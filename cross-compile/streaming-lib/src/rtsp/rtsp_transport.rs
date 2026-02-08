@@ -1,7 +1,6 @@
 use crate::rtsp::global_trait::Marshal;
 
 use super::global_trait::Unmarshal;
-use super::rtsp_utils::scanf;
 
 #[derive(Debug, Clone, Default, PartialEq)]
 
@@ -31,97 +30,138 @@ impl Unmarshal for RtspTransport {
     fn unmarshal(raw_data: &str) -> Result<Self, String> {
         let mut rtsp_transport = RtspTransport::default();
 
-        let param_parts: Vec<&str> = raw_data.split(';').collect();
-        for part in param_parts {
-            let kv: Vec<&str> = part.split('=').collect();
-            match kv[0] {
+        for part in raw_data.split(';') {
+            let part = part.trim();
+            if part.is_empty() {
+                continue;
+            }
+
+            if let Some((raw_key, raw_val)) = part.split_once('=') {
+                let key = raw_key.trim().to_ascii_lowercase();
+                let val = raw_val.trim();
+                match key.as_str() {
+                    "mode" => {
+                        let mode = val
+                            .trim_matches('"')
+                            .trim_matches('\'')
+                            .trim()
+                            .to_ascii_lowercase();
+                        rtsp_transport.transport_mod = Some(mode);
+                    }
+                    "client_port" => {
+                        if let Some(ports) = parse_port_pair(val) {
+                            rtsp_transport.client_port = Some(ports);
+                        }
+                    }
+                    "server_port" => {
+                        if let Some(ports) = parse_port_pair(val) {
+                            rtsp_transport.server_port = Some(ports);
+                        }
+                    }
+                    "interleaved" => {
+                        if let Some(chs) = parse_u8_pair(val) {
+                            rtsp_transport.interleaved = Some(chs);
+                        }
+                    }
+                    "ssrc" => {
+                        rtsp_transport.ssrc = parse_ssrc(val);
+                    }
+                    _ => {}
+                }
+                continue;
+            }
+
+            let token_upper = part.to_ascii_uppercase();
+            let token_lower = part.to_ascii_lowercase();
+
+            match token_upper.as_str() {
                 "RTP/AVP/TCP" => {
                     rtsp_transport.protocol_type = ProtocolType::TCP;
                 }
                 "RTP/AVP/UDP" | "RTP/AVP" => {
                     rtsp_transport.protocol_type = ProtocolType::UDP;
                 }
+                _ => {}
+            }
+
+            match token_lower.as_str() {
                 "unicast" => {
                     rtsp_transport.cast_type = CastType::Unicast;
                 }
                 "multicast" => {
                     rtsp_transport.cast_type = CastType::Multicast;
                 }
-                "mode" => {
-                    if kv.len() < 2 {
-                        continue;
-                    }
-                    rtsp_transport.transport_mod = Some(kv[1].to_string());
-                }
-                "client_port" => {
-                    if kv.len() < 2 {
-                        continue;
-                    }
-                    let ports = scanf!(kv[1], '-', u16, u16);
-
-                    // Only set client_port if at least one port was successfully parsed
-                    if ports.0.is_some() || ports.1.is_some() {
-                        let mut client_ports: [u16; 2] = [0, 0];
-                        if let Some(port) = ports.0 {
-                            client_ports[0] = port;
-                        }
-                        if let Some(port) = ports.1 {
-                            client_ports[1] = port;
-                        }
-                        rtsp_transport.client_port = Some(client_ports);
-                    }
-                }
-                "server_port" => {
-                    if kv.len() < 2 {
-                        continue;
-                    }
-                    let ports = scanf!(kv[1], '-', u16, u16);
-
-                    let mut server_ports: [u16; 2] = [0, 0];
-                    if let Some(port) = ports.0 {
-                        server_ports[0] = port;
-                    }
-                    if let Some(port) = ports.1 {
-                        server_ports[1] = port;
-                    }
-
-                    rtsp_transport.server_port = Some(server_ports);
-                }
-                "interleaved" => {
-                    if kv.len() < 2 {
-                        continue;
-                    }
-                    let vals = scanf!(kv[1], '-', u8, u8);
-
-                    let mut interleaveds: [u8; 2] = [0, 0];
-                    if let Some(val) = vals.0 {
-                        interleaveds[0] = val;
-                    }
-                    if let Some(val) = vals.1 {
-                        interleaveds[1] = val;
-                    }
-
-                    rtsp_transport.interleaved = Some(interleaveds);
-                }
-                "ssrc" => {
-                    if kv.len() < 2 {
-                        continue;
-                    }
-                    let ssrc_str = kv[1].trim();
-                    let ssrc = if ssrc_str.starts_with("0x") || ssrc_str.starts_with("0X") {
-                        u32::from_str_radix(&ssrc_str[2..], 16).ok()
-                    } else {
-                        ssrc_str.parse::<u32>().ok()
-                    };
-                    rtsp_transport.ssrc = ssrc;
-                }
-
                 _ => {}
             }
         }
 
         Ok(rtsp_transport)
     }
+}
+
+fn parse_port_pair(val: &str) -> Option<[u16; 2]> {
+    let val = val.trim();
+    if val.is_empty() {
+        return None;
+    }
+
+    if let Some((a, b)) = val.split_once('-') {
+        let first = a.trim().parse::<u16>().ok()?;
+        let second = b
+            .trim()
+            .parse::<u16>()
+            .ok()
+            .unwrap_or_else(|| if first < u16::MAX { first + 1 } else { first });
+        return Some([first, second]);
+    }
+
+    let first = val.parse::<u16>().ok()?;
+    let second = if first < u16::MAX { first + 1 } else { first };
+    Some([first, second])
+}
+
+fn parse_u8_pair(val: &str) -> Option<[u8; 2]> {
+    let val = val.trim();
+    if val.is_empty() {
+        return None;
+    }
+
+    if let Some((a, b)) = val.split_once('-') {
+        let first = a.trim().parse::<u8>().ok()?;
+        let second = b
+            .trim()
+            .parse::<u8>()
+            .ok()
+            .unwrap_or_else(|| first.saturating_add(1));
+        return Some([first, second]);
+    }
+
+    let first = val.parse::<u8>().ok()?;
+    Some([first, first.saturating_add(1)])
+}
+
+fn parse_ssrc(val: &str) -> Option<u32> {
+    let ssrc_str = val.trim();
+    if ssrc_str.is_empty() {
+        return None;
+    }
+
+    if let Some(rest) = ssrc_str
+        .strip_prefix("0x")
+        .or_else(|| ssrc_str.strip_prefix("0X"))
+    {
+        return u32::from_str_radix(rest, 16).ok();
+    }
+
+    if let Ok(decimal) = ssrc_str.parse::<u32>() {
+        return Some(decimal);
+    }
+
+    if ssrc_str.chars().all(|c| c.is_ascii_hexdigit()) {
+        return u32::from_str_radix(ssrc_str, 16).ok();
+    }
+
+    None
 }
 
 impl Marshal for RtspTransport {
@@ -303,6 +343,43 @@ mod tests {
     fn test_unmarshal_mode_play() {
         let transport = RtspTransport::unmarshal("RTP/AVP;unicast;mode=play").unwrap();
         assert_eq!(transport.transport_mod, Some("play".to_string()));
+    }
+
+    #[test]
+    fn test_unmarshal_case_insensitive_tokens_and_mode_play() {
+        let transport =
+            RtspTransport::unmarshal("rtp/avp/tcp;UNICAST;interleaved=0-1;mode=PLAY").unwrap();
+        assert_eq!(transport.protocol_type, ProtocolType::TCP);
+        assert_eq!(transport.cast_type, CastType::Unicast);
+        assert_eq!(transport.interleaved, Some([0, 1]));
+        assert_eq!(transport.transport_mod, Some("play".to_string()));
+    }
+
+    #[test]
+    fn test_unmarshal_client_port_single_infers_rtcp() {
+        let transport = RtspTransport::unmarshal("RTP/AVP;unicast;client_port=5000").unwrap();
+        assert_eq!(transport.client_port, Some([5000, 5001]));
+    }
+
+    #[test]
+    fn test_unmarshal_interleaved_single_infers_pair() {
+        let transport = RtspTransport::unmarshal("RTP/AVP/TCP;unicast;interleaved=10").unwrap();
+        assert_eq!(transport.interleaved, Some([10, 11]));
+    }
+
+    #[test]
+    fn test_unmarshal_ssrc_hex_without_prefix() {
+        let transport = RtspTransport::unmarshal("RTP/AVP;unicast;ssrc=ABCDEF00").unwrap();
+        assert_eq!(transport.ssrc, Some(0xABCDEF00));
+    }
+
+    #[test]
+    fn test_unmarshal_transport_with_spaces() {
+        let transport =
+            RtspTransport::unmarshal("RTP/AVP ; unicast ; client_port = 5000 - 5001 ").unwrap();
+        assert_eq!(transport.protocol_type, ProtocolType::UDP);
+        assert_eq!(transport.cast_type, CastType::Unicast);
+        assert_eq!(transport.client_port, Some([5000, 5001]));
     }
 
     // ============================================

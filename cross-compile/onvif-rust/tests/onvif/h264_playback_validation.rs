@@ -1198,14 +1198,31 @@ mod tests {
         let platform = Arc::new(ValidationPlatform::new());
         platform.initialize().await.unwrap();
 
+        let listener = match tokio::net::TcpListener::bind("127.0.0.1:0").await {
+            Ok(listener) => listener,
+            Err(e) => {
+                eprintln!("Skipping test - cannot bind TCP listener: {}", e);
+                let _ = fs::remove_file(&test_file);
+                return;
+            }
+        };
+        let port = match listener.local_addr() {
+            Ok(addr) => addr.port(),
+            Err(e) => {
+                eprintln!("Skipping test - cannot query listener address: {}", e);
+                let _ = fs::remove_file(&test_file);
+                return;
+            }
+        };
+
         let config = H264PlaybackConfig {
             file_path: test_file.clone(),
             audio_file_path: None,
             frame_rate: 25,
             audio_sample_rate: 48000,
             loop_playback: false,
-            rtsp_port: 8556,
-            httpflv_port: 8082,
+            rtsp_port: port,
+            httpflv_port: port.saturating_add(1),
         };
 
         let playback = H264PlaybackMode::new(config);
@@ -1219,22 +1236,20 @@ mod tests {
         let sdp_clone1 = sdp.clone();
         let sdp_clone2 = sdp.clone();
         let server_handle = tokio::spawn(async move {
-            if let Ok(listener) = tokio::net::TcpListener::bind("127.0.0.1:8556").await {
-                // Accept first client
-                if let Ok((socket1, _)) = listener.accept().await {
-                    let sdp1 = sdp_clone1.clone();
-                    tokio::spawn(async move {
-                        let _ = handle_rtsp_client(socket1, sdp1).await;
-                    });
-                }
+            // Accept first client
+            if let Ok((socket1, _)) = listener.accept().await {
+                let sdp1 = sdp_clone1.clone();
+                tokio::spawn(async move {
+                    let _ = handle_rtsp_client(socket1, sdp1).await;
+                });
+            }
 
-                // Accept second client
-                if let Ok((socket2, _)) = listener.accept().await {
-                    let sdp2 = sdp_clone2.clone();
-                    tokio::spawn(async move {
-                        let _ = handle_rtsp_client(socket2, sdp2).await;
-                    });
-                }
+            // Accept second client
+            if let Ok((socket2, _)) = listener.accept().await {
+                let sdp2 = sdp_clone2.clone();
+                tokio::spawn(async move {
+                    let _ = handle_rtsp_client(socket2, sdp2).await;
+                });
             }
         });
 
@@ -1243,14 +1258,17 @@ mod tests {
 
         // Connect two concurrent RTSP clients
         let client1_task = async {
-            if let Ok(stream) = tokio::net::TcpStream::connect("127.0.0.1:8556").await {
+            if let Ok(stream) = tokio::net::TcpStream::connect(format!("127.0.0.1:{}", port)).await
+            {
                 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
                 let (reader, mut writer) = stream.into_split();
                 let mut lines = BufReader::new(reader).lines();
 
-                let describe_req =
-                    "DESCRIBE rtsp://127.0.0.1:8556/stream1 RTSP/1.0\r\nCSeq: 1\r\n\r\n";
+                let describe_req = format!(
+                    "DESCRIBE rtsp://127.0.0.1:{}/stream1 RTSP/1.0\r\nCSeq: 1\r\n\r\n",
+                    port
+                );
                 let _ = writer.write_all(describe_req.as_bytes()).await;
                 let _ = writer.flush().await;
 
@@ -1269,14 +1287,17 @@ mod tests {
 
         let client2_task = async {
             tokio::time::sleep(Duration::from_millis(5)).await;
-            if let Ok(stream) = tokio::net::TcpStream::connect("127.0.0.1:8556").await {
+            if let Ok(stream) = tokio::net::TcpStream::connect(format!("127.0.0.1:{}", port)).await
+            {
                 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
                 let (reader, mut writer) = stream.into_split();
                 let mut lines = BufReader::new(reader).lines();
 
-                let describe_req =
-                    "DESCRIBE rtsp://127.0.0.1:8556/stream1 RTSP/1.0\r\nCSeq: 1\r\n\r\n";
+                let describe_req = format!(
+                    "DESCRIBE rtsp://127.0.0.1:{}/stream1 RTSP/1.0\r\nCSeq: 1\r\n\r\n",
+                    port
+                );
                 let _ = writer.write_all(describe_req.as_bytes()).await;
                 let _ = writer.flush().await;
 

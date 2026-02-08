@@ -210,7 +210,31 @@ impl RtcpChannel {
     }
 
     pub fn on_packet(&mut self, packet: RtpPacket) {
-        self.recv_ctx.received_rtp(packet);
+        self.recv_ctx.received_rtp(packet.clone());
+        self.send_ctx.send_rtp(packet);
+    }
+
+    pub async fn send_sr(
+        &mut self,
+        rtcp_io: Arc<Mutex<Box<dyn TNetIO + Send + Sync>>>,
+    ) -> Result<(), BytesWriteError> {
+        let sr = self.send_ctx.generate_sr();
+
+        let net_type = rtcp_io.lock().await.get_net_type();
+        if let Ok(msg) = sr.marshal() {
+            let mut bytes_writer = AsyncBytesWriter::new(rtcp_io);
+            match net_type {
+                crate::bytesio::NetType::TCP => {
+                    bytes_writer.write_u8(0x24)?;
+                    bytes_writer.write_u8(self.channel_identifier)?;
+                    bytes_writer.write_u16::<BigEndian>(msg.len() as u16)?;
+                }
+                crate::bytesio::NetType::UDP => {}
+            }
+            bytes_writer.write(&msg)?;
+            bytes_writer.flush().await?;
+        }
+        Ok(())
     }
 
     pub async fn send_rr(

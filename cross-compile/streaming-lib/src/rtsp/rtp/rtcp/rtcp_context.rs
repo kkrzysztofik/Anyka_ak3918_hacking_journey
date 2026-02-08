@@ -216,6 +216,27 @@ impl RtcpContext {
         self.last_rtp_timestamp = pkt.header.timestamp;
     }
 
+    pub fn generate_sr(&mut self) -> RtcpSenderReport {
+        // Get current NTP timestamp (64-bit: 32 bits seconds since 1900, 32 bits fractional)
+        let ntp = utils::ntp_timestamp();
+
+        RtcpSenderReport {
+            header: RtcpHeader {
+                padding_flag: 0,
+                report_count: 0,
+                payload_type: super::RTCP_SR,
+                length: (4 + 24) / 4, // 4 bytes header + 24 bytes sender info, divided by 4
+                ..Default::default()
+            },
+            ssrc: self.ssrc,
+            ntp,
+            rtp_timestamp: self.last_rtp_timestamp,
+            sender_packet_count: self.send_packets as u32,
+            sender_octet_count: self.send_bytes as u32,
+            report_blocks: Vec::new(),
+        }
+    }
+
     pub fn received_sr(&mut self, sr: &RtcpSenderReport) {
         self.sr_clock_time = utils::current_time();
 

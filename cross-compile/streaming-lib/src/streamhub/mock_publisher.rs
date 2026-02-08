@@ -124,30 +124,43 @@ impl MockVideoPublisher {
                 let mut frame_count: u32 = 0;
                 let frame_duration_ms = reader.frame_duration_ms();
                 let loop_start = Instant::now();
-
                 while let Ok(Some(nal)) = reader.read_next_nal() {
                     match nal.unit_type {
                         NalUnitType::SequenceParameterSet => {
+                            // SPS belongs to the next coded picture's access unit
+                            // Use timestamp of current frame_count (will be used by next VCL NAL)
                             let timestamp = timestamp_offset
                                 .saturating_add(frame_count.saturating_mul(frame_duration_ms));
                             let data = BytesMut::from(nal.data.as_slice());
                             let frame = FrameData::Video { timestamp, data };
                             let _ = sender.send(frame);
-                            last_timestamp_ms.store(timestamp, Ordering::Relaxed);
+                            log::debug!(
+                                "mock_publisher: SPS frame_count={} timestamp={} ({}ms)",
+                                frame_count,
+                                timestamp,
+                                timestamp
+                            );
                         }
                         NalUnitType::PictureParameterSet => {
+                            // PPS uses same timestamp as associated coded picture
                             let timestamp = timestamp_offset
                                 .saturating_add(frame_count.saturating_mul(frame_duration_ms));
                             let data = BytesMut::from(nal.data.as_slice());
                             let frame = FrameData::Video { timestamp, data };
                             let _ = sender.send(frame);
-                            last_timestamp_ms.store(timestamp, Ordering::Relaxed);
+                            log::debug!(
+                                "mock_publisher: PPS frame_count={} timestamp={} ({}ms)",
+                                frame_count,
+                                timestamp,
+                                timestamp
+                            );
                         }
                         NalUnitType::IdrSlice | NalUnitType::NonIdrSlice => {
+                            // RFC 6184: Each VCL NAL unit in typical encodings represents one access unit
+                            // All NAL units of the same access unit share the same RTP timestamp
                             let timestamp = timestamp_offset
                                 .saturating_add(frame_count.saturating_mul(frame_duration_ms));
                             let data = BytesMut::from(nal.data.as_slice());
-
                             let frame = FrameData::Video { timestamp, data };
 
                             if sender.send(frame).is_err() {
@@ -155,6 +168,19 @@ impl MockVideoPublisher {
                             }
                             last_timestamp_ms.store(timestamp, Ordering::Relaxed);
 
+                            log::debug!(
+                                "mock_publisher: {} frame_count={} timestamp={} ({}ms)",
+                                if matches!(nal.unit_type, NalUnitType::IdrSlice) {
+                                    "IDR"
+                                } else {
+                                    "NonIDR"
+                                },
+                                frame_count,
+                                timestamp,
+                                timestamp
+                            );
+
+                            // Increment frame counter for next access unit
                             frame_count = frame_count.saturating_add(1);
                             frames_since_report += 1;
 
@@ -172,6 +198,7 @@ impl MockVideoPublisher {
                             }
 
                             // Frame rate control: align to target schedule to avoid drift.
+                            // Only sleep after completing an entire access unit
                             let target_elapsed_ms =
                                 frame_count.saturating_mul(frame_duration_ms) as u64;
                             let target_elapsed = Duration::from_millis(target_elapsed_ms);
@@ -231,7 +258,7 @@ impl MockVideoPublisher {
         &self.pps
     }
 
-    /// Get a shared handle to the publisher's most recently emitted video timestamp.
+    /// Get a shared handle to the publisher's most recently emitted VCL access unit timestamp.
     pub fn last_timestamp_handle(&self) -> Arc<AtomicU32> {
         Arc::clone(&self.last_timestamp_ms)
     }
@@ -480,6 +507,57 @@ mod tests {
             }
             other => panic!("expected IDR video frame, got {other:?}"),
         }
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[tokio::test]
+    async fn test_last_timestamp_handle_only_updates_on_vcl() {
+        let path = format!(
+            "/tmp/mock_publisher_test_last_ts_vcl_{}.h264",
+            std::process::id()
+        );
+        // SPS + PPS only (no VCL). last_timestamp_handle() must remain at the default value.
+        let bytes: &[u8] = &[
+            0x00, 0x00, 0x00, 0x01, 0x67, 0x42, 0xE0, 0x1E, 0x89, 0x00, //
+            0x00, 0x00, 0x00, 0x01, 0x68, 0xCE, 0x06, 0xE2, 0x00, //
+        ];
+        std::fs::write(&path, bytes).expect("write test h264");
+
+        let publisher = MockVideoPublisher::new("stream1".to_string(), &path, 25, false)
+            .await
+            .expect("publisher new");
+
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let _handle = publisher.start_publishing(tx);
+
+        let mut saw_sps = false;
+        let mut saw_pps = false;
+        for _ in 0..4 {
+            let item = tokio::time::timeout(Duration::from_secs(1), rx.recv())
+                .await
+                .expect("timeout waiting for video frame");
+            let Some(item) = item else { break };
+            if let FrameData::Video { data, .. } = item {
+                let nal_type = data.first().copied().unwrap_or_default() & 0x1f;
+                if nal_type == 7 {
+                    saw_sps = true;
+                } else if nal_type == 8 {
+                    saw_pps = true;
+                }
+            }
+            if saw_sps && saw_pps {
+                break;
+            }
+        }
+
+        assert!(saw_sps, "expected to see SPS");
+        assert!(saw_pps, "expected to see PPS");
+        assert_eq!(
+            publisher.last_timestamp_handle().load(Ordering::Relaxed),
+            0,
+            "SPS/PPS emission must not update last_timestamp_handle()"
+        );
 
         let _ = std::fs::remove_file(&path);
     }

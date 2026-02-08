@@ -220,13 +220,6 @@ impl TStreamHandler for ValidationAvStreamHandler {
                     data: BytesMut::from(idr.as_slice()),
                 });
             }
-
-            if let Some(config) = self.audio_config.as_ref() {
-                let _ = frame_sender.send(FrameData::Audio {
-                    timestamp: 0,
-                    data: BytesMut::from(config.as_slice()),
-                });
-            }
         }
 
         Ok(())
@@ -738,6 +731,47 @@ mod tests {
         assert!(sdp.contains("a=control:trackID=0"));
         assert!(sdp.contains("m=audio 0 RTP/AVP 97"));
         assert!(sdp.contains("a=control:trackID=1"));
+    }
+
+    #[tokio::test]
+    async fn test_validation_av_stream_handler_send_prior_data_does_not_emit_audio_config_frame() {
+        let handler = ValidationAvStreamHandler::new(
+            vec![0x67, 0x42, 0x00, 0x1e],
+            vec![0x68, 0xce, 0x06, 0xe2],
+            None,
+            Arc::new(AtomicU32::new(1234)),
+            Some(vec![0x12, 0x10]),
+            48_000,
+        );
+
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        handler
+            .send_prior_data(DataSender::Frame { sender: tx }, SubscribeType::RtspPull)
+            .await
+            .expect("send_prior_data");
+
+        let mut frames = Vec::new();
+        while let Ok(frame) = rx.try_recv() {
+            frames.push(frame);
+        }
+
+        assert!(
+            frames.iter().any(|f| matches!(
+                f,
+                FrameData::MediaInfo {
+                    media_info: MediaInfo {
+                        audio_clock_rate: 48_000,
+                        ..
+                    }
+                }
+            )),
+            "expected MediaInfo with audio_clock_rate set"
+        );
+
+        assert!(
+            !frames.iter().any(|f| matches!(f, FrameData::Audio { .. })),
+            "audio_config must not be injected as an RTP audio frame"
+        );
     }
 
     #[test]

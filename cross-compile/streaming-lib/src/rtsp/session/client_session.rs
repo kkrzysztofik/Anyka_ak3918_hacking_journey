@@ -13,6 +13,7 @@ use crate::common::http::HttpResponse as RtspResponse;
 use crate::common::http::Marshal as RtspMarshal;
 use crate::common::http::Unmarshal as RtspUnmarshal;
 use crate::common::http::Uri;
+use crate::common::http::try_get_complete_message_len;
 use crate::streamhub::define::SubscriberInfo;
 
 use crate::rtsp::rtp::RtpPacket;
@@ -509,41 +510,39 @@ impl RtspClientSession {
     }
 
     async fn receive_response(&mut self, method_name: &str) -> Result<(), SessionError> {
-        let data = self.io.lock().await.read().await?;
-        self.reader.extend_from_slice(&data[..]);
-
         let mut retry_count = 0;
-        let rtsp_response;
-
-        loop {
+        let message_len = loop {
             let data = self.reader.get_remaining_bytes();
-            if let Some(rtsp_response_data) = RtspResponse::unmarshal(std::str::from_utf8(&data)?) {
-                // TCP packet sticking issue, if have content_length in header.
-                // should check the body
-                if let Some(content_length) = rtsp_response_data.get_header("Content-Length")
-                    && let Ok(uint_num) = content_length.parse::<usize>()
-                    && rtsp_response_data
-                        .body
-                        .as_ref()
-                        .is_none_or(|body| uint_num > body.len())
-                {
-                    if retry_count >= 5 {
-                        log::error!("corrupted rtsp message={}", std::str::from_utf8(&data)?);
-                        return Ok(());
+            match try_get_complete_message_len(&data) {
+                Ok(Some(len)) => break len,
+                Ok(None) => {
+                    if retry_count >= 16 {
+                        return Err(SessionError {
+                            value: SessionErrorValue::RtspMessageCorrupted(
+                                "max read retries exceeded".to_string(),
+                            ),
+                        });
                     }
                     retry_count += 1;
                     let data_recv = self.io.lock().await.read().await?;
                     self.reader.extend_from_slice(&data_recv[..]);
-                    continue;
                 }
-                rtsp_response = rtsp_response_data;
-                self.reader.extract_remaining_bytes();
-                break;
-            } else {
-                log::error!("corrupted rtsp message={}", std::str::from_utf8(&data)?);
-                return Ok(());
+                Err(err) => {
+                    return Err(SessionError {
+                        value: SessionErrorValue::RtspMessageCorrupted(err),
+                    });
+                }
             }
-        }
+        };
+
+        let message_bytes = self.reader.read_bytes(message_len)?;
+        let message_str = std::str::from_utf8(&message_bytes)?;
+
+        let Some(rtsp_response) = RtspResponse::unmarshal(message_str) else {
+            return Err(SessionError {
+                value: SessionErrorValue::RtspMessageCorrupted("response parse failed".to_string()),
+            });
+        };
 
         if rtsp_response.status_code != http::StatusCode::OK {
             log::error!("rtsp response error: {}", rtsp_response.marshal());
@@ -988,5 +987,40 @@ mod tests {
 
         let result = session.receive_response("OPTIONS").await;
         assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_rtsp_client_session_receive_response_with_interleaved_binary_buffered() {
+        let (event_sender, _event_receiver) = tokio::sync::mpsc::unbounded_channel();
+
+        let mut mock_io = MockNetIO::new();
+        mock_io.expect_get_net_type().returning(|| NetType::TCP);
+
+        mock_io
+            .expect_read()
+            .times(1)
+            .returning(|| {
+                let response =
+                    "RTSP/1.0 200 OK\r\nCSeq: 1\r\nPublic: OPTIONS, DESCRIBE, SETUP, PLAY, TEARDOWN\r\n\r\n";
+                let mut buf = BytesMut::from(response);
+                buf.extend_from_slice(&[0x24, 0x00, 0x00, 0x04, 0xff, 0xff, 0xff, 0xff]);
+                Ok(buf)
+            });
+
+        let mut session = RtspClientSession::new_with_io(
+            "localhost:554".to_string(),
+            "live/test".to_string(),
+            ProtocolType::TCP,
+            event_sender,
+            ClientSessionType::Pull,
+            Box::new(mock_io),
+        );
+
+        let result = session.receive_response("OPTIONS").await;
+        assert!(result.is_ok());
+
+        let remaining = session.reader.get_remaining_bytes();
+        assert_eq!(remaining.len(), 8);
+        assert_eq!(remaining[0], 0x24);
     }
 }

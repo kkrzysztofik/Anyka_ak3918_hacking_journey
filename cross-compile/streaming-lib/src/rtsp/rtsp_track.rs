@@ -82,7 +82,7 @@ impl RtspTrack {
 
         tokio::spawn(async move {
             let mut reader = BytesReader::new(BytesMut::new());
-            let mut rtcp_channel_in = rtcp_channel_out.lock().await;
+            let rtcp_channel_in = rtcp_channel_out.clone();
 
             loop {
                 let data = match rtcp_io.lock().await.read().await {
@@ -93,7 +93,28 @@ impl RtspTrack {
                     }
                 };
                 reader.extend_from_slice(&data[..]);
-                rtcp_channel_in.on_rtcp(&mut reader, rtcp_io.clone()).await;
+                rtcp_channel_in
+                    .lock()
+                    .await
+                    .on_rtcp(&mut reader, rtcp_io.clone())
+                    .await;
+            }
+        });
+    }
+
+    /// Start periodic RTCP Sender Report transmission
+    /// RFC 3550 recommends sending SR every 5 seconds for active senders
+    pub async fn rtcp_send_loop(&mut self, rtcp_io: Arc<Mutex<Box<dyn TNetIO + Send + Sync>>>) {
+        let rtcp_channel_out = self.rtcp_channel.clone();
+
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(5));
+            loop {
+                interval.tick().await;
+                let mut rtcp_channel_in = rtcp_channel_out.lock().await;
+                if let Err(err) = rtcp_channel_in.send_sr(rtcp_io.clone()).await {
+                    log::error!("Failed to send RTCP SR: {}", err);
+                }
             }
         });
     }

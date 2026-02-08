@@ -10,6 +10,11 @@ use portable_atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use thiserror::Error;
+
+/// AAC-LC samples per frame (fixed by specification)
+/// Per RFC 3640 Section 3.3, RTP timestamps for AAC are in sample units.
+/// AAC-LC uses 1024 samples per frame regardless of sample rate.
+const AAC_SAMPLES_PER_FRAME: u32 = 1024;
 use tokio::sync::Mutex;
 
 /// Errors that can occur during mock audio publishing
@@ -108,11 +113,19 @@ impl MockAudioPublisher {
                 let loop_start = Instant::now();
 
                 while let Ok(Some(frame)) = reader.read_next_frame() {
+                    // RTP timestamp in sample units (RFC 3640 Section 3.3)
+                    // Each AAC frame = 1024 samples, so timestamp = frame_count * 1024
                     let timestamp = timestamp_offset
-                        .saturating_add(frame_count.saturating_mul(frame_duration_ms));
+                        .saturating_add(frame_count.saturating_mul(AAC_SAMPLES_PER_FRAME));
                     let data = BytesMut::from(frame.data.as_slice());
 
                     let frame_data = FrameData::Audio { timestamp, data };
+
+                    log::debug!(
+                        "mock_audio_publisher: AAC frame_count={} timestamp={} (sample units)",
+                        frame_count,
+                        timestamp
+                    );
 
                     if sender.send(frame_data).is_err() {
                         return;
@@ -136,8 +149,9 @@ impl MockAudioPublisher {
                 }
 
                 // Update timestamp offset for next loop iteration
-                let total_time_this_loop = frame_count.saturating_mul(frame_duration_ms);
-                timestamp_offset = timestamp_offset.saturating_add(total_time_this_loop);
+                // Accumulate in sample units for monotonic audio timestamps
+                let total_samples_this_loop = frame_count.saturating_mul(AAC_SAMPLES_PER_FRAME);
+                timestamp_offset = timestamp_offset.saturating_add(total_samples_this_loop);
 
                 // Reset file for next loop
                 if let Err(_e) = reader.reset() {
@@ -251,6 +265,20 @@ fn generate_sdp_from_audio_config(audio_config: &[u8], sample_rate: u32) -> Stri
         2 // Default to stereo
     };
 
+    // Calculate appropriate profile-level-id based on sample rate and channels
+    // Per ISO/IEC 14496-1 Table 5 (audioProfileLevelIndication Values)
+    // RFC 3640 Section 3.3.6 example uses profile-level-id=16 for 5.1ch 48kHz
+    let profile_level_id = match (sample_rate, channels) {
+        (48000, ch) if ch >= 2 => 15, // AAC Profile @ Level 4 (stereo+ 48kHz)
+        (44100, ch) if ch >= 2 => 15, // AAC Profile @ Level 4 (stereo+ 44.1kHz)
+        (_, 1) => 14,                 // AAC Profile @ Level 2 (mono)
+        _ => 15,                      // AAC Profile @ Level 4 (default)
+    };
+
+    // RFC 3640 Section 3.3.6: AAC-hbr mode MUST include:
+    // - streamtype=5 (AudioStream per ISO/IEC 14496-1 Table 9)
+    // - constantDuration=1024 (samples per AAC frame)
+    // - sizeLength=13, indexLength=3, indexDeltaLength=3
     format!(
         "v=0\r\n\
          o=- 0 0 IN IP4 0.0.0.0\r\n\
@@ -260,8 +288,8 @@ fn generate_sdp_from_audio_config(audio_config: &[u8], sample_rate: u32) -> Stri
          a=tool:streaming-lib-mock\r\n\
          m=audio 0 RTP/AVP 97\r\n\
          a=rtpmap:97 MPEG4-GENERIC/{}/{}\r\n\
-         a=fmtp:97 profile-level-id=1;mode=AAC-hbr;sizelength=13;indexlength=3;indexdeltalength=3;config={}\r\n",
-        sample_rate, channels, config_hex
+         a=fmtp:97 streamtype=5;profile-level-id={};mode=AAC-hbr;sizelength=13;indexlength=3;indexdeltalength=3;constantDuration=1024;config={}\r\n",
+        sample_rate, channels, profile_level_id, config_hex
     )
 }
 
@@ -318,6 +346,36 @@ mod tests {
         assert!(sdp.contains("m=audio 0 RTP/AVP 97"));
         assert!(sdp.contains("a=rtpmap:97 MPEG4-GENERIC/48000/2"));
         assert!(sdp.contains("config=1190"));
+
+        // RFC 3640 Section 3.3.6 AAC-hbr mode required parameters
+        assert!(
+            sdp.contains("streamtype=5"),
+            "Missing required streamtype=5"
+        );
+        assert!(
+            sdp.contains("mode=AAC-hbr"),
+            "Missing required mode=AAC-hbr"
+        );
+        assert!(
+            sdp.contains("sizelength=13"),
+            "Missing required sizelength=13"
+        );
+        assert!(
+            sdp.contains("indexlength=3"),
+            "Missing required indexlength=3"
+        );
+        assert!(
+            sdp.contains("indexdeltalength=3"),
+            "Missing required indexdeltalength=3"
+        );
+        assert!(
+            sdp.contains("constantDuration=1024"),
+            "Missing required constantDuration=1024"
+        );
+        assert!(
+            sdp.contains("profile-level-id=15"),
+            "48kHz stereo should use profile-level-id=15"
+        );
     }
 
     #[test]
@@ -328,5 +386,67 @@ mod tests {
 
         assert!(sdp.contains("a=rtpmap:97 MPEG4-GENERIC/44100/2"));
         assert!(sdp.contains("config=1210"));
+
+        // RFC 3640 required parameters
+        assert!(sdp.contains("streamtype=5"));
+        assert!(sdp.contains("constantDuration=1024"));
+        assert!(
+            sdp.contains("profile-level-id=15"),
+            "44.1kHz stereo should use profile-level-id=15"
+        );
+    }
+
+    #[test]
+    fn test_aac_samples_per_frame_constant() {
+        // Verify the constant is correct for AAC-LC
+        assert_eq!(AAC_SAMPLES_PER_FRAME, 1024);
+    }
+
+    #[tokio::test]
+    async fn test_audio_timestamps_use_sample_units() {
+        // Create a temporary AAC file for testing with 3 frames
+        let path = format!("/tmp/test_audio_timestamps_{}.aac", std::process::id());
+
+        // Create 3 minimal ADTS AAC-LC frames (48kHz, stereo)
+        // Each frame: 7-byte ADTS header + 4-byte payload = 11 bytes
+        let frame: &[u8] = &[
+            0xFF, 0xF1, 0x4C, 0x80, 0x01, 0x7F, 0xFC, // ADTS header
+            0x00, 0x00, 0x00, 0x00, // payload
+        ];
+
+        // Write 3 frames
+        let mut file_data = Vec::new();
+        for _ in 0..3 {
+            file_data.extend_from_slice(frame);
+        }
+        std::fs::write(&path, file_data).expect("write test aac");
+
+        let publisher = MockAudioPublisher::new("test_stream".to_string(), &path, 48_000, false)
+            .await
+            .expect("create publisher");
+
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let _handle = publisher.start_publishing(tx);
+
+        // Collect first few frames
+        let mut timestamps = Vec::new();
+        while let Some(frame) = rx.recv().await {
+            if let FrameData::Audio { timestamp, .. } = frame {
+                timestamps.push(timestamp);
+                if timestamps.len() >= 3 {
+                    break;
+                }
+            }
+        }
+
+        publisher.stop_publishing().await;
+
+        // Verify timestamps are in sample units (multiples of 1024)
+        assert!(timestamps.len() >= 3, "Expected at least 3 frames");
+        assert_eq!(timestamps[0], 0, "First timestamp should be 0");
+        assert_eq!(timestamps[1], 1024, "Second timestamp should be 1024");
+        assert_eq!(timestamps[2], 2048, "Third timestamp should be 2048");
+
+        let _ = std::fs::remove_file(&path);
     }
 }

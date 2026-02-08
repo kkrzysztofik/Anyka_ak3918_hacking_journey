@@ -128,6 +128,34 @@ pub fn current_time() -> u64 {
     }
 }
 
+/// Generate an NTP timestamp (RFC 5905 format: 64-bit value)
+/// Upper 32 bits: seconds since January 1, 1900 00:00 UTC
+/// Lower 32 bits: fractional seconds (2^-32 second resolution)
+pub fn ntp_timestamp() -> u64 {
+    // NTP epoch is January 1, 1900 00:00 UTC
+    // Unix epoch is January 1, 1970 00:00 UTC
+    // Difference is 2208988800 seconds (70 years)
+    const NTP_UNIX_EPOCH_DIFF: u64 = 2208988800;
+
+    let duration = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .expect("System time before Unix epoch");
+
+    let unix_secs = duration.as_secs();
+    let unix_nanos = duration.subsec_nanos() as u64;
+
+    // Convert Unix time to NTP time
+    let ntp_secs = unix_secs + NTP_UNIX_EPOCH_DIFF;
+
+    // Convert nanoseconds to NTP fractional part (32-bit fraction of a second)
+    // NTP fraction = (nanos / 1e9) * 2^32
+    // To avoid floating point: (nanos * 2^32) / 1e9
+    let ntp_frac = (unix_nanos << 32) / 1_000_000_000;
+
+    // Combine into 64-bit NTP timestamp
+    (ntp_secs << 32) | ntp_frac
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

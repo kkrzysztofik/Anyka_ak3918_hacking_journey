@@ -839,6 +839,24 @@ impl Default for StubNetworkInfo {
 
 #[async_trait]
 impl NetworkInfo for StubNetworkInfo {
+    fn detect_local_ip(&self) -> Option<String> {
+        if let Some(ip) = self.ip_address.clone() {
+            return Some(ip);
+        }
+
+        use std::net::UdpSocket;
+        let socket = UdpSocket::bind("0.0.0.0:0").ok()?;
+        if socket.connect("8.8.8.8:80").is_ok()
+            && let Ok(addr) = socket.local_addr()
+        {
+            let ip = addr.ip().to_string();
+            if ip != "0.0.0.0" {
+                return Some(ip);
+            }
+        }
+        None
+    }
+
     async fn get_network_interfaces(&self) -> PlatformResult<Vec<NetworkInterfaceInfo>> {
         // Use configured IP or detect real IP
         let ip = self.ip_address.clone().or_else(|| self.detect_local_ip());

@@ -10,12 +10,14 @@ use crate::common::http::HttpRequest as RtspRequest;
 use crate::common::http::HttpResponse as RtspResponse;
 use crate::common::http::Marshal as RtspMarshal;
 use crate::common::http::Unmarshal as RtspUnmarshal;
+use crate::common::http::try_get_complete_message_len;
 
 use crate::rtsp::rtp::RtpPacket;
 use crate::rtsp::rtsp_range::RtspRange;
 
 use crate::rtsp::sdp::fmtp::Fmtp;
 
+use crate::rtsp::rtsp_channel::RtpChannel;
 use crate::rtsp::rtsp_codec::RtspCodecInfo;
 use crate::rtsp::rtsp_track::RtspTrack;
 use crate::rtsp::rtsp_track::TrackType;
@@ -133,9 +135,38 @@ struct RtpTimestampNormalizer {
 }
 
 impl RtpTimestampNormalizer {
-    fn normalize(&mut self, source_timestamp_ms: u32, clock_rate: u32) -> RtpTimestampSample {
-        let scaled_timestamp =
-            RtspServerSession::scale_rtp_timestamp(source_timestamp_ms, clock_rate);
+    /// Normalize RTP timestamps for audio or video.
+    ///
+    /// # Arguments
+    ///
+    /// * `source_timestamp` - For audio: timestamp in sample units (per RFC 3640).
+    ///   For video: timestamp in milliseconds.
+    /// * `clock_rate` - RTP clock rate (e.g., 48000 for AAC, 90000 for H264)
+    /// * `track_type` - Audio or Video track type
+    ///
+    /// # Timestamp Units
+    ///
+    /// - **Audio (AAC)**: Timestamps are already in sample units (1024 samples/frame)
+    ///   and match the clock_rate. No scaling is performed.
+    /// - **Video (H264/H265)**: Timestamps are in milliseconds and must be scaled
+    ///   to 90kHz RTP clock rate.
+    fn normalize(
+        &mut self,
+        source_timestamp: u32,
+        clock_rate: u32,
+        track_type: TrackType,
+    ) -> RtpTimestampSample {
+        // Audio timestamps are already in sample units (RFC 3640), don't scale.
+        // Video timestamps are in milliseconds, scale to 90kHz RTP clock.
+        let scaled_timestamp = match track_type {
+            TrackType::Audio => source_timestamp,
+            TrackType::Video => {
+                RtspServerSession::scale_rtp_timestamp(source_timestamp, clock_rate)
+            }
+            TrackType::Application => {
+                RtspServerSession::scale_rtp_timestamp(source_timestamp, clock_rate)
+            }
+        };
         let previous_scaled_timestamp = self.previous_scaled_timestamp;
 
         let mut non_wrap_regressed = false;
@@ -162,6 +193,108 @@ impl RtpTimestampNormalizer {
             non_wrap_regressed,
             non_wrap_regression_count: self.non_wrap_regression_count,
         }
+    }
+}
+
+/// Coalesce H.264 access-units that arrive as multiple same-timestamp chunks.
+///
+/// Some publishers emit one `FrameData::Video` per NAL unit while keeping the
+/// same timestamp for all NALs belonging to an access unit. RTP packetizers
+/// expect a full access unit per `on_frame` call; sending NALs individually
+/// causes multiple marker-terminated access units at the same RTP timestamp,
+/// which strict demuxers flag as "same timestamp as previous access unit".
+#[derive(Debug, Default)]
+struct VideoAccessUnitAssembler {
+    pending_timestamp: Option<u32>,
+    pending_bytes: BytesMut,
+}
+
+impl VideoAccessUnitAssembler {
+    fn push(&mut self, timestamp: u32, chunk: BytesMut) -> Option<(u32, BytesMut)> {
+        if chunk.is_empty() {
+            return None;
+        }
+
+        match self.pending_timestamp {
+            None => {
+                self.pending_timestamp = Some(timestamp);
+                self.append_as_annexb(&chunk[..]);
+                None
+            }
+            Some(pending_ts) if pending_ts == timestamp => {
+                self.append_as_annexb(&chunk[..]);
+                None
+            }
+            Some(_pending_ts) => {
+                let flushed = self.flush();
+                self.pending_timestamp = Some(timestamp);
+                self.append_as_annexb(&chunk[..]);
+                flushed
+            }
+        }
+    }
+
+    fn flush(&mut self) -> Option<(u32, BytesMut)> {
+        let timestamp = self.pending_timestamp.take()?;
+        if self.pending_bytes.is_empty() {
+            return None;
+        }
+        let bytes = std::mem::take(&mut self.pending_bytes);
+        Some((timestamp, bytes))
+    }
+
+    fn append_as_annexb(&mut self, chunk: &[u8]) {
+        if chunk.is_empty() {
+            return;
+        }
+        if has_annexb_start_code(chunk) {
+            self.pending_bytes.extend_from_slice(chunk);
+            return;
+        }
+        self.pending_bytes
+            .extend_from_slice(&ANNEXB_NALU_START_CODE[..]);
+        self.pending_bytes.extend_from_slice(chunk);
+    }
+}
+
+fn has_annexb_start_code(data: &[u8]) -> bool {
+    data.starts_with(&[0x00, 0x00, 0x01]) || data.starts_with(&ANNEXB_NALU_START_CODE[..])
+}
+
+struct PlaybackVideoSendContext<'a> {
+    session_id: &'a str,
+    remote_addr: std::net::SocketAddr,
+    request_path: &'a str,
+    shutdown: &'a Arc<AtomicBool>,
+}
+
+async fn send_video_access_unit(
+    video_channel: &Arc<Mutex<RtpChannel>>,
+    timestamp_normalizers: &mut HashMap<TrackType, RtpTimestampNormalizer>,
+    ctx: &PlaybackVideoSendContext<'_>,
+    timestamp: u32,
+    data: &mut BytesMut,
+) {
+    let mut channel = video_channel.lock().await;
+    let normalized = timestamp_normalizers
+        .entry(TrackType::Video)
+        .or_default()
+        .normalize(timestamp, channel.clock_rate(), TrackType::Video);
+    if normalized.non_wrap_regressed {
+        log::warn!(
+            "event=rtp_timestamp_non_wrap_regression track=Video session_id={} remote_addr={} stream_path={} prev_scaled={} current_scaled={} corrected_timestamp={} regression_count={}",
+            ctx.session_id,
+            ctx.remote_addr,
+            ctx.request_path,
+            normalized.previous_scaled_timestamp.unwrap_or_default(),
+            normalized.scaled_timestamp,
+            normalized.output_timestamp,
+            normalized.non_wrap_regression_count,
+        );
+    }
+    if let Err(err) = channel.on_frame(data, normalized.output_timestamp).await {
+        log::info!("handle_play error: {err}");
+        ctx.shutdown.store(true, Ordering::Release);
     }
 }
 
@@ -496,46 +629,39 @@ impl RtspServerSession {
     //publish stream: OPTIONS->ANNOUNCE->SETUP->RECORD->TEARDOWN
     //subscribe stream: OPTIONS->DESCRIBE->SETUP->PLAY->TEARDOWN
     async fn on_rtsp_message(&mut self) -> Result<(), SessionError> {
-        let rtsp_request: RtspRequest;
         let mut retry_count = 0;
-        loop {
-            // TODO(all) : shoud check if have '\r\n\r\n' firstly.
+        let message_len = loop {
             let data = self.reader.get_remaining_bytes();
-            if let Some(rtsp_request_data) = RtspRequest::unmarshal(std::str::from_utf8(&data)?) {
-                // TCP packet sticking issue, if have content_length in header.
-                // should check the body
-                if let Some(content_length) = rtsp_request_data.get_header("Content-Length")
-                    && let Ok(uint_num) = content_length.parse::<usize>()
-                    && rtsp_request_data
-                        .body
-                        .as_ref()
-                        .is_none_or(|body| uint_num > body.len())
-                {
-                    if retry_count >= 5 {
-                        log::error!("corrupted rtsp message={}", std::str::from_utf8(&data)?);
+            match try_get_complete_message_len(&data) {
+                Ok(Some(len)) => break len,
+                Ok(None) => {
+                    if retry_count >= 16 {
                         return Err(SessionError {
                             value: SessionErrorValue::RtspMessageCorrupted(
-                                "max retries exceeded".to_string(),
+                                "max read retries exceeded".to_string(),
                             ),
                         });
                     }
                     retry_count += 1;
                     let data_recv = self.io_reader.lock().await.read().await?;
                     self.reader.extend_from_slice(&data_recv[..]);
-                    continue;
                 }
-                rtsp_request = rtsp_request_data;
-                self.reader.extract_remaining_bytes();
-            } else {
-                log::error!("corrupted rtsp message={}", std::str::from_utf8(&data)?);
-                return Err(SessionError {
-                    value: SessionErrorValue::RtspMessageCorrupted(
-                        "request parse failed".to_string(),
-                    ),
-                });
+                Err(err) => {
+                    return Err(SessionError {
+                        value: SessionErrorValue::RtspMessageCorrupted(err),
+                    });
+                }
             }
-            break;
-        }
+        };
+
+        let message_bytes = self.reader.read_bytes(message_len)?;
+        let message_str = std::str::from_utf8(&message_bytes)?;
+
+        let Some(rtsp_request) = RtspRequest::unmarshal(message_str) else {
+            return Err(SessionError {
+                value: SessionErrorValue::RtspMessageCorrupted("request parse failed".to_string()),
+            });
+        };
 
         match rtsp_request.method.as_str() {
             rtsp_method_name::OPTIONS => {
@@ -564,10 +690,18 @@ impl RtspServerSession {
                 let response = Self::gen_response(http::StatusCode::OK, &rtsp_request);
                 self.send_response(&response).await?;
             }
-            rtsp_method_name::PAUSE => {}
-            rtsp_method_name::GET_PARAMETER => {}
-            rtsp_method_name::SET_PARAMETER => {}
-            rtsp_method_name::REDIRECT => {}
+            rtsp_method_name::PAUSE => {
+                self.handle_pause(&rtsp_request).await?;
+            }
+            rtsp_method_name::GET_PARAMETER => {
+                self.handle_get_parameter(&rtsp_request).await?;
+            }
+            rtsp_method_name::SET_PARAMETER => {
+                self.handle_set_parameter(&rtsp_request).await?;
+            }
+            rtsp_method_name::REDIRECT => {
+                self.handle_redirect(&rtsp_request).await?;
+            }
 
             _ => {}
         }
@@ -806,6 +940,8 @@ impl RtspServerSession {
                 match trans.protocol_type {
                     ProtocolType::TCP => {
                         track.create_packer(self.io_writer.clone()).await;
+                        // Start RTCP SR transmission over TCP (interleaved mode)
+                        track.rtcp_send_loop(self.io_writer.clone()).await;
                     }
                     ProtocolType::UDP => {
                         let (rtp_port, rtcp_port) = trans
@@ -820,8 +956,9 @@ impl RtspServerSession {
                             rtp_server_port = rtp_io.get_local_port();
 
                             let box_udp_io: Box<dyn TNetIO + Send + Sync> = Box::new(rtp_io);
-                            //if mode is empty then it is a player session.
-                            if trans.transport_mod.is_none() {
+                            let is_record =
+                                matches!(trans.transport_mod.as_deref(), Some("record"));
+                            if !is_record {
                                 track.create_packer(Arc::new(Mutex::new(box_udp_io))).await;
                             } else {
                                 track.rtp_receive_loop(box_udp_io).await;
@@ -837,7 +974,8 @@ impl RtspServerSession {
                             rtcp_server_port = rtcp_io.get_local_port();
                             let box_rtcp_io: Arc<Mutex<Box<dyn TNetIO + Send + Sync>>> =
                                 Arc::new(Mutex::new(Box::new(rtcp_io)));
-                            track.rtcp_receive_loop(box_rtcp_io).await;
+                            track.rtcp_receive_loop(box_rtcp_io.clone()).await;
+                            track.rtcp_send_loop(box_rtcp_io).await;
                         }
                     }
                 }
@@ -999,6 +1137,18 @@ impl RtspServerSession {
         trimmed.to_string()
     }
 
+    /// Scale timestamp from milliseconds to RTP clock rate units.
+    ///
+    /// Used for video timestamps only. Audio timestamps are already in sample units.
+    ///
+    /// # Arguments
+    ///
+    /// * `timestamp_ms` - Timestamp in milliseconds
+    /// * `clock_rate` - Target RTP clock rate (typically 90000 for video)
+    ///
+    /// # Returns
+    ///
+    /// Timestamp scaled to clock_rate units
     fn scale_rtp_timestamp(timestamp_ms: u32, clock_rate: u32) -> u32 {
         if clock_rate == 0 {
             return timestamp_ms;
@@ -1234,7 +1384,7 @@ impl RtspServerSession {
             }
         }
 
-        if let Some(range_str) = rtsp_request.headers.get(&String::from("Range")) {
+        if let Some(range_str) = rtsp_request.get_header("Range") {
             match RtspRange::unmarshal(range_str) {
                 Ok(range) => {
                     response
@@ -1296,9 +1446,28 @@ impl RtspServerSession {
             let mut timestamp_normalizers: HashMap<TrackType, RtpTimestampNormalizer> =
                 HashMap::new();
             let mut retry_times = 0;
+            let mut video_assembler = VideoAccessUnitAssembler::default();
+            let video_send_ctx = PlaybackVideoSendContext {
+                session_id: session_id_for_task.as_str(),
+                remote_addr,
+                request_path: request_path.as_str(),
+                shutdown: &shutdown,
+            };
 
             loop {
                 if playback_cancel_for_task.load(Ordering::Acquire) {
+                    if let (Some(video_channel), Some((timestamp, mut data))) =
+                        (&video_rtp_channel, video_assembler.flush())
+                    {
+                        send_video_access_unit(
+                            video_channel,
+                            &mut timestamp_normalizers,
+                            &video_send_ctx,
+                            timestamp,
+                            &mut data,
+                        )
+                        .await;
+                    }
                     break;
                 }
 
@@ -1314,7 +1483,14 @@ impl RtspServerSession {
                                 let normalized = timestamp_normalizers
                                     .entry(TrackType::Audio)
                                     .or_default()
-                                    .normalize(timestamp, channel.clock_rate());
+                                    .normalize(timestamp, channel.clock_rate(), TrackType::Audio);
+                                log::debug!(
+                                    "server_session: Audio timestamp_in={} clock_rate={} scaled={} output={}",
+                                    timestamp,
+                                    channel.clock_rate(),
+                                    normalized.scaled_timestamp,
+                                    normalized.output_timestamp
+                                );
                                 if normalized.non_wrap_regressed {
                                     log::warn!(
                                         "event=rtp_timestamp_non_wrap_regression track=Audio session_id={} remote_addr={} stream_path={} prev_scaled={} current_scaled={} corrected_timestamp={} regression_count={}",
@@ -1337,41 +1513,38 @@ impl RtspServerSession {
                                 }
                             }
                         }
-                        FrameData::Video {
-                            timestamp,
-                            mut data,
-                        } => {
+                        FrameData::Video { timestamp, data } => {
                             if let Some(video_channel) = &video_rtp_channel {
-                                let mut channel = video_channel.lock().await;
-                                let normalized = timestamp_normalizers
-                                    .entry(TrackType::Video)
-                                    .or_default()
-                                    .normalize(timestamp, channel.clock_rate());
-                                if normalized.non_wrap_regressed {
-                                    log::warn!(
-                                        "event=rtp_timestamp_non_wrap_regression track=Video session_id={} remote_addr={} stream_path={} prev_scaled={} current_scaled={} corrected_timestamp={} regression_count={}",
-                                        session_id_for_task,
-                                        remote_addr,
-                                        request_path,
-                                        normalized.previous_scaled_timestamp.unwrap_or_default(),
-                                        normalized.scaled_timestamp,
-                                        normalized.output_timestamp,
-                                        normalized.non_wrap_regression_count,
-                                    );
-                                }
-                                if let Err(err) = channel
-                                    .on_frame(&mut data, normalized.output_timestamp)
-                                    .await
-                                {
-                                    log::info!("handle_play error: {err}");
-                                    shutdown.store(true, Ordering::Release);
-                                    break;
-                                }
+                                let Some((flush_ts, mut flush_data)) =
+                                    video_assembler.push(timestamp, data)
+                                else {
+                                    continue;
+                                };
+                                send_video_access_unit(
+                                    video_channel,
+                                    &mut timestamp_normalizers,
+                                    &video_send_ctx,
+                                    flush_ts,
+                                    &mut flush_data,
+                                )
+                                .await;
                             }
                         }
                         _ => {}
                     }
                 } else {
+                    if let (Some(video_channel), Some((timestamp, mut data))) =
+                        (&video_rtp_channel, video_assembler.flush())
+                    {
+                        send_video_access_unit(
+                            video_channel,
+                            &mut timestamp_normalizers,
+                            &video_send_ctx,
+                            timestamp,
+                            &mut data,
+                        )
+                        .await;
+                    }
                     retry_times += 1;
                     log::info!(
                         "send_channel_data: no data receives ,retry {} times!",
@@ -1395,7 +1568,7 @@ impl RtspServerSession {
 
         //A stream published by gstreamer does not support the Range header
         //https://github.com/harlanc/xiu/issues/135
-        if let Some(range_str) = rtsp_request.headers.get(&String::from("Range")) {
+        if let Some(range_str) = rtsp_request.get_header("Range") {
             match RtspRange::unmarshal(range_str) {
                 Ok(range) => {
                     response
@@ -1418,6 +1591,103 @@ impl RtspServerSession {
         );
 
         self.send_response(&response).await?;
+
+        Ok(())
+    }
+
+    async fn handle_get_parameter(
+        &mut self,
+        rtsp_request: &RtspRequest,
+    ) -> Result<(), SessionError> {
+        self.handle_keep_alive(rtsp_request, rtsp_method_name::GET_PARAMETER)
+            .await
+    }
+
+    async fn handle_set_parameter(
+        &mut self,
+        rtsp_request: &RtspRequest,
+    ) -> Result<(), SessionError> {
+        self.handle_keep_alive(rtsp_request, rtsp_method_name::SET_PARAMETER)
+            .await
+    }
+
+    async fn handle_pause(&mut self, rtsp_request: &RtspRequest) -> Result<(), SessionError> {
+        self.stop_playback_task().await;
+
+        if self.has_subscribed {
+            let identifier = self.resolve_stream_identifier(&rtsp_request.uri.path);
+            let unsubscribe = StreamHubEvent::UnSubscribe {
+                identifier,
+                info: self.get_subscriber_info(),
+            };
+
+            if self.event_producer.send(unsubscribe).is_err() {
+                return Err(SessionError {
+                    value: SessionErrorValue::StreamHubEventSendErr,
+                });
+            }
+
+            self.has_subscribed = false;
+        }
+
+        let mut response = Self::gen_response(http::StatusCode::OK, rtsp_request);
+        if let Some(session_id) = self.session_id {
+            response
+                .headers
+                .insert("Session".to_string(), session_id.to_string());
+        }
+        self.send_response(&response).await?;
+
+        Ok(())
+    }
+
+    async fn handle_redirect(&mut self, rtsp_request: &RtspRequest) -> Result<(), SessionError> {
+        let mut response = Self::gen_rtsp_response(405, "Method Not Allowed", rtsp_request);
+        response
+            .headers
+            .insert("Allow".to_string(), rtsp_method_name::ARRAY.join(","));
+        self.send_response(&response).await?;
+        Ok(())
+    }
+
+    async fn handle_keep_alive(
+        &mut self,
+        rtsp_request: &RtspRequest,
+        method: &str,
+    ) -> Result<(), SessionError> {
+        if let Some(session_hdr) = rtsp_request.get_header("Session")
+            && let Some(current) = self.session_id
+        {
+            let requested = Self::parse_session_header(session_hdr);
+            if !requested.is_empty() && requested != current.to_string() {
+                let response = Self::gen_rtsp_response(454, "Session Not Found", rtsp_request);
+                self.send_response(&response).await?;
+                return Ok(());
+            }
+        }
+
+        let mut response = Self::gen_response(http::StatusCode::OK, rtsp_request);
+        if let Some(session_id) = self.session_id {
+            response
+                .headers
+                .insert("Session".to_string(), session_id.to_string());
+        }
+        self.send_response(&response).await?;
+
+        let cseq = rtsp_request.get_header("CSeq").cloned().unwrap_or_default();
+        let session_id = self
+            .session_id
+            .map(|id| id.to_string())
+            .unwrap_or_else(|| "none".to_string());
+        log::info!(
+            "event=rtsp_request method={} cseq={} session_id={} remote_addr={} stream_path={} session_type={}",
+            method,
+            cseq,
+            session_id,
+            self.remote_addr,
+            rtsp_request.uri.path,
+            self.session_type,
+        );
 
         Ok(())
     }
@@ -1605,13 +1875,43 @@ impl RtspServerSession {
             ..Default::default()
         };
 
-        if let Some(cseq) = rtsp_request.headers.get("CSeq") {
+        if let Some(cseq) = rtsp_request.get_header("CSeq") {
             response
                 .headers
                 .insert("CSeq".to_string(), cseq.to_string());
         }
 
         response
+    }
+
+    fn gen_rtsp_response(
+        code: u16,
+        reason_phrase: &str,
+        rtsp_request: &RtspRequest,
+    ) -> RtspResponse {
+        let mut response = RtspResponse {
+            version: "RTSP/1.0".to_string(),
+            status_code: code,
+            reason_phrase: reason_phrase.to_string(),
+            ..Default::default()
+        };
+
+        if let Some(cseq) = rtsp_request.get_header("CSeq") {
+            response
+                .headers
+                .insert("CSeq".to_string(), cseq.to_string());
+        }
+
+        response
+    }
+
+    fn parse_session_header(session_hdr: &str) -> String {
+        session_hdr
+            .split(';')
+            .next()
+            .unwrap_or_default()
+            .trim()
+            .to_string()
     }
 
     fn get_subscriber_info(&mut self) -> SubscriberInfo {
@@ -2041,6 +2341,181 @@ mod tests {
 
         let request = create_test_request("OPTIONS", Some("1"));
         let result = session.handle_options(&request).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_rtsp_server_session_on_rtsp_message_leaves_interleaved_binary_buffered() {
+        let (event_sender, _event_receiver) = tokio::sync::mpsc::unbounded_channel();
+        let mut mock_io = MockNetIO::new();
+
+        mock_io.expect_get_net_type().returning(|| NetType::TCP);
+        mock_io.expect_read().times(0);
+
+        mock_io
+            .expect_write()
+            .withf(|bytes| {
+                let s = std::str::from_utf8(bytes).unwrap();
+                s.contains("RTSP/1.0 200 OK") && s.contains("Public: OPTIONS,DESCRIBE")
+            })
+            .times(1)
+            .returning(|_| Ok(()));
+
+        let session_io: Box<dyn TNetIO + Send + Sync> = Box::new(mock_io);
+        let remote_addr = "127.0.0.1:0".parse().unwrap();
+        let mut session =
+            RtspServerSession::new_with_io(session_io, event_sender, None, remote_addr);
+
+        let mut data =
+            BytesMut::from("OPTIONS rtsp://localhost/stream1 RTSP/1.0\r\nCSeq: 1\r\n\r\n");
+        data.extend_from_slice(&[0x24, 0x00, 0x00, 0x04, 0xff, 0xff, 0xff, 0xff]);
+        session.reader.extend_from_slice(&data[..]);
+
+        let result = session.on_rtsp_message().await;
+        assert!(result.is_ok());
+
+        let remaining = session.reader.get_remaining_bytes();
+        assert_eq!(remaining.len(), 8);
+        assert_eq!(remaining[0], 0x24);
+    }
+
+    #[tokio::test]
+    async fn test_rtsp_server_session_get_parameter_keep_alive_ok_includes_session() {
+        let (event_sender, _event_receiver) = tokio::sync::mpsc::unbounded_channel();
+        let mut mock_io = MockNetIO::new();
+
+        mock_io.expect_get_net_type().returning(|| NetType::TCP);
+        mock_io.expect_read().times(0);
+
+        mock_io
+            .expect_write()
+            .withf(|bytes| {
+                let s = std::str::from_utf8(bytes).unwrap();
+                s.contains("RTSP/1.0 200 OK") && s.contains("Session:")
+            })
+            .times(1)
+            .returning(|_| Ok(()));
+
+        let session_io: Box<dyn TNetIO + Send + Sync> = Box::new(mock_io);
+        let remote_addr = "127.0.0.1:0".parse().unwrap();
+        let mut session =
+            RtspServerSession::new_with_io(session_io, event_sender, None, remote_addr);
+
+        let session_id = Uuid::new(SESSION_ID_RANDOM_DIGITS);
+        let session_id_str = session_id.to_string();
+        session.session_id = Some(session_id);
+
+        let mut request = create_test_request(rtsp_method_name::GET_PARAMETER, Some("1"));
+        request
+            .headers
+            .insert("Session".to_string(), session_id_str);
+        let result = session.handle_get_parameter(&request).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_rtsp_server_session_get_parameter_wrong_session_returns_454() {
+        let (event_sender, _event_receiver) = tokio::sync::mpsc::unbounded_channel();
+        let mut mock_io = MockNetIO::new();
+
+        mock_io.expect_get_net_type().returning(|| NetType::TCP);
+        mock_io.expect_read().times(0);
+
+        mock_io
+            .expect_write()
+            .withf(|bytes| {
+                let s = std::str::from_utf8(bytes).unwrap();
+                s.contains("RTSP/1.0 454 Session Not Found") && s.contains("CSeq: 1")
+            })
+            .times(1)
+            .returning(|_| Ok(()));
+
+        let session_io: Box<dyn TNetIO + Send + Sync> = Box::new(mock_io);
+        let remote_addr = "127.0.0.1:0".parse().unwrap();
+        let mut session =
+            RtspServerSession::new_with_io(session_io, event_sender, None, remote_addr);
+
+        session.session_id = Some(Uuid::new(SESSION_ID_RANDOM_DIGITS));
+
+        let mut request = create_test_request(rtsp_method_name::GET_PARAMETER, Some("1"));
+        request
+            .headers
+            .insert("Session".to_string(), "does-not-exist".to_string());
+        let result = session.handle_get_parameter(&request).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_rtsp_server_session_pause_unsubscribes_and_responds_ok() {
+        let (event_sender, mut event_receiver) = tokio::sync::mpsc::unbounded_channel();
+        let mut mock_io = MockNetIO::new();
+
+        mock_io.expect_get_net_type().returning(|| NetType::TCP);
+        mock_io.expect_read().times(0);
+
+        mock_io
+            .expect_write()
+            .withf(|bytes| {
+                let s = std::str::from_utf8(bytes).unwrap();
+                s.contains("RTSP/1.0 200 OK") && s.contains("CSeq: 1")
+            })
+            .times(1)
+            .returning(|_| Ok(()));
+
+        let session_io: Box<dyn TNetIO + Send + Sync> = Box::new(mock_io);
+        let remote_addr = "127.0.0.1:0".parse().unwrap();
+        let mut session =
+            RtspServerSession::new_with_io(session_io, event_sender, None, remote_addr);
+
+        session.has_subscribed = true;
+        session.session_id = Some(Uuid::new(SESSION_ID_RANDOM_DIGITS));
+        session.stream_identifier = Some(StreamIdentifier::Rtsp {
+            stream_path: "live/stream1".to_string(),
+        });
+
+        let mut request = create_test_request(rtsp_method_name::PAUSE, Some("1"));
+        request.uri.path = "live/stream1".to_string();
+
+        let result = session.handle_pause(&request).await;
+        assert!(result.is_ok());
+        assert!(!session.has_subscribed);
+
+        let event = event_receiver.recv().await.expect("expected unsubscribe");
+        match event {
+            StreamHubEvent::UnSubscribe { identifier, .. } => match identifier {
+                StreamIdentifier::Rtsp { stream_path } => {
+                    assert_eq!(stream_path, "live/stream1");
+                }
+                _ => panic!("unexpected identifier"),
+            },
+            _ => panic!("expected UnSubscribe event"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_rtsp_server_session_redirect_returns_405_with_allow() {
+        let (event_sender, _event_receiver) = tokio::sync::mpsc::unbounded_channel();
+        let mut mock_io = MockNetIO::new();
+
+        mock_io.expect_get_net_type().returning(|| NetType::TCP);
+        mock_io.expect_read().times(0);
+
+        mock_io
+            .expect_write()
+            .withf(|bytes| {
+                let s = std::str::from_utf8(bytes).unwrap();
+                s.contains("RTSP/1.0 405 Method Not Allowed") && s.contains("Allow:")
+            })
+            .times(1)
+            .returning(|_| Ok(()));
+
+        let session_io: Box<dyn TNetIO + Send + Sync> = Box::new(mock_io);
+        let remote_addr = "127.0.0.1:0".parse().unwrap();
+        let mut session =
+            RtspServerSession::new_with_io(session_io, event_sender, None, remote_addr);
+
+        let request = create_test_request(rtsp_method_name::REDIRECT, Some("1"));
+        let result = session.handle_redirect(&request).await;
         assert!(result.is_ok());
     }
 
@@ -2859,10 +3334,10 @@ mod tests {
     fn test_rtp_timestamp_normalizer_corrects_non_wrap_regression() {
         let mut normalizer = RtpTimestampNormalizer::default();
 
-        let first = normalizer.normalize(1000, 90_000);
-        let second = normalizer.normalize(1033, 90_000);
-        let regressed = normalizer.normalize(0, 90_000);
-        let next = normalizer.normalize(33, 90_000);
+        let first = normalizer.normalize(1000, 90_000, TrackType::Video);
+        let second = normalizer.normalize(1033, 90_000, TrackType::Video);
+        let regressed = normalizer.normalize(0, 90_000, TrackType::Video);
+        let next = normalizer.normalize(33, 90_000, TrackType::Video);
 
         assert_eq!(first.output_timestamp, 90_000);
         assert_eq!(second.output_timestamp, 92_970);
@@ -2879,12 +3354,118 @@ mod tests {
     fn test_rtp_timestamp_normalizer_preserves_true_wrap() {
         let mut normalizer = RtpTimestampNormalizer::default();
 
-        let first = normalizer.normalize(u32::MAX - 10, 0);
-        let wrapped = normalizer.normalize(5, 0);
+        let first = normalizer.normalize(u32::MAX - 10, 0, TrackType::Video);
+        let wrapped = normalizer.normalize(5, 0, TrackType::Video);
 
         assert_eq!(first.output_timestamp, u32::MAX - 10);
         assert!(!wrapped.non_wrap_regressed);
         assert_eq!(wrapped.non_wrap_regression_count, 0);
         assert_eq!(wrapped.output_timestamp, 5);
+    }
+
+    #[test]
+    fn test_rtp_timestamp_normalizer_audio_no_scaling() {
+        // Audio timestamps are already in sample units, should not be scaled
+        let mut normalizer = RtpTimestampNormalizer::default();
+
+        // AAC @ 48kHz: First frame at 0 samples
+        let first = normalizer.normalize(0, 48_000, TrackType::Audio);
+        assert_eq!(first.output_timestamp, 0);
+
+        // Second frame at 1024 samples
+        let second = normalizer.normalize(1024, 48_000, TrackType::Audio);
+        assert_eq!(second.output_timestamp, 1024);
+
+        // Third frame at 2048 samples
+        let third = normalizer.normalize(2048, 48_000, TrackType::Audio);
+        assert_eq!(third.output_timestamp, 2048);
+
+        // No scaling should occur
+        assert_eq!(second.scaled_timestamp, 1024);
+        assert_eq!(third.scaled_timestamp, 2048);
+    }
+
+    #[test]
+    fn test_rtp_timestamp_normalizer_video_scaling() {
+        // Video timestamps are in milliseconds, should be scaled to 90kHz
+        let mut normalizer = RtpTimestampNormalizer::default();
+
+        // First frame at 0ms
+        let first = normalizer.normalize(0, 90_000, TrackType::Video);
+        assert_eq!(first.output_timestamp, 0);
+
+        // Second frame at 33ms (typical for 30fps)
+        let second = normalizer.normalize(33, 90_000, TrackType::Video);
+        assert_eq!(second.output_timestamp, 2970); // 33 * 90000 / 1000
+
+        // Third frame at 66ms
+        let third = normalizer.normalize(66, 90_000, TrackType::Video);
+        assert_eq!(third.output_timestamp, 5940); // 66 * 90000 / 1000
+    }
+
+    #[test]
+    fn test_rtp_timestamp_audio_sequence_monotonic() {
+        // Verify audio timestamps produce monotonic sequence without precision loss
+        let mut normalizer = RtpTimestampNormalizer::default();
+
+        // Simulate 100 AAC frames @ 48kHz (1024 samples/frame)
+        for i in 0..100 {
+            let timestamp = i * 1024;
+            let result = normalizer.normalize(timestamp, 48_000, TrackType::Audio);
+
+            // Timestamp should exactly match input (no scaling)
+            assert_eq!(result.output_timestamp, timestamp);
+            assert_eq!(result.scaled_timestamp, timestamp);
+            assert!(!result.non_wrap_regressed);
+        }
+    }
+
+    #[test]
+    fn test_video_access_unit_assembler_coalesces_same_timestamp() {
+        let mut assembler = VideoAccessUnitAssembler::default();
+
+        let ts1 = 100u32;
+        let ts2 = 200u32;
+
+        // First chunk is a raw NAL (no Annex-B prefix).
+        assert!(
+            assembler
+                .push(ts1, BytesMut::from(&b"\x67\x11\x22"[..]))
+                .is_none()
+        );
+
+        // Second chunk already has a 3-byte Annex-B start code.
+        assert!(
+            assembler
+                .push(ts1, BytesMut::from(&b"\x00\x00\x01\x68\x33"[..]))
+                .is_none()
+        );
+
+        // Timestamp change flushes the previous access unit.
+        let flushed = assembler
+            .push(ts2, BytesMut::from(&b"\x65\x44"[..]))
+            .expect("expected flush on timestamp change");
+
+        assert_eq!(flushed.0, ts1);
+        let mut expected = BytesMut::new();
+        expected.extend_from_slice(&ANNEXB_NALU_START_CODE[..]);
+        expected.extend_from_slice(&b"\x67\x11\x22"[..]);
+        expected.extend_from_slice(&b"\x00\x00\x01\x68\x33"[..]);
+        assert_eq!(flushed.1, expected);
+
+        let (ts, bytes) = assembler.flush().expect("expected pending access unit");
+        assert_eq!(ts, ts2);
+        let mut expected2 = BytesMut::new();
+        expected2.extend_from_slice(&ANNEXB_NALU_START_CODE[..]);
+        expected2.extend_from_slice(&b"\x65\x44"[..]);
+        assert_eq!(bytes, expected2);
+    }
+
+    #[test]
+    fn test_video_access_unit_assembler_flush_empty_returns_none() {
+        let mut assembler = VideoAccessUnitAssembler::default();
+        assert!(assembler.flush().is_none());
+        assert!(assembler.push(1, BytesMut::new()).is_none());
+        assert!(assembler.flush().is_none());
     }
 }

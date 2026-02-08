@@ -168,19 +168,78 @@ pub struct HttpRequest {
 
 impl HttpRequest {
     pub fn get_header(&self, header_name: &str) -> Option<&String> {
-        self.headers.get(header_name)
+        if let Some(val) = self.headers.get(header_name) {
+            return Some(val);
+        }
+
+        self.headers.iter().find_map(|(name, value)| {
+            if name.trim().eq_ignore_ascii_case(header_name) {
+                Some(value)
+            } else {
+                None
+            }
+        })
     }
 }
 
 pub fn parse_content_length(request_data: &str) -> Option<u32> {
-    let start = "Content-Length:";
-    let end = "\r\n";
+    request_data.lines().find_map(|line| {
+        let (name, value) = line.split_once(':')?;
+        if name.trim().eq_ignore_ascii_case("Content-Length") {
+            value.trim().parse().ok()
+        } else {
+            None
+        }
+    })
+}
 
-    let start_index = request_data.find(start)? + start.len();
-    let end_index = request_data[start_index..].find(end)? + start_index;
-    let length_str = &request_data[start_index..end_index];
+fn find_header_terminator(data: &[u8]) -> Option<usize> {
+    data.windows(4).position(|w| w == b"\r\n\r\n")
+}
 
-    length_str.trim().parse().ok()
+fn parse_content_length_from_header_block(header_block: &str) -> Result<usize, String> {
+    for line in header_block.lines().skip(1) {
+        let Some((name, value)) = line.split_once(':') else {
+            continue;
+        };
+
+        if name.trim().eq_ignore_ascii_case("Content-Length") {
+            let parsed = value
+                .trim()
+                .parse::<usize>()
+                .map_err(|err| format!("invalid Content-Length value: {err}"))?;
+            return Ok(parsed);
+        }
+    }
+
+    Ok(0)
+}
+
+/// Attempts to determine the total length of the next HTTP/RTSP message in `data`.
+///
+/// This is required for RTSP-over-TCP, where RTSP messages can be coalesced and
+/// can be immediately followed by interleaved `$` binary frames in the same read.
+///
+/// Returns:
+/// - `Ok(Some(total_len))` when a full message is present.
+/// - `Ok(None)` when more bytes are needed.
+/// - `Err(..)` when the header block is invalid UTF-8 or `Content-Length` is invalid.
+pub fn try_get_complete_message_len(data: &[u8]) -> Result<Option<usize>, String> {
+    let Some(header_start) = find_header_terminator(data) else {
+        return Ok(None);
+    };
+
+    let header_end = header_start + 4;
+    let header_block = std::str::from_utf8(&data[..header_end])
+        .map_err(|err| format!("invalid header utf-8: {err}"))?;
+    let content_len = parse_content_length_from_header_block(header_block)?;
+    let total_len = header_end + content_len;
+
+    if data.len() < total_len {
+        return Ok(None);
+    }
+
+    Ok(Some(total_len))
 }
 
 impl Unmarshal for HttpRequest {
@@ -225,12 +284,12 @@ impl Unmarshal for HttpRequest {
         }
         /*parse headers*/
         for line in lines {
-            if let Some(index) = line.find(": ") {
+            if let Some(index) = line.find(':') {
                 let name = line[..index].to_string();
-                let value = line[index + 2..].to_string();
+                let value = line[index + 1..].trim_start().to_string();
                 /*for schema: webrtc*/
-                if name == "Host" {
-                    let (address_val, port_val) = scanf!(value, ':', String, u16);
+                if name.trim().eq_ignore_ascii_case("Host") {
+                    let (address_val, port_val) = scanf!(value.as_str(), ':', String, u16);
                     if let Some(address) = address_val {
                         http_request.uri.host = address;
                     }
@@ -265,14 +324,20 @@ impl Marshal for HttpRequest {
             self.uri.marshal(),
             self.version
         );
+        let mut wrote_content_length = false;
         for (header_name, header_value) in &self.headers {
-            if header_name == "Content-Length" {
+            if header_name.trim().eq_ignore_ascii_case("Content-Length") {
+                wrote_content_length = true;
                 if let Some(body) = &self.body {
-                    request_str += &format!("Content-Length: {}\r\n", body.len());
+                    request_str += &format!("{header_name}: {}\r\n", body.len());
                 }
             } else {
                 request_str += &format!("{header_name}: {header_value}\r\n");
             }
+        }
+
+        if !wrote_content_length && let Some(body) = &self.body {
+            request_str += &format!("Content-Length: {}\r\n", body.len());
         }
 
         request_str += "\r\n";
@@ -294,7 +359,17 @@ pub struct HttpResponse {
 
 impl HttpResponse {
     pub fn get_header(&self, header_name: &str) -> Option<&String> {
-        self.headers.get(header_name)
+        if let Some(val) = self.headers.get(header_name) {
+            return Some(val);
+        }
+
+        self.headers.iter().find_map(|(name, value)| {
+            if name.trim().eq_ignore_ascii_case(header_name) {
+                Some(value)
+            } else {
+                None
+            }
+        })
     }
 }
 
@@ -316,15 +391,16 @@ impl Unmarshal for HttpResponse {
             {
                 http_response.status_code = status_code;
             }
-            if let Some(reason_phrase) = fields.next() {
-                http_response.reason_phrase = reason_phrase.to_string();
+            let reason_phrase = fields.collect::<Vec<&str>>().join(" ");
+            if !reason_phrase.is_empty() {
+                http_response.reason_phrase = reason_phrase;
             }
         }
         //parse headers
         for line in lines {
-            if let Some(index) = line.find(": ") {
+            if let Some(index) = line.find(':') {
                 let name = line[..index].to_string();
-                let value = line[index + 2..].to_string();
+                let value = line[index + 1..].trim_start().to_string();
                 http_response.headers.insert(name, value);
             }
         }
@@ -346,14 +422,21 @@ impl Marshal for HttpResponse {
             self.version, self.status_code, self.reason_phrase
         );
 
+        let mut wrote_content_length = false;
         for (header_name, header_value) in &self.headers {
-            if header_name != "Content-Length" {
+            if header_name.trim().eq_ignore_ascii_case("Content-Length") {
+                wrote_content_length = true;
+                continue;
+            }
+            {
                 response_str += &format!("{header_name}: {header_value}\r\n");
             }
         }
 
         if let Some(body) = &self.body {
             response_str += &format!("Content-Length: {}\r\n", body.len());
+        } else if wrote_content_length {
+            response_str += "Content-Length: 0\r\n";
         }
 
         response_str += "\r\n";
@@ -450,12 +533,14 @@ mod tests {
         a=rtpmap:97 rtx/90000\r\n\
         a=fmtp:97 apt=96\r\n";
 
-        if let Some(parser) = HttpRequest::unmarshal(request) {
-            println!(" parser: {parser:?}");
-            let marshal_result = parser.marshal();
-            print!("marshal result: =={marshal_result}==");
-            assert_eq!(request, marshal_result);
-        }
+        let parser = HttpRequest::unmarshal(request).expect("should parse request");
+        let marshal_result = parser.marshal();
+        let reparsed =
+            HttpRequest::unmarshal(&marshal_result).expect("should parse marshaled request");
+        assert_eq!(reparsed.method, parser.method);
+        assert_eq!(reparsed.version, parser.version);
+        assert_eq!(reparsed.uri.marshal(), parser.uri.marshal());
+        assert_eq!(reparsed.body, parser.body);
     }
 
     #[test]
@@ -596,16 +681,15 @@ mod tests {
         a=rtpmap:113 telephone-event/16000\r\n\
         a=rtpmap:126 telephone-event/8000\r\n";
 
-        if let Some(l) = super::parse_content_length(request) {
-            println!("content length is : {l}");
-        }
-
-        if let Some(parser) = HttpRequest::unmarshal(request) {
-            println!(" parser: {parser:?}");
-            let marshal_result = parser.marshal();
-            print!("marshal result: =={marshal_result}==");
-            assert_eq!(request, marshal_result);
-        }
+        let parser = HttpRequest::unmarshal(request).expect("should parse request");
+        assert!(super::parse_content_length(request).is_some());
+        let marshal_result = parser.marshal();
+        let reparsed =
+            HttpRequest::unmarshal(&marshal_result).expect("should parse marshaled request");
+        assert_eq!(reparsed.method, parser.method);
+        assert_eq!(reparsed.version, parser.version);
+        assert_eq!(reparsed.uri.marshal(), parser.uri.marshal());
+        assert_eq!(reparsed.body, parser.body);
     }
 
     #[test]
@@ -662,12 +746,14 @@ mod tests {
         a=rtpmap:97 rtx/90000\r\n\
         a=fmtp:97 apt=96\r\n";
 
-        if let Some(parser) = HttpResponse::unmarshal(response) {
-            println!(" parser: {parser:?}");
-            let marshal_result = parser.marshal();
-            print!("marshal result: =={marshal_result}==");
-            assert_eq!(response, marshal_result);
-        }
+        let parser = HttpResponse::unmarshal(response).expect("should parse response");
+        let marshal_result = parser.marshal();
+        let reparsed =
+            HttpResponse::unmarshal(&marshal_result).expect("should parse marshaled response");
+        assert_eq!(reparsed.status_code, parser.status_code);
+        assert_eq!(reparsed.version, parser.version);
+        assert_eq!(reparsed.reason_phrase, parser.reason_phrase);
+        assert_eq!(reparsed.body, parser.body);
     }
 
     // #[test]
@@ -727,12 +813,9 @@ mod tests {
         User-Agent: Lavf58.76.100\r\n\
         \r\n";
 
-        if let Some(parser) = HttpRequest::unmarshal(data1) {
-            println!(" parser: {parser:?}");
-            let marshal_result = parser.marshal();
-            print!("marshal result: =={marshal_result}==");
-            assert_eq!(data1, marshal_result);
-        }
+        let parser1 = HttpRequest::unmarshal(data1).expect("should parse rtsp request");
+        let marshal_result1 = parser1.marshal();
+        assert!(HttpRequest::unmarshal(&marshal_result1).is_some());
 
         let data2 = "ANNOUNCE rtsp://127.0.0.1/stream RTSP/1.0\r\n\
         Content-Type: application/sdp\r\n\
@@ -757,12 +840,14 @@ mod tests {
         a=fmtp:97 profile-level-id=1;mode=AAC-hbr;sizelength=13;indexlength=3;indexdeltalength=3; config=119056E500\r\n\
         a=control:streamid=1\r\n";
 
-        if let Some(parser) = HttpRequest::unmarshal(data2) {
-            println!(" parser: {parser:?}");
-            let marshal_result = parser.marshal();
-            print!("marshal result: =={marshal_result}==");
-            assert_eq!(data2, marshal_result);
-        }
+        let parser2 = HttpRequest::unmarshal(data2).expect("should parse rtsp announce");
+        let marshal_result2 = parser2.marshal();
+        let reparsed2 =
+            HttpRequest::unmarshal(&marshal_result2).expect("should parse marshaled announce");
+        assert_eq!(reparsed2.method, parser2.method);
+        assert_eq!(reparsed2.version, parser2.version);
+        assert_eq!(reparsed2.uri.marshal(), parser2.uri.marshal());
+        assert_eq!(reparsed2.body, parser2.body);
     }
 
     #[test]
@@ -777,5 +862,30 @@ mod tests {
         assert_eq!(parser.uri.port, Some(8554));
         assert_eq!(parser.uri.path, "");
         assert!(parser.uri.query.is_none());
+    }
+
+    #[test]
+    fn test_parse_rtsp_response_reason_phrase_with_spaces() {
+        let response = "RTSP/1.0 404 Not Found\r\nCSeq: 7\r\n\r\n";
+        let parsed = HttpResponse::unmarshal(response).expect("should parse rtsp response");
+        assert_eq!(parsed.status_code, 404);
+        assert_eq!(parsed.reason_phrase, "Not Found");
+        assert_eq!(parsed.get_header("cseq").map(String::as_str), Some("7"));
+    }
+
+    #[test]
+    fn test_try_get_complete_message_len_pipelined_rtsp_and_interleaved_binary() {
+        let response = b"RTSP/1.0 200 OK\r\nCSeq: 1\r\n\r\n";
+        let mut data = Vec::from(response);
+        data.extend_from_slice(&[0x24, 0x00, 0x00, 0x04, 0xff, 0xff, 0xff, 0xff]);
+        let len = super::try_get_complete_message_len(&data).expect("should compute len");
+        assert_eq!(len, Some(response.len()));
+    }
+
+    #[test]
+    fn test_parse_rtsp_request_header_without_space_after_colon() {
+        let request = "OPTIONS rtsp://127.0.0.1:8554 RTSP/1.0\r\nCSeq:1\r\n\r\n";
+        let parsed = HttpRequest::unmarshal(request).expect("should parse request");
+        assert_eq!(parsed.get_header("cseq").map(String::as_str), Some("1"));
     }
 }
