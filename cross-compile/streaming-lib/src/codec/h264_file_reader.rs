@@ -1,6 +1,6 @@
-use std::fs::File;
-use std::io::{Read, Seek, SeekFrom};
 use thiserror::Error;
+use tokio::fs::File;
+use tokio::io::{AsyncReadExt, AsyncSeekExt, SeekFrom};
 
 /// Errors that can occur while reading H264 files
 #[derive(Error, Debug)]
@@ -94,7 +94,11 @@ enum NalFormat {
 }
 
 impl H264FileReader {
-    const BUFFER_SIZE: usize = 65536;
+    // Increased from 65536 (64KB) to 524288 (512KB) for Phase 3 optimization:
+    // - Reduces syscalls by 8x (covers ~5-10 frames per read)
+    // - Better SD card block alignment (512KB = typical erase block)
+    // - Trade-off: Uses ~450KB more memory, acceptable for 24MB constraint
+    const BUFFER_SIZE: usize = 524288;
     const START_CODE_3: &'static [u8] = &[0x00, 0x00, 0x01];
     const START_CODE_4: &'static [u8] = &[0x00, 0x00, 0x00, 0x01];
     const MAX_PARAM_SET_LEN: usize = 4096;
@@ -109,10 +113,10 @@ impl H264FileReader {
     /// # Returns
     ///
     /// Result with H264FileReader or H264FileError
-    pub fn new(file_path: &str, frame_rate: u32) -> Result<Self, H264FileError> {
-        let mut file = File::open(file_path)?;
-        let file_size = file.seek(SeekFrom::End(0))?;
-        file.seek(SeekFrom::Start(0))?;
+    pub async fn new(file_path: &str, frame_rate: u32) -> Result<Self, H264FileError> {
+        let mut file = File::open(file_path).await?;
+        let file_size = file.seek(SeekFrom::End(0)).await?;
+        file.seek(SeekFrom::Start(0)).await?;
 
         let frame_duration_ms = if frame_rate > 0 {
             1000 / frame_rate
@@ -120,7 +124,7 @@ impl H264FileReader {
             40 // Default to 25fps
         };
 
-        let nal_format = Self::detect_nal_format(&mut file, file_size)?;
+        let nal_format = Self::detect_nal_format(&mut file, file_size).await?;
 
         Ok(Self {
             file,
@@ -133,15 +137,18 @@ impl H264FileReader {
         })
     }
 
-    fn detect_nal_format(file: &mut File, file_size: u64) -> Result<NalFormat, H264FileError> {
+    async fn detect_nal_format(
+        file: &mut File,
+        file_size: u64,
+    ) -> Result<NalFormat, H264FileError> {
         let detect_len = std::cmp::min(
             Self::BUFFER_SIZE + Self::START_CODE_4.len(),
             file_size as usize,
         );
         let mut header = vec![0u8; detect_len];
-        let bytes_read = file.read(&mut header)?;
+        let bytes_read = file.read(&mut header).await?;
         header.truncate(bytes_read);
-        file.seek(SeekFrom::Start(0))?;
+        file.seek(SeekFrom::Start(0)).await?;
 
         let has_start_code_4 = header
             .windows(Self::START_CODE_4.len())
@@ -162,14 +169,14 @@ impl H264FileReader {
     /// # Returns
     ///
     /// `Option<NalUnit>` if successful, None at EOF, or H264FileError
-    pub fn read_next_nal(&mut self) -> Result<Option<NalUnit>, H264FileError> {
+    pub async fn read_next_nal(&mut self) -> Result<Option<NalUnit>, H264FileError> {
         match self.nal_format {
-            NalFormat::AnnexB => self.read_next_nal_annexb(),
-            NalFormat::Avcc => self.read_next_nal_avcc(),
+            NalFormat::AnnexB => self.read_next_nal_annexb().await,
+            NalFormat::Avcc => self.read_next_nal_avcc().await,
         }
     }
 
-    fn read_next_nal_annexb(&mut self) -> Result<Option<NalUnit>, H264FileError> {
+    async fn read_next_nal_annexb(&mut self) -> Result<Option<NalUnit>, H264FileError> {
         if self.current_pos >= self.file_size {
             return Ok(None);
         }
@@ -177,7 +184,7 @@ impl H264FileReader {
         // Find the next start code
         // Returns (offset_in_buffer, start_code_length)
         // File pointer is positioned just before the start code
-        let (_offset, start_code_len) = self.find_next_start_code()?;
+        let (_offset, start_code_len) = self.find_next_start_code().await?;
 
         // If start_code_len == 0, we've reached EOF without finding a start code
         if start_code_len == 0 {
@@ -185,11 +192,13 @@ impl H264FileReader {
         }
 
         // Skip past the start code with relative seek
-        self.file.seek(SeekFrom::Current(start_code_len as i64))?;
+        self.file
+            .seek(SeekFrom::Current(start_code_len as i64))
+            .await?;
         self.current_pos += start_code_len as u64;
 
         // Find the next start code to know where this NAL unit ends
-        let (next_offset, next_start_len) = self.find_next_start_code()?;
+        let (next_offset, next_start_len) = self.find_next_start_code().await?;
 
         // Determine how many bytes to read for this NAL unit
         let nal_data_len = if next_start_len == 0 {
@@ -209,13 +218,15 @@ impl H264FileReader {
         // AT the next start code. We need to seek backward to read the NAL data
         // that comes BEFORE the next start code (from current_pos to next_start_code).
         if next_start_len != 0 {
-            self.file.seek(SeekFrom::Current(-(nal_data_len as i64)))?;
+            self.file
+                .seek(SeekFrom::Current(-(nal_data_len as i64)))
+                .await?;
             self.current_pos -= nal_data_len as u64;
         }
 
         // Read NAL unit data from the correct position
         let mut nal_data = vec![0u8; nal_data_len];
-        let bytes_read = self.file.read(&mut nal_data)?;
+        let bytes_read = self.file.read(&mut nal_data).await?;
         if bytes_read != nal_data_len {
             nal_data.truncate(bytes_read);
         }
@@ -241,13 +252,13 @@ impl H264FileReader {
         }))
     }
 
-    fn read_next_nal_avcc(&mut self) -> Result<Option<NalUnit>, H264FileError> {
+    async fn read_next_nal_avcc(&mut self) -> Result<Option<NalUnit>, H264FileError> {
         if self.current_pos >= self.file_size {
             return Ok(None);
         }
 
         let mut len_buf = [0u8; 4];
-        let bytes_read = self.file.read(&mut len_buf)?;
+        let bytes_read = self.file.read(&mut len_buf).await?;
         if bytes_read < 4 {
             return Ok(None);
         }
@@ -259,7 +270,7 @@ impl H264FileReader {
         }
 
         let mut nal_data = vec![0u8; nal_len];
-        let data_read = self.file.read(&mut nal_data)?;
+        let data_read = self.file.read(&mut nal_data).await?;
         if data_read != nal_len {
             nal_data.truncate(data_read);
         }
@@ -289,16 +300,18 @@ impl H264FileReader {
     /// Returns (offset_in_buffer, start_code_length)
     /// Seeks back so file pointer is positioned just before the start code.
     /// If no start code found at EOF, returns (0, 0) and rewinds all read bytes.
-    fn find_next_start_code(&mut self) -> Result<(usize, usize), H264FileError> {
+    async fn find_next_start_code(&mut self) -> Result<(usize, usize), H264FileError> {
         let start_pos = self.current_pos;
         let mut total_read: usize = 0;
         let mut tail_len: usize = 0;
 
         loop {
-            let bytes_read = self.file.read(&mut self.buffer[tail_len..])?;
+            let bytes_read = self.file.read(&mut self.buffer[tail_len..]).await?;
             if bytes_read == 0 {
                 if total_read > 0 {
-                    self.file.seek(SeekFrom::Current(-(total_read as i64)))?;
+                    self.file
+                        .seek(SeekFrom::Current(-(total_read as i64)))
+                        .await?;
                 }
                 return Ok((0, 0));
             }
@@ -306,26 +319,44 @@ impl H264FileReader {
             let buf_len = tail_len + bytes_read;
             let base_offset = total_read.saturating_sub(tail_len);
 
-            // Search for 4-byte start code first
-            for i in 0..buf_len.saturating_sub(3) {
-                if self.buffer[i..i + 4] == *Self::START_CODE_4 {
-                    let offset = base_offset + i;
-                    let seek_back = (total_read + bytes_read).saturating_sub(offset) as i64;
-                    self.file.seek(SeekFrom::Current(-seek_back))?;
-                    self.current_pos = start_pos + offset as u64;
-                    return Ok((offset, 4));
+            // Boyer-Moore-inspired optimization for 4-byte start code
+            // Search with last-byte-first heuristic for faster rejection
+            let mut i = 0;
+            while i + 3 < buf_len {
+                // Check the last byte of the 4-byte pattern first (0x01)
+                if self.buffer[i + 3] == 0x01 {
+                    // Potential match - verify the full pattern
+                    if self.buffer[i] == 0x00
+                        && self.buffer[i + 1] == 0x00
+                        && self.buffer[i + 2] == 0x00
+                    {
+                        let offset = base_offset + i;
+                        let seek_back = (total_read + bytes_read).saturating_sub(offset) as i64;
+                        self.file.seek(SeekFrom::Current(-seek_back)).await?;
+                        self.current_pos = start_pos + offset as u64;
+                        return Ok((offset, 4));
+                    }
                 }
+                // Always advance by 1 to ensure we don't miss overlapping patterns
+                i += 1;
             }
 
-            // Search for 3-byte start code
-            for i in 0..buf_len.saturating_sub(2) {
-                if self.buffer[i..i + 3] == *Self::START_CODE_3 {
-                    let offset = base_offset + i;
-                    let seek_back = (total_read + bytes_read).saturating_sub(offset) as i64;
-                    self.file.seek(SeekFrom::Current(-seek_back))?;
-                    self.current_pos = start_pos + offset as u64;
-                    return Ok((offset, 3));
+            // Boyer-Moore-inspired optimization for 3-byte start code
+            i = 0;
+            while i + 2 < buf_len {
+                // Check the last byte of the 3-byte pattern first (0x01)
+                if self.buffer[i + 2] == 0x01 {
+                    // Potential match - verify the full pattern
+                    if self.buffer[i] == 0x00 && self.buffer[i + 1] == 0x00 {
+                        let offset = base_offset + i;
+                        let seek_back = (total_read + bytes_read).saturating_sub(offset) as i64;
+                        self.file.seek(SeekFrom::Current(-seek_back)).await?;
+                        self.current_pos = start_pos + offset as u64;
+                        return Ok((offset, 3));
+                    }
                 }
+                // Always advance by 1 to ensure we don't miss overlapping patterns
+                i += 1;
             }
 
             total_read += bytes_read;
@@ -333,7 +364,9 @@ impl H264FileReader {
             // No start code found in this chunk
             if bytes_read < Self::BUFFER_SIZE.saturating_sub(tail_len) {
                 // End of file reached without finding start code - rewind all read bytes
-                self.file.seek(SeekFrom::Current(-(total_read as i64)))?;
+                self.file
+                    .seek(SeekFrom::Current(-(total_read as i64)))
+                    .await?;
                 return Ok((0, 0));
             }
 
@@ -348,18 +381,18 @@ impl H264FileReader {
     /// # Returns
     ///
     /// Tuple of (SPS bytes, PPS bytes) or error
-    pub fn extract_sps_pps(&mut self) -> Result<(Vec<u8>, Vec<u8>), H264FileError> {
-        self.file.seek(SeekFrom::Start(0))?;
+    pub async fn extract_sps_pps(&mut self) -> Result<(Vec<u8>, Vec<u8>), H264FileError> {
+        self.file.seek(SeekFrom::Start(0)).await?;
         self.current_pos = 0;
 
         let scan_len = std::cmp::min(self.file_size as usize, 1024 * 1024);
         let mut scan_buf = vec![0u8; scan_len];
-        let bytes_read = self.file.read(&mut scan_buf)?;
+        let bytes_read = self.file.read(&mut scan_buf).await?;
         scan_buf.truncate(bytes_read);
 
         let scan_result = Self::scan_sps_pps_from_buffer(&scan_buf);
 
-        self.file.seek(SeekFrom::Start(0))?;
+        self.file.seek(SeekFrom::Start(0)).await?;
         self.current_pos = 0;
 
         let (sps, pps) = if let Some(found) = scan_result {
@@ -368,7 +401,7 @@ impl H264FileReader {
             let mut sps = Vec::new();
             let mut pps = Vec::new();
 
-            while let Some(nal) = self.read_next_nal()? {
+            while let Some(nal) = self.read_next_nal().await? {
                 match nal.unit_type {
                     NalUnitType::SequenceParameterSet => {
                         if nal.data.len() <= Self::MAX_PARAM_SET_LEN {
@@ -394,7 +427,7 @@ impl H264FileReader {
             (sps, pps)
         };
 
-        self.file.seek(SeekFrom::Start(0))?;
+        self.file.seek(SeekFrom::Start(0)).await?;
         self.current_pos = 0;
 
         if sps.is_empty() || pps.is_empty() {
@@ -531,8 +564,8 @@ impl H264FileReader {
     }
 
     /// Reset file position to beginning
-    pub fn reset(&mut self) -> Result<(), H264FileError> {
-        self.file.seek(SeekFrom::Start(0))?;
+    pub async fn reset(&mut self) -> Result<(), H264FileError> {
+        self.file.seek(SeekFrom::Start(0)).await?;
         self.current_pos = 0;
         Ok(())
     }
@@ -562,20 +595,20 @@ mod tests {
         assert_eq!(NalUnitType::from(8), NalUnitType::PictureParameterSet);
     }
 
-    #[test]
-    fn test_frame_duration_calculation() {
-        let reader = H264FileReader::new("/dev/null", 25).unwrap();
+    #[tokio::test]
+    async fn test_frame_duration_calculation() {
+        let reader = H264FileReader::new("/dev/null", 25).await.unwrap();
         assert_eq!(reader.frame_duration_ms(), 40);
 
-        let reader = H264FileReader::new("/dev/null", 30).unwrap();
+        let reader = H264FileReader::new("/dev/null", 30).await.unwrap();
         assert_eq!(reader.frame_duration_ms(), 33);
 
-        let reader = H264FileReader::new("/dev/null", 0).unwrap();
+        let reader = H264FileReader::new("/dev/null", 0).await.unwrap();
         assert_eq!(reader.frame_duration_ms(), 40); // Default fallback
     }
 
-    #[test]
-    fn test_read_next_nal_start_code_across_buffer_boundary() {
+    #[tokio::test]
+    async fn test_read_next_nal_start_code_across_buffer_boundary() {
         let mut data = vec![0u8; H264FileReader::BUFFER_SIZE - 2];
         data.extend_from_slice(&[0x00, 0x00, 0x01, 0x67, 0x42, 0x00, 0x1e]);
         data.extend_from_slice(&[0x00, 0x00, 0x01, 0x68, 0xce, 0x06, 0xe2]);
@@ -590,20 +623,22 @@ mod tests {
         temp_file.write_all(&data).unwrap();
         drop(temp_file);
 
-        let mut reader = H264FileReader::new(file_path.to_str().unwrap(), 25).unwrap();
-        let sps = reader.read_next_nal().unwrap().unwrap();
+        let mut reader = H264FileReader::new(file_path.to_str().unwrap(), 25)
+            .await
+            .unwrap();
+        let sps = reader.read_next_nal().await.unwrap().unwrap();
         assert_eq!(sps.unit_type, NalUnitType::SequenceParameterSet);
         assert_eq!(sps.data, vec![0x67, 0x42, 0x00, 0x1e]);
 
-        let pps = reader.read_next_nal().unwrap().unwrap();
+        let pps = reader.read_next_nal().await.unwrap().unwrap();
         assert_eq!(pps.unit_type, NalUnitType::PictureParameterSet);
         assert_eq!(pps.data, vec![0x68, 0xce, 0x06, 0xe2]);
 
         let _ = std::fs::remove_file(file_path);
     }
 
-    #[test]
-    fn test_read_next_nal_avcc_format() {
+    #[tokio::test]
+    async fn test_read_next_nal_avcc_format() {
         let sps = [0x67, 0x42, 0x00, 0x1e];
         let pps = [0x68, 0xce, 0x06, 0xe2];
 
@@ -623,12 +658,14 @@ mod tests {
         temp_file.write_all(&data).unwrap();
         drop(temp_file);
 
-        let mut reader = H264FileReader::new(file_path.to_str().unwrap(), 25).unwrap();
-        let sps_nal = reader.read_next_nal().unwrap().unwrap();
+        let mut reader = H264FileReader::new(file_path.to_str().unwrap(), 25)
+            .await
+            .unwrap();
+        let sps_nal = reader.read_next_nal().await.unwrap().unwrap();
         assert_eq!(sps_nal.unit_type, NalUnitType::SequenceParameterSet);
         assert_eq!(sps_nal.data, sps);
 
-        let pps_nal = reader.read_next_nal().unwrap().unwrap();
+        let pps_nal = reader.read_next_nal().await.unwrap().unwrap();
         assert_eq!(pps_nal.unit_type, NalUnitType::PictureParameterSet);
         assert_eq!(pps_nal.data, pps);
 

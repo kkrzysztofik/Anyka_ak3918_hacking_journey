@@ -12,14 +12,17 @@ use bytes::BytesMut;
 use clap::Parser;
 use onvif_rust::app::{Application, DEFAULT_CONFIG_PATH};
 use onvif_rust::validation::h264_playback::{H264PlaybackConfig, H264PlaybackMode};
-use portable_atomic::{AtomicU32, Ordering};
-use std::sync::Arc;
+use portable_atomic::{AtomicU32, AtomicUsize, Ordering};
+use std::backtrace::Backtrace;
+use std::panic::PanicHookInfo;
+use std::sync::{Arc, Once};
 use streaming_lib::streamhub::define::{Information, InformationSender};
 use streaming_lib::streamhub::errors::StreamHubError;
 use streaming_lib::streamhub::statistics::StatisticsStream;
 use streaming_lib::{
     DataSender, FrameData, MediaInfo, SubscribeType, TStreamHandler, VideoCodecType,
 };
+use tokio::time::{Duration, timeout};
 
 /// ONVIF daemon with optional H.264 playback validation mode
 #[derive(Parser, Debug)]
@@ -85,12 +88,104 @@ fn parse_arguments() -> (Option<H264PlaybackConfig>, String) {
     (validation_config, cli.config_path)
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
+/// Get runtime configuration (worker threads, blocking threads) based on platform.
+///
+/// For ARM embedded targets (single-core AK3918), use minimal threading to reduce
+/// scheduler contention. For host builds, use available parallelism.
+fn get_runtime_config() -> (usize, usize) {
+    fn parse_positive_usize(var_name: &str) -> Option<usize> {
+        std::env::var(var_name)
+            .ok()
+            .and_then(|value| value.parse::<usize>().ok())
+            .filter(|value| *value > 0)
+    }
+
+    if cfg!(target_arch = "arm") {
+        // Embedded default: allow light concurrency for async runtime + blocking FS work.
+        // Can be overridden for tuning:
+        //   ONVIF_TOKIO_WORKER_THREADS
+        //   ONVIF_TOKIO_MAX_BLOCKING_THREADS
+        let workers = parse_positive_usize("ONVIF_TOKIO_WORKER_THREADS").unwrap_or(2);
+        let blocking = parse_positive_usize("ONVIF_TOKIO_MAX_BLOCKING_THREADS").unwrap_or(16);
+        (workers, blocking)
+    } else {
+        // Host: use available parallelism
+        let workers = std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(4);
+        (workers, 512) // (worker_threads, max_blocking_threads)
+    }
+}
+
+static VALIDATION_PANIC_HOOK_ONCE: Once = Once::new();
+
+fn panic_message(panic_info: &PanicHookInfo<'_>) -> String {
+    if let Some(message) = panic_info.payload().downcast_ref::<&str>() {
+        (*message).to_string()
+    } else if let Some(message) = panic_info.payload().downcast_ref::<String>() {
+        message.clone()
+    } else {
+        "non-string panic payload".to_string()
+    }
+}
+
+fn install_validation_panic_hook() {
+    VALIDATION_PANIC_HOOK_ONCE.call_once(|| {
+        let default_hook = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |panic_info| {
+            let location = panic_info
+                .location()
+                .map(|location| format!("{}:{}", location.file(), location.line()))
+                .unwrap_or_else(|| "unknown".to_string());
+            let message = panic_message(panic_info);
+            let backtrace = Backtrace::force_capture();
+
+            eprintln!(
+                "validation mode panic at {}: {}\n{}",
+                location, message, backtrace
+            );
+            tracing::error!(
+                location = %location,
+                message = %message,
+                backtrace = %backtrace,
+                "validation mode panic"
+            );
+
+            default_hook(panic_info);
+        }));
+    });
+}
+
+fn main() -> Result<()> {
+    // Build explicit tokio runtime with platform-specific configuration
+    let (worker_threads, max_blocking_threads) = get_runtime_config();
+    eprintln!(
+        "onvif-rust runtime config: worker_threads={}, max_blocking_threads={}",
+        worker_threads, max_blocking_threads
+    );
+
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(worker_threads)
+        .max_blocking_threads(max_blocking_threads)
+        .enable_io()
+        .enable_time()
+        .thread_name("onvif-worker")
+        .build()
+        .context("Failed to create tokio runtime")?;
+
+    // Run async main on the runtime
+    runtime.block_on(async_main())
+}
+
+/// Async entry point for the ONVIF daemon.
+///
+/// Separated from main() to allow explicit runtime configuration.
+async fn async_main() -> Result<()> {
     // Parse command line arguments
     let (validation_config, config_path) = parse_arguments();
 
     if let Some(config) = validation_config {
+        install_validation_panic_hook();
         // Validation mode: initialize H.264 playback pipeline
         run_validation_mode(config, &config_path).await
     } else {
@@ -326,6 +421,12 @@ async fn run_validation_mode(config: H264PlaybackConfig, config_path: &str) -> R
     };
     use tokio::sync::mpsc;
 
+    let publisher_init_timeout_sec = std::env::var("ONVIF_VALIDATION_PUBLISHER_INIT_TIMEOUT_SEC")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(30);
+
     // Configure RTP packet sampling for RTSP validation runs.
     //
     // This is intentionally controlled by an environment variable so that
@@ -392,29 +493,89 @@ async fn run_validation_mode(config: H264PlaybackConfig, config_path: &str) -> R
     }
 
     // 1. Create MockVideoPublisher from H.264 file for frame reading
-    let video_publisher = Arc::new(
+    tracing::info!(
+        file = %config.file_path,
+        frame_rate = config.frame_rate,
+        loop_playback = config.loop_playback,
+        "Creating MockVideoPublisher"
+    );
+    let mut video_publisher = match timeout(
+        Duration::from_secs(publisher_init_timeout_sec),
         MockVideoPublisher::new(
             "stream1".to_string(),
             &config.file_path,
             config.frame_rate,
             config.loop_playback,
-        )
-        .await
-        .context("Failed to create MockVideoPublisher from H.264 file")?,
-    );
+        ),
+    )
+    .await
+    {
+        Err(_elapsed) => {
+            tracing::error!(
+                file = %config.file_path,
+                timeout_sec = publisher_init_timeout_sec,
+                "Timed out creating MockVideoPublisher"
+            );
+            anyhow::bail!(
+                "Timed out creating MockVideoPublisher from {} after {}s",
+                config.file_path,
+                publisher_init_timeout_sec
+            );
+        }
+        Ok(result) => match result {
+            Ok(publisher) => publisher,
+            Err(e) => {
+                tracing::error!(
+                    error = %e,
+                    file = %config.file_path,
+                    "Failed to create MockVideoPublisher (H.264 parse/open error)"
+                );
+                return Err(anyhow::Error::new(e))
+                    .context("Failed to create MockVideoPublisher from H.264 file");
+            }
+        },
+    };
     tracing::info!("MockVideoPublisher created");
 
-    let audio_publisher = if let Some(audio_path) = config.audio_file_path.as_deref() {
-        let publisher = MockAudioPublisher::new(
-            "stream1".to_string(),
-            audio_path,
-            config.audio_sample_rate,
-            config.loop_playback,
+    let mut audio_publisher = if let Some(audio_path) = config.audio_file_path.as_deref() {
+        tracing::info!(
+            file = %audio_path,
+            sample_rate_hz = config.audio_sample_rate,
+            loop_playback = config.loop_playback,
+            "Creating MockAudioPublisher"
+        );
+        let publisher = timeout(
+            Duration::from_secs(publisher_init_timeout_sec),
+            MockAudioPublisher::new(
+                "stream1".to_string(),
+                audio_path,
+                config.audio_sample_rate,
+                config.loop_playback,
+            ),
         )
         .await
-        .context("Failed to create MockAudioPublisher from AAC file")?;
+        .map_err(|_elapsed| {
+            tracing::error!(
+                file = %audio_path,
+                timeout_sec = publisher_init_timeout_sec,
+                "Timed out creating MockAudioPublisher"
+            );
+            anyhow::anyhow!(
+                "Timed out creating MockAudioPublisher from {} after {}s",
+                audio_path,
+                publisher_init_timeout_sec
+            )
+        })?
+        .map_err(|e| {
+            tracing::error!(
+                error = %e,
+                file = %audio_path,
+                "Failed to create MockAudioPublisher (AAC parse/open error)"
+            );
+            anyhow::Error::new(e).context("Failed to create MockAudioPublisher from AAC file")
+        })?;
         tracing::info!("MockAudioPublisher created");
-        Some(Arc::new(publisher))
+        Some(publisher)
     } else {
         None
     };
@@ -476,7 +637,7 @@ async fn run_validation_mode(config: H264PlaybackConfig, config_path: &str) -> R
         frame_receiver: Some(frame_rx_rtsp),
         packet_receiver: None,
     };
-    streamhub
+    let (_rtsp_statistic_sender, rtsp_subscriber_handle) = streamhub
         .publish(
             rtsp_stream_id.clone(),
             rtsp_data_receiver,
@@ -490,11 +651,11 @@ async fn run_validation_mode(config: H264PlaybackConfig, config_path: &str) -> R
         frame_receiver: Some(frame_rx_httpflv),
         packet_receiver: None,
     };
-    streamhub
+    let (_httpflv_statistic_sender, _httpflv_subscriber_handle) = streamhub
         .publish(
             httpflv_stream_id.clone(),
             httpflv_data_receiver,
-            video_publisher.clone(),
+            rtsp_stream_handler.clone(),
         )
         .await
         .context("Failed to publish HTTP-FLV stream to StreamHub")?;
@@ -504,6 +665,42 @@ async fn run_validation_mode(config: H264PlaybackConfig, config_path: &str) -> R
         rtsp_stream_id,
         httpflv_stream_id
     );
+
+    // Wire up on-demand publishing: publishers check subscriber count before sending frames
+    let rtsp_handle_for_video = Arc::clone(&rtsp_subscriber_handle);
+    let video_cached_subscriber_count = Arc::new(AtomicUsize::new(1));
+    let video_cached_subscriber_count_for_cb = Arc::clone(&video_cached_subscriber_count);
+    video_publisher.set_subscriber_count_callback(Arc::new(move || {
+        if let Ok(stats) = rtsp_handle_for_video.try_lock() {
+            let count = stats.subscriber_count;
+            video_cached_subscriber_count_for_cb.store(count, Ordering::Relaxed);
+            count
+        } else {
+            video_cached_subscriber_count_for_cb.load(Ordering::Relaxed)
+        }
+    }));
+
+    if let Some(ref mut audio_pub) = audio_publisher {
+        let rtsp_handle_for_audio = Arc::clone(&rtsp_subscriber_handle);
+        let audio_cached_subscriber_count = Arc::new(AtomicUsize::new(1));
+        let audio_cached_subscriber_count_for_cb = Arc::clone(&audio_cached_subscriber_count);
+        audio_pub.set_subscriber_count_callback(Arc::new(move || {
+            if let Ok(stats) = rtsp_handle_for_audio.try_lock() {
+                let count = stats.subscriber_count;
+                audio_cached_subscriber_count_for_cb.store(count, Ordering::Relaxed);
+                count
+            } else {
+                audio_cached_subscriber_count_for_cb.load(Ordering::Relaxed)
+            }
+        }));
+    }
+    tracing::info!(
+        "On-demand publishing configured: publishers will pause when subscriber count is 0"
+    );
+
+    // Wrap publishers in Arc after configuration
+    let video_publisher = Arc::new(video_publisher);
+    let audio_publisher = audio_publisher.map(Arc::new);
 
     // Start MockVideoPublisher frame emission
     let pub_handle = video_publisher.start_publishing(frame_tx_for_publisher.clone());
@@ -646,6 +843,31 @@ async fn run_validation_mode(config: H264PlaybackConfig, config_path: &str) -> R
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_runtime_config_on_target_platform() {
+        // Test runtime configuration based on target architecture
+        let (worker_threads, max_blocking_threads) = get_runtime_config();
+
+        if cfg!(target_arch = "arm") {
+            // Embedded ARM: allow light concurrency for async + blocking work
+            assert_eq!(worker_threads, 2, "ARM target should use 2 worker threads");
+            assert_eq!(
+                max_blocking_threads, 16,
+                "ARM target should use 16 blocking threads"
+            );
+        } else {
+            // Host: should use available parallelism
+            assert!(
+                worker_threads >= 1,
+                "Host should use at least 1 worker thread"
+            );
+            assert_eq!(
+                max_blocking_threads, 512,
+                "Host should use 512 blocking threads"
+            );
+        }
+    }
 
     #[test]
     fn test_normal_mode_config_path() {

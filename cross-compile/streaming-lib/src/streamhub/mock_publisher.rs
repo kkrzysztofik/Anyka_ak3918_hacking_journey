@@ -35,9 +35,14 @@ pub struct MockVideoPublisher {
     is_running: Arc<Mutex<bool>>,
     loop_playback: bool,
     last_timestamp_ms: Arc<AtomicU32>,
+    /// Callback to get current subscriber count for on-demand publishing
+    subscriber_count_fn: Option<Arc<dyn Fn() -> usize + Send + Sync>>,
 }
 
 impl MockVideoPublisher {
+    const DEFAULT_BOOTSTRAP_IDR_SCAN_MAX_BYTES: u64 = 4 * 1024 * 1024;
+    const BOOTSTRAP_IDR_SCAN_MAX_BYTES_ENV: &'static str = "ONVIF_BOOTSTRAP_IDR_SCAN_MAX_BYTES";
+
     /// Create a new mock video publisher from H264 file
     ///
     /// # Arguments
@@ -56,9 +61,9 @@ impl MockVideoPublisher {
         frame_rate: u32,
         loop_playback: bool,
     ) -> Result<Self, PublisherError> {
-        let mut reader = H264FileReader::new(file_path, frame_rate)?;
-        let (sps, pps) = reader.extract_sps_pps()?;
-        let bootstrap_idr = Self::extract_first_idr(&mut reader)?;
+        let mut reader = H264FileReader::new(file_path, frame_rate).await?;
+        let (sps, pps) = reader.extract_sps_pps().await?;
+        let bootstrap_idr = Self::extract_first_idr(&mut reader).await?;
 
         Ok(Self {
             stream_name,
@@ -69,18 +74,73 @@ impl MockVideoPublisher {
             is_running: Arc::new(Mutex::new(false)),
             loop_playback,
             last_timestamp_ms: Arc::new(AtomicU32::new(0)),
+            subscriber_count_fn: None,
         })
     }
 
-    fn extract_first_idr(reader: &mut H264FileReader) -> Result<Option<Vec<u8>>, PublisherError> {
+    /// Set subscriber count callback for on-demand publishing.
+    ///
+    /// When set, the publisher will pause (sleep) when subscriber count is 0,
+    /// reducing CPU usage. Publishing resumes when subscribers connect.
+    ///
+    /// # Arguments
+    ///
+    /// * `callback` - Function that returns the current subscriber count
+    pub fn set_subscriber_count_callback(
+        &mut self,
+        callback: Arc<dyn Fn() -> usize + Send + Sync>,
+    ) {
+        self.subscriber_count_fn = Some(callback);
+    }
+
+    fn bootstrap_idr_scan_max_bytes() -> u64 {
+        std::env::var(Self::BOOTSTRAP_IDR_SCAN_MAX_BYTES_ENV)
+            .ok()
+            .and_then(|value| value.parse::<u64>().ok())
+            .filter(|value| *value > 0)
+            .unwrap_or(Self::DEFAULT_BOOTSTRAP_IDR_SCAN_MAX_BYTES)
+    }
+
+    async fn extract_first_idr(
+        reader: &mut H264FileReader,
+    ) -> Result<Option<Vec<u8>>, PublisherError> {
+        let max_scan_bytes = Self::bootstrap_idr_scan_max_bytes();
+        Self::extract_first_idr_with_limit(reader, max_scan_bytes).await
+    }
+
+    async fn extract_first_idr_with_limit(
+        reader: &mut H264FileReader,
+        max_scan_bytes: u64,
+    ) -> Result<Option<Vec<u8>>, PublisherError> {
         let mut first_idr = None;
-        while let Some(nal) = reader.read_next_nal()? {
-            if nal.unit_type == NalUnitType::IdrSlice {
-                first_idr = Some(nal.data);
+        let mut reached_scan_limit = false;
+        while reader.current_position() < max_scan_bytes {
+            let before = reader.current_position();
+            match reader.read_next_nal().await? {
+                Some(nal) => {
+                    if nal.unit_type == NalUnitType::IdrSlice {
+                        first_idr = Some(nal.data);
+                        break;
+                    }
+                }
+                None => break,
+            }
+            if reader.current_position() <= before {
                 break;
             }
         }
-        reader.reset()?;
+        if first_idr.is_none() && reader.current_position() >= max_scan_bytes {
+            reached_scan_limit = true;
+        }
+        let scanned_bytes = reader.current_position();
+        reader.reset().await?;
+        if reached_scan_limit {
+            log::warn!(
+                "mock_publisher: bootstrap IDR scan reached {} bytes (scanned={}), continuing without bootstrap IDR",
+                max_scan_bytes,
+                scanned_bytes
+            );
+        }
         Ok(first_idr)
     }
 
@@ -101,6 +161,7 @@ impl MockVideoPublisher {
         let _pps = self.pps.clone();
         let loop_playback = self.loop_playback;
         let last_timestamp_ms = Arc::clone(&self.last_timestamp_ms);
+        let subscriber_count_fn = self.subscriber_count_fn.clone();
 
         tokio::spawn(async move {
             {
@@ -119,12 +180,21 @@ impl MockVideoPublisher {
                 }
                 drop(is_running_check);
 
+                // On-demand publishing: pause if no subscribers
+                if let Some(ref get_count) = subscriber_count_fn
+                    && get_count() == 0
+                {
+                    // No subscribers, sleep to reduce CPU usage
+                    tokio::time::sleep(Duration::from_millis(200)).await;
+                    continue;
+                }
+
                 // Read and send NAL units
                 let mut reader = reader.lock().await;
                 let mut frame_count: u32 = 0;
                 let frame_duration_ms = reader.frame_duration_ms();
                 let loop_start = Instant::now();
-                while let Ok(Some(nal)) = reader.read_next_nal() {
+                while let Ok(Some(nal)) = reader.read_next_nal().await {
                     match nal.unit_type {
                         NalUnitType::SequenceParameterSet => {
                             // SPS belongs to the next coded picture's access unit
@@ -222,7 +292,7 @@ impl MockVideoPublisher {
                 timestamp_offset = timestamp_offset.saturating_add(total_time_this_loop);
 
                 // Reset file for next loop
-                if let Err(_e) = reader.reset() {
+                if let Err(_e) = reader.reset().await {
                     break;
                 }
             }
@@ -417,10 +487,21 @@ fn compute_fps(frames: u64, elapsed: Duration) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::{MockVideoPublisher, compute_fps, generate_sdp_from_sps_pps};
+    use crate::codec::h264_file_reader::H264FileReader;
     use crate::streamhub::define::{DataSender, FrameData, SubscribeType, TStreamHandler};
     use portable_atomic::Ordering;
     use std::time::Duration;
     use tokio::sync::mpsc;
+
+    fn annexb_nal(nal: &[u8]) -> Vec<u8> {
+        let mut out = vec![0x00, 0x00, 0x00, 0x01];
+        out.extend_from_slice(nal);
+        out
+    }
+
+    fn temp_h264_path(label: &str) -> String {
+        format!("/tmp/mock_publisher_{}_{}.h264", label, std::process::id())
+    }
 
     #[test]
     fn test_generate_sdp_includes_controls() {
@@ -613,6 +694,87 @@ mod tests {
                 "timestamps regressed: {timestamps:?}"
             );
         }
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[tokio::test]
+    async fn test_mock_video_publisher_new_no_idr_returns_without_timeout() {
+        let path = temp_h264_path("no_idr");
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&annexb_nal(&[0x67, 0x42, 0xE0, 0x1E, 0x89, 0x00])); // SPS
+        bytes.extend_from_slice(&annexb_nal(&[0x68, 0xCE, 0x06, 0xE2, 0x00])); // PPS
+        for _ in 0..512 {
+            bytes.extend_from_slice(&annexb_nal(&[0x41, 0x9A, 0x22, 0x11, 0x00])); // non-IDR
+        }
+        std::fs::write(&path, &bytes).expect("write test h264");
+
+        let publisher = tokio::time::timeout(
+            Duration::from_secs(2),
+            MockVideoPublisher::new("stream1".to_string(), &path, 25, true),
+        )
+        .await
+        .expect("publisher new timeout")
+        .expect("publisher new error");
+
+        assert!(
+            publisher.bootstrap_idr().is_none(),
+            "expected no bootstrap IDR for stream without IDR NAL units"
+        );
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[tokio::test]
+    async fn test_mock_video_publisher_bootstrap_idr_found_within_scan_limit() {
+        let path = temp_h264_path("idr_within_limit");
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&annexb_nal(&[0x67, 0x42, 0xE0, 0x1E, 0x89, 0x00])); // SPS
+        bytes.extend_from_slice(&annexb_nal(&[0x68, 0xCE, 0x06, 0xE2, 0x00])); // PPS
+        bytes.extend_from_slice(&annexb_nal(&[0x41, 0x9A, 0x22, 0x11, 0x00])); // non-IDR
+        bytes.extend_from_slice(&annexb_nal(&[0x65, 0x88, 0x84, 0x21, 0xA0, 0x00])); // IDR
+        std::fs::write(&path, &bytes).expect("write test h264");
+
+        let publisher = MockVideoPublisher::new("stream1".to_string(), &path, 25, true)
+            .await
+            .expect("publisher new");
+        assert!(
+            publisher.bootstrap_idr().is_some(),
+            "expected bootstrap IDR when IDR appears early in stream"
+        );
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[tokio::test]
+    async fn test_mock_video_publisher_bootstrap_idr_skipped_when_beyond_limit() {
+        let path = temp_h264_path("idr_beyond_limit");
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&annexb_nal(&[0x67, 0x42, 0xE0, 0x1E, 0x89, 0x00])); // SPS
+        bytes.extend_from_slice(&annexb_nal(&[0x68, 0xCE, 0x06, 0xE2, 0x00])); // PPS
+        for _ in 0..512 {
+            bytes.extend_from_slice(&annexb_nal(&[0x41, 0x9A, 0x22, 0x11, 0x00])); // non-IDR
+        }
+        bytes.extend_from_slice(&annexb_nal(&[0x65, 0x88, 0x84, 0x21, 0xA0, 0x00])); // IDR (late)
+        std::fs::write(&path, &bytes).expect("write test h264");
+
+        let mut reader = H264FileReader::new(&path, 25).await.expect("reader new");
+        let _ = reader.extract_sps_pps().await.expect("extract_sps_pps");
+        let bootstrap_idr = MockVideoPublisher::extract_first_idr_with_limit(&mut reader, 128)
+            .await
+            .expect("extract_first_idr_with_limit");
+        assert!(
+            bootstrap_idr.is_none(),
+            "expected no bootstrap IDR when scan limit is too small"
+        );
+
+        let publisher = MockVideoPublisher::new("stream1".to_string(), &path, 25, true)
+            .await
+            .expect("publisher new");
+        assert!(
+            publisher.bootstrap_idr().is_some(),
+            "sanity check: default scan limit should still find IDR in this fixture"
+        );
 
         let _ = std::fs::remove_file(&path);
     }

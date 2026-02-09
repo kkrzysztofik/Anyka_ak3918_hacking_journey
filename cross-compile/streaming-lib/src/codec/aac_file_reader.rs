@@ -1,6 +1,6 @@
-use std::fs::File;
-use std::io::{Read, Seek, SeekFrom};
 use thiserror::Error;
+use tokio::fs::File;
+use tokio::io::{AsyncReadExt, AsyncSeekExt, SeekFrom};
 
 /// Errors that can occur while reading AAC files
 #[derive(Error, Debug)]
@@ -68,7 +68,11 @@ pub struct AacFileReader {
 }
 
 impl AacFileReader {
-    const BUFFER_SIZE: usize = 8192; // AAC frames are smaller than H264
+    // Increased from 8192 (8KB) to 65536 (64KB) for Phase 3 optimization:
+    // - AAC frames are smaller (~200-400 bytes), so 64KB covers ~160-320 frames
+    // - Reduces syscalls significantly
+    // - Still modest memory usage (+56KB)
+    const BUFFER_SIZE: usize = 65536;
     const MIN_ADTS_HEADER_SIZE: usize = 7;
 
     /// Sampling rate index mapping (from MPEG-4 AAC spec)
@@ -98,10 +102,10 @@ impl AacFileReader {
     /// # Returns
     ///
     /// Result with AacFileReader or AacFileError
-    pub fn new(file_path: &str, sample_rate: u32) -> Result<Self, AacFileError> {
-        let mut file = File::open(file_path)?;
-        let file_size = file.seek(SeekFrom::End(0))?;
-        file.seek(SeekFrom::Start(0))?;
+    pub async fn new(file_path: &str, sample_rate: u32) -> Result<Self, AacFileError> {
+        let mut file = File::open(file_path).await?;
+        let file_size = file.seek(SeekFrom::End(0)).await?;
+        file.seek(SeekFrom::Start(0)).await?;
 
         // AAC-LC: 1024 samples/frame
         // @ 48kHz: 1024 samples / 48000 Hz * 1000 = ~21.3ms
@@ -131,20 +135,20 @@ impl AacFileReader {
     /// # Returns
     ///
     /// `Option<AacFrame>` if successful, None at EOF, or AacFileError
-    pub fn read_next_frame(&mut self) -> Result<Option<AacFrame>, AacFileError> {
+    pub async fn read_next_frame(&mut self) -> Result<Option<AacFrame>, AacFileError> {
         if self.current_pos >= self.file_size {
             return Ok(None);
         }
 
         // Find ADTS sync word
-        let header_offset = self.find_next_sync_word()?;
+        let header_offset = self.find_next_sync_word().await?;
         if header_offset.is_none() {
             return Ok(None); // EOF
         }
 
         // Read ADTS header (7 or 9 bytes)
         let mut header = vec![0u8; Self::MIN_ADTS_HEADER_SIZE];
-        self.file.read_exact(&mut header)?;
+        self.file.read_exact(&mut header).await?;
         self.current_pos += Self::MIN_ADTS_HEADER_SIZE as u64;
 
         // Validate sync word
@@ -159,7 +163,7 @@ impl AacFileReader {
         // Read CRC if present
         if !protection_absent {
             let mut crc = vec![0u8; 2];
-            self.file.read_exact(&mut crc)?;
+            self.file.read_exact(&mut crc).await?;
             self.current_pos += 2;
         }
 
@@ -178,7 +182,7 @@ impl AacFileReader {
 
         // Read AAC payload
         let mut payload = vec![0u8; payload_size];
-        self.file.read_exact(&mut payload)?;
+        self.file.read_exact(&mut payload).await?;
         self.current_pos += payload_size as u64;
 
         // Extract metadata from ADTS header
@@ -200,6 +204,20 @@ impl AacFileReader {
             .map(|(_, rate)| *rate)
             .unwrap_or(self.sample_rate);
 
+        if self.sample_rate != actual_sample_rate {
+            log::warn!(
+                "aac_file_reader: configured sample_rate={} differs from ADTS sample_rate={}, using ADTS value",
+                self.sample_rate,
+                actual_sample_rate
+            );
+            self.sample_rate = actual_sample_rate;
+            self.frame_duration_ms = if actual_sample_rate > 0 {
+                (1024 * 1000) / actual_sample_rate
+            } else {
+                self.frame_duration_ms
+            };
+        }
+
         Ok(Some(AacFrame {
             data: payload,
             adts_header_size,
@@ -218,7 +236,7 @@ impl AacFileReader {
     /// # Returns
     ///
     /// 2-byte AudioSpecificConfig or error
-    pub fn extract_audio_config(&mut self) -> Result<Vec<u8>, AacFileError> {
+    pub async fn extract_audio_config(&mut self) -> Result<Vec<u8>, AacFileError> {
         // Return cached config if available
         if let Some(ref config) = self.audio_config {
             return Ok(config.clone());
@@ -228,9 +246,12 @@ impl AacFileReader {
         let saved_pos = self.current_pos;
 
         // Reset to beginning and read first frame
-        self.reset()?;
+        self.reset().await?;
 
-        let _frame = self.read_next_frame()?.ok_or(AacFileError::NoFramesFound)?;
+        let _frame = self
+            .read_next_frame()
+            .await?
+            .ok_or(AacFileError::NoFramesFound)?;
 
         // Build AudioSpecificConfig from cached values
         let profile = self.profile.ok_or(AacFileError::InvalidAdtsHeader)?;
@@ -251,7 +272,7 @@ impl AacFileReader {
         self.audio_config = Some(config.clone());
 
         // Restore position
-        self.file.seek(SeekFrom::Start(saved_pos))?;
+        self.file.seek(SeekFrom::Start(saved_pos)).await?;
         self.current_pos = saved_pos;
 
         Ok(config)
@@ -269,8 +290,8 @@ impl AacFileReader {
     }
 
     /// Reset file position to beginning
-    pub fn reset(&mut self) -> Result<(), AacFileError> {
-        self.file.seek(SeekFrom::Start(0))?;
+    pub async fn reset(&mut self) -> Result<(), AacFileError> {
+        self.file.seek(SeekFrom::Start(0)).await?;
         self.current_pos = 0;
         Ok(())
     }
@@ -288,25 +309,32 @@ impl AacFileReader {
     /// Find the next ADTS sync word in the file
     ///
     /// Returns the offset in the buffer where the sync word was found
-    fn find_next_sync_word(&mut self) -> Result<Option<usize>, AacFileError> {
+    async fn find_next_sync_word(&mut self) -> Result<Option<usize>, AacFileError> {
         loop {
-            let bytes_read = self.file.read(&mut self.buffer)?;
+            let bytes_read = self.file.read(&mut self.buffer).await?;
 
             if bytes_read == 0 {
                 return Ok(None); // EOF
             }
 
-            // Search for 0xFFF sync word (12 bits)
-            for i in 0..bytes_read.saturating_sub(1) {
-                if self.buffer[i] == 0xFF && (self.buffer[i + 1] & 0xF0) == 0xF0 {
-                    // Validate layer bits are 00 (bits 5-6 of second byte)
-                    if (self.buffer[i + 1] & 0x06) == 0x00 {
-                        // Seek back to position at sync word
+            // Boyer-Moore-inspired optimization for AAC sync word search
+            // Sync word: 0xFF 0xF? (12 bits), check second byte first
+            let mut i = 0;
+            while i < bytes_read.saturating_sub(1) {
+                // Check second byte first - if high nibble isn't 0xF0, skip ahead
+                if (self.buffer[i + 1] & 0xF0) == 0xF0 {
+                    // Potential sync word - check first byte and layer bits
+                    if self.buffer[i] == 0xFF && (self.buffer[i + 1] & 0x06) == 0x00 {
+                        // Valid sync word found
                         let rewind = (bytes_read - i) as i64;
-                        self.file.seek(SeekFrom::Current(-rewind))?;
+                        self.file.seek(SeekFrom::Current(-rewind)).await?;
                         self.current_pos += i as u64;
                         return Ok(Some(i));
                     }
+                    i += 1; // Move by 1 if pattern doesn't match
+                } else {
+                    // Second byte high nibble isn't 0xF0, skip ahead by 2
+                    i += 2;
                 }
             }
 
@@ -324,12 +352,12 @@ impl AacFileReader {
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_frame_duration_calculation() {
-        let reader = AacFileReader::new("/dev/null", 48000).unwrap();
+    #[tokio::test]
+    async fn test_frame_duration_calculation() {
+        let reader = AacFileReader::new("/dev/null", 48000).await.unwrap();
         assert_eq!(reader.frame_duration_ms(), 21); // 1024/48000 * 1000 = 21.3ms
 
-        let reader = AacFileReader::new("/dev/null", 44100).unwrap();
+        let reader = AacFileReader::new("/dev/null", 44100).await.unwrap();
         assert_eq!(reader.frame_duration_ms(), 23); // 1024/44100 * 1000 = 23.2ms
     }
 
@@ -351,5 +379,25 @@ mod tests {
                 .map(|(_, rate)| *rate),
             Some(44100)
         );
+    }
+
+    #[tokio::test]
+    async fn test_extract_audio_config_updates_sample_rate_from_adts() {
+        let path = format!("/tmp/aac_sample_rate_detect_{}.aac", std::process::id());
+        let bytes: &[u8] = &[
+            0xFF, 0xF1, 0x50, 0x80, 0x01, 0x7F, 0xFC, // ADTS header (AAC-LC, 44.1kHz, stereo)
+            0x00, 0x00, 0x00, 0x00, // payload
+        ];
+        std::fs::write(&path, bytes).expect("write test aac");
+
+        let mut reader = AacFileReader::new(&path, 48_000).await.expect("reader new");
+        let _ = reader.extract_audio_config().await.expect("extract config");
+        assert_eq!(
+            reader.sample_rate(),
+            44_100,
+            "reader should use sample rate from ADTS header"
+        );
+
+        let _ = std::fs::remove_file(&path);
     }
 }

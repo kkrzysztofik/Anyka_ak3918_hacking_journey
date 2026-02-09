@@ -39,6 +39,8 @@ pub struct MockAudioPublisher {
     loop_playback: bool,
     sample_rate: u32,
     last_timestamp_ms: Arc<AtomicU32>,
+    /// Callback to get current subscriber count for on-demand publishing
+    subscriber_count_fn: Option<Arc<dyn Fn() -> usize + Send + Sync>>,
 }
 
 impl MockAudioPublisher {
@@ -60,8 +62,16 @@ impl MockAudioPublisher {
         sample_rate: u32,
         loop_playback: bool,
     ) -> Result<Self, AudioPublisherError> {
-        let mut reader = AacFileReader::new(file_path, sample_rate)?;
-        let audio_config = reader.extract_audio_config()?;
+        let mut reader = AacFileReader::new(file_path, sample_rate).await?;
+        let audio_config = reader.extract_audio_config().await?;
+        let detected_sample_rate = reader.sample_rate();
+        if detected_sample_rate != sample_rate {
+            log::warn!(
+                "mock_audio_publisher: requested sample_rate={} differs from ADTS sample_rate={}, using ADTS value",
+                sample_rate,
+                detected_sample_rate
+            );
+        }
 
         Ok(Self {
             stream_name,
@@ -69,9 +79,25 @@ impl MockAudioPublisher {
             audio_config,
             is_running: Arc::new(Mutex::new(false)),
             loop_playback,
-            sample_rate,
+            sample_rate: detected_sample_rate,
             last_timestamp_ms: Arc::new(AtomicU32::new(0)),
+            subscriber_count_fn: None,
         })
+    }
+
+    /// Set subscriber count callback for on-demand publishing.
+    ///
+    /// When set, the publisher will pause (sleep) when subscriber count is 0,
+    /// reducing CPU usage. Publishing resumes when subscribers connect.
+    ///
+    /// # Arguments
+    ///
+    /// * `callback` - Function that returns the current subscriber count
+    pub fn set_subscriber_count_callback(
+        &mut self,
+        callback: Arc<dyn Fn() -> usize + Send + Sync>,
+    ) {
+        self.subscriber_count_fn = Some(callback);
     }
 
     /// Start publishing frames from the AAC file
@@ -90,6 +116,7 @@ impl MockAudioPublisher {
         let _audio_config = self.audio_config.clone();
         let loop_playback = self.loop_playback;
         let last_timestamp_ms = Arc::clone(&self.last_timestamp_ms);
+        let subscriber_count_fn = self.subscriber_count_fn.clone();
 
         tokio::spawn(async move {
             {
@@ -106,13 +133,22 @@ impl MockAudioPublisher {
                 }
                 drop(is_running_check);
 
+                // On-demand publishing: pause if no subscribers
+                if let Some(ref get_count) = subscriber_count_fn
+                    && get_count() == 0
+                {
+                    // No subscribers, sleep to reduce CPU usage
+                    tokio::time::sleep(Duration::from_millis(200)).await;
+                    continue;
+                }
+
                 // Read and send AAC frames
                 let mut reader = reader.lock().await;
                 let mut frame_count: u32 = 0;
-                let frame_duration_ms = reader.frame_duration_ms();
+                let sample_rate = reader.sample_rate();
                 let loop_start = Instant::now();
 
-                while let Ok(Some(frame)) = reader.read_next_frame() {
+                while let Ok(Some(frame)) = reader.read_next_frame().await {
                     // RTP timestamp in sample units (RFC 3640 Section 3.3)
                     // Each AAC frame = 1024 samples, so timestamp = frame_count * 1024
                     let timestamp = timestamp_offset
@@ -135,8 +171,7 @@ impl MockAudioPublisher {
                     frame_count = frame_count.saturating_add(1);
 
                     // Frame rate control: align to target schedule to avoid drift.
-                    let target_elapsed_ms = frame_count.saturating_mul(frame_duration_ms) as u64;
-                    let target_elapsed = Duration::from_millis(target_elapsed_ms);
+                    let target_elapsed = audio_target_elapsed(frame_count, sample_rate);
                     let elapsed = loop_start.elapsed();
                     if let Some(remaining) = target_elapsed.checked_sub(elapsed) {
                         tokio::time::sleep(remaining).await;
@@ -154,7 +189,7 @@ impl MockAudioPublisher {
                 timestamp_offset = timestamp_offset.saturating_add(total_samples_this_loop);
 
                 // Reset file for next loop
-                if let Err(_e) = reader.reset() {
+                if let Err(_e) = reader.reset().await {
                     break;
                 }
             }
@@ -293,6 +328,19 @@ fn generate_sdp_from_audio_config(audio_config: &[u8], sample_rate: u32) -> Stri
     )
 }
 
+fn audio_target_elapsed(frame_count: u32, sample_rate: u32) -> Duration {
+    if frame_count == 0 || sample_rate == 0 {
+        return Duration::from_nanos(0);
+    }
+
+    let elapsed_nanos = (u128::from(frame_count))
+        .saturating_mul(u128::from(AAC_SAMPLES_PER_FRAME))
+        .saturating_mul(1_000_000_000u128)
+        / u128::from(sample_rate);
+    let elapsed_nanos_u64 = u64::try_from(elapsed_nanos).unwrap_or(u64::MAX);
+    Duration::from_nanos(elapsed_nanos_u64)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -400,6 +448,23 @@ mod tests {
     fn test_aac_samples_per_frame_constant() {
         // Verify the constant is correct for AAC-LC
         assert_eq!(AAC_SAMPLES_PER_FRAME, 1024);
+    }
+
+    #[test]
+    fn test_audio_target_elapsed_uses_sample_accurate_timing() {
+        assert_eq!(audio_target_elapsed(0, 48_000), Duration::from_nanos(0));
+        assert_eq!(
+            audio_target_elapsed(1, 48_000),
+            Duration::from_nanos(21_333_333)
+        );
+        assert_eq!(
+            audio_target_elapsed(3, 48_000),
+            Duration::from_nanos(64_000_000)
+        );
+        assert_eq!(
+            audio_target_elapsed(1, 44_100),
+            Duration::from_nanos(23_219_954)
+        );
     }
 
     #[tokio::test]
