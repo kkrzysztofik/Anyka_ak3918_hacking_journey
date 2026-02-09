@@ -95,12 +95,14 @@ gdb ../cross-compile/onvif/out/onvifd_debug ../debugging/coredump/core.*
 
 ### 4. `third_party/build_dropbear.sh` - Build Dropbear for SD Overlay
 Cross-builds Dropbear for ARM/uClibc and stages `dropbearmulti` in `SD_card_contents/anyka_hack/dropbear/`.
+Default link mode is `static` (recommended for device compatibility). Use `--link-mode dynamic` only if required.
 
 **Usage:**
 ```bash
 ./third_party/build_dropbear.sh
 ./third_party/build_dropbear.sh --version 2024.86 --sha256 e78936dffc395f2e0db099321d6be659190966b99712b55c530dd0a1822e0a5e
 ./third_party/build_dropbear.sh --archive /path/to/dropbear-2024.86.tar.bz2 --sha256 e78936dffc395f2e0db099321d6be659190966b99712b55c530dd0a1822e0a5e
+./third_party/build_dropbear.sh --link-mode dynamic
 ```
 
 ### 5. `third_party/build_htop.sh` - Build htop for SD Overlay

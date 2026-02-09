@@ -17,6 +17,7 @@ url=""
 archive_override=""
 toolchain_dir="${REPO_ROOT}/toolchain/arm-anykav200-crosstool-ng"
 target_triple="arm-unknown-linux-uclibcgnueabi"
+link_mode="static"
 output_dir="${REPO_ROOT}/SD_card_contents/anyka_hack/dropbear"
 output_lib_dir="${REPO_ROOT}/SD_card_contents/anyka_hack/lib"
 work_root="${REPO_ROOT}/target/third_party/dropbear"
@@ -32,6 +33,7 @@ Options:
   --archive <path>      Use existing source archive instead of downloading
   --toolchain-dir <p>   Toolchain base path
   --target <triple>     Target triple (default: ${target_triple})
+  --link-mode <mode>    Link mode: static|dynamic (default: ${link_mode})
   --output-dir <p>      Output directory (default: ${output_dir})
   --output-lib-dir <p>  Runtime lib output directory (default: ${output_lib_dir})
   --work-root <p>       Build working root (default: ${work_root})
@@ -69,6 +71,10 @@ while [ "$#" -gt 0 ]; do
       target_triple="$2"
       shift 2
       ;;
+    --link-mode)
+      link_mode="$2"
+      shift 2
+      ;;
     --output-dir)
       output_dir="$2"
       shift 2
@@ -104,6 +110,11 @@ fi
 
 if [ ! -d "${toolchain_dir}" ]; then
   echo "ERROR: toolchain not found: ${toolchain_dir}" >&2
+  exit 1
+fi
+
+if [ "${link_mode}" != "static" ] && [ "${link_mode}" != "dynamic" ]; then
+  echo "ERROR: --link-mode must be one of: static, dynamic" >&2
   exit 1
 fi
 
@@ -157,14 +168,22 @@ export AR="${target_triple}-ar"
 export RANLIB="${target_triple}-ranlib"
 export STRIP="${target_triple}-strip"
 export CPPFLAGS="--sysroot=${sysroot} -I${sysroot}/usr/include"
-export LDFLAGS="--sysroot=${sysroot} -L${sysroot}/usr/lib -L${sysroot}/lib"
+export CFLAGS="${CFLAGS:-} --sysroot=${sysroot} -fno-pie"
+export CXXFLAGS="${CXXFLAGS:-} --sysroot=${sysroot} -fno-pie"
+base_ldflags="--sysroot=${sysroot} -L${sysroot}/usr/lib -L${sysroot}/lib -no-pie"
+if [ "${link_mode}" = "static" ]; then
+  export LDFLAGS="${base_ldflags} -static"
+else
+  export LDFLAGS="${base_ldflags}"
+fi
 
 cd "${source_dir}"
 
-echo "Configuring dropbear ${version}..."
+echo "Configuring dropbear ${version} (link mode: ${link_mode})..."
 ./configure \
   --host="${target_triple}" \
   --prefix=/usr \
+  --disable-harden \
   --disable-zlib \
   --disable-lastlog \
   --disable-utmp \
@@ -192,6 +211,10 @@ file "${output_dir}/dropbearmulti"
 "${target_triple}-readelf" -h "${output_dir}/dropbearmulti" | sed -n '1,20p'
 
 if "${target_triple}-readelf" -d "${output_dir}/dropbearmulti" 2>/dev/null | grep -q NEEDED; then
+  if [ "${link_mode}" = "static" ]; then
+    echo "ERROR: static link mode requested but dynamic dependencies are still present" >&2
+    exit 1
+  fi
   echo "Dynamic dependencies detected; bundling from sysroot into ${output_lib_dir}"
   needed_libs="$("${target_triple}-readelf" -d "${output_dir}/dropbearmulti" 2>/dev/null | awk '/NEEDED/ { gsub(/\[|\]/, "", $5); print $5 }')"
   for needed in ${needed_libs}; do

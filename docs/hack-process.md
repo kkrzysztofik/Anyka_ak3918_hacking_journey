@@ -262,6 +262,7 @@ Host-side build helpers:
 ```
 
 If your build host is offline, use `--archive /path/to/source.tar.*` together with `--sha256`.
+Dropbear is built static by default to avoid runtime uClibc loader mismatches on older camera firmware.
 
 After copying `SD_card_contents/anyka_hack` to the SD card and booting, SSH is served by Dropbear from `/mnt/anyka_hack/dropbear`.
 

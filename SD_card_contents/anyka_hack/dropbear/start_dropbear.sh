@@ -2,10 +2,40 @@
 # Start Dropbear SSH service for Anyka SD overlay.
 
 LOG_FILE="dropbear.log"
-[ -f /mnt/anyka_hack/init_logs.sh ] && . /mnt/anyka_hack/init_logs.sh
-[ -f /mnt/anyka_hack/common.sh ] && . /mnt/anyka_hack/common.sh
+SCRIPT_DIR="$(CDPATH= cd -- "$(dirname "$0")" && pwd)"
 
-DROPBEAR_DIR="/mnt/anyka_hack/dropbear"
+INIT_LOGS_PATH=""
+for candidate in "/mnt/anyka_hack/init_logs.sh" "${SCRIPT_DIR}/../init_logs.sh"; do
+  if [ -f "$candidate" ]; then
+    INIT_LOGS_PATH="$candidate"
+    break
+  fi
+done
+[ -n "$INIT_LOGS_PATH" ] && . "$INIT_LOGS_PATH"
+
+COMMON_SH_PATH=""
+for candidate in "/mnt/anyka_hack/common.sh" "${SCRIPT_DIR}/../common.sh"; do
+  if [ -f "$candidate" ]; then
+    COMMON_SH_PATH="$candidate"
+    break
+  fi
+done
+
+if [ -z "$COMMON_SH_PATH" ]; then
+  echo "[ERROR] Required helper script not found: common.sh" >&2
+  exit 1
+fi
+
+. "$COMMON_SH_PATH"
+
+if ! command -v log >/dev/null 2>&1 || ! command -v is_process_running >/dev/null 2>&1; then
+  echo "[ERROR] common.sh loaded but required helpers are missing (log, is_process_running)" >&2
+  exit 1
+fi
+
+ANYKA_HACK_DIR="$(dirname "$COMMON_SH_PATH")"
+DROPBEAR_DIR="${ANYKA_HACK_DIR}/dropbear"
+LIB_DIR="${ANYKA_HACK_DIR}/lib"
 DROPBEAR_MULTI="${DROPBEAR_DIR}/dropbearmulti"
 DROPBEAR_BIN="${DROPBEAR_DIR}/dropbear"
 DROPBEARKEY_BIN="${DROPBEAR_DIR}/dropbearkey"
@@ -19,6 +49,14 @@ SSH_HOST_KEY_PATH="${3:-/mnt/anyka_hack/dropbear/dropbear_ecdsa_host_key}"
 SSH_AUTHORIZED_KEYS_PATH="${4:-/data/.ssh/authorized_keys}"
 
 mkdir -p /mnt/tmp /mnt/logs 2>/dev/null || true
+
+if [ -d "$LIB_DIR" ]; then
+  if [ -n "${LD_LIBRARY_PATH:-}" ]; then
+    export LD_LIBRARY_PATH="${LIB_DIR}:${LD_LIBRARY_PATH}"
+  else
+    export LD_LIBRARY_PATH="${LIB_DIR}"
+  fi
+fi
 
 if [ ! -x "$DROPBEAR_MULTI" ]; then
   log ERROR "Dropbear binary missing or not executable: $DROPBEAR_MULTI"
