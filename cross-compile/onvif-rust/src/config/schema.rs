@@ -483,6 +483,11 @@ impl ConfigSchema {
                 "Enable verbose HTTP request/response logging",
             ))
             .param(ConfigParameter::bool(
+                "logging.stream_frame_debug",
+                false,
+                "Enable per-frame streaming debug logs (high overhead)",
+            ))
+            .param(ConfigParameter::bool(
                 "logging.console_enabled",
                 true,
                 "Enable console logging",
@@ -797,6 +802,10 @@ mod tests {
         let param = schema.get_parameter("server.port");
         assert!(param.is_some());
         assert_eq!(param.unwrap().value_type, ConfigValueType::Int);
+
+        let per_frame = schema.get_parameter("logging.stream_frame_debug");
+        assert!(per_frame.is_some());
+        assert_eq!(per_frame.unwrap().value_type, ConfigValueType::Bool);
     }
 
     #[test]

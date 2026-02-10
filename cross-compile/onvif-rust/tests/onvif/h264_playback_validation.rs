@@ -108,7 +108,7 @@ mod tests {
 
         let test_file = setup_test_h264_file();
 
-        let publisher = MockVideoPublisher::new("test_stream".to_string(), &test_file, 25, false)
+        let publisher = MockVideoPublisher::new("test_stream".to_string(), &test_file, 25, true)
             .await
             .unwrap();
 
@@ -158,7 +158,7 @@ mod tests {
             .unwrap();
 
         // Create frame receiver for prior data
-        let (sender, mut receiver) = mpsc::unbounded_channel();
+        let (sender, _receiver) = mpsc::unbounded_channel();
         let data_sender = DataSender::Frame { sender };
 
         // Call send_prior_data
@@ -291,12 +291,21 @@ mod tests {
         assert!(!publisher.is_publishing().await);
 
         // Start publishing
-        let (sender, _receiver) = mpsc::unbounded_channel();
+        let (sender, mut receiver) = mpsc::unbounded_channel();
         let handle = publisher.start_publishing(sender);
 
-        // Small delay to allow task to start
-        tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
-        assert!(publisher.is_publishing().await);
+        // Poll briefly until task enters running state.
+        let started = tokio::time::timeout(tokio::time::Duration::from_millis(200), async {
+            loop {
+                if publisher.is_publishing().await {
+                    break true;
+                }
+                tokio::time::sleep(tokio::time::Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .unwrap_or(false);
+        assert!(started);
 
         // Stop publishing
         publisher.stop_publishing().await;

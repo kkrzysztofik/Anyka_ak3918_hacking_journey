@@ -57,12 +57,14 @@ impl RtpAacPacker {
 #[async_trait]
 impl TPacker for RtpAacPacker {
     async fn pack(&mut self, data: &mut BytesMut, timestamp: u32) -> Result<(), PackerError> {
-        log::debug!(
-            "RtpAacPacker::pack: timestamp={} data_len={} seq={}",
-            timestamp,
-            data.len(),
-            self.header.seq_number
-        );
+        if crate::stream_frame_debug_logging_enabled() {
+            log::debug!(
+                "RtpAacPacker::pack: timestamp={} data_len={} seq={}",
+                timestamp,
+                data.len(),
+                self.header.seq_number
+            );
+        }
         self.header.timestamp = timestamp;
 
         let data_len = data.len();

@@ -170,9 +170,30 @@ fi
 # Copy binary to deployment directory
 DEPLOY_DIR="${REPO_ROOT}/SD_card_contents/anyka_hack/onvif"
 mkdir -p "${DEPLOY_DIR}"
-cp "${BINARY_PATH}" "${DEPLOY_DIR}/onvif-rust"
+cp "${BINARY_PATH}" "${DEPLOY_DIR}/onvif-rust.bin"
+chmod 755 "${DEPLOY_DIR}/onvif-rust.bin"
+
+cat > "${DEPLOY_DIR}/onvif-rust" <<'EOF'
+#!/bin/sh
+# Launcher for ONVIF Rust server with explicit runtime library path.
+
+SCRIPT_DIR="$(CDPATH= cd -- "$(dirname "$0")" && pwd)"
+ANYKA_HACK_DIR="$(dirname "$SCRIPT_DIR")"
+LIB1="${ANYKA_HACK_DIR}/lib"
+LIB2="${SCRIPT_DIR}/lib"
+
+if [ -n "${LD_LIBRARY_PATH:-}" ]; then
+  export LD_LIBRARY_PATH="${LIB1}:${LIB2}:${LD_LIBRARY_PATH}"
+else
+  export LD_LIBRARY_PATH="${LIB1}:${LIB2}"
+fi
+
+exec "${SCRIPT_DIR}/onvif-rust.bin" "$@"
+EOF
 chmod 755 "${DEPLOY_DIR}/onvif-rust"
-log_success "Binary copied to deployment directory: ${DEPLOY_DIR}/onvif-rust"
+log_success "Binary and launcher copied to deployment directory:"
+log_info "  - ${DEPLOY_DIR}/onvif-rust.bin"
+log_info "  - ${DEPLOY_DIR}/onvif-rust"
 
 echo ""
 log_info "To verify the binary, run:"

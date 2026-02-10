@@ -19,10 +19,12 @@ pub mod codec;
 pub mod common;
 pub mod container;
 pub mod httpflv;
+mod logging_flags;
 pub mod rtsp;
 pub mod streamhub;
 
 // Re-export key types from RTSP
+pub use logging_flags::{set_stream_frame_debug_logging, stream_frame_debug_logging_enabled};
 pub use rtsp::session::client_session::RtspClientSession;
 pub use rtsp::session::server_session::RtspServerSession;
 pub use rtsp::{DefaultRtspServer, RtspServer};

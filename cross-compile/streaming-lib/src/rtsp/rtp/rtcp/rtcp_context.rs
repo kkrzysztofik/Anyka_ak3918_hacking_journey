@@ -140,10 +140,15 @@ impl RtcpContext {
         buf.extend_from_slice(name.as_bytes());
 
         RtcpApp {
+            header: RtcpHeader {
+                // RFC 3550 section 6.1: all RTCP packets use version 2.
+                version: 2,
+                payload_type: super::RTCP_APP,
+                ..Default::default()
+            },
             ssrc: self.ssrc,
             name: buf,
             app_data: data,
-            ..Default::default()
         }
     }
 
@@ -151,7 +156,10 @@ impl RtcpContext {
         let ssrcs = vec![self.ssrc];
         RtcpBye {
             header: RtcpHeader {
+                // RFC 3550 section 6.1: all RTCP packets use version 2.
+                version: 2,
                 report_count: 1,
+                payload_type: super::RTCP_BYE,
                 ..Default::default()
             },
             ssrcs,
@@ -222,11 +230,12 @@ impl RtcpContext {
 
         RtcpSenderReport {
             header: RtcpHeader {
+                // RFC 3550 section 6.1: all RTCP packets use version 2.
+                version: 2,
                 padding_flag: 0,
                 report_count: 0,
                 payload_type: super::RTCP_SR,
                 length: (4 + 24) / 4, // 4 bytes header + 24 bytes sender info, divided by 4
-                ..Default::default()
             },
             ssrc: self.ssrc,
             ntp,
@@ -395,6 +404,16 @@ mod tests {
         assert_eq!(rr.header.report_count, 1);
         assert_eq!(rr.header.version, 2);
         assert_eq!(rr.report_blocks.len(), 1);
+    }
+
+    #[test]
+    fn test_generate_sr_header_fields_match_rfc3550() {
+        let mut ctx = RtcpContext::new(12345, 100, 48_000);
+        let sr = ctx.generate_sr();
+
+        assert_eq!(sr.header.version, 2);
+        assert_eq!(sr.header.payload_type, crate::rtsp::rtp::rtcp::RTCP_SR);
+        assert_eq!(sr.header.report_count, 0);
     }
 
     // ========== send_rtp Tests ==========

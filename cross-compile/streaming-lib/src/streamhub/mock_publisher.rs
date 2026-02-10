@@ -32,6 +32,8 @@ pub struct MockVideoPublisher {
     sps: Vec<u8>,
     pps: Vec<u8>,
     bootstrap_idr: Option<Vec<u8>>,
+    access_units_cache: Option<Arc<Vec<Vec<u8>>>>,
+    frame_duration_ms: u32,
     is_running: Arc<Mutex<bool>>,
     loop_playback: bool,
     last_timestamp_ms: Arc<AtomicU32>,
@@ -42,6 +44,8 @@ pub struct MockVideoPublisher {
 impl MockVideoPublisher {
     const DEFAULT_BOOTSTRAP_IDR_SCAN_MAX_BYTES: u64 = 4 * 1024 * 1024;
     const BOOTSTRAP_IDR_SCAN_MAX_BYTES_ENV: &'static str = "ONVIF_BOOTSTRAP_IDR_SCAN_MAX_BYTES";
+    const DEFAULT_ACCESS_UNITS_CACHE_MAX_BYTES: u64 = 8 * 1024 * 1024;
+    const ACCESS_UNITS_CACHE_MAX_BYTES_ENV: &'static str = "ONVIF_ACCESS_UNITS_CACHE_MAX_BYTES";
 
     /// Create a new mock video publisher from H264 file
     ///
@@ -62,8 +66,10 @@ impl MockVideoPublisher {
         loop_playback: bool,
     ) -> Result<Self, PublisherError> {
         let mut reader = H264FileReader::new(file_path, frame_rate).await?;
+        let frame_duration_ms = reader.frame_duration_ms();
         let (sps, pps) = reader.extract_sps_pps().await?;
         let bootstrap_idr = Self::extract_first_idr(&mut reader).await?;
+        let access_units_cache = Self::try_build_access_units_cache(file_path, &mut reader).await?;
 
         Ok(Self {
             stream_name,
@@ -71,6 +77,8 @@ impl MockVideoPublisher {
             sps,
             pps,
             bootstrap_idr,
+            access_units_cache,
+            frame_duration_ms,
             is_running: Arc::new(Mutex::new(false)),
             loop_playback,
             last_timestamp_ms: Arc::new(AtomicU32::new(0)),
@@ -99,6 +107,74 @@ impl MockVideoPublisher {
             .and_then(|value| value.parse::<u64>().ok())
             .filter(|value| *value > 0)
             .unwrap_or(Self::DEFAULT_BOOTSTRAP_IDR_SCAN_MAX_BYTES)
+    }
+
+    fn access_units_cache_max_bytes() -> u64 {
+        std::env::var(Self::ACCESS_UNITS_CACHE_MAX_BYTES_ENV)
+            .ok()
+            .and_then(|value| value.parse::<u64>().ok())
+            .filter(|value| *value > 0)
+            .unwrap_or(Self::DEFAULT_ACCESS_UNITS_CACHE_MAX_BYTES)
+    }
+
+    async fn try_build_access_units_cache(
+        file_path: &str,
+        reader: &mut H264FileReader,
+    ) -> Result<Option<Arc<Vec<Vec<u8>>>>, PublisherError> {
+        let file_size = std::fs::metadata(file_path)
+            .map(|meta| meta.len())
+            .unwrap_or(u64::MAX);
+        let max_cache_bytes = Self::access_units_cache_max_bytes();
+        if file_size > max_cache_bytes {
+            reader.reset().await?;
+            return Ok(None);
+        }
+
+        let access_units = Self::collect_access_units(reader).await?;
+        if access_units.is_empty() {
+            return Ok(None);
+        }
+
+        let total_bytes: usize = access_units.iter().map(Vec::len).sum();
+        log::info!(
+            "mock_publisher: access-unit cache enabled (frames={} bytes={} source_bytes={})",
+            access_units.len(),
+            total_bytes,
+            file_size
+        );
+        Ok(Some(Arc::new(access_units)))
+    }
+
+    async fn collect_access_units(
+        reader: &mut H264FileReader,
+    ) -> Result<Vec<Vec<u8>>, PublisherError> {
+        let mut access_units = Vec::new();
+        let mut pending_access_unit = BytesMut::new();
+
+        while let Ok(Some(nal)) = reader.read_next_nal().await {
+            match nal.unit_type {
+                NalUnitType::SequenceParameterSet | NalUnitType::PictureParameterSet => {
+                    if !pending_access_unit.is_empty() {
+                        access_units.push(std::mem::take(&mut pending_access_unit).to_vec());
+                    }
+                }
+                NalUnitType::IdrSlice | NalUnitType::NonIdrSlice => {
+                    let first_slice_of_picture = is_first_vcl_slice(&nal.data);
+                    if first_slice_of_picture && !pending_access_unit.is_empty() {
+                        access_units.push(std::mem::take(&mut pending_access_unit).to_vec());
+                    }
+                    append_annexb_nal(&mut pending_access_unit, &nal.data);
+                }
+                _ => {}
+            }
+        }
+
+        if !pending_access_unit.is_empty() {
+            access_units.push(std::mem::take(&mut pending_access_unit).to_vec());
+        }
+
+        reader.reset().await?;
+        Ok(access_units)
     }
 
     async fn extract_first_idr(
@@ -155,11 +231,13 @@ impl MockVideoPublisher {
     /// Tokio join handle for the publishing task
     pub fn start_publishing(&self, sender: FrameDataSender) -> tokio::task::JoinHandle<()> {
         let reader = Arc::clone(&self.reader);
+        let access_units_cache = self.access_units_cache.clone();
         let is_running = Arc::clone(&self.is_running);
         let _stream_name = self.stream_name.clone();
         let _sps = self.sps.clone();
         let _pps = self.pps.clone();
         let loop_playback = self.loop_playback;
+        let frame_duration_ms = self.frame_duration_ms;
         let last_timestamp_ms = Arc::clone(&self.last_timestamp_ms);
         let subscriber_count_fn = self.subscriber_count_fn.clone();
 
@@ -189,14 +267,90 @@ impl MockVideoPublisher {
                     continue;
                 }
 
+                if let Some(access_units) = access_units_cache.as_ref() {
+                    let mut frame_count: u32 = 0;
+                    let frame_interval = Duration::from_millis(frame_duration_ms as u64);
+                    let mut next_send_deadline: Option<Instant> = None;
+                    let mut interrupted_for_zero_subscribers = false;
+
+                    for access_unit in access_units.iter() {
+                        if let Some(ref get_count) = subscriber_count_fn
+                            && get_count() == 0
+                        {
+                            interrupted_for_zero_subscribers = true;
+                            break;
+                        }
+
+                        let timestamp = timestamp_offset
+                            .saturating_add(frame_count.saturating_mul(frame_duration_ms));
+                        if !send_access_unit(
+                            &sender,
+                            BytesMut::from(access_unit.as_slice()),
+                            timestamp,
+                            frame_interval,
+                            &mut next_send_deadline,
+                            &last_timestamp_ms,
+                            frame_count,
+                            &mut frames_since_report,
+                            &mut last_report,
+                        )
+                        .await
+                        {
+                            return;
+                        }
+                        frame_count = frame_count.saturating_add(1);
+                    }
+
+                    if interrupted_for_zero_subscribers {
+                        continue;
+                    }
+
+                    if !loop_playback {
+                        break;
+                    }
+
+                    let total_time_this_loop = frame_count.saturating_mul(frame_duration_ms);
+                    timestamp_offset = timestamp_offset.saturating_add(total_time_this_loop);
+                    continue;
+                }
+
                 // Read and send NAL units
                 let mut reader = reader.lock().await;
                 let mut frame_count: u32 = 0;
-                let frame_duration_ms = reader.frame_duration_ms();
-                let loop_start = Instant::now();
+                let frame_interval = Duration::from_millis(frame_duration_ms as u64);
+                let mut next_send_deadline: Option<Instant> = None;
+                let mut interrupted_for_zero_subscribers = false;
+                let mut pending_access_unit = BytesMut::new();
+                let mut pending_access_unit_timestamp: Option<u32> = None;
                 while let Ok(Some(nal)) = reader.read_next_nal().await {
+                    if let Some(ref get_count) = subscriber_count_fn
+                        && get_count() == 0
+                    {
+                        interrupted_for_zero_subscribers = true;
+                        break;
+                    }
+
                     match nal.unit_type {
                         NalUnitType::SequenceParameterSet => {
+                            if let Some(timestamp) = pending_access_unit_timestamp.take() {
+                                if !send_access_unit(
+                                    &sender,
+                                    std::mem::take(&mut pending_access_unit),
+                                    timestamp,
+                                    frame_interval,
+                                    &mut next_send_deadline,
+                                    &last_timestamp_ms,
+                                    frame_count,
+                                    &mut frames_since_report,
+                                    &mut last_report,
+                                )
+                                .await
+                                {
+                                    return;
+                                }
+                                frame_count = frame_count.saturating_add(1);
+                            }
+
                             // SPS belongs to the next coded picture's access unit
                             // Use timestamp of current frame_count (will be used by next VCL NAL)
                             let timestamp = timestamp_offset
@@ -204,81 +358,119 @@ impl MockVideoPublisher {
                             let data = BytesMut::from(nal.data.as_slice());
                             let frame = FrameData::Video { timestamp, data };
                             let _ = sender.send(frame);
-                            log::debug!(
-                                "mock_publisher: SPS frame_count={} timestamp={} ({}ms)",
-                                frame_count,
-                                timestamp,
-                                timestamp
-                            );
+                            if crate::stream_frame_debug_logging_enabled() {
+                                log::debug!(
+                                    "mock_publisher: SPS frame_count={} timestamp={} ({}ms)",
+                                    frame_count,
+                                    timestamp,
+                                    timestamp
+                                );
+                            }
                         }
                         NalUnitType::PictureParameterSet => {
+                            if let Some(timestamp) = pending_access_unit_timestamp.take() {
+                                if !send_access_unit(
+                                    &sender,
+                                    std::mem::take(&mut pending_access_unit),
+                                    timestamp,
+                                    frame_interval,
+                                    &mut next_send_deadline,
+                                    &last_timestamp_ms,
+                                    frame_count,
+                                    &mut frames_since_report,
+                                    &mut last_report,
+                                )
+                                .await
+                                {
+                                    return;
+                                }
+                                frame_count = frame_count.saturating_add(1);
+                            }
+
                             // PPS uses same timestamp as associated coded picture
                             let timestamp = timestamp_offset
                                 .saturating_add(frame_count.saturating_mul(frame_duration_ms));
                             let data = BytesMut::from(nal.data.as_slice());
                             let frame = FrameData::Video { timestamp, data };
                             let _ = sender.send(frame);
-                            log::debug!(
-                                "mock_publisher: PPS frame_count={} timestamp={} ({}ms)",
-                                frame_count,
-                                timestamp,
-                                timestamp
-                            );
+                            if crate::stream_frame_debug_logging_enabled() {
+                                log::debug!(
+                                    "mock_publisher: PPS frame_count={} timestamp={} ({}ms)",
+                                    frame_count,
+                                    timestamp,
+                                    timestamp
+                                );
+                            }
                         }
                         NalUnitType::IdrSlice | NalUnitType::NonIdrSlice => {
-                            // RFC 6184: Each VCL NAL unit in typical encodings represents one access unit
-                            // All NAL units of the same access unit share the same RTP timestamp
-                            let timestamp = timestamp_offset
-                                .saturating_add(frame_count.saturating_mul(frame_duration_ms));
-                            let data = BytesMut::from(nal.data.as_slice());
-                            let frame = FrameData::Video { timestamp, data };
-
-                            if sender.send(frame).is_err() {
-                                return;
+                            let first_slice_of_picture = is_first_vcl_slice(&nal.data);
+                            if first_slice_of_picture
+                                && let Some(timestamp) = pending_access_unit_timestamp.take()
+                            {
+                                if !send_access_unit(
+                                    &sender,
+                                    std::mem::take(&mut pending_access_unit),
+                                    timestamp,
+                                    frame_interval,
+                                    &mut next_send_deadline,
+                                    &last_timestamp_ms,
+                                    frame_count,
+                                    &mut frames_since_report,
+                                    &mut last_report,
+                                )
+                                .await
+                                {
+                                    return;
+                                }
+                                frame_count = frame_count.saturating_add(1);
                             }
-                            last_timestamp_ms.store(timestamp, Ordering::Relaxed);
 
-                            log::debug!(
-                                "mock_publisher: {} frame_count={} timestamp={} ({}ms)",
-                                if matches!(nal.unit_type, NalUnitType::IdrSlice) {
-                                    "IDR"
-                                } else {
-                                    "NonIDR"
-                                },
-                                frame_count,
-                                timestamp,
-                                timestamp
-                            );
-
-                            // Increment frame counter for next access unit
-                            frame_count = frame_count.saturating_add(1);
-                            frames_since_report += 1;
-
-                            let elapsed = last_report.elapsed();
-                            if elapsed >= Duration::from_secs(1) {
-                                let fps = compute_fps(frames_since_report, elapsed);
-                                log::info!(
-                                    "mock_publisher: sent {} frames in {:.2}s ({:.2} fps)",
-                                    frames_since_report,
-                                    elapsed.as_secs_f64(),
-                                    fps
+                            let timestamp =
+                                pending_access_unit_timestamp.get_or_insert_with(|| {
+                                    timestamp_offset.saturating_add(
+                                        frame_count.saturating_mul(frame_duration_ms),
+                                    )
+                                });
+                            append_annexb_nal(&mut pending_access_unit, &nal.data);
+                            if crate::stream_frame_debug_logging_enabled() {
+                                log::debug!(
+                                    "mock_publisher: {} frame_count={} timestamp={} first_slice={}",
+                                    if matches!(nal.unit_type, NalUnitType::IdrSlice) {
+                                        "IDR"
+                                    } else {
+                                        "NonIDR"
+                                    },
+                                    frame_count,
+                                    *timestamp,
+                                    first_slice_of_picture
                                 );
-                                frames_since_report = 0;
-                                last_report = Instant::now();
-                            }
-
-                            // Frame rate control: align to target schedule to avoid drift.
-                            // Only sleep after completing an entire access unit
-                            let target_elapsed_ms =
-                                frame_count.saturating_mul(frame_duration_ms) as u64;
-                            let target_elapsed = Duration::from_millis(target_elapsed_ms);
-                            let elapsed = loop_start.elapsed();
-                            if let Some(remaining) = target_elapsed.checked_sub(elapsed) {
-                                tokio::time::sleep(remaining).await;
                             }
                         }
                         _ => {}
                     }
+                }
+
+                if let Some(timestamp) = pending_access_unit_timestamp.take() {
+                    if !send_access_unit(
+                        &sender,
+                        std::mem::take(&mut pending_access_unit),
+                        timestamp,
+                        frame_interval,
+                        &mut next_send_deadline,
+                        &last_timestamp_ms,
+                        frame_count,
+                        &mut frames_since_report,
+                        &mut last_report,
+                    )
+                    .await
+                    {
+                        return;
+                    }
+                    frame_count = frame_count.saturating_add(1);
+                }
+
+                if interrupted_for_zero_subscribers {
+                    continue;
                 }
 
                 if !loop_playback {
@@ -440,6 +632,193 @@ fn generate_sdp_from_sps_pps(sps: &[u8], pps: &[u8]) -> String {
     sdp
 }
 
+#[allow(clippy::too_many_arguments)]
+async fn send_access_unit(
+    sender: &FrameDataSender,
+    data: BytesMut,
+    timestamp: u32,
+    frame_interval: Duration,
+    next_send_deadline: &mut Option<Instant>,
+    last_timestamp_ms: &AtomicU32,
+    frame_count: u32,
+    frames_since_report: &mut u64,
+    last_report: &mut Instant,
+) -> bool {
+    if data.is_empty() {
+        return true;
+    }
+    let access_unit_size = data.len();
+
+    // Pace against an absolute deadline sequence. This compensates for timer
+    // quantization on embedded kernels and keeps average FPS close to target.
+    if !frame_interval.is_zero()
+        && let Some(deadline) = *next_send_deadline
+    {
+        let now = Instant::now();
+        if let Some(remaining) = deadline.checked_duration_since(now) {
+            tokio::time::sleep(remaining).await;
+        }
+    }
+
+    if sender.send(FrameData::Video { timestamp, data }).is_err() {
+        return false;
+    }
+
+    if !frame_interval.is_zero() {
+        let now = Instant::now();
+        let mut next = (*next_send_deadline)
+            .map(|deadline| deadline + frame_interval)
+            .unwrap_or_else(|| now + frame_interval);
+        // If we are more than one frame behind, resync to avoid sustained catch-up bursts.
+        if now > next + frame_interval {
+            next = now + frame_interval;
+        }
+        *next_send_deadline = Some(next);
+    }
+
+    last_timestamp_ms.store(timestamp, Ordering::Relaxed);
+    *frames_since_report += 1;
+
+    if crate::stream_frame_debug_logging_enabled() {
+        log::debug!(
+            "mock_publisher: access_unit frame_count={} timestamp={} bytes={}",
+            frame_count,
+            timestamp,
+            access_unit_size
+        );
+    }
+
+    let elapsed = last_report.elapsed();
+    if elapsed >= Duration::from_secs(1) {
+        let fps = compute_fps(*frames_since_report, elapsed);
+        log::debug!(
+            "mock_publisher: sent {} frames in {:.2}s ({:.2} fps)",
+            *frames_since_report,
+            elapsed.as_secs_f64(),
+            fps
+        );
+        *frames_since_report = 0;
+        *last_report = Instant::now();
+    }
+
+    true
+}
+
+fn append_annexb_nal(out: &mut BytesMut, nal: &[u8]) {
+    const START_CODE_4: &[u8] = &[0x00, 0x00, 0x00, 0x01];
+    out.extend_from_slice(START_CODE_4);
+    out.extend_from_slice(nal);
+}
+
+fn is_first_vcl_slice(nal: &[u8]) -> bool {
+    if nal.len() < 2 {
+        return true;
+    }
+    let nal_type = nal[0] & 0x1F;
+    if !(nal_type == 1 || nal_type == 5) {
+        return true;
+    }
+
+    let mut reader = RbspBitReader::new(&nal[1..]);
+    match reader.read_ue() {
+        Some(first_mb_in_slice) => first_mb_in_slice == 0,
+        None => true,
+    }
+}
+
+#[cfg(test)]
+fn remove_emulation_prevention_bytes(data: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(data.len());
+    let mut zero_count = 0u8;
+    for &byte in data {
+        if zero_count >= 2 && byte == 0x03 {
+            zero_count = 0;
+            continue;
+        }
+        out.push(byte);
+        if byte == 0x00 {
+            zero_count = zero_count.saturating_add(1);
+        } else {
+            zero_count = 0;
+        }
+    }
+    out
+}
+
+struct RbspBitReader<'a> {
+    data: &'a [u8],
+    byte_pos: usize,
+    current_byte: u8,
+    bits_remaining: u8,
+    zero_count: u8,
+}
+
+impl<'a> RbspBitReader<'a> {
+    fn new(data: &'a [u8]) -> Self {
+        Self {
+            data,
+            byte_pos: 0,
+            current_byte: 0,
+            bits_remaining: 0,
+            zero_count: 0,
+        }
+    }
+
+    fn next_rbsp_byte(&mut self) -> Option<u8> {
+        while self.byte_pos < self.data.len() {
+            let byte = self.data[self.byte_pos];
+            self.byte_pos += 1;
+            if self.zero_count >= 2 && byte == 0x03 {
+                self.zero_count = 0;
+                continue;
+            }
+            if byte == 0x00 {
+                self.zero_count = self.zero_count.saturating_add(1);
+            } else {
+                self.zero_count = 0;
+            }
+            return Some(byte);
+        }
+        None
+    }
+
+    fn read_bit(&mut self) -> Option<u8> {
+        if self.bits_remaining == 0 {
+            self.current_byte = self.next_rbsp_byte()?;
+            self.bits_remaining = 8;
+        }
+        let bit = (self.current_byte >> 7) & 1;
+        self.current_byte <<= 1;
+        self.bits_remaining -= 1;
+        Some(bit)
+    }
+
+    fn read_bits(&mut self, count: usize) -> Option<u32> {
+        let mut value = 0u32;
+        for _ in 0..count {
+            value = (value << 1) | u32::from(self.read_bit()?);
+        }
+        Some(value)
+    }
+
+    fn read_ue(&mut self) -> Option<u32> {
+        let mut leading_zero_bits = 0usize;
+        while self.read_bit()? == 0 {
+            leading_zero_bits += 1;
+            if leading_zero_bits > 31 {
+                return None;
+            }
+        }
+
+        if leading_zero_bits == 0 {
+            return Some(0);
+        }
+
+        let suffix = self.read_bits(leading_zero_bits)?;
+        Some(((1u32 << leading_zero_bits) - 1) + suffix)
+    }
+}
+
 /// Base64 encode helper for SPS/PPS data
 fn base64_encode(data: &[u8]) -> String {
     const BASE64_CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
@@ -486,7 +865,10 @@ fn compute_fps(frames: u64, elapsed: Duration) -> f64 {
 
 #[cfg(test)]
 mod tests {
-    use super::{MockVideoPublisher, compute_fps, generate_sdp_from_sps_pps};
+    use super::{
+        MockVideoPublisher, compute_fps, generate_sdp_from_sps_pps, is_first_vcl_slice,
+        remove_emulation_prevention_bytes,
+    };
     use crate::codec::h264_file_reader::H264FileReader;
     use crate::streamhub::define::{DataSender, FrameData, SubscribeType, TStreamHandler};
     use portable_atomic::Ordering;
@@ -747,6 +1129,28 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_mock_video_publisher_builds_access_unit_cache_for_small_file() {
+        let path = temp_h264_path("cache_small");
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&annexb_nal(&[0x67, 0x42, 0xE0, 0x1E, 0x89, 0x00])); // SPS
+        bytes.extend_from_slice(&annexb_nal(&[0x68, 0xCE, 0x06, 0xE2, 0x00])); // PPS
+        bytes.extend_from_slice(&annexb_nal(&[0x65, 0x88, 0x84, 0x21, 0xA0, 0x00])); // IDR
+        bytes.extend_from_slice(&annexb_nal(&[0x41, 0x9A, 0x22, 0x11, 0x00])); // non-IDR
+        std::fs::write(&path, &bytes).expect("write test h264");
+
+        let publisher = MockVideoPublisher::new("stream1".to_string(), &path, 25, true)
+            .await
+            .expect("publisher new");
+
+        assert!(
+            publisher.access_units_cache.is_some(),
+            "expected access-unit cache for small source file"
+        );
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[tokio::test]
     async fn test_mock_video_publisher_bootstrap_idr_skipped_when_beyond_limit() {
         let path = temp_h264_path("idr_beyond_limit");
         let mut bytes = Vec::new();
@@ -789,5 +1193,23 @@ mod tests {
     fn test_compute_fps_zero_elapsed() {
         let fps = compute_fps(10, Duration::from_secs(0));
         assert_eq!(fps, 0.0);
+    }
+
+    #[test]
+    fn test_is_first_vcl_slice_detects_first_mb_zero() {
+        // nal_type=1 (non-IDR), slice payload starts with Exp-Golomb `1` => first_mb_in_slice=0
+        assert!(is_first_vcl_slice(&[0x41, 0x80]));
+    }
+
+    #[test]
+    fn test_is_first_vcl_slice_detects_non_zero_first_mb() {
+        // nal_type=1 (non-IDR), slice payload starts with Exp-Golomb `010` => first_mb_in_slice=1
+        assert!(!is_first_vcl_slice(&[0x41, 0x40]));
+    }
+
+    #[test]
+    fn test_remove_emulation_prevention_bytes() {
+        let rbsp = remove_emulation_prevention_bytes(&[0x00, 0x00, 0x03, 0x01, 0x22]);
+        assert_eq!(rbsp, vec![0x00, 0x00, 0x01, 0x22]);
     }
 }

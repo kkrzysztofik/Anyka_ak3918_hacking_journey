@@ -44,22 +44,16 @@ target = "armv5te-unknown-linux-uclibceabi"
 rustc = "${TOOLCHAIN_BASE}/bin/rustc"
 
 # Configuration for armv5te-unknown-linux-uclibceabi
-# Using new LLVM/Clang toolchain with proper ARMv5TE support
+# Use GCC cross-linker to ensure correct uClibc startup objects (Scrt1.o, crti.o)
 [target.armv5te-unknown-linux-uclibceabi]
-linker = "${TOOLCHAIN_BASE}/bin/clang"
+linker = "${TOOLCHAIN_BASE}/bin/arm-unknown-linux-uclibcgnueabi-gcc"
 rustflags = [
   "-C",
-  "link-arg=--target=arm-unknown-linux-uclibcgnueabi",
-  "-C",
-  "link-arg=--sysroot=${TOOLCHAIN_BASE}/arm-unknown-linux-uclibcgnueabi/sysroot",
-  "-C",
-  "link-arg=-march=armv5te",
-  "-C",
-  "link-arg=-mfloat-abi=soft",
-  "-C",
-  "link-arg=-mtune=arm926ej-s",
-  "-C",
   "link-arg=-Wl,--dynamic-linker=/mnt/anyka_hack/lib/ld-uClibc.so.1",
+  "-C",
+  "link-arg=-Wl,-rpath,/mnt/anyka_hack/lib",
+  "-C",
+  "link-arg=-Wl,-rpath,/mnt/anyka_hack/onvif/lib",
 ]
 
 [env]

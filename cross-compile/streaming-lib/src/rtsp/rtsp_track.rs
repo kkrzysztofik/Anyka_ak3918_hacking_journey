@@ -114,6 +114,9 @@ impl RtspTrack {
                 let mut rtcp_channel_in = rtcp_channel_out.lock().await;
                 if let Err(err) = rtcp_channel_in.send_sr(rtcp_io.clone()).await {
                     log::error!("Failed to send RTCP SR: {}", err);
+                    // Transport is no longer writable (e.g., TEARDOWN or peer disconnect).
+                    // Stop this periodic sender loop to avoid repeated errors/churn.
+                    break;
                 }
             }
         });

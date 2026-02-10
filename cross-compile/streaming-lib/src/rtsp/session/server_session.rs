@@ -171,11 +171,13 @@ impl RtpTimestampNormalizer {
 
         let mut non_wrap_regressed = false;
         if let Some(previous) = previous_scaled_timestamp
-            && scaled_timestamp < previous
+            && scaled_timestamp <= previous
             && previous.wrapping_sub(scaled_timestamp) <= RTP_TIMESTAMP_WRAP_THRESHOLD
         {
-            // Source timestamp moved backwards without crossing RTP wrap boundary.
-            // Shift by a correction offset so packet timestamps stay monotonic.
+            // RFC 3550 section 5.1 requires RTP timestamps to reflect sampling instant.
+            // In our validation streams (single access unit cadence, no B-frames), equal or
+            // regressed source timestamps usually indicate source-side resets/chunking artifacts.
+            // Shift by a correction offset so emitted access units remain strictly monotonic.
             let corrected_current = scaled_timestamp.wrapping_add(self.correction);
             let corrected_previous = previous.wrapping_add(self.correction);
             let target = corrected_previous.wrapping_add(1);
@@ -437,13 +439,19 @@ impl InterleavedBinaryData {
     // two-byte integer in network byte order
     pub fn new(reader: &mut BytesReader) -> Result<Option<Self>, SessionError> {
         let is_dollar_sign = reader.advance_u8()? == 0x24;
-        log::debug!("dollar sign: {}", is_dollar_sign);
+        if crate::stream_frame_debug_logging_enabled() {
+            log::debug!("dollar sign: {}", is_dollar_sign);
+        }
         if is_dollar_sign {
             reader.read_u8()?;
             let channel_identifier = reader.read_u8()?;
-            log::debug!("channel_identifier: {}", channel_identifier);
+            if crate::stream_frame_debug_logging_enabled() {
+                log::debug!("channel_identifier: {}", channel_identifier);
+            }
             let length = reader.read_u16::<BigEndian>()?;
-            log::debug!("length: {}", length);
+            if crate::stream_frame_debug_logging_enabled() {
+                log::debug!("length: {}", length);
+            }
             return Ok(Some(InterleavedBinaryData {
                 channel_identifier,
                 length,
@@ -572,6 +580,25 @@ impl RtspServerSession {
         .await;
 
         self.stop_playback_task().await;
+
+        // Ensure StreamHub receives unsubscribe/unpublish even when the run loop exits
+        // without an explicit TEARDOWN/PAUSE (e.g. remote disconnect or internal shutdown).
+        // This prevents stale subscriber counts from keeping on-demand publishers active.
+        if !self.is_normal_exit
+            && let Some(identifier) = self.stream_identifier.clone()
+        {
+            match self.exit(identifier) {
+                Ok(()) => {}
+                Err(cleanup_err) => {
+                    // Preserve the original run error when present, but surface cleanup
+                    // failures when run itself was otherwise successful.
+                    if run_result.is_ok() {
+                        return Err(cleanup_err);
+                    }
+                }
+            }
+        }
+
         run_result
     }
 
@@ -1484,13 +1511,15 @@ impl RtspServerSession {
                                     .entry(TrackType::Audio)
                                     .or_default()
                                     .normalize(timestamp, channel.clock_rate(), TrackType::Audio);
-                                log::debug!(
-                                    "server_session: Audio timestamp_in={} clock_rate={} scaled={} output={}",
-                                    timestamp,
-                                    channel.clock_rate(),
-                                    normalized.scaled_timestamp,
-                                    normalized.output_timestamp
-                                );
+                                if crate::stream_frame_debug_logging_enabled() {
+                                    log::debug!(
+                                        "server_session: Audio timestamp_in={} clock_rate={} scaled={} output={}",
+                                        timestamp,
+                                        channel.clock_rate(),
+                                        normalized.scaled_timestamp,
+                                        normalized.output_timestamp
+                                    );
+                                }
                                 if normalized.non_wrap_regressed {
                                     log::warn!(
                                         "event=rtp_timestamp_non_wrap_regression track=Audio session_id={} remote_addr={} stream_path={} prev_scaled={} current_scaled={} corrected_timestamp={} regression_count={}",
@@ -1693,9 +1722,7 @@ impl RtspServerSession {
     }
 
     fn handle_teardown(&mut self, rtsp_request: &RtspRequest) -> Result<(), SessionError> {
-        let identifier = StreamIdentifier::Rtsp {
-            stream_path: rtsp_request.uri.path.clone(),
-        };
+        let identifier = self.resolve_stream_identifier(&rtsp_request.uri.path);
         log::info!(
             "event=rtsp_teardown session_id={} remote_addr={} stream_path={} session_type={}",
             self.session_id
@@ -2927,6 +2954,76 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_rtsp_server_session_teardown_trailing_slash_unsubscribes_normalized_stream() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        const PLAY_REQ: &str = "PLAY rtsp://localhost/stream1/trackID=0 RTSP/1.0\r\nCSeq: 5\r\nSession: 1\r\nRange: npt=0.000-\r\n\r\n";
+        const TEARDOWN_REQ: &str =
+            "TEARDOWN rtsp://localhost/stream1/ RTSP/1.0\r\nCSeq: 6\r\nSession: 1\r\n\r\n";
+
+        let (event_sender, mut event_receiver) = tokio::sync::mpsc::unbounded_channel();
+        let mut mock_io = MockNetIO::new();
+
+        mock_io.expect_get_net_type().returning(|| NetType::TCP);
+
+        let read_count = AtomicUsize::new(0);
+        let play_bytes = BytesMut::from(PLAY_REQ);
+        let teardown_bytes = BytesMut::from(TEARDOWN_REQ);
+        mock_io.expect_read().times(3).returning(move || {
+            match read_count.fetch_add(1, Ordering::SeqCst) {
+                0 => Ok(play_bytes.clone()),
+                1 => Ok(teardown_bytes.clone()),
+                _ => Err(BytesIOError::from(std::io::Error::new(
+                    std::io::ErrorKind::ConnectionAborted,
+                    "eof",
+                ))),
+            }
+        });
+
+        mock_io.expect_write().times(2).returning(|_| Ok(()));
+
+        let session_io: Box<dyn TNetIO + Send + Sync> = Box::new(mock_io);
+        let remote_addr = "127.0.0.1:0".parse().unwrap();
+
+        let event_handle = tokio::spawn(async move {
+            use crate::streamhub::define::DataReceiver;
+
+            let mut held_frame_sender = None;
+            while let Some(event) = event_receiver.recv().await {
+                match event {
+                    StreamHubEvent::Subscribe { result_sender, .. } => {
+                        let (frame_sender, frame_receiver) = tokio::sync::mpsc::unbounded_channel();
+                        held_frame_sender = Some(frame_sender);
+                        let data_receiver = DataReceiver {
+                            frame_receiver: Some(frame_receiver),
+                            packet_receiver: None,
+                        };
+                        let _ = result_sender.send(Ok((data_receiver, None)));
+                    }
+                    StreamHubEvent::UnSubscribe { identifier, .. } => {
+                        match identifier {
+                            StreamIdentifier::Rtsp { stream_path } => {
+                                assert_eq!(stream_path, "stream1");
+                            }
+                            _ => panic!("Expected RTSP identifier"),
+                        }
+                        drop(held_frame_sender);
+                        break;
+                    }
+                    _ => {}
+                }
+            }
+        });
+
+        let mut session =
+            RtspServerSession::new_with_io(session_io, event_sender, None, remote_addr);
+
+        let run_result = session.run().await;
+        assert!(run_result.is_err());
+        event_handle.await.expect("event task panicked");
+    }
+
+    #[tokio::test]
     async fn test_rtsp_server_session_run_eof_stops_playback_task() {
         use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -2985,6 +3082,44 @@ mod tests {
         assert!(session.playback_cancel.is_none());
 
         event_handle.await.expect("event task panicked");
+    }
+
+    #[tokio::test]
+    async fn test_rtsp_server_session_run_shutdown_sends_unsubscribe_cleanup() {
+        let (event_sender, mut event_receiver) = tokio::sync::mpsc::unbounded_channel();
+        let mut mock_io = MockNetIO::new();
+
+        mock_io.expect_get_net_type().returning(|| NetType::TCP);
+        mock_io.expect_read().times(0);
+        mock_io.expect_write().times(0);
+
+        let session_io: Box<dyn TNetIO + Send + Sync> = Box::new(mock_io);
+        let remote_addr = "127.0.0.1:0".parse().unwrap();
+        let mut session =
+            RtspServerSession::new_with_io(session_io, event_sender, None, remote_addr);
+
+        session.has_subscribed = true;
+        session.stream_identifier = Some(StreamIdentifier::Rtsp {
+            stream_path: "stream1".to_string(),
+        });
+        session.shutdown();
+
+        let run_result = session.run().await;
+        assert!(run_result.is_ok());
+        assert!(session.is_normal_exit);
+
+        match event_receiver
+            .try_recv()
+            .expect("expected UnSubscribe event")
+        {
+            StreamHubEvent::UnSubscribe { identifier, .. } => match identifier {
+                StreamIdentifier::Rtsp { stream_path } => {
+                    assert_eq!(stream_path, "stream1");
+                }
+                _ => panic!("Expected RTSP identifier"),
+            },
+            _ => panic!("Expected UnSubscribe event"),
+        }
     }
 
     #[tokio::test]
@@ -3348,6 +3483,24 @@ mod tests {
             second.output_timestamp.wrapping_add(1)
         );
         assert!(next.output_timestamp > regressed.output_timestamp);
+    }
+
+    #[test]
+    fn test_rtp_timestamp_normalizer_corrects_duplicate_timestamp() {
+        let mut normalizer = RtpTimestampNormalizer::default();
+
+        let first = normalizer.normalize(1_000, 90_000, TrackType::Video);
+        let duplicate = normalizer.normalize(1_000, 90_000, TrackType::Video);
+        let next = normalizer.normalize(1_040, 90_000, TrackType::Video);
+
+        assert_eq!(first.output_timestamp, 90_000);
+        assert!(duplicate.non_wrap_regressed);
+        assert_eq!(duplicate.non_wrap_regression_count, 1);
+        assert_eq!(
+            duplicate.output_timestamp,
+            first.output_timestamp.wrapping_add(1)
+        );
+        assert!(next.output_timestamp > duplicate.output_timestamp);
     }
 
     #[test]

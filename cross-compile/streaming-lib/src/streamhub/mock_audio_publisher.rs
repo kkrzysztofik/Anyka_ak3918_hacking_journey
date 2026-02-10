@@ -146,9 +146,35 @@ impl MockAudioPublisher {
                 let mut reader = reader.lock().await;
                 let mut frame_count: u32 = 0;
                 let sample_rate = reader.sample_rate();
-                let loop_start = Instant::now();
+                let frame_interval = if sample_rate == 0 {
+                    Duration::from_millis(0)
+                } else {
+                    // One AAC-LC frame carries 1024 samples (RFC 3640, AAC-hbr mode).
+                    Duration::from_secs_f64(AAC_SAMPLES_PER_FRAME as f64 / sample_rate as f64)
+                };
+                let mut next_send_deadline: Option<Instant> = None;
+                let mut interrupted_for_zero_subscribers = false;
 
                 while let Ok(Some(frame)) = reader.read_next_frame().await {
+                    if let Some(ref get_count) = subscriber_count_fn
+                        && get_count() == 0
+                    {
+                        interrupted_for_zero_subscribers = true;
+                        break;
+                    }
+
+                    // Pace against an absolute deadline sequence. This compensates for
+                    // timer quantization on embedded kernels and keeps average packet cadence
+                    // close to source timing without bursty catch-up.
+                    if !frame_interval.is_zero()
+                        && let Some(deadline) = next_send_deadline
+                    {
+                        let now = Instant::now();
+                        if let Some(remaining) = deadline.checked_duration_since(now) {
+                            tokio::time::sleep(remaining).await;
+                        }
+                    }
+
                     // RTP timestamp in sample units (RFC 3640 Section 3.3)
                     // Each AAC frame = 1024 samples, so timestamp = frame_count * 1024
                     let timestamp = timestamp_offset
@@ -157,25 +183,36 @@ impl MockAudioPublisher {
 
                     let frame_data = FrameData::Audio { timestamp, data };
 
-                    log::debug!(
-                        "mock_audio_publisher: AAC frame_count={} timestamp={} (sample units)",
-                        frame_count,
-                        timestamp
-                    );
+                    if crate::stream_frame_debug_logging_enabled() {
+                        log::debug!(
+                            "mock_audio_publisher: AAC frame_count={} timestamp={} (sample units)",
+                            frame_count,
+                            timestamp
+                        );
+                    }
 
                     if sender.send(frame_data).is_err() {
                         return;
                     }
+                    if !frame_interval.is_zero() {
+                        let now = Instant::now();
+                        let mut next = next_send_deadline
+                            .map(|deadline| deadline + frame_interval)
+                            .unwrap_or_else(|| now + frame_interval);
+                        // If we are more than one frame behind, resync to avoid bursty
+                        // no-sleep loops under load.
+                        if now > next + frame_interval {
+                            next = now + frame_interval;
+                        }
+                        next_send_deadline = Some(next);
+                    }
                     last_timestamp_ms.store(timestamp, Ordering::Relaxed);
 
                     frame_count = frame_count.saturating_add(1);
+                }
 
-                    // Frame rate control: align to target schedule to avoid drift.
-                    let target_elapsed = audio_target_elapsed(frame_count, sample_rate);
-                    let elapsed = loop_start.elapsed();
-                    if let Some(remaining) = target_elapsed.checked_sub(elapsed) {
-                        tokio::time::sleep(remaining).await;
-                    }
+                if interrupted_for_zero_subscribers {
+                    continue;
                 }
 
                 if !loop_playback {
@@ -328,6 +365,7 @@ fn generate_sdp_from_audio_config(audio_config: &[u8], sample_rate: u32) -> Stri
     )
 }
 
+#[cfg(test)]
 fn audio_target_elapsed(frame_count: u32, sample_rate: u32) -> Duration {
     if frame_count == 0 || sample_rate == 0 {
         return Duration::from_nanos(0);
