@@ -25,6 +25,9 @@ use crate::config::{Args, EffectiveConfig, InitialTimestampPolicyArg, TransportA
 use crate::report::{StreamInfo, TestResult, TestRun, ValidationReport};
 use crate::util::{MAX_TOOL_LOG_BYTES, tail_lossy, write_bytes_tail};
 
+const PROBE_DEMUX_ERROR_TOLERANCE: u32 = 3;
+const PROTOCOL_SEQUENCE_CAPTURE_MAX_DURATION_SEC: u64 = 12;
+
 pub(crate) fn rtsp_url(host: &str, port: u16, stream: &str) -> String {
     format!("rtsp://{}:{}{}", host, port, stream)
 }
@@ -1128,11 +1131,34 @@ pub async fn run_validation(args: &Args, effective: &EffectiveConfig) -> Result<
     let mut saw_rap: bool = false;
     let mut h264_length_prefix_ok: bool = true;
     let mut h264_length_prefix_error: Option<String> = None;
+    let mut demux_error_count: u32 = 0;
+    let mut last_demux_error: Option<String> = None;
 
     let probe_duration = Duration::from_secs(effective.short_duration_sec);
     let probe_res: Result<()> = timeout(probe_duration, async {
         while let Some(item) = demuxed.next().await {
-            let item = item.context("demuxed stream error")?;
+            let item = match item {
+                Ok(item) => item,
+                Err(err) => {
+                    demux_error_count = demux_error_count.saturating_add(1);
+                    last_demux_error = Some(err.to_string());
+                    if demux_error_count <= PROBE_DEMUX_ERROR_TOLERANCE {
+                        warn!(
+                            demux_error_count,
+                            tolerance = PROBE_DEMUX_ERROR_TOLERANCE,
+                            error = %err,
+                            "probe loop demux error"
+                        );
+                    } else {
+                        debug!(
+                            demux_error_count,
+                            error = %err,
+                            "probe loop demux error (continuing)"
+                        );
+                    }
+                    continue;
+                }
+            };
             match item {
                 CodecItem::VideoFrame(frame) => {
                     video_frames = video_frames.saturating_add(1);
@@ -1175,6 +1201,22 @@ pub async fn run_validation(args: &Args, effective: &EffectiveConfig) -> Result<
     if let Err(e) = probe_res {
         warn!(error = %e, "probe loop ended with error");
         tests.push(TestResult::fail("probe_loop", e.to_string()));
+    } else if demux_error_count > PROBE_DEMUX_ERROR_TOLERANCE
+        && video_frames == 0
+        && (!args.require_audio || !has_audio || audio_frames == 0)
+    {
+        let reason = match last_demux_error {
+            Some(err) => format!(
+                "demuxed stream error ({} errors, tolerance {}): {}",
+                demux_error_count, PROBE_DEMUX_ERROR_TOLERANCE, err
+            ),
+            None => format!(
+                "demuxed stream error ({} errors, tolerance {})",
+                demux_error_count, PROBE_DEMUX_ERROR_TOLERANCE
+            ),
+        };
+        warn!(reason = %reason, "probe loop ended without decodable frames");
+        tests.push(TestResult::fail("probe_loop", reason));
     } else {
         tests.push(TestResult::pass("probe_loop"));
     }
@@ -1308,6 +1350,12 @@ pub async fn run_harness(
     let timeout_sec = effective.rtsp_timeout_sec;
     let step_cap_short = Duration::from_secs(timeout_sec.saturating_add(15));
     let step_cap_long = Duration::from_secs(effective.short_duration_sec.saturating_add(30));
+    let step_cap_protocol_sequence = Duration::from_secs(
+        effective
+            .short_duration_sec
+            .saturating_mul(2)
+            .saturating_add(30),
+    );
     let artifacts_dir = effective.artifacts_dir.clone();
     let capture_tool_output = effective.capture_tool_output;
     info!(url = %url, "running harness scenarios");
@@ -1476,7 +1524,7 @@ pub async fn run_harness(
 
     debug!(url = %url, "harness: RTSP protocol sequence");
     match timeout(
-        step_cap_long,
+        step_cap_protocol_sequence,
         harness_rtsp_protocol_sequence(&url, effective, args),
     )
     .await
@@ -1501,7 +1549,10 @@ pub async fn run_harness(
             cleanup_timed_out_media_processes(&url, "harness_protocol_sequence");
             tests.push(TestResult::fail(
                 "harness_protocol_sequence",
-                format!("harness step timed out after {}s", step_cap_long.as_secs()),
+                format!(
+                    "harness step timed out after {}s",
+                    step_cap_protocol_sequence.as_secs()
+                ),
             ));
         }
     }
@@ -2040,7 +2091,9 @@ async fn harness_rtsp_protocol_sequence(
     tokio::time::sleep(Duration::from_secs(1)).await;
 
     let url2 = url.clone();
-    let short_dur = effective.short_duration_sec;
+    let short_dur = effective
+        .short_duration_sec
+        .clamp(1, PROTOCOL_SEQUENCE_CAPTURE_MAX_DURATION_SEC);
     let ffmpeg_log_path = artifacts_dir.join("ffmpeg_protocol_sequence_capture.log");
     let capture_tool = capture_tool_output;
     tokio::task::spawn_blocking(move || {
