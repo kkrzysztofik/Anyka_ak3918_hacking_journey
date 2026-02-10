@@ -1,0 +1,17 @@
+#!/bin/sh
+# Launcher for perf with bundled runtime libraries.
+
+BIN_DIR="$(CDPATH= cd -- "$(dirname "$0")" && pwd)"
+ANYKA_HACK_DIR="$(dirname "$BIN_DIR")"
+PERF_BIN="${BIN_DIR}/perf.bin"
+LIB_DIR="${ANYKA_HACK_DIR}/lib"
+
+if [ -d "${LIB_DIR}" ]; then
+  if [ -n "${LD_LIBRARY_PATH:-}" ]; then
+    export LD_LIBRARY_PATH="${LIB_DIR}:${LD_LIBRARY_PATH}"
+  else
+    export LD_LIBRARY_PATH="${LIB_DIR}"
+  fi
+fi
+
+exec "${PERF_BIN}" "$@"
