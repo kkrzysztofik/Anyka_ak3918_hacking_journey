@@ -287,8 +287,12 @@ pub struct LoggingSection {
 pub struct DeviceSection {
     #[serde(default = "default_device_host")]
     pub host: String,
-    #[serde(default = "default_device_telnet_port")]
-    pub telnet_port: u16,
+    #[serde(default = "default_device_ssh_port")]
+    pub ssh_port: u16,
+    #[serde(default = "default_device_user")]
+    pub user: String,
+    #[serde(default)]
+    pub password: Option<String>,
     #[serde(default = "default_telemetry_enabled")]
     pub telemetry: bool,
     #[serde(default)]
@@ -303,7 +307,9 @@ impl Default for DeviceSection {
     fn default() -> Self {
         Self {
             host: default_device_host(),
-            telnet_port: default_device_telnet_port(),
+            ssh_port: default_device_ssh_port(),
+            user: default_device_user(),
+            password: None,
             telemetry: default_telemetry_enabled(),
             h264_file: None,
             aac_file: None,
@@ -315,8 +321,11 @@ impl Default for DeviceSection {
 fn default_device_host() -> String {
     "192.168.2.198".to_string()
 }
-fn default_device_telnet_port() -> u16 {
-    24
+fn default_device_ssh_port() -> u16 {
+    22
+}
+fn default_device_user() -> String {
+    "root".to_string()
 }
 fn default_telemetry_enabled() -> bool {
     true
@@ -349,7 +358,9 @@ pub struct EffectiveConfig {
     pub keep_pcaps: bool,
     pub launch_on_device: bool,
     pub device_host: String,
-    pub device_telnet_port: u16,
+    pub device_ssh_port: u16,
+    pub device_user: String,
+    pub device_password: Option<String>,
     pub collect_telemetry: bool,
     pub device_h264_file: Option<String>,
     pub device_aac_file: Option<String>,
@@ -367,6 +378,28 @@ pub struct EffectiveConfig {
 }
 
 impl EffectiveConfig {
+    fn resolve_device_auth(
+        args: &Args,
+        c: &RtspValidationConfig,
+        env_user: Option<String>,
+        env_password: Option<String>,
+    ) -> (String, Option<String>) {
+        let device_user = args
+            .device_user
+            .clone()
+            .or(env_user)
+            .or_else(|| Some(c.device.user.clone()))
+            .filter(|u| !u.is_empty())
+            .unwrap_or_else(default_device_user);
+        let device_password = args
+            .device_password
+            .clone()
+            .or(env_password)
+            .or_else(|| c.device.password.clone())
+            .filter(|p| !p.is_empty());
+        (device_user, device_password)
+    }
+
     /// Resolve effective FFmpeg log level from CLI and config.
     pub fn ffmpeg_log_level_from_config(
         config: Option<&RtspValidationConfig>,
@@ -425,11 +458,17 @@ impl EffectiveConfig {
             .or_else(|| Some(c.device.host.clone()))
             .filter(|h| !h.is_empty())
             .unwrap_or_else(|| "192.168.2.198".to_string());
-        let device_telnet_port = args
-            .device_telnet_port
-            .or(Some(c.device.telnet_port))
+        let device_ssh_port = args
+            .device_ssh_port
+            .or(Some(c.device.ssh_port))
             .filter(|&p| p != 0)
-            .unwrap_or(24);
+            .unwrap_or(22);
+        let (device_user, device_password) = Self::resolve_device_auth(
+            args,
+            c,
+            env::var("RTSP_VALIDATION_DEVICE_USER").ok(),
+            env::var("RTSP_VALIDATION_DEVICE_PASSWORD").ok(),
+        );
         let launch_on_device = args.launch_on_device || c.run.launch_on_device;
         let no_launch = args.no_launch || c.run.no_launch || launch_on_device;
         let collect_telemetry = launch_on_device && !args.no_telemetry && c.device.telemetry;
@@ -538,7 +577,9 @@ impl EffectiveConfig {
             keep_pcaps,
             launch_on_device,
             device_host,
-            device_telnet_port,
+            device_ssh_port,
+            device_user,
+            device_password,
             collect_telemetry,
             device_h264_file,
             device_aac_file,
@@ -807,7 +848,7 @@ pub struct Args {
     #[arg(
         long,
         help_heading = "Device",
-        help = "Launch onvif-rust on the device via telnet (implies --no-launch)."
+        help = "Launch onvif-rust on the device via SSH (implies --no-launch)."
     )]
     pub launch_on_device: bool,
 
@@ -815,7 +856,7 @@ pub struct Args {
         long,
         value_name = "HOST",
         help_heading = "Device",
-        help = "Device host/IP for telnet control (default from config)."
+        help = "Device host/IP for SSH control (default from config)."
     )]
     pub device_host: Option<String>,
 
@@ -823,9 +864,25 @@ pub struct Args {
         long,
         value_name = "PORT",
         help_heading = "Device",
-        help = "Device telnet port (default from config)."
+        help = "Device SSH port (default from config)."
     )]
-    pub device_telnet_port: Option<u16>,
+    pub device_ssh_port: Option<u16>,
+
+    #[arg(
+        long,
+        value_name = "USER",
+        help_heading = "Device",
+        help = "Device SSH username (CLI > env RTSP_VALIDATION_DEVICE_USER > config > root)."
+    )]
+    pub device_user: Option<String>,
+
+    #[arg(
+        long,
+        value_name = "PASSWORD",
+        help_heading = "Device",
+        help = "Device SSH password (CLI > env RTSP_VALIDATION_DEVICE_PASSWORD > config)."
+    )]
+    pub device_password: Option<String>,
 
     #[arg(
         long,
@@ -987,6 +1044,9 @@ mod tests {
             PathBuf::from(DEFAULT_ARTIFACTS_ROOT_DIR)
         );
         assert!(!effective.launch_on_device);
+        assert_eq!(effective.device_ssh_port, 22);
+        assert_eq!(effective.device_user, "root");
+        assert_eq!(effective.device_password, None);
         assert!(!effective.update_baseline);
         assert!(!effective.compare_baseline);
     }
@@ -1010,6 +1070,12 @@ mod tests {
             "--update-baseline",
             "--device-host",
             "192.168.1.1",
+            "--device-ssh-port",
+            "2222",
+            "--device-user",
+            "root2",
+            "--device-password",
+            "pw2",
         ])
         .unwrap();
         let effective = EffectiveConfig::from_config_and_args(None, &parsed.args, &parsed.sources);
@@ -1027,6 +1093,48 @@ mod tests {
         assert_eq!(effective.ffmpeg_log_level, "warning");
         assert!(effective.update_baseline);
         assert_eq!(effective.device_host, "192.168.1.1");
+        assert_eq!(effective.device_ssh_port, 2222);
+        assert_eq!(effective.device_user, "root2");
+        assert_eq!(effective.device_password.as_deref(), Some("pw2"));
+    }
+
+    #[test]
+    fn test_from_config_and_args_device_auth_env_overrides_config() {
+        let parsed = parse_args_from(["rtsp_validation_tool"]).unwrap();
+        let mut cfg = RtspValidationConfig::default();
+        cfg.device.user = "cfg_user".to_string();
+        cfg.device.password = Some("cfg_pass".to_string());
+        let (user, password) = EffectiveConfig::resolve_device_auth(
+            &parsed.args,
+            &cfg,
+            Some("env_user".to_string()),
+            Some("env_pass".to_string()),
+        );
+
+        assert_eq!(user, "env_user");
+        assert_eq!(password.as_deref(), Some("env_pass"));
+    }
+
+    #[test]
+    fn test_from_config_and_args_device_auth_cli_overrides_env() {
+        let parsed = parse_args_from([
+            "rtsp_validation_tool",
+            "--device-user",
+            "cli_user",
+            "--device-password",
+            "cli_pass",
+        ])
+        .unwrap();
+        let cfg = RtspValidationConfig::default();
+        let (user, password) = EffectiveConfig::resolve_device_auth(
+            &parsed.args,
+            &cfg,
+            Some("env_user".to_string()),
+            Some("env_pass".to_string()),
+        );
+
+        assert_eq!(user, "cli_user");
+        assert_eq!(password.as_deref(), Some("cli_pass"));
     }
 
     #[test]

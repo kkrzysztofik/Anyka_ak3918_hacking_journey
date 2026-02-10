@@ -77,6 +77,7 @@ python3 validation/rtsp_validation_json_to_md.py -o rtsp_validation.md
 
 Logging is controlled by `RUST_LOG` (overrides config) or `[logging]` in the TOML config. The tool bridges the **retina** library’s `log` crate output into tracing.
 When `logging.file` is set, the validator log is copied into the per-run artifacts directory.
+ONVIF server logs are file-only (`onvif.log*`), without separate `onvif_rust.stdout.log`/`onvif_rust.stderr.log` artifacts.
 
 **Config (rtsp_validation.toml):**
 
@@ -113,6 +114,8 @@ capture-tool-output = true
 keep-pcaps = true
 ```
 
+`capture-tool-output` applies to harness tools (`ffmpeg`/`ffprobe`/`tshark`) only.
+
 Artifacts include (filenames are stable within a run directory):
 
 - `ffmpeg_*.log`: captured ffmpeg-sidecar log events and progress
@@ -125,14 +128,16 @@ Artifacts include (filenames are stable within a run directory):
 
 ## Running against the camera (device validation)
 
-When the camera is on the network with telnet available (e.g. port 24), you can start `onvif-rust` on the device and run validation against it. The tool will start the server in `/mnt/anyka_hack/onvif` on the device, run all tests, collect system telemetry (RAM, CPU, onvif-rust memory), then stop the server.
+When the camera is on the network with SSH available (default port `22`), you can start `onvif-rust` on the device and run validation against it. The tool will start the server in `/mnt/anyka_hack/onvif` on the device, run all tests, collect system telemetry (RAM, CPU, onvif-rust memory), then stop the server.
 
 ```bash
-# Device at 192.168.2.198, telnet on port 24 (default)
+# Device at 192.168.2.198, SSH on port 22 (default)
 ./validation/rtsp_validation_tool --launch-on-device --no-launch
 
-# Explicit device host and telnet port
-./validation/rtsp_validation_tool --launch-on-device --no-launch --device-host 192.168.2.198 --device-telnet-port 24
+# Explicit device host/SSH settings
+RTSP_VALIDATION_DEVICE_PASSWORD=www123 \
+./validation/rtsp_validation_tool --launch-on-device --no-launch \
+  --device-host 192.168.2.198 --device-ssh-port 22 --device-user root
 
 # Skip telemetry collection
 ./validation/rtsp_validation_tool --launch-on-device --no-launch --no-telemetry
@@ -140,7 +145,11 @@ When the camera is on the network with telnet available (e.g. port 24), you can 
 
 Requirements:
 
-- Telnet must be enabled on the device (default port 24).
+- SSH must be enabled on the device (default port 22).
+- A device SSH password must be supplied via one of:
+  - `--device-password`
+  - `RTSP_VALIDATION_DEVICE_PASSWORD`
+  - `[device].password` in config
 - `onvif-rust` and `config.toml` must be present at `/mnt/anyka_hack/onvif/` on the device.
 - RTSP port on device (default 554) must match `--rtsp-port` if you override it.
 
@@ -174,7 +183,9 @@ You can set paths in config instead of argv:
 ```toml
 [device]
 host = "192.168.2.198"
-telnet_port = 24
+ssh_port = 22
+user = "root"
+password = ""
 h264_file = "/mnt/anyka_hack/onvif/test.h264"
 aac_file = "/mnt/anyka_hack/onvif/test.aac"
 loop_playback = true
@@ -250,11 +261,13 @@ interface = ""
 # Optional: device validation (--launch-on-device)
 [device]
 host = "192.168.2.198"
-telnet_port = 24
+ssh_port = 22
+user = "root"
+password = ""
 telemetry = true
 ```
 
-Common CLI overrides: `--rtsp-host`, `--rtsp-port`, `--rtsp-stream`, `--duration`, `--config`, `--update-baseline`, `--compare-baseline`, `--concurrent`, `--long-duration`, `--skip-error-handling`, `--output`. For device validation: `--launch-on-device`, `--no-launch`, `--device-host`, `--device-telnet-port`, `--no-telemetry`.
+Common CLI overrides: `--rtsp-host`, `--rtsp-port`, `--rtsp-stream`, `--duration`, `--config`, `--update-baseline`, `--compare-baseline`, `--concurrent`, `--long-duration`, `--skip-error-handling`, `--output`. For device validation: `--launch-on-device`, `--no-launch`, `--device-host`, `--device-ssh-port`, `--device-user`, `--device-password`, `--no-telemetry`.
 
 ## Metrics
 
@@ -297,4 +310,4 @@ Common CLI overrides: `--rtsp-host`, `--rtsp-port`, `--rtsp-stream`, `--duration
 - **Server not starting** – Check that onvif-rust is built with `--features validation-mode` and H.264 file path is valid.
 - **Port in use** – Set `--rtsp-port` or stop the process using the port.
 - **Stream not found** – For onvif-rust use `--rtsp-stream /stream1` and the port the server reports (e.g. 8554).
-- **Device unreachable** – With `--launch-on-device`, ensure the device IP is correct (`--device-host`), telnet is on (port 24 by default), and `/mnt/anyka_hack/onvif/onvif-rust` and `config.toml` exist on the device.
+- **Device unreachable** – With `--launch-on-device`, ensure the device IP is correct (`--device-host`), SSH is enabled (port 22 by default), credentials are correct, and `/mnt/anyka_hack/onvif/onvif-rust` and `config.toml` exist on the device.

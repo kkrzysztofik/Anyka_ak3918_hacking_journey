@@ -9,7 +9,7 @@
 [run]
 # Connect to existing server (no local/device launch)
 no-launch = false
-# Start onvif-rust on the device via telnet (implies no-launch)
+# Start onvif-rust on the device via SSH (implies no-launch)
 launch-on-device = true
 # For local launch only (no-launch=false, launch-on-device=false): path to H.264 file
 # h264-file = "test_video.h264"
@@ -68,16 +68,20 @@ ffmpeg-level = "debug"
 
 [artifacts]
 # Root directory where the tool writes per-run artifacts:
-# - ffmpeg/ffprobe/tshark stdout/stderr logs
+# - ffmpeg/ffprobe/tshark stdout/stderr logs (harness tools only)
 # - pcap captures (kept by default)
+# ONVIF server logs are file-based (`onvif.log*`), not separate stdout/stderr artifacts.
 dir = "rtsp_results/runs"
 capture-tool-output = true
 keep-pcaps = true
 
-# Device (camera) validation: telnet and telemetry when using launch-on-device
+# Device (camera) validation: SSH and telemetry when using launch-on-device
 [device]
 host = "192.168.2.198"
-telnet-port = 24
+ssh-port = 22
+user = "root"
+# Prefer RTSP_VALIDATION_DEVICE_PASSWORD env var for secrets.
+password = ""
 telemetry = true
 # Paths on device for H.264/AAC validation mode (device binary must be built with validation-mode)
 h264-file = "/mnt/anyka_hack/onvif/test.h264"

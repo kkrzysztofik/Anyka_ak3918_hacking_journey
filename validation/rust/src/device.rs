@@ -1,11 +1,12 @@
-//! Device telemetry and telnet helpers.
+//! Device telemetry and SSH helpers.
 
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Context, Result, anyhow, bail};
 use serde::{Deserialize, Serialize};
-use std::net::ToSocketAddrs;
+use ssh2::Session;
+use std::io::Read;
+use std::net::{TcpStream, ToSocketAddrs};
 use std::path::Path;
 use std::time::Duration;
-use telnet::{Event, Telnet};
 use tracing::{debug, info, trace, warn};
 
 use crate::util::{MAX_TOOL_LOG_BYTES, tail_lossy, write_bytes_tail};
@@ -13,11 +14,21 @@ use crate::util::{MAX_TOOL_LOG_BYTES, tail_lossy, write_bytes_tail};
 const DEVICE_ONVIF_DIR: &str = "/mnt/anyka_hack/onvif";
 const DEVICE_ONVIF_LOG_GLOB: &str = "onvif.log*";
 const DEVICE_ONVIF_PIDFILE: &str = "onvif.pid";
-const DEVICE_TELNET_CONNECT_TIMEOUT_SEC: u64 = 15;
-const DEVICE_TELNET_READ_TIMEOUT_SEC: u64 = 8;
-const DEVICE_TELNET_LOG_COPY_READ_TIMEOUT_SEC: u64 = 45;
+const DEVICE_SSH_CONNECT_TIMEOUT_SEC: u64 = 15;
+const DEVICE_SSH_READ_TIMEOUT_SEC: u64 = 8;
+const DEVICE_SSH_LOG_COPY_READ_TIMEOUT_SEC: u64 = 45;
 const DEVICE_MARKER_BEGIN: &str = "__ANYKA_BEGIN__";
 const DEVICE_MARKER_END: &str = "__ANYKA_END__";
+
+fn marker_echo_begin_cmd() -> &'static str {
+    // Deliberately split the marker so the shell command echo does NOT contain the exact token.
+    // This makes extract_between_markers robust even when the device echoes commands with prompts.
+    "echo __ANYKA_\"\"BEGIN__"
+}
+
+fn marker_echo_end_cmd() -> &'static str {
+    "echo __ANYKA_\"\"END__"
+}
 
 /// Device telemetry snapshot (RAM, CPU, onvif-rust memory) when using --launch-on-device.
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
@@ -36,44 +47,90 @@ pub struct DeviceTelemetry {
     pub error: Option<String>,
 }
 
-/// Run a single command on the device via telnet (blocking). Returns accumulated output.
-pub fn run_telnet_command_blocking(
+#[derive(Debug, Clone, Copy)]
+pub struct DevicePlaybackOptions<'a> {
+    pub h264_file: Option<&'a str>,
+    pub aac_file: Option<&'a str>,
+    pub loop_playback: bool,
+}
+
+/// Run a single command on the device via SSH (blocking). Returns accumulated output.
+pub fn run_ssh_command_blocking(
     host: &str,
     port: u16,
+    user: &str,
+    password: &str,
     command: &str,
     read_timeout_sec: u64,
 ) -> Result<String> {
-    debug!(%host, port, command = %command, "telnet command");
-    let addr = (host, port)
+    if password.is_empty() {
+        bail!(
+            "device ssh password is empty for {}@{}:{}",
+            user,
+            host,
+            port
+        );
+    }
+    debug!(%host, port, %user, command = %command, "ssh command");
+    let _addr = (host, port)
         .to_socket_addrs()
         .context("resolve device address")?
         .next()
         .ok_or_else(|| anyhow!("no address for {}:{}", host, port))?;
+    let stream =
+        TcpStream::connect_timeout(&_addr, Duration::from_secs(DEVICE_SSH_CONNECT_TIMEOUT_SEC))
+            .with_context(|| format!("ssh connect to {}:{}", host, port))?;
+    stream
+        .set_read_timeout(Some(Duration::from_secs(read_timeout_sec.max(1))))
+        .context("set ssh read timeout")?;
+    stream
+        .set_write_timeout(Some(Duration::from_secs(read_timeout_sec.max(1))))
+        .context("set ssh write timeout")?;
 
-    let mut telnet = Telnet::connect_timeout(
-        &addr,
-        4096,
-        Duration::from_secs(DEVICE_TELNET_CONNECT_TIMEOUT_SEC),
-    )
-    .with_context(|| format!("telnet connect to {}:{}", host, port))?;
+    let mut session = Session::new().context("create ssh session")?;
+    session.set_tcp_stream(stream);
+    let timeout_ms = read_timeout_sec.saturating_mul(1000).min(u32::MAX as u64) as u32;
+    session.set_timeout(timeout_ms);
+    session
+        .handshake()
+        .with_context(|| format!("ssh handshake {}:{}", host, port))?;
 
-    let cmd_line = format!("{}\n", command);
-    telnet
-        .write(cmd_line.as_bytes())
-        .context("telnet write command")?;
-
-    let timeout_dur = Duration::from_secs(read_timeout_sec);
-    let mut out = Vec::new();
-    loop {
-        let event = telnet.read_timeout(timeout_dur).context("telnet read")?;
-        match event {
-            Event::Data(buf) => out.extend_from_slice(&buf),
-            Event::TimedOut => break,
-            _ => {}
-        }
+    // Permissive mode by design: we intentionally skip known_hosts host-key validation.
+    session
+        .userauth_password(user, password)
+        .with_context(|| format!("ssh password auth for {}@{}:{}", user, host, port))?;
+    if !session.authenticated() {
+        bail!("ssh authentication failed for {}@{}:{}", user, host, port);
     }
-    let s = String::from_utf8_lossy(&out).into_owned();
-    trace!(output_len = s.len(), "telnet output");
+
+    let mut channel = session.channel_session().context("open ssh channel")?;
+    channel.exec(command).context("ssh exec command")?;
+    let mut stdout = Vec::new();
+    channel
+        .read_to_end(&mut stdout)
+        .context("ssh read stdout")?;
+    let mut stderr = Vec::new();
+    channel
+        .stderr()
+        .read_to_end(&mut stderr)
+        .context("ssh read stderr")?;
+    channel.wait_close().context("ssh wait close")?;
+    let exit_status = channel.exit_status().context("ssh exit status")?;
+
+    let mut combined = stdout;
+    combined.extend_from_slice(&stderr);
+    let s = String::from_utf8_lossy(&combined).into_owned();
+    if exit_status != 0 {
+        bail!(
+            "ssh command failed for {}@{}:{} with exit status {}: {}",
+            user,
+            host,
+            port,
+            exit_status,
+            tail_lossy(&s, 600)
+        );
+    }
+    trace!(output_len = s.len(), "ssh output");
     Ok(s)
 }
 
@@ -166,6 +223,68 @@ fn first_u64_in_text(s: &str) -> Option<u64> {
     s[start..end].parse::<u64>().ok()
 }
 
+fn device_assert_file_exists_blocking(
+    host: &str,
+    port: u16,
+    user: &str,
+    password: &str,
+    path: &str,
+    label: &str,
+) -> Result<()> {
+    let q = sh_single_quote(path);
+    let cmd = format!(
+        "{b} && if [ -f {q} ]; then echo OK; else echo MISSING:{label}:{path}; ls -la {q} 2>&1 || true; fi && {e}",
+        b = marker_echo_begin_cmd(),
+        e = marker_echo_end_cmd(),
+        q = q,
+        label = label,
+        path = path
+    );
+    let raw = run_ssh_command_blocking(
+        host,
+        port,
+        user,
+        password,
+        &cmd,
+        DEVICE_SSH_READ_TIMEOUT_SEC,
+    )?;
+    let content = extract_between_markers(&raw).unwrap_or(raw);
+    if content.lines().any(|l| l.trim() == "OK") {
+        Ok(())
+    } else {
+        bail!(
+            "device missing required {} file: {} (output: {})",
+            label,
+            path,
+            tail_lossy(&content, 600)
+        );
+    }
+}
+
+/// Returns the PID of the onvif-rust process on the device (if found).
+pub fn device_get_onvif_pid_blocking(
+    host: &str,
+    port: u16,
+    user: &str,
+    password: &str,
+) -> Result<Option<u32>> {
+    let cmd = format!(
+        "{b} && ( pgrep -f onvif-rust 2>/dev/null || pidof onvif-rust 2>/dev/null || ps | grep '[o]nvif-rust' | awk '{{print $1}}'; true ) && {e}",
+        b = marker_echo_begin_cmd(),
+        e = marker_echo_end_cmd(),
+    );
+    let raw = run_ssh_command_blocking(
+        host,
+        port,
+        user,
+        password,
+        &cmd,
+        DEVICE_SSH_READ_TIMEOUT_SEC,
+    )?;
+    let content = extract_between_markers(&raw).unwrap_or(raw);
+    Ok(parse_pgrep_output(&content))
+}
+
 /// Parse /proc/meminfo content. Returns (MemTotal, MemFree, MemAvailable) in KiB.
 pub fn parse_meminfo(content: &str) -> (Option<u64>, Option<u64>, Option<u64>) {
     let mut mem_total = None;
@@ -247,33 +366,66 @@ pub fn parse_status_vmrss_vmsize(content: &str) -> (Option<u64>, Option<u64>) {
     (rss, vmsize)
 }
 
-fn device_cleanup_onvif_logs_blocking(host: &str, port: u16) -> Result<()> {
+fn device_cleanup_onvif_logs_blocking(
+    host: &str,
+    port: u16,
+    user: &str,
+    password: &str,
+) -> Result<()> {
     let cmd = format!(
         "cd {} && rm -f {} nohup.out {} 2>/dev/null",
         DEVICE_ONVIF_DIR, DEVICE_ONVIF_LOG_GLOB, DEVICE_ONVIF_PIDFILE
     );
     debug!(command = %cmd, "device cleanup onvif logs");
-    let _ = run_telnet_command_blocking(host, port, &cmd, DEVICE_TELNET_READ_TIMEOUT_SEC)?;
+    let _ = run_ssh_command_blocking(
+        host,
+        port,
+        user,
+        password,
+        &cmd,
+        DEVICE_SSH_READ_TIMEOUT_SEC,
+    )?;
     Ok(())
 }
 
+fn device_list_onvif_logs_command() -> String {
+    format!(
+        "cd {dir} && {b}; for f in {glob}; do [ -f \"$f\" ] && printf '%s\\n' \"$f\"; done; {e}; true",
+        dir = DEVICE_ONVIF_DIR,
+        glob = DEVICE_ONVIF_LOG_GLOB,
+        b = marker_echo_begin_cmd(),
+        e = marker_echo_end_cmd(),
+    )
+}
+
+fn device_start_command(onvif_cmd: &str) -> String {
+    format!(
+        "set -e; cd {dir}; chmod +x ./onvif-rust 2>/dev/null || true; nohup {onvif_cmd} >/dev/null 2>&1 & echo $! > {pidfile}",
+        dir = DEVICE_ONVIF_DIR,
+        onvif_cmd = onvif_cmd,
+        pidfile = DEVICE_ONVIF_PIDFILE
+    )
+}
+
 /// Copy onvif-rust logs from device to artifacts dir (blocking).
-pub fn device_copy_onvif_logs_blocking(host: &str, port: u16, artifacts_dir: &Path) -> Result<()> {
+pub fn device_copy_onvif_logs_blocking(
+    host: &str,
+    port: u16,
+    user: &str,
+    password: &str,
+    artifacts_dir: &Path,
+) -> Result<()> {
     std::fs::create_dir_all(artifacts_dir)
         .with_context(|| format!("create artifacts dir {}", artifacts_dir.display()))?;
 
-    let list_cmd = format!(
-        "cd {dir} && echo {b} && (for f in {glob} nohup.out; do [ -f \"$f\" ] && printf '%s\\n' \"$f\"; done) && echo {e}",
-        dir = DEVICE_ONVIF_DIR,
-        glob = DEVICE_ONVIF_LOG_GLOB,
-        b = DEVICE_MARKER_BEGIN,
-        e = DEVICE_MARKER_END
-    );
-    let listing_raw = run_telnet_command_blocking(
+    let list_cmd = device_list_onvif_logs_command();
+    let listing_raw = run_ssh_command_blocking(
         host,
         port,
+        user,
+        password,
         &list_cmd,
-        DEVICE_TELNET_LOG_COPY_READ_TIMEOUT_SEC,
+        DEVICE_SSH_LOG_COPY_READ_TIMEOUT_SEC,
     )?;
     let listing = extract_between_markers(&listing_raw).unwrap_or(listing_raw);
     let files: Vec<String> = listing
@@ -294,18 +446,20 @@ pub fn device_copy_onvif_logs_blocking(host: &str, port: u16, artifacts_dir: &Pa
 
         let q = sh_single_quote(&f);
         let read_cmd = format!(
-            "cd {dir} && echo {b} && (tail -c {bytes} {q} 2>/dev/null || tail -n 20000 {q} 2>/dev/null || cat {q} 2>/dev/null) && echo {e}",
+            "cd {dir} && {b} && (tail -c {bytes} {q} 2>/dev/null || tail -n 20000 {q} 2>/dev/null || cat {q} 2>/dev/null) && {e}",
             dir = DEVICE_ONVIF_DIR,
-            b = DEVICE_MARKER_BEGIN,
-            e = DEVICE_MARKER_END,
+            b = marker_echo_begin_cmd(),
+            e = marker_echo_end_cmd(),
             bytes = MAX_TOOL_LOG_BYTES,
             q = q
         );
-        let raw = run_telnet_command_blocking(
+        let raw = run_ssh_command_blocking(
             host,
             port,
+            user,
+            password,
             &read_cmd,
-            DEVICE_TELNET_LOG_COPY_READ_TIMEOUT_SEC,
+            DEVICE_SSH_LOG_COPY_READ_TIMEOUT_SEC,
         )?;
         let content = extract_between_markers(&raw).unwrap_or(raw);
         write_bytes_tail(&out_path, content.as_bytes())
@@ -320,23 +474,39 @@ pub fn device_copy_onvif_logs_blocking(host: &str, port: u16, artifacts_dir: &Pa
 pub fn device_start_onvif_blocking(
     host: &str,
     port: u16,
+    user: &str,
+    password: &str,
     rtsp_port: u16,
-    h264_file: Option<&str>,
-    aac_file: Option<&str>,
-    loop_playback: bool,
+    playback: DevicePlaybackOptions<'_>,
 ) -> Result<()> {
+    let DevicePlaybackOptions {
+        h264_file,
+        aac_file,
+        loop_playback,
+    } = playback;
     info!(
         %host,
         port,
+        %user,
         rtsp_port,
         h264 = ?h264_file,
         aac = ?aac_file,
         loop_playback,
         "starting onvif-rust on device"
     );
-    if let Err(e) = device_cleanup_onvif_logs_blocking(host, port) {
+    if let Err(e) = device_cleanup_onvif_logs_blocking(host, port, user, password) {
         warn!(error = %e, "failed to cleanup device onvif logs before start");
     }
+
+    // Fail fast on missing inputs. Otherwise the tool will just wait forever for the RTSP port.
+    // These checks are cheap and dramatically improve diagnosability.
+    if let Some(h264) = h264_file {
+        device_assert_file_exists_blocking(host, port, user, password, h264, "h264")?;
+    }
+    if let Some(aac) = aac_file {
+        device_assert_file_exists_blocking(host, port, user, password, aac, "aac")?;
+    }
+
     let config_q = sh_single_quote(&format!("{}/config.toml", DEVICE_ONVIF_DIR));
     let onvif_cmd = if let Some(h264) = h264_file {
         let mut c = format!(
@@ -356,55 +526,77 @@ pub fn device_start_onvif_blocking(
         format!("./onvif-rust {}", config_q)
     };
 
-    let cmd = format!(
-        "cd {dir} && LOG=\"onvif.log.$(date +%Y%m%dT%H%M%S)\"; nohup {onvif_cmd} > \"$LOG\" 2>&1 & echo $! > {pidfile}",
-        dir = DEVICE_ONVIF_DIR,
-        onvif_cmd = onvif_cmd,
-        pidfile = DEVICE_ONVIF_PIDFILE
-    );
+    let cmd = device_start_command(&onvif_cmd);
     debug!(command = %cmd, "device start command");
-    run_telnet_command_blocking(host, port, &cmd, DEVICE_TELNET_READ_TIMEOUT_SEC)?;
+    run_ssh_command_blocking(
+        host,
+        port,
+        user,
+        password,
+        &cmd,
+        DEVICE_SSH_READ_TIMEOUT_SEC,
+    )?;
     Ok(())
 }
 
 /// Stop onvif-rust on the device (blocking).
-pub fn device_stop_onvif_blocking(host: &str, port: u16) -> Result<()> {
-    debug!(%host, port, "stopping onvif-rust on device");
+pub fn device_stop_onvif_blocking(host: &str, port: u16, user: &str, password: &str) -> Result<()> {
+    debug!(%host, port, %user, "stopping onvif-rust on device");
     let cmd = format!(
         "cd {dir} && if [ -f {pidfile} ]; then pid=\"$(cat {pidfile} 2>/dev/null || true)\"; case \"$pid\" in ''|*[!0-9]*) ;; *) kill \"$pid\" 2>/dev/null ;; esac; fi; pkill -f onvif-rust",
         dir = DEVICE_ONVIF_DIR,
         pidfile = DEVICE_ONVIF_PIDFILE
     );
-    run_telnet_command_blocking(host, port, &cmd, DEVICE_TELNET_READ_TIMEOUT_SEC)?;
+    run_ssh_command_blocking(
+        host,
+        port,
+        user,
+        password,
+        &cmd,
+        DEVICE_SSH_READ_TIMEOUT_SEC,
+    )?;
     Ok(())
 }
 
 /// Collect device telemetry (blocking).
-pub fn device_collect_telemetry_blocking(host: &str, port: u16) -> DeviceTelemetry {
+pub fn device_collect_telemetry_blocking(
+    host: &str,
+    port: u16,
+    user: &str,
+    password: &str,
+) -> DeviceTelemetry {
     let mut t = DeviceTelemetry::default();
-    debug!(%host, port, "collecting device telemetry");
+    debug!(%host, port, %user, "collecting device telemetry");
 
     let meminfo_cmd = format!(
-        "echo {} && cat /proc/meminfo && echo {}",
-        DEVICE_MARKER_BEGIN, DEVICE_MARKER_END
+        "{} && cat /proc/meminfo && {}",
+        marker_echo_begin_cmd(),
+        marker_echo_end_cmd(),
     );
-    let mut meminfo_raw =
-        match run_telnet_command_blocking(host, port, &meminfo_cmd, DEVICE_TELNET_READ_TIMEOUT_SEC)
-        {
-            Ok(s) => s,
-            Err(e) => {
-                t.error = Some(format!("meminfo: {}", e));
-                return t;
-            }
-        };
+    let mut meminfo_raw = match run_ssh_command_blocking(
+        host,
+        port,
+        user,
+        password,
+        &meminfo_cmd,
+        DEVICE_SSH_READ_TIMEOUT_SEC,
+    ) {
+        Ok(s) => s,
+        Err(e) => {
+            t.error = Some(format!("meminfo: {}", e));
+            return t;
+        }
+    };
     let mut meminfo = extract_between_markers(&meminfo_raw).unwrap_or(meminfo_raw.clone());
     let mut parsed = parse_meminfo(&meminfo);
     if parsed.0.is_none() && parsed.1.is_none() && parsed.2.is_none() {
-        match run_telnet_command_blocking(
+        match run_ssh_command_blocking(
             host,
             port,
+            user,
+            password,
             &meminfo_cmd,
-            DEVICE_TELNET_READ_TIMEOUT_SEC.saturating_add(10),
+            DEVICE_SSH_READ_TIMEOUT_SEC.saturating_add(10),
         ) {
             Ok(s) => {
                 meminfo_raw = s;
@@ -431,26 +623,34 @@ pub fn device_collect_telemetry_blocking(host: &str, port: u16) -> DeviceTelemet
     }
 
     let loadavg_cmd = format!(
-        "echo {} && cat /proc/loadavg && echo {}",
-        DEVICE_MARKER_BEGIN, DEVICE_MARKER_END
+        "{} && cat /proc/loadavg && {}",
+        marker_echo_begin_cmd(),
+        marker_echo_end_cmd(),
     );
-    let mut loadavg_raw =
-        match run_telnet_command_blocking(host, port, &loadavg_cmd, DEVICE_TELNET_READ_TIMEOUT_SEC)
-        {
-            Ok(s) => s,
-            Err(e) => {
-                t.error = Some(format!("loadavg: {}", e));
-                return t;
-            }
-        };
+    let mut loadavg_raw = match run_ssh_command_blocking(
+        host,
+        port,
+        user,
+        password,
+        &loadavg_cmd,
+        DEVICE_SSH_READ_TIMEOUT_SEC,
+    ) {
+        Ok(s) => s,
+        Err(e) => {
+            t.error = Some(format!("loadavg: {}", e));
+            return t;
+        }
+    };
     let mut loadavg = extract_between_markers(&loadavg_raw).unwrap_or(loadavg_raw.clone());
     let mut loads = parse_loadavg(&loadavg);
     if loads.0.is_none() && loads.1.is_none() && loads.2.is_none() {
-        match run_telnet_command_blocking(
+        match run_ssh_command_blocking(
             host,
             port,
+            user,
+            password,
             &loadavg_cmd,
-            DEVICE_TELNET_READ_TIMEOUT_SEC.saturating_add(10),
+            DEVICE_SSH_READ_TIMEOUT_SEC.saturating_add(10),
         ) {
             Ok(s) => {
                 loadavg_raw = s;
@@ -476,14 +676,17 @@ pub fn device_collect_telemetry_blocking(host: &str, port: u16) -> DeviceTelemet
         });
     }
 
-    let pgrep_raw = match run_telnet_command_blocking(
+    let pgrep_raw = match run_ssh_command_blocking(
         host,
         port,
+        user,
+        password,
         &format!(
-            "echo {} && ( pgrep -f onvif-rust 2>/dev/null || pidof onvif-rust 2>/dev/null || ps | grep '[o]nvif-rust' | awk '{{print $1}}'; true ) && echo {}",
-            DEVICE_MARKER_BEGIN, DEVICE_MARKER_END
+            "{} && ( pgrep -f onvif-rust 2>/dev/null || pidof onvif-rust 2>/dev/null || ps | grep '[o]nvif-rust' | awk '{{print $1}}'; true ) && {}",
+            marker_echo_begin_cmd(),
+            marker_echo_end_cmd(),
         ),
-        DEVICE_TELNET_READ_TIMEOUT_SEC,
+        DEVICE_SSH_READ_TIMEOUT_SEC,
     ) {
         Ok(s) => s,
         Err(e) => {
@@ -495,12 +698,20 @@ pub fn device_collect_telemetry_blocking(host: &str, port: u16) -> DeviceTelemet
     let mut pid = parse_pgrep_output(&pgrep_out);
     if pid.is_none() {
         let pidfile_cmd = format!(
-            "echo {} && cat {}/{} 2>/dev/null && echo {}",
-            DEVICE_MARKER_BEGIN, DEVICE_ONVIF_DIR, DEVICE_ONVIF_PIDFILE, DEVICE_MARKER_END
+            "{} && cat {}/{} 2>/dev/null && {}",
+            marker_echo_begin_cmd(),
+            DEVICE_ONVIF_DIR,
+            DEVICE_ONVIF_PIDFILE,
+            marker_echo_end_cmd(),
         );
-        if let Ok(raw) =
-            run_telnet_command_blocking(host, port, &pidfile_cmd, DEVICE_TELNET_READ_TIMEOUT_SEC)
-        {
+        if let Ok(raw) = run_ssh_command_blocking(
+            host,
+            port,
+            user,
+            password,
+            &pidfile_cmd,
+            DEVICE_SSH_READ_TIMEOUT_SEC,
+        ) {
             let pidfile_out = extract_between_markers(&raw).unwrap_or(raw);
             pid = parse_pgrep_output(&pidfile_out);
         }
@@ -513,14 +724,18 @@ pub fn device_collect_telemetry_blocking(host: &str, port: u16) -> DeviceTelemet
     t.onvif_pid = Some(pid);
 
     let status_cmd = format!(
-        "echo {} && cat /proc/{}/status 2>/dev/null && echo {}",
-        DEVICE_MARKER_BEGIN, pid, DEVICE_MARKER_END
+        "{} && cat /proc/{}/status 2>/dev/null && {}",
+        marker_echo_begin_cmd(),
+        pid,
+        marker_echo_end_cmd(),
     );
-    let status_raw = match run_telnet_command_blocking(
+    let status_raw = match run_ssh_command_blocking(
         host,
         port,
+        user,
+        password,
         &status_cmd,
-        DEVICE_TELNET_READ_TIMEOUT_SEC,
+        DEVICE_SSH_READ_TIMEOUT_SEC,
     ) {
         Ok(s) => s,
         Err(e) => {
@@ -545,8 +760,9 @@ pub fn device_collect_telemetry_blocking(host: &str, port: u16) -> DeviceTelemet
 #[cfg(test)]
 mod tests {
     use super::{
-        extract_between_markers, parse_loadavg, parse_meminfo, parse_pgrep_output,
-        parse_status_vmrss_vmsize, sanitize_filename_component, sh_single_quote,
+        device_list_onvif_logs_command, device_start_command, extract_between_markers,
+        parse_loadavg, parse_meminfo, parse_pgrep_output, parse_status_vmrss_vmsize,
+        sanitize_filename_component, sh_single_quote,
     };
 
     const FIXTURE_MEMINFO: &str = r#"MemTotal:          36540 kB
@@ -603,6 +819,13 @@ Threads:        1"#;
         let s = "echo __ANYKA_BEGIN__ && cat /proc/meminfo && echo __ANYKA_END__\n__ANYKA_BEGIN__\nMemTotal: 36540 kB\n__ANYKA_END__\n";
         let extracted = extract_between_markers(s).unwrap();
         assert_eq!(extracted, "MemTotal: 36540 kB");
+    }
+
+    #[test]
+    fn test_extract_between_markers_handles_split_marker_command_echo() {
+        let s = "anyka # echo __ANYKA_\"\"BEGIN__ && cat /proc/loadavg && echo __ANYKA_\"\"END__\n__ANYKA_BEGIN__\n2.00 2.01 2.05 1/57 23002\n__ANYKA_END__\n";
+        let extracted = extract_between_markers(s).unwrap();
+        assert_eq!(extracted, "2.00 2.01 2.05 1/57 23002");
     }
 
     #[test]
@@ -739,5 +962,24 @@ Threads:        1"#;
         let (rss, vmsize) = parse_status_vmrss_vmsize(s);
         assert_eq!(rss, Some(3660));
         assert_eq!(vmsize, Some(8820));
+    }
+
+    #[test]
+    fn test_device_list_onvif_logs_command_excludes_nohup_out() {
+        let cmd = device_list_onvif_logs_command();
+        assert!(cmd.contains("for f in onvif.log*;"));
+        assert!(!cmd.contains("nohup.out"));
+    }
+
+    #[test]
+    fn test_device_start_command_no_ld_library_path_or_log_capture() {
+        let cmd = device_start_command("./onvif-rust '/mnt/anyka_hack/onvif/config.toml'");
+        assert!(
+            cmd.contains(
+                "nohup ./onvif-rust '/mnt/anyka_hack/onvif/config.toml' >/dev/null 2>&1 &"
+            )
+        );
+        assert!(!cmd.contains("LD_LIBRARY_PATH="));
+        assert!(!cmd.contains("LOG="));
     }
 }
