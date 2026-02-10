@@ -11,6 +11,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use thiserror::Error;
 use tokio::sync::Mutex;
+use tokio::time::{self, Interval, MissedTickBehavior};
 
 /// Errors that can occur during mock video publishing
 #[derive(Error, Debug)]
@@ -270,7 +271,7 @@ impl MockVideoPublisher {
                 if let Some(access_units) = access_units_cache.as_ref() {
                     let mut frame_count: u32 = 0;
                     let frame_interval = Duration::from_millis(frame_duration_ms as u64);
-                    let mut next_send_deadline: Option<Instant> = None;
+                    let mut pacer = build_pacer(frame_interval);
                     let mut interrupted_for_zero_subscribers = false;
 
                     for access_unit in access_units.iter() {
@@ -287,8 +288,7 @@ impl MockVideoPublisher {
                             &sender,
                             BytesMut::from(access_unit.as_slice()),
                             timestamp,
-                            frame_interval,
-                            &mut next_send_deadline,
+                            &mut pacer,
                             &last_timestamp_ms,
                             frame_count,
                             &mut frames_since_report,
@@ -318,7 +318,7 @@ impl MockVideoPublisher {
                 let mut reader = reader.lock().await;
                 let mut frame_count: u32 = 0;
                 let frame_interval = Duration::from_millis(frame_duration_ms as u64);
-                let mut next_send_deadline: Option<Instant> = None;
+                let mut pacer = build_pacer(frame_interval);
                 let mut interrupted_for_zero_subscribers = false;
                 let mut pending_access_unit = BytesMut::new();
                 let mut pending_access_unit_timestamp: Option<u32> = None;
@@ -337,8 +337,7 @@ impl MockVideoPublisher {
                                     &sender,
                                     std::mem::take(&mut pending_access_unit),
                                     timestamp,
-                                    frame_interval,
-                                    &mut next_send_deadline,
+                                    &mut pacer,
                                     &last_timestamp_ms,
                                     frame_count,
                                     &mut frames_since_report,
@@ -373,8 +372,7 @@ impl MockVideoPublisher {
                                     &sender,
                                     std::mem::take(&mut pending_access_unit),
                                     timestamp,
-                                    frame_interval,
-                                    &mut next_send_deadline,
+                                    &mut pacer,
                                     &last_timestamp_ms,
                                     frame_count,
                                     &mut frames_since_report,
@@ -411,8 +409,7 @@ impl MockVideoPublisher {
                                     &sender,
                                     std::mem::take(&mut pending_access_unit),
                                     timestamp,
-                                    frame_interval,
-                                    &mut next_send_deadline,
+                                    &mut pacer,
                                     &last_timestamp_ms,
                                     frame_count,
                                     &mut frames_since_report,
@@ -455,8 +452,7 @@ impl MockVideoPublisher {
                         &sender,
                         std::mem::take(&mut pending_access_unit),
                         timestamp,
-                        frame_interval,
-                        &mut next_send_deadline,
+                        &mut pacer,
                         &last_timestamp_ms,
                         frame_count,
                         &mut frames_since_report,
@@ -637,8 +633,7 @@ async fn send_access_unit(
     sender: &FrameDataSender,
     data: BytesMut,
     timestamp: u32,
-    frame_interval: Duration,
-    next_send_deadline: &mut Option<Instant>,
+    pacer: &mut Option<Interval>,
     last_timestamp_ms: &AtomicU32,
     frame_count: u32,
     frames_since_report: &mut u64,
@@ -649,31 +644,12 @@ async fn send_access_unit(
     }
     let access_unit_size = data.len();
 
-    // Pace against an absolute deadline sequence. This compensates for timer
-    // quantization on embedded kernels and keeps average FPS close to target.
-    if !frame_interval.is_zero()
-        && let Some(deadline) = *next_send_deadline
-    {
-        let now = Instant::now();
-        if let Some(remaining) = deadline.checked_duration_since(now) {
-            tokio::time::sleep(remaining).await;
-        }
+    if let Some(interval) = pacer.as_mut() {
+        interval.tick().await;
     }
 
     if sender.send(FrameData::Video { timestamp, data }).is_err() {
         return false;
-    }
-
-    if !frame_interval.is_zero() {
-        let now = Instant::now();
-        let mut next = (*next_send_deadline)
-            .map(|deadline| deadline + frame_interval)
-            .unwrap_or_else(|| now + frame_interval);
-        // If we are more than one frame behind, resync to avoid sustained catch-up bursts.
-        if now > next + frame_interval {
-            next = now + frame_interval;
-        }
-        *next_send_deadline = Some(next);
     }
 
     last_timestamp_ms.store(timestamp, Ordering::Relaxed);
@@ -688,8 +664,11 @@ async fn send_access_unit(
         );
     }
 
-    let elapsed = last_report.elapsed();
-    if elapsed >= Duration::from_secs(1) {
+    if *frames_since_report >= 25 {
+        let elapsed = last_report.elapsed();
+        if elapsed < Duration::from_secs(1) {
+            return true;
+        }
         let fps = compute_fps(*frames_since_report, elapsed);
         log::debug!(
             "mock_publisher: sent {} frames in {:.2}s ({:.2} fps)",
@@ -702,6 +681,15 @@ async fn send_access_unit(
     }
 
     true
+}
+
+fn build_pacer(frame_interval: Duration) -> Option<Interval> {
+    if frame_interval.is_zero() {
+        return None;
+    }
+    let mut interval = time::interval(frame_interval);
+    interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
+    Some(interval)
 }
 
 fn append_annexb_nal(out: &mut BytesMut, nal: &[u8]) {

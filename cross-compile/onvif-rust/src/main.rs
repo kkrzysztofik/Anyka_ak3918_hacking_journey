@@ -63,8 +63,14 @@ struct CliArgs {
     config_path: String,
 }
 
+#[derive(Debug)]
+struct StartupArgs {
+    validation_config: Option<H264PlaybackConfig>,
+    config_path: String,
+}
+
 /// Parse CLI arguments for normal or validation mode
-fn parse_arguments() -> (Option<H264PlaybackConfig>, String) {
+fn parse_arguments() -> StartupArgs {
     let cli = CliArgs::parse();
 
     let validation_config = if cli.validation_mode {
@@ -86,14 +92,17 @@ fn parse_arguments() -> (Option<H264PlaybackConfig>, String) {
         None
     };
 
-    (validation_config, cli.config_path)
+    StartupArgs {
+        validation_config,
+        config_path: cli.config_path,
+    }
 }
 
 /// Get runtime configuration (worker threads, blocking threads) based on platform.
 ///
 /// For ARM embedded targets (single-core AK3918), use minimal threading to reduce
 /// scheduler contention. For host builds, use available parallelism.
-fn get_runtime_config() -> (usize, usize) {
+fn get_runtime_config(validation_mode: bool) -> (usize, usize) {
     fn parse_positive_usize(var_name: &str) -> Option<usize> {
         std::env::var(var_name)
             .ok()
@@ -106,8 +115,11 @@ fn get_runtime_config() -> (usize, usize) {
         // Can be overridden for tuning:
         //   ONVIF_TOKIO_WORKER_THREADS
         //   ONVIF_TOKIO_MAX_BLOCKING_THREADS
-        let workers = parse_positive_usize("ONVIF_TOKIO_WORKER_THREADS").unwrap_or(2);
-        let blocking = parse_positive_usize("ONVIF_TOKIO_MAX_BLOCKING_THREADS").unwrap_or(16);
+        let default_workers = if validation_mode { 1 } else { 2 };
+        let default_blocking = if validation_mode { 2 } else { 16 };
+        let workers = parse_positive_usize("ONVIF_TOKIO_WORKER_THREADS").unwrap_or(default_workers);
+        let blocking =
+            parse_positive_usize("ONVIF_TOKIO_MAX_BLOCKING_THREADS").unwrap_or(default_blocking);
         (workers, blocking)
     } else {
         // Host: use available parallelism
@@ -158,8 +170,11 @@ fn install_validation_panic_hook() {
 }
 
 fn main() -> Result<()> {
+    let startup_args = parse_arguments();
+    let validation_mode = startup_args.validation_config.is_some();
+
     // Build explicit tokio runtime with platform-specific configuration
-    let (worker_threads, max_blocking_threads) = get_runtime_config();
+    let (worker_threads, max_blocking_threads) = get_runtime_config(validation_mode);
     eprintln!(
         "onvif-rust runtime config: worker_threads={}, max_blocking_threads={}",
         worker_threads, max_blocking_threads
@@ -175,15 +190,17 @@ fn main() -> Result<()> {
         .context("Failed to create tokio runtime")?;
 
     // Run async main on the runtime
-    runtime.block_on(async_main())
+    runtime.block_on(async_main(startup_args))
 }
 
 /// Async entry point for the ONVIF daemon.
 ///
 /// Separated from main() to allow explicit runtime configuration.
-async fn async_main() -> Result<()> {
-    // Parse command line arguments
-    let (validation_config, config_path) = parse_arguments();
+async fn async_main(startup_args: StartupArgs) -> Result<()> {
+    let StartupArgs {
+        validation_config,
+        config_path,
+    } = startup_args;
 
     if let Some(config) = validation_config {
         install_validation_panic_hook();
@@ -269,6 +286,26 @@ fn env_flag(name: &str, default: bool) -> bool {
             _ => default,
         },
         Err(_) => default,
+    }
+}
+
+fn fanout_validation_frame(
+    frame_tx_rtsp: &tokio::sync::mpsc::UnboundedSender<FrameData>,
+    frame_tx_httpflv: Option<&tokio::sync::mpsc::UnboundedSender<FrameData>>,
+    frame: FrameData,
+) {
+    match frame {
+        FrameData::Audio { .. } => {
+            let _ = frame_tx_rtsp.send(frame);
+        }
+        frame => {
+            if let Some(tx_httpflv) = frame_tx_httpflv {
+                let _ = frame_tx_rtsp.send(frame.clone());
+                let _ = tx_httpflv.send(frame);
+            } else {
+                let _ = frame_tx_rtsp.send(frame);
+            }
+        }
     }
 }
 
@@ -667,17 +704,7 @@ async fn run_validation_mode(config: H264PlaybackConfig, config_path: &str) -> R
 
     let fanout_handle = tokio::spawn(async move {
         while let Some(frame) = frame_rx_from_publisher.recv().await {
-            match frame {
-                FrameData::Audio { .. } => {
-                    let _ = frame_tx_rtsp.send(frame);
-                }
-                _ => {
-                    let _ = frame_tx_rtsp.send(frame.clone());
-                    if let Some(tx_httpflv) = frame_tx_httpflv.as_ref() {
-                        let _ = tx_httpflv.send(frame);
-                    }
-                }
-            }
+            fanout_validation_frame(&frame_tx_rtsp, frame_tx_httpflv.as_ref(), frame);
         }
     });
 
@@ -726,7 +753,7 @@ async fn run_validation_mode(config: H264PlaybackConfig, config_path: &str) -> R
 
     // Wire up on-demand publishing: publishers check subscriber count before sending frames
     let rtsp_handle_for_video = Arc::clone(&rtsp_subscriber_handle);
-    let video_cached_subscriber_count = Arc::new(AtomicUsize::new(1));
+    let video_cached_subscriber_count = Arc::new(AtomicUsize::new(0));
     let video_cached_subscriber_count_for_cb = Arc::clone(&video_cached_subscriber_count);
     video_publisher.set_subscriber_count_callback(Arc::new(move || {
         if let Ok(stats) = rtsp_handle_for_video.try_lock() {
@@ -740,7 +767,7 @@ async fn run_validation_mode(config: H264PlaybackConfig, config_path: &str) -> R
 
     if let Some(ref mut audio_pub) = audio_publisher {
         let rtsp_handle_for_audio = Arc::clone(&rtsp_subscriber_handle);
-        let audio_cached_subscriber_count = Arc::new(AtomicUsize::new(1));
+        let audio_cached_subscriber_count = Arc::new(AtomicUsize::new(0));
         let audio_cached_subscriber_count_for_cb = Arc::clone(&audio_cached_subscriber_count);
         audio_pub.set_subscriber_count_callback(Arc::new(move || {
             if let Ok(stats) = rtsp_handle_for_audio.try_lock() {
@@ -920,7 +947,7 @@ mod tests {
     #[test]
     fn test_runtime_config_on_target_platform() {
         // Test runtime configuration based on target architecture
-        let (worker_threads, max_blocking_threads) = get_runtime_config();
+        let (worker_threads, max_blocking_threads) = get_runtime_config(false);
 
         if cfg!(target_arch = "arm") {
             // Embedded ARM: allow light concurrency for async + blocking work
@@ -943,6 +970,25 @@ mod tests {
     }
 
     #[test]
+    fn test_runtime_config_validation_mode_on_arm() {
+        let (worker_threads, max_blocking_threads) = get_runtime_config(true);
+
+        if cfg!(target_arch = "arm") {
+            assert_eq!(
+                worker_threads, 1,
+                "ARM validation mode should default to 1 worker thread"
+            );
+            assert_eq!(
+                max_blocking_threads, 2,
+                "ARM validation mode should default to 2 blocking threads"
+            );
+        } else {
+            assert!(worker_threads >= 1);
+            assert_eq!(max_blocking_threads, 512);
+        }
+    }
+
+    #[test]
     fn test_normal_mode_config_path() {
         // Test: when no --validation-mode flag, config_path uses default and validation_config is None
         // We test this by calling parse_arguments with mocked args via env
@@ -951,7 +997,10 @@ mod tests {
         }
 
         // Simulate parsing with empty args (just program name)
-        let (validation_config, config_path) = parse_arguments();
+        let StartupArgs {
+            validation_config,
+            config_path,
+        } = parse_arguments();
 
         // Verify defaults
         assert!(
@@ -1067,6 +1116,36 @@ mod tests {
             !frames.iter().any(|f| matches!(f, FrameData::Audio { .. })),
             "audio_config must not be injected as an RTP audio frame"
         );
+    }
+
+    #[tokio::test]
+    async fn test_fanout_validation_frame_rtsp_only_routes_without_httpflv() {
+        let (rtsp_tx, mut rtsp_rx) = tokio::sync::mpsc::unbounded_channel::<FrameData>();
+        let frame = FrameData::Video {
+            timestamp: 10,
+            data: BytesMut::from(&b"video"[..]),
+        };
+
+        fanout_validation_frame(&rtsp_tx, None, frame);
+        let received = rtsp_rx.recv().await.expect("rtsp frame");
+        assert!(matches!(received, FrameData::Video { timestamp: 10, .. }));
+    }
+
+    #[tokio::test]
+    async fn test_fanout_validation_frame_with_httpflv_routes_to_both() {
+        let (rtsp_tx, mut rtsp_rx) = tokio::sync::mpsc::unbounded_channel::<FrameData>();
+        let (http_tx, mut http_rx) = tokio::sync::mpsc::unbounded_channel::<FrameData>();
+        let frame = FrameData::Video {
+            timestamp: 20,
+            data: BytesMut::from(&b"video2"[..]),
+        };
+
+        fanout_validation_frame(&rtsp_tx, Some(&http_tx), frame);
+
+        let rtsp_frame = rtsp_rx.recv().await.expect("rtsp frame");
+        let http_frame = http_rx.recv().await.expect("httpflv frame");
+        assert!(matches!(rtsp_frame, FrameData::Video { timestamp: 20, .. }));
+        assert!(matches!(http_frame, FrameData::Video { timestamp: 20, .. }));
     }
 
     #[test]

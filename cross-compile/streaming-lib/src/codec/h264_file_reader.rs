@@ -80,6 +80,9 @@ pub struct NalUnit {
 pub struct H264FileReader {
     file: File,
     buffer: Vec<u8>,
+    annexb_data: Vec<u8>,
+    annexb_start: usize,
+    annexb_eof: bool,
     current_pos: u64,
     file_size: u64,
     frame_rate: u32,
@@ -129,6 +132,9 @@ impl H264FileReader {
         Ok(Self {
             file,
             buffer: vec![0u8; Self::BUFFER_SIZE],
+            annexb_data: Vec::with_capacity(Self::BUFFER_SIZE),
+            annexb_start: 0,
+            annexb_eof: false,
             current_pos: 0,
             file_size,
             frame_rate,
@@ -177,79 +183,59 @@ impl H264FileReader {
     }
 
     async fn read_next_nal_annexb(&mut self) -> Result<Option<NalUnit>, H264FileError> {
-        if self.current_pos >= self.file_size {
-            return Ok(None);
+        loop {
+            if self.annexb_start >= self.annexb_data.len() && !self.fill_annexb_buffer().await? {
+                return Ok(None);
+            }
+
+            let (start_code_idx, start_code_len) =
+                match Self::find_start_code(&self.annexb_data, self.annexb_start) {
+                    Some(found) => found,
+                    None => {
+                        if self.fill_annexb_buffer().await? {
+                            continue;
+                        }
+
+                        let remaining = self.annexb_data.len().saturating_sub(self.annexb_start);
+                        self.consume_annexb_bytes(remaining);
+                        return Ok(None);
+                    }
+                };
+
+            if start_code_idx > self.annexb_start {
+                self.consume_annexb_bytes(start_code_idx - self.annexb_start);
+                continue;
+            }
+
+            let nal_start = start_code_idx + start_code_len;
+            if let Some((next_start_code_idx, _)) =
+                Self::find_start_code(&self.annexb_data, nal_start)
+            {
+                if next_start_code_idx == nal_start {
+                    self.consume_annexb_bytes(start_code_len);
+                    continue;
+                }
+
+                let nal_data = self.annexb_data[nal_start..next_start_code_idx].to_vec();
+                self.consume_annexb_bytes(next_start_code_idx - self.annexb_start);
+                return Self::build_annexb_nal(nal_data, start_code_len).map(Some);
+            }
+
+            if self.fill_annexb_buffer().await? {
+                continue;
+            }
+
+            if nal_start >= self.annexb_data.len() {
+                let remaining = self.annexb_data.len().saturating_sub(self.annexb_start);
+                self.consume_annexb_bytes(remaining);
+                return Ok(None);
+            }
+
+            let nal_data = self.annexb_data[nal_start..].to_vec();
+            let remaining = self.annexb_data.len().saturating_sub(self.annexb_start);
+            self.consume_annexb_bytes(remaining);
+            return Self::build_annexb_nal(nal_data, start_code_len).map(Some);
         }
-
-        // Find the next start code
-        // Returns (offset_in_buffer, start_code_length)
-        // File pointer is positioned just before the start code
-        let (_offset, start_code_len) = self.find_next_start_code().await?;
-
-        // If start_code_len == 0, we've reached EOF without finding a start code
-        if start_code_len == 0 {
-            return Ok(None);
-        }
-
-        // Skip past the start code with relative seek
-        self.file
-            .seek(SeekFrom::Current(start_code_len as i64))
-            .await?;
-        self.current_pos += start_code_len as u64;
-
-        // Find the next start code to know where this NAL unit ends
-        let (next_offset, next_start_len) = self.find_next_start_code().await?;
-
-        // Determine how many bytes to read for this NAL unit
-        let nal_data_len = if next_start_len == 0 {
-            // EOF reached - read all remaining bytes as the final NAL unit
-            (self.file_size - self.current_pos) as usize
-        } else {
-            // Next start code found - read up to it
-            next_offset
-        };
-
-        // Handle empty NAL data at EOF
-        if nal_data_len == 0 {
-            return Ok(None);
-        }
-
-        // CRITICAL FIX: After find_next_start_code(), the file pointer is positioned
-        // AT the next start code. We need to seek backward to read the NAL data
-        // that comes BEFORE the next start code (from current_pos to next_start_code).
-        if next_start_len != 0 {
-            self.file
-                .seek(SeekFrom::Current(-(nal_data_len as i64)))
-                .await?;
-            self.current_pos -= nal_data_len as u64;
-        }
-
-        // Read NAL unit data from the correct position
-        let mut nal_data = vec![0u8; nal_data_len];
-        let bytes_read = self.file.read(&mut nal_data).await?;
-        if bytes_read != nal_data_len {
-            nal_data.truncate(bytes_read);
-        }
-        self.current_pos += bytes_read as u64;
-
-        // Extract NAL unit type from first byte
-        if nal_data.is_empty() {
-            return Err(H264FileError::InvalidNalUnit);
-        }
-
-        let forbidden_bit = (nal_data[0] >> 7) & 1;
-        if forbidden_bit != 0 {
-            return Err(H264FileError::InvalidNalUnit);
-        }
-
-        let _nal_ref_idc = (nal_data[0] >> 5) & 3;
-        let nal_unit_type = nal_data[0] & 0x1f;
-
-        Ok(Some(NalUnit {
-            unit_type: NalUnitType::from(nal_unit_type),
-            data: nal_data,
-            start_code_length: start_code_len,
-        }))
     }
 
     async fn read_next_nal_avcc(&mut self) -> Result<Option<NalUnit>, H264FileError> {
@@ -295,85 +281,87 @@ impl H264FileReader {
         }))
     }
 
-    /// Find the position and length of the next start code in buffer
-    ///
-    /// Returns (offset_in_buffer, start_code_length)
-    /// Seeks back so file pointer is positioned just before the start code.
-    /// If no start code found at EOF, returns (0, 0) and rewinds all read bytes.
-    async fn find_next_start_code(&mut self) -> Result<(usize, usize), H264FileError> {
-        let start_pos = self.current_pos;
-        let mut total_read: usize = 0;
-        let mut tail_len: usize = 0;
-
-        loop {
-            let bytes_read = self.file.read(&mut self.buffer[tail_len..]).await?;
-            if bytes_read == 0 {
-                if total_read > 0 {
-                    self.file
-                        .seek(SeekFrom::Current(-(total_read as i64)))
-                        .await?;
-                }
-                return Ok((0, 0));
-            }
-
-            let buf_len = tail_len + bytes_read;
-            let base_offset = total_read.saturating_sub(tail_len);
-
-            // Boyer-Moore-inspired optimization for 4-byte start code
-            // Search with last-byte-first heuristic for faster rejection
-            let mut i = 0;
-            while i + 3 < buf_len {
-                // Check the last byte of the 4-byte pattern first (0x01)
-                if self.buffer[i + 3] == 0x01 {
-                    // Potential match - verify the full pattern
-                    if self.buffer[i] == 0x00
-                        && self.buffer[i + 1] == 0x00
-                        && self.buffer[i + 2] == 0x00
-                    {
-                        let offset = base_offset + i;
-                        let seek_back = (total_read + bytes_read).saturating_sub(offset) as i64;
-                        self.file.seek(SeekFrom::Current(-seek_back)).await?;
-                        self.current_pos = start_pos + offset as u64;
-                        return Ok((offset, 4));
-                    }
-                }
-                // Always advance by 1 to ensure we don't miss overlapping patterns
-                i += 1;
-            }
-
-            // Boyer-Moore-inspired optimization for 3-byte start code
-            i = 0;
-            while i + 2 < buf_len {
-                // Check the last byte of the 3-byte pattern first (0x01)
-                if self.buffer[i + 2] == 0x01 {
-                    // Potential match - verify the full pattern
-                    if self.buffer[i] == 0x00 && self.buffer[i + 1] == 0x00 {
-                        let offset = base_offset + i;
-                        let seek_back = (total_read + bytes_read).saturating_sub(offset) as i64;
-                        self.file.seek(SeekFrom::Current(-seek_back)).await?;
-                        self.current_pos = start_pos + offset as u64;
-                        return Ok((offset, 3));
-                    }
-                }
-                // Always advance by 1 to ensure we don't miss overlapping patterns
-                i += 1;
-            }
-
-            total_read += bytes_read;
-
-            // No start code found in this chunk
-            if bytes_read < Self::BUFFER_SIZE.saturating_sub(tail_len) {
-                // End of file reached without finding start code - rewind all read bytes
-                self.file
-                    .seek(SeekFrom::Current(-(total_read as i64)))
-                    .await?;
-                return Ok((0, 0));
-            }
-
-            // Preserve tail for start codes spanning the buffer boundary
-            tail_len = 3.min(buf_len);
-            self.buffer.copy_within(buf_len - tail_len..buf_len, 0);
+    fn build_annexb_nal(
+        nal_data: Vec<u8>,
+        start_code_length: usize,
+    ) -> Result<NalUnit, H264FileError> {
+        if nal_data.is_empty() {
+            return Err(H264FileError::InvalidNalUnit);
         }
+
+        let forbidden_bit = (nal_data[0] >> 7) & 1;
+        if forbidden_bit != 0 {
+            return Err(H264FileError::InvalidNalUnit);
+        }
+
+        let nal_unit_type = nal_data[0] & 0x1f;
+        Ok(NalUnit {
+            unit_type: NalUnitType::from(nal_unit_type),
+            data: nal_data,
+            start_code_length,
+        })
+    }
+
+    async fn fill_annexb_buffer(&mut self) -> Result<bool, H264FileError> {
+        if self.annexb_eof {
+            return Ok(false);
+        }
+
+        let bytes_read = self.file.read(&mut self.buffer).await?;
+        if bytes_read == 0 {
+            self.annexb_eof = true;
+            return Ok(false);
+        }
+
+        self.annexb_data
+            .extend_from_slice(&self.buffer[..bytes_read]);
+        Ok(true)
+    }
+
+    fn consume_annexb_bytes(&mut self, count: usize) {
+        let available = self.annexb_data.len().saturating_sub(self.annexb_start);
+        let consumed = count.min(available);
+        self.annexb_start += consumed;
+        self.current_pos = self.current_pos.saturating_add(consumed as u64);
+        self.compact_annexb_buffer();
+    }
+
+    fn compact_annexb_buffer(&mut self) {
+        if self.annexb_start == 0 {
+            return;
+        }
+        if self.annexb_start >= self.annexb_data.len() {
+            self.annexb_data.clear();
+            self.annexb_start = 0;
+            return;
+        }
+        if self.annexb_start >= Self::BUFFER_SIZE {
+            self.annexb_data.drain(..self.annexb_start);
+            self.annexb_start = 0;
+        }
+    }
+
+    fn find_start_code(data: &[u8], from: usize) -> Option<(usize, usize)> {
+        if data.len() < 3 || from >= data.len() {
+            return None;
+        }
+
+        let mut i = from;
+        while i + 2 < data.len() {
+            if i + 3 < data.len()
+                && data[i] == 0x00
+                && data[i + 1] == 0x00
+                && data[i + 2] == 0x00
+                && data[i + 3] == 0x01
+            {
+                return Some((i, 4));
+            }
+            if data[i] == 0x00 && data[i + 1] == 0x00 && data[i + 2] == 0x01 {
+                return Some((i, 3));
+            }
+            i += 1;
+        }
+        None
     }
 
     /// Extract SPS (Sequence Parameter Set) from next NAL units
@@ -382,8 +370,7 @@ impl H264FileReader {
     ///
     /// Tuple of (SPS bytes, PPS bytes) or error
     pub async fn extract_sps_pps(&mut self) -> Result<(Vec<u8>, Vec<u8>), H264FileError> {
-        self.file.seek(SeekFrom::Start(0)).await?;
-        self.current_pos = 0;
+        self.reset().await?;
 
         let scan_len = std::cmp::min(self.file_size as usize, 1024 * 1024);
         let mut scan_buf = vec![0u8; scan_len];
@@ -392,8 +379,7 @@ impl H264FileReader {
 
         let scan_result = Self::scan_sps_pps_from_buffer(&scan_buf);
 
-        self.file.seek(SeekFrom::Start(0)).await?;
-        self.current_pos = 0;
+        self.reset().await?;
 
         let (sps, pps) = if let Some(found) = scan_result {
             found
@@ -427,8 +413,7 @@ impl H264FileReader {
             (sps, pps)
         };
 
-        self.file.seek(SeekFrom::Start(0)).await?;
-        self.current_pos = 0;
+        self.reset().await?;
 
         if sps.is_empty() || pps.is_empty() {
             return Err(H264FileError::NoNalUnits);
@@ -567,6 +552,9 @@ impl H264FileReader {
     pub async fn reset(&mut self) -> Result<(), H264FileError> {
         self.file.seek(SeekFrom::Start(0)).await?;
         self.current_pos = 0;
+        self.annexb_data.clear();
+        self.annexb_start = 0;
+        self.annexb_eof = false;
         Ok(())
     }
 

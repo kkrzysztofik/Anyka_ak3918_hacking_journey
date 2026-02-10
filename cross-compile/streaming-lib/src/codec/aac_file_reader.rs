@@ -53,6 +53,9 @@ pub struct AacFrame {
 pub struct AacFileReader {
     file: File,
     buffer: Vec<u8>,
+    parse_data: Vec<u8>,
+    parse_start: usize,
+    parse_eof: bool,
     current_pos: u64,
     file_size: u64,
 
@@ -119,6 +122,9 @@ impl AacFileReader {
         Ok(Self {
             file,
             buffer: vec![0u8; Self::BUFFER_SIZE],
+            parse_data: Vec::with_capacity(Self::BUFFER_SIZE),
+            parse_start: 0,
+            parse_eof: false,
             current_pos: 0,
             file_size,
             sample_rate,
@@ -136,96 +142,97 @@ impl AacFileReader {
     ///
     /// `Option<AacFrame>` if successful, None at EOF, or AacFileError
     pub async fn read_next_frame(&mut self) -> Result<Option<AacFrame>, AacFileError> {
-        if self.current_pos >= self.file_size {
-            return Ok(None);
-        }
+        loop {
+            if !self.ensure_parse_bytes(Self::MIN_ADTS_HEADER_SIZE).await? {
+                return Ok(None);
+            }
 
-        // Find ADTS sync word
-        let header_offset = self.find_next_sync_word().await?;
-        if header_offset.is_none() {
-            return Ok(None); // EOF
-        }
-
-        // Read ADTS header (7 or 9 bytes)
-        let mut header = vec![0u8; Self::MIN_ADTS_HEADER_SIZE];
-        self.file.read_exact(&mut header).await?;
-        self.current_pos += Self::MIN_ADTS_HEADER_SIZE as u64;
-
-        // Validate sync word
-        if (header[0] != 0xFF) || ((header[1] & 0xF0) != 0xF0) {
-            return Err(AacFileError::InvalidAdtsHeader);
-        }
-
-        // Check protection_absent bit (1 = no CRC, 0 = CRC present)
-        let protection_absent = (header[1] & 0x01) != 0;
-        let adts_header_size = if protection_absent { 7 } else { 9 };
-
-        // Read CRC if present
-        if !protection_absent {
-            let mut crc = vec![0u8; 2];
-            self.file.read_exact(&mut crc).await?;
-            self.current_pos += 2;
-        }
-
-        // Extract frame length (13 bits across bytes 3-5)
-        let frame_length = (((header[3] & 0x03) as usize) << 11)
-            | ((header[4] as usize) << 3)
-            | ((header[5] as usize) >> 5);
-
-        // Validate frame length
-        if frame_length < adts_header_size {
-            return Err(AacFileError::InvalidFrameLength);
-        }
-
-        // Calculate payload size
-        let payload_size = frame_length - adts_header_size;
-
-        // Read AAC payload
-        let mut payload = vec![0u8; payload_size];
-        self.file.read_exact(&mut payload).await?;
-        self.current_pos += payload_size as u64;
-
-        // Extract metadata from ADTS header
-        let profile = ((header[2] >> 6) & 0x03) + 1;
-        let sampling_freq_index = (header[2] >> 2) & 0x0F;
-        let channel_config = ((header[2] & 0x01) << 2) | ((header[3] >> 6) & 0x03);
-
-        // Cache config on first frame
-        if self.profile.is_none() {
-            self.profile = Some(profile);
-            self.sampling_frequency_index = Some(sampling_freq_index);
-            self.channel_configuration = Some(channel_config);
-        }
-
-        // Get actual sample rate from index
-        let actual_sample_rate = Self::AAC_SAMPLING_RATES
-            .iter()
-            .find(|(idx, _)| *idx == sampling_freq_index)
-            .map(|(_, rate)| *rate)
-            .unwrap_or(self.sample_rate);
-
-        if self.sample_rate != actual_sample_rate {
-            log::warn!(
-                "aac_file_reader: configured sample_rate={} differs from ADTS sample_rate={}, using ADTS value",
-                self.sample_rate,
-                actual_sample_rate
-            );
-            self.sample_rate = actual_sample_rate;
-            self.frame_duration_ms = if actual_sample_rate > 0 {
-                (1024 * 1000) / actual_sample_rate
-            } else {
-                self.frame_duration_ms
+            let sync_index = match Self::find_sync_word(&self.parse_data, self.parse_start) {
+                Some(index) => index,
+                None => {
+                    if self.fill_parse_buffer().await? {
+                        continue;
+                    }
+                    let remaining = self.parse_data.len().saturating_sub(self.parse_start);
+                    self.consume_parse_bytes(remaining);
+                    return Ok(None);
+                }
             };
-        }
 
-        Ok(Some(AacFrame {
-            data: payload,
-            adts_header_size,
-            total_frame_size: frame_length,
-            profile,
-            sample_rate: actual_sample_rate,
-            channels: channel_config,
-        }))
+            if sync_index > self.parse_start {
+                self.consume_parse_bytes(sync_index - self.parse_start);
+                continue;
+            }
+
+            let header =
+                &self.parse_data[self.parse_start..self.parse_start + Self::MIN_ADTS_HEADER_SIZE];
+            if (header[0] != 0xFF) || ((header[1] & 0xF0) != 0xF0) {
+                self.consume_parse_bytes(1);
+                continue;
+            }
+
+            let protection_absent = (header[1] & 0x01) != 0;
+            let adts_header_size = if protection_absent { 7 } else { 9 };
+            if !self.ensure_parse_bytes(adts_header_size).await? {
+                return Ok(None);
+            }
+
+            let header = &self.parse_data[self.parse_start..self.parse_start + adts_header_size];
+            let frame_length = (((header[3] & 0x03) as usize) << 11)
+                | ((header[4] as usize) << 3)
+                | ((header[5] as usize) >> 5);
+            let profile = ((header[2] >> 6) & 0x03) + 1;
+            let sampling_freq_index = (header[2] >> 2) & 0x0F;
+            let channel_config = ((header[2] & 0x01) << 2) | ((header[3] >> 6) & 0x03);
+
+            if frame_length < adts_header_size {
+                return Err(AacFileError::InvalidFrameLength);
+            }
+
+            if !self.ensure_parse_bytes(frame_length).await? {
+                return Ok(None);
+            }
+
+            let frame_end = self.parse_start + frame_length;
+            let payload = self.parse_data[self.parse_start + adts_header_size..frame_end].to_vec();
+
+            if self.profile.is_none() {
+                self.profile = Some(profile);
+                self.sampling_frequency_index = Some(sampling_freq_index);
+                self.channel_configuration = Some(channel_config);
+            }
+
+            let actual_sample_rate = Self::AAC_SAMPLING_RATES
+                .iter()
+                .find(|(idx, _)| *idx == sampling_freq_index)
+                .map(|(_, rate)| *rate)
+                .unwrap_or(self.sample_rate);
+
+            if self.sample_rate != actual_sample_rate {
+                log::warn!(
+                    "aac_file_reader: configured sample_rate={} differs from ADTS sample_rate={}, using ADTS value",
+                    self.sample_rate,
+                    actual_sample_rate
+                );
+                self.sample_rate = actual_sample_rate;
+                self.frame_duration_ms = if actual_sample_rate > 0 {
+                    (1024 * 1000) / actual_sample_rate
+                } else {
+                    self.frame_duration_ms
+                };
+            }
+
+            self.consume_parse_bytes(frame_length);
+
+            return Ok(Some(AacFrame {
+                data: payload,
+                adts_header_size,
+                total_frame_size: frame_length,
+                profile,
+                sample_rate: actual_sample_rate,
+                channels: channel_config,
+            }));
+        }
     }
 
     /// Extract AudioSpecificConfig from ADTS headers (for SDP/RTP)
@@ -272,8 +279,7 @@ impl AacFileReader {
         self.audio_config = Some(config.clone());
 
         // Restore position
-        self.file.seek(SeekFrom::Start(saved_pos)).await?;
-        self.current_pos = saved_pos;
+        self.seek_to_position(saved_pos).await?;
 
         Ok(config)
     }
@@ -291,8 +297,7 @@ impl AacFileReader {
 
     /// Reset file position to beginning
     pub async fn reset(&mut self) -> Result<(), AacFileError> {
-        self.file.seek(SeekFrom::Start(0)).await?;
-        self.current_pos = 0;
+        self.seek_to_position(0).await?;
         Ok(())
     }
 
@@ -306,45 +311,76 @@ impl AacFileReader {
         self.file_size
     }
 
-    /// Find the next ADTS sync word in the file
-    ///
-    /// Returns the offset in the buffer where the sync word was found
-    async fn find_next_sync_word(&mut self) -> Result<Option<usize>, AacFileError> {
-        loop {
-            let bytes_read = self.file.read(&mut self.buffer).await?;
+    async fn seek_to_position(&mut self, position: u64) -> Result<(), AacFileError> {
+        self.file.seek(SeekFrom::Start(position)).await?;
+        self.current_pos = position;
+        self.parse_data.clear();
+        self.parse_start = 0;
+        self.parse_eof = false;
+        Ok(())
+    }
 
-            if bytes_read == 0 {
-                return Ok(None); // EOF
+    async fn ensure_parse_bytes(&mut self, required: usize) -> Result<bool, AacFileError> {
+        while self.parse_data.len().saturating_sub(self.parse_start) < required {
+            if !self.fill_parse_buffer().await? {
+                return Ok(false);
             }
-
-            // Boyer-Moore-inspired optimization for AAC sync word search
-            // Sync word: 0xFF 0xF? (12 bits), check second byte first
-            let mut i = 0;
-            while i < bytes_read.saturating_sub(1) {
-                // Check second byte first - if high nibble isn't 0xF0, skip ahead
-                if (self.buffer[i + 1] & 0xF0) == 0xF0 {
-                    // Potential sync word - check first byte and layer bits
-                    if self.buffer[i] == 0xFF && (self.buffer[i + 1] & 0x06) == 0x00 {
-                        // Valid sync word found
-                        let rewind = (bytes_read - i) as i64;
-                        self.file.seek(SeekFrom::Current(-rewind)).await?;
-                        self.current_pos += i as u64;
-                        return Ok(Some(i));
-                    }
-                    i += 1; // Move by 1 if pattern doesn't match
-                } else {
-                    // Second byte high nibble isn't 0xF0, skip ahead by 2
-                    i += 2;
-                }
-            }
-
-            // No sync word found, continue reading
-            if bytes_read < Self::BUFFER_SIZE {
-                return Ok(None); // EOF without sync
-            }
-
-            self.current_pos += bytes_read as u64;
         }
+        Ok(true)
+    }
+
+    async fn fill_parse_buffer(&mut self) -> Result<bool, AacFileError> {
+        if self.parse_eof {
+            return Ok(false);
+        }
+
+        let bytes_read = self.file.read(&mut self.buffer).await?;
+        if bytes_read == 0 {
+            self.parse_eof = true;
+            return Ok(false);
+        }
+
+        self.parse_data
+            .extend_from_slice(&self.buffer[..bytes_read]);
+        Ok(true)
+    }
+
+    fn consume_parse_bytes(&mut self, count: usize) {
+        let available = self.parse_data.len().saturating_sub(self.parse_start);
+        let consumed = count.min(available);
+        self.parse_start += consumed;
+        self.current_pos = self.current_pos.saturating_add(consumed as u64);
+        self.compact_parse_buffer();
+    }
+
+    fn compact_parse_buffer(&mut self) {
+        if self.parse_start == 0 {
+            return;
+        }
+        if self.parse_start >= self.parse_data.len() {
+            self.parse_data.clear();
+            self.parse_start = 0;
+            return;
+        }
+        if self.parse_start >= Self::BUFFER_SIZE {
+            self.parse_data.drain(..self.parse_start);
+            self.parse_start = 0;
+        }
+    }
+
+    fn find_sync_word(data: &[u8], from: usize) -> Option<usize> {
+        if data.len() < 2 || from >= data.len() {
+            return None;
+        }
+
+        let mut i = from;
+        while i + 1 < data.len() {
+            if data[i] == 0xFF && (data[i + 1] & 0xF0) == 0xF0 && (data[i + 1] & 0x06) == 0x00 {
+                return Some(i);
+            }
+            i += 1;
+        }
+        None
     }
 }
 

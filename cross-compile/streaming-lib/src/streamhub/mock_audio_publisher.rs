@@ -8,7 +8,7 @@ use async_trait::async_trait;
 use bytes::BytesMut;
 use portable_atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use thiserror::Error;
 
 /// AAC-LC samples per frame (fixed by specification)
@@ -16,6 +16,7 @@ use thiserror::Error;
 /// AAC-LC uses 1024 samples per frame regardless of sample rate.
 const AAC_SAMPLES_PER_FRAME: u32 = 1024;
 use tokio::sync::Mutex;
+use tokio::time::{self, MissedTickBehavior};
 
 /// Errors that can occur during mock audio publishing
 #[derive(Error, Debug)]
@@ -152,7 +153,7 @@ impl MockAudioPublisher {
                     // One AAC-LC frame carries 1024 samples (RFC 3640, AAC-hbr mode).
                     Duration::from_secs_f64(AAC_SAMPLES_PER_FRAME as f64 / sample_rate as f64)
                 };
-                let mut next_send_deadline: Option<Instant> = None;
+                let mut pacer = build_audio_pacer(frame_interval);
                 let mut interrupted_for_zero_subscribers = false;
 
                 while let Ok(Some(frame)) = reader.read_next_frame().await {
@@ -163,16 +164,8 @@ impl MockAudioPublisher {
                         break;
                     }
 
-                    // Pace against an absolute deadline sequence. This compensates for
-                    // timer quantization on embedded kernels and keeps average packet cadence
-                    // close to source timing without bursty catch-up.
-                    if !frame_interval.is_zero()
-                        && let Some(deadline) = next_send_deadline
-                    {
-                        let now = Instant::now();
-                        if let Some(remaining) = deadline.checked_duration_since(now) {
-                            tokio::time::sleep(remaining).await;
-                        }
+                    if let Some(interval) = pacer.as_mut() {
+                        interval.tick().await;
                     }
 
                     // RTP timestamp in sample units (RFC 3640 Section 3.3)
@@ -193,18 +186,6 @@ impl MockAudioPublisher {
 
                     if sender.send(frame_data).is_err() {
                         return;
-                    }
-                    if !frame_interval.is_zero() {
-                        let now = Instant::now();
-                        let mut next = next_send_deadline
-                            .map(|deadline| deadline + frame_interval)
-                            .unwrap_or_else(|| now + frame_interval);
-                        // If we are more than one frame behind, resync to avoid bursty
-                        // no-sleep loops under load.
-                        if now > next + frame_interval {
-                            next = now + frame_interval;
-                        }
-                        next_send_deadline = Some(next);
                     }
                     last_timestamp_ms.store(timestamp, Ordering::Relaxed);
 
@@ -363,6 +344,15 @@ fn generate_sdp_from_audio_config(audio_config: &[u8], sample_rate: u32) -> Stri
          a=fmtp:97 streamtype=5;profile-level-id={};mode=AAC-hbr;sizelength=13;indexlength=3;indexdeltalength=3;constantDuration=1024;config={}\r\n",
         sample_rate, channels, profile_level_id, config_hex
     )
+}
+
+fn build_audio_pacer(frame_interval: Duration) -> Option<time::Interval> {
+    if frame_interval.is_zero() {
+        return None;
+    }
+    let mut interval = time::interval(frame_interval);
+    interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
+    Some(interval)
 }
 
 #[cfg(test)]
