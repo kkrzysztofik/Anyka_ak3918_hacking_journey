@@ -18,6 +18,7 @@ toolchain_dir="${REPO_ROOT}/toolchain/arm-anykav200-crosstool-ng"
 target_triple="arm-unknown-linux-uclibcgnueabi"
 output_bin_dir="${REPO_ROOT}/SD_card_contents/anyka_hack/bin"
 output_lib_dir="${REPO_ROOT}/SD_card_contents/anyka_hack/lib"
+output_terminfo_dir="${REPO_ROOT}/SD_card_contents/anyka_hack/share/terminfo"
 work_root="${REPO_ROOT}/target/third_party/htop"
 
 usage() {
@@ -33,6 +34,7 @@ Options:
   --target <triple>     Target triple (default: ${target_triple})
   --output-bin-dir <p>  Binary output directory (default: ${output_bin_dir})
   --output-lib-dir <p>  Lib output directory (default: ${output_lib_dir})
+  --output-terminfo-dir <p>  Terminfo output directory (default: ${output_terminfo_dir})
   --work-root <p>       Build working root (default: ${work_root})
   -h, --help            Show this help
 
@@ -76,6 +78,10 @@ while [ "$#" -gt 0 ]; do
       output_lib_dir="$2"
       shift 2
       ;;
+    --output-terminfo-dir)
+      output_terminfo_dir="$2"
+      shift 2
+      ;;
     --work-root)
       work_root="$2"
       shift 2
@@ -106,7 +112,7 @@ if [ ! -d "${toolchain_dir}" ]; then
   exit 1
 fi
 
-mkdir -p "${work_root}" "${output_bin_dir}" "${output_lib_dir}"
+mkdir -p "${work_root}" "${output_bin_dir}" "${output_lib_dir}" "${output_terminfo_dir}"
 
 build_dir="${work_root}/htop-${version}"
 archive_path="${build_dir}/htop-${version}.tar.xz"
@@ -180,13 +186,52 @@ if [ ! -f "${source_dir}/htop" ]; then
 fi
 
 "${target_triple}-strip" "${source_dir}/htop" || true
-install -m 0755 "${source_dir}/htop" "${output_bin_dir}/htop"
+install -m 0755 "${source_dir}/htop" "${output_bin_dir}/htop.bin"
+
+cat > "${output_bin_dir}/htop" <<'EOF'
+#!/bin/sh
+# Launcher for Anyka htop with bundled terminfo fallback for SSH sessions.
+
+BIN_DIR="$(CDPATH= cd -- "$(dirname "$0")" && pwd)"
+ANYKA_HACK_DIR="$(dirname "$BIN_DIR")"
+TERMINFO_DIR="${ANYKA_HACK_DIR}/share/terminfo"
+HTOP_BIN="${BIN_DIR}/htop.bin"
+
+if [ -d "${TERMINFO_DIR}" ]; then
+  export TERMINFO="${TERMINFO_DIR}"
+fi
+
+if [ -z "${TERM:-}" ]; then
+  TERM="xterm"
+fi
+
+if [ -d "${TERMINFO_DIR}" ]; then
+  term_subdir="$(printf '%s' "${TERM}" | cut -c1)"
+  if [ ! -f "${TERMINFO_DIR}/${term_subdir}/${TERM}" ]; then
+    case "${TERM}" in
+      *256color*)
+        TERM="xterm"
+        ;;
+      tmux*|screen*)
+        TERM="screen"
+        ;;
+      *)
+        TERM="vt100"
+        ;;
+    esac
+  fi
+fi
+
+export TERM
+exec "${HTOP_BIN}" "$@"
+EOF
+chmod 0755 "${output_bin_dir}/htop"
 
 echo "Validating output binary..."
-file "${output_bin_dir}/htop"
-"${target_triple}-readelf" -h "${output_bin_dir}/htop" | sed -n '1,20p'
+file "${output_bin_dir}/htop.bin"
+"${target_triple}-readelf" -h "${output_bin_dir}/htop.bin" | sed -n '1,20p'
 
-needed_libs="$("${target_triple}-readelf" -d "${output_bin_dir}/htop" 2>/dev/null | awk '/NEEDED/ { gsub(/\[|\]/, "", $5); print $5 }' || true)"
+needed_libs="$("${target_triple}-readelf" -d "${output_bin_dir}/htop.bin" 2>/dev/null | awk '/NEEDED/ { gsub(/\[|\]/, "", $5); print $5 }' || true)"
 if [ -n "${needed_libs}" ]; then
   echo "Dynamic dependencies detected; bundling from sysroot into ${output_lib_dir}"
   for needed in ${needed_libs}; do
@@ -212,4 +257,29 @@ if [ -n "${needed_libs}" ]; then
   done
 fi
 
-echo "htop build complete (${build_mode}): ${output_bin_dir}/htop"
+install_terminfo_entry() {
+  local term_name="$1"
+  local term_subdir="${term_name:0:1}"
+  local src_path=""
+
+  for base in /usr/share/terminfo /lib/terminfo /etc/terminfo; do
+    if [ -f "${base}/${term_subdir}/${term_name}" ]; then
+      src_path="${base}/${term_subdir}/${term_name}"
+      break
+    fi
+  done
+
+  if [ -z "${src_path}" ]; then
+    echo "WARNING: terminfo entry not found on build host: ${term_name}" >&2
+    return 0
+  fi
+
+  mkdir -p "${output_terminfo_dir}/${term_subdir}"
+  install -m 0644 "${src_path}" "${output_terminfo_dir}/${term_subdir}/${term_name}"
+}
+
+for term_name in xterm xterm-256color screen screen-256color tmux tmux-256color vt100 linux ansi; do
+  install_terminfo_entry "${term_name}"
+done
+
+echo "htop build complete (${build_mode}): ${output_bin_dir}/htop (wrapper), ${output_bin_dir}/htop.bin"

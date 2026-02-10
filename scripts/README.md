@@ -106,7 +106,12 @@ Default link mode is `static` (recommended for device compatibility). Use `--lin
 ```
 
 ### 5. `third_party/build_htop.sh` - Build htop for SD Overlay
-Cross-builds `htop` for ARM/uClibc and stages it in `SD_card_contents/anyka_hack/bin/htop`.
+Cross-builds `htop` for ARM/uClibc and stages:
+- launcher: `SD_card_contents/anyka_hack/bin/htop`
+- binary: `SD_card_contents/anyka_hack/bin/htop.bin`
+- bundled terminfo: `SD_card_contents/anyka_hack/share/terminfo`
+
+The launcher sets `TERMINFO` and falls back from unsupported values (for example `xterm-256color`) to a supported terminal entry.
 
 **Usage:**
 ```bash

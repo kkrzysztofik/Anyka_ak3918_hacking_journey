@@ -44,3 +44,5 @@ Host-side helper scripts are available to build and package ARM binaries into th
 
 Both scripts support explicit version/checksum overrides with `--version` and `--sha256`.
 If the build host has no internet access, pass local tarballs with `--archive`.
+`build_dropbear.sh` defaults to static linking for runtime compatibility on older AK3918 firmware.
+`build_htop.sh` installs an `htop` launcher plus bundled terminfo entries to avoid SSH `$TERM` incompatibility issues.
