@@ -14,6 +14,7 @@ use onvif_rust::app::{Application, DEFAULT_CONFIG_PATH};
 use onvif_rust::config::{ConfigRuntime, ConfigStorage};
 use onvif_rust::validation::h264_playback::{H264PlaybackConfig, H264PlaybackMode};
 use onvif_rust::validation::httpflv_remux::ValidationHttpFlvRemuxer;
+use onvif_rust::validation::stream_auth::build_stream_auth_for_validation_mode;
 use portable_atomic::{AtomicU32, AtomicUsize, Ordering};
 use std::backtrace::Backtrace;
 use std::panic::PanicHookInfo;
@@ -638,6 +639,13 @@ async fn run_validation_mode(config: H264PlaybackConfig, config_path: &str) -> R
         anyhow::bail!("AAC file not found: {}", audio_path);
     }
 
+    let stream_auth_config = ConfigRuntime::new(
+        ConfigStorage::load_or_default(config_path)
+            .context("Failed to load configuration for stream authentication")?,
+    );
+    let stream_auth = build_stream_auth_for_validation_mode(&stream_auth_config, config_path)
+        .context("Failed to initialize validation mode stream authentication")?;
+
     tracing::info!(
         "H.264 Validation mode starting: {} @ {}fps (RTSP: {}, HTTP-FLV: {})",
         config.file_path,
@@ -897,8 +905,10 @@ async fn run_validation_mode(config: H264PlaybackConfig, config_path: &str) -> R
     let rtsp_port = config.rtsp_port;
     let rtsp_addr = format!("0.0.0.0:{}", rtsp_port);
     let rtsp_event_sender = hub_event_sender.clone();
+    let rtsp_auth = stream_auth.clone();
     let rtsp_handle = tokio::spawn(async move {
-        let mut rtsp_server = DefaultRtspServer::new(rtsp_addr.clone(), rtsp_event_sender, None);
+        let mut rtsp_server =
+            DefaultRtspServer::new(rtsp_addr.clone(), rtsp_event_sender, rtsp_auth);
         if let Err(e) = rtsp_server.run().await {
             tracing::error!("RTSP server error: {}", e);
         }
@@ -909,8 +919,10 @@ async fn run_validation_mode(config: H264PlaybackConfig, config_path: &str) -> R
     let flv_port = config.httpflv_port;
     let flv_addr = format!("0.0.0.0:{}", flv_port);
     let flv_event_sender = hub_event_sender.clone();
+    let flv_auth = stream_auth.clone();
     let flv_handle = tokio::spawn(async move {
-        let mut flv_server = DefaultHttpFlvServer::new(flv_addr.clone(), flv_event_sender, None);
+        let mut flv_server =
+            DefaultHttpFlvServer::new(flv_addr.clone(), flv_event_sender, flv_auth);
         if let Err(e) = flv_server.run().await {
             tracing::error!("HTTP-FLV server error: {}", e);
         }

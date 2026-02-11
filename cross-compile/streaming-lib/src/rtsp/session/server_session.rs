@@ -844,8 +844,23 @@ impl RtspServerSession {
             let has_authorization_header = rtsp_request.get_header("Authorization").is_some();
             let has_userinfo_in_uri = rtsp_request.uri.host.contains('@');
             if has_authorization_header || has_userinfo_in_uri {
-                let response = Self::gen_response(http::StatusCode::UNAUTHORIZED, rtsp_request);
-                self.send_response(&response).await?;
+                self.send_unauthorized_response(rtsp_request).await?;
+                return Ok(());
+            }
+        }
+
+        if let Some(auth) = &self.auth {
+            let stream_name = rtsp_request.uri.path.clone();
+            let auth_result = auth.authenticate_request(
+                &stream_name,
+                &rtsp_request.uri.query,
+                rtsp_request
+                    .get_header("Authorization")
+                    .map(std::string::String::as_str),
+                true,
+            );
+            if auth_result.is_err() {
+                self.send_unauthorized_response(rtsp_request).await?;
                 return Ok(());
             }
         }
@@ -1301,15 +1316,18 @@ impl RtspServerSession {
     async fn handle_play(&mut self, rtsp_request: &RtspRequest) -> Result<(), SessionError> {
         if let Some(auth) = &self.auth {
             let stream_name = rtsp_request.uri.path.clone();
-            auth.authenticate(
+            let auth_result = auth.authenticate_request(
                 &stream_name,
-                &rtsp_request
-                    .uri
-                    .query
-                    .as_ref()
-                    .map(|q| SecretCarrier::Query(q.to_string())),
+                &rtsp_request.uri.query,
+                rtsp_request
+                    .get_header("Authorization")
+                    .map(std::string::String::as_str),
                 true,
-            )?;
+            );
+            if auth_result.is_err() {
+                self.send_unauthorized_response(rtsp_request).await?;
+                return Ok(());
+            }
         }
 
         let cseq = rtsp_request.get_header("CSeq").cloned().unwrap_or_default();
@@ -2056,6 +2074,19 @@ impl RtspServerSession {
             .insert("Server".to_string(), SERVER_HEADER.to_string());
 
         response
+    }
+
+    async fn send_unauthorized_response(
+        &mut self,
+        rtsp_request: &RtspRequest,
+    ) -> Result<(), SessionError> {
+        let mut response = Self::gen_response(http::StatusCode::UNAUTHORIZED, rtsp_request);
+        if let Some(auth) = &self.auth {
+            response
+                .headers
+                .insert("WWW-Authenticate".to_string(), auth.basic_challenge());
+        }
+        self.send_response(&response).await
     }
 
     fn gen_rtsp_response(
@@ -2892,6 +2923,149 @@ mod tests {
         );
 
         let result = session.handle_describe(&request).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_rtsp_server_session_describe_with_basic_auth_returns_ok() {
+        use crate::common::auth::{AuthAlgorithm, AuthType};
+
+        let (event_sender, mut event_receiver) = tokio::sync::mpsc::unbounded_channel();
+        let mut mock_io = MockNetIO::new();
+
+        mock_io.expect_get_net_type().returning(|| NetType::TCP);
+        mock_io
+            .expect_write()
+            .withf(|bytes| {
+                let s = std::str::from_utf8(bytes).unwrap();
+                s.contains("RTSP/1.0 200 OK")
+                    && s.contains("application/sdp")
+                    && s.contains("Content-Base: rtsp://127.0.0.1:8554/live/test/")
+            })
+            .times(1)
+            .returning(|_| Ok(()));
+
+        tokio::spawn(async move {
+            if let Some(StreamHubEvent::Request { sender, .. }) = event_receiver.recv().await {
+                let dummy_sdp = "v=0\r\no=- 0 0 IN IP4 127.0.0.1\r\ns=No Name\r\nc=IN IP4 127.0.0.1\r\nt=0 0\r\nm=video 0 RTP/AVP 96\r\na=rtpmap:96 H264/90000\r\n";
+                let _ = sender.send(Information::Sdp {
+                    data: dummy_sdp.to_string(),
+                });
+            }
+        });
+
+        let session_io: Box<dyn TNetIO + Send + Sync> = Box::new(mock_io);
+        let remote_addr = "127.0.0.1:0".parse().unwrap();
+        let auth = Auth::new(
+            "key".to_string(),
+            "unused".to_string(),
+            None,
+            AuthAlgorithm::Simple,
+            AuthType::Pull,
+        )
+        .with_credential_validator(Arc::new(|username, password| {
+            username == "admin" && password == "secret"
+        }))
+        .with_basic_realm("ONVIF Camera");
+        let mut session =
+            RtspServerSession::new_with_io(session_io, event_sender, Some(auth), remote_addr);
+
+        let mut request = create_test_request("DESCRIBE", Some("6"));
+        request.uri.schema = crate::common::http::Schema::RTSP;
+        request.uri.host = "127.0.0.1".to_string();
+        request.uri.port = Some(8554);
+        request.uri.path = "live/test/trackID=0".to_string();
+        request.headers.insert(
+            "Authorization".to_string(),
+            "Basic YWRtaW46c2VjcmV0".to_string(),
+        );
+
+        let result = session.handle_describe(&request).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_rtsp_server_session_describe_auth_failure_returns_challenge() {
+        use crate::common::auth::{AuthAlgorithm, AuthType};
+
+        let (event_sender, _event_receiver) = tokio::sync::mpsc::unbounded_channel();
+        let mut mock_io = MockNetIO::new();
+
+        mock_io.expect_get_net_type().returning(|| NetType::TCP);
+        mock_io
+            .expect_write()
+            .withf(|bytes| {
+                let s = std::str::from_utf8(bytes).unwrap();
+                s.contains("RTSP/1.0 401 Unauthorized")
+                    && s.contains("WWW-Authenticate: Basic realm=\"ONVIF Camera\"")
+            })
+            .times(1)
+            .returning(|_| Ok(()));
+
+        let session_io: Box<dyn TNetIO + Send + Sync> = Box::new(mock_io);
+        let remote_addr = "127.0.0.1:0".parse().unwrap();
+        let auth = Auth::new(
+            "key".to_string(),
+            "unused".to_string(),
+            None,
+            AuthAlgorithm::Simple,
+            AuthType::Pull,
+        )
+        .with_credential_validator(Arc::new(|username, password| {
+            username == "admin" && password == "secret"
+        }))
+        .with_basic_realm("ONVIF Camera");
+        let mut session =
+            RtspServerSession::new_with_io(session_io, event_sender, Some(auth), remote_addr);
+
+        let mut request = create_test_request("DESCRIBE", Some("7"));
+        request.uri.schema = crate::common::http::Schema::RTSP;
+        request.uri.host = "127.0.0.1".to_string();
+        request.uri.port = Some(8554);
+        request.uri.path = "stream1".to_string();
+
+        let result = session.handle_describe(&request).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_rtsp_server_session_play_auth_failure_returns_challenge() {
+        use crate::common::auth::{AuthAlgorithm, AuthType};
+
+        let (event_sender, _event_receiver) = tokio::sync::mpsc::unbounded_channel();
+        let mut mock_io = MockNetIO::new();
+
+        mock_io.expect_get_net_type().returning(|| NetType::TCP);
+        mock_io
+            .expect_write()
+            .withf(|bytes| {
+                let s = std::str::from_utf8(bytes).unwrap();
+                s.contains("RTSP/1.0 401 Unauthorized")
+                    && s.contains("WWW-Authenticate: Basic realm=\"ONVIF Camera\"")
+            })
+            .times(1)
+            .returning(|_| Ok(()));
+
+        let session_io: Box<dyn TNetIO + Send + Sync> = Box::new(mock_io);
+        let remote_addr = "127.0.0.1:0".parse().unwrap();
+        let auth = Auth::new(
+            "key".to_string(),
+            "unused".to_string(),
+            None,
+            AuthAlgorithm::Simple,
+            AuthType::Pull,
+        )
+        .with_credential_validator(Arc::new(|username, password| {
+            username == "admin" && password == "secret"
+        }))
+        .with_basic_realm("ONVIF Camera");
+        let mut session =
+            RtspServerSession::new_with_io(session_io, event_sender, Some(auth), remote_addr);
+
+        let mut request = create_test_request(rtsp_method_name::PLAY, Some("8"));
+        request.uri.path = "stream1".to_string();
+
+        let result = session.handle_play(&request).await;
         assert!(result.is_ok());
     }
 

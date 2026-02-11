@@ -1,13 +1,17 @@
 use indexmap::IndexMap;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::BuildHasherDefault;
+use std::sync::Arc;
 
 type AuthIndexMap = IndexMap<String, String, BuildHasherDefault<DefaultHasher>>;
+use base64::Engine;
 use md5;
 use serde_derive::Deserialize;
 
 use crate::common::errors::{AuthError, AuthErrorValue};
 use crate::scanf;
+
+const DEFAULT_BASIC_REALM: &str = "streaming-lib";
 
 #[derive(Debug, Deserialize, Clone, Default)]
 pub enum AuthAlgorithm {
@@ -22,6 +26,8 @@ pub enum SecretCarrier {
     Query(String),
     Bearer(String),
 }
+
+pub type CredentialValidator = Arc<dyn Fn(&str, &str) -> bool + Send + Sync>;
 
 pub fn get_secret(carrier: &SecretCarrier) -> Result<String, AuthError> {
     match carrier {
@@ -81,12 +87,14 @@ pub enum AuthType {
     Both,
     None,
 }
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct Auth {
     algorithm: AuthAlgorithm,
     key: String,
     password: String,
     push_password: Option<String>,
+    credential_validator: Option<CredentialValidator>,
+    basic_realm: String,
     pub auth_type: AuthType,
 }
 
@@ -103,8 +111,76 @@ impl Auth {
             key,
             password,
             push_password,
+            credential_validator: None,
+            basic_realm: DEFAULT_BASIC_REALM.to_string(),
             auth_type,
         }
+    }
+
+    pub fn with_credential_validator(mut self, validator: CredentialValidator) -> Self {
+        self.credential_validator = Some(validator);
+        self
+    }
+
+    pub fn with_basic_realm(mut self, realm: impl Into<String>) -> Self {
+        let realm = realm.into();
+        if !realm.is_empty() {
+            self.basic_realm = realm;
+        }
+        self
+    }
+
+    pub fn basic_challenge(&self) -> String {
+        format!("Basic realm=\"{}\"", self.basic_realm)
+    }
+
+    pub fn authenticate_request(
+        &self,
+        stream_name: &str,
+        query_string: &Option<String>,
+        authorization_header: Option<&str>,
+        is_pull: bool,
+    ) -> Result<(), AuthError> {
+        if !self.requires_auth(is_pull) {
+            return Ok(());
+        }
+
+        let mut auth_err = AuthErrorValue::NoTokenFound;
+
+        if let Some(query) = query_string {
+            let query_secret = Some(SecretCarrier::Query(query.clone()));
+            match self.authenticate(stream_name, &query_secret, is_pull) {
+                Ok(()) => return Ok(()),
+                Err(err) => auth_err = err.value,
+            }
+        }
+
+        if let Some(header) = authorization_header {
+            let is_basic = header
+                .trim_start()
+                .get(..6)
+                .map(|prefix| prefix.eq_ignore_ascii_case("Basic "))
+                .unwrap_or(false);
+            if is_basic {
+                let (username, password) = parse_basic_credentials(header)?;
+                if let Some(validator) = &self.credential_validator {
+                    if validator(&username, &password) {
+                        return Ok(());
+                    }
+                    auth_err = AuthErrorValue::InvalidCredentials;
+                } else {
+                    auth_err = AuthErrorValue::InvalidCredentials;
+                }
+            } else {
+                let bearer_secret = Some(SecretCarrier::Bearer(header.to_string()));
+                match self.authenticate(stream_name, &bearer_secret, is_pull) {
+                    Ok(()) => return Ok(()),
+                    Err(err) => auth_err = err.value,
+                }
+            }
+        }
+
+        Err(AuthError { value: auth_err })
     }
 
     pub fn authenticate(
@@ -113,10 +189,7 @@ impl Auth {
         secret: &Option<SecretCarrier>,
         is_pull: bool,
     ) -> Result<(), AuthError> {
-        if (self.auth_type == AuthType::Both)
-            || (is_pull && (self.auth_type == AuthType::Pull))
-            || (!is_pull && (self.auth_type == AuthType::Push))
-        {
+        if self.requires_auth(is_pull) {
             let mut auth_err_reason: String = String::from("there is no token str found.");
             let mut err: AuthErrorValue = AuthErrorValue::NoTokenFound;
 
@@ -142,6 +215,12 @@ impl Auth {
         Ok(())
     }
 
+    fn requires_auth(&self, is_pull: bool) -> bool {
+        (self.auth_type == AuthType::Both)
+            || (is_pull && (self.auth_type == AuthType::Pull))
+            || (!is_pull && (self.auth_type == AuthType::Push))
+    }
+
     fn check(&self, stream_name: &str, auth_str: &str, is_pull: bool) -> bool {
         let password = if is_pull {
             &self.password
@@ -158,6 +237,33 @@ impl Auth {
             }
         }
     }
+}
+
+fn parse_basic_credentials(header: &str) -> Result<(String, String), AuthError> {
+    let trimmed = header.trim();
+    let (scheme, encoded) = trimmed.split_once(' ').ok_or(AuthError {
+        value: AuthErrorValue::InvalidTokenFormat,
+    })?;
+
+    if !scheme.eq_ignore_ascii_case("Basic") || encoded.is_empty() {
+        return Err(AuthError {
+            value: AuthErrorValue::InvalidTokenFormat,
+        });
+    }
+
+    let decoded = base64::engine::general_purpose::STANDARD
+        .decode(encoded)
+        .map_err(|_| AuthError {
+            value: AuthErrorValue::InvalidCredentials,
+        })?;
+    let credential_text = std::str::from_utf8(&decoded).map_err(|_| AuthError {
+        value: AuthErrorValue::InvalidCredentials,
+    })?;
+    let (username, password) = credential_text.split_once(':').ok_or(AuthError {
+        value: AuthErrorValue::InvalidCredentials,
+    })?;
+
+    Ok((username.to_string(), password.to_string()))
 }
 
 #[cfg(test)]
@@ -273,6 +379,8 @@ mod tests {
         assert_eq!(auth.key, "key");
         assert_eq!(auth.password, "password");
         assert_eq!(auth.push_password, None);
+        assert_eq!(auth.basic_realm, DEFAULT_BASIC_REALM);
+        assert!(auth.credential_validator.is_none());
         assert_eq!(auth.auth_type, AuthType::Both);
     }
 
@@ -287,6 +395,106 @@ mod tests {
         );
         assert_eq!(auth.password, "pull_password");
         assert_eq!(auth.push_password, Some("push_password".to_string()));
+    }
+
+    #[test]
+    fn test_parse_basic_credentials_success() {
+        let result = parse_basic_credentials("Basic YWRtaW46c2VjcmV0");
+        assert!(result.is_ok());
+        let (username, password) = result.expect("credentials");
+        assert_eq!(username, "admin");
+        assert_eq!(password, "secret");
+    }
+
+    #[test]
+    fn test_parse_basic_credentials_invalid_format() {
+        let result = parse_basic_credentials("Digest xyz");
+        assert!(result.is_err());
+        assert!(matches!(
+            result.expect_err("error").value,
+            AuthErrorValue::InvalidTokenFormat
+        ));
+    }
+
+    #[test]
+    fn test_parse_basic_credentials_invalid_payload() {
+        let result = parse_basic_credentials("Basic invalid$$");
+        assert!(result.is_err());
+        assert!(matches!(
+            result.expect_err("error").value,
+            AuthErrorValue::InvalidCredentials
+        ));
+    }
+
+    #[test]
+    fn test_basic_challenge_default_and_custom_realm() {
+        let auth = Auth::new(
+            "key".to_string(),
+            "password".to_string(),
+            None,
+            AuthAlgorithm::Simple,
+            AuthType::Pull,
+        );
+        assert_eq!(auth.basic_challenge(), "Basic realm=\"streaming-lib\"");
+
+        let custom = auth.with_basic_realm("ONVIF Camera");
+        assert_eq!(custom.basic_challenge(), "Basic realm=\"ONVIF Camera\"");
+    }
+
+    #[test]
+    fn test_authenticate_request_query_token_success() {
+        let auth = Auth::new(
+            "key".to_string(),
+            "password123".to_string(),
+            None,
+            AuthAlgorithm::Simple,
+            AuthType::Pull,
+        );
+        let result = auth.authenticate_request(
+            "stream1",
+            &Some("token=password123".to_string()),
+            None,
+            true,
+        );
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_authenticate_request_basic_credentials_success() {
+        let auth = Auth::new(
+            "key".to_string(),
+            "password123".to_string(),
+            None,
+            AuthAlgorithm::Simple,
+            AuthType::Pull,
+        )
+        .with_credential_validator(Arc::new(|username, password| {
+            username == "admin" && password == "secret"
+        }));
+        let result =
+            auth.authenticate_request("stream1", &None, Some("Basic YWRtaW46c2VjcmV0"), true);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_authenticate_request_basic_credentials_failure() {
+        let auth = Auth::new(
+            "key".to_string(),
+            "password123".to_string(),
+            None,
+            AuthAlgorithm::Simple,
+            AuthType::Pull,
+        )
+        .with_credential_validator(Arc::new(|username, password| {
+            username == "admin" && password == "secret"
+        }));
+        let result =
+            auth.authenticate_request("stream1", &None, Some("Basic YWRtaW46d3Jvbmc="), true);
+        assert!(result.is_err());
+        assert!(matches!(
+            result.expect_err("error").value,
+            AuthErrorValue::InvalidCredentials
+        ));
     }
 
     // ============================================

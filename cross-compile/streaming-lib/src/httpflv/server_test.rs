@@ -151,6 +151,78 @@ async fn test_handle_connection_auth_failure() {
 }
 
 #[tokio::test]
+async fn test_handle_connection_requires_auth_without_credentials_returns_401_with_challenge() {
+    use crate::common::auth::{AuthAlgorithm, AuthType};
+
+    let (event_sender, _event_receiver) = tokio_mpsc::unbounded_channel();
+    let auth = Auth::new(
+        "test_key".to_string(),
+        "test_secret".to_string(),
+        None,
+        AuthAlgorithm::Simple,
+        AuthType::Pull,
+    )
+    .with_credential_validator(std::sync::Arc::new(|username, password| {
+        username == "admin" && password == "secret"
+    }))
+    .with_basic_realm("ONVIF Camera");
+
+    let uri = Uri::from_static("http://localhost/live/stream1.flv");
+    let req = Request::builder().uri(uri).body(Body::empty()).unwrap();
+    let remote_addr = SocketAddr::from(([127, 0, 0, 1], 1234));
+
+    let response = handle_connection(
+        State((event_sender, Some(auth))),
+        ConnectInfo(remote_addr),
+        req,
+    )
+    .await;
+    assert_eq!(response.status(), axum::http::StatusCode::UNAUTHORIZED);
+    assert_eq!(
+        response.headers().get("WWW-Authenticate").unwrap(),
+        "Basic realm=\"ONVIF Camera\""
+    );
+}
+
+#[tokio::test]
+async fn test_handle_connection_valid_basic_auth_returns_non_401() {
+    use crate::common::auth::{AuthAlgorithm, AuthType};
+
+    let (event_sender, _event_receiver) = tokio_mpsc::unbounded_channel();
+    let auth = Auth::new(
+        "test_key".to_string(),
+        "test_secret".to_string(),
+        None,
+        AuthAlgorithm::Simple,
+        AuthType::Pull,
+    )
+    .with_credential_validator(std::sync::Arc::new(|username, password| {
+        username == "admin" && password == "secret"
+    }))
+    .with_basic_realm("ONVIF Camera");
+
+    let uri = Uri::from_static("http://localhost/live/stream1.flv");
+    let req = Request::builder()
+        .uri(uri)
+        .header("Authorization", "Basic YWRtaW46c2VjcmV0")
+        .body(Body::empty())
+        .unwrap();
+    let remote_addr = SocketAddr::from(([127, 0, 0, 1], 1234));
+
+    let response = handle_connection(
+        State((event_sender, Some(auth))),
+        ConnectInfo(remote_addr),
+        req,
+    )
+    .await;
+    assert_ne!(response.status(), axum::http::StatusCode::UNAUTHORIZED);
+    assert_eq!(
+        response.headers().get("Content-Type").unwrap(),
+        "video/x-flv"
+    );
+}
+
+#[tokio::test]
 async fn test_httpflv_server_address_parsing() {
     let _event_sender = create_test_event_sender();
     let _server = DefaultHttpFlvServer::new(

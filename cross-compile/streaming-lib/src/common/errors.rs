@@ -8,6 +8,8 @@ pub enum AuthErrorValue {
     NoTokenFound,
     #[error("invalid token format")]
     InvalidTokenFormat,
+    #[error("invalid credentials")]
+    InvalidCredentials,
 }
 
 #[derive(Debug, Error)]
@@ -46,6 +48,12 @@ mod tests {
         assert_eq!(format!("{}", err), "invalid token format");
     }
 
+    #[test]
+    fn test_auth_error_value_invalid_credentials_display() {
+        let err = AuthErrorValue::InvalidCredentials;
+        assert_eq!(format!("{}", err), "invalid credentials");
+    }
+
     // ========== AuthError Display Tests ==========
 
     #[test]
@@ -70,6 +78,14 @@ mod tests {
             value: AuthErrorValue::InvalidTokenFormat,
         };
         assert_eq!(format!("{}", err), "invalid token format");
+    }
+
+    #[test]
+    fn test_auth_error_display_invalid_credentials() {
+        let err = AuthError {
+            value: AuthErrorValue::InvalidCredentials,
+        };
+        assert_eq!(format!("{}", err), "invalid credentials");
     }
 
     // ========== Debug Trait Tests ==========

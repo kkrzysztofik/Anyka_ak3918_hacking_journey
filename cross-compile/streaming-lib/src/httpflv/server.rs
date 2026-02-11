@@ -1,6 +1,6 @@
 use {
     super::HttpFlv,
-    crate::common::auth::{Auth, SecretCarrier},
+    crate::common::auth::Auth,
     crate::streamhub::define::StreamHubEventSender,
     async_trait::async_trait,
     axum::{
@@ -28,6 +28,11 @@ pub(crate) async fn handle_connection(
 ) -> Response<Body> {
     let path = req.uri().path();
     let query_string: Option<String> = req.uri().query().map(|s| s.to_string());
+    let authorization_header = req
+        .headers()
+        .get("Authorization")
+        .and_then(|value| value.to_str().ok())
+        .map(|value| value.to_string());
 
     match path.find(".flv") {
         Some(index) if index > 0 => {
@@ -46,11 +51,17 @@ pub(crate) async fn handle_connection(
 
             if let Some(auth_val) = auth
                 && auth_val
-                    .authenticate(&stream_name, &query_string.map(SecretCarrier::Query), true)
+                    .authenticate_request(
+                        &stream_name,
+                        &query_string,
+                        authorization_header.as_deref(),
+                        true,
+                    )
                     .is_err()
             {
                 return Response::builder()
                     .status(StatusCode::UNAUTHORIZED)
+                    .header("WWW-Authenticate", auth_val.basic_challenge())
                     .body(UNAUTHORIZED.into())
                     .unwrap_or_else(|_| Response::new(Body::from(UNAUTHORIZED)));
             }
