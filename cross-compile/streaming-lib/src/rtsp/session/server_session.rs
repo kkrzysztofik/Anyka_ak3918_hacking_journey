@@ -1,6 +1,7 @@
 use crate::rtsp::global_trait::Marshal;
 use crate::rtsp::global_trait::Unmarshal;
 use crate::rtsp::rtsp_codec;
+use chrono::Utc;
 
 use crate::rtsp::rtp::define::ANNEXB_NALU_START_CODE;
 use crate::rtsp::rtp::utils::Marshal as RtpMarshal;
@@ -116,6 +117,9 @@ struct RtpTrackCounters {
 
 const RTP_TIMESTAMP_WRAP_THRESHOLD: u32 = 0x8000_0000;
 const SESSION_ID_RANDOM_DIGITS: RandomDigitCount = RandomDigitCount::Four;
+
+/// RFC 2326 §12.36 — Server header value.
+const SERVER_HEADER: &str = "streaming-lib/0.1";
 
 #[derive(Debug, Clone, Copy)]
 struct RtpTimestampSample {
@@ -452,6 +456,13 @@ impl InterleavedBinaryData {
             if crate::stream_frame_debug_logging_enabled() {
                 log::debug!("length: {}", length);
             }
+            // RFC 2326 §10.12: validate interleaved payload length
+            if length == 0 {
+                log::warn!(
+                    "interleaved: zero-length payload on channel {}",
+                    channel_identifier
+                );
+            }
             return Ok(Some(InterleavedBinaryData {
                 channel_identifier,
                 length,
@@ -543,6 +554,9 @@ impl RtspServerSession {
         }
     }
 
+    /// RFC 2326 §12.37: default session timeout in seconds.
+    const SESSION_TIMEOUT_SECS: u64 = 60;
+
     pub async fn run(&mut self) -> Result<(), SessionError> {
         let run_result: Result<(), SessionError> = async {
             loop {
@@ -550,7 +564,26 @@ impl RtspServerSession {
                     break;
                 }
                 while self.reader.len() < 4 {
-                    let data = self.io_reader.lock().await.read().await?;
+                    let data = match tokio::time::timeout(
+                        std::time::Duration::from_secs(Self::SESSION_TIMEOUT_SECS),
+                        self.io_reader.lock().await.read(),
+                    )
+                    .await
+                    {
+                        Ok(result) => result?,
+                        Err(_) => {
+                            log::info!(
+                                "event=rtsp_session_timeout timeout_secs={} remote_addr={}",
+                                Self::SESSION_TIMEOUT_SECS,
+                                self.remote_addr,
+                            );
+                            return Err(SessionError {
+                                value: SessionErrorValue::SessionTimeout(
+                                    Self::SESSION_TIMEOUT_SECS,
+                                ),
+                            });
+                        }
+                    };
                     self.reader.extend_from_slice(&data[..]);
                 }
                 // If delivering media data using RTP over RTSP(TCP), then it should use InterleavedBinaryData
@@ -690,6 +723,36 @@ impl RtspServerSession {
             });
         };
 
+        // H-07: RFC 2326 §6: reject requests with unsupported RTSP version
+        if rtsp_request.version != "RTSP/1.0" {
+            log::warn!(
+                "event=rtsp_unsupported_version version={} remote_addr={}",
+                rtsp_request.version,
+                self.remote_addr,
+            );
+            let response =
+                Self::gen_response(http::StatusCode::HTTP_VERSION_NOT_SUPPORTED, &rtsp_request);
+            self.send_response(&response).await?;
+            return Ok(());
+        }
+
+        // M-01: RFC 2326 §4.4: validate Content-Length against actual body
+        if let Some(cl_str) = rtsp_request.get_header("Content-Length") {
+            let claimed: usize = cl_str.trim().parse().unwrap_or(0);
+            let actual = rtsp_request.body.as_ref().map_or(0, |b| b.len());
+            if claimed != actual {
+                log::warn!(
+                    "event=rtsp_content_length_mismatch claimed={} actual={} remote_addr={}",
+                    claimed,
+                    actual,
+                    self.remote_addr,
+                );
+                let response = Self::gen_response(http::StatusCode::BAD_REQUEST, &rtsp_request);
+                self.send_response(&response).await?;
+                return Ok(());
+            }
+        }
+
         match rtsp_request.method.as_str() {
             rtsp_method_name::OPTIONS => {
                 self.handle_options(&rtsp_request).await?;
@@ -713,9 +776,18 @@ impl RtspServerSession {
             }
             rtsp_method_name::TEARDOWN => {
                 self.stop_playback_task().await;
-                self.handle_teardown(&rtsp_request)?;
-                let response = Self::gen_response(http::StatusCode::OK, &rtsp_request);
-                self.send_response(&response).await?;
+                if let Some(response) = self.validate_session_id(&rtsp_request) {
+                    self.send_response(&response).await?;
+                } else {
+                    self.handle_teardown(&rtsp_request)?;
+                    let mut response = Self::gen_response(http::StatusCode::OK, &rtsp_request);
+                    if let Some(session_id) = self.session_id {
+                        response
+                            .headers
+                            .insert("Session".to_string(), session_id.to_string());
+                    }
+                    self.send_response(&response).await?;
+                }
             }
             rtsp_method_name::PAUSE => {
                 self.handle_pause(&rtsp_request).await?;
@@ -730,7 +802,15 @@ impl RtspServerSession {
                 self.handle_redirect(&rtsp_request).await?;
             }
 
-            _ => {}
+            _ => {
+                log::warn!(
+                    "event=rtsp_unknown_method method={} remote_addr={}",
+                    rtsp_request.method,
+                    self.remote_addr,
+                );
+                let response = Self::gen_response(http::StatusCode::NOT_IMPLEMENTED, &rtsp_request);
+                self.send_response(&response).await?;
+            }
         }
         Ok(())
     }
@@ -738,7 +818,7 @@ impl RtspServerSession {
     async fn handle_options(&mut self, rtsp_request: &RtspRequest) -> Result<(), SessionError> {
         let status_code = http::StatusCode::OK;
         let mut response = Self::gen_response(status_code, rtsp_request);
-        let public_str = rtsp_method_name::ARRAY.join(",");
+        let public_str = rtsp_method_name::PUBLIC_METHODS.join(", ");
         response.headers.insert("Public".to_string(), public_str);
         self.send_response(&response).await?;
 
@@ -792,6 +872,21 @@ impl RtspServerSession {
             self.sdp = sdp;
             //it can new tracks when get the sdp information;
             self.new_tracks()?;
+        }
+
+        // M-02: RFC 2326 §12.1: honour Accept header in DESCRIBE
+        if let Some(accept) = rtsp_request.get_header("Accept") {
+            let dominated = accept.contains("application/sdp") || accept.contains("*/*");
+            if !dominated {
+                log::warn!(
+                    "event=rtsp_not_acceptable accept=\"{}\" remote_addr={}",
+                    accept,
+                    self.remote_addr,
+                );
+                let response = Self::gen_response(http::StatusCode::NOT_ACCEPTABLE, rtsp_request);
+                self.send_response(&response).await?;
+                return Ok(());
+            }
         }
 
         if self.sdp.medias.is_empty() {
@@ -906,7 +1001,12 @@ impl RtspServerSession {
         self.session_type = define::ServerSessionType::Push;
 
         let status_code = http::StatusCode::OK;
-        let response = Self::gen_response(status_code, rtsp_request);
+        let mut response = Self::gen_response(status_code, rtsp_request);
+        if let Some(session_id) = self.session_id {
+            response
+                .headers
+                .insert("Session".to_string(), session_id.to_string());
+        }
         self.send_response(&response).await?;
 
         Ok(())
@@ -959,6 +1059,21 @@ impl RtspServerSession {
             }
 
             let transport = RtspTransport::unmarshal(transport_data);
+
+            if let Err(ref err) = transport {
+                // M-04: RFC 2326 §12.39: respond 461 for invalid transport
+                log::warn!(
+                    "event=rtsp_unsupported_transport error=\"{}\" remote_addr={}",
+                    err,
+                    self.remote_addr,
+                );
+                let response = Self::gen_response(
+                    http::StatusCode::from_u16(461).unwrap_or(http::StatusCode::BAD_REQUEST),
+                    rtsp_request,
+                );
+                self.send_response(&response).await?;
+                return Ok(());
+            }
 
             if let Ok(mut trans) = transport {
                 let mut rtp_server_port: Option<u16> = None;
@@ -1386,22 +1501,35 @@ impl RtspServerSession {
             }
         }
 
+        // RFC 2326 §10.5 — validate session ID if provided
+        if let Some(response) = self.validate_session_id(rtsp_request) {
+            self.send_response(&response).await?;
+            return Ok(());
+        }
+
         let status_code = http::StatusCode::OK;
         let mut response = Self::gen_response(status_code, rtsp_request);
+
+        // RFC 2326 §12.37 — Session header MUST be in PLAY response
+        if let Some(session_id) = self.session_id {
+            response
+                .headers
+                .insert("Session".to_string(), session_id.to_string());
+        }
 
         if let Some(content_base) = self.build_content_base(rtsp_request)
             && !self.tracks.is_empty()
         {
-            const INITIAL_RTPTIME: u32 = 0;
             let mut rtp_info_parts = Vec::new();
             for track_type in [TrackType::Video, TrackType::Audio, TrackType::Application] {
                 if let Some(track) = self.tracks.get(&track_type) {
-                    let seq = track.rtp_channel.lock().await.initial_sequence();
+                    let rtp_channel = track.rtp_channel.lock().await;
+                    let seq = rtp_channel.initial_sequence();
+                    // RFC 3550 §5.1 — use random initial timestamp, not hardcoded 0
+                    let rtptime = rtp_channel.initial_timestamp();
                     let track_url = format!("{}{}", content_base, track.media_control);
-                    rtp_info_parts.push(format!(
-                        "url={};seq={};rtptime={}",
-                        track_url, seq, INITIAL_RTPTIME
-                    ));
+                    rtp_info_parts
+                        .push(format!("url={};seq={};rtptime={}", track_url, seq, rtptime));
                 }
             }
             if !rtp_info_parts.is_empty() {
@@ -1419,7 +1547,11 @@ impl RtspServerSession {
                         .insert(String::from("Range"), range.marshal());
                 }
                 Err(err) => {
-                    log::warn!("handle_play: invalid Range header ignored: {err}");
+                    // RFC 2326 §11.3.7 — invalid Range returns 457
+                    log::warn!("handle_play: invalid Range header: {err}");
+                    let err_response = Self::gen_rtsp_response(457, "Invalid Range", rtsp_request);
+                    self.send_response(&err_response).await?;
+                    return Ok(());
                 }
             }
         }
@@ -1672,9 +1804,10 @@ impl RtspServerSession {
 
     async fn handle_redirect(&mut self, rtsp_request: &RtspRequest) -> Result<(), SessionError> {
         let mut response = Self::gen_rtsp_response(405, "Method Not Allowed", rtsp_request);
-        response
-            .headers
-            .insert("Allow".to_string(), rtsp_method_name::ARRAY.join(","));
+        response.headers.insert(
+            "Allow".to_string(),
+            rtsp_method_name::PUBLIC_METHODS.join(", "),
+        );
         self.send_response(&response).await?;
         Ok(())
     }
@@ -1888,11 +2021,16 @@ impl RtspServerSession {
         Ok(())
     }
 
+    /// RFC 2326 §12.18 — Date header in HTTP-date format (RFC 7231 §7.1.1.1).
+    fn http_date_now() -> String {
+        Utc::now().format("%a, %d %b %Y %H:%M:%S GMT").to_string()
+    }
+
     fn gen_response(status_code: StatusCode, rtsp_request: &RtspRequest) -> RtspResponse {
         let reason_phrase = if let Some(reason) = status_code.canonical_reason() {
             reason.to_string()
         } else {
-            "".to_string()
+            String::from("")
         };
 
         let mut response = RtspResponse {
@@ -1907,6 +2045,15 @@ impl RtspServerSession {
                 .headers
                 .insert("CSeq".to_string(), cseq.to_string());
         }
+
+        // RFC 2326 §12.18 — Date header SHOULD be included
+        response
+            .headers
+            .insert("Date".to_string(), Self::http_date_now());
+        // RFC 2326 §12.36 — Server header identifies the implementation
+        response
+            .headers
+            .insert("Server".to_string(), SERVER_HEADER.to_string());
 
         response
     }
@@ -1939,6 +2086,26 @@ impl RtspServerSession {
             .unwrap_or_default()
             .trim()
             .to_string()
+    }
+
+    /// Validate that the Session header in the request (if any) matches the current session ID.
+    /// Returns `Some(response)` with a 454 "Session Not Found" if there is a mismatch,
+    /// or `None` if the session ID is valid or no Session header is present.
+    /// Per RFC 2326 §12.37.
+    fn validate_session_id(&self, rtsp_request: &RtspRequest) -> Option<RtspResponse> {
+        if let Some(session_hdr) = rtsp_request.get_header("Session")
+            && let Some(current) = self.session_id
+        {
+            let requested = Self::parse_session_header(session_hdr);
+            if !requested.is_empty() && requested != current.to_string() {
+                return Some(Self::gen_rtsp_response(
+                    454,
+                    "Session Not Found",
+                    rtsp_request,
+                ));
+            }
+        }
+        None
     }
 
     fn get_subscriber_info(&mut self) -> SubscriberInfo {
@@ -2355,7 +2522,11 @@ mod tests {
             .expect_write()
             .withf(|bytes| {
                 let s = std::str::from_utf8(bytes).unwrap();
-                s.contains("RTSP/1.0 200 OK") && s.contains("Public: OPTIONS,DESCRIBE") // Removed space
+                s.contains("RTSP/1.0 200 OK")
+                    && s.contains("Public: OPTIONS, DESCRIBE")
+                    && !s.contains("REDIRECT")
+                    && s.contains("Date:")
+                    && s.contains("Server: streaming-lib")
             })
             .times(1)
             .returning(|_| Ok(()));
@@ -2383,7 +2554,11 @@ mod tests {
             .expect_write()
             .withf(|bytes| {
                 let s = std::str::from_utf8(bytes).unwrap();
-                s.contains("RTSP/1.0 200 OK") && s.contains("Public: OPTIONS,DESCRIBE")
+                s.contains("RTSP/1.0 200 OK")
+                    && s.contains("Public: OPTIONS, DESCRIBE")
+                    && !s.contains("REDIRECT")
+                    && s.contains("Date:")
+                    && s.contains("Server: streaming-lib")
             })
             .times(1)
             .returning(|_| Ok(()));

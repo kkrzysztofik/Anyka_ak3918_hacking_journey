@@ -8,7 +8,7 @@ use bytes::BytesMut;
 use super::utils::Marshal;
 use super::utils::Unmarshal;
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct RtpHeader {
     pub version: u8,        // 2 bits
     pub padding_flag: u8,   // 1 bit
@@ -20,6 +20,24 @@ pub struct RtpHeader {
     pub timestamp: u32,
     pub ssrc: u32,
     pub csrcs: Vec<u32>,
+}
+
+/// RFC 3550 §5.1 mandates RTP version 2.
+impl Default for RtpHeader {
+    fn default() -> Self {
+        Self {
+            version: 2,
+            padding_flag: 0,
+            extension_flag: 0,
+            cc: 0,
+            marker: 0,
+            payload_type: 0,
+            seq_number: 0,
+            timestamp: 0,
+            ssrc: 0,
+            csrcs: Vec::new(),
+        }
+    }
 }
 
 impl Unmarshal<&mut BytesReader, Result<Self, BytesReadError>> for RtpHeader {
@@ -100,7 +118,7 @@ mod tests {
     #[test]
     fn test_default_rtp_header() {
         let header = RtpHeader::default();
-        assert_eq!(header.version, 0);
+        assert_eq!(header.version, 2);
         assert_eq!(header.padding_flag, 0);
         assert_eq!(header.extension_flag, 0);
         assert_eq!(header.cc, 0);

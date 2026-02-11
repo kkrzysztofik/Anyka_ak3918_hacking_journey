@@ -47,6 +47,7 @@ pub struct RtpChannel {
     pub rtp_unpacker: Option<Box<dyn TUnPacker>>,
     ssrc: u32,
     init_sequence: u16,
+    init_timestamp: u32,
 }
 
 #[derive(Default)]
@@ -67,12 +68,15 @@ impl RtpChannel {
                 break sequence;
             }
         };
+        // Random initial RTP timestamp per RFC 3550 §5.1
+        let init_timestamp: u32 = rand::rng().random();
         let mut rtp_channel = RtpChannel {
             codec_info,
             ssrc,
             rtp_packer: None,
             rtp_unpacker: None,
             init_sequence,
+            init_timestamp,
         };
         rtp_channel.create_unpacker();
         rtp_channel
@@ -85,6 +89,23 @@ impl RtpChannel {
     /// Initial RTP sequence number for this channel (used in RTP-Info header on PLAY).
     pub fn initial_sequence(&self) -> u16 {
         self.init_sequence
+    }
+
+    /// Initial RTP timestamp for this channel (used in RTP-Info header on PLAY).
+    /// Per RFC 3550 §5.1, this SHOULD be random to avoid known-plaintext attacks.
+    /// Returns the SSRC assigned to this RTP channel.
+    pub fn ssrc(&self) -> u32 {
+        self.ssrc
+    }
+
+    /// Regenerate the SSRC with a new random value.
+    /// Used to resolve SSRC collisions within a session (RFC 3550 §8.2).
+    pub fn regenerate_ssrc(&mut self) {
+        self.ssrc = rand::rng().random();
+    }
+
+    pub fn initial_timestamp(&self) -> u32 {
+        self.init_timestamp
     }
 
     //Receive av frame from network -> pack AV frame to RTP packet -> send to stream hub
@@ -183,6 +204,12 @@ impl TRtpFunc for RtpChannel {
 }
 
 impl RtcpChannel {
+    /// Set the SSRC for the send context so RTCP SR packets carry the same
+    /// SSRC as the corresponding RTP stream (RFC 3550 §6.4.1).
+    pub fn set_ssrc(&mut self, ssrc: u32) {
+        self.send_ctx = RtcpContext::new(ssrc, 0, 0);
+    }
+
     pub fn set_channel_identifier(&mut self, channel_identifier: u8) {
         self.channel_identifier = channel_identifier;
     }
@@ -364,6 +391,21 @@ mod tests {
     }
 
     #[test]
+    fn test_rtcp_channel_set_ssrc() {
+        let mut channel = RtcpChannel::default();
+        channel.set_ssrc(0x12345678);
+        let sr = channel.send_ctx.generate_sr();
+        assert_eq!(sr.ssrc, 0x12345678);
+    }
+
+    #[test]
+    fn test_rtcp_channel_set_ssrc_default_is_zero() {
+        let mut channel = RtcpChannel::default();
+        let sr = channel.send_ctx.generate_sr();
+        assert_eq!(sr.ssrc, 0);
+    }
+
+    #[test]
     fn test_rtcp_channel_on_packet() {
         let mut channel = RtcpChannel::default();
         let packet = RtpPacket::default();
@@ -389,8 +431,10 @@ mod tests {
             rtp_unpacker: None,
             ssrc: 0,
             init_sequence: 42,
+            init_timestamp: 1000,
         };
         assert_eq!(channel.initial_sequence(), 42);
+        assert_eq!(channel.initial_timestamp(), 1000);
     }
 
     #[test]
@@ -407,6 +451,7 @@ mod tests {
             rtp_unpacker: None,
             ssrc: 0,
             init_sequence: 0,
+            init_timestamp: 0,
         };
         channel.create_unpacker();
         assert!(channel.rtp_unpacker.is_some());
@@ -426,6 +471,7 @@ mod tests {
             rtp_unpacker: None,
             ssrc: 0,
             init_sequence: 0,
+            init_timestamp: 0,
         };
         channel.create_unpacker();
         assert!(channel.rtp_unpacker.is_some());
@@ -445,6 +491,7 @@ mod tests {
             rtp_unpacker: None,
             ssrc: 0,
             init_sequence: 0,
+            init_timestamp: 0,
         };
         channel.create_unpacker();
         assert!(channel.rtp_unpacker.is_some());

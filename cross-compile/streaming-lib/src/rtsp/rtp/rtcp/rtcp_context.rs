@@ -210,7 +210,7 @@ impl RtcpContext {
                 payload_type: RTCP_RR,
                 report_count: 1,
                 version: 2,
-                length: (4 + 24) / 4,
+                length: 7, // RFC 3550: (32 bytes / 4) - 1 = 7
                 ..Default::default()
             },
             report_blocks: vec![block],
@@ -235,7 +235,7 @@ impl RtcpContext {
                 padding_flag: 0,
                 report_count: 0,
                 payload_type: super::RTCP_SR,
-                length: (4 + 24) / 4, // 4 bytes header + 24 bytes sender info, divided by 4
+                length: 6, // RFC 3550: (28 bytes / 4) - 1 = 6
             },
             ssrc: self.ssrc,
             ntp,
@@ -247,6 +247,14 @@ impl RtcpContext {
     }
 
     pub fn received_sr(&mut self, sr: &RtcpSenderReport) {
+        // RFC 3550 §6.4.1: NTP timestamp must be non-zero in a valid SR
+        if sr.ntp == 0 {
+            log::warn!(
+                "received_sr: ignoring SR with zero NTP timestamp (SSRC={})",
+                sr.ssrc
+            );
+            return;
+        }
         self.sr_clock_time = utils::current_time();
 
         self.sr_ntp_lsr = sr.ntp;

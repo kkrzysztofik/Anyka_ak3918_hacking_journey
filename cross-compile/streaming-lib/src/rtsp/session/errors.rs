@@ -50,6 +50,8 @@ pub enum SessionErrorValue {
     MissingSessionId,
     #[error("corrupted rtsp message: {0}")]
     RtspMessageCorrupted(String),
+    #[error("RTSP session timed out after {0}s")]
+    SessionTimeout(u64),
 }
 
 #[derive(Debug, Error)]

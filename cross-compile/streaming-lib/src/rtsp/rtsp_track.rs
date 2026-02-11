@@ -43,6 +43,10 @@ pub struct RtspTrack {
 impl RtspTrack {
     pub fn new(track_type: TrackType, codec_info: RtspCodecInfo, media_control: String) -> Self {
         let rtp_channel = RtpChannel::new(codec_info);
+        let ssrc = rtp_channel.ssrc();
+
+        let mut rtcp_channel = RtcpChannel::default();
+        rtcp_channel.set_ssrc(ssrc);
 
         RtspTrack {
             track_type,
@@ -50,7 +54,7 @@ impl RtspTrack {
             transport: RtspTransport::default(),
             uri: String::default(),
             rtp_channel: Arc::new(Mutex::new(rtp_channel)),
-            rtcp_channel: Arc::new(Mutex::default()),
+            rtcp_channel: Arc::new(Mutex::new(rtcp_channel)),
         }
     }
 

@@ -278,17 +278,6 @@ fn configure_stream_frame_debug_logging(config: &ConfigRuntime) -> bool {
     enabled
 }
 
-fn env_flag(name: &str, default: bool) -> bool {
-    match std::env::var(name) {
-        Ok(value) => match value.trim().to_ascii_lowercase().as_str() {
-            "1" | "true" | "yes" | "on" => true,
-            "0" | "false" | "no" | "off" => false,
-            _ => default,
-        },
-        Err(_) => default,
-    }
-}
-
 fn fanout_validation_frame(
     frame_tx_rtsp: &tokio::sync::mpsc::UnboundedSender<FrameData>,
     frame_tx_httpflv: Option<&tokio::sync::mpsc::UnboundedSender<FrameData>>,
@@ -513,15 +502,7 @@ async fn run_validation_mode(config: H264PlaybackConfig, config_path: &str) -> R
         tracing::info!("RTSP RTP sampling disabled for validation mode");
     }
 
-    // Keep validation mode lightweight on embedded devices by default.
-    // Set env vars to "1"/"true" to re-enable the extra services.
-    let validation_enable_httpflv = env_flag("ONVIF_VALIDATION_ENABLE_HTTPFLV", false);
-    let validation_enable_onvif_app = env_flag("ONVIF_VALIDATION_ENABLE_ONVIF_APP", false);
-    tracing::info!(
-        enable_httpflv = validation_enable_httpflv,
-        enable_onvif_app = validation_enable_onvif_app,
-        "Validation service profile"
-    );
+    tracing::info!("Validation mode: HTTP-FLV and ONVIF application enabled");
 
     // Initialize logging early so validation-mode startup and streaming logs are visible.
     //
@@ -681,25 +662,18 @@ async fn run_validation_mode(config: H264PlaybackConfig, config_path: &str) -> R
     let rtsp_stream_id = StreamIdentifier::Rtsp {
         stream_path: stream_name.clone(),
     };
-    let httpflv_stream_id = if validation_enable_httpflv {
-        Some(StreamIdentifier::Rtmp {
-            app_name: app_name.clone(),
-            stream_name: stream_name.clone(),
-        })
-    } else {
-        None
+    let httpflv_stream_id = StreamIdentifier::Rtmp {
+        app_name: app_name.clone(),
+        stream_name: stream_name.clone(),
     };
 
     // Create a single publisher output channel, then fan-out to protocol-specific StreamHub streams.
-    // HTTP-FLV fan-out is optional in validation mode to reduce CPU load.
     let (frame_tx_for_publisher, mut frame_rx_from_publisher) =
         mpsc::unbounded_channel::<FrameData>();
     let (frame_tx_rtsp, frame_rx_rtsp) = mpsc::unbounded_channel::<FrameData>();
-    let (frame_tx_httpflv, frame_rx_httpflv) = if validation_enable_httpflv {
+    let (frame_tx_httpflv, frame_rx_httpflv) = {
         let (tx, rx) = mpsc::unbounded_channel::<FrameData>();
         (Some(tx), Some(rx))
-    } else {
-        (None, None)
     };
 
     let fanout_handle = tokio::spawn(async move {
@@ -722,34 +696,25 @@ async fn run_validation_mode(config: H264PlaybackConfig, config_path: &str) -> R
         .await
         .context("Failed to publish RTSP stream to StreamHub")?;
 
-    if let (Some(httpflv_stream_id), Some(frame_rx_httpflv)) =
-        (httpflv_stream_id.as_ref(), frame_rx_httpflv)
-    {
-        // Publish HTTP-FLV stream (HTTP-FLV server subscribes using RTMP-style identifiers)
-        let httpflv_data_receiver = DataReceiver {
-            frame_receiver: Some(frame_rx_httpflv),
-            packet_receiver: None,
-        };
-        let (_httpflv_statistic_sender, _httpflv_subscriber_handle) = streamhub
-            .publish(
-                httpflv_stream_id.clone(),
-                httpflv_data_receiver,
-                rtsp_stream_handler.clone(),
-            )
-            .await
-            .context("Failed to publish HTTP-FLV stream to StreamHub")?;
+    // Publish HTTP-FLV stream (HTTP-FLV server subscribes using RTMP-style identifiers)
+    let httpflv_data_receiver = DataReceiver {
+        frame_receiver: frame_rx_httpflv,
+        packet_receiver: None,
+    };
+    let (_httpflv_statistic_sender, _httpflv_subscriber_handle) = streamhub
+        .publish(
+            httpflv_stream_id.clone(),
+            httpflv_data_receiver,
+            rtsp_stream_handler.clone(),
+        )
+        .await
+        .context("Failed to publish HTTP-FLV stream to StreamHub")?;
 
-        tracing::info!(
-            "StreamHub initialized with streams: {} and {}",
-            rtsp_stream_id,
-            httpflv_stream_id
-        );
-    } else {
-        tracing::info!(
-            "StreamHub initialized with RTSP stream only: {}",
-            rtsp_stream_id
-        );
-    }
+    tracing::info!(
+        "StreamHub initialized with streams: {} and {}",
+        rtsp_stream_id,
+        httpflv_stream_id
+    );
 
     // Wire up on-demand publishing: publishers check subscriber count before sending frames
     let rtsp_handle_for_video = Arc::clone(&rtsp_subscriber_handle);
@@ -814,24 +779,17 @@ async fn run_validation_mode(config: H264PlaybackConfig, config_path: &str) -> R
     });
     tracing::info!("RTSP server spawned on port {}", rtsp_port);
 
-    // 4. Spawn optional HTTP-FLV server
-    let flv_handle = if validation_enable_httpflv {
-        let flv_port = config.httpflv_port;
-        let flv_addr = format!("0.0.0.0:{}", flv_port);
-        let flv_event_sender = hub_event_sender.clone();
-        let handle = tokio::spawn(async move {
-            let mut flv_server =
-                DefaultHttpFlvServer::new(flv_addr.clone(), flv_event_sender, None);
-            if let Err(e) = flv_server.run().await {
-                tracing::error!("HTTP-FLV server error: {}", e);
-            }
-        });
-        tracing::info!("HTTP-FLV server spawned on port {}", flv_port);
-        Some(handle)
-    } else {
-        tracing::info!("HTTP-FLV server disabled in validation profile");
-        None
-    };
+    // 4. Spawn HTTP-FLV server
+    let flv_port = config.httpflv_port;
+    let flv_addr = format!("0.0.0.0:{}", flv_port);
+    let flv_event_sender = hub_event_sender.clone();
+    let flv_handle = tokio::spawn(async move {
+        let mut flv_server = DefaultHttpFlvServer::new(flv_addr.clone(), flv_event_sender, None);
+        if let Err(e) = flv_server.run().await {
+            tracing::error!("HTTP-FLV server error: {}", e);
+        }
+    });
+    tracing::info!("HTTP-FLV server spawned on port {}", flv_port);
 
     // 5. Spawn StreamHub event loop
     let streamhub_handle = tokio::spawn(async move {
@@ -845,8 +803,8 @@ async fn run_validation_mode(config: H264PlaybackConfig, config_path: &str) -> R
     platform.initialize().await?;
     tracing::info!("ValidationPlatform initialized");
 
-    // 7. Optionally start ONVIF Application with the validation platform
-    let app = if validation_enable_onvif_app {
+    // 7. Start ONVIF Application with the validation platform
+    let app =
         match Application::start_with_platform(config_path, platform.clone() as Arc<dyn Platform>)
             .await
         {
@@ -861,11 +819,7 @@ async fn run_validation_mode(config: H264PlaybackConfig, config_path: &str) -> R
                 );
                 None
             }
-        }
-    } else {
-        tracing::info!("ONVIF application disabled in validation profile");
-        None
-    };
+        };
 
     // 8. Create playback mode instance
     let playback_mode = H264PlaybackMode::new(config.clone());
@@ -881,12 +835,10 @@ async fn run_validation_mode(config: H264PlaybackConfig, config_path: &str) -> R
     // Print streaming URIs for external clients
     tracing::info!("Streaming URIs:");
     tracing::info!("  RTSP:     rtsp://0.0.0.0:{}/stream1", config.rtsp_port);
-    if validation_enable_httpflv {
-        tracing::info!(
-            "  HTTP-FLV: http://0.0.0.0:{}/live/stream1.flv",
-            config.httpflv_port
-        );
-    }
+    tracing::info!(
+        "  HTTP-FLV: http://0.0.0.0:{}/live/stream1.flv",
+        config.httpflv_port
+    );
     if app.is_some() {
         tracing::info!("  ONVIF Device Service available");
     }
@@ -925,9 +877,7 @@ async fn run_validation_mode(config: H264PlaybackConfig, config_path: &str) -> R
 
     // Cancel server tasks
     rtsp_handle.abort();
-    if let Some(handle) = flv_handle {
-        handle.abort();
-    }
+    flv_handle.abort();
     streamhub_handle.abort();
     pub_handle.abort();
     if let Some(handle) = audio_pub_handle {
@@ -1172,40 +1122,5 @@ mod tests {
 
         let loop_flag = sample_args.iter().any(|arg| arg == "--loop-playback");
         assert!(loop_flag);
-    }
-
-    #[test]
-    fn test_env_flag_parsing_and_default_behavior() {
-        const KEY: &str = "ONVIF_VALIDATION_ENV_FLAG_TEST";
-
-        // SAFETY: unit test mutates process environment in a controlled scope.
-        unsafe {
-            std::env::remove_var(KEY);
-        }
-        assert!(env_flag(KEY, true));
-        assert!(!env_flag(KEY, false));
-
-        // SAFETY: unit test mutates process environment in a controlled scope.
-        unsafe {
-            std::env::set_var(KEY, "1");
-        }
-        assert!(env_flag(KEY, false));
-
-        // SAFETY: unit test mutates process environment in a controlled scope.
-        unsafe {
-            std::env::set_var(KEY, "off");
-        }
-        assert!(!env_flag(KEY, true));
-
-        // SAFETY: unit test mutates process environment in a controlled scope.
-        unsafe {
-            std::env::set_var(KEY, "not_a_boolean");
-        }
-        assert!(env_flag(KEY, true));
-
-        // SAFETY: unit test mutates process environment in a controlled scope.
-        unsafe {
-            std::env::remove_var(KEY);
-        }
     }
 }

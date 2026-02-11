@@ -26,6 +26,20 @@ pub mod rtsp_method_name {
         REDIRECT,
         RECORD,
     ];
+
+    /// Methods advertised in OPTIONS Public header (C→S only, excludes REDIRECT per RFC 2326 §10.10).
+    pub const PUBLIC_METHODS: [&str; 10] = [
+        OPTIONS,
+        DESCRIBE,
+        ANNOUNCE,
+        SETUP,
+        PLAY,
+        PAUSE,
+        TEARDOWN,
+        GET_PARAMETER,
+        SET_PARAMETER,
+        RECORD,
+    ];
 }
 
 pub enum ServerSessionType {

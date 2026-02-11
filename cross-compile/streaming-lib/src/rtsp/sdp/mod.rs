@@ -83,7 +83,7 @@ pub struct SdpMediaInfo {
 //     }
 // }
 
-#[derive(Default, Debug, Clone)]
+#[derive(Debug, Clone)]
 pub struct Sdp {
     pub raw_string: String,
     version: u16,
@@ -93,6 +93,32 @@ pub struct Sdp {
     timing: String,
     pub medias: Vec<SdpMediaInfo>,
     attributes: HashMap<String, String>,
+}
+
+impl Default for Sdp {
+    fn default() -> Self {
+        Self {
+            raw_string: String::new(),
+            version: 0,
+            origin: format!("- {} 0 IN IP4 127.0.0.1", Self::ntp_session_id()),
+            session: "No Name".to_string(),
+            connection: "IN IP4 0.0.0.0".to_string(),
+            timing: "0 0".to_string(),
+            medias: Vec::new(),
+            attributes: HashMap::new(),
+        }
+    }
+}
+
+impl Sdp {
+    /// Generate a unique session-id (NTP timestamp in seconds) per RFC 4566 §5.2.
+    /// Uses the NTP epoch (January 1, 1900) as the base.
+    fn ntp_session_id() -> u64 {
+        const NTP_UNIX_DIFF: u64 = 2_208_988_800;
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_secs() + NTP_UNIX_DIFF)
+    }
 }
 
 impl Unmarshal for SdpMediaInfo {

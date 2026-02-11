@@ -95,6 +95,24 @@ impl Unmarshal for RtspTransport {
             }
         }
 
+        // RFC 2326 §12.39: validate required transport parameters
+        match rtsp_transport.protocol_type {
+            ProtocolType::TCP => {
+                if rtsp_transport.interleaved.is_none() {
+                    return Err(
+                        "TCP transport missing required 'interleaved' parameter".to_string()
+                    );
+                }
+            }
+            ProtocolType::UDP => {
+                if rtsp_transport.client_port.is_none() {
+                    return Err(
+                        "UDP transport missing required 'client_port' parameter".to_string()
+                    );
+                }
+            }
+        }
+
         Ok(rtsp_transport)
     }
 }
@@ -240,19 +258,20 @@ mod tests {
 
     #[test]
     fn test_unmarshal_rtp_avp_udp() {
-        let transport = RtspTransport::unmarshal("RTP/AVP;unicast").unwrap();
+        let transport = RtspTransport::unmarshal("RTP/AVP;unicast;client_port=5000-5001").unwrap();
         assert_eq!(transport.protocol_type, ProtocolType::UDP);
     }
 
     #[test]
     fn test_unmarshal_rtp_avp_udp_explicit() {
-        let transport = RtspTransport::unmarshal("RTP/AVP/UDP;unicast").unwrap();
+        let transport =
+            RtspTransport::unmarshal("RTP/AVP/UDP;unicast;client_port=5000-5001").unwrap();
         assert_eq!(transport.protocol_type, ProtocolType::UDP);
     }
 
     #[test]
     fn test_unmarshal_rtp_avp_tcp() {
-        let transport = RtspTransport::unmarshal("RTP/AVP/TCP;unicast").unwrap();
+        let transport = RtspTransport::unmarshal("RTP/AVP/TCP;unicast;interleaved=0-1").unwrap();
         assert_eq!(transport.protocol_type, ProtocolType::TCP);
     }
 
@@ -262,13 +281,14 @@ mod tests {
 
     #[test]
     fn test_unmarshal_unicast() {
-        let transport = RtspTransport::unmarshal("RTP/AVP;unicast").unwrap();
+        let transport = RtspTransport::unmarshal("RTP/AVP;unicast;client_port=5000-5001").unwrap();
         assert_eq!(transport.cast_type, CastType::Unicast);
     }
 
     #[test]
     fn test_unmarshal_multicast() {
-        let transport = RtspTransport::unmarshal("RTP/AVP;multicast").unwrap();
+        let transport =
+            RtspTransport::unmarshal("RTP/AVP;multicast;client_port=5000-5001").unwrap();
         assert_eq!(transport.cast_type, CastType::Multicast);
     }
 
@@ -284,7 +304,9 @@ mod tests {
 
     #[test]
     fn test_unmarshal_server_port() {
-        let transport = RtspTransport::unmarshal("RTP/AVP;unicast;server_port=6000-6001").unwrap();
+        let transport =
+            RtspTransport::unmarshal("RTP/AVP;unicast;client_port=5000-5001;server_port=6000-6001")
+                .unwrap();
         assert_eq!(transport.server_port, Some([6000, 6001]));
     }
 
@@ -319,13 +341,17 @@ mod tests {
 
     #[test]
     fn test_unmarshal_ssrc() {
-        let transport = RtspTransport::unmarshal("RTP/AVP;unicast;ssrc=0x12345678").unwrap();
+        let transport =
+            RtspTransport::unmarshal("RTP/AVP;unicast;client_port=5000-5001;ssrc=0x12345678")
+                .unwrap();
         assert_eq!(transport.ssrc, Some(0x12345678));
     }
 
     #[test]
     fn test_unmarshal_ssrc_decimal() {
-        let transport = RtspTransport::unmarshal("RTP/AVP;unicast;ssrc=1234567890").unwrap();
+        let transport =
+            RtspTransport::unmarshal("RTP/AVP;unicast;client_port=5000-5001;ssrc=1234567890")
+                .unwrap();
         assert_eq!(transport.ssrc, Some(1234567890));
     }
 
@@ -335,13 +361,15 @@ mod tests {
 
     #[test]
     fn test_unmarshal_mode_record() {
-        let transport = RtspTransport::unmarshal("RTP/AVP;unicast;mode=record").unwrap();
+        let transport =
+            RtspTransport::unmarshal("RTP/AVP;unicast;client_port=5000-5001;mode=record").unwrap();
         assert_eq!(transport.transport_mod, Some("record".to_string()));
     }
 
     #[test]
     fn test_unmarshal_mode_play() {
-        let transport = RtspTransport::unmarshal("RTP/AVP;unicast;mode=play").unwrap();
+        let transport =
+            RtspTransport::unmarshal("RTP/AVP;unicast;client_port=5000-5001;mode=play").unwrap();
         assert_eq!(transport.transport_mod, Some("play".to_string()));
     }
 
@@ -369,7 +397,9 @@ mod tests {
 
     #[test]
     fn test_unmarshal_ssrc_hex_without_prefix() {
-        let transport = RtspTransport::unmarshal("RTP/AVP;unicast;ssrc=ABCDEF00").unwrap();
+        let transport =
+            RtspTransport::unmarshal("RTP/AVP;unicast;client_port=5000-5001;ssrc=ABCDEF00")
+                .unwrap();
         assert_eq!(transport.ssrc, Some(0xABCDEF00));
     }
 
@@ -402,15 +432,23 @@ mod tests {
     }
 
     #[test]
-    fn test_unmarshal_minimal() {
-        let transport = RtspTransport::unmarshal("RTP/AVP;unicast").unwrap();
-        assert_eq!(transport.protocol_type, ProtocolType::UDP);
-        assert_eq!(transport.cast_type, CastType::Unicast);
-        assert_eq!(transport.client_port, None);
-        assert_eq!(transport.server_port, None);
-        assert_eq!(transport.ssrc, None);
-        assert_eq!(transport.interleaved, None);
-        assert_eq!(transport.transport_mod, None);
+    fn test_unmarshal_minimal_udp_without_client_port_rejected() {
+        let result = RtspTransport::unmarshal("RTP/AVP;unicast");
+        assert!(result.is_err());
+        assert!(
+            result.unwrap_err().contains("client_port"),
+            "should mention missing client_port"
+        );
+    }
+
+    #[test]
+    fn test_unmarshal_minimal_tcp_without_interleaved_rejected() {
+        let result = RtspTransport::unmarshal("RTP/AVP/TCP;unicast");
+        assert!(result.is_err());
+        assert!(
+            result.unwrap_err().contains("interleaved"),
+            "should mention missing interleaved"
+        );
     }
 
     // ============================================
@@ -508,12 +546,13 @@ mod tests {
 
     #[test]
     fn test_rtsp_transport_roundtrip_basic() {
-        let original_str = "RTP/AVP;unicast";
+        let original_str = "RTP/AVP;unicast;client_port=5000-5001";
         let transport = RtspTransport::unmarshal(original_str).unwrap();
         let marshaled = transport.marshal();
         // Marshal format may differ slightly, but should contain key components
         assert!(marshaled.contains("RTP/AVP"));
         assert!(marshaled.contains("unicast"));
+        assert!(marshaled.contains("client_port=5000-5001"));
     }
 
     #[test]
@@ -539,13 +578,15 @@ mod tests {
     #[test]
     fn test_unmarshal_empty_string() {
         let transport = RtspTransport::unmarshal("");
-        // Should return default transport
-        assert!(transport.is_ok());
+        // Empty string defaults to UDP but lacks client_port, so validation rejects it
+        assert!(transport.is_err());
     }
 
     #[test]
     fn test_unmarshal_unknown_parameters() {
-        let transport = RtspTransport::unmarshal("RTP/AVP;unicast;unknown_param=value").unwrap();
+        let transport =
+            RtspTransport::unmarshal("RTP/AVP;unicast;client_port=5000-5001;unknown_param=value")
+                .unwrap();
         // Unknown parameters should be ignored
         assert_eq!(transport.protocol_type, ProtocolType::UDP);
         assert_eq!(transport.cast_type, CastType::Unicast);
@@ -553,7 +594,8 @@ mod tests {
 
     #[test]
     fn test_unmarshal_malformed_port() {
-        let transport = RtspTransport::unmarshal("RTP/AVP;unicast;client_port=invalid").unwrap();
-        assert!(transport.client_port.is_none());
+        // Malformed client_port parses as None, which now triggers validation error for UDP
+        let result = RtspTransport::unmarshal("RTP/AVP;unicast;client_port=invalid");
+        assert!(result.is_err());
     }
 }
