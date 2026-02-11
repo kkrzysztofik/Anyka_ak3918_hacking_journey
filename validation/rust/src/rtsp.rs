@@ -1,6 +1,6 @@
 //! RTSP protocol validation and harness (Retina, ffmpeg, tshark).
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result, anyhow, bail};
 use chrono::Utc;
 use ffmpeg_sidecar::command::FfmpegCommand;
 use ffmpeg_sidecar::event::{FfmpegEvent, FfmpegProgress};
@@ -30,6 +30,47 @@ const PROTOCOL_SEQUENCE_CAPTURE_MAX_DURATION_SEC: u64 = 12;
 
 pub(crate) fn rtsp_url(host: &str, port: u16, stream: &str) -> String {
     format!("rtsp://{}:{}{}", host, port, stream)
+}
+
+fn redact_url_credentials(raw_url: &str) -> String {
+    let Ok(mut parsed) = Url::parse(raw_url) else {
+        return raw_url.to_string();
+    };
+    if parsed.username().is_empty() && parsed.password().is_none() {
+        return raw_url.to_string();
+    }
+    if parsed.set_username("REDACTED").is_err() {
+        return raw_url.to_string();
+    }
+    if parsed.set_password(Some("REDACTED")).is_err() {
+        return raw_url.to_string();
+    }
+    parsed.to_string()
+}
+
+fn rtsp_url_with_credentials(
+    host: &str,
+    port: u16,
+    stream: &str,
+    username: Option<&str>,
+    password: Option<&str>,
+) -> Result<String> {
+    let url = rtsp_url(host, port, stream);
+    match (username, password) {
+        (None, None) => Ok(url),
+        (Some(username), Some(password)) => {
+            let mut parsed =
+                Url::parse(&url).with_context(|| format!("invalid RTSP URL: {}", url))?;
+            parsed
+                .set_username(username)
+                .map_err(|_| anyhow!("failed to set RTSP URL username"))?;
+            parsed
+                .set_password(Some(password))
+                .map_err(|_| anyhow!("failed to set RTSP URL password"))?;
+            Ok(parsed.to_string())
+        }
+        _ => bail!("RTSP credentials must include both username and password"),
+    }
 }
 
 fn regex_escape_for_pgrep(raw: &str) -> String {
@@ -1010,7 +1051,7 @@ pub async fn run_validation(args: &Args, effective: &EffectiveConfig) -> Result<
 
     let url = Url::parse(&url_str).with_context(|| format!("invalid RTSP URL: {}", url_str))?;
 
-    let creds = match (&args.username, &args.password) {
+    let creds = match (&effective.stream_username, &effective.stream_password) {
         (Some(username), Some(password)) => Some(Credentials {
             username: username.clone(),
             password: password.clone(),
@@ -1349,6 +1390,13 @@ pub async fn run_harness(
         effective.rtsp_port,
         &effective.rtsp_stream,
     );
+    let auth_url = rtsp_url_with_credentials(
+        &effective.rtsp_host,
+        effective.rtsp_port,
+        &effective.rtsp_stream,
+        effective.stream_username.as_deref(),
+        effective.stream_password.as_deref(),
+    )?;
     let timeout_sec = effective.rtsp_timeout_sec;
     let step_cap_short = Duration::from_secs(timeout_sec.saturating_add(15));
     let step_cap_long = Duration::from_secs(effective.short_duration_sec.saturating_add(30));
@@ -1360,7 +1408,7 @@ pub async fn run_harness(
     );
     let artifacts_dir = effective.artifacts_dir.clone();
     let capture_tool_output = effective.capture_tool_output;
-    info!(url = %url, "running harness scenarios");
+    info!(url = %url, uses_credentials = effective.stream_username.is_some(), "running harness scenarios");
     let mut expect_h264 = false;
     let mut expect_aac = false;
 
@@ -1368,7 +1416,7 @@ pub async fn run_harness(
     match timeout(
         step_cap_short,
         harness_basic_connectivity(
-            &url,
+            &auth_url,
             timeout_sec,
             &artifacts_dir,
             capture_tool_output,
@@ -1389,7 +1437,7 @@ pub async fn run_harness(
             e.to_string(),
         )),
         Err(_) => {
-            cleanup_timed_out_media_processes(&url, "harness_basic_connectivity");
+            cleanup_timed_out_media_processes(&auth_url, "harness_basic_connectivity");
             tests.push(TestResult::fail(
                 "harness_basic_connectivity",
                 format!("harness step timed out after {}s", step_cap_short.as_secs()),
@@ -1405,7 +1453,7 @@ pub async fn run_harness(
     match timeout(
         step_cap_short,
         harness_startup_latency(
-            &url,
+            &auth_url,
             timeout_sec,
             &artifacts_dir,
             capture_tool_output,
@@ -1431,7 +1479,7 @@ pub async fn run_harness(
             e.to_string(),
         )),
         Err(_) => {
-            cleanup_timed_out_media_processes(&url, "harness_startup_latency_ms");
+            cleanup_timed_out_media_processes(&auth_url, "harness_startup_latency_ms");
             tests.push(TestResult::fail(
                 "harness_startup_latency_ms",
                 format!("harness step timed out after {}s", step_cap_short.as_secs()),
@@ -1443,7 +1491,7 @@ pub async fn run_harness(
     match timeout(
         step_cap_long,
         harness_bitrate_fps(
-            &url,
+            &auth_url,
             effective.short_duration_sec,
             &artifacts_dir,
             capture_tool_output,
@@ -1475,7 +1523,7 @@ pub async fn run_harness(
         }
         Ok(Err(e)) => tests.push(TestResult::fail("harness_bitrate_fps", e.to_string())),
         Err(_) => {
-            cleanup_timed_out_media_processes(&url, "harness_bitrate_fps");
+            cleanup_timed_out_media_processes(&auth_url, "harness_bitrate_fps");
             tests.push(TestResult::fail(
                 "harness_bitrate_fps",
                 format!("harness step timed out after {}s", step_cap_long.as_secs()),
@@ -1486,7 +1534,7 @@ pub async fn run_harness(
     debug!(url = %url, "harness: SDP validation");
     match timeout(
         step_cap_short,
-        harness_sdp_validation(&url, timeout_sec, &artifacts_dir, capture_tool_output),
+        harness_sdp_validation(&auth_url, timeout_sec, &artifacts_dir, capture_tool_output),
     )
     .await
     {
@@ -1516,7 +1564,7 @@ pub async fn run_harness(
         }
         Ok(Err(e)) => tests.push(TestResult::fail("harness_sdp_validation", e.to_string())),
         Err(_) => {
-            cleanup_timed_out_media_processes(&url, "harness_sdp_validation");
+            cleanup_timed_out_media_processes(&auth_url, "harness_sdp_validation");
             tests.push(TestResult::fail(
                 "harness_sdp_validation",
                 format!("harness step timed out after {}s", step_cap_short.as_secs()),
@@ -1527,7 +1575,7 @@ pub async fn run_harness(
     debug!(url = %url, "harness: RTSP protocol sequence");
     match timeout(
         step_cap_protocol_sequence,
-        harness_rtsp_protocol_sequence(&url, effective, args),
+        harness_rtsp_protocol_sequence(&auth_url, effective, args),
     )
     .await
     {
@@ -1548,7 +1596,7 @@ pub async fn run_harness(
         }
         Ok(Err(e)) => tests.push(TestResult::fail("harness_protocol_sequence", e.to_string())),
         Err(_) => {
-            cleanup_timed_out_media_processes(&url, "harness_protocol_sequence");
+            cleanup_timed_out_media_processes(&auth_url, "harness_protocol_sequence");
             tests.push(TestResult::fail(
                 "harness_protocol_sequence",
                 format!(
@@ -1562,7 +1610,7 @@ pub async fn run_harness(
     debug!(url = %url, "harness: packet loss + pcap RFC checks");
     match timeout(
         step_cap_long,
-        harness_packet_loss(&url, effective, args, expect_h264, expect_aac),
+        harness_packet_loss(&auth_url, effective, args, expect_h264, expect_aac),
     )
     .await
     {
@@ -1659,7 +1707,7 @@ pub async fn run_harness(
         }
         Ok(Err(e)) => tests.push(TestResult::fail("harness_packet_loss", e.to_string())),
         Err(_) => {
-            cleanup_timed_out_media_processes(&url, "harness_packet_loss");
+            cleanup_timed_out_media_processes(&auth_url, "harness_packet_loss");
             tests.push(TestResult::fail(
                 "harness_packet_loss",
                 format!("harness step timed out after {}s", step_cap_long.as_secs()),
@@ -1672,7 +1720,7 @@ pub async fn run_harness(
         match timeout(
             step_cap_long,
             harness_concurrent_clients(
-                &url,
+                &auth_url,
                 effective.short_duration_sec,
                 effective.concurrent_clients,
                 timeout_sec,
@@ -1694,7 +1742,7 @@ pub async fn run_harness(
                 e.to_string(),
             )),
             Err(_) => {
-                cleanup_timed_out_media_processes(&url, "harness_concurrent_clients");
+                cleanup_timed_out_media_processes(&auth_url, "harness_concurrent_clients");
                 tests.push(TestResult::fail(
                     "harness_concurrent_clients",
                     format!("harness step timed out after {}s", step_cap_long.as_secs()),
@@ -1710,7 +1758,7 @@ pub async fn run_harness(
         match timeout(
             step_cap_long_duration,
             harness_long_duration(
-                &url,
+                &auth_url,
                 effective.long_duration_sec,
                 &artifacts_dir,
                 capture_tool_output,
@@ -1727,7 +1775,7 @@ pub async fn run_harness(
             }
             Ok(Err(e)) => tests.push(TestResult::fail("harness_long_duration", e.to_string())),
             Err(_) => {
-                cleanup_timed_out_media_processes(&url, "harness_long_duration");
+                cleanup_timed_out_media_processes(&auth_url, "harness_long_duration");
                 tests.push(TestResult::fail(
                     "harness_long_duration",
                     format!(
@@ -1747,6 +1795,10 @@ pub async fn run_harness(
                 &effective.rtsp_host,
                 effective.rtsp_port,
                 &effective.rtsp_stream,
+                effective
+                    .stream_username
+                    .as_deref()
+                    .zip(effective.stream_password.as_deref()),
                 timeout_sec,
                 &artifacts_dir,
                 capture_tool_output,
@@ -1768,7 +1820,7 @@ pub async fn run_harness(
             }
             Ok(Err(e)) => tests.push(TestResult::fail("harness_error_handling", e.to_string())),
             Err(_) => {
-                cleanup_timed_out_media_processes(&url, "harness_error_handling");
+                cleanup_timed_out_media_processes(&auth_url, "harness_error_handling");
                 tests.push(TestResult::fail(
                     "harness_error_handling",
                     format!("harness step timed out after {}s", step_cap_short.as_secs()),
@@ -1798,7 +1850,7 @@ async fn harness_basic_connectivity(
         };
         if let Some(l) = log.as_mut() {
             l.write_line("=== ffmpeg basic connectivity ===")?;
-            l.write_line(&format!("url={}", url))?;
+            l.write_line(&format!("url={}", redact_url_credentials(&url)))?;
         }
         let mut cmd = FfmpegCommand::new();
         cmd.hide_banner()
@@ -1865,7 +1917,7 @@ async fn harness_startup_latency(
         };
         if let Some(l) = log.as_mut() {
             l.write_line("=== ffmpeg startup latency ===")?;
-            l.write_line(&format!("url={}", url))?;
+            l.write_line(&format!("url={}", redact_url_credentials(&url)))?;
         }
         let start = std::time::Instant::now();
         let mut cmd = FfmpegCommand::new();
@@ -1930,7 +1982,7 @@ async fn harness_bitrate_fps(
         };
         if let Some(l) = log.as_mut() {
             l.write_line("=== ffmpeg bitrate/fps ===")?;
-            l.write_line(&format!("url={}", url))?;
+            l.write_line(&format!("url={}", redact_url_credentials(&url)))?;
             l.write_line(&format!("duration_sec={}", dur))?;
         }
         let mut cmd = FfmpegCommand::new();
@@ -2106,7 +2158,7 @@ async fn harness_rtsp_protocol_sequence(
         };
         if let Some(l) = log.as_mut() {
             l.write_line("=== ffmpeg protocol sequence capture ===")?;
-            l.write_line(&format!("url={}", url2))?;
+            l.write_line(&format!("url={}", redact_url_credentials(&url2)))?;
             l.write_line(&format!("duration_sec={}", short_dur))?;
         }
         let mut cmd = FfmpegCommand::new();
@@ -2268,7 +2320,7 @@ async fn harness_packet_loss(
         };
         if let Some(l) = log.as_mut() {
             l.write_line("=== ffmpeg packet loss capture ===")?;
-            l.write_line(&format!("url={}", url2))?;
+            l.write_line(&format!("url={}", redact_url_credentials(&url2)))?;
             l.write_line(&format!("duration_sec={}", short_dur_rtp))?;
         }
         let mut cmd = FfmpegCommand::new();
@@ -2388,7 +2440,7 @@ async fn harness_concurrent_clients(
             if let Some(l) = log.as_mut() {
                 l.write_line("=== ffmpeg concurrent client ===")?;
                 l.write_line(&format!("client_index={}", i))?;
-                l.write_line(&format!("url={}", url))?;
+                l.write_line(&format!("url={}", redact_url_credentials(&url)))?;
                 l.write_line(&format!("duration_sec={}", dur))?;
             }
             let mut cmd = FfmpegCommand::new();
@@ -2447,7 +2499,7 @@ async fn harness_long_duration(
         };
         if let Some(l) = log.as_mut() {
             l.write_line("=== ffmpeg long duration ===")?;
-            l.write_line(&format!("url={}", url))?;
+            l.write_line(&format!("url={}", redact_url_credentials(&url)))?;
             l.write_line(&format!("duration_sec={}", dur))?;
         }
         let mut cmd = FfmpegCommand::new();
@@ -2512,12 +2564,18 @@ async fn harness_error_handling(
     host: &str,
     port: u16,
     stream: &str,
+    credentials: Option<(&str, &str)>,
     timeout_sec: u64,
     artifacts_dir: &Path,
     capture_tool_output: bool,
 ) -> Result<(bool, bool)> {
-    let invalid_url = format!("rtsp://invalid:invalid@{}:{}{}", host, port, stream);
-    let bogus_url = format!("rtsp://{}:{}/bogus_stream", host, port);
+    let (username, password) = match credentials {
+        Some((username, password)) => (Some(username), Some(password)),
+        None => (None, None),
+    };
+    let invalid_url =
+        rtsp_url_with_credentials(host, port, stream, Some("invalid"), Some("invalid"))?;
+    let bogus_url = rtsp_url_with_credentials(host, port, "/bogus_stream", username, password)?;
     let timeout_micros = timeout_sec.saturating_mul(1_000_000).to_string();
     let invalid_timeout_micros = timeout_micros.clone();
 
@@ -2530,7 +2588,7 @@ async fn harness_error_handling(
         };
         if let Some(l) = log.as_mut() {
             l.write_line("=== ffmpeg error handling: invalid creds ===")?;
-            l.write_line(&format!("url={}", invalid_url))?;
+            l.write_line(&format!("url={}", redact_url_credentials(&invalid_url)))?;
         }
         let mut cmd = FfmpegCommand::new();
         cmd.hide_banner()
@@ -2580,7 +2638,7 @@ async fn harness_error_handling(
         };
         if let Some(l) = log.as_mut() {
             l.write_line("=== ffmpeg error handling: bogus url ===")?;
-            l.write_line(&format!("url={}", bogus_url))?;
+            l.write_line(&format!("url={}", redact_url_credentials(&bogus_url)))?;
         }
         let mut cmd = FfmpegCommand::new();
         cmd.hide_banner()
@@ -2630,9 +2688,10 @@ mod tests {
         compute_packet_loss_from_seqs, critical_proto_failed, empty_report, fps_within_tolerance,
         group_rtp_rows_by_stream, packet_loss_within_tolerance, parse_rtsp_method_from_meta,
         parse_rtsp_status_code_from_meta, parse_tshark_hex_bytes, parse_tshark_rtp_row_line,
-        pick_primary_audio_stream, pick_primary_video_stream, result_ok, rtsp_url,
-        to_retina_initial_timestamp_policy, to_retina_transport, validate_aac_rtp_payload_rfc3640,
-        validate_h264_length_prefixed_nals, validate_h264_rtp_payload_rfc6184,
+        pick_primary_audio_stream, pick_primary_video_stream, redact_url_credentials, result_ok,
+        rtsp_url, rtsp_url_with_credentials, to_retina_initial_timestamp_policy,
+        to_retina_transport, validate_aac_rtp_payload_rfc3640, validate_h264_length_prefixed_nals,
+        validate_h264_rtp_payload_rfc6184,
     };
     use crate::config::{InitialTimestampPolicyArg, TransportArg};
     use crate::report::{StreamInfo, TestResult, TestRun};
@@ -2725,6 +2784,38 @@ mod tests {
         assert_eq!(
             rtsp_url("192.168.1.1", 8554, "/live"),
             "rtsp://192.168.1.1:8554/live"
+        );
+    }
+
+    #[test]
+    fn test_rtsp_url_with_credentials_encodes_and_roundtrips() {
+        let url = rtsp_url_with_credentials(
+            "192.168.1.1",
+            8554,
+            "/live",
+            Some("user@name"),
+            Some("p@ss:wo/rd"),
+        )
+        .unwrap();
+        let parsed = url::Url::parse(&url).unwrap();
+        assert!(parsed.as_str().contains("user%40name"));
+        assert!(parsed.as_str().contains("p%40ss%3Awo%2Frd"));
+        assert_eq!(parsed.path(), "/live");
+    }
+
+    #[test]
+    fn test_rtsp_url_with_credentials_requires_complete_pair() {
+        let result = rtsp_url_with_credentials("127.0.0.1", 554, "/stream1", Some("user"), None);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_redact_url_credentials() {
+        let redacted = redact_url_credentials("rtsp://user:pass@127.0.0.1:554/stream1");
+        assert_eq!(redacted, "rtsp://REDACTED:REDACTED@127.0.0.1:554/stream1");
+        assert_eq!(
+            redact_url_credentials("rtsp://127.0.0.1:554/stream1"),
+            "rtsp://127.0.0.1:554/stream1"
         );
     }
 

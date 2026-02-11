@@ -30,6 +30,9 @@ stream = "/stream1"
 timeout-sec = 10
 # Handles servers (e.g. MediaMTX) that omit RTP-Info rtptime on PLAY.
 initial-timestamp-policy = "permissive"
+# Optional stream credentials used for BOTH RTSP and HTTP-FLV checks.
+# username = "admin"
+# password = ""
 
 [test]
 short-duration-sec = 30

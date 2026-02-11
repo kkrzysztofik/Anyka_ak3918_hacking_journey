@@ -11,9 +11,70 @@ use ffmpeg_sidecar::event::FfmpegEvent;
 use futures_util::StreamExt;
 use tokio::time::timeout;
 use tracing::{debug, info};
+use url::Url;
 
 use crate::config::EffectiveConfig;
 use crate::report::TestResult;
+
+fn httpflv_base_url(effective: &EffectiveConfig) -> String {
+    format!(
+        "http://{}:{}{}",
+        effective.rtsp_host, effective.httpflv_port, effective.httpflv_path
+    )
+}
+
+fn url_with_credentials(
+    url: &str,
+    username: Option<&str>,
+    password: Option<&str>,
+) -> Result<String> {
+    match (username, password) {
+        (None, None) => Ok(url.to_string()),
+        (Some(username), Some(password)) => {
+            let mut parsed =
+                Url::parse(url).with_context(|| format!("invalid HTTP-FLV URL: {}", url))?;
+            parsed
+                .set_username(username)
+                .map_err(|_| anyhow::anyhow!("failed to set HTTP-FLV URL username"))?;
+            parsed
+                .set_password(Some(password))
+                .map_err(|_| anyhow::anyhow!("failed to set HTTP-FLV URL password"))?;
+            Ok(parsed.to_string())
+        }
+        _ => Ok(url.to_string()),
+    }
+}
+
+fn httpflv_url_with_credentials(effective: &EffectiveConfig) -> Result<String> {
+    let url = httpflv_base_url(effective);
+    url_with_credentials(
+        &url,
+        effective.stream_username.as_deref(),
+        effective.stream_password.as_deref(),
+    )
+}
+
+fn apply_basic_auth(
+    request: reqwest::RequestBuilder,
+    username: Option<&str>,
+    password: Option<&str>,
+) -> reqwest::RequestBuilder {
+    match (username, password) {
+        (Some(username), Some(password)) => request.basic_auth(username, Some(password)),
+        _ => request,
+    }
+}
+
+fn apply_stream_basic_auth(
+    request: reqwest::RequestBuilder,
+    effective: &EffectiveConfig,
+) -> reqwest::RequestBuilder {
+    apply_basic_auth(
+        request,
+        effective.stream_username.as_deref(),
+        effective.stream_password.as_deref(),
+    )
+}
 
 fn validate_video_tag_payload_header(tag_body: &[u8]) -> Result<(), String> {
     if tag_body.len() < 5 {
@@ -73,11 +134,8 @@ fn validate_audio_tag_payload_header(tag_body: &[u8]) -> Result<(), String> {
 ///
 /// This performs low-level validation of the FLV container format by reading the stream prefix.
 pub async fn run_httpflv_validation(effective: &EffectiveConfig) -> Result<Vec<TestResult>> {
-    let url = format!(
-        "http://{}:{}{}",
-        effective.rtsp_host, effective.httpflv_port, effective.httpflv_path
-    );
-    info!(url = %url, "running HTTP-FLV protocol validation");
+    let url = httpflv_base_url(effective);
+    info!(url = %url, uses_credentials = effective.stream_username.is_some(), "running HTTP-FLV protocol validation");
 
     let mut tests = Vec::new();
     let client = reqwest::Client::builder()
@@ -85,7 +143,8 @@ pub async fn run_httpflv_validation(effective: &EffectiveConfig) -> Result<Vec<T
         .build()?;
 
     let start = std::time::Instant::now();
-    let res = match client.get(&url).send().await {
+    let request = apply_stream_basic_auth(client.get(&url), effective);
+    let res = match request.send().await {
         Ok(r) => {
             tests.push(TestResult::pass_proto("httpflv_connect_ok", "httpflv"));
             r
@@ -389,11 +448,9 @@ pub async fn run_httpflv_harness(
     effective: &EffectiveConfig,
     tests: &mut Vec<TestResult>,
 ) -> Result<()> {
-    let url = format!(
-        "http://{}:{}{}",
-        effective.rtsp_host, effective.httpflv_port, effective.httpflv_path
-    );
-    info!(url = %url, "running HTTP-FLV harness analysis (ffmpeg)");
+    let url = httpflv_base_url(effective);
+    let harness_url = httpflv_url_with_credentials(effective)?;
+    info!(url = %url, uses_credentials = effective.stream_username.is_some(), "running HTTP-FLV harness analysis (ffmpeg)");
 
     let duration_sec = effective.short_duration_sec.max(10);
     // Add extra time for startup/buffering
@@ -404,7 +461,7 @@ pub async fn run_httpflv_harness(
         tokio::task::spawn_blocking(move || {
             let mut cmd = FfmpegCommand::new();
             cmd.hide_banner()
-                .input(&url)
+                .input(&harness_url)
                 .duration(duration_sec.to_string())
                 .format("null")
                 .output("-");
@@ -481,7 +538,10 @@ pub async fn run_httpflv_harness(
 
 #[cfg(test)]
 mod tests {
-    use super::{validate_audio_tag_payload_header, validate_video_tag_payload_header};
+    use super::{
+        apply_basic_auth, url_with_credentials, validate_audio_tag_payload_header,
+        validate_video_tag_payload_header,
+    };
 
     #[test]
     fn test_parse_flv_header() {
@@ -517,6 +577,56 @@ mod tests {
         let tag_body = [0x17, 0x02, 0x00, 0x00, 0x00];
         let result = validate_video_tag_payload_header(&tag_body);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_url_with_credentials_roundtrip() {
+        let url = url_with_credentials(
+            "http://127.0.0.1:8080/live/stream1.flv",
+            Some("user@name"),
+            Some("p@ss:wo/rd"),
+        )
+        .unwrap();
+        let parsed = url::Url::parse(&url).unwrap();
+        assert!(parsed.as_str().contains("user%40name"));
+        assert!(parsed.as_str().contains("p%40ss%3Awo%2Frd"));
+    }
+
+    #[test]
+    fn test_apply_basic_auth_sets_authorization_header() {
+        let client = reqwest::Client::new();
+        let request = apply_basic_auth(
+            client.get("http://127.0.0.1:8080/live/stream1.flv"),
+            Some("user"),
+            Some("pass"),
+        )
+        .build()
+        .unwrap();
+        let header = request
+            .headers()
+            .get(reqwest::header::AUTHORIZATION)
+            .unwrap()
+            .to_str()
+            .unwrap();
+        assert_eq!(header, "Basic dXNlcjpwYXNz");
+    }
+
+    #[test]
+    fn test_apply_basic_auth_ignores_partial_credentials() {
+        let client = reqwest::Client::new();
+        let request = apply_basic_auth(
+            client.get("http://127.0.0.1:8080/live/stream1.flv"),
+            Some("user"),
+            None,
+        )
+        .build()
+        .unwrap();
+        assert!(
+            request
+                .headers()
+                .get(reqwest::header::AUTHORIZATION)
+                .is_none()
+        );
     }
 
     #[test]

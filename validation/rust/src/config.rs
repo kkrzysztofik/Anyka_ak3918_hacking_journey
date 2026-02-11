@@ -7,7 +7,7 @@ use serde::Deserialize;
 use std::env;
 use std::ffi::OsString;
 use std::path::PathBuf;
-use tracing::info;
+use tracing::{info, warn};
 
 pub const DEFAULT_VIDEO_STARTUP_TARGET_MS: u64 = 1500;
 pub const DEFAULT_RTSP_HOST: &str = "127.0.0.1";
@@ -97,6 +97,10 @@ pub struct RtspSection {
     pub timeout_sec: u64,
     #[serde(default = "default_initial_timestamp_policy")]
     pub initial_timestamp_policy: InitialTimestampPolicyArg,
+    #[serde(default)]
+    pub username: Option<String>,
+    #[serde(default)]
+    pub password: Option<String>,
 }
 
 impl Default for RtspSection {
@@ -107,6 +111,8 @@ impl Default for RtspSection {
             stream: default_rtsp_stream(),
             timeout_sec: default_rtsp_timeout(),
             initial_timestamp_policy: default_initial_timestamp_policy(),
+            username: None,
+            password: None,
         }
     }
 }
@@ -337,6 +343,8 @@ pub struct EffectiveConfig {
     pub rtsp_host: String,
     pub rtsp_port: u16,
     pub rtsp_stream: String,
+    pub stream_username: Option<String>,
+    pub stream_password: Option<String>,
     pub rtsp_timeout_sec: u64,
     pub initial_timestamp_policy: InitialTimestampPolicyArg,
     pub short_duration_sec: u64,
@@ -399,6 +407,31 @@ impl EffectiveConfig {
             .or_else(|| c.device.password.clone())
             .filter(|p| !p.is_empty());
         (device_user, device_password)
+    }
+
+    fn resolve_stream_auth(
+        args: &Args,
+        c: &RtspValidationConfig,
+    ) -> (Option<String>, Option<String>) {
+        let username = args
+            .username
+            .clone()
+            .or_else(|| c.rtsp.username.clone())
+            .filter(|u| !u.is_empty());
+        let password = args
+            .password
+            .clone()
+            .or_else(|| c.rtsp.password.clone())
+            .filter(|p| !p.is_empty());
+
+        if username.is_some() != password.is_some() {
+            warn!(
+                "RTSP credentials are incomplete (username/password must both be set); ignoring partial credentials"
+            );
+            return (None, None);
+        }
+
+        (username, password)
     }
 
     /// Resolve effective FFmpeg log level from CLI and config.
@@ -514,6 +547,7 @@ impl EffectiveConfig {
         } else {
             c.rtsp.initial_timestamp_policy
         };
+        let (stream_username, stream_password) = Self::resolve_stream_auth(args, c);
         let h264_file = args
             .h264_file
             .clone()
@@ -561,6 +595,8 @@ impl EffectiveConfig {
             rtsp_host,
             rtsp_port,
             rtsp_stream,
+            stream_username,
+            stream_password,
             rtsp_timeout_sec: c.rtsp.timeout_sec,
             initial_timestamp_policy,
             short_duration_sec: if sources.duration {
@@ -1248,6 +1284,47 @@ mod tests {
             EffectiveConfig::from_config_and_args(Some(&cfg), &parsed.args, &parsed.sources);
         assert_eq!(effective.rtsp_host, "10.0.0.2");
         assert_eq!(effective.rtsp_port, 8554);
+    }
+
+    #[test]
+    fn test_from_config_and_args_stream_credentials_cli_overrides_config() {
+        let parsed = parse_args_from([
+            "rtsp_validation_tool",
+            "--username",
+            "cli_user",
+            "--password",
+            "cli_pass",
+        ])
+        .unwrap();
+        let mut cfg = RtspValidationConfig::default();
+        cfg.rtsp.username = Some("cfg_user".to_string());
+        cfg.rtsp.password = Some("cfg_pass".to_string());
+
+        let effective =
+            EffectiveConfig::from_config_and_args(Some(&cfg), &parsed.args, &parsed.sources);
+        assert_eq!(effective.stream_username.as_deref(), Some("cli_user"));
+        assert_eq!(effective.stream_password.as_deref(), Some("cli_pass"));
+    }
+
+    #[test]
+    fn test_from_config_and_args_stream_credentials_from_config_when_cli_omitted() {
+        let parsed = parse_args_from(["rtsp_validation_tool"]).unwrap();
+        let mut cfg = RtspValidationConfig::default();
+        cfg.rtsp.username = Some("cfg_user".to_string());
+        cfg.rtsp.password = Some("cfg_pass".to_string());
+
+        let effective =
+            EffectiveConfig::from_config_and_args(Some(&cfg), &parsed.args, &parsed.sources);
+        assert_eq!(effective.stream_username.as_deref(), Some("cfg_user"));
+        assert_eq!(effective.stream_password.as_deref(), Some("cfg_pass"));
+    }
+
+    #[test]
+    fn test_from_config_and_args_stream_credentials_incomplete_pair_ignored() {
+        let parsed = parse_args_from(["rtsp_validation_tool", "--username", "cli_user"]).unwrap();
+        let effective = EffectiveConfig::from_config_and_args(None, &parsed.args, &parsed.sources);
+        assert!(effective.stream_username.is_none());
+        assert!(effective.stream_password.is_none());
     }
 
     #[test]

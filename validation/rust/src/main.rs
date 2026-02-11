@@ -302,7 +302,7 @@ fn default_onvif_binary_path(cwd: &Path) -> PathBuf {
         .unwrap_or_else(|| candidates[0].clone())
 }
 
-fn validate_args(args: &Args, effective: &EffectiveConfig) -> Result<()> {
+fn validate_args(_args: &Args, effective: &EffectiveConfig) -> Result<()> {
     if effective.launch_on_device && !effective.no_launch {
         bail!(
             "when using launch_on_device (config or --launch-on-device), no_launch must be true (server is started on device)"
@@ -314,12 +314,6 @@ fn validate_args(args: &Args, effective: &EffectiveConfig) -> Result<()> {
         );
     }
 
-    match (&args.username, &args.password) {
-        (Some(_), None) | (None, Some(_)) => {
-            bail!("--username and --password must be provided together");
-        }
-        _ => {}
-    }
     if effective.launch_on_device && effective.device_password.is_none() {
         bail!(
             "launch_on_device requires a device SSH password; set --device-password, [device].password, or RTSP_VALIDATION_DEVICE_PASSWORD"

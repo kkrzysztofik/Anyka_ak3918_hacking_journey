@@ -210,6 +210,7 @@ loop_playback = true
 
 Configuration is read from TOML. Search order: `--config <path>`, env `RTSP_VALIDATION_CONFIG`, then `./rtsp_validation.toml`, then `validation/rtsp_validation.toml`. CLI overrides config.
 For RTSP servers that omit `RTP-Info rtptime` on `PLAY` (common with MediaMTX), use `initial_timestamp_policy = "permissive"` (default).
+When stream authentication is enabled, use one credential pair (`rtsp.username` / `rtsp.password` or `--username` / `--password`) and the tool applies it to both RTSP and HTTP-FLV checks.
 
 **Config-only run:** With a complete `rtsp_validation.toml` (including `[run]` with `no_launch`, `launch_on_device`, and optionally `output`, `update_baseline`, `compare_baseline`), you can run the full test without any CLI arguments:
 
@@ -235,6 +236,9 @@ port = 554
 stream = "/vs0"
 timeout_sec = 10
 initial_timestamp_policy = "permissive"
+# Optional stream credentials used by both RTSP and HTTP-FLV validation
+# username = "admin"
+# password = "www123"
 
 [test]
 short_duration_sec = 30
@@ -267,7 +271,7 @@ password = ""
 telemetry = true
 ```
 
-Common CLI overrides: `--rtsp-host`, `--rtsp-port`, `--rtsp-stream`, `--duration`, `--config`, `--update-baseline`, `--compare-baseline`, `--concurrent`, `--long-duration`, `--skip-error-handling`, `--output`. For device validation: `--launch-on-device`, `--no-launch`, `--device-host`, `--device-ssh-port`, `--device-user`, `--device-password`, `--no-telemetry`.
+Common CLI overrides: `--rtsp-host`, `--rtsp-port`, `--rtsp-stream`, `--username`, `--password`, `--duration`, `--config`, `--update-baseline`, `--compare-baseline`, `--concurrent`, `--long-duration`, `--skip-error-handling`, `--output`. For device validation: `--launch-on-device`, `--no-launch`, `--device-host`, `--device-ssh-port`, `--device-user`, `--device-password`, `--no-telemetry`.
 
 ## Metrics
 
@@ -308,6 +312,7 @@ Common CLI overrides: `--rtsp-host`, `--rtsp-port`, `--rtsp-stream`, `--duration
 - **tshark not found** – `sudo apt-get install tshark`
 - **Permission denied for tshark** – Run with `sudo` or add user to the `wireshark` group.
 - **Server not starting** – Check that onvif-rust is built with `--features validation-mode` and H.264 file path is valid.
+- **Validation-mode stream auth startup failure** – If `server.auth_enabled=true`, `onvif-rust` validation mode now requires a provisioned `users.toml` in the same config directory; missing or empty users will abort startup.
 - **Port in use** – Set `--rtsp-port` or stop the process using the port.
 - **Stream not found** – For onvif-rust use `--rtsp-stream /stream1` and the port the server reports (e.g. 8554).
 - **Device unreachable** – With `--launch-on-device`, ensure the device IP is correct (`--device-host`), SSH is enabled (port 22 by default), credentials are correct, and `/mnt/anyka_hack/onvif/onvif-rust` and `config.toml` exist on the device.
