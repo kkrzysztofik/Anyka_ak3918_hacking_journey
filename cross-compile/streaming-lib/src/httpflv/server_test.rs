@@ -86,7 +86,7 @@ async fn test_handle_connection_invalid_path() {
 #[tokio::test]
 async fn test_handle_connection_path_parsing() {
     let test_cases = vec![
-        ("/live/stream.flv", ("live", "stream")),
+        ("/live/stream1.flv", ("live", "stream1")),
         ("/app/name.flv", ("app", "name")),
         ("/test/123.flv", ("test", "123")),
     ];
@@ -213,6 +213,11 @@ async fn test_response_headers() {
             .unwrap(),
         "*"
     );
+    assert_eq!(
+        response.headers().get("Content-Type").unwrap(),
+        "video/x-flv"
+    );
+    assert_eq!(response.headers().get("Cache-Control").unwrap(), "no-cache");
 }
 
 #[tokio::test]

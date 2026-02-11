@@ -13,6 +13,7 @@ use clap::Parser;
 use onvif_rust::app::{Application, DEFAULT_CONFIG_PATH};
 use onvif_rust::config::{ConfigRuntime, ConfigStorage};
 use onvif_rust::validation::h264_playback::{H264PlaybackConfig, H264PlaybackMode};
+use onvif_rust::validation::httpflv_remux::ValidationHttpFlvRemuxer;
 use portable_atomic::{AtomicU32, AtomicUsize, Ordering};
 use std::backtrace::Backtrace;
 use std::panic::PanicHookInfo;
@@ -281,21 +282,97 @@ fn configure_stream_frame_debug_logging(config: &ConfigRuntime) -> bool {
 fn fanout_validation_frame(
     frame_tx_rtsp: &tokio::sync::mpsc::UnboundedSender<FrameData>,
     frame_tx_httpflv: Option<&tokio::sync::mpsc::UnboundedSender<FrameData>>,
+    httpflv_remuxer: Option<&mut ValidationHttpFlvRemuxer>,
     frame: FrameData,
 ) {
-    match frame {
-        FrameData::Audio { .. } => {
-            let _ = frame_tx_rtsp.send(frame);
-        }
-        frame => {
-            if let Some(tx_httpflv) = frame_tx_httpflv {
-                let _ = frame_tx_rtsp.send(frame.clone());
-                let _ = tx_httpflv.send(frame);
-            } else {
-                let _ = frame_tx_rtsp.send(frame);
+    if frame_tx_httpflv.is_none() {
+        let _ = frame_tx_rtsp.send(frame);
+        return;
+    }
+
+    let _ = frame_tx_rtsp.send(frame.clone());
+    if let (Some(tx_httpflv), Some(remuxer)) = (frame_tx_httpflv, httpflv_remuxer) {
+        match remuxer.remux_frame(frame) {
+            Ok(Some(remuxed_frame)) => {
+                let _ = tx_httpflv.send(remuxed_frame);
+            }
+            Ok(None) => {}
+            Err(err) => {
+                tracing::warn!(error = %err, "Failed to remux validation frame for HTTP-FLV");
             }
         }
     }
+}
+
+fn read_subscriber_count(
+    stats_handle: &Arc<tokio::sync::Mutex<StatisticsStream>>,
+    cached_count: &Arc<AtomicUsize>,
+) -> usize {
+    if let Ok(stats) = stats_handle.try_lock() {
+        let count = stats.subscriber_count;
+        cached_count.store(count, Ordering::Relaxed);
+        count
+    } else {
+        cached_count.load(Ordering::Relaxed)
+    }
+}
+
+fn combined_subscriber_count(
+    rtsp_handle: &Arc<tokio::sync::Mutex<StatisticsStream>>,
+    httpflv_handle: &Arc<tokio::sync::Mutex<StatisticsStream>>,
+    rtsp_cached_count: &Arc<AtomicUsize>,
+    httpflv_cached_count: &Arc<AtomicUsize>,
+) -> usize {
+    let rtsp_count = read_subscriber_count(rtsp_handle, rtsp_cached_count);
+    let httpflv_count = read_subscriber_count(httpflv_handle, httpflv_cached_count);
+    rtsp_count.saturating_add(httpflv_count)
+}
+
+fn stream_hub_error(message: impl Into<String>) -> StreamHubError {
+    StreamHubError::from(message.into())
+}
+
+fn send_frame(
+    frame_sender: &tokio::sync::mpsc::UnboundedSender<FrameData>,
+    frame: FrameData,
+) -> Result<(), StreamHubError> {
+    frame_sender
+        .send(frame)
+        .map_err(|err| stream_hub_error(format!("failed to send frame to subscriber: {}", err)))
+}
+
+fn send_httpflv_prior_frames(
+    frame_sender: &tokio::sync::mpsc::UnboundedSender<FrameData>,
+    remuxer: &mut ValidationHttpFlvRemuxer,
+    timestamp: u32,
+    bootstrap_idr: Option<&[u8]>,
+) -> Result<(), StreamHubError> {
+    let video_sequence_header = remuxer.video_sequence_header(timestamp).map_err(|err| {
+        stream_hub_error(format!(
+            "failed to build HTTP-FLV video sequence header: {}",
+            err
+        ))
+    })?;
+    send_frame(frame_sender, video_sequence_header)?;
+
+    if let Some(audio_sequence_header) = remuxer.audio_sequence_header(timestamp) {
+        send_frame(frame_sender, audio_sequence_header)?;
+    }
+
+    if let Some(idr) = bootstrap_idr {
+        match remuxer.remux_video_frame(timestamp, BytesMut::from(idr)) {
+            Ok(Some(frame)) => send_frame(frame_sender, frame)?,
+            Ok(None) => {}
+            Err(err) => {
+                tracing::warn!(
+                    error = %err,
+                    "Skipping malformed bootstrap IDR for HTTP-FLV prior data"
+                );
+            }
+        }
+    }
+
+    Ok(())
 }
 
 struct ValidationAvStreamHandler {
@@ -332,7 +409,7 @@ impl TStreamHandler for ValidationAvStreamHandler {
     async fn send_prior_data(
         &self,
         sender: DataSender,
-        _sub_type: SubscribeType,
+        sub_type: SubscribeType,
     ) -> Result<(), StreamHubError> {
         if let DataSender::Frame {
             sender: frame_sender,
@@ -350,21 +427,45 @@ impl TStreamHandler for ValidationAvStreamHandler {
                 video_clock_rate: 90000,
                 vcodec: VideoCodecType::H264,
             };
-            let _ = frame_sender.send(FrameData::MediaInfo { media_info });
+            send_frame(&frame_sender, FrameData::MediaInfo { media_info })?;
 
-            let _ = frame_sender.send(FrameData::Video {
-                timestamp,
-                data: BytesMut::from(self.sps.as_slice()),
-            });
-            let _ = frame_sender.send(FrameData::Video {
-                timestamp,
-                data: BytesMut::from(self.pps.as_slice()),
-            });
-            if let Some(idr) = self.bootstrap_idr.as_ref() {
-                let _ = frame_sender.send(FrameData::Video {
+            if matches!(sub_type, SubscribeType::RtmpRemux2HttpFlv) {
+                let mut remuxer = ValidationHttpFlvRemuxer::new(
+                    self.sps.clone(),
+                    self.pps.clone(),
+                    self.audio_config.clone(),
+                    self.audio_sample_rate,
+                );
+                send_httpflv_prior_frames(
+                    &frame_sender,
+                    &mut remuxer,
                     timestamp,
-                    data: BytesMut::from(idr.as_slice()),
-                });
+                    self.bootstrap_idr.as_deref(),
+                )?;
+            } else {
+                send_frame(
+                    &frame_sender,
+                    FrameData::Video {
+                        timestamp,
+                        data: BytesMut::from(self.sps.as_slice()),
+                    },
+                )?;
+                send_frame(
+                    &frame_sender,
+                    FrameData::Video {
+                        timestamp,
+                        data: BytesMut::from(self.pps.as_slice()),
+                    },
+                )?;
+                if let Some(idr) = self.bootstrap_idr.as_ref() {
+                    send_frame(
+                        &frame_sender,
+                        FrameData::Video {
+                            timestamp,
+                            data: BytesMut::from(idr.as_slice()),
+                        },
+                    )?;
+                }
             }
         }
 
@@ -640,14 +741,19 @@ async fn run_validation_mode(config: H264PlaybackConfig, config_path: &str) -> R
     let audio_sample_rate = audio_publisher
         .as_ref()
         .map_or(0, |publisher| publisher.sample_rate());
+    let video_sps = video_publisher.sps().to_vec();
+    let video_pps = video_publisher.pps().to_vec();
+    let video_bootstrap_idr = video_publisher.bootstrap_idr();
+    let video_last_timestamp_handle = video_publisher.last_timestamp_handle();
+    let audio_config = audio_publisher
+        .as_ref()
+        .map(|publisher| publisher.audio_config().to_vec());
     let rtsp_stream_handler = Arc::new(ValidationAvStreamHandler::new(
-        video_publisher.sps().to_vec(),
-        video_publisher.pps().to_vec(),
-        video_publisher.bootstrap_idr(),
-        video_publisher.last_timestamp_handle(),
-        audio_publisher
-            .as_ref()
-            .map(|publisher| publisher.audio_config().to_vec()),
+        video_sps.clone(),
+        video_pps.clone(),
+        video_bootstrap_idr,
+        video_last_timestamp_handle,
+        audio_config.clone(),
         audio_sample_rate,
     ));
 
@@ -677,8 +783,21 @@ async fn run_validation_mode(config: H264PlaybackConfig, config_path: &str) -> R
     };
 
     let fanout_handle = tokio::spawn(async move {
+        let mut httpflv_remuxer = frame_tx_httpflv.as_ref().map(|_| {
+            ValidationHttpFlvRemuxer::new(
+                video_sps.clone(),
+                video_pps.clone(),
+                audio_config.clone(),
+                audio_sample_rate,
+            )
+        });
         while let Some(frame) = frame_rx_from_publisher.recv().await {
-            fanout_validation_frame(&frame_tx_rtsp, frame_tx_httpflv.as_ref(), frame);
+            fanout_validation_frame(
+                &frame_tx_rtsp,
+                frame_tx_httpflv.as_ref(),
+                httpflv_remuxer.as_mut(),
+                frame,
+            );
         }
     });
 
@@ -701,7 +820,7 @@ async fn run_validation_mode(config: H264PlaybackConfig, config_path: &str) -> R
         frame_receiver: frame_rx_httpflv,
         packet_receiver: None,
     };
-    let (_httpflv_statistic_sender, _httpflv_subscriber_handle) = streamhub
+    let (_httpflv_statistic_sender, httpflv_subscriber_handle) = streamhub
         .publish(
             httpflv_stream_id.clone(),
             httpflv_data_receiver,
@@ -718,34 +837,41 @@ async fn run_validation_mode(config: H264PlaybackConfig, config_path: &str) -> R
 
     // Wire up on-demand publishing: publishers check subscriber count before sending frames
     let rtsp_handle_for_video = Arc::clone(&rtsp_subscriber_handle);
-    let video_cached_subscriber_count = Arc::new(AtomicUsize::new(0));
-    let video_cached_subscriber_count_for_cb = Arc::clone(&video_cached_subscriber_count);
+    let httpflv_handle_for_video = Arc::clone(&httpflv_subscriber_handle);
+    let video_cached_rtsp_subscriber_count = Arc::new(AtomicUsize::new(0));
+    let video_cached_httpflv_subscriber_count = Arc::new(AtomicUsize::new(0));
+    let video_cached_rtsp_subscriber_count_for_cb = Arc::clone(&video_cached_rtsp_subscriber_count);
+    let video_cached_httpflv_subscriber_count_for_cb =
+        Arc::clone(&video_cached_httpflv_subscriber_count);
     video_publisher.set_subscriber_count_callback(Arc::new(move || {
-        if let Ok(stats) = rtsp_handle_for_video.try_lock() {
-            let count = stats.subscriber_count;
-            video_cached_subscriber_count_for_cb.store(count, Ordering::Relaxed);
-            count
-        } else {
-            video_cached_subscriber_count_for_cb.load(Ordering::Relaxed)
-        }
+        combined_subscriber_count(
+            &rtsp_handle_for_video,
+            &httpflv_handle_for_video,
+            &video_cached_rtsp_subscriber_count_for_cb,
+            &video_cached_httpflv_subscriber_count_for_cb,
+        )
     }));
 
     if let Some(ref mut audio_pub) = audio_publisher {
         let rtsp_handle_for_audio = Arc::clone(&rtsp_subscriber_handle);
-        let audio_cached_subscriber_count = Arc::new(AtomicUsize::new(0));
-        let audio_cached_subscriber_count_for_cb = Arc::clone(&audio_cached_subscriber_count);
+        let httpflv_handle_for_audio = Arc::clone(&httpflv_subscriber_handle);
+        let audio_cached_rtsp_subscriber_count = Arc::new(AtomicUsize::new(0));
+        let audio_cached_httpflv_subscriber_count = Arc::new(AtomicUsize::new(0));
+        let audio_cached_rtsp_subscriber_count_for_cb =
+            Arc::clone(&audio_cached_rtsp_subscriber_count);
+        let audio_cached_httpflv_subscriber_count_for_cb =
+            Arc::clone(&audio_cached_httpflv_subscriber_count);
         audio_pub.set_subscriber_count_callback(Arc::new(move || {
-            if let Ok(stats) = rtsp_handle_for_audio.try_lock() {
-                let count = stats.subscriber_count;
-                audio_cached_subscriber_count_for_cb.store(count, Ordering::Relaxed);
-                count
-            } else {
-                audio_cached_subscriber_count_for_cb.load(Ordering::Relaxed)
-            }
+            combined_subscriber_count(
+                &rtsp_handle_for_audio,
+                &httpflv_handle_for_audio,
+                &audio_cached_rtsp_subscriber_count_for_cb,
+                &audio_cached_httpflv_subscriber_count_for_cb,
+            )
         }));
     }
     tracing::info!(
-        "On-demand publishing configured: publishers will pause when subscriber count is 0"
+        "On-demand publishing configured: publishers will pause when RTSP+HTTP-FLV subscriber count is 0"
     );
 
     // Wrap publishers in Arc after configuration
@@ -1069,6 +1195,111 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_validation_av_stream_handler_send_prior_data_httpflv_emits_sequence_headers() {
+        let handler = ValidationAvStreamHandler::new(
+            vec![0x67, 0x42, 0x00, 0x1e],
+            vec![0x68, 0xce, 0x06, 0xe2],
+            Some(vec![0x65, 0x88, 0x84, 0x21, 0xA0]),
+            Arc::new(AtomicU32::new(777)),
+            Some(vec![0x12, 0x10]),
+            48_000,
+        );
+
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        handler
+            .send_prior_data(
+                DataSender::Frame { sender: tx },
+                SubscribeType::RtmpRemux2HttpFlv,
+            )
+            .await
+            .expect("send_prior_data");
+
+        let mut saw_video_sequence_header = false;
+        let mut saw_audio_sequence_header = false;
+        while let Ok(frame) = rx.try_recv() {
+            match frame {
+                FrameData::Video { data, .. } if data.len() >= 2 => {
+                    if data[1] == 0 {
+                        saw_video_sequence_header = true;
+                    }
+                }
+                FrameData::Audio { data, .. } if data.len() >= 2 => {
+                    if data[1] == 0 {
+                        saw_audio_sequence_header = true;
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        assert!(saw_video_sequence_header, "expected AVC sequence header");
+        assert!(saw_audio_sequence_header, "expected AAC sequence header");
+    }
+
+    #[tokio::test]
+    async fn test_validation_av_stream_handler_send_prior_data_httpflv_ignores_malformed_bootstrap()
+    {
+        let handler = ValidationAvStreamHandler::new(
+            vec![0x67, 0x42, 0x00, 0x1e],
+            vec![0x68, 0xce, 0x06, 0xe2],
+            Some(vec![0x00, 0x00, 0x00]),
+            Arc::new(AtomicU32::new(778)),
+            Some(vec![0x12, 0x10]),
+            48_000,
+        );
+
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        handler
+            .send_prior_data(
+                DataSender::Frame { sender: tx },
+                SubscribeType::RtmpRemux2HttpFlv,
+            )
+            .await
+            .expect("send_prior_data");
+
+        let mut saw_video_sequence_header = false;
+        while let Ok(frame) = rx.try_recv() {
+            if let FrameData::Video { data, .. } = frame
+                && data.len() >= 2
+                && data[1] == 0
+            {
+                saw_video_sequence_header = true;
+            }
+        }
+
+        assert!(saw_video_sequence_header, "expected AVC sequence header");
+    }
+
+    #[tokio::test]
+    async fn test_combined_subscriber_count_sums_rtsp_and_httpflv() {
+        let rtsp_stats = Arc::new(tokio::sync::Mutex::new(StatisticsStream::default()));
+        let httpflv_stats = Arc::new(tokio::sync::Mutex::new(StatisticsStream::default()));
+        let rtsp_cached = Arc::new(AtomicUsize::new(0));
+        let httpflv_cached = Arc::new(AtomicUsize::new(0));
+
+        rtsp_stats.lock().await.subscriber_count = 2;
+        httpflv_stats.lock().await.subscriber_count = 3;
+
+        let count =
+            combined_subscriber_count(&rtsp_stats, &httpflv_stats, &rtsp_cached, &httpflv_cached);
+        assert_eq!(count, 5);
+    }
+
+    #[tokio::test]
+    async fn test_combined_subscriber_count_uses_cache_when_locks_contended() {
+        let rtsp_stats = Arc::new(tokio::sync::Mutex::new(StatisticsStream::default()));
+        let httpflv_stats = Arc::new(tokio::sync::Mutex::new(StatisticsStream::default()));
+        let rtsp_cached = Arc::new(AtomicUsize::new(4));
+        let httpflv_cached = Arc::new(AtomicUsize::new(5));
+
+        let _rtsp_guard = rtsp_stats.lock().await;
+        let _httpflv_guard = httpflv_stats.lock().await;
+        let count =
+            combined_subscriber_count(&rtsp_stats, &httpflv_stats, &rtsp_cached, &httpflv_cached);
+        assert_eq!(count, 9);
+    }
+
+    #[tokio::test]
     async fn test_fanout_validation_frame_rtsp_only_routes_without_httpflv() {
         let (rtsp_tx, mut rtsp_rx) = tokio::sync::mpsc::unbounded_channel::<FrameData>();
         let frame = FrameData::Video {
@@ -1076,7 +1307,7 @@ mod tests {
             data: BytesMut::from(&b"video"[..]),
         };
 
-        fanout_validation_frame(&rtsp_tx, None, frame);
+        fanout_validation_frame(&rtsp_tx, None, None, frame);
         let received = rtsp_rx.recv().await.expect("rtsp frame");
         assert!(matches!(received, FrameData::Video { timestamp: 10, .. }));
     }
@@ -1085,17 +1316,35 @@ mod tests {
     async fn test_fanout_validation_frame_with_httpflv_routes_to_both() {
         let (rtsp_tx, mut rtsp_rx) = tokio::sync::mpsc::unbounded_channel::<FrameData>();
         let (http_tx, mut http_rx) = tokio::sync::mpsc::unbounded_channel::<FrameData>();
+        let mut remuxer = ValidationHttpFlvRemuxer::new(
+            vec![0x67, 0x42, 0x00, 0x1e],
+            vec![0x68, 0xce, 0x06, 0xe2],
+            None,
+            48_000,
+        );
         let frame = FrameData::Video {
             timestamp: 20,
-            data: BytesMut::from(&b"video2"[..]),
+            data: BytesMut::from(
+                &[
+                    0x00, 0x00, 0x00, 0x01, 0x65, 0x88, 0x84, 0x21, 0xA0, 0x00, 0x00, 0x00, 0x01,
+                    0x06, 0xE5,
+                ][..],
+            ),
         };
 
-        fanout_validation_frame(&rtsp_tx, Some(&http_tx), frame);
+        fanout_validation_frame(&rtsp_tx, Some(&http_tx), Some(&mut remuxer), frame);
 
         let rtsp_frame = rtsp_rx.recv().await.expect("rtsp frame");
         let http_frame = http_rx.recv().await.expect("httpflv frame");
         assert!(matches!(rtsp_frame, FrameData::Video { timestamp: 20, .. }));
-        assert!(matches!(http_frame, FrameData::Video { timestamp: 20, .. }));
+        match http_frame {
+            FrameData::Video { timestamp, data } => {
+                assert_eq!(timestamp, 20);
+                assert_eq!(data[0], 0x17);
+                assert_eq!(data[1], 0x01);
+            }
+            _ => panic!("expected remuxed HTTP-FLV video frame"),
+        }
     }
 
     #[test]

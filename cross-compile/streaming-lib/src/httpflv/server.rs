@@ -75,6 +75,10 @@ pub(crate) async fn handle_connection(
             let mut resp = Response::new(Body::from_stream(http_response_data_consumer));
             resp.headers_mut()
                 .insert("Access-Control-Allow-Origin", HeaderValue::from_static("*"));
+            resp.headers_mut()
+                .insert("Content-Type", HeaderValue::from_static("video/x-flv"));
+            resp.headers_mut()
+                .insert("Cache-Control", HeaderValue::from_static("no-cache"));
 
             resp
         }
