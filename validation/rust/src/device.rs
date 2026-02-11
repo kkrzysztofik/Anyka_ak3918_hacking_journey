@@ -1,6 +1,6 @@
 //! Device telemetry and SSH helpers.
 
-use anyhow::{Context, Result, anyhow, bail};
+use anyhow::{anyhow, bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use ssh2::Session;
 use std::io::Read;
@@ -9,7 +9,7 @@ use std::path::Path;
 use std::time::Duration;
 use tracing::{debug, info, trace, warn};
 
-use crate::util::{MAX_TOOL_LOG_BYTES, tail_lossy, write_bytes_tail};
+use crate::util::{tail_lossy, write_bytes_tail, MAX_TOOL_LOG_BYTES};
 
 const DEVICE_ONVIF_DIR: &str = "/mnt/anyka_hack/onvif";
 const DEVICE_ONVIF_LOG_GLOB: &str = "onvif.log*";
@@ -47,11 +47,15 @@ pub struct DeviceTelemetry {
     pub error: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct DevicePlaybackOptions<'a> {
     pub h264_file: Option<&'a str>,
     pub aac_file: Option<&'a str>,
     pub loop_playback: bool,
+    pub rtsp_stream: String,
+    pub test_duration_seconds: u64,
+    pub httpflv_port: Option<u16>,
+    pub httpflv_path: Option<String>,
 }
 
 /// Run a single command on the device via SSH (blocking). Returns accumulated output.
@@ -483,6 +487,10 @@ pub fn device_start_onvif_blocking(
         h264_file,
         aac_file,
         loop_playback,
+        rtsp_stream: _,
+        test_duration_seconds: _,
+        httpflv_port,
+        httpflv_path: _,
     } = playback;
     info!(
         %host,
@@ -520,6 +528,11 @@ pub fn device_start_onvif_blocking(
         if loop_playback {
             c.push_str(" --loop-playback");
         }
+        if let Some(port) = httpflv_port {
+            c.push_str(&format!(" --httpflv-port {}", port));
+        }
+        // Note: --httpflv-path is not supported in validation mode
+        // The stream path is hardcoded to "stream1" in onvif-rust validation mode
         c.push_str(&format!(" {}", config_q));
         c
     } else {
@@ -974,11 +987,8 @@ Threads:        1"#;
     #[test]
     fn test_device_start_command_no_ld_library_path_or_log_capture() {
         let cmd = device_start_command("./onvif-rust '/mnt/anyka_hack/onvif/config.toml'");
-        assert!(
-            cmd.contains(
-                "nohup ./onvif-rust '/mnt/anyka_hack/onvif/config.toml' >/dev/null 2>&1 &"
-            )
-        );
+        assert!(cmd
+            .contains("nohup ./onvif-rust '/mnt/anyka_hack/onvif/config.toml' >/dev/null 2>&1 &"));
         assert!(!cmd.contains("LD_LIBRARY_PATH="));
         assert!(!cmd.contains("LOG="));
     }

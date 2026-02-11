@@ -368,6 +368,7 @@ fn maybe_launch_server(args: &Args, effective: &EffectiveConfig) -> Result<Optio
         .arg(effective.rtsp_port.to_string())
         .arg("--httpflv-port")
         .arg(effective.httpflv_port.to_string())
+        .env("ONVIF_VALIDATION_ENABLE_HTTPFLV", "1")
         .stdout(Stdio::null())
         .stderr(Stdio::null());
     if args.loop_playback {
@@ -594,6 +595,10 @@ async fn main() -> Result<()> {
         let h264 = effective.device_h264_file.clone();
         let aac = effective.device_aac_file.clone();
         let loop_playback = effective.device_loop_playback;
+        let rtsp_stream = effective.rtsp_stream.clone();
+        let httpflv_path = effective.httpflv_path.clone();
+        let short_duration_sec = effective.short_duration_sec;
+        let httpflv_port = effective.httpflv_port;
         let start_result = tokio::task::spawn_blocking(move || {
             device_start_onvif_blocking(
                 &host,
@@ -605,6 +610,10 @@ async fn main() -> Result<()> {
                     h264_file: h264.as_deref(),
                     aac_file: aac.as_deref(),
                     loop_playback,
+                    rtsp_stream: rtsp_stream.clone(),
+                    test_duration_seconds: short_duration_sec,
+                    httpflv_port: Some(httpflv_port),
+                    httpflv_path: Some(httpflv_path.clone()),
                 },
             )
         })
@@ -695,6 +704,58 @@ async fn main() -> Result<()> {
 
     let run_validation_and_harness = async {
         let mut report = run_validation(&args, &effective).await?;
+
+        // 2. HTTP-FLV Protocol Validation
+        if !args.skip_httpflv {
+            info!("Running HTTP-FLV validation...");
+            match rtsp_validation_tool::httpflv::run_httpflv_validation(&effective).await {
+                Ok(httpflv_tests) => {
+                    report.tests.extend(httpflv_tests);
+                }
+                Err(e) => {
+                    warn!(error = %e, "HTTP-FLV validation failed");
+                    report
+                        .tests
+                        .push(rtsp_validation_tool::report::TestResult::fail_proto(
+                            "httpflv_validation_run",
+                            e.to_string(),
+                            "httpflv",
+                        ));
+                }
+            }
+        }
+
+        // 3. Harness Scenarios
+        if critical_proto_failed(&report.tests) {
+            report.tests.push(TestResult::fail(
+                "harness_skipped",
+                "critical protocol validation failed; skipping harness",
+            ));
+        } else {
+            // Run RTSP harness (existing)
+            run_harness(&args, &effective, &mut report.tests).await?;
+
+            // Run HTTP-FLV harness (new)
+            #[allow(clippy::collapsible_if)]
+            if !args.skip_httpflv {
+                if let Err(e) = rtsp_validation_tool::httpflv::run_httpflv_harness(
+                    &args,
+                    &effective,
+                    &mut report.tests,
+                )
+                .await
+                {
+                    report
+                        .tests
+                        .push(rtsp_validation_tool::report::TestResult::fail(
+                            "httpflv_harness_execution",
+                            format!("HTTP-FLV harness failed: {}", e),
+                        ));
+                }
+            }
+        }
+
+        // Capture telemetry after tests
         if effective.launch_on_device && effective.collect_telemetry {
             let host = effective.device_host.clone();
             let port = effective.device_ssh_port;
@@ -707,14 +768,7 @@ async fn main() -> Result<()> {
             .context("spawn_blocking telemetry")?;
             report.telemetry = Some(telemetry);
         }
-        if critical_proto_failed(&report.tests) {
-            report.tests.push(TestResult::fail(
-                "harness_skipped",
-                "protocol validation failed (describe/setup/play); skipping harness",
-            ));
-        } else {
-            run_harness(&args, &effective, &mut report.tests).await?;
-        }
+
         Ok::<_, anyhow::Error>(report)
     };
 

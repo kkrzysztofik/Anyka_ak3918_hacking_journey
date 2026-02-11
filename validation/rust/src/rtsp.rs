@@ -1002,6 +1002,8 @@ pub async fn run_validation(args: &Args, effective: &EffectiveConfig) -> Result<
         rtsp_port: effective.rtsp_port,
         rtsp_stream: effective.rtsp_stream.clone(),
         test_duration_seconds: effective.short_duration_sec,
+        httpflv_port: Some(effective.httpflv_port),
+        httpflv_path: Some(effective.httpflv_path.clone()),
     };
 
     let mut tests: Vec<TestResult> = Vec::new();
@@ -2705,6 +2707,8 @@ mod tests {
             rtsp_port: 554,
             rtsp_stream: "/stream1".to_string(),
             test_duration_seconds: 30,
+            httpflv_port: None,
+            httpflv_path: None,
         };
         let tests = vec![TestResult::pass("a")];
         let report = empty_report(test_run, tests);

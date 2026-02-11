@@ -375,6 +375,7 @@ pub struct EffectiveConfig {
     pub httpflv_port: u16,
     /// HTTP-FLV path (for future tests).
     pub httpflv_path: String,
+    pub httpflv_timeout_sec: u64,
 }
 
 impl EffectiveConfig {
@@ -530,18 +531,30 @@ impl EffectiveConfig {
         let update_baseline = c.run.update_baseline || args.update_baseline;
         let compare_baseline = c.run.compare_baseline || args.compare_baseline;
 
-        let httpflv_path = c
-            .httpflv
-            .as_ref()
-            .map(|h| h.path.clone())
-            .unwrap_or_else(|| DEFAULT_HTTPFLV_PATH.to_string());
-        let httpflv_port = if sources.httpflv_port {
-            args.httpflv_port
+        let (httpflv_port, httpflv_path, httpflv_timeout_sec) = if let Some(hf) = &c.httpflv {
+            (
+                if sources.httpflv_port {
+                    args.httpflv_port
+                } else {
+                    hf.port
+                },
+                args.httpflv_stream
+                    .clone()
+                    .unwrap_or_else(|| hf.path.clone()),
+                hf.timeout_sec,
+            )
         } else {
-            c.httpflv
-                .as_ref()
-                .map(|h| h.port)
-                .unwrap_or(args.httpflv_port)
+            (
+                if sources.httpflv_port {
+                    args.httpflv_port
+                } else {
+                    DEFAULT_HTTPFLV_PORT
+                },
+                args.httpflv_stream
+                    .clone()
+                    .unwrap_or_else(|| DEFAULT_HTTPFLV_PATH.to_string()),
+                10, // default timeout
+            )
         };
 
         Self {
@@ -592,6 +605,7 @@ impl EffectiveConfig {
             ffmpeg_log_level,
             httpflv_port,
             httpflv_path,
+            httpflv_timeout_sec,
         }
     }
 
@@ -883,6 +897,14 @@ pub struct Args {
         help = "Device SSH password (CLI > env RTSP_VALIDATION_DEVICE_PASSWORD > config)."
     )]
     pub device_password: Option<String>,
+
+    /// Skip HTTP-FLV validation
+    #[arg(long)]
+    pub skip_httpflv: bool,
+
+    /// Override HTTP-FLV stream path (e.g. /live/stream1)
+    #[arg(long)]
+    pub httpflv_stream: Option<String>,
 
     #[arg(
         long,

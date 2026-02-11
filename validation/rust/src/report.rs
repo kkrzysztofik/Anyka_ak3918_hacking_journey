@@ -16,6 +16,10 @@ pub struct TestRun {
     pub rtsp_port: u16,
     pub rtsp_stream: String,
     pub test_duration_seconds: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub httpflv_port: Option<u16>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub httpflv_path: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -44,28 +48,52 @@ pub enum TestResult {
 impl TestResult {
     /// Pass result with default protocol "rtsp" for backward compatibility.
     pub fn pass(name: impl Into<String>) -> Self {
-        TestResult::Pass {
-            name: name.into(),
-            protocol: Some("rtsp".to_string()),
-        }
+        Self::pass_proto(name, "rtsp")
     }
 
     /// Fail result with default protocol "rtsp".
     pub fn fail(name: impl Into<String>, reason: impl Into<String>) -> Self {
-        TestResult::Fail {
-            name: name.into(),
-            reason: reason.into(),
-            protocol: Some("rtsp".to_string()),
-        }
+        Self::fail_proto(name, reason, "rtsp")
     }
 
     /// Metric result with default protocol "rtsp".
     pub fn metric(name: impl Into<String>, value: serde_json::Value, pass: bool) -> Self {
+        Self::metric_proto(name, value, pass, "rtsp")
+    }
+
+    /// Pass result with explicit protocol.
+    pub fn pass_proto(name: impl Into<String>, protocol: impl Into<String>) -> Self {
+        TestResult::Pass {
+            name: name.into(),
+            protocol: Some(protocol.into()),
+        }
+    }
+
+    /// Fail result with explicit protocol.
+    pub fn fail_proto(
+        name: impl Into<String>,
+        reason: impl Into<String>,
+        protocol: impl Into<String>,
+    ) -> Self {
+        TestResult::Fail {
+            name: name.into(),
+            reason: reason.into(),
+            protocol: Some(protocol.into()),
+        }
+    }
+
+    /// Metric result with explicit protocol.
+    pub fn metric_proto(
+        name: impl Into<String>,
+        value: serde_json::Value,
+        pass: bool,
+        protocol: impl Into<String>,
+    ) -> Self {
         TestResult::Metric {
             name: name.into(),
             value,
             pass,
-            protocol: Some("rtsp".to_string()),
+            protocol: Some(protocol.into()),
         }
     }
 
@@ -190,6 +218,8 @@ mod tests {
                 rtsp_port: 554,
                 rtsp_stream: "/stream1".to_string(),
                 test_duration_seconds: 30,
+                httpflv_port: None,
+                httpflv_path: None,
             },
             tests: vec![
                 TestResult::pass("a"),
@@ -216,6 +246,8 @@ mod tests {
                 rtsp_port: 554,
                 rtsp_stream: "/stream1".to_string(),
                 test_duration_seconds: 30,
+                httpflv_port: None,
+                httpflv_path: None,
             },
             tests: vec![],
             summary: Summary {

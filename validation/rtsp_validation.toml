@@ -87,3 +87,9 @@ telemetry = true
 h264-file = "/mnt/anyka_hack/onvif/test.h264"
 aac-file = "/mnt/anyka_hack/onvif/test_audio.aac"
 loop-playback = true
+
+[httpflv]
+# HTTP-FLV streaming endpoint (typically port 80 or 8080)
+port = 8080
+path = "/flv/stream1"
+timeout-sec = 10

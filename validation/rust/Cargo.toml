@@ -25,7 +25,17 @@ rtshark = "4"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 ssh2 = "0.9.5"
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal", "time"] }
+reqwest = { version = "0.13", default-features = false, features = [
+    "rustls",
+    "stream",
+] }
+tokio = { version = "1", features = [
+    "rt-multi-thread",
+    "macros",
+    "net",
+    "signal",
+    "time",
+] }
 toml = "0.8"
 tracing = "0.1"
 tracing-log = "0.2"

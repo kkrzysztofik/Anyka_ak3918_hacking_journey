@@ -312,6 +312,8 @@ mod tests {
                 rtsp_port: 554,
                 rtsp_stream: String::new(),
                 test_duration_seconds: 30,
+                httpflv_port: None,
+                httpflv_path: None,
             },
             tests: vec![],
             summary: crate::report::Summary {
@@ -348,6 +350,8 @@ mod tests {
                 rtsp_port: 554,
                 rtsp_stream: String::new(),
                 test_duration_seconds: 30,
+                httpflv_port: None,
+                httpflv_path: None,
             },
             tests: vec![TestResult::metric(
                 "harness_bitrate_kbps",
