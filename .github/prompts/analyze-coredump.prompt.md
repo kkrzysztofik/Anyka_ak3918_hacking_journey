@@ -28,7 +28,7 @@ ls -la debugging/coredumps/core.*
 
 ```bash
 # Navigate to project root
-cd /home/azureuser/anyka-dev
+cd /home/kmk/anyka-dev
 
 # Run analysis
 ./debugging/run_gdb_multiarch_analysis.sh [coredump_filename] onvifd_debug

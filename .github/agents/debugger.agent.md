@@ -87,7 +87,7 @@ For coredump analysis, use the standardized script:
 
 ```bash
 # Navigate to project root
-cd /home/azureuser/anyka-dev
+cd /home/kmk/anyka-dev
 
 # Run analysis (NEVER run GDB directly)
 ./debugging/run_gdb_multiarch_analysis.sh [coredump_file] onvifd_debug

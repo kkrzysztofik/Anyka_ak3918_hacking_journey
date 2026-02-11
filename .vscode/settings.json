@@ -17,7 +17,7 @@
   "rust-analyzer.cargo.target": "x86_64-unknown-linux-gnu",
   // Set explicit workspace location
   "rust-analyzer.linkedProjects": [
-    "/home/azureuser/anyka-dev/cross-compile/Cargo.toml"
+    "/home/kmk/anyka-dev/cross-compile/Cargo.toml"
   ],
   // Specify target explicitly in cargo commands
   "rust-analyzer.cargo.extraArgs": [
@@ -42,9 +42,12 @@
     "projectKey": "kkrzysztofik_Anyka_ak3918_hacking_journey"
   },
   "chat.tools.terminal.autoApprove": {
-    "/home/azureuser/anyka-dev/toolchain/arm-anykav200-crosstool-ng/bin/cargo": true,
-    "/home/azureuser/anyka-dev/toolchain/arm-anykav200-crosstool-ng/bin/arm-unknown-linux-uclibcgnueabi-nm": true
+    "/home/kmk/anyka-dev/toolchain/arm-anykav200-crosstool-ng/bin/cargo": true,
+    "/home/kmk/anyka-dev/toolchain/arm-anykav200-crosstool-ng/bin/arm-unknown-linux-uclibcgnueabi-nm": true,
+    "cargo fmt": true
   },
   "cursorpyright.analysis.typeCheckingMode": "strict",
-  "cursorpyright.analysis.diagnosticMode": "workspace"
+  "cursorpyright.analysis.diagnosticMode": "workspace",
+  "snyk.advanced.organization": "50e31838-4e3f-4e58-ba5e-c5e116e29a8a",
+  "snyk.advanced.autoSelectOrganization": true
 }
