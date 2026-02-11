@@ -1,0 +1,15 @@
+#!/bin/sh
+# Launcher for ONVIF Rust server with explicit runtime library path.
+
+SCRIPT_DIR="$(CDPATH= cd -- "$(dirname "$0")" && pwd)"
+ANYKA_HACK_DIR="$(dirname "$SCRIPT_DIR")"
+LIB1="${ANYKA_HACK_DIR}/lib"
+LIB2="${SCRIPT_DIR}/lib"
+
+if [ -n "${LD_LIBRARY_PATH:-}" ]; then
+  export LD_LIBRARY_PATH="${LIB1}:${LIB2}:${LD_LIBRARY_PATH}"
+else
+  export LD_LIBRARY_PATH="${LIB1}:${LIB2}"
+fi
+
+exec "${SCRIPT_DIR}/onvif-rust.bin" "$@"

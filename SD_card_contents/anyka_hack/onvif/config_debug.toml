@@ -130,30 +130,25 @@ static_root = "www"
 # ============================================================================
 [logging]
 # Log level: error, warn, info, debug, trace
-level = "info"
+level = "debug"
 
 # Enable verbose HTTP request/response logging
-# !! PERFORMANCE: Set to false to reduce CPU and I/O overhead during streaming
-http_verbose = false
+http_verbose = true
 
 # Enable per-frame streaming debug logs (AAC/H.264 timestamp + packetization internals)
-# !! PERFORMANCE: Keep false on embedded devices; this emits logs for almost every frame/packet.
+# Set true only when diagnosing frame timing/packetization issues.
 stream_frame_debug = false
 
 # Enable console logging
-# !! PERFORMANCE: Keep console_enabled=false on embedded devices to avoid I/O blocking
-console_enabled = false
+console_enabled = true
 
 # Log file path (leave empty to disable file logging)
-# !! PERFORMANCE: For profiling idle CPU, use tmpfs (/tmp/onvif.log) or disable ("")
-# !! to eliminate SD card writes. For production, use persistent path.
-file_path = "/tmp/onvif.log"
+file_path = "/mnt/anyka_hack/onvif/onvif.log"
 
 # Static asset access logging
 [logging.static_assets]
 # Enable static asset access logging
-# !! PERFORMANCE: Disable when not debugging WebUI to reduce log I/O
-enabled = false
+enabled = true
 
 # Directory for static asset access logs
 file_path = "logs"
