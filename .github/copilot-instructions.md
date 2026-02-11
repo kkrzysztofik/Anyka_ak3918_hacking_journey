@@ -128,3 +128,14 @@ To avoid context pollution in the main agent, **delegate focused tasks to subage
 - **Code review**: Spawn subagents per changed file/module
 - **Debugging**: Spawn subagents to investigate different root cause hypotheses
 - **Refactoring**: Spawn subagent to find all usages before making changes
+
+## Issue Tracking
+
+This project uses **bd (beads)** for issue tracking.
+Run `bd prime` for workflow context.
+
+**Quick reference:**
+- `bd ready` - Find unblocked work
+- `bd create "Title" --type task --priority 2` - Create issue
+- `bd close <id>` - Complete work
+- `bd sync` - Sync with git (run at session end)
