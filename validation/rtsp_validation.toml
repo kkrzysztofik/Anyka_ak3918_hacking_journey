@@ -91,5 +91,5 @@ loop-playback = true
 [httpflv]
 # HTTP-FLV streaming endpoint (typically port 80 or 8080)
 port = 8080
-path = "/flv/stream1"
+path = "/live/stream1.flv"
 timeout-sec = 10

@@ -19,7 +19,7 @@ pub const DEFAULT_CONCURRENT_CLIENTS: u32 = 4;
 pub const DEFAULT_BASELINE_DIR: &str = "rtsp_results/baselines";
 pub const DEFAULT_ARTIFACTS_ROOT_DIR: &str = "rtsp_results/runs";
 pub const DEFAULT_HTTPFLV_PORT: u16 = 8080;
-pub const DEFAULT_HTTPFLV_PATH: &str = "/live/stream.flv";
+pub const DEFAULT_HTTPFLV_PATH: &str = "/live/stream1.flv";
 pub const DEFAULT_CONFIG_FILE_NAME: &str = "rtsp_validation.toml";
 
 /// TOML config file schema (rtsp_validation.toml).
@@ -1013,9 +1013,10 @@ where
 #[cfg(test)]
 mod tests {
     use super::{
-        DEFAULT_ARTIFACTS_ROOT_DIR, DEFAULT_BASELINE_DIR, DEFAULT_RTSP_HOST, DEFAULT_RTSP_PORT,
-        DEFAULT_RTSP_STREAM, EffectiveConfig, InitialTimestampPolicyArg, LoggingSection,
-        RtspValidationConfig, load_config, parse_args_from,
+        DEFAULT_ARTIFACTS_ROOT_DIR, DEFAULT_BASELINE_DIR, DEFAULT_HTTPFLV_PATH, DEFAULT_RTSP_HOST,
+        DEFAULT_RTSP_PORT, DEFAULT_RTSP_STREAM, EffectiveConfig, HttpFlvSection,
+        InitialTimestampPolicyArg, LoggingSection, RtspValidationConfig, load_config,
+        parse_args_from,
     };
     use clap::CommandFactory;
     use std::path::PathBuf;
@@ -1299,6 +1300,38 @@ harness-startup-latency-ms = 3500
         assert_eq!(config.rtsp.port, 8554);
         assert_eq!(config.thresholds.video_startup_latency_ms, 2000);
         assert_eq!(config.thresholds.harness_startup_latency_ms, 3500);
+    }
+
+    #[test]
+    fn test_default_httpflv_path_is_canonical_live_stream1_flv() {
+        assert_eq!(DEFAULT_HTTPFLV_PATH, "/live/stream1.flv");
+    }
+
+    #[test]
+    fn test_from_config_and_args_httpflv_path_uses_default_when_not_overridden() {
+        let parsed = parse_args_from(["rtsp_validation_tool"]).expect("parse args");
+        let effective = EffectiveConfig::from_config_and_args(None, &parsed.args, &parsed.sources);
+        assert_eq!(effective.httpflv_path, "/live/stream1.flv");
+    }
+
+    #[test]
+    fn test_from_config_and_args_httpflv_path_cli_overrides_config() {
+        let parsed = parse_args_from([
+            "rtsp_validation_tool",
+            "--httpflv-stream",
+            "/live/custom.flv",
+        ])
+        .expect("parse args");
+        let mut cfg = RtspValidationConfig::default();
+        cfg.httpflv = Some(HttpFlvSection {
+            port: 8080,
+            path: "/live/stream1.flv".to_string(),
+            timeout_sec: 10,
+        });
+
+        let effective =
+            EffectiveConfig::from_config_and_args(Some(&cfg), &parsed.args, &parsed.sources);
+        assert_eq!(effective.httpflv_path, "/live/custom.flv");
     }
 
     #[test]

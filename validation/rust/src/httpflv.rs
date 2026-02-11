@@ -15,6 +15,60 @@ use tracing::{debug, info};
 use crate::config::EffectiveConfig;
 use crate::report::TestResult;
 
+fn validate_video_tag_payload_header(tag_body: &[u8]) -> Result<(), String> {
+    if tag_body.len() < 5 {
+        return Err(format!(
+            "video tag body too short for AVC header: {} bytes",
+            tag_body.len()
+        ));
+    }
+
+    let codec_id = tag_body[0] & 0x0F;
+    if codec_id != 7 {
+        return Err(format!(
+            "video tag codec id is {}, expected 7 (AVC)",
+            codec_id
+        ));
+    }
+
+    let avc_packet_type = tag_body[1];
+    if !matches!(avc_packet_type, 0 | 1) {
+        return Err(format!(
+            "invalid AVC packet type {}, expected 0 or 1",
+            avc_packet_type
+        ));
+    }
+
+    Ok(())
+}
+
+fn validate_audio_tag_payload_header(tag_body: &[u8]) -> Result<(), String> {
+    if tag_body.len() < 2 {
+        return Err(format!(
+            "audio tag body too short for AAC header: {} bytes",
+            tag_body.len()
+        ));
+    }
+
+    let sound_format = tag_body[0] >> 4;
+    if sound_format != 10 {
+        return Err(format!(
+            "audio tag sound format is {}, expected 10 (AAC)",
+            sound_format
+        ));
+    }
+
+    let aac_packet_type = tag_body[1];
+    if !matches!(aac_packet_type, 0 | 1) {
+        return Err(format!(
+            "invalid AAC packet type {}, expected 0 or 1",
+            aac_packet_type
+        ));
+    }
+
+    Ok(())
+}
+
 /// Run HTTP-FLV protocol validation. Returns test results.
 ///
 /// This performs low-level validation of the FLV container format by reading the stream prefix.
@@ -146,6 +200,8 @@ pub async fn run_httpflv_validation(effective: &EffectiveConfig) -> Result<Vec<T
     let mut video_tags = 0;
     let mut audio_tags = 0;
     let mut last_ts = 0;
+    let mut video_payload_header_validated = false;
+    let mut audio_payload_header_validated = false;
 
     let validation_start = std::time::Instant::now();
     // Analyze up to 50 tags or 2 seconds of the stream prefix
@@ -204,6 +260,38 @@ pub async fn run_httpflv_validation(effective: &EffectiveConfig) -> Result<Vec<T
             continue;
         }
 
+        let tag_body = &buffer[pos + 11..next_tag_pos];
+        if tag_type == 9 && !video_payload_header_validated {
+            match validate_video_tag_payload_header(tag_body) {
+                Ok(()) => {
+                    video_payload_header_validated = true;
+                }
+                Err(reason) => {
+                    tests.push(TestResult::fail_proto(
+                        "httpflv_video_payload_header_valid",
+                        reason,
+                        "httpflv",
+                    ));
+                    break;
+                }
+            }
+        }
+        if tag_type == 8 && !audio_payload_header_validated {
+            match validate_audio_tag_payload_header(tag_body) {
+                Ok(()) => {
+                    audio_payload_header_validated = true;
+                }
+                Err(reason) => {
+                    tests.push(TestResult::fail_proto(
+                        "httpflv_audio_payload_header_valid",
+                        reason,
+                        "httpflv",
+                    ));
+                    break;
+                }
+            }
+        }
+
         let footer_prev_tag_size = u32::from_be_bytes([
             buffer[next_tag_pos],
             buffer[next_tag_pos + 1],
@@ -254,6 +342,34 @@ pub async fn run_httpflv_validation(effective: &EffectiveConfig) -> Result<Vec<T
             true,
             "httpflv",
         ));
+        if video_tags > 0 {
+            if video_payload_header_validated {
+                tests.push(TestResult::pass_proto(
+                    "httpflv_video_payload_header_valid",
+                    "httpflv",
+                ));
+            } else {
+                tests.push(TestResult::fail_proto(
+                    "httpflv_video_payload_header_valid",
+                    "video tags found but payload headers not validated",
+                    "httpflv",
+                ));
+            }
+        }
+        if audio_tags > 0 {
+            if audio_payload_header_validated {
+                tests.push(TestResult::pass_proto(
+                    "httpflv_audio_payload_header_valid",
+                    "httpflv",
+                ));
+            } else {
+                tests.push(TestResult::fail_proto(
+                    "httpflv_audio_payload_header_valid",
+                    "audio tags found but payload headers not validated",
+                    "httpflv",
+                ));
+            }
+        }
     } else {
         tests.push(TestResult::fail_proto(
             "httpflv_tags_valid",
@@ -365,7 +481,7 @@ pub async fn run_httpflv_harness(
 
 #[cfg(test)]
 mod tests {
-    // use super::*;
+    use super::{validate_audio_tag_payload_header, validate_video_tag_payload_header};
 
     #[test]
     fn test_parse_flv_header() {
@@ -380,5 +496,47 @@ mod tests {
         assert_eq!(buf[4], 5);
         let offset = u32::from_be_bytes([buf[5], buf[6], buf[7], buf[8]]);
         assert_eq!(offset, 9);
+    }
+
+    #[test]
+    fn test_validate_video_tag_payload_header_success() {
+        let tag_body = [0x17, 0x01, 0x00, 0x00, 0x00, 0x00];
+        let result = validate_video_tag_payload_header(&tag_body);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_validate_video_tag_payload_header_invalid_codec_id() {
+        let tag_body = [0x12, 0x01, 0x00, 0x00, 0x00];
+        let result = validate_video_tag_payload_header(&tag_body);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_validate_video_tag_payload_header_invalid_avc_packet_type() {
+        let tag_body = [0x17, 0x02, 0x00, 0x00, 0x00];
+        let result = validate_video_tag_payload_header(&tag_body);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_validate_audio_tag_payload_header_success() {
+        let tag_body = [0xAF, 0x01, 0x11, 0x90];
+        let result = validate_audio_tag_payload_header(&tag_body);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_validate_audio_tag_payload_header_invalid_sound_format() {
+        let tag_body = [0x2F, 0x01, 0x11, 0x90];
+        let result = validate_audio_tag_payload_header(&tag_body);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_validate_audio_tag_payload_header_invalid_aac_packet_type() {
+        let tag_body = [0xAF, 0x05, 0x11, 0x90];
+        let result = validate_audio_tag_payload_header(&tag_body);
+        assert!(result.is_err());
     }
 }
