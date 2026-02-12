@@ -19,7 +19,7 @@ export interface EncryptedData {
  * Check if Web Crypto API is available (requires secure context)
  */
 function isCryptoAvailable(): boolean {
-  return typeof crypto !== 'undefined' && typeof crypto.subtle !== 'undefined';
+  return crypto !== undefined && crypto.subtle !== undefined;
 }
 
 /**
@@ -41,7 +41,7 @@ async function generateKey(salt: Uint8Array): Promise<CryptoKey> {
   ]);
 
   // Derive a key using PBKDF2
-  return crypto.subtle!.deriveKey(
+  return crypto.subtle.deriveKey(
     {
       name: 'PBKDF2',
       salt: saltBuffer,
@@ -84,7 +84,7 @@ function encodeBase64(plaintext: string): EncryptedData {
   const obfuscated = plaintext.split('').reverse().join('');
   const encoder = new TextEncoder();
   const bytes = encoder.encode(obfuscated);
-  const binaryString = Array.from(bytes, (byte) => String.fromCharCode(byte)).join('');
+  const binaryString = Array.from(bytes, (byte) => String.fromCodePoint(byte)).join('');
   const encoded = btoa(binaryString);
   return {
     data: encoded,
@@ -140,7 +140,7 @@ export async function decrypt(encrypted: EncryptedData): Promise<string> {
   // Handle base64 fallback method
   if (encrypted.method === 'base64') {
     const decoded = atob(encrypted.data);
-    const bytes = Uint8Array.from(decoded, (c) => c.charCodeAt(0));
+    const bytes = Uint8Array.from(decoded, (c) => c.codePointAt(0) ?? 0);
     const decoder = new TextDecoder();
     const obfuscated = decoder.decode(bytes);
     // Reverse the obfuscation

@@ -187,8 +187,7 @@ describe('crypto utilities', () => {
 
       // Create a mock crypto without subtle to simulate non-secure context
       const mockCrypto = {
-        getRandomValues: (arr: Uint8Array) =>
-          originalCrypto.getRandomValues.call(originalCrypto, arr),
+        getRandomValues: (arr: Uint8Array) => originalCrypto.getRandomValues(arr),
       };
 
       // Use vi.stubGlobal to properly mock the read-only crypto property
@@ -219,7 +218,7 @@ describe('crypto utilities', () => {
       const obfuscated = plaintext.split('').reverse().join('');
       const encoder = new TextEncoder();
       const bytes = encoder.encode(obfuscated);
-      const binaryString = Array.from(bytes, (byte) => String.fromCharCode(byte)).join('');
+      const binaryString = Array.from(bytes, (byte) => String.fromCodePoint(byte)).join('');
       const encoded = btoa(binaryString);
 
       const salt = new Uint8Array(16);
