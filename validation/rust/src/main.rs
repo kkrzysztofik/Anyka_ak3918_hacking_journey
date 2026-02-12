@@ -379,9 +379,16 @@ fn maybe_launch_server(args: &Args, effective: &EffectiveConfig) -> Result<Optio
 mod tests {
     use super::{
         default_onvif_binary_path, device_failure_diagnostics, maybe_launch_server, validate_args,
+        wait_for_server_with_retries,
     };
     use rtsp_validation_tool::config::{EffectiveConfig, parse_args_from};
-    use std::{fs, thread, time::Duration};
+    use std::{
+        fs,
+        process::{Command, Stdio},
+        thread,
+        time::Duration,
+    };
+    use tokio::net::TcpListener;
 
     #[test]
     fn test_default_onvif_binary_path_prefers_workspace_debug() {
@@ -448,6 +455,55 @@ mod tests {
     }
 
     #[test]
+    fn test_validate_args_launch_on_device_requires_no_launch_true() {
+        let parsed = parse_args_from(["rtsp_validation_tool", "--launch-on-device"]).unwrap();
+        let mut effective =
+            EffectiveConfig::from_config_and_args(None, &parsed.args, &parsed.sources);
+        effective.no_launch = false;
+        effective.device_password = Some("secret".to_string());
+
+        let err = validate_args(&parsed.args, &effective).unwrap_err();
+        assert!(
+            err.to_string().contains("no_launch must be true"),
+            "unexpected error: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn test_validate_args_local_launch_requires_h264_file() {
+        let parsed = parse_args_from(["rtsp_validation_tool"]).unwrap();
+        let effective = EffectiveConfig::from_config_and_args(None, &parsed.args, &parsed.sources);
+
+        let err = validate_args(&parsed.args, &effective).unwrap_err();
+        assert!(
+            err.to_string().contains("h264_file is required"),
+            "unexpected error: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn test_validate_args_rtsp_stream_must_start_with_slash() {
+        let parsed = parse_args_from([
+            "rtsp_validation_tool",
+            "--no-launch",
+            "--rtsp-stream",
+            "invalid_stream",
+        ])
+        .unwrap();
+        let effective = EffectiveConfig::from_config_and_args(None, &parsed.args, &parsed.sources);
+
+        let err = validate_args(&parsed.args, &effective).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("--rtsp-stream must start with '/'"),
+            "unexpected error: {}",
+            err
+        );
+    }
+
+    #[test]
     fn test_device_failure_diagnostics_reports_missing_logs() {
         let dir = tempfile::tempdir().unwrap();
         let diagnostics = device_failure_diagnostics(dir.path());
@@ -467,6 +523,85 @@ mod tests {
         assert!(diagnostics.contains("device_onvif.log.2"));
         assert!(diagnostics.contains("second log tail"));
     }
+
+    #[tokio::test]
+    async fn test_wait_for_server_timeout_returns_error() {
+        let probe = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = probe.local_addr().unwrap().port();
+        drop(probe);
+
+        let dir = tempfile::tempdir().unwrap();
+        let err = wait_for_server_with_retries(
+            "127.0.0.1",
+            port,
+            None,
+            dir.path(),
+            2,
+            Duration::from_millis(10),
+            Duration::from_millis(1),
+        )
+        .await
+        .unwrap_err();
+
+        assert!(
+            err.to_string().contains("server did not become ready"),
+            "unexpected error: {}",
+            err
+        );
+    }
+
+    #[tokio::test]
+    async fn test_wait_for_server_success_with_local_listener() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let accept_task = tokio::spawn(async move {
+            let _ = listener.accept().await;
+        });
+
+        let dir = tempfile::tempdir().unwrap();
+        let result = wait_for_server_with_retries(
+            "127.0.0.1",
+            port,
+            None,
+            dir.path(),
+            3,
+            Duration::from_millis(10),
+            Duration::from_millis(1),
+        )
+        .await;
+
+        assert!(result.is_ok(), "unexpected result: {:?}", result);
+        let _ = accept_task.await;
+    }
+
+    #[tokio::test]
+    async fn test_wait_for_server_reports_early_child_exit() {
+        let mut child = Command::new("/bin/true")
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap();
+        let _ = child.wait();
+
+        let dir = tempfile::tempdir().unwrap();
+        let err = wait_for_server_with_retries(
+            "127.0.0.1",
+            1,
+            Some(&mut child),
+            dir.path(),
+            1,
+            Duration::from_millis(1),
+            Duration::from_millis(1),
+        )
+        .await
+        .unwrap_err();
+
+        assert!(
+            err.to_string().contains("exited before RTSP became ready"),
+            "unexpected error: {}",
+            err
+        );
+    }
 }
 
 async fn wait_for_server(
@@ -475,10 +610,31 @@ async fn wait_for_server(
     child: Option<&mut Child>,
     artifacts_dir: &Path,
 ) -> Result<()> {
+    wait_for_server_with_retries(
+        host,
+        port,
+        child,
+        artifacts_dir,
+        30,
+        Duration::from_secs(1),
+        Duration::from_millis(200),
+    )
+    .await
+}
+
+async fn wait_for_server_with_retries(
+    host: &str,
+    port: u16,
+    child: Option<&mut Child>,
+    artifacts_dir: &Path,
+    max_attempts: u32,
+    retry_delay: Duration,
+    ready_delay: Duration,
+) -> Result<()> {
     let addr = format!("{}:{}", host, port);
     info!(%addr, "waiting for RTSP server");
     let mut child = child;
-    for _attempt in 1..=30u32 {
+    for _attempt in 1..=max_attempts {
         if let Some(local_child) = child.as_deref_mut() {
             match local_child.try_wait() {
                 Ok(Some(status)) => {
@@ -497,7 +653,7 @@ async fn wait_for_server(
         }
         match TcpStream::connect(&addr).await {
             Ok(_) => {
-                sleep(Duration::from_millis(200)).await;
+                sleep(ready_delay).await;
                 info!(%addr, "RTSP server ready");
                 return Ok(());
             }
@@ -511,7 +667,7 @@ async fn wait_for_server(
             }
             Err(e) => {
                 trace!(error = %e, "RTSP port not ready yet");
-                sleep(Duration::from_secs(1)).await;
+                sleep(retry_delay).await;
             }
         }
     }

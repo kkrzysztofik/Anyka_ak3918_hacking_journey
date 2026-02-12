@@ -20,6 +20,8 @@ const DEVICE_SSH_LOG_COPY_READ_TIMEOUT_SEC: u64 = 45;
 const DEVICE_MARKER_BEGIN: &str = "__ANYKA_BEGIN__";
 const DEVICE_MARKER_END: &str = "__ANYKA_END__";
 
+type SshExecFn<'a> = dyn FnMut(&str, u16, &str, &str, &str, u64) -> Result<String> + 'a;
+
 fn marker_echo_begin_cmd() -> &'static str {
     // Deliberately split the marker so the shell command echo does NOT contain the exact token.
     // This makes extract_between_markers robust even when the device echoes commands with prompts.
@@ -227,13 +229,14 @@ fn first_u64_in_text(s: &str) -> Option<u64> {
     s[start..end].parse::<u64>().ok()
 }
 
-fn device_assert_file_exists_blocking(
+fn device_assert_file_exists_blocking_with_exec(
     host: &str,
     port: u16,
     user: &str,
     password: &str,
     path: &str,
     label: &str,
+    exec: &mut SshExecFn<'_>,
 ) -> Result<()> {
     let q = sh_single_quote(path);
     let cmd = format!(
@@ -244,7 +247,7 @@ fn device_assert_file_exists_blocking(
         label = label,
         path = path
     );
-    let raw = run_ssh_command_blocking(
+    let raw = exec(
         host,
         port,
         user,
@@ -272,12 +275,25 @@ pub fn device_get_onvif_pid_blocking(
     user: &str,
     password: &str,
 ) -> Result<Option<u32>> {
+    let mut exec = |h: &str, p: u16, u: &str, pw: &str, c: &str, t: u64| {
+        run_ssh_command_blocking(h, p, u, pw, c, t)
+    };
+    device_get_onvif_pid_blocking_with_exec(host, port, user, password, &mut exec)
+}
+
+fn device_get_onvif_pid_blocking_with_exec(
+    host: &str,
+    port: u16,
+    user: &str,
+    password: &str,
+    exec: &mut SshExecFn<'_>,
+) -> Result<Option<u32>> {
     let cmd = format!(
         "{b} && ( pgrep -f onvif-rust 2>/dev/null || pidof onvif-rust 2>/dev/null || ps | grep '[o]nvif-rust' | awk '{{print $1}}'; true ) && {e}",
         b = marker_echo_begin_cmd(),
         e = marker_echo_end_cmd(),
     );
-    let raw = run_ssh_command_blocking(
+    let raw = exec(
         host,
         port,
         user,
@@ -370,18 +386,19 @@ pub fn parse_status_vmrss_vmsize(content: &str) -> (Option<u64>, Option<u64>) {
     (rss, vmsize)
 }
 
-fn device_cleanup_onvif_logs_blocking(
+fn device_cleanup_onvif_logs_blocking_with_exec(
     host: &str,
     port: u16,
     user: &str,
     password: &str,
+    exec: &mut SshExecFn<'_>,
 ) -> Result<()> {
     let cmd = format!(
         "cd {} && rm -f {} nohup.out {} 2>/dev/null",
         DEVICE_ONVIF_DIR, DEVICE_ONVIF_LOG_GLOB, DEVICE_ONVIF_PIDFILE
     );
     debug!(command = %cmd, "device cleanup onvif logs");
-    let _ = run_ssh_command_blocking(
+    let _ = exec(
         host,
         port,
         user,
@@ -419,11 +436,25 @@ pub fn device_copy_onvif_logs_blocking(
     password: &str,
     artifacts_dir: &Path,
 ) -> Result<()> {
+    let mut exec = |h: &str, p: u16, u: &str, pw: &str, c: &str, t: u64| {
+        run_ssh_command_blocking(h, p, u, pw, c, t)
+    };
+    device_copy_onvif_logs_blocking_with_exec(host, port, user, password, artifacts_dir, &mut exec)
+}
+
+fn device_copy_onvif_logs_blocking_with_exec(
+    host: &str,
+    port: u16,
+    user: &str,
+    password: &str,
+    artifacts_dir: &Path,
+    exec: &mut SshExecFn<'_>,
+) -> Result<()> {
     std::fs::create_dir_all(artifacts_dir)
         .with_context(|| format!("create artifacts dir {}", artifacts_dir.display()))?;
 
     let list_cmd = device_list_onvif_logs_command();
-    let listing_raw = run_ssh_command_blocking(
+    let listing_raw = exec(
         host,
         port,
         user,
@@ -457,7 +488,7 @@ pub fn device_copy_onvif_logs_blocking(
             bytes = MAX_TOOL_LOG_BYTES,
             q = q
         );
-        let raw = run_ssh_command_blocking(
+        let raw = exec(
             host,
             port,
             user,
@@ -483,6 +514,23 @@ pub fn device_start_onvif_blocking(
     rtsp_port: u16,
     playback: DevicePlaybackOptions<'_>,
 ) -> Result<()> {
+    let mut exec = |h: &str, p: u16, u: &str, pw: &str, c: &str, t: u64| {
+        run_ssh_command_blocking(h, p, u, pw, c, t)
+    };
+    device_start_onvif_blocking_with_exec(
+        host, port, user, password, rtsp_port, playback, &mut exec,
+    )
+}
+
+fn device_start_onvif_blocking_with_exec(
+    host: &str,
+    port: u16,
+    user: &str,
+    password: &str,
+    rtsp_port: u16,
+    playback: DevicePlaybackOptions<'_>,
+    exec: &mut SshExecFn<'_>,
+) -> Result<()> {
     let DevicePlaybackOptions {
         h264_file,
         aac_file,
@@ -502,17 +550,19 @@ pub fn device_start_onvif_blocking(
         loop_playback,
         "starting onvif-rust on device"
     );
-    if let Err(e) = device_cleanup_onvif_logs_blocking(host, port, user, password) {
+    if let Err(e) = device_cleanup_onvif_logs_blocking_with_exec(host, port, user, password, exec) {
         warn!(error = %e, "failed to cleanup device onvif logs before start");
     }
 
     // Fail fast on missing inputs. Otherwise the tool will just wait forever for the RTSP port.
     // These checks are cheap and dramatically improve diagnosability.
     if let Some(h264) = h264_file {
-        device_assert_file_exists_blocking(host, port, user, password, h264, "h264")?;
+        device_assert_file_exists_blocking_with_exec(
+            host, port, user, password, h264, "h264", exec,
+        )?;
     }
     if let Some(aac) = aac_file {
-        device_assert_file_exists_blocking(host, port, user, password, aac, "aac")?;
+        device_assert_file_exists_blocking_with_exec(host, port, user, password, aac, "aac", exec)?;
     }
 
     let config_q = sh_single_quote(&format!("{}/config.toml", DEVICE_ONVIF_DIR));
@@ -541,7 +591,7 @@ pub fn device_start_onvif_blocking(
 
     let cmd = device_start_command(&onvif_cmd);
     debug!(command = %cmd, "device start command");
-    run_ssh_command_blocking(
+    exec(
         host,
         port,
         user,
@@ -578,6 +628,19 @@ pub fn device_collect_telemetry_blocking(
     user: &str,
     password: &str,
 ) -> DeviceTelemetry {
+    let mut exec = |h: &str, p: u16, u: &str, pw: &str, c: &str, t: u64| {
+        run_ssh_command_blocking(h, p, u, pw, c, t)
+    };
+    device_collect_telemetry_blocking_with_exec(host, port, user, password, &mut exec)
+}
+
+fn device_collect_telemetry_blocking_with_exec(
+    host: &str,
+    port: u16,
+    user: &str,
+    password: &str,
+    exec: &mut SshExecFn<'_>,
+) -> DeviceTelemetry {
     let mut t = DeviceTelemetry::default();
     debug!(%host, port, %user, "collecting device telemetry");
 
@@ -586,7 +649,7 @@ pub fn device_collect_telemetry_blocking(
         marker_echo_begin_cmd(),
         marker_echo_end_cmd(),
     );
-    let mut meminfo_raw = match run_ssh_command_blocking(
+    let mut meminfo_raw = match exec(
         host,
         port,
         user,
@@ -603,7 +666,7 @@ pub fn device_collect_telemetry_blocking(
     let mut meminfo = extract_between_markers(&meminfo_raw).unwrap_or(meminfo_raw.clone());
     let mut parsed = parse_meminfo(&meminfo);
     if parsed.0.is_none() && parsed.1.is_none() && parsed.2.is_none() {
-        match run_ssh_command_blocking(
+        match exec(
             host,
             port,
             user,
@@ -640,7 +703,7 @@ pub fn device_collect_telemetry_blocking(
         marker_echo_begin_cmd(),
         marker_echo_end_cmd(),
     );
-    let mut loadavg_raw = match run_ssh_command_blocking(
+    let mut loadavg_raw = match exec(
         host,
         port,
         user,
@@ -657,7 +720,7 @@ pub fn device_collect_telemetry_blocking(
     let mut loadavg = extract_between_markers(&loadavg_raw).unwrap_or(loadavg_raw.clone());
     let mut loads = parse_loadavg(&loadavg);
     if loads.0.is_none() && loads.1.is_none() && loads.2.is_none() {
-        match run_ssh_command_blocking(
+        match exec(
             host,
             port,
             user,
@@ -689,7 +752,7 @@ pub fn device_collect_telemetry_blocking(
         });
     }
 
-    let pgrep_raw = match run_ssh_command_blocking(
+    let pgrep_raw = match exec(
         host,
         port,
         user,
@@ -717,7 +780,7 @@ pub fn device_collect_telemetry_blocking(
             DEVICE_ONVIF_PIDFILE,
             marker_echo_end_cmd(),
         );
-        if let Ok(raw) = run_ssh_command_blocking(
+        if let Ok(raw) = exec(
             host,
             port,
             user,
@@ -742,7 +805,7 @@ pub fn device_collect_telemetry_blocking(
         pid,
         marker_echo_end_cmd(),
     );
-    let status_raw = match run_ssh_command_blocking(
+    let status_raw = match exec(
         host,
         port,
         user,
@@ -773,10 +836,19 @@ pub fn device_collect_telemetry_blocking(
 #[cfg(test)]
 mod tests {
     use super::{
-        device_list_onvif_logs_command, device_start_command, extract_between_markers,
+        DevicePlaybackOptions, device_assert_file_exists_blocking_with_exec,
+        device_collect_telemetry_blocking_with_exec, device_copy_onvif_logs_blocking_with_exec,
+        device_get_onvif_pid_blocking_with_exec, device_list_onvif_logs_command,
+        device_start_command, device_start_onvif_blocking_with_exec, extract_between_markers,
         parse_loadavg, parse_meminfo, parse_pgrep_output, parse_status_vmrss_vmsize,
         sanitize_filename_component, sh_single_quote,
     };
+    use anyhow::{Result, anyhow};
+    use std::cell::RefCell;
+    use std::collections::VecDeque;
+    use std::fs;
+    use std::rc::Rc;
+    use tempfile::tempdir;
 
     const FIXTURE_MEMINFO: &str = r#"MemTotal:          36540 kB
 MemFree:           23256 kB
@@ -791,6 +863,51 @@ State:  S (sleeping)
 VmRSS:  12456 kB
 VmSize: 25680 kB
 Threads:        1"#;
+
+    #[derive(Debug)]
+    struct ExecStep {
+        expected_substring: &'static str,
+        expected_timeout: Option<u64>,
+        result: std::result::Result<String, String>,
+    }
+
+    fn marked(s: &str) -> String {
+        format!("noise\n__ANYKA_BEGIN__\n{}\n__ANYKA_END__\n", s)
+    }
+
+    fn scripted_exec(
+        steps: Vec<ExecStep>,
+    ) -> (
+        Rc<RefCell<Vec<String>>>,
+        impl FnMut(&str, u16, &str, &str, &str, u64) -> Result<String>,
+    ) {
+        let calls = Rc::new(RefCell::new(Vec::new()));
+        let call_log = Rc::clone(&calls);
+        let queue = RefCell::new(VecDeque::from(steps));
+        let exec = move |_h: &str, _p: u16, _u: &str, _pw: &str, cmd: &str, timeout: u64| {
+            call_log.borrow_mut().push(cmd.to_string());
+            let step = queue
+                .borrow_mut()
+                .pop_front()
+                .expect("unexpected ssh call with no scripted step left");
+            if !step.expected_substring.is_empty() {
+                assert!(
+                    cmd.contains(step.expected_substring),
+                    "command did not contain expected snippet: {}\ncommand: {}",
+                    step.expected_substring,
+                    cmd
+                );
+            }
+            if let Some(expected_timeout) = step.expected_timeout {
+                assert_eq!(timeout, expected_timeout, "unexpected timeout");
+            }
+            match step.result {
+                Ok(out) => Ok(out),
+                Err(err) => Err(anyhow!(err)),
+            }
+        };
+        (calls, exec)
+    }
 
     #[test]
     fn test_sh_single_quote() {
@@ -994,5 +1111,284 @@ Threads:        1"#;
         );
         assert!(!cmd.contains("LD_LIBRARY_PATH="));
         assert!(!cmd.contains("LOG="));
+    }
+
+    #[test]
+    fn test_device_assert_file_exists_blocking_success() {
+        let (_calls, mut exec) = scripted_exec(vec![ExecStep {
+            expected_substring: "if [ -f '/tmp/input.h264' ]",
+            expected_timeout: None,
+            result: Ok("__ANYKA_BEGIN__\nOK\n__ANYKA_END__".to_string()),
+        }]);
+
+        let result = device_assert_file_exists_blocking_with_exec(
+            "camera.local",
+            22,
+            "root",
+            "pw",
+            "/tmp/input.h264",
+            "h264",
+            &mut exec,
+        );
+
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_device_assert_file_exists_blocking_missing_file_returns_error() {
+        let (_calls, mut exec) = scripted_exec(vec![ExecStep {
+            expected_substring: "if [ -f '/tmp/missing.aac' ]",
+            expected_timeout: None,
+            result: Ok("__ANYKA_BEGIN__\nMISSING:aac:/tmp/missing.aac\n__ANYKA_END__".to_string()),
+        }]);
+
+        let result = device_assert_file_exists_blocking_with_exec(
+            "camera.local",
+            22,
+            "root",
+            "pw",
+            "/tmp/missing.aac",
+            "aac",
+            &mut exec,
+        );
+
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("missing required aac file"));
+        assert!(err.contains("/tmp/missing.aac"));
+    }
+
+    #[test]
+    fn test_device_get_onvif_pid_blocking_parses_pid_output() {
+        let (_calls, mut exec) = scripted_exec(vec![ExecStep {
+            expected_substring: "pgrep -f onvif-rust",
+            expected_timeout: None,
+            result: Ok("__ANYKA_BEGIN__\n2689 2710\n__ANYKA_END__".to_string()),
+        }]);
+
+        let pid = device_get_onvif_pid_blocking_with_exec("h", 22, "u", "pw", &mut exec).unwrap();
+        assert_eq!(pid, Some(2689));
+    }
+
+    #[test]
+    fn test_device_get_onvif_pid_blocking_returns_none_when_unparseable() {
+        let (_calls, mut exec) = scripted_exec(vec![ExecStep {
+            expected_substring: "pgrep -f onvif-rust",
+            expected_timeout: None,
+            result: Ok(marked("not_a_pid")),
+        }]);
+
+        let pid = device_get_onvif_pid_blocking_with_exec("h", 22, "u", "pw", &mut exec).unwrap();
+        assert_eq!(pid, None);
+    }
+
+    #[test]
+    fn test_device_copy_onvif_logs_blocking_empty_listing() {
+        let dir = tempdir().unwrap();
+        let (_calls, mut exec) = scripted_exec(vec![ExecStep {
+            expected_substring: "for f in onvif.log*;",
+            expected_timeout: None,
+            result: Ok("__ANYKA_BEGIN__\n\n__ANYKA_END__".to_string()),
+        }]);
+
+        let result =
+            device_copy_onvif_logs_blocking_with_exec("h", 22, "u", "pw", dir.path(), &mut exec);
+        assert!(result.is_ok());
+        let entries = fs::read_dir(dir.path()).unwrap().count();
+        assert_eq!(entries, 0);
+    }
+
+    #[test]
+    fn test_device_copy_onvif_logs_blocking_copies_multiple_logs() {
+        let dir = tempdir().unwrap();
+        let (_calls, mut exec) = scripted_exec(vec![
+            ExecStep {
+                expected_substring: "for f in onvif.log*;",
+                expected_timeout: None,
+                result: Ok("__ANYKA_BEGIN__\nonvif.log\nonvif.log.1\n__ANYKA_END__".to_string()),
+            },
+            ExecStep {
+                expected_substring: "tail -c",
+                expected_timeout: None,
+                result: Ok("__ANYKA_BEGIN__\nalpha\n__ANYKA_END__".to_string()),
+            },
+            ExecStep {
+                expected_substring: "tail -c",
+                expected_timeout: None,
+                result: Ok("__ANYKA_BEGIN__\nbeta\n__ANYKA_END__".to_string()),
+            },
+        ]);
+
+        device_copy_onvif_logs_blocking_with_exec("h", 22, "u", "pw", dir.path(), &mut exec)
+            .unwrap();
+
+        let first = fs::read_to_string(dir.path().join("device_onvif.log")).unwrap();
+        let second = fs::read_to_string(dir.path().join("device_onvif.log.1")).unwrap();
+        assert_eq!(first, "alpha");
+        assert_eq!(second, "beta");
+    }
+
+    #[test]
+    fn test_device_start_onvif_blocking_fail_fast_when_input_missing() {
+        let (calls, mut exec) = scripted_exec(vec![
+            ExecStep {
+                expected_substring: "rm -f onvif.log* nohup.out onvif.pid",
+                expected_timeout: None,
+                result: Ok(String::new()),
+            },
+            ExecStep {
+                expected_substring: "if [ -f '/tmp/missing.h264' ]",
+                expected_timeout: None,
+                result: Ok(
+                    "__ANYKA_BEGIN__\nMISSING:h264:/tmp/missing.h264\n__ANYKA_END__".to_string(),
+                ),
+            },
+        ]);
+
+        let playback = DevicePlaybackOptions {
+            h264_file: Some("/tmp/missing.h264"),
+            aac_file: None,
+            loop_playback: false,
+            rtsp_stream: "stream1".to_string(),
+            test_duration_seconds: 5,
+            httpflv_port: None,
+            httpflv_path: None,
+        };
+
+        let result =
+            device_start_onvif_blocking_with_exec("h", 22, "u", "pw", 8554, playback, &mut exec);
+        assert!(result.is_err());
+        assert!(
+            !calls
+                .borrow()
+                .iter()
+                .any(|c| c.contains("nohup ./onvif-rust"))
+        );
+    }
+
+    #[test]
+    fn test_device_start_onvif_blocking_builds_validation_command() {
+        let (calls, mut exec) = scripted_exec(vec![
+            ExecStep {
+                expected_substring: "rm -f onvif.log* nohup.out onvif.pid",
+                expected_timeout: None,
+                result: Ok(String::new()),
+            },
+            ExecStep {
+                expected_substring: "if [ -f '/tmp/input.h264' ]",
+                expected_timeout: None,
+                result: Ok("__ANYKA_BEGIN__\nOK\n__ANYKA_END__".to_string()),
+            },
+            ExecStep {
+                expected_substring: "if [ -f '/tmp/input.aac' ]",
+                expected_timeout: None,
+                result: Ok("__ANYKA_BEGIN__\nOK\n__ANYKA_END__".to_string()),
+            },
+            ExecStep {
+                expected_substring: "nohup ./onvif-rust --validation-mode",
+                expected_timeout: None,
+                result: Ok(String::new()),
+            },
+        ]);
+
+        let playback = DevicePlaybackOptions {
+            h264_file: Some("/tmp/input.h264"),
+            aac_file: Some("/tmp/input.aac"),
+            loop_playback: true,
+            rtsp_stream: "stream1".to_string(),
+            test_duration_seconds: 5,
+            httpflv_port: Some(8080),
+            httpflv_path: Some("stream1".to_string()),
+        };
+
+        device_start_onvif_blocking_with_exec("h", 22, "u", "pw", 8554, playback, &mut exec)
+            .unwrap();
+
+        let all_cmds = calls.borrow().join("\n");
+        assert!(all_cmds.contains("--h264-file '/tmp/input.h264'"));
+        assert!(all_cmds.contains("--aac-file '/tmp/input.aac'"));
+        assert!(all_cmds.contains("--loop-playback"));
+        assert!(all_cmds.contains("--httpflv-port 8080"));
+        assert!(all_cmds.contains("'/mnt/anyka_hack/onvif/config.toml'"));
+    }
+
+    #[test]
+    fn test_device_collect_telemetry_blocking_retries_meminfo_and_uses_pidfile_fallback() {
+        let (_calls, mut exec) = scripted_exec(vec![
+            ExecStep {
+                expected_substring: "cat /proc/meminfo",
+                expected_timeout: Some(8),
+                result: Ok("__ANYKA_BEGIN__\ngarbage\n__ANYKA_END__".to_string()),
+            },
+            ExecStep {
+                expected_substring: "cat /proc/meminfo",
+                expected_timeout: Some(18),
+                result: Ok(
+                    "__ANYKA_BEGIN__\nMemTotal: 1000 kB\nMemFree: 250 kB\n__ANYKA_END__"
+                        .to_string(),
+                ),
+            },
+            ExecStep {
+                expected_substring: "cat /proc/loadavg",
+                expected_timeout: Some(8),
+                result: Ok("__ANYKA_BEGIN__\n1.00 0.50 0.25 1/1 1\n__ANYKA_END__".to_string()),
+            },
+            ExecStep {
+                expected_substring: "pgrep -f onvif-rust",
+                expected_timeout: Some(8),
+                result: Ok("__ANYKA_BEGIN__\n\n__ANYKA_END__".to_string()),
+            },
+            ExecStep {
+                expected_substring: "cat /mnt/anyka_hack/onvif/onvif.pid",
+                expected_timeout: Some(8),
+                result: Ok("__ANYKA_BEGIN__\n4321\n__ANYKA_END__".to_string()),
+            },
+            ExecStep {
+                expected_substring: "cat /proc/4321/status",
+                expected_timeout: Some(8),
+                result: Ok(
+                    "__ANYKA_BEGIN__\nVmRSS: 17 kB\nVmSize: 42 kB\n__ANYKA_END__".to_string(),
+                ),
+            },
+        ]);
+
+        let t = device_collect_telemetry_blocking_with_exec("h", 22, "u", "pw", &mut exec);
+        assert_eq!(t.mem_total_kib, Some(1000));
+        assert_eq!(t.mem_available_kib, Some(250));
+        assert_eq!(t.load_avg_1m, Some(1.0));
+        assert_eq!(t.onvif_pid, Some(4321));
+        assert_eq!(t.onvif_rss_kib, Some(17));
+        assert_eq!(t.onvif_vmsize_kib, Some(42));
+    }
+
+    #[test]
+    fn test_device_collect_telemetry_blocking_loadavg_retry_error_sets_error() {
+        let (_calls, mut exec) = scripted_exec(vec![
+            ExecStep {
+                expected_substring: "cat /proc/meminfo",
+                expected_timeout: Some(8),
+                result: Ok(
+                    "__ANYKA_BEGIN__\nMemTotal: 1000 kB\nMemFree: 250 kB\n__ANYKA_END__"
+                        .to_string(),
+                ),
+            },
+            ExecStep {
+                expected_substring: "cat /proc/loadavg",
+                expected_timeout: Some(8),
+                result: Ok("__ANYKA_BEGIN__\nnot numbers\n__ANYKA_END__".to_string()),
+            },
+            ExecStep {
+                expected_substring: "cat /proc/loadavg",
+                expected_timeout: Some(18),
+                result: Err("timeout".to_string()),
+            },
+        ]);
+
+        let t = device_collect_telemetry_blocking_with_exec("h", 22, "u", "pw", &mut exec);
+        assert_eq!(t.mem_total_kib, Some(1000));
+        assert!(
+            t.error
+                .unwrap_or_default()
+                .contains("loadavg retry: timeout")
+        );
     }
 }

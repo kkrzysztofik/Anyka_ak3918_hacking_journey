@@ -2780,16 +2780,17 @@ async fn harness_error_handling(
 #[cfg(test)]
 mod tests {
     use super::{
-        BoundedLogWriter, RtpTsharkRow, RtspProtocolSequenceStats, bitrate_within_tolerance,
-        build_sdp_test_results, compute_packet_loss_from_seqs, critical_proto_failed, empty_report,
-        fps_within_tolerance, group_rtp_rows_by_stream, harness_bitrate_pass, harness_fps_pass,
+        BoundedLogWriter, RtpTsharkRow, RtspProtocolSequenceStats, analyze_aac_rfc3640_from_rows,
+        analyze_h264_rfc6184_from_rows, bitrate_within_tolerance, build_sdp_test_results,
+        compute_packet_loss_from_seqs, critical_proto_failed, empty_report, fps_within_tolerance,
+        group_rtp_rows_by_stream, harness_bitrate_pass, harness_fps_pass,
         harness_protocol_sequence_pass, packet_loss_within_tolerance, parse_ffmpeg_kbytes_token,
         parse_ffmpeg_summary_bitrate_kbps, parse_rtsp_method_from_meta,
         parse_rtsp_status_code_from_meta, parse_tshark_hex_bytes, parse_tshark_rtp_row_line,
-        pick_primary_audio_stream, pick_primary_video_stream, redact_url_credentials, result_ok,
-        rtsp_url, rtsp_url_with_credentials, to_retina_initial_timestamp_policy,
-        to_retina_transport, validate_aac_rtp_payload_rfc3640, validate_h264_length_prefixed_nals,
-        validate_h264_rtp_payload_rfc6184,
+        parse_tshark_u32, pick_primary_audio_stream, pick_primary_video_stream,
+        redact_url_credentials, result_ok, rtsp_url, rtsp_url_with_credentials,
+        to_retina_initial_timestamp_policy, to_retina_transport, validate_aac_rtp_payload_rfc3640,
+        validate_h264_length_prefixed_nals, validate_h264_rtp_payload_rfc6184,
     };
     use crate::config::{InitialTimestampPolicyArg, TransportArg};
     use crate::report::{StreamInfo, TestResult, TestRun};
@@ -3024,6 +3025,83 @@ mod tests {
         assert_eq!(row.payload, vec![0x7c, 0x85, 0x01, 0xff]);
     }
 
+    fn mk_rtp_row(
+        payload_type: u8,
+        marker: bool,
+        timestamp: u32,
+        seq: u16,
+        payload: &[u8],
+    ) -> RtpTsharkRow {
+        RtpTsharkRow {
+            payload_type,
+            marker,
+            timestamp,
+            seq,
+            ssrc: Some(0x11223344),
+            ip_src: "192.168.2.198".to_string(),
+            ip_dst: "192.168.2.10".to_string(),
+            udp_src_port: Some(5004),
+            udp_dst_port: Some(6000),
+            payload: payload.to_vec(),
+        }
+    }
+
+    #[test]
+    fn test_parse_tshark_u32_accepts_hex_and_decimal() {
+        assert_eq!(parse_tshark_u32("0x10"), Some(16));
+        assert_eq!(parse_tshark_u32("DEADBEEF"), Some(0xDEADBEEF));
+        assert_eq!(parse_tshark_u32("1234"), Some(1234));
+    }
+
+    #[test]
+    fn test_parse_tshark_u32_invalid_and_empty_return_none() {
+        assert_eq!(parse_tshark_u32(""), None);
+        assert_eq!(parse_tshark_u32("  \t"), None);
+        assert_eq!(parse_tshark_u32("xyz123"), None);
+        assert_eq!(parse_tshark_u32("0xZZ"), None);
+    }
+
+    #[test]
+    fn test_parse_tshark_rtp_row_line_insufficient_fields_returns_none() {
+        let row = parse_tshark_rtp_row_line("96\t1\t9000", 42).unwrap();
+        assert!(row.is_none());
+    }
+
+    #[test]
+    fn test_parse_tshark_rtp_row_line_invalid_numeric_fields_return_none() {
+        let bad_payload_type = "x\t1\t9000\t123\t1\t1.1.1.1\t2.2.2.2\t5004\t6000\t65";
+        assert!(
+            parse_tshark_rtp_row_line(bad_payload_type, 1)
+                .unwrap()
+                .is_none()
+        );
+
+        let bad_timestamp = "96\t1\tnot_a_number\t123\t1\t1.1.1.1\t2.2.2.2\t5004\t6000\t65";
+        assert!(
+            parse_tshark_rtp_row_line(bad_timestamp, 2)
+                .unwrap()
+                .is_none()
+        );
+
+        let bad_seq = "96\t1\t9000\tNaN\t1\t1.1.1.1\t2.2.2.2\t5004\t6000\t65";
+        assert!(parse_tshark_rtp_row_line(bad_seq, 3).unwrap().is_none());
+    }
+
+    #[test]
+    fn test_parse_tshark_rtp_row_line_invalid_payload_hex_returns_err() {
+        let line = "96\t1\t9000\t123\t1\t1.1.1.1\t2.2.2.2\t5004\t6000\t7c:zz";
+        let err = parse_tshark_rtp_row_line(line, 7).unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("parse rtp.payload at line 7"));
+    }
+
+    #[test]
+    fn test_parse_tshark_rtp_row_line_empty_payload_returns_none() {
+        let line = "96\t1\t9000\t123\t1\t1.1.1.1\t2.2.2.2\t5004\t6000\t<none>";
+        let row = parse_tshark_rtp_row_line(line, 8).unwrap();
+        assert!(row.is_none());
+    }
+
     #[test]
     fn test_packet_loss_computation_does_not_mix_streams() {
         fn mk_row(pt: u8, ssrc: u32, dst_port: u16, seq: u16, payload: &[u8]) -> RtpTsharkRow {
@@ -3108,6 +3186,69 @@ mod tests {
     }
 
     #[test]
+    fn test_validate_h264_rfc6184_marker_violation_non_vcl_single_nal() {
+        let payload = [0x67, 0xAA]; // SPS with marker set.
+        let (ok, marker_violation, fu_a_invalid, stap_a_invalid) =
+            validate_h264_rtp_payload_rfc6184(&payload, true);
+        assert!(ok);
+        assert!(marker_violation);
+        assert!(!fu_a_invalid);
+        assert!(!stap_a_invalid);
+    }
+
+    #[test]
+    fn test_validate_h264_rfc6184_fu_a_marker_violation_when_not_end() {
+        let payload = [0x7C, 0x85, 0x11]; // Start fragment, not end.
+        let (ok, marker_violation, fu_a_invalid, stap_a_invalid) =
+            validate_h264_rtp_payload_rfc6184(&payload, true);
+        assert!(ok);
+        assert!(marker_violation);
+        assert!(!fu_a_invalid);
+        assert!(!stap_a_invalid);
+    }
+
+    #[test]
+    fn test_validate_h264_rfc6184_fu_a_malformed_short_and_invalid_header() {
+        let too_short = [0x7C];
+        let (ok, _marker_violation, fu_a_invalid, stap_a_invalid) =
+            validate_h264_rtp_payload_rfc6184(&too_short, false);
+        assert!(!ok);
+        assert!(fu_a_invalid);
+        assert!(!stap_a_invalid);
+
+        let invalid_header = [0x7C, 0xE0, 0x11]; // start+end+reserved and orig type 0.
+        let (ok, _marker_violation, fu_a_invalid, stap_a_invalid) =
+            validate_h264_rtp_payload_rfc6184(&invalid_header, false);
+        assert!(!ok);
+        assert!(fu_a_invalid);
+        assert!(!stap_a_invalid);
+    }
+
+    #[test]
+    fn test_validate_h264_rfc6184_stap_a_malformed_variants() {
+        let zero_size = [0x78, 0x00, 0x00];
+        let (ok, _marker_violation, fu_a_invalid, stap_a_invalid) =
+            validate_h264_rtp_payload_rfc6184(&zero_size, false);
+        assert!(!ok);
+        assert!(!fu_a_invalid);
+        assert!(stap_a_invalid);
+
+        let overflow_size = [0x78, 0x00, 0x04, 0x67, 0xAA];
+        let (ok, _marker_violation, fu_a_invalid, stap_a_invalid) =
+            validate_h264_rtp_payload_rfc6184(&overflow_size, false);
+        assert!(!ok);
+        assert!(!fu_a_invalid);
+        assert!(stap_a_invalid);
+
+        let trailing_bytes = [0x78, 0x00, 0x01, 0x67, 0xFF];
+        let (ok, _marker_violation, fu_a_invalid, stap_a_invalid) =
+            validate_h264_rtp_payload_rfc6184(&trailing_bytes, false);
+        assert!(!ok);
+        assert!(!fu_a_invalid);
+        assert!(stap_a_invalid);
+    }
+
+    #[test]
     fn test_validate_aac_rfc3640_single_au_ok() {
         // AU-headers-length = 16 bits, AU-size=4 bytes, index=0, then 4 bytes data
         let payload = [0x00, 0x10, 0x00, 0x20, 0xDE, 0xAD, 0xBE, 0xEF];
@@ -3118,12 +3259,189 @@ mod tests {
     }
 
     #[test]
+    fn test_validate_aac_rfc3640_malformed_au_header() {
+        let zero_header_len = [0x00, 0x00, 0x00, 0x00];
+        let (ok, au_header_invalid, au_size_invalid) =
+            validate_aac_rtp_payload_rfc3640(&zero_header_len);
+        assert!(!ok);
+        assert!(au_header_invalid);
+        assert!(!au_size_invalid);
+
+        let non_multiple_of_16 = [0x00, 0x08, 0x00, 0x00];
+        let (ok, au_header_invalid, au_size_invalid) =
+            validate_aac_rtp_payload_rfc3640(&non_multiple_of_16);
+        assert!(!ok);
+        assert!(au_header_invalid);
+        assert!(!au_size_invalid);
+
+        let headers_too_short = [0x00, 0x20, 0x00, 0x10];
+        let (ok, au_header_invalid, au_size_invalid) =
+            validate_aac_rtp_payload_rfc3640(&headers_too_short);
+        assert!(!ok);
+        assert!(au_header_invalid);
+        assert!(!au_size_invalid);
+    }
+
+    #[test]
+    fn test_validate_aac_rfc3640_zero_au_size_is_invalid() {
+        let payload = [0x00, 0x10, 0x00, 0x00, 0xAA];
+        let (ok, au_header_invalid, au_size_invalid) = validate_aac_rtp_payload_rfc3640(&payload);
+        assert!(!ok);
+        assert!(!au_header_invalid);
+        assert!(au_size_invalid);
+    }
+
+    #[test]
     fn test_validate_aac_rfc3640_au_size_too_large() {
         // AU-size=16 bytes but only 1 byte data.
         let payload = [0x00, 0x10, 0x00, 0x80, 0x00];
         let (ok, _au_header_invalid, au_size_invalid) = validate_aac_rtp_payload_rfc3640(&payload);
         assert!(!ok);
         assert!(au_size_invalid);
+    }
+
+    #[test]
+    fn test_analyze_h264_rfc6184_from_rows_no_rows_returns_error() {
+        let err = analyze_h264_rfc6184_from_rows(&[]).unwrap_err();
+        assert!(err.to_string().contains("no RTP packets found"));
+    }
+
+    #[test]
+    fn test_analyze_h264_rfc6184_from_rows_insufficient_packets_returns_error() {
+        let rows = vec![
+            mk_rtp_row(96, true, 1000, 1, &[0x65, 0x11]),
+            mk_rtp_row(96, true, 2000, 2, &[0x65, 0x22]),
+            mk_rtp_row(96, true, 3000, 3, &[0x65, 0x33]),
+        ];
+        let err = analyze_h264_rfc6184_from_rows(&rows).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("insufficient H.264-like RTP packets")
+        );
+    }
+
+    #[test]
+    fn test_analyze_h264_rfc6184_from_rows_low_valid_ratio_returns_error() {
+        let mut rows = Vec::new();
+        for i in 0..7u16 {
+            rows.push(mk_rtp_row(
+                96,
+                false,
+                1000 + (i as u32) * 3000,
+                100 + i,
+                &[0x61, 0xAA],
+            ));
+        }
+        for i in 0..3u16 {
+            rows.push(mk_rtp_row(
+                96,
+                false,
+                40000 + (i as u32) * 3000,
+                200 + i,
+                &[0x00],
+            ));
+        }
+        let err = analyze_h264_rfc6184_from_rows(&rows).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("could not classify H.264 RTP payload type")
+        );
+    }
+
+    #[test]
+    fn test_analyze_h264_rfc6184_from_rows_collects_violation_counters() {
+        let rows = vec![
+            mk_rtp_row(96, true, 1000, 1, &[0x65, 0x11]),
+            mk_rtp_row(96, true, 2000, 2, &[0x67, 0x11]),
+            mk_rtp_row(96, true, 2000, 3, &[0x68, 0x11]),
+            mk_rtp_row(96, true, 3000, 4, &[0x7C, 0x85, 0x11]),
+            mk_rtp_row(96, false, 4000, 5, &[0x7C]),
+            mk_rtp_row(96, false, 5000, 6, &[0x78, 0x00, 0x00]),
+            mk_rtp_row(96, false, 6000, 7, &[0x61, 0x11]),
+            mk_rtp_row(96, false, 7000, 8, &[0x61, 0x11]),
+            mk_rtp_row(96, false, 8000, 9, &[0x61, 0x11]),
+            mk_rtp_row(96, false, 9000, 10, &[0x61, 0x11]),
+        ];
+
+        let stats = analyze_h264_rfc6184_from_rows(&rows).unwrap();
+        assert_eq!(stats.payload_type, 96);
+        assert_eq!(stats.packets_analyzed, 10);
+        assert_eq!(stats.invalid_packets, 2);
+        assert_eq!(stats.marker_violations, 4);
+        assert_eq!(stats.fu_a_invalid, 1);
+        assert_eq!(stats.stap_a_invalid, 1);
+    }
+
+    #[test]
+    fn test_analyze_aac_rfc3640_from_rows_no_rows_returns_error() {
+        let err = analyze_aac_rfc3640_from_rows(&[]).unwrap_err();
+        assert!(err.to_string().contains("no RTP packets found"));
+    }
+
+    #[test]
+    fn test_analyze_aac_rfc3640_from_rows_insufficient_packets_returns_error() {
+        let rows = vec![
+            mk_rtp_row(97, false, 0, 1, &[0x00, 0x10, 0x00, 0x10, 0xAA, 0xBB]),
+            mk_rtp_row(97, false, 1024, 2, &[0x00, 0x10, 0x00, 0x10, 0xAA, 0xBB]),
+            mk_rtp_row(97, false, 2048, 3, &[0x00, 0x10, 0x00, 0x10, 0xAA, 0xBB]),
+        ];
+        let err = analyze_aac_rfc3640_from_rows(&rows).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("insufficient AAC-like RTP packets")
+        );
+    }
+
+    #[test]
+    fn test_analyze_aac_rfc3640_from_rows_low_valid_ratio_returns_error() {
+        let mut rows = Vec::new();
+        for i in 0..7u16 {
+            rows.push(mk_rtp_row(
+                97,
+                false,
+                (i as u32) * 1024,
+                1 + i,
+                &[0x00, 0x10, 0x00, 0x10, 0xAA, 0xBB],
+            ));
+        }
+        for i in 0..3u16 {
+            rows.push(mk_rtp_row(
+                97,
+                false,
+                20000 + (i as u32) * 1024,
+                100 + i,
+                &[0x00, 0x00, 0x00, 0x00],
+            ));
+        }
+        let err = analyze_aac_rfc3640_from_rows(&rows).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("could not classify AAC RTP payload type")
+        );
+    }
+
+    #[test]
+    fn test_analyze_aac_rfc3640_from_rows_collects_error_and_timestamp_counters() {
+        let rows = vec![
+            mk_rtp_row(97, false, 0, 1, &[0x00, 0x10, 0x00, 0x10, 0xAA, 0xBB]),
+            mk_rtp_row(97, false, 1024, 2, &[0x00, 0x10, 0x00, 0x10, 0xAA, 0xBB]),
+            mk_rtp_row(97, false, 2048, 3, &[0x00, 0x10, 0x00, 0x10, 0xAA, 0xBB]),
+            mk_rtp_row(97, false, 3072, 4, &[0x00, 0x10, 0x00, 0x10, 0xAA, 0xBB]),
+            mk_rtp_row(97, false, 4096, 5, &[0x00, 0x10, 0x00, 0x00, 0xAA]),
+            mk_rtp_row(97, false, 5120, 6, &[0x00, 0x08, 0x00, 0x00]),
+            mk_rtp_row(97, false, 6144, 7, &[0x00, 0x10, 0x00, 0x10, 0xAA, 0xBB]),
+            mk_rtp_row(97, false, 7000, 8, &[0x00, 0x10, 0x00, 0x10, 0xAA, 0xBB]),
+            mk_rtp_row(97, false, 8024, 9, &[0x00, 0x10, 0x00, 0x10, 0xAA, 0xBB]),
+            mk_rtp_row(97, false, 9048, 10, &[0x00, 0x10, 0x00, 0x10, 0xAA, 0xBB]),
+        ];
+
+        let stats = analyze_aac_rfc3640_from_rows(&rows).unwrap();
+        assert_eq!(stats.payload_type, 97);
+        assert_eq!(stats.packets_analyzed, 10);
+        assert_eq!(stats.invalid_packets, 2);
+        assert_eq!(stats.au_header_invalid, 1);
+        assert_eq!(stats.au_size_invalid, 1);
+        assert_eq!(stats.timestamp_anomalies, 1);
     }
 
     #[test]
