@@ -1,4 +1,6 @@
-use crate::container::define::aac_packet_type;
+use crate::container::define::{
+    AacProfile, AvcCodecId, AvcLevel, AvcProfile, SoundFormat, aac_packet_type,
+};
 use define::{
     FrameDataReceiver, PacketDataReceiver, PacketDataSender, RelayType, StatisticData,
     StatisticDataReceiver, StatisticDataSender,
@@ -75,86 +77,67 @@ impl StreamDataTransceiver {
         }
     }
 
+    /// Sends frame data to all subscribers, removing failed senders.
+    async fn broadcast_to_senders(
+        data: FrameData,
+        frame_senders: &Arc<Mutex<HashMap<Uuid, FrameDataSender>>>,
+        error_value: StreamHubErrorValue,
+    ) {
+        let mut senders = frame_senders.lock().await;
+        let mut to_remove: Vec<Uuid> = Vec::new();
+
+        for (id, sender) in senders.iter() {
+            if sender.send(data.clone()).is_err() {
+                to_remove.push(*id);
+            }
+        }
+
+        for id in to_remove {
+            senders.remove(&id);
+            log::warn!(
+                "Transmiter send error: {} subscriber_id={}",
+                error_value,
+                id
+            );
+        }
+    }
+
     async fn receive_frame_data(
         data: Option<FrameData>,
         frame_senders: &Arc<Mutex<HashMap<Uuid, FrameDataSender>>>,
     ) {
         if let Some(val) = data {
             match val {
-                FrameData::MetaData {
-                    timestamp: _,
-                    data: _,
-                } => {}
+                FrameData::MetaData { .. } => {}
                 FrameData::Audio { timestamp, data } => {
-                    let data = FrameData::Audio {
-                        timestamp,
-                        data: data.clone(),
-                    };
-
-                    let mut senders = frame_senders.lock().await;
-                    let mut to_remove: Vec<Uuid> = Vec::new();
-                    for (id, v) in senders.iter() {
-                        if v.send(data.clone()).is_err() {
-                            to_remove.push(*id);
-                        }
-                    }
-                    for id in to_remove {
-                        let _ = senders.remove(&id);
-                        log::warn!(
-                            "Transmiter send error: {} subscriber_id={}",
-                            StreamHubError {
-                                value: StreamHubErrorValue::SendAudioError
-                            },
-                            id
-                        );
-                    }
+                    Self::broadcast_to_senders(
+                        FrameData::Audio {
+                            timestamp,
+                            data: data.clone(),
+                        },
+                        frame_senders,
+                        StreamHubErrorValue::SendAudioError,
+                    )
+                    .await;
                 }
                 FrameData::Video { timestamp, data } => {
-                    let data = FrameData::Video {
-                        timestamp,
-                        data: data.clone(),
-                    };
-                    let mut senders = frame_senders.lock().await;
-                    let mut to_remove: Vec<Uuid> = Vec::new();
-                    for (id, v) in senders.iter() {
-                        if v.send(data.clone()).is_err() {
-                            to_remove.push(*id);
-                        }
-                    }
-                    for id in to_remove {
-                        let _ = senders.remove(&id);
-                        log::warn!(
-                            "Transmiter send error: {} subscriber_id={}",
-                            StreamHubError {
-                                value: StreamHubErrorValue::SendVideoError
-                            },
-                            id
-                        );
-                    }
+                    Self::broadcast_to_senders(
+                        FrameData::Video {
+                            timestamp,
+                            data: data.clone(),
+                        },
+                        frame_senders,
+                        StreamHubErrorValue::SendVideoError,
+                    )
+                    .await;
                 }
-                FrameData::MediaInfo {
-                    media_info: info_value,
-                } => {
-                    let data = FrameData::MediaInfo {
-                        media_info: info_value,
-                    };
-                    let mut senders = frame_senders.lock().await;
-                    let mut to_remove: Vec<Uuid> = Vec::new();
-                    for (id, v) in senders.iter() {
-                        if v.send(data.clone()).is_err() {
-                            to_remove.push(*id);
-                        }
-                    }
-                    for id in to_remove {
-                        let _ = senders.remove(&id);
-                        log::warn!(
-                            "Transmiter send error: {} subscriber_id={}",
-                            StreamHubError {
-                                value: StreamHubErrorValue::SendVideoError
-                            },
-                            id
-                        );
-                    }
+                FrameData::MediaInfo { media_info } => {
+                    Self::broadcast_to_senders(
+                        FrameData::MediaInfo { media_info },
+                        frame_senders,
+                        StreamHubErrorValue::SendVideoError,
+                    )
+                    .await;
                 }
             }
         }
@@ -182,6 +165,31 @@ impl StreamDataTransceiver {
         });
     }
 
+    /// Sends packet data to all subscribers, removing failed senders.
+    async fn broadcast_packet_to_senders(
+        data: PacketData,
+        packet_senders: &Arc<Mutex<HashMap<Uuid, PacketDataSender>>>,
+        error_value: StreamHubErrorValue,
+    ) {
+        let mut senders = packet_senders.lock().await;
+        let mut to_remove: Vec<Uuid> = Vec::new();
+
+        for (id, sender) in senders.iter() {
+            if sender.send(data.clone()).is_err() {
+                to_remove.push(*id);
+            }
+        }
+
+        for id in to_remove {
+            senders.remove(&id);
+            log::warn!(
+                "Transmiter send error: {} subscriber_id={}",
+                error_value,
+                id
+            );
+        }
+    }
+
     async fn receive_packet_data(
         data: Option<PacketData>,
         packet_senders: &Arc<Mutex<HashMap<Uuid, PacketDataSender>>>,
@@ -189,51 +197,26 @@ impl StreamDataTransceiver {
         if let Some(val) = data {
             match val {
                 PacketData::Audio { timestamp, data } => {
-                    let data = PacketData::Audio {
-                        timestamp,
-                        data: data.clone(),
-                    };
-
-                    let mut senders = packet_senders.lock().await;
-                    let mut to_remove: Vec<Uuid> = Vec::new();
-                    for (id, v) in senders.iter() {
-                        if v.send(data.clone()).is_err() {
-                            to_remove.push(*id);
-                        }
-                    }
-                    for id in to_remove {
-                        let _ = senders.remove(&id);
-                        log::warn!(
-                            "Transmiter send error: {} subscriber_id={}",
-                            StreamHubError {
-                                value: StreamHubErrorValue::SendAudioError
-                            },
-                            id
-                        );
-                    }
+                    Self::broadcast_packet_to_senders(
+                        PacketData::Audio {
+                            timestamp,
+                            data: data.clone(),
+                        },
+                        packet_senders,
+                        StreamHubErrorValue::SendAudioError,
+                    )
+                    .await;
                 }
                 PacketData::Video { timestamp, data } => {
-                    let data = PacketData::Video {
-                        timestamp,
-                        data: data.clone(),
-                    };
-                    let mut senders = packet_senders.lock().await;
-                    let mut to_remove: Vec<Uuid> = Vec::new();
-                    for (id, v) in senders.iter() {
-                        if v.send(data.clone()).is_err() {
-                            to_remove.push(*id);
-                        }
-                    }
-                    for id in to_remove {
-                        let _ = senders.remove(&id);
-                        log::warn!(
-                            "Transmiter send error: {} subscriber_id={}",
-                            StreamHubError {
-                                value: StreamHubErrorValue::SendVideoError
-                            },
-                            id
-                        );
-                    }
+                    Self::broadcast_packet_to_senders(
+                        PacketData::Video {
+                            timestamp,
+                            data: data.clone(),
+                        },
+                        packet_senders,
+                        StreamHubErrorValue::SendVideoError,
+                    )
+                    .await;
                 }
             }
         }
@@ -261,6 +244,131 @@ impl StreamDataTransceiver {
         });
     }
 
+    /// Updates audio statistics for subscriber or publisher.
+    async fn update_audio_statistics(
+        uuid: Option<Uuid>,
+        data_size: usize,
+        aac_packet_type: u8,
+        statistics_data: &Arc<Mutex<StatisticsStream>>,
+    ) {
+        if let Some(uid) = uuid {
+            {
+                let subscriber = &mut statistics_data.lock().await.subscribers;
+                if let Some(sub) = subscriber.get_mut(&uid) {
+                    sub.send_bytes += data_size;
+                }
+            }
+            statistics_data.lock().await.total_send_bytes += data_size;
+        } else {
+            if aac_packet_type == aac_packet_type::AAC_RAW {
+                let audio_data = &mut statistics_data.lock().await.publisher.audio;
+                audio_data.recv_bytes += data_size;
+            }
+            statistics_data.lock().await.total_recv_bytes += data_size;
+        }
+    }
+
+    /// Updates video statistics for subscriber or publisher.
+    async fn update_video_statistics(
+        uuid: Option<Uuid>,
+        data_size: usize,
+        frame_count: usize,
+        is_key_frame: Option<bool>,
+        statistics_data: &Arc<Mutex<StatisticsStream>>,
+    ) {
+        if let Some(uid) = uuid {
+            {
+                let subscriber = &mut statistics_data.lock().await.subscribers;
+                if let Some(sub) = subscriber.get_mut(&uid) {
+                    sub.send_bytes += data_size;
+                    sub.total_send_bytes += data_size;
+                }
+            }
+            statistics_data.lock().await.total_send_bytes += data_size;
+        } else {
+            let stat_data = &mut statistics_data.lock().await;
+            stat_data.total_recv_bytes += data_size;
+            stat_data.publisher.video.recv_bytes += data_size;
+            stat_data.publisher.video.recv_frame_count += frame_count;
+            stat_data.publisher.recv_bytes += data_size;
+            if let Some(is_key) = is_key_frame {
+                if is_key {
+                    stat_data.publisher.video.gop =
+                        stat_data.publisher.video.recv_frame_count_for_gop;
+                    stat_data.publisher.video.recv_frame_count_for_gop = 1;
+                } else {
+                    stat_data.publisher.video.recv_frame_count_for_gop += frame_count;
+                }
+            }
+        }
+    }
+
+    /// Updates audio codec information.
+    async fn update_audio_codec_info(
+        sound_format: SoundFormat,
+        profile: AacProfile,
+        samplerate: u32,
+        channels: u8,
+        statistics_data: &Arc<Mutex<StatisticsStream>>,
+    ) {
+        let audio_codec_data = &mut statistics_data.lock().await.publisher.audio;
+        audio_codec_data.sound_format = sound_format;
+        audio_codec_data.profile = profile;
+        audio_codec_data.samplerate = samplerate;
+        audio_codec_data.channels = channels;
+    }
+
+    /// Updates video codec information.
+    async fn update_video_codec_info(
+        codec: AvcCodecId,
+        profile: AvcProfile,
+        level: AvcLevel,
+        width: u32,
+        height: u32,
+        statistics_data: &Arc<Mutex<StatisticsStream>>,
+    ) {
+        let video_codec_data = &mut statistics_data.lock().await.publisher.video;
+        video_codec_data.codec = codec;
+        video_codec_data.profile = profile;
+        video_codec_data.level = level;
+        video_codec_data.width = width;
+        video_codec_data.height = height;
+    }
+
+    /// Updates publisher information.
+    async fn update_publisher_info(
+        id: Uuid,
+        remote_addr: String,
+        start_time: chrono::DateTime<chrono::Local>,
+        statistics_data: &Arc<Mutex<StatisticsStream>>,
+    ) {
+        let publisher = &mut statistics_data.lock().await.publisher;
+        publisher.id = id;
+        publisher.remote_address = remote_addr;
+        publisher.start_time = start_time;
+    }
+
+    /// Adds a new subscriber.
+    async fn add_subscriber(
+        id: Uuid,
+        remote_addr: String,
+        sub_type: SubscribeType,
+        start_time: chrono::DateTime<chrono::Local>,
+        statistics_data: &Arc<Mutex<StatisticsStream>>,
+    ) {
+        let subscriber = &mut statistics_data.lock().await.subscribers;
+        let sub = StatisticSubscriber {
+            id,
+            remote_address: remote_addr,
+            sub_type,
+            start_time,
+            send_bitrate: 0,
+            send_bytes: 0,
+            total_send_bytes: 0,
+        };
+        subscriber.insert(id, sub);
+    }
+
     async fn receive_statistics_data(
         data: Option<StatisticData>,
         statistics_data: &Arc<Mutex<StatisticsStream>>,
@@ -273,26 +381,13 @@ impl StreamDataTransceiver {
                     aac_packet_type,
                     duration: _,
                 } => {
-                    if let Some(uid) = uuid {
-                        {
-                            let subscriber = &mut statistics_data.lock().await.subscribers;
-                            if let Some(sub) = subscriber.get_mut(&uid) {
-                                sub.send_bytes += data_size;
-                            }
-                        }
-
-                        statistics_data.lock().await.total_send_bytes += data_size;
-                    } else {
-                        match aac_packet_type {
-                            aac_packet_type::AAC_RAW => {
-                                let audio_data = &mut statistics_data.lock().await.publisher.audio;
-                                audio_data.recv_bytes += data_size;
-                            }
-                            aac_packet_type::AAC_SEQHDR => {}
-                            _ => {}
-                        }
-                        statistics_data.lock().await.total_recv_bytes += data_size;
-                    }
+                    Self::update_audio_statistics(
+                        uuid,
+                        data_size,
+                        aac_packet_type,
+                        statistics_data,
+                    )
+                    .await;
                 }
                 StatisticData::Video {
                     uuid,
@@ -301,35 +396,14 @@ impl StreamDataTransceiver {
                     is_key_frame,
                     duration: _,
                 } => {
-                    //if it is a subscriber, we need to update the send_bytes
-                    if let Some(uid) = uuid {
-                        {
-                            let subscriber = &mut statistics_data.lock().await.subscribers;
-                            if let Some(sub) = subscriber.get_mut(&uid) {
-                                sub.send_bytes += data_size;
-                                sub.total_send_bytes += data_size;
-                            }
-                        }
-
-                        statistics_data.lock().await.total_send_bytes += data_size;
-                    }
-                    //if it is a publisher, we need to update the recv_bytes
-                    else {
-                        let stat_data = &mut statistics_data.lock().await;
-                        stat_data.total_recv_bytes += data_size;
-                        stat_data.publisher.video.recv_bytes += data_size;
-                        stat_data.publisher.video.recv_frame_count += frame_count;
-                        stat_data.publisher.recv_bytes += data_size;
-                        if let Some(is_key) = is_key_frame {
-                            if is_key {
-                                stat_data.publisher.video.gop =
-                                    stat_data.publisher.video.recv_frame_count_for_gop;
-                                stat_data.publisher.video.recv_frame_count_for_gop = 1;
-                            } else {
-                                stat_data.publisher.video.recv_frame_count_for_gop += frame_count;
-                            }
-                        }
-                    }
+                    Self::update_video_statistics(
+                        uuid,
+                        data_size,
+                        frame_count,
+                        is_key_frame,
+                        statistics_data,
+                    )
+                    .await;
                 }
                 StatisticData::AudioCodec {
                     sound_format,
@@ -337,11 +411,14 @@ impl StreamDataTransceiver {
                     samplerate,
                     channels,
                 } => {
-                    let audio_codec_data = &mut statistics_data.lock().await.publisher.audio;
-                    audio_codec_data.sound_format = sound_format;
-                    audio_codec_data.profile = profile;
-                    audio_codec_data.samplerate = samplerate;
-                    audio_codec_data.channels = channels;
+                    Self::update_audio_codec_info(
+                        sound_format,
+                        profile,
+                        samplerate,
+                        channels,
+                        statistics_data,
+                    )
+                    .await;
                 }
                 StatisticData::VideoCodec {
                     codec,
@@ -350,23 +427,22 @@ impl StreamDataTransceiver {
                     width,
                     height,
                 } => {
-                    let video_codec_data = &mut statistics_data.lock().await.publisher.video;
-                    video_codec_data.codec = codec;
-                    video_codec_data.profile = profile;
-                    video_codec_data.level = level;
-                    video_codec_data.width = width;
-                    video_codec_data.height = height;
+                    Self::update_video_codec_info(
+                        codec,
+                        profile,
+                        level,
+                        width,
+                        height,
+                        statistics_data,
+                    )
+                    .await;
                 }
                 StatisticData::Publisher {
                     id,
                     remote_addr,
                     start_time,
                 } => {
-                    let publisher = &mut statistics_data.lock().await.publisher;
-                    publisher.id = id;
-                    publisher.remote_address = remote_addr;
-
-                    publisher.start_time = start_time;
+                    Self::update_publisher_info(id, remote_addr, start_time, statistics_data).await;
                 }
                 StatisticData::Subscriber {
                     id,
@@ -374,17 +450,8 @@ impl StreamDataTransceiver {
                     sub_type,
                     start_time,
                 } => {
-                    let subscriber = &mut statistics_data.lock().await.subscribers;
-                    let sub = StatisticSubscriber {
-                        id,
-                        remote_address: remote_addr,
-                        sub_type,
-                        start_time,
-                        send_bitrate: 0,
-                        send_bytes: 0,
-                        total_send_bytes: 0,
-                    };
-                    subscriber.insert(id, sub);
+                    Self::add_subscriber(id, remote_addr, sub_type, start_time, statistics_data)
+                        .await;
                 }
             }
         }
@@ -1381,6 +1448,49 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_streams_hub_subscribe_no_stream_emits_pull_event_when_enabled() {
+        let mut hub = StreamsHub::new(None);
+        hub.set_rtmp_pull_enabled(true);
+
+        let identifier = create_test_stream_identifier();
+        let sub_info = create_test_subscriber_info();
+        let (sender, _) = mpsc::unbounded_channel();
+        let data_sender = DataSender::Frame { sender };
+        let mut client_event_receiver = hub.get_client_event_consumer();
+
+        let result = hub.subscribe(&identifier, sub_info, data_sender).await;
+
+        assert!(result.is_err());
+        match result.unwrap_err().value {
+            StreamHubErrorValue::NoAppOrStreamName => {}
+            _ => panic!("Expected NoAppOrStreamName error"),
+        }
+
+        let event = tokio::time::timeout(
+            tokio::time::Duration::from_millis(100),
+            client_event_receiver.recv(),
+        )
+        .await
+        .expect("timed out waiting for broadcast event")
+        .expect("broadcast channel closed unexpectedly");
+
+        match event {
+            BroadcastEvent::Subscribe {
+                id,
+                identifier: event_identifier,
+                server_address,
+                result_sender,
+            } => {
+                assert_eq!(id, "rtmp_relay");
+                assert_eq!(event_identifier, identifier);
+                assert!(server_address.is_none());
+                assert!(result_sender.is_none());
+            }
+            _ => panic!("expected BroadcastEvent::Subscribe"),
+        }
+    }
+
+    #[tokio::test]
     async fn test_streams_hub_unsubscribe_success() {
         let mut hub = StreamsHub::new(None);
         let identifier = create_test_stream_identifier();
@@ -1675,6 +1785,81 @@ mod tests {
             }
             _ => panic!("Expected Audio packet"),
         }
+    }
+
+    #[tokio::test]
+    async fn test_api_kick_off_client_routes_stored_unsubscribe_event() {
+        let mut hub = StreamsHub::new(None);
+        let identifier = create_test_stream_identifier();
+        let sub_info = create_test_subscriber_info();
+
+        hub.un_pub_sub_events.insert(
+            sub_info.id,
+            StreamHubEvent::UnSubscribe {
+                identifier: identifier.clone(),
+                info: sub_info.clone(),
+            },
+        );
+
+        let result = hub.api_kick_off_client(sub_info.id);
+        assert!(result.is_ok());
+
+        let routed = tokio::time::timeout(
+            tokio::time::Duration::from_millis(100),
+            hub.hub_event_receiver.recv(),
+        )
+        .await
+        .expect("timed out waiting for routed kick-off event")
+        .expect("hub event channel closed unexpectedly");
+
+        match routed {
+            StreamHubEvent::UnSubscribe {
+                identifier: routed_identifier,
+                info: routed_info,
+            } => {
+                assert_eq!(routed_identifier, identifier);
+                assert_eq!(routed_info.id, sub_info.id);
+                assert!(matches!(routed_info.sub_type, SubscribeType::RtmpPull));
+            }
+            _ => panic!("expected StreamHubEvent::UnSubscribe"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_receive_statistics_data_video_keyframe_resets_gop_counter() {
+        let stats = Arc::new(Mutex::new(StatisticsStream::new(
+            create_test_stream_identifier(),
+        )));
+
+        StreamDataTransceiver::receive_statistics_data(
+            Some(StatisticData::Video {
+                uuid: None,
+                data_size: 100,
+                frame_count: 3,
+                is_key_frame: Some(false),
+                duration: 33,
+            }),
+            &stats,
+        )
+        .await;
+
+        StreamDataTransceiver::receive_statistics_data(
+            Some(StatisticData::Video {
+                uuid: None,
+                data_size: 50,
+                frame_count: 1,
+                is_key_frame: Some(true),
+                duration: 33,
+            }),
+            &stats,
+        )
+        .await;
+
+        let guard = stats.lock().await;
+        assert_eq!(guard.publisher.video.recv_bytes, 150);
+        assert_eq!(guard.publisher.video.recv_frame_count, 4);
+        assert_eq!(guard.publisher.video.gop, 3);
+        assert_eq!(guard.publisher.video.recv_frame_count_for_gop, 1);
     }
 
     #[tokio::test]

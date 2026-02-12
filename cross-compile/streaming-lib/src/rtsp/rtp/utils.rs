@@ -80,28 +80,39 @@ pub fn find_start_code(nalus: &[u8]) -> Option<usize> {
     nalus.windows(pattern.len()).position(|w| w == pattern)
 }
 
+/// Adjusts the position backwards to exclude trailing zeros before a start code.
+/// This handles the case of 4-byte start codes (00 00 00 01) where we need to
+/// find the actual end of the previous NALU.
+fn adjust_for_trailing_zeros(nalus: &[u8], mut pos: usize) -> usize {
+    while pos > 0 && nalus[pos - 1] == 0 {
+        pos -= 1;
+    }
+    pos
+}
+
+/// Extracts the next NALU from the buffer, returning the NALU data without start code.
+/// Returns None if no start code is found (raw NALU case).
+fn extract_next_nalu(nalus: &mut BytesMut) -> Option<BytesMut> {
+    let first_pos = find_start_code(&nalus[..])?;
+
+    let mut nalu_with_start_code = match find_start_code(&nalus[first_pos + 3..]) {
+        Some(distance_to_first_pos) => {
+            let second_pos =
+                adjust_for_trailing_zeros(nalus, first_pos + 3 + distance_to_first_pos);
+            nalus.split_to(second_pos)
+        }
+        None => nalus.split_to(nalus.len()),
+    };
+
+    Some(nalu_with_start_code.split_off(first_pos + 3))
+}
+
 pub async fn split_annexb_and_process<T: TVideoPacker>(
     nalus: &mut BytesMut,
     packer: &mut T,
 ) -> Result<(), PackerError> {
     while !nalus.is_empty() {
-        /* 0x02,...,0x00,0x00,0x01,0x02..,0x00,0x00,0x01  */
-        /*  |         |              |      |             */
-        /*  -----------              --------             */
-        /*   first_pos         distance_to_first_pos      */
-        if let Some(first_pos) = find_start_code(&nalus[..]) {
-            let mut nalu_with_start_code =
-                if let Some(distance_to_first_pos) = find_start_code(&nalus[first_pos + 3..]) {
-                    let mut second_pos = first_pos + 3 + distance_to_first_pos;
-                    while second_pos > 0 && nalus[second_pos - 1] == 0 {
-                        second_pos -= 1;
-                    }
-                    nalus.split_to(second_pos)
-                } else {
-                    nalus.split_to(nalus.len())
-                };
-
-            let nalu = nalu_with_start_code.split_off(first_pos + 3);
+        if let Some(nalu) = extract_next_nalu(nalus) {
             packer.pack_nalu(nalu).await?;
         } else {
             // If the buffer contains a single raw NAL unit (no Annex-B start code),
@@ -159,12 +170,16 @@ pub fn ntp_timestamp() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::bytesio::bytes_errors::{BytesWriteError, BytesWriteErrorValue};
+    use crate::rtsp::rtp::errors::PackerErrorValue;
     use bytes::BytesMut;
     use std::sync::{Arc, Mutex};
 
     struct CapturePacker {
         nalus: Arc<Mutex<Vec<BytesMut>>>,
     }
+
+    struct ErrorPacker;
 
     #[async_trait]
     impl TRtpReceiverForRtcp for CapturePacker {
@@ -189,6 +204,35 @@ mod tests {
         async fn pack_nalu(&mut self, nalu: BytesMut) -> Result<(), PackerError> {
             self.nalus.lock().unwrap().push(nalu);
             Ok(())
+        }
+    }
+
+    #[async_trait]
+    impl TRtpReceiverForRtcp for ErrorPacker {
+        fn on_packet_for_rtcp_handler(&mut self, _f: OnRtpPacketFn2) {}
+    }
+
+    #[async_trait]
+    impl TPacker for ErrorPacker {
+        async fn pack(
+            &mut self,
+            _nalus: &mut BytesMut,
+            _timestamp: u32,
+        ) -> Result<(), PackerError> {
+            Ok(())
+        }
+
+        fn on_packet_handler(&mut self, _f: OnRtpPacketFn) {}
+    }
+
+    #[async_trait]
+    impl TVideoPacker for ErrorPacker {
+        async fn pack_nalu(&mut self, _nalu: BytesMut) -> Result<(), PackerError> {
+            Err(PackerError {
+                value: PackerErrorValue::BytesWriteError(BytesWriteError {
+                    value: BytesWriteErrorValue::Timeout,
+                }),
+            })
         }
     }
 
@@ -398,5 +442,46 @@ mod tests {
         let stored = captured.lock().unwrap();
         assert_eq!(stored.len(), 1);
         assert_eq!(stored[0], BytesMut::from(&[0x65, 0x88, 0x84][..]));
+    }
+
+    #[tokio::test]
+    async fn test_split_annexb_and_process_mixed_start_codes_extracts_all_nalus() {
+        let captured = Arc::new(Mutex::new(Vec::new()));
+        let mut packer = CapturePacker {
+            nalus: Arc::clone(&captured),
+        };
+
+        // Mixes 3-byte and 4-byte start codes and verifies boundary handling.
+        let mut nalus = BytesMut::from(
+            &[
+                0x00, 0x00, 0x01, 0x65, 0xAA, 0xBB, 0x00, 0x00, 0x00, 0x01, 0x41, 0xCC, 0x00, 0x00,
+                0x01, 0x06, 0xDD,
+            ][..],
+        );
+
+        let result = split_annexb_and_process(&mut nalus, &mut packer).await;
+
+        assert!(result.is_ok());
+        assert!(nalus.is_empty());
+        let stored = captured.lock().unwrap();
+        assert_eq!(stored.len(), 3);
+        assert_eq!(stored[0], BytesMut::from(&[0x65, 0xAA, 0xBB][..]));
+        assert_eq!(stored[1], BytesMut::from(&[0x41, 0xCC][..]));
+        assert_eq!(stored[2], BytesMut::from(&[0x06, 0xDD][..]));
+    }
+
+    #[tokio::test]
+    async fn test_split_annexb_and_process_packer_error_is_propagated() {
+        let mut packer = ErrorPacker;
+        let mut nalus = BytesMut::from(&[0x00, 0x00, 0x01, 0x65, 0xAA][..]);
+
+        let result = split_annexb_and_process(&mut nalus, &mut packer).await;
+
+        assert!(matches!(
+            result,
+            Err(PackerError {
+                value: PackerErrorValue::BytesWriteError(_)
+            })
+        ));
     }
 }

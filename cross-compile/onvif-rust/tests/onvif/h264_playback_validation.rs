@@ -873,6 +873,70 @@ mod tests {
     // ADVANCED E2E TESTS - Real Protocol Implementation
     // ============================================================================
 
+    /// Helper: Get RTSP response type from line
+    fn get_rtsp_method(line: &str) -> Option<&'static str> {
+        if line.starts_with("DESCRIBE") {
+            Some("DESCRIBE")
+        } else if line.starts_with("SETUP") {
+            Some("SETUP")
+        } else if line.starts_with("PLAY") {
+            Some("PLAY")
+        } else if line.starts_with("TEARDOWN") {
+            Some("TEARDOWN")
+        } else {
+            None
+        }
+    }
+
+    /// Helper: Build RTSP DESCRIBE response
+    fn build_describe_response(cseq: u32, sdp_content: &str) -> String {
+        format!(
+            "RTSP/1.0 200 OK\r\n\
+             CSeq: {}\r\n\
+             Content-Type: application/sdp\r\n\
+             Content-Length: {}\r\n\
+             \r\n\
+             {}",
+            cseq,
+            sdp_content.len(),
+            sdp_content
+        )
+    }
+
+    /// Helper: Build RTSP SETUP response
+    fn build_setup_response(cseq: u32, session_id: &str) -> String {
+        format!(
+            "RTSP/1.0 200 OK\r\n\
+             CSeq: {}\r\n\
+             Session: {}\r\n\
+             Transport: RTP/AVP;unicast;client_port=5000-5001;server_port=6000-6001\r\n\
+             \r\n",
+            cseq, session_id
+        )
+    }
+
+    /// Helper: Build RTSP PLAY response
+    fn build_play_response(cseq: u32, session_id: &str) -> String {
+        format!(
+            "RTSP/1.0 200 OK\r\n\
+             CSeq: {}\r\n\
+             Session: {}\r\n\
+             Range: npt=0-\r\n\
+             \r\n",
+            cseq, session_id
+        )
+    }
+
+    /// Helper: Build RTSP TEARDOWN response
+    fn build_teardown_response(cseq: u32) -> String {
+        format!(
+            "RTSP/1.0 200 OK\r\n\
+             CSeq: {}\r\n\
+             \r\n",
+            cseq
+        )
+    }
+
     /// Helper: Minimal RTSP protocol handler for testing
     /// Implements basic RTSP DESCRIBE/SETUP/PLAY sequence
     async fn handle_rtsp_client(
@@ -894,55 +958,24 @@ mod tests {
                 continue;
             }
 
-            if line.starts_with("DESCRIBE") {
-                let response = format!(
-                    "RTSP/1.0 200 OK\r\n\
-                     CSeq: {}\r\n\
-                     Content-Type: application/sdp\r\n\
-                     Content-Length: {}\r\n\
-                     \r\n\
-                     {}",
-                    cseq,
-                    sdp_content.len(),
-                    sdp_content
-                );
-                writer.write_all(response.as_bytes()).await?;
+            let response = match get_rtsp_method(line) {
+                Some("DESCRIBE") => Some(build_describe_response(cseq, &sdp_content)),
+                Some("SETUP") => Some(build_setup_response(cseq, &session_id)),
+                Some("PLAY") => {
+                    tracing::debug!("RTSP PLAY initiated");
+                    Some(build_play_response(cseq, &session_id))
+                }
+                Some("TEARDOWN") => Some(build_teardown_response(cseq)),
+                _ => None,
+            };
+
+            if let Some(resp) = response {
+                writer.write_all(resp.as_bytes()).await?;
                 writer.flush().await?;
-            } else if line.starts_with("SETUP") {
-                let response = format!(
-                    "RTSP/1.0 200 OK\r\n\
-                     CSeq: {}\r\n\
-                     Session: {}\r\n\
-                     Transport: RTP/AVP;unicast;client_port=5000-5001;server_port=6000-6001\r\n\
-                     \r\n",
-                    cseq, &session_id
-                );
-                writer.write_all(response.as_bytes()).await?;
-                writer.flush().await?;
-            } else if line.starts_with("PLAY") {
-                let response = format!(
-                    "RTSP/1.0 200 OK\r\n\
-                     CSeq: {}\r\n\
-                     Session: {}\r\n\
-                     Range: npt=0-\r\n\
-                     \r\n",
-                    cseq, &session_id
-                );
-                writer.write_all(response.as_bytes()).await?;
-                writer.flush().await?;
-                // Indicate streaming started
-                tracing::debug!("RTSP PLAY initiated");
-                break;
-            } else if line.starts_with("TEARDOWN") {
-                let response = format!(
-                    "RTSP/1.0 200 OK\r\n\
-                     CSeq: {}\r\n\
-                     \r\n",
-                    cseq
-                );
-                writer.write_all(response.as_bytes()).await?;
-                writer.flush().await?;
-                break;
+                // Break on PLAY or TEARDOWN
+                if line.starts_with("PLAY") || line.starts_with("TEARDOWN") {
+                    break;
+                }
             }
         }
 

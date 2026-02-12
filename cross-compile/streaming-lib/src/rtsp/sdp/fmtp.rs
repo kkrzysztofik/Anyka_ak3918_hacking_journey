@@ -52,22 +52,25 @@ pub enum Fmtp {
 
 impl Fmtp {
     pub fn new(codec: &str, raw_data: &str) -> Result<Fmtp, String> {
-        match codec.to_lowercase().as_str() {
-            "h264" => match H264Fmtp::unmarshal(raw_data) {
-                Ok(h264_fmtp) => return Ok(Fmtp::H264(h264_fmtp)),
-                Err(e) => return Err(e),
-            },
-            "h265" => match H265Fmtp::unmarshal(raw_data) {
-                Ok(h265_fmtp) => return Ok(Fmtp::H265(h265_fmtp)),
-                Err(e) => return Err(e),
-            },
-            "mpeg4-generic" => match Mpeg4Fmtp::unmarshal(raw_data) {
-                Ok(mpeg4_fmtp) => return Ok(Fmtp::Mpeg4(mpeg4_fmtp)),
-                Err(e) => return Err(e),
-            },
-            _ => {}
+        let codec_lower = codec.to_lowercase();
+        match codec_lower.as_str() {
+            "h264" => Self::parse_h264(raw_data),
+            "h265" => Self::parse_h265(raw_data),
+            "mpeg4-generic" => Self::parse_mpeg4(raw_data),
+            _ => Err("Unsupported codec".to_string()),
         }
-        Err("Unsupported codec".to_string())
+    }
+
+    fn parse_h264(raw_data: &str) -> Result<Fmtp, String> {
+        H264Fmtp::unmarshal(raw_data).map(Fmtp::H264)
+    }
+
+    fn parse_h265(raw_data: &str) -> Result<Fmtp, String> {
+        H265Fmtp::unmarshal(raw_data).map(Fmtp::H265)
+    }
+
+    fn parse_mpeg4(raw_data: &str) -> Result<Fmtp, String> {
+        Mpeg4Fmtp::unmarshal(raw_data).map(Fmtp::Mpeg4)
     }
 
     pub fn marshal(&self) -> String {
@@ -252,6 +255,41 @@ impl Marshal for H265Fmtp {
     }
 }
 
+impl Mpeg4Fmtp {
+    /// Parses a key-value parameter and updates the fmtp struct
+    fn parse_parameter(&mut self, key: &str, value: &str) {
+        match key.to_lowercase().as_str() {
+            "mode" => self.mode = value.to_string(),
+            "config" => self.parse_config(value),
+            "profile-level-id" => self.profile_level_id = value.into(),
+            "sizelength" => self.parse_u16_param(value, |fmtp, v| fmtp.size_length = v),
+            "indexlength" => self.parse_u16_param(value, |fmtp, v| fmtp.index_length = v),
+            "indexdeltalength" => {
+                self.parse_u16_param(value, |fmtp, v| fmtp.index_delta_length = v)
+            }
+            _ => log::info!("not parsed: {}", key),
+        }
+    }
+
+    /// Parses the config parameter as hex-encoded data
+    fn parse_config(&mut self, value: &str) {
+        match hex::decode(value) {
+            Ok(asc) => self.asc.put(&asc[..]),
+            Err(err) => log::warn!("Mpeg4FmtpSdp hex decode err: {err}"),
+        }
+    }
+
+    /// Parses a u16 parameter and applies it using the provided setter
+    fn parse_u16_param<F>(&mut self, value: &str, setter: F)
+    where
+        F: FnOnce(&mut Self, u16),
+    {
+        if let Ok(parsed) = value.parse::<u16>() {
+            setter(self, parsed);
+        }
+    }
+}
+
 impl Unmarshal for Mpeg4Fmtp {
     //a=fmtp:97 profile-level-id=1;mode=AAC-hbr;sizelength=13;indexlength=3;indexdeltalength=3; config=121056e500
     fn unmarshal(raw_data: &str) -> Result<Self, String> {
@@ -273,38 +311,7 @@ impl Unmarshal for Mpeg4Fmtp {
                 log::warn!("Mpeg4FmtpSdp parse key=value err: {}", parameter);
                 continue;
             }
-            match kv[0].to_lowercase().as_str() {
-                "mode" => {
-                    mpeg4_fmtp.mode = kv[1].to_string();
-                }
-                "config" => match hex::decode(kv[1]) {
-                    Ok(asc) => mpeg4_fmtp.asc.put(&asc[..]),
-                    Err(err) => {
-                        log::warn!("Mpeg4FmtpSdp hex decode err: {err}");
-                    }
-                },
-                "profile-level-id" => {
-                    mpeg4_fmtp.profile_level_id = kv[1].into();
-                }
-                "sizelength" => {
-                    if let Ok(size_length) = kv[1].parse::<u16>() {
-                        mpeg4_fmtp.size_length = size_length;
-                    }
-                }
-                "indexlength" => {
-                    if let Ok(index_length) = kv[1].parse::<u16>() {
-                        mpeg4_fmtp.index_length = index_length;
-                    }
-                }
-                "indexdeltalength" => {
-                    if let Ok(index_delta_length) = kv[1].parse::<u16>() {
-                        mpeg4_fmtp.index_delta_length = index_delta_length;
-                    }
-                }
-                _ => {
-                    log::info!("not parsed: {}", kv[0])
-                }
-            }
+            mpeg4_fmtp.parse_parameter(kv[0], kv[1]);
         }
 
         Ok(mpeg4_fmtp)

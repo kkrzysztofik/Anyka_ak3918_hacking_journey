@@ -80,64 +80,12 @@ impl SpsParser {
         log::info!("level_idc: {}", self.sps.level_idc);
         self.sps.seq_parameter_set_id = utils::read_uev(&mut self.bits_reader)?;
 
-        match self.sps.profile_idc {
-            100 | 110 | 122 | 244 | 44 | 83 | 86 | 118 | 128 => {
-                self.sps.chroma_format_idc = utils::read_uev(&mut self.bits_reader)?;
-                if self.sps.chroma_format_idc == 3 {
-                    self.sps.separate_colour_plane_flag = self.bits_reader.read_bit()?;
-                }
-                self.sps.bit_depth_luma_minus8 = utils::read_uev(&mut self.bits_reader)?;
-                self.sps.bit_depth_chroma_minus8 = utils::read_uev(&mut self.bits_reader)?;
-
-                self.sps.qpprime_y_zero_transform_bypass_flag = self.bits_reader.read_bit()?;
-                self.sps.seq_scaling_matrix_present_flag = self.bits_reader.read_bit()?;
-
-                if self.sps.seq_scaling_matrix_present_flag > 0 {
-                    let matrix_dim: usize = if self.sps.chroma_format_idc != 2 {
-                        8
-                    } else {
-                        12
-                    };
-
-                    for _ in 0..matrix_dim {
-                        self.sps
-                            .seq_scaling_list_present_flag
-                            .push(self.bits_reader.read_bit()?);
-                    }
-                }
-            }
-            _ => {
-                // For profiles that don't include chroma_format_idc, default to 1 (4:2:0) per H.264 spec
-                self.sps.chroma_format_idc = 1;
-            }
-        }
+        self.parse_profile_specific_fields()?;
 
         self.sps.log2_max_frame_num_minus4 = utils::read_uev(&mut self.bits_reader)?;
         self.sps.pic_order_cnt_type = utils::read_uev(&mut self.bits_reader)?;
 
-        match self.sps.pic_order_cnt_type {
-            0 => {
-                self.sps.log2_max_pic_order_cnt_lsb_minus4 =
-                    utils::read_uev(&mut self.bits_reader)?;
-            }
-            1 => {
-                self.sps.delta_pic_order_always_zero_flag = self.bits_reader.read_bit()?;
-                self.sps.offset_for_non_ref_pic = utils::read_sev(&mut self.bits_reader)?;
-                self.sps.offset_for_top_to_bottom_field = utils::read_sev(&mut self.bits_reader)?;
-                self.sps.num_ref_frames_in_pic_order_cnt_cycle =
-                    utils::read_uev(&mut self.bits_reader)?;
-
-                self.sps.offset_for_ref_frame.clear();
-                if self.sps.num_ref_frames_in_pic_order_cnt_cycle > 0 {
-                    for _ in 0..self.sps.num_ref_frames_in_pic_order_cnt_cycle as usize {
-                        self.sps
-                            .offset_for_ref_frame
-                            .push(utils::read_sev(&mut self.bits_reader)?);
-                    }
-                }
-            }
-            _ => {}
-        }
+        self.parse_pic_order_cnt_fields()?;
 
         self.sps.max_num_ref_frames = utils::read_uev(&mut self.bits_reader)?;
         self.sps.gaps_in_frame_num_value_allowed_flag = self.bits_reader.read_bit()?;
@@ -154,58 +102,152 @@ impl SpsParser {
         self.sps.direct_8x8_inference_flag = self.bits_reader.read_bit()?;
         self.sps.frame_cropping_flag = self.bits_reader.read_bit()?;
 
+        self.parse_frame_cropping_fields()?;
+
+        self.sps.vui_parameters_present_flag = self.bits_reader.read_bit()?;
+
+        let width = self.calculate_width();
+        let height = self.calculate_height();
+
+        log::trace!("parsed sps data: {:?}", self.sps);
+        Ok((width, height))
+    }
+
+    /// Parse profile-specific fields (High profile and similar)
+    fn parse_profile_specific_fields(&mut self) -> Result<(), H264Error> {
+        match self.sps.profile_idc {
+            100 | 110 | 122 | 244 | 44 | 83 | 86 | 118 | 128 => self.parse_high_profile_fields(),
+            _ => {
+                // For profiles that don't include chroma_format_idc, default to 1 (4:2:0) per H.264 spec
+                self.sps.chroma_format_idc = 1;
+                Ok(())
+            }
+        }
+    }
+
+    /// Parse High profile specific fields
+    fn parse_high_profile_fields(&mut self) -> Result<(), H264Error> {
+        self.sps.chroma_format_idc = utils::read_uev(&mut self.bits_reader)?;
+        if self.sps.chroma_format_idc == 3 {
+            self.sps.separate_colour_plane_flag = self.bits_reader.read_bit()?;
+        }
+        self.sps.bit_depth_luma_minus8 = utils::read_uev(&mut self.bits_reader)?;
+        self.sps.bit_depth_chroma_minus8 = utils::read_uev(&mut self.bits_reader)?;
+
+        self.sps.qpprime_y_zero_transform_bypass_flag = self.bits_reader.read_bit()?;
+        self.sps.seq_scaling_matrix_present_flag = self.bits_reader.read_bit()?;
+
+        if self.sps.seq_scaling_matrix_present_flag > 0 {
+            self.parse_scaling_matrix()?;
+        }
+        Ok(())
+    }
+
+    /// Parse scaling matrix when present
+    fn parse_scaling_matrix(&mut self) -> Result<(), H264Error> {
+        let matrix_dim: usize = if self.sps.chroma_format_idc != 2 {
+            8
+        } else {
+            12
+        };
+
+        for _ in 0..matrix_dim {
+            self.sps
+                .seq_scaling_list_present_flag
+                .push(self.bits_reader.read_bit()?);
+        }
+        Ok(())
+    }
+
+    /// Parse picture order count fields based on type
+    fn parse_pic_order_cnt_fields(&mut self) -> Result<(), H264Error> {
+        match self.sps.pic_order_cnt_type {
+            0 => {
+                self.sps.log2_max_pic_order_cnt_lsb_minus4 =
+                    utils::read_uev(&mut self.bits_reader)?;
+            }
+            1 => self.parse_pic_order_cnt_type1()?,
+            _ => {}
+        }
+        Ok(())
+    }
+
+    /// Parse pic_order_cnt_type = 1 fields
+    fn parse_pic_order_cnt_type1(&mut self) -> Result<(), H264Error> {
+        self.sps.delta_pic_order_always_zero_flag = self.bits_reader.read_bit()?;
+        self.sps.offset_for_non_ref_pic = utils::read_sev(&mut self.bits_reader)?;
+        self.sps.offset_for_top_to_bottom_field = utils::read_sev(&mut self.bits_reader)?;
+        self.sps.num_ref_frames_in_pic_order_cnt_cycle = utils::read_uev(&mut self.bits_reader)?;
+
+        self.sps.offset_for_ref_frame.clear();
+        if self.sps.num_ref_frames_in_pic_order_cnt_cycle > 0 {
+            for _ in 0..self.sps.num_ref_frames_in_pic_order_cnt_cycle as usize {
+                self.sps
+                    .offset_for_ref_frame
+                    .push(utils::read_sev(&mut self.bits_reader)?);
+            }
+        }
+        Ok(())
+    }
+
+    /// Parse frame cropping fields if flag is set
+    fn parse_frame_cropping_fields(&mut self) -> Result<(), H264Error> {
         if self.sps.frame_cropping_flag > 0 {
             self.sps.frame_crop_left_offset = utils::read_uev(&mut self.bits_reader)?;
             self.sps.frame_crop_right_offset = utils::read_uev(&mut self.bits_reader)?;
             self.sps.frame_crop_top_offset = utils::read_uev(&mut self.bits_reader)?;
             self.sps.frame_crop_bottom_offset = utils::read_uev(&mut self.bits_reader)?;
         } else {
-            // Explicitly set to 0 when flag is not set (should already be 0 from Default, but being explicit)
+            // Explicitly set to 0 when flag is not set
             self.sps.frame_crop_left_offset = 0;
             self.sps.frame_crop_right_offset = 0;
             self.sps.frame_crop_top_offset = 0;
             self.sps.frame_crop_bottom_offset = 0;
         }
+        Ok(())
+    }
 
-        self.sps.vui_parameters_present_flag = self.bits_reader.read_bit()?;
-
-        // Calculate width: only apply crop offsets if frame_cropping_flag is set
+    /// Calculate width with optional cropping
+    fn calculate_width(&self) -> u32 {
         let mut width = (self.sps.pic_width_in_mbs_minus1 + 1) * 16;
         if self.sps.frame_cropping_flag > 0 {
-            // crop_unit_x depends on chroma format:
-            // - 0 or 3: crop_unit_x = 1
-            // - 1: crop_unit_x = 2
-            // - 2: crop_unit_x = 2
-            let crop_unit_x = match self.sps.chroma_format_idc {
-                0 | 3 => 1,
-                1 | 2 => 2,
-                _ => 2, // Default to 2 for unknown formats
-            };
+            let crop_unit_x = self.get_crop_unit_x();
             width -=
                 (self.sps.frame_crop_left_offset + self.sps.frame_crop_right_offset) * crop_unit_x;
         }
+        width
+    }
 
-        // Calculate height: only apply crop offsets if frame_cropping_flag is set
+    /// Calculate height with optional cropping
+    fn calculate_height(&self) -> u32 {
         let mut height = (2 - self.sps.frame_mbs_only_flag as u32)
             * (self.sps.pic_height_in_map_units_minus1 + 1)
             * 16;
         if self.sps.frame_cropping_flag > 0 {
-            // crop_unit_y depends on chroma format:
-            // - 0 or 3: crop_unit_y = 1
-            // - 1: crop_unit_y = 2
-            // - 2: crop_unit_y = 1
-            let crop_unit_y = match self.sps.chroma_format_idc {
-                0 | 3 => 1,
-                1 => 2,
-                2 => 1,
-                _ => 2, // Default to 2 for unknown formats
-            };
+            let crop_unit_y = self.get_crop_unit_y();
             height -=
                 (self.sps.frame_crop_top_offset + self.sps.frame_crop_bottom_offset) * crop_unit_y;
         }
+        height
+    }
 
-        log::trace!("parsed sps data: {:?}", self.sps);
-        Ok((width, height))
+    /// Get crop unit X based on chroma format
+    fn get_crop_unit_x(&self) -> u32 {
+        match self.sps.chroma_format_idc {
+            0 | 3 => 1,
+            1 | 2 => 2,
+            _ => 2, // Default to 2 for unknown formats
+        }
+    }
+
+    /// Get crop unit Y based on chroma format
+    fn get_crop_unit_y(&self) -> u32 {
+        match self.sps.chroma_format_idc {
+            0 | 3 => 1,
+            1 => 2,
+            2 => 1,
+            _ => 2, // Default to 2 for unknown formats
+        }
     }
 }
 
@@ -276,6 +318,16 @@ mod tests {
             self.write_bit(1);
             // Write info bits
             self.write_bits(info, leading_zero_bits);
+        }
+
+        /// Write signed Exp-Golomb coded value (se(v))
+        fn write_sev(&mut self, val: i32) {
+            let code_num = if val <= 0 {
+                (-2 * val) as u32
+            } else {
+                (2 * val - 1) as u32
+            };
+            self.write_uev(code_num);
         }
 
         /// Get the encoded bytes, flushing any remaining bits
@@ -449,6 +501,75 @@ mod tests {
         builder.build()
     }
 
+    /// Create a High profile SPS with chroma_format_idc = 3 and scaling matrix present
+    fn create_high_sps_chroma3_with_scaling(width: u32, height: u32) -> BytesMut {
+        let mut builder = SpsBuilder::new();
+
+        builder.write_u8(0x64); // profile_idc = 100 (High)
+        builder.write_u8(0x00); // constraint flags
+        builder.write_u8(0x28); // level_idc = 40
+
+        builder.write_uev(0); // seq_parameter_set_id = 0
+        builder.write_uev(3); // chroma_format_idc = 3
+        builder.write_bit(1); // separate_colour_plane_flag = 1
+        builder.write_uev(0); // bit_depth_luma_minus8 = 0
+        builder.write_uev(0); // bit_depth_chroma_minus8 = 0
+        builder.write_bit(0); // qpprime_y_zero_transform_bypass_flag = 0
+        builder.write_bit(1); // seq_scaling_matrix_present_flag = 1
+
+        // seq_scaling_list_present_flag[0..7]
+        builder.write_bit(1);
+        builder.write_bit(0);
+        builder.write_bit(1);
+        builder.write_bit(0);
+        builder.write_bit(1);
+        builder.write_bit(0);
+        builder.write_bit(1);
+        builder.write_bit(0);
+
+        builder.write_uev(0); // log2_max_frame_num_minus4 = 0
+        builder.write_uev(2); // pic_order_cnt_type = 2
+        builder.write_uev(1); // max_num_ref_frames = 1
+        builder.write_bit(0); // gaps_in_frame_num_value_allowed_flag = 0
+        builder.write_uev(width / 16 - 1); // pic_width_in_mbs_minus1
+        builder.write_uev(height / 16 - 1); // pic_height_in_map_units_minus1
+        builder.write_bit(1); // frame_mbs_only_flag = 1
+        builder.write_bit(1); // direct_8x8_inference_flag = 1
+        builder.write_bit(0); // frame_cropping_flag = 0
+        builder.write_bit(0); // vui_parameters_present_flag = 0
+
+        builder.build()
+    }
+
+    /// Create a Baseline SPS with pic_order_cnt_type = 1 and non-zero offsets
+    fn create_baseline_sps_poc1_with_offsets(width: u32, height: u32) -> BytesMut {
+        let mut builder = SpsBuilder::new();
+
+        builder.write_u8(0x42); // profile_idc = 66 (Baseline)
+        builder.write_u8(0xE0); // constraint flags
+        builder.write_u8(0x1E); // level_idc = 30
+
+        builder.write_uev(0); // seq_parameter_set_id = 0
+        builder.write_uev(0); // log2_max_frame_num_minus4 = 0
+        builder.write_uev(1); // pic_order_cnt_type = 1
+        builder.write_bit(0); // delta_pic_order_always_zero_flag = 0
+        builder.write_sev(-1); // offset_for_non_ref_pic
+        builder.write_sev(2); // offset_for_top_to_bottom_field
+        builder.write_uev(2); // num_ref_frames_in_pic_order_cnt_cycle = 2
+        builder.write_sev(-2); // offset_for_ref_frame[0]
+        builder.write_sev(3); // offset_for_ref_frame[1]
+        builder.write_uev(1); // max_num_ref_frames = 1
+        builder.write_bit(0); // gaps_in_frame_num_value_allowed_flag = 0
+        builder.write_uev(width / 16 - 1); // pic_width_in_mbs_minus1
+        builder.write_uev(height / 16 - 1); // pic_height_in_map_units_minus1
+        builder.write_bit(1); // frame_mbs_only_flag = 1
+        builder.write_bit(1); // direct_8x8_inference_flag = 1
+        builder.write_bit(0); // frame_cropping_flag = 0
+        builder.write_bit(0); // vui_parameters_present_flag = 0
+
+        builder.build()
+    }
+
     /// Create a properly bit-packed Main profile SPS
     fn create_main_sps(width: u32, height: u32) -> BytesMut {
         let mut builder = SpsBuilder::new();
@@ -539,6 +660,26 @@ mod tests {
         let (width, height) = result.unwrap();
         assert_eq!(width, 1920);
         assert_eq!(height, 1088);
+    }
+
+    #[test]
+    fn test_sps_parse_high_profile_chroma3_with_scaling_matrix() {
+        let data = create_high_sps_chroma3_with_scaling(1280, 720);
+        let bytes_reader = BytesReader::new(data);
+        let mut parser = SpsParser::new(bytes_reader);
+
+        let result = parser.parse();
+
+        assert!(result.is_ok());
+        assert_eq!(parser.sps.profile_idc, 100);
+        assert_eq!(parser.sps.chroma_format_idc, 3);
+        assert_eq!(parser.sps.separate_colour_plane_flag, 1);
+        assert_eq!(parser.sps.seq_scaling_matrix_present_flag, 1);
+        assert_eq!(parser.sps.seq_scaling_list_present_flag.len(), 8);
+        assert_eq!(
+            parser.sps.seq_scaling_list_present_flag,
+            vec![1, 0, 1, 0, 1, 0, 1, 0]
+        );
     }
 
     // ============================================
@@ -649,5 +790,22 @@ mod tests {
 
         assert!(result.is_ok());
         assert_eq!(parser.sps.pic_order_cnt_type, 1);
+    }
+
+    #[test]
+    fn test_sps_pic_order_cnt_type_1_with_offsets() {
+        let data = create_baseline_sps_poc1_with_offsets(640, 480);
+        let bytes_reader = BytesReader::new(data);
+        let mut parser = SpsParser::new(bytes_reader);
+
+        let result = parser.parse();
+
+        assert!(result.is_ok());
+        assert_eq!(parser.sps.pic_order_cnt_type, 1);
+        assert_eq!(parser.sps.delta_pic_order_always_zero_flag, 0);
+        assert_eq!(parser.sps.offset_for_non_ref_pic, -1);
+        assert_eq!(parser.sps.offset_for_top_to_bottom_field, 2);
+        assert_eq!(parser.sps.num_ref_frames_in_pic_order_cnt_cycle, 2);
+        assert_eq!(parser.sps.offset_for_ref_frame, vec![-2, 3]);
     }
 }

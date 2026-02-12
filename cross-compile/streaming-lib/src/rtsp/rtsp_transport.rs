@@ -26,6 +26,69 @@ pub struct RtspTransport {
     pub ssrc: Option<u32>,
 }
 
+impl RtspTransport {
+    /// Parse a key=value pair and update the transport state.
+    fn parse_key_value(&mut self, key: &str, val: &str) {
+        match key {
+            "mode" => {
+                let mode = val
+                    .trim_matches('"')
+                    .trim_matches('\'')
+                    .trim()
+                    .to_ascii_lowercase();
+                self.transport_mod = Some(mode);
+            }
+            "client_port" => {
+                if let Some(ports) = parse_port_pair(val) {
+                    self.client_port = Some(ports);
+                }
+            }
+            "server_port" => {
+                if let Some(ports) = parse_port_pair(val) {
+                    self.server_port = Some(ports);
+                }
+            }
+            "interleaved" => {
+                if let Some(chs) = parse_u8_pair(val) {
+                    self.interleaved = Some(chs);
+                }
+            }
+            "ssrc" => {
+                self.ssrc = parse_ssrc(val);
+            }
+            _ => {}
+        }
+    }
+
+    /// Parse a standalone token and update protocol/cast type.
+    fn parse_token(&mut self, token_upper: &str, token_lower: &str) {
+        match token_upper {
+            "RTP/AVP/TCP" => self.protocol_type = ProtocolType::TCP,
+            "RTP/AVP/UDP" | "RTP/AVP" => self.protocol_type = ProtocolType::UDP,
+            _ => {}
+        }
+
+        match token_lower {
+            "unicast" => self.cast_type = CastType::Unicast,
+            "multicast" => self.cast_type = CastType::Multicast,
+            _ => {}
+        }
+    }
+
+    /// Validate required transport parameters per RFC 2326 §12.39.
+    fn validate(&self) -> Result<(), String> {
+        match self.protocol_type {
+            ProtocolType::TCP if self.interleaved.is_none() => {
+                Err("TCP transport missing required 'interleaved' parameter".to_string())
+            }
+            ProtocolType::UDP if self.client_port.is_none() => {
+                Err("UDP transport missing required 'client_port' parameter".to_string())
+            }
+            _ => Ok(()),
+        }
+    }
+}
+
 impl Unmarshal for RtspTransport {
     fn unmarshal(raw_data: &str) -> Result<Self, String> {
         let mut rtsp_transport = RtspTransport::default();
@@ -39,80 +102,16 @@ impl Unmarshal for RtspTransport {
             if let Some((raw_key, raw_val)) = part.split_once('=') {
                 let key = raw_key.trim().to_ascii_lowercase();
                 let val = raw_val.trim();
-                match key.as_str() {
-                    "mode" => {
-                        let mode = val
-                            .trim_matches('"')
-                            .trim_matches('\'')
-                            .trim()
-                            .to_ascii_lowercase();
-                        rtsp_transport.transport_mod = Some(mode);
-                    }
-                    "client_port" => {
-                        if let Some(ports) = parse_port_pair(val) {
-                            rtsp_transport.client_port = Some(ports);
-                        }
-                    }
-                    "server_port" => {
-                        if let Some(ports) = parse_port_pair(val) {
-                            rtsp_transport.server_port = Some(ports);
-                        }
-                    }
-                    "interleaved" => {
-                        if let Some(chs) = parse_u8_pair(val) {
-                            rtsp_transport.interleaved = Some(chs);
-                        }
-                    }
-                    "ssrc" => {
-                        rtsp_transport.ssrc = parse_ssrc(val);
-                    }
-                    _ => {}
-                }
+                rtsp_transport.parse_key_value(key.as_str(), val);
                 continue;
             }
 
             let token_upper = part.to_ascii_uppercase();
             let token_lower = part.to_ascii_lowercase();
-
-            match token_upper.as_str() {
-                "RTP/AVP/TCP" => {
-                    rtsp_transport.protocol_type = ProtocolType::TCP;
-                }
-                "RTP/AVP/UDP" | "RTP/AVP" => {
-                    rtsp_transport.protocol_type = ProtocolType::UDP;
-                }
-                _ => {}
-            }
-
-            match token_lower.as_str() {
-                "unicast" => {
-                    rtsp_transport.cast_type = CastType::Unicast;
-                }
-                "multicast" => {
-                    rtsp_transport.cast_type = CastType::Multicast;
-                }
-                _ => {}
-            }
+            rtsp_transport.parse_token(token_upper.as_str(), token_lower.as_str());
         }
 
-        // RFC 2326 §12.39: validate required transport parameters
-        match rtsp_transport.protocol_type {
-            ProtocolType::TCP => {
-                if rtsp_transport.interleaved.is_none() {
-                    return Err(
-                        "TCP transport missing required 'interleaved' parameter".to_string()
-                    );
-                }
-            }
-            ProtocolType::UDP => {
-                if rtsp_transport.client_port.is_none() {
-                    return Err(
-                        "UDP transport missing required 'client_port' parameter".to_string()
-                    );
-                }
-            }
-        }
-
+        rtsp_transport.validate()?;
         Ok(rtsp_transport)
     }
 }

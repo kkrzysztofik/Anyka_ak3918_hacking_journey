@@ -311,6 +311,78 @@ mod app_state_tests {
     }
 
     #[test]
+    fn test_app_state_builder_missing_ptz_state() {
+        let storage = UserStorage::new();
+        let result = AppState::builder()
+            .user_storage(Arc::new(storage))
+            .password_manager(Arc::new(PasswordManager::new()))
+            .config(Arc::new(ConfigRuntime::new(Default::default())))
+            .memory_monitor(Arc::new(crate::utils::MemoryMonitor::new()))
+            .rate_limiter(Arc::new(crate::security::RateLimiter::new(60)))
+            .build();
+
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err(),
+            AppStateError::MissingComponent("ptz_state".to_string())
+        );
+    }
+
+    #[test]
+    fn test_app_state_builder_missing_config() {
+        let storage = UserStorage::new();
+        let result = AppState::builder()
+            .user_storage(Arc::new(storage))
+            .password_manager(Arc::new(PasswordManager::new()))
+            .ptz_state(Arc::new(PTZStateManager::new()))
+            .memory_monitor(Arc::new(crate::utils::MemoryMonitor::new()))
+            .rate_limiter(Arc::new(crate::security::RateLimiter::new(60)))
+            .build();
+
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err(),
+            AppStateError::MissingComponent("config".to_string())
+        );
+    }
+
+    #[test]
+    fn test_app_state_builder_missing_memory_monitor() {
+        let storage = UserStorage::new();
+        let result = AppState::builder()
+            .user_storage(Arc::new(storage))
+            .password_manager(Arc::new(PasswordManager::new()))
+            .ptz_state(Arc::new(PTZStateManager::new()))
+            .config(Arc::new(ConfigRuntime::new(Default::default())))
+            .rate_limiter(Arc::new(crate::security::RateLimiter::new(60)))
+            .build();
+
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err(),
+            AppStateError::MissingComponent("memory_monitor".to_string())
+        );
+    }
+
+    #[test]
+    fn test_app_state_builder_missing_rate_limiter() {
+        let storage = UserStorage::new();
+        let result = AppState::builder()
+            .user_storage(Arc::new(storage))
+            .password_manager(Arc::new(PasswordManager::new()))
+            .ptz_state(Arc::new(PTZStateManager::new()))
+            .config(Arc::new(ConfigRuntime::new(Default::default())))
+            .memory_monitor(Arc::new(crate::utils::MemoryMonitor::new()))
+            .build();
+
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err(),
+            AppStateError::MissingComponent("rate_limiter".to_string())
+        );
+    }
+
+    #[test]
     fn test_app_state_builder_success_without_platform() {
         let storage = UserStorage::new();
         let result = AppState::builder()
@@ -1218,6 +1290,29 @@ impl Application {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::lifecycle::health::HealthState;
+
+    fn make_application_with_degraded_services(degraded_services: Vec<String>) -> Application {
+        let (shutdown_tx, _) = broadcast::channel(SHUTDOWN_CHANNEL_CAPACITY);
+        let shutdown_coordinator =
+            ShutdownCoordinator::new(shutdown_tx.clone(), DEFAULT_SHUTDOWN_TIMEOUT);
+
+        Application {
+            started_at: Instant::now(),
+            shutdown_coordinator,
+            shutdown_tx,
+            degraded_services,
+            config_path: "/test/config.toml".to_string(),
+            app_state: None,
+            server: None,
+            server_task: None,
+            config_persistence_task: None,
+            discovery: None,
+            discovery_task: None,
+            memory_logging_task: None,
+            rate_limiter_cleanup_task: None,
+        }
+    }
 
     #[tokio::test]
     async fn test_application_start() {
@@ -1292,5 +1387,120 @@ mod tests {
         // App may be degraded if discovery fails (expected in test environment)
         // The important thing is that the app starts successfully
         assert!(app.config_path() == "/test/config.toml");
+    }
+
+    #[test]
+    fn test_make_discovery_config_explicit_values() {
+        let config = Arc::new(ConfigRuntime::new(Default::default()));
+        config
+            .set_string("discovery.endpoint_uuid", "urn:uuid:explicit-test-id")
+            .unwrap();
+        config
+            .set_string("discovery.local_ip", "192.0.2.50")
+            .unwrap();
+        config.set_int("discovery.hello_interval", 42).unwrap();
+
+        let discovery = Application::make_discovery_config(&config, 8181);
+
+        assert_eq!(discovery.endpoint_uuid, "urn:uuid:explicit-test-id");
+        assert_eq!(discovery.device_ip, "192.0.2.50");
+        assert_eq!(discovery.http_port, 8181);
+        assert_eq!(discovery.hello_interval, Duration::from_secs(42));
+    }
+
+    #[test]
+    fn test_make_discovery_config_uses_fallbacks_for_empty_uuid_and_auto_ip() {
+        let config = Arc::new(ConfigRuntime::new(Default::default()));
+        config.set_string("discovery.endpoint_uuid", "").unwrap();
+        config
+            .set_string("network.detected_ip", "198.51.100.42")
+            .unwrap();
+
+        let discovery = Application::make_discovery_config(&config, 8080);
+
+        assert!(discovery.endpoint_uuid.starts_with("urn:uuid:"));
+        assert_eq!(discovery.device_ip, "198.51.100.42");
+        assert_eq!(discovery.http_port, 8080);
+        assert_eq!(discovery.hello_interval, Duration::from_secs(300));
+    }
+
+    #[test]
+    fn test_application_health_without_degradation_reports_healthy_components() {
+        let app = make_application_with_degraded_services(Vec::new());
+        let health = app.health();
+
+        assert_eq!(health.status, HealthState::Healthy);
+        assert!(health.is_ready());
+        assert!(health.degraded_services.is_empty());
+        assert!(health.components.contains_key("config"));
+        assert!(health.components.contains_key("platform"));
+        assert!(health.components.contains_key("device"));
+        assert!(health.components.contains_key("media"));
+    }
+
+    #[test]
+    fn test_application_health_with_degraded_services_marks_status_and_components() {
+        let app = make_application_with_degraded_services(vec!["Discovery".to_string()]);
+        let health = app.health();
+
+        assert_eq!(health.status, HealthState::Degraded);
+        assert!(health.is_ready());
+        assert_eq!(health.degraded_services, vec!["Discovery"]);
+        let discovery_component = health.components.get("discovery");
+        assert!(discovery_component.is_some());
+        assert_eq!(
+            discovery_component.unwrap().status,
+            crate::lifecycle::health::HealthState::Degraded
+        );
+        assert_eq!(
+            discovery_component.unwrap().message,
+            Some("Initialization failed".to_string())
+        );
+    }
+
+    #[test]
+    fn test_application_is_degraded_and_degraded_services_reflect_internal_state() {
+        let degraded = vec!["discovery".to_string(), "ptz".to_string()];
+        let app = make_application_with_degraded_services(degraded.clone());
+
+        assert!(app.is_degraded());
+        assert_eq!(app.degraded_services(), degraded.as_slice());
+    }
+
+    #[tokio::test]
+    async fn test_application_start_with_platform_invalid_port_returns_network_error() {
+        let temp_config = std::env::temp_dir().join(format!(
+            "onvif-rust-app-start-with-platform-{}.toml",
+            uuid::Uuid::new_v4()
+        ));
+
+        std::fs::write(
+            &temp_config,
+            "[server]\nport = 0\nbind_address = \"127.0.0.1\"\n[discovery]\nenabled = false\n",
+        )
+        .unwrap();
+
+        let platform = Arc::new(
+            StubPlatformBuilder::new()
+                .ptz_supported(true)
+                .imaging_supported(true)
+                .build(),
+        );
+
+        let result = Application::start_with_platform(
+            temp_config
+                .to_str()
+                .unwrap_or("/tmp/onvif-test-config.toml"),
+            platform,
+        )
+        .await;
+
+        assert!(result.is_err());
+        assert!(matches!(
+            result,
+            Err(StartupError::Network(ref message)) if message.contains("Port cannot be 0")
+        ));
+
+        let _ = std::fs::remove_file(&temp_config);
     }
 }

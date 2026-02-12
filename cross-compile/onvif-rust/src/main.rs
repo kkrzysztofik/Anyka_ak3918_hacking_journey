@@ -75,29 +75,47 @@ struct StartupArgs {
 fn parse_arguments() -> StartupArgs {
     let cli = CliArgs::parse();
 
-    let validation_config = if cli.validation_mode {
-        if let Some(file_path) = cli.h264_file {
-            Some(H264PlaybackConfig {
-                file_path,
-                frame_rate: 25, // Default to 25 fps
-                loop_playback: cli.loop_playback,
-                rtsp_port: cli.rtsp_port,
-                httpflv_port: cli.httpflv_port,
-                audio_file_path: cli.aac_file,
-                audio_sample_rate: cli.audio_sample_rate,
-            })
-        } else {
-            eprintln!("error: --validation-mode requires --h264-file <path>");
+    match startup_args_from_cli(cli) {
+        Ok(startup_args) => startup_args,
+        Err(message) => {
+            eprintln!("error: {}", message);
             std::process::exit(1);
         }
+    }
+}
+
+fn startup_args_from_cli(cli: CliArgs) -> std::result::Result<StartupArgs, String> {
+    let CliArgs {
+        validation_mode,
+        h264_file,
+        aac_file,
+        audio_sample_rate,
+        rtsp_port,
+        httpflv_port,
+        loop_playback,
+        config_path,
+    } = cli;
+
+    let validation_config = if validation_mode {
+        let file_path =
+            h264_file.ok_or_else(|| "--validation-mode requires --h264-file <path>".to_string())?;
+        Some(H264PlaybackConfig {
+            file_path,
+            frame_rate: 25, // Default to 25 fps
+            loop_playback,
+            rtsp_port,
+            httpflv_port,
+            audio_file_path: aac_file,
+            audio_sample_rate,
+        })
     } else {
         None
     };
 
-    StartupArgs {
+    Ok(StartupArgs {
         validation_config,
-        config_path: cli.config_path,
-    }
+        config_path,
+    })
 }
 
 /// Get runtime configuration (worker threads, blocking threads) based on platform.
@@ -560,14 +578,119 @@ fn base64_encode(data: &[u8]) -> String {
     BASE64.encode(data)
 }
 
+/// Publisher initialization result containing video and optional audio publishers (unwrapped)
+struct ValidationPublishers {
+    video: streaming_lib::streamhub::mock_publisher::MockVideoPublisher,
+    audio: Option<streaming_lib::streamhub::mock_audio_publisher::MockAudioPublisher>,
+}
+
+/// Initialize video publisher from H.264 file with timeout
+async fn init_video_publisher(
+    file_path: &str,
+    frame_rate: u32,
+    loop_playback: bool,
+    timeout_sec: u64,
+) -> Result<streaming_lib::streamhub::mock_publisher::MockVideoPublisher> {
+    use streaming_lib::streamhub::mock_publisher::MockVideoPublisher;
+
+    tracing::info!(
+        file = %file_path,
+        frame_rate,
+        loop_playback,
+        "Creating MockVideoPublisher"
+    );
+
+    match timeout(
+        Duration::from_secs(timeout_sec),
+        MockVideoPublisher::new("stream1".to_string(), file_path, frame_rate, loop_playback),
+    )
+    .await
+    {
+        Err(_elapsed) => {
+            tracing::error!(file = %file_path, timeout_sec, "Timed out creating MockVideoPublisher");
+            anyhow::bail!(
+                "Timed out creating MockVideoPublisher from {} after {}s",
+                file_path,
+                timeout_sec
+            )
+        }
+        Ok(result) => result.map_err(|e| {
+            tracing::error!(error = %e, file = %file_path, "Failed to create MockVideoPublisher");
+            anyhow::Error::new(e).context("Failed to create MockVideoPublisher from H.264 file")
+        }),
+    }
+}
+
+/// Initialize audio publisher from AAC file with timeout
+async fn init_audio_publisher(
+    file_path: &str,
+    sample_rate: u32,
+    loop_playback: bool,
+    timeout_sec: u64,
+) -> Result<streaming_lib::streamhub::mock_audio_publisher::MockAudioPublisher> {
+    use streaming_lib::streamhub::mock_audio_publisher::MockAudioPublisher;
+
+    tracing::info!(file = %file_path, sample_rate_hz = sample_rate, loop_playback, "Creating MockAudioPublisher");
+
+    timeout(
+        Duration::from_secs(timeout_sec),
+        MockAudioPublisher::new("stream1".to_string(), file_path, sample_rate, loop_playback),
+    )
+    .await
+    .map_err(|_elapsed| {
+        tracing::error!(file = %file_path, timeout_sec, "Timed out creating MockAudioPublisher");
+        anyhow::anyhow!(
+            "Timed out creating MockAudioPublisher from {} after {}s",
+            file_path,
+            timeout_sec
+        )
+    })?
+    .map_err(|e| {
+        tracing::error!(error = %e, file = %file_path, "Failed to create MockAudioPublisher");
+        anyhow::Error::new(e).context("Failed to create MockAudioPublisher from AAC file")
+    })
+}
+
+/// Initialize both video and audio publishers for validation mode
+async fn init_validation_publishers(
+    config: &H264PlaybackConfig,
+    timeout_sec: u64,
+) -> Result<ValidationPublishers> {
+    let video_publisher = init_video_publisher(
+        &config.file_path,
+        config.frame_rate,
+        config.loop_playback,
+        timeout_sec,
+    )
+    .await?;
+    tracing::info!("MockVideoPublisher created");
+
+    let audio_publisher = if let Some(audio_path) = config.audio_file_path.as_deref() {
+        let publisher = init_audio_publisher(
+            audio_path,
+            config.audio_sample_rate,
+            config.loop_playback,
+            timeout_sec,
+        )
+        .await?;
+        tracing::info!("MockAudioPublisher created");
+        Some(publisher)
+    } else {
+        None
+    };
+
+    Ok(ValidationPublishers {
+        video: video_publisher,
+        audio: audio_publisher,
+    })
+}
+
 /// Run the daemon in H.264 playback validation mode
 async fn run_validation_mode(config: H264PlaybackConfig, config_path: &str) -> Result<()> {
     use onvif_rust::platform::{Platform, ValidationPlatform};
     use std::path::Path;
     use streaming_lib::StreamIdentifier;
     use streaming_lib::streamhub::define::DataReceiver;
-    use streaming_lib::streamhub::mock_audio_publisher::MockAudioPublisher;
-    use streaming_lib::streamhub::mock_publisher::MockVideoPublisher;
     use streaming_lib::{
         DefaultHttpFlvServer, DefaultRtspServer, HttpFlvServer, RtspServer, StreamsHub,
     };
@@ -658,93 +781,10 @@ async fn run_validation_mode(config: H264PlaybackConfig, config_path: &str) -> R
         tracing::info!("Loop playback enabled");
     }
 
-    // 1. Create MockVideoPublisher from H.264 file for frame reading
-    tracing::info!(
-        file = %config.file_path,
-        frame_rate = config.frame_rate,
-        loop_playback = config.loop_playback,
-        "Creating MockVideoPublisher"
-    );
-    let mut video_publisher = match timeout(
-        Duration::from_secs(publisher_init_timeout_sec),
-        MockVideoPublisher::new(
-            "stream1".to_string(),
-            &config.file_path,
-            config.frame_rate,
-            config.loop_playback,
-        ),
-    )
-    .await
-    {
-        Err(_elapsed) => {
-            tracing::error!(
-                file = %config.file_path,
-                timeout_sec = publisher_init_timeout_sec,
-                "Timed out creating MockVideoPublisher"
-            );
-            anyhow::bail!(
-                "Timed out creating MockVideoPublisher from {} after {}s",
-                config.file_path,
-                publisher_init_timeout_sec
-            );
-        }
-        Ok(result) => match result {
-            Ok(publisher) => publisher,
-            Err(e) => {
-                tracing::error!(
-                    error = %e,
-                    file = %config.file_path,
-                    "Failed to create MockVideoPublisher (H.264 parse/open error)"
-                );
-                return Err(anyhow::Error::new(e))
-                    .context("Failed to create MockVideoPublisher from H.264 file");
-            }
-        },
-    };
-    tracing::info!("MockVideoPublisher created");
-
-    let mut audio_publisher = if let Some(audio_path) = config.audio_file_path.as_deref() {
-        tracing::info!(
-            file = %audio_path,
-            sample_rate_hz = config.audio_sample_rate,
-            loop_playback = config.loop_playback,
-            "Creating MockAudioPublisher"
-        );
-        let publisher = timeout(
-            Duration::from_secs(publisher_init_timeout_sec),
-            MockAudioPublisher::new(
-                "stream1".to_string(),
-                audio_path,
-                config.audio_sample_rate,
-                config.loop_playback,
-            ),
-        )
-        .await
-        .map_err(|_elapsed| {
-            tracing::error!(
-                file = %audio_path,
-                timeout_sec = publisher_init_timeout_sec,
-                "Timed out creating MockAudioPublisher"
-            );
-            anyhow::anyhow!(
-                "Timed out creating MockAudioPublisher from {} after {}s",
-                audio_path,
-                publisher_init_timeout_sec
-            )
-        })?
-        .map_err(|e| {
-            tracing::error!(
-                error = %e,
-                file = %audio_path,
-                "Failed to create MockAudioPublisher (AAC parse/open error)"
-            );
-            anyhow::Error::new(e).context("Failed to create MockAudioPublisher from AAC file")
-        })?;
-        tracing::info!("MockAudioPublisher created");
-        Some(publisher)
-    } else {
-        None
-    };
+    // 1. Create publishers using helper functions (reduces cognitive complexity)
+    let publishers = init_validation_publishers(&config, publisher_init_timeout_sec).await?;
+    let mut video_publisher = publishers.video;
+    let mut audio_publisher = publishers.audio;
 
     let audio_sample_rate = audio_publisher
         .as_ref()
@@ -1031,6 +1071,10 @@ async fn run_validation_mode(config: H264PlaybackConfig, config_path: &str) -> R
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::panic;
+    use std::sync::Mutex;
+
+    static PANIC_HOOK_TEST_GUARD: Mutex<()> = Mutex::new(());
 
     #[test]
     fn test_runtime_config_on_target_platform() {
@@ -1077,78 +1121,59 @@ mod tests {
     }
 
     #[test]
-    fn test_normal_mode_config_path() {
-        // Test: when no --validation-mode flag, config_path uses default and validation_config is None
-        // We test this by calling parse_arguments with mocked args via env
-        unsafe {
-            std::env::set_var("RUST_LOG", "info");
-        }
+    fn test_startup_args_from_cli_normal_mode_returns_default_config_path() {
+        let cli = CliArgs::try_parse_from(["onvifd"]).expect("cli parse should succeed");
 
-        // Simulate parsing with empty args (just program name)
-        let StartupArgs {
-            validation_config,
-            config_path,
-        } = parse_arguments();
+        let startup_args = startup_args_from_cli(cli).expect("startup args should be valid");
 
-        // Verify defaults
-        assert!(
-            validation_config.is_none(),
-            "Expected validation_config to be None in normal mode"
-        );
+        assert!(startup_args.validation_config.is_none());
+        assert_eq!(startup_args.config_path, DEFAULT_CONFIG_PATH);
+    }
+
+    #[test]
+    fn test_startup_args_from_cli_validation_mode_returns_validation_config() {
+        let cli = CliArgs::try_parse_from([
+            "onvifd",
+            "--validation-mode",
+            "--h264-file",
+            "/tmp/test.h264",
+            "--aac-file",
+            "/tmp/test.aac",
+            "--audio-sample-rate",
+            "44100",
+            "--rtsp-port",
+            "9000",
+            "--httpflv-port",
+            "9001",
+            "--loop-playback",
+            "/tmp/config.toml",
+        ])
+        .expect("cli parse should succeed");
+
+        let startup_args = startup_args_from_cli(cli).expect("startup args should be valid");
+        let validation_config = startup_args
+            .validation_config
+            .expect("validation config should exist");
+
+        assert_eq!(validation_config.file_path, "/tmp/test.h264");
         assert_eq!(
-            config_path, DEFAULT_CONFIG_PATH,
-            "Expected default config path"
+            validation_config.audio_file_path.as_deref(),
+            Some("/tmp/test.aac")
         );
+        assert_eq!(validation_config.audio_sample_rate, 44_100);
+        assert_eq!(validation_config.rtsp_port, 9000);
+        assert_eq!(validation_config.httpflv_port, 9001);
+        assert!(validation_config.loop_playback);
+        assert_eq!(startup_args.config_path, "/tmp/config.toml");
     }
 
     #[test]
-    fn test_validation_mode_parsing() {
-        // Simulate: program --validation-mode --h264-file /tmp/test.h264
-        // This verifies the parsing logic (in real tests, we'd mock env::args)
-        let sample_args = vec![
-            "program".to_string(),
-            "--validation-mode".to_string(),
-            "--h264-file".to_string(),
-            "/tmp/test.h264".to_string(),
-        ];
+    fn test_startup_args_from_cli_validation_mode_missing_h264_file_returns_error() {
+        let cli = CliArgs::try_parse_from(["onvifd", "--validation-mode"])
+            .expect("cli parse should succeed");
 
-        // Verify we can parse basic validation flags
-        let validation_flag = sample_args.iter().any(|arg| arg == "--validation-mode");
-        let h264_file_idx = sample_args.iter().position(|arg| arg == "--h264-file");
-
-        assert!(validation_flag);
-        assert!(h264_file_idx.is_some());
-        if let Some(idx) = h264_file_idx {
-            assert_eq!(sample_args[idx + 1], "/tmp/test.h264");
-        }
-    }
-
-    #[test]
-    fn test_validation_mode_with_ports() {
-        // Simulate: program --validation-mode --h264-file /tmp/test.h264 --rtsp-port 9000 --httpflv-port 9001
-        let sample_args = vec![
-            "program".to_string(),
-            "--validation-mode".to_string(),
-            "--h264-file".to_string(),
-            "/tmp/test.h264".to_string(),
-            "--rtsp-port".to_string(),
-            "9000".to_string(),
-            "--httpflv-port".to_string(),
-            "9001".to_string(),
-        ];
-
-        let rtsp_port_idx = sample_args.iter().position(|arg| arg == "--rtsp-port");
-        let httpflv_port_idx = sample_args.iter().position(|arg| arg == "--httpflv-port");
-
-        assert!(rtsp_port_idx.is_some());
-        assert!(httpflv_port_idx.is_some());
-
-        if let Some(idx) = rtsp_port_idx {
-            assert_eq!(sample_args[idx + 1], "9000");
-        }
-        if let Some(idx) = httpflv_port_idx {
-            assert_eq!(sample_args[idx + 1], "9001");
-        }
+        let err = startup_args_from_cli(cli).expect_err("h264 file should be required");
+        assert_eq!(err, "--validation-mode requires --h264-file <path>");
     }
 
     #[test]
@@ -1163,6 +1188,88 @@ mod tests {
         assert!(sdp.contains("a=control:trackID=0"));
         assert!(sdp.contains("m=audio 0 RTP/AVP 97"));
         assert!(sdp.contains("a=control:trackID=1"));
+    }
+
+    #[test]
+    fn test_generate_av_sdp_short_sps_uses_fallback_profile_level_id() {
+        let sdp = generate_av_sdp(&[0x67, 0x42, 0x00], &[0x68, 0xce, 0x06, 0xe2], None, 48_000);
+
+        assert!(sdp.contains("profile-level-id=42e01e"));
+    }
+
+    #[test]
+    fn test_audio_channels_from_config_two_bytes_extracts_channel_count() {
+        assert_eq!(audio_channels_from_config(&[0x12, 0x10]), 2);
+    }
+
+    #[test]
+    fn test_audio_channels_from_config_short_input_returns_stereo_default() {
+        assert_eq!(audio_channels_from_config(&[0x12]), 2);
+    }
+
+    #[test]
+    fn test_audio_config_hex_formats_uppercase_hex() {
+        assert_eq!(audio_config_hex(&[0x12, 0xab, 0x00]), "12AB00");
+    }
+
+    #[test]
+    fn test_panic_message_str_payload_returns_payload() {
+        let _guard = PANIC_HOOK_TEST_GUARD.lock().expect("panic hook guard");
+        let captured = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
+        let captured_for_hook = std::sync::Arc::clone(&captured);
+        let previous_hook = panic::take_hook();
+
+        panic::set_hook(Box::new(move |panic_info| {
+            let mut message = captured_for_hook.lock().expect("captured lock");
+            *message = panic_message(panic_info);
+        }));
+
+        let result = panic::catch_unwind(|| panic!("string slice panic"));
+        panic::set_hook(previous_hook);
+
+        assert!(result.is_err());
+        let message = captured.lock().expect("captured lock").clone();
+        assert_eq!(message, "string slice panic");
+    }
+
+    #[test]
+    fn test_panic_message_string_payload_returns_payload() {
+        let _guard = PANIC_HOOK_TEST_GUARD.lock().expect("panic hook guard");
+        let captured = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
+        let captured_for_hook = std::sync::Arc::clone(&captured);
+        let previous_hook = panic::take_hook();
+
+        panic::set_hook(Box::new(move |panic_info| {
+            let mut message = captured_for_hook.lock().expect("captured lock");
+            *message = panic_message(panic_info);
+        }));
+
+        let result = panic::catch_unwind(|| panic::panic_any(String::from("owned panic")));
+        panic::set_hook(previous_hook);
+
+        assert!(result.is_err());
+        let message = captured.lock().expect("captured lock").clone();
+        assert_eq!(message, "owned panic");
+    }
+
+    #[test]
+    fn test_panic_message_non_string_payload_returns_fallback_message() {
+        let _guard = PANIC_HOOK_TEST_GUARD.lock().expect("panic hook guard");
+        let captured = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
+        let captured_for_hook = std::sync::Arc::clone(&captured);
+        let previous_hook = panic::take_hook();
+
+        panic::set_hook(Box::new(move |panic_info| {
+            let mut message = captured_for_hook.lock().expect("captured lock");
+            *message = panic_message(panic_info);
+        }));
+
+        let result = panic::catch_unwind(|| panic::panic_any(7_u8));
+        panic::set_hook(previous_hook);
+
+        assert!(result.is_err());
+        let message = captured.lock().expect("captured lock").clone();
+        assert_eq!(message, "non-string panic payload");
     }
 
     #[tokio::test]
@@ -1312,6 +1419,103 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_read_subscriber_count_lock_success_updates_cache() {
+        let stats = Arc::new(tokio::sync::Mutex::new(StatisticsStream::default()));
+        let cached = Arc::new(AtomicUsize::new(0));
+
+        stats.lock().await.subscriber_count = 7;
+
+        let count = read_subscriber_count(&stats, &cached);
+        assert_eq!(count, 7);
+        assert_eq!(cached.load(Ordering::Relaxed), 7);
+    }
+
+    #[tokio::test]
+    async fn test_read_subscriber_count_lock_contended_returns_cached_value() {
+        let stats = Arc::new(tokio::sync::Mutex::new(StatisticsStream::default()));
+        let cached = Arc::new(AtomicUsize::new(11));
+
+        let _guard = stats.lock().await;
+        let count = read_subscriber_count(&stats, &cached);
+
+        assert_eq!(count, 11);
+    }
+
+    #[test]
+    fn test_send_frame_closed_channel_returns_error() {
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<FrameData>();
+        drop(rx);
+
+        let result = send_frame(
+            &tx,
+            FrameData::Video {
+                timestamp: 99,
+                data: BytesMut::from(&b"frame"[..]),
+            },
+        );
+
+        assert!(result.is_err());
+        let err = result.expect_err("send should fail when receiver is dropped");
+        assert!(
+            err.to_string()
+                .contains("failed to send frame to subscriber"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_send_httpflv_prior_frames_no_audio_no_bootstrap_emits_video_header_only() {
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<FrameData>();
+        let mut remuxer = ValidationHttpFlvRemuxer::new(
+            vec![0x67, 0x42, 0x00, 0x1e],
+            vec![0x68, 0xce, 0x06, 0xe2],
+            None,
+            48_000,
+        );
+
+        send_httpflv_prior_frames(&tx, &mut remuxer, 4321, None)
+            .expect("prior frame bootstrap should succeed");
+
+        let first = rx.recv().await.expect("first frame should be present");
+        match first {
+            FrameData::Video { timestamp, data } => {
+                assert_eq!(timestamp, 4321);
+                assert!(data.len() >= 2);
+                assert_eq!(data[1], 0);
+            }
+            _ => panic!("expected video sequence header"),
+        }
+        assert!(rx.try_recv().is_err(), "no additional frames expected");
+    }
+
+    #[tokio::test]
+    async fn test_send_httpflv_prior_frames_malformed_bootstrap_skips_idr_frame() {
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<FrameData>();
+        let mut remuxer = ValidationHttpFlvRemuxer::new(
+            vec![0x67, 0x42, 0x00, 0x1e],
+            vec![0x68, 0xce, 0x06, 0xe2],
+            None,
+            48_000,
+        );
+
+        send_httpflv_prior_frames(&tx, &mut remuxer, 4322, Some(&[0x00, 0x00, 0x00]))
+            .expect("malformed bootstrap should be ignored");
+
+        let first = rx.recv().await.expect("first frame should be present");
+        match first {
+            FrameData::Video { data, .. } => {
+                assert!(data.len() >= 2);
+                assert_eq!(data[1], 0);
+            }
+            _ => panic!("expected video sequence header"),
+        }
+        assert!(
+            rx.try_recv().is_err(),
+            "malformed bootstrap should not emit IDR"
+        );
+    }
+
+    #[tokio::test]
     async fn test_fanout_validation_frame_rtsp_only_routes_without_httpflv() {
         let (rtsp_tx, mut rtsp_rx) = tokio::sync::mpsc::unbounded_channel::<FrameData>();
         let frame = FrameData::Video {
@@ -1368,20 +1572,5 @@ mod tests {
 
         assert!(sdp.contains("m=video 0 RTP/AVP 96"));
         assert!(!sdp.contains("m=audio 0 RTP/AVP 97"));
-    }
-
-    #[test]
-    fn test_loop_playback_flag() {
-        // Simulate: program --validation-mode --h264-file /tmp/test.h264 --loop-playback
-        let sample_args = vec![
-            "program".to_string(),
-            "--validation-mode".to_string(),
-            "--h264-file".to_string(),
-            "/tmp/test.h264".to_string(),
-            "--loop-playback".to_string(),
-        ];
-
-        let loop_flag = sample_args.iter().any(|arg| arg == "--loop-playback");
-        assert!(loop_flag);
     }
 }

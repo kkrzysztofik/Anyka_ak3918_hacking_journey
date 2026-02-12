@@ -2613,6 +2613,94 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_rtsp_server_session_on_rtsp_message_unsupported_version_returns_505() {
+        let (event_sender, _event_receiver) = tokio::sync::mpsc::unbounded_channel();
+        let mut mock_io = MockNetIO::new();
+
+        mock_io.expect_get_net_type().returning(|| NetType::TCP);
+        mock_io.expect_read().times(0);
+        mock_io
+            .expect_write()
+            .withf(|bytes| {
+                let s = std::str::from_utf8(bytes).unwrap();
+                s.contains("RTSP/1.0 505") && s.contains("CSeq: 1")
+            })
+            .times(1)
+            .returning(|_| Ok(()));
+
+        let session_io: Box<dyn TNetIO + Send + Sync> = Box::new(mock_io);
+        let remote_addr = "127.0.0.1:0".parse().unwrap();
+        let mut session =
+            RtspServerSession::new_with_io(session_io, event_sender, None, remote_addr);
+
+        let data = BytesMut::from("OPTIONS rtsp://localhost/stream1 RTSP/2.0\r\nCSeq: 1\r\n\r\n");
+        session.reader.extend_from_slice(&data[..]);
+
+        let result = session.on_rtsp_message().await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_rtsp_server_session_on_rtsp_message_content_length_body_mismatch_returns_400() {
+        let (event_sender, _event_receiver) = tokio::sync::mpsc::unbounded_channel();
+        let mut mock_io = MockNetIO::new();
+
+        mock_io.expect_get_net_type().returning(|| NetType::TCP);
+        mock_io.expect_read().times(0);
+        mock_io
+            .expect_write()
+            .withf(|bytes| {
+                let s = std::str::from_utf8(bytes).unwrap();
+                s.contains("RTSP/1.0 400 Bad Request") && s.contains("CSeq: 1")
+            })
+            .times(1)
+            .returning(|_| Ok(()));
+
+        let session_io: Box<dyn TNetIO + Send + Sync> = Box::new(mock_io);
+        let remote_addr = "127.0.0.1:0".parse().unwrap();
+        let mut session =
+            RtspServerSession::new_with_io(session_io, event_sender, None, remote_addr);
+
+        // First Content-Length controls framing (5 bytes body), second is used by header lookup (3)
+        // so on_rtsp_message hits the mismatch branch deterministically.
+        let data = BytesMut::from(
+            "OPTIONS rtsp://localhost/stream1 RTSP/1.0\r\ncontent-length: 5\r\nContent-Length: 3\r\nCSeq: 1\r\n\r\nabcde",
+        );
+        session.reader.extend_from_slice(&data[..]);
+
+        let result = session.on_rtsp_message().await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_rtsp_server_session_on_rtsp_message_unknown_method_returns_501() {
+        let (event_sender, _event_receiver) = tokio::sync::mpsc::unbounded_channel();
+        let mut mock_io = MockNetIO::new();
+
+        mock_io.expect_get_net_type().returning(|| NetType::TCP);
+        mock_io.expect_read().times(0);
+        mock_io
+            .expect_write()
+            .withf(|bytes| {
+                let s = std::str::from_utf8(bytes).unwrap();
+                s.contains("RTSP/1.0 501 Not Implemented") && s.contains("CSeq: 1")
+            })
+            .times(1)
+            .returning(|_| Ok(()));
+
+        let session_io: Box<dyn TNetIO + Send + Sync> = Box::new(mock_io);
+        let remote_addr = "127.0.0.1:0".parse().unwrap();
+        let mut session =
+            RtspServerSession::new_with_io(session_io, event_sender, None, remote_addr);
+
+        let data = BytesMut::from("BREW rtsp://localhost/stream1 RTSP/1.0\r\nCSeq: 1\r\n\r\n");
+        session.reader.extend_from_slice(&data[..]);
+
+        let result = session.on_rtsp_message().await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
     async fn test_rtsp_server_session_get_parameter_keep_alive_ok_includes_session() {
         let (event_sender, _event_receiver) = tokio::sync::mpsc::unbounded_channel();
         let mut mock_io = MockNetIO::new();
@@ -2801,6 +2889,48 @@ mod tests {
 
         let result = session.handle_describe(&request).await;
         assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_rtsp_server_session_describe_unacceptable_accept_returns_406() {
+        let (event_sender, mut event_receiver) = tokio::sync::mpsc::unbounded_channel();
+        let mut mock_io = MockNetIO::new();
+
+        mock_io.expect_get_net_type().returning(|| NetType::TCP);
+        mock_io.expect_read().times(0);
+        mock_io
+            .expect_write()
+            .withf(|bytes| {
+                let s = std::str::from_utf8(bytes).unwrap();
+                s.contains("RTSP/1.0 406 Not Acceptable") && s.contains("CSeq: 2")
+            })
+            .times(1)
+            .returning(|_| Ok(()));
+
+        let event_handle = tokio::spawn(async move {
+            if let Some(StreamHubEvent::Request { sender, .. }) = event_receiver.recv().await {
+                let dummy_sdp = "v=0\r\no=- 0 0 IN IP4 127.0.0.1\r\ns=No Name\r\nc=IN IP4 127.0.0.1\r\nt=0 0\r\nm=video 0 RTP/AVP 96\r\na=rtpmap:96 H264/90000\r\n";
+                let _ = sender.send(Information::Sdp {
+                    data: dummy_sdp.to_string(),
+                });
+            }
+        });
+
+        let session_io: Box<dyn TNetIO + Send + Sync> = Box::new(mock_io);
+        let remote_addr = "127.0.0.1:0".parse().unwrap();
+
+        let mut session =
+            RtspServerSession::new_with_io(session_io, event_sender, None, remote_addr);
+
+        let mut request = create_test_request("DESCRIBE", Some("2"));
+        request.uri.path = "live/test".to_string();
+        request
+            .headers
+            .insert("Accept".to_string(), "application/json".to_string());
+
+        let result = session.handle_describe(&request).await;
+        assert!(result.is_ok());
+        event_handle.await.expect("event task panicked");
     }
 
     #[tokio::test]
@@ -3102,6 +3232,44 @@ mod tests {
         session.tracks.insert(TrackType::Video, track);
 
         let content = "SETUP rtsp://localhost/live/test/trackID=0 RTSP/1.0\r\nCSeq: 3\r\nTransport: RTP/AVP/TCP;unicast;interleaved=0-1\r\n\r\n";
+        let request = RtspRequest::unmarshal(content).unwrap();
+
+        let result = session.handle_setup(&request).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_rtsp_server_session_setup_malformed_transport_returns_461() {
+        let (event_sender, _event_receiver) = tokio::sync::mpsc::unbounded_channel();
+        let mut mock_io = MockNetIO::new();
+
+        mock_io.expect_get_net_type().returning(|| NetType::TCP);
+        mock_io.expect_read().times(0);
+        mock_io
+            .expect_write()
+            .withf(|bytes| {
+                let s = std::str::from_utf8(bytes).unwrap();
+                s.contains("RTSP/1.0 461") && s.contains("CSeq: 3")
+            })
+            .times(1)
+            .returning(|_| Ok(()));
+
+        let session_io: Box<dyn TNetIO + Send + Sync> = Box::new(mock_io);
+        let remote_addr = "127.0.0.1:0".parse().unwrap();
+
+        let mut session =
+            RtspServerSession::new_with_io(session_io, event_sender, None, remote_addr);
+
+        let codec_info = RtspCodecInfo {
+            codec_id: crate::rtsp::rtsp_codec::RtspCodecId::H264,
+            payload_type: 96,
+            sample_rate: 90000,
+            channel_count: 0,
+        };
+        let track = RtspTrack::new(TrackType::Video, codec_info, "trackID=0".to_string());
+        session.tracks.insert(TrackType::Video, track);
+
+        let content = "SETUP rtsp://localhost/live/test/trackID=0 RTSP/1.0\r\nCSeq: 3\r\nTransport: RTP/AVP/TCP;unicast\r\n\r\n";
         let request = RtspRequest::unmarshal(content).unwrap();
 
         let result = session.handle_setup(&request).await;
@@ -3545,6 +3713,39 @@ mod tests {
         subscribe_handle
             .await
             .expect("Subscribe handler task panicked");
+    }
+
+    #[tokio::test]
+    async fn test_rtsp_server_session_play_malformed_range_returns_457_without_subscribe_event() {
+        let (event_sender, mut event_receiver) = tokio::sync::mpsc::unbounded_channel();
+        let mut mock_io = MockNetIO::new();
+
+        mock_io.expect_get_net_type().returning(|| NetType::TCP);
+        mock_io.expect_read().times(0);
+        mock_io
+            .expect_write()
+            .withf(|bytes| {
+                let s = std::str::from_utf8(bytes).unwrap();
+                s.contains("RTSP/1.0 457 Invalid Range") && s.contains("CSeq: 9")
+            })
+            .times(1)
+            .returning(|_| Ok(()));
+
+        let session_io: Box<dyn TNetIO + Send + Sync> = Box::new(mock_io);
+        let remote_addr = "127.0.0.1:0".parse().unwrap();
+
+        let mut session =
+            RtspServerSession::new_with_io(session_io, event_sender, None, remote_addr);
+
+        let content = "PLAY rtsp://localhost/live/test/trackID=0 RTSP/1.0\r\nCSeq: 9\r\nRange: npt=bad-value\r\n\r\n";
+        let request = RtspRequest::unmarshal(content).unwrap();
+
+        let result = session.handle_play(&request).await;
+        assert!(result.is_ok());
+        assert!(matches!(
+            event_receiver.try_recv(),
+            Err(tokio::sync::mpsc::error::TryRecvError::Empty)
+        ));
     }
 
     #[tokio::test]

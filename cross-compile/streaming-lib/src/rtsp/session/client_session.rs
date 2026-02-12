@@ -1023,4 +1023,157 @@ mod tests {
         assert_eq!(remaining.len(), 8);
         assert_eq!(remaining[0], 0x24);
     }
+
+    #[tokio::test]
+    async fn test_rtsp_client_session_receive_response_non_200_returns_status_error() {
+        let (event_sender, _event_receiver) = tokio::sync::mpsc::unbounded_channel();
+
+        let mut mock_io = MockNetIO::new();
+        mock_io.expect_get_net_type().returning(|| NetType::TCP);
+        mock_io.expect_read().times(1).returning(|| {
+            let response = "RTSP/1.0 404 Not Found\r\nCSeq: 1\r\nContent-Length: 0\r\n\r\n";
+            Ok(BytesMut::from(response))
+        });
+
+        let mut session = RtspClientSession::new_with_io(
+            "localhost:554".to_string(),
+            "live/test".to_string(),
+            ProtocolType::TCP,
+            event_sender,
+            ClientSessionType::Pull,
+            Box::new(mock_io),
+        );
+
+        let result = session.receive_response(rtsp_method_name::OPTIONS).await;
+
+        assert!(result.is_err());
+        match result.unwrap_err().value {
+            SessionErrorValue::RtspResponseStatusError => {}
+            other => panic!("expected RtspResponseStatusError, got: {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_rtsp_client_session_receive_response_parse_failure_returns_corrupted_error() {
+        let (event_sender, _event_receiver) = tokio::sync::mpsc::unbounded_channel();
+
+        let mut mock_io = MockNetIO::new();
+        mock_io.expect_get_net_type().returning(|| NetType::TCP);
+        mock_io.expect_read().times(1).returning(|| {
+            let response = BytesMut::from(&b"RTSP/1.0 200 OK\r\nContent-Length: abc\r\n\r\n"[..]);
+            Ok(response)
+        });
+
+        let mut session = RtspClientSession::new_with_io(
+            "localhost:554".to_string(),
+            "live/test".to_string(),
+            ProtocolType::TCP,
+            event_sender,
+            ClientSessionType::Pull,
+            Box::new(mock_io),
+        );
+
+        let result = session.receive_response(rtsp_method_name::OPTIONS).await;
+
+        assert!(result.is_err());
+        match result.unwrap_err().value {
+            SessionErrorValue::RtspMessageCorrupted(err) => {
+                assert!(err.contains("invalid Content-Length value"));
+            }
+            other => panic!("expected RtspMessageCorrupted, got: {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_rtsp_client_session_receive_response_retry_limit_returns_corrupted_error() {
+        let (event_sender, _event_receiver) = tokio::sync::mpsc::unbounded_channel();
+
+        let mut mock_io = MockNetIO::new();
+        mock_io.expect_get_net_type().returning(|| NetType::TCP);
+        mock_io
+            .expect_read()
+            .times(16)
+            .returning(|| Ok(BytesMut::from(&b"RTSP/1.0 200 OK\r\nCSeq: 1\r\n"[..])));
+
+        let mut session = RtspClientSession::new_with_io(
+            "localhost:554".to_string(),
+            "live/test".to_string(),
+            ProtocolType::TCP,
+            event_sender,
+            ClientSessionType::Pull,
+            Box::new(mock_io),
+        );
+
+        let result = session.receive_response(rtsp_method_name::OPTIONS).await;
+
+        assert!(result.is_err());
+        match result.unwrap_err().value {
+            SessionErrorValue::RtspMessageCorrupted(err) => {
+                assert!(err.contains("max read retries exceeded"));
+            }
+            other => panic!("expected RtspMessageCorrupted retry error, got: {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_rtsp_client_session_receive_response_describe_emits_publish_event() {
+        let (event_sender, mut event_receiver) = tokio::sync::mpsc::unbounded_channel();
+
+        let mut mock_io = MockNetIO::new();
+        mock_io.expect_get_net_type().returning(|| NetType::TCP);
+        mock_io.expect_read().times(1).returning(|| {
+            let sdp_body =
+                "v=0\r\no=- 0 0 IN IP4 127.0.0.1\r\ns=No Name\r\nc=IN IP4 127.0.0.1\r\nt=0 0\r\n";
+            let response = format!(
+                "RTSP/1.0 200 OK\r\nCSeq: 2\r\nContent-Length: {}\r\n\r\n{}",
+                sdp_body.len(),
+                sdp_body
+            );
+            Ok(BytesMut::from(response.as_str()))
+        });
+
+        let mut session = RtspClientSession::new_with_io(
+            "localhost:554".to_string(),
+            "live/test".to_string(),
+            ProtocolType::TCP,
+            event_sender,
+            ClientSessionType::Pull,
+            Box::new(mock_io),
+        );
+
+        let receive_task =
+            tokio::spawn(async move { session.receive_response(rtsp_method_name::DESCRIBE).await });
+
+        let event = tokio::time::timeout(
+            tokio::time::Duration::from_millis(100),
+            event_receiver.recv(),
+        )
+        .await
+        .expect("timed out waiting for StreamHubEvent::Publish")
+        .expect("event channel unexpectedly closed");
+
+        match event {
+            StreamHubEvent::Publish {
+                identifier,
+                info: _,
+                result_sender,
+                stream_handler: _,
+            } => {
+                assert!(matches!(
+                    identifier,
+                    StreamIdentifier::Rtsp { stream_path } if stream_path == "live/test"
+                ));
+                let (frame_sender, _frame_receiver) = tokio::sync::mpsc::unbounded_channel();
+                result_sender
+                    .send(Ok((Some(frame_sender), None, None)))
+                    .expect("failed to return publish event result");
+            }
+            _ => panic!("expected StreamHubEvent::Publish"),
+        }
+
+        let result = receive_task
+            .await
+            .expect("receive_response task panicked unexpectedly");
+        assert!(result.is_ok());
+    }
 }

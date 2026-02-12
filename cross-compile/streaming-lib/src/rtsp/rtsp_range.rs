@@ -18,6 +18,94 @@ pub struct RtspRange {
     end: Option<i64>,
 }
 
+impl RtspRange {
+    /// Parse a clock timestamp string into Unix timestamp.
+    fn parse_clock_time(range_time: &str) -> Result<i64, String> {
+        let datetime = chrono::NaiveDateTime::parse_from_str(range_time, "%Y%m%dT%H%M%SZ")
+            .map_err(|err| {
+                error!("get_clock_time error: {err}");
+                format!("invalid clock range: {range_time}")
+            })?;
+        Ok(datetime.and_utc().timestamp())
+    }
+
+    /// Parse clock range values from the value part.
+    fn parse_clock_range(&mut self, value: &str) -> Result<(), String> {
+        self.range_type = RtspRangeType::CLOCK;
+        let ranges: Vec<&str> = value.split('-').collect();
+        self.begin = Self::parse_clock_time(ranges[0])?;
+        if ranges.len() > 1 && !ranges[1].is_empty() {
+            self.end = Some(Self::parse_clock_time(ranges[1])?);
+        }
+        Ok(())
+    }
+
+    /// Parse NPT time in HH:MM:SS.mmm format.
+    fn parse_npt_hhmmss(range_time: &str) -> Option<i64> {
+        let (hour, minute, second, mill) =
+            rtsp_utils::scanf!(range_time, |c| c == ':' || c == '.', i64, i64, i64, i64);
+        if let (Some(hour), Some(minute), Some(second)) = (hour, minute, second) {
+            let mut result = (hour * 3600 + minute * 60 + second) * 1000;
+            if let Some(m) = mill {
+                result += m;
+            }
+            return Some(result);
+        }
+        None
+    }
+
+    /// Parse NPT time in SS.mmm format (seconds with milliseconds).
+    fn parse_npt_seconds_with_ms(range_time: &str) -> Option<i64> {
+        let idx = range_time.find('.')?;
+        let (sec_str, ms_str) = range_time.split_at(idx);
+        let sec = sec_str.parse::<i64>().ok()?;
+        let ms = ms_str[1..].parse::<i64>().ok()?;
+        // Handle variable millisecond precision (e.g., .5 = 500ms, .500 = 500ms)
+        let ms_len = ms_str.len() - 1; // exclude the dot
+        let multiplier = match ms_len {
+            1 => 100, // .5 -> 500
+            2 => 10,  // .50 -> 500
+            _ => 1,   // .500 -> 500
+        };
+        Some(sec * 1000 + ms * multiplier)
+    }
+
+    /// Parse NPT time value (supports HH:MM:SS.mmm, SS.mmm, and plain seconds).
+    fn parse_npt_time(range_time: &str) -> Result<i64, String> {
+        // Try HH:MM:SS.mmm format first
+        if let Some(result) = Self::parse_npt_hhmmss(range_time) {
+            return Ok(result);
+        }
+
+        // Try SS.mmm format (seconds with milliseconds)
+        if let Some(result) = Self::parse_npt_seconds_with_ms(range_time) {
+            return Ok(result);
+        }
+
+        // Try just seconds
+        range_time
+            .parse::<i64>()
+            .map(|s| s * 1000)
+            .map_err(|err| format!("invalid npt seconds '{range_time}': {err}"))
+    }
+
+    /// Parse NPT range values from the value part.
+    fn parse_npt_range(&mut self, value: &str) -> Result<(), String> {
+        self.range_type = RtspRangeType::NPT;
+        let ranges: Vec<&str> = value.split('-').collect();
+
+        self.begin = match ranges[0] {
+            "now" => 0,
+            _ => Self::parse_npt_time(ranges[0])?,
+        };
+
+        if ranges.len() == 2 && !ranges[1].is_empty() {
+            self.end = Some(Self::parse_npt_time(ranges[1])?);
+        }
+        Ok(())
+    }
+}
+
 impl Unmarshal for RtspRange {
     fn unmarshal(raw_data: &str) -> Result<Self, String> {
         let mut rtsp_range = RtspRange::default();
@@ -28,81 +116,9 @@ impl Unmarshal for RtspRange {
         }
 
         match kv[0] {
-            "clock" => {
-                rtsp_range.range_type = RtspRangeType::CLOCK;
-                let ranges: Vec<&str> = kv[1].split('-').collect();
-
-                let get_clock_time = |range_time: &str| -> Result<i64, String> {
-                    let datetime =
-                        chrono::NaiveDateTime::parse_from_str(range_time, "%Y%m%dT%H%M%SZ")
-                            .map_err(|err| {
-                                error!("get_clock_time error: {err}");
-                                format!("invalid clock range: {range_time}")
-                            })?;
-                    Ok(datetime.and_utc().timestamp())
-                };
-
-                rtsp_range.begin = get_clock_time(ranges[0])?;
-                if ranges.len() > 1 && !ranges[1].is_empty() {
-                    rtsp_range.end = Some(get_clock_time(ranges[1])?);
-                }
-            }
-            "npt" => {
-                rtsp_range.range_type = RtspRangeType::NPT;
-                let ranges: Vec<&str> = kv[1].split('-').collect();
-
-                let get_npt_time = |range_time: &str| -> Result<i64, String> {
-                    // Try HH:MM:SS.mmm format first
-                    if let (Some(hour), Some(minute), Some(second), mill) =
-                        rtsp_utils::scanf!(range_time, |c| c == ':' || c == '.', i64, i64, i64, i64)
-                    {
-                        let mut result = (hour * 3600 + minute * 60 + second) * 1000;
-                        if let Some(m) = mill {
-                            result += m;
-                        }
-                        return Ok(result);
-                    }
-
-                    // Try SS.mmm format (seconds with milliseconds)
-                    if let Some(idx) = range_time.find('.') {
-                        let (sec_str, ms_str) = range_time.split_at(idx);
-                        if let (Ok(sec), Ok(ms)) =
-                            (sec_str.parse::<i64>(), ms_str[1..].parse::<i64>())
-                        {
-                            // Handle variable millisecond precision (e.g., .5 = 500ms, .500 = 500ms)
-                            let ms_len = ms_str.len() - 1; // exclude the dot
-                            let multiplier = match ms_len {
-                                1 => 100, // .5 -> 500
-                                2 => 10,  // .50 -> 500
-                                _ => 1,   // .500 -> 500
-                            };
-                            return Ok(sec * 1000 + ms * multiplier);
-                        }
-                    }
-
-                    // Try just seconds
-                    range_time
-                        .parse::<i64>()
-                        .map(|s| s * 1000)
-                        .map_err(|err| format!("invalid npt seconds '{range_time}': {err}"))
-                };
-
-                match ranges[0] {
-                    "now" => {
-                        rtsp_range.begin = 0;
-                    }
-                    _ => {
-                        rtsp_range.begin = get_npt_time(ranges[0])?;
-                    }
-                }
-
-                if ranges.len() == 2 && !ranges[1].is_empty() {
-                    rtsp_range.end = Some(get_npt_time(ranges[1])?);
-                }
-            }
-            _ => {
-                return Err(format!("unsupported range type: {}", kv[0]));
-            }
+            "clock" => rtsp_range.parse_clock_range(kv[1])?,
+            "npt" => rtsp_range.parse_npt_range(kv[1])?,
+            _ => return Err(format!("unsupported range type: {}", kv[0])),
         }
 
         Ok(rtsp_range)

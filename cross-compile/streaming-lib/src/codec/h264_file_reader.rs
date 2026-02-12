@@ -188,54 +188,102 @@ impl H264FileReader {
                 return Ok(None);
             }
 
+            // Try to find start code at current position
             let (start_code_idx, start_code_len) =
-                match Self::find_start_code(&self.annexb_data, self.annexb_start) {
+                match self.find_start_code_at_current_pos().await? {
                     Some(found) => found,
-                    None => {
-                        if self.fill_annexb_buffer().await? {
-                            continue;
-                        }
-
-                        let remaining = self.annexb_data.len().saturating_sub(self.annexb_start);
-                        self.consume_annexb_bytes(remaining);
-                        return Ok(None);
-                    }
+                    None => continue,
                 };
 
+            // Skip to start code if not at current position
             if start_code_idx > self.annexb_start {
                 self.consume_annexb_bytes(start_code_idx - self.annexb_start);
                 continue;
             }
 
+            // Try to extract NAL unit
             let nal_start = start_code_idx + start_code_len;
-            if let Some((next_start_code_idx, _)) =
-                Self::find_start_code(&self.annexb_data, nal_start)
-            {
-                if next_start_code_idx == nal_start {
-                    self.consume_annexb_bytes(start_code_len);
-                    continue;
+            if let Some(result) = self.try_extract_nal_unit(nal_start, start_code_len).await? {
+                return Ok(Some(result));
+            }
+            // If None returned, continue loop to try again with more data
+        }
+    }
+
+    /// Find start code at current position, filling buffer if needed
+    async fn find_start_code_at_current_pos(
+        &mut self,
+    ) -> Result<Option<(usize, usize)>, H264FileError> {
+        match Self::find_start_code(&self.annexb_data, self.annexb_start) {
+            Some(found) => Ok(Some(found)),
+            None => {
+                if self.fill_annexb_buffer().await? {
+                    return Ok(None); // Signal to continue loop
                 }
-
-                let nal_data = self.annexb_data[nal_start..next_start_code_idx].to_vec();
-                self.consume_annexb_bytes(next_start_code_idx - self.annexb_start);
-                return Self::build_annexb_nal(nal_data, start_code_len).map(Some);
-            }
-
-            if self.fill_annexb_buffer().await? {
-                continue;
-            }
-
-            if nal_start >= self.annexb_data.len() {
                 let remaining = self.annexb_data.len().saturating_sub(self.annexb_start);
                 self.consume_annexb_bytes(remaining);
-                return Ok(None);
+                Ok(None)
             }
+        }
+    }
 
-            let nal_data = self.annexb_data[nal_start..].to_vec();
+    /// Try to extract a NAL unit starting at nal_start position
+    async fn try_extract_nal_unit(
+        &mut self,
+        nal_start: usize,
+        start_code_len: usize,
+    ) -> Result<Option<NalUnit>, H264FileError> {
+        // Look for next start code to determine NAL boundary
+        if let Some((next_start_code_idx, _)) = Self::find_start_code(&self.annexb_data, nal_start)
+        {
+            return self
+                .extract_nal_with_boundary(nal_start, next_start_code_idx, start_code_len)
+                .await;
+        }
+
+        // No boundary found, try to fill buffer
+        if self.fill_annexb_buffer().await? {
+            return Ok(None); // Signal to continue loop
+        }
+
+        // EOF - extract remaining data as NAL
+        self.extract_nal_at_eof(nal_start, start_code_len).await
+    }
+
+    /// Extract NAL unit when we found a boundary
+    async fn extract_nal_with_boundary(
+        &mut self,
+        nal_start: usize,
+        next_start_code_idx: usize,
+        start_code_len: usize,
+    ) -> Result<Option<NalUnit>, H264FileError> {
+        // Handle case where next start code is immediately after current (empty NAL)
+        if next_start_code_idx == nal_start {
+            self.consume_annexb_bytes(start_code_len);
+            return Ok(None); // Signal to continue loop
+        }
+
+        let nal_data = self.annexb_data[nal_start..next_start_code_idx].to_vec();
+        self.consume_annexb_bytes(next_start_code_idx - self.annexb_start);
+        Self::build_annexb_nal(nal_data, start_code_len).map(Some)
+    }
+
+    /// Extract NAL unit at EOF
+    async fn extract_nal_at_eof(
+        &mut self,
+        nal_start: usize,
+        start_code_len: usize,
+    ) -> Result<Option<NalUnit>, H264FileError> {
+        if nal_start >= self.annexb_data.len() {
             let remaining = self.annexb_data.len().saturating_sub(self.annexb_start);
             self.consume_annexb_bytes(remaining);
-            return Self::build_annexb_nal(nal_data, start_code_len).map(Some);
+            return Ok(None);
         }
+
+        let nal_data = self.annexb_data[nal_start..].to_vec();
+        let remaining = self.annexb_data.len().saturating_sub(self.annexb_start);
+        self.consume_annexb_bytes(remaining);
+        Self::build_annexb_nal(nal_data, start_code_len).map(Some)
     }
 
     async fn read_next_nal_avcc(&mut self) -> Result<Option<NalUnit>, H264FileError> {
@@ -572,8 +620,22 @@ impl H264FileReader {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::env;
     use std::io::Write;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn create_temp_h264_file(test_name: &str, data: &[u8]) -> std::path::PathBuf {
+        let temp_dir = env::temp_dir();
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let file_path = temp_dir.join(format!("{test_name}_{nanos}.h264"));
+        let mut temp_file = std::fs::File::create(&file_path).unwrap();
+        temp_file.write_all(data).unwrap();
+        drop(temp_file);
+        file_path
+    }
 
     #[test]
     fn test_nal_unit_type_conversion() {
@@ -597,7 +659,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_read_next_nal_start_code_across_buffer_boundary() {
-        let mut data = vec![0u8; H264FileReader::BUFFER_SIZE - 2];
+        // Use non-zero padding to avoid accidental 4-byte start-code matches in filler bytes.
+        let mut data = vec![0xFFu8; H264FileReader::BUFFER_SIZE - 2];
         data.extend_from_slice(&[0x00, 0x00, 0x01, 0x67, 0x42, 0x00, 0x1e]);
         data.extend_from_slice(&[0x00, 0x00, 0x01, 0x68, 0xce, 0x06, 0xe2]);
 
@@ -656,6 +719,58 @@ mod tests {
         let pps_nal = reader.read_next_nal().await.unwrap().unwrap();
         assert_eq!(pps_nal.unit_type, NalUnitType::PictureParameterSet);
         assert_eq!(pps_nal.data, pps);
+
+        let _ = std::fs::remove_file(file_path);
+    }
+
+    #[tokio::test]
+    async fn test_read_next_nal_avcc_forbidden_bit_set_returns_invalid_nal() {
+        // Keep payload free of Annex-B start-code signatures so format detection stays AVCC.
+        let invalid_nal = [0x80, 0xAA, 0xBB, 0xCC];
+        let mut data = Vec::new();
+        data.extend_from_slice(&(invalid_nal.len() as u32).to_be_bytes());
+        data.extend_from_slice(&invalid_nal);
+
+        let file_path = create_temp_h264_file("h264_avcc_forbidden_bit", &data);
+
+        let mut reader = H264FileReader::new(file_path.to_str().unwrap(), 25)
+            .await
+            .unwrap();
+
+        let result = reader.read_next_nal().await;
+        assert!(matches!(result, Err(H264FileError::InvalidNalUnit)));
+
+        let _ = std::fs::remove_file(file_path);
+    }
+
+    #[tokio::test]
+    async fn test_read_next_nal_avcc_length_overflow_returns_invalid_nal() {
+        // Declared NAL length (16) exceeds remaining file size (2).
+        let data = [0x00, 0x00, 0x00, 0x10, 0x67, 0x42];
+        let file_path = create_temp_h264_file("h264_avcc_length_overflow", &data);
+
+        let mut reader = H264FileReader::new(file_path.to_str().unwrap(), 25)
+            .await
+            .unwrap();
+
+        let result = reader.read_next_nal().await;
+        assert!(matches!(result, Err(H264FileError::InvalidNalUnit)));
+
+        let _ = std::fs::remove_file(file_path);
+    }
+
+    #[tokio::test]
+    async fn test_extract_sps_pps_without_parameter_sets_returns_no_nal_units() {
+        // Annex-B stream with only an IDR NAL, no SPS/PPS.
+        let data = [0x00, 0x00, 0x01, 0x65, 0xAA, 0xBB, 0xCC];
+        let file_path = create_temp_h264_file("h264_extract_sps_pps_no_param_sets", &data);
+
+        let mut reader = H264FileReader::new(file_path.to_str().unwrap(), 25)
+            .await
+            .unwrap();
+
+        let result = reader.extract_sps_pps().await;
+        assert!(matches!(result, Err(H264FileError::NoNalUnits)));
 
         let _ = std::fs::remove_file(file_path);
     }

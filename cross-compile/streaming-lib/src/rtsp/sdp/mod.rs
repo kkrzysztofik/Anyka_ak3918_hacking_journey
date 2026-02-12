@@ -207,6 +207,95 @@ impl Marshal for SdpMediaInfo {
     }
 }
 
+impl Sdp {
+    /// Parses a single SDP line and updates the Sdp struct
+    fn parse_line(&mut self, line: &str) {
+        let kv: Vec<&str> = line.trim().splitn(2, '=').collect();
+        if kv.len() < 2 {
+            log::error!("Sdp current line : {} parse error!", line);
+            return;
+        }
+
+        match kv[0] {
+            "v" => self.parse_version(kv[1]),
+            "o" => self.origin = kv[1].to_string(),
+            "s" => self.session = kv[1].to_string(),
+            "c" => self.connection = kv[1].to_string(),
+            "t" => self.timing = kv[1].to_string(),
+            "m" => self.parse_media(kv[1]),
+            "b" => self.parse_bandwidth(kv[1]),
+            "a" => self.parse_attribute(kv[1]),
+            _ => log::info!("not parsed: {}", line),
+        }
+    }
+
+    fn parse_version(&mut self, value: &str) {
+        if let Ok(version) = value.parse::<u16>() {
+            self.version = version;
+        }
+    }
+
+    fn parse_media(&mut self, value: &str) {
+        if let Ok(sdp_media) = SdpMediaInfo::unmarshal(value) {
+            self.medias.push(sdp_media);
+        }
+    }
+
+    fn parse_bandwidth(&mut self, value: &str) {
+        if let Some(cur_media) = self.medias.last_mut()
+            && let Ok(bandwidth) = Bandwidth::unmarshal(value)
+        {
+            cur_media.bandwidth = Some(bandwidth);
+        }
+    }
+
+    fn parse_attribute(&mut self, value: &str) {
+        let attribute: Vec<&str> = value.splitn(2, ':').collect();
+        let attr_name = attribute[0];
+        let attr_value = attribute.get(1).copied().unwrap_or("");
+
+        if let Some(cur_media) = self.medias.last_mut() {
+            if !Self::try_parse_media_attribute(cur_media, attr_name, attr_value) {
+                cur_media
+                    .attributes
+                    .insert(attr_name.to_string(), attr_value.to_string());
+            }
+        } else {
+            self.attributes
+                .insert(attr_name.to_string(), attr_value.to_string());
+        }
+    }
+
+    /// Attempts to parse media-specific attributes (rtpmap, fmtp)
+    /// Returns true if the attribute was handled, false otherwise
+    fn try_parse_media_attribute(
+        cur_media: &mut SdpMediaInfo,
+        attr_name: &str,
+        attr_value: &str,
+    ) -> bool {
+        if attr_value.is_empty() {
+            return false;
+        }
+
+        match attr_name {
+            "rtpmap" => {
+                if let Ok(rtpmap) = RtpMap::unmarshal(attr_value) {
+                    cur_media.rtpmap = rtpmap;
+                    return true;
+                }
+            }
+            "fmtp" => {
+                if let Ok(fmtp) = Fmtp::new(&cur_media.rtpmap.encoding_name, attr_value) {
+                    cur_media.fmtp = Some(fmtp);
+                }
+                return true;
+            }
+            _ => {}
+        }
+        false
+    }
+}
+
 impl Unmarshal for Sdp {
     fn unmarshal(raw_data: &str) -> Result<Self, String> {
         let mut sdp = Sdp {
@@ -216,111 +305,8 @@ impl Unmarshal for Sdp {
 
         let lines: Vec<&str> = raw_data.split(['\r', '\n']).collect();
         for line in lines {
-            if line.is_empty() {
-                continue;
-            }
-            let kv: Vec<&str> = line.trim().splitn(2, '=').collect();
-            if kv.len() < 2 {
-                log::error!("Sdp current line : {} parse error!", line);
-                continue;
-            }
-
-            match kv[0] {
-                //m=audio 11704 RTP/AVP 96 97 98 0 8 18 101 99 100 */
-                //m=video 20003 RTP/AVP 97
-
-                // v=0\r\n\
-                // o=- 0 0 IN IP4 127.0.0.1\r\n\
-                // s=No Name\r\n\
-                // c=IN IP4 127.0.0.1\r\n\
-                // t=0 0\r\n\
-
-                // m=video 0 RTP/AVP 96\r\n\
-                // b=AS:284\r\n\
-                // a=rtpmap:96 H264/90000\r\n\
-                // a=fmtp:96 packetization-mode=1; sprop-parameter-sets=Z2QAHqzZQKAv+XARAAADAAEAAAMAMg8WLZY=,aOvjyyLA; profile-level-id=64001E\r\n\
-                // a=control:streamid=0\r\n\
-                // m=audio 0 RTP/AVP 97\r\n\
-                // b=AS:128\r\n\
-                // a=rtpmap:97 MPEG4-GENERIC/48000/2\r\n\
-                // a=fmtp:97 profile-level-id=1;mode=AAC-hbr;sizelength=13;indexlength=3;indexdeltalength=3; config=119056E500\r\n\
-                // a=control:streamid=1\r\n";
-                "v" => {
-                    if let Ok(version) = kv[1].parse::<u16>() {
-                        sdp.version = version;
-                    }
-                }
-                "o" => {
-                    sdp.origin = kv[1].to_string();
-                }
-                "s" => {
-                    sdp.session = kv[1].to_string();
-                }
-                "c" => {
-                    sdp.connection = kv[1].to_string();
-                }
-                "t" => {
-                    sdp.timing = kv[1].to_string();
-                }
-                "m" => {
-                    if let Ok(sdp_media) = SdpMediaInfo::unmarshal(kv[1]) {
-                        sdp.medias.push(sdp_media);
-                    }
-                }
-                "b" => {
-                    if let Some(cur_media) = sdp.medias.last_mut() {
-                        if let Ok(bandwidth) = Bandwidth::unmarshal(kv[1]) {
-                            cur_media.bandwidth = Some(bandwidth);
-                        }
-                    } else {
-                        continue;
-                    }
-                }
-                // a=rtpmap:96 H264/90000\r\n\
-                // a=fmtp:96 packetization-mode=1; sprop-parameter-sets=Z2QAHqzZQKAv+XARAAADAAEAAAMAMg8WLZY=,aOvjyyLA; profile-level-id=64001E\r\n\
-                // a=control:streamid=0\r\n\
-                "a" => {
-                    let attribute: Vec<&str> = kv[1].splitn(2, ':').collect();
-
-                    let attr_name = attribute[0];
-                    let attr_value = if let Some(val) = attribute.get(1) {
-                        val
-                    } else {
-                        ""
-                    };
-
-                    if let Some(cur_media) = sdp.medias.last_mut() {
-                        if attribute.len() == 2 {
-                            match attr_name {
-                                "rtpmap" => {
-                                    if let Ok(rtpmap) = RtpMap::unmarshal(attr_value) {
-                                        cur_media.rtpmap = rtpmap;
-                                        continue;
-                                    }
-                                }
-                                "fmtp" => {
-                                    if let Ok(fmtp) =
-                                        Fmtp::new(&cur_media.rtpmap.encoding_name, attr_value)
-                                    {
-                                        cur_media.fmtp = Some(fmtp);
-                                    }
-                                    continue;
-                                }
-                                _ => {}
-                            }
-                        }
-                        cur_media
-                            .attributes
-                            .insert(attr_name.to_string(), attr_value.to_string());
-                    } else {
-                        sdp.attributes
-                            .insert(attr_name.to_string(), attr_value.to_string());
-                    }
-                }
-
-                _ => {
-                    log::info!("not parsed: {}", line);
-                }
+            if !line.is_empty() {
+                sdp.parse_line(line);
             }
         }
 

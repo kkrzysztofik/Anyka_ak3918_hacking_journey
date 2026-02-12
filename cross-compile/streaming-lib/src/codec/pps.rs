@@ -44,67 +44,85 @@ impl PpsParser {
         // Parse slice_group_info if num_slice_groups_minus1 > 0
         if self.pps.num_slice_groups_minus1 > 0 {
             self.pps.slice_group_map_type = utils::read_uev(&mut self.bits_reader)?;
-
-            match self.pps.slice_group_map_type {
-                0 => {
-                    // Interleaved slice group map type
-                    for _ in 0..=self.pps.num_slice_groups_minus1 {
-                        let run_length_minus1 = utils::read_uev(&mut self.bits_reader)?;
-                        self.pps.slice_group_info.push(run_length_minus1);
-                    }
-                }
-                2 => {
-                    // Foreground with left-over slice group map type
-                    for _ in 0..self.pps.num_slice_groups_minus1 {
-                        let top_left = utils::read_uev(&mut self.bits_reader)?;
-                        let bottom_right = utils::read_uev(&mut self.bits_reader)?;
-                        self.pps.slice_group_info.push(top_left);
-                        self.pps.slice_group_info.push(bottom_right);
-                    }
-                }
-                3..=5 => {
-                    // For slice_group_map_type 3, 4, 5:
-                    // Read slice_group_change_direction_flag (1 bit)
-                    let slice_group_change_direction_flag = self.bits_reader.read_bit()?;
-                    self.pps
-                        .slice_group_info
-                        .push(slice_group_change_direction_flag as u32);
-
-                    // Read slice_group_change_rate_minus1 (ue(v))
-                    let slice_group_change_rate_minus1 = utils::read_uev(&mut self.bits_reader)?;
-                    self.pps
-                        .slice_group_info
-                        .push(slice_group_change_rate_minus1);
-                }
-                6 => {
-                    // Explicit slice group map
-                    let num_slice_group_map_units_minus1 = utils::read_uev(&mut self.bits_reader)?;
-                    self.pps
-                        .slice_group_info
-                        .push(num_slice_group_map_units_minus1);
-
-                    // slice_group_id[i] is u(v) where v = ceil(log2(num_slice_groups_minus1 + 1))
-                    let num_slice_groups = self.pps.num_slice_groups_minus1 + 1;
-                    // Calculate v = ceil(log2(num_slice_groups))
-                    let v = if num_slice_groups <= 1 {
-                        1
-                    } else {
-                        (num_slice_groups - 1).ilog2() + 1
-                    } as usize;
-
-                    for _ in 0..=num_slice_group_map_units_minus1 {
-                        let slice_group_id = self.bits_reader.read_n_bits(v)?;
-                        self.pps.slice_group_info.push(slice_group_id as u32);
-                    }
-                }
-                _ => {
-                    // Types 1, 7 are not used or reserved
-                }
-            }
+            self.parse_slice_group_info()?;
         }
 
         log::trace!("parsed pps data: {:?}", self.pps);
         Ok(())
+    }
+
+    /// Parse slice group info based on slice_group_map_type
+    fn parse_slice_group_info(&mut self) -> Result<(), H264Error> {
+        match self.pps.slice_group_map_type {
+            0 => self.parse_interleaved_slice_groups(),
+            2 => self.parse_foreground_slice_groups(),
+            3..=5 => self.parse_changing_slice_groups(),
+            6 => self.parse_explicit_slice_groups(),
+            _ => Ok(()), // Types 1, 7 are not used or reserved
+        }
+    }
+
+    /// Parse interleaved slice group map type (type 0)
+    fn parse_interleaved_slice_groups(&mut self) -> Result<(), H264Error> {
+        for _ in 0..=self.pps.num_slice_groups_minus1 {
+            let run_length_minus1 = utils::read_uev(&mut self.bits_reader)?;
+            self.pps.slice_group_info.push(run_length_minus1);
+        }
+        Ok(())
+    }
+
+    /// Parse foreground with left-over slice group map type (type 2)
+    fn parse_foreground_slice_groups(&mut self) -> Result<(), H264Error> {
+        for _ in 0..self.pps.num_slice_groups_minus1 {
+            let top_left = utils::read_uev(&mut self.bits_reader)?;
+            let bottom_right = utils::read_uev(&mut self.bits_reader)?;
+            self.pps.slice_group_info.push(top_left);
+            self.pps.slice_group_info.push(bottom_right);
+        }
+        Ok(())
+    }
+
+    /// Parse changing slice group map types (3, 4, 5)
+    fn parse_changing_slice_groups(&mut self) -> Result<(), H264Error> {
+        // Read slice_group_change_direction_flag (1 bit)
+        let slice_group_change_direction_flag = self.bits_reader.read_bit()?;
+        self.pps
+            .slice_group_info
+            .push(slice_group_change_direction_flag as u32);
+
+        // Read slice_group_change_rate_minus1 (ue(v))
+        let slice_group_change_rate_minus1 = utils::read_uev(&mut self.bits_reader)?;
+        self.pps
+            .slice_group_info
+            .push(slice_group_change_rate_minus1);
+        Ok(())
+    }
+
+    /// Parse explicit slice group map (type 6)
+    fn parse_explicit_slice_groups(&mut self) -> Result<(), H264Error> {
+        let num_slice_group_map_units_minus1 = utils::read_uev(&mut self.bits_reader)?;
+        self.pps
+            .slice_group_info
+            .push(num_slice_group_map_units_minus1);
+
+        // slice_group_id[i] is u(v) where v = ceil(log2(num_slice_groups_minus1 + 1))
+        let num_slice_groups = self.pps.num_slice_groups_minus1 + 1;
+        let v = Self::calculate_slice_group_id_bits(num_slice_groups);
+
+        for _ in 0..=num_slice_group_map_units_minus1 {
+            let slice_group_id = self.bits_reader.read_n_bits(v)?;
+            self.pps.slice_group_info.push(slice_group_id as u32);
+        }
+        Ok(())
+    }
+
+    /// Calculate bits needed for slice_group_id: v = ceil(log2(num_slice_groups))
+    fn calculate_slice_group_id_bits(num_slice_groups: u32) -> usize {
+        if num_slice_groups <= 1 {
+            1
+        } else {
+            ((num_slice_groups - 1).ilog2() + 1) as usize
+        }
     }
 }
 
@@ -215,6 +233,42 @@ mod tests {
         builder.write_uev(0); // slice_group_map_type = 0 (interleaved)
         builder.write_uev(10); // run_length_minus1[0] = 10
         builder.write_uev(20); // run_length_minus1[1] = 20
+
+        builder.build()
+    }
+
+    /// PPS with slice_group_map_type = 2 (foreground with left-over)
+    fn create_pps_slice_group_map_type_2() -> BytesMut {
+        let mut builder = PpsBuilder::new();
+
+        builder.write_uev(3); // pic_parameter_set_id = 3
+        builder.write_uev(0); // seq_parameter_set_id = 0
+        builder.write_bit(0); // entropy_coding_mode_flag = 0
+        builder.write_bit(0); // bottom_field_pic_order_in_frame_present_flag = 0
+        builder.write_uev(2); // num_slice_groups_minus1 = 2
+        builder.write_uev(2); // slice_group_map_type = 2
+        builder.write_uev(1); // top_left[0]
+        builder.write_uev(3); // bottom_right[0]
+        builder.write_uev(4); // top_left[1]
+        builder.write_uev(8); // bottom_right[1]
+
+        builder.build()
+    }
+
+    /// PPS with slice_group_map_type = 6 (explicit)
+    fn create_pps_slice_group_map_type_6() -> BytesMut {
+        let mut builder = PpsBuilder::new();
+
+        builder.write_uev(4); // pic_parameter_set_id = 4
+        builder.write_uev(0); // seq_parameter_set_id = 0
+        builder.write_bit(0); // entropy_coding_mode_flag = 0
+        builder.write_bit(0); // bottom_field_pic_order_in_frame_present_flag = 0
+        builder.write_uev(2); // num_slice_groups_minus1 = 2 -> num_slice_groups = 3
+        builder.write_uev(6); // slice_group_map_type = 6
+        builder.write_uev(2); // num_slice_group_map_units_minus1 = 2
+        builder.write_bits(0, 2); // slice_group_id[0]
+        builder.write_bits(1, 2); // slice_group_id[1]
+        builder.write_bits(2, 2); // slice_group_id[2]
 
         builder.build()
     }
@@ -354,6 +408,34 @@ mod tests {
         assert_eq!(parser.pps.slice_group_map_type, 0); // Interleaved
         // Should have run_length_minus1 values for each slice group
         assert!(parser.pps.slice_group_info.len() >= 2);
+    }
+
+    #[test]
+    fn test_pps_parse_slice_group_map_type_2_foreground() {
+        let data = create_pps_slice_group_map_type_2();
+        let bytes_reader = BytesReader::new(data);
+        let mut parser = PpsParser::new(bytes_reader);
+
+        let result = parser.parse();
+
+        assert!(result.is_ok());
+        assert_eq!(parser.pps.num_slice_groups_minus1, 2);
+        assert_eq!(parser.pps.slice_group_map_type, 2);
+        assert_eq!(parser.pps.slice_group_info, vec![1, 3, 4, 8]);
+    }
+
+    #[test]
+    fn test_pps_parse_slice_group_map_type_6_explicit() {
+        let data = create_pps_slice_group_map_type_6();
+        let bytes_reader = BytesReader::new(data);
+        let mut parser = PpsParser::new(bytes_reader);
+
+        let result = parser.parse();
+
+        assert!(result.is_ok());
+        assert_eq!(parser.pps.num_slice_groups_minus1, 2);
+        assert_eq!(parser.pps.slice_group_map_type, 6);
+        assert_eq!(parser.pps.slice_group_info, vec![2, 0, 1, 2]);
     }
 
     // ============================================
