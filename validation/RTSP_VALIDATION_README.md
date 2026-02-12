@@ -277,9 +277,9 @@ Common CLI overrides: `--rtsp-host`, `--rtsp-port`, `--rtsp-stream`, `--username
 
 - **first_video_frame_latency_ms** – Protocol path first decoded frame latency (threshold: `video-startup-latency-ms` or `--max-video-startup-latency-ms`).
 - **harness_startup_latency_ms** – Harness startup to first decoded frame (threshold: `harness-startup-latency-ms`; for external FFmpeg/MediaMTX streams, `2500-4000` ms is common).
-- **harness_bitrate_kbps**, **harness_fps** – From ffmpeg progress; validated via config expected values or baselines.
+- **harness_bitrate_kbps**, **harness_fps** – From ffmpeg progress; also require sane minimums (`>=1 kbps`, `>=5 fps`) before passing, then validated via config expected values or baselines.
 - **harness_packet_loss_percent** – RTP loss from capture (threshold in config).
-- **harness_protocol_sequence** – RTSP method counts and status codes from pcap.
+- **harness_protocol_sequence** – RTSP method counts and status codes from pcap. Auth challenge `401` responses are tracked separately and do not fail the metric by themselves.
 - **harness_pcap_rfc6184_h264** – RTP payload structural validation for H.264 per RFC 6184 (Single NAL / STAP-A / FU-A).
 - **harness_pcap_rfc3640_aac** – RTP payload structural validation for AAC MPEG4-GENERIC per RFC 3640 (AU headers length + AU sizes).
 

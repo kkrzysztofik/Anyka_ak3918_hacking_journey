@@ -27,6 +27,20 @@ use crate::util::{MAX_TOOL_LOG_BYTES, tail_lossy, write_bytes_tail};
 
 const PROBE_DEMUX_ERROR_TOLERANCE: u32 = 3;
 const PROTOCOL_SEQUENCE_CAPTURE_MAX_DURATION_SEC: u64 = 12;
+const MIN_HARNESS_FPS: f64 = 5.0;
+const MIN_HARNESS_BITRATE_KBPS: f64 = 1.0;
+
+#[derive(Debug, Clone, Copy, Default)]
+struct RtspProtocolSequenceStats {
+    describe: u32,
+    setup: u32,
+    play: u32,
+    teardown: u32,
+    status_200: u32,
+    status_4xx: u32,
+    status_401: u32,
+    status_5xx: u32,
+}
 
 pub(crate) fn rtsp_url(host: &str, port: u16, stream: &str) -> String {
     format!("rtsp://{}:{}{}", host, port, stream)
@@ -882,6 +896,38 @@ pub fn fps_within_tolerance(measured: f64, expected: f64, tolerance_percent: u32
     (measured - expected).abs() / expected <= tol
 }
 
+fn harness_bitrate_pass(
+    measured_kbps: f64,
+    expected_kbps: Option<f64>,
+    tolerance_percent: u32,
+) -> bool {
+    if measured_kbps < MIN_HARNESS_BITRATE_KBPS {
+        return false;
+    }
+    expected_kbps
+        .map(|e| bitrate_within_tolerance(measured_kbps, e, tolerance_percent))
+        .unwrap_or(true)
+}
+
+fn harness_fps_pass(measured_fps: f64, expected_fps: Option<f64>, tolerance_percent: u32) -> bool {
+    if measured_fps < MIN_HARNESS_FPS {
+        return false;
+    }
+    expected_fps
+        .map(|e| fps_within_tolerance(measured_fps, e, tolerance_percent))
+        .unwrap_or(true)
+}
+
+fn harness_protocol_sequence_pass(stats: &RtspProtocolSequenceStats) -> bool {
+    let non_auth_4xx = stats.status_4xx.saturating_sub(stats.status_401);
+    stats.describe > 0
+        && stats.setup > 0
+        && stats.play > 0
+        && stats.status_200 > 0
+        && non_auth_4xx == 0
+        && stats.status_5xx == 0
+}
+
 /// Returns true if loss_percent is within max_percent (i.e. loss_percent <= max_percent).
 pub fn packet_loss_within_tolerance(loss_percent: f64, max_percent: f64) -> bool {
     loss_percent <= max_percent
@@ -1502,14 +1548,13 @@ pub async fn run_harness(
     .await
     {
         Ok(Ok((bitrate, fps))) => {
-            let bitrate_pass = effective
-                .expected_bitrate_kbps
-                .map(|e| bitrate_within_tolerance(bitrate, e, effective.bitrate_tolerance_percent))
-                .unwrap_or(true);
-            let fps_pass = effective
-                .expected_fps
-                .map(|e| fps_within_tolerance(fps, e, effective.fps_tolerance_percent))
-                .unwrap_or(true);
+            let bitrate_pass = harness_bitrate_pass(
+                bitrate,
+                effective.expected_bitrate_kbps,
+                effective.bitrate_tolerance_percent,
+            );
+            let fps_pass =
+                harness_fps_pass(fps, effective.expected_fps, effective.fps_tolerance_percent);
             tests.push(TestResult::metric(
                 "harness_bitrate_kbps",
                 serde_json::json!(bitrate),
@@ -1579,17 +1624,21 @@ pub async fn run_harness(
     )
     .await
     {
-        Ok(Ok((describe, setup, play, teardown, status_200, status_err))) => {
-            let pass = describe > 0 && setup > 0 && play > 0 && status_err == 0 && status_200 > 0;
+        Ok(Ok(stats)) => {
+            let status_non_auth_4xx = stats.status_4xx.saturating_sub(stats.status_401);
+            let pass = harness_protocol_sequence_pass(&stats);
             tests.push(TestResult::metric(
                 "harness_protocol_sequence",
                 serde_json::json!({
-                    "describe": describe,
-                    "setup": setup,
-                    "play": play,
-                    "teardown": teardown,
-                    "status_200": status_200,
-                    "status_4xx": status_err,
+                    "describe": stats.describe,
+                    "setup": stats.setup,
+                    "play": stats.play,
+                    "teardown": stats.teardown,
+                    "status_200": stats.status_200,
+                    "status_4xx": stats.status_4xx,
+                    "status_401_auth_challenge": stats.status_401,
+                    "status_non_auth_4xx": status_non_auth_4xx,
+                    "status_5xx": stats.status_5xx,
                 }),
                 pass,
             ));
@@ -2099,7 +2148,7 @@ async fn harness_rtsp_protocol_sequence(
     url: &str,
     effective: &EffectiveConfig,
     _args: &Args,
-) -> Result<(u32, u32, u32, u32, u32, u32)> {
+) -> Result<RtspProtocolSequenceStats> {
     let iface = effective.capture_interface.clone();
     let port = effective.rtsp_port;
     let url = url.to_string();
@@ -2194,66 +2243,65 @@ async fn harness_rtsp_protocol_sequence(
     let _ = tshark_handle.wait();
 
     let pcap_path_str = pcap_path.to_string_lossy().to_string();
-    let (describe, setup, play, teardown, status_200, status_err) =
-        tokio::task::spawn_blocking(move || {
-            let mut builder = RTSharkBuilder::builder();
-            let mut rtshark = builder
-                .input_path(&pcap_path_str)
-                .spawn()
-                .context("rtshark spawn")?;
-            let mut describe = 0u32;
-            let mut setup = 0u32;
-            let mut play = 0u32;
-            let mut teardown = 0u32;
-            let mut status_200 = 0u32;
-            let mut status_err = 0u32;
-            while let Some(packet) = rtshark.read().context("rtshark read")? {
-                for layer in packet {
-                    let name = layer.name().to_string();
-                    if name == "rtsp" {
-                        let mut counted_method = false;
-                        let mut counted_status = false;
-                        for meta in layer {
-                            if !counted_method
-                                && let Some(method) =
-                                    parse_rtsp_method_from_meta(meta.name(), meta.value())
-                            {
-                                match method {
-                                    "DESCRIBE" => describe += 1,
-                                    "SETUP" => setup += 1,
-                                    "PLAY" => play += 1,
-                                    "TEARDOWN" => teardown += 1,
-                                    _ => {}
+    let stats = tokio::task::spawn_blocking(move || {
+        let mut builder = RTSharkBuilder::builder();
+        let mut rtshark = builder
+            .input_path(&pcap_path_str)
+            .spawn()
+            .context("rtshark spawn")?;
+        let mut stats = RtspProtocolSequenceStats::default();
+        while let Some(packet) = rtshark.read().context("rtshark read")? {
+            for layer in packet {
+                let name = layer.name().to_string();
+                if name == "rtsp" {
+                    let mut counted_method = false;
+                    let mut counted_status = false;
+                    for meta in layer {
+                        if !counted_method
+                            && let Some(method) =
+                                parse_rtsp_method_from_meta(meta.name(), meta.value())
+                        {
+                            match method {
+                                "DESCRIBE" => stats.describe += 1,
+                                "SETUP" => stats.setup += 1,
+                                "PLAY" => stats.play += 1,
+                                "TEARDOWN" => stats.teardown += 1,
+                                _ => {}
+                            }
+                            counted_method = true;
+                        }
+                        if !counted_status
+                            && let Some(status) =
+                                parse_rtsp_status_code_from_meta(meta.name(), meta.value())
+                        {
+                            if (200..300).contains(&status) {
+                                stats.status_200 += 1;
+                            } else if (400..500).contains(&status) {
+                                stats.status_4xx += 1;
+                                if status == 401 {
+                                    stats.status_401 += 1;
                                 }
-                                counted_method = true;
+                            } else if status >= 500 {
+                                stats.status_5xx += 1;
                             }
-                            if !counted_status
-                                && let Some(status) =
-                                    parse_rtsp_status_code_from_meta(meta.name(), meta.value())
-                            {
-                                if status == 200 {
-                                    status_200 += 1;
-                                } else if status >= 400 {
-                                    status_err += 1;
-                                }
-                                counted_status = true;
-                            }
-                            if counted_method && counted_status {
-                                break;
-                            }
+                            counted_status = true;
+                        }
+                        if counted_method && counted_status {
+                            break;
                         }
                     }
                 }
             }
-            if !keep_pcaps {
-                let _ = std::fs::remove_file(&pcap_path_str);
-            }
-            Ok::<_, anyhow::Error>((describe, setup, play, teardown, status_200, status_err))
-        })
-        .await
-        .context("spawn_blocking")??;
+        }
+        if !keep_pcaps {
+            let _ = std::fs::remove_file(&pcap_path_str);
+        }
+        Ok::<_, anyhow::Error>(stats)
+    })
+    .await
+    .context("spawn_blocking")??;
 
-    Ok((describe, setup, play, teardown, status_200, status_err))
+    Ok(stats)
 }
 
 async fn harness_packet_loss(
@@ -2684,9 +2732,10 @@ async fn harness_error_handling(
 #[cfg(test)]
 mod tests {
     use super::{
-        BoundedLogWriter, RtpTsharkRow, bitrate_within_tolerance, build_sdp_test_results,
-        compute_packet_loss_from_seqs, critical_proto_failed, empty_report, fps_within_tolerance,
-        group_rtp_rows_by_stream, packet_loss_within_tolerance, parse_rtsp_method_from_meta,
+        BoundedLogWriter, RtpTsharkRow, RtspProtocolSequenceStats, bitrate_within_tolerance,
+        build_sdp_test_results, compute_packet_loss_from_seqs, critical_proto_failed, empty_report,
+        fps_within_tolerance, group_rtp_rows_by_stream, harness_bitrate_pass, harness_fps_pass,
+        harness_protocol_sequence_pass, packet_loss_within_tolerance, parse_rtsp_method_from_meta,
         parse_rtsp_status_code_from_meta, parse_tshark_hex_bytes, parse_tshark_rtp_row_line,
         pick_primary_audio_stream, pick_primary_video_stream, redact_url_credentials, result_ok,
         rtsp_url, rtsp_url_with_credentials, to_retina_initial_timestamp_policy,
@@ -3174,6 +3223,48 @@ mod tests {
         assert!(fps_within_tolerance(33.0, 30.0, 10));
         assert!(fps_within_tolerance(27.0, 30.0, 10));
         assert!(!fps_within_tolerance(25.0, 30.0, 10));
+    }
+
+    #[test]
+    fn test_harness_fps_pass_enforces_minimum_without_expected() {
+        assert!(!harness_fps_pass(0.3, None, 10));
+        assert!(harness_fps_pass(25.0, None, 10));
+    }
+
+    #[test]
+    fn test_harness_bitrate_pass_enforces_minimum_without_expected() {
+        assert!(!harness_bitrate_pass(0.0, None, 15));
+        assert!(harness_bitrate_pass(800.0, None, 15));
+    }
+
+    #[test]
+    fn test_harness_protocol_sequence_pass_allows_auth_challenge_401() {
+        let stats = RtspProtocolSequenceStats {
+            describe: 2,
+            setup: 2,
+            play: 1,
+            teardown: 1,
+            status_200: 5,
+            status_4xx: 1,
+            status_401: 1,
+            status_5xx: 0,
+        };
+        assert!(harness_protocol_sequence_pass(&stats));
+    }
+
+    #[test]
+    fn test_harness_protocol_sequence_pass_rejects_non_auth_4xx() {
+        let stats = RtspProtocolSequenceStats {
+            describe: 1,
+            setup: 2,
+            play: 1,
+            teardown: 1,
+            status_200: 4,
+            status_4xx: 1,
+            status_401: 0,
+            status_5xx: 0,
+        };
+        assert!(!harness_protocol_sequence_pass(&stats));
     }
 
     #[test]
