@@ -25,10 +25,10 @@ elif [[ -d "${DOCKER_TOOLCHAIN_BASE}" ]]; then
     TOOLCHAIN_BASE="${DOCKER_TOOLCHAIN_BASE}"
     ENV_TYPE="Docker"
 else
-    echo "ERROR: toolchain not found."
-    echo "Expected one of:"
-    echo "  - ${VENDORED_TOOLCHAIN_BASE}"
-    echo "  - ${DOCKER_TOOLCHAIN_BASE}"
+    echo "ERROR: toolchain not found." >&2
+    echo "Expected one of:" >&2
+    echo "  - ${VENDORED_TOOLCHAIN_BASE}" >&2
+    echo "  - ${DOCKER_TOOLCHAIN_BASE}" >&2
     exit 1
 fi
 
