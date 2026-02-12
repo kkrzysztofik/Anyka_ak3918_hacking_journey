@@ -110,6 +110,43 @@ fn process_match_needle(rtsp_url: &str) -> String {
     rtsp_url.to_string()
 }
 
+fn parse_ffmpeg_kbytes_token(raw: &str) -> Option<f64> {
+    let trimmed = raw.trim().trim_end_matches(',');
+    if let Some(value) = trimmed.strip_suffix("kB") {
+        return value.trim().parse::<f64>().ok();
+    }
+    if let Some(value) = trimmed.strip_suffix("MB") {
+        return value.trim().parse::<f64>().ok().map(|v| v * 1000.0);
+    }
+    if let Some(value) = trimmed.strip_suffix('B') {
+        return value.trim().parse::<f64>().ok().map(|v| v / 1000.0);
+    }
+    None
+}
+
+fn parse_ffmpeg_summary_bitrate_kbps(log_line: &str, duration_sec: u64) -> Option<f64> {
+    if duration_sec == 0 {
+        return None;
+    }
+    let mut total_kbytes = 0.0_f64;
+    let mut found = false;
+    for field in log_line.split_whitespace() {
+        let maybe_value = field
+            .strip_prefix("video:")
+            .or_else(|| field.strip_prefix("audio:"));
+        if let Some(value) = maybe_value
+            && let Some(kbytes) = parse_ffmpeg_kbytes_token(value)
+        {
+            total_kbytes += kbytes;
+            found = true;
+        }
+    }
+    if !found || total_kbytes <= 0.0 {
+        return None;
+    }
+    Some((total_kbytes * 8.0) / duration_sec as f64)
+}
+
 fn terminate_processes_by_pattern(pattern: &str) -> Result<u32> {
     let output = Command::new("pgrep")
         .arg("-f")
@@ -2048,6 +2085,7 @@ async fn harness_bitrate_fps(
         let iter = child.iter().context("ffmpeg iter")?;
         let mut last_bitrate = 0.0_f64;
         let mut last_fps = 0.0_f64;
+        let mut summary_bitrate_kbps = None;
         let mut progress_count: u32 = 0;
         for event in iter {
             if let Some(l) = log.as_mut() {
@@ -2060,6 +2098,11 @@ async fn harness_bitrate_fps(
                     FfmpegEvent::Done => l.write_line("done")?,
                     other => l.write_line(&format!("event={:?}", other))?,
                 }
+            }
+            if let FfmpegEvent::Log(_, msg) = &event
+                && let Some(estimated) = parse_ffmpeg_summary_bitrate_kbps(msg, dur)
+            {
+                summary_bitrate_kbps = Some(estimated);
             }
             if let FfmpegEvent::Progress(FfmpegProgress {
                 frame,
@@ -2078,7 +2121,12 @@ async fn harness_bitrate_fps(
                 }
             }
         }
-        Ok::<_, anyhow::Error>((last_bitrate, last_fps))
+        let resolved_bitrate = if last_bitrate > 0.0 {
+            last_bitrate
+        } else {
+            summary_bitrate_kbps.unwrap_or(0.0)
+        };
+        Ok::<_, anyhow::Error>((resolved_bitrate, last_fps))
     })
     .await
     .context("spawn_blocking")??;
@@ -2735,7 +2783,8 @@ mod tests {
         BoundedLogWriter, RtpTsharkRow, RtspProtocolSequenceStats, bitrate_within_tolerance,
         build_sdp_test_results, compute_packet_loss_from_seqs, critical_proto_failed, empty_report,
         fps_within_tolerance, group_rtp_rows_by_stream, harness_bitrate_pass, harness_fps_pass,
-        harness_protocol_sequence_pass, packet_loss_within_tolerance, parse_rtsp_method_from_meta,
+        harness_protocol_sequence_pass, packet_loss_within_tolerance, parse_ffmpeg_kbytes_token,
+        parse_ffmpeg_summary_bitrate_kbps, parse_rtsp_method_from_meta,
         parse_rtsp_status_code_from_meta, parse_tshark_hex_bytes, parse_tshark_rtp_row_line,
         pick_primary_audio_stream, pick_primary_video_stream, redact_url_credentials, result_ok,
         rtsp_url, rtsp_url_with_credentials, to_retina_initial_timestamp_policy,
@@ -3265,6 +3314,26 @@ mod tests {
             status_5xx: 0,
         };
         assert!(!harness_protocol_sequence_pass(&stats));
+    }
+
+    #[test]
+    fn test_parse_ffmpeg_kbytes_token() {
+        assert_eq!(parse_ffmpeg_kbytes_token("52kB"), Some(52.0));
+        assert_eq!(parse_ffmpeg_kbytes_token("1MB"), Some(1000.0));
+        assert!(parse_ffmpeg_kbytes_token("n/a").is_none());
+    }
+
+    #[test]
+    fn test_parse_ffmpeg_summary_bitrate_kbps() {
+        let line = "[info] video:52kB audio:792kB subtitle:0kB";
+        let bitrate = parse_ffmpeg_summary_bitrate_kbps(line, 30).unwrap();
+        assert!((bitrate - 225.0666666667).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_parse_ffmpeg_summary_bitrate_kbps_missing_fields() {
+        let line = "[info] Output #0, null, to 'pipe:'";
+        assert!(parse_ffmpeg_summary_bitrate_kbps(line, 30).is_none());
     }
 
     #[test]

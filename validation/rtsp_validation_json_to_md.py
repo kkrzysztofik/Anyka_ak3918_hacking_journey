@@ -10,6 +10,30 @@ from pathlib import Path
 from typing import Any, cast
 
 
+def find_latest_run() -> Path | None:
+    """Find the most recent run folder and return path to its JSON."""
+    # Try to find runs directory relative to script location
+    script_dir = Path(__file__).parent
+    runs_dir = script_dir / "rtsp_results" / "runs"
+    
+    if not runs_dir.exists():
+        # Try from current working directory
+        runs_dir = Path("rtsp_results/runs")
+        if not runs_dir.exists():
+            return None
+    
+    # Get all run directories (they're named with timestamps)
+    run_dirs = [d for d in runs_dir.iterdir() if d.is_dir()]
+    if not run_dirs:
+        return None
+    
+    # Sort by name (timestamp) and get the most recent
+    latest = sorted(run_dirs, reverse=True)[0]
+    json_path = latest / "rtsp_validation.json"
+    
+    return json_path if json_path.exists() else None
+
+
 def cell(s: str) -> str:
     """Escape pipe so table cells don't break."""
     return str(s).replace("|", ",").replace("\n", " ")
@@ -88,8 +112,7 @@ def main() -> int:
     parser.add_argument(
         "input",
         nargs="?",
-        default="rtsp_validation.json",
-        help="Input JSON path (default: rtsp_validation.json)",
+        help="Input JSON path (default: latest run in rtsp_results/runs/)",
     )
     parser.add_argument(
         "-o", "--output",
@@ -97,7 +120,18 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    path = Path(args.input)
+    # Determine input path
+    if args.input:
+        path = Path(args.input)
+    else:
+        # Auto-find latest run
+        path = find_latest_run()
+        if path is None:
+            print("Error: No input file specified and couldn't find latest run", file=sys.stderr)
+            print("Usage: rtsp_validation_json_to_md.py [input.json]", file=sys.stderr)
+            return 1
+        print(f"Using latest run: {path}", file=sys.stderr)
+    
     if not path.exists():
         print(f"Error: {path} not found", file=sys.stderr)
         return 1
