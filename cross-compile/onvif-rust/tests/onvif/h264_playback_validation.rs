@@ -9,46 +9,56 @@ mod tests {
     use std::time::Duration;
     use streaming_lib::TStreamHandler;
 
-    fn setup_test_h264_file() -> String {
-        // Use UUID to ensure unique file per test (prevents race conditions)
-        let uuid = std::time::SystemTime::now()
+    const START_CODE: &[u8] = &[0x00, 0x00, 0x00, 0x01];
+    const SPS_NAL: &[u8] = &[0x27, 0x42, 0xc0, 0x28, 0xd9, 0x05, 0x05, 0x14, 0x11, 0x00];
+    const PPS_NAL: &[u8] = &[0x28, 0xce, 0x06, 0xe2];
+
+    fn generate_uuid() -> u128 {
+        std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
-            .as_nanos();
-        let test_file = format!("/tmp/test_h264_integration_{}.h264", uuid);
+            .as_nanos()
+    }
 
-        // Clean up if exists
-        let _ = fs::remove_file(&test_file);
-
-        // Create minimal test H264 file
-        let mut file = fs::File::create(&test_file).unwrap();
+    fn write_h264_file(path: &str) {
+        let _ = fs::remove_file(path);
+        let mut file = fs::File::create(path).unwrap();
         use std::io::Write;
-
-        let start_code: &[u8] = &[0x00, 0x00, 0x00, 0x01];
-        let sps: &[u8] = &[0x27, 0x42, 0xc0, 0x28, 0xd9, 0x05, 0x05, 0x14, 0x11, 0x00];
-        let pps: &[u8] = &[0x28, 0xce, 0x06, 0xe2];
-
-        // Write SPS
-        file.write_all(start_code).unwrap();
-        file.write_all(sps).unwrap();
-
-        // Write PPS
-        file.write_all(start_code).unwrap();
-        file.write_all(pps).unwrap();
-
-        // Write a few frame NAL units
+        file.write_all(START_CODE).unwrap();
+        file.write_all(SPS_NAL).unwrap();
+        file.write_all(START_CODE).unwrap();
+        file.write_all(PPS_NAL).unwrap();
         for i in 0..5 {
-            let nal_type = if i == 0 { 0x05u8 } else { 0x01u8 }; // IDR or P-frame
+            let nal_type = if i == 0 { 0x05u8 } else { 0x01u8 };
             let mut frame_data = vec![nal_type];
             for j in 0..32 {
                 frame_data.push(((i * 7 + j) & 0xff) as u8);
             }
-
-            file.write_all(start_code).unwrap();
+            file.write_all(START_CODE).unwrap();
             file.write_all(&frame_data).unwrap();
         }
+    }
 
-        test_file.to_string()
+    fn setup_test_h264_file() -> String {
+        let test_file = format!("/tmp/test_h264_integration_{}.h264", generate_uuid());
+        write_h264_file(&test_file);
+        test_file
+    }
+
+    fn create_test_config(file_path: String) -> H264PlaybackConfig {
+        H264PlaybackConfig {
+            file_path,
+            audio_file_path: None,
+            frame_rate: 25,
+            audio_sample_rate: 48000,
+            loop_playback: false,
+            rtsp_port: 8554,
+            httpflv_port: 8080,
+        }
+    }
+
+    fn cleanup_file(path: &str) {
+        let _ = fs::remove_file(path);
     }
 
     #[test]
@@ -56,12 +66,11 @@ mod tests {
         let test_file = setup_test_h264_file();
         assert!(Path::new(&test_file).exists());
         assert!(fs::metadata(&test_file).unwrap().len() > 0);
-        let _ = fs::remove_file(test_file);
+        cleanup_file(&test_file);
     }
 
     #[test]
     fn test_validation_configuration() {
-        // Real test: verify the validation configuration can be created
         let config = super::fixtures::H264PlaybackTestConfig {
             file_path: setup_test_h264_file(),
             frame_rate: 25,
@@ -75,146 +84,116 @@ mod tests {
         assert_eq!(config.rtsp_port, 8554);
         assert_eq!(config.httpflv_port, 8080);
 
-        let _ = fs::remove_file(&config.file_path);
+        cleanup_file(&config.file_path);
     }
 
     #[tokio::test]
     async fn test_mock_publisher_creation() {
-        // Real test: verify MockVideoPublisher can be created and initialized
         use streaming_lib::streamhub::mock_publisher::MockVideoPublisher;
 
         let test_file = setup_test_h264_file();
-
-        // Create publisher
         let publisher =
             MockVideoPublisher::new("test_stream".to_string(), &test_file, 25, false).await;
 
         assert!(publisher.is_ok());
         let pub_instance = publisher.unwrap();
-
-        // Verify metadata is available
         assert!(!pub_instance.sps().is_empty());
         assert!(!pub_instance.pps().is_empty());
         assert_eq!(pub_instance.stream_name(), "test_stream");
 
-        let _ = fs::remove_file(&test_file);
+        cleanup_file(&test_file);
     }
 
     #[tokio::test]
     async fn test_mock_publisher_frame_emission() {
-        // Real test: verify MockVideoPublisher emits frames correctly
         use streaming_lib::streamhub::mock_publisher::MockVideoPublisher;
         use tokio::sync::mpsc;
 
         let test_file = setup_test_h264_file();
-
         let publisher = MockVideoPublisher::new("test_stream".to_string(), &test_file, 25, true)
             .await
             .unwrap();
 
-        // Create frame receiver
         let (sender, mut receiver) = mpsc::unbounded_channel();
-
-        // Start publishing
         let handle = publisher.start_publishing(sender);
 
-        // Collect emitted frames
         let mut frame_count = 0;
-        let timeout = std::time::Duration::from_secs(2);
+        let timeout = Duration::from_secs(2);
 
         while let Ok(Some(_frame)) = tokio::time::timeout(timeout, receiver.recv()).await {
             frame_count += 1;
-            // Stop after receiving enough frames
             if frame_count >= 10 {
                 break;
             }
         }
 
-        // Verify frames were emitted
         assert!(
             frame_count >= 2,
             "Expected at least 2 frames, got {}",
             frame_count
         );
 
-        // Stop publishing
         publisher.stop_publishing().await;
         let _ = handle.await;
 
-        let _ = fs::remove_file(&test_file);
+        cleanup_file(&test_file);
     }
 
     #[tokio::test]
     async fn test_tstream_handler_prior_data() {
-        // Real test: verify TStreamHandler sends prior data (MediaInfo + SDP)
         use streaming_lib::streamhub::define::{DataSender, FrameData, SubscribeType};
         use streaming_lib::streamhub::mock_publisher::MockVideoPublisher;
         use tokio::sync::mpsc;
 
         let test_file = setup_test_h264_file();
-
         let publisher = MockVideoPublisher::new("test_stream".to_string(), &test_file, 25, true)
             .await
             .unwrap();
 
-        // Create frame receiver for prior data
         let (sender, mut receiver) = mpsc::unbounded_channel();
         let data_sender = DataSender::Frame { sender };
 
-        // Call send_prior_data
         let result = publisher
             .send_prior_data(data_sender, SubscribeType::RtmpPull)
             .await;
         assert!(result.is_ok());
 
-        // Verify MediaInfo was sent
         let mut received_media_info = false;
-        let timeout = std::time::Duration::from_millis(500);
+        let timeout = Duration::from_millis(500);
 
         while let Ok(Some(frame)) = tokio::time::timeout(timeout, receiver.recv()).await {
-            match frame {
-                FrameData::MediaInfo { media_info } => {
-                    received_media_info = true;
-                    assert_eq!(media_info.audio_clock_rate, 48000);
-                    assert_eq!(media_info.video_clock_rate, 90000);
-                    break;
-                }
-                _ => {}
+            if let FrameData::MediaInfo { media_info } = frame {
+                received_media_info = true;
+                assert_eq!(media_info.audio_clock_rate, 48000);
+                assert_eq!(media_info.video_clock_rate, 90000);
+                break;
             }
         }
 
         assert!(received_media_info, "Did not receive MediaInfo frame");
-
-        let _ = fs::remove_file(&test_file);
+        cleanup_file(&test_file);
     }
 
     #[tokio::test]
     async fn test_tstream_handler_sdp_generation() {
-        // Real test: verify TStreamHandler sends proper SDP information
         use streaming_lib::streamhub::define::Information;
         use streaming_lib::streamhub::mock_publisher::MockVideoPublisher;
         use tokio::sync::mpsc;
 
         let test_file = setup_test_h264_file();
-
         let publisher = MockVideoPublisher::new("test_stream".to_string(), &test_file, 25, false)
             .await
             .unwrap();
 
-        // Create information receiver
         let (sender, mut receiver) = mpsc::unbounded_channel();
-
-        // Call send_information
         publisher.send_information(sender).await;
 
-        // Verify SDP was sent
         let mut received_sdp = false;
-        let timeout = std::time::Duration::from_millis(500);
+        let timeout = Duration::from_millis(500);
 
         while let Ok(Some(info)) = tokio::time::timeout(timeout, receiver.recv()).await {
             let Information::Sdp { data } = info;
             received_sdp = true;
-            // Verify SDP format
             assert!(data.contains("v=0"));
             assert!(data.contains("o="));
             assert!(data.contains("s="));
@@ -226,36 +205,21 @@ mod tests {
         }
 
         assert!(received_sdp, "Did not receive SDP information");
-
-        let _ = fs::remove_file(&test_file);
+        cleanup_file(&test_file);
     }
 
     #[tokio::test]
     async fn test_concurrent_publishers() {
-        // Real test: verify multiple concurrent publishers can be created
         use streaming_lib::streamhub::mock_publisher::MockVideoPublisher;
 
-        let uuid = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
+        let uuid = generate_uuid();
         let test_file1 = format!("/tmp/test_h264_1_{}.h264", uuid);
         let test_file2 = format!("/tmp/test_h264_2_{}.h264", uuid);
 
-        // Create test files
-        for file_path in &[&test_file1, &test_file2] {
-            let mut file = fs::File::create(file_path).unwrap();
-            use std::io::Write;
-            let start_code: &[u8] = &[0x00, 0x00, 0x00, 0x01];
-            let sps: &[u8] = &[0x27, 0x42, 0xc0, 0x28, 0xd9, 0x05, 0x05, 0x14, 0x11, 0x00];
-            let pps: &[u8] = &[0x28, 0xce, 0x06, 0xe2];
-            file.write_all(start_code).unwrap();
-            file.write_all(sps).unwrap();
-            file.write_all(start_code).unwrap();
-            file.write_all(pps).unwrap();
+        for path in &[&test_file1, &test_file2] {
+            write_h264_file(path);
         }
 
-        // Create multiple publishers concurrently
         let pub1 = MockVideoPublisher::new("stream1".to_string(), &test_file1, 25, false);
         let pub2 = MockVideoPublisher::new("stream2".to_string(), &test_file2, 30, false);
 
@@ -270,61 +234,44 @@ mod tests {
         assert_eq!(pub1_inst.stream_name(), "stream1");
         assert_eq!(pub2_inst.stream_name(), "stream2");
 
-        // Clean up
-        let _ = fs::remove_file(&test_file1);
-        let _ = fs::remove_file(&test_file2);
+        cleanup_file(&test_file1);
+        cleanup_file(&test_file2);
     }
 
     #[tokio::test]
     async fn test_publisher_lifecycle() {
-        // Real test: verify publisher start/stop lifecycle works correctly
         use streaming_lib::streamhub::mock_publisher::MockVideoPublisher;
         use tokio::sync::mpsc;
 
         let test_file = setup_test_h264_file();
-
         let publisher = MockVideoPublisher::new("test_stream".to_string(), &test_file, 25, false)
             .await
             .unwrap();
 
-        // Verify initial state
         assert!(!publisher.is_publishing().await);
 
-        // Start publishing
         let (sender, _receiver) = mpsc::unbounded_channel();
         let handle = publisher.start_publishing(sender);
 
-        // Allow publisher task to enter steady state before shutdown.
-        tokio::time::sleep(tokio::time::Duration::from_millis(20)).await;
-
-        // Stop publishing
+        tokio::time::sleep(Duration::from_millis(20)).await;
         publisher.stop_publishing().await;
-
-        // Small delay to allow task to stop
-        tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+        tokio::time::sleep(Duration::from_millis(10)).await;
         assert!(!publisher.is_publishing().await);
 
         let _ = handle.await;
-
-        let _ = fs::remove_file(&test_file);
+        cleanup_file(&test_file);
     }
 
     #[tokio::test]
     async fn test_validation_platform_initialization() {
-        // E2E Test: Verify ValidationPlatform initializes correctly
-
         let platform = ValidationPlatform::new();
         let device_info = platform.get_device_info().await.unwrap();
 
-        // Verify device information
         assert_eq!(device_info.manufacturer, "Anyka");
         assert!(device_info.model.contains("AK3918"));
         assert_eq!(device_info.firmware_version, "24.12");
-
-        // Verify platform is initialized
         assert!(platform.initialize().await.is_ok());
 
-        // Verify video encoder
         let encoder = platform.video_encoder();
         let config = encoder.get_configuration().await.unwrap();
         assert_eq!(config.encoding, onvif_rust::platform::VideoEncoding::H264);
@@ -333,12 +280,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_validation_platform_with_playback_mode() {
-        // E2E Test: Verify ValidationPlatform works with H264PlaybackMode
-        use std::sync::Arc;
-
         let test_file = setup_test_h264_file();
 
-        // Create platform and playback mode
         let platform = Arc::new(ValidationPlatform::new());
         platform.initialize().await.unwrap();
 
@@ -353,38 +296,26 @@ mod tests {
         };
 
         let playback_mode = H264PlaybackMode::new(config);
-
-        // Initialize playback with platform
         assert!(playback_mode.initialize(platform.clone()).await.is_ok());
 
-        // Verify platform info
         let device_info = platform.get_device_info().await.unwrap();
         assert_eq!(device_info.manufacturer, "Anyka");
 
-        // Verify playback config
         assert_eq!(playback_mode.config().frame_rate, 25);
         assert_eq!(playback_mode.config().rtsp_port, 8554);
 
-        // Start playback
         assert!(playback_mode.start().await.is_ok());
         assert!(playback_mode.is_running().await);
 
-        // Stop playback
         assert!(playback_mode.stop().await.is_ok());
         assert!(!playback_mode.is_running().await);
 
-        // Cleanup
-        let _ = fs::remove_file(&test_file);
+        cleanup_file(&test_file);
     }
 
     #[tokio::test]
     async fn test_sdp_generation_with_correct_profile_level_id() {
-        // E2E Test: Verify SDP generation uses correct profile-level-id from RBSP bytes
-
-        let uuid = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
+        let uuid = generate_uuid();
         let config = H264PlaybackConfig {
             file_path: format!("/tmp/dummy_{}.h264", uuid),
             audio_file_path: None,
@@ -397,53 +328,41 @@ mod tests {
 
         let playback_mode = H264PlaybackMode::new(config);
 
-        // Test SDP generation with standard H.264 SPS
-        // Format: [0x67 (NAL header)][0x42 (Baseline)][0xe0 (constraint)][0x1e (Level 3.0)]
         let sps = vec![0x67, 0x42, 0xe0, 0x1e, 0xd9];
         let pps = vec![0x68, 0xce, 0x38, 0x80];
-
         let sdp = playback_mode.generate_sdp(&sps, &pps, None);
 
-        // Verify correct profile-level-id extraction (bytes 1,2,3 of SPS = 0x42, 0xe0, 0x1e)
         assert!(
             sdp.contains("profile-level-id=42e01e"),
             "SDP should contain profile-level-id=42e01e, got: {}",
             sdp
         );
-
-        // Verify SDP structure
         assert!(sdp.contains("v=0"));
         assert!(sdp.contains("m=video"));
         assert!(sdp.contains("a=rtpmap:96 H264/90000"));
         assert!(sdp.contains("sprop-parameter-sets="));
     }
 
+    fn write_minimal_h264_file(path: &str) {
+        let _ = fs::remove_file(path);
+        let mut file = fs::File::create(path).unwrap();
+        use std::io::Write;
+        file.write_all(START_CODE).unwrap();
+        file.write_all(SPS_NAL).unwrap();
+        file.write_all(START_CODE).unwrap();
+        file.write_all(PPS_NAL).unwrap();
+    }
+
     #[tokio::test]
     async fn test_multiple_concurrent_playback_streams() {
-        // E2E Test: Verify multiple concurrent playback streams work correctly
-        use std::sync::Arc;
-
-        let uuid = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
+        let uuid = generate_uuid();
         let test_file1 = format!("/tmp/test_stream_1_{}.h264", uuid);
         let test_file2 = format!("/tmp/test_stream_2_{}.h264", uuid);
 
-        // Create test files
-        for file_path in &[&test_file1, &test_file2] {
-            let mut file = fs::File::create(file_path).unwrap();
-            use std::io::Write;
-            let start_code: &[u8] = &[0x00, 0x00, 0x00, 0x01];
-            let sps: &[u8] = &[0x27, 0x42, 0xc0, 0x28, 0xd9];
-            let pps: &[u8] = &[0x28, 0xce, 0x06, 0xe2];
-            file.write_all(start_code).unwrap();
-            file.write_all(sps).unwrap();
-            file.write_all(start_code).unwrap();
-            file.write_all(pps).unwrap();
+        for path in &[&test_file1, &test_file2] {
+            write_minimal_h264_file(path);
         }
 
-        // Create two concurrent platforms and playback modes
         let platform1 = Arc::new(ValidationPlatform::new());
         let platform2 = Arc::new(ValidationPlatform::new());
 
@@ -473,7 +392,6 @@ mod tests {
         let playback1 = H264PlaybackMode::new(config1);
         let playback2 = H264PlaybackMode::new(config2);
 
-        // Initialize both playback modes concurrently
         let (init1, init2) = tokio::join!(
             playback1.initialize(platform1.clone()),
             playback2.initialize(platform2.clone())
@@ -482,38 +400,31 @@ mod tests {
         assert!(init1.is_ok());
         assert!(init2.is_ok());
 
-        // Start both playback modes
         let (start1, start2) = tokio::join!(playback1.start(), playback2.start());
 
         assert!(start1.is_ok());
         assert!(start2.is_ok());
 
-        // Verify both are running
         assert!(playback1.is_running().await);
         assert!(playback2.is_running().await);
 
-        // Stop both
         let (stop1, stop2) = tokio::join!(playback1.stop(), playback2.stop());
 
         assert!(stop1.is_ok());
         assert!(stop2.is_ok());
 
-        // Cleanup
-        let _ = fs::remove_file(&test_file1);
-        let _ = fs::remove_file(&test_file2);
+        cleanup_file(&test_file1);
+        cleanup_file(&test_file2);
     }
 
     #[tokio::test]
     async fn test_validation_config_variations() {
-        // E2E Test: Verify validation works with different port configurations
-        use std::sync::Arc;
-
         let test_file = setup_test_h264_file();
 
         let configs = vec![
-            (8554, 8080, 25, false), // Default
-            (9000, 9001, 30, true),  // Custom ports, loop enabled
-            (7000, 7001, 15, false), // Lower frame rate
+            (8554, 8080, 25, false),
+            (9000, 9001, 30, true),
+            (7000, 7001, 15, false),
         ];
 
         for (rtsp_port, httpflv_port, frame_rate, loop_playback) in configs {
@@ -533,15 +444,13 @@ mod tests {
             let playback = H264PlaybackMode::new(config);
             assert!(playback.initialize(platform).await.is_ok());
 
-            // Verify config is stored correctly
             assert_eq!(playback.config().rtsp_port, rtsp_port);
             assert_eq!(playback.config().httpflv_port, httpflv_port);
             assert_eq!(playback.config().frame_rate, frame_rate);
             assert_eq!(playback.config().loop_playback, loop_playback);
         }
 
-        // Cleanup
-        let _ = fs::remove_file(&test_file);
+        cleanup_file(&test_file);
     }
 
     // ============================================================================

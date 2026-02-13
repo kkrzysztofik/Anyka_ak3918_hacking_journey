@@ -112,7 +112,7 @@ impl MockAudioPublisher {
     /// Tokio join handle for the publishing task
     pub fn start_publishing(&self, sender: FrameDataSender) -> tokio::task::JoinHandle<()> {
         let reader = Arc::clone(&self.reader);
-        let is_running = Arc::clone(&self.is_running);
+        let running_flag = Arc::clone(&self.is_running);
         let _stream_name = self.stream_name.clone();
         let _audio_config = self.audio_config.clone();
         let loop_playback = self.loop_playback;
@@ -120,100 +120,46 @@ impl MockAudioPublisher {
         let subscriber_count_fn = self.subscriber_count_fn.clone();
 
         tokio::spawn(async move {
-            {
-                let mut running = is_running.lock().await;
-                *running = true;
-            }
+            set_running_flag(&running_flag, true).await;
 
             let mut timestamp_offset = 0u32;
 
             loop {
-                let is_running_check = is_running.lock().await;
-                if !*is_running_check {
+                if !check_is_running(&running_flag).await {
                     break;
                 }
-                drop(is_running_check);
 
-                // On-demand publishing: pause if no subscribers
-                if let Some(ref get_count) = subscriber_count_fn
-                    && get_count() == 0
-                {
-                    // No subscribers, sleep to reduce CPU usage
+                if has_no_audio_subscribers(&subscriber_count_fn) {
                     tokio::time::sleep(Duration::from_millis(200)).await;
                     continue;
                 }
 
-                // Read and send AAC frames
-                let mut reader = reader.lock().await;
-                let mut frame_count: u32 = 0;
-                let sample_rate = reader.sample_rate();
-                let frame_interval = if sample_rate == 0 {
-                    Duration::from_millis(0)
-                } else {
-                    // One AAC-LC frame carries 1024 samples (RFC 3640, AAC-hbr mode).
-                    Duration::from_secs_f64(AAC_SAMPLES_PER_FRAME as f64 / sample_rate as f64)
-                };
-                let mut pacer = build_audio_pacer(frame_interval);
-                let mut interrupted_for_zero_subscribers = false;
+                let result = publish_audio_frames(
+                    &reader,
+                    &sender,
+                    &last_timestamp_ms,
+                    timestamp_offset,
+                    loop_playback,
+                    &subscriber_count_fn,
+                )
+                .await;
 
-                while let Ok(Some(frame)) = reader.read_next_frame().await {
-                    if let Some(ref get_count) = subscriber_count_fn
-                        && get_count() == 0
-                    {
-                        interrupted_for_zero_subscribers = true;
-                        break;
-                    }
-
-                    if let Some(interval) = pacer.as_mut() {
-                        interval.tick().await;
-                    }
-
-                    // RTP timestamp in sample units (RFC 3640 Section 3.3)
-                    // Each AAC frame = 1024 samples, so timestamp = frame_count * 1024
-                    let timestamp = timestamp_offset
-                        .saturating_add(frame_count.saturating_mul(AAC_SAMPLES_PER_FRAME));
-                    let data = BytesMut::from(frame.data.as_slice());
-
-                    let frame_data = FrameData::Audio { timestamp, data };
-
-                    if crate::stream_frame_debug_logging_enabled() {
-                        log::debug!(
-                            "mock_audio_publisher: AAC frame_count={} timestamp={} (sample units)",
-                            frame_count,
-                            timestamp
-                        );
-                    }
-
-                    if sender.send(frame_data).is_err() {
+                match result {
+                    AudioPublishResult::Interrupted => continue,
+                    AudioPublishResult::ChannelClosed => {
+                        set_running_flag(&running_flag, false).await;
                         return;
                     }
-                    last_timestamp_ms.store(timestamp, Ordering::Relaxed);
-
-                    frame_count = frame_count.saturating_add(1);
-                }
-
-                if interrupted_for_zero_subscribers {
-                    continue;
-                }
-
-                if !loop_playback {
-                    // Stop playback if looping is disabled
-                    break;
-                }
-
-                // Update timestamp offset for next loop iteration
-                // Accumulate in sample units for monotonic audio timestamps
-                let total_samples_this_loop = frame_count.saturating_mul(AAC_SAMPLES_PER_FRAME);
-                timestamp_offset = timestamp_offset.saturating_add(total_samples_this_loop);
-
-                // Reset file for next loop
-                if let Err(_e) = reader.reset().await {
-                    break;
+                    AudioPublishResult::Completed(new_offset) => {
+                        if !loop_playback {
+                            break;
+                        }
+                        timestamp_offset = new_offset;
+                    }
                 }
             }
 
-            let mut running = is_running.lock().await;
-            *running = false;
+            set_running_flag(&running_flag, false).await;
         })
     }
 
@@ -344,6 +290,94 @@ fn generate_sdp_from_audio_config(audio_config: &[u8], sample_rate: u32) -> Stri
          a=fmtp:97 streamtype=5;profile-level-id={};mode=AAC-hbr;sizelength=13;indexlength=3;indexdeltalength=3;constantDuration=1024;config={}\r\n",
         sample_rate, channels, profile_level_id, config_hex
     )
+}
+
+fn has_no_audio_subscribers(
+    subscriber_count_fn: &Option<Arc<dyn Fn() -> usize + Send + Sync>>,
+) -> bool {
+    subscriber_count_fn.as_ref().is_some_and(|cb| cb() == 0)
+}
+
+async fn check_is_running(flag: &Arc<Mutex<bool>>) -> bool {
+    *flag.lock().await
+}
+
+async fn set_running_flag(flag: &Arc<Mutex<bool>>, value: bool) {
+    *flag.lock().await = value;
+}
+
+enum AudioPublishResult {
+    Interrupted,
+    ChannelClosed,
+    Completed(u32),
+}
+
+async fn publish_audio_frames(
+    reader: &Arc<Mutex<AacFileReader>>,
+    sender: &FrameDataSender,
+    last_timestamp_ms: &AtomicU32,
+    timestamp_offset: u32,
+    loop_playback: bool,
+    subscriber_count_fn: &Option<Arc<dyn Fn() -> usize + Send + Sync>>,
+) -> AudioPublishResult {
+    let mut reader = reader.lock().await;
+    let mut frame_count: u32 = 0;
+    let sample_rate = reader.sample_rate();
+    let frame_interval = compute_frame_interval(sample_rate);
+    let mut pacer = build_audio_pacer(frame_interval);
+
+    while let Ok(Some(frame)) = reader.read_next_frame().await {
+        if has_no_audio_subscribers(subscriber_count_fn) {
+            return AudioPublishResult::Interrupted;
+        }
+
+        if let Some(interval) = pacer.as_mut() {
+            interval.tick().await;
+        }
+
+        let timestamp =
+            timestamp_offset.saturating_add(frame_count.saturating_mul(AAC_SAMPLES_PER_FRAME));
+        let data = BytesMut::from(frame.data.as_slice());
+        let frame_data = FrameData::Audio { timestamp, data };
+
+        log_audio_frame(frame_count, timestamp);
+
+        if sender.send(frame_data).is_err() {
+            return AudioPublishResult::ChannelClosed;
+        }
+        last_timestamp_ms.store(timestamp, Ordering::Relaxed);
+        frame_count = frame_count.saturating_add(1);
+    }
+
+    if !loop_playback {
+        return AudioPublishResult::Completed(timestamp_offset);
+    }
+
+    let new_offset =
+        timestamp_offset.saturating_add(frame_count.saturating_mul(AAC_SAMPLES_PER_FRAME));
+    if reader.reset().await.is_err() {
+        return AudioPublishResult::Completed(timestamp_offset);
+    }
+
+    AudioPublishResult::Completed(new_offset)
+}
+
+fn compute_frame_interval(sample_rate: u32) -> Duration {
+    if sample_rate == 0 {
+        Duration::from_millis(0)
+    } else {
+        Duration::from_secs_f64(AAC_SAMPLES_PER_FRAME as f64 / sample_rate as f64)
+    }
+}
+
+fn log_audio_frame(frame_count: u32, timestamp: u32) {
+    if crate::stream_frame_debug_logging_enabled() {
+        log::debug!(
+            "mock_audio_publisher: AAC frame_count={} timestamp={} (sample units)",
+            frame_count,
+            timestamp
+        );
+    }
 }
 
 fn build_audio_pacer(frame_interval: Duration) -> Option<time::Interval> {

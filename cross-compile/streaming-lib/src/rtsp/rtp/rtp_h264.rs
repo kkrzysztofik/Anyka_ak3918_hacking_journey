@@ -22,6 +22,27 @@ use bytes::{BufMut, BytesMut};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
+#[derive(Clone, Copy)]
+enum NalType {
+    Single,
+    Stap,
+    Mtap,
+    Fu,
+    Unknown,
+}
+
+impl NalType {
+    fn from_header(nal_header: u8) -> Self {
+        match nal_header & 0x1F {
+            1..=23 => NalType::Single,
+            define::STAP_A | define::STAP_B => NalType::Stap,
+            define::MTAP_16 | define::MTAP_24 => NalType::Mtap,
+            define::FU_A | define::FU_B => NalType::Fu,
+            _ => NalType::Unknown,
+        }
+    }
+}
+
 pub struct RtpH264Packer {
     header: RtpHeader,
     mtu: usize,
@@ -157,29 +178,31 @@ impl RtpH264Packer {
         let mut nal_units = Vec::new();
 
         while !frame.is_empty() {
-            if let Some(first_pos) = utils::find_start_code(&frame[..]) {
-                let mut nalu_with_start_code = if let Some(distance_to_first_pos) =
-                    utils::find_start_code(&frame[first_pos + 3..])
-                {
-                    let mut second_pos = first_pos + 3 + distance_to_first_pos;
-                    while second_pos > 0 && frame[second_pos - 1] == 0 {
-                        second_pos -= 1;
-                    }
-                    frame.split_to(second_pos)
-                } else {
-                    frame.split_to(frame.len())
-                };
-
-                let nalu = nalu_with_start_code.split_off(first_pos + 3);
-                if !nalu.is_empty() {
-                    nal_units.push(nalu);
-                }
-            } else {
+            let Some(first_pos) = utils::find_start_code(&frame[..]) else {
                 let raw_nalu = frame.split_to(frame.len());
                 if !raw_nalu.is_empty() {
                     nal_units.push(raw_nalu);
                 }
                 break;
+            };
+
+            let Some(distance) = utils::find_start_code(&frame[first_pos + 3..]) else {
+                let mut nalu_with_start_code = frame.split_to(frame.len());
+                let nalu = nalu_with_start_code.split_off(first_pos + 3);
+                if !nalu.is_empty() {
+                    nal_units.push(nalu);
+                }
+                break;
+            };
+
+            let mut end_pos = first_pos + 3 + distance;
+            while end_pos > 0 && frame[end_pos - 1] == 0 {
+                end_pos -= 1;
+            }
+            let mut nalu_with_start_code = frame.split_to(end_pos);
+            let nalu = nalu_with_start_code.split_off(first_pos + 3);
+            if !nalu.is_empty() {
+                nal_units.push(nalu);
             }
         }
 
@@ -263,25 +286,18 @@ impl TUnPacker for RtpH264UnPacker {
         self.timestamp = rtp_packet.header.timestamp;
         self.sequence_number = rtp_packet.header.seq_number;
 
-        if let Some(packet_type) = rtp_packet.payload.first() {
-            match *packet_type & 0x1F {
-                1..=23 => {
-                    return self.unpack_single(rtp_packet.payload.clone(), *packet_type);
-                }
-                define::STAP_A | define::STAP_B => {
-                    return self.unpack_stap(rtp_packet.payload.clone(), *packet_type);
-                }
-                define::MTAP_16 | define::MTAP_24 => {
-                    return self.unpack_mtap(rtp_packet.payload.clone(), *packet_type);
-                }
-                define::FU_A | define::FU_B => {
-                    return self.unpack_fu(rtp_packet.payload.clone(), *packet_type);
-                }
-                _ => {}
-            }
-        }
+        let Some(nal_header) = rtp_packet.payload.first() else {
+            return Ok(());
+        };
 
-        Ok(())
+        let nal_type = NalType::from_header(*nal_header);
+        match nal_type {
+            NalType::Single => self.unpack_single(rtp_packet.payload.clone(), *nal_header),
+            NalType::Stap => self.unpack_stap(rtp_packet.payload.clone(), *nal_header),
+            NalType::Mtap => self.unpack_mtap(rtp_packet.payload.clone(), *nal_header),
+            NalType::Fu => self.unpack_fu(rtp_packet.payload.clone(), *nal_header),
+            NalType::Unknown => Ok(()),
+        }
     }
 
     fn on_frame_handler(&mut self, f: OnFrameFn) {
@@ -524,27 +540,16 @@ impl RtpH264UnPacker {
         t: define::RtpNalType,
     ) -> Result<(), UnPackerError> {
         let mut payload_reader = BytesReader::new(rtp_payload);
-        //read NAL HDR
         payload_reader.read_u8()?;
-        //read decoding_order_number_base
         payload_reader.read_u16::<BigEndian>()?;
 
+        let ts_bytes = Self::get_mtap_ts_size(t);
+
         while !payload_reader.is_empty() {
-            //read nalu size
             let nalu_size = payload_reader.read_u16::<BigEndian>()? as usize;
-            // read dond
             payload_reader.read_u8()?;
-            // read TS offs - can be 0 (same timestamp as base) or any positive value
-            let (_ts, ts_bytes) = if t == define::MTAP_16 {
-                (payload_reader.read_u16::<BigEndian>()? as u32, 2_usize)
-            } else if t == define::MTAP_24 {
-                (payload_reader.read_u24::<BigEndian>()?, 3_usize)
-            } else {
-                log::warn!("should not be here!");
-                (0, 0)
-            };
-            // Note: ts can be 0 (indicates same timestamp as base), so no validation needed
-            // Validate that nalu_size is large enough to contain ts_bytes + dond (1 byte)
+            Self::skip_mtap_ts_offset(&mut payload_reader, t)?;
+
             if nalu_size < ts_bytes + 1 {
                 return Err(BytesReadError {
                     value: BytesReadErrorValue::NotEnoughBytes,
@@ -553,10 +558,10 @@ impl RtpH264UnPacker {
             }
             let nalu = payload_reader.read_bytes(nalu_size - ts_bytes - 1)?;
 
-            let mut payload = BytesMut::new();
-            payload.extend_from_slice(&define::ANNEXB_NALU_START_CODE);
-            payload.put(nalu);
             if let Some(f) = &self.on_frame_handler {
+                let mut payload = BytesMut::new();
+                payload.extend_from_slice(&define::ANNEXB_NALU_START_CODE);
+                payload.put(nalu);
                 f(FrameData::Video {
                     timestamp: self.timestamp,
                     data: payload,
@@ -564,6 +569,32 @@ impl RtpH264UnPacker {
             }
         }
 
+        Ok(())
+    }
+
+    fn get_mtap_ts_size(t: define::RtpNalType) -> usize {
+        match t {
+            define::MTAP_16 => 2,
+            define::MTAP_24 => 3,
+            _ => 0,
+        }
+    }
+
+    fn skip_mtap_ts_offset(
+        reader: &mut BytesReader,
+        t: define::RtpNalType,
+    ) -> Result<(), UnPackerError> {
+        match t {
+            define::MTAP_16 => {
+                reader.read_u16::<BigEndian>()?;
+            }
+            define::MTAP_24 => {
+                reader.read_u24::<BigEndian>()?;
+            }
+            _ => {
+                log::warn!("Invalid MTAP type");
+            }
+        }
         Ok(())
     }
 }

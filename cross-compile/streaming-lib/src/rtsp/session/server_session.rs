@@ -1027,145 +1027,85 @@ impl RtspServerSession {
         Ok(())
     }
 
-    async fn handle_setup(&mut self, rtsp_request: &RtspRequest) -> Result<(), SessionError> {
-        let mut response = Self::gen_response(http::StatusCode::OK, rtsp_request);
-
+    fn ensure_stream_identifier(&mut self, request_path: &str) {
         if self.stream_identifier.is_none() {
-            let normalized_path = self.normalize_rtsp_stream_path(&rtsp_request.uri.path);
+            let normalized_path = self.normalize_rtsp_stream_path(request_path);
             if !normalized_path.is_empty() {
                 self.stream_identifier = Some(StreamIdentifier::Rtsp {
                     stream_path: normalized_path,
                 });
             }
         }
+    }
 
-        self.ensure_tracks_from_streamhub(rtsp_request).await?;
-
-        let request_uri = rtsp_request.uri.marshal();
-        let mut selected_track_type: Option<TrackType> = None;
+    fn find_track_for_uri(&self, uri: &crate::common::http::Uri) -> Option<TrackType> {
+        let request_uri = uri.marshal();
         for (track_type, track) in &self.tracks {
             if !track.media_control.is_empty() && request_uri.contains(&track.media_control) {
-                selected_track_type = Some(track_type.clone());
-                break;
+                return Some(track_type.clone());
+            }
+        }
+        if self.tracks.contains_key(&TrackType::Video) {
+            return Some(TrackType::Video);
+        }
+        self.tracks
+            .iter()
+            .next()
+            .map(|(track_type, _)| track_type.clone())
+    }
+
+    async fn setup_tcp_transport(
+        io_writer: Arc<Mutex<Box<dyn TNetIO + Send + Sync>>>,
+        track: &mut RtspTrack,
+    ) {
+        track.create_packer(io_writer.clone()).await;
+        track.rtcp_send_loop(io_writer).await;
+    }
+
+    async fn setup_udp_transport(
+        remote_addr: SocketAddr,
+        track: &mut RtspTrack,
+        trans: &RtspTransport,
+    ) -> Result<(Option<u16>, Option<u16>), SessionError> {
+        let (rtp_port, rtcp_port) = trans
+            .client_port
+            .ok_or(SessionError {
+                value: SessionErrorValue::MissingClientPort,
+            })?
+            .into();
+
+        let address = remote_addr.ip().to_string();
+        let mut rtp_server_port: Option<u16> = None;
+        let mut rtcp_server_port: Option<u16> = None;
+
+        if let Some(rtp_io) = UdpIO::new(address.clone(), rtp_port, 0).await {
+            rtp_server_port = rtp_io.get_local_port();
+
+            let box_udp_io: Box<dyn TNetIO + Send + Sync> = Box::new(rtp_io);
+            let is_record = matches!(trans.transport_mod.as_deref(), Some("record"));
+            if !is_record {
+                track.create_packer(Arc::new(Mutex::new(box_udp_io))).await;
+            } else {
+                track.rtp_receive_loop(box_udp_io).await;
             }
         }
 
-        if selected_track_type.is_none() {
-            if self.tracks.contains_key(&TrackType::Video) {
-                selected_track_type = Some(TrackType::Video);
-            } else if let Some((track_type, _)) = self.tracks.iter().next() {
-                selected_track_type = Some(track_type.clone());
-            }
-        }
-
-        let Some(track_type) = selected_track_type else {
-            let response = Self::gen_response(http::StatusCode::NOT_FOUND, rtsp_request);
-            self.send_response(&response).await?;
-            return Ok(());
-        };
-
-        let track = self.tracks.get_mut(&track_type).ok_or(SessionError {
-            value: SessionErrorValue::RtspMessageCorrupted("track missing".to_string()),
+        let rtp_port = rtp_server_port.ok_or(SessionError {
+            value: SessionErrorValue::MissingClientPort,
         })?;
 
-        if let Some(transport_data) = rtsp_request.get_header("Transport") {
-            if self.session_id.is_none() {
-                self.session_id = Some(Uuid::new(SESSION_ID_RANDOM_DIGITS));
-            }
-
-            let transport = RtspTransport::unmarshal(transport_data);
-
-            if let Err(ref err) = transport {
-                // M-04: RFC 2326 §12.39: respond 461 for invalid transport
-                log::warn!(
-                    "event=rtsp_unsupported_transport error=\"{}\" remote_addr={}",
-                    err,
-                    self.remote_addr,
-                );
-                let response = Self::gen_response(
-                    http::StatusCode::from_u16(461).unwrap_or(http::StatusCode::BAD_REQUEST),
-                    rtsp_request,
-                );
-                self.send_response(&response).await?;
-                return Ok(());
-            }
-
-            if let Ok(mut trans) = transport {
-                let mut rtp_server_port: Option<u16> = None;
-                let mut rtcp_server_port: Option<u16> = None;
-
-                match trans.protocol_type {
-                    ProtocolType::TCP => {
-                        track.create_packer(self.io_writer.clone()).await;
-                        // Start RTCP SR transmission over TCP (interleaved mode)
-                        track.rtcp_send_loop(self.io_writer.clone()).await;
-                    }
-                    ProtocolType::UDP => {
-                        let (rtp_port, rtcp_port) = trans
-                            .client_port
-                            .ok_or(SessionError {
-                                value: SessionErrorValue::MissingClientPort,
-                            })?
-                            .into();
-
-                        let address = self.remote_addr.ip().to_string();
-                        if let Some(rtp_io) = UdpIO::new(address.clone(), rtp_port, 0).await {
-                            rtp_server_port = rtp_io.get_local_port();
-
-                            let box_udp_io: Box<dyn TNetIO + Send + Sync> = Box::new(rtp_io);
-                            let is_record =
-                                matches!(trans.transport_mod.as_deref(), Some("record"));
-                            if !is_record {
-                                track.create_packer(Arc::new(Mutex::new(box_udp_io))).await;
-                            } else {
-                                track.rtp_receive_loop(box_udp_io).await;
-                            }
-                        }
-
-                        let rtp_port = rtp_server_port.ok_or(SessionError {
-                            value: SessionErrorValue::MissingClientPort,
-                        })?;
-                        if let Some(rtcp_io) =
-                            UdpIO::new(address.clone(), rtcp_port, rtp_port + 1).await
-                        {
-                            rtcp_server_port = rtcp_io.get_local_port();
-                            let box_rtcp_io: Arc<Mutex<Box<dyn TNetIO + Send + Sync>>> =
-                                Arc::new(Mutex::new(Box::new(rtcp_io)));
-                            track.rtcp_receive_loop(box_rtcp_io.clone()).await;
-                            track.rtcp_send_loop(box_rtcp_io).await;
-                        }
-                    }
-                }
-
-                //tell client the udp ports of server side
-                let mut server_ports: [u16; 2] = [0, 0];
-                if let Some(rtp_port) = rtp_server_port {
-                    server_ports[0] = rtp_port;
-                }
-                if let Some(rtcp_server_port) = rtcp_server_port {
-                    server_ports[1] = rtcp_server_port;
-                    trans.server_port = Some(server_ports);
-                }
-
-                let new_transport_data = trans.marshal();
-                response
-                    .headers
-                    .insert("Transport".to_string(), new_transport_data);
-                response.headers.insert(
-                    "Session".to_string(),
-                    self.session_id
-                        .ok_or(SessionError {
-                            value: SessionErrorValue::MissingSessionId,
-                        })?
-                        .to_string(),
-                );
-
-                track.set_transport(trans).await;
-            }
+        if let Some(rtcp_io) = UdpIO::new(address.clone(), rtcp_port, rtp_port + 1).await {
+            rtcp_server_port = rtcp_io.get_local_port();
+            let box_rtcp_io: Arc<Mutex<Box<dyn TNetIO + Send + Sync>>> =
+                Arc::new(Mutex::new(Box::new(rtcp_io)));
+            track.rtcp_receive_loop(box_rtcp_io.clone()).await;
+            track.rtcp_send_loop(box_rtcp_io).await;
         }
 
-        self.send_response(&response).await?;
+        Ok((rtp_server_port, rtcp_server_port))
+    }
 
+    fn log_setup_request(&self, rtsp_request: &RtspRequest, track_type: &TrackType) {
         let cseq = rtsp_request.get_header("CSeq").cloned().unwrap_or_default();
         let session_id = self
             .session_id
@@ -1185,6 +1125,93 @@ impl RtspServerSession {
             track_type,
             transport_hdr,
         );
+    }
+
+    async fn handle_setup(&mut self, rtsp_request: &RtspRequest) -> Result<(), SessionError> {
+        self.ensure_stream_identifier(&rtsp_request.uri.path);
+        self.ensure_tracks_from_streamhub(rtsp_request).await?;
+
+        let Some(track_type) = self.find_track_for_uri(&rtsp_request.uri) else {
+            let response = Self::gen_response(http::StatusCode::NOT_FOUND, rtsp_request);
+            self.send_response(&response).await?;
+            return Ok(());
+        };
+
+        let Some(transport_data) = rtsp_request.get_header("Transport") else {
+            self.send_response(&Self::gen_response(http::StatusCode::OK, rtsp_request))
+                .await?;
+            return Ok(());
+        };
+
+        if self.session_id.is_none() {
+            self.session_id = Some(Uuid::new(SESSION_ID_RANDOM_DIGITS));
+        }
+
+        let transport = RtspTransport::unmarshal(transport_data);
+        if let Err(ref err) = transport {
+            log::warn!(
+                "event=rtsp_unsupported_transport error=\"{}\" remote_addr={}",
+                err,
+                self.remote_addr,
+            );
+            let response = Self::gen_response(
+                http::StatusCode::from_u16(461).unwrap_or(http::StatusCode::BAD_REQUEST),
+                rtsp_request,
+            );
+            self.send_response(&response).await?;
+            return Ok(());
+        }
+
+        let Ok(mut trans) = transport else {
+            unreachable!("transport error already handled");
+        };
+
+        let io_writer = self.io_writer.clone();
+        let remote_addr = self.remote_addr;
+        let (rtp_server_port, rtcp_server_port) = {
+            let track = self.tracks.get_mut(&track_type).ok_or(SessionError {
+                value: SessionErrorValue::RtspMessageCorrupted("track missing".to_string()),
+            })?;
+
+            match trans.protocol_type {
+                ProtocolType::TCP => {
+                    Self::setup_tcp_transport(io_writer, track).await;
+                    (None, None)
+                }
+                ProtocolType::UDP => Self::setup_udp_transport(remote_addr, track, &trans).await?,
+            }
+        };
+
+        let mut server_ports: [u16; 2] = [0, 0];
+        if let Some(rtp_port) = rtp_server_port {
+            server_ports[0] = rtp_port;
+        }
+        if let Some(rtcp_port) = rtcp_server_port {
+            server_ports[1] = rtcp_port;
+            trans.server_port = Some(server_ports);
+        }
+
+        let mut response = Self::gen_response(http::StatusCode::OK, rtsp_request);
+        response
+            .headers
+            .insert("Transport".to_string(), trans.marshal());
+        response.headers.insert(
+            "Session".to_string(),
+            self.session_id
+                .ok_or(SessionError {
+                    value: SessionErrorValue::MissingSessionId,
+                })?
+                .to_string(),
+        );
+
+        {
+            let track = self.tracks.get_mut(&track_type).ok_or(SessionError {
+                value: SessionErrorValue::RtspMessageCorrupted("track missing".to_string()),
+            })?;
+            track.set_transport(trans).await;
+        }
+        self.send_response(&response).await?;
+        self.log_setup_request(rtsp_request, &track_type);
 
         Ok(())
     }

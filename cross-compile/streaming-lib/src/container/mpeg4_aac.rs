@@ -12,6 +12,9 @@ const AAC_FREQUENCE: [u32; AAC_FREQUENCE_SIZE] = [
     96000, 88200, 64000, 48000, 44100, 32000, 24000, 22050, 16000, 12000, 11025, 8000, 7350,
 ];
 
+const SYNC_EXTENSION_TYPE_SBR: u64 = 0x2B7;
+const SYNC_EXTENSION_TYPE_PS: u64 = 0x548;
+
 #[derive(Debug, Clone, Default)]
 pub struct Mpeg4Aac {
     pub object_type: u8,
@@ -104,7 +107,6 @@ impl Mpeg4AacProcessor {
     }
 
     pub fn audio_specific_config_load(&mut self) -> Result<&mut Self, MpegAacError> {
-        //11 88 56 E5
         let byte_0 = self.bytes_reader.read_u8()?;
         self.mpeg4_aac.object_type = (byte_0 >> 3) & 0x1F;
 
@@ -112,39 +114,105 @@ impl Mpeg4AacProcessor {
         self.mpeg4_aac.sampling_frequency_index = ((byte_0 & 0x07) << 1) | ((byte_1 >> 7) & 0x01);
         self.mpeg4_aac.channel_configuration = (byte_1 >> 3) & 0x0F;
         self.mpeg4_aac.channels = self.mpeg4_aac.channel_configuration;
-        let freq_index = self.mpeg4_aac.sampling_frequency_index as usize;
-        self.mpeg4_aac.sampling_frequency = *AAC_FREQUENCE.get(freq_index).ok_or(MpegAacError {
-            value: MpegErrorValue::NotSupportedSamplingFrequency,
-        })?;
-
-        // log::info!("aac info: {:?}", self.mpeg4_aac);
-
-        // if self.bytes_reader.len() > 2 {
-        //return self.audio_specific_config_load2();
-        // }
-
-        // self.bytes_reader.read_u8()?;
-        // self.bytes_reader.read_u8()?;
+        self.mpeg4_aac.sampling_frequency =
+            Self::get_freq_by_index(self.mpeg4_aac.sampling_frequency_index)?;
 
         self.bytes_reader.extract_remaining_bytes();
 
         Ok(self)
     }
 
+    fn get_freq_by_index(index: u8) -> Result<u32, MpegAacError> {
+        AAC_FREQUENCE
+            .get(index as usize)
+            .copied()
+            .ok_or(MpegAacError {
+                value: MpegErrorValue::NotSupportedSamplingFrequency,
+            })
+    }
+
+    fn handle_sbr_ps_extension(
+        &mut self,
+        extension_audio_object_type: &mut u8,
+        extension_sampling_frequency_index: &mut u32,
+    ) -> Result<(), MpegAacError> {
+        if *extension_audio_object_type != 5 || self.bits_reader.len() < 16 {
+            return Ok(());
+        }
+
+        let sync_extension_type = self.bits_reader.read_n_bits(11)?;
+        if sync_extension_type != SYNC_EXTENSION_TYPE_SBR {
+            return Ok(());
+        }
+
+        *extension_audio_object_type = self.get_audio_object_type()?;
+
+        match *extension_audio_object_type {
+            5 => self.handle_sbr_extension(extension_sampling_frequency_index)?,
+            22 => self.handle_sbr_extension_type22(extension_sampling_frequency_index)?,
+            _ => {}
+        }
+
+        Ok(())
+    }
+
+    fn handle_sbr_extension(
+        &mut self,
+        extension_sampling_frequency_index: &mut u32,
+    ) -> Result<(), MpegAacError> {
+        self.mpeg4_aac.sbr = self.bits_reader.read_n_bits(1)? as usize;
+        if self.mpeg4_aac.sbr > 0 {
+            *extension_sampling_frequency_index = self.get_sampling_frequency()?;
+            if self.bits_reader.len() >= 12 {
+                let sync_extension_type = self.bits_reader.read_n_bits(11)?;
+                if sync_extension_type == SYNC_EXTENSION_TYPE_PS {
+                    self.mpeg4_aac.ps = self.bits_reader.read_n_bits(1)? as usize;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn handle_sbr_extension_type22(
+        &mut self,
+        extension_sampling_frequency_index: &mut u32,
+    ) -> Result<(), MpegAacError> {
+        self.mpeg4_aac.sbr = self.bits_reader.read_n_bits(1)? as usize;
+        if self.mpeg4_aac.sbr > 0 {
+            *extension_sampling_frequency_index = self.get_sampling_frequency()?;
+        }
+        self.bits_reader.read_n_bits(4)?;
+        Ok(())
+    }
+
+    fn process_extension_config(&mut self) -> Result<(), MpegAacError> {
+        let ep_config = self.bits_reader.read_n_bits(2)?;
+        if matches!(ep_config, 2 | 3) {
+            return Err(MpegAacError {
+                value: MpegErrorValue::ShouldNotComeHere,
+            });
+        }
+        Ok(())
+    }
+
+    fn load_specific_config_by_type(&mut self) -> Result<(), MpegAacError> {
+        match self.mpeg4_aac.object_type {
+            1..=7 | 17 | 19..=23 => self.ga_specific_config_load(),
+            8 => self.celp_specific_config_load(),
+            _ => Ok(()),
+        }
+    }
+
     pub fn audio_specific_config_load2(&mut self) -> Result<(), MpegAacError> {
         let remain_bytes = self.bytes_reader.extract_remaining_bytes();
-        // self.bits_reader.extend_from_bytesmut(remain_bytes);
         self.bits_reader.extend_data(remain_bytes);
 
         self.mpeg4_aac.object_type = self.get_audio_object_type()?;
         let sampling_frequency = self.get_sampling_frequency()?;
+
         if sampling_frequency <= 0x0F {
             self.mpeg4_aac.sampling_frequency_index = sampling_frequency as u8;
-            let freq_index = self.mpeg4_aac.sampling_frequency_index as usize;
-            self.mpeg4_aac.sampling_frequency =
-                *AAC_FREQUENCE.get(freq_index).ok_or(MpegAacError {
-                    value: MpegErrorValue::NotSupportedSamplingFrequency,
-                })?;
+            self.mpeg4_aac.sampling_frequency = Self::get_freq_by_index(sampling_frequency as u8)?;
         } else {
             self.mpeg4_aac.sampling_frequency_index = 0x0F;
             self.mpeg4_aac.sampling_frequency = sampling_frequency;
@@ -153,128 +221,76 @@ impl Mpeg4AacProcessor {
 
         let mut extension_audio_object_type: u8;
         let mut extension_sampling_frequency_index: u32 = 0;
-        let mut extension_channel_configuration: u8 = 0;
 
         if self.mpeg4_aac.object_type == 5 || self.mpeg4_aac.object_type == 29 {
             extension_audio_object_type = 5;
             self.mpeg4_aac.sbr = 1;
-            {
-                if self.mpeg4_aac.object_type == 29 {
-                    self.mpeg4_aac.ps = 1;
-                }
-                extension_sampling_frequency_index = self.get_sampling_frequency()?;
-                self.mpeg4_aac.object_type = self.get_audio_object_type()?;
-
-                if self.mpeg4_aac.object_type == 22 {
-                    extension_channel_configuration = self.bits_reader.read_n_bits(4)? as u8;
-                }
+            if self.mpeg4_aac.object_type == 29 {
+                self.mpeg4_aac.ps = 1;
             }
+            extension_sampling_frequency_index = self.get_sampling_frequency()?;
+            self.mpeg4_aac.object_type = self.get_audio_object_type()?;
         } else {
             extension_audio_object_type = 0;
         }
 
-        let ep_config: u64;
+        self.load_specific_config_by_type()?;
 
-        match self.mpeg4_aac.object_type {
-            1 | 2 | 3 | 4 | 5 | 6 | 7 | 17 | 19 | 20 | 21 | 22 | 23 => {
-                self.ga_specific_config_load()?;
-            }
-            8 => {
-                self.celp_specific_config_load()?;
-            }
-            _ => {}
+        if matches!(self.mpeg4_aac.object_type, 17 | 19..=27 | 39) {
+            self.process_extension_config()?;
         }
 
-        match self.mpeg4_aac.object_type {
-            17 | 19 | 20 | 21 | 22 | 23 | 24 | 25 | 26 | 27 | 39 => {
-                ep_config = self.bits_reader.read_n_bits(2)?;
-
-                match ep_config {
-                    2 | 3 => {
-                        return Err(MpegAacError {
-                            value: MpegErrorValue::ShouldNotComeHere,
-                        });
-                    }
-
-                    _ => {}
-                }
-            }
-            _ => {}
-        }
-
-        let mut sync_extension_type: u64;
-
-        if 5 != extension_audio_object_type && self.bits_reader.len() >= 16 {
-            sync_extension_type = self.bits_reader.read_n_bits(11)?;
-
-            if 0x2B7 == sync_extension_type {
-                extension_audio_object_type = self.get_audio_object_type()?;
-
-                match extension_audio_object_type {
-                    5 => {
-                        self.mpeg4_aac.sbr = self.bits_reader.read_n_bits(1)? as usize;
-                        if self.mpeg4_aac.sbr > 0 {
-                            extension_sampling_frequency_index = self.get_sampling_frequency()?;
-                            if self.bits_reader.len() >= 12 {
-                                sync_extension_type = self.bits_reader.read_n_bits(11)?;
-                                if 0x548 == sync_extension_type {
-                                    self.mpeg4_aac.ps = self.bits_reader.read_n_bits(1)? as usize;
-                                }
-                            }
-                        }
-                    }
-                    22 => {
-                        self.mpeg4_aac.sbr = self.bits_reader.read_n_bits(1)? as usize;
-
-                        if self.mpeg4_aac.sbr > 0 {
-                            extension_sampling_frequency_index = self.get_sampling_frequency()?;
-                        }
-
-                        extension_channel_configuration = self.bits_reader.read_n_bits(4)? as u8;
-                    }
-
-                    _ => {}
-                }
-            }
-        }
+        self.handle_sbr_ps_extension(
+            &mut extension_audio_object_type,
+            &mut extension_sampling_frequency_index,
+        )?;
 
         self.bits_reader.bits_alignment_8();
 
         let _ = extension_audio_object_type;
         let _ = extension_sampling_frequency_index;
-        let _ = extension_channel_configuration;
 
         Ok(())
     }
 
     pub fn celp_specific_config_load(&mut self) -> Result<(), MpegAacError> {
-        let excitation_mode: u64;
-
         if self.bits_reader.read_n_bits(1)? > 0 {
-            excitation_mode = self.bits_reader.read_n_bits(1)?;
+            let excitation_mode = self.bits_reader.read_n_bits(1)?;
             self.bits_reader.read_n_bits(1)?;
             self.bits_reader.read_n_bits(1)?;
 
-            if excitation_mode == 1 {
-                self.bits_reader.read_n_bits(3)?;
-            } else if excitation_mode == 0 {
-                self.bits_reader.read_n_bits(5)?;
-                self.bits_reader.read_n_bits(2)?;
-                self.bits_reader.read_n_bits(1)?;
+            match excitation_mode {
+                1 => {
+                    self.bits_reader.read_n_bits(3)?;
+                }
+                0 => {
+                    self.bits_reader.read_n_bits(5)?;
+                    self.bits_reader.read_n_bits(2)?;
+                    self.bits_reader.read_n_bits(1)?;
+                }
+                _ => {}
             }
         } else {
             self.bits_reader.read_n_bits(1)?;
             self.bits_reader.read_n_bits(2)?;
         }
 
-        // if self.bits_reader.read_n_bits(1)? > 0 {
-        //     self.bits_reader.read_n_bits(2)?;
-        // } else {
-        //     self.bits_reader.read_n_bits(2)?;
-        // }
-
         Ok(())
     }
+
+    fn handle_extension_flag_type22(&mut self) -> Result<(), MpegAacError> {
+        self.bits_reader.read_n_bits(5)?;
+        self.bits_reader.read_n_bits(11)?;
+        Ok(())
+    }
+
+    fn handle_extension_flag_type_17_19_20_23(&mut self) -> Result<(), MpegAacError> {
+        self.bits_reader.read_n_bits(1)?;
+        self.bits_reader.read_n_bits(1)?;
+        self.bits_reader.read_n_bits(1)?;
+        Ok(())
+    }
+
     pub fn ga_specific_config_load(&mut self) -> Result<(), MpegAacError> {
         self.bits_reader.read_n_bits(1)?;
 
@@ -283,7 +299,7 @@ impl Mpeg4AacProcessor {
         }
         let extension_flag: u64 = self.bits_reader.read_n_bits(1)?;
 
-        if 0 == self.mpeg4_aac.channel_configuration {
+        if self.mpeg4_aac.channel_configuration == 0 {
             self.pce_load()?;
         }
 
@@ -293,18 +309,10 @@ impl Mpeg4AacProcessor {
 
         if extension_flag > 0 {
             match self.mpeg4_aac.object_type {
-                22 => {
-                    self.bits_reader.read_n_bits(5)?;
-                    self.bits_reader.read_n_bits(11)?;
-                }
-                17 | 19 | 20 | 23 => {
-                    self.bits_reader.read_n_bits(1)?;
-                    self.bits_reader.read_n_bits(1)?;
-                    self.bits_reader.read_n_bits(1)?;
-                }
+                22 => self.handle_extension_flag_type22()?,
+                17 | 19 | 20 | 23 => self.handle_extension_flag_type_17_19_20_23()?,
                 _ => {}
             }
-
             self.bits_reader.read_n_bits(1)?;
         }
 
@@ -321,10 +329,21 @@ impl Mpeg4AacProcessor {
         Ok(data)
     }
 
-    pub fn pce_load(&mut self) -> Result<u8, MpegAacError> {
-        let mut cpe: u64 = 0;
-        let mut tag: u64 = 0;
+    fn read_channel_element(&mut self, pce_bits_vec: &mut BitsWriter) -> Result<u64, MpegAacError> {
+        let cpe = self.mpeg4_bits_copy(pce_bits_vec, 1)?;
+        self.mpeg4_bits_copy(pce_bits_vec, 4)?;
+        Ok(cpe)
+    }
 
+    fn count_channels_for_element(&self, cpe: u64) -> u8 {
+        if cpe > 0 || self.mpeg4_aac.ps > 0 {
+            2
+        } else {
+            1
+        }
+    }
+
+    pub fn pce_load(&mut self) -> Result<u8, MpegAacError> {
         let mut pce_bits_vec = BitsWriter::new(BytesWriter::new());
         pce_bits_vec.write_bytes(self.mpeg4_aac.pce.clone())?;
 
@@ -347,50 +366,31 @@ impl Mpeg4AacProcessor {
         }
 
         for _ in 0..num_front_channel_elements {
-            cpe = self.mpeg4_bits_copy(&mut pce_bits_vec, 1)?;
-            tag = self.mpeg4_bits_copy(&mut pce_bits_vec, 4)?;
-
-            if cpe > 0 || self.mpeg4_aac.ps > 0 {
-                self.mpeg4_aac.channels += 2;
-            } else {
-                self.mpeg4_aac.channels += 1;
-            }
+            let cpe = self.read_channel_element(&mut pce_bits_vec)?;
+            self.mpeg4_aac.channels += self.count_channels_for_element(cpe);
         }
 
         for _ in 0..num_side_channel_elements {
-            cpe = self.mpeg4_bits_copy(&mut pce_bits_vec, 1)?;
-            tag = self.mpeg4_bits_copy(&mut pce_bits_vec, 4)?;
-
-            if cpe > 0 || self.mpeg4_aac.ps > 0 {
-                self.mpeg4_aac.channels += 2;
-            } else {
-                self.mpeg4_aac.channels += 1;
-            }
+            let cpe = self.read_channel_element(&mut pce_bits_vec)?;
+            self.mpeg4_aac.channels += self.count_channels_for_element(cpe);
         }
 
         for _ in 0..num_back_channel_elements {
-            cpe = self.mpeg4_bits_copy(&mut pce_bits_vec, 1)?;
-            tag = self.mpeg4_bits_copy(&mut pce_bits_vec, 4)?;
-
-            if cpe > 0 || self.mpeg4_aac.ps > 0 {
-                self.mpeg4_aac.channels += 2;
-            } else {
-                self.mpeg4_aac.channels += 1;
-            }
+            let cpe = self.read_channel_element(&mut pce_bits_vec)?;
+            self.mpeg4_aac.channels += self.count_channels_for_element(cpe);
         }
 
         for _ in 0..num_lfe_channel_elements {
-            tag = self.mpeg4_bits_copy(&mut pce_bits_vec, 4)?;
+            self.mpeg4_bits_copy(&mut pce_bits_vec, 4)?;
             self.mpeg4_aac.channels += 1;
         }
 
         for _ in 0..num_assoc_data_elements {
-            tag = self.mpeg4_bits_copy(&mut pce_bits_vec, 4)?;
+            self.mpeg4_bits_copy(&mut pce_bits_vec, 4)?;
         }
 
         for _ in 0..num_valid_cc_elements {
-            cpe = self.mpeg4_bits_copy(&mut pce_bits_vec, 1)?;
-            tag = self.mpeg4_bits_copy(&mut pce_bits_vec, 4)?;
+            self.read_channel_element(&mut pce_bits_vec)?;
         }
 
         pce_bits_vec.bits_alignment_8()?;
@@ -404,11 +404,9 @@ impl Mpeg4AacProcessor {
 
         let rv = pce_bits_vec.len().div_ceil(8);
 
-        let _ = tag;
         let _ = element_instance_tag;
         let _ = object_type;
         let _ = sampling_frequency_index;
-        let _ = cpe;
 
         Ok(rv as u8)
     }

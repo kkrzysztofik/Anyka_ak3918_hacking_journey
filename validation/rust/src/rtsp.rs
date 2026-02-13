@@ -1463,135 +1463,105 @@ struct FfprobeStream {
     codec_name: Option<String>,
 }
 
-pub async fn run_harness(
-    args: &Args,
-    effective: &EffectiveConfig,
-    tests: &mut Vec<TestResult>,
-) -> Result<()> {
-    let url = rtsp_url(
-        &effective.rtsp_host,
-        effective.rtsp_port,
-        &effective.rtsp_stream,
-    );
-    let auth_url = rtsp_url_with_credentials(
-        &effective.rtsp_host,
-        effective.rtsp_port,
-        &effective.rtsp_stream,
-        effective.stream_username.as_deref(),
-        effective.stream_password.as_deref(),
-    )?;
-    let timeout_sec = effective.rtsp_timeout_sec;
-    let step_cap_short = Duration::from_secs(timeout_sec.saturating_add(15));
-    let step_cap_long = Duration::from_secs(effective.short_duration_sec.saturating_add(30));
-    let step_cap_protocol_sequence = Duration::from_secs(
-        effective
-            .short_duration_sec
-            .saturating_mul(2)
-            .saturating_add(30),
-    );
-    let artifacts_dir = effective.artifacts_dir.clone();
-    let capture_tool_output = effective.capture_tool_output;
-    info!(url = %url, uses_credentials = effective.stream_username.is_some(), "running harness scenarios");
-    let mut expect_h264 = false;
-    let mut expect_aac = false;
+#[derive(Debug)]
+enum HarnessProcessOutcome<T> {
+    Success(T),
+    Error(String),
+    Timeout,
+}
 
-    debug!("harness: basic connectivity");
-    match timeout(
-        step_cap_short,
-        harness_basic_connectivity(
-            &auth_url,
-            timeout_sec,
-            &artifacts_dir,
-            capture_tool_output,
-            &effective.ffmpeg_log_level,
-        ),
-    )
-    .await
-    {
-        Ok(Ok(ok)) => {
+impl<T> HarnessProcessOutcome<T> {
+    fn is_timeout(&self) -> bool {
+        matches!(self, Self::Timeout)
+    }
+}
+
+fn to_harness_process_outcome<T>(
+    result: std::result::Result<Result<T>, tokio::time::error::Elapsed>,
+) -> HarnessProcessOutcome<T> {
+    match result {
+        Ok(Ok(value)) => HarnessProcessOutcome::Success(value),
+        Ok(Err(e)) => HarnessProcessOutcome::Error(e.to_string()),
+        Err(_) => HarnessProcessOutcome::Timeout,
+    }
+}
+
+fn harness_timeout_reason(step_cap: Duration) -> String {
+    format!("harness step timed out after {}s", step_cap.as_secs())
+}
+
+fn append_harness_basic_connectivity_result(
+    tests: &mut Vec<TestResult>,
+    outcome: HarnessProcessOutcome<bool>,
+    step_cap: Duration,
+) {
+    match outcome {
+        HarnessProcessOutcome::Success(ok) => {
             tests.push(if ok {
                 TestResult::pass("harness_basic_connectivity")
             } else {
                 TestResult::fail("harness_basic_connectivity", "no stream in output")
             });
         }
-        Ok(Err(e)) => tests.push(TestResult::fail(
-            "harness_basic_connectivity",
-            e.to_string(),
-        )),
-        Err(_) => {
-            cleanup_timed_out_media_processes(&auth_url, "harness_basic_connectivity");
+        HarnessProcessOutcome::Error(error) => {
+            tests.push(TestResult::fail("harness_basic_connectivity", error));
+        }
+        HarnessProcessOutcome::Timeout => {
             tests.push(TestResult::fail(
                 "harness_basic_connectivity",
-                format!("harness step timed out after {}s", step_cap_short.as_secs()),
+                harness_timeout_reason(step_cap),
             ));
         }
     }
+}
 
-    debug!(
-        url = %url,
-        target_ms = effective.harness_startup_latency_ms,
-        "harness: startup latency"
-    );
-    match timeout(
-        step_cap_short,
-        harness_startup_latency(
-            &auth_url,
-            timeout_sec,
-            &artifacts_dir,
-            capture_tool_output,
-            &effective.ffmpeg_log_level,
-        ),
-    )
-    .await
-    {
-        Ok(Ok(Some(ms))) => {
-            let pass = ms <= effective.harness_startup_latency_ms;
+fn append_harness_startup_latency_result(
+    tests: &mut Vec<TestResult>,
+    outcome: HarnessProcessOutcome<Option<u64>>,
+    target_ms: u64,
+    step_cap: Duration,
+) {
+    match outcome {
+        HarnessProcessOutcome::Success(Some(ms)) => {
+            let pass = ms <= target_ms;
             tests.push(TestResult::metric(
                 "harness_startup_latency_ms",
                 serde_json::json!(ms),
                 pass,
             ));
         }
-        Ok(Ok(None)) => tests.push(TestResult::fail(
-            "harness_startup_latency_ms",
-            "no frame decoded",
-        )),
-        Ok(Err(e)) => tests.push(TestResult::fail(
-            "harness_startup_latency_ms",
-            e.to_string(),
-        )),
-        Err(_) => {
-            cleanup_timed_out_media_processes(&auth_url, "harness_startup_latency_ms");
+        HarnessProcessOutcome::Success(None) => {
             tests.push(TestResult::fail(
                 "harness_startup_latency_ms",
-                format!("harness step timed out after {}s", step_cap_short.as_secs()),
+                "no frame decoded",
+            ));
+        }
+        HarnessProcessOutcome::Error(error) => {
+            tests.push(TestResult::fail("harness_startup_latency_ms", error));
+        }
+        HarnessProcessOutcome::Timeout => {
+            tests.push(TestResult::fail(
+                "harness_startup_latency_ms",
+                harness_timeout_reason(step_cap),
             ));
         }
     }
+}
 
-    debug!(url = %url, duration_sec = effective.short_duration_sec, "harness: bitrate/fps");
-    match timeout(
-        step_cap_long,
-        harness_bitrate_fps(
-            &auth_url,
-            effective.short_duration_sec,
-            &artifacts_dir,
-            capture_tool_output,
-            effective,
-            &effective.ffmpeg_log_level,
-        ),
-    )
-    .await
-    {
-        Ok(Ok((bitrate, fps))) => {
-            let bitrate_pass = harness_bitrate_pass(
-                bitrate,
-                effective.expected_bitrate_kbps,
-                effective.bitrate_tolerance_percent,
-            );
-            let fps_pass =
-                harness_fps_pass(fps, effective.expected_fps, effective.fps_tolerance_percent);
+fn append_harness_bitrate_fps_result(
+    tests: &mut Vec<TestResult>,
+    outcome: HarnessProcessOutcome<(f64, f64)>,
+    expected_bitrate_kbps: Option<f64>,
+    bitrate_tolerance_percent: u32,
+    expected_fps: Option<f64>,
+    fps_tolerance_percent: u32,
+    step_cap: Duration,
+) {
+    match outcome {
+        HarnessProcessOutcome::Success((bitrate, fps)) => {
+            let bitrate_pass =
+                harness_bitrate_pass(bitrate, expected_bitrate_kbps, bitrate_tolerance_percent);
+            let fps_pass = harness_fps_pass(fps, expected_fps, fps_tolerance_percent);
             tests.push(TestResult::metric(
                 "harness_bitrate_kbps",
                 serde_json::json!(bitrate),
@@ -1603,26 +1573,25 @@ pub async fn run_harness(
                 fps_pass,
             ));
         }
-        Ok(Err(e)) => tests.push(TestResult::fail("harness_bitrate_fps", e.to_string())),
-        Err(_) => {
-            cleanup_timed_out_media_processes(&auth_url, "harness_bitrate_fps");
+        HarnessProcessOutcome::Error(error) => {
+            tests.push(TestResult::fail("harness_bitrate_fps", error));
+        }
+        HarnessProcessOutcome::Timeout => {
             tests.push(TestResult::fail(
                 "harness_bitrate_fps",
-                format!("harness step timed out after {}s", step_cap_long.as_secs()),
+                harness_timeout_reason(step_cap),
             ));
         }
     }
+}
 
-    debug!(url = %url, "harness: SDP validation");
-    match timeout(
-        step_cap_short,
-        harness_sdp_validation(&auth_url, timeout_sec, &artifacts_dir, capture_tool_output),
-    )
-    .await
-    {
-        Ok(Ok((video_count, audio_count, has_h264, has_aac))) => {
-            expect_h264 = has_h264;
-            expect_aac = has_aac;
+fn append_harness_sdp_validation_result(
+    tests: &mut Vec<TestResult>,
+    outcome: HarnessProcessOutcome<(usize, usize, bool, bool)>,
+    step_cap: Duration,
+) -> (bool, bool) {
+    match outcome {
+        HarnessProcessOutcome::Success((video_count, audio_count, has_h264, has_aac)) => {
             tests.push(TestResult::metric(
                 "harness_sdp_video_streams",
                 serde_json::json!(video_count),
@@ -1643,25 +1612,29 @@ pub async fn run_harness(
             } else {
                 TestResult::pass("harness_sdp_audio_aac")
             });
+            (has_h264, has_aac)
         }
-        Ok(Err(e)) => tests.push(TestResult::fail("harness_sdp_validation", e.to_string())),
-        Err(_) => {
-            cleanup_timed_out_media_processes(&auth_url, "harness_sdp_validation");
+        HarnessProcessOutcome::Error(error) => {
+            tests.push(TestResult::fail("harness_sdp_validation", error));
+            (false, false)
+        }
+        HarnessProcessOutcome::Timeout => {
             tests.push(TestResult::fail(
                 "harness_sdp_validation",
-                format!("harness step timed out after {}s", step_cap_short.as_secs()),
+                harness_timeout_reason(step_cap),
             ));
+            (false, false)
         }
     }
+}
 
-    debug!(url = %url, "harness: RTSP protocol sequence");
-    match timeout(
-        step_cap_protocol_sequence,
-        harness_rtsp_protocol_sequence(&auth_url, effective, args),
-    )
-    .await
-    {
-        Ok(Ok(stats)) => {
+fn append_harness_protocol_sequence_result(
+    tests: &mut Vec<TestResult>,
+    outcome: HarnessProcessOutcome<RtspProtocolSequenceStats>,
+    step_cap: Duration,
+) {
+    match outcome {
+        HarnessProcessOutcome::Success(stats) => {
             let status_non_auth_4xx = stats.status_4xx.saturating_sub(stats.status_401);
             let pass = harness_protocol_sequence_pass(&stats);
             tests.push(TestResult::metric(
@@ -1680,32 +1653,33 @@ pub async fn run_harness(
                 pass,
             ));
         }
-        Ok(Err(e)) => tests.push(TestResult::fail("harness_protocol_sequence", e.to_string())),
-        Err(_) => {
-            cleanup_timed_out_media_processes(&auth_url, "harness_protocol_sequence");
+        HarnessProcessOutcome::Error(error) => {
+            tests.push(TestResult::fail("harness_protocol_sequence", error));
+        }
+        HarnessProcessOutcome::Timeout => {
             tests.push(TestResult::fail(
                 "harness_protocol_sequence",
-                format!(
-                    "harness step timed out after {}s",
-                    step_cap_protocol_sequence.as_secs()
-                ),
+                harness_timeout_reason(step_cap),
             ));
         }
     }
+}
 
-    debug!(url = %url, "harness: packet loss + pcap RFC checks");
-    match timeout(
-        step_cap_long,
-        harness_packet_loss(&auth_url, effective, args, expect_h264, expect_aac),
-    )
-    .await
-    {
-        Ok(Ok(res)) => {
+fn append_harness_packet_loss_result(
+    tests: &mut Vec<TestResult>,
+    outcome: HarnessProcessOutcome<HarnessPacketLossResult>,
+    packet_loss_tolerance_percent: f64,
+    expect_h264: bool,
+    expect_aac: bool,
+    step_cap: Duration,
+) {
+    match outcome {
+        HarnessProcessOutcome::Success(res) => {
             let (video_metric, pass) = match res.video.clone() {
                 Some(metric) => {
                     let pass = packet_loss_within_tolerance(
                         metric.loss_percent,
-                        effective.packet_loss_tolerance_percent,
+                        packet_loss_tolerance_percent,
                     );
                     (metric, pass)
                 }
@@ -1724,10 +1698,8 @@ pub async fn run_harness(
             ));
 
             if let Some(video) = res.video.clone() {
-                let pass = packet_loss_within_tolerance(
-                    video.loss_percent,
-                    effective.packet_loss_tolerance_percent,
-                );
+                let pass =
+                    packet_loss_within_tolerance(video.loss_percent, packet_loss_tolerance_percent);
                 tests.push(TestResult::metric(
                     "harness_packet_loss_percent_video",
                     serde_json::json!(video),
@@ -1736,10 +1708,8 @@ pub async fn run_harness(
             }
 
             if let Some(audio) = res.audio.clone() {
-                let pass = packet_loss_within_tolerance(
-                    audio.loss_percent,
-                    effective.packet_loss_tolerance_percent,
-                );
+                let pass =
+                    packet_loss_within_tolerance(audio.loss_percent, packet_loss_tolerance_percent);
                 tests.push(TestResult::metric(
                     "harness_packet_loss_percent_audio",
                     serde_json::json!(audio),
@@ -1791,128 +1761,323 @@ pub async fn run_harness(
                 tests.push(TestResult::pass("harness_pcap_rfc3640_aac"));
             }
         }
-        Ok(Err(e)) => tests.push(TestResult::fail("harness_packet_loss", e.to_string())),
-        Err(_) => {
-            cleanup_timed_out_media_processes(&auth_url, "harness_packet_loss");
+        HarnessProcessOutcome::Error(error) => {
+            tests.push(TestResult::fail("harness_packet_loss", error));
+        }
+        HarnessProcessOutcome::Timeout => {
             tests.push(TestResult::fail(
                 "harness_packet_loss",
-                format!("harness step timed out after {}s", step_cap_long.as_secs()),
+                harness_timeout_reason(step_cap),
             ));
         }
     }
+}
 
-    if effective.concurrent_clients > 0 {
-        debug!(url = %url, concurrent = effective.concurrent_clients, "harness: concurrent clients");
-        match timeout(
-            step_cap_long,
-            harness_concurrent_clients(
+fn append_harness_concurrent_clients_result(
+    tests: &mut Vec<TestResult>,
+    outcome: HarnessProcessOutcome<u32>,
+    requested: u32,
+    step_cap: Duration,
+) {
+    match outcome {
+        HarnessProcessOutcome::Success(failed) => {
+            tests.push(TestResult::metric(
+                "harness_concurrent_clients",
+                serde_json::json!({ "requested": requested, "failed": failed }),
+                failed == 0,
+            ));
+        }
+        HarnessProcessOutcome::Error(error) => {
+            tests.push(TestResult::fail("harness_concurrent_clients", error));
+        }
+        HarnessProcessOutcome::Timeout => {
+            tests.push(TestResult::fail(
+                "harness_concurrent_clients",
+                harness_timeout_reason(step_cap),
+            ));
+        }
+    }
+}
+
+fn append_harness_long_duration_result(
+    tests: &mut Vec<TestResult>,
+    outcome: HarnessProcessOutcome<u32>,
+    step_cap: Duration,
+) {
+    match outcome {
+        HarnessProcessOutcome::Success(degradation_pct) => {
+            tests.push(TestResult::metric(
+                "harness_long_duration_degradation_pct",
+                serde_json::json!(degradation_pct),
+                degradation_pct < 20,
+            ));
+        }
+        HarnessProcessOutcome::Error(error) => {
+            tests.push(TestResult::fail("harness_long_duration", error));
+        }
+        HarnessProcessOutcome::Timeout => {
+            tests.push(TestResult::fail(
+                "harness_long_duration",
+                harness_timeout_reason(step_cap),
+            ));
+        }
+    }
+}
+
+fn append_harness_error_handling_result(
+    tests: &mut Vec<TestResult>,
+    outcome: HarnessProcessOutcome<(bool, bool)>,
+    step_cap: Duration,
+) {
+    match outcome {
+        HarnessProcessOutcome::Success((invalid_creds_ok, bogus_url_ok)) => {
+            tests.push(TestResult::metric(
+                "harness_error_invalid_creds",
+                serde_json::json!(invalid_creds_ok),
+                invalid_creds_ok,
+            ));
+            tests.push(TestResult::metric(
+                "harness_error_bogus_url",
+                serde_json::json!(bogus_url_ok),
+                bogus_url_ok,
+            ));
+        }
+        HarnessProcessOutcome::Error(error) => {
+            tests.push(TestResult::fail("harness_error_handling", error));
+        }
+        HarnessProcessOutcome::Timeout => {
+            tests.push(TestResult::fail(
+                "harness_error_handling",
+                harness_timeout_reason(step_cap),
+            ));
+        }
+    }
+}
+
+pub async fn run_harness(
+    args: &Args,
+    effective: &EffectiveConfig,
+    tests: &mut Vec<TestResult>,
+) -> Result<()> {
+    let url = rtsp_url(
+        &effective.rtsp_host,
+        effective.rtsp_port,
+        &effective.rtsp_stream,
+    );
+    let auth_url = rtsp_url_with_credentials(
+        &effective.rtsp_host,
+        effective.rtsp_port,
+        &effective.rtsp_stream,
+        effective.stream_username.as_deref(),
+        effective.stream_password.as_deref(),
+    )?;
+    let timeout_sec = effective.rtsp_timeout_sec;
+    let step_cap_short = Duration::from_secs(timeout_sec.saturating_add(15));
+    let step_cap_long = Duration::from_secs(effective.short_duration_sec.saturating_add(30));
+    let step_cap_protocol_sequence = Duration::from_secs(
+        effective
+            .short_duration_sec
+            .saturating_mul(2)
+            .saturating_add(30),
+    );
+    let artifacts_dir = effective.artifacts_dir.clone();
+    let capture_tool_output = effective.capture_tool_output;
+    info!(url = %url, uses_credentials = effective.stream_username.is_some(), "running harness scenarios");
+    debug!("harness: basic connectivity");
+    let basic_connectivity = to_harness_process_outcome(
+        timeout(
+            step_cap_short,
+            harness_basic_connectivity(
                 &auth_url,
-                effective.short_duration_sec,
-                effective.concurrent_clients,
                 timeout_sec,
                 &artifacts_dir,
                 capture_tool_output,
+                &effective.ffmpeg_log_level,
             ),
         )
-        .await
-        {
-            Ok(Ok(failed)) => {
-                tests.push(TestResult::metric(
-                    "harness_concurrent_clients",
-                    serde_json::json!({ "requested": effective.concurrent_clients, "failed": failed }),
-                    failed == 0,
-                ));
-            }
-            Ok(Err(e)) => tests.push(TestResult::fail(
-                "harness_concurrent_clients",
-                e.to_string(),
-            )),
-            Err(_) => {
-                cleanup_timed_out_media_processes(&auth_url, "harness_concurrent_clients");
-                tests.push(TestResult::fail(
-                    "harness_concurrent_clients",
-                    format!("harness step timed out after {}s", step_cap_long.as_secs()),
-                ));
-            }
+        .await,
+    );
+    if basic_connectivity.is_timeout() {
+        cleanup_timed_out_media_processes(&auth_url, "harness_basic_connectivity");
+    }
+    append_harness_basic_connectivity_result(tests, basic_connectivity, step_cap_short);
+
+    debug!(
+        url = %url,
+        target_ms = effective.harness_startup_latency_ms,
+        "harness: startup latency"
+    );
+    let startup_latency = to_harness_process_outcome(
+        timeout(
+            step_cap_short,
+            harness_startup_latency(
+                &auth_url,
+                timeout_sec,
+                &artifacts_dir,
+                capture_tool_output,
+                &effective.ffmpeg_log_level,
+            ),
+        )
+        .await,
+    );
+    if startup_latency.is_timeout() {
+        cleanup_timed_out_media_processes(&auth_url, "harness_startup_latency_ms");
+    }
+    append_harness_startup_latency_result(
+        tests,
+        startup_latency,
+        effective.harness_startup_latency_ms,
+        step_cap_short,
+    );
+
+    debug!(url = %url, duration_sec = effective.short_duration_sec, "harness: bitrate/fps");
+    let bitrate_fps = to_harness_process_outcome(
+        timeout(
+            step_cap_long,
+            harness_bitrate_fps(
+                &auth_url,
+                effective.short_duration_sec,
+                &artifacts_dir,
+                capture_tool_output,
+                effective,
+                &effective.ffmpeg_log_level,
+            ),
+        )
+        .await,
+    );
+    if bitrate_fps.is_timeout() {
+        cleanup_timed_out_media_processes(&auth_url, "harness_bitrate_fps");
+    }
+    append_harness_bitrate_fps_result(
+        tests,
+        bitrate_fps,
+        effective.expected_bitrate_kbps,
+        effective.bitrate_tolerance_percent,
+        effective.expected_fps,
+        effective.fps_tolerance_percent,
+        step_cap_long,
+    );
+
+    debug!(url = %url, "harness: SDP validation");
+    let sdp_validation = to_harness_process_outcome(
+        timeout(
+            step_cap_short,
+            harness_sdp_validation(&auth_url, timeout_sec, &artifacts_dir, capture_tool_output),
+        )
+        .await,
+    );
+    if sdp_validation.is_timeout() {
+        cleanup_timed_out_media_processes(&auth_url, "harness_sdp_validation");
+    }
+    let (expect_h264, expect_aac) =
+        append_harness_sdp_validation_result(tests, sdp_validation, step_cap_short);
+
+    debug!(url = %url, "harness: RTSP protocol sequence");
+    let protocol_sequence = to_harness_process_outcome(
+        timeout(
+            step_cap_protocol_sequence,
+            harness_rtsp_protocol_sequence(&auth_url, effective, args),
+        )
+        .await,
+    );
+    if protocol_sequence.is_timeout() {
+        cleanup_timed_out_media_processes(&auth_url, "harness_protocol_sequence");
+    }
+    append_harness_protocol_sequence_result(tests, protocol_sequence, step_cap_protocol_sequence);
+
+    debug!(url = %url, "harness: packet loss + pcap RFC checks");
+    let packet_loss = to_harness_process_outcome(
+        timeout(
+            step_cap_long,
+            harness_packet_loss(&auth_url, effective, args, expect_h264, expect_aac),
+        )
+        .await,
+    );
+    if packet_loss.is_timeout() {
+        cleanup_timed_out_media_processes(&auth_url, "harness_packet_loss");
+    }
+    append_harness_packet_loss_result(
+        tests,
+        packet_loss,
+        effective.packet_loss_tolerance_percent,
+        expect_h264,
+        expect_aac,
+        step_cap_long,
+    );
+
+    if effective.concurrent_clients > 0 {
+        debug!(url = %url, concurrent = effective.concurrent_clients, "harness: concurrent clients");
+        let concurrent_clients = to_harness_process_outcome(
+            timeout(
+                step_cap_long,
+                harness_concurrent_clients(
+                    &auth_url,
+                    effective.short_duration_sec,
+                    effective.concurrent_clients,
+                    timeout_sec,
+                    &artifacts_dir,
+                    capture_tool_output,
+                ),
+            )
+            .await,
+        );
+        if concurrent_clients.is_timeout() {
+            cleanup_timed_out_media_processes(&auth_url, "harness_concurrent_clients");
         }
+        append_harness_concurrent_clients_result(
+            tests,
+            concurrent_clients,
+            effective.concurrent_clients,
+            step_cap_long,
+        );
     }
 
     if args.long_duration {
         let step_cap_long_duration =
             Duration::from_secs(effective.long_duration_sec.saturating_add(30));
         debug!(url = %url, duration_sec = effective.long_duration_sec, "harness: long duration");
-        match timeout(
-            step_cap_long_duration,
-            harness_long_duration(
-                &auth_url,
-                effective.long_duration_sec,
-                &artifacts_dir,
-                capture_tool_output,
-            ),
-        )
-        .await
-        {
-            Ok(Ok(degradation_pct)) => {
-                tests.push(TestResult::metric(
-                    "harness_long_duration_degradation_pct",
-                    serde_json::json!(degradation_pct),
-                    degradation_pct < 20,
-                ));
-            }
-            Ok(Err(e)) => tests.push(TestResult::fail("harness_long_duration", e.to_string())),
-            Err(_) => {
-                cleanup_timed_out_media_processes(&auth_url, "harness_long_duration");
-                tests.push(TestResult::fail(
-                    "harness_long_duration",
-                    format!(
-                        "harness step timed out after {}s",
-                        step_cap_long_duration.as_secs()
-                    ),
-                ));
-            }
+        let long_duration = to_harness_process_outcome(
+            timeout(
+                step_cap_long_duration,
+                harness_long_duration(
+                    &auth_url,
+                    effective.long_duration_sec,
+                    &artifacts_dir,
+                    capture_tool_output,
+                ),
+            )
+            .await,
+        );
+        if long_duration.is_timeout() {
+            cleanup_timed_out_media_processes(&auth_url, "harness_long_duration");
         }
+        append_harness_long_duration_result(tests, long_duration, step_cap_long_duration);
     }
 
     if !args.skip_error_handling {
         debug!(host = %effective.rtsp_host, port = effective.rtsp_port, "harness: error handling");
-        match timeout(
-            step_cap_short,
-            harness_error_handling(
-                &effective.rtsp_host,
-                effective.rtsp_port,
-                &effective.rtsp_stream,
-                effective
-                    .stream_username
-                    .as_deref()
-                    .zip(effective.stream_password.as_deref()),
-                timeout_sec,
-                &artifacts_dir,
-                capture_tool_output,
-            ),
-        )
-        .await
-        {
-            Ok(Ok((invalid_creds_ok, bogus_url_ok))) => {
-                tests.push(TestResult::metric(
-                    "harness_error_invalid_creds",
-                    serde_json::json!(invalid_creds_ok),
-                    invalid_creds_ok,
-                ));
-                tests.push(TestResult::metric(
-                    "harness_error_bogus_url",
-                    serde_json::json!(bogus_url_ok),
-                    bogus_url_ok,
-                ));
-            }
-            Ok(Err(e)) => tests.push(TestResult::fail("harness_error_handling", e.to_string())),
-            Err(_) => {
-                cleanup_timed_out_media_processes(&auth_url, "harness_error_handling");
-                tests.push(TestResult::fail(
-                    "harness_error_handling",
-                    format!("harness step timed out after {}s", step_cap_short.as_secs()),
-                ));
-            }
+        let error_handling = to_harness_process_outcome(
+            timeout(
+                step_cap_short,
+                harness_error_handling(
+                    &effective.rtsp_host,
+                    effective.rtsp_port,
+                    &effective.rtsp_stream,
+                    effective
+                        .stream_username
+                        .as_deref()
+                        .zip(effective.stream_password.as_deref()),
+                    timeout_sec,
+                    &artifacts_dir,
+                    capture_tool_output,
+                ),
+            )
+            .await,
+        );
+        if error_handling.is_timeout() {
+            cleanup_timed_out_media_processes(&auth_url, "harness_error_handling");
         }
+        append_harness_error_handling_result(tests, error_handling, step_cap_short);
     }
 
     Ok(())
@@ -2780,8 +2945,14 @@ async fn harness_error_handling(
 #[cfg(test)]
 mod tests {
     use super::{
-        BoundedLogWriter, RtpTsharkRow, RtspProtocolSequenceStats, analyze_aac_rfc3640_from_rows,
-        analyze_h264_rfc6184_from_rows, bitrate_within_tolerance, build_sdp_test_results,
+        BoundedLogWriter, HarnessPacketLossResult, HarnessProcessOutcome, HarnessRtpLossMetric,
+        RtpPcapRfc3640Stats, RtpPcapRfc6184Stats, RtpTsharkRow, RtspProtocolSequenceStats,
+        analyze_aac_rfc3640_from_rows, analyze_h264_rfc6184_from_rows,
+        append_harness_basic_connectivity_result, append_harness_bitrate_fps_result,
+        append_harness_concurrent_clients_result, append_harness_error_handling_result,
+        append_harness_long_duration_result, append_harness_packet_loss_result,
+        append_harness_protocol_sequence_result, append_harness_sdp_validation_result,
+        append_harness_startup_latency_result, bitrate_within_tolerance, build_sdp_test_results,
         compute_packet_loss_from_seqs, critical_proto_failed, empty_report, fps_within_tolerance,
         group_rtp_rows_by_stream, harness_bitrate_pass, harness_fps_pass,
         harness_protocol_sequence_pass, packet_loss_within_tolerance, parse_ffmpeg_kbytes_token,
@@ -2795,6 +2966,14 @@ mod tests {
     use crate::config::{InitialTimestampPolicyArg, TransportArg};
     use crate::report::{StreamInfo, TestResult, TestRun};
     use crate::util::MAX_TOOL_LOG_BYTES;
+    use std::time::Duration;
+
+    fn fail_reason(test: &TestResult) -> Option<&str> {
+        match test {
+            TestResult::Fail { reason, .. } => Some(reason),
+            _ => None,
+        }
+    }
 
     #[test]
     fn test_result_ok_pass() {
@@ -3659,6 +3838,359 @@ mod tests {
         assert!(packet_loss_within_tolerance(0.5, 1.0));
         assert!(packet_loss_within_tolerance(1.0, 1.0));
         assert!(!packet_loss_within_tolerance(1.5, 1.0));
+    }
+
+    #[test]
+    fn test_harness_basic_connectivity_outcomes() {
+        let mut tests = Vec::new();
+        append_harness_basic_connectivity_result(
+            &mut tests,
+            HarnessProcessOutcome::Success(true),
+            Duration::from_secs(10),
+        );
+        assert!(result_ok(tests.last().unwrap()));
+
+        append_harness_basic_connectivity_result(
+            &mut tests,
+            HarnessProcessOutcome::Error("ffmpeg failed".to_string()),
+            Duration::from_secs(10),
+        );
+        assert_eq!(tests.last().unwrap().name(), "harness_basic_connectivity");
+        assert_eq!(fail_reason(tests.last().unwrap()), Some("ffmpeg failed"));
+
+        append_harness_basic_connectivity_result(
+            &mut tests,
+            HarnessProcessOutcome::Timeout,
+            Duration::from_secs(7),
+        );
+        assert!(
+            fail_reason(tests.last().unwrap())
+                .unwrap()
+                .contains("timed out after 7s")
+        );
+    }
+
+    #[test]
+    fn test_harness_startup_latency_outcomes() {
+        let mut tests = Vec::new();
+        append_harness_startup_latency_result(
+            &mut tests,
+            HarnessProcessOutcome::Success(Some(80)),
+            100,
+            Duration::from_secs(9),
+        );
+        assert!(result_ok(tests.last().unwrap()));
+
+        append_harness_startup_latency_result(
+            &mut tests,
+            HarnessProcessOutcome::Error("decode failed".to_string()),
+            100,
+            Duration::from_secs(9),
+        );
+        assert_eq!(tests.last().unwrap().name(), "harness_startup_latency_ms");
+        assert_eq!(fail_reason(tests.last().unwrap()), Some("decode failed"));
+
+        append_harness_startup_latency_result(
+            &mut tests,
+            HarnessProcessOutcome::Timeout,
+            100,
+            Duration::from_secs(9),
+        );
+        assert!(
+            fail_reason(tests.last().unwrap())
+                .unwrap()
+                .contains("timed out after 9s")
+        );
+    }
+
+    #[test]
+    fn test_harness_bitrate_fps_outcomes() {
+        let mut tests = Vec::new();
+        append_harness_bitrate_fps_result(
+            &mut tests,
+            HarnessProcessOutcome::Success((800.0, 25.0)),
+            Some(820.0),
+            10,
+            Some(24.0),
+            10,
+            Duration::from_secs(20),
+        );
+        assert_eq!(tests.len(), 2);
+        assert!(result_ok(&tests[0]));
+        assert!(result_ok(&tests[1]));
+
+        append_harness_bitrate_fps_result(
+            &mut tests,
+            HarnessProcessOutcome::Error("ffmpeg exited".to_string()),
+            None,
+            10,
+            None,
+            10,
+            Duration::from_secs(20),
+        );
+        assert_eq!(fail_reason(tests.last().unwrap()), Some("ffmpeg exited"));
+
+        append_harness_bitrate_fps_result(
+            &mut tests,
+            HarnessProcessOutcome::Timeout,
+            None,
+            10,
+            None,
+            10,
+            Duration::from_secs(20),
+        );
+        assert!(
+            fail_reason(tests.last().unwrap())
+                .unwrap()
+                .contains("timed out after 20s")
+        );
+    }
+
+    #[test]
+    fn test_harness_sdp_validation_outcomes() {
+        let mut tests = Vec::new();
+        let flags = append_harness_sdp_validation_result(
+            &mut tests,
+            HarnessProcessOutcome::Success((1, 1, true, true)),
+            Duration::from_secs(8),
+        );
+        assert_eq!(flags, (true, true));
+        assert_eq!(tests.len(), 4);
+
+        let flags = append_harness_sdp_validation_result(
+            &mut tests,
+            HarnessProcessOutcome::Error("ffprobe failed".to_string()),
+            Duration::from_secs(8),
+        );
+        assert_eq!(flags, (false, false));
+        assert_eq!(fail_reason(tests.last().unwrap()), Some("ffprobe failed"));
+
+        let flags = append_harness_sdp_validation_result(
+            &mut tests,
+            HarnessProcessOutcome::Timeout,
+            Duration::from_secs(8),
+        );
+        assert_eq!(flags, (false, false));
+        assert!(
+            fail_reason(tests.last().unwrap())
+                .unwrap()
+                .contains("timed out after 8s")
+        );
+    }
+
+    #[test]
+    fn test_harness_protocol_sequence_outcomes() {
+        let mut tests = Vec::new();
+        append_harness_protocol_sequence_result(
+            &mut tests,
+            HarnessProcessOutcome::Success(RtspProtocolSequenceStats {
+                describe: 1,
+                setup: 1,
+                play: 1,
+                teardown: 1,
+                status_200: 3,
+                status_4xx: 0,
+                status_401: 0,
+                status_5xx: 0,
+            }),
+            Duration::from_secs(30),
+        );
+        assert!(result_ok(tests.last().unwrap()));
+
+        append_harness_protocol_sequence_result(
+            &mut tests,
+            HarnessProcessOutcome::Error("tshark parse failed".to_string()),
+            Duration::from_secs(30),
+        );
+        assert_eq!(
+            fail_reason(tests.last().unwrap()),
+            Some("tshark parse failed")
+        );
+
+        append_harness_protocol_sequence_result(
+            &mut tests,
+            HarnessProcessOutcome::Timeout,
+            Duration::from_secs(30),
+        );
+        assert!(
+            fail_reason(tests.last().unwrap())
+                .unwrap()
+                .contains("timed out after 30s")
+        );
+    }
+
+    #[test]
+    fn test_harness_packet_loss_outcomes() {
+        let mut tests = Vec::new();
+        append_harness_packet_loss_result(
+            &mut tests,
+            HarnessProcessOutcome::Success(HarnessPacketLossResult {
+                video: Some(HarnessRtpLossMetric {
+                    rtp_packets: 100,
+                    packet_loss: 0,
+                    loss_percent: 0.0,
+                    payload_type: 96,
+                    ssrc: Some(1),
+                }),
+                audio: Some(HarnessRtpLossMetric {
+                    rtp_packets: 80,
+                    packet_loss: 1,
+                    loss_percent: 1.25,
+                    payload_type: 97,
+                    ssrc: Some(2),
+                }),
+                h264_rfc6184: Some(Ok(RtpPcapRfc6184Stats {
+                    payload_type: 96,
+                    packets_analyzed: 100,
+                    invalid_packets: 0,
+                    marker_violations: 0,
+                    fu_a_invalid: 0,
+                    stap_a_invalid: 0,
+                })),
+                aac_rfc3640: Some(Ok(RtpPcapRfc3640Stats {
+                    payload_type: 97,
+                    packets_analyzed: 80,
+                    invalid_packets: 0,
+                    au_header_invalid: 0,
+                    au_size_invalid: 0,
+                    timestamp_anomalies: 0,
+                })),
+            }),
+            2.0,
+            true,
+            true,
+            Duration::from_secs(25),
+        );
+        assert!(
+            tests
+                .iter()
+                .any(|t| t.name() == "harness_packet_loss_percent")
+        );
+        assert!(
+            tests
+                .iter()
+                .any(|t| t.name() == "harness_pcap_rfc6184_h264")
+        );
+        assert!(tests.iter().any(|t| t.name() == "harness_pcap_rfc3640_aac"));
+
+        append_harness_packet_loss_result(
+            &mut tests,
+            HarnessProcessOutcome::Error("pcap missing".to_string()),
+            2.0,
+            true,
+            true,
+            Duration::from_secs(25),
+        );
+        assert_eq!(fail_reason(tests.last().unwrap()), Some("pcap missing"));
+
+        append_harness_packet_loss_result(
+            &mut tests,
+            HarnessProcessOutcome::Timeout,
+            2.0,
+            true,
+            true,
+            Duration::from_secs(25),
+        );
+        assert!(
+            fail_reason(tests.last().unwrap())
+                .unwrap()
+                .contains("timed out after 25s")
+        );
+    }
+
+    #[test]
+    fn test_harness_concurrent_clients_outcomes() {
+        let mut tests = Vec::new();
+        append_harness_concurrent_clients_result(
+            &mut tests,
+            HarnessProcessOutcome::Success(0),
+            4,
+            Duration::from_secs(15),
+        );
+        assert!(result_ok(tests.last().unwrap()));
+
+        append_harness_concurrent_clients_result(
+            &mut tests,
+            HarnessProcessOutcome::Error("worker panic".to_string()),
+            4,
+            Duration::from_secs(15),
+        );
+        assert_eq!(fail_reason(tests.last().unwrap()), Some("worker panic"));
+
+        append_harness_concurrent_clients_result(
+            &mut tests,
+            HarnessProcessOutcome::Timeout,
+            4,
+            Duration::from_secs(15),
+        );
+        assert!(
+            fail_reason(tests.last().unwrap())
+                .unwrap()
+                .contains("timed out after 15s")
+        );
+    }
+
+    #[test]
+    fn test_harness_long_duration_outcomes() {
+        let mut tests = Vec::new();
+        append_harness_long_duration_result(
+            &mut tests,
+            HarnessProcessOutcome::Success(5),
+            Duration::from_secs(60),
+        );
+        assert!(result_ok(tests.last().unwrap()));
+
+        append_harness_long_duration_result(
+            &mut tests,
+            HarnessProcessOutcome::Error("throughput probe failed".to_string()),
+            Duration::from_secs(60),
+        );
+        assert_eq!(
+            fail_reason(tests.last().unwrap()),
+            Some("throughput probe failed")
+        );
+
+        append_harness_long_duration_result(
+            &mut tests,
+            HarnessProcessOutcome::Timeout,
+            Duration::from_secs(60),
+        );
+        assert!(
+            fail_reason(tests.last().unwrap())
+                .unwrap()
+                .contains("timed out after 60s")
+        );
+    }
+
+    #[test]
+    fn test_harness_error_handling_outcomes() {
+        let mut tests = Vec::new();
+        append_harness_error_handling_result(
+            &mut tests,
+            HarnessProcessOutcome::Success((true, true)),
+            Duration::from_secs(11),
+        );
+        assert_eq!(tests.len(), 2);
+        assert!(result_ok(&tests[0]));
+        assert!(result_ok(&tests[1]));
+
+        append_harness_error_handling_result(
+            &mut tests,
+            HarnessProcessOutcome::Error("ffmpeg not found".to_string()),
+            Duration::from_secs(11),
+        );
+        assert_eq!(fail_reason(tests.last().unwrap()), Some("ffmpeg not found"));
+
+        append_harness_error_handling_result(
+            &mut tests,
+            HarnessProcessOutcome::Timeout,
+            Duration::from_secs(11),
+        );
+        assert!(
+            fail_reason(tests.last().unwrap())
+                .unwrap()
+                .contains("timed out after 11s")
+        );
     }
 
     #[test]

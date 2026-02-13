@@ -12,6 +12,7 @@ use bytes::BytesMut;
 use clap::Parser;
 use onvif_rust::app::{Application, DEFAULT_CONFIG_PATH};
 use onvif_rust::config::{ConfigRuntime, ConfigStorage};
+use onvif_rust::platform::{Platform, ValidationPlatform};
 use onvif_rust::validation::h264_playback::{H264PlaybackConfig, H264PlaybackMode};
 use onvif_rust::validation::httpflv_remux::ValidationHttpFlvRemuxer;
 use onvif_rust::validation::stream_auth::build_stream_auth_for_validation_mode;
@@ -23,8 +24,10 @@ use streaming_lib::streamhub::define::{Information, InformationSender};
 use streaming_lib::streamhub::errors::StreamHubError;
 use streaming_lib::streamhub::statistics::StatisticsStream;
 use streaming_lib::{
-    DataSender, FrameData, MediaInfo, SubscribeType, TStreamHandler, VideoCodecType,
+    DataSender, DefaultHttpFlvServer, DefaultRtspServer, FrameData, HttpFlvServer, MediaInfo,
+    RtspServer, StreamIdentifier, SubscribeType, TStreamHandler, VideoCodecType,
 };
+use streaming_lib::StreamsHub;
 use tokio::time::{Duration, timeout};
 
 /// ONVIF daemon with optional H.264 playback validation mode
@@ -687,54 +690,164 @@ async fn init_validation_publishers(
 
 /// Run the daemon in H.264 playback validation mode
 async fn run_validation_mode(config: H264PlaybackConfig, config_path: &str) -> Result<()> {
-    use onvif_rust::platform::{Platform, ValidationPlatform};
-    use std::path::Path;
-    use streaming_lib::StreamIdentifier;
-    use streaming_lib::streamhub::define::DataReceiver;
-    use streaming_lib::{
-        DefaultHttpFlvServer, DefaultRtspServer, HttpFlvServer, RtspServer, StreamsHub,
-    };
     use tokio::sync::mpsc;
 
-    let publisher_init_timeout_sec = std::env::var("ONVIF_VALIDATION_PUBLISHER_INIT_TIMEOUT_SEC")
-        .ok()
-        .and_then(|value| value.parse::<u64>().ok())
-        .filter(|value| *value > 0)
-        .unwrap_or(30);
+    let publisher_init_timeout_sec =
+        parse_env_timeout("ONVIF_VALIDATION_PUBLISHER_INIT_TIMEOUT_SEC", 30);
+    configure_rtp_sampling();
+    tracing::info!("Validation mode: HTTP-FLV and ONVIF application enabled");
+    init_validation_logging(config_path);
+    validate_source_files(&config)?;
 
-    // Configure RTP packet sampling for RTSP validation runs.
-    //
-    // This is intentionally controlled by an environment variable so that
-    // validation tooling (like `rtsp_validation_tool`) can tune log volume
-    // without changing CLI arguments or config files.
-    //
-    // ONVIF_RTSP_RTP_SAMPLE_INTERVAL:
-    //   - When unset or invalid: defaults to 0 (sampling disabled).
-    //   - When set to "0": disables RTP sampling logs.
-    //   - Otherwise: parsed as u32 and applied as-is.
-    let rtp_sample_interval = std::env::var("ONVIF_RTSP_RTP_SAMPLE_INTERVAL")
+    let stream_auth = build_stream_auth(config_path)?;
+    log_validation_startup(&config);
+
+    let publishers = init_validation_publishers(&config, publisher_init_timeout_sec).await?;
+    let (video_publisher, audio_publisher) = extract_publishers(publishers);
+    let audio_sample_rate = audio_publisher.as_ref().map_or(0, |p| p.sample_rate());
+    let video_sps = video_publisher.sps().to_vec();
+    let video_pps = video_publisher.pps().to_vec();
+    let video_bootstrap_idr = video_publisher.bootstrap_idr();
+    let video_last_timestamp_handle = video_publisher.last_timestamp_handle();
+    let audio_config = audio_publisher.as_ref().map(|p| p.audio_config().to_vec());
+
+    let rtsp_stream_handler = Arc::new(ValidationAvStreamHandler::new(
+        video_sps.clone(),
+        video_pps.clone(),
+        video_bootstrap_idr,
+        video_last_timestamp_handle,
+        audio_config.clone(),
+        audio_sample_rate,
+    ));
+
+    let mut streamhub = StreamsHub::new(None);
+    let (rtsp_stream_id, httpflv_stream_id) = create_stream_identifiers();
+    let (frame_tx_for_publisher, frame_rx_from_publisher) = mpsc::unbounded_channel::<FrameData>();
+    let (frame_tx_rtsp, frame_rx_rtsp) = mpsc::unbounded_channel::<FrameData>();
+    let (frame_tx_httpflv, frame_rx_httpflv) = create_httpflv_channel();
+
+    let fanout_handle = spawn_fanout_task(
+        frame_rx_from_publisher,
+        frame_tx_rtsp.clone(),
+        frame_tx_httpflv,
+        video_sps.clone(),
+        video_pps.clone(),
+        audio_config.clone(),
+        audio_sample_rate,
+    );
+
+    let (rtsp_subscriber_handle, httpflv_subscriber_handle) = publish_to_streamhub(
+        &mut streamhub,
+        rtsp_stream_id.clone(),
+        httpflv_stream_id.clone(),
+        frame_rx_rtsp,
+        frame_rx_httpflv,
+        rtsp_stream_handler.clone(),
+    )
+    .await?;
+
+    tracing::info!(
+        "StreamHub initialized with streams: {} and {}",
+        rtsp_stream_id,
+        httpflv_stream_id
+    );
+
+    let (video_publisher, audio_publisher) = setup_subscriber_callbacks(
+        video_publisher,
+        audio_publisher,
+        rtsp_subscriber_handle,
+        httpflv_subscriber_handle,
+    );
+    tracing::info!(
+        "On-demand publishing configured: publishers will pause when RTSP+HTTP-FLV subscriber count is 0"
+    );
+
+    let video_publisher = Arc::new(video_publisher);
+    let audio_publisher = audio_publisher.map(Arc::new);
+
+    let pub_handle = video_publisher.start_publishing(frame_tx_for_publisher.clone());
+    tracing::info!("MockVideoPublisher started emitting frames");
+
+    let audio_pub_handle = start_audio_publisher(&audio_publisher, frame_tx_for_publisher);
+
+    let hub_event_sender = streamhub.get_hub_event_sender();
+    let rtsp_handle = spawn_rtsp_server(
+        hub_event_sender.clone(),
+        stream_auth.clone(),
+        config.rtsp_port,
+    );
+    let flv_handle = spawn_httpflv_server(hub_event_sender, stream_auth, config.httpflv_port);
+    let streamhub_handle = spawn_streamhub_event_loop(streamhub);
+    let platform = create_and_init_platform().await?;
+
+    let app = start_onvif_application(config_path, platform.clone()).await;
+    let playback_mode = init_playback_mode(config.clone(), platform.clone()).await?;
+
+    log_streaming_uris(&config, app.is_some());
+
+    tokio::signal::ctrl_c()
+        .await
+        .unwrap_or_else(|e| tracing::warn!("Failed to setup Ctrl+C handler: {}", e));
+    tracing::info!("Shutdown signal (Ctrl+C) received");
+    tracing::info!("Initiating graceful shutdown...");
+
+    if let Some(application) = app {
+        let report = application.shutdown().await;
+        tracing::info!("ONVIF Application shutdown completed: {:?}", report.status);
+    }
+
+    playback_mode.stop().await?;
+    tracing::info!("H264 playback stopped");
+
+    platform.shutdown().await?;
+    tracing::info!("ValidationPlatform shutdown");
+
+    video_publisher.stop_publishing().await;
+    tracing::info!("MockVideoPublisher stopped");
+
+    if let Some(audio_publisher) = audio_publisher.as_ref() {
+        audio_publisher.stop_publishing().await;
+        tracing::info!("MockAudioPublisher stopped");
+    }
+
+    abort_all_tasks(
+        rtsp_handle,
+        flv_handle,
+        streamhub_handle,
+        pub_handle,
+        audio_pub_handle,
+        fanout_handle,
+    );
+    tracing::info!("All servers and tasks shutdown");
+    tracing::info!("H.264 Validation mode stopped");
+    Ok(())
+}
+
+fn parse_env_timeout(var: &str, default: u64) -> u64 {
+    std::env::var(var)
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .filter(|v| *v > 0)
+        .unwrap_or(default)
+}
+
+fn configure_rtp_sampling() {
+    let interval = std::env::var("ONVIF_RTSP_RTP_SAMPLE_INTERVAL")
         .ok()
         .and_then(|raw| raw.parse::<u32>().ok())
         .unwrap_or(0);
-    if rtp_sample_interval > 0 {
-        streaming_lib::rtsp::session::server_session::set_rtp_sample_interval(rtp_sample_interval);
+    streaming_lib::rtsp::session::server_session::set_rtp_sample_interval(interval);
+    if interval > 0 {
         tracing::info!(
             "RTSP RTP sampling enabled for validation mode: interval={} packets",
-            rtp_sample_interval
+            interval
         );
     } else {
-        streaming_lib::rtsp::session::server_session::set_rtp_sample_interval(0);
         tracing::info!("RTSP RTP sampling disabled for validation mode");
     }
+}
 
-    tracing::info!("Validation mode: HTTP-FLV and ONVIF application enabled");
-
-    // Initialize logging early so validation-mode startup and streaming logs are visible.
-    //
-    // NOTE: Do NOT use `tracing_subscriber::fmt::init()` here. The application startup path
-    // uses `onvif_rust::logging::init_logging()` which also installs a global subscriber.
-    // If we install one first, application logging initialization will fail with:
-    // "a global default trace dispatcher has already been set".
+fn init_validation_logging(config_path: &str) {
     if let Ok(app_config) = ConfigStorage::load_or_default(config_path) {
         let config_runtime = ConfigRuntime::new(app_config);
         let stream_frame_debug_enabled = configure_stream_frame_debug_logging(&config_runtime);
@@ -747,12 +860,11 @@ async fn run_validation_mode(config: H264PlaybackConfig, config_path: &str) -> R
             );
             config_runtime.log_loaded_config();
         }
-    } else {
-        // Fall back to no-op: application startup will still attempt to initialize logging.
-        // (We avoid a hard failure here to keep validation-mode usable even with a missing config.)
     }
+}
 
-    // Verify H.264 file exists
+fn validate_source_files(config: &H264PlaybackConfig) -> Result<()> {
+    use std::path::Path;
     if !Path::new(&config.file_path).exists() {
         anyhow::bail!("H.264 file not found: {}", config.file_path);
     }
@@ -761,14 +873,19 @@ async fn run_validation_mode(config: H264PlaybackConfig, config_path: &str) -> R
     {
         anyhow::bail!("AAC file not found: {}", audio_path);
     }
+    Ok(())
+}
 
+fn build_stream_auth(config_path: &str) -> Result<Option<streaming_lib::common::auth::Auth>> {
     let stream_auth_config = ConfigRuntime::new(
         ConfigStorage::load_or_default(config_path)
             .context("Failed to load configuration for stream authentication")?,
     );
-    let stream_auth = build_stream_auth_for_validation_mode(&stream_auth_config, config_path)
-        .context("Failed to initialize validation mode stream authentication")?;
+    build_stream_auth_for_validation_mode(&stream_auth_config, config_path)
+        .context("Failed to initialize validation mode stream authentication")
+}
 
+fn log_validation_startup(config: &H264PlaybackConfig) {
     tracing::info!(
         "H.264 Validation mode starting: {} @ {}fps (RTSP: {}, HTTP-FLV: {})",
         config.file_path,
@@ -776,70 +893,57 @@ async fn run_validation_mode(config: H264PlaybackConfig, config_path: &str) -> R
         config.rtsp_port,
         config.httpflv_port
     );
-
     if config.loop_playback {
         tracing::info!("Loop playback enabled");
     }
+}
 
-    // 1. Create publishers using helper functions (reduces cognitive complexity)
-    let publishers = init_validation_publishers(&config, publisher_init_timeout_sec).await?;
-    let mut video_publisher = publishers.video;
-    let mut audio_publisher = publishers.audio;
+fn extract_publishers(
+    publishers: ValidationPublishers,
+) -> (
+    streaming_lib::streamhub::mock_publisher::MockVideoPublisher,
+    Option<streaming_lib::streamhub::mock_audio_publisher::MockAudioPublisher>,
+) {
+    (publishers.video, publishers.audio)
+}
 
-    let audio_sample_rate = audio_publisher
-        .as_ref()
-        .map_or(0, |publisher| publisher.sample_rate());
-    let video_sps = video_publisher.sps().to_vec();
-    let video_pps = video_publisher.pps().to_vec();
-    let video_bootstrap_idr = video_publisher.bootstrap_idr();
-    let video_last_timestamp_handle = video_publisher.last_timestamp_handle();
-    let audio_config = audio_publisher
-        .as_ref()
-        .map(|publisher| publisher.audio_config().to_vec());
-    let rtsp_stream_handler = Arc::new(ValidationAvStreamHandler::new(
-        video_sps.clone(),
-        video_pps.clone(),
-        video_bootstrap_idr,
-        video_last_timestamp_handle,
-        audio_config.clone(),
-        audio_sample_rate,
-    ));
-
-    // 2. Initialize StreamHub for frame distribution
-    let mut streamhub = StreamsHub::new(None);
-    let app_name = "live".to_string();
+fn create_stream_identifiers() -> (StreamIdentifier, StreamIdentifier) {
     let stream_name = "stream1".to_string();
+    let app_name = "live".to_string();
+    (
+        StreamIdentifier::Rtsp {
+            stream_path: stream_name.clone(),
+        },
+        StreamIdentifier::Rtmp {
+            app_name,
+            stream_name,
+        },
+    )
+}
 
-    // IMPORTANT: streaming-lib's RTSP URI parser stores `uri.path` without the leading '/'.
-    // Example: `rtsp://host:8554/stream1` -> `uri.path == "stream1"`.
-    // If we publish "/stream1" here, RTSP subscribe/unpublish will not match and streaming fails.
-    let rtsp_stream_id = StreamIdentifier::Rtsp {
-        stream_path: stream_name.clone(),
-    };
-    let httpflv_stream_id = StreamIdentifier::Rtmp {
-        app_name: app_name.clone(),
-        stream_name: stream_name.clone(),
-    };
+fn create_httpflv_channel() -> (
+    Option<tokio::sync::mpsc::UnboundedSender<FrameData>>,
+    Option<tokio::sync::mpsc::UnboundedReceiver<FrameData>>,
+) {
+    let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<FrameData>();
+    (Some(tx), Some(rx))
+}
 
-    // Create a single publisher output channel, then fan-out to protocol-specific StreamHub streams.
-    let (frame_tx_for_publisher, mut frame_rx_from_publisher) =
-        mpsc::unbounded_channel::<FrameData>();
-    let (frame_tx_rtsp, frame_rx_rtsp) = mpsc::unbounded_channel::<FrameData>();
-    let (frame_tx_httpflv, frame_rx_httpflv) = {
-        let (tx, rx) = mpsc::unbounded_channel::<FrameData>();
-        (Some(tx), Some(rx))
-    };
-
-    let fanout_handle = tokio::spawn(async move {
+#[allow(clippy::too_many_arguments)]
+fn spawn_fanout_task(
+    mut frame_rx: tokio::sync::mpsc::UnboundedReceiver<FrameData>,
+    frame_tx_rtsp: tokio::sync::mpsc::UnboundedSender<FrameData>,
+    frame_tx_httpflv: Option<tokio::sync::mpsc::UnboundedSender<FrameData>>,
+    video_sps: Vec<u8>,
+    video_pps: Vec<u8>,
+    audio_config: Option<Vec<u8>>,
+    audio_sample_rate: u32,
+) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
         let mut httpflv_remuxer = frame_tx_httpflv.as_ref().map(|_| {
-            ValidationHttpFlvRemuxer::new(
-                video_sps.clone(),
-                video_pps.clone(),
-                audio_config.clone(),
-                audio_sample_rate,
-            )
+            ValidationHttpFlvRemuxer::new(video_sps, video_pps, audio_config, audio_sample_rate)
         });
-        while let Some(frame) = frame_rx_from_publisher.recv().await {
+        while let Some(frame) = frame_rx.recv().await {
             fanout_validation_frame(
                 &frame_tx_rtsp,
                 frame_tx_httpflv.as_ref(),
@@ -847,225 +951,203 @@ async fn run_validation_mode(config: H264PlaybackConfig, config_path: &str) -> R
                 frame,
             );
         }
-    });
+    })
+}
 
-    // Publish RTSP stream
+#[allow(clippy::too_many_arguments)]
+async fn publish_to_streamhub(
+    streamhub: &mut StreamsHub,
+    rtsp_stream_id: StreamIdentifier,
+    httpflv_stream_id: StreamIdentifier,
+    frame_rx_rtsp: tokio::sync::mpsc::UnboundedReceiver<FrameData>,
+    frame_rx_httpflv: Option<tokio::sync::mpsc::UnboundedReceiver<FrameData>>,
+    stream_handler: Arc<ValidationAvStreamHandler>,
+) -> Result<(
+    Arc<tokio::sync::Mutex<StatisticsStream>>,
+    Arc<tokio::sync::Mutex<StatisticsStream>>,
+)> {
+    use streaming_lib::streamhub::define::DataReceiver;
+
     let rtsp_data_receiver = DataReceiver {
         frame_receiver: Some(frame_rx_rtsp),
         packet_receiver: None,
     };
-    let (_rtsp_statistic_sender, rtsp_subscriber_handle) = streamhub
-        .publish(
-            rtsp_stream_id.clone(),
-            rtsp_data_receiver,
-            rtsp_stream_handler.clone(),
-        )
+    let (_, rtsp_subscriber_handle) = streamhub
+        .publish(rtsp_stream_id, rtsp_data_receiver, stream_handler.clone())
         .await
         .context("Failed to publish RTSP stream to StreamHub")?;
 
-    // Publish HTTP-FLV stream (HTTP-FLV server subscribes using RTMP-style identifiers)
     let httpflv_data_receiver = DataReceiver {
         frame_receiver: frame_rx_httpflv,
         packet_receiver: None,
     };
-    let (_httpflv_statistic_sender, httpflv_subscriber_handle) = streamhub
-        .publish(
-            httpflv_stream_id.clone(),
-            httpflv_data_receiver,
-            rtsp_stream_handler.clone(),
-        )
+    let (_, httpflv_subscriber_handle) = streamhub
+        .publish(httpflv_stream_id, httpflv_data_receiver, stream_handler)
         .await
         .context("Failed to publish HTTP-FLV stream to StreamHub")?;
 
-    tracing::info!(
-        "StreamHub initialized with streams: {} and {}",
-        rtsp_stream_id,
-        httpflv_stream_id
-    );
+    Ok((rtsp_subscriber_handle, httpflv_subscriber_handle))
+}
 
-    // Wire up on-demand publishing: publishers check subscriber count before sending frames
-    let rtsp_handle_for_video = Arc::clone(&rtsp_subscriber_handle);
-    let httpflv_handle_for_video = Arc::clone(&httpflv_subscriber_handle);
-    let video_cached_rtsp_subscriber_count = Arc::new(AtomicUsize::new(0));
-    let video_cached_httpflv_subscriber_count = Arc::new(AtomicUsize::new(0));
-    let video_cached_rtsp_subscriber_count_for_cb = Arc::clone(&video_cached_rtsp_subscriber_count);
-    let video_cached_httpflv_subscriber_count_for_cb =
-        Arc::clone(&video_cached_httpflv_subscriber_count);
+#[allow(clippy::type_complexity)]
+fn setup_subscriber_callbacks(
+    mut video_publisher: streaming_lib::streamhub::mock_publisher::MockVideoPublisher,
+    mut audio_publisher: Option<streaming_lib::streamhub::mock_audio_publisher::MockAudioPublisher>,
+    rtsp_handle: Arc<tokio::sync::Mutex<StatisticsStream>>,
+    httpflv_handle: Arc<tokio::sync::Mutex<StatisticsStream>>,
+) -> (
+    streaming_lib::streamhub::mock_publisher::MockVideoPublisher,
+    Option<streaming_lib::streamhub::mock_audio_publisher::MockAudioPublisher>,
+) {
+    let video_rtsp = Arc::clone(&rtsp_handle);
+    let video_httpflv = Arc::clone(&httpflv_handle);
+    let video_cached_rtsp = Arc::new(AtomicUsize::new(0));
+    let video_cached_httpflv = Arc::new(AtomicUsize::new(0));
+    let video_cached_rtsp_cb = Arc::clone(&video_cached_rtsp);
+    let video_cached_httpflv_cb = Arc::clone(&video_cached_httpflv);
     video_publisher.set_subscriber_count_callback(Arc::new(move || {
         combined_subscriber_count(
-            &rtsp_handle_for_video,
-            &httpflv_handle_for_video,
-            &video_cached_rtsp_subscriber_count_for_cb,
-            &video_cached_httpflv_subscriber_count_for_cb,
+            &video_rtsp,
+            &video_httpflv,
+            &video_cached_rtsp_cb,
+            &video_cached_httpflv_cb,
         )
     }));
 
     if let Some(ref mut audio_pub) = audio_publisher {
-        let rtsp_handle_for_audio = Arc::clone(&rtsp_subscriber_handle);
-        let httpflv_handle_for_audio = Arc::clone(&httpflv_subscriber_handle);
-        let audio_cached_rtsp_subscriber_count = Arc::new(AtomicUsize::new(0));
-        let audio_cached_httpflv_subscriber_count = Arc::new(AtomicUsize::new(0));
-        let audio_cached_rtsp_subscriber_count_for_cb =
-            Arc::clone(&audio_cached_rtsp_subscriber_count);
-        let audio_cached_httpflv_subscriber_count_for_cb =
-            Arc::clone(&audio_cached_httpflv_subscriber_count);
+        let audio_rtsp = Arc::clone(&rtsp_handle);
+        let audio_httpflv = Arc::clone(&httpflv_handle);
+        let audio_cached_rtsp = Arc::new(AtomicUsize::new(0));
+        let audio_cached_httpflv = Arc::new(AtomicUsize::new(0));
+        let audio_cached_rtsp_cb = Arc::clone(&audio_cached_rtsp);
+        let audio_cached_httpflv_cb = Arc::clone(&audio_cached_httpflv);
         audio_pub.set_subscriber_count_callback(Arc::new(move || {
             combined_subscriber_count(
-                &rtsp_handle_for_audio,
-                &httpflv_handle_for_audio,
-                &audio_cached_rtsp_subscriber_count_for_cb,
-                &audio_cached_httpflv_subscriber_count_for_cb,
+                &audio_rtsp,
+                &audio_httpflv,
+                &audio_cached_rtsp_cb,
+                &audio_cached_httpflv_cb,
             )
         }));
     }
-    tracing::info!(
-        "On-demand publishing configured: publishers will pause when RTSP+HTTP-FLV subscriber count is 0"
-    );
 
-    // Wrap publishers in Arc after configuration
-    let video_publisher = Arc::new(video_publisher);
-    let audio_publisher = audio_publisher.map(Arc::new);
+    (video_publisher, audio_publisher)
+}
 
-    // Start MockVideoPublisher frame emission
-    let pub_handle = video_publisher.start_publishing(frame_tx_for_publisher.clone());
-    tracing::info!("MockVideoPublisher started emitting frames");
-
-    let audio_pub_handle = if let Some(audio_publisher) = audio_publisher.as_ref() {
-        let handle = audio_publisher.start_publishing(frame_tx_for_publisher);
+fn start_audio_publisher(
+    audio_publisher: &Option<
+        Arc<streaming_lib::streamhub::mock_audio_publisher::MockAudioPublisher>,
+    >,
+    frame_tx: tokio::sync::mpsc::UnboundedSender<FrameData>,
+) -> Option<tokio::task::JoinHandle<()>> {
+    audio_publisher.as_ref().map(|pub_| {
+        let handle = pub_.start_publishing(frame_tx);
         tracing::info!("MockAudioPublisher started emitting frames");
-        Some(handle)
-    } else {
-        None
-    };
+        handle
+    })
+}
 
-    // Get hub event sender for servers
-    let hub_event_sender = streamhub.get_hub_event_sender();
-
-    // 3. Spawn RTSP server
-    let rtsp_port = config.rtsp_port;
-    let rtsp_addr = format!("0.0.0.0:{}", rtsp_port);
-    let rtsp_event_sender = hub_event_sender.clone();
-    let rtsp_auth = stream_auth.clone();
-    let rtsp_handle = tokio::spawn(async move {
-        let mut rtsp_server =
-            DefaultRtspServer::new(rtsp_addr.clone(), rtsp_event_sender, rtsp_auth);
-        if let Err(e) = rtsp_server.run().await {
+fn spawn_rtsp_server(
+    event_sender: streaming_lib::streamhub::define::StreamHubEventSender,
+    stream_auth: Option<streaming_lib::common::auth::Auth>,
+    port: u16,
+) -> tokio::task::JoinHandle<()> {
+    let addr = format!("0.0.0.0:{}", port);
+    tokio::spawn(async move {
+        let mut server = DefaultRtspServer::new(addr, event_sender, stream_auth);
+        if let Err(e) = server.run().await {
             tracing::error!("RTSP server error: {}", e);
         }
-    });
-    tracing::info!("RTSP server spawned on port {}", rtsp_port);
+    })
+}
 
-    // 4. Spawn HTTP-FLV server
-    let flv_port = config.httpflv_port;
-    let flv_addr = format!("0.0.0.0:{}", flv_port);
-    let flv_event_sender = hub_event_sender.clone();
-    let flv_auth = stream_auth.clone();
-    let flv_handle = tokio::spawn(async move {
-        let mut flv_server =
-            DefaultHttpFlvServer::new(flv_addr.clone(), flv_event_sender, flv_auth);
-        if let Err(e) = flv_server.run().await {
+fn spawn_httpflv_server(
+    event_sender: streaming_lib::streamhub::define::StreamHubEventSender,
+    stream_auth: Option<streaming_lib::common::auth::Auth>,
+    port: u16,
+) -> tokio::task::JoinHandle<()> {
+    let addr = format!("0.0.0.0:{}", port);
+    tokio::spawn(async move {
+        let mut server = DefaultHttpFlvServer::new(addr, event_sender, stream_auth);
+        if let Err(e) = server.run().await {
             tracing::error!("HTTP-FLV server error: {}", e);
         }
-    });
-    tracing::info!("HTTP-FLV server spawned on port {}", flv_port);
+    })
+}
 
-    // 5. Spawn StreamHub event loop
-    let streamhub_handle = tokio::spawn(async move {
-        let mut hub = streamhub;
-        hub.run().await;
-    });
-    tracing::info!("StreamHub event loop spawned");
+fn spawn_streamhub_event_loop(mut streamhub: StreamsHub) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        streamhub.run().await;
+    })
+}
 
-    // 6. Create validation platform instance
+async fn create_and_init_platform() -> Result<Arc<ValidationPlatform>> {
     let platform = Arc::new(ValidationPlatform::new());
     platform.initialize().await?;
     tracing::info!("ValidationPlatform initialized");
+    Ok(platform)
+}
 
-    // 7. Start ONVIF Application with the validation platform
-    let app =
-        match Application::start_with_platform(config_path, platform.clone() as Arc<dyn Platform>)
-            .await
-        {
-            Ok(app) => {
-                tracing::info!("ONVIF Application started with ValidationPlatform");
-                Some(app)
-            }
-            Err(e) => {
-                tracing::warn!(
-                    "Failed to start ONVIF Application: {}. Continuing with streaming only.",
-                    e
-                );
-                None
-            }
-        };
+async fn start_onvif_application(
+    config_path: &str,
+    platform: Arc<dyn Platform>,
+) -> Option<Application> {
+    match Application::start_with_platform(config_path, platform).await {
+        Ok(app) => {
+            tracing::info!("ONVIF Application started with ValidationPlatform");
+            Some(app)
+        }
+        Err(e) => {
+            tracing::warn!(
+                "Failed to start ONVIF Application: {}. Continuing with streaming only.",
+                e
+            );
+            None
+        }
+    }
+}
 
-    // 8. Create playback mode instance
+async fn init_playback_mode(
+    config: H264PlaybackConfig,
+    platform: Arc<ValidationPlatform>,
+) -> Result<H264PlaybackMode> {
     let playback_mode = H264PlaybackMode::new(config.clone());
-
-    // 9. Initialize playback mode with platform
-    playback_mode.initialize(platform.clone()).await?;
+    playback_mode.initialize(platform).await?;
     tracing::info!("H264PlaybackMode initialized with platform");
-
-    // 10. Start playback
     playback_mode.start().await?;
     tracing::info!("H264 playback started");
+    Ok(playback_mode)
+}
 
-    // Print streaming URIs for external clients
+fn log_streaming_uris(config: &H264PlaybackConfig, has_onvif: bool) {
     tracing::info!("Streaming URIs:");
     tracing::info!("  RTSP:     rtsp://0.0.0.0:{}/stream1", config.rtsp_port);
     tracing::info!(
         "  HTTP-FLV: http://0.0.0.0:{}/live/stream1.flv",
         config.httpflv_port
     );
-    if app.is_some() {
+    if has_onvif {
         tracing::info!("  ONVIF Device Service available");
     }
     tracing::info!("Press Ctrl+C to shutdown");
+}
 
-    // 11. Run validation mode until shutdown signal
-    tokio::signal::ctrl_c()
-        .await
-        .unwrap_or_else(|e| tracing::warn!("Failed to setup Ctrl+C handler: {}", e));
-    tracing::info!("Shutdown signal (Ctrl+C) received");
-
-    // 12. Graceful shutdown
-    tracing::info!("Initiating graceful shutdown...");
-
-    // Stop ONVIF Application if it was started
-    if let Some(application) = app {
-        let report = application.shutdown().await;
-        tracing::info!("ONVIF Application shutdown completed: {:?}", report.status);
-    }
-
-    // Stop playback
-    playback_mode.stop().await?;
-    tracing::info!("H264 playback stopped");
-
-    // Shutdown platform
-    platform.shutdown().await?;
-    tracing::info!("ValidationPlatform shutdown");
-
-    // Stop publisher
-    video_publisher.stop_publishing().await;
-    tracing::info!("MockVideoPublisher stopped");
-    if let Some(audio_publisher) = audio_publisher.as_ref() {
-        audio_publisher.stop_publishing().await;
-        tracing::info!("MockAudioPublisher stopped");
-    }
-
-    // Cancel server tasks
+fn abort_all_tasks(
+    rtsp_handle: tokio::task::JoinHandle<()>,
+    flv_handle: tokio::task::JoinHandle<()>,
+    streamhub_handle: tokio::task::JoinHandle<()>,
+    pub_handle: tokio::task::JoinHandle<()>,
+    audio_pub_handle: Option<tokio::task::JoinHandle<()>>,
+    fanout_handle: tokio::task::JoinHandle<()>,
+) {
     rtsp_handle.abort();
     flv_handle.abort();
     streamhub_handle.abort();
     pub_handle.abort();
-    if let Some(handle) = audio_pub_handle {
-        handle.abort();
+    if let Some(h) = audio_pub_handle {
+        h.abort();
     }
     fanout_handle.abort();
-
-    tracing::info!("All servers and tasks shutdown");
-    tracing::info!("H.264 Validation mode stopped");
-    Ok(())
 }
 
 #[cfg(test)]

@@ -291,42 +291,49 @@ impl H264FileReader {
             return Ok(None);
         }
 
-        let mut len_buf = [0u8; 4];
-        let bytes_read = self.file.read(&mut len_buf).await?;
-        if bytes_read < 4 {
-            return Ok(None);
-        }
-        self.current_pos += 4;
-
-        let nal_len = u32::from_be_bytes(len_buf) as usize;
+        let nal_len = self.read_avcc_length().await?;
         if nal_len == 0 || self.current_pos + nal_len as u64 > self.file_size {
             return Err(H264FileError::InvalidNalUnit);
         }
 
-        let mut nal_data = vec![0u8; nal_len];
-        let data_read = self.file.read(&mut nal_data).await?;
-        if data_read != nal_len {
-            nal_data.truncate(data_read);
-        }
-        self.current_pos += data_read as u64;
-
+        let nal_data = self.read_avcc_nal_data(nal_len).await?;
         if nal_data.is_empty() {
             return Err(H264FileError::InvalidNalUnit);
         }
 
+        Self::validate_and_build_avcc_nal(nal_data).map(Some)
+    }
+
+    async fn read_avcc_length(&mut self) -> Result<usize, H264FileError> {
+        let mut len_buf = [0u8; 4];
+        let bytes_read = self.file.read(&mut len_buf).await?;
+        if bytes_read < 4 {
+            return Ok(0);
+        }
+        self.current_pos += 4;
+        Ok(u32::from_be_bytes(len_buf) as usize)
+    }
+
+    async fn read_avcc_nal_data(&mut self, nal_len: usize) -> Result<Vec<u8>, H264FileError> {
+        let mut nal_data = vec![0u8; nal_len];
+        let data_read = self.file.read(&mut nal_data).await?;
+        nal_data.truncate(data_read);
+        self.current_pos += data_read as u64;
+        Ok(nal_data)
+    }
+
+    fn validate_and_build_avcc_nal(nal_data: Vec<u8>) -> Result<NalUnit, H264FileError> {
         let forbidden_bit = (nal_data[0] >> 7) & 1;
         if forbidden_bit != 0 {
             return Err(H264FileError::InvalidNalUnit);
         }
 
-        let _nal_ref_idc = (nal_data[0] >> 5) & 3;
         let nal_unit_type = nal_data[0] & 0x1f;
-
-        Ok(Some(NalUnit {
+        Ok(NalUnit {
             unit_type: NalUnitType::from(nal_unit_type),
             data: nal_data,
             start_code_length: 0,
-        }))
+        })
     }
 
     fn build_annexb_nal(
@@ -425,48 +432,47 @@ impl H264FileReader {
         let bytes_read = self.file.read(&mut scan_buf).await?;
         scan_buf.truncate(bytes_read);
 
-        let scan_result = Self::scan_sps_pps_from_buffer(&scan_buf);
-
+        let result = Self::scan_sps_pps_from_buffer(&scan_buf);
         self.reset().await?;
 
-        let (sps, pps) = if let Some(found) = scan_result {
-            found
-        } else {
-            let mut sps = Vec::new();
-            let mut pps = Vec::new();
-
-            while let Some(nal) = self.read_next_nal().await? {
-                match nal.unit_type {
-                    NalUnitType::SequenceParameterSet => {
-                        if nal.data.len() <= Self::MAX_PARAM_SET_LEN {
-                            sps = nal.data.clone();
-                        }
-                    }
-                    NalUnitType::PictureParameterSet => {
-                        if nal.data.len() <= Self::MAX_PARAM_SET_LEN {
-                            pps = nal.data.clone();
-                        }
-                    }
-                    NalUnitType::IdrSlice => {
-                        break; // Stop after first IDR frame
-                    }
-                    _ => {}
-                }
-
-                if !sps.is_empty() && !pps.is_empty() {
-                    break;
-                }
-            }
-
-            (sps, pps)
+        let (sps, pps) = match result {
+            Some(found) => found,
+            None => self.scan_sps_pps_fallback().await?,
         };
 
         self.reset().await?;
 
+        Self::validate_sps_pps(sps, pps)
+    }
+
+    async fn scan_sps_pps_fallback(&mut self) -> Result<(Vec<u8>, Vec<u8>), H264FileError> {
+        let mut sps = Vec::new();
+        let mut pps = Vec::new();
+
+        while let Some(nal) = self.read_next_nal().await? {
+            match nal.unit_type {
+                NalUnitType::SequenceParameterSet if nal.data.len() <= Self::MAX_PARAM_SET_LEN => {
+                    sps = nal.data.clone();
+                }
+                NalUnitType::PictureParameterSet if nal.data.len() <= Self::MAX_PARAM_SET_LEN => {
+                    pps = nal.data.clone();
+                }
+                NalUnitType::IdrSlice => break,
+                _ => {}
+            }
+
+            if !sps.is_empty() && !pps.is_empty() {
+                break;
+            }
+        }
+
+        Ok((sps, pps))
+    }
+
+    fn validate_sps_pps(sps: Vec<u8>, pps: Vec<u8>) -> Result<(Vec<u8>, Vec<u8>), H264FileError> {
         if sps.is_empty() || pps.is_empty() {
             return Err(H264FileError::NoNalUnits);
         }
-
         Ok((sps, pps))
     }
 
@@ -478,55 +484,54 @@ impl H264FileReader {
     }
 
     fn scan_annexb_for_sps_pps(buffer: &[u8]) -> Option<(Vec<u8>, Vec<u8>)> {
+        let start_codes = Self::collect_annexb_start_codes(buffer);
+        Self::extract_sps_pps_from_nals(buffer, &start_codes)
+    }
+
+    fn collect_annexb_start_codes(buffer: &[u8]) -> Vec<(usize, usize)> {
         let mut start_codes: Vec<(usize, usize)> = Vec::new();
         let mut i = 0;
-        while i + 3 < buffer.len() {
-            if i + 4 <= buffer.len() && buffer[i..i + 4] == *Self::START_CODE_4 {
-                start_codes.push((i, 4));
-                i += 4;
-                continue;
-            }
-            if buffer[i..i + 3] == *Self::START_CODE_3 {
-                start_codes.push((i, 3));
-                i += 3;
-                continue;
-            }
-            i += 1;
-        }
 
+        while i + 3 < buffer.len() {
+            if let Some(sc_len) = Self::match_start_code_at(buffer, i) {
+                start_codes.push((i, sc_len));
+                i += sc_len;
+            } else {
+                i += 1;
+            }
+        }
+        start_codes
+    }
+
+    fn match_start_code_at(buffer: &[u8], pos: usize) -> Option<usize> {
+        if pos + 4 <= buffer.len() && buffer[pos..pos + 4] == *Self::START_CODE_4 {
+            return Some(4);
+        }
+        if buffer[pos..pos + 3] == *Self::START_CODE_3 {
+            return Some(3);
+        }
+        None
+    }
+
+    fn extract_sps_pps_from_nals(
+        buffer: &[u8],
+        start_codes: &[(usize, usize)],
+    ) -> Option<(Vec<u8>, Vec<u8>)> {
         let mut sps: Option<Vec<u8>> = None;
         let mut pps: Option<Vec<u8>> = None;
 
-        for idx in 0..start_codes.len() {
-            let (start_pos, sc_len) = start_codes[idx];
-            let data_start = start_pos + sc_len;
-            let data_end = if idx + 1 < start_codes.len() {
-                start_codes[idx + 1].0
-            } else {
-                buffer.len()
+        for (idx, &(start_pos, sc_len)) in start_codes.iter().enumerate() {
+            let nal_range = Self::get_nal_range(buffer, start_codes, idx, start_pos, sc_len);
+            let Some((nal_start, nal_end)) = nal_range else {
+                continue;
             };
 
-            if data_start >= data_end {
-                continue;
-            }
-
-            let nal = &buffer[data_start..data_end];
-            if nal.is_empty() {
-                continue;
-            }
-
-            if nal.len() > Self::MAX_PARAM_SET_LEN {
-                continue;
-            }
-
-            match nal[0] & 0x1f {
-                7 => {
-                    sps = Some(nal.to_vec());
+            if let Some(nal_data) = Self::try_get_sps_or_pps(buffer, nal_start, nal_end) {
+                match Self::nal_type(&nal_data) {
+                    7 => sps = Some(nal_data),
+                    8 => pps = Some(nal_data),
+                    _ => {}
                 }
-                8 => {
-                    pps = Some(nal.to_vec());
-                }
-                _ => {}
             }
 
             if sps.is_some() && pps.is_some() {
@@ -534,10 +539,32 @@ impl H264FileReader {
             }
         }
 
-        match (sps, pps) {
-            (Some(sps), Some(pps)) => Some((sps, pps)),
-            _ => None,
-        }
+        sps.zip(pps)
+    }
+
+    fn get_nal_range(
+        buffer: &[u8],
+        start_codes: &[(usize, usize)],
+        idx: usize,
+        start_pos: usize,
+        sc_len: usize,
+    ) -> Option<(usize, usize)> {
+        let data_start = start_pos + sc_len;
+        let data_end = start_codes
+            .get(idx + 1)
+            .map(|(pos, _)| *pos)
+            .unwrap_or(buffer.len());
+
+        (data_start < data_end).then_some((data_start, data_end))
+    }
+
+    fn try_get_sps_or_pps(buffer: &[u8], start: usize, end: usize) -> Option<Vec<u8>> {
+        let nal = &buffer[start..end];
+        (!nal.is_empty() && nal.len() <= Self::MAX_PARAM_SET_LEN).then(|| nal.to_vec())
+    }
+
+    fn nal_type(data: &[u8]) -> u8 {
+        data.first().map(|b| b & 0x1f).unwrap_or(0)
     }
 
     fn scan_avcc_for_sps_pps(buffer: &[u8]) -> Option<(Vec<u8>, Vec<u8>)> {
@@ -561,17 +588,13 @@ impl H264FileReader {
             let nal = &buffer[offset..offset + len];
             offset += len;
 
-            if nal.is_empty() || nal.len() > Self::MAX_PARAM_SET_LEN {
+            let Some(nal_data) = Self::try_get_sps_or_pps_from_avcc(nal) else {
                 continue;
-            }
+            };
 
-            match nal[0] & 0x1f {
-                7 => {
-                    sps = Some(nal.to_vec());
-                }
-                8 => {
-                    pps = Some(nal.to_vec());
-                }
+            match Self::nal_type(&nal_data) {
+                7 => sps = Some(nal_data),
+                8 => pps = Some(nal_data),
                 _ => {}
             }
 
@@ -580,10 +603,11 @@ impl H264FileReader {
             }
         }
 
-        match (sps, pps) {
-            (Some(sps), Some(pps)) => Some((sps, pps)),
-            _ => None,
-        }
+        sps.zip(pps)
+    }
+
+    fn try_get_sps_or_pps_from_avcc(nal: &[u8]) -> Option<Vec<u8>> {
+        (!nal.is_empty() && nal.len() <= Self::MAX_PARAM_SET_LEN).then(|| nal.to_vec())
     }
 
     /// Get the frame rate in fps

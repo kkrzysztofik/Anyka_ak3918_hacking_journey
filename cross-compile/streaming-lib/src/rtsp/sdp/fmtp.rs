@@ -2,7 +2,33 @@ use crate::rtsp::global_trait::{Marshal, Unmarshal};
 use base64::{Engine as _, engine::general_purpose};
 use bytes::{BufMut, BytesMut};
 
-// pub trait Fmtp: TMsgConverter {}
+fn parse_payload_type(raw_data: &str) -> Result<(u16, &str), String> {
+    let parts: Vec<&str> = raw_data.splitn(2, ' ').collect();
+    if parts.is_empty() {
+        return Err("Empty input".to_string());
+    }
+    let payload_type = parts[0].parse::<u16>().map_err(|_| {
+        log::warn!("Invalid payload type in {}", raw_data);
+        "Invalid payload type".to_string()
+    })?;
+    let params = parts.get(1).copied().unwrap_or("");
+    Ok((payload_type, params))
+}
+
+fn parse_key_value_pairs(params: &str) -> impl Iterator<Item = (&str, &str)> {
+    params.split(';').filter_map(|param| {
+        let kv: Vec<&str> = param.trim().splitn(2, '=').collect();
+        (kv.len() == 2).then(|| (kv[0], kv[1]))
+    })
+}
+
+fn decode_base64_to_bytes(value: &str) -> Option<BytesMut> {
+    general_purpose::STANDARD.decode(value).ok().map(|bytes| {
+        let mut buf = BytesMut::new();
+        buf.put(&bytes[..]);
+        buf
+    })
+}
 
 #[derive(Debug, Clone)]
 pub struct H264Fmtp {
@@ -82,67 +108,54 @@ impl Fmtp {
     }
 }
 
-// a=fmtp:96 packetization-mode=1; sprop-parameter-sets=Z2QAFqyyAUBf8uAiAAADAAIAAAMAPB4sXJA=,aOvDyyLA; profile-level-id=640016
+impl H264Fmtp {
+    fn parse_packetization_mode(&mut self, value: &str) {
+        if let Ok(mode) = value.parse::<u8>() {
+            self.packetization_mode = mode;
+        }
+    }
+
+    fn parse_sprop_parameter_sets(&mut self, value: &str) {
+        let spspps: Vec<&str> = value.split(',').collect();
+        if spspps.len() < 2 {
+            log::warn!("H264FmtpSdp parse err: missing sps/pps");
+            return;
+        }
+        if let Some(sps) = decode_base64_to_bytes(spspps[0]) {
+            self.sps = sps;
+        } else {
+            log::warn!("H264FmtpSdp sps decode err");
+        }
+        if let Some(pps) = decode_base64_to_bytes(spspps[1]) {
+            self.pps = pps;
+        } else {
+            log::warn!("H264FmtpSdp pps decode err");
+        }
+    }
+
+    fn parse_profile_level_id(&mut self, value: &str) {
+        self.profile_level_id = value.into();
+    }
+}
+
 impl Unmarshal for H264Fmtp {
     fn unmarshal(raw_data: &str) -> Result<Self, String> {
-        let mut h264_fmtp = H264Fmtp::default();
-        let eles: Vec<&str> = raw_data.splitn(2, ' ').collect();
+        let (payload_type, params) = parse_payload_type(raw_data)?;
+        let mut h264_fmtp = H264Fmtp {
+            payload_type,
+            ..Default::default()
+        };
 
-        if eles.is_empty() {
-            log::warn!("H264FmtpSdp parse err: empty input");
-            return Err("Empty input".to_string());
-        }
-
-        if let Ok(payload_type) = eles[0].parse::<u16>() {
-            h264_fmtp.payload_type = payload_type;
-        } else {
-            log::warn!(
-                "H264FmtpSdp parse err: invalid payload type in {}",
-                raw_data
-            );
-            return Err("Invalid payload type".to_string());
-        }
-
-        // If no parameters provided, return with defaults
-        if eles.len() < 2 {
+        if params.is_empty() {
             return Ok(h264_fmtp);
         }
 
-        let parameters: Vec<&str> = eles[1].split(';').collect();
-        for parameter in parameters {
-            let kv: Vec<&str> = parameter.trim().splitn(2, '=').collect();
-            if kv.len() < 2 {
-                log::warn!("H264FmtpSdp parse key=value err: {}", parameter);
-                continue;
-            }
-
-            match kv[0] {
-                "packetization-mode" => {
-                    if let Ok(packetization_mode) = kv[1].parse::<u8>() {
-                        h264_fmtp.packetization_mode = packetization_mode;
-                    }
-                }
-                "sprop-parameter-sets" => {
-                    let spspps: Vec<&str> = kv[1].split(',').collect();
-                    if spspps.len() < 2 {
-                        log::warn!("H264FmtpSdp parse err: missing sps/pps");
-                        continue;
-                    }
-                    match general_purpose::STANDARD.decode(spspps[0]) {
-                        Ok(sps) => h264_fmtp.sps.put(&sps[..]),
-                        Err(err) => log::warn!("H264FmtpSdp sps decode err: {err}"),
-                    }
-                    match general_purpose::STANDARD.decode(spspps[1]) {
-                        Ok(pps) => h264_fmtp.pps.put(&pps[..]),
-                        Err(err) => log::warn!("H264FmtpSdp pps decode err: {err}"),
-                    }
-                }
-                "profile-level-id" => {
-                    h264_fmtp.profile_level_id = kv[1].into();
-                }
-                _ => {
-                    log::info!("not parsed: {}", kv[0])
-                }
+        for (key, value) in parse_key_value_pairs(params) {
+            match key {
+                "packetization-mode" => h264_fmtp.parse_packetization_mode(value),
+                "sprop-parameter-sets" => h264_fmtp.parse_sprop_parameter_sets(value),
+                "profile-level-id" => h264_fmtp.parse_profile_level_id(value),
+                _ => log::info!("not parsed: {}", key),
             }
         }
 
@@ -197,42 +210,32 @@ impl Marshal for H264Fmtp {
     }
 }
 
+impl H265Fmtp {
+    fn parse_sprop_param(&mut self, key: &str, value: &str) {
+        match key {
+            "sprop-vps" => self.vps = value.into(),
+            "sprop-sps" => self.sps = value.into(),
+            "sprop-pps" => self.pps = value.into(),
+            _ => log::info!("not parsed: {}", key),
+        }
+    }
+}
+
 impl Unmarshal for H265Fmtp {
-    //\"a=fmtp:96 sprop-vps=QAEMAf//AWAAAAMAkAAAAwAAAwA/ugJA; sprop-sps=QgEBAWAAAAMAkAAAAwAAAwA/oAUCAXHy5bpKTC8BAQAAAwABAAADAA8I; sprop-pps=RAHAc8GJ\"
     fn unmarshal(raw_data: &str) -> Result<Self, String> {
-        let mut h265_fmtp = H265Fmtp::default();
-        let eles: Vec<&str> = raw_data.splitn(2, ' ').collect();
-        if eles.len() < 2 {
+        let (payload_type, params) = parse_payload_type(raw_data)?;
+        if params.is_empty() {
             log::warn!("H265FmtpSdp parse err: {}", raw_data);
             return Err("Invalid H265 FMTP format".to_string());
         }
 
-        if let Ok(payload_type) = eles[0].parse::<u16>() {
-            h265_fmtp.payload_type = payload_type;
-        }
+        let mut h265_fmtp = H265Fmtp {
+            payload_type,
+            ..Default::default()
+        };
 
-        let parameters: Vec<&str> = eles[1].split(';').collect();
-        for parameter in parameters {
-            let kv: Vec<&str> = parameter.trim().splitn(2, '=').collect();
-            if kv.len() < 2 {
-                log::warn!("H265FmtpSdp parse key=value err: {}", parameter);
-                continue;
-            }
-
-            match kv[0] {
-                "sprop-vps" => {
-                    h265_fmtp.vps = kv[1].into();
-                }
-                "sprop-sps" => {
-                    h265_fmtp.sps = kv[1].into();
-                }
-                "sprop-pps" => {
-                    h265_fmtp.pps = kv[1].into();
-                }
-                _ => {
-                    log::info!("not parsed: {}", kv[0])
-                }
-            }
+        for (key, value) in parse_key_value_pairs(params) {
+            h265_fmtp.parse_sprop_param(key, value);
         }
 
         Ok(h265_fmtp)
@@ -291,27 +294,20 @@ impl Mpeg4Fmtp {
 }
 
 impl Unmarshal for Mpeg4Fmtp {
-    //a=fmtp:97 profile-level-id=1;mode=AAC-hbr;sizelength=13;indexlength=3;indexdeltalength=3; config=121056e500
     fn unmarshal(raw_data: &str) -> Result<Self, String> {
-        let mut mpeg4_fmtp = Mpeg4Fmtp::default();
-        let eles: Vec<&str> = raw_data.splitn(2, ' ').collect();
-        if eles.len() < 2 {
+        let (payload_type, params) = parse_payload_type(raw_data)?;
+        if params.is_empty() {
             log::warn!("Mpeg4FmtpSdp parse err: {}", raw_data);
             return Err("Invalid MPEG4 FMTP format".to_string());
         }
 
-        if let Ok(payload_type) = eles[0].parse::<u16>() {
-            mpeg4_fmtp.payload_type = payload_type;
-        }
+        let mut mpeg4_fmtp = Mpeg4Fmtp {
+            payload_type,
+            ..Default::default()
+        };
 
-        let parameters: Vec<&str> = eles[1].split(';').collect();
-        for parameter in parameters {
-            let kv: Vec<&str> = parameter.trim().splitn(2, '=').collect();
-            if kv.len() < 2 {
-                log::warn!("Mpeg4FmtpSdp parse key=value err: {}", parameter);
-                continue;
-            }
-            mpeg4_fmtp.parse_parameter(kv[0], kv[1]);
+        for (key, value) in parse_key_value_pairs(params) {
+            mpeg4_fmtp.parse_parameter(key, value);
         }
 
         Ok(mpeg4_fmtp)

@@ -51,83 +51,68 @@ pub struct Uri {
     pub query: Option<String>,
 }
 
-impl Unmarshal for Uri {
-    /*
-    RTSP HTTP header : "ANNOUNCE rtsp://127.0.0.1:5544/stream RTSP/1.0\r\n\
-    the uri rtsp://127.0.0.1:5544/stream is standard with schema://host:port/path?query.
-
-    WEBRTC is special:
-    "POST /whep?app=live&stream=test HTTP/1.1\r\n\
-     Host: localhost:3000\r\n\
-     Accept: \r\n\"
-    It only contains path?query after HTTP method, host:port is saved in the Host parameter.
-    In this function, for Webrtc we only parse path?query, host:port will be parsed in the HTTPRequest
-    unmarshal method.
-    */
-    fn unmarshal(url: &str) -> Option<Self> {
-        let mut uri = Uri::default();
-
-        /*first judge the correct schema */
+impl Uri {
+    fn detect_schema(url: &str) -> Schema {
         if url.starts_with("rtsp://") {
-            uri.schema = Schema::RTSP;
+            Schema::RTSP
         } else if url.starts_with("/whip") || url.starts_with("/whep") {
-            uri.schema = Schema::WEBRTC;
+            Schema::WEBRTC
         } else {
             log::warn!("cannot judge the schema: {}", url);
-            uri.schema = Schema::UNKNOWN;
+            Schema::UNKNOWN
         }
+    }
 
-        let path_with_query = match uri.schema {
-            Schema::RTSP => {
-                if let Some(rtsp_url_without_prefix) = url.strip_prefix("rtsp://") {
-                    /*split host:port and path?query*/
+    fn extract_host_port(authority: &str) -> (String, Option<u16>) {
+        let (host_val, port_val) = scanf!(authority, ':', String, u16);
+        let host = host_val.unwrap_or_else(|| authority.to_string());
+        (host, port_val)
+    }
 
-                    if let Some(index) = rtsp_url_without_prefix.find('/') {
-                        let path_with_query = &rtsp_url_without_prefix[index + 1..];
-                        /*parse host and port*/
-                        let host_with_port = &rtsp_url_without_prefix[..index];
-                        let (host_val, port_val) = scanf!(host_with_port, ':', String, u16);
-                        if let Some(host) = host_val {
-                            uri.host = host;
-                        } else {
-                            uri.host = host_with_port.to_string();
-                        }
-                        if let Some(port) = port_val {
-                            uri.port = Some(port);
-                        }
+    fn parse_path_and_query(&mut self, path_with_query: &str) {
+        let parts: Vec<&str> = path_with_query.splitn(2, '?').collect();
+        self.path = parts[0].to_string();
+        if parts.len() > 1 {
+            self.query = Some(parts[1].to_string());
+        }
+    }
 
-                        path_with_query
-                    } else {
-                        /*no path provided, treat as root and parse host:port only*/
-                        let host_with_port = rtsp_url_without_prefix;
-                        let (host_val, port_val) = scanf!(host_with_port, ':', String, u16);
-                        if let Some(host) = host_val {
-                            uri.host = host;
-                        } else {
-                            uri.host = host_with_port.to_string();
-                        }
-                        if let Some(port) = port_val {
-                            uri.port = Some(port);
-                        }
-                        ""
-                    }
-                } else {
-                    log::error!("cannot find RTSP prefix.");
-                    return None;
-                }
-            }
-            Schema::WEBRTC => url,
-            Schema::UNKNOWN => url,
+    fn parse_rtsp_uri(url: &str) -> Option<Self> {
+        let without_prefix = url.strip_prefix("rtsp://")?;
+        let (authority, path_with_query) = match without_prefix.find('/') {
+            Some(idx) => (&without_prefix[..idx], &without_prefix[idx + 1..]),
+            None => (without_prefix, ""),
         };
-
-        let path_data: Vec<&str> = path_with_query.splitn(2, '?').collect();
-        uri.path = path_data[0].to_string();
-
-        if path_data.len() > 1 {
-            uri.query = Some(path_data[1].to_string());
-        }
-
+        let (host, port) = Self::extract_host_port(authority);
+        let mut uri = Uri {
+            schema: Schema::RTSP,
+            host,
+            port,
+            ..Default::default()
+        };
+        uri.parse_path_and_query(path_with_query);
         Some(uri)
+    }
+
+    fn parse_webrtc_or_unknown_uri(url: &str, schema: Schema) -> Self {
+        let mut uri = Uri {
+            schema,
+            ..Default::default()
+        };
+        uri.parse_path_and_query(url);
+        uri
+    }
+}
+
+impl Unmarshal for Uri {
+    fn unmarshal(url: &str) -> Option<Self> {
+        let schema = Self::detect_schema(url);
+        match schema {
+            Schema::RTSP => Self::parse_rtsp_uri(url),
+            Schema::WEBRTC | Schema::UNKNOWN => {
+                Some(Self::parse_webrtc_or_unknown_uri(url, schema))
+            }
+        }
     }
 }
 
@@ -242,64 +227,69 @@ pub fn try_get_complete_message_len(data: &[u8]) -> Result<Option<usize>, String
     Ok(Some(total_len))
 }
 
-impl Unmarshal for HttpRequest {
-    fn unmarshal(request_data: &str) -> Option<Self> {
-        let mut http_request = HttpRequest::default();
-        let idx = request_data.find("\r\n\r\n")?;
-        let data_except_body = &request_data[..idx];
-        let mut lines = data_except_body.lines();
-        /*parse the first line
-        POST /whip?app=live&stream=test HTTP/1.1*/
-        if let Some(request_first_line) = lines.next() {
-            let mut fields = request_first_line.split_ascii_whitespace();
-            /* method */
-            if let Some(method) = fields.next() {
-                http_request.method = method.to_string();
-            }
-            /* url */
-            if let Some(url) = fields.next() {
-                if let Some(uri) = Uri::unmarshal(url) {
-                    http_request.uri = uri;
+impl HttpRequest {
+    fn parse_request_line(line: &str) -> Option<(String, String, String)> {
+        let mut fields = line.split_ascii_whitespace();
+        let method = fields.next()?.to_string();
+        let url = fields.next()?.to_string();
+        let version = fields.next()?.to_string();
+        Some((method, url, version))
+    }
 
-                    if let Some(query) = &http_request.uri.query {
-                        let pars_array: Vec<&str> = query.split('&').collect();
-
-                        for ele in pars_array {
-                            let (k, v) = scanf!(ele, '=', String, String);
-                            if k.is_none() || v.is_none() {
-                                continue;
-                            }
-                            http_request.query_pairs.insert(k.unwrap(), v.unwrap());
-                        }
-                    }
-                } else {
-                    log::error!("cannot get a Uri.");
-                    return None;
-                }
-            }
-            /* version */
-            if let Some(version) = fields.next() {
-                http_request.version = version.to_string();
+    fn parse_query_pairs(query: &str) -> HttpIndexMap {
+        let mut pairs = HttpIndexMap::default();
+        for ele in query.split('&') {
+            let (k, v) = scanf!(ele, '=', String, String);
+            if let (Some(key), Some(val)) = (k, v) {
+                pairs.insert(key, val);
             }
         }
-        /*parse headers*/
+        pairs
+    }
+
+    fn parse_headers_and_extract_host<'a>(
+        lines: impl Iterator<Item = &'a str>,
+    ) -> (HttpIndexMap, Option<(String, Option<u16>)>) {
+        let mut headers = HttpIndexMap::default();
+        let mut host_info: Option<(String, Option<u16>)> = None;
+
         for line in lines {
             if let Some(index) = line.find(':') {
                 let name = line[..index].to_string();
                 let value = line[index + 1..].trim_start().to_string();
-                /*for schema: webrtc*/
                 if name.trim().eq_ignore_ascii_case("Host") {
                     let (address_val, port_val) = scanf!(value.as_str(), ':', String, u16);
-                    if let Some(address) = address_val {
-                        http_request.uri.host = address;
-                    }
-                    if let Some(port) = port_val {
-                        http_request.uri.port = Some(port);
-                    }
+                    host_info = Some((address_val.unwrap_or(value.clone()), port_val));
                 }
-                http_request.headers.insert(name, value);
+                headers.insert(name, value);
             }
         }
+        (headers, host_info)
+    }
+}
+
+impl Unmarshal for HttpRequest {
+    fn unmarshal(request_data: &str) -> Option<Self> {
+        let idx = request_data.find("\r\n\r\n")?;
+        let data_except_body = &request_data[..idx];
+        let mut lines = data_except_body.lines();
+
+        let first_line = lines.next()?;
+        let (method, url, version) = Self::parse_request_line(first_line)?;
+
+        let mut uri = Uri::unmarshal(&url)?;
+        let query_pairs = uri
+            .query
+            .as_ref()
+            .map(|q| Self::parse_query_pairs(q))
+            .unwrap_or_default();
+
+        let (headers, host_info) = Self::parse_headers_and_extract_host(lines);
+        if let Some((host, port)) = host_info {
+            uri.host = host;
+            uri.port = port;
+        }
+
         let header_end_idx = idx + 4;
         log::trace!(
             "header_end_idx is: {} {}",
@@ -307,12 +297,20 @@ impl Unmarshal for HttpRequest {
             request_data.len()
         );
 
-        if request_data.len() > header_end_idx {
-            /*parse body*/
-            http_request.body = Some(request_data[header_end_idx..].to_string());
-        }
+        let body = if request_data.len() > header_end_idx {
+            Some(request_data[header_end_idx..].to_string())
+        } else {
+            None
+        };
 
-        Some(http_request)
+        Some(HttpRequest {
+            method,
+            uri,
+            query_pairs,
+            version,
+            headers,
+            body,
+        })
     }
 }
 

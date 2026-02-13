@@ -23,9 +23,9 @@ pub mod utils;
 use {
     define::{
         BroadcastEvent, BroadcastEventReceiver, BroadcastEventSender, DataReceiver, DataSender,
-        FrameData, FrameDataSender, Information, StreamHubEvent, StreamHubEventReceiver,
-        StreamHubEventSender, SubscribeType, SubscriberInfo, TStreamHandler, TransceiverEvent,
-        TransceiverEventReceiver, TransceiverEventSender,
+        FrameData, FrameDataSender, Information, InformationSender, PublisherInfo, StreamHubEvent,
+        StreamHubEventReceiver, StreamHubEventSender, SubscribeType, SubscriberInfo,
+        TStreamHandler, TransceiverEvent, TransceiverEventReceiver, TransceiverEventSender,
     },
     errors::{StreamHubError, StreamHubErrorValue},
     notify::Notifier,
@@ -717,8 +717,6 @@ impl StreamsHub {
 
     pub async fn event_loop(&mut self) {
         while let Some(event) = self.hub_event_receiver.recv().await {
-            let message = event.to_message();
-
             match event {
                 StreamHubEvent::Publish {
                     identifier,
@@ -726,174 +724,34 @@ impl StreamsHub {
                     result_sender,
                     stream_handler,
                 } => {
-                    let (frame_sender, packet_sender, receiver) = match info.pub_data_type {
-                        define::PubDataType::Frame => {
-                            let (sender_chan, receiver_chan) = mpsc::unbounded_channel();
-                            (
-                                Some(sender_chan),
-                                None,
-                                DataReceiver {
-                                    frame_receiver: Some(receiver_chan),
-                                    packet_receiver: None,
-                                },
-                            )
-                        }
-                        define::PubDataType::Packet => {
-                            let (sender_chan, receiver_chan) = mpsc::unbounded_channel();
-                            (
-                                None,
-                                Some(sender_chan),
-                                DataReceiver {
-                                    frame_receiver: None,
-                                    packet_receiver: Some(receiver_chan),
-                                },
-                            )
-                        }
-                        define::PubDataType::Both => {
-                            let (sender_frame_chan, receiver_frame_chan) =
-                                mpsc::unbounded_channel();
-                            let (sender_packet_chan, receiver_packet_chan) =
-                                mpsc::unbounded_channel();
-
-                            (
-                                Some(sender_frame_chan),
-                                Some(sender_packet_chan),
-                                DataReceiver {
-                                    frame_receiver: Some(receiver_frame_chan),
-                                    packet_receiver: Some(receiver_packet_chan),
-                                },
-                            )
-                        }
-                    };
-
-                    let result = match self
-                        .publish(identifier.clone(), receiver, stream_handler)
-                        .await
-                    {
-                        Ok((statistic_data_sender, _subscriber_count_handle)) => {
-                            if let Some(notifier) = &self.notifier {
-                                notifier.on_publish_notify(&message).await;
-                            }
-                            self.un_pub_sub_events
-                                .insert(info.id, StreamHubEvent::UnPublish { identifier, info });
-
-                            Ok((frame_sender, packet_sender, Some(statistic_data_sender)))
-                        }
-                        Err(err) => {
-                            log::error!("event_loop Publish err: {}", err);
-                            Err(err)
-                        }
-                    };
-
-                    if result_sender.send(result).is_err() {
-                        log::error!("event_loop Subscribe error: The receiver dropped.")
-                    }
+                    self.handle_publish_event(identifier, info, result_sender, stream_handler)
+                        .await;
                 }
-
                 StreamHubEvent::UnPublish { identifier, info } => {
-                    if let Err(err) = self.unpublish(&identifier) {
-                        log::error!(
-                            "event_loop Unpublish err: {} with identifier: {}",
-                            err,
-                            identifier
-                        );
-                    }
-
-                    self.un_pub_sub_events.remove(&info.id);
-
-                    if let Some(notifier) = &self.notifier {
-                        notifier.on_unpublish_notify(&message).await;
-                    }
+                    self.handle_unpublish_event(identifier, info).await;
                 }
                 StreamHubEvent::Subscribe {
                     identifier,
                     info,
                     result_sender,
                 } => {
-                    let sub_id = info.id;
-                    let info_clone = info.clone();
-
-                    //new chan for Frame/Packet sender and receiver
-                    let (sender, receiver) = match info.sub_data_type {
-                        define::SubDataType::Frame => {
-                            let (sender_chan, receiver_chan) = mpsc::unbounded_channel();
-                            (
-                                DataSender::Frame {
-                                    sender: sender_chan,
-                                },
-                                DataReceiver {
-                                    frame_receiver: Some(receiver_chan),
-                                    packet_receiver: None,
-                                },
-                            )
-                        }
-                        define::SubDataType::Packet => {
-                            let (sender_chan, receiver_chan) = mpsc::unbounded_channel();
-                            (
-                                DataSender::Packet {
-                                    sender: sender_chan,
-                                },
-                                DataReceiver {
-                                    frame_receiver: None,
-                                    packet_receiver: Some(receiver_chan),
-                                },
-                            )
-                        }
-                    };
-
-                    let rv = match self.subscribe(&identifier, info_clone, sender).await {
-                        Ok(statistic_data_sender) => {
-                            if let Some(notifier) = &self.notifier {
-                                notifier.on_play_notify(&message).await;
-                            }
-
-                            self.un_pub_sub_events
-                                .insert(sub_id, StreamHubEvent::UnSubscribe { identifier, info });
-                            Ok((receiver, Some(statistic_data_sender)))
-                        }
-                        Err(err) => {
-                            log::error!("event_loop Subscribe error: {}", err);
-                            Err(err)
-                        }
-                    };
-
-                    if result_sender.send(rv).is_err() {
-                        log::error!("event_loop Subscribe error: The receiver dropped.")
-                    }
+                    self.handle_subscribe_event(identifier, info, result_sender)
+                        .await;
                 }
                 StreamHubEvent::UnSubscribe { identifier, info } => {
-                    let info_id = info.id;
-                    if self.unsubscribe(&identifier, info).is_ok()
-                        && let Some(notifier) = &self.notifier
-                    {
-                        notifier.on_stop_notify(&message).await;
-                    }
-
-                    self.un_pub_sub_events.remove(&info_id);
+                    self.handle_unsubscribe_event(identifier, info).await;
                 }
-
                 StreamHubEvent::ApiStatistic {
                     top_n,
                     identifier,
                     uuid,
                     result_sender,
                 } => {
-                    let result = match self.api_statistic(top_n, identifier, uuid).await {
-                        Ok(rv) => rv,
-                        Err(err) => {
-                            log::error!("event_loop api error: {}", err);
-                            json!(err.to_string())
-                        }
-                    };
-
-                    if let Err(err) = result_sender.send(result) {
-                        log::error!("event_loop api error: {}", err);
-                    }
+                    self.handle_api_statistic(top_n, identifier, uuid, result_sender)
+                        .await;
                 }
                 StreamHubEvent::ApiKickClient { id } => {
-                    if let Err(err) = self.api_kick_off_client(id) {
-                        log::error!("api_kick_off_client api error: {}", err);
-                    }
+                    self.handle_api_kick_client(id);
                 }
                 StreamHubEvent::ApiStartRelayStream {
                     id,
@@ -902,39 +760,293 @@ impl StreamsHub {
                     relay_type,
                     result_sender,
                 } => {
-                    let result = self
-                        .api_start_relay_stream(id, &relay_type, identifier, server_address)
-                        .await;
-
-                    if let Err(err) = result_sender.send(result) {
-                        log::error!("event_loop api error: {:?}", err);
-                    }
+                    self.handle_api_start_relay_stream(
+                        id,
+                        identifier,
+                        server_address,
+                        relay_type,
+                        result_sender,
+                    )
+                    .await;
                 }
                 StreamHubEvent::ApiStopRelayStream {
                     id,
                     relay_type,
                     result_sender,
                 } => {
-                    let result = self.api_stop_relay_stream(id, &relay_type).await;
-
-                    if let Err(err) = result_sender.send(result) {
-                        log::error!("event_loop api error: {:?}", err);
-                    }
+                    self.handle_api_stop_relay_stream(id, relay_type, result_sender)
+                        .await;
                 }
                 StreamHubEvent::Request { identifier, sender } => {
-                    if let Err(err) = self.request(&identifier, sender) {
-                        log::error!("event_loop request error: {}", err);
-                    }
+                    self.handle_request(identifier, sender);
                 }
                 StreamHubEvent::OnHls {
-                    identifier: _,
-                    segment: _,
+                    identifier,
+                    segment,
                 } => {
-                    if let Some(notifier) = &self.notifier {
-                        notifier.on_hls_notify(&message).await;
-                    }
+                    self.handle_on_hls(identifier, segment).await;
                 }
             }
+        }
+    }
+
+    async fn handle_publish_event(
+        &mut self,
+        identifier: StreamIdentifier,
+        info: PublisherInfo,
+        result_sender: define::PubEventExecuteResultSender,
+        stream_handler: Arc<dyn TStreamHandler>,
+    ) {
+        let (frame_sender, packet_sender, receiver) =
+            Self::create_data_channels_for_publish(&info.pub_data_type);
+
+        let result = match self
+            .publish(identifier.clone(), receiver, stream_handler)
+            .await
+        {
+            Ok((statistic_data_sender, _subscriber_count_handle)) => {
+                if let Some(notifier) = &self.notifier {
+                    let message = define::StreamHubEventMessage::Publish {
+                        identifier: identifier.clone(),
+                        info: info.clone(),
+                    };
+                    notifier.on_publish_notify(&message).await;
+                }
+                self.un_pub_sub_events
+                    .insert(info.id, StreamHubEvent::UnPublish { identifier, info });
+                Ok((frame_sender, packet_sender, Some(statistic_data_sender)))
+            }
+            Err(err) => {
+                log::error!("handle_publish_event err: {}", err);
+                Err(err)
+            }
+        };
+
+        if result_sender.send(result).is_err() {
+            log::error!("handle_publish_event error: The receiver dropped.")
+        }
+    }
+
+    fn create_data_channels_for_publish(
+        pub_data_type: &define::PubDataType,
+    ) -> (
+        Option<FrameDataSender>,
+        Option<PacketDataSender>,
+        DataReceiver,
+    ) {
+        match pub_data_type {
+            define::PubDataType::Frame => {
+                let (sender_chan, receiver_chan) = mpsc::unbounded_channel();
+                (
+                    Some(sender_chan),
+                    None,
+                    DataReceiver {
+                        frame_receiver: Some(receiver_chan),
+                        packet_receiver: None,
+                    },
+                )
+            }
+            define::PubDataType::Packet => {
+                let (sender_chan, receiver_chan) = mpsc::unbounded_channel();
+                (
+                    None,
+                    Some(sender_chan),
+                    DataReceiver {
+                        frame_receiver: None,
+                        packet_receiver: Some(receiver_chan),
+                    },
+                )
+            }
+            define::PubDataType::Both => {
+                let (sender_frame_chan, receiver_frame_chan) = mpsc::unbounded_channel();
+                let (sender_packet_chan, receiver_packet_chan) = mpsc::unbounded_channel();
+                (
+                    Some(sender_frame_chan),
+                    Some(sender_packet_chan),
+                    DataReceiver {
+                        frame_receiver: Some(receiver_frame_chan),
+                        packet_receiver: Some(receiver_packet_chan),
+                    },
+                )
+            }
+        }
+    }
+
+    async fn handle_unpublish_event(&mut self, identifier: StreamIdentifier, info: PublisherInfo) {
+        if let Err(err) = self.unpublish(&identifier) {
+            log::error!(
+                "handle_unpublish_event err: {} with identifier: {}",
+                err,
+                identifier
+            );
+        }
+
+        self.un_pub_sub_events.remove(&info.id);
+
+        if let Some(notifier) = &self.notifier {
+            let message = define::StreamHubEventMessage::UnPublish {
+                identifier,
+                info: info.clone(),
+            };
+            notifier.on_unpublish_notify(&message).await;
+        }
+    }
+
+    async fn handle_subscribe_event(
+        &mut self,
+        identifier: StreamIdentifier,
+        info: SubscriberInfo,
+        result_sender: define::SubEventExecuteResultSender,
+    ) {
+        let sub_id = info.id;
+        let info_clone = info.clone();
+        let (sender, receiver) = Self::create_data_channels_for_subscribe(&info.sub_data_type);
+
+        let rv = match self.subscribe(&identifier, info_clone, sender).await {
+            Ok(statistic_data_sender) => {
+                if let Some(notifier) = &self.notifier {
+                    let message = define::StreamHubEventMessage::Subscribe {
+                        identifier: identifier.clone(),
+                        info: info.clone(),
+                    };
+                    notifier.on_play_notify(&message).await;
+                }
+                self.un_pub_sub_events.insert(
+                    sub_id,
+                    StreamHubEvent::UnSubscribe {
+                        identifier,
+                        info: info.clone(),
+                    },
+                );
+                Ok((receiver, Some(statistic_data_sender)))
+            }
+            Err(err) => {
+                log::error!("handle_subscribe_event error: {}", err);
+                Err(err)
+            }
+        };
+
+        if result_sender.send(rv).is_err() {
+            log::error!("handle_subscribe_event error: The receiver dropped.")
+        }
+    }
+
+    fn create_data_channels_for_subscribe(
+        sub_data_type: &define::SubDataType,
+    ) -> (DataSender, DataReceiver) {
+        match sub_data_type {
+            define::SubDataType::Frame => {
+                let (sender_chan, receiver_chan) = mpsc::unbounded_channel();
+                (
+                    DataSender::Frame {
+                        sender: sender_chan,
+                    },
+                    DataReceiver {
+                        frame_receiver: Some(receiver_chan),
+                        packet_receiver: None,
+                    },
+                )
+            }
+            define::SubDataType::Packet => {
+                let (sender_chan, receiver_chan) = mpsc::unbounded_channel();
+                (
+                    DataSender::Packet {
+                        sender: sender_chan,
+                    },
+                    DataReceiver {
+                        frame_receiver: None,
+                        packet_receiver: Some(receiver_chan),
+                    },
+                )
+            }
+        }
+    }
+
+    async fn handle_unsubscribe_event(
+        &mut self,
+        identifier: StreamIdentifier,
+        info: SubscriberInfo,
+    ) {
+        let info_id = info.id;
+        let message = define::StreamHubEventMessage::UnSubscribe {
+            identifier: identifier.clone(),
+            info: info.clone(),
+        };
+        if self.unsubscribe(&identifier, info).is_ok()
+            && let Some(notifier) = &self.notifier
+        {
+            notifier.on_stop_notify(&message).await;
+        }
+
+        self.un_pub_sub_events.remove(&info_id);
+    }
+
+    async fn handle_api_statistic(
+        &mut self,
+        top_n: Option<usize>,
+        identifier: Option<StreamIdentifier>,
+        uuid: Option<Uuid>,
+        result_sender: oneshot::Sender<Value>,
+    ) {
+        let result = match self.api_statistic(top_n, identifier, uuid).await {
+            Ok(rv) => rv,
+            Err(err) => {
+                log::error!("handle_api_statistic error: {}", err);
+                json!(err.to_string())
+            }
+        };
+
+        if let Err(err) = result_sender.send(result) {
+            log::error!("handle_api_statistic error: {}", err);
+        }
+    }
+
+    fn handle_api_kick_client(&mut self, id: Uuid) {
+        if let Err(err) = self.api_kick_off_client(id) {
+            log::error!("handle_api_kick_client error: {}", err);
+        }
+    }
+
+    async fn handle_api_start_relay_stream(
+        &mut self,
+        id: String,
+        identifier: StreamIdentifier,
+        server_address: String,
+        relay_type: define::RelayType,
+        result_sender: oneshot::Sender<Result<(), StreamHubError>>,
+    ) {
+        let result = self
+            .api_start_relay_stream(id, &relay_type, identifier, server_address)
+            .await;
+
+        if let Err(err) = result_sender.send(result) {
+            log::error!("handle_api_start_relay_stream error: {:?}", err);
+        }
+    }
+
+    async fn handle_api_stop_relay_stream(
+        &mut self,
+        id: String,
+        relay_type: define::RelayType,
+        result_sender: oneshot::Sender<Result<(), StreamHubError>>,
+    ) {
+        let result = self.api_stop_relay_stream(id, &relay_type).await;
+
+        if let Err(err) = result_sender.send(result) {
+            log::error!("handle_api_stop_relay_stream error: {:?}", err);
+        }
+    }
+
+    fn handle_request(&mut self, identifier: StreamIdentifier, sender: InformationSender) {
+        if let Err(err) = self.request(&identifier, sender) {
+            log::error!("handle_request error: {}", err);
+        }
+    }
+
+    async fn handle_on_hls(&mut self, _identifier: StreamIdentifier, _segment: define::Segment) {
+        if let Some(notifier) = &self.notifier {
+            let message = define::StreamHubEventMessage::NotSupport {};
+            notifier.on_hls_notify(&message).await;
         }
     }
 

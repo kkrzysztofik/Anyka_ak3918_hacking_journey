@@ -13,8 +13,11 @@ use {
         collections::HashMap,
         sync::{Arc, atomic::AtomicBool},
     },
-    tokio::sync::Mutex,
+    tokio::sync::{Mutex, mpsc},
 };
+
+type HubResult = Result<(), StreamHubError>;
+type HubResultSender = mpsc::Sender<HubResult>;
 
 pub struct RtspPullClientManager {
     clients: HashMap<String, Arc<AtomicBool>>,
@@ -35,149 +38,143 @@ impl RtspPullClientManager {
         log::info!("pull client run...");
 
         loop {
-            let val = self.client_event_consumer.recv().await?;
+            let event = self.client_event_consumer.recv().await?;
 
-            match val {
+            match event {
                 BroadcastEvent::Subscribe {
                     id,
                     identifier,
                     server_address,
                     result_sender,
                 } => {
-                    let sender = match result_sender {
-                        Some(sender) => sender,
-                        None => {
-                            log::error!("missing result sender for subscribe event");
-                            return Err(RelayError {
-                                value: super::errors::PushClientErrorValue::SendError,
-                            });
-                        }
-                    };
-                    let sender_for_task = sender.clone();
-
-                    if let StreamIdentifier::Rtsp { stream_path } = identifier {
-                        if let Some(server_address) = server_address {
-                            log::info!("publish stream_path: {}", stream_path.clone());
-
-                            /* judge if the server address / stream path exists */
-                            if self.clients.get_mut(&id).is_some() {
-                                log::warn!("the client session with id:{} exists", id);
-
-                                let err = Err(StreamHubError {
-                                    value: StreamHubErrorValue::RtspClientSessionError(format!(
-                                        "stream {} exists.",
-                                        stream_path
-                                    )),
-                                });
-                                if let Err(send_err) = sender.send(err).await {
-                                    log::error!("sender error: {}", send_err);
-                                }
-                                continue;
-                            }
-
-                            /* new and run a client, save the client handler for exit */
-                            match RtspClientSession::new(
-                                server_address.clone(),
-                                stream_path.clone(),
-                                ProtocolType::TCP,
-                                self.channel_event_producer.clone(),
-                                ClientSessionType::Pull,
-                            )
-                            .await
-                            {
-                                Ok(client_session) => {
-                                    self.clients.insert(id, client_session.is_running.clone());
-                                    let arc_client_session = Arc::new(Mutex::new(client_session));
-
-                                    tokio::spawn(async move {
-                                        if let Err(err) =
-                                            arc_client_session.lock().await.run().await
-                                        {
-                                            log::error!(
-                                                "client_session as pull client run error: {}",
-                                                err
-                                            );
-                                            let err = Err(StreamHubError {
-                                                value: StreamHubErrorValue::RtspClientSessionError(
-                                                    err.to_string(),
-                                                ),
-                                            });
-                                            if let Err(send_err) = sender_for_task.send(err).await {
-                                                log::error!("sender error: {}", send_err);
-                                            }
-                                        }
-                                    });
-
-                                    if let Err(send_err) = sender.send(Ok(())).await {
-                                        log::error!("sender error: {}", send_err);
-                                    }
-                                }
-                                Err(err) => {
-                                    log::error!("new client session err: {}", err);
-
-                                    let err = Err(StreamHubError {
-                                        value: StreamHubErrorValue::RtspClientSessionError(
-                                            err.to_string(),
-                                        ),
-                                    });
-                                    if let Err(send_err) = sender.send(err).await {
-                                        log::error!("sender error: {}", send_err);
-                                    }
-                                    continue;
-                                }
-                            }
-                        } else {
-                            log::error!(
-                                "The Rtsp subscribe parameters does not contain server address: {}",
-                                stream_path
-                            );
-
-                            let err = Err(StreamHubError {
-                                value: StreamHubErrorValue::RtspClientSessionError(String::from(
-                                    "The Rtsp subscribe parameters does not contain server address",
-                                )),
-                            });
-                            if let Err(send_err) = sender.send(err).await {
-                                log::error!("sender error: {}", send_err);
-                            }
-                            continue;
-                        }
-                    }
+                    self.handle_subscribe(id, identifier, server_address, result_sender)
+                        .await;
                 }
-
                 BroadcastEvent::UnSubscribe { id, result_sender } => {
-                    let sender = match result_sender {
-                        Some(sender) => sender,
-                        None => {
-                            log::error!("missing result sender for unsubscribe event");
-                            continue;
-                        }
-                    };
-                    /* judge if the server address / stream path exists */
-                    if let Some(client) = self.clients.get_mut(&id) {
-                        client.store(false, std::sync::atomic::Ordering::Release);
-                        self.clients.remove(&id);
-                        if let Err(send_err) = sender.send(Ok(())).await {
-                            log::error!("sender error: {}", send_err);
-                        }
-                    } else {
-                        log::warn!("the client session with id:{} not exists", id);
-
-                        let err = Err(StreamHubError {
-                            value: StreamHubErrorValue::RtspClientSessionError(String::from(
-                                "the client session not exists",
-                            )),
-                        });
-                        if let Err(send_err) = sender.send(err).await {
-                            log::error!("sender error: {}", send_err);
-                        }
-                    }
+                    self.handle_unsubscribe(id, result_sender).await;
                 }
-
                 _ => {
                     log::info!("pull client receive other events");
                 }
             }
+        }
+    }
+
+    async fn handle_subscribe(
+        &mut self,
+        id: String,
+        identifier: StreamIdentifier,
+        server_address: Option<String>,
+        result_sender: Option<HubResultSender>,
+    ) {
+        let Some(sender) = result_sender else {
+            log::error!("missing result sender for subscribe event");
+            return;
+        };
+
+        let StreamIdentifier::Rtsp { stream_path } = identifier else {
+            return;
+        };
+
+        let Some(server_address) = server_address else {
+            self.send_error(
+                &sender,
+                "The Rtsp subscribe parameters does not contain server address",
+            )
+            .await;
+            log::error!(
+                "The Rtsp subscribe parameters does not contain server address: {}",
+                stream_path
+            );
+            return;
+        };
+
+        log::info!("publish stream_path: {}", stream_path);
+
+        if self.clients.contains_key(&id) {
+            log::warn!("the client session with id:{} exists", id);
+            self.send_error(&sender, &format!("stream {} exists.", stream_path))
+                .await;
+            return;
+        }
+
+        match self
+            .create_and_spawn_client(&id, server_address, stream_path, sender.clone())
+            .await
+        {
+            Ok(()) => {
+                if let Err(send_err) = sender.send(Ok(())).await {
+                    log::error!("sender error: {}", send_err);
+                }
+            }
+            Err(err) => {
+                self.send_error(&sender, &err.to_string()).await;
+            }
+        }
+    }
+
+    async fn create_and_spawn_client(
+        &mut self,
+        id: &str,
+        server_address: String,
+        stream_path: String,
+        error_sender: HubResultSender,
+    ) -> Result<(), RelayError> {
+        let client_session = RtspClientSession::new(
+            server_address,
+            stream_path,
+            ProtocolType::TCP,
+            self.channel_event_producer.clone(),
+            ClientSessionType::Pull,
+        )
+        .await
+        .map_err(|_| RelayError {
+            value: super::errors::PushClientErrorValue::SendError,
+        })?;
+
+        self.clients
+            .insert(id.to_string(), client_session.is_running.clone());
+        let arc_client_session = Arc::new(Mutex::new(client_session));
+
+        tokio::spawn(async move {
+            if let Err(err) = arc_client_session.lock().await.run().await {
+                log::error!("client_session as pull client run error: {}", err);
+                let hub_err = Err(StreamHubError {
+                    value: StreamHubErrorValue::RtspClientSessionError(err.to_string()),
+                });
+                if let Err(send_err) = error_sender.send(hub_err).await {
+                    log::error!("sender error: {}", send_err);
+                }
+            }
+        });
+
+        Ok(())
+    }
+
+    async fn handle_unsubscribe(&mut self, id: String, result_sender: Option<HubResultSender>) {
+        let Some(sender) = result_sender else {
+            log::error!("missing result sender for unsubscribe event");
+            return;
+        };
+
+        if let Some(client) = self.clients.remove(&id) {
+            client.store(false, std::sync::atomic::Ordering::Release);
+            if let Err(send_err) = sender.send(Ok(())).await {
+                log::error!("sender error: {}", send_err);
+            }
+        } else {
+            log::warn!("the client session with id:{} not exists", id);
+            self.send_error(&sender, "the client session not exists")
+                .await;
+        }
+    }
+
+    async fn send_error(&self, sender: &HubResultSender, message: &str) {
+        let err = Err(StreamHubError {
+            value: StreamHubErrorValue::RtspClientSessionError(message.to_string()),
+        });
+        if let Err(send_err) = sender.send(err).await {
+            log::error!("sender error: {}", send_err);
         }
     }
 }

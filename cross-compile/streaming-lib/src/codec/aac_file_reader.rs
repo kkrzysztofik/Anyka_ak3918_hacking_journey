@@ -147,16 +147,9 @@ impl AacFileReader {
                 return Ok(None);
             }
 
-            let sync_index = match Self::find_sync_word(&self.parse_data, self.parse_start) {
-                Some(index) => index,
-                None => {
-                    if self.fill_parse_buffer().await? {
-                        continue;
-                    }
-                    let remaining = self.parse_data.len().saturating_sub(self.parse_start);
-                    self.consume_parse_bytes(remaining);
-                    return Ok(None);
-                }
+            let sync_index = self.find_and_seek_sync().await?;
+            let Some(sync_index) = sync_index else {
+                return Ok(None);
             };
 
             if sync_index > self.parse_start {
@@ -164,77 +157,155 @@ impl AacFileReader {
                 continue;
             }
 
-            let header =
-                &self.parse_data[self.parse_start..self.parse_start + Self::MIN_ADTS_HEADER_SIZE];
-            if (header[0] != 0xFF) || ((header[1] & 0xF0) != 0xF0) {
+            if !self.validate_sync_bytes()? {
                 self.consume_parse_bytes(1);
                 continue;
             }
 
-            let protection_absent = (header[1] & 0x01) != 0;
-            let adts_header_size = if protection_absent { 7 } else { 9 };
-            if !self.ensure_parse_bytes(adts_header_size).await? {
+            let Some(header_info) = self.parse_adts_header().await? else {
                 return Ok(None);
-            }
+            };
 
-            let header = &self.parse_data[self.parse_start..self.parse_start + adts_header_size];
-            let frame_length = (((header[3] & 0x03) as usize) << 11)
-                | ((header[4] as usize) << 3)
-                | ((header[5] as usize) >> 5);
-            let profile = ((header[2] >> 6) & 0x03) + 1;
-            let sampling_freq_index = (header[2] >> 2) & 0x0F;
-            let channel_config = ((header[2] & 0x01) << 2) | ((header[3] >> 6) & 0x03);
-
-            if frame_length < adts_header_size {
+            if header_info.frame_length < header_info.adts_header_size {
                 return Err(AacFileError::InvalidFrameLength);
             }
 
-            if !self.ensure_parse_bytes(frame_length).await? {
+            if !self.ensure_parse_bytes(header_info.frame_length).await? {
                 return Ok(None);
             }
 
-            let frame_end = self.parse_start + frame_length;
-            let payload = self.parse_data[self.parse_start + adts_header_size..frame_end].to_vec();
-
-            if self.profile.is_none() {
-                self.profile = Some(profile);
-                self.sampling_frequency_index = Some(sampling_freq_index);
-                self.channel_configuration = Some(channel_config);
-            }
-
-            let actual_sample_rate = Self::AAC_SAMPLING_RATES
-                .iter()
-                .find(|(idx, _)| *idx == sampling_freq_index)
-                .map(|(_, rate)| *rate)
-                .unwrap_or(self.sample_rate);
-
-            if self.sample_rate != actual_sample_rate {
-                log::warn!(
-                    "aac_file_reader: configured sample_rate={} differs from ADTS sample_rate={}, using ADTS value",
-                    self.sample_rate,
-                    actual_sample_rate
-                );
-                self.sample_rate = actual_sample_rate;
-                self.frame_duration_ms = if actual_sample_rate > 0 {
-                    (1024 * 1000) / actual_sample_rate
-                } else {
-                    self.frame_duration_ms
-                };
-            }
-
-            self.consume_parse_bytes(frame_length);
-
-            return Ok(Some(AacFrame {
-                data: payload,
-                adts_header_size,
-                total_frame_size: frame_length,
-                profile,
-                sample_rate: actual_sample_rate,
-                channels: channel_config,
-            }));
+            return self.extract_frame(header_info).await;
         }
     }
 
+    async fn find_and_seek_sync(&mut self) -> Result<Option<usize>, AacFileError> {
+        match Self::find_sync_word(&self.parse_data, self.parse_start) {
+            Some(index) => Ok(Some(index)),
+            None => {
+                if self.fill_parse_buffer().await? {
+                    return Ok(Some(self.parse_start));
+                }
+                let remaining = self.parse_data.len().saturating_sub(self.parse_start);
+                self.consume_parse_bytes(remaining);
+                Ok(None)
+            }
+        }
+    }
+
+    fn validate_sync_bytes(&self) -> Result<bool, AacFileError> {
+        let header =
+            &self.parse_data[self.parse_start..self.parse_start + Self::MIN_ADTS_HEADER_SIZE];
+        Ok((header[0] == 0xFF) && ((header[1] & 0xF0) == 0xF0))
+    }
+
+    async fn parse_adts_header(&mut self) -> Result<Option<AdtsHeaderInfo>, AacFileError> {
+        let header = &self.parse_data[self.parse_start..];
+        if header.len() < Self::MIN_ADTS_HEADER_SIZE {
+            return Ok(None);
+        }
+
+        let protection_absent = (header[1] & 0x01) != 0;
+        let adts_header_size = if protection_absent { 7 } else { 9 };
+
+        if !self.ensure_parse_bytes(adts_header_size).await? {
+            return Ok(None);
+        }
+
+        let header = &self.parse_data[self.parse_start..self.parse_start + adts_header_size];
+        Ok(Some(AdtsHeaderInfo {
+            frame_length: Self::extract_frame_length(header),
+            adts_header_size,
+            profile: ((header[2] >> 6) & 0x03) + 1,
+            sampling_freq_index: (header[2] >> 2) & 0x0F,
+            channel_config: ((header[2] & 0x01) << 2) | ((header[3] >> 6) & 0x03),
+        }))
+    }
+
+    fn extract_frame_length(header: &[u8]) -> usize {
+        (((header[3] & 0x03) as usize) << 11)
+            | ((header[4] as usize) << 3)
+            | ((header[5] as usize) >> 5)
+    }
+
+    async fn extract_frame(
+        &mut self,
+        header_info: AdtsHeaderInfo,
+    ) -> Result<Option<AacFrame>, AacFileError> {
+        let AdtsHeaderInfo {
+            frame_length,
+            adts_header_size,
+            profile,
+            sampling_freq_index,
+            channel_config,
+        } = header_info;
+
+        self.cache_adts_parameters(profile, sampling_freq_index, channel_config);
+
+        let actual_sample_rate = self.resolve_sample_rate(sampling_freq_index);
+        self.update_sample_rate_if_changed(actual_sample_rate);
+
+        let frame_end = self.parse_start + frame_length;
+        let payload = self.parse_data[self.parse_start + adts_header_size..frame_end].to_vec();
+        self.consume_parse_bytes(frame_length);
+
+        Ok(Some(AacFrame {
+            data: payload,
+            adts_header_size,
+            total_frame_size: frame_length,
+            profile,
+            sample_rate: actual_sample_rate,
+            channels: channel_config,
+        }))
+    }
+
+    fn cache_adts_parameters(&mut self, profile: u8, sampling_freq_index: u8, channel_config: u8) {
+        if self.profile.is_none() {
+            self.profile = Some(profile);
+            self.sampling_frequency_index = Some(sampling_freq_index);
+            self.channel_configuration = Some(channel_config);
+        }
+    }
+
+    fn resolve_sample_rate(&self, sampling_freq_index: u8) -> u32 {
+        Self::AAC_SAMPLING_RATES
+            .iter()
+            .find(|(idx, _)| *idx == sampling_freq_index)
+            .map(|(_, rate)| *rate)
+            .unwrap_or(self.sample_rate)
+    }
+
+    fn update_sample_rate_if_changed(&mut self, actual_sample_rate: u32) {
+        if self.sample_rate == actual_sample_rate {
+            return;
+        }
+
+        log::warn!(
+            "aac_file_reader: configured sample_rate={} differs from ADTS sample_rate={}, using ADTS value",
+            self.sample_rate,
+            actual_sample_rate
+        );
+        self.sample_rate = actual_sample_rate;
+        self.frame_duration_ms = Self::calculate_frame_duration(actual_sample_rate);
+    }
+
+    fn calculate_frame_duration(sample_rate: u32) -> u32 {
+        if sample_rate > 0 {
+            (1024 * 1000) / sample_rate
+        } else {
+            21
+        }
+    }
+}
+
+struct AdtsHeaderInfo {
+    frame_length: usize,
+    adts_header_size: usize,
+    profile: u8,
+    sampling_freq_index: u8,
+    channel_config: u8,
+}
+
+impl AacFileReader {
     /// Extract AudioSpecificConfig from ADTS headers (for SDP/RTP)
     ///
     /// Reads the first frame's ADTS header to extract ASC.

@@ -23,6 +23,20 @@ use {
 /// Upper bound on frames to wait before assuming missing audio/video.
 const MAX_AV_FRAME_NUM_TO_GUESS_AV: usize = 10;
 
+struct HeaderState {
+    frame_count: usize,
+    cached_frames: Vec<FrameData>,
+}
+
+impl HeaderState {
+    fn new() -> Self {
+        Self {
+            frame_count: 0,
+            cached_frames: Vec::new(),
+        }
+    }
+}
+
 pub struct HttpFlv {
     app_name: String,
     stream_name: String,
@@ -81,77 +95,90 @@ impl HttpFlv {
 
     pub async fn send_media_stream(&mut self) -> Result<(), HttpFLvError> {
         let mut retry_count = 0;
+        let mut header_state = HeaderState::new();
 
-        let mut max_av_frame_num_to_guess_av = 0;
-        // the first av frames are sequence configs, must be cached;
-        let mut cached_frames = Vec::new();
-        //write flv body
         loop {
-            if let Some(data) = self.data_receiver.recv().await {
-                if !self.has_send_header {
-                    max_av_frame_num_to_guess_av += 1;
-
-                    match data {
-                        FrameData::Audio {
-                            timestamp: _,
-                            data: _,
-                        } => {
-                            self.has_audio = true;
-                            cached_frames.push(data);
-                        }
-                        FrameData::Video {
-                            timestamp: _,
-                            data: _,
-                        } => {
-                            self.has_video = true;
-                            cached_frames.push(data);
-                        }
-                        FrameData::MetaData {
-                            timestamp: _,
-                            data: _,
-                        } => cached_frames.push(data),
-                        _ => {}
-                    }
-
-                    if (self.has_audio && self.has_video)
-                        || max_av_frame_num_to_guess_av > MAX_AV_FRAME_NUM_TO_GUESS_AV
-                    {
-                        self.has_send_header = true;
-                        self.muxer
-                            .write_flv_header(self.has_audio, self.has_video)?;
-                        self.muxer.write_previous_tag_size(0)?;
-
-                        self.flush_response_data()?;
-
-                        for frame in &cached_frames {
-                            self.write_flv_tag(frame.clone())?;
-                        }
-                        cached_frames.clear();
-                    }
-
-                    continue;
-                }
-
-                if let Err(err) = self.write_flv_tag(data) {
-                    if let HttpFLvErrorValue::MpscSendError(err_in) = &err.value
-                        && err_in.is_disconnected()
-                    {
-                        log::info!("write_flv_tag: {}", err_in);
-                        break;
-                    }
-                    log::error!("write_flv_tag err: {}", err);
-                    retry_count += 1;
-                } else {
-                    retry_count = 0;
-                }
-            } else {
+            let Some(data) = self.data_receiver.recv().await else {
                 retry_count += 1;
+                if retry_count > 10 {
+                    break;
+                }
+                continue;
+            };
+
+            if !self.has_send_header {
+                self.process_header_phase(&mut header_state, data).await?;
+                continue;
             }
+
+            retry_count = self.process_frame_with_retry(data, retry_count);
             if retry_count > 10 {
                 break;
             }
         }
         self.unsubscribe_from_stream_hub().await
+    }
+
+    async fn process_header_phase(
+        &mut self,
+        header_state: &mut HeaderState,
+        data: FrameData,
+    ) -> Result<(), HttpFLvError> {
+        header_state.frame_count += 1;
+
+        match &data {
+            FrameData::Audio { .. } => {
+                self.has_audio = true;
+                header_state.cached_frames.push(data);
+            }
+            FrameData::Video { .. } => {
+                self.has_video = true;
+                header_state.cached_frames.push(data);
+            }
+            FrameData::MetaData { .. } => {
+                header_state.cached_frames.push(data);
+            }
+            _ => {}
+        }
+
+        let header_ready = (self.has_audio && self.has_video)
+            || header_state.frame_count > MAX_AV_FRAME_NUM_TO_GUESS_AV;
+
+        if header_ready {
+            self.finalize_header(header_state)?;
+        }
+
+        Ok(())
+    }
+
+    fn finalize_header(&mut self, header_state: &mut HeaderState) -> Result<(), HttpFLvError> {
+        self.has_send_header = true;
+        self.muxer
+            .write_flv_header(self.has_audio, self.has_video)?;
+        self.muxer.write_previous_tag_size(0)?;
+        self.flush_response_data()?;
+
+        for frame in &header_state.cached_frames {
+            self.write_flv_tag(frame.clone())?;
+        }
+        header_state.cached_frames.clear();
+        Ok(())
+    }
+
+    fn process_frame_with_retry(&mut self, data: FrameData, mut retry_count: u32) -> u32 {
+        if let Err(err) = self.write_flv_tag(data) {
+            if let HttpFLvErrorValue::MpscSendError(err_in) = &err.value
+                && err_in.is_disconnected()
+            {
+                log::info!("write_flv_tag: {}", err_in);
+                return 11;
+            }
+            log::error!("write_flv_tag err: {}", err);
+            retry_count += 1;
+        } else {
+            retry_count = 0;
+        }
+        retry_count
     }
 
     //used for the http-flv protocol
@@ -162,43 +189,16 @@ impl HttpFlv {
     ) -> Result<(BytesMut, u32, u32), HttpFLvError> {
         let (common_data, common_timestamp, tag_type) = match channel_data {
             FrameData::Audio { timestamp, data } => {
-                if let Some(sender) = &self.statistic_data_sender {
-                    let statistic_audio_data = StatisticData::Audio {
-                        uuid: Some(self.subscriber_id),
-                        aac_packet_type: 1,
-                        data_size: data.len(),
-                        duration: 0,
-                    };
-                    if let Err(err) = sender.send(statistic_audio_data) {
-                        log::error!("send statistic data err: {}", err);
-                    }
-                }
-
+                self.send_audio_statistics(&data);
                 (data, timestamp, tag_type::AUDIO)
             }
             FrameData::Video { timestamp, data } => {
-                if let Some(sender) = &self.statistic_data_sender {
-                    let statistic_video_data = StatisticData::Video {
-                        uuid: Some(self.subscriber_id),
-                        frame_count: 1,
-                        is_key_frame: None,
-                        data_size: data.len(),
-                        duration: 0,
-                    };
-                    if let Err(err) = sender.send(statistic_video_data) {
-                        log::error!("send statistic data err: {}", err);
-                    }
-                }
-
+                self.send_video_statistics(&data);
                 (data, timestamp, tag_type::VIDEO)
             }
             FrameData::MetaData { timestamp, data } => {
-                //remove @setDataFrame from RTMP's metadata
-                let mut amf_writer: Amf0Writer = Amf0Writer::new();
-                amf_writer.write_string(&String::from("@setDataFrame"))?;
-                let (_, right) = data.split_at(amf_writer.len());
-
-                (BytesMut::from(right), timestamp, tag_type::SCRIPT_DATA_AMF)
+                let processed = self.process_metadata(data)?;
+                (processed, timestamp, tag_type::SCRIPT_DATA_AMF)
             }
             _ => {
                 return Err(HttpFLvError {
@@ -208,6 +208,44 @@ impl HttpFlv {
         };
 
         Ok((common_data, common_timestamp, tag_type as u32))
+    }
+
+    fn send_audio_statistics(&self, data: &bytes::BytesMut) {
+        let Some(sender) = &self.statistic_data_sender else {
+            return;
+        };
+        let statistic_audio_data = StatisticData::Audio {
+            uuid: Some(self.subscriber_id),
+            aac_packet_type: 1,
+            data_size: data.len(),
+            duration: 0,
+        };
+        if let Err(err) = sender.send(statistic_audio_data) {
+            log::error!("send statistic data err: {}", err);
+        }
+    }
+
+    fn send_video_statistics(&self, data: &bytes::BytesMut) {
+        let Some(sender) = &self.statistic_data_sender else {
+            return;
+        };
+        let statistic_video_data = StatisticData::Video {
+            uuid: Some(self.subscriber_id),
+            frame_count: 1,
+            is_key_frame: None,
+            data_size: data.len(),
+            duration: 0,
+        };
+        if let Err(err) = sender.send(statistic_video_data) {
+            log::error!("send statistic data err: {}", err);
+        }
+    }
+
+    fn process_metadata(&self, data: bytes::BytesMut) -> Result<BytesMut, HttpFLvError> {
+        let mut amf_writer: Amf0Writer = Amf0Writer::new();
+        amf_writer.write_string(&String::from("@setDataFrame"))?;
+        let (_, right) = data.split_at(amf_writer.len());
+        Ok(BytesMut::from(right))
     }
 
     pub fn write_flv_tag(&mut self, channel_data: FrameData) -> Result<(), HttpFLvError> {

@@ -233,18 +233,111 @@ impl RtspClientSession {
         self.receive_response(rtsp_method_name::DESCRIBE).await
     }
 
+    fn get_media_control(&self, media: &crate::rtsp::sdp::SdpMediaInfo) -> String {
+        media.attributes.get("control").cloned().unwrap_or_else(|| {
+            log::error!("cannot get media control!!");
+            String::from("")
+        })
+    }
+
+    fn parse_interleaved_idx(&self, media_control: &str) -> Option<u8> {
+        let kv: Vec<&str> = media_control.trim().splitn(2, '=').collect();
+        if kv.len() < 2 || kv[1].trim().is_empty() {
+            log::error!("cannot parse control attribute: {}", media_control);
+            return None;
+        }
+        kv[1].parse::<u8>().ok()
+    }
+
+    fn apply_interleaved_to_track(&mut self, media_type: &str, interleaved: Option<[u8; 2]>) {
+        let track_type = match media_type {
+            "audio" => &TrackType::Audio,
+            "video" => &TrackType::Video,
+            _ => return,
+        };
+        if let Some(track) = self.tracks.get_mut(track_type) {
+            track.transport.interleaved = interleaved;
+        }
+    }
+
+    fn build_tcp_transport(&self, interleaved_idx: u8) -> RtspTransport {
+        RtspTransport {
+            protocol_type: ProtocolType::TCP,
+            cast_type: CastType::Unicast,
+            interleaved: Some([interleaved_idx * 2, interleaved_idx * 2 + 1]),
+            ..Default::default()
+        }
+    }
+
+    async fn setup_tcp_transport(
+        &mut self,
+        media_control: &str,
+        media_type: &str,
+        request: &mut RtspRequest,
+    ) -> bool {
+        let Some(interleaved_idx) = self.parse_interleaved_idx(media_control) else {
+            return false;
+        };
+
+        let media_transport = self.build_tcp_transport(interleaved_idx);
+        request
+            .headers
+            .insert("Transport".to_string(), media_transport.marshal());
+        self.apply_interleaved_to_track(media_type, media_transport.interleaved);
+        true
+    }
+
+    async fn setup_udp_transport(
+        &mut self,
+        media_type: &str,
+        request: &mut RtspRequest,
+    ) -> Result<bool, SessionError> {
+        let Some((socket_rtp, socket_rtcp)) = new_udpio_pair().await else {
+            return Ok(false);
+        };
+
+        let rtp_port = socket_rtp.get_local_port().ok_or(SessionError {
+            value: SessionErrorValue::MissingClientPort,
+        })?;
+        let rtcp_port = socket_rtcp.get_local_port().ok_or(SessionError {
+            value: SessionErrorValue::MissingClientPort,
+        })?;
+
+        let media_transport = RtspTransport {
+            protocol_type: ProtocolType::UDP,
+            cast_type: CastType::Unicast,
+            client_port: Some([rtp_port, rtcp_port]),
+            ..Default::default()
+        };
+
+        request
+            .headers
+            .insert("Transport".to_string(), media_transport.marshal());
+
+        let track_type = match media_type {
+            "audio" => &TrackType::Audio,
+            "video" => &TrackType::Video,
+            _ => return Ok(true),
+        };
+
+        if let Some(track) = self.tracks.get_mut(track_type) {
+            let box_rtp_io: Box<dyn TNetIO + Send + Sync> = Box::new(socket_rtp);
+            track.rtp_receive_loop(box_rtp_io).await;
+
+            let box_rtcp_io: Arc<Mutex<Box<dyn TNetIO + Send + Sync>>> =
+                Arc::new(Mutex::new(Box::new(socket_rtcp)));
+            track.rtcp_receive_loop(box_rtcp_io).await;
+        }
+
+        Ok(true)
+    }
+
     async fn send_setup(&mut self) -> Result<(), SessionError> {
         log::info!("rtsp client: send_setup");
         let sdp_medias = self.sdp.medias.clone();
 
         for media in sdp_medias {
-            let media_control = if let Some(media_control_val) = media.attributes.get("control") {
-                media_control_val.clone()
-            } else {
-                log::error!("cannot get media control!!");
-                String::from("")
-            };
-
+            let media_control = self.get_media_control(&media);
             let uri_path = format!(
                 "rtsp://{}/{}/{}",
                 self.address, self.stream_name, media_control
@@ -252,78 +345,19 @@ impl RtspClientSession {
 
             let mut request = self.gen_request(rtsp_method_name::SETUP, uri_path)?;
 
-            match self.protocol_type {
+            let should_send = match self.protocol_type {
                 ProtocolType::TCP => {
-                    let kv: Vec<&str> = media_control.trim().splitn(2, '=').collect();
-                    if kv.len() < 2 || kv[1].trim().is_empty() {
-                        log::error!("cannot parse control attribute: {}", media_control);
-                        continue;
-                    }
-                    let mut media_transport = RtspTransport::default();
-                    if let Ok(interleaved_idx) = kv[1].parse::<u8>() {
-                        media_transport.interleaved =
-                            Some([interleaved_idx * 2, interleaved_idx * 2 + 1]);
-                    } else {
-                        log::error!("cannot get interleaved_idx: {}", kv[1]);
-                    }
-
-                    media_transport.protocol_type = ProtocolType::TCP;
-                    media_transport.cast_type = CastType::Unicast;
-                    request
-                        .headers
-                        .insert("Transport".to_string(), media_transport.marshal());
-
-                    if media.media_type == "audio" {
-                        if let Some(track) = self.tracks.get_mut(&TrackType::Audio) {
-                            track.transport.interleaved = media_transport.interleaved;
-                        }
-                    } else if media.media_type == "video"
-                        && let Some(track) = self.tracks.get_mut(&TrackType::Video)
-                    {
-                        track.transport.interleaved = media_transport.interleaved;
-                    }
+                    self.setup_tcp_transport(&media_control, &media.media_type, &mut request)
+                        .await
                 }
                 ProtocolType::UDP => {
-                    if let Some((socket_rtp, socket_rtcp)) = new_udpio_pair().await {
-                        let rtp_port = socket_rtp.get_local_port().ok_or(SessionError {
-                            value: SessionErrorValue::MissingClientPort,
-                        })?;
-                        let rtcp_port = socket_rtcp.get_local_port().ok_or(SessionError {
-                            value: SessionErrorValue::MissingClientPort,
-                        })?;
-                        let media_transport = RtspTransport {
-                            protocol_type: ProtocolType::UDP,
-                            cast_type: CastType::Unicast,
-                            client_port: Some([rtp_port, rtcp_port]),
-                            ..Default::default()
-                        };
-
-                        request
-                            .headers
-                            .insert("Transport".to_string(), media_transport.marshal());
-
-                        if media.media_type == "audio" {
-                            if let Some(track) = self.tracks.get_mut(&TrackType::Audio) {
-                                let box_rtp_io: Box<dyn TNetIO + Send + Sync> =
-                                    Box::new(socket_rtp);
-                                track.rtp_receive_loop(box_rtp_io).await;
-
-                                let box_rtcp_io: Arc<Mutex<Box<dyn TNetIO + Send + Sync>>> =
-                                    Arc::new(Mutex::new(Box::new(socket_rtcp)));
-                                track.rtcp_receive_loop(box_rtcp_io).await;
-                            }
-                        } else if media.media_type == "video"
-                            && let Some(track) = self.tracks.get_mut(&TrackType::Video)
-                        {
-                            let box_rtp_io: Box<dyn TNetIO + Send + Sync> = Box::new(socket_rtp);
-                            track.rtp_receive_loop(box_rtp_io).await;
-
-                            let box_rtcp_io: Arc<Mutex<Box<dyn TNetIO + Send + Sync>>> =
-                                Arc::new(Mutex::new(Box::new(socket_rtcp)));
-                            track.rtcp_receive_loop(box_rtcp_io).await;
-                        }
-                    }
+                    self.setup_udp_transport(&media.media_type, &mut request)
+                        .await?
                 }
+            };
+
+            if !should_send {
+                continue;
             }
 
             self.send_resquest(&request).await?;
@@ -509,12 +543,12 @@ impl RtspClientSession {
         Ok(())
     }
 
-    async fn receive_response(&mut self, method_name: &str) -> Result<(), SessionError> {
+    async fn read_message(&mut self) -> Result<usize, SessionError> {
         let mut retry_count = 0;
-        let message_len = loop {
+        loop {
             let data = self.reader.get_remaining_bytes();
             match try_get_complete_message_len(&data) {
-                Ok(Some(len)) => break len,
+                Ok(Some(len)) => return Ok(len),
                 Ok(None) => {
                     if retry_count >= 16 {
                         return Err(SessionError {
@@ -533,103 +567,144 @@ impl RtspClientSession {
                     });
                 }
             }
-        };
+        }
+    }
 
+    fn parse_response(&mut self, message_len: usize) -> Result<RtspResponse, SessionError> {
         let message_bytes = self.reader.read_bytes(message_len)?;
         let message_str = std::str::from_utf8(&message_bytes)?;
 
-        let Some(rtsp_response) = RtspResponse::unmarshal(message_str) else {
-            return Err(SessionError {
-                value: SessionErrorValue::RtspMessageCorrupted("response parse failed".to_string()),
-            });
-        };
+        RtspResponse::unmarshal(message_str).ok_or(SessionError {
+            value: SessionErrorValue::RtspMessageCorrupted("response parse failed".to_string()),
+        })
+    }
 
-        if rtsp_response.status_code != http::StatusCode::OK {
-            log::error!("rtsp response error: {}", rtsp_response.marshal());
+    fn validate_response_status(&self, response: &RtspResponse) -> Result<(), SessionError> {
+        if response.status_code != http::StatusCode::OK {
+            log::error!("rtsp response error: {}", response.marshal());
             return Err(SessionError {
                 value: SessionErrorValue::RtspResponseStatusError,
             });
         }
+        Ok(())
+    }
 
+    fn handle_options_response(&self, response: &RtspResponse) {
+        if let Some(public) = response.get_header("Public") {
+            log::info!("support methods: {}", public);
+        }
+    }
+
+    async fn handle_describe_response(
+        &mut self,
+        response: &RtspResponse,
+    ) -> Result<(), SessionError> {
+        let Some(request_body) = &response.body else {
+            return Ok(());
+        };
+
+        let Ok(sdp) = Sdp::unmarshal(request_body) else {
+            return Ok(());
+        };
+
+        self.sdp = sdp.clone();
+        self.stream_handler.set_sdp(sdp).await;
+        self.new_tracks()?;
+
+        let (event_result_sender, event_result_receiver) = oneshot::channel();
+        let identifier = StreamIdentifier::Rtsp {
+            stream_path: self.stream_name.clone(),
+        };
+
+        let publish_event = StreamHubEvent::Publish {
+            identifier,
+            result_sender: event_result_sender,
+            info: self.get_publisher_info(),
+            stream_handler: self.stream_handler.clone(),
+        };
+
+        if self.event_producer.send(publish_event).is_err() {
+            return Err(SessionError {
+                value: SessionErrorValue::StreamHubEventSendErr,
+            });
+        }
+
+        let sender = event_result_receiver.await??.0.ok_or(SessionError {
+            value: SessionErrorValue::MissingFrameSender,
+        })?;
+
+        self.setup_track_frame_handlers(&sender).await;
+        Ok(())
+    }
+
+    async fn setup_track_frame_handlers(
+        &mut self,
+        sender: &tokio::sync::mpsc::UnboundedSender<FrameData>,
+    ) {
+        for track in self.tracks.values_mut() {
+            let sender_out = sender.clone();
+
+            let mut rtp_channel_guard = track.rtp_channel.lock().await;
+            rtp_channel_guard.on_frame_handler(Box::new(
+                move |msg: FrameData| -> Result<(), UnPackerError> {
+                    if let Err(err) = sender_out.send(msg) {
+                        log::error!("send frame error: {}", err);
+                    }
+                    Ok(())
+                },
+            ));
+
+            let rtcp_channel = Arc::clone(&track.rtcp_channel);
+            rtp_channel_guard.on_packet_for_rtcp_handler(Box::new(move |packet: RtpPacket| {
+                let rtcp_channel_in = Arc::clone(&rtcp_channel);
+                Box::pin(async move {
+                    rtcp_channel_in.lock().await.on_packet(packet);
+                })
+            }));
+        }
+    }
+
+    fn handle_setup_response(&mut self, response: &RtspResponse) {
+        if self.session_id.is_none()
+            && let Some(session_id) = response.get_header("Session")
+        {
+            self.session_id = Uuid::from_str2(session_id);
+        }
+
+        if let Some(transport_str) = response.get_header("Transport") {
+            log::info!("setup response: transport {}", transport_str);
+        }
+    }
+
+    async fn dispatch_response_handler(
+        &mut self,
+        method_name: &str,
+        response: &RtspResponse,
+    ) -> Result<(), SessionError> {
         match method_name {
             rtsp_method_name::OPTIONS => {
-                if let Some(public) = rtsp_response.get_header("Public") {
-                    log::info!("support methods: {}", public);
-                }
+                self.handle_options_response(response);
             }
             rtsp_method_name::ANNOUNCE => {}
             rtsp_method_name::DESCRIBE => {
-                if let Some(request_body) = &rtsp_response.body
-                    && let Ok(sdp) = Sdp::unmarshal(request_body)
-                {
-                    self.sdp = sdp.clone();
-                    self.stream_handler.set_sdp(sdp).await;
-
-                    self.new_tracks()?;
-
-                    let (event_result_sender, event_result_receiver) = oneshot::channel();
-                    let identifier = StreamIdentifier::Rtsp {
-                        stream_path: self.stream_name.clone(),
-                    };
-
-                    let publish_event = StreamHubEvent::Publish {
-                        identifier,
-                        result_sender: event_result_sender,
-                        info: self.get_publisher_info(),
-                        stream_handler: self.stream_handler.clone(),
-                    };
-
-                    if self.event_producer.send(publish_event).is_err() {
-                        return Err(SessionError {
-                            value: SessionErrorValue::StreamHubEventSendErr,
-                        });
-                    }
-
-                    let sender = event_result_receiver.await??.0.ok_or(SessionError {
-                        value: SessionErrorValue::MissingFrameSender,
-                    })?;
-
-                    for track in self.tracks.values_mut() {
-                        let sender_out = sender.clone();
-
-                        let mut rtp_channel_guard = track.rtp_channel.lock().await;
-                        rtp_channel_guard.on_frame_handler(Box::new(
-                            move |msg: FrameData| -> Result<(), UnPackerError> {
-                                if let Err(err) = sender_out.send(msg) {
-                                    log::error!("send frame error: {}", err);
-                                }
-                                Ok(())
-                            },
-                        ));
-
-                        let rtcp_channel = Arc::clone(&track.rtcp_channel);
-                        rtp_channel_guard.on_packet_for_rtcp_handler(Box::new(
-                            move |packet: RtpPacket| {
-                                let rtcp_channel_in = Arc::clone(&rtcp_channel);
-                                Box::pin(async move {
-                                    rtcp_channel_in.lock().await.on_packet(packet);
-                                })
-                            },
-                        ));
-                    }
-                }
+                self.handle_describe_response(response).await?;
             }
             rtsp_method_name::SETUP => {
-                if self.session_id.is_none()
-                    && let Some(session_id) = rtsp_response.get_header("Session")
-                {
-                    self.session_id = Uuid::from_str2(session_id);
-                }
-
-                if let Some(transport_str) = rtsp_response.get_header("Transport") {
-                    log::info!("setup response: transport {}", transport_str);
-                }
+                self.handle_setup_response(response);
             }
-            rtsp_method_name::PLAY => {}
-            rtsp_method_name::RECORD => {}
+            rtsp_method_name::PLAY | rtsp_method_name::RECORD => {}
             _ => {}
         }
         Ok(())
+    }
+
+    async fn receive_response(&mut self, method_name: &str) -> Result<(), SessionError> {
+        let message_len = self.read_message().await?;
+        let rtsp_response = self.parse_response(message_len)?;
+
+        self.validate_response_status(&rtsp_response)?;
+        self.dispatch_response_handler(method_name, &rtsp_response)
+            .await
     }
 
     pub fn exit(&mut self) -> Result<(), SessionError> {

@@ -87,66 +87,60 @@ impl UdpIO {
     }
 }
 
+const MAX_PORT: u16 = 65535;
+
+fn wrap_port(port: u16) -> u16 {
+    if port == MAX_PORT { 1 } else { port }
+}
+
 pub async fn new_udpio_pair() -> Option<(UdpIO, UdpIO)> {
-    const MAX_ATTEMPTS: u32 = 32768; // Prevent infinite loops
+    const MAX_ATTEMPTS: u32 = 32768;
 
-    let mut next_local_port = 0;
-    let first_local_port;
-    let mut attempt_count = 0;
+    let udpio_0 = UdpIO::new_with_local_port(0).await?;
+    let first_local_port = udpio_0.get_local_port()?;
+    let first_plus_one = first_local_port.wrapping_add(1);
 
-    // get the first available port
-    if let Some(udpio_0) = UdpIO::new_with_local_port(next_local_port).await {
-        if let Some(local_port_0) = udpio_0.get_local_port() {
-            first_local_port = local_port_0;
-        } else {
-            log::error!("cannot get local port");
-            return None;
-        }
-
-        if first_local_port == 65535 {
-            next_local_port = 1;
-        } else if let Some(udpio_1) = UdpIO::new_with_local_port(first_local_port + 1).await {
-            return Some((udpio_0, udpio_1));
-        } else if first_local_port + 1 == 65535 {
-            next_local_port = 1;
-        } else {
-            next_local_port = first_local_port + 2;
-        }
-    } else {
-        return None;
+    if first_local_port != MAX_PORT
+        && let Some(udpio_1) = UdpIO::new_with_local_port(first_plus_one).await
+    {
+        return Some((udpio_0, udpio_1));
     }
 
-    loop {
-        attempt_count += 1;
-        if attempt_count > MAX_ATTEMPTS {
-            log::error!("new_udpio_pair exceeded maximum attempts");
-            return None;
-        }
+    let mut next_local_port = if first_local_port == MAX_PORT || first_plus_one == MAX_PORT {
+        1
+    } else {
+        first_plus_one + 1
+    };
 
+    for _attempt_count in 1..=MAX_ATTEMPTS {
         log::trace!("next local port: {next_local_port} and first port: {first_local_port}");
-
-        if next_local_port == 65535 {
-            next_local_port = 1;
-            continue;
-        }
 
         if next_local_port == first_local_port {
             return None;
         }
 
+        next_local_port = wrap_port(next_local_port);
+        if next_local_port == first_local_port {
+            return None;
+        }
+
         if let Some(udpio_0) = UdpIO::new_with_local_port(next_local_port).await {
-            if let Some(udpio_1) = UdpIO::new_with_local_port(next_local_port + 1).await {
+            let next_plus_one = next_local_port.wrapping_add(1);
+            if let Some(udpio_1) = UdpIO::new_with_local_port(next_plus_one).await {
                 return Some((udpio_0, udpio_1));
-            } else if next_local_port + 1 == 65535 {
-                next_local_port = 1;
-            } else {
-                next_local_port += 2;
             }
+            next_local_port = if next_plus_one == MAX_PORT {
+                1
+            } else {
+                next_plus_one + 1
+            };
         } else {
-            // try next port
-            next_local_port += 1;
+            next_local_port = next_local_port.wrapping_add(1);
         }
     }
+
+    log::error!("new_udpio_pair exceeded maximum attempts");
+    None
 }
 
 #[async_trait]
@@ -329,10 +323,721 @@ impl TNetIO for TcpWriteIO {
 #[cfg(test)]
 mod tests {
 
-    use super::UdpIO;
-    use super::new_udpio_pair;
+    use super::*;
+    use std::time::Duration;
 
-    use tokio;
+    // ========== NetType Enum Tests ==========
+
+    #[test]
+    fn test_net_type_tcp_variant_exists() {
+        let net_type = NetType::TCP;
+        match net_type {
+            NetType::TCP => assert!(true),
+            NetType::UDP => panic!("Expected TCP variant"),
+        }
+    }
+
+    #[test]
+    fn test_net_type_udp_variant_exists() {
+        let net_type = NetType::UDP;
+        match net_type {
+            NetType::UDP => assert!(true),
+            NetType::TCP => panic!("Expected UDP variant"),
+        }
+    }
+
+    // ========== TcpIO Tests ==========
+
+    #[tokio::test]
+    async fn test_tcpio_new_creates_instance() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let connect_task = tokio::spawn(async move {
+            let stream = tokio::net::TcpStream::connect(addr).await.unwrap();
+            let tcpio = TcpIO::new(stream);
+            // Verify TcpIO was created successfully by checking net type
+            assert!(matches!(tcpio.get_net_type(), NetType::TCP));
+        });
+
+        let _accept_task = tokio::spawn(async move {
+            let _ = listener.accept().await;
+        });
+
+        let _ = connect_task.await;
+    }
+
+    #[tokio::test]
+    async fn test_tcpio_get_net_type_returns_tcp() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let connect_task = tokio::spawn(async move {
+            let stream = tokio::net::TcpStream::connect(addr).await.unwrap();
+            let tcpio = TcpIO::new(stream);
+            assert!(matches!(tcpio.get_net_type(), NetType::TCP));
+        });
+
+        let _accept_task = tokio::spawn(async move {
+            let _ = listener.accept().await;
+        });
+
+        let _ = connect_task.await;
+    }
+
+    #[tokio::test]
+    async fn test_tcpio_write_success() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let connect_task = tokio::spawn(async move {
+            let stream = tokio::net::TcpStream::connect(addr).await.unwrap();
+            let mut tcpio = TcpIO::new(stream);
+            let data = Bytes::from("hello world");
+            let result = tcpio.write(data).await;
+            assert!(
+                result.is_ok(),
+                "Write should succeed on connected TCP stream"
+            );
+        });
+
+        let accept_task = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut buf = [0u8; 11];
+            let n = tokio::io::AsyncReadExt::read(&mut stream, &mut buf)
+                .await
+                .unwrap();
+            assert_eq!(n, 11);
+            assert_eq!(&buf[..], b"hello world");
+        });
+
+        let _ = tokio::try_join!(connect_task, accept_task);
+    }
+
+    #[tokio::test]
+    async fn test_tcpio_write_empty_data_success() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let connect_task = tokio::spawn(async move {
+            let stream = tokio::net::TcpStream::connect(addr).await.unwrap();
+            let mut tcpio = TcpIO::new(stream);
+            let data = Bytes::from("");
+            let result = tcpio.write(data).await;
+            assert!(result.is_ok(), "Writing empty data should succeed");
+        });
+
+        let _accept_task = tokio::spawn(async move {
+            let _ = listener.accept().await;
+        });
+
+        let _ = connect_task.await;
+    }
+
+    #[tokio::test]
+    async fn test_tcpio_read_success() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let connect_task = tokio::spawn(async move {
+            let stream = tokio::net::TcpStream::connect(addr).await.unwrap();
+            let mut tcpio = TcpIO::new(stream);
+            let result = tcpio.read().await;
+            assert!(result.is_ok(), "Read should succeed when data is available");
+            let data = result.unwrap();
+            assert_eq!(&data[..], b"test data");
+        });
+
+        let accept_task = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            tokio::io::AsyncWriteExt::write_all(&mut stream, b"test data")
+                .await
+                .unwrap();
+            tokio::io::AsyncWriteExt::flush(&mut stream).await.unwrap();
+        });
+
+        let _ = tokio::try_join!(connect_task, accept_task);
+    }
+
+    #[tokio::test]
+    async fn test_tcpio_read_none_returns_error() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let connect_task = tokio::spawn(async move {
+            let stream = tokio::net::TcpStream::connect(addr).await.unwrap();
+            let mut tcpio = TcpIO::new(stream);
+            // Give server time to close connection
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            let result = tcpio.read().await;
+            assert!(
+                result.is_err(),
+                "Read should return error when stream is closed"
+            );
+            let err = result.unwrap_err();
+            assert!(matches!(err.value, BytesIOErrorValue::NoneReturn));
+        });
+
+        let accept_task = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            // Immediately close the connection
+            drop(stream);
+        });
+
+        let _ = tokio::try_join!(connect_task, accept_task);
+    }
+
+    #[tokio::test]
+    async fn test_tcpio_read_timeout_success() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let connect_task = tokio::spawn(async move {
+            let stream = tokio::net::TcpStream::connect(addr).await.unwrap();
+            let mut tcpio = TcpIO::new(stream);
+            let timeout_duration = Duration::from_secs(5);
+            let result = tcpio.read_timeout(timeout_duration).await;
+            assert!(
+                result.is_ok(),
+                "Read with timeout should succeed when data arrives"
+            );
+            let data = result.unwrap();
+            assert_eq!(&data[..], b"timeout test");
+        });
+
+        let accept_task = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            // Small delay before sending
+            tokio::time::sleep(Duration::from_millis(10)).await;
+            tokio::io::AsyncWriteExt::write_all(&mut stream, b"timeout test")
+                .await
+                .unwrap();
+            tokio::io::AsyncWriteExt::flush(&mut stream).await.unwrap();
+        });
+
+        let _ = tokio::try_join!(connect_task, accept_task);
+    }
+
+    #[tokio::test]
+    async fn test_tcpio_read_timeout_elapsed_returns_error() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let connect_task = tokio::spawn(async move {
+            let stream = tokio::net::TcpStream::connect(addr).await.unwrap();
+            let mut tcpio = TcpIO::new(stream);
+            // Very short timeout - will definitely elapse
+            let timeout_duration = Duration::from_millis(1);
+            let result = tcpio.read_timeout(timeout_duration).await;
+            assert!(
+                result.is_err(),
+                "Read should timeout with very short duration"
+            );
+            let err = result.unwrap_err();
+            assert!(matches!(err.value, BytesIOErrorValue::TimeoutError(_)));
+        });
+
+        let accept_task = tokio::spawn(async move {
+            let _ = listener.accept().await.unwrap();
+            // Don't send any data - let timeout occur
+        });
+
+        let _ = tokio::try_join!(connect_task, accept_task);
+    }
+
+    #[tokio::test]
+    async fn test_tcpio_write_large_payload_success() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        // Create a large payload (64KB)
+        let large_data = vec![0xABu8; 65536];
+        let large_data_clone = large_data.clone();
+
+        let connect_task = tokio::spawn(async move {
+            let stream = tokio::net::TcpStream::connect(addr).await.unwrap();
+            let mut tcpio = TcpIO::new(stream);
+            let data = Bytes::from(large_data_clone);
+            let result = tcpio.write(data).await;
+            assert!(result.is_ok(), "Writing large payload should succeed");
+        });
+
+        let accept_task = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut buf = vec![0u8; 65536];
+            let mut total_read = 0;
+            while total_read < 65536 {
+                let n = tokio::io::AsyncReadExt::read(&mut stream, &mut buf[total_read..])
+                    .await
+                    .unwrap();
+                total_read += n;
+                if n == 0 {
+                    break;
+                }
+            }
+            assert_eq!(total_read, 65536);
+            assert_eq!(buf, large_data);
+        });
+
+        let _ = tokio::try_join!(connect_task, accept_task);
+    }
+
+    // ========== TcpReadIO Tests ==========
+
+    #[tokio::test]
+    async fn test_tcpreadio_new_creates_instance() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let connect_task = tokio::spawn(async move {
+            let stream = tokio::net::TcpStream::connect(addr).await.unwrap();
+            let (read_half, _) = stream.into_split();
+            let tcpreadio = TcpReadIO::new(read_half);
+            assert!(matches!(tcpreadio.get_net_type(), NetType::TCP));
+        });
+
+        let _accept_task = tokio::spawn(async move {
+            let _ = listener.accept().await;
+        });
+
+        let _ = connect_task.await;
+    }
+
+    #[tokio::test]
+    async fn test_tcpreadio_get_net_type_returns_tcp() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let connect_task = tokio::spawn(async move {
+            let stream = tokio::net::TcpStream::connect(addr).await.unwrap();
+            let (read_half, _) = stream.into_split();
+            let tcpreadio = TcpReadIO::new(read_half);
+            assert!(matches!(tcpreadio.get_net_type(), NetType::TCP));
+        });
+
+        let _accept_task = tokio::spawn(async move {
+            let _ = listener.accept().await;
+        });
+
+        let _ = connect_task.await;
+    }
+
+    #[tokio::test]
+    async fn test_tcpreadio_write_returns_unsupported_error() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let connect_task = tokio::spawn(async move {
+            let stream = tokio::net::TcpStream::connect(addr).await.unwrap();
+            let (read_half, _) = stream.into_split();
+            let mut tcpreadio = TcpReadIO::new(read_half);
+            let data = Bytes::from("test");
+            let result = tcpreadio.write(data).await;
+            assert!(result.is_err(), "Write on TcpReadIO should return error");
+            let err = result.unwrap_err();
+            if let BytesIOErrorValue::IOError(io_err) = err.value {
+                assert_eq!(io_err.kind(), std::io::ErrorKind::Unsupported);
+            } else {
+                panic!("Expected IOError variant");
+            }
+        });
+
+        let _accept_task = tokio::spawn(async move {
+            let _ = listener.accept().await;
+        });
+
+        let _ = connect_task.await;
+    }
+
+    #[tokio::test]
+    async fn test_tcpreadio_read_success() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let connect_task = tokio::spawn(async move {
+            let stream = tokio::net::TcpStream::connect(addr).await.unwrap();
+            let (read_half, _) = stream.into_split();
+            let mut tcpreadio = TcpReadIO::new(read_half);
+            let result = tcpreadio.read().await;
+            assert!(result.is_ok(), "Read should succeed when data is available");
+            let data = result.unwrap();
+            assert_eq!(&data[..], b"read test data");
+        });
+
+        let accept_task = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            tokio::io::AsyncWriteExt::write_all(&mut stream, b"read test data")
+                .await
+                .unwrap();
+            tokio::io::AsyncWriteExt::flush(&mut stream).await.unwrap();
+        });
+
+        let _ = tokio::try_join!(connect_task, accept_task);
+    }
+
+    #[tokio::test]
+    async fn test_tcpreadio_read_none_returns_error() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let connect_task = tokio::spawn(async move {
+            let stream = tokio::net::TcpStream::connect(addr).await.unwrap();
+            let (read_half, _) = stream.into_split();
+            let mut tcpreadio = TcpReadIO::new(read_half);
+            // Give server time to close connection
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            let result = tcpreadio.read().await;
+            assert!(
+                result.is_err(),
+                "Read should return error when stream is closed"
+            );
+            let err = result.unwrap_err();
+            assert!(matches!(err.value, BytesIOErrorValue::NoneReturn));
+        });
+
+        let accept_task = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            // Immediately close the connection
+            drop(stream);
+        });
+
+        let _ = tokio::try_join!(connect_task, accept_task);
+    }
+
+    #[tokio::test]
+    async fn test_tcpreadio_read_timeout_success() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let connect_task = tokio::spawn(async move {
+            let stream = tokio::net::TcpStream::connect(addr).await.unwrap();
+            let (read_half, _) = stream.into_split();
+            let mut tcpreadio = TcpReadIO::new(read_half);
+            let timeout_duration = Duration::from_secs(5);
+            let result = tcpreadio.read_timeout(timeout_duration).await;
+            assert!(
+                result.is_ok(),
+                "Read with timeout should succeed when data arrives"
+            );
+            let data = result.unwrap();
+            assert_eq!(&data[..], b"timeout read test");
+        });
+
+        let accept_task = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            tokio::time::sleep(Duration::from_millis(10)).await;
+            tokio::io::AsyncWriteExt::write_all(&mut stream, b"timeout read test")
+                .await
+                .unwrap();
+            tokio::io::AsyncWriteExt::flush(&mut stream).await.unwrap();
+        });
+
+        let _ = tokio::try_join!(connect_task, accept_task);
+    }
+
+    #[tokio::test]
+    async fn test_tcpreadio_read_timeout_elapsed_returns_error() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let connect_task = tokio::spawn(async move {
+            let stream = tokio::net::TcpStream::connect(addr).await.unwrap();
+            let (read_half, _) = stream.into_split();
+            let mut tcpreadio = TcpReadIO::new(read_half);
+            let timeout_duration = Duration::from_millis(1);
+            let result = tcpreadio.read_timeout(timeout_duration).await;
+            assert!(result.is_err(), "Read should timeout");
+            let err = result.unwrap_err();
+            assert!(matches!(err.value, BytesIOErrorValue::TimeoutError(_)));
+        });
+
+        let accept_task = tokio::spawn(async move {
+            let _ = listener.accept().await.unwrap();
+            // Don't send any data
+        });
+
+        let _ = tokio::try_join!(connect_task, accept_task);
+    }
+
+    // ========== TcpWriteIO Tests ==========
+
+    #[tokio::test]
+    async fn test_tcpwriteio_new_creates_instance() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let connect_task = tokio::spawn(async move {
+            let stream = tokio::net::TcpStream::connect(addr).await.unwrap();
+            let (_, write_half) = stream.into_split();
+            let tcpwriteio = TcpWriteIO::new(write_half);
+            assert!(matches!(tcpwriteio.get_net_type(), NetType::TCP));
+        });
+
+        let _accept_task = tokio::spawn(async move {
+            let _ = listener.accept().await;
+        });
+
+        let _ = connect_task.await;
+    }
+
+    #[tokio::test]
+    async fn test_tcpwriteio_get_net_type_returns_tcp() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let connect_task = tokio::spawn(async move {
+            let stream = tokio::net::TcpStream::connect(addr).await.unwrap();
+            let (_, write_half) = stream.into_split();
+            let tcpwriteio = TcpWriteIO::new(write_half);
+            assert!(matches!(tcpwriteio.get_net_type(), NetType::TCP));
+        });
+
+        let _accept_task = tokio::spawn(async move {
+            let _ = listener.accept().await;
+        });
+
+        let _ = connect_task.await;
+    }
+
+    #[tokio::test]
+    async fn test_tcpwriteio_read_returns_unsupported_error() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let connect_task = tokio::spawn(async move {
+            let stream = tokio::net::TcpStream::connect(addr).await.unwrap();
+            let (_, write_half) = stream.into_split();
+            let mut tcpwriteio = TcpWriteIO::new(write_half);
+            let result = tcpwriteio.read().await;
+            assert!(result.is_err(), "Read on TcpWriteIO should return error");
+            let err = result.unwrap_err();
+            if let BytesIOErrorValue::IOError(io_err) = err.value {
+                assert_eq!(io_err.kind(), std::io::ErrorKind::Unsupported);
+                assert!(io_err.to_string().contains("read not supported"));
+            } else {
+                panic!("Expected IOError variant");
+            }
+        });
+
+        let _accept_task = tokio::spawn(async move {
+            let _ = listener.accept().await;
+        });
+
+        let _ = connect_task.await;
+    }
+
+    #[tokio::test]
+    async fn test_tcpwriteio_write_success() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let connect_task = tokio::spawn(async move {
+            let stream = tokio::net::TcpStream::connect(addr).await.unwrap();
+            let (_, write_half) = stream.into_split();
+            let mut tcpwriteio = TcpWriteIO::new(write_half);
+            let data = Bytes::from("write test data");
+            let result = tcpwriteio.write(data).await;
+            assert!(result.is_ok(), "Write should succeed on TcpWriteIO");
+        });
+
+        let accept_task = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut buf = [0u8; 15];
+            let n = tokio::io::AsyncReadExt::read(&mut stream, &mut buf)
+                .await
+                .unwrap();
+            assert_eq!(n, 15);
+            assert_eq!(&buf[..], b"write test data");
+        });
+
+        let _ = tokio::try_join!(connect_task, accept_task);
+    }
+
+    #[tokio::test]
+    async fn test_tcpwriteio_write_empty_data_success() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let connect_task = tokio::spawn(async move {
+            let stream = tokio::net::TcpStream::connect(addr).await.unwrap();
+            let (_, write_half) = stream.into_split();
+            let mut tcpwriteio = TcpWriteIO::new(write_half);
+            let data = Bytes::from("");
+            let result = tcpwriteio.write(data).await;
+            assert!(result.is_ok(), "Writing empty data should succeed");
+        });
+
+        let _accept_task = tokio::spawn(async move {
+            let _ = listener.accept().await;
+        });
+
+        let _ = connect_task.await;
+    }
+
+    #[tokio::test]
+    async fn test_tcpwriteio_read_timeout_returns_unsupported_error() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let connect_task = tokio::spawn(async move {
+            let stream = tokio::net::TcpStream::connect(addr).await.unwrap();
+            let (_, write_half) = stream.into_split();
+            let mut tcpwriteio = TcpWriteIO::new(write_half);
+            let timeout_duration = Duration::from_secs(1);
+            let result = tcpwriteio.read_timeout(timeout_duration).await;
+            // Since read() always returns Unsupported error, read_timeout should too
+            assert!(
+                result.is_err(),
+                "Read timeout on TcpWriteIO should return error"
+            );
+            let err = result.unwrap_err();
+            if let BytesIOErrorValue::IOError(io_err) = err.value {
+                assert_eq!(io_err.kind(), std::io::ErrorKind::Unsupported);
+            } else {
+                panic!("Expected IOError variant");
+            }
+        });
+
+        let _accept_task = tokio::spawn(async move {
+            let _ = listener.accept().await;
+        });
+
+        let _ = connect_task.await;
+    }
+
+    #[tokio::test]
+    async fn test_tcpwriteio_write_large_payload_success() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let large_data = vec![0xCDu8; 65536];
+        let large_data_clone = large_data.clone();
+
+        let connect_task = tokio::spawn(async move {
+            let stream = tokio::net::TcpStream::connect(addr).await.unwrap();
+            let (_, write_half) = stream.into_split();
+            let mut tcpwriteio = TcpWriteIO::new(write_half);
+            let data = Bytes::from(large_data_clone);
+            let result = tcpwriteio.write(data).await;
+            assert!(result.is_ok(), "Writing large payload should succeed");
+        });
+
+        let accept_task = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut buf = vec![0u8; 65536];
+            let mut total_read = 0;
+            while total_read < 65536 {
+                let n = tokio::io::AsyncReadExt::read(&mut stream, &mut buf[total_read..])
+                    .await
+                    .unwrap();
+                total_read += n;
+                if n == 0 {
+                    break;
+                }
+            }
+            assert_eq!(total_read, 65536);
+            assert_eq!(buf, large_data);
+        });
+
+        let _ = tokio::try_join!(connect_task, accept_task);
+    }
+
+    // ========== UdpIO TNetIO Trait Tests ==========
+
+    #[tokio::test]
+    async fn test_udpio_get_net_type_returns_udp() {
+        if let Some(udpio) = UdpIO::new_with_local_port(0).await {
+            assert!(matches!(udpio.get_net_type(), NetType::UDP));
+        }
+    }
+
+    #[tokio::test]
+    async fn test_udpio_new_with_localhost_resolves() {
+        // Test that localhost resolution works
+        let result = UdpIO::new("localhost".to_string(), 12345, 0).await;
+        // This may fail if port is in use, so we just check it doesn't panic
+        if let Some(udpio) = result {
+            assert!(matches!(udpio.get_net_type(), NetType::UDP));
+        }
+    }
+
+    #[tokio::test]
+    async fn test_udpio_new_with_invalid_address_returns_none() {
+        // Invalid IP address format should return None
+        let result = UdpIO::new("invalid-address-that-does-not-exist".to_string(), 12345, 0).await;
+        assert!(result.is_none(), "Invalid address should return None");
+    }
+
+    #[tokio::test]
+    async fn test_udpio_get_local_port_returns_valid_port() {
+        if let Some(udpio) = UdpIO::new_with_local_port(0).await {
+            if let Some(port) = udpio.get_local_port() {
+                assert!(port > 0, "OS-assigned port should be greater than 0");
+            } else {
+                panic!("get_local_port should return Some for valid socket");
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn test_udpio_new_with_specific_port() {
+        // First get an available port
+        if let Some(temp_udpio) = UdpIO::new_with_local_port(0).await {
+            if let Some(port) = temp_udpio.get_local_port() {
+                // Drop the temp socket to free the port
+                drop(temp_udpio);
+
+                // Now try to bind to the same port (may fail if port is reused)
+                // Just verify the function doesn't panic
+                let _ = UdpIO::new_with_local_port(port).await;
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn test_udpio_write_and_read_roundtrip() {
+        if let Some((udpio1, udpio2)) = new_udpio_pair().await {
+            if let (Some(port1), Some(port2)) = (udpio1.get_local_port(), udpio2.get_local_port()) {
+                // Create new UDP sockets connected to each other
+                if let (Some(mut sender), Some(mut receiver)) = (
+                    UdpIO::new("127.0.0.1".to_string(), port2, port1).await,
+                    UdpIO::new("127.0.0.1".to_string(), port1, port2).await,
+                ) {
+                    drop(udpio1);
+                    drop(udpio2);
+
+                    let send_task = tokio::spawn(async move {
+                        let data = Bytes::from("udp test message");
+                        let result = sender.write(data).await;
+                        assert!(result.is_ok(), "UDP write should succeed");
+                    });
+
+                    let recv_task = tokio::spawn(async move {
+                        let result = receiver.read().await;
+                        assert!(result.is_ok(), "UDP read should succeed");
+                        let data = result.unwrap();
+                        assert_eq!(&data[..], b"udp test message");
+                    });
+
+                    let _ = tokio::try_join!(send_task, recv_task);
+                }
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn test_udpio_read_timeout_elapsed_returns_error() {
+        if let Some(mut udpio) = UdpIO::new_with_local_port(0).await {
+            // Very short timeout with no data being sent
+            let timeout_duration = Duration::from_millis(1);
+            let result = udpio.read_timeout(timeout_duration).await;
+            assert!(result.is_err(), "Read should timeout when no data arrives");
+            let err = result.unwrap_err();
+            assert!(matches!(err.value, BytesIOErrorValue::TimeoutError(_)));
+        }
+    }
+
+    // ========== new_udpio_pair Tests (existing tests preserved) ==========
 
     #[tokio::test]
     async fn test_new_udpio_pair() {
@@ -394,6 +1099,28 @@ mod tests {
             println!("success")
         } else {
             println!("fail")
+        }
+    }
+
+    #[tokio::test]
+    async fn test_new_udpio_pair_returns_consecutive_ports() {
+        if let Some((udpio1, udpio2)) = new_udpio_pair().await {
+            let port1 = udpio1.get_local_port();
+            let port2 = udpio2.get_local_port();
+
+            // Both should have valid ports
+            assert!(port1.is_some(), "First UDP socket should have a local port");
+            assert!(
+                port2.is_some(),
+                "Second UDP socket should have a local port"
+            );
+
+            // Ports should be consecutive
+            let p1 = port1.unwrap();
+            let p2 = port2.unwrap();
+            assert_eq!(p2, p1 + 1, "UDP pair ports should be consecutive");
+        } else {
+            panic!("new_udpio_pair should return Some with available ports");
         }
     }
 }

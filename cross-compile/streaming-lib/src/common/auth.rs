@@ -1,9 +1,5 @@
-use indexmap::IndexMap;
-use std::collections::hash_map::DefaultHasher;
-use std::hash::BuildHasherDefault;
 use std::sync::Arc;
 
-type AuthIndexMap = IndexMap<String, String, BuildHasherDefault<DefaultHasher>>;
 use base64::Engine;
 use md5;
 use serde_derive::Deserialize;
@@ -31,53 +27,38 @@ pub type CredentialValidator = Arc<dyn Fn(&str, &str) -> bool + Send + Sync>;
 
 pub fn get_secret(carrier: &SecretCarrier) -> Result<String, AuthError> {
     match carrier {
-        SecretCarrier::Query(query) => {
-            let mut query_pairs = AuthIndexMap::default();
-            let pars_array: Vec<&str> = query.split('&').collect();
-            for ele in pars_array {
-                let (k, v) = scanf!(ele, '=', String, String);
-                if k.is_none() || v.is_none() {
-                    continue;
-                }
-                query_pairs.insert(k.unwrap(), v.unwrap());
-            }
+        SecretCarrier::Query(query) => extract_token_from_query(query),
+        SecretCarrier::Bearer(header) => extract_token_from_bearer(header),
+    }
+}
 
-            query_pairs.get("token").map_or(
-                Err(AuthError {
-                    value: AuthErrorValue::NoTokenFound,
-                }),
-                |t| Ok(t.to_string()),
-            )
-        }
-        SecretCarrier::Bearer(header) => {
-            let invalid_format = Err(AuthError {
-                value: AuthErrorValue::InvalidTokenFormat,
-            });
-            let (prefix, token) = scanf!(header, " ", String, String);
-
-            //if prefix.is_none() || token.is_none() {
-            //    invalid_format
-            //} else if prefix.unwrap() != "Bearer" {
-            //    invalid_format
-            //} else {
-            //    Ok(token.unwrap())
-            //}
-            //fix cargo clippy --fix --allow-dirty --allow-no-vcs warnings
-            match token {
-                Some(token_val) => match prefix {
-                    Some(prefix_val) => {
-                        if prefix_val != "Bearer" {
-                            invalid_format
-                        } else {
-                            Ok(token_val)
-                        }
-                    }
-                    None => invalid_format,
-                },
-                None => invalid_format,
-            }
+fn extract_token_from_query(query: &str) -> Result<String, AuthError> {
+    for pair in query.split('&') {
+        let (k, v) = scanf!(pair, '=', String, String);
+        if let (Some(key), Some(val)) = (k, v)
+            && key == "token"
+        {
+            return Ok(val);
         }
     }
+    Err(AuthError {
+        value: AuthErrorValue::NoTokenFound,
+    })
+}
+
+fn extract_token_from_bearer(header: &str) -> Result<String, AuthError> {
+    let invalid_format = || AuthError {
+        value: AuthErrorValue::InvalidTokenFormat,
+    };
+
+    let (prefix, token) = scanf!(header, " ", String, String);
+    let prefix = prefix.ok_or_else(invalid_format)?;
+    let token = token.ok_or_else(invalid_format)?;
+
+    if prefix != "Bearer" {
+        return Err(invalid_format());
+    }
+    Ok(token)
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -145,42 +126,66 @@ impl Auth {
             return Ok(());
         }
 
-        let mut auth_err = AuthErrorValue::NoTokenFound;
+        self.try_query_auth(stream_name, query_string, is_pull)
+            .or_else(|| self.try_header_auth(stream_name, authorization_header, is_pull))
+            .unwrap_or(Err(AuthError {
+                value: AuthErrorValue::NoTokenFound,
+            }))
+    }
 
-        if let Some(query) = query_string {
-            let query_secret = Some(SecretCarrier::Query(query.clone()));
-            match self.authenticate(stream_name, &query_secret, is_pull) {
-                Ok(()) => return Ok(()),
-                Err(err) => auth_err = err.value,
-            }
+    fn try_query_auth(
+        &self,
+        stream_name: &str,
+        query_string: &Option<String>,
+        is_pull: bool,
+    ) -> Option<Result<(), AuthError>> {
+        let query = query_string.as_ref()?;
+        let secret = Some(SecretCarrier::Query(query.clone()));
+        Some(self.authenticate(stream_name, &secret, is_pull))
+    }
+
+    fn try_header_auth(
+        &self,
+        stream_name: &str,
+        authorization_header: Option<&str>,
+        is_pull: bool,
+    ) -> Option<Result<(), AuthError>> {
+        let header = authorization_header?;
+        if self.is_basic_auth(header) {
+            Some(self.try_basic_auth(header))
+        } else {
+            self.try_bearer_auth(stream_name, header, is_pull)
         }
+    }
 
-        if let Some(header) = authorization_header {
-            let is_basic = header
-                .trim_start()
-                .get(..6)
-                .map(|prefix| prefix.eq_ignore_ascii_case("Basic "))
-                .unwrap_or(false);
-            if is_basic {
-                let (username, password) = parse_basic_credentials(header)?;
-                if let Some(validator) = &self.credential_validator {
-                    if validator(&username, &password) {
-                        return Ok(());
-                    }
-                    auth_err = AuthErrorValue::InvalidCredentials;
-                } else {
-                    auth_err = AuthErrorValue::InvalidCredentials;
-                }
-            } else {
-                let bearer_secret = Some(SecretCarrier::Bearer(header.to_string()));
-                match self.authenticate(stream_name, &bearer_secret, is_pull) {
-                    Ok(()) => return Ok(()),
-                    Err(err) => auth_err = err.value,
-                }
-            }
+    fn is_basic_auth(&self, header: &str) -> bool {
+        header
+            .trim_start()
+            .get(..6)
+            .map(|prefix| prefix.eq_ignore_ascii_case("Basic "))
+            .unwrap_or(false)
+    }
+
+    fn try_basic_auth(&self, header: &str) -> Result<(), AuthError> {
+        let (username, password) = parse_basic_credentials(header)?;
+        if let Some(validator) = &self.credential_validator
+            && validator(&username, &password)
+        {
+            return Ok(());
         }
+        Err(AuthError {
+            value: AuthErrorValue::InvalidCredentials,
+        })
+    }
 
-        Err(AuthError { value: auth_err })
+    fn try_bearer_auth(
+        &self,
+        stream_name: &str,
+        header: &str,
+        is_pull: bool,
+    ) -> Option<Result<(), AuthError>> {
+        let secret = Some(SecretCarrier::Bearer(header.to_string()));
+        Some(self.authenticate(stream_name, &secret, is_pull))
     }
 
     pub fn authenticate(
