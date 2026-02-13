@@ -19,7 +19,9 @@ export interface EncryptedData {
  * Check if Web Crypto API is available (requires secure context)
  */
 function isCryptoAvailable(): boolean {
-  return crypto !== undefined && crypto.subtle !== undefined;
+  if (typeof crypto === 'undefined') return false;
+  if (typeof crypto.subtle === 'undefined') return false;
+  return true;
 }
 
 /**

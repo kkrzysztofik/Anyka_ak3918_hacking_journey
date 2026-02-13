@@ -24,7 +24,7 @@ require_cmd() {
   local cmd="$1"
   if ! command -v "$cmd" >/dev/null 2>&1; then
     echo "error: required command not found: $cmd" >&2
-    exit 2
+    return 2
   fi
 }
 
@@ -124,6 +124,7 @@ cleanup() {
     kill "$ONVIF_PID" >/dev/null 2>&1 || true
     wait "$ONVIF_PID" >/dev/null 2>&1 || true
   fi
+  return 0
 }
 trap cleanup EXIT
 
