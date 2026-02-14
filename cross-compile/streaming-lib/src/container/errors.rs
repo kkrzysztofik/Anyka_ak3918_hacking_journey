@@ -477,4 +477,177 @@ mod tests {
         assert!(debug_str.contains("BitVecError"));
         assert!(debug_str.contains("NotEnoughBits"));
     }
+
+    // ========== Additional From Trait Tests ==========
+
+    #[test]
+    fn test_flv_demuxer_error_from_demuxer_error_value() {
+        let val = DemuxerErrorValue::InvalidFlvHeader {
+            reason: "test".to_string(),
+        };
+        let err: FlvDemuxerError = val.into();
+        assert!(matches!(
+            err.value,
+            DemuxerErrorValue::InvalidFlvHeader { .. }
+        ));
+    }
+
+    #[test]
+    fn test_flv_demuxer_error_from_mpeg4_avc_hevc_error() {
+        let inner = Mpeg4AvcHevcError {
+            value: MpegErrorValue::SPSNalunitTypeNotCorrect,
+        };
+        let err: FlvDemuxerError = inner.into();
+        assert!(matches!(err.value, DemuxerErrorValue::MpegAvcError(_)));
+    }
+
+    #[test]
+    fn test_flv_demuxer_error_from_mpeg_aac_error() {
+        let inner = MpegAacError {
+            value: MpegErrorValue::NotSupportedSamplingFrequency,
+        };
+        let err: FlvDemuxerError = inner.into();
+        assert!(matches!(err.value, DemuxerErrorValue::MpegAacError(_)));
+    }
+
+    #[test]
+    fn test_flv_muxer_error_from_muxer_error_value() {
+        let write_err = BytesWriteError {
+            value: BytesWriteErrorValue::Timeout,
+        };
+        let val = MuxerErrorValue::BytesWriteError(write_err);
+        let err: FlvMuxerError = val.into();
+        assert!(matches!(err.value, MuxerErrorValue::BytesWriteError(_)));
+    }
+
+    #[test]
+    fn test_mpeg4_avc_hevc_error_from_mpeg_error_value() {
+        let val = MpegErrorValue::ShouldNotComeHere;
+        let err: Mpeg4AvcHevcError = val.into();
+        assert!(matches!(err.value, MpegErrorValue::ShouldNotComeHere));
+    }
+
+    #[test]
+    fn test_mpeg4_avc_hevc_error_from_bit_error() {
+        use crate::bytesio::bits_errors::{BitError, BitErrorValue};
+        let bit_err = BitError {
+            value: BitErrorValue::TooBig,
+        };
+        let err: Mpeg4AvcHevcError = bit_err.into();
+        assert!(matches!(err.value, MpegErrorValue::BitError(_)));
+    }
+
+    #[test]
+    fn test_mpeg4_avc_hevc_error_from_h264_error() {
+        use crate::bytesio::bits_errors::{BitError, BitErrorValue};
+        let h264_err = H264Error {
+            value: crate::codec::errors::H264ErrorValue::BitError(BitError {
+                value: BitErrorValue::TooBig,
+            }),
+        };
+        let err: Mpeg4AvcHevcError = h264_err.into();
+        assert!(matches!(err.value, MpegErrorValue::H264Error(_)));
+    }
+
+    #[test]
+    fn test_mpeg_aac_error_from_mpeg_error_value() {
+        let val = MpegErrorValue::NotEnoughBitsToRead;
+        let err: MpegAacError = val.into();
+        assert!(matches!(err.value, MpegErrorValue::NotEnoughBitsToRead));
+    }
+
+    #[test]
+    fn test_mpeg_aac_error_from_bit_error() {
+        use crate::bytesio::bits_errors::{BitError, BitErrorValue};
+        let bit_err = BitError {
+            value: BitErrorValue::InvalidBitValue,
+        };
+        let err: MpegAacError = bit_err.into();
+        assert!(matches!(err.value, MpegErrorValue::BitError(_)));
+    }
+
+    #[test]
+    fn test_bit_vec_error_from_bit_vec_error_value() {
+        let val = BitVecErrorValue::NotEnoughBits;
+        let err: BitVecError = val.into();
+        assert!(matches!(err.value, BitVecErrorValue::NotEnoughBits));
+    }
+
+    // ========== DemuxerErrorValue Display Tests ==========
+
+    #[test]
+    fn test_demuxer_error_value_invalid_flv_header_display() {
+        let err = DemuxerErrorValue::InvalidFlvHeader {
+            reason: "bad sig".to_string(),
+        };
+        let display = format!("{}", err);
+        assert!(display.contains("invalid flv header"));
+        assert!(display.contains("bad sig"));
+    }
+
+    #[test]
+    fn test_demuxer_error_value_mpeg_avc_error_display() {
+        let inner = Mpeg4AvcHevcError {
+            value: MpegErrorValue::SPSNalunitTypeNotCorrect,
+        };
+        let err = DemuxerErrorValue::MpegAvcError(inner);
+        let display = format!("{}", err);
+        assert!(display.contains("sps nal unit type"));
+    }
+
+    #[test]
+    fn test_demuxer_error_value_mpeg_aac_error_display() {
+        let inner = MpegAacError {
+            value: MpegErrorValue::NotSupportedSamplingFrequency,
+        };
+        let err = DemuxerErrorValue::MpegAacError(inner);
+        let display = format!("{}", err);
+        assert!(display.contains("sampling frequency"));
+    }
+
+    // ========== FlvDemuxerError Display Tests ==========
+
+    #[test]
+    fn test_flv_demuxer_error_display_invalid_header() {
+        let err = FlvDemuxerError {
+            value: DemuxerErrorValue::InvalidFlvHeader {
+                reason: "test reason".to_string(),
+            },
+        };
+        let display = format!("{}", err);
+        assert!(display.contains("test reason"));
+    }
+
+    // ========== Mpeg4AvcHevcError Display Tests ==========
+
+    #[test]
+    fn test_mpeg4_avc_hevc_error_display() {
+        let err = Mpeg4AvcHevcError {
+            value: MpegErrorValue::NotEnoughBitsToRead,
+        };
+        let display = format!("{}", err);
+        assert!(display.contains("not enough bits"));
+    }
+
+    // ========== MpegAacError Display Tests ==========
+
+    #[test]
+    fn test_mpeg_aac_error_display() {
+        let err = MpegAacError {
+            value: MpegErrorValue::NotSupportedSamplingFrequency,
+        };
+        let display = format!("{}", err);
+        assert!(display.contains("sampling frequency"));
+    }
+
+    // ========== BitVecError Display Tests ==========
+
+    #[test]
+    fn test_bit_vec_error_display() {
+        let err = BitVecError {
+            value: BitVecErrorValue::NotEnoughBits,
+        };
+        let display = format!("{}", err);
+        assert_eq!(display, "not enough bits left");
+    }
 }

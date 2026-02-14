@@ -1315,6 +1315,41 @@ mod tests {
 
     // ========== Additional UdpIO branches ==========
 
+    // ========== wrap_port and next_try_port helper tests ==========
+
+    #[test]
+    fn test_wrap_port_normal() {
+        assert_eq!(wrap_port(1000), 1000);
+        assert_eq!(wrap_port(1), 1);
+        assert_eq!(wrap_port(65534), 65534);
+    }
+
+    #[test]
+    fn test_wrap_port_max_wraps_to_one() {
+        assert_eq!(wrap_port(MAX_PORT), 1);
+    }
+
+    #[test]
+    fn test_next_try_port_normal() {
+        assert_eq!(next_try_port(1000), 1001);
+        assert_eq!(next_try_port(1), 2);
+    }
+
+    #[test]
+    fn test_next_try_port_max_wraps_to_one() {
+        assert_eq!(next_try_port(MAX_PORT), 1);
+    }
+
+    #[test]
+    fn test_next_try_port_max_minus_one() {
+        assert_eq!(next_try_port(65534), 65535);
+    }
+
+    #[test]
+    fn test_max_udp_datagram_size_constant() {
+        assert_eq!(MAX_UDP_DATAGRAM_SIZE, 65507);
+    }
+
     #[tokio::test]
     async fn test_udpio_new_with_unparseable_address_returns_none() {
         let result = UdpIO::new("256.256.256.256".to_string(), 80, 0).await;

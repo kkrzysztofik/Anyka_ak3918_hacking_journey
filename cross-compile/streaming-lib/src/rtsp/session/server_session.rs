@@ -4924,4 +4924,456 @@ mod tests {
         assert!(assembler.push(1, BytesMut::new()).is_none());
         assert!(assembler.flush().is_none());
     }
+
+    // ========================================================================
+    // RtpTrackCounters Tests
+    // ========================================================================
+
+    #[test]
+    fn test_rtp_track_counters_new_initial_state() {
+        let counters = RtpTrackCounters::new();
+        assert_eq!(counters.packet_count.load(Ordering::Relaxed), 0);
+        assert_eq!(counters.byte_count.load(Ordering::Relaxed), 0);
+        assert_eq!(counters.first_send_ms.load(Ordering::Relaxed), 0);
+        assert_eq!(counters.last_send_ms.load(Ordering::Relaxed), 0);
+        assert_eq!(counters.last_seq.load(Ordering::Relaxed), u32::MAX);
+        assert_eq!(counters.last_timestamp.load(Ordering::Relaxed), u32::MAX);
+    }
+
+    #[test]
+    fn test_rtp_track_counters_first_packet() {
+        let counters = RtpTrackCounters::new();
+        let obs = counters.on_packet_sent(100, 1000, 45000);
+
+        assert_eq!(obs.packets_sent, 1);
+        assert_eq!(obs.bytes_sent, 100);
+        assert!(obs.prev_seq.is_none());
+        assert!(obs.prev_timestamp.is_none());
+        assert!(obs.seq_delta.is_none());
+        assert!(obs.timestamp_delta.is_none());
+        assert!(!obs.seq_gap);
+        assert!(!obs.seq_regressed);
+        assert!(!obs.timestamp_regressed);
+    }
+
+    #[test]
+    fn test_rtp_track_counters_sequential_packets() {
+        let counters = RtpTrackCounters::new();
+        counters.on_packet_sent(100, 1000, 45000);
+        let obs = counters.on_packet_sent(150, 1001, 48000);
+
+        assert_eq!(obs.packets_sent, 2);
+        assert_eq!(obs.bytes_sent, 250);
+        assert_eq!(obs.prev_seq, Some(1000));
+        assert_eq!(obs.seq_delta, Some(1));
+        assert_eq!(obs.prev_timestamp, Some(45000));
+        assert_eq!(obs.timestamp_delta, Some(3000));
+        assert!(!obs.seq_gap);
+        assert!(!obs.seq_regressed);
+        assert!(!obs.timestamp_regressed);
+    }
+
+    #[test]
+    fn test_rtp_track_counters_sequence_gap_detected() {
+        let counters = RtpTrackCounters::new();
+        counters.on_packet_sent(100, 1000, 45000);
+        let obs = counters.on_packet_sent(150, 1005, 48000);
+
+        assert_eq!(obs.seq_delta, Some(5));
+        assert!(obs.seq_gap);
+        assert!(!obs.seq_regressed);
+    }
+
+    #[test]
+    fn test_rtp_track_counters_sequence_wraparound() {
+        let counters = RtpTrackCounters::new();
+        counters.on_packet_sent(100, 65535, 45000);
+        let obs = counters.on_packet_sent(150, 0, 48000);
+
+        assert_eq!(obs.prev_seq, Some(65535));
+        assert_eq!(obs.seq_delta, Some(1));
+        assert!(!obs.seq_gap);
+        assert!(!obs.seq_regressed);
+    }
+
+    #[test]
+    fn test_rtp_track_counters_sequence_regression_detected() {
+        let counters = RtpTrackCounters::new();
+        counters.on_packet_sent(100, 1005, 45000);
+        let obs = counters.on_packet_sent(150, 1000, 48000);
+
+        assert!(obs.seq_delta.unwrap() >= 0x8000);
+        assert!(obs.seq_regressed);
+        assert!(!obs.seq_gap);
+    }
+
+    #[test]
+    fn test_rtp_track_counters_timestamp_regression_detected() {
+        let counters = RtpTrackCounters::new();
+        // Use values where current < previous with small gap -> wrapping delta > threshold
+        counters.on_packet_sent(100, 1000, 0x1000);
+        let obs = counters.on_packet_sent(150, 1001, 0x0500);
+
+        let delta = obs.timestamp_delta.unwrap();
+        // 0x0500 - 0x1000 wraps to 0xFFFFF500, which exceeds the threshold
+        assert!(delta > RTP_TIMESTAMP_WRAP_THRESHOLD);
+        assert!(obs.timestamp_regressed);
+    }
+
+    #[test]
+    fn test_rtp_track_counters_snapshot_initial() {
+        let counters = RtpTrackCounters::new();
+        let (packets, bytes, duration) = counters.snapshot();
+
+        assert_eq!(packets, 0);
+        assert_eq!(bytes, 0);
+        assert!(duration.is_none());
+    }
+
+    #[test]
+    fn test_rtp_track_counters_snapshot_after_sends() {
+        let counters = RtpTrackCounters::new();
+        counters.on_packet_sent(100, 1000, 45000);
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        counters.on_packet_sent(150, 1001, 48000);
+
+        let (packets, bytes, duration) = counters.snapshot();
+        assert_eq!(packets, 2);
+        assert_eq!(bytes, 250);
+        assert!(duration.is_some());
+        assert!(duration.unwrap() >= 10);
+    }
+
+    // ========================================================================
+    // RtpTimestampNormalizer Tests
+    // ========================================================================
+
+    #[test]
+    fn test_rtp_timestamp_normalizer_audio_passthrough() {
+        let mut normalizer = RtpTimestampNormalizer::default();
+
+        let first = normalizer.normalize(1000, 48_000, TrackType::Audio);
+        assert_eq!(first.output_timestamp, 1000);
+        assert_eq!(first.scaled_timestamp, 1000);
+        assert!(!first.non_wrap_regressed);
+    }
+
+    #[test]
+    fn test_rtp_timestamp_normalizer_regression_correction() {
+        let mut normalizer = RtpTimestampNormalizer::default();
+
+        normalizer.normalize(0, 90_000, TrackType::Video);
+        let second = normalizer.normalize(33, 90_000, TrackType::Video);
+
+        // Third frame has lower timestamp -> regression
+        let third = normalizer.normalize(20, 90_000, TrackType::Video);
+        assert!(third.output_timestamp > second.output_timestamp);
+        assert!(third.non_wrap_regressed);
+        assert_eq!(third.non_wrap_regression_count, 1);
+    }
+
+    #[test]
+    fn test_rtp_timestamp_normalizer_equal_timestamp_correction() {
+        let mut normalizer = RtpTimestampNormalizer::default();
+
+        let first = normalizer.normalize(1000, 48_000, TrackType::Audio);
+        let second = normalizer.normalize(1000, 48_000, TrackType::Audio);
+
+        assert!(second.output_timestamp > first.output_timestamp);
+        assert!(second.non_wrap_regressed);
+    }
+
+    #[test]
+    fn test_rtp_timestamp_normalizer_true_wrap_not_corrected() {
+        let mut normalizer = RtpTimestampNormalizer::default();
+
+        normalizer.normalize(0xFFFF_0000, 90_000, TrackType::Video);
+        let second = normalizer.normalize(0x0000_1000, 90_000, TrackType::Video);
+
+        // True wrap (large gap > threshold) should NOT be flagged as regression
+        assert!(!second.non_wrap_regressed);
+    }
+
+    #[test]
+    fn test_rtp_timestamp_normalizer_multiple_regressions() {
+        let mut normalizer = RtpTimestampNormalizer::default();
+
+        normalizer.normalize(1000, 48_000, TrackType::Audio);
+        let reg1 = normalizer.normalize(999, 48_000, TrackType::Audio);
+        let reg2 = normalizer.normalize(998, 48_000, TrackType::Audio);
+
+        assert_eq!(reg1.non_wrap_regression_count, 1);
+        assert_eq!(reg2.non_wrap_regression_count, 2);
+    }
+
+    // ========================================================================
+    // has_annexb_start_code Tests
+    // ========================================================================
+
+    #[test]
+    fn test_has_annexb_start_code_3byte() {
+        assert!(has_annexb_start_code(&[0x00, 0x00, 0x01]));
+        assert!(has_annexb_start_code(&[0x00, 0x00, 0x01, 0x67]));
+    }
+
+    #[test]
+    fn test_has_annexb_start_code_4byte() {
+        assert!(has_annexb_start_code(&[0x00, 0x00, 0x00, 0x01]));
+        assert!(has_annexb_start_code(&[0x00, 0x00, 0x00, 0x01, 0x68]));
+    }
+
+    #[test]
+    fn test_has_annexb_start_code_false() {
+        assert!(!has_annexb_start_code(&[0x00, 0x00, 0x02]));
+        assert!(!has_annexb_start_code(&[0x67, 0x00, 0x01]));
+        assert!(!has_annexb_start_code(&[0x00, 0x01, 0x00]));
+        assert!(!has_annexb_start_code(&[]));
+        assert!(!has_annexb_start_code(&[0x00]));
+    }
+
+    // ========================================================================
+    // Helper Function Tests
+    // ========================================================================
+
+    #[test]
+    fn test_set_rtp_sample_interval() {
+        set_rtp_sample_interval(2000);
+        assert_eq!(rtp_sample_interval(), 2000);
+
+        set_rtp_sample_interval(1024);
+        assert_eq!(rtp_sample_interval(), 1024);
+
+        // Reset
+        set_rtp_sample_interval(0);
+    }
+
+    #[test]
+    fn test_now_millis_positive() {
+        let now = now_millis();
+        assert!(now > 0);
+    }
+
+    // ========================================================================
+    // validate_rtsp_request_headers Tests
+    // ========================================================================
+
+    #[test]
+    fn test_validate_rtsp_request_headers_valid_request() {
+        let request = create_test_request("OPTIONS", Some("1"));
+        let addr: SocketAddr = "127.0.0.1:5000".parse().unwrap();
+        let result = RtspServerSession::validate_rtsp_request_headers(&request, &addr);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_validate_rtsp_request_headers_wrong_version_returns_505() {
+        let mut request = create_test_request("DESCRIBE", Some("2"));
+        request.version = "RTSP/2.0".to_string();
+        let addr: SocketAddr = "127.0.0.1:5000".parse().unwrap();
+        let result = RtspServerSession::validate_rtsp_request_headers(&request, &addr);
+        assert!(result.is_some());
+        let response = result.unwrap();
+        assert_eq!(response.status_code, StatusCode::HTTP_VERSION_NOT_SUPPORTED.as_u16());
+    }
+
+    #[test]
+    fn test_validate_rtsp_request_headers_empty_version_returns_505() {
+        let mut request = create_test_request("OPTIONS", Some("1"));
+        request.version = String::new();
+        let addr: SocketAddr = "192.168.1.1:8554".parse().unwrap();
+        let result = RtspServerSession::validate_rtsp_request_headers(&request, &addr);
+        assert!(result.is_some());
+        assert_eq!(
+            result.unwrap().status_code,
+            StatusCode::HTTP_VERSION_NOT_SUPPORTED.as_u16()
+        );
+    }
+
+    #[test]
+    fn test_validate_rtsp_request_headers_content_length_matches_body() {
+        let mut request = create_test_request("ANNOUNCE", Some("3"));
+        request.body = Some("hello".to_string());
+        request
+            .headers
+            .insert("Content-Length".to_string(), "5".to_string());
+        let addr: SocketAddr = "127.0.0.1:5000".parse().unwrap();
+        let result = RtspServerSession::validate_rtsp_request_headers(&request, &addr);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_validate_rtsp_request_headers_content_length_mismatch_returns_400() {
+        let mut request = create_test_request("ANNOUNCE", Some("4"));
+        request.body = Some("hello".to_string());
+        request
+            .headers
+            .insert("Content-Length".to_string(), "100".to_string());
+        let addr: SocketAddr = "10.0.0.1:554".parse().unwrap();
+        let result = RtspServerSession::validate_rtsp_request_headers(&request, &addr);
+        assert!(result.is_some());
+        assert_eq!(result.unwrap().status_code, StatusCode::BAD_REQUEST.as_u16());
+    }
+
+    #[test]
+    fn test_validate_rtsp_request_headers_content_length_zero_no_body() {
+        let mut request = create_test_request("SETUP", Some("5"));
+        request
+            .headers
+            .insert("Content-Length".to_string(), "0".to_string());
+        let addr: SocketAddr = "127.0.0.1:5000".parse().unwrap();
+        let result = RtspServerSession::validate_rtsp_request_headers(&request, &addr);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_validate_rtsp_request_headers_no_content_length_is_valid() {
+        let request = create_test_request("PLAY", Some("6"));
+        let addr: SocketAddr = "127.0.0.1:5000".parse().unwrap();
+        let result = RtspServerSession::validate_rtsp_request_headers(&request, &addr);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_validate_rtsp_request_headers_non_numeric_content_length_with_empty_body() {
+        let mut request = create_test_request("ANNOUNCE", Some("7"));
+        request
+            .headers
+            .insert("Content-Length".to_string(), "abc".to_string());
+        // Non-numeric parses to 0, no body means actual=0, so 0==0 → valid
+        let addr: SocketAddr = "127.0.0.1:5000".parse().unwrap();
+        let result = RtspServerSession::validate_rtsp_request_headers(&request, &addr);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_validate_rtsp_request_headers_non_numeric_content_length_with_body_returns_400() {
+        let mut request = create_test_request("ANNOUNCE", Some("8"));
+        request.body = Some("data".to_string());
+        request
+            .headers
+            .insert("Content-Length".to_string(), "abc".to_string());
+        // Non-numeric parses to 0, body has 4 bytes → 0!=4 → bad request
+        let addr: SocketAddr = "127.0.0.1:5000".parse().unwrap();
+        let result = RtspServerSession::validate_rtsp_request_headers(&request, &addr);
+        assert!(result.is_some());
+        assert_eq!(result.unwrap().status_code, StatusCode::BAD_REQUEST.as_u16());
+    }
+
+    #[test]
+    fn test_validate_rtsp_request_headers_content_length_with_whitespace() {
+        let mut request = create_test_request("ANNOUNCE", Some("9"));
+        request.body = Some("ab".to_string());
+        request
+            .headers
+            .insert("Content-Length".to_string(), " 2 ".to_string());
+        let addr: SocketAddr = "127.0.0.1:5000".parse().unwrap();
+        let result = RtspServerSession::validate_rtsp_request_headers(&request, &addr);
+        assert!(result.is_none());
+    }
+
+    // ========================================================================
+    // VideoAccessUnitAssembler Additional Edge Case Tests
+    // ========================================================================
+
+    #[test]
+    fn test_video_access_unit_assembler_single_chunk_flush() {
+        let mut assembler = VideoAccessUnitAssembler::default();
+        // Push one chunk, then flush it
+        assert!(assembler.push(42, BytesMut::from(&b"\x65\xAA\xBB"[..])).is_none());
+        let (ts, bytes) = assembler.flush().expect("expected pending data");
+        assert_eq!(ts, 42);
+        // Should have Annex-B prefix prepended (raw NAL, no start code)
+        assert!(bytes.starts_with(&ANNEXB_NALU_START_CODE[..]));
+    }
+
+    #[test]
+    fn test_video_access_unit_assembler_preserves_existing_annexb_prefix() {
+        let mut assembler = VideoAccessUnitAssembler::default();
+        let chunk_with_start_code = BytesMut::from(&b"\x00\x00\x00\x01\x67\x11"[..]);
+        assembler.push(10, chunk_with_start_code.clone());
+        let (ts, bytes) = assembler.flush().unwrap();
+        assert_eq!(ts, 10);
+        // Should NOT double-prepend start code
+        assert_eq!(bytes, chunk_with_start_code);
+    }
+
+    #[test]
+    fn test_video_access_unit_assembler_three_byte_start_code_preserved() {
+        let mut assembler = VideoAccessUnitAssembler::default();
+        let chunk = BytesMut::from(&b"\x00\x00\x01\x68\x22"[..]);
+        assembler.push(20, chunk.clone());
+        let (_, bytes) = assembler.flush().unwrap();
+        // 3-byte start code is also recognized
+        assert_eq!(bytes, chunk);
+    }
+
+    #[test]
+    fn test_video_access_unit_assembler_multiple_timestamp_transitions() {
+        let mut assembler = VideoAccessUnitAssembler::default();
+
+        // ts=100, two chunks
+        assert!(assembler.push(100, BytesMut::from(&b"\x67\x01"[..])).is_none());
+        assert!(assembler.push(100, BytesMut::from(&b"\x68\x02"[..])).is_none());
+
+        // ts=200 flushes ts=100 AU
+        let flushed = assembler.push(200, BytesMut::from(&b"\x65\x03"[..]));
+        assert!(flushed.is_some());
+        let (ts, _) = flushed.unwrap();
+        assert_eq!(ts, 100);
+
+        // ts=300 flushes ts=200 AU
+        let flushed2 = assembler.push(300, BytesMut::from(&b"\x65\x04"[..]));
+        assert!(flushed2.is_some());
+        let (ts2, _) = flushed2.unwrap();
+        assert_eq!(ts2, 200);
+
+        // Final flush for ts=300
+        let (ts3, _) = assembler.flush().unwrap();
+        assert_eq!(ts3, 300);
+    }
+
+    #[test]
+    fn test_video_access_unit_assembler_empty_chunk_ignored() {
+        let mut assembler = VideoAccessUnitAssembler::default();
+        assert!(assembler.push(50, BytesMut::new()).is_none());
+        // No pending data
+        assert!(assembler.flush().is_none());
+    }
+
+    #[test]
+    fn test_video_access_unit_assembler_empty_after_data_then_empty() {
+        let mut assembler = VideoAccessUnitAssembler::default();
+        assembler.push(10, BytesMut::from(&b"\x65\x01"[..]));
+        // Empty chunk is ignored, does not change pending timestamp
+        assert!(assembler.push(10, BytesMut::new()).is_none());
+        let (ts, _) = assembler.flush().unwrap();
+        assert_eq!(ts, 10);
+    }
+
+    // ========================================================================
+    // scale_rtp_timestamp Additional Edge Case Tests
+    // ========================================================================
+
+    #[test]
+    fn test_scale_rtp_timestamp_48000hz_audio() {
+        // 48000Hz audio: timestamp is already in sample units, but let's test the math
+        // 1000ms * 48000 / 1000 = 48000
+        let result = RtspServerSession::scale_rtp_timestamp(1000, 48000);
+        assert_eq!(result, 48000);
+    }
+
+    #[test]
+    fn test_scale_rtp_timestamp_large_timestamp_saturates() {
+        // Very large timestamp_ms near u32::MAX — verify no panic from overflow
+        let result = RtspServerSession::scale_rtp_timestamp(u32::MAX, 90000);
+        // (u32::MAX as u64) * 90000 / 1000 → wraps into u32
+        let expected = ((u32::MAX as u64).saturating_mul(90000) / 1000) as u32;
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn test_scale_rtp_timestamp_one_ms() {
+        // 1ms at 90kHz = 90 ticks
+        assert_eq!(RtspServerSession::scale_rtp_timestamp(1, 90000), 90);
+    }
 }

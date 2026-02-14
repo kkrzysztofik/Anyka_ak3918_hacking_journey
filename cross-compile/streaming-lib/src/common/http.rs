@@ -886,4 +886,514 @@ mod tests {
         let parsed = HttpRequest::unmarshal(request).expect("should parse request");
         assert_eq!(parsed.get_header("cseq").map(String::as_str), Some("1"));
     }
+
+    // ========== Schema Display Tests ==========
+
+    #[test]
+    fn test_schema_display_rtsp() {
+        assert_eq!(format!("{}", Schema::RTSP), "rtsp");
+    }
+
+    #[test]
+    fn test_schema_display_webrtc() {
+        assert_eq!(format!("{}", Schema::WEBRTC), "");
+    }
+
+    #[test]
+    fn test_schema_display_unknown() {
+        assert_eq!(format!("{}", Schema::UNKNOWN), "unknown");
+    }
+
+    // ========== Uri Helper Method Tests ==========
+
+    #[test]
+    fn test_uri_detect_schema_rtsp() {
+        let schema = super::Uri::detect_schema("rtsp://localhost/test");
+        assert!(matches!(schema, Schema::RTSP));
+    }
+
+    #[test]
+    fn test_uri_detect_schema_whip() {
+        let schema = super::Uri::detect_schema("/whip/endpoint");
+        assert!(matches!(schema, Schema::WEBRTC));
+    }
+
+    #[test]
+    fn test_uri_detect_schema_whep() {
+        let schema = super::Uri::detect_schema("/whep?stream=test");
+        assert!(matches!(schema, Schema::WEBRTC));
+    }
+
+    #[test]
+    fn test_uri_detect_schema_unknown() {
+        let schema = super::Uri::detect_schema("http://example.com");
+        assert!(matches!(schema, Schema::UNKNOWN));
+    }
+
+    #[test]
+    fn test_uri_extract_host_port_with_port() {
+        let (host, port) = super::Uri::extract_host_port("192.168.1.1:554");
+        assert_eq!(host, "192.168.1.1");
+        assert_eq!(port, Some(554));
+    }
+
+    #[test]
+    fn test_uri_extract_host_port_without_port() {
+        let (host, port) = super::Uri::extract_host_port("192.168.1.1");
+        assert_eq!(host, "192.168.1.1");
+        assert_eq!(port, None);
+    }
+
+    #[test]
+    fn test_uri_parse_path_and_query_with_query() {
+        let mut uri = super::Uri::default();
+        uri.parse_path_and_query("live/stream?token=abc&id=1");
+        assert_eq!(uri.path, "live/stream");
+        assert_eq!(uri.query, Some("token=abc&id=1".to_string()));
+    }
+
+    #[test]
+    fn test_uri_parse_path_and_query_without_query() {
+        let mut uri = super::Uri::default();
+        uri.parse_path_and_query("live/stream");
+        assert_eq!(uri.path, "live/stream");
+        assert!(uri.query.is_none());
+    }
+
+    #[test]
+    fn test_uri_unmarshal_rtsp_with_port_and_path() {
+        let uri = super::Uri::unmarshal("rtsp://10.0.0.1:8554/live/stream1").unwrap();
+        assert!(matches!(uri.schema, Schema::RTSP));
+        assert_eq!(uri.host, "10.0.0.1");
+        assert_eq!(uri.port, Some(8554));
+        assert_eq!(uri.path, "live/stream1");
+    }
+
+    #[test]
+    fn test_uri_unmarshal_rtsp_without_port() {
+        let uri = super::Uri::unmarshal("rtsp://myhost/stream").unwrap();
+        assert!(matches!(uri.schema, Schema::RTSP));
+        assert_eq!(uri.host, "myhost");
+        assert_eq!(uri.port, None);
+        assert_eq!(uri.path, "stream");
+    }
+
+    #[test]
+    fn test_uri_unmarshal_webrtc() {
+        let uri = super::Uri::unmarshal("/whip/endpoint?app=live").unwrap();
+        assert!(matches!(uri.schema, Schema::WEBRTC));
+        assert_eq!(uri.path, "/whip/endpoint");
+        assert_eq!(uri.query, Some("app=live".to_string()));
+    }
+
+    #[test]
+    fn test_uri_unmarshal_unknown() {
+        let uri = super::Uri::unmarshal("some/random/path").unwrap();
+        assert!(matches!(uri.schema, Schema::UNKNOWN));
+    }
+
+    // ========== Uri Marshal Tests ==========
+
+    #[test]
+    fn test_uri_marshal_rtsp_with_port() {
+        let uri = super::Uri {
+            schema: Schema::RTSP,
+            host: "192.168.1.1".to_string(),
+            port: Some(554),
+            path: "live/stream".to_string(),
+            query: None,
+        };
+        assert_eq!(uri.marshal(), "rtsp://192.168.1.1:554/live/stream");
+    }
+
+    #[test]
+    fn test_uri_marshal_rtsp_without_port() {
+        let uri = super::Uri {
+            schema: Schema::RTSP,
+            host: "example.com".to_string(),
+            port: None,
+            path: "test".to_string(),
+            query: None,
+        };
+        assert_eq!(uri.marshal(), "rtsp://example.com/test");
+    }
+
+    #[test]
+    fn test_uri_marshal_rtsp_with_query() {
+        let uri = super::Uri {
+            schema: Schema::RTSP,
+            host: "host".to_string(),
+            port: Some(554),
+            path: "path".to_string(),
+            query: Some("key=val".to_string()),
+        };
+        assert_eq!(uri.marshal(), "rtsp://host:554/path?key=val");
+    }
+
+    #[test]
+    fn test_uri_marshal_webrtc() {
+        let uri = super::Uri {
+            schema: Schema::WEBRTC,
+            path: "/whip/endpoint".to_string(),
+            ..Default::default()
+        };
+        assert_eq!(uri.marshal(), "/whip/endpoint");
+    }
+
+    #[test]
+    fn test_uri_marshal_unknown() {
+        let uri = super::Uri {
+            schema: Schema::UNKNOWN,
+            path: "some/path".to_string(),
+            ..Default::default()
+        };
+        assert_eq!(uri.marshal(), "some/path");
+    }
+
+    // ========== HttpRequest Helper Method Tests ==========
+
+    #[test]
+    fn test_parse_request_line() {
+        let result = HttpRequest::parse_request_line("OPTIONS rtsp://host RTSP/1.0");
+        assert!(result.is_some());
+        let (method, url, version) = result.unwrap();
+        assert_eq!(method, "OPTIONS");
+        assert_eq!(url, "rtsp://host");
+        assert_eq!(version, "RTSP/1.0");
+    }
+
+    #[test]
+    fn test_parse_request_line_incomplete() {
+        assert!(HttpRequest::parse_request_line("ONLY_METHOD").is_none());
+        assert!(HttpRequest::parse_request_line("").is_none());
+    }
+
+    #[test]
+    fn test_parse_query_pairs() {
+        let pairs = HttpRequest::parse_query_pairs("app=live&stream=test&token=abc");
+        assert_eq!(pairs.get("app").map(String::as_str), Some("live"));
+        assert_eq!(pairs.get("stream").map(String::as_str), Some("test"));
+        assert_eq!(pairs.get("token").map(String::as_str), Some("abc"));
+    }
+
+    #[test]
+    fn test_parse_query_pairs_empty() {
+        let pairs = HttpRequest::parse_query_pairs("");
+        assert!(pairs.is_empty());
+    }
+
+    // ========== HttpRequest get_header Tests ==========
+
+    #[test]
+    fn test_http_request_get_header_exact_match() {
+        let request = HttpRequest::unmarshal(
+            "OPTIONS rtsp://host RTSP/1.0\r\nCSeq: 5\r\nUser-Agent: test\r\n\r\n",
+        )
+        .unwrap();
+        assert_eq!(request.get_header("CSeq").map(String::as_str), Some("5"));
+    }
+
+    #[test]
+    fn test_http_request_get_header_case_insensitive() {
+        let request =
+            HttpRequest::unmarshal("OPTIONS rtsp://host RTSP/1.0\r\nCSeq: 5\r\n\r\n").unwrap();
+        assert_eq!(request.get_header("cseq").map(String::as_str), Some("5"));
+    }
+
+    #[test]
+    fn test_http_request_get_header_missing() {
+        let request =
+            HttpRequest::unmarshal("OPTIONS rtsp://host RTSP/1.0\r\nCSeq: 1\r\n\r\n").unwrap();
+        assert!(request.get_header("Authorization").is_none());
+    }
+
+    // ========== HttpResponse get_header Tests ==========
+
+    #[test]
+    fn test_http_response_get_header_exact_match() {
+        let response =
+            HttpResponse::unmarshal("RTSP/1.0 200 OK\r\nSession: abc123\r\n\r\n").unwrap();
+        assert_eq!(
+            response.get_header("Session").map(String::as_str),
+            Some("abc123")
+        );
+    }
+
+    #[test]
+    fn test_http_response_get_header_case_insensitive() {
+        let response =
+            HttpResponse::unmarshal("RTSP/1.0 200 OK\r\nSession: abc123\r\n\r\n").unwrap();
+        assert_eq!(
+            response.get_header("session").map(String::as_str),
+            Some("abc123")
+        );
+    }
+
+    #[test]
+    fn test_http_response_get_header_missing() {
+        let response = HttpResponse::unmarshal("RTSP/1.0 200 OK\r\nCSeq: 1\r\n\r\n").unwrap();
+        assert!(response.get_header("Session").is_none());
+    }
+
+    // ========== parse_content_length Tests ==========
+
+    #[test]
+    fn test_parse_content_length_present() {
+        assert_eq!(
+            super::parse_content_length("RTSP/1.0 200 OK\r\nContent-Length: 42\r\n\r\n"),
+            Some(42)
+        );
+    }
+
+    #[test]
+    fn test_parse_content_length_case_insensitive() {
+        assert_eq!(
+            super::parse_content_length("RTSP/1.0 200 OK\r\ncontent-length: 100\r\n\r\n"),
+            Some(100)
+        );
+    }
+
+    #[test]
+    fn test_parse_content_length_missing() {
+        assert_eq!(
+            super::parse_content_length("RTSP/1.0 200 OK\r\nCSeq: 1\r\n\r\n"),
+            None
+        );
+    }
+
+    #[test]
+    fn test_parse_content_length_invalid_value() {
+        assert_eq!(
+            super::parse_content_length("RTSP/1.0 200 OK\r\nContent-Length: abc\r\n\r\n"),
+            None
+        );
+    }
+
+    // ========== try_get_complete_message_len Tests ==========
+
+    #[test]
+    fn test_try_get_complete_message_len_complete_no_body() {
+        let data = b"RTSP/1.0 200 OK\r\nCSeq: 1\r\n\r\n";
+        let result = super::try_get_complete_message_len(data);
+        assert_eq!(result.unwrap(), Some(data.len()));
+    }
+
+    #[test]
+    fn test_try_get_complete_message_len_incomplete_header() {
+        let data = b"RTSP/1.0 200 OK\r\nCSeq: 1\r\n";
+        let result = super::try_get_complete_message_len(data);
+        assert_eq!(result.unwrap(), None);
+    }
+
+    #[test]
+    fn test_try_get_complete_message_len_with_body_complete() {
+        let body = "hello";
+        let data = format!(
+            "RTSP/1.0 200 OK\r\nContent-Length: {}\r\n\r\n{}",
+            body.len(),
+            body
+        );
+        let result = super::try_get_complete_message_len(data.as_bytes());
+        assert_eq!(result.unwrap(), Some(data.len()));
+    }
+
+    #[test]
+    fn test_try_get_complete_message_len_with_body_incomplete() {
+        let data = b"RTSP/1.0 200 OK\r\nContent-Length: 100\r\n\r\npartial";
+        let result = super::try_get_complete_message_len(data);
+        assert_eq!(result.unwrap(), None);
+    }
+
+    #[test]
+    fn test_try_get_complete_message_len_invalid_content_length() {
+        let data = b"RTSP/1.0 200 OK\r\nContent-Length: abc\r\n\r\n";
+        let result = super::try_get_complete_message_len(data);
+        assert!(result.is_err());
+    }
+
+    // ========== HttpRequest Marshal Tests ==========
+
+    #[test]
+    fn test_http_request_marshal_with_body() {
+        let mut headers = HttpIndexMap::default();
+        headers.insert("CSeq".to_string(), "1".to_string());
+        let request = HttpRequest {
+            method: "ANNOUNCE".to_string(),
+            uri: super::Uri::unmarshal("rtsp://host/stream").unwrap(),
+            version: "RTSP/1.0".to_string(),
+            headers,
+            body: Some("v=0\r\n".to_string()),
+            ..Default::default()
+        };
+        let marshaled = request.marshal();
+        assert!(marshaled.contains("ANNOUNCE"));
+        assert!(marshaled.contains("Content-Length: 5"));
+        assert!(marshaled.contains("v=0\r\n"));
+    }
+
+    #[test]
+    fn test_http_request_marshal_no_body() {
+        let mut headers = HttpIndexMap::default();
+        headers.insert("CSeq".to_string(), "1".to_string());
+        let request = HttpRequest {
+            method: "OPTIONS".to_string(),
+            uri: super::Uri::unmarshal("rtsp://host/stream").unwrap(),
+            version: "RTSP/1.0".to_string(),
+            headers,
+            body: None,
+            ..Default::default()
+        };
+        let marshaled = request.marshal();
+        assert!(marshaled.contains("OPTIONS"));
+        assert!(!marshaled.contains("Content-Length"));
+        assert!(marshaled.ends_with("\r\n\r\n"));
+    }
+
+    #[test]
+    fn test_http_request_marshal_with_explicit_content_length_header() {
+        let mut headers = HttpIndexMap::default();
+        headers.insert("Content-Length".to_string(), "999".to_string());
+        let request = HttpRequest {
+            method: "ANNOUNCE".to_string(),
+            uri: super::Uri::unmarshal("rtsp://host/stream").unwrap(),
+            version: "RTSP/1.0".to_string(),
+            headers,
+            body: Some("body".to_string()),
+            ..Default::default()
+        };
+        let marshaled = request.marshal();
+        // Should use actual body length, not the header value
+        assert!(marshaled.contains("Content-Length: 4"));
+    }
+
+    // ========== HttpResponse Marshal Tests ==========
+
+    #[test]
+    fn test_http_response_marshal_with_body() {
+        let response = HttpResponse {
+            version: "RTSP/1.0".to_string(),
+            status_code: 200,
+            reason_phrase: "OK".to_string(),
+            headers: HttpIndexMap::default(),
+            body: Some("sdp content".to_string()),
+        };
+        let marshaled = response.marshal();
+        assert!(marshaled.contains("RTSP/1.0 200 OK"));
+        assert!(marshaled.contains("Content-Length: 11"));
+        assert!(marshaled.contains("sdp content"));
+    }
+
+    #[test]
+    fn test_http_response_marshal_no_body() {
+        let response = HttpResponse {
+            version: "RTSP/1.0".to_string(),
+            status_code: 200,
+            reason_phrase: "OK".to_string(),
+            headers: HttpIndexMap::default(),
+            body: None,
+        };
+        let marshaled = response.marshal();
+        assert!(marshaled.contains("RTSP/1.0 200 OK"));
+        assert!(!marshaled.contains("Content-Length"));
+    }
+
+    #[test]
+    fn test_http_response_marshal_with_content_length_header_no_body() {
+        let mut headers = HttpIndexMap::default();
+        headers.insert("Content-Length".to_string(), "0".to_string());
+        let response = HttpResponse {
+            version: "RTSP/1.0".to_string(),
+            status_code: 200,
+            reason_phrase: "OK".to_string(),
+            headers,
+            body: None,
+        };
+        let marshaled = response.marshal();
+        assert!(marshaled.contains("Content-Length: 0"));
+    }
+
+    // ========== HttpRequest Unmarshal Edge Cases ==========
+
+    #[test]
+    fn test_http_request_unmarshal_no_terminator() {
+        assert!(HttpRequest::unmarshal("OPTIONS rtsp://host RTSP/1.0\r\n").is_none());
+    }
+
+    #[test]
+    fn test_http_request_unmarshal_empty() {
+        assert!(HttpRequest::unmarshal("").is_none());
+    }
+
+    #[test]
+    fn test_http_request_unmarshal_with_host_header() {
+        let request = HttpRequest::unmarshal(
+            "OPTIONS rtsp://original.host:554/test RTSP/1.0\r\nHost: override.host:8554\r\n\r\n",
+        )
+        .unwrap();
+        // Host header overrides the URI host
+        assert_eq!(request.uri.host, "override.host");
+        assert_eq!(request.uri.port, Some(8554));
+    }
+
+    // ========== HttpResponse Unmarshal Edge Cases ==========
+
+    #[test]
+    fn test_http_response_unmarshal_no_reason_phrase() {
+        let response = HttpResponse::unmarshal("RTSP/1.0 200\r\n\r\n").unwrap();
+        assert_eq!(response.status_code, 200);
+        assert_eq!(response.reason_phrase, "");
+    }
+
+    #[test]
+    fn test_http_response_unmarshal_with_body() {
+        let response =
+            HttpResponse::unmarshal("RTSP/1.0 200 OK\r\nCSeq: 1\r\n\r\nsome body content").unwrap();
+        assert_eq!(response.body, Some("some body content".to_string()));
+    }
+
+    #[test]
+    fn test_http_response_unmarshal_no_body() {
+        let response = HttpResponse::unmarshal("RTSP/1.0 200 OK\r\nCSeq: 1\r\n\r\n").unwrap();
+        assert!(response.body.is_none());
+    }
+
+    // ========== find_header_terminator Tests ==========
+
+    #[test]
+    fn test_find_header_terminator_present() {
+        let data = b"Header: val\r\n\r\nbody";
+        assert_eq!(super::find_header_terminator(data), Some(11));
+    }
+
+    #[test]
+    fn test_find_header_terminator_absent() {
+        let data = b"Header: val\r\nno terminator";
+        assert!(super::find_header_terminator(data).is_none());
+    }
+
+    // ========== parse_content_length_from_header_block Tests ==========
+
+    #[test]
+    fn test_parse_content_length_from_header_block_valid() {
+        let block = "RTSP/1.0 200 OK\r\nContent-Length: 42\r\n\r\n";
+        assert_eq!(
+            super::parse_content_length_from_header_block(block).unwrap(),
+            42
+        );
+    }
+
+    #[test]
+    fn test_parse_content_length_from_header_block_missing() {
+        let block = "RTSP/1.0 200 OK\r\nCSeq: 1\r\n\r\n";
+        assert_eq!(
+            super::parse_content_length_from_header_block(block).unwrap(),
+            0
+        );
+    }
+
+    #[test]
+    fn test_parse_content_length_from_header_block_invalid() {
+        let block = "RTSP/1.0 200 OK\r\nContent-Length: abc\r\n\r\n";
+        assert!(super::parse_content_length_from_header_block(block).is_err());
+    }
 }

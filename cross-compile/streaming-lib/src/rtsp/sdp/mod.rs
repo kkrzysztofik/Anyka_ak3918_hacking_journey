@@ -346,10 +346,12 @@ impl Marshal for Sdp {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
 
     use crate::rtsp::global_trait::{Marshal, Unmarshal};
 
     use super::Sdp;
+    use super::rtpmap;
 
     #[test]
     fn test_parse_sdp() {
@@ -432,5 +434,618 @@ mod tests {
         //    .join(" ");
 
         //println!("=={fmts_str}==");
+    }
+
+    // ========== Bandwidth Tests ==========
+
+    #[test]
+    fn test_bandwidth_unmarshal() {
+        use super::Bandwidth;
+        let bw = Bandwidth::unmarshal("AS:284").unwrap();
+        assert_eq!(bw.b_type, "AS");
+        assert_eq!(bw.bandwidth, 284);
+    }
+
+    #[test]
+    fn test_bandwidth_unmarshal_rr() {
+        use super::Bandwidth;
+        let bw = Bandwidth::unmarshal("RR:0").unwrap();
+        assert_eq!(bw.b_type, "RR");
+        assert_eq!(bw.bandwidth, 0);
+    }
+
+    #[test]
+    fn test_bandwidth_marshal() {
+        use super::Bandwidth;
+        let bw = Bandwidth {
+            b_type: "AS".to_string(),
+            bandwidth: 128,
+        };
+        assert_eq!(bw.marshal(), "AS:128\r\n");
+    }
+
+    #[test]
+    fn test_bandwidth_unmarshal_invalid_number() {
+        use super::Bandwidth;
+        let bw = Bandwidth::unmarshal("AS:abc").unwrap();
+        assert_eq!(bw.b_type, "AS");
+        assert_eq!(bw.bandwidth, 0); // default when parse fails
+    }
+
+    #[test]
+    fn test_bandwidth_unmarshal_no_colon() {
+        use super::Bandwidth;
+        let bw = Bandwidth::unmarshal("AS").unwrap();
+        assert_eq!(bw.b_type, "AS");
+        assert_eq!(bw.bandwidth, 0);
+    }
+
+    // ========== SdpMediaInfo Unmarshal Tests ==========
+
+    #[test]
+    fn test_sdp_media_info_unmarshal_video() {
+        use super::SdpMediaInfo;
+        let mi = SdpMediaInfo::unmarshal("video 0 RTP/AVP 96").unwrap();
+        assert_eq!(mi.media_type, "video");
+        assert_eq!(mi.port, 0);
+        assert_eq!(mi.protocol, "RTP/AVP");
+        assert_eq!(mi.fmts, vec![96]);
+    }
+
+    #[test]
+    fn test_sdp_media_info_unmarshal_audio_multiple_fmts() {
+        use super::SdpMediaInfo;
+        let mi = SdpMediaInfo::unmarshal("audio 11704 RTP/AVP 96 97 98 0 8").unwrap();
+        assert_eq!(mi.media_type, "audio");
+        assert_eq!(mi.port, 11704);
+        assert_eq!(mi.protocol, "RTP/AVP");
+        assert_eq!(mi.fmts, vec![96, 97, 98, 0, 8]);
+    }
+
+    #[test]
+    fn test_sdp_media_info_unmarshal_no_fmts() {
+        use super::SdpMediaInfo;
+        let mi = SdpMediaInfo::unmarshal("video 0 RTP/AVP").unwrap();
+        assert_eq!(mi.media_type, "video");
+        assert_eq!(mi.protocol, "RTP/AVP");
+        assert!(mi.fmts.is_empty());
+    }
+
+    // ========== SdpMediaInfo Marshal Tests ==========
+
+    #[test]
+    fn test_sdp_media_info_marshal_basic() {
+        use super::SdpMediaInfo;
+        use rtpmap::RtpMap;
+
+        let mi = SdpMediaInfo {
+            media_type: "video".to_string(),
+            port: 0,
+            protocol: "RTP/AVP".to_string(),
+            fmts: vec![96],
+            bandwidth: None,
+            rtpmap: RtpMap {
+                payload_type: 96,
+                encoding_name: "H264".to_string(),
+                clock_rate: 90000,
+                encoding_param: String::new(),
+            },
+            fmtp: None,
+            attributes: HashMap::new(),
+        };
+        let marshaled = mi.marshal();
+        assert!(marshaled.contains("m=video 0 RTP/AVP 96"));
+        assert!(marshaled.contains("a=rtpmap:"));
+    }
+
+    #[test]
+    fn test_sdp_media_info_marshal_with_bandwidth() {
+        use super::{Bandwidth, SdpMediaInfo};
+        use rtpmap::RtpMap;
+
+        let mi = SdpMediaInfo {
+            media_type: "video".to_string(),
+            port: 0,
+            protocol: "RTP/AVP".to_string(),
+            fmts: vec![96],
+            bandwidth: Some(Bandwidth {
+                b_type: "AS".to_string(),
+                bandwidth: 284,
+            }),
+            rtpmap: RtpMap::default(),
+            fmtp: None,
+            attributes: HashMap::new(),
+        };
+        let marshaled = mi.marshal();
+        assert!(marshaled.contains("b=AS:284"));
+    }
+
+    #[test]
+    fn test_sdp_media_info_marshal_with_attributes() {
+        use super::SdpMediaInfo;
+        use rtpmap::RtpMap;
+
+        let mut attrs = HashMap::new();
+        attrs.insert("control".to_string(), "streamid=0".to_string());
+        let mi = SdpMediaInfo {
+            media_type: "video".to_string(),
+            port: 0,
+            protocol: "RTP/AVP".to_string(),
+            fmts: vec![96],
+            bandwidth: None,
+            rtpmap: RtpMap::default(),
+            fmtp: None,
+            attributes: attrs,
+        };
+        let marshaled = mi.marshal();
+        assert!(marshaled.contains("a=control:streamid=0\r\n"));
+    }
+
+    #[test]
+    fn test_sdp_media_info_marshal_attribute_no_value() {
+        use super::SdpMediaInfo;
+        use rtpmap::RtpMap;
+
+        let mut attrs = HashMap::new();
+        attrs.insert("recvonly".to_string(), String::new());
+        let mi = SdpMediaInfo {
+            media_type: "audio".to_string(),
+            port: 0,
+            protocol: "RTP/AVP".to_string(),
+            fmts: vec![97],
+            bandwidth: None,
+            rtpmap: RtpMap::default(),
+            fmtp: None,
+            attributes: attrs,
+        };
+        let marshaled = mi.marshal();
+        assert!(marshaled.contains("a=recvonly\r\n"));
+        assert!(!marshaled.contains("a=recvonly:\r\n"));
+    }
+
+    // ========== Sdp Unmarshal Tests ==========
+
+    #[test]
+    fn test_sdp_unmarshal_video_only() {
+        let data = "v=0\r\n\
+            o=- 0 0 IN IP4 127.0.0.1\r\n\
+            s=Test\r\n\
+            c=IN IP4 0.0.0.0\r\n\
+            t=0 0\r\n\
+            m=video 0 RTP/AVP 96\r\n\
+            a=rtpmap:96 H264/90000\r\n\
+            a=control:trackID=0\r\n";
+
+        let sdp = Sdp::unmarshal(data).unwrap();
+        assert_eq!(sdp.version, 0);
+        assert_eq!(sdp.medias.len(), 1);
+        assert_eq!(sdp.medias[0].media_type, "video");
+        assert_eq!(sdp.medias[0].rtpmap.encoding_name, "H264");
+        assert_eq!(sdp.medias[0].rtpmap.clock_rate, 90000);
+    }
+
+    #[test]
+    fn test_sdp_unmarshal_with_bandwidth() {
+        let data = "v=0\r\n\
+            o=- 0 0 IN IP4 0.0.0.0\r\n\
+            s=Test\r\n\
+            t=0 0\r\n\
+            m=video 0 RTP/AVP 96\r\n\
+            b=AS:284\r\n\
+            a=rtpmap:96 H264/90000\r\n";
+
+        let sdp = Sdp::unmarshal(data).unwrap();
+        assert!(sdp.medias[0].bandwidth.is_some());
+        let bw = sdp.medias[0].bandwidth.as_ref().unwrap();
+        assert_eq!(bw.b_type, "AS");
+        assert_eq!(bw.bandwidth, 284);
+    }
+
+    #[test]
+    fn test_sdp_unmarshal_multiple_medias() {
+        let data = "v=0\r\n\
+            o=- 0 0 IN IP4 127.0.0.1\r\n\
+            s=Test\r\n\
+            t=0 0\r\n\
+            m=video 0 RTP/AVP 96\r\n\
+            a=rtpmap:96 H264/90000\r\n\
+            m=audio 0 RTP/AVP 97\r\n\
+            a=rtpmap:97 MPEG4-GENERIC/48000/2\r\n";
+
+        let sdp = Sdp::unmarshal(data).unwrap();
+        assert_eq!(sdp.medias.len(), 2);
+        assert_eq!(sdp.medias[0].media_type, "video");
+        assert_eq!(sdp.medias[1].media_type, "audio");
+        assert_eq!(sdp.medias[1].rtpmap.encoding_name, "MPEG4-GENERIC");
+    }
+
+    #[test]
+    fn test_sdp_unmarshal_session_attributes() {
+        let data = "v=0\r\n\
+            o=- 0 0 IN IP4 0.0.0.0\r\n\
+            s=Test\r\n\
+            t=0 0\r\n\
+            a=tool:libavformat 58.76.100\r\n\
+            a=type:broadcast\r\n";
+
+        let sdp = Sdp::unmarshal(data).unwrap();
+        assert_eq!(
+            sdp.attributes.get("tool"),
+            Some(&"libavformat 58.76.100".to_string())
+        );
+        assert_eq!(sdp.attributes.get("type"), Some(&"broadcast".to_string()));
+    }
+
+    #[test]
+    fn test_sdp_unmarshal_session_attribute_no_value() {
+        let data = "v=0\r\n\
+            o=- 0 0 IN IP4 0.0.0.0\r\n\
+            s=Test\r\n\
+            t=0 0\r\n\
+            a=sendonly\r\n";
+
+        let sdp = Sdp::unmarshal(data).unwrap();
+        assert_eq!(sdp.attributes.get("sendonly"), Some(&"".to_string()));
+    }
+
+    #[test]
+    fn test_sdp_unmarshal_preserves_origin() {
+        let data = "v=0\r\n\
+            o=- 946685052188730 1 IN IP4 0.0.0.0\r\n\
+            s=RTSP/RTP Server\r\n\
+            t=0 0\r\n";
+
+        let sdp = Sdp::unmarshal(data).unwrap();
+        assert!(sdp.origin.contains("946685052188730"));
+    }
+
+    #[test]
+    fn test_sdp_unmarshal_preserves_session() {
+        let data = "v=0\r\n\
+            o=- 0 0 IN IP4 0.0.0.0\r\n\
+            s=My Custom Session\r\n\
+            t=0 0\r\n";
+
+        let sdp = Sdp::unmarshal(data).unwrap();
+        assert_eq!(sdp.session, "My Custom Session");
+    }
+
+    #[test]
+    fn test_sdp_unmarshal_preserves_connection() {
+        let data = "v=0\r\n\
+            o=- 0 0 IN IP4 0.0.0.0\r\n\
+            s=Test\r\n\
+            c=IN IP4 192.168.1.100\r\n\
+            t=0 0\r\n";
+
+        let sdp = Sdp::unmarshal(data).unwrap();
+        assert_eq!(sdp.connection, "IN IP4 192.168.1.100");
+    }
+
+    #[test]
+    fn test_sdp_unmarshal_preserves_raw_string() {
+        let data = "v=0\r\ns=Test\r\n";
+        let sdp = Sdp::unmarshal(data).unwrap();
+        assert_eq!(sdp.raw_string, data);
+    }
+
+    // ========== Sdp Marshal Tests ==========
+
+    #[test]
+    fn test_sdp_marshal_basic() {
+        let data = "v=0\r\n\
+            o=- 0 0 IN IP4 127.0.0.1\r\n\
+            s=Test\r\n\
+            c=IN IP4 0.0.0.0\r\n\
+            t=0 0\r\n\
+            m=video 0 RTP/AVP 96\r\n\
+            a=rtpmap:96 H264/90000\r\n";
+
+        let sdp = Sdp::unmarshal(data).unwrap();
+        let marshaled = sdp.marshal();
+
+        assert!(marshaled.contains("v=0\r\n"));
+        assert!(marshaled.contains("s=Test\r\n"));
+        assert!(marshaled.contains("t=0 0\r\n"));
+        assert!(marshaled.contains("m=video 0 RTP/AVP 96\r\n"));
+    }
+
+    #[test]
+    fn test_sdp_marshal_session_attribute_with_value() {
+        let data = "v=0\r\n\
+            o=- 0 0 IN IP4 0.0.0.0\r\n\
+            s=Test\r\n\
+            t=0 0\r\n\
+            a=tool:mylib\r\n";
+
+        let sdp = Sdp::unmarshal(data).unwrap();
+        let marshaled = sdp.marshal();
+        assert!(marshaled.contains("a=tool:mylib\r\n"));
+    }
+
+    #[test]
+    fn test_sdp_marshal_session_attribute_no_value() {
+        let data = "v=0\r\n\
+            o=- 0 0 IN IP4 0.0.0.0\r\n\
+            s=Test\r\n\
+            t=0 0\r\n\
+            a=recvonly\r\n";
+
+        let sdp = Sdp::unmarshal(data).unwrap();
+        let marshaled = sdp.marshal();
+        assert!(marshaled.contains("a=recvonly\r\n"));
+        assert!(!marshaled.contains("a=recvonly:\r\n"));
+    }
+
+    // ========== Sdp Default Tests ==========
+
+    #[test]
+    fn test_sdp_default() {
+        let sdp = Sdp::default();
+        assert_eq!(sdp.version, 0);
+        assert_eq!(sdp.session, "No Name");
+        assert_eq!(sdp.connection, "IN IP4 0.0.0.0");
+        assert_eq!(sdp.timing, "0 0");
+        assert!(sdp.medias.is_empty());
+        assert!(sdp.origin.contains("IN IP4 127.0.0.1"));
+    }
+
+    // ========== Sdp parse_line edge cases ==========
+
+    #[test]
+    fn test_sdp_parse_line_invalid_no_equals() {
+        // Lines without '=' should be silently ignored
+        let data = "v=0\r\ninvalidline\r\ns=Test\r\nt=0 0\r\n";
+        let sdp = Sdp::unmarshal(data).unwrap();
+        assert_eq!(sdp.session, "Test");
+    }
+
+    #[test]
+    fn test_sdp_parse_bandwidth_before_media_ignored() {
+        // b= lines before any m= line should be ignored
+        let data = "v=0\r\nb=AS:128\r\nm=video 0 RTP/AVP 96\r\na=rtpmap:96 H264/90000\r\n";
+        let sdp = Sdp::unmarshal(data).unwrap();
+        assert!(sdp.medias[0].bandwidth.is_none());
+    }
+
+    #[test]
+    fn test_sdp_media_attribute_control() {
+        let data = "v=0\r\n\
+            s=Test\r\n\
+            t=0 0\r\n\
+            m=video 0 RTP/AVP 96\r\n\
+            a=rtpmap:96 H264/90000\r\n\
+            a=control:streamid=0\r\n";
+
+        let sdp = Sdp::unmarshal(data).unwrap();
+        assert_eq!(
+            sdp.medias[0].attributes.get("control"),
+            Some(&"streamid=0".to_string())
+        );
+    }
+
+    #[test]
+    fn test_sdp_media_attribute_with_fmtp() {
+        let data = "v=0\r\n\
+            s=Test\r\n\
+            t=0 0\r\n\
+            m=video 0 RTP/AVP 96\r\n\
+            a=rtpmap:96 H264/90000\r\n\
+            a=fmtp:96 packetization-mode=1; profile-level-id=64001E\r\n";
+
+        let sdp = Sdp::unmarshal(data).unwrap();
+        assert!(sdp.medias[0].fmtp.is_some());
+    }
+
+    #[test]
+    fn test_sdp_unmarshal_version_non_zero() {
+        let data = "v=1\r\ns=Test\r\nt=0 0\r\n";
+        let sdp = Sdp::unmarshal(data).unwrap();
+        assert_eq!(sdp.version, 1);
+    }
+
+    #[test]
+    fn test_sdp_unmarshal_invalid_version() {
+        let data = "v=abc\r\ns=Test\r\nt=0 0\r\n";
+        let sdp = Sdp::unmarshal(data).unwrap();
+        assert_eq!(sdp.version, 0); // default when parse fails
+    }
+
+    // ========== Bandwidth Default Test ==========
+
+    #[test]
+    fn test_bandwidth_default() {
+        use super::Bandwidth;
+        let bw = Bandwidth::default();
+        assert_eq!(bw.b_type, "");
+        assert_eq!(bw.bandwidth, 0);
+    }
+
+    // ========== Additional parse_line edge cases ==========
+
+    #[test]
+    fn test_sdp_parse_line_unknown_type_ignored() {
+        // 'i' (session info) and 'z' (time zone) lines hit the `_` arm
+        let data = "v=0\r\ni=Session Description\r\ns=Test\r\nt=0 0\r\nz=2882844526 -1h\r\n";
+        let sdp = Sdp::unmarshal(data).unwrap();
+        assert_eq!(sdp.session, "Test");
+        assert_eq!(sdp.version, 0);
+    }
+
+    #[test]
+    fn test_sdp_media_info_unmarshal_invalid_port() {
+        use super::SdpMediaInfo;
+        let mi = SdpMediaInfo::unmarshal("video notaport RTP/AVP 96").unwrap();
+        assert_eq!(mi.media_type, "video");
+        assert_eq!(mi.port, 0); // default when parse fails
+        assert_eq!(mi.protocol, "RTP/AVP");
+        assert_eq!(mi.fmts, vec![96]);
+    }
+
+    #[test]
+    fn test_sdp_media_info_unmarshal_empty() {
+        use super::SdpMediaInfo;
+        let mi = SdpMediaInfo::unmarshal("").unwrap();
+        assert_eq!(mi.media_type, "");
+        assert_eq!(mi.port, 0);
+    }
+
+    #[test]
+    fn test_sdp_try_parse_media_attribute_empty_value() {
+        // When attr_value is empty, try_parse_media_attribute returns false
+        // and the attribute is stored as a regular attribute
+        let data = "v=0\r\n\
+            s=Test\r\n\
+            t=0 0\r\n\
+            m=video 0 RTP/AVP 96\r\n\
+            a=rtpmap:96 H264/90000\r\n\
+            a=recvonly\r\n";
+
+        let sdp = Sdp::unmarshal(data).unwrap();
+        // 'recvonly' has no value, so it's stored as regular attribute
+        assert_eq!(
+            sdp.medias[0].attributes.get("recvonly"),
+            Some(&"".to_string())
+        );
+    }
+
+    #[test]
+    fn test_sdp_media_info_marshal_with_fmtp() {
+        use super::{SdpMediaInfo, fmtp};
+        use rtpmap::RtpMap;
+
+        let fmtp_obj =
+            fmtp::Fmtp::new("h264", "96 packetization-mode=1; profile-level-id=640016").unwrap();
+
+        let mi = SdpMediaInfo {
+            media_type: "video".to_string(),
+            port: 0,
+            protocol: "RTP/AVP".to_string(),
+            fmts: vec![96],
+            bandwidth: None,
+            rtpmap: RtpMap {
+                payload_type: 96,
+                encoding_name: "H264".to_string(),
+                clock_rate: 90000,
+                encoding_param: String::new(),
+            },
+            fmtp: Some(fmtp_obj),
+            attributes: HashMap::new(),
+        };
+        let marshaled = mi.marshal();
+        assert!(marshaled.contains("m=video 0 RTP/AVP 96"));
+        assert!(marshaled.contains("a=fmtp:"));
+        assert!(marshaled.contains("packetization-mode=1"));
+    }
+
+    #[test]
+    fn test_sdp_bandwidth_roundtrip() {
+        use super::Bandwidth;
+        use crate::rtsp::global_trait::{Marshal, Unmarshal};
+
+        let bw = Bandwidth::unmarshal("AS:284").unwrap();
+        let marshaled = bw.marshal();
+        assert_eq!(marshaled, "AS:284\r\n");
+        let bw2 = Bandwidth::unmarshal(marshaled.trim_end()).unwrap();
+        assert_eq!(bw.b_type, bw2.b_type);
+        assert_eq!(bw.bandwidth, bw2.bandwidth);
+    }
+
+    #[test]
+    fn test_sdp_full_roundtrip() {
+        let data = "v=0\r\n\
+            o=- 0 0 IN IP4 127.0.0.1\r\n\
+            s=Test Session\r\n\
+            c=IN IP4 0.0.0.0\r\n\
+            t=0 0\r\n\
+            m=video 0 RTP/AVP 96\r\n\
+            b=AS:284\r\n\
+            a=rtpmap:96 H264/90000\r\n\
+            a=control:trackID=0\r\n\
+            m=audio 0 RTP/AVP 97\r\n\
+            a=rtpmap:97 MPEG4-GENERIC/48000/2\r\n\
+            a=control:trackID=1\r\n";
+
+        let sdp = Sdp::unmarshal(data).unwrap();
+        let marshaled = sdp.marshal();
+        let sdp2 = Sdp::unmarshal(&marshaled).unwrap();
+
+        assert_eq!(sdp.version, sdp2.version);
+        assert_eq!(sdp.session, sdp2.session);
+        assert_eq!(sdp.medias.len(), sdp2.medias.len());
+        assert_eq!(sdp.medias[0].media_type, sdp2.medias[0].media_type);
+        assert_eq!(sdp.medias[1].media_type, sdp2.medias[1].media_type);
+    }
+
+    #[test]
+    fn test_sdp_unmarshal_media_attribute_no_colon() {
+        // a=sendonly inside a media block (no colon = empty value)
+        let data = "v=0\r\n\
+            s=Test\r\n\
+            t=0 0\r\n\
+            m=video 0 RTP/AVP 96\r\n\
+            a=sendonly\r\n";
+
+        let sdp = Sdp::unmarshal(data).unwrap();
+        assert_eq!(
+            sdp.medias[0].attributes.get("sendonly"),
+            Some(&"".to_string())
+        );
+    }
+
+    #[test]
+    fn test_sdp_unmarshal_fmtp_with_unsupported_codec() {
+        // rtpmap sets encoding_name to "VP8", fmtp tries to parse
+        // but Fmtp::new("VP8", ...) returns Err, so fmtp stays None
+        let data = "v=0\r\n\
+            s=Test\r\n\
+            t=0 0\r\n\
+            m=video 0 RTP/AVP 96\r\n\
+            a=rtpmap:96 VP8/90000\r\n\
+            a=fmtp:96 some-params=value\r\n";
+
+        let sdp = Sdp::unmarshal(data).unwrap();
+        assert!(sdp.medias[0].fmtp.is_none());
+    }
+
+    #[test]
+    fn test_sdp_unmarshal_empty_string() {
+        let sdp = Sdp::unmarshal("").unwrap();
+        assert!(sdp.medias.is_empty());
+        assert_eq!(sdp.version, 0);
+    }
+
+    #[test]
+    fn test_sdp_media_info_unmarshal_large_fmt_values_ignored() {
+        use super::SdpMediaInfo;
+        // fmt values > 255 can't fit in u8 and should be silently skipped
+        let mi = SdpMediaInfo::unmarshal("video 0 RTP/AVP 96 300 97").unwrap();
+        assert_eq!(mi.fmts, vec![96, 97]); // 300 skipped
+    }
+
+    #[test]
+    fn test_sdp_unmarshal_h265_fmtp() {
+        let data = "v=0\r\n\
+            s=Test\r\n\
+            t=0 0\r\n\
+            m=video 0 RTP/AVP 96\r\n\
+            a=rtpmap:96 H265/90000\r\n\
+            a=fmtp:96 sprop-vps=QAEMAf; sprop-sps=QgEBAW; sprop-pps=RAHA\r\n";
+
+        let sdp = Sdp::unmarshal(data).unwrap();
+        assert!(sdp.medias[0].fmtp.is_some());
+    }
+
+    #[test]
+    fn test_sdp_unmarshal_mpeg4_fmtp() {
+        let data = "v=0\r\n\
+            s=Test\r\n\
+            t=0 0\r\n\
+            m=audio 0 RTP/AVP 97\r\n\
+            a=rtpmap:97 MPEG4-GENERIC/48000/2\r\n\
+            a=fmtp:97 profile-level-id=1;mode=AAC-hbr;sizelength=13;indexlength=3;indexdeltalength=3; config=119056E500\r\n";
+
+        let sdp = Sdp::unmarshal(data).unwrap();
+        assert!(sdp.medias[0].fmtp.is_some());
     }
 }

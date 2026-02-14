@@ -808,4 +808,126 @@ mod tests {
         assert_eq!(parser.sps.num_ref_frames_in_pic_order_cnt_cycle, 2);
         assert_eq!(parser.sps.offset_for_ref_frame, vec![-2, 3]);
     }
+
+    // ============================================
+    // Sps Default Tests
+    // ============================================
+
+    #[test]
+    fn test_sps_default() {
+        let sps = Sps::default();
+        assert_eq!(sps.profile_idc, 0);
+        assert_eq!(sps.level_idc, 0);
+        assert_eq!(sps.chroma_format_idc, 0);
+        assert_eq!(sps.frame_mbs_only_flag, 0);
+        assert_eq!(sps.frame_cropping_flag, 0);
+        assert_eq!(sps.vui_parameters_present_flag, 0);
+        assert!(sps.seq_scaling_list_present_flag.is_empty());
+        assert!(sps.offset_for_ref_frame.is_empty());
+    }
+
+    // ============================================
+    // Resolution Variety Tests
+    // ============================================
+
+    #[test]
+    fn test_sps_resolution_320x240() {
+        let data = create_baseline_sps(320, 240);
+        let bytes_reader = BytesReader::new(data);
+        let mut parser = SpsParser::new(bytes_reader);
+        let (w, h) = parser.parse().unwrap();
+        assert_eq!(w, 320);
+        assert_eq!(h, 240);
+    }
+
+    #[test]
+    fn test_sps_resolution_1280x720() {
+        let data = create_baseline_sps(1280, 720);
+        let bytes_reader = BytesReader::new(data);
+        let mut parser = SpsParser::new(bytes_reader);
+        let (w, h) = parser.parse().unwrap();
+        assert_eq!(w, 1280);
+        assert_eq!(h, 720);
+    }
+
+    #[test]
+    fn test_sps_resolution_1920x1088_high_profile() {
+        let data = create_high_sps(1920, 1088);
+        let bytes_reader = BytesReader::new(data);
+        let mut parser = SpsParser::new(bytes_reader);
+        let (w, h) = parser.parse().unwrap();
+        assert_eq!(w, 1920);
+        assert_eq!(h, 1088);
+    }
+
+    // ============================================
+    // Cropping Unit Tests
+    // ============================================
+
+    #[test]
+    fn test_sps_cropping_left_and_right() {
+        // Crop 16 pixels from left (8 units) and 16 from right (8 units)
+        // For 4:2:0 (chroma_format_idc=1): crop_unit_x = 2
+        // Width: 640 - (8+8)*2 = 640 - 32 = 608
+        let data = create_baseline_sps_with_cropping(640, 480, 8, 8, 0, 0);
+        let bytes_reader = BytesReader::new(data);
+        let mut parser = SpsParser::new(bytes_reader);
+        let (w, h) = parser.parse().unwrap();
+        assert_eq!(w, 608);
+        assert_eq!(h, 480);
+    }
+
+    #[test]
+    fn test_sps_cropping_top_and_bottom() {
+        // For 4:2:0 (chroma_format_idc=1): crop_unit_y = 2
+        // Height: 480 - (0+4)*2 = 480 - 8 = 472
+        let data = create_baseline_sps_with_cropping(640, 480, 0, 0, 0, 4);
+        let bytes_reader = BytesReader::new(data);
+        let mut parser = SpsParser::new(bytes_reader);
+        let (w, h) = parser.parse().unwrap();
+        assert_eq!(w, 640);
+        assert_eq!(h, 472);
+    }
+
+    // ============================================
+    // Profile IDC Variety Tests
+    // ============================================
+
+    #[test]
+    fn test_sps_chroma_format_idc_defaults_for_baseline() {
+        // Baseline (profile_idc=66) should default chroma_format_idc to 1
+        let data = create_baseline_sps(640, 480);
+        let bytes_reader = BytesReader::new(data);
+        let mut parser = SpsParser::new(bytes_reader);
+        parser.parse().unwrap();
+        assert_eq!(parser.sps.chroma_format_idc, 1);
+    }
+
+    #[test]
+    fn test_sps_high_profile_chroma_format_parsed() {
+        let data = create_high_sps(640, 480);
+        let bytes_reader = BytesReader::new(data);
+        let mut parser = SpsParser::new(bytes_reader);
+        parser.parse().unwrap();
+        assert_eq!(parser.sps.profile_idc, 100);
+        assert_eq!(parser.sps.chroma_format_idc, 1);
+    }
+
+    #[test]
+    fn test_sps_pic_order_cnt_type_2() {
+        // Type 2 requires no extra fields
+        let data = create_baseline_sps(640, 480);
+        let bytes_reader = BytesReader::new(data);
+        let mut parser = SpsParser::new(bytes_reader);
+        parser.parse().unwrap();
+        assert_eq!(parser.sps.pic_order_cnt_type, 2);
+    }
+
+    #[test]
+    fn test_sps_debug_format() {
+        let sps = Sps::default();
+        let debug = format!("{sps:?}");
+        assert!(debug.contains("Sps"));
+        assert!(debug.contains("profile_idc"));
+    }
 }

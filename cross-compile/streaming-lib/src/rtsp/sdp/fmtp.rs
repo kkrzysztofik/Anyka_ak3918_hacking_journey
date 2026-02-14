@@ -192,6 +192,156 @@ mod tests {
         assert_eq!(parser.profile_level_id, "1");
         assert!(parser.asc.is_empty());
     }
+
+    #[test]
+    fn test_parse_payload_type_empty_input() {
+        let result = parse_payload_type("");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_payload_type_non_numeric() {
+        let result = parse_payload_type("abc some params");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_payload_type_valid() {
+        let (pt, params) = parse_payload_type("96 packetization-mode=1").unwrap();
+        assert_eq!(pt, 96);
+        assert_eq!(params, "packetization-mode=1");
+    }
+
+    #[test]
+    fn test_parse_payload_type_no_params() {
+        let (pt, params) = parse_payload_type("96").unwrap();
+        assert_eq!(pt, 96);
+        assert_eq!(params, "");
+    }
+
+    #[test]
+    fn test_parse_key_value_pairs_valid() {
+        let pairs: Vec<(&str, &str)> = parse_key_value_pairs("key1=val1;key2=val2").collect();
+        assert_eq!(pairs.len(), 2);
+        assert_eq!(pairs[0], ("key1", "val1"));
+        assert_eq!(pairs[1], ("key2", "val2"));
+    }
+
+    #[test]
+    fn test_parse_key_value_pairs_no_equals() {
+        let pairs: Vec<(&str, &str)> = parse_key_value_pairs("noequalssign").collect();
+        assert!(pairs.is_empty());
+    }
+
+    #[test]
+    fn test_parse_key_value_pairs_mixed() {
+        let pairs: Vec<(&str, &str)> = parse_key_value_pairs("good=value;bad;also=ok").collect();
+        assert_eq!(pairs.len(), 2);
+        assert_eq!(pairs[0], ("good", "value"));
+        assert_eq!(pairs[1], ("also", "ok"));
+    }
+
+    #[test]
+    fn test_decode_base64_to_bytes_valid() {
+        let result = decode_base64_to_bytes("aGVsbG8="); // "hello"
+        assert!(result.is_some());
+        assert_eq!(&result.unwrap()[..], b"hello");
+    }
+
+    #[test]
+    fn test_decode_base64_to_bytes_invalid() {
+        let result = decode_base64_to_bytes("!!!invalid!!!");
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_h265_fmtp_unmarshal_empty_params_returns_error() {
+        let result = H265Fmtp::unmarshal("96");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_mpeg4_fmtp_unmarshal_empty_params_returns_error() {
+        let result = Mpeg4Fmtp::unmarshal("97");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_h264_fmtp_sprop_single_value_missing_pps() {
+        // Only one comma-separated value (missing PPS)
+        let fmtp =
+            H264Fmtp::unmarshal("96 sprop-parameter-sets=Z2QAFqyyAUBf8uAiAAADAAIAAAMAPB4sXJA=")
+                .unwrap();
+        // Should parse but SPS/PPS should be empty (< 2 parts)
+        assert!(fmtp.sps.is_empty());
+        assert!(fmtp.pps.is_empty());
+    }
+
+    #[test]
+    fn test_h264_fmtp_default() {
+        let fmtp = H264Fmtp::default();
+        assert_eq!(fmtp.payload_type, 0);
+        assert_eq!(fmtp.packetization_mode, 1); // default is 1 for FU-A
+        assert!(fmtp.sps.is_empty());
+        assert!(fmtp.pps.is_empty());
+    }
+
+    #[test]
+    fn test_h265_fmtp_default() {
+        let fmtp = H265Fmtp::default();
+        assert_eq!(fmtp.payload_type, 0);
+        assert!(fmtp.vps.is_empty());
+        assert!(fmtp.sps.is_empty());
+        assert!(fmtp.pps.is_empty());
+    }
+
+    #[test]
+    fn test_mpeg4_fmtp_default() {
+        let fmtp = Mpeg4Fmtp::default();
+        assert_eq!(fmtp.payload_type, 0);
+        assert!(fmtp.asc.is_empty());
+        assert_eq!(fmtp.mode, "");
+        assert_eq!(fmtp.size_length, 0);
+        assert_eq!(fmtp.index_length, 0);
+        assert_eq!(fmtp.index_delta_length, 0);
+    }
+
+    #[test]
+    fn test_h265_fmtp_unknown_sprop_key_ignored() {
+        let fmtp = H265Fmtp::unmarshal("96 sprop-unknown=ABC; sprop-vps=VPS").unwrap();
+        assert_eq!(fmtp.vps, "VPS");
+    }
+
+    #[test]
+    fn test_h264_fmtp_unknown_key_ignored() {
+        let fmtp = H264Fmtp::unmarshal("96 unknown-key=value; packetization-mode=2").unwrap();
+        assert_eq!(fmtp.packetization_mode, 2);
+    }
+
+    #[test]
+    fn test_mpeg4_fmtp_unknown_key_ignored() {
+        let fmtp = Mpeg4Fmtp::unmarshal("97 unknownparam=xyz;mode=AAC-hbr").unwrap();
+        assert_eq!(fmtp.mode, "AAC-hbr");
+    }
+
+    #[test]
+    fn test_mpeg4_fmtp_invalid_sizelength_ignored() {
+        let fmtp = Mpeg4Fmtp::unmarshal("97 sizelength=notanumber").unwrap();
+        assert_eq!(fmtp.size_length, 0); // default when parse fails
+    }
+
+    #[test]
+    fn test_h264_fmtp_invalid_packetization_mode_ignored() {
+        let fmtp = H264Fmtp::unmarshal("96 packetization-mode=abc").unwrap();
+        assert_eq!(fmtp.packetization_mode, 1); // default
+    }
+
+    #[test]
+    fn test_fmtp_enum_clone() {
+        let fmtp = Fmtp::new("h264", "96 packetization-mode=1").unwrap();
+        let _cloned = fmtp.clone();
+        // Just verifying Clone works without panic
+    }
 }
 
 impl Marshal for H264Fmtp {

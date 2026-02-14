@@ -829,4 +829,552 @@ mod tests {
         assert!(segment.discontinuity);
         assert_eq!(segment.name, "test.ts");
     }
+
+    // ========== SubscriberInfo Serialize Tests ==========
+
+    #[test]
+    fn test_subscriber_info_serialize() {
+        let info = SubscriberInfo {
+            id: Uuid::default(),
+            sub_type: SubscribeType::RtmpPull,
+            notify_info: NotifyInfo {
+                request_url: "rtmp://example.com/live/stream".to_string(),
+                remote_addr: "192.168.1.1:5000".to_string(),
+            },
+            sub_data_type: SubDataType::Frame,
+        };
+        let json = serde_json::to_string(&info).unwrap();
+        assert!(json.contains("id"));
+        assert!(json.contains("sub_type"));
+        assert!(json.contains("notify_info"));
+        assert!(json.contains("RtmpPull"));
+    }
+
+    #[test]
+    fn test_subscriber_info_clone() {
+        let info = SubscriberInfo {
+            id: Uuid::default(),
+            sub_type: SubscribeType::RtspPull,
+            notify_info: NotifyInfo {
+                request_url: "rtsp://test".to_string(),
+                remote_addr: "10.0.0.1:554".to_string(),
+            },
+            sub_data_type: SubDataType::Packet,
+        };
+        let cloned = info.clone();
+        assert_eq!(
+            format!("{:?}", info.sub_type),
+            format!("{:?}", cloned.sub_type)
+        );
+    }
+
+    #[test]
+    fn test_subscriber_info_debug() {
+        let info = SubscriberInfo {
+            id: Uuid::default(),
+            sub_type: SubscribeType::WhepPull,
+            notify_info: NotifyInfo {
+                request_url: "http://test".to_string(),
+                remote_addr: "127.0.0.1:0".to_string(),
+            },
+            sub_data_type: SubDataType::Frame,
+        };
+        let debug = format!("{:?}", info);
+        assert!(debug.contains("SubscriberInfo"));
+        assert!(debug.contains("WhepPull"));
+    }
+
+    // ========== PublisherInfo Serialize Tests ==========
+
+    #[test]
+    fn test_publisher_info_serialize() {
+        let info = PublisherInfo {
+            id: Uuid::default(),
+            pub_type: PublishType::RtmpPush,
+            pub_data_type: PubDataType::Both,
+            notify_info: NotifyInfo {
+                request_url: "rtmp://example.com/live/stream".to_string(),
+                remote_addr: "192.168.1.1:1935".to_string(),
+            },
+        };
+        let json = serde_json::to_string(&info).unwrap();
+        assert!(json.contains("id"));
+        assert!(json.contains("pub_type"));
+        assert!(json.contains("notify_info"));
+        assert!(json.contains("RtmpPush"));
+    }
+
+    #[test]
+    fn test_publisher_info_clone() {
+        let info = PublisherInfo {
+            id: Uuid::default(),
+            pub_type: PublishType::RtspPush,
+            pub_data_type: PubDataType::Frame,
+            notify_info: NotifyInfo {
+                request_url: "rtsp://test".to_string(),
+                remote_addr: "10.0.0.1:554".to_string(),
+            },
+        };
+        let cloned = info.clone();
+        assert_eq!(
+            format!("{:?}", info.pub_type),
+            format!("{:?}", cloned.pub_type)
+        );
+    }
+
+    #[test]
+    fn test_publisher_info_debug() {
+        let info = PublisherInfo {
+            id: Uuid::default(),
+            pub_type: PublishType::WhipPush,
+            pub_data_type: PubDataType::Packet,
+            notify_info: NotifyInfo {
+                request_url: "http://test".to_string(),
+                remote_addr: "127.0.0.1:0".to_string(),
+            },
+        };
+        let debug = format!("{:?}", info);
+        assert!(debug.contains("PublisherInfo"));
+        assert!(debug.contains("WhipPush"));
+    }
+
+    // ========== SubDataType / PubDataType Tests ==========
+
+    #[test]
+    fn test_sub_data_type_serialize() {
+        let frame = SubDataType::Frame;
+        let packet = SubDataType::Packet;
+        let frame_json = serde_json::to_string(&frame).unwrap();
+        let packet_json = serde_json::to_string(&packet).unwrap();
+        assert!(frame_json.contains("Frame"));
+        assert!(packet_json.contains("Packet"));
+    }
+
+    #[test]
+    fn test_sub_data_type_debug() {
+        let frame = SubDataType::Frame;
+        let packet = SubDataType::Packet;
+        assert!(format!("{:?}", frame).contains("Frame"));
+        assert!(format!("{:?}", packet).contains("Packet"));
+    }
+
+    #[test]
+    fn test_sub_data_type_clone() {
+        let original = SubDataType::Packet;
+        let cloned = original.clone();
+        assert!(format!("{:?}", cloned).contains("Packet"));
+    }
+
+    #[test]
+    fn test_pub_data_type_serialize() {
+        let frame = PubDataType::Frame;
+        let packet = PubDataType::Packet;
+        let both = PubDataType::Both;
+        let frame_json = serde_json::to_string(&frame).unwrap();
+        let packet_json = serde_json::to_string(&packet).unwrap();
+        let both_json = serde_json::to_string(&both).unwrap();
+        assert!(frame_json.contains("Frame"));
+        assert!(packet_json.contains("Packet"));
+        assert!(both_json.contains("Both"));
+    }
+
+    #[test]
+    fn test_pub_data_type_debug() {
+        assert!(format!("{:?}", PubDataType::Frame).contains("Frame"));
+        assert!(format!("{:?}", PubDataType::Packet).contains("Packet"));
+        assert!(format!("{:?}", PubDataType::Both).contains("Both"));
+    }
+
+    // ========== DataSender Tests ==========
+
+    #[test]
+    fn test_data_sender_frame_variant() {
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let sender = DataSender::Frame { sender: tx };
+        let debug = format!("{:?}", sender);
+        assert!(debug.contains("Frame"));
+    }
+
+    #[test]
+    fn test_data_sender_packet_variant() {
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let sender = DataSender::Packet { sender: tx };
+        let debug = format!("{:?}", sender);
+        assert!(debug.contains("Packet"));
+    }
+
+    #[test]
+    fn test_data_sender_clone() {
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let sender = DataSender::Frame { sender: tx };
+        let cloned = sender.clone();
+        let debug = format!("{:?}", cloned);
+        assert!(debug.contains("Frame"));
+    }
+
+    // ========== StreamHubEvent to_message Tests ==========
+
+    #[test]
+    fn test_stream_hub_event_to_message_unsubscribe() {
+        let identifier = StreamIdentifier::Rtmp {
+            app_name: "live".to_string(),
+            stream_name: "test".to_string(),
+        };
+        let info = SubscriberInfo {
+            id: Uuid::default(),
+            sub_type: SubscribeType::RtmpPull,
+            notify_info: NotifyInfo {
+                request_url: "rtmp://localhost/live/test".to_string(),
+                remote_addr: "127.0.0.1:1234".to_string(),
+            },
+            sub_data_type: SubDataType::Frame,
+        };
+        let event = StreamHubEvent::UnSubscribe {
+            identifier: identifier.clone(),
+            info,
+        };
+        let message = event.to_message();
+        assert!(matches!(message, StreamHubEventMessage::UnSubscribe { .. }));
+    }
+
+    #[test]
+    fn test_stream_hub_event_to_message_unpublish() {
+        let identifier = StreamIdentifier::Rtsp {
+            stream_path: "/live/stream1".to_string(),
+        };
+        let info = PublisherInfo {
+            id: Uuid::default(),
+            pub_type: PublishType::RtspPush,
+            pub_data_type: PubDataType::Frame,
+            notify_info: NotifyInfo {
+                request_url: "rtsp://localhost/live/stream1".to_string(),
+                remote_addr: "127.0.0.1:554".to_string(),
+            },
+        };
+        let event = StreamHubEvent::UnPublish {
+            identifier: identifier.clone(),
+            info,
+        };
+        let message = event.to_message();
+        assert!(matches!(message, StreamHubEventMessage::UnPublish { .. }));
+    }
+
+    #[test]
+    fn test_stream_hub_event_to_message_request_returns_not_support() {
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let event = StreamHubEvent::Request {
+            identifier: StreamIdentifier::Rtmp {
+                app_name: "live".to_string(),
+                stream_name: "test".to_string(),
+            },
+            sender: tx,
+        };
+        let message = event.to_message();
+        assert!(matches!(message, StreamHubEventMessage::NotSupport {}));
+    }
+
+    #[test]
+    fn test_stream_hub_event_to_message_api_kick_returns_not_support() {
+        let event = StreamHubEvent::ApiKickClient {
+            id: Uuid::default(),
+        };
+        let message = event.to_message();
+        assert!(matches!(message, StreamHubEventMessage::NotSupport {}));
+    }
+
+    // ========== StreamHubEventMessage Serialize Tests ==========
+
+    #[test]
+    fn test_stream_hub_event_message_not_support_serialize() {
+        let msg = StreamHubEventMessage::NotSupport {};
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(json.contains("NotSupport"));
+    }
+
+    #[test]
+    fn test_stream_hub_event_message_unsubscribe_serialize() {
+        let msg = StreamHubEventMessage::UnSubscribe {
+            identifier: StreamIdentifier::Rtmp {
+                app_name: "live".to_string(),
+                stream_name: "test".to_string(),
+            },
+            info: SubscriberInfo {
+                id: Uuid::default(),
+                sub_type: SubscribeType::RtmpPull,
+                notify_info: NotifyInfo {
+                    request_url: "test".to_string(),
+                    remote_addr: "127.0.0.1:0".to_string(),
+                },
+                sub_data_type: SubDataType::Frame,
+            },
+        };
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(json.contains("UnSubscribe"));
+    }
+
+    // ========== RelayType Tests ==========
+
+    #[test]
+    fn test_relay_type_debug() {
+        assert!(format!("{:?}", RelayType::Pull).contains("Pull"));
+        assert!(format!("{:?}", RelayType::Push).contains("Push"));
+    }
+
+    #[test]
+    fn test_relay_type_clone() {
+        let pull = RelayType::Pull;
+        let cloned = pull.clone();
+        assert!(format!("{:?}", cloned).contains("Pull"));
+    }
+
+    #[test]
+    fn test_relay_type_deserialize() {
+        let pull: RelayType = serde_json::from_str(r#""Pull""#).unwrap();
+        let push: RelayType = serde_json::from_str(r#""Push""#).unwrap();
+        assert!(matches!(pull, RelayType::Pull));
+        assert!(matches!(push, RelayType::Push));
+    }
+
+    // ========== BroadcastEvent Tests ==========
+
+    #[test]
+    fn test_broadcast_event_publish_clone() {
+        let event = BroadcastEvent::Publish {
+            identifier: StreamIdentifier::Rtmp {
+                app_name: "live".to_string(),
+                stream_name: "test".to_string(),
+            },
+        };
+        let cloned = event.clone();
+        assert!(matches!(cloned, BroadcastEvent::Publish { .. }));
+    }
+
+    #[test]
+    fn test_broadcast_event_unpublish_clone() {
+        let event = BroadcastEvent::UnPublish {
+            identifier: StreamIdentifier::Rtsp {
+                stream_path: "/live/stream".to_string(),
+            },
+        };
+        let cloned = event.clone();
+        assert!(matches!(cloned, BroadcastEvent::UnPublish { .. }));
+    }
+
+    #[test]
+    fn test_broadcast_event_subscribe_debug() {
+        let event = BroadcastEvent::Subscribe {
+            id: "relay-001".to_string(),
+            identifier: StreamIdentifier::Rtmp {
+                app_name: "live".to_string(),
+                stream_name: "test".to_string(),
+            },
+            server_address: Some("192.168.1.1:1935".to_string()),
+            result_sender: None,
+        };
+        let debug = format!("{:?}", event);
+        assert!(debug.contains("Subscribe"));
+        assert!(debug.contains("relay-001"));
+    }
+
+    #[test]
+    fn test_broadcast_event_unsubscribe_debug() {
+        let event = BroadcastEvent::UnSubscribe {
+            id: "relay-002".to_string(),
+            result_sender: None,
+        };
+        let debug = format!("{:?}", event);
+        assert!(debug.contains("UnSubscribe"));
+        assert!(debug.contains("relay-002"));
+    }
+
+    // ========== Segment Edge Cases ==========
+
+    #[test]
+    fn test_segment_eof() {
+        let segment = Segment::new(
+            0,
+            false,
+            "eof.ts".to_string(),
+            "/path/eof.ts".to_string(),
+            true,
+        );
+        assert!(segment.is_eof);
+        assert_eq!(segment.duration, 0);
+    }
+
+    #[test]
+    fn test_segment_discontinuity() {
+        let segment = Segment::new(
+            5,
+            true,
+            "disc.ts".to_string(),
+            "/disc.ts".to_string(),
+            false,
+        );
+        assert!(segment.discontinuity);
+    }
+
+    #[test]
+    fn test_segment_serialize_deserialize_roundtrip() {
+        let original = Segment::new(
+            42,
+            true,
+            "roundtrip.ts".to_string(),
+            "/path/roundtrip.ts".to_string(),
+            false,
+        );
+        let json = serde_json::to_string(&original).unwrap();
+        let deserialized: Segment = serde_json::from_str(&json).unwrap();
+        assert_eq!(original.duration, deserialized.duration);
+        assert_eq!(original.discontinuity, deserialized.discontinuity);
+        assert_eq!(original.name, deserialized.name);
+        assert_eq!(original.path, deserialized.path);
+        assert_eq!(original.is_eof, deserialized.is_eof);
+    }
+
+    // ========== FrameData Clone Tests ==========
+
+    #[test]
+    fn test_frame_data_video_clone() {
+        let frame = FrameData::Video {
+            timestamp: 5000,
+            data: BytesMut::from(&[0x67, 0x42, 0x00, 0x1E][..]),
+        };
+        let cloned = frame.clone();
+        if let FrameData::Video { timestamp, data } = cloned {
+            assert_eq!(timestamp, 5000);
+            assert_eq!(data.len(), 4);
+        } else {
+            panic!("Expected Video variant");
+        }
+    }
+
+    #[test]
+    fn test_frame_data_audio_clone() {
+        let frame = FrameData::Audio {
+            timestamp: 3000,
+            data: BytesMut::from(&[0xFF, 0xF1, 0x50][..]),
+        };
+        let cloned = frame.clone();
+        if let FrameData::Audio { timestamp, data } = cloned {
+            assert_eq!(timestamp, 3000);
+            assert_eq!(data.len(), 3);
+        } else {
+            panic!("Expected Audio variant");
+        }
+    }
+
+    #[test]
+    fn test_frame_data_media_info_clone() {
+        let frame = FrameData::MediaInfo {
+            media_info: MediaInfo {
+                audio_clock_rate: 44100,
+                video_clock_rate: 90000,
+                vcodec: VideoCodecType::H265,
+            },
+        };
+        let cloned = frame.clone();
+        if let FrameData::MediaInfo { media_info } = cloned {
+            assert_eq!(media_info.audio_clock_rate, 44100);
+            assert_eq!(media_info.video_clock_rate, 90000);
+        } else {
+            panic!("Expected MediaInfo variant");
+        }
+    }
+
+    // ========== PacketData Clone Tests ==========
+
+    #[test]
+    fn test_packet_data_video_clone() {
+        let packet = PacketData::Video {
+            timestamp: 7000,
+            data: BytesMut::from(&[0x80, 0x60][..]),
+        };
+        let cloned = packet.clone();
+        if let PacketData::Video { timestamp, data } = cloned {
+            assert_eq!(timestamp, 7000);
+            assert_eq!(data.len(), 2);
+        } else {
+            panic!("Expected Video variant");
+        }
+    }
+
+    #[test]
+    fn test_packet_data_audio_clone() {
+        let packet = PacketData::Audio {
+            timestamp: 8000,
+            data: BytesMut::from(&[0x12, 0x10][..]),
+        };
+        let cloned = packet.clone();
+        if let PacketData::Audio { timestamp, data } = cloned {
+            assert_eq!(timestamp, 8000);
+            assert_eq!(data.len(), 2);
+        } else {
+            panic!("Expected Audio variant");
+        }
+    }
+
+    // ========== Information Clone Tests ==========
+
+    #[test]
+    fn test_information_sdp_clone() {
+        let info = Information::Sdp {
+            data: "v=0\r\n".to_string(),
+        };
+        let cloned = info.clone();
+        let Information::Sdp { data } = cloned;
+        assert_eq!(data, "v=0\r\n");
+    }
+
+    // ========== PublishType Additional Tests ==========
+
+    #[test]
+    fn test_publish_type_all_variants_serialize() {
+        let variants = [
+            (PublishType::RtmpPush, "RtmpPush"),
+            (PublishType::RtmpRelay, "RtmpRelay"),
+            (PublishType::RtspPush, "RtspPush"),
+            (PublishType::RtspRelay, "RtspRelay"),
+            (PublishType::WhipPush, "WhipPush"),
+            (PublishType::WhepRelay, "WhepRelay"),
+            (PublishType::RtpPush, "RtpPush"),
+        ];
+        for (variant, expected) in variants {
+            let json = serde_json::to_string(&variant).unwrap();
+            assert!(
+                json.contains(expected),
+                "Expected {} in JSON: {}",
+                expected,
+                json
+            );
+        }
+    }
+
+    // ========== SubscribeType Additional Tests ==========
+
+    #[test]
+    fn test_subscribe_type_all_variants_serialize() {
+        let variants = [
+            (SubscribeType::RtmpPull, "RtmpPull"),
+            (SubscribeType::RtmpRemux2HttpFlv, "RtmpRemux2HttpFlv"),
+            (SubscribeType::RtmpRemux2Hls, "RtmpRemux2Hls"),
+            (SubscribeType::RtmpRelay, "RtmpRelay"),
+            (SubscribeType::RtspPull, "RtspPull"),
+            (SubscribeType::RtspRemux2Rtmp, "RtspRemux2Rtmp"),
+            (SubscribeType::RtspRelay, "RtspRelay"),
+            (SubscribeType::WhepPull, "WhepPull"),
+            (SubscribeType::WebRTCRemux2Rtmp, "WebRTCRemux2Rtmp"),
+            (SubscribeType::WhipRelay, "WhipRelay"),
+            (SubscribeType::RtpPull, "RtpPull"),
+        ];
+        for (variant, expected) in variants {
+            let json = serde_json::to_string(&variant).unwrap();
+            assert!(
+                json.contains(expected),
+                "Expected {} in JSON: {}",
+                expected,
+                json
+            );
+        }
+    }
 }

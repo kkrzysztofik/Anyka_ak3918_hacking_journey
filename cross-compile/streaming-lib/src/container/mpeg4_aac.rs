@@ -847,4 +847,431 @@ mod tests {
         assert_eq!(aac.sampling_frequency, 96000);
         assert_eq!(aac.sampling_frequency_index, 0);
     }
+
+    // ========== Extended audio_specific_config_load2 Tests ==========
+
+    #[test]
+    fn test_audio_specific_config_load2_basic_aac_lc() {
+        let mut processor = Mpeg4AacProcessor::new();
+        // AAC-LC (obj_type=2), 48000Hz (idx=3), stereo (ch=2): 0x11 0x90
+        let data = BytesMut::from(&[0x11, 0x90][..]);
+        processor.bits_reader = crate::bytesio::bits_reader::BitsReader::new(
+            crate::bytesio::bytes_reader::BytesReader::new(data),
+        );
+
+        let result = processor.audio_specific_config_load2();
+        assert!(result.is_ok());
+        assert_eq!(processor.mpeg4_aac.object_type, 2);
+        assert_eq!(processor.mpeg4_aac.sampling_frequency, 48000);
+        assert_eq!(processor.mpeg4_aac.channel_configuration, 2);
+    }
+
+    // ========== get_freq_by_index Tests ==========
+
+    #[test]
+    fn test_get_freq_by_index_all_valid() {
+        for (index, expected_freq) in AAC_FREQUENCE.iter().enumerate() {
+            let freq = Mpeg4AacProcessor::get_freq_by_index(index as u8).unwrap();
+            assert_eq!(freq, *expected_freq);
+        }
+    }
+
+    #[test]
+    fn test_get_freq_by_index_invalid() {
+        let result = Mpeg4AacProcessor::get_freq_by_index(15);
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err().value,
+            MpegErrorValue::NotSupportedSamplingFrequency
+        ));
+    }
+
+    // ========== Constructor & Configuration Tests ==========
+
+    #[test]
+    fn test_mpeg4_aac_new_mono() {
+        let aac = Mpeg4Aac::new(2, 44100, 1).unwrap();
+        assert_eq!(aac.channel_configuration, 1);
+        assert_eq!(aac.sampling_frequency, 44100);
+    }
+
+    #[test]
+    fn test_mpeg4_aac_new_5_1_channels() {
+        let aac = Mpeg4Aac::new(2, 48000, 6).unwrap();
+        assert_eq!(aac.channel_configuration, 6);
+    }
+
+    #[test]
+    fn test_mpeg4_aac_default_values() {
+        let aac = Mpeg4Aac::default();
+        assert_eq!(aac.sbr, 0);
+        assert_eq!(aac.ps, 0);
+        assert_eq!(aac.npce, 0);
+        assert!(aac.pce.is_empty());
+    }
+
+    // ========== gen_audio_specific_config Tests ==========
+
+    #[test]
+    fn test_gen_audio_specific_config_all_object_types() {
+        for obj_type in 1..=4u8 {
+            let aac = Mpeg4Aac::new(obj_type, 44100, 2).unwrap();
+            let config = aac.gen_audio_specific_config().unwrap();
+            assert_eq!(config.len(), 2);
+            // Verify object type is encoded in top 5 bits
+            assert_eq!(config[0] >> 3, obj_type);
+        }
+    }
+
+    #[test]
+    fn test_gen_audio_specific_config_various_sample_rates() {
+        let sample_rates = [96000, 48000, 44100, 32000, 22050, 16000, 8000, 7350];
+        for sample_rate in sample_rates {
+            let aac = Mpeg4Aac::new(2, sample_rate, 2).unwrap();
+            let config = aac.gen_audio_specific_config().unwrap();
+            assert_eq!(config.len(), 2);
+        }
+    }
+
+    // ========== ADTS Save Tests ==========
+
+    #[test]
+    fn test_adts_save_various_configurations() {
+        let configs = [
+            (2u8, 3u8, 1u8), // AAC-LC, 48kHz, mono
+            (2, 4, 2),       // AAC-LC, 44.1kHz, stereo
+            (2, 8, 1),       // AAC-LC, 16kHz, mono
+        ];
+
+        for (obj_type, freq_idx, channels) in configs {
+            let mut processor = Mpeg4AacProcessor::new();
+            processor.mpeg4_aac.object_type = obj_type;
+            processor.mpeg4_aac.sampling_frequency_index = freq_idx;
+            processor.mpeg4_aac.channel_configuration = channels;
+
+            let raw_data = BytesMut::from(&[0x21, 0x10][..]);
+            processor.bytes_reader = crate::bytesio::bytes_reader::BytesReader::new(raw_data);
+
+            assert!(processor.adts_save().is_ok());
+            let output = processor.bytes_writer.extract_current_bytes();
+            // Verify ADTS sync word (0xFFF)
+            assert_eq!(output[0], 0xFF);
+            assert_eq!(output[1] & 0xF0, 0xF0);
+        }
+    }
+
+    #[test]
+    fn test_adts_save_large_payload() {
+        let mut processor = Mpeg4AacProcessor::new();
+        processor.mpeg4_aac.object_type = 2;
+        processor.mpeg4_aac.sampling_frequency_index = 4;
+        processor.mpeg4_aac.channel_configuration = 2;
+
+        let large_data = vec![0xAB; 2048];
+        processor.bytes_reader =
+            crate::bytesio::bytes_reader::BytesReader::new(BytesMut::from(&large_data[..]));
+
+        assert!(processor.adts_save().is_ok());
+        let output = processor.bytes_writer.extract_current_bytes();
+        assert_eq!(output.len(), 7 + 2048); // 7-byte ADTS header + payload
+    }
+
+    #[test]
+    fn test_adts_save_verifies_frame_length_encoding() {
+        let mut processor = Mpeg4AacProcessor::new();
+        processor.mpeg4_aac.object_type = 2;
+        processor.mpeg4_aac.sampling_frequency_index = 4;
+        processor.mpeg4_aac.channel_configuration = 2;
+
+        let payload = vec![0x00; 100];
+        processor.bytes_reader =
+            crate::bytesio::bytes_reader::BytesReader::new(BytesMut::from(&payload[..]));
+
+        processor.adts_save().unwrap();
+        let output = processor.bytes_writer.extract_current_bytes();
+
+        // Frame length = 7 (header) + 100 (payload) = 107
+        let frame_len = ((output[3] as u32 & 0x03) << 11)
+            | ((output[4] as u32) << 3)
+            | ((output[5] as u32) >> 5);
+        assert_eq!(frame_len, 107);
+    }
+
+    // ========== Error Path Tests ==========
+
+    #[test]
+    fn test_audio_specific_config_load_insufficient_data() {
+        let mut processor = Mpeg4AacProcessor::new();
+        let data = BytesMut::from(&[0x11][..]); // Only 1 byte - not enough
+        processor.extend_data(data);
+
+        let result = processor.audio_specific_config_load();
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_mpeg4_aac_new_invalid_frequency_zero() {
+        let result = Mpeg4Aac::new(2, 0, 2);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_mpeg4_aac_new_invalid_frequency_between_values() {
+        let result = Mpeg4Aac::new(2, 20000, 2); // Between 16000 and 22050
+        assert!(result.is_err());
+    }
+
+    // ========== Processor Utility Tests ==========
+
+    #[test]
+    fn test_extend_data_multiple_calls() {
+        let mut processor = Mpeg4AacProcessor::new();
+        processor.extend_data(BytesMut::from(&[0x11][..]));
+        processor.extend_data(BytesMut::from(&[0x90][..]));
+        assert_eq!(processor.bytes_reader.len(), 2);
+    }
+
+    // ========== Round-trip Tests ==========
+
+    #[test]
+    fn test_audio_specific_config_roundtrip_mono() {
+        let original = Mpeg4Aac::new(2, 48000, 1).unwrap();
+        let config = original.gen_audio_specific_config().unwrap();
+
+        let mut processor = Mpeg4AacProcessor::new();
+        processor.extend_data(config);
+        processor.audio_specific_config_load().unwrap();
+
+        assert_eq!(processor.mpeg4_aac.channel_configuration, 1);
+    }
+
+    // ========== count_channels_for_element Tests ==========
+
+    #[test]
+    fn test_count_channels_for_element_cpe_set() {
+        let processor = Mpeg4AacProcessor::new();
+        // cpe > 0 should return 2 channels
+        assert_eq!(processor.count_channels_for_element(1), 2);
+    }
+
+    #[test]
+    fn test_count_channels_for_element_cpe_zero_no_ps() {
+        let processor = Mpeg4AacProcessor::new();
+        // cpe == 0 and ps == 0 should return 1 channel
+        assert_eq!(processor.count_channels_for_element(0), 1);
+    }
+
+    #[test]
+    fn test_count_channels_for_element_cpe_zero_with_ps() {
+        let mut processor = Mpeg4AacProcessor::new();
+        processor.mpeg4_aac.ps = 1;
+        // cpe == 0 but ps > 0 should return 2 channels
+        assert_eq!(processor.count_channels_for_element(0), 2);
+    }
+
+    // ========== process_extension_config Tests ==========
+
+    #[test]
+    fn test_process_extension_config_ep_config_0_ok() {
+        let mut processor = Mpeg4AacProcessor::new();
+        // ep_config = 0 (binary 00): needs 2 bits
+        let data = BytesMut::from(&[0x00][..]);
+        processor.bits_reader = crate::bytesio::bits_reader::BitsReader::new(
+            crate::bytesio::bytes_reader::BytesReader::new(data),
+        );
+        let result = processor.process_extension_config();
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_process_extension_config_ep_config_1_ok() {
+        let mut processor = Mpeg4AacProcessor::new();
+        // ep_config = 1 (binary 01): 0x40 = 01 000000
+        let data = BytesMut::from(&[0x40][..]);
+        processor.bits_reader = crate::bytesio::bits_reader::BitsReader::new(
+            crate::bytesio::bytes_reader::BytesReader::new(data),
+        );
+        let result = processor.process_extension_config();
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_process_extension_config_ep_config_2_error() {
+        let mut processor = Mpeg4AacProcessor::new();
+        // ep_config = 2 (binary 10): 0x80 = 10 000000
+        let data = BytesMut::from(&[0x80][..]);
+        processor.bits_reader = crate::bytesio::bits_reader::BitsReader::new(
+            crate::bytesio::bytes_reader::BytesReader::new(data),
+        );
+        let result = processor.process_extension_config();
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err().value,
+            MpegErrorValue::ShouldNotComeHere
+        ));
+    }
+
+    #[test]
+    fn test_process_extension_config_ep_config_3_error() {
+        let mut processor = Mpeg4AacProcessor::new();
+        // ep_config = 3 (binary 11): 0xC0 = 11 000000
+        let data = BytesMut::from(&[0xC0][..]);
+        processor.bits_reader = crate::bytesio::bits_reader::BitsReader::new(
+            crate::bytesio::bytes_reader::BytesReader::new(data),
+        );
+        let result = processor.process_extension_config();
+        assert!(result.is_err());
+    }
+
+    // ========== get_audio_object_type Extended Type Tests ==========
+
+    #[test]
+    fn test_get_audio_object_type_extended_type_31() {
+        let mut processor = Mpeg4AacProcessor::new();
+        // Object type 31+ triggers extended encoding:
+        // First 5 bits = 11111 (31), then 6 more bits for (type - 32)
+        // For type 32: extended bits = 000000
+        // 0xF8 = 11111 000 -> first 5 bits = 31
+        // 0x00 = 00 000000 -> next 6 bits = 0, so type = 32 + 0 = 32
+        let data = BytesMut::from(&[0xF8, 0x00][..]);
+        processor.bits_reader = crate::bytesio::bits_reader::BitsReader::new(
+            crate::bytesio::bytes_reader::BytesReader::new(data),
+        );
+        let object_type = processor.get_audio_object_type().unwrap();
+        assert_eq!(object_type, 32);
+    }
+
+    #[test]
+    fn test_get_audio_object_type_extended_type_33() {
+        let mut processor = Mpeg4AacProcessor::new();
+        // For type 33: first 5 bits = 11111 (31), then 6 bits = 000001 (1)
+        // BitsReader reads MSB-first from each byte:
+        // Byte 0: 11111_000 = 0xF8 -> reads 5 bits: 11111 (31)
+        // Remaining 3 bits in byte 0: 000
+        // Byte 1: need 3 more bits -> 001_xxxxx = 0x20
+        // So 6-bit value = 000_001 = 1, type = 32 + 1 = 33
+        let data = BytesMut::from(&[0xF8, 0x20][..]);
+        processor.bits_reader = crate::bytesio::bits_reader::BitsReader::new(
+            crate::bytesio::bytes_reader::BytesReader::new(data),
+        );
+        let object_type = processor.get_audio_object_type().unwrap();
+        assert_eq!(object_type, 33);
+    }
+
+    // ========== get_sampling_frequency with 0x0F Index Tests ==========
+
+    #[test]
+    fn test_get_sampling_frequency_explicit_value() {
+        let mut processor = Mpeg4AacProcessor::new();
+        // When sampling_frequency_index == 0x0F, next 24 bits are the actual frequency.
+        // BitsReader reads MSB-first from byte boundary.
+        // 4 bits index: 1111 (0x0F)
+        // 24 bits freq: we'll use 3000 (0x000BB8) for simplicity
+        // 3000 = 0000 0000 0000 1011 1011 1000
+        // Stream bits: 1111 | 0000 0000 0000 1011 1011 1000
+        // Byte layout: 1111_0000 | 0000_0000 | 1011_1011 | 1000_xxxx
+        //              0xF0        0x00        0xBB        0x80
+        let data = BytesMut::from(&[0xF0, 0x00, 0xBB, 0x80][..]);
+        processor.bits_reader = crate::bytesio::bits_reader::BitsReader::new(
+            crate::bytesio::bytes_reader::BytesReader::new(data),
+        );
+        let freq = processor.get_sampling_frequency().unwrap();
+        assert_eq!(freq, 3000);
+    }
+
+    // ========== handle_sbr_ps_extension Tests ==========
+
+    #[test]
+    fn test_handle_sbr_ps_extension_not_type5_returns_ok() {
+        let mut processor = Mpeg4AacProcessor::new();
+        let data = BytesMut::from(&[0x00][..]);
+        processor.bits_reader = crate::bytesio::bits_reader::BitsReader::new(
+            crate::bytesio::bytes_reader::BytesReader::new(data),
+        );
+        let mut ext_type: u8 = 0; // not 5
+        let mut ext_freq: u32 = 0;
+        let result = processor.handle_sbr_ps_extension(&mut ext_type, &mut ext_freq);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_handle_sbr_ps_extension_type5_insufficient_bits() {
+        let mut processor = Mpeg4AacProcessor::new();
+        // Only 8 bits available, but needs 16
+        let data = BytesMut::from(&[0x00][..]);
+        processor.bits_reader = crate::bytesio::bits_reader::BitsReader::new(
+            crate::bytesio::bytes_reader::BytesReader::new(data),
+        );
+        let mut ext_type: u8 = 5;
+        let mut ext_freq: u32 = 0;
+        let result = processor.handle_sbr_ps_extension(&mut ext_type, &mut ext_freq);
+        assert!(result.is_ok()); // returns early due to insufficient bits
+    }
+
+    // ========== handle_extension_flag_type22 Tests ==========
+
+    #[test]
+    fn test_handle_extension_flag_type22() {
+        let mut processor = Mpeg4AacProcessor::new();
+        // Needs 5 + 11 = 16 bits
+        let data = BytesMut::from(&[0x00, 0x00][..]);
+        processor.bits_reader = crate::bytesio::bits_reader::BitsReader::new(
+            crate::bytesio::bytes_reader::BytesReader::new(data),
+        );
+        let result = processor.handle_extension_flag_type22();
+        assert!(result.is_ok());
+    }
+
+    // ========== handle_extension_flag_type_17_19_20_23 Tests ==========
+
+    #[test]
+    fn test_handle_extension_flag_type_17_19_20_23() {
+        let mut processor = Mpeg4AacProcessor::new();
+        // Needs 1 + 1 + 1 = 3 bits
+        let data = BytesMut::from(&[0x00][..]);
+        processor.bits_reader = crate::bytesio::bits_reader::BitsReader::new(
+            crate::bytesio::bytes_reader::BytesReader::new(data),
+        );
+        let result = processor.handle_extension_flag_type_17_19_20_23();
+        assert!(result.is_ok());
+    }
+
+    // ========== audio_specific_config_load Error Tests ==========
+
+    #[test]
+    fn test_audio_specific_config_load_empty_data() {
+        let mut processor = Mpeg4AacProcessor::new();
+        let result = processor.audio_specific_config_load();
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_audio_specific_config_load_invalid_freq_index() {
+        let mut processor = Mpeg4AacProcessor::new();
+        // Construct bytes where sampling_frequency_index = 15 (out of range)
+        // byte_0 = object_type(5 bits) | freq_hi(3 bits)
+        // byte_1 = freq_lo(1 bit) | channel(4 bits) | padding(3 bits)
+        // For freq_index=15: 1111 -> hi=111, lo=1
+        // object_type=2: 00010
+        // byte_0 = 00010 111 = 0x17
+        // byte_1 = 1 0010 000 = 0x90
+        let data = BytesMut::from(&[0x17, 0x90][..]);
+        processor.extend_data(data);
+        let result = processor.audio_specific_config_load();
+        assert!(result.is_err());
+    }
+
+    // ========== load_specific_config_by_type Tests ==========
+
+    #[test]
+    fn test_load_specific_config_by_type_unsupported_type() {
+        let mut processor = Mpeg4AacProcessor::new();
+        processor.mpeg4_aac.object_type = 30; // Not in 1..=7, 17, 19..=23, or 8
+        let data = BytesMut::from(&[0x00, 0x00][..]);
+        processor.bits_reader = crate::bytesio::bits_reader::BitsReader::new(
+            crate::bytesio::bytes_reader::BytesReader::new(data),
+        );
+        let result = processor.load_specific_config_by_type();
+        assert!(result.is_ok()); // Falls through to Ok(())
+    }
 }

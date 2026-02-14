@@ -2358,6 +2358,298 @@ mod tests {
         // Full integration test in onvif-rust/tests will validate end-to-end behavior.
     }
 
+    // ========== Statistics Helper Method Tests ==========
+
+    #[tokio::test]
+    async fn test_update_audio_statistics_publisher() {
+        let stats = Arc::new(Mutex::new(StatisticsStream::new(
+            create_test_stream_identifier(),
+        )));
+        // Publisher data (uuid = None) with AAC_RAW type (1)
+        StreamDataTransceiver::update_audio_statistics(
+            None,
+            500,
+            crate::container::define::aac_packet_type::AAC_RAW,
+            &stats,
+        )
+        .await;
+        let guard = stats.lock().await;
+        assert_eq!(guard.publisher.audio.recv_bytes, 500);
+        assert_eq!(guard.total_recv_bytes, 500);
+    }
+
+    #[tokio::test]
+    async fn test_update_audio_statistics_publisher_non_raw() {
+        let stats = Arc::new(Mutex::new(StatisticsStream::new(
+            create_test_stream_identifier(),
+        )));
+        // Publisher data with non-RAW type should only update total_recv_bytes
+        StreamDataTransceiver::update_audio_statistics(
+            None,
+            200,
+            crate::container::define::aac_packet_type::AAC_SEQHDR,
+            &stats,
+        )
+        .await;
+        let guard = stats.lock().await;
+        assert_eq!(guard.publisher.audio.recv_bytes, 0);
+        assert_eq!(guard.total_recv_bytes, 200);
+    }
+
+    #[tokio::test]
+    async fn test_update_audio_statistics_subscriber() {
+        let stats = Arc::new(Mutex::new(StatisticsStream::new(
+            create_test_stream_identifier(),
+        )));
+        let sub_id = Uuid::new(crate::streamhub::utils::RandomDigitCount::Four);
+        // Add a subscriber first
+        StreamDataTransceiver::add_subscriber(
+            sub_id,
+            "127.0.0.1:5000".to_string(),
+            SubscribeType::RtmpPull,
+            chrono::Local::now(),
+            &stats,
+        )
+        .await;
+        // Update audio statistics for subscriber
+        StreamDataTransceiver::update_audio_statistics(Some(sub_id), 300, 0, &stats).await;
+        let guard = stats.lock().await;
+        let sub = guard.subscribers.get(&sub_id).unwrap();
+        assert_eq!(sub.send_bytes, 300);
+        assert_eq!(guard.total_send_bytes, 300);
+    }
+
+    #[tokio::test]
+    async fn test_update_video_statistics_publisher() {
+        let stats = Arc::new(Mutex::new(StatisticsStream::new(
+            create_test_stream_identifier(),
+        )));
+        StreamDataTransceiver::update_video_statistics(None, 1000, 2, Some(false), &stats).await;
+        let guard = stats.lock().await;
+        assert_eq!(guard.publisher.video.recv_bytes, 1000);
+        assert_eq!(guard.publisher.video.recv_frame_count, 2);
+        assert_eq!(guard.publisher.recv_bytes, 1000);
+        assert_eq!(guard.total_recv_bytes, 1000);
+        assert_eq!(guard.publisher.video.recv_frame_count_for_gop, 2);
+    }
+
+    #[tokio::test]
+    async fn test_update_video_statistics_subscriber() {
+        let stats = Arc::new(Mutex::new(StatisticsStream::new(
+            create_test_stream_identifier(),
+        )));
+        let sub_id = Uuid::new(crate::streamhub::utils::RandomDigitCount::Four);
+        StreamDataTransceiver::add_subscriber(
+            sub_id,
+            "10.0.0.1:8080".to_string(),
+            SubscribeType::RtspPull,
+            chrono::Local::now(),
+            &stats,
+        )
+        .await;
+        StreamDataTransceiver::update_video_statistics(Some(sub_id), 800, 1, None, &stats).await;
+        let guard = stats.lock().await;
+        let sub = guard.subscribers.get(&sub_id).unwrap();
+        assert_eq!(sub.send_bytes, 800);
+        assert_eq!(sub.total_send_bytes, 800);
+        assert_eq!(guard.total_send_bytes, 800);
+    }
+
+    #[tokio::test]
+    async fn test_update_audio_codec_info() {
+        let stats = Arc::new(Mutex::new(StatisticsStream::new(
+            create_test_stream_identifier(),
+        )));
+        StreamDataTransceiver::update_audio_codec_info(
+            crate::container::define::SoundFormat::AAC,
+            crate::container::define::AacProfile::LC,
+            48000,
+            2,
+            &stats,
+        )
+        .await;
+        let guard = stats.lock().await;
+        assert_eq!(guard.publisher.audio.samplerate, 48000);
+        assert_eq!(guard.publisher.audio.channels, 2);
+    }
+
+    #[tokio::test]
+    async fn test_update_video_codec_info() {
+        let stats = Arc::new(Mutex::new(StatisticsStream::new(
+            create_test_stream_identifier(),
+        )));
+        StreamDataTransceiver::update_video_codec_info(
+            crate::container::define::AvcCodecId::H264,
+            crate::container::define::AvcProfile::High,
+            crate::container::define::AvcLevel::Level4,
+            1920,
+            1080,
+            &stats,
+        )
+        .await;
+        let guard = stats.lock().await;
+        assert_eq!(guard.publisher.video.width, 1920);
+        assert_eq!(guard.publisher.video.height, 1080);
+    }
+
+    #[tokio::test]
+    async fn test_update_publisher_info() {
+        let stats = Arc::new(Mutex::new(StatisticsStream::new(
+            create_test_stream_identifier(),
+        )));
+        let pub_id = Uuid::new(crate::streamhub::utils::RandomDigitCount::Four);
+        let now = chrono::Local::now();
+        StreamDataTransceiver::update_publisher_info(
+            pub_id,
+            "192.168.1.100:1935".to_string(),
+            now,
+            &stats,
+        )
+        .await;
+        let guard = stats.lock().await;
+        assert_eq!(guard.publisher.id, pub_id);
+        assert_eq!(guard.publisher.remote_address, "192.168.1.100:1935");
+    }
+
+    #[tokio::test]
+    async fn test_add_subscriber() {
+        let stats = Arc::new(Mutex::new(StatisticsStream::new(
+            create_test_stream_identifier(),
+        )));
+        let sub_id = Uuid::new(crate::streamhub::utils::RandomDigitCount::Four);
+        StreamDataTransceiver::add_subscriber(
+            sub_id,
+            "10.0.0.5:8080".to_string(),
+            SubscribeType::RtspPull,
+            chrono::Local::now(),
+            &stats,
+        )
+        .await;
+        let guard = stats.lock().await;
+        assert!(guard.subscribers.contains_key(&sub_id));
+        let sub = guard.subscribers.get(&sub_id).unwrap();
+        assert_eq!(sub.remote_address, "10.0.0.5:8080");
+        assert_eq!(sub.send_bytes, 0);
+    }
+
+    #[tokio::test]
+    async fn test_receive_statistics_data_audio_codec() {
+        let stats = Arc::new(Mutex::new(StatisticsStream::new(
+            create_test_stream_identifier(),
+        )));
+        StreamDataTransceiver::receive_statistics_data(
+            Some(StatisticData::AudioCodec {
+                sound_format: crate::container::define::SoundFormat::AAC,
+                profile: crate::container::define::AacProfile::LC,
+                samplerate: 44100,
+                channels: 1,
+            }),
+            &stats,
+        )
+        .await;
+        let guard = stats.lock().await;
+        assert_eq!(guard.publisher.audio.samplerate, 44100);
+        assert_eq!(guard.publisher.audio.channels, 1);
+    }
+
+    #[tokio::test]
+    async fn test_receive_statistics_data_video_codec() {
+        let stats = Arc::new(Mutex::new(StatisticsStream::new(
+            create_test_stream_identifier(),
+        )));
+        StreamDataTransceiver::receive_statistics_data(
+            Some(StatisticData::VideoCodec {
+                codec: crate::container::define::AvcCodecId::H264,
+                profile: crate::container::define::AvcProfile::Baseline,
+                level: crate::container::define::AvcLevel::Level3,
+                width: 1280,
+                height: 720,
+            }),
+            &stats,
+        )
+        .await;
+        let guard = stats.lock().await;
+        assert_eq!(guard.publisher.video.width, 1280);
+        assert_eq!(guard.publisher.video.height, 720);
+    }
+
+    #[tokio::test]
+    async fn test_receive_statistics_data_none() {
+        let stats = Arc::new(Mutex::new(StatisticsStream::new(
+            create_test_stream_identifier(),
+        )));
+        // Passing None should be a no-op
+        StreamDataTransceiver::receive_statistics_data(None, &stats).await;
+        let guard = stats.lock().await;
+        assert_eq!(guard.total_recv_bytes, 0);
+        assert_eq!(guard.total_send_bytes, 0);
+    }
+
+    #[tokio::test]
+    async fn test_receive_frame_data_none_is_noop() {
+        let senders: Arc<Mutex<HashMap<Uuid, FrameDataSender>>> =
+            Arc::new(Mutex::new(HashMap::new()));
+        // Passing None should not panic
+        StreamDataTransceiver::receive_frame_data(None, &senders).await;
+        assert!(senders.lock().await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_receive_packet_data_none_is_noop() {
+        let senders: Arc<Mutex<HashMap<Uuid, PacketDataSender>>> =
+            Arc::new(Mutex::new(HashMap::new()));
+        StreamDataTransceiver::receive_packet_data(None, &senders).await;
+        assert!(senders.lock().await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_receive_frame_data_video_forwarded() {
+        let senders: Arc<Mutex<HashMap<Uuid, FrameDataSender>>> =
+            Arc::new(Mutex::new(HashMap::new()));
+        let id = Uuid::new(crate::streamhub::utils::RandomDigitCount::Four);
+        let (tx, mut rx) = mpsc::unbounded_channel::<FrameData>();
+        senders.lock().await.insert(id, tx);
+
+        let frame = FrameData::Video {
+            timestamp: 42,
+            data: BytesMut::from(&[0xAA, 0xBB][..]),
+        };
+        StreamDataTransceiver::receive_frame_data(Some(frame), &senders).await;
+
+        let received = rx.try_recv().unwrap();
+        match received {
+            FrameData::Video { timestamp, data } => {
+                assert_eq!(timestamp, 42);
+                assert_eq!(data.as_ref(), &[0xAA, 0xBB]);
+            }
+            _ => panic!("expected Video frame"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_receive_packet_data_video_forwarded() {
+        let senders: Arc<Mutex<HashMap<Uuid, PacketDataSender>>> =
+            Arc::new(Mutex::new(HashMap::new()));
+        let id = Uuid::new(crate::streamhub::utils::RandomDigitCount::Four);
+        let (tx, mut rx) = mpsc::unbounded_channel::<PacketData>();
+        senders.lock().await.insert(id, tx);
+
+        let packet = PacketData::Video {
+            timestamp: 99,
+            data: BytesMut::from(&[0xCC][..]),
+        };
+        StreamDataTransceiver::receive_packet_data(Some(packet), &senders).await;
+
+        let received = rx.try_recv().unwrap();
+        match received {
+            PacketData::Video { timestamp, data } => {
+                assert_eq!(timestamp, 99);
+                assert_eq!(data.as_ref(), &[0xCC]);
+            }
+            _ => panic!("expected Video packet"),
+        }
+    }
+
     #[tokio::test]
     async fn test_get_subscriber_count_decrements_on_unsubscribe() {
         // Test that subscriber count decreases when a subscriber is removed
@@ -2398,5 +2690,108 @@ mod tests {
         tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
 
         // Verification happens in full integration test
+    }
+
+    // ========================================================================
+    // statistics_to_value Tests
+    // ========================================================================
+
+    #[test]
+    fn test_statistics_to_value_empty_data_no_top_n() {
+        let data: Vec<StatisticsStream> = vec![];
+        let result = StreamsHub::statistics_to_value(data, None).unwrap();
+        assert!(result.is_array());
+        assert_eq!(result.as_array().unwrap().len(), 0);
+    }
+
+    #[test]
+    fn test_statistics_to_value_single_stream_no_top_n() {
+        let stream = StatisticsStream::new(StreamIdentifier::Rtsp {
+            stream_path: "/live/cam1".to_string(),
+        });
+        let data = vec![stream];
+        let result = StreamsHub::statistics_to_value(data, None).unwrap();
+        assert!(result.is_array());
+        assert_eq!(result.as_array().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn test_statistics_to_value_with_top_n_limits_results() {
+        let mut streams = Vec::new();
+        for i in 0..5 {
+            let mut s = StatisticsStream::new(StreamIdentifier::Rtsp {
+                stream_path: format!("/live/cam{}", i),
+            });
+            s.subscriber_count = i;
+            streams.push(s);
+        }
+
+        let result = StreamsHub::statistics_to_value(streams, Some(2)).unwrap();
+        let arr = result.as_array().unwrap();
+        assert_eq!(arr.len(), 2);
+    }
+
+    #[test]
+    fn test_statistics_to_value_with_top_n_sorts_by_subscriber_count_desc() {
+        let mut streams = Vec::new();
+        for i in 0..3 {
+            let mut s = StatisticsStream::new(StreamIdentifier::Rtsp {
+                stream_path: format!("/live/cam{}", i),
+            });
+            s.subscriber_count = i;
+            streams.push(s);
+        }
+
+        let result = StreamsHub::statistics_to_value(streams, Some(3)).unwrap();
+        let arr = result.as_array().unwrap();
+        // Sorted descending by subscriber_count: 2, 1, 0
+        assert_eq!(arr[0]["subscriber_count"], 2);
+        assert_eq!(arr[1]["subscriber_count"], 1);
+        assert_eq!(arr[2]["subscriber_count"], 0);
+    }
+
+    #[test]
+    fn test_statistics_to_value_top_n_larger_than_data() {
+        let s = StatisticsStream::new(StreamIdentifier::Unknown);
+        let data = vec![s];
+        let result = StreamsHub::statistics_to_value(data, Some(10)).unwrap();
+        let arr = result.as_array().unwrap();
+        assert_eq!(arr.len(), 1);
+    }
+
+    #[test]
+    fn test_statistics_to_value_top_n_zero_returns_empty() {
+        let s = StatisticsStream::new(StreamIdentifier::Unknown);
+        let data = vec![s];
+        let result = StreamsHub::statistics_to_value(data, Some(0)).unwrap();
+        let arr = result.as_array().unwrap();
+        assert_eq!(arr.len(), 0);
+    }
+
+    // ========================================================================
+    // get_hub_event_sender / get_client_event_consumer Tests
+    // ========================================================================
+
+    #[test]
+    fn test_get_hub_event_sender_returns_valid_sender() {
+        let mut hub = StreamsHub::new(None);
+        let sender = hub.get_hub_event_sender();
+        // Sending an event should succeed since the receiver exists within the hub
+        assert!(sender
+            .send(StreamHubEvent::Request {
+                identifier: StreamIdentifier::Unknown,
+                sender: {
+                    let (tx, _) = mpsc::unbounded_channel();
+                    tx
+                },
+            })
+            .is_ok());
+    }
+
+    #[test]
+    fn test_get_client_event_consumer_returns_receiver() {
+        let mut hub = StreamsHub::new(None);
+        let _receiver = hub.get_client_event_consumer();
+        // Just verify it returns without panic — the receiver type is opaque
     }
 }

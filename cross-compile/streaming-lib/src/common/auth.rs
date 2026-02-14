@@ -885,6 +885,237 @@ mod tests {
     }
 
     // ============================================
+    // Builder Method Tests
+    // ============================================
+
+    #[test]
+    fn test_with_basic_realm_empty_string_keeps_default() {
+        let auth = Auth::new(
+            "key".to_string(),
+            "password".to_string(),
+            None,
+            AuthAlgorithm::Simple,
+            AuthType::Both,
+        )
+        .with_basic_realm("");
+        // Empty realm should NOT change the default
+        assert_eq!(auth.basic_challenge(), "Basic realm=\"streaming-lib\"");
+    }
+
+    #[test]
+    fn test_with_credential_validator_returns_self() {
+        let auth = Auth::new(
+            "key".to_string(),
+            "password".to_string(),
+            None,
+            AuthAlgorithm::Simple,
+            AuthType::Both,
+        )
+        .with_credential_validator(Arc::new(|_u, _p| true));
+        assert!(auth.credential_validator.is_some());
+    }
+
+    // ============================================
+    // is_basic_auth Edge Cases
+    // ============================================
+
+    #[test]
+    fn test_authenticate_request_short_header_not_basic() {
+        let auth = Auth::new(
+            "key".to_string(),
+            "password".to_string(),
+            None,
+            AuthAlgorithm::Simple,
+            AuthType::Pull,
+        )
+        .with_credential_validator(Arc::new(|_u, _p| false));
+        // Header shorter than "Basic " (6 chars) should NOT be treated as basic auth
+        let result = auth.authenticate_request("stream", &None, Some("Ba"), true);
+        assert!(result.is_err());
+    }
+
+    // ============================================
+    // parse_basic_credentials Edge Cases
+    // ============================================
+
+    #[test]
+    fn test_parse_basic_credentials_empty_encoded() {
+        let result = parse_basic_credentials("Basic ");
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err().value,
+            AuthErrorValue::InvalidTokenFormat
+        ));
+    }
+
+    #[test]
+    fn test_parse_basic_credentials_no_colon_in_decoded() {
+        // base64("nocolon") = "bm9jb2xvbg=="
+        let result = parse_basic_credentials("Basic bm9jb2xvbg==");
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err().value,
+            AuthErrorValue::InvalidCredentials
+        ));
+    }
+
+    #[test]
+    fn test_parse_basic_credentials_no_space() {
+        let result = parse_basic_credentials("BasicYWRtaW46c2VjcmV0");
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err().value,
+            AuthErrorValue::InvalidTokenFormat
+        ));
+    }
+
+    #[test]
+    fn test_parse_basic_credentials_invalid_utf8() {
+        // base64 of [0xFF, 0xFE, 0x3A, 0x70] — invalid UTF-8 before the colon
+        let result = parse_basic_credentials("Basic //4DcA==");
+        // Should fail because decoded bytes aren't valid UTF-8
+        assert!(result.is_err());
+    }
+
+    // ============================================
+    // authenticate_request Fallback Paths
+    // ============================================
+
+    #[test]
+    fn test_authenticate_request_no_query_no_header() {
+        let auth = Auth::new(
+            "key".to_string(),
+            "password".to_string(),
+            None,
+            AuthAlgorithm::Simple,
+            AuthType::Pull,
+        );
+        let result = auth.authenticate_request("stream", &None, None, true);
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err().value,
+            AuthErrorValue::NoTokenFound
+        ));
+    }
+
+    #[test]
+    fn test_authenticate_request_auth_none_skips_all() {
+        let auth = Auth::new(
+            "key".to_string(),
+            "password".to_string(),
+            None,
+            AuthAlgorithm::Simple,
+            AuthType::None,
+        );
+        // Even without token, auth_type=None should pass
+        let result = auth.authenticate_request("stream", &None, None, true);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_authenticate_request_bearer_token_success() {
+        let auth = Auth::new(
+            "key".to_string(),
+            "password".to_string(),
+            None,
+            AuthAlgorithm::Simple,
+            AuthType::Pull,
+        );
+        let result = auth.authenticate_request("stream", &None, Some("Bearer password"), true);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_authenticate_request_bearer_token_wrong_password() {
+        let auth = Auth::new(
+            "key".to_string(),
+            "password".to_string(),
+            None,
+            AuthAlgorithm::Simple,
+            AuthType::Pull,
+        );
+        let result = auth.authenticate_request("stream", &None, Some("Bearer wrong"), true);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_authenticate_request_query_takes_priority_over_header() {
+        // If query has valid token, header is not checked
+        let auth = Auth::new(
+            "key".to_string(),
+            "password".to_string(),
+            None,
+            AuthAlgorithm::Simple,
+            AuthType::Pull,
+        );
+        let result = auth.authenticate_request(
+            "stream",
+            &Some("token=password".to_string()),
+            Some("Bearer wrong"),
+            true,
+        );
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_authenticate_request_query_fails_falls_to_header() {
+        // Query has no token= param, so falls through to bearer header
+        let auth = Auth::new(
+            "key".to_string(),
+            "password".to_string(),
+            None,
+            AuthAlgorithm::Simple,
+            AuthType::Pull,
+        );
+        let result = auth.authenticate_request(
+            "stream",
+            &Some("other=value".to_string()),
+            Some("Bearer password"),
+            true,
+        );
+        // Query auth fails (no token), but returns Some(Err(NoTokenFound))
+        // which is used, so header is not checked. authenticate_request uses .or_else
+        // which only falls through on None, not on Some(Err).
+        assert!(result.is_err());
+    }
+
+    // ============================================
+    // AuthAlgorithm Debug Tests
+    // ============================================
+
+    #[test]
+    fn test_auth_algorithm_debug() {
+        let simple = AuthAlgorithm::Simple;
+        let md5 = AuthAlgorithm::Md5;
+        assert!(format!("{:?}", simple).contains("Simple"));
+        assert!(format!("{:?}", md5).contains("Md5"));
+    }
+
+    #[test]
+    fn test_auth_type_debug() {
+        assert!(format!("{:?}", AuthType::Pull).contains("Pull"));
+        assert!(format!("{:?}", AuthType::Push).contains("Push"));
+        assert!(format!("{:?}", AuthType::Both).contains("Both"));
+        assert!(format!("{:?}", AuthType::None).contains("None"));
+    }
+
+    #[test]
+    fn test_secret_carrier_query_variant() {
+        let carrier = SecretCarrier::Query("token=abc".to_string());
+        let result = get_secret(&carrier);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), "abc");
+    }
+
+    #[test]
+    fn test_secret_carrier_bearer_variant() {
+        let carrier = SecretCarrier::Bearer("Bearer abc".to_string());
+        let result = get_secret(&carrier);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), "abc");
+    }
+
+    // ============================================
     // Edge Cases
     // ============================================
 

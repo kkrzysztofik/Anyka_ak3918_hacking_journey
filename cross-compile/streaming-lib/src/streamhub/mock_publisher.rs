@@ -1107,12 +1107,15 @@ fn compute_fps(frames: u64, elapsed: Duration) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::{
-        MockVideoPublisher, compute_fps, generate_sdp_from_sps_pps, is_first_vcl_slice,
-        remove_emulation_prevention_bytes,
+        MockVideoPublisher, PublisherError, RbspBitReader, append_annexb_nal, base64_encode,
+        build_pacer, compute_fps, generate_sdp_from_sps_pps, has_no_subscribers,
+        is_first_vcl_slice, remove_emulation_prevention_bytes, send_param_set_frame,
     };
     use crate::codec::h264_file_reader::H264FileReader;
     use crate::streamhub::define::{DataSender, FrameData, SubscribeType, TStreamHandler};
+    use bytes::BytesMut;
     use portable_atomic::Ordering;
+    use std::sync::Arc;
     use std::time::Duration;
     use tokio::sync::mpsc;
 
@@ -1452,5 +1455,342 @@ mod tests {
     fn test_remove_emulation_prevention_bytes() {
         let rbsp = remove_emulation_prevention_bytes(&[0x00, 0x00, 0x03, 0x01, 0x22]);
         assert_eq!(rbsp, vec![0x00, 0x00, 0x01, 0x22]);
+    }
+
+    // ========== base64_encode Tests ==========
+
+    #[test]
+    fn test_base64_encode_empty() {
+        assert_eq!(base64_encode(&[]), "");
+    }
+
+    #[test]
+    fn test_base64_encode_single_byte() {
+        // 0x41 = 'A' => 01000001 => groups: 010000 01xxxx xxxxxx
+        // With padding: QQ==
+        let result = base64_encode(&[0x41]);
+        assert_eq!(result, "QQ==");
+    }
+
+    #[test]
+    fn test_base64_encode_two_bytes() {
+        // "AB" = [0x41, 0x42] => QUI=
+        let result = base64_encode(&[0x41, 0x42]);
+        assert_eq!(result, "QUI=");
+    }
+
+    #[test]
+    fn test_base64_encode_three_bytes() {
+        // "ABC" = [0x41, 0x42, 0x43] => QUJD (no padding)
+        let result = base64_encode(&[0x41, 0x42, 0x43]);
+        assert_eq!(result, "QUJD");
+    }
+
+    #[test]
+    fn test_base64_encode_sps_data() {
+        // Typical SPS: [0x67, 0x42, 0xE0, 0x1E] => Z0LgHg==
+        let sps = [0x67, 0x42, 0xE0, 0x1E];
+        let result = base64_encode(&sps);
+        // Verify it produces a non-empty base64 string with correct length
+        assert!(!result.is_empty());
+        // 4 bytes -> ceil(4/3)*4 = 8 chars
+        assert_eq!(result.len(), 8);
+    }
+
+    #[test]
+    fn test_base64_encode_all_zeros() {
+        let result = base64_encode(&[0x00, 0x00, 0x00]);
+        assert_eq!(result, "AAAA");
+    }
+
+    #[test]
+    fn test_base64_encode_all_ones() {
+        let result = base64_encode(&[0xFF, 0xFF, 0xFF]);
+        assert_eq!(result, "////");
+    }
+
+    // ========== RbspBitReader Tests ==========
+
+    #[test]
+    fn test_rbsp_bit_reader_new_empty() {
+        let reader = RbspBitReader::new(&[]);
+        assert_eq!(reader.byte_pos, 0);
+        assert_eq!(reader.bits_remaining, 0);
+    }
+
+    #[test]
+    fn test_rbsp_bit_reader_read_bit_single_byte() {
+        let data = [0b1010_0000];
+        let mut reader = RbspBitReader::new(&data);
+        assert_eq!(reader.read_bit(), Some(1));
+        assert_eq!(reader.read_bit(), Some(0));
+        assert_eq!(reader.read_bit(), Some(1));
+        assert_eq!(reader.read_bit(), Some(0));
+    }
+
+    #[test]
+    fn test_rbsp_bit_reader_read_bit_exhausted() {
+        let data = [0xFF];
+        let mut reader = RbspBitReader::new(&data);
+        for _ in 0..8 {
+            assert!(reader.read_bit().is_some());
+        }
+        assert!(reader.read_bit().is_none());
+    }
+
+    #[test]
+    fn test_rbsp_bit_reader_read_bits() {
+        let data = [0b1100_1010];
+        let mut reader = RbspBitReader::new(&data);
+        assert_eq!(reader.read_bits(4), Some(0b1100));
+        assert_eq!(reader.read_bits(4), Some(0b1010));
+    }
+
+    #[test]
+    fn test_rbsp_bit_reader_read_ue_zero() {
+        // ue(0) = "1" => single 1 bit
+        let data = [0b1000_0000];
+        let mut reader = RbspBitReader::new(&data);
+        assert_eq!(reader.read_ue(), Some(0));
+    }
+
+    #[test]
+    fn test_rbsp_bit_reader_read_ue_one() {
+        // ue(1) = "010" => 0 leading zeros, prefix 1, suffix 0 => code_num = 1
+        let data = [0b0100_0000];
+        let mut reader = RbspBitReader::new(&data);
+        assert_eq!(reader.read_ue(), Some(1));
+    }
+
+    #[test]
+    fn test_rbsp_bit_reader_read_ue_two() {
+        // ue(2) = "011"
+        let data = [0b0110_0000];
+        let mut reader = RbspBitReader::new(&data);
+        assert_eq!(reader.read_ue(), Some(2));
+    }
+
+    #[test]
+    fn test_rbsp_bit_reader_read_ue_seven() {
+        // ue(7) = "0001000" => 3 leading zeros
+        let data = [0b0001_0000];
+        let mut reader = RbspBitReader::new(&data);
+        assert_eq!(reader.read_ue(), Some(7));
+    }
+
+    #[test]
+    fn test_rbsp_bit_reader_skips_emulation_prevention() {
+        // [0x00, 0x00, 0x03, 0x01] should read as [0x00, 0x00, 0x01]
+        let data = [0x00, 0x00, 0x03, 0x01];
+        let mut reader = RbspBitReader::new(&data);
+        assert_eq!(reader.next_rbsp_byte(), Some(0x00));
+        assert_eq!(reader.next_rbsp_byte(), Some(0x00));
+        // 0x03 is emulation prevention byte, should be skipped
+        assert_eq!(reader.next_rbsp_byte(), Some(0x01));
+        assert_eq!(reader.next_rbsp_byte(), None);
+    }
+
+    #[test]
+    fn test_rbsp_bit_reader_read_ue_empty() {
+        let mut reader = RbspBitReader::new(&[]);
+        assert_eq!(reader.read_ue(), None);
+    }
+
+    // ========== append_annexb_nal Tests ==========
+
+    #[test]
+    fn test_append_annexb_nal_empty() {
+        let mut buf = BytesMut::new();
+        append_annexb_nal(&mut buf, &[]);
+        assert_eq!(buf.as_ref(), &[0x00, 0x00, 0x00, 0x01]);
+    }
+
+    #[test]
+    fn test_append_annexb_nal_sps() {
+        let mut buf = BytesMut::new();
+        append_annexb_nal(&mut buf, &[0x67, 0x42]);
+        assert_eq!(buf.as_ref(), &[0x00, 0x00, 0x00, 0x01, 0x67, 0x42]);
+    }
+
+    #[test]
+    fn test_append_annexb_nal_multiple() {
+        let mut buf = BytesMut::new();
+        append_annexb_nal(&mut buf, &[0x67]);
+        append_annexb_nal(&mut buf, &[0x68]);
+        assert_eq!(
+            buf.as_ref(),
+            &[0x00, 0x00, 0x00, 0x01, 0x67, 0x00, 0x00, 0x00, 0x01, 0x68]
+        );
+    }
+
+    // ========== has_no_subscribers Tests ==========
+
+    #[test]
+    fn test_has_no_subscribers_none_callback() {
+        assert!(!has_no_subscribers(&None));
+    }
+
+    #[test]
+    fn test_has_no_subscribers_zero_count() {
+        let cb: Arc<dyn Fn() -> usize + Send + Sync> = Arc::new(|| 0);
+        assert!(has_no_subscribers(&Some(cb)));
+    }
+
+    #[test]
+    fn test_has_no_subscribers_nonzero_count() {
+        let cb: Arc<dyn Fn() -> usize + Send + Sync> = Arc::new(|| 3);
+        assert!(!has_no_subscribers(&Some(cb)));
+    }
+
+    // ========== build_pacer Tests ==========
+
+    #[test]
+    fn test_build_pacer_zero_interval() {
+        let pacer = build_pacer(Duration::from_millis(0));
+        assert!(pacer.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_build_pacer_nonzero_interval() {
+        let pacer = build_pacer(Duration::from_millis(40));
+        assert!(pacer.is_some());
+    }
+
+    // ========== PublisherError Display Tests ==========
+
+    #[test]
+    fn test_publisher_error_h264_display() {
+        use crate::codec::h264_file_reader::H264FileError;
+        let err = PublisherError::H264Error(H264FileError::InvalidFormat);
+        let msg = format!("{}", err);
+        assert!(msg.contains("H264 file error"));
+    }
+
+    #[test]
+    fn test_publisher_error_channel_display() {
+        let err = PublisherError::ChannelError;
+        assert_eq!(format!("{}", err), "Channel send error");
+    }
+
+    #[test]
+    fn test_publisher_error_stream_stopped_display() {
+        let err = PublisherError::StreamStopped;
+        assert_eq!(format!("{}", err), "Stream already stopped");
+    }
+
+    // ========== send_param_set_frame Tests ==========
+
+    #[test]
+    fn test_send_param_set_frame_sends_video_data() {
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        send_param_set_frame(&tx, &[0x67, 0x42], 0, 0, 40, "SPS");
+        let frame = rx.try_recv().unwrap();
+        match frame {
+            FrameData::Video { timestamp, data } => {
+                assert_eq!(timestamp, 0);
+                assert_eq!(data.as_ref(), &[0x67, 0x42]);
+            }
+            _ => panic!("expected Video frame"),
+        }
+    }
+
+    #[test]
+    fn test_send_param_set_frame_computes_timestamp() {
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        send_param_set_frame(&tx, &[0x68], 100, 5, 40, "PPS");
+        let frame = rx.try_recv().unwrap();
+        match frame {
+            FrameData::Video { timestamp, .. } => {
+                assert_eq!(timestamp, 100 + 5 * 40);
+            }
+            _ => panic!("expected Video frame"),
+        }
+    }
+
+    // ========== generate_sdp_from_sps_pps Edge Cases ==========
+
+    #[test]
+    fn test_generate_sdp_short_sps_uses_default_profile() {
+        // SPS with fewer than 4 bytes should use default profile-level-id
+        let sps = [0x67, 0x42];
+        let pps = [0x68];
+        let sdp = generate_sdp_from_sps_pps(&sps, &pps);
+        assert!(sdp.contains("profile-level-id=42e01e"));
+    }
+
+    #[test]
+    fn test_generate_sdp_empty_sps() {
+        let sdp = generate_sdp_from_sps_pps(&[], &[]);
+        assert!(sdp.contains("profile-level-id=42e01e"));
+        assert!(sdp.contains("v=0"));
+    }
+
+    #[test]
+    fn test_generate_sdp_contains_sendonly() {
+        let sps = [0x67, 0x42, 0xE0, 0x1E];
+        let pps = [0x68, 0xCE];
+        let sdp = generate_sdp_from_sps_pps(&sps, &pps);
+        assert!(sdp.contains("a=sendonly"));
+    }
+
+    // ========== remove_emulation_prevention_bytes Edge Cases ==========
+
+    #[test]
+    fn test_remove_emulation_prevention_bytes_no_epb() {
+        let data = [0x01, 0x02, 0x03, 0x04];
+        let result = remove_emulation_prevention_bytes(&data);
+        assert_eq!(result, data.to_vec());
+    }
+
+    #[test]
+    fn test_remove_emulation_prevention_bytes_multiple_epb() {
+        // Two emulation prevention bytes
+        let data = [0x00, 0x00, 0x03, 0x00, 0x00, 0x00, 0x03, 0x01];
+        let result = remove_emulation_prevention_bytes(&data);
+        assert_eq!(result, vec![0x00, 0x00, 0x00, 0x00, 0x00, 0x01]);
+    }
+
+    #[test]
+    fn test_remove_emulation_prevention_bytes_empty() {
+        let result = remove_emulation_prevention_bytes(&[]);
+        assert!(result.is_empty());
+    }
+
+    // ========== is_first_vcl_slice Edge Cases ==========
+
+    #[test]
+    fn test_is_first_vcl_slice_empty_nal() {
+        assert!(is_first_vcl_slice(&[]));
+    }
+
+    #[test]
+    fn test_is_first_vcl_slice_single_byte() {
+        assert!(is_first_vcl_slice(&[0x41]));
+    }
+
+    #[test]
+    fn test_is_first_vcl_slice_idr_type() {
+        // nal_type=5 (IDR), first_mb_in_slice=0 (Exp-Golomb "1" = bit 1 at MSB)
+        assert!(is_first_vcl_slice(&[0x65, 0x80]));
+    }
+
+    #[test]
+    fn test_is_first_vcl_slice_non_vcl_type() {
+        // nal_type=7 (SPS) - not 1 or 5, should return true
+        assert!(is_first_vcl_slice(&[0x67, 0x42]));
+    }
+
+    // ========== compute_fps Edge Cases ==========
+
+    #[test]
+    fn test_compute_fps_fractional() {
+        let fps = compute_fps(25, Duration::from_secs(1));
+        assert!((fps - 25.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_compute_fps_zero_frames() {
+        let fps = compute_fps(0, Duration::from_secs(1));
+        assert!((fps - 0.0).abs() < f64::EPSILON);
     }
 }

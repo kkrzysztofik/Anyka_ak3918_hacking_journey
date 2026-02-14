@@ -212,4 +212,103 @@ mod tests {
         ));
         // Variants with wrapped errors are tested via From traits above
     }
+
+    // ========== Additional From Trait Tests ==========
+
+    #[tokio::test]
+    async fn test_httpflv_error_from_recv_error() {
+        let (tx, rx) = tokio::sync::oneshot::channel::<()>();
+        drop(tx); // Drop sender to trigger RecvError
+        let recv_err = rx.await.unwrap_err();
+        let http_error: HttpFLvError = recv_err.into();
+        match http_error.value {
+            HttpFLvErrorValue::RecvError(_) => {}
+            _ => panic!("Expected RecvError variant"),
+        }
+    }
+
+    // ========== Additional Display Tests ==========
+
+    #[test]
+    fn test_httpflv_error_value_unexpected_frame_data_display() {
+        let error = HttpFLvErrorValue::UnexpectedFrameData("bad data".to_string());
+        let display = format!("{}", error);
+        assert!(display.contains("unexpected frame data"));
+        assert!(display.contains("bad data"));
+    }
+
+    #[test]
+    fn test_httpflv_error_value_missing_frame_receiver_display() {
+        let error = HttpFLvErrorValue::MissingFrameReceiver;
+        assert_eq!(format!("{}", error), "missing frame receiver");
+    }
+
+    #[test]
+    fn test_server_error_display() {
+        let error = ServerError {
+            value: ServerErrorValue::Error,
+        };
+        assert_eq!(format!("{}", error), "server error");
+    }
+
+    #[tokio::test]
+    async fn test_httpflv_error_from_recv_error_display() {
+        let (tx, rx) = tokio::sync::oneshot::channel::<()>();
+        drop(tx);
+        let recv_err = rx.await.unwrap_err();
+        let http_error: HttpFLvError = recv_err.into();
+        let display = format!("{}", http_error);
+        assert!(display.contains("oneshot receiver err"));
+    }
+
+    #[test]
+    fn test_httpflv_error_from_stream_hub_error_display() {
+        use crate::streamhub::errors::{StreamHubError, StreamHubErrorValue};
+        let hub_error = StreamHubError {
+            value: StreamHubErrorValue::NoAppName,
+        };
+        let http_error: HttpFLvError = hub_error.into();
+        let display = format!("{}", http_error);
+        assert!(display.contains("event execute error"));
+    }
+
+    #[test]
+    fn test_httpflv_error_value_muxer_error_display() {
+        use crate::bytesio::bytes_errors::{BytesWriteError, BytesWriteErrorValue};
+        use crate::container::errors::{FlvMuxerError, MuxerErrorValue};
+        let write_error = BytesWriteError {
+            value: BytesWriteErrorValue::OutofIndex,
+        };
+        let muxer_error = FlvMuxerError {
+            value: MuxerErrorValue::BytesWriteError(write_error),
+        };
+        let error = HttpFLvErrorValue::MuxerError(muxer_error);
+        let display = format!("{}", error);
+        assert!(display.contains("flv muxer error"));
+    }
+
+    #[test]
+    fn test_httpflv_error_value_amf0_write_error_display() {
+        use crate::container::amf0::errors::{Amf0WriteError, Amf0WriteErrorValue};
+        let amf_error = Amf0WriteError(Amf0WriteErrorValue::NormalStringTooLong);
+        let error = HttpFLvErrorValue::Amf0WriteError(amf_error);
+        let display = format!("{}", error);
+        assert!(display.contains("amf write error"));
+    }
+
+    // ========== Debug Tests ==========
+
+    #[test]
+    fn test_httpflv_error_value_debug() {
+        let error = HttpFLvErrorValue::Error;
+        let debug = format!("{:?}", error);
+        assert!(debug.contains("Error"));
+    }
+
+    #[test]
+    fn test_server_error_value_debug() {
+        let error = ServerErrorValue::Error;
+        let debug = format!("{:?}", error);
+        assert!(debug.contains("Error"));
+    }
 }

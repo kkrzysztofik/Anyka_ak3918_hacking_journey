@@ -693,4 +693,151 @@ mod tests {
         let read_value = amf_reader.read_with_type(amf0_markers::OBJECT).unwrap();
         assert_eq!(read_value, value);
     }
+
+    // ============================================
+    // Error Path Tests
+    // ============================================
+
+    #[test]
+    fn test_read_any_unknown_marker() {
+        let mut writer = BytesWriter::new();
+        writer.write_u8(0xFE).unwrap(); // Unknown marker
+
+        let bytes_reader = BytesReader::new(writer.extract_current_bytes());
+        let mut amf_reader = Amf0Reader::new(bytes_reader);
+        let result = amf_reader.read_any();
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_read_bool_invalid_value() {
+        let mut writer = BytesWriter::new();
+        writer.write_u8(amf0_markers::BOOLEAN).unwrap();
+        writer.write_u8(0x02).unwrap(); // Invalid: not 0 or 1
+
+        let bytes_reader = BytesReader::new(writer.extract_current_bytes());
+        let mut amf_reader = Amf0Reader::new(bytes_reader);
+        let result = amf_reader.read_with_type(amf0_markers::BOOLEAN);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_read_long_string() {
+        let long_text = "a".repeat(300);
+        let mut writer = BytesWriter::new();
+        writer.write_u8(amf0_markers::LONG_STRING).unwrap();
+        writer
+            .write_u32::<BigEndian>(long_text.len() as u32)
+            .unwrap();
+        writer.write(long_text.as_bytes()).unwrap();
+
+        let bytes_reader = BytesReader::new(writer.extract_current_bytes());
+        let mut amf_reader = Amf0Reader::new(bytes_reader);
+        let result = amf_reader
+            .read_with_type(amf0_markers::LONG_STRING)
+            .unwrap();
+        assert_eq!(result, Amf0ValueType::LongUTF8String(long_text));
+    }
+
+    #[test]
+    fn test_read_long_string_empty() {
+        let mut writer = BytesWriter::new();
+        writer.write_u8(amf0_markers::LONG_STRING).unwrap();
+        writer.write_u32::<BigEndian>(0).unwrap();
+
+        let bytes_reader = BytesReader::new(writer.extract_current_bytes());
+        let mut amf_reader = Amf0Reader::new(bytes_reader);
+        let result = amf_reader
+            .read_with_type(amf0_markers::LONG_STRING)
+            .unwrap();
+        assert_eq!(result, Amf0ValueType::LongUTF8String(String::new()));
+    }
+
+    #[test]
+    fn test_read_all_empty() {
+        let bytes_reader = BytesReader::new(BytesMut::new());
+        let mut amf_reader = Amf0Reader::new(bytes_reader);
+        let result = amf_reader.read_all().unwrap();
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_read_all_multiple_values() {
+        let mut writer = BytesWriter::new();
+        // Number
+        writer.write_u8(amf0_markers::NUMBER).unwrap();
+        writer.write_f64::<BigEndian>(42.0).unwrap();
+        // String
+        writer.write_u8(amf0_markers::STRING).unwrap();
+        writer.write_u16::<BigEndian>(3).unwrap();
+        writer.write(b"abc").unwrap();
+        // Null
+        writer.write_u8(amf0_markers::NULL).unwrap();
+
+        let bytes_reader = BytesReader::new(writer.extract_current_bytes());
+        let mut amf_reader = Amf0Reader::new(bytes_reader);
+        let result = amf_reader.read_all().unwrap();
+        assert_eq!(result.len(), 3);
+        assert_eq!(result[0], Amf0ValueType::Number(42.0));
+        assert_eq!(result[1], Amf0ValueType::UTF8String("abc".to_string()));
+        assert_eq!(result[2], Amf0ValueType::Null);
+    }
+
+    #[test]
+    fn test_read_any_empty_returns_end() {
+        let bytes_reader = BytesReader::new(BytesMut::new());
+        let mut amf_reader = Amf0Reader::new(bytes_reader);
+        let result = amf_reader.read_any().unwrap();
+        assert_eq!(result, Amf0ValueType::END);
+    }
+
+    #[test]
+    fn test_read_any_object_end_marker() {
+        let mut writer = BytesWriter::new();
+        writer.write_u8(amf0_markers::OBJECT_END).unwrap();
+
+        let bytes_reader = BytesReader::new(writer.extract_current_bytes());
+        let mut amf_reader = Amf0Reader::new(bytes_reader);
+        let result = amf_reader.read_any().unwrap();
+        assert_eq!(result, Amf0ValueType::END);
+    }
+
+    #[test]
+    fn test_read_ecma_array_empty() {
+        let mut writer = BytesWriter::new();
+        writer.write_u8(amf0_markers::ECMA_ARRAY).unwrap();
+        writer.write_u32::<BigEndian>(0).unwrap(); // count = 0
+        writer
+            .write_u24::<BigEndian>(amf0_markers::OBJECT_END as u32)
+            .unwrap();
+
+        let bytes_reader = BytesReader::new(writer.extract_current_bytes());
+        let mut amf_reader = Amf0Reader::new(bytes_reader);
+        let result = amf_reader.read_with_type(amf0_markers::ECMA_ARRAY).unwrap();
+
+        if let Amf0ValueType::EcmaArray(props) = result {
+            assert!(props.is_empty());
+        } else {
+            panic!("Expected EcmaArray");
+        }
+    }
+
+    #[test]
+    fn test_read_number_directly() {
+        let mut writer = BytesWriter::new();
+        writer.write_f64::<BigEndian>(-999.5).unwrap();
+
+        let bytes_reader = BytesReader::new(writer.extract_current_bytes());
+        let mut amf_reader = Amf0Reader::new(bytes_reader);
+        let result = amf_reader.read_number().unwrap();
+        assert_eq!(result, Amf0ValueType::Number(-999.5));
+    }
+
+    #[test]
+    fn test_read_null_directly() {
+        let bytes_reader = BytesReader::new(BytesMut::new());
+        let mut amf_reader = Amf0Reader::new(bytes_reader);
+        let result = amf_reader.read_null().unwrap();
+        assert_eq!(result, Amf0ValueType::Null);
+    }
 }

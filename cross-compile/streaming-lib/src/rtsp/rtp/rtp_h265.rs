@@ -778,4 +778,262 @@ mod tests {
         let _ = unpacker.unpack(&mut reader).await;
         assert_eq!(*received_timestamp.lock().unwrap(), 5000);
     }
+
+    #[tokio::test]
+    async fn test_rtp_h265_unpacker_paci_type_ignored() {
+        let mut unpacker = RtpH265UnPacker::new();
+        let frame_count = std::sync::Arc::new(std::sync::Mutex::new(0));
+        let frame_count_clone = frame_count.clone();
+
+        unpacker.on_frame_handler(Box::new(move |_frame| {
+            *frame_count_clone.lock().unwrap() += 1;
+            Ok(())
+        }));
+
+        // Create a PACI packet (type 50) — should return Ok(()) without emitting a frame
+        let mut packet = RtpPacket {
+            header: RtpHeader {
+                payload_type: 96,
+                seq_number: 1,
+                timestamp: 1000,
+                ssrc: 12345,
+                version: 2,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        // PayloadHdr with PACI type (50): first byte = (50 << 1) = 0x64
+        packet.payload.put_u8(0x64); // F=0, Type=50 (PACI)
+        packet.payload.put_u8(0x01); // TID=1
+        packet.payload.extend_from_slice(&[0x01, 0x02, 0x03]);
+
+        let packet_bytes = packet.marshal().unwrap();
+        let mut reader = BytesReader::new(packet_bytes);
+
+        let result = unpacker.unpack(&mut reader).await;
+        assert!(result.is_ok());
+        assert_eq!(*frame_count.lock().unwrap(), 0); // PACI emits no frames
+    }
+
+    #[tokio::test]
+    async fn test_rtp_h265_unpacker_empty_payload() {
+        let mut unpacker = RtpH265UnPacker::new();
+        let frame_count = std::sync::Arc::new(std::sync::Mutex::new(0));
+        let frame_count_clone = frame_count.clone();
+
+        unpacker.on_frame_handler(Box::new(move |_frame| {
+            *frame_count_clone.lock().unwrap() += 1;
+            Ok(())
+        }));
+
+        // Create RTP packet with empty payload
+        let packet = RtpPacket {
+            header: RtpHeader {
+                payload_type: 96,
+                seq_number: 1,
+                timestamp: 1000,
+                ssrc: 12345,
+                version: 2,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        let packet_bytes = packet.marshal().unwrap();
+        let mut reader = BytesReader::new(packet_bytes);
+
+        let result = unpacker.unpack(&mut reader).await;
+        assert!(result.is_ok());
+        assert_eq!(*frame_count.lock().unwrap(), 0); // No frames from empty payload
+    }
+
+    #[tokio::test]
+    async fn test_rtp_h265_unpacker_fu_sequence_discontinuity() {
+        let mut unpacker = RtpH265UnPacker::new();
+        let frame_count = std::sync::Arc::new(std::sync::Mutex::new(0));
+        let frame_count_clone = frame_count.clone();
+
+        unpacker.on_frame_handler(Box::new(move |_frame| {
+            *frame_count_clone.lock().unwrap() += 1;
+            Ok(())
+        }));
+
+        // Send FU start packet with seq=1
+        let mut start_packet = RtpPacket {
+            header: RtpHeader {
+                payload_type: 96,
+                seq_number: 1,
+                timestamp: 1000,
+                ssrc: 12345,
+                version: 2,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        start_packet.payload.put_u8(0x62); // PayloadHdr: Type=49 (FU)
+        start_packet.payload.put_u8(0x01); // TID=1
+        start_packet.payload.put_u8(0x83); // FU header: S=1, FuType=19
+        start_packet.payload.extend_from_slice(&[0x01, 0x02, 0x03]);
+
+        let start_bytes = start_packet.marshal().unwrap();
+        let mut reader = BytesReader::new(start_bytes);
+        let _ = unpacker.unpack(&mut reader).await;
+
+        // Send FU middle packet with seq=5 (discontinuity: expected 2, got 5)
+        let mut mid_packet = RtpPacket {
+            header: RtpHeader {
+                payload_type: 96,
+                seq_number: 5, // Discontinuity!
+                timestamp: 1000,
+                ssrc: 12345,
+                version: 2,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        mid_packet.payload.put_u8(0x62); // PayloadHdr
+        mid_packet.payload.put_u8(0x01);
+        mid_packet.payload.put_u8(0x13); // FU header: S=0, E=0, FuType=19 (middle)
+        mid_packet.payload.extend_from_slice(&[0x04, 0x05, 0x06]);
+
+        let mid_bytes = mid_packet.marshal().unwrap();
+        let mut reader = BytesReader::new(mid_bytes);
+        let result = unpacker.unpack(&mut reader).await;
+        assert!(result.is_ok());
+
+        // No frame should be emitted due to sequence discontinuity
+        assert_eq!(*frame_count.lock().unwrap(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_rtp_h265_unpacker_fu_buffer_overflow_protection() {
+        let mut unpacker = RtpH265UnPacker::new();
+        let frame_count = std::sync::Arc::new(std::sync::Mutex::new(0));
+        let frame_count_clone = frame_count.clone();
+
+        unpacker.on_frame_handler(Box::new(move |_frame| {
+            *frame_count_clone.lock().unwrap() += 1;
+            Ok(())
+        }));
+
+        // Send FU start packet to initialize the fu_buffer
+        let mut start_packet = RtpPacket {
+            header: RtpHeader {
+                payload_type: 96,
+                seq_number: 1,
+                timestamp: 1000,
+                ssrc: 12345,
+                version: 2,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        start_packet.payload.put_u8(0x62); // PayloadHdr: Type=49 (FU)
+        start_packet.payload.put_u8(0x01);
+        start_packet.payload.put_u8(0x93); // FU header: S=1, FuType=19
+        // Fill with near-maximum data to trigger overflow on next packet
+        let large_data = vec![0xAA; 1024 * 1024 - 10];
+        start_packet.payload.extend_from_slice(&large_data);
+
+        let start_bytes = start_packet.marshal().unwrap();
+        let mut reader = BytesReader::new(start_bytes);
+        let _ = unpacker.unpack(&mut reader).await;
+
+        // Send FU middle packet that would exceed MAX_FU_BUFFER_SIZE
+        let mut mid_packet = RtpPacket {
+            header: RtpHeader {
+                payload_type: 96,
+                seq_number: 2,
+                timestamp: 1000,
+                ssrc: 12345,
+                version: 2,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        mid_packet.payload.put_u8(0x62); // PayloadHdr
+        mid_packet.payload.put_u8(0x01);
+        mid_packet.payload.put_u8(0x13); // FU header: S=0, E=0, FuType=19
+        mid_packet.payload.extend_from_slice(&vec![0xBB; 100]);
+
+        let mid_bytes = mid_packet.marshal().unwrap();
+        let mut reader = BytesReader::new(mid_bytes);
+        let result = unpacker.unpack(&mut reader).await;
+        assert!(result.is_ok());
+
+        // Buffer should have been cleared — no frame emitted
+        assert_eq!(*frame_count.lock().unwrap(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_rtp_h265_unpacker_rtcp_handler() {
+        let mut unpacker = RtpH265UnPacker::new();
+
+        let rtcp_count = std::sync::Arc::new(std::sync::Mutex::new(0));
+        let rtcp_count_clone = rtcp_count.clone();
+
+        unpacker.on_packet_for_rtcp_handler(Box::new(move |_packet| {
+            *rtcp_count_clone.lock().unwrap() += 1;
+            Box::pin(async {})
+        }));
+
+        unpacker.on_frame_handler(Box::new(move |_frame| Ok(())));
+
+        let mut packet = RtpPacket {
+            header: RtpHeader {
+                payload_type: 96,
+                seq_number: 1,
+                timestamp: 1000,
+                ssrc: 12345,
+                version: 2,
+                marker: 1,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let nalu = create_test_h265_nalu();
+        packet.payload.put(nalu);
+
+        let packet_bytes = packet.marshal().unwrap();
+        let mut reader = BytesReader::new(packet_bytes);
+
+        let _ = unpacker.unpack(&mut reader).await;
+        assert_eq!(*rtcp_count.lock().unwrap(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_rtp_h265_packer_rtcp_handler() {
+        let mock_io = Arc::new(Mutex::new(
+            Box::new(MockNetIO::new()) as Box<dyn TNetIO + Send + Sync>
+        ));
+        let mut packer = RtpH265Packer::new(96, 12345, 0, 1500, mock_io);
+
+        let rtcp_count = std::sync::Arc::new(std::sync::Mutex::new(0));
+        let rtcp_count_clone = rtcp_count.clone();
+
+        packer.on_packet_for_rtcp_handler(Box::new(move |_packet| {
+            *rtcp_count_clone.lock().unwrap() += 1;
+            Box::pin(async {})
+        }));
+
+        packer.on_packet_handler(Box::new(move |_io, _packet| {
+            Box::pin(async move { Ok(()) })
+        }));
+
+        let nalu = create_test_h265_nalu();
+        let _ = packer.pack_single(nalu).await;
+
+        assert_eq!(*rtcp_count.lock().unwrap(), 1);
+    }
+
+    #[test]
+    fn test_rtp_h265_unpacker_default() {
+        let unpacker = RtpH265UnPacker::default();
+        assert_eq!(unpacker.sequence_number, 0);
+        assert_eq!(unpacker.timestamp, 0);
+        assert!(unpacker.fu_buffer.is_empty());
+        assert!(!unpacker.using_donl_field);
+        assert!(unpacker.on_frame_handler.is_none());
+        assert!(unpacker.on_packet_for_rtcp_handler.is_none());
+    }
 }

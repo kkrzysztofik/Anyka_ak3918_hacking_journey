@@ -129,4 +129,59 @@ mod tests {
         assert_eq!(v2, 1);
         assert_eq!(v3, -1);
     }
+
+    #[test]
+    fn test_read_sev_larger_values() {
+        // code_num 3 -> "00100" -> se(v) = 2
+        // code_num 4 -> "00101" -> se(v) = -2
+        // code_num 5 -> "00110" -> se(v) = 3
+        // code_num 6 -> "00111" -> se(v) = -3
+        // bitstream: 00100 00101 00110 0 (pad)
+        let mut bytes_reader = BytesReader::new(BytesMut::new());
+        bytes_reader.extend_from_slice(&[0b00100_001]);
+        bytes_reader.extend_from_slice(&[0b01_00110_0]);
+
+        let mut bits_reader = BitsReader::new(bytes_reader);
+
+        let v1 = read_sev(&mut bits_reader).unwrap();
+        let v2 = read_sev(&mut bits_reader).unwrap();
+        let v3 = read_sev(&mut bits_reader).unwrap();
+
+        assert_eq!(v1, 2);
+        assert_eq!(v2, -2);
+        assert_eq!(v3, 3);
+    }
+
+    #[test]
+    fn test_read_uev_zero_value() {
+        // uev(0) is encoded as a single "1" bit
+        let mut bytes_reader = BytesReader::new(BytesMut::new());
+        bytes_reader.extend_from_slice(&[0b1000_0000]);
+
+        let mut bits_reader = BitsReader::new(bytes_reader);
+        let v = read_uev(&mut bits_reader).unwrap();
+        assert_eq!(v, 0);
+    }
+
+    #[test]
+    fn test_read_uev_value_one() {
+        // uev(1) is encoded as "010"
+        let mut bytes_reader = BytesReader::new(BytesMut::new());
+        bytes_reader.extend_from_slice(&[0b0100_0000]);
+
+        let mut bits_reader = BitsReader::new(bytes_reader);
+        let v = read_uev(&mut bits_reader).unwrap();
+        assert_eq!(v, 1);
+    }
+
+    #[test]
+    fn test_read_uev_value_two() {
+        // uev(2) is encoded as "011"
+        let mut bytes_reader = BytesReader::new(BytesMut::new());
+        bytes_reader.extend_from_slice(&[0b0110_0000]);
+
+        let mut bits_reader = BitsReader::new(bytes_reader);
+        let v = read_uev(&mut bits_reader).unwrap();
+        assert_eq!(v, 2);
+    }
 }

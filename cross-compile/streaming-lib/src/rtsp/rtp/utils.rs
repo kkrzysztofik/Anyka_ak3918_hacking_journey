@@ -470,6 +470,99 @@ mod tests {
         assert_eq!(stored[2], BytesMut::from(&[0x06, 0xDD][..]));
     }
 
+    // ========== ntp_timestamp Tests ==========
+
+    #[test]
+    fn test_ntp_timestamp_returns_nonzero() {
+        let ts = ntp_timestamp();
+        assert!(ts > 0);
+    }
+
+    #[test]
+    fn test_ntp_timestamp_upper_bits_reasonable() {
+        let ts = ntp_timestamp();
+        let ntp_secs = ts >> 32;
+        // NTP epoch offset from Unix epoch is ~2.2 billion seconds
+        // Current time in NTP seconds should be > 3.9 billion (year 2023+)
+        assert!(ntp_secs > 3_900_000_000);
+    }
+
+    // ========== adjust_for_trailing_zeros Tests ==========
+
+    #[test]
+    fn test_adjust_for_trailing_zeros_no_zeros() {
+        let data = [0x65, 0x88, 0x84, 0x21];
+        assert_eq!(adjust_for_trailing_zeros(&data, 4), 4);
+    }
+
+    #[test]
+    fn test_adjust_for_trailing_zeros_one_zero() {
+        // pos=3, nalus[2]=0x00 → skip, nalus[1]=0x88 → stop → returns 2
+        let data = [0x65, 0x88, 0x00, 0x01];
+        assert_eq!(adjust_for_trailing_zeros(&data, 3), 2);
+    }
+
+    #[test]
+    fn test_adjust_for_trailing_zeros_multiple_zeros() {
+        let data = [0x65, 0x00, 0x00, 0x00, 0x01];
+        assert_eq!(adjust_for_trailing_zeros(&data, 3), 1);
+    }
+
+    #[test]
+    fn test_adjust_for_trailing_zeros_at_zero() {
+        let data = [0x00, 0x00, 0x01];
+        assert_eq!(adjust_for_trailing_zeros(&data, 0), 0);
+    }
+
+    // ========== extract_next_nalu Tests ==========
+
+    #[test]
+    fn test_extract_next_nalu_single() {
+        let mut nalus = BytesMut::from(&[0x00, 0x00, 0x01, 0x65, 0x88][..]);
+        let nalu = extract_next_nalu(&mut nalus);
+        assert!(nalu.is_some());
+        assert_eq!(nalu.unwrap(), BytesMut::from(&[0x65, 0x88][..]));
+        assert!(nalus.is_empty());
+    }
+
+    #[test]
+    fn test_extract_next_nalu_two_nalus() {
+        let mut nalus = BytesMut::from(&[0x00, 0x00, 0x01, 0x65, 0x88, 0x00, 0x00, 0x01, 0x41][..]);
+        let nalu1 = extract_next_nalu(&mut nalus);
+        assert!(nalu1.is_some());
+        assert_eq!(nalu1.unwrap(), BytesMut::from(&[0x65, 0x88][..]));
+
+        let nalu2 = extract_next_nalu(&mut nalus);
+        assert!(nalu2.is_some());
+        assert_eq!(nalu2.unwrap(), BytesMut::from(&[0x41][..]));
+    }
+
+    #[test]
+    fn test_extract_next_nalu_four_byte_start_code() {
+        let mut nalus = BytesMut::from(
+            &[
+                0x00, 0x00, 0x00, 0x01, 0x65, 0xAA, 0x00, 0x00, 0x00, 0x01, 0x41,
+            ][..],
+        );
+        let nalu1 = extract_next_nalu(&mut nalus);
+        assert!(nalu1.is_some());
+        assert_eq!(nalu1.unwrap(), BytesMut::from(&[0x65, 0xAA][..]));
+    }
+
+    #[test]
+    fn test_extract_next_nalu_no_start_code() {
+        let mut nalus = BytesMut::from(&[0x65, 0x88, 0x84][..]);
+        let nalu = extract_next_nalu(&mut nalus);
+        assert!(nalu.is_none());
+    }
+
+    #[test]
+    fn test_extract_next_nalu_empty() {
+        let mut nalus = BytesMut::new();
+        let nalu = extract_next_nalu(&mut nalus);
+        assert!(nalu.is_none());
+    }
+
     #[tokio::test]
     async fn test_split_annexb_and_process_packer_error_is_propagated() {
         let mut packer = ErrorPacker;

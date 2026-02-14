@@ -546,4 +546,135 @@ mod tests {
         assert_eq!(cloned.frame_type, header.frame_type);
         assert_eq!(cloned.composition_time, header.composition_time);
     }
+
+    // ========== Unmarshal Error Path Tests ==========
+
+    #[test]
+    fn test_audio_tag_header_unmarshal_empty_reader() {
+        let data = BytesMut::new();
+        let mut reader = BytesReader::new(data);
+        let result = AudioTagHeader::unmarshal(&mut reader);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_audio_tag_header_unmarshal_aac_truncated() {
+        // AAC format byte but no second byte for aac_packet_type
+        let data = BytesMut::from(&[0xAF][..]);
+        let mut reader = BytesReader::new(data);
+        let result = AudioTagHeader::unmarshal(&mut reader);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_video_tag_header_unmarshal_empty_reader() {
+        let data = BytesMut::new();
+        let mut reader = BytesReader::new(data);
+        let result = VideoTagHeader::unmarshal(&mut reader);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_video_tag_header_unmarshal_h264_truncated() {
+        // H.264 flags byte but no subsequent bytes for avc_packet_type/composition_time
+        let data = BytesMut::from(&[0x17][..]);
+        let mut reader = BytesReader::new(data);
+        let result = VideoTagHeader::unmarshal(&mut reader);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_video_tag_header_unmarshal_hevc_truncated() {
+        // HEVC flags byte but no subsequent bytes
+        let data = BytesMut::from(&[0x1C][..]);
+        let mut reader = BytesReader::new(data);
+        let result = VideoTagHeader::unmarshal(&mut reader);
+        assert!(result.is_err());
+    }
+
+    // ========== Additional Marshal Edge Cases ==========
+
+    #[test]
+    fn test_audio_tag_header_marshal_speex() {
+        let header = AudioTagHeader {
+            sound_format: 11, // Speex
+            sound_rate: 0,
+            sound_size: 1,
+            sound_type: 0,
+            aac_packet_type: 0,
+        };
+        let result = header.marshal().unwrap();
+        assert_eq!(result.len(), 1); // Non-AAC: only 1 byte
+        assert_eq!(result[0], 0xB2); // 11 << 4 | 0 << 2 | 1 << 1 | 0 = 176 + 2 = 178
+    }
+
+    #[test]
+    fn test_video_tag_header_marshal_h264_with_large_cts() {
+        let header = VideoTagHeader {
+            frame_type: 2,             // Inter frame
+            codec_id: 7,               // H.264
+            avc_packet_type: 1,        // NALU
+            composition_time: 8388607, // Max positive 23-bit value (0x7FFFFF)
+        };
+        let result = header.marshal().unwrap();
+        assert_eq!(result.len(), 5);
+        // CTS bytes: 0x7F, 0xFF, 0xFF
+        assert_eq!(result[2], 0x7F);
+        assert_eq!(result[3], 0xFF);
+        assert_eq!(result[4], 0xFF);
+    }
+
+    #[test]
+    fn test_video_tag_header_unmarshal_h264_zero_cts() {
+        // H.264 inter frame, NALU, CTS = 0
+        let data = BytesMut::from(&[0x27, 0x01, 0x00, 0x00, 0x00][..]);
+        let mut reader = BytesReader::new(data);
+        let header = VideoTagHeader::unmarshal(&mut reader).unwrap();
+        assert_eq!(header.frame_type, 2);
+        assert_eq!(header.codec_id, 7);
+        assert_eq!(header.avc_packet_type, 1);
+        assert_eq!(header.composition_time, 0);
+    }
+
+    #[test]
+    fn test_video_tag_header_unmarshal_hevc_keyframe() {
+        // HEVC keyframe, sequence header
+        let data = BytesMut::from(&[0x1C, 0x00, 0x00, 0x00, 0x00][..]);
+        let mut reader = BytesReader::new(data);
+        let header = VideoTagHeader::unmarshal(&mut reader).unwrap();
+        assert_eq!(header.frame_type, 1);
+        assert_eq!(header.codec_id, 12);
+        assert_eq!(header.avc_packet_type, 0);
+        assert_eq!(header.composition_time, 0);
+    }
+
+    #[test]
+    fn test_video_tag_header_roundtrip_non_avc() {
+        let original = VideoTagHeader {
+            frame_type: 2,
+            codec_id: 2, // H.263
+            avc_packet_type: 0,
+            composition_time: 0,
+        };
+        let marshaled = original.marshal().unwrap();
+        let mut reader = BytesReader::new(marshaled);
+        let decoded = VideoTagHeader::unmarshal(&mut reader).unwrap();
+        assert_eq!(decoded.frame_type, original.frame_type);
+        assert_eq!(decoded.codec_id, original.codec_id);
+    }
+
+    // ========== Video Tag Header AVC End of Sequence ==========
+
+    #[test]
+    fn test_video_tag_header_avc_end_of_sequence() {
+        let header = VideoTagHeader {
+            frame_type: 1,
+            codec_id: 7,
+            avc_packet_type: 2, // End of sequence
+            composition_time: 0,
+        };
+        let result = header.marshal().unwrap();
+        assert_eq!(result.len(), 5);
+        assert_eq!(result[1], 2); // avc_packet_type
+    }
 }

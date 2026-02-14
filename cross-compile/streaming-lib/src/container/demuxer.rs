@@ -723,4 +723,187 @@ mod tests {
         // Check that data contains raw data
         assert!(result.data.len() > 3);
     }
+
+    // ============================================
+    // FLV Header Validation Error Tests
+    // ============================================
+
+    #[test]
+    fn test_read_flv_header_invalid_signature() {
+        let mut data = BytesMut::new();
+        data.extend_from_slice(b"AVI"); // Wrong signature
+        data.extend_from_slice(&[0x01, 0x05, 0x00, 0x00, 0x00, 0x09]);
+        let mut demuxer = FlvDemuxer::new(data);
+        let result = demuxer.read_flv_header();
+        assert!(result.is_err());
+        let err = format!("{}", result.unwrap_err());
+        assert!(err.contains("invalid signature"));
+    }
+
+    #[test]
+    fn test_read_flv_header_unsupported_version() {
+        let mut data = BytesMut::new();
+        data.extend_from_slice(b"FLV");
+        data.extend_from_slice(&[0x02, 0x05, 0x00, 0x00, 0x00, 0x09]); // version 2
+        let mut demuxer = FlvDemuxer::new(data);
+        let result = demuxer.read_flv_header();
+        assert!(result.is_err());
+        let err = format!("{}", result.unwrap_err());
+        assert!(err.contains("unsupported version"));
+    }
+
+    #[test]
+    fn test_read_flv_header_invalid_flags() {
+        let mut data = BytesMut::new();
+        data.extend_from_slice(b"FLV");
+        data.extend_from_slice(&[0x01, 0xFF, 0x00, 0x00, 0x00, 0x09]); // invalid flags
+        let mut demuxer = FlvDemuxer::new(data);
+        let result = demuxer.read_flv_header();
+        assert!(result.is_err());
+        let err = format!("{}", result.unwrap_err());
+        assert!(err.contains("invalid flags"));
+    }
+
+    #[test]
+    fn test_read_flv_header_wrong_data_offset() {
+        let mut data = BytesMut::new();
+        data.extend_from_slice(b"FLV");
+        data.extend_from_slice(&[0x01, 0x05, 0x00, 0x00, 0x00, 0x0A]); // offset 10, not 9
+        let mut demuxer = FlvDemuxer::new(data);
+        let result = demuxer.read_flv_header();
+        assert!(result.is_err());
+        let err = format!("{}", result.unwrap_err());
+        assert!(err.contains("unexpected data offset"));
+    }
+
+    #[test]
+    fn test_read_flv_header_audio_only() {
+        let mut data = BytesMut::new();
+        data.extend_from_slice(b"FLV");
+        data.extend_from_slice(&[0x01, 0x04, 0x00, 0x00, 0x00, 0x09]); // audio=1, video=0
+        let mut demuxer = FlvDemuxer::new(data);
+        let result = demuxer.read_flv_header().unwrap();
+        assert!(result.has_audio);
+        assert!(!result.has_video);
+    }
+
+    #[test]
+    fn test_read_flv_header_video_only() {
+        let mut data = BytesMut::new();
+        data.extend_from_slice(b"FLV");
+        data.extend_from_slice(&[0x01, 0x01, 0x00, 0x00, 0x00, 0x09]); // audio=0, video=1
+        let mut demuxer = FlvDemuxer::new(data);
+        let result = demuxer.read_flv_header().unwrap();
+        assert!(!result.has_audio);
+        assert!(result.has_video);
+    }
+
+    #[test]
+    fn test_read_flv_header_no_streams() {
+        let mut data = BytesMut::new();
+        data.extend_from_slice(b"FLV");
+        data.extend_from_slice(&[0x01, 0x00, 0x00, 0x00, 0x00, 0x09]); // no audio, no video
+        let mut demuxer = FlvDemuxer::new(data);
+        let result = demuxer.read_flv_header().unwrap();
+        assert!(!result.has_audio);
+        assert!(!result.has_video);
+    }
+
+    // ============================================
+    // FlvVideoTagDemuxer Edge Case Tests
+    // ============================================
+
+    #[test]
+    fn test_flv_video_tag_demuxer_unknown_packet_type() {
+        let mut demuxer = FlvVideoTagDemuxer::new();
+        // FrameType: 1 (Keyframe), CodecID: 7 (AVC) -> 0x17
+        // AVCPacketType: 0xFF (unknown)
+        let mut data = BytesMut::new();
+        data.extend_from_slice(&[0x17, 0xFF, 0x00, 0x00, 0x00]);
+        let result = demuxer.demux(0, data).unwrap();
+        assert!(result.is_none()); // Unknown packet type returns None
+    }
+
+    #[test]
+    fn test_flv_video_tag_demuxer_non_h264_codec() {
+        let mut demuxer = FlvVideoTagDemuxer::new();
+        // FrameType: 1, CodecID: 2 (H.263) -> 0x12
+        let mut data = BytesMut::new();
+        data.extend_from_slice(&[0x12, 0x00, 0x00, 0x00, 0x00]);
+        let result = demuxer.demux(0, data).unwrap();
+        assert!(result.is_none()); // Non-H264 returns None
+    }
+
+    #[test]
+    fn test_flv_video_tag_demuxer_default() {
+        let demuxer = FlvVideoTagDemuxer::default();
+        assert_eq!(demuxer.avc_processor.mpeg4_avc.nalu_length, 0);
+    }
+
+    // ============================================
+    // FlvAudioTagDemuxer Edge Case Tests
+    // ============================================
+
+    #[test]
+    fn test_flv_audio_tag_demuxer_non_aac_format() {
+        let mut demuxer = FlvAudioTagDemuxer::new();
+        // SoundFormat: 2 (MP3), other bits -> 0x2F
+        let mut data = BytesMut::new();
+        data.extend_from_slice(&[0x2F, 0x00, 0xAA, 0xBB]);
+        let result = demuxer.demux(0, data).unwrap();
+        assert!(!result.has_data); // Non-AAC returns empty data
+    }
+
+    #[test]
+    fn test_flv_audio_tag_demuxer_aac_unknown_packet_type() {
+        let mut demuxer = FlvAudioTagDemuxer::new();
+        // AAC format (0xA), SoundRate 44k (3), 16bit (1), Stereo (1) -> 0xAF
+        // AACPacketType: 0xFF (unknown)
+        let mut data = BytesMut::new();
+        data.extend_from_slice(&[0xAF, 0xFF, 0xAA, 0xBB]);
+        let result = demuxer.demux(0, data).unwrap();
+        assert!(!result.has_data); // Unknown AAC packet type returns empty
+    }
+
+    #[test]
+    fn test_flv_audio_tag_demuxer_seq_header_short() {
+        let mut demuxer = FlvAudioTagDemuxer::new();
+        // AAC SeqHdr with less than 2 bytes of AudioSpecificConfig
+        let mut data = BytesMut::new();
+        data.extend_from_slice(&[0xAF, 0x00, 0x12]); // Only 1 byte after header
+        let result = demuxer.demux(0, data).unwrap();
+        assert!(!result.has_data); // SeqHdr returns empty, but config not loaded (< 2 bytes)
+    }
+
+    #[test]
+    fn test_flv_audio_tag_demuxer_default() {
+        let demuxer = FlvAudioTagDemuxer::default();
+        assert_eq!(demuxer.aac_processor.mpeg4_aac.object_type, 0);
+    }
+
+    // ============================================
+    // FlvHeaderInfo Tests
+    // ============================================
+
+    #[test]
+    fn test_flv_header_info_debug() {
+        let info = FlvHeaderInfo {
+            has_audio: true,
+            has_video: false,
+        };
+        let debug = format!("{:?}", info);
+        assert!(debug.contains("has_audio"));
+        assert!(debug.contains("true"));
+    }
+
+    #[test]
+    fn test_flv_header_info_clone() {
+        let info = FlvHeaderInfo {
+            has_audio: true,
+            has_video: true,
+        };
+        let cloned = info.clone();
+        assert_eq!(info.has_audio, cloned.has_audio);
+        assert_eq!(info.has_video, cloned.has_video);
+    }
 }

@@ -507,4 +507,298 @@ mod tests {
 
         let _ = std::fs::remove_file(&path);
     }
+
+    // ========== find_sync_word tests ==========
+
+    #[test]
+    fn test_find_sync_word_at_start() {
+        // ADTS sync word: 0xFF 0xF1 (0xFFF with layer=0, protection_absent=1)
+        let data = [0xFF, 0xF1, 0x50, 0x80];
+        let result = AacFileReader::find_sync_word(&data, 0);
+        assert_eq!(result, Some(0));
+    }
+
+    #[test]
+    fn test_find_sync_word_with_offset() {
+        let data = [0xAA, 0xBB, 0xFF, 0xF1, 0x50];
+        let result = AacFileReader::find_sync_word(&data, 0);
+        assert_eq!(result, Some(2));
+    }
+
+    #[test]
+    fn test_find_sync_word_no_match() {
+        let data = [0xAA, 0xBB, 0xCC, 0xDD];
+        let result = AacFileReader::find_sync_word(&data, 0);
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_find_sync_word_empty() {
+        let result = AacFileReader::find_sync_word(&[], 0);
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_find_sync_word_too_short() {
+        let result = AacFileReader::find_sync_word(&[0xFF], 0);
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_find_sync_word_from_past_end() {
+        let data = [0xFF, 0xF1, 0x50];
+        let result = AacFileReader::find_sync_word(&data, 10);
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_find_sync_word_false_positive_rejected() {
+        // 0xFF 0xFE has layer bits set (not 0), should not match
+        // find_sync_word checks: data[i+1] & 0x06 == 0x00 (layer must be 0)
+        let data = [0xFF, 0xFE, 0x50, 0x80];
+        let result = AacFileReader::find_sync_word(&data, 0);
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_find_sync_word_protection_absent_0() {
+        // 0xFF 0xF0 — protection_absent=0, should still match (sync = 0xFFF0 with layer=0)
+        let data = [0xFF, 0xF0, 0x50, 0x80];
+        let result = AacFileReader::find_sync_word(&data, 0);
+        assert_eq!(result, Some(0));
+    }
+
+    // ========== extract_frame_length tests ==========
+
+    #[test]
+    fn test_extract_frame_length_basic() {
+        // Frame length is encoded across header[3..6]:
+        // bits: header[3]&0x03 (2 bits) | header[4] (8 bits) | header[5]>>5 (3 bits) = 13 bits
+        // For a frame length of 11 (0b00000001011):
+        // header[3] & 0x03 = 0b00 (bits 12-11)
+        // header[4] = 0b00000001 (bits 10-3)
+        // header[5] >> 5 = 0b011 (bits 2-0)
+        // length = (0 << 11) | (1 << 3) | 3 = 11
+        let header = [0xFF, 0xF1, 0x50, 0x80, 0x01, 0x60, 0xFC];
+        let length = AacFileReader::extract_frame_length(&header);
+        assert_eq!(length, 11);
+    }
+
+    #[test]
+    fn test_extract_frame_length_7_bytes() {
+        // Standard ADTS header for a 7-byte frame (header only, no payload)
+        // frame_length = 7: bits = 0b0_00000000_111
+        // header[3] & 0x03 = 0 (0b00)
+        // header[4] = 0 (0b00000000)
+        // header[5] >> 5 = 7 (0b111)
+        let header = [0xFF, 0xF1, 0x50, 0x80, 0x00, 0xE0, 0xFC];
+        let length = AacFileReader::extract_frame_length(&header);
+        assert_eq!(length, 7);
+    }
+
+    // ========== calculate_frame_duration tests ==========
+
+    #[test]
+    fn test_calculate_frame_duration_48khz() {
+        assert_eq!(AacFileReader::calculate_frame_duration(48000), 21);
+    }
+
+    #[test]
+    fn test_calculate_frame_duration_44100() {
+        assert_eq!(AacFileReader::calculate_frame_duration(44100), 23);
+    }
+
+    #[test]
+    fn test_calculate_frame_duration_16khz() {
+        assert_eq!(AacFileReader::calculate_frame_duration(16000), 64);
+    }
+
+    #[test]
+    fn test_calculate_frame_duration_8khz() {
+        assert_eq!(AacFileReader::calculate_frame_duration(8000), 128);
+    }
+
+    #[test]
+    fn test_calculate_frame_duration_zero_rate() {
+        assert_eq!(AacFileReader::calculate_frame_duration(0), 21);
+    }
+
+    // ========== AAC_SAMPLING_RATES constant tests ==========
+
+    #[test]
+    fn test_aac_sampling_rates_complete() {
+        let rates = &AacFileReader::AAC_SAMPLING_RATES;
+        assert_eq!(rates.len(), 13);
+        assert_eq!(rates[0], (0, 96000));
+        assert_eq!(rates[4], (4, 44100));
+        assert_eq!(rates[11], (11, 8000));
+        assert_eq!(rates[12], (12, 7350));
+    }
+
+    #[test]
+    fn test_aac_sampling_rates_indices_are_sequential() {
+        for (i, (idx, _)) in AacFileReader::AAC_SAMPLING_RATES.iter().enumerate() {
+            assert_eq!(*idx as usize, i);
+        }
+    }
+
+    #[test]
+    fn test_aac_sampling_rates_descending() {
+        let rates: Vec<u32> = AacFileReader::AAC_SAMPLING_RATES
+            .iter()
+            .map(|(_, r)| *r)
+            .collect();
+        for i in 1..rates.len() {
+            assert!(
+                rates[i] < rates[i - 1],
+                "Rates should be in descending order"
+            );
+        }
+    }
+
+    // ========== AacFileError display tests ==========
+
+    #[test]
+    fn test_aac_file_error_display() {
+        let err = AacFileError::InvalidAdtsHeader;
+        assert_eq!(format!("{err}"), "Invalid ADTS header");
+
+        let err = AacFileError::InvalidFrameLength;
+        assert_eq!(format!("{err}"), "Invalid ADTS frame length");
+
+        let err = AacFileError::NoFramesFound;
+        assert_eq!(format!("{err}"), "No frames found in file");
+
+        let err = AacFileError::UnsupportedProfile(5);
+        assert_eq!(format!("{err}"), "Unsupported AAC profile: 5");
+
+        let err = AacFileError::UnsupportedSamplingFrequency(15);
+        assert_eq!(format!("{err}"), "Unsupported sampling frequency index: 15");
+
+        let err = AacFileError::InvalidSyncWord;
+        assert_eq!(format!("{err}"), "Invalid sync word");
+    }
+
+    #[test]
+    fn test_aac_file_error_io_from() {
+        let io_err = std::io::Error::new(std::io::ErrorKind::NotFound, "no such file");
+        let aac_err: AacFileError = io_err.into();
+        assert!(format!("{aac_err}").contains("no such file"));
+    }
+
+    // ========== AacFrame struct tests ==========
+
+    #[test]
+    fn test_aac_frame_clone() {
+        let frame = AacFrame {
+            data: vec![0xAA, 0xBB],
+            adts_header_size: 7,
+            total_frame_size: 9,
+            profile: 2,
+            sample_rate: 44100,
+            channels: 2,
+        };
+        let cloned = frame.clone();
+        assert_eq!(cloned.data, vec![0xAA, 0xBB]);
+        assert_eq!(cloned.adts_header_size, 7);
+        assert_eq!(cloned.total_frame_size, 9);
+        assert_eq!(cloned.profile, 2);
+        assert_eq!(cloned.sample_rate, 44100);
+        assert_eq!(cloned.channels, 2);
+    }
+
+    #[test]
+    fn test_aac_frame_debug() {
+        let frame = AacFrame {
+            data: vec![0xAA],
+            adts_header_size: 7,
+            total_frame_size: 8,
+            profile: 2,
+            sample_rate: 48000,
+            channels: 1,
+        };
+        let debug = format!("{frame:?}");
+        assert!(debug.contains("AacFrame"));
+        assert!(debug.contains("48000"));
+    }
+
+    // ========== Async reader property tests ==========
+
+    #[tokio::test]
+    async fn test_reader_initial_properties() {
+        let reader = AacFileReader::new("/dev/null", 48000).await.unwrap();
+        assert_eq!(reader.sample_rate(), 48000);
+        assert_eq!(reader.frame_duration_ms(), 21);
+        assert_eq!(reader.current_position(), 0);
+        assert_eq!(reader.file_size(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_reader_zero_sample_rate_defaults() {
+        let reader = AacFileReader::new("/dev/null", 0).await.unwrap();
+        assert_eq!(reader.frame_duration_ms(), 21); // Default for 48kHz
+    }
+
+    #[tokio::test]
+    async fn test_read_frame_from_empty_file() {
+        let mut reader = AacFileReader::new("/dev/null", 48000).await.unwrap();
+        let result = reader.read_next_frame().await.unwrap();
+        assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_read_frame_from_valid_adts() {
+        let path = format!("/tmp/aac_valid_frame_{}.aac", std::process::id());
+        // Construct a valid ADTS frame:
+        // Sync word: 0xFFF, MPEG-4=1, Layer=0, Protection_absent=1
+        // Profile: AAC-LC (1 -> object type 2, stored as 01 in 2 bits)
+        // Sampling freq idx: 3 (48kHz)
+        // Channel config: 2 (stereo)
+        // Frame length: 11 (7 header + 4 payload)
+        // header[3..5] encode frame length in 13 bits
+        let header = [
+            0xFF, 0xF1, // sync + MPEG-4, layer=0, protection_absent=1
+            0x50, // profile=01(LC), freq_idx=0011(48k), private=0, channel high bit=0
+            0x80, // channel low 2 bits=10(stereo), originality=0, home=0, ...
+            0x01, // ...frame_length bits continued
+            0x60, // ...frame_length bits = 11 total
+            0xFC, // buffer fullness + frame count
+        ];
+        let payload = [0xAA, 0xBB, 0xCC, 0xDD];
+        let mut data = Vec::new();
+        data.extend_from_slice(&header);
+        data.extend_from_slice(&payload);
+        std::fs::write(&path, &data).expect("write test aac");
+
+        let mut reader = AacFileReader::new(&path, 48000).await.expect("open");
+        let frame = reader.read_next_frame().await.unwrap();
+        assert!(frame.is_some());
+        let frame = frame.unwrap();
+        assert_eq!(frame.channels, 2);
+        assert_eq!(frame.adts_header_size, 7);
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[tokio::test]
+    async fn test_reset_allows_rereading() {
+        let path = format!("/tmp/aac_reset_{}.aac", std::process::id());
+        let bytes: &[u8] = &[
+            0xFF, 0xF1, 0x50, 0x80, 0x01, 0x7F, 0xFC, // ADTS header
+            0x00, 0x00, 0x00, 0x00, // payload
+        ];
+        std::fs::write(&path, bytes).expect("write");
+
+        let mut reader = AacFileReader::new(&path, 48000).await.unwrap();
+        let frame1 = reader.read_next_frame().await.unwrap();
+        assert!(frame1.is_some());
+
+        reader.reset().await.unwrap();
+        assert_eq!(reader.current_position(), 0);
+
+        let frame2 = reader.read_next_frame().await.unwrap();
+        assert!(frame2.is_some());
+
+        let _ = std::fs::remove_file(&path);
+    }
 }

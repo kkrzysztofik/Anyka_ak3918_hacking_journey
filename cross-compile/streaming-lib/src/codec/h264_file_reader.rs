@@ -798,4 +798,480 @@ mod tests {
 
         let _ = std::fs::remove_file(file_path);
     }
+
+    // ========== NalUnitType::from comprehensive tests ==========
+
+    #[test]
+    fn test_nal_unit_type_from_all_values() {
+        assert_eq!(NalUnitType::from(0), NalUnitType::UnspecifiedHighValue);
+        assert_eq!(NalUnitType::from(2), NalUnitType::PartitionASlice);
+        assert_eq!(NalUnitType::from(3), NalUnitType::PartitionBSlice);
+        assert_eq!(NalUnitType::from(4), NalUnitType::PartitionCSlice);
+        assert_eq!(
+            NalUnitType::from(6),
+            NalUnitType::SupplementalEnhancementInformation
+        );
+        assert_eq!(NalUnitType::from(9), NalUnitType::AccessUnitDelimiter);
+        assert_eq!(NalUnitType::from(10), NalUnitType::EndOfSequence);
+        assert_eq!(NalUnitType::from(11), NalUnitType::EndOfStream);
+        assert_eq!(NalUnitType::from(12), NalUnitType::FillerData);
+        assert_eq!(
+            NalUnitType::from(13),
+            NalUnitType::SequenceParameterSetExtension
+        );
+        assert_eq!(NalUnitType::from(14), NalUnitType::PrefixNalUnit);
+        assert_eq!(
+            NalUnitType::from(15),
+            NalUnitType::SubsetSequenceParameterSet
+        );
+        assert_eq!(NalUnitType::from(16), NalUnitType::DepthParameterSet);
+    }
+
+    #[test]
+    fn test_nal_unit_type_from_reserved_ranges() {
+        assert_eq!(NalUnitType::from(17), NalUnitType::Reserved);
+        assert_eq!(NalUnitType::from(18), NalUnitType::Reserved);
+        assert_eq!(NalUnitType::from(19), NalUnitType::Reserved);
+        assert_eq!(NalUnitType::from(23), NalUnitType::Reserved);
+    }
+
+    #[test]
+    fn test_nal_unit_type_from_unspecified_high() {
+        assert_eq!(NalUnitType::from(24), NalUnitType::UnspecifiedHighValue);
+        assert_eq!(NalUnitType::from(31), NalUnitType::UnspecifiedHighValue);
+        assert_eq!(NalUnitType::from(255), NalUnitType::UnspecifiedHighValue);
+    }
+
+    // ========== find_start_code tests ==========
+
+    #[test]
+    fn test_find_start_code_3byte() {
+        let data = [0x00, 0x00, 0x01, 0x67];
+        assert_eq!(H264FileReader::find_start_code(&data, 0), Some((0, 3)));
+    }
+
+    #[test]
+    fn test_find_start_code_4byte() {
+        let data = [0x00, 0x00, 0x00, 0x01, 0x67];
+        assert_eq!(H264FileReader::find_start_code(&data, 0), Some((0, 4)));
+    }
+
+    #[test]
+    fn test_find_start_code_with_offset() {
+        let data = [0xAA, 0xBB, 0x00, 0x00, 0x01, 0x67];
+        assert_eq!(H264FileReader::find_start_code(&data, 0), Some((2, 3)));
+        assert_eq!(H264FileReader::find_start_code(&data, 2), Some((2, 3)));
+        assert_eq!(H264FileReader::find_start_code(&data, 3), None);
+    }
+
+    #[test]
+    fn test_find_start_code_no_match() {
+        let data = [0xAA, 0xBB, 0xCC, 0xDD];
+        assert_eq!(H264FileReader::find_start_code(&data, 0), None);
+    }
+
+    #[test]
+    fn test_find_start_code_empty() {
+        assert_eq!(H264FileReader::find_start_code(&[], 0), None);
+    }
+
+    #[test]
+    fn test_find_start_code_too_short() {
+        assert_eq!(H264FileReader::find_start_code(&[0x00, 0x00], 0), None);
+    }
+
+    #[test]
+    fn test_find_start_code_from_past_end() {
+        let data = [0x00, 0x00, 0x01, 0x67];
+        assert_eq!(H264FileReader::find_start_code(&data, 10), None);
+    }
+
+    #[test]
+    fn test_find_start_code_prefers_4byte_over_3byte() {
+        // 4-byte start code: 00 00 00 01
+        let data = [0x00, 0x00, 0x00, 0x01, 0x67];
+        let result = H264FileReader::find_start_code(&data, 0);
+        assert_eq!(result, Some((0, 4)));
+    }
+
+    #[test]
+    fn test_find_start_code_multiple() {
+        // Two NALs with 3-byte start codes
+        let data = [0x00, 0x00, 0x01, 0x67, 0x42, 0x00, 0x00, 0x01, 0x68];
+        assert_eq!(H264FileReader::find_start_code(&data, 0), Some((0, 3)));
+        assert_eq!(H264FileReader::find_start_code(&data, 3), Some((5, 3)));
+    }
+
+    // ========== build_annexb_nal tests ==========
+
+    #[test]
+    fn test_build_annexb_nal_valid_sps() {
+        let nal_data = vec![0x67, 0x42, 0x00, 0x1E]; // SPS NAL
+        let result = H264FileReader::build_annexb_nal(nal_data.clone(), 3);
+        assert!(result.is_ok());
+        let nal = result.unwrap();
+        assert_eq!(nal.unit_type, NalUnitType::SequenceParameterSet);
+        assert_eq!(nal.data, nal_data);
+        assert_eq!(nal.start_code_length, 3);
+    }
+
+    #[test]
+    fn test_build_annexb_nal_valid_idr() {
+        let nal_data = vec![0x65, 0xAA, 0xBB]; // IDR NAL
+        let result = H264FileReader::build_annexb_nal(nal_data, 4);
+        assert!(result.is_ok());
+        let nal = result.unwrap();
+        assert_eq!(nal.unit_type, NalUnitType::IdrSlice);
+        assert_eq!(nal.start_code_length, 4);
+    }
+
+    #[test]
+    fn test_build_annexb_nal_empty_data() {
+        let result = H264FileReader::build_annexb_nal(vec![], 3);
+        assert!(matches!(result, Err(H264FileError::InvalidNalUnit)));
+    }
+
+    #[test]
+    fn test_build_annexb_nal_forbidden_bit_set() {
+        let nal_data = vec![0x80, 0x42]; // forbidden_zero_bit = 1
+        let result = H264FileReader::build_annexb_nal(nal_data, 3);
+        assert!(matches!(result, Err(H264FileError::InvalidNalUnit)));
+    }
+
+    // ========== validate_and_build_avcc_nal tests ==========
+
+    #[test]
+    fn test_validate_and_build_avcc_nal_valid() {
+        let nal_data = vec![0x67, 0x42, 0x00, 0x1E]; // SPS
+        let result = H264FileReader::validate_and_build_avcc_nal(nal_data);
+        assert!(result.is_ok());
+        let nal = result.unwrap();
+        assert_eq!(nal.unit_type, NalUnitType::SequenceParameterSet);
+        assert_eq!(nal.start_code_length, 0);
+    }
+
+    #[test]
+    fn test_validate_and_build_avcc_nal_forbidden_bit() {
+        let nal_data = vec![0x87, 0x42]; // forbidden_zero_bit = 1
+        let result = H264FileReader::validate_and_build_avcc_nal(nal_data);
+        assert!(matches!(result, Err(H264FileError::InvalidNalUnit)));
+    }
+
+    // ========== validate_sps_pps tests ==========
+
+    #[test]
+    fn test_validate_sps_pps_both_valid() {
+        let result = H264FileReader::validate_sps_pps(vec![0x67, 0x42], vec![0x68, 0xCE]);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_validate_sps_pps_empty_sps() {
+        let result = H264FileReader::validate_sps_pps(vec![], vec![0x68, 0xCE]);
+        assert!(matches!(result, Err(H264FileError::NoNalUnits)));
+    }
+
+    #[test]
+    fn test_validate_sps_pps_empty_pps() {
+        let result = H264FileReader::validate_sps_pps(vec![0x67, 0x42], vec![]);
+        assert!(matches!(result, Err(H264FileError::NoNalUnits)));
+    }
+
+    #[test]
+    fn test_validate_sps_pps_both_empty() {
+        let result = H264FileReader::validate_sps_pps(vec![], vec![]);
+        assert!(matches!(result, Err(H264FileError::NoNalUnits)));
+    }
+
+    // ========== match_start_code_at tests ==========
+
+    #[test]
+    fn test_match_start_code_at_4byte() {
+        let data = [0x00, 0x00, 0x00, 0x01, 0x67];
+        assert_eq!(H264FileReader::match_start_code_at(&data, 0), Some(4));
+    }
+
+    #[test]
+    fn test_match_start_code_at_3byte() {
+        let data = [0x00, 0x00, 0x01, 0x67];
+        assert_eq!(H264FileReader::match_start_code_at(&data, 0), Some(3));
+    }
+
+    #[test]
+    fn test_match_start_code_at_no_match() {
+        let data = [0xAA, 0xBB, 0xCC, 0xDD];
+        assert_eq!(H264FileReader::match_start_code_at(&data, 0), None);
+    }
+
+    // ========== nal_type tests ==========
+
+    #[test]
+    fn test_nal_type_sps() {
+        assert_eq!(H264FileReader::nal_type(&[0x67]), 7); // SPS
+    }
+
+    #[test]
+    fn test_nal_type_pps() {
+        assert_eq!(H264FileReader::nal_type(&[0x68]), 8); // PPS
+    }
+
+    #[test]
+    fn test_nal_type_idr() {
+        assert_eq!(H264FileReader::nal_type(&[0x65]), 5); // IDR
+    }
+
+    #[test]
+    fn test_nal_type_empty() {
+        assert_eq!(H264FileReader::nal_type(&[]), 0);
+    }
+
+    // ========== collect_annexb_start_codes tests ==========
+
+    #[test]
+    fn test_collect_annexb_start_codes_multiple() {
+        let data = [
+            0x00, 0x00, 0x01, 0x67, 0x42, // 3-byte SPS
+            0x00, 0x00, 0x00, 0x01, 0x68, 0xCE, // 4-byte PPS
+        ];
+        let codes = H264FileReader::collect_annexb_start_codes(&data);
+        assert_eq!(codes.len(), 2);
+        assert_eq!(codes[0], (0, 3));
+        assert_eq!(codes[1], (5, 4));
+    }
+
+    #[test]
+    fn test_collect_annexb_start_codes_empty() {
+        let codes = H264FileReader::collect_annexb_start_codes(&[]);
+        assert!(codes.is_empty());
+    }
+
+    #[test]
+    fn test_collect_annexb_start_codes_no_codes() {
+        let data = [0xAA, 0xBB, 0xCC, 0xDD, 0xEE];
+        let codes = H264FileReader::collect_annexb_start_codes(&data);
+        assert!(codes.is_empty());
+    }
+
+    // ========== scan_annexb_for_sps_pps tests ==========
+
+    #[test]
+    fn test_scan_annexb_for_sps_pps_found() {
+        let data = [
+            0x00, 0x00, 0x01, 0x67, 0x42, 0x00, 0x1E, // SPS
+            0x00, 0x00, 0x01, 0x68, 0xCE, 0x06, 0xE2, // PPS
+        ];
+        let result = H264FileReader::scan_annexb_for_sps_pps(&data);
+        assert!(result.is_some());
+        let (sps, pps) = result.unwrap();
+        assert_eq!(sps[0] & 0x1F, 7); // SPS type
+        assert_eq!(pps[0] & 0x1F, 8); // PPS type
+    }
+
+    #[test]
+    fn test_scan_annexb_for_sps_pps_missing_pps() {
+        let data = [
+            0x00, 0x00, 0x01, 0x67, 0x42, 0x00, 0x1E, // SPS only
+        ];
+        let result = H264FileReader::scan_annexb_for_sps_pps(&data);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_scan_annexb_for_sps_pps_missing_sps() {
+        let data = [
+            0x00, 0x00, 0x01, 0x68, 0xCE, 0x06, 0xE2, // PPS only
+        ];
+        let result = H264FileReader::scan_annexb_for_sps_pps(&data);
+        assert!(result.is_none());
+    }
+
+    // ========== scan_avcc_for_sps_pps tests ==========
+
+    #[test]
+    fn test_scan_avcc_for_sps_pps_found() {
+        let sps = [0x67, 0x42, 0x00, 0x1E];
+        let pps = [0x68, 0xCE, 0x06, 0xE2];
+        let mut data = Vec::new();
+        data.extend_from_slice(&(sps.len() as u32).to_be_bytes());
+        data.extend_from_slice(&sps);
+        data.extend_from_slice(&(pps.len() as u32).to_be_bytes());
+        data.extend_from_slice(&pps);
+
+        let result = H264FileReader::scan_avcc_for_sps_pps(&data);
+        assert!(result.is_some());
+        let (found_sps, found_pps) = result.unwrap();
+        assert_eq!(found_sps, sps);
+        assert_eq!(found_pps, pps);
+    }
+
+    #[test]
+    fn test_scan_avcc_for_sps_pps_zero_length_nal() {
+        // Length = 0 should stop scanning
+        let data = [0x00, 0x00, 0x00, 0x00];
+        let result = H264FileReader::scan_avcc_for_sps_pps(&data);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_scan_avcc_for_sps_pps_empty() {
+        let result = H264FileReader::scan_avcc_for_sps_pps(&[]);
+        assert!(result.is_none());
+    }
+
+    // ========== H264FileError display tests ==========
+
+    #[test]
+    fn test_h264_file_error_display() {
+        let err = H264FileError::InvalidFormat;
+        assert_eq!(format!("{err}"), "Invalid H264 file format");
+
+        let err = H264FileError::NoNalUnits;
+        assert_eq!(format!("{err}"), "No NAL units found");
+
+        let err = H264FileError::InvalidNalUnit;
+        assert_eq!(format!("{err}"), "Invalid NAL unit");
+    }
+
+    #[test]
+    fn test_h264_file_error_io_error_from() {
+        let io_err = std::io::Error::new(std::io::ErrorKind::NotFound, "file not found");
+        let h264_err: H264FileError = io_err.into();
+        assert!(format!("{h264_err}").contains("file not found"));
+    }
+
+    // ========== NalUnit struct tests ==========
+
+    #[test]
+    fn test_nal_unit_clone() {
+        let nal = NalUnit {
+            unit_type: NalUnitType::SequenceParameterSet,
+            data: vec![0x67, 0x42],
+            start_code_length: 4,
+        };
+        let cloned = nal.clone();
+        assert_eq!(cloned.unit_type, NalUnitType::SequenceParameterSet);
+        assert_eq!(cloned.data, vec![0x67, 0x42]);
+        assert_eq!(cloned.start_code_length, 4);
+    }
+
+    #[test]
+    fn test_nal_unit_debug() {
+        let nal = NalUnit {
+            unit_type: NalUnitType::IdrSlice,
+            data: vec![0x65],
+            start_code_length: 3,
+        };
+        let debug = format!("{nal:?}");
+        assert!(debug.contains("IdrSlice"));
+    }
+
+    // ========== NalFormat equality tests ==========
+
+    #[test]
+    fn test_nal_format_eq() {
+        assert_eq!(NalFormat::AnnexB, NalFormat::AnnexB);
+        assert_eq!(NalFormat::Avcc, NalFormat::Avcc);
+        assert_ne!(NalFormat::AnnexB, NalFormat::Avcc);
+    }
+
+    // ========== Async file-based tests ==========
+
+    #[tokio::test]
+    async fn test_reader_file_size_and_position() {
+        let data = [0x00, 0x00, 0x01, 0x67, 0x42, 0x00, 0x1E];
+        let file_path = create_temp_h264_file("h264_size_pos", &data);
+
+        let reader = H264FileReader::new(file_path.to_str().unwrap(), 25)
+            .await
+            .unwrap();
+        assert_eq!(reader.file_size(), data.len() as u64);
+        assert_eq!(reader.current_position(), 0);
+        assert_eq!(reader.frame_rate(), 25);
+
+        let _ = std::fs::remove_file(file_path);
+    }
+
+    #[tokio::test]
+    async fn test_reader_reset() {
+        let data = [
+            0x00, 0x00, 0x01, 0x67, 0x42, 0x00, 0x1E, // SPS
+            0x00, 0x00, 0x01, 0x68, 0xCE, 0x06, 0xE2, // PPS
+        ];
+        let file_path = create_temp_h264_file("h264_reset", &data);
+
+        let mut reader = H264FileReader::new(file_path.to_str().unwrap(), 25)
+            .await
+            .unwrap();
+
+        // Read first NAL
+        let _ = reader.read_next_nal().await.unwrap();
+        // Reset and read first NAL again
+        reader.reset().await.unwrap();
+        assert_eq!(reader.current_position(), 0);
+
+        let nal = reader.read_next_nal().await.unwrap().unwrap();
+        assert_eq!(nal.unit_type, NalUnitType::SequenceParameterSet);
+
+        let _ = std::fs::remove_file(file_path);
+    }
+
+    #[tokio::test]
+    async fn test_extract_sps_pps_annexb_success() {
+        let data = [
+            0x00, 0x00, 0x01, 0x67, 0x42, 0x00, 0x1E, // SPS
+            0x00, 0x00, 0x01, 0x68, 0xCE, 0x06, 0xE2, // PPS
+        ];
+        let file_path = create_temp_h264_file("h264_sps_pps_ok", &data);
+
+        let mut reader = H264FileReader::new(file_path.to_str().unwrap(), 25)
+            .await
+            .unwrap();
+
+        let (sps, pps) = reader.extract_sps_pps().await.unwrap();
+        assert_eq!(sps[0] & 0x1F, 7); // SPS type
+        assert_eq!(pps[0] & 0x1F, 8); // PPS type
+
+        let _ = std::fs::remove_file(file_path);
+    }
+
+    #[tokio::test]
+    async fn test_read_empty_file() {
+        let file_path = create_temp_h264_file("h264_empty", &[]);
+
+        let mut reader = H264FileReader::new(file_path.to_str().unwrap(), 25)
+            .await
+            .unwrap();
+        let result = reader.read_next_nal().await.unwrap();
+        assert!(result.is_none());
+
+        let _ = std::fs::remove_file(file_path);
+    }
+
+    #[tokio::test]
+    async fn test_read_annexb_multiple_nals() {
+        let data = [
+            0x00, 0x00, 0x00, 0x01, 0x67, 0x42, // SPS (4-byte start code)
+            0x00, 0x00, 0x01, 0x68, 0xCE, // PPS (3-byte start code)
+            0x00, 0x00, 0x01, 0x65, 0xAA, 0xBB, // IDR
+        ];
+        let file_path = create_temp_h264_file("h264_multi_nal", &data);
+
+        let mut reader = H264FileReader::new(file_path.to_str().unwrap(), 25)
+            .await
+            .unwrap();
+
+        let nal1 = reader.read_next_nal().await.unwrap().unwrap();
+        assert_eq!(nal1.unit_type, NalUnitType::SequenceParameterSet);
+
+        let nal2 = reader.read_next_nal().await.unwrap().unwrap();
+        assert_eq!(nal2.unit_type, NalUnitType::PictureParameterSet);
+
+        let nal3 = reader.read_next_nal().await.unwrap().unwrap();
+        assert_eq!(nal3.unit_type, NalUnitType::IdrSlice);
+
+        let nal4 = reader.read_next_nal().await.unwrap();
+        assert!(nal4.is_none());
+
+        let _ = std::fs::remove_file(file_path);
+    }
 }

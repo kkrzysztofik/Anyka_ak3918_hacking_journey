@@ -106,4 +106,21 @@ mod tests {
         let debug_str = format!("{:?}", err);
         assert!(debug_str.contains("NoTokenFound"));
     }
+
+    // ========== From Trait Tests ==========
+
+    #[test]
+    fn test_auth_error_from_auth_error_value() {
+        let err: AuthError = AuthErrorValue::TokenIsNotCorrect.into();
+        assert!(matches!(err.value, AuthErrorValue::TokenIsNotCorrect));
+
+        let err: AuthError = AuthErrorValue::NoTokenFound.into();
+        assert!(matches!(err.value, AuthErrorValue::NoTokenFound));
+
+        let err: AuthError = AuthErrorValue::InvalidTokenFormat.into();
+        assert!(matches!(err.value, AuthErrorValue::InvalidTokenFormat));
+
+        let err: AuthError = AuthErrorValue::InvalidCredentials.into();
+        assert!(matches!(err.value, AuthErrorValue::InvalidCredentials));
+    }
 }

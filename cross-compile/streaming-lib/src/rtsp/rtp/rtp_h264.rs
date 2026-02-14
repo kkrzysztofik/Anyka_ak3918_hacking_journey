@@ -1365,4 +1365,239 @@ mod tests {
         assert!(result.is_ok());
         assert_eq!(*frame_count.lock().unwrap(), 1);
     }
+
+    // ========== NalType::from_header Tests ==========
+
+    #[test]
+    fn test_nal_type_from_header_single_type_1() {
+        assert!(matches!(NalType::from_header(0x61), NalType::Single)); // type 1 (non-IDR)
+    }
+
+    #[test]
+    fn test_nal_type_from_header_single_type_5() {
+        assert!(matches!(NalType::from_header(0x65), NalType::Single)); // type 5 (IDR)
+    }
+
+    #[test]
+    fn test_nal_type_from_header_single_type_7() {
+        assert!(matches!(NalType::from_header(0x67), NalType::Single)); // type 7 (SPS)
+    }
+
+    #[test]
+    fn test_nal_type_from_header_single_type_8() {
+        assert!(matches!(NalType::from_header(0x68), NalType::Single)); // type 8 (PPS)
+    }
+
+    #[test]
+    fn test_nal_type_from_header_single_type_23() {
+        assert!(matches!(NalType::from_header(23), NalType::Single)); // type 23
+    }
+
+    #[test]
+    fn test_nal_type_from_header_stap_a() {
+        assert!(matches!(
+            NalType::from_header(define::STAP_A),
+            NalType::Stap
+        ));
+    }
+
+    #[test]
+    fn test_nal_type_from_header_stap_b() {
+        assert!(matches!(
+            NalType::from_header(define::STAP_B),
+            NalType::Stap
+        ));
+    }
+
+    #[test]
+    fn test_nal_type_from_header_mtap_16() {
+        assert!(matches!(
+            NalType::from_header(define::MTAP_16),
+            NalType::Mtap
+        ));
+    }
+
+    #[test]
+    fn test_nal_type_from_header_mtap_24() {
+        assert!(matches!(
+            NalType::from_header(define::MTAP_24),
+            NalType::Mtap
+        ));
+    }
+
+    #[test]
+    fn test_nal_type_from_header_fu_a() {
+        assert!(matches!(NalType::from_header(define::FU_A), NalType::Fu));
+    }
+
+    #[test]
+    fn test_nal_type_from_header_fu_b() {
+        assert!(matches!(NalType::from_header(define::FU_B), NalType::Fu));
+    }
+
+    #[test]
+    fn test_nal_type_from_header_unknown_type_0() {
+        assert!(matches!(NalType::from_header(0x00), NalType::Unknown));
+    }
+
+    #[test]
+    fn test_nal_type_from_header_unknown_type_30() {
+        assert!(matches!(NalType::from_header(30), NalType::Unknown));
+    }
+
+    #[test]
+    fn test_nal_type_from_header_unknown_type_31() {
+        assert!(matches!(NalType::from_header(31), NalType::Unknown));
+    }
+
+    // ========== is_vcl_nalu_header Tests ==========
+
+    #[test]
+    fn test_is_vcl_nalu_header_type_1() {
+        assert!(RtpH264Packer::is_vcl_nalu_header(0x61)); // type 1
+    }
+
+    #[test]
+    fn test_is_vcl_nalu_header_type_5() {
+        assert!(RtpH264Packer::is_vcl_nalu_header(0x65)); // type 5 (IDR)
+    }
+
+    #[test]
+    fn test_is_vcl_nalu_header_type_3() {
+        assert!(RtpH264Packer::is_vcl_nalu_header(0x03)); // type 3
+    }
+
+    #[test]
+    fn test_is_vcl_nalu_header_sps_not_vcl() {
+        assert!(!RtpH264Packer::is_vcl_nalu_header(0x67)); // type 7 (SPS)
+    }
+
+    #[test]
+    fn test_is_vcl_nalu_header_pps_not_vcl() {
+        assert!(!RtpH264Packer::is_vcl_nalu_header(0x68)); // type 8 (PPS)
+    }
+
+    #[test]
+    fn test_is_vcl_nalu_header_type_0_not_vcl() {
+        assert!(!RtpH264Packer::is_vcl_nalu_header(0x00)); // type 0
+    }
+
+    #[test]
+    fn test_is_vcl_nalu_header_type_6_not_vcl() {
+        assert!(!RtpH264Packer::is_vcl_nalu_header(0x06)); // type 6 (SEI)
+    }
+
+    // ========== extract_nalus_from_frame Tests ==========
+
+    #[test]
+    fn test_extract_nalus_from_frame_empty() {
+        let mut frame = BytesMut::new();
+        let nalus = RtpH264Packer::extract_nalus_from_frame(&mut frame);
+        assert!(nalus.is_empty());
+    }
+
+    #[test]
+    fn test_extract_nalus_from_frame_single_nalu_with_start_code() {
+        let mut frame = BytesMut::new();
+        frame.extend_from_slice(&[0x00, 0x00, 0x01]); // 3-byte start code
+        frame.extend_from_slice(&[0x65, 0x88, 0x84]); // IDR NALU
+        let nalus = RtpH264Packer::extract_nalus_from_frame(&mut frame);
+        assert_eq!(nalus.len(), 1);
+        assert_eq!(nalus[0][0], 0x65);
+    }
+
+    #[test]
+    fn test_extract_nalus_from_frame_two_nalus() {
+        let mut frame = BytesMut::new();
+        frame.extend_from_slice(&[0x00, 0x00, 0x01]); // start code
+        frame.extend_from_slice(&[0x67, 0x42, 0x00]); // SPS
+        frame.extend_from_slice(&[0x00, 0x00, 0x01]); // start code
+        frame.extend_from_slice(&[0x68, 0xCE, 0x38]); // PPS
+        let nalus = RtpH264Packer::extract_nalus_from_frame(&mut frame);
+        assert_eq!(nalus.len(), 2);
+        assert_eq!(nalus[0][0] & 0x1F, 7); // SPS
+        assert_eq!(nalus[1][0] & 0x1F, 8); // PPS
+    }
+
+    #[test]
+    fn test_extract_nalus_from_frame_four_byte_start_code() {
+        let mut frame = BytesMut::new();
+        frame.extend_from_slice(&[0x00, 0x00, 0x00, 0x01]); // 4-byte start code
+        frame.extend_from_slice(&[0x65, 0x01, 0x02]); // IDR
+        let nalus = RtpH264Packer::extract_nalus_from_frame(&mut frame);
+        assert_eq!(nalus.len(), 1);
+    }
+
+    #[test]
+    fn test_extract_nalus_from_frame_raw_nalu_no_start_code() {
+        let mut frame = BytesMut::new();
+        frame.extend_from_slice(&[0x65, 0x01, 0x02, 0x03]); // Raw NALU without start code
+        let nalus = RtpH264Packer::extract_nalus_from_frame(&mut frame);
+        assert_eq!(nalus.len(), 1);
+        assert_eq!(nalus[0].len(), 4);
+    }
+
+    // ========== get_mtap_ts_size Tests ==========
+
+    #[test]
+    fn test_get_mtap_ts_size_mtap16() {
+        assert_eq!(RtpH264UnPacker::get_mtap_ts_size(define::MTAP_16), 2);
+    }
+
+    #[test]
+    fn test_get_mtap_ts_size_mtap24() {
+        assert_eq!(RtpH264UnPacker::get_mtap_ts_size(define::MTAP_24), 3);
+    }
+
+    #[test]
+    fn test_get_mtap_ts_size_unknown_type() {
+        assert_eq!(RtpH264UnPacker::get_mtap_ts_size(0), 0);
+    }
+
+    #[test]
+    fn test_get_mtap_ts_size_stap_a() {
+        assert_eq!(RtpH264UnPacker::get_mtap_ts_size(define::STAP_A), 0);
+    }
+
+    // ========== skip_mtap_ts_offset Tests ==========
+
+    #[test]
+    fn test_skip_mtap_ts_offset_mtap16() {
+        let data = BytesMut::from(&[0x00, 0x64][..]); // 2-byte TS offset
+        let mut reader = BytesReader::new(data);
+        let result = RtpH264UnPacker::skip_mtap_ts_offset(&mut reader, define::MTAP_16);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_skip_mtap_ts_offset_mtap24() {
+        let data = BytesMut::from(&[0x00, 0x00, 0x64][..]); // 3-byte TS offset
+        let mut reader = BytesReader::new(data);
+        let result = RtpH264UnPacker::skip_mtap_ts_offset(&mut reader, define::MTAP_24);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_skip_mtap_ts_offset_unknown_type_does_nothing() {
+        let data = BytesMut::from(&[0x00][..]);
+        let mut reader = BytesReader::new(data);
+        let result = RtpH264UnPacker::skip_mtap_ts_offset(&mut reader, 0);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_skip_mtap_ts_offset_mtap16_insufficient_data() {
+        let data = BytesMut::from(&[0x00][..]); // Only 1 byte, need 2
+        let mut reader = BytesReader::new(data);
+        let result = RtpH264UnPacker::skip_mtap_ts_offset(&mut reader, define::MTAP_16);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_skip_mtap_ts_offset_mtap24_insufficient_data() {
+        let data = BytesMut::from(&[0x00, 0x01][..]); // Only 2 bytes, need 3
+        let mut reader = BytesReader::new(data);
+        let result = RtpH264UnPacker::skip_mtap_ts_offset(&mut reader, define::MTAP_24);
+        assert!(result.is_err());
+    }
 }

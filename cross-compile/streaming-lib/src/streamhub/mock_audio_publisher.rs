@@ -408,6 +408,7 @@ mod tests {
     use super::*;
     use crate::streamhub::define::{DataSender, FrameData, SubscribeType, TStreamHandler};
     use portable_atomic::Ordering;
+    use std::sync::Arc;
     use tokio::sync::mpsc;
 
     #[tokio::test]
@@ -575,5 +576,165 @@ mod tests {
         assert_eq!(timestamps[2], 2048, "Third timestamp should be 2048");
 
         let _ = std::fs::remove_file(&path);
+    }
+
+    // ========== compute_frame_interval Tests ==========
+
+    #[test]
+    fn test_compute_frame_interval_48khz() {
+        let interval = compute_frame_interval(48_000);
+        // 1024 / 48000 ≈ 21.333ms
+        let expected_nanos = (1024.0 / 48_000.0 * 1_000_000_000.0) as u64;
+        let delta = if interval.as_nanos() > expected_nanos as u128 {
+            interval.as_nanos() - expected_nanos as u128
+        } else {
+            expected_nanos as u128 - interval.as_nanos()
+        };
+        assert!(delta < 100, "interval off by {delta}ns");
+    }
+
+    #[test]
+    fn test_compute_frame_interval_44100() {
+        let interval = compute_frame_interval(44_100);
+        // 1024 / 44100 ≈ 23.22ms
+        assert!(interval.as_millis() >= 23);
+        assert!(interval.as_millis() <= 24);
+    }
+
+    #[test]
+    fn test_compute_frame_interval_zero() {
+        let interval = compute_frame_interval(0);
+        assert!(interval.is_zero());
+    }
+
+    #[test]
+    fn test_compute_frame_interval_8khz() {
+        let interval = compute_frame_interval(8_000);
+        // 1024 / 8000 = 128ms
+        assert_eq!(interval.as_millis(), 128);
+    }
+
+    // ========== has_no_audio_subscribers Tests ==========
+
+    #[test]
+    fn test_has_no_audio_subscribers_none_callback() {
+        assert!(!has_no_audio_subscribers(&None));
+    }
+
+    #[test]
+    fn test_has_no_audio_subscribers_zero_count() {
+        let cb: Arc<dyn Fn() -> usize + Send + Sync> = Arc::new(|| 0);
+        assert!(has_no_audio_subscribers(&Some(cb)));
+    }
+
+    #[test]
+    fn test_has_no_audio_subscribers_nonzero_count() {
+        let cb: Arc<dyn Fn() -> usize + Send + Sync> = Arc::new(|| 5);
+        assert!(!has_no_audio_subscribers(&Some(cb)));
+    }
+
+    // ========== build_audio_pacer Tests ==========
+
+    #[test]
+    fn test_build_audio_pacer_zero_interval() {
+        let pacer = build_audio_pacer(Duration::from_millis(0));
+        assert!(pacer.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_build_audio_pacer_nonzero_interval() {
+        let pacer = build_audio_pacer(Duration::from_millis(21));
+        assert!(pacer.is_some());
+    }
+
+    // ========== AudioPublisherError Display Tests ==========
+
+    #[test]
+    fn test_audio_publisher_error_aac_display() {
+        use crate::codec::aac_file_reader::AacFileError;
+        let err = AudioPublisherError::AacError(AacFileError::InvalidAdtsHeader);
+        let msg = format!("{}", err);
+        assert!(msg.contains("AAC file error"));
+    }
+
+    #[test]
+    fn test_audio_publisher_error_channel_display() {
+        let err = AudioPublisherError::ChannelError;
+        assert_eq!(format!("{}", err), "Channel send error");
+    }
+
+    #[test]
+    fn test_audio_publisher_error_stream_stopped_display() {
+        let err = AudioPublisherError::StreamStopped;
+        assert_eq!(format!("{}", err), "Stream already stopped");
+    }
+
+    // ========== generate_sdp_from_audio_config Edge Cases ==========
+
+    #[test]
+    fn test_sdp_generation_mono() {
+        // AAC-LC, 48kHz, mono: channelConfig = 1 => bits 3-6 of byte[1]
+        // For mono: byte[1] = 0x08 => (0x08 >> 3) & 0x0F = 1
+        let audio_config = vec![0x11, 0x08];
+        let sdp = generate_sdp_from_audio_config(&audio_config, 48000);
+        assert!(
+            sdp.contains("profile-level-id=14"),
+            "mono should use level 2"
+        );
+    }
+
+    #[test]
+    fn test_sdp_generation_empty_config() {
+        // Edge case: empty config should still produce valid SDP
+        let sdp = generate_sdp_from_audio_config(&[], 48000);
+        assert!(sdp.contains("m=audio 0 RTP/AVP 97"));
+        // Default to stereo (2) when config too short
+        assert!(sdp.contains("/2"));
+    }
+
+    #[test]
+    fn test_sdp_generation_single_byte_config() {
+        let sdp = generate_sdp_from_audio_config(&[0x11], 44100);
+        assert!(sdp.contains("config=11"));
+        // Single byte config: channels defaults to 2
+        assert!(sdp.contains("/2"));
+    }
+
+    #[test]
+    fn test_sdp_generation_16khz() {
+        let audio_config = vec![0x14, 0x10];
+        let sdp = generate_sdp_from_audio_config(&audio_config, 16000);
+        assert!(sdp.contains("MPEG4-GENERIC/16000"));
+    }
+
+    // ========== audio_target_elapsed Edge Cases ==========
+
+    #[test]
+    fn test_audio_target_elapsed_zero_sample_rate() {
+        assert_eq!(audio_target_elapsed(10, 0), Duration::from_nanos(0));
+    }
+
+    #[test]
+    fn test_audio_target_elapsed_large_frame_count() {
+        // Should not panic with large frame counts
+        let d = audio_target_elapsed(1_000_000, 48_000);
+        assert!(d.as_secs() > 0);
+    }
+
+    // ========== check_is_running / set_running_flag Tests ==========
+
+    #[tokio::test]
+    async fn test_check_is_running_default_false() {
+        let flag = Arc::new(tokio::sync::Mutex::new(false));
+        assert!(!check_is_running(&flag).await);
+    }
+
+    #[tokio::test]
+    async fn test_set_running_flag_and_check() {
+        let flag = Arc::new(tokio::sync::Mutex::new(false));
+        set_running_flag(&flag, true).await;
+        assert!(check_is_running(&flag).await);
+        set_running_flag(&flag, false).await;
+        assert!(!check_is_running(&flag).await);
     }
 }

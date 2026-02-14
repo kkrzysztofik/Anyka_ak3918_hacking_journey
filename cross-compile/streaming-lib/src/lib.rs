@@ -100,3 +100,71 @@ pub enum FrameType {
     /// Audio packet (AAC)
     AudioPacket,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ========== FrameType Tests ==========
+
+    #[test]
+    fn test_frame_type_debug() {
+        assert_eq!(format!("{:?}", FrameType::VideoIFrame), "VideoIFrame");
+        assert_eq!(format!("{:?}", FrameType::VideoPFrame), "VideoPFrame");
+        assert_eq!(format!("{:?}", FrameType::VideoBFrame), "VideoBFrame");
+        assert_eq!(format!("{:?}", FrameType::AudioPacket), "AudioPacket");
+    }
+
+    #[test]
+    fn test_frame_type_clone() {
+        let ft = FrameType::VideoIFrame;
+        let ft2 = ft;
+        assert_eq!(ft, ft2);
+    }
+
+    #[test]
+    fn test_frame_type_equality() {
+        assert_eq!(FrameType::VideoIFrame, FrameType::VideoIFrame);
+        assert_ne!(FrameType::VideoIFrame, FrameType::VideoPFrame);
+        assert_ne!(FrameType::AudioPacket, FrameType::VideoBFrame);
+    }
+
+    // ========== Frame Tests ==========
+
+    #[test]
+    fn test_frame_construction() {
+        let data = [0u8; 10];
+        let frame = Frame {
+            data: data.as_ptr(),
+            size: data.len(),
+            timestamp: 12345,
+            frame_type: FrameType::VideoIFrame,
+        };
+        assert_eq!(frame.size, 10);
+        assert_eq!(frame.timestamp, 12345);
+        assert_eq!(frame.frame_type, FrameType::VideoIFrame);
+    }
+
+    #[test]
+    fn test_frame_send_sync() {
+        fn assert_send<T: Send>() {}
+        fn assert_sync<T: Sync>() {}
+        assert_send::<Frame>();
+        assert_sync::<Frame>();
+    }
+
+    // ========== Re-export Smoke Tests ==========
+
+    #[test]
+    fn test_logging_flags_reexport() {
+        // Just verify the re-exports compile and are accessible
+        set_stream_frame_debug_logging(false);
+        let _ = stream_frame_debug_logging_enabled();
+    }
+
+    #[test]
+    fn test_video_codec_type_reexport() {
+        // Verify VideoCodecType re-export is accessible
+        let _ = VideoCodecType::H264;
+    }
+}

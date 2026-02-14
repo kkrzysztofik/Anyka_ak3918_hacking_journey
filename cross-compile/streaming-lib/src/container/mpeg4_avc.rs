@@ -742,4 +742,256 @@ mod tests {
         let size = processor.read_nalu_size(&mut reader).unwrap();
         assert_eq!(size, 256);
     }
+
+    // ========== decoder_configuration_record_save High Profile Tests ==========
+
+    #[test]
+    fn test_decoder_configuration_record_save_high_profile_has_extension_data() {
+        let mut processor = Mpeg4AvcProcessor::new();
+        processor.mpeg4_avc.profile = 100; // High profile
+        processor.mpeg4_avc.compatibility = 0x00;
+        processor.mpeg4_avc.level = 0x1F;
+        processor.mpeg4_avc.nalu_length = 4;
+        processor.mpeg4_avc.chroma_format_idc = 1;
+        processor.mpeg4_avc.bit_depth_luma_minus8 = 0;
+        processor.mpeg4_avc.bit_depth_chroma_minus8 = 0;
+
+        let record = processor.decoder_configuration_record_save().unwrap();
+
+        // Base: version(1) + profile(1) + compat(1) + level(1) + nalu_len(1) + sps_count(1) + pps_count(1) = 7
+        // Extension for High: chroma_format(1) + bit_depth_luma(1) + bit_depth_chroma(1) + num_sps_ext(1) = 4
+        assert_eq!(record.len(), 7 + 4);
+        assert_eq!(record[0], 1); // version
+        assert_eq!(record[1], 100); // High profile
+
+        // Extension data checks
+        assert_eq!(record[7] & 0xFC, 0xFC); // reserved bits
+        assert_eq!(record[7] & 0x03, 1); // chroma_format_idc
+        assert_eq!(record[8] & 0xF8, 0xF8); // reserved bits
+        assert_eq!(record[8] & 0x07, 0); // bit_depth_luma_minus8
+        assert_eq!(record[9] & 0xF8, 0xF8); // reserved bits
+        assert_eq!(record[9] & 0x07, 0); // bit_depth_chroma_minus8
+        assert_eq!(record[10], 0); // num SPS ext = 0
+    }
+
+    // ========== decoder_configuration_record_load Tests ==========
+
+    #[test]
+    fn test_decoder_configuration_record_load_baseline_720p() {
+        let mut processor = Mpeg4AvcProcessor::new();
+
+        // Build a minimal AVCDecoderConfigurationRecord with Baseline SPS for 1280x720
+        let mut writer = BytesWriter::new();
+        writer.write_u8(1).unwrap(); // version
+        writer.write_u8(66).unwrap(); // Baseline profile
+        writer.write_u8(0xC0).unwrap(); // compatibility
+        writer.write_u8(30).unwrap(); // level 3.0
+        writer.write_u8(0xFF).unwrap(); // nalu_length = 4 (3 | 0xFC)
+
+        // 1 SPS
+        writer.write_u8(0xE1).unwrap(); // 1 SPS (0x01 | 0xE0)
+        // SPS: Baseline profile, 1280x720
+        // Properly bit-packed exp-Golomb encoded SPS data
+        let sps_data: &[u8] = &[
+            0x67, // NAL type SPS
+            0x42, // profile_idc = 66 (Baseline)
+            0xC0, // constraint_set flags
+            0x1E, // level_idc = 30
+            0xDA, // UEV(0)+UEV(0)+UEV(2)+UEV(1)
+            0x01, // gaps=0, start of UEV(79) for pic_width_in_mbs_minus1
+            0x40, // middle of UEV(79), start of UEV(44) for pic_height_in_map_units_minus1
+            0x16, // middle of UEV(44)
+            0xE0, // end of UEV(44), frame_mbs_only=1, direct_8x8=1, cropping=0, vui=0
+        ];
+        writer
+            .write_u16::<BigEndian>(sps_data.len() as u16)
+            .unwrap();
+        writer.write(sps_data).unwrap();
+
+        // 1 PPS
+        writer.write_u8(1).unwrap(); // 1 PPS
+        let pps_data: &[u8] = &[0x68, 0xCE, 0x3C, 0x80];
+        writer
+            .write_u16::<BigEndian>(pps_data.len() as u16)
+            .unwrap();
+        writer.write(pps_data).unwrap();
+
+        let mut reader = BytesReader::new(writer.extract_current_bytes());
+        let result = processor.decoder_configuration_record_load(&mut reader);
+        assert!(result.is_ok());
+
+        assert_eq!(processor.mpeg4_avc.profile, 66);
+        assert_eq!(processor.mpeg4_avc.compatibility, 0xC0);
+        assert_eq!(processor.mpeg4_avc.level, 30);
+        assert_eq!(processor.mpeg4_avc.nalu_length, 4);
+        assert_eq!(processor.mpeg4_avc.nb_sps, 1);
+        assert_eq!(processor.mpeg4_avc.nb_pps, 1);
+        assert_eq!(processor.mpeg4_avc.sps.len(), 1);
+        assert_eq!(processor.mpeg4_avc.pps.len(), 1);
+        // Resolution should have been parsed from SPS
+        assert!(processor.mpeg4_avc.width > 0);
+        assert!(processor.mpeg4_avc.height > 0);
+    }
+
+    #[test]
+    fn test_decoder_configuration_record_load_wrong_sps_nal_type_returns_error() {
+        let mut processor = Mpeg4AvcProcessor::new();
+
+        let mut writer = BytesWriter::new();
+        writer.write_u8(1).unwrap(); // version
+        writer.write_u8(66).unwrap(); // profile
+        writer.write_u8(0).unwrap(); // compat
+        writer.write_u8(30).unwrap(); // level
+        writer.write_u8(0xFF).unwrap(); // nalu_length = 4
+
+        // 1 SPS but with wrong NAL type (PPS type 8 instead of SPS type 7)
+        writer.write_u8(0xE1).unwrap();
+        let bad_sps_data: &[u8] = &[0x68, 0xCE, 0x3C, 0x80]; // PPS NAL type, not SPS
+        writer
+            .write_u16::<BigEndian>(bad_sps_data.len() as u16)
+            .unwrap();
+        writer.write(bad_sps_data).unwrap();
+
+        let mut reader = BytesReader::new(writer.extract_current_bytes());
+        let result = processor.decoder_configuration_record_load(&mut reader);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_decoder_configuration_record_load_no_sps_no_pps() {
+        let mut processor = Mpeg4AvcProcessor::new();
+
+        let mut writer = BytesWriter::new();
+        writer.write_u8(1).unwrap(); // version
+        writer.write_u8(66).unwrap(); // profile
+        writer.write_u8(0).unwrap(); // compat
+        writer.write_u8(30).unwrap(); // level
+        writer.write_u8(0xFF).unwrap(); // nalu_length = 4
+
+        // 0 SPS
+        writer.write_u8(0xE0).unwrap(); // 0 SPS (0x00 | 0xE0)
+        // 0 PPS
+        writer.write_u8(0).unwrap();
+
+        let mut reader = BytesReader::new(writer.extract_current_bytes());
+        let result = processor.decoder_configuration_record_load(&mut reader);
+        assert!(result.is_ok());
+        assert_eq!(processor.mpeg4_avc.nb_sps, 0);
+        assert_eq!(processor.mpeg4_avc.nb_pps, 0);
+    }
+
+    // ========== h264_mp4toannexb Tests ==========
+
+    #[test]
+    fn test_h264_mp4toannexb_single_sei_nalu() {
+        let mut processor = Mpeg4AvcProcessor::new();
+        processor.mpeg4_avc.nalu_length = 4;
+
+        // Build MP4 data: 4-byte size + SEI NAL (type 6)
+        let mut mp4_data = BytesMut::new();
+        mp4_data.extend_from_slice(&[0x00, 0x00, 0x00, 0x03]); // size=3
+        mp4_data.extend_from_slice(&[0x06, 0x01, 0x02]); // SEI data
+
+        let mut reader = BytesReader::new(mp4_data);
+        let annexb = processor.h264_mp4toannexb(&mut reader).unwrap();
+
+        // Should have start code (4) + data (3) = 7 bytes
+        assert_eq!(annexb.len(), 7);
+        assert_eq!(&annexb[..4], &H264_START_CODE);
+        assert_eq!(annexb[4], 0x06); // SEI NAL type
+    }
+
+    #[test]
+    fn test_h264_mp4toannexb_idr_with_sps_pps_prepend() {
+        let mut processor = Mpeg4AvcProcessor::new();
+        processor.mpeg4_avc.nalu_length = 4;
+
+        // Preload SPS/PPS annexb data
+        processor
+            .mpeg4_avc
+            .sps_annexb_data
+            .write(&[0x00, 0x00, 0x00, 0x01, 0x67, 0x42])
+            .unwrap();
+        processor
+            .mpeg4_avc
+            .pps_annexb_data
+            .write(&[0x00, 0x00, 0x00, 0x01, 0x68, 0xCE])
+            .unwrap();
+
+        // Build MP4 data with IDR NAL (type 5)
+        let mut mp4_data = BytesMut::new();
+        mp4_data.extend_from_slice(&[0x00, 0x00, 0x00, 0x02]); // size=2
+        mp4_data.extend_from_slice(&[0x65, 0x88]); // IDR slice
+
+        let mut reader = BytesReader::new(mp4_data);
+        let annexb = processor.h264_mp4toannexb(&mut reader).unwrap();
+
+        // Should contain SPS annexb + PPS annexb + start code + IDR data
+        // SPS: 6 bytes, PPS: 6 bytes, start code: 4 bytes, IDR: 2 bytes = 18
+        assert_eq!(annexb.len(), 6 + 6 + 4 + 2);
+    }
+
+    #[test]
+    fn test_h264_mp4toannexb_sps_pps_nalu_does_not_prepend() {
+        let mut processor = Mpeg4AvcProcessor::new();
+        processor.mpeg4_avc.nalu_length = 4;
+
+        // Build MP4 data with SPS NAL (type 7) followed by IDR (type 5)
+        let mut mp4_data = BytesMut::new();
+        // SPS
+        mp4_data.extend_from_slice(&[0x00, 0x00, 0x00, 0x02]); // size=2
+        mp4_data.extend_from_slice(&[0x67, 0x42]); // SPS
+        // IDR (sps_pps_flag should already be true, so no prepend)
+        mp4_data.extend_from_slice(&[0x00, 0x00, 0x00, 0x02]); // size=2
+        mp4_data.extend_from_slice(&[0x65, 0x88]); // IDR
+
+        let mut reader = BytesReader::new(mp4_data);
+        let annexb = processor.h264_mp4toannexb(&mut reader).unwrap();
+
+        // Should have: start_code + SPS(2) + start_code + IDR(2) = 4+2+4+2 = 12
+        assert_eq!(annexb.len(), 12);
+    }
+
+    // ========== decoder_configuration_record roundtrip ==========
+
+    #[test]
+    fn test_decoder_configuration_record_save_load_roundtrip() {
+        let mut save_processor = Mpeg4AvcProcessor::new();
+        save_processor.mpeg4_avc.profile = 66; // Baseline
+        save_processor.mpeg4_avc.compatibility = 0xC0;
+        save_processor.mpeg4_avc.level = 30;
+        save_processor.mpeg4_avc.nalu_length = 4;
+
+        // Create a minimal valid SPS (Baseline, 1280x720, properly bit-packed)
+        let sps_data: &[u8] = &[0x67, 0x42, 0xC0, 0x1E, 0xDA, 0x01, 0x40, 0x16, 0xE0];
+        save_processor.mpeg4_avc.sps.push(Sps {
+            data: BytesMut::from(sps_data),
+        });
+        save_processor.mpeg4_avc.nb_sps = 1;
+
+        let pps_data: &[u8] = &[0x68, 0xCE, 0x3C, 0x80];
+        save_processor.mpeg4_avc.pps.push(Pps {
+            data: BytesMut::from(pps_data),
+        });
+        save_processor.mpeg4_avc.nb_pps = 1;
+
+        // Save
+        let record = save_processor.decoder_configuration_record_save().unwrap();
+
+        // Load
+        let mut load_processor = Mpeg4AvcProcessor::new();
+        let mut reader = BytesReader::new(record);
+        load_processor
+            .decoder_configuration_record_load(&mut reader)
+            .unwrap();
+
+        assert_eq!(load_processor.mpeg4_avc.profile, 66);
+        assert_eq!(load_processor.mpeg4_avc.compatibility, 0xC0);
+        assert_eq!(load_processor.mpeg4_avc.level, 30);
+        assert_eq!(load_processor.mpeg4_avc.nalu_length, 4);
+        assert_eq!(load_processor.mpeg4_avc.sps.len(), 1);
+        assert_eq!(load_processor.mpeg4_avc.pps.len(), 1);
+        assert_eq!(load_processor.mpeg4_avc.sps[0].data[..], sps_data[..]);
+        assert_eq!(load_processor.mpeg4_avc.pps[0].data[..], pps_data[..]);
+    }
 }

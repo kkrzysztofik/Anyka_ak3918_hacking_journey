@@ -115,4 +115,103 @@ mod tests {
         let debug_str = format!("{:?}", err);
         assert!(debug_str.contains("BytesWriteError"));
     }
+
+    // ========== InvalidPacketLoss Display Tests ==========
+
+    #[test]
+    fn test_rtcp_error_value_invalid_packet_loss_display() {
+        let err = RtcpErrorValue::InvalidPacketLoss { value: 16777216 };
+        let display = format!("{}", err);
+        assert!(display.contains("cumulative packets lost exceeds 24-bit range"));
+        assert!(display.contains("16777216"));
+    }
+
+    #[test]
+    fn test_rtcp_error_value_invalid_packet_loss_zero() {
+        let err = RtcpErrorValue::InvalidPacketLoss { value: 0 };
+        let display = format!("{}", err);
+        assert!(display.contains("0"));
+    }
+
+    #[test]
+    fn test_rtcp_error_value_invalid_packet_loss_max_24bit() {
+        let err = RtcpErrorValue::InvalidPacketLoss { value: 0x00FF_FFFF };
+        let display = format!("{}", err);
+        assert!(display.contains("16777215"));
+    }
+
+    // ========== InvalidAppLength Display Tests ==========
+
+    #[test]
+    fn test_rtcp_error_value_invalid_app_length_display() {
+        let err = RtcpErrorValue::InvalidAppLength { length: 1 };
+        let display = format!("{}", err);
+        assert!(display.contains("invalid RTCP APP length"));
+        assert!(display.contains("1"));
+    }
+
+    #[test]
+    fn test_rtcp_error_value_invalid_app_length_zero() {
+        let err = RtcpErrorValue::InvalidAppLength { length: 0 };
+        let display = format!("{}", err);
+        assert!(display.contains("0"));
+    }
+
+    // ========== From<RtcpErrorValue> for RtcpError Tests ==========
+
+    #[test]
+    fn test_rtcp_error_from_error_value_invalid_packet_loss() {
+        let val = RtcpErrorValue::InvalidPacketLoss { value: 999 };
+        let err: RtcpError = val.into();
+        assert!(matches!(
+            err.value,
+            RtcpErrorValue::InvalidPacketLoss { value: 999 }
+        ));
+    }
+
+    #[test]
+    fn test_rtcp_error_from_error_value_invalid_app_length() {
+        let val = RtcpErrorValue::InvalidAppLength { length: 42 };
+        let err: RtcpError = val.into();
+        assert!(matches!(
+            err.value,
+            RtcpErrorValue::InvalidAppLength { length: 42 }
+        ));
+    }
+
+    #[test]
+    fn test_rtcp_error_display_invalid_packet_loss() {
+        let err = RtcpError {
+            value: RtcpErrorValue::InvalidPacketLoss { value: 500 },
+        };
+        let display = format!("{}", err);
+        assert!(display.contains("500"));
+    }
+
+    #[test]
+    fn test_rtcp_error_display_invalid_app_length() {
+        let err = RtcpError {
+            value: RtcpErrorValue::InvalidAppLength { length: 3 },
+        };
+        let display = format!("{}", err);
+        assert!(display.contains("3"));
+    }
+
+    #[test]
+    fn test_rtcp_error_debug_invalid_packet_loss() {
+        let err = RtcpError {
+            value: RtcpErrorValue::InvalidPacketLoss { value: 123 },
+        };
+        let debug_str = format!("{:?}", err);
+        assert!(debug_str.contains("InvalidPacketLoss"));
+    }
+
+    #[test]
+    fn test_rtcp_error_debug_invalid_app_length() {
+        let err = RtcpError {
+            value: RtcpErrorValue::InvalidAppLength { length: 7 },
+        };
+        let debug_str = format!("{:?}", err);
+        assert!(debug_str.contains("InvalidAppLength"));
+    }
 }

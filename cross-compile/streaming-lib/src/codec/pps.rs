@@ -497,4 +497,138 @@ mod tests {
 
         assert!(result.is_err());
     }
+
+    // ============================================
+    // calculate_slice_group_id_bits tests
+    // ============================================
+
+    #[test]
+    fn test_calculate_slice_group_id_bits_one_group() {
+        assert_eq!(PpsParser::calculate_slice_group_id_bits(1), 1);
+    }
+
+    #[test]
+    fn test_calculate_slice_group_id_bits_two_groups() {
+        assert_eq!(PpsParser::calculate_slice_group_id_bits(2), 1);
+    }
+
+    #[test]
+    fn test_calculate_slice_group_id_bits_three_groups() {
+        assert_eq!(PpsParser::calculate_slice_group_id_bits(3), 2);
+    }
+
+    #[test]
+    fn test_calculate_slice_group_id_bits_four_groups() {
+        assert_eq!(PpsParser::calculate_slice_group_id_bits(4), 2);
+    }
+
+    #[test]
+    fn test_calculate_slice_group_id_bits_five_groups() {
+        assert_eq!(PpsParser::calculate_slice_group_id_bits(5), 3);
+    }
+
+    #[test]
+    fn test_calculate_slice_group_id_bits_zero() {
+        assert_eq!(PpsParser::calculate_slice_group_id_bits(0), 1);
+    }
+
+    // ============================================
+    // Slice Group Map Type 3-5 (changing) tests
+    // ============================================
+
+    #[test]
+    fn test_pps_parse_slice_group_map_type_3_changing() {
+        let mut builder = PpsBuilder::new();
+
+        builder.write_uev(5); // pic_parameter_set_id = 5
+        builder.write_uev(0); // seq_parameter_set_id = 0
+        builder.write_bit(0); // entropy_coding_mode_flag = 0
+        builder.write_bit(0); // bottom_field_pic_order_in_frame_present_flag = 0
+        builder.write_uev(1); // num_slice_groups_minus1 = 1
+        builder.write_uev(3); // slice_group_map_type = 3 (changing)
+        builder.write_bit(1); // slice_group_change_direction_flag = 1
+        builder.write_uev(7); // slice_group_change_rate_minus1 = 7
+
+        let data = builder.build();
+        let bytes_reader = BytesReader::new(data);
+        let mut parser = PpsParser::new(bytes_reader);
+
+        let result = parser.parse();
+        assert!(result.is_ok());
+        assert_eq!(parser.pps.slice_group_map_type, 3);
+        assert_eq!(parser.pps.slice_group_info, vec![1, 7]); // direction=1, rate=7
+    }
+
+    #[test]
+    fn test_pps_parse_slice_group_map_type_4_changing() {
+        let mut builder = PpsBuilder::new();
+
+        builder.write_uev(6); // pic_parameter_set_id = 6
+        builder.write_uev(0); // seq_parameter_set_id = 0
+        builder.write_bit(0); // entropy_coding_mode_flag = 0
+        builder.write_bit(0); // bottom_field_pic_order_in_frame_present_flag = 0
+        builder.write_uev(1); // num_slice_groups_minus1 = 1
+        builder.write_uev(4); // slice_group_map_type = 4
+        builder.write_bit(0); // slice_group_change_direction_flag = 0
+        builder.write_uev(3); // slice_group_change_rate_minus1 = 3
+
+        let data = builder.build();
+        let bytes_reader = BytesReader::new(data);
+        let mut parser = PpsParser::new(bytes_reader);
+
+        let result = parser.parse();
+        assert!(result.is_ok());
+        assert_eq!(parser.pps.slice_group_map_type, 4);
+        assert_eq!(parser.pps.slice_group_info, vec![0, 3]);
+    }
+
+    #[test]
+    fn test_pps_parse_slice_group_map_type_5_changing() {
+        let mut builder = PpsBuilder::new();
+
+        builder.write_uev(7); // pic_parameter_set_id = 7
+        builder.write_uev(0); // seq_parameter_set_id = 0
+        builder.write_bit(1); // entropy_coding_mode_flag = 1 (CABAC)
+        builder.write_bit(1); // bottom_field_pic_order_in_frame_present_flag = 1
+        builder.write_uev(1); // num_slice_groups_minus1 = 1
+        builder.write_uev(5); // slice_group_map_type = 5
+        builder.write_bit(0); // slice_group_change_direction_flag = 0
+        builder.write_uev(15); // slice_group_change_rate_minus1 = 15
+
+        let data = builder.build();
+        let bytes_reader = BytesReader::new(data);
+        let mut parser = PpsParser::new(bytes_reader);
+
+        let result = parser.parse();
+        assert!(result.is_ok());
+        assert_eq!(parser.pps.pic_parameter_set_id, 7);
+        assert_eq!(parser.pps.entropy_coding_mode_flag, 1);
+        assert_eq!(parser.pps.bottom_field_pic_order_in_frame_present_flag, 1);
+        assert_eq!(parser.pps.slice_group_map_type, 5);
+        assert_eq!(parser.pps.slice_group_info, vec![0, 15]);
+    }
+
+    // ============================================
+    // Pps Default Tests
+    // ============================================
+
+    #[test]
+    fn test_pps_default() {
+        let pps = Pps::default();
+        assert_eq!(pps.pic_parameter_set_id, 0);
+        assert_eq!(pps.seq_parameter_set_id, 0);
+        assert_eq!(pps.entropy_coding_mode_flag, 0);
+        assert_eq!(pps.bottom_field_pic_order_in_frame_present_flag, 0);
+        assert_eq!(pps.num_slice_groups_minus1, 0);
+        assert_eq!(pps.slice_group_map_type, 0);
+        assert!(pps.slice_group_info.is_empty());
+    }
+
+    #[test]
+    fn test_pps_debug() {
+        let pps = Pps::default();
+        let debug = format!("{pps:?}");
+        assert!(debug.contains("Pps"));
+        assert!(debug.contains("pic_parameter_set_id"));
+    }
 }

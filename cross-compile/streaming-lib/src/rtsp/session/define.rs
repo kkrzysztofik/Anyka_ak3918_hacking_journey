@@ -169,6 +169,32 @@ mod tests {
         assert_eq!(format!("{}", session_type), "push");
     }
 
+    // ========== ClientSessionType Display Tests ==========
+
+    #[test]
+    fn test_client_session_type_pull_display() {
+        let session_type = ClientSessionType::Pull;
+        assert_eq!(format!("{}", session_type), "pull");
+    }
+
+    #[test]
+    fn test_client_session_type_push_display() {
+        let session_type = ClientSessionType::Push;
+        assert_eq!(format!("{}", session_type), "push");
+    }
+
+    // ========== PUBLIC_METHODS Tests ==========
+
+    #[test]
+    fn test_public_methods_excludes_redirect() {
+        assert!(!rtsp_method_name::PUBLIC_METHODS.contains(&rtsp_method_name::REDIRECT));
+    }
+
+    #[test]
+    fn test_public_methods_length() {
+        assert_eq!(rtsp_method_name::PUBLIC_METHODS.len(), 10);
+    }
+
     // ========== USER_AGENT Constant Test ==========
 
     #[test]

@@ -301,4 +301,145 @@ mod tests {
         assert_eq!(get_level_idc(SPS_BASELINE_1080P), Some(40)); // Level 4.0
         assert_eq!(get_level_idc(SPS_HIGH_1080P), Some(40)); // Level 4.0
     }
+
+    // ========== Edge Case Tests for Helper Functions ==========
+
+    #[test]
+    fn test_get_profile_idc_empty_slice() {
+        assert_eq!(get_profile_idc(&[]), None);
+    }
+
+    #[test]
+    fn test_get_profile_idc_single_byte() {
+        assert_eq!(get_profile_idc(&[0x67]), None);
+    }
+
+    #[test]
+    fn test_get_level_idc_empty_slice() {
+        assert_eq!(get_level_idc(&[]), None);
+    }
+
+    #[test]
+    fn test_get_level_idc_short_slice() {
+        assert_eq!(get_level_idc(&[0x67, 0x42, 0xC0]), None);
+    }
+
+    #[test]
+    fn test_get_level_idc_exact_four_bytes() {
+        assert_eq!(get_level_idc(&[0x67, 0x42, 0xC0, 0x1F]), Some(0x1F));
+    }
+
+    // ========== Fixture Count Tests ==========
+
+    #[test]
+    fn test_all_sps_fixtures_count() {
+        assert_eq!(all_sps_fixtures().len(), 5);
+    }
+
+    #[test]
+    fn test_all_pps_fixtures_count() {
+        assert_eq!(all_pps_fixtures().len(), 3);
+    }
+
+    // ========== SPS Fixture Non-Empty Tests ==========
+
+    #[test]
+    fn test_sps_fixtures_are_non_empty() {
+        for (name, data) in all_sps_fixtures() {
+            assert!(
+                data.len() >= 4,
+                "{} should have at least 4 bytes (nal + profile + constraints + level)",
+                name
+            );
+        }
+    }
+
+    #[test]
+    fn test_pps_fixtures_are_non_empty() {
+        for (name, data) in all_pps_fixtures() {
+            assert!(
+                data.len() >= 2,
+                "{} should have at least 2 bytes (nal + params)",
+                name
+            );
+        }
+    }
+
+    // ========== AAC Config Tests ==========
+
+    #[test]
+    fn test_aac_config_48k_stereo_non_empty() {
+        assert_eq!(AAC_CONFIG_48K_STEREO.len(), 2);
+    }
+
+    #[test]
+    fn test_aac_config_44k_stereo_non_empty() {
+        assert_eq!(AAC_CONFIG_44K_STEREO.len(), 2);
+    }
+
+    #[test]
+    fn test_aac_configs_are_different() {
+        assert_ne!(AAC_CONFIG_48K_STEREO, AAC_CONFIG_44K_STEREO);
+    }
+
+    // ========== Cross-Validation Tests ==========
+
+    #[test]
+    fn test_sps_high_profile_has_higher_profile_idc_than_baseline() {
+        let baseline = get_profile_idc(SPS_BASELINE_720P).unwrap();
+        let high = get_profile_idc(SPS_HIGH_720P).unwrap();
+        assert!(
+            high > baseline,
+            "High profile ({}) > Baseline ({})",
+            high,
+            baseline
+        );
+    }
+
+    #[test]
+    fn test_main_profile_idc_between_baseline_and_high() {
+        let baseline = get_profile_idc(SPS_BASELINE_720P).unwrap();
+        let main = get_profile_idc(SPS_MAIN_480P).unwrap();
+        let high = get_profile_idc(SPS_HIGH_720P).unwrap();
+        assert!(main > baseline, "Main ({}) > Baseline ({})", main, baseline);
+        assert!(main < high, "Main ({}) < High ({})", main, high);
+    }
+
+    #[test]
+    fn test_level_idc_1080p_higher_than_720p() {
+        let level_720p = get_level_idc(SPS_BASELINE_720P).unwrap();
+        let level_1080p = get_level_idc(SPS_BASELINE_1080P).unwrap();
+        assert!(
+            level_1080p > level_720p,
+            "1080p level ({}) > 720p level ({})",
+            level_1080p,
+            level_720p
+        );
+    }
+
+    // ========== SPS NAL Reference IDC Tests ==========
+
+    #[test]
+    fn test_sps_nal_ref_idc_nonzero() {
+        for (name, data) in all_sps_fixtures() {
+            let nal_ref_idc = (data[0] >> 5) & 0x03;
+            assert!(
+                nal_ref_idc > 0,
+                "{} should have non-zero nal_ref_idc for SPS",
+                name
+            );
+        }
+    }
+
+    #[test]
+    fn test_pps_nal_ref_idc_nonzero() {
+        for (name, data) in all_pps_fixtures() {
+            let nal_ref_idc = (data[0] >> 5) & 0x03;
+            assert!(
+                nal_ref_idc > 0,
+                "{} should have non-zero nal_ref_idc for PPS",
+                name
+            );
+        }
+    }
 }
