@@ -1117,6 +1117,33 @@ mod tests {
         let _ = server_handle.await;
     }
 
+    /// Helper function to connect an RTSP client and verify SDP response
+    async fn connect_rtsp_client_and_verify_sdp(port: u16) -> bool {
+        use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+
+        match tokio::net::TcpStream::connect(format!("127.0.0.1:{}", port)).await {
+            Ok(stream) => {
+                let (reader, mut writer) = stream.into_split();
+                let mut lines = BufReader::new(reader).lines();
+
+                let describe_req = format!(
+                    "DESCRIBE rtsp://127.0.0.1:{}/stream1 RTSP/1.0\r\nCSeq: 1\r\n\r\n",
+                    port
+                );
+                let _ = writer.write_all(describe_req.as_bytes()).await;
+                let _ = writer.flush().await;
+
+                while let Ok(Some(line)) = lines.next_line().await {
+                    if line.contains("profile-level-id=") {
+                        return true;
+                    }
+                }
+                false
+            }
+            Err(_) => false,
+        }
+    }
+
     #[tokio::test]
     async fn test_e2e_concurrent_rtsp_clients() {
         // E2E Test: Verify multiple concurrent RTSP clients work correctly
@@ -1190,62 +1217,12 @@ mod tests {
         // Allow server to start
         tokio::time::sleep(Duration::from_millis(10)).await;
 
-        // Connect two concurrent RTSP clients
-        let client1_task = async {
-            if let Ok(stream) = tokio::net::TcpStream::connect(format!("127.0.0.1:{}", port)).await
-            {
-                use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-
-                let (reader, mut writer) = stream.into_split();
-                let mut lines = BufReader::new(reader).lines();
-
-                let describe_req = format!(
-                    "DESCRIBE rtsp://127.0.0.1:{}/stream1 RTSP/1.0\r\nCSeq: 1\r\n\r\n",
-                    port
-                );
-                let _ = writer.write_all(describe_req.as_bytes()).await;
-                let _ = writer.flush().await;
-
-                let mut found_sdp = false;
-                while let Ok(Some(line)) = lines.next_line().await {
-                    if line.contains("profile-level-id=") {
-                        found_sdp = true;
-                        break;
-                    }
-                }
-                found_sdp
-            } else {
-                false
-            }
-        };
+        // Connect two concurrent RTSP clients using helper function
+        let client1_task = connect_rtsp_client_and_verify_sdp(port);
 
         let client2_task = async {
             tokio::time::sleep(Duration::from_millis(5)).await;
-            if let Ok(stream) = tokio::net::TcpStream::connect(format!("127.0.0.1:{}", port)).await
-            {
-                use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-
-                let (reader, mut writer) = stream.into_split();
-                let mut lines = BufReader::new(reader).lines();
-
-                let describe_req = format!(
-                    "DESCRIBE rtsp://127.0.0.1:{}/stream1 RTSP/1.0\r\nCSeq: 1\r\n\r\n",
-                    port
-                );
-                let _ = writer.write_all(describe_req.as_bytes()).await;
-                let _ = writer.flush().await;
-
-                let mut found_sdp = false;
-                while let Ok(Some(line)) = lines.next_line().await {
-                    if line.contains("profile-level-id=") {
-                        found_sdp = true;
-                        break;
-                    }
-                }
-                found_sdp
-            } else {
-                false
-            }
+            connect_rtsp_client_and_verify_sdp(port).await
         };
 
         let (result1, result2) = tokio::join!(client1_task, client2_task);

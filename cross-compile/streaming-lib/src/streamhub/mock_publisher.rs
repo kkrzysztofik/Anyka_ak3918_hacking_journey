@@ -502,6 +502,98 @@ enum ReaderPublishResult {
     Completed(u32),
 }
 
+/// Process a single NAL unit and update state accordingly.
+///
+/// Returns `Some(ReaderPublishResult)` if processing should terminate early
+/// (e.g., channel closed), or `None` to continue processing.
+#[allow(clippy::too_many_arguments)]
+async fn process_nal_unit(
+    nal: &crate::codec::h264_file_reader::NalUnit,
+    sender: &FrameDataSender,
+    pending_access_unit: &mut BytesMut,
+    pending_access_unit_timestamp: &mut Option<u32>,
+    pacer: &mut Option<Interval>,
+    last_timestamp_ms: &AtomicU32,
+    frame_count: &mut u32,
+    frames_since_report: &mut u64,
+    last_report: &mut Instant,
+    timestamp_offset: u32,
+    frame_duration_ms: u32,
+) -> Option<ReaderPublishResult> {
+    match nal.unit_type {
+        NalUnitType::SequenceParameterSet => {
+            if let Some(ts) = handle_sps_nal(
+                sender,
+                pending_access_unit,
+                pending_access_unit_timestamp.take(),
+                pacer,
+                last_timestamp_ms,
+                frame_count,
+                frames_since_report,
+                last_report,
+                &nal.data,
+                timestamp_offset,
+                frame_duration_ms,
+            )
+            .await
+            {
+                return Some(ts);
+            }
+        }
+        NalUnitType::PictureParameterSet => {
+            if let Some(ts) = handle_pps_nal(
+                sender,
+                pending_access_unit,
+                pending_access_unit_timestamp.take(),
+                pacer,
+                last_timestamp_ms,
+                frame_count,
+                frames_since_report,
+                last_report,
+                &nal.data,
+                timestamp_offset,
+                frame_duration_ms,
+            )
+            .await
+            {
+                return Some(ts);
+            }
+        }
+        NalUnitType::IdrSlice | NalUnitType::NonIdrSlice => {
+            let first_slice = is_first_vcl_slice(&nal.data);
+
+            // Check if we need to flush pending access unit before starting new one.
+            // Note: kept as two separate conditions to reduce cognitive complexity (S3776).
+            #[allow(clippy::collapsible_if)]
+            if first_slice && pending_access_unit_timestamp.is_some() {
+                if let Some(ts) = process_pending_access_unit(
+                    sender,
+                    pending_access_unit,
+                    pending_access_unit_timestamp.take(),
+                    pacer,
+                    last_timestamp_ms,
+                    frame_count,
+                    frames_since_report,
+                    last_report,
+                )
+                .await
+                {
+                    return Some(ts);
+                }
+            }
+
+            let timestamp = pending_access_unit_timestamp.get_or_insert_with(|| {
+                timestamp_offset.saturating_add(frame_count.saturating_mul(frame_duration_ms))
+            });
+            append_annexb_nal(pending_access_unit, &nal.data);
+            log_vcl_frame(*frame_count, *timestamp, first_slice, nal.unit_type);
+        }
+        _ => {}
+    }
+
+    None
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn publish_from_reader(
     reader: &Arc<Mutex<H264FileReader>>,
@@ -526,71 +618,22 @@ async fn publish_from_reader(
             return ReaderPublishResult::Interrupted;
         }
 
-        match nal.unit_type {
-            NalUnitType::SequenceParameterSet => {
-                if let Some(ts) = handle_sps_nal(
-                    sender,
-                    &mut pending_access_unit,
-                    pending_access_unit_timestamp.take(),
-                    &mut pacer,
-                    last_timestamp_ms,
-                    &mut frame_count,
-                    frames_since_report,
-                    last_report,
-                    &nal.data,
-                    timestamp_offset,
-                    frame_duration_ms,
-                )
-                .await
-                {
-                    return ts;
-                }
-            }
-            NalUnitType::PictureParameterSet => {
-                if let Some(ts) = handle_pps_nal(
-                    sender,
-                    &mut pending_access_unit,
-                    pending_access_unit_timestamp.take(),
-                    &mut pacer,
-                    last_timestamp_ms,
-                    &mut frame_count,
-                    frames_since_report,
-                    last_report,
-                    &nal.data,
-                    timestamp_offset,
-                    frame_duration_ms,
-                )
-                .await
-                {
-                    return ts;
-                }
-            }
-            NalUnitType::IdrSlice | NalUnitType::NonIdrSlice => {
-                let first_slice = is_first_vcl_slice(&nal.data);
-                if first_slice
-                    && pending_access_unit_timestamp.is_some()
-                    && let Some(ts) = process_pending_access_unit(
-                        sender,
-                        &mut pending_access_unit,
-                        pending_access_unit_timestamp.take(),
-                        &mut pacer,
-                        last_timestamp_ms,
-                        &mut frame_count,
-                        frames_since_report,
-                        last_report,
-                    )
-                    .await
-                {
-                    return ts;
-                }
-
-                let timestamp = pending_access_unit_timestamp.get_or_insert_with(|| {
-                    timestamp_offset.saturating_add(frame_count.saturating_mul(frame_duration_ms))
-                });
-                append_annexb_nal(&mut pending_access_unit, &nal.data);
-                log_vcl_frame(frame_count, *timestamp, first_slice, nal.unit_type);
-            }
-            _ => {}
+        if let Some(result) = process_nal_unit(
+            &nal,
+            sender,
+            &mut pending_access_unit,
+            &mut pending_access_unit_timestamp,
+            &mut pacer,
+            last_timestamp_ms,
+            &mut frame_count,
+            frames_since_report,
+            last_report,
+            timestamp_offset,
+            frame_duration_ms,
+        )
+        .await
+        {
+            return result;
         }
     }
 

@@ -306,6 +306,214 @@ async fn send_video_access_unit(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
+async fn process_audio_frame(
+    audio_channel: &Arc<Mutex<RtpChannel>>,
+    timestamp_normalizers: &mut HashMap<TrackType, RtpTimestampNormalizer>,
+    session_id: &str,
+    remote_addr: SocketAddr,
+    request_path: &str,
+    shutdown: &Arc<AtomicBool>,
+    timestamp: u32,
+    data: &mut BytesMut,
+) {
+    let mut channel = audio_channel.lock().await;
+    let normalized = timestamp_normalizers
+        .entry(TrackType::Audio)
+        .or_default()
+        .normalize(timestamp, channel.clock_rate(), TrackType::Audio);
+
+    if crate::stream_frame_debug_logging_enabled() {
+        log::debug!(
+            "server_session: Audio timestamp_in={} clock_rate={} scaled={} output={}",
+            timestamp,
+            channel.clock_rate(),
+            normalized.scaled_timestamp,
+            normalized.output_timestamp
+        );
+    }
+
+    if normalized.non_wrap_regressed {
+        log::warn!(
+            "event=rtp_timestamp_non_wrap_regression track=Audio session_id={} remote_addr={} stream_path={} prev_scaled={} current_scaled={} corrected_timestamp={} regression_count={}",
+            session_id,
+            remote_addr,
+            request_path,
+            normalized.previous_scaled_timestamp.unwrap_or_default(),
+            normalized.scaled_timestamp,
+            normalized.output_timestamp,
+            normalized.non_wrap_regression_count,
+        );
+    }
+
+    if let Err(err) = channel.on_frame(data, normalized.output_timestamp).await {
+        log::info!("handle_play error: {err}");
+        shutdown.store(true, Ordering::Release);
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn process_video_frame(
+    video_channel: &Arc<Mutex<RtpChannel>>,
+    video_assembler: &mut VideoAccessUnitAssembler,
+    timestamp_normalizers: &mut HashMap<TrackType, RtpTimestampNormalizer>,
+    session_id: &str,
+    remote_addr: SocketAddr,
+    request_path: &str,
+    shutdown: &Arc<AtomicBool>,
+    timestamp: u32,
+    data: BytesMut,
+) {
+    let Some((flush_ts, mut flush_data)) = video_assembler.push(timestamp, data) else {
+        return;
+    };
+
+    let ctx = PlaybackVideoSendContext {
+        session_id,
+        remote_addr,
+        request_path,
+        shutdown,
+    };
+
+    send_video_access_unit(
+        video_channel,
+        timestamp_normalizers,
+        &ctx,
+        flush_ts,
+        &mut flush_data,
+    )
+    .await;
+}
+
+async fn flush_pending_video(
+    video_channel: &Option<Arc<Mutex<RtpChannel>>>,
+    video_assembler: &mut VideoAccessUnitAssembler,
+    timestamp_normalizers: &mut HashMap<TrackType, RtpTimestampNormalizer>,
+    session_id: &str,
+    remote_addr: SocketAddr,
+    request_path: &str,
+    shutdown: &Arc<AtomicBool>,
+) {
+    if let (Some(video_channel), Some((timestamp, mut data))) =
+        (video_channel, video_assembler.flush())
+    {
+        let ctx = PlaybackVideoSendContext {
+            session_id,
+            remote_addr,
+            request_path,
+            shutdown,
+        };
+
+        send_video_access_unit(
+            video_channel,
+            timestamp_normalizers,
+            &ctx,
+            timestamp,
+            &mut data,
+        )
+        .await;
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn run_playback_loop(
+    mut receiver: mpsc::UnboundedReceiver<FrameData>,
+    audio_rtp_channel: Option<Arc<Mutex<RtpChannel>>>,
+    video_rtp_channel: Option<Arc<Mutex<RtpChannel>>>,
+    playback_cancel: Arc<AtomicBool>,
+    shutdown: Arc<AtomicBool>,
+    session_id: String,
+    remote_addr: SocketAddr,
+    request_path: String,
+) {
+    let mut timestamp_normalizers: HashMap<TrackType, RtpTimestampNormalizer> = HashMap::new();
+    let mut retry_times = 0;
+    let mut video_assembler = VideoAccessUnitAssembler::default();
+
+    loop {
+        if playback_cancel.load(Ordering::Acquire) {
+            flush_pending_video(
+                &video_rtp_channel,
+                &mut video_assembler,
+                &mut timestamp_normalizers,
+                &session_id,
+                remote_addr,
+                &request_path,
+                &shutdown,
+            )
+            .await;
+            break;
+        }
+
+        if let Some(frame_data) = receiver.recv().await {
+            retry_times = 0;
+            match frame_data {
+                FrameData::Audio {
+                    timestamp,
+                    mut data,
+                } => {
+                    if let Some(audio_channel) = &audio_rtp_channel {
+                        process_audio_frame(
+                            audio_channel,
+                            &mut timestamp_normalizers,
+                            &session_id,
+                            remote_addr,
+                            &request_path,
+                            &shutdown,
+                            timestamp,
+                            &mut data,
+                        )
+                        .await;
+
+                        if shutdown.load(Ordering::Acquire) {
+                            break;
+                        }
+                    }
+                }
+                FrameData::Video { timestamp, data } => {
+                    if let Some(video_channel) = &video_rtp_channel {
+                        process_video_frame(
+                            video_channel,
+                            &mut video_assembler,
+                            &mut timestamp_normalizers,
+                            &session_id,
+                            remote_addr,
+                            &request_path,
+                            &shutdown,
+                            timestamp,
+                            data,
+                        )
+                        .await;
+                    }
+                }
+                _ => {}
+            }
+        } else {
+            flush_pending_video(
+                &video_rtp_channel,
+                &mut video_assembler,
+                &mut timestamp_normalizers,
+                &session_id,
+                remote_addr,
+                &request_path,
+                &shutdown,
+            )
+            .await;
+
+            retry_times += 1;
+            log::info!(
+                "send_channel_data: no data receives ,retry {} times!",
+                retry_times
+            );
+
+            if retry_times > 10 {
+                shutdown.store(true, Ordering::Release);
+                break;
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 struct RtpPacketObservation {
     packets_sent: u64,
@@ -1349,6 +1557,57 @@ impl RtspServerSession {
         Some(base)
     }
 
+    async fn build_rtp_info_header(&self, rtsp_request: &RtspRequest) -> Option<String> {
+        let content_base = self.build_content_base(rtsp_request)?;
+        if self.tracks.is_empty() {
+            return None;
+        }
+
+        let mut rtp_info_parts = Vec::new();
+        for track_type in [TrackType::Video, TrackType::Audio, TrackType::Application] {
+            if let Some(track) = self.tracks.get(&track_type) {
+                let rtp_channel = track.rtp_channel.lock().await;
+                let seq = rtp_channel.initial_sequence();
+                // RFC 3550 §5.1 — use random initial timestamp, not hardcoded 0
+                let rtptime = rtp_channel.initial_timestamp();
+                let track_url = format!("{}{}", content_base, track.media_control);
+                rtp_info_parts.push(format!("url={};seq={};rtptime={}", track_url, seq, rtptime));
+            }
+        }
+
+        if rtp_info_parts.is_empty() {
+            None
+        } else {
+            Some(rtp_info_parts.join(", "))
+        }
+    }
+
+    async fn apply_range_header(
+        &mut self,
+        rtsp_request: &RtspRequest,
+        response: &mut RtspResponse,
+    ) -> Result<bool, SessionError> {
+        if let Some(range_str) = rtsp_request.get_header("Range") {
+            match RtspRange::unmarshal(range_str) {
+                Ok(range) => {
+                    response
+                        .headers
+                        .insert(String::from("Range"), range.marshal());
+                    Ok(true)
+                }
+                Err(err) => {
+                    // RFC 2326 §11.3.7 — invalid Range returns 457
+                    log::warn!("handle_play: invalid Range header: {err}");
+                    let err_response = Self::gen_rtsp_response(457, "Invalid Range", rtsp_request);
+                    self.send_response(&err_response).await?;
+                    Ok(false)
+                }
+            }
+        } else {
+            Ok(true)
+        }
+    }
+
     fn normalize_rtsp_stream_path(&self, request_path: &str) -> String {
         let trimmed = request_path.trim_matches('/');
         if let Some(last_slash) = trimmed.rfind('/') {
@@ -1634,43 +1893,12 @@ impl RtspServerSession {
                 .insert("Session".to_string(), session_id.to_string());
         }
 
-        if let Some(content_base) = self.build_content_base(rtsp_request)
-            && !self.tracks.is_empty()
-        {
-            let mut rtp_info_parts = Vec::new();
-            for track_type in [TrackType::Video, TrackType::Audio, TrackType::Application] {
-                if let Some(track) = self.tracks.get(&track_type) {
-                    let rtp_channel = track.rtp_channel.lock().await;
-                    let seq = rtp_channel.initial_sequence();
-                    // RFC 3550 §5.1 — use random initial timestamp, not hardcoded 0
-                    let rtptime = rtp_channel.initial_timestamp();
-                    let track_url = format!("{}{}", content_base, track.media_control);
-                    rtp_info_parts
-                        .push(format!("url={};seq={};rtptime={}", track_url, seq, rtptime));
-                }
-            }
-            if !rtp_info_parts.is_empty() {
-                response
-                    .headers
-                    .insert("RTP-Info".to_string(), rtp_info_parts.join(", "));
-            }
+        if let Some(rtp_info) = self.build_rtp_info_header(rtsp_request).await {
+            response.headers.insert("RTP-Info".to_string(), rtp_info);
         }
 
-        if let Some(range_str) = rtsp_request.get_header("Range") {
-            match RtspRange::unmarshal(range_str) {
-                Ok(range) => {
-                    response
-                        .headers
-                        .insert(String::from("Range"), range.marshal());
-                }
-                Err(err) => {
-                    // RFC 2326 §11.3.7 — invalid Range returns 457
-                    log::warn!("handle_play: invalid Range header: {err}");
-                    let err_response = Self::gen_rtsp_response(457, "Invalid Range", rtsp_request);
-                    self.send_response(&err_response).await?;
-                    return Ok(());
-                }
-            }
+        if !self.apply_range_header(rtsp_request, &mut response).await? {
+            return Ok(());
         }
 
         self.send_response(&response).await?;
@@ -1690,7 +1918,7 @@ impl RtspServerSession {
             });
         }
 
-        let mut receiver = event_result_receiver
+        let receiver = event_result_receiver
             .await??
             .0
             .frame_receiver
@@ -1718,124 +1946,16 @@ impl RtspServerSession {
         let playback_cancel_for_task = playback_cancel.clone();
         self.playback_cancel = Some(playback_cancel);
 
-        self.playback_task = Some(tokio::spawn(async move {
-            let mut timestamp_normalizers: HashMap<TrackType, RtpTimestampNormalizer> =
-                HashMap::new();
-            let mut retry_times = 0;
-            let mut video_assembler = VideoAccessUnitAssembler::default();
-            let video_send_ctx = PlaybackVideoSendContext {
-                session_id: session_id_for_task.as_str(),
-                remote_addr,
-                request_path: request_path.as_str(),
-                shutdown: &shutdown,
-            };
-
-            loop {
-                if playback_cancel_for_task.load(Ordering::Acquire) {
-                    if let (Some(video_channel), Some((timestamp, mut data))) =
-                        (&video_rtp_channel, video_assembler.flush())
-                    {
-                        send_video_access_unit(
-                            video_channel,
-                            &mut timestamp_normalizers,
-                            &video_send_ctx,
-                            timestamp,
-                            &mut data,
-                        )
-                        .await;
-                    }
-                    break;
-                }
-
-                if let Some(frame_data) = receiver.recv().await {
-                    retry_times = 0;
-                    match frame_data {
-                        FrameData::Audio {
-                            timestamp,
-                            mut data,
-                        } => {
-                            if let Some(audio_channel) = &audio_rtp_channel {
-                                let mut channel = audio_channel.lock().await;
-                                let normalized = timestamp_normalizers
-                                    .entry(TrackType::Audio)
-                                    .or_default()
-                                    .normalize(timestamp, channel.clock_rate(), TrackType::Audio);
-                                if crate::stream_frame_debug_logging_enabled() {
-                                    log::debug!(
-                                        "server_session: Audio timestamp_in={} clock_rate={} scaled={} output={}",
-                                        timestamp,
-                                        channel.clock_rate(),
-                                        normalized.scaled_timestamp,
-                                        normalized.output_timestamp
-                                    );
-                                }
-                                if normalized.non_wrap_regressed {
-                                    log::warn!(
-                                        "event=rtp_timestamp_non_wrap_regression track=Audio session_id={} remote_addr={} stream_path={} prev_scaled={} current_scaled={} corrected_timestamp={} regression_count={}",
-                                        session_id_for_task,
-                                        remote_addr,
-                                        request_path,
-                                        normalized.previous_scaled_timestamp.unwrap_or_default(),
-                                        normalized.scaled_timestamp,
-                                        normalized.output_timestamp,
-                                        normalized.non_wrap_regression_count,
-                                    );
-                                }
-                                if let Err(err) = channel
-                                    .on_frame(&mut data, normalized.output_timestamp)
-                                    .await
-                                {
-                                    log::info!("handle_play error: {err}");
-                                    shutdown.store(true, Ordering::Release);
-                                    break;
-                                }
-                            }
-                        }
-                        FrameData::Video { timestamp, data } => {
-                            if let Some(video_channel) = &video_rtp_channel {
-                                let Some((flush_ts, mut flush_data)) =
-                                    video_assembler.push(timestamp, data)
-                                else {
-                                    continue;
-                                };
-                                send_video_access_unit(
-                                    video_channel,
-                                    &mut timestamp_normalizers,
-                                    &video_send_ctx,
-                                    flush_ts,
-                                    &mut flush_data,
-                                )
-                                .await;
-                            }
-                        }
-                        _ => {}
-                    }
-                } else {
-                    if let (Some(video_channel), Some((timestamp, mut data))) =
-                        (&video_rtp_channel, video_assembler.flush())
-                    {
-                        send_video_access_unit(
-                            video_channel,
-                            &mut timestamp_normalizers,
-                            &video_send_ctx,
-                            timestamp,
-                            &mut data,
-                        )
-                        .await;
-                    }
-                    retry_times += 1;
-                    log::info!(
-                        "send_channel_data: no data receives ,retry {} times!",
-                        retry_times
-                    );
-
-                    if retry_times > 10 {
-                        shutdown.store(true, Ordering::Release);
-                        break;
-                    }
-                }
-            }
-        }));
+        self.playback_task = Some(tokio::spawn(run_playback_loop(
+            receiver,
+            audio_rtp_channel,
+            video_rtp_channel,
+            playback_cancel_for_task,
+            shutdown,
+            session_id_for_task,
+            remote_addr,
+            request_path,
+        )));
 
         Ok(())
     }
