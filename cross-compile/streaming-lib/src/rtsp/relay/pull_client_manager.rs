@@ -183,6 +183,7 @@ impl RtspPullClientManager {
 mod tests {
     use super::*;
     use crate::streamhub::define::{BroadcastEvent, StreamHubEvent};
+    use crate::streamhub::stream::StreamIdentifier;
     use tokio::sync::{broadcast, mpsc};
 
     // ========== Helper Functions ==========
@@ -743,6 +744,80 @@ mod tests {
             "Duplicate client ID should return error"
         );
 
+        handle.abort();
+    }
+
+    // ========== run() and create_and_spawn_client branches ==========
+
+    #[tokio::test]
+    async fn test_run_returns_error_when_broadcast_sender_dropped() {
+        let (mut manager, event_tx, _hub_rx) = create_test_manager();
+
+        let handle = tokio::spawn(async move { manager.run().await });
+
+        drop(event_tx);
+
+        let result = handle.await;
+        assert!(result.is_ok(), "Task should complete");
+        let run_result = result.unwrap();
+        assert!(
+            run_result.is_err(),
+            "Run should return error when broadcast channel is closed"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_handle_subscribe_create_client_failure_sends_error() {
+        let (mut manager, event_tx, _hub_rx) = create_test_manager();
+        let (result_tx, mut result_rx) = mpsc::channel::<HubResult>(1);
+
+        let event = BroadcastEvent::Subscribe {
+            id: "fail-connect-client".to_string(),
+            identifier: StreamIdentifier::Rtsp {
+                stream_path: "/stream".to_string(),
+            },
+            server_address: Some("127.0.0.1:1".to_string()),
+            result_sender: Some(result_tx),
+        };
+
+        event_tx.send(event).unwrap();
+
+        let handle = tokio::spawn(async move { manager.run().await });
+
+        let response =
+            tokio::time::timeout(tokio::time::Duration::from_secs(2), result_rx.recv()).await;
+
+        assert!(response.is_ok(), "Should receive response");
+        let msg = response.unwrap();
+        assert!(msg.is_some(), "Should get some result");
+        assert!(
+            msg.unwrap().is_err(),
+            "Create client should fail for invalid/unreachable address"
+        );
+
+        handle.abort();
+    }
+
+    #[tokio::test]
+    async fn test_send_error_when_receiver_dropped_does_not_panic() {
+        let (mut manager, event_tx, _hub_rx) = create_test_manager();
+        let (result_tx, result_rx) = mpsc::channel::<HubResult>(1);
+
+        let event = BroadcastEvent::Subscribe {
+            id: "drop-receiver".to_string(),
+            identifier: StreamIdentifier::Rtsp {
+                stream_path: "/stream".to_string(),
+            },
+            server_address: None,
+            result_sender: Some(result_tx),
+        };
+
+        event_tx.send(event).unwrap();
+        drop(result_rx);
+
+        let handle = tokio::spawn(async move { manager.run().await });
+
+        tokio::time::sleep(tokio::time::Duration::from_millis(150)).await;
         handle.abort();
     }
 }

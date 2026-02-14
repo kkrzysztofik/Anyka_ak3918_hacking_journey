@@ -312,4 +312,31 @@ mod tests {
         assert_eq!(config.token, "audio_encoder");
         assert_eq!(config.sample_rate, 8000);
     }
+
+    #[tokio::test]
+    async fn test_validation_platform_shutdown_before_init_returns_ok() {
+        let platform = ValidationPlatform::new();
+        assert!(!platform.is_initialized());
+        let result = platform.shutdown().await;
+        assert!(result.is_ok());
+        assert!(!platform.is_initialized());
+    }
+
+    #[tokio::test]
+    async fn test_validation_platform_ptz_control_returns_none() {
+        let platform = ValidationPlatform::new();
+        assert!(platform.ptz_control().is_none());
+    }
+
+    #[tokio::test]
+    async fn test_validation_platform_imaging_control_returns_none() {
+        let platform = ValidationPlatform::new();
+        assert!(platform.imaging_control().is_none());
+    }
+
+    #[tokio::test]
+    async fn test_validation_platform_network_info_returns_none() {
+        let platform = ValidationPlatform::new();
+        assert!(platform.network_info().is_none());
+    }
 }

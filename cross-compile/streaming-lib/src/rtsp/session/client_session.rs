@@ -1295,8 +1295,7 @@ mod tests {
             Box::new(mock_io),
         );
 
-        let describe_task =
-            tokio::spawn(async move { session.send_describe().await });
+        let describe_task = tokio::spawn(async move { session.send_describe().await });
 
         // Handle the publish event from describe response
         let event = tokio::time::timeout(
@@ -1393,9 +1392,7 @@ mod tests {
             .expect_write()
             .withf(|bytes| {
                 let s = std::str::from_utf8(bytes).unwrap();
-                s.contains("SETUP")
-                    && s.contains("RTP/AVP/TCP")
-                    && s.contains("interleaved=")
+                s.contains("SETUP") && s.contains("RTP/AVP/TCP") && s.contains("interleaved=")
             })
             .times(1)
             .returning(|_| Ok(()));
@@ -1694,8 +1691,7 @@ mod tests {
             Box::new(mock_io),
         );
 
-        let teardown_task =
-            tokio::spawn(async move { session.send_teardown().await });
+        let teardown_task = tokio::spawn(async move { session.send_teardown().await });
 
         // Expect UnPublish event for Pull client
         let event = tokio::time::timeout(
@@ -1739,8 +1735,7 @@ mod tests {
             Box::new(mock_io),
         );
 
-        let teardown_task =
-            tokio::spawn(async move { session.send_teardown().await });
+        let teardown_task = tokio::spawn(async move { session.send_teardown().await });
 
         // Expect UnSubscribe event for Push client
         let event = tokio::time::timeout(
@@ -1799,9 +1794,7 @@ mod tests {
 
         assert!(matches!(event, StreamHubEvent::UnPublish { .. }));
 
-        let result = exit_task
-            .await
-            .expect("exit task panicked unexpectedly");
+        let result = exit_task.await.expect("exit task panicked unexpectedly");
         assert!(result.is_ok());
     }
 
@@ -1833,9 +1826,7 @@ mod tests {
 
         assert!(matches!(event, StreamHubEvent::UnSubscribe { .. }));
 
-        let result = exit_task
-            .await
-            .expect("exit task panicked unexpectedly");
+        let result = exit_task.await.expect("exit task panicked unexpectedly");
         assert!(result.is_ok());
     }
 
@@ -1915,7 +1906,10 @@ mod tests {
             .gen_request("OPTIONS", "rtsp://localhost:554/test".to_string())
             .unwrap();
 
-        assert_eq!(request.headers.get("User-Agent"), Some(&USER_AGENT.to_string()));
+        assert_eq!(
+            request.headers.get("User-Agent"),
+            Some(&USER_AGENT.to_string())
+        );
     }
 
     #[tokio::test]
@@ -1965,7 +1959,10 @@ mod tests {
         // Uri::unmarshal treats non-rtsp strings as Schema::UNKNOWN and always returns Some.
         // So gen_request succeeds; assert we get a valid request with OPTIONS method.
         let result = session.gen_request("OPTIONS", "not-a-valid-uri".to_string());
-        assert!(result.is_ok(), "gen_request accepts non-rtsp URI as unknown schema");
+        assert!(
+            result.is_ok(),
+            "gen_request accepts non-rtsp URI as unknown schema"
+        );
         let request = result.unwrap();
         assert_eq!(request.method, "OPTIONS");
     }
@@ -2217,9 +2214,10 @@ mod tests {
 
         let response = RtspResponse {
             status_code: http::StatusCode::OK.as_u16(),
-            headers: crate::common::http::HttpIndexMap::from_iter([
-                ("Session".to_string(), "1234567890".to_string()),
-            ]),
+            headers: crate::common::http::HttpIndexMap::from_iter([(
+                "Session".to_string(),
+                "1234567890".to_string(),
+            )]),
             ..Default::default()
         };
 
@@ -2248,9 +2246,10 @@ mod tests {
 
         let response = RtspResponse {
             status_code: http::StatusCode::OK.as_u16(),
-            headers: crate::common::http::HttpIndexMap::from_iter([
-                ("Session".to_string(), "new-id".to_string()),
-            ]),
+            headers: crate::common::http::HttpIndexMap::from_iter([(
+                "Session".to_string(),
+                "new-id".to_string(),
+            )]),
             ..Default::default()
         };
 
@@ -2579,7 +2578,11 @@ mod tests {
             Box::new(mock_io),
         );
 
-        assert!(session.is_running.load(std::sync::atomic::Ordering::Acquire));
+        assert!(
+            session
+                .is_running
+                .load(std::sync::atomic::Ordering::Acquire)
+        );
     }
 
     #[tokio::test]
@@ -2599,6 +2602,10 @@ mod tests {
         session
             .is_running
             .store(false, std::sync::atomic::Ordering::Release);
-        assert!(!session.is_running.load(std::sync::atomic::Ordering::Acquire));
+        assert!(
+            !session
+                .is_running
+                .load(std::sync::atomic::Ordering::Acquire)
+        );
     }
 }

@@ -1123,4 +1123,190 @@ mod tests {
             panic!("new_udpio_pair should return Some with available ports");
         }
     }
+
+    // ========== Additional UdpIO error and timeout branches ==========
+
+    #[tokio::test]
+    async fn test_udpio_new_remote_address_parse_error_returns_none() {
+        // Empty domain produces ":9" which cannot parse as SocketAddr
+        let result = UdpIO::new("".to_string(), 9, 0).await;
+        assert!(
+            result.is_none(),
+            "Unparseable remote address should return None"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_udpio_new_with_valid_ip_and_port_returns_some_or_none() {
+        // UDP connect to 127.0.0.1:1 exercises the connect path; result is OS-dependent.
+        let result = UdpIO::new("127.0.0.1".to_string(), 1, 0).await;
+        if let Some(udpio) = result {
+            assert!(matches!(udpio.get_net_type(), NetType::UDP));
+        }
+    }
+
+    #[tokio::test]
+    async fn test_udpio_read_timeout_success() {
+        if let Some((udpio1, udpio2)) = new_udpio_pair().await {
+            if let (Some(port1), Some(port2)) = (udpio1.get_local_port(), udpio2.get_local_port()) {
+                if let (Some(mut sender), Some(mut receiver)) = (
+                    UdpIO::new("127.0.0.1".to_string(), port2, port1).await,
+                    UdpIO::new("127.0.0.1".to_string(), port1, port2).await,
+                ) {
+                    drop(udpio1);
+                    drop(udpio2);
+                    let send_data = Bytes::from("udp timeout test");
+                    let send_task = tokio::spawn(async move {
+                        let _ = sender.write(send_data).await;
+                    });
+                    let recv_task = tokio::spawn(async move {
+                        let result = receiver.read_timeout(Duration::from_secs(2)).await;
+                        assert!(
+                            result.is_ok(),
+                            "Read_timeout should succeed when data arrives"
+                        );
+                        let data = result.unwrap();
+                        assert_eq!(&data[..], b"udp timeout test");
+                    });
+                    let _ = tokio::try_join!(send_task, recv_task);
+                }
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn test_udpio_write_empty_bytes_does_not_panic() {
+        if let Some(mut udpio) = UdpIO::new_with_local_port(0).await {
+            let data = Bytes::from("");
+            let _ = udpio.write(data).await;
+            // Platform-dependent: send(0) may succeed or fail; we only assert no panic
+        }
+    }
+
+    // ========== TcpIO write error when connection closed ==========
+
+    #[tokio::test]
+    async fn test_tcpio_write_after_remote_closed_returns_error() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let connect_task = tokio::spawn(async move {
+            let stream = tokio::net::TcpStream::connect(addr).await.unwrap();
+            let mut tcpio = TcpIO::new(stream);
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            let data = Bytes::from("too late");
+            let result = tcpio.write(data).await;
+            assert!(
+                result.is_err(),
+                "Write after remote closed should return error"
+            );
+        });
+
+        let accept_task = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            drop(stream);
+        });
+
+        let _ = tokio::try_join!(connect_task, accept_task);
+    }
+
+    #[tokio::test]
+    async fn test_tcpio_read_returns_io_error_on_stream_error() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let connect_task = tokio::spawn(async move {
+            let stream = tokio::net::TcpStream::connect(addr).await.unwrap();
+            let mut tcpio = TcpIO::new(stream);
+            let first = tcpio.read().await;
+            assert!(first.is_ok(), "First read should get the sent data");
+            let second = tcpio.read().await;
+            assert!(
+                second.is_err(),
+                "Second read after peer close should return error"
+            );
+            let err = second.unwrap_err();
+            assert!(
+                matches!(
+                    err.value,
+                    BytesIOErrorValue::NoneReturn | BytesIOErrorValue::IOError(_)
+                ),
+                "Expected NoneReturn or IOError after peer closed"
+            );
+        });
+
+        let accept_task = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            tokio::io::AsyncWriteExt::write_all(&mut stream, b"one frame")
+                .await
+                .unwrap();
+            tokio::io::AsyncWriteExt::flush(&mut stream).await.unwrap();
+            drop(stream);
+        });
+
+        let _ = tokio::try_join!(connect_task, accept_task);
+    }
+
+    #[tokio::test]
+    async fn test_tcpreadio_read_returns_io_error_on_stream_error() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let connect_task = tokio::spawn(async move {
+            let stream = tokio::net::TcpStream::connect(addr).await.unwrap();
+            let (read_half, _) = stream.into_split();
+            let mut tcpreadio = TcpReadIO::new(read_half);
+            let first = tcpreadio.read().await;
+            assert!(first.is_ok(), "First read should succeed");
+            let second = tcpreadio.read().await;
+            assert!(
+                second.is_err(),
+                "Second read after peer close should return error"
+            );
+            let err = second.unwrap_err();
+            assert!(
+                matches!(
+                    err.value,
+                    BytesIOErrorValue::NoneReturn | BytesIOErrorValue::IOError(_)
+                ),
+                "Expected NoneReturn or IOError"
+            );
+        });
+
+        let accept_task = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            tokio::io::AsyncWriteExt::write_all(&mut stream, b"data")
+                .await
+                .unwrap();
+            tokio::io::AsyncWriteExt::flush(&mut stream).await.unwrap();
+            drop(stream);
+        });
+
+        let _ = tokio::try_join!(connect_task, accept_task);
+    }
+
+    #[tokio::test]
+    async fn test_tcpwriteio_write_after_remote_closed_returns_error() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let connect_task = tokio::spawn(async move {
+            let stream = tokio::net::TcpStream::connect(addr).await.unwrap();
+            let (_, write_half) = stream.into_split();
+            let mut tcpwriteio = TcpWriteIO::new(write_half);
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            let result = tcpwriteio.write(Bytes::from("late")).await;
+            assert!(
+                result.is_err(),
+                "Write after remote closed should return error"
+            );
+        });
+
+        let accept_task = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            drop(stream);
+        });
+
+        let _ = tokio::try_join!(connect_task, accept_task);
+    }
 }

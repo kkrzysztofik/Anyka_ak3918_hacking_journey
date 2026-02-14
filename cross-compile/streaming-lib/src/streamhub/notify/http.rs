@@ -845,6 +845,95 @@ mod tests {
         mock_server.verify().await;
     }
 
+    // ========== Rtsp Identifier and NotSupport Variants ==========
+
+    #[tokio::test]
+    async fn test_on_publish_notify_with_rtsp_identifier_sends_body() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/publish"))
+            .and(body_string_contains("Rtsp"))
+            .respond_with(ResponseTemplate::new(200))
+            .mount(&mock_server)
+            .await;
+
+        let notifier = HttpNotifier::new(
+            Some(format!("{}/publish", mock_server.uri())),
+            None,
+            None,
+            None,
+            None,
+        );
+
+        let event = StreamHubEventMessage::Publish {
+            identifier: StreamIdentifier::Rtsp {
+                stream_path: "/live/stream".to_string(),
+            },
+            info: PublisherInfo {
+                id: Uuid::new(RandomDigitCount::Four),
+                pub_type: PublishType::RtspPush,
+                pub_data_type: PubDataType::Frame,
+                notify_info: NotifyInfo {
+                    request_url: "rtsp://localhost/live/stream".to_string(),
+                    remote_addr: "127.0.0.1:554".to_string(),
+                },
+            },
+        };
+
+        notifier.on_publish_notify(&event).await;
+
+        mock_server.verify().await;
+    }
+
+    #[tokio::test]
+    async fn test_on_hls_notify_with_not_support_event_completes() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/hls"))
+            .respond_with(ResponseTemplate::new(200))
+            .mount(&mock_server)
+            .await;
+
+        let notifier = HttpNotifier::new(
+            None,
+            None,
+            None,
+            None,
+            Some(format!("{}/hls", mock_server.uri())),
+        );
+        let event = StreamHubEventMessage::NotSupport {};
+
+        notifier.on_hls_notify(&event).await;
+
+        mock_server.verify().await;
+    }
+
+    #[tokio::test]
+    async fn test_on_stop_notify_non_200_response_logs_and_completes() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/stop"))
+            .respond_with(ResponseTemplate::new(503))
+            .mount(&mock_server)
+            .await;
+
+        let notifier = HttpNotifier::new(
+            None,
+            None,
+            None,
+            Some(format!("{}/stop", mock_server.uri())),
+            None,
+        );
+        let event = create_subscribe_event_message();
+
+        notifier.on_stop_notify(&event).await;
+
+        mock_server.verify().await;
+    }
+
     // ========== Thread Safety Tests ==========
 
     #[tokio::test]

@@ -113,8 +113,7 @@ mod tests {
     #[test]
     fn test_default_rtsp_server_new() {
         let event_sender = create_test_event_sender();
-        let server =
-            DefaultRtspServer::new("127.0.0.1:0".to_string(), event_sender, None);
+        let server = DefaultRtspServer::new("127.0.0.1:0".to_string(), event_sender, None);
         assert_eq!(server.address, "127.0.0.1:0");
         assert!(server.auth.is_none());
     }
@@ -130,11 +129,7 @@ mod tests {
             AuthAlgorithm::Simple,
             AuthType::None,
         );
-        let server = DefaultRtspServer::new(
-            "0.0.0.0:554".to_string(),
-            event_sender,
-            Some(auth),
-        );
+        let server = DefaultRtspServer::new("0.0.0.0:554".to_string(), event_sender, Some(auth));
         assert_eq!(server.address, "0.0.0.0:554");
         assert!(server.auth.is_some());
     }
@@ -142,8 +137,7 @@ mod tests {
     #[tokio::test]
     async fn test_default_rtsp_server_run_invalid_address_returns_err() {
         let event_sender = create_test_event_sender();
-        let mut server =
-            DefaultRtspServer::new("not-an-address".to_string(), event_sender, None);
+        let mut server = DefaultRtspServer::new("not-an-address".to_string(), event_sender, None);
         let result = server.run().await;
         assert!(result.is_err());
         let err = result.unwrap_err();

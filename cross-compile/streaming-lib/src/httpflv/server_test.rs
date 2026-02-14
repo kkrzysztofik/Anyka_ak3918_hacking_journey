@@ -108,7 +108,10 @@ async fn test_handle_connection_path_no_flv_extension_returns_not_found() {
     let req = Request::builder().uri(uri).body(Body::empty()).unwrap();
 
     let path = req.uri().path();
-    assert!(path.find(".flv").is_none(), "Path without .flv should trigger NOT_FOUND");
+    assert!(
+        path.find(".flv").is_none(),
+        "Path without .flv should trigger NOT_FOUND"
+    );
 }
 
 #[tokio::test]

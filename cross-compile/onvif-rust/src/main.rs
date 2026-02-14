@@ -1664,18 +1664,18 @@ mod tests {
     #[test]
     fn test_parse_env_timeout_parses_valid_value() {
         let var = "ONVIF_TEST_PARSE_ENV_TIMEOUT_VALUE";
-        std::env::set_var(var, "42");
+        unsafe { std::env::set_var(var, "42") };
         let value = parse_env_timeout(var, 10);
-        std::env::remove_var(var);
+        unsafe { std::env::remove_var(var) };
         assert_eq!(value, 42);
     }
 
     #[test]
     fn test_parse_env_timeout_zero_uses_default() {
         let var = "ONVIF_TEST_PARSE_ENV_TIMEOUT_ZERO";
-        std::env::set_var(var, "0");
+        unsafe { std::env::set_var(var, "0") };
         let value = parse_env_timeout(var, 30);
-        std::env::remove_var(var);
+        unsafe { std::env::remove_var(var) };
         assert_eq!(value, 30);
     }
 
@@ -1724,5 +1724,87 @@ mod tests {
 
         assert!(startup_args.validation_config.is_none());
         assert_eq!(startup_args.config_path, "/custom/config.toml");
+    }
+
+    // -------------------------------------------------------------------------
+    // get_runtime_config env fallback (Phase 3 coverage)
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn test_get_runtime_config_arm_env_invalid_workers_uses_default() {
+        const VAR: &str = "ONVIF_TOKIO_WORKER_THREADS";
+        unsafe { std::env::set_var(VAR, "x") };
+        let (workers, blocking) = get_runtime_config(false);
+        unsafe { std::env::remove_var(VAR) };
+
+        if cfg!(target_arch = "arm") {
+            assert_eq!(
+                workers, 2,
+                "invalid env should fall back to default workers"
+            );
+            assert_eq!(blocking, 16);
+        } else {
+            assert!(workers >= 1);
+            assert_eq!(blocking, 512);
+        }
+    }
+
+    #[test]
+    fn test_get_runtime_config_arm_env_zero_workers_uses_default() {
+        const VAR: &str = "ONVIF_TOKIO_WORKER_THREADS";
+        unsafe { std::env::set_var(VAR, "0") };
+        let (workers, _blocking) = get_runtime_config(false);
+        unsafe { std::env::remove_var(VAR) };
+
+        if cfg!(target_arch = "arm") {
+            assert_eq!(workers, 2, "zero is filtered out, should use default");
+        } else {
+            assert!(workers >= 1);
+        }
+    }
+
+    #[test]
+    fn test_get_runtime_config_arm_env_valid_workers_uses_env() {
+        const VAR: &str = "ONVIF_TOKIO_WORKER_THREADS";
+        unsafe { std::env::set_var(VAR, "3") };
+        let (workers, blocking) = get_runtime_config(false);
+        unsafe { std::env::remove_var(VAR) };
+
+        if cfg!(target_arch = "arm") {
+            assert_eq!(workers, 3);
+            assert_eq!(blocking, 16);
+        } else {
+            assert!(workers >= 1);
+            assert_eq!(blocking, 512);
+        }
+    }
+
+    #[test]
+    fn test_get_runtime_config_arm_env_blocking_uses_env() {
+        const VAR: &str = "ONVIF_TOKIO_MAX_BLOCKING_THREADS";
+        unsafe { std::env::set_var(VAR, "8") };
+        let (workers, blocking) = get_runtime_config(false);
+        unsafe { std::env::remove_var(VAR) };
+
+        if cfg!(target_arch = "arm") {
+            assert_eq!(workers, 2);
+            assert_eq!(blocking, 8);
+        } else {
+            assert!(workers >= 1);
+            assert_eq!(blocking, 512);
+        }
+    }
+
+    #[test]
+    fn test_get_runtime_config_validation_mode_arm_defaults() {
+        let (workers, blocking) = get_runtime_config(true);
+
+        if cfg!(target_arch = "arm") {
+            assert_eq!(workers, 1);
+            assert_eq!(blocking, 2);
+        } else {
+            assert!(workers >= 1);
+            assert_eq!(blocking, 512);
+        }
     }
 }

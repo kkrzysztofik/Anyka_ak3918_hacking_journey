@@ -357,9 +357,10 @@ mod tests {
     use super::*;
     use crate::httpflv::errors::HttpFLvErrorValue;
     use crate::streamhub::define::{
-        FrameData, MediaInfo, NotifyInfo, StatisticData, StreamHubEvent, SubDataType,
+        DataReceiver, FrameData, MediaInfo, NotifyInfo, StatisticData, StreamHubEvent, SubDataType,
         SubscribeType, SubscriberInfo, VideoCodecType,
     };
+    use crate::streamhub::errors::{StreamHubError, StreamHubErrorValue};
     use crate::streamhub::stream::StreamIdentifier;
     use crate::streamhub::utils::{RandomDigitCount, Uuid};
     use bytes::BytesMut;
@@ -1126,10 +1127,226 @@ mod tests {
         let frame = FrameData::MediaInfo { media_info };
 
         let result = httpflv.write_flv_tag(frame);
-        assert!(result.is_err(), "MediaInfo frame should not be writable as FLV tag");
+        assert!(
+            result.is_err(),
+            "MediaInfo frame should not be writable as FLV tag"
+        );
         if let Err(e) = result {
             assert!(matches!(e.value, HttpFLvErrorValue::UnexpectedFrameData(_)));
         }
+    }
+
+    #[tokio::test]
+    async fn test_write_flv_tag_audio_success() {
+        let (event_sender, _event_receiver, response_sender, mut response_receiver) =
+            create_test_channels();
+        let remote_addr = create_test_socket_addr();
+
+        let mut httpflv = HttpFlv::new(
+            "live".to_string(),
+            "stream1".to_string(),
+            event_sender,
+            response_sender,
+            "http://localhost/live/stream1.flv".to_string(),
+            remote_addr,
+        );
+
+        let frame = FrameData::Audio {
+            timestamp: 100,
+            data: BytesMut::from(&[0x01, 0x02, 0x03][..]),
+        };
+        let result = httpflv.write_flv_tag(frame);
+        assert!(result.is_ok(), "Audio frame should be writable as FLV tag");
+        let _ = response_receiver.next().await;
+    }
+
+    #[tokio::test]
+    async fn test_write_flv_tag_video_success() {
+        let (event_sender, _event_receiver, response_sender, mut response_receiver) =
+            create_test_channels();
+        let remote_addr = create_test_socket_addr();
+
+        let mut httpflv = HttpFlv::new(
+            "live".to_string(),
+            "stream1".to_string(),
+            event_sender,
+            response_sender,
+            "http://localhost/live/stream1.flv".to_string(),
+            remote_addr,
+        );
+
+        let frame = FrameData::Video {
+            timestamp: 200,
+            data: BytesMut::from(&[0x00, 0x01, 0x02][..]),
+        };
+        let result = httpflv.write_flv_tag(frame);
+        assert!(result.is_ok(), "Video frame should be writable as FLV tag");
+        let _ = response_receiver.next().await;
+    }
+
+    #[tokio::test]
+    async fn test_write_flv_tag_metadata_success() {
+        let (event_sender, _event_receiver, response_sender, mut response_receiver) =
+            create_test_channels();
+        let remote_addr = create_test_socket_addr();
+
+        let mut httpflv = HttpFlv::new(
+            "live".to_string(),
+            "stream1".to_string(),
+            event_sender,
+            response_sender,
+            "http://localhost/live/stream1.flv".to_string(),
+            remote_addr,
+        );
+
+        let mut meta = BytesMut::new();
+        meta.extend_from_slice(b"@setDataFrame");
+        meta.extend_from_slice(b"onMetaData");
+        let frame = FrameData::MetaData {
+            timestamp: 0,
+            data: meta,
+        };
+        let result = httpflv.write_flv_tag(frame);
+        assert!(
+            result.is_ok(),
+            "MetaData frame should be writable as FLV tag"
+        );
+        let _ = response_receiver.next().await;
+    }
+
+    #[tokio::test]
+    async fn test_subscribe_from_stream_hub_success() {
+        let (event_sender, mut event_receiver, response_sender, _response_receiver) =
+            create_test_channels();
+        let remote_addr = create_test_socket_addr();
+
+        let mut httpflv = HttpFlv::new(
+            "live".to_string(),
+            "stream1".to_string(),
+            event_sender,
+            response_sender,
+            "http://localhost/live/stream1.flv".to_string(),
+            remote_addr,
+        );
+
+        let hub_task = tokio::spawn(async move {
+            if let Some(StreamHubEvent::Subscribe { result_sender, .. }) =
+                event_receiver.recv().await
+            {
+                let (frame_tx, frame_rx) = tokio_mpsc::unbounded_channel();
+                drop(frame_tx);
+                let data_receiver = DataReceiver {
+                    frame_receiver: Some(frame_rx),
+                    packet_receiver: None,
+                };
+                let _ = result_sender.send(Ok((data_receiver, None)));
+            }
+        });
+
+        let result = httpflv.subscribe_from_stream_hub().await;
+        assert!(
+            result.is_ok(),
+            "Subscribe should succeed when hub responds with receiver"
+        );
+        let _ = hub_task.await;
+    }
+
+    #[tokio::test]
+    async fn test_subscribe_from_stream_hub_send_fails_returns_error() {
+        let (event_sender, event_receiver, response_sender, _response_receiver) =
+            create_test_channels();
+        let remote_addr = create_test_socket_addr();
+
+        drop(event_receiver);
+
+        let mut httpflv = HttpFlv::new(
+            "live".to_string(),
+            "stream1".to_string(),
+            event_sender,
+            response_sender,
+            "http://localhost/live/stream1.flv".to_string(),
+            remote_addr,
+        );
+
+        let result = httpflv.subscribe_from_stream_hub().await;
+        assert!(
+            result.is_err(),
+            "Subscribe should fail when event send fails"
+        );
+        if let Err(e) = result {
+            assert!(matches!(e.value, HttpFLvErrorValue::SendFrameDataErr));
+        }
+    }
+
+    #[tokio::test]
+    async fn test_subscribe_from_stream_hub_missing_frame_receiver_returns_error() {
+        let (event_sender, mut event_receiver, response_sender, _response_receiver) =
+            create_test_channels();
+        let remote_addr = create_test_socket_addr();
+
+        let mut httpflv = HttpFlv::new(
+            "live".to_string(),
+            "stream1".to_string(),
+            event_sender,
+            response_sender,
+            "http://localhost/live/stream1.flv".to_string(),
+            remote_addr,
+        );
+
+        let hub_task = tokio::spawn(async move {
+            if let Some(StreamHubEvent::Subscribe { result_sender, .. }) =
+                event_receiver.recv().await
+            {
+                let data_receiver = DataReceiver {
+                    frame_receiver: None,
+                    packet_receiver: None,
+                };
+                let _ = result_sender.send(Ok((data_receiver, None)));
+            }
+        });
+
+        let result = httpflv.subscribe_from_stream_hub().await;
+        assert!(
+            result.is_err(),
+            "Subscribe should fail when frame_receiver is None"
+        );
+        if let Err(e) = result {
+            assert!(matches!(e.value, HttpFLvErrorValue::MissingFrameReceiver));
+        }
+        let _ = hub_task.await;
+    }
+
+    #[tokio::test]
+    async fn test_subscribe_from_stream_hub_hub_returns_error() {
+        let (event_sender, mut event_receiver, response_sender, _response_receiver) =
+            create_test_channels();
+        let remote_addr = create_test_socket_addr();
+
+        let mut httpflv = HttpFlv::new(
+            "live".to_string(),
+            "stream1".to_string(),
+            event_sender,
+            response_sender,
+            "http://localhost/live/stream1.flv".to_string(),
+            remote_addr,
+        );
+
+        let hub_task = tokio::spawn(async move {
+            if let Some(StreamHubEvent::Subscribe { result_sender, .. }) =
+                event_receiver.recv().await
+            {
+                let _ = result_sender.send(Err(StreamHubError {
+                    value: StreamHubErrorValue::NoStreamName,
+                }));
+            }
+        });
+
+        let result = httpflv.subscribe_from_stream_hub().await;
+        assert!(
+            result.is_err(),
+            "Subscribe should fail when hub returns error"
+        );
+        let _ = hub_task.await;
     }
 
     // ========== Integration-like Tests ==========

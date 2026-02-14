@@ -1371,7 +1371,7 @@ mod tests {
     use super::*;
     use crate::streamhub::define::{
         DataReceiver, DataSender, FrameData, NotifyInfo, PacketData, RelayType, StatisticData,
-        SubDataType, StreamHubEvent, SubscribeType, SubscriberInfo,
+        StreamHubEvent, SubDataType, SubscribeType, SubscriberInfo,
     };
     use async_trait::async_trait;
     use bytes::BytesMut;
