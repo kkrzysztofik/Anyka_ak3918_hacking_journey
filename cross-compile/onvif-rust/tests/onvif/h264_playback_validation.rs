@@ -1055,6 +1055,25 @@ mod tests {
         let _ = fs::remove_file(&test_file);
     }
 
+    fn assert_httpflv_response(response_str: &str) {
+        assert!(
+            response_str.contains("HTTP/1.1 200"),
+            "HTTP response missing 200 status"
+        );
+        assert!(
+            response_str.contains("video/x-flv"),
+            "HTTP response missing FLV content type"
+        );
+        if let Some(body_start) = response_str.find("\r\n\r\n") {
+            let body = &response_str[body_start + 4..];
+            assert!(
+                body.starts_with("FLV"),
+                "FLV signature missing in response body"
+            );
+            tracing::info!("HTTP-FLV stream delivery validated");
+        }
+    }
+
     #[tokio::test]
     async fn test_e2e_httpflv_stream_delivery() {
         // E2E Test: Verify HTTP-FLV streaming with FLV format compliance
@@ -1069,7 +1088,6 @@ mod tests {
         let flv_data = generate_flv_data();
         let flv_data_clone = flv_data.clone();
 
-        // Spawn minimal HTTP-FLV server
         let server_handle = tokio::spawn(async move {
             if let Ok(listener) = tokio::net::TcpListener::bind("127.0.0.1:8080").await {
                 if let Ok((socket, _)) = listener.accept().await {
@@ -1078,14 +1096,11 @@ mod tests {
             }
         });
 
-        // Allow server to start
         tokio::time::sleep(Duration::from_millis(10)).await;
 
-        // Connect as HTTP-FLV client
         if let Ok(mut stream) = tokio::net::TcpStream::connect("127.0.0.1:8080").await {
             use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-            // Send HTTP GET request
             let http_req = "GET /live/stream1.flv HTTP/1.1\r\n\
                             Host: 127.0.0.1:8080\r\n\
                             Connection: close\r\n\
@@ -1093,32 +1108,10 @@ mod tests {
             stream.write_all(http_req.as_bytes()).await.unwrap();
             stream.flush().await.unwrap();
 
-            // Read response
             let mut buffer = Vec::new();
             stream.read_to_end(&mut buffer).await.unwrap();
-
             let response_str = String::from_utf8_lossy(&buffer);
-
-            // Verify HTTP response
-            assert!(
-                response_str.contains("HTTP/1.1 200"),
-                "HTTP response missing 200 status"
-            );
-            assert!(
-                response_str.contains("video/x-flv"),
-                "HTTP response missing FLV content type"
-            );
-
-            // Extract FLV signature from response (after headers)
-            if let Some(body_start) = response_str.find("\r\n\r\n") {
-                let body = &response_str[body_start + 4..];
-                assert!(
-                    body.starts_with("FLV"),
-                    "FLV signature missing in response body"
-                );
-
-                tracing::info!("HTTP-FLV stream delivery validated");
-            }
+            assert_httpflv_response(&response_str);
         }
 
         let _ = server_handle.await;

@@ -1661,6 +1661,81 @@ mod tests {
         assert!(result.is_err());
     }
 
+    #[tokio::test]
+    async fn test_send_record_with_session_id_includes_header() {
+        let (event_sender, _event_receiver) = tokio::sync::mpsc::unbounded_channel();
+
+        let mut mock_io = MockNetIO::new();
+        mock_io.expect_get_net_type().returning(|| NetType::TCP);
+        mock_io
+            .expect_write()
+            .withf(|bytes| {
+                let s = std::str::from_utf8(bytes).unwrap();
+                s.contains("RECORD") && s.contains("Session: 1234567890")
+            })
+            .times(1)
+            .returning(|_| Ok(()));
+        mock_io.expect_read().times(1).returning(|| {
+            let response = "RTSP/1.0 200 OK\r\nCSeq: 1\r\nSession: 1234567890\r\n\r\n";
+            Ok(BytesMut::from(response))
+        });
+
+        let mut session = RtspClientSession::new_with_io(
+            "localhost:554".to_string(),
+            "live/test".to_string(),
+            ProtocolType::TCP,
+            event_sender,
+            ClientSessionType::Push,
+            Box::new(mock_io),
+        );
+        session.session_id = Uuid::from_str2("1234567890");
+
+        let result = session.send_record().await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_exit_direct_call_push_returns_ok() {
+        let (event_sender, mut event_receiver) = tokio::sync::mpsc::unbounded_channel();
+
+        let mut session = RtspClientSession::new_with_io(
+            "localhost:554".to_string(),
+            "live/stream".to_string(),
+            ProtocolType::TCP,
+            event_sender,
+            ClientSessionType::Push,
+            Box::new(MockNetIO::new()),
+        );
+
+        let result = session.exit();
+        assert!(result.is_ok());
+
+        let event = event_receiver.recv().await;
+        assert!(event.is_some());
+        assert!(matches!(event.unwrap(), StreamHubEvent::UnSubscribe { .. }));
+    }
+
+    #[tokio::test]
+    async fn test_exit_direct_call_pull_returns_ok() {
+        let (event_sender, mut event_receiver) = tokio::sync::mpsc::unbounded_channel();
+
+        let mut session = RtspClientSession::new_with_io(
+            "localhost:554".to_string(),
+            "live/stream".to_string(),
+            ProtocolType::TCP,
+            event_sender,
+            ClientSessionType::Pull,
+            Box::new(MockNetIO::new()),
+        );
+
+        let result = session.exit();
+        assert!(result.is_ok());
+
+        let event = event_receiver.recv().await;
+        assert!(event.is_some());
+        assert!(matches!(event.unwrap(), StreamHubEvent::UnPublish { .. }));
+    }
+
     // ========================================================================
     // send_teardown Tests
     // ========================================================================

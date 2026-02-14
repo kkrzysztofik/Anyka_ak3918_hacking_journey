@@ -1258,6 +1258,30 @@ mod tests {
     }
 
     #[test]
+    fn test_startup_args_from_cli_validation_mode_minimal_uses_default_config_path() {
+        let cli = CliArgs::try_parse_from([
+            "onvifd",
+            "--validation-mode",
+            "--h264-file",
+            "/tmp/minimal.h264",
+        ])
+        .expect("cli parse should succeed");
+
+        let startup_args = startup_args_from_cli(cli).expect("startup args should be valid");
+        let validation_config = startup_args
+            .validation_config
+            .expect("validation config should exist");
+
+        assert_eq!(validation_config.file_path, "/tmp/minimal.h264");
+        assert!(validation_config.audio_file_path.is_none());
+        assert_eq!(validation_config.audio_sample_rate, 48000);
+        assert_eq!(validation_config.rtsp_port, 8554);
+        assert_eq!(validation_config.httpflv_port, 8080);
+        assert!(!validation_config.loop_playback);
+        assert_eq!(startup_args.config_path, DEFAULT_CONFIG_PATH);
+    }
+
+    #[test]
     fn test_generate_av_sdp_includes_audio() {
         let sps = vec![0x67, 0x42, 0x00, 0x1e];
         let pps = vec![0x68, 0xce, 0x06, 0xe2];
@@ -1802,6 +1826,41 @@ mod tests {
         if cfg!(target_arch = "arm") {
             assert_eq!(workers, 1);
             assert_eq!(blocking, 2);
+        } else {
+            assert!(workers >= 1);
+            assert_eq!(blocking, 512);
+        }
+    }
+
+    #[test]
+    fn test_get_runtime_config_arm_env_blocking_invalid_uses_default() {
+        const VAR: &str = "ONVIF_TOKIO_MAX_BLOCKING_THREADS";
+        unsafe { std::env::set_var(VAR, "invalid") };
+        let (workers, blocking) = get_runtime_config(false);
+        unsafe { std::env::remove_var(VAR) };
+
+        if cfg!(target_arch = "arm") {
+            assert_eq!(workers, 2);
+            assert_eq!(
+                blocking, 16,
+                "invalid blocking env should fall back to default"
+            );
+        } else {
+            assert!(workers >= 1);
+            assert_eq!(blocking, 512);
+        }
+    }
+
+    #[test]
+    fn test_get_runtime_config_arm_env_blocking_zero_uses_default() {
+        const VAR: &str = "ONVIF_TOKIO_MAX_BLOCKING_THREADS";
+        unsafe { std::env::set_var(VAR, "0") };
+        let (workers, blocking) = get_runtime_config(false);
+        unsafe { std::env::remove_var(VAR) };
+
+        if cfg!(target_arch = "arm") {
+            assert_eq!(workers, 2);
+            assert_eq!(blocking, 16, "zero blocking should fall back to default");
         } else {
             assert!(workers >= 1);
             assert_eq!(blocking, 512);

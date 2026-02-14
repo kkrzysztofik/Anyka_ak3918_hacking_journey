@@ -93,6 +93,19 @@ fn wrap_port(port: u16) -> u16 {
     if port == MAX_PORT { 1 } else { port }
 }
 
+/// Try to create a UDP pair bound to (port, port+1). Returns None if either bind fails.
+async fn try_udpio_pair_at(port: u16) -> Option<(UdpIO, UdpIO)> {
+    let udpio_0 = UdpIO::new_with_local_port(port).await?;
+    let next_port = port.wrapping_add(1);
+    let udpio_1 = UdpIO::new_with_local_port(next_port).await?;
+    Some((udpio_0, udpio_1))
+}
+
+/// Compute the next port to try after a failed pair attempt.
+fn next_try_port(after: u16) -> u16 {
+    if after == MAX_PORT { 1 } else { after + 1 }
+}
+
 pub async fn new_udpio_pair() -> Option<(UdpIO, UdpIO)> {
     const MAX_ATTEMPTS: u32 = 32768;
 
@@ -109,7 +122,7 @@ pub async fn new_udpio_pair() -> Option<(UdpIO, UdpIO)> {
     let mut next_local_port = if first_local_port == MAX_PORT || first_plus_one == MAX_PORT {
         1
     } else {
-        first_plus_one + 1
+        next_try_port(first_plus_one)
     };
 
     for _attempt_count in 1..=MAX_ATTEMPTS {
@@ -118,25 +131,15 @@ pub async fn new_udpio_pair() -> Option<(UdpIO, UdpIO)> {
         if next_local_port == first_local_port {
             return None;
         }
-
         next_local_port = wrap_port(next_local_port);
         if next_local_port == first_local_port {
             return None;
         }
 
-        if let Some(udpio_0) = UdpIO::new_with_local_port(next_local_port).await {
-            let next_plus_one = next_local_port.wrapping_add(1);
-            if let Some(udpio_1) = UdpIO::new_with_local_port(next_plus_one).await {
-                return Some((udpio_0, udpio_1));
-            }
-            next_local_port = if next_plus_one == MAX_PORT {
-                1
-            } else {
-                next_plus_one + 1
-            };
-        } else {
-            next_local_port = next_local_port.wrapping_add(1);
+        if let Some(pair) = try_udpio_pair_at(next_local_port).await {
+            return Some(pair);
         }
+        next_local_port = next_try_port(next_local_port.wrapping_add(1));
     }
 
     log::error!("new_udpio_pair exceeded maximum attempts");
@@ -1308,5 +1311,26 @@ mod tests {
         });
 
         let _ = tokio::try_join!(connect_task, accept_task);
+    }
+
+    // ========== Additional UdpIO branches ==========
+
+    #[tokio::test]
+    async fn test_udpio_new_with_unparseable_address_returns_none() {
+        let result = UdpIO::new("256.256.256.256".to_string(), 80, 0).await;
+        assert!(result.is_none(), "Invalid IP address should return None");
+    }
+
+    #[tokio::test]
+    async fn test_udpio_new_with_local_port_bind_fails_when_port_in_use() {
+        if let Some(udpio) = UdpIO::new_with_local_port(0).await {
+            if let Some(port) = udpio.get_local_port() {
+                let result = UdpIO::new_with_local_port(port).await;
+                assert!(
+                    result.is_none(),
+                    "Binding to already-used port should return None"
+                );
+            }
+        }
     }
 }

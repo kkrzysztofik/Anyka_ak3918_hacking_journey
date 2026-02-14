@@ -339,4 +339,78 @@ mod tests {
         let platform = ValidationPlatform::new();
         assert!(platform.network_info().is_none());
     }
+
+    #[tokio::test]
+    async fn test_validation_platform_default_constructs() {
+        let platform = ValidationPlatform::default();
+        assert!(!platform.is_initialized());
+        let device_info = platform.get_device_info().await.unwrap();
+        assert_eq!(device_info.manufacturer, "Anyka");
+    }
+
+    #[tokio::test]
+    async fn test_validation_platform_is_initialized_false_after_shutdown() {
+        let platform = ValidationPlatform::new();
+        platform.initialize().await.unwrap();
+        assert!(platform.is_initialized());
+        platform.shutdown().await.unwrap();
+        assert!(!platform.is_initialized());
+    }
+
+    #[tokio::test]
+    async fn test_validation_platform_init_shutdown_init_cycle() {
+        let platform = ValidationPlatform::new();
+        platform.initialize().await.unwrap();
+        assert!(platform.is_initialized());
+        platform.shutdown().await.unwrap();
+        assert!(!platform.is_initialized());
+        platform.initialize().await.unwrap();
+        assert!(platform.is_initialized());
+    }
+
+    #[tokio::test]
+    async fn test_validation_platform_video_input_get_resolution() {
+        let platform = ValidationPlatform::new();
+        let input = platform.video_input();
+        let resolution = input.get_resolution().await.unwrap();
+        assert_eq!(resolution.width, 1280);
+        assert_eq!(resolution.height, 720);
+    }
+
+    #[tokio::test]
+    async fn test_validation_platform_video_encoder_get_options() {
+        let platform = ValidationPlatform::new();
+        let encoder = platform.video_encoder();
+        let options = encoder.get_options().await.unwrap();
+        assert!(!options.resolutions.is_empty());
+        assert!(options.resolutions.contains(&Resolution::new(1280, 720)));
+        assert_eq!(options.framerate_range, (1, 30));
+    }
+
+    #[tokio::test]
+    async fn test_validation_platform_video_encoder_get_configurations() {
+        let platform = ValidationPlatform::new();
+        let encoder = platform.video_encoder();
+        let configs = encoder.get_configurations().await.unwrap();
+        assert_eq!(configs.len(), 1);
+        assert_eq!(configs[0].token, "encoder_h264");
+    }
+
+    #[tokio::test]
+    async fn test_validation_platform_audio_input_get_sources() {
+        let platform = ValidationPlatform::new();
+        let input = platform.audio_input();
+        let sources = input.get_sources().await.unwrap();
+        assert_eq!(sources.len(), 1);
+        assert_eq!(sources[0].token, "audio_in");
+    }
+
+    #[tokio::test]
+    async fn test_validation_platform_audio_encoder_get_configurations() {
+        let platform = ValidationPlatform::new();
+        let encoder = platform.audio_encoder();
+        let configs = encoder.get_configurations().await.unwrap();
+        assert_eq!(configs.len(), 1);
+        assert_eq!(configs[0].token, "audio_encoder");
+    }
 }

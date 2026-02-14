@@ -934,6 +934,80 @@ mod tests {
         mock_server.verify().await;
     }
 
+    // ========== Additional 4xx/5xx Response Tests ==========
+
+    #[tokio::test]
+    async fn test_on_unpublish_notify_502_bad_gateway_completes_without_panic() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/unpublish"))
+            .respond_with(ResponseTemplate::new(502))
+            .mount(&mock_server)
+            .await;
+
+        let notifier = HttpNotifier::new(
+            None,
+            Some(format!("{}/unpublish", mock_server.uri())),
+            None,
+            None,
+            None,
+        );
+        let event = create_test_event_message();
+
+        notifier.on_unpublish_notify(&event).await;
+
+        mock_server.verify().await;
+    }
+
+    #[tokio::test]
+    async fn test_on_play_notify_403_forbidden_completes_without_panic() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/play"))
+            .respond_with(ResponseTemplate::new(403))
+            .mount(&mock_server)
+            .await;
+
+        let notifier = HttpNotifier::new(
+            None,
+            None,
+            Some(format!("{}/play", mock_server.uri())),
+            None,
+            None,
+        );
+        let event = create_subscribe_event_message();
+
+        notifier.on_play_notify(&event).await;
+
+        mock_server.verify().await;
+    }
+
+    #[tokio::test]
+    async fn test_on_hls_notify_500_internal_server_error_completes_without_panic() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/hls"))
+            .respond_with(ResponseTemplate::new(500))
+            .mount(&mock_server)
+            .await;
+
+        let notifier = HttpNotifier::new(
+            None,
+            None,
+            None,
+            None,
+            Some(format!("{}/hls", mock_server.uri())),
+        );
+        let event = create_test_event_message();
+
+        notifier.on_hls_notify(&event).await;
+
+        mock_server.verify().await;
+    }
+
     // ========== Thread Safety Tests ==========
 
     #[tokio::test]

@@ -496,79 +496,129 @@ impl StreamDataTransceiver {
     ) {
         tokio::spawn(async move {
             while let Some(val) = receiver.recv().await {
-                match val {
+                let should_break = match val {
                     TransceiverEvent::Subscribe {
                         sender,
                         info,
                         result_sender,
                     } => {
-                        if let Err(err) = stream_handler
-                            .send_prior_data(sender.clone(), info.sub_type)
-                            .await
-                        {
-                            log::error!("receive_event_loop send_prior_data err: {}", err);
-                            break;
-                        }
-                        match sender {
-                            DataSender::Frame {
-                                sender: frame_sender,
-                            } => {
-                                frame_senders.lock().await.insert(info.id, frame_sender);
-                            }
-                            DataSender::Packet {
-                                sender: packet_sender,
-                            } => {
-                                packet_senders.lock().await.insert(info.id, packet_sender);
-                            }
-                        }
-
-                        if let Err(err) = result_sender.send(statistic_sender.clone()) {
-                            log::error!("receive_event_loop:send statistic send err :{:?} ", err)
-                        }
-
-                        let mut statistics_data = statistics_data.lock().await;
-                        statistics_data.subscriber_count += 1;
+                        Self::handle_subscribe_event(
+                            &stream_handler,
+                            sender,
+                            &info,
+                            result_sender,
+                            &statistic_sender,
+                            &packet_senders,
+                            &frame_senders,
+                            &statistics_data,
+                        )
+                        .await
                     }
                     TransceiverEvent::UnSubscribe { info } => {
-                        match info.sub_type {
-                            SubscribeType::RtpPull | SubscribeType::WhepPull => {
-                                packet_senders.lock().await.remove(&info.id);
-                            }
-                            _ => {
-                                frame_senders.lock().await.remove(&info.id);
-                            }
-                        }
-                        let mut statistics_data = statistics_data.lock().await;
-                        let subscribers = &mut statistics_data.subscribers;
-                        subscribers.remove(&info.id);
-
-                        statistics_data.subscriber_count -= 1;
+                        Self::handle_unsubscribe_event(
+                            &info,
+                            &packet_senders,
+                            &frame_senders,
+                            &statistics_data,
+                        )
+                        .await;
+                        false
                     }
                     TransceiverEvent::UnPublish {} => {
                         if let Err(err) = exit.send(()) {
                             log::error!("TransmitterEvent::UnPublish send error: {}", err);
                         }
-                        break;
+                        true
                     }
                     TransceiverEvent::Api { sender, uuid } => {
-                        log::info!("api:  stream identifier: {:?}", uuid);
-                        let statistic_data = if let Some(uid) = uuid {
-                            statistics_data.lock().await.query_by_uuid(uid)
-                        } else {
-                            log::info!("api2:  stream identifier: {:?}", statistics_data);
-                            statistics_data.lock().await.clone()
-                        };
-
-                        if let Err(err) = sender.send(statistic_data) {
-                            log::info!("Transmitter send avstatistic data err: {}", err);
-                        }
+                        Self::handle_api_event(&sender, uuid, &statistics_data).await;
+                        false
                     }
                     TransceiverEvent::Request { sender } => {
                         stream_handler.send_information(sender).await;
+                        false
                     }
+                };
+                if should_break {
+                    break;
                 }
             }
         });
+    }
+
+    /// Returns true if the loop should break.
+    #[allow(clippy::too_many_arguments)]
+    async fn handle_subscribe_event(
+        stream_handler: &Arc<dyn TStreamHandler>,
+        sender: DataSender,
+        info: &define::SubscriberInfo,
+        result_sender: define::TransceiverEventExecuteResultSender,
+        statistic_sender: &StatisticDataSender,
+        packet_senders: &Arc<Mutex<HashMap<Uuid, PacketDataSender>>>,
+        frame_senders: &Arc<Mutex<HashMap<Uuid, FrameDataSender>>>,
+        statistics_data: &Arc<Mutex<StatisticsStream>>,
+    ) -> bool {
+        if let Err(err) = stream_handler
+            .send_prior_data(sender.clone(), info.sub_type.clone())
+            .await
+        {
+            log::error!("receive_event_loop send_prior_data err: {}", err);
+            return true;
+        }
+        match sender {
+            DataSender::Frame {
+                sender: frame_sender,
+            } => {
+                frame_senders.lock().await.insert(info.id, frame_sender);
+            }
+            DataSender::Packet {
+                sender: packet_sender,
+            } => {
+                packet_senders.lock().await.insert(info.id, packet_sender);
+            }
+        }
+        if let Err(err) = result_sender.send(statistic_sender.clone()) {
+            log::error!("receive_event_loop:send statistic send err :{:?} ", err);
+        }
+        let mut stats = statistics_data.lock().await;
+        stats.subscriber_count += 1;
+        false
+    }
+
+    async fn handle_unsubscribe_event(
+        info: &define::SubscriberInfo,
+        packet_senders: &Arc<Mutex<HashMap<Uuid, PacketDataSender>>>,
+        frame_senders: &Arc<Mutex<HashMap<Uuid, FrameDataSender>>>,
+        statistics_data: &Arc<Mutex<StatisticsStream>>,
+    ) {
+        match info.sub_type {
+            SubscribeType::RtpPull | SubscribeType::WhepPull => {
+                packet_senders.lock().await.remove(&info.id);
+            }
+            _ => {
+                frame_senders.lock().await.remove(&info.id);
+            }
+        }
+        let mut stats = statistics_data.lock().await;
+        stats.subscribers.remove(&info.id);
+        stats.subscriber_count -= 1;
+    }
+
+    async fn handle_api_event(
+        sender: &define::StatisticStreamSender,
+        uuid: Option<Uuid>,
+        statistics_data: &Arc<Mutex<StatisticsStream>>,
+    ) {
+        log::info!("api:  stream identifier: {:?}", uuid);
+        let statistic_data = if let Some(uid) = uuid {
+            statistics_data.lock().await.query_by_uuid(uid)
+        } else {
+            log::info!("api2:  stream identifier: {:?}", statistics_data);
+            statistics_data.lock().await.clone()
+        };
+        if let Err(err) = sender.send(statistic_data) {
+            log::info!("Transmitter send avstatistic data err: {}", err);
+        }
     }
 
     /// Get the current number of subscribers for this stream.
@@ -1065,6 +1115,69 @@ impl StreamsHub {
         Ok(())
     }
 
+    fn send_api_statistic_events(
+        &mut self,
+        identifier: Option<StreamIdentifier>,
+        uuid: Option<Uuid>,
+        stream_sender: &define::StatisticStreamSender,
+    ) -> Result<usize, StreamHubError> {
+        if let Some(id) = identifier {
+            if let Some(event_sender) = self.streams.get_mut(&id) {
+                log::info!("api_statistic:  stream identifier: {}", id);
+                event_sender
+                    .send(TransceiverEvent::Api {
+                        sender: stream_sender.clone(),
+                        uuid,
+                    })
+                    .map_err(|_| StreamHubError {
+                        value: StreamHubErrorValue::SendError,
+                    })?;
+                return Ok(1);
+            }
+            return Ok(0);
+        }
+        let stream_count = self.streams.len();
+        for v in self.streams.values() {
+            v.send(TransceiverEvent::Api {
+                sender: stream_sender.clone(),
+                uuid,
+            })
+            .map_err(|_| {
+                log::error!("TransmitterEvent  api send data err");
+                StreamHubError {
+                    value: StreamHubErrorValue::SendError,
+                }
+            })?;
+        }
+        Ok(stream_count)
+    }
+
+    async fn collect_stream_statistics(
+        mut stream_receiver: define::StatisticStreamReceiver,
+        stream_count: usize,
+    ) -> Vec<StatisticsStream> {
+        let mut data = Vec::new();
+        while data.len() < stream_count {
+            if let Some(stream_statistics) = stream_receiver.recv().await {
+                data.push(stream_statistics);
+            }
+        }
+        data
+    }
+
+    fn statistics_to_value(
+        data: Vec<StatisticsStream>,
+        top_n: Option<usize>,
+    ) -> Result<Value, StreamHubError> {
+        if let Some(topn) = top_n {
+            let mut sorted = data;
+            sorted.sort_by(|a, b| b.subscriber_count.cmp(&a.subscriber_count));
+            let top_streams: Vec<StatisticsStream> = sorted.into_iter().take(topn).collect();
+            return Ok(serde_json::to_value(top_streams)?);
+        }
+        Ok(serde_json::to_value(data)?)
+    }
+
     async fn api_statistic(
         &mut self,
         top_n: Option<usize>,
@@ -1075,55 +1188,10 @@ impl StreamsHub {
             return Ok(json!({}));
         }
         log::info!("api_statistic:  stream identifier: {:?}", identifier);
-        let (stream_sender, mut stream_receiver) = mpsc::unbounded_channel();
-
-        let mut stream_count: usize = 1;
-
-        if let Some(identifier) = identifier {
-            if let Some(event_sender) = self.streams.get_mut(&identifier) {
-                let event = TransceiverEvent::Api {
-                    sender: stream_sender.clone(),
-                    uuid,
-                };
-                log::info!("api_statistic:  stream identifier: {}", identifier);
-                event_sender.send(event).map_err(|_| StreamHubError {
-                    value: StreamHubErrorValue::SendError,
-                })?;
-            }
-        } else {
-            stream_count = self.streams.len();
-            for v in self.streams.values() {
-                if let Err(err) = v.send(TransceiverEvent::Api {
-                    sender: stream_sender.clone(),
-                    uuid,
-                }) {
-                    log::error!("TransmitterEvent  api send data err: {}", err);
-                    return Err(StreamHubError {
-                        value: StreamHubErrorValue::SendError,
-                    });
-                }
-            }
-        }
-
-        let mut data = Vec::new();
-
-        loop {
-            log::info!("api_statistic:  stream count: {}", stream_count);
-            if let Some(stream_statistics) = stream_receiver.recv().await {
-                data.push(stream_statistics);
-            }
-            if data.len() == stream_count {
-                break;
-            }
-        }
-
-        if let Some(topn) = top_n {
-            data.sort_by(|a, b| b.subscriber_count.cmp(&a.subscriber_count));
-            let top_streams: Vec<StatisticsStream> = data.into_iter().take(topn).collect();
-            return Ok(serde_json::to_value(top_streams)?);
-        }
-
-        Ok(serde_json::to_value(data)?)
+        let (stream_sender, stream_receiver) = mpsc::unbounded_channel();
+        let stream_count = self.send_api_statistic_events(identifier, uuid, &stream_sender)?;
+        let data = Self::collect_stream_statistics(stream_receiver, stream_count).await;
+        Self::statistics_to_value(data, top_n)
     }
 
     fn api_kick_off_client(&mut self, uid: Uuid) -> Result<(), StreamHubError> {
@@ -1752,6 +1820,24 @@ mod tests {
             .unwrap();
         let value = result_rx.await.unwrap();
         assert_eq!(value, json!({}));
+    }
+
+    #[tokio::test]
+    async fn test_handle_api_statistic_result_sender_dropped_completes_without_panic() {
+        let mut hub = StreamsHub::new(None);
+        let event_sender = hub.get_hub_event_sender();
+        let (result_tx, result_rx) = oneshot::channel();
+        tokio::spawn(async move { hub.event_loop().await });
+        event_sender
+            .send(StreamHubEvent::ApiStatistic {
+                top_n: None,
+                identifier: None,
+                uuid: None,
+                result_sender: result_tx,
+            })
+            .unwrap();
+        drop(result_rx);
+        tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
     }
 
     #[tokio::test]

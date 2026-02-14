@@ -1445,4 +1445,310 @@ mod tests {
         let id_str = id.to_string();
         assert!(!id_str.is_empty(), "UUID string should not be empty");
     }
+
+    // ========== send_media_stream / process_header_phase / process_frame_with_retry Tests ==========
+
+    #[tokio::test]
+    async fn test_send_media_stream_channel_closed_exits_after_retries() {
+        let (event_sender, _event_receiver, response_sender, _response_receiver) =
+            create_test_channels();
+        let remote_addr = create_test_socket_addr();
+
+        let mut httpflv = HttpFlv::new(
+            "live".to_string(),
+            "stream1".to_string(),
+            event_sender,
+            response_sender,
+            "http://localhost/live/stream1.flv".to_string(),
+            remote_addr,
+        );
+
+        let result = httpflv.send_media_stream().await;
+        assert!(
+            result.is_ok(),
+            "send_media_stream should complete when channel closed after retries"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_send_media_stream_header_phase_with_audio_video_finalizes() {
+        let (event_sender, mut event_receiver, response_sender, mut response_receiver) =
+            create_test_channels();
+        let remote_addr = create_test_socket_addr();
+
+        let mut httpflv = HttpFlv::new(
+            "live".to_string(),
+            "stream1".to_string(),
+            event_sender,
+            response_sender,
+            "http://localhost/live/stream1.flv".to_string(),
+            remote_addr,
+        );
+
+        let hub_task = tokio::spawn(async move {
+            if let Some(StreamHubEvent::Subscribe { result_sender, .. }) =
+                event_receiver.recv().await
+            {
+                let (frame_tx, frame_rx) = tokio_mpsc::unbounded_channel();
+                let data_receiver = DataReceiver {
+                    frame_receiver: Some(frame_rx),
+                    packet_receiver: None,
+                };
+                let _ = result_sender.send(Ok((data_receiver, None)));
+
+                let _ = frame_tx.send(FrameData::Audio {
+                    timestamp: 0,
+                    data: BytesMut::from(&[0x01, 0x02][..]),
+                });
+                let _ = frame_tx.send(FrameData::Video {
+                    timestamp: 0,
+                    data: BytesMut::from(&[0x00, 0x01][..]),
+                });
+                drop(frame_tx);
+            }
+        });
+
+        let result = httpflv.subscribe_from_stream_hub().await;
+        assert!(result.is_ok());
+
+        let send_task = tokio::spawn(async move { httpflv.send_media_stream().await });
+
+        let result = send_task.await.expect("send_media_stream task panicked");
+        assert!(result.is_ok());
+
+        let _ = response_receiver.next().await;
+        let _ = hub_task.await;
+    }
+
+    #[tokio::test]
+    async fn test_send_media_stream_header_phase_metadata_then_audio_video() {
+        let (event_sender, mut event_receiver, response_sender, mut response_receiver) =
+            create_test_channels();
+        let remote_addr = create_test_socket_addr();
+
+        let mut httpflv = HttpFlv::new(
+            "live".to_string(),
+            "stream1".to_string(),
+            event_sender,
+            response_sender,
+            "http://localhost/live/stream1.flv".to_string(),
+            remote_addr,
+        );
+
+        let hub_task = tokio::spawn(async move {
+            if let Some(StreamHubEvent::Subscribe { result_sender, .. }) =
+                event_receiver.recv().await
+            {
+                let (frame_tx, frame_rx) = tokio_mpsc::unbounded_channel();
+                let data_receiver = DataReceiver {
+                    frame_receiver: Some(frame_rx),
+                    packet_receiver: None,
+                };
+                let _ = result_sender.send(Ok((data_receiver, None)));
+
+                let mut meta = BytesMut::new();
+                meta.extend_from_slice(b"@setDataFrame");
+                meta.extend_from_slice(b"onMetaData");
+                let _ = frame_tx.send(FrameData::MetaData {
+                    timestamp: 0,
+                    data: meta,
+                });
+                let _ = frame_tx.send(FrameData::Audio {
+                    timestamp: 100,
+                    data: BytesMut::from(&[0x01][..]),
+                });
+                let _ = frame_tx.send(FrameData::Video {
+                    timestamp: 200,
+                    data: BytesMut::from(&[0x00, 0x01][..]),
+                });
+                drop(frame_tx);
+            }
+        });
+
+        let result = httpflv.subscribe_from_stream_hub().await;
+        assert!(result.is_ok());
+
+        let send_task = tokio::spawn(async move { httpflv.send_media_stream().await });
+
+        let result = send_task.await.expect("send_media_stream task panicked");
+        assert!(result.is_ok());
+
+        let _ = response_receiver.next().await;
+        let _ = hub_task.await;
+    }
+
+    #[tokio::test]
+    async fn test_send_media_stream_header_phase_max_frames_without_av_guesses() {
+        let (event_sender, mut event_receiver, response_sender, mut response_receiver) =
+            create_test_channels();
+        let remote_addr = create_test_socket_addr();
+
+        let mut httpflv = HttpFlv::new(
+            "live".to_string(),
+            "stream1".to_string(),
+            event_sender,
+            response_sender,
+            "http://localhost/live/stream1.flv".to_string(),
+            remote_addr,
+        );
+
+        let hub_task = tokio::spawn(async move {
+            if let Some(StreamHubEvent::Subscribe { result_sender, .. }) =
+                event_receiver.recv().await
+            {
+                let (frame_tx, frame_rx) = tokio_mpsc::unbounded_channel();
+                let data_receiver = DataReceiver {
+                    frame_receiver: Some(frame_rx),
+                    packet_receiver: None,
+                };
+                let _ = result_sender.send(Ok((data_receiver, None)));
+
+                for _ in 0..12 {
+                    let mut meta = BytesMut::new();
+                    meta.extend_from_slice(b"@setDataFrame");
+                    meta.extend_from_slice(b"onMetaData");
+                    let _ = frame_tx.send(FrameData::MetaData {
+                        timestamp: 0,
+                        data: meta,
+                    });
+                }
+                drop(frame_tx);
+            }
+        });
+
+        let result = httpflv.subscribe_from_stream_hub().await;
+        assert!(result.is_ok());
+
+        let send_task = tokio::spawn(async move { httpflv.send_media_stream().await });
+
+        let result = send_task.await.expect("send_media_stream task panicked");
+        assert!(result.is_ok());
+
+        let _ = response_receiver.next().await;
+        let _ = hub_task.await;
+    }
+
+    #[tokio::test]
+    async fn test_send_media_stream_process_frame_with_retry_disconnected_breaks_loop() {
+        let (event_sender, mut event_receiver, response_sender, mut response_receiver) =
+            create_test_channels();
+        let remote_addr = create_test_socket_addr();
+
+        let mut httpflv = HttpFlv::new(
+            "live".to_string(),
+            "stream1".to_string(),
+            event_sender,
+            response_sender,
+            "http://localhost/live/stream1.flv".to_string(),
+            remote_addr,
+        );
+
+        let hub_task = tokio::spawn(async move {
+            if let Some(StreamHubEvent::Subscribe { result_sender, .. }) =
+                event_receiver.recv().await
+            {
+                let (frame_tx, frame_rx) = tokio_mpsc::unbounded_channel();
+                let data_receiver = DataReceiver {
+                    frame_receiver: Some(frame_rx),
+                    packet_receiver: None,
+                };
+                let _ = result_sender.send(Ok((data_receiver, None)));
+
+                let _ = frame_tx.send(FrameData::Audio {
+                    timestamp: 0,
+                    data: BytesMut::from(&[0x01][..]),
+                });
+                let _ = frame_tx.send(FrameData::Video {
+                    timestamp: 0,
+                    data: BytesMut::from(&[0x00][..]),
+                });
+                let _ = frame_tx.send(FrameData::Audio {
+                    timestamp: 100,
+                    data: BytesMut::from(&[0x02][..]),
+                });
+                drop(frame_tx);
+            }
+        });
+
+        let result = httpflv.subscribe_from_stream_hub().await;
+        assert!(result.is_ok());
+
+        let drain_task = tokio::spawn(async move {
+            for _ in 0..3 {
+                let _ = response_receiver.next().await;
+            }
+            drop(response_receiver);
+        });
+
+        let result = httpflv.send_media_stream().await;
+        assert!(
+            result.is_ok(),
+            "send_media_stream should complete when response channel disconnected after header"
+        );
+
+        let _ = hub_task.await;
+        let _ = drain_task.await;
+    }
+
+    #[tokio::test]
+    async fn test_send_media_stream_frame_phase_success() {
+        let (event_sender, mut event_receiver, response_sender, mut response_receiver) =
+            create_test_channels();
+        let remote_addr = create_test_socket_addr();
+
+        let mut httpflv = HttpFlv::new(
+            "live".to_string(),
+            "stream1".to_string(),
+            event_sender,
+            response_sender,
+            "http://localhost/live/stream1.flv".to_string(),
+            remote_addr,
+        );
+
+        let hub_task = tokio::spawn(async move {
+            if let Some(StreamHubEvent::Subscribe { result_sender, .. }) =
+                event_receiver.recv().await
+            {
+                let (frame_tx, frame_rx) = tokio_mpsc::unbounded_channel();
+                let data_receiver = DataReceiver {
+                    frame_receiver: Some(frame_rx),
+                    packet_receiver: None,
+                };
+                let _ = result_sender.send(Ok((data_receiver, None)));
+
+                let _ = frame_tx.send(FrameData::Audio {
+                    timestamp: 0,
+                    data: BytesMut::from(&[0x01][..]),
+                });
+                let _ = frame_tx.send(FrameData::Video {
+                    timestamp: 0,
+                    data: BytesMut::from(&[0x00, 0x01][..]),
+                });
+                for i in 0..5 {
+                    let _ = frame_tx.send(FrameData::Video {
+                        timestamp: (i + 1) * 33,
+                        data: BytesMut::from(&[0x00, 0x01, 0x02][..]),
+                    });
+                }
+                drop(frame_tx);
+            }
+        });
+
+        let result = httpflv.subscribe_from_stream_hub().await;
+        assert!(result.is_ok());
+
+        let send_task = tokio::spawn(async move { httpflv.send_media_stream().await });
+
+        let result = send_task.await.expect("send_media_stream task panicked");
+        assert!(result.is_ok());
+
+        let mut count = 0;
+        while let Some(_) = response_receiver.next().await {
+            count += 1;
+            if count >= 3 {
+                break;
+            }
+        }
+        let _ = hub_task.await;
+    }
 }

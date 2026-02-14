@@ -18,6 +18,7 @@ Environment profile used for this measurement:
   ONVIF_VALIDATION_ENABLE_HTTPFLV=0
   ONVIF_VALIDATION_ENABLE_ONVIF_APP=0
 USAGE
+  return 0
 }
 
 require_cmd() {
@@ -26,6 +27,7 @@ require_cmd() {
     echo "error: required command not found: $cmd" >&2
     return 2
   fi
+  return 0
 }
 
 ONVIF_BIN=""

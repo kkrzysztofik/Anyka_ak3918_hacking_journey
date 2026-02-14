@@ -143,4 +143,22 @@ mod tests {
         let err = result.unwrap_err();
         assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
     }
+
+    #[tokio::test]
+    async fn test_default_rtsp_server_run_empty_address_returns_err() {
+        let event_sender = create_test_event_sender();
+        let mut server = DefaultRtspServer::new("".to_string(), event_sender, None);
+        let result = server.run().await;
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
+    }
+
+    #[tokio::test]
+    async fn test_default_rtsp_server_run_invalid_port_returns_err() {
+        let event_sender = create_test_event_sender();
+        let mut server = DefaultRtspServer::new("127.0.0.1:99999".to_string(), event_sender, None);
+        let result = server.run().await;
+        assert!(result.is_err());
+    }
 }

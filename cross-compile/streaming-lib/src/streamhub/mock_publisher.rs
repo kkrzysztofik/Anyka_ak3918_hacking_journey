@@ -264,38 +264,10 @@ impl MockVideoPublisher {
                     continue;
                 }
 
-                if let Some(access_units) = access_units_cache.as_ref() {
-                    let result = publish_from_cache(
-                        &sender,
-                        access_units,
-                        frame_duration_ms,
-                        timestamp_offset,
-                        &last_timestamp_ms,
-                        &subscriber_count_fn,
-                        &mut frames_since_report,
-                        &mut last_report,
-                    )
-                    .await;
-                    match result {
-                        CachePublishResult::Interrupted => continue,
-                        CachePublishResult::ChannelClosed => {
-                            set_not_running(&is_running).await;
-                            return;
-                        }
-                        CachePublishResult::Completed(frame_count) => {
-                            if !loop_playback {
-                                break;
-                            }
-                            timestamp_offset = timestamp_offset
-                                .saturating_add(frame_count.saturating_mul(frame_duration_ms));
-                        }
-                    }
-                    continue;
-                }
-
-                let result = publish_from_reader(
+                let action = run_publish_loop_iteration(
                     &reader,
                     &sender,
+                    access_units_cache.as_ref(),
                     frame_duration_ms,
                     timestamp_offset,
                     loop_playback,
@@ -306,18 +278,14 @@ impl MockVideoPublisher {
                 )
                 .await;
 
-                match result {
-                    ReaderPublishResult::Interrupted => continue,
-                    ReaderPublishResult::ChannelClosed => {
+                match action {
+                    PublishLoopAction::Continue => {}
+                    PublishLoopAction::Break => break,
+                    PublishLoopAction::Exit => {
                         set_not_running(&is_running).await;
                         return;
                     }
-                    ReaderPublishResult::Completed(new_offset) => {
-                        if !loop_playback {
-                            break;
-                        }
-                        timestamp_offset = new_offset;
-                    }
+                    PublishLoopAction::UpdateOffset(offset) => timestamp_offset = offset,
                 }
             }
 
@@ -478,6 +446,14 @@ enum CachePublishResult {
     Completed(u32),
 }
 
+/// Result of one iteration of the publish loop; tells the outer loop whether to continue, break, exit, or update offset.
+enum PublishLoopAction {
+    Continue,
+    Break,
+    Exit,
+    UpdateOffset(u32),
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn publish_from_cache(
     sender: &FrameDataSender,
@@ -552,7 +528,7 @@ async fn publish_from_reader(
 
         match nal.unit_type {
             NalUnitType::SequenceParameterSet => {
-                if let Some(ts) = process_pending_access_unit(
+                if let Some(ts) = handle_sps_nal(
                     sender,
                     &mut pending_access_unit,
                     pending_access_unit_timestamp.take(),
@@ -561,23 +537,17 @@ async fn publish_from_reader(
                     &mut frame_count,
                     frames_since_report,
                     last_report,
+                    &nal.data,
+                    timestamp_offset,
+                    frame_duration_ms,
                 )
                 .await
                 {
                     return ts;
                 }
-
-                send_param_set_frame(
-                    sender,
-                    &nal.data,
-                    timestamp_offset,
-                    frame_count,
-                    frame_duration_ms,
-                    "SPS",
-                );
             }
             NalUnitType::PictureParameterSet => {
-                if let Some(ts) = process_pending_access_unit(
+                if let Some(ts) = handle_pps_nal(
                     sender,
                     &mut pending_access_unit,
                     pending_access_unit_timestamp.take(),
@@ -586,20 +556,14 @@ async fn publish_from_reader(
                     &mut frame_count,
                     frames_since_report,
                     last_report,
+                    &nal.data,
+                    timestamp_offset,
+                    frame_duration_ms,
                 )
                 .await
                 {
                     return ts;
                 }
-
-                send_param_set_frame(
-                    sender,
-                    &nal.data,
-                    timestamp_offset,
-                    frame_count,
-                    frame_duration_ms,
-                    "PPS",
-                );
             }
             NalUnitType::IdrSlice | NalUnitType::NonIdrSlice => {
                 let first_slice = is_first_vcl_slice(&nal.data);
@@ -657,6 +621,73 @@ async fn publish_from_reader(
     ReaderPublishResult::Completed(new_offset)
 }
 
+#[allow(clippy::too_many_arguments)]
+async fn run_publish_loop_iteration(
+    reader: &Arc<Mutex<H264FileReader>>,
+    sender: &FrameDataSender,
+    access_units_cache: Option<&Arc<Vec<Vec<u8>>>>,
+    frame_duration_ms: u32,
+    timestamp_offset: u32,
+    loop_playback: bool,
+    last_timestamp_ms: &AtomicU32,
+    subscriber_count_fn: &Option<Arc<dyn Fn() -> usize + Send + Sync>>,
+    frames_since_report: &mut u64,
+    last_report: &mut Instant,
+) -> PublishLoopAction {
+    if let Some(access_units) = access_units_cache {
+        let result = publish_from_cache(
+            sender,
+            access_units,
+            frame_duration_ms,
+            timestamp_offset,
+            last_timestamp_ms,
+            subscriber_count_fn,
+            frames_since_report,
+            last_report,
+        )
+        .await;
+        return match result {
+            CachePublishResult::Interrupted => PublishLoopAction::Continue,
+            CachePublishResult::ChannelClosed => PublishLoopAction::Exit,
+            CachePublishResult::Completed(frame_count) => {
+                if !loop_playback {
+                    PublishLoopAction::Break
+                } else {
+                    PublishLoopAction::UpdateOffset(
+                        timestamp_offset
+                            .saturating_add(frame_count.saturating_mul(frame_duration_ms)),
+                    )
+                }
+            }
+        };
+    }
+
+    let result = publish_from_reader(
+        reader,
+        sender,
+        frame_duration_ms,
+        timestamp_offset,
+        loop_playback,
+        last_timestamp_ms,
+        subscriber_count_fn,
+        frames_since_report,
+        last_report,
+    )
+    .await;
+
+    match result {
+        ReaderPublishResult::Interrupted => PublishLoopAction::Continue,
+        ReaderPublishResult::ChannelClosed => PublishLoopAction::Exit,
+        ReaderPublishResult::Completed(new_offset) => {
+            if !loop_playback {
+                PublishLoopAction::Break
+            } else {
+                PublishLoopAction::UpdateOffset(new_offset)
+            }
+        }
+    }
+}
+
 fn send_param_set_frame(
     sender: &FrameDataSender,
     data: &[u8],
@@ -697,6 +728,84 @@ fn log_vcl_frame(frame_count: u32, timestamp: u32, first_slice: bool, unit_type:
             first_slice
         );
     }
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn handle_sps_nal(
+    sender: &FrameDataSender,
+    pending_access_unit: &mut BytesMut,
+    pending_access_unit_timestamp: Option<u32>,
+    pacer: &mut Option<Interval>,
+    last_timestamp_ms: &AtomicU32,
+    frame_count: &mut u32,
+    frames_since_report: &mut u64,
+    last_report: &mut Instant,
+    nal_data: &[u8],
+    timestamp_offset: u32,
+    frame_duration_ms: u32,
+) -> Option<ReaderPublishResult> {
+    let ts = process_pending_access_unit(
+        sender,
+        pending_access_unit,
+        pending_access_unit_timestamp,
+        pacer,
+        last_timestamp_ms,
+        frame_count,
+        frames_since_report,
+        last_report,
+    )
+    .await;
+    if ts.is_some() {
+        return ts;
+    }
+    send_param_set_frame(
+        sender,
+        nal_data,
+        timestamp_offset,
+        *frame_count,
+        frame_duration_ms,
+        "SPS",
+    );
+    None
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn handle_pps_nal(
+    sender: &FrameDataSender,
+    pending_access_unit: &mut BytesMut,
+    pending_access_unit_timestamp: Option<u32>,
+    pacer: &mut Option<Interval>,
+    last_timestamp_ms: &AtomicU32,
+    frame_count: &mut u32,
+    frames_since_report: &mut u64,
+    last_report: &mut Instant,
+    nal_data: &[u8],
+    timestamp_offset: u32,
+    frame_duration_ms: u32,
+) -> Option<ReaderPublishResult> {
+    let ts = process_pending_access_unit(
+        sender,
+        pending_access_unit,
+        pending_access_unit_timestamp,
+        pacer,
+        last_timestamp_ms,
+        frame_count,
+        frames_since_report,
+        last_report,
+    )
+    .await;
+    if ts.is_some() {
+        return ts;
+    }
+    send_param_set_frame(
+        sender,
+        nal_data,
+        timestamp_offset,
+        *frame_count,
+        frame_duration_ms,
+        "PPS",
+    );
+    None
 }
 
 #[allow(clippy::too_many_arguments)]
