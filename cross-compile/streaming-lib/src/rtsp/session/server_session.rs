@@ -2500,6 +2500,173 @@ mod tests {
     }
 
     // ========================================================================
+    // parse_session_header Tests
+    // ========================================================================
+
+    #[test]
+    fn test_parse_session_header_extracts_id_before_semicolon() {
+        let id = RtspServerSession::parse_session_header("1234567890;timeout=60");
+        assert_eq!(id, "1234567890");
+    }
+
+    #[test]
+    fn test_parse_session_header_trimmed() {
+        let id = RtspServerSession::parse_session_header("  abc123  ");
+        assert_eq!(id, "abc123");
+    }
+
+    #[test]
+    fn test_parse_session_header_empty_returns_empty() {
+        let id = RtspServerSession::parse_session_header("");
+        assert_eq!(id, "");
+    }
+
+    #[test]
+    fn test_parse_session_header_semicolon_only_returns_empty() {
+        let id = RtspServerSession::parse_session_header(";timeout=60");
+        assert_eq!(id, "");
+    }
+
+    // ========================================================================
+    // validate_session_id Tests
+    // ========================================================================
+
+    #[test]
+    fn test_validate_session_id_mismatch_returns_454_response() {
+        let (event_sender, _) = tokio::sync::mpsc::unbounded_channel();
+        let mock_io = MockNetIO::new();
+        let session_io: Box<dyn TNetIO + Send + Sync> = Box::new(mock_io);
+        let remote_addr = "127.0.0.1:0".parse().unwrap();
+        let mut session =
+            RtspServerSession::new_with_io(session_io, event_sender, None, remote_addr);
+        session.session_id = Some(Uuid::new(SESSION_ID_RANDOM_DIGITS));
+
+        let mut request = create_test_request("TEARDOWN", Some("1"));
+        request
+            .headers
+            .insert("Session".to_string(), "wrong-session-id".to_string());
+
+        let response = session.validate_session_id(&request);
+        let resp = response.expect("expected Some(454)");
+        assert_eq!(resp.status_code, 454);
+        assert_eq!(resp.reason_phrase, "Session Not Found");
+    }
+
+    #[test]
+    fn test_validate_session_id_match_returns_none() {
+        let (event_sender, _) = tokio::sync::mpsc::unbounded_channel();
+        let mock_io = MockNetIO::new();
+        let session_io: Box<dyn TNetIO + Send + Sync> = Box::new(mock_io);
+        let remote_addr = "127.0.0.1:0".parse().unwrap();
+        let mut session =
+            RtspServerSession::new_with_io(session_io, event_sender, None, remote_addr);
+        let session_id = Uuid::new(SESSION_ID_RANDOM_DIGITS);
+        session.session_id = Some(session_id);
+
+        let mut request = create_test_request("TEARDOWN", Some("1"));
+        request
+            .headers
+            .insert("Session".to_string(), session_id.to_string());
+
+        let response = session.validate_session_id(&request);
+        assert!(response.is_none());
+    }
+
+    #[test]
+    fn test_validate_session_id_no_session_header_returns_none() {
+        let (event_sender, _) = tokio::sync::mpsc::unbounded_channel();
+        let mock_io = MockNetIO::new();
+        let session_io: Box<dyn TNetIO + Send + Sync> = Box::new(mock_io);
+        let remote_addr = "127.0.0.1:0".parse().unwrap();
+        let mut session =
+            RtspServerSession::new_with_io(session_io, event_sender, None, remote_addr);
+        session.session_id = Some(Uuid::new(SESSION_ID_RANDOM_DIGITS));
+
+        let request = create_test_request("TEARDOWN", Some("1"));
+
+        let response = session.validate_session_id(&request);
+        assert!(response.is_none());
+    }
+
+    #[test]
+    fn test_validate_session_id_no_current_session_returns_none() {
+        let (event_sender, _) = tokio::sync::mpsc::unbounded_channel();
+        let mock_io = MockNetIO::new();
+        let session_io: Box<dyn TNetIO + Send + Sync> = Box::new(mock_io);
+        let remote_addr = "127.0.0.1:0".parse().unwrap();
+        let session =
+            RtspServerSession::new_with_io(session_io, event_sender, None, remote_addr);
+        assert!(session.session_id.is_none());
+
+        let mut request = create_test_request("TEARDOWN", Some("1"));
+        request
+            .headers
+            .insert("Session".to_string(), "any-id".to_string());
+
+        let response = session.validate_session_id(&request);
+        assert!(response.is_none());
+    }
+
+    // ========================================================================
+    // build_content_base Tests
+    // ========================================================================
+
+    #[test]
+    fn test_build_content_base_with_host_and_path_returns_trailing_slash() {
+        let (event_sender, _) = tokio::sync::mpsc::unbounded_channel();
+        let mock_io = MockNetIO::new();
+        let session_io: Box<dyn TNetIO + Send + Sync> = Box::new(mock_io);
+        let remote_addr = "127.0.0.1:0".parse().unwrap();
+        let session =
+            RtspServerSession::new_with_io(session_io, event_sender, None, remote_addr);
+
+        let mut request = create_test_request("DESCRIBE", Some("1"));
+        request.uri.host = "127.0.0.1".to_string();
+        request.uri.port = Some(8554);
+        request.uri.path = "live/test".to_string();
+
+        let base = session.build_content_base(&request);
+        assert_eq!(base.as_deref(), Some("rtsp://127.0.0.1:8554/live/test/"));
+    }
+
+    #[test]
+    fn test_build_content_base_empty_host_uses_host_header() {
+        let (event_sender, _) = tokio::sync::mpsc::unbounded_channel();
+        let mock_io = MockNetIO::new();
+        let session_io: Box<dyn TNetIO + Send + Sync> = Box::new(mock_io);
+        let remote_addr = "127.0.0.1:0".parse().unwrap();
+        let session =
+            RtspServerSession::new_with_io(session_io, event_sender, None, remote_addr);
+
+        let mut request = create_test_request("DESCRIBE", Some("1"));
+        request.uri.host = String::new();
+        request.uri.path = "live/stream".to_string();
+        request
+            .headers
+            .insert("Host".to_string(), "example.com:554".to_string());
+
+        let base = session.build_content_base(&request);
+        assert_eq!(base.as_deref(), Some("rtsp://example.com:554/live/stream/"));
+    }
+
+    #[test]
+    fn test_build_content_base_empty_host_no_host_header_empty_path_returns_none() {
+        let (event_sender, _) = tokio::sync::mpsc::unbounded_channel();
+        let mock_io = MockNetIO::new();
+        let session_io: Box<dyn TNetIO + Send + Sync> = Box::new(mock_io);
+        let remote_addr = "127.0.0.1:0".parse().unwrap();
+        let session =
+            RtspServerSession::new_with_io(session_io, event_sender, None, remote_addr);
+
+        let mut request = create_test_request("DESCRIBE", Some("1"));
+        request.uri.host = String::new();
+        request.uri.path = String::new();
+
+        let base = session.build_content_base(&request);
+        assert!(base.is_none());
+    }
+
+    // ========================================================================
     // RtspStreamHandler Tests
     // ========================================================================
 
@@ -2790,6 +2957,69 @@ mod tests {
             .headers
             .insert("Session".to_string(), "does-not-exist".to_string());
         let result = session.handle_get_parameter(&request).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_rtsp_server_session_set_parameter_success_returns_200() {
+        let (event_sender, _event_receiver) = tokio::sync::mpsc::unbounded_channel();
+        let mut mock_io = MockNetIO::new();
+
+        mock_io.expect_get_net_type().returning(|| NetType::TCP);
+        mock_io.expect_read().times(0);
+        mock_io
+            .expect_write()
+            .withf(|bytes| {
+                let s = std::str::from_utf8(bytes).unwrap();
+                s.contains("RTSP/1.0 200 OK") && s.contains("CSeq: 2") && s.contains("Session:")
+            })
+            .times(1)
+            .returning(|_| Ok(()));
+
+        let session_io: Box<dyn TNetIO + Send + Sync> = Box::new(mock_io);
+        let remote_addr = "127.0.0.1:0".parse().unwrap();
+        let mut session =
+            RtspServerSession::new_with_io(session_io, event_sender, None, remote_addr);
+
+        let session_id = Uuid::new(SESSION_ID_RANDOM_DIGITS);
+        session.session_id = Some(session_id);
+
+        let mut request = create_test_request(rtsp_method_name::SET_PARAMETER, Some("2"));
+        request
+            .headers
+            .insert("Session".to_string(), session_id.to_string());
+        let result = session.handle_set_parameter(&request).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_rtsp_server_session_set_parameter_wrong_session_returns_454() {
+        let (event_sender, _event_receiver) = tokio::sync::mpsc::unbounded_channel();
+        let mut mock_io = MockNetIO::new();
+
+        mock_io.expect_get_net_type().returning(|| NetType::TCP);
+        mock_io.expect_read().times(0);
+        mock_io
+            .expect_write()
+            .withf(|bytes| {
+                let s = std::str::from_utf8(bytes).unwrap();
+                s.contains("RTSP/1.0 454 Session Not Found") && s.contains("CSeq: 2")
+            })
+            .times(1)
+            .returning(|_| Ok(()));
+
+        let session_io: Box<dyn TNetIO + Send + Sync> = Box::new(mock_io);
+        let remote_addr = "127.0.0.1:0".parse().unwrap();
+        let mut session =
+            RtspServerSession::new_with_io(session_io, event_sender, None, remote_addr);
+
+        session.session_id = Some(Uuid::new(SESSION_ID_RANDOM_DIGITS));
+
+        let mut request = create_test_request(rtsp_method_name::SET_PARAMETER, Some("2"));
+        request
+            .headers
+            .insert("Session".to_string(), "wrong-session-id".to_string());
+        let result = session.handle_set_parameter(&request).await;
         assert!(result.is_ok());
     }
 

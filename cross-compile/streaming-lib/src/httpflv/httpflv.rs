@@ -355,6 +355,7 @@ impl HttpFlv {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::httpflv::errors::HttpFLvErrorValue;
     use crate::streamhub::define::{
         FrameData, MediaInfo, NotifyInfo, StatisticData, StreamHubEvent, SubDataType,
         SubscribeType, SubscriberInfo, VideoCodecType,
@@ -1098,6 +1099,37 @@ mod tests {
     fn test_max_av_frame_num_constant() {
         const MAX_AV_FRAME_NUM_TO_GUESS_AV: usize = 10;
         assert_eq!(MAX_AV_FRAME_NUM_TO_GUESS_AV, 10);
+    }
+
+    // ========== write_flv_tag / extract_flv_tag_data Tests ==========
+
+    #[tokio::test]
+    async fn test_write_flv_tag_media_info_returns_unexpected_frame_data_error() {
+        let (event_sender, _event_receiver, response_sender, _response_receiver) =
+            create_test_channels();
+        let remote_addr = create_test_socket_addr();
+
+        let mut httpflv = HttpFlv::new(
+            "live".to_string(),
+            "stream1".to_string(),
+            event_sender,
+            response_sender,
+            "http://localhost/live/stream1.flv".to_string(),
+            remote_addr,
+        );
+
+        let media_info = MediaInfo {
+            audio_clock_rate: 48000,
+            video_clock_rate: 90000,
+            vcodec: VideoCodecType::H264,
+        };
+        let frame = FrameData::MediaInfo { media_info };
+
+        let result = httpflv.write_flv_tag(frame);
+        assert!(result.is_err(), "MediaInfo frame should not be writable as FLV tag");
+        if let Err(e) = result {
+            assert!(matches!(e.value, HttpFLvErrorValue::UnexpectedFrameData(_)));
+        }
     }
 
     // ========== Integration-like Tests ==========

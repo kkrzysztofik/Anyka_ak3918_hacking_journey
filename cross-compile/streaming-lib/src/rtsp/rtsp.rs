@@ -98,3 +98,55 @@ impl RtspServer for DefaultRtspServer {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::streamhub::define::StreamHubEventSender;
+    use tokio::sync::mpsc;
+
+    fn create_test_event_sender() -> StreamHubEventSender {
+        let (tx, _) = mpsc::unbounded_channel();
+        tx
+    }
+
+    #[test]
+    fn test_default_rtsp_server_new() {
+        let event_sender = create_test_event_sender();
+        let server =
+            DefaultRtspServer::new("127.0.0.1:0".to_string(), event_sender, None);
+        assert_eq!(server.address, "127.0.0.1:0");
+        assert!(server.auth.is_none());
+    }
+
+    #[test]
+    fn test_default_rtsp_server_new_with_auth() {
+        use crate::common::auth::{Auth, AuthAlgorithm, AuthType};
+        let event_sender = create_test_event_sender();
+        let auth = Auth::new(
+            "user".to_string(),
+            "pass".to_string(),
+            None,
+            AuthAlgorithm::Simple,
+            AuthType::None,
+        );
+        let server = DefaultRtspServer::new(
+            "0.0.0.0:554".to_string(),
+            event_sender,
+            Some(auth),
+        );
+        assert_eq!(server.address, "0.0.0.0:554");
+        assert!(server.auth.is_some());
+    }
+
+    #[tokio::test]
+    async fn test_default_rtsp_server_run_invalid_address_returns_err() {
+        let event_sender = create_test_event_sender();
+        let mut server =
+            DefaultRtspServer::new("not-an-address".to_string(), event_sender, None);
+        let result = server.run().await;
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
+    }
+}

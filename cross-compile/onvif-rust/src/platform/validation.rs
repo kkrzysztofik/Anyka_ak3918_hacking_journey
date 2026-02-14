@@ -270,4 +270,46 @@ mod tests {
         assert!(!sources.is_empty());
         assert_eq!(sources[0].token, "main");
     }
+
+    #[tokio::test]
+    async fn test_validation_platform_is_initialized_false_before_init() {
+        let platform = ValidationPlatform::new();
+        assert!(!platform.is_initialized());
+    }
+
+    #[tokio::test]
+    async fn test_validation_platform_is_initialized_true_after_init() {
+        let platform = ValidationPlatform::new();
+        platform.initialize().await.unwrap();
+        assert!(platform.is_initialized());
+    }
+
+    #[tokio::test]
+    async fn test_validation_platform_shutdown_after_init_returns_ok() {
+        let platform = ValidationPlatform::new();
+        platform.initialize().await.unwrap();
+        assert!(platform.is_initialized());
+        let result = platform.shutdown().await;
+        assert!(result.is_ok());
+        assert!(!platform.is_initialized());
+    }
+
+    #[tokio::test]
+    async fn test_validation_platform_audio_input_returns_config() {
+        let platform = ValidationPlatform::new();
+        let input = platform.audio_input();
+        let config = input.get_configuration().await.unwrap();
+        assert_eq!(config.token, "audio_in");
+        assert_eq!(config.name, "Microphone");
+        assert_eq!(config.channels, 1);
+    }
+
+    #[tokio::test]
+    async fn test_validation_platform_audio_encoder_returns_config() {
+        let platform = ValidationPlatform::new();
+        let encoder = platform.audio_encoder();
+        let config = encoder.get_configuration().await.unwrap();
+        assert_eq!(config.token, "audio_encoder");
+        assert_eq!(config.sample_rate, 8000);
+    }
 }

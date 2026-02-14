@@ -1370,12 +1370,13 @@ impl StreamsHub {
 mod tests {
     use super::*;
     use crate::streamhub::define::{
-        DataReceiver, DataSender, FrameData, NotifyInfo, PacketData, StatisticData, SubDataType,
-        SubscribeType, SubscriberInfo,
+        DataReceiver, DataSender, FrameData, NotifyInfo, PacketData, RelayType, StatisticData,
+        SubDataType, StreamHubEvent, SubscribeType, SubscriberInfo,
     };
     use async_trait::async_trait;
     use bytes::BytesMut;
     use mockall::mock;
+    use serde_json::json;
     use std::sync::Arc;
     use tokio::sync::{mpsc, oneshot};
 
@@ -1733,6 +1734,188 @@ mod tests {
         let result = hub.request(&identifier, info_sender);
         // Request doesn't fail if stream doesn't exist, it just does nothing
         assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_handle_api_statistic_empty_streams_returns_empty_json() {
+        let mut hub = StreamsHub::new(None);
+        let event_sender = hub.get_hub_event_sender();
+        let (result_tx, result_rx) = oneshot::channel();
+        tokio::spawn(async move { hub.event_loop().await });
+        event_sender
+            .send(StreamHubEvent::ApiStatistic {
+                top_n: None,
+                identifier: None,
+                uuid: None,
+                result_sender: result_tx,
+            })
+            .unwrap();
+        let value = result_rx.await.unwrap();
+        assert_eq!(value, json!({}));
+    }
+
+    #[tokio::test]
+    async fn test_handle_api_statistic_with_stream_success() {
+        let mut hub = StreamsHub::new(None);
+        let identifier = create_test_stream_identifier();
+        let (_frame_sender, frame_receiver) = mpsc::unbounded_channel();
+        let receiver = DataReceiver {
+            frame_receiver: Some(frame_receiver),
+            packet_receiver: None,
+        };
+        let mut mock_handler = MockStreamHandler::new();
+        mock_handler
+            .expect_send_prior_data()
+            .times(0)
+            .returning(|_, _| Ok(()));
+        let mock_handler = Arc::new(mock_handler);
+        let _ = hub
+            .publish(identifier.clone(), receiver, mock_handler)
+            .await;
+
+        let event_sender = hub.get_hub_event_sender();
+        let (result_tx, result_rx) = oneshot::channel();
+        tokio::spawn(async move { hub.event_loop().await });
+        event_sender
+            .send(StreamHubEvent::ApiStatistic {
+                top_n: None,
+                identifier: Some(identifier),
+                uuid: None,
+                result_sender: result_tx,
+            })
+            .unwrap();
+        let value = result_rx.await.unwrap();
+        assert!(value.is_array());
+    }
+
+    #[tokio::test]
+    async fn test_handle_api_start_relay_stream_pull_success() {
+        let mut hub = StreamsHub::new(None);
+        let mut client_rx = hub.get_client_event_consumer();
+        let event_sender = hub.get_hub_event_sender();
+        tokio::spawn(async move {
+            while let Ok(ev) = client_rx.recv().await {
+                if let BroadcastEvent::Subscribe {
+                    result_sender: Some(rs),
+                    ..
+                } = ev
+                {
+                    let _ = rs.send(Ok(())).await;
+                    break;
+                }
+            }
+        });
+        tokio::spawn(async move { hub.event_loop().await });
+        let (result_tx, result_rx) = oneshot::channel();
+        event_sender
+            .send(StreamHubEvent::ApiStartRelayStream {
+                id: "relay-1".to_string(),
+                identifier: create_test_stream_identifier(),
+                server_address: "127.0.0.1:554".to_string(),
+                relay_type: RelayType::Pull,
+                result_sender: result_tx,
+            })
+            .unwrap();
+        let r = result_rx.await.unwrap();
+        assert!(r.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_handle_api_start_relay_stream_pull_failure() {
+        let mut hub = StreamsHub::new(None);
+        let mut client_rx = hub.get_client_event_consumer();
+        let event_sender = hub.get_hub_event_sender();
+        let err = StreamHubError {
+            value: StreamHubErrorValue::SendError,
+        };
+        tokio::spawn(async move {
+            while let Ok(ev) = client_rx.recv().await {
+                if let BroadcastEvent::Subscribe {
+                    result_sender: Some(rs),
+                    ..
+                } = ev
+                {
+                    let _ = rs.send(Err(err)).await;
+                    break;
+                }
+            }
+        });
+        tokio::spawn(async move { hub.event_loop().await });
+        let (result_tx, result_rx) = oneshot::channel();
+        event_sender
+            .send(StreamHubEvent::ApiStartRelayStream {
+                id: "relay-2".to_string(),
+                identifier: create_test_stream_identifier(),
+                server_address: "127.0.0.1:554".to_string(),
+                relay_type: RelayType::Pull,
+                result_sender: result_tx,
+            })
+            .unwrap();
+        let r = result_rx.await.unwrap();
+        assert!(r.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_handle_api_stop_relay_stream_pull_success() {
+        let mut hub = StreamsHub::new(None);
+        let mut client_rx = hub.get_client_event_consumer();
+        let event_sender = hub.get_hub_event_sender();
+        tokio::spawn(async move {
+            while let Ok(ev) = client_rx.recv().await {
+                if let BroadcastEvent::UnSubscribe {
+                    result_sender: Some(rs),
+                    ..
+                } = ev
+                {
+                    let _ = rs.send(Ok(())).await;
+                    break;
+                }
+            }
+        });
+        tokio::spawn(async move { hub.event_loop().await });
+        let (result_tx, result_rx) = oneshot::channel();
+        event_sender
+            .send(StreamHubEvent::ApiStopRelayStream {
+                id: "relay-1".to_string(),
+                relay_type: RelayType::Pull,
+                result_sender: result_tx,
+            })
+            .unwrap();
+        let r = result_rx.await.unwrap();
+        assert!(r.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_handle_api_stop_relay_stream_pull_failure() {
+        let mut hub = StreamsHub::new(None);
+        let mut client_rx = hub.get_client_event_consumer();
+        let event_sender = hub.get_hub_event_sender();
+        let err = StreamHubError {
+            value: StreamHubErrorValue::NoAppOrStreamName,
+        };
+        tokio::spawn(async move {
+            while let Ok(ev) = client_rx.recv().await {
+                if let BroadcastEvent::UnSubscribe {
+                    result_sender: Some(rs),
+                    ..
+                } = ev
+                {
+                    let _ = rs.send(Err(err)).await;
+                    break;
+                }
+            }
+        });
+        tokio::spawn(async move { hub.event_loop().await });
+        let (result_tx, result_rx) = oneshot::channel();
+        event_sender
+            .send(StreamHubEvent::ApiStopRelayStream {
+                id: "unknown-id".to_string(),
+                relay_type: RelayType::Pull,
+                result_sender: result_tx,
+            })
+            .unwrap();
+        let r = result_rx.await.unwrap();
+        assert!(r.is_err());
     }
 
     #[tokio::test]

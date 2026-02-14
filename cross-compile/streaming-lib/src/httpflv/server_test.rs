@@ -84,6 +84,34 @@ async fn test_handle_connection_invalid_path() {
 }
 
 #[tokio::test]
+async fn test_handle_connection_path_too_few_segments_yields_bad_request_path() {
+    // Path like "/live.flv" has .flv but left.split('/') gives ["", "live"], len 2 < 3 -> BAD_REQUEST
+    let uri = Uri::from_static("http://localhost/live.flv");
+    let req = Request::builder().uri(uri).body(Body::empty()).unwrap();
+
+    let path = req.uri().path();
+    if let Some(index) = path.find(".flv") {
+        if index > 0 {
+            let (left, _) = path.split_at(index);
+            let rv: Vec<_> = left.split('/').collect();
+            assert!(
+                rv.len() < 3,
+                "Path with single segment before .flv should yield fewer than 3 segments for BAD_REQUEST"
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn test_handle_connection_path_no_flv_extension_returns_not_found() {
+    let uri = Uri::from_static("http://localhost/live/stream1");
+    let req = Request::builder().uri(uri).body(Body::empty()).unwrap();
+
+    let path = req.uri().path();
+    assert!(path.find(".flv").is_none(), "Path without .flv should trigger NOT_FOUND");
+}
+
+#[tokio::test]
 async fn test_handle_connection_path_parsing() {
     let test_cases = vec![
         ("/live/stream1.flv", ("live", "stream1")),

@@ -1654,4 +1654,75 @@ mod tests {
         assert!(sdp.contains("m=video 0 RTP/AVP 96"));
         assert!(!sdp.contains("m=audio 0 RTP/AVP 97"));
     }
+
+    #[test]
+    fn test_parse_env_timeout_returns_default_when_unset() {
+        let value = parse_env_timeout("ONVIF_TEST_NONEXISTENT_TIMEOUT_VAR_12345", 99);
+        assert_eq!(value, 99);
+    }
+
+    #[test]
+    fn test_parse_env_timeout_parses_valid_value() {
+        let var = "ONVIF_TEST_PARSE_ENV_TIMEOUT_VALUE";
+        std::env::set_var(var, "42");
+        let value = parse_env_timeout(var, 10);
+        std::env::remove_var(var);
+        assert_eq!(value, 42);
+    }
+
+    #[test]
+    fn test_parse_env_timeout_zero_uses_default() {
+        let var = "ONVIF_TEST_PARSE_ENV_TIMEOUT_ZERO";
+        std::env::set_var(var, "0");
+        let value = parse_env_timeout(var, 30);
+        std::env::remove_var(var);
+        assert_eq!(value, 30);
+    }
+
+    #[test]
+    fn test_validate_source_files_missing_h264_returns_err() {
+        let config = H264PlaybackConfig {
+            file_path: "/nonexistent/path/to/file.h264".to_string(),
+            frame_rate: 25,
+            loop_playback: false,
+            rtsp_port: 8554,
+            httpflv_port: 8080,
+            audio_file_path: None,
+            audio_sample_rate: 48000,
+        };
+        let result = validate_source_files(&config);
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(err_msg.contains("H.264 file not found"));
+        assert!(err_msg.contains("file.h264"));
+    }
+
+    #[test]
+    fn test_validate_source_files_missing_aac_returns_err() {
+        let config = H264PlaybackConfig {
+            file_path: ".".to_string(),
+            frame_rate: 25,
+            loop_playback: false,
+            rtsp_port: 8554,
+            httpflv_port: 8080,
+            audio_file_path: Some("/nonexistent/audio.aac".to_string()),
+            audio_sample_rate: 48000,
+        };
+        let result = validate_source_files(&config);
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(err_msg.contains("AAC file not found"));
+        assert!(err_msg.contains("audio.aac"));
+    }
+
+    #[test]
+    fn test_startup_args_from_cli_normal_mode_custom_config_path() {
+        let cli = CliArgs::try_parse_from(["onvifd", "/custom/config.toml"])
+            .expect("cli parse should succeed");
+
+        let startup_args = startup_args_from_cli(cli).expect("startup args should be valid");
+
+        assert!(startup_args.validation_config.is_none());
+        assert_eq!(startup_args.config_path, "/custom/config.toml");
+    }
 }
