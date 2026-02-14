@@ -178,3 +178,571 @@ impl RtspPullClientManager {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::streamhub::define::{BroadcastEvent, StreamHubEvent};
+    use tokio::sync::{broadcast, mpsc};
+
+    // ========== Helper Functions ==========
+
+    /// Creates a test manager with fresh channels
+    fn create_test_manager() -> (
+        RtspPullClientManager,
+        broadcast::Sender<BroadcastEvent>,
+        mpsc::UnboundedReceiver<StreamHubEvent>,
+    ) {
+        let (event_tx, _event_rx) = broadcast::channel::<BroadcastEvent>(16);
+        let (hub_tx, hub_rx) = mpsc::unbounded_channel::<StreamHubEvent>();
+        let consumer = event_tx.subscribe();
+        let manager = RtspPullClientManager::new(consumer, hub_tx);
+        (manager, event_tx, hub_rx)
+    }
+
+    // ========== Constructor Tests ==========
+
+    #[test]
+    fn test_pull_client_manager_new_creates_empty_client_map() {
+        let (manager, _, _) = create_test_manager();
+        assert!(
+            manager.clients.is_empty(),
+            "New manager should have empty clients map"
+        );
+    }
+
+    #[test]
+    fn test_pull_client_manager_new_stores_channels() {
+        let (manager, _tx, _rx) = create_test_manager();
+        // Verify manager was created successfully with channels
+        assert!(
+            manager.clients.is_empty(),
+            "Manager should be initialized correctly"
+        );
+    }
+
+    // ========== Subscribe Event Tests - Missing Parameters ==========
+
+    #[tokio::test]
+    async fn test_handle_subscribe_missing_result_sender_returns_early() {
+        let (mut manager, event_tx, _hub_rx) = create_test_manager();
+
+        // Send subscribe event without result_sender
+        let event = BroadcastEvent::Subscribe {
+            id: "test-client-1".to_string(),
+            identifier: StreamIdentifier::Rtsp {
+                stream_path: "/test/stream".to_string(),
+            },
+            server_address: Some("rtsp://192.168.1.100:554".to_string()),
+            result_sender: None, // Missing sender
+        };
+
+        // Send the event
+        event_tx.send(event).unwrap();
+
+        // Use tokio::select to timeout the run loop
+        let result =
+            tokio::time::timeout(tokio::time::Duration::from_millis(100), manager.run()).await;
+
+        // The run loop should timeout (it's waiting for next event)
+        // but importantly, no client should be added
+        assert!(
+            result.is_err() || result.unwrap().is_err(),
+            "Run should timeout or continue waiting - no crash expected"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_handle_subscribe_missing_server_address_sends_error() {
+        let (mut manager, event_tx, _hub_rx) = create_test_manager();
+        let (result_tx, mut result_rx) = mpsc::channel::<HubResult>(1);
+
+        // Send subscribe event without server_address
+        let event = BroadcastEvent::Subscribe {
+            id: "test-client-2".to_string(),
+            identifier: StreamIdentifier::Rtsp {
+                stream_path: "/test/stream".to_string(),
+            },
+            server_address: None, // Missing server address
+            result_sender: Some(result_tx),
+        };
+
+        event_tx.send(event).unwrap();
+
+        // Run with timeout and check for error response
+        let handle = tokio::spawn(async move { manager.run().await });
+
+        // Wait for error response
+        let response =
+            tokio::time::timeout(tokio::time::Duration::from_millis(500), result_rx.recv()).await;
+
+        // Should receive an error response
+        assert!(
+            response.is_ok(),
+            "Should receive error response for missing server address"
+        );
+        let result = response.unwrap();
+        assert!(result.is_some(), "Result should not be None");
+        let hub_result = result.unwrap();
+        assert!(
+            hub_result.is_err(),
+            "Should return error when server address is missing"
+        );
+
+        // Verify error message contains expected text
+        if let Err(err) = hub_result {
+            if let StreamHubErrorValue::RtspClientSessionError(msg) = err.value {
+                assert!(
+                    msg.contains("server address"),
+                    "Error message should mention server address, got: {}",
+                    msg
+                );
+            } else {
+                panic!("Expected RtspClientSessionError variant");
+            }
+        }
+
+        handle.abort();
+    }
+
+    #[tokio::test]
+    async fn test_handle_subscribe_non_rtsp_identifier_returns_early() {
+        let (mut manager, event_tx, _hub_rx) = create_test_manager();
+        let (result_tx, mut result_rx) = mpsc::channel::<HubResult>(1);
+
+        // Send subscribe event with RTMP identifier (not RTSP)
+        let event = BroadcastEvent::Subscribe {
+            id: "test-client-3".to_string(),
+            identifier: StreamIdentifier::Rtmp {
+                app_name: "live".to_string(),
+                stream_name: "stream".to_string(),
+            },
+            server_address: Some("rtmp://192.168.1.100:1935".to_string()),
+            result_sender: Some(result_tx),
+        };
+
+        event_tx.send(event).unwrap();
+
+        let handle = tokio::spawn(async move { manager.run().await });
+
+        // With timeout - should not receive any response (early return)
+        let response =
+            tokio::time::timeout(tokio::time::Duration::from_millis(200), result_rx.recv()).await;
+
+        // Should timeout because non-RTSP identifier causes early return
+        // (no response sent, no error, just returns)
+        assert!(
+            response.is_err() || response.unwrap().is_none(),
+            "Should not receive response for non-RTSP identifier (early return)"
+        );
+
+        handle.abort();
+    }
+
+    // ========== Duplicate Client Detection Tests ==========
+
+    #[tokio::test]
+    async fn test_handle_subscribe_duplicate_client_sends_error() {
+        let (mut manager, event_tx, _hub_rx) = create_test_manager();
+
+        // Pre-populate with an existing client
+        let existing_id = "existing-client".to_string();
+        manager
+            .clients
+            .insert(existing_id.clone(), Arc::new(AtomicBool::new(true)));
+
+        let (result_tx, mut result_rx) = mpsc::channel::<HubResult>(1);
+
+        // Try to subscribe with same ID
+        let event = BroadcastEvent::Subscribe {
+            id: existing_id,
+            identifier: StreamIdentifier::Rtsp {
+                stream_path: "/test/stream".to_string(),
+            },
+            server_address: Some("rtsp://192.168.1.100:554".to_string()),
+            result_sender: Some(result_tx),
+        };
+
+        event_tx.send(event).unwrap();
+
+        let handle = tokio::spawn(async move { manager.run().await });
+
+        // Wait for error response
+        let response =
+            tokio::time::timeout(tokio::time::Duration::from_millis(500), result_rx.recv()).await;
+
+        assert!(
+            response.is_ok(),
+            "Should receive response for duplicate client"
+        );
+        let result = response.unwrap();
+        assert!(result.is_some(), "Result should not be None");
+        let hub_result = result.unwrap();
+        assert!(
+            hub_result.is_err(),
+            "Should return error for duplicate client"
+        );
+
+        // Verify error message mentions existence
+        if let Err(err) = hub_result {
+            if let StreamHubErrorValue::RtspClientSessionError(msg) = err.value {
+                assert!(
+                    msg.contains("exists"),
+                    "Error message should mention existing stream, got: {}",
+                    msg
+                );
+            } else {
+                panic!("Expected RtspClientSessionError variant");
+            }
+        }
+
+        handle.abort();
+    }
+
+    // ========== Unsubscribe Event Tests ==========
+
+    #[tokio::test]
+    async fn test_handle_unsubscribe_missing_result_sender_returns_early() {
+        let (mut manager, event_tx, _hub_rx) = create_test_manager();
+
+        // Pre-populate with a client
+        manager
+            .clients
+            .insert("test-client".to_string(), Arc::new(AtomicBool::new(true)));
+
+        // Send unsubscribe event without result_sender
+        let event = BroadcastEvent::UnSubscribe {
+            id: "test-client".to_string(),
+            result_sender: None,
+        };
+
+        event_tx.send(event).unwrap();
+
+        let result =
+            tokio::time::timeout(tokio::time::Duration::from_millis(100), manager.run()).await;
+
+        // Should timeout (waiting for next event), not crash
+        assert!(
+            result.is_err() || result.unwrap().is_err(),
+            "Run should timeout without crash"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_handle_unsubscribe_not_found_sends_error() {
+        let (mut manager, event_tx, _hub_rx) = create_test_manager();
+        let (result_tx, mut result_rx) = mpsc::channel::<HubResult>(1);
+
+        // Don't add any clients - try to unsubscribe non-existent
+        let event = BroadcastEvent::UnSubscribe {
+            id: "non-existent-client".to_string(),
+            result_sender: Some(result_tx),
+        };
+
+        event_tx.send(event).unwrap();
+
+        let handle = tokio::spawn(async move { manager.run().await });
+
+        // Wait for error response
+        let response =
+            tokio::time::timeout(tokio::time::Duration::from_millis(500), result_rx.recv()).await;
+
+        assert!(
+            response.is_ok(),
+            "Should receive response for non-existent client unsubscribe"
+        );
+        let result = response.unwrap();
+        assert!(result.is_some(), "Result should not be None");
+        let hub_result = result.unwrap();
+        assert!(
+            hub_result.is_err(),
+            "Should return error when unsubscribing non-existent client"
+        );
+
+        // Verify error message
+        if let Err(err) = hub_result {
+            if let StreamHubErrorValue::RtspClientSessionError(msg) = err.value {
+                assert!(
+                    msg.contains("not exists") || msg.contains("not found"),
+                    "Error message should mention client not existing, got: {}",
+                    msg
+                );
+            } else {
+                panic!("Expected RtspClientSessionError variant");
+            }
+        }
+
+        handle.abort();
+    }
+
+    #[tokio::test]
+    async fn test_handle_unsubscribe_existing_client_succeeds() {
+        let (mut manager, event_tx, _hub_rx) = create_test_manager();
+        let (result_tx, mut result_rx) = mpsc::channel::<HubResult>(1);
+
+        // Pre-populate with a client
+        let client_id = "existing-client-to-remove".to_string();
+        let running_flag = Arc::new(AtomicBool::new(true));
+        manager
+            .clients
+            .insert(client_id.clone(), running_flag.clone());
+
+        assert!(
+            manager.clients.contains_key(&client_id),
+            "Client should exist before unsubscribe"
+        );
+
+        let event = BroadcastEvent::UnSubscribe {
+            id: client_id.clone(),
+            result_sender: Some(result_tx),
+        };
+
+        event_tx.send(event).unwrap();
+
+        let handle = tokio::spawn(async move { manager.run().await });
+
+        // Wait for success response
+        let response =
+            tokio::time::timeout(tokio::time::Duration::from_millis(500), result_rx.recv()).await;
+
+        assert!(
+            response.is_ok(),
+            "Should receive response for successful unsubscribe"
+        );
+        let result = response.unwrap();
+        assert!(result.is_some(), "Result should not be None");
+        let hub_result = result.unwrap();
+        assert!(
+            hub_result.is_ok(),
+            "Should return Ok for successful unsubscribe"
+        );
+
+        // Verify running flag was set to false
+        assert!(
+            !running_flag.load(std::sync::atomic::Ordering::Acquire),
+            "Running flag should be set to false after unsubscribe"
+        );
+
+        handle.abort();
+    }
+
+    // ========== Edge Case Tests ==========
+
+    #[tokio::test]
+    async fn test_handle_unsubscribe_empty_manager_sends_error() {
+        let (mut manager, event_tx, _hub_rx) = create_test_manager();
+        let (result_tx, mut result_rx) = mpsc::channel::<HubResult>(1);
+
+        // Manager has no clients - empty state
+        assert!(
+            manager.clients.is_empty(),
+            "Manager should be empty initially"
+        );
+
+        let event = BroadcastEvent::UnSubscribe {
+            id: "any-client-id".to_string(),
+            result_sender: Some(result_tx),
+        };
+
+        event_tx.send(event).unwrap();
+
+        let handle = tokio::spawn(async move { manager.run().await });
+
+        let response =
+            tokio::time::timeout(tokio::time::Duration::from_millis(500), result_rx.recv()).await;
+
+        assert!(
+            response.is_ok(),
+            "Should receive error response when manager is empty"
+        );
+        let result = response.unwrap();
+        assert!(result.is_some(), "Result should not be None");
+        assert!(
+            result.unwrap().is_err(),
+            "Should return error when client not found in empty manager"
+        );
+
+        handle.abort();
+    }
+
+    #[tokio::test]
+    async fn test_handle_subscribe_empty_stream_path_still_processed() {
+        let (mut manager, event_tx, _hub_rx) = create_test_manager();
+        let (result_tx, mut result_rx) = mpsc::channel::<HubResult>(1);
+
+        // Subscribe with empty stream path (edge case)
+        let event = BroadcastEvent::Subscribe {
+            id: "client-empty-path".to_string(),
+            identifier: StreamIdentifier::Rtsp {
+                stream_path: "".to_string(), // Empty path
+            },
+            server_address: Some("rtsp://192.168.1.100:554".to_string()),
+            result_sender: Some(result_tx),
+        };
+
+        event_tx.send(event).unwrap();
+
+        let handle = tokio::spawn(async move { manager.run().await });
+
+        // This will likely fail to create client (no valid path), but should handle gracefully
+        let response =
+            tokio::time::timeout(tokio::time::Duration::from_millis(500), result_rx.recv()).await;
+
+        // Should receive some response (error or otherwise)
+        assert!(
+            response.is_ok(),
+            "Should receive response even with empty stream path"
+        );
+
+        handle.abort();
+    }
+
+    #[tokio::test]
+    async fn test_handle_unsubscribe_sets_running_flag_false() {
+        let (mut manager, event_tx, _hub_rx) = create_test_manager();
+        let (result_tx, mut result_rx) = mpsc::channel::<HubResult>(1);
+
+        // Create client with running flag = true
+        let running_flag = Arc::new(AtomicBool::new(true));
+        let client_id = "flag-test-client".to_string();
+        manager
+            .clients
+            .insert(client_id.clone(), running_flag.clone());
+
+        assert!(
+            running_flag.load(std::sync::atomic::Ordering::Acquire),
+            "Running flag should be true initially"
+        );
+
+        let event = BroadcastEvent::UnSubscribe {
+            id: client_id,
+            result_sender: Some(result_tx),
+        };
+
+        event_tx.send(event).unwrap();
+
+        let handle = tokio::spawn(async move { manager.run().await });
+
+        let _ =
+            tokio::time::timeout(tokio::time::Duration::from_millis(500), result_rx.recv()).await;
+
+        // Verify flag was set to false
+        assert!(
+            !running_flag.load(std::sync::atomic::Ordering::Acquire),
+            "Running flag should be false after unsubscribe"
+        );
+
+        handle.abort();
+    }
+
+    // ========== BroadcastEvent Variant Tests ==========
+
+    #[tokio::test]
+    async fn test_run_handles_publish_event_gracefully() {
+        let (mut manager, event_tx, _hub_rx) = create_test_manager();
+
+        // Send a Publish event (not Subscribe/Unsubscribe)
+        let event = BroadcastEvent::Publish {
+            identifier: StreamIdentifier::Rtsp {
+                stream_path: "/test/stream".to_string(),
+            },
+        };
+
+        event_tx.send(event).unwrap();
+
+        // Run should continue without error (logs "other events")
+        let result =
+            tokio::time::timeout(tokio::time::Duration::from_millis(100), manager.run()).await;
+
+        // Should timeout (run continues waiting), not crash
+        assert!(
+            result.is_err() || result.unwrap().is_err(),
+            "Run should handle Publish event gracefully and continue"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_run_handles_unpublish_event_gracefully() {
+        let (mut manager, event_tx, _hub_rx) = create_test_manager();
+
+        // Send an UnPublish event
+        let event = BroadcastEvent::UnPublish {
+            identifier: StreamIdentifier::Rtsp {
+                stream_path: "/test/stream".to_string(),
+            },
+        };
+
+        event_tx.send(event).unwrap();
+
+        let result =
+            tokio::time::timeout(tokio::time::Duration::from_millis(100), manager.run()).await;
+
+        // Should timeout (run continues waiting), not crash
+        assert!(
+            result.is_err() || result.unwrap().is_err(),
+            "Run should handle UnPublish event gracefully and continue"
+        );
+    }
+
+    // ========== Multiple Client Tests ==========
+
+    #[tokio::test]
+    async fn test_multiple_clients_can_be_managed() {
+        let (mut manager, _event_tx, _hub_rx) = create_test_manager();
+
+        // Add multiple clients manually
+        for i in 0..5 {
+            manager
+                .clients
+                .insert(format!("client-{}", i), Arc::new(AtomicBool::new(true)));
+        }
+
+        assert_eq!(manager.clients.len(), 5, "Should have 5 clients registered");
+
+        // Verify all are present
+        for i in 0..5 {
+            assert!(
+                manager.clients.contains_key(&format!("client-{}", i)),
+                "Client {} should exist",
+                i
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_client_id_uniqueness_enforced() {
+        let (mut manager, event_tx, _hub_rx) = create_test_manager();
+
+        // Pre-populate with client
+        let client_id = "unique-test-id".to_string();
+        manager
+            .clients
+            .insert(client_id.clone(), Arc::new(AtomicBool::new(true)));
+
+        let (result_tx, mut result_rx) = mpsc::channel::<HubResult>(1);
+
+        // Try to add another with same ID
+        let event = BroadcastEvent::Subscribe {
+            id: client_id,
+            identifier: StreamIdentifier::Rtsp {
+                stream_path: "/stream".to_string(),
+            },
+            server_address: Some("rtsp://server:554".to_string()),
+            result_sender: Some(result_tx),
+        };
+
+        event_tx.send(event).unwrap();
+        let handle = tokio::spawn(async move { manager.run().await });
+
+        let response =
+            tokio::time::timeout(tokio::time::Duration::from_millis(500), result_rx.recv()).await;
+
+        // Should get error for duplicate
+        assert!(
+            response.is_ok() && response.unwrap().unwrap().is_err(),
+            "Duplicate client ID should return error"
+        );
+
+        handle.abort();
+    }
+}

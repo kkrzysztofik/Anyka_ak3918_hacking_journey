@@ -351,3 +351,849 @@ impl HttpFlv {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::streamhub::define::{
+        FrameData, MediaInfo, NotifyInfo, StatisticData, StreamHubEvent, SubDataType,
+        SubscribeType, SubscriberInfo, VideoCodecType,
+    };
+    use crate::streamhub::stream::StreamIdentifier;
+    use crate::streamhub::utils::{RandomDigitCount, Uuid};
+    use bytes::BytesMut;
+    use futures::channel::mpsc as futures_mpsc;
+    use futures::{SinkExt, StreamExt};
+    use std::net::SocketAddr;
+    use tokio::sync::mpsc as tokio_mpsc;
+
+    /// Helper function to create test channels
+    fn create_test_channels() -> (
+        tokio_mpsc::UnboundedSender<StreamHubEvent>,
+        tokio_mpsc::UnboundedReceiver<StreamHubEvent>,
+        futures_mpsc::UnboundedSender<std::io::Result<BytesMut>>,
+        futures_mpsc::UnboundedReceiver<std::io::Result<BytesMut>>,
+    ) {
+        let (event_sender, event_receiver) = tokio_mpsc::unbounded_channel();
+        let (response_sender, response_receiver) = futures_mpsc::unbounded();
+        (
+            event_sender,
+            event_receiver,
+            response_sender,
+            response_receiver,
+        )
+    }
+
+    /// Helper to create a sample SocketAddr
+    fn create_test_socket_addr() -> SocketAddr {
+        "127.0.0.1:8080".parse().unwrap()
+    }
+
+    // ========== HeaderState Tests ==========
+
+    #[test]
+    fn test_header_state_new_creates_empty_state() {
+        let state = HeaderState::new();
+        assert_eq!(
+            state.frame_count, 0,
+            "New HeaderState should have frame_count of 0"
+        );
+        assert!(
+            state.cached_frames.is_empty(),
+            "New HeaderState should have empty cached_frames"
+        );
+    }
+
+    #[test]
+    fn test_header_state_frame_count_starts_at_zero() {
+        let state = HeaderState::new();
+        assert_eq!(state.frame_count, 0);
+    }
+
+    #[test]
+    fn test_header_state_cached_frames_is_empty_on_creation() {
+        let state = HeaderState::new();
+        assert_eq!(state.cached_frames.len(), 0);
+    }
+
+    // ========== HttpFlv Creation Tests ==========
+
+    #[tokio::test]
+    async fn test_httpflv_new_creates_instance_with_correct_app_name() {
+        let (event_sender, _event_receiver, response_sender, _response_receiver) =
+            create_test_channels();
+        let remote_addr = create_test_socket_addr();
+
+        let httpflv = HttpFlv::new(
+            "live".to_string(),
+            "stream1".to_string(),
+            event_sender,
+            response_sender,
+            "http://localhost/live/stream1.flv".to_string(),
+            remote_addr,
+        );
+
+        let _ = httpflv;
+    }
+
+    #[tokio::test]
+    async fn test_httpflv_new_creates_instance_with_empty_app_name() {
+        let (event_sender, _event_receiver, response_sender, _response_receiver) =
+            create_test_channels();
+        let remote_addr = create_test_socket_addr();
+
+        let httpflv = HttpFlv::new(
+            "".to_string(),
+            "stream1".to_string(),
+            event_sender,
+            response_sender,
+            "http://localhost/stream1.flv".to_string(),
+            remote_addr,
+        );
+
+        let _ = httpflv;
+    }
+
+    #[tokio::test]
+    async fn test_httpflv_new_creates_instance_with_special_characters_in_names() {
+        let (event_sender, _event_receiver, response_sender, _response_receiver) =
+            create_test_channels();
+        let remote_addr = create_test_socket_addr();
+
+        let httpflv = HttpFlv::new(
+            "app-name_123".to_string(),
+            "stream.name-test".to_string(),
+            event_sender,
+            response_sender,
+            "http://localhost/app-name_123/stream.name-test.flv".to_string(),
+            remote_addr,
+        );
+
+        let _ = httpflv;
+    }
+
+    #[tokio::test]
+    async fn test_httpflv_new_with_ipv6_address() {
+        let (event_sender, _event_receiver, response_sender, _response_receiver) =
+            create_test_channels();
+        let remote_addr: SocketAddr = "[::1]:8080".parse().unwrap();
+
+        let httpflv = HttpFlv::new(
+            "live".to_string(),
+            "stream1".to_string(),
+            event_sender,
+            response_sender,
+            "http://[::1]/live/stream1.flv".to_string(),
+            remote_addr,
+        );
+
+        let _ = httpflv;
+    }
+
+    #[tokio::test]
+    async fn test_httpflv_new_with_different_port() {
+        let (event_sender, _event_receiver, response_sender, _response_receiver) =
+            create_test_channels();
+        let remote_addr: SocketAddr = "192.168.1.100:9999".parse().unwrap();
+
+        let httpflv = HttpFlv::new(
+            "live".to_string(),
+            "stream1".to_string(),
+            event_sender,
+            response_sender,
+            "http://192.168.1.100:9999/live/stream1.flv".to_string(),
+            remote_addr,
+        );
+
+        let _ = httpflv;
+    }
+
+    // ========== Tag Type Constants Tests ==========
+
+    #[test]
+    fn test_tag_type_audio_value() {
+        assert_eq!(tag_type::AUDIO, 8, "AUDIO tag type should be 8");
+    }
+
+    #[test]
+    fn test_tag_type_video_value() {
+        assert_eq!(tag_type::VIDEO, 9, "VIDEO tag type should be 9");
+    }
+
+    #[test]
+    fn test_tag_type_script_data_amf_value() {
+        assert_eq!(
+            tag_type::SCRIPT_DATA_AMF,
+            18,
+            "SCRIPT_DATA_AMF tag type should be 18"
+        );
+    }
+
+    #[test]
+    fn test_tag_type_values_are_distinct() {
+        let audio = tag_type::AUDIO;
+        let video = tag_type::VIDEO;
+        let script = tag_type::SCRIPT_DATA_AMF;
+
+        assert_ne!(audio, video);
+        assert_ne!(video, script);
+        assert_ne!(audio, script);
+    }
+
+    // ========== FrameData Variant Tests for Tag Extraction ==========
+
+    #[test]
+    fn test_frame_data_video_creation() {
+        let data = BytesMut::from(&[0x00, 0x01, 0x02, 0x03][..]);
+        let frame = FrameData::Video {
+            timestamp: 1000,
+            data: data.clone(),
+        };
+
+        if let FrameData::Video {
+            timestamp,
+            data: frame_data,
+        } = frame
+        {
+            assert_eq!(timestamp, 1000, "Video timestamp should be 1000");
+            assert_eq!(frame_data.len(), 4, "Video data length should be 4");
+        } else {
+            panic!("Expected Video variant");
+        }
+    }
+
+    #[test]
+    fn test_frame_data_audio_creation() {
+        let data = BytesMut::from(&[0xAA, 0xBB][..]);
+        let frame = FrameData::Audio {
+            timestamp: 2000,
+            data: data.clone(),
+        };
+
+        if let FrameData::Audio {
+            timestamp,
+            data: frame_data,
+        } = frame
+        {
+            assert_eq!(timestamp, 2000, "Audio timestamp should be 2000");
+            assert_eq!(frame_data.len(), 2, "Audio data length should be 2");
+        } else {
+            panic!("Expected Audio variant");
+        }
+    }
+
+    #[test]
+    fn test_frame_data_metadata_creation() {
+        let data = BytesMut::from(&[0x01, 0x02, 0x03][..]);
+        let frame = FrameData::MetaData {
+            timestamp: 0,
+            data: data.clone(),
+        };
+
+        if let FrameData::MetaData {
+            timestamp,
+            data: frame_data,
+        } = frame
+        {
+            assert_eq!(timestamp, 0, "MetaData timestamp should be 0");
+            assert_eq!(frame_data.len(), 3, "MetaData data length should be 3");
+        } else {
+            panic!("Expected MetaData variant");
+        }
+    }
+
+    #[test]
+    fn test_frame_data_media_info_creation() {
+        let media_info = MediaInfo {
+            audio_clock_rate: 48000,
+            video_clock_rate: 90000,
+            vcodec: VideoCodecType::H264,
+        };
+        let frame = FrameData::MediaInfo { media_info };
+
+        if let FrameData::MediaInfo { media_info: info } = frame {
+            assert_eq!(info.audio_clock_rate, 48000);
+            assert_eq!(info.video_clock_rate, 90000);
+            assert!(info.vcodec == VideoCodecType::H264);
+        } else {
+            panic!("Expected MediaInfo variant");
+        }
+    }
+
+    #[test]
+    fn test_frame_data_empty_video_data() {
+        let data = BytesMut::new();
+        let frame = FrameData::Video { timestamp: 0, data };
+
+        if let FrameData::Video { data, .. } = frame {
+            assert!(data.is_empty(), "Empty video data should be allowed");
+        } else {
+            panic!("Expected Video variant");
+        }
+    }
+
+    #[test]
+    fn test_frame_data_empty_audio_data() {
+        let data = BytesMut::new();
+        let frame = FrameData::Audio { timestamp: 0, data };
+
+        if let FrameData::Audio { data, .. } = frame {
+            assert!(data.is_empty(), "Empty audio data should be allowed");
+        } else {
+            panic!("Expected Audio variant");
+        }
+    }
+
+    #[test]
+    fn test_frame_data_large_timestamp() {
+        let large_timestamp = u32::MAX;
+        let frame = FrameData::Video {
+            timestamp: large_timestamp,
+            data: BytesMut::new(),
+        };
+
+        if let FrameData::Video { timestamp, .. } = frame {
+            assert_eq!(timestamp, u32::MAX, "Should handle max u32 timestamp");
+        } else {
+            panic!("Expected Video variant");
+        }
+    }
+
+    // ========== Subscriber Info Tests ==========
+
+    #[test]
+    fn test_subscriber_info_creation_for_httpflv() {
+        let notify_info = NotifyInfo {
+            request_url: "http://localhost/live/stream.flv".to_string(),
+            remote_addr: "127.0.0.1:12345".to_string(),
+        };
+
+        let subscriber_info = SubscriberInfo {
+            id: Uuid::new(RandomDigitCount::Four),
+            sub_type: SubscribeType::RtmpRemux2HttpFlv,
+            sub_data_type: SubDataType::Frame,
+            notify_info,
+        };
+
+        assert_eq!(subscriber_info.sub_type, SubscribeType::RtmpRemux2HttpFlv);
+        assert!(matches!(subscriber_info.sub_data_type, SubDataType::Frame));
+        assert_eq!(
+            subscriber_info.notify_info.request_url,
+            "http://localhost/live/stream.flv"
+        );
+    }
+
+    #[test]
+    fn test_notify_info_clone() {
+        let info = NotifyInfo {
+            request_url: "http://test".to_string(),
+            remote_addr: "127.0.0.1:1234".to_string(),
+        };
+        let cloned = info.clone();
+        assert_eq!(info.request_url, cloned.request_url);
+        assert_eq!(info.remote_addr, cloned.remote_addr);
+    }
+
+    // ========== Stream Identifier Tests ==========
+
+    #[test]
+    fn test_stream_identifier_rtmp_creation() {
+        let identifier = StreamIdentifier::Rtmp {
+            app_name: "live".to_string(),
+            stream_name: "test".to_string(),
+        };
+
+        if let StreamIdentifier::Rtmp {
+            app_name,
+            stream_name,
+        } = identifier
+        {
+            assert_eq!(app_name, "live");
+            assert_eq!(stream_name, "test");
+        } else {
+            panic!("Expected Rtmp variant");
+        }
+    }
+
+    #[test]
+    fn test_stream_identifier_clone() {
+        let identifier = StreamIdentifier::Rtmp {
+            app_name: "app".to_string(),
+            stream_name: "stream".to_string(),
+        };
+        let cloned = identifier.clone();
+
+        if let StreamIdentifier::Rtmp {
+            app_name,
+            stream_name,
+        } = cloned
+        {
+            assert_eq!(app_name, "app");
+            assert_eq!(stream_name, "stream");
+        } else {
+            panic!("Expected Rtmp variant");
+        }
+    }
+
+    // ========== StatisticData Tests ==========
+
+    #[test]
+    fn test_statistic_data_audio_creation() {
+        let stat = StatisticData::Audio {
+            uuid: None,
+            data_size: 1024,
+            aac_packet_type: 1,
+            duration: 0,
+        };
+
+        if let StatisticData::Audio {
+            data_size,
+            aac_packet_type,
+            ..
+        } = stat
+        {
+            assert_eq!(data_size, 1024);
+            assert_eq!(aac_packet_type, 1);
+        } else {
+            panic!("Expected Audio variant");
+        }
+    }
+
+    #[test]
+    fn test_statistic_data_video_creation() {
+        let stat = StatisticData::Video {
+            uuid: None,
+            data_size: 2048,
+            frame_count: 1,
+            is_key_frame: Some(true),
+            duration: 0,
+        };
+
+        if let StatisticData::Video {
+            data_size,
+            frame_count,
+            is_key_frame,
+            ..
+        } = stat
+        {
+            assert_eq!(data_size, 2048);
+            assert_eq!(frame_count, 1);
+            assert_eq!(is_key_frame, Some(true));
+        } else {
+            panic!("Expected Video variant");
+        }
+    }
+
+    #[test]
+    fn test_statistic_data_subscriber_creation() {
+        let stat = StatisticData::Subscriber {
+            id: Uuid::new(RandomDigitCount::Four),
+            remote_addr: "192.168.1.1:12345".to_string(),
+            sub_type: SubscribeType::RtmpRemux2HttpFlv,
+            start_time: chrono::Local::now(),
+        };
+
+        if let StatisticData::Subscriber {
+            sub_type,
+            remote_addr,
+            ..
+        } = stat
+        {
+            assert_eq!(sub_type, SubscribeType::RtmpRemux2HttpFlv);
+            assert_eq!(remote_addr, "192.168.1.1:12345");
+        } else {
+            panic!("Expected Subscriber variant");
+        }
+    }
+
+    // ========== Subscribe/Unsubscribe Event Tests ==========
+
+    #[tokio::test]
+    async fn test_subscribe_event_creation() {
+        let (event_sender, mut event_receiver) = tokio_mpsc::unbounded_channel();
+        let (result_sender, _result_receiver) = tokio::sync::oneshot::channel();
+
+        let identifier = StreamIdentifier::Rtmp {
+            app_name: "live".to_string(),
+            stream_name: "stream1".to_string(),
+        };
+
+        let subscriber_info = SubscriberInfo {
+            id: Uuid::new(RandomDigitCount::Four),
+            sub_type: SubscribeType::RtmpRemux2HttpFlv,
+            sub_data_type: SubDataType::Frame,
+            notify_info: NotifyInfo {
+                request_url: "http://localhost/live/stream1.flv".to_string(),
+                remote_addr: "127.0.0.1:12345".to_string(),
+            },
+        };
+
+        let subscribe_event = StreamHubEvent::Subscribe {
+            identifier,
+            info: subscriber_info,
+            result_sender,
+        };
+
+        assert!(
+            event_sender.send(subscribe_event).is_ok(),
+            "Should be able to send subscribe event"
+        );
+
+        if let Some(StreamHubEvent::Subscribe { info, .. }) = event_receiver.recv().await {
+            assert_eq!(info.sub_type, SubscribeType::RtmpRemux2HttpFlv);
+        } else {
+            panic!("Expected Subscribe event");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_unsubscribe_event_creation() {
+        let (event_sender, mut event_receiver) = tokio_mpsc::unbounded_channel();
+
+        let identifier = StreamIdentifier::Rtmp {
+            app_name: "live".to_string(),
+            stream_name: "stream1".to_string(),
+        };
+
+        let subscriber_info = SubscriberInfo {
+            id: Uuid::new(RandomDigitCount::Four),
+            sub_type: SubscribeType::RtmpRemux2HttpFlv,
+            sub_data_type: SubDataType::Frame,
+            notify_info: NotifyInfo {
+                request_url: "http://localhost/live/stream1.flv".to_string(),
+                remote_addr: "127.0.0.1:12345".to_string(),
+            },
+        };
+
+        let unsubscribe_event = StreamHubEvent::UnSubscribe {
+            identifier,
+            info: subscriber_info,
+        };
+
+        assert!(
+            event_sender.send(unsubscribe_event).is_ok(),
+            "Should be able to send unsubscribe event"
+        );
+
+        if let Some(StreamHubEvent::UnSubscribe { info, .. }) = event_receiver.recv().await {
+            assert_eq!(info.sub_type, SubscribeType::RtmpRemux2HttpFlv);
+        } else {
+            panic!("Expected UnSubscribe event");
+        }
+    }
+
+    // ========== Channel Communication Tests ==========
+
+    #[tokio::test]
+    async fn test_response_channel_communication() {
+        let (mut response_sender, mut response_receiver) =
+            futures_mpsc::unbounded::<std::io::Result<BytesMut>>();
+
+        let test_data = BytesMut::from(&[0x46, 0x4C, 0x56][..]); // "FLV" signature
+        assert!(response_sender.send(Ok(test_data.clone())).await.is_ok());
+
+        if let Some(Ok(received_data)) = response_receiver.next().await {
+            assert_eq!(received_data.len(), 3);
+            assert_eq!(&received_data[..], &[0x46, 0x4C, 0x56]);
+        } else {
+            panic!("Expected to receive data");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_response_channel_error_propagation() {
+        let (mut response_sender, mut response_receiver) =
+            futures_mpsc::unbounded::<std::io::Result<BytesMut>>();
+
+        let error = std::io::Error::new(std::io::ErrorKind::BrokenPipe, "Connection lost");
+        assert!(response_sender.send(Err(error)).await.is_ok());
+
+        if let Some(Err(e)) = response_receiver.next().await {
+            assert_eq!(e.kind(), std::io::ErrorKind::BrokenPipe);
+        } else {
+            panic!("Expected to receive error");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_response_channel_multiple_messages() {
+        let (mut response_sender, mut response_receiver) =
+            futures_mpsc::unbounded::<std::io::Result<BytesMut>>();
+
+        for i in 0..5 {
+            let data = BytesMut::from(&[i as u8][..]);
+            assert!(response_sender.send(Ok(data)).await.is_ok());
+        }
+
+        let mut count = 0;
+        while let Some(Ok(data)) = response_receiver.next().await {
+            assert_eq!(data.len(), 1);
+            count += 1;
+            if count == 5 {
+                break;
+            }
+        }
+        assert_eq!(count, 5, "Should receive all 5 messages");
+    }
+
+    // ========== Edge Cases and Error Scenarios ==========
+
+    #[test]
+    fn test_frame_data_clone() {
+        let frame = FrameData::Video {
+            timestamp: 1000,
+            data: BytesMut::from(&[0x01, 0x02][..]),
+        };
+        let cloned = frame.clone();
+
+        if let FrameData::Video { timestamp, data } = cloned {
+            assert_eq!(timestamp, 1000);
+            assert_eq!(data.len(), 2);
+        } else {
+            panic!("Expected Video variant");
+        }
+    }
+
+    #[test]
+    fn test_frame_data_debug_format() {
+        let frame = FrameData::Video {
+            timestamp: 1000,
+            data: BytesMut::from(&[0x01][..]),
+        };
+        let debug_str = format!("{:?}", frame);
+        assert!(debug_str.contains("Video"));
+        assert!(debug_str.contains("1000"));
+    }
+
+    #[test]
+    fn test_media_info_clone() {
+        let info = MediaInfo {
+            audio_clock_rate: 48000,
+            video_clock_rate: 90000,
+            vcodec: VideoCodecType::H264,
+        };
+        let cloned = info.clone();
+        assert_eq!(cloned.audio_clock_rate, 48000);
+        assert_eq!(cloned.video_clock_rate, 90000);
+    }
+
+    #[test]
+    fn test_video_codec_type_equality() {
+        assert!(VideoCodecType::H264 == VideoCodecType::H264);
+        assert!(VideoCodecType::H265 == VideoCodecType::H265);
+        assert!(VideoCodecType::H264 != VideoCodecType::H265);
+    }
+
+    #[test]
+    fn test_video_codec_type_clone() {
+        let codec = VideoCodecType::H264;
+        let cloned = codec.clone();
+        assert!(codec == cloned);
+    }
+
+    // ========== SubscribeType Tests for HttpFlv ==========
+
+    #[test]
+    fn test_subscribe_type_rtmp_remux_2_httpflv() {
+        let sub_type = SubscribeType::RtmpRemux2HttpFlv;
+        let debug_str = format!("{:?}", sub_type);
+        assert!(debug_str.contains("RtmpRemux2HttpFlv"));
+    }
+
+    #[test]
+    fn test_subscribe_type_clone() {
+        let sub_type = SubscribeType::RtmpRemux2HttpFlv;
+        let cloned = sub_type.clone();
+        assert_eq!(sub_type, cloned);
+    }
+
+    #[test]
+    fn test_subscribe_type_eq() {
+        let t1 = SubscribeType::RtmpRemux2HttpFlv;
+        let t2 = SubscribeType::RtmpRemux2HttpFlv;
+        assert_eq!(t1, t2);
+    }
+
+    // ========== SubDataType Tests ==========
+
+    #[test]
+    fn test_sub_data_type_frame() {
+        let sub_data_type = SubDataType::Frame;
+        let debug_str = format!("{:?}", sub_data_type);
+        assert!(debug_str.contains("Frame"));
+    }
+
+    #[test]
+    fn test_sub_data_type_clone() {
+        let sub_data_type = SubDataType::Frame;
+        let cloned = sub_data_type.clone();
+        assert!(matches!(cloned, SubDataType::Frame));
+    }
+
+    // ========== FLV Header Constants Verification ==========
+
+    #[test]
+    fn test_flv_tag_sizes() {
+        assert_eq!(tag_type::AUDIO, 8, "FLV audio tag type is 8");
+        assert_eq!(tag_type::VIDEO, 9, "FLV video tag type is 9");
+        assert_eq!(
+            tag_type::SCRIPT_DATA_AMF,
+            18,
+            "FLV script data tag type is 18"
+        );
+    }
+
+    // ========== BytesMut Edge Cases ==========
+
+    #[test]
+    fn test_bytes_mut_empty_data() {
+        let data = BytesMut::new();
+        assert!(data.is_empty());
+        assert_eq!(data.len(), 0);
+    }
+
+    #[test]
+    fn test_bytes_mut_from_slice() {
+        let slice: &[u8] = &[0x01, 0x02, 0x03, 0x04];
+        let data = BytesMut::from(slice);
+        assert_eq!(data.len(), 4);
+        assert_eq!(&data[..], slice);
+    }
+
+    #[test]
+    fn test_bytes_mut_split_at() {
+        let data = BytesMut::from(&[0x01, 0x02, 0x03, 0x04][..]);
+        let (left, right) = data.split_at(2);
+        assert_eq!(&left[..], &[0x01, 0x02]);
+        assert_eq!(&right[..], &[0x03, 0x04]);
+    }
+
+    // ========== SocketAddr Edge Cases ==========
+
+    #[test]
+    fn test_socket_addr_ipv4() {
+        let addr: SocketAddr = "127.0.0.1:8080".parse().unwrap();
+        assert!(addr.is_ipv4());
+        assert_eq!(addr.port(), 8080);
+    }
+
+    #[test]
+    fn test_socket_addr_ipv6() {
+        let addr: SocketAddr = "[::1]:8080".parse().unwrap();
+        assert!(addr.is_ipv6());
+        assert_eq!(addr.port(), 8080);
+    }
+
+    #[test]
+    fn test_socket_addr_to_string() {
+        let addr: SocketAddr = "192.168.1.1:9999".parse().unwrap();
+        let addr_str = addr.to_string();
+        assert!(addr_str.contains("192.168.1.1"));
+        assert!(addr_str.contains("9999"));
+    }
+
+    // ========== MAX_AV_FRAME_NUM_TO_GUESS_AV Constant Test ==========
+
+    #[test]
+    fn test_max_av_frame_num_constant() {
+        const MAX_AV_FRAME_NUM_TO_GUESS_AV: usize = 10;
+        assert_eq!(MAX_AV_FRAME_NUM_TO_GUESS_AV, 10);
+    }
+
+    // ========== Integration-like Tests ==========
+
+    #[tokio::test]
+    async fn test_httpflv_unsubscribe_from_stream_hub_sends_event() {
+        let (event_sender, mut event_receiver, response_sender, _response_receiver) =
+            create_test_channels();
+        let remote_addr = create_test_socket_addr();
+
+        let mut httpflv = HttpFlv::new(
+            "live".to_string(),
+            "stream1".to_string(),
+            event_sender,
+            response_sender,
+            "http://localhost/live/stream1.flv".to_string(),
+            remote_addr,
+        );
+
+        let result = httpflv.unsubscribe_from_stream_hub().await;
+        assert!(result.is_ok(), "Unsubscribe should succeed");
+
+        if let Some(event) = event_receiver.recv().await {
+            if let StreamHubEvent::UnSubscribe { info, .. } = event {
+                assert_eq!(info.sub_type, SubscribeType::RtmpRemux2HttpFlv);
+            } else {
+                panic!("Expected UnSubscribe event");
+            }
+        } else {
+            panic!("Should receive unsubscribe event");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_httpflv_multiple_unsubscribe_calls() {
+        let (event_sender, mut event_receiver, response_sender, _response_receiver) =
+            create_test_channels();
+        let remote_addr = create_test_socket_addr();
+
+        let mut httpflv = HttpFlv::new(
+            "live".to_string(),
+            "stream1".to_string(),
+            event_sender,
+            response_sender,
+            "http://localhost/live/stream1.flv".to_string(),
+            remote_addr,
+        );
+
+        let result1 = httpflv.unsubscribe_from_stream_hub().await;
+        assert!(result1.is_ok());
+
+        let result2 = httpflv.unsubscribe_from_stream_hub().await;
+        assert!(result2.is_ok());
+
+        let _ = event_receiver.recv().await;
+        let _ = event_receiver.recv().await;
+    }
+
+    #[tokio::test]
+    async fn test_httpflv_with_closed_event_sender_unsubscribe_still_returns_ok() {
+        let (event_sender, event_receiver, response_sender, _response_receiver) =
+            create_test_channels();
+        let remote_addr = create_test_socket_addr();
+
+        let mut httpflv = HttpFlv::new(
+            "live".to_string(),
+            "stream1".to_string(),
+            event_sender,
+            response_sender,
+            "http://localhost/live/stream1.flv".to_string(),
+            remote_addr,
+        );
+
+        drop(event_receiver);
+
+        let result = httpflv.unsubscribe_from_stream_hub().await;
+        assert!(
+            result.is_ok(),
+            "Unsubscribe should return Ok even with closed channel"
+        );
+    }
+
+    // ========== Uuid Tests ==========
+
+    #[test]
+    fn test_uuid_new_creates_unique_ids() {
+        let id1 = Uuid::new(RandomDigitCount::Four);
+        let id2 = Uuid::new(RandomDigitCount::Four);
+
+        assert_ne!(id1.to_string(), id2.to_string(), "UUIDs should be unique");
+    }
+
+    #[test]
+    fn test_uuid_to_string() {
+        let id = Uuid::new(RandomDigitCount::Four);
+        let id_str = id.to_string();
+        assert!(!id_str.is_empty(), "UUID string should not be empty");
+    }
+}

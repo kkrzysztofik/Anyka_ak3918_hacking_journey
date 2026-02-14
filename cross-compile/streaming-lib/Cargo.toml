@@ -75,3 +75,4 @@ reqwest = { version = "0.13.1", features = ["native-tls-vendored", "query", "for
 mockall = "0.13"
 tokio-test = "0.4"
 proptest = "1.0"
+wiremock = "0.6"
