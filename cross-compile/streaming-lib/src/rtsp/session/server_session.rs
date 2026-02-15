@@ -5173,7 +5173,10 @@ mod tests {
         let result = RtspServerSession::validate_rtsp_request_headers(&request, &addr);
         assert!(result.is_some());
         let response = result.unwrap();
-        assert_eq!(response.status_code, StatusCode::HTTP_VERSION_NOT_SUPPORTED.as_u16());
+        assert_eq!(
+            response.status_code,
+            StatusCode::HTTP_VERSION_NOT_SUPPORTED.as_u16()
+        );
     }
 
     #[test]
@@ -5211,7 +5214,10 @@ mod tests {
         let addr: SocketAddr = "10.0.0.1:554".parse().unwrap();
         let result = RtspServerSession::validate_rtsp_request_headers(&request, &addr);
         assert!(result.is_some());
-        assert_eq!(result.unwrap().status_code, StatusCode::BAD_REQUEST.as_u16());
+        assert_eq!(
+            result.unwrap().status_code,
+            StatusCode::BAD_REQUEST.as_u16()
+        );
     }
 
     #[test]
@@ -5256,7 +5262,10 @@ mod tests {
         let addr: SocketAddr = "127.0.0.1:5000".parse().unwrap();
         let result = RtspServerSession::validate_rtsp_request_headers(&request, &addr);
         assert!(result.is_some());
-        assert_eq!(result.unwrap().status_code, StatusCode::BAD_REQUEST.as_u16());
+        assert_eq!(
+            result.unwrap().status_code,
+            StatusCode::BAD_REQUEST.as_u16()
+        );
     }
 
     #[test]
@@ -5279,7 +5288,11 @@ mod tests {
     fn test_video_access_unit_assembler_single_chunk_flush() {
         let mut assembler = VideoAccessUnitAssembler::default();
         // Push one chunk, then flush it
-        assert!(assembler.push(42, BytesMut::from(&b"\x65\xAA\xBB"[..])).is_none());
+        assert!(
+            assembler
+                .push(42, BytesMut::from(&b"\x65\xAA\xBB"[..]))
+                .is_none()
+        );
         let (ts, bytes) = assembler.flush().expect("expected pending data");
         assert_eq!(ts, 42);
         // Should have Annex-B prefix prepended (raw NAL, no start code)
@@ -5312,8 +5325,16 @@ mod tests {
         let mut assembler = VideoAccessUnitAssembler::default();
 
         // ts=100, two chunks
-        assert!(assembler.push(100, BytesMut::from(&b"\x67\x01"[..])).is_none());
-        assert!(assembler.push(100, BytesMut::from(&b"\x68\x02"[..])).is_none());
+        assert!(
+            assembler
+                .push(100, BytesMut::from(&b"\x67\x01"[..]))
+                .is_none()
+        );
+        assert!(
+            assembler
+                .push(100, BytesMut::from(&b"\x68\x02"[..]))
+                .is_none()
+        );
 
         // ts=200 flushes ts=100 AU
         let flushed = assembler.push(200, BytesMut::from(&b"\x65\x03"[..]));

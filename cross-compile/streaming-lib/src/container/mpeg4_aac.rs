@@ -1274,4 +1274,657 @@ mod tests {
         let result = processor.load_specific_config_by_type();
         assert!(result.is_ok()); // Falls through to Ok(())
     }
+
+    // ========== celp_specific_config_load Tests ==========
+
+    #[test]
+    fn test_celp_specific_config_load_first_bit_1_excitation_mode_1() {
+        let mut processor = Mpeg4AacProcessor::new();
+        // First bit = 1, excitation_mode = 1
+        // Reads: 1 bit, 1 bit (excitation_mode=1), 1 bit, 1 bit, then 3 bits
+        // Total: 1 + 1 + 1 + 1 + 3 = 7 bits
+        // Bits: 1 1 x x x x x x (where x are the remaining bits)
+        // Let's use: 1100 0000 0000 0000 = 0xC0 0x00
+        let data = BytesMut::from(&[0xC0, 0x00][..]);
+        processor.bits_reader = crate::bytesio::bits_reader::BitsReader::new(
+            crate::bytesio::bytes_reader::BytesReader::new(data),
+        );
+        let result = processor.celp_specific_config_load();
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_celp_specific_config_load_first_bit_1_excitation_mode_0() {
+        let mut processor = Mpeg4AacProcessor::new();
+        // First bit = 1, excitation_mode = 0
+        // Reads: 1 bit, 1 bit (excitation_mode=0), 1 bit, 1 bit, then 5 + 2 + 1 = 8 bits
+        // Total: 1 + 1 + 1 + 1 + 5 + 2 + 1 = 12 bits
+        // Bits: 1 0 x x xxxx xx x xxxxx
+        // Let's use: 1000 0000 0000 0000 = 0x80 0x00
+        let data = BytesMut::from(&[0x80, 0x00][..]);
+        processor.bits_reader = crate::bytesio::bits_reader::BitsReader::new(
+            crate::bytesio::bytes_reader::BytesReader::new(data),
+        );
+        let result = processor.celp_specific_config_load();
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_celp_specific_config_load_first_bit_0() {
+        let mut processor = Mpeg4AacProcessor::new();
+        // First bit = 0
+        // Reads: 1 bit, then 1 bit, then 2 bits
+        // Total: 1 + 1 + 2 = 4 bits
+        // Bits: 0 x xx xxxxx
+        // Let's use: 0000 0000 = 0x00
+        let data = BytesMut::from(&[0x00][..]);
+        processor.bits_reader = crate::bytesio::bits_reader::BitsReader::new(
+            crate::bytesio::bytes_reader::BytesReader::new(data),
+        );
+        let result = processor.celp_specific_config_load();
+        assert!(result.is_ok());
+    }
+
+    // ========== ga_specific_config_load Tests ==========
+
+    #[test]
+    fn test_ga_specific_config_load_basic() {
+        let mut processor = Mpeg4AacProcessor::new();
+        // Basic path: frameLengthFlag=0, dependsOnCoreCoder=0, extensionFlag=0
+        // Reads: 1 bit (frameLengthFlag) + 1 bit (dependsOnCoreCoder) + 1 bit (extensionFlag) = 3 bits
+        // channel_configuration != 0, so no pce_load
+        // object_type not 6 or 20, so no layer read
+        processor.mpeg4_aac.channel_configuration = 2;
+        processor.mpeg4_aac.object_type = 2;
+        let data = BytesMut::from(&[0x00][..]); // All bits 0
+        processor.bits_reader = crate::bytesio::bits_reader::BitsReader::new(
+            crate::bytesio::bytes_reader::BytesReader::new(data),
+        );
+        let result = processor.ga_specific_config_load();
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_ga_specific_config_load_depends_on_core_coder() {
+        let mut processor = Mpeg4AacProcessor::new();
+        // dependsOnCoreCoder = 1 (reads 14 additional bits)
+        // Reads: 1 bit (frameLengthFlag) + 1 bit (dependsOnCoreCoder=1) + 14 bits + 1 bit (extensionFlag)
+        // Bits: 0 1 (14 bits) 0
+        // Total: 17 bits
+        // Bit layout: 01 | 00000000 000000 | 0
+        //             01000000 00000000 0x
+        //             0x40     0x00     0x00
+        processor.mpeg4_aac.channel_configuration = 2;
+        processor.mpeg4_aac.object_type = 2;
+        let data = BytesMut::from(&[0x40, 0x00, 0x00][..]);
+        processor.bits_reader = crate::bytesio::bits_reader::BitsReader::new(
+            crate::bytesio::bytes_reader::BytesReader::new(data),
+        );
+        let result = processor.ga_specific_config_load();
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_ga_specific_config_load_extension_flag_type22() {
+        let mut processor = Mpeg4AacProcessor::new();
+        // extensionFlag = 1, object_type = 22
+        // Reads: 1 + 1 + 1 (ext_flag=1) + 5 + 11 (type22) + 1 (final bit) = 20 bits
+        processor.mpeg4_aac.channel_configuration = 2;
+        processor.mpeg4_aac.object_type = 22;
+        // Bits: 0 0 1 | (5 bits) (11 bits) 0
+        // Let's use: 001 00000 00000000000 0
+        //            00100000 00000000 000x xxxx
+        //            0x20     0x00     0x00
+        let data = BytesMut::from(&[0x20, 0x00, 0x00][..]);
+        processor.bits_reader = crate::bytesio::bits_reader::BitsReader::new(
+            crate::bytesio::bytes_reader::BytesReader::new(data),
+        );
+        let result = processor.ga_specific_config_load();
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_ga_specific_config_load_extension_flag_type17() {
+        let mut processor = Mpeg4AacProcessor::new();
+        // extensionFlag = 1, object_type = 17
+        // Reads: 1 + 1 + 1 (ext_flag=1) + 1 + 1 + 1 (type17) + 1 (final bit) = 8 bits
+        processor.mpeg4_aac.channel_configuration = 2;
+        processor.mpeg4_aac.object_type = 17;
+        // Bits: 0 0 1 xxx 0
+        // Let's use: 00100000 = 0x20
+        let data = BytesMut::from(&[0x20][..]);
+        processor.bits_reader = crate::bytesio::bits_reader::BitsReader::new(
+            crate::bytesio::bytes_reader::BytesReader::new(data),
+        );
+        let result = processor.ga_specific_config_load();
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_ga_specific_config_load_channel_config_0_triggers_pce() {
+        let mut processor = Mpeg4AacProcessor::new();
+        processor.mpeg4_aac.channel_configuration = 0; // Triggers pce_load
+        processor.mpeg4_aac.object_type = 2;
+
+        // Build minimal PCE data: 4+2+4+4+4+4+2+3+4 = 31 bits for header
+        // Then 3 optional flags (3 bits), alignment, comment field length (8 bits)
+        // Total minimum: ~50 bits = 7 bytes
+        // PCE structure:
+        // element_instance_tag(4) object_type(2) sampling_freq_idx(4)
+        // num_front(4) num_side(4) num_back(4) num_lfe(2) num_assoc(3) num_valid_cc(4)
+        // 3 optional flags (1 bit each)
+        // alignment to byte boundary
+        // comment_field_bytes(8)
+
+        // Let's create minimal PCE: all counts = 0, no optional elements, no comment
+        // Bits: eeee tt ffff FFFF SSSS BBBB ll aaa VVVV | 0 0 0 | padding | 00000000
+        // Using: 0000 00 0000 0000 0000 0000 00 000 0000 = 0x00 0x00 0x00 0x00
+        //        0 0 0 (padding to byte) = need 5 more bits for alignment after bit 34
+        //        00000000 (comment length)
+        // Total bits: 31 + 3 = 34 bits, alignment adds 6 bits -> 40 bits, +8 for comment = 48 bits = 6 bytes
+
+        // But we need ga_specific_config_load bits first: 1 + 1 + 1 = 3 bits
+        // So total: 3 + 48 = 51 bits = 7 bytes
+        // ga bits: 001 (no frame length flag, no depends, ext flag=0)
+        // Combined: 001 + PCE bits
+        let data = BytesMut::from(&[0x20, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00][..]);
+        processor.bits_reader = crate::bytesio::bits_reader::BitsReader::new(
+            crate::bytesio::bytes_reader::BytesReader::new(data),
+        );
+        let result = processor.ga_specific_config_load();
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_ga_specific_config_load_object_type_6_reads_layer() {
+        let mut processor = Mpeg4AacProcessor::new();
+        processor.mpeg4_aac.channel_configuration = 2;
+        processor.mpeg4_aac.object_type = 6; // Triggers layerNr read (3 bits)
+        // Reads: 1 + 1 + 1 (flags) + 3 (layerNr) = 6 bits
+        // Bits: 000 xxx
+        // Let's use: 00000000 = 0x00
+        let data = BytesMut::from(&[0x00][..]);
+        processor.bits_reader = crate::bytesio::bits_reader::BitsReader::new(
+            crate::bytesio::bytes_reader::BytesReader::new(data),
+        );
+        let result = processor.ga_specific_config_load();
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_ga_specific_config_load_object_type_20_reads_layer() {
+        let mut processor = Mpeg4AacProcessor::new();
+        processor.mpeg4_aac.channel_configuration = 2;
+        processor.mpeg4_aac.object_type = 20; // Also triggers layerNr read
+        let data = BytesMut::from(&[0x00][..]);
+        processor.bits_reader = crate::bytesio::bits_reader::BitsReader::new(
+            crate::bytesio::bytes_reader::BytesReader::new(data),
+        );
+        let result = processor.ga_specific_config_load();
+        assert!(result.is_ok());
+    }
+
+    // ========== pce_load Tests ==========
+
+    #[test]
+    fn test_pce_load_minimal_no_elements() {
+        let mut processor = Mpeg4AacProcessor::new();
+        processor.mpeg4_aac.ps = 0;
+
+        // PCE structure with all element counts = 0:
+        // element_instance_tag(4) = 0000
+        // object_type(2) = 00
+        // sampling_frequency_index(4) = 0000
+        // num_front_channel_elements(4) = 0000
+        // num_side_channel_elements(4) = 0000
+        // num_back_channel_elements(4) = 0000
+        // num_lfe_channel_elements(2) = 00
+        // num_assoc_data_elements(3) = 000
+        // num_valid_cc_elements(4) = 0000
+        // Total: 31 bits
+
+        // Then 3 optional flags (mono, stereo, matrix):
+        // 0 0 0 = 3 bits
+        // Total so far: 34 bits
+
+        // Then alignment to 8-bit boundary: 34 bits needs 6 more bits to reach 40 (5 bytes)
+        // After alignment, comment_field_bytes(8) = 00000000
+        // Total: 48 bits = 6 bytes
+
+        // Bit layout:
+        // Byte 0: 0000 0000 = 0x00 (element_instance_tag + object_type)
+        // Byte 1: 0000 0000 = 0x00 (sampling_freq_idx + num_front)
+        // Byte 2: 0000 0000 = 0x00 (num_side + num_back)
+        // Byte 3: 0000 0000 = 0x00 (num_lfe + num_assoc + num_valid_cc)
+        // Byte 4: 00 000000 = 0x00 (3 optional flags + 5 padding bits for alignment)
+        // Byte 5: 0000 0000 = 0x00 (comment_field_bytes = 0)
+
+        let data = BytesMut::from(&[0x00, 0x00, 0x00, 0x00, 0x00, 0x00][..]);
+        processor.bits_reader = crate::bytesio::bits_reader::BitsReader::new(
+            crate::bytesio::bytes_reader::BytesReader::new(data),
+        );
+
+        let result = processor.pce_load();
+        assert!(result.is_ok());
+        assert_eq!(processor.mpeg4_aac.channels, 0); // No channels
+    }
+
+    #[test]
+    fn test_pce_load_with_front_channel_mono() {
+        let mut processor = Mpeg4AacProcessor::new();
+        processor.mpeg4_aac.ps = 0;
+
+        // num_front_channel_elements = 1
+        // Each front element: cpe(1 bit) + element_instance_tag(4 bits) = 5 bits
+        // Let's set cpe = 0 (mono), so it adds 1 channel
+
+        // PCE header bit layout (31 bits):
+        // Bits 0-3: element_instance_tag = 0000
+        // Bits 4-5: object_type = 00
+        // Bits 6-9: sampling_frequency_index = 0000
+        // Bits 10-13: num_front_channel_elements = 0001
+        // Bits 14-17: num_side_channel_elements = 0000
+        // Bits 18-21: num_back_channel_elements = 0000
+        // Bits 22-23: num_lfe_channel_elements = 00
+        // Bits 24-26: num_assoc_data_elements = 000
+        // Bits 27-30: num_valid_cc_elements = 0000
+
+        // BitsReader reads MSB-first from each byte:
+        // Byte 0 (bits 0-7): 0000_0000 = 0x00
+        // Byte 1 (bits 8-15): 00_0001_00 = 0x04 (num_front=1 in bits 10-13)
+        // Byte 2 (bits 16-23): 0000_0000 = 0x00
+        // Byte 3 (bits 24-31): 000_0000_0 = 0x00 (bit 31 is first optional flag)
+
+        // After 31 bits, we read 3 optional flags (all 0): 3 more bits
+        // Then 1 front element: cpe(1)=0 + tag(4)=0000 = 5 bits
+        // Total after header: 31 + 3 + 5 = 39 bits
+
+        // Byte 4 (bits 32-39): opt_flag2(1)=0 + opt_flag3(1)=0 + cpe(1)=0 + tag(4)=0000 + align(1)=0
+        //                      0000_0000 = 0x00
+        // Alignment adds 1 bit to reach bit 40 (byte boundary)
+        // Byte 5 (bits 40-47): comment_field_bytes(8) = 0x00
+
+        let data = BytesMut::from(&[0x00, 0x04, 0x00, 0x00, 0x00, 0x00][..]);
+        processor.bits_reader = crate::bytesio::bits_reader::BitsReader::new(
+            crate::bytesio::bytes_reader::BytesReader::new(data),
+        );
+
+        let result = processor.pce_load();
+        assert!(result.is_ok());
+        assert_eq!(processor.mpeg4_aac.channels, 1); // 1 mono channel
+    }
+
+    #[test]
+    fn test_pce_load_with_front_channel_stereo() {
+        let mut processor = Mpeg4AacProcessor::new();
+        processor.mpeg4_aac.ps = 0;
+
+        // num_front_channel_elements = 1, cpe = 1 (stereo)
+        // Should add 2 channels
+
+        // Same layout as mono test, but with cpe=1
+        // Byte 0: 0x00
+        // Byte 1: 0x04 (num_front=1 in bits 10-13)
+        // Byte 2: 0x00
+        // Byte 3: 0x00 (includes first optional flag = 0 in bit 31)
+        // Byte 4: bit 32-39: opt_flag2(1)=0, opt_flag3(1)=0, cpe(1)=1, tag(4)=0000, align(1)=0
+        //         00_1_0000_0 = 0x20
+        // Byte 5: 0x00 (comment_field_bytes=0)
+
+        let data = BytesMut::from(&[0x00, 0x04, 0x00, 0x00, 0x20, 0x00][..]);
+        processor.bits_reader = crate::bytesio::bits_reader::BitsReader::new(
+            crate::bytesio::bytes_reader::BytesReader::new(data),
+        );
+
+        let result = processor.pce_load();
+        assert!(result.is_ok());
+        assert_eq!(processor.mpeg4_aac.channels, 2); // 1 stereo pair = 2 channels
+    }
+
+    #[test]
+    fn test_pce_load_with_lfe_element() {
+        let mut processor = Mpeg4AacProcessor::new();
+        processor.mpeg4_aac.ps = 0;
+
+        // num_lfe_channel_elements = 1
+        // Each LFE element: element_instance_tag(4 bits), adds 1 channel
+
+        // Using byte-aligned layout:
+        // Byte 0: element_instance_tag(4) + object_type(2) + sampling_freq_idx(2 upper)
+        //         0000_0000 = 0x00
+        // Byte 1: sampling_freq_idx(2 lower) + num_front(4) + num_side(2 upper)
+        //         0000_0000 = 0x00
+        // Byte 2: num_side(2 lower) + num_back(4) + num_lfe(2)
+        //         0000_0001 = 0x01 (num_lfe=01 in bits 6-7)
+        // Byte 3: num_assoc(3) + num_valid_cc(4) + opt_flag_1(1)
+        //         0000_0000 = 0x00
+        // Byte 4: opt_flag_2(1) + opt_flag_3(1) + lfe_tag(4) + align(2)
+        //         0000_0000 = 0x00
+        // Byte 5: comment_field_bytes(8)
+        //         0000_0000 = 0x00
+
+        let data = BytesMut::from(&[0x00, 0x00, 0x01, 0x00, 0x00, 0x00][..]);
+        processor.bits_reader = crate::bytesio::bits_reader::BitsReader::new(
+            crate::bytesio::bytes_reader::BytesReader::new(data),
+        );
+
+        let result = processor.pce_load();
+        assert!(result.is_ok());
+        assert_eq!(processor.mpeg4_aac.channels, 1); // 1 LFE channel
+    }
+
+    #[test]
+    fn test_pce_load_with_comment_field() {
+        let mut processor = Mpeg4AacProcessor::new();
+        processor.mpeg4_aac.ps = 0;
+
+        // Minimal PCE with comment_field_bytes = 2
+        // Using byte-aligned layout with all element counts = 0:
+        // Byte 0: 0x00
+        // Byte 1: 0x00
+        // Byte 2: 0x00
+        // Byte 3: 0x00 (includes opt_flag_1=0 in bit 31)
+        // Byte 4: opt_flag_2(1)=0, opt_flag_3(1)=0, align(6)=0 = 0x00
+        // Byte 5: comment_field_bytes(8) = 0x02
+        // Byte 6: comment byte 1 = 0xAB
+        // Byte 7: comment byte 2 = 0xCD
+
+        let data = BytesMut::from(&[0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0xAB, 0xCD][..]);
+        processor.bits_reader = crate::bytesio::bits_reader::BitsReader::new(
+            crate::bytesio::bytes_reader::BytesReader::new(data),
+        );
+
+        let result = processor.pce_load();
+        assert!(result.is_ok());
+    }
+
+    // ========== audio_specific_config_load2 Branch Tests ==========
+
+    #[test]
+    fn test_audio_specific_config_load2_object_type_5_sbr() {
+        let mut processor = Mpeg4AacProcessor::new();
+
+        // object_type = 5 (SBR), should set sbr = 1
+        // Layout:
+        // object_type(5 bits) = 00101 (5)
+        // sampling_freq_index(4 bits) = 0011 (3 = 48000Hz)
+        // channel_config(4 bits) = 0010 (2 = stereo)
+        // extension_sampling_freq_index(4 bits) = 0011
+        // new object_type(5 bits) = 00010 (2 = AAC-LC)
+        // frameLengthFlag(1) = 0
+        // dependsOnCoreCoder(1) = 0
+        // extensionFlag(1) = 0
+
+        // Bits: 00101 0011 0010 0011 00010 0 0 0
+        // Bytes: 00101001 10010001 10001000 0
+        //        0x29     0x91     0x88     0x00
+
+        let data = BytesMut::from(&[0x29, 0x91, 0x88, 0x00][..]);
+        processor.bytes_reader = crate::bytesio::bytes_reader::BytesReader::new(data);
+
+        let result = processor.audio_specific_config_load2();
+        assert!(result.is_ok());
+        assert_eq!(processor.mpeg4_aac.object_type, 2); // Changed to AAC-LC
+        assert_eq!(processor.mpeg4_aac.sbr, 1); // SBR enabled
+        assert_eq!(processor.mpeg4_aac.ps, 0); // PS not enabled
+    }
+
+    #[test]
+    fn test_audio_specific_config_load2_object_type_29_ps_sbr() {
+        let mut processor = Mpeg4AacProcessor::new();
+
+        // object_type = 29 (PS+SBR), should set sbr = 1 and ps = 1
+        // Layout:
+        // object_type(5 bits) = 11101 (29)
+        // sampling_freq_index(4 bits) = 0011 (3 = 48000Hz)
+        // channel_config(4 bits) = 0010 (2 = stereo)
+        // extension_sampling_freq_index(4 bits) = 0011
+        // new object_type(5 bits) = 00010 (2 = AAC-LC)
+        // frameLengthFlag(1) = 0
+        // dependsOnCoreCoder(1) = 0
+        // extensionFlag(1) = 0
+
+        // Bits: 11101 0011 0010 0011 00010 0 0 0
+        // Bytes: 11101001 10010001 10001000 0
+        //        0xE9     0x91     0x88     0x00
+
+        let data = BytesMut::from(&[0xE9, 0x91, 0x88, 0x00][..]);
+        processor.bytes_reader = crate::bytesio::bytes_reader::BytesReader::new(data);
+
+        let result = processor.audio_specific_config_load2();
+        assert!(result.is_ok());
+        assert_eq!(processor.mpeg4_aac.object_type, 2);
+        assert_eq!(processor.mpeg4_aac.sbr, 1);
+        assert_eq!(processor.mpeg4_aac.ps, 1); // PS enabled for type 29
+    }
+
+    #[test]
+    fn test_audio_specific_config_load2_object_type_17_process_extension() {
+        let mut processor = Mpeg4AacProcessor::new();
+
+        // object_type = 17 triggers process_extension_config
+        // Layout:
+        // object_type(5 bits) = 10001 (17)
+        // sampling_freq_index(4 bits) = 0011 (3 = 48000Hz)
+        // channel_config(4 bits) = 0010 (2 = stereo)
+        // frameLengthFlag(1) = 0
+        // dependsOnCoreCoder(1) = 0
+        // extensionFlag(1) = 0
+        // ep_config(2 bits) = 00 (from process_extension_config)
+
+        // Bits: 10001 0011 0010 0 0 0 00
+        // Bytes: 10001001 10010000 0
+        //        0x89     0x90     0x00
+
+        let data = BytesMut::from(&[0x89, 0x90, 0x00][..]);
+        processor.bytes_reader = crate::bytesio::bytes_reader::BytesReader::new(data);
+
+        let result = processor.audio_specific_config_load2();
+        assert!(result.is_ok());
+        assert_eq!(processor.mpeg4_aac.object_type, 17);
+    }
+
+    #[test]
+    fn test_audio_specific_config_load2_handle_sbr_extension_with_ps() {
+        let mut processor = Mpeg4AacProcessor::new();
+
+        // AAC-LC that later has SBR extension in handle_sbr_ps_extension
+        // To trigger handle_sbr_ps_extension with type 5, we need:
+        // - Initial object_type != 5 or 29
+        // - Then have enough bits for handle_sbr_ps_extension to read
+
+        // Layout:
+        // object_type(5 bits) = 00010 (2 = AAC-LC)
+        // sampling_freq_index(4 bits) = 0011 (3 = 48000Hz)
+        // channel_config(4 bits) = 0010 (2 = stereo)
+        // frameLengthFlag(1) = 0
+        // dependsOnCoreCoder(1) = 0
+        // extensionFlag(1) = 1 (to have handle_sbr_ps_extension later, but it needs extension_audio_object_type=5)
+
+        // Actually, handle_sbr_ps_extension is only called if extension_audio_object_type is already 5,
+        // which happens when object_type is 5 or 29. Otherwise it's 0 and skips.
+        // Let me create a test for when it does trigger with sufficient bits
+
+        // For this, I need object_type = 5 (set extension_audio_object_type = 5)
+        // Then bits_reader.len() >= 16
+        // sync_extension_type = SYNC_EXTENSION_TYPE_SBR (0x2B7 = 11 bits)
+        // Then get_audio_object_type returns 5
+        // Then handle_sbr_extension sets sbr bit and checks for PS
+
+        // Layout:
+        // object_type(5 bits) = 00101 (5)
+        // sampling_freq_index(4 bits) = 0011
+        // channel_config(4 bits) = 0010
+        // extension_sampling_freq_index(4 bits) = 0011
+        // new object_type(5 bits) = 00010 (2)
+        // frameLengthFlag(1) = 0
+        // dependsOnCoreCoder(1) = 0
+        // extensionFlag(1) = 0
+        // (now in handle_sbr_ps_extension)
+        // sync_extension_type(11 bits) = 010 1011 0111 (0x2B7)
+        // extension_audio_object_type(5 bits) = 00101 (5)
+        // sbr(1 bit) = 1
+        // extension_sampling_freq_index2(4 bits) = 0011
+        // sync_extension_type_ps(11 bits) = 101 0100 1000 (0x548)
+        // ps(1 bit) = 1
+
+        // Bits: 00101 0011 0010 0011 00010 0 0 0 | 010 1011 0111 00101 1 0011 101 0100 1000 1
+        // Let me break this down byte by byte:
+        // 00101001 10010001 10001000 00101011 01110010 11001110 10100100 01
+        // 0x29     0x91     0x88     0x2B     0x72     0xCE     0xA4     0x40
+
+        let data = BytesMut::from(&[0x29, 0x91, 0x88, 0x2B, 0x72, 0xCE, 0xA4, 0x40][..]);
+        processor.bytes_reader = crate::bytesio::bytes_reader::BytesReader::new(data);
+
+        let result = processor.audio_specific_config_load2();
+        assert!(result.is_ok());
+        assert_eq!(processor.mpeg4_aac.sbr, 1);
+        assert_eq!(processor.mpeg4_aac.ps, 1); // PS should be set
+    }
+
+    #[test]
+    fn test_audio_specific_config_load2_explicit_sampling_frequency() {
+        let mut processor = Mpeg4AacProcessor::new();
+
+        // sampling_frequency_index = 0x0F triggers explicit 24-bit frequency read
+        // Layout:
+        // object_type(5 bits) = 00010 (2)
+        // sampling_freq_index(4 bits) = 1111 (0x0F)
+        // sampling_frequency(24 bits) = 48000 = 0x00BB80
+        // channel_config(4 bits) = 0010
+        // frameLengthFlag(1) = 0
+        // dependsOnCoreCoder(1) = 0
+        // extensionFlag(1) = 0
+
+        // Bits: 00010 1111 | 00000000 10111011 10000000 | 0010 0 0 0
+        // Bytes: 00010111 10000000 01011101 11000000 00100000
+        //        0x17     0x80     0x5D     0xC0     0x20
+
+        let data = BytesMut::from(&[0x17, 0x80, 0x5D, 0xC0, 0x20][..]);
+        processor.bytes_reader = crate::bytesio::bytes_reader::BytesReader::new(data);
+
+        let result = processor.audio_specific_config_load2();
+        assert!(result.is_ok());
+        assert_eq!(processor.mpeg4_aac.sampling_frequency_index, 0x0F);
+        assert_eq!(processor.mpeg4_aac.sampling_frequency, 48000);
+    }
+
+    // ========== handle_sbr_extension Tests ==========
+
+    #[test]
+    fn test_handle_sbr_extension_sbr_bit_set_with_ps() {
+        let mut processor = Mpeg4AacProcessor::new();
+
+        // sbr bit = 1, sufficient bits for PS check
+        // Layout:
+        // sbr(1 bit) = 1
+        // extension_sampling_freq_index(4 bits) = 0011
+        // sync_extension_type_ps(11 bits) = 101 0100 1000 (0x548)
+        // ps(1 bit) = 1
+
+        // Bits: 1 0011 10101001000 1
+        // Bytes: 10011101 01001000 1
+        //        0x9D     0x48     0x80
+
+        let data = BytesMut::from(&[0x9D, 0x48, 0x80][..]);
+        processor.bits_reader = crate::bytesio::bits_reader::BitsReader::new(
+            crate::bytesio::bytes_reader::BytesReader::new(data),
+        );
+
+        let mut ext_freq: u32 = 0;
+        let result = processor.handle_sbr_extension(&mut ext_freq);
+        assert!(result.is_ok());
+        assert_eq!(processor.mpeg4_aac.sbr, 1);
+        assert_eq!(processor.mpeg4_aac.ps, 1);
+    }
+
+    #[test]
+    fn test_handle_sbr_extension_sbr_bit_set_no_ps() {
+        let mut processor = Mpeg4AacProcessor::new();
+
+        // sbr bit = 1, but sync_extension_type != SYNC_EXTENSION_TYPE_PS
+        // Layout:
+        // sbr(1 bit) = 1
+        // extension_sampling_freq_index(4 bits) = 0011
+        // sync_extension_type(11 bits) = 000 0000 0000 (not 0x548)
+
+        // Bits: 1 0011 00000000000
+        // Bytes: 10011000 00000000
+        //        0x98     0x00
+
+        let data = BytesMut::from(&[0x98, 0x00][..]);
+        processor.bits_reader = crate::bytesio::bits_reader::BitsReader::new(
+            crate::bytesio::bytes_reader::BytesReader::new(data),
+        );
+
+        let mut ext_freq: u32 = 0;
+        let result = processor.handle_sbr_extension(&mut ext_freq);
+        assert!(result.is_ok());
+        assert_eq!(processor.mpeg4_aac.sbr, 1);
+        assert_eq!(processor.mpeg4_aac.ps, 0); // PS not set
+    }
+
+    #[test]
+    fn test_handle_sbr_extension_sbr_bit_not_set() {
+        let mut processor = Mpeg4AacProcessor::new();
+
+        // sbr bit = 0, should return early
+        let data = BytesMut::from(&[0x00][..]);
+        processor.bits_reader = crate::bytesio::bits_reader::BitsReader::new(
+            crate::bytesio::bytes_reader::BytesReader::new(data),
+        );
+
+        let mut ext_freq: u32 = 0;
+        let result = processor.handle_sbr_extension(&mut ext_freq);
+        assert!(result.is_ok());
+        assert_eq!(processor.mpeg4_aac.sbr, 0);
+    }
+
+    // ========== handle_sbr_extension_type22 Tests ==========
+
+    #[test]
+    fn test_handle_sbr_extension_type22_sbr_bit_set() {
+        let mut processor = Mpeg4AacProcessor::new();
+
+        // sbr bit = 1, reads extension_sampling_freq_index (4 bits) then reads 4 more bits
+        // Layout:
+        // sbr(1 bit) = 1
+        // extension_sampling_freq_index(4 bits) = 0011
+        // reserved(4 bits) = 0000
+
+        // Bits: 1 0011 0000
+        // Bytes: 10011000 0
+        //        0x98     0x00
+
+        let data = BytesMut::from(&[0x98, 0x00][..]);
+        processor.bits_reader = crate::bytesio::bits_reader::BitsReader::new(
+            crate::bytesio::bytes_reader::BytesReader::new(data),
+        );
+
+        let mut ext_freq: u32 = 0;
+        let result = processor.handle_sbr_extension_type22(&mut ext_freq);
+        assert!(result.is_ok());
+        assert_eq!(processor.mpeg4_aac.sbr, 1);
+    }
+
+    #[test]
+    fn test_handle_sbr_extension_type22_sbr_bit_not_set() {
+        let mut processor = Mpeg4AacProcessor::new();
+
+        // sbr bit = 0, still reads extension_sampling_freq and 4 bits
+        // Layout:
+        // sbr(1 bit) = 0
+        // extension_sampling_freq_index(4 bits) = 0011
+        // reserved(4 bits) = 0000
+
+        let data = BytesMut::from(&[0x18, 0x00][..]);
+        processor.bits_reader = crate::bytesio::bits_reader::BitsReader::new(
+            crate::bytesio::bytes_reader::BytesReader::new(data),
+        );
+
+        let mut ext_freq: u32 = 0;
+        let result = processor.handle_sbr_extension_type22(&mut ext_freq);
+        assert!(result.is_ok());
+        assert_eq!(processor.mpeg4_aac.sbr, 0);
+    }
 }

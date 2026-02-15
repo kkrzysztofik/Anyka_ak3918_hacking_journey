@@ -994,4 +994,171 @@ mod tests {
         assert_eq!(load_processor.mpeg4_avc.sps[0].data[..], sps_data[..]);
         assert_eq!(load_processor.mpeg4_avc.pps[0].data[..], pps_data[..]);
     }
+
+    // ========== Edge Case Tests ==========
+
+    #[test]
+    fn test_h264_mp4toannexb_empty_input() {
+        let mut processor = Mpeg4AvcProcessor::new();
+        processor.mpeg4_avc.nalu_length = 4;
+
+        // Empty BytesMut input
+        let empty_data = BytesMut::new();
+        let mut reader = BytesReader::new(empty_data);
+        let result = processor.h264_mp4toannexb(&mut reader).unwrap();
+
+        // Should return empty result
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_decoder_configuration_record_load_minimal_valid_data() {
+        let mut processor = Mpeg4AvcProcessor::new();
+
+        // Build minimal valid AVC config record with smallest valid SPS
+        let mut writer = BytesWriter::new();
+        writer.write_u8(1).unwrap(); // version
+        writer.write_u8(66).unwrap(); // Baseline profile
+        writer.write_u8(0).unwrap(); // compatibility
+        writer.write_u8(10).unwrap(); // level 1.0
+        writer.write_u8(0xFF).unwrap(); // nalu_length = 4
+
+        // Minimal SPS (properly encoded)
+        writer.write_u8(0xE1).unwrap(); // 1 SPS
+        let minimal_sps: &[u8] = &[0x67, 0x42, 0x00, 0x0A, 0xDA, 0x01, 0x40, 0x16, 0xE0];
+        writer
+            .write_u16::<BigEndian>(minimal_sps.len() as u16)
+            .unwrap();
+        writer.write(minimal_sps).unwrap();
+
+        // Minimal PPS
+        writer.write_u8(1).unwrap(); // 1 PPS
+        let minimal_pps: &[u8] = &[0x68, 0xCE, 0x3C, 0x80];
+        writer
+            .write_u16::<BigEndian>(minimal_pps.len() as u16)
+            .unwrap();
+        writer.write(minimal_pps).unwrap();
+
+        let mut reader = BytesReader::new(writer.extract_current_bytes());
+        let result = processor.decoder_configuration_record_load(&mut reader);
+
+        assert!(result.is_ok());
+        assert_eq!(processor.mpeg4_avc.profile, 66);
+        assert_eq!(processor.mpeg4_avc.level, 10);
+        assert_eq!(processor.mpeg4_avc.nb_sps, 1);
+        assert_eq!(processor.mpeg4_avc.nb_pps, 1);
+    }
+
+    #[test]
+    fn test_h264_mp4toannexb_empty_sps_pps_data() {
+        let mut processor = Mpeg4AvcProcessor::new();
+        processor.mpeg4_avc.nalu_length = 4;
+
+        // Empty SPS/PPS annexb data (not preloaded)
+        assert!(
+            processor
+                .mpeg4_avc
+                .sps_annexb_data
+                .get_current_bytes()
+                .is_empty()
+        );
+        assert!(
+            processor
+                .mpeg4_avc
+                .pps_annexb_data
+                .get_current_bytes()
+                .is_empty()
+        );
+
+        // Build MP4 data with IDR NAL (should attempt prepend but with empty data)
+        let mut mp4_data = BytesMut::new();
+        mp4_data.extend_from_slice(&[0x00, 0x00, 0x00, 0x02]); // size=2
+        mp4_data.extend_from_slice(&[0x65, 0x88]); // IDR slice
+
+        let mut reader = BytesReader::new(mp4_data);
+        let annexb = processor.h264_mp4toannexb(&mut reader).unwrap();
+
+        // Should only have start code + IDR data (no SPS/PPS prepended since empty)
+        // Result: 4 (start code) + 2 (IDR data) = 6 bytes
+        assert_eq!(annexb.len(), 6);
+        assert_eq!(&annexb[..4], &H264_START_CODE);
+        assert_eq!(annexb[4], 0x65); // IDR NAL type
+    }
+
+    #[test]
+    fn test_nalus_to_mpeg4avc_empty_vector() {
+        let mut processor = Mpeg4AvcProcessor::new();
+        processor.mpeg4_avc.nalu_length = 4;
+
+        let empty_nalus: Vec<BytesMut> = vec![];
+        let result = processor.nalus_to_mpeg4avc(empty_nalus).unwrap();
+
+        // Should return empty result
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_decoder_configuration_record_load_multiple_sps_pps() {
+        let mut processor = Mpeg4AvcProcessor::new();
+
+        let mut writer = BytesWriter::new();
+        writer.write_u8(1).unwrap(); // version
+        writer.write_u8(66).unwrap(); // profile
+        writer.write_u8(0).unwrap(); // compat
+        writer.write_u8(30).unwrap(); // level
+        writer.write_u8(0xFF).unwrap(); // nalu_length
+
+        // 2 SPS entries
+        writer.write_u8(0xE2).unwrap(); // 2 SPS (0x02 | 0xE0)
+        let sps1: &[u8] = &[0x67, 0x42, 0x00, 0x1E, 0xDA, 0x01, 0x40, 0x16, 0xE0];
+        writer.write_u16::<BigEndian>(sps1.len() as u16).unwrap();
+        writer.write(sps1).unwrap();
+
+        let sps2: &[u8] = &[0x67, 0x42, 0x00, 0x1E, 0xDA, 0x01, 0x40, 0x16, 0xE0];
+        writer.write_u16::<BigEndian>(sps2.len() as u16).unwrap();
+        writer.write(sps2).unwrap();
+
+        // 2 PPS entries
+        writer.write_u8(2).unwrap(); // 2 PPS
+        let pps1: &[u8] = &[0x68, 0xCE, 0x3C, 0x80];
+        writer.write_u16::<BigEndian>(pps1.len() as u16).unwrap();
+        writer.write(pps1).unwrap();
+
+        let pps2: &[u8] = &[0x68, 0xCE, 0x3C, 0x81];
+        writer.write_u16::<BigEndian>(pps2.len() as u16).unwrap();
+        writer.write(pps2).unwrap();
+
+        let mut reader = BytesReader::new(writer.extract_current_bytes());
+        let result = processor.decoder_configuration_record_load(&mut reader);
+
+        assert!(result.is_ok());
+        assert_eq!(processor.mpeg4_avc.nb_sps, 2);
+        assert_eq!(processor.mpeg4_avc.nb_pps, 2);
+        assert_eq!(processor.mpeg4_avc.sps.len(), 2);
+        assert_eq!(processor.mpeg4_avc.pps.len(), 2);
+    }
+
+    #[test]
+    fn test_read_nalu_size_1_byte() {
+        let mut processor = Mpeg4AvcProcessor::new();
+        processor.mpeg4_avc.nalu_length = 1;
+
+        let data = BytesMut::from(&[0xFF][..]);
+        let mut reader = BytesReader::new(data);
+
+        let size = processor.read_nalu_size(&mut reader).unwrap();
+        assert_eq!(size, 255);
+    }
+
+    #[test]
+    fn test_write_nalu_size_1_byte() {
+        let mut processor = Mpeg4AvcProcessor::new();
+        processor.mpeg4_avc.nalu_length = 1;
+
+        let mut writer = BytesWriter::new();
+        processor.write_nalu_size(&mut writer, 255).unwrap();
+
+        let bytes = writer.extract_current_bytes();
+        assert_eq!(bytes.as_ref(), &[0xFF]);
+    }
 }

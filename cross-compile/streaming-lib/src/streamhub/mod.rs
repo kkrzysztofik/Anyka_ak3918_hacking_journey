@@ -2777,15 +2777,17 @@ mod tests {
         let mut hub = StreamsHub::new(None);
         let sender = hub.get_hub_event_sender();
         // Sending an event should succeed since the receiver exists within the hub
-        assert!(sender
-            .send(StreamHubEvent::Request {
-                identifier: StreamIdentifier::Unknown,
-                sender: {
-                    let (tx, _) = mpsc::unbounded_channel();
-                    tx
-                },
-            })
-            .is_ok());
+        assert!(
+            sender
+                .send(StreamHubEvent::Request {
+                    identifier: StreamIdentifier::Unknown,
+                    sender: {
+                        let (tx, _) = mpsc::unbounded_channel();
+                        tx
+                    },
+                })
+                .is_ok()
+        );
     }
 
     #[test]

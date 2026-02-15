@@ -496,4 +496,367 @@ mod tests {
         channel.create_unpacker();
         assert!(channel.rtp_unpacker.is_some());
     }
+
+    // ========================================================================
+    // Additional Coverage Tests
+    // ========================================================================
+
+    #[test]
+    fn test_clock_rate_h264_returns_sample_rate() {
+        let codec_info = RtspCodecInfo {
+            codec_id: RtspCodecId::H264,
+            payload_type: 96,
+            sample_rate: 90000,
+            ..Default::default()
+        };
+        let channel = RtpChannel::new(codec_info);
+        assert_eq!(channel.clock_rate(), 90000);
+    }
+
+    #[test]
+    fn test_clock_rate_aac_returns_sample_rate() {
+        let codec_info = RtspCodecInfo {
+            codec_id: RtspCodecId::AAC,
+            payload_type: 97,
+            sample_rate: 44100,
+            channel_count: 2,
+        };
+        let channel = RtpChannel::new(codec_info);
+        assert_eq!(channel.clock_rate(), 44100);
+    }
+
+    #[test]
+    fn test_clock_rate_g711a_returns_sample_rate() {
+        let codec_info = RtspCodecInfo {
+            codec_id: RtspCodecId::G711A,
+            payload_type: 8,
+            sample_rate: 8000,
+            ..Default::default()
+        };
+        let channel = RtpChannel::new(codec_info);
+        assert_eq!(channel.clock_rate(), 8000);
+    }
+
+    #[test]
+    fn test_regenerate_ssrc_changes_value() {
+        let codec_info = RtspCodecInfo::default();
+        let mut channel = RtpChannel::new(codec_info);
+        let original_ssrc = channel.ssrc();
+        channel.regenerate_ssrc();
+        let new_ssrc = channel.ssrc();
+        // With very high probability, the new SSRC should be different
+        // (probability of collision is 1 in 2^32)
+        assert_ne!(original_ssrc, new_ssrc);
+    }
+
+    #[test]
+    fn test_initial_timestamp_returns_init_value() {
+        let codec_info = RtspCodecInfo {
+            codec_id: RtspCodecId::H264,
+            payload_type: 96,
+            sample_rate: 90000,
+            ..Default::default()
+        };
+        let channel = RtpChannel {
+            codec_info,
+            rtp_packer: None,
+            rtp_unpacker: None,
+            ssrc: 0,
+            init_sequence: 42,
+            init_timestamp: 12345,
+        };
+        assert_eq!(channel.initial_timestamp(), 12345);
+    }
+
+    #[test]
+    fn test_on_frame_handler_when_unpacker_is_none_noop() {
+        let codec_info = RtspCodecInfo {
+            codec_id: RtspCodecId::G711A,
+            payload_type: 8,
+            sample_rate: 8000,
+            ..Default::default()
+        };
+        let mut channel = RtpChannel {
+            codec_info,
+            rtp_packer: None,
+            rtp_unpacker: None,
+            ssrc: 0,
+            init_sequence: 0,
+            init_timestamp: 0,
+        };
+        // Should not panic when unpacker is None
+        channel.on_frame_handler(Box::new(|_| Ok(())));
+    }
+
+    #[test]
+    fn test_on_packet_handler_when_packer_is_none_noop() {
+        use std::future::Future;
+        use std::pin::Pin;
+        let codec_info = RtspCodecInfo {
+            codec_id: RtspCodecId::H264,
+            payload_type: 96,
+            sample_rate: 90000,
+            ..Default::default()
+        };
+        let mut channel = RtpChannel {
+            codec_info,
+            rtp_packer: None,
+            rtp_unpacker: None,
+            ssrc: 0,
+            init_sequence: 0,
+            init_timestamp: 0,
+        };
+        // Should not panic when packer is None
+        channel.on_packet_handler(Box::new(|_, _| {
+            Box::pin(async { Ok(()) })
+                as Pin<Box<dyn Future<Output = Result<(), PackerError>> + Send>>
+        }));
+    }
+
+    #[test]
+    fn test_on_packet_for_rtcp_handler_when_packer_is_none_noop() {
+        use std::future::Future;
+        use std::pin::Pin;
+        let codec_info = RtspCodecInfo {
+            codec_id: RtspCodecId::H264,
+            payload_type: 96,
+            sample_rate: 90000,
+            ..Default::default()
+        };
+        let mut channel = RtpChannel {
+            codec_info,
+            rtp_packer: None,
+            rtp_unpacker: None,
+            ssrc: 0,
+            init_sequence: 0,
+            init_timestamp: 0,
+        };
+        // Should not panic when packer is None
+        channel.on_packet_for_rtcp_handler(Box::new(|_| {
+            Box::pin(async {}) as Pin<Box<dyn Future<Output = ()> + Send>>
+        }));
+    }
+
+    #[test]
+    fn test_rtcp_channel_on_packet_with_non_default_packet() {
+        use crate::rtsp::rtp::rtp_header::RtpHeader;
+        use bytes::BytesMut;
+
+        let mut channel = RtcpChannel::default();
+        let packet = RtpPacket {
+            header: RtpHeader {
+                version: 2,
+                padding_flag: 0,
+                extension_flag: 0,
+                cc: 0,
+                marker: 1,
+                payload_type: 96,
+                seq_number: 1234,
+                timestamp: 90000,
+                ssrc: 0x12345678,
+                csrcs: Vec::new(),
+            },
+            header_extension_profile: 0,
+            header_extension_length: 0,
+            header_extension_payload: BytesMut::new(),
+            payload: BytesMut::from(&[1, 2, 3, 4][..]),
+            padding: BytesMut::new(),
+        };
+        // Should not panic
+        channel.on_packet(packet);
+    }
+
+    #[test]
+    fn test_rtp_channel_ssrc_getter_returns_value() {
+        let codec_info = RtspCodecInfo {
+            codec_id: RtspCodecId::H264,
+            payload_type: 96,
+            sample_rate: 90000,
+            ..Default::default()
+        };
+        let channel = RtpChannel {
+            codec_info,
+            rtp_packer: None,
+            rtp_unpacker: None,
+            ssrc: 0xABCDEF00,
+            init_sequence: 0,
+            init_timestamp: 0,
+        };
+        assert_eq!(channel.ssrc(), 0xABCDEF00);
+    }
+
+    // ========================================================================
+    // TRtpFunc::create_packer Tests with Mock TNetIO
+    // ========================================================================
+
+    use crate::bytesio::bytesio_errors::BytesIOError;
+    use crate::bytesio::{NetType, TNetIO};
+    use async_trait::async_trait;
+    use bytes::{Bytes, BytesMut};
+    use mockall::mock;
+    use std::time::Duration;
+
+    mock! {
+        NetIO {}
+        #[async_trait]
+        impl TNetIO for NetIO {
+            async fn write(&mut self, bytes: Bytes) -> Result<(), BytesIOError>;
+            async fn read(&mut self) -> Result<BytesMut, BytesIOError>;
+            async fn read_timeout(&mut self, duration: Duration) -> Result<BytesMut, BytesIOError>;
+            fn get_net_type(&self) -> NetType;
+        }
+    }
+
+    #[test]
+    fn test_create_packer_h264_creates_packer() {
+        let codec_info = RtspCodecInfo {
+            codec_id: RtspCodecId::H264,
+            payload_type: 96,
+            sample_rate: 90000,
+            ..Default::default()
+        };
+        let mut channel = RtpChannel {
+            codec_info,
+            rtp_packer: None,
+            rtp_unpacker: None,
+            ssrc: 0x12345678,
+            init_sequence: 100,
+            init_timestamp: 0,
+        };
+        let mock_io = Arc::new(Mutex::new(
+            Box::new(MockNetIO::new()) as Box<dyn TNetIO + Send + Sync>
+        ));
+        channel.create_packer(mock_io);
+        assert!(channel.rtp_packer.is_some());
+    }
+
+    #[test]
+    fn test_create_packer_h265_creates_packer() {
+        let codec_info = RtspCodecInfo {
+            codec_id: RtspCodecId::H265,
+            payload_type: 98,
+            sample_rate: 90000,
+            ..Default::default()
+        };
+        let mut channel = RtpChannel {
+            codec_info,
+            rtp_packer: None,
+            rtp_unpacker: None,
+            ssrc: 0x12345678,
+            init_sequence: 100,
+            init_timestamp: 0,
+        };
+        let mock_io = Arc::new(Mutex::new(
+            Box::new(MockNetIO::new()) as Box<dyn TNetIO + Send + Sync>
+        ));
+        channel.create_packer(mock_io);
+        assert!(channel.rtp_packer.is_some());
+    }
+
+    #[test]
+    fn test_create_packer_aac_creates_packer() {
+        let codec_info = RtspCodecInfo {
+            codec_id: RtspCodecId::AAC,
+            payload_type: 97,
+            sample_rate: 44100,
+            channel_count: 2,
+        };
+        let mut channel = RtpChannel {
+            codec_info,
+            rtp_packer: None,
+            rtp_unpacker: None,
+            ssrc: 0x12345678,
+            init_sequence: 100,
+            init_timestamp: 0,
+        };
+        let mock_io = Arc::new(Mutex::new(
+            Box::new(MockNetIO::new()) as Box<dyn TNetIO + Send + Sync>
+        ));
+        channel.create_packer(mock_io);
+        assert!(channel.rtp_packer.is_some());
+    }
+
+    #[test]
+    fn test_create_packer_g711a_no_packer_created() {
+        let codec_info = RtspCodecInfo {
+            codec_id: RtspCodecId::G711A,
+            payload_type: 8,
+            sample_rate: 8000,
+            ..Default::default()
+        };
+        let mut channel = RtpChannel {
+            codec_info,
+            rtp_packer: None,
+            rtp_unpacker: None,
+            ssrc: 0x12345678,
+            init_sequence: 100,
+            init_timestamp: 0,
+        };
+        let mock_io = Arc::new(Mutex::new(
+            Box::new(MockNetIO::new()) as Box<dyn TNetIO + Send + Sync>
+        ));
+        channel.create_packer(mock_io);
+        // G711A packer not implemented yet
+        assert!(channel.rtp_packer.is_none());
+    }
+
+    #[test]
+    fn test_on_frame_handler_when_unpacker_is_some_accepts_handler() {
+        let codec_info = RtspCodecInfo {
+            codec_id: RtspCodecId::H264,
+            payload_type: 96,
+            sample_rate: 90000,
+            ..Default::default()
+        };
+        let mut channel = RtpChannel::new(codec_info);
+        // Unpacker is created in RtpChannel::new for H264
+        assert!(channel.rtp_unpacker.is_some());
+        // Should accept handler without panic
+        channel.on_frame_handler(Box::new(|_| Ok(())));
+    }
+
+    #[test]
+    fn test_on_packet_handler_when_packer_is_some_accepts_handler() {
+        use std::future::Future;
+        use std::pin::Pin;
+        let codec_info = RtspCodecInfo {
+            codec_id: RtspCodecId::H264,
+            payload_type: 96,
+            sample_rate: 90000,
+            ..Default::default()
+        };
+        let mut channel = RtpChannel::new(codec_info);
+        let mock_io = Arc::new(Mutex::new(
+            Box::new(MockNetIO::new()) as Box<dyn TNetIO + Send + Sync>
+        ));
+        channel.create_packer(mock_io);
+        assert!(channel.rtp_packer.is_some());
+        // Should accept handler without panic
+        channel.on_packet_handler(Box::new(|_, _| {
+            Box::pin(async { Ok(()) })
+                as Pin<Box<dyn Future<Output = Result<(), PackerError>> + Send>>
+        }));
+    }
+
+    #[test]
+    fn test_on_packet_for_rtcp_handler_when_packer_is_some_accepts_handler() {
+        use std::future::Future;
+        use std::pin::Pin;
+        let codec_info = RtspCodecInfo {
+            codec_id: RtspCodecId::H264,
+            payload_type: 96,
+            sample_rate: 90000,
+            ..Default::default()
+        };
+        let mut channel = RtpChannel::new(codec_info);
+        let mock_io = Arc::new(Mutex::new(
+            Box::new(MockNetIO::new()) as Box<dyn TNetIO + Send + Sync>
+        ));
+        channel.create_packer(mock_io);
+        assert!(channel.rtp_packer.is_some());
+        // Should accept handler without panic
+        channel.on_packet_for_rtcp_handler(Box::new(|_| {
+            Box::pin(async {}) as Pin<Box<dyn Future<Output = ()> + Send>>
+        }));
+    }
 }

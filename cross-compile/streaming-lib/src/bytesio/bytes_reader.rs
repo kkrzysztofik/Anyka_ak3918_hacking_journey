@@ -1154,4 +1154,212 @@ mod tests {
         assert_eq!(reader.len(), 5);
         assert_eq!(reader.read_u8().unwrap(), 2);
     }
+
+    // ============================================
+    // AsyncBytesReader Tests
+    // ============================================
+
+    use crate::bytesio::NetType;
+    use crate::bytesio::bytesio_errors::{BytesIOError, BytesIOErrorValue};
+    use async_trait::async_trait;
+    use bytes::Bytes;
+    use std::collections::VecDeque;
+    use std::time::Duration;
+
+    /// Mock TNetIO that returns pre-loaded data chunks on each read() call.
+    struct MockNetIO {
+        chunks: tokio::sync::Mutex<VecDeque<BytesMut>>,
+    }
+
+    impl MockNetIO {
+        fn new(chunks: Vec<&[u8]>) -> Self {
+            let queue = chunks
+                .into_iter()
+                .map(|c| BytesMut::from(c))
+                .collect::<VecDeque<_>>();
+            Self {
+                chunks: tokio::sync::Mutex::new(queue),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl TNetIO for MockNetIO {
+        async fn write(&mut self, _bytes: Bytes) -> Result<(), BytesIOError> {
+            Ok(())
+        }
+
+        async fn read(&mut self) -> Result<BytesMut, BytesIOError> {
+            let mut chunks = self.chunks.lock().await;
+            chunks.pop_front().ok_or(BytesIOError {
+                value: BytesIOErrorValue::NoneReturn,
+            })
+        }
+
+        async fn read_timeout(&mut self, _duration: Duration) -> Result<BytesMut, BytesIOError> {
+            self.read().await
+        }
+
+        fn get_net_type(&self) -> NetType {
+            NetType::TCP
+        }
+    }
+
+    fn make_async_reader(chunks: Vec<&[u8]>) -> AsyncBytesReader<MockNetIO> {
+        let io = Arc::new(Mutex::new(MockNetIO::new(chunks)));
+        AsyncBytesReader::new(io)
+    }
+
+    #[tokio::test]
+    async fn test_async_bytes_reader_new() {
+        let reader = make_async_reader(vec![]);
+        assert!(reader.bytes_reader.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_async_bytes_reader_read_populates_buffer() {
+        let mut reader = make_async_reader(vec![&[1, 2, 3]]);
+        reader.read().await.unwrap();
+        assert_eq!(reader.bytes_reader.len(), 3);
+    }
+
+    #[tokio::test]
+    async fn test_async_bytes_reader_read_u8() {
+        let mut reader = make_async_reader(vec![&[0x42]]);
+        let val = reader.read_u8().await.unwrap();
+        assert_eq!(val, 0x42);
+    }
+
+    #[tokio::test]
+    async fn test_async_bytes_reader_advance_u8() {
+        let mut reader = make_async_reader(vec![&[0xAB, 0xCD]]);
+        let val = reader.advance_u8().await.unwrap();
+        assert_eq!(val, 0xAB);
+        // advance doesn't consume, so buffer still has 2 bytes
+        assert_eq!(reader.bytes_reader.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_async_bytes_reader_read_u16_big_endian() {
+        let mut reader = make_async_reader(vec![&[0x01, 0x02]]);
+        let val = reader.read_u16::<BigEndian>().await.unwrap();
+        assert_eq!(val, 0x0102);
+    }
+
+    #[tokio::test]
+    async fn test_async_bytes_reader_read_u24_big_endian() {
+        let mut reader = make_async_reader(vec![&[0x01, 0x02, 0x03]]);
+        let val = reader.read_u24::<BigEndian>().await.unwrap();
+        assert_eq!(val, 0x010203);
+    }
+
+    #[tokio::test]
+    async fn test_async_bytes_reader_advance_u24_big_endian() {
+        let mut reader = make_async_reader(vec![&[0x04, 0x05, 0x06]]);
+        let val = reader.advance_u24::<BigEndian>().await.unwrap();
+        assert_eq!(val, 0x040506);
+        // advance doesn't consume
+        assert_eq!(reader.bytes_reader.len(), 3);
+    }
+
+    #[tokio::test]
+    async fn test_async_bytes_reader_read_u32_big_endian() {
+        let mut reader = make_async_reader(vec![&[0x01, 0x02, 0x03, 0x04]]);
+        let val = reader.read_u32::<BigEndian>().await.unwrap();
+        assert_eq!(val, 0x01020304);
+    }
+
+    #[tokio::test]
+    async fn test_async_bytes_reader_read_f64_big_endian() {
+        // IEEE 754 representation of 1.0
+        let mut reader = make_async_reader(vec![&[0x3F, 0xF0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]]);
+        let val = reader.read_f64::<BigEndian>().await.unwrap();
+        assert!((val - 1.0).abs() < f64::EPSILON);
+    }
+
+    #[tokio::test]
+    async fn test_async_bytes_reader_read_bytes() {
+        let mut reader = make_async_reader(vec![&[10, 20, 30, 40, 50]]);
+        let result = reader.read_bytes(3).await.unwrap();
+        assert_eq!(&result[..], &[10, 20, 30]);
+        assert_eq!(reader.bytes_reader.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_async_bytes_reader_advance_bytes() {
+        let mut reader = make_async_reader(vec![&[10, 20, 30, 40, 50]]);
+        let result = reader.advance_bytes(3).await.unwrap();
+        assert_eq!(&result[..], &[10, 20, 30]);
+        // advance doesn't consume
+        assert_eq!(reader.bytes_reader.len(), 5);
+    }
+
+    #[tokio::test]
+    async fn test_async_bytes_reader_read_bytes_cursor() {
+        let mut reader = make_async_reader(vec![&[1, 2, 3, 4, 5]]);
+        let cursor = reader.read_bytes_cursor(3).await.unwrap();
+        let inner = cursor.into_inner();
+        assert_eq!(&inner[..], &[1, 2, 3]);
+        assert_eq!(reader.bytes_reader.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_async_bytes_reader_advance_bytes_cursor() {
+        let mut reader = make_async_reader(vec![&[1, 2, 3, 4, 5]]);
+        let cursor = reader.advance_bytes_cursor(3).await.unwrap();
+        let inner = cursor.into_inner();
+        assert_eq!(&inner[..], &[1, 2, 3]);
+        // advance doesn't consume
+        assert_eq!(reader.bytes_reader.len(), 5);
+    }
+
+    #[tokio::test]
+    async fn test_async_bytes_reader_check_reads_multiple_chunks() {
+        // Data arrives in two chunks; the reader should accumulate
+        // enough for a 4-byte u32 read.
+        let mut reader = make_async_reader(vec![&[0x01, 0x02], &[0x03, 0x04]]);
+        let val = reader.read_u32::<BigEndian>().await.unwrap();
+        assert_eq!(val, 0x01020304);
+    }
+
+    #[tokio::test]
+    async fn test_async_bytes_reader_check_reads_many_chunks() {
+        // 8 bytes arrive one byte at a time for a u64 read
+        let mut reader = make_async_reader(vec![
+            &[0x01],
+            &[0x02],
+            &[0x03],
+            &[0x04],
+            &[0x05],
+            &[0x06],
+            &[0x07],
+            &[0x08],
+        ]);
+        let val = reader.read_f64::<BigEndian>().await.unwrap();
+        // 0x0102030405060708 as f64
+        let expected = f64::from_bits(0x0102030405060708);
+        assert!((val - expected).abs() < f64::EPSILON || val.to_bits() == expected.to_bits());
+    }
+
+    #[tokio::test]
+    async fn test_async_bytes_reader_sequential_reads() {
+        let mut reader = make_async_reader(vec![&[
+            0x01, // u8
+            0x02, 0x03, // u16
+            0x04, 0x05, 0x06, // u24
+            0x07, 0x08, 0x09, 0x0A, // u32
+        ]]);
+        assert_eq!(reader.read_u8().await.unwrap(), 0x01);
+        assert_eq!(reader.read_u16::<BigEndian>().await.unwrap(), 0x0203);
+        assert_eq!(reader.read_u24::<BigEndian>().await.unwrap(), 0x040506);
+        assert_eq!(reader.read_u32::<BigEndian>().await.unwrap(), 0x0708090A);
+    }
+
+    #[tokio::test]
+    async fn test_async_bytes_reader_read_error_propagated() {
+        // Empty mock with no data chunks - read will return NoneReturn error
+        let mut reader = make_async_reader(vec![]);
+        let result = reader.read_u8().await;
+        assert!(result.is_err());
+    }
 }

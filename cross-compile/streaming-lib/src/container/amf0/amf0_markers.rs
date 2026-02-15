@@ -25,7 +25,16 @@ mod tests {
 
     #[test]
     fn test_amf0_markers_are_distinct() {
-        let markers = [NUMBER, BOOLEAN, STRING, OBJECT, NULL, ECMA_ARRAY, OBJECT_END, LONG_STRING];
+        let markers = [
+            NUMBER,
+            BOOLEAN,
+            STRING,
+            OBJECT,
+            NULL,
+            ECMA_ARRAY,
+            OBJECT_END,
+            LONG_STRING,
+        ];
         for i in 0..markers.len() {
             for j in (i + 1)..markers.len() {
                 assert_ne!(markers[i], markers[j], "markers[{}] == markers[{}]", i, j);
