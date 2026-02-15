@@ -2,7 +2,6 @@
  * Shared test utilities for React component tests
  * Provides common wrappers, QueryClient setup, and mock factories
  */
-/* eslint-disable react-refresh/only-export-components */
 import type { ReactElement, ReactNode } from 'react';
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';

@@ -6,6 +6,15 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { type AuthContextValue, AuthProvider, useAuth } from './useAuth';
 
+const createEncryptedFixture = () => {
+  const unique = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  return {
+    iv: btoa(`iv-${unique}`),
+    data: btoa(`data-${unique}`),
+    tag: btoa(`tag-${unique}`),
+  };
+};
+
 // Mock crypto utilities
 const mockEncrypt = vi.fn();
 const mockDecrypt = vi.fn();
@@ -46,7 +55,7 @@ describe('useAuth', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     sessionStorage.clear();
-    mockEncrypt.mockResolvedValue({ iv: 'test-iv', data: 'test-data', tag: 'test-tag' });
+    mockEncrypt.mockResolvedValue(createEncryptedFixture());
     mockDecrypt.mockResolvedValue('decrypted-password');
   });
 
@@ -63,7 +72,7 @@ describe('useAuth', () => {
     it('should restore authenticated state from sessionStorage', async () => {
       const storedData = {
         username: 'admin',
-        encryptedPassword: { iv: 'test-iv', data: 'test-data', tag: 'test-tag' },
+        encryptedPassword: createEncryptedFixture(),
       };
       sessionStorage.setItem('onvif_camera_auth', JSON.stringify(storedData));
 

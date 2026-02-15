@@ -16,6 +16,15 @@ import {
 
 import LoginPage from './LoginPage';
 
+const createEncryptedFixture = () => {
+  const unique = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  return {
+    iv: btoa(`iv-${unique}`),
+    data: btoa(`data-${unique}`),
+    tag: btoa(`tag-${unique}`),
+  };
+};
+
 // Mock authService
 vi.mock('@/services/authService', () => ({
   verifyCredentials: vi.fn(),
@@ -162,7 +171,7 @@ describe('LoginPage', () => {
       'onvif_camera_auth',
       JSON.stringify({
         username: 'admin',
-        encryptedPassword: { iv: 'test', data: 'test', tag: 'test' },
+        encryptedPassword: createEncryptedFixture(),
       }),
     );
 
@@ -179,7 +188,7 @@ describe('LoginPage', () => {
       'onvif_camera_auth',
       JSON.stringify({
         username: 'admin',
-        encryptedPassword: { iv: 'test', data: 'test', tag: 'test' },
+        encryptedPassword: createEncryptedFixture(),
       }),
     );
 
@@ -199,7 +208,7 @@ describe('LoginPage', () => {
       'onvif_camera_auth',
       JSON.stringify({
         username: 'admin',
-        encryptedPassword: { iv: 'test', data: 'test', tag: 'test' },
+        encryptedPassword: createEncryptedFixture(),
       }),
     );
 

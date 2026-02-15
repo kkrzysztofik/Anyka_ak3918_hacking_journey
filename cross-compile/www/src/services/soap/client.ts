@@ -121,11 +121,11 @@ export function escapeXmlAttribute(input: string): string {
  */
 export function createSOAPEnvelope(body: string): string {
   return `<?xml version="1.0" encoding="UTF-8"?>
-<soap:Envelope xmlns:soap="${SOAP_NS}" xmlns:tds="${DEVICE_NS}" xmlns:trt="${MEDIA_NS}" xmlns:timg="${IMAGING_NS}" xmlns:tptz="${PTZ_NS}">
-  <soap:Body>
+<s:Envelope xmlns:s="${SOAP_NS}" xmlns:tds="${DEVICE_NS}" xmlns:trt="${MEDIA_NS}" xmlns:timg="${IMAGING_NS}" xmlns:tptz="${PTZ_NS}">
+  <s:Body>
     ${body}
-  </soap:Body>
-</soap:Envelope>`;
+  </s:Body>
+</s:Envelope>`;
 }
 
 /**

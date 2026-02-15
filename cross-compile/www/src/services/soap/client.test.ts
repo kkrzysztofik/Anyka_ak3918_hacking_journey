@@ -52,15 +52,15 @@ describe('SOAP Client', () => {
       const envelope = createSOAPEnvelope(body);
 
       expect(envelope).toContain('<?xml version="1.0" encoding="UTF-8"?>');
-      expect(envelope).toContain('soap:Envelope');
-      expect(envelope).toContain('soap:Body');
+      expect(envelope).toContain('s:Envelope');
+      expect(envelope).toContain('s:Body');
       expect(envelope).toContain(body);
     });
 
     it('should include all required ONVIF namespaces', () => {
       const envelope = createSOAPEnvelope('<test />');
 
-      expect(envelope).toContain('xmlns:soap=');
+      expect(envelope).toContain('xmlns:s=');
       expect(envelope).toContain('xmlns:tds=');
       expect(envelope).toContain('xmlns:trt=');
       expect(envelope).toContain('xmlns:timg=');

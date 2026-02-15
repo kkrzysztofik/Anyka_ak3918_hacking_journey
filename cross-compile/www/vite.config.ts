@@ -12,37 +12,27 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
  * @param id - The module ID to determine the chunk for
  * @returns The chunk name or undefined for default chunking
  */
-function isVendorLibrary(id: string): boolean {
-  return id.includes('node_modules');
-}
+/**
+ * Determines the vendor chunk name for node_modules dependencies.
+ * Only vendor code is manually chunked — app source code is left to
+ * Vite's default route-based splitting to avoid circular chunk dependencies.
+ */
+function getChunkName(id: string): string | undefined {
+  if (!id.includes('node_modules')) return undefined;
 
-function getVendorChunk(id: string): string | undefined {
   if (id.includes('@tanstack/react-query')) return 'query-vendor';
-  if (id.includes('react-router-dom')) return 'router-vendor';
-  if (id.includes('lucide-react') || id.includes('@radix-ui') || id.includes('react-hook-form') || id.includes('@hookform') || id.includes('recharts') || id.includes('sonner')) return 'ui-vendor';
+  if (
+    id.includes('lucide-react') ||
+    id.includes('@radix-ui') ||
+    id.includes('react-hook-form') ||
+    id.includes('@hookform') ||
+    id.includes('recharts') ||
+    id.includes('sonner')
+  )
+    return 'ui-vendor';
   if (id.includes('axios')) return 'http-vendor';
   if (id.includes('fast-xml-parser') || id.includes('dompurify')) return 'utils-vendor';
   return 'vendor';
-}
-
-function getSrcChunk(id: string): string | undefined {
-  if (id.includes('/services/') || id.includes('onvif')) return 'onvif-services';
-  if (id.includes('DeviceService') || id.includes('SystemInfo')) return 'device-components';
-  if (id.includes('/store/slices/')) return 'store-slices';
-  if (id.includes('/utils/') || id.includes('/config/')) return 'app-utils';
-  if (id.includes('/components/') && (id.includes('LiveView') || id.includes('PTZ') || id.includes('Video'))) return 'camera-components';
-  return undefined;
-}
-
-function getChunkName(id: string): string | undefined {
-  const fromSrc = getSrcChunk(id);
-  if (fromSrc) return fromSrc;
-
-  if (isVendorLibrary(id)) {
-    return getVendorChunk(id);
-  }
-
-  return undefined;
 }
 
 // https://vitejs.dev/config/
