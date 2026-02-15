@@ -575,24 +575,56 @@ impl Application {
 
         // Phase 2: Platform
         progress.begin_phase(StartupPhase::Platform);
-        // Platform initialization is optional - we continue without it for testing
-        let stub_platform = StubPlatformBuilder::new()
-            .ptz_supported(true)
-            .imaging_supported(true)
-            .build();
-
-        let platform: Option<Arc<dyn Platform>> = match stub_platform.initialize().await {
-            Ok(()) => {
-                tracing::info!("Platform initialized successfully (using stub)");
-                Some(Arc::new(stub_platform) as Arc<dyn Platform>)
+        let platform: Option<Arc<dyn Platform>> = {
+            #[cfg(not(use_stubs))]
+            {
+                // On real hardware, use AnykaPlatform with FFI to Anyka SDK
+                match crate::platform::AnykaPlatform::new() {
+                    Ok(p) => match p.initialize().await {
+                        Ok(()) => {
+                            tracing::info!("AnykaPlatform initialized (real hardware)");
+                            Some(Arc::new(p) as Arc<dyn Platform>)
+                        }
+                        Err(e) => {
+                            tracing::warn!(
+                                "AnykaPlatform initialization failed, continuing in degraded mode: {}",
+                                e
+                            );
+                            progress.record_degraded("platform", e.to_string());
+                            None
+                        }
+                    },
+                    Err(e) => {
+                        tracing::warn!(
+                            "AnykaPlatform creation failed, continuing in degraded mode: {}",
+                            e
+                        );
+                        progress.record_degraded("platform", e.to_string());
+                        None
+                    }
+                }
             }
-            Err(e) => {
-                tracing::warn!(
-                    "Platform initialization failed, continuing in degraded mode: {}",
-                    e
-                );
-                progress.record_degraded("platform", e.to_string());
-                None
+            #[cfg(use_stubs)]
+            {
+                // On dev builds, use StubPlatform for testing
+                let stub_platform = StubPlatformBuilder::new()
+                    .ptz_supported(true)
+                    .imaging_supported(true)
+                    .build();
+                match stub_platform.initialize().await {
+                    Ok(()) => {
+                        tracing::info!("Platform initialized (stub mode)");
+                        Some(Arc::new(stub_platform) as Arc<dyn Platform>)
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            "Stub platform initialization failed, continuing in degraded mode: {}",
+                            e
+                        );
+                        progress.record_degraded("platform", e.to_string());
+                        None
+                    }
+                }
             }
         };
         progress.complete_phase();

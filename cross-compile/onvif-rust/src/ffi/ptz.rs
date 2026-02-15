@@ -27,10 +27,10 @@ use crate::platform::PlatformError;
 use crate::platform::PlatformResult;
 
 #[cfg(not(use_stubs))]
-use crate::ffi::generated::{ptz_device, ptz_turn_direction};
+use crate::ffi::generated::{ptz_device, ptz_feedback_pin, ptz_turn_direction};
 
 #[cfg(use_stubs)]
-use crate::ffi::{ptz_device, ptz_turn_direction};
+use crate::ffi::{ptz_device, ptz_feedback_pin, ptz_turn_direction};
 
 use crate::ffi::{AK_FAILED_I32, AK_SUCCESS_I32, PtzDirection, PtzMotor};
 
@@ -39,9 +39,10 @@ use crate::ffi::{AK_FAILED_I32, AK_SUCCESS_I32, PtzDirection, PtzMotor};
 pub(crate) trait PtzFfiTrait: Send + Sync {
     fn ptz_open(&self) -> i32;
     fn ptz_close(&self) -> i32;
+    fn ptz_check_self(&self, pin_type: ptz_feedback_pin) -> i32;
     fn ptz_turn(&self, direction: ptz_turn_direction, degree: i32) -> i32;
     fn ptz_get_step_pos(&self, motor_no: ptz_device) -> i32;
-    fn ptz_stop(&self) -> i32;
+    fn ptz_stop(&self, direction: ptz_turn_direction) -> i32;
 }
 
 /// Default implementation that calls the real FFI functions.
@@ -75,6 +76,19 @@ impl PtzFfiTrait for RealPtzFfi {
     }
 
     #[cfg(not(use_stubs))]
+    fn ptz_check_self(&self, pin_type: ptz_feedback_pin) -> i32 {
+        unsafe extern "C" {
+            fn ak_drv_ptz_check_self(pin_type: ptz_feedback_pin) -> i32;
+        }
+        unsafe { ak_drv_ptz_check_self(pin_type) }
+    }
+
+    #[cfg(use_stubs)]
+    fn ptz_check_self(&self, _pin_type: ptz_feedback_pin) -> i32 {
+        AK_SUCCESS_I32
+    }
+
+    #[cfg(not(use_stubs))]
     fn ptz_turn(&self, direction: ptz_turn_direction, degree: i32) -> i32 {
         unsafe extern "C" {
             fn ak_drv_ptz_turn(direction: ptz_turn_direction, degree: i32) -> i32;
@@ -101,15 +115,15 @@ impl PtzFfiTrait for RealPtzFfi {
     }
 
     #[cfg(not(use_stubs))]
-    fn ptz_stop(&self) -> i32 {
+    fn ptz_stop(&self, direction: ptz_turn_direction) -> i32 {
         unsafe extern "C" {
-            fn ak_drv_ptz_stop() -> i32;
+            fn ak_drv_ptz_turn_stop(direct: ptz_turn_direction) -> i32;
         }
-        unsafe { ak_drv_ptz_stop() }
+        unsafe { ak_drv_ptz_turn_stop(direction) }
     }
 
     #[cfg(use_stubs)]
-    fn ptz_stop(&self) -> i32 {
+    fn ptz_stop(&self, _direction: ptz_turn_direction) -> i32 {
         AK_SUCCESS_I32
     }
 }
@@ -163,7 +177,13 @@ unsafe impl Sync for PTZHandle {}
 impl Drop for PTZHandle {
     fn drop(&mut self) {
         if self.opened {
-            let _ = REAL_PTZ_FFI.ptz_close();
+            let ret = REAL_PTZ_FFI.ptz_close();
+            if ret != AK_SUCCESS_I32 {
+                tracing::error!(
+                    "PTZ device close failed in Drop (resource may leak): error code {}",
+                    ret
+                );
+            }
         }
     }
 }
@@ -177,9 +197,27 @@ impl PTZHandle {
 }
 
 /// Internal helper that takes FFI trait for testability.
+///
+/// Calls `ak_drv_ptz_open()` followed by `ak_drv_ptz_check_self(0)` to complete
+/// SDK initialization, matching the C adapter's `platform_ptz_init()` sequence.
+/// The self-check calibrates motor positions and transitions the SDK from
+/// `PTZ_WAIT_INIT` to `PTZ_INIT_OK` state.
 pub(crate) fn ptz_open_internal(ffi: &dyn PtzFfiTrait) -> PlatformResult<PTZHandle> {
     let ret = ffi.ptz_open();
     check_result(ret, "ak_drv_ptz_open")?;
+
+    // Self-check is required for the SDK to consider PTZ initialized.
+    // PTZ_FEEDBACK_PIN_NONE = 0 (no feedback pin on this hardware).
+    let ret = ffi.ptz_check_self(ptz_feedback_pin::PTZ_FEEDBACK_PIN_NONE);
+    if ret != AK_SUCCESS_I32 {
+        tracing::warn!(
+            "PTZ self-check failed (error code {}), continuing anyway",
+            ret
+        );
+        // Don't return error — PTZ may still work without self-check,
+        // matching the C adapter's behavior.
+    }
+
     Ok(PTZHandle { opened: true })
 }
 
@@ -372,11 +410,13 @@ pub fn ptz_get_step_pos(handle: &PTZHandle, motor: PtzMotor) -> PlatformResult<i
 /// Internal helper that takes FFI trait for testability.
 pub(crate) fn ptz_stop_internal(
     _handle: &PTZHandle,
-    _direction: PtzDirection,
+    direction: PtzDirection,
     ffi: &dyn PtzFfiTrait,
 ) -> PlatformResult<()> {
-    let ret = ffi.ptz_stop();
-    check_result(ret, "ak_drv_ptz_stop")
+    let sdk_direction: ptz_turn_direction =
+        unsafe { std::mem::transmute(direction.to_direction_code()) };
+    let ret = ffi.ptz_stop(sdk_direction);
+    check_result(ret, "ak_drv_ptz_turn_stop")
 }
 
 /// Stop PTZ motor movement.
@@ -525,6 +565,10 @@ mod tests {
             .expect_ptz_open()
             .times(1)
             .returning(|| AK_SUCCESS_I32);
+        mock_ffi
+            .expect_ptz_check_self()
+            .times(1)
+            .returning(|_| AK_SUCCESS_I32);
 
         let result = ptz_open_internal(&mock_ffi);
         assert!(result.is_ok());
@@ -668,8 +712,9 @@ mod tests {
 
         mock_ffi
             .expect_ptz_stop()
+            .withf(|dir| *dir == ptz_turn_direction::PTZ_TURN_RIGHT)
             .times(1)
-            .returning(|| AK_SUCCESS_I32);
+            .returning(|_| AK_SUCCESS_I32);
 
         let result = ptz_stop_internal(&handle, PtzDirection::Right, &mock_ffi);
         assert!(result.is_ok());
@@ -682,14 +727,15 @@ mod tests {
 
         mock_ffi
             .expect_ptz_stop()
+            .withf(|dir| *dir == ptz_turn_direction::PTZ_TURN_DOWN)
             .times(1)
-            .returning(|| AK_FAILED_I32);
+            .returning(|_| AK_FAILED_I32);
 
         let result = ptz_stop_internal(&handle, PtzDirection::Down, &mock_ffi);
         assert!(result.is_err());
         match result {
             Err(PlatformError::HardwareFailure(msg)) => {
-                assert!(msg.contains("ak_drv_ptz_stop"));
+                assert!(msg.contains("ak_drv_ptz_turn_stop"));
             }
             _ => panic!("Expected HardwareFailure error"),
         }

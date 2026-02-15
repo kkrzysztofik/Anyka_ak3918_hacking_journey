@@ -158,15 +158,25 @@ pub mod stubs {
         Vertical = 1,
     }
 
+    /// PTZ feedback pin type
+    #[repr(C)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    #[allow(non_camel_case_types)]
+    pub enum PtzFeedbackPin {
+        PTZ_FEEDBACK_PIN_NONE = 0,
+        PTZ_FEEDBACK_PIN_EXIST = 1,
+    }
+
     /// PTZ turn direction
     #[repr(C)]
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    #[allow(non_camel_case_types)]
     pub enum PtzTurnDirection {
-        Reserved = 0,
-        Left = 1,
-        Right = 2,
-        Up = 3,
-        Down = 4,
+        PTZ_TURN_RESERVED = 0,
+        PTZ_TURN_LEFT = 1,
+        PTZ_TURN_RIGHT = 2,
+        PTZ_TURN_UP = 3,
+        PTZ_TURN_DOWN = 4,
     }
 
     /// Video channel attributes
@@ -223,6 +233,7 @@ mod stub_type_aliases {
     pub type video_resolution = stubs::VideoResolution;
     pub type audio_param = stubs::AudioParam;
     pub type ptz_device = stubs::PtzDevice;
+    pub type ptz_feedback_pin = stubs::PtzFeedbackPin;
     pub type ptz_turn_direction = stubs::PtzTurnDirection;
 }
 
