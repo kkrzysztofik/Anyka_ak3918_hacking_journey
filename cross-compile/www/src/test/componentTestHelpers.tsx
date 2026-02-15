@@ -412,8 +412,7 @@ export async function expandProfile(
 
   await waitFor(
     () => {
-      const videoSourceTexts = screen.getAllByText('Video Source');
-      expect(videoSourceTexts.length).toBeGreaterThan(0);
+      expect(screen.getByTestId(`video-source-config-${profileToken}`)).toBeInTheDocument();
     },
     { timeout: 3000 },
   );
@@ -422,11 +421,12 @@ export async function expandProfile(
 /**
  * Wait for the video encoder section to appear in an expanded profile
  */
-export async function waitForVideoEncoderSection(): Promise<void> {
+export async function waitForVideoEncoderSection(
+  profileToken = 'ProfileToken1',
+): Promise<void> {
   await waitFor(
     () => {
-      const videoEncoderTexts = screen.getAllByText('Video Encoder');
-      expect(videoEncoderTexts.length).toBeGreaterThan(0);
+      expect(screen.getByTestId(`video-encoder-config-${profileToken}`)).toBeInTheDocument();
     },
     { timeout: 3000 },
   );

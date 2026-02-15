@@ -87,13 +87,13 @@ describe('StatusCardItem', () => {
 
   it('should display label and value', () => {
     render(<StatusCardItem label="Status" value="Online" />);
-    expect(screen.getByText('Status')).toBeInTheDocument();
-    expect(screen.getByText('Online')).toBeInTheDocument();
+    expect(screen.getByTestId('status-card-item-label')).toHaveTextContent('Status');
+    expect(screen.getByTestId('status-card-item-value')).toHaveTextContent('Online');
   });
 
   it('should render ReactNode as value', () => {
     render(<StatusCardItem label="Count" value={<span data-testid="value-node">42</span>} />);
-    expect(screen.getByText('Count')).toBeInTheDocument();
+    expect(screen.getByTestId('status-card-item-label')).toHaveTextContent('Count');
     expect(screen.getByTestId('value-node')).toHaveTextContent('42');
   });
 
@@ -119,9 +119,13 @@ describe('StatusCard Composition', () => {
     expect(screen.getByTestId('status-card')).toBeInTheDocument();
     expect(screen.getByTestId('status-card-image')).toBeInTheDocument();
     expect(screen.getByTestId('status-card-content')).toBeInTheDocument();
-    expect(screen.getByText('Label 1')).toBeInTheDocument();
-    expect(screen.getByText('Value 1')).toBeInTheDocument();
-    expect(screen.getByText('Label 2')).toBeInTheDocument();
-    expect(screen.getByText('Value 2')).toBeInTheDocument();
+    const labels = screen.getAllByTestId('status-card-item-label');
+    const values = screen.getAllByTestId('status-card-item-value');
+    expect(labels).toHaveLength(2);
+    expect(values).toHaveLength(2);
+    expect(labels[0]).toHaveTextContent('Label 1');
+    expect(values[0]).toHaveTextContent('Value 1');
+    expect(labels[1]).toHaveTextContent('Label 2');
+    expect(values[1]).toHaveTextContent('Value 2');
   });
 });

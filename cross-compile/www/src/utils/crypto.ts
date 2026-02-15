@@ -1,19 +1,26 @@
 /**
  * Cryptographic utilities for secure credential storage
  *
- * Uses Web Crypto API (AES-GCM) for password encryption when available (HTTPS/localhost).
- * Falls back to base64 encoding in non-secure contexts (HTTP).
- * Keys are derived from a session-specific salt to prevent
- * cross-session key extraction.
+ * Uses Web Crypto API (AES-GCM) with a non-exportable session key held in memory.
+ * The key is generated once per page load via crypto.subtle.generateKey() and is
+ * never persisted — on page refresh the key is lost, stored ciphertext becomes
+ * unreadable, and the user must re-authenticate. This is the correct security
+ * model for sessionStorage-based credential caching.
+ *
+ * When SubtleCrypto is unavailable (plain HTTP), credential persistence is
+ * refused entirely — callers must handle this by keeping credentials in
+ * React state only.
  */
 
 // Encryption result interface
 export interface EncryptedData {
   data: string; // Base64-encoded ciphertext
   iv: string; // Base64-encoded initialization vector
-  salt: string; // Base64-encoded salt for key derivation
-  method?: 'aes-gcm' | 'base64'; // Encryption method used (for backward compatibility)
+  method: 'aes-gcm'; // Encryption method (only AES-GCM is supported)
 }
+
+/** Module-level session key — lives only in memory, never exported or persisted */
+let sessionKey: CryptoKey | null = null;
 
 /**
  * Check if Web Crypto API is available (requires secure context)
@@ -25,45 +32,28 @@ function isCryptoAvailable(): boolean {
 }
 
 /**
- * Generate a cryptographically strong random key
+ * Returns the current session key, generating one if needed.
+ * The key is non-exportable and uses AES-GCM with a 256-bit key length.
  */
-async function generateKey(salt: Uint8Array): Promise<CryptoKey> {
+async function getOrCreateKey(): Promise<CryptoKey> {
   if (!isCryptoAvailable()) {
-    throw new Error('Web Crypto API not available in non-secure context');
+    throw new Error('Credential storage requires HTTPS');
   }
-  // Import the salt as a key material
-  // Convert to ArrayBuffer to satisfy type requirements
-  // Create a new ArrayBuffer and copy the salt data
-  const saltBuffer = new ArrayBuffer(salt.byteLength);
-  const saltView = new Uint8Array(saltBuffer);
-  saltView.set(salt);
+  if (sessionKey) return sessionKey;
 
-  const keyMaterial = await crypto.subtle.importKey('raw', saltBuffer, { name: 'PBKDF2' }, false, [
-    'deriveKey',
+  sessionKey = await crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, false, [
+    'encrypt',
+    'decrypt',
   ]);
-
-  // Derive a key using PBKDF2
-  return crypto.subtle.deriveKey(
-    {
-      name: 'PBKDF2',
-      salt: saltBuffer,
-      iterations: 100000,
-      hash: 'SHA-256',
-    },
-    keyMaterial,
-    { name: 'AES-GCM', length: 256 },
-    false,
-    ['encrypt', 'decrypt'],
-  );
+  return sessionKey;
 }
 
 /**
- * Generate a cryptographically strong random salt
+ * Clear the in-memory session key.
+ * Call on logout to ensure the key cannot be reused.
  */
-function generateSalt(): Uint8Array {
-  const salt = new Uint8Array(16);
-  crypto.getRandomValues(salt);
-  return salt;
+export function clearSessionKey(): void {
+  sessionKey = null;
 }
 
 /**
@@ -76,110 +66,62 @@ function generateIV(): Uint8Array {
 }
 
 /**
- * Simple base64 encoding fallback for non-secure contexts
- * Note: This is NOT cryptographically secure, only obfuscation
+ * Encrypt a string using AES-GCM with the session key.
+ *
+ * @param plaintext - The string to encrypt
+ * @returns EncryptedData containing base64-encoded ciphertext and IV
+ * @throws Error if SubtleCrypto is unavailable (non-HTTPS context)
  */
-function encodeBase64(plaintext: string): EncryptedData {
-  const salt = generateSalt();
+export async function encrypt(plaintext: string): Promise<EncryptedData> {
+  const key = await getOrCreateKey();
   const iv = generateIV();
-  // Simple obfuscation: reverse string and encode using TextEncoder for proper Unicode handling
-  const obfuscated = plaintext.split('').reverse().join('');
+
   const encoder = new TextEncoder();
-  const bytes = encoder.encode(obfuscated);
-  const binaryString = Array.from(bytes, (byte) => String.fromCodePoint(byte)).join('');
-  const encoded = btoa(binaryString);
+  const data = encoder.encode(plaintext);
+
+  // Convert IV to ArrayBuffer
+  const ivBuffer = new ArrayBuffer(iv.byteLength);
+  const ivView = new Uint8Array(ivBuffer);
+  ivView.set(iv);
+
+  const ciphertext = await crypto.subtle.encrypt({ name: 'AES-GCM', iv: ivBuffer }, key, data);
+
   return {
-    data: encoded,
+    data: btoa(Array.from(new Uint8Array(ciphertext), (b) => String.fromCodePoint(b)).join('')),
     iv: btoa(Array.from(iv, (b) => String.fromCodePoint(b)).join('')),
-    salt: btoa(Array.from(salt, (b) => String.fromCodePoint(b)).join('')),
-    method: 'base64',
+    method: 'aes-gcm',
   };
 }
 
 /**
- * Encrypt a string using AES-GCM (if available) or base64 fallback
+ * Decrypt a string using AES-GCM with the session key.
  *
- * @param plaintext - The string to encrypt
- * @returns EncryptedData containing base64-encoded ciphertext, IV, and salt
- */
-export async function encrypt(plaintext: string): Promise<EncryptedData> {
-  // Use Web Crypto API if available (HTTPS/localhost)
-  if (isCryptoAvailable()) {
-    const salt = generateSalt();
-    const iv = generateIV();
-    const key = await generateKey(salt);
-
-    const encoder = new TextEncoder();
-    const data = encoder.encode(plaintext);
-
-    // Convert IV to ArrayBuffer
-    const ivBuffer = new ArrayBuffer(iv.byteLength);
-    const ivView = new Uint8Array(ivBuffer);
-    ivView.set(iv);
-
-    const ciphertext = await crypto.subtle.encrypt({ name: 'AES-GCM', iv: ivBuffer }, key, data);
-
-    return {
-      data: btoa(Array.from(new Uint8Array(ciphertext), (b) => String.fromCodePoint(b)).join('')),
-      iv: btoa(Array.from(iv, (b) => String.fromCodePoint(b)).join('')),
-      salt: btoa(Array.from(salt, (b) => String.fromCodePoint(b)).join('')),
-      method: 'aes-gcm',
-    };
-  }
-
-  // Fallback to base64 encoding for non-secure contexts (HTTP)
-  return encodeBase64(plaintext);
-}
-
-/**
- * Decrypt a string using AES-GCM (if available) or base64 fallback
- *
- * @param encrypted - EncryptedData containing ciphertext, IV, and salt
+ * @param encrypted - EncryptedData containing ciphertext and IV
  * @returns The decrypted plaintext string
- * @throws Error if decryption fails
+ * @throws Error if decryption fails (e.g. key was lost on page refresh)
  */
 export async function decrypt(encrypted: EncryptedData): Promise<string> {
-  // Handle base64 fallback method
-  if (encrypted.method === 'base64') {
-    const decoded = atob(encrypted.data);
-    const bytes = Uint8Array.from(decoded, (c) => c.codePointAt(0) ?? 0);
-    const decoder = new TextDecoder();
-    const obfuscated = decoder.decode(bytes);
-    // Reverse the obfuscation
-    return obfuscated.split('').reverse().join('');
-  }
-
-  const salt = Uint8Array.from(atob(encrypted.salt), (c) => c.codePointAt(0) ?? 0);
+  const key = await getOrCreateKey();
   const iv = Uint8Array.from(atob(encrypted.iv), (c) => c.codePointAt(0) ?? 0);
   const ciphertext = Uint8Array.from(atob(encrypted.data), (c) => c.codePointAt(0) ?? 0);
 
-  try {
-    const key = await generateKey(salt);
+  // Convert to ArrayBuffer to satisfy type requirements
+  const ivBuffer = new ArrayBuffer(iv.byteLength);
+  const ivView = new Uint8Array(ivBuffer);
+  ivView.set(iv);
 
-    // Convert to ArrayBuffer to satisfy type requirements
-    const ivBuffer = new ArrayBuffer(iv.byteLength);
-    const ivView = new Uint8Array(ivBuffer);
-    ivView.set(iv);
+  const ciphertextBuffer = new ArrayBuffer(ciphertext.byteLength);
+  const ciphertextView = new Uint8Array(ciphertextBuffer);
+  ciphertextView.set(ciphertext);
 
-    const ciphertextBuffer = new ArrayBuffer(ciphertext.byteLength);
-    const ciphertextView = new Uint8Array(ciphertextBuffer);
-    ciphertextView.set(ciphertext);
+  const decrypted = await crypto.subtle.decrypt(
+    { name: 'AES-GCM', iv: ivBuffer },
+    key,
+    ciphertextBuffer,
+  );
 
-    const decrypted = await crypto.subtle.decrypt(
-      { name: 'AES-GCM', iv: ivBuffer },
-      key,
-      ciphertextBuffer,
-    );
-
-    const decoder = new TextDecoder();
-    const password = decoder.decode(decrypted);
-    return password;
-  } finally {
-    // Clear sensitive memory
-    salt.fill(0);
-    iv.fill(0);
-    ciphertext.fill(0);
-  }
+  const decoder = new TextDecoder();
+  return decoder.decode(decrypted);
 }
 
 /**

@@ -25,18 +25,24 @@ export function AboutDialog({ open, onOpenChange }: AboutDialogProps) {
 
   useEffect(() => {
     if (open && !deviceInfo) {
+      const controller = new AbortController();
       const fetchData = async () => {
         setIsLoading(true);
         try {
           const info = await getDeviceInformation();
+          if (controller.signal.aborted) return;
           setDeviceInfo(info);
         } catch {
+          if (controller.signal.aborted) return;
           toast.error('Failed to load device information');
         } finally {
-          setIsLoading(false);
+          if (!controller.signal.aborted) {
+            setIsLoading(false);
+          }
         }
       };
       fetchData();
+      return () => controller.abort();
     }
   }, [open, deviceInfo]);
 

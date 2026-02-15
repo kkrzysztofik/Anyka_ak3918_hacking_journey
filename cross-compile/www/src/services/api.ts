@@ -55,8 +55,8 @@ apiClient.interceptors.response.use(
   (response) => response,
   (error: AxiosError) => {
     if (error.response?.status === 401) {
-      // Clear credentials on 401 Unauthorized
-      // Auth clearing is handled by auth interceptor
+      sessionStorage.removeItem('onvif_camera_auth');
+      window.dispatchEvent(new CustomEvent('auth:unauthorized'));
     }
     return Promise.reject(error);
   },

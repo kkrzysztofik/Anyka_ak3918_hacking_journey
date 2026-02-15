@@ -306,6 +306,7 @@ export default function ImagingPage() {
                   value="auto"
                   disabled
                   className="h-10 w-full appearance-none rounded-md border border-[#3a3a3c] bg-[#2c2c2e] px-3 py-2 text-sm text-white disabled:opacity-50"
+                  data-testid="imaging-white-balance-mode-select"
                 >
                   <option value="auto">Auto</option>
                 </select>
@@ -335,6 +336,7 @@ export default function ImagingPage() {
                   value="auto"
                   disabled
                   className="h-10 w-full appearance-none rounded-md border border-[#3a3a3c] bg-[#2c2c2e] px-3 py-2 text-sm text-white disabled:opacity-50"
+                  data-testid="imaging-exposure-mode-select"
                 >
                   <option value="auto">Auto</option>
                 </select>
@@ -368,6 +370,7 @@ export default function ImagingPage() {
                     updateSetting('irCutFilter', e.target.value as 'ON' | 'OFF' | 'AUTO')
                   }
                   className="h-10 w-full appearance-none rounded-md border border-[#3a3a3c] bg-[#2c2c2e] px-3 py-2 text-sm text-white focus:border-transparent focus:ring-2 focus:ring-[#0a84ff] focus:outline-none"
+                  data-testid="imaging-ir-cut-filter-select"
                 >
                   {options?.irCutFilterModes?.map((mode) => {
                     let label: string;
@@ -427,6 +430,7 @@ export default function ImagingPage() {
                     })
                   }
                   className="h-10 w-full appearance-none rounded-md border border-[#3a3a3c] bg-[#2c2c2e] px-3 py-2 text-sm text-white focus:border-transparent focus:ring-2 focus:ring-[#0a84ff] focus:outline-none"
+                  data-testid="imaging-wdr-mode-select"
                 >
                   {options?.wideDynamicRange?.modes?.map((mode) => (
                     <option key={mode} value={mode}>
@@ -480,6 +484,7 @@ export default function ImagingPage() {
                     })
                   }
                   className="h-10 w-full appearance-none rounded-md border border-[#3a3a3c] bg-[#2c2c2e] px-3 py-2 text-sm text-white focus:border-transparent focus:ring-2 focus:ring-[#0a84ff] focus:outline-none"
+                  data-testid="imaging-backlight-mode-select"
                 >
                   {options?.backlightCompensation?.modes?.map((mode) => (
                     <option key={mode} value={mode}>

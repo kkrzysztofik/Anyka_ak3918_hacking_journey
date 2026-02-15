@@ -144,7 +144,7 @@ export async function setNetworkInterface(
     <tds:NetworkInterface>
       <tt:IPv4>
         <tt:Enabled>true</tt:Enabled>
-        <tt:DHCP>${dhcp}</tt:DHCP>
+        <tt:DHCP>${escapeXml(String(dhcp))}</tt:DHCP>
         ${manualConfig}
       </tt:IPv4>
     </tds:NetworkInterface>
@@ -168,7 +168,7 @@ export async function setDNS(_fromDHCP: boolean, dnsServers?: string[]): Promise
       : '';
 
   const body = `<tds:SetDNS>
-    <tds:FromDHCP>${_fromDHCP}</tds:FromDHCP>
+    <tds:FromDHCP>${escapeXml(String(_fromDHCP))}</tds:FromDHCP>
     ${manualDNS}
   </tds:SetDNS>`;
 

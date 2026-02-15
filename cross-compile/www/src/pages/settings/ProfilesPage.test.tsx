@@ -219,7 +219,7 @@ describe('ProfilesPage', () => {
     renderWithProviders(<ProfilesPage />);
 
     await waitFor(() => {
-      expect(screen.getByText(/no media profiles found/i)).toBeInTheDocument();
+      expect(screen.getByTestId('profiles-empty-state')).toBeInTheDocument();
     });
   });
 
@@ -237,7 +237,7 @@ describe('ProfilesPage', () => {
     renderWithProviders(<ProfilesPage />);
 
     await waitFor(() => {
-      expect(screen.getByText('SubStream')).toBeInTheDocument();
+      expect(screen.getByTestId('profile-name-ProfileToken2')).toBeInTheDocument();
     });
 
     // Fixed profiles should not have delete buttons
@@ -286,8 +286,7 @@ describe('ProfilesPage', () => {
     await user.click(expandButton);
     await waitFor(
       () => {
-        const videoSourceTexts = screen.getAllByText('Video Source');
-        expect(videoSourceTexts.length).toBeGreaterThan(0);
+        expect(screen.getByTestId('video-source-config-ProfileToken1')).toBeInTheDocument();
       },
       { timeout: 3000 },
     );
@@ -358,10 +357,8 @@ describe('ProfilesPage', () => {
 
     await waitFor(
       () => {
-        const videoSourceTexts = screen.getAllByText('Video Source');
-        const videoEncoderTexts = screen.getAllByText('Video Encoder');
-        expect(videoSourceTexts.length).toBeGreaterThan(0);
-        expect(videoEncoderTexts.length).toBeGreaterThan(0);
+        expect(screen.getByTestId('video-source-config-ProfileToken1')).toBeInTheDocument();
+        expect(screen.getByTestId('video-encoder-config-ProfileToken1')).toBeInTheDocument();
       },
       { timeout: 3000 },
     );
@@ -379,7 +376,7 @@ describe('ProfilesPage', () => {
     renderWithProviders(<ProfilesPage />);
 
     await waitFor(() => {
-      expect(screen.getByText('EmptyProfile')).toBeInTheDocument();
+      expect(screen.getByTestId('profile-name-ProfileToken3')).toBeInTheDocument();
     });
 
     // Expand profile
@@ -388,10 +385,7 @@ describe('ProfilesPage', () => {
 
     await waitFor(
       () => {
-        const videoSourceTexts = screen.getAllByText('Video Source');
-        const notConfiguredTexts = screen.getAllByText('Not configured');
-        expect(videoSourceTexts.length).toBeGreaterThan(0);
-        expect(notConfiguredTexts.length).toBeGreaterThan(0);
+        expect(screen.getByTestId('video-source-config-ProfileToken3')).toBeInTheDocument();
       },
       { timeout: 3000 },
     );

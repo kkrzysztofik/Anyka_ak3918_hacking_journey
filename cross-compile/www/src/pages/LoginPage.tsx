@@ -64,7 +64,7 @@ export default function LoginPage() {
       }
       navigate(safeFrom, { replace: true });
     }
-  }, [isAuthenticated, navigate, location]);
+  }, [isAuthenticated, navigate, location.state]);
 
   const onSubmit = async (data: LoginFormData) => {
     setIsLoading(true);

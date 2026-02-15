@@ -77,6 +77,7 @@ const parserOptions = {
   removeNSPrefix: true,
   parseTagValue: true,
   trimValues: true,
+  processEntities: false,
 };
 
 const parser = new XMLParser(parserOptions);

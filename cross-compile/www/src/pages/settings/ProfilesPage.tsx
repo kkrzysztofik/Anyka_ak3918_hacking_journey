@@ -273,6 +273,7 @@ export default function ProfilesPage() {
                         active={!!profile.videoSourceConfiguration}
                         token={profile.videoSourceConfiguration?.token}
                         details={profile.videoSourceConfiguration?.name}
+                        testId={`video-source-config-${profile.token}`}
                       />
 
                       {/* Video Encoder Config */}
@@ -291,7 +292,7 @@ export default function ProfilesPage() {
                             ? () =>
                                 setEditingEncoder({
                                   profileToken: profile.token,
-                                  encoderToken: profile.videoEncoderConfiguration!.token,
+                                  encoderToken: profile.videoEncoderConfiguration?.token ?? '',
                                 })
                             : undefined
                         }
@@ -341,7 +342,7 @@ export default function ProfilesPage() {
           ))}
 
           {profiles?.length === 0 && (
-            <div className="py-[48px] text-center text-[#a1a1a6]">
+            <div className="py-[48px] text-center text-[#a1a1a6]" data-testid="profiles-empty-state">
               No media profiles found. Create one to get started.
             </div>
           )}
@@ -506,26 +507,32 @@ function VideoEncoderEditDialog({
 
   // Fetch encoder configuration and options
   useEffect(() => {
+    const controller = new AbortController();
     const loadData = async () => {
       try {
         const [encoderConfig, encoderOptions] = await Promise.all([
           getVideoEncoderConfiguration(encoderToken),
           getVideoEncoderConfigurationOptions(encoderToken),
         ]);
+        if (controller.signal.aborted) return;
         if (encoderConfig) {
           setConfig(encoderConfig);
         }
         setOptions(encoderOptions);
       } catch (error) {
+        if (controller.signal.aborted) return;
         toast.error('Failed to load encoder configuration', {
           description: error instanceof Error ? error.message : 'An error occurred',
         });
         onClose();
       } finally {
-        setIsLoading(false);
+        if (!controller.signal.aborted) {
+          setIsLoading(false);
+        }
       }
     };
     loadData();
+    return () => controller.abort();
   }, [encoderToken, onClose]);
 
   const updateMutation = useMutation({
@@ -602,6 +609,7 @@ function VideoEncoderEditDialog({
                 setConfig({ ...config, resolution: { width, height } });
               }}
               className="h-10 w-full appearance-none rounded-md border border-[#3a3a3c] bg-[#2c2c2e] px-3 py-2 text-sm text-white focus:border-[#0a84ff] focus:outline-none"
+              data-testid="video-encoder-resolution-select"
             >
               {availableResolutions.map((res) => (
                 <option key={`${res.width}x${res.height}`} value={`${res.width}x${res.height}`}>
@@ -624,6 +632,7 @@ function VideoEncoderEditDialog({
               value={config.quality}
               onChange={(e) => setConfig({ ...config, quality: Number(e.target.value) })}
               className="w-full"
+              data-testid="video-encoder-quality-slider"
             />
           </div>
 
@@ -651,6 +660,7 @@ function VideoEncoderEditDialog({
                   })
                 }
                 className="w-full"
+                data-testid="video-encoder-framerate-slider"
               />
             </div>
           )}
@@ -679,6 +689,7 @@ function VideoEncoderEditDialog({
                   })
                 }
                 className="w-full"
+                data-testid="video-encoder-bitrate-slider"
               />
             </div>
           )}
@@ -696,6 +707,7 @@ function VideoEncoderEditDialog({
                   })
                 }
                 className="h-10 w-full appearance-none rounded-md border border-[#3a3a3c] bg-[#2c2c2e] px-3 py-2 text-sm text-white focus:border-[#0a84ff] focus:outline-none"
+                data-testid="video-encoder-h264-profile-select"
               >
                 {h264Options.h264ProfilesSupported.map((profile) => (
                   <option key={profile} value={profile}>
@@ -725,6 +737,7 @@ function VideoEncoderEditDialog({
                   })
                 }
                 className="w-full"
+                data-testid="video-encoder-gop-slider"
               />
             </div>
           )}

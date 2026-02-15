@@ -21,12 +21,12 @@ function getChunkName(id: string): string | undefined {
   if (!id.includes('node_modules')) return undefined;
 
   if (id.includes('@tanstack/react-query')) return 'query-vendor';
+  if (id.includes('recharts')) return 'charts-vendor';
   if (
     id.includes('lucide-react') ||
     id.includes('@radix-ui') ||
     id.includes('react-hook-form') ||
     id.includes('@hookform') ||
-    id.includes('recharts') ||
     id.includes('sonner')
   )
     return 'ui-vendor';
@@ -117,7 +117,7 @@ export default defineConfig(({ mode }) => ({
   build: {
     outDir: '../../SD_card_contents/anyka_hack/onvif/www',
     emptyOutDir: true,
-    sourcemap: true,
+    sourcemap: false,
     rollupOptions: {
       output: {
         manualChunks: (id) => getChunkName(id),
@@ -140,7 +140,7 @@ export default defineConfig(({ mode }) => ({
       },
     },
     // Optimize chunk size
-    chunkSizeWarningLimit: 1000,
+    chunkSizeWarningLimit: 200,
     // Enable minification
     minify: 'terser',
     terserOptions: {
