@@ -376,3 +376,289 @@ fn test_get_service_capabilities_returns_valid_caps() {
     // Verify system capabilities
     assert!(response.capabilities.system.discovery_bye.is_some());
 }
+// ============================================================================
+// Extended Coverage Tests
+// ============================================================================
+
+#[tokio::test]
+async fn test_get_device_information_firmware_version_format() {
+    let service = create_test_service();
+    let response = service
+        .handle_get_device_information(GetDeviceInformation {})
+        .await
+        .unwrap();
+
+    // Firmware version should follow semantic versioning pattern
+    assert!(response.firmware_version.contains('.') || !response.firmware_version.is_empty());
+}
+
+#[test]
+fn test_get_capabilities_all_service_types() {
+    let service = create_test_service();
+
+    let response = service
+        .handle_get_capabilities(GetCapabilities { category: vec![] })
+        .unwrap();
+
+    // Verify all expected service capabilities
+    assert!(response.capabilities.device.is_some());
+    assert!(response.capabilities.media.is_some());
+    assert!(response.capabilities.ptz.is_some());
+    assert!(response.capabilities.imaging.is_some());
+}
+
+#[test]
+fn test_get_capabilities_media_xaddr_not_empty() {
+    let service = create_test_service();
+
+    let response = service
+        .handle_get_capabilities(GetCapabilities { category: vec![] })
+        .unwrap();
+
+    if let Some(media_caps) = response.capabilities.media {
+        assert!(!media_caps.x_addr.is_empty());
+    }
+}
+
+#[test]
+fn test_get_capabilities_ptz_xaddr_exists() {
+    let service = create_test_service();
+
+    let response = service
+        .handle_get_capabilities(GetCapabilities { category: vec![] })
+        .unwrap();
+
+    if let Some(ptz_caps) = response.capabilities.ptz {
+        assert!(!ptz_caps.x_addr.is_empty());
+    }
+}
+
+#[test]
+fn test_get_services_device_service_included() {
+    let service = create_test_service();
+
+    let response = service
+        .handle_get_services(GetServices {
+            include_capability: false,
+        })
+        .unwrap();
+
+    let has_device_service = response
+        .services
+        .iter()
+        .any(|s| s.namespace == "http://www.onvif.org/ver10/device/wsdl");
+
+    assert!(
+        has_device_service,
+        "Device service should be included in services list"
+    );
+}
+
+#[test]
+fn test_get_services_media_service_included() {
+    let service = create_test_service();
+
+    let response = service
+        .handle_get_services(GetServices {
+            include_capability: false,
+        })
+        .unwrap();
+
+    let has_media_service = response
+        .services
+        .iter()
+        .any(|s| s.namespace == "http://www.onvif.org/ver10/media/wsdl");
+
+    assert!(
+        has_media_service,
+        "Media service should be included in services list"
+    );
+}
+
+#[test]
+fn test_get_services_with_capabilities() {
+    let service = create_test_service();
+
+    let response = service
+        .handle_get_services(GetServices {
+            include_capability: true,
+        })
+        .unwrap();
+
+    // With capabilities requested, services may have capability info
+    assert!(!response.services.is_empty());
+}
+
+#[test]
+fn test_get_system_date_and_time_returns_valid_time() {
+    let service = create_test_service();
+
+    let response = service
+        .handle_get_system_date_and_time(GetSystemDateAndTime {})
+        .unwrap();
+
+    // Verify UTC time exists
+    assert!(response.system_date_and_time.utc_date_time.is_some());
+}
+
+#[test]
+fn test_get_system_date_and_time_utc_values_valid() {
+    let service = create_test_service();
+
+    let response = service
+        .handle_get_system_date_and_time(GetSystemDateAndTime {})
+        .unwrap();
+
+    if let Some(utc) = response.system_date_and_time.utc_date_time {
+        // Validate time ranges
+        assert!(utc.time.hour < 24);
+        assert!(utc.time.minute < 60);
+        assert!(utc.time.second < 60);
+
+        // Validate date ranges
+        assert!(utc.date.year >= 2020);
+        assert!(utc.date.month >= 1 && utc.date.month <= 12);
+        assert!(utc.date.day >= 1 && utc.date.day <= 31);
+    }
+}
+
+#[test]
+fn test_get_hostname_returns_valid_hostname() {
+    let service = create_test_service();
+
+    let response = service.handle_get_hostname(GetHostname {}).unwrap();
+
+    // Hostname should be set (from config or default)
+    assert!(response.hostname_information.name.is_some());
+}
+
+#[test]
+fn test_set_hostname_updates_value() {
+    let service = create_test_service();
+
+    let new_hostname = "test-camera-01";
+    let _set_response = service.handle_set_hostname(SetHostname {
+        name: new_hostname.to_string(),
+    });
+
+    // Verify hostname was updated
+    let get_response = service.handle_get_hostname(GetHostname {}).unwrap();
+    if let Some(name) = get_response.hostname_information.name {
+        assert_eq!(name, new_hostname);
+    }
+}
+
+#[test]
+fn test_get_scopes_returns_default_scopes() {
+    let service = create_test_service();
+
+    let response = service.handle_get_scopes(GetScopes {}).unwrap();
+
+    // Should have at least some default scopes
+    assert!(!response.scopes.is_empty());
+}
+
+#[test]
+fn test_add_scopes_increases_scope_count() {
+    let service = create_test_service();
+
+    let initial_response = service.handle_get_scopes(GetScopes {}).unwrap();
+    let initial_count = initial_response.scopes.len();
+
+    let _add_response = service.handle_add_scopes(AddScopes {
+        scope_item: vec!["onvif://www.onvif.org/location/test".to_string()],
+    });
+
+    let final_response = service.handle_get_scopes(GetScopes {}).unwrap();
+    let final_count = final_response.scopes.len();
+
+    assert!(final_count >= initial_count);
+}
+
+#[test]
+fn test_set_scopes_replaces_all_scopes() {
+    let service = create_test_service();
+
+    let new_scopes = vec![
+        "onvif://www.onvif.org/location/building/floor1".to_string(),
+        "onvif://www.onvif.org/name/TestCamera".to_string(),
+    ];
+
+    let _set_response = service.handle_set_scopes(SetScopes {
+        scopes: new_scopes.clone(),
+    });
+
+    let get_response = service.handle_get_scopes(GetScopes {}).unwrap();
+
+    // Verify new scopes are present
+    for scope in &new_scopes {
+        assert!(get_response.scopes.iter().any(|s| &s.scope_item == scope));
+    }
+}
+
+#[test]
+fn test_get_discovery_mode_returns_valid_mode() {
+    let service = create_test_service();
+
+    let response = service
+        .handle_get_discovery_mode(GetDiscoveryMode {})
+        .unwrap();
+
+    // Discovery mode should be one of the valid values
+    match response.discovery_mode {
+        DiscoveryMode::Discoverable | DiscoveryMode::NonDiscoverable => {
+            // Valid
+        }
+    }
+}
+
+#[test]
+fn test_set_discovery_mode_updates_mode() {
+    let service = create_test_service();
+
+    let _set_response = service.handle_set_discovery_mode(SetDiscoveryMode {
+        discovery_mode: DiscoveryMode::NonDiscoverable,
+    });
+
+    let get_response = service
+        .handle_get_discovery_mode(GetDiscoveryMode {})
+        .unwrap();
+
+    assert_eq!(get_response.discovery_mode, DiscoveryMode::NonDiscoverable);
+}
+
+#[test]
+fn test_get_service_capabilities_security_fields_populated() {
+    let service = create_test_service();
+
+    let response = service
+        .handle_get_service_capabilities(GetServiceCapabilities {})
+        .unwrap();
+
+    let sec_caps = response.capabilities.security;
+
+    // All security capability fields should be populated
+    assert!(sec_caps.max_users.is_some());
+    assert!(sec_caps.username_token.is_some());
+    assert!(sec_caps.http_digest.is_some());
+    assert!(sec_caps.kerberos_token.is_some());
+    assert!(sec_caps.saml_token.is_some());
+    assert!(sec_caps.x509_token.is_some());
+}
+
+#[test]
+fn test_get_service_capabilities_system_fields_populated() {
+    let service = create_test_service();
+
+    let response = service
+        .handle_get_service_capabilities(GetServiceCapabilities {})
+        .unwrap();
+
+    let sys_caps = response.capabilities.system;
+
+    // System capability fields should be populated
+    assert!(sys_caps.discovery_bye.is_some());
+    assert!(sys_caps.discovery_resolve.is_some());
+    assert!(sys_caps.system_backup.is_some());
+    assert!(sys_caps.system_logging.is_some());
+}

@@ -1021,4 +1021,115 @@ mod tests {
         assert_eq!(auth.realm(), "TestRealm");
         assert_eq!(auth.nonce_validity(), Duration::from_secs(600));
     }
+
+    #[test]
+    fn test_with_opaque() {
+        let auth = HttpDigestAuth::new("ONVIF", 300).with_opaque("session123");
+        assert_eq!(auth.opaque, Some("session123".to_string()));
+    }
+
+    #[test]
+    fn test_cleanup_expired_nonces_zero_validity() {
+        // Create with very short validity to test cleanup
+        let auth = HttpDigestAuth::new("ONVIF", 0); // 0 second validity
+
+        // Generate some nonces
+        let _ = auth.generate_nonce();
+        let _ = auth.generate_nonce();
+        let _ = auth.generate_nonce();
+
+        assert!(auth.nonces.len() >= 3);
+
+        // Sleep briefly and cleanup (nonces should be expired)
+        std::thread::sleep(Duration::from_millis(10));
+        auth.cleanup_expired_nonces();
+
+        // All should be cleaned up since 0 second validity
+        assert_eq!(auth.nonces.len(), 0);
+    }
+
+    #[test]
+    fn test_authenticate_success() {
+        let auth = HttpDigestAuth::new("ONVIF", 300);
+        let nonce = auth.generate_nonce();
+
+        let username = "admin";
+        let password = "secret";
+
+        let ha1 = md5_hex(&format!("{}:{}:{}", username, "ONVIF", password));
+        let ha2 = md5_hex("GET:/snapshot");
+        let response = md5_hex(&format!("{}:{}:{}", ha1, nonce, ha2));
+
+        let auth_header = format!(
+            r#"Digest username="{}", realm="ONVIF", nonce="{}", uri="/snapshot", response="{}""#,
+            username, nonce, response
+        );
+
+        let result = auth.authenticate(&auth_header, "GET", password);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), "admin");
+    }
+
+    #[test]
+    fn test_authenticate_failure() {
+        let auth = HttpDigestAuth::new("ONVIF", 300);
+        let nonce = auth.generate_nonce();
+
+        let auth_header = format!(
+            r#"Digest username="admin", realm="ONVIF", nonce="{}", uri="/", response="wrong""#,
+            nonce
+        );
+
+        let result = auth.authenticate(&auth_header, "GET", "password");
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), HttpDigestError::InvalidDigest);
+    }
+
+    #[test]
+    fn test_debug_impl() {
+        let auth = HttpDigestAuth::new("ONVIF", 300).with_opaque("opaque123");
+        let _ = auth.generate_nonce();
+
+        let debug_str = format!("{:?}", auth);
+        assert!(debug_str.contains("ONVIF"));
+        assert!(debug_str.contains("active_nonces"));
+        assert!(debug_str.contains("opaque123"));
+    }
+
+    #[test]
+    fn test_is_nonce_valid_expired() {
+        // Create with 0 second validity
+        let auth = HttpDigestAuth::new("ONVIF", 0);
+        let nonce = auth.generate_nonce();
+
+        // Should still be technically valid right after creation
+        // but after a tiny sleep, should be invalid
+        std::thread::sleep(Duration::from_millis(5));
+        assert!(!auth.is_nonce_valid(&nonce));
+    }
+
+    #[test]
+    fn test_is_nonce_valid_not_found() {
+        let auth = HttpDigestAuth::new("ONVIF", 300);
+        assert!(!auth.is_nonce_valid("nonexistent_nonce"));
+    }
+
+    #[test]
+    fn test_http_digest_state_new() {
+        use crate::users::{PasswordManager, UserStorage};
+
+        let digest_auth = Arc::new(HttpDigestAuth::new("ONVIF", 300));
+        let user_storage = Arc::new(UserStorage::new());
+        let password_manager = Arc::new(PasswordManager::new());
+
+        let state = HttpDigestState::new(
+            digest_auth.clone(),
+            user_storage.clone(),
+            password_manager.clone(),
+            true,
+        );
+
+        assert!(state.auth_enabled);
+        assert_eq!(state.digest_auth.realm(), "ONVIF");
+    }
 }

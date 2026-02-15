@@ -1,0 +1,760 @@
+diff -ruN '--exclude=.cargo-ok' '--exclude=Cargo.lock' '--exclude=.cargo_vcs_info.json' '--exclude=Cargo.toml.orig' originals/openssl-src-300.2.3+3.2.1/openssl/.github/workflows/ci.yml openssl-src-300.2.3+3.2.1-full/openssl/.github/workflows/ci.yml
+--- originals/openssl-src-300.2.3+3.2.1/openssl/.github/workflows/ci.yml	2006-07-24 03:21:28.000000000 +0200
++++ openssl-src-300.2.3+3.2.1-full/openssl/.github/workflows/ci.yml	2026-01-10 20:08:33.952357716 +0100
+@@ -29,7 +29,7 @@
+       run: |
+         sudo apt-get update
+         sudo apt-get -yq --no-install-suggests --no-install-recommends --force-yes install unifdef
+-    - uses: actions/checkout@v4
++    - uses: actions/checkout@v6
+       with:
+         fetch-depth: 0
+     - name: config
+@@ -44,7 +44,7 @@
+   check_docs:
+     runs-on: ${{ github.server_url == 'https://github.com' && 'ubuntu-latest' || 'ubuntu-22.04-self-hosted' }}
+     steps:
+-    - uses: actions/checkout@v4
++    - uses: actions/checkout@v6
+     - name: config
+       run: ./config --banner=Configured --strict-warnings enable-fips && perl configdata.pm --dump
+     - name: make build_generated
+@@ -64,7 +64,7 @@
+   check-ansi:
+     runs-on: ${{ github.server_url == 'https://github.com' && 'ubuntu-latest' || 'ubuntu-22.04-self-hosted' }}
+     steps:
+-    - uses: actions/checkout@v4
++    - uses: actions/checkout@v6
+     - name: config
+       run: CPPFLAGS=-ansi ./config --banner=Configured no-asm no-makedepend enable-buildtest-c++ enable-fips --strict-warnings -D_DEFAULT_SOURCE && perl configdata.pm --dump
+     - name: make
+@@ -73,7 +73,7 @@
+   basic_gcc:
+     runs-on: ${{ github.server_url == 'https://github.com' && 'ubuntu-latest' || 'ubuntu-22.04-self-hosted' }}
+     steps:
+-    - uses: actions/checkout@v4
++    - uses: actions/checkout@v6
+     - name: checkout fuzz/corpora submodule
+       run: git submodule update --init --depth 1 fuzz/corpora
+     - name: localegen
+@@ -93,7 +93,7 @@
+   basic_clang:
+     runs-on: ${{ github.server_url == 'https://github.com' && 'ubuntu-latest' || 'ubuntu-22.04-self-hosted' }}
+     steps:
+-    - uses: actions/checkout@v4
++    - uses: actions/checkout@v6
+     - name: checkout fuzz/corpora submodule
+       run: git submodule update --init --depth 1 fuzz/corpora
+     - name: config
+@@ -114,7 +114,7 @@
+     runs-on: ${{ matrix.os }}-self-hosted
+     continue-on-error: true
+     steps:
+-    - uses: actions/checkout@v4
++    - uses: actions/checkout@v6
+     - name: config
+       run: ./config enable-fips enable-ec_nistp_64_gcc_128 enable-md2 enable-rc5 enable-ssl3 enable-ssl3-method enable-trace
+     - name: config dump
+@@ -129,7 +129,7 @@
+   minimal:
+     runs-on: ${{ github.server_url == 'https://github.com' && 'ubuntu-latest' || 'ubuntu-22.04-self-hosted' }}
+     steps:
+-    - uses: actions/checkout@v4
++    - uses: actions/checkout@v6
+     - name: checkout fuzz/corpora submodule
+       run: git submodule update --init --depth 1 fuzz/corpora
+     - name: config
+@@ -146,7 +146,7 @@
+   no-deprecated:
+     runs-on: ${{ github.server_url == 'https://github.com' && 'ubuntu-latest' || 'ubuntu-22.04-self-hosted' }}
+     steps:
+-    - uses: actions/checkout@v4
++    - uses: actions/checkout@v6
+     - name: checkout fuzz/corpora submodule
+       run: git submodule update --init --depth 1 fuzz/corpora
+     - name: config
+@@ -163,7 +163,7 @@
+   no-shared-ubuntu:
+     runs-on: ${{ github.server_url == 'https://github.com' && 'ubuntu-latest' || 'ubuntu-22.04-self-hosted' }}
+     steps:
+-    - uses: actions/checkout@v4
++    - uses: actions/checkout@v6
+     - name: checkout fuzz/corpora submodule
+       run: git submodule update --init --depth 1 fuzz/corpora
+     - name: config
+@@ -181,7 +181,7 @@
+     runs-on: macos-latest
+     if: github.server_url == 'https://github.com'
+     steps:
+-    - uses: actions/checkout@v4
++    - uses: actions/checkout@v6
+     - name: checkout fuzz/corpora submodule
+       run: git submodule update --init --depth 1 fuzz/corpora
+     - name: config
+@@ -198,7 +198,7 @@
+   non-caching:
+     runs-on: ${{ github.server_url == 'https://github.com' && 'ubuntu-latest' || 'ubuntu-22.04-self-hosted' }}
+     steps:
+-    - uses: actions/checkout@v4
++    - uses: actions/checkout@v6
+     - name: checkout fuzz/corpora submodule
+       run: git submodule update --init --depth 1 fuzz/corpora
+     - name: config
+@@ -215,7 +215,7 @@
+   address_ub_sanitizer:
+     runs-on: ${{ github.server_url == 'https://github.com' && 'ubuntu-latest' || 'ubuntu-22.04-self-hosted' }}
+     steps:
+-    - uses: actions/checkout@v4
++    - uses: actions/checkout@v6
+     - name: checkout fuzz/corpora submodule
+       run: git submodule update --init --depth 1 fuzz/corpora
+     - name: config
+@@ -232,7 +232,7 @@
+   fuzz_tests:
+     runs-on: ${{ github.server_url == 'https://github.com' && 'ubuntu-latest' || 'ubuntu-22.04-self-hosted' }}
+     steps:
+-    - uses: actions/checkout@v4
++    - uses: actions/checkout@v6
+     - name: checkout fuzz/corpora submodule
+       run: git submodule update --init --depth 1 fuzz/corpora
+     - name: config
+@@ -249,7 +249,7 @@
+   memory_sanitizer:
+     runs-on: ${{ github.server_url == 'https://github.com' && 'ubuntu-latest' || 'ubuntu-22.04-self-hosted' }}
+     steps:
+-    - uses: actions/checkout@v4
++    - uses: actions/checkout@v6
+     - name: checkout fuzz/corpora submodule
+       run: git submodule update --init --depth 1 fuzz/corpora
+     - name: config
+@@ -267,7 +267,7 @@
+   threads_sanitizer:
+     runs-on: ${{ github.server_url == 'https://github.com' && 'ubuntu-latest' || 'ubuntu-22.04-self-hosted' }}
+     steps:
+-    - uses: actions/checkout@v4
++    - uses: actions/checkout@v6
+     - name: checkout fuzz/corpora submodule
+       run: git submodule update --init --depth 1 fuzz/corpora
+     - name: config
+@@ -284,7 +284,7 @@
+   enable_non-default_options:
+     runs-on: ${{ github.server_url == 'https://github.com' && 'ubuntu-latest' || 'ubuntu-22.04-self-hosted' }}
+     steps:
+-    - uses: actions/checkout@v4
++    - uses: actions/checkout@v6
+     - name: checkout fuzz/corpora submodule
+       run: git submodule update --init --depth 1 fuzz/corpora
+     - name: modprobe tls
+@@ -303,7 +303,7 @@
+   fips_and_ktls:
+     runs-on: ${{ github.server_url == 'https://github.com' && 'ubuntu-latest' || 'ubuntu-22.04-self-hosted' }}
+     steps:
+-    - uses: actions/checkout@v4
++    - uses: actions/checkout@v6
+     - name: checkout fuzz/corpora submodule
+       run: git submodule update --init --depth 1 fuzz/corpora
+     - name: modprobe tls
+@@ -322,7 +322,7 @@
+   no-legacy:
+     runs-on: ${{ github.server_url == 'https://github.com' && 'ubuntu-latest' || 'ubuntu-22.04-self-hosted' }}
+     steps:
+-    - uses: actions/checkout@v4
++    - uses: actions/checkout@v6
+     - name: checkout fuzz/corpora submodule
+       run: git submodule update --init --depth 1 fuzz/corpora
+     - name: config
+@@ -339,7 +339,7 @@
+   legacy:
+     runs-on: ${{ github.server_url == 'https://github.com' && 'ubuntu-latest' || 'ubuntu-22.04-self-hosted' }}
+     steps:
+-    - uses: actions/checkout@v4
++    - uses: actions/checkout@v6
+     - name: checkout fuzz/corpora submodule
+       run: git submodule update --init --depth 1 fuzz/corpora
+     - name: config
+@@ -361,7 +361,7 @@
+   out-of-readonly-source-and-install-ubuntu:
+     runs-on: ${{ github.server_url == 'https://github.com' && 'ubuntu-latest' || 'ubuntu-22.04-self-hosted' }}
+     steps:
+-    - uses: actions/checkout@v4
++    - uses: actions/checkout@v6
+       with:
+         path: ./source
+     - name: checkout fuzz/corpora submodule
+@@ -397,7 +397,7 @@
+     runs-on: macos-latest
+     if: github.server_url == 'https://github.com'
+     steps:
+-    - uses: actions/checkout@v4
++    - uses: actions/checkout@v6
+       with:
+         path: ./source
+     - name: checkout fuzz/corpora submodule
+@@ -432,7 +432,7 @@
+   external-tests:
+     runs-on: ${{ github.server_url == 'https://github.com' && 'ubuntu-latest' || 'ubuntu-22.04-self-hosted' }}
+     steps:
+-    - uses: actions/checkout@v4
++    - uses: actions/checkout@v6
+       with:
+         submodules: recursive
+     - name: package installs
+@@ -471,7 +471,7 @@
+         PYTHON:
+           - 3.9
+     steps:
+-    - uses: actions/checkout@v4
++    - uses: actions/checkout@v6
+       with:
+         submodules: recursive
+     - name: Configure OpenSSL
+@@ -495,7 +495,7 @@
+   external-test-cf-quiche:
+     runs-on: ${{ github.server_url == 'https://github.com' && 'ubuntu-latest' || 'ubuntu-22.04-self-hosted' }}
+     steps:
+-    - uses: actions/checkout@v4
++    - uses: actions/checkout@v6
+       with:
+         submodules: recursive
+     - name: Configure OpenSSL
+diff -ruN '--exclude=.cargo-ok' '--exclude=Cargo.lock' '--exclude=.cargo_vcs_info.json' '--exclude=Cargo.toml.orig' originals/openssl-src-300.2.3+3.2.1/openssl/.github/workflows/compiler-zoo.yml openssl-src-300.2.3+3.2.1-full/openssl/.github/workflows/compiler-zoo.yml
+--- originals/openssl-src-300.2.3+3.2.1/openssl/.github/workflows/compiler-zoo.yml	2006-07-24 03:21:28.000000000 +0200
++++ openssl-src-300.2.3+3.2.1-full/openssl/.github/workflows/compiler-zoo.yml	2026-01-10 20:08:33.952357716 +0100
+@@ -114,7 +114,7 @@
+         sudo apt-get update
+         sudo apt-get -y install ${{ matrix.zoo.cc }}
+ 
+-    - uses: actions/checkout@v4
++    - uses: actions/checkout@v6
+     - name: checkout fuzz/corpora submodule
+       run: git submodule update --init --depth 1 fuzz/corpora
+ 
+diff -ruN '--exclude=.cargo-ok' '--exclude=Cargo.lock' '--exclude=.cargo_vcs_info.json' '--exclude=Cargo.toml.orig' originals/openssl-src-300.2.3+3.2.1/openssl/.github/workflows/coveralls.yml openssl-src-300.2.3+3.2.1-full/openssl/.github/workflows/coveralls.yml
+--- originals/openssl-src-300.2.3+3.2.1/openssl/.github/workflows/coveralls.yml	2006-07-24 03:21:28.000000000 +0200
++++ openssl-src-300.2.3+3.2.1-full/openssl/.github/workflows/coveralls.yml	2026-01-10 20:08:33.956757716 +0100
+@@ -37,7 +37,7 @@
+         ]
+     runs-on: ubuntu-latest
+     steps:
+-    - uses: actions/checkout@v4
++    - uses: actions/checkout@v6
+       with:
+         submodules: recursive
+         ref: ${{ matrix.branches.branch }}
+diff -ruN '--exclude=.cargo-ok' '--exclude=Cargo.lock' '--exclude=.cargo_vcs_info.json' '--exclude=Cargo.toml.orig' originals/openssl-src-300.2.3+3.2.1/openssl/.github/workflows/cross-compiles.yml openssl-src-300.2.3+3.2.1-full/openssl/.github/workflows/cross-compiles.yml
+--- originals/openssl-src-300.2.3+3.2.1/openssl/.github/workflows/cross-compiles.yml	2006-07-24 03:21:28.000000000 +0200
++++ openssl-src-300.2.3+3.2.1-full/openssl/.github/workflows/cross-compiles.yml	2026-01-10 20:08:33.956757716 +0100
+@@ -160,7 +160,7 @@
+         sudo apt-get -yq --force-yes install \
+             gcc-${{ matrix.platform.arch }} \
+             ${{ matrix.platform.libs }}
+-    - uses: actions/checkout@v4
++    - uses: actions/checkout@v6
+     - name: checkout fuzz/corpora submodule
+       run: git submodule update --init --depth 1 fuzz/corpora
+ 
+diff -ruN '--exclude=.cargo-ok' '--exclude=Cargo.lock' '--exclude=.cargo_vcs_info.json' '--exclude=Cargo.toml.orig' originals/openssl-src-300.2.3+3.2.1/openssl/.github/workflows/fips-checksums.yml openssl-src-300.2.3+3.2.1-full/openssl/.github/workflows/fips-checksums.yml
+--- originals/openssl-src-300.2.3+3.2.1/openssl/.github/workflows/fips-checksums.yml	2006-07-24 03:21:28.000000000 +0200
++++ openssl-src-300.2.3+3.2.1-full/openssl/.github/workflows/fips-checksums.yml	2026-01-10 20:08:33.956757716 +0100
+@@ -26,7 +26,7 @@
+           mkdir ./build
+           mkdir ./source
+           mkdir ./artifact
+-      - uses: actions/checkout@v4
++      - uses: actions/checkout@v6
+         with:
+           repository: ${{ github.event.pull_request.base.repo.full_name }}
+           ref: ${{ github.event.pull_request.base.ref }}
+@@ -43,7 +43,7 @@
+       - name: make fips-checksums pristine
+         run: make fips-checksums
+         working-directory: ./build-pristine
+-      - uses: actions/checkout@v4
++      - uses: actions/checkout@v6
+         with:
+           path: source
+       - name: config
+diff -ruN '--exclude=.cargo-ok' '--exclude=Cargo.lock' '--exclude=.cargo_vcs_info.json' '--exclude=Cargo.toml.orig' originals/openssl-src-300.2.3+3.2.1/openssl/.github/workflows/fuzz-checker.yml openssl-src-300.2.3+3.2.1-full/openssl/.github/workflows/fuzz-checker.yml
+--- originals/openssl-src-300.2.3+3.2.1/openssl/.github/workflows/fuzz-checker.yml	2006-07-24 03:21:28.000000000 +0200
++++ openssl-src-300.2.3+3.2.1-full/openssl/.github/workflows/fuzz-checker.yml	2026-01-10 20:08:33.956757716 +0100
+@@ -48,7 +48,7 @@
+       run: |
+         sudo apt-get update
+         sudo apt-get -yq --force-yes install ${{ matrix.fuzzy.install }}
+-    - uses: actions/checkout@v4
++    - uses: actions/checkout@v6
+ 
+     - name: config
+       run: |
+diff -ruN '--exclude=.cargo-ok' '--exclude=Cargo.lock' '--exclude=.cargo_vcs_info.json' '--exclude=Cargo.toml.orig' originals/openssl-src-300.2.3+3.2.1/openssl/.github/workflows/interop-tests.yml openssl-src-300.2.3+3.2.1-full/openssl/.github/workflows/interop-tests.yml
+--- originals/openssl-src-300.2.3+3.2.1/openssl/.github/workflows/interop-tests.yml	2006-07-24 03:21:28.000000000 +0200
++++ openssl-src-300.2.3+3.2.1-full/openssl/.github/workflows/interop-tests.yml	2026-01-10 20:08:33.956757716 +0100
+@@ -21,7 +21,7 @@
+     env:
+       COMPONENT: ${{ matrix.COMPONENT }}
+     steps:
+-      - uses: actions/checkout@v4
++      - uses: actions/checkout@v6
+       - name: Display environment
+         run: export
+       - name : Install needed tools
+diff -ruN '--exclude=.cargo-ok' '--exclude=Cargo.lock' '--exclude=.cargo_vcs_info.json' '--exclude=Cargo.toml.orig' originals/openssl-src-300.2.3+3.2.1/openssl/.github/workflows/os-zoo.yml openssl-src-300.2.3+3.2.1-full/openssl/.github/workflows/os-zoo.yml
+--- originals/openssl-src-300.2.3+3.2.1/openssl/.github/workflows/os-zoo.yml	2006-07-24 03:21:28.000000000 +0200
++++ openssl-src-300.2.3+3.2.1-full/openssl/.github/workflows/os-zoo.yml	2026-01-10 20:08:33.956757716 +0100
+@@ -32,7 +32,7 @@
+     steps:
+     - name: install packages
+       run: apk --no-cache add build-base perl linux-headers ${{ matrix.cc }}
+-    - uses: actions/checkout@v4
++    - uses: actions/checkout@v6
+       with:
+         ref: ${{ matrix.branch }}
+     - name: config
+@@ -82,7 +82,7 @@
+     runs-on: ubuntu-latest
+     container: ${{ matrix.zoo.image }}
+     steps:
+-    - uses: actions/checkout@v4
++    - uses: actions/checkout@v6
+       with:
+         ref: ${{ matrix.branch }}
+     - name: install packages
+@@ -108,7 +108,7 @@
+         os: [macos-11, macos-12, macos-13]
+     runs-on: ${{ matrix.os }}
+     steps:
+-    - uses: actions/checkout@v4
++    - uses: actions/checkout@v6
+       with:
+         ref: ${{ matrix.branch }}
+     - name: checkout fuzz/corpora submodule
+@@ -134,7 +134,7 @@
+         os: [windows-2019, windows-2022]
+     runs-on: ${{ matrix.os }}
+     steps:
+-    - uses: actions/checkout@v4
++    - uses: actions/checkout@v6
+       with:
+         ref: ${{ matrix.branch }}
+     - name: checkout fuzz/corpora submodule
+@@ -175,7 +175,7 @@
+     runs-on: ${{ matrix.os }}-self-hosted
+     continue-on-error: true
+     steps:
+-    - uses: actions/checkout@v4
++    - uses: actions/checkout@v6
+     - name: config
+       run: ./config enable-fips enable-ec_nistp_64_gcc_128 enable-md2 enable-rc5 enable-ssl3 enable-ssl3-method enable-trace
+     - name: config dump
+diff -ruN '--exclude=.cargo-ok' '--exclude=Cargo.lock' '--exclude=.cargo_vcs_info.json' '--exclude=Cargo.toml.orig' originals/openssl-src-300.2.3+3.2.1/openssl/.github/workflows/provider-compatibility.yml openssl-src-300.2.3+3.2.1-full/openssl/.github/workflows/provider-compatibility.yml
+--- originals/openssl-src-300.2.3+3.2.1/openssl/.github/workflows/provider-compatibility.yml	2006-07-24 03:21:28.000000000 +0200
++++ openssl-src-300.2.3+3.2.1-full/openssl/.github/workflows/provider-compatibility.yml	2026-01-10 20:08:33.956757716 +0100
+@@ -125,7 +125,7 @@
+ 
+     runs-on: ubuntu-latest
+     steps:
+-      - uses: actions/checkout@v4
++      - uses: actions/checkout@v6
+         with:
+           path: ${{ matrix.branch.dir }}
+           repository: openssl/openssl
+diff -ruN '--exclude=.cargo-ok' '--exclude=Cargo.lock' '--exclude=.cargo_vcs_info.json' '--exclude=Cargo.toml.orig' originals/openssl-src-300.2.3+3.2.1/openssl/.github/workflows/run-checker-ci.yml openssl-src-300.2.3+3.2.1-full/openssl/.github/workflows/run-checker-ci.yml
+--- originals/openssl-src-300.2.3+3.2.1/openssl/.github/workflows/run-checker-ci.yml	2006-07-24 03:21:28.000000000 +0200
++++ openssl-src-300.2.3+3.2.1-full/openssl/.github/workflows/run-checker-ci.yml	2026-01-10 20:08:33.956757716 +0100
+@@ -41,7 +41,7 @@
+         ]
+     runs-on: ubuntu-latest
+     steps:
+-    - uses: actions/checkout@v4
++    - uses: actions/checkout@v6
+     - name: checkout fuzz/corpora submodule
+       run: git submodule update --init --depth 1 fuzz/corpora
+     - name: config
+diff -ruN '--exclude=.cargo-ok' '--exclude=Cargo.lock' '--exclude=.cargo_vcs_info.json' '--exclude=Cargo.toml.orig' originals/openssl-src-300.2.3+3.2.1/openssl/.github/workflows/run-checker-daily.yml openssl-src-300.2.3+3.2.1-full/openssl/.github/workflows/run-checker-daily.yml
+--- originals/openssl-src-300.2.3+3.2.1/openssl/.github/workflows/run-checker-daily.yml	2006-07-24 03:21:28.000000000 +0200
++++ openssl-src-300.2.3+3.2.1-full/openssl/.github/workflows/run-checker-daily.yml	2026-01-10 20:08:33.956757716 +0100
+@@ -135,7 +135,7 @@
+         ]
+     runs-on: ubuntu-latest
+     steps:
+-    - uses: actions/checkout@v4
++    - uses: actions/checkout@v6
+     - name: checkout fuzz/corpora submodule
+       run: git submodule update --init --depth 1 fuzz/corpora
+     - name: config
+@@ -154,7 +154,7 @@
+   run-checker-sctp:
+     runs-on: ubuntu-latest
+     steps:
+-    - uses: actions/checkout@v4
++    - uses: actions/checkout@v6
+     - name: checkout fuzz/corpora submodule
+       run: git submodule update --init --depth 1 fuzz/corpora
+     - name: Install Dependencies for sctp option
+@@ -198,7 +198,7 @@
+         sudo apt-get update
+         sudo apt-get -yq --no-install-suggests --no-install-recommends --force-yes install brotli libbrotli1 libbrotli-dev
+     - name: checkout openssl
+-      uses: actions/checkout@v4
++      uses: actions/checkout@v6
+     - name: checkout fuzz/corpora submodule
+       run: git submodule update --init --depth 1 fuzz/corpora
+     - name: config
+@@ -220,7 +220,7 @@
+         sudo apt-get update
+         sudo apt-get -yq --no-install-suggests --no-install-recommends --force-yes install zstd libzstd1 libzstd-dev
+     - name: checkout openssl
+-      uses: actions/checkout@v4
++      uses: actions/checkout@v6
+     - name: checkout fuzz/corpora submodule
+       run: git submodule update --init --depth 1 fuzz/corpora
+     - name: config
+@@ -243,7 +243,7 @@
+         sudo apt-get -yq --no-install-suggests --no-install-recommends --force-yes install brotli libbrotli1 libbrotli-dev
+         sudo apt-get -yq --no-install-suggests --no-install-recommends --force-yes install zstd libzstd1 libzstd-dev
+     - name: checkout openssl
+-      uses: actions/checkout@v4
++      uses: actions/checkout@v6
+     - name: checkout fuzz/corpora submodule
+       run: git submodule update --init --depth 1 fuzz/corpora
+     - name: config
+@@ -265,7 +265,7 @@
+         sudo apt-get update
+         sudo apt-get -yq --no-install-suggests --no-install-recommends --force-yes install brotli libbrotli1 libbrotli-dev
+     - name: checkout openssl
+-      uses: actions/checkout@v4
++      uses: actions/checkout@v6
+     - name: checkout fuzz/corpora submodule
+       run: git submodule update --init --depth 1 fuzz/corpora
+     - name: config
+@@ -287,7 +287,7 @@
+         sudo apt-get update
+         sudo apt-get -yq --no-install-suggests --no-install-recommends --force-yes install zstd libzstd1 libzstd-dev
+     - name: checkout openssl
+-      uses: actions/checkout@v4
++      uses: actions/checkout@v6
+     - name: checkout fuzz/corpora submodule
+       run: git submodule update --init --depth 1 fuzz/corpora
+     - name: config
+@@ -307,7 +307,7 @@
+         os: [ ubuntu-latest, macos-latest ]
+     runs-on: ${{matrix.os}}
+     steps:
+-    - uses: actions/checkout@v4
++    - uses: actions/checkout@v6
+     - name: checkout fuzz/corpora submodule
+       run: git submodule update --init --depth 1 fuzz/corpora
+     - name: config
+@@ -322,7 +322,7 @@
+   enable_buildtest:
+     runs-on: ubuntu-latest
+     steps:
+-    - uses: actions/checkout@v4
++    - uses: actions/checkout@v6
+     - name: checkout fuzz/corpora submodule
+       run: git submodule update --init --depth 1 fuzz/corpora
+     - name: config
+diff -ruN '--exclude=.cargo-ok' '--exclude=Cargo.lock' '--exclude=.cargo_vcs_info.json' '--exclude=Cargo.toml.orig' originals/openssl-src-300.2.3+3.2.1/openssl/.github/workflows/run-checker-merge.yml openssl-src-300.2.3+3.2.1-full/openssl/.github/workflows/run-checker-merge.yml
+--- originals/openssl-src-300.2.3+3.2.1/openssl/.github/workflows/run-checker-merge.yml	2006-07-24 03:21:28.000000000 +0200
++++ openssl-src-300.2.3+3.2.1-full/openssl/.github/workflows/run-checker-merge.yml	2026-01-10 20:08:33.956757716 +0100
+@@ -38,7 +38,7 @@
+         ]
+     runs-on: ubuntu-latest
+     steps:
+-    - uses: actions/checkout@v4
++    - uses: actions/checkout@v6
+     - name: checkout fuzz/corpora submodule
+       run: git submodule update --init --depth 1 fuzz/corpora
+     - name: config
+diff -ruN '--exclude=.cargo-ok' '--exclude=Cargo.lock' '--exclude=.cargo_vcs_info.json' '--exclude=Cargo.toml.orig' originals/openssl-src-300.2.3+3.2.1/openssl/.github/workflows/static-analysis.yml openssl-src-300.2.3+3.2.1-full/openssl/.github/workflows/static-analysis.yml
+--- originals/openssl-src-300.2.3+3.2.1/openssl/.github/workflows/static-analysis.yml	2006-07-24 03:21:28.000000000 +0200
++++ openssl-src-300.2.3+3.2.1-full/openssl/.github/workflows/static-analysis.yml	2026-01-10 20:08:33.956757716 +0100
+@@ -19,7 +19,7 @@
+   coverity:
+     runs-on: ubuntu-latest
+     steps:
+-    - uses: actions/checkout@v4
++    - uses: actions/checkout@v6
+     - name: tool download
+       run: |
+         wget https://scan.coverity.com/download/linux64 \
+diff -ruN '--exclude=.cargo-ok' '--exclude=Cargo.lock' '--exclude=.cargo_vcs_info.json' '--exclude=Cargo.toml.orig' originals/openssl-src-300.2.3+3.2.1/openssl/.github/workflows/windows.yml openssl-src-300.2.3+3.2.1-full/openssl/.github/workflows/windows.yml
+--- originals/openssl-src-300.2.3+3.2.1/openssl/.github/workflows/windows.yml	2006-07-24 03:21:28.000000000 +0200
++++ openssl-src-300.2.3+3.2.1-full/openssl/.github/workflows/windows.yml	2026-01-10 20:08:33.956757716 +0100
+@@ -27,7 +27,7 @@
+             config: --strict-warnings no-fips
+     runs-on: ${{ github.server_url == 'https://github.com' && matrix.os || format('{0}-self-hosted', matrix.os) }}
+     steps:
+-    - uses: actions/checkout@v4
++    - uses: actions/checkout@v6
+     - name: checkout fuzz/corpora submodule
+       run: git submodule update --init --depth 1 fuzz/corpora
+     - uses: ilammy/msvc-dev-cmd@v1
+@@ -77,7 +77,7 @@
+           - windows-2022
+     runs-on: ${{ github.server_url == 'https://github.com' && matrix.os || format('{0}-self-hosted', matrix.os) }}
+     steps:
+-    - uses: actions/checkout@v4
++    - uses: actions/checkout@v6
+     - name: checkout fuzz/corpora submodule
+       run: git submodule update --init --depth 1 fuzz/corpora
+     - uses: ilammy/msvc-dev-cmd@v1
+@@ -115,7 +115,7 @@
+           - windows-2022
+     runs-on: ${{ github.server_url == 'https://github.com' && matrix.os || format('{0}-self-hosted', matrix.os) }}
+     steps:
+-    - uses: actions/checkout@v4
++    - uses: actions/checkout@v6
+     - name: checkout fuzz/corpora submodule
+       run: git submodule update --init --depth 1 fuzz/corpora
+     - uses: ilammy/msvc-dev-cmd@v1
+@@ -167,7 +167,7 @@
+       MAKE_PARAMS: -j 4
+     steps:
+ # Checkout before cygwin can mess with PATH...
+-    - uses: actions/checkout@v4
++    - uses: actions/checkout@v6
+     - uses: cygwin/cygwin-install-action@master
+       with:
+          packages: perl git make gcc-core
+diff -ruN '--exclude=.cargo-ok' '--exclude=Cargo.lock' '--exclude=.cargo_vcs_info.json' '--exclude=Cargo.toml.orig' originals/openssl-src-300.2.3+3.2.1/openssl/.github/workflows/windows_comp.yml openssl-src-300.2.3+3.2.1-full/openssl/.github/workflows/windows_comp.yml
+--- originals/openssl-src-300.2.3+3.2.1/openssl/.github/workflows/windows_comp.yml	2006-07-24 03:21:28.000000000 +0200
++++ openssl-src-300.2.3+3.2.1-full/openssl/.github/workflows/windows_comp.yml	2026-01-10 20:08:33.956757716 +0100
+@@ -22,7 +22,7 @@
+   zstd:
+     runs-on: windows-latest
+     steps:
+-    - uses: actions/checkout@v4
++    - uses: actions/checkout@v6
+     - name: checkout fuzz/corpora submodule
+       run: git submodule update --init --depth 1 fuzz/corpora
+     - uses: ilammy/msvc-dev-cmd@v1
+@@ -61,7 +61,7 @@
+   brotli:
+     runs-on: windows-latest
+     steps:
+-    - uses: actions/checkout@v4
++    - uses: actions/checkout@v6
+     - name: checkout fuzz/corpora submodule
+       run: git submodule update --init --depth 1 fuzz/corpora
+     - uses: ilammy/msvc-dev-cmd@v1
+diff -ruN '--exclude=.cargo-ok' '--exclude=Cargo.lock' '--exclude=.cargo_vcs_info.json' '--exclude=Cargo.toml.orig' originals/openssl-src-300.2.3+3.2.1/src/lib.rs openssl-src-300.2.3+3.2.1-full/src/lib.rs
+--- originals/openssl-src-300.2.3+3.2.1/src/lib.rs	2006-07-24 03:21:28.000000000 +0200
++++ openssl-src-300.2.3+3.2.1-full/src/lib.rs	2026-01-11 23:38:05.333282842 +0100
+@@ -286,6 +286,7 @@
+             "arm-unknown-linux-musleabihf" => "linux-armv4",
+             "armv5te-unknown-linux-gnueabi" => "linux-armv4",
+             "armv5te-unknown-linux-musleabi" => "linux-armv4",
++            "armv5te-unknown-linux-uclibceabi" => "linux-armv4",
+             "armv6-unknown-freebsd" => "BSD-generic32",
+             "armv6-alpine-linux-musleabihf" => "linux-armv6",
+             "armv7-unknown-freebsd" => "BSD-armv4",
+@@ -557,11 +558,84 @@
+             install.arg("install_dev").current_dir(&inner_dir);
+             self.run_command(install, "installing OpenSSL");
+         } else {
++            // Fix timestamps before running make depend
++            fix_timestamps(&inner_dir);
++
+             let mut depend = self.cmd_make();
+             depend.arg("depend").current_dir(&inner_dir);
+-            self.run_command(depend, "building OpenSSL dependencies");
+ 
++            // Track whether make depend was skipped (target doesn't exist)
++            let mut depend_skipped = false;
++
++            // Retry logic for timestamp issues
++            let mut retries = 3;
++            loop {
++                let output = depend.output();
++                match output {
++                    Ok(output) if output.status.success() => {
++                        break;
++                    }
++                    Ok(output) if retries > 0 => {
++                        // Check if error is due to missing target (optional in some OpenSSL versions)
++                        let stderr = String::from_utf8_lossy(&output.stderr);
++                        if stderr.contains("No rule to make target") {
++                            // make depend is optional, skip it
++                            println!("cargo:warning=make depend target not available, skipping");
++                            depend_skipped = true;
++                            break;
++                        }
++                        // Fix timestamps and retry for timestamp-related errors
++                        fix_timestamps(&inner_dir);
++                        retries -= 1;
++                        depend = self.cmd_make();
++                        depend.arg("depend").current_dir(&inner_dir);
++                        continue;
++                    }
++                    Ok(output) => {
++                        // Check if error is due to missing target (optional in some OpenSSL versions)
++                        let stderr = String::from_utf8_lossy(&output.stderr);
++                        if stderr.contains("No rule to make target") {
++                            // make depend is optional, skip it
++                            println!("cargo:warning=make depend target not available, skipping");
++                            depend_skipped = true;
++                            break;
++                        }
++                        // Final failure - show error from output
++                        let stdout = String::from_utf8_lossy(&output.stdout);
++                        panic!(
++                            "
++
++
++Error building OpenSSL dependencies:
++    Command: make depend
++    Exit status: {}
++    stdout: {}
++    stderr: {}
++
++
++    ",
++                            output.status, stdout, stderr
++                        );
++                    }
++                    Err(e) => {
++                        if retries > 0 {
++                            fix_timestamps(&inner_dir);
++                            retries -= 1;
++                            depend = self.cmd_make();
++                            depend.arg("depend").current_dir(&inner_dir);
++                            continue;
++                        }
++                        panic!("Failed to execute make depend: {}", e);
++                    }
++                }
++            }
++
++            // Build OpenSSL libraries. According to OpenSSL docs:
++            // - build_sw is the DEFAULT TARGET (builds all software components)
++            // - build_libs may not exist in all OpenSSL versions
++            // - When make depend is skipped, we can still use build_sw
+             let mut build = self.cmd_make();
++            // Try build_libs first (if it exists), otherwise fall back to build_sw (default target)
+             build.arg("build_libs").current_dir(&inner_dir);
+             if !cfg!(windows) {
+                 if let Some(s) = env::var_os("CARGO_MAKEFLAGS") {
+@@ -575,7 +649,98 @@
+                 build.env("CROSS_SDK", components[1]);
+             }
+ 
+-            self.run_command(build, "building OpenSSL");
++            // Try build_libs first
++            let build_output = build.output();
++            match build_output {
++                Ok(output) if output.status.success() => {
++                    // Success - build_libs worked
++                }
++                Ok(output) => {
++                    let stderr = String::from_utf8_lossy(&output.stderr);
++                    // If build_libs doesn't exist, try 'all' target (builds all software components)
++                    if stderr.contains("No rule to make target") {
++                        println!(
++                            "cargo:warning=build_libs target not available, trying 'all' target"
++                        );
++                        let mut build_all = self.cmd_make();
++                        build_all.arg("all").current_dir(&inner_dir);
++                        if !cfg!(windows) {
++                            if let Some(s) = env::var_os("CARGO_MAKEFLAGS") {
++                                build_all.env("MAKEFLAGS", s);
++                            }
++                        }
++                        if let Some(ref isysr) = ios_isysroot {
++                            let components: Vec<&str> = isysr.split("/SDKs/").collect();
++                            build_all.env("CROSS_TOP", components[0]);
++                            build_all.env("CROSS_SDK", components[1]);
++                        }
++                        // Try 'all' target, and if that fails, try running make without target
++                        let all_output = build_all.output();
++                        match all_output {
++                            Ok(output) if output.status.success() => {
++                                // Success - 'all' target worked
++                            }
++                            Ok(output) => {
++                                let all_stderr = String::from_utf8_lossy(&output.stderr);
++                                if all_stderr.contains("No rule to make target")
++                                    || all_stderr.contains("No targets")
++                                {
++                                    println!("cargo:warning='all' target not available, trying 'build_sw' target");
++                                    let mut build_sw = self.cmd_make();
++                                    build_sw.arg("build_sw").current_dir(&inner_dir);
++                                    if !cfg!(windows) {
++                                        if let Some(s) = env::var_os("CARGO_MAKEFLAGS") {
++                                            build_sw.env("MAKEFLAGS", s);
++                                        }
++                                    }
++                                    if let Some(ref isysr) = ios_isysroot {
++                                        let components: Vec<&str> = isysr.split("/SDKs/").collect();
++                                        build_sw.env("CROSS_TOP", components[0]);
++                                        build_sw.env("CROSS_SDK", components[1]);
++                                    }
++                                    self.run_command(build_sw, "building OpenSSL");
++                                } else {
++                                    // Other error from 'all' target
++                                    let all_stdout = String::from_utf8_lossy(&output.stdout);
++                                    panic!(
++                                        "
++
++Error building OpenSSL (all target):
++    Command: make all
++    Exit status: {}
++    stdout: {}
++    stderr: {}
++
++    ",
++                                        output.status, all_stdout, all_stderr
++                                    );
++                                }
++                            }
++                            Err(e) => {
++                                panic!("Failed to execute make all: {}", e);
++                            }
++                        }
++                    } else {
++                        // Other error - show the error from the output we captured
++                        let stdout = String::from_utf8_lossy(&output.stdout);
++                        panic!(
++                            "
++
++Error building OpenSSL:
++    Command: make build_libs
++    Exit status: {}
++    stdout: {}
++    stderr: {}
++
++    ",
++                            output.status, stdout, stderr
++                        );
++                    }
++                }
++                Err(e) => {
++                    panic!("Failed to execute make build_libs: {}", e);
++                }
++            }
+ 
+             let mut install = self.cmd_make();
+             install.arg("install_dev").current_dir(&inner_dir);
+@@ -623,6 +788,22 @@
+     }
+ }
+ 
++fn fix_timestamps(build_dir: &Path) {
++    use std::fs::OpenOptions;
++
++    let configdata_pm = build_dir.join("configdata.pm");
++    if configdata_pm.exists() {
++        // Open in append mode to update timestamp without truncating
++        let _ = OpenOptions::new().append(true).open(&configdata_pm);
++    }
++    // Also touch Makefile to ensure consistency
++    let makefile = build_dir.join("Makefile");
++    if makefile.exists() {
++        // Open in append mode to update timestamp without truncating
++        let _ = OpenOptions::new().append(true).open(&makefile);
++    }
++}
++
+ fn cp_r(src: &Path, dst: &Path) {
+     for f in fs::read_dir(src).unwrap() {
+         let f = f.unwrap();

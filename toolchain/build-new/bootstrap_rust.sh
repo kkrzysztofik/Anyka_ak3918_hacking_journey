@@ -1,6 +1,6 @@
 #!/bin/bash
-# Bootstrap Rust from source with custom LLVM for ARMv5TE target
-# Creates armv5te-unknown-linux-uclibceabi target
+# Bootstrap Rust from source with custom LLVM
+# Supports: ARMv5TE (armv5te) and aarch64 architectures
 
 set -e  # Exit on error
 
@@ -10,16 +10,44 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
+# Architecture selection (default: armv5te)
+ARCH="${ARCH:-armv5te}"
+
+# Validate architecture
+if [ "${ARCH}" != "armv5te" ] && [ "${ARCH}" != "aarch64" ]; then
+    echo "Error: ARCH must be 'armv5te' or 'aarch64'"
+    echo "Usage: ARCH=armv5te ./bootstrap_rust.sh  (default)"
+    echo "       ARCH=aarch64 ./bootstrap_rust.sh"
+    exit 1
+fi
+
 # Script directory
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BUILD_DIR="${SCRIPT_DIR}"
-INSTALL_DIR="${SCRIPT_DIR}/../arm-anykav200-crosstool-ng"
+
+# Set target-specific variables based on architecture
+if [ "${ARCH}" = "aarch64" ]; then
+    INSTALL_DIR="${SCRIPT_DIR}/../aarch64-unknown-linux-gnu-toolchain"
+    TARGET_NAME="aarch64-unknown-linux-gnu"
+    TARGET_SPEC="${BUILD_DIR}/${TARGET_NAME}.json"
+    TARGET_TUPLE="aarch64-unknown-linux-gnu"
+    SYSROOT_SUBDIR="aarch64-unknown-linux-gnu"
+    CLANG_WRAPPER="clang-wrapper-aarch64.sh"
+    IS_BUILTIN_TARGET=true
+else
+    INSTALL_DIR="${SCRIPT_DIR}/../arm-anykav200-crosstool-ng"
+    TARGET_NAME="armv5te-unknown-linux-uclibceabi"
+    TARGET_SPEC="${BUILD_DIR}/${TARGET_NAME}.json"
+    TARGET_TUPLE="arm-unknown-linux-uclibcgnueabi"
+    SYSROOT_SUBDIR="arm-unknown-linux-uclibcgnueabi"
+    CLANG_WRAPPER="clang-wrapper.sh"
+    IS_BUILTIN_TARGET=false
+fi
+
 RUST_SRC_DIR="${BUILD_DIR}/rust"
 # Use latest stable Rust version (1.91.1 or newer)
 # This matches the system Rust version for bootstrap compatibility
-RUST_VERSION="1.91.1"  # Latest stable version
-TARGET_NAME="armv5te-unknown-linux-uclibceabi"
-TARGET_SPEC="${BUILD_DIR}/${TARGET_NAME}.json"
+RUST_VERSION="1.92.0"  # Latest stable version
 
 # Logging functions
 log_info() {
@@ -79,12 +107,20 @@ check_dependencies() {
     local llvm_config="${INSTALL_DIR}/bin/llvm-config"
     if [[ ! -f "${llvm_config}" ]]; then
         log_error "LLVM not found at: ${llvm_config}"
+        log_error ""
+        log_error "LLVM/Clang is required for Rust bootstrap."
         log_error "Please build LLVM first using build_llvm.sh"
+        log_error ""
+        log_error "For ${ARCH} architecture, run:"
+        log_error "  ARCH=${ARCH} ./build_llvm.sh"
+        log_error ""
+        log_error "Note: build_llvm.sh needs to be created first."
+        log_error "It should build LLVM 18.1.8 with Clang and LLD for ${ARCH}."
         exit 1
     fi
 
-    # Check for target spec file
-    if [[ ! -f "${TARGET_SPEC}" ]]; then
+    # Check for target spec file (only required for non-builtin targets)
+    if [[ "${IS_BUILTIN_TARGET}" = "false" ]] && [[ ! -f "${TARGET_SPEC}" ]]; then
         log_error "Target specification not found: ${TARGET_SPEC}"
         exit 1
     fi
@@ -106,15 +142,13 @@ clone_rust() {
     cd "${BUILD_DIR}"
 
     log_info "Cloning Rust repository (version ${RUST_VERSION})..."
-    # Try to clone specific version first, fallback to stable branch
+    # Clone the specific version tag - do NOT fallback to stable
+    # Rust tags use plain semantic versions (e.g., 1.92.0) without a v prefix
     git clone --depth 1 --branch "${RUST_VERSION}" \
-        https://github.com/rust-lang/rust.git "${RUST_SRC_DIR}" 2>/dev/null || {
-        log_warn "Version ${RUST_VERSION} not found, trying stable branch..."
-        git clone --depth 1 --branch stable \
-            https://github.com/rust-lang/rust.git "${RUST_SRC_DIR}" || {
-            log_error "Failed to clone Rust source"
-            exit 1
-        }
+        https://github.com/rust-lang/rust.git "${RUST_SRC_DIR}" || {
+        log_error "Failed to clone Rust source for version ${RUST_VERSION}"
+        log_error "Available versions can be checked at: https://github.com/rust-lang/rust/tags"
+        exit 1
     }
 
     log_info "Rust source cloned. Using system Rust ${RUST_VERSION} for bootstrap."
@@ -124,6 +158,11 @@ clone_rust() {
 
 # Add target specification to Rust source
 add_target_spec() {
+    if [[ "${IS_BUILTIN_TARGET}" = "true" ]]; then
+        log_info "Target ${TARGET_NAME} is a builtin Rust target, skipping custom spec"
+        return 0
+    fi
+
     log_info "Adding target specification to Rust source..."
 
     # Modern Rust uses compiler/rustc_target/src/spec/targets/
@@ -216,11 +255,11 @@ RUST_EOF
 
 # Create Rust config.toml
 create_rust_config() {
-    log_info "Creating Rust config.toml..."
+    log_info "Creating Rust config.toml for ${ARCH}..."
 
     local config_file="${RUST_SRC_DIR}/config.toml"
     local llvm_config="${INSTALL_DIR}/bin/llvm-config"
-    local sysroot="${INSTALL_DIR}/arm-unknown-linux-uclibcgnueabi/sysroot"
+    local sysroot="${INSTALL_DIR}/${SYSROOT_SUBDIR}/sysroot"
 
     # Find system Rust toolchain for bootstrap
     local system_rustc=$(which rustc 2>/dev/null || echo "rustc")
@@ -233,8 +272,24 @@ create_rust_config() {
         log_warn "Or ensure rustc and cargo are in your PATH"
     fi
 
+    # Determine compiler paths based on architecture
+    local target_cc target_cxx target_ar target_ranlib
+    if [ "${ARCH}" = "aarch64" ]; then
+        # aarch64 toolchain installs to bin/ directly (not usr/bin/)
+        target_cc="${INSTALL_DIR}/bin/aarch64-unknown-linux-gnu-gcc"
+        target_cxx="${INSTALL_DIR}/bin/aarch64-unknown-linux-gnu-g++"
+        target_ar="${INSTALL_DIR}/bin/aarch64-unknown-linux-gnu-ar"
+        target_ranlib="${INSTALL_DIR}/bin/aarch64-unknown-linux-gnu-ranlib"
+    else
+        # ARMv5TE toolchain installs to bin/ (not usr/bin/)
+        target_cc="${INSTALL_DIR}/bin/arm-unknown-linux-uclibcgnueabi-gcc"
+        target_cxx="${INSTALL_DIR}/bin/arm-unknown-linux-uclibcgnueabi-g++"
+        target_ar="${INSTALL_DIR}/bin/arm-unknown-linux-uclibcgnueabi-ar"
+        target_ranlib="${INSTALL_DIR}/bin/arm-unknown-linux-uclibcgnueabi-ranlib"
+    fi
+
     cat > "${config_file}" << EOF
-# Rust build configuration for custom LLVM and ARMv5TE target
+# Rust build configuration for custom LLVM and ${ARCH} target
 # Generated by bootstrap_rust.sh
 
 [llvm]
@@ -254,7 +309,7 @@ rustc = "${system_rustc}"
 cargo = "${system_cargo}"
 # Build extended tools (cargo, rustfmt, clippy, etc.)
 extended = true
-tools = ["cargo", "rustfmt", "clippy", "rustdoc"]
+tools = ["cargo", "rustfmt", "clippy", "rustdoc", "src"]
 
 [install]
 prefix = "${INSTALL_DIR}"
@@ -272,14 +327,14 @@ ar = "ar"
 ranlib = "ranlib"
 
 [target.${TARGET_NAME}]
-# Linker configuration - use Clang for the target
-linker = "${INSTALL_DIR}/bin/clang"
+# Linker configuration - use Clang wrapper for the target
+linker = "${BUILD_DIR}/${CLANG_WRAPPER}"
 # C compiler for target build scripts (but build scripts should use host compiler)
 # These are only used when building for the target itself
-cc = "${INSTALL_DIR}/bin/arm-unknown-linux-uclibcgnueabi-gcc"
-cxx = "${INSTALL_DIR}/bin/arm-unknown-linux-uclibcgnueabi-g++"
-ar = "${INSTALL_DIR}/bin/arm-unknown-linux-uclibcgnueabi-ar"
-ranlib = "${INSTALL_DIR}/bin/arm-unknown-linux-uclibcgnueabi-ranlib"
+cc = "${target_cc}"
+cxx = "${target_cxx}"
+ar = "${target_ar}"
+ranlib = "${target_ranlib}"
 # Linker flags to specify sysroot and target
 # Clang needs these to find crti.o, crtn.o, and other C runtime files
 # Note: Use RUSTFLAGS environment variable instead, as link-args format may vary
@@ -346,11 +401,32 @@ build_rust() {
     log_info "Using CXX for host: ${CXX}"
     log_info "Using LLVM_CONFIG: ${LLVM_CONFIG}"
 
-    # Create Clang wrapper script that includes sysroot and target flags
+    # Create or verify Clang wrapper script that includes sysroot and target flags
     # This ensures Clang always has the right flags without affecting host builds
-    local sysroot="${INSTALL_DIR}/arm-unknown-linux-uclibcgnueabi/sysroot"
-    local clang_wrapper="${BUILD_DIR}/clang-wrapper.sh"
-    cat > "${clang_wrapper}" << EOF
+    local sysroot="${INSTALL_DIR}/${SYSROOT_SUBDIR}/sysroot"
+    local clang_wrapper="${BUILD_DIR}/${CLANG_WRAPPER}"
+    
+    if [ "${ARCH}" = "aarch64" ]; then
+        # Use the existing aarch64 wrapper if it exists, otherwise create it
+        if [[ ! -f "${clang_wrapper}" ]]; then
+            cat > "${clang_wrapper}" << EOF
+#!/bin/bash
+# Clang wrapper for aarch64 target with sysroot
+exec "${INSTALL_DIR}/bin/clang" \\
+    --target=aarch64-unknown-linux-gnu \\
+    --sysroot="${sysroot}" \\
+    -L"${sysroot}/lib" \\
+    -L"${sysroot}/usr/lib" \\
+    "\$@"
+EOF
+            chmod +x "${clang_wrapper}"
+            log_info "Created Clang wrapper: ${clang_wrapper}"
+        else
+            log_info "Using existing Clang wrapper: ${clang_wrapper}"
+        fi
+    else
+        # Create ARMv5TE wrapper
+        cat > "${clang_wrapper}" << EOF
 #!/bin/bash
 # Clang wrapper for ARMv5TE target with sysroot
 exec "${INSTALL_DIR}/bin/clang" \\
@@ -363,12 +439,16 @@ exec "${INSTALL_DIR}/bin/clang" \\
     -L"${sysroot}/usr/lib" \\
     "\$@"
 EOF
-    chmod +x "${clang_wrapper}"
-    log_info "Created Clang wrapper: ${clang_wrapper}"
+        chmod +x "${clang_wrapper}"
+        log_info "Created Clang wrapper: ${clang_wrapper}"
+    fi
 
-    # Update config.toml to use the wrapper
-    sed -i "s|linker = \"${INSTALL_DIR}/bin/clang\"|linker = \"${clang_wrapper}\"|" "${RUST_SRC_DIR}/config.toml"
-    log_info "Updated config.toml to use Clang wrapper"
+    # Update config.toml to use the wrapper (if not already set)
+    if ! grep -q "linker = \"${clang_wrapper}\"" "${RUST_SRC_DIR}/config.toml"; then
+        sed -i "s|linker = \".*\"|linker = \"${clang_wrapper}\"|" "${RUST_SRC_DIR}/config.toml" || \
+        sed -i "s|linker = \".*\"|linker = \"${clang_wrapper}\"|" "${RUST_SRC_DIR}/config.toml"
+        log_info "Updated config.toml to use Clang wrapper"
+    fi
 
     # Build Rust compiler and std library for both host and target
     # Host is needed for build scripts, target is for cross-compilation
@@ -420,6 +500,73 @@ install_rust() {
         exit 1
     }
 
+    # Install rust-src component explicitly
+    # rust-src is just source code (no compilation needed), so we copy it directly
+    # This matches the bootstrap implementation in src/bootstrap/src/core/build_steps/dist.rs
+    log_info "Installing rust-src component (copying library sources)..."
+    local rust_src_dest="${INSTALL_DIR}/lib/rustlib/src/rust"
+    
+    # Create destination directory
+    mkdir -p "${rust_src_dest}" || {
+        log_error "Failed to create rust-src destination directory: ${rust_src_dest}"
+        exit 1
+    }
+    
+    # Copy library source files (matches bootstrap dist.rs implementation)
+    if [[ -d "${RUST_SRC_DIR}/library" ]]; then
+        log_info "Copying library sources from ${RUST_SRC_DIR}/library..."
+        # Use rsync or cp with exclusions to match bootstrap behavior
+        # Exclude: library/backtrace/crates, library/stdarch/Cargo.toml, etc.
+        if command -v rsync >/dev/null 2>&1; then
+            if rsync -a --exclude='backtrace/crates' \
+                  --exclude='stdarch/Cargo.toml' \
+                  --exclude='stdarch/crates/stdarch-verify' \
+                  --exclude='stdarch/crates/intrinsic-test' \
+                  "${RUST_SRC_DIR}/library/" "${rust_src_dest}/library/"; then
+                log_info "Library sources copied successfully"
+            else
+                log_warn "rsync failed, falling back to cp"
+                cp -r "${RUST_SRC_DIR}/library" "${rust_src_dest}/" || {
+                    log_error "Failed to copy library sources"
+                    exit 1
+                }
+                log_info "Library sources copied successfully"
+            fi
+        else
+            log_warn "rsync not found, falling back to cp"
+            cp -r "${RUST_SRC_DIR}/library" "${rust_src_dest}/" || {
+                log_error "Failed to copy library sources"
+                exit 1
+            }
+            log_info "Library sources copied successfully"
+        fi
+    else
+        log_error "Library source directory not found: ${RUST_SRC_DIR}/library"
+        exit 1
+    fi
+    
+    # Copy libunwind source (needed for some std library dependencies)
+    if [[ -d "${RUST_SRC_DIR}/src/llvm-project/libunwind" ]]; then
+        log_info "Copying libunwind sources..."
+        mkdir -p "${rust_src_dest}/src/llvm-project"
+        cp -r "${RUST_SRC_DIR}/src/llvm-project/libunwind" "${rust_src_dest}/src/llvm-project/" || {
+            log_warn "Failed to copy libunwind sources (non-critical)"
+        }
+    fi
+    
+    # Create version file
+    local rust_version=$("${INSTALL_DIR}/bin/rustc" --version 2>/dev/null | cut -d' ' -f2 || echo "unknown")
+    echo "${rust_version}" > "${rust_src_dest}/version" 2>/dev/null || true
+    
+    # Register rust-src in components file
+    local components_file="${INSTALL_DIR}/lib/rustlib/components"
+    if [[ -f "${components_file}" ]] && ! grep -q "rust-src" "${components_file}"; then
+        echo "rust-src" >> "${components_file}"
+        log_info "Registered rust-src in components file"
+    fi
+    
+    log_info "rust-src component installed successfully at: ${rust_src_dest}"
+
     # Verify cargo was installed
     local cargo_path="${INSTALL_DIR}/bin/cargo"
     if [[ ! -f "${cargo_path}" ]]; then
@@ -470,13 +617,40 @@ verify_installation() {
         log_warn "Target ${TARGET_NAME} not found in target list"
     fi
 
+    # Verify rust-src component installation
+    log_info "Verifying rust-src component..."
+    local rust_src_path="${INSTALL_DIR}/lib/rustlib/src/rust"
+    if [[ -d "${rust_src_path}" ]]; then
+        log_info "rust-src component installed at: ${rust_src_path}"
+        # Check for key library directories
+        if [[ -d "${rust_src_path}/library/std" ]] && [[ -d "${rust_src_path}/library/core" ]]; then
+            log_info "Standard library source code verified (std, core)"
+        else
+            log_warn "rust-src directory exists but library sources not found"
+        fi
+    else
+        log_error "rust-src component not found at expected location: ${rust_src_path}"
+        log_error "rust-analyzer will not be able to load standard library sources"
+        exit 1
+    fi
+
+    # Verify components file includes rust-src
+    local components_file="${INSTALL_DIR}/lib/rustlib/components"
+    if [[ -f "${components_file}" ]]; then
+        if grep -q "rust-src" "${components_file}"; then
+            log_info "rust-src component registered in components file"
+        else
+            log_warn "rust-src not found in components file, but directory exists"
+        fi
+    fi
+
     log_info "Rust verification completed"
     return 0
 }
 
 # Main execution
 main() {
-    log_info "Starting Rust bootstrap for ARMv5TE"
+    log_info "Starting Rust bootstrap for ${ARCH}"
     log_info "Build directory: ${BUILD_DIR}"
     log_info "Install directory: ${INSTALL_DIR}"
     log_info "Rust version: ${RUST_VERSION}"

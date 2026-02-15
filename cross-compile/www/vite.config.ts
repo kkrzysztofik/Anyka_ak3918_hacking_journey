@@ -6,6 +6,45 @@ import viteCompression from 'vite-plugin-compression';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
+/**
+ * Determines the chunk name for a given module ID.
+ * This function encapsulates the chunking strategy to reduce cognitive complexity.
+ * @param id - The module ID to determine the chunk for
+ * @returns The chunk name or undefined for default chunking
+ */
+function isVendorLibrary(id: string): boolean {
+  return id.includes('node_modules');
+}
+
+function getVendorChunk(id: string): string | undefined {
+  if (id.includes('@tanstack/react-query')) return 'query-vendor';
+  if (id.includes('react-router-dom')) return 'router-vendor';
+  if (id.includes('lucide-react') || id.includes('@radix-ui') || id.includes('react-hook-form') || id.includes('@hookform') || id.includes('recharts') || id.includes('sonner')) return 'ui-vendor';
+  if (id.includes('axios')) return 'http-vendor';
+  if (id.includes('fast-xml-parser') || id.includes('dompurify')) return 'utils-vendor';
+  return 'vendor';
+}
+
+function getSrcChunk(id: string): string | undefined {
+  if (id.includes('/services/') || id.includes('onvif')) return 'onvif-services';
+  if (id.includes('DeviceService') || id.includes('SystemInfo')) return 'device-components';
+  if (id.includes('/store/slices/')) return 'store-slices';
+  if (id.includes('/utils/') || id.includes('/config/')) return 'app-utils';
+  if (id.includes('/components/') && (id.includes('LiveView') || id.includes('PTZ') || id.includes('Video'))) return 'camera-components';
+  return undefined;
+}
+
+function getChunkName(id: string): string | undefined {
+  const fromSrc = getSrcChunk(id);
+  if (fromSrc) return fromSrc;
+
+  if (isVendorLibrary(id)) {
+    return getVendorChunk(id);
+  }
+
+  return undefined;
+}
+
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => ({
   // Vitest configuration
@@ -91,97 +130,7 @@ export default defineConfig(({ mode }) => ({
     sourcemap: true,
     rollupOptions: {
       output: {
-        manualChunks: (id) => {
-          // Application code first (specific features before generic)
-          // ONVIF services and related components
-          if (id.includes('/services/') || id.includes('onvif')) {
-            return 'onvif-services';
-          }
-
-          // Device management components
-          if (id.includes('DeviceService') || id.includes('SystemInfo')) {
-            return 'device-components';
-          }
-
-          // Store slices
-          if (id.includes('/store/slices/')) {
-            return 'store-slices';
-          }
-
-          // Utilities and helpers
-          if (id.includes('/utils/') || id.includes('/config/')) {
-            return 'app-utils';
-          }
-
-          // Video and PTZ components (specific feature code, not all node_modules)
-          if (
-            id.includes('/components/') &&
-            (id.includes('LiveView') || id.includes('PTZ') || id.includes('Video'))
-          ) {
-            return 'camera-components';
-          }
-
-          // Vendor libraries (specific packages)
-          // TanStack Query and related
-          if (id.includes('@tanstack/react-query')) {
-            return 'query-vendor';
-          }
-
-          // Router libraries
-          if (id.includes('react-router-dom')) {
-            return 'router-vendor';
-          }
-
-          // UI libraries (group Radix, lucide, forms, charts together)
-          if (
-            id.includes('lucide-react') ||
-            id.includes('@radix-ui') ||
-            id.includes('react-hook-form') ||
-            id.includes('@hookform') ||
-            id.includes('recharts') ||
-            id.includes('sonner')
-          ) {
-            return 'ui-vendor';
-          }
-
-          // HTTP and networking
-          if (id.includes('axios')) {
-            return 'http-vendor';
-          }
-
-          // XML parsing and utilities
-          if (id.includes('fast-xml-parser') || id.includes('dompurify')) {
-            return 'utils-vendor';
-          }
-
-          // ONVIF services and related components (from src)
-          if ((id.includes('/services/') || id.includes('onvif')) && !id.includes('node_modules')) {
-            return 'onvif-services';
-          }
-
-          // Device management components (from src)
-          if ((id.includes('DeviceService') || id.includes('SystemInfo')) && !id.includes('node_modules')) {
-            return 'device-components';
-          }
-
-          // Store slices (from src)
-          if (id.includes('/store/slices/') && !id.includes('node_modules')) {
-            return 'store-slices';
-          }
-
-          // Utilities and helpers (from src)
-          if ((id.includes('/utils/') || id.includes('/config/')) && !id.includes('node_modules')) {
-            return 'app-utils';
-          }
-
-          // Default chunk for other node_modules
-          if (id.includes('node_modules')) {
-            return 'vendor';
-          }
-
-          // Return undefined for other files (use default chunking)
-          return undefined;
-        },
+        manualChunks: (id) => getChunkName(id),
         chunkFileNames: () => {
           return `js/[name]-[hash].js`;
         },

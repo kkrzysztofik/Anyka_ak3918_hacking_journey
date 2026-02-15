@@ -2,6 +2,16 @@
 run_ftp=1
 #telnet connection [default 1]
 run_telnet=1
+#ssh server (dropbear) [default 0]
+run_ssh=0
+#ssh service port [default 22]
+ssh_port=22
+#ssh auth mode [both|key|password]
+ssh_auth_mode=both
+#dropbear host key path
+ssh_host_key_path=/mnt/anyka_hack/dropbear/dropbear_ecdsa_host_key
+#authorized keys path (linked to /root/.ssh/authorized_keys)
+ssh_authorized_keys_path=/data/.ssh/authorized_keys
 #web interface on port 80 [default 0]
 run_web_interface=0
 #ONVIF server (PTZ, imaging, and media services) [default 0]

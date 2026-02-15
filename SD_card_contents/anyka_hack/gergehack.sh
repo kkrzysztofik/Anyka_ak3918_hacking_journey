@@ -232,6 +232,34 @@ start_onvif_server() {
   fi
 }
 
+start_ssh_service() {
+  local pid_file="/mnt/tmp/dropbear.pid"
+  local log_file="/mnt/logs/dropbear.log"
+  local ssh_script="/mnt/anyka_hack/dropbear/start_dropbear.sh"
+
+  if [ "${run_ssh:-0}" -ne 1 ]; then
+    debug_log "SSH disabled"
+    return 0
+  fi
+
+  if [ ! -f "$ssh_script" ]; then
+    log WARN "Dropbear startup script not found: $ssh_script"
+    return 1
+  fi
+
+  if is_process_running "$pid_file" "dropbear"; then
+    return 0
+  fi
+
+  "$ssh_script" \
+    "${ssh_port:-22}" \
+    "${ssh_auth_mode:-both}" \
+    "${ssh_host_key_path:-/mnt/anyka_hack/dropbear/dropbear_ecdsa_host_key}" \
+    "${ssh_authorized_keys_path:-/data/.ssh/authorized_keys}" \
+    >> "$log_file" 2>&1
+  return $?
+}
+
 # Monitoring functions
 start_system_monitor() {
   local pid_file="/mnt/tmp/sys_monitor.pid"
@@ -298,8 +326,8 @@ fi
 # Validate system state
 validate_system_state
 
-# Disable telnet if configured
-if [ "${run_telnet:-1}" -eq 0 ]; then
+# Disable telnet if configured or if SSH is enabled
+if [ "${run_telnet:-1}" -eq 0 ] || [ "${run_ssh:-0}" -eq 1 ]; then
   killall telnetd 2>/dev/null && log INFO "Disabled telnetd" || log DEBUG "telnetd not running"
 fi
 
@@ -314,7 +342,7 @@ else
   log INFO "|       Gerge Hacked This       |"
   log INFO "---------------------------------"
 
-  # Perform updates
+  # Run updates
   update_settings_from_sd
   update_script_from_sd
 
@@ -337,6 +365,9 @@ else
   # Load kernel modules for camera
   load_camera_modules "$sensor_kern_module"
 
+  # Start SSH service if enabled
+  start_ssh_service
+
 
   if [ "${run_web_interface:-0}" -eq 1 ]; then
     start_web_interface
@@ -352,6 +383,7 @@ else
   start_periodic_reboot
 
   # Report service status
+  report_service_status "dropbear" "/mnt/tmp/dropbear.pid" "/mnt/logs/dropbear.log"
   report_service_status "sys_monitor" "/mnt/tmp/sys_monitor.pid" "/mnt/logs/sys_monitor.log"
   report_service_status "periodic_reboot" "/mnt/tmp/periodic_reboot.pid" "/mnt/logs/periodic_reboot.log"
 

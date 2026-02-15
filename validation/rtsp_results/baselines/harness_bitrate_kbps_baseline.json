@@ -1,0 +1,7 @@
+{
+  "test": "harness_bitrate_kbps",
+  "created": "2025-02-04T12:00:00Z",
+  "baseline_value": 2000.0,
+  "tolerance_percent": 20,
+  "direction": "higher"
+}

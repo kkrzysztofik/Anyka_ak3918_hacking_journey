@@ -1,0 +1,29 @@
+[workspace]
+members = ["onvif-rust", "streaming-lib"]
+resolver = "2"
+
+[patch.crates-io]
+# ARMv5TEJ compatibility patches
+# These patches replace native 64-bit atomics with portable-atomic
+# ARMv5TEJ architecture lacks native 64-bit atomic operations
+webrtc-util = { path = "patches/webrtc-util-0.7.0-full" }
+webrtc-ice = { path = "patches/webrtc-ice-0.9.1-full" }
+webrtc-sctp = { path = "patches/webrtc-sctp-0.8.0-full" }
+rtp = { path = "patches/rtp-0.8.0-full" }
+tokio-metrics = { path = "patches/tokio-metrics-0.2.2-full" }
+
+# uClibc target support patch for openssl-src
+# Enables cross-compilation for armv5te-unknown-linux-uclibceabi
+openssl-src = { path = "patches/openssl-src-300.2.3+3.2.1-full" }
+
+# Release profile for all workspace members
+# Phase 4 optimization: Changed from opt-level="z" to "3" for performance gains
+# - "z" optimizes for size (minimal inlining, loop unrolling disabled)
+# - "3" optimizes for speed (aggressive inlining, loop unrolling enabled)
+# Trade-off: Binary grows ~100-200KB but CPU usage drops 5-10% on ARMv5TEJ
+# Justification: 24MB target has room for larger binary, need FPS improvement
+[profile.release]
+opt-level = 3    # Changed from "z" - prioritize speed over size
+lto = true
+codegen-units = 1
+strip = true

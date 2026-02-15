@@ -1,0 +1,7 @@
+{
+  "test": "telemetry_load_avg_5m",
+  "created": "2025-02-04T12:00:00Z",
+  "baseline_value": 1.2,
+  "tolerance_percent": 20,
+  "direction": "lower"
+}

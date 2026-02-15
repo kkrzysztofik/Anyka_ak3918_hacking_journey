@@ -2,7 +2,7 @@
 //!
 //! This module implements the WS-Discovery protocol as defined by:
 //! - OASIS Web Services Dynamic Discovery (WS-Discovery) Version 1.1
-//!   http://docs.oasis-open.org/ws-dd/discovery/1.1/os/wsdd-discovery-1.1-spec-os.html
+//!   <http://docs.oasis-open.org/ws-dd/discovery/1.1/os/wsdd-discovery-1.1-spec-os.html>
 //!
 //! ## Protocol Assignments (Section 3.1.1)
 //! - Port: 3702 (IANA registered)
@@ -10,9 +10,9 @@
 //! - IPv6 Multicast: FF02::C (link-local scope)
 //!
 //! ## XML Namespaces (Section 1.5)
-//! - `d` = http://docs.oasis-open.org/ws-dd/ns/discovery/2009/01
-//! - `a` = http://www.w3.org/2005/08/addressing
-//! - `s` = http://www.w3.org/2003/05/soap-envelope (SOAP 1.2)
+//! - `d` = <http://docs.oasis-open.org/ws-dd/ns/discovery/2009/01>
+//! - `a` = <http://www.w3.org/2005/08/addressing>
+//! - `s` = <http://www.w3.org/2003/05/soap-envelope> (SOAP 1.2)
 //!
 //! ## Application Level Transmission Delay (Section 3.1.3)
 //! Before sending certain messages, a random delay of 0 to APP_MAX_DELAY (500ms)
@@ -570,8 +570,8 @@ impl WsDiscovery {
     /// Check if incoming data contains a Probe message
     ///
     /// Supports both WS-Discovery namespaces:
-    /// - 2005/04: http://schemas.xmlsoap.org/ws/2005/04/discovery/Probe
-    /// - 2009/01: http://docs.oasis-open.org/ws-dd/ns/discovery/2009/01/Probe
+    /// - 2005/04: <http://schemas.xmlsoap.org/ws/2005/04/discovery/Probe>
+    /// - 2009/01: <http://docs.oasis-open.org/ws-dd/ns/discovery/2009/01/Probe>
     pub fn is_probe_message(data: &[u8]) -> bool {
         let text = match std::str::from_utf8(data) {
             Ok(s) => s,

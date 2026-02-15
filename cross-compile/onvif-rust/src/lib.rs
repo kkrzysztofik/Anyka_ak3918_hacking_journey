@@ -33,6 +33,7 @@
 //! - [`onvif`] - ONVIF service implementations
 //! - [`auth`] - Authentication (WS-Security, HTTP Digest)
 //! - [`security`] - Security hardening (rate limiting, brute force protection)
+//! - [`validation`] - H264 playback validation and memory monitoring
 
 use cap::Cap;
 use std::alloc::System;
@@ -76,6 +77,8 @@ pub mod discovery;
 pub mod security;
 
 pub mod ffi;
+
+pub mod validation;
 
 // Re-export main types for convenience
 pub use app::{AppState, AppStateBuilder, AppStateError, Application};

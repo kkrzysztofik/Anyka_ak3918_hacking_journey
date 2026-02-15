@@ -25,60 +25,90 @@ export function testDialogClosed(dialogTestId: string): void {
 }
 
 /**
- * Test dialog rendering (open/close states)
- * @param dialogTestId - Test ID of the dialog content
- * @param open - Whether dialog should be open
- * @deprecated Use testDialogOpen or testDialogClosed instead
- */
-export async function testDialogRendering(dialogTestId: string, open: boolean): Promise<void> {
-  // NOSONAR - Deprecated function kept for backward compatibility, will be removed in future version
-  if (open) {
-    // NOSONAR - Deprecated parameter pattern, use testDialogOpen/testDialogClosed instead
-    await testDialogOpen(dialogTestId);
-  } else {
-    testDialogClosed(dialogTestId);
-  }
-}
-
-/**
- * Test dialog cancel action
+ * Test dialog cancel action by clicking cancel button
  * @param user - User event instance
  * @param cancelButtonTestId - Test ID of the cancel button
- * @param dialogTestId - Test ID of the dialog to verify it closed
- * @param onOpenChangeMock - Optional mock function to verify was called with false
  */
-export async function testDialogCancel(
+export async function testDialogCancelByButton(
   user: ReturnType<typeof userEvent.setup>,
   cancelButtonTestId: string,
-  dialogTestId: string,
-  onOpenChangeMock?: Mock,
 ): Promise<void> {
   const cancelButton = screen.getByTestId(cancelButtonTestId);
   await user.click(cancelButton);
+}
 
-  // First verify onOpenChange was called (this happens immediately)
-  if (onOpenChangeMock) {
-    expect(onOpenChangeMock).toHaveBeenCalledWith(false);
-  }
+/**
+ * Test dialog cancel action with callback verification
+ * @param user - User event instance
+ * @param cancelButtonTestId - Test ID of the cancel button
+ * @param onOpenChangeMock - Mock function to verify was called with false
+ */
+export async function testDialogCancelByButtonWithCallback(
+  user: ReturnType<typeof userEvent.setup>,
+  cancelButtonTestId: string,
+  onOpenChangeMock: Mock,
+): Promise<void> {
+  const cancelButton = screen.getByTestId(cancelButtonTestId);
+  await user.click(cancelButton);
+  expect(onOpenChangeMock).toHaveBeenCalledWith(false);
+}
 
-  // Then wait for dialog to close (may take a moment for state update)
-  // Note: Some dialogs may use dialog-content testId, so we check for that too
-  const dialogContentTestId = dialogTestId.includes('dialog-content')
-    ? dialogTestId
-    : 'dialog-content';
-
+export async function assertDialogClosed(
+  dialogTestId: string,
+  dialogContentTestId?: string,
+): Promise<void> {
+  // Wait for dialog to close (may take a moment for state update)
   await waitFor(
     () => {
       const dialog = screen.queryByTestId(dialogTestId);
-      const dialogContent = screen.queryByTestId(dialogContentTestId);
-      // Dialog should not be in document (check both testIds)
+      const contentTestId = dialogContentTestId ?? 'dialog-content';
+      const dialogContent = screen.queryByTestId(contentTestId);
+
       expect(dialog).not.toBeInTheDocument();
-      if (dialogContentTestId !== dialogTestId) {
+      if (contentTestId !== dialogTestId) {
         expect(dialogContent).not.toBeInTheDocument();
       }
     },
     { timeout: 3000 },
   );
+}
+
+/**
+ * Test dialog cancel action and verify it closes
+ * @param user - User event instance
+ * @param cancelButtonTestId - Test ID of the cancel button
+ * @param dialogTestId - Test ID of the dialog to verify it closed
+ */
+export async function testDialogCancel(
+  user: ReturnType<typeof userEvent.setup>,
+  cancelButtonTestId: string,
+  dialogTestId: string,
+): Promise<void> {
+  await testDialogCancelByButton(user, cancelButtonTestId);
+
+  const dialogContentTestId = dialogTestId.includes('dialog-content') ? dialogTestId : undefined;
+
+  await assertDialogClosed(dialogTestId, dialogContentTestId);
+}
+
+/**
+ * Test dialog cancel action with callback verification and verify it closes
+ * @param user - User event instance
+ * @param cancelButtonTestId - Test ID of the cancel button
+ * @param dialogTestId - Test ID of the dialog to verify it closed
+ * @param onOpenChangeMock - Mock function to verify was called with false
+ */
+export async function testDialogCancelWithCallback(
+  user: ReturnType<typeof userEvent.setup>,
+  cancelButtonTestId: string,
+  dialogTestId: string,
+  onOpenChangeMock: Mock,
+): Promise<void> {
+  await testDialogCancelByButtonWithCallback(user, cancelButtonTestId, onOpenChangeMock);
+
+  const dialogContentTestId = dialogTestId.includes('dialog-content') ? dialogTestId : undefined;
+
+  await assertDialogClosed(dialogTestId, dialogContentTestId);
 }
 
 /**

@@ -718,7 +718,7 @@ struct H264ProfileWrapper {
     value: String,
 }
 
-/// Custom serialization/deserialization for Vec<H264Profile>.
+/// Custom serialization/deserialization for `Vec<H264Profile>`.
 /// Handles repeated `<H264ProfilesSupported>Value</H264ProfilesSupported>` elements.
 mod h264_profiles_vec {
     use super::{H264Profile, H264ProfileWrapper};

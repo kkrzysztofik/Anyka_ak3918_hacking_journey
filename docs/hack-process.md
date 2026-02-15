@@ -245,7 +245,26 @@ All the functions listed here can be enabled in gergesettings.txt and will be la
 
 ### SSH
 
-[Dropbear](https://gitea.raspiweb.com/Gerge/Anyka_ak3918_hacking_journey/src/branch/main/SD_card_contents/anyka_hack/dropbear) can give ssh access if telnet is not your preference.
+`anyka_hack` now includes a managed Dropbear startup script.
+
+- Set `run_ssh=1` in `gergesettings.txt`
+- Configure `ssh_port`, `ssh_auth_mode`, `ssh_host_key_path`, and `ssh_authorized_keys_path` as needed
+- When SSH is enabled, `gergehack.sh` disables telnet automatically
+
+Host-side build helpers:
+
+```bash
+# Build and package Dropbear for ARM/uClibc
+./scripts/third_party/build_dropbear.sh
+
+# Build and package htop for ARM/uClibc
+./scripts/third_party/build_htop.sh
+```
+
+If your build host is offline, use `--archive /path/to/source.tar.*` together with `--sha256`.
+Dropbear is built static by default to avoid runtime uClibc loader mismatches on older camera firmware.
+
+After copying `SD_card_contents/anyka_hack` to the SD card and booting, SSH is served by Dropbear from `/mnt/anyka_hack/dropbear`.
 
 ### Snapshot
 

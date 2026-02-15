@@ -313,4 +313,58 @@ mod tests {
         assert_eq!(PlatformLogLevel::from(i32::MAX), PlatformLogLevel::Debug);
         assert_eq!(PlatformLogLevel::from(i32::MIN), PlatformLogLevel::Debug);
     }
+
+    // ============================================
+    // ak_print_wrapper FFI Tests
+    // ============================================
+
+    #[test]
+    fn test_ak_print_wrapper_null_message() {
+        // SAFETY: Testing null pointer handling
+        let result = unsafe { ak_print_wrapper(1, std::ptr::null()) };
+        assert_eq!(result, -1);
+    }
+
+    #[test]
+    fn test_ak_print_wrapper_valid_message() {
+        let msg = std::ffi::CString::new("test message from FFI").unwrap();
+        // SAFETY: msg is a valid C string
+        let result = unsafe { ak_print_wrapper(1, msg.as_ptr()) };
+        assert_eq!(result, 0);
+    }
+
+    #[test]
+    fn test_ak_print_wrapper_all_levels() {
+        let msg = std::ffi::CString::new("test").unwrap();
+        for level in 0..=7 {
+            // SAFETY: msg is a valid C string
+            let result = unsafe { ak_print_wrapper(level, msg.as_ptr()) };
+            assert_eq!(result, 0);
+        }
+    }
+
+    #[test]
+    fn test_ak_print_wrapper_with_newline() {
+        let msg = std::ffi::CString::new("test message\n").unwrap();
+        // SAFETY: msg is a valid C string
+        let result = unsafe { ak_print_wrapper(1, msg.as_ptr()) };
+        assert_eq!(result, 0);
+    }
+
+    #[test]
+    fn test_ak_print_wrapper_empty_string() {
+        let msg = std::ffi::CString::new("").unwrap();
+        // SAFETY: msg is a valid C string
+        let result = unsafe { ak_print_wrapper(1, msg.as_ptr()) };
+        assert_eq!(result, 0);
+    }
+
+    #[test]
+    fn test_platform_log_level_reserved_to_tracing() {
+        // Test Reserved level specifically
+        assert_eq!(
+            PlatformLogLevel::Reserved.to_tracing_level(),
+            tracing::Level::TRACE
+        );
+    }
 }

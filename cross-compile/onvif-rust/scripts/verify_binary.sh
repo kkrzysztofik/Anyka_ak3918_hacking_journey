@@ -10,31 +10,45 @@
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Go up 1 level: scripts -> onvif-rust
 PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+# Workspace root: onvif-rust -> cross-compile
+WORKSPACE_DIR="$(cd "${PROJECT_DIR}/.." && pwd)"
 BINARY_NAME="onvif-rust"
 
 # Try to find binary in common locations
 BINARY_PATH=""
 
-# Check release build first
+# Prefer workspace target directory (Cargo workspace layout)
+WORKSPACE_RELEASE_BINARY="${WORKSPACE_DIR}/target/armv5te-unknown-linux-uclibceabi/release/${BINARY_NAME}"
+WORKSPACE_DEBUG_BINARY="${WORKSPACE_DIR}/target/armv5te-unknown-linux-uclibceabi/debug/${BINARY_NAME}"
+
+# Fallback to crate-local target directory (legacy/standalone layout)
 RELEASE_BINARY="${PROJECT_DIR}/target/armv5te-unknown-linux-uclibceabi/release/${BINARY_NAME}"
-if [[ -f "${RELEASE_BINARY}" ]]; then
+DEBUG_BINARY="${PROJECT_DIR}/target/armv5te-unknown-linux-uclibceabi/debug/${BINARY_NAME}"
+
+# Check release build first (workspace, then crate)
+if [[ -f "${WORKSPACE_RELEASE_BINARY}" ]]; then
+  BINARY_PATH="${WORKSPACE_RELEASE_BINARY}"
+elif [[ -f "${RELEASE_BINARY}" ]]; then
   BINARY_PATH="${RELEASE_BINARY}"
-else
-  # Check debug build
-  DEBUG_BINARY="${PROJECT_DIR}/target/armv5te-unknown-linux-uclibceabi/debug/${BINARY_NAME}"
-  if [[ -f "${DEBUG_BINARY}" ]]; then
+fi
+
+if [[ -z "${BINARY_PATH}" ]]; then
+  # Check debug build (workspace, then crate)
+  if [[ -f "${WORKSPACE_DEBUG_BINARY}" ]]; then
+    BINARY_PATH="${WORKSPACE_DEBUG_BINARY}"
+  elif [[ -f "${DEBUG_BINARY}" ]]; then
     BINARY_PATH="${DEBUG_BINARY}"
-  else
-    # Try alternative target name
-    ALT_RELEASE="${PROJECT_DIR}/target/arm-unknown-linux-uclibcgnueabi/release/${BINARY_NAME}"
-    if [[ -f "${ALT_RELEASE}" ]]; then
-      BINARY_PATH="${ALT_RELEASE}"
-    else
-      ALT_DEBUG="${PROJECT_DIR}/target/arm-unknown-linux-uclibcgnueabi/debug/${BINARY_NAME}"
-      if [[ -f "${ALT_DEBUG}" ]]; then
-        BINARY_PATH="${ALT_DEBUG}"
-      fi
-    fi
+  fi
+fi
+
+if [[ -z "${BINARY_PATH}" ]]; then
+  # Try alternative target name (legacy)
+  ALT_RELEASE="${PROJECT_DIR}/target/arm-unknown-linux-uclibcgnueabi/release/${BINARY_NAME}"
+  ALT_DEBUG="${PROJECT_DIR}/target/arm-unknown-linux-uclibcgnueabi/debug/${BINARY_NAME}"
+  if [[ -f "${ALT_RELEASE}" ]]; then
+    BINARY_PATH="${ALT_RELEASE}"
+  elif [[ -f "${ALT_DEBUG}" ]]; then
+    BINARY_PATH="${ALT_DEBUG}"
   fi
 fi
 

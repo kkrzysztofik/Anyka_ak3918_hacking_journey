@@ -7,12 +7,17 @@
 # -----------------------------------------------------------------------------
 toolchain/arm-anykav200-crosstool/**/*
 toolchain/arm-anykav200-crosstool-ng/**/*
+toolchain/aarch64-unknown-linux-gnu-toolchain/**/*
 toolchain/go-custom-armv5/**/*
 toolchain/go-source/**/*
 toolchain/build-new/rust/**/*
 toolchain/build-new/build/**/*
 toolchain/build-new/.build/**/*
+toolchain/build-new/llvm-*/**/*
+toolchain/build-new/crosstool-ng-*/**/*
+toolchain/build-new/compiler-rt-*/**/*
 cross-compile/gsoap/**/*
+target/**/*
 
 # -----------------------------------------------------------------------------
 # Reference Code and Original Files

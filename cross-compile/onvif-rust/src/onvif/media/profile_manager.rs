@@ -2090,4 +2090,390 @@ mod tests {
         let loaded = manager_reloaded.get_profile(&profile.token).unwrap();
         assert_eq!(loaded.name, "PersistedProfile");
     }
+
+    // ========================================================================
+    // Parsing Helper Tests
+    // ========================================================================
+
+    #[test]
+    fn test_parse_video_encoding_h264() {
+        let encoding = ProfileManager::parse_video_encoding("h264");
+        assert!(matches!(
+            encoding,
+            crate::onvif::types::common::VideoEncoding::H264
+        ));
+    }
+
+    #[test]
+    fn test_parse_video_encoding_h264_uppercase() {
+        let encoding = ProfileManager::parse_video_encoding("H264");
+        assert!(matches!(
+            encoding,
+            crate::onvif::types::common::VideoEncoding::H264
+        ));
+    }
+
+    #[test]
+    fn test_parse_video_encoding_mjpeg() {
+        let encoding = ProfileManager::parse_video_encoding("mjpeg");
+        assert!(matches!(
+            encoding,
+            crate::onvif::types::common::VideoEncoding::JPEG
+        ));
+    }
+
+    #[test]
+    fn test_parse_video_encoding_jpeg() {
+        let encoding = ProfileManager::parse_video_encoding("jpeg");
+        assert!(matches!(
+            encoding,
+            crate::onvif::types::common::VideoEncoding::JPEG
+        ));
+    }
+
+    #[test]
+    fn test_parse_video_encoding_mpeg4() {
+        let encoding = ProfileManager::parse_video_encoding("mpeg4");
+        assert!(matches!(
+            encoding,
+            crate::onvif::types::common::VideoEncoding::MPEG4
+        ));
+    }
+
+    #[test]
+    fn test_parse_video_encoding_unknown_defaults_to_h264() {
+        let encoding = ProfileManager::parse_video_encoding("unknown");
+        assert!(matches!(
+            encoding,
+            crate::onvif::types::common::VideoEncoding::H264
+        ));
+    }
+
+    #[test]
+    fn test_parse_h264_profile_baseline() {
+        let profile = ProfileManager::parse_h264_profile("baseline");
+        assert!(matches!(
+            profile,
+            crate::onvif::types::common::H264Profile::Baseline
+        ));
+    }
+
+    #[test]
+    fn test_parse_h264_profile_main() {
+        let profile = ProfileManager::parse_h264_profile("main");
+        assert!(matches!(
+            profile,
+            crate::onvif::types::common::H264Profile::Main
+        ));
+    }
+
+    #[test]
+    fn test_parse_h264_profile_high() {
+        let profile = ProfileManager::parse_h264_profile("high");
+        assert!(matches!(
+            profile,
+            crate::onvif::types::common::H264Profile::High
+        ));
+    }
+
+    #[test]
+    fn test_parse_h264_profile_unknown_defaults_to_main() {
+        let profile = ProfileManager::parse_h264_profile("unknown");
+        assert!(matches!(
+            profile,
+            crate::onvif::types::common::H264Profile::Main
+        ));
+    }
+
+    #[test]
+    fn test_parse_audio_encoding_g711() {
+        let encoding = ProfileManager::parse_audio_encoding("g711");
+        assert!(matches!(
+            encoding,
+            crate::onvif::types::common::AudioEncoding::G711
+        ));
+    }
+
+    #[test]
+    fn test_parse_audio_encoding_aac() {
+        let encoding = ProfileManager::parse_audio_encoding("aac");
+        assert!(matches!(
+            encoding,
+            crate::onvif::types::common::AudioEncoding::AAC
+        ));
+    }
+
+    #[test]
+    fn test_parse_audio_encoding_g726() {
+        let encoding = ProfileManager::parse_audio_encoding("g726");
+        assert!(matches!(
+            encoding,
+            crate::onvif::types::common::AudioEncoding::G726
+        ));
+    }
+
+    #[test]
+    fn test_parse_audio_encoding_unknown_defaults_to_g711() {
+        let encoding = ProfileManager::parse_audio_encoding("unknown");
+        assert!(matches!(
+            encoding,
+            crate::onvif::types::common::AudioEncoding::G711
+        ));
+    }
+
+    // ========================================================================
+    // Configuration Methods Tests
+    // ========================================================================
+
+    #[test]
+    fn test_get_video_source_configurations() {
+        let manager = ProfileManager::new();
+        let configs = manager.get_video_source_configurations();
+        assert!(!configs.is_empty());
+    }
+
+    #[test]
+    fn test_get_audio_source_configurations() {
+        let manager = ProfileManager::new();
+        let configs = manager.get_audio_source_configurations();
+        assert!(!configs.is_empty());
+    }
+
+    #[test]
+    fn test_get_audio_encoder_configurations() {
+        let manager = ProfileManager::new();
+        let configs = manager.get_audio_encoder_configurations();
+        assert!(!configs.is_empty());
+    }
+
+    #[test]
+    fn test_get_video_source_configuration_by_token() {
+        let manager = ProfileManager::new();
+        let configs = manager.get_video_source_configurations();
+        if !configs.is_empty() {
+            let token = &configs[0].token;
+            let result = manager.get_video_source_configuration(token);
+            assert!(result.is_ok());
+        }
+    }
+
+    #[test]
+    fn test_get_video_encoder_configuration_by_token() {
+        let manager = ProfileManager::new();
+        let configs = manager.get_video_encoder_configurations();
+        if !configs.is_empty() {
+            let token = &configs[0].token;
+            let result = manager.get_video_encoder_configuration(token);
+            assert!(result.is_ok());
+        }
+    }
+
+    #[test]
+    fn test_get_audio_source_configuration_by_token() {
+        let manager = ProfileManager::new();
+        let configs = manager.get_audio_source_configurations();
+        if !configs.is_empty() {
+            let token = &configs[0].token;
+            let result = manager.get_audio_source_configuration(token);
+            assert!(result.is_ok());
+        }
+    }
+
+    #[test]
+    fn test_get_audio_encoder_configuration_by_token() {
+        let manager = ProfileManager::new();
+        let configs = manager.get_audio_encoder_configurations();
+        if !configs.is_empty() {
+            let token = &configs[0].token;
+            let result = manager.get_audio_encoder_configuration(token);
+            assert!(result.is_ok());
+        }
+    }
+
+    #[test]
+    fn test_get_nonexistent_configuration_returns_error() {
+        let manager = ProfileManager::new();
+        let result = manager.get_video_encoder_configuration(&"NonExistent".to_string());
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_add_video_source_configuration() {
+        let manager = ProfileManager::new();
+        let profile = manager
+            .create_profile("TestProfile".to_string(), None)
+            .unwrap();
+        let config_token = format!("{}0", VIDEO_SOURCE_CONFIG_PREFIX);
+        let result = manager.add_video_source_configuration(&profile.token, &config_token);
+        assert!(result.is_ok());
+
+        let updated_profile = manager.get_profile(&profile.token).unwrap();
+        assert!(updated_profile.video_source_configuration.is_some());
+    }
+
+    #[test]
+    fn test_add_audio_source_configuration() {
+        let manager = ProfileManager::new();
+        let profile = manager
+            .create_profile("TestProfile".to_string(), None)
+            .unwrap();
+        let config_token = format!("{}0", AUDIO_SOURCE_CONFIG_PREFIX);
+        let result = manager.add_audio_source_configuration(&profile.token, &config_token);
+        assert!(result.is_ok());
+
+        let updated_profile = manager.get_profile(&profile.token).unwrap();
+        assert!(updated_profile.audio_source_configuration.is_some());
+    }
+
+    #[test]
+    fn test_add_audio_encoder_configuration() {
+        let manager = ProfileManager::new();
+        let profile = manager
+            .create_profile("TestProfile".to_string(), None)
+            .unwrap();
+        let config_token = format!("{}0", AUDIO_ENCODER_CONFIG_PREFIX);
+        let result = manager.add_audio_encoder_configuration(&profile.token, &config_token);
+        assert!(result.is_ok());
+
+        let updated_profile = manager.get_profile(&profile.token).unwrap();
+        assert!(updated_profile.audio_encoder_configuration.is_some());
+    }
+
+    #[test]
+    fn test_remove_video_encoder_configuration() {
+        let manager = ProfileManager::new();
+        let profile = manager
+            .create_profile("TestProfile".to_string(), None)
+            .unwrap();
+        let config_token = format!("{}0", VIDEO_ENCODER_CONFIG_PREFIX);
+        manager
+            .add_video_encoder_configuration(&profile.token, &config_token)
+            .unwrap();
+
+        let result = manager.remove_video_encoder_configuration(&profile.token);
+        assert!(result.is_ok());
+
+        let updated_profile = manager.get_profile(&profile.token).unwrap();
+        assert!(updated_profile.video_encoder_configuration.is_none());
+    }
+
+    #[test]
+    fn test_remove_audio_encoder_configuration() {
+        let manager = ProfileManager::new();
+        let profile = manager
+            .create_profile("TestProfile".to_string(), None)
+            .unwrap();
+        let config_token = format!("{}0", AUDIO_ENCODER_CONFIG_PREFIX);
+        manager
+            .add_audio_encoder_configuration(&profile.token, &config_token)
+            .unwrap();
+
+        let result = manager.remove_audio_encoder_configuration(&profile.token);
+        assert!(result.is_ok());
+
+        let updated_profile = manager.get_profile(&profile.token).unwrap();
+        assert!(updated_profile.audio_encoder_configuration.is_none());
+    }
+
+    #[test]
+    fn test_get_compatible_video_source_configurations() {
+        let manager = ProfileManager::new();
+        let compatible =
+            manager.get_compatible_video_source_configurations(&"SomeToken".to_string());
+        // Should return all video source configurations
+        assert!(!compatible.is_empty());
+    }
+
+    #[test]
+    fn test_get_compatible_video_encoder_configurations() {
+        let manager = ProfileManager::new();
+        let compatible =
+            manager.get_compatible_video_encoder_configurations(&"SomeToken".to_string());
+        assert!(!compatible.is_empty());
+    }
+
+    #[test]
+    fn test_get_compatible_audio_source_configurations() {
+        let manager = ProfileManager::new();
+        let compatible =
+            manager.get_compatible_audio_source_configurations(&"SomeToken".to_string());
+        assert!(!compatible.is_empty());
+    }
+
+    #[test]
+    fn test_get_compatible_audio_encoder_configurations() {
+        let manager = ProfileManager::new();
+        let compatible =
+            manager.get_compatible_audio_encoder_configurations(&"SomeToken".to_string());
+        assert!(!compatible.is_empty());
+    }
+
+    #[test]
+    fn test_get_video_encoder_configuration_options() {
+        let manager = ProfileManager::new();
+        let options = manager.get_video_encoder_configuration_options();
+        // Quality range should have valid min/max values
+        assert!(options.quality_range.min <= options.quality_range.max);
+    }
+
+    #[test]
+    fn test_profile_manager_default() {
+        let manager = ProfileManager::default();
+        let profiles = manager.get_profiles();
+        assert_eq!(profiles.len(), 2);
+    }
+
+    #[test]
+    fn test_max_profiles_limit() {
+        let manager = ProfileManager::new();
+        // Verify manager starts with 2 default profiles
+        assert_eq!(
+            manager.get_profiles().len(),
+            2,
+            "expected 2 default profiles at startup"
+        );
+        // Manager starts with 2 default profiles, so we can create MAX_PROFILES - 2 more
+        for i in 0..(MAX_PROFILES - 2) {
+            let result = manager.create_profile(format!("Profile{}", i), None);
+            assert!(
+                result.is_ok(),
+                "Failed to create profile {} when under limit",
+                i
+            );
+        }
+        // Now at MAX_PROFILES, next create should fail
+        let result = manager.create_profile("OneMoreProfile".to_string(), None);
+        assert!(
+            result.is_err(),
+            "Expected error when creating profile beyond MAX_PROFILES limit"
+        );
+    }
+
+    #[test]
+    fn test_create_profile_empty_name_fails() {
+        let manager = ProfileManager::new();
+        // Empty name should fail validation
+        let result = manager.create_profile("".to_string(), None);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_add_configuration_to_nonexistent_profile() {
+        let manager = ProfileManager::new();
+        let config_token = format!("{}0", VIDEO_ENCODER_CONFIG_PREFIX);
+        let result =
+            manager.add_video_encoder_configuration(&"NonExistent".to_string(), &config_token);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_add_nonexistent_configuration_to_profile() {
+        let manager = ProfileManager::new();
+        let profile = manager
+            .create_profile("TestProfile".to_string(), None)
+            .unwrap();
+        let result =
+            manager.add_video_encoder_configuration(&profile.token, &"NonExistent".to_string());
+        assert!(result.is_err());
+    }
 }

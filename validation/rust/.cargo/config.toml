@@ -1,0 +1,7 @@
+[build]
+# Always build/run this validator for the host by default.
+target = "x86_64-unknown-linux-gnu"
+
+# Keep build artifacts under validation/target/ (easy to clean and keeps repo root tidy).
+target-dir = "../target"
+

@@ -1,0 +1,11 @@
+{
+  "include": ["scripts", ".ai", "mock-server"],
+  "exclude": ["**/__pycache__", "**/node_modules", "cross-compile/xiu", "SD_card_contents"],
+  "typeCheckingMode": "strict",
+  "reportMissingImports": true,
+  "reportMissingTypeStubs": false,
+  "reportMissingParameterType": true,
+  "reportUnknownParameterType": true,
+  "reportUnknownVariableType": true,
+  "pythonVersion": "3.12"
+}

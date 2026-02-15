@@ -31,6 +31,7 @@
 
 mod stubs;
 mod traits;
+pub mod validation;
 
 // Conditional compilation for Anyka implementation
 #[cfg(not(use_stubs))]
@@ -38,6 +39,7 @@ mod anyka;
 
 pub use stubs::*;
 pub use traits::*;
+pub use validation::ValidationPlatform;
 
 #[cfg(not(use_stubs))]
 pub use anyka::*;

@@ -60,7 +60,7 @@ pub struct HttpLogConfig {
     pub verbose: bool,
 
     /// Maximum number of bytes to log from request/response bodies.
-    /// Bodies larger than this are truncated with "...[truncated]" suffix.
+    /// Bodies larger than this are truncated with `...[truncated]` suffix.
     pub max_body_log_size: usize,
 
     /// Whether to sanitize passwords and tokens in logged bodies.

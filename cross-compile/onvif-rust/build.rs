@@ -15,6 +15,8 @@ fn main() {
     let is_cross_compile = target.contains("arm") || target.contains("uclibc");
 
     println!("cargo:rerun-if-changed=build.rs");
+    println!("cargo:rerun-if-changed=vendor/include");
+    println!("cargo:rerun-if-changed=vendor/lib");
 
     // Only generate FFI bindings when cross-compiling for ARM target
     // For native builds (testing), we use stub implementations
@@ -34,12 +36,84 @@ fn generate_anyka_bindings() {
     let vendor_include = PathBuf::from("vendor/include");
     let vendor_lib = PathBuf::from("vendor/lib");
 
-    // Check if vendor headers exist
+    // Check if vendor directories exist
     if !vendor_include.exists() {
         println!(
-            "cargo:warning=Vendor headers not found at {:?}, using stubs",
+            "cargo:warning=Vendor headers directory not found at {:?}, using stubs",
             vendor_include
         );
+        println!("cargo:warning=Run 'scripts/prepare_vendor.sh' to set up vendor files");
+        println!("cargo:rustc-cfg=use_stubs");
+        return;
+    }
+
+    if !vendor_lib.exists() {
+        println!(
+            "cargo:warning=Vendor libraries directory not found at {:?}, using stubs",
+            vendor_lib
+        );
+        println!("cargo:warning=Run 'scripts/prepare_vendor.sh' to set up vendor files");
+        println!("cargo:rustc-cfg=use_stubs");
+        return;
+    }
+
+    // Verify critical header files
+    let critical_headers = [
+        "ak_common.h",
+        "ak_vi.h",
+        "ak_venc.h",
+        "ak_ai.h",
+        "ak_aenc.h",
+        "ak_drv_ptz.h",
+        "ak_vpss.h",
+        "ak_drv_irled.h",
+    ];
+
+    let mut missing_headers = Vec::new();
+    for header in &critical_headers {
+        let header_path = vendor_include.join(header);
+        if !header_path.exists() {
+            missing_headers.push(header);
+        }
+    }
+
+    if !missing_headers.is_empty() {
+        println!(
+            "cargo:warning=Missing critical headers: {:?}, using stubs",
+            missing_headers
+        );
+        println!("cargo:warning=Run 'scripts/prepare_vendor.sh' to set up vendor files");
+        println!("cargo:rustc-cfg=use_stubs");
+        return;
+    }
+
+    // Verify required library files
+    let required_libs = [
+        "libplat_common.a",
+        "libplat_thread.a",
+        "libplat_vi.a",
+        "libplat_vpss.a",
+        "libplat_ai.a",
+        "libplat_drv.a",
+        "libmpi_venc.a",
+        "libmpi_aenc.a",
+        "libakuio.a",
+    ];
+
+    let mut missing_libs = Vec::new();
+    for lib in &required_libs {
+        let lib_path = vendor_lib.join(lib);
+        if !lib_path.exists() {
+            missing_libs.push(lib);
+        }
+    }
+
+    if !missing_libs.is_empty() {
+        println!(
+            "cargo:warning=Missing required libraries: {:?}, using stubs",
+            missing_libs
+        );
+        println!("cargo:warning=Run 'scripts/prepare_vendor.sh' to set up vendor files");
         println!("cargo:rustc-cfg=use_stubs");
         return;
     }
@@ -122,20 +196,21 @@ fn generate_anyka_bindings() {
     let lib_path_abs = vendor_lib.canonicalize().unwrap_or(vendor_lib);
     println!("cargo:rustc-link-search=native={}", lib_path_abs.display());
 
+    // Group static libraries to resolve circular dependencies
+    println!("cargo:rustc-link-arg=-Wl,--start-group");
+
+    // MPI libraries (from libmpi) - static linking
+    println!("cargo:rustc-link-lib=static=mpi_venc");
+    println!("cargo:rustc-link-lib=static=mpi_aenc");
+    println!("cargo:rustc-link-lib=static=mpi_aed");
+
     // Platform libraries (from libplat) - static linking
-    println!("cargo:rustc-link-lib=static=plat_common");
-    println!("cargo:rustc-link-lib=static=plat_thread");
     println!("cargo:rustc-link-lib=static=plat_vi");
     println!("cargo:rustc-link-lib=static=plat_vpss");
     println!("cargo:rustc-link-lib=static=plat_ipcsrv");
     println!("cargo:rustc-link-lib=static=plat_venc_cb");
     println!("cargo:rustc-link-lib=static=plat_ai");
     println!("cargo:rustc-link-lib=static=plat_drv");
-
-    // MPI libraries (from libmpi) - static linking
-    println!("cargo:rustc-link-lib=static=mpi_venc");
-    println!("cargo:rustc-link-lib=static=mpi_aenc");
-    println!("cargo:rustc-link-lib=static=mpi_aed");
 
     // SDK component libraries - static linking
     println!("cargo:rustc-link-lib=static=akuio");
@@ -145,6 +220,16 @@ fn generate_anyka_bindings() {
     println!("cargo:rustc-link-lib=static=akaudiocodec");
     println!("cargo:rustc-link-lib=static=akmedialib");
     println!("cargo:rustc-link-lib=static=akae");
+
+    // Platform core libraries last to satisfy dependencies
+    println!("cargo:rustc-link-lib=static=plat_common");
+    println!("cargo:rustc-link-lib=static=plat_thread");
+
+    println!("cargo:rustc-link-arg=-Wl,--end-group");
+
+    // Application libraries (dynamic only)
+    println!("cargo:rustc-link-lib=app_net");
+    println!("cargo:rustc-link-lib=app_rtsp");
 
     // System libraries - dynamic linking (from toolchain sysroot)
     println!("cargo:rustc-link-lib=pthread");

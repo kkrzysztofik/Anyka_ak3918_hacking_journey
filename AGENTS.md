@@ -6,7 +6,14 @@
 
 **CRITICAL MANDATE**: You MUST follow the project's established patterns, standards, and documentation. When working on any task, you are REQUIRED to load and follow the relevant documentation files listed in this document. Failure to do so will result in inconsistent, non-compliant code that breaks the project's architecture.
 
-**⚠️ TOOLCHAIN REQUIREMENT**: This project uses a **custom Rust toolchain** located at `/home/kmk/anyka-dev/toolchain/arm-anykav200-crosstool-ng/`. You MUST use the cargo binary from this toolchain for ALL cargo commands: `/home/kmk/anyka-dev/toolchain/arm-anykav200-crosstool-ng/bin/cargo`. Using system cargo will cause compilation errors due to version mismatches.
+**⚠️ TOOLCHAIN REQUIREMENT**: This project uses a **custom Rust toolchain** vendored in this repo at `toolchain/arm-anykav200-crosstool-ng/`.
+
+You MUST use the cargo binary from this toolchain for ALL cargo commands:
+
+- Repo-relative: `toolchain/arm-anykav200-crosstool-ng/bin/cargo`
+- Absolute (example): `/home/<user>/anyka-dev/toolchain/arm-anykav200-crosstool-ng/bin/cargo`
+
+Using system `cargo` may cause compilation errors due to version/target mismatches.
 
 ## Project Overview
 
@@ -34,15 +41,15 @@ The project focuses on creating a fully ONVIF 24.12 compliant implementation whi
 
 ```bash
 # Define custom cargo path (use this in all commands)
-export CARGO=/home/kmk/anyka-dev/toolchain/arm-anykav200-crosstool-ng/bin/cargo
+export CARGO=toolchain/arm-anykav200-crosstool-ng/bin/cargo
 
 # Build & Test
 cd cross-compile/onvif-rust && $CARGO build --release  # Build
-$CARGO test                                            # All tests
-$CARGO test --lib                                      # Unit tests only
+$CARGO test --target x86_64-unknown-linux-gnu           # All tests (host-side)
+$CARGO test --target x86_64-unknown-linux-gnu --lib     # Unit tests only (host-side)
 
 # Code Quality
-$CARGO clippy -- -D warnings                          # Linting
+$CARGO clippy --target x86_64-unknown-linux-gnu -- -D warnings  # Linting (host-side)
 $CARGO fmt --check                                     # Formatting check
 $CARGO fmt                                             # Format code
 
@@ -52,9 +59,9 @@ $CARGO doc --no-deps --open                           # Generate docs
 
 **Direct paths (alternative)**:
 ```bash
-/home/kmk/anyka-dev/toolchain/arm-anykav200-crosstool-ng/bin/cargo build --release
-/home/kmk/anyka-dev/toolchain/arm-anykav200-crosstool-ng/bin/cargo clippy -- -D warnings
-/home/kmk/anyka-dev/toolchain/arm-anykav200-crosstool-ng/bin/cargo test
+toolchain/arm-anykav200-crosstool-ng/bin/cargo build --release
+toolchain/arm-anykav200-crosstool-ng/bin/cargo clippy --target x86_64-unknown-linux-gnu -- -D warnings
+toolchain/arm-anykav200-crosstool-ng/bin/cargo test --target x86_64-unknown-linux-gnu
 ```
 
 ### Mock Pattern (mockall)
@@ -143,6 +150,21 @@ This documentation is organized into focused modules to reduce context usage and
 - **`cross-compile/onvif-rust/tests/`** — **MANDATORY** - Unit and integration testing framework using Rust's built-in testing and `mockall`
 - **`SD_card_contents/anyka_hack/`** — SD card payload system for runtime testing
 - **`cross-compile/anyka_reference/akipc/`** — Authoritative vendor reference code
+- **`cross-compile/www/`** — React WebUI (shadcn/ui + TanStack Query + Vitest)
+
+## Codex Instruction Mapping (from `.github/`)
+
+This repo also contains GitHub Copilot configuration under `.github/` (instructions, prompts, and agent profiles). Codex uses `AGENTS.md` for instruction scoping.
+
+Codex-equivalent scoped instruction files:
+
+- `cross-compile/onvif-rust/AGENTS.md` — Rust backend rules (coding/testing/security/perf/docs)
+- `cross-compile/www/AGENTS.md` — WebUI rules (design system/testing/quality gates)
+
+Reusable checklists/prompts (manual reference):
+
+- `.github/instructions/` — topic-specific guidelines (legacy Copilot format)
+- `.github/prompts/` — task templates (code review, debugging, docs generation)
 
 ## ⚡ MANDATORY DEVELOPMENT WORKFLOW
 
@@ -208,3 +230,117 @@ Before marking any task as complete, verify:
 - [ ] Self-review checklist is completed
 
 **REMEMBER**: This is a professional embedded systems project. Quality, consistency, and adherence to standards are non-negotiable.
+
+## Landing the Plane (Session Completion)
+
+**When ending a work session**, you MUST complete ALL steps below. Work is NOT complete until `git push` succeeds.
+
+**MANDATORY WORKFLOW:**
+
+1. **File issues for remaining work** - Create issues for anything that needs follow-up
+2. **Run quality gates** (if code changed) - Tests, linters, builds
+3. **Update issue status** - Close finished work, update in-progress items
+4. **PUSH TO REMOTE** - This is MANDATORY:
+   ```bash
+   git pull --rebase
+   bd sync
+   git push
+   git status  # MUST show "up to date with origin"
+   ```
+5. **Clean up** - Clear stashes, prune remote branches
+6. **Verify** - All changes committed AND pushed
+7. **Hand off** - Provide context for next session
+
+**CRITICAL RULES:**
+- Work is NOT complete until `git push` succeeds
+- NEVER stop before pushing - that leaves work stranded locally
+- NEVER say "ready to push when you are" - YOU must push
+- If push fails, resolve and retry until it succeeds
+
+
+<!-- BEGIN BEADS INTEGRATION -->
+## Issue Tracking with bd (beads)
+
+**IMPORTANT**: This project uses **bd (beads)** for ALL issue tracking. Do NOT use markdown TODOs, task lists, or other tracking methods.
+
+### Why bd?
+
+- Dependency-aware: Track blockers and relationships between issues
+- Git-friendly: Auto-syncs to JSONL for version control
+- Agent-optimized: JSON output, ready work detection, discovered-from links
+- Prevents duplicate tracking systems and confusion
+
+### Quick Start
+
+**Check for ready work:**
+
+```bash
+bd ready --json
+```
+
+**Create new issues:**
+
+```bash
+bd create "Issue title" --description="Detailed context" -t bug|feature|task -p 0-4 --json
+bd create "Issue title" --description="What this issue is about" -p 1 --deps discovered-from:bd-123 --json
+```
+
+**Claim and update:**
+
+```bash
+bd update bd-42 --status in_progress --json
+bd update bd-42 --priority 1 --json
+```
+
+**Complete work:**
+
+```bash
+bd close bd-42 --reason "Completed" --json
+```
+
+### Issue Types
+
+- `bug` - Something broken
+- `feature` - New functionality
+- `task` - Work item (tests, docs, refactoring)
+- `epic` - Large feature with subtasks
+- `chore` - Maintenance (dependencies, tooling)
+
+### Priorities
+
+- `0` - Critical (security, data loss, broken builds)
+- `1` - High (major features, important bugs)
+- `2` - Medium (default, nice-to-have)
+- `3` - Low (polish, optimization)
+- `4` - Backlog (future ideas)
+
+### Workflow for AI Agents
+
+1. **Check ready work**: `bd ready` shows unblocked issues
+2. **Claim your task**: `bd update <id> --status in_progress`
+3. **Work on it**: Implement, test, document
+4. **Discover new work?** Create linked issue:
+   - `bd create "Found bug" --description="Details about what was found" -p 1 --deps discovered-from:<parent-id>`
+5. **Complete**: `bd close <id> --reason "Done"`
+
+### Auto-Sync
+
+bd automatically syncs with git:
+
+- Exports to `.beads/issues.jsonl` after changes (5s debounce)
+- Imports from JSONL when newer (e.g., after `git pull`)
+- No manual export/import needed!
+
+### Important Rules
+
+- ✅ Use bd for ALL task tracking
+- ✅ Always use `--json` flag for programmatic use
+- ✅ Link discovered work with `discovered-from` dependencies
+- ✅ Check `bd ready` before asking "what should I work on?"
+- ❌ Do NOT create markdown TODO lists
+- ❌ Do NOT use external issue trackers
+- ❌ Do NOT duplicate tracking systems
+
+For more details, see README.md and docs/QUICKSTART.md.
+
+<!-- END BEADS INTEGRATION -->

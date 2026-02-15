@@ -1,0 +1,35 @@
+#!/bin/sh
+# Launcher for Anyka htop with bundled terminfo fallback for SSH sessions.
+
+BIN_DIR="$(CDPATH= cd -- "$(dirname "$0")" && pwd)"
+ANYKA_HACK_DIR="$(dirname "$BIN_DIR")"
+TERMINFO_DIR="${ANYKA_HACK_DIR}/share/terminfo"
+HTOP_BIN="${BIN_DIR}/htop.bin"
+
+if [ -d "${TERMINFO_DIR}" ]; then
+  export TERMINFO="${TERMINFO_DIR}"
+fi
+
+if [ -z "${TERM:-}" ]; then
+  TERM="xterm"
+fi
+
+if [ -d "${TERMINFO_DIR}" ]; then
+  term_subdir="$(printf '%s' "${TERM}" | cut -c1)"
+  if [ ! -f "${TERMINFO_DIR}/${term_subdir}/${TERM}" ]; then
+    case "${TERM}" in
+      *256color*)
+        TERM="xterm"
+        ;;
+      tmux*|screen*)
+        TERM="screen"
+        ;;
+      *)
+        TERM="vt100"
+        ;;
+    esac
+  fi
+fi
+
+export TERM
+exec "${HTOP_BIN}" "$@"

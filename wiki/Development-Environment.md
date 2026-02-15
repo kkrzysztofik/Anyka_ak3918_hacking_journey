@@ -44,6 +44,10 @@ sudo apt-get install -y \
 
 ## Building the Toolchain
 
+The toolchain build system supports multiple architectures:
+- **ARMv5TE** (default): For Anyka AK3918 and embedded devices
+- **aarch64**: For modern ARM64 systems
+
 ### Step 1: Navigate to the build directory
 
 ```bash
@@ -52,8 +56,14 @@ cd /home/kmk/anyka-dev/toolchain/build-new
 
 ### Step 2: Build the GCC toolchain
 
+#### Building ARMv5TE (Default)
+
 ```bash
+# Default (ARMv5TE)
 ./build_toolchain.sh
+
+# Or explicitly
+ARCH=armv5te ./build_toolchain.sh
 ```
 
 This will:
@@ -63,18 +73,41 @@ This will:
 - Build GCC 15.2, Binutils 2.45, and GDB 16.3
 - Install to `../arm-anykav200-crosstool-ng/usr/`
 
+#### Building aarch64
+
+```bash
+ARCH=aarch64 ./build_toolchain.sh
+```
+
+This will:
+
+- Use existing crosstool-NG (if already built)
+- Configure for aarch64 with glibc
+- Build GCC 15.2, Binutils 2.45, and GDB 16.3
+- Install to `../aarch64-unknown-linux-gnu-toolchain/usr/`
+
+#### Building Both Architectures
+
+To build both architectures in sequence:
+
+```bash
+./build_all_architectures.sh
+```
+
 ### Step 3: Build LLVM/Clang (Required for Rust)
 
 ```bash
 ./build_llvm.sh
 ```
 
-This builds LLVM 18.1.8 with Clang and LLD for cross-compilation support.
+This builds LLVM 21.1.8 (latest stable) with Clang and LLD for cross-compilation support.
 
 ### Step 4: Bootstrap Rust from Source
 
+#### For ARMv5TE
+
 ```bash
-./bootstrap_rust.sh
+ARCH=armv5te ./bootstrap_rust.sh
 ```
 
 This will:
@@ -85,17 +118,41 @@ This will:
 - Build Rust compiler and std library for the target
 - Install to `../arm-anykav200-crosstool-ng/`
 
+#### For aarch64
+
+```bash
+ARCH=aarch64 ./bootstrap_rust.sh
+```
+
+This will:
+
+- Clone Rust source code (if not already cloned)
+- Configure Rust to use the custom LLVM (aarch64 is a builtin target)
+- Build Rust compiler and std library for the target
+- Install to `../aarch64-unknown-linux-gnu-toolchain/`
+
 ### Step 5: Verify the installation
 
+**For ARMv5TE:**
 ```bash
 ./verify_rust.sh
 ```
 
-After building, the toolchain will be available at:
+**For aarch64:**
+```bash
+./verify_toolchain_aarch64.sh
+```
 
-- `../arm-anykav200-crosstool-ng/bin/rustc`
-- `../arm-anykav200-crosstool-ng/bin/cargo`
-- `../arm-anykav200-crosstool-ng/bin/clang`
+After building, the toolchains will be available at:
+
+- ARMv5TE:
+  - `../arm-anykav200-crosstool-ng/bin/rustc`
+  - `../arm-anykav200-crosstool-ng/bin/cargo`
+  - `../arm-anykav200-crosstool-ng/bin/clang`
+- aarch64:
+  - `../aarch64-unknown-linux-gnu-toolchain/bin/rustc`
+  - `../aarch64-unknown-linux-gnu-toolchain/bin/cargo`
+  - `../aarch64-unknown-linux-gnu-toolchain/bin/clang`
 
 For detailed toolchain build instructions, see the [Toolchain Build README](toolchain/build-new/README.md).
 

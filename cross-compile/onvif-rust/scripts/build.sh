@@ -8,6 +8,8 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Go up 1 level: scripts -> onvif-rust
 PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+# Workspace root: onvif-rust -> cross-compile
+WORKSPACE_DIR="$(cd "${PROJECT_DIR}/.." && pwd)"
 
 # Default values
 BUILD_MODE="release"
@@ -98,41 +100,56 @@ log_info "Project directory: ${PROJECT_DIR}"
 log_info "Target: ${TARGET}"
 log_info "Build mode: ${BUILD_MODE}"
 
-# Check if cargo is available
-if ! command -v cargo &> /dev/null; then
-  log_error "cargo not found. Please ensure Rust toolchain is installed and in PATH."
+# Use vendored toolchain cargo by default (per project requirements)
+REPO_ROOT="$(cd "${PROJECT_DIR}/../.." && pwd)"
+DEFAULT_CARGO="${REPO_ROOT}/toolchain/arm-anykav200-crosstool-ng/bin/cargo"
+export CARGO="${CARGO:-${DEFAULT_CARGO}}"
+
+if [[ ! -x "${CARGO}" ]]; then
+  log_error "cargo not found or not executable at: ${CARGO}"
+  log_error "Set CARGO to the vendored toolchain cargo, e.g.:"
+  log_error "  export CARGO=${DEFAULT_CARGO}"
   exit 1
 fi
 
-# Check if rustc is available
-if ! command -v rustc &> /dev/null; then
-  log_error "rustc not found. Please ensure Rust toolchain is installed and in PATH."
-  exit 1
-fi
-
-log_info "Using cargo: $(which cargo)"
-log_info "Using rustc: $(which rustc)"
+log_info "Using cargo: ${CARGO}"
 
 # Clean if requested
 if [[ "${CLEAN}" = true ]]; then
   log_info "Cleaning build artifacts..."
-  cargo clean
+  "${CARGO}" clean
 fi
 
 # Build the project
 log_info "Building for target ${TARGET} in ${BUILD_MODE} mode..."
 
 if [[ "${BUILD_MODE}" = "release" ]]; then
-  cargo build --release --target "${TARGET}"
-  BINARY_PATH="${PROJECT_DIR}/target/${TARGET}/release/onvif-rust"
+  "${CARGO}" build --release --target "${TARGET}"
+  WORKSPACE_BINARY_PATH="${WORKSPACE_DIR}/target/${TARGET}/release/onvif-rust"
+  CRATE_BINARY_PATH="${PROJECT_DIR}/target/${TARGET}/release/onvif-rust"
 else
-  cargo build --target "${TARGET}"
-  BINARY_PATH="${PROJECT_DIR}/target/${TARGET}/debug/onvif-rust"
+  "${CARGO}" build --target "${TARGET}"
+  WORKSPACE_BINARY_PATH="${WORKSPACE_DIR}/target/${TARGET}/debug/onvif-rust"
+  CRATE_BINARY_PATH="${PROJECT_DIR}/target/${TARGET}/debug/onvif-rust"
+fi
+
+# Resolve actual binary location.
+# When building as part of the `cross-compile` workspace, Cargo places artifacts in `${WORKSPACE_DIR}/target`.
+# Older standalone builds may place artifacts in `${PROJECT_DIR}/target`.
+if [[ -f "${WORKSPACE_BINARY_PATH}" ]]; then
+  BINARY_PATH="${WORKSPACE_BINARY_PATH}"
+elif [[ -f "${CRATE_BINARY_PATH}" ]]; then
+  BINARY_PATH="${CRATE_BINARY_PATH}"
+else
+  BINARY_PATH=""
 fi
 
 # Check if build succeeded
 if [[ ! -f "${BINARY_PATH}" ]]; then
   log_error "Build failed - binary not found at expected location: ${BINARY_PATH}"
+  log_error "Searched:"
+  log_error "  - ${WORKSPACE_BINARY_PATH}"
+  log_error "  - ${CRATE_BINARY_PATH}"
   exit 1
 fi
 
@@ -143,13 +160,40 @@ log_info "Binary size: $(du -h "${BINARY_PATH}" | cut -f1)"
 # Show binary information
 if command -v file &> /dev/null; then
   log_info "Binary type: $(file "${BINARY_PATH}")"
+  if ! file "${BINARY_PATH}" | grep -q "ELF 32-bit.*ARM"; then
+    log_error "Refusing to deploy: produced binary does not look like an ARMv5 32-bit ELF."
+    log_error "This often happens if you built for the host (x86_64) and then copied it to the camera."
+    exit 1
+  fi
 fi
 
 # Copy binary to deployment directory
-DEPLOY_DIR="/home/kmk/anyka-dev/SD_card_contents/anyka_hack/onvif"
-cp "${BINARY_PATH}" "${DEPLOY_DIR}/onvif-rust"
+DEPLOY_DIR="${REPO_ROOT}/SD_card_contents/anyka_hack/onvif"
+mkdir -p "${DEPLOY_DIR}"
+cp "${BINARY_PATH}" "${DEPLOY_DIR}/onvif-rust.bin"
+chmod 755 "${DEPLOY_DIR}/onvif-rust.bin"
+
+cat > "${DEPLOY_DIR}/onvif-rust" <<'EOF'
+#!/bin/sh
+# Launcher for ONVIF Rust server with explicit runtime library path.
+
+SCRIPT_DIR="$(CDPATH= cd -- "$(dirname "$0")" && pwd)"
+ANYKA_HACK_DIR="$(dirname "$SCRIPT_DIR")"
+LIB1="${ANYKA_HACK_DIR}/lib"
+LIB2="${SCRIPT_DIR}/lib"
+
+if [ -n "${LD_LIBRARY_PATH:-}" ]; then
+  export LD_LIBRARY_PATH="${LIB1}:${LIB2}:${LD_LIBRARY_PATH}"
+else
+  export LD_LIBRARY_PATH="${LIB1}:${LIB2}"
+fi
+
+exec "${SCRIPT_DIR}/onvif-rust.bin" "$@"
+EOF
 chmod 755 "${DEPLOY_DIR}/onvif-rust"
-log_success "Binary copied to deployment directory: ${DEPLOY_DIR}/onvif-rust"
+log_success "Binary and launcher copied to deployment directory:"
+log_info "  - ${DEPLOY_DIR}/onvif-rust.bin"
+log_info "  - ${DEPLOY_DIR}/onvif-rust"
 
 echo ""
 log_info "To verify the binary, run:"

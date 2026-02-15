@@ -1,115 +1,53 @@
 {
-  "files.associations": {
-    "*.h": "c",
-    "*.c": "c",
-    "*.cpp": "cpp",
-    "*.hpp": "cpp"
+  // Rust-analyzer configuration for cross-compilation project
+  // Use system rustc and x86_64 target for IDE analysis
+  "rust-analyzer.server.extraEnv": {
+    // Override RUSTC to use system rustc for rust-analyzer
+    "RUSTC": "rustc",
+    // Prevent using custom toolchain for analysis
+    "RUSTUP_TOOLCHAIN": ""
   },
-  // "C_Cpp.default.configurationProvider": "ms-vscode.cmake-tools",
-  // "C_Cpp.default.intelliSenseMode": "gcc-x64",
-  // "C_Cpp.default.compilerPath": "/usr/bin/gcc",
-  // "C_Cpp.default.cStandard": "c99",
-  // "C_Cpp.default.cppStandard": "c++11",
-  // "C_Cpp.default.includePath": [
-  //   "${workspaceFolder}/cross-compile/onvif/include",
-  //   "${workspaceFolder}/cross-compile/onvif/src",
-  //   "${workspaceFolder}/cross-compile/anyka_reference/component",
-  //   "${workspaceFolder}/cross-compile/anyka_reference/platform",
-  //   "${workspaceFolder}/cross-compile/anyka_reference/akipc/include",
-  //   "${workspaceFolder}/cross-compile/anyka_reference/component/include",
-  //   "${workspaceFolder}/cross-compile/anyka_reference/platform/include"
-  // ],
-  // "C_Cpp.default.defines": [
-  //   "ANYKA_PLATFORM=1",
-  //   "_POSIX_C_SOURCE=199309L",
-  //   "PLATFORM_LOG_LEVEL_INFO=3",
-  //   "DEBUG_BUILD"
-  // ],
-  // "C_Cpp.default.compilerArgs": [
-  //   "-std=c99",
-  //   "-D_POSIX_C_SOURCE=199309L",
-  //   "-DANYKA_PLATFORM=1",
-  //   "-g",
-  //   "-O0",
-  //   "-DDEBUG_BUILD",
-  //   "-Wall",
-  //   "-Wextra",
-  //   "-Wpedantic"
-  // ],
-  // Editor settings
-  "editor.tabSize": 2,
-  "editor.insertSpaces": true,
-  "editor.detectIndentation": false,
-  "editor.formatOnSave": true,
-  "editor.semanticHighlighting.enabled": true,
-  // File settings
-  "files.trimTrailingWhitespace": true,
-  "files.insertFinalNewline": true,
-  "files.trimFinalNewlines": true,
-  "files.watcherExclude": {
-    "**/cross-compile/onvif/out/**": true,
-    "**/cross-compile/onvif/docs/**": true,
-    "**/.vscode/browse.vc.db*": true,
-    "**/node_modules/**": true
+  "rust-analyzer.cargo.extraEnv": {
+    // Override RUSTC for cargo check operations
+    "RUSTC": "rustc"
   },
-  "terminal.integrated.defaultProfile.linux": "bash",
-  "terminal.integrated.profiles.linux": {
-    "bash": {
-      "path": "/bin/bash",
-      "icon": "terminal-bash"
-    }
-  },
-  // Build and task settings
-  "task.autoDetect": "on",
-  "task.showDecorations": true,
-  "task.quickOpen.history": 10,
-  "task.quickOpen.detail": true,
-  "task.quickOpen.skip": false,
-  // Clangd settings for WSL2 development
-  "clangd.path": "/usr/bin/clangd",
-  // "clangd.arguments": [
-  //   "--compile-commands-dir=${workspaceFolder}/cross-compile/onvif",
-  //   "--header-insertion=never",
-  //   "--completion-style=detailed",
-  //   "--function-arg-placeholders=false",
-  //   "--fallback-style=Google",
-  //   "--background-index",
-  //   "--clang-tidy"
-  // ],
-  "clangd.checkUpdates": true,
-  "clangd.onConfigChanged": "restart",
-  // Problems pane settings
-  "problems.decorations.enabled": true,
-  "problems.showCurrentInStatus": true,
-  "problems.sortOrder": "severity",
-  "problems.autoReveal": true,
-  // Language-specific settings
-  "[c]": {
-    "editor.defaultFormatter": "llvm-vs-code-extensions.vscode-clangd",
-    "editor.semanticHighlighting.enabled": true,
-    "editor.suggest.snippetsPreventQuickSuggestions": false
-  },
-  "[cpp]": {
-    "editor.defaultFormatter": "llvm-vs-code-extensions.vscode-clangd",
-    "editor.semanticHighlighting.enabled": true,
-    "editor.suggest.snippetsPreventQuickSuggestions": false
-  },
+  // Use system rustc path for rust-analyzer operations
+  "rust-analyzer.rustc.source": "discover",
+  // Use x86_64 target for analysis (not ARM) as per project standards
+  "rust-analyzer.cargo.target": "x86_64-unknown-linux-gnu",
+  // Set explicit workspace location
+  "rust-analyzer.linkedProjects": [
+    "/home/kmk/anyka-dev/cross-compile/Cargo.toml"
+  ],
+  // Specify target explicitly in cargo commands
+  "rust-analyzer.cargo.extraArgs": [
+    "--target",
+    "x86_64-unknown-linux-gnu"
+  ],
+  "rust-analyzer.check.extraArgs": [
+    "--target",
+    "x86_64-unknown-linux-gnu"
+  ],
+  "rust-analyzer.inlayHints.chainingHints.enable": false,
+  "rust-analyzer.inlayHints.closingBraceHints.enable": false,
+  "rust-analyzer.inlayHints.typeHints.enable": false,
+  "rust-analyzer.procMacro.enable": false,
+  "rust-analyzer.completion.autoimport.enable": false,
+  // Use cargo check for faster feedback
+  "rust-analyzer.check.command": "check",
+  // Additional helpful settings
+  "rust-analyzer.diagnostics.enable": true,
   "sonarlint.connectedMode.project": {
-    "connectionId": "kkrzysztofik Org",
+    "connectionId": "kkrzysztofik",
     "projectKey": "kkrzysztofik_Anyka_ak3918_hacking_journey"
   },
-  "css.lint.unknownAtRules": "ignore",
-  // Rust and rust-analyzer settings
-  "rust-analyzer.cargo.buildScripts.enable": true,
-  "rust-analyzer.checkOnSave.enable": true,
-  "rust-analyzer.checkOnSave.command": "clippy",
-  "rust-analyzer.checkOnSave.extraArgs": ["--", "-D", "warnings"],
-  "rust-analyzer.cargo.features": "all",
-  "rust-analyzer.procMacro.enable": true,
-  "rust-analyzer.inlayHints.typeHints.enable": true,
-  "rust-analyzer.inlayHints.parameterHints.enable": true,
-  "[rust]": {
-    "editor.defaultFormatter": "rust-lang.rust-analyzer",
-    "editor.formatOnSave": true
-  }
+  "chat.tools.terminal.autoApprove": {
+    "/home/kmk/anyka-dev/toolchain/arm-anykav200-crosstool-ng/bin/cargo": true,
+    "/home/kmk/anyka-dev/toolchain/arm-anykav200-crosstool-ng/bin/arm-unknown-linux-uclibcgnueabi-nm": true,
+    "cargo fmt": true
+  },
+  "cursorpyright.analysis.typeCheckingMode": "strict",
+  "cursorpyright.analysis.diagnosticMode": "workspace",
+  "snyk.advanced.organization": "50e31838-4e3f-4e58-ba5e-c5e116e29a8a",
+  "snyk.advanced.autoSelectOrganization": true
 }

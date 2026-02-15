@@ -588,6 +588,7 @@ mod stub_impl {
     }
 
     /// Open video input device (stub).
+    #[allow(dead_code)]
     pub fn video_input_open(_device: VideoDevice) -> AnykaResult<*mut std::ffi::c_void> {
         // Return a non-null pointer for stub
         Ok(std::ptr::dangling_mut::<std::ffi::c_void>())
@@ -600,31 +601,37 @@ mod stub_impl {
     /// This function is marked as `unsafe` because it accepts a raw pointer. However, since this is a stub
     /// implementation that does not dereference the pointer, it is safe to call with any pointer value,
     /// including null pointers.
+    #[allow(dead_code)]
     pub unsafe fn video_input_close(_handle: *mut std::ffi::c_void) -> AnykaResult<()> {
         Ok(())
     }
 
     /// Open PTZ motor control (stub).
+    #[allow(dead_code)]
     pub fn ptz_open() -> AnykaResult<()> {
         Ok(())
     }
 
     /// Close PTZ motor control (stub).
+    #[allow(dead_code)]
     pub fn ptz_close() -> AnykaResult<()> {
         Ok(())
     }
 
     /// Turn PTZ motor in a direction (stub).
+    #[allow(dead_code)]
     pub fn ptz_turn(_direction: PtzDirection) -> AnykaResult<()> {
         Ok(())
     }
 
     /// Stop PTZ motor movement (stub).
+    #[allow(dead_code)]
     pub fn ptz_stop() -> AnykaResult<()> {
         Ok(())
     }
 
     /// Get PTZ motor step position (stub).
+    #[allow(dead_code)]
     pub fn ptz_get_position(_motor: PtzMotor) -> AnykaResult<i32> {
         Ok(0)
     }

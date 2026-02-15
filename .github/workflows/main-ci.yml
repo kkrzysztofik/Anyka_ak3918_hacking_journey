@@ -6,7 +6,9 @@ on:
       - main
     paths:
       - "cross-compile/onvif-rust/**"
+      - "cross-compile/streaming-lib/**"
       - "cross-compile/www/**"
+      - "validation/**"
   pull_request:
     branches:
       - main
@@ -16,22 +18,24 @@ on:
       - reopened
     paths:
       - "cross-compile/onvif-rust/**"
+      - "cross-compile/streaming-lib/**"
       - "cross-compile/www/**"
-
-
+      - "validation/**"
 
 jobs:
   # =============================================================================
   # RUST BACKEND - Lint, Test & Coverage
   # =============================================================================
-  rust-lint:
-    name: Rust - Lint Code
+  rust-quality-and-coverage:
+    name: Rust - Lint, Test & Coverage
     runs-on: ubuntu-latest
     permissions:
       contents: read
     container:
-      image: kkrzysztofik/anyka-cross-compile:latest
-
+      image: kkrzysztofik/anyka-cross-compile:rust-1.91.1
+      options: --security-opt seccomp=unconfined
+    outputs:
+      coverage: ${{ steps.coverage-summary.outputs.coverage }}
     steps:
       - name: Checkout Code
         uses: actions/checkout@v6
@@ -44,40 +48,10 @@ jobs:
           git config --global user.name "GitHub Actions"
           git config --global user.email "actions@github.com"
 
-      - name: Setup Cargo Config
-        working-directory: cross-compile/onvif-rust
+      - name: Setup ARMv5TEJ Patches
+        working-directory: cross-compile/patches
         run: |
-          ./scripts/setup-cargo-config.sh
-
-      - name: Check Formatting
-        working-directory: cross-compile/onvif-rust
-        run: |
-          cargo fmt --check
-
-      - name: Run Clippy
-        working-directory: cross-compile/onvif-rust
-        run: |
-          cargo clippy --target x86_64-unknown-linux-gnu -- -D warnings
-
-  rust-test-and-coverage:
-    name: Rust - Test Suite & Coverage
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    container:
-      image: kkrzysztofik/anyka-cross-compile:latest
-      options: --security-opt seccomp=unconfined
-    outputs:
-      coverage: ${{ steps.coverage-summary.outputs.coverage }}
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v6
-
-      - name: Configure Git
-        run: |
-          git config --global --add safe.directory "$GITHUB_WORKSPACE"
-          git config --global user.name "GitHub Actions"
-          git config --global user.email "actions@github.com"
+          bash setup.sh
 
       - name: Setup Cargo Config
         working-directory: cross-compile/onvif-rust
@@ -91,21 +65,33 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             ~/.cargo/bin
-            cross-compile/onvif-rust/target
-          key: cargo-${{ runner.os }}-rust-onvif-${{ hashFiles('cross-compile/onvif-rust/Cargo.lock') }}
+            cross-compile/target
+          key: cargo-${{ runner.os }}-rust-${{ hashFiles('cross-compile/Cargo.lock') }}
           restore-keys: |
-            cargo-${{ runner.os }}-rust-onvif-
+            cargo-${{ runner.os }}-rust-
+
+      - name: Check Formatting
+        working-directory: cross-compile
+        run: |
+          cargo fmt --check
+
+      - name: Run Clippy
+        working-directory: cross-compile
+        run: |
+          cargo clippy --target x86_64-unknown-linux-gnu -- -D warnings
 
       - name: Run Tests with Coverage
-        working-directory: cross-compile/onvif-rust
+        working-directory: cross-compile
         run: |
           cargo tarpaulin \
+            --workspace \
             --target x86_64-unknown-linux-gnu \
             --all-features \
             --skip-clean \
             --follow-exec \
             --timeout 600 \
             --implicit-test-threads \
+            --exclude-files "xiu/**" "patches/**" "anyka_reference/**" "onvif/**" \
             --out Html \
             --out Lcov \
             --out Xml \
@@ -136,29 +122,116 @@ jobs:
         with:
           name: rust-coverage
           path: |
-            cross-compile/onvif-rust/coverage/cobertura.xml
-            cross-compile/onvif-rust/coverage/lcov.info
-            cross-compile/onvif-rust/coverage/tarpaulin-report.html
+            cross-compile/coverage/cobertura.xml
+            cross-compile/coverage/lcov.info
+            cross-compile/coverage/tarpaulin-report.html
           retention-days: 7
 
       - name: Generate Coverage Summary
         id: coverage-summary
-        working-directory: cross-compile/onvif-rust
         run: |
-          if [ -f "coverage/cobertura.xml" ]; then
-            COVERAGE_PCT=$(python3 -c "import xml.etree.ElementTree as ET; tree = ET.parse('coverage/cobertura.xml'); root = tree.getroot(); rate = float(root.get('line-rate', 0)) * 100; print(f'{rate:.2f}')" 2>/dev/null || echo "0.00")
-            echo "coverage=$COVERAGE_PCT" >> $GITHUB_OUTPUT
-            echo "✅ Rust Coverage: ${COVERAGE_PCT}%"
+          COVERAGE="0.00"
+
+          # Get workspace coverage
+          if [ -f "cross-compile/coverage/cobertura.xml" ]; then
+            COVERAGE=$(python3 -c "import xml.etree.ElementTree as ET; tree = ET.parse('cross-compile/coverage/cobertura.xml'); root = tree.getroot(); rate = float(root.get('line-rate', 0)) * 100; print(f'{rate:.2f}')" 2>/dev/null || echo "0.00")
+            echo "✅ Rust Workspace Coverage: ${COVERAGE}%"
           else
-            echo "coverage=0.00" >> $GITHUB_OUTPUT
-            echo "⚠️ Rust coverage file not found"
+            echo "⚠️ Rust workspace coverage file not found"
           fi
+
+          echo "coverage=$COVERAGE" >> $GITHUB_OUTPUT
+
+  # =============================================================================
+  # VALIDATION (RTSP) - Lint, Test & Coverage
+  # =============================================================================
+  validation-rust-quality:
+    name: Validation (Rust) - Lint, Test & Coverage
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      coverage: ${{ steps.coverage-summary.outputs.coverage }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v6
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Cache Cargo Dependencies
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.cargo/bin
+            validation/target
+          key: cargo-${{ runner.os }}-validation-${{ hashFiles('validation/rust/Cargo.lock') }}
+          restore-keys: |
+            cargo-${{ runner.os }}-validation-
+
+      - name: Install cargo-tarpaulin
+        run: |
+          if ! command -v cargo-tarpaulin &> /dev/null; then
+            cargo install cargo-tarpaulin --locked
+          else
+            echo "cargo-tarpaulin already installed"
+          fi
+
+      - name: Check Formatting
+        working-directory: validation/rust
+        run: cargo fmt --check
+
+      - name: Run Clippy
+        working-directory: validation/rust
+        run: cargo clippy --target x86_64-unknown-linux-gnu --release -- -D warnings
+
+      - name: Run Tests with Coverage
+        working-directory: validation/rust
+        run: |
+          # Use dev profile (no --release) so coverage reports all source lines;
+          # release optimizations (inlining, DCE) reduce instrumented line count.
+          cargo tarpaulin \
+            --target x86_64-unknown-linux-gnu \
+            --all-targets \
+            --out Html \
+            --out Lcov \
+            --out Xml \
+            --output-dir coverage
+          echo ""
+          echo "=== Validation Rust Coverage Files ==="
+          ls -lah coverage/ 2>/dev/null || echo "Coverage directory not found"
+
+      - name: Upload Coverage Artifacts
+        uses: actions/upload-artifact@v6
+        with:
+          name: validation-rust-coverage
+          path: |
+            validation/rust/coverage/cobertura.xml
+            validation/rust/coverage/lcov.info
+            validation/rust/coverage/tarpaulin-report.html
+          retention-days: 7
+
+      - name: Generate Coverage Summary
+        id: coverage-summary
+        run: |
+          COVERAGE="0.00"
+          if [ -f "validation/rust/coverage/cobertura.xml" ]; then
+            COVERAGE=$(python3 -c "import xml.etree.ElementTree as ET; tree = ET.parse('validation/rust/coverage/cobertura.xml'); root = tree.getroot(); rate = float(root.get('line-rate', 0)) * 100; print(f'{rate:.2f}')" 2>/dev/null || echo "0.00")
+            echo "✅ Validation (Rust) Coverage: ${COVERAGE}%"
+          else
+            echo "⚠️ Validation Rust coverage file not found"
+          fi
+          echo "coverage=$COVERAGE" >> $GITHUB_OUTPUT
 
   # =============================================================================
   # WEBUI FRONTEND - Lint, Test & Coverage
   # =============================================================================
-  webui-test-and-coverage:
-    name: WebUI - Test Suite & Coverage
+  webui-quality-and-coverage:
+    name: WebUI - Lint, Test & Coverage
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -229,7 +302,7 @@ jobs:
   security-scans:
     name: Security Scans
     runs-on: ubuntu-latest
-    needs: [rust-test-and-coverage, webui-test-and-coverage]
+    needs: [rust-quality-and-coverage, webui-quality-and-coverage, validation-rust-quality]
     continue-on-error: true
     permissions:
       contents: read
@@ -261,6 +334,40 @@ jobs:
         continue-on-error: true
         with:
           sarif_file: cross-compile/onvif-rust/snyk-code-rust.sarif
+
+      # Streaming-lib Snyk Code Scan
+      - name: Run Snyk Code for streaming-lib
+        id: snyk-code-streaming
+        if: hashFiles('cross-compile/streaming-lib/**/*.rs') != ''
+        working-directory: cross-compile/streaming-lib
+        run: snyk code test --sarif-file-output=snyk-code-streaming.sarif
+        continue-on-error: true
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+
+      - name: Upload streaming-lib Snyk Code SARIF
+        if: hashFiles('cross-compile/streaming-lib/**/*.rs') != '' && hashFiles('cross-compile/streaming-lib/snyk-code-streaming.sarif') != ''
+        uses: github/codeql-action/upload-sarif@v4
+        continue-on-error: true
+        with:
+          sarif_file: cross-compile/streaming-lib/snyk-code-streaming.sarif
+
+      # Validation (RTSP) Snyk Code Scan
+      - name: Run Snyk Code for validation (Rust)
+        id: snyk-code-validation
+        if: hashFiles('validation/**/*.rs') != ''
+        working-directory: validation/rust
+        run: snyk code test --sarif-file-output=snyk-code-validation.sarif
+        continue-on-error: true
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+
+      - name: Upload validation Snyk Code SARIF
+        if: hashFiles('validation/**/*.rs') != '' && hashFiles('validation/rust/snyk-code-validation.sarif') != ''
+        uses: github/codeql-action/upload-sarif@v4
+        continue-on-error: true
+        with:
+          sarif_file: validation/rust/snyk-code-validation.sarif
 
       # WebUI Snyk Code + OSS Scan
       - name: Setup Node.js for WebUI Scans
@@ -328,9 +435,9 @@ jobs:
           OSS_STATUS="success"
 
           # Check if any code scan ran
-          if [ "${{ steps.snyk-code-rust.outcome }}" == "failure" ] || [ "${{ steps.snyk-code-webui.outcome }}" == "failure" ]; then
+          if [ "${{ steps.snyk-code-rust.outcome }}" == "failure" ] || [ "${{ steps.snyk-code-webui.outcome }}" == "failure" ] || [ "${{ steps.snyk-code-validation.outcome }}" == "failure" ]; then
             CODE_STATUS="failure"
-          elif [ "${{ steps.snyk-code-rust.outcome }}" == "skipped" ] && [ "${{ steps.snyk-code-webui.outcome }}" == "skipped" ]; then
+          elif [ "${{ steps.snyk-code-rust.outcome }}" == "skipped" ] && [ "${{ steps.snyk-code-webui.outcome }}" == "skipped" ] && [ "${{ steps.snyk-code-validation.outcome }}" == "skipped" ]; then
             CODE_STATUS="skipped"
           fi
 
@@ -360,7 +467,7 @@ jobs:
   sonarqube:
     name: SonarQube Analysis & Quality Gate
     runs-on: ubuntu-latest
-    needs: [rust-test-and-coverage, webui-test-and-coverage]
+    needs: [rust-quality-and-coverage, webui-quality-and-coverage, validation-rust-quality]
     continue-on-error: true
     permissions:
       contents: read
@@ -383,14 +490,28 @@ jobs:
       - name: Merge Coverage Reports
         run: |
           # Create coverage directories
-          mkdir -p cross-compile/onvif-rust/coverage
+          mkdir -p cross-compile/coverage
           mkdir -p cross-compile/www/coverage
+          mkdir -p validation/rust/coverage
 
-          # Copy Rust coverage if available
+          # Copy Rust workspace coverage if available
           if [ -f "coverage-artifacts/rust-coverage/cobertura.xml" ]; then
-            cp coverage-artifacts/rust-coverage/cobertura.xml cross-compile/onvif-rust/coverage/
-            cp coverage-artifacts/rust-coverage/lcov.info cross-compile/onvif-rust/coverage/ 2>/dev/null || true
-            echo "✅ Rust coverage copied"
+            cp coverage-artifacts/rust-coverage/cobertura.xml cross-compile/coverage/
+            cp coverage-artifacts/rust-coverage/lcov.info cross-compile/coverage/ 2>/dev/null || true
+            echo "✅ Rust workspace coverage copied"
+          fi
+
+          # Copy Validation (Rust) coverage if available
+          if [ -f "coverage-artifacts/validation-rust-coverage/cobertura.xml" ]; then
+            cp coverage-artifacts/validation-rust-coverage/cobertura.xml validation/rust/coverage/
+            cp coverage-artifacts/validation-rust-coverage/lcov.info validation/rust/coverage/ 2>/dev/null || true
+            echo "✅ Validation Rust coverage copied"
+            # Fix cobertura paths: tarpaulin uses paths relative to crate (e.g. src/lib.rs)
+            # SonarQube expects paths relative to project root (validation/rust/src/lib.rs)
+            if [ -f "validation/rust/coverage/cobertura.xml" ]; then
+              sed -i 's|filename="src/|filename="validation/rust/src/|g' validation/rust/coverage/cobertura.xml
+              echo "✅ Validation Rust cobertura paths transformed to project root relative"
+            fi
           fi
 
           # Copy WebUI coverage if available
@@ -418,7 +539,8 @@ jobs:
 
           # Verify coverage files exist
           echo "=== Coverage Verification ==="
-          echo "Rust Cobertura: $(ls -lh cross-compile/onvif-rust/coverage/cobertura.xml 2>/dev/null || echo 'Not found')"
+          echo "Rust Workspace Cobertura: $(ls -lh cross-compile/coverage/cobertura.xml 2>/dev/null || echo 'Not found')"
+          echo "Validation Rust Cobertura: $(ls -lh validation/rust/coverage/cobertura.xml 2>/dev/null || echo 'Not found')"
           echo "WebUI LCOV: $(ls -lh cross-compile/www/coverage/lcov.info 2>/dev/null || echo 'Not found')"
 
       - name: Verify Coverage Reports
@@ -447,20 +569,20 @@ jobs:
 
           echo "=== Coverage Files After Merge ==="
 
-          # Check Rust coverage with detailed info
-          if [ -f "cross-compile/onvif-rust/coverage/cobertura.xml" ]; then
-            echo "✅ Found Rust coverage: cross-compile/onvif-rust/coverage/cobertura.xml"
-            ls -lh cross-compile/onvif-rust/coverage/
-            echo "File size: $(wc -c < cross-compile/onvif-rust/coverage/cobertura.xml) bytes"
+          # Check Rust workspace coverage with detailed info
+          if [ -f "cross-compile/coverage/cobertura.xml" ]; then
+            echo "✅ Found Rust workspace coverage: cross-compile/coverage/cobertura.xml"
+            ls -lh cross-compile/coverage/
+            echo "File size: $(wc -c < cross-compile/coverage/cobertura.xml) bytes"
             echo "First 10 lines of cobertura.xml:"
-            head -10 cross-compile/onvif-rust/coverage/cobertura.xml || true
+            head -10 cross-compile/coverage/cobertura.xml || true
             echo "Checking for coverage data in XML:"
-            grep -c "class name" cross-compile/onvif-rust/coverage/cobertura.xml || echo "No class elements found"
-            grep -c "line number" cross-compile/onvif-rust/coverage/cobertura.xml || echo "No line number elements found"
+            grep -c "class name" cross-compile/coverage/cobertura.xml || echo "No class elements found"
+            grep -c "line number" cross-compile/coverage/cobertura.xml || echo "No line number elements found"
           else
-            echo "❌ Rust coverage NOT FOUND at: cross-compile/onvif-rust/coverage/cobertura.xml"
+            echo "❌ Rust workspace coverage NOT FOUND at: cross-compile/coverage/cobertura.xml"
             echo "Checking if directory exists:"
-            ls -la cross-compile/onvif-rust/coverage/ 2>/dev/null || echo "Directory does not exist"
+            ls -la cross-compile/coverage/ 2>/dev/null || echo "Directory does not exist"
           fi
           echo ""
 
@@ -490,11 +612,11 @@ jobs:
 
           # Check if files are readable
           echo "=== File Readability Check ==="
-          if [ -f "cross-compile/onvif-rust/coverage/cobertura.xml" ]; then
-            if [ -r "cross-compile/onvif-rust/coverage/cobertura.xml" ]; then
-              echo "✅ Rust coverage file is readable"
+          if [ -f "cross-compile/coverage/cobertura.xml" ]; then
+            if [ -r "cross-compile/coverage/cobertura.xml" ]; then
+              echo "✅ Rust workspace coverage file is readable"
             else
-              echo "❌ Rust coverage file is NOT readable"
+              echo "❌ Rust workspace coverage file is NOT readable"
             fi
           fi
           if [ -f "cross-compile/www/coverage/lcov.info" ]; then
@@ -507,8 +629,8 @@ jobs:
           echo ""
 
           echo "=== Absolute Path Check ==="
-          if [ -f "cross-compile/onvif-rust/coverage/cobertura.xml" ]; then
-            echo "Rust coverage absolute path: $(realpath cross-compile/onvif-rust/coverage/cobertura.xml)"
+          if [ -f "cross-compile/coverage/cobertura.xml" ]; then
+            echo "Rust workspace coverage absolute path: $(realpath cross-compile/coverage/cobertura.xml)"
           fi
           if [ -f "cross-compile/www/coverage/lcov.info" ]; then
             echo "WebUI coverage absolute path: $(realpath cross-compile/www/coverage/lcov.info)"
@@ -521,17 +643,17 @@ jobs:
           echo ""
 
           # Check Rust coverage
-          RUST_COV_PATH="cross-compile/onvif-rust/coverage/cobertura.xml"
+          RUST_COV_PATH="cross-compile/coverage/cobertura.xml"
           if [ -f "$RUST_COV_PATH" ]; then
-            echo "✅ Rust coverage file exists: $RUST_COV_PATH"
+            echo "✅ Rust workspace coverage file exists: $RUST_COV_PATH"
             echo "   Size: $(stat -f%z "$RUST_COV_PATH" 2>/dev/null || stat -c%s "$RUST_COV_PATH" 2>/dev/null) bytes"
             echo "   Contains coverage data: $(grep -q 'line-rate' "$RUST_COV_PATH" && echo 'Yes' || echo 'No')"
             echo "   Sample of file paths in XML (first 5):"
             grep -o 'filename="[^"]*"' "$RUST_COV_PATH" | head -5 || echo "   No filename attributes found"
           else
-            echo "❌ Rust coverage file MISSING: $RUST_COV_PATH"
+            echo "❌ Rust workspace coverage file MISSING: $RUST_COV_PATH"
             echo "   Searching for any XML files in coverage directory:"
-            find cross-compile/onvif-rust/coverage -name "*.xml" 2>/dev/null || echo "   No XML files found"
+            find cross-compile/coverage -name "*.xml" 2>/dev/null || echo "   No XML files found"
           fi
           echo ""
 
@@ -634,11 +756,11 @@ jobs:
           echo "=== Post-Scan Coverage Analysis ==="
           echo "Checking if coverage files are still present after scan:"
           echo ""
-          if [ -f "cross-compile/onvif-rust/coverage/cobertura.xml" ]; then
-            echo "✅ Rust coverage still exists after scan"
-            echo "   File size: $(wc -c < cross-compile/onvif-rust/coverage/cobertura.xml) bytes"
+          if [ -f "cross-compile/coverage/cobertura.xml" ]; then
+            echo "✅ Rust workspace coverage still exists after scan"
+            echo "   File size: $(wc -c < cross-compile/coverage/cobertura.xml) bytes"
           else
-            echo "❌ Rust coverage missing after scan"
+            echo "❌ Rust workspace coverage missing after scan"
           fi
           if [ -f "cross-compile/www/coverage/lcov.info" ]; then
             echo "✅ WebUI coverage still exists after scan"
@@ -648,12 +770,12 @@ jobs:
           fi
           echo ""
           echo "=== Coverage File Content Sample ==="
-          if [ -f "cross-compile/onvif-rust/coverage/cobertura.xml" ]; then
-            echo "Rust coverage XML header:"
-            head -5 cross-compile/onvif-rust/coverage/cobertura.xml || true
+          if [ -f "cross-compile/coverage/cobertura.xml" ]; then
+            echo "Rust workspace coverage XML header:"
+            head -5 cross-compile/coverage/cobertura.xml || true
             echo ""
-            echo "Rust coverage summary (line-rate):"
-            grep -o 'line-rate="[^"]*"' cross-compile/onvif-rust/coverage/cobertura.xml | head -1 || echo "No line-rate found"
+            echo "Rust workspace coverage summary (line-rate):"
+            grep -o 'line-rate="[^"]*"' cross-compile/coverage/cobertura.xml | head -1 || echo "No line-rate found"
           fi
           if [ -f "cross-compile/www/coverage/lcov.info" ]; then
             echo "WebUI coverage LCOV header:"
@@ -750,8 +872,9 @@ jobs:
     runs-on: ubuntu-latest
     needs:
       [
-        rust-test-and-coverage,
-        webui-test-and-coverage,
+        rust-quality-and-coverage,
+        webui-quality-and-coverage,
+        validation-rust-quality,
         security-scans,
         sonarqube,
       ]
@@ -762,8 +885,9 @@ jobs:
     steps:
       - name: Generate Run Summary
         env:
-          RUST_COVERAGE: ${{ needs.rust-test-and-coverage.outputs.coverage || 'N/A' }}
-          WEBUI_COVERAGE: ${{ needs.webui-test-and-coverage.outputs.coverage || 'N/A' }}
+          RUST_COVERAGE: ${{ needs.rust-quality-and-coverage.outputs.coverage || 'N/A' }}
+          VALIDATION_RUST_COVERAGE: ${{ needs.validation-rust-quality.outputs.coverage || 'N/A' }}
+          WEBUI_COVERAGE: ${{ needs.webui-quality-and-coverage.outputs.coverage || 'N/A' }}
           SNYK_CODE_STATUS: ${{ needs.security-scans.outputs.snyk_code_status }}
           SNYK_OSS_STATUS: ${{ needs.security-scans.outputs.snyk_oss_status }}
           SNYK_ISSUES: ${{ needs.security-scans.outputs.snyk_issues }}
@@ -798,6 +922,7 @@ jobs:
           | Project | Coverage |
           |---------|----------|
           | **Rust ONVIF API** | ${RUST_COVERAGE}% |
+          | **Validation (Rust)** | ${VALIDATION_RUST_COVERAGE}% |
           | **WebUI** | ${WEBUI_COVERAGE}% |
 
           ## 🔒 Security Scans (Snyk)
@@ -821,8 +946,9 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            const rustCoverage = '${{ needs.rust-test-and-coverage.outputs.coverage || 'N/A' }}';
-            const webuiCoverage = '${{ needs.webui-test-and-coverage.outputs.coverage || 'N/A' }}';
+            const rustCoverage = '${{ needs.rust-quality-and-coverage.outputs.coverage || 'N/A' }}';
+            const validationRustCoverage = '${{ needs.validation-rust-quality.outputs.coverage || 'N/A' }}';
+            const webuiCoverage = '${{ needs.webui-quality-and-coverage.outputs.coverage || 'N/A' }}';
             const snykCodeStatus = '${{ needs.security-scans.outputs.snyk_code_status }}';
             const snykOssStatus = '${{ needs.security-scans.outputs.snyk_oss_status }}';
             const snykIssues = '${{ needs.security-scans.outputs.snyk_issues || 0 }}';
@@ -841,6 +967,7 @@ jobs:
             | Project | Coverage |
             |---------|----------|
             | **Rust ONVIF API** | ${rustCoverage}% |
+            | **Validation (Rust)** | ${validationRustCoverage}% |
             | **WebUI** | ${webuiCoverage}% |
 
             ### 🔒 Security Scans (Snyk)
@@ -859,7 +986,9 @@ jobs:
             ### ✅ Build Status
             - **Rust Lint**: ✅ Passed
             - **WebUI Lint**: ✅ Passed
+            - **Validation (Rust) Lint**: ✅ Passed
             - **Rust Tests**: ✅ Passed
+            - **Validation (Rust) Tests**: ✅ Passed
             - **WebUI Tests**: ✅ Passed
             - **Build**: ✅ Successful
 

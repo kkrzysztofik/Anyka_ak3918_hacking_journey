@@ -1,0 +1,78 @@
+[package]
+name = "streaming-lib"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "Streaming library for RTSP and HTTP-FLV protocols, forked from xiu"
+repository = "https://github.com/harlanc/xiu"
+readme = "README.md"
+
+[dependencies]
+# Async runtime
+tokio = { version = "1.4", default-features = false, features = [
+  "rt-multi-thread",
+  "net",
+  "sync",
+  "macros",
+  "time",
+  "io-util",
+  "fs",  # Added for async file I/O (Phase 1 optimization)
+] }
+tokio-util = { version = "0.7.18", features = ["codec"] }
+tokio-stream = "0.1"
+futures = "0.3"
+
+# Binary I/O
+bytes = "1.0"
+byteorder = "1.4"
+rand = "0.9.2"
+
+# Logging
+log = "0.4"
+
+# Error handling
+anyhow = "1.0"
+thiserror = "1.0"
+
+# HTTP/Web
+http = "1.4.0"
+axum = "0.8.8"
+base64 = "0.22.1"
+hex = "0.4"
+
+# Serialization
+serde = { version = "1.0", features = ["derive", "rc"] }
+serde_json = { version = "1", default-features = false, features = [
+  "alloc",
+  "raw_value",
+  "std",
+] }
+serde_derive = "1.0"
+
+# Utilities
+chrono = { version = "0.4", features = ["serde"] }
+indexmap = "2.13.0"
+lazy_static = "1.4"
+async-trait = "0.1"
+md5 = "0.8.0"
+env_logger = "0.11.8"
+job_scheduler_ng = "2.0"
+portable-atomic = { version = "1.11", features = ["std"] }
+
+# Network
+reqwest = { version = "0.13.1", features = ["native-tls-vendored", "query", "form"] }
+
+# Note: ARMv5TEJ patches are inherited from workspace root
+# Patches applied at workspace level:
+# - webrtc-util (portable-atomic)
+# - webrtc-ice (portable-atomic)
+# - webrtc-sctp (portable-atomic)
+# - rtp (portable-atomic)
+# - tokio-metrics (portable-atomic)
+# - openssl-src (uClibc support)
+
+[dev-dependencies]
+mockall = "0.13"
+tokio-test = "0.4"
+proptest = "1.0"
+wiremock = "0.6"

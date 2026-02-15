@@ -7,7 +7,8 @@ network and validates their responses. It can also passively listen for Hello me
 when devices join the network.
 
 Usage:
-    python ws_discovery_validator.py [--timeout SECONDS] [--listen-hello] [--verbose] [--debug] [--interface IP]
+    python ws_discovery_validator.py [--timeout SECONDS] [--listen-hello] [--verbose]
+    python ws_discovery_validator.py [--debug] [--interface IP]
 
 Examples:
     # Discover all devices with default 5 second timeout
@@ -35,14 +36,16 @@ import sys
 import time
 import uuid
 from dataclasses import dataclass, field, asdict
-from typing import List, Optional, Dict, Any
-from urllib.parse import urlparse
+from typing import Any, Dict, List, Optional, TypeAlias, cast
 
 try:
     from lxml import etree  # type: ignore[import-untyped]
 except ImportError:
     print("Error: lxml is required. Install with: pip install lxml", file=sys.stderr)
     sys.exit(1)
+
+# lxml has no type stubs; use Any for XML elements from etree.fromstring/find
+XMLElement: TypeAlias = Any
 
 # Set up module logger
 logger = logging.getLogger(__name__)
@@ -61,11 +64,14 @@ NAMESPACES = {
     "tdn": "http://www.onvif.org/ver10/network/wsdl",
 }
 
+# 2009/01 discovery namespace (used in NAMESPACES_2009 and fallback XPath)
+NS_2009_DISCOVERY = "http://docs.oasis-open.org/ws-dd/ns/discovery/2009/01"
+
 # Also support 2009/01 namespace in responses (some devices use newer spec)
 NAMESPACES_2009 = {
     "s": "http://www.w3.org/2003/05/soap-envelope",
     "a": "http://www.w3.org/2005/08/addressing",
-    "d": "http://docs.oasis-open.org/ws-dd/ns/discovery/2009/01",
+    "d": NS_2009_DISCOVERY,
     "tdn": "http://www.onvif.org/ver10/network/wsdl",
 }
 
@@ -160,76 +166,98 @@ def build_probe_message() -> tuple[str, str]:
     return message_id, probe_xml
 
 
-def _find_action_element(root: etree.Element) -> tuple[Optional[etree.Element], Dict[str, str]]:
+def _find_action_element(root: XMLElement) -> tuple[Optional[XMLElement], Dict[str, str]]:
     """Find Action element in XML root, trying both namespace versions."""
     ns_to_try = [NAMESPACES, NAMESPACES_2009]
     for ns in ns_to_try:
-        action_elem = root.find(".//a:Action", namespaces=ns)
+        action_elem: Optional[XMLElement] = root.find(".//a:Action", namespaces=ns)
         if action_elem is not None:
             return action_elem, ns
     return None, NAMESPACES
 
 
-def _find_match_element(root: etree.Element, message_type: str, active_ns: Dict[str, str]) -> Optional[etree.Element]:
+def _find_match_element(
+    root: XMLElement, message_type: str, active_ns: Dict[str, str]
+) -> Optional[XMLElement]:
     """Find ProbeMatch or Hello element in XML root."""
+    match_elem: Optional[XMLElement]
     if message_type == "ProbeMatch":
         match_elem = root.find(".//d:ProbeMatch", namespaces=active_ns)
         if match_elem is None:
-            match_elem = root.find(".//{http://schemas.xmlsoap.org/ws/2005/04/discovery}ProbeMatch")
+            match_elem = root.find(
+            ".//{http://schemas.xmlsoap.org/ws/2005/04/discovery}ProbeMatch"
+        )
         if match_elem is None:
-            match_elem = root.find(".//{http://docs.oasis-open.org/ws-dd/ns/discovery/2009/01}ProbeMatch")
+            match_elem = root.find(f".//{{{NS_2009_DISCOVERY}}}ProbeMatch")
     else:  # Hello
         match_elem = root.find(".//d:Hello", namespaces=active_ns)
         if match_elem is None:
-            match_elem = root.find(".//{http://schemas.xmlsoap.org/ws/2005/04/discovery}Hello")
+            match_elem = root.find(
+                ".//{http://schemas.xmlsoap.org/ws/2005/04/discovery}Hello"
+            )
         if match_elem is None:
-            match_elem = root.find(".//{http://docs.oasis-open.org/ws-dd/ns/discovery/2009/01}Hello")
+            match_elem = root.find(f".//{{{NS_2009_DISCOVERY}}}Hello")
     return match_elem
 
 
-def _extract_element_text(match_elem: etree.Element, elem_name: str, active_ns: Dict[str, str]) -> Optional[etree.Element]:
+def _extract_element_text(
+    match_elem: XMLElement, elem_name: str, active_ns: Dict[str, str]
+) -> Optional[XMLElement]:
     """Extract element by name, trying multiple namespace patterns."""
-    elem = match_elem.find(f"d:{elem_name}", namespaces=active_ns)
+    elem: Optional[XMLElement] = match_elem.find(f"d:{elem_name}", namespaces=active_ns)
     if elem is None:
-        elem = match_elem.find(f"{{http://schemas.xmlsoap.org/ws/2005/04/discovery}}{elem_name}")
+        ns_2005 = "http://schemas.xmlsoap.org/ws/2005/04/discovery"
+        elem = match_elem.find(f"{{{ns_2005}}}{elem_name}")
     if elem is None:
-        elem = match_elem.find(f"{{http://docs.oasis-open.org/ws-dd/ns/discovery/2009/01}}{elem_name}")
+        elem = match_elem.find(f"{{{NS_2009_DISCOVERY}}}{elem_name}")
     return elem
 
 
-def _extract_relates_to(root: etree.Element, message_type: str, active_ns: Dict[str, str]) -> Optional[str]:
+def _extract_relates_to(root: XMLElement, message_type: str, active_ns: Dict[str, str]) -> Optional[str]:
     """Extract RelatesTo for ProbeMatch validation."""
     if message_type != "ProbeMatch":
         return None
-    relates_to_elem = root.find(".//a:RelatesTo", namespaces=active_ns)
+    relates_to_elem: Optional[XMLElement] = root.find(
+        ".//a:RelatesTo", namespaces=active_ns
+    )
     if relates_to_elem is not None and relates_to_elem.text:
         return relates_to_elem.text.strip()
     return None
 
 
-def _extract_endpoint_uuid(match_elem: etree.Element, active_ns: Dict[str, str]) -> str:
+def _extract_endpoint_uuid(match_elem: XMLElement, active_ns: Dict[str, str]) -> str:
     """Extract EndpointReference/Address (UUID)."""
-    endpoint_elem = match_elem.find(".//a:EndpointReference/a:Address", namespaces=active_ns)
+    endpoint_elem: Optional[XMLElement] = match_elem.find(
+        ".//a:EndpointReference/a:Address", namespaces=active_ns
+    )
     if endpoint_elem is None:
-        endpoint_elem = match_elem.find(".//{http://schemas.xmlsoap.org/ws/2004/08/addressing}Address")
+        endpoint_elem = match_elem.find(
+            ".//{http://schemas.xmlsoap.org/ws/2004/08/addressing}Address"
+        )
     if endpoint_elem is None:
-        endpoint_elem = match_elem.find(".//{http://www.w3.org/2005/08/addressing}Address")
+        endpoint_elem = match_elem.find(
+            ".//{http://www.w3.org/2005/08/addressing}Address"
+        )
     if endpoint_elem is not None and endpoint_elem.text:
         return endpoint_elem.text.strip()
     return ""
 
 
-def _extract_text_list(match_elem: etree.Element, elem_name: str, active_ns: Dict[str, str]) -> List[str]:
+def _extract_text_list(match_elem: XMLElement, elem_name: str, active_ns: Dict[str, str]) -> List[str]:
     """Extract a text-based list element (XAddrs, Types, Scopes)."""
-    elem = _extract_element_text(match_elem, elem_name, active_ns)
+    elem: Optional[XMLElement] = _extract_element_text(match_elem, elem_name, active_ns)
     if elem is not None and elem.text:
         return elem.text.strip().split()
     return []
 
 
-def _extract_metadata_version(match_elem: etree.Element, active_ns: Dict[str, str]) -> Optional[int]:
+def _extract_metadata_version(
+    match_elem: XMLElement, active_ns: Dict[str, str]
+) -> Optional[int]:
     """Extract MetadataVersion as integer."""
-    metadata_elem = _extract_element_text(match_elem, "MetadataVersion", active_ns)
+    metadata_elem: Optional[XMLElement] = _extract_element_text(
+        match_elem, "MetadataVersion", active_ns
+    )
     if metadata_elem is not None and metadata_elem.text:
         try:
             return int(metadata_elem.text.strip())
@@ -238,8 +266,10 @@ def _extract_metadata_version(match_elem: etree.Element, active_ns: Dict[str, st
     return None
 
 
-def _extract_device_data(match_elem: etree.Element, root: etree.Element, message_type: str,
-                        active_ns: Dict[str, str]) -> Dict[str, Any]:
+def _extract_device_data(
+    match_elem: XMLElement, root: XMLElement, message_type: str,
+    active_ns: Dict[str, str],
+) -> Dict[str, Any]:
     """Extract all device data from match element."""
     relates_to = _extract_relates_to(root, message_type, active_ns)
     endpoint_uuid = _extract_endpoint_uuid(match_elem, active_ns)
@@ -258,7 +288,7 @@ def _extract_device_data(match_elem: etree.Element, root: etree.Element, message
     }
 
 
-def parse_response(data: bytes, source_addr: tuple, start_time: float,
+def parse_response(data: bytes, source_addr: tuple[str, int], start_time: float,
                    verbose: bool = False) -> Optional[DiscoveredDevice]:
     """
     Parse a WS-Discovery response (ProbeMatch or Hello).
@@ -273,6 +303,8 @@ def parse_response(data: bytes, source_addr: tuple, start_time: float,
         DiscoveredDevice if successfully parsed, None otherwise
     """
     response_time_ms = (time.time() - start_time) * 1000
+    source_ip: str
+    source_port: int
     source_ip, source_port = source_addr
 
     logger.debug("Parsing response from %s:%d, bytes=%d, response_time_ms=%.2f",
@@ -280,9 +312,11 @@ def parse_response(data: bytes, source_addr: tuple, start_time: float,
     logger.debug("Raw response data:\n%s", data.decode('utf-8', errors='replace'))
 
     try:
-        root = etree.fromstring(data)
+        root = cast(XMLElement, etree.fromstring(data))  # type: ignore[unknown-member]
         logger.debug("XML parsed successfully")
 
+        action_elem: Optional[XMLElement]
+        active_ns: Dict[str, str]
         action_elem, active_ns = _find_action_element(root)
         if action_elem is None:
             logger.debug("No Action header found in any namespace")
@@ -290,7 +324,7 @@ def parse_response(data: bytes, source_addr: tuple, start_time: float,
                 print(f"  [WARN] No Action header in response from {source_ip}", file=sys.stderr)
             return None
 
-        action = action_elem.text.strip() if action_elem.text else ""
+        action: str = action_elem.text.strip() if action_elem.text else ""
         logger.debug("Action header value: %s", action)
 
         # Determine message type
@@ -307,7 +341,10 @@ def parse_response(data: bytes, source_addr: tuple, start_time: float,
         match_elem = _find_match_element(root, message_type, active_ns)
         if match_elem is None:
             if verbose:
-                print(f"  [WARN] No {message_type} element in response from {source_ip}", file=sys.stderr)
+                print(
+                    f"  [WARN] No {message_type} element in response from {source_ip}",
+                    file=sys.stderr,
+                )
             return None
 
         device_data = _extract_device_data(match_elem, root, message_type, active_ns)
@@ -325,9 +362,9 @@ def parse_response(data: bytes, source_addr: tuple, start_time: float,
             relates_to=device_data["relates_to"],
         )
 
-    except etree.XMLSyntaxError as e:
+    except etree.XMLSyntaxError:  # type: ignore[misc]
         if verbose:
-            print(f"  [WARN] XML parse error from {source_ip}: {e}", file=sys.stderr)
+            print(f"  [WARN] XML parse error from {source_ip}", file=sys.stderr)
         return None
 
 
@@ -381,20 +418,29 @@ def _send_probe(sock: socket.socket, interface: Optional[str], verbose: bool) ->
 
     logger.debug("Sending Probe to multicast address: dest=%s:%d, bytes=%d",
                  WS_DISCOVERY_MULTICAST, WS_DISCOVERY_PORT, len(probe_xml))
-    sock.sendto(probe_xml.encode("utf-8"), (WS_DISCOVERY_MULTICAST, WS_DISCOVERY_PORT))
+    sock.sendto(
+        probe_xml.encode("utf-8"),
+        (WS_DISCOVERY_MULTICAST, WS_DISCOVERY_PORT),
+    )
     logger.debug("Probe sent successfully")
 
     return message_id, probe_xml
 
 
-def _should_accept_device(device: DiscoveredDevice, message_id: str, listen_hello: bool, verbose: bool) -> bool:
+def _should_accept_device(
+    device: DiscoveredDevice, message_id: str, listen_hello: bool, verbose: bool
+) -> bool:
     """Check if device should be accepted based on message type and filters."""
     if device.message_type == "ProbeMatch":
         if device.relates_to != message_id:
             logger.debug("ProbeMatch RelatesTo mismatch: expected=%s, got=%s",
                          message_id, device.relates_to)
             if verbose:
-                print(f"  [SKIP] ProbeMatch RelatesTo mismatch: expected {message_id}, got {device.relates_to}", file=sys.stderr)
+                print(
+                    f"  [SKIP] ProbeMatch RelatesTo mismatch: "
+                    f"expected {message_id}, got {device.relates_to}",
+                    file=sys.stderr,
+                )
             return False
         logger.debug("ProbeMatch RelatesTo validated successfully")
         return True
@@ -406,28 +452,43 @@ def _should_accept_device(device: DiscoveredDevice, message_id: str, listen_hell
     return True
 
 
-def _process_received_device(device: DiscoveredDevice, devices: Dict[str, DiscoveredDevice], verbose: bool) -> None:
+def _process_received_device(
+    device: DiscoveredDevice,
+    devices: Dict[str, DiscoveredDevice],
+    verbose: bool,
+) -> None:
     """Process a received device, adding it to the devices dict if new."""
     key = device.endpoint_uuid or f"{device.source_ip}:{device.source_port}"
     if key not in devices:
         devices[key] = device
         if verbose:
-            print(f"  [FOUND] {device.message_type}: {device.endpoint_uuid}", file=sys.stderr)
+            print(
+                f"  [FOUND] {device.message_type}: {device.endpoint_uuid}",
+                file=sys.stderr,
+            )
             for xaddr in device.xaddrs:
                 print(f"          XAddr: {xaddr}", file=sys.stderr)
     elif verbose:
-        print(f"  [DUP] Already discovered: {device.endpoint_uuid}", file=sys.stderr)
+        print(
+            f"  [DUP] Already discovered: {device.endpoint_uuid}",
+            file=sys.stderr,
+        )
 
 
-def _process_packet(data: bytes, addr: tuple, start_time: float, message_id: str,
-                    listen_hello: bool, verbose: bool, devices: Dict[str, DiscoveredDevice],
-                    recv_count: int) -> None:
+def _process_packet(
+    data: bytes, addr: tuple[str, int], start_time: float, message_id: str,
+    listen_hello: bool, verbose: bool, devices: Dict[str, DiscoveredDevice],
+    recv_count: int,
+) -> None:
     """Process a single received packet."""
     logger.debug("Received packet #%d from %s:%d, bytes=%d",
                  recv_count, addr[0], addr[1], len(data))
 
     if verbose:
-        print(f"  [RECV] Response from {addr[0]}:{addr[1]} ({len(data)} bytes)", file=sys.stderr)
+        print(
+            f"  [RECV] Response from {addr[0]}:{addr[1]} ({len(data)} bytes)",
+            file=sys.stderr,
+        )
 
     device = parse_response(data, addr, start_time, verbose)
 
@@ -440,8 +501,10 @@ def _process_packet(data: bytes, addr: tuple, start_time: float, message_id: str
             _process_received_device(device, devices, verbose)
 
 
-def _receive_responses(sock: socket.socket, start_time: float, timeout: float, message_id: str,
-                       listen_hello: bool, verbose: bool, result: DiscoveryResult) -> Dict[str, DiscoveredDevice]:
+def _receive_responses(
+    sock: socket.socket, start_time: float, timeout: float, message_id: str,
+    listen_hello: bool, verbose: bool, result: DiscoveryResult,
+) -> Dict[str, DiscoveredDevice]:
     """Receive and process responses until timeout."""
     devices: Dict[str, DiscoveredDevice] = {}
     recv_count = 0
@@ -457,11 +520,14 @@ def _receive_responses(sock: socket.socket, start_time: float, timeout: float, m
         try:
             data, addr = sock.recvfrom(65535)
             recv_count += 1
-            _process_packet(data, addr, start_time, message_id, listen_hello, verbose, devices, recv_count)
+            _process_packet(
+                data, addr, start_time, message_id, listen_hello, verbose,
+                devices, recv_count,
+            )
 
         except socket.timeout:
             continue
-        except Exception as e:
+        except OSError as e:
             if verbose:
                 print(f"  [ERROR] Receive error: {e}", file=sys.stderr)
             result.errors.append(str(e))
@@ -469,8 +535,12 @@ def _receive_responses(sock: socket.socket, start_time: float, timeout: float, m
     return devices
 
 
-def discover_devices(timeout: float = 5.0, listen_hello: bool = False,
-                     interface: Optional[str] = None, verbose: bool = False) -> DiscoveryResult:
+def discover_devices(
+    timeout: float = 5.0,
+    listen_hello: bool = False,
+    interface: Optional[str] = None,
+    verbose: bool = False,
+) -> DiscoveryResult:
     """
     Perform WS-Discovery to find ONVIF devices.
 
@@ -483,8 +553,10 @@ def discover_devices(timeout: float = 5.0, listen_hello: bool = False,
     Returns:
         DiscoveryResult with discovered devices
     """
-    logger.debug("Starting WS-Discovery: timeout=%.1f, listen_hello=%s, interface=%s",
-                 timeout, listen_hello, interface or "all")
+    logger.debug(
+        "Starting WS-Discovery: timeout=%.1f, listen_hello=%s, interface=%s",
+        timeout, listen_hello, interface or "all",
+    )
 
     result = DiscoveryResult(
         success=False,
@@ -507,7 +579,9 @@ def discover_devices(timeout: float = 5.0, listen_hello: bool = False,
         message_id, _ = _send_probe(sock, interface, verbose)
         result.probe_message_id = message_id
 
-        devices = _receive_responses(sock, start_time, timeout, message_id, listen_hello, verbose, result)
+        devices = _receive_responses(
+            sock, start_time, timeout, message_id, listen_hello, verbose, result
+        )
 
         sock.close()
 
@@ -523,7 +597,7 @@ def discover_devices(timeout: float = 5.0, listen_hello: bool = False,
             result.success = False
             result.message = "No ONVIF devices discovered"
 
-    except Exception as e:
+    except OSError as e:
         result.success = False
         result.message = f"Discovery failed: {e}"
         result.errors.append(str(e))

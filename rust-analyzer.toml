@@ -1,0 +1,48 @@
+# Mirrors .vscode/settings.json rust-analyzer configuration for non-VSCode clients (e.g., Serena).
+linkedProjects = ["/home/kmk/anyka-dev/cross-compile/Cargo.toml"]
+
+[server]
+extraEnv = { RUSTC = "rustc", RUSTUP_TOOLCHAIN = "" }
+
+[cargo]
+target = "x86_64-unknown-linux-gnu"
+extraArgs = ["--target", "x86_64-unknown-linux-gnu"]
+extraEnv = { RUSTC = "rustc" }
+allTargets = false
+
+[cargo.buildScripts]
+enable = false
+
+[check]
+command = "check"
+extraArgs = ["--target", "x86_64-unknown-linux-gnu"]
+allTargets = false
+
+[files]
+watcherExclude = [
+	"**/target/**",
+	"**/.git/**",
+	"**/cross-compile/patches/**",
+	"**/cross-compile/**/out/**",
+]
+
+[rustc]
+source = "discover"
+
+[diagnostics]
+enable = true
+
+[procMacro]
+enable = false
+
+[completion.autoimport]
+enable = false
+
+[inlayHints.chainingHints]
+enable = false
+
+[inlayHints.closingBraceHints]
+enable = false
+
+[inlayHints.typeHints]
+enable = false

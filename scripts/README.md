@@ -93,6 +93,33 @@ Downloads core dump files from the device via FTP for debugging purposes with en
 gdb ../cross-compile/onvif/out/onvifd_debug ../debugging/coredump/core.*
 ```
 
+### 4. `third_party/build_dropbear.sh` - Build Dropbear for SD Overlay
+Cross-builds Dropbear for ARM/uClibc and stages `dropbearmulti` in `SD_card_contents/anyka_hack/dropbear/`.
+Default link mode is `static` (recommended for device compatibility). Use `--link-mode dynamic` only if required.
+
+**Usage:**
+```bash
+./third_party/build_dropbear.sh
+./third_party/build_dropbear.sh --version 2024.86 --sha256 e78936dffc395f2e0db099321d6be659190966b99712b55c530dd0a1822e0a5e
+./third_party/build_dropbear.sh --archive /path/to/dropbear-2024.86.tar.bz2 --sha256 e78936dffc395f2e0db099321d6be659190966b99712b55c530dd0a1822e0a5e
+./third_party/build_dropbear.sh --link-mode dynamic
+```
+
+### 5. `third_party/build_htop.sh` - Build htop for SD Overlay
+Cross-builds `htop` for ARM/uClibc and stages:
+- launcher: `SD_card_contents/anyka_hack/bin/htop`
+- binary: `SD_card_contents/anyka_hack/bin/htop.bin`
+- bundled terminfo: `SD_card_contents/anyka_hack/share/terminfo`
+
+The launcher sets `TERMINFO` and falls back from unsupported values (for example `xterm-256color`) to a supported terminal entry.
+
+**Usage:**
+```bash
+./third_party/build_htop.sh
+./third_party/build_htop.sh --version 3.3.0 --sha256 a69acf9b42ff592c4861010fce7d8006805f0d6ef0e8ee647a6ee6e59b743d5c
+./third_party/build_htop.sh --archive /path/to/htop-3.3.0.tar.xz --sha256 a69acf9b42ff592c4861010fce7d8006805f0d6ef0e8ee647a6ee6e59b743d5c
+```
+
 ## Prerequisites
 
 ### Required Tools

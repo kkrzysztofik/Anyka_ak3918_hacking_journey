@@ -5,11 +5,46 @@
 //! For native builds (testing), stub implementations are provided.
 
 mod anyka_sdk;
+pub mod audio;
+pub mod imaging;
+pub mod ptz;
+pub mod video;
 
+// NOSONAR: Module-level wildcard re-export is acceptable for facade modules.
+// This module is designed as a unified FFI interface. Explicit re-exports would
+// be too verbose and harder to maintain as the SDK evolves.
 pub use anyka_sdk::*;
+pub use audio::{
+    AudioEncoderHandle, AudioInputHandle, audio_encoder_open, audio_encoder_set_config,
+    audio_input_open, audio_input_set_volume,
+};
+pub use imaging::{
+    imaging_set_brightness, imaging_set_contrast, imaging_set_ir_filter, imaging_set_saturation,
+    imaging_set_sharpness, imaging_set_wdr, onvif_to_sdk_brightness, onvif_to_sdk_contrast,
+    onvif_to_sdk_saturation, onvif_to_sdk_sharpness, validate_onvif_range,
+};
+pub use ptz::{
+    PTZHandle, degrees_to_steps, ptz_get_step_pos, ptz_open, ptz_stop, ptz_turn, steps_to_degrees,
+    validate_pan_range, validate_tilt_range,
+};
+pub use video::{
+    VideoEncoderHandle, VideoInputHandle, video_encoder_open, video_encoder_request_idr,
+    video_encoder_set_rc, video_input_get_sensor_resolution, video_input_open,
+    video_input_set_channel_attr,
+};
+
+/// Anyka SDK success code as i32 for consistent comparisons.
+#[allow(clippy::unnecessary_cast)]
+pub const AK_SUCCESS_I32: i32 = AK_SUCCESS as i32;
+/// Anyka SDK failure code as i32 for consistent comparisons.
+#[allow(clippy::unnecessary_cast)]
+pub const AK_FAILED_I32: i32 = AK_FAILED as i32;
 
 // Re-export common types
 #[cfg(not(use_stubs))]
+// NOSONAR: Wildcard re-export of generated bindings is standard pattern.
+// Generated bindings are auto-created by bindgen and change frequently.
+// Explicit re-exports would require constant maintenance.
 pub use generated::*;
 
 #[cfg(not(use_stubs))]
@@ -133,7 +168,63 @@ pub mod stubs {
         Up = 3,
         Down = 4,
     }
+
+    /// Video channel attributes
+    #[repr(C)]
+    #[derive(Debug, Clone, Copy, Default)]
+    pub struct VideoChannelAttr {
+        pub crop: CropInfo,
+        pub res: [VideoResolution; 2], // VIDEO_CHN_NUM = 2 (MAIN, SUB)
+    }
+
+    /// Crop information
+    #[repr(C)]
+    #[derive(Debug, Clone, Copy, Default)]
+    pub struct CropInfo {
+        pub left: i32,
+        pub top: i32,
+        pub width: i32,
+        pub height: i32,
+    }
+
+    /// PCM parameters for audio input
+    #[repr(C)]
+    #[derive(Debug, Clone, Copy, Default)]
+    pub struct PcmParam {
+        pub sample_rate: u32,
+        pub sample_bits: u32,
+        pub channel_num: u32,
+    }
+
+    /// Audio encoder attributes
+    #[repr(C)]
+    #[derive(Debug, Clone, Copy, Default)]
+    pub struct AencAttr {
+        pub aac_head: i32, // enum aenc_aac_attr
+    }
 }
 
 #[cfg(use_stubs)]
+// NOSONAR: Wildcard re-export of stub types is standard pattern for test builds.
+// Stub module provides type definitions that mirror generated bindings.
+// Explicit re-exports would duplicate the type list unnecessarily.
 pub use stubs::*;
+
+// Type aliases for consistency with generated bindings (snake_case)
+#[cfg(use_stubs)]
+#[allow(non_camel_case_types)]
+mod stub_type_aliases {
+    use super::stubs;
+    pub type video_channel_attr = stubs::VideoChannelAttr;
+    pub type pcm_param = stubs::PcmParam;
+    pub type aenc_attr = stubs::AencAttr;
+    pub type encode_param = stubs::EncodeParam;
+    pub type video_dev_type = stubs::VideoDevType;
+    pub type video_resolution = stubs::VideoResolution;
+    pub type audio_param = stubs::AudioParam;
+    pub type ptz_device = stubs::PtzDevice;
+    pub type ptz_turn_direction = stubs::PtzTurnDirection;
+}
+
+#[cfg(use_stubs)]
+pub use stub_type_aliases::*;

@@ -1,7 +1,7 @@
 /**
  * Cryptographic Utilities Tests
  */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import {
   type EncryptedData,
@@ -182,14 +182,16 @@ describe('crypto utilities', () => {
 
   describe('fallback for non-secure contexts', () => {
     it('should use base64 fallback when crypto.subtle is unavailable', async () => {
-      // Save original crypto.subtle
-      const originalSubtle = globalThis.crypto?.subtle;
+      // Save original crypto object
+      const originalCrypto = globalThis.crypto;
 
-      // Mock crypto.subtle as undefined to simulate non-secure context
-      if (globalThis.crypto) {
-        // @ts-expect-error - Intentionally removing subtle for test
-        delete globalThis.crypto.subtle;
-      }
+      // Create a mock crypto without subtle to simulate non-secure context
+      const mockCrypto = {
+        getRandomValues: (arr: Uint8Array) => originalCrypto.getRandomValues(arr),
+      };
+
+      // Use vi.stubGlobal to properly mock the read-only crypto property
+      vi.stubGlobal('crypto', mockCrypto);
 
       try {
         const plaintext = 'test password';
@@ -205,10 +207,8 @@ describe('crypto utilities', () => {
         const decrypted = await decrypt(encrypted);
         expect(decrypted).toBe(plaintext);
       } finally {
-        // Restore original crypto.subtle
-        if (globalThis.crypto && originalSubtle) {
-          globalThis.crypto.subtle = originalSubtle;
-        }
+        // Restore original crypto using vi.unstubAllGlobals
+        vi.unstubAllGlobals();
       }
     });
 
@@ -218,7 +218,7 @@ describe('crypto utilities', () => {
       const obfuscated = plaintext.split('').reverse().join('');
       const encoder = new TextEncoder();
       const bytes = encoder.encode(obfuscated);
-      const binaryString = Array.from(bytes, (byte) => String.fromCharCode(byte)).join('');
+      const binaryString = Array.from(bytes, (byte) => String.fromCodePoint(byte)).join('');
       const encoded = btoa(binaryString);
 
       const salt = new Uint8Array(16);

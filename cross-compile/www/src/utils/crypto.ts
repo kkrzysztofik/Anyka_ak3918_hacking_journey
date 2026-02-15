@@ -19,7 +19,9 @@ export interface EncryptedData {
  * Check if Web Crypto API is available (requires secure context)
  */
 function isCryptoAvailable(): boolean {
-  return typeof crypto !== 'undefined' && typeof crypto.subtle !== 'undefined';
+  if (globalThis.crypto === undefined) return false;
+  if (globalThis.crypto.subtle === undefined) return false;
+  return true;
 }
 
 /**
@@ -41,7 +43,7 @@ async function generateKey(salt: Uint8Array): Promise<CryptoKey> {
   ]);
 
   // Derive a key using PBKDF2
-  return crypto.subtle!.deriveKey(
+  return crypto.subtle.deriveKey(
     {
       name: 'PBKDF2',
       salt: saltBuffer,
@@ -84,7 +86,7 @@ function encodeBase64(plaintext: string): EncryptedData {
   const obfuscated = plaintext.split('').reverse().join('');
   const encoder = new TextEncoder();
   const bytes = encoder.encode(obfuscated);
-  const binaryString = Array.from(bytes, (byte) => String.fromCharCode(byte)).join('');
+  const binaryString = Array.from(bytes, (byte) => String.fromCodePoint(byte)).join('');
   const encoded = btoa(binaryString);
   return {
     data: encoded,
@@ -92,25 +94,6 @@ function encodeBase64(plaintext: string): EncryptedData {
     salt: btoa(Array.from(salt, (b) => String.fromCodePoint(b)).join('')),
     method: 'base64',
   };
-}
-
-/**
- * Simple base64 decoding fallback for non-secure contexts
- */
-function decodeBase64(encrypted: EncryptedData): string {
-  try {
-    const binaryString = atob(encrypted.data);
-    const bytes = new Uint8Array(binaryString.length);
-    for (let i = 0; i < binaryString.length; i++) {
-      bytes[i] = binaryString.charCodeAt(i);
-    }
-    const decoder = new TextDecoder();
-    const decoded = decoder.decode(bytes);
-    // Reverse the obfuscation
-    return decoded.split('').reverse().join('');
-  } catch {
-    throw new Error('Failed to decode base64-encoded data');
-  }
 }
 
 /**
@@ -129,12 +112,12 @@ export async function encrypt(plaintext: string): Promise<EncryptedData> {
     const encoder = new TextEncoder();
     const data = encoder.encode(plaintext);
 
-  // Convert IV to ArrayBuffer
-  const ivBuffer = new ArrayBuffer(iv.byteLength);
-  const ivView = new Uint8Array(ivBuffer);
-  ivView.set(iv);
+    // Convert IV to ArrayBuffer
+    const ivBuffer = new ArrayBuffer(iv.byteLength);
+    const ivView = new Uint8Array(ivBuffer);
+    ivView.set(iv);
 
-  const ciphertext = await crypto.subtle.encrypt({ name: 'AES-GCM', iv: ivBuffer }, key, data);
+    const ciphertext = await crypto.subtle.encrypt({ name: 'AES-GCM', iv: ivBuffer }, key, data);
 
     return {
       data: btoa(Array.from(new Uint8Array(ciphertext), (b) => String.fromCodePoint(b)).join('')),
@@ -156,6 +139,16 @@ export async function encrypt(plaintext: string): Promise<EncryptedData> {
  * @throws Error if decryption fails
  */
 export async function decrypt(encrypted: EncryptedData): Promise<string> {
+  // Handle base64 fallback method
+  if (encrypted.method === 'base64') {
+    const decoded = atob(encrypted.data);
+    const bytes = Uint8Array.from(decoded, (c) => c.codePointAt(0) ?? 0);
+    const decoder = new TextDecoder();
+    const obfuscated = decoder.decode(bytes);
+    // Reverse the obfuscation
+    return obfuscated.split('').reverse().join('');
+  }
+
   const salt = Uint8Array.from(atob(encrypted.salt), (c) => c.codePointAt(0) ?? 0);
   const iv = Uint8Array.from(atob(encrypted.iv), (c) => c.codePointAt(0) ?? 0);
   const ciphertext = Uint8Array.from(atob(encrypted.data), (c) => c.codePointAt(0) ?? 0);

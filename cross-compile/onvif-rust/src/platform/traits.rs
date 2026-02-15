@@ -678,4 +678,230 @@ mod tests {
         assert_eq!(opts.brightness_range, (0.0, 100.0));
         assert!(opts.ir_cut_filter_supported);
     }
+
+    // ==================== Extended Coverage Tests ====================
+
+    #[test]
+    fn test_resolution_default() {
+        let res = Resolution::default();
+        assert_eq!(res.width, 0);
+        assert_eq!(res.height, 0);
+    }
+
+    #[test]
+    fn test_resolution_equality() {
+        let res1 = Resolution::new(1920, 1080);
+        let res2 = Resolution::new(1920, 1080);
+        let res3 = Resolution::new(1280, 720);
+        assert_eq!(res1, res2);
+        assert_ne!(res1, res3);
+    }
+
+    #[test]
+    fn test_resolution_clone() {
+        let res1 = Resolution::new(1920, 1080);
+        let res2 = res1.clone();
+        assert_eq!(res1, res2);
+    }
+
+    #[test]
+    fn test_video_encoding_default() {
+        let encoding = VideoEncoding::default();
+        assert_eq!(encoding, VideoEncoding::H264);
+    }
+
+    #[test]
+    fn test_video_encoding_variants() {
+        let h264 = VideoEncoding::H264;
+        let h265 = VideoEncoding::H265;
+        let mjpeg = VideoEncoding::Mjpeg;
+        assert_ne!(h264, h265);
+        assert_ne!(h264, mjpeg);
+        assert_ne!(h265, mjpeg);
+    }
+
+    #[test]
+    fn test_bitrate_mode_default() {
+        let mode = BitrateMode::default();
+        assert_eq!(mode, BitrateMode::Cbr);
+    }
+
+    #[test]
+    fn test_bitrate_mode_variants() {
+        let cbr = BitrateMode::Cbr;
+        let vbr = BitrateMode::Vbr;
+        assert_ne!(cbr, vbr);
+    }
+
+    #[test]
+    fn test_ptz_position_new() {
+        let pos = PtzPosition::new(90.0, 45.0, 5.0);
+        assert_eq!(pos.pan, 90.0);
+        assert_eq!(pos.tilt, 45.0);
+        assert_eq!(pos.zoom, 5.0);
+    }
+
+    #[test]
+    fn test_ptz_position_default() {
+        let pos = PtzPosition::default();
+        assert_eq!(pos.pan, 0.0);
+        assert_eq!(pos.tilt, 0.0);
+        assert_eq!(pos.zoom, 0.0); // Default is 0.0, not 1.0
+    }
+
+    #[test]
+    fn test_ptz_position_negative_values() {
+        let pos = PtzPosition::new(-180.0, -90.0, 0.5);
+        assert_eq!(pos.pan, -180.0);
+        assert_eq!(pos.tilt, -90.0);
+        assert_eq!(pos.zoom, 0.5);
+    }
+
+    #[test]
+    fn test_ptz_velocity_new() {
+        let vel = PtzVelocity::new(0.5, -0.3, 0.2);
+        assert_eq!(vel.pan, 0.5);
+        assert_eq!(vel.tilt, -0.3);
+        assert_eq!(vel.zoom, 0.2);
+    }
+
+    #[test]
+    fn test_ptz_velocity_default() {
+        let vel = PtzVelocity::default();
+        assert_eq!(vel.pan, 0.0);
+        assert_eq!(vel.tilt, 0.0);
+        assert_eq!(vel.zoom, 0.0);
+    }
+
+    #[test]
+    fn test_ptz_preset_creation() {
+        let preset = PtzPreset {
+            token: "preset1".to_string(),
+            name: "Front Door".to_string(),
+            position: PtzPosition::new(90.0, 45.0, 3.0),
+        };
+        assert_eq!(preset.token, "preset1");
+        assert_eq!(preset.name, "Front Door");
+        assert_eq!(preset.position.pan, 90.0);
+    }
+
+    #[test]
+    fn test_ptz_limits_default_values() {
+        let limits = PtzLimits::DEFAULT;
+        assert_eq!(limits.min_zoom, 1.0);
+        assert_eq!(limits.max_zoom, 10.0);
+        assert!(limits.min_pan < limits.max_pan);
+        assert!(limits.min_tilt < limits.max_tilt);
+    }
+
+    #[test]
+    fn test_imaging_settings_default() {
+        let settings = ImagingSettings::default();
+        assert_eq!(settings.brightness, 0.0);
+        assert_eq!(settings.contrast, 0.0);
+        assert!(!settings.ir_cut_filter);
+        assert!(!settings.wdr);
+    }
+
+    #[test]
+    fn test_imaging_settings_custom_values() {
+        let settings = ImagingSettings {
+            brightness: 50.0,
+            contrast: 60.0,
+            saturation: 70.0,
+            sharpness: 80.0,
+            ir_cut_filter: true,
+            ir_led: true,
+            wdr: false,
+            backlight_compensation: true,
+        };
+        assert_eq!(settings.brightness, 50.0);
+        assert!(settings.ir_cut_filter);
+        assert!(settings.ir_led);
+        assert!(!settings.wdr);
+    }
+
+    #[test]
+    fn test_imaging_options_default_trait() {
+        let options = ImagingOptions::default();
+        assert_eq!(options.brightness_range, (0.0, 0.0));
+        assert!(!options.ir_cut_filter_supported);
+    }
+
+    #[test]
+    fn test_imaging_options_default_options_comprehensive() {
+        let options = ImagingOptions::default_options();
+        assert_eq!(options.brightness_range, (0.0, 100.0));
+        assert_eq!(options.contrast_range, (0.0, 100.0));
+        assert_eq!(options.saturation_range, (0.0, 100.0));
+        assert_eq!(options.sharpness_range, (0.0, 100.0));
+        assert!(options.ir_cut_filter_supported);
+        assert!(options.ir_led_supported);
+        assert!(!options.wdr_supported); // default_options() sets this to false
+        assert!(options.backlight_compensation_supported);
+    }
+
+    #[test]
+    fn test_platform_error_initialization_failed() {
+        let err = PlatformError::InitializationFailed("SDK init failed".to_string());
+        assert!(err.to_string().contains("Initialization failed"));
+        assert!(err.to_string().contains("SDK init failed"));
+    }
+
+    #[test]
+    fn test_platform_error_hardware_unavailable() {
+        let err = PlatformError::HardwareUnavailable("Camera not found".to_string());
+        assert!(err.to_string().contains("Hardware not available"));
+    }
+
+    #[test]
+    fn test_platform_error_not_supported() {
+        let err = PlatformError::NotSupported("PTZ not available".to_string());
+        assert!(err.to_string().contains("Operation not supported"));
+    }
+
+    #[test]
+    fn test_platform_error_invalid_parameter() {
+        let err = PlatformError::InvalidParameter("Invalid zoom".to_string());
+        assert!(err.to_string().contains("Invalid parameter"));
+    }
+
+    #[test]
+    fn test_platform_error_timeout() {
+        let err = PlatformError::Timeout;
+        assert!(err.to_string().contains("timed out"));
+    }
+
+    #[test]
+    fn test_platform_error_hardware_failure() {
+        let err = PlatformError::HardwareFailure("Encoder crash".to_string());
+        assert!(err.to_string().contains("Hardware failure"));
+    }
+
+    #[test]
+    fn test_platform_error_resource_busy() {
+        let err = PlatformError::ResourceBusy("Encoder in use".to_string());
+        assert!(err.to_string().contains("Resource busy"));
+    }
+
+    #[test]
+    fn test_platform_error_permission_denied() {
+        let err = PlatformError::PermissionDenied;
+        assert!(err.to_string().contains("Permission denied"));
+    }
+
+    #[test]
+    fn test_platform_error_clone() {
+        let err1 = PlatformError::Timeout;
+        let err2 = err1.clone();
+        assert_eq!(err1.to_string(), err2.to_string());
+    }
+
+    #[test]
+    fn test_video_source_config_default() {
+        let config = VideoSourceConfig::default();
+        assert_eq!(config.token, "");
+        assert_eq!(config.name, "");
+        assert_eq!(config.resolution.width, 0);
+    }
 }
