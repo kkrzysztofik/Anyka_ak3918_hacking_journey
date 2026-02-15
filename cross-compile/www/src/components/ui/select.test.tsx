@@ -48,7 +48,7 @@ describe('Select', () => {
         </SelectContent>
       </Select>,
     );
-    expect(screen.getByText('Choose an option')).toBeInTheDocument();
+    expect(screen.getByTestId('select-trigger')).toHaveTextContent('Choose an option');
   });
 
   it('should render SelectItem with value-based testId', () => {

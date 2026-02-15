@@ -17,6 +17,9 @@ export const queryClient = new QueryClient({
     },
     mutations: {
       retry: 0, // Don't retry mutations
+      onError: (error) => {
+        console.error('[mutation error]', error);
+      },
     },
   },
 });

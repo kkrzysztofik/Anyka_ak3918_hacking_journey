@@ -131,7 +131,11 @@ describe('Sheet', () => {
     it('should render sheet on right side by default', () => {
       render(
         <Sheet defaultOpen>
-          <SheetContent>Right Sheet</SheetContent>
+          <SheetContent>
+            <SheetTitle>Sheet Title</SheetTitle>
+            <SheetDescription>Sheet Description</SheetDescription>
+            Right Sheet
+          </SheetContent>
         </Sheet>,
       );
 

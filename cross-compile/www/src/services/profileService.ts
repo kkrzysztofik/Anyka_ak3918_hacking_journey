@@ -185,7 +185,8 @@ export async function getProfile(token: string): Promise<MediaProfile | null> {
       token: safeString(profile['@_token'], ''),
       name: safeString(profile.Name, ''),
     };
-  } catch {
+  } catch (error) {
+    console.warn('Failed to get profile:', error);
     return null;
   }
 }
@@ -324,7 +325,8 @@ export async function getVideoEncoderConfiguration(
         : undefined,
       sessionTimeout: safeString(config.SessionTimeout, 'PT60S'),
     };
-  } catch {
+  } catch (error) {
+    console.warn('Failed to get video encoder configuration:', error);
     return null;
   }
 }

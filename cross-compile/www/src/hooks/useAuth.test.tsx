@@ -2,17 +2,21 @@
  * useAuth Hook Tests
  */
 import { act, renderHook, waitFor } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { createEncryptedFixture } from '@/test/componentTestHelpers';
 
 import { type AuthContextValue, AuthProvider, useAuth } from './useAuth';
 
 // Mock crypto utilities
 const mockEncrypt = vi.fn();
 const mockDecrypt = vi.fn();
+const mockClearSessionKey = vi.fn();
 
 vi.mock('../utils/crypto', () => ({
   encrypt: (password: string) => mockEncrypt(password),
   decrypt: (encrypted: unknown) => mockDecrypt(encrypted),
+  clearSessionKey: () => mockClearSessionKey(),
 }));
 
 // Helper functions to reduce nesting depth
@@ -46,8 +50,13 @@ describe('useAuth', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     sessionStorage.clear();
-    mockEncrypt.mockResolvedValue({ iv: 'test-iv', data: 'test-data', tag: 'test-tag' });
+    mockEncrypt.mockResolvedValue(createEncryptedFixture());
     mockDecrypt.mockResolvedValue('decrypted-password');
+  });
+
+  afterEach(() => {
+    // Clean up any event listeners
+    vi.restoreAllMocks();
   });
 
   describe('AuthProvider', () => {
@@ -63,7 +72,7 @@ describe('useAuth', () => {
     it('should restore authenticated state from sessionStorage', async () => {
       const storedData = {
         username: 'admin',
-        encryptedPassword: { iv: 'test-iv', data: 'test-data', tag: 'test-tag' },
+        encryptedPassword: createEncryptedFixture(),
       };
       sessionStorage.setItem('onvif_camera_auth', JSON.stringify(storedData));
 
@@ -119,6 +128,64 @@ describe('useAuth', () => {
       expect(parsed.username).toBe('testuser');
       expect(parsed.encryptedPassword).toBeDefined();
     });
+
+    it('should fall back to memory-only auth when crypto fails (HTTP)', async () => {
+      mockEncrypt.mockRejectedValue(new Error('Credential storage requires HTTPS'));
+
+      const { result } = renderHook(() => useAuth(), {
+        wrapper: AuthProvider,
+      });
+
+      await loginUser(result, 'testuser', 'testpassword');
+
+      await waitFor(() => {
+        expect(result.current.isAuthenticated).toBe(true);
+        expect(result.current.username).toBe('testuser');
+      });
+
+      // Should NOT be persisted to sessionStorage
+      expect(sessionStorage.getItem('onvif_camera_auth')).toBeNull();
+    });
+
+    it('should provide credentials from memory-only auth', async () => {
+      mockEncrypt.mockRejectedValue(new Error('Credential storage requires HTTPS'));
+
+      const { result } = renderHook(() => useAuth(), {
+        wrapper: AuthProvider,
+      });
+
+      await loginUser(result, 'testuser', 'testpassword');
+
+      await waitFor(() => {
+        expect(result.current.isAuthenticated).toBe(true);
+      });
+
+      const credentials = await getCredentialsWithAct(result);
+      expect(credentials).toEqual({
+        username: 'testuser',
+        password: 'testpassword',
+      });
+      // Decrypt should NOT be called for memory-only auth
+      expect(mockDecrypt).not.toHaveBeenCalled();
+    });
+
+    it('should provide basic auth header from memory-only auth', async () => {
+      mockEncrypt.mockRejectedValue(new Error('Credential storage requires HTTPS'));
+
+      const { result } = renderHook(() => useAuth(), {
+        wrapper: AuthProvider,
+      });
+
+      await loginUser(result, 'testuser', 'testpassword');
+
+      await waitFor(() => {
+        expect(result.current.isAuthenticated).toBe(true);
+      });
+
+      const header = await getBasicAuthHeaderWithAct(result);
+      expect(header).toBe('Basic ' + btoa('testuser:testpassword'));
+      expect(mockDecrypt).not.toHaveBeenCalled();
+    });
   });
 
   describe('logout', () => {
@@ -140,6 +207,29 @@ describe('useAuth', () => {
       expect(result.current.isAuthenticated).toBe(false);
       expect(result.current.username).toBeNull();
       expect(sessionStorage.getItem('onvif_camera_auth')).toBeNull();
+      expect(mockClearSessionKey).toHaveBeenCalled();
+    });
+
+    it('should logout on auth:unauthorized event', async () => {
+      const { result } = renderHook(() => useAuth(), {
+        wrapper: AuthProvider,
+      });
+
+      await loginUser(result, 'testuser', 'testpassword');
+
+      await waitFor(() => {
+        expect(result.current.isAuthenticated).toBe(true);
+      });
+
+      act(() => {
+        globalThis.dispatchEvent(new CustomEvent('auth:unauthorized'));
+      });
+
+      await waitFor(() => {
+        expect(result.current.isAuthenticated).toBe(false);
+        expect(result.current.username).toBeNull();
+        expect(mockClearSessionKey).toHaveBeenCalled();
+      });
     });
   });
 
@@ -175,7 +265,7 @@ describe('useAuth', () => {
       expect(mockDecrypt).not.toHaveBeenCalled();
     });
 
-    it('should return null when decryption fails', async () => {
+    it('should return null and clear state when decryption fails', async () => {
       const { result } = renderHook(() => useAuth(), {
         wrapper: AuthProvider,
       });
@@ -191,6 +281,8 @@ describe('useAuth', () => {
       const credentials = await getCredentialsWithAct(result);
 
       expect(credentials).toBeNull();
+      // Should clear stale sessionStorage data
+      expect(sessionStorage.getItem('onvif_camera_auth')).toBeNull();
     });
   });
 
@@ -223,7 +315,7 @@ describe('useAuth', () => {
       expect(mockDecrypt).not.toHaveBeenCalled();
     });
 
-    it('should return null when decryption fails', async () => {
+    it('should return null and clear state when decryption fails', async () => {
       const { result } = renderHook(() => useAuth(), {
         wrapper: AuthProvider,
       });
@@ -239,6 +331,7 @@ describe('useAuth', () => {
       const header = await getBasicAuthHeaderWithAct(result);
 
       expect(header).toBeNull();
+      expect(sessionStorage.getItem('onvif_camera_auth')).toBeNull();
     });
   });
 

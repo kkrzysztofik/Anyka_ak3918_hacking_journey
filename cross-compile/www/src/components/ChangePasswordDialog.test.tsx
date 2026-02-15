@@ -1,7 +1,7 @@
 /**
  * ChangePasswordDialog Component Tests
  */
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -103,14 +103,8 @@ describe('ChangePasswordDialog', () => {
         expect(currentPasswordInput).toHaveValue('oldpass');
       });
 
-      // Find and submit the form directly to trigger loading
-      const form = currentPasswordInput.closest('form');
-      expect(form).toBeTruthy();
-
-      await act(async () => {
-        const submitEvent = new Event('submit', { bubbles: true, cancelable: true });
-        form?.dispatchEvent(submitEvent);
-      });
+      const submitButton = screen.getByTestId('change-password-dialog-submit-button');
+      await user.click(submitButton);
 
       // Now check if cancel button is disabled during loading
       await waitFor(
@@ -253,14 +247,8 @@ describe('ChangePasswordDialog', () => {
         expect(confirmPasswordInput).toHaveValue('newpass123');
       });
 
-      // Find and submit the form directly
-      const form = currentPasswordInput.closest('form');
-      expect(form).toBeTruthy();
-
-      await act(async () => {
-        const submitEvent = new Event('submit', { bubbles: true, cancelable: true });
-        form?.dispatchEvent(submitEvent);
-      });
+      const submitButton = screen.getByTestId('change-password-dialog-submit-button');
+      await user.click(submitButton);
 
       await waitFor(
         () => {
@@ -302,14 +290,8 @@ describe('ChangePasswordDialog', () => {
         expect(confirmPasswordInput).toHaveValue('newpass123');
       });
 
-      // Find and submit the form directly
-      const form = currentPasswordInput.closest('form');
-      expect(form).toBeTruthy();
-
-      await act(async () => {
-        const submitEvent = new Event('submit', { bubbles: true, cancelable: true });
-        form?.dispatchEvent(submitEvent);
-      });
+      const submitButton = screen.getByTestId('change-password-dialog-submit-button');
+      await user.click(submitButton);
 
       await waitFor(
         () => {
@@ -335,25 +317,17 @@ describe('ChangePasswordDialog', () => {
         'change-password-dialog-confirm-password-input',
       );
 
-      await act(async () => {
-        await user.type(currentPasswordInput, 'wrongpass');
-        await user.type(newPasswordInput, 'newpass123');
-        await user.type(confirmPasswordInput, 'newpass123');
-      });
+      await user.type(currentPasswordInput, 'wrongpass');
+      await user.type(newPasswordInput, 'newpass123');
+      await user.type(confirmPasswordInput, 'newpass123');
 
       // Wait for form state to update
       await waitFor(() => {
         expect(currentPasswordInput).toHaveValue('wrongpass');
       });
 
-      // Find and submit the form directly
-      const form = currentPasswordInput.closest('form');
-      expect(form).toBeTruthy();
-
-      await act(async () => {
-        const submitEvent = new Event('submit', { bubbles: true, cancelable: true });
-        form?.dispatchEvent(submitEvent);
-      });
+      const submitButton = screen.getByTestId('change-password-dialog-submit-button');
+      await user.click(submitButton);
 
       await waitFor(
         () => {
@@ -389,14 +363,8 @@ describe('ChangePasswordDialog', () => {
         expect(currentPasswordInput).toHaveValue('oldpass');
       });
 
-      // Find and submit the form directly
-      const form = currentPasswordInput.closest('form');
-      expect(form).toBeTruthy();
-
-      await act(async () => {
-        const submitEvent = new Event('submit', { bubbles: true, cancelable: true });
-        form?.dispatchEvent(submitEvent);
-      });
+      const submitButton = screen.getByTestId('change-password-dialog-submit-button');
+      await user.click(submitButton);
 
       await waitFor(
         () => {
@@ -431,14 +399,8 @@ describe('ChangePasswordDialog', () => {
         expect(currentPasswordInput).toHaveValue('oldpass');
       });
 
-      // Find and submit the form directly
-      const form = currentPasswordInput.closest('form');
-      expect(form).toBeTruthy();
-
-      await act(async () => {
-        const submitEvent = new Event('submit', { bubbles: true, cancelable: true });
-        form?.dispatchEvent(submitEvent);
-      });
+      const submitButton = screen.getByTestId('change-password-dialog-submit-button');
+      await user.click(submitButton);
 
       await waitFor(
         () => {
@@ -478,16 +440,8 @@ describe('ChangePasswordDialog', () => {
         expect(currentPasswordInput).toHaveValue('oldpass');
       });
 
-      // Find and submit the form directly
-      const form = currentPasswordInput.closest('form');
-      expect(form).toBeTruthy();
-
       const submitButton = screen.getByTestId('change-password-dialog-submit-button');
-
-      await act(async () => {
-        const submitEvent = new Event('submit', { bubbles: true, cancelable: true });
-        form?.dispatchEvent(submitEvent);
-      });
+      await user.click(submitButton);
 
       await waitFor(
         () => {
@@ -528,14 +482,8 @@ describe('ChangePasswordDialog', () => {
         expect(currentPasswordInput).toHaveValue('oldpass');
       });
 
-      // Find and submit the form directly
-      const form = currentPasswordInput.closest('form');
-      expect(form).toBeTruthy();
-
-      await act(async () => {
-        const submitEvent = new Event('submit', { bubbles: true, cancelable: true });
-        form?.dispatchEvent(submitEvent);
-      });
+      const submitButton = screen.getByTestId('change-password-dialog-submit-button');
+      await user.click(submitButton);
 
       await waitFor(
         () => {

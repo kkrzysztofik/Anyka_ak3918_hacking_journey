@@ -27,22 +27,22 @@ import { cn } from '@/lib/utils';
 
 // Mock data generator for charts
 // Using Math.random() for mock visualization data - not security-sensitive
-const generateData = (points: number, base: number, variance: number) => {
+function generateData(points: number, base: number, variance: number) {
   // NOSONAR: Math.random() is acceptable for mock visualization data
   return Array.from({ length: points }, (_, i) => ({
     time: i,
     value: Math.max(0, Math.min(100, base + (Math.random() - 0.5) * variance)), // NOSONAR
   }));
-};
+}
 
-const cpuData = generateData(30, 45, 15);
-const memoryData = generateData(30, 60, 5);
-const networkData = Array.from({ length: 30 }, (_, i) => ({
-  time: i,
-  // NOSONAR: Math.random() is acceptable for mock visualization data
-  upload: Math.max(0, 2 + (Math.random() - 0.5) * 1), // NOSONAR
-  download: Math.max(0, 4 + (Math.random() - 0.5) * 2), // NOSONAR
-}));
+function generateNetworkData(points: number) {
+  return Array.from({ length: points }, (_, i) => ({
+    time: i,
+    // NOSONAR: Math.random() is acceptable for mock visualization data
+    upload: Math.max(0, 2 + (Math.random() - 0.5) * 1), // NOSONAR
+    download: Math.max(0, 4 + (Math.random() - 0.5) * 2), // NOSONAR
+  }));
+}
 
 function StatCard({
   icon: Icon,
@@ -126,6 +126,10 @@ export const CustomTooltip = ({ active, payload, label }: CustomTooltipProps) =>
 };
 
 export default function DiagnosticsPage() {
+  const cpuData = React.useMemo(() => generateData(30, 45, 15), []);
+  const memoryData = React.useMemo(() => generateData(30, 60, 5), []);
+  const networkData = React.useMemo(() => generateNetworkData(30), []);
+
   return (
     <div className="space-y-6 pb-8">
       <div className="flex flex-col gap-2">

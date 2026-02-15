@@ -64,13 +64,32 @@ export async function fillFormFields(
 /**
  * Submit a form by dispatching a submit event
  * @param fieldTestId - Test ID of any field in the form (used to find the form element)
+ * @param user - Optional user event instance to reuse (avoids creating a new session)
  */
-export async function submitFormByEvent(fieldTestId: string): Promise<void> {
+export async function submitFormByEvent(
+  fieldTestId: string,
+  user: ReturnType<typeof userEvent.setup>,
+): Promise<void> {
   const field = screen.getByTestId(fieldTestId);
   const form = field.closest('form');
-  const submitEvent = new Event('submit', { bubbles: true, cancelable: true });
+  
+  // Validate that the field belongs to a form
+  if (!form) {
+    throw new Error(
+      `submitFormByEvent: No form found for field with testId "${fieldTestId}". ` +
+        `The field must be a descendant of a <form> element.`
+    );
+  }
+  
+  const submitButton = form.querySelector('button[type="submit"]') as HTMLButtonElement | null;
+
+  if (submitButton) {
+    await user.click(submitButton);
+    return;
+  }
+
   await act(async () => {
-    form?.dispatchEvent(submitEvent);
+    form.requestSubmit();
   });
 }
 
@@ -156,8 +175,8 @@ export async function fillAndSubmitForm(
     2000,
   );
 
-  // Submit form
-  await submitFormByEvent(fieldTestId);
+  // Submit form (forward user instance to avoid creating a new session)
+  await submitFormByEvent(fieldTestId, user);
 
   // Wait for submission
   if (onSubmitMock) {

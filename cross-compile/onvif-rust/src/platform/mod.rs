@@ -29,6 +29,7 @@
 //! let device_info = platform.get_device_info().await?;
 //! ```
 
+pub(crate) mod hw_ptz;
 mod stubs;
 mod traits;
 pub mod validation;

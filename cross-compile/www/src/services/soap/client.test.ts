@@ -52,19 +52,25 @@ describe('SOAP Client', () => {
       const envelope = createSOAPEnvelope(body);
 
       expect(envelope).toContain('<?xml version="1.0" encoding="UTF-8"?>');
-      expect(envelope).toContain('soap:Envelope');
-      expect(envelope).toContain('soap:Body');
+      expect(envelope).toContain('s:Envelope');
+      expect(envelope).toContain('s:Body');
       expect(envelope).toContain(body);
     });
 
     it('should include all required ONVIF namespaces', () => {
       const envelope = createSOAPEnvelope('<test />');
 
-      expect(envelope).toContain('xmlns:soap=');
+      expect(envelope).toContain('xmlns:s=');
       expect(envelope).toContain('xmlns:tds=');
       expect(envelope).toContain('xmlns:trt=');
       expect(envelope).toContain('xmlns:timg=');
       expect(envelope).toContain('xmlns:tptz=');
+      expect(envelope).toContain('xmlns:tt=');
+    });
+
+    it('should include tt namespace for ONVIF schema types', () => {
+      const envelope = createSOAPEnvelope('<test />');
+      expect(envelope).toContain('xmlns:tt="http://www.onvif.org/ver10/schema"');
     });
   });
 
@@ -303,6 +309,77 @@ describe('SOAP Client', () => {
       const body = soapBodies.restoreSystem(backupFiles);
       expect(body).toContain('tds:RestoreSystem');
       expect(body).toContain('tds:BackupFiles');
+    });
+
+    // PTZ SOAP bodies
+    it('should create continuousMove body with velocity', () => {
+      const body = soapBodies.continuousMove('ProfileToken1', 0.5, -0.3);
+      expect(body).toContain('tptz:ContinuousMove');
+      expect(body).toContain('ProfileToken1');
+      expect(body).toContain('tt:PanTilt');
+      expect(body).toContain('x="0.5"');
+      expect(body).toContain('y="-0.3"');
+    });
+
+    it('should create ptzStop body', () => {
+      const body = soapBodies.ptzStop('ProfileToken1');
+      expect(body).toContain('tptz:Stop');
+      expect(body).toContain('ProfileToken1');
+      expect(body).toContain('<tptz:PanTilt>true</tptz:PanTilt>');
+      expect(body).toContain('<tptz:Zoom>true</tptz:Zoom>');
+    });
+
+    it('should create gotoHomePosition body', () => {
+      const body = soapBodies.gotoHomePosition('ProfileToken1');
+      expect(body).toContain('tptz:GotoHomePosition');
+      expect(body).toContain('ProfileToken1');
+    });
+
+    it('should create getPTZStatus body', () => {
+      const body = soapBodies.getPTZStatus('ProfileToken1');
+      expect(body).toContain('tptz:GetStatus');
+      expect(body).toContain('ProfileToken1');
+    });
+
+    it('should create getPresets body', () => {
+      const body = soapBodies.getPresets('ProfileToken1');
+      expect(body).toContain('tptz:GetPresets');
+      expect(body).toContain('ProfileToken1');
+    });
+
+    it('should create gotoPreset body', () => {
+      const body = soapBodies.gotoPreset('ProfileToken1', 'preset1');
+      expect(body).toContain('tptz:GotoPreset');
+      expect(body).toContain('ProfileToken1');
+      expect(body).toContain('preset1');
+    });
+
+    it('should create setPreset body with name only', () => {
+      const body = soapBodies.setPreset('ProfileToken1', 'My Preset');
+      expect(body).toContain('tptz:SetPreset');
+      expect(body).toContain('ProfileToken1');
+      expect(body).toContain('My Preset');
+      expect(body).not.toContain('tptz:PresetToken');
+    });
+
+    it('should create setPreset body with existing preset token', () => {
+      const body = soapBodies.setPreset('ProfileToken1', 'Updated', 'preset1');
+      expect(body).toContain('tptz:SetPreset');
+      expect(body).toContain('<tptz:PresetToken>preset1</tptz:PresetToken>');
+      expect(body).toContain('Updated');
+    });
+
+    it('should create removePreset body', () => {
+      const body = soapBodies.removePreset('ProfileToken1', 'preset1');
+      expect(body).toContain('tptz:RemovePreset');
+      expect(body).toContain('ProfileToken1');
+      expect(body).toContain('preset1');
+    });
+
+    it('should escape XML in PTZ soap bodies', () => {
+      const body = soapBodies.setPreset('Profile<Token>', 'Name&"Test"');
+      expect(body).toContain('Profile&lt;Token&gt;');
+      expect(body).toContain('Name&amp;&quot;Test&quot;');
     });
   });
 });

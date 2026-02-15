@@ -1,7 +1,7 @@
 /**
  * UserDialogs Component Tests
  */
-import { act, screen, waitFor } from '@testing-library/react';
+import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -164,7 +164,7 @@ describe('AddUserDialog', () => {
       );
 
       // Submit form directly - wrap in act()
-      await submitFormByEvent('add-user-username-input');
+      await submitFormByEvent('add-user-username-input', user);
 
       await waitFor(
         () => {
@@ -201,7 +201,7 @@ describe('AddUserDialog', () => {
       );
 
       // Submit form directly - wrap in act()
-      await submitFormByEvent('add-user-username-input');
+      await submitFormByEvent('add-user-username-input', user);
 
       await waitFor(
         () => {
@@ -237,14 +237,8 @@ describe('AddUserDialog', () => {
         { timeout: 2000 },
       );
 
-      // Submit form directly - wrap in act()
-      const form = usernameInput.closest('form');
       const submitButton = screen.getByTestId('add-user-submit-button');
-
-      const submitEvent = new Event('submit', { bubbles: true, cancelable: true });
-      await act(async () => {
-        form?.dispatchEvent(submitEvent);
-      });
+      await user.click(submitButton);
 
       await waitFor(
         () => {
@@ -450,7 +444,7 @@ describe('ChangePasswordDialog', () => {
       );
 
       // Submit form directly
-      await submitFormByEvent('change-password-new-input');
+      await submitFormByEvent('change-password-new-input', user);
 
       await waitFor(
         () => {
@@ -486,7 +480,7 @@ describe('ChangePasswordDialog', () => {
       );
 
       // Submit form
-      await submitFormByEvent('change-password-new-input');
+      await submitFormByEvent('change-password-new-input', user);
 
       await waitFor(
         () => {
@@ -524,12 +518,7 @@ describe('ChangePasswordDialog', () => {
         { timeout: 2000 },
       );
 
-      // Submit form
-      const form = passwordInput.closest('form');
-      const submitEvent = new Event('submit', { bubbles: true, cancelable: true });
-      await act(async () => {
-        form?.dispatchEvent(submitEvent);
-      });
+      await user.click(submitButton);
 
       await waitFor(
         () => {
@@ -572,13 +561,7 @@ describe('ChangePasswordDialog', () => {
         { timeout: 2000 },
       );
 
-      // Submit form
-      const form = passwordInput.closest('form');
-      const submitEvent = new Event('submit', { bubbles: true, cancelable: true });
-
-      await act(async () => {
-        form?.dispatchEvent(submitEvent);
-      });
+      await user.click(submitButton);
 
       await waitFor(
         () => {

@@ -2,7 +2,6 @@
  * Shared test utilities for React component tests
  * Provides common wrappers, QueryClient setup, and mock factories
  */
-/* eslint-disable react-refresh/only-export-components */
 import type { ReactElement, ReactNode } from 'react';
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -413,8 +412,7 @@ export async function expandProfile(
 
   await waitFor(
     () => {
-      const videoSourceTexts = screen.getAllByText('Video Source');
-      expect(videoSourceTexts.length).toBeGreaterThan(0);
+      expect(screen.getByTestId(`video-source-config-${profileToken}`)).toBeInTheDocument();
     },
     { timeout: 3000 },
   );
@@ -423,11 +421,12 @@ export async function expandProfile(
 /**
  * Wait for the video encoder section to appear in an expanded profile
  */
-export async function waitForVideoEncoderSection(): Promise<void> {
+export async function waitForVideoEncoderSection(
+  profileToken = 'ProfileToken1',
+): Promise<void> {
   await waitFor(
     () => {
-      const videoEncoderTexts = screen.getAllByText('Video Encoder');
-      expect(videoEncoderTexts.length).toBeGreaterThan(0);
+      expect(screen.getByTestId(`video-encoder-config-${profileToken}`)).toBeInTheDocument();
     },
     { timeout: 3000 },
   );
@@ -629,6 +628,20 @@ export const MockButton = {
   ),
   buttonVariants: () => 'mock-button-variant',
 };
+
+/**
+ * Create an encrypted data fixture with unique values for testing.
+ * Generates unique IV and data strings to prevent cross-test contamination
+ * in sessionStorage-based auth tests.
+ */
+export function createEncryptedFixture() {
+  const unique = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  return {
+    iv: btoa(`iv-${unique}`),
+    data: btoa(`data-${unique}`),
+    method: 'aes-gcm' as const,
+  };
+}
 
 /**
  * Generic error toast verification helper

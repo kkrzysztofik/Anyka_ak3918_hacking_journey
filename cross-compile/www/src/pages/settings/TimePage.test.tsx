@@ -130,10 +130,9 @@ describe('TimePage', () => {
         const primaryServerInput = screen.queryByTestId('time-page-ntp-server1-input');
         const secondaryServerInput = screen.queryByTestId('time-page-ntp-server2-input');
         // At least verify NTP section is rendered
-        const syncTexts = screen.getAllByText(/synchronization/i);
-        expect(syncTexts.length).toBeGreaterThan(0);
+        expect(screen.getByTestId('time-synchronization-title')).toBeInTheDocument();
         expect(
-          primaryServerInput || secondaryServerInput || screen.queryByText(/ntp/i),
+          primaryServerInput || secondaryServerInput || screen.queryByTestId('time-page-ntp-radio'),
         ).toBeTruthy();
       },
       { timeout: 3000 },

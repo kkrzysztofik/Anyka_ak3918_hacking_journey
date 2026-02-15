@@ -1,10 +1,11 @@
 /**
  * Live View Page
  *
- * Video stream and PTZ controls placeholder.
+ * Video stream with real PTZ controls wired to ONVIF backend.
  */
-import React, { useState } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Activity,
   ArrowDown,
@@ -18,6 +19,7 @@ import {
   Settings2,
   Wifi,
 } from 'lucide-react';
+import { toast } from 'sonner';
 
 import { Button } from '@/components/ui/button';
 import {
@@ -28,16 +30,157 @@ import {
   SettingsCardTitle,
 } from '@/components/ui/settings-card';
 import { cn } from '@/lib/utils';
+import { getProfiles } from '@/services/profileService';
+import {
+  continuousMove,
+  getPresets,
+  gotoHome,
+  gotoPreset,
+  removePreset,
+  setPreset,
+  stopMove,
+} from '@/services/ptzService';
+import type { PTZDirection, PTZPreset } from '@/services/ptzService';
 
 export default function LiveViewPage() {
   const [streamType, setStreamType] = useState<'main' | 'sub'>('main');
   const [ptzSpeed, setPtzSpeed] = useState(50);
+  const queryClient = useQueryClient();
 
-  // Handlers for PTZ (will be implemented with PTZ service)
-  const handlePtz = (_action: string) => {
-    // PTZ actions are handled by the PTZ service
-    // This will be implemented in future PR
-  };
+  // Fetch profiles to get the PTZ-capable profile token
+  const { data: profiles } = useQuery({
+    queryKey: ['profiles'],
+    queryFn: getProfiles,
+  });
+
+  const profileToken = profiles?.find((p) => p.ptzConfiguration)?.token ?? profiles?.[0]?.token ?? '';
+
+  // Fetch presets for the active profile
+  const { data: presets } = useQuery({
+    queryKey: ['ptzPresets', profileToken],
+    queryFn: () => getPresets(profileToken),
+    enabled: !!profileToken,
+  });
+
+  // ContinuousMove mutation
+  const moveMutation = useMutation({
+    mutationFn: ({ direction }: { direction: PTZDirection }) =>
+      continuousMove(profileToken, direction, ptzSpeed),
+    onError: (error) => {
+      toast.error('PTZ move failed', {
+        description: error instanceof Error ? error.message : 'An error occurred',
+      });
+    },
+  });
+
+  // Stop mutation
+  const stopMutation = useMutation({
+    mutationFn: () => stopMove(profileToken),
+    onError: (error) => {
+      toast.error('PTZ stop failed', {
+        description: error instanceof Error ? error.message : 'An error occurred',
+      });
+    },
+  });
+
+  // Home mutation
+  const homeMutation = useMutation({
+    mutationFn: () => gotoHome(profileToken),
+    onError: (error) => {
+      toast.error('Go to home failed', {
+        description: error instanceof Error ? error.message : 'An error occurred',
+      });
+    },
+  });
+
+  // Goto preset mutation
+  const gotoPresetMutation = useMutation({
+    mutationFn: (presetToken: string) => gotoPreset(profileToken, presetToken),
+    onError: (error) => {
+      toast.error('Go to preset failed', {
+        description: error instanceof Error ? error.message : 'An error occurred',
+      });
+    },
+  });
+
+  // Set preset mutation
+  const setPresetMutation = useMutation({
+    mutationFn: ({ name, presetToken }: { name: string; presetToken?: string }) =>
+      setPreset(profileToken, name, presetToken),
+    onSuccess: () => {
+      toast.success('Preset saved');
+      queryClient.invalidateQueries({ queryKey: ['ptzPresets', profileToken] });
+    },
+    onError: (error) => {
+      toast.error('Save preset failed', {
+        description: error instanceof Error ? error.message : 'An error occurred',
+      });
+    },
+  });
+
+  // Remove preset mutation
+  const removePresetMutation = useMutation({
+    mutationFn: (presetToken: string) => removePreset(profileToken, presetToken),
+    onSuccess: () => {
+      toast.success('Preset removed');
+      queryClient.invalidateQueries({ queryKey: ['ptzPresets', profileToken] });
+    },
+    onError: (error) => {
+      toast.error('Remove preset failed', {
+        description: error instanceof Error ? error.message : 'An error occurred',
+      });
+    },
+  });
+
+  const isMovingRef = useRef(false);
+
+  const handlePtzStart = useCallback(
+    (direction: PTZDirection) => {
+      if (!profileToken) return;
+      isMovingRef.current = true;
+      moveMutation.mutate({ direction });
+    },
+    [profileToken, moveMutation],
+  );
+
+  const handlePtzStop = useCallback(() => {
+    if (!profileToken || !isMovingRef.current) return;
+    isMovingRef.current = false;
+    stopMutation.mutate();
+  }, [profileToken, stopMutation]);
+
+  const handleHome = useCallback(() => {
+    if (!profileToken) return;
+    homeMutation.mutate();
+  }, [profileToken, homeMutation]);
+
+  const handleGotoPreset = useCallback(
+    (presetToken: string) => {
+      if (!profileToken) return;
+      gotoPresetMutation.mutate(presetToken);
+    },
+    [profileToken, gotoPresetMutation],
+  );
+
+  const handleAddPreset = useCallback(() => {
+    if (!profileToken) return;
+    const nextIndex = (presets?.length ?? 0) + 1;
+    setPresetMutation.mutate({ name: `Preset ${nextIndex}` });
+  }, [profileToken, presets, setPresetMutation]);
+
+  const handleRemovePreset = useCallback(
+    (presetToken: string) => {
+      if (!profileToken) return;
+      removePresetMutation.mutate(presetToken);
+    },
+    [profileToken, removePresetMutation],
+  );
+
+  // Build display presets: use real presets if available, fallback to placeholder slots
+  const displayPresets: Array<{ index: number; preset?: PTZPreset }> = [1, 2, 3].map((i) => ({
+    index: i,
+    preset: presets?.[i - 1],
+  }));
 
   return (
     <div className="flex h-full flex-col gap-6">
@@ -62,7 +205,9 @@ export default function LiveViewPage() {
                 <span className="font-medium">Video Stream</span>
               </div>
               <div className="flex items-center gap-2">
-                <div className="flex rounded-lg border border-zinc-700/50 bg-zinc-900/80 p-1">
+                {/* Semantic fieldset for stream type selection with reset styles */}
+                <fieldset className="flex border-0 p-0 m-0 appearance-none rounded-lg border border-zinc-700/50 bg-zinc-900/80 p-1">
+                  <legend className="sr-only">Stream type</legend>
                   <button
                     onClick={() => setStreamType('main')}
                     className={cn(
@@ -71,6 +216,7 @@ export default function LiveViewPage() {
                         ? 'bg-accent-red text-white'
                         : 'text-zinc-400 hover:text-white',
                     )}
+                    aria-pressed={streamType === 'main'}
                     data-testid="liveview-main-stream-button"
                   >
                     Main Stream
@@ -83,11 +229,12 @@ export default function LiveViewPage() {
                         ? 'bg-accent-red text-white'
                         : 'text-zinc-400 hover:text-white',
                     )}
+                    aria-pressed={streamType === 'sub'}
                     data-testid="liveview-sub-stream-button"
                   >
                     Sub Stream
                   </button>
-                </div>
+                </fieldset>
                 <div className="status-badge-connected">Connected</div>
               </div>
             </div>
@@ -247,7 +394,13 @@ export default function LiveViewPage() {
                   {/* Top Row */}
                   <div className="flex gap-1">
                     <button
-                      onMouseDown={() => handlePtz('up-left')}
+                      type="button"
+                      onMouseDown={() => handlePtzStart('up-left')}
+                      onMouseUp={handlePtzStop}
+                      onMouseLeave={handlePtzStop}
+                      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handlePtzStart('up-left'); } }}
+                      onKeyUp={(e) => { if (e.key === 'Enter' || e.key === ' ') handlePtzStop(); }}
+                      aria-label="Pan up-left"
                       className="hover:bg-accent-red group flex h-11 w-11 items-center justify-center rounded-lg bg-zinc-800 transition-colors active:bg-red-700 md:h-12 md:w-12"
                       data-testid="liveview-ptz-up-left-button"
                     >
@@ -256,14 +409,26 @@ export default function LiveViewPage() {
                       </div>
                     </button>
                     <button
-                      onMouseDown={() => handlePtz('up')}
+                      type="button"
+                      onMouseDown={() => handlePtzStart('up')}
+                      onMouseUp={handlePtzStop}
+                      onMouseLeave={handlePtzStop}
+                      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handlePtzStart('up'); } }}
+                      onKeyUp={(e) => { if (e.key === 'Enter' || e.key === ' ') handlePtzStop(); }}
+                      aria-label="Pan up"
                       className="hover:bg-accent-red flex h-11 w-11 items-center justify-center rounded-lg bg-zinc-800 transition-colors active:bg-red-700 md:h-12 md:w-12"
                       data-testid="liveview-ptz-up-button"
                     >
                       <ArrowUp className="h-4 w-4 text-white md:h-5 md:w-5" />
                     </button>
                     <button
-                      onMouseDown={() => handlePtz('up-right')}
+                      type="button"
+                      onMouseDown={() => handlePtzStart('up-right')}
+                      onMouseUp={handlePtzStop}
+                      onMouseLeave={handlePtzStop}
+                      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handlePtzStart('up-right'); } }}
+                      onKeyUp={(e) => { if (e.key === 'Enter' || e.key === ' ') handlePtzStop(); }}
+                      aria-label="Pan up-right"
                       className="hover:bg-accent-red flex h-11 w-11 items-center justify-center rounded-lg bg-zinc-800 transition-colors active:bg-red-700 md:h-12 md:w-12"
                       data-testid="liveview-ptz-up-right-button"
                     >
@@ -276,21 +441,35 @@ export default function LiveViewPage() {
                   {/* Middle Row */}
                   <div className="flex gap-1">
                     <button
-                      onMouseDown={() => handlePtz('left')}
+                      type="button"
+                      onMouseDown={() => handlePtzStart('left')}
+                      onMouseUp={handlePtzStop}
+                      onMouseLeave={handlePtzStop}
+                      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handlePtzStart('left'); } }}
+                      onKeyUp={(e) => { if (e.key === 'Enter' || e.key === ' ') handlePtzStop(); }}
+                      aria-label="Pan left"
                       className="hover:bg-accent-red flex h-11 w-11 items-center justify-center rounded-lg bg-zinc-800 transition-colors active:bg-red-700 md:h-12 md:w-12"
                       data-testid="liveview-ptz-left-button"
                     >
                       <ArrowLeft className="h-4 w-4 text-white md:h-5 md:w-5" />
                     </button>
                     <button
-                      onClick={() => handlePtz('home')}
+                      type="button"
+                      onClick={handleHome}
+                      aria-label="Return to home position"
                       className="bg-accent-red flex h-11 w-11 items-center justify-center rounded-lg shadow-lg shadow-red-900/20 transition-colors hover:bg-red-700 md:h-12 md:w-12"
                       data-testid="liveview-ptz-home-button"
                     >
                       <Home className="h-4 w-4 text-white md:h-5 md:w-5" />
                     </button>
                     <button
-                      onMouseDown={() => handlePtz('right')}
+                      type="button"
+                      onMouseDown={() => handlePtzStart('right')}
+                      onMouseUp={handlePtzStop}
+                      onMouseLeave={handlePtzStop}
+                      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handlePtzStart('right'); } }}
+                      onKeyUp={(e) => { if (e.key === 'Enter' || e.key === ' ') handlePtzStop(); }}
+                      aria-label="Pan right"
                       className="hover:bg-accent-red flex h-11 w-11 items-center justify-center rounded-lg bg-zinc-800 transition-colors active:bg-red-700 md:h-12 md:w-12"
                       data-testid="liveview-ptz-right-button"
                     >
@@ -301,7 +480,13 @@ export default function LiveViewPage() {
                   {/* Bottom Row */}
                   <div className="flex gap-1">
                     <button
-                      onMouseDown={() => handlePtz('down-left')}
+                      type="button"
+                      onMouseDown={() => handlePtzStart('down-left')}
+                      onMouseUp={handlePtzStop}
+                      onMouseLeave={handlePtzStop}
+                      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handlePtzStart('down-left'); } }}
+                      onKeyUp={(e) => { if (e.key === 'Enter' || e.key === ' ') handlePtzStop(); }}
+                      aria-label="Pan down-left"
                       className="hover:bg-accent-red flex h-11 w-11 items-center justify-center rounded-lg bg-zinc-800 transition-colors active:bg-red-700 md:h-12 md:w-12"
                       data-testid="liveview-ptz-down-left-button"
                     >
@@ -310,14 +495,26 @@ export default function LiveViewPage() {
                       </div>
                     </button>
                     <button
-                      onMouseDown={() => handlePtz('down')}
+                      type="button"
+                      onMouseDown={() => handlePtzStart('down')}
+                      onMouseUp={handlePtzStop}
+                      onMouseLeave={handlePtzStop}
+                      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handlePtzStart('down'); } }}
+                      onKeyUp={(e) => { if (e.key === 'Enter' || e.key === ' ') handlePtzStop(); }}
+                      aria-label="Pan down"
                       className="hover:bg-accent-red flex h-11 w-11 items-center justify-center rounded-lg bg-zinc-800 transition-colors active:bg-red-700 md:h-12 md:w-12"
                       data-testid="liveview-ptz-down-button"
                     >
                       <ArrowDown className="h-4 w-4 text-white md:h-5 md:w-5" />
                     </button>
                     <button
-                      onMouseDown={() => handlePtz('down-right')}
+                      type="button"
+                      onMouseDown={() => handlePtzStart('down-right')}
+                      onMouseUp={handlePtzStop}
+                      onMouseLeave={handlePtzStop}
+                      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handlePtzStart('down-right'); } }}
+                      onKeyUp={(e) => { if (e.key === 'Enter' || e.key === ' ') handlePtzStop(); }}
+                      aria-label="Pan down-right"
                       className="hover:bg-accent-red flex h-11 w-11 items-center justify-center rounded-lg bg-zinc-800 transition-colors active:bg-red-700 md:h-12 md:w-12"
                       data-testid="liveview-ptz-down-right-button"
                     >
@@ -365,25 +562,27 @@ export default function LiveViewPage() {
             </SettingsCardHeader>
             <SettingsCardContent>
               <div className="space-y-2">
-                {[1, 2, 3].map((i) => (
-                  <div key={i} className="group flex items-center gap-2">
+                {displayPresets.map(({ index, preset }) => (
+                  <div key={index} className="group flex items-center gap-2">
                     <Button
                       variant="outline"
                       className="border-border bg-muted text-foreground hover:border-ring hover:bg-muted/80 flex-1 justify-between"
-                      data-testid={`liveview-preset-${i}-button`}
+                      data-testid={`liveview-preset-${index}-button`}
+                      onClick={() => preset && handleGotoPreset(preset.token)}
                     >
-                      <span className="text-xs" data-testid={`liveview-preset-${i}-label`}>
-                        Preset {i}
+                      <span className="text-xs" data-testid={`liveview-preset-${index}-label`}>
+                        {preset?.name || `Preset ${index}`}
                       </span>
                       <span className="bg-background text-muted-foreground rounded px-1.5 py-0.5 font-mono text-[10px]">
-                        #{i}
+                        #{index}
                       </span>
                     </Button>
                     <Button
                       variant="ghost"
                       size="icon"
                       className="text-muted-foreground hover:bg-muted hover:text-accent-red h-8 w-8"
-                      data-testid={`liveview-preset-${i}-settings-button`}
+                      data-testid={`liveview-preset-${index}-settings-button`}
+                      onClick={() => preset && handleRemovePreset(preset.token)}
                     >
                       <Settings2 className="h-3.5 w-3.5" />
                     </Button>
@@ -393,6 +592,7 @@ export default function LiveViewPage() {
                   variant="outline"
                   className="border-border text-muted-foreground hover:bg-muted/50 hover:text-foreground mt-2 w-full border-dashed"
                   data-testid="liveview-add-preset-button"
+                  onClick={handleAddPreset}
                 >
                   <span data-testid="liveview-add-preset-label">+ Add Preset</span>
                 </Button>

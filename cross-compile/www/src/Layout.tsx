@@ -244,7 +244,7 @@ function SidebarContent({ onClose }: Readonly<{ onClose?: () => void }>) {
         </div>
 
         {/* Navigation */}
-        <nav className="flex-1 space-y-1 overflow-y-auto px-2 py-2">
+        <nav className="flex-1 space-y-1 overflow-y-auto px-2 py-2" aria-label="Main navigation">
           {navItems.map((item) => (
             <NavLinkItem key={item.path} item={item} onClick={onClose} />
           ))}
@@ -265,6 +265,7 @@ function SidebarContent({ onClose }: Readonly<{ onClose?: () => void }>) {
                   }
                 }}
                 aria-label="Close menu"
+                data-testid="layout-menu-backdrop"
               />
               <div className="bg-dark-sidebar border-dark-border animate-in fade-in zoom-in absolute right-4 bottom-full left-4 z-50 mb-2 rounded-lg border py-1 shadow-xl duration-200">
                 <div
@@ -446,13 +447,14 @@ export default function Layout() {
     >
       <aside
         className="hidden h-full w-[260px] shrink-0 overflow-hidden lg:block"
+        aria-label="Sidebar"
         data-testid="layout-desktop-sidebar"
       >
         <SidebarContent />
       </aside>
       <div className="flex min-w-0 flex-1 flex-col">
         <Header />
-        <main className="flex-1 overflow-y-auto p-6 md:p-8" data-testid="layout-main-content">
+        <main className="flex-1 overflow-y-auto p-6 md:p-8" aria-label="Page content" data-testid="layout-main-content">
           <div className="page-enter h-full w-full">
             <Outlet />
           </div>

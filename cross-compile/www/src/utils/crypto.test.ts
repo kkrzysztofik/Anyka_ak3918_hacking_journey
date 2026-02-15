@@ -1,10 +1,11 @@
 /**
  * Cryptographic Utilities Tests
  */
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   type EncryptedData,
+  clearSessionKey,
   decrypt,
   deserializeEncrypted,
   encrypt,
@@ -12,6 +13,11 @@ import {
 } from './crypto';
 
 describe('crypto utilities', () => {
+  afterEach(() => {
+    // Reset session key between tests to ensure isolation
+    clearSessionKey();
+  });
+
   describe('encrypt', () => {
     it('should encrypt a plaintext string', async () => {
       const plaintext = 'test password';
@@ -19,19 +25,18 @@ describe('crypto utilities', () => {
 
       expect(encrypted).toHaveProperty('data');
       expect(encrypted).toHaveProperty('iv');
-      expect(encrypted).toHaveProperty('salt');
+      expect(encrypted).toHaveProperty('method');
+      expect(encrypted.method).toBe('aes-gcm');
       expect(encrypted.data).toBeTruthy();
       expect(encrypted.iv).toBeTruthy();
-      expect(encrypted.salt).toBeTruthy();
     });
 
-    it('should produce different output for same input (due to random salt/IV)', async () => {
+    it('should produce different output for same input (due to random IV)', async () => {
       const plaintext = 'same password';
       const encrypted1 = await encrypt(plaintext);
       const encrypted2 = await encrypt(plaintext);
 
-      // Salt and IV should be different
-      expect(encrypted1.salt).not.toBe(encrypted2.salt);
+      // IV should be different
       expect(encrypted1.iv).not.toBe(encrypted2.iv);
       // Encrypted data should be different
       expect(encrypted1.data).not.toBe(encrypted2.data);
@@ -41,7 +46,6 @@ describe('crypto utilities', () => {
       const encrypted = await encrypt('');
       expect(encrypted.data).toBeTruthy();
       expect(encrypted.iv).toBeTruthy();
-      expect(encrypted.salt).toBeTruthy();
     });
 
     it('should encrypt long strings', async () => {
@@ -86,6 +90,13 @@ describe('crypto utilities', () => {
       const decrypted = await decrypt(encrypted);
       expect(decrypted).toBe(unicode);
     });
+
+    it('should fail to decrypt after session key is cleared', async () => {
+      const encrypted = await encrypt('secret');
+      clearSessionKey();
+      // New key is generated — cannot decrypt data from old key
+      await expect(decrypt(encrypted)).rejects.toThrow();
+    });
   });
 
   describe('encrypt/decrypt roundtrip', () => {
@@ -112,21 +123,20 @@ describe('crypto utilities', () => {
       const encrypted: EncryptedData = {
         data: 'base64data',
         iv: 'base64iv',
-        salt: 'base64salt',
+        method: 'aes-gcm',
       };
 
       const serialized = serializeEncrypted(encrypted);
       expect(typeof serialized).toBe('string');
       expect(serialized).toContain('base64data');
       expect(serialized).toContain('base64iv');
-      expect(serialized).toContain('base64salt');
     });
 
     it('should produce valid JSON', () => {
       const encrypted: EncryptedData = {
         data: 'test',
         iv: 'test',
-        salt: 'test',
+        method: 'aes-gcm',
       };
 
       const serialized = serializeEncrypted(encrypted);
@@ -141,7 +151,7 @@ describe('crypto utilities', () => {
       const encrypted: EncryptedData = {
         data: 'base64data',
         iv: 'base64iv',
-        salt: 'base64salt',
+        method: 'aes-gcm',
       };
 
       const serialized = serializeEncrypted(encrypted);
@@ -180,62 +190,64 @@ describe('crypto utilities', () => {
     });
   });
 
-  describe('fallback for non-secure contexts', () => {
-    it('should use base64 fallback when crypto.subtle is unavailable', async () => {
-      // Save original crypto object
+  describe('clearSessionKey', () => {
+    it('should clear the session key so encryption creates a new one', async () => {
+      const encrypted1 = await encrypt('test');
+      const decrypted1 = await decrypt(encrypted1);
+      expect(decrypted1).toBe('test');
+
+      clearSessionKey();
+
+      // New encryption should work with a new key
+      const encrypted2 = await encrypt('test2');
+      const decrypted2 = await decrypt(encrypted2);
+      expect(decrypted2).toBe('test2');
+
+      // But old ciphertext from the first key should fail
+      await expect(decrypt(encrypted1)).rejects.toThrow();
+    });
+  });
+
+  describe('non-secure context handling', () => {
+    it('should throw when crypto.subtle is unavailable', async () => {
       const originalCrypto = globalThis.crypto;
 
-      // Create a mock crypto without subtle to simulate non-secure context
       const mockCrypto = {
         getRandomValues: (arr: Uint8Array) => originalCrypto.getRandomValues(arr),
       };
 
-      // Use vi.stubGlobal to properly mock the read-only crypto property
       vi.stubGlobal('crypto', mockCrypto);
 
       try {
-        const plaintext = 'test password';
-        const encrypted = await encrypt(plaintext);
-
-        // Should use base64 method
-        expect(encrypted.method).toBe('base64');
-        expect(encrypted.data).toBeTruthy();
-        expect(encrypted.iv).toBeTruthy();
-        expect(encrypted.salt).toBeTruthy();
-
-        // Should decrypt correctly
-        const decrypted = await decrypt(encrypted);
-        expect(decrypted).toBe(plaintext);
+        await expect(encrypt('test password')).rejects.toThrow(
+          'Credential storage requires HTTPS',
+        );
       } finally {
-        // Restore original crypto using vi.unstubAllGlobals
         vi.unstubAllGlobals();
       }
     });
 
-    it('should handle base64-encoded data from previous sessions', async () => {
-      // Create base64-encoded data manually (simulating old session data)
-      const plaintext = 'test password';
-      const obfuscated = plaintext.split('').reverse().join('');
-      const encoder = new TextEncoder();
-      const bytes = encoder.encode(obfuscated);
-      const binaryString = Array.from(bytes, (byte) => String.fromCodePoint(byte)).join('');
-      const encoded = btoa(binaryString);
+    it('should throw on decrypt when crypto.subtle is unavailable', async () => {
+      const originalCrypto = globalThis.crypto;
 
-      const salt = new Uint8Array(16);
-      crypto.getRandomValues(salt);
-      const iv = new Uint8Array(12);
-      crypto.getRandomValues(iv);
-
-      const encrypted: EncryptedData = {
-        data: encoded,
-        iv: btoa(Array.from(iv, (b) => String.fromCodePoint(b)).join('')),
-        salt: btoa(Array.from(salt, (b) => String.fromCodePoint(b)).join('')),
-        method: 'base64',
+      const mockCrypto = {
+        getRandomValues: (arr: Uint8Array) => originalCrypto.getRandomValues(arr),
       };
 
-      // Should decrypt correctly even if crypto.subtle is available
-      const decrypted = await decrypt(encrypted);
-      expect(decrypted).toBe(plaintext);
+      vi.stubGlobal('crypto', mockCrypto);
+
+      try {
+        const fakeEncrypted: EncryptedData = {
+          data: btoa('fake'),
+          iv: btoa('fakeiv'),
+          method: 'aes-gcm',
+        };
+        await expect(decrypt(fakeEncrypted)).rejects.toThrow(
+          'Credential storage requires HTTPS',
+        );
+      } finally {
+        vi.unstubAllGlobals();
+      }
     });
   });
 });

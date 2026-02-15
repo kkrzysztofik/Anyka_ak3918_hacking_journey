@@ -4,7 +4,7 @@
  * SOAP operations for system date/time configuration.
  */
 import { ENDPOINTS } from '@/services/api';
-import { soapBodies, soapRequest } from '@/services/soap/client';
+import { escapeXml, soapBodies, soapRequest } from '@/services/soap/client';
 import { safeString } from '@/utils/safeString';
 
 export type DateTimeType = 'NTP' | 'Manual';
@@ -71,6 +71,9 @@ export async function setSystemDateAndTime(
   timezone: string,
   manualDateTime?: Date,
 ): Promise<void> {
+  const escapedDateTimeType = escapeXml(dateTimeType);
+  const escapedTimezone = escapeXml(timezone);
+
   let utcDateTimeXml = '';
 
   if (dateTimeType === 'Manual' && manualDateTime) {
@@ -92,10 +95,10 @@ export async function setSystemDateAndTime(
   }
 
   const body = `<tds:SetSystemDateAndTime>
-    <tds:DateTimeType>${dateTimeType}</tds:DateTimeType>
+    <tds:DateTimeType>${escapedDateTimeType}</tds:DateTimeType>
     <tds:DaylightSavings>${daylightSavings}</tds:DaylightSavings>
     <tds:TimeZone>
-      <tt:TZ>${timezone}</tt:TZ>
+      <tt:TZ>${escapedTimezone}</tt:TZ>
     </tds:TimeZone>
     ${utcDateTimeXml}
   </tds:SetSystemDateAndTime>`;

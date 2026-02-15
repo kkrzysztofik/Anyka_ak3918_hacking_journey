@@ -1,13 +1,52 @@
 /**
  * LiveViewPage Tests
  */
-import { screen, waitFor } from '@testing-library/react';
+import { fireEvent, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { renderWithProviders } from '@/test/componentTestHelpers';
 
 import LiveViewPage from './LiveViewPage';
+
+// Mock ptzService
+vi.mock('@/services/ptzService', () => ({
+  continuousMove: vi.fn().mockResolvedValue(undefined),
+  stopMove: vi.fn().mockResolvedValue(undefined),
+  gotoHome: vi.fn().mockResolvedValue(undefined),
+  getPresets: vi.fn().mockResolvedValue([
+    { token: 'preset1', name: 'Front Door' },
+    { token: 'preset2', name: 'Back Yard' },
+    { token: 'preset3', name: 'Garage' },
+  ]),
+  gotoPreset: vi.fn().mockResolvedValue(undefined),
+  setPreset: vi.fn().mockResolvedValue('preset_new'),
+  removePreset: vi.fn().mockResolvedValue(undefined),
+}));
+
+// Mock profileService
+vi.mock('@/services/profileService', () => ({
+  getProfiles: vi.fn().mockResolvedValue([
+    {
+      token: 'ProfileToken1',
+      name: 'MainStream',
+      ptzConfiguration: { token: 'PtzConfig1', name: 'PTZ' },
+    },
+    {
+      token: 'ProfileToken2',
+      name: 'SubStream',
+    },
+  ]),
+}));
+
+// Mock sonner toast
+vi.mock('sonner', () => ({
+  toast: {
+    error: vi.fn(),
+    success: vi.fn(),
+    info: vi.fn(),
+  },
+}));
 
 // Mock clipboard API
 const mockWriteText = vi.fn().mockResolvedValue(undefined);
@@ -97,55 +136,27 @@ describe('LiveViewPage', () => {
     expect(screen.getByTestId('liveview-copy-url-button')).toBeInTheDocument();
   });
 
-  it('should copy stream URL when copy button is clicked', async () => {
-    const user = userEvent.setup();
-    renderWithProviders(<LiveViewPage />);
-
-    // Wait for page to render
-    await waitFor(() => {
-      expect(screen.getByTestId('liveview-stream-url-label')).toBeInTheDocument();
-    });
-
-    // Find copy button by test id
-    const copyButton = screen.getByTestId('liveview-copy-url-button');
-
-    expect(copyButton).toBeInTheDocument();
-    await user.click(copyButton);
-
-    // Note: The button may not have onClick handler yet (feature not implemented)
-    // This test verifies the button exists and is clickable
-    // When the onClick handler is added, it should call navigator.clipboard.writeText
-    await waitFor(
-      () => {
-        // If clipboard is called, verify it
-        if (mockWriteText.mock.calls.length > 0) {
-          expect(mockWriteText).toHaveBeenCalledWith('rtsp://192.168.1.100:554/main');
-        } else {
-          // Otherwise, just verify button was clicked (button exists and is functional)
-          expect(copyButton).toBeInTheDocument();
-        }
-      },
-      { timeout: 3000 },
-    );
-  });
-
-  it('should render preset buttons', () => {
+  it('should render preset buttons', async () => {
     renderWithProviders(<LiveViewPage />);
     expect(screen.getByTestId('liveview-presets-title')).toHaveTextContent('Presets');
-    expect(screen.getByTestId('liveview-preset-1-label')).toHaveTextContent('Preset 1');
-    expect(screen.getByTestId('liveview-preset-2-label')).toHaveTextContent('Preset 2');
-    expect(screen.getByTestId('liveview-preset-3-label')).toHaveTextContent('Preset 3');
+
+    // Preset data is loaded asynchronously from the mocked getPresets service
+    await waitFor(() => {
+      expect(screen.getByTestId('liveview-preset-1-button')).toBeInTheDocument();
+    });
+    expect(screen.getByTestId('liveview-preset-2-button')).toBeInTheDocument();
+    expect(screen.getByTestId('liveview-preset-3-button')).toBeInTheDocument();
     expect(screen.getByTestId('liveview-add-preset-label')).toHaveTextContent('+ Add Preset');
   });
 
   it('should render PTZ control buttons', () => {
     renderWithProviders(<LiveViewPage />);
-    // PTZ control panel should be rendered
     expect(screen.getByTestId('liveview-ptz-title')).toHaveTextContent('Pan & Tilt');
-    expect(screen.getByTestId('liveview-ptz-description')).toHaveTextContent('PTZ camera controls');
-    // PTZ buttons are rendered (home button and directional buttons)
-    const buttons = screen.getAllByRole('button');
-    expect(buttons.length).toBeGreaterThan(0);
+    const directions = ['up', 'down', 'left', 'right', 'up-left', 'up-right', 'down-left', 'down-right'];
+    for (const dir of directions) {
+      expect(screen.getByTestId(`liveview-ptz-${dir}-button`)).toBeInTheDocument();
+    }
+    expect(screen.getByTestId('liveview-ptz-home-button')).toBeInTheDocument();
   });
 
   it('should render LIVE indicator', () => {
@@ -159,99 +170,195 @@ describe('LiveViewPage', () => {
     const speedSlider = screen.getByTestId('liveview-ptz-speed-slider');
     expect(speedSlider).toHaveValue('50');
 
-    // For range inputs, we need to use fireEvent or directly set value
-    // Since userEvent doesn't support range inputs well, we'll test that the slider exists
-    // and can be interacted with by clicking/dragging (which is hard to test programmatically)
-
-    // Verify slider properties using getAttribute
     expect(speedSlider.getAttribute('type')).toBe('range');
     expect(speedSlider.getAttribute('min')).toBe('1');
     expect(speedSlider.getAttribute('max')).toBe('100');
   });
 
-  it('should handle PTZ up button', async () => {
-    const user = userEvent.setup();
-    renderWithProviders(<LiveViewPage />);
+  describe('PTZ controls with real backend', () => {
+    it('should call continuousMove on mousedown of directional button', async () => {
+      const { continuousMove: mockContinuousMove } = await import('@/services/ptzService');
+      renderWithProviders(<LiveViewPage />);
 
-    // Find PTZ up button
-    const upButton = screen.getByTestId('liveview-ptz-up-button');
-    expect(upButton).toBeInTheDocument();
+      // Wait for profiles + presets queries to resolve (preset names prove profileToken is set)
+      await waitFor(() => {
+        expect(screen.getByTestId('liveview-preset-1-label')).toHaveTextContent('Front Door');
+      });
 
-    await user.click(upButton);
-    // handlePtz is called but doesn't do anything yet (stub)
-    // Just verify button is clickable
-    expect(upButton).toBeInTheDocument();
-  });
+      const upButton = screen.getByTestId('liveview-ptz-up-button');
+      fireEvent.mouseDown(upButton);
 
-  it('should handle PTZ home button', async () => {
-    const user = userEvent.setup();
-    renderWithProviders(<LiveViewPage />);
+      await waitFor(() => {
+        expect(mockContinuousMove).toHaveBeenCalledWith('ProfileToken1', 'up', 50);
+      });
+    });
 
-    // Find home button
-    const homeButton = screen.getByTestId('liveview-ptz-home-button');
-    expect(homeButton).toBeInTheDocument();
+    it('should call stopMove on mouseup of directional button', async () => {
+      const { stopMove: mockStopMove } = await import('@/services/ptzService');
+      renderWithProviders(<LiveViewPage />);
 
-    await user.click(homeButton);
-    // handlePtz('home') is called
-    expect(homeButton).toBeInTheDocument();
-  });
+      await waitFor(() => {
+        expect(screen.getByTestId('liveview-preset-1-label')).toHaveTextContent('Front Door');
+      });
 
-  it('should handle PTZ directional buttons', async () => {
-    const user = userEvent.setup();
-    renderWithProviders(<LiveViewPage />);
+      const upButton = screen.getByTestId('liveview-ptz-up-button');
+      fireEvent.mouseDown(upButton);
+      fireEvent.mouseUp(upButton);
 
-    // Find all PTZ buttons
-    const ptzButtons = [
-      screen.getByTestId('liveview-ptz-up-button'),
-      screen.getByTestId('liveview-ptz-down-button'),
-      screen.getByTestId('liveview-ptz-left-button'),
-      screen.getByTestId('liveview-ptz-right-button'),
-      screen.getByTestId('liveview-ptz-up-left-button'),
-      screen.getByTestId('liveview-ptz-up-right-button'),
-      screen.getByTestId('liveview-ptz-down-left-button'),
-      screen.getByTestId('liveview-ptz-down-right-button'),
-    ];
+      await waitFor(() => {
+        expect(mockStopMove).toHaveBeenCalledWith('ProfileToken1');
+      });
+    });
 
-    // Click each PTZ button
-    for (const button of ptzButtons) {
-      expect(button).toBeInTheDocument();
-      await user.click(button);
-    }
-  });
+    it('should call stopMove on mouseleave of directional button', async () => {
+      const { stopMove: mockStopMove } = await import('@/services/ptzService');
+      renderWithProviders(<LiveViewPage />);
 
-  it('should handle preset button clicks', async () => {
-    const user = userEvent.setup();
-    renderWithProviders(<LiveViewPage />);
+      await waitFor(() => {
+        expect(screen.getByTestId('liveview-preset-1-label')).toHaveTextContent('Front Door');
+      });
 
-    const preset1Button = screen.getByTestId('liveview-preset-1-button');
-    expect(preset1Button).toBeInTheDocument();
+      const leftButton = screen.getByTestId('liveview-ptz-left-button');
+      fireEvent.mouseDown(leftButton);
+      fireEvent.mouseLeave(leftButton);
 
-    await user.click(preset1Button);
-    // Preset buttons are clickable but handlers may not be implemented yet
-    expect(preset1Button).toBeInTheDocument();
-  });
+      await waitFor(() => {
+        expect(mockStopMove).toHaveBeenCalledWith('ProfileToken1');
+      });
+    });
 
-  it('should handle add preset button click', async () => {
-    const user = userEvent.setup();
-    renderWithProviders(<LiveViewPage />);
+    it('should call gotoHome on home button click', async () => {
+      const user = userEvent.setup();
+      const { gotoHome: mockGotoHome } = await import('@/services/ptzService');
+      renderWithProviders(<LiveViewPage />);
 
-    const addPresetButton = screen.getByTestId('liveview-add-preset-button');
-    expect(addPresetButton).toBeInTheDocument();
+      await waitFor(() => {
+        expect(screen.getByTestId('liveview-ptz-home-button')).toBeInTheDocument();
+      });
 
-    await user.click(addPresetButton);
-    // Add preset button is clickable
-    expect(addPresetButton).toBeInTheDocument();
+      const homeButton = screen.getByTestId('liveview-ptz-home-button');
+      await user.click(homeButton);
+
+      await waitFor(() => {
+        expect(mockGotoHome).toHaveBeenCalledWith('ProfileToken1');
+      });
+    });
+
+    it('should call continuousMove for all 8 directional buttons', async () => {
+      const { continuousMove: mockContinuousMove } = await import('@/services/ptzService');
+      renderWithProviders(<LiveViewPage />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('liveview-preset-1-label')).toHaveTextContent('Front Door');
+      });
+
+      const directions = [
+        'up', 'down', 'left', 'right',
+        'up-left', 'up-right', 'down-left', 'down-right',
+      ];
+
+      for (const direction of directions) {
+        vi.mocked(mockContinuousMove).mockClear();
+        const button = screen.getByTestId(`liveview-ptz-${direction}-button`);
+        fireEvent.mouseDown(button);
+
+        await waitFor(() => {
+          expect(mockContinuousMove).toHaveBeenCalledWith('ProfileToken1', direction, 50);
+        });
+      }
+    });
+
+    it('should call gotoPreset when preset button is clicked', async () => {
+      const user = userEvent.setup();
+      const { gotoPreset: mockGotoPreset } = await import('@/services/ptzService');
+      renderWithProviders(<LiveViewPage />);
+
+      // Wait for presets to load
+      await waitFor(() => {
+        expect(screen.getByTestId('liveview-preset-1-button')).toBeInTheDocument();
+      });
+
+      const presetButton = screen.getByTestId('liveview-preset-1-button');
+      await user.click(presetButton);
+
+      await waitFor(() => {
+        expect(mockGotoPreset).toHaveBeenCalledWith('ProfileToken1', 'preset1');
+      });
+    });
+
+    it('should call setPreset when add preset button is clicked', async () => {
+      const user = userEvent.setup();
+      const { setPreset: mockSetPreset } = await import('@/services/ptzService');
+      renderWithProviders(<LiveViewPage />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('liveview-preset-1-label')).toHaveTextContent('Front Door');
+      });
+
+      const addButton = screen.getByTestId('liveview-add-preset-button');
+      await user.click(addButton);
+
+      await waitFor(() => {
+        expect(mockSetPreset).toHaveBeenCalledWith('ProfileToken1', expect.any(String), undefined);
+      });
+    });
+
+    it('should call removePreset when preset settings button is clicked', async () => {
+      const user = userEvent.setup();
+      const { removePreset: mockRemovePreset } = await import('@/services/ptzService');
+      renderWithProviders(<LiveViewPage />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('liveview-preset-1-settings-button')).toBeInTheDocument();
+      });
+
+      const settingsButton = screen.getByTestId('liveview-preset-1-settings-button');
+      await user.click(settingsButton);
+
+      await waitFor(() => {
+        expect(mockRemovePreset).toHaveBeenCalledWith('ProfileToken1', 'preset1');
+      });
+    });
+
+    it('should display preset names from backend', async () => {
+      renderWithProviders(<LiveViewPage />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('liveview-preset-1-label')).toHaveTextContent('Front Door');
+      });
+      expect(screen.getByTestId('liveview-preset-2-label')).toHaveTextContent('Back Yard');
+      expect(screen.getByTestId('liveview-preset-3-label')).toHaveTextContent('Garage');
+    });
+
+    it('should show error toast when PTZ move fails', async () => {
+      const { continuousMove: mockContinuousMove } = await import('@/services/ptzService');
+      const { toast } = await import('sonner');
+      vi.mocked(mockContinuousMove).mockRejectedValueOnce(new Error('Connection refused'));
+
+      renderWithProviders(<LiveViewPage />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('liveview-preset-1-label')).toHaveTextContent('Front Door');
+      });
+
+      const upButton = screen.getByTestId('liveview-ptz-up-button');
+      fireEvent.mouseDown(upButton);
+
+      await waitFor(() => {
+        expect(toast.error).toHaveBeenCalledWith('PTZ move failed', {
+          description: 'Connection refused',
+        });
+      });
+    });
   });
 
   it('should handle preset settings button clicks', async () => {
     renderWithProviders(<LiveViewPage />);
 
-    // Find settings buttons for presets
     const settingsButton1 = screen.getByTestId('liveview-preset-1-settings-button');
     const settingsButton2 = screen.getByTestId('liveview-preset-2-settings-button');
     const settingsButton3 = screen.getByTestId('liveview-preset-3-settings-button');
 
-    // Settings buttons should be present
     expect(settingsButton1).toBeInTheDocument();
     expect(settingsButton2).toBeInTheDocument();
     expect(settingsButton3).toBeInTheDocument();

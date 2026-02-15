@@ -76,6 +76,18 @@ describe('userService', () => {
         expect.stringContaining('<tt:UserLevel>User</tt:UserLevel>'),
       );
     });
+
+    it('should escape XML special characters in create user payload', async () => {
+      const mockResponse = createMockSOAPResponse('<CreateUsersResponse />');
+
+      vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
+
+      await createUser('new<user>&"\'"', 'pass<word>&"\'"', 'User');
+
+      const payload = vi.mocked(apiClient.post).mock.calls[0][1] as string;
+      expect(payload).toContain('<tt:Username>new&lt;user&gt;&amp;&quot;&apos;&quot;</tt:Username>');
+      expect(payload).toContain('<tt:Password>pass&lt;word&gt;&amp;&quot;&apos;&quot;</tt:Password>');
+    });
   });
 
   describe('deleteUser', () => {
@@ -91,6 +103,17 @@ describe('userService', () => {
         expect.stringContaining('<tds:Username>olduser</tds:Username>'),
       );
     });
+
+    it('should escape XML special characters in delete user payload', async () => {
+      const mockResponse = createMockSOAPResponse('<DeleteUsersResponse />');
+
+      vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
+
+      await deleteUser('old<user>&"\'"');
+
+      const payload = vi.mocked(apiClient.post).mock.calls[0][1] as string;
+      expect(payload).toContain('<tds:Username>old&lt;user&gt;&amp;&quot;&apos;&quot;</tds:Username>');
+    });
   });
 
   describe('setUser', () => {
@@ -105,6 +128,18 @@ describe('userService', () => {
         '/onvif/device_service',
         expect.stringContaining('<tt:Username>admin</tt:Username>'),
       );
+    });
+
+    it('should escape XML special characters in set user payload', async () => {
+      const mockResponse = createMockSOAPResponse('<SetUserResponse />');
+
+      vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
+
+      await setUser('ad<min>&"\'"', 'new<password>&"\'"', 'Administrator');
+
+      const payload = vi.mocked(apiClient.post).mock.calls[0][1] as string;
+      expect(payload).toContain('<tt:Username>ad&lt;min&gt;&amp;&quot;&apos;&quot;</tt:Username>');
+      expect(payload).toContain('<tt:Password>new&lt;password&gt;&amp;&quot;&apos;&quot;</tt:Password>');
     });
   });
 });

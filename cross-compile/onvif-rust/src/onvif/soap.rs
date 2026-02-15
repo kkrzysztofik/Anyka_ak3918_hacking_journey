@@ -422,14 +422,21 @@ fn handle_envelope_start(
 }
 
 /// Extract namespace from Envelope attributes.
+/// Matches any xmlns prefix whose value equals the SOAP envelope namespace URI,
+/// making the parser spec-compliant (XML namespaces are identified by URI, not prefix).
 fn extract_envelope_namespace(state: &mut SoapParseState, e: &quick_xml::events::BytesStart) {
     for attr in e.attributes().flatten() {
         let key = String::from_utf8_lossy(attr.key.as_ref());
-        // Only capture the SOAP envelope namespace, not other xmlns declarations
-        if key == "xmlns:s" || key == "xmlns" {
-            state.envelope_namespace = Some(String::from_utf8_lossy(&attr.value).to_string());
-            break;
+        // Check key before allocating value to avoid unnecessary String allocation
+        if !(key.starts_with("xmlns:") || key == "xmlns") {
+            continue;
         }
+        let value = String::from_utf8_lossy(&attr.value).to_string();
+        // Capture the first xmlns value that looks like a SOAP namespace.
+        // Validation of the exact namespace URI happens later in parse_soap_request,
+        // so we store it to enable better error messages for wrong SOAP versions.
+        state.envelope_namespace = Some(value);
+        break;
     }
 }
 

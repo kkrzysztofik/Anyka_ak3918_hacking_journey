@@ -280,9 +280,9 @@ describe('ImagingPage', () => {
   });
 
   describe('Edge Cases', () => {
-    it('should use default values when options is undefined', async () => {
+    it('should use default values when options are missing', async () => {
       vi.mocked(getImagingOptions).mockResolvedValue(
-        undefined as unknown as typeof MOCK_DATA.imaging.options,
+        null as unknown as typeof MOCK_DATA.imaging.options,
       );
 
       renderWithProviders(<ImagingPage />);
@@ -321,9 +321,9 @@ describe('ImagingPage', () => {
       );
     });
 
-    it('should use fallback defaults for slider min/max when options are undefined', async () => {
+    it('should use fallback defaults for slider min/max when options are missing', async () => {
       vi.mocked(getImagingOptions).mockResolvedValue(
-        undefined as unknown as typeof MOCK_DATA.imaging.options,
+        null as unknown as typeof MOCK_DATA.imaging.options,
       );
 
       renderWithProviders(<ImagingPage />);

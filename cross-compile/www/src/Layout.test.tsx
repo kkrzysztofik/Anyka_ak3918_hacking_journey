@@ -221,7 +221,7 @@ describe('Layout', () => {
       });
 
       // Click outside button (the backdrop)
-      const backdrop = screen.getByLabelText('Close menu');
+      const backdrop = screen.getByTestId('layout-menu-backdrop');
       await user.click(backdrop);
 
       await waitFor(() => {
@@ -322,7 +322,7 @@ describe('Layout', () => {
     it('should render outlet for child routes', () => {
       renderLayout();
       // Outlet is rendered by react-router, we just verify the main structure exists
-      const main = screen.getByRole('main');
+      const main = screen.getByTestId('layout-main-content');
       expect(main).toBeInTheDocument();
     });
   });

@@ -3,6 +3,7 @@ import { Outlet } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AuthProvider } from '@/hooks/useAuth';
+import { createEncryptedFixture } from '@/test/componentTestHelpers';
 
 import AppRouter, { LoadingFallback } from './index';
 
@@ -75,7 +76,7 @@ describe('Router', () => {
         'onvif_camera_auth',
         JSON.stringify({
           username: 'admin',
-          encryptedPassword: { iv: 'test', data: 'test', tag: 'test' },
+          encryptedPassword: createEncryptedFixture(),
         }),
       );
     };

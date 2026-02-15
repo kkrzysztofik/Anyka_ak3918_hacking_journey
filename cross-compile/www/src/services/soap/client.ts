@@ -19,6 +19,7 @@ const DEVICE_NS = 'http://www.onvif.org/ver10/device/wsdl'; // NOSONAR
 const MEDIA_NS = 'http://www.onvif.org/ver10/media/wsdl'; // NOSONAR
 const IMAGING_NS = 'http://www.onvif.org/ver20/imaging/wsdl'; // NOSONAR
 const PTZ_NS = 'http://www.onvif.org/ver20/ptz/wsdl'; // NOSONAR
+const TT_NS = 'http://www.onvif.org/ver10/schema'; // NOSONAR
 
 /**
  * Performs a SOAP request to the specified endpoint.
@@ -76,6 +77,7 @@ const parserOptions = {
   removeNSPrefix: true,
   parseTagValue: true,
   trimValues: true,
+  processEntities: false,
 };
 
 const parser = new XMLParser(parserOptions);
@@ -121,11 +123,11 @@ export function escapeXmlAttribute(input: string): string {
  */
 export function createSOAPEnvelope(body: string): string {
   return `<?xml version="1.0" encoding="UTF-8"?>
-<soap:Envelope xmlns:soap="${SOAP_NS}" xmlns:tds="${DEVICE_NS}" xmlns:trt="${MEDIA_NS}" xmlns:timg="${IMAGING_NS}" xmlns:tptz="${PTZ_NS}">
-  <soap:Body>
+<s:Envelope xmlns:s="${SOAP_NS}" xmlns:tds="${DEVICE_NS}" xmlns:trt="${MEDIA_NS}" xmlns:timg="${IMAGING_NS}" xmlns:tptz="${PTZ_NS}" xmlns:tt="${TT_NS}">
+  <s:Body>
     ${body}
-  </soap:Body>
-</soap:Envelope>`;
+  </s:Body>
+</s:Envelope>`;
 }
 
 /**
@@ -231,6 +233,44 @@ export const soapBodies = {
       .join('');
     return `<tds:RestoreSystem><tds:BackupFiles>${filesXml}</tds:BackupFiles></tds:RestoreSystem>`;
   },
+
+  // PTZ service
+  continuousMove: (profileToken: string, panSpeed: number, tiltSpeed: number) => {
+    // Helper to round floating-point speeds to 3 decimal places for stable XML output
+    const formatSpeed = (speed: number): string => {
+      if (!Number.isFinite(speed)) {
+        return '0';
+      }
+      // Clamp to 3 decimal places and convert to string, removing trailing zeros
+      return (Math.round(speed * 1000) / 1000).toFixed(3).replace(/\.?0+$/, '');
+    };
+    return `<tptz:ContinuousMove><tptz:ProfileToken>${escapeXml(profileToken)}</tptz:ProfileToken><tptz:Velocity><tt:PanTilt x="${formatSpeed(panSpeed)}" y="${formatSpeed(tiltSpeed)}" /></tptz:Velocity></tptz:ContinuousMove>`;
+  },
+
+  ptzStop: (profileToken: string) =>
+    `<tptz:Stop><tptz:ProfileToken>${escapeXml(profileToken)}</tptz:ProfileToken><tptz:PanTilt>true</tptz:PanTilt><tptz:Zoom>true</tptz:Zoom></tptz:Stop>`,
+
+  gotoHomePosition: (profileToken: string) =>
+    `<tptz:GotoHomePosition><tptz:ProfileToken>${escapeXml(profileToken)}</tptz:ProfileToken></tptz:GotoHomePosition>`,
+
+  getPTZStatus: (profileToken: string) =>
+    `<tptz:GetStatus><tptz:ProfileToken>${escapeXml(profileToken)}</tptz:ProfileToken></tptz:GetStatus>`,
+
+  getPresets: (profileToken: string) =>
+    `<tptz:GetPresets><tptz:ProfileToken>${escapeXml(profileToken)}</tptz:ProfileToken></tptz:GetPresets>`,
+
+  gotoPreset: (profileToken: string, presetToken: string) =>
+    `<tptz:GotoPreset><tptz:ProfileToken>${escapeXml(profileToken)}</tptz:ProfileToken><tptz:PresetToken>${escapeXml(presetToken)}</tptz:PresetToken></tptz:GotoPreset>`,
+
+  setPreset: (profileToken: string, presetName: string, presetToken?: string) => {
+    const presetTokenXml = presetToken
+      ? '<tptz:PresetToken>' + escapeXml(presetToken) + '</tptz:PresetToken>'
+      : '';
+    return `<tptz:SetPreset><tptz:ProfileToken>${escapeXml(profileToken)}</tptz:ProfileToken>${presetTokenXml}<tptz:PresetName>${escapeXml(presetName)}</tptz:PresetName></tptz:SetPreset>`;
+  },
+
+  removePreset: (profileToken: string, presetToken: string) =>
+    `<tptz:RemovePreset><tptz:ProfileToken>${escapeXml(profileToken)}</tptz:ProfileToken><tptz:PresetToken>${escapeXml(presetToken)}</tptz:PresetToken></tptz:RemovePreset>`,
 };
 
 export { parser, builder };

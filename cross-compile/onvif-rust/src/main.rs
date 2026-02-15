@@ -12,7 +12,11 @@ use bytes::BytesMut;
 use clap::Parser;
 use onvif_rust::app::{Application, DEFAULT_CONFIG_PATH};
 use onvif_rust::config::{ConfigRuntime, ConfigStorage};
-use onvif_rust::platform::{Platform, ValidationPlatform};
+#[cfg(not(use_stubs))]
+use onvif_rust::platform::AnykaPlatform;
+use onvif_rust::platform::Platform;
+#[cfg(use_stubs)]
+use onvif_rust::platform::ValidationPlatform;
 use onvif_rust::validation::h264_playback::{H264PlaybackConfig, H264PlaybackMode};
 use onvif_rust::validation::httpflv_remux::ValidationHttpFlvRemuxer;
 use onvif_rust::validation::stream_auth::build_stream_auth_for_validation_mode;
@@ -799,7 +803,7 @@ async fn run_validation_mode(config: H264PlaybackConfig, config_path: &str) -> R
     tracing::info!("H264 playback stopped");
 
     platform.shutdown().await?;
-    tracing::info!("ValidationPlatform shutdown");
+    tracing::info!("Platform shutdown complete");
 
     video_publisher.stop_publishing().await;
     tracing::info!("MockVideoPublisher stopped");
@@ -1080,11 +1084,24 @@ fn spawn_streamhub_event_loop(mut streamhub: StreamsHub) -> tokio::task::JoinHan
     })
 }
 
-async fn create_and_init_platform() -> Result<Arc<ValidationPlatform>> {
-    let platform = Arc::new(ValidationPlatform::new());
-    platform.initialize().await?;
-    tracing::info!("ValidationPlatform initialized");
-    Ok(platform)
+async fn create_and_init_platform() -> Result<Arc<dyn Platform>> {
+    #[cfg(not(use_stubs))]
+    {
+        // On real hardware (ARM cross-compile), use AnykaPlatform which
+        // provides actual PTZ, imaging, and network control via FFI.
+        let platform = AnykaPlatform::new().context("Failed to create AnykaPlatform")?;
+        platform.initialize().await?;
+        tracing::info!("AnykaPlatform initialized (real hardware)");
+        Ok(Arc::new(platform) as Arc<dyn Platform>)
+    }
+    #[cfg(use_stubs)]
+    {
+        // On development builds (x86_64), use ValidationPlatform for testing.
+        let platform = ValidationPlatform::new();
+        platform.initialize().await?;
+        tracing::info!("ValidationPlatform initialized (stub mode)");
+        Ok(Arc::new(platform) as Arc<dyn Platform>)
+    }
 }
 
 async fn start_onvif_application(
@@ -1108,7 +1125,7 @@ async fn start_onvif_application(
 
 async fn init_playback_mode(
     config: H264PlaybackConfig,
-    platform: Arc<ValidationPlatform>,
+    platform: Arc<dyn Platform>,
 ) -> Result<H264PlaybackMode> {
     let playback_mode = H264PlaybackMode::new(config.clone());
     playback_mode.initialize(platform).await?;

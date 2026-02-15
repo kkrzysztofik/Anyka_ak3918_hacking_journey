@@ -8,7 +8,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { verifyCredentials } from '@/services/authService';
 import {
   createDelayedPromise,
-  // This import should remain as createDelayedPromise is now exported from componentTestHelpers
+  createEncryptedFixture,
   mockToast,
   renderWithProviders,
   verifyPasswordVisibilityToggle,
@@ -162,7 +162,7 @@ describe('LoginPage', () => {
       'onvif_camera_auth',
       JSON.stringify({
         username: 'admin',
-        encryptedPassword: { iv: 'test', data: 'test', tag: 'test' },
+        encryptedPassword: createEncryptedFixture(),
       }),
     );
 
@@ -179,7 +179,7 @@ describe('LoginPage', () => {
       'onvif_camera_auth',
       JSON.stringify({
         username: 'admin',
-        encryptedPassword: { iv: 'test', data: 'test', tag: 'test' },
+        encryptedPassword: createEncryptedFixture(),
       }),
     );
 
@@ -199,7 +199,7 @@ describe('LoginPage', () => {
       'onvif_camera_auth',
       JSON.stringify({
         username: 'admin',
-        encryptedPassword: { iv: 'test', data: 'test', tag: 'test' },
+        encryptedPassword: createEncryptedFixture(),
       }),
     );
 

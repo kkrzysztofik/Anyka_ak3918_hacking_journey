@@ -28,7 +28,9 @@ use crate::lifecycle::startup::{StartupPhase, StartupProgress};
 use crate::lifecycle::{RuntimeError, ShutdownReport, StartupError};
 use crate::onvif::ptz::PTZStateManager;
 use crate::onvif::server::{OnvifServer, OnvifServerConfig};
-use crate::platform::{Platform, StubPlatformBuilder};
+use crate::platform::Platform;
+#[cfg(use_stubs)]
+use crate::platform::StubPlatformBuilder;
 use crate::security::RateLimiter;
 use crate::users::password::PasswordManager;
 use crate::users::storage::UserStorage;
@@ -575,26 +577,7 @@ impl Application {
 
         // Phase 2: Platform
         progress.begin_phase(StartupPhase::Platform);
-        // Platform initialization is optional - we continue without it for testing
-        let stub_platform = StubPlatformBuilder::new()
-            .ptz_supported(true)
-            .imaging_supported(true)
-            .build();
-
-        let platform: Option<Arc<dyn Platform>> = match stub_platform.initialize().await {
-            Ok(()) => {
-                tracing::info!("Platform initialized successfully (using stub)");
-                Some(Arc::new(stub_platform) as Arc<dyn Platform>)
-            }
-            Err(e) => {
-                tracing::warn!(
-                    "Platform initialization failed, continuing in degraded mode: {}",
-                    e
-                );
-                progress.record_degraded("platform", e.to_string());
-                None
-            }
-        };
+        let platform = Self::init_platform(&mut progress).await;
         progress.complete_phase();
 
         // Phase 3: Services - Build AppState
@@ -785,6 +768,61 @@ impl Application {
             memory_logging_task,
             rate_limiter_cleanup_task,
         })
+    }
+
+    /// Initialize the platform abstraction layer.
+    ///
+    /// On real hardware (`cfg(not(use_stubs))`), creates and initializes `AnykaPlatform`.
+    /// On dev builds (`cfg(use_stubs)`), creates a `StubPlatform` for testing.
+    /// Returns `None` in degraded mode if initialization fails (non-fatal).
+    async fn init_platform(progress: &mut StartupProgress) -> Option<Arc<dyn Platform>> {
+        #[cfg(not(use_stubs))]
+        {
+            match crate::platform::AnykaPlatform::new() {
+                Ok(p) => match p.initialize().await {
+                    Ok(()) => {
+                        tracing::info!("AnykaPlatform initialized (real hardware)");
+                        return Some(Arc::new(p) as Arc<dyn Platform>);
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            "AnykaPlatform initialization failed, continuing in degraded mode: {}",
+                            e
+                        );
+                        progress.record_degraded("platform", e.to_string());
+                    }
+                },
+                Err(e) => {
+                    tracing::warn!(
+                        "AnykaPlatform creation failed, continuing in degraded mode: {}",
+                        e
+                    );
+                    progress.record_degraded("platform", e.to_string());
+                }
+            }
+            None
+        }
+        #[cfg(use_stubs)]
+        {
+            let stub_platform = StubPlatformBuilder::new()
+                .ptz_supported(true)
+                .imaging_supported(true)
+                .build();
+            match stub_platform.initialize().await {
+                Ok(()) => {
+                    tracing::info!("Platform initialized (stub mode)");
+                    Some(Arc::new(stub_platform) as Arc<dyn Platform>)
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        "Stub platform initialization failed, continuing in degraded mode: {}",
+                        e
+                    );
+                    progress.record_degraded("platform", e.to_string());
+                    None
+                }
+            }
+        }
     }
 
     /// Start the application with a custom platform abstraction.

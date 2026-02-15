@@ -8,7 +8,7 @@ description = "Rust rewrite of the Anyka ONVIF services stack"
 doctest = false
 
 [dependencies]
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "net", "sync"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "net", "sync", "time"] }
 axum = "0.8"
 axum-extra = { version = "0.10", features = ["typed-header"] }
 headers = "0.4"
@@ -19,7 +19,7 @@ toml = "0.9"
 serde = { version = "1.0", features = ["derive"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-tracing-appender = "0.2"
+tracing-appender = "0.2.3"
 tracing-log = "0.2"
 argon2 = "0.5"
 sha1 = "0.10"
@@ -33,7 +33,7 @@ chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1.18", features = ["v4"] }
 parking_lot = "0.12"
 dashmap = "6.1"
-bytes = "1.11"
+bytes = "1.11.1"
 http-body-util = "0.1"
 libc = "0.2"
 anyhow = "1.0"

@@ -4,7 +4,7 @@
  * SOAP operations for network configuration.
  */
 import { ENDPOINTS } from '@/services/api';
-import { soapRequest } from '@/services/soap/client';
+import { escapeXml, soapRequest } from '@/services/soap/client';
 import { safeString } from '@/utils/safeString';
 
 /**
@@ -131,17 +131,20 @@ export async function setNetworkInterface(
   address?: string,
   prefixLength?: number,
 ): Promise<void> {
+  const escapedToken = escapeXml(token);
+  const escapedAddress = address ? escapeXml(address) : undefined;
+
   const manualConfig =
-    !dhcp && address
-      ? `<tt:Manual><tt:Address>${address}</tt:Address><tt:PrefixLength>${prefixLength || 24}</tt:PrefixLength></tt:Manual>`
+    !dhcp && escapedAddress
+      ? `<tt:Manual><tt:Address>${escapedAddress}</tt:Address><tt:PrefixLength>${prefixLength || 24}</tt:PrefixLength></tt:Manual>`
       : '';
 
   const body = `<tds:SetNetworkInterfaces>
-    <tds:InterfaceToken>${token}</tds:InterfaceToken>
+    <tds:InterfaceToken>${escapedToken}</tds:InterfaceToken>
     <tds:NetworkInterface>
       <tt:IPv4>
         <tt:Enabled>true</tt:Enabled>
-        <tt:DHCP>${dhcp}</tt:DHCP>
+        <tt:DHCP>${escapeXml(String(dhcp))}</tt:DHCP>
         ${manualConfig}
       </tt:IPv4>
     </tds:NetworkInterface>
@@ -159,13 +162,13 @@ export async function setDNS(_fromDHCP: boolean, dnsServers?: string[]): Promise
       ? dnsServers
           .map(
             (ip) =>
-              `<tds:DNSManual><tt:Type>IPv4</tt:Type><tt:IPv4Address>${ip}</tt:IPv4Address></tds:DNSManual>`,
+              `<tds:DNSManual><tt:Type>IPv4</tt:Type><tt:IPv4Address>${escapeXml(ip)}</tt:IPv4Address></tds:DNSManual>`,
           )
           .join('')
       : '';
 
   const body = `<tds:SetDNS>
-    <tds:FromDHCP>${_fromDHCP}</tds:FromDHCP>
+    <tds:FromDHCP>${escapeXml(String(_fromDHCP))}</tds:FromDHCP>
     ${manualDNS}
   </tds:SetDNS>`;
 
