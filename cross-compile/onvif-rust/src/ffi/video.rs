@@ -26,7 +26,8 @@
 
 use crate::platform::PlatformError;
 use crate::platform::PlatformResult;
-use std::ffi::c_void;
+use std::ffi::{CString, c_char, c_void};
+use std::path::Path;
 
 #[cfg(not(use_stubs))]
 use crate::ffi::generated::{encode_param, video_channel_attr, video_dev_type, video_resolution};
@@ -39,10 +40,12 @@ use crate::ffi::{AK_FAILED_I32, AK_SUCCESS_I32, Resolution, VideoDevice};
 /// Internal trait for abstracting video FFI calls to enable mocking in tests.
 #[cfg_attr(test, mockall::automock)]
 pub(crate) trait VideoFfiTrait: Send + Sync {
+    fn vi_match_sensor(&self, config_file: *const c_char) -> i32;
     fn vi_open(&self, dev: video_dev_type) -> *mut c_void;
     fn vi_close(&self, handle: *mut c_void) -> i32;
     fn vi_get_sensor_resolution(&self, handle: *mut c_void, res: *mut video_resolution) -> i32;
     fn vi_set_channel_attr(&self, handle: *mut c_void, attr: *const video_channel_attr) -> i32;
+    fn vi_capture_on(&self, handle: *mut c_void) -> i32;
     fn venc_open(&self, param: *const encode_param) -> *mut c_void;
     fn venc_close(&self, handle: *mut c_void) -> i32;
     fn venc_set_rc(&self, enc_handle: *mut c_void, bps: i32) -> i32;
@@ -53,6 +56,19 @@ pub(crate) trait VideoFfiTrait: Send + Sync {
 pub(crate) struct RealVideoFfi;
 
 impl VideoFfiTrait for RealVideoFfi {
+    #[cfg(not(use_stubs))]
+    fn vi_match_sensor(&self, config_file: *const c_char) -> i32 {
+        unsafe extern "C" {
+            fn ak_vi_match_sensor(config_file: *const c_char) -> i32;
+        }
+        unsafe { ak_vi_match_sensor(config_file) }
+    }
+
+    #[cfg(use_stubs)]
+    fn vi_match_sensor(&self, _config_file: *const c_char) -> i32 {
+        AK_SUCCESS_I32
+    }
+
     #[cfg(not(use_stubs))]
     fn vi_open(&self, dev: video_dev_type) -> *mut c_void {
         unsafe extern "C" {
@@ -108,6 +124,19 @@ impl VideoFfiTrait for RealVideoFfi {
 
     #[cfg(use_stubs)]
     fn vi_set_channel_attr(&self, _handle: *mut c_void, _attr: *const video_channel_attr) -> i32 {
+        AK_SUCCESS_I32
+    }
+
+    #[cfg(not(use_stubs))]
+    fn vi_capture_on(&self, handle: *mut c_void) -> i32 {
+        unsafe extern "C" {
+            fn ak_vi_capture_on(handle: *mut c_void) -> i32;
+        }
+        unsafe { ak_vi_capture_on(handle) }
+    }
+
+    #[cfg(use_stubs)]
+    fn vi_capture_on(&self, _handle: *mut c_void) -> i32 {
         AK_SUCCESS_I32
     }
 
@@ -376,6 +405,70 @@ pub fn video_input_set_channel_attr(
     video_input_set_channel_attr_internal(handle, attr, &REAL_VIDEO_FFI)
 }
 
+/// Internal helper that takes FFI trait for testability.
+///
+/// Loads the ISP sensor configuration from the specified path. This must be
+/// called before `ak_vi_open()` so the ISP subsystem has a valid config buffer.
+pub(crate) fn video_input_match_sensor_internal(
+    config_path: &Path,
+    ffi: &dyn VideoFfiTrait,
+) -> PlatformResult<()> {
+    let path_str = config_path.to_str().ok_or_else(|| {
+        PlatformError::InvalidParameter("ISP config path is not valid UTF-8".to_string())
+    })?;
+
+    let c_path = CString::new(path_str).map_err(|_| {
+        PlatformError::InvalidParameter("ISP config path contains null byte".to_string())
+    })?;
+
+    let ret = ffi.vi_match_sensor(c_path.as_ptr());
+    check_result(ret, "ak_vi_match_sensor")
+}
+
+/// Load ISP sensor configuration for the video input subsystem.
+///
+/// This must be called **before** `video_input_open()` to load the binary ISP
+/// configuration that the sensor requires. Without this call, `ak_vi_open()`
+/// will fail because `isp_init()` expects the config buffer to already be loaded.
+///
+/// # Arguments
+///
+/// * `config_path` - Path to the binary ISP config file (e.g., `isp_gc1084.conf`)
+///
+/// # Errors
+///
+/// * `PlatformError::InvalidParameter` if the path is not valid UTF-8 or contains null bytes
+/// * `PlatformError::HardwareFailure` if the SDK rejects the config file
+pub fn video_input_match_sensor(config_path: &Path) -> PlatformResult<()> {
+    video_input_match_sensor_internal(config_path, &REAL_VIDEO_FFI)
+}
+
+/// Internal helper that takes FFI trait for testability.
+pub(crate) fn video_input_capture_on_internal(
+    handle: &VideoInputHandle,
+    ffi: &dyn VideoFfiTrait,
+) -> PlatformResult<()> {
+    let ret = ffi.vi_capture_on(handle.as_ptr());
+    check_result(ret, "ak_vi_capture_on")
+}
+
+/// Start the ISP capture pipeline on the video input device.
+///
+/// This must be called **after** `video_input_set_channel_attr()` to begin
+/// the image capture pipeline. The SDK vendor code calls this as the final
+/// step of video input initialization.
+///
+/// # Arguments
+///
+/// * `handle` - Video input handle from a successful `video_input_open()` call
+///
+/// # Errors
+///
+/// * `PlatformError::HardwareFailure` if the SDK call fails
+pub fn video_input_capture_on(handle: &VideoInputHandle) -> PlatformResult<()> {
+    video_input_capture_on_internal(handle, &REAL_VIDEO_FFI)
+}
+
 /// RAII handle for video encoder.
 ///
 /// This handle automatically closes the video encoder when dropped,
@@ -579,11 +672,7 @@ mod tests {
             fps: 30,
             goplen: 30,
             bps: 2000000,
-            profile: 0,
-            use_chn: 0,
-            enc_grp: 0,
-            br_mode: 0,
-            enc_out_type: 0,
+            ..Default::default()
         };
         let result = video_encoder_open(&param);
         assert!(result.is_ok());
@@ -602,11 +691,7 @@ mod tests {
             fps: 30,
             goplen: 30,
             bps: 2000000,
-            profile: 0,
-            use_chn: 0,
-            enc_grp: 0,
-            br_mode: 0,
-            enc_out_type: 0,
+            ..Default::default()
         };
         let handle = video_encoder_open(&param).unwrap();
         let result = video_encoder_set_rc(&handle, 3000000);
@@ -624,11 +709,7 @@ mod tests {
             fps: 30,
             goplen: 30,
             bps: 2000000,
-            profile: 0,
-            use_chn: 0,
-            enc_grp: 0,
-            br_mode: 0,
-            enc_out_type: 0,
+            ..Default::default()
         };
         let handle = video_encoder_open(&param).unwrap();
         let result = video_encoder_request_idr(&handle);
@@ -910,6 +991,113 @@ mod tests {
         match result {
             Err(PlatformError::HardwareFailure(msg)) => {
                 assert!(msg.contains("ak_venc_set_iframe"));
+            }
+            _ => panic!("Expected HardwareFailure error"),
+        }
+    }
+
+    // ---- Tests for video_input_match_sensor_internal ----
+
+    #[test]
+    fn test_video_input_match_sensor_internal_success() {
+        let mut mock_ffi = MockVideoFfiTrait::new();
+
+        mock_ffi
+            .expect_vi_match_sensor()
+            .times(1)
+            .returning(|_| AK_SUCCESS_I32);
+
+        let path = Path::new("/tmp/sensor/isp_gc1084.conf");
+        let result = video_input_match_sensor_internal(path, &mock_ffi);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_video_input_match_sensor_internal_ffi_failure() {
+        let mut mock_ffi = MockVideoFfiTrait::new();
+
+        mock_ffi
+            .expect_vi_match_sensor()
+            .times(1)
+            .returning(|_| AK_FAILED_I32);
+
+        let path = Path::new("/tmp/sensor/isp_gc1084.conf");
+        let result = video_input_match_sensor_internal(path, &mock_ffi);
+        assert!(result.is_err());
+        match result {
+            Err(PlatformError::HardwareFailure(msg)) => {
+                assert!(msg.contains("ak_vi_match_sensor"));
+            }
+            _ => panic!("Expected HardwareFailure error"),
+        }
+    }
+
+    #[test]
+    fn test_video_input_match_sensor_internal_passes_correct_path() {
+        let mut mock_ffi = MockVideoFfiTrait::new();
+
+        mock_ffi
+            .expect_vi_match_sensor()
+            .withf(|config_file| {
+                let c_str = unsafe { std::ffi::CStr::from_ptr(*config_file) };
+                c_str.to_str().unwrap() == "/etc/jffs2/isp_gc1084.conf"
+            })
+            .times(1)
+            .returning(|_| AK_SUCCESS_I32);
+
+        let path = Path::new("/etc/jffs2/isp_gc1084.conf");
+        let result = video_input_match_sensor_internal(path, &mock_ffi);
+        assert!(result.is_ok());
+    }
+
+    // ---- Tests for video_input_capture_on_internal ----
+
+    #[test]
+    fn test_video_input_capture_on_internal_success() {
+        let mut mock_ffi = MockVideoFfiTrait::new();
+        let vi_handle = VideoInputHandle::test_handle();
+
+        mock_ffi
+            .expect_vi_capture_on()
+            .times(1)
+            .returning(|_| AK_SUCCESS_I32);
+
+        let result = video_input_capture_on_internal(&vi_handle, &mock_ffi);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_video_input_capture_on_internal_ffi_failure() {
+        let mut mock_ffi = MockVideoFfiTrait::new();
+        let vi_handle = VideoInputHandle::test_handle();
+
+        mock_ffi
+            .expect_vi_capture_on()
+            .times(1)
+            .returning(|_| AK_FAILED_I32);
+
+        let result = video_input_capture_on_internal(&vi_handle, &mock_ffi);
+        assert!(result.is_err());
+        match result {
+            Err(PlatformError::HardwareFailure(msg)) => {
+                assert!(msg.contains("ak_vi_capture_on"));
+            }
+            _ => panic!("Expected HardwareFailure error"),
+        }
+    }
+
+    #[test]
+    fn test_video_input_capture_on_internal_unknown_error_code() {
+        let mut mock_ffi = MockVideoFfiTrait::new();
+        let vi_handle = VideoInputHandle::test_handle();
+
+        mock_ffi.expect_vi_capture_on().times(1).returning(|_| -99);
+
+        let result = video_input_capture_on_internal(&vi_handle, &mock_ffi);
+        assert!(result.is_err());
+        match result {
+            Err(PlatformError::HardwareFailure(msg)) => {
+                assert!(msg.contains("error code -99"));
             }
             _ => panic!("Expected HardwareFailure error"),
         }

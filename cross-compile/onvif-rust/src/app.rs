@@ -577,7 +577,7 @@ impl Application {
 
         // Phase 2: Platform
         progress.begin_phase(StartupPhase::Platform);
-        let platform = Self::init_platform(&mut progress).await;
+        let platform = Self::init_platform(&mut progress, &config_runtime).await;
         progress.complete_phase();
 
         // Phase 3: Services - Build AppState
@@ -775,10 +775,19 @@ impl Application {
     /// On real hardware (`cfg(not(use_stubs))`), creates and initializes `AnykaPlatform`.
     /// On dev builds (`cfg(use_stubs)`), creates a `StubPlatform` for testing.
     /// Returns `None` in degraded mode if initialization fails (non-fatal).
-    async fn init_platform(progress: &mut StartupProgress) -> Option<Arc<dyn Platform>> {
+    async fn init_platform(
+        progress: &mut StartupProgress,
+        config_runtime: &Arc<ConfigRuntime>,
+    ) -> Option<Arc<dyn Platform>> {
         #[cfg(not(use_stubs))]
         {
-            match crate::platform::AnykaPlatform::new() {
+            let isp_path = config_runtime
+                .get_string("device.isp_config_path")
+                .ok()
+                .filter(|s| !s.is_empty())
+                .map(std::path::PathBuf::from);
+
+            match crate::platform::AnykaPlatform::with_isp_config(isp_path) {
                 Ok(p) => match p.initialize().await {
                     Ok(()) => {
                         tracing::info!("AnykaPlatform initialized (real hardware)");
@@ -804,6 +813,7 @@ impl Application {
         }
         #[cfg(use_stubs)]
         {
+            let _ = config_runtime; // Not used in stub mode
             let stub_platform = StubPlatformBuilder::new()
                 .ptz_supported(true)
                 .imaging_supported(true)
@@ -1329,6 +1339,7 @@ impl Application {
 mod tests {
     use super::*;
     use crate::lifecycle::health::HealthState;
+    use crate::platform::StubPlatformBuilder;
 
     fn make_application_with_degraded_services(degraded_services: Vec<String>) -> Application {
         let (shutdown_tx, _) = broadcast::channel(SHUTDOWN_CHANNEL_CAPACITY);

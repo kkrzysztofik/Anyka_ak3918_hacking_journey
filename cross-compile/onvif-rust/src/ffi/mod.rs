@@ -29,8 +29,8 @@ pub use ptz::{
 };
 pub use video::{
     VideoEncoderHandle, VideoInputHandle, video_encoder_open, video_encoder_request_idr,
-    video_encoder_set_rc, video_input_get_sensor_resolution, video_input_open,
-    video_input_set_channel_attr,
+    video_encoder_set_rc, video_input_capture_on, video_input_get_sensor_resolution,
+    video_input_match_sensor, video_input_open, video_input_set_channel_attr,
 };
 
 /// Anyka SDK success code as i32 for consistent comparisons.
@@ -94,32 +94,61 @@ pub mod stubs {
         pub max_height: i32,
     }
 
+    /// Encode group type
+    #[repr(C)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+    #[allow(non_camel_case_types)]
+    pub enum EncodeGroupType {
+        #[default]
+        ENCODE_RECORD = 0,
+        ENCODE_MAINCHN_NET = 1,
+        ENCODE_SUBCHN_NET = 2,
+        ENCODE_PICTURE = 3,
+        ENCODE_GRP_NUM = 4,
+    }
+
+    /// Encode use channel
+    #[repr(C)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+    #[allow(non_camel_case_types)]
+    pub enum EncodeUseChn {
+        #[default]
+        ENCODE_MAIN_CHN = 0,
+        ENCODE_SUB_CHN = 1,
+    }
+
     /// Encode output type
     #[repr(C)]
-    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+    #[allow(non_camel_case_types)]
     pub enum EncodeOutputType {
-        H264 = 0,
-        Mjpeg = 1,
-        Hevc = 2,
+        #[default]
+        H264_ENC_TYPE = 0,
+        MJPEG_ENC_TYPE = 1,
+        HEVC_ENC_TYPE = 2,
     }
 
     /// Bitrate control mode
     #[repr(C)]
-    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+    #[allow(non_camel_case_types)]
     pub enum BitrateCtrlMode {
-        Cbr = 0,
-        Vbr = 1,
+        #[default]
+        BR_MODE_CBR = 0,
+        BR_MODE_VBR = 1,
     }
 
     /// Profile mode
     #[repr(C)]
-    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+    #[allow(non_camel_case_types)]
     pub enum ProfileMode {
-        Main = 0,
-        High = 1,
-        Base = 2,
-        HevcMain = 3,
-        HevcMainStill = 4,
+        #[default]
+        PROFILE_MAIN = 0,
+        PROFILE_HIGH = 1,
+        PROFILE_BASE = 2,
+        PROFILE_HEVC_MAIN = 3,
+        PROFILE_HEVC_MAIN_STILL = 4,
     }
 
     /// Encode parameters
@@ -133,11 +162,11 @@ pub mod stubs {
         pub fps: i32,
         pub goplen: i32,
         pub bps: i32,
-        pub profile: i32,
-        pub use_chn: i32,
-        pub enc_grp: i32,
-        pub br_mode: i32,
-        pub enc_out_type: i32,
+        pub profile: ProfileMode,
+        pub use_chn: EncodeUseChn,
+        pub enc_grp: EncodeGroupType,
+        pub br_mode: BitrateCtrlMode,
+        pub enc_out_type: EncodeOutputType,
     }
 
     /// Audio parameters
@@ -236,6 +265,11 @@ mod stub_type_aliases {
     pub type ptz_device = stubs::PtzDevice;
     pub type ptz_feedback_pin = stubs::PtzFeedbackPin;
     pub type ptz_turn_direction = stubs::PtzTurnDirection;
+    pub type profile_mode = stubs::ProfileMode;
+    pub type encode_use_chn = stubs::EncodeUseChn;
+    pub type encode_group_type = stubs::EncodeGroupType;
+    pub type bitrate_ctrl_mode = stubs::BitrateCtrlMode;
+    pub type encode_output_type = stubs::EncodeOutputType;
 }
 
 #[cfg(use_stubs)]
