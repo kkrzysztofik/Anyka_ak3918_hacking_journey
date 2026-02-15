@@ -135,7 +135,7 @@ impl HardwarePTZControl {
         if handle.is_some() {
             return Ok(());
         }
-        let h = ptz_open_internal(self.ffi.as_ref())?;
+        let h = ptz_open_internal(Arc::clone(&self.ffi))?;
         *handle = Some(h);
         Ok(())
     }

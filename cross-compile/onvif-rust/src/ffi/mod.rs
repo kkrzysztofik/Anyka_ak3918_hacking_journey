@@ -153,9 +153,10 @@ pub mod stubs {
     /// PTZ device
     #[repr(C)]
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    #[allow(non_camel_case_types)]
     pub enum PtzDevice {
-        Horizontal = 0,
-        Vertical = 1,
+        PTZ_DEV_H = 0,
+        PTZ_DEV_V = 1,
     }
 
     /// PTZ feedback pin type

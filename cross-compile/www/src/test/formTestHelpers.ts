@@ -68,7 +68,7 @@ export async function fillFormFields(
  */
 export async function submitFormByEvent(
   fieldTestId: string,
-  user?: ReturnType<typeof userEvent.setup>,
+  user: ReturnType<typeof userEvent.setup>,
 ): Promise<void> {
   const field = screen.getByTestId(fieldTestId);
   const form = field.closest('form');
@@ -84,8 +84,7 @@ export async function submitFormByEvent(
   const submitButton = form.querySelector('button[type="submit"]') as HTMLButtonElement | null;
 
   if (submitButton) {
-    const userInstance = user ?? userEvent.setup();
-    await userInstance.click(submitButton);
+    await user.click(submitButton);
     return;
   }
 

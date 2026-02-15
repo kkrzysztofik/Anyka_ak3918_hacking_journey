@@ -28,7 +28,9 @@ use crate::lifecycle::startup::{StartupPhase, StartupProgress};
 use crate::lifecycle::{RuntimeError, ShutdownReport, StartupError};
 use crate::onvif::ptz::PTZStateManager;
 use crate::onvif::server::{OnvifServer, OnvifServerConfig};
-use crate::platform::{Platform, StubPlatformBuilder};
+use crate::platform::Platform;
+#[cfg(use_stubs)]
+use crate::platform::StubPlatformBuilder;
 use crate::security::RateLimiter;
 use crate::users::password::PasswordManager;
 use crate::users::storage::UserStorage;

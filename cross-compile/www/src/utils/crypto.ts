@@ -79,17 +79,23 @@ export async function encrypt(plaintext: string): Promise<EncryptedData> {
   const encoder = new TextEncoder();
   const data = encoder.encode(plaintext);
 
-  const ciphertext = await crypto.subtle.encrypt(
-    { name: 'AES-GCM', iv: iv as Uint8Array<ArrayBuffer> },
-    key,
-    data,
-  );
+  try {
+    const ciphertext = await crypto.subtle.encrypt(
+      { name: 'AES-GCM', iv: iv as Uint8Array<ArrayBuffer> },
+      key,
+      data,
+    );
 
-  return {
-    data: btoa(Array.from(new Uint8Array(ciphertext), (b) => String.fromCodePoint(b)).join('')),
-    iv: btoa(Array.from(iv, (b) => String.fromCodePoint(b)).join('')),
-    method: 'aes-gcm',
-  };
+    return {
+      data: btoa(Array.from(new Uint8Array(ciphertext), (b) => String.fromCodePoint(b)).join('')),
+      iv: btoa(Array.from(iv, (b) => String.fromCodePoint(b)).join('')),
+      method: 'aes-gcm',
+    };
+  } finally {
+    // Overwrite sensitive plaintext buffer to reduce exposure window
+    data.fill(0);
+    iv.fill(0);
+  }
 }
 
 /**
@@ -104,10 +110,16 @@ export async function decrypt(encrypted: EncryptedData): Promise<string> {
   const iv = Uint8Array.from(atob(encrypted.iv), (c) => c.codePointAt(0) ?? 0);
   const ciphertext = Uint8Array.from(atob(encrypted.data), (c) => c.codePointAt(0) ?? 0);
 
-  const decrypted = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, ciphertext);
+  try {
+    const decrypted = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, ciphertext);
 
-  const decoder = new TextDecoder();
-  return decoder.decode(decrypted);
+    const decoder = new TextDecoder();
+    return decoder.decode(decrypted);
+  } finally {
+    // Overwrite sensitive buffers to reduce exposure window
+    iv.fill(0);
+    ciphertext.fill(0);
+  }
 }
 
 /**

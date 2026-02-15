@@ -49,7 +49,8 @@ export async function continuousMove(
 ): Promise<void> {
   const vel = DIRECTION_VELOCITIES[direction];
   if (!vel) throw new Error(`Unknown PTZ direction: ${direction}`);
-  const speed = Math.max(0, Math.min(100, speedPercent)) / 100;
+  const clamped = Number.isFinite(speedPercent) ? speedPercent : 0;
+  const speed = Math.max(0, Math.min(100, clamped)) / 100;
   await soapRequest(
     ENDPOINTS.ptz,
     soapBodies.continuousMove(profileToken, vel.pan * speed, vel.tilt * speed),

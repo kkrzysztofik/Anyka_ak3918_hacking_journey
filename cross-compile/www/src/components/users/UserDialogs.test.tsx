@@ -164,7 +164,7 @@ describe('AddUserDialog', () => {
       );
 
       // Submit form directly - wrap in act()
-      await submitFormByEvent('add-user-username-input');
+      await submitFormByEvent('add-user-username-input', user);
 
       await waitFor(
         () => {
@@ -201,7 +201,7 @@ describe('AddUserDialog', () => {
       );
 
       // Submit form directly - wrap in act()
-      await submitFormByEvent('add-user-username-input');
+      await submitFormByEvent('add-user-username-input', user);
 
       await waitFor(
         () => {
@@ -444,7 +444,7 @@ describe('ChangePasswordDialog', () => {
       );
 
       // Submit form directly
-      await submitFormByEvent('change-password-new-input');
+      await submitFormByEvent('change-password-new-input', user);
 
       await waitFor(
         () => {
@@ -480,7 +480,7 @@ describe('ChangePasswordDialog', () => {
       );
 
       // Submit form
-      await submitFormByEvent('change-password-new-input');
+      await submitFormByEvent('change-password-new-input', user);
 
       await waitFor(
         () => {

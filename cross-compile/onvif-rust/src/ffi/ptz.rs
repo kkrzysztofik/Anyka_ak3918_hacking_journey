@@ -173,6 +173,8 @@ fn check_result(ret: i32, context: &str) -> PlatformResult<()> {
 ///
 /// This handle automatically closes the PTZ device when dropped,
 /// ensuring proper resource cleanup even in error paths.
+/// The handle stores a reference to the FFI implementation used to open
+/// the device, so Drop calls close on the same backend.
 ///
 /// # Thread Safety
 ///
@@ -180,6 +182,7 @@ fn check_result(ret: i32, context: &str) -> PlatformResult<()> {
 /// is safe to send and share between threads.
 pub struct PTZHandle {
     opened: bool,
+    ffi: std::sync::Arc<dyn PtzFfiTrait>,
 }
 
 // SAFETY: PTZHandle is thread-safe - SDK uses internal mutexes.
@@ -190,7 +193,7 @@ unsafe impl Sync for PTZHandle {}
 impl Drop for PTZHandle {
     fn drop(&mut self) {
         if self.opened {
-            let ret = REAL_PTZ_FFI.ptz_close();
+            let ret = self.ffi.ptz_close();
             if ret != AK_SUCCESS_I32 {
                 tracing::error!(
                     "PTZ device close failed in Drop (resource may leak): error code {}",
@@ -215,7 +218,7 @@ impl PTZHandle {
 /// SDK initialization, matching the C adapter's `platform_ptz_init()` sequence.
 /// The self-check calibrates motor positions and transitions the SDK from
 /// `PTZ_WAIT_INIT` to `PTZ_INIT_OK` state.
-pub(crate) fn ptz_open_internal(ffi: &dyn PtzFfiTrait) -> PlatformResult<PTZHandle> {
+pub(crate) fn ptz_open_internal(ffi: std::sync::Arc<dyn PtzFfiTrait>) -> PlatformResult<PTZHandle> {
     let ret = ffi.ptz_open();
     check_result(ret, "ak_drv_ptz_open")?;
 
@@ -231,7 +234,7 @@ pub(crate) fn ptz_open_internal(ffi: &dyn PtzFfiTrait) -> PlatformResult<PTZHand
         // matching the C adapter's behavior.
     }
 
-    Ok(PTZHandle { opened: true })
+    Ok(PTZHandle { opened: true, ffi })
 }
 
 /// Open a PTZ device.
@@ -248,7 +251,7 @@ pub(crate) fn ptz_open_internal(ffi: &dyn PtzFfiTrait) -> PlatformResult<PTZHand
 /// - We validate the result and map errors appropriately
 /// - Handle is wrapped in `PTZHandle` for RAII cleanup
 pub fn ptz_open() -> PlatformResult<PTZHandle> {
-    ptz_open_internal(&REAL_PTZ_FFI)
+    ptz_open_internal(std::sync::Arc::new(RealPtzFfi))
 }
 
 /// Validate pan range (±180 degrees).
@@ -401,8 +404,8 @@ pub(crate) fn ptz_get_step_pos_internal(
     // This ensures the compiler catches any future enum changes at compile time
     // rather than producing silent undefined behavior.
     let sdk_motor = match motor {
-        PtzMotor::Horizontal => ptz_device::PTZ_DEVICE_HORIZONTAL,
-        PtzMotor::Vertical => ptz_device::PTZ_DEVICE_VERTICAL,
+        PtzMotor::Horizontal => ptz_device::PTZ_DEV_H,
+        PtzMotor::Vertical => ptz_device::PTZ_DEV_V,
     };
 
     let result = ffi.ptz_get_step_pos(sdk_motor);
@@ -468,6 +471,16 @@ pub fn ptz_stop(handle: &PTZHandle, direction: PtzDirection) -> PlatformResult<(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Create a test handle that uses a no-op mock for close on drop.
+    fn test_handle() -> PTZHandle {
+        let mut mock = MockPtzFfiTrait::new();
+        mock.expect_ptz_close().returning(|| AK_SUCCESS_I32);
+        PTZHandle {
+            opened: true,
+            ffi: std::sync::Arc::new(mock),
+        }
+    }
 
     #[test]
     fn test_check_result_success() {
@@ -600,8 +613,9 @@ mod tests {
             .expect_ptz_check_self()
             .times(1)
             .returning(|_| AK_SUCCESS_I32);
+        mock_ffi.expect_ptz_close().returning(|| AK_SUCCESS_I32);
 
-        let result = ptz_open_internal(&mock_ffi);
+        let result = ptz_open_internal(std::sync::Arc::new(mock_ffi));
         assert!(result.is_ok());
         let handle = result.unwrap();
         assert!(handle.is_opened());
@@ -616,7 +630,7 @@ mod tests {
             .times(1)
             .returning(|| AK_FAILED_I32);
 
-        let result = ptz_open_internal(&mock_ffi);
+        let result = ptz_open_internal(std::sync::Arc::new(mock_ffi));
         assert!(result.is_err());
         match result {
             Err(PlatformError::HardwareFailure(msg)) => {
@@ -629,7 +643,7 @@ mod tests {
     #[test]
     fn test_ptz_turn_internal_calls_ffi() {
         let mut mock_ffi = MockPtzFfiTrait::new();
-        let handle = PTZHandle { opened: true };
+        let handle = test_handle();
 
         mock_ffi
             .expect_ptz_turn()
@@ -648,7 +662,7 @@ mod tests {
     #[test]
     fn test_ptz_turn_internal_validates_pan_range() {
         let mock_ffi = MockPtzFfiTrait::new();
-        let handle = PTZHandle { opened: true };
+        let handle = test_handle();
 
         // Should fail validation before calling FFI
         let result = ptz_turn_internal(&handle, PtzDirection::Left, 200.0, &mock_ffi);
@@ -664,7 +678,7 @@ mod tests {
     #[test]
     fn test_ptz_turn_internal_validates_tilt_range() {
         let mock_ffi = MockPtzFfiTrait::new();
-        let handle = PTZHandle { opened: true };
+        let handle = test_handle();
 
         // Should fail validation before calling FFI
         let result = ptz_turn_internal(&handle, PtzDirection::Up, 100.0, &mock_ffi);
@@ -680,7 +694,7 @@ mod tests {
     #[test]
     fn test_ptz_turn_internal_propagates_error() {
         let mut mock_ffi = MockPtzFfiTrait::new();
-        let handle = PTZHandle { opened: true };
+        let handle = test_handle();
 
         mock_ffi
             .expect_ptz_turn()
@@ -700,7 +714,7 @@ mod tests {
     #[test]
     fn test_ptz_get_step_pos_internal_calls_ffi_and_returns_position() {
         let mut mock_ffi = MockPtzFfiTrait::new();
-        let handle = PTZHandle { opened: true };
+        let handle = test_handle();
 
         mock_ffi
             .expect_ptz_get_step_pos()
@@ -719,7 +733,7 @@ mod tests {
     #[test]
     fn test_ptz_get_step_pos_internal_propagates_error() {
         let mut mock_ffi = MockPtzFfiTrait::new();
-        let handle = PTZHandle { opened: true };
+        let handle = test_handle();
 
         mock_ffi
             .expect_ptz_get_step_pos()
@@ -739,7 +753,7 @@ mod tests {
     #[test]
     fn test_ptz_stop_internal_calls_ffi() {
         let mut mock_ffi = MockPtzFfiTrait::new();
-        let handle = PTZHandle { opened: true };
+        let handle = test_handle();
 
         mock_ffi
             .expect_ptz_stop()
@@ -754,7 +768,7 @@ mod tests {
     #[test]
     fn test_ptz_stop_internal_propagates_error() {
         let mut mock_ffi = MockPtzFfiTrait::new();
-        let handle = PTZHandle { opened: true };
+        let handle = test_handle();
 
         mock_ffi
             .expect_ptz_stop()

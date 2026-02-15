@@ -432,12 +432,11 @@ fn extract_envelope_namespace(state: &mut SoapParseState, e: &quick_xml::events:
             continue;
         }
         let value = String::from_utf8_lossy(&attr.value).to_string();
-        // Only set envelope_namespace if the value matches the SOAP envelope namespace constant.
-        // This ensures we capture the correct SOAP namespace URI and not arbitrary xmlns attributes.
-        if value == crate::onvif::protocol::SOAP_ENVELOPE_NS {
-            state.envelope_namespace = Some(value);
-            break;
-        }
+        // Capture the first xmlns value that looks like a SOAP namespace.
+        // Validation of the exact namespace URI happens later in parse_soap_request,
+        // so we store it to enable better error messages for wrong SOAP versions.
+        state.envelope_namespace = Some(value);
+        break;
     }
 }
 

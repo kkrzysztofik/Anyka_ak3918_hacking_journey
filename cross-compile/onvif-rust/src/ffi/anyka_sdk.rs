@@ -443,6 +443,7 @@ mod ffi_impl {
     /// - `ak_drv_ptz_open()` is a C function that initializes PTZ hardware
     /// - Returns negative value on error, non-negative on success
     /// - We validate the result and map errors appropriately
+    #[allow(dead_code)]
     pub fn ptz_open() -> AnykaResult<()> {
         // SAFETY: ak_drv_ptz_open() is a C function that initializes hardware
         // - Returns negative value on error, non-negative on success
@@ -466,6 +467,7 @@ mod ffi_impl {
     /// - `ak_drv_ptz_close()` is a C function that cleans up PTZ hardware
     /// - Returns negative value on error, non-negative on success
     /// - We validate the result and map errors appropriately
+    #[allow(dead_code)]
     pub fn ptz_close() -> AnykaResult<()> {
         // SAFETY: ak_drv_ptz_close() is a C function that cleans up hardware
         // - Returns negative value on error, non-negative on success
@@ -499,6 +501,7 @@ mod ffi_impl {
     /// - `ak_drv_ptz_turn()` is a C function that moves PTZ hardware
     /// - Returns negative value on error, non-negative on success
     /// - We validate the result and map errors appropriately
+    #[allow(dead_code)]
     pub fn ptz_turn(direction: PtzDirection) -> AnykaResult<()> {
         // Validate: Enum ensures only valid direction values
         let sdk_direction: ptz_turn_direction =
@@ -526,6 +529,7 @@ mod ffi_impl {
     /// - `ak_drv_ptz_stop()` is a C function that stops PTZ hardware movement
     /// - Returns negative value on error, non-negative on success
     /// - We validate the result and map errors appropriately
+    #[allow(dead_code)]
     pub fn ptz_stop() -> AnykaResult<()> {
         // SAFETY: ak_drv_ptz_stop() is a C function that stops PTZ hardware
         // - Returns negative value on error, non-negative on success
@@ -558,6 +562,7 @@ mod ffi_impl {
     /// - `ak_drv_ptz_get_step_pos()` is a C function that reads hardware position
     /// - Returns negative value on error, position value (>=0) on success
     /// - We validate the result and map errors appropriately
+    #[allow(dead_code)]
     pub fn ptz_get_position(motor: PtzMotor) -> AnykaResult<i32> {
         // Validate: Enum ensures only valid motor values (0 or 1)
         let sdk_motor: ptz_device = unsafe { std::mem::transmute(motor.to_device_id()) };

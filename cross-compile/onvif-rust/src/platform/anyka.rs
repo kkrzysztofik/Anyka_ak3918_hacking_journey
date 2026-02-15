@@ -95,7 +95,7 @@ impl AnykaPlatform {
 #[async_trait]
 impl Platform for AnykaPlatform {
     async fn get_device_info(&self) -> PlatformResult<DeviceInfo> {
-        // TODO: Read actual device info from Anyka SDK
+        // TODO(kkrzysztofik): Read actual device info from Anyka SDK
         Ok(self.device_info.clone())
     }
 
@@ -145,13 +145,13 @@ impl Platform for AnykaPlatform {
     async fn shutdown(&self) -> PlatformResult<()> {
         // Best-effort PTZ stop — the PTZHandle Drop will call ptz_close.
         // We log errors but do not abort shutdown for a single subsystem failure.
-        if let Some(ref ptz) = self.ptz_control {
-            if let Err(e) = ptz.stop().await {
-                tracing::warn!(
-                    "PTZ stop failed during shutdown (best-effort, continuing): {}",
-                    e
-                );
-            }
+        if let Some(ref ptz) = self.ptz_control
+            && let Err(e) = ptz.stop().await
+        {
+            tracing::warn!(
+                "PTZ stop failed during shutdown (best-effort, continuing): {}",
+                e
+            );
         }
         // TODO(kkrzysztofik): Call remaining Anyka SDK cleanup functions via FFI
         // - ak_vi_close()
@@ -183,24 +183,24 @@ impl AnykaVideoInput {
 #[async_trait]
 impl VideoInput for AnykaVideoInput {
     async fn open(&self) -> PlatformResult<()> {
-        // TODO: Call ak_vi_open() via FFI
+        // TODO(kkrzysztofik): Call ak_vi_open() via FFI
         self.opened.store(true, Ordering::SeqCst);
         Ok(())
     }
 
     async fn close(&self) -> PlatformResult<()> {
-        // TODO: Call ak_vi_close() via FFI
+        // TODO(kkrzysztofik): Call ak_vi_close() via FFI
         self.opened.store(false, Ordering::SeqCst);
         Ok(())
     }
 
     async fn get_resolution(&self) -> PlatformResult<Resolution> {
-        // TODO: Get actual resolution from ak_vi_get_sensor_resolution()
+        // TODO(kkrzysztofik): Get actual resolution from ak_vi_get_sensor_resolution()
         Ok(Resolution::new(1920, 1080))
     }
 
     async fn get_sources(&self) -> PlatformResult<Vec<VideoSourceConfig>> {
-        // TODO: Query actual video sources from Anyka SDK
+        // TODO(kkrzysztofik): Query actual video sources from Anyka SDK
         Ok(vec![VideoSourceConfig {
             token: "VideoSource_1".to_string(),
             name: "Main Camera".to_string(),
@@ -249,7 +249,7 @@ impl AnykaVideoEncoder {
 #[async_trait]
 impl VideoEncoder for AnykaVideoEncoder {
     async fn init(&self, config: &VideoEncoderConfig) -> PlatformResult<()> {
-        // TODO: Call ak_venc_open() with actual config via FFI
+        // TODO(kkrzysztofik): Call ak_venc_open() with actual config via FFI
         let mut configs = self.configurations.write();
         if let Some(cfg) = configs.iter_mut().find(|c| c.token == config.token) {
             *cfg = config.clone();
@@ -268,7 +268,7 @@ impl VideoEncoder for AnykaVideoEncoder {
     }
 
     async fn set_configuration(&self, config: &VideoEncoderConfig) -> PlatformResult<()> {
-        // TODO: Call ak_venc_set_rc() or similar via FFI
+        // TODO(kkrzysztofik): Call ak_venc_set_rc() or similar via FFI
         let mut configs = self.configurations.write();
         if let Some(cfg) = configs.iter_mut().find(|c| c.token == config.token) {
             *cfg = config.clone();
@@ -286,7 +286,7 @@ impl VideoEncoder for AnykaVideoEncoder {
     }
 
     async fn get_options(&self) -> PlatformResult<VideoEncoderOptions> {
-        // TODO: Query actual hardware capabilities
+        // TODO(kkrzysztofik): Query actual hardware capabilities
         Ok(VideoEncoderOptions {
             resolutions: vec![
                 Resolution::new(1920, 1080),
@@ -322,19 +322,19 @@ impl AnykaAudioInput {
 #[async_trait]
 impl AudioInput for AnykaAudioInput {
     async fn open(&self) -> PlatformResult<()> {
-        // TODO: Call ak_ai_open() via FFI
+        // TODO(kkrzysztofik): Call ak_ai_open() via FFI
         self.opened.store(true, Ordering::SeqCst);
         Ok(())
     }
 
     async fn close(&self) -> PlatformResult<()> {
-        // TODO: Call ak_ai_close() via FFI
+        // TODO(kkrzysztofik): Call ak_ai_close() via FFI
         self.opened.store(false, Ordering::SeqCst);
         Ok(())
     }
 
     async fn get_configuration(&self) -> PlatformResult<AudioSourceConfig> {
-        // TODO: Get actual audio config from Anyka SDK
+        // TODO(kkrzysztofik): Get actual audio config from Anyka SDK
         Ok(AudioSourceConfig {
             token: "AudioSource_1".to_string(),
             name: "Microphone".to_string(),
@@ -343,7 +343,7 @@ impl AudioInput for AnykaAudioInput {
     }
 
     async fn get_sources(&self) -> PlatformResult<Vec<AudioSourceConfig>> {
-        // TODO: Query actual audio sources
+        // TODO(kkrzysztofik): Query actual audio sources
         Ok(vec![AudioSourceConfig {
             token: "AudioSource_1".to_string(),
             name: "Microphone".to_string(),
@@ -378,7 +378,7 @@ impl AnykaAudioEncoder {
 #[async_trait]
 impl AudioEncoder for AnykaAudioEncoder {
     async fn init(&self, config: &AudioEncoderConfig) -> PlatformResult<()> {
-        // TODO: Call ak_aenc_open() with actual config via FFI
+        // TODO(kkrzysztofik): Call ak_aenc_open() with actual config via FFI
         let mut configs = self.configurations.write();
         if let Some(cfg) = configs.iter_mut().find(|c| c.token == config.token) {
             *cfg = config.clone();
@@ -397,7 +397,7 @@ impl AudioEncoder for AnykaAudioEncoder {
     }
 
     async fn set_configuration(&self, config: &AudioEncoderConfig) -> PlatformResult<()> {
-        // TODO: Call ak_aenc_set_config() or similar via FFI
+        // TODO(kkrzysztofik): Call ak_aenc_set_config() or similar via FFI
         let mut configs = self.configurations.write();
         if let Some(cfg) = configs.iter_mut().find(|c| c.token == config.token) {
             *cfg = config.clone();
@@ -454,41 +454,41 @@ impl AnykaImagingControl {
 #[async_trait]
 impl ImagingControl for AnykaImagingControl {
     async fn get_settings(&self) -> PlatformResult<ImagingSettings> {
-        // TODO: Read actual settings from Anyka imaging SDK
+        // TODO(kkrzysztofik): Read actual settings from Anyka imaging SDK
         Ok(self.settings.read().clone())
     }
 
     async fn set_settings(&self, settings: &ImagingSettings) -> PlatformResult<()> {
-        // TODO: Apply settings via Anyka imaging SDK
+        // TODO(kkrzysztofik): Apply settings via Anyka imaging SDK
         *self.settings.write() = settings.clone();
         Ok(())
     }
 
     async fn get_options(&self) -> PlatformResult<ImagingOptions> {
-        // TODO: Query actual hardware capabilities
+        // TODO(kkrzysztofik): Query actual hardware capabilities
         Ok(ImagingOptions::default_options())
     }
 
     async fn set_brightness(&self, value: f32) -> PlatformResult<()> {
-        // TODO: Call Anyka imaging SDK
+        // TODO(kkrzysztofik): Call Anyka imaging SDK
         self.settings.write().brightness = value;
         Ok(())
     }
 
     async fn set_contrast(&self, value: f32) -> PlatformResult<()> {
-        // TODO: Call Anyka imaging SDK
+        // TODO(kkrzysztofik): Call Anyka imaging SDK
         self.settings.write().contrast = value;
         Ok(())
     }
 
     async fn set_saturation(&self, value: f32) -> PlatformResult<()> {
-        // TODO: Call Anyka imaging SDK
+        // TODO(kkrzysztofik): Call Anyka imaging SDK
         self.settings.write().saturation = value;
         Ok(())
     }
 
     async fn set_sharpness(&self, value: f32) -> PlatformResult<()> {
-        // TODO: Call Anyka imaging SDK
+        // TODO(kkrzysztofik): Call Anyka imaging SDK
         self.settings.write().sharpness = value;
         Ok(())
     }
