@@ -124,6 +124,18 @@ describe('networkService', () => {
       );
     });
 
+    it('should escape XML special characters in network interface payload', async () => {
+      const mockResponse = createMockSOAPResponse('<SetNetworkInterfacesResponse />');
+
+      vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
+
+      await setNetworkInterface('eth0<bad>&"\'"', false, '192.168.1.50<bad>&"\'"', 24);
+
+      const payload = vi.mocked(apiClient.post).mock.calls[0][1] as string;
+      expect(payload).toContain('<tds:InterfaceToken>eth0&lt;bad&gt;&amp;&quot;&apos;&quot;</tds:InterfaceToken>');
+      expect(payload).toContain('<tt:Address>192.168.1.50&lt;bad&gt;&amp;&quot;&apos;&quot;</tt:Address>');
+    });
+
     it('should throw on failure', async () => {
       const mockResponse = createMockSOAPFaultResponse('soap:Sender', 'Failed');
 
@@ -162,6 +174,17 @@ describe('networkService', () => {
         '/onvif/device_service',
         expect.stringContaining('8.8.4.4'),
       );
+    });
+
+    it('should escape XML special characters in manual DNS payload', async () => {
+      const mockResponse = createMockSOAPResponse('<SetDNSResponse />');
+
+      vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
+
+      await setDNS(false, ['8.8.8.8<bad>&"\'"']);
+
+      const payload = vi.mocked(apiClient.post).mock.calls[0][1] as string;
+      expect(payload).toContain('<tt:IPv4Address>8.8.8.8&lt;bad&gt;&amp;&quot;&apos;&quot;</tt:IPv4Address>');
     });
 
     it('should throw on failure', async () => {

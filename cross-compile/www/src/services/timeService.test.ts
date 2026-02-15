@@ -102,6 +102,17 @@ describe('timeService', () => {
       );
     });
 
+    it('should escape XML special characters in timezone payload', async () => {
+      const mockResponse = createMockSOAPResponse('<SetSystemDateAndTimeResponse />');
+
+      vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
+
+      await setSystemDateAndTime('NTP', false, 'UTC+0<bad>&"\'"');
+
+      const payload = vi.mocked(apiClient.post).mock.calls[0][1] as string;
+      expect(payload).toContain('<tt:TZ>UTC+0&lt;bad&gt;&amp;&quot;&apos;&quot;</tt:TZ>');
+    });
+
     it('should send Manual configuration with date', async () => {
       const mockResponse = createMockSOAPResponse('<SetSystemDateAndTimeResponse />');
 

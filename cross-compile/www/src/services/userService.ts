@@ -4,7 +4,7 @@
  * SOAP operations for user management.
  */
 import { ENDPOINTS } from '@/services/api';
-import { soapRequest } from '@/services/soap/client';
+import { escapeXml, soapRequest } from '@/services/soap/client';
 import { safeString } from '@/utils/safeString';
 
 export type UserLevel = 'Administrator' | 'Operator' | 'User' | 'Anonymous';
@@ -46,11 +46,15 @@ export async function createUser(
   password: string,
   userLevel: UserLevel,
 ): Promise<void> {
+  const escapedUsername = escapeXml(username);
+  const escapedPassword = escapeXml(password);
+  const escapedUserLevel = escapeXml(userLevel);
+
   const body = `<tds:CreateUsers>
     <tds:User>
-      <tt:Username>${username}</tt:Username>
-      <tt:Password>${password}</tt:Password>
-      <tt:UserLevel>${userLevel}</tt:UserLevel>
+      <tt:Username>${escapedUsername}</tt:Username>
+      <tt:Password>${escapedPassword}</tt:Password>
+      <tt:UserLevel>${escapedUserLevel}</tt:UserLevel>
     </tds:User>
   </tds:CreateUsers>`;
 
@@ -61,8 +65,10 @@ export async function createUser(
  * Delete a user
  */
 export async function deleteUser(username: string): Promise<void> {
+  const escapedUsername = escapeXml(username);
+
   const body = `<tds:DeleteUsers>
-    <tds:Username>${username}</tds:Username>
+    <tds:Username>${escapedUsername}</tds:Username>
   </tds:DeleteUsers>`;
 
   await soapRequest(ENDPOINTS.device, body);
@@ -76,11 +82,15 @@ export async function setUser(
   password: string,
   userLevel: UserLevel,
 ): Promise<void> {
+  const escapedUsername = escapeXml(username);
+  const escapedPassword = escapeXml(password);
+  const escapedUserLevel = escapeXml(userLevel);
+
   const body = `<tds:SetUser>
     <tds:User>
-      <tt:Username>${username}</tt:Username>
-      <tt:Password>${password}</tt:Password>
-      <tt:UserLevel>${userLevel}</tt:UserLevel>
+      <tt:Username>${escapedUsername}</tt:Username>
+      <tt:Password>${escapedPassword}</tt:Password>
+      <tt:UserLevel>${escapedUserLevel}</tt:UserLevel>
     </tds:User>
   </tds:SetUser>`;
 

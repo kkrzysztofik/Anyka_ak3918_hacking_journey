@@ -68,9 +68,16 @@ export async function fillFormFields(
 export async function submitFormByEvent(fieldTestId: string): Promise<void> {
   const field = screen.getByTestId(fieldTestId);
   const form = field.closest('form');
-  const submitEvent = new Event('submit', { bubbles: true, cancelable: true });
+  const submitButton = form?.querySelector('button[type="submit"]') as HTMLButtonElement | null;
+
+  if (submitButton) {
+    const user = userEvent.setup();
+    await user.click(submitButton);
+    return;
+  }
+
   await act(async () => {
-    form?.dispatchEvent(submitEvent);
+    form?.requestSubmit();
   });
 }
 

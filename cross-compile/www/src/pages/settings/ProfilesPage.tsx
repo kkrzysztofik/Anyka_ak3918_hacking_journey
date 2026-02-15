@@ -84,10 +84,6 @@ export default function ProfilesPage() {
   // Track open state for each profile card
   const [openProfiles, setOpenProfiles] = useState<Record<string, boolean>>({});
 
-  const toggleProfile = (token: string) => {
-    setOpenProfiles((prev) => ({ ...prev, [token]: !prev[token] }));
-  };
-
   // Fetch profiles
   const {
     data: profiles,
@@ -192,8 +188,13 @@ export default function ProfilesPage() {
           {profiles?.map((profile) => (
             <Collapsible
               key={profile.token}
-              open={openProfiles[profile.token]}
-              onOpenChange={() => toggleProfile(profile.token)}
+              open={openProfiles[profile.token] ?? false}
+              onOpenChange={(isOpen) =>
+                setOpenProfiles((prev) => ({
+                  ...prev,
+                  [profile.token]: isOpen,
+                }))
+              }
               className="w-full"
             >
               <div className="overflow-hidden rounded-[12px] border border-[#3a3a3c] bg-[#1c1c1e]">
@@ -555,6 +556,12 @@ function VideoEncoderEditDialog({
           className="border-[#3a3a3c] bg-[#1c1c1e] text-white sm:max-w-[600px]"
           data-testid="video-encoder-edit-dialog"
         >
+          <DialogHeader>
+            <DialogTitle className="sr-only">Loading Video Encoder Configuration</DialogTitle>
+            <DialogDescription className="sr-only">
+              Loading encoder settings dialog content
+            </DialogDescription>
+          </DialogHeader>
           <div
             className="py-8 text-center text-[#a1a1a6]"
             data-testid="video-encoder-edit-dialog-loading"
