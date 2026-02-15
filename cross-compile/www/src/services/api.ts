@@ -56,7 +56,7 @@ apiClient.interceptors.response.use(
   (error: AxiosError) => {
     if (error.response?.status === 401) {
       sessionStorage.removeItem('onvif_camera_auth');
-      window.dispatchEvent(new CustomEvent('auth:unauthorized'));
+      globalThis.dispatchEvent(new CustomEvent('auth:unauthorized'));
     }
     return Promise.reject(error);
   },

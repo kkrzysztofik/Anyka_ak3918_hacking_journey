@@ -72,7 +72,16 @@ export async function submitFormByEvent(
 ): Promise<void> {
   const field = screen.getByTestId(fieldTestId);
   const form = field.closest('form');
-  const submitButton = form?.querySelector('button[type="submit"]') as HTMLButtonElement | null;
+  
+  // Validate that the field belongs to a form
+  if (!form) {
+    throw new Error(
+      `submitFormByEvent: No form found for field with testId "${fieldTestId}". ` +
+        `The field must be a descendant of a <form> element.`
+    );
+  }
+  
+  const submitButton = form.querySelector('button[type="submit"]') as HTMLButtonElement | null;
 
   if (submitButton) {
     const userInstance = user ?? userEvent.setup();
@@ -81,7 +90,7 @@ export async function submitFormByEvent(
   }
 
   await act(async () => {
-    form?.requestSubmit();
+    form.requestSubmit();
   });
 }
 

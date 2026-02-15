@@ -320,16 +320,28 @@ impl PTZControl for HardwarePTZControl {
                             "PTZ continuous move timeout after {}s, stopping",
                             PTZ_CONTINUOUS_TIMEOUT_SECS
                         );
-                        // Stop all four directions (matching C adapter pattern)
-                        for (dir, sdk_dir) in iter_ffi_directions(&PTZ_STOP_DIRECTIONS) {
-                            let ret = ffi.ptz_stop(sdk_dir);
-                            if ret != AK_SUCCESS_I32 {
-                                tracing::error!(
-                                    "CRITICAL: PTZ stop({:?}) failed after timeout \
-                                     (error code {}), motor may still be running!",
-                                    dir, ret
-                                );
+                        // Stop all four directions by running the stop loop in spawn_blocking
+                        // to avoid blocking the Tokio executor with synchronous FFI calls.
+                        // Matching C adapter pattern (ptz_adapter.c:376-382).
+                        let ffi_clone = ffi.clone();
+                        let stop_result = tokio::task::spawn_blocking(move || {
+                            for (dir, sdk_dir) in iter_ffi_directions(&PTZ_STOP_DIRECTIONS) {
+                                let ret = ffi_clone.ptz_stop(sdk_dir);
+                                if ret != AK_SUCCESS_I32 {
+                                    tracing::error!(
+                                        "CRITICAL: PTZ stop({:?}) failed after timeout \
+                                         (error code {}), motor may still be running!",
+                                        dir, ret
+                                    );
+                                }
                             }
+                        }).await;
+
+                        if let Err(e) = stop_result {
+                            tracing::error!(
+                                "PTZ stop task failed after timeout (possible task panic): {}",
+                                e
+                            );
                         }
                     }
                 }

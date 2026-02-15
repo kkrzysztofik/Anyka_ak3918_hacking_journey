@@ -235,8 +235,17 @@ export const soapBodies = {
   },
 
   // PTZ service
-  continuousMove: (profileToken: string, panSpeed: number, tiltSpeed: number) =>
-    `<tptz:ContinuousMove><tptz:ProfileToken>${escapeXml(profileToken)}</tptz:ProfileToken><tptz:Velocity><tt:PanTilt x="${Number.isFinite(panSpeed) ? panSpeed : 0}" y="${Number.isFinite(tiltSpeed) ? tiltSpeed : 0}" /></tptz:Velocity></tptz:ContinuousMove>`,
+  continuousMove: (profileToken: string, panSpeed: number, tiltSpeed: number) => {
+    // Helper to round floating-point speeds to 3 decimal places for stable XML output
+    const formatSpeed = (speed: number): string => {
+      if (!Number.isFinite(speed)) {
+        return '0';
+      }
+      // Clamp to 3 decimal places and convert to string, removing trailing zeros
+      return (Math.round(speed * 1000) / 1000).toFixed(3).replace(/\.?0+$/, '');
+    };
+    return `<tptz:ContinuousMove><tptz:ProfileToken>${escapeXml(profileToken)}</tptz:ProfileToken><tptz:Velocity><tt:PanTilt x="${formatSpeed(panSpeed)}" y="${formatSpeed(tiltSpeed)}" /></tptz:Velocity></tptz:ContinuousMove>`;
+  },
 
   ptzStop: (profileToken: string) =>
     `<tptz:Stop><tptz:ProfileToken>${escapeXml(profileToken)}</tptz:ProfileToken><tptz:PanTilt>true</tptz:PanTilt><tptz:Zoom>true</tptz:Zoom></tptz:Stop>`,
@@ -253,8 +262,12 @@ export const soapBodies = {
   gotoPreset: (profileToken: string, presetToken: string) =>
     `<tptz:GotoPreset><tptz:ProfileToken>${escapeXml(profileToken)}</tptz:ProfileToken><tptz:PresetToken>${escapeXml(presetToken)}</tptz:PresetToken></tptz:GotoPreset>`,
 
-  setPreset: (profileToken: string, presetName: string, presetToken?: string) =>
-    `<tptz:SetPreset><tptz:ProfileToken>${escapeXml(profileToken)}</tptz:ProfileToken>${presetToken ? `<tptz:PresetToken>${escapeXml(presetToken)}</tptz:PresetToken>` : ''}<tptz:PresetName>${escapeXml(presetName)}</tptz:PresetName></tptz:SetPreset>`,
+  setPreset: (profileToken: string, presetName: string, presetToken?: string) => {
+    const presetTokenXml = presetToken
+      ? '<tptz:PresetToken>' + escapeXml(presetToken) + '</tptz:PresetToken>'
+      : '';
+    return `<tptz:SetPreset><tptz:ProfileToken>${escapeXml(profileToken)}</tptz:ProfileToken>${presetTokenXml}<tptz:PresetName>${escapeXml(presetName)}</tptz:PresetName></tptz:SetPreset>`;
+  },
 
   removePreset: (profileToken: string, presetToken: string) =>
     `<tptz:RemovePreset><tptz:ProfileToken>${escapeXml(profileToken)}</tptz:ProfileToken><tptz:PresetToken>${escapeXml(presetToken)}</tptz:PresetToken></tptz:RemovePreset>`,

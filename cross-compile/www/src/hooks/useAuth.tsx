@@ -87,8 +87,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
   useEffect(() => {
     const handler = () => logout();
-    window.addEventListener('auth:unauthorized', handler);
-    return () => window.removeEventListener('auth:unauthorized', handler);
+    globalThis.addEventListener('auth:unauthorized', handler);
+    return () => globalThis.removeEventListener('auth:unauthorized', handler);
   }, [logout]);
 
   const login = useCallback(async (username: string, password: string) => {

@@ -222,7 +222,7 @@ describe('useAuth', () => {
       });
 
       act(() => {
-        window.dispatchEvent(new CustomEvent('auth:unauthorized'));
+        globalThis.dispatchEvent(new CustomEvent('auth:unauthorized'));
       });
 
       await waitFor(() => {

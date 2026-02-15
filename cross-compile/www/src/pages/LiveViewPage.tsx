@@ -205,7 +205,9 @@ export default function LiveViewPage() {
                 <span className="font-medium">Video Stream</span>
               </div>
               <div className="flex items-center gap-2">
-                <div className="flex rounded-lg border border-zinc-700/50 bg-zinc-900/80 p-1" role="group" aria-label="Stream type">
+                {/* Semantic fieldset for stream type selection with reset styles */}
+                <fieldset className="flex border-0 p-0 m-0 appearance-none rounded-lg border border-zinc-700/50 bg-zinc-900/80 p-1">
+                  <legend className="sr-only">Stream type</legend>
                   <button
                     onClick={() => setStreamType('main')}
                     className={cn(
@@ -232,7 +234,7 @@ export default function LiveViewPage() {
                   >
                     Sub Stream
                   </button>
-                </div>
+                </fieldset>
                 <div className="status-badge-connected">Connected</div>
               </div>
             </div>
