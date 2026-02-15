@@ -203,17 +203,24 @@ impl HardwarePTZControl {
     /// Matches the C adapter pattern (ptz_adapter.c:376-382) which calls
     /// `platform_ptz_turn_stop()` for Left, Right, Up, and Down to ensure
     /// all motors are stopped regardless of which axis was moving.
+    ///
+    /// Unlike a simple `?`-based loop, this attempts to stop **all** axes
+    /// even if one fails, then returns the first error (if any).
     fn stop_hardware(&self) -> PlatformResult<()> {
+        let mut first_error: Option<PlatformError> = None;
         for (dir, sdk_dir) in iter_ffi_directions(&PTZ_STOP_DIRECTIONS) {
             let ret = self.ffi.ptz_stop(sdk_dir);
-            if ret != AK_SUCCESS_I32 {
-                return Err(PlatformError::HardwareFailure(format!(
+            if ret != AK_SUCCESS_I32 && first_error.is_none() {
+                first_error = Some(PlatformError::HardwareFailure(format!(
                     "ptz_turn_stop({:?}) failed: error code {}",
                     dir, ret
                 )));
             }
         }
-        Ok(())
+        match first_error {
+            Some(e) => Err(e),
+            None => Ok(()),
+        }
     }
 }
 

@@ -236,7 +236,7 @@ export const soapBodies = {
 
   // PTZ service
   continuousMove: (profileToken: string, panSpeed: number, tiltSpeed: number) =>
-    `<tptz:ContinuousMove><tptz:ProfileToken>${escapeXml(profileToken)}</tptz:ProfileToken><tptz:Velocity><tt:PanTilt x="${panSpeed}" y="${tiltSpeed}" /></tptz:Velocity></tptz:ContinuousMove>`,
+    `<tptz:ContinuousMove><tptz:ProfileToken>${escapeXml(profileToken)}</tptz:ProfileToken><tptz:Velocity><tt:PanTilt x="${Number.isFinite(panSpeed) ? panSpeed : 0}" y="${Number.isFinite(tiltSpeed) ? tiltSpeed : 0}" /></tptz:Velocity></tptz:ContinuousMove>`,
 
   ptzStop: (profileToken: string) =>
     `<tptz:Stop><tptz:ProfileToken>${escapeXml(profileToken)}</tptz:ProfileToken><tptz:PanTilt>true</tptz:PanTilt><tptz:Zoom>true</tptz:Zoom></tptz:Stop>`,

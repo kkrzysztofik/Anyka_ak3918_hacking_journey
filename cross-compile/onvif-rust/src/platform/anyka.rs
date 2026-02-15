@@ -132,7 +132,7 @@ impl Platform for AnykaPlatform {
     }
 
     async fn initialize(&self) -> PlatformResult<()> {
-        // TODO: Call remaining Anyka SDK initialization functions via FFI
+        // TODO(kkrzysztofik): Call remaining Anyka SDK initialization functions via FFI
         // - ak_vi_open()
         // - ak_venc_open()
         // - ak_ai_open()
@@ -153,7 +153,7 @@ impl Platform for AnykaPlatform {
                 );
             }
         }
-        // TODO: Call remaining Anyka SDK cleanup functions via FFI
+        // TODO(kkrzysztofik): Call remaining Anyka SDK cleanup functions via FFI
         // - ak_vi_close()
         // - ak_venc_close()
         // - ak_ai_close()

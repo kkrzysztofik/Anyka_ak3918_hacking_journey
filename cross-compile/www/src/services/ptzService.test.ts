@@ -4,6 +4,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { apiClient } from '@/services/api';
+import type { PTZDirection } from '@/services/ptzService';
 import {
   continuousMove,
   getPresets,
@@ -78,7 +79,8 @@ describe('ptzService', () => {
     });
 
     it('should throw on unknown direction', async () => {
-      await expect(continuousMove('ProfileToken1', 'invalid', 50)).rejects.toThrow(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await expect(continuousMove('ProfileToken1', 'invalid' as any, 50)).rejects.toThrow(
         'Unknown PTZ direction: invalid',
       );
     });
@@ -280,11 +282,11 @@ describe('ptzService', () => {
       ['down-right', 0.7, -0.7],
     ])(
       'should map %s direction to pan=%s tilt=%s at 100%% speed',
-      async (direction, expectedPan, expectedTilt) => {
+      async (direction: string, expectedPan, expectedTilt) => {
         const mockResponse = createMockSOAPResponse('<ContinuousMoveResponse />');
         vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
 
-        await continuousMove('ProfileToken1', direction, 100);
+        await continuousMove('ProfileToken1', direction as PTZDirection, 100);
 
         const callArgs = vi.mocked(apiClient.post).mock.calls[0];
         expect(callArgs[1]).toContain(`x="${expectedPan}"`);

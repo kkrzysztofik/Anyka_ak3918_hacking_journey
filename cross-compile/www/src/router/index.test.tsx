@@ -3,17 +3,9 @@ import { Outlet } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AuthProvider } from '@/hooks/useAuth';
+import { createEncryptedFixture } from '@/test/componentTestHelpers';
 
 import AppRouter, { LoadingFallback } from './index';
-
-const createEncryptedFixture = () => {
-  const unique = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-  return {
-    iv: btoa(`iv-${unique}`),
-    data: btoa(`data-${unique}`),
-    tag: btoa(`tag-${unique}`),
-  };
-};
 
 // Mock the pages to avoid loading them
 vi.mock('@/pages/LoginPage', () => ({

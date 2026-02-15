@@ -427,12 +427,14 @@ fn handle_envelope_start(
 fn extract_envelope_namespace(state: &mut SoapParseState, e: &quick_xml::events::BytesStart) {
     for attr in e.attributes().flatten() {
         let key = String::from_utf8_lossy(attr.key.as_ref());
-        let value = String::from_utf8_lossy(&attr.value).to_string();
-        // Accept any xmlns prefix whose value is the SOAP envelope namespace
-        if (key.starts_with("xmlns:") || key == "xmlns") && value == SOAP_ENVELOPE_NS {
-            state.envelope_namespace = Some(value);
-            break;
+        // Check key before allocating value to avoid unnecessary String allocation
+        if !(key.starts_with("xmlns:") || key == "xmlns") {
+            continue;
         }
+        let value = String::from_utf8_lossy(&attr.value).to_string();
+        // Capture any xmlns attribute to allow validation and reporting of invalid namespaces
+        state.envelope_namespace = Some(value);
+        break;
     }
 }
 

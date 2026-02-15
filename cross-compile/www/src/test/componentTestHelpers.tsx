@@ -630,6 +630,20 @@ export const MockButton = {
 };
 
 /**
+ * Create an encrypted data fixture with unique values for testing.
+ * Generates unique IV and data strings to prevent cross-test contamination
+ * in sessionStorage-based auth tests.
+ */
+export function createEncryptedFixture() {
+  const unique = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  return {
+    iv: btoa(`iv-${unique}`),
+    data: btoa(`data-${unique}`),
+    method: 'aes-gcm' as const,
+  };
+}
+
+/**
  * Generic error toast verification helper
  * @param message - Expected error message
  * @param description - Optional error description

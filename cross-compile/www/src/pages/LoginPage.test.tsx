@@ -8,22 +8,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { verifyCredentials } from '@/services/authService';
 import {
   createDelayedPromise,
-  // This import should remain as createDelayedPromise is now exported from componentTestHelpers
+  createEncryptedFixture,
   mockToast,
   renderWithProviders,
   verifyPasswordVisibilityToggle,
 } from '@/test/componentTestHelpers';
 
 import LoginPage from './LoginPage';
-
-const createEncryptedFixture = () => {
-  const unique = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-  return {
-    iv: btoa(`iv-${unique}`),
-    data: btoa(`data-${unique}`),
-    tag: btoa(`tag-${unique}`),
-  };
-};
 
 // Mock authService
 vi.mock('@/services/authService', () => ({

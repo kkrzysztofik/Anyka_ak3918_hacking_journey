@@ -136,10 +136,14 @@ describe('LiveViewPage', () => {
     expect(screen.getByTestId('liveview-copy-url-button')).toBeInTheDocument();
   });
 
-  it('should render preset buttons', () => {
+  it('should render preset buttons', async () => {
     renderWithProviders(<LiveViewPage />);
     expect(screen.getByTestId('liveview-presets-title')).toHaveTextContent('Presets');
-    expect(screen.getByTestId('liveview-preset-1-button')).toBeInTheDocument();
+
+    // Preset data is loaded asynchronously from the mocked getPresets service
+    await waitFor(() => {
+      expect(screen.getByTestId('liveview-preset-1-button')).toBeInTheDocument();
+    });
     expect(screen.getByTestId('liveview-preset-2-button')).toBeInTheDocument();
     expect(screen.getByTestId('liveview-preset-3-button')).toBeInTheDocument();
     expect(screen.getByTestId('liveview-add-preset-label')).toHaveTextContent('+ Add Preset');
@@ -148,8 +152,11 @@ describe('LiveViewPage', () => {
   it('should render PTZ control buttons', () => {
     renderWithProviders(<LiveViewPage />);
     expect(screen.getByTestId('liveview-ptz-title')).toHaveTextContent('Pan & Tilt');
-    const buttons = screen.getAllByRole('button');
-    expect(buttons.length).toBeGreaterThan(0);
+    const directions = ['up', 'down', 'left', 'right', 'up-left', 'up-right', 'down-left', 'down-right'];
+    for (const dir of directions) {
+      expect(screen.getByTestId(`liveview-ptz-${dir}-button`)).toBeInTheDocument();
+    }
+    expect(screen.getByTestId('liveview-ptz-home-button')).toBeInTheDocument();
   });
 
   it('should render LIVE indicator', () => {

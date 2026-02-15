@@ -64,15 +64,19 @@ export async function fillFormFields(
 /**
  * Submit a form by dispatching a submit event
  * @param fieldTestId - Test ID of any field in the form (used to find the form element)
+ * @param user - Optional user event instance to reuse (avoids creating a new session)
  */
-export async function submitFormByEvent(fieldTestId: string): Promise<void> {
+export async function submitFormByEvent(
+  fieldTestId: string,
+  user?: ReturnType<typeof userEvent.setup>,
+): Promise<void> {
   const field = screen.getByTestId(fieldTestId);
   const form = field.closest('form');
   const submitButton = form?.querySelector('button[type="submit"]') as HTMLButtonElement | null;
 
   if (submitButton) {
-    const user = userEvent.setup();
-    await user.click(submitButton);
+    const userInstance = user ?? userEvent.setup();
+    await userInstance.click(submitButton);
     return;
   }
 
@@ -163,8 +167,8 @@ export async function fillAndSubmitForm(
     2000,
   );
 
-  // Submit form
-  await submitFormByEvent(fieldTestId);
+  // Submit form (forward user instance to avoid creating a new session)
+  await submitFormByEvent(fieldTestId, user);
 
   // Wait for submission
   if (onSubmitMock) {

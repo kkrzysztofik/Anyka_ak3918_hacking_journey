@@ -3,7 +3,7 @@
  *
  * Manage media profiles and their configurations (Video/Audio Sources, Encoders, PTZ, Analytics, Metadata).
  */
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -505,6 +505,10 @@ function VideoEncoderEditDialog({
   const [options, setOptions] = useState<VideoEncoderConfigurationOptions | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
+  // Stabilize onClose so it doesn't cause re-fetches when the parent re-renders
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
   // Fetch encoder configuration and options
   useEffect(() => {
     const controller = new AbortController();
@@ -524,7 +528,7 @@ function VideoEncoderEditDialog({
         toast.error('Failed to load encoder configuration', {
           description: error instanceof Error ? error.message : 'An error occurred',
         });
-        onClose();
+        onCloseRef.current();
       } finally {
         if (!controller.signal.aborted) {
           setIsLoading(false);
@@ -533,7 +537,7 @@ function VideoEncoderEditDialog({
     };
     loadData();
     return () => controller.abort();
-  }, [encoderToken, onClose]);
+  }, [encoderToken]);
 
   const updateMutation = useMutation({
     mutationFn: (updatedConfig: VideoEncoderConfiguration) =>

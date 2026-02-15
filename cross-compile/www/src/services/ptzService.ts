@@ -12,8 +12,19 @@ export interface PTZPreset {
   name: string;
 }
 
+/** Valid PTZ movement directions */
+export type PTZDirection =
+  | 'up'
+  | 'down'
+  | 'left'
+  | 'right'
+  | 'up-left'
+  | 'up-right'
+  | 'down-left'
+  | 'down-right';
+
 /** Direction-to-velocity unit vector mapping */
-const DIRECTION_VELOCITIES: Record<string, { pan: number; tilt: number }> = {
+const DIRECTION_VELOCITIES: Record<PTZDirection, { pan: number; tilt: number }> = {
   up: { pan: 0, tilt: 1 },
   down: { pan: 0, tilt: -1 },
   left: { pan: -1, tilt: 0 },
@@ -33,12 +44,12 @@ const DIRECTION_VELOCITIES: Record<string, { pan: number; tilt: number }> = {
  */
 export async function continuousMove(
   profileToken: string,
-  direction: string,
+  direction: PTZDirection,
   speedPercent: number,
 ): Promise<void> {
   const vel = DIRECTION_VELOCITIES[direction];
   if (!vel) throw new Error(`Unknown PTZ direction: ${direction}`);
-  const speed = speedPercent / 100;
+  const speed = Math.max(0, Math.min(100, speedPercent)) / 100;
   await soapRequest(
     ENDPOINTS.ptz,
     soapBodies.continuousMove(profileToken, vel.pan * speed, vel.tilt * speed),

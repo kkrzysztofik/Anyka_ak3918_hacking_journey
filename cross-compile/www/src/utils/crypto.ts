@@ -79,12 +79,11 @@ export async function encrypt(plaintext: string): Promise<EncryptedData> {
   const encoder = new TextEncoder();
   const data = encoder.encode(plaintext);
 
-  // Convert IV to ArrayBuffer
-  const ivBuffer = new ArrayBuffer(iv.byteLength);
-  const ivView = new Uint8Array(ivBuffer);
-  ivView.set(iv);
-
-  const ciphertext = await crypto.subtle.encrypt({ name: 'AES-GCM', iv: ivBuffer }, key, data);
+  const ciphertext = await crypto.subtle.encrypt(
+    { name: 'AES-GCM', iv: iv as Uint8Array<ArrayBuffer> },
+    key,
+    data,
+  );
 
   return {
     data: btoa(Array.from(new Uint8Array(ciphertext), (b) => String.fromCodePoint(b)).join('')),
@@ -105,20 +104,7 @@ export async function decrypt(encrypted: EncryptedData): Promise<string> {
   const iv = Uint8Array.from(atob(encrypted.iv), (c) => c.codePointAt(0) ?? 0);
   const ciphertext = Uint8Array.from(atob(encrypted.data), (c) => c.codePointAt(0) ?? 0);
 
-  // Convert to ArrayBuffer to satisfy type requirements
-  const ivBuffer = new ArrayBuffer(iv.byteLength);
-  const ivView = new Uint8Array(ivBuffer);
-  ivView.set(iv);
-
-  const ciphertextBuffer = new ArrayBuffer(ciphertext.byteLength);
-  const ciphertextView = new Uint8Array(ciphertextBuffer);
-  ciphertextView.set(ciphertext);
-
-  const decrypted = await crypto.subtle.decrypt(
-    { name: 'AES-GCM', iv: ivBuffer },
-    key,
-    ciphertextBuffer,
-  );
+  const decrypted = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, ciphertext);
 
   const decoder = new TextDecoder();
   return decoder.decode(decrypted);

@@ -4,16 +4,9 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { type AuthContextValue, AuthProvider, useAuth } from './useAuth';
+import { createEncryptedFixture } from '@/test/componentTestHelpers';
 
-const createEncryptedFixture = () => {
-  const unique = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-  return {
-    iv: btoa(`iv-${unique}`),
-    data: btoa(`data-${unique}`),
-    method: 'aes-gcm' as const,
-  };
-};
+import { type AuthContextValue, AuthProvider, useAuth } from './useAuth';
 
 // Mock crypto utilities
 const mockEncrypt = vi.fn();

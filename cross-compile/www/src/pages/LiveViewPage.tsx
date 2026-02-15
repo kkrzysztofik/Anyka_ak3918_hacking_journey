@@ -40,7 +40,7 @@ import {
   setPreset,
   stopMove,
 } from '@/services/ptzService';
-import type { PTZPreset } from '@/services/ptzService';
+import type { PTZDirection, PTZPreset } from '@/services/ptzService';
 
 export default function LiveViewPage() {
   const [streamType, setStreamType] = useState<'main' | 'sub'>('main');
@@ -64,7 +64,7 @@ export default function LiveViewPage() {
 
   // ContinuousMove mutation
   const moveMutation = useMutation({
-    mutationFn: ({ direction }: { direction: string }) =>
+    mutationFn: ({ direction }: { direction: PTZDirection }) =>
       continuousMove(profileToken, direction, ptzSpeed),
     onError: (error) => {
       toast.error('PTZ move failed', {
@@ -135,7 +135,7 @@ export default function LiveViewPage() {
   const isMovingRef = useRef(false);
 
   const handlePtzStart = useCallback(
-    (direction: string) => {
+    (direction: PTZDirection) => {
       if (!profileToken) return;
       isMovingRef.current = true;
       moveMutation.mutate({ direction });
@@ -392,6 +392,7 @@ export default function LiveViewPage() {
                   {/* Top Row */}
                   <div className="flex gap-1">
                     <button
+                      type="button"
                       onMouseDown={() => handlePtzStart('up-left')}
                       onMouseUp={handlePtzStop}
                       onMouseLeave={handlePtzStop}
@@ -406,6 +407,7 @@ export default function LiveViewPage() {
                       </div>
                     </button>
                     <button
+                      type="button"
                       onMouseDown={() => handlePtzStart('up')}
                       onMouseUp={handlePtzStop}
                       onMouseLeave={handlePtzStop}
@@ -418,6 +420,7 @@ export default function LiveViewPage() {
                       <ArrowUp className="h-4 w-4 text-white md:h-5 md:w-5" />
                     </button>
                     <button
+                      type="button"
                       onMouseDown={() => handlePtzStart('up-right')}
                       onMouseUp={handlePtzStop}
                       onMouseLeave={handlePtzStop}
@@ -436,6 +439,7 @@ export default function LiveViewPage() {
                   {/* Middle Row */}
                   <div className="flex gap-1">
                     <button
+                      type="button"
                       onMouseDown={() => handlePtzStart('left')}
                       onMouseUp={handlePtzStop}
                       onMouseLeave={handlePtzStop}
@@ -448,6 +452,7 @@ export default function LiveViewPage() {
                       <ArrowLeft className="h-4 w-4 text-white md:h-5 md:w-5" />
                     </button>
                     <button
+                      type="button"
                       onClick={handleHome}
                       aria-label="Return to home position"
                       className="bg-accent-red flex h-11 w-11 items-center justify-center rounded-lg shadow-lg shadow-red-900/20 transition-colors hover:bg-red-700 md:h-12 md:w-12"
@@ -456,6 +461,7 @@ export default function LiveViewPage() {
                       <Home className="h-4 w-4 text-white md:h-5 md:w-5" />
                     </button>
                     <button
+                      type="button"
                       onMouseDown={() => handlePtzStart('right')}
                       onMouseUp={handlePtzStop}
                       onMouseLeave={handlePtzStop}
@@ -472,6 +478,7 @@ export default function LiveViewPage() {
                   {/* Bottom Row */}
                   <div className="flex gap-1">
                     <button
+                      type="button"
                       onMouseDown={() => handlePtzStart('down-left')}
                       onMouseUp={handlePtzStop}
                       onMouseLeave={handlePtzStop}
@@ -486,6 +493,7 @@ export default function LiveViewPage() {
                       </div>
                     </button>
                     <button
+                      type="button"
                       onMouseDown={() => handlePtzStart('down')}
                       onMouseUp={handlePtzStop}
                       onMouseLeave={handlePtzStop}
@@ -498,6 +506,7 @@ export default function LiveViewPage() {
                       <ArrowDown className="h-4 w-4 text-white md:h-5 md:w-5" />
                     </button>
                     <button
+                      type="button"
                       onMouseDown={() => handlePtzStart('down-right')}
                       onMouseUp={handlePtzStop}
                       onMouseLeave={handlePtzStop}
