@@ -48,7 +48,7 @@ use crate::onvif::types::media::{
     SetVideoSourceConfigurationResponse, StartMulticastStreaming, StartMulticastStreamingResponse,
     StopMulticastStreaming, StopMulticastStreamingResponse, StreamingCapabilities,
 };
-use crate::platform::Platform;
+use crate::platform::{Platform, Resolution};
 
 use super::profile_manager::ProfileManager;
 use super::types::{DEFAULT_RTSP_PORT, DEFAULT_SNAPSHOT_PATH, MAX_PROFILES};
@@ -99,19 +99,69 @@ impl MediaService {
     }
 
     /// Create a new Media Service with configuration and platform.
+    /// The platform's max_sensor_resolution is automatically queried and passed to ProfileManager
+    /// to ensure ONVIF profiles are constrained by actual sensor capabilities.
     pub fn with_config_and_platform(
         config: Arc<ConfigRuntime>,
         platform: Arc<dyn Platform>,
     ) -> Self {
+        // Query max sensor resolution from platform for adaptive profile configuration
+        let max_sensor_resolution = platform
+            .max_sensor_resolution()
+            .unwrap_or_else(|_| {
+                // Fallback to default if platform not initialized or sensor resolution unavailable
+                tracing::warn!(
+                    "Failed to query sensor resolution from platform, using fallback 1920x1080"
+                );
+                Resolution::new(1920, 1080)
+            });
+
+        let profile_manager = Arc::new(ProfileManager::with_config_and_sensor_resolution(
+            Arc::clone(&config),
+            None,
+            max_sensor_resolution,
+        ));
+
         Self {
-            profile_manager: Arc::new(ProfileManager::with_config(Arc::clone(&config))),
+            profile_manager,
             config,
             platform: Some(platform),
             persistence: None,
         }
     }
 
-    /// Create a Media Service wired with config persistence.
+    /// Create a Media Service wired with config persistence and platform.
+    /// The platform's max_sensor_resolution is automatically queried for adaptive profiles.
+    pub fn with_config_and_persistence_and_platform(
+        config: Arc<ConfigRuntime>,
+        persistence: ConfigPersistenceHandle,
+        platform: Arc<dyn Platform>,
+    ) -> Self {
+        // Query max sensor resolution from platform
+        let max_sensor_resolution = platform
+            .max_sensor_resolution()
+            .unwrap_or_else(|_| {
+                tracing::warn!(
+                    "Failed to query sensor resolution from platform, using fallback 1920x1080"
+                );
+                Resolution::new(1920, 1080)
+            });
+
+        let profile_manager = Arc::new(ProfileManager::with_config_and_sensor_resolution(
+            Arc::clone(&config),
+            Some(persistence.clone()),
+            max_sensor_resolution,
+        ));
+
+        Self {
+            profile_manager,
+            config,
+            platform: Some(platform),
+            persistence: Some(persistence),
+        }
+    }
+
+    /// Create a Media Service wired with config persistence (without platform).
     pub fn with_config_and_persistence(
         config: Arc<ConfigRuntime>,
         persistence: ConfigPersistenceHandle,
@@ -330,6 +380,7 @@ impl MediaService {
     /// Handle SetVideoEncoderConfiguration request.
     ///
     /// Updates a video encoder configuration.
+    /// Ensures profile resolution does not exceed sensor capabilities.
     pub fn handle_set_video_encoder_configuration(
         &self,
         request: SetVideoEncoderConfiguration,
@@ -349,6 +400,34 @@ impl MediaService {
         if let Some(ref rate_control) = request.configuration.rate_control {
             super::faults::validate_frame_rate(rate_control.frame_rate_limit)?;
             super::faults::validate_bitrate(rate_control.bitrate_limit)?;
+        }
+
+        // Validate that profile resolution doesn't exceed sensor capabilities
+        if let Some(ref platform) = self.platform {
+            let requested_width = request.configuration.resolution.width as u32;
+            let requested_height = request.configuration.resolution.height as u32;
+
+            // Query the actual sensor resolution from the platform
+            let max_resolution = platform.max_sensor_resolution().map_err(|e| {
+                OnvifError::HardwareFailure(format!("Failed to get sensor resolution: {}", e))
+            })?;
+
+            if requested_width > max_resolution.width || requested_height > max_resolution.height {
+                tracing::warn!(
+                    "Profile resolution request exceeds sensor capabilities: requested {}x{}, max {}x{}",
+                    requested_width,
+                    requested_height,
+                    max_resolution.width,
+                    max_resolution.height
+                );
+                return Err(OnvifError::invalid_arg_val(
+                    "ter:InvalidResolution",
+                    &format!(
+                        "Requested resolution {}x{} exceeds sensor maximum of {}x{}",
+                        requested_width, requested_height, max_resolution.width, max_resolution.height
+                    ),
+                ));
+            }
         }
 
         self.profile_manager

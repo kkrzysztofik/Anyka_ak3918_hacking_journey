@@ -636,6 +636,15 @@ pub trait Platform: Send + Sync {
 
     /// Shutdown the platform.
     async fn shutdown(&self) -> PlatformResult<()>;
+
+    /// Get the maximum resolution supported by the video sensor.
+    ///
+    /// Returns the native sensor resolution. This is used to constrain
+    /// ONVIF profile configurations and resolution options.
+    ///
+    /// # Errors
+    /// Returns `PlatformError::InitializationFailed` if the platform has not been initialized.
+    fn max_sensor_resolution(&self) -> PlatformResult<Resolution>;
 }
 
 #[cfg(test)]

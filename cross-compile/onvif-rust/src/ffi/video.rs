@@ -46,6 +46,7 @@ pub(crate) trait VideoFfiTrait: Send + Sync {
     fn vi_get_sensor_resolution(&self, handle: *mut c_void, res: *mut video_resolution) -> i32;
     fn vi_set_channel_attr(&self, handle: *mut c_void, attr: *const video_channel_attr) -> i32;
     fn vi_capture_on(&self, handle: *mut c_void) -> i32;
+    fn vi_capture_off(&self, handle: *mut c_void) -> i32;
     fn venc_open(&self, param: *const encode_param) -> *mut c_void;
     fn venc_close(&self, handle: *mut c_void) -> i32;
     fn venc_set_rc(&self, enc_handle: *mut c_void, bps: i32) -> i32;
@@ -141,6 +142,19 @@ impl VideoFfiTrait for RealVideoFfi {
     }
 
     #[cfg(not(use_stubs))]
+    fn vi_capture_off(&self, handle: *mut c_void) -> i32 {
+        unsafe extern "C" {
+            fn ak_vi_capture_off(handle: *mut c_void) -> i32;
+        }
+        unsafe { ak_vi_capture_off(handle) }
+    }
+
+    #[cfg(use_stubs)]
+    fn vi_capture_off(&self, _handle: *mut c_void) -> i32 {
+        AK_SUCCESS_I32
+    }
+
+    #[cfg(not(use_stubs))]
     fn venc_open(&self, param: *const encode_param) -> *mut c_void {
         unsafe extern "C" {
             fn ak_venc_open(param: *const encode_param) -> *mut c_void;
@@ -211,8 +225,8 @@ fn check_result(ret: i32, context: &str) -> PlatformResult<()> {
     match ret {
         AK_SUCCESS_I32 => Ok(()),
         AK_FAILED_I32 => Err(PlatformError::HardwareFailure(format!(
-            "{} failed",
-            context
+            "{} failed (AK_FAILED={})",
+            context, AK_FAILED_I32
         ))),
         _ => Err(PlatformError::HardwareFailure(format!(
             "{}: error code {}",
@@ -452,6 +466,15 @@ pub(crate) fn video_input_capture_on_internal(
     check_result(ret, "ak_vi_capture_on")
 }
 
+/// Internal helper that takes FFI trait for testability.
+pub(crate) fn video_input_capture_off_internal(
+    handle: &VideoInputHandle,
+    ffi: &dyn VideoFfiTrait,
+) -> PlatformResult<()> {
+    let ret = ffi.vi_capture_off(handle.as_ptr());
+    check_result(ret, "ak_vi_capture_off")
+}
+
 /// Start the ISP capture pipeline on the video input device.
 ///
 /// This must be called **after** `video_input_set_channel_attr()` to begin
@@ -467,6 +490,22 @@ pub(crate) fn video_input_capture_on_internal(
 /// * `PlatformError::HardwareFailure` if the SDK call fails
 pub fn video_input_capture_on(handle: &VideoInputHandle) -> PlatformResult<()> {
     video_input_capture_on_internal(handle, &REAL_VIDEO_FFI)
+}
+
+/// Stop the ISP capture pipeline on the video input device.
+///
+/// This mirrors `ak_vi_capture_off()` and is used for cleanup/recovery between
+/// capture start attempts.
+///
+/// # Arguments
+///
+/// * `handle` - Video input handle from a successful `video_input_open()` call
+///
+/// # Errors
+///
+/// * `PlatformError::HardwareFailure` if the SDK call fails
+pub fn video_input_capture_off(handle: &VideoInputHandle) -> PlatformResult<()> {
+    video_input_capture_off_internal(handle, &REAL_VIDEO_FFI)
 }
 
 /// RAII handle for video encoder.
@@ -1098,6 +1137,40 @@ mod tests {
         match result {
             Err(PlatformError::HardwareFailure(msg)) => {
                 assert!(msg.contains("error code -99"));
+            }
+            _ => panic!("Expected HardwareFailure error"),
+        }
+    }
+
+    #[test]
+    fn test_video_input_capture_off_internal_success() {
+        let mut mock_ffi = MockVideoFfiTrait::new();
+        let vi_handle = VideoInputHandle::test_handle();
+
+        mock_ffi
+            .expect_vi_capture_off()
+            .times(1)
+            .returning(|_| AK_SUCCESS_I32);
+
+        let result = video_input_capture_off_internal(&vi_handle, &mock_ffi);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_video_input_capture_off_internal_ffi_failure() {
+        let mut mock_ffi = MockVideoFfiTrait::new();
+        let vi_handle = VideoInputHandle::test_handle();
+
+        mock_ffi
+            .expect_vi_capture_off()
+            .times(1)
+            .returning(|_| AK_FAILED_I32);
+
+        let result = video_input_capture_off_internal(&vi_handle, &mock_ffi);
+        assert!(result.is_err());
+        match result {
+            Err(PlatformError::HardwareFailure(msg)) => {
+                assert!(msg.contains("ak_vi_capture_off"));
             }
             _ => panic!("Expected HardwareFailure error"),
         }

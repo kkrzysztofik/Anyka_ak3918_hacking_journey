@@ -25,6 +25,7 @@ use crate::onvif::types::media::{
     AudioEncoderConfigurationOptions, H264Options, H264Profile, JpegOptions,
     VideoEncoderConfigurationOptions, VideoSourceConfigurationOptions,
 };
+use crate::platform::Resolution;
 
 use super::faults::{
     no_config_error, no_profile_error, validate_profile_name, validate_profile_token,
@@ -81,6 +82,8 @@ pub struct ProfileManager {
     audio_encoder_configs: RwLock<HashMap<ReferenceToken, AudioEncoderConfiguration>>,
     /// Profile counter for generating unique tokens.
     profile_counter: AtomicU32,
+    /// Maximum sensor resolution for profile validation.
+    max_sensor_resolution: Resolution,
     /// Runtime configuration (optional) used for persistence.
     config: Option<Arc<ConfigRuntime>>,
     /// Config persistence handle for debounced saves.
@@ -88,9 +91,28 @@ pub struct ProfileManager {
 }
 
 impl ProfileManager {
-    /// Create a new ProfileManager with default profiles.
+    /// Create a new ProfileManager with default profiles and fallback max sensor resolution.
+    /// Used primarily for testing; prefer `with_default_resolution()` for test clarity.
     pub fn new() -> Self {
-        let manager = Self::new_with_dependencies(None, None);
+        Self::with_default_resolution()
+    }
+
+    /// Create a ProfileManager with default profiles and specified max sensor resolution.
+    /// This is the recommended constructor for tests and initialization without platform context.
+    pub fn with_default_resolution() -> Self {
+        let manager = Self::new_with_dependencies(
+            None,
+            None,
+            Resolution::new(1920, 1080), // Fallback for tests without real platform
+        );
+        manager.initialize_defaults();
+        manager
+    }
+
+    /// Create a ProfileManager with specified max sensor resolution.
+    /// Use this when you have direct knowledge of the sensor resolution.
+    pub fn with_max_resolution(max_sensor_resolution: Resolution) -> Self {
+        let manager = Self::new_with_dependencies(None, None, max_sensor_resolution);
         manager.initialize_defaults();
         manager
     }
@@ -105,7 +127,32 @@ impl ProfileManager {
         config: Arc<ConfigRuntime>,
         persistence: Option<ConfigPersistenceHandle>,
     ) -> Self {
-        let manager = Self::new_with_dependencies(Some(Arc::clone(&config)), persistence);
+        let manager = Self::new_with_dependencies(
+            Some(Arc::clone(&config)),
+            persistence,
+            Resolution::new(1920, 1080), // Fallback for tests
+        );
+
+        if !manager.load_from_config() {
+            manager.initialize_defaults();
+            manager.persist_all();
+        }
+
+        manager
+    }
+
+    /// Create a ProfileManager with all dependencies and max sensor resolution.
+    /// Called from phase 3: MediaService will pass sensor resolution from platform.
+    pub fn with_config_and_sensor_resolution(
+        config: Arc<ConfigRuntime>,
+        persistence: Option<ConfigPersistenceHandle>,
+        max_sensor_resolution: Resolution,
+    ) -> Self {
+        let manager = Self::new_with_dependencies(
+            Some(Arc::clone(&config)),
+            persistence,
+            max_sensor_resolution,
+        );
 
         if !manager.load_from_config() {
             manager.initialize_defaults();
@@ -119,6 +166,7 @@ impl ProfileManager {
     fn new_with_dependencies(
         config: Option<Arc<ConfigRuntime>>,
         persistence: Option<ConfigPersistenceHandle>,
+        max_sensor_resolution: Resolution,
     ) -> Self {
         Self {
             profiles: RwLock::new(HashMap::new()),
@@ -129,6 +177,7 @@ impl ProfileManager {
             audio_source_configs: RwLock::new(HashMap::new()),
             audio_encoder_configs: RwLock::new(HashMap::new()),
             profile_counter: AtomicU32::new(0),
+            max_sensor_resolution,
             config,
             persistence,
         }
@@ -142,13 +191,13 @@ impl ProfileManager {
         // Create default PTZ configuration used by all profiles
         let default_ptz_config = Self::create_default_ptz_configuration();
 
-        // Create default video source
+        // Create default video source with sensor-aware resolution
         let video_source = VideoSource {
             token: DEFAULT_VIDEO_SOURCE_TOKEN.to_string(),
             framerate: 30.0,
             resolution: VideoResolution {
-                width: 1920,
-                height: 1080,
+                width: self.max_sensor_resolution.width as i32,
+                height: self.max_sensor_resolution.height as i32,
             },
             imaging: None,
             extension: None,
@@ -166,7 +215,7 @@ impl ProfileManager {
             .write()
             .insert(DEFAULT_AUDIO_SOURCE_TOKEN.to_string(), audio_source);
 
-        // Create default video source configuration
+        // Create default video source configuration with sensor-aware bounds
         let video_source_config = VideoSourceConfiguration {
             token: format!("{}0", VIDEO_SOURCE_CONFIG_PREFIX),
             source_token: DEFAULT_VIDEO_SOURCE_TOKEN.to_string(),
@@ -176,8 +225,8 @@ impl ProfileManager {
             bounds: IntRectangle {
                 x: 0,
                 y: 0,
-                width: 1920,
-                height: 1080,
+                width: self.max_sensor_resolution.width as i32,
+                height: self.max_sensor_resolution.height as i32,
             },
             extension: None,
         };
@@ -216,6 +265,7 @@ impl ProfileManager {
     }
 
     /// Initialize profiles from config sections (stream_profile_1..4).
+    /// Validates each profile against max sensor resolution, skipping profiles that exceed capabilities.
     fn initialize_profiles_from_config(
         &self,
         config: &Arc<ConfigRuntime>,
@@ -230,6 +280,24 @@ impl ProfileManager {
             }
 
             let profile_config = Self::read_profile_config(config, &prefix, profile_num);
+
+            // Validate profile resolution against sensor maximum capabilities
+            if profile_config.width > self.max_sensor_resolution.width
+                || profile_config.height > self.max_sensor_resolution.height
+            {
+                tracing::error!(
+                    "Skipping stream_profile_{} from config.toml: resolution {}x{} exceeds \
+                     sensor maximum {}x{}. Check config.toml stream_profile_{} settings.",
+                    profile_num,
+                    profile_config.width,
+                    profile_config.height,
+                    self.max_sensor_resolution.width,
+                    self.max_sensor_resolution.height,
+                    profile_num
+                );
+                continue; // Skip this profile entirely
+            }
+
             let video_encoding = Self::parse_video_encoding(&profile_config.encoding_str);
             let h264_profile = Self::parse_h264_profile(&profile_config.profile_str);
             let audio_encoding = Self::parse_audio_encoding(&profile_config.audio_encoding_str);
@@ -888,52 +956,20 @@ impl ProfileManager {
         Ok(())
     }
 
-    /// Get video encoder configuration options.
+    /// Get video encoder configuration options with dynamic resolution lists based on sensor maximum.
     pub fn get_video_encoder_configuration_options(&self) -> VideoEncoderConfigurationOptions {
+        let resolutions = Self::generate_standard_resolutions(self.max_sensor_resolution);
+
         VideoEncoderConfigurationOptions {
             quality_range: IntRange { min: 0, max: 100 },
             jpeg: Some(JpegOptions {
-                resolutions_available: vec![
-                    VideoResolution {
-                        width: 1920,
-                        height: 1080,
-                    },
-                    VideoResolution {
-                        width: 1280,
-                        height: 720,
-                    },
-                    VideoResolution {
-                        width: 640,
-                        height: 480,
-                    },
-                    VideoResolution {
-                        width: 320,
-                        height: 240,
-                    },
-                ],
+                resolutions_available: resolutions.clone(),
                 frame_rate_range: IntRange { min: 1, max: 30 },
                 encoding_interval_range: IntRange { min: 1, max: 30 },
             }),
             mpeg4: None,
             h264: Some(H264Options {
-                resolutions_available: vec![
-                    VideoResolution {
-                        width: 1920,
-                        height: 1080,
-                    },
-                    VideoResolution {
-                        width: 1280,
-                        height: 720,
-                    },
-                    VideoResolution {
-                        width: 640,
-                        height: 480,
-                    },
-                    VideoResolution {
-                        width: 320,
-                        height: 240,
-                    },
-                ],
+                resolutions_available: resolutions,
                 gov_length_range: IntRange { min: 1, max: 300 },
                 frame_rate_range: IntRange { min: 1, max: 30 },
                 encoding_interval_range: IntRange { min: 1, max: 30 },
@@ -945,6 +981,27 @@ impl ProfileManager {
             }),
             extension: None,
         }
+    }
+
+    /// Generate standard resolution list filtered by sensor maximum capability.
+    /// Filters common resolutions (1920x1080, 1280x720, 640x480, 320x240) to only those
+    /// that fit within the sensor maximum resolution.
+    fn generate_standard_resolutions(max: Resolution) -> Vec<VideoResolution> {
+        let standard_resolutions = vec![
+            (1920u32, 1080u32),
+            (1280u32, 720u32),
+            (640u32, 480u32),
+            (320u32, 240u32),
+        ];
+
+        standard_resolutions
+            .into_iter()
+            .filter(|(w, h)| *w <= max.width && *h <= max.height)
+            .map(|(w, h)| VideoResolution {
+                width: w as i32,
+                height: h as i32,
+            })
+            .collect()
     }
 
     // ========================================================================

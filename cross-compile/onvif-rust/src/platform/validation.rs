@@ -229,6 +229,11 @@ impl Platform for ValidationPlatform {
         tracing::info!("ValidationPlatform shutdown");
         Ok(())
     }
+
+    fn max_sensor_resolution(&self) -> PlatformResult<Resolution> {
+        // Return default resolution for testing validation platform
+        Ok(Resolution::new(1920, 1080))
+    }
 }
 
 #[cfg(test)]

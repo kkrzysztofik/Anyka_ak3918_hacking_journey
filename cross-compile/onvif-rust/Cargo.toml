@@ -7,6 +7,10 @@ description = "Rust rewrite of the Anyka ONVIF services stack"
 [lib]
 doctest = false
 
+[[bin]]
+name = "onvif-rust"
+path = "src/main.rs"
+
 [dependencies]
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "net", "sync", "time"] }
 axum = "0.8"

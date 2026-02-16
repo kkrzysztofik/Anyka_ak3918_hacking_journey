@@ -30,9 +30,10 @@ use parking_lot::RwLock;
 
 use crate::ffi::VideoDevice;
 use crate::ffi::video::{
-    RealVideoFfi, VideoFfiTrait, VideoInputHandle, video_input_capture_on_internal,
-    video_input_get_sensor_resolution_internal, video_input_match_sensor_internal,
-    video_input_open_internal, video_input_set_channel_attr_internal,
+    RealVideoFfi, VideoFfiTrait, VideoInputHandle, video_input_capture_off_internal,
+    video_input_capture_on_internal, video_input_get_sensor_resolution_internal,
+    video_input_match_sensor_internal, video_input_open_internal,
+    video_input_set_channel_attr_internal,
 };
 
 use crate::ffi::{video_channel_attr, video_resolution};
@@ -52,6 +53,7 @@ use super::traits::{
 pub struct AnykaPlatform {
     initialized: AtomicBool,
     device_info: DeviceInfo,
+    sensor_resolution: RwLock<Option<Resolution>>,
     video_input: Arc<AnykaVideoInput>,
     video_encoder: Arc<AnykaVideoEncoder>,
     audio_input: Arc<AnykaAudioInput>,
@@ -109,6 +111,7 @@ impl AnykaPlatform {
         Ok(Self {
             initialized: AtomicBool::new(false),
             device_info,
+            sensor_resolution: RwLock::new(None),
             video_input,
             video_encoder,
             audio_input,
@@ -169,6 +172,15 @@ impl Platform for AnykaPlatform {
 
         // Step 2: Open video input device
         self.video_input.open().await?;
+
+        // Step 2.5: Query and store sensor resolution
+        let sensor_res = self.video_input.get_sensor_resolution()?;
+        *self.sensor_resolution.write() = Some(sensor_res);
+        tracing::info!(
+            "Sensor resolution detected: {}x{}",
+            sensor_res.width,
+            sensor_res.height
+        );
 
         // Step 3: Configure dual channels
         if let Err(e) = self.video_input.set_channel_attr() {
@@ -242,6 +254,14 @@ impl Platform for AnykaPlatform {
         self.initialized.store(false, Ordering::SeqCst);
         Ok(())
     }
+
+    fn max_sensor_resolution(&self) -> PlatformResult<Resolution> {
+        self.sensor_resolution.read().ok_or_else(|| {
+            PlatformError::InitializationFailed(
+                "Sensor resolution not available - platform not initialized".to_string(),
+            )
+        })
+    }
 }
 
 // =============================================================================
@@ -312,9 +332,8 @@ impl AnykaVideoInput {
 
     /// Configure dual-channel video attributes.
     ///
-    /// Sets up the main channel (1920x1080) and sub channel (1280x720) with
-    /// full sensor crop area. Called during platform initialization after
-    /// the video input device is opened.
+    /// Uses a conservative, sensor-native startup strategy to maximize capture
+    /// bring-up reliability across firmware variants.
     ///
     /// # Errors
     ///
@@ -326,25 +345,48 @@ impl AnykaVideoInput {
             PlatformError::HardwareUnavailable("Video input not opened".to_string())
         })?;
 
-        let attr = video_channel_attr {
-            res: [
-                // Main channel: 1920x1080
-                video_resolution {
-                    width: 1920,
-                    height: 1080,
-                    max_width: 1920,
-                    max_height: 1080,
-                },
-                // Sub channel: 1280x720
-                video_resolution {
-                    width: 1280,
-                    height: 720,
-                    max_width: 1280,
-                    max_height: 720,
-                },
-            ],
-            ..Default::default()
-        };
+        // Query sensor resolution to properly set crop area
+        let sensor_res = video_input_get_sensor_resolution_internal(handle, self.ffi.as_ref())?;
+        tracing::debug!(
+            "Sensor resolution: {}x{}",
+            sensor_res.width,
+            sensor_res.height
+        );
+
+        let sensor_width = sensor_res.width as i32;
+        let sensor_height = sensor_res.height as i32;
+
+        let mut attr = video_channel_attr::default();
+        attr.crop.left = 0;
+        attr.crop.top = 0;
+        attr.crop.width = sensor_width;
+        attr.crop.height = sensor_height;
+        attr.res = [
+            // Main channel: sensor-native conservative startup.
+            video_resolution {
+                width: sensor_width,
+                height: sensor_height,
+                max_width: sensor_width,
+                max_height: sensor_height,
+            },
+            // Sub channel: sensor-native conservative startup.
+            video_resolution {
+                width: sensor_width,
+                height: sensor_height,
+                max_width: sensor_width,
+                max_height: sensor_height,
+            },
+        ];
+
+        tracing::info!(
+            "Applying sensor-native channel attrs: crop={}x{}, main={}x{}, sub={}x{}",
+            attr.crop.width,
+            attr.crop.height,
+            attr.res[0].width,
+            attr.res[0].height,
+            attr.res[1].width,
+            attr.res[1].height
+        );
 
         video_input_set_channel_attr_internal(handle, &attr, self.ffi.as_ref())
     }
@@ -393,23 +435,104 @@ impl AnykaVideoInput {
         ))
     }
 
+    /// Get the sensor resolution via `ak_vi_get_sensor_resolution()`.
+    ///
+    /// Returns the native resolution of the video sensor.
+    /// This is used to constrain profile configurations and validate ONVIF requests.
+    ///
+    /// # Errors
+    ///
+    /// * `PlatformError::HardwareUnavailable` if the device is not opened
+    /// * `PlatformError::HardwareFailure` if the SDK call fails
+    fn get_sensor_resolution(&self) -> PlatformResult<Resolution> {
+        let guard = self.handle.read();
+        let handle = guard.as_ref().ok_or_else(|| {
+            PlatformError::HardwareUnavailable("Video input not opened".to_string())
+        })?;
+
+        let sensor_res = video_input_get_sensor_resolution_internal(handle, self.ffi.as_ref())?;
+        Ok(Resolution {
+            width: sensor_res.width as u32,
+            height: sensor_res.height as u32,
+        })
+    }
+
     /// Start the ISP capture pipeline via `ak_vi_capture_on()`.
     ///
     /// This should be called after `set_channel_attr()` to activate the capture
     /// pipeline. Without this call, the video input device is configured but not
     /// actually capturing frames.
     ///
+    /// Uses retry mechanism with delays to allow ISP system to fully initialize,
+    /// especially important for v3 ISP config files which may need extra time.
+    ///
     /// # Errors
     ///
     /// * `PlatformError::HardwareUnavailable` if the device is not opened
-    /// * `PlatformError::HardwareFailure` if the SDK call fails
+    /// * `PlatformError::HardwareFailure` if the SDK call fails after all retries
     fn capture_on(&self) -> PlatformResult<()> {
         let guard = self.handle.read();
         let handle = guard.as_ref().ok_or_else(|| {
             PlatformError::HardwareUnavailable("Video input not opened".to_string())
         })?;
 
-        video_input_capture_on_internal(handle, self.ffi.as_ref())
+        // Add delay to allow VI system to fully initialize (especially for v3 configs)
+        const VI_INIT_DELAY_MS: u64 = 500;
+        const RETRY_DELAY_MS: u64 = 300;
+        const RETRY_RESET_DELAY_MS: u64 = 120;
+        const MAX_RETRIES: u32 = 3;
+
+        std::thread::sleep(std::time::Duration::from_millis(VI_INIT_DELAY_MS));
+        let capture_start = std::time::Instant::now();
+
+        // Try to start video capture with retry mechanism
+        for attempt in 1..=MAX_RETRIES {
+            let attempt_start = std::time::Instant::now();
+            match video_input_capture_on_internal(handle, self.ffi.as_ref()) {
+                Ok(()) => {
+                    tracing::info!(
+                        "Video capture started successfully on attempt {} (attempt_elapsed_ms={}, total_elapsed_ms={})",
+                        attempt,
+                        attempt_start.elapsed().as_millis(),
+                        capture_start.elapsed().as_millis()
+                    );
+                    return Ok(());
+                }
+                Err(e) if attempt < MAX_RETRIES => {
+                    tracing::warn!(
+                        "ak_vi_capture_on attempt {} failed after {}ms (total={}ms): {}; running capture_off cleanup before retry",
+                        attempt,
+                        attempt_start.elapsed().as_millis(),
+                        capture_start.elapsed().as_millis(),
+                        e
+                    );
+
+                    if let Err(cleanup_error) =
+                        video_input_capture_off_internal(handle, self.ffi.as_ref())
+                    {
+                        tracing::warn!(
+                            "ak_vi_capture_off cleanup after attempt {} failed: {}",
+                            attempt,
+                            cleanup_error
+                        );
+                    }
+
+                    std::thread::sleep(std::time::Duration::from_millis(RETRY_RESET_DELAY_MS));
+                    std::thread::sleep(std::time::Duration::from_millis(RETRY_DELAY_MS));
+                }
+                Err(e) => {
+                    tracing::error!(
+                        "ak_vi_capture_on failed after {} attempts (total_elapsed_ms={}): {}",
+                        MAX_RETRIES,
+                        capture_start.elapsed().as_millis(),
+                        e
+                    );
+                    return Err(e);
+                }
+            }
+        }
+
+        Ok(())
     }
 }
 
@@ -1512,6 +1635,17 @@ mod tests {
     #[tokio::test]
     async fn test_video_input_set_channel_attr_success() {
         let mut mock = mock_ffi_with_successful_open();
+        mock.expect_vi_get_sensor_resolution()
+            .times(1)
+            .returning(|_, res| {
+                unsafe {
+                    (*res).width = 1280;
+                    (*res).height = 720;
+                    (*res).max_width = 1280;
+                    (*res).max_height = 720;
+                }
+                AK_SUCCESS_I32
+            });
         mock.expect_vi_set_channel_attr()
             .times(1)
             .returning(|_, _| AK_SUCCESS_I32);
@@ -1541,6 +1675,17 @@ mod tests {
     #[tokio::test]
     async fn test_video_input_set_channel_attr_ffi_error() {
         let mut mock = mock_ffi_with_successful_open();
+        mock.expect_vi_get_sensor_resolution()
+            .times(1)
+            .returning(|_, res| {
+                unsafe {
+                    (*res).width = 1280;
+                    (*res).height = 720;
+                    (*res).max_width = 1280;
+                    (*res).max_height = 720;
+                }
+                AK_SUCCESS_I32
+            });
         mock.expect_vi_set_channel_attr()
             .times(1)
             .returning(|_, _| AK_FAILED_I32);
@@ -1677,6 +1822,36 @@ mod tests {
         mock.expect_vi_open()
             .returning(move |_| test_ptr as *mut c_void);
         mock.expect_vi_capture_on()
+            .times(1)
+            .returning(|_| AK_SUCCESS_I32);
+
+        let vi = AnykaVideoInput::with_ffi(Arc::new(mock), None);
+        vi.open().await.unwrap();
+
+        let result = vi.capture_on();
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_capture_on_retry_runs_capture_off_cleanup() {
+        let mut mock = MockVideoFfiTrait::new();
+        let test_ptr = std::ptr::NonNull::<c_void>::dangling().as_ptr() as usize;
+
+        mock.expect_vi_open()
+            .times(1)
+            .returning(move |_| test_ptr as *mut c_void);
+
+        let mut attempts = 0;
+        mock.expect_vi_capture_on().times(2).returning(move |_| {
+            attempts += 1;
+            if attempts == 1 {
+                AK_FAILED_I32
+            } else {
+                AK_SUCCESS_I32
+            }
+        });
+
+        mock.expect_vi_capture_off()
             .times(1)
             .returning(|_| AK_SUCCESS_I32);
 

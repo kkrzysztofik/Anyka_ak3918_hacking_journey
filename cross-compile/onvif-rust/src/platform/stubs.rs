@@ -451,6 +451,11 @@ impl Platform for StubPlatform {
         self.initialized.store(false, Ordering::SeqCst);
         Ok(())
     }
+
+    fn max_sensor_resolution(&self) -> PlatformResult<Resolution> {
+        // Return default resolution for testing
+        Ok(Resolution::new(1920, 1080))
+    }
 }
 
 /// Stub video input implementation.
