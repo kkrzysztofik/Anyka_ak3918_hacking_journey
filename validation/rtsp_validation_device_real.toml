@@ -1,0 +1,71 @@
+# RTSP validation tool configuration — Device Real Mode
+#
+# Validates the real camera sensor pipeline (no file playback).
+# Runs validation against both main (1080p) and sub (480p) streams.
+#
+# Usage:
+#   rtsp_validation_tool -c validation/rtsp_validation_device_real.toml --device-password secret
+
+[run]
+launch-on-device = true
+
+[rtsp]
+host = "192.168.2.198"
+port = 554
+stream = "/main"  # primary stream (used when [[device.streams]] is empty)
+timeout-sec = 10
+initial-timestamp-policy = "permissive"
+
+[test]
+short-duration-sec = 30
+long-duration-sec = 600
+concurrent-clients = 2  # lower for embedded device
+
+[thresholds]
+video-startup-latency-ms = 3000
+harness-startup-latency-ms = 5000
+audio-startup-latency-ms = 3000
+bitrate-tolerance-percent = 20
+fps-tolerance-percent = 15
+packet-loss-tolerance-percent = 1
+
+[baseline]
+dir = "rtsp_results/baselines"
+
+[capture]
+interface = ""
+
+[logging]
+level = "debug"
+retina-level = "debug"
+file = "rtsp_validation.log"
+
+[artifacts]
+dir = "rtsp_results/runs"
+capture-tool-output = true
+keep-pcaps = true
+
+[device]
+host = "192.168.2.198"
+ssh-port = 22
+user = "root"
+password = ""
+telemetry = true
+real-mode = true
+# h264-file and aac-file intentionally omitted (real mode uses camera sensor)
+
+# Streams to validate (both main and sub)
+[[device.streams]]
+label = "main"
+rtsp-stream = "/main"
+httpflv-path = "/live/main.flv"
+
+[[device.streams]]
+label = "sub"
+rtsp-stream = "/sub"
+httpflv-path = "/live/sub.flv"
+
+[httpflv]
+port = 8080
+path = "/live/main.flv"
+timeout-sec = 10

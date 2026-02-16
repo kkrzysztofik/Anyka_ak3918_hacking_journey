@@ -302,7 +302,7 @@ fn default_onvif_binary_path(cwd: &Path) -> PathBuf {
         .unwrap_or_else(|| candidates[0].clone())
 }
 
-fn validate_args(_args: &Args, effective: &EffectiveConfig) -> Result<()> {
+fn validate_args(args: &Args, effective: &EffectiveConfig) -> Result<()> {
     if effective.launch_on_device && !effective.no_launch {
         bail!(
             "when using launch_on_device (config or --launch-on-device), no_launch must be true (server is started on device)"
@@ -320,6 +320,12 @@ fn validate_args(_args: &Args, effective: &EffectiveConfig) -> Result<()> {
         );
     }
 
+    if effective.device_real_mode && args.device_h264_file.is_some() {
+        bail!(
+            "--device-real-mode and --device-h264-file are mutually exclusive (real mode uses the camera sensor, not file playback)"
+        );
+    }
+
     if !effective.rtsp_stream.starts_with('/') {
         bail!(
             "--rtsp-stream must start with '/' (got {})",
@@ -328,6 +334,21 @@ fn validate_args(_args: &Args, effective: &EffectiveConfig) -> Result<()> {
     }
 
     Ok(())
+}
+
+/// Prefix test names with a stream label for multi-stream disambiguation.
+fn prefix_test_names(tests: &mut [TestResult], prefix: &str) {
+    if prefix.is_empty() {
+        return;
+    }
+    for test in tests.iter_mut() {
+        let name = match test {
+            TestResult::Pass { name, .. }
+            | TestResult::Fail { name, .. }
+            | TestResult::Metric { name, .. } => name,
+        };
+        *name = format!("{}:{}", prefix, name);
+    }
 }
 
 fn maybe_launch_server(args: &Args, effective: &EffectiveConfig) -> Result<Option<Child>> {
@@ -378,10 +399,12 @@ fn maybe_launch_server(args: &Args, effective: &EffectiveConfig) -> Result<Optio
 #[cfg(test)]
 mod tests {
     use super::{
-        default_onvif_binary_path, device_failure_diagnostics, maybe_launch_server, validate_args,
-        wait_for_server_with_retries,
+        default_onvif_binary_path, device_failure_diagnostics, maybe_launch_server,
+        prefix_test_names, validate_args, wait_for_server_with_retries,
     };
     use rtsp_validation_tool::config::{EffectiveConfig, parse_args_from};
+    use rtsp_validation_tool::report::TestResult;
+    use rtsp_validation_tool::rtsp::critical_proto_failed;
     use std::{
         fs,
         process::{Command, Stdio},
@@ -602,6 +625,71 @@ mod tests {
             err
         );
     }
+
+    #[test]
+    fn test_validate_args_device_real_mode_and_h264_conflict() {
+        let parsed = parse_args_from([
+            "rtsp_validation_tool",
+            "--launch-on-device",
+            "--device-real-mode",
+            "--device-h264-file",
+            "/mnt/test.h264",
+            "--device-password",
+            "secret",
+        ])
+        .unwrap();
+        let effective = EffectiveConfig::from_config_and_args(None, &parsed.args, &parsed.sources);
+        let err = validate_args(&parsed.args, &effective).unwrap_err();
+        assert!(
+            err.to_string().contains("mutually exclusive"),
+            "unexpected error: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn test_prefix_test_names_adds_prefix() {
+        let mut tests = vec![
+            TestResult::pass("describe_ok"),
+            TestResult::fail("play_ok", "timeout"),
+            TestResult::metric("fps".to_string(), serde_json::json!(25.0), true),
+        ];
+        prefix_test_names(&mut tests, "main");
+        let names: Vec<&str> = tests
+            .iter()
+            .map(|t| match t {
+                TestResult::Pass { name, .. }
+                | TestResult::Fail { name, .. }
+                | TestResult::Metric { name, .. } => name.as_str(),
+            })
+            .collect();
+        assert_eq!(names, vec!["main:describe_ok", "main:play_ok", "main:fps"]);
+    }
+
+    #[test]
+    fn test_prefix_test_names_empty_prefix_noop() {
+        let mut tests = vec![TestResult::pass("describe_ok")];
+        prefix_test_names(&mut tests, "");
+        match &tests[0] {
+            TestResult::Pass { name, .. } => assert_eq!(name, "describe_ok"),
+            _ => panic!("expected Pass"),
+        }
+    }
+
+    #[test]
+    fn test_critical_proto_failed_with_prefixed_names() {
+        let tests = vec![TestResult::fail("main:describe_ok", "timeout")];
+        assert!(critical_proto_failed(&tests));
+
+        let tests = vec![TestResult::fail("sub:play_ok", "timeout")];
+        assert!(critical_proto_failed(&tests));
+
+        let tests = vec![TestResult::fail("main:setup_stream_video", "error")];
+        assert!(critical_proto_failed(&tests));
+
+        let tests = vec![TestResult::fail("main:fps_check", "low")];
+        assert!(!critical_proto_failed(&tests));
+    }
 }
 
 async fn wait_for_server(
@@ -697,7 +785,9 @@ async fn main() -> Result<()> {
         .to_string();
     info!(path = %effective.artifacts_dir.display(), "artifacts directory");
 
-    let run_mode = if effective.launch_on_device {
+    let run_mode = if effective.device_real_mode {
+        "device-real"
+    } else if effective.launch_on_device {
         "device"
     } else if effective.no_launch {
         "no-launch"
@@ -708,9 +798,11 @@ async fn main() -> Result<()> {
         "rtsp://{}:{}{}",
         effective.rtsp_host, effective.rtsp_port, effective.rtsp_stream
     );
+    let stream_labels: Vec<&str> = effective.streams.iter().map(|s| s.label.as_str()).collect();
     info!(
         run_mode,
         rtsp = %rtsp_url,
+        streams = ?stream_labels,
         output = %effective.output,
         "RTSP validation run"
     );
@@ -853,57 +945,93 @@ async fn main() -> Result<()> {
     }
 
     let run_validation_and_harness = async {
-        let mut report = run_validation(&args, &effective).await?;
+        let mut all_tests: Vec<TestResult> = Vec::new();
+        let mut first_report: Option<ValidationReport> = None;
 
-        // 2. HTTP-FLV Protocol Validation
-        if !args.skip_httpflv {
-            info!("Running HTTP-FLV validation...");
-            match rtsp_validation_tool::httpflv::run_httpflv_validation(&effective).await {
-                Ok(httpflv_tests) => {
-                    report.tests.extend(httpflv_tests);
-                }
-                Err(e) => {
-                    warn!(error = %e, "HTTP-FLV validation failed");
-                    report
-                        .tests
-                        .push(rtsp_validation_tool::report::TestResult::fail_proto(
-                            "httpflv_validation_run",
-                            e.to_string(),
-                            "httpflv",
-                        ));
-                }
+        for stream_cfg in &effective.streams {
+            let mut stream_effective = effective.clone();
+            stream_effective.rtsp_stream = stream_cfg.rtsp_stream.clone();
+            stream_effective.httpflv_path = stream_cfg.httpflv_path.clone();
+
+            let prefix = &stream_cfg.label;
+            if !prefix.is_empty() {
+                info!(
+                    stream = %prefix,
+                    rtsp = %stream_cfg.rtsp_stream,
+                    httpflv = %stream_cfg.httpflv_path,
+                    "validating stream"
+                );
             }
-        }
 
-        // 3. Harness Scenarios
-        if critical_proto_failed(&report.tests) {
-            report.tests.push(TestResult::fail(
-                "harness_skipped",
-                "critical protocol validation failed; skipping harness",
-            ));
-        } else {
-            // Run RTSP harness (existing)
-            run_harness(&args, &effective, &mut report.tests).await?;
+            let mut report = run_validation(&args, &stream_effective).await?;
+            prefix_test_names(&mut report.tests, prefix);
 
-            // Run HTTP-FLV harness (new)
-            #[allow(clippy::collapsible_if)]
+            // HTTP-FLV Protocol Validation for this stream
             if !args.skip_httpflv {
-                if let Err(e) = rtsp_validation_tool::httpflv::run_httpflv_harness(
-                    &args,
-                    &effective,
-                    &mut report.tests,
-                )
-                .await
-                {
-                    report
-                        .tests
-                        .push(rtsp_validation_tool::report::TestResult::fail(
+                info!(stream = %prefix, "running HTTP-FLV validation");
+                let mut httpflv_tests =
+                    match rtsp_validation_tool::httpflv::run_httpflv_validation(&stream_effective)
+                        .await
+                    {
+                        Ok(tests) => tests,
+                        Err(e) => {
+                            warn!(error = %e, stream = %prefix, "HTTP-FLV validation failed");
+                            vec![TestResult::fail_proto(
+                                "httpflv_validation_run",
+                                e.to_string(),
+                                "httpflv",
+                            )]
+                        }
+                    };
+                prefix_test_names(&mut httpflv_tests, prefix);
+                report.tests.extend(httpflv_tests);
+            }
+
+            // Harness Scenarios for this stream
+            if critical_proto_failed(&report.tests) {
+                let name = if prefix.is_empty() {
+                    "harness_skipped".to_string()
+                } else {
+                    format!("{}:harness_skipped", prefix)
+                };
+                report.tests.push(TestResult::fail(
+                    name,
+                    "critical protocol validation failed; skipping harness",
+                ));
+            } else {
+                let pre_harness_len = report.tests.len();
+                run_harness(&args, &stream_effective, &mut report.tests).await?;
+                prefix_test_names(&mut report.tests[pre_harness_len..], prefix);
+
+                #[allow(clippy::collapsible_if)]
+                if !args.skip_httpflv {
+                    let pre_httpflv_len = report.tests.len();
+                    if let Err(e) = rtsp_validation_tool::httpflv::run_httpflv_harness(
+                        &args,
+                        &stream_effective,
+                        &mut report.tests,
+                    )
+                    .await
+                    {
+                        report.tests.push(TestResult::fail(
                             "httpflv_harness_execution",
                             format!("HTTP-FLV harness failed: {}", e),
                         ));
+                    }
+                    prefix_test_names(&mut report.tests[pre_httpflv_len..], prefix);
                 }
             }
+
+            all_tests.extend(std::mem::take(&mut report.tests));
+            if first_report.is_none() {
+                first_report = Some(report);
+            }
         }
+
+        // Use the first stream's report as the base (test_run metadata).
+        // This is guaranteed to exist since EffectiveConfig always has ≥1 stream.
+        let mut report = first_report.expect("streams list must have at least one entry");
+        report.tests = all_tests;
 
         // Capture telemetry after tests
         if effective.launch_on_device && effective.collect_telemetry {

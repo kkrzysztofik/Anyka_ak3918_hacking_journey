@@ -41,6 +41,12 @@ fn test_effective_config(httpflv_port: u16, httpflv_path: &str) -> EffectiveConf
         device_h264_file: None,
         device_aac_file: None,
         device_loop_playback: false,
+        device_real_mode: false,
+        streams: vec![rtsp_validation_tool::config::StreamConfig {
+            label: String::new(),
+            rtsp_stream: "/stream1".to_string(),
+            httpflv_path: httpflv_path.to_string(),
+        }],
         no_launch: true,
         h264_file: None,
         output: "report.json".to_string(),
