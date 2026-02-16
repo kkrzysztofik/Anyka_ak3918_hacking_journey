@@ -75,6 +75,10 @@ build_v4l2_ctl() {
     if [ ! -f "${MEDIA_BUS_HDR}" ]; then
         MEDIA_BUS_HDR="${SYSROOT}/usr/include/linux/media-bus-format.h"
     fi
+    if [ ! -f "${MEDIA_BUS_HDR}" ]; then
+        echo "ERROR: media-bus-format.h not found in source or sysroot"
+        exit 1
+    fi
     bash "${SRC_DIR}/utils/gen_media_bus_format_names.sh" "${MEDIA_BUS_HDR}" \
         > "${BUILD_DIR}/media-bus-format-names.h"
 
@@ -151,8 +155,19 @@ build_v4l2_ctl() {
         fi
     done
 
+    # Report compilation summary after both loops
+    local TOTAL_SOURCES=$((${#C_SOURCES[@]} + ${#SOURCES[@]}))
     echo ""
-    echo "Compiled ${#OBJECTS[@]}/${#SOURCES[@]} files (${FAILED} failed)"
+    echo "Compiled ${#OBJECTS[@]}/${TOTAL_SOURCES} files (${FAILED} failed)"
+
+    if [ ${#OBJECTS[@]} -eq 0 ]; then
+        echo "ERROR: No objects compiled."
+        exit 1
+    fi
+    if [ ${FAILED} -gt 0 ]; then
+        echo "ERROR: ${FAILED} file(s) failed to compile."
+        exit 1
+    fi
 
     if [ ${#OBJECTS[@]} -eq 0 ]; then
         echo "ERROR: No objects compiled."
@@ -175,6 +190,18 @@ build_v4l2_ctl() {
 build_v4l2_ctl_meson() {
     echo ""
     echo "Building v4l2-ctl via meson cross-compilation..."
+
+    # Check if meson and ninja are available
+    if ! command -v meson &>/dev/null; then
+        echo "ERROR: meson not found. Install with: pip install meson"
+        echo "Or: sudo apt install meson"
+        exit 1
+    fi
+    if ! command -v ninja &>/dev/null; then
+        echo "ERROR: ninja not found. Install with: pip install ninja"
+        echo "Or: sudo apt install ninja-build"
+        exit 1
+    fi
 
     # Create meson cross file
     local CROSS_FILE="${BUILD_DIR}/arm-cross.ini"
@@ -200,19 +227,12 @@ pkg_config_libdir = '${SYSROOT}/usr/lib/pkgconfig'
 [host_machine]
 system = 'linux'
 cpu_family = 'arm'
-cpu = 'arm926ej-s'
+cpu = 'armv5te'
 endian = 'little'
 EOF
 
     local MESON_BUILD_DIR="${BUILD_DIR}/meson-out"
     rm -rf "${MESON_BUILD_DIR}"
-
-    # Check if meson is available
-    if ! command -v meson &>/dev/null; then
-        echo "ERROR: meson not found. Install with: pip install meson"
-        echo "Or: sudo apt install meson"
-        exit 1
-    fi
 
     meson setup "${MESON_BUILD_DIR}" "${SRC_DIR}" \
         --cross-file="${CROSS_FILE}" \

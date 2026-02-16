@@ -200,6 +200,7 @@ install_ffmpeg() {
     # Deploy
     echo ""
     echo "Deploying to ${DEPLOY_DIR}..."
+    mkdir -p "${DEPLOY_DIR}"
     cp "${binary}" "${DEPLOY_DIR}/ffmpeg"
     echo "Deployed."
 }

@@ -5,6 +5,9 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../../" && pwd)"
 
+# Change to script directory to resolve relative paths correctly
+cd "$SCRIPT_DIR"
+
 # Find the crosstool in the repo (prefer -ng version if available)
 if [ -d "$REPO_ROOT/toolchain/arm-anykav200-crosstool" ]; then
     TOOLCHAIN_PATH="$REPO_ROOT/toolchain/arm-anykav200-crosstool"
