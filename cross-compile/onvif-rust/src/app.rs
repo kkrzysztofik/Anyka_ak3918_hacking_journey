@@ -513,6 +513,9 @@ pub struct Application {
 
     /// Handle to the rate limiter cleanup task.
     rate_limiter_cleanup_task: Option<JoinHandle<()>>,
+
+    /// Live streaming service (RTSP + HTTP-FLV).
+    streaming_service: Option<crate::streaming::service::StreamingService>,
 }
 
 impl Application {
@@ -742,6 +745,10 @@ impl Application {
         };
         progress.complete_phase();
 
+        // Phase 6: Streaming (optional, gracefully degrades)
+        let streaming_service =
+            Self::start_streaming(&config_runtime, platform.as_ref(), &mut progress).await;
+
         let startup_duration = started_at.elapsed();
         if progress.has_degraded_services() {
             tracing::warn!(
@@ -767,6 +774,7 @@ impl Application {
             config_persistence_task,
             memory_logging_task,
             rate_limiter_cleanup_task,
+            streaming_service,
         })
     }
 
@@ -831,6 +839,53 @@ impl Application {
                     progress.record_degraded("platform", e.to_string());
                     None
                 }
+            }
+        }
+    }
+
+    /// Start the streaming service (RTSP + HTTP-FLV) if enabled in config.
+    ///
+    /// This is non-fatal: if streaming fails to start, the application continues
+    /// in degraded mode.
+    async fn start_streaming(
+        config_runtime: &Arc<ConfigRuntime>,
+        platform: Option<&Arc<dyn Platform>>,
+        progress: &mut StartupProgress,
+    ) -> Option<crate::streaming::service::StreamingService> {
+        let streaming_config =
+            crate::streaming::config::StreamingConfig::from_config(config_runtime);
+        if !streaming_config.enabled {
+            tracing::info!("Streaming is disabled in configuration");
+            return None;
+        }
+
+        let mut service = crate::streaming::service::StreamingService::new(streaming_config);
+        match service.start().await {
+            Ok(bridge) => {
+                // Register the bridge as a frame callback with the platform.
+                if let Some(platform) = platform {
+                    match platform.register_frame_callback(bridge) {
+                        Ok(()) => {
+                            tracing::info!("Frame callback registered with platform");
+                        }
+                        Err(e) => {
+                            tracing::warn!(
+                                "Failed to register frame callback (streaming will work but \
+                                 won't receive live frames from encoder): {}",
+                                e
+                            );
+                        }
+                    }
+                }
+                Some(service)
+            }
+            Err(e) => {
+                tracing::warn!(
+                    "Streaming service failed to start, continuing in degraded mode: {}",
+                    e
+                );
+                progress.record_degraded("streaming", e.to_string());
+                None
             }
         }
     }
@@ -1039,6 +1094,10 @@ impl Application {
         };
         progress.complete_phase();
 
+        // Phase 6: Streaming (optional, gracefully degrades)
+        let streaming_service =
+            Self::start_streaming(&config_runtime, Some(&platform), &mut progress).await;
+
         let startup_duration = started_at.elapsed();
         if progress.has_degraded_services() {
             tracing::warn!(
@@ -1064,6 +1123,7 @@ impl Application {
             config_persistence_task,
             memory_logging_task,
             rate_limiter_cleanup_task,
+            streaming_service,
         })
     }
 
@@ -1194,6 +1254,14 @@ impl Application {
         report.record_success("ptz");
         report.record_success("media");
         report.record_success("device");
+
+        // Phase 3.5: Streaming shutdown (before platform)
+        if let Some(mut streaming) = self.streaming_service.take() {
+            streaming.shutdown().await;
+            report.record_success("streaming");
+        } else {
+            report.record_success("streaming");
+        }
 
         // Phase 4: Platform shutdown
         tracing::debug!("Shutting down platform...");
@@ -1373,6 +1441,7 @@ mod tests {
             discovery_task: None,
             memory_logging_task: None,
             rate_limiter_cleanup_task: None,
+            streaming_service: None,
         }
     }
 

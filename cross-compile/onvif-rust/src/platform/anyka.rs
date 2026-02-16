@@ -202,6 +202,9 @@ impl Platform for AnykaPlatform {
             let _ = self.video_input.close().await;
             return Err(e);
         }
+        // Allow the capture pipeline to stabilize before opening encoders.
+        // The C reference (platform_anyka.c:609) uses PLATFORM_DELAY_MS_RETRY (200ms).
+        std::thread::sleep(Duration::from_millis(200));
         tracing::info!("Video input initialized: dual-channel config and capture started");
 
         // Initialize dual video encoders (main 720p + sub 360p)
@@ -236,6 +239,21 @@ impl Platform for AnykaPlatform {
             encoder_configs.len()
         );
 
+        // Start frame production: bind VI+encoder and spawn polling threads
+        if let Some(vi_handle) = self.video_input.get_handle() {
+            let main_enc = self.video_encoder.main_handle.read().clone();
+            let sub_enc = self.video_encoder.sub_handle.read().clone();
+
+            if let Some(ref main) = main_enc
+                && let Err(e) =
+                    self.video_encoder
+                        .start_streaming(&vi_handle, main, sub_enc.as_ref())
+            {
+                tracing::error!("Failed to start streaming: {}", e);
+                // Non-fatal: platform can still serve ONVIF metadata without live frames
+            }
+        }
+
         // TODO(kkrzysztofik): Call remaining Anyka SDK initialization functions via FFI
         // - ak_ai_open()
         // - ak_aenc_open()
@@ -255,6 +273,9 @@ impl Platform for AnykaPlatform {
                 e
             );
         }
+
+        // Stop frame production threads before closing encoders
+        self.video_encoder.stop_streaming();
 
         if let Err(e) = self.video_encoder.close_all_encoders() {
             tracing::warn!(
@@ -296,6 +317,15 @@ impl Platform for AnykaPlatform {
                 "Sensor resolution not available - platform not initialized".to_string(),
             )
         })
+    }
+
+    fn register_frame_callback(
+        &self,
+        callback: Arc<dyn crate::platform::frame::FrameCallback>,
+    ) -> PlatformResult<()> {
+        let _id = self.video_encoder.register_frame_callback(callback);
+        tracing::info!("Frame callback registered (id={})", _id);
+        Ok(())
     }
 }
 
@@ -386,6 +416,11 @@ impl AnykaVideoInput {
             isp_config_path,
             vpss_initialized: AtomicBool::new(false),
         }
+    }
+
+    /// Get a clone of the video input handle (if opened).
+    pub fn get_handle(&self) -> Option<Arc<crate::ffi::VideoInputHandle>> {
+        self.handle.read().clone()
     }
 
     /// Configure dual-channel video attributes.
@@ -802,16 +837,18 @@ use std::time::{Duration, Instant};
 
 use portable_atomic::AtomicU64;
 
+#[cfg(use_stubs)]
+use crate::ffi::VideoFrameType;
 use crate::ffi::video::{
-    VideoEncoderHandle, video_encoder_open_internal, video_encoder_request_idr_internal,
-    video_encoder_set_rc_internal,
+    VideoEncoderHandle, VideoStreamHandle, video_encoder_open_internal,
+    video_encoder_request_idr_internal, video_encoder_set_rc_internal,
 };
 use crate::ffi::{
     bitrate_ctrl_mode, encode_group_type, encode_output_type, encode_param, encode_use_chn,
-    profile_mode,
+    profile_mode, video_stream,
 };
 
-use super::frame::{ActiveFrames, CallbackId, Frame, FrameCallback};
+use super::frame::{ActiveFrames, CallbackId, Frame, FrameCallback, FrameType, StreamId};
 
 /// Encoder lifecycle state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -820,6 +857,130 @@ enum EncoderState {
     Uninitialized,
     /// Encoder initialized and ready to produce frames.
     Initialized,
+}
+
+/// Convert an SDK `VideoFrameType` to our `FrameType`.
+#[cfg(use_stubs)]
+fn sdk_frame_type_to_frame_type(ft: VideoFrameType) -> FrameType {
+    match ft {
+        VideoFrameType::FrameTypeI | VideoFrameType::FrameTypePi => FrameType::VideoIFrame,
+        VideoFrameType::FrameTypeP => FrameType::VideoPFrame,
+        VideoFrameType::FrameTypeB => FrameType::VideoBFrame,
+    }
+}
+
+#[cfg(not(use_stubs))]
+fn sdk_frame_type_to_frame_type(ft: crate::ffi::video_frame_type) -> FrameType {
+    match ft {
+        crate::ffi::video_frame_type::FRAME_TYPE_I
+        | crate::ffi::video_frame_type::FRAME_TYPE_PI => FrameType::VideoIFrame,
+        crate::ffi::video_frame_type::FRAME_TYPE_P => FrameType::VideoPFrame,
+        crate::ffi::video_frame_type::FRAME_TYPE_B => FrameType::VideoBFrame,
+    }
+}
+
+/// Polling loop that reads encoded frames from the SDK and invokes callbacks.
+///
+/// This runs on a dedicated `std::thread` (NOT tokio) because `ak_venc_get_stream()`
+/// is a blocking C call. The loop reads frames, converts them to `Frame`, invokes
+/// all registered callbacks, then releases the SDK buffer back.
+///
+/// Exits cleanly when `stop_signal` is set to `true`.
+fn frame_read_loop(
+    stream_handle: Arc<VideoStreamHandle>,
+    ffi: Arc<dyn crate::ffi::video::VideoFfiTrait>,
+    stream_id: StreamId,
+    callbacks: Arc<RwLock<HashMap<CallbackId, Arc<dyn FrameCallback>>>>,
+    stop_signal: Arc<AtomicBool>,
+) {
+    use crate::ffi::AK_SUCCESS_I32;
+
+    tracing::info!("Frame read loop started for {:?}", stream_id);
+
+    // Allow the SDK's internal encoder thread to initialize before polling.
+    // The C reference (platform_anyka.c:2673) uses PLATFORM_DELAY_MS_MEDIUM (100ms).
+    std::thread::sleep(Duration::from_millis(100));
+
+    let mut consecutive_errors: u32 = 0;
+
+    while !stop_signal.load(Ordering::SeqCst) {
+        let mut stream = std::mem::MaybeUninit::<video_stream>::uninit();
+
+        // Blocking call — waits until a frame is available or error
+        let ret = ffi.venc_get_stream(stream_handle.as_ptr(), stream.as_mut_ptr());
+
+        if ret != AK_SUCCESS_I32 {
+            if stop_signal.load(Ordering::SeqCst) {
+                break;
+            }
+            // Exponential backoff: 10ms → 20ms → 40ms → 80ms → 100ms max.
+            // The C reference uses base 50ms with 2x backoff up to 200ms.
+            let delay = std::cmp::min(10u64 * (1u64 << consecutive_errors.min(3)), 100);
+            std::thread::sleep(Duration::from_millis(delay));
+            consecutive_errors += 1;
+            continue;
+        }
+
+        consecutive_errors = 0;
+
+        // SAFETY: venc_get_stream succeeded, so `stream` is fully initialized
+        let mut stream_data = unsafe { stream.assume_init() };
+
+        if !stream_data.data.is_null() && stream_data.len > 0 {
+            let frame_type = sdk_frame_type_to_frame_type(stream_data.frame_type);
+
+            let frame = Frame {
+                data: stream_data.data as *const u8,
+                size: stream_data.len as usize,
+                // SDK timestamps are in milliseconds; Frame uses microseconds
+                timestamp: stream_data.ts.wrapping_mul(1000),
+                frame_type,
+                stream_id,
+            };
+
+            // Invoke all callbacks (panic-isolated)
+            invoke_callbacks_from_map(&callbacks, &frame);
+        }
+
+        // Release the SDK buffer back to the encoder.
+        // SAFETY: We pass back the same stream struct that get_stream populated.
+        // The data pointer is owned by the SDK and must be returned.
+        // This MUST happen even during shutdown to avoid leaking SDK buffers.
+        let _ = ffi.venc_release_stream(stream_handle.as_ptr(), &mut stream_data);
+    }
+
+    tracing::info!("Frame read loop exited for {:?}", stream_id);
+}
+
+/// Invoke all registered callbacks with a frame, isolating panics.
+///
+/// This is a standalone function (not a method) so it can be used from
+/// the `frame_read_loop` thread without holding a reference to `AnykaVideoEncoder`.
+fn invoke_callbacks_from_map(
+    callbacks: &RwLock<HashMap<CallbackId, Arc<dyn FrameCallback>>>,
+    frame: &Frame,
+) {
+    let cbs = callbacks.read();
+    let mut failed = Vec::new();
+
+    for (id, cb) in cbs.iter() {
+        let result = std::panic::catch_unwind(AssertUnwindSafe(|| {
+            cb.on_frame(frame);
+        }));
+
+        if result.is_err() {
+            tracing::error!("Frame callback {} panicked, marking for removal", id);
+            failed.push(*id);
+        }
+    }
+
+    if !failed.is_empty() {
+        drop(cbs);
+        let mut cbs_write = callbacks.write();
+        for id in failed {
+            cbs_write.remove(&id);
+        }
+    }
 }
 
 /// Anyka video encoder implementation with FFI integration and callback support.
@@ -847,9 +1008,14 @@ struct AnykaVideoEncoder {
     sub_handle: RwLock<Option<Arc<VideoEncoderHandle>>>,
     main_state: RwLock<EncoderState>,
     sub_state: RwLock<EncoderState>,
-    callbacks: RwLock<HashMap<CallbackId, Arc<dyn FrameCallback>>>,
+    callbacks: Arc<RwLock<HashMap<CallbackId, Arc<dyn FrameCallback>>>>,
     active_frames: Arc<ActiveFrames>,
     next_callback_id: AtomicU64,
+    main_stream_handle: RwLock<Option<Arc<VideoStreamHandle>>>,
+    sub_stream_handle: RwLock<Option<Arc<VideoStreamHandle>>>,
+    main_read_thread: RwLock<Option<std::thread::JoinHandle<()>>>,
+    sub_read_thread: RwLock<Option<std::thread::JoinHandle<()>>>,
+    stop_signal: Arc<AtomicBool>,
 }
 
 impl AnykaVideoEncoder {
@@ -892,9 +1058,14 @@ impl AnykaVideoEncoder {
             sub_handle: RwLock::new(None),
             main_state: RwLock::new(EncoderState::Uninitialized),
             sub_state: RwLock::new(EncoderState::Uninitialized),
-            callbacks: RwLock::new(HashMap::new()),
+            callbacks: Arc::new(RwLock::new(HashMap::new())),
             active_frames: Arc::new(ActiveFrames::new()),
             next_callback_id: AtomicU64::new(1),
+            main_stream_handle: RwLock::new(None),
+            sub_stream_handle: RwLock::new(None),
+            main_read_thread: RwLock::new(None),
+            sub_read_thread: RwLock::new(None),
+            stop_signal: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -991,6 +1162,131 @@ impl AnykaVideoEncoder {
     /// Get a reference to the active frames tracker.
     pub fn active_frames(&self) -> &Arc<ActiveFrames> {
         &self.active_frames
+    }
+
+    /// Start streaming from the encoder by requesting stream handles and spawning
+    /// dedicated reader threads that poll the SDK for encoded frames.
+    ///
+    /// # Arguments
+    ///
+    /// * `vi_handle` - Video input handle (provides raw sensor data)
+    /// * `main_enc` - Main encoder handle (720p)
+    /// * `sub_enc` - Optional sub encoder handle (360p)
+    pub fn start_streaming(
+        &self,
+        vi_handle: &Arc<crate::ffi::VideoInputHandle>,
+        main_enc: &Arc<VideoEncoderHandle>,
+        sub_enc: Option<&Arc<VideoEncoderHandle>>,
+    ) -> PlatformResult<()> {
+        self.stop_signal.store(false, Ordering::SeqCst);
+
+        // Request main stream
+        let main_sh = Arc::new(VideoStreamHandle::new(
+            vi_handle.as_ptr(),
+            main_enc.as_ptr(),
+            Arc::clone(&self.ffi),
+        )?);
+        *self.main_stream_handle.write() = Some(Arc::clone(&main_sh));
+
+        // Allow the SDK encoder process thread to start up before we poll.
+        // The C reference (platform_anyka.c:609) uses PLATFORM_DELAY_MS_RETRY (200ms)
+        // for post-capture/post-request stabilization.
+        std::thread::sleep(Duration::from_millis(200));
+
+        // Spawn main read thread
+        let main_thread = {
+            let ffi = Arc::clone(&self.ffi);
+            let callbacks = Arc::clone(&self.callbacks_arc());
+            let stop = Arc::clone(&self.stop_signal);
+            let sh = Arc::clone(&main_sh);
+            std::thread::Builder::new()
+                .name("venc-main-read".to_string())
+                .spawn(move || {
+                    frame_read_loop(sh, ffi, StreamId::VideoMain, callbacks, stop);
+                })
+                .map_err(|e| {
+                    PlatformError::InitializationFailed(format!(
+                        "Failed to spawn main read thread: {}",
+                        e
+                    ))
+                })?
+        };
+        *self.main_read_thread.write() = Some(main_thread);
+        tracing::info!("Main stream reader thread started");
+
+        // Request sub stream (if encoder exists)
+        if let Some(sub) = sub_enc {
+            let sub_sh = Arc::new(VideoStreamHandle::new(
+                vi_handle.as_ptr(),
+                sub.as_ptr(),
+                Arc::clone(&self.ffi),
+            )?);
+            *self.sub_stream_handle.write() = Some(Arc::clone(&sub_sh));
+
+            // Same stabilization delay as main stream (see above).
+            std::thread::sleep(Duration::from_millis(200));
+
+            let sub_thread = {
+                let ffi = Arc::clone(&self.ffi);
+                let callbacks = Arc::clone(&self.callbacks_arc());
+                let stop = Arc::clone(&self.stop_signal);
+                let sh = Arc::clone(&sub_sh);
+                std::thread::Builder::new()
+                    .name("venc-sub-read".to_string())
+                    .spawn(move || {
+                        frame_read_loop(sh, ffi, StreamId::VideoSub, callbacks, stop);
+                    })
+                    .map_err(|e| {
+                        PlatformError::InitializationFailed(format!(
+                            "Failed to spawn sub read thread: {}",
+                            e
+                        ))
+                    })?
+            };
+            *self.sub_read_thread.write() = Some(sub_thread);
+            tracing::info!("Sub stream reader thread started");
+        }
+
+        Ok(())
+    }
+
+    /// Stop streaming: signal threads to stop, cancel streams (unblocking SDK calls),
+    /// then join the reader threads.
+    pub fn stop_streaming(&self) {
+        self.stop_signal.store(true, Ordering::SeqCst);
+
+        // Cancel streams to unblock ak_venc_get_stream() in reader threads.
+        // Must happen BEFORE thread join — threads hold Arc clones so RAII won't fire.
+        if let Some(handle) = self.main_stream_handle.read().as_ref() {
+            handle.cancel();
+        }
+        if let Some(handle) = self.sub_stream_handle.read().as_ref() {
+            handle.cancel();
+        }
+
+        // Now join threads — they will exit because venc_get_stream returns error
+        // and stop_signal is set.
+        if let Some(thread) = self.main_read_thread.write().take()
+            && let Err(e) = thread.join()
+        {
+            tracing::warn!("Main read thread panicked during join: {:?}", e);
+        }
+        if let Some(thread) = self.sub_read_thread.write().take()
+            && let Err(e) = thread.join()
+        {
+            tracing::warn!("Sub read thread panicked during join: {:?}", e);
+        }
+
+        // Drop stream handles (threads are done, RAII Drop is now a no-op due to cancelled flag).
+        let _ = self.main_stream_handle.write().take();
+        let _ = self.sub_stream_handle.write().take();
+
+        tracing::info!("Streaming stopped");
+    }
+
+    /// Get a cloned `Arc` reference to the callbacks map for thread sharing.
+    fn callbacks_arc(&self) -> Arc<RwLock<HashMap<CallbackId, Arc<dyn FrameCallback>>>> {
+        Arc::clone(&self.callbacks)
     }
 
     /// Request an IDR (I-frame) from the specified encoder channel.
@@ -2712,5 +3008,429 @@ mod tests {
         let encoder = AnykaVideoEncoder::with_ffi(Arc::new(mock));
         let af = encoder.active_frames();
         assert_eq!(af.active_count(), 0);
+    }
+
+    // =========================================================================
+    // VideoStreamHandle Tests
+    // =========================================================================
+
+    use crate::ffi::video::VideoStreamHandle;
+
+    #[test]
+    fn test_video_stream_handle_creation_success() {
+        let mut mock = MockVideoFfiTrait::new();
+        let test_ptr = std::ptr::NonNull::<c_void>::dangling().as_ptr() as usize;
+
+        mock.expect_venc_request_stream()
+            .times(1)
+            .returning(move |_, _| test_ptr as *mut c_void);
+        mock.expect_venc_cancel_stream()
+            .times(1)
+            .returning(|_| AK_SUCCESS_I32);
+
+        let vi_handle = std::ptr::NonNull::<c_void>::dangling().as_ptr();
+        let venc_handle = std::ptr::NonNull::<c_void>::dangling().as_ptr();
+
+        let result = VideoStreamHandle::new(vi_handle, venc_handle, Arc::new(mock));
+        assert!(result.is_ok());
+        // Drop triggers venc_cancel_stream
+    }
+
+    #[test]
+    fn test_video_stream_handle_creation_null_returns_error() {
+        let mut mock = MockVideoFfiTrait::new();
+
+        mock.expect_venc_request_stream()
+            .times(1)
+            .returning(|_, _| std::ptr::null_mut());
+
+        let vi_handle = std::ptr::NonNull::<c_void>::dangling().as_ptr();
+        let venc_handle = std::ptr::NonNull::<c_void>::dangling().as_ptr();
+
+        let result = VideoStreamHandle::new(vi_handle, venc_handle, Arc::new(mock));
+        assert!(result.is_err());
+        match result {
+            Err(PlatformError::HardwareFailure(msg)) => {
+                assert!(msg.contains("ak_venc_request_stream"));
+            }
+            _ => panic!("Expected HardwareFailure error"),
+        }
+    }
+
+    #[test]
+    fn test_video_stream_handle_drop_calls_cancel() {
+        let mut mock = MockVideoFfiTrait::new();
+        let test_ptr = std::ptr::NonNull::<c_void>::dangling().as_ptr() as usize;
+
+        mock.expect_venc_request_stream()
+            .returning(move |_, _| test_ptr as *mut c_void);
+        mock.expect_venc_cancel_stream()
+            .withf(move |handle| *handle == test_ptr as *mut c_void)
+            .times(1)
+            .returning(|_| AK_SUCCESS_I32);
+
+        let vi_handle = std::ptr::NonNull::<c_void>::dangling().as_ptr();
+        let venc_handle = std::ptr::NonNull::<c_void>::dangling().as_ptr();
+
+        let sh = VideoStreamHandle::new(vi_handle, venc_handle, Arc::new(mock)).unwrap();
+        drop(sh); // Should call venc_cancel_stream exactly once
+    }
+
+    // =========================================================================
+    // Frame Type Conversion Tests
+    // =========================================================================
+
+    #[cfg(use_stubs)]
+    #[test]
+    fn test_frame_type_conversion_i_frame() {
+        use crate::ffi::VideoFrameType;
+        assert_eq!(
+            sdk_frame_type_to_frame_type(VideoFrameType::FrameTypeI),
+            FrameType::VideoIFrame
+        );
+    }
+
+    #[cfg(use_stubs)]
+    #[test]
+    fn test_frame_type_conversion_pi_frame() {
+        use crate::ffi::VideoFrameType;
+        assert_eq!(
+            sdk_frame_type_to_frame_type(VideoFrameType::FrameTypePi),
+            FrameType::VideoIFrame
+        );
+    }
+
+    #[cfg(use_stubs)]
+    #[test]
+    fn test_frame_type_conversion_p_frame() {
+        use crate::ffi::VideoFrameType;
+        assert_eq!(
+            sdk_frame_type_to_frame_type(VideoFrameType::FrameTypeP),
+            FrameType::VideoPFrame
+        );
+    }
+
+    #[cfg(use_stubs)]
+    #[test]
+    fn test_frame_type_conversion_b_frame() {
+        use crate::ffi::VideoFrameType;
+        assert_eq!(
+            sdk_frame_type_to_frame_type(VideoFrameType::FrameTypeB),
+            FrameType::VideoBFrame
+        );
+    }
+
+    // =========================================================================
+    // Timestamp Conversion Tests
+    // =========================================================================
+
+    #[test]
+    fn test_timestamp_conversion_ms_to_us() {
+        // SDK timestamps are in ms, Frame uses µs
+        let sdk_ts_ms: u64 = 12345;
+        let frame_ts_us = sdk_ts_ms.wrapping_mul(1000);
+        assert_eq!(frame_ts_us, 12_345_000);
+    }
+
+    #[test]
+    fn test_timestamp_conversion_zero() {
+        let sdk_ts_ms: u64 = 0;
+        let frame_ts_us = sdk_ts_ms.wrapping_mul(1000);
+        assert_eq!(frame_ts_us, 0);
+    }
+
+    #[test]
+    fn test_timestamp_conversion_wrapping() {
+        // Verify wrapping_mul won't panic on large values
+        let sdk_ts_ms: u64 = u64::MAX;
+        let frame_ts_us = sdk_ts_ms.wrapping_mul(1000);
+        // Just verify it doesn't panic; exact value isn't important
+        let _ = frame_ts_us;
+    }
+
+    // =========================================================================
+    // Frame Read Loop Tests
+    // =========================================================================
+
+    #[test]
+    fn test_frame_read_loop_invokes_callbacks() {
+        use crate::ffi::VideoFrameType;
+        use std::sync::atomic::AtomicUsize;
+
+        let call_count = Arc::new(AtomicUsize::new(0));
+        let call_count_clone = Arc::clone(&call_count);
+
+        struct CountingCallback(Arc<AtomicUsize>);
+        impl FrameCallback for CountingCallback {
+            fn on_frame(&self, frame: &Frame) {
+                assert_eq!(frame.stream_id, StreamId::VideoMain);
+                assert_eq!(frame.frame_type, FrameType::VideoIFrame);
+                assert_eq!(frame.size, 100);
+                // SDK ts=5000ms → Frame ts=5_000_000µs
+                assert_eq!(frame.timestamp, 5_000_000);
+                self.0.fetch_add(1, Ordering::SeqCst);
+            }
+        }
+
+        let mut mock = MockVideoFfiTrait::new();
+        let stop = Arc::new(AtomicBool::new(false));
+        let stop_clone = Arc::clone(&stop);
+
+        // Frame data buffer
+        let frame_data: Vec<u8> = vec![0xAB; 100];
+        let frame_data_ptr = frame_data.as_ptr() as usize;
+
+        // First call: return a frame, then signal stop
+        let mut seq = mockall::Sequence::new();
+        mock.expect_venc_get_stream()
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(move |_, stream_ptr| {
+                unsafe {
+                    let stream = &mut *stream_ptr;
+                    stream.data = frame_data_ptr as *mut u8;
+                    stream.len = 100;
+                    stream.ts = 5000; // ms
+                    stream.seq_no = 1;
+                    stream.frame_type = VideoFrameType::FrameTypeI;
+                }
+                stop_clone.store(true, Ordering::SeqCst);
+                AK_SUCCESS_I32
+            });
+
+        mock.expect_venc_release_stream()
+            .times(1)
+            .returning(|_, _| AK_SUCCESS_I32);
+
+        // Stream handle creation + cancel
+        let test_ptr = std::ptr::NonNull::<c_void>::dangling().as_ptr() as usize;
+        mock.expect_venc_request_stream()
+            .returning(move |_, _| test_ptr as *mut c_void);
+        mock.expect_venc_cancel_stream()
+            .returning(|_| AK_SUCCESS_I32);
+
+        let ffi: Arc<dyn crate::ffi::video::VideoFfiTrait> = Arc::new(mock);
+        let vi_ptr = std::ptr::NonNull::<c_void>::dangling().as_ptr();
+        let venc_ptr = std::ptr::NonNull::<c_void>::dangling().as_ptr();
+        let sh = Arc::new(VideoStreamHandle::new(vi_ptr, venc_ptr, Arc::clone(&ffi)).unwrap());
+
+        let callbacks: Arc<RwLock<HashMap<CallbackId, Arc<dyn FrameCallback>>>> =
+            Arc::new(RwLock::new(HashMap::new()));
+        callbacks
+            .write()
+            .insert(1, Arc::new(CountingCallback(call_count_clone)));
+
+        frame_read_loop(sh, ffi, StreamId::VideoMain, callbacks, stop);
+
+        assert_eq!(call_count.load(Ordering::SeqCst), 1);
+        // Keep frame_data alive until after the loop
+        drop(frame_data);
+    }
+
+    #[test]
+    fn test_frame_read_loop_handles_error_and_retries() {
+        let mut mock = MockVideoFfiTrait::new();
+        let stop = Arc::new(AtomicBool::new(false));
+        let stop_clone = Arc::clone(&stop);
+        let error_count = Arc::new(AtomicU32::new(0));
+        let error_count_clone = Arc::clone(&error_count);
+
+        // Return errors, then signal stop after 2 errors
+        mock.expect_venc_get_stream().returning(move |_, _| {
+            let count = error_count_clone.fetch_add(1, Ordering::SeqCst);
+            if count >= 1 {
+                stop_clone.store(true, Ordering::SeqCst);
+            }
+            crate::ffi::AK_FAILED_I32
+        });
+
+        // No release_stream calls expected (errors don't produce frames)
+        // Stream handle
+        let test_ptr = std::ptr::NonNull::<c_void>::dangling().as_ptr() as usize;
+        mock.expect_venc_request_stream()
+            .returning(move |_, _| test_ptr as *mut c_void);
+        mock.expect_venc_cancel_stream()
+            .returning(|_| AK_SUCCESS_I32);
+
+        let ffi: Arc<dyn crate::ffi::video::VideoFfiTrait> = Arc::new(mock);
+        let vi_ptr = std::ptr::NonNull::<c_void>::dangling().as_ptr();
+        let venc_ptr = std::ptr::NonNull::<c_void>::dangling().as_ptr();
+        let sh = Arc::new(VideoStreamHandle::new(vi_ptr, venc_ptr, Arc::clone(&ffi)).unwrap());
+
+        let callbacks: Arc<RwLock<HashMap<CallbackId, Arc<dyn FrameCallback>>>> =
+            Arc::new(RwLock::new(HashMap::new()));
+
+        frame_read_loop(sh, ffi, StreamId::VideoMain, callbacks, stop);
+
+        // Should have retried at least twice
+        assert!(error_count.load(Ordering::SeqCst) >= 2);
+    }
+
+    #[test]
+    fn test_stop_signal_terminates_loop() {
+        let mut mock = MockVideoFfiTrait::new();
+        let stop = Arc::new(AtomicBool::new(true)); // Pre-set stop
+
+        // get_stream should never be called since stop is already set
+        // (but allow 0 calls in case of timing)
+        mock.expect_venc_get_stream()
+            .times(0)
+            .returning(|_, _| AK_FAILED_I32);
+
+        let test_ptr = std::ptr::NonNull::<c_void>::dangling().as_ptr() as usize;
+        mock.expect_venc_request_stream()
+            .returning(move |_, _| test_ptr as *mut c_void);
+        mock.expect_venc_cancel_stream()
+            .returning(|_| AK_SUCCESS_I32);
+
+        let ffi: Arc<dyn crate::ffi::video::VideoFfiTrait> = Arc::new(mock);
+        let vi_ptr = std::ptr::NonNull::<c_void>::dangling().as_ptr();
+        let venc_ptr = std::ptr::NonNull::<c_void>::dangling().as_ptr();
+        let sh = Arc::new(VideoStreamHandle::new(vi_ptr, venc_ptr, Arc::clone(&ffi)).unwrap());
+
+        let callbacks: Arc<RwLock<HashMap<CallbackId, Arc<dyn FrameCallback>>>> =
+            Arc::new(RwLock::new(HashMap::new()));
+
+        // Should return immediately
+        frame_read_loop(sh, ffi, StreamId::VideoMain, callbacks, stop);
+    }
+
+    #[tokio::test]
+    async fn test_start_stop_streaming_lifecycle() {
+        let mut mock = MockVideoFfiTrait::new();
+
+        // Encoder open expectations
+        mock.expect_venc_set_cfg_path().returning(|_| 0);
+        let test_ptr = std::ptr::NonNull::<c_void>::dangling().as_ptr() as usize;
+        mock.expect_venc_open()
+            .returning(move |_| test_ptr as *mut c_void);
+
+        // Stream lifecycle expectations
+        mock.expect_venc_request_stream()
+            .returning(move |_, _| test_ptr as *mut c_void);
+        mock.expect_venc_get_stream()
+            .returning(|_, _| AK_FAILED_I32); // No frames in test
+        mock.expect_venc_cancel_stream()
+            .returning(|_| AK_SUCCESS_I32);
+
+        let encoder = Arc::new(AnykaVideoEncoder::with_ffi(Arc::new(mock)));
+
+        // Initialize main encoder
+        let config = VideoEncoderConfig {
+            token: "VideoEncoder_1".to_string(),
+            name: "Main Stream".to_string(),
+            resolution: Resolution::new(1280, 720),
+            framerate: 15,
+            bitrate: 2000,
+            encoding: VideoEncoding::H264,
+            gop_length: 30,
+            quality: 80,
+            ..Default::default()
+        };
+        encoder.init(&config).await.unwrap();
+
+        // Create a dummy VI handle for testing
+        let vi_handle = Arc::new(crate::ffi::VideoInputHandle::test_handle());
+        let main_enc = encoder.main_handle.read().clone().unwrap();
+
+        // Start streaming
+        let result = encoder.start_streaming(&vi_handle, &main_enc, None);
+        assert!(result.is_ok());
+
+        // Verify threads are running
+        assert!(encoder.main_stream_handle.read().is_some());
+        assert!(encoder.main_read_thread.read().is_some());
+
+        // Stop streaming
+        encoder.stop_streaming();
+
+        // Verify cleanup
+        assert!(encoder.main_stream_handle.read().is_none());
+        assert!(encoder.main_read_thread.read().is_none());
+    }
+
+    #[test]
+    fn test_frame_read_loop_initial_delay() {
+        // Verify frame_read_loop takes at least 100ms due to startup delay,
+        // even when the stop signal is already set.
+        let mut mock = MockVideoFfiTrait::new();
+        let stop = Arc::new(AtomicBool::new(true)); // Pre-set stop
+
+        mock.expect_venc_get_stream()
+            .times(0)
+            .returning(|_, _| AK_FAILED_I32);
+
+        let test_ptr = std::ptr::NonNull::<c_void>::dangling().as_ptr() as usize;
+        mock.expect_venc_request_stream()
+            .returning(move |_, _| test_ptr as *mut c_void);
+        mock.expect_venc_cancel_stream()
+            .returning(|_| AK_SUCCESS_I32);
+
+        let ffi: Arc<dyn crate::ffi::video::VideoFfiTrait> = Arc::new(mock);
+        let vi_ptr = std::ptr::NonNull::<c_void>::dangling().as_ptr();
+        let venc_ptr = std::ptr::NonNull::<c_void>::dangling().as_ptr();
+        let sh = Arc::new(VideoStreamHandle::new(vi_ptr, venc_ptr, Arc::clone(&ffi)).unwrap());
+
+        let callbacks: Arc<RwLock<HashMap<CallbackId, Arc<dyn FrameCallback>>>> =
+            Arc::new(RwLock::new(HashMap::new()));
+
+        let start = std::time::Instant::now();
+        frame_read_loop(sh, ffi, StreamId::VideoMain, callbacks, stop);
+        let elapsed = start.elapsed();
+
+        // Must take at least 100ms due to the startup delay
+        assert!(
+            elapsed >= Duration::from_millis(90),
+            "Expected >= 90ms startup delay, got {:?}",
+            elapsed
+        );
+    }
+
+    #[test]
+    fn test_consecutive_error_backoff() {
+        // Verify exponential backoff: first error ~10ms, fourth error ~80ms.
+        // We check that 4 consecutive errors take longer than 4 * 10ms = 40ms,
+        // proving backoff is in effect.
+        let mut mock = MockVideoFfiTrait::new();
+        let stop = Arc::new(AtomicBool::new(false));
+        let stop_clone = Arc::clone(&stop);
+        let error_count = Arc::new(AtomicU32::new(0));
+        let error_count_clone = Arc::clone(&error_count);
+
+        // Return 4 errors, then stop
+        mock.expect_venc_get_stream().returning(move |_, _| {
+            let count = error_count_clone.fetch_add(1, Ordering::SeqCst);
+            if count >= 3 {
+                stop_clone.store(true, Ordering::SeqCst);
+            }
+            crate::ffi::AK_FAILED_I32
+        });
+
+        let test_ptr = std::ptr::NonNull::<c_void>::dangling().as_ptr() as usize;
+        mock.expect_venc_request_stream()
+            .returning(move |_, _| test_ptr as *mut c_void);
+        mock.expect_venc_cancel_stream()
+            .returning(|_| AK_SUCCESS_I32);
+
+        let ffi: Arc<dyn crate::ffi::video::VideoFfiTrait> = Arc::new(mock);
+        let vi_ptr = std::ptr::NonNull::<c_void>::dangling().as_ptr();
+        let venc_ptr = std::ptr::NonNull::<c_void>::dangling().as_ptr();
+        let sh = Arc::new(VideoStreamHandle::new(vi_ptr, venc_ptr, Arc::clone(&ffi)).unwrap());
+
+        let callbacks: Arc<RwLock<HashMap<CallbackId, Arc<dyn FrameCallback>>>> =
+            Arc::new(RwLock::new(HashMap::new()));
+
+        let start = std::time::Instant::now();
+        frame_read_loop(sh, ffi, StreamId::VideoMain, callbacks, stop);
+        let elapsed = start.elapsed();
+
+        assert!(error_count.load(Ordering::SeqCst) >= 4);
+        // 100ms initial delay + backoff: 10ms + 20ms + 40ms + 80ms = 250ms total
+        // Allow some tolerance; should be at least 200ms
+        assert!(
+            elapsed >= Duration::from_millis(200),
+            "Expected >= 200ms with backoff, got {:?}",
+            elapsed
+        );
     }
 }

@@ -28,10 +28,10 @@ pub use ptz::{
     validate_pan_range, validate_tilt_range,
 };
 pub use video::{
-    VideoEncoderHandle, VideoInputHandle, video_encoder_open, video_encoder_request_idr,
-    video_encoder_set_rc, video_input_capture_on, video_input_get_sensor_resolution,
-    video_input_match_sensor, video_input_open, video_input_set_channel_attr, vpss_destroy,
-    vpss_init,
+    VideoEncoderHandle, VideoInputHandle, VideoStreamHandle, video_encoder_open,
+    video_encoder_request_idr, video_encoder_set_rc, video_input_capture_on,
+    video_input_get_sensor_resolution, video_input_match_sensor, video_input_open,
+    video_input_set_channel_attr, vpss_destroy, vpss_init,
 };
 
 /// Anyka SDK success code as i32 for consistent comparisons.
@@ -243,6 +243,26 @@ pub mod stubs {
     pub struct AencAttr {
         pub aac_head: i32, // enum aenc_aac_attr
     }
+
+    /// Video frame type (matches SDK `enum video_frame_type` in ak_global.h).
+    #[repr(C)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum VideoFrameType {
+        FrameTypeP = 0,
+        FrameTypeI = 1,
+        FrameTypeB = 2,
+        FrameTypePi = 3,
+    }
+
+    /// Encoded video stream data (matches SDK `struct video_stream` in ak_global.h).
+    #[repr(C)]
+    pub struct VideoStream {
+        pub data: *mut u8,
+        pub len: u32,
+        pub ts: u64,
+        pub seq_no: std::os::raw::c_ulong,
+        pub frame_type: VideoFrameType,
+    }
 }
 
 #[cfg(use_stubs)]
@@ -271,6 +291,8 @@ mod stub_type_aliases {
     pub type encode_group_type = stubs::EncodeGroupType;
     pub type bitrate_ctrl_mode = stubs::BitrateCtrlMode;
     pub type encode_output_type = stubs::EncodeOutputType;
+    pub type video_frame_type = super::stubs::VideoFrameType;
+    pub type video_stream = super::stubs::VideoStream;
 }
 
 #[cfg(use_stubs)]

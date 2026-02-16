@@ -645,6 +645,23 @@ pub trait Platform: Send + Sync {
     /// # Errors
     /// Returns `PlatformError::InitializationFailed` if the platform has not been initialized.
     fn max_sensor_resolution(&self) -> PlatformResult<Resolution>;
+
+    /// Register a callback to receive encoded frames from the platform.
+    ///
+    /// The platform calls `callback.on_frame()` for each encoded video/audio
+    /// frame produced by the hardware encoder. The callback must complete
+    /// quickly (< 2ms) — typically just a memcpy into a channel.
+    ///
+    /// Default implementation returns `NotSupported` for platforms that do not
+    /// produce encoded frames (e.g., stubs used in testing).
+    fn register_frame_callback(
+        &self,
+        _callback: Arc<dyn crate::platform::frame::FrameCallback>,
+    ) -> PlatformResult<()> {
+        Err(PlatformError::NotSupported(
+            "register_frame_callback".to_string(),
+        ))
+    }
 }
 
 #[cfg(test)]

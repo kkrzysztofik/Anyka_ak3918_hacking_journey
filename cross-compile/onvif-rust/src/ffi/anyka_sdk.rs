@@ -416,6 +416,7 @@ mod ffi_impl {
     /// - `ak_vi_open()` is a C function that returns a handle or NULL
     /// - We check for null handle and return error if SDK fails
     /// - The handle is wrapped in `VideoInput` which manages cleanup
+    #[allow(dead_code)]
     pub fn video_input_open(device: VideoDevice) -> AnykaResult<VideoInput> {
         // Validate: Type system ensures device.0 is only 0 (DEV0)
         let sdk_device: video_dev_type = unsafe { std::mem::transmute(device.0 as i32) };

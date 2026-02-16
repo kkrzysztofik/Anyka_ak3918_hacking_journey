@@ -28,12 +28,18 @@ use crate::platform::PlatformError;
 use crate::platform::PlatformResult;
 use std::ffi::{CString, c_char, c_void};
 use std::path::Path;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 #[cfg(not(use_stubs))]
-use crate::ffi::generated::{encode_param, video_channel_attr, video_dev_type, video_resolution};
+use crate::ffi::generated::{
+    encode_param, video_channel_attr, video_dev_type, video_resolution, video_stream,
+};
 
 #[cfg(use_stubs)]
-use crate::ffi::{encode_param, video_channel_attr, video_dev_type, video_resolution};
+use crate::ffi::{
+    encode_param, video_channel_attr, video_dev_type, video_resolution, video_stream,
+};
 
 use crate::ffi::{AK_FAILED_I32, AK_SUCCESS_I32, Resolution, VideoDevice};
 
@@ -54,6 +60,10 @@ pub(crate) trait VideoFfiTrait: Send + Sync {
     fn venc_close(&self, handle: *mut c_void) -> i32;
     fn venc_set_rc(&self, enc_handle: *mut c_void, bps: i32) -> i32;
     fn venc_set_iframe(&self, enc_handle: *mut c_void) -> i32;
+    fn venc_request_stream(&self, vi_handle: *mut c_void, venc_handle: *mut c_void) -> *mut c_void;
+    fn venc_get_stream(&self, stream_handle: *mut c_void, stream: *mut video_stream) -> i32;
+    fn venc_release_stream(&self, stream_handle: *mut c_void, stream: *mut video_stream) -> i32;
+    fn venc_cancel_stream(&self, stream_handle: *mut c_void) -> i32;
 }
 
 /// Default implementation that calls the real FFI functions.
@@ -245,6 +255,66 @@ impl VideoFfiTrait for RealVideoFfi {
 
     #[cfg(use_stubs)]
     fn venc_set_iframe(&self, _enc_handle: *mut c_void) -> i32 {
+        AK_SUCCESS_I32
+    }
+
+    #[cfg(not(use_stubs))]
+    fn venc_request_stream(&self, vi_handle: *mut c_void, venc_handle: *mut c_void) -> *mut c_void {
+        unsafe extern "C" {
+            fn ak_venc_request_stream(
+                vi_handle: *mut c_void,
+                enc_handle: *mut c_void,
+            ) -> *mut c_void;
+        }
+        unsafe { ak_venc_request_stream(vi_handle, venc_handle) }
+    }
+
+    #[cfg(use_stubs)]
+    fn venc_request_stream(
+        &self,
+        _vi_handle: *mut c_void,
+        _venc_handle: *mut c_void,
+    ) -> *mut c_void {
+        std::ptr::NonNull::<c_void>::dangling().as_ptr()
+    }
+
+    #[cfg(not(use_stubs))]
+    fn venc_get_stream(&self, stream_handle: *mut c_void, stream: *mut video_stream) -> i32 {
+        unsafe extern "C" {
+            fn ak_venc_get_stream(stream_handle: *mut c_void, stream: *mut video_stream) -> i32;
+        }
+        unsafe { ak_venc_get_stream(stream_handle, stream) }
+    }
+
+    #[cfg(use_stubs)]
+    fn venc_get_stream(&self, _stream_handle: *mut c_void, _stream: *mut video_stream) -> i32 {
+        AK_FAILED_I32 // No frames in stub mode
+    }
+
+    #[cfg(not(use_stubs))]
+    fn venc_release_stream(&self, stream_handle: *mut c_void, stream: *mut video_stream) -> i32 {
+        unsafe extern "C" {
+            fn ak_venc_release_stream(stream_handle: *mut c_void, stream: *mut video_stream)
+            -> i32;
+        }
+        unsafe { ak_venc_release_stream(stream_handle, stream) }
+    }
+
+    #[cfg(use_stubs)]
+    fn venc_release_stream(&self, _stream_handle: *mut c_void, _stream: *mut video_stream) -> i32 {
+        AK_SUCCESS_I32
+    }
+
+    #[cfg(not(use_stubs))]
+    fn venc_cancel_stream(&self, stream_handle: *mut c_void) -> i32 {
+        unsafe extern "C" {
+            fn ak_venc_cancel_stream(stream_handle: *mut c_void) -> i32;
+        }
+        unsafe { ak_venc_cancel_stream(stream_handle) }
+    }
+
+    #[cfg(use_stubs)]
+    fn venc_cancel_stream(&self, _stream_handle: *mut c_void) -> i32 {
         AK_SUCCESS_I32
     }
 }
@@ -710,6 +780,84 @@ impl VideoEncoderHandle {
     /// Do not use after the handle is dropped.
     pub(crate) fn as_ptr(&self) -> *mut c_void {
         self.handle.unwrap_or(std::ptr::null_mut())
+    }
+}
+
+/// RAII handle for a video stream (bound VI + encoder pair).
+///
+/// Created by `ak_venc_request_stream()` and automatically cancelled on drop
+/// via `ak_venc_cancel_stream()`. The stream handle is used with
+/// `ak_venc_get_stream()` / `ak_venc_release_stream()` to poll encoded frames.
+///
+/// # Thread Safety
+///
+/// The underlying SDK uses internal mutexes for thread safety.
+pub struct VideoStreamHandle {
+    handle: *mut c_void,
+    ffi: Arc<dyn VideoFfiTrait>,
+    cancelled: AtomicBool,
+}
+
+// SAFETY: VideoStreamHandle is thread-safe - SDK uses internal mutexes.
+unsafe impl Send for VideoStreamHandle {}
+unsafe impl Sync for VideoStreamHandle {}
+
+impl Drop for VideoStreamHandle {
+    fn drop(&mut self) {
+        if !self.handle.is_null() && !self.cancelled.load(Ordering::SeqCst) {
+            let ret = self.ffi.venc_cancel_stream(self.handle);
+            if ret != AK_SUCCESS_I32 {
+                tracing::warn!(
+                    "ak_venc_cancel_stream failed during drop: error code {}",
+                    ret
+                );
+            }
+        }
+    }
+}
+
+impl VideoStreamHandle {
+    /// Create a new stream handle by binding a video input and encoder.
+    ///
+    /// Calls `ak_venc_request_stream()` which starts the hardware encode pipeline.
+    pub(crate) fn new(
+        vi_handle: *mut c_void,
+        venc_handle: *mut c_void,
+        ffi: Arc<dyn VideoFfiTrait>,
+    ) -> PlatformResult<Self> {
+        let handle = ffi.venc_request_stream(vi_handle, venc_handle);
+        if handle.is_null() {
+            return Err(PlatformError::HardwareFailure(
+                "ak_venc_request_stream returned null".to_string(),
+            ));
+        }
+        Ok(Self {
+            handle,
+            ffi,
+            cancelled: AtomicBool::new(false),
+        })
+    }
+
+    /// Explicitly cancel the stream to unblock pending `ak_venc_get_stream()` calls.
+    /// Idempotent — safe to call multiple times; only the first call invokes the SDK.
+    pub fn cancel(&self) {
+        if self.cancelled.swap(true, Ordering::SeqCst) {
+            return; // Already cancelled
+        }
+        if !self.handle.is_null() {
+            let ret = self.ffi.venc_cancel_stream(self.handle);
+            if ret != 0 {
+                tracing::warn!(
+                    "ak_venc_cancel_stream failed during explicit cancel: {}",
+                    ret
+                );
+            }
+        }
+    }
+
+    /// Get the raw stream handle pointer for FFI calls.
+    pub(crate) fn as_ptr(&self) -> *mut c_void {
+        self.handle
     }
 }
 

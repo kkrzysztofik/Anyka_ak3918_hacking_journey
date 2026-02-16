@@ -172,6 +172,14 @@ file_name = "access"
 # RTSP server port (1-65535)
 rtsp_port = 554
 
+# HTTP-FLV server port (1-65535)
+httpflv_port = 8080
+
+# Enable live streaming via RTSP and HTTP-FLV (true/false)
+# When enabled, the platform's encoded frames are bridged to StreamsHub and
+# served at rtsp://<ip>:<rtsp_port>/main, /sub and http://<ip>:<httpflv_port>/live/main.flv, /sub.flv
+streaming_enabled = true
+
 # Snapshot HTTP port (0 to use main server port)
 snapshot_port = 0
 

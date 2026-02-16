@@ -78,6 +78,8 @@ pub mod security;
 
 pub mod ffi;
 
+pub mod streaming;
+
 pub mod validation;
 
 // Re-export main types for convenience
