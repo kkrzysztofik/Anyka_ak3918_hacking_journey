@@ -35,6 +35,7 @@ exclude:
     - "**/Release/**"
     - "**/dist/**"
     - "**/target/**"
+    - "**/coverage/**"
 
     # IDE and editor files
     - "**/.vscode/**"

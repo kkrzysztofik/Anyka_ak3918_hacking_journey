@@ -44,7 +44,10 @@
   "chat.tools.terminal.autoApprove": {
     "/home/kmk/anyka-dev/toolchain/arm-anykav200-crosstool-ng/bin/cargo": true,
     "/home/kmk/anyka-dev/toolchain/arm-anykav200-crosstool-ng/bin/arm-unknown-linux-uclibcgnueabi-nm": true,
-    "cargo fmt": true
+    "cargo fmt": true,
+    "npm run type-check": true,
+    "npm run test": true,
+    "cargo audit": true
   },
   "cursorpyright.analysis.typeCheckingMode": "strict",
   "cursorpyright.analysis.diagnosticMode": "workspace",

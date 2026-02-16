@@ -5,7 +5,11 @@ name: "CodeQL Configuration"
 
 paths-ignore:
   - "cross-compile/anyka_reference/**"
+  - "cross-compile/xiu/**"
+  - "toolchain/**"
+  - "orig/**"
   - "**/node_modules/**"
   - "**/dist/**"
   - "**/build/**"
   - "**/target/**"
+  - "**/coverage/**"

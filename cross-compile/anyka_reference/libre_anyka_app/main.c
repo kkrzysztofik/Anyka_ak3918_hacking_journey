@@ -145,7 +145,7 @@ static struct ak_misc misc_ctrl = {0};
 
 
 volatile sig_atomic_t stop;					//stop if error occurs
-#define cfg "/etc/jffs2"
+#define cfg "/data/sensor"
 
 // Camera vars
 void *vi_handle = NULL;						//vi operating handle
