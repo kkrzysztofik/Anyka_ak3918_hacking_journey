@@ -767,6 +767,7 @@ async fn run_validation_mode(config: H264PlaybackConfig, config_path: &str) -> R
 
     let video_publisher = Arc::new(video_publisher);
     let audio_publisher = audio_publisher.map(Arc::new);
+    let platform = create_and_init_platform().await?;
 
     let pub_handle = video_publisher.start_publishing(frame_tx_for_publisher.clone());
     tracing::info!("MockVideoPublisher started emitting frames");
@@ -781,7 +782,6 @@ async fn run_validation_mode(config: H264PlaybackConfig, config_path: &str) -> R
     );
     let flv_handle = spawn_httpflv_server(hub_event_sender, stream_auth, config.httpflv_port);
     let streamhub_handle = spawn_streamhub_event_loop(streamhub);
-    let platform = create_and_init_platform().await?;
 
     let app = start_onvif_application(config_path, platform.clone()).await;
     let playback_mode = init_playback_mode(config.clone(), platform.clone()).await?;
@@ -802,9 +802,6 @@ async fn run_validation_mode(config: H264PlaybackConfig, config_path: &str) -> R
     playback_mode.stop().await?;
     tracing::info!("H264 playback stopped");
 
-    platform.shutdown().await?;
-    tracing::info!("Platform shutdown complete");
-
     video_publisher.stop_publishing().await;
     tracing::info!("MockVideoPublisher stopped");
 
@@ -821,6 +818,10 @@ async fn run_validation_mode(config: H264PlaybackConfig, config_path: &str) -> R
         audio_pub_handle,
         fanout_handle,
     );
+
+    platform.shutdown().await?;
+    tracing::info!("Platform shutdown complete");
+
     tracing::info!("All servers and tasks shutdown");
     tracing::info!("H.264 Validation mode stopped");
     Ok(())

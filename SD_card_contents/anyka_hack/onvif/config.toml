@@ -87,6 +87,10 @@ hardware_id = "ak3918"
 # Device hostname
 hostname = "ipcam"
 
+# ISP sensor config file path (leave empty for auto-detection)
+# Auto-detection searches: /mnt/anyka_hack/onvif/, /etc/jffs2/, /usr/local/
+isp_config_path = "/data/sensor/isp_gc1084.conf"
+
 # Device UUID (leave empty to auto-generate)
 uuid = ""
 

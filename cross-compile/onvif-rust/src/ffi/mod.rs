@@ -30,7 +30,8 @@ pub use ptz::{
 pub use video::{
     VideoEncoderHandle, VideoInputHandle, video_encoder_open, video_encoder_request_idr,
     video_encoder_set_rc, video_input_capture_on, video_input_get_sensor_resolution,
-    video_input_match_sensor, video_input_open, video_input_set_channel_attr,
+    video_input_match_sensor, video_input_open, video_input_set_channel_attr, vpss_destroy,
+    vpss_init,
 };
 
 /// Anyka SDK success code as i32 for consistent comparisons.

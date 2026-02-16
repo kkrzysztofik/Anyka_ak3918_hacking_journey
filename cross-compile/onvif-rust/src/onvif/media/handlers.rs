@@ -106,15 +106,13 @@ impl MediaService {
         platform: Arc<dyn Platform>,
     ) -> Self {
         // Query max sensor resolution from platform for adaptive profile configuration
-        let max_sensor_resolution = platform
-            .max_sensor_resolution()
-            .unwrap_or_else(|_| {
-                // Fallback to default if platform not initialized or sensor resolution unavailable
-                tracing::warn!(
-                    "Failed to query sensor resolution from platform, using fallback 1920x1080"
-                );
-                Resolution::new(1920, 1080)
-            });
+        let max_sensor_resolution = platform.max_sensor_resolution().unwrap_or_else(|_| {
+            // Fallback to default if platform not initialized or sensor resolution unavailable
+            tracing::warn!(
+                "Failed to query sensor resolution from platform, using fallback 1920x1080"
+            );
+            Resolution::new(1920, 1080)
+        });
 
         let profile_manager = Arc::new(ProfileManager::with_config_and_sensor_resolution(
             Arc::clone(&config),
@@ -138,14 +136,12 @@ impl MediaService {
         platform: Arc<dyn Platform>,
     ) -> Self {
         // Query max sensor resolution from platform
-        let max_sensor_resolution = platform
-            .max_sensor_resolution()
-            .unwrap_or_else(|_| {
-                tracing::warn!(
-                    "Failed to query sensor resolution from platform, using fallback 1920x1080"
-                );
-                Resolution::new(1920, 1080)
-            });
+        let max_sensor_resolution = platform.max_sensor_resolution().unwrap_or_else(|_| {
+            tracing::warn!(
+                "Failed to query sensor resolution from platform, using fallback 1920x1080"
+            );
+            Resolution::new(1920, 1080)
+        });
 
         let profile_manager = Arc::new(ProfileManager::with_config_and_sensor_resolution(
             Arc::clone(&config),
@@ -422,9 +418,12 @@ impl MediaService {
                 );
                 return Err(OnvifError::invalid_arg_val(
                     "ter:InvalidResolution",
-                    &format!(
+                    format!(
                         "Requested resolution {}x{} exceeds sensor maximum of {}x{}",
-                        requested_width, requested_height, max_resolution.width, max_resolution.height
+                        requested_width,
+                        requested_height,
+                        max_resolution.width,
+                        max_resolution.height
                     ),
                 ));
             }

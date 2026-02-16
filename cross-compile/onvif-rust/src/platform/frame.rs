@@ -161,8 +161,13 @@ impl ActiveFrames {
     /// which starts at 1 (the delivery context holds the first reference).
     pub fn register_frame(&self, buffer: *const u8) -> Arc<AtomicUsize> {
         let key = buffer as usize;
+        let mut frames = self.frames.lock();
+        if let Some(existing) = frames.get(&key) {
+            return Arc::clone(existing);
+        }
+
         let ref_count = Arc::new(AtomicUsize::new(1));
-        self.frames.lock().insert(key, Arc::clone(&ref_count));
+        frames.insert(key, Arc::clone(&ref_count));
         ref_count
     }
 
@@ -181,6 +186,30 @@ impl ActiveFrames {
                 active_frames: Arc::clone(self),
             }
         })
+    }
+
+    /// Release the registration-time reference for a frame buffer.
+    ///
+    /// The delivery path calls `register_frame()` for each incoming SDK buffer.
+    /// Once callback fanout is complete, this function should be called to drop
+    /// that registration-time reference. If no consumer handles are alive, the
+    /// frame entry is removed immediately.
+    pub fn release_frame(&self, buffer: *const u8) {
+        let key = buffer as usize;
+
+        let should_remove = {
+            let guard = self.frames.lock();
+            if let Some(ref_count) = guard.get(&key) {
+                ref_count.fetch_sub(1, Ordering::Release) == 1
+            } else {
+                false
+            }
+        };
+
+        if should_remove {
+            std::sync::atomic::fence(Ordering::Acquire);
+            self.remove_frame(key);
+        }
     }
 
     /// Remove a frame from tracking (called when ref count reaches zero).
@@ -228,6 +257,19 @@ mod tests {
 
         let _rc2 = af.register_frame(buf2);
         assert_eq!(af.active_count(), 2);
+    }
+
+    #[test]
+    fn test_register_frame_existing_buffer_returns_existing_ref_count() {
+        let af = ActiveFrames::new();
+        let buf = 0x1000 as *const u8;
+
+        let rc1 = af.register_frame(buf);
+        let rc2 = af.register_frame(buf);
+
+        assert!(Arc::ptr_eq(&rc1, &rc2));
+        assert_eq!(af.active_count(), 1);
+        assert_eq!(rc1.load(Ordering::SeqCst), 1);
     }
 
     #[test]
@@ -279,14 +321,13 @@ mod tests {
             assert_eq!(rc.load(Ordering::SeqCst), 3);
             // _handle2 dropped here → rc = 2
         }
-        // handle dropped here → rc = 1
-        // But the original register_frame ref (rc=1) is still in the map
-        // because remove_frame is only called when drop sees rc going from 1→0.
-        // The register_frame Arc still holds a reference in the map.
+        // handle dropped here → rc = 1 (register_frame reference still held)
+        assert_eq!(rc.load(Ordering::SeqCst), 1);
+        assert_eq!(af.active_count(), 1);
     }
 
     #[test]
-    fn test_frame_handle_last_drop_removes_from_tracking() {
+    fn test_full_lifecycle_frame_removed() {
         let af = Arc::new(ActiveFrames::new());
         let buf = 0x1000 as *const u8;
         let _rc = af.register_frame(buf);
@@ -294,21 +335,15 @@ mod tests {
 
         {
             let handle = af.acquire_ref(buf).unwrap();
-            // rc = 2 (register + acquire)
-            let handle2 = handle.clone();
-            // rc = 3
-
-            // Drop the register_frame ref by decrementing manually
-            // to simulate the delivery context releasing its reference.
-            // In practice, the delivery code drops its local ref after callbacks.
             drop(handle);
-            // rc = 2
-            drop(handle2);
-            // rc = 1 → but not zero yet (register_frame's Arc still exists)
         }
-        // The frame is still tracked because register_frame's Arc holds a ref
-        // in the HashMap. In real usage, the delivery loop would also drop
-        // the register_frame ref by letting it go out of scope.
+
+        // Registration reference is still held by ActiveFrames map.
+        assert_eq!(af.active_count(), 1);
+
+        // Explicitly release registration-time reference.
+        af.release_frame(buf);
+        assert_eq!(af.active_count(), 0);
     }
 
     #[test]

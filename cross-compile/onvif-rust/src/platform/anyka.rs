@@ -19,7 +19,7 @@
 //!
 //! The `VideoInputHandle` implements `Drop` to automatically close the SDK device,
 //! ensuring proper cleanup even in error paths. Dual-channel configuration
-//! (Main: 1920x1080, Sub: 1280x720) is applied during platform initialization.
+//! (Main: 1280x720, Sub: 640x360) is applied during platform initialization.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -173,7 +173,13 @@ impl Platform for AnykaPlatform {
         // Step 2: Open video input device
         self.video_input.open().await?;
 
-        // Step 2.5: Query and store sensor resolution
+        // Step 2.5: VPSS init skipped — libre_anyka_app does not call ak_vpss_init()
+        // and our init sequence lacks the prerequisite ak_cmd_server_register().
+        // VPSS is not needed for basic video encoding; it provides post-processing
+        // features (OSD overlay, video effects). Can be re-enabled later if needed
+        // by calling ak_cmd_server_register() first. See akipc/main/ipc_main.c.
+
+        // Step 3: Query and store sensor resolution
         let sensor_res = self.video_input.get_sensor_resolution()?;
         *self.sensor_resolution.write() = Some(sensor_res);
         tracing::info!(
@@ -182,35 +188,48 @@ impl Platform for AnykaPlatform {
             sensor_res.height
         );
 
-        // Step 3: Configure dual channels
+        // Step 4: Configure dual channels
         if let Err(e) = self.video_input.set_channel_attr() {
             tracing::error!("Failed to set channel attributes, rolling back: {}", e);
             let _ = self.video_input.close().await;
             return Err(e);
         }
 
-        // Step 4: Start capture pipeline
+        // Step 5: Start capture pipeline
         if let Err(e) = self.video_input.capture_on() {
             tracing::error!("Failed to start capture pipeline, rolling back: {}", e);
+            let _ = self.video_input.capture_off();
             let _ = self.video_input.close().await;
             return Err(e);
         }
-        tracing::info!(
-            "Video input initialized with dual-channel configuration and capture started"
-        );
+        tracing::info!("Video input initialized: dual-channel config and capture started");
 
-        // Initialize dual video encoders (main 1080p + sub 720p)
+        // Initialize dual video encoders (main 720p + sub 360p)
         let encoder_configs = self.video_encoder.get_configurations().await?;
+        let mut initialized_encoder_tokens: Vec<String> = Vec::new();
         for config in &encoder_configs {
             if let Err(e) = self.video_encoder.init(config).await {
                 tracing::error!("Failed to initialize video encoder {}: {}", config.token, e);
-                // Rollback: close video input
+
+                for token in initialized_encoder_tokens.iter().rev() {
+                    if let Err(close_error) = self.video_encoder.close_encoder(token) {
+                        tracing::warn!(
+                            "Failed to rollback initialized encoder {}: {}",
+                            token,
+                            close_error
+                        );
+                    }
+                }
+
+                // Rollback: stop capture, close video input
+                let _ = self.video_input.capture_off();
                 let _ = self.video_input.close().await;
                 return Err(PlatformError::InitializationFailed(format!(
                     "Video encoder {} initialization failed: {}",
                     config.token, e
                 )));
             }
+            initialized_encoder_tokens.push(config.token.clone());
         }
         tracing::info!(
             "Video encoders initialized: {} channels",
@@ -236,6 +255,22 @@ impl Platform for AnykaPlatform {
                 e
             );
         }
+
+        if let Err(e) = self.video_encoder.close_all_encoders() {
+            tracing::warn!(
+                "Video encoder close failed during shutdown (best-effort, continuing): {}",
+                e
+            );
+        }
+
+        // Stop capture BEFORE closing video input.
+        if let Err(e) = self.video_input.capture_off() {
+            tracing::warn!(
+                "Video capture off failed during shutdown (best-effort, continuing): {}",
+                e
+            );
+        }
+
         // Close video input (RAII handle will call ak_vi_close)
         if let Err(e) = self.video_input.close().await {
             tracing::warn!(
@@ -285,6 +320,18 @@ impl Platform for AnykaPlatform {
 /// All fields are `Send + Sync`. The `AtomicBool` provides lock-free reads for
 /// the common `is_opened` check, while the `RwLock` protects handle mutations.
 /// Default search paths for the ISP sensor configuration file.
+/// Align a width value up to the 32-pixel boundary required by the video encoder.
+/// Reference: `VENCODER_WIDTH_ALIGN_REQ` in `ak_vi.c`.
+fn align_to_32(w: i32) -> i32 {
+    (w + 31) & !31
+}
+
+/// Align a height value up to the 8-pixel boundary required by the video encoder.
+/// Reference: `VENCODER_HEIGHT_ALIGN_REQ` in `ak_vi.c`.
+fn align_to_8(h: i32) -> i32 {
+    (h + 7) & !7
+}
+
 ///
 /// These paths are searched in order when no explicit ISP config path is provided.
 /// The first path that exists on the filesystem is used for `ak_vi_match_sensor()`.
@@ -294,11 +341,18 @@ const ISP_CONFIG_SEARCH_PATHS: &[&str] = &[
     "/usr/local/isp_gc1084.conf",
 ];
 
+const COMPAT_MAIN_MAX_WIDTH_VGA: i32 = 640;
+const COMPAT_MAIN_MAX_HEIGHT_VGA: i32 = 480;
+const COMPAT_SUB_MAX_WIDTH_HD: i32 = 1280;
+const COMPAT_SUB_MAX_HEIGHT_HD: i32 = 720;
+
 struct AnykaVideoInput {
     ffi: Arc<dyn VideoFfiTrait>,
     handle: RwLock<Option<Arc<VideoInputHandle>>>,
     opened: AtomicBool,
+    capture_started: AtomicBool,
     isp_config_path: Option<PathBuf>,
+    vpss_initialized: AtomicBool,
 }
 
 impl AnykaVideoInput {
@@ -316,7 +370,9 @@ impl AnykaVideoInput {
             ffi,
             handle: RwLock::new(None),
             opened: AtomicBool::new(false),
+            capture_started: AtomicBool::new(false),
             isp_config_path,
+            vpss_initialized: AtomicBool::new(false),
         }
     }
 
@@ -326,7 +382,9 @@ impl AnykaVideoInput {
             ffi,
             handle: RwLock::new(None),
             opened: AtomicBool::new(false),
+            capture_started: AtomicBool::new(false),
             isp_config_path,
+            vpss_initialized: AtomicBool::new(false),
         }
     }
 
@@ -361,20 +419,33 @@ impl AnykaVideoInput {
         attr.crop.top = 0;
         attr.crop.width = sensor_width;
         attr.crop.height = sensor_height;
+
+        // Sub channel must be smaller than main channel — the ISP driver's internal
+        // scaling pipeline stalls frame production when both are identical.
+        // Reference: vi_demo uses 640x360, ipc_main defaults to 640x480.
+        let sub_width = align_to_32((sensor_width / 2).max(640));
+        let sub_height = align_to_8(sensor_height * sub_width / sensor_width);
+        // Preserve legacy compatibility intent while guaranteeing max dimensions
+        // are not below active dimensions.
+        let main_max_width = sensor_width.max(COMPAT_MAIN_MAX_WIDTH_VGA);
+        let main_max_height = sensor_height.max(COMPAT_MAIN_MAX_HEIGHT_VGA);
+        let sub_max_width = sub_width.max(COMPAT_SUB_MAX_WIDTH_HD);
+        let sub_max_height = sub_height.max(COMPAT_SUB_MAX_HEIGHT_HD);
+
         attr.res = [
-            // Main channel: sensor-native conservative startup.
+            // Main channel: sensor-native resolution.
             video_resolution {
                 width: sensor_width,
                 height: sensor_height,
-                max_width: sensor_width,
-                max_height: sensor_height,
+                max_width: main_max_width,
+                max_height: main_max_height,
             },
-            // Sub channel: sensor-native conservative startup.
+            // Sub channel: smaller resolution required by ISP driver.
             video_resolution {
-                width: sensor_width,
-                height: sensor_height,
-                max_width: sensor_width,
-                max_height: sensor_height,
+                width: sub_width,
+                height: sub_height,
+                max_width: sub_max_width,
+                max_height: sub_max_height,
             },
         ];
 
@@ -386,6 +457,13 @@ impl AnykaVideoInput {
             attr.res[0].height,
             attr.res[1].width,
             attr.res[1].height
+        );
+        tracing::info!(
+            "Applying Anyka compat max attrs: main_max={}x{}, sub_max={}x{}",
+            attr.res[0].max_width,
+            attr.res[0].max_height,
+            attr.res[1].max_width,
+            attr.res[1].max_height,
         );
 
         video_input_set_channel_attr_internal(handle, &attr, self.ffi.as_ref())
@@ -433,6 +511,44 @@ impl AnykaVideoInput {
         Err(PlatformError::HardwareUnavailable(
             "No ISP sensor config file found in any search path".to_string(),
         ))
+    }
+
+    /// Initialize the Video Post-Processing SubSystem (VPSS).
+    ///
+    /// This MUST be called immediately after `open()` and before any other
+    /// video operations. This is a critical initialization step from the
+    /// reference implementation that sets up the ISP processing pipeline.
+    ///
+    /// # Errors
+    ///
+    /// Returns `PlatformError::HardwareUnavailable` if the device is not opened.
+    fn init_vpss(&self) -> PlatformResult<()> {
+        let guard = self.handle.read();
+        let handle = guard.as_ref().ok_or_else(|| {
+            PlatformError::HardwareUnavailable("Video input not opened".to_string())
+        })?;
+
+        crate::ffi::video::vpss_init_internal(handle, VideoDevice::DEV0, self.ffi.as_ref())?;
+        self.vpss_initialized.store(true, Ordering::SeqCst);
+        tracing::info!("VPSS initialized successfully");
+        Ok(())
+    }
+
+    /// Destroy the Video Post-Processing SubSystem (VPSS).
+    ///
+    /// This MUST be called BEFORE closing the video input device during cleanup.
+    /// The reference implementation shows this must be done in the correct order
+    /// to avoid resource leaks.
+    fn destroy_vpss(&self) -> PlatformResult<()> {
+        if self
+            .vpss_initialized
+            .compare_exchange(true, false, Ordering::SeqCst, Ordering::SeqCst)
+            .is_ok()
+        {
+            crate::ffi::video::vpss_destroy_internal(VideoDevice::DEV0, self.ffi.as_ref())?;
+            tracing::info!("VPSS destroyed successfully");
+        }
+        Ok(())
     }
 
     /// Get the sensor resolution via `ak_vi_get_sensor_resolution()`.
@@ -490,6 +606,7 @@ impl AnykaVideoInput {
             let attempt_start = std::time::Instant::now();
             match video_input_capture_on_internal(handle, self.ffi.as_ref()) {
                 Ok(()) => {
+                    self.capture_started.store(true, Ordering::SeqCst);
                     tracing::info!(
                         "Video capture started successfully on attempt {} (attempt_elapsed_ms={}, total_elapsed_ms={})",
                         attempt,
@@ -510,12 +627,17 @@ impl AnykaVideoInput {
                     if let Err(cleanup_error) =
                         video_input_capture_off_internal(handle, self.ffi.as_ref())
                     {
-                        tracing::warn!(
-                            "ak_vi_capture_off cleanup after attempt {} failed: {}",
+                        tracing::error!(
+                            "ak_vi_capture_off cleanup after attempt {} failed, aborting retries: {}",
                             attempt,
                             cleanup_error
                         );
+                        return Err(PlatformError::HardwareFailure(format!(
+                            "ak_vi_capture_on retry cleanup failed on attempt {}: {}",
+                            attempt, cleanup_error
+                        )));
                     }
+                    self.capture_started.store(false, Ordering::SeqCst);
 
                     std::thread::sleep(std::time::Duration::from_millis(RETRY_RESET_DELAY_MS));
                     std::thread::sleep(std::time::Duration::from_millis(RETRY_DELAY_MS));
@@ -532,6 +654,24 @@ impl AnykaVideoInput {
             }
         }
 
+        Err(PlatformError::HardwareFailure(
+            "ak_vi_capture_on retry loop exited unexpectedly".to_string(),
+        ))
+    }
+
+    fn capture_off(&self) -> PlatformResult<()> {
+        if !self.capture_started.load(Ordering::SeqCst) {
+            return Ok(());
+        }
+
+        let guard = self.handle.read();
+        let handle = guard.as_ref().ok_or_else(|| {
+            PlatformError::HardwareUnavailable("Video input not opened".to_string())
+        })?;
+
+        video_input_capture_off_internal(handle, self.ffi.as_ref())?;
+        self.capture_started.store(false, Ordering::SeqCst);
+        tracing::info!("Video capture stopped successfully");
         Ok(())
     }
 }
@@ -548,18 +688,26 @@ impl VideoInput for AnykaVideoInput {
     /// - `PlatformError::ResourceBusy` if the device is already opened.
     /// - `PlatformError::HardwareUnavailable` if the SDK returns a null handle.
     async fn open(&self) -> PlatformResult<()> {
-        // Fast path: check if already opened without acquiring the lock
-        if self.opened.load(Ordering::SeqCst) {
+        if self
+            .opened
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .is_err()
+        {
             return Err(PlatformError::ResourceBusy(
                 "Video input already opened".to_string(),
             ));
         }
 
-        let vi_handle = video_input_open_internal(VideoDevice::DEV0, self.ffi.as_ref())?;
+        let vi_handle = match video_input_open_internal(VideoDevice::DEV0, self.ffi.as_ref()) {
+            Ok(handle) => handle,
+            Err(error) => {
+                self.opened.store(false, Ordering::SeqCst);
+                return Err(error);
+            }
+        };
 
         let mut guard = self.handle.write();
         *guard = Some(Arc::new(vi_handle));
-        self.opened.store(true, Ordering::SeqCst);
 
         tracing::info!("Video input device opened successfully");
         Ok(())
@@ -578,9 +726,17 @@ impl VideoInput for AnykaVideoInput {
             return Ok(());
         }
 
+        if let Err(e) = self.capture_off() {
+            tracing::warn!(
+                "Video capture off failed during close (best-effort, continuing): {}",
+                e
+            );
+        }
+
         let mut guard = self.handle.write();
         let _old_handle = guard.take(); // Drop triggers RAII cleanup
         self.opened.store(false, Ordering::SeqCst);
+        self.capture_started.store(false, Ordering::SeqCst);
 
         tracing::info!("Video input device closed");
         Ok(())
@@ -668,7 +824,7 @@ enum EncoderState {
 
 /// Anyka video encoder implementation with FFI integration and callback support.
 ///
-/// Manages dual video encoders (main 1080p + sub 720p) with:
+/// Manages dual video encoders (main 720p + sub 360p) with:
 /// - RAII-based FFI handles via `VideoEncoderHandle`
 /// - Zero-copy frame delivery to multiple subscribers
 /// - Panic-isolated callback invocation
@@ -712,22 +868,22 @@ impl AnykaVideoEncoder {
                 VideoEncoderConfig {
                     token: "VideoEncoder_1".to_string(),
                     name: "Main Stream".to_string(),
-                    resolution: Resolution::new(1920, 1080),
-                    framerate: 25,
-                    bitrate: 4000,
+                    resolution: Resolution::new(1280, 720),
+                    framerate: 15,
+                    bitrate: 2000,
                     encoding: VideoEncoding::H264,
-                    gop_length: 50,
+                    gop_length: 30,
                     quality: 80,
                     ..Default::default()
                 },
                 VideoEncoderConfig {
                     token: "VideoEncoder_2".to_string(),
                     name: "Sub Stream".to_string(),
-                    resolution: Resolution::new(1280, 720),
-                    framerate: 30,
-                    bitrate: 2000,
+                    resolution: Resolution::new(640, 360),
+                    framerate: 15,
+                    bitrate: 300,
                     encoding: VideoEncoding::H264,
-                    gop_length: 60,
+                    gop_length: 30,
                     quality: 70,
                     ..Default::default()
                 },
@@ -759,14 +915,17 @@ impl AnykaVideoEncoder {
         encode_param {
             width: config.resolution.width,
             height: config.resolution.height,
-            minqp: 10,
+            minqp: 20,
             maxqp: 51,
             fps: config.framerate as i32,
             goplen: config.gop_length as i32,
-            bps: (config.bitrate as i32) * 1000, // kbps to bps
+            bps: config.bitrate as i32, // kbps (vendor SDK expects kbps despite field name)
             profile: profile_mode::PROFILE_MAIN,
             use_chn: channel,
-            enc_grp: encode_group_type::ENCODE_RECORD,
+            enc_grp: match channel {
+                encode_use_chn::ENCODE_MAIN_CHN => encode_group_type::ENCODE_MAINCHN_NET,
+                encode_use_chn::ENCODE_SUB_CHN => encode_group_type::ENCODE_SUBCHN_NET,
+            },
             br_mode,
             enc_out_type,
         }
@@ -853,6 +1012,41 @@ impl AnykaVideoEncoder {
 
         video_encoder_request_idr_internal(handle, self.ffi.as_ref())
     }
+
+    /// Close a single encoder by token.
+    ///
+    /// This is used for initialization rollback when one encoder fails after
+    /// previous encoders have been successfully opened.
+    fn close_encoder(&self, token: &str) -> PlatformResult<()> {
+        match token {
+            "VideoEncoder_1" => {
+                let old_handle = self.main_handle.write().take();
+                if old_handle.is_some() {
+                    *self.main_state.write() = EncoderState::Uninitialized;
+                    tracing::info!("Closed video encoder token={}", token);
+                }
+                Ok(())
+            }
+            "VideoEncoder_2" => {
+                let old_handle = self.sub_handle.write().take();
+                if old_handle.is_some() {
+                    *self.sub_state.write() = EncoderState::Uninitialized;
+                    tracing::info!("Closed video encoder token={}", token);
+                }
+                Ok(())
+            }
+            _ => Err(PlatformError::InvalidParameter(format!(
+                "Unknown encoder token: {}",
+                token
+            ))),
+        }
+    }
+
+    fn close_all_encoders(&self) -> PlatformResult<()> {
+        self.close_encoder("VideoEncoder_2")?;
+        self.close_encoder("VideoEncoder_1")?;
+        Ok(())
+    }
 }
 
 #[async_trait]
@@ -877,7 +1071,40 @@ impl VideoEncoder for AnykaVideoEncoder {
             }
         };
 
+        // Validate encoder resolution before opening
+        if config.resolution.width == 0 || config.resolution.height == 0 {
+            return Err(PlatformError::InvalidParameter(
+                "Encoder resolution must be non-zero".to_string(),
+            ));
+        }
+        if !config.resolution.width.is_multiple_of(4) || !config.resolution.height.is_multiple_of(4)
+        {
+            return Err(PlatformError::InvalidParameter(format!(
+                "Encoder resolution {}x{} must be divisible by 4",
+                config.resolution.width, config.resolution.height
+            )));
+        }
+
         let param = Self::config_to_encode_param(config, channel);
+
+        tracing::debug!(
+            "Opening encoder {}: {}x{} @ {}fps, {}kbps, goplen={}, enc_grp={:?}, use_chn={:?}, param_size={}",
+            config.token,
+            param.width,
+            param.height,
+            param.fps,
+            param.bps,
+            param.goplen,
+            param.enc_grp,
+            param.use_chn,
+            std::mem::size_of::<encode_param>(),
+        );
+
+        // Point the vendor library at our SD card venc.cfg before opening.
+        // The V2 encoder doesn't read this file but ak_venc_open requires it to exist.
+        let cfg_path = c"/mnt/anyka_hack/onvif/venc.cfg";
+        self.ffi.venc_set_cfg_path(cfg_path.as_ptr());
+
         let enc_handle = video_encoder_open_internal(&param, self.ffi.as_ref())?;
 
         *handle_lock.write() = Some(Arc::new(enc_handle));
@@ -932,7 +1159,7 @@ impl VideoEncoder for AnykaVideoEncoder {
 
             if let Some(ref current) = current_config {
                 if current.bitrate != config.bitrate {
-                    let bps = (config.bitrate as i32) * 1000;
+                    let bps = config.bitrate as i32; // kbps (vendor SDK expects kbps)
                     video_encoder_set_rc_internal(handle, bps, self.ffi.as_ref())?;
                     tracing::info!(
                         "Encoder {} bitrate changed: {}kbps → {}kbps",
@@ -1862,6 +2089,36 @@ mod tests {
         assert!(result.is_ok());
     }
 
+    #[tokio::test]
+    async fn test_capture_on_retry_aborts_when_capture_off_cleanup_fails() {
+        let mut mock = MockVideoFfiTrait::new();
+        let test_ptr = std::ptr::NonNull::<c_void>::dangling().as_ptr() as usize;
+
+        mock.expect_vi_open()
+            .times(1)
+            .returning(move |_| test_ptr as *mut c_void);
+
+        mock.expect_vi_capture_on()
+            .times(1)
+            .returning(|_| AK_FAILED_I32);
+
+        mock.expect_vi_capture_off()
+            .times(1)
+            .returning(|_| AK_FAILED_I32);
+
+        let vi = AnykaVideoInput::with_ffi(Arc::new(mock), None);
+        vi.open().await.unwrap();
+
+        let result = vi.capture_on();
+        assert!(result.is_err());
+        match result {
+            Err(PlatformError::HardwareFailure(msg)) => {
+                assert!(msg.contains("retry cleanup failed"));
+            }
+            other => panic!("Expected HardwareFailure, got {:?}", other),
+        }
+    }
+
     #[test]
     fn test_capture_on_fails_when_not_opened() {
         let mock = MockVideoFfiTrait::new();
@@ -1887,6 +2144,7 @@ mod tests {
     /// Create a mock FFI that expects a successful venc_open call.
     fn mock_ffi_with_successful_encoder_open() -> MockVideoFfiTrait {
         let mut mock = MockVideoFfiTrait::new();
+        mock.expect_venc_set_cfg_path().returning(|_| 0);
         let test_ptr = std::ptr::NonNull::<c_void>::dangling().as_ptr() as usize;
         mock.expect_venc_open()
             .returning(move |_| test_ptr as *mut c_void);
@@ -1901,11 +2159,11 @@ mod tests {
         let config = VideoEncoderConfig {
             token: "VideoEncoder_1".to_string(),
             name: "Main Stream".to_string(),
-            resolution: Resolution::new(1920, 1080),
-            framerate: 25,
-            bitrate: 4000,
+            resolution: Resolution::new(1280, 720),
+            framerate: 15,
+            bitrate: 2000,
             encoding: VideoEncoding::H264,
-            gop_length: 50,
+            gop_length: 30,
             quality: 80,
             ..Default::default()
         };
@@ -1924,11 +2182,11 @@ mod tests {
         let config = VideoEncoderConfig {
             token: "VideoEncoder_2".to_string(),
             name: "Sub Stream".to_string(),
-            resolution: Resolution::new(1280, 720),
-            framerate: 30,
-            bitrate: 2000,
+            resolution: Resolution::new(640, 360),
+            framerate: 15,
+            bitrate: 300,
             encoding: VideoEncoding::H264,
-            gop_length: 60,
+            gop_length: 30,
             quality: 70,
             ..Default::default()
         };
@@ -1947,21 +2205,21 @@ mod tests {
         let main_config = VideoEncoderConfig {
             token: "VideoEncoder_1".to_string(),
             name: "Main Stream".to_string(),
-            resolution: Resolution::new(1920, 1080),
-            framerate: 25,
-            bitrate: 4000,
+            resolution: Resolution::new(1280, 720),
+            framerate: 15,
+            bitrate: 2000,
             encoding: VideoEncoding::H264,
-            gop_length: 50,
+            gop_length: 30,
             ..Default::default()
         };
         let sub_config = VideoEncoderConfig {
             token: "VideoEncoder_2".to_string(),
             name: "Sub Stream".to_string(),
-            resolution: Resolution::new(1280, 720),
-            framerate: 30,
-            bitrate: 2000,
+            resolution: Resolution::new(640, 360),
+            framerate: 15,
+            bitrate: 300,
             encoding: VideoEncoding::H264,
-            gop_length: 60,
+            gop_length: 30,
             ..Default::default()
         };
 
@@ -1998,15 +2256,16 @@ mod tests {
     #[tokio::test]
     async fn test_video_encoder_init_ffi_failure() {
         let mut mock = MockVideoFfiTrait::new();
+        mock.expect_venc_set_cfg_path().returning(|_| 0);
         mock.expect_venc_open().returning(|_| std::ptr::null_mut());
 
         let encoder = AnykaVideoEncoder::with_ffi(Arc::new(mock));
 
         let config = VideoEncoderConfig {
             token: "VideoEncoder_1".to_string(),
-            resolution: Resolution::new(1920, 1080),
-            framerate: 25,
-            bitrate: 4000,
+            resolution: Resolution::new(1280, 720),
+            framerate: 15,
+            bitrate: 2000,
             encoding: VideoEncoding::H264,
             ..Default::default()
         };
@@ -2025,7 +2284,7 @@ mod tests {
     async fn test_video_encoder_set_configuration_bitrate_change() {
         let mut mock = mock_ffi_with_successful_encoder_open();
         mock.expect_venc_set_rc()
-            .withf(|_, bps| *bps == 6000 * 1000)
+            .withf(|_, bps| *bps == 6000) // kbps passed directly to SDK
             .times(1)
             .returning(|_, _| AK_SUCCESS_I32);
 
@@ -2035,11 +2294,11 @@ mod tests {
         let init_config = VideoEncoderConfig {
             token: "VideoEncoder_1".to_string(),
             name: "Main Stream".to_string(),
-            resolution: Resolution::new(1920, 1080),
-            framerate: 25,
-            bitrate: 4000,
+            resolution: Resolution::new(1280, 720),
+            framerate: 15,
+            bitrate: 2000,
             encoding: VideoEncoding::H264,
-            gop_length: 50,
+            gop_length: 30,
             ..Default::default()
         };
         encoder.init(&init_config).await.unwrap();
@@ -2048,11 +2307,11 @@ mod tests {
         let new_config = VideoEncoderConfig {
             token: "VideoEncoder_1".to_string(),
             name: "Main Stream".to_string(),
-            resolution: Resolution::new(1920, 1080),
-            framerate: 25,
+            resolution: Resolution::new(1280, 720),
+            framerate: 15,
             bitrate: 6000,
             encoding: VideoEncoding::H264,
-            gop_length: 50,
+            gop_length: 30,
             ..Default::default()
         };
         let result = encoder.set_configuration(&new_config).await;
@@ -2094,11 +2353,11 @@ mod tests {
         let init_config = VideoEncoderConfig {
             token: "VideoEncoder_1".to_string(),
             name: "Main Stream".to_string(),
-            resolution: Resolution::new(1920, 1080),
-            framerate: 25,
-            bitrate: 4000,
+            resolution: Resolution::new(1280, 720),
+            framerate: 15,
+            bitrate: 2000,
             encoding: VideoEncoding::H264,
-            gop_length: 50,
+            gop_length: 30,
             ..Default::default()
         };
         encoder.init(&init_config).await.unwrap();
@@ -2107,11 +2366,11 @@ mod tests {
         let new_config = VideoEncoderConfig {
             token: "VideoEncoder_1".to_string(),
             name: "Main Stream".to_string(),
-            resolution: Resolution::new(1920, 1080),
-            framerate: 25,
+            resolution: Resolution::new(1280, 720),
+            framerate: 15,
             bitrate: 6000,
             encoding: VideoEncoding::H264,
-            gop_length: 50,
+            gop_length: 30,
             ..Default::default()
         };
         let result = encoder.set_configuration(&new_config).await;
@@ -2129,10 +2388,10 @@ mod tests {
 
         let config = encoder.get_configuration().await.unwrap();
         assert_eq!(config.token, "VideoEncoder_1");
-        assert_eq!(config.resolution.width, 1920);
-        assert_eq!(config.resolution.height, 1080);
-        assert_eq!(config.framerate, 25);
-        assert_eq!(config.bitrate, 4000);
+        assert_eq!(config.resolution.width, 1280);
+        assert_eq!(config.resolution.height, 720);
+        assert_eq!(config.framerate, 15);
+        assert_eq!(config.bitrate, 2000);
     }
 
     #[tokio::test]
@@ -2161,22 +2420,24 @@ mod tests {
     fn test_config_to_encode_param_main() {
         let config = VideoEncoderConfig {
             token: "VideoEncoder_1".to_string(),
-            resolution: Resolution::new(1920, 1080),
-            framerate: 25,
-            bitrate: 4000,
+            resolution: Resolution::new(1280, 720),
+            framerate: 15,
+            bitrate: 2000,
             encoding: VideoEncoding::H264,
-            gop_length: 50,
+            gop_length: 30,
             ..Default::default()
         };
 
         let param =
             AnykaVideoEncoder::config_to_encode_param(&config, encode_use_chn::ENCODE_MAIN_CHN);
-        assert_eq!(param.width, 1920);
-        assert_eq!(param.height, 1080);
-        assert_eq!(param.fps, 25);
-        assert_eq!(param.bps, 4_000_000);
-        assert_eq!(param.goplen, 50);
+        assert_eq!(param.width, 1280);
+        assert_eq!(param.height, 720);
+        assert_eq!(param.fps, 15);
+        assert_eq!(param.bps, 2000); // kbps passed directly
+        assert_eq!(param.goplen, 30);
+        assert_eq!(param.minqp, 20);
         assert_eq!(param.use_chn, encode_use_chn::ENCODE_MAIN_CHN);
+        assert_eq!(param.enc_grp, encode_group_type::ENCODE_MAINCHN_NET);
         assert_eq!(param.enc_out_type, encode_output_type::H264_ENC_TYPE);
     }
 
@@ -2184,22 +2445,23 @@ mod tests {
     fn test_config_to_encode_param_sub() {
         let config = VideoEncoderConfig {
             token: "VideoEncoder_2".to_string(),
-            resolution: Resolution::new(1280, 720),
-            framerate: 30,
-            bitrate: 2000,
+            resolution: Resolution::new(640, 360),
+            framerate: 15,
+            bitrate: 300,
             encoding: VideoEncoding::H264,
-            gop_length: 60,
+            gop_length: 30,
             ..Default::default()
         };
 
         let param =
             AnykaVideoEncoder::config_to_encode_param(&config, encode_use_chn::ENCODE_SUB_CHN);
-        assert_eq!(param.width, 1280);
-        assert_eq!(param.height, 720);
-        assert_eq!(param.fps, 30);
-        assert_eq!(param.bps, 2_000_000);
-        assert_eq!(param.goplen, 60);
+        assert_eq!(param.width, 640);
+        assert_eq!(param.height, 360);
+        assert_eq!(param.fps, 15);
+        assert_eq!(param.bps, 300); // kbps passed directly
+        assert_eq!(param.goplen, 30);
         assert_eq!(param.use_chn, encode_use_chn::ENCODE_SUB_CHN);
+        assert_eq!(param.enc_grp, encode_group_type::ENCODE_SUBCHN_NET);
     }
 
     #[test]
@@ -2399,11 +2661,11 @@ mod tests {
         // Initialize main encoder
         let config = VideoEncoderConfig {
             token: "VideoEncoder_1".to_string(),
-            resolution: Resolution::new(1920, 1080),
-            framerate: 25,
-            bitrate: 4000,
+            resolution: Resolution::new(1280, 720),
+            framerate: 15,
+            bitrate: 2000,
             encoding: VideoEncoding::H264,
-            gop_length: 50,
+            gop_length: 30,
             ..Default::default()
         };
         encoder.init(&config).await.unwrap();

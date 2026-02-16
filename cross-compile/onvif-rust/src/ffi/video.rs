@@ -47,6 +47,9 @@ pub(crate) trait VideoFfiTrait: Send + Sync {
     fn vi_set_channel_attr(&self, handle: *mut c_void, attr: *const video_channel_attr) -> i32;
     fn vi_capture_on(&self, handle: *mut c_void) -> i32;
     fn vi_capture_off(&self, handle: *mut c_void) -> i32;
+    fn vpss_init(&self, vi_handle: *mut c_void, dev: i32);
+    fn vpss_destroy(&self, dev: i32);
+    fn venc_set_cfg_path(&self, path: *const c_char) -> i32;
     fn venc_open(&self, param: *const encode_param) -> *mut c_void;
     fn venc_close(&self, handle: *mut c_void) -> i32;
     fn venc_set_rc(&self, enc_handle: *mut c_void, bps: i32) -> i32;
@@ -151,6 +154,45 @@ impl VideoFfiTrait for RealVideoFfi {
 
     #[cfg(use_stubs)]
     fn vi_capture_off(&self, _handle: *mut c_void) -> i32 {
+        AK_SUCCESS_I32
+    }
+
+    #[cfg(not(use_stubs))]
+    fn vpss_init(&self, vi_handle: *mut c_void, dev: i32) {
+        unsafe extern "C" {
+            fn ak_vpss_init(vi_handle: *mut c_void, dev_no: i32);
+        }
+        unsafe { ak_vpss_init(vi_handle, dev) }
+    }
+
+    #[cfg(use_stubs)]
+    fn vpss_init(&self, _vi_handle: *mut c_void, _dev: i32) {
+        // Stub: no-op for testing
+    }
+
+    #[cfg(not(use_stubs))]
+    fn vpss_destroy(&self, dev: i32) {
+        unsafe extern "C" {
+            fn ak_vpss_destroy(dev_no: i32);
+        }
+        unsafe { ak_vpss_destroy(dev) }
+    }
+
+    #[cfg(use_stubs)]
+    fn vpss_destroy(&self, _dev: i32) {
+        // Stub: no-op for testing
+    }
+
+    #[cfg(not(use_stubs))]
+    fn venc_set_cfg_path(&self, path: *const c_char) -> i32 {
+        unsafe extern "C" {
+            fn ak_venc_set_cfg_path(path: *const c_char) -> i32;
+        }
+        unsafe { ak_venc_set_cfg_path(path) }
+    }
+
+    #[cfg(use_stubs)]
+    fn venc_set_cfg_path(&self, _path: *const c_char) -> i32 {
         AK_SUCCESS_I32
     }
 
@@ -506,6 +548,129 @@ pub fn video_input_capture_on(handle: &VideoInputHandle) -> PlatformResult<()> {
 /// * `PlatformError::HardwareFailure` if the SDK call fails
 pub fn video_input_capture_off(handle: &VideoInputHandle) -> PlatformResult<()> {
     video_input_capture_off_internal(handle, &REAL_VIDEO_FFI)
+}
+
+/// Internal helper that takes FFI trait for testability.
+///
+/// Initializes the Video Post-Processing SubSystem (VPSS).
+/// This MUST be called immediately after `video_input_open()` and
+/// BEFORE any other video operations.
+pub(crate) fn vpss_init_internal(
+    handle: &VideoInputHandle,
+    device: VideoDevice,
+    ffi: &dyn VideoFfiTrait,
+) -> PlatformResult<()> {
+    // Validate device ID
+    let dev_id = if device == VideoDevice::DEV0 {
+        0i32
+    } else {
+        return Err(PlatformError::InvalidParameter(format!(
+            "Invalid video device ID: {}. Only VideoDevice::DEV0 is supported",
+            device.0
+        )));
+    };
+
+    ffi.vpss_init(handle.as_ptr(), dev_id);
+    Ok(())
+}
+
+/// Initialize the Video Post-Processing SubSystem (VPSS).
+///
+/// This function MUST be called immediately after `video_input_open()` and
+/// BEFORE any other video input operations. The reference implementation shows
+/// this is a critical initialization step that sets up the ISP processing pipeline.
+///
+/// # Arguments
+///
+/// * `handle` - Video input handle from a successful `video_input_open()` call
+/// * `device` - Video device identifier (must match the device used in `video_input_open()`)
+///
+/// # Errors
+///
+/// * `PlatformError::InvalidParameter` if device ID is invalid
+///
+/// # Safety
+///
+/// The FFI call is safe because:
+/// - `ak_vpss_init()` is called with a valid vi_handle from `ak_vi_open()`
+/// - The function returns void (no error codes to validate)
+/// - VPSS state is managed internally by the SDK
+///
+/// # Example Initialization Sequence
+///
+/// ```no_run
+/// use onvif_rust::ffi::{VideoDevice, video_input_open, vpss_init};
+///
+/// // Step 1: Open video input
+/// let vi_handle = video_input_open(VideoDevice::DEV0)?;
+///
+/// // Step 2: Initialize VPSS (CRITICAL - must be called before other operations)
+/// vpss_init(&vi_handle, VideoDevice::DEV0)?;
+///
+/// // Step 3: Continue with sensor resolution query, channel config, etc.
+/// # Ok::<(), onvif_rust::platform::PlatformError>(())
+/// ```
+pub fn vpss_init(handle: &VideoInputHandle, device: VideoDevice) -> PlatformResult<()> {
+    vpss_init_internal(handle, device, &REAL_VIDEO_FFI)
+}
+
+/// Internal helper that takes FFI trait for testability.
+///
+/// Destroys the Video Post-Processing SubSystem (VPSS).
+/// This MUST be called BEFORE `video_input_close()` during cleanup.
+pub(crate) fn vpss_destroy_internal(
+    device: VideoDevice,
+    ffi: &dyn VideoFfiTrait,
+) -> PlatformResult<()> {
+    // Validate device ID
+    let dev_id = if device == VideoDevice::DEV0 {
+        0i32
+    } else {
+        return Err(PlatformError::InvalidParameter(format!(
+            "Invalid video device ID: {}. Only VideoDevice::DEV0 is supported",
+            device.0
+        )));
+    };
+
+    ffi.vpss_destroy(dev_id);
+    Ok(())
+}
+
+/// Destroy the Video Post-Processing SubSystem (VPSS).
+///
+/// This function MUST be called BEFORE closing the video input device during
+/// cleanup/shutdown. The reference implementation shows this must be done in
+/// the correct order to avoid resource leaks.
+///
+/// # Arguments
+///
+/// * `device` - Video device identifier (must match the device used in initialization)
+///
+/// # Errors
+///
+/// * `PlatformError::InvalidParameter` if device ID is invalid
+///
+/// # Safety
+///
+/// The FFI call is safe because:
+/// - `ak_vpss_destroy()` takes only a device enum (no pointer validation needed)
+/// - The function returns void (no error codes to validate)
+/// - VPSS state cleanup is managed internally by the SDK
+///
+/// # Example Cleanup Sequence
+///
+/// ```no_run
+/// use onvif_rust::ffi::{VideoDevice, vpss_destroy};
+///
+/// // Step 1: Destroy VPSS BEFORE closing video input
+/// vpss_destroy(VideoDevice::DEV0)?;
+///
+/// // Step 2: Close video input (handle Drop will call ak_vi_close)
+/// drop(vi_handle);
+/// # Ok::<(), onvif_rust::platform::PlatformError>(())
+/// ```
+pub fn vpss_destroy(device: VideoDevice) -> PlatformResult<()> {
+    vpss_destroy_internal(device, &REAL_VIDEO_FFI)
 }
 
 /// RAII handle for video encoder.
@@ -1174,5 +1339,86 @@ mod tests {
             }
             _ => panic!("Expected HardwareFailure error"),
         }
+    }
+
+    // ---- Tests for vpss_init_internal and vpss_destroy_internal ----
+
+    #[test]
+    fn test_vpss_init_internal_calls_ffi() {
+        let mut mock_ffi = MockVideoFfiTrait::new();
+        let vi_handle = VideoInputHandle::test_handle();
+
+        mock_ffi
+            .expect_vpss_init()
+            .withf(|handle, _dev| handle.is_null())
+            .times(1)
+            .returning(|_, _| ());
+
+        let result = vpss_init_internal(&vi_handle, VideoDevice::DEV0, &mock_ffi);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_vpss_init_internal_rejects_invalid_device() {
+        let mock_ffi = MockVideoFfiTrait::new();
+        let vi_handle = VideoInputHandle::test_handle();
+
+        // Try with invalid device ID (not DEV0)
+        let invalid_device = VideoDevice(1);
+        let result = vpss_init_internal(&vi_handle, invalid_device, &mock_ffi);
+        assert!(result.is_err());
+        match result {
+            Err(PlatformError::InvalidParameter(msg)) => {
+                assert!(msg.contains("Invalid video device ID"));
+                assert!(msg.contains("1"));
+            }
+            _ => panic!("Expected InvalidParameter error"),
+        }
+    }
+
+    #[test]
+    fn test_vpss_destroy_internal_calls_ffi() {
+        let mut mock_ffi = MockVideoFfiTrait::new();
+
+        mock_ffi
+            .expect_vpss_destroy()
+            .withf(|_dev| true)
+            .times(1)
+            .returning(|_| ());
+
+        let result = vpss_destroy_internal(VideoDevice::DEV0, &mock_ffi);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_vpss_destroy_internal_rejects_invalid_device() {
+        let mock_ffi = MockVideoFfiTrait::new();
+
+        // Try with invalid device ID (not DEV0)
+        let invalid_device = VideoDevice(1);
+        let result = vpss_destroy_internal(invalid_device, &mock_ffi);
+        assert!(result.is_err());
+        match result {
+            Err(PlatformError::InvalidParameter(msg)) => {
+                assert!(msg.contains("Invalid video device ID"));
+                assert!(msg.contains("1"));
+            }
+            _ => panic!("Expected InvalidParameter error"),
+        }
+    }
+
+    #[test]
+    #[cfg(use_stubs)]
+    fn test_vpss_init_success() {
+        let handle = video_input_open(VideoDevice::DEV0).unwrap();
+        let result = vpss_init(&handle, VideoDevice::DEV0);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    #[cfg(use_stubs)]
+    fn test_vpss_destroy_success() {
+        let result = vpss_destroy(VideoDevice::DEV0);
+        assert!(result.is_ok());
     }
 }

@@ -1197,7 +1197,20 @@ impl Application {
 
         // Phase 4: Platform shutdown
         tracing::debug!("Shutting down platform...");
-        report.record_success("platform");
+        if let Some(state) = self.app_state.as_ref() {
+            if let Some(platform) = state.platform() {
+                if let Err(e) = platform.shutdown().await {
+                    tracing::warn!("Platform shutdown reported an error: {}", e);
+                    report.record_failure("platform", e.to_string());
+                } else {
+                    report.record_success("platform");
+                }
+            } else {
+                report.record_success("platform");
+            }
+        } else {
+            report.record_success("platform");
+        }
 
         // Phase 5: Configuration cleanup
         tracing::debug!("Cleaning up configuration...");
