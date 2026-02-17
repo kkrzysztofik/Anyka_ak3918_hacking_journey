@@ -1269,6 +1269,7 @@ impl Application {
         Self::record_service_shutdown(&mut report);
         self.shutdown_streaming(&mut report).await;
         self.shutdown_platform(&mut report).await;
+        self.disarm_platform_drop_for_hard_exit(&report);
 
         // Phase 5: Configuration cleanup
         tracing::debug!("Cleaning up configuration...");
@@ -1361,19 +1362,35 @@ impl Application {
             report.record_success("platform");
             return;
         };
-        match tokio::time::timeout(Duration::from_secs(10), platform.shutdown()).await {
-            Ok(Ok(())) => {
+        match platform.shutdown().await {
+            Ok(()) => {
                 report.record_success("platform");
             }
-            Ok(Err(e)) => {
+            Err(e) => {
                 tracing::warn!("Platform shutdown error: {}", e);
                 report.record_failure("platform", e.to_string());
             }
-            Err(_) => {
-                tracing::error!("Platform shutdown timed out after 10s — possible stuck FFI call");
-                report.record_failure("platform", "timeout".to_string());
-            }
         }
+    }
+
+    fn disarm_platform_drop_for_hard_exit(&mut self, report: &ShutdownReport) {
+        if !Self::shutdown_requires_hard_exit(report) {
+            return;
+        }
+
+        if let Some(state) = self.app_state.take() {
+            tracing::error!(
+                "Unsafe teardown detected; leaking app_state to suppress destructor-driven SDK cleanup before hard exit"
+            );
+            std::mem::forget(state);
+        }
+    }
+
+    fn shutdown_requires_hard_exit(report: &ShutdownReport) -> bool {
+        report
+            .errors
+            .iter()
+            .any(|e| e.contains("unsafe teardown required"))
     }
 
     /// Get the current health status of the application.

@@ -304,7 +304,25 @@ async fn run_normal_mode(config_path: &str) -> Result<()> {
         }
     }
 
-    Ok(())
+    let hard_exit_required = shutdown_requires_hard_exit(&report);
+    let exit_code = if hard_exit_required { 1 } else { 0 };
+    if hard_exit_required {
+        tracing::error!(
+            "Forcing hard process exit due to unsafe hardware teardown state (exit_code=1)"
+        );
+        hard_terminate_process(exit_code);
+    }
+    tracing::info!("Forcing process exit to terminate any lingering vendor threads");
+    // Brief pause to allow tracing subscriber to flush
+    std::thread::sleep(std::time::Duration::from_millis(50));
+    std::process::exit(exit_code);
+}
+
+fn shutdown_requires_hard_exit(report: &onvif_rust::ShutdownReport) -> bool {
+    report
+        .errors
+        .iter()
+        .any(|e| e.contains("unsafe teardown required"))
 }
 
 fn configure_stream_frame_debug_logging(config: &ConfigRuntime) -> bool {
@@ -679,8 +697,8 @@ async fn run_validation_mode(config: H264PlaybackConfig, config_path: &str) -> R
 /// Spawn a watchdog thread that force-terminates the process if shutdown exceeds the
 /// given deadline. Returns a guard — dropping the guard signals the watchdog to exit
 /// cleanly. If the guard is *not* dropped (e.g. the main thread is stuck), the
-/// watchdog fires `std::process::exit(1)` which calls libc `_exit()`, terminating all
-/// threads immediately — even those stuck in uninterruptible kernel I/O.
+/// watchdog forces process termination, terminating all threads immediately — even
+/// those stuck in uninterruptible kernel I/O.
 fn spawn_shutdown_watchdog(deadline: Duration) -> ShutdownWatchdogGuard {
     let cancel = Arc::new(AtomicBool::new(false));
     let cancel_clone = Arc::clone(&cancel);
@@ -700,12 +718,30 @@ fn spawn_shutdown_watchdog(deadline: Duration) -> ShutdownWatchdogGuard {
                 "SHUTDOWN WATCHDOG: forced exit after {:?} timeout",
                 deadline
             );
-            // Brief pause to flush log output
-            std::thread::sleep(Duration::from_millis(100));
-            std::process::exit(1);
+            hard_terminate_process(1);
         });
 
     ShutdownWatchdogGuard { cancel }
+}
+
+fn hard_terminate_process(exit_code: i32) -> ! {
+    #[cfg(target_os = "linux")]
+    unsafe {
+        let _ = libc::syscall(
+            libc::SYS_exit_group as libc::c_long,
+            exit_code as libc::c_int,
+        );
+        let _ = libc::kill(libc::getpid(), libc::SIGKILL);
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    {
+        std::process::exit(exit_code);
+    }
+
+    loop {
+        std::thread::sleep(Duration::from_secs(1));
+    }
 }
 
 /// Guard that cancels the shutdown watchdog when dropped.

@@ -30,6 +30,10 @@ use async_trait::async_trait;
 use parking_lot::RwLock;
 
 use crate::ffi::VideoDevice;
+use crate::ffi::ipc::{
+    DEFAULT_CMD_SERVER_PORT, command_send_with_timeout, command_server_register,
+    command_server_unregister,
+};
 use crate::ffi::video::{
     RealVideoFfi, VideoFfiTrait, VideoInputHandle, video_input_capture_off_internal,
     video_input_capture_on_internal, video_input_get_sensor_resolution_internal,
@@ -53,6 +57,7 @@ use super::traits::{
 /// a safe Rust interface to the hardware.
 pub struct AnykaPlatform {
     initialized: AtomicBool,
+    cmd_server_registered: AtomicBool,
     device_info: DeviceInfo,
     sensor_resolution: RwLock<Option<Resolution>>,
     video_input: Arc<AnykaVideoInput>,
@@ -65,6 +70,10 @@ pub struct AnykaPlatform {
 }
 
 impl AnykaPlatform {
+    const CMD_SERVER_NAME: &'static str = "onvif-rust";
+    const IPC_DIAG_TIMEOUT_MS: u64 = 350;
+    const IPC_DIAG_MAX_CHARS: usize = 1200;
+
     /// Create a new Anyka platform instance.
     ///
     /// Uses auto-detection for the ISP config path. See [`with_isp_config`](Self::with_isp_config)
@@ -111,6 +120,7 @@ impl AnykaPlatform {
 
         Ok(Self {
             initialized: AtomicBool::new(false),
+            cmd_server_registered: AtomicBool::new(false),
             device_info,
             sensor_resolution: RwLock::new(None),
             video_input,
@@ -121,6 +131,189 @@ impl AnykaPlatform {
             imaging_control,
             network_info,
         })
+    }
+
+    fn register_cmd_server(&self) -> PlatformResult<()> {
+        if self.cmd_server_registered.load(Ordering::SeqCst) {
+            return Ok(());
+        }
+        command_server_register(Self::CMD_SERVER_NAME)?;
+        self.cmd_server_registered.store(true, Ordering::SeqCst);
+        tracing::info!(
+            port = DEFAULT_CMD_SERVER_PORT,
+            name = Self::CMD_SERVER_NAME,
+            "Anyka command server registered"
+        );
+        Ok(())
+    }
+
+    fn unregister_cmd_server_best_effort(&self) {
+        if !self.cmd_server_registered.swap(false, Ordering::SeqCst) {
+            return;
+        }
+        if let Err(e) = command_server_unregister() {
+            tracing::warn!(
+                port = DEFAULT_CMD_SERVER_PORT,
+                "Anyka command server unregister failed: {}",
+                e
+            );
+        } else {
+            tracing::info!(
+                port = DEFAULT_CMD_SERVER_PORT,
+                "Anyka command server unregistered"
+            );
+        }
+    }
+
+    fn parse_module_listing(listing: &str) -> Vec<String> {
+        let mut modules = Vec::new();
+        for token in listing.split('[').skip(1) {
+            if let Some(end) = token.find(']') {
+                let module = token[..end].trim();
+                if !module.is_empty() {
+                    modules.push(module.to_string());
+                }
+            }
+        }
+        modules
+    }
+
+    fn normalize_diag_output(output: &str, max_chars: usize) -> String {
+        let compact = output
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty())
+            .collect::<Vec<_>>()
+            .join(" | ");
+        let text = if compact.is_empty() {
+            "<empty>".to_string()
+        } else {
+            compact
+        };
+        let char_count = text.chars().count();
+        if char_count <= max_chars {
+            return text;
+        }
+        let mut truncated = text.chars().take(max_chars).collect::<String>();
+        truncated.push_str(" ...[truncated]");
+        truncated
+    }
+
+    fn log_sdk_ipc_diagnostics_best_effort(&self, context: &str) {
+        if !self.cmd_server_registered.load(Ordering::SeqCst) {
+            tracing::warn!(
+                context = context,
+                "Skipping Anyka IPC diagnostics: command server is not registered"
+            );
+            return;
+        }
+
+        let timeout_ms =
+            env_var_u64("ANYKA_IPC_DIAG_TIMEOUT_MS").unwrap_or(Self::IPC_DIAG_TIMEOUT_MS);
+        let max_chars = env_var_u64("ANYKA_IPC_DIAG_MAX_CHARS")
+            .and_then(|v| usize::try_from(v).ok())
+            .unwrap_or(Self::IPC_DIAG_MAX_CHARS);
+
+        let modules_raw = match command_send_with_timeout("get all support modules", timeout_ms) {
+            Ok(raw) => raw,
+            Err(e) => {
+                tracing::warn!(
+                    context = context,
+                    timeout_ms = timeout_ms,
+                    "Anyka IPC diagnostics failed to fetch module listing: {}",
+                    e
+                );
+                return;
+            }
+        };
+        let modules = Self::parse_module_listing(&modules_raw);
+        tracing::error!(
+            context = context,
+            timeout_ms = timeout_ms,
+            modules = %Self::normalize_diag_output(&modules_raw, max_chars),
+            "Anyka IPC diagnostics: module snapshot"
+        );
+
+        if modules.is_empty() {
+            tracing::warn!(
+                context = context,
+                "Anyka IPC diagnostics: no modules parsed from IPC module listing"
+            );
+            return;
+        }
+
+        for module in modules {
+            for suffix in ["get_status", "version"] {
+                let command = format!("{module}_{suffix}");
+                match command_send_with_timeout(&command, timeout_ms) {
+                    Ok(output) => {
+                        tracing::error!(
+                            context = context,
+                            command = command.as_str(),
+                            output = %Self::normalize_diag_output(&output, max_chars),
+                            "Anyka IPC diagnostics response"
+                        );
+                    }
+                    Err(PlatformError::Timeout) => {
+                        tracing::warn!(
+                            context = context,
+                            command = command.as_str(),
+                            timeout_ms = timeout_ms,
+                            "Anyka IPC diagnostics command timed out"
+                        );
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            context = context,
+                            command = command.as_str(),
+                            "Anyka IPC diagnostics command failed: {}",
+                            e
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    fn shutdown_video_pipeline(
+        video_encoder: &AnykaVideoEncoder,
+        video_input: &AnykaVideoInput,
+    ) -> PlatformResult<()> {
+        tracing::info!("Platform shutdown: PTZ stop complete, stopping streaming...");
+        video_encoder.stop_streaming()?;
+        tracing::info!("Platform shutdown: streaming stopped, closing encoders...");
+
+        video_encoder.close_all_encoders()?;
+        tracing::info!("Platform shutdown: encoders closed, stopping capture...");
+
+        // Stop capture BEFORE closing video input.
+        if let Err(e) = video_input.capture_off() {
+            tracing::warn!(
+                "Video capture off failed during shutdown (best-effort, continuing): {}",
+                e
+            );
+        }
+        tracing::info!("Platform shutdown: capture stopped, destroying VPSS...");
+
+        // Destroy VPSS BEFORE closing video input (required by SDK).
+        if let Err(e) = video_input.destroy_vpss() {
+            tracing::warn!(
+                "VPSS destroy failed during shutdown (best-effort, continuing): {}",
+                e
+            );
+        }
+        tracing::info!("Platform shutdown: VPSS destroyed, closing video input...");
+
+        // Close video input (RAII handle will call ak_vi_close)
+        if let Err(e) = video_input.close_blocking() {
+            tracing::warn!(
+                "Video input close failed during shutdown (best-effort, continuing): {}",
+                e
+            );
+        }
+        tracing::info!("Platform shutdown: video input closed");
+
+        Ok(())
     }
 }
 
@@ -167,18 +360,39 @@ impl Platform for AnykaPlatform {
     }
 
     async fn initialize(&self) -> PlatformResult<()> {
+        // Step 0: Start Anyka command server before VPSS/video init.
+        // The Anyka reference service registers this first so VPSS IPC hooks
+        // can bind cleanly.
+        if let Err(e) = self.register_cmd_server() {
+            return Err(PlatformError::InitializationFailed(format!(
+                "Failed to register Anyka command server: {}",
+                e
+            )));
+        }
+
         // Step 1: Load ISP sensor configuration (must precede vi_open)
-        self.video_input.match_sensor()?;
+        if let Err(e) = self.video_input.match_sensor() {
+            self.log_sdk_ipc_diagnostics_best_effort("initialize:match_sensor_failed");
+            self.unregister_cmd_server_best_effort();
+            return Err(e);
+        }
         tracing::info!("ISP sensor matched successfully");
 
         // Step 2: Open video input device
-        self.video_input.open().await?;
+        if let Err(e) = self.video_input.open().await {
+            self.log_sdk_ipc_diagnostics_best_effort("initialize:vi_open_failed");
+            self.unregister_cmd_server_best_effort();
+            return Err(e);
+        }
 
-        // Step 2.5: VPSS init skipped — libre_anyka_app does not call ak_vpss_init()
-        // and our init sequence lacks the prerequisite ak_cmd_server_register().
-        // VPSS is not needed for basic video encoding; it provides post-processing
-        // features (OSD overlay, video effects). Can be re-enabled later if needed
-        // by calling ak_cmd_server_register() first. See akipc/main/ipc_main.c.
+        // Step 2.5: Initialize VPSS. The Anyka ONVIF reference path performs
+        // ak_vpss_init() early in VI bring-up.
+        if let Err(e) = self.video_input.init_vpss() {
+            tracing::warn!(
+                "VPSS init failed during platform init; continuing without VPSS: {}",
+                e
+            );
+        }
 
         // Step 3: Query and store sensor resolution
         let sensor_res = self.video_input.get_sensor_resolution()?;
@@ -192,15 +406,24 @@ impl Platform for AnykaPlatform {
         // Step 4: Configure dual channels
         if let Err(e) = self.video_input.set_channel_attr() {
             tracing::error!("Failed to set channel attributes, rolling back: {}", e);
+            let _ = self.video_input.destroy_vpss();
             let _ = self.video_input.close().await;
+            self.log_sdk_ipc_diagnostics_best_effort("initialize:set_channel_attr_failed");
+            self.unregister_cmd_server_best_effort();
             return Err(e);
         }
+        let (main_layout, sub_layout) = self.video_input.channel_layout();
+        self.video_encoder
+            .sync_configurations_to_channel_layout(main_layout, sub_layout);
 
         // Step 5: Start capture pipeline
         if let Err(e) = self.video_input.capture_on() {
             tracing::error!("Failed to start capture pipeline, rolling back: {}", e);
             let _ = self.video_input.capture_off();
+            let _ = self.video_input.destroy_vpss();
             let _ = self.video_input.close().await;
+            self.log_sdk_ipc_diagnostics_best_effort("initialize:capture_on_failed");
+            self.unregister_cmd_server_best_effort();
             return Err(e);
         }
         // Allow the capture pipeline to stabilize before opening encoders.
@@ -227,7 +450,10 @@ impl Platform for AnykaPlatform {
 
                 // Rollback: stop capture, close video input
                 let _ = self.video_input.capture_off();
+                let _ = self.video_input.destroy_vpss();
                 let _ = self.video_input.close().await;
+                self.log_sdk_ipc_diagnostics_best_effort("initialize:encoder_init_failed");
+                self.unregister_cmd_server_best_effort();
                 return Err(PlatformError::InitializationFailed(format!(
                     "Video encoder {} initialization failed: {}",
                     config.token, e
@@ -240,19 +466,72 @@ impl Platform for AnykaPlatform {
             encoder_configs.len()
         );
 
-        // Start frame production: bind VI+encoder and spawn polling threads
-        if let Some(vi_handle) = self.video_input.get_handle() {
-            let main_enc = self.video_encoder.main_handle.read().clone();
-            let sub_enc = self.video_encoder.sub_handle.read().clone();
-
-            if let Some(ref main) = main_enc
-                && let Err(e) =
-                    self.video_encoder
-                        .start_streaming(&vi_handle, main, sub_enc.as_ref())
-            {
-                tracing::error!("Failed to start streaming: {}", e);
-                // Non-fatal: platform can still serve ONVIF metadata without live frames
+        // Step 6: Start frame production: bind VI+encoder and spawn polling threads.
+        let vi_handle = match self.video_input.get_handle() {
+            Some(handle) => handle,
+            None => {
+                let _ = self.video_encoder.close_all_encoders();
+                let _ = self.video_input.capture_off();
+                let _ = self.video_input.destroy_vpss();
+                let _ = self.video_input.close().await;
+                self.log_sdk_ipc_diagnostics_best_effort("initialize:missing_vi_handle");
+                self.unregister_cmd_server_best_effort();
+                return Err(PlatformError::InitializationFailed(
+                    "Video input handle missing after successful open".to_string(),
+                ));
             }
+        };
+        let main_enc_candidate = {
+            let guard = self.video_encoder.main_handle.read();
+            guard.clone()
+        };
+        let main_enc = match main_enc_candidate {
+            Some(handle) => handle,
+            None => {
+                let _ = self.video_encoder.close_all_encoders();
+                let _ = self.video_input.capture_off();
+                let _ = self.video_input.destroy_vpss();
+                let _ = self.video_input.close().await;
+                self.log_sdk_ipc_diagnostics_best_effort("initialize:missing_main_encoder_handle");
+                self.unregister_cmd_server_best_effort();
+                return Err(PlatformError::InitializationFailed(
+                    "Main encoder handle missing after successful init".to_string(),
+                ));
+            }
+        };
+        let sub_enc = self.video_encoder.sub_handle.read().clone();
+        if let Err(e) = self
+            .video_encoder
+            .start_streaming(&vi_handle, &main_enc, sub_enc.as_ref())
+        {
+            tracing::error!("Failed to start streaming, rolling back: {}", e);
+            let _ = self.video_encoder.close_all_encoders();
+            let _ = self.video_input.capture_off();
+            let _ = self.video_input.destroy_vpss();
+            let _ = self.video_input.close().await;
+            self.log_sdk_ipc_diagnostics_best_effort("initialize:start_streaming_failed");
+            self.unregister_cmd_server_best_effort();
+            return Err(PlatformError::InitializationFailed(format!(
+                "Video streaming startup failed: {}",
+                e
+            )));
+        }
+
+        // Step 7: Validate VI/VENC pipeline readiness.
+        let readiness_timeout_ms = env_var_u64("ANYKA_PIPELINE_READY_TIMEOUT_MS").unwrap_or(5000);
+        let require_sub_pipeline = env_var_truthy_or("ANYKA_PIPELINE_REQUIRE_SUB", true);
+        if let Err(e) = self.video_encoder.wait_for_stream_readiness(
+            Duration::from_millis(readiness_timeout_ms),
+            require_sub_pipeline,
+        ) {
+            tracing::error!(
+                "VI/VENC pipeline failed readiness validation, rolling back: {}",
+                e
+            );
+            let _ = AnykaPlatform::shutdown_video_pipeline(&self.video_encoder, &self.video_input);
+            self.log_sdk_ipc_diagnostics_best_effort("initialize:readiness_failed");
+            self.unregister_cmd_server_best_effort();
+            return Err(e);
         }
 
         // TODO(kkrzysztofik): Call remaining Anyka SDK initialization functions via FFI
@@ -275,48 +554,51 @@ impl Platform for AnykaPlatform {
                 e
             );
         }
-        tracing::info!("Platform shutdown: PTZ stop complete, stopping streaming...");
 
-        // Stop frame production threads before closing encoders
-        self.video_encoder.stop_streaming();
-        tracing::info!("Platform shutdown: streaming stopped, closing encoders...");
+        // Run blocking SDK teardown in a dedicated OS thread with a hard deadline.
+        // This avoids async cancellation races around blocking vendor calls.
+        let video_encoder = Arc::clone(&self.video_encoder);
+        let video_input = Arc::clone(&self.video_input);
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::Builder::new()
+            .name("anyka-shutdown-worker".to_string())
+            .spawn(move || {
+                let result = AnykaPlatform::shutdown_video_pipeline(&video_encoder, &video_input);
+                let _ = tx.send(result);
+            })
+            .map_err(|e| {
+                PlatformError::HardwareFailure(format!(
+                    "failed to spawn anyka shutdown worker thread: {}",
+                    e
+                ))
+            })?;
 
-        if let Err(e) = self.video_encoder.close_all_encoders() {
-            tracing::warn!(
-                "Video encoder close failed during shutdown (best-effort, continuing): {}",
-                e
-            );
-        }
-        tracing::info!("Platform shutdown: encoders closed, stopping capture...");
+        #[cfg(test)]
+        let shutdown_deadline = Duration::from_millis(200);
+        #[cfg(not(test))]
+        let shutdown_deadline = Duration::from_secs(12);
 
-        // Stop capture BEFORE closing video input.
-        if let Err(e) = self.video_input.capture_off() {
-            tracing::warn!(
-                "Video capture off failed during shutdown (best-effort, continuing): {}",
-                e
-            );
-        }
-        tracing::info!("Platform shutdown: capture stopped, closing video input...");
-
-        // Close video input (RAII handle will call ak_vi_close)
-        if let Err(e) = self.video_input.close().await {
-            tracing::warn!(
-                "Video input close failed during shutdown (best-effort, continuing): {}",
-                e
-            );
-        }
-        tracing::info!("Platform shutdown: video input closed");
-
-        // Video encoder handles are dropped via RAII (VideoEncoderHandle::Drop
-        // calls ak_venc_close). The handles are stored in AnykaVideoEncoder's
-        // main_handle/sub_handle RwLocks and cleaned up when the platform is dropped.
+        let result = match rx.recv_timeout(shutdown_deadline) {
+            Ok(result) => result,
+            Err(_) => {
+                self.video_encoder
+                    .mark_unsafe_shutdown("platform shutdown worker exceeded hard deadline");
+                Err(PlatformError::Timeout)
+            }
+        };
 
         // TODO(kkrzysztofik): Call remaining Anyka SDK cleanup functions via FFI
         // - ak_ai_close()
         // - ak_aenc_close()
-        self.initialized.store(false, Ordering::SeqCst);
-        tracing::info!("Platform shutdown: complete");
-        Ok(())
+        if result.is_ok() {
+            self.initialized.store(false, Ordering::SeqCst);
+            tracing::info!("Platform shutdown: complete");
+        } else {
+            tracing::error!("Platform shutdown ended with error: {:?}", result);
+            self.log_sdk_ipc_diagnostics_best_effort("shutdown:failed");
+        }
+        self.unregister_cmd_server_best_effort();
+        result
     }
 
     fn max_sensor_resolution(&self) -> PlatformResult<Resolution> {
@@ -370,6 +652,27 @@ fn align_to_8(h: i32) -> i32 {
     (h + 7) & !7
 }
 
+fn env_var_truthy(name: &str) -> bool {
+    env_var_truthy_or(name, false)
+}
+
+fn env_var_truthy_or(name: &str, default: bool) -> bool {
+    std::env::var(name)
+        .map(|value| {
+            matches!(
+                value.trim().to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes" | "on"
+            )
+        })
+        .unwrap_or(default)
+}
+
+fn env_var_u64(name: &str) -> Option<u64> {
+    std::env::var(name)
+        .ok()
+        .and_then(|value| value.trim().parse::<u64>().ok())
+}
+
 ///
 /// These paths are searched in order when no explicit ISP config path is provided.
 /// The first path that exists on the filesystem is used for `ak_vi_match_sensor()`.
@@ -381,8 +684,29 @@ const ISP_CONFIG_SEARCH_PATHS: &[&str] = &[
 
 const COMPAT_MAIN_MAX_WIDTH_VGA: i32 = 640;
 const COMPAT_MAIN_MAX_HEIGHT_VGA: i32 = 480;
-const COMPAT_SUB_MAX_WIDTH_HD: i32 = 1280;
-const COMPAT_SUB_MAX_HEIGHT_HD: i32 = 720;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ViChannelAttrMode {
+    SensorNative,
+    LegacyCompat,
+}
+
+impl ViChannelAttrMode {
+    fn from_env() -> Self {
+        if env_var_truthy("ANYKA_VI_COMPAT_MODE") {
+            Self::LegacyCompat
+        } else {
+            Self::SensorNative
+        }
+    }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::SensorNative => "sensor-native",
+            Self::LegacyCompat => "legacy-compat",
+        }
+    }
+}
 
 struct AnykaVideoInput {
     ffi: Arc<dyn VideoFfiTrait>,
@@ -391,12 +715,18 @@ struct AnykaVideoInput {
     capture_started: AtomicBool,
     isp_config_path: Option<PathBuf>,
     vpss_initialized: AtomicBool,
+    channel_attr_mode: ViChannelAttrMode,
+    channel_layout: RwLock<(Resolution, Resolution)>,
 }
 
 impl AnykaVideoInput {
     /// Create a new `AnykaVideoInput` with the default (real) FFI backend.
     fn new(isp_config_path: Option<PathBuf>) -> Self {
-        Self::with_ffi(Arc::new(RealVideoFfi), isp_config_path)
+        Self::with_ffi_and_mode(
+            Arc::new(RealVideoFfi),
+            isp_config_path,
+            ViChannelAttrMode::from_env(),
+        )
     }
 
     /// Create a new `AnykaVideoInput` with a custom FFI backend.
@@ -404,18 +734,19 @@ impl AnykaVideoInput {
     /// Used by tests with `MockVideoFfiTrait` for hardware-free testing.
     #[cfg(test)]
     fn with_ffi(ffi: Arc<dyn VideoFfiTrait>, isp_config_path: Option<PathBuf>) -> Self {
-        Self {
-            ffi,
-            handle: RwLock::new(None),
-            opened: AtomicBool::new(false),
-            capture_started: AtomicBool::new(false),
-            isp_config_path,
-            vpss_initialized: AtomicBool::new(false),
-        }
+        Self::with_ffi_and_mode(ffi, isp_config_path, ViChannelAttrMode::SensorNative)
     }
 
     #[cfg(not(test))]
     fn with_ffi(ffi: Arc<dyn VideoFfiTrait>, isp_config_path: Option<PathBuf>) -> Self {
+        Self::with_ffi_and_mode(ffi, isp_config_path, ViChannelAttrMode::from_env())
+    }
+
+    fn with_ffi_and_mode(
+        ffi: Arc<dyn VideoFfiTrait>,
+        isp_config_path: Option<PathBuf>,
+        channel_attr_mode: ViChannelAttrMode,
+    ) -> Self {
         Self {
             ffi,
             handle: RwLock::new(None),
@@ -423,12 +754,18 @@ impl AnykaVideoInput {
             capture_started: AtomicBool::new(false),
             isp_config_path,
             vpss_initialized: AtomicBool::new(false),
+            channel_attr_mode,
+            channel_layout: RwLock::new((Resolution::new(1280, 720), Resolution::new(640, 480))),
         }
     }
 
     /// Get a clone of the video input handle (if opened).
     pub fn get_handle(&self) -> Option<Arc<crate::ffi::VideoInputHandle>> {
         self.handle.read().clone()
+    }
+
+    fn channel_layout(&self) -> (Resolution, Resolution) {
+        *self.channel_layout.read()
     }
 
     /// Configure dual-channel video attributes.
@@ -463,17 +800,44 @@ impl AnykaVideoInput {
         attr.crop.width = sensor_width;
         attr.crop.height = sensor_height;
 
-        // Sub channel must be smaller than main channel — the ISP driver's internal
-        // scaling pipeline stalls frame production when both are identical.
-        // Reference: vi_demo uses 640x360, ipc_main defaults to 640x480.
-        let sub_width = align_to_32((sensor_width / 2).max(640));
-        let sub_height = align_to_8(sensor_height * sub_width / sensor_width);
-        // Preserve legacy compatibility intent while guaranteeing max dimensions
-        // are not below active dimensions.
-        let main_max_width = sensor_width.max(COMPAT_MAIN_MAX_WIDTH_VGA);
-        let main_max_height = sensor_height.max(COMPAT_MAIN_MAX_HEIGHT_VGA);
-        let sub_max_width = sub_width.max(COMPAT_SUB_MAX_WIDTH_HD);
-        let sub_max_height = sub_height.max(COMPAT_SUB_MAX_HEIGHT_HD);
+        let (sub_width, sub_height, main_max_width, main_max_height, sub_max_width, sub_max_height) =
+            match self.channel_attr_mode {
+                // Match Anyka ONVIF reference defaults:
+                // main = sensor-native, sub = 640x480.
+                ViChannelAttrMode::SensorNative => {
+                    let sub_width = if sensor_width >= 640 {
+                        640
+                    } else {
+                        align_to_32(sensor_width.max(32))
+                    };
+                    let sub_height = if sensor_height >= 480 {
+                        480
+                    } else {
+                        align_to_8(sensor_height.max(8))
+                    };
+                    (
+                        sub_width,
+                        sub_height,
+                        sensor_width,
+                        sensor_height,
+                        sub_width,
+                        sub_height,
+                    )
+                }
+                // Legacy compatibility mode keeps previous scaling/max semantics.
+                ViChannelAttrMode::LegacyCompat => {
+                    let sub_width = align_to_32((sensor_width / 2).max(640));
+                    let sub_height = align_to_8(sensor_height * sub_width / sensor_width);
+                    (
+                        sub_width,
+                        sub_height,
+                        sub_width,
+                        sub_height,
+                        sub_width.max(COMPAT_MAIN_MAX_WIDTH_VGA),
+                        sub_height.max(COMPAT_MAIN_MAX_HEIGHT_VGA),
+                    )
+                }
+            };
 
         attr.res = [
             // Main channel: sensor-native resolution.
@@ -502,14 +866,22 @@ impl AnykaVideoInput {
             attr.res[1].height
         );
         tracing::info!(
+            "Applying Anyka channel attr mode: {}",
+            self.channel_attr_mode.as_str()
+        );
+        tracing::info!(
             "Applying Anyka compat max attrs: main_max={}x{}, sub_max={}x{}",
             attr.res[0].max_width,
             attr.res[0].max_height,
             attr.res[1].max_width,
             attr.res[1].max_height,
         );
-
-        video_input_set_channel_attr_internal(handle, &attr, self.ffi.as_ref())
+        video_input_set_channel_attr_internal(handle, &attr, self.ffi.as_ref())?;
+        *self.channel_layout.write() = (
+            Resolution::new(attr.res[0].width as u32, attr.res[0].height as u32),
+            Resolution::new(attr.res[1].width as u32, attr.res[1].height as u32),
+        );
+        Ok(())
     }
 
     /// Load the ISP sensor configuration via `ak_vi_match_sensor()`.
@@ -717,6 +1089,28 @@ impl AnykaVideoInput {
         tracing::info!("Video capture stopped successfully");
         Ok(())
     }
+
+    fn close_blocking(&self) -> PlatformResult<()> {
+        // Idempotent: already closed is not an error
+        if !self.opened.load(Ordering::SeqCst) {
+            return Ok(());
+        }
+
+        if let Err(e) = self.capture_off() {
+            tracing::warn!(
+                "Video capture off failed during close (best-effort, continuing): {}",
+                e
+            );
+        }
+
+        let mut guard = self.handle.write();
+        let _old_handle = guard.take(); // Drop triggers RAII cleanup
+        self.opened.store(false, Ordering::SeqCst);
+        self.capture_started.store(false, Ordering::SeqCst);
+
+        tracing::info!("Video input device closed");
+        Ok(())
+    }
 }
 
 #[async_trait]
@@ -764,25 +1158,7 @@ impl VideoInput for AnykaVideoInput {
     /// This operation is idempotent — calling close on an already-closed device
     /// returns `Ok(())`.
     async fn close(&self) -> PlatformResult<()> {
-        // Idempotent: already closed is not an error
-        if !self.opened.load(Ordering::SeqCst) {
-            return Ok(());
-        }
-
-        if let Err(e) = self.capture_off() {
-            tracing::warn!(
-                "Video capture off failed during close (best-effort, continuing): {}",
-                e
-            );
-        }
-
-        let mut guard = self.handle.write();
-        let _old_handle = guard.take(); // Drop triggers RAII cleanup
-        self.opened.store(false, Ordering::SeqCst);
-        self.capture_started.store(false, Ordering::SeqCst);
-
-        tracing::info!("Video input device closed");
-        Ok(())
+        self.close_blocking()
     }
 
     /// Get the native sensor resolution from the hardware.
@@ -887,6 +1263,71 @@ fn sdk_frame_type_to_frame_type(ft: crate::ffi::video_frame_type) -> FrameType {
     }
 }
 
+const SDK_ERROR_NO_DATA: i32 = 23;
+#[cfg(test)]
+const NO_DATA_IDR_RECOVERY_EVERY_ERRORS: u32 = 3;
+#[cfg(not(test))]
+const NO_DATA_IDR_RECOVERY_EVERY_ERRORS: u32 = 100;
+const PIPELINE_READINESS_POLL_MS: u64 = 25;
+
+#[derive(Default)]
+struct StreamHealthCounters {
+    main_frames: AtomicU64,
+    sub_frames: AtomicU64,
+    main_no_data_errors: AtomicU64,
+    sub_no_data_errors: AtomicU64,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct StreamHealthSnapshot {
+    main_frames: u64,
+    sub_frames: u64,
+    main_no_data_errors: u64,
+    sub_no_data_errors: u64,
+}
+
+impl StreamHealthCounters {
+    fn reset(&self) {
+        self.main_frames.store(0, Ordering::SeqCst);
+        self.sub_frames.store(0, Ordering::SeqCst);
+        self.main_no_data_errors.store(0, Ordering::SeqCst);
+        self.sub_no_data_errors.store(0, Ordering::SeqCst);
+    }
+
+    fn record_frame(&self, stream_id: StreamId) {
+        match stream_id {
+            StreamId::VideoMain => {
+                self.main_frames.fetch_add(1, Ordering::SeqCst);
+            }
+            StreamId::VideoSub => {
+                self.sub_frames.fetch_add(1, Ordering::SeqCst);
+            }
+            StreamId::Audio => {}
+        }
+    }
+
+    fn record_no_data_error(&self, stream_id: StreamId) {
+        match stream_id {
+            StreamId::VideoMain => {
+                self.main_no_data_errors.fetch_add(1, Ordering::SeqCst);
+            }
+            StreamId::VideoSub => {
+                self.sub_no_data_errors.fetch_add(1, Ordering::SeqCst);
+            }
+            StreamId::Audio => {}
+        }
+    }
+
+    fn snapshot(&self) -> StreamHealthSnapshot {
+        StreamHealthSnapshot {
+            main_frames: self.main_frames.load(Ordering::SeqCst),
+            sub_frames: self.sub_frames.load(Ordering::SeqCst),
+            main_no_data_errors: self.main_no_data_errors.load(Ordering::SeqCst),
+            sub_no_data_errors: self.sub_no_data_errors.load(Ordering::SeqCst),
+        }
+    }
+}
+
 /// Polling loop that reads encoded frames from the SDK and invokes callbacks.
 ///
 /// This runs on a dedicated `std::thread` (NOT tokio) because `ak_venc_get_stream()`
@@ -900,115 +1341,163 @@ fn frame_read_loop(
     stream_id: StreamId,
     callbacks: Arc<RwLock<HashMap<CallbackId, Arc<dyn FrameCallback>>>>,
     stop_signal: Arc<AtomicBool>,
+    stream_health: Arc<StreamHealthCounters>,
+    recovery_encoder_handle_addr: Option<usize>,
 ) {
     use crate::ffi::AK_SUCCESS_I32;
 
-    tracing::info!(stream = ?stream_id, "Frame read loop started");
+    // Configurable poll sleep between drain cycles (vendor default: 30ms).
+    let poll_sleep_ms = env_var_u64("ANYKA_FRAME_POLL_SLEEP_MS").unwrap_or(30);
 
-    // Allow the SDK's internal encoder thread to initialize before polling.
-    // The C reference (platform_anyka.c:2673) uses PLATFORM_DELAY_MS_MEDIUM (100ms).
-    std::thread::sleep(Duration::from_millis(100));
+    tracing::info!(
+        stream = ?stream_id,
+        poll_sleep_ms,
+        "Frame read loop started (drain-loop pattern)"
+    );
 
-    let mut consecutive_errors: u32 = 0;
+    let mut consecutive_no_data: u32 = 0;
     let mut frame_count: u64 = 0;
     let mut total_bytes: u64 = 0;
     let mut iframe_count: u64 = 0;
     let mut error_count: u64 = 0;
 
     while !stop_signal.load(Ordering::SeqCst) {
-        let mut stream = std::mem::MaybeUninit::<video_stream>::uninit();
+        // ── Drain all available frames (vendor pattern) ──────────────
+        // The Anyka SDK's venc_get_stream() is non-blocking: it returns
+        // immediately with an error when stream_list is empty. The vendor
+        // reference drains all buffered frames in a tight loop, then sleeps
+        // a fixed interval before the next drain cycle.
+        let mut frames_this_cycle: u32 = 0;
 
-        // Blocking call — waits until a frame is available or error
-        let ret = ffi.venc_get_stream(stream_handle.as_ptr(), stream.as_mut_ptr());
-
-        if ret != AK_SUCCESS_I32 {
+        loop {
             if stop_signal.load(Ordering::SeqCst) {
                 break;
             }
-            consecutive_errors += 1;
-            error_count += 1;
-            // Log SDK error details on first error and every 50th consecutive error
-            // to avoid flooding logs while still providing diagnostics.
-            if consecutive_errors == 1 || consecutive_errors.is_multiple_of(50) {
+
+            let mut stream = std::mem::MaybeUninit::<video_stream>::uninit();
+            let ret = ffi.venc_get_stream(stream_handle.as_ptr(), stream.as_mut_ptr());
+
+            if ret != AK_SUCCESS_I32 {
+                // No more frames available in this drain cycle.
                 let sdk_errno = ffi.get_error_no();
-                let sdk_errstr = ffi.get_error_str();
-                tracing::warn!(
+                if sdk_errno == SDK_ERROR_NO_DATA {
+                    consecutive_no_data += 1;
+                    stream_health.record_no_data_error(stream_id);
+
+                    if consecutive_no_data.is_multiple_of(NO_DATA_IDR_RECOVERY_EVERY_ERRORS)
+                        && let Some(handle_addr) = recovery_encoder_handle_addr
+                    {
+                        let idr_ret = ffi.venc_set_iframe(handle_addr as *mut std::ffi::c_void);
+                        if idr_ret == AK_SUCCESS_I32 {
+                            tracing::warn!(
+                                stream = ?stream_id,
+                                consecutive_no_data,
+                                recovery_interval = NO_DATA_IDR_RECOVERY_EVERY_ERRORS,
+                                "Sustained no-data detected; requested IDR recovery frame"
+                            );
+                        } else {
+                            tracing::warn!(
+                                stream = ?stream_id,
+                                consecutive_no_data,
+                                recovery_interval = NO_DATA_IDR_RECOVERY_EVERY_ERRORS,
+                                idr_error_code = idr_ret,
+                                "Sustained no-data detected; IDR recovery request failed"
+                            );
+                        }
+                    }
+                } else {
+                    error_count += 1;
+                    // Log non-no-data errors on first occurrence and every 50th
+                    if error_count == 1 || error_count.is_multiple_of(50) {
+                        let sdk_errstr = ffi.get_error_str();
+                        tracing::warn!(
+                            stream = ?stream_id,
+                            error_code = ret,
+                            sdk_errno,
+                            sdk_error = %sdk_errstr,
+                            "venc_get_stream failed (non-no-data error)"
+                        );
+                    }
+                }
+                break; // Exit inner drain loop
+            }
+
+            // Reset no-data counter on successful frame retrieval
+            consecutive_no_data = 0;
+
+            // SAFETY: venc_get_stream succeeded, so `stream` is fully initialized
+            let mut stream_data = unsafe { stream.assume_init() };
+
+            if !stream_data.data.is_null() && stream_data.len > 0 {
+                let frame_type = sdk_frame_type_to_frame_type(stream_data.frame_type);
+                let frame_size = stream_data.len as usize;
+
+                tracing::trace!(
                     stream = ?stream_id,
-                    error_code = ret,
-                    consecutive_errors,
-                    sdk_errno,
-                    sdk_error = %sdk_errstr,
-                    "venc_get_stream failed"
+                    size = frame_size,
+                    timestamp_ms = stream_data.ts,
+                    frame_type = ?frame_type,
+                    "Frame retrieved from SDK"
+                );
+
+                frame_count += 1;
+                frames_this_cycle += 1;
+                stream_health.record_frame(stream_id);
+                total_bytes += frame_size as u64;
+                if matches!(frame_type, FrameType::VideoIFrame) {
+                    iframe_count += 1;
+                }
+
+                // Periodic summary every 300 frames (~10s at 30fps)
+                if frame_count.is_multiple_of(300) {
+                    tracing::debug!(
+                        stream = ?stream_id,
+                        frames = frame_count,
+                        total_bytes,
+                        iframes = iframe_count,
+                        errors = error_count,
+                        "Frame read loop progress"
+                    );
+                }
+
+                let frame = Frame {
+                    data: stream_data.data as *const u8,
+                    size: frame_size,
+                    // SDK timestamps are in milliseconds; Frame uses microseconds
+                    timestamp: stream_data.ts.wrapping_mul(1000),
+                    frame_type,
+                    stream_id,
+                };
+
+                // Invoke all callbacks (panic-isolated)
+                invoke_callbacks_from_map(&callbacks, &frame);
+            } else {
+                tracing::trace!(
+                    stream = ?stream_id,
+                    data_null = stream_data.data.is_null(),
+                    len = stream_data.len,
+                    "Frame skipped: null data or zero length"
                 );
             }
-            // Exponential backoff: 10ms → 20ms → 40ms → 80ms → 100ms max.
-            // The C reference uses base 50ms with 2x backoff up to 200ms.
-            let delay = std::cmp::min(10u64 * (1u64 << consecutive_errors.min(3)), 100);
-            std::thread::sleep(Duration::from_millis(delay));
-            continue;
+
+            // Release the SDK buffer back to the encoder.
+            // SAFETY: We pass back the same stream struct that get_stream populated.
+            // The data pointer is owned by the SDK and must be returned.
+            // This MUST happen even during shutdown to avoid leaking SDK buffers.
+            let _ = ffi.venc_release_stream(stream_handle.as_ptr(), &mut stream_data);
+            tracing::trace!(stream = ?stream_id, "SDK buffer released");
         }
 
-        consecutive_errors = 0;
-
-        // SAFETY: venc_get_stream succeeded, so `stream` is fully initialized
-        let mut stream_data = unsafe { stream.assume_init() };
-
-        if !stream_data.data.is_null() && stream_data.len > 0 {
-            let frame_type = sdk_frame_type_to_frame_type(stream_data.frame_type);
-            let frame_size = stream_data.len as usize;
-
+        if frames_this_cycle > 0 {
             tracing::trace!(
                 stream = ?stream_id,
-                size = frame_size,
-                timestamp_ms = stream_data.ts,
-                frame_type = ?frame_type,
-                "Frame retrieved from SDK"
-            );
-
-            frame_count += 1;
-            total_bytes += frame_size as u64;
-            if matches!(frame_type, FrameType::VideoIFrame) {
-                iframe_count += 1;
-            }
-
-            // Periodic summary every 300 frames (~10s at 30fps)
-            if frame_count.is_multiple_of(300) {
-                tracing::debug!(
-                    stream = ?stream_id,
-                    frames = frame_count,
-                    total_bytes,
-                    iframes = iframe_count,
-                    errors = error_count,
-                    "Frame read loop progress"
-                );
-            }
-
-            let frame = Frame {
-                data: stream_data.data as *const u8,
-                size: frame_size,
-                // SDK timestamps are in milliseconds; Frame uses microseconds
-                timestamp: stream_data.ts.wrapping_mul(1000),
-                frame_type,
-                stream_id,
-            };
-
-            // Invoke all callbacks (panic-isolated)
-            invoke_callbacks_from_map(&callbacks, &frame);
-        } else {
-            tracing::trace!(
-                stream = ?stream_id,
-                data_null = stream_data.data.is_null(),
-                len = stream_data.len,
-                "Frame skipped: null data or zero length"
+                frames_this_cycle,
+                "Drain cycle complete"
             );
         }
 
-        // Release the SDK buffer back to the encoder.
-        // SAFETY: We pass back the same stream struct that get_stream populated.
-        // The data pointer is owned by the SDK and must be returned.
-        // This MUST happen even during shutdown to avoid leaking SDK buffers.
-        let _ = ffi.venc_release_stream(stream_handle.as_ptr(), &mut stream_data);
-        tracing::trace!(stream = ?stream_id, "SDK buffer released");
+        // Fixed sleep between drain cycles (vendor pattern: 30ms)
+        std::thread::sleep(Duration::from_millis(poll_sleep_ms));
     }
 
     tracing::info!(
@@ -1101,41 +1590,55 @@ struct AnykaVideoEncoder {
     main_read_thread: RwLock<Option<std::thread::JoinHandle<()>>>,
     sub_read_thread: RwLock<Option<std::thread::JoinHandle<()>>>,
     stop_signal: Arc<AtomicBool>,
+    stream_health: Arc<StreamHealthCounters>,
+    unsafe_shutdown_required: AtomicBool,
 }
 
+#[cfg(test)]
+const STREAM_THREAD_JOIN_TIMEOUT: Duration = Duration::from_millis(50);
+#[cfg(not(test))]
+const STREAM_THREAD_JOIN_TIMEOUT: Duration = Duration::from_secs(3);
+/// Grace period after setting `stop_signal` before cancelling streams.
+/// Gives non-stuck reader threads time to check `stop_signal` and exit the
+/// drain loop naturally. Dana vendor uses 20ms; we use 50ms for ~1.5 poll
+/// cycles at the default 30ms sleep interval.
+#[cfg(test)]
+const CANCEL_GRACE_PERIOD: Duration = Duration::from_millis(5);
+#[cfg(not(test))]
+const CANCEL_GRACE_PERIOD: Duration = Duration::from_millis(50);
+
 /// Join a thread with a timeout. Returns `true` if the thread completed (success or
-/// panic), `false` if the join timed out. On timeout the helper thread is detached
-/// via `std::mem::forget` — we cannot force-kill a thread stuck in kernel I/O.
+/// panic), otherwise returns the original join handle so caller can retry after an
+/// emergency unblock action.
 fn join_thread_with_timeout(
     thread: std::thread::JoinHandle<()>,
     name: &str,
     timeout: Duration,
-) -> bool {
-    let (tx, rx) = std::sync::mpsc::channel();
-    let join_thread = std::thread::spawn(move || {
-        let result = thread.join();
-        let _ = tx.send(result);
-    });
-    match rx.recv_timeout(timeout) {
-        Ok(Ok(())) => {
-            tracing::info!("Thread '{}' joined successfully", name);
-            true
-        }
-        Ok(Err(e)) => {
-            tracing::warn!("Thread '{}' panicked: {:?}", name, e);
-            true
-        }
-        Err(_) => {
+) -> Result<(), std::thread::JoinHandle<()>> {
+    let start = std::time::Instant::now();
+    let thread = thread;
+    while !thread.is_finished() {
+        if start.elapsed() >= timeout {
             tracing::error!(
                 "Thread '{}' join timed out after {:?} — thread may be stuck in kernel I/O",
                 name,
                 timeout
             );
-            // Detach — we cannot force-kill a stuck thread
-            std::mem::forget(join_thread);
-            false
+            return Err(thread);
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+
+    match thread.join() {
+        Ok(()) => {
+            tracing::info!("Thread '{}' joined successfully", name);
+        }
+        Err(e) => {
+            tracing::warn!("Thread '{}' panicked: {:?}", name, e);
         }
     }
+
+    Ok(())
 }
 
 impl AnykaVideoEncoder {
@@ -1186,6 +1689,109 @@ impl AnykaVideoEncoder {
             main_read_thread: RwLock::new(None),
             sub_read_thread: RwLock::new(None),
             stop_signal: Arc::new(AtomicBool::new(false)),
+            stream_health: Arc::new(StreamHealthCounters::default()),
+            unsafe_shutdown_required: AtomicBool::new(false),
+        }
+    }
+
+    fn mark_unsafe_shutdown(&self, reason: &str) {
+        let first = !self.unsafe_shutdown_required.swap(true, Ordering::SeqCst);
+        if first {
+            tracing::error!(
+                reason = reason,
+                "Unsafe video teardown detected; hard process termination required"
+            );
+        } else {
+            tracing::error!(
+                reason = reason,
+                "Unsafe video teardown already active; preserving hard-exit requirement"
+            );
+        }
+    }
+
+    fn leak_stream_handles_for_hard_shutdown(&self) {
+        if let Some(handle) = self.main_stream_handle.write().take() {
+            std::mem::forget(handle);
+        }
+        if let Some(handle) = self.sub_stream_handle.write().take() {
+            std::mem::forget(handle);
+        }
+    }
+
+    fn leak_encoder_handles_for_hard_shutdown(&self) {
+        if let Some(handle) = self.main_handle.write().take() {
+            *self.main_state.write() = EncoderState::Uninitialized;
+            std::mem::forget(handle);
+        }
+        if let Some(handle) = self.sub_handle.write().take() {
+            *self.sub_state.write() = EncoderState::Uninitialized;
+            std::mem::forget(handle);
+        }
+    }
+
+    fn fail_fast_to_hard_shutdown(&self, reason: impl Into<String>) -> PlatformError {
+        let reason = reason.into();
+        self.mark_unsafe_shutdown(&reason);
+        self.leak_stream_handles_for_hard_shutdown();
+        self.leak_encoder_handles_for_hard_shutdown();
+        PlatformError::HardwareFailure(format!("unsafe teardown required: {}", reason))
+    }
+
+    fn requires_hard_shutdown(&self) -> bool {
+        self.unsafe_shutdown_required.load(Ordering::SeqCst)
+    }
+
+    fn sync_configurations_to_channel_layout(&self, main: Resolution, sub: Resolution) {
+        let mut configs = self.configurations.write();
+        for cfg in configs.iter_mut() {
+            match cfg.token.as_str() {
+                "VideoEncoder_1" => cfg.resolution = main,
+                "VideoEncoder_2" => cfg.resolution = sub,
+                _ => {}
+            }
+        }
+        tracing::info!(
+            "Aligned encoder configurations to VI layout: main={}x{}, sub={}x{}",
+            main.width,
+            main.height,
+            sub.width,
+            sub.height
+        );
+    }
+
+    fn wait_for_stream_readiness(
+        &self,
+        timeout: Duration,
+        require_sub: bool,
+    ) -> PlatformResult<()> {
+        let started = Instant::now();
+        loop {
+            let health = self.stream_health.snapshot();
+            if health.main_frames > 0 && (!require_sub || health.sub_frames > 0) {
+                if health.sub_frames == 0 {
+                    tracing::warn!(
+                        "VI/VENC readiness check passed on main stream only (sub stream has no frames)"
+                    );
+                } else {
+                    tracing::info!(
+                        "VI/VENC readiness check passed: main_frames={}, sub_frames={}",
+                        health.main_frames,
+                        health.sub_frames
+                    );
+                }
+                return Ok(());
+            }
+            if started.elapsed() >= timeout {
+                return Err(PlatformError::InitializationFailed(format!(
+                    "VI/VENC pipeline readiness timeout after {:?}: main_frames={}, sub_frames={}, main_no_data_errors={}, sub_no_data_errors={}",
+                    timeout,
+                    health.main_frames,
+                    health.sub_frames,
+                    health.main_no_data_errors,
+                    health.sub_no_data_errors
+                )));
+            }
+            std::thread::sleep(Duration::from_millis(PIPELINE_READINESS_POLL_MS));
         }
     }
 
@@ -1299,8 +1905,17 @@ impl AnykaVideoEncoder {
         sub_enc: Option<&Arc<VideoEncoderHandle>>,
     ) -> PlatformResult<()> {
         self.stop_signal.store(false, Ordering::SeqCst);
+        self.stream_health.reset();
 
-        // Request main stream
+        // ── Phase 1: Request all streams (no reader threads yet) ─────────
+        //
+        // The vendor reference (ak_onvif_demo.c:498-541) requests ALL streams
+        // before reading from any of them. This avoids a race condition where
+        // venc_get_stream() (called by a reader thread) iterates the SDK's
+        // internal venc_list under `cancel_mutex` while venc_request_stream()
+        // modifies that same list under a different lock (`cancel_lock`).
+
+        // 1a. Request main stream
         let main_sh = Arc::new(VideoStreamHandle::new(
             vi_handle.as_ptr(),
             main_enc.as_ptr(),
@@ -1308,30 +1923,66 @@ impl AnykaVideoEncoder {
         )?);
         *self.main_stream_handle.write() = Some(Arc::clone(&main_sh));
 
-        // Force the first encoded frame to be an I-frame. The C reference
-        // (dana_av.c:298) always calls ak_venc_set_iframe() immediately after
-        // ak_venc_request_stream() — this appears necessary to kick-start the
-        // encoder pipeline; without it, venc_get_stream() returns -1 indefinitely.
+        // 1b. Force initial I-frame for main encoder (dana_av.c:298 pattern)
         if let Err(e) = video_encoder_request_idr_internal(main_enc, self.ffi.as_ref()) {
             tracing::warn!("Failed to set initial I-frame for main stream: {}", e);
         }
+        tracing::debug!("Main stream requested and IDR kicked");
 
-        // Allow the SDK encoder process thread to start up before we poll.
-        // The C reference (platform_anyka.c:609) uses PLATFORM_DELAY_MS_RETRY (200ms)
-        // for post-capture/post-request stabilization.
-        std::thread::sleep(Duration::from_millis(200));
-        tracing::debug!("Main stream stabilization delay complete (200ms)");
+        // 1c. Request sub stream (if encoder exists)
+        let sub_sh = if let Some(sub) = sub_enc {
+            let sh = Arc::new(VideoStreamHandle::new(
+                vi_handle.as_ptr(),
+                sub.as_ptr(),
+                Arc::clone(&self.ffi),
+            )?);
+            *self.sub_stream_handle.write() = Some(Arc::clone(&sh));
 
-        // Spawn main read thread
+            // 1d. Force initial I-frame for sub encoder
+            if let Err(e) = video_encoder_request_idr_internal(sub, self.ffi.as_ref()) {
+                tracing::warn!("Failed to set initial I-frame for sub stream: {}", e);
+            }
+            tracing::debug!("Sub stream requested and IDR kicked");
+            Some(sh)
+        } else {
+            None
+        };
+
+        // ── Phase 2: Single stabilization delay ─────────────────────────
+        //
+        // Both encoders are now requested and IDR-kicked. Give the ISP/encoder
+        // pipeline time to produce the first frames. Configurable via env var
+        // for on-device tuning; default 300ms exceeds the vendor's recommended
+        // PLATFORM_DELAY_MS_RETRY (200ms) stabilization window.
+        let stabilization_ms = env_var_u64("ANYKA_STREAM_STABILIZATION_MS").unwrap_or(300);
+        std::thread::sleep(Duration::from_millis(stabilization_ms));
+        tracing::debug!(stabilization_ms, "Stream stabilization delay complete");
+
+        // ── Phase 3: Spawn reader threads ────────────────────────────────
+        //
+        // All stream requests are complete — safe to start reading without
+        // racing against venc_request_stream modifications.
+
+        // 3a. Spawn main read thread
         let main_thread = {
             let ffi = Arc::clone(&self.ffi);
             let callbacks = Arc::clone(&self.callbacks_arc());
             let stop = Arc::clone(&self.stop_signal);
+            let stream_health = Arc::clone(&self.stream_health);
             let sh = Arc::clone(&main_sh);
+            let main_enc_addr = main_enc.as_ptr() as usize;
             std::thread::Builder::new()
                 .name("venc-main-read".to_string())
                 .spawn(move || {
-                    frame_read_loop(sh, ffi, StreamId::VideoMain, callbacks, stop);
+                    frame_read_loop(
+                        sh,
+                        ffi,
+                        StreamId::VideoMain,
+                        callbacks,
+                        stop,
+                        stream_health,
+                        Some(main_enc_addr),
+                    );
                 })
                 .map_err(|e| {
                     PlatformError::InitializationFailed(format!(
@@ -1343,33 +1994,28 @@ impl AnykaVideoEncoder {
         *self.main_read_thread.write() = Some(main_thread);
         tracing::info!("Main stream reader thread started");
 
-        // Request sub stream (if encoder exists)
-        if let Some(sub) = sub_enc {
-            let sub_sh = Arc::new(VideoStreamHandle::new(
-                vi_handle.as_ptr(),
-                sub.as_ptr(),
-                Arc::clone(&self.ffi),
-            )?);
-            *self.sub_stream_handle.write() = Some(Arc::clone(&sub_sh));
-
-            // Force initial I-frame for sub stream (same rationale as main stream above).
-            if let Err(e) = video_encoder_request_idr_internal(sub, self.ffi.as_ref()) {
-                tracing::warn!("Failed to set initial I-frame for sub stream: {}", e);
-            }
-
-            // Same stabilization delay as main stream (see above).
-            std::thread::sleep(Duration::from_millis(200));
-            tracing::debug!("Sub stream stabilization delay complete (200ms)");
-
+        // 3b. Spawn sub read thread (if sub stream was requested)
+        if let Some(sub_sh) = sub_sh {
+            let sub = sub_enc.expect("sub_sh exists implies sub_enc exists");
             let sub_thread = {
                 let ffi = Arc::clone(&self.ffi);
                 let callbacks = Arc::clone(&self.callbacks_arc());
                 let stop = Arc::clone(&self.stop_signal);
+                let stream_health = Arc::clone(&self.stream_health);
                 let sh = Arc::clone(&sub_sh);
+                let sub_enc_addr = sub.as_ptr() as usize;
                 std::thread::Builder::new()
                     .name("venc-sub-read".to_string())
                     .spawn(move || {
-                        frame_read_loop(sh, ffi, StreamId::VideoSub, callbacks, stop);
+                        frame_read_loop(
+                            sh,
+                            ffi,
+                            StreamId::VideoSub,
+                            callbacks,
+                            stop,
+                            stream_health,
+                            Some(sub_enc_addr),
+                        );
                     })
                     .map_err(|e| {
                         PlatformError::InitializationFailed(format!(
@@ -1385,67 +2031,107 @@ impl AnykaVideoEncoder {
         Ok(())
     }
 
-    /// Stop streaming by quiescing readers first, then cancelling stream handles.
+    /// Stop all frame-read threads and cancel the active video streams.
     ///
-    /// Vendor SDK contract (`ak_venc_cancel_stream`) requires no concurrent
-    /// `ak_venc_get_stream` calls while cancelling. We therefore signal stop,
-    /// join reader threads, and only then call cancel. If threads fail to join,
-    /// we still attempt a timed cancel as a best-effort fallback.
-    pub fn stop_streaming(&self) {
+    /// **Cancel-first ordering** (matching vendor SDK pattern):
+    ///   1. Set `stop_signal` — cooperative exit for non-stuck threads
+    ///   2. Sleep `CANCEL_GRACE_PERIOD` — non-stuck threads exit naturally
+    ///   3. `cancel_stream` — stops SDK internal threads, unblocks `get_stream`
+    ///   4. Join reader threads — should complete quickly after cancel
+    ///   5. Drop stream handles
+    ///
+    /// If cancel fails or join times out after cancel, we fail fast into
+    /// unsafe teardown mode requiring process termination.
+    pub fn stop_streaming(&self) -> PlatformResult<()> {
+        if self.requires_hard_shutdown() {
+            return Err(PlatformError::HardwareFailure(
+                "unsafe teardown required: previous shutdown failure".to_string(),
+            ));
+        }
+
+        // Phase 1: Signal stop and give non-stuck threads a grace period to exit.
         tracing::info!("stop_streaming: signalling stop...");
         self.stop_signal.store(true, Ordering::SeqCst);
+        std::thread::sleep(CANCEL_GRACE_PERIOD);
 
-        let main_stream_handle = self.main_stream_handle.read().clone();
-        let sub_stream_handle = self.sub_stream_handle.read().clone();
+        let mut main_stream_handle = self.main_stream_handle.read().clone();
+        let mut sub_stream_handle = self.sub_stream_handle.read().clone();
 
-        // Join threads first so we do not cancel while `venc_get_stream()` is in-flight.
-        let main_joined = if let Some(thread) = self.main_read_thread.write().take() {
-            tracing::info!("stop_streaming: joining main read thread...");
-            join_thread_with_timeout(thread, "main-read", Duration::from_secs(3))
-        } else {
-            true
-        };
-        let sub_joined = if let Some(thread) = self.sub_read_thread.write().take() {
-            tracing::info!("stop_streaming: joining sub read thread...");
-            join_thread_with_timeout(thread, "sub-read", Duration::from_secs(3))
-        } else {
-            true
-        };
-
-        // Timed cancel prevents a shutdown hang when the vendor call blocks.
-        if let Some(handle) = main_stream_handle {
+        // Phase 2: Cancel streams — stops SDK internal threads and unblocks
+        // any reader stuck in ak_venc_get_stream().
+        if let Some(ref handle) = main_stream_handle {
             tracing::info!("stop_streaming: cancelling main stream...");
-            if !main_joined {
-                tracing::warn!(
-                    "stop_streaming: main read thread did not join before cancel; forcing timed cancel"
+            if let Err(e) = handle.cancel_blocking() {
+                if let Some(handle) = main_stream_handle.take() {
+                    std::mem::forget(handle);
+                }
+                if let Some(handle) = sub_stream_handle.take() {
+                    std::mem::forget(handle);
+                }
+                return Err(
+                    self.fail_fast_to_hard_shutdown(format!("main stream cancel failed: {}", e))
                 );
             }
-            if handle.cancel_with_timeout(Duration::from_secs(2)) {
-                tracing::info!("stop_streaming: main stream cancelled");
-            } else {
-                tracing::error!("stop_streaming: main stream cancel timed out");
+            tracing::info!("stop_streaming: main stream cancelled");
+        }
+        if let Some(ref handle) = sub_stream_handle {
+            tracing::info!("stop_streaming: cancelling sub stream...");
+            if let Err(e) = handle.cancel_blocking() {
+                if let Some(handle) = main_stream_handle.take() {
+                    std::mem::forget(handle);
+                }
+                if let Some(handle) = sub_stream_handle.take() {
+                    std::mem::forget(handle);
+                }
+                return Err(
+                    self.fail_fast_to_hard_shutdown(format!("sub stream cancel failed: {}", e))
+                );
+            }
+            tracing::info!("stop_streaming: sub stream cancelled");
+        }
+
+        // Phase 3: Join reader threads — should complete quickly now that
+        // cancel has unblocked any stuck SDK calls.
+        if let Some(thread) = self.main_read_thread.write().take() {
+            tracing::info!("stop_streaming: joining main read thread...");
+            if let Err(_thread) =
+                join_thread_with_timeout(thread, "main-read", STREAM_THREAD_JOIN_TIMEOUT)
+            {
+                if let Some(handle) = main_stream_handle.take() {
+                    std::mem::forget(handle);
+                }
+                if let Some(handle) = sub_stream_handle.take() {
+                    std::mem::forget(handle);
+                }
+                return Err(self.fail_fast_to_hard_shutdown(
+                    "reader thread join timeout after cancel (possible blocked kernel I/O)",
+                ));
             }
         }
-        if let Some(handle) = sub_stream_handle {
-            tracing::info!("stop_streaming: cancelling sub stream...");
-            if !sub_joined {
-                tracing::warn!(
-                    "stop_streaming: sub read thread did not join before cancel; forcing timed cancel"
-                );
-            }
-            if handle.cancel_with_timeout(Duration::from_secs(2)) {
-                tracing::info!("stop_streaming: sub stream cancelled");
-            } else {
-                tracing::error!("stop_streaming: sub stream cancel timed out");
+        if let Some(thread) = self.sub_read_thread.write().take() {
+            tracing::info!("stop_streaming: joining sub read thread...");
+            if let Err(_thread) =
+                join_thread_with_timeout(thread, "sub-read", STREAM_THREAD_JOIN_TIMEOUT)
+            {
+                if let Some(handle) = main_stream_handle.take() {
+                    std::mem::forget(handle);
+                }
+                if let Some(handle) = sub_stream_handle.take() {
+                    std::mem::forget(handle);
+                }
+                return Err(self.fail_fast_to_hard_shutdown(
+                    "reader thread join timeout after cancel (possible blocked kernel I/O)",
+                ));
             }
         }
 
-        // Drop stream handles (threads are done, RAII Drop is now a no-op due to cancelled flag).
+        // Phase 4: Drop stream handles (cancel already completed).
         tracing::info!("stop_streaming: dropping stream handles...");
         let _ = self.main_stream_handle.write().take();
         let _ = self.sub_stream_handle.write().take();
 
         tracing::info!("Streaming stopped");
+        Ok(())
     }
 
     /// Get a cloned `Arc` reference to the callbacks map for thread sharing.
@@ -1478,10 +2164,22 @@ impl AnykaVideoEncoder {
     /// This is used for initialization rollback when one encoder fails after
     /// previous encoders have been successfully opened.
     fn close_encoder(&self, token: &str) -> PlatformResult<()> {
+        if self.requires_hard_shutdown() {
+            return Err(PlatformError::HardwareFailure(
+                "unsafe teardown required: skipping encoder close".to_string(),
+            ));
+        }
+
         match token {
             "VideoEncoder_1" => {
                 let old_handle = self.main_handle.write().take();
-                if old_handle.is_some() {
+                if let Some(handle) = old_handle {
+                    if let Err(e) = handle.close_blocking_with_ffi(self.ffi.as_ref()) {
+                        return Err(self.fail_fast_to_hard_shutdown(format!(
+                            "main encoder close failed: {}",
+                            e
+                        )));
+                    }
                     *self.main_state.write() = EncoderState::Uninitialized;
                     tracing::info!("Closed video encoder token={}", token);
                 }
@@ -1489,7 +2187,13 @@ impl AnykaVideoEncoder {
             }
             "VideoEncoder_2" => {
                 let old_handle = self.sub_handle.write().take();
-                if old_handle.is_some() {
+                if let Some(handle) = old_handle {
+                    if let Err(e) = handle.close_blocking_with_ffi(self.ffi.as_ref()) {
+                        return Err(self.fail_fast_to_hard_shutdown(format!(
+                            "sub encoder close failed: {}",
+                            e
+                        )));
+                    }
                     *self.sub_state.write() = EncoderState::Uninitialized;
                     tracing::info!("Closed video encoder token={}", token);
                 }
@@ -1503,6 +2207,11 @@ impl AnykaVideoEncoder {
     }
 
     fn close_all_encoders(&self) -> PlatformResult<()> {
+        if self.requires_hard_shutdown() {
+            return Err(PlatformError::HardwareFailure(
+                "unsafe teardown required: skipping encoder close".to_string(),
+            ));
+        }
         self.close_encoder("VideoEncoder_2")?;
         self.close_encoder("VideoEncoder_1")?;
         Ok(())
@@ -2338,6 +3047,48 @@ mod tests {
             .returning(|_, _| AK_SUCCESS_I32);
 
         let vi = AnykaVideoInput::with_ffi(Arc::new(mock), None);
+        vi.open().await.unwrap();
+
+        let result = vi.set_channel_attr();
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_video_input_set_channel_attr_sensor_native_matches_anyka_reference() {
+        let mut mock = mock_ffi_with_successful_open();
+        mock.expect_vi_get_sensor_resolution()
+            .times(1)
+            .returning(|_, res| {
+                unsafe {
+                    (*res).width = 1920;
+                    (*res).height = 1080;
+                    (*res).max_width = 1920;
+                    (*res).max_height = 1080;
+                }
+                AK_SUCCESS_I32
+            });
+        mock.expect_vi_set_channel_attr()
+            .times(1)
+            .returning(|_, attr| {
+                unsafe {
+                    // Anyka reference onvif_demo uses main=sensor and sub=640x480.
+                    assert_eq!((*attr).res[0].width, 1920);
+                    assert_eq!((*attr).res[0].height, 1080);
+                    assert_eq!((*attr).res[1].width, 640);
+                    assert_eq!((*attr).res[1].height, 480);
+                    assert_eq!((*attr).res[0].max_width, 1920);
+                    assert_eq!((*attr).res[0].max_height, 1080);
+                    assert_eq!((*attr).res[1].max_width, 640);
+                    assert_eq!((*attr).res[1].max_height, 480);
+                }
+                AK_SUCCESS_I32
+            });
+
+        let vi = AnykaVideoInput::with_ffi_and_mode(
+            Arc::new(mock),
+            None,
+            ViChannelAttrMode::SensorNative,
+        );
         vi.open().await.unwrap();
 
         let result = vi.set_channel_attr();
@@ -3366,23 +4117,31 @@ mod tests {
         let frame_data: Vec<u8> = vec![0xAB; 100];
         let frame_data_ptr = frame_data.as_ptr() as usize;
 
-        // First call: return a frame, then signal stop
-        let mut seq = mockall::Sequence::new();
+        // Drain-loop pattern: first call returns a frame (sets stop signal),
+        // second call returns failure to break inner drain loop.
+        let call_idx = Arc::new(AtomicUsize::new(0));
+        let call_idx_clone = Arc::clone(&call_idx);
         mock.expect_venc_get_stream()
-            .times(1)
-            .in_sequence(&mut seq)
             .returning(move |_, stream_ptr| {
-                unsafe {
-                    let stream = &mut *stream_ptr;
-                    stream.data = frame_data_ptr as *mut u8;
-                    stream.len = 100;
-                    stream.ts = 5000; // ms
-                    stream.seq_no = 1;
-                    stream.frame_type = VideoFrameType::FrameTypeI;
+                let idx = call_idx_clone.fetch_add(1, Ordering::SeqCst);
+                if idx == 0 {
+                    // First call: return a frame
+                    unsafe {
+                        let stream = &mut *stream_ptr;
+                        stream.data = frame_data_ptr as *mut u8;
+                        stream.len = 100;
+                        stream.ts = 5000; // ms
+                        stream.seq_no = 1;
+                        stream.frame_type = VideoFrameType::FrameTypeI;
+                    }
+                    stop_clone.store(true, Ordering::SeqCst);
+                    AK_SUCCESS_I32
+                } else {
+                    // Subsequent calls: no more frames (breaks drain loop)
+                    crate::ffi::AK_FAILED_I32
                 }
-                stop_clone.store(true, Ordering::SeqCst);
-                AK_SUCCESS_I32
             });
+        mock.expect_get_error_no().returning(|| SDK_ERROR_NO_DATA);
 
         mock.expect_venc_release_stream()
             .times(1)
@@ -3406,7 +4165,15 @@ mod tests {
             .write()
             .insert(1, Arc::new(CountingCallback(call_count_clone)));
 
-        frame_read_loop(sh, ffi, StreamId::VideoMain, callbacks, stop);
+        frame_read_loop(
+            sh,
+            ffi,
+            StreamId::VideoMain,
+            callbacks,
+            stop,
+            Arc::new(StreamHealthCounters::default()),
+            None,
+        );
 
         assert_eq!(call_count.load(Ordering::SeqCst), 1);
         // Keep frame_data alive until after the loop
@@ -3414,14 +4181,16 @@ mod tests {
     }
 
     #[test]
-    fn test_frame_read_loop_handles_error_and_retries() {
+    fn test_frame_read_loop_handles_no_data_and_retries() {
         let mut mock = MockVideoFfiTrait::new();
         let stop = Arc::new(AtomicBool::new(false));
         let stop_clone = Arc::clone(&stop);
         let error_count = Arc::new(AtomicU32::new(0));
         let error_count_clone = Arc::clone(&error_count);
 
-        // Return errors, then signal stop after 2 errors
+        // Return no-data errors, then signal stop after 2 errors.
+        // In the drain-loop pattern, get_stream returning non-success breaks
+        // the inner loop, then the outer loop sleeps and retries.
         mock.expect_venc_get_stream().returning(move |_, _| {
             let count = error_count_clone.fetch_add(1, Ordering::SeqCst);
             if count >= 1 {
@@ -3429,6 +4198,8 @@ mod tests {
             }
             crate::ffi::AK_FAILED_I32
         });
+        // No-data errors don't call get_error_str (only non-no-data errors do)
+        mock.expect_get_error_no().returning(|| SDK_ERROR_NO_DATA);
 
         // No release_stream calls expected (errors don't produce frames)
         // Stream handle
@@ -3446,7 +4217,15 @@ mod tests {
         let callbacks: Arc<RwLock<HashMap<CallbackId, Arc<dyn FrameCallback>>>> =
             Arc::new(RwLock::new(HashMap::new()));
 
-        frame_read_loop(sh, ffi, StreamId::VideoMain, callbacks, stop);
+        frame_read_loop(
+            sh,
+            ffi,
+            StreamId::VideoMain,
+            callbacks,
+            stop,
+            Arc::new(StreamHealthCounters::default()),
+            None,
+        );
 
         // Should have retried at least twice
         assert!(error_count.load(Ordering::SeqCst) >= 2);
@@ -3478,7 +4257,15 @@ mod tests {
             Arc::new(RwLock::new(HashMap::new()));
 
         // Should return immediately
-        frame_read_loop(sh, ffi, StreamId::VideoMain, callbacks, stop);
+        frame_read_loop(
+            sh,
+            ffi,
+            StreamId::VideoMain,
+            callbacks,
+            stop,
+            Arc::new(StreamHealthCounters::default()),
+            None,
+        );
     }
 
     #[tokio::test]
@@ -3495,13 +4282,13 @@ mod tests {
         mock.expect_venc_request_stream()
             .returning(move |_, _| test_ptr as *mut c_void);
         mock.expect_venc_set_iframe()
-            .times(1)
+            .times(1..)
             .returning(|_| AK_SUCCESS_I32);
         mock.expect_venc_get_stream()
             .returning(|_, _| AK_FAILED_I32); // No frames in test
+        mock.expect_get_error_no().returning(|| SDK_ERROR_NO_DATA);
         mock.expect_venc_cancel_stream()
             .returning(|_| AK_SUCCESS_I32);
-
         let encoder = Arc::new(AnykaVideoEncoder::with_ffi(Arc::new(mock)));
 
         // Initialize main encoder
@@ -3531,7 +4318,12 @@ mod tests {
         assert!(encoder.main_read_thread.read().is_some());
 
         // Stop streaming
-        encoder.stop_streaming();
+        let stop_result = encoder.stop_streaming();
+        assert!(
+            stop_result.is_ok(),
+            "stop_streaming failed: {:?}",
+            stop_result
+        );
 
         // Verify cleanup
         assert!(encoder.main_stream_handle.read().is_none());
@@ -3539,9 +4331,189 @@ mod tests {
     }
 
     #[test]
-    fn test_frame_read_loop_initial_delay() {
-        // Verify frame_read_loop takes at least 100ms due to startup delay,
-        // even when the stop signal is already set.
+    fn test_stop_streaming_join_timeout_after_cancel_marks_unsafe() {
+        let mut mock = MockVideoFfiTrait::new();
+        let stream_ptr = std::ptr::NonNull::<c_void>::dangling().as_ptr() as usize;
+        mock.expect_venc_request_stream()
+            .times(1)
+            .returning(move |_, _| stream_ptr as *mut c_void);
+        // Cancel is called first in the new ordering.
+        mock.expect_venc_cancel_stream()
+            .times(1)
+            .returning(|_| AK_SUCCESS_I32);
+
+        let ffi: Arc<dyn crate::ffi::video::VideoFfiTrait> = Arc::new(mock);
+        let encoder = AnykaVideoEncoder::with_ffi(Arc::clone(&ffi));
+        let vi_ptr = std::ptr::NonNull::<c_void>::dangling().as_ptr();
+        let venc_ptr = std::ptr::NonNull::<c_void>::dangling().as_ptr();
+        let sh = Arc::new(VideoStreamHandle::new(vi_ptr, venc_ptr, Arc::clone(&ffi)).unwrap());
+        *encoder.main_stream_handle.write() = Some(sh);
+
+        // Simulate a reader thread stuck in kernel I/O that doesn't unblock
+        // even after cancel (e.g. blocked in a kernel ioctl).
+        let blocked = std::thread::spawn(move || {
+            // Force the thread to outlive STREAM_THREAD_JOIN_TIMEOUT in tests.
+            std::thread::sleep(Duration::from_millis(200));
+        });
+        *encoder.main_read_thread.write() = Some(blocked);
+
+        let result = encoder.stop_streaming();
+        assert!(result.is_err());
+        assert!(encoder.requires_hard_shutdown());
+        match result {
+            Err(PlatformError::HardwareFailure(msg)) => {
+                assert!(msg.contains("unsafe teardown required"));
+                assert!(msg.contains("join timeout"));
+            }
+            other => panic!("Expected unsafe teardown HardwareFailure, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_stop_streaming_cancel_failure_does_not_attempt_second_channel() {
+        let mut mock = MockVideoFfiTrait::new();
+        let mut request_seq = mockall::Sequence::new();
+        let stream_ptr_a = std::ptr::NonNull::<c_void>::dangling().as_ptr() as usize;
+        let stream_ptr_b = (stream_ptr_a.wrapping_add(16)) as *mut c_void as usize;
+
+        mock.expect_venc_request_stream()
+            .times(1)
+            .in_sequence(&mut request_seq)
+            .returning(move |_, _| stream_ptr_a as *mut c_void);
+        mock.expect_venc_request_stream()
+            .times(1)
+            .in_sequence(&mut request_seq)
+            .returning(move |_, _| stream_ptr_b as *mut c_void);
+
+        // First channel cancel fails; fail-fast should prevent sub-channel cancel.
+        mock.expect_venc_cancel_stream()
+            .times(1)
+            .returning(|_| AK_FAILED_I32);
+
+        let ffi: Arc<dyn crate::ffi::video::VideoFfiTrait> = Arc::new(mock);
+        let encoder = AnykaVideoEncoder::with_ffi(Arc::clone(&ffi));
+        let vi_ptr = std::ptr::NonNull::<c_void>::dangling().as_ptr();
+        let venc_ptr_main = std::ptr::NonNull::<c_void>::dangling().as_ptr();
+        let venc_ptr_sub = (venc_ptr_main as usize).wrapping_add(32) as *mut c_void;
+        let main = Arc::new(
+            VideoStreamHandle::new(vi_ptr, venc_ptr_main, Arc::clone(&ffi)).expect("main stream"),
+        );
+        let sub = Arc::new(
+            VideoStreamHandle::new(vi_ptr, venc_ptr_sub, Arc::clone(&ffi)).expect("sub stream"),
+        );
+        *encoder.main_stream_handle.write() = Some(main);
+        *encoder.sub_stream_handle.write() = Some(sub);
+
+        let result = encoder.stop_streaming();
+        assert!(result.is_err());
+        assert!(encoder.requires_hard_shutdown());
+    }
+
+    #[tokio::test]
+    async fn test_shutdown_order_is_cancel_then_join_then_close() {
+        let mut mock = MockVideoFfiTrait::new();
+        let mut seq = mockall::Sequence::new();
+        let enc_ptr = std::ptr::NonNull::<c_void>::dangling().as_ptr() as usize;
+        let stream_ptr = (enc_ptr.wrapping_add(64)) as *mut c_void as usize;
+
+        mock.expect_venc_set_cfg_path().times(1).returning(|_| 0);
+        mock.expect_venc_open()
+            .times(1)
+            .returning(move |_| enc_ptr as *mut c_void);
+        mock.expect_venc_request_stream()
+            .times(1)
+            .returning(move |_, _| stream_ptr as *mut c_void);
+
+        // Cancel must happen before close (cancel-first pattern).
+        mock.expect_venc_cancel_stream()
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(|_| AK_SUCCESS_I32);
+        mock.expect_venc_close()
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(|_| AK_SUCCESS_I32);
+
+        let encoder = AnykaVideoEncoder::with_ffi(Arc::new(mock));
+        let config = VideoEncoderConfig {
+            token: "VideoEncoder_1".to_string(),
+            name: "Main Stream".to_string(),
+            resolution: Resolution::new(1280, 720),
+            framerate: 15,
+            bitrate: 2000,
+            encoding: VideoEncoding::H264,
+            gop_length: 30,
+            quality: 80,
+            ..Default::default()
+        };
+        encoder.init(&config).await.unwrap();
+
+        let vi_ptr = std::ptr::NonNull::<c_void>::dangling().as_ptr();
+        let venc_ptr = encoder
+            .main_handle
+            .read()
+            .as_ref()
+            .expect("main encoder")
+            .as_ptr();
+        let sh = Arc::new(
+            VideoStreamHandle::new(vi_ptr, venc_ptr, Arc::clone(&encoder.ffi))
+                .expect("stream handle"),
+        );
+        *encoder.main_stream_handle.write() = Some(sh);
+
+        // Reader thread exits on stop_signal — simulates a non-stuck reader.
+        let stop = Arc::clone(&encoder.stop_signal);
+        let joinable_reader = std::thread::spawn(move || {
+            while !stop.load(Ordering::SeqCst) {
+                std::thread::sleep(Duration::from_millis(1));
+            }
+        });
+        *encoder.main_read_thread.write() = Some(joinable_reader);
+
+        encoder.stop_streaming().expect("stop_streaming");
+        encoder.close_all_encoders().expect("close_all_encoders");
+    }
+
+    #[test]
+    fn test_stop_streaming_cancel_unblocks_reader_thread() {
+        // Verify that the cancel-first pattern allows a reader thread that
+        // exits on stop_signal to join successfully.
+        let mut mock = MockVideoFfiTrait::new();
+        let stream_ptr = std::ptr::NonNull::<c_void>::dangling().as_ptr() as usize;
+        mock.expect_venc_request_stream()
+            .times(1)
+            .returning(move |_, _| stream_ptr as *mut c_void);
+        mock.expect_venc_cancel_stream()
+            .times(1)
+            .returning(|_| AK_SUCCESS_I32);
+
+        let ffi: Arc<dyn crate::ffi::video::VideoFfiTrait> = Arc::new(mock);
+        let encoder = AnykaVideoEncoder::with_ffi(Arc::clone(&ffi));
+        let vi_ptr = std::ptr::NonNull::<c_void>::dangling().as_ptr();
+        let venc_ptr = std::ptr::NonNull::<c_void>::dangling().as_ptr();
+        let sh = Arc::new(VideoStreamHandle::new(vi_ptr, venc_ptr, Arc::clone(&ffi)).unwrap());
+        *encoder.main_stream_handle.write() = Some(sh);
+
+        // Reader thread waits for stop_signal, then exits (simulates a thread
+        // that would be stuck in get_stream until cancel fires).
+        let stop = Arc::clone(&encoder.stop_signal);
+        let reader = std::thread::spawn(move || {
+            while !stop.load(Ordering::SeqCst) {
+                std::thread::sleep(Duration::from_millis(1));
+            }
+        });
+        *encoder.main_read_thread.write() = Some(reader);
+
+        let result = encoder.stop_streaming();
+        assert!(result.is_ok(), "cancel-first should allow clean join");
+        assert!(!encoder.requires_hard_shutdown());
+        assert!(encoder.main_stream_handle.read().is_none());
+    }
+
+    #[test]
+    fn test_frame_read_loop_no_initial_delay() {
+        // Verify frame_read_loop exits quickly when stop signal is pre-set
+        // (no 100ms initial delay — removed in drain-loop refactor).
         let mut mock = MockVideoFfiTrait::new();
         let stop = Arc::new(AtomicBool::new(true)); // Pre-set stop
 
@@ -3564,36 +4536,44 @@ mod tests {
             Arc::new(RwLock::new(HashMap::new()));
 
         let start = std::time::Instant::now();
-        frame_read_loop(sh, ffi, StreamId::VideoMain, callbacks, stop);
+        frame_read_loop(
+            sh,
+            ffi,
+            StreamId::VideoMain,
+            callbacks,
+            stop,
+            Arc::new(StreamHealthCounters::default()),
+            None,
+        );
         let elapsed = start.elapsed();
 
-        // Must take at least 100ms due to the startup delay
+        // Should exit very quickly — no initial delay
         assert!(
-            elapsed >= Duration::from_millis(90),
-            "Expected >= 90ms startup delay, got {:?}",
+            elapsed < Duration::from_millis(50),
+            "Expected fast exit with pre-set stop, got {:?}",
             elapsed
         );
     }
 
     #[test]
-    fn test_consecutive_error_backoff() {
-        // Verify exponential backoff: first error ~10ms, fourth error ~80ms.
-        // We check that 4 consecutive errors take longer than 4 * 10ms = 40ms,
-        // proving backoff is in effect.
+    fn test_drain_loop_fixed_sleep() {
+        // Verify the drain-loop uses fixed sleep (30ms default) between cycles,
+        // not exponential backoff. With no-data errors, each cycle sleeps 30ms.
         let mut mock = MockVideoFfiTrait::new();
         let stop = Arc::new(AtomicBool::new(false));
         let stop_clone = Arc::clone(&stop);
         let error_count = Arc::new(AtomicU32::new(0));
         let error_count_clone = Arc::clone(&error_count);
 
-        // Return 4 errors, then stop
+        // Return 4 no-data errors, then stop
         mock.expect_venc_get_stream().returning(move |_, _| {
             let count = error_count_clone.fetch_add(1, Ordering::SeqCst);
-            if count >= 4 {
+            if count >= 3 {
                 stop_clone.store(true, Ordering::SeqCst);
             }
             crate::ffi::AK_FAILED_I32
         });
+        mock.expect_get_error_no().returning(|| SDK_ERROR_NO_DATA);
 
         let test_ptr = std::ptr::NonNull::<c_void>::dangling().as_ptr() as usize;
         mock.expect_venc_request_stream()
@@ -3610,16 +4590,116 @@ mod tests {
             Arc::new(RwLock::new(HashMap::new()));
 
         let start = std::time::Instant::now();
-        frame_read_loop(sh, ffi, StreamId::VideoMain, callbacks, stop);
+        frame_read_loop(
+            sh,
+            ffi,
+            StreamId::VideoMain,
+            callbacks,
+            stop,
+            Arc::new(StreamHealthCounters::default()),
+            None,
+        );
         let elapsed = start.elapsed();
 
         assert!(error_count.load(Ordering::SeqCst) >= 4);
-        // 100ms initial delay + backoff: 10ms + 20ms + 40ms + 80ms = 250ms total
-        // Allow some tolerance; should be at least 200ms
+        // 4 drain cycles × 30ms fixed sleep = ~120ms.
+        // With exponential backoff this would have been 10+20+40+80 = 150ms.
+        // Allow tolerance: should be between 90ms and 250ms.
         assert!(
-            elapsed >= Duration::from_millis(200),
-            "Expected >= 200ms with backoff, got {:?}",
+            elapsed >= Duration::from_millis(90) && elapsed <= Duration::from_millis(250),
+            "Expected ~120ms with fixed 30ms sleep over 4 cycles, got {:?}",
             elapsed
         );
+    }
+
+    #[tokio::test]
+    async fn test_video_input_set_channel_attr_legacy_compat_mode() {
+        let mut mock = mock_ffi_with_successful_open();
+        mock.expect_vi_get_sensor_resolution()
+            .times(1)
+            .returning(|_, res| {
+                unsafe {
+                    (*res).width = 1280;
+                    (*res).height = 720;
+                    (*res).max_width = 1280;
+                    (*res).max_height = 720;
+                }
+                AK_SUCCESS_I32
+            });
+        mock.expect_vi_set_channel_attr()
+            .times(1)
+            .returning(|_, attr| {
+                unsafe {
+                    // Legacy compatibility mode mirrors main max to sub size.
+                    assert_eq!((*attr).res[0].width, 1280);
+                    assert_eq!((*attr).res[0].height, 720);
+                    assert_eq!((*attr).res[1].width, 640);
+                    assert_eq!((*attr).res[1].height, 360);
+                    assert_eq!((*attr).res[0].max_width, 640);
+                    assert_eq!((*attr).res[0].max_height, 360);
+                    // Sub max keeps a VGA floor.
+                    assert_eq!((*attr).res[1].max_width, 640);
+                    assert_eq!((*attr).res[1].max_height, 480);
+                }
+                AK_SUCCESS_I32
+            });
+
+        let vi = AnykaVideoInput::with_ffi_and_mode(
+            Arc::new(mock),
+            None,
+            ViChannelAttrMode::LegacyCompat,
+        );
+        vi.open().await.unwrap();
+
+        let result = vi.set_channel_attr();
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_frame_read_loop_requests_idr_after_sustained_no_data() {
+        let mut mock = MockVideoFfiTrait::new();
+        let stop = Arc::new(AtomicBool::new(false));
+        let stop_clone = Arc::clone(&stop);
+        let error_count = Arc::new(AtomicU32::new(0));
+        let error_count_clone = Arc::clone(&error_count);
+
+        mock.expect_venc_get_stream().returning(move |_, _| {
+            let count = error_count_clone.fetch_add(1, Ordering::SeqCst);
+            if count >= NO_DATA_IDR_RECOVERY_EVERY_ERRORS {
+                stop_clone.store(true, Ordering::SeqCst);
+            }
+            AK_FAILED_I32
+        });
+        mock.expect_get_error_no().returning(|| SDK_ERROR_NO_DATA);
+        // No-data errors don't call get_error_str in drain-loop pattern
+        mock.expect_venc_set_iframe()
+            .times(1)
+            .returning(|_| AK_SUCCESS_I32);
+
+        let test_ptr = std::ptr::NonNull::<c_void>::dangling().as_ptr() as usize;
+        mock.expect_venc_request_stream()
+            .returning(move |_, _| test_ptr as *mut c_void);
+        mock.expect_venc_cancel_stream()
+            .returning(|_| AK_SUCCESS_I32);
+
+        let ffi: Arc<dyn crate::ffi::video::VideoFfiTrait> = Arc::new(mock);
+        let vi_ptr = std::ptr::NonNull::<c_void>::dangling().as_ptr();
+        let venc_ptr = std::ptr::NonNull::<c_void>::dangling().as_ptr();
+        let sh = Arc::new(VideoStreamHandle::new(vi_ptr, venc_ptr, Arc::clone(&ffi)).unwrap());
+
+        let callbacks: Arc<RwLock<HashMap<CallbackId, Arc<dyn FrameCallback>>>> =
+            Arc::new(RwLock::new(HashMap::new()));
+
+        frame_read_loop(
+            sh,
+            ffi,
+            StreamId::VideoMain,
+            callbacks,
+            stop,
+            Arc::new(StreamHealthCounters::default()),
+            Some(venc_ptr as usize),
+        );
+
+        assert!(error_count.load(Ordering::SeqCst) >= NO_DATA_IDR_RECOVERY_EVERY_ERRORS);
     }
 }

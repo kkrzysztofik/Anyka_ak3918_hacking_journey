@@ -29,7 +29,7 @@ use crate::platform::PlatformResult;
 use std::ffi::{CString, c_char, c_void};
 use std::path::Path;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::time::Duration;
 
 #[cfg(not(use_stubs))]
@@ -824,6 +824,7 @@ pub fn vpss_destroy(device: VideoDevice) -> PlatformResult<()> {
 /// is safe to send and share between threads.
 pub struct VideoEncoderHandle {
     handle: Option<*mut c_void>,
+    closed: AtomicBool,
 }
 
 // SAFETY: VideoEncoderHandle is thread-safe - SDK uses internal mutexes.
@@ -833,6 +834,9 @@ unsafe impl Sync for VideoEncoderHandle {}
 
 impl Drop for VideoEncoderHandle {
     fn drop(&mut self) {
+        if self.closed.swap(true, Ordering::SeqCst) {
+            return;
+        }
         if let Some(handle) = self.handle
             && !handle.is_null()
         {
@@ -854,6 +858,26 @@ impl VideoEncoderHandle {
     pub(crate) fn as_ptr(&self) -> *mut c_void {
         self.handle.unwrap_or(std::ptr::null_mut())
     }
+
+    /// Explicitly close encoder in the current thread.
+    ///
+    /// This path is used by platform shutdown, where we want strict call ordering
+    /// and no detached timeout threads for `ak_venc_close()`.
+    pub(crate) fn close_blocking_with_ffi(&self, ffi: &dyn VideoFfiTrait) -> PlatformResult<()> {
+        if self.closed.swap(true, Ordering::SeqCst) {
+            return Ok(());
+        }
+
+        let Some(handle) = self.handle else {
+            return Ok(());
+        };
+        if handle.is_null() {
+            return Ok(());
+        }
+
+        let ret = ffi.venc_close(handle);
+        check_result(ret, "ak_venc_close")
+    }
 }
 
 /// RAII handle for a video stream (bound VI + encoder pair).
@@ -868,8 +892,13 @@ impl VideoEncoderHandle {
 pub struct VideoStreamHandle {
     handle: *mut c_void,
     ffi: Arc<dyn VideoFfiTrait>,
-    cancelled: AtomicBool,
+    cancel_state: AtomicU8,
 }
+
+const CANCEL_STATE_ACTIVE: u8 = 0;
+const CANCEL_STATE_PENDING: u8 = 1;
+const CANCEL_STATE_DONE: u8 = 2;
+const CANCEL_STATE_UNKNOWN: u8 = 3;
 
 // SAFETY: VideoStreamHandle is thread-safe - SDK uses internal mutexes.
 unsafe impl Send for VideoStreamHandle {}
@@ -913,7 +942,7 @@ impl VideoStreamHandle {
         Ok(Self {
             handle,
             ffi,
-            cancelled: AtomicBool::new(false),
+            cancel_state: AtomicU8::new(CANCEL_STATE_ACTIVE),
         })
     }
 
@@ -931,10 +960,28 @@ impl VideoStreamHandle {
     /// This is used by shutdown paths that must not block indefinitely when vendor
     /// SDK calls are stuck in kernel I/O.
     pub fn cancel_with_timeout(&self, timeout: Duration) -> bool {
-        if self.cancelled.swap(true, Ordering::SeqCst) {
-            return true; // Already cancelled
+        let state = self.cancel_state.load(Ordering::SeqCst);
+        if state == CANCEL_STATE_DONE {
+            return true;
         }
+        if state == CANCEL_STATE_UNKNOWN || state == CANCEL_STATE_PENDING {
+            return false;
+        }
+        if self
+            .cancel_state
+            .compare_exchange(
+                CANCEL_STATE_ACTIVE,
+                CANCEL_STATE_PENDING,
+                Ordering::SeqCst,
+                Ordering::SeqCst,
+            )
+            .is_err()
+        {
+            return false;
+        }
+
         if self.handle.is_null() {
+            self.cancel_state.store(CANCEL_STATE_DONE, Ordering::SeqCst);
             return true;
         }
 
@@ -945,6 +992,7 @@ impl VideoStreamHandle {
             ffi.venc_cancel_stream(handle_ptr as *mut c_void)
         }) {
             Ok(ret) => {
+                self.cancel_state.store(CANCEL_STATE_DONE, Ordering::SeqCst);
                 if ret != AK_SUCCESS_I32 {
                     tracing::warn!(
                         stream_handle = ?self.handle,
@@ -954,8 +1002,55 @@ impl VideoStreamHandle {
                 }
                 true
             }
-            Err(()) => false,
+            Err(()) => {
+                // Timeout means we do not know whether the SDK consumed the handle.
+                // Keep this as unknown rather than "done" so callers can make an
+                // explicit hard-exit decision instead of assuming success.
+                self.cancel_state
+                    .store(CANCEL_STATE_UNKNOWN, Ordering::SeqCst);
+                false
+            }
         }
+    }
+
+    /// Explicitly cancel stream in the current thread (no timeout wrapper).
+    ///
+    /// This path is used by platform shutdown to preserve strict ordering:
+    /// join reader thread -> cancel stream -> close encoder.
+    pub fn cancel_blocking(&self) -> PlatformResult<()> {
+        let state = self.cancel_state.load(Ordering::SeqCst);
+        if state == CANCEL_STATE_DONE {
+            return Ok(());
+        }
+        if state == CANCEL_STATE_PENDING || state == CANCEL_STATE_UNKNOWN {
+            return Err(PlatformError::HardwareFailure(
+                "stream cancel state is indeterminate".to_string(),
+            ));
+        }
+        if self
+            .cancel_state
+            .compare_exchange(
+                CANCEL_STATE_ACTIVE,
+                CANCEL_STATE_PENDING,
+                Ordering::SeqCst,
+                Ordering::SeqCst,
+            )
+            .is_err()
+        {
+            return Err(PlatformError::HardwareFailure(
+                "failed to enter stream cancel state".to_string(),
+            ));
+        }
+
+        if self.handle.is_null() {
+            self.cancel_state.store(CANCEL_STATE_DONE, Ordering::SeqCst);
+            return Ok(());
+        }
+
+        tracing::info!(stream_handle = ?self.handle, "Cancelling video stream (blocking)");
+        let ret = self.ffi.venc_cancel_stream(self.handle);
+        self.cancel_state.store(CANCEL_STATE_DONE, Ordering::SeqCst);
+        check_result(ret, "ak_venc_cancel_stream")
     }
 
     /// Get the raw stream handle pointer for FFI calls.
@@ -978,6 +1073,7 @@ pub(crate) fn video_encoder_open_internal(
     } else {
         Ok(VideoEncoderHandle {
             handle: Some(handle),
+            closed: AtomicBool::new(false),
         })
     }
 }
@@ -1377,6 +1473,7 @@ mod tests {
         let mut mock_ffi = MockVideoFfiTrait::new();
         let enc_handle = VideoEncoderHandle {
             handle: None, // Use None to prevent Drop from calling venc_close on dangling pointer
+            closed: AtomicBool::new(false),
         };
 
         mock_ffi
@@ -1394,6 +1491,7 @@ mod tests {
         let mut mock_ffi = MockVideoFfiTrait::new();
         let enc_handle = VideoEncoderHandle {
             handle: None, // Use None to prevent Drop from calling venc_close on dangling pointer
+            closed: AtomicBool::new(false),
         };
 
         mock_ffi
@@ -1417,6 +1515,7 @@ mod tests {
         let mut mock_ffi = MockVideoFfiTrait::new();
         let enc_handle = VideoEncoderHandle {
             handle: None, // Use None to prevent Drop from calling venc_close on dangling pointer
+            closed: AtomicBool::new(false),
         };
 
         mock_ffi
@@ -1434,6 +1533,7 @@ mod tests {
         let mut mock_ffi = MockVideoFfiTrait::new();
         let enc_handle = VideoEncoderHandle {
             handle: None, // Use None to prevent Drop from calling venc_close on dangling pointer
+            closed: AtomicBool::new(false),
         };
 
         mock_ffi

@@ -7,6 +7,7 @@
 mod anyka_sdk;
 pub mod audio;
 pub mod imaging;
+pub mod ipc;
 pub mod ptz;
 pub mod video;
 
@@ -22,6 +23,10 @@ pub use imaging::{
     imaging_set_brightness, imaging_set_contrast, imaging_set_ir_filter, imaging_set_saturation,
     imaging_set_sharpness, imaging_set_wdr, onvif_to_sdk_brightness, onvif_to_sdk_contrast,
     onvif_to_sdk_saturation, onvif_to_sdk_sharpness, validate_onvif_range,
+};
+pub use ipc::{
+    DEFAULT_CMD_SERVER_PORT, command_send, command_send_with_timeout, command_server_register,
+    command_server_unregister,
 };
 pub use ptz::{
     PTZHandle, degrees_to_steps, ptz_get_step_pos, ptz_open, ptz_stop, ptz_turn, steps_to_degrees,
