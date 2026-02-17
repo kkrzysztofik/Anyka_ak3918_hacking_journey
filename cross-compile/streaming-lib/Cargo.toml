@@ -62,14 +62,7 @@ portable-atomic = { version = "1.11", features = ["std"] }
 # Network
 reqwest = { version = "0.13.1", features = ["native-tls-vendored", "query", "form"] }
 
-# Note: ARMv5TEJ patches are inherited from workspace root
-# Patches applied at workspace level:
-# - webrtc-util (portable-atomic)
-# - webrtc-ice (portable-atomic)
-# - webrtc-sctp (portable-atomic)
-# - rtp (portable-atomic)
-# - tokio-metrics (portable-atomic)
-# - openssl-src (uClibc support)
+# Note: openssl-src is patched at workspace root for uClibc ARM target support.
 
 [dev-dependencies]
 mockall = "0.13"
