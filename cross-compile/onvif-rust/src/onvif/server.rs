@@ -443,7 +443,25 @@ impl OnvifServer {
 
         // Register Media Service
         tracing::debug!("Registering Media Service");
-        dispatcher.register_service("media", Arc::new(MediaService::new()));
+        let media_service = match (app_state.config_persistence(), app_state.platform()) {
+            (Some(persistence), Some(platform)) => {
+                MediaService::with_config_and_persistence_and_platform(
+                    Arc::clone(app_state.config()),
+                    persistence.clone(),
+                    Arc::clone(platform),
+                )
+            }
+            (Some(persistence), None) => MediaService::with_config_and_persistence(
+                Arc::clone(app_state.config()),
+                persistence.clone(),
+            ),
+            (None, Some(platform)) => MediaService::with_config_and_platform(
+                Arc::clone(app_state.config()),
+                Arc::clone(platform),
+            ),
+            (None, None) => MediaService::with_config(Arc::clone(app_state.config())),
+        };
+        dispatcher.register_service("media", Arc::new(media_service));
 
         // Register PTZ Service
         tracing::debug!("Registering PTZ Service");

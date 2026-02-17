@@ -3400,7 +3400,7 @@ mod tests {
         // Return 4 errors, then stop
         mock.expect_venc_get_stream().returning(move |_, _| {
             let count = error_count_clone.fetch_add(1, Ordering::SeqCst);
-            if count >= 3 {
+            if count >= 4 {
                 stop_clone.store(true, Ordering::SeqCst);
             }
             crate::ffi::AK_FAILED_I32

@@ -1,12 +1,13 @@
 # Tarpaulin configuration for cross-compile workspace
 # Excludes patched dependencies and external workspaces from coverage
 # This file is automatically detected when running tarpaulin from the cross-compile/ directory
+[default]
 
 # Exclude patched crates (these are external dependencies we've patched for ARMv5TEJ)
 # These are included in the dependency graph via [patch.crates-io] but shouldn't be in coverage
 exclude = [
     "webrtc-util",
-    "webrtc-ice", 
+    "webrtc-ice",
     "webrtc-sctp",
     "rtp",
     "tokio-metrics",

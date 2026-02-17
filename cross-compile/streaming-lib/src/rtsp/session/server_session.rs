@@ -416,6 +416,97 @@ async fn flush_pending_video(
 }
 
 #[allow(clippy::too_many_arguments)]
+async fn handle_playback_frame(
+    frame_data: FrameData,
+    audio_rtp_channel: &Option<Arc<Mutex<RtpChannel>>>,
+    video_rtp_channel: &Option<Arc<Mutex<RtpChannel>>>,
+    video_assembler: &mut VideoAccessUnitAssembler,
+    timestamp_normalizers: &mut HashMap<TrackType, RtpTimestampNormalizer>,
+    session_id: &str,
+    remote_addr: SocketAddr,
+    request_path: &str,
+    shutdown: &Arc<AtomicBool>,
+) -> bool {
+    match frame_data {
+        FrameData::Audio {
+            timestamp,
+            mut data,
+        } => {
+            if let Some(audio_channel) = audio_rtp_channel {
+                process_audio_frame(
+                    audio_channel,
+                    timestamp_normalizers,
+                    session_id,
+                    remote_addr,
+                    request_path,
+                    shutdown,
+                    timestamp,
+                    &mut data,
+                )
+                .await;
+
+                return shutdown.load(Ordering::Acquire);
+            }
+        }
+        FrameData::Video { timestamp, data } => {
+            if let Some(video_channel) = video_rtp_channel {
+                process_video_frame(
+                    video_channel,
+                    video_assembler,
+                    timestamp_normalizers,
+                    session_id,
+                    remote_addr,
+                    request_path,
+                    shutdown,
+                    timestamp,
+                    data,
+                )
+                .await;
+            }
+        }
+        _ => {}
+    }
+
+    false
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn handle_no_frame_data(
+    video_rtp_channel: &Option<Arc<Mutex<RtpChannel>>>,
+    video_assembler: &mut VideoAccessUnitAssembler,
+    timestamp_normalizers: &mut HashMap<TrackType, RtpTimestampNormalizer>,
+    session_id: &str,
+    remote_addr: SocketAddr,
+    request_path: &str,
+    shutdown: &Arc<AtomicBool>,
+    retry_times: &mut usize,
+) -> bool {
+    flush_pending_video(
+        video_rtp_channel,
+        video_assembler,
+        timestamp_normalizers,
+        session_id,
+        remote_addr,
+        request_path,
+        shutdown,
+    )
+    .await;
+
+    *retry_times += 1;
+    log::info!(
+        "send_channel_data: no data receives ,retry {} times!",
+        *retry_times
+    );
+
+    if *retry_times > 10 {
+        shutdown.store(true, Ordering::Release);
+        return true;
+    }
+
+    false
+}
+
+#[allow(clippy::too_many_arguments)]
 async fn run_playback_loop(
     mut receiver: mpsc::UnboundedReceiver<FrameData>,
     audio_rtp_channel: Option<Arc<Mutex<RtpChannel>>>,
@@ -427,7 +518,7 @@ async fn run_playback_loop(
     request_path: String,
 ) {
     let mut timestamp_normalizers: HashMap<TrackType, RtpTimestampNormalizer> = HashMap::new();
-    let mut retry_times = 0;
+    let mut retry_times: usize = 0;
     let mut video_assembler = VideoAccessUnitAssembler::default();
 
     loop {
@@ -445,70 +536,40 @@ async fn run_playback_loop(
             break;
         }
 
-        if let Some(frame_data) = receiver.recv().await {
-            retry_times = 0;
-            match frame_data {
-                FrameData::Audio {
-                    timestamp,
-                    mut data,
-                } => {
-                    if let Some(audio_channel) = &audio_rtp_channel {
-                        process_audio_frame(
-                            audio_channel,
-                            &mut timestamp_normalizers,
-                            &session_id,
-                            remote_addr,
-                            &request_path,
-                            &shutdown,
-                            timestamp,
-                            &mut data,
-                        )
-                        .await;
-
-                        if shutdown.load(Ordering::Acquire) {
-                            break;
-                        }
-                    }
+        match receiver.recv().await {
+            Some(frame_data) => {
+                retry_times = 0;
+                if handle_playback_frame(
+                    frame_data,
+                    &audio_rtp_channel,
+                    &video_rtp_channel,
+                    &mut video_assembler,
+                    &mut timestamp_normalizers,
+                    &session_id,
+                    remote_addr,
+                    &request_path,
+                    &shutdown,
+                )
+                .await
+                {
+                    break;
                 }
-                FrameData::Video { timestamp, data } => {
-                    if let Some(video_channel) = &video_rtp_channel {
-                        process_video_frame(
-                            video_channel,
-                            &mut video_assembler,
-                            &mut timestamp_normalizers,
-                            &session_id,
-                            remote_addr,
-                            &request_path,
-                            &shutdown,
-                            timestamp,
-                            data,
-                        )
-                        .await;
-                    }
-                }
-                _ => {}
             }
-        } else {
-            flush_pending_video(
-                &video_rtp_channel,
-                &mut video_assembler,
-                &mut timestamp_normalizers,
-                &session_id,
-                remote_addr,
-                &request_path,
-                &shutdown,
-            )
-            .await;
-
-            retry_times += 1;
-            log::info!(
-                "send_channel_data: no data receives ,retry {} times!",
-                retry_times
-            );
-
-            if retry_times > 10 {
-                shutdown.store(true, Ordering::Release);
-                break;
+            None => {
+                if handle_no_frame_data(
+                    &video_rtp_channel,
+                    &mut video_assembler,
+                    &mut timestamp_normalizers,
+                    &session_id,
+                    remote_addr,
+                    &request_path,
+                    &shutdown,
+                    &mut retry_times,
+                )
+                .await
+                {
+                    break;
+                }
             }
         }
     }

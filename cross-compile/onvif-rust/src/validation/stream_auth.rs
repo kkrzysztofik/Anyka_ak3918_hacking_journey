@@ -13,6 +13,10 @@ fn users_file_path(config_path: &str) -> PathBuf {
         .join("users.toml")
 }
 
+fn generate_unpredictable_stream_token() -> String {
+    uuid::Uuid::new_v4().simple().to_string()
+}
+
 /// Build stream authentication for validation mode using ONVIF user credentials.
 ///
 /// When `server.auth_enabled` is `false`, stream authentication is disabled.
@@ -65,7 +69,7 @@ pub fn build_stream_auth_for_validation_mode(
         .unwrap_or_else(|_| "ONVIF Camera".to_string());
     let auth = Auth::new(
         String::new(),
-        "__unused_token__".to_string(),
+        generate_unpredictable_stream_token(),
         None,
         AuthAlgorithm::Simple,
         AuthType::Pull,
@@ -128,6 +132,26 @@ mod tests {
     }
 
     #[test]
+    fn test_build_stream_auth_validation_mode_empty_users_returns_error() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let config_path = temp.path().join("config.toml");
+        let users_path = temp.path().join("users.toml");
+        let config = make_config(true);
+
+        std::fs::write(&users_path, "users = []\n").expect("write empty users file");
+
+        let result = build_stream_auth_for_validation_mode(
+            &config,
+            config_path.to_str().expect("config path"),
+        );
+        let message = match result {
+            Ok(_) => panic!("expected empty users file error"),
+            Err(error) => error.to_string(),
+        };
+        assert!(message.contains("users file is empty"));
+    }
+
+    #[test]
     fn test_build_stream_auth_validation_mode_validates_basic_credentials() {
         let temp = tempfile::tempdir().expect("tempdir");
         let config_path = temp.path().join("config.toml");
@@ -153,5 +177,13 @@ mod tests {
         let fail =
             auth.authenticate_request("stream1", &None, Some("Basic YWRtaW46d3Jvbmc="), true);
         assert!(fail.is_err());
+
+        let token_fallback = auth.authenticate_request(
+            "stream1",
+            &Some("token=__unused_token__".to_string()),
+            None,
+            true,
+        );
+        assert!(token_fallback.is_err());
     }
 }

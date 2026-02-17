@@ -34,6 +34,7 @@ use crate::platform::StubPlatformBuilder;
 use crate::security::RateLimiter;
 use crate::users::password::PasswordManager;
 use crate::users::storage::UserStorage;
+use streaming_lib::common::auth::{Auth, AuthAlgorithm, AuthType, CredentialValidator};
 
 // ============================================================================
 // AppState - Shared application state for dependency injection
@@ -747,7 +748,7 @@ impl Application {
 
         // Phase 6: Streaming (optional, gracefully degrades)
         let streaming_service =
-            Self::start_streaming(&config_runtime, platform.as_ref(), &mut progress).await;
+            Self::start_streaming(&config_runtime, &app_state, &mut progress).await;
 
         let startup_duration = started_at.elapsed();
         if progress.has_degraded_services() {
@@ -849,21 +850,35 @@ impl Application {
     /// in degraded mode.
     async fn start_streaming(
         config_runtime: &Arc<ConfigRuntime>,
-        platform: Option<&Arc<dyn Platform>>,
+        app_state: &AppState,
         progress: &mut StartupProgress,
     ) -> Option<crate::streaming::service::StreamingService> {
-        let streaming_config =
+        let mut streaming_config =
             crate::streaming::config::StreamingConfig::from_config(config_runtime);
         if !streaming_config.enabled {
             tracing::info!("Streaming is disabled in configuration");
             return None;
         }
 
+        match Self::build_stream_auth(app_state) {
+            Ok(stream_auth) => {
+                streaming_config.auth = stream_auth;
+            }
+            Err(e) => {
+                tracing::warn!(
+                    "Streaming authentication setup failed, continuing in degraded mode: {}",
+                    e
+                );
+                progress.record_degraded("streaming_auth", e.to_string());
+                return None;
+            }
+        }
+
         let mut service = crate::streaming::service::StreamingService::new(streaming_config);
         match service.start().await {
             Ok(bridge) => {
                 // Register the bridge as a frame callback with the platform.
-                if let Some(platform) = platform {
+                if let Some(platform) = app_state.platform() {
                     match platform.register_frame_callback(bridge) {
                         Ok(()) => {
                             tracing::info!("Frame callback registered with platform");
@@ -888,6 +903,52 @@ impl Application {
                 None
             }
         }
+    }
+
+    fn build_stream_auth(app_state: &AppState) -> anyhow::Result<Option<Auth>> {
+        let auth_enabled = app_state
+            .config()
+            .get_bool("server.auth_enabled")
+            .unwrap_or(true);
+        if !auth_enabled {
+            tracing::info!("Streaming authentication disabled (server.auth_enabled=false)");
+            return Ok(None);
+        }
+
+        if app_state.user_storage().is_empty() {
+            anyhow::bail!(
+                "Streaming authentication is enabled but no users are available in UserStorage"
+            );
+        }
+
+        let validator_storage = Arc::clone(app_state.user_storage());
+        let validator_password_manager = Arc::clone(app_state.password_manager());
+        let validator: CredentialValidator = Arc::new(move |username, password| {
+            validator_storage
+                .get_user(username)
+                .map(|user| validator_password_manager.verify_password(password, &user.password))
+                .unwrap_or(false)
+        });
+
+        let realm = app_state
+            .config()
+            .get_string("server.realm")
+            .unwrap_or_else(|_| "ONVIF Camera".to_string());
+        let stream_auth = Auth::new(
+            String::new(),
+            Self::generate_unpredictable_stream_token(),
+            None,
+            AuthAlgorithm::Simple,
+            AuthType::Pull,
+        )
+        .with_credential_validator(validator)
+        .with_basic_realm(realm);
+
+        Ok(Some(stream_auth))
+    }
+
+    fn generate_unpredictable_stream_token() -> String {
+        uuid::Uuid::new_v4().simple().to_string()
     }
 
     /// Start the application with a custom platform abstraction.
@@ -1096,7 +1157,7 @@ impl Application {
 
         // Phase 6: Streaming (optional, gracefully degrades)
         let streaming_service =
-            Self::start_streaming(&config_runtime, Some(&platform), &mut progress).await;
+            Self::start_streaming(&config_runtime, &app_state, &mut progress).await;
 
         let startup_duration = started_at.elapsed();
         if progress.has_degraded_services() {
@@ -1202,83 +1263,12 @@ impl Application {
 
         let mut report = self.shutdown_coordinator.initiate_shutdown().await;
 
-        // Record component shutdown status
-        // In a full implementation, each component would report its shutdown status
-
-        // Phase 1: Discovery Bye (non-fatal)
-        tracing::debug!("Sending WS-Discovery Bye...");
-        if let Some(discovery) = self.discovery.take() {
-            if let Err(e) = discovery.stop().await {
-                tracing::warn!("Failed to stop WS-Discovery gracefully: {}", e);
-                report.record_failure("discovery", e.to_string());
-            } else {
-                report.record_success("discovery");
-            }
-            // Wait for discovery task to complete
-            if let Some(task) = self.discovery_task.take() {
-                let _ = tokio::time::timeout(Duration::from_secs(2), task).await;
-            }
-        } else {
-            report.record_success("discovery");
-        }
-
-        // Phase 2: Network shutdown - Stop HTTP server
-        tracing::debug!("Shutting down network services...");
-        if let Some(server) = self.server.take() {
-            server.shutdown();
-            // Wait for server task to complete
-            if let Some(task) = self.server_task.take() {
-                let _ = tokio::time::timeout(Duration::from_secs(5), task).await;
-            }
-        }
-        report.record_success("network");
-
-        // Phase 3a: Config persistence task
-        if let Some(task) = self.config_persistence_task.take() {
-            let _ = tokio::time::timeout(Duration::from_secs(2), task).await;
-        }
-
-        // Phase 3b: Memory logging task
-        if let Some(task) = self.memory_logging_task.take() {
-            let _ = tokio::time::timeout(Duration::from_secs(1), task).await;
-        }
-
-        // Phase 3c: Rate limiter cleanup task
-        if let Some(task) = self.rate_limiter_cleanup_task.take() {
-            let _ = tokio::time::timeout(Duration::from_secs(1), task).await;
-        }
-
-        // Phase 3: Services shutdown (reverse order)
-        tracing::debug!("Shutting down ONVIF services...");
-        report.record_success("imaging");
-        report.record_success("ptz");
-        report.record_success("media");
-        report.record_success("device");
-
-        // Phase 3.5: Streaming shutdown (before platform)
-        if let Some(mut streaming) = self.streaming_service.take() {
-            streaming.shutdown().await;
-            report.record_success("streaming");
-        } else {
-            report.record_success("streaming");
-        }
-
-        // Phase 4: Platform shutdown
-        tracing::debug!("Shutting down platform...");
-        if let Some(state) = self.app_state.as_ref() {
-            if let Some(platform) = state.platform() {
-                if let Err(e) = platform.shutdown().await {
-                    tracing::warn!("Platform shutdown reported an error: {}", e);
-                    report.record_failure("platform", e.to_string());
-                } else {
-                    report.record_success("platform");
-                }
-            } else {
-                report.record_success("platform");
-            }
-        } else {
-            report.record_success("platform");
-        }
+        self.shutdown_discovery(&mut report).await;
+        self.shutdown_network(&mut report).await;
+        self.shutdown_background_tasks().await;
+        Self::record_service_shutdown(&mut report);
+        self.shutdown_streaming(&mut report).await;
+        self.shutdown_platform(&mut report).await;
 
         // Phase 5: Configuration cleanup
         tracing::debug!("Cleaning up configuration...");
@@ -1292,6 +1282,82 @@ impl Application {
         );
 
         report
+    }
+
+    async fn shutdown_discovery(&mut self, report: &mut ShutdownReport) {
+        tracing::debug!("Sending WS-Discovery Bye...");
+        if let Some(discovery) = self.discovery.take() {
+            if let Err(e) = discovery.stop().await {
+                tracing::warn!("Failed to stop WS-Discovery gracefully: {}", e);
+                report.record_failure("discovery", e.to_string());
+            } else {
+                report.record_success("discovery");
+            }
+            if let Some(task) = self.discovery_task.take() {
+                let _ = tokio::time::timeout(Duration::from_secs(2), task).await;
+            }
+            return;
+        }
+
+        report.record_success("discovery");
+    }
+
+    async fn shutdown_network(&mut self, report: &mut ShutdownReport) {
+        tracing::debug!("Shutting down network services...");
+        if let Some(server) = self.server.take() {
+            server.shutdown();
+            if let Some(task) = self.server_task.take() {
+                let _ = tokio::time::timeout(Duration::from_secs(5), task).await;
+            }
+        }
+        report.record_success("network");
+    }
+
+    async fn shutdown_background_tasks(&mut self) {
+        if let Some(task) = self.config_persistence_task.take() {
+            let _ = tokio::time::timeout(Duration::from_secs(2), task).await;
+        }
+
+        if let Some(task) = self.memory_logging_task.take() {
+            let _ = tokio::time::timeout(Duration::from_secs(1), task).await;
+        }
+
+        if let Some(task) = self.rate_limiter_cleanup_task.take() {
+            let _ = tokio::time::timeout(Duration::from_secs(1), task).await;
+        }
+    }
+
+    fn record_service_shutdown(report: &mut ShutdownReport) {
+        tracing::debug!("Shutting down ONVIF services...");
+        report.record_success("imaging");
+        report.record_success("ptz");
+        report.record_success("media");
+        report.record_success("device");
+    }
+
+    async fn shutdown_streaming(&mut self, report: &mut ShutdownReport) {
+        if let Some(mut streaming) = self.streaming_service.take() {
+            streaming.shutdown().await;
+        }
+        report.record_success("streaming");
+    }
+
+    async fn shutdown_platform(&self, report: &mut ShutdownReport) {
+        tracing::debug!("Shutting down platform...");
+        let Some(state) = self.app_state.as_ref() else {
+            report.record_success("platform");
+            return;
+        };
+        let Some(platform) = state.platform() else {
+            report.record_success("platform");
+            return;
+        };
+        if let Err(e) = platform.shutdown().await {
+            tracing::warn!("Platform shutdown reported an error: {}", e);
+            report.record_failure("platform", e.to_string());
+            return;
+        }
+        report.record_success("platform");
     }
 
     /// Get the current health status of the application.
@@ -1419,8 +1485,27 @@ impl Application {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::lifecycle::ShutdownStatus;
     use crate::lifecycle::health::HealthState;
     use crate::platform::StubPlatformBuilder;
+    use crate::users::UserLevel;
+    use crate::utils::MemoryMonitor;
+    use std::net::TcpListener;
+
+    fn make_app_state_for_stream_auth(
+        config: Arc<ConfigRuntime>,
+        user_storage: Arc<UserStorage>,
+    ) -> AppState {
+        AppState::builder()
+            .user_storage(user_storage)
+            .password_manager(Arc::new(PasswordManager::new()))
+            .ptz_state(Arc::new(PTZStateManager::new()))
+            .config(config)
+            .memory_monitor(Arc::new(MemoryMonitor::new()))
+            .rate_limiter(Arc::new(crate::security::RateLimiter::new(60)))
+            .build()
+            .expect("app state should build")
+    }
 
     fn make_application_with_degraded_services(degraded_services: Vec<String>) -> Application {
         let (shutdown_tx, _) = broadcast::channel(SHUTDOWN_CHANNEL_CAPACITY);
@@ -1443,6 +1528,150 @@ mod tests {
             rate_limiter_cleanup_task: None,
             streaming_service: None,
         }
+    }
+
+    fn reserve_test_port() -> u16 {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind ephemeral port");
+        let port = listener.local_addr().expect("read local addr").port();
+        drop(listener);
+        port
+    }
+
+    fn make_streaming_runtime_config(
+        rtsp_port: u16,
+        httpflv_port: u16,
+        auth_enabled: bool,
+    ) -> Arc<ConfigRuntime> {
+        let config = Arc::new(ConfigRuntime::new(Default::default()));
+        config
+            .set_bool("media.streaming_enabled", true)
+            .expect("set streaming_enabled");
+        config
+            .set_int("media.rtsp_port", i64::from(rtsp_port))
+            .expect("set rtsp_port");
+        config
+            .set_int("media.httpflv_port", i64::from(httpflv_port))
+            .expect("set httpflv_port");
+        config
+            .set_bool("server.auth_enabled", auth_enabled)
+            .expect("set auth_enabled");
+        config
+    }
+
+    #[test]
+    fn test_build_stream_auth_disabled_returns_none() {
+        let config = Arc::new(ConfigRuntime::new(Default::default()));
+        config.set_bool("server.auth_enabled", false).unwrap();
+        let app_state = make_app_state_for_stream_auth(config, Arc::new(UserStorage::new()));
+
+        let stream_auth = Application::build_stream_auth(&app_state).unwrap();
+        assert!(stream_auth.is_none());
+    }
+
+    #[test]
+    fn test_build_stream_auth_enabled_without_users_returns_error() {
+        let config = Arc::new(ConfigRuntime::new(Default::default()));
+        config.set_bool("server.auth_enabled", true).unwrap();
+        let app_state = make_app_state_for_stream_auth(config, Arc::new(UserStorage::new()));
+
+        let result = Application::build_stream_auth(&app_state);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_build_stream_auth_enabled_uses_user_storage_credentials() {
+        let config = Arc::new(ConfigRuntime::new(Default::default()));
+        config.set_bool("server.auth_enabled", true).unwrap();
+        config.set_string("server.realm", "ONVIF Camera").unwrap();
+
+        let storage = UserStorage::new();
+        storage
+            .create_user("admin", "secret", UserLevel::Administrator)
+            .unwrap();
+        let app_state = make_app_state_for_stream_auth(config, Arc::new(storage));
+
+        let stream_auth = Application::build_stream_auth(&app_state)
+            .unwrap()
+            .expect("stream auth should be configured");
+
+        assert!(
+            stream_auth
+                .authenticate_request("live/main", &None, Some("Basic YWRtaW46c2VjcmV0"), true)
+                .is_ok()
+        );
+        assert!(
+            stream_auth
+                .authenticate_request("live/main", &None, Some("Basic YWRtaW46d3Jvbmc="), true)
+                .is_err()
+        );
+        assert!(
+            stream_auth
+                .authenticate_request(
+                    "live/main",
+                    &Some("token=__unused_token__".to_string()),
+                    None,
+                    true
+                )
+                .is_err()
+        );
+    }
+
+    #[tokio::test]
+    async fn test_start_streaming_degrades_when_stream_auth_setup_fails() {
+        let rtsp_port = reserve_test_port();
+        let httpflv_port = reserve_test_port();
+        let config = make_streaming_runtime_config(rtsp_port, httpflv_port, true);
+        let app_state =
+            make_app_state_for_stream_auth(config.clone(), Arc::new(UserStorage::new()));
+        let mut progress = StartupProgress::new();
+
+        let streaming = Application::start_streaming(&config, &app_state, &mut progress).await;
+        assert!(streaming.is_none());
+        assert!(progress.has_degraded_services());
+        assert!(
+            progress
+                .degraded_services()
+                .iter()
+                .any(|service| service == "streaming_auth")
+        );
+    }
+
+    #[tokio::test]
+    async fn test_start_streaming_degrades_when_rtsp_port_unavailable() {
+        let rtsp_listener = TcpListener::bind("127.0.0.1:0").expect("bind occupied rtsp port");
+        let rtsp_port = rtsp_listener.local_addr().expect("rtsp local addr").port();
+        let httpflv_port = reserve_test_port();
+        let config = make_streaming_runtime_config(rtsp_port, httpflv_port, false);
+        let app_state =
+            make_app_state_for_stream_auth(config.clone(), Arc::new(UserStorage::new()));
+        let mut progress = StartupProgress::new();
+
+        let streaming = Application::start_streaming(&config, &app_state, &mut progress).await;
+        assert!(streaming.is_none());
+        assert!(progress.has_degraded_services());
+        assert!(
+            progress
+                .degraded_services()
+                .iter()
+                .any(|service| service == "streaming")
+        );
+    }
+
+    #[tokio::test]
+    async fn test_start_streaming_success_without_platform_returns_service() {
+        let rtsp_port = reserve_test_port();
+        let httpflv_port = reserve_test_port();
+        let config = make_streaming_runtime_config(rtsp_port, httpflv_port, false);
+        let app_state =
+            make_app_state_for_stream_auth(config.clone(), Arc::new(UserStorage::new()));
+        let mut progress = StartupProgress::new();
+
+        let mut streaming = Application::start_streaming(&config, &app_state, &mut progress)
+            .await
+            .expect("streaming service should start");
+        assert!(!progress.has_degraded_services());
+
+        streaming.shutdown().await;
     }
 
     #[tokio::test]
@@ -1633,5 +1862,65 @@ mod tests {
         ));
 
         let _ = std::fs::remove_file(&temp_config);
+    }
+
+    #[tokio::test]
+    async fn test_application_start_with_platform_success_and_shutdown() {
+        let port = reserve_test_port();
+        let temp_config = std::env::temp_dir().join(format!(
+            "onvif-rust-app-start-with-platform-success-{}.toml",
+            uuid::Uuid::new_v4()
+        ));
+
+        std::fs::write(
+            &temp_config,
+            format!(
+                "[server]\nport = {port}\nbind_address = \"127.0.0.1\"\nauth_enabled = false\n\
+                 \n[discovery]\nenabled = false\n\n[media]\nstreaming_enabled = false\n"
+            ),
+        )
+        .expect("write temp config");
+
+        let platform = Arc::new(
+            StubPlatformBuilder::new()
+                .ptz_supported(true)
+                .imaging_supported(true)
+                .build(),
+        );
+
+        let config_path = temp_config
+            .to_str()
+            .unwrap_or("/tmp/onvif-start-with-platform-success.toml")
+            .to_string();
+        let app = Application::start_with_platform(&config_path, platform)
+            .await
+            .expect("application should start with custom platform");
+
+        assert_eq!(app.config_path(), config_path);
+
+        let report = app.shutdown().await;
+        assert_eq!(report.status, ShutdownStatus::Success);
+        assert!(
+            report
+                .successful_components
+                .iter()
+                .any(|component| component == "network")
+        );
+
+        let _ = std::fs::remove_file(&temp_config);
+    }
+
+    #[tokio::test]
+    async fn test_application_shutdown_without_app_state_still_marks_platform_success() {
+        let app = make_application_with_degraded_services(Vec::new());
+        let report = app.shutdown().await;
+
+        assert_eq!(report.status, ShutdownStatus::Success);
+        assert!(
+            report
+                .successful_components
+                .iter()
+                .any(|component| component == "platform")
+        );
     }
 }

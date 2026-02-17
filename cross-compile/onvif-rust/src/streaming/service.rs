@@ -210,6 +210,9 @@ impl StreamingService {
     /// starts fanout tasks. Returns the bridge that should be registered with
     /// the platform as a `FrameCallback`.
     pub async fn start(&mut self) -> Result<Arc<StreamingBridge>, anyhow::Error> {
+        Self::verify_port_available(self.config.rtsp_port, "RTSP")?;
+        Self::verify_port_available(self.config.httpflv_port, "HTTP-FLV")?;
+
         let mut streamhub = StreamsHub::new(None);
 
         // Create per-stream frame channels (bridge → fanout).
@@ -220,7 +223,7 @@ impl StreamingService {
         self.bridge = Arc::new(StreamingBridge::new(
             main_bridge_tx,
             sub_bridge_tx,
-            self.config.auth.as_ref().map(|_| 48000u32).unwrap_or(0),
+            self.config.audio_sample_rate,
         ));
 
         // Publish main stream (RTSP + HTTP-FLV).
@@ -267,6 +270,19 @@ impl StreamingService {
         );
 
         Ok(Arc::clone(&self.bridge))
+    }
+
+    fn verify_port_available(port: u16, service: &'static str) -> Result<(), anyhow::Error> {
+        std::net::TcpListener::bind(("0.0.0.0", port))
+            .map(drop)
+            .map_err(|error| {
+                anyhow::anyhow!(
+                    "{} port {} is unavailable for startup: {}",
+                    service,
+                    port,
+                    error
+                )
+            })
     }
 
     /// Get a reference to the streaming bridge.
@@ -363,34 +379,34 @@ impl StreamingService {
             let mut httpflv_remuxer: Option<ValidationHttpFlvRemuxer> = None;
             let mut cached_sps: Option<Vec<u8>> = None;
             let mut cached_pps: Option<Vec<u8>> = None;
-            
+
             while let Some(frame) = bridge_rx.recv().await {
                 let stream = if is_main {
                     &bridge_ref.main_stream
                 } else {
                     &bridge_ref.sub_stream
                 };
-                
+
                 let current_sps = stream.sps.read().deref().clone();
                 let current_pps = stream.pps.read().deref().clone();
-                
+
                 // Check if SPS/PPS have changed or remuxer needs initialization
                 let needs_refresh = httpflv_remuxer.is_none()
                     || current_sps != cached_sps
                     || current_pps != cached_pps;
-                
-                if needs_refresh {
-                    if let (Some(sps), Some(pps)) = (current_sps.clone(), current_pps.clone()) {
-                        let audio_config = bridge_ref.audio_config.read().deref().clone();
-                        httpflv_remuxer = Some(ValidationHttpFlvRemuxer::new(
-                            sps.clone(),
-                            pps.clone(),
-                            audio_config,
-                            bridge_ref.audio_sample_rate,
-                        ));
-                        cached_sps = Some(sps);
-                        cached_pps = Some(pps);
-                    }
+
+                if needs_refresh
+                    && let (Some(sps), Some(pps)) = (current_sps.clone(), current_pps.clone())
+                {
+                    let audio_config = bridge_ref.audio_config.read().deref().clone();
+                    httpflv_remuxer = Some(ValidationHttpFlvRemuxer::new(
+                        sps.clone(),
+                        pps.clone(),
+                        audio_config,
+                        bridge_ref.audio_sample_rate,
+                    ));
+                    cached_sps = Some(sps);
+                    cached_pps = Some(pps);
                 }
 
                 // Always fan out to RTSP. HTTP-FLV gets the remuxed version.
@@ -567,5 +583,60 @@ mod tests {
 
         // No SDP should be sent when SPS/PPS are not yet available.
         assert!(info_rx.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn test_streaming_service_start_fails_when_rtsp_port_is_in_use() {
+        let rtsp_listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let rtsp_port = rtsp_listener.local_addr().unwrap().port();
+
+        let httpflv_listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let httpflv_port = httpflv_listener.local_addr().unwrap().port();
+        drop(httpflv_listener);
+
+        let config = StreamingConfig {
+            rtsp_port,
+            httpflv_port,
+            ..StreamingConfig::default()
+        };
+
+        let mut service = StreamingService::new(config);
+        let start_result = service.start().await;
+
+        if start_result.is_ok() {
+            service.shutdown().await;
+        }
+
+        assert!(
+            start_result.is_err(),
+            "expected startup to fail when RTSP port is already bound"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_streaming_service_start_uses_configured_audio_sample_rate() {
+        let rtsp_listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let rtsp_port = rtsp_listener.local_addr().unwrap().port();
+        drop(rtsp_listener);
+
+        let httpflv_listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let httpflv_port = httpflv_listener.local_addr().unwrap().port();
+        drop(httpflv_listener);
+
+        let config = StreamingConfig {
+            rtsp_port,
+            httpflv_port,
+            audio_sample_rate: 44_100,
+            ..StreamingConfig::default()
+        };
+
+        let mut service = StreamingService::new(config);
+        let start_result = service.start().await;
+        assert!(start_result.is_ok(), "streaming startup should succeed");
+
+        let bridge = start_result.unwrap();
+        assert_eq!(bridge.audio_sample_rate, 44_100);
+
+        service.shutdown().await;
     }
 }
