@@ -29,10 +29,46 @@ pub fn fanout_frame(
         return;
     }
 
+    // Log the RTSP dispatch
+    match &frame {
+        FrameData::Video { timestamp, data } => {
+            tracing::trace!(
+                timestamp,
+                size = data.len(),
+                "Dispatching video frame to RTSP"
+            );
+        }
+        FrameData::Audio { timestamp, data } => {
+            tracing::trace!(
+                timestamp,
+                size = data.len(),
+                "Dispatching audio frame to RTSP"
+            );
+        }
+        _ => {}
+    }
+
     let _ = frame_tx_rtsp.send(frame.clone());
     if let (Some(tx_httpflv), Some(remuxer)) = (frame_tx_httpflv, httpflv_remuxer) {
         match remuxer.remux_frame(frame) {
             Ok(Some(remuxed_frame)) => {
+                match &remuxed_frame {
+                    FrameData::Video { timestamp, data } => {
+                        tracing::trace!(
+                            timestamp,
+                            remuxed_size = data.len(),
+                            "Dispatching remuxed video to HTTP-FLV"
+                        );
+                    }
+                    FrameData::Audio { timestamp, data } => {
+                        tracing::trace!(
+                            timestamp,
+                            remuxed_size = data.len(),
+                            "Dispatching remuxed audio to HTTP-FLV"
+                        );
+                    }
+                    _ => {}
+                }
                 let _ = tx_httpflv.send(remuxed_frame);
             }
             Ok(None) => {}
@@ -93,19 +129,32 @@ pub fn send_httpflv_prior_frames(
     timestamp: u32,
     bootstrap_idr: Option<&[u8]>,
 ) -> Result<(), StreamHubError> {
+    tracing::debug!(
+        timestamp,
+        has_bootstrap_idr = bootstrap_idr.is_some(),
+        "Sending HTTP-FLV prior frames to late-joining subscriber"
+    );
+
     let video_sequence_header = remuxer.video_sequence_header(timestamp).map_err(|err| {
         stream_hub_error(format!(
             "failed to build HTTP-FLV video sequence header: {}",
             err
         ))
     })?;
+    if let FrameData::Video { data, .. } = &video_sequence_header {
+        tracing::debug!(size = data.len(), "Sending video sequence header");
+    }
     send_frame(frame_sender, video_sequence_header)?;
 
     if let Some(audio_sequence_header) = remuxer.audio_sequence_header(timestamp) {
+        if let FrameData::Audio { data, .. } = &audio_sequence_header {
+            tracing::debug!(size = data.len(), "Sending audio sequence header");
+        }
         send_frame(frame_sender, audio_sequence_header)?;
     }
 
     if let Some(idr) = bootstrap_idr {
+        tracing::debug!(size = idr.len(), "Sending bootstrap IDR to subscriber");
         match remuxer.remux_video_frame(timestamp, BytesMut::from(idr)) {
             Ok(Some(frame)) => send_frame(frame_sender, frame)?,
             Ok(None) => {}

@@ -80,6 +80,14 @@ impl StreamingBridge {
         let data = BytesMut::from(unsafe { std::slice::from_raw_parts(frame.data, frame.size) });
         let timestamp_ms = (frame.timestamp / 1000) as u32;
 
+        tracing::trace!(
+            stream = ?frame.stream_id,
+            size = frame.size,
+            timestamp_ms,
+            frame_type = ?frame.frame_type,
+            "Bridge routing frame"
+        );
+
         match frame.stream_id {
             StreamId::VideoMain => {
                 self.process_video_frame(&self.main_stream, frame, data, timestamp_ms);
@@ -93,8 +101,12 @@ impl StreamingBridge {
                     data: data.clone(),
                 };
                 // Audio goes to both streams.
-                let _ = self.main_stream.frame_tx.send(frame_data.clone());
-                let _ = self.sub_stream.frame_tx.send(frame_data);
+                if self.main_stream.frame_tx.send(frame_data.clone()).is_err() {
+                    tracing::warn!("Failed to send audio frame to main stream channel (closed)");
+                }
+                if self.sub_stream.frame_tx.send(frame_data).is_err() {
+                    tracing::warn!("Failed to send audio frame to sub stream channel (closed)");
+                }
             }
         }
     }
@@ -107,42 +119,104 @@ impl StreamingBridge {
         data: BytesMut,
         timestamp_ms: u32,
     ) {
+        let stream_name = match frame.stream_id {
+            StreamId::VideoMain => "main",
+            StreamId::VideoSub => "sub",
+            StreamId::Audio => "audio",
+        };
+
         stream
             .last_timestamp_ms
             .store(timestamp_ms, portable_atomic::Ordering::Relaxed);
 
         if frame.frame_type == FrameType::VideoIFrame {
+            tracing::debug!(
+                stream = stream_name,
+                size = data.len(),
+                timestamp_ms,
+                "IDR frame received"
+            );
             // Parse Annex-B NAL units to extract SPS and PPS.
             self.extract_parameter_sets(stream, &data);
             // Cache the full IDR for late-joining subscribers.
             *stream.bootstrap_idr.write() = Some(data.to_vec());
         }
 
+        tracing::trace!(
+            stream = stream_name,
+            size = data.len(),
+            timestamp_ms,
+            frame_type = ?frame.frame_type,
+            "Video frame sent to channel"
+        );
+
         let frame_data = FrameData::Video {
             timestamp: timestamp_ms,
             data,
         };
-        let _ = stream.frame_tx.send(frame_data);
+        if stream.frame_tx.send(frame_data).is_err() {
+            tracing::warn!(
+                stream = stream_name,
+                "Failed to send video frame to channel (closed)"
+            );
+        }
     }
 
     /// Scan Annex-B NAL units in an IDR frame to extract and cache SPS/PPS.
     fn extract_parameter_sets(&self, stream: &StreamState, data: &[u8]) {
+        let mut found_sps = false;
+        let mut found_pps = false;
+
         for nal in AnnexBIterator::new(data) {
             if nal.is_empty() {
                 continue;
             }
             let nal_type = nal[0] & 0x1F;
+            tracing::trace!(nal_type, size = nal.len(), "Parsed NAL unit");
             match nal_type {
                 7 => {
                     // SPS
+                    let hex_prefix: String = nal
+                        .iter()
+                        .take(8)
+                        .map(|b| format!("{:02x}", b))
+                        .collect::<Vec<_>>()
+                        .join(" ");
+                    tracing::debug!(
+                        size = nal.len(),
+                        hex_prefix = %hex_prefix,
+                        "SPS extracted/updated"
+                    );
                     *stream.sps.write() = Some(nal.to_vec());
+                    found_sps = true;
                 }
                 8 => {
                     // PPS
+                    let hex_prefix: String = nal
+                        .iter()
+                        .take(8)
+                        .map(|b| format!("{:02x}", b))
+                        .collect::<Vec<_>>()
+                        .join(" ");
+                    tracing::debug!(
+                        size = nal.len(),
+                        hex_prefix = %hex_prefix,
+                        "PPS extracted/updated"
+                    );
                     *stream.pps.write() = Some(nal.to_vec());
+                    found_pps = true;
                 }
                 _ => {}
             }
+        }
+
+        if !found_sps || !found_pps {
+            tracing::warn!(
+                found_sps,
+                found_pps,
+                idr_size = data.len(),
+                "IDR frame missing SPS and/or PPS (stream may be corrupt)"
+            );
         }
     }
 }

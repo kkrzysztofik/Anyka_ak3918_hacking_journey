@@ -30,6 +30,7 @@ use std::ffi::{CString, c_char, c_void};
 use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
 
 #[cfg(not(use_stubs))]
 use crate::ffi::generated::{
@@ -64,6 +65,10 @@ pub(crate) trait VideoFfiTrait: Send + Sync {
     fn venc_get_stream(&self, stream_handle: *mut c_void, stream: *mut video_stream) -> i32;
     fn venc_release_stream(&self, stream_handle: *mut c_void, stream: *mut video_stream) -> i32;
     fn venc_cancel_stream(&self, stream_handle: *mut c_void) -> i32;
+    /// Get the last SDK error number (thread-local).
+    fn get_error_no(&self) -> i32;
+    /// Get the last SDK error string (thread-local). Returns empty string on stub.
+    fn get_error_str(&self) -> String;
 }
 
 /// Default implementation that calls the real FFI functions.
@@ -317,6 +322,40 @@ impl VideoFfiTrait for RealVideoFfi {
     fn venc_cancel_stream(&self, _stream_handle: *mut c_void) -> i32 {
         AK_SUCCESS_I32
     }
+
+    #[cfg(not(use_stubs))]
+    fn get_error_no(&self) -> i32 {
+        unsafe extern "C" {
+            fn ak_get_error_no() -> i32;
+        }
+        unsafe { ak_get_error_no() }
+    }
+
+    #[cfg(use_stubs)]
+    fn get_error_no(&self) -> i32 {
+        0
+    }
+
+    #[cfg(not(use_stubs))]
+    fn get_error_str(&self) -> String {
+        unsafe extern "C" {
+            fn ak_get_error_str(error_no: i32) -> *const c_char;
+        }
+        let errno = self.get_error_no();
+        let ptr = unsafe { ak_get_error_str(errno) };
+        if ptr.is_null() {
+            String::new()
+        } else {
+            unsafe { std::ffi::CStr::from_ptr(ptr) }
+                .to_string_lossy()
+                .into_owned()
+        }
+    }
+
+    #[cfg(use_stubs)]
+    fn get_error_str(&self) -> String {
+        String::new()
+    }
 }
 
 // Global instance for default FFI implementation
@@ -347,6 +386,34 @@ fn check_result(ret: i32, context: &str) -> PlatformResult<()> {
     }
 }
 
+/// Run a blocking FFI call on a dedicated thread with a timeout.
+/// Returns `Ok(ret)` if the call completed within the deadline, `Err(())` if it
+/// timed out. On timeout the spawned thread is detached — we cannot force-kill a
+/// thread stuck in kernel I/O.
+fn ffi_call_with_timeout<F>(name: &str, timeout: Duration, f: F) -> Result<i32, ()>
+where
+    F: FnOnce() -> i32 + Send + 'static,
+{
+    let (tx, rx) = std::sync::mpsc::channel();
+    let join_handle = std::thread::spawn(move || {
+        let ret = f();
+        let _ = tx.send(ret);
+    });
+    match rx.recv_timeout(timeout) {
+        Ok(ret) => {
+            // Thread finished — join it to clean up
+            let _ = join_handle.join();
+            Ok(ret)
+        }
+        Err(_) => {
+            tracing::error!("FFI call '{}' timed out after {:?}", name, timeout);
+            // Detach the stuck thread
+            std::mem::forget(join_handle);
+            Err(())
+        }
+    }
+}
+
 /// RAII handle for video input device.
 ///
 /// This handle automatically closes the video input device when dropped,
@@ -370,7 +437,10 @@ impl Drop for VideoInputHandle {
         if let Some(handle) = self.handle
             && !handle.is_null()
         {
-            let _ = REAL_VIDEO_FFI.vi_close(handle);
+            let handle_ptr = handle as usize; // Copy for Send
+            let _ = ffi_call_with_timeout("ak_vi_close", Duration::from_secs(3), move || {
+                REAL_VIDEO_FFI.vi_close(handle_ptr as *mut c_void)
+            });
         }
     }
 }
@@ -766,7 +836,10 @@ impl Drop for VideoEncoderHandle {
         if let Some(handle) = self.handle
             && !handle.is_null()
         {
-            let _ = REAL_VIDEO_FFI.venc_close(handle);
+            let handle_ptr = handle as usize; // Copy for Send
+            let _ = ffi_call_with_timeout("ak_venc_close", Duration::from_secs(3), move || {
+                REAL_VIDEO_FFI.venc_close(handle_ptr as *mut c_void)
+            });
         }
     }
 }
@@ -804,15 +877,7 @@ unsafe impl Sync for VideoStreamHandle {}
 
 impl Drop for VideoStreamHandle {
     fn drop(&mut self) {
-        if !self.handle.is_null() && !self.cancelled.load(Ordering::SeqCst) {
-            let ret = self.ffi.venc_cancel_stream(self.handle);
-            if ret != AK_SUCCESS_I32 {
-                tracing::warn!(
-                    "ak_venc_cancel_stream failed during drop: error code {}",
-                    ret
-                );
-            }
-        }
+        let _ = self.cancel_with_timeout(Duration::from_secs(2));
     }
 }
 
@@ -825,12 +890,26 @@ impl VideoStreamHandle {
         venc_handle: *mut c_void,
         ffi: Arc<dyn VideoFfiTrait>,
     ) -> PlatformResult<Self> {
+        tracing::debug!(
+            vi_handle = ?vi_handle,
+            venc_handle = ?venc_handle,
+            "Requesting video stream from SDK"
+        );
         let handle = ffi.venc_request_stream(vi_handle, venc_handle);
         if handle.is_null() {
+            tracing::error!(
+                vi_handle = ?vi_handle,
+                venc_handle = ?venc_handle,
+                "venc_request_stream returned null"
+            );
             return Err(PlatformError::HardwareFailure(
                 "ak_venc_request_stream returned null".to_string(),
             ));
         }
+        tracing::debug!(
+            stream_handle = ?handle,
+            "Video stream requested successfully"
+        );
         Ok(Self {
             handle,
             ffi,
@@ -839,19 +918,43 @@ impl VideoStreamHandle {
     }
 
     /// Explicitly cancel the stream to unblock pending `ak_venc_get_stream()` calls.
+    ///
     /// Idempotent — safe to call multiple times; only the first call invokes the SDK.
-    pub fn cancel(&self) {
+    /// Returns `true` when the cancel call completed (success or SDK error), `false` on
+    /// timeout.
+    pub fn cancel(&self) -> bool {
+        self.cancel_with_timeout(Duration::from_secs(2))
+    }
+
+    /// Explicitly cancel the stream with a caller-specified timeout.
+    ///
+    /// This is used by shutdown paths that must not block indefinitely when vendor
+    /// SDK calls are stuck in kernel I/O.
+    pub fn cancel_with_timeout(&self, timeout: Duration) -> bool {
         if self.cancelled.swap(true, Ordering::SeqCst) {
-            return; // Already cancelled
+            return true; // Already cancelled
         }
-        if !self.handle.is_null() {
-            let ret = self.ffi.venc_cancel_stream(self.handle);
-            if ret != 0 {
-                tracing::warn!(
-                    "ak_venc_cancel_stream failed during explicit cancel: {}",
-                    ret
-                );
+        if self.handle.is_null() {
+            return true;
+        }
+
+        let handle_ptr = self.handle as usize; // Copy for Send
+        let ffi = Arc::clone(&self.ffi);
+        tracing::info!(stream_handle = ?self.handle, "Cancelling video stream");
+        match ffi_call_with_timeout("ak_venc_cancel_stream", timeout, move || {
+            ffi.venc_cancel_stream(handle_ptr as *mut c_void)
+        }) {
+            Ok(ret) => {
+                if ret != AK_SUCCESS_I32 {
+                    tracing::warn!(
+                        stream_handle = ?self.handle,
+                        error_code = ret,
+                        "ak_venc_cancel_stream failed during explicit cancel"
+                    );
+                }
+                true
             }
+            Err(()) => false,
         }
     }
 
@@ -953,6 +1056,7 @@ pub(crate) fn video_encoder_request_idr_internal(
 /// * `Ok(())` on success
 /// * `Err(PlatformError::HardwareFailure)` on SDK error
 pub fn video_encoder_request_idr(handle: &VideoEncoderHandle) -> PlatformResult<()> {
+    tracing::debug!(encoder_handle = ?handle.as_ptr(), "Forcing IDR frame");
     video_encoder_request_idr_internal(handle, &REAL_VIDEO_FFI)
 }
 

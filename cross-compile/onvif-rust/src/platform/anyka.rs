@@ -24,6 +24,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
 
 use async_trait::async_trait;
 use parking_lot::RwLock;
@@ -263,6 +264,7 @@ impl Platform for AnykaPlatform {
     }
 
     async fn shutdown(&self) -> PlatformResult<()> {
+        tracing::info!("Platform shutdown: starting PTZ stop...");
         // Best-effort PTZ stop — the PTZHandle Drop will call ptz_close.
         // We log errors but do not abort shutdown for a single subsystem failure.
         if let Some(ref ptz) = self.ptz_control
@@ -273,9 +275,11 @@ impl Platform for AnykaPlatform {
                 e
             );
         }
+        tracing::info!("Platform shutdown: PTZ stop complete, stopping streaming...");
 
         // Stop frame production threads before closing encoders
         self.video_encoder.stop_streaming();
+        tracing::info!("Platform shutdown: streaming stopped, closing encoders...");
 
         if let Err(e) = self.video_encoder.close_all_encoders() {
             tracing::warn!(
@@ -283,6 +287,7 @@ impl Platform for AnykaPlatform {
                 e
             );
         }
+        tracing::info!("Platform shutdown: encoders closed, stopping capture...");
 
         // Stop capture BEFORE closing video input.
         if let Err(e) = self.video_input.capture_off() {
@@ -291,6 +296,7 @@ impl Platform for AnykaPlatform {
                 e
             );
         }
+        tracing::info!("Platform shutdown: capture stopped, closing video input...");
 
         // Close video input (RAII handle will call ak_vi_close)
         if let Err(e) = self.video_input.close().await {
@@ -299,6 +305,7 @@ impl Platform for AnykaPlatform {
                 e
             );
         }
+        tracing::info!("Platform shutdown: video input closed");
 
         // Video encoder handles are dropped via RAII (VideoEncoderHandle::Drop
         // calls ak_venc_close). The handles are stored in AnykaVideoEncoder's
@@ -308,6 +315,7 @@ impl Platform for AnykaPlatform {
         // - ak_ai_close()
         // - ak_aenc_close()
         self.initialized.store(false, Ordering::SeqCst);
+        tracing::info!("Platform shutdown: complete");
         Ok(())
     }
 
@@ -833,7 +841,7 @@ impl VideoInput for AnykaVideoInput {
 
 use std::collections::HashMap;
 use std::panic::AssertUnwindSafe;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use portable_atomic::AtomicU64;
 
@@ -895,13 +903,17 @@ fn frame_read_loop(
 ) {
     use crate::ffi::AK_SUCCESS_I32;
 
-    tracing::info!("Frame read loop started for {:?}", stream_id);
+    tracing::info!(stream = ?stream_id, "Frame read loop started");
 
     // Allow the SDK's internal encoder thread to initialize before polling.
     // The C reference (platform_anyka.c:2673) uses PLATFORM_DELAY_MS_MEDIUM (100ms).
     std::thread::sleep(Duration::from_millis(100));
 
     let mut consecutive_errors: u32 = 0;
+    let mut frame_count: u64 = 0;
+    let mut total_bytes: u64 = 0;
+    let mut iframe_count: u64 = 0;
+    let mut error_count: u64 = 0;
 
     while !stop_signal.load(Ordering::SeqCst) {
         let mut stream = std::mem::MaybeUninit::<video_stream>::uninit();
@@ -913,11 +925,26 @@ fn frame_read_loop(
             if stop_signal.load(Ordering::SeqCst) {
                 break;
             }
+            consecutive_errors += 1;
+            error_count += 1;
+            // Log SDK error details on first error and every 50th consecutive error
+            // to avoid flooding logs while still providing diagnostics.
+            if consecutive_errors == 1 || consecutive_errors.is_multiple_of(50) {
+                let sdk_errno = ffi.get_error_no();
+                let sdk_errstr = ffi.get_error_str();
+                tracing::warn!(
+                    stream = ?stream_id,
+                    error_code = ret,
+                    consecutive_errors,
+                    sdk_errno,
+                    sdk_error = %sdk_errstr,
+                    "venc_get_stream failed"
+                );
+            }
             // Exponential backoff: 10ms → 20ms → 40ms → 80ms → 100ms max.
             // The C reference uses base 50ms with 2x backoff up to 200ms.
             let delay = std::cmp::min(10u64 * (1u64 << consecutive_errors.min(3)), 100);
             std::thread::sleep(Duration::from_millis(delay));
-            consecutive_errors += 1;
             continue;
         }
 
@@ -928,10 +955,37 @@ fn frame_read_loop(
 
         if !stream_data.data.is_null() && stream_data.len > 0 {
             let frame_type = sdk_frame_type_to_frame_type(stream_data.frame_type);
+            let frame_size = stream_data.len as usize;
+
+            tracing::trace!(
+                stream = ?stream_id,
+                size = frame_size,
+                timestamp_ms = stream_data.ts,
+                frame_type = ?frame_type,
+                "Frame retrieved from SDK"
+            );
+
+            frame_count += 1;
+            total_bytes += frame_size as u64;
+            if matches!(frame_type, FrameType::VideoIFrame) {
+                iframe_count += 1;
+            }
+
+            // Periodic summary every 300 frames (~10s at 30fps)
+            if frame_count.is_multiple_of(300) {
+                tracing::debug!(
+                    stream = ?stream_id,
+                    frames = frame_count,
+                    total_bytes,
+                    iframes = iframe_count,
+                    errors = error_count,
+                    "Frame read loop progress"
+                );
+            }
 
             let frame = Frame {
                 data: stream_data.data as *const u8,
-                size: stream_data.len as usize,
+                size: frame_size,
                 // SDK timestamps are in milliseconds; Frame uses microseconds
                 timestamp: stream_data.ts.wrapping_mul(1000),
                 frame_type,
@@ -940,6 +994,13 @@ fn frame_read_loop(
 
             // Invoke all callbacks (panic-isolated)
             invoke_callbacks_from_map(&callbacks, &frame);
+        } else {
+            tracing::trace!(
+                stream = ?stream_id,
+                data_null = stream_data.data.is_null(),
+                len = stream_data.len,
+                "Frame skipped: null data or zero length"
+            );
         }
 
         // Release the SDK buffer back to the encoder.
@@ -947,9 +1008,17 @@ fn frame_read_loop(
         // The data pointer is owned by the SDK and must be returned.
         // This MUST happen even during shutdown to avoid leaking SDK buffers.
         let _ = ffi.venc_release_stream(stream_handle.as_ptr(), &mut stream_data);
+        tracing::trace!(stream = ?stream_id, "SDK buffer released");
     }
 
-    tracing::info!("Frame read loop exited for {:?}", stream_id);
+    tracing::info!(
+        stream = ?stream_id,
+        total_frames = frame_count,
+        total_bytes,
+        total_iframes = iframe_count,
+        total_errors = error_count,
+        "Frame read loop exited"
+    );
 }
 
 /// Invoke all registered callbacks with a frame, isolating panics.
@@ -961,12 +1030,28 @@ fn invoke_callbacks_from_map(
     frame: &Frame,
 ) {
     let cbs = callbacks.read();
+    let cb_count = cbs.len();
+    tracing::trace!(
+        callback_count = cb_count,
+        stream = ?frame.stream_id,
+        "Invoking frame callbacks"
+    );
     let mut failed = Vec::new();
 
     for (id, cb) in cbs.iter() {
+        let start = std::time::Instant::now();
         let result = std::panic::catch_unwind(AssertUnwindSafe(|| {
             cb.on_frame(frame);
         }));
+        let elapsed = start.elapsed();
+
+        if elapsed > Duration::from_millis(2) {
+            tracing::warn!(
+                callback_id = %id,
+                elapsed_us = elapsed.as_micros() as u64,
+                "Callback exceeded 2ms threshold (violates bridge contract)"
+            );
+        }
 
         if result.is_err() {
             tracing::error!("Frame callback {} panicked, marking for removal", id);
@@ -1016,6 +1101,41 @@ struct AnykaVideoEncoder {
     main_read_thread: RwLock<Option<std::thread::JoinHandle<()>>>,
     sub_read_thread: RwLock<Option<std::thread::JoinHandle<()>>>,
     stop_signal: Arc<AtomicBool>,
+}
+
+/// Join a thread with a timeout. Returns `true` if the thread completed (success or
+/// panic), `false` if the join timed out. On timeout the helper thread is detached
+/// via `std::mem::forget` — we cannot force-kill a thread stuck in kernel I/O.
+fn join_thread_with_timeout(
+    thread: std::thread::JoinHandle<()>,
+    name: &str,
+    timeout: Duration,
+) -> bool {
+    let (tx, rx) = std::sync::mpsc::channel();
+    let join_thread = std::thread::spawn(move || {
+        let result = thread.join();
+        let _ = tx.send(result);
+    });
+    match rx.recv_timeout(timeout) {
+        Ok(Ok(())) => {
+            tracing::info!("Thread '{}' joined successfully", name);
+            true
+        }
+        Ok(Err(e)) => {
+            tracing::warn!("Thread '{}' panicked: {:?}", name, e);
+            true
+        }
+        Err(_) => {
+            tracing::error!(
+                "Thread '{}' join timed out after {:?} — thread may be stuck in kernel I/O",
+                name,
+                timeout
+            );
+            // Detach — we cannot force-kill a stuck thread
+            std::mem::forget(join_thread);
+            false
+        }
+    }
 }
 
 impl AnykaVideoEncoder {
@@ -1188,10 +1308,19 @@ impl AnykaVideoEncoder {
         )?);
         *self.main_stream_handle.write() = Some(Arc::clone(&main_sh));
 
+        // Force the first encoded frame to be an I-frame. The C reference
+        // (dana_av.c:298) always calls ak_venc_set_iframe() immediately after
+        // ak_venc_request_stream() — this appears necessary to kick-start the
+        // encoder pipeline; without it, venc_get_stream() returns -1 indefinitely.
+        if let Err(e) = video_encoder_request_idr_internal(main_enc, self.ffi.as_ref()) {
+            tracing::warn!("Failed to set initial I-frame for main stream: {}", e);
+        }
+
         // Allow the SDK encoder process thread to start up before we poll.
         // The C reference (platform_anyka.c:609) uses PLATFORM_DELAY_MS_RETRY (200ms)
         // for post-capture/post-request stabilization.
         std::thread::sleep(Duration::from_millis(200));
+        tracing::debug!("Main stream stabilization delay complete (200ms)");
 
         // Spawn main read thread
         let main_thread = {
@@ -1223,8 +1352,14 @@ impl AnykaVideoEncoder {
             )?);
             *self.sub_stream_handle.write() = Some(Arc::clone(&sub_sh));
 
+            // Force initial I-frame for sub stream (same rationale as main stream above).
+            if let Err(e) = video_encoder_request_idr_internal(sub, self.ffi.as_ref()) {
+                tracing::warn!("Failed to set initial I-frame for sub stream: {}", e);
+            }
+
             // Same stabilization delay as main stream (see above).
             std::thread::sleep(Duration::from_millis(200));
+            tracing::debug!("Sub stream stabilization delay complete (200ms)");
 
             let sub_thread = {
                 let ffi = Arc::clone(&self.ffi);
@@ -1250,34 +1385,63 @@ impl AnykaVideoEncoder {
         Ok(())
     }
 
-    /// Stop streaming: signal threads to stop, cancel streams (unblocking SDK calls),
-    /// then join the reader threads.
+    /// Stop streaming by quiescing readers first, then cancelling stream handles.
+    ///
+    /// Vendor SDK contract (`ak_venc_cancel_stream`) requires no concurrent
+    /// `ak_venc_get_stream` calls while cancelling. We therefore signal stop,
+    /// join reader threads, and only then call cancel. If threads fail to join,
+    /// we still attempt a timed cancel as a best-effort fallback.
     pub fn stop_streaming(&self) {
+        tracing::info!("stop_streaming: signalling stop...");
         self.stop_signal.store(true, Ordering::SeqCst);
 
-        // Cancel streams to unblock ak_venc_get_stream() in reader threads.
-        // Must happen BEFORE thread join — threads hold Arc clones so RAII won't fire.
-        if let Some(handle) = self.main_stream_handle.read().as_ref() {
-            handle.cancel();
-        }
-        if let Some(handle) = self.sub_stream_handle.read().as_ref() {
-            handle.cancel();
-        }
+        let main_stream_handle = self.main_stream_handle.read().clone();
+        let sub_stream_handle = self.sub_stream_handle.read().clone();
 
-        // Now join threads — they will exit because venc_get_stream returns error
-        // and stop_signal is set.
-        if let Some(thread) = self.main_read_thread.write().take()
-            && let Err(e) = thread.join()
-        {
-            tracing::warn!("Main read thread panicked during join: {:?}", e);
+        // Join threads first so we do not cancel while `venc_get_stream()` is in-flight.
+        let main_joined = if let Some(thread) = self.main_read_thread.write().take() {
+            tracing::info!("stop_streaming: joining main read thread...");
+            join_thread_with_timeout(thread, "main-read", Duration::from_secs(3))
+        } else {
+            true
+        };
+        let sub_joined = if let Some(thread) = self.sub_read_thread.write().take() {
+            tracing::info!("stop_streaming: joining sub read thread...");
+            join_thread_with_timeout(thread, "sub-read", Duration::from_secs(3))
+        } else {
+            true
+        };
+
+        // Timed cancel prevents a shutdown hang when the vendor call blocks.
+        if let Some(handle) = main_stream_handle {
+            tracing::info!("stop_streaming: cancelling main stream...");
+            if !main_joined {
+                tracing::warn!(
+                    "stop_streaming: main read thread did not join before cancel; forcing timed cancel"
+                );
+            }
+            if handle.cancel_with_timeout(Duration::from_secs(2)) {
+                tracing::info!("stop_streaming: main stream cancelled");
+            } else {
+                tracing::error!("stop_streaming: main stream cancel timed out");
+            }
         }
-        if let Some(thread) = self.sub_read_thread.write().take()
-            && let Err(e) = thread.join()
-        {
-            tracing::warn!("Sub read thread panicked during join: {:?}", e);
+        if let Some(handle) = sub_stream_handle {
+            tracing::info!("stop_streaming: cancelling sub stream...");
+            if !sub_joined {
+                tracing::warn!(
+                    "stop_streaming: sub read thread did not join before cancel; forcing timed cancel"
+                );
+            }
+            if handle.cancel_with_timeout(Duration::from_secs(2)) {
+                tracing::info!("stop_streaming: sub stream cancelled");
+            } else {
+                tracing::error!("stop_streaming: sub stream cancel timed out");
+            }
         }
 
         // Drop stream handles (threads are done, RAII Drop is now a no-op due to cancelled flag).
+        tracing::info!("stop_streaming: dropping stream handles...");
         let _ = self.main_stream_handle.write().take();
         let _ = self.sub_stream_handle.write().take();
 
@@ -3076,6 +3240,27 @@ mod tests {
         drop(sh); // Should call venc_cancel_stream exactly once
     }
 
+    #[test]
+    fn test_video_stream_handle_explicit_cancel_is_idempotent() {
+        let mut mock = MockVideoFfiTrait::new();
+        let test_ptr = std::ptr::NonNull::<c_void>::dangling().as_ptr() as usize;
+
+        mock.expect_venc_request_stream()
+            .returning(move |_, _| test_ptr as *mut c_void);
+        mock.expect_venc_cancel_stream()
+            .withf(move |handle| *handle == test_ptr as *mut c_void)
+            .times(1)
+            .returning(|_| AK_SUCCESS_I32);
+
+        let vi_handle = std::ptr::NonNull::<c_void>::dangling().as_ptr();
+        let venc_handle = std::ptr::NonNull::<c_void>::dangling().as_ptr();
+
+        let sh = VideoStreamHandle::new(vi_handle, venc_handle, Arc::new(mock)).unwrap();
+        assert!(sh.cancel());
+        assert!(sh.cancel()); // Second cancel is a no-op success
+        drop(sh); // Drop must not invoke cancel again
+    }
+
     // =========================================================================
     // Frame Type Conversion Tests
     // =========================================================================
@@ -3153,6 +3338,7 @@ mod tests {
     // =========================================================================
 
     #[test]
+    #[cfg(use_stubs)]
     fn test_frame_read_loop_invokes_callbacks() {
         use crate::ffi::VideoFrameType;
         use std::sync::atomic::AtomicUsize;
@@ -3308,6 +3494,9 @@ mod tests {
         // Stream lifecycle expectations
         mock.expect_venc_request_stream()
             .returning(move |_, _| test_ptr as *mut c_void);
+        mock.expect_venc_set_iframe()
+            .times(1)
+            .returning(|_| AK_SUCCESS_I32);
         mock.expect_venc_get_stream()
             .returning(|_, _| AK_FAILED_I32); // No frames in test
         mock.expect_venc_cancel_stream()

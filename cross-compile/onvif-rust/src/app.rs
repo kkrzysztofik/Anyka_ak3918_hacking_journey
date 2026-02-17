@@ -1337,7 +1337,16 @@ impl Application {
 
     async fn shutdown_streaming(&mut self, report: &mut ShutdownReport) {
         if let Some(mut streaming) = self.streaming_service.take() {
-            streaming.shutdown().await;
+            match tokio::time::timeout(Duration::from_secs(5), streaming.shutdown()).await {
+                Ok(()) => {
+                    report.record_success("streaming");
+                }
+                Err(_) => {
+                    tracing::error!("Streaming shutdown timed out after 5s");
+                    report.record_failure("streaming", "timeout".to_string());
+                }
+            }
+            return;
         }
         report.record_success("streaming");
     }
@@ -1352,12 +1361,19 @@ impl Application {
             report.record_success("platform");
             return;
         };
-        if let Err(e) = platform.shutdown().await {
-            tracing::warn!("Platform shutdown reported an error: {}", e);
-            report.record_failure("platform", e.to_string());
-            return;
+        match tokio::time::timeout(Duration::from_secs(10), platform.shutdown()).await {
+            Ok(Ok(())) => {
+                report.record_success("platform");
+            }
+            Ok(Err(e)) => {
+                tracing::warn!("Platform shutdown error: {}", e);
+                report.record_failure("platform", e.to_string());
+            }
+            Err(_) => {
+                tracing::error!("Platform shutdown timed out after 10s — possible stuck FFI call");
+                report.record_failure("platform", "timeout".to_string());
+            }
         }
-        report.record_success("platform");
     }
 
     /// Get the current health status of the application.

@@ -71,6 +71,13 @@ impl TStreamHandler for LiveStreamHandler {
         sender: DataSender,
         sub_type: SubscribeType,
     ) -> Result<(), StreamHubError> {
+        let stream_name = if self.is_main { "main" } else { "sub" };
+        tracing::debug!(
+            stream = stream_name,
+            sub_type = ?sub_type,
+            "Subscriber requesting prior data"
+        );
+
         if let DataSender::Frame {
             sender: frame_sender,
         } = sender
@@ -95,7 +102,30 @@ impl TStreamHandler for LiveStreamHandler {
             let pps = stream.pps.read().deref().clone();
             let bootstrap_idr = stream.bootstrap_idr.read().deref().clone();
 
+            let has_sps = sps.is_some();
+            let has_pps = pps.is_some();
+            let has_idr = bootstrap_idr.is_some();
+
+            if !has_sps || !has_pps {
+                tracing::warn!(
+                    stream = stream_name,
+                    has_sps,
+                    has_pps,
+                    "SPS/PPS missing when subscriber connects (client will see black screen)"
+                );
+            }
+
             if let (Some(sps), Some(pps)) = (sps, pps) {
+                tracing::debug!(
+                    stream = stream_name,
+                    sps_size = sps.len(),
+                    pps_size = pps.len(),
+                    has_bootstrap_idr = has_idr,
+                    idr_size = bootstrap_idr.as_ref().map(|i| i.len()).unwrap_or(0),
+                    timestamp,
+                    "Sending prior data to subscriber"
+                );
+
                 if matches!(sub_type, SubscribeType::RtmpRemux2HttpFlv) {
                     let mut remuxer = ValidationHttpFlvRemuxer::new(
                         sps,
@@ -145,9 +175,14 @@ impl TStreamHandler for LiveStreamHandler {
     }
 
     async fn send_information(&self, sender: InformationSender) {
+        let stream_name = if self.is_main { "main" } else { "sub" };
+        tracing::debug!(stream = stream_name, "Generating SDP information");
+
         let stream = self.stream();
         let sps = stream.sps.read().deref().clone();
         let pps = stream.pps.read().deref().clone();
+        let has_sps = sps.is_some();
+        let has_pps = pps.is_some();
         let audio_config = self.bridge.audio_config.read().deref().clone();
 
         if let (Some(sps), Some(pps)) = (sps, pps) {
@@ -157,7 +192,20 @@ impl TStreamHandler for LiveStreamHandler {
                 audio_config.as_deref(),
                 self.bridge.audio_sample_rate,
             );
+            tracing::debug!(
+                stream = stream_name,
+                sdp_length = sdp.len(),
+                has_audio = audio_config.is_some(),
+                "SDP generated"
+            );
             let _ = sender.send(Information::Sdp { data: sdp });
+        } else {
+            tracing::warn!(
+                stream = stream_name,
+                has_sps,
+                has_pps,
+                "Cannot generate SDP: SPS/PPS missing"
+            );
         }
     }
 }
@@ -291,13 +339,28 @@ impl StreamingService {
     }
 
     /// Gracefully shut down all streaming tasks.
+    ///
+    /// Aborts fanout tasks first (closing the bridge channel receivers), then
+    /// server tasks. The bridge senders (`frame_tx`) will return `Err` on
+    /// subsequent sends, which is handled gracefully by `let _ =` in
+    /// `route_frame`. This ordering ensures no new frames are forwarded to
+    /// servers that are being shut down.
     pub async fn shutdown(&mut self) {
         tracing::info!("Shutting down streaming service...");
 
-        // Abort all tasks.
+        // Abort fanout tasks first — this drops the bridge channel receivers,
+        // causing any in-flight bridge sends to fail gracefully.
+        tracing::info!("streaming shutdown: aborting fanout tasks...");
+        if let Some(task) = self.main_fanout_task.take() {
+            task.abort();
+        }
+        if let Some(task) = self.sub_fanout_task.take() {
+            task.abort();
+        }
+
+        // Then abort server tasks.
+        tracing::info!("streaming shutdown: aborting server tasks...");
         for task in [
-            self.main_fanout_task.take(),
-            self.sub_fanout_task.take(),
             self.rtsp_task.take(),
             self.httpflv_task.take(),
             self.streamhub_task.take(),
@@ -375,12 +438,36 @@ impl StreamingService {
         let bridge_ref = Arc::clone(&self.bridge);
 
         // Spawn fanout task: bridge_rx → rtsp_tx + httpflv_tx.
+        let fanout_stream_name = stream_name.to_string();
         let fanout_handle = tokio::spawn(async move {
             let mut httpflv_remuxer: Option<ValidationHttpFlvRemuxer> = None;
             let mut cached_sps: Option<Vec<u8>> = None;
             let mut cached_pps: Option<Vec<u8>> = None;
+            let mut fanout_frame_count: u64 = 0;
+            let mut fanout_bytes: u64 = 0;
+            let mut first_frame_logged = false;
 
             while let Some(frame) = bridge_rx.recv().await {
+                if !first_frame_logged {
+                    tracing::debug!(
+                        stream = %fanout_stream_name,
+                        "First frame received in fanout task (pipeline is flowing)"
+                    );
+                    first_frame_logged = true;
+                }
+
+                // Track frame statistics
+                match &frame {
+                    FrameData::Video { data, .. } => {
+                        fanout_bytes += data.len() as u64;
+                    }
+                    FrameData::Audio { data, .. } => {
+                        fanout_bytes += data.len() as u64;
+                    }
+                    _ => {}
+                }
+                fanout_frame_count += 1;
+
                 let stream = if is_main {
                     &bridge_ref.main_stream
                 } else {
@@ -398,6 +485,17 @@ impl StreamingService {
                 if needs_refresh
                     && let (Some(sps), Some(pps)) = (current_sps.clone(), current_pps.clone())
                 {
+                    if httpflv_remuxer.is_none() {
+                        tracing::debug!(
+                            stream = %fanout_stream_name,
+                            "HTTP-FLV remuxer initialized"
+                        );
+                    } else {
+                        tracing::debug!(
+                            stream = %fanout_stream_name,
+                            "SPS/PPS changed, refreshing HTTP-FLV remuxer"
+                        );
+                    }
                     let audio_config = bridge_ref.audio_config.read().deref().clone();
                     httpflv_remuxer = Some(ValidationHttpFlvRemuxer::new(
                         sps.clone(),
@@ -409,9 +507,37 @@ impl StreamingService {
                     cached_pps = Some(pps);
                 }
 
+                // Track I-frames
+                if matches!(&frame, FrameData::Video { .. }) {
+                    // We can't easily distinguish I/P frames here, but we count video frames
+                    // in the periodic summary
+                }
+
+                tracing::trace!(
+                    stream = %fanout_stream_name,
+                    frame_count = fanout_frame_count,
+                    "Fanout dispatching frame"
+                );
+
                 // Always fan out to RTSP. HTTP-FLV gets the remuxed version.
                 fanout_frame(&rtsp_tx, Some(&httpflv_tx), httpflv_remuxer.as_mut(), frame);
+
+                // Periodic summary every 300 frames
+                if fanout_frame_count.is_multiple_of(300) {
+                    tracing::debug!(
+                        stream = %fanout_stream_name,
+                        frames = fanout_frame_count,
+                        total_bytes = fanout_bytes,
+                        "Fanout task progress"
+                    );
+                }
             }
+
+            tracing::warn!(
+                stream = %fanout_stream_name,
+                total_frames = fanout_frame_count,
+                "Bridge channel closed, fanout loop exiting"
+            );
         });
 
         Ok(fanout_handle)

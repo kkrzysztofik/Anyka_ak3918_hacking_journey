@@ -24,7 +24,7 @@ use onvif_rust::streaming::helpers::{
 use onvif_rust::validation::h264_playback::{H264PlaybackConfig, H264PlaybackMode};
 use onvif_rust::validation::httpflv_remux::ValidationHttpFlvRemuxer;
 use onvif_rust::validation::stream_auth::build_stream_auth_for_validation_mode;
-use portable_atomic::{AtomicU32, AtomicUsize, Ordering};
+use portable_atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
 use std::backtrace::Backtrace;
 use std::panic::PanicHookInfo;
 use std::sync::{Arc, Once};
@@ -278,8 +278,15 @@ async fn run_normal_mode(config_path: &str) -> Result<()> {
         tracing::error!("Runtime error: {}", e);
     }
 
+    // Spawn shutdown watchdog — force exit if shutdown hangs beyond hard deadline.
+    // This prevents zombie processes when FFI calls are stuck in kernel D-state.
+    let watchdog = spawn_shutdown_watchdog(Duration::from_secs(20));
+
     // Perform graceful shutdown
     let report = app.shutdown().await;
+
+    // Cancel watchdog — shutdown completed normally
+    drop(watchdog);
 
     // Log shutdown report
     match report.status {
@@ -630,6 +637,9 @@ async fn run_validation_mode(config: H264PlaybackConfig, config_path: &str) -> R
     tracing::info!("Shutdown signal (Ctrl+C) received");
     tracing::info!("Initiating graceful shutdown...");
 
+    // Spawn shutdown watchdog for validation mode
+    let watchdog = spawn_shutdown_watchdog(Duration::from_secs(20));
+
     if let Some(application) = app {
         let report = application.shutdown().await;
         tracing::info!("ONVIF Application shutdown completed: {:?}", report.status);
@@ -658,9 +668,55 @@ async fn run_validation_mode(config: H264PlaybackConfig, config_path: &str) -> R
     platform.shutdown().await?;
     tracing::info!("Platform shutdown complete");
 
+    // Cancel watchdog — shutdown completed normally
+    drop(watchdog);
+
     tracing::info!("All servers and tasks shutdown");
     tracing::info!("H.264 Validation mode stopped");
     Ok(())
+}
+
+/// Spawn a watchdog thread that force-terminates the process if shutdown exceeds the
+/// given deadline. Returns a guard — dropping the guard signals the watchdog to exit
+/// cleanly. If the guard is *not* dropped (e.g. the main thread is stuck), the
+/// watchdog fires `std::process::exit(1)` which calls libc `_exit()`, terminating all
+/// threads immediately — even those stuck in uninterruptible kernel I/O.
+fn spawn_shutdown_watchdog(deadline: Duration) -> ShutdownWatchdogGuard {
+    let cancel = Arc::new(AtomicBool::new(false));
+    let cancel_clone = Arc::clone(&cancel);
+
+    let _ = std::thread::Builder::new()
+        .name("shutdown-watchdog".to_string())
+        .spawn(move || {
+            // Sleep in small increments so we can check the cancel flag
+            let start = std::time::Instant::now();
+            while start.elapsed() < deadline {
+                std::thread::sleep(Duration::from_millis(100));
+                if cancel_clone.load(Ordering::Relaxed) {
+                    return; // Shutdown completed normally
+                }
+            }
+            tracing::error!(
+                "SHUTDOWN WATCHDOG: forced exit after {:?} timeout",
+                deadline
+            );
+            // Brief pause to flush log output
+            std::thread::sleep(Duration::from_millis(100));
+            std::process::exit(1);
+        });
+
+    ShutdownWatchdogGuard { cancel }
+}
+
+/// Guard that cancels the shutdown watchdog when dropped.
+struct ShutdownWatchdogGuard {
+    cancel: Arc<AtomicBool>,
+}
+
+impl Drop for ShutdownWatchdogGuard {
+    fn drop(&mut self) {
+        self.cancel.store(true, Ordering::Relaxed);
+    }
 }
 
 fn parse_env_timeout(var: &str, default: u64) -> u64 {
