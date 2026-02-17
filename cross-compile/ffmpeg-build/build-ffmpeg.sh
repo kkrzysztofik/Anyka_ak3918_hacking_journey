@@ -20,15 +20,16 @@ NPROC=$(nproc)
 
 # ── Download source ──────────────────────────────────────────────────────────
 download_source() {
-    if [ -d "${SRC_DIR}" ]; then
+    if [[ -d "${SRC_DIR}" ]]; then
         echo "Source directory already exists: ${SRC_DIR}"
         return
     fi
 
     local tarball="ffmpeg-${FFMPEG_VERSION}.tar.xz"
-    if [ ! -f "${SCRIPT_DIR}/${tarball}" ]; then
+    if [[ ! -f "${SCRIPT_DIR}/${tarball}" ]]; then
         echo "Downloading FFmpeg ${FFMPEG_VERSION}..."
-        wget -O "${SCRIPT_DIR}/${tarball}" \
+        wget --https-only --max-redirect=0 --secure-protocol=TLSv1_2 \
+            -O "${SCRIPT_DIR}/${tarball}" \
             "https://ffmpeg.org/releases/${tarball}"
     fi
 
@@ -167,6 +168,7 @@ configure_ffmpeg() {
         "$@"
 
     echo "Configuration complete."
+    return 0
 }
 
 # ── Build ────────────────────────────────────────────────────────────────────
@@ -175,6 +177,7 @@ build_ffmpeg() {
     echo "Building FFmpeg with ${NPROC} jobs..."
     make -j"${NPROC}"
     echo "Build complete."
+    return 0
 }
 
 # ── Install & Deploy ─────────────────────────────────────────────────────────
@@ -183,8 +186,8 @@ install_ffmpeg() {
     make install
 
     local binary="${INSTALL_DIR}/bin/ffmpeg"
-    if [ ! -f "${binary}" ]; then
-        echo "ERROR: ffmpeg binary not found at ${binary}"
+    if [[ ! -f "${binary}" ]]; then
+        echo "ERROR: ffmpeg binary not found at ${binary}" >&2
         exit 1
     fi
 
@@ -203,12 +206,14 @@ install_ffmpeg() {
     mkdir -p "${DEPLOY_DIR}"
     cp "${binary}" "${DEPLOY_DIR}/ffmpeg"
     echo "Deployed."
+    return 0
 }
 
 # ── Clean ────────────────────────────────────────────────────────────────────
 clean() {
     echo "Cleaning build and install directories..."
     rm -rf "${BUILD_DIR}" "${INSTALL_DIR}"
+    return 0
 }
 
 # ── Main ─────────────────────────────────────────────────────────────────────
@@ -222,6 +227,7 @@ usage() {
     echo ""
     echo "To add network support (RTSP, HTTP), pass extra flags:"
     echo "  $0 configure --enable-network --enable-protocol=tcp --enable-protocol=udp"
+    return 0
 }
 
 case "${1:-all}" in

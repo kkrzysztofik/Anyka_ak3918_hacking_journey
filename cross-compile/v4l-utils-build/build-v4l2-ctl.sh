@@ -32,15 +32,16 @@ COMMON_LDFLAGS="-static -Wl,--gc-sections --sysroot=${SYSROOT}"
 
 # ── Download source ──────────────────────────────────────────────────────────
 download_source() {
-    if [ -d "${SRC_DIR}" ]; then
+    if [[ -d "${SRC_DIR}" ]]; then
         echo "Source directory already exists: ${SRC_DIR}"
         return
     fi
 
     local tarball="v4l-utils-${V4L_UTILS_VERSION}.tar.xz"
-    if [ ! -f "${SCRIPT_DIR}/${tarball}" ]; then
+    if [[ ! -f "${SCRIPT_DIR}/${tarball}" ]]; then
         echo "Downloading v4l-utils ${V4L_UTILS_VERSION}..."
-        wget -O "${SCRIPT_DIR}/${tarball}" \
+        wget --https-only --max-redirect=0 --secure-protocol=TLSv1_2 \
+            -O "${SCRIPT_DIR}/${tarball}" \
             "https://linuxtv.org/downloads/v4l-utils/${tarball}"
     fi
 
@@ -62,54 +63,54 @@ build_v4l2_ctl() {
 
     echo "Building v4l2-ctl for ARMv5TEJ (direct compilation)..."
 
-    local V4L2_CTL_DIR="${SRC_DIR}/utils/v4l2-ctl"
+    local v4l2_ctl_dir="${SRC_DIR}/utils/v4l2-ctl"
 
-    if [ ! -d "${V4L2_CTL_DIR}" ]; then
-        echo "ERROR: v4l2-ctl source directory not found at ${V4L2_CTL_DIR}"
+    if [[ ! -d "${v4l2_ctl_dir}" ]]; then
+        echo "ERROR: v4l2-ctl source directory not found at ${v4l2_ctl_dir}" >&2
         exit 1
     fi
 
     # Generate media-bus-format-names.h (normally done by meson)
     echo "Generating media-bus-format-names.h..."
-    local MEDIA_BUS_HDR="${SRC_DIR}/include/linux/media-bus-format.h"
-    if [ ! -f "${MEDIA_BUS_HDR}" ]; then
-        MEDIA_BUS_HDR="${SYSROOT}/usr/include/linux/media-bus-format.h"
+    local media_bus_hdr="${SRC_DIR}/include/linux/media-bus-format.h"
+    if [[ ! -f "${media_bus_hdr}" ]]; then
+        media_bus_hdr="${SYSROOT}/usr/include/linux/media-bus-format.h"
     fi
-    if [ ! -f "${MEDIA_BUS_HDR}" ]; then
-        echo "ERROR: media-bus-format.h not found in source or sysroot"
+    if [[ ! -f "${media_bus_hdr}" ]]; then
+        echo "ERROR: media-bus-format.h not found in source or sysroot" >&2
         exit 1
     fi
-    bash "${SRC_DIR}/utils/gen_media_bus_format_names.sh" "${MEDIA_BUS_HDR}" \
+    bash "${SRC_DIR}/utils/gen_media_bus_format_names.sh" "${media_bus_hdr}" \
         > "${BUILD_DIR}/media-bus-format-names.h"
 
     # Include paths: common/ has the .h files, v4l2-ctl/ has symlinks to .cpp
     # Use gnu++17 (not c++17) for typeof() support in kernel-style macros
-    local CXXFLAGS="${COMMON_CFLAGS} -std=gnu++17"
-    CXXFLAGS+=" -I${BUILD_DIR}"
-    CXXFLAGS+=" -I${SRC_DIR}"
-    CXXFLAGS+=" -I${SRC_DIR}/include"
-    CXXFLAGS+=" -I${SRC_DIR}/lib/include"
-    CXXFLAGS+=" -I${SRC_DIR}/utils/common"
-    CXXFLAGS+=" -I${V4L2_CTL_DIR}"
-    CXXFLAGS+=" -I${SYSROOT}/usr/include"
+    local cxxflags="${COMMON_CFLAGS} -std=gnu++17"
+    cxxflags+=" -I${BUILD_DIR}"
+    cxxflags+=" -I${SRC_DIR}"
+    cxxflags+=" -I${SRC_DIR}/include"
+    cxxflags+=" -I${SRC_DIR}/lib/include"
+    cxxflags+=" -I${SRC_DIR}/utils/common"
+    cxxflags+=" -I${v4l2_ctl_dir}"
+    cxxflags+=" -I${SYSROOT}/usr/include"
     # Disable libv4l2 wrapper (use direct kernel V4L2 ioctls)
-    CXXFLAGS+=" -DNO_LIBV4L2"
+    cxxflags+=" -DNO_LIBV4L2"
     # Define version macros normally set by meson
-    CXXFLAGS+=" -DPACKAGE_VERSION='\"${V4L_UTILS_VERSION}\"'"
-    CXXFLAGS+=" -DGIT_COMMIT_CNT=0"
+    cxxflags+=" -DPACKAGE_VERSION='\"${V4L_UTILS_VERSION}\"'"
+    cxxflags+=" -DGIT_COMMIT_CNT=0"
 
     # C flags for the C source files (tpg, fwht codec, v4l-stream)
-    local CFLAGS="${COMMON_CFLAGS} -std=gnu99"
-    CFLAGS+=" -I${BUILD_DIR}"
-    CFLAGS+=" -I${SRC_DIR}"
-    CFLAGS+=" -I${SRC_DIR}/include"
-    CFLAGS+=" -I${SRC_DIR}/lib/include"
-    CFLAGS+=" -I${SRC_DIR}/utils/common"
-    CFLAGS+=" -I${V4L2_CTL_DIR}"
-    CFLAGS+=" -I${SYSROOT}/usr/include"
+    local cflags="${COMMON_CFLAGS} -std=gnu99"
+    cflags+=" -I${BUILD_DIR}"
+    cflags+=" -I${SRC_DIR}"
+    cflags+=" -I${SRC_DIR}/include"
+    cflags+=" -I${SRC_DIR}/lib/include"
+    cflags+=" -I${SRC_DIR}/utils/common"
+    cflags+=" -I${v4l2_ctl_dir}"
+    cflags+=" -I${SYSROOT}/usr/include"
 
     # Compile C support files from common/ (TPG, FWHT codec, v4l-stream)
-    local C_SOURCES=(
+    local c_sources=(
         "${SRC_DIR}/utils/common/v4l2-tpg-core.c"
         "${SRC_DIR}/utils/common/v4l2-tpg-colors.c"
         "${SRC_DIR}/utils/common/codec-fwht.c"
@@ -117,65 +118,65 @@ build_v4l2_ctl() {
         "${SRC_DIR}/utils/common/v4l-stream.c"
     )
 
-    local OBJECTS=()
-    local FAILED=0
+    local objects=()
+    local failed=0
 
     echo "Compiling C support files..."
-    for src in "${C_SOURCES[@]}"; do
-        if [ ! -f "${src}" ]; then
+    for src in "${c_sources[@]}"; do
+        if [[ ! -f "${src}" ]]; then
             echo "  SKIP: $(basename "${src}") (not found)"
             continue
         fi
         local obj="${BUILD_DIR}/$(basename "${src}" .c).o"
         echo "  CC  $(basename "${src}")"
-        if ${CC} ${CFLAGS} -c "${src}" -o "${obj}" 2>&1; then
-            OBJECTS+=("${obj}")
+        if ${CC} ${cflags} -c "${src}" -o "${obj}" 2>&1; then
+            objects+=("${obj}")
         else
             echo "  FAILED: $(basename "${src}")"
-            FAILED=$((FAILED + 1))
+            failed=$((failed + 1))
         fi
     done
 
     # Compile ONLY C++ files from v4l2-ctl/ directory (includes symlinks to common/)
     # Do NOT also compile from common/ - that causes duplicate symbols
-    local SOURCES=()
-    for f in "${V4L2_CTL_DIR}"/*.cpp; do
-        SOURCES+=("$f")
+    local sources=()
+    for f in "${v4l2_ctl_dir}"/*.cpp; do
+        sources+=("$f")
     done
 
-    echo "Compiling ${#SOURCES[@]} C++ source files..."
-    for src in "${SOURCES[@]}"; do
+    echo "Compiling ${#sources[@]} C++ source files..."
+    for src in "${sources[@]}"; do
         local obj="${BUILD_DIR}/$(basename "${src}" .cpp).o"
         echo "  CXX $(basename "${src}")"
-        if ${CXX} ${CXXFLAGS} -c "${src}" -o "${obj}" 2>&1; then
-            OBJECTS+=("${obj}")
+        if ${CXX} ${cxxflags} -c "${src}" -o "${obj}" 2>&1; then
+            objects+=("${obj}")
         else
             echo "  FAILED: $(basename "${src}")"
-            FAILED=$((FAILED + 1))
+            failed=$((failed + 1))
         fi
     done
 
     # Report compilation summary after both loops
-    local TOTAL_SOURCES=$((${#C_SOURCES[@]} + ${#SOURCES[@]}))
+    local total_sources=$((${#c_sources[@]} + ${#sources[@]}))
     echo ""
-    echo "Compiled ${#OBJECTS[@]}/${TOTAL_SOURCES} files (${FAILED} failed)"
+    echo "Compiled ${#objects[@]}/${total_sources} files (${failed} failed)"
 
-    if [ ${#OBJECTS[@]} -eq 0 ]; then
-        echo "ERROR: No objects compiled."
+    if [[ ${#objects[@]} -eq 0 ]]; then
+        echo "ERROR: No objects compiled." >&2
         exit 1
     fi
-    if [ ${FAILED} -gt 0 ]; then
-        echo "ERROR: ${FAILED} file(s) failed to compile."
+    if [[ ${failed} -gt 0 ]]; then
+        echo "ERROR: ${failed} file(s) failed to compile." >&2
         exit 1
     fi
 
-    if [ ${#OBJECTS[@]} -eq 0 ]; then
-        echo "ERROR: No objects compiled."
+    if [[ ${#objects[@]} -eq 0 ]]; then
+        echo "ERROR: No objects compiled." >&2
         exit 1
     fi
 
     echo "Linking v4l2-ctl..."
-    ${CXX} ${COMMON_LDFLAGS} -o "${INSTALL_DIR}/bin/v4l2-ctl" "${OBJECTS[@]}" \
+    ${CXX} ${COMMON_LDFLAGS} -o "${INSTALL_DIR}/bin/v4l2-ctl" "${objects[@]}" \
         -lstdc++ -lm -lpthread -lrt
 
     ${STRIP} --strip-all "${INSTALL_DIR}/bin/v4l2-ctl"
@@ -184,6 +185,7 @@ build_v4l2_ctl() {
     echo "Binary info:"
     file "${INSTALL_DIR}/bin/v4l2-ctl"
     ls -lh "${INSTALL_DIR}/bin/v4l2-ctl"
+    return 0
 }
 
 # ── Fallback: meson-based build ─────────────────────────────────────────────
@@ -193,19 +195,19 @@ build_v4l2_ctl_meson() {
 
     # Check if meson and ninja are available
     if ! command -v meson &>/dev/null; then
-        echo "ERROR: meson not found. Install with: pip install meson"
+        echo "ERROR: meson not found. Install with: pip install meson" >&2
         echo "Or: sudo apt install meson"
         exit 1
     fi
     if ! command -v ninja &>/dev/null; then
-        echo "ERROR: ninja not found. Install with: pip install ninja"
+        echo "ERROR: ninja not found. Install with: pip install ninja" >&2
         echo "Or: sudo apt install ninja-build"
         exit 1
     fi
 
     # Create meson cross file
-    local CROSS_FILE="${BUILD_DIR}/arm-cross.ini"
-    cat > "${CROSS_FILE}" <<EOF
+    local cross_file="${BUILD_DIR}/arm-cross.ini"
+    cat > "${cross_file}" <<EOF
 [binaries]
 c = '${CC}'
 cpp = '${CXX}'
@@ -231,11 +233,11 @@ cpu = 'armv5te'
 endian = 'little'
 EOF
 
-    local MESON_BUILD_DIR="${BUILD_DIR}/meson-out"
-    rm -rf "${MESON_BUILD_DIR}"
+    local meson_build_dir="${BUILD_DIR}/meson-out"
+    rm -rf "${meson_build_dir}"
 
-    meson setup "${MESON_BUILD_DIR}" "${SRC_DIR}" \
-        --cross-file="${CROSS_FILE}" \
+    meson setup "${meson_build_dir}" "${SRC_DIR}" \
+        --cross-file="${cross_file}" \
         --prefix="${INSTALL_DIR}" \
         --default-library=static \
         -Dbpf=disabled \
@@ -254,22 +256,23 @@ EOF
         -Dv4l2-compliance-libv4l=false \
         -Ddoxygen-doc=disabled
 
-    ninja -C "${MESON_BUILD_DIR}" utils/v4l2-ctl/v4l2-ctl -j"${NPROC}"
+    ninja -C "${meson_build_dir}" utils/v4l2-ctl/v4l2-ctl -j"${NPROC}"
 
-    cp "${MESON_BUILD_DIR}/utils/v4l2-ctl/v4l2-ctl" "${INSTALL_DIR}/bin/"
+    cp "${meson_build_dir}/utils/v4l2-ctl/v4l2-ctl" "${INSTALL_DIR}/bin/"
     ${STRIP} --strip-all "${INSTALL_DIR}/bin/v4l2-ctl"
 
     echo ""
     echo "Binary info:"
     file "${INSTALL_DIR}/bin/v4l2-ctl"
     ls -lh "${INSTALL_DIR}/bin/v4l2-ctl"
+    return 0
 }
 
 # ── Deploy ───────────────────────────────────────────────────────────────────
 deploy() {
     local binary="${INSTALL_DIR}/bin/v4l2-ctl"
-    if [ ! -f "${binary}" ]; then
-        echo "ERROR: v4l2-ctl binary not found. Run build first."
+    if [[ ! -f "${binary}" ]]; then
+        echo "ERROR: v4l2-ctl binary not found. Run build first." >&2
         exit 1
     fi
 
@@ -278,12 +281,14 @@ deploy() {
     cp "${binary}" "${DEPLOY_DIR}/v4l2-ctl"
     chmod +x "${DEPLOY_DIR}/v4l2-ctl"
     echo "Deployed."
+    return 0
 }
 
 # ── Clean ────────────────────────────────────────────────────────────────────
 clean() {
     echo "Cleaning build and install directories..."
     rm -rf "${BUILD_DIR}" "${INSTALL_DIR}"
+    return 0
 }
 
 # ── Main ─────────────────────────────────────────────────────────────────────
@@ -294,6 +299,7 @@ usage() {
     echo ""
     echo "Environment variables:"
     echo "  V4L_UTILS_VERSION  v4l-utils version to build (default: 1.28.1)"
+    return 0
 }
 
 case "${1:-all}" in
