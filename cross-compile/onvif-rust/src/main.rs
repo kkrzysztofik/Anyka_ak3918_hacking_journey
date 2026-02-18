@@ -210,12 +210,17 @@ fn main() -> Result<()> {
         worker_threads, max_blocking_threads
     );
 
+    let worker_name_seq = Arc::new(AtomicUsize::new(0));
+    let worker_name_seq_for_builder = Arc::clone(&worker_name_seq);
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(worker_threads)
         .max_blocking_threads(max_blocking_threads)
         .enable_io()
         .enable_time()
-        .thread_name("onvif-worker")
+        .thread_name_fn(move || {
+            let idx = worker_name_seq_for_builder.fetch_add(1, Ordering::Relaxed) % 100;
+            format!("onvif-w{:02}", idx)
+        })
         .build()
         .context("Failed to create tokio runtime")?;
 
@@ -257,6 +262,12 @@ async fn run_normal_mode(config_path: &str) -> Result<()> {
         Ok(app) => app,
         Err(e) => {
             tracing::error!("Failed to start application: {}", e);
+            if e.to_string().contains("unsafe teardown required") {
+                tracing::error!(
+                    "Startup failed in unsafe teardown state; forcing hard process termination"
+                );
+                hard_terminate_process(1);
+            }
             return Err(e.into());
         }
     };

@@ -23,7 +23,6 @@ target/**/*
 # Reference Code and Original Files
 # -----------------------------------------------------------------------------
 cross-compile/anyka_reference/component/**/*
-cross-compile/anyka_reference/platform/**/*
 orig/**/*
 sample_xml/**/*
 

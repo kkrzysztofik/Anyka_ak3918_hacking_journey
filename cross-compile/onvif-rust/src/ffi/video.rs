@@ -29,7 +29,7 @@ use crate::platform::PlatformResult;
 use std::ffi::{CString, c_char, c_void};
 use std::path::Path;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering};
 use std::time::Duration;
 
 #[cfg(not(use_stubs))]
@@ -395,10 +395,32 @@ where
     F: FnOnce() -> i32 + Send + 'static,
 {
     let (tx, rx) = std::sync::mpsc::channel();
-    let join_handle = std::thread::spawn(move || {
-        let ret = f();
-        let _ = tx.send(ret);
-    });
+    static FFI_TIMEOUT_THREAD_SEQ: AtomicUsize = AtomicUsize::new(0);
+    let seq = FFI_TIMEOUT_THREAD_SEQ.fetch_add(1, Ordering::Relaxed) % 100;
+    let base = match name {
+        "ak_venc_cancel_stream" => "ffi-venc-can",
+        "ak_venc_close" => "ffi-venc-clo",
+        "ak_vi_close" => "ffi-vi-close",
+        _ => "ffi-call",
+    };
+    let thread_name = format!("{}-{:02}", base, seq);
+    let join_handle = match std::thread::Builder::new()
+        .name(thread_name.clone())
+        .spawn(move || {
+            let ret = f();
+            let _ = tx.send(ret);
+        }) {
+        Ok(handle) => handle,
+        Err(e) => {
+            tracing::warn!(
+                thread_name = thread_name.as_str(),
+                call = name,
+                error = %e,
+                "Failed to create named FFI timeout thread"
+            );
+            return Err(());
+        }
+    };
     match rx.recv_timeout(timeout) {
         Ok(ret) => {
             // Thread finished — join it to clean up
@@ -1009,6 +1031,61 @@ impl VideoStreamHandle {
                 self.cancel_state
                     .store(CANCEL_STATE_UNKNOWN, Ordering::SeqCst);
                 false
+            }
+        }
+    }
+
+    /// Cancel the stream with a timeout and return a checked result.
+    ///
+    /// This is the preferred shutdown path: it is timeout-bounded and surfaces
+    /// non-success SDK return codes as errors so callers can decide whether to
+    /// require a hard process termination.
+    pub fn cancel_checked_with_timeout(&self, timeout: Duration) -> PlatformResult<()> {
+        let state = self.cancel_state.load(Ordering::SeqCst);
+        if state == CANCEL_STATE_DONE {
+            return Ok(());
+        }
+        if state == CANCEL_STATE_PENDING || state == CANCEL_STATE_UNKNOWN {
+            return Err(PlatformError::HardwareFailure(
+                "stream cancel state is indeterminate".to_string(),
+            ));
+        }
+        if self
+            .cancel_state
+            .compare_exchange(
+                CANCEL_STATE_ACTIVE,
+                CANCEL_STATE_PENDING,
+                Ordering::SeqCst,
+                Ordering::SeqCst,
+            )
+            .is_err()
+        {
+            return Err(PlatformError::HardwareFailure(
+                "failed to enter stream cancel state".to_string(),
+            ));
+        }
+
+        if self.handle.is_null() {
+            self.cancel_state.store(CANCEL_STATE_DONE, Ordering::SeqCst);
+            return Ok(());
+        }
+
+        let handle_ptr = self.handle as usize; // Copy for Send
+        let ffi = Arc::clone(&self.ffi);
+        tracing::info!(stream_handle = ?self.handle, "Cancelling video stream (timeout)");
+        match ffi_call_with_timeout("ak_venc_cancel_stream", timeout, move || {
+            ffi.venc_cancel_stream(handle_ptr as *mut c_void)
+        }) {
+            Ok(ret) => {
+                self.cancel_state.store(CANCEL_STATE_DONE, Ordering::SeqCst);
+                check_result(ret, "ak_venc_cancel_stream")
+            }
+            Err(()) => {
+                self.cancel_state
+                    .store(CANCEL_STATE_UNKNOWN, Ordering::SeqCst);
+                Err(PlatformError::HardwareFailure(
+                    "ak_venc_cancel_stream timed out".to_string(),
+                ))
             }
         }
     }

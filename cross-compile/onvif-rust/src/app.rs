@@ -581,7 +581,7 @@ impl Application {
 
         // Phase 2: Platform
         progress.begin_phase(StartupPhase::Platform);
-        let platform = Self::init_platform(&mut progress, &config_runtime).await;
+        let platform = Self::init_platform(&mut progress, &config_runtime).await?;
         progress.complete_phase();
 
         // Phase 3: Services - Build AppState
@@ -783,11 +783,12 @@ impl Application {
     ///
     /// On real hardware (`cfg(not(use_stubs))`), creates and initializes `AnykaPlatform`.
     /// On dev builds (`cfg(use_stubs)`), creates a `StubPlatform` for testing.
-    /// Returns `None` in degraded mode if initialization fails (non-fatal).
+    /// Returns `None` in degraded mode for recoverable platform failures.
+    /// Returns `Err` for unsafe teardown failures that require hard process exit.
     async fn init_platform(
         progress: &mut StartupProgress,
         config_runtime: &Arc<ConfigRuntime>,
-    ) -> Option<Arc<dyn Platform>> {
+    ) -> Result<Option<Arc<dyn Platform>>, StartupError> {
         #[cfg(not(use_stubs))]
         {
             let isp_path = config_runtime
@@ -800,14 +801,22 @@ impl Application {
                 Ok(p) => match p.initialize().await {
                     Ok(()) => {
                         tracing::info!("AnykaPlatform initialized (real hardware)");
-                        return Some(Arc::new(p) as Arc<dyn Platform>);
+                        return Ok(Some(Arc::new(p) as Arc<dyn Platform>));
                     }
                     Err(e) => {
+                        let msg = e.to_string();
+                        if msg.contains("unsafe teardown required") {
+                            tracing::error!(
+                                "AnykaPlatform initialization entered unsafe teardown state; refusing degraded startup: {}",
+                                msg
+                            );
+                            return Err(StartupError::Platform(msg));
+                        }
                         tracing::warn!(
                             "AnykaPlatform initialization failed, continuing in degraded mode: {}",
-                            e
+                            msg
                         );
-                        progress.record_degraded("platform", e.to_string());
+                        progress.record_degraded("platform", msg);
                     }
                 },
                 Err(e) => {
@@ -818,7 +827,7 @@ impl Application {
                     progress.record_degraded("platform", e.to_string());
                 }
             }
-            None
+            Ok(None)
         }
         #[cfg(use_stubs)]
         {
@@ -830,7 +839,7 @@ impl Application {
             match stub_platform.initialize().await {
                 Ok(()) => {
                     tracing::info!("Platform initialized (stub mode)");
-                    Some(Arc::new(stub_platform) as Arc<dyn Platform>)
+                    Ok(Some(Arc::new(stub_platform) as Arc<dyn Platform>))
                 }
                 Err(e) => {
                     tracing::warn!(
@@ -838,7 +847,7 @@ impl Application {
                         e
                     );
                     progress.record_degraded("platform", e.to_string());
-                    None
+                    Ok(None)
                 }
             }
         }

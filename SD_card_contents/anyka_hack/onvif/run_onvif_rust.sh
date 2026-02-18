@@ -11,6 +11,9 @@ LOG_FILE=onvif_rust.log
 start_onvif_rust() {
   log INFO 'Starting ONVIF Rust server (onvif-rust)'
 
+  # Enable core dumps for this process
+  ulimit -c unlimited 2>/dev/null || log WARN "Failed to set ulimit -c unlimited"
+
   # Set library path for shared libraries (common lib + onvif-specific lib)
   export LD_LIBRARY_PATH=/mnt/anyka_hack/lib:/mnt/anyka_hack/onvif/lib:$LD_LIBRARY_PATH
 

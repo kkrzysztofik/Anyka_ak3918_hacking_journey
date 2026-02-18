@@ -1,0 +1,30 @@
+#!/bin/sh
+# Wrapper script to run onvif-rust with coredumps enabled
+# BusyBox-compatible version
+# Usage: ./run_with_coredump.sh
+
+# Enable core dumps
+ulimit -c unlimited 2>/dev/null
+
+# Change to dump directory to ensure core dumps are saved there
+# (if core_pattern is relative)
+cd /mnt/anyka_hack/onvif 2>/dev/null || cd /tmp
+
+# Verify core dump settings
+if [ -r /proc/sys/kernel/core_pattern ]; then
+    pattern=$(cat /proc/sys/kernel/core_pattern)
+    echo "Core dump pattern: $pattern"
+fi
+
+ulimit_c=$(ulimit -c 2>/dev/null)
+if [ "$ulimit_c" = "0" ] || [ -z "$ulimit_c" ]; then
+    echo "Warning: Core dumps disabled (ulimit -c = $ulimit_c)"
+    echo "Run: sudo ./enable_coredump.sh first"
+else
+    echo "Core dumps enabled (ulimit -c = $ulimit_c)"
+fi
+
+echo ""
+
+# Run onvif-rust
+exec /mnt/anyka_hack/onvif/onvif-rust

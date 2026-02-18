@@ -105,6 +105,13 @@ REPO_ROOT="$(cd "${PROJECT_DIR}/../.." && pwd)"
 DEFAULT_CARGO="${REPO_ROOT}/toolchain/arm-anykav200-crosstool-ng/bin/cargo"
 export CARGO="${CARGO:-${DEFAULT_CARGO}}"
 
+if [[ "${SKIP_VENDOR_SYNC:-0}" != "1" ]]; then
+  log_info "Refreshing vendor headers/libraries..."
+  if ! bash "${SCRIPT_DIR}/prepare_vendor.sh"; then
+    log_warn "Vendor sync failed; continuing with existing vendor/ contents"
+  fi
+fi
+
 if [[ ! -x "${CARGO}" ]]; then
   log_error "cargo not found or not executable at: ${CARGO}"
   log_error "Set CARGO to the vendored toolchain cargo, e.g.:"
