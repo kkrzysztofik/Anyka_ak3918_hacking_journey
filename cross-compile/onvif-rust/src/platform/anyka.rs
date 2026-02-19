@@ -100,6 +100,7 @@ impl AnykaPlatform {
         let audio_input = Arc::new(AnykaAudioInput::new());
         let audio_encoder = Arc::new(AnykaAudioEncoder::new());
         let ptz_control: Option<Arc<dyn PTZControl>> = {
+            tracing::info!("Initializing PTZ (native Rust driver, /dev/ak-motor0, /dev/ak-motor1)");
             let ptz = AnykaPTZControl::new();
             match ptz.open() {
                 Ok(()) => {

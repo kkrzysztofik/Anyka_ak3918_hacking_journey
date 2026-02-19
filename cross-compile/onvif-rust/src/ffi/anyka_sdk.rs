@@ -283,9 +283,9 @@ pub struct PtzPreset {
 
 #[cfg(not(use_stubs))]
 mod ffi_impl {
-    use super::{AnykaError, AnykaResult, LogLevel, PtzDirection, PtzMotor, VideoDevice};
+    use super::{AnykaError, AnykaResult, LogLevel, VideoDevice};
     use crate::ffi::generated::{
-        audio_param, encode_param, pcm_param, ptz_device, ptz_turn_direction, video_dev_type,
+        audio_param, encode_param, pcm_param, video_dev_type,
     };
     use std::ffi::{c_char, c_int, c_void};
 
@@ -301,11 +301,7 @@ mod ffi_impl {
         fn ak_ai_close(handle: *mut c_void) -> c_int;
         fn ak_aenc_open(param: *const audio_param) -> *mut c_void;
         fn ak_aenc_close(handle: *mut c_void) -> c_int;
-        fn ak_drv_ptz_open() -> c_int;
-        fn ak_drv_ptz_close() -> c_int;
-        fn ak_drv_ptz_turn(direction: ptz_turn_direction, degree: c_int) -> c_int;
-        fn ak_drv_ptz_stop() -> c_int;
-        fn ak_drv_ptz_get_step_pos(motor_no: ptz_device) -> c_int;
+        // PTZ: native Rust driver (ptz_driver.rs), no C SDK
     }
 
     /// Print a message using Anyka SDK logging.
@@ -433,151 +429,7 @@ mod ffi_impl {
         }
     }
 
-    /// Open PTZ motor control.
-    ///
-    /// # Input Validation
-    ///
-    /// No parameters - function initializes hardware.
-    ///
-    /// # Safety
-    ///
-    /// - `ak_drv_ptz_open()` is a C function that initializes PTZ hardware
-    /// - Returns negative value on error, non-negative on success
-    /// - We validate the result and map errors appropriately
-    #[allow(dead_code)]
-    pub fn ptz_open() -> AnykaResult<()> {
-        // SAFETY: ak_drv_ptz_open() is a C function that initializes hardware
-        // - Returns negative value on error, non-negative on success
-        // - We validate the result below
-        let result = unsafe { ak_drv_ptz_open() };
-        if result < 0 {
-            Err(AnykaError::SdkError(result))
-        } else {
-            Ok(())
-        }
-    }
-
-    /// Close PTZ motor control.
-    ///
-    /// # Input Validation
-    ///
-    /// No parameters - function cleans up hardware.
-    ///
-    /// # Safety
-    ///
-    /// - `ak_drv_ptz_close()` is a C function that cleans up PTZ hardware
-    /// - Returns negative value on error, non-negative on success
-    /// - We validate the result and map errors appropriately
-    #[allow(dead_code)]
-    pub fn ptz_close() -> AnykaResult<()> {
-        // SAFETY: ak_drv_ptz_close() is a C function that cleans up hardware
-        // - Returns negative value on error, non-negative on success
-        // - We validate the result below
-        let result = unsafe { ak_drv_ptz_close() };
-        if result < 0 {
-            Err(AnykaError::SdkError(result))
-        } else {
-            Ok(())
-        }
-    }
-
-    /// Turn PTZ motor in a direction.
-    ///
-    /// # Input Validation
-    ///
-    /// - `direction`: Must be a valid `PtzDirection` enum variant (Left, Right, Up, Down)
-    /// - `to_direction_code()` returns only values 1, 2, 3, 4 - validated by enum
-    /// - Degree parameter is hardcoded to 0 (not configurable in current API)
-    ///
-    /// # Safety
-    ///
-    /// The transmute is safe because:
-    /// - `to_direction_code()` returns only values 1, 2, 3, 4 (Left, Right, Up, Down)
-    /// - These values match the C enum `ptz_turn_direction` variants exactly
-    /// - The i32 bit pattern is reinterpreted as the C enum type
-    /// - All possible return values are valid C enum variants
-    /// - NOSONAR: S5343 - transmute is safe for enum value mapping with known bounds
-    ///
-    /// The FFI call is safe because:
-    /// - `ak_drv_ptz_turn()` is a C function that moves PTZ hardware
-    /// - Returns negative value on error, non-negative on success
-    /// - We validate the result and map errors appropriately
-    #[allow(dead_code)]
-    pub fn ptz_turn(direction: PtzDirection) -> AnykaResult<()> {
-        // Validate: Enum ensures only valid direction values
-        let sdk_direction: ptz_turn_direction =
-            unsafe { std::mem::transmute(direction.to_direction_code()) };
-
-        // SAFETY: ak_drv_ptz_turn() is a C function that moves PTZ hardware
-        // - Returns negative value on error, non-negative on success
-        // - We validate the result below
-        let result = unsafe { ak_drv_ptz_turn(sdk_direction, 0) };
-        if result < 0 {
-            Err(AnykaError::SdkError(result))
-        } else {
-            Ok(())
-        }
-    }
-
-    /// Stop PTZ motor movement.
-    ///
-    /// # Input Validation
-    ///
-    /// No parameters - function stops all PTZ movement.
-    ///
-    /// # Safety
-    ///
-    /// - `ak_drv_ptz_stop()` is a C function that stops PTZ hardware movement
-    /// - Returns negative value on error, non-negative on success
-    /// - We validate the result and map errors appropriately
-    #[allow(dead_code)]
-    pub fn ptz_stop() -> AnykaResult<()> {
-        // SAFETY: ak_drv_ptz_stop() is a C function that stops PTZ hardware
-        // - Returns negative value on error, non-negative on success
-        // - We validate the result below
-        let result = unsafe { ak_drv_ptz_stop() };
-        if result < 0 {
-            Err(AnykaError::SdkError(result))
-        } else {
-            Ok(())
-        }
-    }
-
-    /// Get PTZ motor step position.
-    ///
-    /// # Input Validation
-    ///
-    /// - `motor`: Must be a valid `PtzMotor` enum variant (Horizontal or Vertical)
-    /// - `to_device_id()` returns only values 0 or 1 - validated by enum
-    ///
-    /// # Safety
-    ///
-    /// The transmute is safe because:
-    /// - `to_device_id()` returns only values 0 (Horizontal) or 1 (Vertical)
-    /// - These values match the C enum `ptz_device` variants exactly
-    /// - The i32 bit pattern is reinterpreted as the C enum type
-    /// - All possible return values are valid C enum variants
-    /// - NOSONAR: S5343 - transmute is safe for enum value mapping with known bounds
-    ///
-    /// The FFI call is safe because:
-    /// - `ak_drv_ptz_get_step_pos()` is a C function that reads hardware position
-    /// - Returns negative value on error, position value (>=0) on success
-    /// - We validate the result and map errors appropriately
-    #[allow(dead_code)]
-    pub fn ptz_get_position(motor: PtzMotor) -> AnykaResult<i32> {
-        // Validate: Enum ensures only valid motor values (0 or 1)
-        let sdk_motor: ptz_device = unsafe { std::mem::transmute(motor.to_device_id()) };
-
-        // SAFETY: ak_drv_ptz_get_step_pos() is a C function that reads hardware position
-        // - Returns negative value on error, position value (>=0) on success
-        // - We validate the result below
-        let result = unsafe { ak_drv_ptz_get_step_pos(sdk_motor) };
-        if result < 0 {
-            Err(AnykaError::SdkError(result))
-        } else {
-            Ok(result)
-        }
-    }
+    // PTZ: use crate::ffi::ptz (native Rust driver on ARM), not C SDK
 }
 
 #[cfg(not(use_stubs))]

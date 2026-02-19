@@ -9,6 +9,7 @@ pub mod audio;
 pub mod imaging;
 pub mod ipc;
 pub mod ptz;
+pub mod ptz_driver;
 pub mod video;
 
 // NOSONAR: Module-level wildcard re-export is acceptable for facade modules.
@@ -68,6 +69,10 @@ mod generated {
     // Include consolidated generated bindings
     include!(concat!(env!("OUT_DIR"), "/anyka_bindings.rs"));
 }
+
+// On ARM we use the Rust PTZ driver; PTZ types come from ptz_driver (ak_drv_ptz.h not in bindgen).
+#[cfg(not(use_stubs))]
+pub use ptz_driver::{ptz_device, ptz_feedback_pin, ptz_turn_direction};
 
 // Stub types for native builds (testing)
 #[cfg(use_stubs)]

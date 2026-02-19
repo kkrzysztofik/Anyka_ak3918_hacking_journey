@@ -26,8 +26,9 @@
 use crate::platform::PlatformError;
 use crate::platform::PlatformResult;
 
+// On ARM we use the Rust native driver; types from ptz_driver (ak_drv_ptz.h omitted from bindgen).
 #[cfg(not(use_stubs))]
-use crate::ffi::generated::{ptz_device, ptz_feedback_pin, ptz_turn_direction};
+use crate::ffi::ptz_driver::{ptz_device, ptz_feedback_pin, ptz_turn_direction};
 
 #[cfg(use_stubs)]
 use crate::ffi::{ptz_device, ptz_feedback_pin, ptz_turn_direction};
@@ -45,48 +46,69 @@ pub(crate) trait PtzFfiTrait: Send + Sync {
     fn ptz_stop(&self, direction: ptz_turn_direction) -> i32;
 }
 
-/// Default implementation that calls the real FFI functions.
+/// Stub implementation for host tests (use_stubs). No hardware.
 pub(crate) struct RealPtzFfi;
 
-impl PtzFfiTrait for RealPtzFfi {
-    #[cfg(not(use_stubs))]
+/// Native Rust PTZ driver implementation for ARM. Talks to /dev/ak-motor0, /dev/ak-motor1.
+#[cfg(not(use_stubs))]
+pub(crate) struct NativePtzFfi {
+    driver: std::sync::Arc<crate::ffi::ptz_driver::NativePtzDriver>,
+}
+
+#[cfg(not(use_stubs))]
+impl NativePtzFfi {
+    pub(crate) fn new() -> std::sync::Arc<Self> {
+        std::sync::Arc::new(Self {
+            driver: std::sync::Arc::new(crate::ffi::ptz_driver::NativePtzDriver::new()),
+        })
+    }
+}
+
+#[cfg(not(use_stubs))]
+impl PtzFfiTrait for NativePtzFfi {
     fn ptz_open(&self) -> i32 {
-        unsafe extern "C" {
-            fn ak_drv_ptz_open() -> i32;
-        }
-        unsafe { ak_drv_ptz_open() }
+        self.driver.open().map(|()| AK_SUCCESS_I32).unwrap_or(AK_FAILED_I32)
     }
 
-    #[cfg(use_stubs)]
-    fn ptz_open(&self) -> i32 {
-        AK_SUCCESS_I32
-    }
-
-    #[cfg(not(use_stubs))]
     fn ptz_close(&self) -> i32 {
-        unsafe extern "C" {
-            fn ak_drv_ptz_close() -> i32;
-        }
-        unsafe { ak_drv_ptz_close() }
+        self.driver.close().map(|()| AK_SUCCESS_I32).unwrap_or(AK_FAILED_I32)
     }
 
-    #[cfg(use_stubs)]
-    fn ptz_close(&self) -> i32 {
-        AK_SUCCESS_I32
-    }
-
-    #[cfg(not(use_stubs))]
     fn ptz_check_self(&self, pin_type: ptz_feedback_pin) -> i32 {
-        // SAFETY: `ak_drv_ptz_check_self` is provided by the Anyka C driver library.
-        // The function accepts a `ptz_feedback_pin` enum (which matches the C ABI),
-        // has no preconditions beyond a valid enum value, does not access global state
-        // unsafely, and does not violate Rust aliasing or ownership rules.
-        // The driver library internally synchronizes PTZ operations, so this call is
-        // thread-safe and can be safely invoked from multiple async contexts.
-        unsafe extern "C" {
-            fn ak_drv_ptz_check_self(pin_type: ptz_feedback_pin) -> i32;
-        }
-        unsafe { ak_drv_ptz_check_self(pin_type) }
+        self.driver
+            .check_self(pin_type)
+            .map(|()| AK_SUCCESS_I32)
+            .unwrap_or(AK_FAILED_I32)
+    }
+
+    fn ptz_turn(&self, direction: ptz_turn_direction, degree: i32) -> i32 {
+        self.driver
+            .turn(direction, degree)
+            .map(|()| AK_SUCCESS_I32)
+            .unwrap_or(AK_FAILED_I32)
+    }
+
+    fn ptz_get_step_pos(&self, motor_no: ptz_device) -> i32 {
+        self.driver.get_step_pos(motor_no).unwrap_or(-1)
+    }
+
+    fn ptz_stop(&self, direction: ptz_turn_direction) -> i32 {
+        self.driver
+            .stop(direction)
+            .map(|()| AK_SUCCESS_I32)
+            .unwrap_or(AK_FAILED_I32)
+    }
+}
+
+impl PtzFfiTrait for RealPtzFfi {
+    #[cfg(use_stubs)]
+    fn ptz_open(&self) -> i32 {
+        AK_SUCCESS_I32
+    }
+
+    #[cfg(use_stubs)]
+    fn ptz_close(&self) -> i32 {
+        AK_SUCCESS_I32
     }
 
     #[cfg(use_stubs)]
@@ -94,25 +116,9 @@ impl PtzFfiTrait for RealPtzFfi {
         AK_SUCCESS_I32
     }
 
-    #[cfg(not(use_stubs))]
-    fn ptz_turn(&self, direction: ptz_turn_direction, degree: i32) -> i32 {
-        unsafe extern "C" {
-            fn ak_drv_ptz_turn(direction: ptz_turn_direction, degree: i32) -> i32;
-        }
-        unsafe { ak_drv_ptz_turn(direction, degree) }
-    }
-
     #[cfg(use_stubs)]
     fn ptz_turn(&self, _direction: ptz_turn_direction, _degree: i32) -> i32 {
         AK_SUCCESS_I32
-    }
-
-    #[cfg(not(use_stubs))]
-    fn ptz_get_step_pos(&self, motor_no: ptz_device) -> i32 {
-        unsafe extern "C" {
-            fn ak_drv_ptz_get_step_pos(motor_no: ptz_device) -> i32;
-        }
-        unsafe { ak_drv_ptz_get_step_pos(motor_no) }
     }
 
     #[cfg(use_stubs)]
@@ -120,28 +126,53 @@ impl PtzFfiTrait for RealPtzFfi {
         0 // Return 0 steps for stub
     }
 
-    #[cfg(not(use_stubs))]
-    fn ptz_stop(&self, direction: ptz_turn_direction) -> i32 {
-        // SAFETY: `ak_drv_ptz_turn_stop` is provided by the Anyka C driver library.
-        // The `direction` parameter is a validated `ptz_turn_direction` enum (values 0-3),
-        // which matches the C ABI exactly. The function returns an error code (0 = success,
-        // negative = error) with no unsafe pointer dereferences or memory access on the
-        // Rust side. The external driver symbol is guaranteed to be present and thread-safe
-        // (the C driver uses internal mutexes), making this FFI call safe from both a
-        // signature and concurrency perspective. See ptz_stop and ak_drv_ptz_turn_stop.
-        unsafe extern "C" {
-            fn ak_drv_ptz_turn_stop(direct: ptz_turn_direction) -> i32;
-        }
-        unsafe { ak_drv_ptz_turn_stop(direction) }
-    }
-
     #[cfg(use_stubs)]
     fn ptz_stop(&self, _direction: ptz_turn_direction) -> i32 {
         AK_SUCCESS_I32
     }
+
+    // Not used on ARM (NativePtzFfi is used). Required so REAL_PTZ_FFI compiles for tests that run on host only.
+    #[cfg(not(use_stubs))]
+    fn ptz_open(&self) -> i32 {
+        AK_FAILED_I32
+    }
+
+    #[cfg(not(use_stubs))]
+    fn ptz_close(&self) -> i32 {
+        AK_SUCCESS_I32
+    }
+
+    #[cfg(not(use_stubs))]
+    fn ptz_check_self(&self, _pin_type: ptz_feedback_pin) -> i32 {
+        AK_FAILED_I32
+    }
+
+    #[cfg(not(use_stubs))]
+    fn ptz_turn(&self, _direction: ptz_turn_direction, _degree: i32) -> i32 {
+        AK_FAILED_I32
+    }
+
+    #[cfg(not(use_stubs))]
+    fn ptz_get_step_pos(&self, _motor_no: ptz_device) -> i32 {
+        -1
+    }
+
+    #[cfg(not(use_stubs))]
+    fn ptz_stop(&self, _direction: ptz_turn_direction) -> i32 {
+        AK_FAILED_I32
+    }
 }
 
-// Global instance for default FFI implementation
+/// Default PTZ FFI: native Rust driver on ARM (/dev/ak-motor*), stub on host.
+/// Used by HardwarePTZControl::new() and ptz_open() so the platform uses the same backend.
+pub(crate) fn default_ptz_ffi() -> std::sync::Arc<dyn PtzFfiTrait> {
+    #[cfg(not(use_stubs))]
+    return NativePtzFfi::new();
+    #[cfg(use_stubs)]
+    std::sync::Arc::new(RealPtzFfi)
+}
+
+// Global instance for stub path (used by tests that inject mocks).
 static REAL_PTZ_FFI: RealPtzFfi = RealPtzFfi;
 
 /// Helper function to convert SDK return codes to PlatformResult.
@@ -239,19 +270,14 @@ pub(crate) fn ptz_open_internal(ffi: std::sync::Arc<dyn PtzFfiTrait>) -> Platfor
 
 /// Open a PTZ device.
 ///
+/// On ARM uses the native Rust driver (/dev/ak-motor*). On host (tests) uses stubs.
+///
 /// # Returns
 ///
 /// * `Ok(PTZHandle)` on success
 /// * `Err(PlatformError::HardwareFailure)` if device cannot be opened
-///
-/// # Safety
-///
-/// The FFI call is safe because:
-/// - `ak_drv_ptz_open()` returns an error code (0 = success, negative = error)
-/// - We validate the result and map errors appropriately
-/// - Handle is wrapped in `PTZHandle` for RAII cleanup
 pub fn ptz_open() -> PlatformResult<PTZHandle> {
-    ptz_open_internal(std::sync::Arc::new(RealPtzFfi))
+    ptz_open_internal(default_ptz_ffi())
 }
 
 /// Validate pan range (±180 degrees).
@@ -391,7 +417,7 @@ pub(crate) fn ptz_turn_internal(
 /// * `Err(PlatformError::InvalidParameter)` if angle is out of range
 /// * `Err(PlatformError::HardwareFailure)` on SDK error
 pub fn ptz_turn(handle: &PTZHandle, direction: PtzDirection, degrees: f32) -> PlatformResult<()> {
-    ptz_turn_internal(handle, direction, degrees, &REAL_PTZ_FFI)
+    ptz_turn_internal(handle, direction, degrees, handle.ffi.as_ref())
 }
 
 /// Internal helper that takes FFI trait for testability.
@@ -431,7 +457,7 @@ pub(crate) fn ptz_get_step_pos_internal(
 /// * `Ok(i32)` with step position on success
 /// * `Err(PlatformError::HardwareFailure)` on SDK error
 pub fn ptz_get_step_pos(handle: &PTZHandle, motor: PtzMotor) -> PlatformResult<i32> {
-    ptz_get_step_pos_internal(handle, motor, &REAL_PTZ_FFI)
+    ptz_get_step_pos_internal(handle, motor, handle.ffi.as_ref())
 }
 
 /// Internal helper that takes FFI trait for testability.
@@ -465,7 +491,7 @@ pub(crate) fn ptz_stop_internal(
 /// * `Ok(())` on success
 /// * `Err(PlatformError::HardwareFailure)` on SDK error
 pub fn ptz_stop(handle: &PTZHandle, direction: PtzDirection) -> PlatformResult<()> {
-    ptz_stop_internal(handle, direction, &REAL_PTZ_FFI)
+    ptz_stop_internal(handle, direction, handle.ffi.as_ref())
 }
 
 #[cfg(test)]

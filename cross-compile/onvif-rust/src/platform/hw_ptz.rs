@@ -25,7 +25,7 @@ use parking_lot::{Mutex, RwLock};
 use tokio::sync::Notify;
 use tokio::task::JoinHandle;
 
-use crate::ffi::ptz::{PTZHandle, PtzFfiTrait, RealPtzFfi, ptz_open_internal};
+use crate::ffi::ptz::{ptz_open_internal, default_ptz_ffi, PTZHandle, PtzFfiTrait};
 use crate::ffi::{AK_SUCCESS_I32, PtzDirection};
 
 use crate::ffi::ptz_turn_direction;
@@ -107,9 +107,11 @@ pub(crate) struct HardwarePTZControl {
 
 #[allow(dead_code)]
 impl HardwarePTZControl {
-    /// Create a new `HardwarePTZControl` with the default (real) FFI backend.
+    /// Create a new `HardwarePTZControl` with the default FFI backend.
+    /// On ARM this uses the native Rust PTZ driver (/dev/ak-motor0, /dev/ak-motor1);
+    /// on host (use_stubs) uses the stub for tests.
     pub(crate) fn new() -> Self {
-        Self::with_ffi(Arc::new(RealPtzFfi))
+        Self::with_ffi(default_ptz_ffi())
     }
 
     /// Create a new `HardwarePTZControl` with a custom FFI backend.

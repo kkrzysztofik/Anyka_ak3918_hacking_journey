@@ -57,14 +57,13 @@ fn generate_anyka_bindings() {
         return;
     }
 
-    // Verify critical header files
+    // Verify critical header files (ak_drv_ptz.h omitted: PTZ is implemented in Rust)
     let critical_headers = [
         "ak_common.h",
         "ak_vi.h",
         "ak_venc.h",
         "ak_ai.h",
         "ak_aenc.h",
-        "ak_drv_ptz.h",
         "ak_vpss.h",
         "ak_drv_irled.h",
     ];
@@ -125,13 +124,12 @@ fn generate_anyka_bindings() {
     std::fs::write(
         &wrapper_path,
         r#"
-// Wrapper header for all Anyka SDK headers
+// Wrapper header for all Anyka SDK headers (PTZ excluded: native Rust driver)
 #include "ak_common.h"
 #include "ak_vi.h"
 #include "ak_venc.h"
 #include "ak_ai.h"
 #include "ak_aenc.h"
-#include "ak_drv_ptz.h"
 #include "ak_vpss.h"
 #include "ak_drv_irled.h"
 "#,
