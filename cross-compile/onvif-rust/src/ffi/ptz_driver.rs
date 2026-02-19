@@ -128,7 +128,11 @@ pub enum ptz_turn_direction {
 const AK_MOTOR_DEV0: &str = "/dev/ak-motor0";
 const AK_MOTOR_DEV1: &str = "/dev/ak-motor1";
 const CYCLE_STEP: i32 = 2048;
+/// Steps from limit to "middle" (matches C driver init_pos = fulldst_step/2).
+const RESET_STEP: i32 = 2048 / 2;
 const DEFAULT_SPEED: c_int = 100;
+/// Timeout for calibration move to limit (full rotation can be slow).
+const CALIBRATION_TIMEOUT_SECS: u64 = 120;
 
 /// Single motor handle (one fd). Not thread-safe; use NativePtzDriver for concurrent access.
 struct MotorHandle {
@@ -253,6 +257,24 @@ impl MotorHandle {
     fn degree_to_steps(&self, degree: i32) -> i32 {
         (self.cycle_step as i64 * degree as i64 / 360) as i32
     }
+
+    /// Run calibration sequence matching C driver get_motor_param():
+    /// turn anticlockwise to limit (HIT or STOP), then clockwise to middle (RESET_STEP).
+    fn calibrate(&mut self) -> PlatformResult<()> {
+        self.set_speed(DEFAULT_SPEED)?;
+        // Turn anticlockwise to physical limit; wait for HIT or STOP event.
+        self.turn_steps(CYCLE_STEP, false)?;
+        let notify = self.wait_event(CALIBRATION_TIMEOUT_SECS)?;
+        if (notify.event & AK_MOTOR_EVENT_HIT) != 0 {
+            tracing::debug!("calibration: motor hit limit, remain_steps={}", notify.remain_steps);
+        } else if (notify.event & AK_MOTOR_EVENT_STOP) != 0 {
+            tracing::debug!("calibration: motor stop, remain_steps={}", notify.remain_steps);
+        }
+        // Turn clockwise to middle position (same as C driver reset_step).
+        self.turn_steps(RESET_STEP, true)?;
+        self.wait_event(60)?;
+        Ok(())
+    }
 }
 
 /// Native PTZ driver: two motors, thread-safe via Mutex.
@@ -316,9 +338,17 @@ impl NativePtzDriver {
         Ok(())
     }
 
-    /// check_self: minimal path for PTZ_FEEDBACK_PIN_NONE (no-op; motors already opened and speed set).
+    /// check_self: run calibration (turn to limit, then to middle) for both motors.
+    /// Matches C driver get_motor_param() so the physical calibration movement is heard.
     pub fn check_self(&self, _pin_type: ptz_feedback_pin) -> PlatformResult<()> {
-        self.with_open(|_| Ok(()))
+        self.with_open(|inner| {
+            tracing::info!("PTZ calibration: horizontal motor (limit then middle)");
+            inner.motor_h.calibrate()?;
+            tracing::info!("PTZ calibration: vertical motor (limit then middle)");
+            inner.motor_v.calibrate()?;
+            tracing::info!("PTZ calibration complete");
+            Ok(())
+        })
     }
 
     /// Turn one motor by degree. direction maps to which motor and clockwise/anticlockwise.
