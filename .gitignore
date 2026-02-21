@@ -166,12 +166,13 @@ docs/.doctrees/
 __pycache__/
 *.py[cod]
 *$py.class
-*.so
 .Python
 env/
 venv/
 ENV/
 pip-log.txt
+.sonar-home/**/*
+.sonar-scanner/
 
 # Node.js
 node_modules/

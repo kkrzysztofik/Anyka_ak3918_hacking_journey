@@ -4,8 +4,8 @@
   "rust-analyzer.server.extraEnv": {
     // Override RUSTC to use system rustc for rust-analyzer
     "RUSTC": "rustc",
-    // Prevent using custom toolchain for analysis
-    "RUSTUP_TOOLCHAIN": ""
+    // Explicitly name the stable toolchain (empty string is unreliable)
+    "RUSTUP_TOOLCHAIN": "stable"
   },
   "rust-analyzer.cargo.extraEnv": {
     // Override RUSTC for cargo check operations
@@ -31,7 +31,7 @@
   "rust-analyzer.inlayHints.chainingHints.enable": false,
   "rust-analyzer.inlayHints.closingBraceHints.enable": false,
   "rust-analyzer.inlayHints.typeHints.enable": false,
-  "rust-analyzer.procMacro.enable": false,
+  "rust-analyzer.procMacro.enable": true,
   "rust-analyzer.completion.autoimport.enable": false,
   // Use cargo check for faster feedback
   "rust-analyzer.check.command": "check",
@@ -47,7 +47,8 @@
     "cargo fmt": true,
     "npm run type-check": true,
     "npm run test": true,
-    "cargo audit": true
+    "cargo audit": true,
+    "../../toolchain/arm-anykav200-crosstool-ng/bin/cargo": true
   },
   "cursorpyright.analysis.typeCheckingMode": "strict",
   "cursorpyright.analysis.diagnosticMode": "workspace",
