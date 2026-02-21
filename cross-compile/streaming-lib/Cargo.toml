@@ -9,7 +9,7 @@ readme = "README.md"
 
 [dependencies]
 # Async runtime
-tokio = { version = "1.4", default-features = false, features = [
+tokio = { version = "1.49", default-features = false, features = [
   "rt-multi-thread",
   "net",
   "sync",
@@ -18,21 +18,21 @@ tokio = { version = "1.4", default-features = false, features = [
   "io-util",
   "fs",  # Added for async file I/O (Phase 1 optimization)
 ] }
-tokio-util = { version = "0.7.18", features = ["codec"] }
+tokio-util = { version = "0.7", features = ["codec"] }
 tokio-stream = "0.1"
 futures = "0.3"
 
 # Binary I/O
-bytes = "1.0"
-byteorder = "1.4"
-rand = "0.9.2"
+bytes = "1.11"
+byteorder = "1.5"
+rand = "0.10"
 
 # Logging
 log = "0.4"
 
 # Error handling
 anyhow = "1.0"
-thiserror = "1.0"
+thiserror = "2.0"
 
 # HTTP/Web
 http = "1.4.0"
@@ -51,21 +51,21 @@ serde_derive = "1.0"
 
 # Utilities
 chrono = { version = "0.4", features = ["serde"] }
-indexmap = "2.13.0"
-lazy_static = "1.4"
+indexmap = "2.13"
+lazy_static = "1.5"
 async-trait = "0.1"
-md5 = "0.8.0"
-env_logger = "0.11.8"
-job_scheduler_ng = "2.0"
-portable-atomic = { version = "1.11", features = ["std"] }
+md5 = "0.8"
+env_logger = "0.11"
+job_scheduler_ng = "2.4"
+portable-atomic = { version = "1.13", features = ["std"] }
 
 # Network
-reqwest = { version = "0.13.1", features = ["native-tls-vendored", "query", "form"] }
+reqwest = { version = "0.13", features = ["native-tls-vendored", "query", "form"] }
 
 # Note: openssl-src is patched at workspace root for uClibc ARM target support.
 
 [dev-dependencies]
-mockall = "0.13"
+mockall = "0.14"
 tokio-test = "0.4"
-proptest = "1.0"
+proptest = "1.10"
 wiremock = "0.6"
