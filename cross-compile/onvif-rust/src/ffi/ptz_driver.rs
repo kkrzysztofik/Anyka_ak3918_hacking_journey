@@ -27,7 +27,9 @@ const fn _iow(type_: c_uint, nr: c_uint, size: c_uint) -> c_uint {
     const IOC_TYPESHIFT: c_uint = 8;
     const IOC_SIZESHIFT: c_uint = 16;
     const IOC_DIRSHIFT: c_uint = 30;
-    (IOC_WRITE << IOC_DIRSHIFT) | ((type_ << IOC_TYPESHIFT) & 0xff00) | (nr << IOC_NRSHIFT)
+    (IOC_WRITE << IOC_DIRSHIFT)
+        | ((type_ << IOC_TYPESHIFT) & 0xff00)
+        | (nr << IOC_NRSHIFT)
         | (size << IOC_SIZESHIFT)
 }
 
@@ -38,7 +40,9 @@ const fn _ior(type_: c_uint, nr: c_uint, size: c_uint) -> c_uint {
     const IOC_TYPESHIFT: c_uint = 8;
     const IOC_SIZESHIFT: c_uint = 16;
     const IOC_DIRSHIFT: c_uint = 30;
-    (IOC_READ << IOC_DIRSHIFT) | ((type_ << IOC_TYPESHIFT) & 0xff00) | (nr << IOC_NRSHIFT)
+    (IOC_READ << IOC_DIRSHIFT)
+        | ((type_ << IOC_TYPESHIFT) & 0xff00)
+        | (nr << IOC_NRSHIFT)
         | (size << IOC_SIZESHIFT)
 }
 
@@ -182,7 +186,13 @@ impl MotorHandle {
 
     fn turn_stop(&self) -> PlatformResult<()> {
         let fd = self.file.as_raw_fd();
-        let ret = unsafe { libc::ioctl(fd, AK_MOTOR_TURN_STOP as libc::c_ulong, std::ptr::null_mut::<c_int>()) };
+        let ret = unsafe {
+            libc::ioctl(
+                fd,
+                AK_MOTOR_TURN_STOP as libc::c_ulong,
+                std::ptr::null_mut::<c_int>(),
+            )
+        };
         if ret != 0 {
             return Err(PlatformError::HardwareFailure(format!(
                 "AK_MOTOR_TURN_STOP failed: errno {}",
@@ -240,12 +250,15 @@ impl MotorHandle {
                 std::io::Error::last_os_error()
             )));
         }
-        let n = self.file.read(unsafe {
-            std::slice::from_raw_parts_mut(
-                &mut buf as *mut NotifyData as *mut u8,
-                std::mem::size_of::<NotifyData>(),
-            )
-        }).map_err(|e| PlatformError::HardwareFailure(e.to_string()))?;
+        let n = self
+            .file
+            .read(unsafe {
+                std::slice::from_raw_parts_mut(
+                    &mut buf as *mut NotifyData as *mut u8,
+                    std::mem::size_of::<NotifyData>(),
+                )
+            })
+            .map_err(|e| PlatformError::HardwareFailure(e.to_string()))?;
         if n != std::mem::size_of::<NotifyData>() {
             return Err(PlatformError::HardwareFailure(
                 "short read on motor notify".to_string(),
@@ -266,9 +279,15 @@ impl MotorHandle {
         self.turn_steps(CYCLE_STEP, false)?;
         let notify = self.wait_event(CALIBRATION_TIMEOUT_SECS)?;
         if (notify.event & AK_MOTOR_EVENT_HIT) != 0 {
-            tracing::debug!("calibration: motor hit limit, remain_steps={}", notify.remain_steps);
+            tracing::debug!(
+                "calibration: motor hit limit, remain_steps={}",
+                notify.remain_steps
+            );
         } else if (notify.event & AK_MOTOR_EVENT_STOP) != 0 {
-            tracing::debug!("calibration: motor stop, remain_steps={}", notify.remain_steps);
+            tracing::debug!(
+                "calibration: motor stop, remain_steps={}",
+                notify.remain_steps
+            );
         }
         // Turn clockwise to middle position (same as C driver reset_step).
         self.turn_steps(RESET_STEP, true)?;

@@ -1,11 +1,15 @@
 #!/usr/bin/env bash
 
-# Prepare vendor directory for ONVIF Rust project
+# Prepare vendor directory for ONVIF Rust project (libre_anyka_app only)
 # Usage: ./scripts/prepare_vendor.sh
 #
-# This script builds the Anyka platform libraries (libplat, libmpi, uiolib)
-# from source and copies the resulting static libraries to the vendor directory
-# for Rust FFI integration.
+# This script uses ONLY libre_anyka_app (older SDK). It does NOT build or use
+# anything from the platform tree.
+#
+# - Copies SDK headers from libre_anyka_app/include to vendor/include.
+# - Copies all required .so from libre_anyka_app/lib (or LIBRE_ANYKA_LIBS_PATH)
+#   into vendor/lib for dynamic linking. That directory must contain the full
+#   set of libs that libre_anyka_app links against (platform + device + app .so).
 #
 # The script is idempotent and can be safely run multiple times.
 
@@ -15,42 +19,44 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 WORKSPACE_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
-REPO_ROOT="$(cd "${WORKSPACE_DIR}/.." && pwd)"
 
-# Relative paths from workspace
-PLATFORM_DIR="${WORKSPACE_DIR}/anyka_reference/platform"
-UIOLIB_DIR="${PLATFORM_DIR}/uiolib"
+# libre_anyka_app only (no platform paths)
+LIBRE_APP_DIR="${WORKSPACE_DIR}/anyka_reference/libre_anyka_app"
+LIBRE_APP_LIB="${LIBRE_APP_DIR}/lib"
 
 # Vendor directories
 VENDOR_DIR="${PROJECT_DIR}/vendor"
+VENDOR_INCLUDE_DIR="${VENDOR_DIR}/include"
 VENDOR_LIB_DIR="${VENDOR_DIR}/lib"
 
-# Build output locations
-PLATFORM_LIBPLAT_DIR="${PLATFORM_DIR}/libplat/lib"
-PLATFORM_LIBMPI_DIR="${PLATFORM_DIR}/libmpi/lib"
-UIOLIB_BUILD_DIR="${UIOLIB_DIR}/BUILD_libakuio_SO"
-
-# Required libraries (as specified in build.rs)
-REQUIRED_LIBS=(
-    "libplat_common.a"
-    "libplat_thread.a"
-    "libplat_vi.a"
-    "libplat_vpss.a"
-    "libplat_ipcsrv.a"
-    "libplat_venc_cb.a"
-    "libplat_ai.a"
-    "libplat_drv.a"
-    "libmpi_venc.a"
-    "libmpi_aenc.a"
-    "libmpi_aed.a"
-    "libakuio.a"
-    "libakispsdk.a"
-    "libakv_encode.a"
-    "libakstreamenc.a"
-    "libakaudiocodec.a"
-    "libakmedialib.a"
-    "libakae.a"
+# Full set of .so that libre_anyka_app links (build.sh): use this order for copy/check
+# Link line: -lakuio -lakispsdk -lakv_encode -lplat_common -lplat_thread -lplat_vi
+#            -lplat_vpss -lplat_ipcsrv -lplat_venc_cb -lmpi_venc -lakstreamenc
+#            -lakae -lakaudiocodec -lakmedia -lapp_net -lapp_rtsp -lmpi_aed -lmpi_aenc -lplat_ai -lplat_drv
+REQUIRED_SO=(
+    "libakuio.so"
+    "libakispsdk.so"
+    "libakv_encode.so"
+    "libplat_common.so"
+    "libplat_thread.so"
+    "libplat_vi.so"
+    "libplat_vpss.so"
+    "libplat_ipcsrv.so"
+    "libplat_venc_cb.so"
+    "libmpi_venc.so"
+    "libakstreamenc.so"
+    "libakae.so"
+    "libakaudiocodec.so"
+    "libakmedia.so"
+    "libapp_net.so"
+    "libapp_rtsp.so"
+    "libmpi_aed.so"
+    "libmpi_aenc.so"
+    "libplat_ai.so"
+    "libplat_drv.so"
 )
+# Optional: versioned libakuio (e.g. libakuio.so.3.1.01) accepted as libakuio.so
+LIBAKUIO_ALT="libakuio.so.3.1.01"
 
 # Colors for output
 RED='\033[0;31m'
@@ -77,150 +83,111 @@ log_error() {
 }
 
 echo ""
-log_info "=== ONVIF Rust Vendor Setup (Platform Libs) ==="
+log_info "=== ONVIF Rust Vendor Setup (libre_anyka_app only, no platform) ==="
 echo ""
 
-# Validate platform directory exists
-if [ ! -d "$PLATFORM_DIR" ]; then
-    log_error "Platform directory not found: $PLATFORM_DIR"
+# Source of .so: LIBRE_ANYKA_LIBS_PATH overrides; else use libre_anyka_app/lib
+LIBS_SOURCE="${LIBRE_ANYKA_LIBS_PATH:-$LIBRE_APP_LIB}"
+
+if [ ! -d "$LIBRE_APP_DIR/include" ]; then
+    log_error "libre_anyka_app include not found: $LIBRE_APP_DIR/include"
     exit 1
 fi
 
-if [ ! -f "$PLATFORM_DIR/Makefile" ]; then
-    log_error "Platform Makefile not found: $PLATFORM_DIR/Makefile"
+if [ ! -d "$LIBS_SOURCE" ]; then
+    log_error "Libs directory not found: $LIBS_SOURCE"
+    log_info "Populate libre_anyka_app/lib/ with the full set of .so (same as used to build libre_anyka_app), or set: export LIBRE_ANYKA_LIBS_PATH=/path/to/dir"
     exit 1
 fi
 
-if [ ! -d "$UIOLIB_DIR" ]; then
-    log_error "uiolib directory not found: $UIOLIB_DIR"
-    exit 1
-fi
-
-if [ ! -f "$UIOLIB_DIR/Makefile" ]; then
-    log_error "uiolib Makefile not found: $UIOLIB_DIR/Makefile"
-    exit 1
-fi
-
-log_success "Source directories validated"
+log_success "Source directories validated (libre_anyka_app only)"
 echo ""
 
-# Create vendor library directory
-log_info "Creating vendor directory structure..."
+# --- 1. Copy headers from libre_anyka_app only ---
+log_info "Copying SDK headers from libre_anyka_app/include to vendor/include..."
+mkdir -p "$VENDOR_INCLUDE_DIR"
+cp -f "${LIBRE_APP_DIR}"/include/*.h "$VENDOR_INCLUDE_DIR/" 2>/dev/null || true
+log_success "Vendor include populated from libre_anyka_app only"
+echo ""
+
+# --- 2. Copy all .so from libre_anyka_app lib (or LIBRE_ANYKA_LIBS_PATH) ---
+log_info "Creating vendor lib directory and copying .so from $LIBS_SOURCE..."
 mkdir -p "$VENDOR_LIB_DIR"
 chmod 755 "$VENDOR_LIB_DIR"
-log_success "Vendor lib directory created: $VENDOR_LIB_DIR"
-echo ""
+COPIED=0
+MISSING=()
 
-# Build platform libraries (libplat and libmpi)
-log_info "Building platform libraries (libplat, libmpi)..."
-log_info "Running: make -C $PLATFORM_DIR lib COMPILE_SO=n"
-echo ""
-
-if ! make -C "$PLATFORM_DIR" lib COMPILE_SO=n; then
-    log_error "Failed to build platform libraries"
-    exit 1
-fi
-
-log_success "Platform libraries built successfully"
-echo ""
-
-# Build uiolib
-log_info "Building uiolib..."
-log_info "Running: make -C $UIOLIB_DIR"
-echo ""
-
-if ! make -C "$UIOLIB_DIR"; then
-    log_error "Failed to build uiolib"
-    exit 1
-fi
-
-log_success "uiolib built successfully"
-echo ""
-
-# Copy libraries to vendor
-log_info "Copying built libraries to vendor directory..."
-echo ""
-
-COPIED_COUNT=0
-MISSING_LIBS=()
-
-for lib in "${REQUIRED_LIBS[@]}"; do
-    dest_lib="$VENDOR_LIB_DIR/$lib"
-    source_lib=""
-
-    # Determine source location based on library name
-    if [[ "$lib" == libplat_* ]]; then
-        source_lib="$PLATFORM_LIBPLAT_DIR/$lib"
-    elif [[ "$lib" == libmpi_* ]]; then
-        source_lib="$PLATFORM_LIBMPI_DIR/$lib"
-    elif [[ "$lib" == libakuio.a ]]; then
-        source_lib="$UIOLIB_BUILD_DIR/$lib"
-    else
-        # Other SDK libraries (akispsdk, etc.) - not built here
-        # These may be in other vendor directories or pre-built
-        if [ ! -f "$dest_lib" ]; then
-            MISSING_LIBS+=("$lib")
-            log_warn "Library not found (will be needed at build time): $lib"
+for lib in "${REQUIRED_SO[@]}"; do
+    src="$LIBS_SOURCE/$lib"
+    if [ "$lib" = "libakuio.so" ]; then
+        if [ -f "$src" ]; then
+            cp -f "$src" "$VENDOR_LIB_DIR/"
+            chmod 644 "$VENDOR_LIB_DIR/$lib"
+            log_info "Copied: $lib"
+            COPIED=$((COPIED + 1))
+        elif [ -f "$LIBS_SOURCE/$LIBAKUIO_ALT" ]; then
+            cp -f "$LIBS_SOURCE/$LIBAKUIO_ALT" "$VENDOR_LIB_DIR/$LIBAKUIO_ALT"
+            chmod 644 "$VENDOR_LIB_DIR/$LIBAKUIO_ALT"
+            if [ ! -L "$VENDOR_LIB_DIR/libakuio.so" ]; then
+                ( cd "$VENDOR_LIB_DIR" && ln -sf "$LIBAKUIO_ALT" libakuio.so )
+            fi
+            log_info "Copied: $LIBAKUIO_ALT (as libakuio.so)"
+            COPIED=$((COPIED + 1))
         else
-            log_info "Library already in vendor: $lib"
-            COPIED_COUNT=$((COPIED_COUNT + 1))
+            MISSING+=("$lib")
         fi
         continue
     fi
-
-    if [ ! -f "$source_lib" ]; then
-        MISSING_LIBS+=("$lib")
-        log_warn "Library not found in build output: $source_lib"
-        continue
+    if [ -f "$src" ]; then
+        cp -f "$src" "$VENDOR_LIB_DIR/"
+        chmod 644 "$VENDOR_LIB_DIR/$lib"
+        log_info "Copied: $lib"
+        COPIED=$((COPIED + 1))
+    else
+        MISSING+=("$lib")
     fi
-
-    # Copy library
-    cp -f "$source_lib" "$dest_lib"
-    chmod 644 "$dest_lib"
-    log_info "Copied: $lib"
-    COPIED_COUNT=$((COPIED_COUNT + 1))
 done
 
-echo ""
-log_success "Copied $COPIED_COUNT library file(s)"
+# If we have libakuio.so.3.1.01 but no libakuio.so symlink yet
+if [ -f "$VENDOR_LIB_DIR/$LIBAKUIO_ALT" ] && [ ! -L "$VENDOR_LIB_DIR/libakuio.so" ] && [ ! -f "$VENDOR_LIB_DIR/libakuio.so" ]; then
+    ( cd "$VENDOR_LIB_DIR" && ln -sf "$LIBAKUIO_ALT" libakuio.so )
+    log_info "Symlink: libakuio.so -> $LIBAKUIO_ALT"
+fi
+
+if [ ${#MISSING[@]} -gt 0 ]; then
+    log_warn "Missing .so: ${MISSING[*]}"
+    log_info "Ensure $LIBS_SOURCE contains the full set of libs that libre_anyka_app links against."
+fi
+log_success "Copied $COPIED .so to vendor/lib"
 echo ""
 
-# Verify critical libraries were copied
-CRITICAL_LIBS=(
-    "libplat_common.a"
-    "libplat_vi.a"
-    "libmpi_venc.a"
-    "libakuio.a"
-)
-
+# --- 3. Verify critical .so ---
+CRITICAL_SO=("libplat_common.so" "libplat_vi.so" "libmpi_venc.so" "libakuio.so")
 MISSING_CRITICAL=0
-for lib in "${CRITICAL_LIBS[@]}"; do
-    if [ ! -f "$VENDOR_LIB_DIR/$lib" ]; then
-        log_error "CRITICAL: Missing library: $lib"
+for lib in "${CRITICAL_SO[@]}"; do
+    if [ "$lib" = "libakuio.so" ]; then
+        if [ ! -f "$VENDOR_LIB_DIR/libakuio.so" ] && [ ! -L "$VENDOR_LIB_DIR/libakuio.so" ] && [ ! -f "$VENDOR_LIB_DIR/$LIBAKUIO_ALT" ]; then
+            log_error "CRITICAL: Missing: libakuio.so (or $LIBAKUIO_ALT)"
+            MISSING_CRITICAL=$((MISSING_CRITICAL + 1))
+        fi
+    elif [ ! -f "$VENDOR_LIB_DIR/$lib" ]; then
+        log_error "CRITICAL: Missing: $lib"
         MISSING_CRITICAL=$((MISSING_CRITICAL + 1))
     fi
 done
 
-echo ""
 echo "=== Setup Complete ==="
-echo "Libraries copied: $COPIED_COUNT"
-echo "Total required: ${#REQUIRED_LIBS[@]}"
-
 if [ "$MISSING_CRITICAL" -gt 0 ]; then
-    log_error "Build completed with CRITICAL errors ($MISSING_CRITICAL critical libraries missing)"
+    log_error "Build completed with CRITICAL errors ($MISSING_CRITICAL critical .so missing)"
     exit 1
-elif [ ${#MISSING_LIBS[@]} -gt 0 ]; then
-    log_warn "Build completed with warnings (${#MISSING_LIBS[@]} libraries missing)"
-    echo ""
-    log_info "Some non-critical libraries are missing. These may be:"
-    log_info "  - Pre-built SDK libraries (libakispsdk.a, etc.)"
-    log_info "  - Already in vendor/ from previous builds"
-    exit 1
-else
-    log_success "All vendor libraries are ready!"
-    echo ""
-    log_info "You can now build the project with:"
-    log_info "  cd ${PROJECT_DIR}"
-    log_info "  ./scripts/build.sh --release"
-    exit 0
 fi
+log_success "Vendor setup complete (libre_anyka_app only)."
+echo ""
+log_info "Build the project with:"
+log_info "  cd ${PROJECT_DIR}"
+log_info "  ./scripts/build.sh --release"
+exit 0
+
+
+
+

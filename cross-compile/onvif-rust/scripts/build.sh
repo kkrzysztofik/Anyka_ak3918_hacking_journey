@@ -15,6 +15,7 @@ WORKSPACE_DIR="$(cd "${PROJECT_DIR}/.." && pwd)"
 BUILD_MODE="release"
 TARGET="armv5te-unknown-linux-uclibceabi"
 CLEAN=false
+EXTRA_FEATURES=""
 
 # Colors for output
 RED='\033[0;31m'
@@ -67,21 +68,25 @@ while [[ $# -gt 0 ]]; do
       CLEAN=true
       shift
       ;;
+    --features)
+      EXTRA_FEATURES="$2"
+      shift 2
+      ;;
     -h|--help)
       echo "Usage: $0 [OPTIONS]"
       echo ""
       echo "Options:"
-      echo "  --debug          Build in debug mode (default: release)"
-      echo "  --release        Build in release mode (default)"
-      echo "  --target TARGET  Specify target triple (default: armv5te-unknown-linux-uclibceabi)"
-      echo "  --clean          Clean before building"
-      echo "  -h, --help       Show this help message"
+      echo "  --debug               Build in debug mode (default: release)"
+      echo "  --release             Build in release mode (default)"
+      echo "  --target TARGET       Specify target triple (default: armv5te-unknown-linux-uclibceabi)"
+      echo "  --clean               Clean before building"
+      echo "  --features FEATURES   Extra cargo features to enable (e.g. use_vendor_ipc)"
+      echo "  -h, --help            Show this help message"
       echo ""
       exit 0
       ;;
     *)
-      local unknown_arg="$1"
-      log_error "Unknown option: ${unknown_arg}"
+      log_error "Unknown option: $1"
       echo "Use --help for usage information" >&2
       exit 1
       ;;
@@ -99,18 +104,12 @@ log_info "Building ONVIF Rust application"
 log_info "Project directory: ${PROJECT_DIR}"
 log_info "Target: ${TARGET}"
 log_info "Build mode: ${BUILD_MODE}"
+[[ -n "${EXTRA_FEATURES}" ]] && log_info "Extra features: ${EXTRA_FEATURES}"
 
 # Use vendored toolchain cargo by default (per project requirements)
 REPO_ROOT="$(cd "${PROJECT_DIR}/../.." && pwd)"
 DEFAULT_CARGO="${REPO_ROOT}/toolchain/arm-anykav200-crosstool-ng/bin/cargo"
 export CARGO="${CARGO:-${DEFAULT_CARGO}}"
-
-if [[ "${SKIP_VENDOR_SYNC:-0}" != "1" ]]; then
-  log_info "Refreshing vendor headers/libraries..."
-  if ! bash "${SCRIPT_DIR}/prepare_vendor.sh"; then
-    log_warn "Vendor sync failed; continuing with existing vendor/ contents"
-  fi
-fi
 
 if [[ ! -x "${CARGO}" ]]; then
   log_error "cargo not found or not executable at: ${CARGO}"
@@ -130,12 +129,17 @@ fi
 # Build the project
 log_info "Building for target ${TARGET} in ${BUILD_MODE} mode..."
 
+FEATURES_ARGS=()
+if [[ -n "${EXTRA_FEATURES}" ]]; then
+  FEATURES_ARGS=(--features "${EXTRA_FEATURES}")
+fi
+
 if [[ "${BUILD_MODE}" = "release" ]]; then
-  "${CARGO}" build --release --target "${TARGET}"
+  "${CARGO}" build --release --target "${TARGET}" "${FEATURES_ARGS[@]}"
   WORKSPACE_BINARY_PATH="${WORKSPACE_DIR}/target/${TARGET}/release/onvif-rust"
   CRATE_BINARY_PATH="${PROJECT_DIR}/target/${TARGET}/release/onvif-rust"
 else
-  "${CARGO}" build --target "${TARGET}"
+  "${CARGO}" build --target "${TARGET}" "${FEATURES_ARGS[@]}"
   WORKSPACE_BINARY_PATH="${WORKSPACE_DIR}/target/${TARGET}/debug/onvif-rust"
   CRATE_BINARY_PATH="${PROJECT_DIR}/target/${TARGET}/debug/onvif-rust"
 fi
@@ -201,6 +205,15 @@ chmod 755 "${DEPLOY_DIR}/onvif-rust"
 log_success "Binary and launcher copied to deployment directory:"
 log_info "  - ${DEPLOY_DIR}/onvif-rust.bin"
 log_info "  - ${DEPLOY_DIR}/onvif-rust"
+
+# Copy vendor-daemon if built
+VENDOR_DAEMON_BIN="${WORKSPACE_DIR}/vendor-daemon/build/vendor-daemon.bin"
+if [[ -f "${VENDOR_DAEMON_BIN}" ]]; then
+  cp "${VENDOR_DAEMON_BIN}" "${DEPLOY_DIR}/vendor-daemon.bin"
+  chmod 755 "${DEPLOY_DIR}/vendor-daemon.bin"
+  log_success "Vendor daemon copied to deployment directory"
+  log_info "  - ${DEPLOY_DIR}/vendor-daemon.bin"
+fi
 
 echo ""
 log_info "To verify the binary, run:"

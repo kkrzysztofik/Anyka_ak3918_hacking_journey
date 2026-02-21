@@ -99,19 +99,20 @@ int ak_drv_ptz_check_self_ex(enum ptz_feedback_pin pin_type,
 		enum sc_step *scs, int scs_size);
 
 /**
- * ak_drv_ptz_set_angle_rate deprecated > SDK1.8.00.
+ * ak_drv_ptz_set_angle_rate - set motor horizontal and vertical angle rate
+ * @h_rate[IN]: angle rate of horizontal
+ * @v_rate[IN]: angle rate of vertical
+ * return: 0 success; -1 failed
  */
-#define ak_drv_ptz_set_angle_rate(__h_rate, __v_rate) \
-	do {\
-		ak_print_error_ex ("%s() deprecated > SDK1.8.00.\r\n", __func__);\
-	} while (0)
+void ak_drv_ptz_set_angle_rate(float h_rate, float v_rate);
 
 /**
- * @ref ak_drv_ptz_setup_step_param Quick Call.
+ * ak_drv_ptz_set_degree - set motor horizontal and vertical degree
+ * @h_degre[IN]: relative degree of horizontal to current position
+ * @v_degree[IN]: relative degree of vertical to current position
+ * return: 0 success; -1 failed
  */
-#define ak_drv_ptz_set_degree(__h_degree, __v_degree) \
-		(ak_drv_ptz_setup_step_param (PTZ_DEV_H, 2048, 2048 * (__h_degree) / 360, -1) == AK_SUCCESS                       \
-		&& ak_drv_ptz_setup_step_param (PTZ_DEV_V, 2048, 2048 * (__v_degree) / 360, -1) == AK_SUCCESS ? AK_SUCCESS : AK_FAILED)
+void ak_drv_ptz_set_degree(int h_degree, int v_degree);
 
 /**
  * ak_drv_ptz_reset_dg: reset degree for calibrate.

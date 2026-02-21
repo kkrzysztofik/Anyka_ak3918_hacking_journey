@@ -41,6 +41,9 @@ use crate::ffi::video::{
     video_input_set_channel_attr_internal,
 };
 
+#[cfg(feature = "use_vendor_ipc")]
+use crate::ffi::vendor_ipc::VendorIpc;
+
 use crate::ffi::{video_channel_attr, video_resolution};
 
 use super::traits::{
@@ -707,6 +710,21 @@ struct AnykaVideoInput {
 impl AnykaVideoInput {
     /// Create a new `AnykaVideoInput` with the default (real) FFI backend.
     fn new(isp_config_path: Option<PathBuf>) -> Self {
+        #[cfg(feature = "use_vendor_ipc")]
+        {
+            match VendorIpc::new() {
+                Ok(ipc) => {
+                    tracing::info!("Using VendorIpc for vendor library access");
+                    return Self::with_ffi(Arc::new(ipc), isp_config_path);
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        "VendorIpc connection failed, falling back to RealVideoFfi: {}",
+                        e
+                    );
+                }
+            }
+        }
         Self::with_ffi(Arc::new(RealVideoFfi), isp_config_path)
     }
 
@@ -1593,7 +1611,25 @@ fn join_thread_with_timeout(
 
 impl AnykaVideoEncoder {
     /// Create a new `AnykaVideoEncoder` with the default (real) FFI backend.
+    ///
+    /// When the `use_vendor_ipc` feature is enabled, attempts to connect to the
+    /// vendor daemon via `VendorIpc` first. Falls back to `RealVideoFfi` on failure.
     fn new() -> Self {
+        #[cfg(feature = "use_vendor_ipc")]
+        {
+            match crate::ffi::vendor_ipc::VendorIpc::new() {
+                Ok(ipc) => {
+                    tracing::info!("AnykaVideoEncoder: using VendorIpc for vendor library access");
+                    return Self::with_ffi(Arc::new(ipc));
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        "AnykaVideoEncoder: VendorIpc connection failed, falling back to RealVideoFfi: {}",
+                        e
+                    );
+                }
+            }
+        }
         Self::with_ffi(Arc::new(crate::ffi::video::RealVideoFfi))
     }
 
@@ -2352,12 +2388,29 @@ impl VideoEncoder for AnykaVideoEncoder {
 
 /// Anyka audio input implementation.
 struct AnykaAudioInput {
+    #[allow(dead_code)]
+    ffi: Arc<dyn crate::ffi::audio::AudioFfiTrait>,
     opened: AtomicBool,
 }
 
 impl AnykaAudioInput {
+    /// Create a new `AnykaAudioInput`.
+    ///
+    /// When the `use_vendor_ipc` feature is enabled, attempts to connect to the
+    /// vendor daemon via `VendorIpc` first. Falls back to `RealAudioFfi` on failure.
     fn new() -> Self {
+        #[cfg(feature = "use_vendor_ipc")]
+        {
+            if let Ok(ipc) = crate::ffi::vendor_ipc::VendorIpc::new() {
+                tracing::info!("AnykaAudioInput: using VendorIpc for vendor library access");
+                return Self {
+                    ffi: Arc::new(ipc),
+                    opened: AtomicBool::new(false),
+                };
+            }
+        }
         Self {
+            ffi: Arc::new(crate::ffi::audio::RealAudioFfi),
             opened: AtomicBool::new(false),
         }
     }
@@ -2402,12 +2455,39 @@ impl AudioInput for AnykaAudioInput {
 
 /// Anyka audio encoder implementation.
 struct AnykaAudioEncoder {
+    #[allow(dead_code)]
+    ffi: Arc<dyn crate::ffi::audio::AudioFfiTrait>,
     configurations: RwLock<Vec<AudioEncoderConfig>>,
 }
 
 impl AnykaAudioEncoder {
+    /// Create a new `AnykaAudioEncoder`.
+    ///
+    /// When the `use_vendor_ipc` feature is enabled, attempts to connect to the
+    /// vendor daemon via `VendorIpc` first. Falls back to `RealAudioFfi` on failure.
     fn new() -> Self {
+        #[cfg(feature = "use_vendor_ipc")]
+        let ffi: Arc<dyn crate::ffi::audio::AudioFfiTrait> = {
+            match crate::ffi::vendor_ipc::VendorIpc::new() {
+                Ok(ipc) => {
+                    tracing::info!("AnykaAudioEncoder: using VendorIpc for vendor library access");
+                    Arc::new(ipc)
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        "AnykaAudioEncoder: VendorIpc connection failed, falling back to RealAudioFfi: {}",
+                        e
+                    );
+                    Arc::new(crate::ffi::audio::RealAudioFfi)
+                }
+            }
+        };
+        #[cfg(not(feature = "use_vendor_ipc"))]
+        let ffi: Arc<dyn crate::ffi::audio::AudioFfiTrait> =
+            Arc::new(crate::ffi::audio::RealAudioFfi);
+
         Self {
+            ffi,
             configurations: RwLock::new(vec![AudioEncoderConfig {
                 token: "AudioEncoder_1".to_string(),
                 name: "Audio Stream".to_string(),
@@ -2475,12 +2555,40 @@ type AnykaPTZControl = super::hw_ptz::HardwarePTZControl;
 
 /// Anyka imaging control implementation.
 struct AnykaImagingControl {
+    ffi: Arc<dyn crate::ffi::imaging::ImagingFfiTrait>,
     settings: RwLock<ImagingSettings>,
 }
 
 impl AnykaImagingControl {
+    /// Create a new `AnykaImagingControl`.
+    ///
+    /// When the `use_vendor_ipc` feature is enabled, attempts to connect to the
+    /// vendor daemon via `VendorIpc` first. Falls back to `RealImagingFfi` on failure.
     fn new() -> Self {
+        #[cfg(feature = "use_vendor_ipc")]
+        let ffi: Arc<dyn crate::ffi::imaging::ImagingFfiTrait> = {
+            match crate::ffi::vendor_ipc::VendorIpc::new() {
+                Ok(ipc) => {
+                    tracing::info!(
+                        "AnykaImagingControl: using VendorIpc for vendor library access"
+                    );
+                    Arc::new(ipc)
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        "AnykaImagingControl: VendorIpc connection failed, falling back to RealImagingFfi: {}",
+                        e
+                    );
+                    Arc::new(crate::ffi::imaging::RealImagingFfi)
+                }
+            }
+        };
+        #[cfg(not(feature = "use_vendor_ipc"))]
+        let ffi: Arc<dyn crate::ffi::imaging::ImagingFfiTrait> =
+            Arc::new(crate::ffi::imaging::RealImagingFfi);
+
         Self {
+            ffi,
             settings: RwLock::new(ImagingSettings {
                 brightness: 50.0,
                 contrast: 50.0,
@@ -2503,7 +2611,16 @@ impl ImagingControl for AnykaImagingControl {
     }
 
     async fn set_settings(&self, settings: &ImagingSettings) -> PlatformResult<()> {
-        // TODO(kkrzysztofik): Apply settings via Anyka imaging SDK
+        crate::ffi::imaging::imaging_set_brightness_internal(
+            settings.brightness,
+            self.ffi.as_ref(),
+        )?;
+        crate::ffi::imaging::imaging_set_contrast_internal(settings.contrast, self.ffi.as_ref())?;
+        crate::ffi::imaging::imaging_set_saturation_internal(
+            settings.saturation,
+            self.ffi.as_ref(),
+        )?;
+        crate::ffi::imaging::imaging_set_sharpness_internal(settings.sharpness, self.ffi.as_ref())?;
         *self.settings.write() = settings.clone();
         Ok(())
     }
@@ -2514,25 +2631,25 @@ impl ImagingControl for AnykaImagingControl {
     }
 
     async fn set_brightness(&self, value: f32) -> PlatformResult<()> {
-        // TODO(kkrzysztofik): Call Anyka imaging SDK
+        crate::ffi::imaging::imaging_set_brightness_internal(value, self.ffi.as_ref())?;
         self.settings.write().brightness = value;
         Ok(())
     }
 
     async fn set_contrast(&self, value: f32) -> PlatformResult<()> {
-        // TODO(kkrzysztofik): Call Anyka imaging SDK
+        crate::ffi::imaging::imaging_set_contrast_internal(value, self.ffi.as_ref())?;
         self.settings.write().contrast = value;
         Ok(())
     }
 
     async fn set_saturation(&self, value: f32) -> PlatformResult<()> {
-        // TODO(kkrzysztofik): Call Anyka imaging SDK
+        crate::ffi::imaging::imaging_set_saturation_internal(value, self.ffi.as_ref())?;
         self.settings.write().saturation = value;
         Ok(())
     }
 
     async fn set_sharpness(&self, value: f32) -> PlatformResult<()> {
-        // TODO(kkrzysztofik): Call Anyka imaging SDK
+        crate::ffi::imaging::imaging_set_sharpness_internal(value, self.ffi.as_ref())?;
         self.settings.write().sharpness = value;
         Ok(())
     }

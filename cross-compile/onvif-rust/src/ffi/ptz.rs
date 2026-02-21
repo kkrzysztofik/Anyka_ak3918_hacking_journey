@@ -67,11 +67,17 @@ impl NativePtzFfi {
 #[cfg(not(use_stubs))]
 impl PtzFfiTrait for NativePtzFfi {
     fn ptz_open(&self) -> i32 {
-        self.driver.open().map(|()| AK_SUCCESS_I32).unwrap_or(AK_FAILED_I32)
+        self.driver
+            .open()
+            .map(|()| AK_SUCCESS_I32)
+            .unwrap_or(AK_FAILED_I32)
     }
 
     fn ptz_close(&self) -> i32 {
-        self.driver.close().map(|()| AK_SUCCESS_I32).unwrap_or(AK_FAILED_I32)
+        self.driver
+            .close()
+            .map(|()| AK_SUCCESS_I32)
+            .unwrap_or(AK_FAILED_I32)
     }
 
     fn ptz_check_self(&self, pin_type: ptz_feedback_pin) -> i32 {
@@ -173,6 +179,7 @@ pub(crate) fn default_ptz_ffi() -> std::sync::Arc<dyn PtzFfiTrait> {
 }
 
 // Global instance for stub path (used by tests that inject mocks).
+#[allow(dead_code)]
 static REAL_PTZ_FFI: RealPtzFfi = RealPtzFfi;
 
 /// Helper function to convert SDK return codes to PlatformResult.

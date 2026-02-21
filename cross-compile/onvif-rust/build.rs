@@ -86,33 +86,34 @@ fn generate_anyka_bindings() {
         return;
     }
 
-    // Verify required library files
+    // Verify required shared libraries (libre_anyka_app set; .so only, no platform tree)
     let required_libs = [
-        "libplat_common.a",
-        "libplat_thread.a",
-        "libplat_vi.a",
-        "libplat_vpss.a",
-        "libplat_ai.a",
-        "libplat_drv.a",
-        "libmpi_venc.a",
-        "libmpi_aenc.a",
-        "libakuio.a",
+        "libplat_common.so",
+        "libplat_vi.so",
+        "libmpi_venc.so",
+        "libakuio.so",
     ];
-
     let mut missing_libs = Vec::new();
     for lib in &required_libs {
         let lib_path = vendor_lib.join(lib);
-        if !lib_path.exists() {
+        let alt = if *lib == "libakuio.so" {
+            vendor_lib.join("libakuio.so.3.1.01")
+        } else {
+            PathBuf::new()
+        };
+        if !lib_path.exists() && !alt.exists() {
             missing_libs.push(lib);
         }
     }
 
     if !missing_libs.is_empty() {
         println!(
-            "cargo:warning=Missing required libraries: {:?}, using stubs",
+            "cargo:warning=Missing required .so: {:?}, using stubs",
             missing_libs
         );
-        println!("cargo:warning=Run 'scripts/prepare_vendor.sh' to set up vendor files");
+        println!(
+            "cargo:warning=Run 'scripts/prepare_vendor.sh' (libre_anyka_app lib/ or LIBRE_ANYKA_LIBS_PATH)"
+        );
         println!("cargo:rustc-cfg=use_stubs");
         return;
     }
@@ -188,48 +189,59 @@ fn generate_anyka_bindings() {
         .write_to_file(out_dir.join("anyka_bindings.rs"))
         .expect("Couldn't write Anyka bindings");
 
-    // Link against Anyka libraries from vendor directory
-    // These match the C ONVIF Makefile's LINKERFLAG
-    // Using static linking for all Anyka libraries to avoid uClibc version mismatch
+    // Link against Anyka shared libraries from vendor (libre_anyka_app set only; no platform tree)
+    // Order matches libre_anyka_app build.sh link line for dependency resolution
     let lib_path_abs = vendor_lib.canonicalize().unwrap_or(vendor_lib);
     println!("cargo:rustc-link-search=native={}", lib_path_abs.display());
 
-    // Group static libraries to resolve circular dependencies
-    println!("cargo:rustc-link-arg=-Wl,--start-group");
+    // Allow unresolved symbols between shared libraries; they resolve at runtime
+    // via LD_LIBRARY_PATH when all libre_anyka_app .so files are co-located
+    println!("cargo:rustc-link-arg=-Wl,--allow-shlib-undefined");
 
-    // MPI libraries (from libmpi) - static linking
-    println!("cargo:rustc-link-lib=static=mpi_venc");
-    println!("cargo:rustc-link-lib=static=mpi_aenc");
-    println!("cargo:rustc-link-lib=static=mpi_aed");
+    // Force ALL vendor .so files into the binary's NEEDED list using --no-as-needed.
+    //
+    // Why: most libre_anyka_app .so files have incomplete DT_NEEDED entries —
+    // they only list libc.so.0 and rely on the main binary loading all peers.
+    // For example, libplat_vi.so uses akuio_* symbols but doesn't declare
+    // libakuio.so as NEEDED. Without --no-as-needed, rustc's default --as-needed
+    // drops libraries our Rust code doesn't directly reference, causing runtime
+    // "can't resolve symbol" errors on the device.
+    //
+    // We use rustc-link-arg (not rustc-link-lib) to control exact linker
+    // command line ordering: --no-as-needed must precede the -l flags.
+    println!("cargo:rustc-link-arg=-Wl,--no-as-needed");
 
-    // Platform libraries (from libplat) - static linking
-    println!("cargo:rustc-link-lib=static=plat_vi");
-    println!("cargo:rustc-link-lib=static=plat_vpss");
-    println!("cargo:rustc-link-lib=static=plat_ipcsrv");
-    println!("cargo:rustc-link-lib=static=plat_venc_cb");
-    println!("cargo:rustc-link-lib=static=plat_ai");
-    println!("cargo:rustc-link-lib=static=plat_drv");
+    // Vendor libraries (same .so set as libre_anyka_app)
+    let vendor_libs = [
+        "akuio",
+        "akispsdk",
+        "akv_encode",
+        "plat_common",
+        "plat_thread",
+        "plat_vi",
+        "plat_vpss",
+        "plat_ipcsrv",
+        "plat_venc_cb",
+        "mpi_venc",
+        "akstreamenc",
+        "akae",
+        "akaudiocodec",
+        "akmedia",
+        "app_net",
+        "app_rtsp",
+        "mpi_aed",
+        "mpi_aenc",
+        "plat_ai",
+        "plat_drv",
+    ];
+    for lib in &vendor_libs {
+        println!("cargo:rustc-link-arg=-l{}", lib);
+    }
 
-    // SDK component libraries - static linking
-    println!("cargo:rustc-link-lib=static=akuio");
-    println!("cargo:rustc-link-lib=static=akispsdk");
-    println!("cargo:rustc-link-lib=static=akv_encode");
-    println!("cargo:rustc-link-lib=static=akstreamenc");
-    println!("cargo:rustc-link-lib=static=akaudiocodec");
-    println!("cargo:rustc-link-lib=static=akmedialib");
-    println!("cargo:rustc-link-lib=static=akae");
+    // Restore --as-needed for system libraries (normal behavior)
+    println!("cargo:rustc-link-arg=-Wl,--as-needed");
 
-    // Platform core libraries last to satisfy dependencies
-    println!("cargo:rustc-link-lib=static=plat_common");
-    println!("cargo:rustc-link-lib=static=plat_thread");
-
-    println!("cargo:rustc-link-arg=-Wl,--end-group");
-
-    // Application libraries (dynamic only)
-    println!("cargo:rustc-link-lib=app_net");
-    println!("cargo:rustc-link-lib=app_rtsp");
-
-    // System libraries - dynamic linking (from toolchain sysroot)
+    // System libraries - dynamic (from toolchain sysroot)
     println!("cargo:rustc-link-lib=pthread");
     println!("cargo:rustc-link-lib=m");
     println!("cargo:rustc-link-lib=dl");

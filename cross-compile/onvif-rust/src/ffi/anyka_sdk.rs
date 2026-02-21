@@ -284,9 +284,7 @@ pub struct PtzPreset {
 #[cfg(not(use_stubs))]
 mod ffi_impl {
     use super::{AnykaError, AnykaResult, LogLevel, VideoDevice};
-    use crate::ffi::generated::{
-        audio_param, encode_param, pcm_param, video_dev_type,
-    };
+    use crate::ffi::generated::{audio_param, encode_param, pcm_param, video_dev_type};
     use std::ffi::{c_char, c_int, c_void};
 
     // External C functions from Anyka SDK

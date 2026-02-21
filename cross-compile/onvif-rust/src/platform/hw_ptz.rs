@@ -25,7 +25,7 @@ use parking_lot::{Mutex, RwLock};
 use tokio::sync::Notify;
 use tokio::task::JoinHandle;
 
-use crate::ffi::ptz::{ptz_open_internal, default_ptz_ffi, PTZHandle, PtzFfiTrait};
+use crate::ffi::ptz::{PTZHandle, PtzFfiTrait, default_ptz_ffi, ptz_open_internal};
 use crate::ffi::{AK_SUCCESS_I32, PtzDirection};
 
 use crate::ffi::ptz_turn_direction;

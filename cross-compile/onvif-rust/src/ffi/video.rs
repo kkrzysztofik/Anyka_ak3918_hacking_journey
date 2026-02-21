@@ -173,11 +173,8 @@ impl VideoFfiTrait for RealVideoFfi {
     }
 
     #[cfg(not(use_stubs))]
-    fn vpss_init(&self, vi_handle: *mut c_void, dev: i32) {
-        unsafe extern "C" {
-            fn ak_vpss_init(vi_handle: *mut c_void, dev_no: i32);
-        }
-        unsafe { ak_vpss_init(vi_handle, dev) }
+    fn vpss_init(&self, _vi_handle: *mut c_void, _dev: i32) {
+        // libre_anyka_app SDK handles VPSS lifecycle internally; no explicit init needed
     }
 
     #[cfg(use_stubs)]
@@ -186,11 +183,8 @@ impl VideoFfiTrait for RealVideoFfi {
     }
 
     #[cfg(not(use_stubs))]
-    fn vpss_destroy(&self, dev: i32) {
-        unsafe extern "C" {
-            fn ak_vpss_destroy(dev_no: i32);
-        }
-        unsafe { ak_vpss_destroy(dev) }
+    fn vpss_destroy(&self, _dev: i32) {
+        // libre_anyka_app SDK handles VPSS lifecycle internally; no explicit destroy needed
     }
 
     #[cfg(use_stubs)]
@@ -199,11 +193,9 @@ impl VideoFfiTrait for RealVideoFfi {
     }
 
     #[cfg(not(use_stubs))]
-    fn venc_set_cfg_path(&self, path: *const c_char) -> i32 {
-        unsafe extern "C" {
-            fn ak_venc_set_cfg_path(path: *const c_char) -> i32;
-        }
-        unsafe { ak_venc_set_cfg_path(path) }
+    fn venc_set_cfg_path(&self, _path: *const c_char) -> i32 {
+        // libre_anyka_app's venc doesn't use a config file path; V2 encoder ignores it
+        AK_SUCCESS_I32
     }
 
     #[cfg(use_stubs)]

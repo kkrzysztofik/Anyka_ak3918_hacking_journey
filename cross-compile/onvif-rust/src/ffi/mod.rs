@@ -12,6 +12,9 @@ pub mod ptz;
 pub mod ptz_driver;
 pub mod video;
 
+#[cfg(feature = "use_vendor_ipc")]
+pub mod vendor_ipc;
+
 // NOSONAR: Module-level wildcard re-export is acceptable for facade modules.
 // This module is designed as a unified FFI interface. Explicit re-exports would
 // be too verbose and harder to maintain as the SDK evolves.
