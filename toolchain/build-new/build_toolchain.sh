@@ -1,6 +1,6 @@
 #!/bin/bash
 # Build script for modern toolchain using crosstool-NG
-# Supports: ARMv5TEJ (armv5te) and aarch64 architectures
+# Supports: ARMv5TEJ (armv5te) for Anyka AK3918 cameras
 
 set -e  # Exit on error
 
@@ -10,31 +10,14 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
-# Architecture selection (default: armv5te)
-ARCH="${ARCH:-armv5te}"
-
-# Validate architecture
-if [ "${ARCH}" != "armv5te" ] && [ "${ARCH}" != "aarch64" ]; then
-    echo "Error: ARCH must be 'armv5te' or 'aarch64'"
-    echo "Usage: ARCH=armv5te ./build_toolchain.sh  (default)"
-    echo "       ARCH=aarch64 ./build_toolchain.sh"
-    exit 1
-fi
-
 # Script directory
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BUILD_DIR="${SCRIPT_DIR}"
 
-# Set installation directory based on architecture
-if [ "${ARCH}" = "aarch64" ]; then
-    INSTALL_DIR="${SCRIPT_DIR}/../aarch64-unknown-linux-gnu-toolchain"
-    TARGET_TUPLE="aarch64-unknown-linux-gnu"
-    CONFIG_FILE="crosstool-ng.config.aarch64"
-else
-    INSTALL_DIR="${SCRIPT_DIR}/../arm-anykav200-crosstool-ng"
-    TARGET_TUPLE="arm-unknown-linux-uclibcgnueabi"
-    CONFIG_FILE="crosstool-ng.config"
-fi
+# ARMv5TE toolchain configuration
+INSTALL_DIR="${SCRIPT_DIR}/../arm-anykav200-crosstool-ng"
+TARGET_TUPLE="arm-unknown-linux-uclibcgnueabi"
+CONFIG_FILE="crosstool-ng.config"
 
 CTNG_VERSION="1.28.0"
 CTNG_DIR="${BUILD_DIR}/crosstool-ng-${CTNG_VERSION}"
@@ -161,24 +144,7 @@ install_crosstool_ng() {
         fi
     fi
 
-    # Patch Linux build script to handle aarch64 architecture
-    # Linux kernel uses "arm64" but crosstool-NG uses "aarch64" as CT_ARCH
-    local linux_sh="${CTNG_DIR}/scripts/build/kernel/linux.sh"
-    if [ -f "${linux_sh}" ] && ! grep -q "aarch64:\*)" "${linux_sh}"; then
-        log_info "Patching Linux build script to support aarch64..."
-        sed -i '/arm:64) kernel_arch="arm64";;/a\        # AArch64 architecture (when CT_ARCH is set to "aarch64")\n        aarch64:*) kernel_arch="arm64";;' "${linux_sh}"
-        log_info "Linux build script patched for aarch64 support"
-    fi
-
     make -j$(nproc)
-
-    # Create symlink for aarch64 architecture support
-    # aarch64 is handled by arm.sh in crosstool-NG, but arch.sh looks for aarch64.sh
-    local arch_dir="${CTNG_DIR}/scripts/build/arch"
-    if [ ! -f "${arch_dir}/aarch64.sh" ] && [ -f "${arch_dir}/arm.sh" ]; then
-        log_info "Creating aarch64.sh symlink (aarch64 uses arm.sh)..."
-        ln -sf arm.sh "${arch_dir}/aarch64.sh"
-    fi
 
     log_info "crosstool-NG installed successfully"
 }
@@ -194,14 +160,8 @@ configure_toolchain() {
 
     # Always start from crosstool-NG sample to ensure complete config
     # The pre-made config files may be incomplete, so we regenerate from samples
-    log_info "Creating configuration from crosstool-NG sample for ${ARCH}..."
-    if [ "${ARCH}" = "aarch64" ]; then
-        # Start with aarch64 sample configuration
-        "${CTNG_BIN}" aarch64-unknown-linux-gnu
-    else
-        # Start with ARM uClibc sample configuration
-        "${CTNG_BIN}" arm-unknown-linux-uclibcgnueabi
-    fi
+    log_info "Creating configuration from crosstool-NG sample..."
+    "${CTNG_BIN}" arm-unknown-linux-uclibcgnueabi
     log_info "Configuration template created. Customizing for ${ARCH}..."
 
     # Apply architecture-specific customizations
@@ -217,13 +177,8 @@ create_config_file() {
 
     # If .config doesn't exist, create from sample
     if [ ! -f ".config" ]; then
-        if [ "${ARCH}" = "aarch64" ]; then
-            log_info "Creating configuration from aarch64 sample..."
-            "${CTNG_DIR}/ct-ng" aarch64-unknown-linux-gnu
-        else
-            log_info "Creating configuration from ARM uClibc sample..."
-            "${CTNG_DIR}/ct-ng" arm-unknown-linux-uclibcgnueabi
-        fi
+        log_info "Creating configuration from ARM uClibc sample..."
+        "${CTNG_DIR}/ct-ng" arm-unknown-linux-uclibcgnueabi
     fi
 
     # Read current config and modify it
@@ -241,75 +196,45 @@ create_config_file() {
         log_warn "Could not set GDB version to 16.3, using default"
     fi
 
-    # Architecture-specific customizations
-    if [ "${ARCH}" = "aarch64" ]; then
-        log_info "Configuring for aarch64 (64-bit ARM, glibc)..."
-        
-        # Ensure aarch64 architecture is set
-        sed -i 's/^CT_ARCH=.*/CT_ARCH="aarch64"/' "${config_file}"
-        sed -i 's/^CT_ARCH_64=.*/CT_ARCH_64=y/' "${config_file}"
-        
-        # Fix Linux version to match the version flag (6.16, not 6.1.0)
-        # The sample config has CT_LINUX_V_6_16=y but CT_LINUX_VERSION="6.1.0" which is wrong
-        sed -i 's/^CT_LINUX_VERSION=.*/CT_LINUX_VERSION="6.16"/' "${config_file}"
-        log_info "Set Linux kernel version to 6.16 (modern)"
-        
-        # Set glibc version
-        sed -i 's/^CT_GLIBC_VERSION=.*/CT_GLIBC_VERSION="2.38"/' "${config_file}"
-        sed -i '/^CT_UCLIBC_VERSION=/d' "${config_file}"
-        
-        # Enable glibc and disable uClibc-ng
-        sed -i 's/^CT_LIBC_GLIBC=.*/CT_LIBC_GLIBC=y/' "${config_file}"
-        sed -i '/^CT_LIBC_UCLIBC_NG=y/d' "${config_file}"
-        echo "# CT_LIBC_UCLIBC_NG is not set" >> "${config_file}"
-        
-        # Set target tuple
-        sed -i 's/^CT_TARGET_VENDOR=.*/CT_TARGET_VENDOR="unknown"/' "${config_file}"
-        sed -i 's/^CT_TARGET_OS=.*/CT_TARGET_OS="linux"/' "${config_file}"
-        sed -i 's/^CT_TARGET_SYS=.*/CT_TARGET_SYS="gnu"/' "${config_file}"
-        
-        log_info "Set glibc version to 2.38"
-    else
-        log_info "Configuring for ARMv5TE (32-bit ARM, uClibc-ng)..."
-        
-        # Set architecture to ARMv5TEJ
-        sed -i 's/^CT_ARCH_ARM=.*/CT_ARCH_ARM=y/' "${config_file}"
-        sed -i 's/^CT_ARCH_CPU=.*/CT_ARCH_CPU="arm926ej-s"/' "${config_file}"
-        
-        # Set float ABI to soft
-        sed -i 's/^CT_ARCH_FLOAT=.*/CT_ARCH_FLOAT="soft"/' "${config_file}"
-        sed -i 's/^CT_ARCH_FLOAT_CFLAGS=.*/CT_ARCH_FLOAT_CFLAGS="-mfloat-abi=soft"/' "${config_file}"
-        
-        # Set kernel version to 3.4.35
-        sed -i 's/^CT_LINUX_VERSION=.*/CT_LINUX_VERSION="3.4.35"/' "${config_file}"
-        sed -i 's/^CT_KERNEL_VERSION=.*/CT_KERNEL_VERSION="3.4.35"/' "${config_file}" 2>/dev/null || true
-        sed -i 's/^CT_KERNEL=.*/CT_KERNEL="linux"/' "${config_file}"
-        if ! grep -q "^CT_LINUX_VERSION=" "${config_file}"; then
-            echo 'CT_LINUX_VERSION="3.4.35"' >> "${config_file}"
-        fi
-        
-        # Set uClibc-ng version
-        sed -i 's/^CT_UCLIBC_VERSION=.*/CT_UCLIBC_VERSION="1.0.54"/' "${config_file}"
-        sed -i '/^CT_GLIBC_VERSION=/d' "${config_file}"
-        
-        # Enable uClibc-ng and disable glibc
-        sed -i 's/^CT_LIBC_UCLIBC_NG=.*/CT_LIBC_UCLIBC_NG=y/' "${config_file}"
-        sed -i '/^CT_LIBC_GLIBC=y/d' "${config_file}"
-        echo "# CT_LIBC_GLIBC is not set" >> "${config_file}"
-        
-        # Set target tuple
-        sed -i 's/^CT_TARGET_VENDOR=.*/CT_TARGET_VENDOR="unknown"/' "${config_file}"
-        sed -i 's/^CT_TARGET_OS=.*/CT_TARGET_OS="linux"/' "${config_file}"
-        sed -i 's/^CT_TARGET_SYS=.*/CT_TARGET_SYS="uclibcgnueabi"/' "${config_file}"
-        
-        # Additional optimizations for embedded
-        if ! grep -q "CT_OPTIMIZE_FOR_SIZE" "${config_file}"; then
-            echo "CT_OPTIMIZE_FOR_SIZE=y" >> "${config_file}"
-        fi
-        
-        log_info "Set Linux kernel version to 3.4.35"
-        log_info "Set uClibc-ng version to 1.0.54"
+    log_info "Configuring for ARMv5TE (32-bit ARM, uClibc-ng)..."
+
+    # Set architecture to ARMv5TEJ
+    sed -i 's/^CT_ARCH_ARM=.*/CT_ARCH_ARM=y/' "${config_file}"
+    sed -i 's/^CT_ARCH_CPU=.*/CT_ARCH_CPU="arm926ej-s"/' "${config_file}"
+
+    # Set float ABI to soft
+    sed -i 's/^CT_ARCH_FLOAT=.*/CT_ARCH_FLOAT="soft"/' "${config_file}"
+    sed -i 's/^CT_ARCH_FLOAT_CFLAGS=.*/CT_ARCH_FLOAT_CFLAGS="-mfloat-abi=soft"/' "${config_file}"
+
+    # Set kernel version to 3.4.35
+    sed -i 's/^CT_LINUX_VERSION=.*/CT_LINUX_VERSION="3.4.35"/' "${config_file}"
+    sed -i 's/^CT_KERNEL_VERSION=.*/CT_KERNEL_VERSION="3.4.35"/' "${config_file}" 2>/dev/null || true
+    sed -i 's/^CT_KERNEL=.*/CT_KERNEL="linux"/' "${config_file}"
+    if ! grep -q "^CT_LINUX_VERSION=" "${config_file}"; then
+        echo 'CT_LINUX_VERSION="3.4.35"' >> "${config_file}"
     fi
+
+    # Set uClibc-ng version
+    sed -i 's/^CT_UCLIBC_VERSION=.*/CT_UCLIBC_VERSION="1.0.54"/' "${config_file}"
+    sed -i '/^CT_GLIBC_VERSION=/d' "${config_file}"
+
+    # Enable uClibc-ng and disable glibc
+    sed -i 's/^CT_LIBC_UCLIBC_NG=.*/CT_LIBC_UCLIBC_NG=y/' "${config_file}"
+    sed -i '/^CT_LIBC_GLIBC=y/d' "${config_file}"
+    echo "# CT_LIBC_GLIBC is not set" >> "${config_file}"
+
+    # Set target tuple
+    sed -i 's/^CT_TARGET_VENDOR=.*/CT_TARGET_VENDOR="unknown"/' "${config_file}"
+    sed -i 's/^CT_TARGET_OS=.*/CT_TARGET_OS="linux"/' "${config_file}"
+    sed -i 's/^CT_TARGET_SYS=.*/CT_TARGET_SYS="uclibcgnueabi"/' "${config_file}"
+
+    # Additional optimizations for embedded
+    if ! grep -q "CT_OPTIMIZE_FOR_SIZE" "${config_file}"; then
+        echo "CT_OPTIMIZE_FOR_SIZE=y" >> "${config_file}"
+    fi
+
+    log_info "Set Linux kernel version to 3.4.35"
+    log_info "Set uClibc-ng version to 1.0.54"
 
     # Set installation path
     sed -i "s|^CT_PREFIX_DIR=.*|CT_PREFIX_DIR=\"${INSTALL_DIR}\"|" "${config_file}"
@@ -349,13 +274,7 @@ verify_installation() {
     log_info "Verifying toolchain installation for ${ARCH}..."
 
     local gcc_path
-    if [ "${ARCH}" = "aarch64" ]; then
-        # aarch64 toolchain installs to bin/ directly (not usr/bin/)
-        gcc_path="${INSTALL_DIR}/bin/aarch64-unknown-linux-gnu-gcc"
-    else
-        # ARMv5TE toolchain installs to usr/bin/
-        gcc_path="${INSTALL_DIR}/usr/bin/arm-unknown-linux-uclibcgnueabi-gcc"
-    fi
+    gcc_path="${INSTALL_DIR}/usr/bin/arm-unknown-linux-uclibcgnueabi-gcc"
 
     if [ ! -f "${gcc_path}" ]; then
         log_error "Toolchain not found at expected location: ${gcc_path}"
@@ -368,13 +287,8 @@ verify_installation() {
     log_info "Testing target architecture..."
     "${gcc_path}" -dumpmachine
 
-    if [ "${ARCH}" = "armv5te" ]; then
-        log_info "Verifying soft-float configuration..."
-        "${gcc_path}" -march=armv5te -mfloat-abi=soft -E -dM - < /dev/null | grep -i "float" || true
-    else
-        log_info "Verifying aarch64 configuration..."
-        "${gcc_path}" -E -dM - < /dev/null | grep -i "aarch64" || true
-    fi
+    log_info "Verifying soft-float configuration..."
+    "${gcc_path}" -march=armv5te -mfloat-abi=soft -E -dM - < /dev/null | grep -i "float" || true
 
     log_info "Toolchain verification completed"
 }
@@ -394,20 +308,12 @@ main() {
 
     log_info "=========================================="
     log_info "Toolchain build completed successfully!"
-    log_info "Architecture: ${ARCH}"
-    if [ "${ARCH}" = "aarch64" ]; then
-        log_info "Installation location: ${INSTALL_DIR}"
-        log_info "=========================================="
-        log_info "To use the aarch64 toolchain:"
-        log_info "  ${INSTALL_DIR}/bin/aarch64-unknown-linux-gnu-gcc"
-    else
-        log_info "Installation location: ${INSTALL_DIR}/usr"
-        log_info "=========================================="
-        log_info "To use the ARMv5TE toolchain, set:"
-        log_info "  export ANYKA_TOOLCHAIN_VERSION=new"
-        log_info "Or update your build scripts to use:"
-        log_info "  ${INSTALL_DIR}/usr/bin/arm-unknown-linux-uclibcgnueabi-gcc"
-    fi
+    log_info "Installation location: ${INSTALL_DIR}/usr"
+    log_info "=========================================="
+    log_info "To use the ARMv5TE toolchain, set:"
+    log_info "  export ANYKA_TOOLCHAIN_VERSION=new"
+    log_info "Or update your build scripts to use:"
+    log_info "  ${INSTALL_DIR}/usr/bin/arm-unknown-linux-uclibcgnueabi-gcc"
 }
 
 # Run main function

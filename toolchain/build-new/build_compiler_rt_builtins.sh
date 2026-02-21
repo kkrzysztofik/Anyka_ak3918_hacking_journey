@@ -1,7 +1,7 @@
 #!/bin/bash
 # Build compiler-rt builtins separately using target GCC cross-compiler
 # This is a second-stage build that runs after build_llvm.sh
-# Supports: ARMv5TE (armv5te) and aarch64 architectures
+# Target: ARMv5TE for Anyka AK3918 cameras
 
 set -e  # Exit on error
 
@@ -11,50 +11,25 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
-# Architecture selection (default: armv5te)
-ARCH="${ARCH:-armv5te}"
-
-# Validate architecture
-if [ "${ARCH}" != "armv5te" ] && [ "${ARCH}" != "aarch64" ]; then
-    echo "Error: ARCH must be 'armv5te' or 'aarch64'"
-    echo "Usage: ARCH=armv5te ./build_compiler_rt_builtins.sh  (default)"
-    echo "       ARCH=aarch64 ./build_compiler_rt_builtins.sh"
-    exit 1
-fi
-
 # Script directory
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BUILD_DIR="${SCRIPT_DIR}"
 
-# Set target-specific variables based on architecture
-if [ "${ARCH}" = "aarch64" ]; then
-    INSTALL_DIR="${SCRIPT_DIR}/../aarch64-unknown-linux-gnu-toolchain"
-    TARGET_TRIPLE="aarch64-unknown-linux-gnu"
-    SYSROOT_SUBDIR="aarch64-unknown-linux-gnu"
-    LLVM_TARGET="AArch64"
-    CMAKE_TARGET_ARCH="aarch64"
-    # aarch64 toolchain installs to bin/ directly
-    CROSS_CC="${INSTALL_DIR}/bin/aarch64-unknown-linux-gnu-gcc"
-    CROSS_CXX="${INSTALL_DIR}/bin/aarch64-unknown-linux-gnu-g++"
-    CROSS_AR="${INSTALL_DIR}/bin/aarch64-unknown-linux-gnu-ar"
-    CROSS_RANLIB="${INSTALL_DIR}/bin/aarch64-unknown-linux-gnu-ranlib"
-else
-    INSTALL_DIR="${SCRIPT_DIR}/../arm-anykav200-crosstool-ng"
-    TARGET_TRIPLE="arm-unknown-linux-uclibcgnueabi"
-    SYSROOT_SUBDIR="arm-unknown-linux-uclibcgnueabi"
-    LLVM_TARGET="ARM"
-    CMAKE_TARGET_ARCH="arm"
-    # ARMv5TE toolchain installs to bin/
-    CROSS_CC="${INSTALL_DIR}/bin/arm-unknown-linux-uclibcgnueabi-gcc"
-    CROSS_CXX="${INSTALL_DIR}/bin/arm-unknown-linux-uclibcgnueabi-g++"
-    CROSS_AR="${INSTALL_DIR}/bin/arm-unknown-linux-uclibcgnueabi-ar"
-    CROSS_RANLIB="${INSTALL_DIR}/bin/arm-unknown-linux-uclibcgnueabi-ranlib"
-fi
+# ARMv5TE toolchain configuration
+INSTALL_DIR="${SCRIPT_DIR}/../arm-anykav200-crosstool-ng"
+TARGET_TRIPLE="arm-unknown-linux-uclibcgnueabi"
+SYSROOT_SUBDIR="arm-unknown-linux-uclibcgnueabi"
+LLVM_TARGET="ARM"
+CMAKE_TARGET_ARCH="arm"
+CROSS_CC="${INSTALL_DIR}/bin/arm-unknown-linux-uclibcgnueabi-gcc"
+CROSS_CXX="${INSTALL_DIR}/bin/arm-unknown-linux-uclibcgnueabi-g++"
+CROSS_AR="${INSTALL_DIR}/bin/arm-unknown-linux-uclibcgnueabi-ar"
+CROSS_RANLIB="${INSTALL_DIR}/bin/arm-unknown-linux-uclibcgnueabi-ranlib"
 
 LLVM_VERSION="21.1.8"
 LLVM_SRC_DIR="${BUILD_DIR}/llvm-${LLVM_VERSION}"
 COMPILER_RT_SRC_DIR="${LLVM_SRC_DIR}/compiler-rt"
-COMPILER_RT_BUILD_DIR="${BUILD_DIR}/.build/compiler-rt-${LLVM_VERSION}-${ARCH}"
+COMPILER_RT_BUILD_DIR="${BUILD_DIR}/.build/compiler-rt-${LLVM_VERSION}-arm"
 SYSROOT="${INSTALL_DIR}/${SYSROOT_SUBDIR}/sysroot"
 
 # Global variable to store actual builtins library location
@@ -151,21 +126,12 @@ configure_compiler_rt() {
     # We use the target GCC cross-compiler to build the builtins
     # This is a cross-compilation build, so we set CMAKE_SYSTEM_NAME and CMAKE_SYSTEM_PROCESSOR
     local cmake_target_flags
-    if [ "${ARCH}" = "aarch64" ]; then
-        cmake_target_flags=(
-            -DCMAKE_SYSTEM_NAME=Linux
-            -DCMAKE_SYSTEM_PROCESSOR=aarch64
-            -DCMAKE_C_COMPILER_TARGET="${TARGET_TRIPLE}"
-            -DCMAKE_CXX_COMPILER_TARGET="${TARGET_TRIPLE}"
-        )
-    else
-        cmake_target_flags=(
-            -DCMAKE_SYSTEM_NAME=Linux
-            -DCMAKE_SYSTEM_PROCESSOR=arm
-            -DCMAKE_C_COMPILER_TARGET="${TARGET_TRIPLE}"
-            -DCMAKE_CXX_COMPILER_TARGET="${TARGET_TRIPLE}"
-        )
-    fi
+    cmake_target_flags=(
+        -DCMAKE_SYSTEM_NAME=Linux
+        -DCMAKE_SYSTEM_PROCESSOR=arm
+        -DCMAKE_C_COMPILER_TARGET="${TARGET_TRIPLE}"
+        -DCMAKE_CXX_COMPILER_TARGET="${TARGET_TRIPLE}"
+    )
 
     # Configure with CMake
     # IMPORTANT: This is a cross-compilation build, so we use the target GCC
@@ -323,15 +289,11 @@ install_compiler_rt() {
 
 # Verify installation
 verify_installation() {
-    log_info "Verifying compiler-rt installation for ${ARCH}..."
+    log_info "Verifying compiler-rt installation for ARMv5TE..."
 
     # Check for builtins library in expected location
     local builtins_lib
-    if [ "${ARCH}" = "aarch64" ]; then
-        builtins_lib="${INSTALL_DIR}/lib/clang/${LLVM_VERSION}/lib/linux/libclang_rt.builtins-aarch64.a"
-    else
-        builtins_lib="${INSTALL_DIR}/lib/clang/${LLVM_VERSION}/lib/linux/libclang_rt.builtins-arm.a"
-    fi
+    builtins_lib="${INSTALL_DIR}/lib/clang/${LLVM_VERSION}/lib/linux/libclang_rt.builtins-arm.a"
 
     local found_lib=""
     if [[ -f "${builtins_lib}" ]]; then
@@ -364,7 +326,7 @@ verify_installation() {
 
 # Main execution
 main() {
-    log_info "Starting compiler-rt builtins build for ${ARCH}"
+    log_info "Starting compiler-rt builtins build for ARMv5TE"
     log_info "Build directory: ${BUILD_DIR}"
     log_info "Install directory: ${INSTALL_DIR}"
     log_info "Target triple: ${TARGET_TRIPLE}"
@@ -378,23 +340,17 @@ main() {
 
     log_info "=========================================="
     log_info "Compiler-rt builtins build completed successfully!"
-    log_info "Architecture: ${ARCH}"
     log_info "Installation location: ${INSTALL_DIR}"
     log_info "=========================================="
     log_info "Builtins library installed to:"
     if [[ -n "${ACTUAL_BUILTINS_LIB}" ]]; then
         log_info "  ${ACTUAL_BUILTINS_LIB}"
     else
-        # Fallback to expected location if verification didn't run
-        if [ "${ARCH}" = "aarch64" ]; then
-            log_info "  ${INSTALL_DIR}/lib/clang/${LLVM_VERSION}/lib/linux/libclang_rt.builtins-aarch64.a"
-        else
-            log_info "  ${INSTALL_DIR}/lib/clang/${LLVM_VERSION}/lib/linux/libclang_rt.builtins-arm.a"
-        fi
+        log_info "  ${INSTALL_DIR}/lib/clang/${LLVM_VERSION}/lib/linux/libclang_rt.builtins-arm.a"
     fi
     log_info ""
     log_info "You can now bootstrap Rust:"
-    log_info "  ARCH=${ARCH} ./bootstrap_rust.sh"
+    log_info "  ./bootstrap_rust.sh"
 }
 
 # Run main function

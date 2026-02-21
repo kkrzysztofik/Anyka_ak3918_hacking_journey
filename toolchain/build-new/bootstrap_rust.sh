@@ -1,6 +1,6 @@
 #!/bin/bash
 # Bootstrap Rust from source with custom LLVM
-# Supports: ARMv5TE (armv5te) and aarch64 architectures
+# Target: ARMv5TE (armv5te-unknown-linux-uclibceabi) for Anyka AK3918 cameras
 
 set -e  # Exit on error
 
@@ -10,39 +10,18 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
-# Architecture selection (default: armv5te)
-ARCH="${ARCH:-armv5te}"
-
-# Validate architecture
-if [ "${ARCH}" != "armv5te" ] && [ "${ARCH}" != "aarch64" ]; then
-    echo "Error: ARCH must be 'armv5te' or 'aarch64'"
-    echo "Usage: ARCH=armv5te ./bootstrap_rust.sh  (default)"
-    echo "       ARCH=aarch64 ./bootstrap_rust.sh"
-    exit 1
-fi
-
 # Script directory
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BUILD_DIR="${SCRIPT_DIR}"
 
-# Set target-specific variables based on architecture
-if [ "${ARCH}" = "aarch64" ]; then
-    INSTALL_DIR="${SCRIPT_DIR}/../aarch64-unknown-linux-gnu-toolchain"
-    TARGET_NAME="aarch64-unknown-linux-gnu"
-    TARGET_SPEC="${BUILD_DIR}/${TARGET_NAME}.json"
-    TARGET_TUPLE="aarch64-unknown-linux-gnu"
-    SYSROOT_SUBDIR="aarch64-unknown-linux-gnu"
-    CLANG_WRAPPER="clang-wrapper-aarch64.sh"
-    IS_BUILTIN_TARGET=true
-else
-    INSTALL_DIR="${SCRIPT_DIR}/../arm-anykav200-crosstool-ng"
-    TARGET_NAME="armv5te-unknown-linux-uclibceabi"
-    TARGET_SPEC="${BUILD_DIR}/${TARGET_NAME}.json"
-    TARGET_TUPLE="arm-unknown-linux-uclibcgnueabi"
-    SYSROOT_SUBDIR="arm-unknown-linux-uclibcgnueabi"
-    CLANG_WRAPPER="clang-wrapper.sh"
-    IS_BUILTIN_TARGET=false
-fi
+# ARMv5TE target configuration
+INSTALL_DIR="${SCRIPT_DIR}/../arm-anykav200-crosstool-ng"
+TARGET_NAME="armv5te-unknown-linux-uclibceabi"
+TARGET_SPEC="${BUILD_DIR}/${TARGET_NAME}.json"
+TARGET_TUPLE="arm-unknown-linux-uclibcgnueabi"
+SYSROOT_SUBDIR="arm-unknown-linux-uclibcgnueabi"
+CLANG_WRAPPER="clang-wrapper.sh"
+IS_BUILTIN_TARGET=false
 
 RUST_SRC_DIR="${BUILD_DIR}/rust"
 # Use latest stable Rust version (1.91.1 or newer)
@@ -272,21 +251,12 @@ create_rust_config() {
         log_warn "Or ensure rustc and cargo are in your PATH"
     fi
 
-    # Determine compiler paths based on architecture
+    # ARMv5TE compiler paths
     local target_cc target_cxx target_ar target_ranlib
-    if [ "${ARCH}" = "aarch64" ]; then
-        # aarch64 toolchain installs to bin/ directly (not usr/bin/)
-        target_cc="${INSTALL_DIR}/bin/aarch64-unknown-linux-gnu-gcc"
-        target_cxx="${INSTALL_DIR}/bin/aarch64-unknown-linux-gnu-g++"
-        target_ar="${INSTALL_DIR}/bin/aarch64-unknown-linux-gnu-ar"
-        target_ranlib="${INSTALL_DIR}/bin/aarch64-unknown-linux-gnu-ranlib"
-    else
-        # ARMv5TE toolchain installs to bin/ (not usr/bin/)
-        target_cc="${INSTALL_DIR}/bin/arm-unknown-linux-uclibcgnueabi-gcc"
-        target_cxx="${INSTALL_DIR}/bin/arm-unknown-linux-uclibcgnueabi-g++"
-        target_ar="${INSTALL_DIR}/bin/arm-unknown-linux-uclibcgnueabi-ar"
-        target_ranlib="${INSTALL_DIR}/bin/arm-unknown-linux-uclibcgnueabi-ranlib"
-    fi
+    target_cc="${INSTALL_DIR}/bin/arm-unknown-linux-uclibcgnueabi-gcc"
+    target_cxx="${INSTALL_DIR}/bin/arm-unknown-linux-uclibcgnueabi-g++"
+    target_ar="${INSTALL_DIR}/bin/arm-unknown-linux-uclibcgnueabi-ar"
+    target_ranlib="${INSTALL_DIR}/bin/arm-unknown-linux-uclibcgnueabi-ranlib"
 
     cat > "${config_file}" << EOF
 # Rust build configuration for custom LLVM and ${ARCH} target
@@ -309,7 +279,7 @@ rustc = "${system_rustc}"
 cargo = "${system_cargo}"
 # Build extended tools (cargo, rustfmt, clippy, etc.)
 extended = true
-tools = ["cargo", "rustfmt", "clippy", "rustdoc", "src"]
+tools = ["cargo", "rustfmt", "clippy", "rustdoc", "src", "rust-analyzer-proc-macro-srv"]
 
 [install]
 prefix = "${INSTALL_DIR}"
@@ -406,27 +376,8 @@ build_rust() {
     local sysroot="${INSTALL_DIR}/${SYSROOT_SUBDIR}/sysroot"
     local clang_wrapper="${BUILD_DIR}/${CLANG_WRAPPER}"
     
-    if [ "${ARCH}" = "aarch64" ]; then
-        # Use the existing aarch64 wrapper if it exists, otherwise create it
-        if [[ ! -f "${clang_wrapper}" ]]; then
-            cat > "${clang_wrapper}" << EOF
-#!/bin/bash
-# Clang wrapper for aarch64 target with sysroot
-exec "${INSTALL_DIR}/bin/clang" \\
-    --target=aarch64-unknown-linux-gnu \\
-    --sysroot="${sysroot}" \\
-    -L"${sysroot}/lib" \\
-    -L"${sysroot}/usr/lib" \\
-    "\$@"
-EOF
-            chmod +x "${clang_wrapper}"
-            log_info "Created Clang wrapper: ${clang_wrapper}"
-        else
-            log_info "Using existing Clang wrapper: ${clang_wrapper}"
-        fi
-    else
-        # Create ARMv5TE wrapper
-        cat > "${clang_wrapper}" << EOF
+    # Create ARMv5TE Clang wrapper
+    cat > "${clang_wrapper}" << EOF
 #!/bin/bash
 # Clang wrapper for ARMv5TE target with sysroot
 exec "${INSTALL_DIR}/bin/clang" \\
@@ -439,9 +390,8 @@ exec "${INSTALL_DIR}/bin/clang" \\
     -L"${sysroot}/usr/lib" \\
     "\$@"
 EOF
-        chmod +x "${clang_wrapper}"
-        log_info "Created Clang wrapper: ${clang_wrapper}"
-    fi
+    chmod +x "${clang_wrapper}"
+    log_info "Created Clang wrapper: ${clang_wrapper}"
 
     # Update config.toml to use the wrapper (if not already set)
     if ! grep -q "linker = \"${clang_wrapper}\"" "${RUST_SRC_DIR}/config.toml"; then

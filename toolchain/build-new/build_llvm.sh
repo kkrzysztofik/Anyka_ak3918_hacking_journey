@@ -1,6 +1,6 @@
 #!/bin/bash
 # Build LLVM/Clang from source with cross-compilation support
-# Supports: ARMv5TE (armv5te) and aarch64 architectures
+# Target: ARMv5TE (armv5te) for Anyka AK3918 cameras
 
 set -e  # Exit on error
 
@@ -10,49 +10,24 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
-# Architecture selection (default: armv5te)
-ARCH="${ARCH:-armv5te}"
-
-# Validate architecture
-if [ "${ARCH}" != "armv5te" ] && [ "${ARCH}" != "aarch64" ]; then
-    echo "Error: ARCH must be 'armv5te' or 'aarch64'"
-    echo "Usage: ARCH=armv5te ./build_llvm.sh  (default)"
-    echo "       ARCH=aarch64 ./build_llvm.sh"
-    exit 1
-fi
-
 # Script directory
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BUILD_DIR="${SCRIPT_DIR}"
 
-# Set target-specific variables based on architecture
-if [ "${ARCH}" = "aarch64" ]; then
-    INSTALL_DIR="${SCRIPT_DIR}/../aarch64-unknown-linux-gnu-toolchain"
-    TARGET_TRIPLE="aarch64-unknown-linux-gnu"
-    SYSROOT_SUBDIR="aarch64-unknown-linux-gnu"
-    LLVM_TARGET="AArch64"
-    CMAKE_TARGET_ARCH="aarch64"
-    # aarch64 toolchain installs to bin/ directly
-    CROSS_CC="${INSTALL_DIR}/bin/aarch64-unknown-linux-gnu-gcc"
-    CROSS_CXX="${INSTALL_DIR}/bin/aarch64-unknown-linux-gnu-g++"
-    CROSS_AR="${INSTALL_DIR}/bin/aarch64-unknown-linux-gnu-ar"
-    CROSS_RANLIB="${INSTALL_DIR}/bin/aarch64-unknown-linux-gnu-ranlib"
-else
-    INSTALL_DIR="${SCRIPT_DIR}/../arm-anykav200-crosstool-ng"
-    TARGET_TRIPLE="arm-unknown-linux-uclibcgnueabi"
-    SYSROOT_SUBDIR="arm-unknown-linux-uclibcgnueabi"
-    LLVM_TARGET="ARM"
-    CMAKE_TARGET_ARCH="arm"
-    # ARMv5TE toolchain installs to bin/
-    CROSS_CC="${INSTALL_DIR}/bin/arm-unknown-linux-uclibcgnueabi-gcc"
-    CROSS_CXX="${INSTALL_DIR}/bin/arm-unknown-linux-uclibcgnueabi-g++"
-    CROSS_AR="${INSTALL_DIR}/bin/arm-unknown-linux-uclibcgnueabi-ar"
-    CROSS_RANLIB="${INSTALL_DIR}/bin/arm-unknown-linux-uclibcgnueabi-ranlib"
-fi
+# ARMv5TE toolchain configuration
+INSTALL_DIR="${SCRIPT_DIR}/../arm-anykav200-crosstool-ng"
+TARGET_TRIPLE="arm-unknown-linux-uclibcgnueabi"
+SYSROOT_SUBDIR="arm-unknown-linux-uclibcgnueabi"
+LLVM_TARGET="ARM"
+CMAKE_TARGET_ARCH="arm"
+CROSS_CC="${INSTALL_DIR}/bin/arm-unknown-linux-uclibcgnueabi-gcc"
+CROSS_CXX="${INSTALL_DIR}/bin/arm-unknown-linux-uclibcgnueabi-g++"
+CROSS_AR="${INSTALL_DIR}/bin/arm-unknown-linux-uclibcgnueabi-ar"
+CROSS_RANLIB="${INSTALL_DIR}/bin/arm-unknown-linux-uclibcgnueabi-ranlib"
 
 LLVM_VERSION="21.1.8"
 LLVM_SRC_DIR="${BUILD_DIR}/llvm-${LLVM_VERSION}"
-LLVM_BUILD_DIR="${BUILD_DIR}/.build/llvm-${LLVM_VERSION}-${ARCH}"
+LLVM_BUILD_DIR="${BUILD_DIR}/.build/llvm-${LLVM_VERSION}-arm"
 SYSROOT="${INSTALL_DIR}/${SYSROOT_SUBDIR}/sysroot"
 
 # Logging functions
@@ -99,7 +74,7 @@ check_dependencies() {
     if [[ ! -f "${CROSS_CC}" ]]; then
         log_error "GCC toolchain not found at: ${CROSS_CC}"
         log_error "Please build the GCC toolchain first:"
-        log_error "  ARCH=${ARCH} ./build_toolchain.sh"
+        log_error "  ./build_toolchain.sh"
         exit 1
     fi
 
@@ -107,7 +82,7 @@ check_dependencies() {
     if [[ ! -d "${SYSROOT}" ]]; then
         log_error "Sysroot not found at: ${SYSROOT}"
         log_error "Please build the GCC toolchain first:"
-        log_error "  ARCH=${ARCH} ./build_toolchain.sh"
+        log_error "  ./build_toolchain.sh"
         exit 1
     fi
 
@@ -164,7 +139,7 @@ download_llvm() {
 
 # Configure LLVM build
 configure_llvm() {
-    log_info "Configuring LLVM build for ${ARCH}..."
+    log_info "Configuring LLVM build for ARMv5TE..."
 
     # Remove any existing build directory to ensure clean configuration
     if [[ -d "${LLVM_BUILD_DIR}" ]]; then
@@ -182,17 +157,10 @@ configure_llvm() {
     # CMAKE_SYSTEM_NAME or CMAKE_SYSTEM_PROCESSOR, as that makes CMake think we're
     # cross-compiling and adds --sysroot flags.
     local cmake_target_flags
-    if [ "${ARCH}" = "aarch64" ]; then
-        cmake_target_flags=(
-            -DLLVM_TARGET_ARCH=AArch64
-            -DLLVM_DEFAULT_TARGET_TRIPLE=aarch64-unknown-linux-gnu
-        )
-    else
-        cmake_target_flags=(
+    cmake_target_flags=(
             -DLLVM_TARGET_ARCH=ARM
             -DLLVM_DEFAULT_TARGET_TRIPLE=arm-unknown-linux-uclibcgnueabi
         )
-    fi
 
     log_info "Running CMake configuration..."
     log_info "Target triple: ${TARGET_TRIPLE}"
@@ -384,7 +352,7 @@ install_llvm() {
 
 # Verify installation
 verify_installation() {
-    log_info "Verifying LLVM installation for ${ARCH}..."
+    log_info "Verifying LLVM installation for ARMv5TE..."
 
     local llvm_config="${INSTALL_DIR}/bin/llvm-config"
     local clang="${INSTALL_DIR}/bin/clang"
@@ -426,7 +394,7 @@ verify_installation() {
 
 # Main execution
 main() {
-    log_info "Starting LLVM build for ${ARCH}"
+    log_info "Starting LLVM build for ARMv5TE"
     log_info "Build directory: ${BUILD_DIR}"
     log_info "Install directory: ${INSTALL_DIR}"
     log_info "Target triple: ${TARGET_TRIPLE}"
@@ -441,7 +409,6 @@ main() {
 
     log_info "=========================================="
     log_info "LLVM build completed successfully!"
-    log_info "Architecture: ${ARCH}"
     log_info "Installation location: ${INSTALL_DIR}"
     log_info "=========================================="
     log_info "LLVM tools available at:"
@@ -451,7 +418,7 @@ main() {
     log_info "  ${INSTALL_DIR}/bin/lld"
     log_info ""
     log_info "You can now bootstrap Rust:"
-    log_info "  ARCH=${ARCH} ./bootstrap_rust.sh"
+    log_info "  ./bootstrap_rust.sh"
 }
 
 # Run main function
