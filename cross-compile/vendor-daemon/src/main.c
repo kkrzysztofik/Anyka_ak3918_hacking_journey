@@ -1,0 +1,1136 @@
+/**
+ * vendor-daemon - Anyka SDK IPC bridge
+ *
+ * Receives binary IPC commands from the Rust onvif-rust server over a Unix
+ * domain socket (/tmp/vendor-daemon.sock) and dispatches them to the real
+ * Anyka SDK C API calls.
+ *
+ * Protocol (little-endian):
+ *   Request:  [i32 cmd_id][u32 req_len][req_data bytes]
+ *   Response: [i32 status][u32 resp_len][resp_data bytes]
+ *
+ * Connection model:
+ *   One client at a time. After accept(), loop reading requests on the same
+ *   fd until EOF, error, or CMD_SHUTDOWN. Only then close and accept next.
+ *
+ * Build (old Anyka toolchain):
+ *   arm-anykav200-linux-uclibcgnueabi-gcc -std=gnu99 -march=armv5te \
+ *     -mfloat-abi=soft -o vendor-daemon main.c \
+ *     -I<sdk-include-dir> -L<sdk-lib-dir> \
+ *     -lplat_vi -lplat_vpss -lplat_venc_cb -lmpi_venc ...
+ */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <stdint.h>
+#include <errno.h>
+#include <signal.h>
+#include <unistd.h>
+#include <sys/socket.h>
+#include <sys/un.h>
+#include <fcntl.h>
+#include "log.h"
+
+#include "ak_vi.h"
+#include "ak_vpss.h"
+#include "ak_venc.h"
+#include "ak_ai.h"
+#include "ak_aenc.h"
+#include "ak_common.h"
+#include "ak_global.h"
+#include "ak_error.h"
+
+/* ---- constants ----------------------------------------------------------- */
+
+#define SOCKET_PATH      "/tmp/vendor-daemon.sock"
+#define MAX_REQUEST_SIZE (1 * 1024 * 1024)  /* 1 MB – for frame data */
+#define LOG_FILE_PATH    "/tmp/vendor-daemon.log"
+#define STATUS_OK        0
+#define STATUS_ERROR     (-1)
+
+/* Maximum number of video_stream structs held pending release */
+#define MAX_PENDING_STREAMS 16
+
+/* ---- command IDs --------------------------------------------------------- */
+
+enum cmd_id {
+    /* Video Input */
+    CMD_VI_MATCH_SENSOR           = 1,
+    CMD_VI_OPEN                   = 2,
+    CMD_VI_CLOSE                  = 3,
+    CMD_VI_GET_SENSOR_RESOLUTION  = 4,
+    CMD_VI_SET_CHANNEL_ATTR       = 5,
+    CMD_VI_CAPTURE_ON             = 6,
+    CMD_VI_CAPTURE_OFF            = 7,
+    /* VPSS */
+    CMD_VPSS_INIT                 = 8,
+    CMD_VPSS_DESTROY              = 9,
+    /* Video Encoder */
+    CMD_VENC_SET_CFG_PATH         = 10,
+    CMD_VENC_OPEN                 = 11,
+    CMD_VENC_CLOSE                = 12,
+    CMD_VENC_SET_RC               = 13,
+    CMD_VENC_SET_IFRAME           = 14,
+    CMD_VENC_REQUEST_STREAM       = 15,
+    CMD_VENC_GET_STREAM           = 16,
+    CMD_VENC_RELEASE_STREAM       = 17,
+    CMD_VENC_CANCEL_STREAM        = 18,
+    /* Audio Input */
+    CMD_AI_OPEN                   = 50,
+    CMD_AI_CLOSE                  = 51,
+    CMD_AI_SET_ADC_VOLUME         = 52,
+    CMD_AI_SET_ASLC_VOLUME        = 53,
+    /* Audio Encoder */
+    CMD_AENC_OPEN                 = 54,
+    CMD_AENC_CLOSE                = 55,
+    CMD_AENC_SET_ATTR             = 56,
+    /* Imaging / ISP */
+    CMD_ISP_SET_BRIGHTNESS        = 100,
+    CMD_ISP_SET_CONTRAST          = 101,
+    CMD_ISP_SET_SATURATION        = 102,
+    CMD_ISP_SET_SHARPNESS         = 103,
+    CMD_ISP_SET_IR_FILTER         = 104,
+    CMD_ISP_SET_WDR               = 105,
+    /* Utility */
+    CMD_GET_ERROR_NO              = 200,
+    CMD_GET_ERROR_STR             = 201,
+    CMD_SHUTDOWN                  = 255
+};
+
+/* ---- pending-release table ----------------------------------------------- */
+/*
+ * After ak_venc_get_stream() succeeds we store the video_stream struct here
+ * and hand the Rust client the slot index as a "remote_token". The client
+ * must pass the token back with CMD_VENC_RELEASE_STREAM so we can call
+ * ak_venc_release_stream() with the correct struct.
+ */
+static struct {
+    struct video_stream stream;
+    int in_use;
+} g_pending[MAX_PENDING_STREAMS];
+
+/* ---- shutdown flag ------------------------------------------------------- */
+static volatile int g_shutdown = 0;
+
+/* Saved file descriptors for stdout/stderr restoration on shutdown */
+static int g_saved_stdout = -1;
+static int g_saved_stderr = -1;
+static FILE *g_log_fp = NULL;
+
+static void signal_handler(int sig)
+{
+    (void)sig;
+    g_shutdown = 1;
+}
+
+/* ---- I/O helpers --------------------------------------------------------- */
+
+/**
+ * read_exact - read exactly n bytes, retrying on partial reads.
+ * Returns 0 on success, -1 on EOF or error.
+ */
+static int read_exact(int fd, void *buf, size_t n)
+{
+    size_t done = 0;
+    while (done < n) {
+        ssize_t r = read(fd, (char *)buf + done, n - done);
+        if (r <= 0) {
+            if (r < 0 && errno == EINTR)
+                continue;
+            return -1;
+        }
+        done += (size_t)r;
+    }
+    return 0;
+}
+
+/**
+ * write_exact - write exactly n bytes, retrying on partial writes.
+ * Returns 0 on success, -1 on error.
+ */
+static int write_exact(int fd, const void *buf, size_t n)
+{
+    size_t done = 0;
+    while (done < n) {
+        ssize_t w = write(fd, (const char *)buf + done, n - done);
+        if (w <= 0) {
+            if (w < 0 && errno == EINTR)
+                continue;
+            return -1;
+        }
+        done += (size_t)w;
+    }
+    return 0;
+}
+
+/**
+ * send_response - send [i32 status][u32 len][data] to client.
+ * Returns 0 on success, -1 on write error.
+ */
+static int send_response(int fd, int32_t status, const void *data, uint32_t len)
+{
+    if (write_exact(fd, &status, sizeof(status)) != 0) return -1;
+    if (write_exact(fd, &len,    sizeof(len))    != 0) return -1;
+    if (len > 0 && data != NULL)
+        if (write_exact(fd, data, len) != 0)           return -1;
+    return 0;
+}
+
+/* ---- pending-release helpers --------------------------------------------- */
+
+static int pending_alloc(void)
+{
+    int i;
+    for (i = 0; i < MAX_PENDING_STREAMS; i++) {
+        if (!g_pending[i].in_use) {
+            g_pending[i].in_use = 1;
+            return i;
+        }
+    }
+    return -1;
+}
+
+static void pending_free(int idx)
+{
+    if (idx >= 0 && idx < MAX_PENDING_STREAMS)
+        g_pending[idx].in_use = 0;
+}
+
+/* ---- VI handlers --------------------------------------------------------- */
+
+static int handle_vi_match_sensor(int fd, const uint8_t *req, uint32_t req_len)
+{
+    char path[512];
+    uint32_t copy = req_len < sizeof(path) - 1 ? req_len : sizeof(path) - 1;
+    memcpy(path, req, copy);
+    path[copy] = '\0';
+
+    log_debug("[vi] match_sensor path=%s", path);
+    int ret = ak_vi_match_sensor(path);
+    if (ret != 0)
+        log_error("[vi] match_sensor failed: %d", ret);
+    return send_response(fd, ret, NULL, 0);
+}
+
+static int handle_vi_open(int fd, const uint8_t *req, uint32_t req_len)
+{
+    if (req_len < sizeof(int32_t)) {
+        log_warn("[vi] open: req too short (%u)", req_len);
+        return send_response(fd, STATUS_ERROR, NULL, 0);
+    }
+    int32_t dev_type_i32;
+    memcpy(&dev_type_i32, req, sizeof(dev_type_i32));
+    enum video_dev_type dev = (enum video_dev_type)dev_type_i32;
+
+    log_debug("[vi] open dev=%d", dev_type_i32);
+    void *handle = ak_vi_open(dev);
+    if (handle == NULL) {
+        log_error("[vi] open failed (NULL handle)");
+        return send_response(fd, STATUS_ERROR, NULL, 0);
+    }
+    int64_t h64 = (int64_t)(uintptr_t)handle;
+    return send_response(fd, STATUS_OK, &h64, sizeof(h64));
+}
+
+static int handle_vi_close(int fd, const uint8_t *req, uint32_t req_len)
+{
+    if (req_len < sizeof(uint64_t)) {
+        return send_response(fd, STATUS_ERROR, NULL, 0);
+    }
+    uint64_t h64;
+    memcpy(&h64, req, sizeof(h64));
+    void *handle = (void *)(uintptr_t)h64;
+
+    log_debug("[vi] close handle=%p", handle);
+    int ret = ak_vi_close(handle);
+    return send_response(fd, ret, NULL, 0);
+}
+
+static int handle_vi_get_sensor_resolution(int fd, const uint8_t *req, uint32_t req_len)
+{
+    if (req_len < sizeof(uint64_t)) {
+        return send_response(fd, STATUS_ERROR, NULL, 0);
+    }
+    uint64_t h64;
+    memcpy(&h64, req, sizeof(h64));
+    void *handle = (void *)(uintptr_t)h64;
+
+    struct video_resolution res;
+    memset(&res, 0, sizeof(res));
+    int ret = ak_vi_get_sensor_resolution(handle, &res);
+    if (ret != 0) {
+        log_error("[vi] get_sensor_resolution failed: %d", ret);
+        return send_response(fd, ret, NULL, 0);
+    }
+
+    /* Response: 4 x i32 = width, height, max_width, max_height */
+    int32_t resp[4];
+    resp[0] = (int32_t)res.width;
+    resp[1] = (int32_t)res.height;
+    resp[2] = (int32_t)res.max_width;
+    resp[3] = (int32_t)res.max_height;
+    return send_response(fd, STATUS_OK, resp, sizeof(resp));
+}
+
+/*
+ * Wire format for video_channel_attr (packed, LE):
+ *   crop:  left(i32) top(i32) width(i32) height(i32)
+ *   res[0]: width(i32) height(i32) max_width(i32) max_height(i32)
+ *   res[1]: width(i32) height(i32) max_width(i32) max_height(i32)
+ * Total = 4 + 4*3 = 4 + 12 = 16 i32s = 64 bytes (after u64 handle = 72 bytes)
+ */
+static int handle_vi_set_channel_attr(int fd, const uint8_t *req, uint32_t req_len)
+{
+    /* u64 handle + 12 i32s = 8 + 48 = 56 bytes */
+    if (req_len < 8 + 48) {
+        log_warn("[vi] set_channel_attr: req too short (%u)", req_len);
+        return send_response(fd, STATUS_ERROR, NULL, 0);
+    }
+    uint64_t h64;
+    memcpy(&h64, req, sizeof(h64));
+    void *handle = (void *)(uintptr_t)h64;
+
+    const uint8_t *p = req + 8;
+    struct video_channel_attr attr;
+    memset(&attr, 0, sizeof(attr));
+
+    int32_t tmp;
+    memcpy(&tmp, p +  0, 4); attr.crop.left      = (int)tmp;
+    memcpy(&tmp, p +  4, 4); attr.crop.top       = (int)tmp;
+    memcpy(&tmp, p +  8, 4); attr.crop.width     = (int)tmp;
+    memcpy(&tmp, p + 12, 4); attr.crop.height    = (int)tmp;
+
+    memcpy(&tmp, p + 16, 4); attr.res[0].width      = (int)tmp;
+    memcpy(&tmp, p + 20, 4); attr.res[0].height     = (int)tmp;
+    memcpy(&tmp, p + 24, 4); attr.res[0].max_width  = (int)tmp;
+    memcpy(&tmp, p + 28, 4); attr.res[0].max_height = (int)tmp;
+
+    memcpy(&tmp, p + 32, 4); attr.res[1].width      = (int)tmp;
+    memcpy(&tmp, p + 36, 4); attr.res[1].height     = (int)tmp;
+    memcpy(&tmp, p + 40, 4); attr.res[1].max_width  = (int)tmp;
+    memcpy(&tmp, p + 44, 4); attr.res[1].max_height = (int)tmp;
+
+    int ret = ak_vi_set_channel_attr(handle, &attr);
+    return send_response(fd, ret, NULL, 0);
+}
+
+static int handle_vi_capture_on(int fd, const uint8_t *req, uint32_t req_len)
+{
+    if (req_len < sizeof(uint64_t))
+        return send_response(fd, STATUS_ERROR, NULL, 0);
+    uint64_t h64;
+    memcpy(&h64, req, sizeof(h64));
+    void *handle = (void *)(uintptr_t)h64;
+    int ret = ak_vi_capture_on(handle);
+    return send_response(fd, ret, NULL, 0);
+}
+
+static int handle_vi_capture_off(int fd, const uint8_t *req, uint32_t req_len)
+{
+    if (req_len < sizeof(uint64_t))
+        return send_response(fd, STATUS_ERROR, NULL, 0);
+    uint64_t h64;
+    memcpy(&h64, req, sizeof(h64));
+    void *handle = (void *)(uintptr_t)h64;
+    int ret = ak_vi_capture_off(handle);
+    return send_response(fd, ret, NULL, 0);
+}
+
+/* ---- VPSS handlers ------------------------------------------------------- */
+
+static int handle_vpss_init(int fd, const uint8_t *req, uint32_t req_len)
+{
+    /*
+     * req: u64 vi_handle + i32 dev_no = 12 bytes
+     * The SDK manages VPSS internally through vi; we call ak_vpss_init().
+     */
+    if (req_len < 8 + 4)
+        return send_response(fd, STATUS_ERROR, NULL, 0);
+
+    uint64_t h64;
+    int32_t dev_no;
+    memcpy(&h64,    req,     sizeof(h64));
+    memcpy(&dev_no, req + 8, sizeof(dev_no));
+
+    void *vi_handle = (void *)(uintptr_t)h64;
+    log_debug("[vpss] init vi=%p dev=%d", vi_handle, dev_no);
+    ak_vpss_init(vi_handle, (int)dev_no);
+    return send_response(fd, STATUS_OK, NULL, 0);
+}
+
+static int handle_vpss_destroy(int fd, const uint8_t *req, uint32_t req_len)
+{
+    if (req_len < sizeof(int32_t))
+        return send_response(fd, STATUS_ERROR, NULL, 0);
+    int32_t dev_no;
+    memcpy(&dev_no, req, sizeof(dev_no));
+    log_debug("[vpss] destroy dev=%d", dev_no);
+    ak_vpss_destroy((int)dev_no);
+    return send_response(fd, STATUS_OK, NULL, 0);
+}
+
+/* ---- VENC handlers ------------------------------------------------------- */
+
+static int handle_venc_set_cfg_path(int fd, const uint8_t *req, uint32_t req_len)
+{
+    char path[512];
+    uint32_t copy = req_len < sizeof(path) - 1 ? req_len : sizeof(path) - 1;
+    memcpy(path, req, copy);
+    path[copy] = '\0';
+
+    log_debug("[venc] set_cfg_path path=%s", path);
+    int ret = ak_venc_set_cfg_path(path);
+    if (ret != 0)
+        log_error("[venc] set_cfg_path failed: %d", ret);
+    return send_response(fd, ret, NULL, 0);
+}
+
+/*
+ * Wire format for encode_param (48 bytes, all i32/u32 LE):
+ *   width(u32) height(u32) minqp(i32) maxqp(i32) fps(i32) goplen(i32)
+ *   bps(i32) profile(i32) use_chn(i32) enc_grp(i32) br_mode(i32) enc_out_type(i32)
+ */
+static int handle_venc_open(int fd, const uint8_t *req, uint32_t req_len)
+{
+    if (req_len < 48) {
+        log_warn("[venc] open: req too short (%u)", req_len);
+        return send_response(fd, STATUS_ERROR, NULL, 0);
+    }
+
+    struct encode_param param;
+    memset(&param, 0, sizeof(param));
+
+    uint32_t u32tmp;
+    int32_t  i32tmp;
+
+    memcpy(&u32tmp, req +  0, 4); param.width        = (unsigned long)u32tmp;
+    memcpy(&u32tmp, req +  4, 4); param.height       = (unsigned long)u32tmp;
+    memcpy(&i32tmp, req +  8, 4); param.minqp        = (signed long)i32tmp;
+    memcpy(&i32tmp, req + 12, 4); param.maxqp        = (signed long)i32tmp;
+    memcpy(&i32tmp, req + 16, 4); param.fps          = (signed long)i32tmp;
+    memcpy(&i32tmp, req + 20, 4); param.goplen       = (signed long)i32tmp;
+    memcpy(&i32tmp, req + 24, 4); param.bps          = (signed long)i32tmp;
+    memcpy(&i32tmp, req + 28, 4); param.profile      = (enum profile_mode)i32tmp;
+    memcpy(&i32tmp, req + 32, 4); param.use_chn      = (enum encode_use_chn)i32tmp;
+    memcpy(&i32tmp, req + 36, 4); param.enc_grp      = (enum encode_group_type)i32tmp;
+    memcpy(&i32tmp, req + 40, 4); param.br_mode      = (enum bitrate_ctrl_mode)i32tmp;
+    memcpy(&i32tmp, req + 44, 4); param.enc_out_type = (enum encode_output_type)i32tmp;
+
+    log_debug("[venc] open %lux%lu fps=%ld bps=%ld type=%d",
+            param.width, param.height, param.fps, param.bps, param.enc_out_type);
+
+    void *handle = ak_venc_open(&param);
+    if (handle == NULL) {
+        log_error("[venc] open failed (NULL handle)");
+        return send_response(fd, STATUS_ERROR, NULL, 0);
+    }
+    int64_t h64 = (int64_t)(uintptr_t)handle;
+    return send_response(fd, STATUS_OK, &h64, sizeof(h64));
+}
+
+static int handle_venc_close(int fd, const uint8_t *req, uint32_t req_len)
+{
+    if (req_len < sizeof(uint64_t))
+        return send_response(fd, STATUS_ERROR, NULL, 0);
+    uint64_t h64;
+    memcpy(&h64, req, sizeof(h64));
+    void *handle = (void *)(uintptr_t)h64;
+    log_debug("[venc] close handle=%p", handle);
+    int ret = ak_venc_close(handle);
+    return send_response(fd, ret, NULL, 0);
+}
+
+static int handle_venc_set_rc(int fd, const uint8_t *req, uint32_t req_len)
+{
+    /* u64 handle + i32 bps = 12 bytes */
+    if (req_len < 8 + 4)
+        return send_response(fd, STATUS_ERROR, NULL, 0);
+    uint64_t h64;
+    int32_t bps;
+    memcpy(&h64, req,     sizeof(h64));
+    memcpy(&bps, req + 8, sizeof(bps));
+    void *handle = (void *)(uintptr_t)h64;
+    int ret = ak_venc_set_rc(handle, (int)bps);
+    return send_response(fd, ret, NULL, 0);
+}
+
+static int handle_venc_set_iframe(int fd, const uint8_t *req, uint32_t req_len)
+{
+    if (req_len < sizeof(uint64_t))
+        return send_response(fd, STATUS_ERROR, NULL, 0);
+    uint64_t h64;
+    memcpy(&h64, req, sizeof(h64));
+    void *handle = (void *)(uintptr_t)h64;
+    int ret = ak_venc_set_iframe(handle);
+    return send_response(fd, ret, NULL, 0);
+}
+
+static int handle_venc_request_stream(int fd, const uint8_t *req, uint32_t req_len)
+{
+    /* u64 vi_handle + u64 venc_handle = 16 bytes */
+    if (req_len < 16)
+        return send_response(fd, STATUS_ERROR, NULL, 0);
+    uint64_t vi_h64, venc_h64;
+    memcpy(&vi_h64,   req,     sizeof(vi_h64));
+    memcpy(&venc_h64, req + 8, sizeof(venc_h64));
+    void *vi_handle   = (void *)(uintptr_t)vi_h64;
+    void *venc_handle = (void *)(uintptr_t)venc_h64;
+
+    log_debug("[venc] request_stream vi=%p venc=%p", vi_handle, venc_handle);
+    void *stream_handle = ak_venc_request_stream(vi_handle, venc_handle);
+    if (stream_handle == NULL) {
+        log_error("[venc] request_stream failed (NULL)");
+        return send_response(fd, STATUS_ERROR, NULL, 0);
+    }
+    int64_t h64 = (int64_t)(uintptr_t)stream_handle;
+    return send_response(fd, STATUS_OK, &h64, sizeof(h64));
+}
+
+/*
+ * CMD_VENC_GET_STREAM response layout (after status + resp_len header):
+ *   [u32 frame_len][u64 timestamp][u32 seq_no][i32 frame_type]
+ *   [u64 remote_token][frame_data_bytes]
+ * Total header = 4+8+4+4+8 = 28 bytes + frame data
+ */
+static int handle_venc_get_stream(int fd, const uint8_t *req, uint32_t req_len)
+{
+    if (req_len < sizeof(uint64_t))
+        return send_response(fd, STATUS_ERROR, NULL, 0);
+    uint64_t sh64;
+    memcpy(&sh64, req, sizeof(sh64));
+    void *stream_handle = (void *)(uintptr_t)sh64;
+
+    /* Allocate a slot in the pending table */
+    int slot = pending_alloc();
+    if (slot < 0) {
+        log_error("[venc] get_stream: pending table full");
+        return send_response(fd, STATUS_ERROR, NULL, 0);
+    }
+
+    struct video_stream *vs = &g_pending[slot].stream;
+    memset(vs, 0, sizeof(*vs));
+
+    int ret = ak_venc_get_stream(stream_handle, vs);
+    if (ret != 0) {
+        log_error("[venc] get_stream failed: %d", ret);
+        pending_free(slot);
+        return send_response(fd, ret, NULL, 0);
+    }
+
+    /* Build response payload – we copy frame data so Rust can own it */
+    uint32_t frame_len   = vs->len;
+    uint64_t timestamp   = (uint64_t)vs->ts;
+    uint32_t seq_no      = (uint32_t)vs->seq_no;
+    int32_t  frame_type  = (int32_t)vs->frame_type;
+    uint64_t token       = (uint64_t)slot;
+
+    /* Header: 28 bytes + frame data */
+    uint32_t resp_payload_len = 28u + frame_len;
+
+    /* Allocate response buffer on stack for header; frame_data may be large */
+    uint8_t hdr[28];
+    memcpy(hdr +  0, &frame_len,  4);
+    memcpy(hdr +  4, &timestamp,  8);
+    memcpy(hdr + 12, &seq_no,     4);
+    memcpy(hdr + 16, &frame_type, 4);
+    memcpy(hdr + 20, &token,      8);
+
+    /* Send header parts manually to avoid a large allocation */
+    int32_t  status = STATUS_OK;
+    if (write_exact(fd, &status,          sizeof(status))          != 0) goto fail;
+    if (write_exact(fd, &resp_payload_len, sizeof(resp_payload_len)) != 0) goto fail;
+    if (write_exact(fd, hdr,              sizeof(hdr))              != 0) goto fail;
+    if (frame_len > 0 && vs->data != NULL)
+        if (write_exact(fd, vs->data, frame_len) != 0)               goto fail;
+
+    /* Do NOT release yet; Rust must call CMD_VENC_RELEASE_STREAM with token */
+    return 0;
+
+fail:
+    pending_free(slot);
+    return -1;
+}
+
+static int handle_venc_release_stream(int fd, const uint8_t *req, uint32_t req_len)
+{
+    /* u64 stream_handle + u64 remote_token = 16 bytes */
+    if (req_len < 16)
+        return send_response(fd, STATUS_ERROR, NULL, 0);
+    uint64_t sh64, token;
+    memcpy(&sh64,  req,     sizeof(sh64));
+    memcpy(&token, req + 8, sizeof(token));
+    void *stream_handle = (void *)(uintptr_t)sh64;
+
+    int slot = (int)token;
+    if (slot < 0 || slot >= MAX_PENDING_STREAMS || !g_pending[slot].in_use) {
+        log_error("[venc] release_stream: bad token %llu",
+                (unsigned long long)token);
+        return send_response(fd, STATUS_ERROR, NULL, 0);
+    }
+
+    int ret = ak_venc_release_stream(stream_handle, &g_pending[slot].stream);
+    pending_free(slot);
+    return send_response(fd, ret, NULL, 0);
+}
+
+static int handle_venc_cancel_stream(int fd, const uint8_t *req, uint32_t req_len)
+{
+    if (req_len < sizeof(uint64_t))
+        return send_response(fd, STATUS_ERROR, NULL, 0);
+    uint64_t sh64;
+    memcpy(&sh64, req, sizeof(sh64));
+    void *stream_handle = (void *)(uintptr_t)sh64;
+    log_debug("[venc] cancel_stream handle=%p", stream_handle);
+    int ret = ak_venc_cancel_stream(stream_handle);
+    return send_response(fd, ret, NULL, 0);
+}
+
+/* ---- Audio Input handlers ------------------------------------------------ */
+
+/*
+ * Wire format for pcm_param (12 bytes):
+ *   sample_rate(u32) sample_bits(u32) channel_num(u32)
+ */
+static int handle_ai_open(int fd, const uint8_t *req, uint32_t req_len)
+{
+    if (req_len < 12) {
+        log_warn("[ai] open: req too short (%u)", req_len);
+        return send_response(fd, STATUS_ERROR, NULL, 0);
+    }
+    struct pcm_param param;
+    uint32_t tmp;
+    memcpy(&tmp, req + 0, 4); param.sample_rate  = (unsigned int)tmp;
+    memcpy(&tmp, req + 4, 4); param.sample_bits  = (unsigned int)tmp;
+    memcpy(&tmp, req + 8, 4); param.channel_num  = (unsigned int)tmp;
+
+    log_debug("[ai] open rate=%u bits=%u ch=%u",
+            param.sample_rate, param.sample_bits, param.channel_num);
+    void *handle = ak_ai_open(&param);
+    if (handle == NULL) {
+        log_error("[ai] open failed (NULL handle)");
+        return send_response(fd, STATUS_ERROR, NULL, 0);
+    }
+    int64_t h64 = (int64_t)(uintptr_t)handle;
+    return send_response(fd, STATUS_OK, &h64, sizeof(h64));
+}
+
+static int handle_ai_close(int fd, const uint8_t *req, uint32_t req_len)
+{
+    if (req_len < sizeof(uint64_t))
+        return send_response(fd, STATUS_ERROR, NULL, 0);
+    uint64_t h64;
+    memcpy(&h64, req, sizeof(h64));
+    void *handle = (void *)(uintptr_t)h64;
+    int ret = ak_ai_close(handle);
+    return send_response(fd, ret, NULL, 0);
+}
+
+static int handle_ai_set_adc_volume(int fd, const uint8_t *req, uint32_t req_len)
+{
+    if (req_len < 8 + 4)
+        return send_response(fd, STATUS_ERROR, NULL, 0);
+    uint64_t h64;
+    int32_t vol;
+    memcpy(&h64, req,     sizeof(h64));
+    memcpy(&vol, req + 8, sizeof(vol));
+    void *handle = (void *)(uintptr_t)h64;
+    int ret = ak_ai_set_adc_volume(handle, (int)vol);
+    return send_response(fd, ret, NULL, 0);
+}
+
+static int handle_ai_set_aslc_volume(int fd, const uint8_t *req, uint32_t req_len)
+{
+    if (req_len < 8 + 4)
+        return send_response(fd, STATUS_ERROR, NULL, 0);
+    uint64_t h64;
+    int32_t vol;
+    memcpy(&h64, req,     sizeof(h64));
+    memcpy(&vol, req + 8, sizeof(vol));
+    void *handle = (void *)(uintptr_t)h64;
+    int ret = ak_ai_set_aslc_volume(handle, (int)vol);
+    return send_response(fd, ret, NULL, 0);
+}
+
+/* ---- Audio Encoder handlers ---------------------------------------------- */
+
+/*
+ * Wire format for audio_param (16 bytes), as specified in the IPC protocol:
+ *   sample_rate(u32) channel_num(u32) sample_bits(u32) type(i32)
+ *
+ * Note: the SDK struct audio_param has fields in a different order
+ * (type, sample_rate, sample_bits, channel_num), so we deserialise
+ * explicitly from the wire layout rather than casting the buffer directly.
+ */
+static int handle_aenc_open(int fd, const uint8_t *req, uint32_t req_len)
+{
+    if (req_len < 16) {
+        log_warn("[aenc] open: req too short (%u)", req_len);
+        return send_response(fd, STATUS_ERROR, NULL, 0);
+    }
+    struct audio_param param;
+    int32_t  itype;
+    uint32_t tmp;
+    memcpy(&tmp,   req +  0, 4); param.sample_rate  = (unsigned int)tmp;
+    memcpy(&tmp,   req +  4, 4); param.channel_num  = (unsigned int)tmp;
+    memcpy(&tmp,   req +  8, 4); param.sample_bits  = (unsigned int)tmp;
+    memcpy(&itype, req + 12, 4); param.type         = (enum ak_audio_type)itype;
+
+    log_debug("[aenc] open type=%d rate=%u bits=%u ch=%u",
+            (int)param.type, param.sample_rate, param.sample_bits, param.channel_num);
+    void *handle = ak_aenc_open(&param);
+    if (handle == NULL) {
+        log_error("[aenc] open failed (NULL handle)");
+        return send_response(fd, STATUS_ERROR, NULL, 0);
+    }
+    int64_t h64 = (int64_t)(uintptr_t)handle;
+    return send_response(fd, STATUS_OK, &h64, sizeof(h64));
+}
+
+static int handle_aenc_close(int fd, const uint8_t *req, uint32_t req_len)
+{
+    if (req_len < sizeof(uint64_t))
+        return send_response(fd, STATUS_ERROR, NULL, 0);
+    uint64_t h64;
+    memcpy(&h64, req, sizeof(h64));
+    void *handle = (void *)(uintptr_t)h64;
+    int ret = ak_aenc_close(handle);
+    return send_response(fd, ret, NULL, 0);
+}
+
+static int handle_aenc_set_attr(int fd, const uint8_t *req, uint32_t req_len)
+{
+    /* u64 handle + i32 aac_head = 12 bytes */
+    if (req_len < 8 + 4)
+        return send_response(fd, STATUS_ERROR, NULL, 0);
+    uint64_t h64;
+    int32_t aac_head_i32;
+    memcpy(&h64,          req,     sizeof(h64));
+    memcpy(&aac_head_i32, req + 8, sizeof(aac_head_i32));
+    void *handle = (void *)(uintptr_t)h64;
+
+    struct aenc_attr attr;
+    attr.aac_head = (enum aenc_aac_attr)aac_head_i32;
+    int ret = ak_aenc_set_attr(handle, &attr);
+    return send_response(fd, ret, NULL, 0);
+}
+
+/* ---- ISP / Imaging handlers ---------------------------------------------- */
+
+/*
+ * All ISP effect commands share the same wire format:
+ *   u64 vi_handle + i32 value = 12 bytes
+ *
+ * They map to ak_vpss_effect_set(vi_handle, <effect_type>, value).
+ * CMD_ISP_SET_IR_FILTER and CMD_ISP_SET_WDR are handled specially.
+ */
+static int handle_isp_effect(int fd, const uint8_t *req, uint32_t req_len,
+                              enum vpss_effect_type effect_type, const char *name)
+{
+    if (req_len < 8 + 4) {
+        log_warn("[isp] %s: req too short (%u)", name, req_len);
+        return send_response(fd, STATUS_ERROR, NULL, 0);
+    }
+    uint64_t h64;
+    int32_t value;
+    memcpy(&h64,   req,     sizeof(h64));
+    memcpy(&value, req + 8, sizeof(value));
+    void *vi_handle = (void *)(uintptr_t)h64;
+
+    log_debug("[isp] %s vi=%p value=%d", name, vi_handle, (int)value);
+    int ret = ak_vpss_effect_set(vi_handle, effect_type, (int)value);
+    return send_response(fd, ret, NULL, 0);
+}
+
+static int handle_isp_set_wdr(int fd, const uint8_t *req, uint32_t req_len)
+{
+    /* req: u64 vi_handle + i32 enable = 12 bytes */
+    if (req_len < 8 + 4)
+        return send_response(fd, STATUS_ERROR, NULL, 0);
+    uint64_t h64;
+    int32_t enable;
+    memcpy(&h64,    req,     sizeof(h64));
+    memcpy(&enable, req + 8, sizeof(enable));
+
+    log_debug("[isp] set_wdr enable=%d", (int)enable);
+    int ret;
+    if (enable)
+        ret = ak_vpss_open_wdr();
+    else
+        ret = ak_vpss_close_wdr();
+    return send_response(fd, ret, NULL, 0);
+}
+
+/*
+ * IR filter: use the vi day/night switch rather than vpss effect.
+ * req: u64 vi_handle + i32 mode  (0 = day, 1 = night)
+ */
+static int handle_isp_set_ir_filter(int fd, const uint8_t *req, uint32_t req_len)
+{
+    if (req_len < 8 + 4)
+        return send_response(fd, STATUS_ERROR, NULL, 0);
+    uint64_t h64;
+    int32_t mode;
+    memcpy(&h64,  req,     sizeof(h64));
+    memcpy(&mode, req + 8, sizeof(mode));
+    void *vi_handle = (void *)(uintptr_t)h64;
+
+    enum video_daynight_mode dn = (mode != 0) ? VI_MODE_NIGHT : VI_MODE_DAY;
+    log_debug("[isp] set_ir_filter vi=%p mode=%d", vi_handle, (int)dn);
+    int ret = ak_vi_switch_mode(vi_handle, dn);
+    return send_response(fd, ret, NULL, 0);
+}
+
+/* ---- Utility handlers ---------------------------------------------------- */
+
+static int handle_get_error_no(int fd)
+{
+    int32_t err = (int32_t)ak_get_error_no();
+    return send_response(fd, STATUS_OK, &err, sizeof(err));
+}
+
+static int handle_get_error_str(int fd)
+{
+    int err_no = ak_get_error_no();
+    char *msg = ak_get_error_str(err_no);
+    if (msg == NULL)
+        msg = "(null)";
+    uint32_t slen = (uint32_t)(strlen(msg) + 1);
+    return send_response(fd, STATUS_OK, msg, slen);
+}
+
+/* ---- Main request dispatcher --------------------------------------------- */
+
+/**
+ * process_request - read one IPC request and dispatch to handler.
+ *
+ * Returns:
+ *   0  – success, continue loop
+ *  -1  – I/O or protocol error; caller should close client fd
+ *  -2  – CMD_SHUTDOWN; caller should close client fd AND stop accept loop
+ */
+static int process_request(int fd)
+{
+    int32_t  cmd_id;
+    uint32_t req_len;
+
+    if (read_exact(fd, &cmd_id,  sizeof(cmd_id))  != 0) return -1;
+    if (read_exact(fd, &req_len, sizeof(req_len)) != 0) return -1;
+
+    if (req_len > MAX_REQUEST_SIZE) {
+        log_error("[daemon] req_len %u exceeds max %u, disconnecting",
+                req_len, (unsigned)MAX_REQUEST_SIZE);
+        return -1;
+    }
+
+    /* Read request payload into a heap buffer (may be up to 1 MB) */
+    uint8_t *req_buf = NULL;
+    if (req_len > 0) {
+        req_buf = (uint8_t *)malloc(req_len);
+        if (req_buf == NULL) {
+            log_error("[daemon] malloc(%u) failed", req_len);
+            return -1;
+        }
+        if (read_exact(fd, req_buf, req_len) != 0) {
+            free(req_buf);
+            return -1;
+        }
+    }
+
+    int ret = 0;
+
+    switch ((enum cmd_id)cmd_id) {
+    /* --- Video Input --- */
+    case CMD_VI_MATCH_SENSOR:
+        ret = handle_vi_match_sensor(fd, req_buf, req_len);
+        break;
+    case CMD_VI_OPEN:
+        ret = handle_vi_open(fd, req_buf, req_len);
+        break;
+    case CMD_VI_CLOSE:
+        ret = handle_vi_close(fd, req_buf, req_len);
+        break;
+    case CMD_VI_GET_SENSOR_RESOLUTION:
+        ret = handle_vi_get_sensor_resolution(fd, req_buf, req_len);
+        break;
+    case CMD_VI_SET_CHANNEL_ATTR:
+        ret = handle_vi_set_channel_attr(fd, req_buf, req_len);
+        break;
+    case CMD_VI_CAPTURE_ON:
+        ret = handle_vi_capture_on(fd, req_buf, req_len);
+        break;
+    case CMD_VI_CAPTURE_OFF:
+        ret = handle_vi_capture_off(fd, req_buf, req_len);
+        break;
+
+    /* --- VPSS --- */
+    case CMD_VPSS_INIT:
+        ret = handle_vpss_init(fd, req_buf, req_len);
+        break;
+    case CMD_VPSS_DESTROY:
+        ret = handle_vpss_destroy(fd, req_buf, req_len);
+        break;
+
+    /* --- Video Encoder --- */
+    case CMD_VENC_SET_CFG_PATH:
+        ret = handle_venc_set_cfg_path(fd, req_buf, req_len);
+        break;
+    case CMD_VENC_OPEN:
+        ret = handle_venc_open(fd, req_buf, req_len);
+        break;
+    case CMD_VENC_CLOSE:
+        ret = handle_venc_close(fd, req_buf, req_len);
+        break;
+    case CMD_VENC_SET_RC:
+        ret = handle_venc_set_rc(fd, req_buf, req_len);
+        break;
+    case CMD_VENC_SET_IFRAME:
+        ret = handle_venc_set_iframe(fd, req_buf, req_len);
+        break;
+    case CMD_VENC_REQUEST_STREAM:
+        ret = handle_venc_request_stream(fd, req_buf, req_len);
+        break;
+    case CMD_VENC_GET_STREAM:
+        ret = handle_venc_get_stream(fd, req_buf, req_len);
+        break;
+    case CMD_VENC_RELEASE_STREAM:
+        ret = handle_venc_release_stream(fd, req_buf, req_len);
+        break;
+    case CMD_VENC_CANCEL_STREAM:
+        ret = handle_venc_cancel_stream(fd, req_buf, req_len);
+        break;
+
+    /* --- Audio Input --- */
+    case CMD_AI_OPEN:
+        ret = handle_ai_open(fd, req_buf, req_len);
+        break;
+    case CMD_AI_CLOSE:
+        ret = handle_ai_close(fd, req_buf, req_len);
+        break;
+    case CMD_AI_SET_ADC_VOLUME:
+        ret = handle_ai_set_adc_volume(fd, req_buf, req_len);
+        break;
+    case CMD_AI_SET_ASLC_VOLUME:
+        ret = handle_ai_set_aslc_volume(fd, req_buf, req_len);
+        break;
+
+    /* --- Audio Encoder --- */
+    case CMD_AENC_OPEN:
+        ret = handle_aenc_open(fd, req_buf, req_len);
+        break;
+    case CMD_AENC_CLOSE:
+        ret = handle_aenc_close(fd, req_buf, req_len);
+        break;
+    case CMD_AENC_SET_ATTR:
+        ret = handle_aenc_set_attr(fd, req_buf, req_len);
+        break;
+
+    /* --- ISP / Imaging --- */
+    case CMD_ISP_SET_BRIGHTNESS:
+        ret = handle_isp_effect(fd, req_buf, req_len,
+                                VPSS_EFFECT_BRIGHTNESS, "set_brightness");
+        break;
+    case CMD_ISP_SET_CONTRAST:
+        ret = handle_isp_effect(fd, req_buf, req_len,
+                                VPSS_EFFECT_CONTRAST, "set_contrast");
+        break;
+    case CMD_ISP_SET_SATURATION:
+        ret = handle_isp_effect(fd, req_buf, req_len,
+                                VPSS_EFFECT_SATURATION, "set_saturation");
+        break;
+    case CMD_ISP_SET_SHARPNESS:
+        ret = handle_isp_effect(fd, req_buf, req_len,
+                                VPSS_EFFECT_SHARP, "set_sharpness");
+        break;
+    case CMD_ISP_SET_IR_FILTER:
+        ret = handle_isp_set_ir_filter(fd, req_buf, req_len);
+        break;
+    case CMD_ISP_SET_WDR:
+        ret = handle_isp_set_wdr(fd, req_buf, req_len);
+        break;
+
+    /* --- Utility --- */
+    case CMD_GET_ERROR_NO:
+        ret = handle_get_error_no(fd);
+        break;
+    case CMD_GET_ERROR_STR:
+        ret = handle_get_error_str(fd);
+        break;
+
+    case CMD_SHUTDOWN:
+        log_info("[daemon] CMD_SHUTDOWN received");
+        send_response(fd, STATUS_OK, NULL, 0);
+        ret = -2;  /* signal caller to shut everything down */
+        break;
+
+    default:
+        log_warn("[daemon] unknown cmd_id=%d, sending error", cmd_id);
+        ret = send_response(fd, STATUS_ERROR, NULL, 0);
+        break;
+    }
+
+    free(req_buf);
+    return ret;
+}
+
+/* ---- main ---------------------------------------------------------------- */
+
+int main(int argc, char *argv[])
+{
+    (void)argc;
+    (void)argv;
+
+    /* ================================================================
+     * LOGGING INITIALIZATION
+     * ================================================================ */
+
+    /* Open log file */
+    g_log_fp = fopen(LOG_FILE_PATH, "a");
+    if (!g_log_fp) {
+        fprintf(stderr, "Failed to open log file %s: %s\n",
+                LOG_FILE_PATH, strerror(errno));
+        g_log_fp = NULL;
+    }
+
+    /* Save original stdout/stderr for restoration on shutdown */
+    g_saved_stdout = dup(STDOUT_FILENO);
+    g_saved_stderr = dup(STDERR_FILENO);
+
+    /* Redirect stdout/stderr to log file to capture Anyka SDK ak_print() */
+    if (g_log_fp) {
+        dup2(fileno(g_log_fp), STDOUT_FILENO);
+        dup2(fileno(g_log_fp), STDERR_FILENO);
+    }
+
+    /* Initialize log.c - quiet mode suppresses stderr (we redirected it) */
+    log_set_level(LOG_DEBUG);
+    if (g_log_fp) {
+        log_add_fp(g_log_fp, LOG_DEBUG);
+        log_set_quiet(true);  /* Only write via file callback, not stderr */
+    }
+
+    log_info("========================================");
+    log_info("vendor-daemon starting");
+    log_info("log file: %s", LOG_FILE_PATH);
+
+    /* Configure Anyka SDK logging:
+     * - Set print level to DEBUG so all SDK messages go to stdout
+     *   (which we redirected to our log file)
+     * - Disable syslog output to avoid duplicate messages
+     */
+    ak_print_set_level(LOG_LEVEL_DEBUG);
+    ak_print_set_syslog_level(0);
+    log_info("SDK logging: level=DEBUG, syslog=disabled");
+
+    /* ================================================================
+     * SIGNAL HANDLING
+     * ================================================================ */
+
+    struct sigaction sa;
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_handler = signal_handler;
+    sigemptyset(&sa.sa_mask);
+    sigaction(SIGINT,  &sa, NULL);
+    sigaction(SIGTERM, &sa, NULL);
+
+    /* Ignore SIGPIPE so write errors return EPIPE instead of killing us */
+    signal(SIGPIPE, SIG_IGN);
+
+    /* Initialise pending-release table */
+    memset(g_pending, 0, sizeof(g_pending));
+
+    /* ================================================================
+     * SOCKET SETUP
+     * ================================================================ */
+
+    int server_fd = socket(AF_UNIX, SOCK_STREAM, 0);
+    if (server_fd < 0) {
+        log_fatal("socket: %s", strerror(errno));
+        return 1;
+    }
+
+    unlink(SOCKET_PATH);
+
+    struct sockaddr_un addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sun_family = AF_UNIX;
+    strncpy(addr.sun_path, SOCKET_PATH, sizeof(addr.sun_path) - 1);
+
+    if (bind(server_fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
+        log_fatal("bind: %s", strerror(errno));
+        close(server_fd);
+        return 1;
+    }
+
+    if (listen(server_fd, 4) < 0) {
+        log_fatal("listen: %s", strerror(errno));
+        close(server_fd);
+        return 1;
+    }
+
+    log_info("[daemon] listening on %s", SOCKET_PATH);
+
+    /* ================================================================
+     * MAIN ACCEPT LOOP
+     * ================================================================ */
+
+    while (!g_shutdown) {
+        int client_fd = accept(server_fd, NULL, NULL);
+        if (client_fd < 0) {
+            if (errno == EINTR)
+                continue;   /* signal interrupted accept */
+            if (!g_shutdown)
+                log_error("accept: %s", strerror(errno));
+            break;
+        }
+
+        log_info("[daemon] client connected fd=%d", client_fd);
+
+        /* Service all requests on this connection until client disconnects */
+        int shutdown_requested = 0;
+        while (!g_shutdown) {
+            int ret = process_request(client_fd);
+            if (ret == -1) {
+                /* EOF or I/O error – client disconnected */
+                log_info("[daemon] client fd=%d disconnected", client_fd);
+                break;
+            }
+            if (ret == -2) {
+                /* CMD_SHUTDOWN */
+                shutdown_requested = 1;
+                break;
+            }
+        }
+
+        close(client_fd);
+
+        if (shutdown_requested || g_shutdown)
+            break;
+    }
+
+    /* ================================================================
+     * SHUTDOWN
+     * ================================================================ */
+
+    log_info("[daemon] shutting down");
+    close(server_fd);
+    unlink(SOCKET_PATH);
+
+    log_info("vendor-daemon stopped");
+    log_info("========================================");
+
+    /* Restore original stdout/stderr */
+    if (g_saved_stdout >= 0) {
+        dup2(g_saved_stdout, STDOUT_FILENO);
+        close(g_saved_stdout);
+    }
+    if (g_saved_stderr >= 0) {
+        dup2(g_saved_stderr, STDERR_FILENO);
+        close(g_saved_stderr);
+    }
+    if (g_log_fp) {
+        fclose(g_log_fp);
+    }
+
+    return 0;
+}
