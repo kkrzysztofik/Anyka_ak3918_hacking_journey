@@ -1178,7 +1178,9 @@ fn frame_read_loop(
                 let probe_interval = 50u32;
                 let should_probe = consecutive_no_data == 0
                     || !last_error_was_no_data
-                    || consecutive_no_data.wrapping_add(1).is_multiple_of(probe_interval);
+                    || consecutive_no_data
+                        .wrapping_add(1)
+                        .is_multiple_of(probe_interval);
 
                 let is_no_data = if should_probe {
                     let sdk_errno = ffi.get_error_no();

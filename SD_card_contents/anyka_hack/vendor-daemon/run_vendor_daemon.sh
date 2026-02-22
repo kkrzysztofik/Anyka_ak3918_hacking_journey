@@ -21,7 +21,8 @@
 #   handle log redirection (see below).
 #
 # Environment variables honoured (set in /data/gergesettings.txt):
-#   LOG_FILE  - Override log file name (default: vendor_daemon.log)
+#   VENDOR_DAEMON_LOG_FILE  - Override vendor-daemon log file path (default: /mnt/logs/vendor_daemon.log)
+#   LOG_FILE  - Override shell script log file name (default: vendor_daemon.log)
 #   DEBUG     - Set to 1 for debug-level logging
 #   VERBOSE   - Set to 1 for verbose logging
 #
