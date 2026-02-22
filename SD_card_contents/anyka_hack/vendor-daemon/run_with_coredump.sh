@@ -27,7 +27,7 @@ fi
 echo ""
 
 # Set library path so vendor-daemon can find SDK shared libs
-export LD_LIBRARY_PATH=/mnt/anyka_hack/lib:/mnt/anyka_hack/vendor-daemon/lib:$LD_LIBRARY_PATH
+export LD_LIBRARY_PATH=/mnt/anyka_hack/vendor-daemon/lib:$LD_LIBRARY_PATH
 
 # Run vendor-daemon
 exec /mnt/anyka_hack/vendor-daemon/vendor-daemon.bin

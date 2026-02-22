@@ -58,7 +58,6 @@ fi
 VENDOR_DAEMON_BIN="/mnt/anyka_hack/vendor-daemon/vendor-daemon.bin"
 VENDOR_DAEMON_SOCK="/tmp/vendor-daemon.sock"
 VENDOR_DAEMON_LOG="/mnt/logs/vendor_daemon.log"
-SHARED_LIB_DIR="/mnt/anyka_hack/lib"
 
 # =============================================================================
 # TRAP: LOG CLEAN EXIT/SIGNAL
@@ -100,11 +99,6 @@ if pgrep -f "vendor-daemon.bin" >/dev/null 2>&1; then
   exit 0
 fi
 
-# Validate shared library directory
-if [ ! -d "${SHARED_LIB_DIR}" ]; then
-  log ERROR "Shared library directory not found: ${SHARED_LIB_DIR}"
-  exit 1
-fi
 
 # Validate vendor-daemon binary
 if [ ! -f "${VENDOR_DAEMON_BIN}" ]; then
@@ -122,7 +116,7 @@ fi
 # =============================================================================
 
 # Prepend Anyka SDK libs and vendor-daemon-specific libs to the search path
-export LD_LIBRARY_PATH=/mnt/anyka_hack/lib:/mnt/anyka_hack/vendor-daemon/lib:${LD_LIBRARY_PATH}
+export LD_LIBRARY_PATH=/mnt/anyka_hack/vendor-daemon/lib:${LD_LIBRARY_PATH}
 
 # Enable core dumps so crash diagnostics are captured
 ulimit -c unlimited 2>/dev/null || log WARN "Failed to enable core dumps (ulimit -c unlimited)"
