@@ -24,7 +24,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::time::Duration;
 
-use rand::Rng;
+use rand::RngExt;
 use socket2::{Domain, Protocol, Socket, Type};
 use thiserror::Error;
 use tokio::net::UdpSocket;

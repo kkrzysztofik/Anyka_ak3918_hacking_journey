@@ -34,8 +34,10 @@ use crate::ffi::ipc::{
     DEFAULT_CMD_SERVER_PORT, command_send_with_timeout, command_server_register,
     command_server_unregister,
 };
+#[cfg(not(feature = "use_vendor_ipc"))]
+use crate::ffi::video::RealVideoFfi;
 use crate::ffi::video::{
-    RealVideoFfi, VideoFfiTrait, VideoInputHandle, video_input_capture_off_internal,
+    VideoFfiTrait, VideoInputHandle, video_input_capture_off_internal,
     video_input_capture_on_internal, video_input_get_sensor_resolution_internal,
     video_input_match_sensor_internal, video_input_open_internal,
     video_input_set_channel_attr_internal,
@@ -98,10 +100,44 @@ impl AnykaPlatform {
             hardware_id: "ak3918-hw".to_string(),
         };
 
-        let video_input = Arc::new(AnykaVideoInput::new(isp_config_path));
-        let video_encoder = Arc::new(AnykaVideoEncoder::new());
-        let audio_input = Arc::new(AnykaAudioInput::new());
-        let audio_encoder = Arc::new(AnykaAudioEncoder::new());
+        #[cfg(feature = "use_vendor_ipc")]
+        let (video_input, video_encoder, audio_input, audio_encoder, imaging_control) = {
+            let shared_ipc = Arc::new(VendorIpc::new().map_err(|e| {
+                PlatformError::InitializationFailed(format!(
+                    "VendorIpc connection failed (is vendor-daemon running?): {}",
+                    e
+                ))
+            })?);
+
+            tracing::info!("AnykaPlatform: using shared VendorIpc client for video/audio/imaging");
+
+            let video_ffi: Arc<dyn VideoFfiTrait> = shared_ipc.clone();
+            let audio_ffi: Arc<dyn crate::ffi::audio::AudioFfiTrait> = shared_ipc.clone();
+            let imaging_ffi: Arc<dyn crate::ffi::imaging::ImagingFfiTrait> = shared_ipc.clone();
+
+            (
+                Arc::new(AnykaVideoInput::with_ffi(
+                    video_ffi.clone(),
+                    isp_config_path.clone(),
+                )),
+                Arc::new(AnykaVideoEncoder::with_ffi(video_ffi)),
+                Arc::new(AnykaAudioInput::with_ffi(audio_ffi.clone())),
+                Arc::new(AnykaAudioEncoder::with_ffi(audio_ffi)),
+                Some(
+                    Arc::new(AnykaImagingControl::with_ffi(imaging_ffi)) as Arc<dyn ImagingControl>
+                ),
+            )
+        };
+
+        #[cfg(not(feature = "use_vendor_ipc"))]
+        let (video_input, video_encoder, audio_input, audio_encoder, imaging_control) = (
+            Arc::new(AnykaVideoInput::new(isp_config_path)?),
+            Arc::new(AnykaVideoEncoder::new()?),
+            Arc::new(AnykaAudioInput::new()?),
+            Arc::new(AnykaAudioEncoder::new()?),
+            Some(Arc::new(AnykaImagingControl::new()?) as Arc<dyn ImagingControl>),
+        );
+
         let ptz_control: Option<Arc<dyn PTZControl>> = {
             tracing::info!("Initializing PTZ (native Rust driver, /dev/ak-motor0, /dev/ak-motor1)");
             let ptz = AnykaPTZControl::new();
@@ -119,7 +155,6 @@ impl AnykaPlatform {
                 }
             }
         };
-        let imaging_control = Some(Arc::new(AnykaImagingControl::new()) as Arc<dyn ImagingControl>);
         let network_info = Some(Arc::new(AnykaNetworkInfo::new()) as Arc<dyn NetworkInfo>);
 
         Ok(Self {
@@ -709,23 +744,20 @@ struct AnykaVideoInput {
 
 impl AnykaVideoInput {
     /// Create a new `AnykaVideoInput` with the default (real) FFI backend.
-    fn new(isp_config_path: Option<PathBuf>) -> Self {
+    fn new(isp_config_path: Option<PathBuf>) -> PlatformResult<Self> {
         #[cfg(feature = "use_vendor_ipc")]
         {
-            match VendorIpc::new() {
-                Ok(ipc) => {
-                    tracing::info!("Using VendorIpc for vendor library access");
-                    return Self::with_ffi(Arc::new(ipc), isp_config_path);
-                }
-                Err(e) => {
-                    tracing::warn!(
-                        "VendorIpc connection failed, falling back to RealVideoFfi: {}",
-                        e
-                    );
-                }
-            }
+            let ipc = VendorIpc::new().map_err(|e| {
+                PlatformError::InitializationFailed(format!(
+                    "VendorIpc connection failed (is vendor-daemon running?): {}",
+                    e
+                ))
+            })?;
+            tracing::info!("AnykaVideoInput: using VendorIpc for vendor library access");
+            Ok(Self::with_ffi(Arc::new(ipc), isp_config_path))
         }
-        Self::with_ffi(Arc::new(RealVideoFfi), isp_config_path)
+        #[cfg(not(feature = "use_vendor_ipc"))]
+        Ok(Self::with_ffi(Arc::new(RealVideoFfi), isp_config_path))
     }
 
     /// Create a new `AnykaVideoInput` with a custom FFI backend.
@@ -796,21 +828,41 @@ impl AnykaVideoInput {
             align_to_8(sensor_height.max(8))
         };
 
+        // libre_anyka_app quirk: in vendor IPC mode, main.max_* drives sub-channel
+        // validation/limits. Mirror the proven C workaround (invert max mapping).
+        let (main_max_width, main_max_height, sub_max_width, sub_max_height, max_mode) =
+            if cfg!(feature = "use_vendor_ipc") {
+                (
+                    sub_width,
+                    sub_height,
+                    sensor_width,
+                    sensor_height,
+                    "vendor-ipc-legacy-mapping",
+                )
+            } else {
+                (
+                    sensor_width,
+                    sensor_height,
+                    sub_width,
+                    sub_height,
+                    "native-mapping",
+                )
+            };
+
         attr.res = [
             // Main channel: sensor-native resolution.
             video_resolution {
                 width: sensor_width,
                 height: sensor_height,
-                // SDK validation requires main width/height <= main max width/height.
-                max_width: sensor_width,
-                max_height: sensor_height,
+                max_width: main_max_width,
+                max_height: main_max_height,
             },
             // Sub channel: smaller resolution required by ISP driver.
             video_resolution {
                 width: sub_width,
                 height: sub_height,
-                max_width: sub_width,
-                max_height: sub_height,
+                max_width: sub_max_width,
+                max_height: sub_max_height,
             },
         ];
 
@@ -824,7 +876,8 @@ impl AnykaVideoInput {
             attr.res[1].height
         );
         tracing::info!(
-            "Applying Anyka VI max attrs: main_max={}x{}, sub_max={}x{}",
+            "Applying Anyka VI max attrs ({}): main_max={}x{}, sub_max={}x{}",
+            max_mode,
             attr.res[0].max_width,
             attr.res[0].max_height,
             attr.res[1].max_width,
@@ -1329,7 +1382,8 @@ fn frame_read_loop(
             }
 
             let mut stream = std::mem::MaybeUninit::<video_stream>::uninit();
-            let ret = ffi.venc_get_stream(stream_handle.as_ptr(), stream.as_mut_ptr());
+            let stream_ptr = stream.as_mut_ptr();
+            let ret = ffi.venc_get_stream(stream_handle.as_ptr(), stream_ptr);
 
             if ret != AK_SUCCESS_I32 {
                 // No more frames available in this drain cycle.
@@ -1389,8 +1443,10 @@ fn frame_read_loop(
             // Reset no-data counter on successful frame retrieval
             consecutive_no_data = 0;
 
-            // SAFETY: venc_get_stream succeeded, so `stream` is fully initialized
-            let mut stream_data = unsafe { stream.assume_init() };
+            // SAFETY: venc_get_stream succeeded, so `stream` is fully initialized.
+            // We keep using the same video_stream address for get+release because
+            // the vendor IPC path keys pending frames by this pointer address.
+            let stream_data = unsafe { stream.assume_init_mut() };
 
             if !stream_data.data.is_null() && stream_data.len > 0 {
                 let frame_type = sdk_frame_type_to_frame_type(stream_data.frame_type);
@@ -1448,7 +1504,7 @@ fn frame_read_loop(
             // SAFETY: We pass back the same stream struct that get_stream populated.
             // The data pointer is owned by the SDK and must be returned.
             // This MUST happen even during shutdown to avoid leaking SDK buffers.
-            let _ = ffi.venc_release_stream(stream_handle.as_ptr(), &mut stream_data);
+            let _ = ffi.venc_release_stream(stream_handle.as_ptr(), stream_data);
             tracing::trace!(stream = ?stream_id, "SDK buffer released");
         }
 
@@ -1613,24 +1669,21 @@ impl AnykaVideoEncoder {
     /// Create a new `AnykaVideoEncoder` with the default (real) FFI backend.
     ///
     /// When the `use_vendor_ipc` feature is enabled, attempts to connect to the
-    /// vendor daemon via `VendorIpc` first. Falls back to `RealVideoFfi` on failure.
-    fn new() -> Self {
+    /// vendor daemon via `VendorIpc` first. Returns error on failure.
+    fn new() -> PlatformResult<Self> {
         #[cfg(feature = "use_vendor_ipc")]
         {
-            match crate::ffi::vendor_ipc::VendorIpc::new() {
-                Ok(ipc) => {
-                    tracing::info!("AnykaVideoEncoder: using VendorIpc for vendor library access");
-                    return Self::with_ffi(Arc::new(ipc));
-                }
-                Err(e) => {
-                    tracing::warn!(
-                        "AnykaVideoEncoder: VendorIpc connection failed, falling back to RealVideoFfi: {}",
-                        e
-                    );
-                }
-            }
+            let ipc = crate::ffi::vendor_ipc::VendorIpc::new().map_err(|e| {
+                PlatformError::InitializationFailed(format!(
+                    "AnykaVideoEncoder: VendorIpc connection failed: {}",
+                    e
+                ))
+            })?;
+            tracing::info!("AnykaVideoEncoder: using VendorIpc for vendor library access");
+            Ok(Self::with_ffi(Arc::new(ipc)))
         }
-        Self::with_ffi(Arc::new(crate::ffi::video::RealVideoFfi))
+        #[cfg(not(feature = "use_vendor_ipc"))]
+        Ok(Self::with_ffi(Arc::new(crate::ffi::video::RealVideoFfi)))
     }
 
     /// Create a new `AnykaVideoEncoder` with a custom FFI backend.
@@ -2397,20 +2450,29 @@ impl AnykaAudioInput {
     /// Create a new `AnykaAudioInput`.
     ///
     /// When the `use_vendor_ipc` feature is enabled, attempts to connect to the
-    /// vendor daemon via `VendorIpc` first. Falls back to `RealAudioFfi` on failure.
-    fn new() -> Self {
+    /// vendor daemon via `VendorIpc` first. Returns error on failure.
+    fn new() -> PlatformResult<Self> {
         #[cfg(feature = "use_vendor_ipc")]
         {
-            if let Ok(ipc) = crate::ffi::vendor_ipc::VendorIpc::new() {
-                tracing::info!("AnykaAudioInput: using VendorIpc for vendor library access");
-                return Self {
-                    ffi: Arc::new(ipc),
-                    opened: AtomicBool::new(false),
-                };
-            }
+            let ipc = crate::ffi::vendor_ipc::VendorIpc::new().map_err(|e| {
+                PlatformError::InitializationFailed(format!(
+                    "AnykaAudioInput: VendorIpc connection failed: {}",
+                    e
+                ))
+            })?;
+            tracing::info!("AnykaAudioInput: using VendorIpc for vendor library access");
+            Ok(Self {
+                ffi: Arc::new(ipc),
+                opened: AtomicBool::new(false),
+            })
         }
+        #[cfg(not(feature = "use_vendor_ipc"))]
+        Ok(Self::with_ffi(Arc::new(crate::ffi::audio::RealAudioFfi)))
+    }
+
+    fn with_ffi(ffi: Arc<dyn crate::ffi::audio::AudioFfiTrait>) -> Self {
         Self {
-            ffi: Arc::new(crate::ffi::audio::RealAudioFfi),
+            ffi,
             opened: AtomicBool::new(false),
         }
     }
@@ -2464,28 +2526,27 @@ impl AnykaAudioEncoder {
     /// Create a new `AnykaAudioEncoder`.
     ///
     /// When the `use_vendor_ipc` feature is enabled, attempts to connect to the
-    /// vendor daemon via `VendorIpc` first. Falls back to `RealAudioFfi` on failure.
-    fn new() -> Self {
+    /// vendor daemon via `VendorIpc` first. Returns error on failure.
+    fn new() -> PlatformResult<Self> {
         #[cfg(feature = "use_vendor_ipc")]
         let ffi: Arc<dyn crate::ffi::audio::AudioFfiTrait> = {
-            match crate::ffi::vendor_ipc::VendorIpc::new() {
-                Ok(ipc) => {
-                    tracing::info!("AnykaAudioEncoder: using VendorIpc for vendor library access");
-                    Arc::new(ipc)
-                }
-                Err(e) => {
-                    tracing::warn!(
-                        "AnykaAudioEncoder: VendorIpc connection failed, falling back to RealAudioFfi: {}",
-                        e
-                    );
-                    Arc::new(crate::ffi::audio::RealAudioFfi)
-                }
-            }
+            let ipc = crate::ffi::vendor_ipc::VendorIpc::new().map_err(|e| {
+                PlatformError::InitializationFailed(format!(
+                    "AnykaAudioEncoder: VendorIpc connection failed: {}",
+                    e
+                ))
+            })?;
+            tracing::info!("AnykaAudioEncoder: using VendorIpc for vendor library access");
+            Arc::new(ipc)
         };
         #[cfg(not(feature = "use_vendor_ipc"))]
         let ffi: Arc<dyn crate::ffi::audio::AudioFfiTrait> =
             Arc::new(crate::ffi::audio::RealAudioFfi);
 
+        Ok(Self::with_ffi(ffi))
+    }
+
+    fn with_ffi(ffi: Arc<dyn crate::ffi::audio::AudioFfiTrait>) -> Self {
         Self {
             ffi,
             configurations: RwLock::new(vec![AudioEncoderConfig {
@@ -2563,30 +2624,27 @@ impl AnykaImagingControl {
     /// Create a new `AnykaImagingControl`.
     ///
     /// When the `use_vendor_ipc` feature is enabled, attempts to connect to the
-    /// vendor daemon via `VendorIpc` first. Falls back to `RealImagingFfi` on failure.
-    fn new() -> Self {
+    /// vendor daemon via `VendorIpc` first. Returns error on failure.
+    fn new() -> PlatformResult<Self> {
         #[cfg(feature = "use_vendor_ipc")]
         let ffi: Arc<dyn crate::ffi::imaging::ImagingFfiTrait> = {
-            match crate::ffi::vendor_ipc::VendorIpc::new() {
-                Ok(ipc) => {
-                    tracing::info!(
-                        "AnykaImagingControl: using VendorIpc for vendor library access"
-                    );
-                    Arc::new(ipc)
-                }
-                Err(e) => {
-                    tracing::warn!(
-                        "AnykaImagingControl: VendorIpc connection failed, falling back to RealImagingFfi: {}",
-                        e
-                    );
-                    Arc::new(crate::ffi::imaging::RealImagingFfi)
-                }
-            }
+            let ipc = crate::ffi::vendor_ipc::VendorIpc::new().map_err(|e| {
+                PlatformError::InitializationFailed(format!(
+                    "AnykaImagingControl: VendorIpc connection failed: {}",
+                    e
+                ))
+            })?;
+            tracing::info!("AnykaImagingControl: using VendorIpc for vendor library access");
+            Arc::new(ipc)
         };
         #[cfg(not(feature = "use_vendor_ipc"))]
         let ffi: Arc<dyn crate::ffi::imaging::ImagingFfiTrait> =
             Arc::new(crate::ffi::imaging::RealImagingFfi);
 
+        Ok(Self::with_ffi(ffi))
+    }
+
+    fn with_ffi(ffi: Arc<dyn crate::ffi::imaging::ImagingFfiTrait>) -> Self {
         Self {
             ffi,
             settings: RwLock::new(ImagingSettings {
@@ -3153,10 +3211,22 @@ mod tests {
                     assert_eq!((*attr).res[0].height, 1080);
                     assert_eq!((*attr).res[1].width, 640);
                     assert_eq!((*attr).res[1].height, 360);
-                    assert_eq!((*attr).res[0].max_width, 1920);
-                    assert_eq!((*attr).res[0].max_height, 1080);
-                    assert_eq!((*attr).res[1].max_width, 640);
-                    assert_eq!((*attr).res[1].max_height, 360);
+                    #[cfg(feature = "use_vendor_ipc")]
+                    {
+                        // libre_anyka_app quirk (via vendor IPC):
+                        // main.max_* drives sub-channel limits.
+                        assert_eq!((*attr).res[0].max_width, 640);
+                        assert_eq!((*attr).res[0].max_height, 360);
+                        assert_eq!((*attr).res[1].max_width, 1920);
+                        assert_eq!((*attr).res[1].max_height, 1080);
+                    }
+                    #[cfg(not(feature = "use_vendor_ipc"))]
+                    {
+                        assert_eq!((*attr).res[0].max_width, 1920);
+                        assert_eq!((*attr).res[0].max_height, 1080);
+                        assert_eq!((*attr).res[1].max_width, 640);
+                        assert_eq!((*attr).res[1].max_height, 360);
+                    }
                 }
                 AK_SUCCESS_I32
             });
@@ -4189,6 +4259,8 @@ mod tests {
         // Frame data buffer
         let frame_data: Vec<u8> = vec![0xAB; 100];
         let frame_data_ptr = frame_data.as_ptr() as usize;
+        let get_stream_ptr = Arc::new(AtomicUsize::new(0));
+        let get_stream_ptr_clone = Arc::clone(&get_stream_ptr);
 
         // Drain-loop pattern: first call returns a frame (sets stop signal),
         // second call returns failure to break inner drain loop.
@@ -4196,6 +4268,7 @@ mod tests {
         let call_idx_clone = Arc::clone(&call_idx);
         mock.expect_venc_get_stream()
             .returning(move |_, stream_ptr| {
+                get_stream_ptr_clone.store(stream_ptr as usize, Ordering::SeqCst);
                 let idx = call_idx_clone.fetch_add(1, Ordering::SeqCst);
                 if idx == 0 {
                     // First call: return a frame
@@ -4218,7 +4291,14 @@ mod tests {
 
         mock.expect_venc_release_stream()
             .times(1)
-            .returning(|_, _| AK_SUCCESS_I32);
+            .returning(move |_, stream_ptr| {
+                assert_eq!(
+                    stream_ptr as usize,
+                    get_stream_ptr.load(Ordering::SeqCst),
+                    "release must use same video_stream pointer as get"
+                );
+                AK_SUCCESS_I32
+            });
 
         // Stream handle creation + cancel
         let test_ptr = std::ptr::NonNull::<c_void>::dangling().as_ptr() as usize;

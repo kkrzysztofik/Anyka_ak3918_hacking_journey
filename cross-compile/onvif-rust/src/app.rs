@@ -29,7 +29,7 @@ use crate::lifecycle::{RuntimeError, ShutdownReport, StartupError};
 use crate::onvif::ptz::PTZStateManager;
 use crate::onvif::server::{OnvifServer, OnvifServerConfig};
 use crate::platform::Platform;
-#[cfg(use_stubs)]
+#[cfg(all(use_stubs, not(feature = "use_vendor_ipc")))]
 use crate::platform::StubPlatformBuilder;
 use crate::security::RateLimiter;
 use crate::users::password::PasswordManager;
@@ -781,15 +781,15 @@ impl Application {
 
     /// Initialize the platform abstraction layer.
     ///
-    /// On real hardware (`cfg(not(use_stubs))`), creates and initializes `AnykaPlatform`.
-    /// On dev builds (`cfg(use_stubs)`), creates a `StubPlatform` for testing.
+    /// On real hardware or with vendor IPC, creates and initializes `AnykaPlatform`.
+    /// On dev builds without vendor IPC, creates a `StubPlatform` for testing.
     /// Returns `None` in degraded mode for recoverable platform failures.
     /// Returns `Err` for unsafe teardown failures that require hard process exit.
     async fn init_platform(
         progress: &mut StartupProgress,
         config_runtime: &Arc<ConfigRuntime>,
     ) -> Result<Option<Arc<dyn Platform>>, StartupError> {
-        #[cfg(not(use_stubs))]
+        #[cfg(any(not(use_stubs), feature = "use_vendor_ipc"))]
         {
             let isp_path = config_runtime
                 .get_string("device.isp_config_path")
@@ -829,7 +829,7 @@ impl Application {
             }
             Ok(None)
         }
-        #[cfg(use_stubs)]
+        #[cfg(all(use_stubs, not(feature = "use_vendor_ipc")))]
         {
             let _ = config_runtime; // Not used in stub mode
             let stub_platform = StubPlatformBuilder::new()

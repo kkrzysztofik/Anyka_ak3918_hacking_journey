@@ -12,10 +12,10 @@ use bytes::BytesMut;
 use clap::Parser;
 use onvif_rust::app::{Application, DEFAULT_CONFIG_PATH};
 use onvif_rust::config::{ConfigRuntime, ConfigStorage};
-#[cfg(not(use_stubs))]
+#[cfg(any(not(use_stubs), feature = "use_vendor_ipc"))]
 use onvif_rust::platform::AnykaPlatform;
 use onvif_rust::platform::Platform;
-#[cfg(use_stubs)]
+#[cfg(all(use_stubs, not(feature = "use_vendor_ipc")))]
 use onvif_rust::platform::ValidationPlatform;
 use onvif_rust::streaming::helpers::{
     combined_subscriber_count, fanout_frame, generate_av_sdp, send_frame,
@@ -991,7 +991,7 @@ fn start_audio_publisher(
 }
 
 async fn create_and_init_platform() -> Result<Arc<dyn Platform>> {
-    #[cfg(not(use_stubs))]
+    #[cfg(any(not(use_stubs), feature = "use_vendor_ipc"))]
     {
         // On real hardware (ARM cross-compile), use AnykaPlatform which
         // provides actual PTZ, imaging, and network control via FFI.
@@ -1000,7 +1000,7 @@ async fn create_and_init_platform() -> Result<Arc<dyn Platform>> {
         tracing::info!("AnykaPlatform initialized (real hardware)");
         Ok(Arc::new(platform) as Arc<dyn Platform>)
     }
-    #[cfg(use_stubs)]
+    #[cfg(all(use_stubs, not(feature = "use_vendor_ipc")))]
     {
         // On development builds (x86_64), use ValidationPlatform for testing.
         let platform = ValidationPlatform::new();

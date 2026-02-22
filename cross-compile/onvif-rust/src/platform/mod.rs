@@ -45,5 +45,5 @@ pub use stubs::*;
 pub use traits::*;
 pub use validation::ValidationPlatform;
 
-#[cfg(not(use_stubs))]
+#[cfg(any(not(use_stubs), feature = "use_vendor_ipc"))]
 pub use anyka::*;

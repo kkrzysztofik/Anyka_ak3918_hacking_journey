@@ -37,7 +37,7 @@ use base64::{Engine, engine::general_purpose::STANDARD as BASE64};
 use constant_time_eq::constant_time_eq;
 use dashmap::DashMap;
 use md5::{Digest, Md5};
-use rand::Rng;
+use rand::RngExt;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use thiserror::Error;

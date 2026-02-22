@@ -16,6 +16,7 @@ BUILD_MODE="release"
 TARGET="armv5te-unknown-linux-uclibceabi"
 CLEAN=false
 EXTRA_FEATURES=""
+NO_IPC=false
 
 # Colors for output
 RED='\033[0;31m'
@@ -72,6 +73,10 @@ while [[ $# -gt 0 ]]; do
       EXTRA_FEATURES="$2"
       shift 2
       ;;
+    --no-ipc|--direct-ffi)
+      NO_IPC=true
+      shift
+      ;;
     -h|--help)
       echo "Usage: $0 [OPTIONS]"
       echo ""
@@ -80,7 +85,8 @@ while [[ $# -gt 0 ]]; do
       echo "  --release             Build in release mode (default)"
       echo "  --target TARGET       Specify target triple (default: armv5te-unknown-linux-uclibceabi)"
       echo "  --clean               Clean before building"
-      echo "  --features FEATURES   Extra cargo features to enable (e.g. use_vendor_ipc)"
+      echo "  --features FEATURES   Additional cargo features (added to default: use_vendor_ipc)"
+      echo "  --no-ipc              Disable IPC mode (use direct vendor FFI linking)"
       echo "  -h, --help            Show this help message"
       echo ""
       exit 0
@@ -130,9 +136,28 @@ fi
 log_info "Building for target ${TARGET} in ${BUILD_MODE} mode..."
 
 FEATURES_ARGS=()
-if [[ -n "${EXTRA_FEATURES}" ]]; then
-  FEATURES_ARGS=(--features "${EXTRA_FEATURES}")
+# Default to IPC mode (vendor-daemon required)
+DEFAULT_FEATURES="use_vendor_ipc"
+if [[ "${NO_IPC}" = true ]]; then
+  DEFAULT_FEATURES=""
+  log_warn "IPC mode disabled (--no-ipc): building with direct vendor FFI linking"
 fi
+
+# Combine default + extra features
+ALL_FEATURES="${DEFAULT_FEATURES}"
+if [[ -n "${EXTRA_FEATURES}" ]]; then
+  if [[ -n "${ALL_FEATURES}" ]]; then
+    ALL_FEATURES="${ALL_FEATURES},${EXTRA_FEATURES}"
+  else
+    ALL_FEATURES="${EXTRA_FEATURES}"
+  fi
+fi
+
+if [[ -n "${ALL_FEATURES}" ]]; then
+  FEATURES_ARGS=(--features "${ALL_FEATURES}")
+fi
+
+[[ -n "${ALL_FEATURES}" ]] && log_info "Features: ${ALL_FEATURES}"
 
 if [[ "${BUILD_MODE}" = "release" ]]; then
   "${CARGO}" build --release --target "${TARGET}" "${FEATURES_ARGS[@]}"
@@ -208,11 +233,13 @@ log_info "  - ${DEPLOY_DIR}/onvif-rust"
 
 # Copy vendor-daemon if built
 VENDOR_DAEMON_BIN="${WORKSPACE_DIR}/vendor-daemon/build/vendor-daemon.bin"
+VENDOR_DAEMON_DEPLOY="${REPO_ROOT}/SD_card_contents/anyka_hack/vendor-daemon"
 if [[ -f "${VENDOR_DAEMON_BIN}" ]]; then
-  cp "${VENDOR_DAEMON_BIN}" "${DEPLOY_DIR}/vendor-daemon.bin"
-  chmod 755 "${DEPLOY_DIR}/vendor-daemon.bin"
+  mkdir -p "${VENDOR_DAEMON_DEPLOY}"
+  cp "${VENDOR_DAEMON_BIN}" "${VENDOR_DAEMON_DEPLOY}/vendor-daemon.bin"
+  chmod 755 "${VENDOR_DAEMON_DEPLOY}/vendor-daemon.bin"
   log_success "Vendor daemon copied to deployment directory"
-  log_info "  - ${DEPLOY_DIR}/vendor-daemon.bin"
+  log_info "  - ${VENDOR_DAEMON_DEPLOY}/vendor-daemon.bin"
 fi
 
 echo ""

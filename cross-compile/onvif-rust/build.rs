@@ -10,6 +10,20 @@ fn main() {
     // Declare the use_stubs cfg to avoid warnings
     println!("cargo::rustc-check-cfg=cfg(use_stubs)");
 
+    // When use_vendor_ipc is enabled, all SDK access goes through vendor-daemon IPC.
+    // No need for FFI bindings or vendor library linking — use stub type definitions.
+    if std::env::var("CARGO_FEATURE_USE_VENDOR_IPC").is_ok() {
+        println!("cargo:rustc-cfg=use_stubs");
+        println!(
+            "cargo:warning=use_vendor_ipc enabled: using stub types, skipping vendor FFI generation"
+        );
+        // System libs (pthread, m, dl) are still needed for the Rust runtime
+        println!("cargo:rustc-link-lib=pthread");
+        println!("cargo:rustc-link-lib=m");
+        println!("cargo:rustc-link-lib=dl");
+        return;
+    }
+
     // Determine if we're cross-compiling
     let target = env::var("TARGET").unwrap_or_else(|_| String::from("native"));
     let is_cross_compile = target.contains("arm") || target.contains("uclibc");

@@ -355,7 +355,7 @@ pub fn compute_digest(nonce: &[u8], created: &str, password: &str) -> String {
 ///
 /// Returns a tuple of (raw bytes, Base64-encoded string).
 pub fn generate_nonce() -> (Vec<u8>, String) {
-    use rand::Rng;
+    use rand::RngExt;
     let mut rng = rand::rng();
     let nonce: Vec<u8> = (0..16).map(|_| rng.random()).collect();
     let nonce_b64 = BASE64.encode(&nonce);

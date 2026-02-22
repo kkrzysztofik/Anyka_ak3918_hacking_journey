@@ -48,7 +48,7 @@ const GENERATED_PASSWORD_LENGTH: usize = 16;
 /// assert_eq!(password.len(), 16);
 /// ```
 fn generate_secure_password() -> String {
-    use rand::Rng;
+    use rand::RngExt;
     let mut rng = rand::rng();
     (0..GENERATED_PASSWORD_LENGTH)
         .map(|_| {

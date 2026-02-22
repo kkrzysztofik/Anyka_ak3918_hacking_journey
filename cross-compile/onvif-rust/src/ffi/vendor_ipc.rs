@@ -33,8 +33,9 @@ use std::ffi::{c_char, c_void};
 use std::io::{Read, Write};
 use std::os::unix::net::UnixStream;
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 
-use tracing::{debug, error, trace, warn};
+use tracing::{debug, error, warn};
 
 use crate::ffi::video::VideoFfiTrait;
 use crate::ffi::{aenc_attr, audio_param, pcm_param};
@@ -274,6 +275,45 @@ pub struct VendorIpc {
 }
 
 impl VendorIpc {
+    fn cmd_name(cmd_id: i32) -> &'static str {
+        match cmd_id {
+            CMD_VI_MATCH_SENSOR => "VI_MATCH_SENSOR",
+            CMD_VI_OPEN => "VI_OPEN",
+            CMD_VI_CLOSE => "VI_CLOSE",
+            CMD_VI_GET_SENSOR_RESOLUTION => "VI_GET_SENSOR_RESOLUTION",
+            CMD_VI_SET_CHANNEL_ATTR => "VI_SET_CHANNEL_ATTR",
+            CMD_VI_CAPTURE_ON => "VI_CAPTURE_ON",
+            CMD_VI_CAPTURE_OFF => "VI_CAPTURE_OFF",
+            CMD_VPSS_INIT => "VPSS_INIT",
+            CMD_VPSS_DESTROY => "VPSS_DESTROY",
+            CMD_VENC_SET_CFG_PATH => "VENC_SET_CFG_PATH",
+            CMD_VENC_OPEN => "VENC_OPEN",
+            CMD_VENC_CLOSE => "VENC_CLOSE",
+            CMD_VENC_SET_RC => "VENC_SET_RC",
+            CMD_VENC_SET_IFRAME => "VENC_SET_IFRAME",
+            CMD_VENC_REQUEST_STREAM => "VENC_REQUEST_STREAM",
+            CMD_VENC_GET_STREAM => "VENC_GET_STREAM",
+            CMD_VENC_RELEASE_STREAM => "VENC_RELEASE_STREAM",
+            CMD_VENC_CANCEL_STREAM => "VENC_CANCEL_STREAM",
+            CMD_AI_OPEN => "AI_OPEN",
+            CMD_AI_CLOSE => "AI_CLOSE",
+            CMD_AI_SET_ADC_VOLUME => "AI_SET_ADC_VOLUME",
+            CMD_AI_SET_ASLC_VOLUME => "AI_SET_ASLC_VOLUME",
+            CMD_AENC_OPEN => "AENC_OPEN",
+            CMD_AENC_CLOSE => "AENC_CLOSE",
+            CMD_AENC_SET_ATTR => "AENC_SET_ATTR",
+            CMD_ISP_SET_BRIGHTNESS => "ISP_SET_BRIGHTNESS",
+            CMD_ISP_SET_CONTRAST => "ISP_SET_CONTRAST",
+            CMD_ISP_SET_SATURATION => "ISP_SET_SATURATION",
+            CMD_ISP_SET_SHARPNESS => "ISP_SET_SHARPNESS",
+            CMD_ISP_SET_IR_FILTER => "ISP_SET_IR_FILTER",
+            CMD_ISP_SET_WDR => "ISP_SET_WDR",
+            CMD_GET_ERROR_NO => "GET_ERROR_NO",
+            CMD_GET_ERROR_STR => "GET_ERROR_STR",
+            _ => "UNKNOWN",
+        }
+    }
+
     /// Create a new IPC client connected to the vendor daemon.
     pub fn new() -> PlatformResult<Self> {
         let stream = UnixStream::connect(VENDOR_SOCKET_PATH).map_err(|e| {
@@ -326,14 +366,62 @@ impl VendorIpc {
     ///
     /// On I/O error, attempts a single reconnect and retries the request.
     fn send_request(&self, cmd_id: i32, req_data: &[u8]) -> PlatformResult<(i32, Vec<u8>)> {
-        trace!(cmd_id, req_len = req_data.len(), "Sending IPC request");
+        let started = Instant::now();
+        let cmd_name = Self::cmd_name(cmd_id);
+        debug!(
+            cmd_id,
+            cmd_name,
+            req_len = req_data.len(),
+            "IPC request start"
+        );
         match self.send_request_once(cmd_id, req_data) {
-            Ok(result) => Ok(result),
+            Ok(result) => {
+                let elapsed_ms = started.elapsed().as_millis();
+                debug!(
+                    cmd_id,
+                    cmd_name,
+                    status = result.0,
+                    resp_len = result.1.len(),
+                    elapsed_ms,
+                    "IPC request done"
+                );
+                Ok(result)
+            }
             Err(e) => {
-                warn!(cmd_id, error = %e, "IPC request failed; attempting reconnect");
+                let elapsed_ms = started.elapsed().as_millis();
+                warn!(
+                    cmd_id,
+                    cmd_name,
+                    elapsed_ms,
+                    error = %e,
+                    "IPC request failed; attempting reconnect"
+                );
                 self.reconnect()?;
-                trace!(cmd_id, "Retrying IPC request after reconnect");
-                self.send_request_once(cmd_id, req_data)
+                debug!(cmd_id, cmd_name, "IPC request retry start");
+                let retry_started = Instant::now();
+                let retry_result = self.send_request_once(cmd_id, req_data);
+                match &retry_result {
+                    Ok((status, resp_data)) => {
+                        debug!(
+                            cmd_id,
+                            cmd_name,
+                            status,
+                            resp_len = resp_data.len(),
+                            elapsed_ms = retry_started.elapsed().as_millis(),
+                            "IPC request retry done"
+                        );
+                    }
+                    Err(err) => {
+                        warn!(
+                            cmd_id,
+                            cmd_name,
+                            elapsed_ms = retry_started.elapsed().as_millis(),
+                            error = %err,
+                            "IPC request retry failed"
+                        );
+                    }
+                }
+                retry_result
             }
         }
     }
