@@ -831,7 +831,7 @@ impl Application {
         }
         #[cfg(use_stubs)]
         {
-            let _ = config_runtime; // Not used in stub mode
+            let _ = config_runtime;
             let stub_platform = StubPlatformBuilder::new()
                 .ptz_supported(true)
                 .imaging_supported(true)

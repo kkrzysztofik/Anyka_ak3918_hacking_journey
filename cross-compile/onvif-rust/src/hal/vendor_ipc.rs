@@ -627,13 +627,13 @@ impl VendorIpc {
     }
 
     #[cfg(not(use_stubs))]
-    fn ipc_to_frame_type(val: i32) -> crate::hal::generated::video_frame_type {
-        use crate::hal::generated::video_frame_type;
+    fn ipc_to_frame_type(val: i32) -> crate::hal::VideoFrameType {
+        use crate::hal::VideoFrameType;
         match val {
-            1 => video_frame_type::FRAME_TYPE_I,
-            2 => video_frame_type::FRAME_TYPE_B,
-            3 => video_frame_type::FRAME_TYPE_PI,
-            _ => video_frame_type::FRAME_TYPE_P, // 0 = P-frame; unknown defaults to P
+            1 => VideoFrameType::FrameTypeI,
+            2 => VideoFrameType::FrameTypeB,
+            3 => VideoFrameType::FrameTypePi,
+            _ => VideoFrameType::FrameTypeP, // 0 = P-frame; unknown defaults to P
         }
     }
 }
@@ -1685,7 +1685,7 @@ mod tests {
         data.extend_from_slice(&480i32.to_le_bytes()); // height
         data.extend_from_slice(&1920i32.to_le_bytes()); // max_width
         data.extend_from_slice(&1080i32.to_le_bytes()); // max_height
-        // Extra padding bytes — should be ignored
+                                                        // Extra padding bytes — should be ignored
         data.extend_from_slice(&[0xDE, 0xAD, 0xBE, 0xEF, 0xFF]);
 
         assert!(data.len() > 16);

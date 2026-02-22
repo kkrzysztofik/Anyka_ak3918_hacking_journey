@@ -85,7 +85,8 @@ while [[ $# -gt 0 ]]; do
       echo "  --release             Build in release mode (default)"
       echo "  --target TARGET       Specify target triple (default: armv5te-unknown-linux-uclibceabi)"
       echo "  --clean               Clean before building"
-      echo "  --features FEATURES   Additional cargo features (added to default: use_vendor_ipc)"
+      echo "  --clean               Clean before building"
+      echo "  --features FEATURES   Additional cargo features"
       echo "  --no-ipc              Disable IPC mode (use direct vendor FFI linking)"
       echo "  -h, --help            Show this help message"
       echo ""
@@ -136,12 +137,8 @@ fi
 log_info "Building for target ${TARGET} in ${BUILD_MODE} mode..."
 
 FEATURES_ARGS=()
-# Default to IPC mode (vendor-daemon required)
-DEFAULT_FEATURES="use_vendor_ipc"
-if [[ "${NO_IPC}" = true ]]; then
-  DEFAULT_FEATURES=""
-  log_warn "IPC mode disabled (--no-ipc): building with direct vendor FFI linking"
-fi
+# No default features - use --features to add any needed features
+DEFAULT_FEATURES=""
 
 # Combine default + extra features
 ALL_FEATURES="${DEFAULT_FEATURES}"

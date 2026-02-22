@@ -28,7 +28,7 @@ use tokio::task::JoinHandle;
 use crate::hal::ptz::{PTZHandle, PtzHalTrait, default_ptz_hal, ptz_open_internal};
 use crate::hal::{AK_SUCCESS_I32, PtzDirection};
 
-use crate::hal::ptz_turn_direction;
+use crate::hal::ptz_driver::ptz_turn_direction;
 
 use super::traits::{
     PTZControl, PlatformError, PlatformResult, PtzLimits, PtzPosition, PtzPreset, PtzVelocity,

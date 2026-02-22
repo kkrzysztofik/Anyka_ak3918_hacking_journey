@@ -1046,11 +1046,11 @@ fn sdk_frame_type_to_frame_type(ft: VideoFrameType) -> FrameType {
 
 #[cfg(not(use_stubs))]
 fn sdk_frame_type_to_frame_type(ft: crate::hal::video_frame_type) -> FrameType {
+    use crate::hal::VideoFrameType;
     match ft {
-        crate::hal::video_frame_type::FRAME_TYPE_I
-        | crate::hal::video_frame_type::FRAME_TYPE_PI => FrameType::VideoIFrame,
-        crate::hal::video_frame_type::FRAME_TYPE_P => FrameType::VideoPFrame,
-        crate::hal::video_frame_type::FRAME_TYPE_B => FrameType::VideoBFrame,
+        VideoFrameType::FrameTypeI | VideoFrameType::FrameTypePi => FrameType::VideoIFrame,
+        VideoFrameType::FrameTypeP => FrameType::VideoPFrame,
+        VideoFrameType::FrameTypeB => FrameType::VideoBFrame,
     }
 }
 

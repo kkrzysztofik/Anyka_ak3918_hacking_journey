@@ -26,17 +26,17 @@
 
 use crate::platform::PlatformError;
 use crate::platform::PlatformResult;
-use std::ffi::{CString, c_char, c_void};
+use std::ffi::{c_char, c_void, CString};
 use std::path::Path;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 
 use crate::hal::{
     encode_param, video_channel_attr, video_dev_type, video_resolution, video_stream,
 };
 
-use crate::hal::{AK_FAILED_I32, AK_SUCCESS_I32, Resolution, VideoDevice};
+use crate::hal::{Resolution, VideoDevice, AK_FAILED_I32, AK_SUCCESS_I32};
 
 /// Internal trait for abstracting video FFI calls to enable mocking in tests.
 #[cfg_attr(test, mockall::automock)]
@@ -519,7 +519,6 @@ pub(crate) fn vpss_init_internal(
     device: VideoDevice,
     ffi: &dyn VideoHalTrait,
 ) -> PlatformResult<()> {
-    // Validate device ID
     let dev_id = if device == VideoDevice::DEV0 {
         0i32
     } else {
@@ -581,7 +580,6 @@ pub(crate) fn vpss_destroy_internal(
     device: VideoDevice,
     ffi: &dyn VideoHalTrait,
 ) -> PlatformResult<()> {
-    // Validate device ID
     let dev_id = if device == VideoDevice::DEV0 {
         0i32
     } else {

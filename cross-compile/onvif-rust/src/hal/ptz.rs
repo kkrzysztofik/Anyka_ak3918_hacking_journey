@@ -33,7 +33,7 @@ use crate::hal::ptz_driver::{ptz_device, ptz_feedback_pin, ptz_turn_direction};
 #[cfg(use_stubs)]
 use crate::hal::{ptz_device, ptz_feedback_pin, ptz_turn_direction};
 
-use crate::hal::{AK_FAILED_I32, AK_SUCCESS_I32, PtzDirection, PtzMotor};
+use crate::hal::{PtzDirection, PtzMotor, AK_FAILED_I32, AK_SUCCESS_I32};
 
 /// Internal trait for abstracting PTZ FFI calls to enable mocking in tests.
 #[cfg_attr(test, mockall::automock)]
@@ -434,8 +434,6 @@ pub(crate) fn ptz_get_step_pos_internal(
     ffi: &dyn PtzHalTrait,
 ) -> PlatformResult<i32> {
     // Convert motor to FFI enum using exhaustive match instead of transmute.
-    // This ensures the compiler catches any future enum changes at compile time
-    // rather than producing silent undefined behavior.
     let sdk_motor = match motor {
         PtzMotor::Horizontal => ptz_device::PTZ_DEV_H,
         PtzMotor::Vertical => ptz_device::PTZ_DEV_V,
@@ -474,8 +472,6 @@ pub(crate) fn ptz_stop_internal(
     ffi: &dyn PtzHalTrait,
 ) -> PlatformResult<()> {
     // Convert direction to FFI enum using exhaustive match instead of transmute.
-    // This ensures the compiler catches any future enum changes at compile time
-    // rather than producing silent undefined behavior.
     let sdk_direction = match direction {
         PtzDirection::Left => ptz_turn_direction::PTZ_TURN_LEFT,
         PtzDirection::Right => ptz_turn_direction::PTZ_TURN_RIGHT,
