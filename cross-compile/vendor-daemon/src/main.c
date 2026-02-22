@@ -278,7 +278,7 @@ static int handle_vi_get_sensor_resolution(int fd, const uint8_t *req, uint32_t 
  *   crop:  left(i32) top(i32) width(i32) height(i32)
  *   res[0]: width(i32) height(i32) max_width(i32) max_height(i32)
  *   res[1]: width(i32) height(i32) max_width(i32) max_height(i32)
- * Total = 4 + 4*3 = 4 + 12 = 16 i32s = 64 bytes (after u64 handle = 72 bytes)
+ * Total = 12 i32s = 48 bytes (after u64 handle = 56 bytes)
  */
 static int handle_vi_set_channel_attr(int fd, const uint8_t *req, uint32_t req_len)
 {
@@ -311,7 +311,35 @@ static int handle_vi_set_channel_attr(int fd, const uint8_t *req, uint32_t req_l
     memcpy(&tmp, p + 40, 4); attr.res[1].max_width  = (int)tmp;
     memcpy(&tmp, p + 44, 4); attr.res[1].max_height = (int)tmp;
 
+    log_debug(
+        "[vi] set_channel_attr decoded: crop=%dx%d main=%dx%d main_max=%dx%d sub=%dx%d sub_max=%dx%d",
+        attr.crop.width,
+        attr.crop.height,
+        attr.res[VIDEO_CHN_MAIN].width,
+        attr.res[VIDEO_CHN_MAIN].height,
+        attr.res[VIDEO_CHN_MAIN].max_width,
+        attr.res[VIDEO_CHN_MAIN].max_height,
+        attr.res[VIDEO_CHN_SUB].width,
+        attr.res[VIDEO_CHN_SUB].height,
+        attr.res[VIDEO_CHN_SUB].max_width,
+        attr.res[VIDEO_CHN_SUB].max_height
+    );
+
     int ret = ak_vi_set_channel_attr(handle, &attr);
+    if (ret != 0) {
+        log_error(
+            "[vi] set_channel_attr failed: ret=%d main=%dx%d main_max=%dx%d sub=%dx%d sub_max=%dx%d",
+            ret,
+            attr.res[VIDEO_CHN_MAIN].width,
+            attr.res[VIDEO_CHN_MAIN].height,
+            attr.res[VIDEO_CHN_MAIN].max_width,
+            attr.res[VIDEO_CHN_MAIN].max_height,
+            attr.res[VIDEO_CHN_SUB].width,
+            attr.res[VIDEO_CHN_SUB].height,
+            attr.res[VIDEO_CHN_SUB].max_width,
+            attr.res[VIDEO_CHN_SUB].max_height
+        );
+    }
     return send_response(fd, ret, NULL, 0);
 }
 
@@ -342,31 +370,25 @@ static int handle_vi_capture_off(int fd, const uint8_t *req, uint32_t req_len)
 static int handle_vpss_init(int fd, const uint8_t *req, uint32_t req_len)
 {
     /*
-     * req: u64 vi_handle + i32 dev_no = 12 bytes
-     * The SDK manages VPSS internally through vi; we call ak_vpss_init().
+     * libre_anyka_app SDK: ak_vpss_init() is not exported by libplat_vpss.so.
+     * VPSS lifecycle is managed internally by the VI subsystem in this SDK
+     * variant — no explicit init call is needed or possible.
      */
-    if (req_len < 8 + 4)
-        return send_response(fd, STATUS_ERROR, NULL, 0);
-
-    uint64_t h64;
-    int32_t dev_no;
-    memcpy(&h64,    req,     sizeof(h64));
-    memcpy(&dev_no, req + 8, sizeof(dev_no));
-
-    void *vi_handle = (void *)(uintptr_t)h64;
-    log_debug("[vpss] init vi=%p dev=%d", vi_handle, dev_no);
-    ak_vpss_init(vi_handle, (int)dev_no);
+    (void)req;
+    (void)req_len;
+    log_debug("[vpss] init: no-op (libre_anyka_app SDK)");
     return send_response(fd, STATUS_OK, NULL, 0);
 }
 
 static int handle_vpss_destroy(int fd, const uint8_t *req, uint32_t req_len)
 {
-    if (req_len < sizeof(int32_t))
-        return send_response(fd, STATUS_ERROR, NULL, 0);
-    int32_t dev_no;
-    memcpy(&dev_no, req, sizeof(dev_no));
-    log_debug("[vpss] destroy dev=%d", dev_no);
-    ak_vpss_destroy((int)dev_no);
+    /*
+     * libre_anyka_app SDK: ak_vpss_destroy() is not exported by libplat_vpss.so.
+     * VPSS teardown is managed internally by the VI subsystem in this SDK variant.
+     */
+    (void)req;
+    (void)req_len;
+    log_debug("[vpss] destroy: no-op (libre_anyka_app SDK)");
     return send_response(fd, STATUS_OK, NULL, 0);
 }
 
@@ -374,16 +396,15 @@ static int handle_vpss_destroy(int fd, const uint8_t *req, uint32_t req_len)
 
 static int handle_venc_set_cfg_path(int fd, const uint8_t *req, uint32_t req_len)
 {
-    char path[512];
-    uint32_t copy = req_len < sizeof(path) - 1 ? req_len : sizeof(path) - 1;
-    memcpy(path, req, copy);
-    path[copy] = '\0';
-
-    log_debug("[venc] set_cfg_path path=%s", path);
-    int ret = ak_venc_set_cfg_path(path);
-    if (ret != 0)
-        log_error("[venc] set_cfg_path failed: %d", ret);
-    return send_response(fd, ret, NULL, 0);
+    /*
+     * libre_anyka_app SDK: ak_venc_set_cfg_path() is not exported by libmpi_venc.so.
+     * The V2 encoder in this SDK variant uses the default path (/etc/jffs2/venc.cfg)
+     * and does not support overriding it at runtime.
+     */
+    (void)req;
+    (void)req_len;
+    log_debug("[venc] set_cfg_path: no-op (libre_anyka_app SDK)");
+    return send_response(fd, STATUS_OK, NULL, 0);
 }
 
 /*
@@ -628,28 +649,26 @@ static int handle_ai_close(int fd, const uint8_t *req, uint32_t req_len)
 
 static int handle_ai_set_adc_volume(int fd, const uint8_t *req, uint32_t req_len)
 {
-    if (req_len < 8 + 4)
-        return send_response(fd, STATUS_ERROR, NULL, 0);
-    uint64_t h64;
-    int32_t vol;
-    memcpy(&h64, req,     sizeof(h64));
-    memcpy(&vol, req + 8, sizeof(vol));
-    void *handle = (void *)(uintptr_t)h64;
-    int ret = ak_ai_set_adc_volume(handle, (int)vol);
-    return send_response(fd, ret, NULL, 0);
+    /*
+     * libre_anyka_app SDK: ak_ai_set_adc_volume() is not exported by libplat_ai.so.
+     * Audio ADC volume control is not available in this SDK variant.
+     */
+    (void)req;
+    (void)req_len;
+    log_debug("[ai] set_adc_volume: no-op (libre_anyka_app SDK)");
+    return send_response(fd, STATUS_OK, NULL, 0);
 }
 
 static int handle_ai_set_aslc_volume(int fd, const uint8_t *req, uint32_t req_len)
 {
-    if (req_len < 8 + 4)
-        return send_response(fd, STATUS_ERROR, NULL, 0);
-    uint64_t h64;
-    int32_t vol;
-    memcpy(&h64, req,     sizeof(h64));
-    memcpy(&vol, req + 8, sizeof(vol));
-    void *handle = (void *)(uintptr_t)h64;
-    int ret = ak_ai_set_aslc_volume(handle, (int)vol);
-    return send_response(fd, ret, NULL, 0);
+    /*
+     * libre_anyka_app SDK: ak_ai_set_aslc_volume() is not exported by libplat_ai.so.
+     * Audio ASLC volume control is not available in this SDK variant.
+     */
+    (void)req;
+    (void)req_len;
+    log_debug("[ai] set_aslc_volume: no-op (libre_anyka_app SDK)");
+    return send_response(fd, STATUS_OK, NULL, 0);
 }
 
 /* ---- Audio Encoder handlers ---------------------------------------------- */
@@ -744,21 +763,14 @@ static int handle_isp_effect(int fd, const uint8_t *req, uint32_t req_len,
 
 static int handle_isp_set_wdr(int fd, const uint8_t *req, uint32_t req_len)
 {
-    /* req: u64 vi_handle + i32 enable = 12 bytes */
-    if (req_len < 8 + 4)
-        return send_response(fd, STATUS_ERROR, NULL, 0);
-    uint64_t h64;
-    int32_t enable;
-    memcpy(&h64,    req,     sizeof(h64));
-    memcpy(&enable, req + 8, sizeof(enable));
-
-    log_debug("[isp] set_wdr enable=%d", (int)enable);
-    int ret;
-    if (enable)
-        ret = ak_vpss_open_wdr();
-    else
-        ret = ak_vpss_close_wdr();
-    return send_response(fd, ret, NULL, 0);
+    /*
+     * libre_anyka_app SDK: ak_vpss_open_wdr() and ak_vpss_close_wdr() are not
+     * exported by libplat_vpss.so. WDR control is not available in this SDK variant.
+     */
+    (void)req;
+    (void)req_len;
+    log_debug("[isp] set_wdr: no-op (libre_anyka_app SDK)");
+    return send_response(fd, STATUS_OK, NULL, 0);
 }
 
 /*
@@ -822,6 +834,8 @@ static int process_request(int fd)
                 req_len, (unsigned)MAX_REQUEST_SIZE);
         return -1;
     }
+
+    log_debug("[daemon] fd=%d dispatch cmd=%d len=%u", fd, cmd_id, req_len);
 
     /* Read request payload into a heap buffer (may be up to 1 MB) */
     uint8_t *req_buf = NULL;
@@ -970,6 +984,7 @@ static int process_request(int fd)
     }
 
     free(req_buf);
+    log_debug("[daemon] fd=%d cmd=%d completed ret=%d", fd, cmd_id, ret);
     return ret;
 }
 

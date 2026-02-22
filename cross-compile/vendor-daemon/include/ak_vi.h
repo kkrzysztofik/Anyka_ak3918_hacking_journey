@@ -64,6 +64,8 @@ struct video_input_frame {
 	void *mdinfo;
 };
 
+/* NOTE: Functions below are verified against libplat_vi.so exports (libre_anyka_app SDK) */
+
 /**
  * ak_vi_get_version - get video in version
  * return: version string
@@ -255,16 +257,5 @@ int ak_vi_clear_buffer(void *handle);
  * notes:
  */
 int ak_vi_close(void *handle);
-
-/**
- * ak_vi_set_box_rect - set box rect info
- * @x[IN]: left of rect
- * @y[IN]: top of rect
- * @width[IN]: width of rect
- * @height[IN]: height of rect
- * return: 0 success, -1 failed
- * notes:
- */
-int ak_vi_set_box_rect(int x, int y, int width, int height);
 
 #endif

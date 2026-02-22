@@ -109,42 +109,6 @@ struct vpss_od_info {
 	unsigned int rgb_hist[VPSS_OD_RGB_HIST_MAX];
 };
 
-struct vpss_af_stat_info {
-   unsigned int  af_statics[5];
-};
-
-struct vpss_af_attr {
-    unsigned short  af_win0_left; 	//[0, 1279] 
-	unsigned short  af_win0_right;	//[0, 1279]
-	unsigned short  af_win0_top;	    //[0, 959]
-	unsigned short  af_win0_bottom;   //[0, 959]
-
-	unsigned short  af_win1_left; 	//[0, 1279]
-	unsigned short  af_win1_right;	//[0, 1279]
-	unsigned short  af_win1_top;	    //[[0, 959]
-	unsigned short  af_win1_bottom;   //[0, 959]
-
-	unsigned short  af_win2_left; 	//[0, 1279]
-	unsigned short  af_win2_right;	//[0, 1279]
-	unsigned short  af_win2_top;	    //[0, 959]
-	unsigned short  af_win2_bottom;   //[0, 959]
-
-    unsigned short  af_win3_left; 	//[0, 1279]
-	unsigned short  af_win3_right;	//[0, 1279]
-	unsigned short  af_win3_top;	    //[0, 959]
-	unsigned short  af_win3_bottom;   //[0, 959]
-
-    unsigned short  af_win4_left; 	//[0, 1279]
-	unsigned short  af_win4_right;	//[0, 1279]
-	unsigned short  af_win4_top;	    //[0, 959]
-	unsigned short  af_win4_bottom;   //[0, 959]
-    
-	unsigned short   af_th;       //[0, 128],     af_thÎª·§Öµ£¬´óÓÚ¸ÃÖµµÄ¸ßÍ¨ÂË²¨½á¹û½«±»½ØÈ¡¡£ÆäÖÐ¸ßÍ¨ÂË²¨½á¹ûÀ´×ÔÓÚsharpÄ£¿éÖÐµÄ¸ßÆµÈñ»¯½á¹û¡£
-    
-};
-
-
-
 /********************** effect *******************************/
 enum vpss_effect_type {
 	/* HUE to SHARP, value: [-50, 50], 0 means use the value in ISP config file */
@@ -161,30 +125,23 @@ enum vpss_effect_type {
 
 /********************** ISP *******************************/
 struct vpss_isp_ae_attr {
-	unsigned long exp_time_max;			//ÆØ¹âÊ±¼äµÄ×î´óÖµ
-    unsigned long exp_time_min;			//ÆØ¹âÊ±¼äµÄ×îÐ¡Öµ
-    unsigned long d_gain_max;      		//Êý×ÖÔöÒæµÄ×î´óÖµ
-    unsigned long d_gain_min;     		//Êý×ÖÔöÒæµÄ×îÐ¡Öµ
-    unsigned long isp_d_gain_min;  		//ispÊý×ÖÔöÒæµÄ×îÐ¡
-    unsigned long isp_d_gain_max;  		//ispÊý×ÖÔöÒæµÄ×î´óÖµ
-    unsigned long a_gain_max;     		//Ä£ÄâÔöÒæµÄ×î´óÖµ
-    unsigned long a_gain_min;      		//Ä£ÄâÔöÒæµÄ×îÐ¡Öµ
-    unsigned long exp_step;            	//ÓÃ»§ÆØ¹âµ÷Õû²½³¤
-    unsigned long exp_stable_range;     //ÎÈ¶¨·¶Î§
-    unsigned long target_lumiance;     	//Ä¿±êÁÁ¶È
+	unsigned long exp_time_max;			//ï¿½Ø¹ï¿½Ê±ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Öµ
+    unsigned long exp_time_min;			//ï¿½Ø¹ï¿½Ê±ï¿½ï¿½ï¿½ï¿½ï¿½Ð¡Öµ
+    unsigned long d_gain_max;      		//ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Öµ
+    unsigned long d_gain_min;     		//ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ð¡Öµ
+    unsigned long isp_d_gain_min;  		//ispï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ð¡
+    unsigned long isp_d_gain_max;  		//ispï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Öµ
+    unsigned long a_gain_max;     		//Ä£ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Öµ
+    unsigned long a_gain_min;      		//Ä£ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ð¡Öµ
+    unsigned long exp_step;            	//ï¿½Ã»ï¿½ï¿½Ø¹ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
+    unsigned long exp_stable_range;     //ï¿½È¶ï¿½ï¿½ï¿½Î§
+    unsigned long target_lumiance;     	//Ä¿ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
     unsigned long envi_gain_range[10][2];
     unsigned long hist_weight[16];
     unsigned long OE_suppress_en;
     unsigned long OE_detect_scope;		//[0,255]
     unsigned long OE_rate_max;			//[0, 255]
     unsigned long OE_rate_min;			//[0, 255]
-};
-
-struct vpss_isp_mae_attr {
-	unsigned long exp_time;	
-    unsigned long a_gain; 
-    unsigned long d_gain;	
-    unsigned long isp_d_gain;	
 };
 
 struct vpss_isp_wb_type_attr {
@@ -195,9 +152,9 @@ struct vpss_isp_3d_nr {
 	unsigned short uv_min_enable;
 	unsigned short tnr_y_enable;
 	unsigned short tnr_uv_enable;
-	unsigned short updata_ref_y;		//¸üÐÂY
-	unsigned short updata_ref_uv;		//¸üÐÂuv
-	unsigned short tnr_refFrame_format;	//²Î¿¼Ö¡µÄ¸ñÊ½
+	unsigned short updata_ref_y;		//ï¿½ï¿½ï¿½ï¿½Y
+	unsigned short updata_ref_uv;		//ï¿½ï¿½ï¿½ï¿½uv
+	unsigned short tnr_refFrame_format;	//ï¿½Î¿ï¿½Ö¡ï¿½Ä¸ï¿½Ê½
 	unsigned short y_2dnr_enable;
 	unsigned short uv_2dnr_enable;
 
@@ -231,7 +188,7 @@ struct vpss_isp_3d_nr {
 	unsigned short t_y_mc_k;			//[0-31]
 	unsigned short t_y_ac_th;	    	//[0, 1023]
 
-	unsigned long md_th;				//[0, 65535]  ÔË¶¯¼ì²âãÐÖµ [0-127]
+	unsigned long md_th;				//[0, 65535]  ï¿½Ë¶ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Öµ [0-127]
 };
 
 struct vpss_isp_3d_nr_attr {
@@ -261,10 +218,10 @@ struct vpss_isp_awb_attr {
     unsigned short rb_low[10];			//rb_low[i]<=rb_high[i]
     unsigned short rb_high[10];
 
-    //awbÈí¼þ²¿·ÖÐèÒªÉèÖÃµÄ²ÎÊý
-    unsigned short auto_wb_step;                //°×Æ½ºâ²½³¤¼ÆËã
-    unsigned short total_cnt_thresh;            //ÏñËØ¸öÊýãÐÖµ
-    unsigned short colortemp_stable_cnt_thresh; //ÎÈ¶¨Ö¡Êý£¬¶àÉÙÖ¡Ò»ÑùÈÏÎª»·¾³É«ÎÂ¸Ä±ä
+    //awbï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Òªï¿½ï¿½ï¿½ÃµÄ²ï¿½ï¿½ï¿½
+    unsigned short auto_wb_step;                //ï¿½ï¿½Æ½ï¿½â²½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
+    unsigned short total_cnt_thresh;            //ï¿½ï¿½ï¿½Ø¸ï¿½ï¿½ï¿½ï¿½ï¿½Öµ
+    unsigned short colortemp_stable_cnt_thresh; //ï¿½È¶ï¿½Ö¡ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ö¡Ò»ï¿½ï¿½ï¿½ï¿½Îªï¿½ï¿½ï¿½ï¿½É«ï¿½Â¸Ä±ï¿½
     unsigned short colortemp_envi[10];
 };
 
@@ -273,42 +230,20 @@ struct vpss_isp_exp_type {
 };
 
 struct vpss_isp_ae_run_info {
-    unsigned char current_calc_avg_lumi;         		//ÏÖÔÚµÄ¼ÆËã³öµÄÁÁ¶ÈÖµ
-    unsigned char current_calc_avg_compensation_lumi;	//¾­¹ýÆØ¹â²¹³¥ºóµÄÁÁ¶ÈÖµ
+    unsigned char current_calc_avg_lumi;         		//ï¿½ï¿½ï¿½ÚµÄ¼ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Öµ
+    unsigned char current_calc_avg_compensation_lumi;	//ï¿½ï¿½ï¿½ï¿½ï¿½Ø¹â²¹ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Öµ
 
-    unsigned char current_darked_flag;                 	//°×ÌìºÚÒ¹µÄ±ê¼Ç
+    unsigned char current_darked_flag;                 	//ï¿½ï¿½ï¿½ï¿½ï¿½Ò¹ï¿½Ä±ï¿½ï¿½
 
-    long  current_a_gain;				//Ä£ÄâÔöÒæµÄÖµ
-    long  current_d_gain;				//Êý×ÖÔöÒæµÄÖµ
-    long  current_isp_d_gain;			//ispÊý×ÖÔöÒæµÄÖµ
-    long  current_exp_time;				//ÆØ¹âÊ±¼äµÄÖµ
+    long  current_a_gain;				//Ä£ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Öµ
+    long  current_d_gain;				//ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Öµ
+    long  current_isp_d_gain;			//ispï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Öµ
+    long  current_exp_time;				//ï¿½Ø¹ï¿½Ê±ï¿½ï¿½ï¿½Öµ
 
-    unsigned long  current_a_gain_step;	//ÏÖÔÚµÄÄ£ÄâÔöÒæµÄ²½³¤
-    unsigned long  current_d_gain_step; //Êý×ÖÔöÒæµÄ²½³¤
-    unsigned long  current_isp_d_gain_step;	//ispÊý×ÖÔöÒæµÄ²½³¤
-    unsigned long  current_exp_time_step;	//ÆØ¹âÊ±¼äµÄ²½³¤
-};
-
-struct vpss_isp_awb_stat_info {
-	//ÔÚ°×Æ½ºâÍ³¼Æ²ÎÊý·¶Î§ÄÚµÄ°×Æ½ºâÍ³¼Æ½á¹û
-    unsigned long  total_R[10];	//10¸öÉ«ÎÂÃ¿Ò»¸öÉ«ÎÂÏÂµÄR·ÖÁ¿ÏñËØÖµ
-    unsigned long  total_G[10]; //10¸öÉ«ÎÂÃ¿Ò»¸öÉ«ÎÂÏÂµÄG·ÖÁ¿ÏñËØÖµ
-    unsigned long  total_B[10]; //10¸öÉ«ÎÂÃ¿Ò»¸öÉ«ÎÂÏÂµÄB·ÖÁ¿ÏñËØÖµ
-    unsigned long  total_cnt[10];	//ÔÚ°×Æ½ºâÍ³¼Æ²ÎÊý·¶Î§ÄÚµÄÏñËØÊýÁ¿Öµ
-    
-    //¾­ÓÉ×Ô¶¯°×Æ½ºâËã·¨Ëã³öµÄ°×Æ½ºâÔöÒæÖµ
-    unsigned short  r_gain;	// ºìÉ«·ÖÁ¿ÔöÒæÖµ
-    unsigned short  g_gain;	// ÂÌÉ«·ÖÁ¿ÔöÒæÖµ
-    unsigned short  b_gain;	// À¶É«·ÖÁ¿ÔöÒæÖµ
-    unsigned short  r_offset;	// ºìÉ«·ÖÁ¿Æ«ÒÆÖµ
-    unsigned short  g_offset;	// ÂÌÉ«·ÖÁ¿Æ«ÒÆÖµ
-    unsigned short  b_offset;	// À¶É«·ÖÁ¿Æ«ÒÆÖµ
-    unsigned short  current_colortemp_index;   //»·¾³É«ÎÂ±ê¼Ç£¬ÊÇ²ÎÊýËæ»·¾³±ä»¯µÄÉ«ÎÂÖ¸±ê  
-    unsigned short  colortemp_stable_cnt[10];  //Ã¿Ò»ÖÖÉ«ÎÂÎÈ¶¨µÄÖ¡Êý¼ÆÊý   
-};
-
-struct vpss_isp_weight_attr {
-   unsigned short zone_weight[8][16];
+    unsigned long  current_a_gain_step;	//ï¿½ï¿½ï¿½Úµï¿½Ä£ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ä²ï¿½ï¿½ï¿½
+    unsigned long  current_d_gain_step; //ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ä²ï¿½ï¿½ï¿½
+    unsigned long  current_isp_d_gain_step;	//ispï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ä²ï¿½ï¿½ï¿½
+    unsigned long  current_exp_time_step;	//ï¿½Ø¹ï¿½Ê±ï¿½ï¿½Ä²ï¿½ï¿½ï¿½
 };
 
 struct vpss_isp_sensor_reg_info {
@@ -316,76 +251,8 @@ struct vpss_isp_sensor_reg_info {
     unsigned short value;
 };
 
-/* notice: not suggest to use */
-struct ak_ir_auto_check {
-	int pre_ir_level;		// pre ir cut level,1:day ,0:night
-	int day_to_night_lum;	// day to night lum value
-	int night_to_day_lum;	// night to day lum value
-	int night_cnt[NIGHT_ARRAY_NUM];	// awb night cnt array
-	int day_cnt[DAY_ARRAY_NUM];	// awb day cnt array
-	int lock_time;					// locke night status time
-	int quick_switch_mode;			// quick switch mode
-};
 
-struct ak_auto_day_night_threshold {
-	int day_to_night_lum;	// day to night lum value
-	int night_to_day_lum;	// night to day lum value
-	int night_cnt[NIGHT_ARRAY_NUM];	// awb night cnt array
-	int day_cnt[DAY_ARRAY_NUM];	// awb day cnt array
-	int lock_time;					// locke night status time
-	int quick_switch_mode;			// quick switch mode
-};
-
-enum mode_state {
-	STATE_NIGHT,
-	STATE_DAY
-};
-
-struct ak_manual_blc {
-    short     bl_r_offset;			//[-2048,2047]
-    short     bl_gr_offset;			//[-2048,2047]
-    short     bl_gb_offset;			//[-2048,2047]
-    short     bl_b_offset;			//[-2048,2047]
-};
-
-struct vpss_isp_wdr {
-    unsigned short   hdr_uv_adjust_level;        //uvè°ƒæ•´ç¨‹åº¦, [0,31]
-    unsigned short   hdr_cnoise_suppress_slop;   //æŠ‘åˆ¶æ–œçŽ‡
-    unsigned short   wdr_enable;
-  
-	unsigned short	wdr_th1;	  //0-1023
-	unsigned short	wdr_th2;	  //0-1023
-	unsigned short	wdr_th3;	  //0-1023
-	unsigned short	wdr_th4;	  //0-1023
-	unsigned short	wdr_th5;	  //0-1023
-
-    //unsigned short wdr_light_weight;
-    
-	unsigned short	area_tb1[65];	  //10bit
-	unsigned short	area_tb2[65];	  //10bit
-	unsigned short	area_tb3[65];	  //10bit
-	unsigned short	area_tb4[65];	  //10bit
-	unsigned short	area_tb5[65];	  //10bit
-	unsigned short	area_tb6[65];	  //10bit
-
-	unsigned short	area1_key[16];
-	unsigned short	area2_key[16];
-	unsigned short	area3_key[16];
-	unsigned short	area4_key[16];
-	unsigned short	area5_key[16];
-	unsigned short	area6_key[16];
-
-    unsigned short   hdr_uv_adjust_enable;       //uvè°ƒæ•´ä½¿èƒ½
-    unsigned short   hdr_cnoise_suppress_yth1;   //è‰²å½©å™ªå£°äº®åº¦é˜ˆå€?
-    unsigned short   hdr_cnoise_suppress_yth2;   //è‰²å½©å™ªå£°äº®åº¦é˜ˆå€?
-    unsigned short   hdr_cnoise_suppress_gain;   //è‰²å·®æŠ‘åˆ¶
-};
-
-struct vpss_wdr_attr {
-	unsigned short      wdr_mode;              //æ¨¡å¼é€‰æ‹©ï¼Œæ‰‹åŠ¨æˆ–è€…è”åŠ?	struct vpss_isp_wdr manual_wdr;
-	struct vpss_isp_wdr linkage_wdr[9]; 
-};
-
+/* NOTE: Functions below are verified against libplat_vpss.so exports (libre_anyka_app SDK) */
 
 /********************** public *******************************/
 
@@ -394,25 +261,6 @@ struct vpss_wdr_attr {
  * return: version string
  */
 const char *ak_vpss_get_version(void);
-
-/**
- * ak_vpss_init - vpss module init
- * @vi_handle[IN]: opened vi handle
- * @dev_no[IN]: dev number
- * return: 
- * notes: 
- */
-void ak_vpss_init(void *vi_handle, int dev_no);
-
-
-/**
- * ak_vpss_destroy - vpss module destroy
- * @dev_no[IN]: dev number
- * return: 
- * notes: 
- */
-void ak_vpss_destroy(int dev_no);
-
 
 /********************** osd *******************************/
 /**  
@@ -451,36 +299,6 @@ int ak_vpss_osd_close(const void *vi_handle, struct vpss_osd_param *param);
  * notes:
  */
 int ak_vpss_md_get_stat(const void *vi_handle, struct vpss_md_info *md);
-
-/********************** af stat *******************************/
-
-/**
- * ak_vpss_af_get_stat: get af stat info
- * @vi_handle[IN]: vi module handle
- * @af_stat[OUT]: af_stat info
- * return: 0 success, -1 failed
- * notes:
- */
-int ak_vpss_af_get_stat(const void *vi_handle, struct vpss_af_stat_info *af_stat);
-
-/**
- * ak_vpss_set_af_attr: set af attr
- * @vi_handle[IN]: vi module handle
- * @af_stat[IN]: af_attr
- * return: 0 success, -1 failed
- * notes:
- */
-int ak_vpss_set_af_attr(const void *vi_handle, struct vpss_af_attr *af_attr);
-
-/**
- * ak_vpss_get_af_attr: set af attr
- * @vi_handle[IN]: vi module handle
- * @af_stat[OUT]: af_attr
- * return: 0 success, -1 failed
- * notes:
- */
-int ak_vpss_get_af_attr(const void *vi_handle, struct vpss_af_attr *af_attr);
-
 
 /********************** mask *******************************/
 /**  
@@ -587,79 +405,6 @@ int ak_vpss_isp_set_ae_attr(const void *vi_handle,
 							const struct vpss_isp_ae_attr *ae_attr);
 
 /**
- * ak_vpss_isp_check_ae_stable: check ae is stable or not
- * @vi_handle[IN]: vi module handle
- * @stable[OUT]: 1 stable, 0 not stable
- * return: 0 success, -1 failed
- */
-int ak_vpss_isp_check_ae_stable(const void *vi_handle, int *stable);
-/*
- * ak_vpss_isp_get_mae_attr: get MAE attr
- * @vi_handle[IN]: vi module handle
- * @mae_attr[OUT]: MAE attr info
- * return: 0 success, -1 failed
- */
-int ak_vpss_isp_get_mae_attr(const void *vi_handle, 
-		struct vpss_isp_mae_attr *mae_attr);
-
-/**
- * ak_vpss_isp_set_mae_attr: set MAE attr
- * @vi_handle[IN]: vi module handle
- * @mae_attr[IN]: MAE attr info
- * return: 0 success, -1 failed
- */
-int ak_vpss_isp_set_mae_attr(const void *vi_handle, 
-							const struct vpss_isp_mae_attr *mae_attr);
-/**
- * ak_vpss_isp_set_ae_convergence_rate: set AE convergence rate
- * @vi_handle[IN]: vi module handle
- * @value[IN]: param of convergence rate
- * return: 0 success, -1 failed
- */
-int ak_vpss_isp_set_ae_convergence_rate(const void *vi_handle, unsigned long value);
-
-/**
- * ak_vpss_isp_get_ae_convergence_rate: get AE convergence rate
- * @vi_handle[IN]: vi module handle
- * @value[OUT]: param of convergence rate
- * return: 0 success, -1 failed
- */
-int ak_vpss_isp_get_ae_convergence_rate(const void *vi_handle, unsigned long *value);
-
-
-
-/**
- * ak_vpss_get_weight_attr: get weight attr
- * @vi_handle[IN]: vi module handle
- * @weight_attr[OUT]: weight_attr info
- * return: 0 success, -1 failed
- */
-int ak_vpss_get_weight_attr(const void *vi_handle, 
-		struct vpss_isp_weight_attr *weight_attr);
-
-/**
- * ak_vpss_set_weight_attr: set weight attr
- * @vi_handle[IN]: vi module handle
- * @weight_attr[IN]: weight_attr info
- * return: 0 success, -1 failed
- */
-int ak_vpss_set_weight_attr(const void *vi_handle, 
-		struct vpss_isp_weight_attr *weight_attr);
-
-/**
- * ak_vpss_isp_get_rgb_average: get rgb average value
- * @vi_handle[IN]: vi module handle
- * @r_avr[OUT]: r average value
- * @g_avr[OUT]: g average value
- * @b_avr[OUT]: b average value
- * return: 0 success, -1 failed
- */
-int ak_vpss_isp_get_rgb_average(const void *vi_handle, 
-        unsigned int *r_avr, unsigned int *g_avr, unsigned int *b_avr);
-
-
-
-/**
  * ak_vpss_isp_get_wb_type: get wb type
  * @vi_handle[IN]: vi module handle
  * @wb_type[OUT]: wb type
@@ -759,16 +504,6 @@ int ak_vpss_isp_get_ae_run_info(const void *vi_handle,
 							struct vpss_isp_ae_run_info *ae_run_info);
 
 /**
- * ak_vpss_isp_get_awb_stat_info: get awb stat info
- * @vi_handle[IN]: vi module handle
- * @awb_stat_info[OUT]: awb stat info
- * return: 0 success, -1 failed
- */
-int ak_vpss_isp_get_awb_stat_info(const void *vi_handle, 
-							struct vpss_isp_awb_stat_info *awb_stat_info);
-
-
-/**
  * ak_vpss_isp_get_sensor_reg: get sensor register info
  * @vi_handle[IN]: vi module handle
  * @sensor_reg_info[IN/OUT]: sensor register info
@@ -776,100 +511,5 @@ int ak_vpss_isp_get_awb_stat_info(const void *vi_handle,
  */
 int ak_vpss_isp_get_sensor_reg(const void *vi_handle,
 							struct vpss_isp_sensor_reg_info *sensor_reg_info);
-
-/**
- * ak_vpss_get_force_anti_flicker_flag: get force anti flicker flag
- * @vi_handle[IN]: vi module handle
- * return: force anti flicker flag
- */
-int ak_vpss_get_force_anti_flicker_flag(const void *vi_handle);
-
-/**
- * ak_vpss_set_force_anti_flicker_flag: set force anti flicker flag
- * @vi_handle[IN]: vi module handle
- * @force_flag[IN]: force anti flicker flag
- * return: 0 success, -1 failed
- */
-int ak_vpss_set_force_anti_flicker_flag(const void *vi_handle, int force_flag);
-
-/**
- * ak_vpss_isp_get_input_level: get day or night mode
- * @param[IN]: input param
- * return: 0 night, 1 day, -1 failed
- * notice: not suggest to use
- */
-int ak_vpss_isp_get_input_level(struct ak_ir_auto_check *param);
-
-/**
- * brief: get current lum factor 
- * return: lum factor
- * notes:
- */
-int ak_vpss_isp_get_cur_lumi(void);
-
-/**
- * brief: get night lock 
- * return: lock status
- * notes:
- */
-int ak_vpss_isp_get_ir_lock(void);
-
-/**
- * brief: get night lock time
- * return: lock status
- * notes:
- */
-int ak_vpss_isp_get_ir_lock_time(void);
-
-/**
- * ak_vpss_isp_set_auto_day_night_param: set auto day or night switch threshold
- * @param[IN]: input param threshold
- * return: NULL
- */
-int ak_vpss_isp_set_auto_day_night_param(struct ak_auto_day_night_threshold *param);
-
-/**
- * ak_vpss_isp_get_auto_day_night_level: get day or night 
- * @pre_ir_level[IN]: pre status, 0 night, 1 day
- * return: 0 night, 1 day, -1 failed
- */
-int ak_vpss_isp_get_auto_day_night_level(int pre_ir_level);
-
-/**
- * ak_vpss_isp_clean_auto_day_night_param: clean auto day or night switch threshold
- * return: NULL
- */
-void ak_vpss_isp_clean_auto_day_night_param(void);
-
-/**
- * ak_vpss_isp_set_manual_blc: set manual blc
- * @vi_handle[IN]: vi module handle
- * @mblc[IN]: manual blc info
- * return: 0 success, -1 failed
- */
-int ak_vpss_isp_set_manual_blc(const void *vi_handle, 
-							const struct ak_manual_blc *mblc);
-
-/**
- * brief: open wdr
- * return: 0 success, -1 failed
- * notes:
- */
-int ak_vpss_open_wdr(void);
-
-/**
- * brief: close wdr
- * return: 0 success, -1 failed
- * notes:
- */
-int ak_vpss_close_wdr(void);
-
-/**
- * brief: get wdr attr
- * @p_wdr[OUT]: wdr attr
- * return: 0 success, -1 failed
- * notes:
- */
-int ak_vpss_get_wdr_attr(struct vpss_wdr_attr *p_wdr);
 
 #endif

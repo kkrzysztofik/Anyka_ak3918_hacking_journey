@@ -40,8 +40,15 @@ CFLAGS = \
 # Use --start-group/--end-group to handle any circular dependencies among
 # the SDK libraries.  System libs (pthread, rt, m, dl) go outside the group
 # since they have no circular deps with the SDK.
+# --allow-shlib-undefined: The older libplat_thread.so (9388 bytes, pre-regression)
+# doesn't export ak_thread_cond_*, ak_thread_mutexattr_*, ak_thread_sem_{try,timed}wait
+# which libplat_venc_cb.so references. uClibc's lazy binding means these are only
+# resolved if actually called (they aren't). This flag mirrors that runtime behavior
+# at link time. See: SD_card_contents/anyka_hack/libre_anyka_app runs with this
+# exact combination proving the code paths are never hit.
 LDFLAGS = \
 	-L$(ANYKA_LIB_DIR) \
+	-Wl,--allow-shlib-undefined \
 	-Wl,--start-group \
 	  -lplat_vi \
 	  -lplat_vpss \

@@ -75,103 +75,13 @@ struct venc_rate_stat {
     int gop;
 };
 
-/* 
- * smart mode config, just work on VBR mode
- */
-
-struct venc_smart_cfg {
-	int smart_mode;			//0:disable smart, 1:mode of LTR, 2:mode of changing GOP length
-	int smart_goplen;		//smart goplen
-	int smart_quality; 		//smart quality
-	int smart_static_value; //smart static value
-};
-
-
-/**
- * This Structure  Indicate an YUV Frame Data Structure. \n
- *
- * There are YUV, Y-Dem, UV-Dem, U-Dem, V-Dem to Describe All the Plane Data Memory Data in YUV Frame.\n
- * YUV, Y-Dem, UV-Dem, U-Dem, V-Dem are NOT All Valid at the Same Time.\n
- * For Example:\n
- * To Only Y Frame, Only Y-Dem is Valid, All Dem are Ignore.\n
- * To NV12, YUV, Y-Dem, UV-Dem are Valid, U-Dem, V-Dem are Ignore.\n
- *
- *
- */
-struct venc_yuv_frame {
-
-	int width;              ///< Frame Width (Unit: Bytes)
-	int height;             ///< Frame Height (Unit: Bytes)
-
-	int seqno;              ///< Frame Generation Sequence Number.
-	unsigned long long ts;  ///< YUV Timestamp (Unit: ms)
-
-	unsigned char *pixels;  ///< Raw Data Memory Address.
-	int size;               ///< Raw Data Size.
-
-	unsigned char *y;       ///< Y-D outof YUV Raw Data Offset, If Invalid It Should be NULL.
-	int yStride;            ///< Y-D Line Strdie (Uint: Bytes)
-	int ySize;              ///< Y-D Data Length
-
-	unsigned char *u;      ///< U-D outof YUV Raw Data Offset, If Invalid It Should be NULL.
-	int uStride;           ///< U-D Data Length
-	int uSize;             ///< U-D Data Length
-
-	unsigned char *v;      ///< V-D outof YUV Raw Data Offset, If Invalid It Should be NULL.
-	int vStride;           ///< V-D Data Length
-	int vSize;             ///< V-D Data Length
-
-	unsigned char *uv;      ///< UV-D outof YUV Raw Data Offset, If Invalid It Should be NULL.
-	int uvStride;           ///< UV-D Data Length
-	int uvSize;             ///< UV-D Data Length
-
-};
-
-
+/* NOTE: Functions below are verified against libmpi_venc.so exports (libre_anyka_app SDK) */
 
 /**
  * ak_venc_get_version - get venc version
  * return: version string
- */
+  */
 const char* ak_venc_get_version(void);
-
-/**
- * Get Current Video Encoder Configuration File Path.
- *
- * @author luo_zhanzhao
- *
- * @param[OUT] stack
- *  File Path String Stored When Success.
- *
- * @param[IN] stacklen
- *  The Length of Memory @ref stack Indicated.
- *
- * @return
- *  Return the Configuration File Path If Success, the Path Would be Stored on Memory @stack Also.
- *  Failed Return -1.
- *
- */
-const char *ak_venc_get_cfg_path (char *stack, int stacklen);
-
-
-/**
- * Set Video Encoder Configuration File Path.\n
- * If Ignore this Function, The Configuration File Path Default </etc/jffs2/venc.cfg>.\n
- * If User Wanna to Change the Configuration File Path.\n
- * User MUST Call this Function to Setup a New Path before @ref ak_venc_open() Called.\n
- * Otherwires, the Configuration Would be Ignored.
- *
- * @author luo_zhanzhao
- *
- * @param[IN] path
- *  New Configuration File Path.
- *
- * @return
- *  Return 0 If Success, Else Return -1.
- *
- */
-int ak_venc_set_cfg_path (const char *path);
-
 
 /**
  * ak_venc_open - open encoder and set encode param
@@ -229,15 +139,6 @@ int ak_venc_set_fps(void *enc_handle, int fps);
  */
 int ak_venc_get_kbps(void *enc_handle);
 
-/*
- * ak_venc_get_actual_kbps - get encode target bps and max bps
- * @enc_handle[IN]:  enc_handle return by 'ak_venc_open'
- * @target_bps[OUT]: store target bps
- * @max_bps[OUT]:    store max bps
- * return: >=0 kbps ;-1:failed
- */
-int ak_venc_get_actual_kbps(void *enc_handle, int *target_bps, int *max_bps);
-
 /**
  * ak_venc_set_rc - reset encode bitpersecond
  * @enc_handle[IN]: encode handle return by 'ak_venc_open'
@@ -245,16 +146,6 @@ int ak_venc_get_actual_kbps(void *enc_handle, int *target_bps, int *max_bps);
  * return: 0 on success, -1 faield
  */
 int ak_venc_set_rc(void *enc_handle, int bps);
-
-/*
- * ak_venc_set_kbps - set encode bsp 
- * @enc_handle[IN]: encode handle return by 'ak_venc_open'
- * @target_bps[IN]: target bps you want to set
- * @max_bps[IN]: max bps you want to set
- * notes: target_bps should <= max_bps
- * return: 0 on success, others faield or no effect
- */
-int ak_venc_set_kbps(void *enc_handle, int target_bps, int max_bps);
 
 /**
  * ak_venc_set_iframe - set next encode frame to I frame
@@ -340,15 +231,6 @@ int ak_venc_set_method(void *enc_handle, enum enc_method method);
  */
 int ak_venc_set_check_scene(void *enc_handle, int enable);
 
-/**
- * ak_venc_set_smart_config - enable or disable smart function
- * @enc_handle[IN]: encode handle return by ak_venc_open()
- * @cfg[IN]: pointer to venc_smart_cfg
- * return: 0 success, -1 failed
- * notes: call after open before request stream
- */
-int ak_venc_set_smart_config(void *enc_handle, struct venc_smart_cfg *cfg);
-
 
 /**
  * ak_venc_close - close video encode
@@ -405,41 +287,6 @@ int ak_venc_get_rate_stat(void *stream_handle, struct venc_rate_stat *stat);
  *       'ak_get_error_str()' to get more detail.
  */
 int ak_venc_cancel_stream(void *stream_handle);
-
-/**
- * Fetch Video Pre-Process YUV Raw Data, Which would Store on P-Memeory User Indicated.\n
- * User MUST Release this Frame with @ref ak_venc_release_yuv().
- *
- * Caution:\n
- *  The Interface Would Block till One Encode PreProcess Frame Captured.\n
- *  User Should Confirm this Interface Woud not be Called After the Video Encode Application Exit.
- *
- * @author luo_zhanzhao
- *
- * @param[IN] width
- *  The YUV Width User Indicated.
- *  If Pass -1, Sytem Would Use Default Image Width.
- *
- * @param[IN] height
- *  The YUV Height User Indicated.
- *  If Pass -1, Sytem Would Use Default Image Height.
- *
- *
- * @param[OUT] yuv_frame
- *  Return the Frame Structure Data Field When Fetch Success, See also @ref venc_yuv_frame.
- *
- * @return
- *  If Success Return 0, Failed Return -1.
- */
-int ak_venc_get_yuv (int width, int height, struct venc_yuv_frame *yuv_frame);
-
-/**
- * Release the YUV Frame Allocated by @ref ak_venc_get_yuv().
- *
- * @author luo_zhanzhao
- *
- */
-int ak_venc_release_yuv (struct venc_yuv_frame *yuv_frame);
 
 
 #endif
