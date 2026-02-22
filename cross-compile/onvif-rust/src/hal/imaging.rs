@@ -18,7 +18,7 @@
 use crate::platform::PlatformError;
 use crate::platform::PlatformResult;
 
-use crate::ffi::{AK_FAILED_I32, AK_SUCCESS_I32};
+use crate::hal::{AK_FAILED_I32, AK_SUCCESS_I32};
 
 /// Default maximum value for SDK imaging parameters (typically 255 for 8-bit registers).
 const SDK_MAX_VALUE: i32 = 255;
@@ -31,7 +31,7 @@ const ONVIF_MAX: f32 = 100.0;
 
 /// Internal trait for abstracting imaging FFI calls to enable mocking in tests.
 #[cfg_attr(test, mockall::automock)]
-pub(crate) trait ImagingFfiTrait: Send + Sync {
+pub(crate) trait ImagingHalTrait: Send + Sync {
     fn set_brightness(&self, value: i32) -> i32;
     fn set_contrast(&self, value: i32) -> i32;
     fn set_saturation(&self, value: i32) -> i32;
@@ -41,90 +41,36 @@ pub(crate) trait ImagingFfiTrait: Send + Sync {
 }
 
 /// Default implementation that calls the real FFI functions.
-pub(crate) struct RealImagingFfi;
+pub(crate) struct StubImagingHal;
 
-impl ImagingFfiTrait for RealImagingFfi {
-    #[cfg(not(use_stubs))]
-    fn set_brightness(&self, value: i32) -> i32 {
-        unsafe extern "C" {
-            fn ak_isp_set_brightness(value: i32) -> i32;
-        }
-        unsafe { ak_isp_set_brightness(value) }
-    }
-
-    #[cfg(use_stubs)]
+impl ImagingHalTrait for StubImagingHal {
     fn set_brightness(&self, _value: i32) -> i32 {
         AK_SUCCESS_I32
     }
 
-    #[cfg(not(use_stubs))]
-    fn set_contrast(&self, value: i32) -> i32 {
-        unsafe extern "C" {
-            fn ak_isp_set_contrast(value: i32) -> i32;
-        }
-        unsafe { ak_isp_set_contrast(value) }
-    }
-
-    #[cfg(use_stubs)]
     fn set_contrast(&self, _value: i32) -> i32 {
         AK_SUCCESS_I32
     }
 
-    #[cfg(not(use_stubs))]
-    fn set_saturation(&self, value: i32) -> i32 {
-        unsafe extern "C" {
-            fn ak_isp_set_saturation(value: i32) -> i32;
-        }
-        unsafe { ak_isp_set_saturation(value) }
-    }
-
-    #[cfg(use_stubs)]
     fn set_saturation(&self, _value: i32) -> i32 {
         AK_SUCCESS_I32
     }
 
-    #[cfg(not(use_stubs))]
-    fn set_sharpness(&self, value: i32) -> i32 {
-        unsafe extern "C" {
-            fn ak_isp_set_sharpness(value: i32) -> i32;
-        }
-        unsafe { ak_isp_set_sharpness(value) }
-    }
-
-    #[cfg(use_stubs)]
     fn set_sharpness(&self, _value: i32) -> i32 {
         AK_SUCCESS_I32
     }
 
-    #[cfg(not(use_stubs))]
-    fn set_ir_filter(&self, enabled: bool) -> i32 {
-        unsafe extern "C" {
-            fn ak_isp_set_ir_filter(enabled: i32) -> i32;
-        }
-        unsafe { ak_isp_set_ir_filter(if enabled { 1 } else { 0 }) }
-    }
-
-    #[cfg(use_stubs)]
     fn set_ir_filter(&self, _enabled: bool) -> i32 {
         AK_SUCCESS_I32
     }
 
-    #[cfg(not(use_stubs))]
-    fn set_wdr(&self, enabled: bool) -> i32 {
-        unsafe extern "C" {
-            fn ak_isp_set_wdr(enabled: i32) -> i32;
-        }
-        unsafe { ak_isp_set_wdr(if enabled { 1 } else { 0 }) }
-    }
-
-    #[cfg(use_stubs)]
     fn set_wdr(&self, _enabled: bool) -> i32 {
         AK_SUCCESS_I32
     }
 }
 
 // Global instance for default FFI implementation
-static REAL_IMAGING_FFI: RealImagingFfi = RealImagingFfi;
+static DEFAULT_IMAGING_HAL: StubImagingHal = StubImagingHal;
 
 /// Helper function to convert SDK return codes to PlatformResult.
 ///
@@ -246,7 +192,7 @@ fn onvif_to_sdk_value(onvif_value: f32, sdk_max: i32) -> i32 {
 /// Internal helper that takes FFI trait for testability.
 pub(crate) fn imaging_set_brightness_internal(
     value: f32,
-    ffi: &dyn ImagingFfiTrait,
+    ffi: &dyn ImagingHalTrait,
 ) -> PlatformResult<()> {
     validate_onvif_range(value, "brightness")?;
     let sdk_value = onvif_to_sdk_brightness(value);
@@ -266,13 +212,13 @@ pub(crate) fn imaging_set_brightness_internal(
 /// * `Err(PlatformError::InvalidParameter)` if value is out of range
 /// * `Err(PlatformError::HardwareFailure)` on SDK error
 pub fn imaging_set_brightness(value: f32) -> PlatformResult<()> {
-    imaging_set_brightness_internal(value, &REAL_IMAGING_FFI)
+    imaging_set_brightness_internal(value, &DEFAULT_IMAGING_HAL)
 }
 
 /// Internal helper that takes FFI trait for testability.
 pub(crate) fn imaging_set_contrast_internal(
     value: f32,
-    ffi: &dyn ImagingFfiTrait,
+    ffi: &dyn ImagingHalTrait,
 ) -> PlatformResult<()> {
     validate_onvif_range(value, "contrast")?;
     let sdk_value = onvif_to_sdk_contrast(value);
@@ -292,13 +238,13 @@ pub(crate) fn imaging_set_contrast_internal(
 /// * `Err(PlatformError::InvalidParameter)` if value is out of range
 /// * `Err(PlatformError::HardwareFailure)` on SDK error
 pub fn imaging_set_contrast(value: f32) -> PlatformResult<()> {
-    imaging_set_contrast_internal(value, &REAL_IMAGING_FFI)
+    imaging_set_contrast_internal(value, &DEFAULT_IMAGING_HAL)
 }
 
 /// Internal helper that takes FFI trait for testability.
 pub(crate) fn imaging_set_saturation_internal(
     value: f32,
-    ffi: &dyn ImagingFfiTrait,
+    ffi: &dyn ImagingHalTrait,
 ) -> PlatformResult<()> {
     validate_onvif_range(value, "saturation")?;
     let sdk_value = onvif_to_sdk_saturation(value);
@@ -318,13 +264,13 @@ pub(crate) fn imaging_set_saturation_internal(
 /// * `Err(PlatformError::InvalidParameter)` if value is out of range
 /// * `Err(PlatformError::HardwareFailure)` on SDK error
 pub fn imaging_set_saturation(value: f32) -> PlatformResult<()> {
-    imaging_set_saturation_internal(value, &REAL_IMAGING_FFI)
+    imaging_set_saturation_internal(value, &DEFAULT_IMAGING_HAL)
 }
 
 /// Internal helper that takes FFI trait for testability.
 pub(crate) fn imaging_set_sharpness_internal(
     value: f32,
-    ffi: &dyn ImagingFfiTrait,
+    ffi: &dyn ImagingHalTrait,
 ) -> PlatformResult<()> {
     validate_onvif_range(value, "sharpness")?;
     let sdk_value = onvif_to_sdk_sharpness(value);
@@ -344,13 +290,13 @@ pub(crate) fn imaging_set_sharpness_internal(
 /// * `Err(PlatformError::InvalidParameter)` if value is out of range
 /// * `Err(PlatformError::HardwareFailure)` on SDK error
 pub fn imaging_set_sharpness(value: f32) -> PlatformResult<()> {
-    imaging_set_sharpness_internal(value, &REAL_IMAGING_FFI)
+    imaging_set_sharpness_internal(value, &DEFAULT_IMAGING_HAL)
 }
 
 /// Internal helper that takes FFI trait for testability.
 pub(crate) fn imaging_set_ir_filter_internal(
     enabled: bool,
-    ffi: &dyn ImagingFfiTrait,
+    ffi: &dyn ImagingHalTrait,
 ) -> PlatformResult<()> {
     let ret = ffi.set_ir_filter(enabled);
     check_result(ret, "imaging_set_ir_filter")
@@ -367,13 +313,13 @@ pub(crate) fn imaging_set_ir_filter_internal(
 /// * `Ok(())` on success
 /// * `Err(PlatformError::HardwareFailure)` on SDK error
 pub fn imaging_set_ir_filter(enabled: bool) -> PlatformResult<()> {
-    imaging_set_ir_filter_internal(enabled, &REAL_IMAGING_FFI)
+    imaging_set_ir_filter_internal(enabled, &DEFAULT_IMAGING_HAL)
 }
 
 /// Internal helper that takes FFI trait for testability.
 pub(crate) fn imaging_set_wdr_internal(
     enabled: bool,
-    ffi: &dyn ImagingFfiTrait,
+    ffi: &dyn ImagingHalTrait,
 ) -> PlatformResult<()> {
     let ret = ffi.set_wdr(enabled);
     check_result(ret, "imaging_set_wdr")
@@ -390,7 +336,7 @@ pub(crate) fn imaging_set_wdr_internal(
 /// * `Ok(())` on success
 /// * `Err(PlatformError::HardwareFailure)` on SDK error
 pub fn imaging_set_wdr(enabled: bool) -> PlatformResult<()> {
-    imaging_set_wdr_internal(enabled, &REAL_IMAGING_FFI)
+    imaging_set_wdr_internal(enabled, &DEFAULT_IMAGING_HAL)
 }
 
 #[cfg(test)]
@@ -470,7 +416,7 @@ mod tests {
 
     #[test]
     fn test_imaging_set_brightness_internal_calls_ffi() {
-        let mut mock_ffi = MockImagingFfiTrait::new();
+        let mut mock_ffi = MockImagingHalTrait::new();
 
         mock_ffi
             .expect_set_brightness()
@@ -484,7 +430,7 @@ mod tests {
 
     #[test]
     fn test_imaging_set_brightness_internal_validates_range() {
-        let mock_ffi = MockImagingFfiTrait::new();
+        let mock_ffi = MockImagingHalTrait::new();
 
         // Should fail validation before calling FFI
         let result = imaging_set_brightness_internal(150.0, &mock_ffi);
@@ -499,7 +445,7 @@ mod tests {
 
     #[test]
     fn test_imaging_set_brightness_internal_propagates_error() {
-        let mut mock_ffi = MockImagingFfiTrait::new();
+        let mut mock_ffi = MockImagingHalTrait::new();
 
         mock_ffi
             .expect_set_brightness()
@@ -518,7 +464,7 @@ mod tests {
 
     #[test]
     fn test_imaging_set_contrast_internal_calls_ffi() {
-        let mut mock_ffi = MockImagingFfiTrait::new();
+        let mut mock_ffi = MockImagingHalTrait::new();
 
         mock_ffi
             .expect_set_contrast()
@@ -532,7 +478,7 @@ mod tests {
 
     #[test]
     fn test_imaging_set_saturation_internal_calls_ffi() {
-        let mut mock_ffi = MockImagingFfiTrait::new();
+        let mut mock_ffi = MockImagingHalTrait::new();
 
         mock_ffi
             .expect_set_saturation()
@@ -546,7 +492,7 @@ mod tests {
 
     #[test]
     fn test_imaging_set_sharpness_internal_calls_ffi() {
-        let mut mock_ffi = MockImagingFfiTrait::new();
+        let mut mock_ffi = MockImagingHalTrait::new();
 
         mock_ffi
             .expect_set_sharpness()
@@ -560,7 +506,7 @@ mod tests {
 
     #[test]
     fn test_imaging_set_ir_filter_internal_calls_ffi_enabled() {
-        let mut mock_ffi = MockImagingFfiTrait::new();
+        let mut mock_ffi = MockImagingHalTrait::new();
 
         mock_ffi
             .expect_set_ir_filter()
@@ -574,7 +520,7 @@ mod tests {
 
     #[test]
     fn test_imaging_set_ir_filter_internal_calls_ffi_disabled() {
-        let mut mock_ffi = MockImagingFfiTrait::new();
+        let mut mock_ffi = MockImagingHalTrait::new();
 
         mock_ffi
             .expect_set_ir_filter()
@@ -588,7 +534,7 @@ mod tests {
 
     #[test]
     fn test_imaging_set_ir_filter_internal_propagates_error() {
-        let mut mock_ffi = MockImagingFfiTrait::new();
+        let mut mock_ffi = MockImagingHalTrait::new();
 
         mock_ffi
             .expect_set_ir_filter()
@@ -607,7 +553,7 @@ mod tests {
 
     #[test]
     fn test_imaging_set_wdr_internal_calls_ffi_enabled() {
-        let mut mock_ffi = MockImagingFfiTrait::new();
+        let mut mock_ffi = MockImagingHalTrait::new();
 
         mock_ffi
             .expect_set_wdr()
@@ -621,7 +567,7 @@ mod tests {
 
     #[test]
     fn test_imaging_set_wdr_internal_calls_ffi_disabled() {
-        let mut mock_ffi = MockImagingFfiTrait::new();
+        let mut mock_ffi = MockImagingHalTrait::new();
 
         mock_ffi
             .expect_set_wdr()
@@ -635,7 +581,7 @@ mod tests {
 
     #[test]
     fn test_imaging_set_wdr_internal_propagates_error() {
-        let mut mock_ffi = MockImagingFfiTrait::new();
+        let mut mock_ffi = MockImagingHalTrait::new();
 
         mock_ffi
             .expect_set_wdr()

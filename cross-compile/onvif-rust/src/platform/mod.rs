@@ -36,7 +36,7 @@ mod traits;
 pub mod validation;
 
 // Anyka implementation is always compiled so unit tests can exercise it
-// with MockVideoFfiTrait, similar to hw_ptz.rs. Only the public re-export
+// with MockVideoHalTrait, similar to hw_ptz.rs. Only the public re-export
 // is gated to avoid name conflicts with stubs in native builds.
 #[allow(dead_code)]
 mod anyka;
@@ -45,5 +45,5 @@ pub use stubs::*;
 pub use traits::*;
 pub use validation::ValidationPlatform;
 
-#[cfg(any(not(use_stubs), feature = "use_vendor_ipc"))]
+#[cfg(not(use_stubs))]
 pub use anyka::*;

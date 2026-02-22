@@ -12,7 +12,7 @@
 //!
 //! ```text
 //! AnykaVideoInput
-//!   ├── ffi: Arc<dyn VideoFfiTrait>   (injected, mockable)
+//!   ├── ffi: Arc<dyn VideoHalTrait>   (injected, mockable)
 //!   ├── handle: RwLock<Option<Arc<VideoInputHandle>>>  (RAII, calls vi_close on Drop)
 //!   └── opened: AtomicBool            (fast-path state check)
 //! ```
@@ -29,24 +29,17 @@ use std::time::Duration;
 use async_trait::async_trait;
 use parking_lot::RwLock;
 
-use crate::ffi::VideoDevice;
-use crate::ffi::ipc::{
-    DEFAULT_CMD_SERVER_PORT, command_send_with_timeout, command_server_register,
-    command_server_unregister,
-};
-#[cfg(not(feature = "use_vendor_ipc"))]
-use crate::ffi::video::RealVideoFfi;
-use crate::ffi::video::{
-    VideoFfiTrait, VideoInputHandle, video_input_capture_off_internal,
+use crate::hal::VideoDevice;
+use crate::hal::video::{
+    VideoHalTrait, VideoInputHandle, video_input_capture_off_internal,
     video_input_capture_on_internal, video_input_get_sensor_resolution_internal,
     video_input_match_sensor_internal, video_input_open_internal,
     video_input_set_channel_attr_internal,
 };
 
-#[cfg(feature = "use_vendor_ipc")]
-use crate::ffi::vendor_ipc::VendorIpc;
+use crate::hal::vendor_ipc::VendorIpc;
 
-use crate::ffi::{video_channel_attr, video_resolution};
+use crate::hal::{video_channel_attr, video_resolution};
 
 use super::traits::{
     AudioEncoder, AudioEncoderConfig, AudioInput, AudioSourceConfig, DeviceInfo, DnsInfo,
@@ -62,7 +55,6 @@ use super::traits::{
 /// a safe Rust interface to the hardware.
 pub struct AnykaPlatform {
     initialized: AtomicBool,
-    cmd_server_registered: AtomicBool,
     device_info: DeviceInfo,
     sensor_resolution: RwLock<Option<Resolution>>,
     video_input: Arc<AnykaVideoInput>,
@@ -75,10 +67,6 @@ pub struct AnykaPlatform {
 }
 
 impl AnykaPlatform {
-    const CMD_SERVER_NAME: &'static str = "onvif-rust";
-    const IPC_DIAG_TIMEOUT_MS: u64 = 350;
-    const IPC_DIAG_MAX_CHARS: usize = 1200;
-
     /// Create a new Anyka platform instance.
     ///
     /// Uses auto-detection for the ISP config path. See [`with_isp_config`](Self::with_isp_config)
@@ -100,7 +88,6 @@ impl AnykaPlatform {
             hardware_id: "ak3918-hw".to_string(),
         };
 
-        #[cfg(feature = "use_vendor_ipc")]
         let (video_input, video_encoder, audio_input, audio_encoder, imaging_control) = {
             let shared_ipc = Arc::new(VendorIpc::new().map_err(|e| {
                 PlatformError::InitializationFailed(format!(
@@ -111,9 +98,9 @@ impl AnykaPlatform {
 
             tracing::info!("AnykaPlatform: using shared VendorIpc client for video/audio/imaging");
 
-            let video_ffi: Arc<dyn VideoFfiTrait> = shared_ipc.clone();
-            let audio_ffi: Arc<dyn crate::ffi::audio::AudioFfiTrait> = shared_ipc.clone();
-            let imaging_ffi: Arc<dyn crate::ffi::imaging::ImagingFfiTrait> = shared_ipc.clone();
+            let video_ffi: Arc<dyn VideoHalTrait> = shared_ipc.clone();
+            let audio_ffi: Arc<dyn crate::hal::audio::AudioHalTrait> = shared_ipc.clone();
+            let imaging_ffi: Arc<dyn crate::hal::imaging::ImagingHalTrait> = shared_ipc.clone();
 
             (
                 Arc::new(AnykaVideoInput::with_ffi(
@@ -128,15 +115,6 @@ impl AnykaPlatform {
                 ),
             )
         };
-
-        #[cfg(not(feature = "use_vendor_ipc"))]
-        let (video_input, video_encoder, audio_input, audio_encoder, imaging_control) = (
-            Arc::new(AnykaVideoInput::new(isp_config_path)?),
-            Arc::new(AnykaVideoEncoder::new()?),
-            Arc::new(AnykaAudioInput::new()?),
-            Arc::new(AnykaAudioEncoder::new()?),
-            Some(Arc::new(AnykaImagingControl::new()?) as Arc<dyn ImagingControl>),
-        );
 
         let ptz_control: Option<Arc<dyn PTZControl>> = {
             tracing::info!("Initializing PTZ (native Rust driver, /dev/ak-motor0, /dev/ak-motor1)");
@@ -159,7 +137,6 @@ impl AnykaPlatform {
 
         Ok(Self {
             initialized: AtomicBool::new(false),
-            cmd_server_registered: AtomicBool::new(false),
             device_info,
             sensor_resolution: RwLock::new(None),
             video_input,
@@ -172,148 +149,7 @@ impl AnykaPlatform {
         })
     }
 
-    fn register_cmd_server(&self) -> PlatformResult<()> {
-        if self.cmd_server_registered.load(Ordering::SeqCst) {
-            return Ok(());
-        }
-        command_server_register(Self::CMD_SERVER_NAME)?;
-        self.cmd_server_registered.store(true, Ordering::SeqCst);
-        tracing::info!(
-            port = DEFAULT_CMD_SERVER_PORT,
-            name = Self::CMD_SERVER_NAME,
-            "Anyka command server registered"
-        );
-        Ok(())
-    }
-
-    fn unregister_cmd_server_best_effort(&self) {
-        if !self.cmd_server_registered.swap(false, Ordering::SeqCst) {
-            return;
-        }
-        if let Err(e) = command_server_unregister() {
-            tracing::warn!(
-                port = DEFAULT_CMD_SERVER_PORT,
-                "Anyka command server unregister failed: {}",
-                e
-            );
-        } else {
-            tracing::info!(
-                port = DEFAULT_CMD_SERVER_PORT,
-                "Anyka command server unregistered"
-            );
-        }
-    }
-
-    fn parse_module_listing(listing: &str) -> Vec<String> {
-        let mut modules = Vec::new();
-        for token in listing.split('[').skip(1) {
-            if let Some(end) = token.find(']') {
-                let module = token[..end].trim();
-                if !module.is_empty() {
-                    modules.push(module.to_string());
-                }
-            }
-        }
-        modules
-    }
-
-    fn normalize_diag_output(output: &str, max_chars: usize) -> String {
-        let compact = output
-            .lines()
-            .map(str::trim)
-            .filter(|line| !line.is_empty())
-            .collect::<Vec<_>>()
-            .join(" | ");
-        let text = if compact.is_empty() {
-            "<empty>".to_string()
-        } else {
-            compact
-        };
-        let char_count = text.chars().count();
-        if char_count <= max_chars {
-            return text;
-        }
-        let mut truncated = text.chars().take(max_chars).collect::<String>();
-        truncated.push_str(" ...[truncated]");
-        truncated
-    }
-
-    fn log_sdk_ipc_diagnostics_best_effort(&self, context: &str) {
-        if !self.cmd_server_registered.load(Ordering::SeqCst) {
-            tracing::warn!(
-                context = context,
-                "Skipping Anyka IPC diagnostics: command server is not registered"
-            );
-            return;
-        }
-
-        let timeout_ms =
-            env_var_u64("ANYKA_IPC_DIAG_TIMEOUT_MS").unwrap_or(Self::IPC_DIAG_TIMEOUT_MS);
-        let max_chars = env_var_u64("ANYKA_IPC_DIAG_MAX_CHARS")
-            .and_then(|v| usize::try_from(v).ok())
-            .unwrap_or(Self::IPC_DIAG_MAX_CHARS);
-
-        let modules_raw = match command_send_with_timeout("get all support modules", timeout_ms) {
-            Ok(raw) => raw,
-            Err(e) => {
-                tracing::warn!(
-                    context = context,
-                    timeout_ms = timeout_ms,
-                    "Anyka IPC diagnostics failed to fetch module listing: {}",
-                    e
-                );
-                return;
-            }
-        };
-        let modules = Self::parse_module_listing(&modules_raw);
-        tracing::error!(
-            context = context,
-            timeout_ms = timeout_ms,
-            modules = %Self::normalize_diag_output(&modules_raw, max_chars),
-            "Anyka IPC diagnostics: module snapshot"
-        );
-
-        if modules.is_empty() {
-            tracing::warn!(
-                context = context,
-                "Anyka IPC diagnostics: no modules parsed from IPC module listing"
-            );
-            return;
-        }
-
-        for module in modules {
-            for suffix in ["get_status", "version"] {
-                let command = format!("{module}_{suffix}");
-                match command_send_with_timeout(&command, timeout_ms) {
-                    Ok(output) => {
-                        tracing::error!(
-                            context = context,
-                            command = command.as_str(),
-                            output = %Self::normalize_diag_output(&output, max_chars),
-                            "Anyka IPC diagnostics response"
-                        );
-                    }
-                    Err(PlatformError::Timeout) => {
-                        tracing::warn!(
-                            context = context,
-                            command = command.as_str(),
-                            timeout_ms = timeout_ms,
-                            "Anyka IPC diagnostics command timed out"
-                        );
-                    }
-                    Err(e) => {
-                        tracing::warn!(
-                            context = context,
-                            command = command.as_str(),
-                            "Anyka IPC diagnostics command failed: {}",
-                            e
-                        );
-                    }
-                }
-            }
-        }
-    }
-
+    // Command server functions removed - vendor-daemon IPC handles all SDK access
     fn shutdown_video_pipeline(
         video_encoder: &AnykaVideoEncoder,
         video_input: &AnykaVideoInput,
@@ -399,30 +235,12 @@ impl Platform for AnykaPlatform {
     }
 
     async fn initialize(&self) -> PlatformResult<()> {
-        // Step 0: Start Anyka command server before VPSS/video init.
-        // The Anyka reference service registers this first so VPSS IPC hooks
-        // can bind cleanly.
-        if let Err(e) = self.register_cmd_server() {
-            return Err(PlatformError::InitializationFailed(format!(
-                "Failed to register Anyka command server: {}",
-                e
-            )));
-        }
-
         // Step 1: Load ISP sensor configuration (must precede vi_open)
-        if let Err(e) = self.video_input.match_sensor() {
-            self.log_sdk_ipc_diagnostics_best_effort("initialize:match_sensor_failed");
-            self.unregister_cmd_server_best_effort();
-            return Err(e);
-        }
+        self.video_input.match_sensor()?;
         tracing::info!("ISP sensor matched successfully");
 
         // Step 2: Open video input device
-        if let Err(e) = self.video_input.open().await {
-            self.log_sdk_ipc_diagnostics_best_effort("initialize:vi_open_failed");
-            self.unregister_cmd_server_best_effort();
-            return Err(e);
-        }
+        self.video_input.open().await?;
 
         // Step 2.5: Initialize VPSS. The Anyka ONVIF reference path performs
         // ak_vpss_init() early in VI bring-up.
@@ -447,8 +265,6 @@ impl Platform for AnykaPlatform {
             tracing::error!("Failed to set channel attributes, rolling back: {}", e);
             let _ = self.video_input.destroy_vpss();
             let _ = self.video_input.close().await;
-            self.log_sdk_ipc_diagnostics_best_effort("initialize:set_channel_attr_failed");
-            self.unregister_cmd_server_best_effort();
             return Err(e);
         }
         let (main_layout, sub_layout) = self.video_input.channel_layout();
@@ -461,8 +277,6 @@ impl Platform for AnykaPlatform {
             let _ = self.video_input.capture_off();
             let _ = self.video_input.destroy_vpss();
             let _ = self.video_input.close().await;
-            self.log_sdk_ipc_diagnostics_best_effort("initialize:capture_on_failed");
-            self.unregister_cmd_server_best_effort();
             return Err(e);
         }
         // Allow the capture pipeline to stabilize before opening encoders.
@@ -491,8 +305,6 @@ impl Platform for AnykaPlatform {
                 let _ = self.video_input.capture_off();
                 let _ = self.video_input.destroy_vpss();
                 let _ = self.video_input.close().await;
-                self.log_sdk_ipc_diagnostics_best_effort("initialize:encoder_init_failed");
-                self.unregister_cmd_server_best_effort();
                 return Err(PlatformError::InitializationFailed(format!(
                     "Video encoder {} initialization failed: {}",
                     config.token, e
@@ -513,8 +325,6 @@ impl Platform for AnykaPlatform {
                 let _ = self.video_input.capture_off();
                 let _ = self.video_input.destroy_vpss();
                 let _ = self.video_input.close().await;
-                self.log_sdk_ipc_diagnostics_best_effort("initialize:missing_vi_handle");
-                self.unregister_cmd_server_best_effort();
                 return Err(PlatformError::InitializationFailed(
                     "Video input handle missing after successful open".to_string(),
                 ));
@@ -531,8 +341,6 @@ impl Platform for AnykaPlatform {
                 let _ = self.video_input.capture_off();
                 let _ = self.video_input.destroy_vpss();
                 let _ = self.video_input.close().await;
-                self.log_sdk_ipc_diagnostics_best_effort("initialize:missing_main_encoder_handle");
-                self.unregister_cmd_server_best_effort();
                 return Err(PlatformError::InitializationFailed(
                     "Main encoder handle missing after successful init".to_string(),
                 ));
@@ -548,8 +356,6 @@ impl Platform for AnykaPlatform {
             let _ = self.video_input.capture_off();
             let _ = self.video_input.destroy_vpss();
             let _ = self.video_input.close().await;
-            self.log_sdk_ipc_diagnostics_best_effort("initialize:start_streaming_failed");
-            self.unregister_cmd_server_best_effort();
             return Err(PlatformError::InitializationFailed(format!(
                 "Video streaming startup failed: {}",
                 e
@@ -568,19 +374,15 @@ impl Platform for AnykaPlatform {
                 e
             );
             if let Err(rollback_error) =
-                AnykaPlatform::shutdown_video_pipeline(&self.video_encoder, &self.video_input)
+                Self::shutdown_video_pipeline(&self.video_encoder, &self.video_input)
             {
                 tracing::error!(
                     "VI/VENC readiness rollback failed (unsafe): readiness_error='{}', rollback_error='{}'",
                     e,
                     rollback_error
                 );
-                self.log_sdk_ipc_diagnostics_best_effort("initialize:readiness_failed");
-                self.unregister_cmd_server_best_effort();
                 return Err(rollback_error);
             }
-            self.log_sdk_ipc_diagnostics_best_effort("initialize:readiness_failed");
-            self.unregister_cmd_server_best_effort();
             return Err(e);
         }
 
@@ -645,9 +447,7 @@ impl Platform for AnykaPlatform {
             tracing::info!("Platform shutdown: complete");
         } else {
             tracing::error!("Platform shutdown ended with error: {:?}", result);
-            self.log_sdk_ipc_diagnostics_best_effort("shutdown:failed");
         }
-        self.unregister_cmd_server_best_effort();
         result
     }
 
@@ -675,7 +475,7 @@ impl Platform for AnykaPlatform {
 
 /// Anyka video input implementation backed by the Anyka SDK FFI layer.
 ///
-/// Uses dependency injection via `Arc<dyn VideoFfiTrait>` to enable mock-based
+/// Uses dependency injection via `Arc<dyn VideoHalTrait>` to enable mock-based
 /// testing without hardware. The `VideoInputHandle` provides RAII cleanup —
 /// dropping the handle automatically calls `ak_vi_close()`.
 ///
@@ -733,7 +533,7 @@ const ISP_CONFIG_SEARCH_PATHS: &[&str] = &[
 ];
 
 struct AnykaVideoInput {
-    ffi: Arc<dyn VideoFfiTrait>,
+    ffi: Arc<dyn VideoHalTrait>,
     handle: RwLock<Option<Arc<VideoInputHandle>>>,
     opened: AtomicBool,
     capture_started: AtomicBool,
@@ -745,25 +545,20 @@ struct AnykaVideoInput {
 impl AnykaVideoInput {
     /// Create a new `AnykaVideoInput` with the default (real) FFI backend.
     fn new(isp_config_path: Option<PathBuf>) -> PlatformResult<Self> {
-        #[cfg(feature = "use_vendor_ipc")]
-        {
-            let ipc = VendorIpc::new().map_err(|e| {
-                PlatformError::InitializationFailed(format!(
-                    "VendorIpc connection failed (is vendor-daemon running?): {}",
-                    e
-                ))
-            })?;
-            tracing::info!("AnykaVideoInput: using VendorIpc for vendor library access");
-            Ok(Self::with_ffi(Arc::new(ipc), isp_config_path))
-        }
-        #[cfg(not(feature = "use_vendor_ipc"))]
-        Ok(Self::with_ffi(Arc::new(RealVideoFfi), isp_config_path))
+        let ipc = VendorIpc::new().map_err(|e| {
+            PlatformError::InitializationFailed(format!(
+                "VendorIpc connection failed (is vendor-daemon running?): {}",
+                e
+            ))
+        })?;
+        tracing::info!("AnykaVideoInput: using VendorIpc for vendor library access");
+        Ok(Self::with_ffi(Arc::new(ipc), isp_config_path))
     }
 
     /// Create a new `AnykaVideoInput` with a custom FFI backend.
     ///
-    /// Used by tests with `MockVideoFfiTrait` for hardware-free testing.
-    fn with_ffi(ffi: Arc<dyn VideoFfiTrait>, isp_config_path: Option<PathBuf>) -> Self {
+    /// Used by tests with `MockVideoHalTrait` for hardware-free testing.
+    fn with_ffi(ffi: Arc<dyn VideoHalTrait>, isp_config_path: Option<PathBuf>) -> Self {
         Self {
             ffi,
             handle: RwLock::new(None),
@@ -776,7 +571,7 @@ impl AnykaVideoInput {
     }
 
     /// Get a clone of the video input handle (if opened).
-    pub fn get_handle(&self) -> Option<Arc<crate::ffi::VideoInputHandle>> {
+    pub fn get_handle(&self) -> Option<Arc<crate::hal::VideoInputHandle>> {
         self.handle.read().clone()
     }
 
@@ -830,24 +625,13 @@ impl AnykaVideoInput {
 
         // libre_anyka_app quirk: in vendor IPC mode, main.max_* drives sub-channel
         // validation/limits. Mirror the proven C workaround (invert max mapping).
-        let (main_max_width, main_max_height, sub_max_width, sub_max_height, max_mode) =
-            if cfg!(feature = "use_vendor_ipc") {
-                (
-                    sub_width,
-                    sub_height,
-                    sensor_width,
-                    sensor_height,
-                    "vendor-ipc-legacy-mapping",
-                )
-            } else {
-                (
-                    sensor_width,
-                    sensor_height,
-                    sub_width,
-                    sub_height,
-                    "native-mapping",
-                )
-            };
+        let (main_max_width, main_max_height, sub_max_width, sub_max_height, max_mode) = (
+            sub_width,
+            sub_height,
+            sensor_width,
+            sensor_height,
+            "vendor-ipc-legacy-mapping",
+        );
 
         attr.res = [
             // Main channel: sensor-native resolution.
@@ -950,7 +734,7 @@ impl AnykaVideoInput {
             PlatformError::HardwareUnavailable("Video input not opened".to_string())
         })?;
 
-        crate::ffi::video::vpss_init_internal(handle, VideoDevice::DEV0, self.ffi.as_ref())?;
+        crate::hal::video::vpss_init_internal(handle, VideoDevice::DEV0, self.ffi.as_ref())?;
         self.vpss_initialized.store(true, Ordering::SeqCst);
         tracing::info!("VPSS initialized successfully");
         Ok(())
@@ -967,7 +751,7 @@ impl AnykaVideoInput {
             .compare_exchange(true, false, Ordering::SeqCst, Ordering::SeqCst)
             .is_ok()
         {
-            crate::ffi::video::vpss_destroy_internal(VideoDevice::DEV0, self.ffi.as_ref())?;
+            crate::hal::video::vpss_destroy_internal(VideoDevice::DEV0, self.ffi.as_ref())?;
             tracing::info!("VPSS destroyed successfully");
         }
         Ok(())
@@ -1191,7 +975,7 @@ impl VideoInput for AnykaVideoInput {
 
         let ffi_res = video_input_get_sensor_resolution_internal(handle, self.ffi.as_ref())?;
 
-        // Convert FFI Resolution (crate::ffi::Resolution) to platform Resolution
+        // Convert FFI Resolution (crate::hal::Resolution) to platform Resolution
         Ok(Resolution::new(ffi_res.width, ffi_res.height))
     }
 
@@ -1229,12 +1013,12 @@ use std::time::Instant;
 use portable_atomic::AtomicU64;
 
 #[cfg(use_stubs)]
-use crate::ffi::VideoFrameType;
-use crate::ffi::video::{
+use crate::hal::VideoFrameType;
+use crate::hal::video::{
     VideoEncoderHandle, VideoStreamHandle, video_encoder_open_internal,
     video_encoder_request_idr_internal, video_encoder_set_rc_internal,
 };
-use crate::ffi::{
+use crate::hal::{
     bitrate_ctrl_mode, encode_group_type, encode_output_type, encode_param, encode_use_chn,
     profile_mode, video_stream,
 };
@@ -1261,12 +1045,12 @@ fn sdk_frame_type_to_frame_type(ft: VideoFrameType) -> FrameType {
 }
 
 #[cfg(not(use_stubs))]
-fn sdk_frame_type_to_frame_type(ft: crate::ffi::video_frame_type) -> FrameType {
+fn sdk_frame_type_to_frame_type(ft: crate::hal::video_frame_type) -> FrameType {
     match ft {
-        crate::ffi::video_frame_type::FRAME_TYPE_I
-        | crate::ffi::video_frame_type::FRAME_TYPE_PI => FrameType::VideoIFrame,
-        crate::ffi::video_frame_type::FRAME_TYPE_P => FrameType::VideoPFrame,
-        crate::ffi::video_frame_type::FRAME_TYPE_B => FrameType::VideoBFrame,
+        crate::hal::video_frame_type::FRAME_TYPE_I
+        | crate::hal::video_frame_type::FRAME_TYPE_PI => FrameType::VideoIFrame,
+        crate::hal::video_frame_type::FRAME_TYPE_P => FrameType::VideoPFrame,
+        crate::hal::video_frame_type::FRAME_TYPE_B => FrameType::VideoBFrame,
     }
 }
 
@@ -1344,14 +1128,14 @@ impl StreamHealthCounters {
 /// Exits cleanly when `stop_signal` is set to `true`.
 fn frame_read_loop(
     stream_handle: Arc<VideoStreamHandle>,
-    ffi: Arc<dyn crate::ffi::video::VideoFfiTrait>,
+    ffi: Arc<dyn crate::hal::video::VideoHalTrait>,
     stream_id: StreamId,
     callbacks: Arc<RwLock<HashMap<CallbackId, Arc<dyn FrameCallback>>>>,
     stop_signal: Arc<AtomicBool>,
     stream_health: Arc<StreamHealthCounters>,
     recovery_encoder_handle_addr: Option<usize>,
 ) {
-    use crate::ffi::AK_SUCCESS_I32;
+    use crate::hal::AK_SUCCESS_I32;
 
     // Configurable poll sleep between drain cycles (vendor default: 30ms).
     let poll_sleep_ms = env_var_u64("ANYKA_FRAME_POLL_SLEEP_MS").unwrap_or(30);
@@ -1589,14 +1373,14 @@ fn invoke_callbacks_from_map(
 ///
 /// ```text
 /// AnykaVideoEncoder
-///   ├── ffi: Arc<dyn VideoFfiTrait>       (injected, mockable)
+///   ├── ffi: Arc<dyn VideoHalTrait>       (injected, mockable)
 ///   ├── main_handle: RwLock<Option<Arc<VideoEncoderHandle>>>
 ///   ├── sub_handle:  RwLock<Option<Arc<VideoEncoderHandle>>>
 ///   ├── callbacks: RwLock<HashMap<CallbackId, Arc<dyn FrameCallback>>>
 ///   └── active_frames: Arc<ActiveFrames>  (ref-counted buffer tracking)
 /// ```
 struct AnykaVideoEncoder {
-    ffi: Arc<dyn crate::ffi::video::VideoFfiTrait>,
+    ffi: Arc<dyn crate::hal::video::VideoHalTrait>,
     configurations: RwLock<Vec<VideoEncoderConfig>>,
     main_handle: RwLock<Option<Arc<VideoEncoderHandle>>>,
     sub_handle: RwLock<Option<Arc<VideoEncoderHandle>>>,
@@ -1668,28 +1452,22 @@ fn join_thread_with_timeout(
 impl AnykaVideoEncoder {
     /// Create a new `AnykaVideoEncoder` with the default (real) FFI backend.
     ///
-    /// When the `use_vendor_ipc` feature is enabled, attempts to connect to the
-    /// vendor daemon via `VendorIpc` first. Returns error on failure.
+    /// Uses `VendorIpc` to connect to the vendor daemon for vendor library access.
     fn new() -> PlatformResult<Self> {
-        #[cfg(feature = "use_vendor_ipc")]
-        {
-            let ipc = crate::ffi::vendor_ipc::VendorIpc::new().map_err(|e| {
-                PlatformError::InitializationFailed(format!(
-                    "AnykaVideoEncoder: VendorIpc connection failed: {}",
-                    e
-                ))
-            })?;
-            tracing::info!("AnykaVideoEncoder: using VendorIpc for vendor library access");
-            Ok(Self::with_ffi(Arc::new(ipc)))
-        }
-        #[cfg(not(feature = "use_vendor_ipc"))]
-        Ok(Self::with_ffi(Arc::new(crate::ffi::video::RealVideoFfi)))
+        let ipc = crate::hal::vendor_ipc::VendorIpc::new().map_err(|e| {
+            PlatformError::InitializationFailed(format!(
+                "AnykaVideoEncoder: VendorIpc connection failed: {}",
+                e
+            ))
+        })?;
+        tracing::info!("AnykaVideoEncoder: using VendorIpc for vendor library access");
+        Ok(Self::with_ffi(Arc::new(ipc)))
     }
 
     /// Create a new `AnykaVideoEncoder` with a custom FFI backend.
     ///
-    /// Used by tests with `MockVideoFfiTrait` for hardware-free testing.
-    fn with_ffi(ffi: Arc<dyn crate::ffi::video::VideoFfiTrait>) -> Self {
+    /// Used by tests with `MockVideoHalTrait` for hardware-free testing.
+    fn with_ffi(ffi: Arc<dyn crate::hal::video::VideoHalTrait>) -> Self {
         Self {
             ffi,
             configurations: RwLock::new(vec![
@@ -1939,7 +1717,7 @@ impl AnykaVideoEncoder {
     /// * `sub_enc` - Optional sub encoder handle (360p)
     pub fn start_streaming(
         &self,
-        vi_handle: &Arc<crate::ffi::VideoInputHandle>,
+        vi_handle: &Arc<crate::hal::VideoInputHandle>,
         main_enc: &Arc<VideoEncoderHandle>,
         sub_enc: Option<&Arc<VideoEncoderHandle>>,
     ) -> PlatformResult<()> {
@@ -2442,35 +2220,29 @@ impl VideoEncoder for AnykaVideoEncoder {
 /// Anyka audio input implementation.
 struct AnykaAudioInput {
     #[allow(dead_code)]
-    ffi: Arc<dyn crate::ffi::audio::AudioFfiTrait>,
+    ffi: Arc<dyn crate::hal::audio::AudioHalTrait>,
     opened: AtomicBool,
 }
 
 impl AnykaAudioInput {
     /// Create a new `AnykaAudioInput`.
     ///
-    /// When the `use_vendor_ipc` feature is enabled, attempts to connect to the
-    /// vendor daemon via `VendorIpc` first. Returns error on failure.
+    /// Uses `VendorIpc` to connect to the vendor daemon for vendor library access.
     fn new() -> PlatformResult<Self> {
-        #[cfg(feature = "use_vendor_ipc")]
-        {
-            let ipc = crate::ffi::vendor_ipc::VendorIpc::new().map_err(|e| {
-                PlatformError::InitializationFailed(format!(
-                    "AnykaAudioInput: VendorIpc connection failed: {}",
-                    e
-                ))
-            })?;
-            tracing::info!("AnykaAudioInput: using VendorIpc for vendor library access");
-            Ok(Self {
-                ffi: Arc::new(ipc),
-                opened: AtomicBool::new(false),
-            })
-        }
-        #[cfg(not(feature = "use_vendor_ipc"))]
-        Ok(Self::with_ffi(Arc::new(crate::ffi::audio::RealAudioFfi)))
+        let ipc = crate::hal::vendor_ipc::VendorIpc::new().map_err(|e| {
+            PlatformError::InitializationFailed(format!(
+                "AnykaAudioInput: VendorIpc connection failed: {}",
+                e
+            ))
+        })?;
+        tracing::info!("AnykaAudioInput: using VendorIpc for vendor library access");
+        Ok(Self {
+            ffi: Arc::new(ipc),
+            opened: AtomicBool::new(false),
+        })
     }
 
-    fn with_ffi(ffi: Arc<dyn crate::ffi::audio::AudioFfiTrait>) -> Self {
+    fn with_ffi(ffi: Arc<dyn crate::hal::audio::AudioHalTrait>) -> Self {
         Self {
             ffi,
             opened: AtomicBool::new(false),
@@ -2518,19 +2290,17 @@ impl AudioInput for AnykaAudioInput {
 /// Anyka audio encoder implementation.
 struct AnykaAudioEncoder {
     #[allow(dead_code)]
-    ffi: Arc<dyn crate::ffi::audio::AudioFfiTrait>,
+    ffi: Arc<dyn crate::hal::audio::AudioHalTrait>,
     configurations: RwLock<Vec<AudioEncoderConfig>>,
 }
 
 impl AnykaAudioEncoder {
     /// Create a new `AnykaAudioEncoder`.
     ///
-    /// When the `use_vendor_ipc` feature is enabled, attempts to connect to the
-    /// vendor daemon via `VendorIpc` first. Returns error on failure.
+    /// Uses `VendorIpc` to connect to the vendor daemon for vendor library access.
     fn new() -> PlatformResult<Self> {
-        #[cfg(feature = "use_vendor_ipc")]
-        let ffi: Arc<dyn crate::ffi::audio::AudioFfiTrait> = {
-            let ipc = crate::ffi::vendor_ipc::VendorIpc::new().map_err(|e| {
+        let ffi: Arc<dyn crate::hal::audio::AudioHalTrait> = {
+            let ipc = crate::hal::vendor_ipc::VendorIpc::new().map_err(|e| {
                 PlatformError::InitializationFailed(format!(
                     "AnykaAudioEncoder: VendorIpc connection failed: {}",
                     e
@@ -2539,14 +2309,11 @@ impl AnykaAudioEncoder {
             tracing::info!("AnykaAudioEncoder: using VendorIpc for vendor library access");
             Arc::new(ipc)
         };
-        #[cfg(not(feature = "use_vendor_ipc"))]
-        let ffi: Arc<dyn crate::ffi::audio::AudioFfiTrait> =
-            Arc::new(crate::ffi::audio::RealAudioFfi);
 
         Ok(Self::with_ffi(ffi))
     }
 
-    fn with_ffi(ffi: Arc<dyn crate::ffi::audio::AudioFfiTrait>) -> Self {
+    fn with_ffi(ffi: Arc<dyn crate::hal::audio::AudioHalTrait>) -> Self {
         Self {
             ffi,
             configurations: RwLock::new(vec![AudioEncoderConfig {
@@ -2616,19 +2383,17 @@ type AnykaPTZControl = super::hw_ptz::HardwarePTZControl;
 
 /// Anyka imaging control implementation.
 struct AnykaImagingControl {
-    ffi: Arc<dyn crate::ffi::imaging::ImagingFfiTrait>,
+    ffi: Arc<dyn crate::hal::imaging::ImagingHalTrait>,
     settings: RwLock<ImagingSettings>,
 }
 
 impl AnykaImagingControl {
     /// Create a new `AnykaImagingControl`.
     ///
-    /// When the `use_vendor_ipc` feature is enabled, attempts to connect to the
-    /// vendor daemon via `VendorIpc` first. Returns error on failure.
+    /// Uses `VendorIpc` to connect to the vendor daemon for vendor library access.
     fn new() -> PlatformResult<Self> {
-        #[cfg(feature = "use_vendor_ipc")]
-        let ffi: Arc<dyn crate::ffi::imaging::ImagingFfiTrait> = {
-            let ipc = crate::ffi::vendor_ipc::VendorIpc::new().map_err(|e| {
+        let ffi: Arc<dyn crate::hal::imaging::ImagingHalTrait> = {
+            let ipc = crate::hal::vendor_ipc::VendorIpc::new().map_err(|e| {
                 PlatformError::InitializationFailed(format!(
                     "AnykaImagingControl: VendorIpc connection failed: {}",
                     e
@@ -2637,14 +2402,11 @@ impl AnykaImagingControl {
             tracing::info!("AnykaImagingControl: using VendorIpc for vendor library access");
             Arc::new(ipc)
         };
-        #[cfg(not(feature = "use_vendor_ipc"))]
-        let ffi: Arc<dyn crate::ffi::imaging::ImagingFfiTrait> =
-            Arc::new(crate::ffi::imaging::RealImagingFfi);
 
         Ok(Self::with_ffi(ffi))
     }
 
-    fn with_ffi(ffi: Arc<dyn crate::ffi::imaging::ImagingFfiTrait>) -> Self {
+    fn with_ffi(ffi: Arc<dyn crate::hal::imaging::ImagingHalTrait>) -> Self {
         Self {
             ffi,
             settings: RwLock::new(ImagingSettings {
@@ -2669,16 +2431,16 @@ impl ImagingControl for AnykaImagingControl {
     }
 
     async fn set_settings(&self, settings: &ImagingSettings) -> PlatformResult<()> {
-        crate::ffi::imaging::imaging_set_brightness_internal(
+        crate::hal::imaging::imaging_set_brightness_internal(
             settings.brightness,
             self.ffi.as_ref(),
         )?;
-        crate::ffi::imaging::imaging_set_contrast_internal(settings.contrast, self.ffi.as_ref())?;
-        crate::ffi::imaging::imaging_set_saturation_internal(
+        crate::hal::imaging::imaging_set_contrast_internal(settings.contrast, self.ffi.as_ref())?;
+        crate::hal::imaging::imaging_set_saturation_internal(
             settings.saturation,
             self.ffi.as_ref(),
         )?;
-        crate::ffi::imaging::imaging_set_sharpness_internal(settings.sharpness, self.ffi.as_ref())?;
+        crate::hal::imaging::imaging_set_sharpness_internal(settings.sharpness, self.ffi.as_ref())?;
         *self.settings.write() = settings.clone();
         Ok(())
     }
@@ -2689,25 +2451,25 @@ impl ImagingControl for AnykaImagingControl {
     }
 
     async fn set_brightness(&self, value: f32) -> PlatformResult<()> {
-        crate::ffi::imaging::imaging_set_brightness_internal(value, self.ffi.as_ref())?;
+        crate::hal::imaging::imaging_set_brightness_internal(value, self.ffi.as_ref())?;
         self.settings.write().brightness = value;
         Ok(())
     }
 
     async fn set_contrast(&self, value: f32) -> PlatformResult<()> {
-        crate::ffi::imaging::imaging_set_contrast_internal(value, self.ffi.as_ref())?;
+        crate::hal::imaging::imaging_set_contrast_internal(value, self.ffi.as_ref())?;
         self.settings.write().contrast = value;
         Ok(())
     }
 
     async fn set_saturation(&self, value: f32) -> PlatformResult<()> {
-        crate::ffi::imaging::imaging_set_saturation_internal(value, self.ffi.as_ref())?;
+        crate::hal::imaging::imaging_set_saturation_internal(value, self.ffi.as_ref())?;
         self.settings.write().saturation = value;
         Ok(())
     }
 
     async fn set_sharpness(&self, value: f32) -> PlatformResult<()> {
-        crate::ffi::imaging::imaging_set_sharpness_internal(value, self.ffi.as_ref())?;
+        crate::hal::imaging::imaging_set_sharpness_internal(value, self.ffi.as_ref())?;
         self.settings.write().sharpness = value;
         Ok(())
     }
@@ -2959,24 +2721,24 @@ impl NetworkInfo for AnykaNetworkInfo {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ffi::video::MockVideoFfiTrait;
-    use crate::ffi::{AK_FAILED_I32, AK_SUCCESS_I32};
+    use crate::hal::video::MockVideoHalTrait;
+    use crate::hal::{AK_FAILED_I32, AK_SUCCESS_I32};
     use std::ffi::c_void;
 
-    fn video_dev0() -> crate::ffi::video_dev_type {
+    fn video_dev0() -> crate::hal::video_dev_type {
         #[cfg(use_stubs)]
         {
-            crate::ffi::video_dev_type::Dev0
+            crate::hal::video_dev_type::Dev0
         }
         #[cfg(not(use_stubs))]
         {
-            crate::ffi::video_dev_type::VIDEO_DEV0
+            crate::hal::video_dev_type::VIDEO_DEV0
         }
     }
 
     /// Create a mock FFI that expects a successful vi_open call.
-    fn mock_ffi_with_successful_open() -> MockVideoFfiTrait {
-        let mut mock = MockVideoFfiTrait::new();
+    fn mock_ffi_with_successful_open() -> MockVideoHalTrait {
+        let mut mock = MockVideoHalTrait::new();
         let test_ptr = std::ptr::NonNull::<c_void>::dangling().as_ptr() as usize;
         mock.expect_vi_open()
             .with(mockall::predicate::eq(video_dev0()))
@@ -3017,7 +2779,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_video_input_open_hardware_failure() {
-        let mut mock = MockVideoFfiTrait::new();
+        let mut mock = MockVideoHalTrait::new();
         mock.expect_vi_open()
             .with(mockall::predicate::eq(video_dev0()))
             .times(1)
@@ -3051,7 +2813,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_video_input_close_idempotent() {
-        let mock = MockVideoFfiTrait::new();
+        let mock = MockVideoHalTrait::new();
         let vi = AnykaVideoInput::with_ffi(Arc::new(mock), None);
 
         // Close without ever opening — should succeed (idempotent)
@@ -3090,7 +2852,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_video_input_get_resolution_not_opened() {
-        let mock = MockVideoFfiTrait::new();
+        let mock = MockVideoHalTrait::new();
         let vi = AnykaVideoInput::with_ffi(Arc::new(mock), None);
 
         let result = vi.get_resolution().await;
@@ -3125,7 +2887,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_video_input_get_sources_returns_config() {
-        let mock = MockVideoFfiTrait::new();
+        let mock = MockVideoHalTrait::new();
         let vi = AnykaVideoInput::with_ffi(Arc::new(mock), None);
 
         // get_sources works even when not opened (uses default resolution)
@@ -3211,22 +2973,12 @@ mod tests {
                     assert_eq!((*attr).res[0].height, 1080);
                     assert_eq!((*attr).res[1].width, 640);
                     assert_eq!((*attr).res[1].height, 360);
-                    #[cfg(feature = "use_vendor_ipc")]
-                    {
-                        // libre_anyka_app quirk (via vendor IPC):
-                        // main.max_* drives sub-channel limits.
-                        assert_eq!((*attr).res[0].max_width, 640);
-                        assert_eq!((*attr).res[0].max_height, 360);
-                        assert_eq!((*attr).res[1].max_width, 1920);
-                        assert_eq!((*attr).res[1].max_height, 1080);
-                    }
-                    #[cfg(not(feature = "use_vendor_ipc"))]
-                    {
-                        assert_eq!((*attr).res[0].max_width, 1920);
-                        assert_eq!((*attr).res[0].max_height, 1080);
-                        assert_eq!((*attr).res[1].max_width, 640);
-                        assert_eq!((*attr).res[1].max_height, 360);
-                    }
+                    // libre_anyka_app quirk (via vendor IPC):
+                    // main.max_* drives sub-channel limits.
+                    assert_eq!((*attr).res[0].max_width, 640);
+                    assert_eq!((*attr).res[0].max_height, 360);
+                    assert_eq!((*attr).res[1].max_width, 1920);
+                    assert_eq!((*attr).res[1].max_height, 1080);
                 }
                 AK_SUCCESS_I32
             });
@@ -3240,7 +2992,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_video_input_set_channel_attr_not_opened() {
-        let mock = MockVideoFfiTrait::new();
+        let mock = MockVideoHalTrait::new();
         let vi = AnykaVideoInput::with_ffi(Arc::new(mock), None);
 
         let result = vi.set_channel_attr();
@@ -3286,7 +3038,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_video_input_concurrent_operations() {
-        let mut mock = MockVideoFfiTrait::new();
+        let mut mock = MockVideoHalTrait::new();
         let test_ptr = std::ptr::NonNull::<c_void>::dangling().as_ptr() as usize;
         mock.expect_vi_open()
             .with(mockall::predicate::eq(video_dev0()))
@@ -3322,7 +3074,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_video_input_open_close_reopen() {
-        let mut mock = MockVideoFfiTrait::new();
+        let mut mock = MockVideoHalTrait::new();
         let test_ptr = std::ptr::NonNull::<c_void>::dangling().as_ptr() as usize;
         mock.expect_vi_open()
             .with(mockall::predicate::eq(video_dev0()))
@@ -3348,7 +3100,7 @@ mod tests {
 
     #[test]
     fn test_match_sensor_with_explicit_existing_path() {
-        let mut mock = MockVideoFfiTrait::new();
+        let mut mock = MockVideoHalTrait::new();
         mock.expect_vi_match_sensor()
             .times(1)
             .returning(|_| AK_SUCCESS_I32);
@@ -3366,7 +3118,7 @@ mod tests {
     fn test_match_sensor_explicit_path_not_found_falls_back() {
         // With an explicit path that doesn't exist AND no search paths existing,
         // match_sensor should return an error.
-        let mock = MockVideoFfiTrait::new();
+        let mock = MockVideoHalTrait::new();
         let vi = AnykaVideoInput::with_ffi(
             Arc::new(mock),
             Some(PathBuf::from("/nonexistent/isp_config.conf")),
@@ -3384,7 +3136,7 @@ mod tests {
     #[test]
     fn test_match_sensor_no_config_found() {
         // No explicit path, no default search paths exist
-        let mock = MockVideoFfiTrait::new();
+        let mock = MockVideoHalTrait::new();
         let vi = AnykaVideoInput::with_ffi(Arc::new(mock), None);
         let result = vi.match_sensor();
         assert!(result.is_err());
@@ -3398,7 +3150,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_capture_on_success() {
-        let mut mock = MockVideoFfiTrait::new();
+        let mut mock = MockVideoHalTrait::new();
         let test_ptr = std::ptr::NonNull::<c_void>::dangling().as_ptr() as usize;
         mock.expect_vi_open()
             .returning(move |_| test_ptr as *mut c_void);
@@ -3415,7 +3167,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_capture_on_retry_runs_capture_off_cleanup() {
-        let mut mock = MockVideoFfiTrait::new();
+        let mut mock = MockVideoHalTrait::new();
         let test_ptr = std::ptr::NonNull::<c_void>::dangling().as_ptr() as usize;
 
         mock.expect_vi_open()
@@ -3445,7 +3197,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_capture_on_retry_aborts_when_capture_off_cleanup_fails() {
-        let mut mock = MockVideoFfiTrait::new();
+        let mut mock = MockVideoHalTrait::new();
         let test_ptr = std::ptr::NonNull::<c_void>::dangling().as_ptr() as usize;
 
         mock.expect_vi_open()
@@ -3475,7 +3227,7 @@ mod tests {
 
     #[test]
     fn test_capture_on_fails_when_not_opened() {
-        let mock = MockVideoFfiTrait::new();
+        let mock = MockVideoHalTrait::new();
         let vi = AnykaVideoInput::with_ffi(Arc::new(mock), None);
 
         let result = vi.capture_on();
@@ -3496,8 +3248,8 @@ mod tests {
     use std::sync::atomic::AtomicU32;
 
     /// Create a mock FFI that expects a successful venc_open call.
-    fn mock_ffi_with_successful_encoder_open() -> MockVideoFfiTrait {
-        let mut mock = MockVideoFfiTrait::new();
+    fn mock_ffi_with_successful_encoder_open() -> MockVideoHalTrait {
+        let mut mock = MockVideoHalTrait::new();
         mock.expect_venc_set_cfg_path().returning(|_| 0);
         let test_ptr = std::ptr::NonNull::<c_void>::dangling().as_ptr() as usize;
         mock.expect_venc_open()
@@ -3589,7 +3341,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_video_encoder_init_invalid_token() {
-        let mock = MockVideoFfiTrait::new();
+        let mock = MockVideoHalTrait::new();
         let encoder = AnykaVideoEncoder::with_ffi(Arc::new(mock));
 
         let config = VideoEncoderConfig {
@@ -3609,7 +3361,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_video_encoder_init_ffi_failure() {
-        let mut mock = MockVideoFfiTrait::new();
+        let mut mock = MockVideoHalTrait::new();
         mock.expect_venc_set_cfg_path().returning(|_| 0);
         mock.expect_venc_open().returning(|_| std::ptr::null_mut());
 
@@ -3678,7 +3430,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_video_encoder_set_configuration_invalid_token() {
-        let mock = MockVideoFfiTrait::new();
+        let mock = MockVideoHalTrait::new();
         let encoder = AnykaVideoEncoder::with_ffi(Arc::new(mock));
 
         let config = VideoEncoderConfig {
@@ -3737,7 +3489,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_video_encoder_get_configuration() {
-        let mock = MockVideoFfiTrait::new();
+        let mock = MockVideoHalTrait::new();
         let encoder = AnykaVideoEncoder::with_ffi(Arc::new(mock));
 
         let config = encoder.get_configuration().await.unwrap();
@@ -3750,7 +3502,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_video_encoder_get_configurations() {
-        let mock = MockVideoFfiTrait::new();
+        let mock = MockVideoHalTrait::new();
         let encoder = AnykaVideoEncoder::with_ffi(Arc::new(mock));
 
         let configs = encoder.get_configurations().await.unwrap();
@@ -3761,7 +3513,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_video_encoder_get_options() {
-        let mock = MockVideoFfiTrait::new();
+        let mock = MockVideoHalTrait::new();
         let encoder = AnykaVideoEncoder::with_ffi(Arc::new(mock));
 
         let options = encoder.get_options().await.unwrap();
@@ -3891,7 +3643,7 @@ mod tests {
 
     #[test]
     fn test_callback_registration() {
-        let mock = MockVideoFfiTrait::new();
+        let mock = MockVideoHalTrait::new();
         let encoder = AnykaVideoEncoder::with_ffi(Arc::new(mock));
 
         let cb = Arc::new(CountingCallback::new());
@@ -3902,7 +3654,7 @@ mod tests {
 
     #[test]
     fn test_callback_unregistration() {
-        let mock = MockVideoFfiTrait::new();
+        let mock = MockVideoHalTrait::new();
         let encoder = AnykaVideoEncoder::with_ffi(Arc::new(mock));
 
         let cb = Arc::new(CountingCallback::new());
@@ -3916,7 +3668,7 @@ mod tests {
 
     #[test]
     fn test_callback_unregister_nonexistent() {
-        let mock = MockVideoFfiTrait::new();
+        let mock = MockVideoHalTrait::new();
         let encoder = AnykaVideoEncoder::with_ffi(Arc::new(mock));
 
         let removed = encoder.unregister_frame_callback(999);
@@ -3925,7 +3677,7 @@ mod tests {
 
     #[test]
     fn test_callback_invocation() {
-        let mock = MockVideoFfiTrait::new();
+        let mock = MockVideoHalTrait::new();
         let encoder = AnykaVideoEncoder::with_ffi(Arc::new(mock));
 
         let cb = Arc::new(CountingCallback::new());
@@ -3940,7 +3692,7 @@ mod tests {
 
     #[test]
     fn test_multiple_callbacks_invocation() {
-        let mock = MockVideoFfiTrait::new();
+        let mock = MockVideoHalTrait::new();
         let encoder = AnykaVideoEncoder::with_ffi(Arc::new(mock));
 
         let cb1 = Arc::new(CountingCallback::new());
@@ -3960,7 +3712,7 @@ mod tests {
 
     #[test]
     fn test_callback_panic_isolation() {
-        let mock = MockVideoFfiTrait::new();
+        let mock = MockVideoHalTrait::new();
         let encoder = AnykaVideoEncoder::with_ffi(Arc::new(mock));
 
         // Register a panicking callback
@@ -3987,7 +3739,7 @@ mod tests {
 
     #[test]
     fn test_callback_panicked_removed_on_second_invocation() {
-        let mock = MockVideoFfiTrait::new();
+        let mock = MockVideoHalTrait::new();
         let encoder = AnykaVideoEncoder::with_ffi(Arc::new(mock));
 
         let panicking = Arc::new(PanickingCallback);
@@ -4030,7 +3782,7 @@ mod tests {
 
     #[test]
     fn test_video_encoder_request_idr_not_initialized() {
-        let mock = MockVideoFfiTrait::new();
+        let mock = MockVideoHalTrait::new();
         let encoder = AnykaVideoEncoder::with_ffi(Arc::new(mock));
 
         let result = encoder.request_idr_frame(true);
@@ -4045,7 +3797,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_video_encoder_concurrent_config_access() {
-        let mock = MockVideoFfiTrait::new();
+        let mock = MockVideoHalTrait::new();
         let encoder = Arc::new(AnykaVideoEncoder::with_ffi(Arc::new(mock)));
 
         let e1 = encoder.clone();
@@ -4062,7 +3814,7 @@ mod tests {
 
     #[test]
     fn test_encoder_active_frames_accessible() {
-        let mock = MockVideoFfiTrait::new();
+        let mock = MockVideoHalTrait::new();
         let encoder = AnykaVideoEncoder::with_ffi(Arc::new(mock));
         let af = encoder.active_frames();
         assert_eq!(af.active_count(), 0);
@@ -4072,11 +3824,11 @@ mod tests {
     // VideoStreamHandle Tests
     // =========================================================================
 
-    use crate::ffi::video::VideoStreamHandle;
+    use crate::hal::video::VideoStreamHandle;
 
     #[test]
     fn test_video_stream_handle_creation_success() {
-        let mut mock = MockVideoFfiTrait::new();
+        let mut mock = MockVideoHalTrait::new();
         let test_ptr = std::ptr::NonNull::<c_void>::dangling().as_ptr() as usize;
 
         mock.expect_venc_request_stream()
@@ -4096,7 +3848,7 @@ mod tests {
 
     #[test]
     fn test_video_stream_handle_creation_null_returns_error() {
-        let mut mock = MockVideoFfiTrait::new();
+        let mut mock = MockVideoHalTrait::new();
 
         mock.expect_venc_request_stream()
             .times(1)
@@ -4117,7 +3869,7 @@ mod tests {
 
     #[test]
     fn test_video_stream_handle_drop_calls_cancel() {
-        let mut mock = MockVideoFfiTrait::new();
+        let mut mock = MockVideoHalTrait::new();
         let test_ptr = std::ptr::NonNull::<c_void>::dangling().as_ptr() as usize;
 
         mock.expect_venc_request_stream()
@@ -4136,7 +3888,7 @@ mod tests {
 
     #[test]
     fn test_video_stream_handle_explicit_cancel_is_idempotent() {
-        let mut mock = MockVideoFfiTrait::new();
+        let mut mock = MockVideoHalTrait::new();
         let test_ptr = std::ptr::NonNull::<c_void>::dangling().as_ptr() as usize;
 
         mock.expect_venc_request_stream()
@@ -4162,7 +3914,7 @@ mod tests {
     #[cfg(use_stubs)]
     #[test]
     fn test_frame_type_conversion_i_frame() {
-        use crate::ffi::VideoFrameType;
+        use crate::hal::VideoFrameType;
         assert_eq!(
             sdk_frame_type_to_frame_type(VideoFrameType::FrameTypeI),
             FrameType::VideoIFrame
@@ -4172,7 +3924,7 @@ mod tests {
     #[cfg(use_stubs)]
     #[test]
     fn test_frame_type_conversion_pi_frame() {
-        use crate::ffi::VideoFrameType;
+        use crate::hal::VideoFrameType;
         assert_eq!(
             sdk_frame_type_to_frame_type(VideoFrameType::FrameTypePi),
             FrameType::VideoIFrame
@@ -4182,7 +3934,7 @@ mod tests {
     #[cfg(use_stubs)]
     #[test]
     fn test_frame_type_conversion_p_frame() {
-        use crate::ffi::VideoFrameType;
+        use crate::hal::VideoFrameType;
         assert_eq!(
             sdk_frame_type_to_frame_type(VideoFrameType::FrameTypeP),
             FrameType::VideoPFrame
@@ -4192,7 +3944,7 @@ mod tests {
     #[cfg(use_stubs)]
     #[test]
     fn test_frame_type_conversion_b_frame() {
-        use crate::ffi::VideoFrameType;
+        use crate::hal::VideoFrameType;
         assert_eq!(
             sdk_frame_type_to_frame_type(VideoFrameType::FrameTypeB),
             FrameType::VideoBFrame
@@ -4234,7 +3986,7 @@ mod tests {
     #[test]
     #[cfg(use_stubs)]
     fn test_frame_read_loop_invokes_callbacks() {
-        use crate::ffi::VideoFrameType;
+        use crate::hal::VideoFrameType;
         use std::sync::atomic::AtomicUsize;
 
         let call_count = Arc::new(AtomicUsize::new(0));
@@ -4252,7 +4004,7 @@ mod tests {
             }
         }
 
-        let mut mock = MockVideoFfiTrait::new();
+        let mut mock = MockVideoHalTrait::new();
         let stop = Arc::new(AtomicBool::new(false));
         let stop_clone = Arc::clone(&stop);
 
@@ -4284,7 +4036,7 @@ mod tests {
                     AK_SUCCESS_I32
                 } else {
                     // Subsequent calls: no more frames (breaks drain loop)
-                    crate::ffi::AK_FAILED_I32
+                    crate::hal::AK_FAILED_I32
                 }
             });
         mock.expect_get_error_no().returning(|| SDK_ERROR_NO_DATA);
@@ -4307,7 +4059,7 @@ mod tests {
         mock.expect_venc_cancel_stream()
             .returning(|_| AK_SUCCESS_I32);
 
-        let ffi: Arc<dyn crate::ffi::video::VideoFfiTrait> = Arc::new(mock);
+        let ffi: Arc<dyn crate::hal::video::VideoHalTrait> = Arc::new(mock);
         let vi_ptr = std::ptr::NonNull::<c_void>::dangling().as_ptr();
         let venc_ptr = std::ptr::NonNull::<c_void>::dangling().as_ptr();
         let sh = Arc::new(VideoStreamHandle::new(vi_ptr, venc_ptr, Arc::clone(&ffi)).unwrap());
@@ -4335,7 +4087,7 @@ mod tests {
 
     #[test]
     fn test_frame_read_loop_handles_no_data_and_retries() {
-        let mut mock = MockVideoFfiTrait::new();
+        let mut mock = MockVideoHalTrait::new();
         let stop = Arc::new(AtomicBool::new(false));
         let stop_clone = Arc::clone(&stop);
         let error_count = Arc::new(AtomicU32::new(0));
@@ -4349,7 +4101,7 @@ mod tests {
             if count >= 1 {
                 stop_clone.store(true, Ordering::SeqCst);
             }
-            crate::ffi::AK_FAILED_I32
+            crate::hal::AK_FAILED_I32
         });
         // No-data errors don't call get_error_str (only non-no-data errors do)
         mock.expect_get_error_no().returning(|| SDK_ERROR_NO_DATA);
@@ -4362,7 +4114,7 @@ mod tests {
         mock.expect_venc_cancel_stream()
             .returning(|_| AK_SUCCESS_I32);
 
-        let ffi: Arc<dyn crate::ffi::video::VideoFfiTrait> = Arc::new(mock);
+        let ffi: Arc<dyn crate::hal::video::VideoHalTrait> = Arc::new(mock);
         let vi_ptr = std::ptr::NonNull::<c_void>::dangling().as_ptr();
         let venc_ptr = std::ptr::NonNull::<c_void>::dangling().as_ptr();
         let sh = Arc::new(VideoStreamHandle::new(vi_ptr, venc_ptr, Arc::clone(&ffi)).unwrap());
@@ -4386,7 +4138,7 @@ mod tests {
 
     #[test]
     fn test_stop_signal_terminates_loop() {
-        let mut mock = MockVideoFfiTrait::new();
+        let mut mock = MockVideoHalTrait::new();
         let stop = Arc::new(AtomicBool::new(true)); // Pre-set stop
 
         // get_stream should never be called since stop is already set
@@ -4401,7 +4153,7 @@ mod tests {
         mock.expect_venc_cancel_stream()
             .returning(|_| AK_SUCCESS_I32);
 
-        let ffi: Arc<dyn crate::ffi::video::VideoFfiTrait> = Arc::new(mock);
+        let ffi: Arc<dyn crate::hal::video::VideoHalTrait> = Arc::new(mock);
         let vi_ptr = std::ptr::NonNull::<c_void>::dangling().as_ptr();
         let venc_ptr = std::ptr::NonNull::<c_void>::dangling().as_ptr();
         let sh = Arc::new(VideoStreamHandle::new(vi_ptr, venc_ptr, Arc::clone(&ffi)).unwrap());
@@ -4423,7 +4175,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_start_stop_streaming_lifecycle() {
-        let mut mock = MockVideoFfiTrait::new();
+        let mut mock = MockVideoHalTrait::new();
 
         // Encoder open expectations
         mock.expect_venc_set_cfg_path().returning(|_| 0);
@@ -4459,7 +4211,7 @@ mod tests {
         encoder.init(&config).await.unwrap();
 
         // Create a dummy VI handle for testing
-        let vi_handle = Arc::new(crate::ffi::VideoInputHandle::test_handle());
+        let vi_handle = Arc::new(crate::hal::VideoInputHandle::test_handle());
         let main_enc = encoder.main_handle.read().clone().unwrap();
 
         // Start streaming
@@ -4485,7 +4237,7 @@ mod tests {
 
     #[test]
     fn test_stop_streaming_join_timeout_after_cancel_marks_unsafe() {
-        let mut mock = MockVideoFfiTrait::new();
+        let mut mock = MockVideoHalTrait::new();
         let stream_ptr = std::ptr::NonNull::<c_void>::dangling().as_ptr() as usize;
         mock.expect_venc_request_stream()
             .times(1)
@@ -4495,7 +4247,7 @@ mod tests {
             .times(1)
             .returning(|_| AK_SUCCESS_I32);
 
-        let ffi: Arc<dyn crate::ffi::video::VideoFfiTrait> = Arc::new(mock);
+        let ffi: Arc<dyn crate::hal::video::VideoHalTrait> = Arc::new(mock);
         let encoder = AnykaVideoEncoder::with_ffi(Arc::clone(&ffi));
         let vi_ptr = std::ptr::NonNull::<c_void>::dangling().as_ptr();
         let venc_ptr = std::ptr::NonNull::<c_void>::dangling().as_ptr();
@@ -4524,7 +4276,7 @@ mod tests {
 
     #[test]
     fn test_stop_streaming_cancel_failure_still_attempts_second_channel() {
-        let mut mock = MockVideoFfiTrait::new();
+        let mut mock = MockVideoHalTrait::new();
         let mut request_seq = mockall::Sequence::new();
         let stream_ptr_a = std::ptr::NonNull::<c_void>::dangling().as_ptr() as usize;
         let stream_ptr_b = (stream_ptr_a.wrapping_add(16)) as *mut c_void as usize;
@@ -4547,7 +4299,7 @@ mod tests {
             .times(1)
             .returning(|_| AK_SUCCESS_I32);
 
-        let ffi: Arc<dyn crate::ffi::video::VideoFfiTrait> = Arc::new(mock);
+        let ffi: Arc<dyn crate::hal::video::VideoHalTrait> = Arc::new(mock);
         let encoder = AnykaVideoEncoder::with_ffi(Arc::clone(&ffi));
         let vi_ptr = std::ptr::NonNull::<c_void>::dangling().as_ptr();
         let venc_ptr_main = std::ptr::NonNull::<c_void>::dangling().as_ptr();
@@ -4568,7 +4320,7 @@ mod tests {
 
     #[test]
     fn test_stop_streaming_cancel_timeout_marks_unsafe_and_attempts_both() {
-        let mut mock = MockVideoFfiTrait::new();
+        let mut mock = MockVideoHalTrait::new();
         let stream_ptr_a = std::ptr::NonNull::<c_void>::dangling().as_ptr() as usize;
         let stream_ptr_b = (stream_ptr_a.wrapping_add(16)) as *mut c_void as usize;
         mock.expect_venc_request_stream()
@@ -4588,7 +4340,7 @@ mod tests {
             .times(1)
             .returning(|_| AK_SUCCESS_I32);
 
-        let ffi: Arc<dyn crate::ffi::video::VideoFfiTrait> = Arc::new(mock);
+        let ffi: Arc<dyn crate::hal::video::VideoHalTrait> = Arc::new(mock);
         let encoder = AnykaVideoEncoder::with_ffi(Arc::clone(&ffi));
         let vi_ptr = std::ptr::NonNull::<c_void>::dangling().as_ptr();
         let venc_ptr_main = std::ptr::NonNull::<c_void>::dangling().as_ptr();
@@ -4609,7 +4361,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_shutdown_order_is_cancel_then_join_then_close() {
-        let mut mock = MockVideoFfiTrait::new();
+        let mut mock = MockVideoHalTrait::new();
         let mut seq = mockall::Sequence::new();
         let enc_ptr = std::ptr::NonNull::<c_void>::dangling().as_ptr() as usize;
         let stream_ptr = (enc_ptr.wrapping_add(64)) as *mut c_void as usize;
@@ -4676,7 +4428,7 @@ mod tests {
     fn test_stop_streaming_cancel_unblocks_reader_thread() {
         // Verify that the cancel-first pattern allows a reader thread that
         // exits on stop_signal to join successfully.
-        let mut mock = MockVideoFfiTrait::new();
+        let mut mock = MockVideoHalTrait::new();
         let stream_ptr = std::ptr::NonNull::<c_void>::dangling().as_ptr() as usize;
         mock.expect_venc_request_stream()
             .times(1)
@@ -4685,7 +4437,7 @@ mod tests {
             .times(1)
             .returning(|_| AK_SUCCESS_I32);
 
-        let ffi: Arc<dyn crate::ffi::video::VideoFfiTrait> = Arc::new(mock);
+        let ffi: Arc<dyn crate::hal::video::VideoHalTrait> = Arc::new(mock);
         let encoder = AnykaVideoEncoder::with_ffi(Arc::clone(&ffi));
         let vi_ptr = std::ptr::NonNull::<c_void>::dangling().as_ptr();
         let venc_ptr = std::ptr::NonNull::<c_void>::dangling().as_ptr();
@@ -4712,7 +4464,7 @@ mod tests {
     fn test_frame_read_loop_no_initial_delay() {
         // Verify frame_read_loop exits quickly when stop signal is pre-set
         // (no 100ms initial delay — removed in drain-loop refactor).
-        let mut mock = MockVideoFfiTrait::new();
+        let mut mock = MockVideoHalTrait::new();
         let stop = Arc::new(AtomicBool::new(true)); // Pre-set stop
 
         mock.expect_venc_get_stream()
@@ -4725,7 +4477,7 @@ mod tests {
         mock.expect_venc_cancel_stream()
             .returning(|_| AK_SUCCESS_I32);
 
-        let ffi: Arc<dyn crate::ffi::video::VideoFfiTrait> = Arc::new(mock);
+        let ffi: Arc<dyn crate::hal::video::VideoHalTrait> = Arc::new(mock);
         let vi_ptr = std::ptr::NonNull::<c_void>::dangling().as_ptr();
         let venc_ptr = std::ptr::NonNull::<c_void>::dangling().as_ptr();
         let sh = Arc::new(VideoStreamHandle::new(vi_ptr, venc_ptr, Arc::clone(&ffi)).unwrap());
@@ -4757,7 +4509,7 @@ mod tests {
     fn test_drain_loop_fixed_sleep() {
         // Verify the drain-loop uses fixed sleep (30ms default) between cycles,
         // not exponential backoff. With no-data errors, each cycle sleeps 30ms.
-        let mut mock = MockVideoFfiTrait::new();
+        let mut mock = MockVideoHalTrait::new();
         let stop = Arc::new(AtomicBool::new(false));
         let stop_clone = Arc::clone(&stop);
         let error_count = Arc::new(AtomicU32::new(0));
@@ -4769,7 +4521,7 @@ mod tests {
             if count >= 3 {
                 stop_clone.store(true, Ordering::SeqCst);
             }
-            crate::ffi::AK_FAILED_I32
+            crate::hal::AK_FAILED_I32
         });
         mock.expect_get_error_no().returning(|| SDK_ERROR_NO_DATA);
 
@@ -4779,7 +4531,7 @@ mod tests {
         mock.expect_venc_cancel_stream()
             .returning(|_| AK_SUCCESS_I32);
 
-        let ffi: Arc<dyn crate::ffi::video::VideoFfiTrait> = Arc::new(mock);
+        let ffi: Arc<dyn crate::hal::video::VideoHalTrait> = Arc::new(mock);
         let vi_ptr = std::ptr::NonNull::<c_void>::dangling().as_ptr();
         let venc_ptr = std::ptr::NonNull::<c_void>::dangling().as_ptr();
         let sh = Arc::new(VideoStreamHandle::new(vi_ptr, venc_ptr, Arc::clone(&ffi)).unwrap());
@@ -4849,7 +4601,7 @@ mod tests {
 
     #[test]
     fn test_frame_read_loop_skips_idr_before_first_frame() {
-        let mut mock = MockVideoFfiTrait::new();
+        let mut mock = MockVideoHalTrait::new();
         let stop = Arc::new(AtomicBool::new(false));
         let stop_clone = Arc::clone(&stop);
         let error_count = Arc::new(AtomicU32::new(0));
@@ -4872,7 +4624,7 @@ mod tests {
         mock.expect_venc_cancel_stream()
             .returning(|_| AK_SUCCESS_I32);
 
-        let ffi: Arc<dyn crate::ffi::video::VideoFfiTrait> = Arc::new(mock);
+        let ffi: Arc<dyn crate::hal::video::VideoHalTrait> = Arc::new(mock);
         let vi_ptr = std::ptr::NonNull::<c_void>::dangling().as_ptr();
         let venc_ptr = std::ptr::NonNull::<c_void>::dangling().as_ptr();
         let sh = Arc::new(VideoStreamHandle::new(vi_ptr, venc_ptr, Arc::clone(&ffi)).unwrap());
@@ -4895,7 +4647,7 @@ mod tests {
 
     #[test]
     fn test_frame_read_loop_requests_idr_after_frames_then_sustained_no_data() {
-        let mut mock = MockVideoFfiTrait::new();
+        let mut mock = MockVideoHalTrait::new();
         let stop = Arc::new(AtomicBool::new(false));
         let stop_clone = Arc::clone(&stop);
         let no_data_count = Arc::new(AtomicU32::new(0));
@@ -4941,7 +4693,7 @@ mod tests {
         mock.expect_venc_cancel_stream()
             .returning(|_| AK_SUCCESS_I32);
 
-        let ffi: Arc<dyn crate::ffi::video::VideoFfiTrait> = Arc::new(mock);
+        let ffi: Arc<dyn crate::hal::video::VideoHalTrait> = Arc::new(mock);
         let vi_ptr = std::ptr::NonNull::<c_void>::dangling().as_ptr();
         let venc_ptr = std::ptr::NonNull::<c_void>::dangling().as_ptr();
         let sh = Arc::new(VideoStreamHandle::new(vi_ptr, venc_ptr, Arc::clone(&ffi)).unwrap());

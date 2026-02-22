@@ -76,7 +76,7 @@ pub mod discovery;
 
 pub mod security;
 
-pub mod ffi;
+pub mod hal;
 
 pub mod streaming;
 

@@ -37,13 +37,13 @@ use std::time::Instant;
 
 use tracing::{debug, error, warn};
 
-use crate::ffi::video::VideoFfiTrait;
-use crate::ffi::{aenc_attr, audio_param, pcm_param};
-use crate::ffi::{
+use crate::hal::video::VideoHalTrait;
+use crate::hal::{aenc_attr, audio_param, pcm_param};
+use crate::hal::{
     encode_param, video_channel_attr, video_dev_type, video_resolution, video_stream,
 };
 
-use crate::ffi::{AK_FAILED_I32, AK_SUCCESS_I32};
+use crate::hal::{AK_FAILED_I32, AK_SUCCESS_I32};
 
 // ============================================================================
 // Self-contained type definitions for IPC (matching C daemon structs)
@@ -616,8 +616,8 @@ impl VendorIpc {
     /// The conversion itself is safe: we use an exhaustive match instead of
     /// `std::mem::transmute`, so no invalid enum values can be produced.
     #[cfg(use_stubs)]
-    fn ipc_to_frame_type(val: i32) -> crate::ffi::stubs::VideoFrameType {
-        use crate::ffi::stubs::VideoFrameType;
+    fn ipc_to_frame_type(val: i32) -> crate::hal::stubs::VideoFrameType {
+        use crate::hal::stubs::VideoFrameType;
         match val {
             1 => VideoFrameType::FrameTypeI,
             2 => VideoFrameType::FrameTypeB,
@@ -627,8 +627,8 @@ impl VendorIpc {
     }
 
     #[cfg(not(use_stubs))]
-    fn ipc_to_frame_type(val: i32) -> crate::ffi::generated::video_frame_type {
-        use crate::ffi::generated::video_frame_type;
+    fn ipc_to_frame_type(val: i32) -> crate::hal::generated::video_frame_type {
+        use crate::hal::generated::video_frame_type;
         match val {
             1 => video_frame_type::FRAME_TYPE_I,
             2 => video_frame_type::FRAME_TYPE_B,
@@ -638,7 +638,7 @@ impl VendorIpc {
     }
 }
 
-impl VideoFfiTrait for VendorIpc {
+impl VideoHalTrait for VendorIpc {
     fn vi_match_sensor(&self, config_file: *const c_char) -> i32 {
         if config_file.is_null() {
             return AK_FAILED_I32;
@@ -924,7 +924,7 @@ impl VideoFfiTrait for VendorIpc {
         };
 
         // --- Populate the caller's video_stream struct ---
-        // SAFETY: The caller contract (VideoFfiTrait::venc_get_stream) requires
+        // SAFETY: The caller contract (VideoHalTrait::venc_get_stream) requires
         // `stream` to be a valid, writable, non-null pointer to a `video_stream`.
         // We do not read the current contents; we only write fields.
         // The `data` pointer we store refers to a `Vec<u8>` that lives inside
@@ -1026,7 +1026,7 @@ impl VideoFfiTrait for VendorIpc {
     }
 }
 
-impl crate::ffi::audio::AudioFfiTrait for VendorIpc {
+impl crate::hal::audio::AudioHalTrait for VendorIpc {
     fn ai_open(&self, param: *const pcm_param) -> *mut c_void {
         // SAFETY: caller guarantees `param` is a valid, non-null pointer to a
         // `pcm_param` that remains valid for the duration of this call.
@@ -1120,7 +1120,7 @@ impl crate::ffi::audio::AudioFfiTrait for VendorIpc {
     }
 }
 
-impl crate::ffi::imaging::ImagingFfiTrait for VendorIpc {
+impl crate::hal::imaging::ImagingHalTrait for VendorIpc {
     fn set_brightness(&self, value: i32) -> i32 {
         let req_data = value.to_le_bytes().to_vec();
         match self.send_request(CMD_ISP_SET_BRIGHTNESS, &req_data) {
@@ -1281,8 +1281,8 @@ mod tests {
         let daemon = FakeDaemon::start(|_cmd_id, _req| (AK_SUCCESS_I32, vec![]));
         let ipc = VendorIpc::new_with_path(&daemon.socket_path).unwrap();
 
-        // set_brightness is part of ImagingFfiTrait; accessible from within the crate.
-        let result = <VendorIpc as crate::ffi::imaging::ImagingFfiTrait>::set_brightness(&ipc, 50);
+        // set_brightness is part of ImagingHalTrait; accessible from within the crate.
+        let result = <VendorIpc as crate::hal::imaging::ImagingHalTrait>::set_brightness(&ipc, 50);
 
         assert_eq!(result, AK_SUCCESS_I32, "expected AK_SUCCESS from daemon");
     }
@@ -1293,7 +1293,7 @@ mod tests {
         let daemon = FakeDaemon::start(|_cmd_id, _req| (AK_FAILED_I32, vec![]));
         let ipc = VendorIpc::new_with_path(&daemon.socket_path).unwrap();
 
-        let result = <VendorIpc as crate::ffi::imaging::ImagingFfiTrait>::set_brightness(&ipc, 50);
+        let result = <VendorIpc as crate::hal::imaging::ImagingHalTrait>::set_brightness(&ipc, 50);
 
         assert_eq!(
             result, AK_FAILED_I32,
@@ -1312,13 +1312,13 @@ mod tests {
 
         #[cfg(use_stubs)]
         let handle = {
-            use crate::ffi::stubs::VideoDevType;
-            <VendorIpc as crate::ffi::video::VideoFfiTrait>::vi_open(&ipc, VideoDevType::Dev0)
+            use crate::hal::stubs::VideoDevType;
+            <VendorIpc as crate::hal::video::VideoHalTrait>::vi_open(&ipc, VideoDevType::Dev0)
         };
         #[cfg(not(use_stubs))]
         let handle = {
-            use crate::ffi::generated::video_dev_type;
-            <VendorIpc as crate::ffi::video::VideoFfiTrait>::vi_open(
+            use crate::hal::generated::video_dev_type;
+            <VendorIpc as crate::hal::video::VideoHalTrait>::vi_open(
                 &ipc,
                 video_dev_type::AK_VI_DEV_0,
             )
@@ -1339,7 +1339,7 @@ mod tests {
 
         for i in 0..3 {
             let result =
-                <VendorIpc as crate::ffi::imaging::ImagingFfiTrait>::set_brightness(&ipc, 50 + i);
+                <VendorIpc as crate::hal::imaging::ImagingHalTrait>::set_brightness(&ipc, 50 + i);
             assert_eq!(result, AK_SUCCESS_I32, "request {} should succeed", i);
         }
     }
@@ -1348,7 +1348,7 @@ mod tests {
     #[test]
     #[cfg(use_stubs)]
     fn test_vendor_ipc_get_stream_frame_data_parses_header_and_payload() {
-        use crate::ffi::stubs::VideoFrameType;
+        use crate::hal::stubs::VideoFrameType;
         use std::mem::MaybeUninit;
 
         // Build the daemon response: 28-byte header + 4-byte payload.
@@ -1381,10 +1381,10 @@ mod tests {
         let stream_handle = 1usize as *mut std::ffi::c_void;
 
         // Allocate an uninitialized video_stream on the stack.
-        let mut vs = MaybeUninit::<crate::ffi::stubs::VideoStream>::zeroed();
+        let mut vs = MaybeUninit::<crate::hal::stubs::VideoStream>::zeroed();
         let vs_ptr = vs.as_mut_ptr() as *mut video_stream;
 
-        let result = <VendorIpc as crate::ffi::video::VideoFfiTrait>::venc_get_stream(
+        let result = <VendorIpc as crate::hal::video::VideoHalTrait>::venc_get_stream(
             &ipc,
             stream_handle,
             vs_ptr,
@@ -1418,7 +1418,7 @@ mod tests {
 
         // Release the stream to clean up pending_frames.
         // SAFETY: vs_ptr points to the same stack allocation; still valid at this point.
-        let release_result = <VendorIpc as crate::ffi::video::VideoFfiTrait>::venc_release_stream(
+        let release_result = <VendorIpc as crate::hal::video::VideoHalTrait>::venc_release_stream(
             &ipc,
             stream_handle,
             vs_ptr,
@@ -1439,7 +1439,7 @@ mod tests {
     fn test_ipc_frame_type_conversion_p_frame() {
         #[cfg(use_stubs)]
         {
-            use crate::ffi::stubs::VideoFrameType;
+            use crate::hal::stubs::VideoFrameType;
             assert_eq!(VendorIpc::ipc_to_frame_type(0), VideoFrameType::FrameTypeP);
         }
     }
@@ -1448,7 +1448,7 @@ mod tests {
     fn test_ipc_frame_type_conversion_i_frame() {
         #[cfg(use_stubs)]
         {
-            use crate::ffi::stubs::VideoFrameType;
+            use crate::hal::stubs::VideoFrameType;
             assert_eq!(VendorIpc::ipc_to_frame_type(1), VideoFrameType::FrameTypeI);
         }
     }
@@ -1457,7 +1457,7 @@ mod tests {
     fn test_ipc_frame_type_conversion_b_frame() {
         #[cfg(use_stubs)]
         {
-            use crate::ffi::stubs::VideoFrameType;
+            use crate::hal::stubs::VideoFrameType;
             assert_eq!(VendorIpc::ipc_to_frame_type(2), VideoFrameType::FrameTypeB);
         }
     }
@@ -1466,7 +1466,7 @@ mod tests {
     fn test_ipc_frame_type_conversion_pi_frame() {
         #[cfg(use_stubs)]
         {
-            use crate::ffi::stubs::VideoFrameType;
+            use crate::hal::stubs::VideoFrameType;
             assert_eq!(VendorIpc::ipc_to_frame_type(3), VideoFrameType::FrameTypePi);
         }
     }
@@ -1475,7 +1475,7 @@ mod tests {
     fn test_ipc_frame_type_conversion_unknown_defaults_to_p() {
         #[cfg(use_stubs)]
         {
-            use crate::ffi::stubs::VideoFrameType;
+            use crate::hal::stubs::VideoFrameType;
             assert_eq!(VendorIpc::ipc_to_frame_type(99), VideoFrameType::FrameTypeP);
             assert_eq!(VendorIpc::ipc_to_frame_type(-1), VideoFrameType::FrameTypeP);
         }
@@ -1524,7 +1524,7 @@ mod tests {
     fn test_encode_video_channel_attr_round_trip() {
         #[cfg(use_stubs)]
         {
-            use crate::ffi::stubs::{CropInfo, VideoChannelAttr, VideoResolution};
+            use crate::hal::stubs::{CropInfo, VideoChannelAttr, VideoResolution};
 
             let attr = VideoChannelAttr {
                 crop: CropInfo {
@@ -1590,7 +1590,7 @@ mod tests {
     fn test_encode_encode_param_byte_length() {
         #[cfg(use_stubs)]
         {
-            use crate::ffi::stubs::EncodeParam;
+            use crate::hal::stubs::EncodeParam;
 
             let param = EncodeParam::default();
             let encoded = VendorIpc::encode_encode_param(&param);
@@ -1604,7 +1604,7 @@ mod tests {
     fn test_encode_pcm_param_values() {
         #[cfg(use_stubs)]
         {
-            use crate::ffi::stubs::PcmParam;
+            use crate::hal::stubs::PcmParam;
 
             let param = PcmParam {
                 sample_rate: 8000,
@@ -1626,7 +1626,7 @@ mod tests {
     fn test_encode_audio_param_values() {
         #[cfg(use_stubs)]
         {
-            use crate::ffi::stubs::AudioParam;
+            use crate::hal::stubs::AudioParam;
 
             let param = AudioParam {
                 sample_rate: 48000,
@@ -1650,7 +1650,7 @@ mod tests {
     fn test_encode_aenc_attr_values() {
         #[cfg(use_stubs)]
         {
-            use crate::ffi::stubs::AencAttr;
+            use crate::hal::stubs::AencAttr;
 
             let attr = AencAttr { aac_head: 1 };
             let encoded = VendorIpc::encode_aenc_attr(&attr);

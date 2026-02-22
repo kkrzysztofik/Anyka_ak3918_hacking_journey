@@ -94,7 +94,7 @@ pub struct MotorMessage {
     pub attach_timer: c_int,
 }
 
-// --- PTZ types matching SDK (for PtzFfiTrait) - no C header dependency ---
+// --- PTZ types matching SDK (for PtzHalTrait) - no C header dependency ---
 
 /// PTZ device (motor index). Matches C enum ptz_device.
 #[repr(C)]

@@ -9,8 +9,8 @@
 //! All handles implement the Drop trait to automatically clean up resources:
 //!
 //! ```rust,no_run
-//! use onvif_rust::ffi::audio::*;
-//! use onvif_rust::ffi::pcm_param;
+//! use onvif_rust::hal::audio::*;
+//! use onvif_rust::hal::pcm_param;
 //!
 //! // Handle is automatically closed when it goes out of scope
 //! {
@@ -29,17 +29,14 @@ use crate::platform::PlatformError;
 use crate::platform::PlatformResult;
 use std::ffi::c_void;
 
-#[cfg(not(use_stubs))]
-use crate::ffi::generated::{aenc_attr, audio_param, pcm_param};
+use crate::hal::{aenc_attr, audio_param, pcm_param};
 
-#[cfg(use_stubs)]
-use crate::ffi::{aenc_attr, audio_param, pcm_param};
-
-use crate::ffi::{AK_FAILED_I32, AK_SUCCESS_I32};
+use crate::hal::{AK_FAILED_I32, AK_SUCCESS_I32};
 
 /// Internal trait for abstracting audio FFI calls to enable mocking in tests.
 #[cfg_attr(test, mockall::automock)]
-pub(crate) trait AudioFfiTrait: Send + Sync {
+#[allow(dead_code)]
+pub(crate) trait AudioHalTrait: Send + Sync {
     fn ai_open(&self, param: *const pcm_param) -> *mut c_void;
     fn ai_close(&self, handle: *mut c_void) -> i32;
     fn ai_set_adc_volume(&self, handle: *mut c_void, vol: i32) -> i32;
@@ -50,103 +47,40 @@ pub(crate) trait AudioFfiTrait: Send + Sync {
 }
 
 /// Default implementation that calls the real FFI functions.
-pub(crate) struct RealAudioFfi;
+pub(crate) struct StubAudioHal;
 
-impl AudioFfiTrait for RealAudioFfi {
-    #[cfg(not(use_stubs))]
-    fn ai_open(&self, param: *const pcm_param) -> *mut c_void {
-        unsafe extern "C" {
-            fn ak_ai_open(param: *const pcm_param) -> *mut c_void;
-        }
-        unsafe { ak_ai_open(param) }
-    }
-
-    #[cfg(use_stubs)]
+impl AudioHalTrait for StubAudioHal {
     fn ai_open(&self, _param: *const pcm_param) -> *mut c_void {
         std::ptr::NonNull::<c_void>::dangling().as_ptr()
     }
 
-    #[cfg(not(use_stubs))]
-    fn ai_close(&self, handle: *mut c_void) -> i32 {
-        unsafe extern "C" {
-            fn ak_ai_close(handle: *mut c_void) -> i32;
-        }
-        unsafe { ak_ai_close(handle) }
-    }
-
-    #[cfg(use_stubs)]
     fn ai_close(&self, _handle: *mut c_void) -> i32 {
         AK_SUCCESS_I32
     }
 
-    #[cfg(not(use_stubs))]
-    fn ai_set_adc_volume(&self, handle: *mut c_void, vol: i32) -> i32 {
-        unsafe extern "C" {
-            fn ak_ai_set_adc_volume(handle: *mut c_void, vol: i32) -> i32;
-        }
-        unsafe { ak_ai_set_adc_volume(handle, vol) }
-    }
-
-    #[cfg(use_stubs)]
     fn ai_set_adc_volume(&self, _handle: *mut c_void, _vol: i32) -> i32 {
         AK_SUCCESS_I32
     }
 
-    #[cfg(not(use_stubs))]
-    fn ai_set_aslc_volume(&self, handle: *mut c_void, vol: i32) -> i32 {
-        unsafe extern "C" {
-            fn ak_ai_set_aslc_volume(handle: *mut c_void, vol: i32) -> i32;
-        }
-        unsafe { ak_ai_set_aslc_volume(handle, vol) }
-    }
-
-    #[cfg(use_stubs)]
     fn ai_set_aslc_volume(&self, _handle: *mut c_void, _vol: i32) -> i32 {
         AK_SUCCESS_I32
     }
 
-    #[cfg(not(use_stubs))]
-    fn aenc_open(&self, param: *const audio_param) -> *mut c_void {
-        unsafe extern "C" {
-            fn ak_aenc_open(param: *const audio_param) -> *mut c_void;
-        }
-        unsafe { ak_aenc_open(param) }
-    }
-
-    #[cfg(use_stubs)]
     fn aenc_open(&self, _param: *const audio_param) -> *mut c_void {
         std::ptr::NonNull::<c_void>::dangling().as_ptr()
     }
 
-    #[cfg(not(use_stubs))]
-    fn aenc_close(&self, handle: *mut c_void) -> i32 {
-        unsafe extern "C" {
-            fn ak_aenc_close(handle: *mut c_void) -> i32;
-        }
-        unsafe { ak_aenc_close(handle) }
-    }
-
-    #[cfg(use_stubs)]
     fn aenc_close(&self, _handle: *mut c_void) -> i32 {
         AK_SUCCESS_I32
     }
 
-    #[cfg(not(use_stubs))]
-    fn aenc_set_attr(&self, enc_handle: *mut c_void, attr: *const aenc_attr) -> i32 {
-        unsafe extern "C" {
-            fn ak_aenc_set_attr(enc_handle: *mut c_void, attr: *const aenc_attr) -> i32;
-        }
-        unsafe { ak_aenc_set_attr(enc_handle, attr) }
-    }
-
-    #[cfg(use_stubs)]
     fn aenc_set_attr(&self, _enc_handle: *mut c_void, _attr: *const aenc_attr) -> i32 {
         AK_SUCCESS_I32
     }
 }
 
 // Global instance for default FFI implementation
-static REAL_AUDIO_FFI: RealAudioFfi = RealAudioFfi;
+static DEFAULT_AUDIO_HAL: StubAudioHal = StubAudioHal;
 
 /// Helper function to convert SDK return codes to PlatformResult.
 ///
@@ -193,9 +127,7 @@ unsafe impl Sync for AudioInputHandle {}
 
 impl Drop for AudioInputHandle {
     fn drop(&mut self) {
-        if !self.handle.is_null() {
-            let _ = REAL_AUDIO_FFI.ai_close(self.handle);
-        }
+        // In IPC mode, handles are managed by vendor-daemon - no-op cleanup.
     }
 }
 
@@ -214,7 +146,7 @@ impl AudioInputHandle {
 /// Internal helper that takes FFI trait for testability.
 pub(crate) fn audio_input_open_internal(
     param: &pcm_param,
-    ffi: &dyn AudioFfiTrait,
+    ffi: &dyn AudioHalTrait,
 ) -> PlatformResult<AudioInputHandle> {
     let handle = ffi.ai_open(param);
 
@@ -245,14 +177,14 @@ pub(crate) fn audio_input_open_internal(
 /// - We validate the result (null check)
 /// - Handle is wrapped in `AudioInputHandle` for RAII cleanup
 pub fn audio_input_open(param: &pcm_param) -> PlatformResult<AudioInputHandle> {
-    audio_input_open_internal(param, &REAL_AUDIO_FFI)
+    audio_input_open_internal(param, &DEFAULT_AUDIO_HAL)
 }
 
 /// Internal helper that takes FFI trait for testability.
 pub(crate) fn audio_input_set_volume_internal(
     handle: &AudioInputHandle,
     volume: u8,
-    ffi: &dyn AudioFfiTrait,
+    ffi: &dyn AudioHalTrait,
 ) -> PlatformResult<()> {
     // Validate volume range (0-15) before computing ADC/ASLC splits
     if volume > 15 {
@@ -300,7 +232,7 @@ pub(crate) fn audio_input_set_volume_internal(
 /// - ADC volume: `volume >= 8 ? 8 : (volume % 8)`
 /// - ASLC volume: `volume >= 8 ? (volume - 8) : 0`
 pub fn audio_input_set_volume(handle: &AudioInputHandle, volume: u8) -> PlatformResult<()> {
-    audio_input_set_volume_internal(handle, volume, &REAL_AUDIO_FFI)
+    audio_input_set_volume_internal(handle, volume, &DEFAULT_AUDIO_HAL)
 }
 
 /// RAII handle for audio encoder.
@@ -323,9 +255,7 @@ unsafe impl Sync for AudioEncoderHandle {}
 
 impl Drop for AudioEncoderHandle {
     fn drop(&mut self) {
-        if !self.handle.is_null() {
-            let _ = REAL_AUDIO_FFI.aenc_close(self.handle);
-        }
+        // In IPC mode, handles are managed by vendor-daemon - no-op cleanup.
     }
 }
 
@@ -344,7 +274,7 @@ impl AudioEncoderHandle {
 /// Internal helper that takes FFI trait for testability.
 pub(crate) fn audio_encoder_open_internal(
     param: &audio_param,
-    ffi: &dyn AudioFfiTrait,
+    ffi: &dyn AudioHalTrait,
 ) -> PlatformResult<AudioEncoderHandle> {
     let handle = ffi.aenc_open(param);
 
@@ -375,14 +305,14 @@ pub(crate) fn audio_encoder_open_internal(
 /// - We validate the result (null check)
 /// - Handle is wrapped in `AudioEncoderHandle` for RAII cleanup
 pub fn audio_encoder_open(param: &audio_param) -> PlatformResult<AudioEncoderHandle> {
-    audio_encoder_open_internal(param, &REAL_AUDIO_FFI)
+    audio_encoder_open_internal(param, &DEFAULT_AUDIO_HAL)
 }
 
 /// Internal helper that takes FFI trait for testability.
 pub(crate) fn audio_encoder_set_config_internal(
     handle: &AudioEncoderHandle,
     attr: &aenc_attr,
-    ffi: &dyn AudioFfiTrait,
+    ffi: &dyn AudioHalTrait,
 ) -> PlatformResult<()> {
     let ret = ffi.aenc_set_attr(handle.as_ptr(), attr);
     check_result(ret, "ak_aenc_set_attr")
@@ -406,7 +336,7 @@ pub fn audio_encoder_set_config(
     handle: &AudioEncoderHandle,
     attr: &aenc_attr,
 ) -> PlatformResult<()> {
-    audio_encoder_set_config_internal(handle, attr, &REAL_AUDIO_FFI)
+    audio_encoder_set_config_internal(handle, attr, &DEFAULT_AUDIO_HAL)
 }
 
 #[cfg(test)]
@@ -502,7 +432,7 @@ mod tests {
     // Mockall-based tests for wrapper functions
     #[test]
     fn test_audio_input_open_internal_calls_ffi_and_returns_handle() {
-        let mut mock_ffi = MockAudioFfiTrait::new();
+        let mut mock_ffi = MockAudioHalTrait::new();
         let test_handle = std::ptr::NonNull::<c_void>::dangling().as_ptr();
         let param = pcm_param {
             sample_rate: 8000,
@@ -524,7 +454,7 @@ mod tests {
 
     #[test]
     fn test_audio_input_open_internal_returns_error_on_null_handle() {
-        let mut mock_ffi = MockAudioFfiTrait::new();
+        let mut mock_ffi = MockAudioHalTrait::new();
         let param = pcm_param {
             sample_rate: 8000,
             channel_num: 1,
@@ -546,7 +476,7 @@ mod tests {
 
     #[test]
     fn test_audio_input_set_volume_internal_calls_both_ffi_functions() {
-        let mut mock_ffi = MockAudioFfiTrait::new();
+        let mut mock_ffi = MockAudioHalTrait::new();
         let test_handle = std::ptr::NonNull::<c_void>::dangling().as_ptr();
         let ai_handle = AudioInputHandle {
             handle: test_handle,
@@ -572,7 +502,7 @@ mod tests {
 
     #[test]
     fn test_audio_input_set_volume_internal_low_volume_calls_only_adc() {
-        let mut mock_ffi = MockAudioFfiTrait::new();
+        let mut mock_ffi = MockAudioHalTrait::new();
         let test_handle = std::ptr::NonNull::<c_void>::dangling().as_ptr();
         let ai_handle = AudioInputHandle {
             handle: test_handle,
@@ -598,7 +528,7 @@ mod tests {
 
     #[test]
     fn test_audio_input_set_volume_internal_propagates_error_on_adc_failure() {
-        let mut mock_ffi = MockAudioFfiTrait::new();
+        let mut mock_ffi = MockAudioHalTrait::new();
         let test_handle = std::ptr::NonNull::<c_void>::dangling().as_ptr();
         let ai_handle = AudioInputHandle {
             handle: test_handle,
@@ -629,7 +559,7 @@ mod tests {
 
     #[test]
     fn test_audio_input_set_volume_internal_propagates_error_on_aslc_failure() {
-        let mut mock_ffi = MockAudioFfiTrait::new();
+        let mut mock_ffi = MockAudioHalTrait::new();
         let test_handle = std::ptr::NonNull::<c_void>::dangling().as_ptr();
         let ai_handle = AudioInputHandle {
             handle: test_handle,
@@ -660,7 +590,7 @@ mod tests {
 
     #[test]
     fn test_audio_input_set_volume_internal_rejects_out_of_range_volume() {
-        let mock_ffi = MockAudioFfiTrait::new();
+        let mock_ffi = MockAudioHalTrait::new();
         let test_handle = std::ptr::NonNull::<c_void>::dangling().as_ptr();
         let ai_handle = AudioInputHandle {
             handle: test_handle,
@@ -679,7 +609,7 @@ mod tests {
         }
 
         // Volume at maximum valid value (15) should be accepted
-        let mut mock_ffi_valid = MockAudioFfiTrait::new();
+        let mut mock_ffi_valid = MockAudioHalTrait::new();
         let test_handle_usize = test_handle as usize;
         mock_ffi_valid
             .expect_ai_set_adc_volume()
@@ -698,7 +628,7 @@ mod tests {
 
     #[test]
     fn test_audio_encoder_open_internal_calls_ffi_and_returns_handle() {
-        let mut mock_ffi = MockAudioFfiTrait::new();
+        let mut mock_ffi = MockAudioHalTrait::new();
         let test_handle = std::ptr::NonNull::<c_void>::dangling().as_ptr();
         let mut param = audio_param::default();
         param.sample_rate = 8000;
@@ -719,7 +649,7 @@ mod tests {
 
     #[test]
     fn test_audio_encoder_open_internal_returns_error_on_null_handle() {
-        let mut mock_ffi = MockAudioFfiTrait::new();
+        let mut mock_ffi = MockAudioHalTrait::new();
         let mut param = audio_param::default();
         param.sample_rate = 8000;
         param.channel_num = 1;
@@ -740,7 +670,7 @@ mod tests {
 
     #[test]
     fn test_audio_encoder_set_config_internal_calls_ffi() {
-        let mut mock_ffi = MockAudioFfiTrait::new();
+        let mut mock_ffi = MockAudioHalTrait::new();
         let test_handle = std::ptr::NonNull::<c_void>::dangling().as_ptr();
         let enc_handle = AudioEncoderHandle {
             handle: test_handle,
@@ -760,7 +690,7 @@ mod tests {
 
     #[test]
     fn test_audio_encoder_set_config_internal_propagates_error() {
-        let mut mock_ffi = MockAudioFfiTrait::new();
+        let mut mock_ffi = MockAudioHalTrait::new();
         let test_handle = std::ptr::NonNull::<c_void>::dangling().as_ptr();
         let enc_handle = AudioEncoderHandle {
             handle: test_handle,
