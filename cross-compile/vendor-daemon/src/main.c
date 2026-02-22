@@ -45,7 +45,8 @@
 
 #define SOCKET_PATH      "/tmp/vendor-daemon.sock"
 #define MAX_REQUEST_SIZE (1 * 1024 * 1024)  /* 1 MB – for frame data */
-#define LOG_FILE_PATH    "/tmp/vendor-daemon.log"
+#define LOG_FILE_PATH_DEFAULT "/mnt/logs/vendor_daemon.log"
+#define LOG_FILE_PATH_MAX    512
 #define STATUS_OK        0
 #define STATUS_ERROR     (-1)
 
@@ -996,14 +997,32 @@ int main(int argc, char *argv[])
     (void)argv;
 
     /* ================================================================
+     * LOG FILE PATH INITIALIZATION
+     * ================================================================ */
+
+    /* Determine log file path from environment variable or use default.
+     * Env var: VENDOR_DAEMON_LOG_FILE
+     * Default: /mnt/logs/vendor_daemon.log
+     */
+    char log_file_path[LOG_FILE_PATH_MAX];
+    const char *env_log_path = getenv("VENDOR_DAEMON_LOG_FILE");
+    if (env_log_path && env_log_path[0] != '\0') {
+        strncpy(log_file_path, env_log_path, LOG_FILE_PATH_MAX - 1);
+        log_file_path[LOG_FILE_PATH_MAX - 1] = '\0';
+    } else {
+        strncpy(log_file_path, LOG_FILE_PATH_DEFAULT, LOG_FILE_PATH_MAX - 1);
+        log_file_path[LOG_FILE_PATH_MAX - 1] = '\0';
+    }
+
+    /* ================================================================
      * LOGGING INITIALIZATION
      * ================================================================ */
 
     /* Open log file */
-    g_log_fp = fopen(LOG_FILE_PATH, "a");
+    g_log_fp = fopen(log_file_path, "a");
     if (!g_log_fp) {
         fprintf(stderr, "Failed to open log file %s: %s\n",
-                LOG_FILE_PATH, strerror(errno));
+                log_file_path, strerror(errno));
         g_log_fp = NULL;
     }
 
@@ -1026,7 +1045,7 @@ int main(int argc, char *argv[])
 
     log_info("========================================");
     log_info("vendor-daemon starting");
-    log_info("log file: %s", LOG_FILE_PATH);
+    log_info("log file: %s", log_file_path);
 
     /* Configure Anyka SDK logging:
      * - Set print level to DEBUG so all SDK messages go to stdout

@@ -20,8 +20,8 @@ pub mod vendor_ipc;
 // be too verbose and harder to maintain as the platform evolves.
 pub use anyka_sdk::*;
 pub use audio::{
-    audio_encoder_open, audio_encoder_set_config, audio_input_open, audio_input_set_volume,
-    AudioEncoderHandle, AudioInputHandle,
+    AudioEncoderHandle, AudioInputHandle, audio_encoder_open, audio_encoder_set_config,
+    audio_input_open, audio_input_set_volume,
 };
 pub use imaging::{
     imaging_set_brightness, imaging_set_contrast, imaging_set_ir_filter, imaging_set_saturation,
@@ -29,14 +29,14 @@ pub use imaging::{
     onvif_to_sdk_saturation, onvif_to_sdk_sharpness, validate_onvif_range,
 };
 pub use ptz::{
-    degrees_to_steps, ptz_get_step_pos, ptz_open, ptz_stop, ptz_turn, steps_to_degrees,
-    validate_pan_range, validate_tilt_range, PTZHandle,
+    PTZHandle, degrees_to_steps, ptz_get_step_pos, ptz_open, ptz_stop, ptz_turn, steps_to_degrees,
+    validate_pan_range, validate_tilt_range,
 };
 pub use video::{
-    video_encoder_open, video_encoder_request_idr, video_encoder_set_rc, video_input_capture_on,
+    VideoEncoderHandle, VideoInputHandle, VideoStreamHandle, video_encoder_open,
+    video_encoder_request_idr, video_encoder_set_rc, video_input_capture_on,
     video_input_get_sensor_resolution, video_input_match_sensor, video_input_open,
-    video_input_set_channel_attr, vpss_destroy, vpss_init, VideoEncoderHandle, VideoInputHandle,
-    VideoStreamHandle,
+    video_input_set_channel_attr, vpss_destroy, vpss_init,
 };
 
 /// Anyka SDK success code as i32 for consistent comparisons.

@@ -26,9 +26,7 @@ use tokio::sync::Notify;
 use tokio::task::JoinHandle;
 
 use crate::hal::ptz::{PTZHandle, PtzHalTrait, default_ptz_hal, ptz_open_internal};
-use crate::hal::{AK_SUCCESS_I32, PtzDirection};
-
-use crate::hal::ptz_driver::ptz_turn_direction;
+use crate::hal::{AK_SUCCESS_I32, PtzDirection, PtzTurnDirection};
 
 use super::traits::{
     PTZControl, PlatformError, PlatformResult, PtzLimits, PtzPosition, PtzPreset, PtzVelocity,
@@ -60,18 +58,18 @@ const PTZ_STOP_DIRECTIONS: [PtzDirection; 4] = [
 /// Uses an exhaustive match instead of transmute so the compiler catches any
 /// future enum changes at compile time rather than producing silent UB.
 #[allow(dead_code)]
-fn direction_to_ffi(direction: PtzDirection) -> ptz_turn_direction {
+fn direction_to_ffi(direction: PtzDirection) -> PtzTurnDirection {
     match direction {
-        PtzDirection::Left => ptz_turn_direction::PTZ_TURN_LEFT,
-        PtzDirection::Right => ptz_turn_direction::PTZ_TURN_RIGHT,
-        PtzDirection::Up => ptz_turn_direction::PTZ_TURN_UP,
-        PtzDirection::Down => ptz_turn_direction::PTZ_TURN_DOWN,
+        PtzDirection::Left => PtzTurnDirection::PTZ_TURN_LEFT,
+        PtzDirection::Right => PtzTurnDirection::PTZ_TURN_RIGHT,
+        PtzDirection::Up => PtzTurnDirection::PTZ_TURN_UP,
+        PtzDirection::Down => PtzTurnDirection::PTZ_TURN_DOWN,
     }
 }
 
 fn iter_ffi_directions(
     directions: &[PtzDirection],
-) -> impl Iterator<Item = (PtzDirection, ptz_turn_direction)> + '_ {
+) -> impl Iterator<Item = (PtzDirection, PtzTurnDirection)> + '_ {
     directions
         .iter()
         .copied()
@@ -510,7 +508,7 @@ mod tests {
     async fn test_move_positive_pan_turns_right() {
         let mut mock = mock_with_open();
         mock.expect_ptz_turn()
-            .withf(|dir, deg| *dir == ptz_turn_direction::PTZ_TURN_RIGHT && *deg == 90)
+            .withf(|dir, deg| *dir == PtzTurnDirection::PTZ_TURN_RIGHT && *deg == 90)
             .times(1)
             .returning(|_, _| AK_SUCCESS_I32);
         mock.expect_ptz_stop().returning(|_| AK_SUCCESS_I32);
@@ -527,7 +525,7 @@ mod tests {
     async fn test_move_negative_pan_turns_left() {
         let mut mock = mock_with_open();
         mock.expect_ptz_turn()
-            .withf(|dir, deg| *dir == ptz_turn_direction::PTZ_TURN_LEFT && *deg == 45)
+            .withf(|dir, deg| *dir == PtzTurnDirection::PTZ_TURN_LEFT && *deg == 45)
             .times(1)
             .returning(|_, _| AK_SUCCESS_I32);
         mock.expect_ptz_stop().returning(|_| AK_SUCCESS_I32);
@@ -546,7 +544,7 @@ mod tests {
     async fn test_move_positive_tilt_turns_down() {
         let mut mock = mock_with_open();
         mock.expect_ptz_turn()
-            .withf(|dir, deg| *dir == ptz_turn_direction::PTZ_TURN_DOWN && *deg == 60)
+            .withf(|dir, deg| *dir == PtzTurnDirection::PTZ_TURN_DOWN && *deg == 60)
             .times(1)
             .returning(|_, _| AK_SUCCESS_I32);
         mock.expect_ptz_stop().returning(|_| AK_SUCCESS_I32);
@@ -563,7 +561,7 @@ mod tests {
     async fn test_move_negative_tilt_turns_up() {
         let mut mock = mock_with_open();
         mock.expect_ptz_turn()
-            .withf(|dir, deg| *dir == ptz_turn_direction::PTZ_TURN_UP && *deg == 30)
+            .withf(|dir, deg| *dir == PtzTurnDirection::PTZ_TURN_UP && *deg == 30)
             .times(1)
             .returning(|_, _| AK_SUCCESS_I32);
         mock.expect_ptz_stop().returning(|_| AK_SUCCESS_I32);
@@ -603,7 +601,7 @@ mod tests {
         let mut mock = mock_with_open();
         // Pan should be clamped to 350, not 500
         mock.expect_ptz_turn()
-            .withf(|dir, deg| *dir == ptz_turn_direction::PTZ_TURN_RIGHT && *deg == 350)
+            .withf(|dir, deg| *dir == PtzTurnDirection::PTZ_TURN_RIGHT && *deg == 350)
             .times(1)
             .returning(|_, _| AK_SUCCESS_I32);
         mock.expect_ptz_stop().returning(|_| AK_SUCCESS_I32);
@@ -680,7 +678,7 @@ mod tests {
     async fn test_continuous_move_positive_pan() {
         let mut mock = mock_with_open();
         mock.expect_ptz_turn()
-            .withf(|dir, deg| *dir == ptz_turn_direction::PTZ_TURN_RIGHT && *deg == 350)
+            .withf(|dir, deg| *dir == PtzTurnDirection::PTZ_TURN_RIGHT && *deg == 350)
             .times(1)
             .returning(|_, _| AK_SUCCESS_I32);
         mock.expect_ptz_stop().returning(|_| AK_SUCCESS_I32);
@@ -697,7 +695,7 @@ mod tests {
     async fn test_continuous_move_negative_tilt() {
         let mut mock = mock_with_open();
         mock.expect_ptz_turn()
-            .withf(|dir, deg| *dir == ptz_turn_direction::PTZ_TURN_UP && *deg == 130)
+            .withf(|dir, deg| *dir == PtzTurnDirection::PTZ_TURN_UP && *deg == 130)
             .times(1)
             .returning(|_, _| AK_SUCCESS_I32);
         mock.expect_ptz_stop().returning(|_| AK_SUCCESS_I32);
@@ -1000,7 +998,7 @@ mod tests {
         let mut mock = mock_with_open();
         // Pan -500 should be clamped to -350, turning Left 350 degrees
         mock.expect_ptz_turn()
-            .withf(|dir, deg| *dir == ptz_turn_direction::PTZ_TURN_LEFT && *deg == 350)
+            .withf(|dir, deg| *dir == PtzTurnDirection::PTZ_TURN_LEFT && *deg == 350)
             .times(1)
             .returning(|_, _| AK_SUCCESS_I32);
         mock.expect_ptz_stop().returning(|_| AK_SUCCESS_I32);
@@ -1020,7 +1018,7 @@ mod tests {
         let mut mock = mock_with_open();
         // Tilt -200 should be clamped to -130, turning Up 130 degrees
         mock.expect_ptz_turn()
-            .withf(|dir, deg| *dir == ptz_turn_direction::PTZ_TURN_UP && *deg == 130)
+            .withf(|dir, deg| *dir == PtzTurnDirection::PTZ_TURN_UP && *deg == 130)
             .times(1)
             .returning(|_, _| AK_SUCCESS_I32);
         mock.expect_ptz_stop().returning(|_| AK_SUCCESS_I32);
@@ -1042,14 +1040,14 @@ mod tests {
 
         // First call: pan Right 100 degrees (positive pan delta)
         mock.expect_ptz_turn()
-            .withf(|dir, deg| *dir == ptz_turn_direction::PTZ_TURN_RIGHT && *deg == 100)
+            .withf(|dir, deg| *dir == PtzTurnDirection::PTZ_TURN_RIGHT && *deg == 100)
             .times(1)
             .in_sequence(&mut seq)
             .returning(|_, _| AK_SUCCESS_I32);
 
         // Second call: tilt Up 50 degrees (negative tilt delta → Up)
         mock.expect_ptz_turn()
-            .withf(|dir, deg| *dir == ptz_turn_direction::PTZ_TURN_UP && *deg == 50)
+            .withf(|dir, deg| *dir == PtzTurnDirection::PTZ_TURN_UP && *deg == 50)
             .times(1)
             .in_sequence(&mut seq)
             .returning(|_, _| AK_SUCCESS_I32);

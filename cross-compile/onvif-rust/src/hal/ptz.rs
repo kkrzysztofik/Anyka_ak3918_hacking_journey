@@ -33,7 +33,7 @@ use crate::hal::ptz_driver::{ptz_device, ptz_feedback_pin, ptz_turn_direction};
 #[cfg(use_stubs)]
 use crate::hal::{ptz_device, ptz_feedback_pin, ptz_turn_direction};
 
-use crate::hal::{PtzDirection, PtzMotor, AK_FAILED_I32, AK_SUCCESS_I32};
+use crate::hal::{AK_FAILED_I32, AK_SUCCESS_I32, PtzDirection, PtzMotor};
 
 /// Internal trait for abstracting PTZ FFI calls to enable mocking in tests.
 #[cfg_attr(test, mockall::automock)]

@@ -1137,8 +1137,8 @@ fn frame_read_loop(
 ) {
     use crate::hal::AK_SUCCESS_I32;
 
-    // Configurable poll sleep between drain cycles (vendor default: 30ms).
-    let poll_sleep_ms = env_var_u64("ANYKA_FRAME_POLL_SLEEP_MS").unwrap_or(30);
+    // Configurable poll sleep between drain cycles (default: 50ms, tunable via env).
+    let poll_sleep_ms = env_var_u64("ANYKA_FRAME_POLL_SLEEP_MS").unwrap_or(50);
 
     tracing::info!(
         stream = ?stream_id,
@@ -1151,6 +1151,8 @@ fn frame_read_loop(
     let mut total_bytes: u64 = 0;
     let mut iframe_count: u64 = 0;
     let mut error_count: u64 = 0;
+    let mut current_sleep_ms: u64 = poll_sleep_ms;
+    let mut last_error_was_no_data: bool = true;
 
     while !stop_signal.load(Ordering::SeqCst) {
         // ── Drain all available frames (vendor pattern) ──────────────
@@ -1170,10 +1172,24 @@ fn frame_read_loop(
             let ret = ffi.venc_get_stream(stream_handle.as_ptr(), stream_ptr);
 
             if ret != AK_SUCCESS_I32 {
-                // No more frames available in this drain cycle.
-                let sdk_errno = ffi.get_error_no();
-                if sdk_errno == SDK_ERROR_NO_DATA {
+                // Optimistic fast-path: skip IPC get_error_no() call when we
+                // expect no-data (the common case). Probe on first call to
+                // establish baseline, then periodically to detect changes.
+                let probe_interval = 50u32;
+                let should_probe = consecutive_no_data == 0
+                    || !last_error_was_no_data
+                    || consecutive_no_data.wrapping_add(1).is_multiple_of(probe_interval);
+
+                let is_no_data = if should_probe {
+                    let sdk_errno = ffi.get_error_no();
+                    sdk_errno == SDK_ERROR_NO_DATA
+                } else {
+                    true // Assume no-data (optimistic)
+                };
+
+                if is_no_data {
                     consecutive_no_data += 1;
+                    last_error_was_no_data = true;
                     stream_health.record_no_data_error(stream_id);
 
                     if consecutive_no_data.is_multiple_of(NO_DATA_IDR_RECOVERY_EVERY_ERRORS) {
@@ -1208,6 +1224,7 @@ fn frame_read_loop(
                         }
                     }
                 } else {
+                    last_error_was_no_data = false;
                     error_count += 1;
                     // Log non-no-data errors on first occurrence and every 50th
                     if error_count == 1 || error_count.is_multiple_of(50) {
@@ -1215,9 +1232,8 @@ fn frame_read_loop(
                         tracing::warn!(
                             stream = ?stream_id,
                             error_code = ret,
-                            sdk_errno,
-                            sdk_error = %sdk_errstr,
-                            "venc_get_stream failed (non-no-data error)"
+                            "venc_get_stream failed (non-no-data error): {}",
+                            sdk_errstr
                         );
                     }
                 }
@@ -1226,6 +1242,7 @@ fn frame_read_loop(
 
             // Reset no-data counter on successful frame retrieval
             consecutive_no_data = 0;
+            last_error_was_no_data = true;
 
             // SAFETY: venc_get_stream succeeded, so `stream` is fully initialized.
             // We keep using the same video_stream address for get+release because
@@ -1300,8 +1317,15 @@ fn frame_read_loop(
             );
         }
 
-        // Fixed sleep between drain cycles (vendor pattern: 30ms)
-        std::thread::sleep(Duration::from_millis(poll_sleep_ms));
+        // Adaptive sleep: back off when no frames available to reduce CPU load
+        // on single-core ARM. Reset to base rate when frames arrive.
+        if frames_this_cycle > 0 {
+            current_sleep_ms = poll_sleep_ms;
+        } else {
+            // Double sleep up to 4x base (capped)
+            current_sleep_ms = (current_sleep_ms * 2).min(poll_sleep_ms * 4);
+        }
+        std::thread::sleep(Duration::from_millis(current_sleep_ms));
     }
 
     tracing::info!(
@@ -4506,9 +4530,9 @@ mod tests {
     }
 
     #[test]
-    fn test_drain_loop_fixed_sleep() {
-        // Verify the drain-loop uses fixed sleep (30ms default) between cycles,
-        // not exponential backoff. With no-data errors, each cycle sleeps 30ms.
+    fn test_drain_loop_adaptive_sleep() {
+        // Verify the drain-loop uses adaptive sleep (50ms default) between cycles.
+        // With no-data errors, each cycle backs off: 50 + 100 + 200 + 200 = 550ms (capped at 4x).
         let mut mock = MockVideoHalTrait::new();
         let stop = Arc::new(AtomicBool::new(false));
         let stop_clone = Arc::clone(&stop);
@@ -4552,14 +4576,146 @@ mod tests {
         let elapsed = start.elapsed();
 
         assert!(error_count.load(Ordering::SeqCst) >= 4);
-        // 4 drain cycles × 30ms fixed sleep = ~120ms.
-        // With exponential backoff this would have been 10+20+40+80 = 150ms.
-        // Allow tolerance: should be between 90ms and 250ms.
+        // 4 drain cycles × adaptive sleep: 50 + 100 + 200 + 200 = 550ms (capped at 4x base).
+        // Allow tolerance: should be between 400ms and 800ms.
         assert!(
-            elapsed >= Duration::from_millis(90) && elapsed <= Duration::from_millis(250),
-            "Expected ~120ms with fixed 30ms sleep over 4 cycles, got {:?}",
+            elapsed >= Duration::from_millis(400) && elapsed <= Duration::from_millis(800),
+            "Expected ~550ms with adaptive sleep over 4 cycles, got {:?}",
             elapsed
         );
+    }
+
+    #[test]
+    fn test_drain_loop_resets_sleep_on_frame() {
+        // Verify adaptive sleep resets to base when frames are available.
+        // Cycle 1: no-data (sleep 100ms), cycle 2: frame + no-data (sleep 50ms), cycle 3: no-data (sleep 100ms).
+        // Total: ~250ms (100 + 50 + 100).
+        let mut mock = MockVideoHalTrait::new();
+        let stop = Arc::new(AtomicBool::new(false));
+        let stop_clone = Arc::clone(&stop);
+        let call_idx = Arc::new(AtomicU32::new(0));
+        let call_idx_clone = Arc::clone(&call_idx);
+
+        let frame_data: Vec<u8> = vec![0xCD; 64];
+        let frame_data_ptr = frame_data.as_ptr() as usize;
+
+        // Cycle 1: no-data (sleep backs off)
+        // Cycle 2: frame found then no-data (sleep resets to base, then backs off)
+        // Cycle 3: no-data (sleep backs off again)
+        // Cycle 4: no-data and stop
+        mock.expect_venc_get_stream()
+            .returning(move |_, stream_ptr| {
+                let idx = call_idx_clone.fetch_add(1, Ordering::SeqCst);
+                match idx {
+                    0 => crate::hal::AK_FAILED_I32, // no-data: sleep will back off to 100ms
+                    1 => {
+                        // First call in cycle 2: return frame (sleep resets to 50ms)
+                        unsafe {
+                            let stream = &mut *stream_ptr;
+                            stream.data = frame_data_ptr as *mut u8;
+                            stream.len = 64;
+                            stream.ts = 1000;
+                            stream.seq_no = 1;
+                            stream.frame_type = VideoFrameType::FrameTypeP;
+                        }
+                        crate::hal::AK_SUCCESS_I32
+                    }
+                    2 => crate::hal::AK_FAILED_I32, // Second call in cycle 2: no-data (sleep 100ms)
+                    3 => crate::hal::AK_FAILED_I32, // no-data (sleep 200ms capped)
+                    _ => {
+                        stop_clone.store(true, Ordering::SeqCst);
+                        crate::hal::AK_FAILED_I32
+                    }
+                }
+            });
+        mock.expect_get_error_no().returning(|| SDK_ERROR_NO_DATA);
+        mock.expect_venc_release_stream()
+            .returning(|_, _| AK_SUCCESS_I32);
+
+        let test_ptr = std::ptr::NonNull::<c_void>::dangling().as_ptr() as usize;
+        mock.expect_venc_request_stream()
+            .returning(move |_, _| test_ptr as *mut c_void);
+        mock.expect_venc_cancel_stream()
+            .returning(|_| AK_SUCCESS_I32);
+
+        let ffi: Arc<dyn crate::hal::video::VideoHalTrait> = Arc::new(mock);
+        let vi_ptr = std::ptr::NonNull::<c_void>::dangling().as_ptr();
+        let venc_ptr = std::ptr::NonNull::<c_void>::dangling().as_ptr();
+        let sh = Arc::new(VideoStreamHandle::new(vi_ptr, venc_ptr, Arc::clone(&ffi)).unwrap());
+
+        let callbacks: Arc<RwLock<HashMap<CallbackId, Arc<dyn FrameCallback>>>> =
+            Arc::new(RwLock::new(HashMap::new()));
+
+        let start = std::time::Instant::now();
+        frame_read_loop(
+            sh,
+            ffi,
+            StreamId::VideoMain,
+            callbacks,
+            stop,
+            Arc::new(StreamHealthCounters::default()),
+            None,
+        );
+        let elapsed = start.elapsed();
+
+        // Adaptive timing: 100 + 50 + 100 = ~250ms total
+        // Allow tolerance: 180ms to 600ms (generous for CI environments)
+        assert!(
+            elapsed >= Duration::from_millis(180) && elapsed <= Duration::from_millis(600),
+            "Expected ~250ms with reset on frame, got {:?}",
+            elapsed
+        );
+    }
+
+    #[test]
+    fn test_drain_loop_skips_get_error_no_on_fast_path() {
+        // Verify get_error_no() is NOT called on every no-data cycle (optimistic fast path).
+        // With the probe interval of 50, it should only probe occasionally.
+        // First cycle always probes (to establish baseline), subsequent cycles skip until probe_interval.
+        let mut mock = MockVideoHalTrait::new();
+        let stop = Arc::new(AtomicBool::new(false));
+        let stop_clone = Arc::clone(&stop);
+        let call_idx = Arc::new(AtomicU32::new(0));
+        let call_idx_clone = Arc::clone(&call_idx);
+
+        // Run many no-data cycles and count how many times get_error_no is called
+        mock.expect_venc_get_stream().returning(move |_, _| {
+            let idx = call_idx_clone.fetch_add(1, Ordering::SeqCst);
+            if idx >= 10 {
+                stop_clone.store(true, Ordering::SeqCst);
+            }
+            crate::hal::AK_FAILED_I32
+        });
+        mock.expect_get_error_no()
+            .times(1) // Should be called only once (first cycle probes, rest skip)
+            .returning(|| SDK_ERROR_NO_DATA);
+
+        let test_ptr = std::ptr::NonNull::<c_void>::dangling().as_ptr() as usize;
+        mock.expect_venc_request_stream()
+            .returning(move |_, _| test_ptr as *mut c_void);
+        mock.expect_venc_cancel_stream()
+            .returning(|_| AK_SUCCESS_I32);
+
+        let ffi: Arc<dyn crate::hal::video::VideoHalTrait> = Arc::new(mock);
+        let vi_ptr = std::ptr::NonNull::<c_void>::dangling().as_ptr();
+        let venc_ptr = std::ptr::NonNull::<c_void>::dangling().as_ptr();
+        let sh = Arc::new(VideoStreamHandle::new(vi_ptr, venc_ptr, Arc::clone(&ffi)).unwrap());
+
+        let callbacks: Arc<RwLock<HashMap<CallbackId, Arc<dyn FrameCallback>>>> =
+            Arc::new(RwLock::new(HashMap::new()));
+
+        frame_read_loop(
+            sh,
+            ffi,
+            StreamId::VideoMain,
+            callbacks,
+            stop,
+            Arc::new(StreamHealthCounters::default()),
+            None,
+        );
+
+        // get_error_no should have been called only 1 time, not 10 times
+        // (first cycle always probes, rest skip until probe_interval=50)
     }
 
     #[tokio::test]

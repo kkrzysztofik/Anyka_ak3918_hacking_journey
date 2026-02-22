@@ -1685,7 +1685,7 @@ mod tests {
         data.extend_from_slice(&480i32.to_le_bytes()); // height
         data.extend_from_slice(&1920i32.to_le_bytes()); // max_width
         data.extend_from_slice(&1080i32.to_le_bytes()); // max_height
-                                                        // Extra padding bytes — should be ignored
+        // Extra padding bytes — should be ignored
         data.extend_from_slice(&[0xDE, 0xAD, 0xBE, 0xEF, 0xFF]);
 
         assert!(data.len() > 16);

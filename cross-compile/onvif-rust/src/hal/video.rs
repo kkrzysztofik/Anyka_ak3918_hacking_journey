@@ -26,17 +26,17 @@
 
 use crate::platform::PlatformError;
 use crate::platform::PlatformResult;
-use std::ffi::{c_char, c_void, CString};
+use std::ffi::{CString, c_char, c_void};
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering};
 use std::time::Duration;
 
 use crate::hal::{
     encode_param, video_channel_attr, video_dev_type, video_resolution, video_stream,
 };
 
-use crate::hal::{Resolution, VideoDevice, AK_FAILED_I32, AK_SUCCESS_I32};
+use crate::hal::{AK_FAILED_I32, AK_SUCCESS_I32, Resolution, VideoDevice};
 
 /// Internal trait for abstracting video FFI calls to enable mocking in tests.
 #[cfg_attr(test, mockall::automock)]

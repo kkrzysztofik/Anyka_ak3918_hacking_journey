@@ -7,7 +7,8 @@ use rtsp_validation_tool::config::{
 };
 use rtsp_validation_tool::device::{
     DevicePlaybackOptions, device_collect_telemetry_blocking, device_copy_onvif_logs_blocking,
-    device_get_onvif_pid_blocking, device_start_onvif_blocking, device_stop_onvif_blocking,
+    device_copy_vendor_daemon_logs_blocking, device_get_onvif_pid_blocking,
+    device_start_onvif_blocking, device_stop_onvif_blocking,
 };
 use rtsp_validation_tool::report::{TestResult, ValidationReport, compute_summary};
 use rtsp_validation_tool::rtsp::{critical_proto_failed, run_harness, run_validation};
@@ -239,8 +240,8 @@ async fn cleanup_device_process(effective: &EffectiveConfig) {
 
     let host = effective.device_host.clone();
     let port = effective.device_ssh_port;
-    let user = device_user;
-    let password = device_password;
+    let user = device_user.clone();
+    let password = device_password.clone();
     let artifacts_dir = effective.artifacts_dir.clone();
     match tokio::task::spawn_blocking(move || {
         device_copy_onvif_logs_blocking(&host, port, &user, &password, &artifacts_dir)
@@ -250,6 +251,21 @@ async fn cleanup_device_process(effective: &EffectiveConfig) {
         Ok(Ok(())) => {}
         Ok(Err(e)) => warn!(error = %e, "device onvif log copy failed"),
         Err(e) => warn!(error = %e, "spawn_blocking device onvif log copy failed"),
+    }
+
+    let host = effective.device_host.clone();
+    let port = effective.device_ssh_port;
+    let user = device_user;
+    let password = device_password;
+    let artifacts_dir = effective.artifacts_dir.clone();
+    match tokio::task::spawn_blocking(move || {
+        device_copy_vendor_daemon_logs_blocking(&host, port, &user, &password, &artifacts_dir)
+    })
+    .await
+    {
+        Ok(Ok(())) => {}
+        Ok(Err(e)) => warn!(error = %e, "device vendor-daemon log copy failed"),
+        Err(e) => warn!(error = %e, "spawn_blocking device vendor-daemon log copy failed"),
     }
 }
 

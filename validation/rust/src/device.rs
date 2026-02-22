@@ -14,6 +14,8 @@ use crate::util::{MAX_TOOL_LOG_BYTES, tail_lossy, write_bytes_tail};
 const DEVICE_ONVIF_DIR: &str = "/mnt/anyka_hack/onvif";
 const DEVICE_ONVIF_LOG_GLOB: &str = "onvif.log*";
 const DEVICE_ONVIF_PIDFILE: &str = "onvif.pid";
+const DEVICE_VENDOR_DAEMON_LOG_DIR: &str = "/mnt/logs";
+const DEVICE_VENDOR_DAEMON_LOG_GLOB: &str = "vendor_daemon.log*";
 const DEVICE_SSH_CONNECT_TIMEOUT_SEC: u64 = 15;
 const DEVICE_SSH_READ_TIMEOUT_SEC: u64 = 8;
 const DEVICE_SSH_LOG_COPY_READ_TIMEOUT_SEC: u64 = 45;
@@ -500,6 +502,100 @@ fn device_copy_onvif_logs_blocking_with_exec(
         write_bytes_tail(&out_path, content.as_bytes())
             .with_context(|| format!("write {}", out_path.display()))?;
         info!(path = %out_path.display(), device_file = %f, "copied device onvif log");
+    }
+
+    Ok(())
+}
+
+fn device_list_vendor_daemon_logs_command() -> String {
+    format!(
+        "cd {dir} && {b}; for f in {glob}; do [ -f \"$f\" ] && printf '%s\\n' \"$f\"; done; {e}; true",
+        dir = DEVICE_VENDOR_DAEMON_LOG_DIR,
+        glob = DEVICE_VENDOR_DAEMON_LOG_GLOB,
+        b = marker_echo_begin_cmd(),
+        e = marker_echo_end_cmd(),
+    )
+}
+
+/// Copy vendor-daemon logs from device to artifacts dir (blocking).
+pub fn device_copy_vendor_daemon_logs_blocking(
+    host: &str,
+    port: u16,
+    user: &str,
+    password: &str,
+    artifacts_dir: &Path,
+) -> Result<()> {
+    let mut exec = |h: &str, p: u16, u: &str, pw: &str, c: &str, t: u64| {
+        run_ssh_command_blocking(h, p, u, pw, c, t)
+    };
+    device_copy_vendor_daemon_logs_blocking_with_exec(
+        host,
+        port,
+        user,
+        password,
+        artifacts_dir,
+        &mut exec,
+    )
+}
+
+fn device_copy_vendor_daemon_logs_blocking_with_exec(
+    host: &str,
+    port: u16,
+    user: &str,
+    password: &str,
+    artifacts_dir: &Path,
+    exec: &mut SshExecFn<'_>,
+) -> Result<()> {
+    std::fs::create_dir_all(artifacts_dir)
+        .with_context(|| format!("create artifacts dir {}", artifacts_dir.display()))?;
+
+    let list_cmd = device_list_vendor_daemon_logs_command();
+    let listing_raw = exec(
+        host,
+        port,
+        user,
+        password,
+        &list_cmd,
+        DEVICE_SSH_LOG_COPY_READ_TIMEOUT_SEC,
+    )?;
+    let listing = extract_between_markers(&listing_raw).unwrap_or(listing_raw);
+    let files: Vec<String> = listing
+        .lines()
+        .map(|l| l.trim_matches(['\r', '\n', ' ']))
+        .filter(|l| !l.is_empty())
+        .map(|l| l.to_string())
+        .collect();
+
+    if files.is_empty() {
+        debug!("no device vendor-daemon logs found");
+        return Ok(());
+    }
+
+    for f in files {
+        let safe = sanitize_filename_component(&f);
+        let out_path = artifacts_dir.join(format!("device_vendor_daemon_{}", safe));
+
+        let q = sh_single_quote(&f);
+        let read_cmd = format!(
+            "cd {dir} && {b} && (tail -c {bytes} {q} 2>/dev/null || tail -n 20000 {q} 2>/dev/null || cat {q} 2>/dev/null) && {e}",
+            dir = DEVICE_VENDOR_DAEMON_LOG_DIR,
+            b = marker_echo_begin_cmd(),
+            e = marker_echo_end_cmd(),
+            bytes = MAX_TOOL_LOG_BYTES,
+            q = q
+        );
+        let raw = exec(
+            host,
+            port,
+            user,
+            password,
+            &read_cmd,
+            DEVICE_SSH_LOG_COPY_READ_TIMEOUT_SEC,
+        )?;
+        let content = extract_between_markers(&raw).unwrap_or(raw);
+        write_bytes_tail(&out_path, content.as_bytes())
+            .with_context(|| format!("write {}", out_path.display()))?;
+        info!(path = %out_path.display(), device_file = %f, "copied device vendor-daemon log");
     }
 
     Ok(())
