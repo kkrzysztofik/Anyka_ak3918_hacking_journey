@@ -8,6 +8,8 @@ use crate::rtsp::rtp::utils::OnFrameFn;
 use crate::rtsp::rtp::utils::OnRtpPacketFn;
 use crate::rtsp::rtp::utils::OnRtpPacketFn2;
 
+use rand::RngExt;
+
 use super::rtp::rtp_aac::RtpAacPacker;
 use super::rtp::rtp_h264::RtpH264Packer;
 use super::rtp::rtp_h265::RtpH265Packer;
@@ -30,7 +32,6 @@ use crate::rtsp::rtp::utils::Marshal;
 use crate::rtsp::rtp::utils::Unmarshal;
 use byteorder::BigEndian;
 use bytes::BytesMut;
-use rand::Rng;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 

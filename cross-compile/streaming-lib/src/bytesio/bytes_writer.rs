@@ -6,7 +6,7 @@ use {
     byteorder::{ByteOrder, WriteBytesExt},
     bytes::BytesMut,
     rand,
-    rand::Rng,
+    rand::RngExt,
     std::{io::Write, sync::Arc, time::Duration},
     tokio::{sync::Mutex, time::timeout},
 };
