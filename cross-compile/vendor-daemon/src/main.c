@@ -10,8 +10,12 @@
  *   Response: [i32 status][u32 resp_len][resp_data bytes]
  *
  * Connection model:
- *   One client at a time. After accept(), loop reading requests on the same
- *   fd until EOF, error, or CMD_SHUTDOWN. Only then close and accept next.
+ *   poll()-based multiplexing of up to MAX_CLIENTS concurrent connections.
+ *   The first client to issue a lifecycle command (vi_open, venc_open, etc.)
+ *   becomes the "control client" — only it may call lifecycle commands.
+ *   Additional clients are restricted to streaming ops (get/release_stream,
+ *   set_iframe) and queries (get_error_*, isp_*).  When the control client
+ *   disconnects, the slot opens for the next lifecycle command.
  *
  * Build (old Anyka toolchain):
  *   arm-anykav200-linux-uclibcgnueabi-gcc -std=gnu99 -march=armv5te \
@@ -30,6 +34,7 @@
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <fcntl.h>
+#include <poll.h>
 #include "log.h"
 
 #include "ak_vi.h"
@@ -52,6 +57,10 @@
 
 /* Maximum number of video_stream structs held pending release */
 #define MAX_PENDING_STREAMS 16
+
+/* Maximum simultaneous clients (control + streaming + snapshot + spare) */
+#define MAX_CLIENTS 4
+#define SDK_ERROR_NO_DATA 23
 
 /* ---- command IDs --------------------------------------------------------- */
 
@@ -108,11 +117,28 @@ enum cmd_id {
  */
 static struct {
     struct video_stream stream;
+    void *stream_handle;  /* SDK stream handle for release */
     int in_use;
+    int client_fd;        /* owning client fd for cleanup on disconnect */
 } g_pending[MAX_PENDING_STREAMS];
 
 /* ---- shutdown flag ------------------------------------------------------- */
 static volatile int g_shutdown = 0;
+
+/* ---- control client guard ------------------------------------------------ */
+/*
+ * The "control client" is the first connection that owns the hardware
+ * lifecycle.  Only this fd may issue lifecycle commands (vi_open, vi_close,
+ * venc_open, venc_close, venc_request_stream, venc_cancel_stream, etc.).
+ * Additional clients are restricted to streaming ops (get_stream,
+ * release_stream, set_iframe, set_rc) and queries (get_error_*, isp_*).
+ *
+ * When the control client disconnects, the slot opens and the next
+ * lifecycle command from any client promotes that client to control.
+ */
+static int g_control_fd = -1;
+static unsigned long long g_venc_no_data_count = 0;
+static unsigned long long g_venc_stream_error_count = 0;
 
 /* Saved file descriptors for stdout/stderr restoration on shutdown */
 static int g_saved_stdout = -1;
@@ -180,22 +206,48 @@ static int send_response(int fd, int32_t status, const void *data, uint32_t len)
 
 /* ---- pending-release helpers --------------------------------------------- */
 
-static int pending_alloc(void)
+static int pending_alloc(int client_fd)
 {
     int i;
     for (i = 0; i < MAX_PENDING_STREAMS; i++) {
         if (!g_pending[i].in_use) {
             g_pending[i].in_use = 1;
+            g_pending[i].client_fd = client_fd;
             return i;
         }
     }
     return -1;
 }
 
+/**
+ * Release all pending video_stream slots owned by a disconnecting client.
+ * Prevents SDK ring buffer leaks when a client exits without releasing.
+ */
+static void cleanup_pending_for_fd(int client_fd)
+{
+    int i;
+    int cleaned = 0;
+    for (i = 0; i < MAX_PENDING_STREAMS; i++) {
+        if (g_pending[i].in_use && g_pending[i].client_fd == client_fd) {
+            ak_venc_release_stream(g_pending[i].stream_handle,
+                                   &g_pending[i].stream);
+            g_pending[i].in_use = 0;
+            g_pending[i].client_fd = -1;
+            cleaned++;
+        }
+    }
+    if (cleaned > 0) {
+        log_info("[daemon] cleaned up %d pending frames for fd=%d",
+                 cleaned, client_fd);
+    }
+}
+
 static void pending_free(int idx)
 {
-    if (idx >= 0 && idx < MAX_PENDING_STREAMS)
+    if (idx >= 0 && idx < MAX_PENDING_STREAMS) {
         g_pending[idx].in_use = 0;
+        g_pending[idx].client_fd = -1;
+    }
 }
 
 /* ---- VI handlers --------------------------------------------------------- */
@@ -524,7 +576,7 @@ static int handle_venc_get_stream(int fd, const uint8_t *req, uint32_t req_len)
     void *stream_handle = (void *)(uintptr_t)sh64;
 
     /* Allocate a slot in the pending table */
-    int slot = pending_alloc();
+    int slot = pending_alloc(fd);
     if (slot < 0) {
         log_error("[venc] get_stream: pending table full");
         return send_response(fd, STATUS_ERROR, NULL, 0);
@@ -532,10 +584,25 @@ static int handle_venc_get_stream(int fd, const uint8_t *req, uint32_t req_len)
 
     struct video_stream *vs = &g_pending[slot].stream;
     memset(vs, 0, sizeof(*vs));
+    g_pending[slot].stream_handle = stream_handle;
 
     int ret = ak_venc_get_stream(stream_handle, vs);
     if (ret != 0) {
-        log_error("[venc] get_stream failed: %d", ret);
+        int err_no = ak_get_error_no();
+        if (err_no == SDK_ERROR_NO_DATA) {
+            g_venc_no_data_count++;
+            if ((g_venc_no_data_count % 1000ULL) == 0ULL) {
+                log_debug("[venc] get_stream no-data events=%llu", g_venc_no_data_count);
+            }
+        } else {
+            g_venc_stream_error_count++;
+            log_warn(
+                "[venc] get_stream failed ret=%d err_no=%d total_errors=%llu",
+                ret,
+                err_no,
+                g_venc_stream_error_count
+            );
+        }
         pending_free(slot);
         return send_response(fd, ret, NULL, 0);
     }
@@ -812,6 +879,67 @@ static int handle_get_error_str(int fd)
     return send_response(fd, STATUS_OK, msg, slen);
 }
 
+/* ---- Control client helpers ---------------------------------------------- */
+
+/**
+ * Check whether cmd_id is a hardware lifecycle command that only the
+ * control client is allowed to issue.
+ */
+static int is_lifecycle_cmd(int32_t cmd)
+{
+    switch ((enum cmd_id)cmd) {
+    case CMD_VI_MATCH_SENSOR:
+    case CMD_VI_OPEN:
+    case CMD_VI_CLOSE:
+    case CMD_VI_SET_CHANNEL_ATTR:
+    case CMD_VI_CAPTURE_ON:
+    case CMD_VI_CAPTURE_OFF:
+    case CMD_VPSS_INIT:
+    case CMD_VPSS_DESTROY:
+    case CMD_VENC_SET_CFG_PATH:
+    case CMD_VENC_OPEN:
+    case CMD_VENC_CLOSE:
+    case CMD_VENC_REQUEST_STREAM:
+    case CMD_VENC_CANCEL_STREAM:
+    case CMD_AI_OPEN:
+    case CMD_AI_CLOSE:
+    case CMD_AENC_OPEN:
+    case CMD_AENC_CLOSE:
+    case CMD_AENC_SET_ATTR:
+    case CMD_SHUTDOWN:
+        return 1;
+    default:
+        return 0;
+    }
+}
+
+/**
+ * Try to acquire control-client status for fd.
+ * Returns 1 if fd is (or just became) the control client, 0 otherwise.
+ */
+static int acquire_control(int fd)
+{
+    if (g_control_fd == fd)
+        return 1;
+    if (g_control_fd == -1) {
+        g_control_fd = fd;
+        log_info("[daemon] fd=%d promoted to control client", fd);
+        return 1;
+    }
+    return 0;
+}
+
+/**
+ * Release control-client status when the control client disconnects.
+ */
+static void release_control(int fd)
+{
+    if (g_control_fd == fd) {
+        log_info("[daemon] control client fd=%d released", fd);
+        g_control_fd = -1;
+    }
+}
+
 /* ---- Main request dispatcher --------------------------------------------- */
 
 /**
@@ -838,7 +966,9 @@ static int process_request(int fd)
 
     log_debug("[daemon] fd=%d dispatch cmd=%d len=%u", fd, cmd_id, req_len);
 
-    /* Read request payload into a heap buffer (may be up to 1 MB) */
+    /* Read request payload into a heap buffer (may be up to 1 MB).
+     * We must consume the payload even if we reject the command,
+     * otherwise the stream gets out of sync. */
     uint8_t *req_buf = NULL;
     if (req_len > 0) {
         req_buf = (uint8_t *)malloc(req_len);
@@ -849,6 +979,16 @@ static int process_request(int fd)
         if (read_exact(fd, req_buf, req_len) != 0) {
             free(req_buf);
             return -1;
+        }
+    }
+
+    /* Guard: lifecycle commands require control-client status */
+    if (is_lifecycle_cmd(cmd_id)) {
+        if (!acquire_control(fd)) {
+            log_warn("[daemon] fd=%d rejected lifecycle cmd=%d (control held by fd=%d)",
+                     fd, cmd_id, g_control_fd);
+            free(req_buf);
+            return send_response(fd, STATUS_ERROR, NULL, 0);
         }
     }
 
@@ -1105,41 +1245,88 @@ int main(int argc, char *argv[])
     log_info("[daemon] listening on %s", SOCKET_PATH);
 
     /* ================================================================
-     * MAIN ACCEPT LOOP
-     * ================================================================ */
+     * MAIN EVENT LOOP (poll-based multiplexing)
+     * ================================================================
+     *
+     * fds[0]         = server_fd (listening socket)
+     * fds[1..nfds-1] = connected client fds
+     *
+     * This replaces the old blocking accept()-then-inner-loop model so
+     * multiple clients can be serviced without queuing in the kernel
+     * backlog.  Each client with pending data is serviced round-robin.
+     */
+
+    struct pollfd fds[MAX_CLIENTS + 1];
+    int nfds = 1;
+    memset(fds, 0, sizeof(fds));
+    fds[0].fd = server_fd;
+    fds[0].events = POLLIN;
 
     while (!g_shutdown) {
-        int client_fd = accept(server_fd, NULL, NULL);
-        if (client_fd < 0) {
+        int ready = poll(fds, nfds, 1000); /* 1s timeout for shutdown check */
+        if (ready < 0) {
             if (errno == EINTR)
-                continue;   /* signal interrupted accept */
-            if (!g_shutdown)
+                continue;
+            log_error("poll: %s", strerror(errno));
+            break;
+        }
+        if (ready == 0)
+            continue; /* timeout – re-check g_shutdown */
+
+        /* ── Accept new connections ─────────────────────────────────── */
+        if (fds[0].revents & POLLIN) {
+            int client_fd = accept(server_fd, NULL, NULL);
+            if (client_fd >= 0) {
+                if (nfds < MAX_CLIENTS + 1) {
+                    fds[nfds].fd = client_fd;
+                    fds[nfds].events = POLLIN;
+                    fds[nfds].revents = 0;
+                    nfds++;
+                    log_info("[daemon] client connected fd=%d (total=%d)",
+                             client_fd, nfds - 1);
+                } else {
+                    log_error("[daemon] max clients (%d) reached, rejecting fd=%d",
+                              MAX_CLIENTS, client_fd);
+                    close(client_fd);
+                }
+            } else if (errno != EINTR) {
                 log_error("accept: %s", strerror(errno));
-            break;
+            }
         }
 
-        log_info("[daemon] client connected fd=%d", client_fd);
+        /* ── Service clients with pending data (round-robin) ──────── */
+        int i;
+        for (i = 1; i < nfds; i++) {
+            if (!(fds[i].revents & (POLLIN | POLLHUP | POLLERR)))
+                continue;
 
-        /* Service all requests on this connection until client disconnects */
-        int shutdown_requested = 0;
-        while (!g_shutdown) {
-            int ret = process_request(client_fd);
+            int ret = process_request(fds[i].fd);
             if (ret == -1) {
-                /* EOF or I/O error – client disconnected */
-                log_info("[daemon] client fd=%d disconnected", client_fd);
-                break;
-            }
-            if (ret == -2) {
+                /* Client disconnected or I/O error */
+                log_info("[daemon] client fd=%d disconnected", fds[i].fd);
+                cleanup_pending_for_fd(fds[i].fd);
+                release_control(fds[i].fd);
+                close(fds[i].fd);
+                /* Compact: move last entry into this slot */
+                fds[i] = fds[nfds - 1];
+                nfds--;
+                i--; /* re-check this slot */
+            } else if (ret == -2) {
                 /* CMD_SHUTDOWN */
-                shutdown_requested = 1;
+                g_shutdown = 1;
                 break;
             }
         }
+    }
 
-        close(client_fd);
-
-        if (shutdown_requested || g_shutdown)
-            break;
+    /* Clean up any remaining client connections */
+    {
+        int i;
+        for (i = 1; i < nfds; i++) {
+            cleanup_pending_for_fd(fds[i].fd);
+            release_control(fds[i].fd);
+            close(fds[i].fd);
+        }
     }
 
     /* ================================================================
