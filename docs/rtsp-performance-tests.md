@@ -87,6 +87,21 @@
   - Longer term, add a GitHub Actions or external CI job that assumes a reachable lab camera, runs a subset of the RTSP performance/conformance tests nightly, and publishes metrics/graphs.
   - Use this to detect regressions in streaming performance or protocol behaviour as `onvif-rust` evolves.
 
+### 9. VLC low-latency verification profile
+
+- **Purpose**: Validate camera-side latency improvements with minimal client-side buffering.
+- **Recommended launch**:
+  - `vlc --network-caching=150 --clock-jitter=0 --clock-synchro=0 --avcodec-hw=none rtsp://<user>:<pass>@<ip>:554/main`
+- **Why software decode first**:
+  - Hardware decode allocation failures (`hardware acceleration picture allocation failed`) can mask camera-side improvements.
+- **Pass criteria for this profile**:
+  - No repeated multi-second `picture is too late` bursts.
+  - Initial buffering stabilizes within ~1s.
+  - No persistent playback drift beyond 500ms.
+- **Server-side knob for startup readiness**:
+  - `ONVIF_PLAY_READY_TIMEOUT_MS` controls how long RTSP `PLAY` waits for stream readiness (SPS/PPS/track availability) before returning `503`.
+  - Suggested starting value for latency tuning runs: `ONVIF_PLAY_READY_TIMEOUT_MS=1500`.
+
 ### Mermaid overview of the test flow
 
 ```mermaid
@@ -99,4 +114,3 @@ graph TD
     hostTests -->|HTTP-FLV| httpFlvServer["HttpFlvServer"]
   end
 ```
-
