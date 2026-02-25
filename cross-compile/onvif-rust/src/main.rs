@@ -13,6 +13,8 @@ use clap::Parser;
 use onvif_rust::app::{Application, DEFAULT_CONFIG_PATH};
 use onvif_rust::config::{ConfigRuntime, ConfigStorage};
 #[cfg(not(use_stubs))]
+use onvif_rust::hal::vendor_ipc;
+#[cfg(not(use_stubs))]
 use onvif_rust::platform::AnykaPlatform;
 use onvif_rust::platform::Platform;
 #[cfg(use_stubs)]
@@ -255,6 +257,7 @@ async fn run_normal_mode(config_path: &str) -> Result<()> {
     if let Ok(app_config) = ConfigStorage::load_or_default(config_path) {
         let config_runtime = ConfigRuntime::new(app_config);
         let _ = configure_stream_frame_debug_logging(&config_runtime);
+        let _ = configure_ipc_debug_logging(&config_runtime);
     }
 
     // Start the application with ordered initialization
@@ -341,6 +344,13 @@ fn configure_stream_frame_debug_logging(config: &ConfigRuntime) -> bool {
         .get_bool("logging.stream_frame_debug")
         .unwrap_or(false);
     streaming_lib::set_stream_frame_debug_logging(enabled);
+    enabled
+}
+
+fn configure_ipc_debug_logging(config: &ConfigRuntime) -> bool {
+    let enabled = config.get_bool("logging.ipc_debug").unwrap_or(false);
+    #[cfg(not(use_stubs))]
+    vendor_ipc::set_ipc_debug_logging(enabled);
     enabled
 }
 
@@ -794,6 +804,7 @@ fn init_validation_logging(config_path: &str) {
     if let Ok(app_config) = ConfigStorage::load_or_default(config_path) {
         let config_runtime = ConfigRuntime::new(app_config);
         let stream_frame_debug_enabled = configure_stream_frame_debug_logging(&config_runtime);
+        let ipc_debug_enabled = configure_ipc_debug_logging(&config_runtime);
         if let Err(e) = onvif_rust::logging::init_logging(&config_runtime) {
             eprintln!("Failed to initialize logging: {}", e);
         } else {
@@ -801,6 +812,7 @@ fn init_validation_logging(config_path: &str) {
                 enabled = stream_frame_debug_enabled,
                 "Per-frame streaming debug logging configured"
             );
+            tracing::info!(enabled = ipc_debug_enabled, "IPC debug logging configured");
             config_runtime.log_loaded_config();
         }
     }

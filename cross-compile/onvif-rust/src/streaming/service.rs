@@ -15,7 +15,7 @@ use async_trait::async_trait;
 use bytes::BytesMut;
 use portable_atomic::Ordering;
 
-use super::bridge::StreamState;
+use super::bridge::{LowLatencyFrameQueue, StreamState};
 use streaming_lib::streamhub::define::{
     DataReceiver, DataSender, Information, InformationSender, MediaInfo, SubscribeType,
     VideoCodecType,
@@ -24,6 +24,7 @@ use streaming_lib::streamhub::errors::StreamHubError;
 use streaming_lib::streamhub::statistics::StatisticsStream;
 use streaming_lib::streamhub::stream::StreamIdentifier;
 use streaming_lib::{FrameData, StreamsHub, TStreamHandler};
+#[cfg(test)]
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
@@ -229,17 +230,53 @@ pub struct StreamingService {
 }
 
 impl StreamingService {
+    fn parse_queue_capacity(env_key: &str, default: usize) -> usize {
+        std::env::var(env_key)
+            .ok()
+            .and_then(|value| value.trim().parse::<usize>().ok())
+            .filter(|value| *value > 0)
+            .unwrap_or(default)
+    }
+
+    fn is_h264_idr(frame: &FrameData) -> bool {
+        let FrameData::Video { data, .. } = frame else {
+            return false;
+        };
+
+        let bytes = data.as_ref();
+        let mut index = 0usize;
+        while index + 4 < bytes.len() {
+            let (start_code_len, nal_start) =
+                if bytes[index..].starts_with(&[0x00, 0x00, 0x00, 0x01]) {
+                    (4usize, index + 4)
+                } else if bytes[index..].starts_with(&[0x00, 0x00, 0x01]) {
+                    (3usize, index + 3)
+                } else {
+                    index += 1;
+                    continue;
+                };
+
+            if nal_start < bytes.len() && (bytes[nal_start] & 0x1F) == 5 {
+                return true;
+            }
+
+            index += start_code_len;
+        }
+
+        false
+    }
+
     /// Create a new streaming service with the given configuration.
     ///
     /// Does not start any servers. Call [`start`](Self::start) to begin.
     pub fn new(config: StreamingConfig) -> Self {
-        let (main_tx, _main_rx) = mpsc::unbounded_channel();
-        let (sub_tx, _sub_rx) = mpsc::unbounded_channel();
-
-        // These dummy channels are replaced in start(). We create the bridge
-        // here so that `bridge()` is available even before start(), but the
-        // channels won't be used until start() wires them up properly.
-        let bridge = Arc::new(StreamingBridge::new(main_tx, sub_tx, 0));
+        // These queues are replaced in start(). We create the bridge here so
+        // that `bridge()` is available before start() for wiring.
+        let bridge = Arc::new(StreamingBridge::new(
+            LowLatencyFrameQueue::default_main(),
+            LowLatencyFrameQueue::default_sub(),
+            0,
+        ));
 
         Self {
             bridge,
@@ -263,14 +300,15 @@ impl StreamingService {
 
         let mut streamhub = StreamsHub::new(None);
 
-        // Create per-stream frame channels (bridge → fanout).
-        let (main_bridge_tx, main_bridge_rx) = mpsc::unbounded_channel::<FrameData>();
-        let (sub_bridge_tx, sub_bridge_rx) = mpsc::unbounded_channel::<FrameData>();
+        let main_queue_capacity = Self::parse_queue_capacity("ONVIF_QUEUE_MAIN", 4);
+        let sub_queue_capacity = Self::parse_queue_capacity("ONVIF_QUEUE_SUB", 6);
+        let main_bridge_queue = LowLatencyFrameQueue::new("main", main_queue_capacity);
+        let sub_bridge_queue = LowLatencyFrameQueue::new("sub", sub_queue_capacity);
 
-        // Re-create the bridge with real channels.
+        // Re-create the bridge with low-latency queues.
         self.bridge = Arc::new(StreamingBridge::new(
-            main_bridge_tx,
-            sub_bridge_tx,
+            Arc::clone(&main_bridge_queue),
+            Arc::clone(&sub_bridge_queue),
             self.config.audio_sample_rate,
         ));
 
@@ -279,7 +317,7 @@ impl StreamingService {
             .publish_stream(
                 &mut streamhub,
                 &self.config.main_stream_name.clone(),
-                main_bridge_rx,
+                main_bridge_queue,
             )
             .await?;
 
@@ -288,7 +326,7 @@ impl StreamingService {
             .publish_stream(
                 &mut streamhub,
                 &self.config.sub_stream_name.clone(),
-                sub_bridge_rx,
+                sub_bridge_queue,
             )
             .await?;
 
@@ -314,6 +352,8 @@ impl StreamingService {
             httpflv_port = self.config.httpflv_port,
             main_stream = %self.config.main_stream_name,
             sub_stream = %self.config.sub_stream_name,
+            main_queue_capacity,
+            sub_queue_capacity,
             "Streaming service started"
         );
 
@@ -381,18 +421,18 @@ impl StreamingService {
         &self,
         streamhub: &mut StreamsHub,
         stream_name: &str,
-        mut bridge_rx: mpsc::UnboundedReceiver<FrameData>,
+        bridge_queue: Arc<LowLatencyFrameQueue>,
     ) -> Result<JoinHandle<()>, anyhow::Error> {
         let app_name = self.config.app_name.clone();
 
         // Create RTSP channel.
-        let (rtsp_tx, rtsp_rx) = mpsc::unbounded_channel::<FrameData>();
+        let (rtsp_tx, rtsp_rx) = tokio::sync::mpsc::unbounded_channel::<FrameData>();
         let rtsp_id = StreamIdentifier::Rtsp {
             stream_path: stream_name.to_string(),
         };
 
         // Create HTTP-FLV channel.
-        let (httpflv_tx, httpflv_rx) = mpsc::unbounded_channel::<FrameData>();
+        let (httpflv_tx, httpflv_rx) = tokio::sync::mpsc::unbounded_channel::<FrameData>();
         let httpflv_id = StreamIdentifier::Rtmp {
             app_name: app_name.clone(),
             stream_name: stream_name.to_string(),
@@ -446,14 +486,40 @@ impl StreamingService {
             let mut fanout_frame_count: u64 = 0;
             let mut fanout_bytes: u64 = 0;
             let mut first_frame_logged = false;
+            let mut queue_lag_over_250ms: u64 = 0;
+            let mut queue_lag_over_500ms: u64 = 0;
 
-            while let Some(frame) = bridge_rx.recv().await {
+            loop {
+                let queued = bridge_queue.recv().await;
+                let frame = queued.frame;
+                let queue_delay_ms = queued.enqueue_instant.elapsed().as_millis() as u64;
+                if queue_delay_ms > 250 {
+                    queue_lag_over_250ms += 1;
+                }
+                if queue_delay_ms > 500 {
+                    queue_lag_over_500ms += 1;
+                }
+
                 if !first_frame_logged {
                     tracing::debug!(
                         stream = %fanout_stream_name,
                         "First frame received in fanout task (pipeline is flowing)"
                     );
                     first_frame_logged = true;
+                }
+
+                if let FrameData::Video { timestamp, data } = &frame {
+                    let stream_id = if is_main {
+                        crate::platform::frame::StreamId::VideoMain
+                    } else {
+                        crate::platform::frame::StreamId::VideoSub
+                    };
+                    bridge_ref.update_video_metadata(
+                        stream_id,
+                        *timestamp,
+                        data,
+                        Self::is_h264_idr(&frame),
+                    );
                 }
 
                 // Track frame statistics
@@ -528,16 +594,13 @@ impl StreamingService {
                         stream = %fanout_stream_name,
                         frames = fanout_frame_count,
                         total_bytes = fanout_bytes,
+                        queue_lag_over_250ms,
+                        queue_lag_over_500ms,
+                        queue_capacity = bridge_queue.capacity(),
                         "Fanout task progress"
                     );
                 }
             }
-
-            tracing::warn!(
-                stream = %fanout_stream_name,
-                total_frames = fanout_frame_count,
-                "Bridge channel closed, fanout loop exiting"
-            );
         });
 
         Ok(fanout_handle)
@@ -550,9 +613,18 @@ mod tests {
 
     /// Helper: create a bridge and handler targeting the main stream.
     fn make_main_handler() -> (Arc<StreamingBridge>, LiveStreamHandler) {
-        let (main_tx, _) = mpsc::unbounded_channel();
-        let (sub_tx, _) = mpsc::unbounded_channel();
-        let bridge = Arc::new(StreamingBridge::new(main_tx, sub_tx, 48000));
+        let bridge = Arc::new(StreamingBridge::new(
+            LowLatencyFrameQueue::new("test-main", 8),
+            LowLatencyFrameQueue::new("test-sub", 8),
+            48_000,
+        ));
+        // Tests must not inherit process-wide SPS/PPS cache from other cases.
+        *bridge.main_stream.sps.write() = None;
+        *bridge.main_stream.pps.write() = None;
+        *bridge.main_stream.bootstrap_idr.write() = None;
+        *bridge.sub_stream.sps.write() = None;
+        *bridge.sub_stream.pps.write() = None;
+        *bridge.sub_stream.bootstrap_idr.write() = None;
         let handler = LiveStreamHandler::new(true, Arc::clone(&bridge));
         (bridge, handler)
     }

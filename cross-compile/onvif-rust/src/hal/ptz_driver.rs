@@ -232,7 +232,8 @@ impl MotorHandle {
         }
         let tv_sec_i32 = timeout_secs.min(i32::MAX as u64) as i32;
         let mut tv = libc::timeval {
-            tv_sec: tv_sec_i32.into(), // libc::timeval::tv_sec is i32 on some targets, i64 on others
+            #[allow(clippy::useless_conversion)] // tv_sec is i32 on host, i64 on ARM target
+            tv_sec: tv_sec_i32.into(),
             tv_usec: 0,
         };
         let ret = unsafe {

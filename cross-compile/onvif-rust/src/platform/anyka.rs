@@ -22,9 +22,9 @@
 //! (Main: 1280x720, Sub: 640x360) is applied during platform initialization.
 
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::Duration;
+use std::sync::{Arc, Weak};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
 use parking_lot::RwLock;
@@ -38,6 +38,8 @@ use crate::hal::video::{
 };
 
 use crate::hal::vendor_ipc::VendorIpc;
+
+use crate::streaming::bridge::BytesMutPool;
 
 use crate::hal::{video_channel_attr, video_resolution};
 
@@ -102,17 +104,24 @@ impl AnykaPlatform {
             let audio_ffi: Arc<dyn crate::hal::audio::AudioHalTrait> = shared_ipc.clone();
             let imaging_ffi: Arc<dyn crate::hal::imaging::ImagingHalTrait> = shared_ipc.clone();
 
+            let video_input = Arc::new(AnykaVideoInput::with_ffi(
+                video_ffi.clone(),
+                isp_config_path.clone(),
+            ));
+            let video_encoder = Arc::new(AnykaVideoEncoder::with_vendor_ipc(shared_ipc.clone()));
+            let audio_input = Arc::new(AnykaAudioInput::with_ffi(audio_ffi.clone()));
+            let audio_encoder = Arc::new(AnykaAudioEncoder::with_ffi(audio_ffi));
+            let imaging_control = Some(Arc::new(AnykaImagingControl::with_ffi_and_video_encoder(
+                imaging_ffi,
+                Arc::clone(&video_encoder),
+            )) as Arc<dyn ImagingControl>);
+
             (
-                Arc::new(AnykaVideoInput::with_ffi(
-                    video_ffi.clone(),
-                    isp_config_path.clone(),
-                )),
-                Arc::new(AnykaVideoEncoder::with_ffi(video_ffi)),
-                Arc::new(AnykaAudioInput::with_ffi(audio_ffi.clone())),
-                Arc::new(AnykaAudioEncoder::with_ffi(audio_ffi)),
-                Some(
-                    Arc::new(AnykaImagingControl::with_ffi(imaging_ffi)) as Arc<dyn ImagingControl>
-                ),
+                video_input,
+                video_encoder,
+                audio_input,
+                audio_encoder,
+                imaging_control,
             )
         };
 
@@ -1060,6 +1069,96 @@ const NO_DATA_IDR_RECOVERY_EVERY_ERRORS: u32 = 3;
 #[cfg(not(test))]
 const NO_DATA_IDR_RECOVERY_EVERY_ERRORS: u32 = 100;
 const PIPELINE_READINESS_POLL_MS: u64 = 25;
+const CALLBACK_HISTOGRAM_LOG_INTERVAL: u64 = 1000;
+const CALLBACK_BUCKET_LIMITS_US: [u64; 6] = [250, 500, 1000, 2000, 5000, u64::MAX];
+
+static CALLBACK_DURATION_TOTAL: AtomicU64 = AtomicU64::new(0);
+static CALLBACK_DURATION_MAX_US: AtomicU64 = AtomicU64::new(0);
+static CALLBACK_DURATION_BUCKET_0: AtomicU64 = AtomicU64::new(0);
+static CALLBACK_DURATION_BUCKET_1: AtomicU64 = AtomicU64::new(0);
+static CALLBACK_DURATION_BUCKET_2: AtomicU64 = AtomicU64::new(0);
+static CALLBACK_DURATION_BUCKET_3: AtomicU64 = AtomicU64::new(0);
+static CALLBACK_DURATION_BUCKET_4: AtomicU64 = AtomicU64::new(0);
+static CALLBACK_DURATION_BUCKET_5: AtomicU64 = AtomicU64::new(0);
+static LAST_IMAGING_UPDATE_SEQ: AtomicU64 = AtomicU64::new(0);
+static LAST_IMAGING_UPDATE_UNIX_MS: AtomicU64 = AtomicU64::new(0);
+
+fn current_unix_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+fn callback_bucket_counter(index: usize) -> &'static AtomicU64 {
+    match index {
+        0 => &CALLBACK_DURATION_BUCKET_0,
+        1 => &CALLBACK_DURATION_BUCKET_1,
+        2 => &CALLBACK_DURATION_BUCKET_2,
+        3 => &CALLBACK_DURATION_BUCKET_3,
+        4 => &CALLBACK_DURATION_BUCKET_4,
+        _ => &CALLBACK_DURATION_BUCKET_5,
+    }
+}
+
+fn record_callback_duration(elapsed_us: u64) {
+    CALLBACK_DURATION_TOTAL.fetch_add(1, Ordering::Relaxed);
+    CALLBACK_DURATION_MAX_US.fetch_max(elapsed_us, Ordering::Relaxed);
+
+    for (index, limit) in CALLBACK_BUCKET_LIMITS_US.iter().enumerate() {
+        if elapsed_us <= *limit {
+            callback_bucket_counter(index).fetch_add(1, Ordering::Relaxed);
+            break;
+        }
+    }
+}
+
+fn histogram_percentile_bucket_us(percentile: f64) -> u64 {
+    let total = CALLBACK_DURATION_TOTAL.load(Ordering::Relaxed);
+    if total == 0 {
+        return 0;
+    }
+
+    let threshold = (total as f64 * percentile).ceil() as u64;
+    let mut cumulative = 0u64;
+    for (index, limit) in CALLBACK_BUCKET_LIMITS_US.iter().enumerate() {
+        cumulative += callback_bucket_counter(index).load(Ordering::Relaxed);
+        if cumulative >= threshold {
+            return *limit;
+        }
+    }
+
+    CALLBACK_BUCKET_LIMITS_US[CALLBACK_BUCKET_LIMITS_US.len() - 1]
+}
+
+fn maybe_log_callback_histogram() {
+    let total = CALLBACK_DURATION_TOTAL.load(Ordering::Relaxed);
+    if total == 0 || !total.is_multiple_of(CALLBACK_HISTOGRAM_LOG_INTERVAL) {
+        return;
+    }
+
+    tracing::debug!(
+        callback_samples = total,
+        callback_p50_us = histogram_percentile_bucket_us(0.50),
+        callback_p95_us = histogram_percentile_bucket_us(0.95),
+        callback_p99_us = histogram_percentile_bucket_us(0.99),
+        callback_max_us = CALLBACK_DURATION_MAX_US.load(Ordering::Relaxed),
+        callback_bucket_le_250us = CALLBACK_DURATION_BUCKET_0.load(Ordering::Relaxed),
+        callback_bucket_le_500us = CALLBACK_DURATION_BUCKET_1.load(Ordering::Relaxed),
+        callback_bucket_le_1ms = CALLBACK_DURATION_BUCKET_2.load(Ordering::Relaxed),
+        callback_bucket_le_2ms = CALLBACK_DURATION_BUCKET_3.load(Ordering::Relaxed),
+        callback_bucket_le_5ms = CALLBACK_DURATION_BUCKET_4.load(Ordering::Relaxed),
+        callback_bucket_gt_5ms = CALLBACK_DURATION_BUCKET_5.load(Ordering::Relaxed),
+        "Frame callback duration histogram"
+    );
+}
+
+fn compute_no_data_recovery_interval_errors(trigger_ms: u64, cycle_sleep_ms: u64) -> u32 {
+    let trigger_ms = trigger_ms.max(1);
+    let cycle_sleep_ms = cycle_sleep_ms.max(1);
+    let errors = trigger_ms.div_ceil(cycle_sleep_ms);
+    errors.max(1).min(u64::from(u32::MAX)) as u32
+}
 
 #[derive(Default)]
 struct StreamHealthCounters {
@@ -1126,40 +1225,80 @@ impl StreamHealthCounters {
 /// all registered callbacks, then releases the SDK buffer back.
 ///
 /// Exits cleanly when `stop_signal` is set to `true`.
-fn frame_read_loop(
-    stream_handle: Arc<VideoStreamHandle>,
+///
+/// # Unified reader thread
+///
+/// This function drains frames from **both** main and sub streams in a single
+/// thread, alternating between them each cycle.  This eliminates the IPC mutex
+/// contention that occurred when two independent threads (`venc-main-read` and
+/// `venc-sub-read`) competed for the same `Mutex<UnixStream>` to the vendor
+/// daemon.  The vendor daemon is single-threaded, so serialising requests from
+/// one thread matches its dispatch model perfectly.
+///
+/// Each stream has independent per-stream counters (frame count, no-data
+/// streak, adaptive sleep state) so IDR recovery and health tracking remain
+/// per-channel.
+#[allow(clippy::too_many_arguments)]
+fn unified_frame_read_loop(
+    main_stream_handle: Arc<VideoStreamHandle>,
+    sub_stream_handle: Option<Arc<VideoStreamHandle>>,
     ffi: Arc<dyn crate::hal::video::VideoHalTrait>,
-    stream_id: StreamId,
     callbacks: Arc<RwLock<HashMap<CallbackId, Arc<dyn FrameCallback>>>>,
     stop_signal: Arc<AtomicBool>,
     stream_health: Arc<StreamHealthCounters>,
-    recovery_encoder_handle_addr: Option<usize>,
+    main_enc_addr: Option<usize>,
+    sub_enc_addr: Option<usize>,
+    vendor_ipc: Option<Arc<VendorIpc>>,
+    frame_pool: Option<Arc<BytesMutPool>>,
 ) {
     use crate::hal::AK_SUCCESS_I32;
 
-    // Configurable poll sleep between drain cycles (default: 50ms, tunable via env).
-    let poll_sleep_ms = env_var_u64("ANYKA_FRAME_POLL_SLEEP_MS").unwrap_or(50);
+    /// Per-stream state for the unified reader loop.
+    struct StreamState {
+        stream_id: StreamId,
+        consecutive_no_data: u32,
+        frame_count: u64,
+        total_bytes: u64,
+        iframe_count: u64,
+        error_count: u64,
+        last_error_was_no_data: bool,
+        recovery_encoder_handle_addr: Option<usize>,
+        last_imaging_seq_frame_logged: u64,
+        last_imaging_seq_iframe_logged: u64,
+    }
 
-    tracing::info!(
-        stream = ?stream_id,
-        poll_sleep_ms,
-        "Frame read loop started (drain-loop pattern)"
-    );
+    impl StreamState {
+        fn new(stream_id: StreamId, recovery_encoder_handle_addr: Option<usize>) -> Self {
+            Self {
+                stream_id,
+                consecutive_no_data: 0,
+                frame_count: 0,
+                total_bytes: 0,
+                iframe_count: 0,
+                error_count: 0,
+                last_error_was_no_data: true,
+                recovery_encoder_handle_addr,
+                last_imaging_seq_frame_logged: 0,
+                last_imaging_seq_iframe_logged: 0,
+            }
+        }
+    }
 
-    let mut consecutive_no_data: u32 = 0;
-    let mut frame_count: u64 = 0;
-    let mut total_bytes: u64 = 0;
-    let mut iframe_count: u64 = 0;
-    let mut error_count: u64 = 0;
-    let mut current_sleep_ms: u64 = poll_sleep_ms;
-    let mut last_error_was_no_data: bool = true;
-
-    while !stop_signal.load(Ordering::SeqCst) {
-        // ── Drain all available frames (vendor pattern) ──────────────
-        // The Anyka SDK's venc_get_stream() is non-blocking: it returns
-        // immediately with an error when stream_list is empty. The vendor
-        // reference drains all buffered frames in a tight loop, then sleeps
-        // a fixed interval before the next drain cycle.
+    /// Drain all available frames from a single stream handle.
+    ///
+    /// Returns the number of frames drained this cycle.
+    #[allow(clippy::too_many_arguments)]
+    fn drain_stream(
+        handle: &VideoStreamHandle,
+        ffi: &dyn crate::hal::video::VideoHalTrait,
+        state: &mut StreamState,
+        callbacks: &RwLock<HashMap<CallbackId, Arc<dyn FrameCallback>>>,
+        stop_signal: &AtomicBool,
+        stream_health: &StreamHealthCounters,
+        no_data_recovery_interval_errors: u32,
+        vendor_ipc: Option<&VendorIpc>,
+        frame_pool: Option<&BytesMutPool>,
+    ) -> u32 {
         let mut frames_this_cycle: u32 = 0;
 
         loop {
@@ -1167,18 +1306,162 @@ fn frame_read_loop(
                 break;
             }
 
+            // ── Owned (zero-copy) path: fetch directly into BytesMut ──
+            if let Some(ipc) = vendor_ipc {
+                match ipc.fetch_frame_owned(handle.as_ptr(), state.stream_id, frame_pool) {
+                    Ok(owned_frame) => {
+                        // Reset no-data counter on successful frame retrieval
+                        state.consecutive_no_data = 0;
+                        state.last_error_was_no_data = true;
+
+                        let frame_type = owned_frame.frame_type;
+                        let frame_size = owned_frame.data.len();
+
+                        tracing::trace!(
+                            stream = ?state.stream_id,
+                            size = frame_size,
+                            timestamp_us = owned_frame.timestamp,
+                            frame_type = ?frame_type,
+                            "Frame retrieved via owned path (zero-copy)"
+                        );
+
+                        state.frame_count += 1;
+                        frames_this_cycle += 1;
+                        stream_health.record_frame(state.stream_id);
+                        state.total_bytes += frame_size as u64;
+                        if matches!(frame_type, FrameType::VideoIFrame) {
+                            state.iframe_count += 1;
+                        }
+
+                        // Imaging update tracking
+                        let latest_imaging_seq = LAST_IMAGING_UPDATE_SEQ.load(Ordering::Relaxed);
+                        if latest_imaging_seq > state.last_imaging_seq_frame_logged {
+                            let applied_ms = LAST_IMAGING_UPDATE_UNIX_MS.load(Ordering::Relaxed);
+                            let latency_ms = current_unix_ms().saturating_sub(applied_ms);
+                            tracing::info!(
+                                stream = ?state.stream_id,
+                                imaging_seq = latest_imaging_seq,
+                                latency_ms,
+                                frame_type = ?frame_type,
+                                "First encoded frame observed after imaging update"
+                            );
+                            state.last_imaging_seq_frame_logged = latest_imaging_seq;
+                        }
+                        if matches!(frame_type, FrameType::VideoIFrame)
+                            && latest_imaging_seq > state.last_imaging_seq_iframe_logged
+                        {
+                            let applied_ms = LAST_IMAGING_UPDATE_UNIX_MS.load(Ordering::Relaxed);
+                            let latency_ms = current_unix_ms().saturating_sub(applied_ms);
+                            tracing::info!(
+                                stream = ?state.stream_id,
+                                imaging_seq = latest_imaging_seq,
+                                latency_ms,
+                                "First IDR observed after imaging update"
+                            );
+                            state.last_imaging_seq_iframe_logged = latest_imaging_seq;
+                        }
+
+                        // Periodic summary every 300 frames
+                        if state.frame_count.is_multiple_of(300) {
+                            tracing::debug!(
+                                stream = ?state.stream_id,
+                                frames = state.frame_count,
+                                total_bytes = state.total_bytes,
+                                iframes = state.iframe_count,
+                                errors = state.error_count,
+                                "Frame read loop progress (owned path)"
+                            );
+                        }
+
+                        // Create a temporary Frame borrowing from the OwnedFrame's
+                        // BytesMut buffer for backward-compatible callback invocation.
+                        // SAFETY: owned_frame.data is a valid BytesMut allocation.
+                        // The pointer remains valid for the duration of callback
+                        // invocation because owned_frame lives on this stack frame
+                        // and is not dropped until after invoke_callbacks_from_map.
+                        let frame = Frame {
+                            data: owned_frame.data.as_ptr(),
+                            size: frame_size,
+                            timestamp: owned_frame.timestamp,
+                            frame_type,
+                            stream_id: state.stream_id,
+                        };
+                        invoke_callbacks_from_map(callbacks, &frame);
+
+                        // Release the frame (sends remote_token to daemon).
+                        if let Err(e) = ipc.release_frame_owned(handle.as_ptr()) {
+                            tracing::warn!(
+                                stream = ?state.stream_id,
+                                error = %e,
+                                "release_frame_owned failed"
+                            );
+                        }
+                        tracing::trace!(stream = ?state.stream_id, "Owned frame released");
+
+                        continue; // Continue draining
+                    }
+                    Err(_e) => {
+                        // Treat errors from fetch_frame_owned similar to legacy
+                        // venc_get_stream failures. The owned path returns errors
+                        // for both IPC failures and daemon-side no-data.
+                        state.consecutive_no_data += 1;
+                        state.last_error_was_no_data = true;
+                        stream_health.record_no_data_error(state.stream_id);
+
+                        if state
+                            .consecutive_no_data
+                            .is_multiple_of(no_data_recovery_interval_errors)
+                        {
+                            if state.frame_count > 0 {
+                                if let Some(handle_addr) = state.recovery_encoder_handle_addr {
+                                    let idr_ret =
+                                        ffi.venc_set_iframe(handle_addr as *mut std::ffi::c_void);
+                                    if idr_ret == AK_SUCCESS_I32 {
+                                        tracing::warn!(
+                                            stream = ?state.stream_id,
+                                            consecutive_no_data = state.consecutive_no_data,
+                                            recovery_interval = no_data_recovery_interval_errors,
+                                            "Sustained no-data detected; requested IDR recovery frame"
+                                        );
+                                    } else {
+                                        tracing::warn!(
+                                            stream = ?state.stream_id,
+                                            consecutive_no_data = state.consecutive_no_data,
+                                            recovery_interval = no_data_recovery_interval_errors,
+                                            idr_error_code = idr_ret,
+                                            "Sustained no-data detected; IDR recovery request failed"
+                                        );
+                                    }
+                                }
+                            } else if state.recovery_encoder_handle_addr.is_some() {
+                                tracing::debug!(
+                                    stream = ?state.stream_id,
+                                    consecutive_no_data = state.consecutive_no_data,
+                                    recovery_interval = no_data_recovery_interval_errors,
+                                    "Skipping no-data IDR recovery before first frame"
+                                );
+                            }
+                        }
+
+                        break; // Exit inner drain loop
+                    }
+                }
+            }
+
+            // ── Legacy path (no VendorIpc available, e.g. in tests) ──
             let mut stream = std::mem::MaybeUninit::<video_stream>::uninit();
             let stream_ptr = stream.as_mut_ptr();
-            let ret = ffi.venc_get_stream(stream_handle.as_ptr(), stream_ptr);
+            let ret = ffi.venc_get_stream(handle.as_ptr(), stream_ptr);
 
             if ret != AK_SUCCESS_I32 {
                 // Optimistic fast-path: skip IPC get_error_no() call when we
                 // expect no-data (the common case). Probe on first call to
                 // establish baseline, then periodically to detect changes.
                 let probe_interval = 50u32;
-                let should_probe = consecutive_no_data == 0
-                    || !last_error_was_no_data
-                    || consecutive_no_data
+                let should_probe = state.consecutive_no_data == 0
+                    || !state.last_error_was_no_data
+                    || state
+                        .consecutive_no_data
                         .wrapping_add(1)
                         .is_multiple_of(probe_interval);
 
@@ -1190,49 +1473,52 @@ fn frame_read_loop(
                 };
 
                 if is_no_data {
-                    consecutive_no_data += 1;
-                    last_error_was_no_data = true;
-                    stream_health.record_no_data_error(stream_id);
+                    state.consecutive_no_data += 1;
+                    state.last_error_was_no_data = true;
+                    stream_health.record_no_data_error(state.stream_id);
 
-                    if consecutive_no_data.is_multiple_of(NO_DATA_IDR_RECOVERY_EVERY_ERRORS) {
-                        if frame_count > 0 {
-                            if let Some(handle_addr) = recovery_encoder_handle_addr {
+                    if state
+                        .consecutive_no_data
+                        .is_multiple_of(no_data_recovery_interval_errors)
+                    {
+                        if state.frame_count > 0 {
+                            if let Some(handle_addr) = state.recovery_encoder_handle_addr {
                                 let idr_ret =
                                     ffi.venc_set_iframe(handle_addr as *mut std::ffi::c_void);
                                 if idr_ret == AK_SUCCESS_I32 {
                                     tracing::warn!(
-                                        stream = ?stream_id,
-                                        consecutive_no_data,
-                                        recovery_interval = NO_DATA_IDR_RECOVERY_EVERY_ERRORS,
+                                        stream = ?state.stream_id,
+                                        consecutive_no_data = state.consecutive_no_data,
+                                        recovery_interval = no_data_recovery_interval_errors,
                                         "Sustained no-data detected; requested IDR recovery frame"
                                     );
                                 } else {
                                     tracing::warn!(
-                                        stream = ?stream_id,
-                                        consecutive_no_data,
-                                        recovery_interval = NO_DATA_IDR_RECOVERY_EVERY_ERRORS,
+                                        stream = ?state.stream_id,
+                                        consecutive_no_data = state.consecutive_no_data,
+                                        recovery_interval = no_data_recovery_interval_errors,
                                         idr_error_code = idr_ret,
                                         "Sustained no-data detected; IDR recovery request failed"
                                     );
                                 }
                             }
-                        } else if recovery_encoder_handle_addr.is_some() {
+                        } else if state.recovery_encoder_handle_addr.is_some() {
                             tracing::debug!(
-                                stream = ?stream_id,
-                                consecutive_no_data,
-                                recovery_interval = NO_DATA_IDR_RECOVERY_EVERY_ERRORS,
+                                stream = ?state.stream_id,
+                                consecutive_no_data = state.consecutive_no_data,
+                                recovery_interval = no_data_recovery_interval_errors,
                                 "Skipping no-data IDR recovery before first frame"
                             );
                         }
                     }
                 } else {
-                    last_error_was_no_data = false;
-                    error_count += 1;
+                    state.last_error_was_no_data = false;
+                    state.error_count += 1;
                     // Log non-no-data errors on first occurrence and every 50th
-                    if error_count == 1 || error_count.is_multiple_of(50) {
+                    if state.error_count == 1 || state.error_count.is_multiple_of(50) {
                         let sdk_errstr = ffi.get_error_str();
                         tracing::warn!(
-                            stream = ?stream_id,
+                            stream = ?state.stream_id,
                             error_code = ret,
                             "venc_get_stream failed (non-no-data error): {}",
                             sdk_errstr
@@ -1243,8 +1529,8 @@ fn frame_read_loop(
             }
 
             // Reset no-data counter on successful frame retrieval
-            consecutive_no_data = 0;
-            last_error_was_no_data = true;
+            state.consecutive_no_data = 0;
+            state.last_error_was_no_data = true;
 
             // SAFETY: venc_get_stream succeeded, so `stream` is fully initialized.
             // We keep using the same video_stream address for get+release because
@@ -1256,29 +1542,57 @@ fn frame_read_loop(
                 let frame_size = stream_data.len as usize;
 
                 tracing::trace!(
-                    stream = ?stream_id,
+                    stream = ?state.stream_id,
                     size = frame_size,
                     timestamp_ms = stream_data.ts,
                     frame_type = ?frame_type,
                     "Frame retrieved from SDK"
                 );
 
-                frame_count += 1;
+                state.frame_count += 1;
                 frames_this_cycle += 1;
-                stream_health.record_frame(stream_id);
-                total_bytes += frame_size as u64;
+                stream_health.record_frame(state.stream_id);
+                state.total_bytes += frame_size as u64;
                 if matches!(frame_type, FrameType::VideoIFrame) {
-                    iframe_count += 1;
+                    state.iframe_count += 1;
+                }
+
+                let latest_imaging_seq = LAST_IMAGING_UPDATE_SEQ.load(Ordering::Relaxed);
+                if latest_imaging_seq > state.last_imaging_seq_frame_logged {
+                    let applied_ms = LAST_IMAGING_UPDATE_UNIX_MS.load(Ordering::Relaxed);
+                    let latency_ms = current_unix_ms().saturating_sub(applied_ms);
+                    tracing::info!(
+                        stream = ?state.stream_id,
+                        imaging_seq = latest_imaging_seq,
+                        latency_ms,
+                        frame_type = ?frame_type,
+                        "First encoded frame observed after imaging update"
+                    );
+                    state.last_imaging_seq_frame_logged = latest_imaging_seq;
+                }
+
+                if matches!(frame_type, FrameType::VideoIFrame)
+                    && latest_imaging_seq > state.last_imaging_seq_iframe_logged
+                {
+                    let applied_ms = LAST_IMAGING_UPDATE_UNIX_MS.load(Ordering::Relaxed);
+                    let latency_ms = current_unix_ms().saturating_sub(applied_ms);
+                    tracing::info!(
+                        stream = ?state.stream_id,
+                        imaging_seq = latest_imaging_seq,
+                        latency_ms,
+                        "First IDR observed after imaging update"
+                    );
+                    state.last_imaging_seq_iframe_logged = latest_imaging_seq;
                 }
 
                 // Periodic summary every 300 frames (~10s at 30fps)
-                if frame_count.is_multiple_of(300) {
+                if state.frame_count.is_multiple_of(300) {
                     tracing::debug!(
-                        stream = ?stream_id,
-                        frames = frame_count,
-                        total_bytes,
-                        iframes = iframe_count,
-                        errors = error_count,
+                        stream = ?state.stream_id,
+                        frames = state.frame_count,
+                        total_bytes = state.total_bytes,
+                        iframes = state.iframe_count,
+                        errors = state.error_count,
                         "Frame read loop progress"
                     );
                 }
@@ -1289,14 +1603,14 @@ fn frame_read_loop(
                     // SDK timestamps are in milliseconds; Frame uses microseconds
                     timestamp: stream_data.ts.wrapping_mul(1000),
                     frame_type,
-                    stream_id,
+                    stream_id: state.stream_id,
                 };
 
                 // Invoke all callbacks (panic-isolated)
-                invoke_callbacks_from_map(&callbacks, &frame);
+                invoke_callbacks_from_map(callbacks, &frame);
             } else {
                 tracing::trace!(
-                    stream = ?stream_id,
+                    stream = ?state.stream_id,
                     data_null = stream_data.data.is_null(),
                     len = stream_data.len,
                     "Frame skipped: null data or zero length"
@@ -1307,36 +1621,109 @@ fn frame_read_loop(
             // SAFETY: We pass back the same stream struct that get_stream populated.
             // The data pointer is owned by the SDK and must be returned.
             // This MUST happen even during shutdown to avoid leaking SDK buffers.
-            let _ = ffi.venc_release_stream(stream_handle.as_ptr(), stream_data);
-            tracing::trace!(stream = ?stream_id, "SDK buffer released");
+            let _ = ffi.venc_release_stream(handle.as_ptr(), stream_data);
+            tracing::trace!(stream = ?state.stream_id, "SDK buffer released");
         }
 
-        if frames_this_cycle > 0 {
-            tracing::trace!(
-                stream = ?stream_id,
-                frames_this_cycle,
-                "Drain cycle complete"
-            );
+        frames_this_cycle
+    }
+
+    // Configurable poll sleeps between drain cycles.
+    let idle_poll_sleep_ms = env_var_u64("ANYKA_FRAME_POLL_SLEEP_MS")
+        .unwrap_or(50)
+        .max(1);
+    let active_poll_sleep_ms = env_var_u64("ONVIF_ACTIVE_POLL_SLEEP_MS")
+        .unwrap_or(8)
+        .max(1);
+    #[cfg(test)]
+    let default_no_data_idr_trigger_ms =
+        u64::from(NO_DATA_IDR_RECOVERY_EVERY_ERRORS) * idle_poll_sleep_ms;
+    #[cfg(not(test))]
+    let default_no_data_idr_trigger_ms = 250;
+    let no_data_idr_trigger_ms =
+        env_var_u64("ONVIF_NO_DATA_IDR_TRIGGER_MS").unwrap_or(default_no_data_idr_trigger_ms);
+    let has_sub = sub_stream_handle.is_some();
+
+    tracing::info!(
+        idle_poll_sleep_ms,
+        active_poll_sleep_ms,
+        no_data_idr_trigger_ms,
+        has_sub_stream = has_sub,
+        "Unified frame read loop started (drain-loop pattern, single-thread)"
+    );
+
+    let mut main_state = StreamState::new(StreamId::VideoMain, main_enc_addr);
+    let mut sub_state = StreamState::new(StreamId::VideoSub, sub_enc_addr);
+    let mut current_sleep_ms: u64 = idle_poll_sleep_ms;
+
+    while !stop_signal.load(Ordering::SeqCst) {
+        let has_active_callbacks = !callbacks.read().is_empty();
+        let cycle_sleep_ms = if has_active_callbacks {
+            active_poll_sleep_ms
+        } else {
+            idle_poll_sleep_ms
+        };
+        let no_data_recovery_interval_errors =
+            compute_no_data_recovery_interval_errors(no_data_idr_trigger_ms, cycle_sleep_ms);
+
+        // ── Drain all available frames from both streams (vendor pattern) ──
+        // Alternating: drain main first, then sub. Both are non-blocking so
+        // this completes quickly when no frames are buffered.
+        let main_frames = drain_stream(
+            &main_stream_handle,
+            ffi.as_ref(),
+            &mut main_state,
+            &callbacks,
+            &stop_signal,
+            &stream_health,
+            no_data_recovery_interval_errors,
+            vendor_ipc.as_deref(),
+            frame_pool.as_deref(),
+        );
+
+        let sub_frames = if let Some(ref sub_sh) = sub_stream_handle {
+            drain_stream(
+                sub_sh,
+                ffi.as_ref(),
+                &mut sub_state,
+                &callbacks,
+                &stop_signal,
+                &stream_health,
+                no_data_recovery_interval_errors,
+                vendor_ipc.as_deref(),
+                frame_pool.as_deref(),
+            )
+        } else {
+            0
+        };
+
+        let total_frames_this_cycle = main_frames + sub_frames;
+
+        if total_frames_this_cycle > 0 {
+            tracing::trace!(main_frames, sub_frames, "Drain cycle complete");
         }
 
-        // Adaptive sleep: back off when no frames available to reduce CPU load
-        // on single-core ARM. Reset to base rate when frames arrive.
-        if frames_this_cycle > 0 {
-            current_sleep_ms = poll_sleep_ms;
+        // Keep polling tight while callbacks are active; otherwise keep
+        // adaptive backoff to reduce idle CPU on single-core ARM.
+        if has_active_callbacks || total_frames_this_cycle > 0 {
+            current_sleep_ms = cycle_sleep_ms;
         } else {
             // Double sleep up to 4x base (capped)
-            current_sleep_ms = (current_sleep_ms * 2).min(poll_sleep_ms * 4);
+            current_sleep_ms = (current_sleep_ms * 2).min(cycle_sleep_ms * 4);
         }
         std::thread::sleep(Duration::from_millis(current_sleep_ms));
     }
 
     tracing::info!(
-        stream = ?stream_id,
-        total_frames = frame_count,
-        total_bytes,
-        total_iframes = iframe_count,
-        total_errors = error_count,
-        "Frame read loop exited"
+        main_frames = main_state.frame_count,
+        main_bytes = main_state.total_bytes,
+        main_iframes = main_state.iframe_count,
+        main_errors = main_state.error_count,
+        sub_frames = sub_state.frame_count,
+        sub_bytes = sub_state.total_bytes,
+        sub_iframes = sub_state.iframe_count,
+        sub_errors = sub_state.error_count,
+        "Unified frame read loop exited"
     );
 }
 
@@ -1363,11 +1750,13 @@ fn invoke_callbacks_from_map(
             cb.on_frame(frame);
         }));
         let elapsed = start.elapsed();
+        let elapsed_us = elapsed.as_micros() as u64;
+        record_callback_duration(elapsed_us);
 
         if elapsed > Duration::from_millis(2) {
             tracing::warn!(
                 callback_id = %id,
-                elapsed_us = elapsed.as_micros() as u64,
+                elapsed_us,
                 "Callback exceeded 2ms threshold (violates bridge contract)"
             );
         }
@@ -1385,6 +1774,8 @@ fn invoke_callbacks_from_map(
             cbs_write.remove(&id);
         }
     }
+
+    maybe_log_callback_histogram();
 }
 
 /// Anyka video encoder implementation with FFI integration and callback support.
@@ -1407,6 +1798,10 @@ fn invoke_callbacks_from_map(
 /// ```
 struct AnykaVideoEncoder {
     ffi: Arc<dyn crate::hal::video::VideoHalTrait>,
+    /// Optional VendorIpc reference for the zero-copy owned frame path.
+    /// This is the same object as `ffi` (when using IPC mode), stored
+    /// separately because we can't downcast `dyn VideoHalTrait` to `VendorIpc`.
+    vendor_ipc: Option<Arc<VendorIpc>>,
     configurations: RwLock<Vec<VideoEncoderConfig>>,
     main_handle: RwLock<Option<Arc<VideoEncoderHandle>>>,
     sub_handle: RwLock<Option<Arc<VideoEncoderHandle>>>,
@@ -1417,8 +1812,7 @@ struct AnykaVideoEncoder {
     next_callback_id: AtomicU64,
     main_stream_handle: RwLock<Option<Arc<VideoStreamHandle>>>,
     sub_stream_handle: RwLock<Option<Arc<VideoStreamHandle>>>,
-    main_read_thread: RwLock<Option<std::thread::JoinHandle<()>>>,
-    sub_read_thread: RwLock<Option<std::thread::JoinHandle<()>>>,
+    read_thread: RwLock<Option<std::thread::JoinHandle<()>>>,
     stop_signal: Arc<AtomicBool>,
     stream_health: Arc<StreamHealthCounters>,
     unsafe_shutdown_required: AtomicBool,
@@ -1496,6 +1890,7 @@ impl AnykaVideoEncoder {
     fn with_ffi(ffi: Arc<dyn crate::hal::video::VideoHalTrait>) -> Self {
         Self {
             ffi,
+            vendor_ipc: None, // No VendorIpc available when using custom FFI
             configurations: RwLock::new(vec![
                 VideoEncoderConfig {
                     token: "VideoEncoder_1".to_string(),
@@ -1529,12 +1924,21 @@ impl AnykaVideoEncoder {
             next_callback_id: AtomicU64::new(1),
             main_stream_handle: RwLock::new(None),
             sub_stream_handle: RwLock::new(None),
-            main_read_thread: RwLock::new(None),
-            sub_read_thread: RwLock::new(None),
+            read_thread: RwLock::new(None),
             stop_signal: Arc::new(AtomicBool::new(false)),
             stream_health: Arc::new(StreamHealthCounters::default()),
             unsafe_shutdown_required: AtomicBool::new(false),
         }
+    }
+
+    /// Create a new `AnykaVideoEncoder` with a shared VendorIpc instance.
+    ///
+    /// The VendorIpc is stored both as the `dyn VideoHalTrait` backend and as a
+    /// concrete reference for the zero-copy frame fetch path.
+    fn with_vendor_ipc(ipc: Arc<VendorIpc>) -> Self {
+        let mut encoder = Self::with_ffi(ipc.clone() as Arc<dyn crate::hal::video::VideoHalTrait>);
+        encoder.vendor_ipc = Some(ipc);
+        encoder
     }
 
     fn mark_unsafe_shutdown(&self, reason: &str) {
@@ -1801,75 +2205,54 @@ impl AnykaVideoEncoder {
         std::thread::sleep(Duration::from_millis(stabilization_ms));
         tracing::debug!(stabilization_ms, "Stream stabilization delay complete");
 
-        // ── Phase 3: Spawn reader threads ────────────────────────────────
+        // ── Phase 3: Spawn unified reader thread ─────────────────────────
         //
-        // All stream requests are complete — safe to start reading without
-        // racing against venc_request_stream modifications.
+        // A single thread drains both main and sub streams in alternating
+        // fashion.  This eliminates IPC mutex contention that occurred when
+        // two independent threads competed for the shared UnixStream to the
+        // vendor daemon.
 
-        // 3a. Spawn main read thread
-        let main_thread = {
+        let reader_thread = {
             let ffi = Arc::clone(&self.ffi);
             let callbacks = Arc::clone(&self.callbacks_arc());
             let stop = Arc::clone(&self.stop_signal);
             let stream_health = Arc::clone(&self.stream_health);
-            let sh = Arc::clone(&main_sh);
+            let main_sh_clone = Arc::clone(&main_sh);
+            let sub_sh_clone = sub_sh.as_ref().map(Arc::clone);
             let main_enc_addr = main_enc.as_ptr() as usize;
+            let sub_enc_addr = sub_enc.map(|h| h.as_ptr() as usize);
+            let vendor_ipc = self.vendor_ipc.clone();
+            let frame_pool = vendor_ipc
+                .as_ref()
+                .map(|_| Arc::new(BytesMutPool::default_frame_pool()));
             std::thread::Builder::new()
-                .name("venc-main-read".to_string())
+                .name("venc-read".to_string())
                 .spawn(move || {
-                    frame_read_loop(
-                        sh,
+                    unified_frame_read_loop(
+                        main_sh_clone,
+                        sub_sh_clone,
                         ffi,
-                        StreamId::VideoMain,
                         callbacks,
                         stop,
                         stream_health,
                         Some(main_enc_addr),
+                        sub_enc_addr,
+                        vendor_ipc,
+                        frame_pool,
                     );
                 })
                 .map_err(|e| {
                     PlatformError::InitializationFailed(format!(
-                        "Failed to spawn main read thread: {}",
+                        "Failed to spawn reader thread: {}",
                         e
                     ))
                 })?
         };
-        *self.main_read_thread.write() = Some(main_thread);
-        tracing::info!("Main stream reader thread started");
-
-        // 3b. Spawn sub read thread (if sub stream was requested)
-        if let Some(sub_sh) = sub_sh {
-            let sub = sub_enc.expect("sub_sh exists implies sub_enc exists");
-            let sub_thread = {
-                let ffi = Arc::clone(&self.ffi);
-                let callbacks = Arc::clone(&self.callbacks_arc());
-                let stop = Arc::clone(&self.stop_signal);
-                let stream_health = Arc::clone(&self.stream_health);
-                let sh = Arc::clone(&sub_sh);
-                let sub_enc_addr = sub.as_ptr() as usize;
-                std::thread::Builder::new()
-                    .name("venc-sub-read".to_string())
-                    .spawn(move || {
-                        frame_read_loop(
-                            sh,
-                            ffi,
-                            StreamId::VideoSub,
-                            callbacks,
-                            stop,
-                            stream_health,
-                            Some(sub_enc_addr),
-                        );
-                    })
-                    .map_err(|e| {
-                        PlatformError::InitializationFailed(format!(
-                            "Failed to spawn sub read thread: {}",
-                            e
-                        ))
-                    })?
-            };
-            *self.sub_read_thread.write() = Some(sub_thread);
-            tracing::info!("Sub stream reader thread started");
-        }
+        *self.read_thread.write() = Some(reader_thread);
+        tracing::info!(
+            has_sub_stream = sub_sh.is_some(),
+            "Unified stream reader thread started"
+        );
 
         Ok(())
     }
@@ -1943,26 +2326,15 @@ impl AnykaVideoEncoder {
             return Err(self.fail_fast_to_hard_shutdown(failures.join("; ")));
         }
 
-        // Phase 3: Join reader threads — should complete quickly now that
-        // cancel has unblocked any stuck SDK calls.
-        if let Some(thread) = self.main_read_thread.write().take() {
-            tracing::info!("stop_streaming: joining main read thread...");
+        // Phase 3: Join the unified reader thread — should complete quickly
+        // now that cancel has unblocked any stuck SDK calls.
+        if let Some(thread) = self.read_thread.write().take() {
+            tracing::info!("stop_streaming: joining reader thread...");
             if let Err(_thread) =
-                join_thread_with_timeout(thread, "main-read", STREAM_THREAD_JOIN_TIMEOUT)
+                join_thread_with_timeout(thread, "venc-read", STREAM_THREAD_JOIN_TIMEOUT)
             {
                 failures.push(
-                    "main reader thread join timeout after cancel (possible blocked kernel I/O)"
-                        .to_string(),
-                );
-            }
-        }
-        if let Some(thread) = self.sub_read_thread.write().take() {
-            tracing::info!("stop_streaming: joining sub read thread...");
-            if let Err(_thread) =
-                join_thread_with_timeout(thread, "sub-read", STREAM_THREAD_JOIN_TIMEOUT)
-            {
-                failures.push(
-                    "sub reader thread join timeout after cancel (possible blocked kernel I/O)"
+                    "reader thread join timeout after cancel (possible blocked kernel I/O)"
                         .to_string(),
                 );
             }
@@ -2411,6 +2783,7 @@ type AnykaPTZControl = super::hw_ptz::HardwarePTZControl;
 struct AnykaImagingControl {
     ffi: Arc<dyn crate::hal::imaging::ImagingHalTrait>,
     settings: RwLock<ImagingSettings>,
+    video_encoder: Option<Weak<AnykaVideoEncoder>>,
 }
 
 impl AnykaImagingControl {
@@ -2445,7 +2818,43 @@ impl AnykaImagingControl {
                 wdr: false,
                 backlight_compensation: false,
             }),
+            video_encoder: None,
         }
+    }
+
+    fn with_ffi_and_video_encoder(
+        ffi: Arc<dyn crate::hal::imaging::ImagingHalTrait>,
+        video_encoder: Arc<AnykaVideoEncoder>,
+    ) -> Self {
+        let mut control = Self::with_ffi(ffi);
+        control.video_encoder = Some(Arc::downgrade(&video_encoder));
+        control
+    }
+
+    fn approximately_equal(a: f32, b: f32) -> bool {
+        (a - b).abs() <= 0.001
+    }
+
+    fn mark_imaging_update_and_request_idr(&self, operation: &'static str) {
+        let seq = LAST_IMAGING_UPDATE_SEQ.fetch_add(1, Ordering::Relaxed) + 1;
+        LAST_IMAGING_UPDATE_UNIX_MS.store(current_unix_ms(), Ordering::Relaxed);
+
+        let mut requested_streams = 0u32;
+        if let Some(video_encoder) = self.video_encoder.as_ref().and_then(Weak::upgrade) {
+            if video_encoder.request_idr_frame(true).is_ok() {
+                requested_streams += 1;
+            }
+            if video_encoder.request_idr_frame(false).is_ok() {
+                requested_streams += 1;
+            }
+        }
+
+        tracing::info!(
+            operation,
+            imaging_seq = seq,
+            requested_streams,
+            "Imaging update applied"
+        );
     }
 }
 
@@ -2457,6 +2866,7 @@ impl ImagingControl for AnykaImagingControl {
     }
 
     async fn set_settings(&self, settings: &ImagingSettings) -> PlatformResult<()> {
+        let start = std::time::Instant::now();
         crate::hal::imaging::imaging_set_brightness_internal(
             settings.brightness,
             self.ffi.as_ref(),
@@ -2468,6 +2878,11 @@ impl ImagingControl for AnykaImagingControl {
         )?;
         crate::hal::imaging::imaging_set_sharpness_internal(settings.sharpness, self.ffi.as_ref())?;
         *self.settings.write() = settings.clone();
+        self.mark_imaging_update_and_request_idr("set_settings");
+        tracing::info!(
+            elapsed_us = start.elapsed().as_micros() as u64,
+            "Applied imaging settings batch"
+        );
         Ok(())
     }
 
@@ -2477,26 +2892,70 @@ impl ImagingControl for AnykaImagingControl {
     }
 
     async fn set_brightness(&self, value: f32) -> PlatformResult<()> {
+        if Self::approximately_equal(self.settings.read().brightness, value) {
+            tracing::debug!(value, "Skipping redundant brightness update");
+            return Ok(());
+        }
+        let start = std::time::Instant::now();
         crate::hal::imaging::imaging_set_brightness_internal(value, self.ffi.as_ref())?;
         self.settings.write().brightness = value;
+        self.mark_imaging_update_and_request_idr("set_brightness");
+        tracing::info!(
+            value,
+            elapsed_us = start.elapsed().as_micros() as u64,
+            "Brightness updated"
+        );
         Ok(())
     }
 
     async fn set_contrast(&self, value: f32) -> PlatformResult<()> {
+        if Self::approximately_equal(self.settings.read().contrast, value) {
+            tracing::debug!(value, "Skipping redundant contrast update");
+            return Ok(());
+        }
+        let start = std::time::Instant::now();
         crate::hal::imaging::imaging_set_contrast_internal(value, self.ffi.as_ref())?;
         self.settings.write().contrast = value;
+        self.mark_imaging_update_and_request_idr("set_contrast");
+        tracing::info!(
+            value,
+            elapsed_us = start.elapsed().as_micros() as u64,
+            "Contrast updated"
+        );
         Ok(())
     }
 
     async fn set_saturation(&self, value: f32) -> PlatformResult<()> {
+        if Self::approximately_equal(self.settings.read().saturation, value) {
+            tracing::debug!(value, "Skipping redundant saturation update");
+            return Ok(());
+        }
+        let start = std::time::Instant::now();
         crate::hal::imaging::imaging_set_saturation_internal(value, self.ffi.as_ref())?;
         self.settings.write().saturation = value;
+        self.mark_imaging_update_and_request_idr("set_saturation");
+        tracing::info!(
+            value,
+            elapsed_us = start.elapsed().as_micros() as u64,
+            "Saturation updated"
+        );
         Ok(())
     }
 
     async fn set_sharpness(&self, value: f32) -> PlatformResult<()> {
+        if Self::approximately_equal(self.settings.read().sharpness, value) {
+            tracing::debug!(value, "Skipping redundant sharpness update");
+            return Ok(());
+        }
+        let start = std::time::Instant::now();
         crate::hal::imaging::imaging_set_sharpness_internal(value, self.ffi.as_ref())?;
         self.settings.write().sharpness = value;
+        self.mark_imaging_update_and_request_idr("set_sharpness");
+        tracing::info!(
+            value,
+            elapsed_us = start.elapsed().as_micros() as u64,
+            "Sharpness updated"
+        );
         Ok(())
     }
 }
@@ -4096,13 +4555,16 @@ mod tests {
             .write()
             .insert(1, Arc::new(CountingCallback(call_count_clone)));
 
-        frame_read_loop(
+        unified_frame_read_loop(
             sh,
+            None,
             ffi,
-            StreamId::VideoMain,
             callbacks,
             stop,
             Arc::new(StreamHealthCounters::default()),
+            None,
+            None,
+            None,
             None,
         );
 
@@ -4148,13 +4610,16 @@ mod tests {
         let callbacks: Arc<RwLock<HashMap<CallbackId, Arc<dyn FrameCallback>>>> =
             Arc::new(RwLock::new(HashMap::new()));
 
-        frame_read_loop(
+        unified_frame_read_loop(
             sh,
+            None,
             ffi,
-            StreamId::VideoMain,
             callbacks,
             stop,
             Arc::new(StreamHealthCounters::default()),
+            None,
+            None,
+            None,
             None,
         );
 
@@ -4188,13 +4653,16 @@ mod tests {
             Arc::new(RwLock::new(HashMap::new()));
 
         // Should return immediately
-        frame_read_loop(
+        unified_frame_read_loop(
             sh,
+            None,
             ffi,
-            StreamId::VideoMain,
             callbacks,
             stop,
             Arc::new(StreamHealthCounters::default()),
+            None,
+            None,
+            None,
             None,
         );
     }
@@ -4221,6 +4689,9 @@ mod tests {
         mock.expect_venc_cancel_stream()
             .returning(|_| AK_SUCCESS_I32);
         let encoder = Arc::new(AnykaVideoEncoder::with_ffi(Arc::new(mock)));
+        // Keep the reader loop on active poll cadence in this lifecycle test
+        // so stop/join timing is deterministic under host CI scheduling.
+        let _callback_id = encoder.register_frame_callback(Arc::new(CountingCallback::new()));
 
         // Initialize main encoder
         let config = VideoEncoderConfig {
@@ -4246,7 +4717,7 @@ mod tests {
 
         // Verify threads are running
         assert!(encoder.main_stream_handle.read().is_some());
-        assert!(encoder.main_read_thread.read().is_some());
+        assert!(encoder.read_thread.read().is_some());
 
         // Stop streaming
         let stop_result = encoder.stop_streaming();
@@ -4258,7 +4729,7 @@ mod tests {
 
         // Verify cleanup
         assert!(encoder.main_stream_handle.read().is_none());
-        assert!(encoder.main_read_thread.read().is_none());
+        assert!(encoder.read_thread.read().is_none());
     }
 
     #[test]
@@ -4286,7 +4757,7 @@ mod tests {
             // Force the thread to outlive STREAM_THREAD_JOIN_TIMEOUT in tests.
             std::thread::sleep(Duration::from_millis(200));
         });
-        *encoder.main_read_thread.write() = Some(blocked);
+        *encoder.read_thread.write() = Some(blocked);
 
         let result = encoder.stop_streaming();
         assert!(result.is_err());
@@ -4444,7 +4915,7 @@ mod tests {
                 std::thread::sleep(Duration::from_millis(1));
             }
         });
-        *encoder.main_read_thread.write() = Some(joinable_reader);
+        *encoder.read_thread.write() = Some(joinable_reader);
 
         encoder.stop_streaming().expect("stop_streaming");
         encoder.close_all_encoders().expect("close_all_encoders");
@@ -4478,7 +4949,7 @@ mod tests {
                 std::thread::sleep(Duration::from_millis(1));
             }
         });
-        *encoder.main_read_thread.write() = Some(reader);
+        *encoder.read_thread.write() = Some(reader);
 
         let result = encoder.stop_streaming();
         assert!(result.is_ok(), "cancel-first should allow clean join");
@@ -4512,13 +4983,16 @@ mod tests {
             Arc::new(RwLock::new(HashMap::new()));
 
         let start = std::time::Instant::now();
-        frame_read_loop(
+        unified_frame_read_loop(
             sh,
+            None,
             ffi,
-            StreamId::VideoMain,
             callbacks,
             stop,
             Arc::new(StreamHealthCounters::default()),
+            None,
+            None,
+            None,
             None,
         );
         let elapsed = start.elapsed();
@@ -4566,13 +5040,16 @@ mod tests {
             Arc::new(RwLock::new(HashMap::new()));
 
         let start = std::time::Instant::now();
-        frame_read_loop(
+        unified_frame_read_loop(
             sh,
+            None,
             ffi,
-            StreamId::VideoMain,
             callbacks,
             stop,
             Arc::new(StreamHealthCounters::default()),
+            None,
+            None,
+            None,
             None,
         );
         let elapsed = start.elapsed();
@@ -4649,13 +5126,16 @@ mod tests {
             Arc::new(RwLock::new(HashMap::new()));
 
         let start = std::time::Instant::now();
-        frame_read_loop(
+        unified_frame_read_loop(
             sh,
+            None,
             ffi,
-            StreamId::VideoMain,
             callbacks,
             stop,
             Arc::new(StreamHealthCounters::default()),
+            None,
+            None,
+            None,
             None,
         );
         let elapsed = start.elapsed();
@@ -4706,13 +5186,16 @@ mod tests {
         let callbacks: Arc<RwLock<HashMap<CallbackId, Arc<dyn FrameCallback>>>> =
             Arc::new(RwLock::new(HashMap::new()));
 
-        frame_read_loop(
+        unified_frame_read_loop(
             sh,
+            None,
             ffi,
-            StreamId::VideoMain,
             callbacks,
             stop,
             Arc::new(StreamHealthCounters::default()),
+            None,
+            None,
+            None,
             None,
         );
 
@@ -4790,14 +5273,17 @@ mod tests {
         let callbacks: Arc<RwLock<HashMap<CallbackId, Arc<dyn FrameCallback>>>> =
             Arc::new(RwLock::new(HashMap::new()));
 
-        frame_read_loop(
+        unified_frame_read_loop(
             sh,
+            None,
             ffi,
-            StreamId::VideoMain,
             callbacks,
             stop,
             Arc::new(StreamHealthCounters::default()),
             Some(venc_ptr as usize),
+            None,
+            None,
+            None,
         );
 
         assert!(error_count.load(Ordering::SeqCst) >= NO_DATA_IDR_RECOVERY_EVERY_ERRORS);
@@ -4859,14 +5345,17 @@ mod tests {
         let callbacks: Arc<RwLock<HashMap<CallbackId, Arc<dyn FrameCallback>>>> =
             Arc::new(RwLock::new(HashMap::new()));
 
-        frame_read_loop(
+        unified_frame_read_loop(
             sh,
+            None,
             ffi,
-            StreamId::VideoMain,
             callbacks,
             stop,
             Arc::new(StreamHealthCounters::default()),
             Some(venc_ptr as usize),
+            None,
+            None,
+            None,
         );
 
         assert!(no_data_count.load(Ordering::SeqCst) > NO_DATA_IDR_RECOVERY_EVERY_ERRORS);

@@ -57,7 +57,7 @@ use std::sync::{
     Arc,
     atomic::{AtomicBool, AtomicU32, Ordering},
 };
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
@@ -119,9 +119,106 @@ struct RtpTrackCounters {
 
 const RTP_TIMESTAMP_WRAP_THRESHOLD: u32 = 0x8000_0000;
 const SESSION_ID_RANDOM_DIGITS: RandomDigitCount = RandomDigitCount::Four;
+const DEFAULT_MAX_FRAME_AGE_MS: u32 = 400;
+const LAG_RECOVERY_THRESHOLD_MS: u32 = 1000;
+const LAG_RECOVERY_SUSTAINED_FRAMES: u32 = 8;
+const SOURCE_TIMESTAMP_RESET_THRESHOLD_MS: u32 = 10_000;
+const DEFAULT_PLAY_READY_TIMEOUT_MS: u64 = 1500;
 
 /// RFC 2326 §12.36 — Server header value.
 const SERVER_HEADER: &str = "streaming-lib/0.1";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LagRecoveryMode {
+    Disabled,
+    LatestIdr,
+}
+
+impl LagRecoveryMode {
+    fn from_env() -> Self {
+        match std::env::var("ONVIF_LAG_RECOVERY_MODE")
+            .ok()
+            .unwrap_or_else(|| "latest_idr".to_string())
+            .trim()
+            .to_ascii_lowercase()
+            .as_str()
+        {
+            "off" | "none" | "disabled" => Self::Disabled,
+            _ => Self::LatestIdr,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct PlaybackLatencyPolicy {
+    max_frame_age_ms: u32,
+    lag_recovery_mode: LagRecoveryMode,
+    lag_recovery_threshold_ms: u32,
+    sustained_lag_frames: u32,
+}
+
+impl PlaybackLatencyPolicy {
+    fn from_env() -> Self {
+        let max_frame_age_ms = std::env::var("ONVIF_MAX_FRAME_AGE_MS")
+            .ok()
+            .and_then(|value| value.trim().parse::<u32>().ok())
+            .filter(|value| *value > 0)
+            .unwrap_or(DEFAULT_MAX_FRAME_AGE_MS);
+
+        Self {
+            max_frame_age_ms,
+            lag_recovery_mode: LagRecoveryMode::from_env(),
+            lag_recovery_threshold_ms: LAG_RECOVERY_THRESHOLD_MS,
+            sustained_lag_frames: LAG_RECOVERY_SUSTAINED_FRAMES,
+        }
+    }
+}
+
+#[derive(Debug)]
+struct LagTracker {
+    anchor_local: Instant,
+    anchor_source_ts: u32,
+    last_source_ts: u32,
+    initialized: bool,
+}
+
+impl Default for LagTracker {
+    fn default() -> Self {
+        Self {
+            anchor_local: Instant::now(),
+            anchor_source_ts: 0,
+            last_source_ts: 0,
+            initialized: false,
+        }
+    }
+}
+
+impl LagTracker {
+    fn lag_ms(&mut self, source_timestamp_ms: u32) -> u32 {
+        if !self.initialized {
+            self.initialized = true;
+            self.anchor_local = Instant::now();
+            self.anchor_source_ts = source_timestamp_ms;
+            self.last_source_ts = source_timestamp_ms;
+            return 0;
+        }
+
+        if source_timestamp_ms < self.last_source_ts
+            && self.last_source_ts.wrapping_sub(source_timestamp_ms)
+                > SOURCE_TIMESTAMP_RESET_THRESHOLD_MS
+        {
+            self.anchor_local = Instant::now();
+            self.anchor_source_ts = source_timestamp_ms;
+            self.last_source_ts = source_timestamp_ms;
+            return 0;
+        }
+
+        self.last_source_ts = source_timestamp_ms;
+        let elapsed_ms = self.anchor_local.elapsed().as_millis() as u32;
+        let expected_source_ts = self.anchor_source_ts.wrapping_add(elapsed_ms);
+        expected_source_ts.saturating_sub(source_timestamp_ms)
+    }
+}
 
 #[derive(Debug, Clone, Copy)]
 struct RtpTimestampSample {
@@ -269,6 +366,27 @@ fn has_annexb_start_code(data: &[u8]) -> bool {
     data.starts_with(&[0x00, 0x00, 0x01]) || data.starts_with(&ANNEXB_NALU_START_CODE[..])
 }
 
+fn contains_h264_idr(data: &[u8]) -> bool {
+    let mut i = 0usize;
+    while i + 4 < data.len() {
+        let nal_start = if data[i..].starts_with(&ANNEXB_NALU_START_CODE[..]) {
+            i + 4
+        } else if data[i..].starts_with(&[0x00, 0x00, 0x01]) {
+            i + 3
+        } else {
+            i += 1;
+            continue;
+        };
+
+        if nal_start < data.len() && (data[nal_start] & 0x1F) == 5 {
+            return true;
+        }
+
+        i = nal_start;
+    }
+    false
+}
+
 struct PlaybackVideoSendContext<'a> {
     session_id: &'a str,
     remote_addr: std::net::SocketAddr,
@@ -310,13 +428,37 @@ async fn send_video_access_unit(
 async fn process_audio_frame(
     audio_channel: &Arc<Mutex<RtpChannel>>,
     timestamp_normalizers: &mut HashMap<TrackType, RtpTimestampNormalizer>,
+    latency_policy: PlaybackLatencyPolicy,
+    audio_lag_tracker: &mut LagTracker,
     session_id: &str,
     remote_addr: SocketAddr,
     request_path: &str,
     shutdown: &Arc<AtomicBool>,
     timestamp: u32,
     data: &mut BytesMut,
+    dropped_stale_frames: &mut u64,
+    waiting_for_idr_recovery: bool,
+    dropped_for_recovery: &mut u64,
 ) {
+    if waiting_for_idr_recovery {
+        *dropped_for_recovery += 1;
+        return;
+    }
+
+    let lag_ms = audio_lag_tracker.lag_ms(timestamp);
+    if lag_ms > latency_policy.max_frame_age_ms {
+        *dropped_stale_frames += 1;
+        log::warn!(
+            "event=stale_frame_drop track=Audio session_id={} remote_addr={} stream_path={} lag_ms={} threshold_ms={}",
+            session_id,
+            remote_addr,
+            request_path,
+            lag_ms,
+            latency_policy.max_frame_age_ms,
+        );
+        return;
+    }
+
     let mut channel = audio_channel.lock().await;
     let normalized = timestamp_normalizers
         .entry(TrackType::Audio)
@@ -357,6 +499,13 @@ async fn process_video_frame(
     video_channel: &Arc<Mutex<RtpChannel>>,
     video_assembler: &mut VideoAccessUnitAssembler,
     timestamp_normalizers: &mut HashMap<TrackType, RtpTimestampNormalizer>,
+    latency_policy: PlaybackLatencyPolicy,
+    video_lag_tracker: &mut LagTracker,
+    sustained_video_lag_frames: &mut u32,
+    waiting_for_idr_recovery: &mut bool,
+    dropped_stale_frames: &mut u64,
+    dropped_for_recovery: &mut u64,
+    idr_recovery_count: &mut u64,
     session_id: &str,
     remote_addr: SocketAddr,
     request_path: &str,
@@ -367,6 +516,62 @@ async fn process_video_frame(
     let Some((flush_ts, mut flush_data)) = video_assembler.push(timestamp, data) else {
         return;
     };
+
+    let contains_idr = contains_h264_idr(flush_data.as_ref());
+    if *waiting_for_idr_recovery {
+        if !contains_idr {
+            *dropped_for_recovery += 1;
+            return;
+        }
+
+        *waiting_for_idr_recovery = false;
+        log::info!(
+            "event=lag_recovery_resynced track=Video session_id={} remote_addr={} stream_path={}",
+            session_id,
+            remote_addr,
+            request_path,
+        );
+    }
+
+    let lag_ms = video_lag_tracker.lag_ms(flush_ts);
+    if lag_ms > latency_policy.max_frame_age_ms {
+        *dropped_stale_frames += 1;
+        log::warn!(
+            "event=stale_frame_drop track=Video session_id={} remote_addr={} stream_path={} lag_ms={} threshold_ms={}",
+            session_id,
+            remote_addr,
+            request_path,
+            lag_ms,
+            latency_policy.max_frame_age_ms,
+        );
+        return;
+    }
+
+    if lag_ms > latency_policy.lag_recovery_threshold_ms {
+        *sustained_video_lag_frames = sustained_video_lag_frames.saturating_add(1);
+    } else {
+        *sustained_video_lag_frames = 0;
+    }
+
+    if latency_policy.lag_recovery_mode == LagRecoveryMode::LatestIdr
+        && *sustained_video_lag_frames >= latency_policy.sustained_lag_frames
+        && !contains_idr
+    {
+        *waiting_for_idr_recovery = true;
+        *sustained_video_lag_frames = 0;
+        *dropped_for_recovery += 1;
+        *idr_recovery_count += 1;
+        log::warn!(
+            "event=lag_recovery_trigger track=Video session_id={} remote_addr={} stream_path={} lag_ms={} threshold_ms={} sustained_frames={}",
+            session_id,
+            remote_addr,
+            request_path,
+            lag_ms,
+            latency_policy.lag_recovery_threshold_ms,
+            latency_policy.sustained_lag_frames,
+        );
+        return;
+    }
 
     let ctx = PlaybackVideoSendContext {
         session_id,
@@ -422,6 +627,14 @@ async fn handle_playback_frame(
     video_rtp_channel: &Option<Arc<Mutex<RtpChannel>>>,
     video_assembler: &mut VideoAccessUnitAssembler,
     timestamp_normalizers: &mut HashMap<TrackType, RtpTimestampNormalizer>,
+    latency_policy: PlaybackLatencyPolicy,
+    audio_lag_tracker: &mut LagTracker,
+    video_lag_tracker: &mut LagTracker,
+    sustained_video_lag_frames: &mut u32,
+    waiting_for_idr_recovery: &mut bool,
+    dropped_stale_frames: &mut u64,
+    dropped_for_recovery: &mut u64,
+    idr_recovery_count: &mut u64,
     session_id: &str,
     remote_addr: SocketAddr,
     request_path: &str,
@@ -436,12 +649,17 @@ async fn handle_playback_frame(
                 process_audio_frame(
                     audio_channel,
                     timestamp_normalizers,
+                    latency_policy,
+                    audio_lag_tracker,
                     session_id,
                     remote_addr,
                     request_path,
                     shutdown,
                     timestamp,
                     &mut data,
+                    dropped_stale_frames,
+                    *waiting_for_idr_recovery,
+                    dropped_for_recovery,
                 )
                 .await;
 
@@ -454,6 +672,13 @@ async fn handle_playback_frame(
                     video_channel,
                     video_assembler,
                     timestamp_normalizers,
+                    latency_policy,
+                    video_lag_tracker,
+                    sustained_video_lag_frames,
+                    waiting_for_idr_recovery,
+                    dropped_stale_frames,
+                    dropped_for_recovery,
+                    idr_recovery_count,
                     session_id,
                     remote_addr,
                     request_path,
@@ -516,10 +741,18 @@ async fn run_playback_loop(
     session_id: String,
     remote_addr: SocketAddr,
     request_path: String,
+    latency_policy: PlaybackLatencyPolicy,
 ) {
     let mut timestamp_normalizers: HashMap<TrackType, RtpTimestampNormalizer> = HashMap::new();
     let mut retry_times: usize = 0;
     let mut video_assembler = VideoAccessUnitAssembler::default();
+    let mut audio_lag_tracker = LagTracker::default();
+    let mut video_lag_tracker = LagTracker::default();
+    let mut sustained_video_lag_frames = 0u32;
+    let mut waiting_for_idr_recovery = false;
+    let mut dropped_stale_frames = 0u64;
+    let mut dropped_for_recovery = 0u64;
+    let mut idr_recovery_count = 0u64;
 
     loop {
         if playback_cancel.load(Ordering::Acquire) {
@@ -545,6 +778,14 @@ async fn run_playback_loop(
                     &video_rtp_channel,
                     &mut video_assembler,
                     &mut timestamp_normalizers,
+                    latency_policy,
+                    &mut audio_lag_tracker,
+                    &mut video_lag_tracker,
+                    &mut sustained_video_lag_frames,
+                    &mut waiting_for_idr_recovery,
+                    &mut dropped_stale_frames,
+                    &mut dropped_for_recovery,
+                    &mut idr_recovery_count,
                     &session_id,
                     remote_addr,
                     &request_path,
@@ -573,6 +814,16 @@ async fn run_playback_loop(
             }
         }
     }
+
+    log::info!(
+        "event=playback_loop_exit session_id={} remote_addr={} stream_path={} dropped_stale_frames={} dropped_for_recovery={} idr_recovery_count={}",
+        session_id,
+        remote_addr,
+        request_path,
+        dropped_stale_frames,
+        dropped_for_recovery,
+        idr_recovery_count,
+    );
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -1565,6 +1816,27 @@ impl RtspServerSession {
         Ok(())
     }
 
+    async fn wait_for_tracks(
+        &mut self,
+        rtsp_request: &RtspRequest,
+        timeout: Duration,
+    ) -> Result<bool, SessionError> {
+        if !self.tracks.is_empty() {
+            return Ok(true);
+        }
+
+        let deadline = Instant::now() + timeout;
+        while Instant::now() <= deadline {
+            self.ensure_tracks_from_streamhub(rtsp_request).await?;
+            if !self.tracks.is_empty() {
+                return Ok(true);
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+
+        Ok(false)
+    }
+
     fn resolve_stream_identifier(&mut self, request_path: &str) -> StreamIdentifier {
         if let Some(identifier) = &self.stream_identifier {
             return identifier.clone();
@@ -1886,6 +2158,52 @@ impl RtspServerSession {
             self.session_type,
         );
 
+        if let Some(range_str) = rtsp_request.get_header("Range")
+            && RtspRange::unmarshal(range_str).is_err()
+        {
+            log::warn!(
+                "event=play_rejected_invalid_range session_id={} remote_addr={} stream_path={} range={}",
+                session_id,
+                self.remote_addr,
+                rtsp_request.uri.path,
+                range_str,
+            );
+            let response = Self::gen_rtsp_response(457, "Invalid Range", rtsp_request);
+            self.send_response(&response).await?;
+            return Ok(());
+        }
+
+        let play_gate_timeout_ms = std::env::var("ONVIF_PLAY_READY_TIMEOUT_MS")
+            .ok()
+            .and_then(|value| value.trim().parse::<u64>().ok())
+            .filter(|value| *value > 0)
+            .unwrap_or(DEFAULT_PLAY_READY_TIMEOUT_MS);
+        log::debug!(
+            "event=play_waiting_for_tracks session_id={} remote_addr={} stream_path={} timeout_ms={}",
+            session_id,
+            self.remote_addr,
+            rtsp_request.uri.path,
+            play_gate_timeout_ms,
+        );
+        if !self
+            .wait_for_tracks(
+                rtsp_request,
+                Duration::from_millis(play_gate_timeout_ms.max(50)),
+            )
+            .await?
+        {
+            log::warn!(
+                "event=play_rejected_waiting_for_sps_pps session_id={} remote_addr={} stream_path={} timeout_ms={}",
+                session_id,
+                self.remote_addr,
+                rtsp_request.uri.path,
+                play_gate_timeout_ms,
+            );
+            let response = Self::gen_response(http::StatusCode::SERVICE_UNAVAILABLE, rtsp_request);
+            self.send_response(&response).await?;
+            return Ok(());
+        }
+
         let sample_interval = self.rtp_sample_interval;
         let session_id_for_rtp = session_id.clone();
         let remote_for_rtp = self.remote_addr;
@@ -2001,6 +2319,18 @@ impl RtspServerSession {
         let request_path = rtsp_request.uri.path.clone();
         let session_id_for_task = session_id.clone();
         let shutdown = self.shutdown.clone();
+        let latency_policy = PlaybackLatencyPolicy::from_env();
+
+        log::info!(
+            "event=playback_latency_policy session_id={} remote_addr={} stream_path={} max_frame_age_ms={} lag_recovery_mode={:?} lag_recovery_threshold_ms={} sustained_lag_frames={}",
+            session_id,
+            self.remote_addr,
+            rtsp_request.uri.path,
+            latency_policy.max_frame_age_ms,
+            latency_policy.lag_recovery_mode,
+            latency_policy.lag_recovery_threshold_ms,
+            latency_policy.sustained_lag_frames,
+        );
 
         self.stop_playback_task().await;
         let playback_cancel = Arc::new(AtomicBool::new(false));
@@ -2016,6 +2346,7 @@ impl RtspServerSession {
             session_id_for_task,
             remote_addr,
             request_path,
+            latency_policy,
         )));
 
         Ok(())
@@ -2705,6 +3036,17 @@ mod tests {
             request.headers.insert("CSeq".to_string(), seq.to_string());
         }
         request
+    }
+
+    fn add_default_video_track(session: &mut RtspServerSession) {
+        let codec_info = RtspCodecInfo {
+            codec_id: crate::rtsp::rtsp_codec::RtspCodecId::H264,
+            payload_type: 96,
+            sample_rate: 90000,
+            channel_count: 0,
+        };
+        let track = RtspTrack::new(TrackType::Video, codec_info, "trackID=0".to_string());
+        session.tracks.insert(TrackType::Video, track);
     }
 
     #[test]
@@ -4274,6 +4616,7 @@ mod tests {
 
         let mut session =
             RtspServerSession::new_with_io(session_io, event_sender, None, remote_addr);
+        add_default_video_track(&mut session);
 
         let run_result = session.run().await;
         assert!(run_result.is_err());
@@ -4348,6 +4691,7 @@ mod tests {
 
         let mut session =
             RtspServerSession::new_with_io(session_io, event_sender, None, remote_addr);
+        add_default_video_track(&mut session);
 
         let run_result = session.run().await;
         assert!(run_result.is_err());
@@ -4406,6 +4750,7 @@ mod tests {
         let remote_addr = "127.0.0.1:0".parse().unwrap();
         let mut session =
             RtspServerSession::new_with_io(session_io, event_sender, None, remote_addr);
+        add_default_video_track(&mut session);
 
         let run_result = session.run().await;
         assert!(run_result.is_err());
@@ -4474,13 +4819,7 @@ mod tests {
 
         let mut session =
             RtspServerSession::new_with_io(session_io, event_sender, None, remote_addr);
-
-        // Populate a track so PLAY knows what to play (though handle_play logic might iterate all tracks)
-        // handle_play calls `self.tracks.values_mut()` which implies it needs tracks?
-        // Actually handle_play primarily subscribes to the stream identifier.
-        // But let's check: handle_play iterates tracks?
-        // It iterates tracks to set `is_sending = true`.
-        // It subscribes via `event_producer`.
+        add_default_video_track(&mut session);
 
         // Ensure we use the aggregate stream identifier for PLAY requests that include track IDs.
         session.stream_identifier = Some(StreamIdentifier::Rtsp {
@@ -4582,6 +4921,7 @@ mod tests {
 
         let mut session =
             RtspServerSession::new_with_io(session_io, event_sender, None, remote_addr);
+        add_default_video_track(&mut session);
 
         let subscribe_handle = tokio::spawn(async move {
             use crate::streamhub::define::DataReceiver;
@@ -5457,5 +5797,39 @@ mod tests {
     fn test_scale_rtp_timestamp_one_ms() {
         // 1ms at 90kHz = 90 ticks
         assert_eq!(RtspServerSession::scale_rtp_timestamp(1, 90000), 90);
+    }
+
+    #[test]
+    fn test_contains_h264_idr_detects_idr_nal() {
+        let data = [
+            0x00, 0x00, 0x00, 0x01, 0x67, 0x42, 0x00, 0x1e, // SPS
+            0x00, 0x00, 0x00, 0x01, 0x65, 0x88, 0x84, // IDR
+        ];
+        assert!(contains_h264_idr(&data));
+    }
+
+    #[test]
+    fn test_lag_tracker_reports_positive_lag_for_old_frame() {
+        let mut tracker = LagTracker {
+            anchor_local: Instant::now() - Duration::from_millis(500),
+            anchor_source_ts: 1000,
+            last_source_ts: 1200,
+            initialized: true,
+        };
+        let lag_ms = tracker.lag_ms(1200);
+        assert!(lag_ms >= 200);
+    }
+
+    #[test]
+    fn test_lag_tracker_resets_on_large_timestamp_regression() {
+        let mut tracker = LagTracker {
+            anchor_local: Instant::now() - Duration::from_millis(500),
+            anchor_source_ts: 10_000,
+            last_source_ts: 20_000,
+            initialized: true,
+        };
+        let lag_ms = tracker.lag_ms(100);
+        assert_eq!(lag_ms, 0);
+        assert_eq!(tracker.anchor_source_ts, 100);
     }
 }

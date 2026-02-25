@@ -488,6 +488,11 @@ impl ConfigSchema {
                 "Enable per-frame streaming debug logs (high overhead)",
             ))
             .param(ConfigParameter::bool(
+                "logging.ipc_debug",
+                false,
+                "Enable vendor IPC connection debug logs",
+            ))
+            .param(ConfigParameter::bool(
                 "logging.console_enabled",
                 true,
                 "Enable console logging",

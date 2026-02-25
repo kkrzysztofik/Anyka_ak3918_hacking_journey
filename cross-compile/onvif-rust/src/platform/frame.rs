@@ -26,6 +26,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use parking_lot::Mutex;
 
+use bytes::BytesMut;
+
 /// Unique identifier for a registered callback.
 pub type CallbackId = u64;
 
@@ -51,6 +53,65 @@ pub enum StreamId {
     VideoSub,
     /// Audio stream.
     Audio,
+}
+
+/// Metadata parsed from the 28-byte IPC frame header.
+///
+/// This is extracted during `recv_frame_response` and used to populate
+/// `OwnedFrame` fields and manage the remote token for frame release.
+#[derive(Debug, Clone)]
+pub struct FrameMetadata {
+    /// Timestamp in milliseconds (from daemon).
+    pub timestamp_ms: u64,
+    /// Sequence number.
+    pub seq_no: u32,
+    /// Frame type (I-frame, P-frame, etc.).
+    pub frame_type: FrameType,
+    /// Opaque token the daemon uses to identify this frame on release.
+    pub remote_token: u64,
+}
+
+/// Frame with owned data buffer — no copy needed downstream.
+///
+/// Unlike [`Frame`] which holds a borrowed raw pointer into SDK memory,
+/// `OwnedFrame` owns its data via `BytesMut`. This enables zero-extra-copy
+/// delivery through the streaming pipeline: the frame data is read from the
+/// IPC socket directly into `BytesMut`, which is then moved (not copied)
+/// through the callback chain to the streaming bridge.
+///
+/// # Usage
+///
+/// ```text
+/// vendor_ipc::fetch_frame_owned()
+///   → OwnedFrame { data: BytesMut, ... }
+///     → OwnedFrameCallback::on_owned_frame()
+///       → StreamingBridge::route_owned_frame()  // moves data, no copy
+/// ```
+pub struct OwnedFrame {
+    /// Owned encoded frame data (already in BytesMut).
+    pub data: BytesMut,
+    /// Timestamp in microseconds since epoch.
+    pub timestamp: u64,
+    /// Type of frame (I-frame, P-frame, etc.).
+    pub frame_type: FrameType,
+    /// Which stream this frame belongs to.
+    pub stream_id: StreamId,
+}
+
+/// Extended callback trait that receives owned frames.
+///
+/// This is the zero-copy counterpart to [`FrameCallback`]. Implementations
+/// receive an `OwnedFrame` with `BytesMut` data that can be moved directly
+/// into the streaming pipeline without additional copies.
+///
+/// Callbacks must be `Send + Sync` and should complete quickly (target < 2ms).
+pub trait OwnedFrameCallback: Send + Sync {
+    /// Called when a new owned frame is available.
+    ///
+    /// The `frame` is moved to the callback, transferring ownership of the
+    /// `BytesMut` buffer. The callback may consume, store, or forward the
+    /// frame data without any copy.
+    fn on_owned_frame(&self, frame: OwnedFrame);
 }
 
 /// A single encoded frame delivered from the SDK.
@@ -372,5 +433,49 @@ mod tests {
     fn test_active_frames_default() {
         let af = ActiveFrames::default();
         assert_eq!(af.active_count(), 0);
+    }
+
+    #[test]
+    fn test_owned_frame_construction() {
+        let data = BytesMut::from(&[0x00, 0x00, 0x00, 0x01, 0x65, 0x88][..]);
+        let frame = OwnedFrame {
+            data,
+            timestamp: 2_000_000,
+            frame_type: FrameType::VideoIFrame,
+            stream_id: StreamId::VideoMain,
+        };
+        assert_eq!(frame.data.len(), 6);
+        assert_eq!(frame.timestamp, 2_000_000);
+        assert_eq!(frame.frame_type, FrameType::VideoIFrame);
+        assert_eq!(frame.stream_id, StreamId::VideoMain);
+    }
+
+    #[test]
+    fn test_owned_frame_data_ownership_transfer() {
+        let original_data = vec![0xAA, 0xBB, 0xCC, 0xDD];
+        let data = BytesMut::from(original_data.as_slice());
+        let frame = OwnedFrame {
+            data,
+            timestamp: 1_000_000,
+            frame_type: FrameType::VideoPFrame,
+            stream_id: StreamId::VideoSub,
+        };
+        // Data is owned by frame — can be moved without copy
+        let moved_data = frame.data;
+        assert_eq!(&moved_data[..], &[0xAA, 0xBB, 0xCC, 0xDD]);
+    }
+
+    #[test]
+    fn test_frame_metadata_construction() {
+        let meta = FrameMetadata {
+            timestamp_ms: 12345,
+            seq_no: 42,
+            frame_type: FrameType::VideoIFrame,
+            remote_token: 0xDEAD_BEEF,
+        };
+        assert_eq!(meta.timestamp_ms, 12345);
+        assert_eq!(meta.seq_no, 42);
+        assert_eq!(meta.frame_type, FrameType::VideoIFrame);
+        assert_eq!(meta.remote_token, 0xDEAD_BEEF);
     }
 }
