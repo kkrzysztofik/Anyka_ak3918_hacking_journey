@@ -476,6 +476,15 @@ impl Platform for AnykaPlatform {
         tracing::info!("Frame callback registered (id={})", _id);
         Ok(())
     }
+
+    fn register_owned_frame_callback(
+        &self,
+        callback: Arc<dyn crate::platform::frame::OwnedFrameCallback>,
+    ) -> PlatformResult<()> {
+        let _id = self.video_encoder.register_owned_frame_callback(callback);
+        tracing::info!("Owned frame callback registered (id={})", _id);
+        Ok(())
+    }
 }
 
 // =============================================================================
@@ -1032,7 +1041,10 @@ use crate::hal::{
     profile_mode, video_stream,
 };
 
-use super::frame::{ActiveFrames, CallbackId, Frame, FrameCallback, FrameType, StreamId};
+use super::frame::{
+    ActiveFrames, CallbackId, Frame, FrameCallback, FrameType, OwnedFrame, OwnedFrameCallback,
+    StreamId,
+};
 
 /// Encoder lifecycle state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1244,6 +1256,7 @@ fn unified_frame_read_loop(
     sub_stream_handle: Option<Arc<VideoStreamHandle>>,
     ffi: Arc<dyn crate::hal::video::VideoHalTrait>,
     callbacks: Arc<RwLock<HashMap<CallbackId, Arc<dyn FrameCallback>>>>,
+    owned_callbacks: Arc<RwLock<HashMap<CallbackId, Arc<dyn OwnedFrameCallback>>>>,
     stop_signal: Arc<AtomicBool>,
     stream_health: Arc<StreamHealthCounters>,
     main_enc_addr: Option<usize>,
@@ -1293,6 +1306,7 @@ fn unified_frame_read_loop(
         ffi: &dyn crate::hal::video::VideoHalTrait,
         state: &mut StreamState,
         callbacks: &RwLock<HashMap<CallbackId, Arc<dyn FrameCallback>>>,
+        owned_callbacks: &RwLock<HashMap<CallbackId, Arc<dyn OwnedFrameCallback>>>,
         stop_signal: &AtomicBool,
         stream_health: &StreamHealthCounters,
         no_data_recovery_interval_errors: u32,
@@ -1373,20 +1387,28 @@ fn unified_frame_read_loop(
                             );
                         }
 
-                        // Create a temporary Frame borrowing from the OwnedFrame's
-                        // BytesMut buffer for backward-compatible callback invocation.
-                        // SAFETY: owned_frame.data is a valid BytesMut allocation.
-                        // The pointer remains valid for the duration of callback
-                        // invocation because owned_frame lives on this stack frame
-                        // and is not dropped until after invoke_callbacks_from_map.
-                        let frame = Frame {
-                            data: owned_frame.data.as_ptr(),
-                            size: frame_size,
-                            timestamp: owned_frame.timestamp,
-                            frame_type,
-                            stream_id: state.stream_id,
-                        };
-                        invoke_callbacks_from_map(callbacks, &frame);
+                        // Try owned callbacks first (zero-copy path).
+                        // If no owned callbacks are registered, fall back to
+                        // legacy FrameCallback with a borrowed Frame.
+                        if let Some(remaining) =
+                            invoke_owned_callbacks_from_map(owned_callbacks, owned_frame)
+                        {
+                            // No owned callbacks consumed the frame — fall back to legacy path.
+                            // Create a temporary Frame borrowing from the OwnedFrame's
+                            // BytesMut buffer for backward-compatible callback invocation.
+                            // SAFETY: remaining.data is a valid BytesMut allocation.
+                            // The pointer remains valid for the duration of callback
+                            // invocation because remaining lives on this stack frame
+                            // and is not dropped until after invoke_callbacks_from_map.
+                            let frame = Frame {
+                                data: remaining.data.as_ptr(),
+                                size: frame_size,
+                                timestamp: remaining.timestamp,
+                                frame_type,
+                                stream_id: state.stream_id,
+                            };
+                            invoke_callbacks_from_map(callbacks, &frame);
+                        } // else: owned callbacks consumed the frame — no legacy fallback needed
 
                         // Release the frame (sends remote_token to daemon).
                         if let Err(e) = ipc.release_frame_owned(handle.as_ptr()) {
@@ -1674,6 +1696,7 @@ fn unified_frame_read_loop(
             ffi.as_ref(),
             &mut main_state,
             &callbacks,
+            &owned_callbacks,
             &stop_signal,
             &stream_health,
             no_data_recovery_interval_errors,
@@ -1687,6 +1710,7 @@ fn unified_frame_read_loop(
                 ffi.as_ref(),
                 &mut sub_state,
                 &callbacks,
+                &owned_callbacks,
                 &stop_signal,
                 &stream_health,
                 no_data_recovery_interval_errors,
@@ -1778,6 +1802,115 @@ fn invoke_callbacks_from_map(
     maybe_log_callback_histogram();
 }
 
+/// Invoke all registered owned-frame callbacks, transferring ownership.
+///
+/// If there are no owned callbacks, returns `Some(owned_frame)` so the caller
+/// can fall back to the legacy `FrameCallback` path.
+///
+/// If there is exactly one callback (common case — just `StreamingBridge`),
+/// the `OwnedFrame` is moved directly — true zero-copy.
+///
+/// If there are multiple callbacks, each except the last receives a clone.
+fn invoke_owned_callbacks_from_map(
+    owned_callbacks: &RwLock<HashMap<CallbackId, Arc<dyn OwnedFrameCallback>>>,
+    owned_frame: OwnedFrame,
+) -> Option<OwnedFrame> {
+    let cbs = owned_callbacks.read();
+    let cb_count = cbs.len();
+
+    if cb_count == 0 {
+        return Some(owned_frame);
+    }
+
+    tracing::trace!(
+        callback_count = cb_count,
+        stream = ?owned_frame.stream_id,
+        "Invoking owned frame callbacks (zero-copy)"
+    );
+
+    // Collect Arc refs so we can drop the read lock before invoking
+    let callbacks: Vec<(CallbackId, Arc<dyn OwnedFrameCallback>)> =
+        cbs.iter().map(|(id, cb)| (*id, Arc::clone(cb))).collect();
+    drop(cbs);
+
+    let mut failed = Vec::new();
+    let last_idx = callbacks.len() - 1;
+
+    for (i, (id, cb)) in callbacks.iter().enumerate() {
+        let start = std::time::Instant::now();
+
+        let frame_to_send = if i < last_idx {
+            // Not the last callback — clone the data
+            OwnedFrame {
+                data: owned_frame.data.clone(),
+                timestamp: owned_frame.timestamp,
+                frame_type: owned_frame.frame_type,
+                stream_id: owned_frame.stream_id,
+            }
+        } else {
+            // Last callback — will get the moved frame below
+            break;
+        };
+
+        let result = std::panic::catch_unwind(AssertUnwindSafe(|| {
+            cb.on_owned_frame(frame_to_send);
+        }));
+
+        let elapsed = start.elapsed();
+        let elapsed_us = elapsed.as_micros() as u64;
+        record_callback_duration(elapsed_us);
+
+        if elapsed > Duration::from_millis(2) {
+            tracing::warn!(
+                callback_id = %id,
+                elapsed_us,
+                "Owned callback exceeded 2ms threshold"
+            );
+        }
+
+        if result.is_err() {
+            tracing::error!("Owned frame callback {} panicked, marking for removal", id);
+            failed.push(*id);
+        }
+    }
+
+    // Invoke the last callback with the original owned_frame (moved)
+    let (last_id, last_cb) = &callbacks[last_idx];
+    let start = std::time::Instant::now();
+    let result = std::panic::catch_unwind(AssertUnwindSafe(|| {
+        last_cb.on_owned_frame(owned_frame);
+    }));
+    let elapsed = start.elapsed();
+    let elapsed_us = elapsed.as_micros() as u64;
+    record_callback_duration(elapsed_us);
+    if elapsed > Duration::from_millis(2) {
+        tracing::warn!(
+            callback_id = %last_id,
+            elapsed_us,
+            "Owned callback exceeded 2ms threshold"
+        );
+    }
+    if result.is_err() {
+        tracing::error!(
+            "Owned frame callback {} panicked, marking for removal",
+            last_id
+        );
+        failed.push(*last_id);
+    }
+
+    // Remove failed callbacks
+    if !failed.is_empty() {
+        let mut cbs_write = owned_callbacks.write();
+        for id in failed {
+            cbs_write.remove(&id);
+        }
+    }
+
+    maybe_log_callback_histogram();
+
+    None // Frame was consumed by owned callbacks
+}
+
 /// Anyka video encoder implementation with FFI integration and callback support.
 ///
 /// Manages dual video encoders (main 720p + sub 360p) with:
@@ -1808,6 +1941,7 @@ struct AnykaVideoEncoder {
     main_state: RwLock<EncoderState>,
     sub_state: RwLock<EncoderState>,
     callbacks: Arc<RwLock<HashMap<CallbackId, Arc<dyn FrameCallback>>>>,
+    owned_callbacks: Arc<RwLock<HashMap<CallbackId, Arc<dyn OwnedFrameCallback>>>>,
     active_frames: Arc<ActiveFrames>,
     next_callback_id: AtomicU64,
     main_stream_handle: RwLock<Option<Arc<VideoStreamHandle>>>,
@@ -1920,6 +2054,7 @@ impl AnykaVideoEncoder {
             main_state: RwLock::new(EncoderState::Uninitialized),
             sub_state: RwLock::new(EncoderState::Uninitialized),
             callbacks: Arc::new(RwLock::new(HashMap::new())),
+            owned_callbacks: Arc::new(RwLock::new(HashMap::new())),
             active_frames: Arc::new(ActiveFrames::new()),
             next_callback_id: AtomicU64::new(1),
             main_stream_handle: RwLock::new(None),
@@ -2090,6 +2225,23 @@ impl AnykaVideoEncoder {
         self.callbacks.write().remove(&id).is_some()
     }
 
+    /// Register an owned frame callback (zero-copy path).
+    ///
+    /// Returns a `CallbackId` that can be used to unregister the callback.
+    pub fn register_owned_frame_callback(
+        &self,
+        callback: Arc<dyn OwnedFrameCallback>,
+    ) -> CallbackId {
+        let id = self.next_callback_id.fetch_add(1, Ordering::SeqCst);
+        self.owned_callbacks.write().insert(id, callback);
+        id
+    }
+
+    /// Unregister a previously registered owned frame callback.
+    pub fn unregister_owned_frame_callback(&self, id: CallbackId) -> bool {
+        self.owned_callbacks.write().remove(&id).is_some()
+    }
+
     /// Invoke all registered callbacks with a frame, isolating panics.
     ///
     /// Each callback is invoked in a `catch_unwind` boundary. If a callback
@@ -2222,6 +2374,7 @@ impl AnykaVideoEncoder {
             let main_enc_addr = main_enc.as_ptr() as usize;
             let sub_enc_addr = sub_enc.map(|h| h.as_ptr() as usize);
             let vendor_ipc = self.vendor_ipc.clone();
+            let owned_callbacks = Arc::clone(&self.owned_callbacks_arc());
             let frame_pool = vendor_ipc
                 .as_ref()
                 .map(|_| Arc::new(BytesMutPool::default_frame_pool()));
@@ -2233,6 +2386,7 @@ impl AnykaVideoEncoder {
                         sub_sh_clone,
                         ffi,
                         callbacks,
+                        owned_callbacks,
                         stop,
                         stream_health,
                         Some(main_enc_addr),
@@ -2362,6 +2516,11 @@ impl AnykaVideoEncoder {
     /// Get a cloned `Arc` reference to the callbacks map for thread sharing.
     fn callbacks_arc(&self) -> Arc<RwLock<HashMap<CallbackId, Arc<dyn FrameCallback>>>> {
         Arc::clone(&self.callbacks)
+    }
+
+    /// Get a cloned `Arc` reference to the owned callbacks map for thread sharing.
+    fn owned_callbacks_arc(&self) -> Arc<RwLock<HashMap<CallbackId, Arc<dyn OwnedFrameCallback>>>> {
+        Arc::clone(&self.owned_callbacks)
     }
 
     /// Request an IDR (I-frame) from the specified encoder channel.
@@ -4115,6 +4274,46 @@ mod tests {
         }
     }
 
+    /// Test owned callback that counts invocations.
+    struct CountingOwnedCallback {
+        count: AtomicU64,
+        last_size: AtomicU64,
+    }
+
+    impl CountingOwnedCallback {
+        fn new() -> Self {
+            Self {
+                count: AtomicU64::new(0),
+                last_size: AtomicU64::new(0),
+            }
+        }
+
+        fn call_count(&self) -> u64 {
+            self.count.load(Ordering::SeqCst)
+        }
+
+        fn last_size(&self) -> u64 {
+            self.last_size.load(Ordering::SeqCst)
+        }
+    }
+
+    impl OwnedFrameCallback for CountingOwnedCallback {
+        fn on_owned_frame(&self, frame: OwnedFrame) {
+            self.count.fetch_add(1, Ordering::SeqCst);
+            self.last_size
+                .store(frame.data.len() as u64, Ordering::SeqCst);
+        }
+    }
+
+    /// Test owned callback that deliberately panics.
+    struct PanickingOwnedCallback;
+
+    impl OwnedFrameCallback for PanickingOwnedCallback {
+        fn on_owned_frame(&self, _frame: OwnedFrame) {
+            panic!("intentional panic in owned callback test");
+        }
+    }
+
     fn make_test_frame() -> Frame {
         static TEST_DATA: [u8; 4] = [0x00, 0x00, 0x00, 0x01];
         Frame {
@@ -4238,6 +4437,153 @@ mod tests {
 
         // Second invocation with no callbacks is fine
         encoder.invoke_callbacks(&frame);
+    }
+
+    // ===== Owned Frame Callback Tests =====
+
+    /// Helper to register an owned callback directly in tests (bypasses AnykaVideoEncoder).
+    fn register_owned_callback_for_test(
+        callbacks: &Arc<RwLock<HashMap<CallbackId, Arc<dyn OwnedFrameCallback>>>>,
+        callback: Arc<dyn OwnedFrameCallback>,
+    ) -> CallbackId {
+        static NEXT_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+        let id = NEXT_ID.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        callbacks.write().insert(id, callback);
+        id
+    }
+
+    #[test]
+    fn test_register_owned_frame_callback() {
+        let mock = MockVideoHalTrait::new();
+        let encoder = AnykaVideoEncoder::with_ffi(Arc::new(mock));
+
+        let cb = Arc::new(CountingOwnedCallback::new());
+        let id = encoder.register_owned_frame_callback(cb);
+        assert!(id > 0);
+        assert_eq!(encoder.owned_callbacks.read().len(), 1);
+    }
+
+    #[test]
+    fn test_unregister_owned_frame_callback() {
+        let mock = MockVideoHalTrait::new();
+        let encoder = AnykaVideoEncoder::with_ffi(Arc::new(mock));
+
+        let cb = Arc::new(CountingOwnedCallback::new());
+        let id = encoder.register_owned_frame_callback(cb);
+        assert_eq!(encoder.owned_callbacks.read().len(), 1);
+
+        let removed = encoder.unregister_owned_frame_callback(id);
+        assert!(removed);
+        assert_eq!(encoder.owned_callbacks.read().len(), 0);
+    }
+
+    #[test]
+    fn test_invoke_owned_callbacks_from_map_empty() {
+        use parking_lot::RwLock;
+        use std::collections::HashMap;
+
+        let owned_callbacks: Arc<RwLock<HashMap<CallbackId, Arc<dyn OwnedFrameCallback>>>> =
+            Arc::new(RwLock::new(HashMap::new()));
+
+        let owned_frame = OwnedFrame {
+            data: bytes::BytesMut::from(&b"test data"[..]),
+            timestamp: 1000,
+            frame_type: FrameType::VideoIFrame,
+            stream_id: StreamId::VideoMain,
+        };
+
+        // Should return the frame since there are no callbacks
+        let result = invoke_owned_callbacks_from_map(&owned_callbacks, owned_frame);
+        assert!(result.is_some());
+    }
+
+    #[test]
+    fn test_invoke_owned_callbacks_from_map_single() {
+        use parking_lot::RwLock;
+        use std::collections::HashMap;
+
+        let owned_callbacks: Arc<RwLock<HashMap<CallbackId, Arc<dyn OwnedFrameCallback>>>> =
+            Arc::new(RwLock::new(HashMap::new()));
+
+        let cb = Arc::new(CountingOwnedCallback::new());
+        let cb_ref = Arc::clone(&cb);
+        let _id = register_owned_callback_for_test(&owned_callbacks, cb);
+
+        let owned_frame = OwnedFrame {
+            data: bytes::BytesMut::from(&b"test data for single callback"[..]),
+            timestamp: 1000,
+            frame_type: FrameType::VideoIFrame,
+            stream_id: StreamId::VideoMain,
+        };
+
+        // Should consume the frame (return None)
+        let result = invoke_owned_callbacks_from_map(&owned_callbacks, owned_frame);
+        assert!(result.is_none());
+        assert_eq!(cb_ref.call_count(), 1);
+    }
+
+    #[test]
+    fn test_invoke_owned_callbacks_from_map_multiple() {
+        use parking_lot::RwLock;
+        use std::collections::HashMap;
+
+        let owned_callbacks: Arc<RwLock<HashMap<CallbackId, Arc<dyn OwnedFrameCallback>>>> =
+            Arc::new(RwLock::new(HashMap::new()));
+
+        let cb1 = Arc::new(CountingOwnedCallback::new());
+        let cb2 = Arc::new(CountingOwnedCallback::new());
+        let cb1_ref = Arc::clone(&cb1);
+        let cb2_ref = Arc::clone(&cb2);
+        register_owned_callback_for_test(&owned_callbacks, cb1);
+        register_owned_callback_for_test(&owned_callbacks, cb2);
+
+        let owned_frame = OwnedFrame {
+            data: bytes::BytesMut::from(&b"test data for multiple callbacks"[..]),
+            timestamp: 1000,
+            frame_type: FrameType::VideoIFrame,
+            stream_id: StreamId::VideoMain,
+        };
+
+        // Should consume the frame (return None)
+        let result = invoke_owned_callbacks_from_map(&owned_callbacks, owned_frame);
+        assert!(result.is_none());
+        assert_eq!(cb1_ref.call_count(), 1);
+        assert_eq!(cb2_ref.call_count(), 1);
+    }
+
+    #[test]
+    fn test_invoke_owned_callbacks_from_map_panic_recovery() {
+        use parking_lot::RwLock;
+        use std::collections::HashMap;
+
+        let owned_callbacks: Arc<RwLock<HashMap<CallbackId, Arc<dyn OwnedFrameCallback>>>> =
+            Arc::new(RwLock::new(HashMap::new()));
+
+        // Register a panicking callback
+        let panicking = Arc::new(PanickingOwnedCallback);
+        register_owned_callback_for_test(&owned_callbacks, panicking);
+
+        // Register a normal callback
+        let normal = Arc::new(CountingOwnedCallback::new());
+        let normal_ref = Arc::clone(&normal);
+        register_owned_callback_for_test(&owned_callbacks, normal);
+
+        let owned_frame = OwnedFrame {
+            data: bytes::BytesMut::from(&b"test panic recovery"[..]),
+            timestamp: 1000,
+            frame_type: FrameType::VideoIFrame,
+            stream_id: StreamId::VideoMain,
+        };
+
+        // Should not panic - panic should be caught
+        let result = invoke_owned_callbacks_from_map(&owned_callbacks, owned_frame);
+        assert!(result.is_none());
+
+        // Panicking callback should be removed, normal should remain
+        assert_eq!(owned_callbacks.read().len(), 1);
+
+        // Normal callback may or may not have been invoked depending on iteration order
+        let _ = normal_ref.call_count();
     }
 
     #[tokio::test]
@@ -4555,11 +4901,15 @@ mod tests {
             .write()
             .insert(1, Arc::new(CountingCallback(call_count_clone)));
 
+        let owned_callbacks: Arc<RwLock<HashMap<CallbackId, Arc<dyn OwnedFrameCallback>>>> =
+            Arc::new(RwLock::new(HashMap::new()));
+
         unified_frame_read_loop(
             sh,
             None,
             ffi,
             callbacks,
+            owned_callbacks,
             stop,
             Arc::new(StreamHealthCounters::default()),
             None,
@@ -4610,11 +4960,15 @@ mod tests {
         let callbacks: Arc<RwLock<HashMap<CallbackId, Arc<dyn FrameCallback>>>> =
             Arc::new(RwLock::new(HashMap::new()));
 
+        let owned_callbacks: Arc<RwLock<HashMap<CallbackId, Arc<dyn OwnedFrameCallback>>>> =
+            Arc::new(RwLock::new(HashMap::new()));
+
         unified_frame_read_loop(
             sh,
             None,
             ffi,
             callbacks,
+            owned_callbacks,
             stop,
             Arc::new(StreamHealthCounters::default()),
             None,
@@ -4652,12 +5006,16 @@ mod tests {
         let callbacks: Arc<RwLock<HashMap<CallbackId, Arc<dyn FrameCallback>>>> =
             Arc::new(RwLock::new(HashMap::new()));
 
+        let owned_callbacks: Arc<RwLock<HashMap<CallbackId, Arc<dyn OwnedFrameCallback>>>> =
+            Arc::new(RwLock::new(HashMap::new()));
+
         // Should return immediately
         unified_frame_read_loop(
             sh,
             None,
             ffi,
             callbacks,
+            owned_callbacks,
             stop,
             Arc::new(StreamHealthCounters::default()),
             None,
@@ -4982,12 +5340,16 @@ mod tests {
         let callbacks: Arc<RwLock<HashMap<CallbackId, Arc<dyn FrameCallback>>>> =
             Arc::new(RwLock::new(HashMap::new()));
 
+        let owned_callbacks: Arc<RwLock<HashMap<CallbackId, Arc<dyn OwnedFrameCallback>>>> =
+            Arc::new(RwLock::new(HashMap::new()));
+
         let start = std::time::Instant::now();
         unified_frame_read_loop(
             sh,
             None,
             ffi,
             callbacks,
+            owned_callbacks,
             stop,
             Arc::new(StreamHealthCounters::default()),
             None,
@@ -5039,12 +5401,16 @@ mod tests {
         let callbacks: Arc<RwLock<HashMap<CallbackId, Arc<dyn FrameCallback>>>> =
             Arc::new(RwLock::new(HashMap::new()));
 
+        let owned_callbacks: Arc<RwLock<HashMap<CallbackId, Arc<dyn OwnedFrameCallback>>>> =
+            Arc::new(RwLock::new(HashMap::new()));
+
         let start = std::time::Instant::now();
         unified_frame_read_loop(
             sh,
             None,
             ffi,
             callbacks,
+            owned_callbacks,
             stop,
             Arc::new(StreamHealthCounters::default()),
             None,
@@ -5125,12 +5491,16 @@ mod tests {
         let callbacks: Arc<RwLock<HashMap<CallbackId, Arc<dyn FrameCallback>>>> =
             Arc::new(RwLock::new(HashMap::new()));
 
+        let owned_callbacks: Arc<RwLock<HashMap<CallbackId, Arc<dyn OwnedFrameCallback>>>> =
+            Arc::new(RwLock::new(HashMap::new()));
+
         let start = std::time::Instant::now();
         unified_frame_read_loop(
             sh,
             None,
             ffi,
             callbacks,
+            owned_callbacks,
             stop,
             Arc::new(StreamHealthCounters::default()),
             None,
@@ -5186,11 +5556,15 @@ mod tests {
         let callbacks: Arc<RwLock<HashMap<CallbackId, Arc<dyn FrameCallback>>>> =
             Arc::new(RwLock::new(HashMap::new()));
 
+        let owned_callbacks: Arc<RwLock<HashMap<CallbackId, Arc<dyn OwnedFrameCallback>>>> =
+            Arc::new(RwLock::new(HashMap::new()));
+
         unified_frame_read_loop(
             sh,
             None,
             ffi,
             callbacks,
+            owned_callbacks,
             stop,
             Arc::new(StreamHealthCounters::default()),
             None,
@@ -5273,11 +5647,15 @@ mod tests {
         let callbacks: Arc<RwLock<HashMap<CallbackId, Arc<dyn FrameCallback>>>> =
             Arc::new(RwLock::new(HashMap::new()));
 
+        let owned_callbacks: Arc<RwLock<HashMap<CallbackId, Arc<dyn OwnedFrameCallback>>>> =
+            Arc::new(RwLock::new(HashMap::new()));
+
         unified_frame_read_loop(
             sh,
             None,
             ffi,
             callbacks,
+            owned_callbacks,
             stop,
             Arc::new(StreamHealthCounters::default()),
             Some(venc_ptr as usize),
@@ -5345,11 +5723,15 @@ mod tests {
         let callbacks: Arc<RwLock<HashMap<CallbackId, Arc<dyn FrameCallback>>>> =
             Arc::new(RwLock::new(HashMap::new()));
 
+        let owned_callbacks: Arc<RwLock<HashMap<CallbackId, Arc<dyn OwnedFrameCallback>>>> =
+            Arc::new(RwLock::new(HashMap::new()));
+
         unified_frame_read_loop(
             sh,
             None,
             ffi,
             callbacks,
+            owned_callbacks,
             stop,
             Arc::new(StreamHealthCounters::default()),
             Some(venc_ptr as usize),

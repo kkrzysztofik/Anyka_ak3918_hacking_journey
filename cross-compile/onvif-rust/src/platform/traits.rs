@@ -662,6 +662,23 @@ pub trait Platform: Send + Sync {
             "register_frame_callback".to_string(),
         ))
     }
+
+    /// Register a callback to receive owned frames (zero-copy path).
+    ///
+    /// The platform calls `callback.on_owned_frame()` for each encoded frame,
+    /// transferring ownership of the `BytesMut` buffer. This eliminates the
+    /// memcpy that `FrameCallback::on_frame()` requires.
+    ///
+    /// Default implementation returns `NotSupported` for platforms that do not
+    /// support owned frame delivery.
+    fn register_owned_frame_callback(
+        &self,
+        _callback: Arc<dyn crate::platform::frame::OwnedFrameCallback>,
+    ) -> PlatformResult<()> {
+        Err(PlatformError::NotSupported(
+            "register_owned_frame_callback".to_string(),
+        ))
+    }
 }
 
 #[cfg(test)]
