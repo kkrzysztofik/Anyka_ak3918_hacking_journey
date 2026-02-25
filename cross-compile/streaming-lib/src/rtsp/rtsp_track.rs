@@ -44,9 +44,10 @@ impl RtspTrack {
     pub fn new(track_type: TrackType, codec_info: RtspCodecInfo, media_control: String) -> Self {
         let rtp_channel = RtpChannel::new(codec_info);
         let ssrc = rtp_channel.ssrc();
+        let sample_rate = rtp_channel.clock_rate();
 
         let mut rtcp_channel = RtcpChannel::default();
-        rtcp_channel.set_ssrc(ssrc);
+        rtcp_channel.set_ssrc(ssrc, sample_rate);
 
         RtspTrack {
             track_type,

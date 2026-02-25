@@ -113,6 +113,10 @@ pub struct RtcpContext {
     sr_clock_time: u64,
     last_rtp_clock: u64,
     last_rtp_timestamp: u32,
+    /// Wall-clock time (µs since epoch) when `last_rtp_timestamp` was recorded.
+    /// Used to extrapolate the RTP timestamp in RTCP SR generation so the
+    /// NTP/RTP pair is correctly correlated per RFC 3550 §6.4.1.
+    last_rtp_wallclock_us: u64,
     sample_rate: u32,
     send_bytes: u64,
     send_packets: u64,
@@ -222,11 +226,29 @@ impl RtcpContext {
         self.send_bytes += pkt.payload.len() as u64;
         self.send_packets += 1;
         self.last_rtp_timestamp = pkt.header.timestamp;
+        self.last_rtp_wallclock_us = utils::current_time();
     }
 
     pub fn generate_sr(&mut self) -> RtcpSenderReport {
         // Get current NTP timestamp (64-bit: 32 bits seconds since 1900, 32 bits fractional)
         let ntp = utils::ntp_timestamp();
+        let now_us = utils::current_time();
+
+        // Extrapolate the RTP timestamp to match the current NTP wall-clock.
+        //
+        // RFC 3550 §6.4.1 requires the NTP timestamp and RTP timestamp in an
+        // SR to correspond to the *same* wall-clock instant.  Without
+        // extrapolation, the RTP timestamp is whatever was recorded at the
+        // last `send_rtp()` call, which may be tens or hundreds of
+        // milliseconds stale.  This causes a growing NTP/RTP offset that
+        // poisons VLC's AV-sync.
+        let rtp_timestamp = if self.last_rtp_wallclock_us > 0 && self.sample_rate > 0 {
+            let elapsed_us = now_us.saturating_sub(self.last_rtp_wallclock_us);
+            let elapsed_ticks = (elapsed_us as u128 * self.sample_rate as u128 / 1_000_000) as u32;
+            self.last_rtp_timestamp.wrapping_add(elapsed_ticks)
+        } else {
+            self.last_rtp_timestamp
+        };
 
         RtcpSenderReport {
             header: RtcpHeader {
@@ -239,7 +261,7 @@ impl RtcpContext {
             },
             ssrc: self.ssrc,
             ntp,
-            rtp_timestamp: self.last_rtp_timestamp,
+            rtp_timestamp,
             sender_packet_count: self.send_packets as u32,
             sender_octet_count: self.send_bytes as u32,
             report_blocks: Vec::new(),
@@ -759,5 +781,81 @@ mod tests {
         let rr = ctx.generate_rr();
         assert_eq!(rr.ssrc, 12345);
         assert_eq!(rr.report_blocks[0].ssrc, 54321);
+    }
+
+    // ========== generate_sr extrapolation Tests ==========
+
+    #[test]
+    fn test_generate_sr_extrapolates_rtp_timestamp() {
+        let mut ctx = RtcpContext::new(12345, 100, 90_000);
+
+        // Simulate sending an RTP packet at timestamp 1000.
+        let pkt = RtpPacket {
+            header: RtpHeader {
+                timestamp: 1000,
+                ..Default::default()
+            },
+            payload: BytesMut::from(&[0x00; 100][..]),
+            ..Default::default()
+        };
+        ctx.send_rtp(pkt);
+
+        // Verify wallclock was recorded.
+        assert!(ctx.last_rtp_wallclock_us > 0);
+
+        // Wait ~50ms, then generate SR. The extrapolated RTP timestamp
+        // should be greater than the base (1000) by approximately
+        // 50ms * 90000 / 1_000_000 = 4500 ticks.
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        let sr = ctx.generate_sr();
+
+        // The extrapolated timestamp should be ahead of the base.
+        let delta = sr.rtp_timestamp.wrapping_sub(1000);
+        // Allow a wide range: 2000..8000 ticks (22ms..89ms at 90kHz)
+        // to account for timing variability in CI.
+        assert!(
+            delta >= 2000 && delta <= 8000,
+            "expected extrapolated delta ~4500 ticks, got {}",
+            delta
+        );
+    }
+
+    #[test]
+    fn test_generate_sr_no_extrapolation_without_sample_rate() {
+        let mut ctx = RtcpContext::new(12345, 100, 0);
+
+        let pkt = RtpPacket {
+            header: RtpHeader {
+                timestamp: 5000,
+                ..Default::default()
+            },
+            payload: BytesMut::from(&[0x00; 50][..]),
+            ..Default::default()
+        };
+        ctx.send_rtp(pkt);
+
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        let sr = ctx.generate_sr();
+
+        // With sample_rate=0, no extrapolation — timestamp stays at 5000.
+        assert_eq!(sr.rtp_timestamp, 5000);
+    }
+
+    #[test]
+    fn test_send_rtp_records_wallclock() {
+        let mut ctx = RtcpContext::new(12345, 100, 48000);
+        assert_eq!(ctx.last_rtp_wallclock_us, 0);
+
+        let pkt = RtpPacket {
+            header: RtpHeader {
+                timestamp: 1000,
+                ..Default::default()
+            },
+            payload: BytesMut::from(&[0x00; 50][..]),
+            ..Default::default()
+        };
+        ctx.send_rtp(pkt);
+
+        assert!(ctx.last_rtp_wallclock_us > 0);
     }
 }

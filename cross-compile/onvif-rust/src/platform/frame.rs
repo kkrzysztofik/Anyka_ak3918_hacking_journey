@@ -40,6 +40,9 @@ pub enum FrameType {
     VideoPFrame,
     /// H.264/H.265 bi-directional predicted frame.
     VideoBFrame,
+    /// Predicted Intra frame (partial refresh). Treated as P-frame for streaming
+    /// purposes but carries intra-coded macroblocks for gradual decoder refresh.
+    VideoPiFrame,
     /// Audio packet (G.711, AAC, etc.).
     AudioPacket,
 }

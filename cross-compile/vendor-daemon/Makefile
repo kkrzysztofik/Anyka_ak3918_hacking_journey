@@ -28,7 +28,13 @@ SD_DEPLOY_DIR = /home/kmk/anyka-dev/SD_card_contents/anyka_hack/vendor-daemon
 
 CC = $(ANYKA_CC)
 
-CFLAGS = \
+# Build mode selection:
+#   make                -> release (default)
+#   make release        -> explicit release build
+#   make debug          -> debug build with symbols
+BUILD_MODE ?= release
+
+COMMON_CFLAGS = \
 	-march=armv5te \
 	-mfloat-abi=soft \
 	-fno-PIC \
@@ -36,6 +42,19 @@ CFLAGS = \
 	-Wextra \
 	-std=gnu99 \
 	-I$(ANYKA_INCLUDE_DIR)
+
+RELEASE_CFLAGS = -O2 -DNDEBUG
+DEBUG_CFLAGS   = -O0 -g3 -DDEBUG -fno-omit-frame-pointer
+
+ifeq ($(BUILD_MODE),debug)
+TARGET    = vendor-daemon-debug.bin
+MODE_CFLAGS = $(DEBUG_CFLAGS)
+else
+TARGET    = vendor-daemon.bin
+MODE_CFLAGS = $(RELEASE_CFLAGS)
+endif
+
+CFLAGS = $(COMMON_CFLAGS) $(MODE_CFLAGS)
 
 # Use --start-group/--end-group to handle any circular dependencies among
 # the SDK libraries.  System libs (pthread, rt, m, dl) go outside the group
@@ -69,15 +88,20 @@ LDFLAGS = \
 	-Wl,--end-group \
 	-lpthread -lrt -lm -ldl
 
-TARGET    = vendor-daemon.bin
 SRC_DIR   = src
 BUILD_DIR = build
 SRCS      = $(wildcard $(SRC_DIR)/*.c)
 OBJS      = $(SRCS:$(SRC_DIR)/%.c=$(BUILD_DIR)/%.o)
 
-.PHONY: all clean install sync-libs
+.PHONY: all release debug clean install sync-libs
 
 all: $(BUILD_DIR)/$(TARGET)
+
+release:
+	$(MAKE) BUILD_MODE=release all
+
+debug:
+	$(MAKE) BUILD_MODE=debug all
 
 $(BUILD_DIR)/$(TARGET): $(OBJS)
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
