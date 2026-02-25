@@ -10,7 +10,8 @@
 //! Response format: status (i32) + resp_len (u32) + resp_data (bytes)
 //!
 //! Frame delivery is push-only: vendor-daemon writes encoded frames into a
-//! shared-memory ring and sends 12-byte notifications over `/tmp/vd-frame.sock`.
+//! shared-memory ring and sends 12-byte notifications over
+//! `/tmp/vd-frame-main.sock` and `/tmp/vd-frame-sub.sock`.
 
 #![allow(dead_code)]
 
@@ -22,6 +23,7 @@ use crate::streaming::bridge::BytesMutPool;
 
 use std::ffi::{c_char, c_void};
 use std::io::{ErrorKind, Read, Write};
+use std::os::fd::AsRawFd;
 use std::os::unix::net::UnixStream;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -220,8 +222,10 @@ fn is_ipc_debug_enabled() -> bool {
 
 const VENDOR_SOCKET_PATH: &str = "/tmp/vendor-daemon.sock";
 
-/// Path for the dedicated frame socket (Approach B Phase 3)
-const FRAME_SOCKET_PATH: &str = "/tmp/vd-frame.sock";
+/// Path for the dedicated main-stream frame notification socket.
+const FRAME_MAIN_SOCKET_PATH: &str = "/tmp/vd-frame-main.sock";
+/// Path for the dedicated sub-stream frame notification socket.
+const FRAME_SUB_SOCKET_PATH: &str = "/tmp/vd-frame-sub.sock";
 /// Path for the dedicated control socket (Approach B Phase 3)
 const CTRL_SOCKET_PATH: &str = "/tmp/vd-ctrl.sock";
 
@@ -267,10 +271,10 @@ const PUSH_NOTIFICATION_TIMEOUT: Duration = Duration::from_millis(200);
 pub struct VendorIpc {
     /// Control socket for command RPCs.
     stream: Arc<Mutex<UnixStream>>,
-    /// Dedicated frame socket (Approach B P3) - wrapped in Mutex for interior mutability.
-    /// Only the frame reader thread accesses this, so there's no contention.
-    /// None if daemon doesn't support dual sockets.
-    frame_stream: Mutex<Option<UnixStream>>,
+    /// Dedicated main-stream frame notification socket.
+    frame_main_stream: Mutex<Option<UnixStream>>,
+    /// Dedicated sub-stream frame notification socket.
+    frame_sub_stream: Mutex<Option<UnixStream>>,
     /// Shared memory ring buffer reader (Approach A) - wrapped in Mutex for interior mutability.
     /// Only the frame reader thread accesses this, so there's no contention.
     /// None if daemon doesn't use shared memory.
@@ -333,14 +337,24 @@ impl VendorIpc {
             debug!(socket = CTRL_SOCKET_PATH, "Connected to vendor daemon");
         }
 
-        // Push-only mode requires dedicated frame socket.
-        let frame_stream = UnixStream::connect(FRAME_SOCKET_PATH).map_err(|e| {
+        // Push-only mode requires dedicated frame sockets for main and sub streams.
+        let frame_main_stream = UnixStream::connect(FRAME_MAIN_SOCKET_PATH).map_err(|e| {
             PlatformError::HardwareUnavailable(format!(
-                "Push-only mode requires frame socket {}: {}",
-                FRAME_SOCKET_PATH, e
+                "Push-only mode requires main frame socket {}: {}",
+                FRAME_MAIN_SOCKET_PATH, e
             ))
         })?;
-        tracing::info!("Connected to dedicated frame socket");
+        let frame_sub_stream = UnixStream::connect(FRAME_SUB_SOCKET_PATH).map_err(|e| {
+            PlatformError::HardwareUnavailable(format!(
+                "Push-only mode requires sub frame socket {}: {}",
+                FRAME_SUB_SOCKET_PATH, e
+            ))
+        })?;
+        tracing::info!(
+            main_socket = FRAME_MAIN_SOCKET_PATH,
+            sub_socket = FRAME_SUB_SOCKET_PATH,
+            "Connected to dedicated frame sockets"
+        );
 
         // Push-only mode requires shared memory ring buffer.
         let shm_reader = match ShmRingReader::open() {
@@ -361,7 +375,8 @@ impl VendorIpc {
 
         Ok(Self {
             stream: Arc::new(Mutex::new(stream)),
-            frame_stream: Mutex::new(Some(frame_stream)),
+            frame_main_stream: Mutex::new(Some(frame_main_stream)),
+            frame_sub_stream: Mutex::new(Some(frame_sub_stream)),
             shm_reader: Mutex::new(Some(shm_reader)),
         })
     }
@@ -379,8 +394,12 @@ impl VendorIpc {
             debug!(socket = path, "Connected to vendor daemon (test)");
         }
 
-        // In test mode, try to connect to frame socket if it exists
-        let frame_stream = match UnixStream::connect(FRAME_SOCKET_PATH) {
+        // In test mode, try to connect to frame sockets if they exist.
+        let frame_main_stream = match UnixStream::connect(FRAME_MAIN_SOCKET_PATH) {
+            Ok(fs) => Some(fs),
+            Err(_) => None,
+        };
+        let frame_sub_stream = match UnixStream::connect(FRAME_SUB_SOCKET_PATH) {
             Ok(fs) => Some(fs),
             Err(_) => None,
         };
@@ -393,9 +412,48 @@ impl VendorIpc {
 
         Ok(Self {
             stream: Arc::new(Mutex::new(stream)),
-            frame_stream: Mutex::new(frame_stream),
+            frame_main_stream: Mutex::new(frame_main_stream),
+            frame_sub_stream: Mutex::new(frame_sub_stream),
             shm_reader: Mutex::new(shm_reader),
         })
+    }
+
+    fn read_push_notification(
+        stream: &mut UnixStream,
+        channel: &'static str,
+    ) -> PlatformResult<FrameNotification> {
+        stream
+            .set_read_timeout(Some(PUSH_NOTIFICATION_TIMEOUT))
+            .map_err(|e| {
+                PlatformError::HardwareFailure(format!(
+                    "push read-timeout setup error ({}): {}",
+                    channel, e
+                ))
+            })?;
+
+        let mut notif_bytes = [0u8; 12];
+        stream
+            .read_exact(&mut notif_bytes)
+            .map_err(|e| match e.kind() {
+                ErrorKind::WouldBlock | ErrorKind::TimedOut => PlatformError::Timeout,
+                _ => PlatformError::HardwareFailure(format!(
+                    "push notification read error ({}): {}",
+                    channel, e
+                )),
+            })?;
+        Ok(FrameNotification::from_bytes(&notif_bytes))
+    }
+
+    fn map_shm_slot_read_error(error: PlatformError, channel: &'static str) -> PlatformError {
+        match error {
+            PlatformError::InvalidParameter(msg) if msg.contains("not ready for reading") => {
+                PlatformError::ResourceBusy(format!(
+                    "transient slot race on {} channel: {}",
+                    channel, msg
+                ))
+            }
+            other => other,
+        }
     }
 
     /// Attempt to reconnect to the vendor daemon, replacing the existing socket.
@@ -644,28 +702,91 @@ impl VendorIpc {
     /// The frame data is read from shared memory using the slot index in
     /// the notification.
     pub fn recv_pushed_frame(&self, pool: Option<&BytesMutPool>) -> PlatformResult<OwnedFrame> {
-        let mut frame_guard = self.frame_stream.lock().map_err(|e| {
-            PlatformError::HardwareFailure(format!("frame_stream mutex poisoned: {}", e))
+        let mut frame_main_guard = self.frame_main_stream.lock().map_err(|e| {
+            PlatformError::HardwareFailure(format!("frame_main_stream mutex poisoned: {}", e))
         })?;
-        let frame_stream = frame_guard.as_mut().ok_or_else(|| {
-            PlatformError::HardwareFailure("no frame socket for push mode".into())
+        let mut frame_sub_guard = self.frame_sub_stream.lock().map_err(|e| {
+            PlatformError::HardwareFailure(format!("frame_sub_stream mutex poisoned: {}", e))
         })?;
 
-        frame_stream
-            .set_read_timeout(Some(PUSH_NOTIFICATION_TIMEOUT))
-            .map_err(|e| {
-                PlatformError::HardwareFailure(format!("push read-timeout setup error: {}", e))
-            })?;
+        let mut poll_fds = [libc::pollfd {
+            fd: -1,
+            events: 0,
+            revents: 0,
+        }; 2];
+        let mut poll_count = 0usize;
+        let mut main_idx = None;
+        let mut sub_idx = None;
 
-        // Block on reading 12-byte notification (daemon pushes these)
-        let mut notif_bytes = [0u8; 12];
-        frame_stream
-            .read_exact(&mut notif_bytes)
-            .map_err(|e| match e.kind() {
-                ErrorKind::WouldBlock | ErrorKind::TimedOut => PlatformError::Timeout,
-                _ => PlatformError::HardwareFailure(format!("push notification read error: {}", e)),
+        if let Some(stream) = frame_main_guard.as_ref() {
+            poll_fds[poll_count].fd = stream.as_raw_fd();
+            poll_fds[poll_count].events = libc::POLLIN;
+            main_idx = Some(poll_count);
+            poll_count += 1;
+        }
+        if let Some(stream) = frame_sub_guard.as_ref() {
+            poll_fds[poll_count].fd = stream.as_raw_fd();
+            poll_fds[poll_count].events = libc::POLLIN;
+            sub_idx = Some(poll_count);
+            poll_count += 1;
+        }
+        if poll_count == 0 {
+            return Err(PlatformError::HardwareFailure(
+                "no frame notification sockets for push mode".into(),
+            ));
+        }
+
+        let timeout_ms = i32::try_from(PUSH_NOTIFICATION_TIMEOUT.as_millis()).unwrap_or(i32::MAX);
+        // SAFETY: `poll_fds` points to a stack-allocated array of valid `pollfd`
+        // entries, `poll_count` is bounded by that array length, and timeout is finite.
+        let poll_ret = unsafe {
+            libc::poll(
+                poll_fds.as_mut_ptr(),
+                poll_count as libc::nfds_t,
+                timeout_ms,
+            )
+        };
+        if poll_ret < 0 {
+            return Err(PlatformError::HardwareFailure(format!(
+                "push notification poll error: {}",
+                std::io::Error::last_os_error()
+            )));
+        }
+        if poll_ret == 0 {
+            return Err(PlatformError::Timeout);
+        }
+
+        let main_ready = main_idx
+            .map(|idx| (poll_fds[idx].revents & libc::POLLIN) != 0)
+            .unwrap_or(false);
+        let sub_ready = sub_idx
+            .map(|idx| (poll_fds[idx].revents & libc::POLLIN) != 0)
+            .unwrap_or(false);
+        let main_hup_err = main_idx
+            .map(|idx| (poll_fds[idx].revents & (libc::POLLHUP | libc::POLLERR)) != 0)
+            .unwrap_or(false);
+        let sub_hup_err = sub_idx
+            .map(|idx| (poll_fds[idx].revents & (libc::POLLHUP | libc::POLLERR)) != 0)
+            .unwrap_or(false);
+
+        let (channel_name, notif) = if main_ready {
+            let stream = frame_main_guard.as_mut().ok_or_else(|| {
+                PlatformError::HardwareFailure("main frame socket became unavailable".into())
             })?;
-        let notif = FrameNotification::from_bytes(&notif_bytes);
+            ("main", Self::read_push_notification(stream, "main")?)
+        } else if sub_ready {
+            let stream = frame_sub_guard.as_mut().ok_or_else(|| {
+                PlatformError::HardwareFailure("sub frame socket became unavailable".into())
+            })?;
+            ("sub", Self::read_push_notification(stream, "sub")?)
+        } else if main_hup_err || sub_hup_err {
+            return Err(PlatformError::HardwareFailure(format!(
+                "push notification socket disconnected (main_hup_err={}, sub_hup_err={})",
+                main_hup_err, sub_hup_err
+            )));
+        } else {
+            return Err(PlatformError::Timeout);
+        };
 
         // Check for dropped-frame notification (Fix 4 integration)
         if notif.is_frame_dropped() {
@@ -682,7 +803,9 @@ impl VendorIpc {
             PlatformError::HardwareFailure("shm reader not available for push mode".into())
         })?;
 
-        let (metadata, frame_data) = shm.read_slot_into_bytesmut(notif.slot_index, pool)?;
+        let (metadata, frame_data) = shm
+            .read_slot_into_bytesmut(notif.slot_index, pool)
+            .map_err(|e| Self::map_shm_slot_read_error(e, channel_name))?;
 
         Ok(OwnedFrame {
             data: frame_data,
@@ -1302,7 +1425,7 @@ impl crate::hal::imaging::ImagingHalTrait for VendorIpc {
 mod tests {
     use super::*;
     use std::io::{Read, Write};
-    use std::os::unix::net::UnixListener;
+    use std::os::unix::net::{UnixListener, UnixStream};
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     // ============================================================================
@@ -1734,6 +1857,51 @@ mod tests {
     #[test]
     fn test_max_response_size_constant() {
         assert_eq!(MAX_RESPONSE_SIZE, 2 * 1024 * 1024);
+    }
+
+    #[test]
+    fn test_read_push_notification_reads_12_byte_notification() {
+        let (mut writer, mut reader) = UnixStream::pair().unwrap();
+        let raw = [
+            0x02, 0x00, 0x00, 0x00, // slot_index = 2
+            0x34, 0x12, 0x00, 0x00, // frame_len = 0x1234
+            0x01, 0x00, 0x00, 0x00, // flags = VD_NOTIFY_LAST_FRAGMENT
+        ];
+        writer.write_all(&raw).unwrap();
+        writer.flush().unwrap();
+
+        let notif = VendorIpc::read_push_notification(&mut reader, "main").unwrap();
+        assert_eq!(notif.slot_index, 2);
+        assert_eq!(notif.frame_len, 0x1234);
+        assert_eq!(notif.flags, 1);
+    }
+
+    #[test]
+    fn test_map_shm_slot_read_error_not_ready_becomes_resource_busy() {
+        let error =
+            PlatformError::InvalidParameter("slot 0 not ready for reading (state: 0)".into());
+        let mapped = VendorIpc::map_shm_slot_read_error(error, "main");
+
+        match mapped {
+            PlatformError::ResourceBusy(msg) => {
+                assert!(msg.contains("transient slot race"));
+                assert!(msg.contains("main"));
+            }
+            other => panic!("expected ResourceBusy, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_map_shm_slot_read_error_other_invalid_parameter_passthrough() {
+        let error = PlatformError::InvalidParameter("slot index 99 out of range".into());
+        let mapped = VendorIpc::map_shm_slot_read_error(error, "sub");
+
+        match mapped {
+            PlatformError::InvalidParameter(msg) => {
+                assert_eq!(msg, "slot index 99 out of range");
+            }
+            other => panic!("expected InvalidParameter, got {:?}", other),
+        }
     }
 
     #[test]

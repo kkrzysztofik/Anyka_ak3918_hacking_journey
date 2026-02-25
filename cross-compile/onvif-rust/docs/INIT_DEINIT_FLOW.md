@@ -8,7 +8,7 @@ This document describes the complete initialization and shutdown sequence for th
 
 - No IPC pull path (`CMD_VENC_GET_STREAM` / `CMD_VENC_RELEASE_STREAM`) is used.
 - `vendor-daemon` runs per-stream push workers and writes frames into the shared-memory ring.
-- `onvif-rust` receives 12-byte notifications on `/tmp/vd-frame.sock` and reads frame data from shared memory.
+- `onvif-rust` receives 12-byte notifications on `/tmp/vd-frame-main.sock` and `/tmp/vd-frame-sub.sock`, then reads frame data from shared memory.
 
 Sections below that describe direct Rust-side polling of `ak_venc_get_stream()` are historical context for legacy behavior and test fallback only.
 
