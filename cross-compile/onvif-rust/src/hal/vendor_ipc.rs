@@ -25,6 +25,7 @@ use std::ffi::{c_char, c_void};
 use std::io::{ErrorKind, Read, Write};
 use std::os::fd::AsRawFd;
 use std::os::unix::net::UnixStream;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -279,6 +280,8 @@ pub struct VendorIpc {
     /// Only the frame reader thread accesses this, so there's no contention.
     /// None if daemon doesn't use shared memory.
     shm_reader: Mutex<Option<ShmRingReader>>,
+    /// Tie-breaker when both channels are ready at once; toggles to prevent starvation.
+    prefer_sub_on_tie: AtomicBool,
 }
 
 impl VendorIpc {
@@ -378,6 +381,7 @@ impl VendorIpc {
             frame_main_stream: Mutex::new(Some(frame_main_stream)),
             frame_sub_stream: Mutex::new(Some(frame_sub_stream)),
             shm_reader: Mutex::new(Some(shm_reader)),
+            prefer_sub_on_tie: AtomicBool::new(false),
         })
     }
 
@@ -415,6 +419,7 @@ impl VendorIpc {
             frame_main_stream: Mutex::new(frame_main_stream),
             frame_sub_stream: Mutex::new(frame_sub_stream),
             shm_reader: Mutex::new(shm_reader),
+            prefer_sub_on_tie: AtomicBool::new(false),
         })
     }
 
@@ -453,6 +458,22 @@ impl VendorIpc {
                 ))
             }
             other => other,
+        }
+    }
+
+    fn choose_ready_channel(&self, main_ready: bool, sub_ready: bool) -> Option<&'static str> {
+        match (main_ready, sub_ready) {
+            (true, false) => Some("main"),
+            (false, true) => Some("sub"),
+            (true, true) => {
+                let prefer_sub = self.prefer_sub_on_tie.fetch_xor(true, Ordering::AcqRel);
+                if prefer_sub {
+                    Some("sub")
+                } else {
+                    Some("main")
+                }
+            }
+            (false, false) => None,
         }
     }
 
@@ -769,16 +790,19 @@ impl VendorIpc {
             .map(|idx| (poll_fds[idx].revents & (libc::POLLHUP | libc::POLLERR)) != 0)
             .unwrap_or(false);
 
-        let (channel_name, notif) = if main_ready {
-            let stream = frame_main_guard.as_mut().ok_or_else(|| {
-                PlatformError::HardwareFailure("main frame socket became unavailable".into())
-            })?;
-            ("main", Self::read_push_notification(stream, "main")?)
-        } else if sub_ready {
-            let stream = frame_sub_guard.as_mut().ok_or_else(|| {
-                PlatformError::HardwareFailure("sub frame socket became unavailable".into())
-            })?;
-            ("sub", Self::read_push_notification(stream, "sub")?)
+        let chosen_channel = self.choose_ready_channel(main_ready, sub_ready);
+        let (channel_name, notif) = if let Some(channel) = chosen_channel {
+            if channel == "main" {
+                let stream = frame_main_guard.as_mut().ok_or_else(|| {
+                    PlatformError::HardwareFailure("main frame socket became unavailable".into())
+                })?;
+                (channel, Self::read_push_notification(stream, channel)?)
+            } else {
+                let stream = frame_sub_guard.as_mut().ok_or_else(|| {
+                    PlatformError::HardwareFailure("sub frame socket became unavailable".into())
+                })?;
+                (channel, Self::read_push_notification(stream, channel)?)
+            }
         } else if main_hup_err || sub_hup_err {
             return Err(PlatformError::HardwareFailure(format!(
                 "push notification socket disconnected (main_hup_err={}, sub_hup_err={})",
@@ -1502,6 +1526,19 @@ mod tests {
         }
     }
 
+    fn make_ipc_for_channel_selection_tests() -> VendorIpc {
+        let (ctrl_a, _ctrl_b) = UnixStream::pair().unwrap();
+        let (main_a, _main_b) = UnixStream::pair().unwrap();
+        let (sub_a, _sub_b) = UnixStream::pair().unwrap();
+        VendorIpc {
+            stream: std::sync::Arc::new(std::sync::Mutex::new(ctrl_a)),
+            frame_main_stream: Mutex::new(Some(main_a)),
+            frame_sub_stream: Mutex::new(Some(sub_a)),
+            shm_reader: Mutex::new(None),
+            prefer_sub_on_tie: AtomicBool::new(false),
+        }
+    }
+
     // ============================================================================
     // Fake-daemon integration tests
     // ============================================================================
@@ -1902,6 +1939,25 @@ mod tests {
             }
             other => panic!("expected InvalidParameter, got {:?}", other),
         }
+    }
+
+    #[test]
+    fn test_choose_ready_channel_single_channel_ready() {
+        let ipc = make_ipc_for_channel_selection_tests();
+
+        assert_eq!(ipc.choose_ready_channel(true, false), Some("main"));
+        assert_eq!(ipc.choose_ready_channel(false, true), Some("sub"));
+        assert_eq!(ipc.choose_ready_channel(false, false), None);
+    }
+
+    #[test]
+    fn test_choose_ready_channel_tie_alternates_between_main_and_sub() {
+        let ipc = make_ipc_for_channel_selection_tests();
+
+        assert_eq!(ipc.choose_ready_channel(true, true), Some("main"));
+        assert_eq!(ipc.choose_ready_channel(true, true), Some("sub"));
+        assert_eq!(ipc.choose_ready_channel(true, true), Some("main"));
+        assert_eq!(ipc.choose_ready_channel(true, true), Some("sub"));
     }
 
     #[test]

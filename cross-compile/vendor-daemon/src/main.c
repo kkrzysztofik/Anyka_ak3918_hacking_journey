@@ -163,8 +163,9 @@ static int g_frame_main_server_fd = -1;
 static int g_frame_sub_server_fd = -1;
 static int g_frame_main_client_fd = -1; /* At most 1 main frame client */
 static int g_frame_sub_client_fd = -1;  /* At most 1 sub frame client */
-/* Serialize frame client fd access and socket writes from push threads. */
-static pthread_mutex_t g_frame_client_lock = PTHREAD_MUTEX_INITIALIZER;
+/* Per-channel locks: keep main/sub notification channels independent. */
+static pthread_mutex_t g_frame_main_client_lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t g_frame_sub_client_lock = PTHREAD_MUTEX_INITIALIZER;
 
 /* Saved file descriptors for stdout/stderr restoration on shutdown */
 static int g_saved_stdout = -1;
@@ -244,13 +245,22 @@ static int send_response(int fd, int32_t status, const void *data, uint32_t len)
     return 0;
 }
 
-/* Map stream id to its dedicated frame client fd. Caller holds lock. */
-static int frame_client_fd_for_stream_locked(uint32_t stream_id)
+/* Map stream id to its dedicated frame client lock. */
+static pthread_mutex_t *frame_client_lock_for_stream(uint32_t stream_id)
 {
     if (stream_id == VD_STREAM_SUB) {
-        return g_frame_sub_client_fd;
+        return &g_frame_sub_client_lock;
     }
-    return g_frame_main_client_fd;
+    return &g_frame_main_client_lock;
+}
+
+/* Map stream id to its dedicated frame client fd storage. */
+static int *frame_client_fd_for_stream(uint32_t stream_id)
+{
+    if (stream_id == VD_STREAM_SUB) {
+        return &g_frame_sub_client_fd;
+    }
+    return &g_frame_main_client_fd;
 }
 
 /**
@@ -259,15 +269,17 @@ static int frame_client_fd_for_stream_locked(uint32_t stream_id)
  */
 static int send_frame_notification(uint32_t stream_id, const struct vd_frame_notify *notif)
 {
+    pthread_mutex_t *lock = frame_client_lock_for_stream(stream_id);
+    int *client_fd_ptr = frame_client_fd_for_stream(stream_id);
     int ret = 0;
-    pthread_mutex_lock(&g_frame_client_lock);
-    int client_fd = frame_client_fd_for_stream_locked(stream_id);
+    pthread_mutex_lock(lock);
+    int client_fd = *client_fd_ptr;
     if (client_fd >= 0) {
         if (write_exact(client_fd, notif, sizeof(*notif)) != 0) {
             ret = -1;
         }
     }
-    pthread_mutex_unlock(&g_frame_client_lock);
+    pthread_mutex_unlock(lock);
     return ret;
 }
 
@@ -1534,12 +1546,12 @@ int main(int argc, char *argv[])
             int client_fd = accept(g_frame_main_server_fd, NULL, NULL);
             if (client_fd >= 0) {
                 int has_existing = 0;
-                pthread_mutex_lock(&g_frame_client_lock);
+                pthread_mutex_lock(&g_frame_main_client_lock);
                 has_existing = (g_frame_main_client_fd >= 0);
                 if (!has_existing) {
                     g_frame_main_client_fd = client_fd;
                 }
-                pthread_mutex_unlock(&g_frame_client_lock);
+                pthread_mutex_unlock(&g_frame_main_client_lock);
 
                 if (has_existing) {
                     log_warn("[daemon] main frame client already connected, rejecting fd=%d", client_fd);
@@ -1551,11 +1563,11 @@ int main(int argc, char *argv[])
                     nfds++;
                     log_info("[daemon] main frame client connected fd=%d", client_fd);
                 } else {
-                    pthread_mutex_lock(&g_frame_client_lock);
+                    pthread_mutex_lock(&g_frame_main_client_lock);
                     if (g_frame_main_client_fd == client_fd) {
                         g_frame_main_client_fd = -1;
                     }
-                    pthread_mutex_unlock(&g_frame_client_lock);
+                    pthread_mutex_unlock(&g_frame_main_client_lock);
                     log_error("[daemon] max clients (%d) reached, rejecting main frame fd=%d",
                               MAX_CLIENTS, client_fd);
                     close(client_fd);
@@ -1570,12 +1582,12 @@ int main(int argc, char *argv[])
             int client_fd = accept(g_frame_sub_server_fd, NULL, NULL);
             if (client_fd >= 0) {
                 int has_existing = 0;
-                pthread_mutex_lock(&g_frame_client_lock);
+                pthread_mutex_lock(&g_frame_sub_client_lock);
                 has_existing = (g_frame_sub_client_fd >= 0);
                 if (!has_existing) {
                     g_frame_sub_client_fd = client_fd;
                 }
-                pthread_mutex_unlock(&g_frame_client_lock);
+                pthread_mutex_unlock(&g_frame_sub_client_lock);
 
                 if (has_existing) {
                     log_warn("[daemon] sub frame client already connected, rejecting fd=%d", client_fd);
@@ -1587,11 +1599,11 @@ int main(int argc, char *argv[])
                     nfds++;
                     log_info("[daemon] sub frame client connected fd=%d", client_fd);
                 } else {
-                    pthread_mutex_lock(&g_frame_client_lock);
+                    pthread_mutex_lock(&g_frame_sub_client_lock);
                     if (g_frame_sub_client_fd == client_fd) {
                         g_frame_sub_client_fd = -1;
                     }
-                    pthread_mutex_unlock(&g_frame_client_lock);
+                    pthread_mutex_unlock(&g_frame_sub_client_lock);
                     log_error("[daemon] max clients (%d) reached, rejecting sub frame fd=%d",
                               MAX_CLIENTS, client_fd);
                     close(client_fd);
@@ -1611,24 +1623,38 @@ int main(int argc, char *argv[])
 
             {
                 int client_fd = fds[i].fd;
-                int is_main_frame_client = 0;
-                int is_sub_frame_client = 0;
+                int main_client_fd = -1;
+                int sub_client_fd = -1;
+                int is_main_frame_client;
+                int is_sub_frame_client;
 
-                pthread_mutex_lock(&g_frame_client_lock);
-                is_main_frame_client = (client_fd == g_frame_main_client_fd);
-                is_sub_frame_client = (client_fd == g_frame_sub_client_fd);
-                pthread_mutex_unlock(&g_frame_client_lock);
+                pthread_mutex_lock(&g_frame_main_client_lock);
+                main_client_fd = g_frame_main_client_fd;
+                pthread_mutex_unlock(&g_frame_main_client_lock);
+
+                pthread_mutex_lock(&g_frame_sub_client_lock);
+                sub_client_fd = g_frame_sub_client_fd;
+                pthread_mutex_unlock(&g_frame_sub_client_lock);
+
+                is_main_frame_client = (client_fd == main_client_fd);
+                is_sub_frame_client = (client_fd == sub_client_fd);
 
                 if (is_main_frame_client || is_sub_frame_client) {
                     if (fds[i].revents & (POLLHUP | POLLERR)) {
-                        pthread_mutex_lock(&g_frame_client_lock);
-                        if (client_fd == g_frame_main_client_fd) {
-                            g_frame_main_client_fd = -1;
+                        if (is_main_frame_client) {
+                            pthread_mutex_lock(&g_frame_main_client_lock);
+                            if (client_fd == g_frame_main_client_fd) {
+                                g_frame_main_client_fd = -1;
+                            }
+                            pthread_mutex_unlock(&g_frame_main_client_lock);
                         }
-                        if (client_fd == g_frame_sub_client_fd) {
-                            g_frame_sub_client_fd = -1;
+                        if (is_sub_frame_client) {
+                            pthread_mutex_lock(&g_frame_sub_client_lock);
+                            if (client_fd == g_frame_sub_client_fd) {
+                                g_frame_sub_client_fd = -1;
+                            }
+                            pthread_mutex_unlock(&g_frame_sub_client_lock);
                         }
-                        pthread_mutex_unlock(&g_frame_client_lock);
                         log_info("[daemon] %s frame client disconnected fd=%d",
                                  is_sub_frame_client ? "sub" : "main", client_fd);
                         close(client_fd);
@@ -1689,16 +1715,19 @@ shutdown:
     }
 
     /* Close frame clients */
-    pthread_mutex_lock(&g_frame_client_lock);
+    pthread_mutex_lock(&g_frame_main_client_lock);
     if (g_frame_main_client_fd >= 0) {
         close(g_frame_main_client_fd);
         g_frame_main_client_fd = -1;
     }
+    pthread_mutex_unlock(&g_frame_main_client_lock);
+
+    pthread_mutex_lock(&g_frame_sub_client_lock);
     if (g_frame_sub_client_fd >= 0) {
         close(g_frame_sub_client_fd);
         g_frame_sub_client_fd = -1;
     }
-    pthread_mutex_unlock(&g_frame_client_lock);
+    pthread_mutex_unlock(&g_frame_sub_client_lock);
 
     /* Close control socket */
     if (g_ctrl_server_fd >= 0) {
