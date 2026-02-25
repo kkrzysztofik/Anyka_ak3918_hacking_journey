@@ -9,6 +9,17 @@
  *   Request:  [i32 cmd_id][u32 req_len][req_data bytes]
  *   Response: [i32 status][u32 resp_len][resp_data bytes]
  *
+ * Dual Socket Mode (Approach B Phase 3):
+ *   - Control socket: /tmp/vd-ctrl.sock (formerly /tmp/vendor-daemon.sock)
+ *     Handles all IPC commands including lifecycle operations
+ *   - Frame socket: /tmp/vd-frame.sock
+ *     Dedicated socket for frame streaming with shared memory support
+ *
+ * Shared Memory Ring Buffer (Approach A):
+ *   - Zero-copy frame delivery via shared memory
+ *   - 12-byte notification protocol on frame socket
+ *   - Falls back to socket-based delivery on ring buffer overflow
+ *
  * Connection model:
  *   poll()-based multiplexing of up to MAX_CLIENTS concurrent connections.
  *   The first client to issue a lifecycle command (vi_open, venc_open, etc.)
@@ -45,10 +56,13 @@
 #include "ak_common.h"
 #include "ak_global.h"
 #include "ak_error.h"
+#include "vd_ring_buffer.h"
 
 /* ---- constants ----------------------------------------------------------- */
 
-#define SOCKET_PATH      "/tmp/vendor-daemon.sock"
+/* Dual socket paths (Approach B Phase 3) */
+#define CTRL_SOCKET_PATH   "/tmp/vd-ctrl.sock"   /* Formerly /tmp/vendor-daemon.sock */
+#define FRAME_SOCKET_PATH  "/tmp/vd-frame.sock"  /* Dedicated frame delivery */
 #define MAX_REQUEST_SIZE (1 * 1024 * 1024)  /* 1 MB – for frame data */
 #define LOG_FILE_PATH_DEFAULT "/mnt/logs/vendor_daemon.log"
 #define LOG_FILE_PATH_MAX    512
@@ -139,6 +153,25 @@ static volatile int g_shutdown = 0;
 static int g_control_fd = -1;
 static unsigned long long g_venc_no_data_count = 0;
 static unsigned long long g_venc_stream_error_count = 0;
+
+/* ---- Shared memory ring buffer (Approach A) ------------------------------ */
+/*
+ * Shared memory ring buffer for zero-copy frame delivery.
+ * When initialized, frame requests on the frame socket will:
+ *   1. Write frame to ring buffer
+ *   2. Send 12-byte notification instead of full frame data
+ *   3. Release SDK frame immediately (data now in shm)
+ */
+static void *g_ring_buffer = NULL;
+
+/* ---- Dual socket support (Approach B Phase 3) -------------------------- */
+/*
+ * Control socket: handles all IPC commands (lifecycle + streaming)
+ * Frame socket: dedicated for frame delivery with shared memory support
+ */
+static int g_ctrl_server_fd = -1;   /* Control socket server */
+static int g_frame_server_fd = -1;  /* Frame socket server */
+static int g_frame_client_fd = -1;  /* At most 1 frame client */
 
 /* Saved file descriptors for stdout/stderr restoration on shutdown */
 static int g_saved_stdout = -1;
@@ -248,6 +281,43 @@ static void pending_free(int idx)
         g_pending[idx].in_use = 0;
         g_pending[idx].client_fd = -1;
     }
+}
+
+/* ---- Socket creation helper --------------------------------------------- */
+
+/**
+ * create_unix_socket - create, bind, and listen on a Unix domain socket
+ * Returns socket fd on success, -1 on error
+ */
+static int create_unix_socket(const char *path)
+{
+    int fd = socket(AF_UNIX, SOCK_STREAM, 0);
+    if (fd < 0) {
+        log_error("[daemon] socket: %s", strerror(errno));
+        return -1;
+    }
+
+    unlink(path);
+
+    struct sockaddr_un addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sun_family = AF_UNIX;
+    strncpy(addr.sun_path, path, sizeof(addr.sun_path) - 1);
+
+    if (bind(fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
+        log_error("[daemon] bind %s: %s", path, strerror(errno));
+        close(fd);
+        return -1;
+    }
+
+    if (listen(fd, 4) < 0) {
+        log_error("[daemon] listen %s: %s", path, strerror(errno));
+        close(fd);
+        unlink(path);
+        return -1;
+    }
+
+    return fd;
 }
 
 /* ---- VI handlers --------------------------------------------------------- */
@@ -562,6 +632,163 @@ static int handle_venc_request_stream(int fd, const uint8_t *req, uint32_t req_l
 }
 
 /*
+ * Convert SDK frame type to ring buffer frame type
+ */
+static uint32_t convert_frame_type(enum video_frame_type sdk_type)
+{
+    switch (sdk_type) {
+    case FRAME_TYPE_I:
+        return VD_FRAME_TYPE_I;
+    case FRAME_TYPE_B:
+        return VD_FRAME_TYPE_B;
+    case FRAME_TYPE_P:
+    default:
+        return VD_FRAME_TYPE_P;
+    }
+}
+
+/*
+ * handle_venc_get_stream_shm - Frame delivery with shared memory support
+ * 
+ * On the frame socket with ring buffer initialized:
+ *   1. Get frame from SDK
+ *   2. Write to ring buffer via vd_ring_write()
+ *   3. Send 12-byte notification instead of full frame
+ *   4. Release SDK frame immediately
+ * 
+ * Falls back to socket-based delivery on ring buffer overflow.
+ */
+static int handle_venc_get_stream_shm(int fd, const uint8_t *req, uint32_t req_len)
+{
+    if (req_len < sizeof(uint64_t))
+        return send_response(fd, STATUS_ERROR, NULL, 0);
+    uint64_t sh64;
+    memcpy(&sh64, req, sizeof(sh64));
+    void *stream_handle = (void *)(uintptr_t)sh64;
+
+    /* Allocate a slot in the pending table */
+    int slot = pending_alloc(fd);
+    if (slot < 0) {
+        log_error("[venc] get_stream: pending table full");
+        return send_response(fd, STATUS_ERROR, NULL, 0);
+    }
+
+    struct video_stream *vs = &g_pending[slot].stream;
+    memset(vs, 0, sizeof(*vs));
+    g_pending[slot].stream_handle = stream_handle;
+
+    int ret = ak_venc_get_stream(stream_handle, vs);
+    if (ret != 0) {
+        int err_no = ak_get_error_no();
+        if (err_no == SDK_ERROR_NO_DATA) {
+            g_venc_no_data_count++;
+            if ((g_venc_no_data_count % 1000ULL) == 0ULL) {
+                log_debug("[venc] get_stream no-data events=%llu", g_venc_no_data_count);
+            }
+        } else {
+            g_venc_stream_error_count++;
+            log_warn(
+                "[venc] get_stream failed ret=%d err_no=%d total_errors=%llu",
+                ret,
+                err_no,
+                g_venc_stream_error_count
+            );
+        }
+        pending_free(slot);
+        return send_response(fd, ret, NULL, 0);
+    }
+
+    uint32_t frame_len = vs->len;
+    uint64_t timestamp = (uint64_t)vs->ts;
+    uint32_t seq_no = (uint32_t)vs->seq_no;
+    int32_t frame_type = (int32_t)vs->frame_type;
+
+    /*
+     * Try shared memory path first (if ring buffer initialized and frame fits)
+     */
+    if (g_ring_buffer != NULL && frame_len <= VD_SHM_SLOT_DATA_SIZE) {
+        /* Convert timestamp from ms to us */
+        uint64_t timestamp_us = timestamp * 1000ULL;
+        uint32_t ring_frame_type = convert_frame_type(vs->frame_type);
+        
+        int ring_slot = vd_ring_write(g_ring_buffer, vs->data, frame_len,
+                                       timestamp_us, seq_no,
+                                       ring_frame_type, VD_STREAM_MAIN);
+        
+        if (ring_slot >= 0) {
+            /* Success: send 12-byte notification instead of full frame */
+            struct vd_frame_notify notif;
+            notif.slot_index = (uint32_t)ring_slot;
+            notif.frame_len = frame_len;
+            notif.flags = VD_NOTIFY_LAST_FRAGMENT;
+            
+            /* Send notification: [status][resp_len=12][notification] */
+            int32_t status = STATUS_OK;
+            uint32_t resp_len = sizeof(notif);  /* 12 bytes */
+            
+            if (write_exact(fd, &status, sizeof(status)) != 0) {
+                /* Socket error, but frame is in ring buffer - still release it */
+                ak_venc_release_stream(stream_handle, vs);
+                pending_free(slot);
+                return -1;
+            }
+            if (write_exact(fd, &resp_len, sizeof(resp_len)) != 0) {
+                ak_venc_release_stream(stream_handle, vs);
+                pending_free(slot);
+                return -1;
+            }
+            if (write_exact(fd, &notif, sizeof(notif)) != 0) {
+                ak_venc_release_stream(stream_handle, vs);
+                pending_free(slot);
+                return -1;
+            }
+            
+            /* Release SDK frame immediately (data is now in shm) */
+            ak_venc_release_stream(stream_handle, vs);
+            pending_free(slot);
+            return 0;
+        }
+        
+        /* Ring buffer full or error - fall through to socket fallback */
+        log_debug("[venc] ring buffer full, using socket fallback");
+    }
+
+    /*
+     * Socket fallback: existing frame delivery over socket
+     * This path is used when:
+     *   - Ring buffer not initialized
+     *   - Frame too large for ring buffer
+     *   - Ring buffer write failed
+     */
+    uint64_t token = (uint64_t)slot;
+
+    /* Header: 28 bytes + frame data */
+    uint32_t resp_payload_len = 28u + frame_len;
+
+    uint8_t hdr[28];
+    memcpy(hdr +  0, &frame_len,  4);
+    memcpy(hdr +  4, &timestamp,  8);
+    memcpy(hdr + 12, &seq_no,     4);
+    memcpy(hdr + 16, &frame_type, 4);
+    memcpy(hdr + 20, &token,      8);
+
+    /* Send header parts manually to avoid a large allocation */
+    int32_t status = STATUS_OK;
+    if (write_exact(fd, &status,          sizeof(status))          != 0) goto fail;
+    if (write_exact(fd, &resp_payload_len, sizeof(resp_payload_len)) != 0) goto fail;
+    if (write_exact(fd, hdr,              sizeof(hdr))              != 0) goto fail;
+    if (frame_len > 0 && vs->data != NULL)
+        if (write_exact(fd, vs->data, frame_len) != 0)               goto fail;
+
+    /* Do NOT release yet; Rust must call CMD_VENC_RELEASE_STREAM with token */
+    return 0;
+
+fail:
+    pending_free(slot);
+    return -1;
+}
+
+/*
  * CMD_VENC_GET_STREAM response layout (after status + resp_len header):
  *   [u32 frame_len][u64 timestamp][u32 seq_no][i32 frame_type]
  *   [u64 remote_token][frame_data_bytes]
@@ -569,6 +796,17 @@ static int handle_venc_request_stream(int fd, const uint8_t *req, uint32_t req_l
  */
 static int handle_venc_get_stream(int fd, const uint8_t *req, uint32_t req_len)
 {
+    /*
+     * If this request is on the frame socket AND ring buffer is available,
+     * use the shared memory path
+     */
+    if (fd == g_frame_client_fd && g_ring_buffer != NULL) {
+        return handle_venc_get_stream_shm(fd, req, req_len);
+    }
+
+    /*
+     * Legacy socket path: always send full frame data over socket
+     */
     if (req_len < sizeof(uint64_t))
         return send_response(fd, STATUS_ERROR, NULL, 0);
     uint64_t sh64;
@@ -1214,53 +1452,70 @@ int main(int argc, char *argv[])
     memset(g_pending, 0, sizeof(g_pending));
 
     /* ================================================================
-     * SOCKET SETUP
+     * SHARED MEMORY RING BUFFER INITIALIZATION (Approach A)
      * ================================================================ */
 
-    int server_fd = socket(AF_UNIX, SOCK_STREAM, 0);
-    if (server_fd < 0) {
-        log_fatal("socket: %s", strerror(errno));
-        return 1;
+    g_ring_buffer = vd_ring_create();
+    if (g_ring_buffer) {
+        log_info("[daemon] shared memory ring buffer initialized (%d slots, %d bytes/slot)",
+                 VD_SHM_SLOT_COUNT, VD_SHM_SLOT_DATA_SIZE);
+    } else {
+        log_warn("[daemon] shared memory init failed, using socket-only mode");
     }
 
-    unlink(SOCKET_PATH);
+    /* ================================================================
+     * DUAL SOCKET SETUP (Approach B Phase 3)
+     * ================================================================ */
 
-    struct sockaddr_un addr;
-    memset(&addr, 0, sizeof(addr));
-    addr.sun_family = AF_UNIX;
-    strncpy(addr.sun_path, SOCKET_PATH, sizeof(addr.sun_path) - 1);
-
-    if (bind(server_fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
-        log_fatal("bind: %s", strerror(errno));
-        close(server_fd);
-        return 1;
+    /* Control socket: handles all IPC commands */
+    g_ctrl_server_fd = create_unix_socket(CTRL_SOCKET_PATH);
+    if (g_ctrl_server_fd < 0) {
+        log_fatal("[daemon] control socket creation failed");
+        goto shutdown;
     }
+    log_info("[daemon] control socket listening on %s", CTRL_SOCKET_PATH);
 
-    if (listen(server_fd, 4) < 0) {
-        log_fatal("listen: %s", strerror(errno));
-        close(server_fd);
-        return 1;
+    /* Frame socket: dedicated for frame delivery (optional) */
+    g_frame_server_fd = create_unix_socket(FRAME_SOCKET_PATH);
+    if (g_frame_server_fd < 0) {
+        log_warn("[daemon] frame socket creation failed, using legacy single-socket mode");
+        g_frame_server_fd = -1;
+    } else {
+        log_info("[daemon] frame socket listening on %s", FRAME_SOCKET_PATH);
     }
-
-    log_info("[daemon] listening on %s", SOCKET_PATH);
 
     /* ================================================================
      * MAIN EVENT LOOP (poll-based multiplexing)
      * ================================================================
      *
-     * fds[0]         = server_fd (listening socket)
-     * fds[1..nfds-1] = connected client fds
+     * fds[0]         = ctrl_server_fd (control socket)
+     * fds[1]         = frame_server_fd (frame socket, if available)
+     * fds[2..nfds-1] = connected client fds
      *
      * This replaces the old blocking accept()-then-inner-loop model so
      * multiple clients can be serviced without queuing in the kernel
      * backlog.  Each client with pending data is serviced round-robin.
+     *
+     * Frame socket accepts at most 1 client (dedicated frame reader).
      */
 
-    struct pollfd fds[MAX_CLIENTS + 1];
-    int nfds = 1;
+    /* pollfd array: [ctrl_server, frame_server (optional), clients...] */
+    struct pollfd fds[MAX_CLIENTS + 2];  /* +2 for dual sockets */
+    int nfds = 0;
+
     memset(fds, 0, sizeof(fds));
-    fds[0].fd = server_fd;
-    fds[0].events = POLLIN;
+
+    /* Add control server socket */
+    fds[nfds].fd = g_ctrl_server_fd;
+    fds[nfds].events = POLLIN;
+    nfds++;
+
+    /* Add frame server socket (if available) */
+    if (g_frame_server_fd >= 0) {
+        fds[nfds].fd = g_frame_server_fd;
+        fds[nfds].events = POLLIN;
+        nfds++;
+    }
 
     while (!g_shutdown) {
         int ready = poll(fds, nfds, 1000); /* 1s timeout for shutdown check */
@@ -1273,16 +1528,16 @@ int main(int argc, char *argv[])
         if (ready == 0)
             continue; /* timeout – re-check g_shutdown */
 
-        /* ── Accept new connections ─────────────────────────────────── */
+        /* ── Accept new connections on control socket ─────────────────── */
         if (fds[0].revents & POLLIN) {
-            int client_fd = accept(server_fd, NULL, NULL);
+            int client_fd = accept(g_ctrl_server_fd, NULL, NULL);
             if (client_fd >= 0) {
-                if (nfds < MAX_CLIENTS + 1) {
+                if (nfds < MAX_CLIENTS + 2) {
                     fds[nfds].fd = client_fd;
                     fds[nfds].events = POLLIN;
                     fds[nfds].revents = 0;
                     nfds++;
-                    log_info("[daemon] client connected fd=%d (total=%d)",
+                    log_info("[daemon] control client connected fd=%d (total=%d)",
                              client_fd, nfds - 1);
                 } else {
                     log_error("[daemon] max clients (%d) reached, rejecting fd=%d",
@@ -1290,23 +1545,79 @@ int main(int argc, char *argv[])
                     close(client_fd);
                 }
             } else if (errno != EINTR) {
-                log_error("accept: %s", strerror(errno));
+                log_error("accept (control): %s", strerror(errno));
             }
         }
 
-        /* ── Service clients with pending data (round-robin) ──────── */
+        /* ── Accept new connection on frame socket ───────────────────── */
+        if (g_frame_server_fd >= 0 && fds[1].revents & POLLIN) {
+            if (g_frame_client_fd >= 0) {
+                /* Already have a frame client - reject new connection */
+                int reject_fd = accept(g_frame_server_fd, NULL, NULL);
+                if (reject_fd >= 0) {
+                    log_warn("[daemon] frame client already connected, rejecting new connection");
+                    close(reject_fd);
+                }
+            } else {
+                int client_fd = accept(g_frame_server_fd, NULL, NULL);
+                if (client_fd >= 0) {
+                    g_frame_client_fd = client_fd;
+                    /* Add to poll array after control clients */
+                    fds[nfds].fd = client_fd;
+                    fds[nfds].events = POLLIN;
+                    fds[nfds].revents = 0;
+                    nfds++;
+                    log_info("[daemon] frame client connected fd=%d", client_fd);
+                } else if (errno != EINTR) {
+                    log_error("accept (frame): %s", strerror(errno));
+                }
+            }
+        }
+
+        /* ── Service clients with pending data (round-robin) ────────── */
         int i;
-        for (i = 1; i < nfds; i++) {
+        /* First client index depends on how many server sockets we have */
+        int first_client_idx;
+        if (g_frame_server_fd >= 0) {
+            first_client_idx = 2;  /* fds[0]=ctrl_server, fds[1]=frame_server, clients start at 2 */
+        } else {
+            first_client_idx = 1;  /* fds[0]=ctrl_server, clients start at 1 */
+        }
+
+        for (i = first_client_idx; i < nfds; i++) {
             if (!(fds[i].revents & (POLLIN | POLLHUP | POLLERR)))
                 continue;
+
+            /* Check if this is the frame client disconnecting */
+            if (fds[i].fd == g_frame_client_fd && (fds[i].revents & (POLLHUP | POLLERR))) {
+                log_info("[daemon] frame client disconnected fd=%d", fds[i].fd);
+                cleanup_pending_for_fd(fds[i].fd);
+                close(fds[i].fd);
+                g_frame_client_fd = -1;
+                /* Compact: move last entry into this slot */
+                fds[i] = fds[nfds - 1];
+                nfds--;
+                i--; /* re-check this slot */
+                continue;
+            }
 
             int ret = process_request(fds[i].fd);
             if (ret == -1) {
                 /* Client disconnected or I/O error */
-                log_info("[daemon] client fd=%d disconnected", fds[i].fd);
-                cleanup_pending_for_fd(fds[i].fd);
-                release_control(fds[i].fd);
-                close(fds[i].fd);
+                int client_fd = fds[i].fd;
+                
+                /* Check if it's the frame client */
+                if (client_fd == g_frame_client_fd) {
+                    g_frame_client_fd = -1;
+                    log_info("[daemon] frame client fd=%d disconnected", client_fd);
+                } else {
+                    log_info("[daemon] control client fd=%d disconnected", client_fd);
+                }
+                
+                cleanup_pending_for_fd(client_fd);
+                release_control(client_fd);
+                close(client_fd);
+                
                 /* Compact: move last entry into this slot */
                 fds[i] = fds[nfds - 1];
                 nfds--;
@@ -1322,20 +1633,51 @@ int main(int argc, char *argv[])
     /* Clean up any remaining client connections */
     {
         int i;
-        for (i = 1; i < nfds; i++) {
+        /* First client index depends on how many server sockets we had */
+        int first_client_idx;
+        if (g_frame_server_fd >= 0) {
+            first_client_idx = 2;
+        } else {
+            first_client_idx = 1;
+        }
+        for (i = first_client_idx; i < nfds; i++) {
             cleanup_pending_for_fd(fds[i].fd);
             release_control(fds[i].fd);
             close(fds[i].fd);
         }
     }
 
+shutdown:
     /* ================================================================
      * SHUTDOWN
      * ================================================================ */
 
     log_info("[daemon] shutting down");
-    close(server_fd);
-    unlink(SOCKET_PATH);
+
+    /* Close frame socket */
+    if (g_frame_server_fd >= 0) {
+        close(g_frame_server_fd);
+        unlink(FRAME_SOCKET_PATH);
+    }
+
+    /* Close frame client */
+    if (g_frame_client_fd >= 0) {
+        close(g_frame_client_fd);
+        g_frame_client_fd = -1;
+    }
+
+    /* Close control socket */
+    if (g_ctrl_server_fd >= 0) {
+        close(g_ctrl_server_fd);
+        unlink(CTRL_SOCKET_PATH);
+    }
+
+    /* Clean up shared memory ring buffer */
+    if (g_ring_buffer) {
+        vd_ring_shutdown(g_ring_buffer);
+        vd_ring_destroy(g_ring_buffer, 1);
+        g_ring_buffer = NULL;
+    }
 
     log_info("vendor-daemon stopped");
     log_info("========================================");

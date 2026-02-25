@@ -141,7 +141,7 @@ http_verbose = true
 
 # Enable per-frame streaming debug logs (AAC/H.264 timestamp + packetization internals)
 # Set true only when diagnosing frame timing/packetization issues.
-stream_frame_debug = false
+stream_frame_debug = true
 
 # Enable console logging
 console_enabled = true

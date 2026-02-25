@@ -15,6 +15,9 @@ pub mod video;
 // Vendor IPC client for communication with vendor-daemon
 pub mod vendor_ipc;
 
+// Shared memory ring buffer for zero-copy frame delivery
+pub mod shm_ring;
+
 // NOSONAR: Module-level wildcard re-export is acceptable for facade modules.
 // This module is designed as a unified HAL interface. Explicit re-exports would
 // be too verbose and harder to maintain as the platform evolves.
