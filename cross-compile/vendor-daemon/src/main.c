@@ -176,6 +176,7 @@ static FILE *g_log_fp = NULL;
 static uint64_t g_last_wall_clock_us = 0;
 
 /* ---- Push-mode frame delivery thread state ------------------------------ */
+<<<<<<< HEAD
 struct push_stream_state {
     pthread_t thread;
     volatile int active;
@@ -184,6 +185,11 @@ struct push_stream_state {
 };
 #define PUSH_STREAM_SLOT_COUNT 2
 static struct push_stream_state g_push_streams[PUSH_STREAM_SLOT_COUNT];
+=======
+static pthread_t g_push_thread;
+static volatile int g_push_active = 0;
+static void *g_push_stream_handle = NULL;  /* SDK stream handle for push thread */
+>>>>>>> a644370a4911905465f9f35c78f4cc33f78f6dd1
 #define PUSH_POLL_SLEEP_MS 5  /* Sleep on no-data (slightly less than ref's 10ms) */
 
 static void signal_handler(int sig)
@@ -650,6 +656,182 @@ static uint32_t convert_frame_type(enum video_frame_type sdk_type)
 /**
  * Populate wall-clock timing fields in a slot header after a successful ring write.
  * Call this after vd_ring_write() returns a valid slot index.
+<<<<<<< HEAD
+=======
+ */
+static void fill_slot_timing(void *ring_base, int slot_idx)
+{
+    struct timespec now;
+    clock_gettime(CLOCK_MONOTONIC, &now);
+    uint64_t wall_us = (uint64_t)now.tv_sec * 1000000ULL + (uint64_t)now.tv_nsec / 1000ULL;
+
+    struct vd_slot_header *slot = vd_ring_get_slot_hdr(ring_base, (uint32_t)slot_idx);
+    slot->wall_clock_us = wall_us;
+
+    uint32_t delta = 0;
+    if (g_last_wall_clock_us > 0 && wall_us > g_last_wall_clock_us) {
+        uint64_t diff = wall_us - g_last_wall_clock_us;
+        delta = (diff > UINT32_MAX) ? UINT32_MAX : (uint32_t)diff;
+    }
+    slot->inter_frame_us = delta;
+    g_last_wall_clock_us = wall_us;
+}
+
+/* ---- Push-mode frame delivery ------------------------------------------- */
+
+/*
+ * push_frame_thread - Dedicated thread for push-based frame delivery.
+ *
+ * Polls ak_venc_get_stream() in a tight loop, writes frames to the ring
+ * buffer, and pushes unsolicited 12-byte notifications to the frame client.
+ * The Rust side just reads notifications — zero polling, zero wasted IPC.
+ */
+static void *push_frame_thread(void *arg)
+{
+    (void)arg;
+    struct video_stream vs;
+    uint64_t frames_pushed = 0;
+    uint64_t no_data_count = 0;
+
+    log_info("[push] frame push thread started (handle=%p)", g_push_stream_handle);
+
+    while (g_push_active && !g_shutdown) {
+        memset(&vs, 0, sizeof(vs));
+        int ret = ak_venc_get_stream(g_push_stream_handle, &vs);
+
+        if (ret != 0) {
+            /* No data — brief sleep to avoid busy-spin */
+            no_data_count++;
+            struct timespec ts = { .tv_sec = 0, .tv_nsec = PUSH_POLL_SLEEP_MS * 1000000L };
+            nanosleep(&ts, NULL);
+            continue;
+        }
+
+        uint32_t frame_len = vs.len;
+        uint64_t timestamp_us = (uint64_t)vs.ts * 1000ULL;
+        uint32_t seq_no = (uint32_t)vs.seq_no;
+        uint32_t ring_frame_type = convert_frame_type(vs.frame_type);
+
+        /* Try ring buffer write */
+        int ring_slot = -1;
+        if (g_ring_buffer != NULL && frame_len <= VD_SHM_SLOT_DATA_SIZE) {
+            ring_slot = vd_ring_write(g_ring_buffer, vs.data, frame_len,
+                                       timestamp_us, seq_no,
+                                       ring_frame_type, VD_STREAM_MAIN);
+
+            /* I-frame priority eviction on overflow */
+            if (ring_slot == -1 && ring_frame_type == VD_FRAME_TYPE_I) {
+                struct vd_ring_header *hdr = vd_ring_get_header(g_ring_buffer);
+                __atomic_add_fetch(&hdr->overflow_count, 1, __ATOMIC_RELAXED);
+
+                int evicted = vd_ring_evict_oldest_pframe(g_ring_buffer);
+                if (evicted >= 0) {
+                    __atomic_add_fetch(&hdr->eviction_count, 1, __ATOMIC_RELAXED);
+                    ring_slot = vd_ring_write(g_ring_buffer, vs.data, frame_len,
+                                               timestamp_us, seq_no,
+                                               ring_frame_type, VD_STREAM_MAIN);
+                }
+            } else if (ring_slot == -1) {
+                /* P/Pi-frame overflow */
+                struct vd_ring_header *hdr = vd_ring_get_header(g_ring_buffer);
+                __atomic_add_fetch(&hdr->overflow_count, 1, __ATOMIC_RELAXED);
+                __atomic_add_fetch(&hdr->dropped_count, 1, __ATOMIC_RELAXED);
+            }
+        }
+
+        if (ring_slot >= 0) {
+            /* Populate wall-clock timing in the slot */
+            fill_slot_timing(g_ring_buffer, ring_slot);
+
+            /* Push notification to frame client (if connected) */
+            if (g_frame_client_fd >= 0) {
+                struct vd_frame_notify notif;
+                notif.slot_index = (uint32_t)ring_slot;
+                notif.frame_len = frame_len;
+                notif.flags = VD_NOTIFY_LAST_FRAGMENT;
+
+                /* Write notification directly (no request/response framing) */
+                if (write_exact(g_frame_client_fd, &notif, sizeof(notif)) != 0) {
+                    log_warn("[push] notification write failed, client may have disconnected");
+                }
+            }
+            frames_pushed++;
+        } else if (ring_frame_type != VD_FRAME_TYPE_I) {
+            /* P/Pi-frame dropped during overflow — send drop notification if client connected */
+            if (g_frame_client_fd >= 0) {
+                struct vd_frame_notify notif;
+                notif.slot_index = 0;
+                notif.frame_len = 0;
+                notif.flags = VD_NOTIFY_FRAME_DROPPED;
+                write_exact(g_frame_client_fd, &notif, sizeof(notif));
+            }
+        }
+        /* else: I-frame couldn't fit even after eviction — dropped (rare) */
+
+        /* Release SDK frame immediately */
+        ak_venc_release_stream(g_push_stream_handle, &vs);
+
+        if (frames_pushed > 0 && (frames_pushed % 300) == 0) {
+            log_info("[push] frames=%llu no_data=%llu",
+                     (unsigned long long)frames_pushed,
+                     (unsigned long long)no_data_count);
+        }
+    }
+
+    log_info("[push] frame push thread exited (frames=%llu no_data=%llu)",
+             (unsigned long long)frames_pushed,
+             (unsigned long long)no_data_count);
+    return NULL;
+}
+
+static int handle_venc_start_push(int fd, const uint8_t *req, uint32_t req_len)
+{
+    if (req_len < sizeof(uint64_t))
+        return send_response(fd, STATUS_ERROR, NULL, 0);
+    if (g_push_active) {
+        log_warn("[push] already active, ignoring start_push");
+        return send_response(fd, STATUS_OK, NULL, 0);
+    }
+
+    uint64_t sh64;
+    memcpy(&sh64, req, sizeof(sh64));
+    g_push_stream_handle = (void *)(uintptr_t)sh64;
+    g_push_active = 1;
+
+    if (pthread_create(&g_push_thread, NULL, push_frame_thread, NULL) != 0) {
+        log_error("[push] failed to create push thread: %s", strerror(errno));
+        g_push_active = 0;
+        return send_response(fd, STATUS_ERROR, NULL, 0);
+    }
+
+    log_info("[push] push-based frame delivery started (handle=%p)", g_push_stream_handle);
+    return send_response(fd, STATUS_OK, NULL, 0);
+}
+
+static int handle_venc_stop_push(int fd, const uint8_t *req, uint32_t req_len)
+{
+    (void)req; (void)req_len;
+    if (!g_push_active) {
+        return send_response(fd, STATUS_OK, NULL, 0);
+    }
+    g_push_active = 0;
+    pthread_join(g_push_thread, NULL);
+    g_push_stream_handle = NULL;
+    log_info("[push] push-based frame delivery stopped");
+    return send_response(fd, STATUS_OK, NULL, 0);
+}
+
+/*
+ * handle_venc_get_stream_shm - Frame delivery with shared memory support
+ * 
+ * On the frame socket with ring buffer initialized:
+ *   1. Get frame from SDK
+ *   2. Write to ring buffer via vd_ring_write()
+ *   3. Send 12-byte notification instead of full frame
+ *   4. Release SDK frame immediately
+ * 
+ * Falls back to socket-based delivery on ring buffer overflow.
+>>>>>>> a644370a4911905465f9f35c78f4cc33f78f6dd1
  */
 static void fill_slot_timing(void *ring_base, int slot_idx)
 {
@@ -760,11 +942,16 @@ static void *push_frame_thread(void *arg)
             /* Populate wall-clock timing in the slot */
             fill_slot_timing(g_ring_buffer, ring_slot);
 
+<<<<<<< HEAD
             /* Push notification to frame client (if connected) */
+=======
+            /* Success: send 12-byte notification instead of full frame */
+>>>>>>> a644370a4911905465f9f35c78f4cc33f78f6dd1
             struct vd_frame_notify notif;
             notif.slot_index = (uint32_t)ring_slot;
             notif.frame_len = frame_len;
             notif.flags = VD_NOTIFY_LAST_FRAGMENT;
+<<<<<<< HEAD
             if (send_frame_notification(state->stream_id, &notif) != 0) {
                 log_warn("[push] notification write failed, client may have disconnected");
             }
@@ -795,6 +982,151 @@ static void *push_frame_thread(void *arg)
              (unsigned long long)frames_pushed,
              (unsigned long long)no_data_count);
     return NULL;
+=======
+
+            /* Send notification: [status][resp_len=12][notification] */
+            int32_t status = STATUS_OK;
+            uint32_t resp_len = sizeof(notif);  /* 12 bytes */
+
+            if (write_exact(fd, &status, sizeof(status)) != 0) {
+                /* Socket error, but frame is in ring buffer - still release it */
+                ak_venc_release_stream(stream_handle, vs);
+                pending_free(slot);
+                return -1;
+            }
+            if (write_exact(fd, &resp_len, sizeof(resp_len)) != 0) {
+                ak_venc_release_stream(stream_handle, vs);
+                pending_free(slot);
+                return -1;
+            }
+            if (write_exact(fd, &notif, sizeof(notif)) != 0) {
+                ak_venc_release_stream(stream_handle, vs);
+                pending_free(slot);
+                return -1;
+            }
+
+            /* Release SDK frame immediately (data is now in shm) */
+            ak_venc_release_stream(stream_handle, vs);
+            pending_free(slot);
+            return 0;
+        }
+        
+        /* I-frame priority: evict oldest P/Pi-frame to make room */
+        if (ring_slot == -1 && ring_frame_type == VD_FRAME_TYPE_I) {
+            int evicted = vd_ring_evict_oldest_pframe(g_ring_buffer);
+            if (evicted >= 0) {
+                struct vd_ring_header *ev_hdr = vd_ring_get_header(g_ring_buffer);
+                __atomic_add_fetch(&ev_hdr->eviction_count, 1, __ATOMIC_RELAXED);
+                log_debug("[venc] evicted P-frame from slot %d for I-frame priority", evicted);
+                ring_slot = vd_ring_write(g_ring_buffer, vs->data, frame_len,
+                                           timestamp_us, seq_no,
+                                           ring_frame_type, VD_STREAM_MAIN);
+            }
+        }
+
+        if (ring_slot >= 0) {
+            /* Eviction succeeded — populate timing and send shm notification */
+            fill_slot_timing(g_ring_buffer, ring_slot);
+
+            struct vd_frame_notify notif;
+            notif.slot_index = (uint32_t)ring_slot;
+            notif.frame_len = frame_len;
+            notif.flags = VD_NOTIFY_LAST_FRAGMENT;
+
+            int32_t status = STATUS_OK;
+            uint32_t resp_len = sizeof(notif);
+
+            if (write_exact(fd, &status, sizeof(status)) != 0 ||
+                write_exact(fd, &resp_len, sizeof(resp_len)) != 0 ||
+                write_exact(fd, &notif, sizeof(notif)) != 0) {
+                ak_venc_release_stream(stream_handle, vs);
+                pending_free(slot);
+                return -1;
+            }
+
+            ak_venc_release_stream(stream_handle, vs);
+            pending_free(slot);
+            return 0;
+        }
+
+        /* Ring buffer full — increment overflow counter */
+        {
+            struct vd_ring_header *hdr = vd_ring_get_header(g_ring_buffer);
+            __atomic_add_fetch(&hdr->overflow_count, 1, __ATOMIC_RELAXED);
+
+            uint32_t write_seq = __atomic_load_n(&hdr->write_seq, __ATOMIC_ACQUIRE);
+            uint32_t read_seq = __atomic_load_n(&hdr->read_seq, __ATOMIC_ACQUIRE);
+            uint32_t flags = __atomic_load_n(&hdr->flags, __ATOMIC_ACQUIRE);
+            log_debug(
+                "[venc] ring buffer full, using socket fallback"
+                " (write_seq=%u read_seq=%u delta=%u frame_len=%u flags=0x%x)",
+                write_seq,
+                read_seq,
+                write_seq - read_seq,
+                frame_len,
+                flags
+            );
+
+            /* P/Pi-frame during overflow: drop instead of expensive socket send */
+            if (ring_frame_type != VD_FRAME_TYPE_I) {
+                __atomic_add_fetch(&hdr->dropped_count, 1, __ATOMIC_RELAXED);
+
+                struct vd_frame_notify notif;
+                notif.slot_index = 0;
+                notif.frame_len = 0;
+                notif.flags = VD_NOTIFY_FRAME_DROPPED;
+
+                int32_t drop_status = STATUS_OK;
+                uint32_t drop_resp_len = sizeof(notif);
+
+                write_exact(fd, &drop_status, sizeof(drop_status));
+                write_exact(fd, &drop_resp_len, sizeof(drop_resp_len));
+                write_exact(fd, &notif, sizeof(notif));
+
+                ak_venc_release_stream(stream_handle, vs);
+                pending_free(slot);
+                return 0;
+            }
+
+            /* I-frame overflow — must use socket fallback */
+            __atomic_add_fetch(&hdr->socket_fallback_count, 1, __ATOMIC_RELAXED);
+        }
+    }
+
+    /*
+     * Socket fallback: existing frame delivery over socket
+     * This path is used when:
+     *   - Ring buffer not initialized
+     *   - Frame too large for ring buffer
+     *   - I-frame ring buffer write failed after eviction attempt
+     */
+    uint64_t token = (uint64_t)slot;
+
+    /* Header: 28 bytes + frame data */
+    uint32_t resp_payload_len = 28u + frame_len;
+
+    uint8_t hdr[28];
+    memcpy(hdr +  0, &frame_len,  4);
+    memcpy(hdr +  4, &timestamp,  8);
+    memcpy(hdr + 12, &seq_no,     4);
+    memcpy(hdr + 16, &frame_type, 4);
+    memcpy(hdr + 20, &token,      8);
+
+    /* Send header parts manually to avoid a large allocation */
+    int32_t status = STATUS_OK;
+    if (write_exact(fd, &status,          sizeof(status))          != 0) goto fail;
+    if (write_exact(fd, &resp_payload_len, sizeof(resp_payload_len)) != 0) goto fail;
+    if (write_exact(fd, hdr,              sizeof(hdr))              != 0) goto fail;
+    if (frame_len > 0 && vs->data != NULL)
+        if (write_exact(fd, vs->data, frame_len) != 0)               goto fail;
+
+    /* Do NOT release yet; Rust must call CMD_VENC_RELEASE_STREAM with token */
+    return 0;
+
+fail:
+    pending_free(slot);
+    return -1;
+>>>>>>> a644370a4911905465f9f35c78f4cc33f78f6dd1
 }
 
 static void stop_push_slot(int idx)
@@ -1735,9 +2067,19 @@ shutdown:
         unlink(CTRL_SOCKET_PATH);
     }
 
+<<<<<<< HEAD
     /* Stop push threads before destroying ring buffer */
     stop_push_slot(0);
     stop_push_slot(1);
+=======
+    /* Stop push thread before destroying ring buffer */
+    if (g_push_active) {
+        g_push_active = 0;
+        pthread_join(g_push_thread, NULL);
+        g_push_stream_handle = NULL;
+        log_info("[push] push thread stopped during shutdown");
+    }
+>>>>>>> a644370a4911905465f9f35c78f4cc33f78f6dd1
 
     /* Clean up shared memory ring buffer */
     if (g_ring_buffer) {
