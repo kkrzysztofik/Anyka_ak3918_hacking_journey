@@ -9,11 +9,13 @@
  *   Request:  [i32 cmd_id][u32 req_len][req_data bytes]
  *   Response: [i32 status][u32 resp_len][resp_data bytes]
  *
- * Dual Socket Mode (Approach B Phase 3):
+ * Dual Socket Mode:
  *   - Control socket: /tmp/vd-ctrl.sock (formerly /tmp/vendor-daemon.sock)
  *     Handles all IPC commands including lifecycle operations
- *   - Frame socket: /tmp/vd-frame.sock
- *     Dedicated socket for frame streaming with shared memory support
+ *   - Frame main socket: /tmp/vd-frame-main.sock
+ *     Dedicated notification channel for main stream push frames
+ *   - Frame sub socket: /tmp/vd-frame-sub.sock
+ *     Dedicated notification channel for sub stream push frames
  *
  * Shared Memory Ring Buffer (Approach A):
  *   - Zero-copy frame delivery via shared memory
@@ -62,9 +64,10 @@
 
 /* ---- constants ----------------------------------------------------------- */
 
-/* Dual socket paths (Approach B Phase 3) */
+/* IPC socket paths */
 #define CTRL_SOCKET_PATH   "/tmp/vd-ctrl.sock"   /* Formerly /tmp/vendor-daemon.sock */
-#define FRAME_SOCKET_PATH  "/tmp/vd-frame.sock"  /* Dedicated frame delivery */
+#define FRAME_MAIN_SOCKET_PATH "/tmp/vd-frame-main.sock"
+#define FRAME_SUB_SOCKET_PATH  "/tmp/vd-frame-sub.sock"
 #define MAX_REQUEST_SIZE (1 * 1024 * 1024)  /* 1 MB – for frame data */
 #define LOG_FILE_PATH_DEFAULT "/mnt/logs/vendor_daemon.log"
 #define LOG_FILE_PATH_MAX    512
@@ -150,14 +153,18 @@ static int g_control_fd = -1;
  */
 static void *g_ring_buffer = NULL;
 
-/* ---- Dual socket support (Approach B Phase 3) -------------------------- */
+/* ---- Socket support ----------------------------------------------------- */
 /*
- * Control socket: handles all IPC commands (lifecycle + streaming)
- * Frame socket: dedicated for frame delivery with shared memory support
+ * Control socket: handles all IPC commands.
+ * Frame sockets: dedicated per-stream notification channels.
  */
-static int g_ctrl_server_fd = -1;   /* Control socket server */
-static int g_frame_server_fd = -1;  /* Frame socket server */
-static int g_frame_client_fd = -1;  /* At most 1 frame client */
+static int g_ctrl_server_fd = -1;
+static int g_frame_main_server_fd = -1;
+static int g_frame_sub_server_fd = -1;
+static int g_frame_main_client_fd = -1; /* At most 1 main frame client */
+static int g_frame_sub_client_fd = -1;  /* At most 1 sub frame client */
+/* Serialize frame client fd access and socket writes from push threads. */
+static pthread_mutex_t g_frame_client_lock = PTHREAD_MUTEX_INITIALIZER;
 
 /* Saved file descriptors for stdout/stderr restoration on shutdown */
 static int g_saved_stdout = -1;
@@ -235,6 +242,33 @@ static int send_response(int fd, int32_t status, const void *data, uint32_t len)
     if (len > 0 && data != NULL)
         if (write_exact(fd, data, len) != 0)           return -1;
     return 0;
+}
+
+/* Map stream id to its dedicated frame client fd. Caller holds lock. */
+static int frame_client_fd_for_stream_locked(uint32_t stream_id)
+{
+    if (stream_id == VD_STREAM_SUB) {
+        return g_frame_sub_client_fd;
+    }
+    return g_frame_main_client_fd;
+}
+
+/**
+ * send_frame_notification - send one 12-byte frame notification on the
+ * dedicated channel for the given stream.
+ */
+static int send_frame_notification(uint32_t stream_id, const struct vd_frame_notify *notif)
+{
+    int ret = 0;
+    pthread_mutex_lock(&g_frame_client_lock);
+    int client_fd = frame_client_fd_for_stream_locked(stream_id);
+    if (client_fd >= 0) {
+        if (write_exact(client_fd, notif, sizeof(*notif)) != 0) {
+            ret = -1;
+        }
+    }
+    pthread_mutex_unlock(&g_frame_client_lock);
+    return ret;
 }
 
 /* ---- Socket creation helper --------------------------------------------- */
@@ -715,27 +749,21 @@ static void *push_frame_thread(void *arg)
             fill_slot_timing(g_ring_buffer, ring_slot);
 
             /* Push notification to frame client (if connected) */
-            if (g_frame_client_fd >= 0) {
-                struct vd_frame_notify notif;
-                notif.slot_index = (uint32_t)ring_slot;
-                notif.frame_len = frame_len;
-                notif.flags = VD_NOTIFY_LAST_FRAGMENT;
-
-                /* Write notification directly (no request/response framing) */
-                if (write_exact(g_frame_client_fd, &notif, sizeof(notif)) != 0) {
-                    log_warn("[push] notification write failed, client may have disconnected");
-                }
+            struct vd_frame_notify notif;
+            notif.slot_index = (uint32_t)ring_slot;
+            notif.frame_len = frame_len;
+            notif.flags = VD_NOTIFY_LAST_FRAGMENT;
+            if (send_frame_notification(state->stream_id, &notif) != 0) {
+                log_warn("[push] notification write failed, client may have disconnected");
             }
             frames_pushed++;
         } else if (ring_frame_type != VD_FRAME_TYPE_I) {
             /* P/Pi-frame dropped during overflow — send drop notification if client connected */
-            if (g_frame_client_fd >= 0) {
-                struct vd_frame_notify notif;
-                notif.slot_index = 0;
-                notif.frame_len = 0;
-                notif.flags = VD_NOTIFY_FRAME_DROPPED;
-                write_exact(g_frame_client_fd, &notif, sizeof(notif));
-            }
+            struct vd_frame_notify notif;
+            notif.slot_index = 0;
+            notif.frame_len = 0;
+            notif.flags = VD_NOTIFY_FRAME_DROPPED;
+            (void)send_frame_notification(state->stream_id, &notif);
         }
         /* else: I-frame couldn't fit even after eviction — dropped (rare) */
 
@@ -1405,7 +1433,7 @@ int main(int argc, char *argv[])
     }
 
     /* ================================================================
-     * DUAL SOCKET SETUP (Approach B Phase 3)
+     * SOCKET SETUP
      * ================================================================ */
 
     /* Control socket: handles all IPC commands */
@@ -1416,32 +1444,40 @@ int main(int argc, char *argv[])
     }
     log_info("[daemon] control socket listening on %s", CTRL_SOCKET_PATH);
 
-    /* Frame socket: dedicated for frame delivery (optional) */
-    g_frame_server_fd = create_unix_socket(FRAME_SOCKET_PATH);
-    if (g_frame_server_fd < 0) {
-        log_warn("[daemon] frame socket creation failed, using legacy single-socket mode");
-        g_frame_server_fd = -1;
-    } else {
-        log_info("[daemon] frame socket listening on %s", FRAME_SOCKET_PATH);
+    /* Dedicated notification channel for main stream. */
+    g_frame_main_server_fd = create_unix_socket(FRAME_MAIN_SOCKET_PATH);
+    if (g_frame_main_server_fd < 0) {
+        log_fatal("[daemon] main frame socket creation failed");
+        goto shutdown;
     }
+    log_info("[daemon] main frame socket listening on %s", FRAME_MAIN_SOCKET_PATH);
+
+    /* Dedicated notification channel for sub stream. */
+    g_frame_sub_server_fd = create_unix_socket(FRAME_SUB_SOCKET_PATH);
+    if (g_frame_sub_server_fd < 0) {
+        log_fatal("[daemon] sub frame socket creation failed");
+        goto shutdown;
+    }
+    log_info("[daemon] sub frame socket listening on %s", FRAME_SUB_SOCKET_PATH);
 
     /* ================================================================
      * MAIN EVENT LOOP (poll-based multiplexing)
      * ================================================================
      *
-     * fds[0]         = ctrl_server_fd (control socket)
-     * fds[1]         = frame_server_fd (frame socket, if available)
-     * fds[2..nfds-1] = connected client fds
+     * fds[0]         = ctrl_server_fd
+     * fds[1]         = frame_main_server_fd
+     * fds[2]         = frame_sub_server_fd
+     * fds[3..nfds-1] = connected client fds
      *
      * This replaces the old blocking accept()-then-inner-loop model so
      * multiple clients can be serviced without queuing in the kernel
      * backlog.  Each client with pending data is serviced round-robin.
      *
-     * Frame socket accepts at most 1 client (dedicated frame reader).
+     * Each frame socket accepts at most 1 client.
      */
 
-    /* pollfd array: [ctrl_server, frame_server (optional), clients...] */
-    struct pollfd fds[MAX_CLIENTS + 2];  /* +2 for dual sockets */
+    /* pollfd array: [ctrl_server, frame_main_server, frame_sub_server, clients...] */
+    struct pollfd fds[MAX_CLIENTS + 3];
     int nfds = 0;
 
     memset(fds, 0, sizeof(fds));
@@ -1451,12 +1487,15 @@ int main(int argc, char *argv[])
     fds[nfds].events = POLLIN;
     nfds++;
 
-    /* Add frame server socket (if available) */
-    if (g_frame_server_fd >= 0) {
-        fds[nfds].fd = g_frame_server_fd;
-        fds[nfds].events = POLLIN;
-        nfds++;
-    }
+    /* Add frame main server socket */
+    fds[nfds].fd = g_frame_main_server_fd;
+    fds[nfds].events = POLLIN;
+    nfds++;
+
+    /* Add frame sub server socket */
+    fds[nfds].fd = g_frame_sub_server_fd;
+    fds[nfds].events = POLLIN;
+    nfds++;
 
     while (!g_shutdown) {
         int ready = poll(fds, nfds, 1000); /* 1s timeout for shutdown check */
@@ -1473,7 +1512,7 @@ int main(int argc, char *argv[])
         if (fds[0].revents & POLLIN) {
             int client_fd = accept(g_ctrl_server_fd, NULL, NULL);
             if (client_fd >= 0) {
-                if (nfds < MAX_CLIENTS + 2) {
+                if (nfds < MAX_CLIENTS + 3) {
                     fds[nfds].fd = client_fd;
                     fds[nfds].events = POLLIN;
                     fds[nfds].revents = 0;
@@ -1490,81 +1529,132 @@ int main(int argc, char *argv[])
             }
         }
 
-        /* ── Accept new connection on frame socket ───────────────────── */
-        if (g_frame_server_fd >= 0 && fds[1].revents & POLLIN) {
-            if (g_frame_client_fd >= 0) {
-                /* Already have a frame client - reject new connection */
-                int reject_fd = accept(g_frame_server_fd, NULL, NULL);
-                if (reject_fd >= 0) {
-                    log_warn("[daemon] frame client already connected, rejecting new connection");
-                    close(reject_fd);
+        /* ── Accept new connection on main frame socket ──────────────── */
+        if (fds[1].revents & POLLIN) {
+            int client_fd = accept(g_frame_main_server_fd, NULL, NULL);
+            if (client_fd >= 0) {
+                int has_existing = 0;
+                pthread_mutex_lock(&g_frame_client_lock);
+                has_existing = (g_frame_main_client_fd >= 0);
+                if (!has_existing) {
+                    g_frame_main_client_fd = client_fd;
                 }
-            } else {
-                int client_fd = accept(g_frame_server_fd, NULL, NULL);
-                if (client_fd >= 0) {
-                    g_frame_client_fd = client_fd;
-                    /* Add to poll array after control clients */
+                pthread_mutex_unlock(&g_frame_client_lock);
+
+                if (has_existing) {
+                    log_warn("[daemon] main frame client already connected, rejecting fd=%d", client_fd);
+                    close(client_fd);
+                } else if (nfds < MAX_CLIENTS + 3) {
                     fds[nfds].fd = client_fd;
                     fds[nfds].events = POLLIN;
                     fds[nfds].revents = 0;
                     nfds++;
-                    log_info("[daemon] frame client connected fd=%d", client_fd);
-                } else if (errno != EINTR) {
-                    log_error("accept (frame): %s", strerror(errno));
+                    log_info("[daemon] main frame client connected fd=%d", client_fd);
+                } else {
+                    pthread_mutex_lock(&g_frame_client_lock);
+                    if (g_frame_main_client_fd == client_fd) {
+                        g_frame_main_client_fd = -1;
+                    }
+                    pthread_mutex_unlock(&g_frame_client_lock);
+                    log_error("[daemon] max clients (%d) reached, rejecting main frame fd=%d",
+                              MAX_CLIENTS, client_fd);
+                    close(client_fd);
                 }
+            } else if (errno != EINTR) {
+                log_error("accept (frame-main): %s", strerror(errno));
+            }
+        }
+
+        /* ── Accept new connection on sub frame socket ───────────────── */
+        if (fds[2].revents & POLLIN) {
+            int client_fd = accept(g_frame_sub_server_fd, NULL, NULL);
+            if (client_fd >= 0) {
+                int has_existing = 0;
+                pthread_mutex_lock(&g_frame_client_lock);
+                has_existing = (g_frame_sub_client_fd >= 0);
+                if (!has_existing) {
+                    g_frame_sub_client_fd = client_fd;
+                }
+                pthread_mutex_unlock(&g_frame_client_lock);
+
+                if (has_existing) {
+                    log_warn("[daemon] sub frame client already connected, rejecting fd=%d", client_fd);
+                    close(client_fd);
+                } else if (nfds < MAX_CLIENTS + 3) {
+                    fds[nfds].fd = client_fd;
+                    fds[nfds].events = POLLIN;
+                    fds[nfds].revents = 0;
+                    nfds++;
+                    log_info("[daemon] sub frame client connected fd=%d", client_fd);
+                } else {
+                    pthread_mutex_lock(&g_frame_client_lock);
+                    if (g_frame_sub_client_fd == client_fd) {
+                        g_frame_sub_client_fd = -1;
+                    }
+                    pthread_mutex_unlock(&g_frame_client_lock);
+                    log_error("[daemon] max clients (%d) reached, rejecting sub frame fd=%d",
+                              MAX_CLIENTS, client_fd);
+                    close(client_fd);
+                }
+            } else if (errno != EINTR) {
+                log_error("accept (frame-sub): %s", strerror(errno));
             }
         }
 
         /* ── Service clients with pending data (round-robin) ────────── */
         int i;
-        /* First client index depends on how many server sockets we have */
-        int first_client_idx;
-        if (g_frame_server_fd >= 0) {
-            first_client_idx = 2;  /* fds[0]=ctrl_server, fds[1]=frame_server, clients start at 2 */
-        } else {
-            first_client_idx = 1;  /* fds[0]=ctrl_server, clients start at 1 */
-        }
+        int first_client_idx = 3;  /* fds[0..2] are server sockets */
 
         for (i = first_client_idx; i < nfds; i++) {
             if (!(fds[i].revents & (POLLIN | POLLHUP | POLLERR)))
                 continue;
 
-            /* Check if this is the frame client disconnecting */
-            if (fds[i].fd == g_frame_client_fd && (fds[i].revents & (POLLHUP | POLLERR))) {
-                log_info("[daemon] frame client disconnected fd=%d", fds[i].fd);
-                close(fds[i].fd);
-                g_frame_client_fd = -1;
-                /* Compact: move last entry into this slot */
-                fds[i] = fds[nfds - 1];
-                nfds--;
-                i--; /* re-check this slot */
-                continue;
-            }
-
-            int ret = process_request(fds[i].fd);
-            if (ret == -1) {
-                /* Client disconnected or I/O error */
+            {
                 int client_fd = fds[i].fd;
-                
-                /* Check if it's the frame client */
-                if (client_fd == g_frame_client_fd) {
-                    g_frame_client_fd = -1;
-                    log_info("[daemon] frame client fd=%d disconnected", client_fd);
-                } else {
-                    log_info("[daemon] control client fd=%d disconnected", client_fd);
+                int is_main_frame_client = 0;
+                int is_sub_frame_client = 0;
+
+                pthread_mutex_lock(&g_frame_client_lock);
+                is_main_frame_client = (client_fd == g_frame_main_client_fd);
+                is_sub_frame_client = (client_fd == g_frame_sub_client_fd);
+                pthread_mutex_unlock(&g_frame_client_lock);
+
+                if (is_main_frame_client || is_sub_frame_client) {
+                    if (fds[i].revents & (POLLHUP | POLLERR)) {
+                        pthread_mutex_lock(&g_frame_client_lock);
+                        if (client_fd == g_frame_main_client_fd) {
+                            g_frame_main_client_fd = -1;
+                        }
+                        if (client_fd == g_frame_sub_client_fd) {
+                            g_frame_sub_client_fd = -1;
+                        }
+                        pthread_mutex_unlock(&g_frame_client_lock);
+                        log_info("[daemon] %s frame client disconnected fd=%d",
+                                 is_sub_frame_client ? "sub" : "main", client_fd);
+                        close(client_fd);
+                        fds[i] = fds[nfds - 1];
+                        nfds--;
+                        i--;
+                    }
+                    continue;
                 }
-                
-                release_control(client_fd);
-                close(client_fd);
-                
-                /* Compact: move last entry into this slot */
-                fds[i] = fds[nfds - 1];
-                nfds--;
-                i--; /* re-check this slot */
-            } else if (ret == -2) {
-                /* CMD_SHUTDOWN */
-                g_shutdown = 1;
-                break;
+
+                {
+                    int ret = process_request(client_fd);
+                    if (ret == -1) {
+                        /* Control client disconnected or I/O error */
+                        log_info("[daemon] control client fd=%d disconnected", client_fd);
+                        release_control(client_fd);
+                        close(client_fd);
+                        fds[i] = fds[nfds - 1];
+                        nfds--;
+                        i--;
+                    } else if (ret == -2) {
+                        /* CMD_SHUTDOWN */
+                        g_shutdown = 1;
+                        break;
+                    }
+                }
             }
         }
     }
@@ -1572,13 +1662,7 @@ int main(int argc, char *argv[])
     /* Clean up any remaining client connections */
     {
         int i;
-        /* First client index depends on how many server sockets we had */
-        int first_client_idx;
-        if (g_frame_server_fd >= 0) {
-            first_client_idx = 2;
-        } else {
-            first_client_idx = 1;
-        }
+        int first_client_idx = 3;
         for (i = first_client_idx; i < nfds; i++) {
             release_control(fds[i].fd);
             close(fds[i].fd);
@@ -1592,17 +1676,29 @@ shutdown:
 
     log_info("[daemon] shutting down");
 
-    /* Close frame socket */
-    if (g_frame_server_fd >= 0) {
-        close(g_frame_server_fd);
-        unlink(FRAME_SOCKET_PATH);
+    /* Close frame sockets */
+    if (g_frame_main_server_fd >= 0) {
+        close(g_frame_main_server_fd);
+        g_frame_main_server_fd = -1;
+        unlink(FRAME_MAIN_SOCKET_PATH);
+    }
+    if (g_frame_sub_server_fd >= 0) {
+        close(g_frame_sub_server_fd);
+        g_frame_sub_server_fd = -1;
+        unlink(FRAME_SUB_SOCKET_PATH);
     }
 
-    /* Close frame client */
-    if (g_frame_client_fd >= 0) {
-        close(g_frame_client_fd);
-        g_frame_client_fd = -1;
+    /* Close frame clients */
+    pthread_mutex_lock(&g_frame_client_lock);
+    if (g_frame_main_client_fd >= 0) {
+        close(g_frame_main_client_fd);
+        g_frame_main_client_fd = -1;
     }
+    if (g_frame_sub_client_fd >= 0) {
+        close(g_frame_sub_client_fd);
+        g_frame_sub_client_fd = -1;
+    }
+    pthread_mutex_unlock(&g_frame_client_lock);
 
     /* Close control socket */
     if (g_ctrl_server_fd >= 0) {
