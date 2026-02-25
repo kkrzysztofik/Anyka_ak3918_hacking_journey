@@ -2,6 +2,12 @@
 
 This guide provides practical commands to identify which thread is stuck during shutdown or runtime on the Anyka AK3918 embedded Linux system.
 
+## Push-Mode Note (2026-02)
+
+The live frame path is push-only: `vendor-daemon` polls the SDK and pushes frame notifications to `onvif-rust`.
+During runtime debugging, prioritize `vendor-daemon` push worker threads and frame-socket/shm paths.
+References below to Rust-side `ak_venc_get_stream()` waits apply to legacy behavior and test fallback scenarios.
+
 ## Quick Check: Find Stuck Threads
 
 ### Method 1: Check Thread States (Recommended)
