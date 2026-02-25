@@ -58,10 +58,9 @@ pub enum StreamId {
     Audio,
 }
 
-/// Metadata parsed from the 28-byte IPC frame header.
+/// Metadata associated with an encoded frame delivered through IPC.
 ///
-/// This is extracted during `recv_frame_response` and used to populate
-/// `OwnedFrame` fields and manage the remote token for frame release.
+/// In push mode this metadata comes from the shared-memory slot header.
 #[derive(Debug, Clone)]
 pub struct FrameMetadata {
     /// Timestamp in milliseconds (from daemon).
@@ -72,6 +71,8 @@ pub struct FrameMetadata {
     pub frame_type: FrameType,
     /// Opaque token the daemon uses to identify this frame on release.
     pub remote_token: u64,
+    /// Which stream this frame belongs to.
+    pub stream_id: StreamId,
 }
 
 /// Frame with owned data buffer — no copy needed downstream.
@@ -85,7 +86,7 @@ pub struct FrameMetadata {
 /// # Usage
 ///
 /// ```text
-/// vendor_ipc::fetch_frame_owned()
+/// vendor_ipc::recv_pushed_frame()
 ///   → OwnedFrame { data: BytesMut, ... }
 ///     → OwnedFrameCallback::on_owned_frame()
 ///       → StreamingBridge::route_owned_frame()  // moves data, no copy
@@ -475,10 +476,12 @@ mod tests {
             seq_no: 42,
             frame_type: FrameType::VideoIFrame,
             remote_token: 0xDEAD_BEEF,
+            stream_id: StreamId::VideoMain,
         };
         assert_eq!(meta.timestamp_ms, 12345);
         assert_eq!(meta.seq_no, 42);
         assert_eq!(meta.frame_type, FrameType::VideoIFrame);
         assert_eq!(meta.remote_token, 0xDEAD_BEEF);
+        assert_eq!(meta.stream_id, StreamId::VideoMain);
     }
 }

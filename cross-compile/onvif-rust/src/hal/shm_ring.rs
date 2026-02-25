@@ -579,6 +579,7 @@ impl ShmRingReader {
             seq_no: header.seq_no,
             frame_type: shm_frame_type_to_onvif(header.frame_type),
             remote_token: 0, // Not used in shm path
+            stream_id: shm_stream_id_to_onvif(header.stream_id),
         };
 
         // Release the slot

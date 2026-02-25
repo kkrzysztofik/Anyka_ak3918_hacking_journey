@@ -9,31 +9,17 @@
 //! Request format: cmd_id (i32) + req_len (u32) + req_data (bytes)
 //! Response format: status (i32) + resp_len (u32) + resp_data (bytes)
 //!
-//! # Frame Response Format (CMD_VENC_GET_STREAM)
-//!
-//! Response data layout:
-//! ```text
-//! [u32 frame_len][u64 timestamp][u32 seq_no][i32 frame_type][u64 remote_token][frame_data_bytes]
-//!  4 bytes        8 bytes        4 bytes     4 bytes          8 bytes
-//! ```
-//! Total header = 28 bytes, followed by `frame_len` bytes of actual frame data.
-//!
-//! # Usage
-//!
-//! This module can be used as a drop-in replacement for the direct FFI calls
-//! by using the `VendorIpc` implementation of the FFI traits.
+//! Frame delivery is push-only: vendor-daemon writes encoded frames into a
+//! shared-memory ring and sends 12-byte notifications over `/tmp/vd-frame.sock`.
 
 #![allow(dead_code)]
-
-use bytes::BytesMut;
 
 use crate::hal::shm_ring::{FrameNotification, ShmRingReader};
 use crate::platform::PlatformError;
 use crate::platform::PlatformResult;
-use crate::platform::frame::{FrameMetadata, FrameType, OwnedFrame, StreamId};
+use crate::platform::frame::{OwnedFrame, StreamId};
 use crate::streaming::bridge::BytesMutPool;
 
-use std::collections::HashMap;
 use std::ffi::{c_char, c_void};
 use std::io::{ErrorKind, Read, Write};
 use std::os::unix::net::UnixStream;
@@ -211,19 +197,6 @@ pub struct IpcVideoStream {
 }
 
 // ============================================================================
-// PendingFrame — locally-owned frame buffer awaiting release
-// ============================================================================
-
-/// Holds a frame buffer that was received from the daemon and must be
-/// explicitly released via `CMD_VENC_RELEASE_STREAM` when the caller is done.
-struct PendingFrame {
-    /// Locally-owned copy of the encoded frame data.
-    data: Vec<u8>,
-    /// Opaque token the daemon uses to identify this frame on its side.
-    remote_token: u64,
-}
-
-// ============================================================================
 // IPC Client Implementation
 // ============================================================================
 
@@ -255,10 +228,6 @@ const CTRL_SOCKET_PATH: &str = "/tmp/vd-ctrl.sock";
 /// Maximum allowed IPC response body (2 MB — large enough for raw I-frames).
 const MAX_RESPONSE_SIZE: usize = 2 * 1024 * 1024;
 
-/// Byte length of the fixed header in a `CMD_VENC_GET_STREAM` response:
-/// frame_len(4) + timestamp(8) + seq_no(4) + frame_type(4) + remote_token(8) = 28
-const VENC_STREAM_HEADER_LEN: usize = 28;
-
 const CMD_VI_MATCH_SENSOR: i32 = 1;
 const CMD_VI_OPEN: i32 = 2;
 const CMD_VI_CLOSE: i32 = 3;
@@ -274,8 +243,6 @@ const CMD_VENC_CLOSE: i32 = 12;
 const CMD_VENC_SET_RC: i32 = 13;
 const CMD_VENC_SET_IFRAME: i32 = 14;
 const CMD_VENC_REQUEST_STREAM: i32 = 15;
-const CMD_VENC_GET_STREAM: i32 = 16;
-const CMD_VENC_RELEASE_STREAM: i32 = 17;
 const CMD_VENC_CANCEL_STREAM: i32 = 18;
 const CMD_VENC_START_PUSH: i32 = 19;
 const CMD_VENC_STOP_PUSH: i32 = 20;
@@ -298,7 +265,7 @@ const PUSH_NOTIFICATION_TIMEOUT: Duration = Duration::from_millis(200);
 
 /// IPC client for vendor daemon communication
 pub struct VendorIpc {
-    /// Legacy/control socket for commands (used when dual socket not available)
+    /// Control socket for command RPCs.
     stream: Arc<Mutex<UnixStream>>,
     /// Dedicated frame socket (Approach B P3) - wrapped in Mutex for interior mutability.
     /// Only the frame reader thread accesses this, so there's no contention.
@@ -308,11 +275,6 @@ pub struct VendorIpc {
     /// Only the frame reader thread accesses this, so there's no contention.
     /// None if daemon doesn't use shared memory.
     shm_reader: Mutex<Option<ShmRingReader>>,
-    /// Frames that have been handed to the caller and are awaiting release (legacy path).
-    pending_frames: Mutex<HashMap<u64, PendingFrame>>,
-    /// Remote tokens for frames fetched via the owned path (new zero-copy path).
-    /// Key: stream handle as u64. Value: remote_token for frame release.
-    pending_tokens: Mutex<HashMap<u64, u64>>,
 }
 
 impl VendorIpc {
@@ -333,8 +295,6 @@ impl VendorIpc {
             CMD_VENC_SET_RC => "VENC_SET_RC",
             CMD_VENC_SET_IFRAME => "VENC_SET_IFRAME",
             CMD_VENC_REQUEST_STREAM => "VENC_REQUEST_STREAM",
-            CMD_VENC_GET_STREAM => "VENC_GET_STREAM",
-            CMD_VENC_RELEASE_STREAM => "VENC_RELEASE_STREAM",
             CMD_VENC_CANCEL_STREAM => "VENC_CANCEL_STREAM",
             CMD_VENC_START_PUSH => "VENC_START_PUSH",
             CMD_VENC_STOP_PUSH => "VENC_STOP_PUSH",
@@ -373,43 +333,36 @@ impl VendorIpc {
             debug!(socket = CTRL_SOCKET_PATH, "Connected to vendor daemon");
         }
 
-        // Try connecting to dedicated frame socket (Approach B Phase 3)
-        let frame_stream = match UnixStream::connect(FRAME_SOCKET_PATH) {
-            Ok(fs) => {
-                tracing::info!("Connected to dedicated frame socket");
-                Some(fs)
-            }
-            Err(e) => {
-                tracing::info!(
-                    "Frame socket not available, using legacy single-socket mode: {}",
-                    e
-                );
-                None
-            }
-        };
+        // Push-only mode requires dedicated frame socket.
+        let frame_stream = UnixStream::connect(FRAME_SOCKET_PATH).map_err(|e| {
+            PlatformError::HardwareUnavailable(format!(
+                "Push-only mode requires frame socket {}: {}",
+                FRAME_SOCKET_PATH, e
+            ))
+        })?;
+        tracing::info!("Connected to dedicated frame socket");
 
-        // Try opening shared memory ring buffer (Approach A)
+        // Push-only mode requires shared memory ring buffer.
         let shm_reader = match ShmRingReader::open() {
-            Ok(Some(reader)) => {
-                tracing::info!("Shared memory ring buffer opened");
-                Some(reader)
-            }
+            Ok(Some(reader)) => reader,
             Ok(None) => {
-                tracing::info!("Shared memory not available");
-                None
+                return Err(PlatformError::HardwareUnavailable(
+                    "Push-only mode requires shared memory ring buffer".into(),
+                ));
             }
             Err(e) => {
-                tracing::warn!("Shared memory open failed: {}", e);
-                None
+                return Err(PlatformError::HardwareUnavailable(format!(
+                    "Push-only mode requires shared memory ring buffer: {}",
+                    e
+                )));
             }
         };
+        tracing::info!("Shared memory ring buffer opened");
 
         Ok(Self {
             stream: Arc::new(Mutex::new(stream)),
-            frame_stream: Mutex::new(frame_stream),
-            shm_reader: Mutex::new(shm_reader),
-            pending_frames: Mutex::new(HashMap::new()),
-            pending_tokens: Mutex::new(HashMap::new()),
+            frame_stream: Mutex::new(Some(frame_stream)),
+            shm_reader: Mutex::new(Some(shm_reader)),
         })
     }
 
@@ -442,8 +395,6 @@ impl VendorIpc {
             stream: Arc::new(Mutex::new(stream)),
             frame_stream: Mutex::new(frame_stream),
             shm_reader: Mutex::new(shm_reader),
-            pending_frames: Mutex::new(HashMap::new()),
-            pending_tokens: Mutex::new(HashMap::new()),
         })
     }
 
@@ -627,536 +578,12 @@ impl VendorIpc {
         }
     }
 
-    /// Convert an i32 frame_type value from the IPC wire format to the
-    /// platform's `FrameType` enum (used by the owned frame path).
-    fn ipc_to_platform_frame_type(val: i32) -> FrameType {
-        match val {
-            1 => FrameType::VideoIFrame,
-            2 => FrameType::VideoBFrame,
-            3 => FrameType::VideoPiFrame,
-            _ => FrameType::VideoPFrame, // 0 = P-frame; unknown defaults to P
+    fn stream_id_to_wire(stream_id: StreamId) -> u32 {
+        match stream_id {
+            StreamId::VideoMain => 0,
+            StreamId::VideoSub => 1,
+            StreamId::Audio => 2,
         }
-    }
-
-    /// Receive a frame response: reads the 8-byte status/length header, then the
-    /// 28-byte frame header, then reads frame data directly into a `BytesMut` buffer.
-    ///
-    /// This is the zero-copy receive path: frame data goes straight from the socket
-    /// into `BytesMut` with no intermediate `Vec<u8>` allocation.
-    ///
-    /// # Arguments
-    ///
-    /// * `stream` — The Unix socket stream to read from (already locked by caller).
-    /// * `pool` — Optional buffer pool for reusing `BytesMut` allocations.
-    fn recv_frame_response(
-        stream: &mut UnixStream,
-        pool: Option<&BytesMutPool>,
-    ) -> PlatformResult<(FrameMetadata, BytesMut)> {
-        // 1. Read status (i32 LE) + resp_len (u32 LE)
-        let mut hdr = [0u8; 8];
-        stream
-            .read_exact(&mut hdr)
-            .map_err(|e| PlatformError::HardwareFailure(format!("IPC read error: {}", e)))?;
-
-        let status = i32::from_le_bytes(
-            hdr[0..4]
-                .try_into()
-                .map_err(|_| PlatformError::HardwareFailure("Invalid status bytes".to_string()))?,
-        );
-        let resp_len = u32::from_le_bytes(
-            hdr[4..8]
-                .try_into()
-                .map_err(|_| PlatformError::HardwareFailure("Invalid length bytes".to_string()))?,
-        ) as usize;
-
-        if status != AK_SUCCESS_I32 {
-            // Drain any remaining response data to keep stream in sync
-            if resp_len > 0 {
-                let drain_len = resp_len.min(MAX_RESPONSE_SIZE);
-                let mut discard = vec![0u8; drain_len];
-                let _ = stream.read_exact(&mut discard);
-            }
-            return Err(PlatformError::HardwareFailure(format!(
-                "IPC frame request failed: status {}",
-                status
-            )));
-        }
-
-        if resp_len < VENC_STREAM_HEADER_LEN {
-            return Err(PlatformError::HardwareFailure(format!(
-                "IPC frame response too short: {} bytes (need >= {})",
-                resp_len, VENC_STREAM_HEADER_LEN
-            )));
-        }
-
-        // 2. Read 28-byte frame header
-        let mut frame_hdr = [0u8; VENC_STREAM_HEADER_LEN];
-        stream.read_exact(&mut frame_hdr).map_err(|e| {
-            PlatformError::HardwareFailure(format!("IPC frame header read error: {}", e))
-        })?;
-
-        let frame_len = u32::from_le_bytes(
-            frame_hdr[0..4]
-                .try_into()
-                .map_err(|_| PlatformError::HardwareFailure("Invalid frame_len".to_string()))?,
-        ) as usize;
-        let timestamp_ms = u64::from_le_bytes(
-            frame_hdr[4..12]
-                .try_into()
-                .map_err(|_| PlatformError::HardwareFailure("Invalid timestamp".to_string()))?,
-        );
-        let seq_no = u32::from_le_bytes(
-            frame_hdr[12..16]
-                .try_into()
-                .map_err(|_| PlatformError::HardwareFailure("Invalid seq_no".to_string()))?,
-        );
-        let frame_type_val = i32::from_le_bytes(
-            frame_hdr[16..20]
-                .try_into()
-                .map_err(|_| PlatformError::HardwareFailure("Invalid frame_type".to_string()))?,
-        );
-        let remote_token = u64::from_le_bytes(
-            frame_hdr[20..28]
-                .try_into()
-                .map_err(|_| PlatformError::HardwareFailure("Invalid remote_token".to_string()))?,
-        );
-
-        // Validate frame_len against response
-        let expected_total = VENC_STREAM_HEADER_LEN + frame_len;
-        if resp_len < expected_total {
-            return Err(PlatformError::HardwareFailure(format!(
-                "IPC frame response truncated: got {} bytes, need {}",
-                resp_len, expected_total
-            )));
-        }
-
-        // Bounded decode — reject suspiciously large frame data before allocating.
-        if frame_len > MAX_RESPONSE_SIZE {
-            return Err(PlatformError::HardwareFailure(format!(
-                "IPC frame data too large: {} bytes (max {})",
-                frame_len, MAX_RESPONSE_SIZE
-            )));
-        }
-
-        // 3. Read frame data DIRECTLY into BytesMut — no intermediate Vec
-        let mut frame_data = match pool {
-            Some(p) => {
-                let mut buf = p.get(frame_len);
-                buf.resize(frame_len, 0);
-                buf
-            }
-            None => BytesMut::zeroed(frame_len),
-        };
-        stream.read_exact(&mut frame_data).map_err(|e| {
-            PlatformError::HardwareFailure(format!("IPC frame data read error: {}", e))
-        })?;
-
-        // Drain any extra bytes beyond expected_total (future protocol extensibility)
-        let extra = resp_len.saturating_sub(expected_total);
-        if extra > 0 {
-            let mut discard = vec![0u8; extra.min(4096)];
-            let _ = stream.read_exact(&mut discard);
-        }
-
-        let metadata = FrameMetadata {
-            timestamp_ms,
-            seq_no,
-            frame_type: Self::ipc_to_platform_frame_type(frame_type_val),
-            remote_token,
-        };
-
-        Ok((metadata, frame_data))
-    }
-
-    /// Receive frame data from an already-connected stream.
-    ///
-    /// This is used by both the legacy path and the dual-socket path.
-    /// The caller is responsible for having already read the 8-byte status/length header.
-    fn recv_frame_data_from_stream(
-        stream: &mut impl std::io::Read,
-        resp_len: usize,
-        pool: Option<&BytesMutPool>,
-    ) -> PlatformResult<(FrameMetadata, BytesMut)> {
-        // Read 28-byte frame header
-        let mut frame_hdr = [0u8; VENC_STREAM_HEADER_LEN];
-        stream.read_exact(&mut frame_hdr).map_err(|e| {
-            PlatformError::HardwareFailure(format!("IPC frame header read error: {}", e))
-        })?;
-
-        let frame_len = u32::from_le_bytes(
-            frame_hdr[0..4]
-                .try_into()
-                .map_err(|_| PlatformError::HardwareFailure("Invalid frame_len".to_string()))?,
-        ) as usize;
-        let timestamp_ms = u64::from_le_bytes(
-            frame_hdr[4..12]
-                .try_into()
-                .map_err(|_| PlatformError::HardwareFailure("Invalid timestamp".to_string()))?,
-        );
-        let seq_no = u32::from_le_bytes(
-            frame_hdr[12..16]
-                .try_into()
-                .map_err(|_| PlatformError::HardwareFailure("Invalid seq_no".to_string()))?,
-        );
-        let frame_type_val = i32::from_le_bytes(
-            frame_hdr[16..20]
-                .try_into()
-                .map_err(|_| PlatformError::HardwareFailure("Invalid frame_type".to_string()))?,
-        );
-        let remote_token = u64::from_le_bytes(
-            frame_hdr[20..28]
-                .try_into()
-                .map_err(|_| PlatformError::HardwareFailure("Invalid remote_token".to_string()))?,
-        );
-
-        // Validate frame_len against response
-        let expected_total = VENC_STREAM_HEADER_LEN + frame_len;
-        if resp_len < expected_total {
-            return Err(PlatformError::HardwareFailure(format!(
-                "IPC frame response truncated: got {} bytes, need {}",
-                resp_len, expected_total
-            )));
-        }
-
-        // Bounded decode — reject suspiciously large frame data before allocating.
-        if frame_len > MAX_RESPONSE_SIZE {
-            return Err(PlatformError::HardwareFailure(format!(
-                "IPC frame data too large: {} bytes (max {})",
-                frame_len, MAX_RESPONSE_SIZE
-            )));
-        }
-
-        // Read frame data
-        let mut frame_data = match pool {
-            Some(p) => {
-                let mut buf = p.get(frame_len);
-                buf.resize(frame_len, 0);
-                buf
-            }
-            None => BytesMut::zeroed(frame_len),
-        };
-        stream.read_exact(&mut frame_data).map_err(|e| {
-            PlatformError::HardwareFailure(format!("IPC frame data read error: {}", e))
-        })?;
-
-        // Drain any extra bytes beyond expected_total (future protocol extensibility)
-        let extra = resp_len.saturating_sub(expected_total);
-        if extra > 0 {
-            let mut discard = vec![0u8; extra.min(4096)];
-            let _ = stream.read_exact(&mut discard);
-        }
-
-        let metadata = FrameMetadata {
-            timestamp_ms,
-            seq_no,
-            frame_type: Self::ipc_to_platform_frame_type(frame_type_val),
-            remote_token,
-        };
-
-        Ok((metadata, frame_data))
-    }
-
-    /// Write request header to a stream.
-    fn write_request_header(
-        stream: &mut impl std::io::Write,
-        cmd_id: i32,
-        req_len: u32,
-    ) -> PlatformResult<()> {
-        stream
-            .write_all(&cmd_id.to_le_bytes())
-            .map_err(|e| PlatformError::HardwareFailure(format!("IPC write error: {}", e)))?;
-        stream
-            .write_all(&req_len.to_le_bytes())
-            .map_err(|e| PlatformError::HardwareFailure(format!("IPC write error: {}", e)))?;
-        Ok(())
-    }
-
-    /// Fetch next encoded frame as an `OwnedFrame` with `BytesMut` data.
-    ///
-    /// This is the zero-extra-copy path: frame data is read from the socket
-    /// directly into `BytesMut`, which can be passed through to the streaming
-    /// pipeline without any additional copy.
-    ///
-    /// This method supports three modes:
-    /// 1. Dual socket + shared memory: Use dedicated frame socket + shm for data
-    /// 2. Dual socket (socket fallback): Use dedicated frame socket, data over socket
-    /// 3. Legacy single socket: Use legacy stream with Mutex protection
-    ///
-    /// # Arguments
-    ///
-    /// * `stream_handle` — The stream handle from `venc_request_stream`.
-    /// * `stream_id` — Which stream this frame belongs to (VideoMain/VideoSub).
-    /// * `pool` — Optional buffer pool for reusing BytesMut allocations.
-    ///
-    /// # Returns
-    ///
-    /// * `Ok(OwnedFrame)` — Frame data available.
-    /// * `Err(...)` — IPC or protocol error.
-    pub fn fetch_frame_owned(
-        &self,
-        stream_handle: *mut std::ffi::c_void,
-        stream_id: StreamId,
-        pool: Option<&BytesMutPool>,
-    ) -> PlatformResult<OwnedFrame> {
-        let handle_val = stream_handle as u64;
-
-        // Choose the socket to use for frame requests
-        // Lock both frame_stream and shm_reader (they're separate locks, no contention)
-        let mut frame_guard = self.frame_stream.lock().map_err(|e| {
-            PlatformError::HardwareFailure(format!("frame_stream mutex poisoned: {}", e))
-        })?;
-
-        if let Some(ref mut frame_stream) = *frame_guard {
-            // Dual socket mode: use dedicated frame socket
-            Self::write_request_header(frame_stream, CMD_VENC_GET_STREAM, 8)?;
-            frame_stream
-                .write_all(&handle_val.to_le_bytes())
-                .map_err(|e| PlatformError::HardwareFailure(format!("IPC write error: {}", e)))?;
-            frame_stream
-                .flush()
-                .map_err(|e| PlatformError::HardwareFailure(format!("IPC flush error: {}", e)))?;
-
-            // Read response header (status + resp_len)
-            let mut hdr = [0u8; 8];
-            frame_stream
-                .read_exact(&mut hdr)
-                .map_err(|e| PlatformError::HardwareFailure(format!("IPC read error: {}", e)))?;
-            let status =
-                i32::from_le_bytes(hdr[0..4].try_into().map_err(|_| {
-                    PlatformError::HardwareFailure("Invalid status bytes".to_string())
-                })?);
-            let resp_len =
-                u32::from_le_bytes(hdr[4..8].try_into().map_err(|_| {
-                    PlatformError::HardwareFailure("Invalid length bytes".to_string())
-                })?) as usize;
-
-            if status != AK_SUCCESS_I32 {
-                // Drain any remaining response data to keep stream in sync
-                if resp_len > 0 {
-                    let drain_len = resp_len.min(MAX_RESPONSE_SIZE);
-                    let mut discard = vec![0u8; drain_len];
-                    let _ = frame_stream.read_exact(&mut discard);
-                }
-                return Err(PlatformError::HardwareFailure(format!(
-                    "IPC frame request failed: status {}",
-                    status
-                )));
-            }
-
-            // Check for shared memory notification (12 bytes)
-            // resp_len == 12 means daemon sent a notification (not a full frame)
-            if resp_len == 12 {
-                // Check if we have shm_reader - need to lock it too
-                let mut shm_guard = self.shm_reader.lock().map_err(|e| {
-                    PlatformError::HardwareFailure(format!("shm_reader mutex poisoned: {}", e))
-                })?;
-
-                if shm_guard.is_some() {
-                    // SHARED MEMORY PATH: read 12-byte notification
-                    let mut notif_bytes = [0u8; 12];
-                    frame_stream.read_exact(&mut notif_bytes).map_err(|e| {
-                        PlatformError::HardwareFailure(format!("IPC read error: {}", e))
-                    })?;
-                    let notif = FrameNotification::from_bytes(&notif_bytes);
-
-                    if notif.is_frame_dropped() {
-                        // P-frame intentionally dropped during ring overflow
-                        return Err(PlatformError::HardwareFailure(
-                            "frame dropped by daemon (P-frame during ring overflow)".into(),
-                        ));
-                    }
-
-                    if !notif.is_socket_fallback() {
-                        // Normal shm path: read from shared memory
-                        let shm = shm_guard.as_mut().ok_or_else(|| {
-                            PlatformError::HardwareFailure(
-                                "shm reader disappeared unexpectedly".into(),
-                            )
-                        })?;
-                        let (metadata, frame_data) =
-                            shm.read_slot_into_bytesmut(notif.slot_index, pool)?;
-
-                        // No pending_tokens needed — SDK frame already released by daemon
-                        if is_ipc_debug_enabled() {
-                            debug!(
-                                frame_len = frame_data.len(),
-                                timestamp_ms = metadata.timestamp_ms,
-                                seq_no = metadata.seq_no,
-                                frame_type = ?metadata.frame_type,
-                                slot_index = notif.slot_index,
-                                "fetch_frame_owned: frame received via shared memory"
-                            );
-                        }
-
-                        return Ok(OwnedFrame {
-                            data: frame_data,
-                            timestamp: metadata.timestamp_ms.wrapping_mul(1000),
-                            frame_type: metadata.frame_type,
-                            stream_id,
-                        });
-                    }
-                    // Socket-fallback notification means daemon could not place this
-                    // frame in shared memory. Current protocol sends only this 12-byte
-                    // notification for fallback cases on the frame socket.
-                    //
-                    // Return an explicit error after consuming the notification payload
-                    // so stream framing remains synchronized.
-                    drop(shm_guard);
-                    return Err(PlatformError::ResourceBusy(
-                        "daemon reported socket fallback for frame request".into(),
-                    ));
-                } else {
-                    // Received shm notification but shm_reader not available - this is an error
-                    // Read and discard the 12 bytes to keep socket in sync
-                    let mut discard = [0u8; 12];
-                    frame_stream.read_exact(&mut discard).map_err(|e| {
-                        PlatformError::HardwareFailure(format!("IPC read error: {}", e))
-                    })?;
-                    return Err(PlatformError::HardwareFailure(
-                        "received shm notification but shm reader not available".into(),
-                    ));
-                }
-            }
-
-            // SOCKET PATH: Read frame from socket (resp_len > 12 means full frame over socket)
-            let (metadata, frame_data) =
-                Self::recv_frame_data_from_stream(frame_stream, resp_len, pool)?;
-
-            // Store token for release (keyed by stream_handle)
-            self.pending_tokens
-                .lock()
-                .map_err(|e| {
-                    PlatformError::HardwareFailure(format!("pending_tokens mutex poisoned: {}", e))
-                })?
-                .insert(handle_val, metadata.remote_token);
-
-            if is_ipc_debug_enabled() {
-                debug!(
-                    frame_len = frame_data.len(),
-                    timestamp_ms = metadata.timestamp_ms,
-                    seq_no = metadata.seq_no,
-                    frame_type = ?metadata.frame_type,
-                    remote_token = metadata.remote_token,
-                    "fetch_frame_owned: frame received via dual socket"
-                );
-            }
-
-            return Ok(OwnedFrame {
-                data: frame_data,
-                timestamp: metadata.timestamp_ms.wrapping_mul(1000),
-                frame_type: metadata.frame_type,
-                stream_id,
-            });
-        }
-
-        // Legacy single-socket mode: use the Mutex-protected stream
-        let req_data = handle_val.to_le_bytes();
-
-        let mut stream = self
-            .stream
-            .lock()
-            .map_err(|e| PlatformError::HardwareFailure(format!("IPC mutex poisoned: {}", e)))?;
-
-        // Send request: cmd_id + req_len + req_data
-        stream
-            .write_all(&CMD_VENC_GET_STREAM.to_le_bytes())
-            .map_err(|e| PlatformError::HardwareFailure(format!("IPC write error: {}", e)))?;
-        stream
-            .write_all(&(8u32).to_le_bytes())
-            .map_err(|e| PlatformError::HardwareFailure(format!("IPC write error: {}", e)))?;
-        stream
-            .write_all(&req_data)
-            .map_err(|e| PlatformError::HardwareFailure(format!("IPC write error: {}", e)))?;
-        stream
-            .flush()
-            .map_err(|e| PlatformError::HardwareFailure(format!("IPC flush error: {}", e)))?;
-
-        // Receive frame directly into BytesMut
-        let (metadata, frame_data) = Self::recv_frame_response(&mut stream, pool)?;
-
-        // Drop stream lock before acquiring pending_tokens lock
-        drop(stream);
-
-        // Store remote_token for release (keyed by stream_handle)
-        self.pending_tokens
-            .lock()
-            .map_err(|e| {
-                PlatformError::HardwareFailure(format!("pending_tokens mutex poisoned: {}", e))
-            })?
-            .insert(handle_val, metadata.remote_token);
-
-        if is_ipc_debug_enabled() {
-            debug!(
-                frame_len = frame_data.len(),
-                timestamp_ms = metadata.timestamp_ms,
-                seq_no = metadata.seq_no,
-                frame_type = ?metadata.frame_type,
-                remote_token = metadata.remote_token,
-                "fetch_frame_owned: frame received (legacy path)"
-            );
-        }
-
-        Ok(OwnedFrame {
-            data: frame_data,
-            // Convert ms to μs (same convention as the legacy path)
-            timestamp: metadata.timestamp_ms.wrapping_mul(1000),
-            frame_type: metadata.frame_type,
-            stream_id,
-        })
-    }
-
-    /// Release a frame previously acquired via `fetch_frame_owned`.
-    ///
-    /// Sends the remote_token back to the daemon so it can reclaim the frame buffer.
-    /// This method only manages the `pending_tokens` map (not `pending_frames`).
-    ///
-    /// When using shared memory, the daemon already releases the SDK frame, so this
-    /// is a no-op (no pending token to send).
-    ///
-    /// # Arguments
-    ///
-    /// * `stream_handle` — The stream handle used in `fetch_frame_owned`.
-    pub fn release_frame_owned(&self, stream_handle: *mut std::ffi::c_void) -> PlatformResult<()> {
-        let handle_val = stream_handle as u64;
-
-        // Check if we have a pending token (socket path only)
-        // If using shared memory, there's no token stored
-        let remote_token = self
-            .pending_tokens
-            .lock()
-            .map_err(|e| {
-                PlatformError::HardwareFailure(format!("pending_tokens mutex poisoned: {}", e))
-            })?
-            .remove(&handle_val)
-            .unwrap_or(0);
-
-        // If no token, we're in shared memory path - daemon already released the frame
-        if remote_token == 0 {
-            // Check if we have shm_reader to confirm we're in shm mode
-            // Need to lock to access shm_reader
-            let shm_guard = self.shm_reader.lock().map_err(|e| {
-                PlatformError::HardwareFailure(format!("shm_reader mutex poisoned: {}", e))
-            })?;
-            if shm_guard.is_some() {
-                tracing::debug!("release_frame_owned: shared memory path, no release needed");
-                return Ok(());
-            }
-            // No token and no shm - might be legacy path with token=0, continue with release
-        }
-
-        // Socket path: send release to daemon
-        let mut req_data = [0u8; 16];
-        req_data[0..8].copy_from_slice(&handle_val.to_le_bytes());
-        req_data[8..16].copy_from_slice(&remote_token.to_le_bytes());
-
-        let (status, _) = self.send_request(CMD_VENC_RELEASE_STREAM, &req_data)?;
-        if status != AK_SUCCESS_I32 {
-            return Err(PlatformError::HardwareFailure(format!(
-                "Frame release failed: status {}",
-                status
-            )));
-        }
-        Ok(())
     }
 
     // ============================================================================
@@ -1169,9 +596,16 @@ impl VendorIpc {
     /// writes frames to the ring buffer, and pushes unsolicited 12-byte
     /// notifications over the frame socket. Returns `Ok(())` if the daemon
     /// accepted the command, or an error if the daemon doesn't support push mode.
-    pub fn start_push(&self, stream_handle: *mut c_void) -> PlatformResult<()> {
+    pub fn start_push(
+        &self,
+        stream_handle: *mut c_void,
+        stream_id: StreamId,
+    ) -> PlatformResult<()> {
         let handle_val = stream_handle as u64;
-        let (status, _) = self.send_request(CMD_VENC_START_PUSH, &handle_val.to_le_bytes())?;
+        let mut req = [0u8; 12];
+        req[0..8].copy_from_slice(&handle_val.to_le_bytes());
+        req[8..12].copy_from_slice(&Self::stream_id_to_wire(stream_id).to_le_bytes());
+        let (status, _) = self.send_request(CMD_VENC_START_PUSH, &req)?;
         if status != AK_SUCCESS_I32 {
             return Err(PlatformError::HardwareFailure("start_push failed".into()));
         }
@@ -1179,8 +613,10 @@ impl VendorIpc {
     }
 
     /// Stop push-based frame delivery.
-    pub fn stop_push(&self) -> PlatformResult<()> {
-        let (status, _) = self.send_request(CMD_VENC_STOP_PUSH, &[])?;
+    pub fn stop_push(&self, stream_id: Option<StreamId>) -> PlatformResult<()> {
+        let req = stream_id.map(|id| Self::stream_id_to_wire(id).to_le_bytes().to_vec());
+        let req_slice = req.as_deref().unwrap_or(&[]);
+        let (status, _) = self.send_request(CMD_VENC_STOP_PUSH, req_slice)?;
         if status != AK_SUCCESS_I32 {
             return Err(PlatformError::HardwareFailure("stop_push failed".into()));
         }
@@ -1207,11 +643,7 @@ impl VendorIpc {
     /// This method blocks until a notification arrives (no polling needed).
     /// The frame data is read from shared memory using the slot index in
     /// the notification.
-    pub fn recv_pushed_frame(
-        &self,
-        stream_id: StreamId,
-        pool: Option<&BytesMutPool>,
-    ) -> PlatformResult<OwnedFrame> {
+    pub fn recv_pushed_frame(&self, pool: Option<&BytesMutPool>) -> PlatformResult<OwnedFrame> {
         let mut frame_guard = self.frame_stream.lock().map_err(|e| {
             PlatformError::HardwareFailure(format!("frame_stream mutex poisoned: {}", e))
         })?;
@@ -1256,7 +688,7 @@ impl VendorIpc {
             data: frame_data,
             timestamp: metadata.timestamp_ms.wrapping_mul(1000),
             frame_type: metadata.frame_type,
-            stream_id,
+            stream_id: metadata.stream_id,
         })
     }
 
@@ -1663,183 +1095,18 @@ impl VideoHalTrait for VendorIpc {
         }
     }
 
-    /// Fetch the next encoded video frame from the daemon.
-    ///
-    /// # Wire format
-    ///
-    /// The daemon responds with a 28-byte header followed by the raw frame bytes:
-    /// ```text
-    /// [u32 frame_len][u64 timestamp][u32 seq_no][i32 frame_type][u64 remote_token][frame_data…]
-    /// ```
-    ///
-    /// The Rust side copies the frame data into a locally-owned `Vec<u8>`,
-    /// stores it in `pending_frames` keyed by the address of `stream`,
-    /// and writes a pointer to that buffer back into `stream.data`.
-    ///
-    /// # Safety
-    ///
-    /// The caller guarantees that `stream` is a valid, writable, non-null pointer
-    /// to a `video_stream` that remains live until `venc_release_stream` is called.
     fn venc_get_stream(&self, stream_handle: *mut c_void, stream: *mut video_stream) -> i32 {
-        let handle_val = stream_handle as u64;
-        let req_data = handle_val.to_le_bytes().to_vec();
-
-        let (status, data) = match self.send_request(CMD_VENC_GET_STREAM, &req_data) {
-            Ok(pair) => pair,
-            Err(e) => {
-                error!(error = %e, "venc_get_stream IPC failed");
-                return AK_FAILED_I32;
-            }
-        };
-
-        if status != AK_SUCCESS_I32 {
-            return status;
-        }
-
-        if data.len() < VENC_STREAM_HEADER_LEN {
-            error!(
-                got = data.len(),
-                need = VENC_STREAM_HEADER_LEN,
-                "venc_get_stream response header too short"
-            );
-            return AK_FAILED_I32;
-        }
-
-        // --- Parse the 28-byte header ---
-        let frame_len = u32::from_le_bytes(match data[0..4].try_into() {
-            Ok(b) => b,
-            Err(_) => return AK_FAILED_I32,
-        });
-        let ts = u64::from_le_bytes(match data[4..12].try_into() {
-            Ok(b) => b,
-            Err(_) => return AK_FAILED_I32,
-        });
-        let seq_no = u32::from_le_bytes(match data[12..16].try_into() {
-            Ok(b) => b,
-            Err(_) => return AK_FAILED_I32,
-        });
-        let frame_type_val = i32::from_le_bytes(match data[16..20].try_into() {
-            Ok(b) => b,
-            Err(_) => return AK_FAILED_I32,
-        });
-        let remote_token = u64::from_le_bytes(match data[20..28].try_into() {
-            Ok(b) => b,
-            Err(_) => return AK_FAILED_I32,
-        });
-
-        // --- Validate and copy frame payload ---
-        let expected_total = VENC_STREAM_HEADER_LEN + frame_len as usize;
-        if data.len() < expected_total {
-            error!(
-                got = data.len(),
-                need = expected_total,
-                "venc_get_stream response truncated (frame data missing)"
-            );
-            return AK_FAILED_I32;
-        }
-
-        let frame_data = data[VENC_STREAM_HEADER_LEN..expected_total].to_vec();
-
-        // --- Store pending frame, keyed by the stream pointer address ---
-        let stream_key = stream as u64;
-        let pending = PendingFrame {
-            data: frame_data,
-            remote_token,
-        };
-
-        let data_ptr = {
-            let mut frames = match self.pending_frames.lock() {
-                Ok(g) => g,
-                Err(e) => {
-                    error!(error = %e, "pending_frames mutex poisoned in venc_get_stream");
-                    return AK_FAILED_I32;
-                }
-            };
-            frames.insert(stream_key, pending);
-            // Retrieve the pointer to the buffer we just stored.
-            // SAFETY: We just inserted the entry; it is guaranteed to be present.
-            frames[&stream_key].data.as_ptr() as *mut u8
-        };
-
-        // --- Populate the caller's video_stream struct ---
-        // SAFETY: The caller contract (VideoHalTrait::venc_get_stream) requires
-        // `stream` to be a valid, writable, non-null pointer to a `video_stream`.
-        // We do not read the current contents; we only write fields.
-        // The `data` pointer we store refers to a `Vec<u8>` that lives inside
-        // `pending_frames` and remains valid until `venc_release_stream` is called.
-        unsafe {
-            (*stream).len = frame_len;
-            (*stream).ts = ts;
-            (*stream).seq_no = seq_no as std::os::raw::c_ulong;
-            (*stream).frame_type = Self::ipc_to_frame_type(frame_type_val);
-            (*stream).data = data_ptr;
-        }
-
-        if is_ipc_debug_enabled() {
-            debug!(
-                frame_len,
-                ts, seq_no, frame_type_val, remote_token, "venc_get_stream: frame received"
-            );
-        }
-
-        AK_SUCCESS_I32
+        let _ = stream_handle;
+        let _ = stream;
+        error!("venc_get_stream is removed in push-only mode");
+        AK_FAILED_I32
     }
 
-    /// Release a previously acquired video stream frame.
-    ///
-    /// Looks up the pending frame by the address of `stream`, sends a release
-    /// command to the daemon, and removes the locally-owned buffer.
-    ///
-    /// # Safety
-    ///
-    /// After this call returns, the `stream.data` pointer is **invalid** — the
-    /// backing `Vec<u8>` has been dropped.  Callers must not dereference
-    /// `stream.data` after `venc_release_stream` returns.
     fn venc_release_stream(&self, stream_handle: *mut c_void, stream: *mut video_stream) -> i32 {
-        let stream_key = stream as u64;
-
-        // Look up the remote token for this frame.
-        let remote_token = {
-            let frames = match self.pending_frames.lock() {
-                Ok(g) => g,
-                Err(e) => {
-                    error!(error = %e, "pending_frames mutex poisoned in venc_release_stream");
-                    return AK_FAILED_I32;
-                }
-            };
-            match frames.get(&stream_key) {
-                Some(pf) => pf.remote_token,
-                None => {
-                    warn!(
-                        stream_key,
-                        "venc_release_stream: no pending frame found for stream address"
-                    );
-                    // Still try to send the release with just the stream handle.
-                    0u64
-                }
-            }
-        };
-
-        // Build request: stream_handle (u64) + remote_token (u64)
-        let handle_val = stream_handle as u64;
-        let mut req_data = handle_val.to_le_bytes().to_vec();
-        req_data.extend_from_slice(&remote_token.to_le_bytes());
-
-        let result = match self.send_request(CMD_VENC_RELEASE_STREAM, &req_data) {
-            Ok((status, _)) => status,
-            Err(e) => {
-                error!(error = %e, "venc_release_stream IPC failed");
-                AK_FAILED_I32
-            }
-        };
-
-        // Remove the pending frame regardless of IPC outcome — the caller
-        // has relinquished ownership and we must not hold the buffer forever.
-        if let Ok(mut frames) = self.pending_frames.lock() {
-            frames.remove(&stream_key);
-        }
-
-        result
+        let _ = stream_handle;
+        let _ = stream;
+        error!("venc_release_stream is removed in push-only mode");
+        AK_FAILED_I32
     }
 
     fn venc_cancel_stream(&self, stream_handle: *mut c_void) -> i32 {
@@ -2176,43 +1443,15 @@ mod tests {
         }
     }
 
-    /// venc_get_stream correctly parses a 28-byte header + payload from the daemon.
+    /// Pull-style venc_get_stream is removed in push-only mode.
     #[test]
     #[cfg(use_stubs)]
-    fn test_vendor_ipc_get_stream_frame_data_parses_header_and_payload() {
-        use crate::hal::stubs::VideoFrameType;
+    fn test_vendor_ipc_get_stream_removed_returns_failed() {
         use std::mem::MaybeUninit;
-
-        // Build the daemon response: 28-byte header + 4-byte payload.
-        let frame_payload: Vec<u8> = vec![0xAA, 0xBB, 0xCC, 0xDD];
-        let frame_len = frame_payload.len() as u32;
-        let timestamp: u64 = 12345;
-        let seq_no: u32 = 1;
-        let frame_type_val: i32 = 1; // I-frame
-        let remote_token: u64 = 99;
-
-        let daemon = FakeDaemon::start(move |cmd_id, _req| {
-            if cmd_id == CMD_VENC_GET_STREAM {
-                let mut resp = Vec::new();
-                resp.extend_from_slice(&frame_len.to_le_bytes());
-                resp.extend_from_slice(&timestamp.to_le_bytes());
-                resp.extend_from_slice(&seq_no.to_le_bytes());
-                resp.extend_from_slice(&frame_type_val.to_le_bytes());
-                resp.extend_from_slice(&remote_token.to_le_bytes());
-                resp.extend_from_slice(&frame_payload);
-                (AK_SUCCESS_I32, resp)
-            } else {
-                // Handle CMD_VENC_RELEASE_STREAM and anything else with success.
-                (AK_SUCCESS_I32, vec![])
-            }
-        });
+        let daemon = FakeDaemon::start(|_cmd_id, _req| (AK_SUCCESS_I32, vec![]));
 
         let ipc = VendorIpc::new_with_path(&daemon.socket_path).unwrap();
-
-        // Use a dummy stream handle (any non-zero value serves as the session handle).
         let stream_handle = 1usize as *mut std::ffi::c_void;
-
-        // Allocate an uninitialized video_stream on the stack.
         let mut vs = MaybeUninit::<crate::hal::stubs::VideoStream>::zeroed();
         let vs_ptr = vs.as_mut_ptr() as *mut video_stream;
 
@@ -2221,44 +1460,7 @@ mod tests {
             stream_handle,
             vs_ptr,
         );
-        assert_eq!(result, AK_SUCCESS_I32, "venc_get_stream should succeed");
-
-        // SAFETY: venc_get_stream returned AK_SUCCESS, so the fields are initialized.
-        let populated = unsafe { vs.assume_init() };
-        assert_eq!(populated.len, frame_len, "frame length mismatch");
-        assert_eq!(populated.ts, timestamp, "timestamp mismatch");
-        assert_eq!(
-            populated.seq_no, seq_no as std::os::raw::c_ulong,
-            "seq_no mismatch"
-        );
-        assert_eq!(
-            populated.frame_type,
-            VideoFrameType::FrameTypeI,
-            "frame type should be I-frame"
-        );
-        assert!(!populated.data.is_null(), "data pointer should not be null");
-
-        // Verify frame payload bytes via the data pointer.
-        // SAFETY: data points into pending_frames Vec<u8> which is still alive (ipc is alive).
-        let actual_bytes =
-            unsafe { std::slice::from_raw_parts(populated.data, frame_len as usize) };
-        assert_eq!(
-            actual_bytes,
-            &[0xAAu8, 0xBB, 0xCC, 0xDD],
-            "frame bytes mismatch"
-        );
-
-        // Release the stream to clean up pending_frames.
-        // SAFETY: vs_ptr points to the same stack allocation; still valid at this point.
-        let release_result = <VendorIpc as crate::hal::video::VideoHalTrait>::venc_release_stream(
-            &ipc,
-            stream_handle,
-            vs_ptr,
-        );
-        assert_eq!(
-            release_result, AK_SUCCESS_I32,
-            "venc_release_stream should succeed"
-        );
+        assert_eq!(result, AK_FAILED_I32);
     }
 
     #[test]
@@ -2535,210 +1737,77 @@ mod tests {
     }
 
     #[test]
-    fn test_venc_stream_header_len_constant() {
-        assert_eq!(VENC_STREAM_HEADER_LEN, 28);
-    }
+    fn test_start_push_encodes_stream_handle_and_stream_id() {
+        use std::sync::{Arc, Mutex};
 
-    /// fetch_frame_owned reads a frame directly into BytesMut without extra copy.
-    #[test]
-    fn test_vendor_ipc_fetch_frame_owned_reads_into_bytes_mut() {
-        use crate::platform::frame::{FrameType, StreamId};
-
-        let frame_payload: Vec<u8> = vec![0xAA, 0xBB, 0xCC, 0xDD];
-        let frame_len = frame_payload.len() as u32;
-        let timestamp: u64 = 12345;
-        let seq_no: u32 = 1;
-        let frame_type_val: i32 = 1; // I-frame
-        let remote_token: u64 = 99;
-
-        let daemon = FakeDaemon::start(move |cmd_id, _req| {
-            if cmd_id == CMD_VENC_GET_STREAM {
-                let mut resp = Vec::new();
-                resp.extend_from_slice(&frame_len.to_le_bytes());
-                resp.extend_from_slice(&timestamp.to_le_bytes());
-                resp.extend_from_slice(&seq_no.to_le_bytes());
-                resp.extend_from_slice(&frame_type_val.to_le_bytes());
-                resp.extend_from_slice(&remote_token.to_le_bytes());
-                resp.extend_from_slice(&frame_payload);
-                (AK_SUCCESS_I32, resp)
-            } else {
-                (AK_SUCCESS_I32, vec![])
-            }
-        });
-
-        let mut ipc = VendorIpc::new_with_path(&daemon.socket_path).unwrap();
-        let stream_handle = 1usize as *mut std::ffi::c_void;
-
-        let frame = ipc
-            .fetch_frame_owned(stream_handle, StreamId::VideoMain, None)
-            .unwrap();
-
-        assert_eq!(&frame.data[..], &[0xAA, 0xBB, 0xCC, 0xDD]);
-        assert_eq!(frame.timestamp, 12345 * 1000); // ms to μs
-        assert_eq!(frame.frame_type, FrameType::VideoIFrame);
-        assert_eq!(frame.stream_id, StreamId::VideoMain);
-    }
-
-    /// fetch_frame_owned uses the BytesMutPool when provided.
-    #[test]
-    fn test_vendor_ipc_fetch_frame_owned_uses_pool() {
-        use crate::platform::frame::StreamId;
-        use crate::streaming::bridge::BytesMutPool;
-
-        let frame_payload: Vec<u8> = vec![0x11, 0x22, 0x33];
-        let frame_len = frame_payload.len() as u32;
-        let timestamp: u64 = 999;
-        let seq_no: u32 = 5;
-        let frame_type_val: i32 = 0; // P-frame
-        let remote_token: u64 = 42;
-
-        let daemon = FakeDaemon::start(move |cmd_id, _req| {
-            if cmd_id == CMD_VENC_GET_STREAM {
-                let mut resp = Vec::new();
-                resp.extend_from_slice(&frame_len.to_le_bytes());
-                resp.extend_from_slice(&timestamp.to_le_bytes());
-                resp.extend_from_slice(&seq_no.to_le_bytes());
-                resp.extend_from_slice(&frame_type_val.to_le_bytes());
-                resp.extend_from_slice(&remote_token.to_le_bytes());
-                resp.extend_from_slice(&frame_payload);
-                (AK_SUCCESS_I32, resp)
-            } else {
-                (AK_SUCCESS_I32, vec![])
-            }
-        });
-
-        let mut ipc = VendorIpc::new_with_path(&daemon.socket_path).unwrap();
-        let pool = BytesMutPool::new(1024, 4);
-        let stream_handle = 1usize as *mut std::ffi::c_void;
-
-        let frame = ipc
-            .fetch_frame_owned(stream_handle, StreamId::VideoMain, Some(&pool))
-            .unwrap();
-
-        assert_eq!(&frame.data[..], &[0x11, 0x22, 0x33]);
-        // The buffer should have been allocated from pool (capacity >= 1024)
-        // but since pool was empty, it allocated fresh with max(3, 1024)
-    }
-
-    /// release_frame_owned sends the stored remote_token to daemon.
-    #[test]
-    fn test_vendor_ipc_release_frame_owned_sends_token() {
-        use crate::platform::frame::StreamId;
-        use portable_atomic::{AtomicU64, Ordering};
-        use std::sync::Arc as StdArc;
-
-        let received_token = StdArc::new(AtomicU64::new(0));
-        let received_token_clone = received_token.clone();
-
-        let frame_payload: Vec<u8> = vec![0xDE, 0xAD];
-        let frame_len = frame_payload.len() as u32;
-        let timestamp: u64 = 1;
-        let seq_no: u32 = 1;
-        let frame_type_val: i32 = 0;
-        let remote_token: u64 = 0xBEEF_CAFE;
-
+        let captured: Arc<Mutex<Vec<(i32, Vec<u8>)>>> = Arc::new(Mutex::new(Vec::new()));
+        let captured_closure = Arc::clone(&captured);
         let daemon = FakeDaemon::start(move |cmd_id, req| {
-            if cmd_id == CMD_VENC_GET_STREAM {
-                let mut resp = Vec::new();
-                resp.extend_from_slice(&frame_len.to_le_bytes());
-                resp.extend_from_slice(&timestamp.to_le_bytes());
-                resp.extend_from_slice(&seq_no.to_le_bytes());
-                resp.extend_from_slice(&frame_type_val.to_le_bytes());
-                resp.extend_from_slice(&remote_token.to_le_bytes());
-                resp.extend_from_slice(&frame_payload);
-                (AK_SUCCESS_I32, resp)
-            } else if cmd_id == CMD_VENC_RELEASE_STREAM {
-                // Extract the remote_token from the release request
-                if req.len() >= 16 {
-                    let token = u64::from_le_bytes(req[8..16].try_into().unwrap());
-                    received_token_clone.store(token, Ordering::SeqCst);
-                }
-                (AK_SUCCESS_I32, vec![])
-            } else {
-                (AK_SUCCESS_I32, vec![])
-            }
+            captured_closure
+                .lock()
+                .unwrap()
+                .push((cmd_id, req.to_vec()));
+            (AK_SUCCESS_I32, vec![])
         });
+        let ipc = VendorIpc::new_with_path(&daemon.socket_path).unwrap();
+        let stream_handle = 0x1234_5678usize as *mut std::ffi::c_void;
 
-        let mut ipc = VendorIpc::new_with_path(&daemon.socket_path).unwrap();
-        let stream_handle = 1usize as *mut std::ffi::c_void;
+        ipc.start_push(stream_handle, StreamId::VideoSub).unwrap();
 
-        // Fetch the frame (stores remote_token)
-        let _frame = ipc
-            .fetch_frame_owned(stream_handle, StreamId::VideoMain, None)
-            .unwrap();
+        let captured = captured.lock().unwrap();
+        assert_eq!(captured.len(), 1);
+        assert_eq!(captured[0].0, CMD_VENC_START_PUSH);
+        assert_eq!(captured[0].1.len(), 12);
 
-        // Release the frame (sends remote_token back to daemon)
-        ipc.release_frame_owned(stream_handle).unwrap();
-
-        // Verify the daemon received the correct token
-        assert_eq!(received_token.load(Ordering::SeqCst), 0xBEEF_CAFE);
+        let handle = u64::from_le_bytes(captured[0].1[0..8].try_into().unwrap());
+        let stream_id = u32::from_le_bytes(captured[0].1[8..12].try_into().unwrap());
+        assert_eq!(handle, stream_handle as u64);
+        assert_eq!(stream_id, 1);
     }
 
-    /// recv_frame_response correctly rejects non-success status.
     #[test]
-    fn test_recv_frame_response_rejects_error_status() {
-        use std::os::unix::net::UnixStream as StdUnixStream;
+    fn test_stop_push_with_stream_id_encodes_payload() {
+        use std::sync::{Arc, Mutex};
 
-        let (mut server, mut client) = StdUnixStream::pair().unwrap();
-
-        // Write error response from "daemon" side
-        std::thread::spawn(move || {
-            use std::io::Write;
-            let status: i32 = -1;
-            let resp_len: u32 = 0;
-            server.write_all(&status.to_le_bytes()).unwrap();
-            server.write_all(&resp_len.to_le_bytes()).unwrap();
-            server.flush().unwrap();
+        let captured: Arc<Mutex<Vec<(i32, Vec<u8>)>>> = Arc::new(Mutex::new(Vec::new()));
+        let captured_closure = Arc::clone(&captured);
+        let daemon = FakeDaemon::start(move |cmd_id, req| {
+            captured_closure
+                .lock()
+                .unwrap()
+                .push((cmd_id, req.to_vec()));
+            (AK_SUCCESS_I32, vec![])
         });
+        let ipc = VendorIpc::new_with_path(&daemon.socket_path).unwrap();
 
-        std::thread::sleep(std::time::Duration::from_millis(50));
+        ipc.stop_push(Some(StreamId::VideoMain)).unwrap();
 
-        let result = VendorIpc::recv_frame_response(&mut client, None);
-        assert!(result.is_err());
+        let captured = captured.lock().unwrap();
+        assert_eq!(captured.len(), 1);
+        assert_eq!(captured[0].0, CMD_VENC_STOP_PUSH);
+        assert_eq!(captured[0].1, 0u32.to_le_bytes().to_vec());
     }
 
     #[test]
-    fn test_ipc_to_platform_frame_type_mappings() {
-        use crate::platform::frame::FrameType;
+    fn test_stop_push_without_stream_id_sends_empty_payload() {
+        use std::sync::{Arc, Mutex};
 
-        assert_eq!(
-            VendorIpc::ipc_to_platform_frame_type(0),
-            FrameType::VideoPFrame
-        );
-        assert_eq!(
-            VendorIpc::ipc_to_platform_frame_type(1),
-            FrameType::VideoIFrame
-        );
-        assert_eq!(
-            VendorIpc::ipc_to_platform_frame_type(2),
-            FrameType::VideoBFrame
-        );
-        assert_eq!(
-            VendorIpc::ipc_to_platform_frame_type(3),
-            FrameType::VideoPiFrame
-        );
-        // Unknown defaults to P
-        assert_eq!(
-            VendorIpc::ipc_to_platform_frame_type(99),
-            FrameType::VideoPFrame
-        );
-    }
+        let captured: Arc<Mutex<Vec<(i32, Vec<u8>)>>> = Arc::new(Mutex::new(Vec::new()));
+        let captured_closure = Arc::clone(&captured);
+        let daemon = FakeDaemon::start(move |cmd_id, req| {
+            captured_closure
+                .lock()
+                .unwrap()
+                .push((cmd_id, req.to_vec()));
+            (AK_SUCCESS_I32, vec![])
+        });
+        let ipc = VendorIpc::new_with_path(&daemon.socket_path).unwrap();
 
-    #[test]
-    fn test_write_request_header_produces_correct_bytes() {
-        use std::os::unix::net::UnixStream as StdUnixStream;
+        ipc.stop_push(None).unwrap();
 
-        let (mut server, mut client) = StdUnixStream::pair().unwrap();
-
-        VendorIpc::write_request_header(&mut client, CMD_VENC_GET_STREAM, 8).unwrap();
-        client.flush().unwrap();
-
-        let mut buf = [0u8; 8];
-        server.read_exact(&mut buf).unwrap();
-        assert_eq!(
-            i32::from_le_bytes(buf[0..4].try_into().unwrap()),
-            CMD_VENC_GET_STREAM
-        );
-        assert_eq!(u32::from_le_bytes(buf[4..8].try_into().unwrap()), 8);
+        let captured = captured.lock().unwrap();
+        assert_eq!(captured.len(), 1);
+        assert_eq!(captured[0].0, CMD_VENC_STOP_PUSH);
+        assert!(captured[0].1.is_empty());
     }
 }
