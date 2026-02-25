@@ -515,14 +515,21 @@ impl StreamingBridge {
 
         let needs_parameter_sets = stream.sps.read().is_none() || stream.pps.read().is_none();
         if is_video_idr || needs_parameter_sets {
-            self.extract_parameter_sets(stream_id, stream, data);
+            self.extract_parameter_sets(stream_id, stream, data, is_video_idr);
         }
     }
 
     /// Scan Annex-B NAL units in an IDR frame to extract and cache SPS/PPS.
-    fn extract_parameter_sets(&self, stream_id: StreamId, stream: &StreamState, data: &[u8]) {
+    fn extract_parameter_sets(
+        &self,
+        stream_id: StreamId,
+        stream: &StreamState,
+        data: &[u8],
+        idr_hint: bool,
+    ) {
         let mut found_sps = false;
         let mut found_pps = false;
+        let mut found_idr_nal = false;
         let mut sps_to_cache: Option<Vec<u8>> = None;
         let mut pps_to_cache: Option<Vec<u8>> = None;
 
@@ -569,6 +576,9 @@ impl StreamingBridge {
                     pps_to_cache = Some(pps);
                     found_pps = true;
                 }
+                5 => {
+                    found_idr_nal = true;
+                }
                 _ => {}
             }
         }
@@ -593,12 +603,32 @@ impl StreamingBridge {
         }
 
         if !found_sps || !found_pps {
-            tracing::warn!(
-                found_sps,
-                found_pps,
-                idr_size = data.len(),
-                "IDR frame missing SPS and/or PPS (stream may be corrupt)"
-            );
+            let has_cached_sps = stream.sps.read().is_some();
+            let has_cached_pps = stream.pps.read().is_some();
+
+            if !has_cached_sps || !has_cached_pps {
+                tracing::warn!(
+                    stream = ?stream_id,
+                    idr_hint,
+                    found_idr_nal,
+                    found_sps,
+                    found_pps,
+                    has_cached_sps,
+                    has_cached_pps,
+                    idr_size = data.len(),
+                    "IDR frame missing SPS/PPS and cache incomplete"
+                );
+            } else {
+                tracing::trace!(
+                    stream = ?stream_id,
+                    idr_hint,
+                    found_idr_nal,
+                    found_sps,
+                    found_pps,
+                    idr_size = data.len(),
+                    "IDR frame missing inline SPS/PPS, using cached parameter sets"
+                );
+            }
         }
     }
 

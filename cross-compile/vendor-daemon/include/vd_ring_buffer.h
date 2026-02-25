@@ -30,8 +30,11 @@ extern "C" {
 /** Magic identifier for shared memory validation */
 #define VD_SHM_MAGIC       0x56444653  /* "VDFS" */
 
-/** Protocol version - bump on incompatible layout changes */
-#define VD_SHM_VERSION     1
+/** Protocol version - bump on incompatible layout changes
+ *  v1: Initial layout (8 header fields + 32 bytes padding)
+ *  v2: Added overflow diagnostic counters in header, wall-clock timing in slot header
+ */
+#define VD_SHM_VERSION     2
 
 /** Default total shared memory size: 1 MB */
 #define VD_SHM_DEFAULT_SIZE (1024 * 1024)
@@ -70,6 +73,7 @@ extern "C" {
 /* Frame notification flags */
 #define VD_NOTIFY_LAST_FRAGMENT     (1 << 0)
 #define VD_NOTIFY_SOCKET_FALLBACK   (1 << 1)
+#define VD_NOTIFY_FRAME_DROPPED     (1 << 2)
 
 /* Frame types (matching vendor SDK enum) */
 #define VD_FRAME_TYPE_P   0
@@ -101,7 +105,12 @@ struct vd_ring_header {
     uint32_t write_seq;       /* Monotonically increasing write sequence (daemon) */
     uint32_t read_seq;        /* Monotonically increasing read sequence (Rust) */
     uint32_t flags;           /* Shutdown, overflow indicators */
-    uint8_t  _padding[32];    /* Pad to 64 bytes (cache line alignment) */
+    /* Diagnostic counters (16 bytes, version >= 2) */
+    uint32_t overflow_count;       /* Total ring-full events */
+    uint32_t eviction_count;       /* P-frame evictions for I-frame priority */
+    uint32_t socket_fallback_count;/* Frames sent via socket fallback */
+    uint32_t dropped_count;        /* P-frames dropped during overflow */
+    uint8_t  _padding[16];         /* Reduced from 32: pad to 64 bytes */
 } __attribute__((packed));
 
 /**
@@ -112,12 +121,16 @@ struct vd_ring_header {
 struct vd_slot_header {
     uint32_t state;           /* VD_SLOT_EMPTY | WRITING | READY | READING */
     uint32_t frame_len;       /* Actual frame data length */
-    uint64_t timestamp_us;   /* Timestamp in microseconds */
+    uint64_t timestamp_us;   /* Timestamp in microseconds (SDK ts converted ms→μs) */
     uint32_t seq_no;          /* Frame sequence number */
     uint32_t frame_type;      /* 0=P, 1=I, 2=B, 3=Pi */
     uint32_t stream_id;       /* 0=main, 1=sub, 2=audio */
     uint32_t checksum;        /* CRC32 of frame data (0 = not computed) */
-    uint8_t  _padding[32];   /* Pad to 64 bytes */
+    /* Timing diagnostics (version >= 2, 16 bytes) */
+    uint64_t wall_clock_us;   /* CLOCK_MONOTONIC at ring write time */
+    uint32_t inter_frame_us;  /* Delta from previous frame (same stream) */
+    uint32_t _reserved;
+    uint8_t  _padding[16];   /* Reduced from 32: pad to 64 bytes */
 } __attribute__((packed));
 
 /**
@@ -162,13 +175,7 @@ _Static_assert(sizeof(struct vd_frame_notify) == 12, "vd_frame_notify must be 12
  * Required after memcpy of frame data, before setting slot state to READY.
  * This ensures all writes are visible before the state change.
  */
-#if defined(__arm__)
-#define VD_DATA_MEMORY_BARRIER() \
-    __asm__ __volatile__("mcr p15, 0, %0, c7, c10, 4" :: "r"(0) : "memory")
-#else
-#define VD_DATA_MEMORY_BARRIER() \
-    __asm__ __volatile__("" ::: "memory")
-#endif
+#define VD_DATA_MEMORY_BARRIER() __sync_synchronize()
 
 /*============================================================================
  * Inline Helper Functions
@@ -303,9 +310,9 @@ static inline void *vd_ring_open(void)
         return NULL;
     }
 
-    /* Validate header */
+    /* Validate header (accept version 1 or 2 for backward compatibility) */
     hdr = vd_ring_get_header(base);
-    if (hdr->magic != VD_SHM_MAGIC || hdr->version != VD_SHM_VERSION) {
+    if (hdr->magic != VD_SHM_MAGIC || (hdr->version != 1 && hdr->version != 2)) {
         munmap(base, VD_SHM_TOTAL_SIZE);
         return NULL;
     }
@@ -392,6 +399,40 @@ static inline int vd_ring_write(void *base, const void *frame_data, uint32_t fra
     __atomic_add_fetch(&hdr->write_seq, 1, __ATOMIC_RELEASE);
 
     return (int)slot_idx;
+}
+
+/**
+ * @brief Evict the oldest P/Pi-frame from the ring buffer to make room for an I-frame.
+ *
+ * Scans from read_seq to write_seq looking for the first P-frame or Pi-frame
+ * slot in READY state. Uses CAS to atomically transition it to EMPTY.
+ * This allows I-frames to always be placed in shared memory, avoiding
+ * the expensive socket fallback path for large I-frames (15-80KB on ARM).
+ *
+ * @param base  Ring buffer base pointer
+ *
+ * @return Evicted slot index on success, -1 if no P/Pi-frame could be evicted
+ */
+static inline int vd_ring_evict_oldest_pframe(void *base)
+{
+    struct vd_ring_header *hdr = vd_ring_get_header(base);
+    uint32_t read_seq = __atomic_load_n(&hdr->read_seq, __ATOMIC_ACQUIRE);
+    uint32_t write_seq = __atomic_load_n(&hdr->write_seq, __ATOMIC_ACQUIRE);
+
+    for (uint32_t i = read_seq; i < write_seq; i++) {
+        uint32_t idx = i % VD_SHM_SLOT_COUNT;
+        struct vd_slot_header *slot = vd_ring_get_slot_hdr(base, idx);
+        uint32_t expected = VD_SLOT_READY;
+        /* Evict P-frames and Pi-frames (not I or B) */
+        if (slot->frame_type == VD_FRAME_TYPE_P || slot->frame_type == VD_FRAME_TYPE_PI) {
+            if (__atomic_compare_exchange_n(&slot->state, &expected, VD_SLOT_EMPTY,
+                                             0, __ATOMIC_RELEASE, __ATOMIC_ACQUIRE)) {
+                __atomic_add_fetch(&hdr->read_seq, 1, __ATOMIC_RELEASE);
+                return (int)idx;
+            }
+        }
+    }
+    return -1;
 }
 
 /**

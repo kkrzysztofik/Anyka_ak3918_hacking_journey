@@ -47,12 +47,18 @@ pub struct LiveStreamHandler {
     is_main: bool,
     /// Reference to the bridge for reading per-stream state.
     bridge: Arc<StreamingBridge>,
+    /// Video frame rate for SDP `a=framerate` attribute.
+    video_framerate: u32,
 }
 
 impl LiveStreamHandler {
     /// Create a handler for a specific stream.
-    pub fn new(is_main: bool, bridge: Arc<StreamingBridge>) -> Self {
-        Self { is_main, bridge }
+    pub fn new(is_main: bool, bridge: Arc<StreamingBridge>, video_framerate: u32) -> Self {
+        Self {
+            is_main,
+            bridge,
+            video_framerate,
+        }
     }
 
     /// Get the stream state this handler reads from.
@@ -192,6 +198,7 @@ impl TStreamHandler for LiveStreamHandler {
                 &pps,
                 audio_config.as_deref(),
                 self.bridge.audio_sample_rate,
+                Some(self.video_framerate as f64),
             );
             tracing::debug!(
                 stream = stream_name,
@@ -441,7 +448,11 @@ impl StreamingService {
         // The handler references the bridge's actual stream state so it reads
         // the latest SPS/PPS/IDR that the bridge caches from live frames.
         let is_main = stream_name == self.config.main_stream_name;
-        let handler = Arc::new(LiveStreamHandler::new(is_main, Arc::clone(&self.bridge)));
+        let handler = Arc::new(LiveStreamHandler::new(
+            is_main,
+            Arc::clone(&self.bridge),
+            self.config.video_framerate,
+        ));
 
         // Publish RTSP stream.
         let rtsp_receiver = DataReceiver {
@@ -625,7 +636,7 @@ mod tests {
         *bridge.sub_stream.sps.write() = None;
         *bridge.sub_stream.pps.write() = None;
         *bridge.sub_stream.bootstrap_idr.write() = None;
-        let handler = LiveStreamHandler::new(true, Arc::clone(&bridge));
+        let handler = LiveStreamHandler::new(true, Arc::clone(&bridge), 15);
         (bridge, handler)
     }
 

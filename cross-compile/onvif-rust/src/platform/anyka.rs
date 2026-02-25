@@ -1056,20 +1056,10 @@ enum EncoderState {
 }
 
 /// Convert an SDK `VideoFrameType` to our `FrameType`.
-#[cfg(use_stubs)]
 fn sdk_frame_type_to_frame_type(ft: VideoFrameType) -> FrameType {
     match ft {
-        VideoFrameType::FrameTypeI | VideoFrameType::FrameTypePi => FrameType::VideoIFrame,
-        VideoFrameType::FrameTypeP => FrameType::VideoPFrame,
-        VideoFrameType::FrameTypeB => FrameType::VideoBFrame,
-    }
-}
-
-#[cfg(not(use_stubs))]
-fn sdk_frame_type_to_frame_type(ft: crate::hal::video_frame_type) -> FrameType {
-    use crate::hal::VideoFrameType;
-    match ft {
-        VideoFrameType::FrameTypeI | VideoFrameType::FrameTypePi => FrameType::VideoIFrame,
+        VideoFrameType::FrameTypeI => FrameType::VideoIFrame,
+        VideoFrameType::FrameTypePi => FrameType::VideoPiFrame,
         VideoFrameType::FrameTypeP => FrameType::VideoPFrame,
         VideoFrameType::FrameTypeB => FrameType::VideoBFrame,
     }
@@ -1083,6 +1073,8 @@ const NO_DATA_IDR_RECOVERY_EVERY_ERRORS: u32 = 100;
 const PIPELINE_READINESS_POLL_MS: u64 = 25;
 const CALLBACK_HISTOGRAM_LOG_INTERVAL: u64 = 1000;
 const CALLBACK_BUCKET_LIMITS_US: [u64; 6] = [250, 500, 1000, 2000, 5000, u64::MAX];
+const CALLBACK_SLOW_WARN_THRESHOLD_US: u64 = 5000;
+const CALLBACK_SLOW_LOG_INTERVAL: u64 = 50;
 
 static CALLBACK_DURATION_TOTAL: AtomicU64 = AtomicU64::new(0);
 static CALLBACK_DURATION_MAX_US: AtomicU64 = AtomicU64::new(0);
@@ -1092,6 +1084,7 @@ static CALLBACK_DURATION_BUCKET_2: AtomicU64 = AtomicU64::new(0);
 static CALLBACK_DURATION_BUCKET_3: AtomicU64 = AtomicU64::new(0);
 static CALLBACK_DURATION_BUCKET_4: AtomicU64 = AtomicU64::new(0);
 static CALLBACK_DURATION_BUCKET_5: AtomicU64 = AtomicU64::new(0);
+static CALLBACK_SLOW_TOTAL: AtomicU64 = AtomicU64::new(0);
 static LAST_IMAGING_UPDATE_SEQ: AtomicU64 = AtomicU64::new(0);
 static LAST_IMAGING_UPDATE_UNIX_MS: AtomicU64 = AtomicU64::new(0);
 
@@ -1151,6 +1144,7 @@ fn maybe_log_callback_histogram() {
 
     tracing::debug!(
         callback_samples = total,
+        callback_slow_over_5ms = CALLBACK_SLOW_TOTAL.load(Ordering::Relaxed),
         callback_p50_us = histogram_percentile_bucket_us(0.50),
         callback_p95_us = histogram_percentile_bucket_us(0.95),
         callback_p99_us = histogram_percentile_bucket_us(0.99),
@@ -1165,11 +1159,42 @@ fn maybe_log_callback_histogram() {
     );
 }
 
+fn maybe_log_slow_callback(callback_id: u64, elapsed_us: u64, callback_kind: &'static str) {
+    let slow_total = CALLBACK_SLOW_TOTAL.fetch_add(1, Ordering::Relaxed) + 1;
+    if slow_total == 1 || slow_total.is_multiple_of(CALLBACK_SLOW_LOG_INTERVAL) {
+        tracing::warn!(
+            callback_id,
+            elapsed_us,
+            slow_count = slow_total,
+            threshold_us = CALLBACK_SLOW_WARN_THRESHOLD_US,
+            callback_kind,
+            "Frame callback exceeded latency threshold"
+        );
+    }
+}
+
+fn maybe_log_slow_owned_callback(callback_id: u64, elapsed_us: u64) {
+    maybe_log_slow_callback(callback_id, elapsed_us, "owned");
+}
+
 fn compute_no_data_recovery_interval_errors(trigger_ms: u64, cycle_sleep_ms: u64) -> u32 {
     let trigger_ms = trigger_ms.max(1);
     let cycle_sleep_ms = cycle_sleep_ms.max(1);
     let errors = trigger_ms.div_ceil(cycle_sleep_ms);
     errors.max(1).min(u64::from(u32::MAX)) as u32
+}
+
+#[inline]
+fn push_mode_enabled(has_sub_stream: bool) -> bool {
+    !has_sub_stream
+}
+
+#[inline]
+fn is_push_mode_transient_error(error: &PlatformError) -> bool {
+    matches!(
+        error,
+        PlatformError::Timeout | PlatformError::ResourceBusy(_)
+    )
 }
 
 #[derive(Default)]
@@ -1377,12 +1402,22 @@ fn unified_frame_read_loop(
 
                         // Periodic summary every 300 frames
                         if state.frame_count.is_multiple_of(300) {
+                            let (overflow, eviction, fallback, dropped) =
+                                if let Some(ipc_ref) = vendor_ipc {
+                                    ipc_ref.shm_diagnostic_counters()
+                                } else {
+                                    (0, 0, 0, 0)
+                                };
                             tracing::debug!(
                                 stream = ?state.stream_id,
                                 frames = state.frame_count,
                                 total_bytes = state.total_bytes,
                                 iframes = state.iframe_count,
                                 errors = state.error_count,
+                                shm_overflow = overflow,
+                                shm_eviction = eviction,
+                                shm_fallback = fallback,
+                                shm_dropped = dropped,
                                 "Frame read loop progress (owned path)"
                             );
                         }
@@ -1678,6 +1713,88 @@ fn unified_frame_read_loop(
     let mut sub_state = StreamState::new(StreamId::VideoSub, sub_enc_addr);
     let mut current_sleep_ms: u64 = idle_poll_sleep_ms;
 
+    // ── Push-mode fast path: daemon polls SDK, pushes frames proactively ──
+    // Eliminates ~105 wasted IPC round-trips/sec (only 15 of ~120 carry frames).
+    if let Some(ref ipc) = vendor_ipc
+        && push_mode_enabled(has_sub)
+    {
+        match ipc.start_push(main_stream_handle.as_ptr()) {
+            Err(e) => {
+                tracing::warn!("Push mode not available, falling back to polling: {}", e);
+            }
+            Ok(()) => {
+                tracing::info!("Push-based frame delivery active");
+                while !stop_signal.load(Ordering::SeqCst) {
+                    match ipc.recv_pushed_frame(StreamId::VideoMain, frame_pool.as_deref()) {
+                        Ok(owned_frame) => {
+                            main_state.consecutive_no_data = 0;
+                            main_state.last_error_was_no_data = true;
+
+                            let frame_type = owned_frame.frame_type;
+                            let frame_size = owned_frame.data.len();
+
+                            main_state.frame_count += 1;
+                            stream_health.record_frame(StreamId::VideoMain);
+                            main_state.total_bytes += frame_size as u64;
+                            if matches!(frame_type, FrameType::VideoIFrame) {
+                                main_state.iframe_count += 1;
+                            }
+
+                            if main_state.frame_count.is_multiple_of(300) {
+                                let (overflow, eviction, fallback, dropped) =
+                                    ipc.shm_diagnostic_counters();
+                                tracing::debug!(
+                                    frames = main_state.frame_count,
+                                    total_bytes = main_state.total_bytes,
+                                    iframes = main_state.iframe_count,
+                                    shm_overflow = overflow,
+                                    shm_eviction = eviction,
+                                    shm_fallback = fallback,
+                                    shm_dropped = dropped,
+                                    "Push-mode frame delivery progress"
+                                );
+                            }
+
+                            if let Some(remaining) =
+                                invoke_owned_callbacks_from_map(&owned_callbacks, owned_frame)
+                            {
+                                let frame = Frame {
+                                    data: remaining.data.as_ptr(),
+                                    size: frame_size,
+                                    timestamp: remaining.timestamp,
+                                    frame_type,
+                                    stream_id: StreamId::VideoMain,
+                                };
+                                invoke_callbacks_from_map(&callbacks, &frame);
+                            }
+                        }
+                        Err(e) => {
+                            tracing::debug!("Push recv error: {}", e);
+                            main_state.consecutive_no_data += 1;
+                            // Timeouts and dropped-frame notifications are normal in push mode.
+                            if is_push_mode_transient_error(&e) {
+                                continue;
+                            }
+                            // IO/disconnect/protocol errors require fallback to polling.
+                            tracing::warn!("Push mode interrupted, falling back to polling: {}", e);
+                            break;
+                        }
+                    }
+                }
+                let _ = ipc.stop_push();
+                tracing::info!(
+                    push_frames = main_state.frame_count,
+                    push_bytes = main_state.total_bytes,
+                    "Push mode ended"
+                );
+            }
+        }
+    } else if vendor_ipc.is_some() && has_sub {
+        tracing::info!(
+            "Push mode disabled because sub stream is active; using unified polling for both streams"
+        );
+    }
+
     while !stop_signal.load(Ordering::SeqCst) {
         let has_active_callbacks = !callbacks.read().is_empty();
         let cycle_sleep_ms = if has_active_callbacks {
@@ -1777,12 +1894,8 @@ fn invoke_callbacks_from_map(
         let elapsed_us = elapsed.as_micros() as u64;
         record_callback_duration(elapsed_us);
 
-        if elapsed > Duration::from_millis(2) {
-            tracing::warn!(
-                callback_id = %id,
-                elapsed_us,
-                "Callback exceeded 2ms threshold (violates bridge contract)"
-            );
+        if elapsed_us > CALLBACK_SLOW_WARN_THRESHOLD_US {
+            maybe_log_slow_callback(*id, elapsed_us, "borrowed");
         }
 
         if result.is_err() {
@@ -1860,12 +1973,8 @@ fn invoke_owned_callbacks_from_map(
         let elapsed_us = elapsed.as_micros() as u64;
         record_callback_duration(elapsed_us);
 
-        if elapsed > Duration::from_millis(2) {
-            tracing::warn!(
-                callback_id = %id,
-                elapsed_us,
-                "Owned callback exceeded 2ms threshold"
-            );
+        if elapsed_us > CALLBACK_SLOW_WARN_THRESHOLD_US {
+            maybe_log_slow_owned_callback(*id, elapsed_us);
         }
 
         if result.is_err() {
@@ -1883,12 +1992,8 @@ fn invoke_owned_callbacks_from_map(
     let elapsed = start.elapsed();
     let elapsed_us = elapsed.as_micros() as u64;
     record_callback_duration(elapsed_us);
-    if elapsed > Duration::from_millis(2) {
-        tracing::warn!(
-            callback_id = %last_id,
-            elapsed_us,
-            "Owned callback exceeded 2ms threshold"
-        );
+    if elapsed_us > CALLBACK_SLOW_WARN_THRESHOLD_US {
+        maybe_log_slow_owned_callback(*last_id, elapsed_us);
     }
     if result.is_err() {
         tracing::error!(
@@ -3370,14 +3475,7 @@ mod tests {
     use std::ffi::c_void;
 
     fn video_dev0() -> crate::hal::video_dev_type {
-        #[cfg(use_stubs)]
-        {
-            crate::hal::video_dev_type::Dev0
-        }
-        #[cfg(not(use_stubs))]
-        {
-            crate::hal::video_dev_type::VIDEO_DEV0
-        }
+        crate::hal::video_dev_type::Dev0
     }
 
     /// Create a mock FFI that expects a successful vi_open call.
@@ -4446,8 +4544,8 @@ mod tests {
         callbacks: &Arc<RwLock<HashMap<CallbackId, Arc<dyn OwnedFrameCallback>>>>,
         callback: Arc<dyn OwnedFrameCallback>,
     ) -> CallbackId {
-        static NEXT_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
-        let id = NEXT_ID.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        static NEXT_ID: portable_atomic::AtomicU64 = portable_atomic::AtomicU64::new(1);
+        let id = NEXT_ID.fetch_add(1, portable_atomic::Ordering::SeqCst);
         callbacks.write().insert(id, callback);
         id
     }
@@ -4758,7 +4856,7 @@ mod tests {
         use crate::hal::VideoFrameType;
         assert_eq!(
             sdk_frame_type_to_frame_type(VideoFrameType::FrameTypePi),
-            FrameType::VideoIFrame
+            FrameType::VideoPiFrame
         );
     }
 
@@ -4780,6 +4878,27 @@ mod tests {
             sdk_frame_type_to_frame_type(VideoFrameType::FrameTypeB),
             FrameType::VideoBFrame
         );
+    }
+
+    #[test]
+    fn test_push_mode_enabled_main_only() {
+        assert!(push_mode_enabled(false));
+    }
+
+    #[test]
+    fn test_push_mode_disabled_when_sub_stream_present() {
+        assert!(!push_mode_enabled(true));
+    }
+
+    #[test]
+    fn test_push_mode_transient_error_classification() {
+        assert!(is_push_mode_transient_error(&PlatformError::Timeout));
+        assert!(is_push_mode_transient_error(&PlatformError::ResourceBusy(
+            "frame dropped".to_string()
+        )));
+        assert!(!is_push_mode_transient_error(
+            &PlatformError::HardwareFailure("socket disconnected".to_string())
+        ));
     }
 
     // =========================================================================

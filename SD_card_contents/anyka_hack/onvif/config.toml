@@ -281,10 +281,10 @@ width = 1920
 height = 1080
 
 # Frame rate (1-60)
-framerate = 25
+framerate = 15
 
 # Video bitrate in kbps (64-16384)
-bitrate = 4000
+bitrate = 2000
 
 # Video encoding (H264, H265, MJPEG)
 encoding = "H264"

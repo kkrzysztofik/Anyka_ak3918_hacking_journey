@@ -64,8 +64,10 @@ use crate::streaming::bridge::BytesMutPool;
 
 /// Magic value identifying the shared memory region ("VDFS")
 pub const VD_SHM_MAGIC: u32 = 0x5644_4653;
-/// Version of the shared memory protocol
-pub const VD_SHM_VERSION: u32 = 1;
+/// Version of the shared memory protocol (v2 adds diagnostic counters + wall-clock timing)
+pub const VD_SHM_VERSION: u32 = 2;
+/// Minimum supported version (v1 layout still accepted for backward compat)
+pub const VD_SHM_VERSION_MIN: u32 = 1;
 /// Number of slots in the ring buffer
 pub const VD_SHM_SLOT_COUNT: u32 = 8;
 /// Size of each slot (header + data)
@@ -103,6 +105,8 @@ pub const VD_FLAG_OVERFLOW: u32 = 1 << 1;
 pub const VD_NOTIFY_LAST_FRAGMENT: u32 = 1 << 0;
 /// Socket fallback notification (daemon couldn't use shm)
 pub const VD_NOTIFY_SOCKET_FALLBACK: u32 = 1 << 1;
+/// Frame was intentionally dropped by daemon (P-frame during ring overflow)
+pub const VD_NOTIFY_FRAME_DROPPED: u32 = 1 << 2;
 
 // =============================================================================
 // C-compatible Structures
@@ -128,8 +132,16 @@ pub struct RingHeader {
     pub read_seq: u32,
     /// Ring buffer flags
     pub flags: u32,
-    /// Padding to 64 bytes
-    pub _padding: [u8; 32],
+    /// Diagnostic: total ring-full events (version >= 2)
+    pub overflow_count: u32,
+    /// Diagnostic: P-frame evictions for I-frame priority (version >= 2)
+    pub eviction_count: u32,
+    /// Diagnostic: frames sent via socket fallback (version >= 2)
+    pub socket_fallback_count: u32,
+    /// Diagnostic: P-frames dropped during overflow (version >= 2)
+    pub dropped_count: u32,
+    /// Padding to 64 bytes (reduced from 32)
+    pub _padding: [u8; 16],
 }
 
 /// Slot header (64 bytes, must match C struct exactly)
@@ -150,8 +162,14 @@ pub struct SlotHeader {
     pub stream_id: u32,
     /// Checksum of frame data
     pub checksum: u32,
-    /// Padding to 64 bytes (8 extra bytes for C struct compatibility)
-    pub _padding: [u8; 32],
+    /// CLOCK_MONOTONIC at ring write time (version >= 2)
+    pub wall_clock_us: u64,
+    /// Delta from previous frame in microseconds (version >= 2)
+    pub inter_frame_us: u32,
+    /// Reserved for future use
+    pub _reserved: u32,
+    /// Padding to 64 bytes (reduced from 32)
+    pub _padding: [u8; 16],
 }
 
 /// Frame notification received from daemon (12 bytes)
@@ -202,6 +220,15 @@ impl FrameNotification {
     /// Check if this is the last fragment of a multi-packet frame.
     pub fn is_last_fragment(&self) -> bool {
         self.flags & VD_NOTIFY_LAST_FRAGMENT != 0
+    }
+
+    /// Check if the daemon intentionally dropped this frame.
+    ///
+    /// During ring buffer overflow, P-frames are dropped instead of using
+    /// the expensive socket fallback. The daemon sends a notification with
+    /// this flag set so the Rust side can track the drop.
+    pub fn is_frame_dropped(&self) -> bool {
+        self.flags & VD_NOTIFY_FRAME_DROPPED != 0
     }
 }
 
@@ -351,15 +378,15 @@ impl ShmRingReader {
             )));
         }
 
-        if header.version != VD_SHM_VERSION {
+        if header.version < VD_SHM_VERSION_MIN || header.version > VD_SHM_VERSION {
             // SAFETY: We own the mmap'd region and fd, must clean up on error.
             unsafe {
                 libc::munmap(base, VD_SHM_TOTAL_SIZE);
                 libc::close(fd);
             }
             return Err(PlatformError::InvalidParameter(format!(
-                "unsupported shm version: expected {}, got {}",
-                VD_SHM_VERSION, header.version
+                "unsupported shm version: expected {}-{}, got {}",
+                VD_SHM_VERSION_MIN, VD_SHM_VERSION, header.version
             )));
         }
 
@@ -396,6 +423,35 @@ impl ShmRingReader {
     pub fn has_overflow(&self) -> bool {
         let flags = self.flags_atomic().load(Ordering::Acquire);
         flags & VD_FLAG_OVERFLOW != 0
+    }
+
+    /// Read diagnostic counters from the ring header (version >= 2).
+    ///
+    /// Returns (overflow_count, eviction_count, socket_fallback_count, dropped_count).
+    /// For version 1 ring buffers, all counters return 0.
+    pub fn diagnostic_counters(&self) -> (u32, u32, u32, u32) {
+        let header = Self::header_from_ptr(self.base as *const RingHeader);
+        if header.version < 2 {
+            return (0, 0, 0, 0);
+        }
+        // SAFETY: header pointer is from mmap, fields are written atomically by daemon
+        let overflow = unsafe {
+            let ptr = &header.overflow_count as *const u32 as *const AtomicU32;
+            (*ptr).load(Ordering::Relaxed)
+        };
+        let eviction = unsafe {
+            let ptr = &header.eviction_count as *const u32 as *const AtomicU32;
+            (*ptr).load(Ordering::Relaxed)
+        };
+        let fallback = unsafe {
+            let ptr = &header.socket_fallback_count as *const u32 as *const AtomicU32;
+            (*ptr).load(Ordering::Relaxed)
+        };
+        let dropped = unsafe {
+            let ptr = &header.dropped_count as *const u32 as *const AtomicU32;
+            (*ptr).load(Ordering::Relaxed)
+        };
+        (overflow, eviction, fallback, dropped)
     }
 
     /// Read a frame from the specified slot.
@@ -637,8 +693,8 @@ impl ShmRingReader {
     /// Get atomic write_seq field
     #[inline]
     fn write_seq_atomic(&self) -> &AtomicU32 {
-        // Offset to write_seq in RingHeader: 6 * 4 = 24 bytes
-        let offset = 24_usize;
+        // Offset to write_seq in RingHeader: 5 * 4 = 20 bytes
+        let offset = 20_usize;
         // SAFETY: Offset is within bounds, field is u32.
         unsafe {
             let ptr = self.base.add(offset);
@@ -649,8 +705,8 @@ impl ShmRingReader {
     /// Get atomic read_seq field
     #[inline]
     fn read_seq_atomic(&self) -> &AtomicU32 {
-        // Offset to read_seq in RingHeader: 7 * 4 = 28 bytes
-        let offset = 28_usize;
+        // Offset to read_seq in RingHeader: 6 * 4 = 24 bytes
+        let offset = 24_usize;
         // SAFETY: Offset is within bounds, field is u32.
         unsafe {
             let ptr = self.base.add(offset);
@@ -661,8 +717,8 @@ impl ShmRingReader {
     /// Get atomic flags field
     #[inline]
     fn flags_atomic(&self) -> &AtomicU32 {
-        // Offset to flags in RingHeader: 8 * 4 = 32 bytes
-        let offset = 32_usize;
+        // Offset to flags in RingHeader: 7 * 4 = 28 bytes
+        let offset = 28_usize;
         // SAFETY: Offset is within bounds, field is u32.
         unsafe {
             let ptr = self.base.add(offset);
@@ -746,13 +802,14 @@ impl<'a> ShmFrame<'a> {
 /// - 0 = P-frame (VD_FRAME_TYPE_P)
 /// - 1 = I-frame (VD_FRAME_TYPE_I)
 /// - 2 = B-frame (VD_FRAME_TYPE_B)
-/// - 3+ = audio or other (VD_FRAME_TYPE_PI)
+/// - 3 = Pi-frame (VD_FRAME_TYPE_PI) — partial refresh, treated as P for streaming
 fn shm_frame_type_to_onvif(raw: u32) -> FrameType {
     match raw {
-        0 => FrameType::VideoPFrame, // VD_FRAME_TYPE_P
-        1 => FrameType::VideoIFrame, // VD_FRAME_TYPE_I
-        2 => FrameType::VideoBFrame, // VD_FRAME_TYPE_B
-        _ => FrameType::AudioPacket, // VD_FRAME_TYPE_PI or audio
+        0 => FrameType::VideoPFrame,  // VD_FRAME_TYPE_P
+        1 => FrameType::VideoIFrame,  // VD_FRAME_TYPE_I
+        2 => FrameType::VideoBFrame,  // VD_FRAME_TYPE_B
+        3 => FrameType::VideoPiFrame, // VD_FRAME_TYPE_PI
+        _ => FrameType::VideoPFrame,  // Unknown defaults to P
     }
 }
 
@@ -798,7 +855,11 @@ mod tests {
             write_seq: 0,
             read_seq: 0,
             flags: 0,
-            _padding: [0u8; 32],
+            overflow_count: 0,
+            eviction_count: 0,
+            socket_fallback_count: 0,
+            dropped_count: 0,
+            _padding: [0u8; 16],
         };
 
         let header_bytes = unsafe {
@@ -818,7 +879,10 @@ mod tests {
             frame_type: 0,
             stream_id: 0,
             checksum: 0,
-            _padding: [0u8; 32],
+            wall_clock_us: 0,
+            inter_frame_us: 0,
+            _reserved: 0,
+            _padding: [0u8; 16],
         };
         let slot_bytes = unsafe {
             std::slice::from_raw_parts(
@@ -917,7 +981,11 @@ mod tests {
                 write_seq: 0,
                 read_seq: 0,
                 flags: 0,
-                _padding: [0u8; 32],
+                overflow_count: 0,
+                eviction_count: 0,
+                socket_fallback_count: 0,
+                dropped_count: 0,
+                _padding: [0u8; 16],
             };
 
             let header_bytes = unsafe {
@@ -1036,7 +1104,11 @@ mod tests {
                 write_seq: 0,
                 read_seq: 0,
                 flags: 0,
-                _padding: [0u8; 32],
+                overflow_count: 0,
+                eviction_count: 0,
+                socket_fallback_count: 0,
+                dropped_count: 0,
+                _padding: [0u8; 16],
             };
 
             let header_bytes = unsafe {
@@ -1056,7 +1128,10 @@ mod tests {
                 frame_type: 0,
                 stream_id: 0,
                 checksum: 0,
-                _padding: [0u8; 32],
+                wall_clock_us: 0,
+                inter_frame_us: 0,
+                _reserved: 0,
+                _padding: [0u8; 16],
             };
             let slot_bytes = unsafe {
                 std::slice::from_raw_parts(
@@ -1080,7 +1155,10 @@ mod tests {
                 frame_type: 0,
                 stream_id: 0,
                 checksum: 0,
-                _padding: [0u8; 32],
+                wall_clock_us: 0,
+                inter_frame_us: 0,
+                _reserved: 0,
+                _padding: [0u8; 16],
             };
 
             let slot_bytes = unsafe {
@@ -1164,7 +1242,10 @@ mod tests {
             frame_type: 1, // I-frame (VD_FRAME_TYPE_I)
             stream_id: 1,  // Sub stream
             checksum: 0,
-            _padding: [0u8; 32],
+            wall_clock_us: 0,
+            inter_frame_us: 0,
+            _reserved: 0,
+            _padding: [0u8; 16],
         };
 
         file.seek(std::io::SeekFrom::Start(slot_offset as u64))
@@ -1222,8 +1303,8 @@ mod tests {
             .open(&path)
             .unwrap();
 
-        // flags is at offset 32 (8 * 4 bytes) in header
-        let flags_offset = 32usize;
+        // flags is at offset 28 (7 * 4 bytes) in header
+        let flags_offset = 28usize;
         let shutdown_flags: u32 = VD_FLAG_SHUTDOWN;
         file.seek(std::io::SeekFrom::Start(flags_offset as u64))
             .unwrap();
@@ -1256,7 +1337,7 @@ mod tests {
             .open(&path)
             .unwrap();
 
-        let flags_offset = 32usize;
+        let flags_offset = 28usize;
         let overflow_flags: u32 = VD_FLAG_OVERFLOW;
         file.seek(std::io::SeekFrom::Start(flags_offset as u64))
             .unwrap();

@@ -1132,14 +1132,7 @@ mod tests {
     }
 
     fn video_dev0() -> video_dev_type {
-        #[cfg(use_stubs)]
-        {
-            video_dev_type::Dev0
-        }
-        #[cfg(not(use_stubs))]
-        {
-            video_dev_type::VIDEO_DEV0
-        }
+        video_dev_type::Dev0
     }
 
     // Mockall-based tests for wrapper functions

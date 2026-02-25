@@ -11,6 +11,9 @@ pub struct StreamingConfig {
     pub httpflv_port: u16,
     /// Audio sample rate in Hz for stream metadata (default: 8000).
     pub audio_sample_rate: u32,
+    /// Video frame rate for SDP `a=framerate` attribute (default: 15).
+    /// Helps clients like VLC pre-configure their jitter buffer.
+    pub video_framerate: u32,
     /// Main stream path name (default: "main").
     pub main_stream_name: String,
     /// Sub stream path name (default: "sub").
@@ -62,11 +65,18 @@ impl StreamingConfig {
         let httpflv_port = Self::parse_port(config, "media.httpflv_port", 8080, "HTTP-FLV");
         let audio_sample_rate = Self::parse_audio_sample_rate(config);
         let enabled = config.get_bool("media.streaming_enabled").unwrap_or(true);
+        let video_framerate = config
+            .get_int("stream_profile_1.framerate")
+            .ok()
+            .filter(|&v| (1..=120).contains(&v))
+            .map(|v| v as u32)
+            .unwrap_or(15);
 
         Self {
             rtsp_port,
             httpflv_port,
             audio_sample_rate,
+            video_framerate,
             main_stream_name: "main".to_string(),
             sub_stream_name: "sub".to_string(),
             app_name: "live".to_string(),
@@ -82,6 +92,7 @@ impl Default for StreamingConfig {
             rtsp_port: 554,
             httpflv_port: 8080,
             audio_sample_rate: 8000,
+            video_framerate: 15,
             main_stream_name: "main".to_string(),
             sub_stream_name: "sub".to_string(),
             app_name: "live".to_string(),
@@ -102,6 +113,7 @@ mod tests {
         assert_eq!(config.rtsp_port, 554);
         assert_eq!(config.httpflv_port, 8080);
         assert_eq!(config.audio_sample_rate, 8000);
+        assert_eq!(config.video_framerate, 15);
         assert_eq!(config.main_stream_name, "main");
         assert_eq!(config.sub_stream_name, "sub");
         assert_eq!(config.app_name, "live");

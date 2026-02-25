@@ -171,11 +171,16 @@ pub fn send_httpflv_prior_frames(
 }
 
 /// Generate an SDP description for an audio/video stream.
+///
+/// When `video_framerate` is provided, an `a=framerate` attribute is added
+/// to the video media section per RFC 4566 §6, helping clients like VLC
+/// pre-configure their jitter buffer for the expected frame rate.
 pub fn generate_av_sdp(
     sps: &[u8],
     pps: &[u8],
     audio_config: Option<&[u8]>,
     audio_sample_rate: u32,
+    video_framerate: Option<f64>,
 ) -> String {
     let profile_level_id = if sps.len() >= 4 {
         format!("{:02x}{:02x}{:02x}", sps[1], sps[2], sps[3])
@@ -200,6 +205,9 @@ pub fn generate_av_sdp(
         profile_level_id
     ));
     sdp.push_str("a=control:trackID=0\r\n");
+    if let Some(fps) = video_framerate {
+        sdp.push_str(&format!("a=framerate:{:.1}\r\n", fps));
+    }
     sdp.push_str("a=sendonly\r\n");
 
     if let Some(config) = audio_config {
@@ -293,7 +301,7 @@ mod tests {
         let pps = vec![0x68, 0xce, 0x06, 0xe2];
         let audio_config = vec![0x12, 0x10];
 
-        let sdp = generate_av_sdp(&sps, &pps, Some(&audio_config), 48000);
+        let sdp = generate_av_sdp(&sps, &pps, Some(&audio_config), 48000, None);
 
         assert!(sdp.contains("m=video 0 RTP/AVP 96"));
         assert!(sdp.contains("a=control:trackID=0"));
@@ -306,7 +314,7 @@ mod tests {
         let sps = vec![0x67, 0x42, 0x00, 0x1e];
         let pps = vec![0x68, 0xce, 0x06, 0xe2];
 
-        let sdp = generate_av_sdp(&sps, &pps, None, 48000);
+        let sdp = generate_av_sdp(&sps, &pps, None, 48000, None);
 
         assert!(sdp.contains("m=video 0 RTP/AVP 96"));
         assert!(!sdp.contains("m=audio 0 RTP/AVP 97"));
@@ -314,8 +322,34 @@ mod tests {
 
     #[test]
     fn test_generate_av_sdp_short_sps_uses_fallback_profile_level_id() {
-        let sdp = generate_av_sdp(&[0x67, 0x42, 0x00], &[0x68, 0xce, 0x06, 0xe2], None, 48_000);
+        let sdp = generate_av_sdp(
+            &[0x67, 0x42, 0x00],
+            &[0x68, 0xce, 0x06, 0xe2],
+            None,
+            48_000,
+            None,
+        );
         assert!(sdp.contains("profile-level-id=42e01e"));
+    }
+
+    #[test]
+    fn test_generate_av_sdp_includes_framerate() {
+        let sps = vec![0x67, 0x42, 0x00, 0x1e];
+        let pps = vec![0x68, 0xce, 0x06, 0xe2];
+
+        let sdp = generate_av_sdp(&sps, &pps, None, 48000, Some(15.0));
+
+        assert!(sdp.contains("a=framerate:15.0\r\n"));
+    }
+
+    #[test]
+    fn test_generate_av_sdp_no_framerate_when_none() {
+        let sps = vec![0x67, 0x42, 0x00, 0x1e];
+        let pps = vec![0x68, 0xce, 0x06, 0xe2];
+
+        let sdp = generate_av_sdp(&sps, &pps, None, 48000, None);
+
+        assert!(!sdp.contains("a=framerate"));
     }
 
     #[test]

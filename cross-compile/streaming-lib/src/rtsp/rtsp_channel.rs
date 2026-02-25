@@ -205,10 +205,11 @@ impl TRtpFunc for RtpChannel {
 }
 
 impl RtcpChannel {
-    /// Set the SSRC for the send context so RTCP SR packets carry the same
-    /// SSRC as the corresponding RTP stream (RFC 3550 §6.4.1).
-    pub fn set_ssrc(&mut self, ssrc: u32) {
-        self.send_ctx = RtcpContext::new(ssrc, 0, 0);
+    /// Set the SSRC and sample rate for the send context so RTCP SR packets
+    /// carry the same SSRC as the corresponding RTP stream (RFC 3550 §6.4.1)
+    /// and can correctly extrapolate the RTP timestamp for NTP/RTP correlation.
+    pub fn set_ssrc(&mut self, ssrc: u32, sample_rate: u32) {
+        self.send_ctx = RtcpContext::new(ssrc, 0, sample_rate);
     }
 
     pub fn set_channel_identifier(&mut self, channel_identifier: u8) {
@@ -394,7 +395,7 @@ mod tests {
     #[test]
     fn test_rtcp_channel_set_ssrc() {
         let mut channel = RtcpChannel::default();
-        channel.set_ssrc(0x12345678);
+        channel.set_ssrc(0x12345678, 90000);
         let sr = channel.send_ctx.generate_sr();
         assert_eq!(sr.ssrc, 0x12345678);
     }

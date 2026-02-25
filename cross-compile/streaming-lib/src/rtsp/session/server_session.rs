@@ -119,7 +119,7 @@ struct RtpTrackCounters {
 
 const RTP_TIMESTAMP_WRAP_THRESHOLD: u32 = 0x8000_0000;
 const SESSION_ID_RANDOM_DIGITS: RandomDigitCount = RandomDigitCount::Four;
-const DEFAULT_MAX_FRAME_AGE_MS: u32 = 400;
+const DEFAULT_MAX_FRAME_AGE_MS: u32 = 600;
 const LAG_RECOVERY_THRESHOLD_MS: u32 = 1000;
 const LAG_RECOVERY_SUSTAINED_FRAMES: u32 = 8;
 const SOURCE_TIMESTAMP_RESET_THRESHOLD_MS: u32 = 10_000;
@@ -217,6 +217,76 @@ impl LagTracker {
         let elapsed_ms = self.anchor_local.elapsed().as_millis() as u32;
         let expected_source_ts = self.anchor_source_ts.wrapping_add(elapsed_ms);
         expected_source_ts.saturating_sub(source_timestamp_ms)
+    }
+}
+
+/// Minimum sleep threshold in milliseconds.
+///
+/// Sleeps shorter than ~2ms are unreliable on Linux due to timer resolution
+/// and context-switch overhead. On the Anyka ARM SoC this is especially true
+/// at the default HZ=100 tick rate.
+const PACE_MIN_SLEEP_MS: u64 = 2;
+
+/// Maximum inter-frame sleep cap in milliseconds.
+///
+/// After a gap in the source stream (e.g. encoder restart, I/O stall) the
+/// timestamp delta can be very large. Sleeping for the full delta would stall
+/// playback. 200ms is long enough to absorb normal jitter but short enough
+/// to avoid visible freezes.
+const PACE_MAX_DELTA_MS: u64 = 200;
+
+/// Paces RTP frame delivery to approximate real-time timing.
+///
+/// Without pacing, the playback loop dequeues and sends frames as fast as
+/// the network allows, causing bursts that overwhelm VLC's jitter buffer.
+/// `FramePacer` compares the wall-clock elapsed time against the frame
+/// timestamp delta and sleeps when the sender is running ahead of real-time.
+///
+/// Each RTSP session gets its own `FramePacer` instance so clients joining
+/// at different times are paced independently.
+struct FramePacer {
+    /// Wall-clock instant when the last frame was sent.
+    last_send: Option<Instant>,
+    /// Source timestamp (in milliseconds) of the last sent frame.
+    last_timestamp_ms: Option<u32>,
+}
+
+impl FramePacer {
+    fn new() -> Self {
+        Self {
+            last_send: None,
+            last_timestamp_ms: None,
+        }
+    }
+
+    /// Pace a frame by sleeping if the sender is ahead of real-time.
+    ///
+    /// `timestamp_ms` is the source frame timestamp in milliseconds.
+    /// On the first frame, no delay is introduced.
+    async fn pace(&mut self, timestamp_ms: u32) {
+        if let (Some(last_send), Some(last_ts)) = (self.last_send, self.last_timestamp_ms) {
+            let ts_delta_ms = timestamp_ms.wrapping_sub(last_ts) as u64;
+            let wall_delta = last_send.elapsed();
+            let wall_delta_ms = wall_delta.as_millis() as u64;
+
+            if ts_delta_ms > wall_delta_ms {
+                let sleep_ms = std::cmp::min(ts_delta_ms - wall_delta_ms, PACE_MAX_DELTA_MS);
+                if sleep_ms >= PACE_MIN_SLEEP_MS {
+                    tokio::time::sleep(Duration::from_millis(sleep_ms)).await;
+                }
+            }
+        }
+
+        self.last_send = Some(Instant::now());
+        self.last_timestamp_ms = Some(timestamp_ms);
+    }
+}
+
+#[inline]
+fn pacing_timestamp_ms(frame_data: &FrameData) -> Option<u32> {
+    match frame_data {
+        FrameData::Video { timestamp, .. } => Some(*timestamp),
+        FrameData::Audio { .. } | FrameData::MetaData { .. } | FrameData::MediaInfo { .. } => None,
     }
 }
 
@@ -445,16 +515,24 @@ async fn process_audio_frame(
         return;
     }
 
+    let previous_source_ts = audio_lag_tracker.last_source_ts;
     let lag_ms = audio_lag_tracker.lag_ms(timestamp);
     if lag_ms > latency_policy.max_frame_age_ms {
         *dropped_stale_frames += 1;
+        let elapsed_ms = audio_lag_tracker.anchor_local.elapsed().as_millis() as u32;
+        let expected_source_ts = audio_lag_tracker.anchor_source_ts.wrapping_add(elapsed_ms);
         log::warn!(
-            "event=stale_frame_drop track=Audio session_id={} remote_addr={} stream_path={} lag_ms={} threshold_ms={}",
+            "event=stale_frame_drop track=Audio session_id={} remote_addr={} stream_path={} lag_ms={} threshold_ms={} source_ts={} prev_source_ts={} expected_source_ts={} anchor_source_ts={} anchor_elapsed_ms={}",
             session_id,
             remote_addr,
             request_path,
             lag_ms,
             latency_policy.max_frame_age_ms,
+            timestamp,
+            previous_source_ts,
+            expected_source_ts,
+            audio_lag_tracker.anchor_source_ts,
+            elapsed_ms,
         );
         return;
     }
@@ -533,18 +611,47 @@ async fn process_video_frame(
         );
     }
 
+    let previous_source_ts = video_lag_tracker.last_source_ts;
     let lag_ms = video_lag_tracker.lag_ms(flush_ts);
     if lag_ms > latency_policy.max_frame_age_ms {
-        *dropped_stale_frames += 1;
-        log::warn!(
-            "event=stale_frame_drop track=Video session_id={} remote_addr={} stream_path={} lag_ms={} threshold_ms={}",
-            session_id,
-            remote_addr,
-            request_path,
+        if maybe_reanchor_video_lag_tracker_on_stale_idr(
+            video_lag_tracker,
+            flush_ts,
             lag_ms,
             latency_policy.max_frame_age_ms,
-        );
-        return;
+            contains_idr,
+        ) {
+            log::warn!(
+                "event=stale_frame_reanchor track=Video session_id={} remote_addr={} stream_path={} lag_ms={} threshold_ms={} source_ts={} prev_source_ts={} contains_idr={}",
+                session_id,
+                remote_addr,
+                request_path,
+                lag_ms,
+                latency_policy.max_frame_age_ms,
+                flush_ts,
+                previous_source_ts,
+                contains_idr,
+            );
+        } else {
+            *dropped_stale_frames += 1;
+            let elapsed_ms = video_lag_tracker.anchor_local.elapsed().as_millis() as u32;
+            let expected_source_ts = video_lag_tracker.anchor_source_ts.wrapping_add(elapsed_ms);
+            log::warn!(
+                "event=stale_frame_drop track=Video session_id={} remote_addr={} stream_path={} lag_ms={} threshold_ms={} source_ts={} prev_source_ts={} expected_source_ts={} anchor_source_ts={} anchor_elapsed_ms={} contains_idr={}",
+                session_id,
+                remote_addr,
+                request_path,
+                lag_ms,
+                latency_policy.max_frame_age_ms,
+                flush_ts,
+                previous_source_ts,
+                expected_source_ts,
+                video_lag_tracker.anchor_source_ts,
+                elapsed_ms,
+                contains_idr,
+            );
+            return;
+        }
     }
 
     if lag_ms > latency_policy.lag_recovery_threshold_ms {
@@ -588,6 +695,23 @@ async fn process_video_frame(
         &mut flush_data,
     )
     .await;
+}
+
+fn maybe_reanchor_video_lag_tracker_on_stale_idr(
+    video_lag_tracker: &mut LagTracker,
+    source_timestamp_ms: u32,
+    lag_ms: u32,
+    max_frame_age_ms: u32,
+    contains_idr: bool,
+) -> bool {
+    if !contains_idr || lag_ms <= max_frame_age_ms {
+        return false;
+    }
+
+    video_lag_tracker.anchor_local = Instant::now();
+    video_lag_tracker.anchor_source_ts = source_timestamp_ms;
+    video_lag_tracker.last_source_ts = source_timestamp_ms;
+    true
 }
 
 async fn flush_pending_video(
@@ -753,6 +877,7 @@ async fn run_playback_loop(
     let mut dropped_stale_frames = 0u64;
     let mut dropped_for_recovery = 0u64;
     let mut idr_recovery_count = 0u64;
+    let mut frame_pacer = FramePacer::new();
 
     loop {
         if playback_cancel.load(Ordering::Acquire) {
@@ -772,6 +897,15 @@ async fn run_playback_loop(
         match receiver.recv().await {
             Some(frame_data) => {
                 retry_times = 0;
+
+                // Pace frame delivery to approximate real-time timing.
+                // Without this, frames dequeued from the ring buffer are
+                // sent in bursts, overwhelming VLC's jitter buffer.
+                let timestamp_ms = pacing_timestamp_ms(&frame_data);
+                if let Some(ts) = timestamp_ms {
+                    frame_pacer.pace(ts).await;
+                }
+
                 if handle_playback_frame(
                     frame_data,
                     &audio_rtp_channel,
@@ -5831,5 +5965,139 @@ mod tests {
         let lag_ms = tracker.lag_ms(100);
         assert_eq!(lag_ms, 0);
         assert_eq!(tracker.anchor_source_ts, 100);
+    }
+
+    #[test]
+    fn test_maybe_reanchor_video_lag_tracker_on_stale_idr_reanchors() {
+        let mut tracker = LagTracker {
+            anchor_local: Instant::now() - Duration::from_millis(750),
+            anchor_source_ts: 5_000,
+            last_source_ts: 5_400,
+            initialized: true,
+        };
+
+        let did_reanchor =
+            maybe_reanchor_video_lag_tracker_on_stale_idr(&mut tracker, 5_420, 650, 600, true);
+
+        assert!(did_reanchor);
+        assert_eq!(tracker.anchor_source_ts, 5_420);
+        assert_eq!(tracker.last_source_ts, 5_420);
+    }
+
+    #[test]
+    fn test_maybe_reanchor_video_lag_tracker_on_stale_non_idr_does_not_reanchor() {
+        let mut tracker = LagTracker {
+            anchor_local: Instant::now() - Duration::from_millis(750),
+            anchor_source_ts: 5_000,
+            last_source_ts: 5_400,
+            initialized: true,
+        };
+
+        let did_reanchor =
+            maybe_reanchor_video_lag_tracker_on_stale_idr(&mut tracker, 5_420, 650, 600, false);
+
+        assert!(!did_reanchor);
+        assert_eq!(tracker.anchor_source_ts, 5_000);
+        assert_eq!(tracker.last_source_ts, 5_400);
+    }
+
+    // ========================================================================
+    // FramePacer Tests
+    // ========================================================================
+
+    #[tokio::test]
+    async fn test_frame_pacer_first_frame_no_sleep() {
+        let mut pacer = FramePacer::new();
+        let before = Instant::now();
+        pacer.pace(1000).await;
+        // First frame should complete instantly (well under 10ms).
+        assert!(before.elapsed() < Duration::from_millis(10));
+        assert!(pacer.last_send.is_some());
+        assert_eq!(pacer.last_timestamp_ms, Some(1000));
+    }
+
+    #[tokio::test]
+    async fn test_frame_pacer_sleeps_when_ahead() {
+        let mut pacer = FramePacer::new();
+        pacer.pace(0).await;
+
+        // Send second frame with 66ms timestamp gap but essentially zero
+        // wall-clock elapsed — the pacer should sleep ~66ms.
+        let before = Instant::now();
+        pacer.pace(66).await;
+        let elapsed = before.elapsed();
+
+        // Allow generous tolerance for CI/tokio timer granularity.
+        assert!(
+            elapsed >= Duration::from_millis(40),
+            "expected sleep of ~66ms, got {:?}",
+            elapsed
+        );
+        assert!(
+            elapsed < Duration::from_millis(200),
+            "sleep took too long: {:?}",
+            elapsed
+        );
+    }
+
+    #[tokio::test]
+    async fn test_frame_pacer_no_sleep_when_behind() {
+        let mut pacer = FramePacer::new();
+        pacer.pace(0).await;
+
+        // Wait longer than the timestamp delta before sending next frame.
+        tokio::time::sleep(Duration::from_millis(80)).await;
+
+        let before = Instant::now();
+        pacer.pace(50).await; // 50ms gap, but 80ms already elapsed
+        let elapsed = before.elapsed();
+
+        // Should complete nearly instantly (no sleep needed).
+        assert!(
+            elapsed < Duration::from_millis(10),
+            "expected no sleep, got {:?}",
+            elapsed
+        );
+    }
+
+    #[tokio::test]
+    async fn test_frame_pacer_caps_at_max_delta() {
+        let mut pacer = FramePacer::new();
+        pacer.pace(0).await;
+
+        // 500ms timestamp gap should be capped at PACE_MAX_DELTA_MS (200ms).
+        let before = Instant::now();
+        pacer.pace(500).await;
+        let elapsed = before.elapsed();
+
+        // Should sleep ~200ms (capped), not 500ms.
+        assert!(
+            elapsed < Duration::from_millis(300),
+            "expected ~200ms (capped), got {:?}",
+            elapsed
+        );
+        assert!(
+            elapsed >= Duration::from_millis(150),
+            "expected ~200ms (capped), got {:?}",
+            elapsed
+        );
+    }
+
+    #[test]
+    fn test_pacing_timestamp_ms_video() {
+        let frame = FrameData::Video {
+            timestamp: 1234,
+            data: BytesMut::new(),
+        };
+        assert_eq!(pacing_timestamp_ms(&frame), Some(1234));
+    }
+
+    #[test]
+    fn test_pacing_timestamp_ms_audio_none() {
+        let frame = FrameData::Audio {
+            timestamp: 48_000,
+            data: BytesMut::new(),
+        };
+        assert_eq!(pacing_timestamp_ms(&frame), None);
     }
 }

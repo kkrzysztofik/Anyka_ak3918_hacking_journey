@@ -461,6 +461,7 @@ impl TStreamHandler for ValidationAvStreamHandler {
             &self.pps,
             self.audio_config.as_deref(),
             self.audio_sample_rate,
+            None,
         );
         let _ = sender.send(Information::Sdp { data: sdp });
     }
