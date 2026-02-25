@@ -27,6 +27,7 @@
 
 use bytes::BytesMut;
 
+use crate::hal::shm_ring::{FrameNotification, ShmRingReader};
 use crate::platform::PlatformError;
 use crate::platform::PlatformResult;
 use crate::platform::frame::{FrameMetadata, FrameType, OwnedFrame, StreamId};
@@ -246,6 +247,11 @@ fn is_ipc_debug_enabled() -> bool {
 
 const VENDOR_SOCKET_PATH: &str = "/tmp/vendor-daemon.sock";
 
+/// Path for the dedicated frame socket (Approach B Phase 3)
+const FRAME_SOCKET_PATH: &str = "/tmp/vd-frame.sock";
+/// Path for the dedicated control socket (Approach B Phase 3)
+const CTRL_SOCKET_PATH: &str = "/tmp/vd-ctrl.sock";
+
 /// Maximum allowed IPC response body (2 MB — large enough for raw I-frames).
 const MAX_RESPONSE_SIZE: usize = 2 * 1024 * 1024;
 
@@ -289,7 +295,16 @@ const CMD_GET_ERROR_STR: i32 = 201;
 
 /// IPC client for vendor daemon communication
 pub struct VendorIpc {
+    /// Legacy/control socket for commands (used when dual socket not available)
     stream: Arc<Mutex<UnixStream>>,
+    /// Dedicated frame socket (Approach B P3) - wrapped in Mutex for interior mutability.
+    /// Only the frame reader thread accesses this, so there's no contention.
+    /// None if daemon doesn't support dual sockets.
+    frame_stream: Mutex<Option<UnixStream>>,
+    /// Shared memory ring buffer reader (Approach A) - wrapped in Mutex for interior mutability.
+    /// Only the frame reader thread accesses this, so there's no contention.
+    /// None if daemon doesn't use shared memory.
+    shm_reader: Mutex<Option<ShmRingReader>>,
     /// Frames that have been handed to the caller and are awaiting release (legacy path).
     pending_frames: Mutex<HashMap<u64, PendingFrame>>,
     /// Remote tokens for frames fetched via the owned path (new zero-copy path).
@@ -339,14 +354,55 @@ impl VendorIpc {
 
     /// Create a new IPC client connected to the vendor daemon.
     pub fn new() -> PlatformResult<Self> {
-        let stream = UnixStream::connect(VENDOR_SOCKET_PATH).map_err(|e| {
-            PlatformError::HardwareUnavailable(format!("Failed to connect to vendor daemon: {}", e))
-        })?;
+        // Connect to control socket: try new path first, fall back to legacy
+        // The daemon now uses /tmp/vd-ctrl.sock (replacing /tmp/vendor-daemon.sock)
+        let stream = UnixStream::connect(CTRL_SOCKET_PATH)
+            .or_else(|_| UnixStream::connect(VENDOR_SOCKET_PATH))
+            .map_err(|e| {
+                PlatformError::HardwareUnavailable(format!(
+                    "Cannot connect to vendor daemon (tried {} and {}): {}",
+                    CTRL_SOCKET_PATH, VENDOR_SOCKET_PATH, e
+                ))
+            })?;
         if is_ipc_debug_enabled() {
-            debug!(socket = VENDOR_SOCKET_PATH, "Connected to vendor daemon");
+            debug!(socket = CTRL_SOCKET_PATH, "Connected to vendor daemon");
         }
+
+        // Try connecting to dedicated frame socket (Approach B Phase 3)
+        let frame_stream = match UnixStream::connect(FRAME_SOCKET_PATH) {
+            Ok(fs) => {
+                tracing::info!("Connected to dedicated frame socket");
+                Some(fs)
+            }
+            Err(e) => {
+                tracing::info!(
+                    "Frame socket not available, using legacy single-socket mode: {}",
+                    e
+                );
+                None
+            }
+        };
+
+        // Try opening shared memory ring buffer (Approach A)
+        let shm_reader = match ShmRingReader::open() {
+            Ok(Some(reader)) => {
+                tracing::info!("Shared memory ring buffer opened");
+                Some(reader)
+            }
+            Ok(None) => {
+                tracing::info!("Shared memory not available");
+                None
+            }
+            Err(e) => {
+                tracing::warn!("Shared memory open failed: {}", e);
+                None
+            }
+        };
+
         Ok(Self {
             stream: Arc::new(Mutex::new(stream)),
+            frame_stream: Mutex::new(frame_stream),
+            shm_reader: Mutex::new(shm_reader),
             pending_frames: Mutex::new(HashMap::new()),
             pending_tokens: Mutex::new(HashMap::new()),
         })
@@ -364,8 +420,23 @@ impl VendorIpc {
         if is_ipc_debug_enabled() {
             debug!(socket = path, "Connected to vendor daemon (test)");
         }
+
+        // In test mode, try to connect to frame socket if it exists
+        let frame_stream = match UnixStream::connect(FRAME_SOCKET_PATH) {
+            Ok(fs) => Some(fs),
+            Err(_) => None,
+        };
+
+        // In test mode, try to open shm if available
+        let shm_reader = match ShmRingReader::open() {
+            Ok(Some(reader)) => Some(reader),
+            _ => None,
+        };
+
         Ok(Self {
             stream: Arc::new(Mutex::new(stream)),
+            frame_stream: Mutex::new(frame_stream),
+            shm_reader: Mutex::new(shm_reader),
             pending_frames: Mutex::new(HashMap::new()),
             pending_tokens: Mutex::new(HashMap::new()),
         })
@@ -374,15 +445,18 @@ impl VendorIpc {
     /// Attempt to reconnect to the vendor daemon, replacing the existing socket.
     fn reconnect(&self) -> PlatformResult<()> {
         warn!(
-            socket = VENDOR_SOCKET_PATH,
+            socket = CTRL_SOCKET_PATH,
             "Attempting to reconnect to vendor daemon"
         );
-        let new_stream = UnixStream::connect(VENDOR_SOCKET_PATH).map_err(|e| {
-            PlatformError::HardwareUnavailable(format!(
-                "Failed to reconnect to vendor daemon: {}",
-                e
-            ))
-        })?;
+        // Try new path first, fall back to legacy
+        let new_stream = UnixStream::connect(CTRL_SOCKET_PATH)
+            .or_else(|_| UnixStream::connect(VENDOR_SOCKET_PATH))
+            .map_err(|e| {
+                PlatformError::HardwareUnavailable(format!(
+                    "Failed to reconnect to vendor daemon: {}",
+                    e
+                ))
+            })?;
         let mut guard = self.stream.lock().map_err(|e| {
             PlatformError::HardwareFailure(format!("IPC mutex poisoned on reconnect: {}", e))
         })?;
@@ -688,11 +762,119 @@ impl VendorIpc {
         Ok((metadata, frame_data))
     }
 
+    /// Receive frame data from an already-connected stream.
+    ///
+    /// This is used by both the legacy path and the dual-socket path.
+    /// The caller is responsible for having already read the 8-byte status/length header.
+    fn recv_frame_data_from_stream(
+        stream: &mut impl std::io::Read,
+        resp_len: usize,
+        pool: Option<&BytesMutPool>,
+    ) -> PlatformResult<(FrameMetadata, BytesMut)> {
+        // Read 28-byte frame header
+        let mut frame_hdr = [0u8; VENC_STREAM_HEADER_LEN];
+        stream.read_exact(&mut frame_hdr).map_err(|e| {
+            PlatformError::HardwareFailure(format!("IPC frame header read error: {}", e))
+        })?;
+
+        let frame_len = u32::from_le_bytes(
+            frame_hdr[0..4]
+                .try_into()
+                .map_err(|_| PlatformError::HardwareFailure("Invalid frame_len".to_string()))?,
+        ) as usize;
+        let timestamp_ms = u64::from_le_bytes(
+            frame_hdr[4..12]
+                .try_into()
+                .map_err(|_| PlatformError::HardwareFailure("Invalid timestamp".to_string()))?,
+        );
+        let seq_no = u32::from_le_bytes(
+            frame_hdr[12..16]
+                .try_into()
+                .map_err(|_| PlatformError::HardwareFailure("Invalid seq_no".to_string()))?,
+        );
+        let frame_type_val = i32::from_le_bytes(
+            frame_hdr[16..20]
+                .try_into()
+                .map_err(|_| PlatformError::HardwareFailure("Invalid frame_type".to_string()))?,
+        );
+        let remote_token = u64::from_le_bytes(
+            frame_hdr[20..28]
+                .try_into()
+                .map_err(|_| PlatformError::HardwareFailure("Invalid remote_token".to_string()))?,
+        );
+
+        // Validate frame_len against response
+        let expected_total = VENC_STREAM_HEADER_LEN + frame_len;
+        if resp_len < expected_total {
+            return Err(PlatformError::HardwareFailure(format!(
+                "IPC frame response truncated: got {} bytes, need {}",
+                resp_len, expected_total
+            )));
+        }
+
+        // Bounded decode — reject suspiciously large frame data before allocating.
+        if frame_len > MAX_RESPONSE_SIZE {
+            return Err(PlatformError::HardwareFailure(format!(
+                "IPC frame data too large: {} bytes (max {})",
+                frame_len, MAX_RESPONSE_SIZE
+            )));
+        }
+
+        // Read frame data
+        let mut frame_data = match pool {
+            Some(p) => {
+                let mut buf = p.get(frame_len);
+                buf.resize(frame_len, 0);
+                buf
+            }
+            None => BytesMut::zeroed(frame_len),
+        };
+        stream.read_exact(&mut frame_data).map_err(|e| {
+            PlatformError::HardwareFailure(format!("IPC frame data read error: {}", e))
+        })?;
+
+        // Drain any extra bytes beyond expected_total (future protocol extensibility)
+        let extra = resp_len.saturating_sub(expected_total);
+        if extra > 0 {
+            let mut discard = vec![0u8; extra.min(4096)];
+            let _ = stream.read_exact(&mut discard);
+        }
+
+        let metadata = FrameMetadata {
+            timestamp_ms,
+            seq_no,
+            frame_type: Self::ipc_to_platform_frame_type(frame_type_val),
+            remote_token,
+        };
+
+        Ok((metadata, frame_data))
+    }
+
+    /// Write request header to a stream.
+    fn write_request_header(
+        stream: &mut impl std::io::Write,
+        cmd_id: i32,
+        req_len: u32,
+    ) -> PlatformResult<()> {
+        stream
+            .write_all(&cmd_id.to_le_bytes())
+            .map_err(|e| PlatformError::HardwareFailure(format!("IPC write error: {}", e)))?;
+        stream
+            .write_all(&req_len.to_le_bytes())
+            .map_err(|e| PlatformError::HardwareFailure(format!("IPC write error: {}", e)))?;
+        Ok(())
+    }
+
     /// Fetch next encoded frame as an `OwnedFrame` with `BytesMut` data.
     ///
     /// This is the zero-extra-copy path: frame data is read from the socket
     /// directly into `BytesMut`, which can be passed through to the streaming
     /// pipeline without any additional copy.
+    ///
+    /// This method supports three modes:
+    /// 1. Dual socket + shared memory: Use dedicated frame socket + shm for data
+    /// 2. Dual socket (socket fallback): Use dedicated frame socket, data over socket
+    /// 3. Legacy single socket: Use legacy stream with Mutex protection
     ///
     /// # Arguments
     ///
@@ -702,7 +884,7 @@ impl VendorIpc {
     ///
     /// # Returns
     ///
-    /// * `Ok(Some(OwnedFrame))` — Frame data available.
+    /// * `Ok(OwnedFrame)` — Frame data available.
     /// * `Err(...)` — IPC or protocol error.
     pub fn fetch_frame_owned(
         &self,
@@ -711,6 +893,178 @@ impl VendorIpc {
         pool: Option<&BytesMutPool>,
     ) -> PlatformResult<OwnedFrame> {
         let handle_val = stream_handle as u64;
+
+        // Choose the socket to use for frame requests
+        // Lock both frame_stream and shm_reader (they're separate locks, no contention)
+        let mut frame_guard = self.frame_stream.lock().map_err(|e| {
+            PlatformError::HardwareFailure(format!("frame_stream mutex poisoned: {}", e))
+        })?;
+
+        if let Some(ref mut frame_stream) = *frame_guard {
+            // Dual socket mode: use dedicated frame socket
+            Self::write_request_header(frame_stream, CMD_VENC_GET_STREAM, 8)?;
+            frame_stream
+                .write_all(&handle_val.to_le_bytes())
+                .map_err(|e| PlatformError::HardwareFailure(format!("IPC write error: {}", e)))?;
+            frame_stream
+                .flush()
+                .map_err(|e| PlatformError::HardwareFailure(format!("IPC flush error: {}", e)))?;
+
+            // Read response header (status + resp_len)
+            let mut hdr = [0u8; 8];
+            frame_stream
+                .read_exact(&mut hdr)
+                .map_err(|e| PlatformError::HardwareFailure(format!("IPC read error: {}", e)))?;
+            let status =
+                i32::from_le_bytes(hdr[0..4].try_into().map_err(|_| {
+                    PlatformError::HardwareFailure("Invalid status bytes".to_string())
+                })?);
+            let resp_len =
+                u32::from_le_bytes(hdr[4..8].try_into().map_err(|_| {
+                    PlatformError::HardwareFailure("Invalid length bytes".to_string())
+                })?) as usize;
+
+            if status != AK_SUCCESS_I32 {
+                // Drain any remaining response data to keep stream in sync
+                if resp_len > 0 {
+                    let drain_len = resp_len.min(MAX_RESPONSE_SIZE);
+                    let mut discard = vec![0u8; drain_len];
+                    let _ = frame_stream.read_exact(&mut discard);
+                }
+                return Err(PlatformError::HardwareFailure(format!(
+                    "IPC frame request failed: status {}",
+                    status
+                )));
+            }
+
+            // Check for shared memory notification (12 bytes)
+            // resp_len == 12 means daemon sent a notification (not a full frame)
+            if resp_len == 12 {
+                // Check if we have shm_reader - need to lock it too
+                let mut shm_guard = self.shm_reader.lock().map_err(|e| {
+                    PlatformError::HardwareFailure(format!("shm_reader mutex poisoned: {}", e))
+                })?;
+
+                if shm_guard.is_some() {
+                    // SHARED MEMORY PATH: read 12-byte notification
+                    let mut notif_bytes = [0u8; 12];
+                    frame_stream.read_exact(&mut notif_bytes).map_err(|e| {
+                        PlatformError::HardwareFailure(format!("IPC read error: {}", e))
+                    })?;
+                    let notif = FrameNotification::from_bytes(&notif_bytes);
+
+                    if !notif.is_socket_fallback() {
+                        // Normal shm path: read from shared memory
+                        let shm = shm_guard.as_mut().ok_or_else(|| {
+                            PlatformError::HardwareFailure(
+                                "shm reader disappeared unexpectedly".into(),
+                            )
+                        })?;
+                        let (metadata, frame_data) =
+                            shm.read_slot_into_bytesmut(notif.slot_index, pool)?;
+
+                        // No pending_tokens needed — SDK frame already released by daemon
+                        if is_ipc_debug_enabled() {
+                            debug!(
+                                frame_len = frame_data.len(),
+                                timestamp_ms = metadata.timestamp_ms,
+                                seq_no = metadata.seq_no,
+                                frame_type = ?metadata.frame_type,
+                                slot_index = notif.slot_index,
+                                "fetch_frame_owned: frame received via shared memory"
+                            );
+                        }
+
+                        return Ok(OwnedFrame {
+                            data: frame_data,
+                            timestamp: metadata.timestamp_ms.wrapping_mul(1000),
+                            frame_type: metadata.frame_type,
+                            stream_id,
+                        });
+                    }
+                    // Socket fallback: daemon sends 12-byte notification followed by
+                    // the full frame data. We already read the 12-byte notification,
+                    // now read the 28-byte frame header and frame data.
+                    tracing::debug!("Socket fallback: reading frame from socket");
+                    let (metadata, frame_data) =
+                        Self::recv_frame_data_from_stream(frame_stream, resp_len, pool)?;
+
+                    // Store token for release (keyed by stream_handle)
+                    // Need to release shm_guard first to avoid holding two locks
+                    drop(shm_guard);
+
+                    self.pending_tokens
+                        .lock()
+                        .map_err(|e| {
+                            PlatformError::HardwareFailure(format!(
+                                "pending_tokens mutex poisoned: {}",
+                                e
+                            ))
+                        })?
+                        .insert(handle_val, metadata.remote_token);
+
+                    if is_ipc_debug_enabled() {
+                        debug!(
+                            frame_len = frame_data.len(),
+                            timestamp_ms = metadata.timestamp_ms,
+                            seq_no = metadata.seq_no,
+                            frame_type = ?metadata.frame_type,
+                            remote_token = metadata.remote_token,
+                            "fetch_frame_owned: frame received via socket fallback"
+                        );
+                    }
+
+                    return Ok(OwnedFrame {
+                        data: frame_data,
+                        timestamp: metadata.timestamp_ms.wrapping_mul(1000),
+                        frame_type: metadata.frame_type,
+                        stream_id,
+                    });
+                } else {
+                    // Received shm notification but shm_reader not available - this is an error
+                    // Read and discard the 12 bytes to keep socket in sync
+                    let mut discard = [0u8; 12];
+                    frame_stream.read_exact(&mut discard).map_err(|e| {
+                        PlatformError::HardwareFailure(format!("IPC read error: {}", e))
+                    })?;
+                    return Err(PlatformError::HardwareFailure(
+                        "received shm notification but shm reader not available".into(),
+                    ));
+                }
+            }
+
+            // SOCKET PATH: Read frame from socket (resp_len > 12 means full frame over socket)
+            let (metadata, frame_data) =
+                Self::recv_frame_data_from_stream(frame_stream, resp_len, pool)?;
+
+            // Store token for release (keyed by stream_handle)
+            self.pending_tokens
+                .lock()
+                .map_err(|e| {
+                    PlatformError::HardwareFailure(format!("pending_tokens mutex poisoned: {}", e))
+                })?
+                .insert(handle_val, metadata.remote_token);
+
+            if is_ipc_debug_enabled() {
+                debug!(
+                    frame_len = frame_data.len(),
+                    timestamp_ms = metadata.timestamp_ms,
+                    seq_no = metadata.seq_no,
+                    frame_type = ?metadata.frame_type,
+                    remote_token = metadata.remote_token,
+                    "fetch_frame_owned: frame received via dual socket"
+                );
+            }
+
+            return Ok(OwnedFrame {
+                data: frame_data,
+                timestamp: metadata.timestamp_ms.wrapping_mul(1000),
+                frame_type: metadata.frame_type,
+                stream_id,
+            });
+        }
+
+        // Legacy single-socket mode: use the Mutex-protected stream
         let req_data = handle_val.to_le_bytes();
 
         let mut stream = self
@@ -753,7 +1107,7 @@ impl VendorIpc {
                 seq_no = metadata.seq_no,
                 frame_type = ?metadata.frame_type,
                 remote_token = metadata.remote_token,
-                "fetch_frame_owned: frame received"
+                "fetch_frame_owned: frame received (legacy path)"
             );
         }
 
@@ -771,12 +1125,17 @@ impl VendorIpc {
     /// Sends the remote_token back to the daemon so it can reclaim the frame buffer.
     /// This method only manages the `pending_tokens` map (not `pending_frames`).
     ///
+    /// When using shared memory, the daemon already releases the SDK frame, so this
+    /// is a no-op (no pending token to send).
+    ///
     /// # Arguments
     ///
     /// * `stream_handle` — The stream handle used in `fetch_frame_owned`.
     pub fn release_frame_owned(&self, stream_handle: *mut std::ffi::c_void) -> PlatformResult<()> {
         let handle_val = stream_handle as u64;
 
+        // Check if we have a pending token (socket path only)
+        // If using shared memory, there's no token stored
         let remote_token = self
             .pending_tokens
             .lock()
@@ -786,6 +1145,21 @@ impl VendorIpc {
             .remove(&handle_val)
             .unwrap_or(0);
 
+        // If no token, we're in shared memory path - daemon already released the frame
+        if remote_token == 0 {
+            // Check if we have shm_reader to confirm we're in shm mode
+            // Need to lock to access shm_reader
+            let shm_guard = self.shm_reader.lock().map_err(|e| {
+                PlatformError::HardwareFailure(format!("shm_reader mutex poisoned: {}", e))
+            })?;
+            if shm_guard.is_some() {
+                tracing::debug!("release_frame_owned: shared memory path, no release needed");
+                return Ok(());
+            }
+            // No token and no shm - might be legacy path with token=0, continue with release
+        }
+
+        // Socket path: send release to daemon
         let mut req_data = [0u8; 16];
         req_data[0..8].copy_from_slice(&handle_val.to_le_bytes());
         req_data[8..16].copy_from_slice(&remote_token.to_le_bytes());
@@ -804,67 +1178,146 @@ impl VendorIpc {
     // Encoding helpers - convert Rust types to bytes for IPC
     // ============================================================================
 
+    /// Encode video_dev_type to a fixed-size buffer (4 bytes).
+    fn encode_video_dev_type_buf(dev: video_dev_type) -> ([u8; 4], usize) {
+        let mut buf = [0u8; 4];
+        buf.copy_from_slice(&(dev as i32).to_le_bytes());
+        (buf, 4)
+    }
+
+    /// Encode video_channel_attr to a fixed-size buffer (48 bytes).
+    /// Format: crop (16 bytes) + res[0] (16 bytes) + res[1] (16 bytes)
+    fn encode_video_channel_attr_buf(attr: &video_channel_attr) -> ([u8; 48], usize) {
+        let mut buf = [0u8; 48];
+        let mut offset = 0;
+        // Crop info (16 bytes)
+        buf[offset..offset + 4].copy_from_slice(&attr.crop.left.to_le_bytes());
+        offset += 4;
+        buf[offset..offset + 4].copy_from_slice(&attr.crop.top.to_le_bytes());
+        offset += 4;
+        buf[offset..offset + 4].copy_from_slice(&attr.crop.width.to_le_bytes());
+        offset += 4;
+        buf[offset..offset + 4].copy_from_slice(&attr.crop.height.to_le_bytes());
+        offset += 4;
+        // Resolution array (32 bytes)
+        for res in &attr.res {
+            buf[offset..offset + 4].copy_from_slice(&res.width.to_le_bytes());
+            offset += 4;
+            buf[offset..offset + 4].copy_from_slice(&res.height.to_le_bytes());
+            offset += 4;
+            buf[offset..offset + 4].copy_from_slice(&res.max_width.to_le_bytes());
+            offset += 4;
+            buf[offset..offset + 4].copy_from_slice(&res.max_height.to_le_bytes());
+            offset += 4;
+        }
+        (buf, 48)
+    }
+
+    /// Encode encode_param to a fixed-size buffer (48 bytes).
+    fn encode_encode_param_buf(param: &encode_param) -> ([u8; 48], usize) {
+        let mut buf = [0u8; 48];
+        let mut offset = 0;
+        buf[offset..offset + 4].copy_from_slice(&param.width.to_le_bytes());
+        offset += 4;
+        buf[offset..offset + 4].copy_from_slice(&param.height.to_le_bytes());
+        offset += 4;
+        buf[offset..offset + 4].copy_from_slice(&param.minqp.to_le_bytes());
+        offset += 4;
+        buf[offset..offset + 4].copy_from_slice(&param.maxqp.to_le_bytes());
+        offset += 4;
+        buf[offset..offset + 4].copy_from_slice(&param.fps.to_le_bytes());
+        offset += 4;
+        buf[offset..offset + 4].copy_from_slice(&param.goplen.to_le_bytes());
+        offset += 4;
+        buf[offset..offset + 4].copy_from_slice(&param.bps.to_le_bytes());
+        offset += 4;
+        buf[offset..offset + 4].copy_from_slice(&(param.profile as i32).to_le_bytes());
+        offset += 4;
+        buf[offset..offset + 4].copy_from_slice(&(param.use_chn as i32).to_le_bytes());
+        offset += 4;
+        buf[offset..offset + 4].copy_from_slice(&(param.enc_grp as i32).to_le_bytes());
+        offset += 4;
+        buf[offset..offset + 4].copy_from_slice(&(param.br_mode as i32).to_le_bytes());
+        offset += 4;
+        buf[offset..offset + 4].copy_from_slice(&(param.enc_out_type as i32).to_le_bytes());
+        offset += 4;
+        (buf, offset)
+    }
+
+    /// Encode pcm_param to a fixed-size buffer (12 bytes).
+    fn encode_pcm_param_buf(param: &pcm_param) -> ([u8; 12], usize) {
+        let mut buf = [0u8; 12];
+        let mut offset = 0;
+        buf[offset..offset + 4].copy_from_slice(&param.sample_rate.to_le_bytes());
+        offset += 4;
+        buf[offset..offset + 4].copy_from_slice(&param.sample_bits.to_le_bytes());
+        offset += 4;
+        buf[offset..offset + 4].copy_from_slice(&param.channel_num.to_le_bytes());
+        offset += 4;
+        (buf, offset)
+    }
+
+    /// Encode audio_param to a fixed-size buffer (16 bytes).
+    fn encode_audio_param_buf(param: &audio_param) -> ([u8; 16], usize) {
+        let mut buf = [0u8; 16];
+        let mut offset = 0;
+        buf[offset..offset + 4].copy_from_slice(&param.sample_rate.to_le_bytes());
+        offset += 4;
+        buf[offset..offset + 4].copy_from_slice(&param.channel_num.to_le_bytes());
+        offset += 4;
+        buf[offset..offset + 4].copy_from_slice(&param.sample_bits.to_le_bytes());
+        offset += 4;
+        buf[offset..offset + 4].copy_from_slice(&param.type_.to_le_bytes());
+        offset += 4;
+        (buf, offset)
+    }
+
+    /// Encode aenc_attr to a fixed-size buffer (4 bytes).
+    fn encode_aenc_attr_buf(attr: &aenc_attr) -> ([u8; 4], usize) {
+        let mut buf = [0u8; 4];
+        buf.copy_from_slice(&attr.aac_head.to_le_bytes());
+        (buf, 4)
+    }
+
+    // Legacy Vec-based encoders (deprecated, kept for tests)
+    #[allow(dead_code)]
     fn encode_i32(val: i32) -> Vec<u8> {
         val.to_le_bytes().to_vec()
     }
 
+    #[allow(dead_code)]
     fn encode_video_dev_type(dev: video_dev_type) -> Vec<u8> {
         (dev as i32).to_le_bytes().to_vec()
     }
 
+    #[allow(dead_code)]
     fn encode_video_channel_attr(attr: &video_channel_attr) -> Vec<u8> {
-        let mut data = Vec::new();
-        // Crop info
-        data.extend_from_slice(&attr.crop.left.to_le_bytes());
-        data.extend_from_slice(&attr.crop.top.to_le_bytes());
-        data.extend_from_slice(&attr.crop.width.to_le_bytes());
-        data.extend_from_slice(&attr.crop.height.to_le_bytes());
-        // Resolution array
-        for res in &attr.res {
-            data.extend_from_slice(&res.width.to_le_bytes());
-            data.extend_from_slice(&res.height.to_le_bytes());
-            data.extend_from_slice(&res.max_width.to_le_bytes());
-            data.extend_from_slice(&res.max_height.to_le_bytes());
-        }
-        data
+        let (buf, len) = Self::encode_video_channel_attr_buf(attr);
+        buf[..len].to_vec()
     }
 
+    #[allow(dead_code)]
     fn encode_encode_param(param: &encode_param) -> Vec<u8> {
-        let mut data = Vec::new();
-        data.extend_from_slice(&param.width.to_le_bytes());
-        data.extend_from_slice(&param.height.to_le_bytes());
-        data.extend_from_slice(&param.minqp.to_le_bytes());
-        data.extend_from_slice(&param.maxqp.to_le_bytes());
-        data.extend_from_slice(&param.fps.to_le_bytes());
-        data.extend_from_slice(&param.goplen.to_le_bytes());
-        data.extend_from_slice(&param.bps.to_le_bytes());
-        data.extend_from_slice(&(param.profile as i32).to_le_bytes());
-        data.extend_from_slice(&(param.use_chn as i32).to_le_bytes());
-        data.extend_from_slice(&(param.enc_grp as i32).to_le_bytes());
-        data.extend_from_slice(&(param.br_mode as i32).to_le_bytes());
-        data.extend_from_slice(&(param.enc_out_type as i32).to_le_bytes());
-        data
+        let (buf, len) = Self::encode_encode_param_buf(param);
+        buf[..len].to_vec()
     }
 
+    #[allow(dead_code)]
     fn encode_pcm_param(param: &pcm_param) -> Vec<u8> {
-        let mut data = Vec::new();
-        data.extend_from_slice(&param.sample_rate.to_le_bytes());
-        data.extend_from_slice(&param.sample_bits.to_le_bytes());
-        data.extend_from_slice(&param.channel_num.to_le_bytes());
-        data
+        let (buf, len) = Self::encode_pcm_param_buf(param);
+        buf[..len].to_vec()
     }
 
+    #[allow(dead_code)]
     fn encode_audio_param(param: &audio_param) -> Vec<u8> {
-        let mut data = Vec::new();
-        data.extend_from_slice(&param.sample_rate.to_le_bytes());
-        data.extend_from_slice(&param.channel_num.to_le_bytes());
-        data.extend_from_slice(&param.sample_bits.to_le_bytes());
-        data.extend_from_slice(&param.type_.to_le_bytes());
-        data
+        let (buf, len) = Self::encode_audio_param_buf(param);
+        buf[..len].to_vec()
     }
 
+    #[allow(dead_code)]
     fn encode_aenc_attr(attr: &aenc_attr) -> Vec<u8> {
-        attr.aac_head.to_le_bytes().to_vec()
+        let (buf, len) = Self::encode_aenc_attr_buf(attr);
+        buf[..len].to_vec()
     }
 
     // ============================================================================
@@ -884,16 +1337,6 @@ impl VendorIpc {
     /// Write a u64 value directly to the stream — no heap allocation.
     fn write_u64(stream: &mut UnixStream, val: u64) -> std::io::Result<()> {
         stream.write_all(&val.to_le_bytes())
-    }
-
-    /// Write an IPC request header (cmd_id + req_len) directly to the stream.
-    fn write_request_header(
-        stream: &mut UnixStream,
-        cmd_id: i32,
-        req_len: u32,
-    ) -> std::io::Result<()> {
-        stream.write_all(&cmd_id.to_le_bytes())?;
-        stream.write_all(&req_len.to_le_bytes())
     }
 
     fn decode_video_resolution(data: &[u8]) -> PlatformResult<video_resolution> {
@@ -981,8 +1424,8 @@ impl VideoHalTrait for VendorIpc {
     }
 
     fn vi_open(&self, dev: video_dev_type) -> *mut c_void {
-        let req_data = Self::encode_video_dev_type(dev);
-        match self.send_handle_request(CMD_VI_OPEN, &req_data) {
+        let (req_buf, req_len) = Self::encode_video_dev_type_buf(dev);
+        match self.send_handle_request(CMD_VI_OPEN, &req_buf[..req_len]) {
             Ok(handle) => handle,
             Err(e) => {
                 error!(error = %e, "vi_open IPC failed");
@@ -1035,12 +1478,13 @@ impl VideoHalTrait for VendorIpc {
 
     fn vi_set_channel_attr(&self, handle: *mut c_void, attr: *const video_channel_attr) -> i32 {
         let handle_val = handle as u64;
-        let mut req_data = handle_val.to_le_bytes().to_vec();
+        let mut req_buf = [0u8; 56]; // 8 bytes handle + 48 bytes attr
+        req_buf[0..8].copy_from_slice(&handle_val.to_le_bytes());
         // SAFETY: caller guarantees `attr` is a valid, non-null pointer to a
         // `video_channel_attr` that remains valid for the duration of this call.
-        let attr_data = unsafe { Self::encode_video_channel_attr(&*attr) };
-        req_data.extend_from_slice(&attr_data);
-        match self.send_request(CMD_VI_SET_CHANNEL_ATTR, &req_data) {
+        let (attr_buf, attr_len) = unsafe { Self::encode_video_channel_attr_buf(&*attr) };
+        req_buf[8..8 + attr_len].copy_from_slice(&attr_buf[..attr_len]);
+        match self.send_request(CMD_VI_SET_CHANNEL_ATTR, &req_buf[..8 + attr_len]) {
             Ok((status, _)) => status,
             Err(e) => {
                 error!(error = %e, "vi_set_channel_attr IPC failed");
@@ -1084,8 +1528,8 @@ impl VideoHalTrait for VendorIpc {
     fn venc_open(&self, param: *const encode_param) -> *mut c_void {
         // SAFETY: caller guarantees `param` is a valid, non-null pointer to an
         // `encode_param` that remains valid for the duration of this call.
-        let req_data = unsafe { Self::encode_encode_param(&*param) };
-        match self.send_handle_request(CMD_VENC_OPEN, &req_data) {
+        let (req_buf, req_len) = unsafe { Self::encode_encode_param_buf(&*param) };
+        match self.send_handle_request(CMD_VENC_OPEN, &req_buf[..req_len]) {
             Ok(handle) => handle,
             Err(e) => {
                 error!(error = %e, "venc_open IPC failed");
@@ -1352,8 +1796,8 @@ impl crate::hal::audio::AudioHalTrait for VendorIpc {
     fn ai_open(&self, param: *const pcm_param) -> *mut c_void {
         // SAFETY: caller guarantees `param` is a valid, non-null pointer to a
         // `pcm_param` that remains valid for the duration of this call.
-        let req_data = unsafe { Self::encode_pcm_param(&*param) };
-        match self.send_handle_request(CMD_AI_OPEN, &req_data) {
+        let (req_buf, req_len) = unsafe { Self::encode_pcm_param_buf(&*param) };
+        match self.send_handle_request(CMD_AI_OPEN, &req_buf[..req_len]) {
             Ok(handle) => handle,
             Err(e) => {
                 error!(error = %e, "ai_open IPC failed");
@@ -1403,8 +1847,8 @@ impl crate::hal::audio::AudioHalTrait for VendorIpc {
     fn aenc_open(&self, param: *const audio_param) -> *mut c_void {
         // SAFETY: caller guarantees `param` is a valid, non-null pointer to an
         // `audio_param` that remains valid for the duration of this call.
-        let req_data = unsafe { Self::encode_audio_param(&*param) };
-        match self.send_handle_request(CMD_AENC_OPEN, &req_data) {
+        let (req_buf, req_len) = unsafe { Self::encode_audio_param_buf(&*param) };
+        match self.send_handle_request(CMD_AENC_OPEN, &req_buf[..req_len]) {
             Ok(handle) => handle,
             Err(e) => {
                 error!(error = %e, "aenc_open IPC failed");
@@ -1427,12 +1871,13 @@ impl crate::hal::audio::AudioHalTrait for VendorIpc {
 
     fn aenc_set_attr(&self, handle: *mut c_void, attr: *const aenc_attr) -> i32 {
         let handle_val = handle as u64;
-        let mut req_data = handle_val.to_le_bytes().to_vec();
+        let mut req_buf = [0u8; 16]; // 8 bytes handle + 8 bytes padding for alignment
+        req_buf[0..8].copy_from_slice(&handle_val.to_le_bytes());
         // SAFETY: caller guarantees `attr` is a valid, non-null pointer to an
         // `aenc_attr` that remains valid for the duration of this call.
-        let attr_data = unsafe { Self::encode_aenc_attr(&*attr) };
-        req_data.extend_from_slice(&attr_data);
-        match self.send_request(CMD_AENC_SET_ATTR, &req_data) {
+        let (attr_buf, attr_len) = unsafe { Self::encode_aenc_attr_buf(&*attr) };
+        req_buf[8..8 + attr_len].copy_from_slice(&attr_buf[..attr_len]);
+        match self.send_request(CMD_AENC_SET_ATTR, &req_buf[..8 + attr_len]) {
             Ok((status, _)) => status,
             Err(e) => {
                 error!(error = %e, "aenc_set_attr IPC failed");
@@ -2056,7 +2501,7 @@ mod tests {
             }
         });
 
-        let ipc = VendorIpc::new_with_path(&daemon.socket_path).unwrap();
+        let mut ipc = VendorIpc::new_with_path(&daemon.socket_path).unwrap();
         let stream_handle = 1usize as *mut std::ffi::c_void;
 
         let frame = ipc
@@ -2097,7 +2542,7 @@ mod tests {
             }
         });
 
-        let ipc = VendorIpc::new_with_path(&daemon.socket_path).unwrap();
+        let mut ipc = VendorIpc::new_with_path(&daemon.socket_path).unwrap();
         let pool = BytesMutPool::new(1024, 4);
         let stream_handle = 1usize as *mut std::ffi::c_void;
 
@@ -2149,7 +2594,7 @@ mod tests {
             }
         });
 
-        let ipc = VendorIpc::new_with_path(&daemon.socket_path).unwrap();
+        let mut ipc = VendorIpc::new_with_path(&daemon.socket_path).unwrap();
         let stream_handle = 1usize as *mut std::ffi::c_void;
 
         // Fetch the frame (stores remote_token)
