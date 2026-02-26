@@ -398,14 +398,20 @@ mod tests {
     fn test_rtcp_channel_set_ssrc() {
         let mut channel = RtcpChannel::default();
         channel.set_ssrc(0x12345678, 90000);
-        let sr = channel.send_ctx.generate_sr().expect("SR should be generated");
+        let sr = channel
+            .send_ctx
+            .generate_sr()
+            .expect("SR should be generated");
         assert_eq!(sr.ssrc, 0x12345678);
     }
 
     #[test]
     fn test_rtcp_channel_set_ssrc_default_is_zero() {
         let mut channel = RtcpChannel::default();
-        let sr = channel.send_ctx.generate_sr().expect("SR should be generated");
+        let sr = channel
+            .send_ctx
+            .generate_sr()
+            .expect("SR should be generated");
         assert_eq!(sr.ssrc, 0);
     }
 

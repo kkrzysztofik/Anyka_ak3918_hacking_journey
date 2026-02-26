@@ -230,13 +230,10 @@ impl TPacker for RtpH264Packer {
     async fn pack(&mut self, nalus: &mut BytesMut, timestamp: u32) -> Result<(), PackerError> {
         self.header.timestamp = timestamp; // ((timestamp as u64 * self.clock_rate as u64) / 1000) as u32;
         let extracted_nalus = Self::extract_nalus_from_frame(nalus);
-        let last_vcl_index = extracted_nalus.iter().rposition(|nalu| {
-            nalu.first()
-                .is_some_and(|header| Self::is_vcl_nalu_header(*header))
-        });
+        let last_index = extracted_nalus.len().saturating_sub(1);
 
         for (index, nalu) in extracted_nalus.into_iter().enumerate() {
-            let mark_end_of_access_unit = Some(index) == last_vcl_index;
+            let mark_end_of_access_unit = index == last_index;
             self.pack_nalu_with_marker(nalu, mark_end_of_access_unit)
                 .await?;
         }
@@ -1599,5 +1596,129 @@ mod tests {
         let mut reader = BytesReader::new(data);
         let result = RtpH264UnPacker::skip_mtap_ts_offset(&mut reader, define::MTAP_24);
         assert!(result.is_err());
+    }
+
+    // ========== End-of-Access-Unit Marker Tests (RFC 6184) ==========
+    //
+    // RFC 6184 Section 5.1: "The RTP marker bit is set to 1 to indicate the
+    // last RTP packet of an access unit."
+
+    #[tokio::test]
+    async fn test_marker_on_last_nal_even_with_trailing_non_vcl() {
+        let mock_io = Arc::new(Mutex::new(
+            Box::new(MockNetIO::new()) as Box<dyn TNetIO + Send + Sync>
+        ));
+        let mut packer = RtpH264Packer::new(96, 12345, 0, 1500, mock_io);
+
+        let markers = Arc::new(std::sync::Mutex::new(Vec::<u8>::new()));
+        let markers_clone = markers.clone();
+        packer.on_packet_handler(Box::new(move |_io, packet| {
+            markers_clone.lock().unwrap().push(packet.header.marker);
+            Box::pin(async move { Ok(()) })
+        }));
+
+        let mut frame = BytesMut::new();
+        frame.extend_from_slice(&[0x00, 0x00, 0x00, 0x01]);
+        frame.extend_from_slice(&[0x65, 0x88, 0x84, 0x21]);
+        frame.extend_from_slice(&[0x00, 0x00, 0x00, 0x01]);
+        frame.extend_from_slice(&[0x06, 0x05, 0xff, 0xff]);
+
+        let result = packer.pack(&mut frame, 1000).await;
+        assert!(result.is_ok());
+
+        let recorded_markers = markers.lock().unwrap();
+        assert_eq!(
+            recorded_markers.len(),
+            2,
+            "Should have 2 packets (IDR + SEI)"
+        );
+        assert_eq!(
+            recorded_markers[0], 0,
+            "First packet (IDR VCL) should NOT have marker"
+        );
+        assert_eq!(
+            recorded_markers[1], 1,
+            "Last packet (SEI non-VCL) SHOULD have marker - end of access unit"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_marker_exactly_one_per_multi_nal_access_unit() {
+        let mock_io = Arc::new(Mutex::new(
+            Box::new(MockNetIO::new()) as Box<dyn TNetIO + Send + Sync>
+        ));
+        let mut packer = RtpH264Packer::new(96, 12345, 0, 1500, mock_io);
+
+        let markers = Arc::new(std::sync::Mutex::new(Vec::<u8>::new()));
+        let markers_clone = markers.clone();
+        packer.on_packet_handler(Box::new(move |_io, packet| {
+            markers_clone.lock().unwrap().push(packet.header.marker);
+            Box::pin(async move { Ok(()) })
+        }));
+
+        let mut frame = BytesMut::new();
+        frame.extend_from_slice(&[0x00, 0x00, 0x00, 0x01, 0x67, 0x42, 0x00]);
+        frame.extend_from_slice(&[0x00, 0x00, 0x00, 0x01, 0x68, 0xce, 0x38]);
+        frame.extend_from_slice(&[0x00, 0x00, 0x00, 0x01, 0x65, 0x88, 0x84]);
+        frame.extend_from_slice(&[0x00, 0x00, 0x00, 0x01, 0x41, 0x9a, 0x22]);
+        frame.extend_from_slice(&[0x00, 0x00, 0x00, 0x01, 0x06, 0x05, 0xff]);
+
+        let result = packer.pack(&mut frame, 1000).await;
+        assert!(result.is_ok());
+
+        let recorded_markers = markers.lock().unwrap();
+        assert_eq!(recorded_markers.len(), 5, "Should have 5 NAL packets");
+        let marker_count = recorded_markers.iter().filter(|&&m| m == 1).count();
+        assert_eq!(
+            marker_count, 1,
+            "Exactly one marker=1 expected at end of access unit, got markers: {:?}",
+            *recorded_markers
+        );
+        assert_eq!(
+            *recorded_markers.last().unwrap(),
+            1,
+            "Final packet must have marker=1"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_marker_on_fu_a_single_large_vcl_at_access_unit_end() {
+        let mock_io = Arc::new(Mutex::new(
+            Box::new(MockNetIO::new()) as Box<dyn TNetIO + Send + Sync>
+        ));
+        let mut packer = RtpH264Packer::new(96, 12345, 0, 1500, mock_io);
+
+        let markers = Arc::new(std::sync::Mutex::new(Vec::<u8>::new()));
+        let fu_end_marker = Arc::new(std::sync::Mutex::new(None::<u8>));
+        let markers_clone = markers.clone();
+        let fu_end_marker_clone = fu_end_marker.clone();
+        packer.on_packet_handler(Box::new(move |_io, packet| {
+            markers_clone.lock().unwrap().push(packet.header.marker);
+            if packet.payload.len() >= 2 {
+                let fu_indicator = packet.payload[0];
+                let fu_header = packet.payload[1];
+                if (fu_indicator & 0x1F) == define::FU_A && (fu_header & define::FU_END) > 0 {
+                    *fu_end_marker_clone.lock().unwrap() = Some(packet.header.marker);
+                }
+            }
+            Box::pin(async move { Ok(()) })
+        }));
+
+        let nalu = create_large_nalu(2000);
+        let result = packer.pack_fu_a(nalu).await;
+        assert!(result.is_ok());
+
+        let recorded_markers = markers.lock().unwrap();
+        assert!(
+            recorded_markers.len() >= 2,
+            "Should have multiple FU-A fragments, got {} packets",
+            recorded_markers.len()
+        );
+        let fu_end_marker_val = fu_end_marker.lock().unwrap();
+        assert_eq!(
+            *fu_end_marker_val,
+            Some(1),
+            "FU-A last fragment MUST have marker=1 when at access unit end (single VCL)"
+        );
     }
 }
