@@ -1796,14 +1796,14 @@ fn unified_frame_read_loop(
     if let Some(ref ipc) = vendor_ipc
         && push_mode_enabled(has_sub)
     {
-        match ipc.start_push(main_stream_handle.as_ptr()) {
+        match ipc.start_push(main_stream_handle.as_ptr(), StreamId::VideoMain) {
             Err(e) => {
                 tracing::warn!("Push mode not available, falling back to polling: {}", e);
             }
             Ok(()) => {
                 tracing::info!("Push-based frame delivery active");
                 while !stop_signal.load(Ordering::SeqCst) {
-                    match ipc.recv_pushed_frame(StreamId::VideoMain, frame_pool.as_deref()) {
+                    match ipc.recv_pushed_frame(frame_pool.as_deref()) {
                         Ok(owned_frame) => {
                             main_state.consecutive_no_data = 0;
                             main_state.last_error_was_no_data = true;
@@ -1859,7 +1859,7 @@ fn unified_frame_read_loop(
                         }
                     }
                 }
-                let _ = ipc.stop_push();
+                let _ = ipc.stop_push(Some(StreamId::VideoMain));
                 tracing::info!(
                     push_frames = main_state.frame_count,
                     push_bytes = main_state.total_bytes,
