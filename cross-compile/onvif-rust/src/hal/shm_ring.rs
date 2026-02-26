@@ -49,7 +49,9 @@
 //! ```
 
 use std::ffi::CString;
+use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU32, Ordering};
+use std::time::Instant;
 
 use bytes::BytesMut;
 
@@ -108,6 +110,23 @@ pub const VD_NOTIFY_SOCKET_FALLBACK: u32 = 1 << 1;
 /// Frame was intentionally dropped by daemon (P-frame during ring overflow)
 pub const VD_NOTIFY_FRAME_DROPPED: u32 = 1 << 2;
 
+#[inline]
+fn slot_state_name(state: u32) -> &'static str {
+    match state {
+        VD_SLOT_EMPTY => "EMPTY",
+        VD_SLOT_WRITING => "WRITING",
+        VD_SLOT_READY => "READY",
+        VD_SLOT_READING => "READING",
+        _ => "UNKNOWN",
+    }
+}
+
+#[inline]
+fn monotonic_millis() -> u64 {
+    static START: OnceLock<Instant> = OnceLock::new();
+    START.get_or_init(Instant::now).elapsed().as_millis() as u64
+}
+
 // =============================================================================
 // C-compatible Structures
 // =============================================================================
@@ -152,8 +171,10 @@ pub struct SlotHeader {
     pub state: u32,
     /// Length of valid frame data in bytes
     pub frame_len: u32,
-    /// Timestamp in microseconds
-    pub timestamp_us: u64,
+    /// Timestamp in milliseconds (SDK ts directly, no μs inflation)
+    pub timestamp_ms: u32,
+    /// Padding (was part of u64 timestamp_us)
+    pub _ts_pad: u32,
     /// Frame sequence number
     pub seq_no: u32,
     /// Frame type (video/audio, encoding type)
@@ -486,6 +507,21 @@ impl ShmRingReader {
 
         // Verify slot is ready
         if state != VD_SLOT_READY {
+            let write_seq = self.write_seq();
+            let available_frames = write_seq.wrapping_sub(self.local_read_seq);
+            tracing::warn!(
+                event = "shm_slot_not_ready",
+                diag_monotonic_ms = monotonic_millis(),
+                slot_index,
+                state,
+                state_name = slot_state_name(state),
+                expected_state = VD_SLOT_READY,
+                expected_state_name = slot_state_name(VD_SLOT_READY),
+                write_seq,
+                local_read_seq = self.local_read_seq,
+                available_frames,
+                "shared memory slot not ready during read"
+            );
             return Err(PlatformError::InvalidParameter(format!(
                 "slot {} not ready for reading (state: {})",
                 slot_index, state
@@ -523,7 +559,7 @@ impl ShmRingReader {
 
                 Ok(ShmFrame {
                     data,
-                    timestamp_us: header.timestamp_us,
+                    timestamp_ms: header.timestamp_ms,
                     seq_no: header.seq_no,
                     frame_type: header.frame_type,
                     stream_id: header.stream_id,
@@ -531,6 +567,21 @@ impl ShmRingReader {
                 })
             }
             Err(current) => {
+                let write_seq = self.write_seq();
+                let available_frames = write_seq.wrapping_sub(self.local_read_seq);
+                tracing::warn!(
+                    event = "shm_slot_acquire_race",
+                    diag_monotonic_ms = monotonic_millis(),
+                    slot_index,
+                    expected_state = VD_SLOT_READY,
+                    expected_state_name = slot_state_name(VD_SLOT_READY),
+                    current_state = current,
+                    current_state_name = slot_state_name(current),
+                    write_seq,
+                    local_read_seq = self.local_read_seq,
+                    available_frames,
+                    "shared memory slot changed while acquiring read lease"
+                );
                 // Slot state changed between our read and CAS
                 Err(PlatformError::ResourceBusy(format!(
                     "slot {} state changed during acquire (was {}, now {})",
@@ -575,7 +626,7 @@ impl ShmRingReader {
         // Parse metadata from slot header
         let header = self.slot_header(slot_index);
         let metadata = FrameMetadata {
-            timestamp_ms: header.timestamp_us / 1000,
+            timestamp_ms: header.timestamp_ms,
             seq_no: header.seq_no,
             frame_type: shm_frame_type_to_onvif(header.frame_type),
             remote_token: 0, // Not used in shm path
@@ -627,10 +678,31 @@ impl ShmRingReader {
                     .store(self.local_read_seq, Ordering::Release);
                 Ok(())
             }
-            Err(current) => Err(PlatformError::HardwareFailure(format!(
-                "failed to release slot {}: expected state {}, got {}",
-                slot_index, VD_SLOT_READING, current
-            ))),
+            Err(current) => {
+                let header = self.slot_header(slot_index);
+                let write_seq = self.write_seq();
+                let available_frames = write_seq.wrapping_sub(self.local_read_seq);
+                tracing::warn!(
+                    event = "shm_slot_release_mismatch",
+                    diag_monotonic_ms = monotonic_millis(),
+                    slot_index,
+                    expected_state = VD_SLOT_READING,
+                    expected_state_name = slot_state_name(VD_SLOT_READING),
+                    current_state = current,
+                    current_state_name = slot_state_name(current),
+                    frame_seq_no = header.seq_no,
+                    frame_stream_id = header.stream_id,
+                    frame_timestamp_ms = header.timestamp_ms,
+                    write_seq,
+                    local_read_seq = self.local_read_seq,
+                    available_frames,
+                    "shared memory slot release observed unexpected state"
+                );
+                Err(PlatformError::HardwareFailure(format!(
+                    "failed to release slot {}: expected state {}, got {}",
+                    slot_index, VD_SLOT_READING, current
+                )))
+            }
         }
     }
 
@@ -768,8 +840,8 @@ impl Drop for ShmRingReader {
 pub struct ShmFrame<'a> {
     /// Frame data (borrowed from shared memory)
     pub data: &'a [u8],
-    /// Timestamp in microseconds
-    pub timestamp_us: u64,
+    /// Timestamp in milliseconds
+    pub timestamp_ms: u32,
     /// Frame sequence number
     pub seq_no: u32,
     /// Frame type (raw value from daemon)
@@ -875,7 +947,8 @@ mod tests {
         let empty_slot = SlotHeader {
             state: VD_SLOT_EMPTY,
             frame_len: 0,
-            timestamp_us: 0,
+            timestamp_ms: 0,
+            _ts_pad: 0,
             seq_no: 0,
             frame_type: 0,
             stream_id: 0,
@@ -1124,7 +1197,8 @@ mod tests {
             let empty_slot = SlotHeader {
                 state: VD_SLOT_EMPTY,
                 frame_len: 0,
-                timestamp_us: 0,
+                timestamp_ms: 0,
+                _ts_pad: 0,
                 seq_no: 0,
                 frame_type: 0,
                 stream_id: 0,
@@ -1151,7 +1225,8 @@ mod tests {
             let slot = SlotHeader {
                 state: VD_SLOT_READY,
                 frame_len: 100,
-                timestamp_us: 1234567890,
+                timestamp_ms: 1234567,
+                _ts_pad: 0,
                 seq_no: 42,
                 frame_type: 0,
                 stream_id: 0,
@@ -1189,7 +1264,7 @@ mod tests {
         // Now read the slot
         let frame = reader.read_slot(0).unwrap();
         assert_eq!(frame.data, test_data.as_slice());
-        assert_eq!(frame.timestamp_us, 1234567890);
+        assert_eq!(frame.timestamp_ms, 1234567);
         assert_eq!(frame.seq_no, 42);
         assert_eq!(frame.frame_type, 0);
         assert_eq!(frame.stream_id, 0);
@@ -1238,7 +1313,8 @@ mod tests {
         let mut slot = SlotHeader {
             state: VD_SLOT_READY,
             frame_len: 100,
-            timestamp_us: 2000000, // 2 seconds in us
+            timestamp_ms: 2000, // 2 seconds in ms
+            _ts_pad: 0,
             seq_no: 100,
             frame_type: 1, // I-frame (VD_FRAME_TYPE_I)
             stream_id: 1,  // Sub stream

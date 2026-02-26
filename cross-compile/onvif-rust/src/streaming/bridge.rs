@@ -339,7 +339,7 @@ impl StreamingBridge {
     pub fn route_frame(&self, frame: &Frame) {
         // SAFETY: frame.data is valid for frame.size bytes during this callback.
         let data = BytesMut::from(unsafe { std::slice::from_raw_parts(frame.data, frame.size) });
-        let timestamp_ms = (frame.timestamp / 1000) as u32;
+        let timestamp_ms = frame.timestamp;
 
         tracing::trace!(
             stream = ?frame.stream_id,
@@ -378,7 +378,7 @@ impl StreamingBridge {
     /// this method moves the existing `BytesMut` from the `OwnedFrame` directly
     /// into the streaming queue. This eliminates Copy 2 from the frame path.
     pub fn route_owned_frame(&self, frame: OwnedFrame) {
-        let timestamp_ms = (frame.timestamp / 1000) as u32;
+        let timestamp_ms = frame.timestamp;
 
         tracing::trace!(
             stream = ?frame.stream_id,
@@ -749,7 +749,7 @@ mod tests {
         Frame {
             data: data.as_ptr(),
             size: data.len(),
-            timestamp: 2_000_000, // 2 seconds in microseconds
+            timestamp: 2_000, // 2 seconds in milliseconds
             frame_type,
             stream_id,
         }
@@ -870,14 +870,14 @@ mod tests {
     }
 
     #[test]
-    fn test_bridge_timestamp_conversion_us_to_ms() {
+    fn test_bridge_timestamp_passthrough_ms() {
         let bridge = make_bridge();
 
         let payload = vec![0x00, 0x00, 0x00, 0x01, 0x41, 0x9a];
         let frame = Frame {
             data: payload.as_ptr(),
             size: payload.len(),
-            timestamp: 3_500_000, // 3500ms in microseconds
+            timestamp: 3500, // 3500ms directly
             frame_type: FrameType::VideoPFrame,
             stream_id: StreamId::VideoMain,
         };
@@ -886,7 +886,7 @@ mod tests {
         let received = bridge.main_stream.frame_queue.try_recv().unwrap().frame;
         match received {
             FrameData::Video { timestamp, .. } => {
-                assert_eq!(timestamp, 3500); // microseconds → milliseconds
+                assert_eq!(timestamp, 3500); // ms passthrough, no conversion
             }
             _ => panic!("expected video frame"),
         }
@@ -1098,7 +1098,7 @@ mod tests {
         let data = BytesMut::from(&[0x00, 0x00, 0x00, 0x01, 0x41, 0x9a, 0x24][..]);
         let frame = OwnedFrame {
             data,
-            timestamp: 2_000_000,
+            timestamp: 2_000,
             frame_type: FrameType::VideoPFrame,
             stream_id: StreamId::VideoMain,
         };
@@ -1115,7 +1115,7 @@ mod tests {
         let data = BytesMut::from(&[0x00, 0x00, 0x00, 0x01, 0x41, 0x9a, 0x24][..]);
         let frame = OwnedFrame {
             data,
-            timestamp: 2_000_000,
+            timestamp: 2_000,
             frame_type: FrameType::VideoPFrame,
             stream_id: StreamId::VideoSub,
         };
@@ -1132,7 +1132,7 @@ mod tests {
         let data = BytesMut::from(&[0xFF, 0xF1, 0x50, 0x80][..]);
         let frame = OwnedFrame {
             data,
-            timestamp: 2_000_000,
+            timestamp: 2_000,
             frame_type: FrameType::AudioPacket,
             stream_id: StreamId::Audio,
         };
@@ -1143,13 +1143,13 @@ mod tests {
     }
 
     #[test]
-    fn test_bridge_route_owned_frame_timestamp_conversion() {
+    fn test_bridge_route_owned_frame_timestamp_passthrough() {
         let bridge = make_bridge();
 
         let data = BytesMut::from(&[0x00, 0x00, 0x00, 0x01, 0x41, 0x9a][..]);
         let frame = OwnedFrame {
             data,
-            timestamp: 3_500_000, // 3500ms in microseconds
+            timestamp: 3500, // 3500ms directly
             frame_type: FrameType::VideoPFrame,
             stream_id: StreamId::VideoMain,
         };
@@ -1158,7 +1158,7 @@ mod tests {
         let received = bridge.main_stream.frame_queue.try_recv().unwrap().frame;
         match received {
             FrameData::Video { timestamp, .. } => {
-                assert_eq!(timestamp, 3500);
+                assert_eq!(timestamp, 3500); // ms passthrough, no conversion
             }
             _ => panic!("expected video frame"),
         }
@@ -1172,7 +1172,7 @@ mod tests {
         let data = BytesMut::from(&[0x00, 0x00, 0x00, 0x01, 0x41, 0x9a][..]);
         let frame = OwnedFrame {
             data,
-            timestamp: 1_000_000,
+            timestamp: 1_000,
             frame_type: FrameType::VideoPFrame,
             stream_id: StreamId::VideoMain,
         };

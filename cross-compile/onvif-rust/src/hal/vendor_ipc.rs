@@ -23,13 +23,10 @@ use crate::streaming::bridge::BytesMutPool;
 
 use std::ffi::{c_char, c_void};
 use std::io::{ErrorKind, Read, Write};
-<<<<<<< HEAD
 use std::os::fd::AsRawFd;
-=======
->>>>>>> a644370a4911905465f9f35c78f4cc33f78f6dd1
 use std::os::unix::net::UnixStream;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use tracing::{debug, error, warn};
@@ -222,6 +219,11 @@ pub fn set_ipc_debug_logging(enabled: bool) {
 /// Check if IPC debug logging is enabled.
 fn is_ipc_debug_enabled() -> bool {
     IPC_DEBUG.load(std::sync::atomic::Ordering::SeqCst)
+}
+
+fn monotonic_millis() -> u64 {
+    static START: OnceLock<Instant> = OnceLock::new();
+    START.get_or_init(Instant::now).elapsed().as_millis() as u64
 }
 
 const VENDOR_SOCKET_PATH: &str = "/tmp/vendor-daemon.sock";
@@ -449,18 +451,47 @@ impl VendorIpc {
                     channel, e
                 )),
             })?;
-        Ok(FrameNotification::from_bytes(&notif_bytes))
+        let notif = FrameNotification::from_bytes(&notif_bytes);
+        if is_ipc_debug_enabled() {
+            debug!(
+                event = "push_notification_received",
+                diag_monotonic_ms = monotonic_millis(),
+                channel,
+                slot_index = notif.slot_index,
+                flags = notif.flags,
+                socket_fallback = notif.is_socket_fallback(),
+                frame_dropped = notif.is_frame_dropped(),
+                "received push notification"
+            );
+        }
+        Ok(notif)
     }
 
     fn map_shm_slot_read_error(error: PlatformError, channel: &'static str) -> PlatformError {
         match error {
             PlatformError::InvalidParameter(msg) if msg.contains("not ready for reading") => {
+                warn!(
+                    event = "shm_slot_transient_race",
+                    diag_monotonic_ms = monotonic_millis(),
+                    channel,
+                    reason = %msg,
+                    "push frame read classified as transient race"
+                );
                 PlatformError::ResourceBusy(format!(
                     "transient slot race on {} channel: {}",
                     channel, msg
                 ))
             }
-            other => other,
+            other => {
+                warn!(
+                    event = "shm_slot_read_error",
+                    diag_monotonic_ms = monotonic_millis(),
+                    channel,
+                    error = %other,
+                    "push frame read failed"
+                );
+                other
+            }
         }
     }
 
@@ -660,22 +691,11 @@ impl VendorIpc {
         }
     }
 
-<<<<<<< HEAD
     fn stream_id_to_wire(stream_id: StreamId) -> u32 {
         match stream_id {
             StreamId::VideoMain => 0,
             StreamId::VideoSub => 1,
             StreamId::Audio => 2,
-=======
-    /// Convert an i32 frame_type value from the IPC wire format to the
-    /// platform's `FrameType` enum (used by the owned frame path).
-    fn ipc_to_platform_frame_type(val: i32) -> FrameType {
-        match val {
-            1 => FrameType::VideoIFrame,
-            2 => FrameType::VideoBFrame,
-            3 => FrameType::VideoPiFrame,
-            _ => FrameType::VideoPFrame, // 0 = P-frame; unknown defaults to P
->>>>>>> a644370a4911905465f9f35c78f4cc33f78f6dd1
         }
     }
 
@@ -695,24 +715,65 @@ impl VendorIpc {
         stream_id: StreamId,
     ) -> PlatformResult<()> {
         let handle_val = stream_handle as u64;
+        tracing::info!(
+            event = "push_start_request",
+            diag_monotonic_ms = monotonic_millis(),
+            stream_id = ?stream_id,
+            handle = handle_val,
+            "requesting daemon push start"
+        );
         let mut req = [0u8; 12];
         req[0..8].copy_from_slice(&handle_val.to_le_bytes());
         req[8..12].copy_from_slice(&Self::stream_id_to_wire(stream_id).to_le_bytes());
         let (status, _) = self.send_request(CMD_VENC_START_PUSH, &req)?;
         if status != AK_SUCCESS_I32 {
+            warn!(
+                event = "push_start_failed",
+                diag_monotonic_ms = monotonic_millis(),
+                stream_id = ?stream_id,
+                status,
+                "daemon rejected push start request"
+            );
             return Err(PlatformError::HardwareFailure("start_push failed".into()));
         }
+        tracing::info!(
+            event = "push_start_ack",
+            diag_monotonic_ms = monotonic_millis(),
+            stream_id = ?stream_id,
+            status,
+            "daemon accepted push start request"
+        );
         Ok(())
     }
 
     /// Stop push-based frame delivery.
     pub fn stop_push(&self, stream_id: Option<StreamId>) -> PlatformResult<()> {
+        tracing::info!(
+            event = "push_stop_request",
+            diag_monotonic_ms = monotonic_millis(),
+            stream_id = ?stream_id,
+            "requesting daemon push stop"
+        );
         let req = stream_id.map(|id| Self::stream_id_to_wire(id).to_le_bytes().to_vec());
         let req_slice = req.as_deref().unwrap_or(&[]);
         let (status, _) = self.send_request(CMD_VENC_STOP_PUSH, req_slice)?;
         if status != AK_SUCCESS_I32 {
+            warn!(
+                event = "push_stop_failed",
+                diag_monotonic_ms = monotonic_millis(),
+                stream_id = ?stream_id,
+                status,
+                "daemon rejected push stop request"
+            );
             return Err(PlatformError::HardwareFailure("stop_push failed".into()));
         }
+        tracing::info!(
+            event = "push_stop_ack",
+            diag_monotonic_ms = monotonic_millis(),
+            stream_id = ?stream_id,
+            status,
+            "daemon accepted push stop request"
+        );
         Ok(())
     }
 
@@ -805,86 +866,29 @@ impl VendorIpc {
             .unwrap_or(false);
 
         let chosen_channel = self.choose_ready_channel(main_ready, sub_ready);
+        if is_ipc_debug_enabled() {
+            debug!(
+                event = "push_poll_result",
+                diag_monotonic_ms = monotonic_millis(),
+                main_ready,
+                sub_ready,
+                main_hup_err,
+                sub_hup_err,
+                chosen_channel = ?chosen_channel,
+                "push notification poll completed"
+            );
+        }
         let (channel_name, notif) = if let Some(channel) = chosen_channel {
             if channel == "main" {
                 let stream = frame_main_guard.as_mut().ok_or_else(|| {
                     PlatformError::HardwareFailure("main frame socket became unavailable".into())
                 })?;
-<<<<<<< HEAD
                 (channel, Self::read_push_notification(stream, channel)?)
             } else {
                 let stream = frame_sub_guard.as_mut().ok_or_else(|| {
                     PlatformError::HardwareFailure("sub frame socket became unavailable".into())
                 })?;
                 (channel, Self::read_push_notification(stream, channel)?)
-=======
-
-                if shm_guard.is_some() {
-                    // SHARED MEMORY PATH: read 12-byte notification
-                    let mut notif_bytes = [0u8; 12];
-                    frame_stream.read_exact(&mut notif_bytes).map_err(|e| {
-                        PlatformError::HardwareFailure(format!("IPC read error: {}", e))
-                    })?;
-                    let notif = FrameNotification::from_bytes(&notif_bytes);
-
-                    if notif.is_frame_dropped() {
-                        // P-frame intentionally dropped during ring overflow
-                        return Err(PlatformError::HardwareFailure(
-                            "frame dropped by daemon (P-frame during ring overflow)".into(),
-                        ));
-                    }
-
-                    if !notif.is_socket_fallback() {
-                        // Normal shm path: read from shared memory
-                        let shm = shm_guard.as_mut().ok_or_else(|| {
-                            PlatformError::HardwareFailure(
-                                "shm reader disappeared unexpectedly".into(),
-                            )
-                        })?;
-                        let (metadata, frame_data) =
-                            shm.read_slot_into_bytesmut(notif.slot_index, pool)?;
-
-                        // No pending_tokens needed — SDK frame already released by daemon
-                        if is_ipc_debug_enabled() {
-                            debug!(
-                                frame_len = frame_data.len(),
-                                timestamp_ms = metadata.timestamp_ms,
-                                seq_no = metadata.seq_no,
-                                frame_type = ?metadata.frame_type,
-                                slot_index = notif.slot_index,
-                                "fetch_frame_owned: frame received via shared memory"
-                            );
-                        }
-
-                        return Ok(OwnedFrame {
-                            data: frame_data,
-                            timestamp: metadata.timestamp_ms.wrapping_mul(1000),
-                            frame_type: metadata.frame_type,
-                            stream_id,
-                        });
-                    }
-                    // Socket-fallback notification means daemon could not place this
-                    // frame in shared memory. Current protocol sends only this 12-byte
-                    // notification for fallback cases on the frame socket.
-                    //
-                    // Return an explicit error after consuming the notification payload
-                    // so stream framing remains synchronized.
-                    drop(shm_guard);
-                    return Err(PlatformError::ResourceBusy(
-                        "daemon reported socket fallback for frame request".into(),
-                    ));
-                } else {
-                    // Received shm notification but shm_reader not available - this is an error
-                    // Read and discard the 12 bytes to keep socket in sync
-                    let mut discard = [0u8; 12];
-                    frame_stream.read_exact(&mut discard).map_err(|e| {
-                        PlatformError::HardwareFailure(format!("IPC read error: {}", e))
-                    })?;
-                    return Err(PlatformError::HardwareFailure(
-                        "received shm notification but shm reader not available".into(),
-                    ));
-                }
->>>>>>> a644370a4911905465f9f35c78f4cc33f78f6dd1
             }
         } else if main_hup_err || sub_hup_err {
             return Err(PlatformError::HardwareFailure(format!(
@@ -897,6 +901,14 @@ impl VendorIpc {
 
         // Check for dropped-frame notification (Fix 4 integration)
         if notif.is_frame_dropped() {
+            warn!(
+                event = "push_notification_frame_dropped",
+                diag_monotonic_ms = monotonic_millis(),
+                channel = channel_name,
+                slot_index = notif.slot_index,
+                flags = notif.flags,
+                "daemon reported dropped frame notification"
+            );
             return Err(PlatformError::ResourceBusy(
                 "frame dropped by daemon (P-frame during ring overflow)".into(),
             ));
@@ -916,110 +928,9 @@ impl VendorIpc {
 
         Ok(OwnedFrame {
             data: frame_data,
-            timestamp: metadata.timestamp_ms.wrapping_mul(1000),
+            timestamp: metadata.timestamp_ms,
             frame_type: metadata.frame_type,
             stream_id: metadata.stream_id,
-        })
-    }
-
-    // ============================================================================
-    // Push-mode frame delivery
-    // ============================================================================
-
-    /// Start push-based frame delivery from the daemon.
-    ///
-    /// The daemon spawns a dedicated thread that polls `ak_venc_get_stream()`,
-    /// writes frames to the ring buffer, and pushes unsolicited 12-byte
-    /// notifications over the frame socket. Returns `Ok(())` if the daemon
-    /// accepted the command, or an error if the daemon doesn't support push mode.
-    pub fn start_push(&self, stream_handle: *mut c_void) -> PlatformResult<()> {
-        let handle_val = stream_handle as u64;
-        let (status, _) = self.send_request(CMD_VENC_START_PUSH, &handle_val.to_le_bytes())?;
-        if status != AK_SUCCESS_I32 {
-            return Err(PlatformError::HardwareFailure("start_push failed".into()));
-        }
-        Ok(())
-    }
-
-    /// Stop push-based frame delivery.
-    pub fn stop_push(&self) -> PlatformResult<()> {
-        let (status, _) = self.send_request(CMD_VENC_STOP_PUSH, &[])?;
-        if status != AK_SUCCESS_I32 {
-            return Err(PlatformError::HardwareFailure("stop_push failed".into()));
-        }
-        Ok(())
-    }
-
-    /// Read ring buffer diagnostic counters (overflow, eviction, fallback, dropped).
-    ///
-    /// Returns `(0, 0, 0, 0)` if the shm reader is not available or version < 2.
-    pub fn shm_diagnostic_counters(&self) -> (u32, u32, u32, u32) {
-        let guard = match self.shm_reader.lock() {
-            Ok(g) => g,
-            Err(_) => return (0, 0, 0, 0),
-        };
-        match guard.as_ref() {
-            Some(shm) => shm.diagnostic_counters(),
-            None => (0, 0, 0, 0),
-        }
-    }
-
-    /// Receive the next pushed frame from the daemon.
-    ///
-    /// In push mode, the daemon sends 12-byte notifications proactively.
-    /// This method blocks until a notification arrives (no polling needed).
-    /// The frame data is read from shared memory using the slot index in
-    /// the notification.
-    pub fn recv_pushed_frame(
-        &self,
-        stream_id: StreamId,
-        pool: Option<&BytesMutPool>,
-    ) -> PlatformResult<OwnedFrame> {
-        let mut frame_guard = self.frame_stream.lock().map_err(|e| {
-            PlatformError::HardwareFailure(format!("frame_stream mutex poisoned: {}", e))
-        })?;
-        let frame_stream = frame_guard.as_mut().ok_or_else(|| {
-            PlatformError::HardwareFailure("no frame socket for push mode".into())
-        })?;
-
-        frame_stream
-            .set_read_timeout(Some(PUSH_NOTIFICATION_TIMEOUT))
-            .map_err(|e| {
-                PlatformError::HardwareFailure(format!("push read-timeout setup error: {}", e))
-            })?;
-
-        // Block on reading 12-byte notification (daemon pushes these)
-        let mut notif_bytes = [0u8; 12];
-        frame_stream
-            .read_exact(&mut notif_bytes)
-            .map_err(|e| match e.kind() {
-                ErrorKind::WouldBlock | ErrorKind::TimedOut => PlatformError::Timeout,
-                _ => PlatformError::HardwareFailure(format!("push notification read error: {}", e)),
-            })?;
-        let notif = FrameNotification::from_bytes(&notif_bytes);
-
-        // Check for dropped-frame notification (Fix 4 integration)
-        if notif.is_frame_dropped() {
-            return Err(PlatformError::ResourceBusy(
-                "frame dropped by daemon (P-frame during ring overflow)".into(),
-            ));
-        }
-
-        // Read from shared memory
-        let mut shm_guard = self.shm_reader.lock().map_err(|e| {
-            PlatformError::HardwareFailure(format!("shm_reader mutex poisoned: {}", e))
-        })?;
-        let shm = shm_guard.as_mut().ok_or_else(|| {
-            PlatformError::HardwareFailure("shm reader not available for push mode".into())
-        })?;
-
-        let (metadata, frame_data) = shm.read_slot_into_bytesmut(notif.slot_index, pool)?;
-
-        Ok(OwnedFrame {
-            data: frame_data,
-            timestamp: metadata.timestamp_ms.wrapping_mul(1000),
-            frame_type: metadata.frame_type,
-            stream_id,
         })
     }
 
@@ -2126,15 +2037,8 @@ mod tests {
     }
 
     #[test]
-<<<<<<< HEAD
     fn test_choose_ready_channel_single_channel_ready() {
         let ipc = make_ipc_for_channel_selection_tests();
-=======
-    fn test_vendor_ipc_release_frame_owned_sends_token() {
-        use crate::platform::frame::StreamId;
-        use portable_atomic::{AtomicU64, Ordering};
-        use std::sync::Arc as StdArc;
->>>>>>> a644370a4911905465f9f35c78f4cc33f78f6dd1
 
         assert_eq!(ipc.choose_ready_channel(true, false), Some("main"));
         assert_eq!(ipc.choose_ready_channel(false, true), Some("sub"));
@@ -2207,7 +2111,6 @@ mod tests {
     fn test_stop_push_without_stream_id_sends_empty_payload() {
         use std::sync::{Arc, Mutex};
 
-<<<<<<< HEAD
         let captured: Arc<Mutex<Vec<(i32, Vec<u8>)>>> = Arc::new(Mutex::new(Vec::new()));
         let captured_closure = Arc::clone(&captured);
         let daemon = FakeDaemon::start(move |cmd_id, req| {
@@ -2218,30 +2121,6 @@ mod tests {
             (AK_SUCCESS_I32, vec![])
         });
         let ipc = VendorIpc::new_with_path(&daemon.socket_path).unwrap();
-=======
-        assert_eq!(
-            VendorIpc::ipc_to_platform_frame_type(0),
-            FrameType::VideoPFrame
-        );
-        assert_eq!(
-            VendorIpc::ipc_to_platform_frame_type(1),
-            FrameType::VideoIFrame
-        );
-        assert_eq!(
-            VendorIpc::ipc_to_platform_frame_type(2),
-            FrameType::VideoBFrame
-        );
-        assert_eq!(
-            VendorIpc::ipc_to_platform_frame_type(3),
-            FrameType::VideoPiFrame
-        );
-        // Unknown defaults to P
-        assert_eq!(
-            VendorIpc::ipc_to_platform_frame_type(99),
-            FrameType::VideoPFrame
-        );
-    }
->>>>>>> a644370a4911905465f9f35c78f4cc33f78f6dd1
 
         ipc.stop_push(None).unwrap();
 

@@ -63,8 +63,8 @@ pub enum StreamId {
 /// In push mode this metadata comes from the shared-memory slot header.
 #[derive(Debug, Clone)]
 pub struct FrameMetadata {
-    /// Timestamp in milliseconds (from daemon).
-    pub timestamp_ms: u64,
+    /// Timestamp in milliseconds (SDK source, u32 wraps at ~49.7 days).
+    pub timestamp_ms: u32,
     /// Sequence number.
     pub seq_no: u32,
     /// Frame type (I-frame, P-frame, etc.).
@@ -94,8 +94,8 @@ pub struct FrameMetadata {
 pub struct OwnedFrame {
     /// Owned encoded frame data (already in BytesMut).
     pub data: BytesMut,
-    /// Timestamp in microseconds since epoch.
-    pub timestamp: u64,
+    /// Timestamp in milliseconds (SDK source).
+    pub timestamp: u32,
     /// Type of frame (I-frame, P-frame, etc.).
     pub frame_type: FrameType,
     /// Which stream this frame belongs to.
@@ -135,8 +135,8 @@ pub struct Frame {
     pub data: *const u8,
     /// Size of the frame data in bytes.
     pub size: usize,
-    /// Timestamp in microseconds since epoch.
-    pub timestamp: u64,
+    /// Timestamp in milliseconds (SDK source).
+    pub timestamp: u32,
     /// Type of frame (I-frame, P-frame, etc.).
     pub frame_type: FrameType,
     /// Which stream this frame belongs to.
@@ -423,12 +423,12 @@ mod tests {
         let frame = Frame {
             data: data.as_ptr(),
             size: 64,
-            timestamp: 1_000_000,
+            timestamp: 1_000,
             frame_type: FrameType::VideoIFrame,
             stream_id: StreamId::VideoMain,
         };
         assert_eq!(frame.size, 64);
-        assert_eq!(frame.timestamp, 1_000_000);
+        assert_eq!(frame.timestamp, 1_000);
         assert_eq!(frame.frame_type, FrameType::VideoIFrame);
         assert_eq!(frame.stream_id, StreamId::VideoMain);
     }
@@ -444,12 +444,12 @@ mod tests {
         let data = BytesMut::from(&[0x00, 0x00, 0x00, 0x01, 0x65, 0x88][..]);
         let frame = OwnedFrame {
             data,
-            timestamp: 2_000_000,
+            timestamp: 2_000,
             frame_type: FrameType::VideoIFrame,
             stream_id: StreamId::VideoMain,
         };
         assert_eq!(frame.data.len(), 6);
-        assert_eq!(frame.timestamp, 2_000_000);
+        assert_eq!(frame.timestamp, 2_000);
         assert_eq!(frame.frame_type, FrameType::VideoIFrame);
         assert_eq!(frame.stream_id, StreamId::VideoMain);
     }
@@ -460,7 +460,7 @@ mod tests {
         let data = BytesMut::from(original_data.as_slice());
         let frame = OwnedFrame {
             data,
-            timestamp: 1_000_000,
+            timestamp: 1_000,
             frame_type: FrameType::VideoPFrame,
             stream_id: StreamId::VideoSub,
         };

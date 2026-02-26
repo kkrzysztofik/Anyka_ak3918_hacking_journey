@@ -147,29 +147,28 @@ impl TStreamHandler for LiveStreamHandler {
                         bootstrap_idr.as_deref(),
                     )?;
                 } else {
-                    send_frame(
-                        &frame_sender,
-                        FrameData::Video {
-                            timestamp,
-                            data: BytesMut::from(sps.as_slice()),
-                        },
-                    )?;
-                    send_frame(
-                        &frame_sender,
-                        FrameData::Video {
-                            timestamp,
-                            data: BytesMut::from(pps.as_slice()),
-                        },
-                    )?;
+                    // Combine SPS+PPS(+IDR) into a single Annex-B access unit.
+                    // Sending them as separate FrameData::Video messages with
+                    // the same timestamp causes DTS collisions at the RTP layer
+                    // (the assembler/normalizer interaction produces duplicate
+                    // timestamps that ffmpeg reports as "non monotonically
+                    // increasing dts").
+                    let mut au = BytesMut::new();
+                    au.extend_from_slice(&[0, 0, 0, 1]);
+                    au.extend_from_slice(&sps);
+                    au.extend_from_slice(&[0, 0, 0, 1]);
+                    au.extend_from_slice(&pps);
                     if let Some(idr) = bootstrap_idr.as_ref() {
-                        send_frame(
-                            &frame_sender,
-                            FrameData::Video {
-                                timestamp,
-                                data: BytesMut::from(idr.as_slice()),
-                            },
-                        )?;
+                        au.extend_from_slice(&[0, 0, 0, 1]);
+                        au.extend_from_slice(idr);
                     }
+                    send_frame(
+                        &frame_sender,
+                        FrameData::Video {
+                            timestamp,
+                            data: au,
+                        },
+                    )?;
                 }
             }
         }
@@ -694,36 +693,27 @@ mod tests {
             .await;
         assert!(result.is_ok());
 
-        // MediaInfo + SPS + PPS + IDR = 4 frames.
+        // MediaInfo + combined SPS+PPS+IDR access unit = 2 frames.
         let media_info = frame_rx.try_recv().unwrap();
         assert!(matches!(media_info, FrameData::MediaInfo { .. }));
 
-        let sps_frame = frame_rx.try_recv().unwrap();
-        assert!(matches!(
-            sps_frame,
-            FrameData::Video {
-                timestamp: 2000,
-                ..
+        let au_frame = frame_rx.try_recv().unwrap();
+        match au_frame {
+            FrameData::Video { timestamp, data } => {
+                assert_eq!(timestamp, 2000);
+                // Combined AU: start_code + SPS + start_code + PPS + start_code + IDR
+                // = 4 + 4 + 4 + 4 + 4 + 4 = 24 bytes
+                assert_eq!(data.len(), 24);
+                // Verify Annex-B start codes and NALUs
+                assert_eq!(&data[0..4], &[0, 0, 0, 1]); // SPS start code
+                assert_eq!(&data[4..8], &[0x67, 0x42, 0x00, 0x1e]); // SPS
+                assert_eq!(&data[8..12], &[0, 0, 0, 1]); // PPS start code
+                assert_eq!(&data[12..16], &[0x68, 0xce, 0x06, 0xe2]); // PPS
+                assert_eq!(&data[16..20], &[0, 0, 0, 1]); // IDR start code
+                assert_eq!(&data[20..24], &[0x65, 0x88, 0x84, 0x21]); // IDR
             }
-        ));
-
-        let pps_frame = frame_rx.try_recv().unwrap();
-        assert!(matches!(
-            pps_frame,
-            FrameData::Video {
-                timestamp: 2000,
-                ..
-            }
-        ));
-
-        let idr_frame = frame_rx.try_recv().unwrap();
-        assert!(matches!(
-            idr_frame,
-            FrameData::Video {
-                timestamp: 2000,
-                ..
-            }
-        ));
+            _ => panic!("expected combined Video access unit"),
+        }
 
         assert!(frame_rx.try_recv().is_err());
     }
