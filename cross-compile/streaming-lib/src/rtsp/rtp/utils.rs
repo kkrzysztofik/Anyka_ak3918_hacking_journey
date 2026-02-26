@@ -139,32 +139,30 @@ pub fn current_time() -> u64 {
     }
 }
 
-/// Generate an NTP timestamp (RFC 5905 format: 64-bit value)
+/// Generate an NTP timestamp (RFC 5905 format: 64-bit value) from a SystemTime.
 /// Upper 32 bits: seconds since January 1, 1900 00:00 UTC
 /// Lower 32 bits: fractional seconds (2^-32 second resolution)
-pub fn ntp_timestamp() -> u64 {
-    // NTP epoch is January 1, 1900 00:00 UTC
-    // Unix epoch is January 1, 1970 00:00 UTC
-    // Difference is 2208988800 seconds (70 years)
+/// Returns None if the system time is before the Unix epoch.
+pub fn ntp_timestamp_from_system_time(st: SystemTime) -> Option<u64> {
     const NTP_UNIX_EPOCH_DIFF: u64 = 2208988800;
 
-    let duration = SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .expect("System time before Unix epoch");
+    let duration = st.duration_since(SystemTime::UNIX_EPOCH).ok()?;
 
     let unix_secs = duration.as_secs();
     let unix_nanos = duration.subsec_nanos() as u64;
 
-    // Convert Unix time to NTP time
     let ntp_secs = unix_secs + NTP_UNIX_EPOCH_DIFF;
-
-    // Convert nanoseconds to NTP fractional part (32-bit fraction of a second)
-    // NTP fraction = (nanos / 1e9) * 2^32
-    // To avoid floating point: (nanos * 2^32) / 1e9
     let ntp_frac = (unix_nanos << 32) / 1_000_000_000;
 
-    // Combine into 64-bit NTP timestamp
-    (ntp_secs << 32) | ntp_frac
+    Some((ntp_secs << 32) | ntp_frac)
+}
+
+/// Generate an NTP timestamp (RFC 5905 format: 64-bit value)
+/// Upper 32 bits: seconds since January 1, 1900 00:00 UTC
+/// Lower 32 bits: fractional seconds (2^-32 second resolution)
+/// Panics if system time is before Unix epoch (use ntp_timestamp_from_system_time for fallible version).
+pub fn ntp_timestamp() -> u64 {
+    ntp_timestamp_from_system_time(SystemTime::now()).expect("System time before Unix epoch")
 }
 
 #[cfg(test)]
@@ -468,6 +466,42 @@ mod tests {
         assert_eq!(stored[0], BytesMut::from(&[0x65, 0xAA, 0xBB][..]));
         assert_eq!(stored[1], BytesMut::from(&[0x41, 0xCC][..]));
         assert_eq!(stored[2], BytesMut::from(&[0x06, 0xDD][..]));
+    }
+
+    // ========== ntp_timestamp_from_system_time Tests ==========
+
+    #[test]
+    fn test_ntp_timestamp_from_system_time_invalid_before_unix_epoch() {
+        use std::time::Duration;
+        let invalid_time = SystemTime::UNIX_EPOCH - Duration::from_secs(1);
+        let result = super::ntp_timestamp_from_system_time(invalid_time);
+        assert!(result.is_none(), "Expected None for time before Unix epoch");
+    }
+
+    #[test]
+    fn test_ntp_timestamp_from_system_time_valid_after_unix_epoch() {
+        use std::time::Duration;
+        let valid_time = SystemTime::UNIX_EPOCH + Duration::from_secs(1);
+        let result = super::ntp_timestamp_from_system_time(valid_time);
+        assert!(
+            result.is_some(),
+            "Expected Some for valid time after Unix epoch"
+        );
+        let ntp = result.unwrap();
+        let ntp_secs = ntp >> 32;
+        assert_eq!(ntp_secs, 2208988801, "NTP seconds should be epoch diff + 1");
+    }
+
+    #[test]
+    fn test_ntp_timestamp_from_system_time_unix_epoch_zero() {
+        let result = super::ntp_timestamp_from_system_time(SystemTime::UNIX_EPOCH);
+        assert!(result.is_some());
+        let ntp = result.unwrap();
+        let ntp_secs = ntp >> 32;
+        assert_eq!(
+            ntp_secs, 2208988800,
+            "NTP seconds at Unix epoch should be epoch diff"
+        );
     }
 
     // ========== ntp_timestamp Tests ==========

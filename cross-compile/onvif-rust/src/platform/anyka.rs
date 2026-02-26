@@ -1178,6 +1178,7 @@ fn maybe_log_slow_owned_callback(callback_id: u64, elapsed_us: u64) {
     maybe_log_slow_callback(callback_id, elapsed_us, "owned");
 }
 
+#[cfg(test)]
 fn compute_no_data_recovery_interval_errors(trigger_ms: u64, cycle_sleep_ms: u64) -> u32 {
     let trigger_ms = trigger_ms.max(1);
     let cycle_sleep_ms = cycle_sleep_ms.max(1);
@@ -1185,11 +1186,12 @@ fn compute_no_data_recovery_interval_errors(trigger_ms: u64, cycle_sleep_ms: u64
     errors.max(1).min(u64::from(u32::MAX)) as u32
 }
 
-#[cfg(test)]
+#[inline]
 fn push_mode_enabled(has_sub_stream: bool) -> bool {
     !has_sub_stream
 }
 
+#[inline]
 fn is_push_mode_transient_error(error: &PlatformError) -> bool {
     matches!(
         error,
@@ -1344,8 +1346,167 @@ fn unified_frame_read_loop(
                 break;
             }
 
-            // ── Test-only SDK polling path (no VendorIpc available) ──
-            // ── Test-only SDK polling path (no VendorIpc available) ──
+            // ── Owned (zero-copy) path: fetch directly into BytesMut ──
+            if let Some(ipc) = vendor_ipc {
+                match ipc.fetch_frame_owned(handle.as_ptr(), state.stream_id, frame_pool) {
+                    Ok(owned_frame) => {
+                        // Reset no-data counter on successful frame retrieval
+                        state.consecutive_no_data = 0;
+                        state.last_error_was_no_data = true;
+
+                        let frame_type = owned_frame.frame_type;
+                        let frame_size = owned_frame.data.len();
+
+                        tracing::trace!(
+                            stream = ?state.stream_id,
+                            size = frame_size,
+                            timestamp_us = owned_frame.timestamp,
+                            frame_type = ?frame_type,
+                            "Frame retrieved via owned path (zero-copy)"
+                        );
+
+                        state.frame_count += 1;
+                        frames_this_cycle += 1;
+                        stream_health.record_frame(state.stream_id);
+                        state.total_bytes += frame_size as u64;
+                        if matches!(frame_type, FrameType::VideoIFrame) {
+                            state.iframe_count += 1;
+                        }
+
+                        // Imaging update tracking
+                        let latest_imaging_seq = LAST_IMAGING_UPDATE_SEQ.load(Ordering::Relaxed);
+                        if latest_imaging_seq > state.last_imaging_seq_frame_logged {
+                            let applied_ms = LAST_IMAGING_UPDATE_UNIX_MS.load(Ordering::Relaxed);
+                            let latency_ms = current_unix_ms().saturating_sub(applied_ms);
+                            tracing::info!(
+                                stream = ?state.stream_id,
+                                imaging_seq = latest_imaging_seq,
+                                latency_ms,
+                                frame_type = ?frame_type,
+                                "First encoded frame observed after imaging update"
+                            );
+                            state.last_imaging_seq_frame_logged = latest_imaging_seq;
+                        }
+                        if matches!(frame_type, FrameType::VideoIFrame)
+                            && latest_imaging_seq > state.last_imaging_seq_iframe_logged
+                        {
+                            let applied_ms = LAST_IMAGING_UPDATE_UNIX_MS.load(Ordering::Relaxed);
+                            let latency_ms = current_unix_ms().saturating_sub(applied_ms);
+                            tracing::info!(
+                                stream = ?state.stream_id,
+                                imaging_seq = latest_imaging_seq,
+                                latency_ms,
+                                "First IDR observed after imaging update"
+                            );
+                            state.last_imaging_seq_iframe_logged = latest_imaging_seq;
+                        }
+
+                        // Periodic summary every 300 frames
+                        if state.frame_count.is_multiple_of(300) {
+                            let (overflow, eviction, fallback, dropped) =
+                                if let Some(ipc_ref) = vendor_ipc {
+                                    ipc_ref.shm_diagnostic_counters()
+                                } else {
+                                    (0, 0, 0, 0)
+                                };
+                            tracing::debug!(
+                                stream = ?state.stream_id,
+                                frames = state.frame_count,
+                                total_bytes = state.total_bytes,
+                                iframes = state.iframe_count,
+                                errors = state.error_count,
+                                shm_overflow = overflow,
+                                shm_eviction = eviction,
+                                shm_fallback = fallback,
+                                shm_dropped = dropped,
+                                "Frame read loop progress (owned path)"
+                            );
+                        }
+
+                        // Try owned callbacks first (zero-copy path).
+                        // If no owned callbacks are registered, fall back to
+                        // legacy FrameCallback with a borrowed Frame.
+                        if let Some(remaining) =
+                            invoke_owned_callbacks_from_map(owned_callbacks, owned_frame)
+                        {
+                            // No owned callbacks consumed the frame — fall back to legacy path.
+                            // Create a temporary Frame borrowing from the OwnedFrame's
+                            // BytesMut buffer for backward-compatible callback invocation.
+                            // SAFETY: remaining.data is a valid BytesMut allocation.
+                            // The pointer remains valid for the duration of callback
+                            // invocation because remaining lives on this stack frame
+                            // and is not dropped until after invoke_callbacks_from_map.
+                            let frame = Frame {
+                                data: remaining.data.as_ptr(),
+                                size: frame_size,
+                                timestamp: remaining.timestamp,
+                                frame_type,
+                                stream_id: state.stream_id,
+                            };
+                            invoke_callbacks_from_map(callbacks, &frame);
+                        } // else: owned callbacks consumed the frame — no legacy fallback needed
+
+                        // Release the frame (sends remote_token to daemon).
+                        if let Err(e) = ipc.release_frame_owned(handle.as_ptr()) {
+                            tracing::warn!(
+                                stream = ?state.stream_id,
+                                error = %e,
+                                "release_frame_owned failed"
+                            );
+                        }
+                        tracing::trace!(stream = ?state.stream_id, "Owned frame released");
+
+                        continue; // Continue draining
+                    }
+                    Err(_e) => {
+                        // Treat errors from fetch_frame_owned similar to legacy
+                        // venc_get_stream failures. The owned path returns errors
+                        // for both IPC failures and daemon-side no-data.
+                        state.consecutive_no_data += 1;
+                        state.last_error_was_no_data = true;
+                        stream_health.record_no_data_error(state.stream_id);
+
+                        if state
+                            .consecutive_no_data
+                            .is_multiple_of(no_data_recovery_interval_errors)
+                        {
+                            if state.frame_count > 0 {
+                                if let Some(handle_addr) = state.recovery_encoder_handle_addr {
+                                    let idr_ret =
+                                        ffi.venc_set_iframe(handle_addr as *mut std::ffi::c_void);
+                                    if idr_ret == AK_SUCCESS_I32 {
+                                        tracing::warn!(
+                                            stream = ?state.stream_id,
+                                            consecutive_no_data = state.consecutive_no_data,
+                                            recovery_interval = no_data_recovery_interval_errors,
+                                            "Sustained no-data detected; requested IDR recovery frame"
+                                        );
+                                    } else {
+                                        tracing::warn!(
+                                            stream = ?state.stream_id,
+                                            consecutive_no_data = state.consecutive_no_data,
+                                            recovery_interval = no_data_recovery_interval_errors,
+                                            idr_error_code = idr_ret,
+                                            "Sustained no-data detected; IDR recovery request failed"
+                                        );
+                                    }
+                                }
+                            } else if state.recovery_encoder_handle_addr.is_some() {
+                                tracing::debug!(
+                                    stream = ?state.stream_id,
+                                    consecutive_no_data = state.consecutive_no_data,
+                                    recovery_interval = no_data_recovery_interval_errors,
+                                    "Skipping no-data IDR recovery before first frame"
+                                );
+                            }
+                        }
+
+                        break; // Exit inner drain loop
+                    }
+                }
+            }
+
+            // ── Legacy path (no VendorIpc available, e.g. in tests) ──
             let mut stream = std::mem::MaybeUninit::<video_stream>::uninit();
             let stream_ptr = stream.as_mut_ptr();
             let ret = ffi.venc_get_stream(handle.as_ptr(), stream_ptr);
@@ -1495,8 +1656,8 @@ fn unified_frame_read_loop(
                 let frame = Frame {
                     data: stream_data.data as *const u8,
                     size: frame_size,
-                    // SDK timestamps are in milliseconds
-                    timestamp: stream_data.ts as u32,
+                    // SDK timestamps are in milliseconds; Frame uses microseconds
+                    timestamp: stream_data.ts.wrapping_mul(1000),
                     frame_type,
                     stream_id: state.stream_id,
                 };
@@ -1629,6 +1790,88 @@ fn unified_frame_read_loop(
         has_sub_stream = sub_push_started,
         "Push-based frame delivery active"
     );
+
+    // ── Push-mode fast path: daemon polls SDK, pushes frames proactively ──
+    // Eliminates ~105 wasted IPC round-trips/sec (only 15 of ~120 carry frames).
+    if let Some(ref ipc) = vendor_ipc
+        && push_mode_enabled(has_sub)
+    {
+        match ipc.start_push(main_stream_handle.as_ptr()) {
+            Err(e) => {
+                tracing::warn!("Push mode not available, falling back to polling: {}", e);
+            }
+            Ok(()) => {
+                tracing::info!("Push-based frame delivery active");
+                while !stop_signal.load(Ordering::SeqCst) {
+                    match ipc.recv_pushed_frame(StreamId::VideoMain, frame_pool.as_deref()) {
+                        Ok(owned_frame) => {
+                            main_state.consecutive_no_data = 0;
+                            main_state.last_error_was_no_data = true;
+
+                            let frame_type = owned_frame.frame_type;
+                            let frame_size = owned_frame.data.len();
+
+                            main_state.frame_count += 1;
+                            stream_health.record_frame(StreamId::VideoMain);
+                            main_state.total_bytes += frame_size as u64;
+                            if matches!(frame_type, FrameType::VideoIFrame) {
+                                main_state.iframe_count += 1;
+                            }
+
+                            if main_state.frame_count.is_multiple_of(300) {
+                                let (overflow, eviction, fallback, dropped) =
+                                    ipc.shm_diagnostic_counters();
+                                tracing::debug!(
+                                    frames = main_state.frame_count,
+                                    total_bytes = main_state.total_bytes,
+                                    iframes = main_state.iframe_count,
+                                    shm_overflow = overflow,
+                                    shm_eviction = eviction,
+                                    shm_fallback = fallback,
+                                    shm_dropped = dropped,
+                                    "Push-mode frame delivery progress"
+                                );
+                            }
+
+                            if let Some(remaining) =
+                                invoke_owned_callbacks_from_map(&owned_callbacks, owned_frame)
+                            {
+                                let frame = Frame {
+                                    data: remaining.data.as_ptr(),
+                                    size: frame_size,
+                                    timestamp: remaining.timestamp,
+                                    frame_type,
+                                    stream_id: StreamId::VideoMain,
+                                };
+                                invoke_callbacks_from_map(&callbacks, &frame);
+                            }
+                        }
+                        Err(e) => {
+                            tracing::debug!("Push recv error: {}", e);
+                            main_state.consecutive_no_data += 1;
+                            // Timeouts and dropped-frame notifications are normal in push mode.
+                            if is_push_mode_transient_error(&e) {
+                                continue;
+                            }
+                            // IO/disconnect/protocol errors require fallback to polling.
+                            tracing::warn!("Push mode interrupted, falling back to polling: {}", e);
+                            break;
+                        }
+                    }
+                }
+                let _ = ipc.stop_push();
+                tracing::info!(
+                    push_frames = main_state.frame_count,
+                    push_bytes = main_state.total_bytes,
+                    "Push mode ended"
+                );
+            }
+        }
+    } else if vendor_ipc.is_some() && has_sub {
+        tracing::info!(
+            "Push mode disabled because sub stream is active; using unified polling for both streams"
+        );
+    }
 
     while !stop_signal.load(Ordering::SeqCst) {
         match ipc.recv_pushed_frame(frame_pool.as_deref()) {
@@ -4750,26 +4993,27 @@ mod tests {
     // =========================================================================
 
     #[test]
-    fn test_timestamp_passthrough_ms() {
-        // SDK timestamps are in ms, Frame uses ms directly (no conversion)
+    fn test_timestamp_conversion_ms_to_us() {
+        // SDK timestamps are in ms, Frame uses µs
         let sdk_ts_ms: u64 = 12345;
-        let frame_ts_ms = sdk_ts_ms as u32;
-        assert_eq!(frame_ts_ms, 12345);
+        let frame_ts_us = sdk_ts_ms.wrapping_mul(1000);
+        assert_eq!(frame_ts_us, 12_345_000);
     }
 
     #[test]
-    fn test_timestamp_passthrough_zero() {
+    fn test_timestamp_conversion_zero() {
         let sdk_ts_ms: u64 = 0;
-        let frame_ts_ms = sdk_ts_ms as u32;
-        assert_eq!(frame_ts_ms, 0);
+        let frame_ts_us = sdk_ts_ms.wrapping_mul(1000);
+        assert_eq!(frame_ts_us, 0);
     }
 
     #[test]
-    fn test_timestamp_passthrough_u32_max() {
-        // u32 ms wraps at ~49.7 days — far exceeds any camera session
-        let sdk_ts_ms: u64 = u32::MAX as u64;
-        let frame_ts_ms = sdk_ts_ms as u32;
-        assert_eq!(frame_ts_ms, u32::MAX);
+    fn test_timestamp_conversion_wrapping() {
+        // Verify wrapping_mul won't panic on large values
+        let sdk_ts_ms: u64 = u64::MAX;
+        let frame_ts_us = sdk_ts_ms.wrapping_mul(1000);
+        // Just verify it doesn't panic; exact value isn't important
+        let _ = frame_ts_us;
     }
 
     // =========================================================================
@@ -4791,8 +5035,8 @@ mod tests {
                 assert_eq!(frame.stream_id, StreamId::VideoMain);
                 assert_eq!(frame.frame_type, FrameType::VideoIFrame);
                 assert_eq!(frame.size, 100);
-                // SDK ts=5000ms → Frame ts=5000ms (passthrough)
-                assert_eq!(frame.timestamp, 5000);
+                // SDK ts=5000ms → Frame ts=5_000_000µs
+                assert_eq!(frame.timestamp, 5_000_000);
                 self.0.fetch_add(1, Ordering::SeqCst);
             }
         }

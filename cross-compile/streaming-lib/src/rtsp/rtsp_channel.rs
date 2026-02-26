@@ -246,8 +246,10 @@ impl RtcpChannel {
     pub async fn send_sr(
         &mut self,
         rtcp_io: Arc<Mutex<Box<dyn TNetIO + Send + Sync>>>,
-    ) -> Result<(), BytesWriteError> {
-        let sr = self.send_ctx.generate_sr();
+    ) -> Result<bool, BytesWriteError> {
+        let Some(sr) = self.send_ctx.generate_sr() else {
+            return Ok(false);
+        };
 
         let net_type = rtcp_io.lock().await.get_net_type();
         if let Ok(msg) = sr.marshal() {
@@ -263,7 +265,7 @@ impl RtcpChannel {
             bytes_writer.write(&msg)?;
             bytes_writer.flush().await?;
         }
-        Ok(())
+        Ok(true)
     }
 
     pub async fn send_rr(
@@ -396,14 +398,14 @@ mod tests {
     fn test_rtcp_channel_set_ssrc() {
         let mut channel = RtcpChannel::default();
         channel.set_ssrc(0x12345678, 90000);
-        let sr = channel.send_ctx.generate_sr();
+        let sr = channel.send_ctx.generate_sr().expect("SR should be generated");
         assert_eq!(sr.ssrc, 0x12345678);
     }
 
     #[test]
     fn test_rtcp_channel_set_ssrc_default_is_zero() {
         let mut channel = RtcpChannel::default();
-        let sr = channel.send_ctx.generate_sr();
+        let sr = channel.send_ctx.generate_sr().expect("SR should be generated");
         assert_eq!(sr.ssrc, 0);
     }
 
