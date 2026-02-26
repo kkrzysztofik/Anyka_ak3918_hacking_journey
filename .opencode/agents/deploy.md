@@ -1,7 +1,7 @@
 ---
 description: Cross-compilation and SD card deployment specialist - ARM release builds, binary optimization, SD card layout, on-device testing
 mode: subagent
-model: anthropic/claude-haiku-4-5
+model: minimax-coding-plan/MiniMax-M2.5-highspeed
 tools:
   write: false
   edit: false

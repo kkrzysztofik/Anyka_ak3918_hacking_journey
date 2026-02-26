@@ -1,7 +1,7 @@
 ---
 description: Project-aware planning and analysis for Anyka ONVIF camera development - understands ARM cross-compilation, custom toolchain, memory constraints, and bd issue tracking
 mode: primary
-model: anthropic/claude-opus-4-6
+model: openai/gpt-5.3-codex
 permission:
   edit: ask
   bash:
