@@ -76,8 +76,8 @@ pub struct Frame {
     pub data: *const u8,
     /// Size of frame data in bytes
     pub size: usize,
-    /// Timestamp in microseconds since epoch
-    pub timestamp: u64,
+    /// Timestamp in milliseconds (SDK source)
+    pub timestamp: u32,
     /// Type of frame
     pub frame_type: FrameType,
 }

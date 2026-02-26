@@ -54,7 +54,7 @@ use portable_atomic::AtomicU64;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::{
-    Arc,
+    Arc, OnceLock,
     atomic::{AtomicBool, AtomicU32, Ordering},
 };
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -104,6 +104,11 @@ fn now_millis() -> u64 {
         .as_millis() as u64
 }
 
+fn monotonic_millis() -> u64 {
+    static START: OnceLock<Instant> = OnceLock::new();
+    START.get_or_init(Instant::now).elapsed().as_millis() as u64
+}
+
 /// Lightweight per-track RTP counters for logging.
 ///
 /// These use atomics so they can be safely updated from async contexts
@@ -119,11 +124,13 @@ struct RtpTrackCounters {
 
 const RTP_TIMESTAMP_WRAP_THRESHOLD: u32 = 0x8000_0000;
 const SESSION_ID_RANDOM_DIGITS: RandomDigitCount = RandomDigitCount::Four;
-const DEFAULT_MAX_FRAME_AGE_MS: u32 = 600;
+const DEFAULT_MAX_FRAME_AGE_MS: u32 = 1500;
 const LAG_RECOVERY_THRESHOLD_MS: u32 = 1000;
 const LAG_RECOVERY_SUSTAINED_FRAMES: u32 = 8;
 const SOURCE_TIMESTAMP_RESET_THRESHOLD_MS: u32 = 10_000;
 const DEFAULT_PLAY_READY_TIMEOUT_MS: u64 = 1500;
+const RTP_SEND_SLOW_WARN_MS: u128 = 25;
+const PACER_SLEEP_DIAGNOSTIC_MIN_MS: u64 = 20;
 
 /// RFC 2326 §12.36 — Server header value.
 const SERVER_HEADER: &str = "streaming-lib/0.1";
@@ -263,7 +270,8 @@ impl FramePacer {
     ///
     /// `timestamp_ms` is the source frame timestamp in milliseconds.
     /// On the first frame, no delay is introduced.
-    async fn pace(&mut self, timestamp_ms: u32) {
+    async fn pace(&mut self, timestamp_ms: u32) -> u64 {
+        let mut slept_ms = 0;
         if let (Some(last_send), Some(last_ts)) = (self.last_send, self.last_timestamp_ms) {
             let ts_delta_ms = timestamp_ms.wrapping_sub(last_ts) as u64;
             let wall_delta = last_send.elapsed();
@@ -273,12 +281,14 @@ impl FramePacer {
                 let sleep_ms = std::cmp::min(ts_delta_ms - wall_delta_ms, PACE_MAX_DELTA_MS);
                 if sleep_ms >= PACE_MIN_SLEEP_MS {
                     tokio::time::sleep(Duration::from_millis(sleep_ms)).await;
+                    slept_ms = sleep_ms;
                 }
             }
         }
 
         self.last_send = Some(Instant::now());
         self.last_timestamp_ms = Some(timestamp_ms);
+        slept_ms
     }
 }
 
@@ -472,6 +482,7 @@ async fn send_video_access_unit(
     data: &mut BytesMut,
 ) {
     let mut channel = video_channel.lock().await;
+    let payload_len = data.len();
     let normalized = timestamp_normalizers
         .entry(TrackType::Video)
         .or_default()
@@ -488,9 +499,28 @@ async fn send_video_access_unit(
             normalized.non_wrap_regression_count,
         );
     }
-    if let Err(err) = channel.on_frame(data, normalized.output_timestamp).await {
-        log::info!("handle_play error: {err}");
-        ctx.shutdown.store(true, Ordering::Release);
+    let send_started = Instant::now();
+    match channel.on_frame(data, normalized.output_timestamp).await {
+        Ok(()) => {
+            let send_ms = send_started.elapsed().as_millis();
+            if send_ms >= RTP_SEND_SLOW_WARN_MS {
+                log::warn!(
+                    "event=rtp_send_slow track=Video session_id={} remote_addr={} stream_path={} source_ts={} rtp_ts={} payload_len={} send_ms={} diag_monotonic_ms={}",
+                    ctx.session_id,
+                    ctx.remote_addr,
+                    ctx.request_path,
+                    timestamp,
+                    normalized.output_timestamp,
+                    payload_len,
+                    send_ms,
+                    monotonic_millis(),
+                );
+            }
+        }
+        Err(err) => {
+            log::info!("handle_play error: {err}");
+            ctx.shutdown.store(true, Ordering::Release);
+        }
     }
 }
 
@@ -517,6 +547,22 @@ async fn process_audio_frame(
 
     let previous_source_ts = audio_lag_tracker.last_source_ts;
     let lag_ms = audio_lag_tracker.lag_ms(timestamp);
+    if crate::stream_frame_debug_logging_enabled()
+        && lag_ms >= latency_policy.max_frame_age_ms.saturating_div(2)
+    {
+        log::debug!(
+            "event=lag_probe track=Audio session_id={} remote_addr={} stream_path={} lag_ms={} threshold_ms={} source_ts={} prev_source_ts={} waiting_for_idr_recovery={} diag_monotonic_ms={}",
+            session_id,
+            remote_addr,
+            request_path,
+            lag_ms,
+            latency_policy.max_frame_age_ms,
+            timestamp,
+            previous_source_ts,
+            waiting_for_idr_recovery,
+            monotonic_millis(),
+        );
+    }
     if lag_ms > latency_policy.max_frame_age_ms {
         *dropped_stale_frames += 1;
         let elapsed_ms = audio_lag_tracker.anchor_local.elapsed().as_millis() as u32;
@@ -566,9 +612,29 @@ async fn process_audio_frame(
         );
     }
 
-    if let Err(err) = channel.on_frame(data, normalized.output_timestamp).await {
-        log::info!("handle_play error: {err}");
-        shutdown.store(true, Ordering::Release);
+    let payload_len = data.len();
+    let send_started = Instant::now();
+    match channel.on_frame(data, normalized.output_timestamp).await {
+        Ok(()) => {
+            let send_ms = send_started.elapsed().as_millis();
+            if send_ms >= RTP_SEND_SLOW_WARN_MS {
+                log::warn!(
+                    "event=rtp_send_slow track=Audio session_id={} remote_addr={} stream_path={} source_ts={} rtp_ts={} payload_len={} send_ms={} diag_monotonic_ms={}",
+                    session_id,
+                    remote_addr,
+                    request_path,
+                    timestamp,
+                    normalized.output_timestamp,
+                    payload_len,
+                    send_ms,
+                    monotonic_millis(),
+                );
+            }
+        }
+        Err(err) => {
+            log::info!("handle_play error: {err}");
+            shutdown.store(true, Ordering::Release);
+        }
     }
 }
 
@@ -613,6 +679,24 @@ async fn process_video_frame(
 
     let previous_source_ts = video_lag_tracker.last_source_ts;
     let lag_ms = video_lag_tracker.lag_ms(flush_ts);
+    if crate::stream_frame_debug_logging_enabled()
+        && lag_ms >= latency_policy.max_frame_age_ms.saturating_div(2)
+    {
+        log::debug!(
+            "event=lag_probe track=Video session_id={} remote_addr={} stream_path={} lag_ms={} threshold_ms={} source_ts={} prev_source_ts={} contains_idr={} sustained_lag_frames={} waiting_for_idr_recovery={} diag_monotonic_ms={}",
+            session_id,
+            remote_addr,
+            request_path,
+            lag_ms,
+            latency_policy.max_frame_age_ms,
+            flush_ts,
+            previous_source_ts,
+            contains_idr,
+            *sustained_video_lag_frames,
+            *waiting_for_idr_recovery,
+            monotonic_millis(),
+        );
+    }
     if lag_ms > latency_policy.max_frame_age_ms {
         if maybe_reanchor_video_lag_tracker_on_stale_idr(
             video_lag_tracker,
@@ -903,7 +987,18 @@ async fn run_playback_loop(
                 // sent in bursts, overwhelming VLC's jitter buffer.
                 let timestamp_ms = pacing_timestamp_ms(&frame_data);
                 if let Some(ts) = timestamp_ms {
-                    frame_pacer.pace(ts).await;
+                    let paced_sleep_ms = frame_pacer.pace(ts).await;
+                    if paced_sleep_ms >= PACER_SLEEP_DIAGNOSTIC_MIN_MS {
+                        log::debug!(
+                            "event=playback_pacer_sleep session_id={} remote_addr={} stream_path={} source_ts={} sleep_ms={} diag_monotonic_ms={}",
+                            session_id,
+                            remote_addr,
+                            request_path,
+                            ts,
+                            paced_sleep_ms,
+                            monotonic_millis(),
+                        );
+                    }
                 }
 
                 if handle_playback_frame(
@@ -1756,7 +1851,12 @@ impl RtspServerSession {
     async fn setup_tcp_transport(
         io_writer: Arc<Mutex<Box<dyn TNetIO + Send + Sync>>>,
         track: &mut RtspTrack,
+        transport: &RtspTransport,
     ) {
+        // set_transport MUST happen before rtcp_send_loop: the loop's first
+        // RTCP SR fires immediately (tokio::time::interval first-tick semantics)
+        // and needs the correct interleaved channel_identifier already assigned.
+        track.set_transport(transport.clone()).await;
         track.create_packer(io_writer.clone()).await;
         track.rtcp_send_loop(io_writer).await;
     }
@@ -1874,7 +1974,7 @@ impl RtspServerSession {
 
             match trans.protocol_type {
                 ProtocolType::TCP => {
-                    Self::setup_tcp_transport(io_writer, track).await;
+                    Self::setup_tcp_transport(io_writer, track, &trans).await;
                     (None, None)
                 }
                 ProtocolType::UDP => Self::setup_udp_transport(remote_addr, track, &trans).await?,
@@ -1903,12 +2003,15 @@ impl RtspServerSession {
                 .to_string(),
         );
 
-        {
+        // For UDP, set_transport after server_port is assigned.
+        // TCP already calls set_transport inside setup_tcp_transport (before rtcp_send_loop).
+        if trans.protocol_type == ProtocolType::UDP {
             let track = self.tracks.get_mut(&track_type).ok_or(SessionError {
                 value: SessionErrorValue::RtspMessageCorrupted("track missing".to_string()),
             })?;
             track.set_transport(trans).await;
         }
+
         self.send_response(&response).await?;
         self.log_setup_request(rtsp_request, &track_type);
 
