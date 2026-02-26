@@ -121,7 +121,8 @@ struct vd_ring_header {
 struct vd_slot_header {
     uint32_t state;           /* VD_SLOT_EMPTY | WRITING | READY | READING */
     uint32_t frame_len;       /* Actual frame data length */
-    uint64_t timestamp_us;   /* Timestamp in microseconds (SDK ts converted ms→μs) */
+    uint32_t timestamp_ms;   /* Timestamp in milliseconds (SDK ts directly) */
+    uint32_t _ts_pad;        /* Maintain 64-byte struct alignment */
     uint32_t seq_no;          /* Frame sequence number */
     uint32_t frame_type;      /* 0=P, 1=I, 2=B, 3=Pi */
     uint32_t stream_id;       /* 0=main, 1=sub, 2=audio */
@@ -329,7 +330,7 @@ static inline void *vd_ring_open(void)
  * @param base       Ring buffer base pointer
  * @param frame_data Pointer to frame data to copy
  * @param frame_len  Length of frame data
- * @param timestamp_us Frame timestamp in microseconds
+ * @param timestamp_ms Frame timestamp in milliseconds
  * @param seq_no     Frame sequence number
  * @param frame_type Frame type (0=P, 1=I, 2=B, 3=Pi)
  * @param stream_id  Stream identifier (0=main, 1=sub, 2=audio)
@@ -337,7 +338,7 @@ static inline void *vd_ring_open(void)
  * @return Slot index on success, -1 on overflow, -2 on error
  */
 static inline int vd_ring_write(void *base, const void *frame_data, uint32_t frame_len,
-                                uint64_t timestamp_us, uint32_t seq_no,
+                                uint32_t timestamp_ms, uint32_t seq_no,
                                 uint32_t frame_type, uint32_t stream_id)
 {
     struct vd_ring_header *hdr;
@@ -386,7 +387,7 @@ static inline int vd_ring_write(void *base, const void *frame_data, uint32_t fra
 
     /* Fill in slot header */
     slot->frame_len = frame_len;
-    slot->timestamp_us = timestamp_us;
+    slot->timestamp_ms = timestamp_ms;
     slot->seq_no = seq_no;
     slot->frame_type = frame_type;
     slot->stream_id = stream_id;
