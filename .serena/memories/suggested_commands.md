@@ -5,44 +5,49 @@
 This project cross-compiles for ARM (`armv5te-unknown-linux-uclibceabi`) by default.
 **For host-side operations (test, lint, build for dev), you MUST specify x86_64 target.**
 
+The Rust project is a **workspace** with members: `onvif-rust` and `streaming-lib`.
+Commands run from `cross-compile/` apply to the entire workspace.
+
 ## Quick Reference
 
-### Rust Backend (onvif-rust)
+### Rust Workspace (onvif-rust + streaming-lib)
 
 ```bash
-# Navigate to Rust project
-cd cross-compile/onvif-rust
+# Navigate to workspace root
+cd cross-compile
 
 # === HOST-SIDE COMMANDS (for development) ===
 
-# Build for host (x86_64)
+# Build entire workspace for host (x86_64)
 cargo build --target x86_64-unknown-linux-gnu
 cargo build --target x86_64-unknown-linux-gnu --release
 
-# Test (MUST use host target)
+# Test entire workspace (MUST use host target)
 cargo test --target x86_64-unknown-linux-gnu
 cargo test --target x86_64-unknown-linux-gnu --lib          # Unit tests only
 cargo test --target x86_64-unknown-linux-gnu test_name      # Specific test
+
+# Test specific workspace member
+cargo test --target x86_64-unknown-linux-gnu -p onvif-rust
+cargo test --target x86_64-unknown-linux-gnu -p streaming-lib
 
 # Linting (MUST use host target)
 cargo clippy --target x86_64-unknown-linux-gnu -- -D warnings
 
 # Formatting (target-independent)
-cargo fmt                          # Format code
-cargo fmt --check                  # Check formatting
+cargo fmt                          # Format all workspace code
+cargo fmt --check                  # Check formatting (CI)
 
 # Documentation (target-independent)
 cargo doc --no-deps                # Generate docs
 cargo doc --no-deps --open         # Generate and open in browser
 
 # Coverage (host target, requires tarpaulin)
-# Exclude xiu/ and patches/ directories (not part of our workspace)
 cargo tarpaulin \
   --workspace \
   --target x86_64-unknown-linux-gnu \
   --exclude-files "xiu/**" "patches/**" "anyka_reference/**" "onvif/**" \
   --out Html
-# Note: tarpaulin.toml config file also exists but command-line flags are more reliable
 
 # === DEVICE-SIDE COMMANDS (cross-compile for ARM) ===
 
@@ -51,13 +56,22 @@ cargo build --release              # Release build for device
 cargo build                        # Debug build for device
 ```
 
-### Pre-Commit (Rust)
+### Pre-Commit (Rust - Workspace)
 
 ```bash
 cd cross-compile
 cargo fmt && \
 cargo clippy --target x86_64-unknown-linux-gnu -- -D warnings && \
 cargo test --target x86_64-unknown-linux-gnu
+```
+
+### Vendor Daemon (C)
+
+```bash
+# Build vendor daemon for ARM
+cd cross-compile/vendor-daemon
+make                               # Build with ARM cross-compiler
+make clean                         # Clean build artifacts
 ```
 
 ### WebUI Frontend (www)
@@ -101,19 +115,15 @@ npm run lint && npm run type-check && npm run test
 # Navigate to scripts directory
 cd scripts
 
-# Deploy to camera (uploads ARM binary)
+# Deploy to camera (uploads ARM binaries)
 ./deploy_onvif.sh [device_ip] [username] [password]
 ./deploy_onvif.sh 192.168.1.100 admin admin  # Example
 
 # Run on device
 ./run_onvif.sh [device_ip] [username] [password] [release|debug]
-./run_onvif.sh 192.168.1.100 admin admin debug  # Example
 
 # Collect crash dumps
 ./collect_coredump.sh [device_ip] [username] [password]
-
-# Analyze crash dumps
-gdb ../cross-compile/onvif/out/onvifd_debug ../debugging/coredump/core.*
 ```
 
 ### Git Workflow
@@ -134,23 +144,6 @@ git commit -m "feat: description"  # Conventional commit
 git push -u origin feature/your-feature-name
 ```
 
-### System Utilities
-
-```bash
-# File operations
-ls -la                             # List files with details
-find . -name "*.rs"                # Find Rust files
-grep -r "pattern" --include="*.rs" # Search in Rust files
-
-# Process management
-ps aux | grep onvifd               # Check running daemon
-kill -9 PID                        # Force kill process
-
-# Network
-curl -X POST http://IP:PORT/onvif/device_service  # Test ONVIF endpoint
-netstat -tlnp                      # Check listening ports
-```
-
 ## Target Summary
 
 | Operation | Target | Command Flag |
@@ -166,6 +159,7 @@ netstat -tlnp                      # Check listening ports
 ## CI/CD Notes
 
 - GitHub Actions runs tests/lint with `--target x86_64-unknown-linux-gnu`
+- Container: `kkrzysztofik/anyka-cross-compile:rust-1.91.1`
 - Coverage reports uploaded to SonarCloud
 - Security scans via Snyk (SAST + SCA)
 - Quality gates must pass before merge

@@ -2,12 +2,14 @@
 
 ## Pre-Commit Checklist
 
-### Rust Backend (onvif-rust)
+### Rust Workspace (onvif-rust + streaming-lib)
 
 **⚠️ Cross-compile note**: Use `--target x86_64-unknown-linux-gnu` for host-side operations.
 
+Commands from `cross-compile/` apply to the entire workspace.
+
 ```bash
-cd cross-compile/onvif-rust
+cd cross-compile
 cargo fmt && \
 cargo clippy --target x86_64-unknown-linux-gnu -- -D warnings && \
 cargo test --target x86_64-unknown-linux-gnu
@@ -15,10 +17,10 @@ cargo test --target x86_64-unknown-linux-gnu
 
 | Gate | Command | Requirement |
 |------|---------|-------------|
-| Formatting | `cargo fmt --check` | No changes needed |
-| Linting | `cargo clippy --target x86_64-unknown-linux-gnu -- -D warnings` | Zero warnings |
-| Unit Tests | `cargo test --target x86_64-unknown-linux-gnu` | All pass |
-| Build (device) | `cargo build --release` | No errors |
+| Formatting | `cargo fmt --check` | No changes needed (workspace) |
+| Linting | `cargo clippy --target x86_64-unknown-linux-gnu -- -D warnings` | Zero warnings (workspace) |
+| Unit Tests | `cargo test --target x86_64-unknown-linux-gnu` | All pass (workspace) |
+| Build (device) | `cargo build --release` | No errors (workspace) |
 | Documentation | `cargo doc --no-deps` | No warnings |
 
 ### WebUI Frontend (www)

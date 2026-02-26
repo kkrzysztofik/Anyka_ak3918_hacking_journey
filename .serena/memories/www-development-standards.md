@@ -70,7 +70,9 @@ function isDeviceInfo(data: unknown): data is DeviceInfo {
 }
 ```
 
-### Zod Validation (Mandatory for Forms/API)
+### Zod 4 Validation (Mandatory for Forms/API)
+
+**Note**: Project uses Zod ^4.3.6. The core API (`z.object`, `z.string`, `safeParse`, `z.infer`) is compatible with Zod 3 patterns.
 
 ```typescript
 import { z } from 'zod';

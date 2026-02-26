@@ -38,14 +38,19 @@ Optimized for monitoring applications with dark theme and red accent colors.
 
 | Element | Font | Weight | Size |
 |---------|------|--------|------|
-| Font Family | Inter | - | - |
-| Headings (h1) | Inter | Semi-Bold (600) | 28px |
-| Headings (h2) | Inter | Semi-Bold (600) | 24px |
-| Headings (h3) | Inter | Medium (500) | 20px |
-| Body | Inter | Regular (400) | 14px |
-| Small/Caption | Inter | Regular (400) | 12px |
-| Buttons | Inter | Medium (500) | 14px |
-| Labels | Inter | Medium (500) | 12px |
+| Font Family (Primary) | IBM Plex Sans | - | - |
+| Font Family (Mono) | IBM Plex Mono | - | - |
+| Font Family (Fallback) | Inter | - | - |
+| Headings (h1) | IBM Plex Sans | Semi-Bold (600) | 28px |
+| Headings (h2) | IBM Plex Sans | Semi-Bold (600) | 24px |
+| Headings (h3) | IBM Plex Sans | Medium (500) | 20px |
+| Body | IBM Plex Sans | Regular (400) | 14px |
+| Small/Caption | IBM Plex Sans | Regular (400) | 12px |
+| Buttons | IBM Plex Sans | Medium (500) | 14px |
+| Labels | IBM Plex Sans | Medium (500) | 12px |
+| Code/Terminal | IBM Plex Mono | Regular (400) | 13px |
+
+**Font packages**: `@fontsource-variable/ibm-plex-sans`, `@fontsource/ibm-plex-mono`, `@fontsource/inter`
 
 ### Spacing Scale
 
