@@ -1,495 +1,643 @@
-# ONVIF Video Flow - Developer Guide & Troubleshooting
+# Video Flow — Developer Guide & Troubleshooting
 
-## Overview
+## 1. Overview
 
-This document provides a comprehensive guide for developers working with the ONVIF video pipeline from hardware sensor to RTSP stream delivery. It covers the complete video flow, common troubleshooting scenarios, debugging techniques, and validation procedures.
+This document covers the complete video path from hardware sensor to client
+playback for the Anyka AK3918 camera platform.
 
-**Target Audience**: Developers, system administrators, and QA engineers working with the ONVIF video system.
+The system uses a **dual-process architecture**:
 
-## Quick Reference
+| Process           | Language | Role                                                                         |
+|-------------------|----------|------------------------------------------------------------------------------|
+| **vendor-daemon** | C        | Wraps the Anyka SDK. Captures, encodes, and pushes frames via shared memory. |
+| **onvif-rust**    | Rust     | ONVIF 24.12 server. Consumes pushed frames, serves RTSP and HTTP-FLV.        |
+
+Frame delivery is **push-only** — vendor-daemon writes encoded frames into a
+shared-memory ring buffer and sends lightweight 12-byte notifications over
+per-stream Unix sockets. There are no pull/poll operations from the Rust side.
+
+**Related documents**: `ARCHITECTURE.md` (system design), `INIT_DEINIT_FLOW.md` (mutex inventory and ordering).
+
+---
+
+## 2. Quick Reference
 
 ### Key Files
-- `src/core/lifecycle/video_lifecycle.c` - Complete video pipeline initialization and management
-- `src/platform/platform_anyka.c` - Anyka AK3918 hardware abstraction layer
-- `src/networking/rtsp/rtsp_multistream.c` - Multi-stream RTSP server implementation
-- `src/services/common/video_config_types.h` - Video configuration structures
+
+| File                                                | Description                                                     |
+|-----------------------------------------------------|-----------------------------------------------------------------|
+| `cross-compile/vendor-daemon/src/main.c`            | C daemon: IPC dispatch, push_frame_thread, ring write           |
+| `cross-compile/onvif-rust/src/hal/vendor_ipc.rs`    | Rust IPC client: command protocol, `recv_pushed_frame()`        |
+| `cross-compile/onvif-rust/src/hal/shm_ring.rs`      | Shared memory ring reader: `ShmRingReader`, `FrameNotification` |
+| `cross-compile/onvif-rust/src/platform/anyka.rs`    | Platform init/shutdown, channel configuration                   |
+| `cross-compile/onvif-rust/src/platform/frame.rs`    | `OwnedFrame`, `StreamId`, `FrameType`, `FrameMetadata`          |
+| `cross-compile/onvif-rust/src/streaming/bridge.rs`  | `StreamingBridge`, `LowLatencyFrameQueue`, `BytesMutPool`       |
+| `cross-compile/onvif-rust/src/streaming/service.rs` | `StreamingService`, fanout tasks, RTSP/HTTP-FLV server spawn    |
+| `cross-compile/onvif-rust/src/streaming/config.rs`  | `StreamingConfig`: ports, stream names, defaults                |
 
 ### Common Issues Quick Fix
-| Issue | Quick Fix | File Location |
-|-------|-----------|---------------|
-| No video stream | Check sensor detection | `video_lifecycle.c:46-61` |
-| RTSP connection fails | Verify RTSP server start | `video_lifecycle.c:363-381` |
-| Poor video quality | Check encoder config | `video_lifecycle.c:278-320` |
-| Sensor not detected | Check sensor paths | `video_lifecycle.c:47-57` |
-| Memory leaks | Verify cleanup order | `video_lifecycle.c:438-468` |
+
+| Issue           | Quick Fix                           | Details                                  |
+|-----------------|-------------------------------------|------------------------------------------|
+| No video stream | Is vendor-daemon running?           | Check `/tmp/vd-ctrl.sock` exists         |
+| Socket missing  | Daemon not started or crashed       | `ls /tmp/vd-*.sock`                      |
+| SHM errors      | Shared memory file missing or wrong | `ls -la /tmp/vendor-frame-ring.shm`      |
+| Port conflict   | Another process on :554 or :8080    | `ss -tlnp` and grep for 554 or 8080      |
+| Frame timeout   | Push thread not active              | Grep daemon logs for `push_frame_thread` |
 
 ### Build & Test Commands
+
 ```bash
-# Debug build with video logging
-cd cross-compile/onvif && make debug
+# Build vendor-daemon (cross-compile)
+cd cross-compile/vendor-daemon && make
 
-# Test video pipeline
-./out/onvifd &
-# Check RTSP stream
-ffplay rtsp://admin:admin@localhost:554/vs0
+# Build onvif-rust
+cd cross-compile/onvif-rust && cargo build --release
 
-# Check video logs
-journalctl -f | grep -E "(video|RTSP|sensor)"
+# Run tests
+cargo test
+
+# Lint
+cargo clippy -- -D warnings
+
+# Test RTSP playback
+ffplay -fflags nobuffer rtsp://<camera-ip>:554/main
+
+# Grep for errors in daemon log
+grep -E 'error|WARN|panic' /tmp/vendor-daemon.log
 ```
 
-## Video Pipeline Architecture
+---
 
-### Current Implementation Overview
+## 3. Two-Process Architecture
 
-The ONVIF video system uses a **7-phase initialization pipeline** with these characteristics:
+### 3a. Process Responsibilities
 
-1. **Sensor Detection**: Multi-path sensor configuration matching
-2. **Video Input Setup**: Hardware video input channel initialization
-3. **Channel Configuration**: Main/sub stream channel setup
-4. **Global Capture**: Hardware video capture activation
-5. **Stream Configuration**: Video/audio parameter validation
-6. **RTSP Server**: Multi-stream server creation and stream registration
-7. **Server Start**: Threading and network activation
+**vendor-daemon (C)**:
 
-### Video Flow Architecture
+- Calls Anyka SDK functions (`ak_vi_*`, `ak_vpss_*`, `ak_venc_*`, `ak_ai_*`, `ak_aenc_*`)
+- Manages hardware lifecycle (sensor, VPSS, encoder open/close)
+- Runs `push_frame_thread()` per stream — polls `ak_venc_get_stream()` and writes to SHM
+- Sends 12-byte frame notifications over per-stream Unix sockets
+- Accepts IPC commands from onvif-rust for lifecycle and imaging control
+
+**onvif-rust (Rust)**:
+
+- ONVIF 24.12 web service (Device, Media, Imaging, PTZ, Events)
+- Connects to vendor-daemon via IPC sockets
+- Reads frames from shared memory via `ShmRingReader`
+- Routes frames through `StreamingBridge` to `LowLatencyFrameQueue`
+- Serves RTSP (:554) and HTTP-FLV (:8080) streams via `StreamingService`
+
+### 3b. IPC Channels
+
+| Channel           | Path                         | Direction            | Purpose                                      |
+|-------------------|------------------------------|----------------------|----------------------------------------------|
+| Control socket    | `/tmp/vd-ctrl.sock`          | Rust → C → Rust      | Command RPC (lifecycle, imaging, queries)    |
+| Frame main socket | `/tmp/vd-frame-main.sock`    | C → Rust             | 12-byte notifications for main stream frames |
+| Frame sub socket  | `/tmp/vd-frame-sub.sock`     | C → Rust             | 12-byte notifications for sub stream frames  |
+| Shared memory     | `/tmp/vendor-frame-ring.shm` | C writes, Rust reads | Zero-copy frame data (ring buffer)           |
+
+> **Legacy fallback**: The daemon also accepts connections on `/tmp/vendor-daemon.sock`
+> (the original single-socket path). `VendorIpc::new()` tries `/tmp/vd-ctrl.sock` first,
+> falling back to the legacy path.
+
+### 3c. Binary Protocol
+
+**Command RPC** (control socket, bidirectional):
+
+```text
+Request:  [cmd_id: i32 LE] [req_len: u32 LE] [req_data: bytes]
+Response: [status: i32 LE] [resp_len: u32 LE] [resp_data: bytes]
+```
+
+**Frame Notification** (frame sockets, daemon → Rust, 12 bytes):
+
+```text
+[slot_index: u32 LE] [frame_len: u32 LE] [flags: u32 LE]
+```
+
+- `slot_index == u32::MAX` → socket fallback (frame data follows inline, not in SHM)
+- `flags & VD_NOTIFY_FRAME_DROPPED` → frame was dropped, diagnostic only
+
+### 3d. End-to-End Frame Flow
 
 ```mermaid
-graph TD
-    A["🎥 Camera Sensor"] --> B["ISP Processing"]
-    B --> C["Video Input Driver (ak_vi)"]
-    C --> D["Platform Abstraction (platform_anyka.c)"]
-    D --> E["Video Lifecycle (video_lifecycle.c)"]
-    E --> F["Video Encoder (ak_venc)"]
-    F --> G["RTSP Server (rtsp_multistream.c)"]
-    G --> H["RTP Packetization"]
-    H --> I["Network Transport"]
-    I --> J["🖥️ ONVIF Client"]
+sequenceDiagram
+    participant Sensor
+    box vendor-daemon (C)
+        participant SDK as Anyka SDK<br/>(VI → VPSS → VENC)
+        participant PFT as push_frame_thread<br/>(main.c)
+    end
+    participant SHM as SHM Ring<br/>(/tmp/vendor-frame-ring.shm)
+    box onvif-rust (Rust)
+        participant IPC as VendorIpc<br/>(vendor_ipc.rs)
+        participant Bridge as StreamingBridge<br/>(bridge.rs)
+        participant Fanout as Fanout Task<br/>(service.rs)
+    end
+    participant Client
 
-    style A fill:#ff9800,color:#fff
-    style E fill:#2196f3,color:#fff
-    style G fill:#4caf50,color:#fff
-    style J fill:#9c27b0,color:#fff
+    Sensor->>SDK: Raw Bayer data
+    Note over SDK: VI: demosaic + ISP<br/>VPSS: scale main + sub<br/>VENC: H.264 encode
+    SDK->>PFT: ak_venc_get_stream()
+    PFT->>SHM: Write frame to slot
+    PFT-)IPC: 12-byte notification<br/>[slot_index | frame_len | flags]
+    Note over IPC: poll() wakes on<br/>frame socket
+    IPC->>SHM: read_slot_into_bytesmut()
+    SHM-->>IPC: Zero-copy BytesMut
+    Note over IPC: Construct OwnedFrame<br/>(frame.rs)
+    IPC->>Bridge: route_owned_frame()
+    Note over Bridge: LowLatencyFrameQueue::push()<br/>I-frame flush on overflow
+    Fanout->>Bridge: dequeue()
+    Bridge-->>Fanout: OwnedFrame
+    par RTSP
+        Fanout->>Client: :554/main or /sub
+    and HTTP-FLV
+        Fanout->>Client: :8080/live/main or /sub
+    end
 ```
 
-## Troubleshooting Guide
+---
 
-### 1. Video System Initialization Failures
+## 4. Initialization Sequence
 
-**Symptoms**: RTSP streaming disabled, no video streams available
+### Startup (Rust → IPC → vendor-daemon)
 
-**Root Causes**:
-- Sensor configuration not found
-- Video input hardware failure
-- Channel configuration mismatch
-- Video capture failure
+The `AnykaPlatform::initialize()` method (`anyka.rs:246`) drives the init
+sequence by sending IPC commands to vendor-daemon:
 
-**Debugging Steps**:
-```bash
-# 1. Check sensor detection
-journalctl -f | grep "sensor"
-# Look for: "warning: failed to match sensor at /etc/jffs2"
+| Step | Rust Call                             | IPC Command                        | Description                              |
+|------|---------------------------------------|------------------------------------|------------------------------------------|
+| 1    | `video_input.match_sensor()`          | `CMD_VI_MATCH_SENSOR (1)`          | Load ISP config, detect sensor           |
+| 2    | `video_input.open()`                  | `CMD_VI_OPEN (2)`                  | Open video input device                  |
+| 2.5  | `video_input.init_vpss()`             | `CMD_VPSS_INIT (8)`                | Initialize video processing subsystem    |
+| 3    | `video_input.get_sensor_resolution()` | `CMD_VI_GET_SENSOR_RESOLUTION (4)` | Query native sensor resolution           |
+| 4    | `video_input.set_channel_attr()`      | `CMD_VI_SET_CHANNEL_ATTR (5)`      | Configure dual channels (main + sub)     |
+| 5    | `video_input.capture_on()`            | `CMD_VI_CAPTURE_ON (6)`            | Start capture pipeline (200ms stabilize) |
+| 6    | `video_encoder.init(config)`          | `CMD_VENC_OPEN (11)` × 2           | Open main and sub encoders               |
+| 7    | `video_encoder.start_streaming()`     | `CMD_VENC_START_PUSH (19)`         | Start push_frame_thread per stream       |
+| 8    | `StreamingService::start()`           | — (local)                          | Create StreamsHub, spawn RTSP + HTTP-FLV |
 
-# 2. Test hardware access
-ls -la /dev/video* /dev/ak*
-# Should show video device nodes
+Each step includes rollback logic — if step N fails, steps 1..N-1 are reversed
+in order. See `anyka.rs:246-345` for the full sequence with error handling.
 
-# 3. Check video input initialization
-journalctl -f | grep "video input"
-# Look for: "Video input initialized: 1920x1080"
+### Shutdown (Reverse Order)
 
-# 4. Manual sensor detection test
-find /etc/jffs2 /data/sensor /data -name "*sensor*" -o -name "*.cfg" 2>/dev/null
+`AnykaPlatform::shutdown()` (`anyka.rs:406`) and `shutdown_video_pipeline()`
+(`anyka.rs:162`) tear down in reverse:
+
+| Step | Action                                       | IPC Command               |
+|------|----------------------------------------------|---------------------------|
+| 1    | Stop PTZ motors                              | — (local)                 |
+| 2    | Stop streaming (abort fanout tasks, servers) | — (local)                 |
+| 3    | Stop push threads                            | `CMD_VENC_STOP_PUSH (20)` |
+| 4    | Close encoders                               | `CMD_VENC_CLOSE (12)` × 2 |
+| 5    | Capture off                                  | `CMD_VI_CAPTURE_OFF (7)`  |
+| 6    | Destroy VPSS                                 | `CMD_VPSS_DESTROY (9)`    |
+| 7    | Close video input                            | `CMD_VI_CLOSE (3)`        |
+
+Shutdown is **best-effort** — each step logs errors but continues to the next,
+ensuring maximum cleanup even if the daemon becomes unresponsive.
+
+---
+
+## 5. Frame Data Path
+
+### Complete Path (per frame)
+
+```text
+1.  Sensor hardware                           → Raw Bayer data
+2.  VI (ak_vi)                                → Demosaic + ISP processing
+3.  VPSS (ak_vpss)                            → Scale to main and sub (640×360)
+4.  VENC (ak_venc)                            → H.264 encode
+5.  push_frame_thread                         → main.c:754 — polls ak_venc_get_stream()
+6.  SHM ring write                            → main.c — writes to SHM ring
+7.  Socket notification                       → main.c — sends 12-byte FrameNotification
+8.  VendorIpc::recv_pushed_frame()            → vendor_ipc.rs:800 — poll() on frame sockets
+9.  ShmRingReader::read_slot_into_bytesmut()  → shm_ring.rs — zero-copy read from SHM
+10. OwnedFrame constructed                    → frame.rs — data in BytesMut, no extra copy
+11. StreamingBridge::route_owned_frame()      → bridge.rs:380 — routes by StreamId
+12. LowLatencyFrameQueue::push()              → bridge.rs:75 — bounded push, I-frame flush
+13. Fanout task recv()                        → service.rs:503 — dequeues and fans out
+14. RTSP / HTTP-FLV send                      → service.rs:600 — to subscriber channels
 ```
 
-**Code Locations**:
-- **Sensor matching**: `video_lifecycle.c:46-61` - Multi-path sensor detection
-- **Video input init**: `video_lifecycle.c:69-92` - Hardware initialization
-- **Channel config**: `video_lifecycle.c:100-131` - Main/sub channel setup
-- **Global capture**: `video_lifecycle.c:138-146` - Video capture start
-
-**Fixes**:
-1. **Missing sensor config**: Copy sensor files to `/etc/jffs2/`
-2. **Hardware permissions**: Check device node permissions
-3. **Resolution limits**: Verify sensor resolution capabilities
-4. **Hardware reset**: Restart hardware components
-
-### 2. RTSP Server Creation Failures
-
-**Symptoms**: "Failed to create multi-stream RTSP server", no RTSP port listening
-
-**Root Causes**:
-- Port 554 already in use
-- Video input handle not available
-- Memory allocation failure
-- Socket creation failure
-
-**Debugging Steps**:
-```bash
-# 1. Check port availability
-netstat -tlnp | grep :554
-# Should be empty before daemon start
-
-# 2. Check video handle
-journalctl -f | grep "vi_handle"
-# Look for valid handle creation
-
-# 3. Test socket creation
-nc -l 554  # Should succeed if port available
-
-# 4. Check memory availability
-free -m && cat /proc/meminfo | grep Available
-```
-
-**Code Locations**:
-- **Server creation**: `video_lifecycle.c:328-357` - RTSP server creation
-- **Stream addition**: `video_lifecycle.c:345-352` - Stream registration
-- **Server start**: `video_lifecycle.c:363-381` - Network activation
-
-**Fixes**:
-1. **Port conflict**: Stop conflicting services or change port
-2. **Memory issues**: Free memory or optimize configuration
-3. **Handle validation**: Ensure video input initialization succeeded
-4. **Permission issues**: Run with appropriate privileges
-
-### 3. Video Encoding Issues
-
-**Symptoms**: RTSP connects but no video data, black screen, encoding errors
-
-**Root Causes**:
-- Invalid video configuration
-- Encoder initialization failure
-- Frame rate mismatch
-- Resolution not supported
-
-**Debugging Steps**:
-```bash
-# 1. Check encoder configuration
-journalctl -f | grep "platform_venc_init"
-# Look for: "Video encoder initialized successfully"
-
-# 2. Check frame processing
-journalctl -f | grep "venc_get_stream"
-# Should show regular frame processing
-
-# 3. Test video configuration
-journalctl -f | grep "Main stream configuration"
-# Shows actual config being used
-
-# 4. Monitor encoder stats
-watch "journalctl -n 50 | grep -E '(frames_sent|bytes_sent)'"
-```
-
-**Code Locations**:
-- **Config validation**: `video_lifecycle.c:296-304` - Stream config validation
-- **Encoder setup**: `platform_anyka.c:794-940` - Hardware encoder init
-- **Frame processing**: `rtsp_multistream.c` - Video frame handling
-
-**Fixes**:
-1. **Invalid config**: Use `stream_config_validate()` for validation
-2. **Resolution issues**: Ensure 4-byte alignment for width/height
-3. **Frame rate**: Match sensor capabilities (5-60fps range)
-4. **Profile/level**: Use supported H.264 profiles
-
-### 4. Sensor Detection Failures
-
-**Symptoms**: "failed to match sensor", "video input disabled"
-
-**Root Causes**:
-- Sensor configuration files missing
-- Wrong sensor driver
-- Hardware connection issues
-- Path access permissions
-
-**Debugging Steps**:
-```bash
-# 1. Check sensor file paths
-find /etc/jffs2 -name "*sensor*" -o -name "*.conf" 2>/dev/null
-find /data/sensor -name "*" 2>/dev/null
-find /data -name "*sensor*" 2>/dev/null
-
-# 2. Check hardware detection
-dmesg | grep -i sensor
-lsmod | grep -i sensor
-
-# 3. Test sensor access
-cat /proc/ak39/ak39_global 2>/dev/null || echo "No hardware access"
-
-# 4. Check mount points
-mount | grep -E "(jffs2|data)"
-```
-
-**Code Locations**:
-- **Multi-path detection**: `video_lifecycle.c:46-61` - Sensor path fallback
-- **Platform call**: `platform_anyka.c:459-470` - Hardware sensor matching
-
-**Fixes**:
-1. **Missing files**: Copy sensor configs to expected paths
-2. **Permission issues**: Fix mount permissions or file ownership
-3. **Hardware issues**: Check physical sensor connection
-4. **Driver issues**: Verify sensor driver loading
-
-### 5. Video Quality and Performance Issues
-
-**Symptoms**: Poor video quality, low frame rate, high latency
-
-**Root Causes**:
-- Incorrect bitrate settings
-- GOP size misconfiguration
-- Frame rate limitations
-- Network congestion
-
-**Debugging Steps**:
-```bash
-# 1. Check current configuration
-journalctl -f | grep "stream configuration"
-# Shows bitrate, fps, resolution
-
-# 2. Monitor performance
-top -p $(pgrep onvifd)
-# Check CPU usage
-
-# 3. Network monitoring
-iftop -i eth0  # Monitor network usage
-ss -tuln | grep 554  # Check RTSP connections
-
-# 4. Frame rate analysis
-journalctl -f | grep "frames_sent" | tail -20
-```
-
-**Code Locations**:
-- **Config validation**: `video_lifecycle.c:236-256` - GOP size validation
-- **Quality settings**: `platform_anyka.c:850-880` - Encoder parameters
-- **Frame rate config**: `video_lifecycle.c:179-196` - FPS validation
-
-**Fixes**:
-1. **Bitrate optimization**: Adjust based on network capacity
-2. **GOP size**: Use 2x frame rate for optimal quality
-3. **Resolution scaling**: Reduce resolution for performance
-4. **Network optimization**: Check bandwidth and latency
-
-## Developer Guidelines
-
-### Adding New Video Streams
-
-When adding additional video streams:
-
-1. **Check stream limits** in `rtsp_multistream.h:23`:
-   ```c
-   #define RTSP_MAX_STREAMS 4
-   ```
-
-2. **Add stream configuration**:
-   ```c
-   video_config_t stream_config = {
-       .width = 640,
-       .height = 480,
-       .fps = 15,
-       .bitrate = 1000,
-       .gop_size = 30,
-       .profile = PLATFORM_PROFILE_BASELINE
-   };
-   ```
-
-3. **Register with RTSP server**:
-   ```c
-   rtsp_multistream_server_add_stream(server, "/vs2", "sub2",
-                                      &stream_config, &audio_config, false);
-   ```
-
-### Video Configuration Best Practices
-
-1. **Resolution Alignment**: Ensure width/height are 4-byte aligned
-2. **Frame Rate Validation**: Keep within sensor capabilities (5-60fps)
-3. **Bitrate Calculation**: Use ~1-5 Mbps for 1080p, ~500kbps-2Mbps for 720p
-4. **GOP Size**: Set to 2x frame rate for optimal seeking
-5. **Profile Selection**: Use Baseline for compatibility, Main for quality
-
-### Error Handling Patterns
-
-For video components:
-
-1. **Graceful Degradation**: Video failure doesn't crash daemon
-   ```c
-   if (video_lifecycle_init(cfg) != 0) {
-       platform_log_warning("Video system disabled, continuing without streaming\n");
-       // Continue with other services
-   }
-   ```
-
-2. **Cleanup Idempotency**: Safe to call cleanup multiple times
-   ```c
-   void video_lifecycle_cleanup(void) {
-       static bool cleanup_done = false;
-       if (cleanup_done) return;
-       // Cleanup logic
-       cleanup_done = true;
-   }
-   ```
-
-3. **Resource Management**: Always release resources in reverse order
-   ```c
-   // Cleanup order: RTSP server -> Video input -> Platform
-   rtsp_multistream_server_destroy(server);
-   platform_vi_close(vi_handle);
-   platform_cleanup();
-   ```
-
-### Performance Optimization
-
-1. **Memory Management**: Use platform memory pools
-2. **Thread Safety**: Protect shared video resources with mutexes
-3. **Frame Buffering**: Implement efficient buffer management
-4. **Network Optimization**: Use optimal packet sizes for RTP
-
-### Testing Video Pipeline
-
-```bash
-# 1. Basic functionality test
-./out/onvifd &
-PID=$!
-sleep 5
-curl -s http://localhost:8080/onvif/device_service | grep -q "Device"
-echo "ONVIF service: $?"
-
-# 2. RTSP stream test
-timeout 10s ffmpeg -i rtsp://admin:admin@localhost:554/vs0 -frames:v 10 -f null - 2>&1 | grep -E "(fps|bitrate)"
-
-# 3. Multi-client test
-for i in {1..3}; do
-  timeout 10s ffplay -nodisp rtsp://admin:admin@localhost:554/vs0 &
-done
-sleep 5
-ps aux | grep ffplay | wc -l  # Should show 3 clients
-
-# 4. Cleanup test
-kill -INT $PID
-sleep 2
-ps -p $PID >/dev/null && echo "FAIL: Process still running" || echo "PASS: Clean shutdown"
-```
-
-## Video Configuration Reference
-
-### Video Configuration Structure
-```c
-typedef struct {
-    int width;              // Video width (4-byte aligned)
-    int height;             // Video height (4-byte aligned)
-    int fps;                // Frame rate (5-60 range)
-    int bitrate;            // Bitrate in kbps (100-20000)
-    int gop_size;           // GOP size (auto: fps * 2)
-    int profile;            // H.264 profile
-    int codec_type;         // Codec type (H.264)
-    int br_mode;            // Bitrate mode (CBR/VBR)
-} video_config_t;
-```
-
-### Audio Configuration Structure
-```c
-typedef struct {
-    int sample_rate;        // Sample rate (8000-48000)
-    int channels;           // Channel count (1-2)
-    int bits_per_sample;    // Bits per sample (16/24)
-    int codec_type;         // Audio codec type
-    int bitrate;            // Audio bitrate
-} audio_config_t;
-```
-
-### Stream Path Mapping
-- **Main Stream**: `/vs0` - Full resolution, high quality
-- **Sub Stream**: `/vs1` - Lower resolution, optimized for bandwidth
-- **Custom Streams**: `/vs2`, `/vs3` - Additional streams as needed
-
-### Hardware Limitations (Anyka AK3918)
-- **Max Resolution**: 1920x1080 @ 30fps
-- **Max Streams**: 4 concurrent streams
-- **Encoder**: H.264 hardware encoder
-- **Memory**: Limited buffer pools for video frames
-
-## Expected Log Messages
-
-### Normal Video Initialization
-```
-[INFO] Initializing video input...
-[INFO] Video input initialized: 1920x1080
-[INFO] Detected sensor frame rate: 25 fps
-[INFO] Global video capture started successfully
-[INFO] Main stream configuration: 1920x1080@25fps, 2000kbps, H264-Main, GOP:50
-[INFO] Multi-stream RTSP server created successfully
-[INFO] Multi-stream RTSP server started successfully
-```
-
-### Warning Messages (Non-Fatal)
-```
-[WARNING] warning: failed to match sensor at /etc/jffs2, trying backup path
-[WARNING] warning: failed to detect sensor frame rate, using default 15fps
-[WARNING] Config FPS 60 outside valid range (5-50), using sensor FPS 25
-[WARNING] warning: using default main stream configuration with sensor fps 25
-```
-
-### Error Messages (Investigation Required)
-```
-[ERROR] Failed to open video input, RTSP streaming disabled
-[ERROR] Failed to set video channel attributes, RTSP streaming disabled
-[ERROR] Failed to start global video capture, RTSP streaming disabled
-[ERROR] Failed to create multi-stream RTSP server
-[ERROR] Failed to start multi-stream RTSP server
-```
-
-## Performance Expectations
-
-| Component | Expected Duration | Max Acceptable | Warning Signs |
-|-----------|------------------|----------------|---------------|
-| Sensor detection | < 100ms | < 500ms | Multiple path failures |
-| Video input init | 200-500ms | 2s | Hardware timeouts |
-| Channel config | < 100ms | < 500ms | Invalid parameters |
-| Global capture | 100-300ms | 1s | Hardware not ready |
-| RTSP server creation | < 200ms | 1s | Port conflicts |
-| Server start | 200-500ms | 2s | Threading issues |
-| **Total initialization** | **500ms-1.5s** | **7s** | **System overload** |
-
-## Integration with Build System
-
-### Debug Build with Video Logging
-```bash
-# Enable video debug logging
-make debug CFLAGS="-DPLATFORM_LOG_LEVEL=0"
-
-# Video-specific static analysis
-clang-tidy --checks='-*,bugprone-*,performance-*' src/core/lifecycle/video_lifecycle.c
-
-# Memory leak detection for video
-valgrind --leak-check=full --track-origins=yes ./out/onvifd
-```
-
-### Automated Testing for CI
-```bash
-# Video pipeline test
-test_video_pipeline() {
-  timeout 30s ./out/onvifd &
-  local pid=$!
-  sleep 5
-
-  # Test RTSP connection
-  timeout 10s ffprobe rtsp://admin:admin@localhost:554/vs0 2>&1 | grep -q "Video:"
-  local video_ok=$?
-
-  kill -INT $pid
-  wait $pid
-
-  [[ $video_ok -eq 0 ]] || exit 1
+### Key Data Structures
+
+**`OwnedFrame`** (`frame.rs:94`):
+
+```rust
+pub struct OwnedFrame {
+    pub data: BytesMut,       // Encoded frame data (owned, zero-copy from SHM)
+    pub timestamp: u64,       // Microseconds since epoch
+    pub frame_type: FrameType,// VideoIFrame | VideoPFrame | VideoBFrame | AudioPacket
+    pub stream_id: StreamId,  // VideoMain | VideoSub | Audio
 }
 ```
 
-## Conclusion
+**`LowLatencyFrameQueue`** (`bridge.rs:43`):
 
-The ONVIF video pipeline provides a robust, production-ready solution for camera streaming with comprehensive error handling and performance optimization. Key features:
+- Bounded `VecDeque<QueuedFrame>` with overflow policy
+- On overflow + incoming I-frame: **flush entire queue** (ensures clean GOP start)
+- On overflow + incoming P-frame: drop oldest non-IDR frame
+- Telemetry: tracks enqueued, dequeued, dropped_on_overflow, dropped_on_flush, max_depth
 
-1. **Multi-Path Sensor Detection** - Automatic fallback for sensor configuration
-2. **Hardware Abstraction** - Clean separation between hardware and application layers
-3. **Configuration Validation** - Automatic parameter validation and correction
-4. **Error Recovery** - Graceful degradation when video components fail
-5. **Performance Monitoring** - Built-in statistics and logging for troubleshooting
-6. **Multi-Stream Support** - Concurrent main/sub stream delivery
-7. **Thread Safety** - Mutex-protected operations throughout the pipeline
+**`StreamState`** (`bridge.rs:277`):
 
-For development, always test the complete pipeline from sensor detection through RTSP streaming. The comprehensive logging system provides detailed visibility into each phase of the video flow for effective debugging.
+- Per-stream (main/sub) bridge state
+- Holds `frame_queue`, cached SPS/PPS, `last_timestamp_ms`, `bootstrap_idr`
+- Late-joining subscribers receive cached SPS + PPS + latest IDR
+
+### Stream URIs
+
+| Protocol | Main Stream                  | Sub Stream                  |
+|----------|------------------------------|-----------------------------|
+| RTSP     | `rtsp://<ip>:554/main`       | `rtsp://<ip>:554/sub`       |
+| HTTP-FLV | `http://<ip>:8080/live/main` | `http://<ip>:8080/live/sub` |
+
+---
+
+## 6. Troubleshooting Guide
+
+### 6.1 Vendor-Daemon Not Running
+
+**Symptoms**: onvif-rust fails at startup with "VendorIpc connection failed",
+`/tmp/vd-ctrl.sock` does not exist.
+
+**Debugging**:
+
+```bash
+# Check if daemon is running
+ps aux | grep vendor-daemon
+
+# Check socket existence
+ls -la /tmp/vd-ctrl.sock /tmp/vd-frame-main.sock /tmp/vd-frame-sub.sock
+
+# Start daemon manually (on device)
+/mnt/anyka_hack/vendor-daemon/vendor-daemon.bin &
+
+# Check daemon logs
+cat /tmp/vendor-daemon.log | tail -50
+```
+
+**Code locations**: `VendorIpc::new()` at `vendor_ipc.rs:336`, connection to
+`CTRL_SOCKET_PATH` (`/tmp/vd-ctrl.sock`).
+
+**Fix**: Ensure vendor-daemon starts before onvif-rust. The SD card boot script
+(`anyka_hack/init_camera.sh`) should launch vendor-daemon first.
+
+### 6.2 Shared Memory Ring Issues
+
+**Symptoms**: "SHM file missing", "SHM size mismatch", frames arrive but contain
+garbage data.
+
+**Debugging**:
+
+```bash
+# Check SHM file exists and has correct size
+ls -la /tmp/vendor-frame-ring.shm
+# Expected size: 1048640 bytes (64 + 8 × 128KB)
+
+# Check permissions
+stat /tmp/vendor-frame-ring.shm
+# Both processes must have read/write access
+```
+
+**Code locations**:
+
+- Ring layout constants: `shm_ring.rs:74-87`
+- `ShmRingReader::open()`: `shm_ring.rs`
+- Ring creation: `main.c` (vendor-daemon creates the file)
+
+**Expected SHM layout**:
+
+```text
+Ring Header:     64 bytes
+Slot 0 Header:   64 bytes  ┐
+Slot 0 Data:   128KB - 64B ┘  × 8 slots
+...
+Total: 64 + 8 × 131072 = 1,048,640 bytes
+```
+
+**Fix**: If the file is missing, vendor-daemon hasn't been started or failed
+during init. If the size is wrong, ensure both processes use matching constants
+(`VD_SHM_SLOT_COUNT=8`, `VD_SHM_SLOT_SIZE=128KB`).
+
+### 6.3 Frame Push Timeout
+
+**Symptoms**: onvif-rust connects but never receives frames, `poll()` in
+`recv_pushed_frame()` times out.
+
+**Debugging**:
+
+```bash
+# Check if push threads are active in daemon logs
+grep "push_frame_thread" /tmp/vendor-daemon.log
+
+# Check if encoder is producing frames
+grep "venc_get_stream" /tmp/vendor-daemon.log | tail -5
+
+# Verify frame sockets are connected
+ls -la /tmp/vd-frame-main.sock /tmp/vd-frame-sub.sock
+```
+
+**Code locations**:
+
+- Push thread: `main.c:754` (`push_frame_thread`)
+- Start push: `CMD_VENC_START_PUSH (19)` at `main.c:1426`
+- Rust poll: `vendor_ipc.rs:800` (`recv_pushed_frame`)
+
+**Fix**: Ensure step 7 of init (start_streaming → `CMD_VENC_START_PUSH`) completed
+successfully. Check if encoders were opened (`CMD_VENC_OPEN`) before push was started.
+
+### 6.4 RTSP / HTTP-FLV Connection Failures
+
+**Symptoms**: `ffplay` or browser cannot connect, "connection refused" errors.
+
+**Debugging**:
+
+```bash
+# Check if ports are bound
+ss -tlnp | grep -E ':554|:8080'
+
+# Test RTSP with ffprobe
+ffprobe -v error -show_entries stream=codec_name,width,height \
+  rtsp://<camera-ip>:554/main
+
+# Test HTTP-FLV with curl
+curl -v http://<camera-ip>:8080/live/main
+
+# Check if streaming service started
+grep "Streaming service started" /tmp/onvif-rust.log
+```
+
+**Code locations**:
+
+- Port verification: `service.rs:370` (`verify_port_available`)
+- Server spawn: `service.rs:342-352`
+- Stream names: `config.rs:80-81` (`main_stream_name="main"`, `sub_stream_name="sub"`)
+
+**Fix**: If ports are in use, check for leftover processes. If streaming didn't
+start, check for init errors earlier in the log. Verify config values (default:
+RTSP=554, HTTP-FLV=8080).
+
+### 6.5 Frame Drops / Queue Overflow
+
+**Symptoms**: Video stuttering, log messages about dropped frames, periodic
+telemetry showing high `dropped_on_overflow` or `dropped_on_flush` counts.
+
+**Debugging**:
+
+```bash
+# Check for dropped frame notifications from daemon
+grep "push_drop_notify" /tmp/vendor-daemon.log
+
+# Check queue telemetry from onvif-rust
+grep "Low-latency queue telemetry" /tmp/onvif-rust.log
+
+# Check fanout progress
+grep "Fanout task progress" /tmp/onvif-rust.log
+```
+
+**Code locations**:
+
+- Daemon drop notification: `main.c:877` (`VD_NOTIFY_FRAME_DROPPED`)
+- Queue overflow policy: `bridge.rs:75-95` (`LowLatencyFrameQueue::push`)
+- Queue telemetry: `bridge.rs:147` (`maybe_log_telemetry`, every 500 frames)
+- Fanout summary: `service.rs:603` (every 300 frames)
+
+**I-frame flush behavior**: When the queue is full and a new I-frame arrives,
+the entire queue is flushed and replaced with the fresh I-frame. This ensures
+clients always start from a clean GOP boundary rather than accumulating stale
+P-frames that would cause decode artifacts.
+
+**Fix**:
+
+- If daemon reports drops → encoder is producing faster than SHM writes (rare)
+- If queue overflow → downstream consumption is too slow; check network, increase
+  queue capacity via `ONVIF_QUEUE_MAIN` / `ONVIF_QUEUE_SUB` env vars
+- Default capacities: main=4, sub=6 (see `service.rs:310-311`)
+
+---
+
+## 7. Developer Guidelines
+
+### Adding a New Stream
+
+1. Add a `StreamId` variant in `frame.rs` (e.g., `VideoThird`)
+2. Add a new `LowLatencyFrameQueue` in `StreamingBridge` (`bridge.rs`)
+3. Update `route_owned_frame()` routing logic in `bridge.rs`
+4. Add a new frame socket path in `vendor_ipc.rs`
+5. Add encoder configuration in `anyka.rs`
+6. Publish the new stream in `StreamingService::start()` (`service.rs`)
+7. Add push thread in vendor-daemon (`main.c`)
+
+### Adding IPC Commands
+
+1. Define the command constant in `vendor_ipc.rs` (e.g., `const CMD_NEW_THING: i32 = 30;`)
+2. Add a handler in `main.c` dispatch switch
+3. Add a Rust wrapper method on `VendorIpc` that calls `send_command()`
+4. Wire the wrapper into the relevant HAL trait implementation
+
+### Error Handling Patterns
+
+Graceful degradation — non-critical failures log and continue:
+
+```rust
+// Best-effort shutdown pattern (anyka.rs:174)
+if let Err(e) = video_input.capture_off() {
+    tracing::warn!("Video capture off failed during shutdown (best-effort): {}", e);
+}
+```
+
+Rollback on critical init failure:
+
+```rust
+// anyka.rs:273 — if set_channel_attr fails, undo open + VPSS
+if let Err(e) = self.video_input.set_channel_attr() {
+    let _ = self.video_input.destroy_vpss();
+    let _ = self.video_input.close().await;
+    return Err(e);
+}
+```
+
+### Performance Notes
+
+- **BytesMutPool** (`bridge.rs:216`): Reuses `BytesMut` buffers (64KB default, pool of 8)
+  to reduce malloc pressure on uClibc. I-frames > 64KB get fresh allocations.
+- **Zero-copy path**: SHM read → `BytesMut` → `OwnedFrame` → `route_owned_frame()`.
+  Frame data is *moved*, never copied between pipeline stages.
+- **Queue capacities**: main=4 frames, sub=6 frames (configurable via env vars).
+  Smaller queues = lower latency; larger queues = more tolerance for jitter.
+- **Tie-breaker fairness**: `recv_pushed_frame()` uses `poll()` on both frame
+  sockets simultaneously, preventing main-stream starvation of sub-stream or
+  vice versa.
+- **Callback budget**: `on_frame` / `on_owned_frame` must complete in < 2ms to
+  avoid blocking the encoder pipeline.
+
+### Testing Commands
+
+```bash
+# Unit tests
+cargo test --lib
+
+# All tests (unit + integration)
+cargo test
+
+# Lint check
+cargo clippy -- -D warnings
+
+# Format check
+cargo fmt --check
+
+# On-device RTSP validation
+ffprobe -v error rtsp://<camera-ip>:554/main
+ffprobe -v error rtsp://<camera-ip>:554/sub
+
+# Multi-client load test (3 concurrent RTSP streams)
+for i in 1 2 3; do
+  ffplay -fflags nobuffer rtsp://<camera-ip>:554/main &
+done
+```
+
+---
+
+## 8. Configuration Reference
+
+### Stream Profiles
+
+| Parameter     | Main Stream                 | Sub Stream         |
+|---------------|-----------------------------|--------------------|
+| Resolution    | 1280×720 (or sensor-native) | 640×360            |
+| Framerate     | 15 fps                      | 15 fps             |
+| Bitrate       | 2000 kbps                   | 300 kbps           |
+| Codec         | H.264 Main Profile          | H.264 Main Profile |
+| Encoder token | `VideoEncoder_1`            | `VideoEncoder_2`   |
+
+> Channel layout is configured in `anyka.rs:609` (`set_channel_attr`). Main
+> resolution follows the sensor; sub defaults to 640×360 with fallback for
+> small sensors.
+
+### SHM Ring Layout
+
+| Component          | Size                | Count    |
+|--------------------|---------------------|----------|
+| Ring Header        | 64 bytes            | 1        |
+| Slot Header        | 64 bytes            | per slot |
+| Slot Data          | 128KB - 64B         | per slot |
+| **Total Slots**    | —                   | **8**    |
+| **Total SHM Size** | **1,048,640 bytes** | —        |
+
+Constants defined in `shm_ring.rs:74-87`:
+
+- `VD_SHM_SLOT_COUNT = 8`
+- `VD_SHM_SLOT_SIZE = 128 KB`
+- `VD_SHM_HEADER_SIZE = 64`
+- `VD_SHM_SLOT_HDR_SIZE = 64`
+
+### Hardware Limitations (AK3918)
+
+- Max resolution: 1920×1080 @ 30fps
+- Codec: H.264 only (no H.265 on this SoC)
+- RAM budget: **24 MB** hard cap (enforced via `cap` crate allocator)
+- Dual-stream maximum: main + sub simultaneous encoding
+
+---
+
+## 9. Expected Log Messages
+
+### Normal Startup
+
+```text
+INFO  AnykaPlatform: using shared VendorIpc client for video/audio/imaging
+INFO  ISP sensor matched successfully
+INFO  Sensor resolution detected: 1280x720
+INFO  Video input initialized: dual-channel config and capture started
+INFO  Video encoders initialized: 2 channels
+INFO  Streaming service started rtsp_port=554 httpflv_port=8080
+DEBUG First frame received in fanout task (pipeline is flowing)
+```
+
+### Warnings (Transient / Non-Fatal)
+
+```text
+WARN  VPSS init failed during platform init; continuing without VPSS: ...
+WARN  IDR frame missing SPS/PPS and cache incomplete
+WARN  SPS/PPS missing when subscriber connects (client will see black screen)
+WARN  Video capture off failed during shutdown (best-effort, continuing): ...
+```
+
+### Errors (Requires Investigation)
+
+```text
+ERROR VendorIpc connection failed (is vendor-daemon running?): ...
+ERROR Failed to set channel attributes, rolling back: ...
+ERROR RTSP port 554 is unavailable for startup: Address already in use
+ERROR Video encoder VideoEncoder_1 initialization failed: ...
+```
+
+---
+
+## 10. Performance Expectations
+
+| Metric                 | Expected Value | Notes                                  |
+|------------------------|----------------|----------------------------------------|
+| VendorIpc connect      | < 50ms         | Unix socket connect to daemon          |
+| Sensor match + VI open | < 500ms        | ISP config load + device init          |
+| VPSS + channel config  | < 100ms        | Includes 200ms capture stabilize delay |
+| Encoder open (×2)      | < 200ms        | Main + sub H.264 encoders              |
+| Start push             | < 50ms         | Spawns push_frame_thread per stream    |
+| First frame arrival    | < 300ms        | After push start, to first OwnedFrame  |
+| **Total init budget**  | **< 1.5s**     | All steps, sensor to first RTSP frame  |
+| Frame callback budget  | < 2ms          | on_owned_frame must not block encoder  |
+| Queue push overhead    | < 100μs        | Mutex lock + VecDeque push + notify    |
+
+---
+
+## 11. Build System Integration
+
+### Cross-Compilation
+
+```bash
+# vendor-daemon (C, Anyka toolchain)
+cd cross-compile/vendor-daemon
+arm-anykav200-linux-uclibcgnueabi-gcc -std=gnu99 -march=armv5te \
+  -mfloat-abi=soft -o vendor-daemon main.c \
+  -I<sdk-include-dir> -L<sdk-lib-dir> \
+  -lplat_vi -lplat_vpss -lplat_venc_cb -lmpi_venc ...
+
+# onvif-rust (Rust, cross-compile for ARM)
+cd cross-compile/onvif-rust
+cargo build --release
+```
+
+### Deploy to SD Card
+
+```bash
+# Copy binaries to SD card payload
+cp vendor-daemon.bin SD_card_contents/anyka_hack/vendor-daemon/
+cp onvif-rust.bin    SD_card_contents/anyka_hack/onvif/
+```
+
+### Quality Checks
+
+```bash
+cargo clippy -- -D warnings   # Zero warnings required
+cargo fmt --check              # Formatting must pass
+cargo test                     # All tests must pass
+cargo doc --no-deps            # Documentation must build
+```
+
+---
+
+## 12. Conclusion
+
+The dual-process video pipeline provides:
+
+- **Process isolation**: SDK crashes in vendor-daemon do not bring down the ONVIF server
+- **Push-only delivery**: No polling from Rust; daemon pushes frames as they're encoded
+- **Zero-copy path**: SHM ring → BytesMut → OwnedFrame → queue (data is moved, not copied)
+- **I-frame queue flush**: On overflow, stale P-frames are discarded for a clean GOP start
+- **Dual-stream fairness**: `poll()` on both frame sockets prevents cross-channel blocking
+- **ONVIF 24.12 compliance**: Full RTSP and HTTP-FLV streaming with late-join support
+- **24 MB RAM budget**: BytesMutPool reuse + bounded queues keep memory predictable
