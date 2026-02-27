@@ -48,7 +48,12 @@
     "npm run type-check": true,
     "npm run test": true,
     "cargo audit": true,
-    "../../toolchain/arm-anykav200-crosstool-ng/bin/cargo": true
+    "../../toolchain/arm-anykav200-crosstool-ng/bin/cargo": true,
+    "bd": true,
+    "/^cd /home/kmk/anyka-dev && bd list --json 2>/dev/null \\| python3 -c \"import sys,json; items=json\\.load\\(sys\\.stdin\\); \\[print\\(i\\['id'\\], i\\.get\\('status',''\\), i\\.get\\('title',''\\), i\\.get\\('priority',''\\)\\) for i in items\\[:20\\]\\]\" 2>/dev/null \\|\\| bd list 2>/dev/null \\| head -60$/": {
+      "approve": true,
+      "matchCommandLine": true
+    }
   },
   "cursorpyright.analysis.typeCheckingMode": "strict",
   "cursorpyright.analysis.diagnosticMode": "workspace",
