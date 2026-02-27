@@ -157,12 +157,12 @@ pub fn ntp_timestamp_from_system_time(st: SystemTime) -> Option<u64> {
     Some((ntp_secs << 32) | ntp_frac)
 }
 
-/// Generate an NTP timestamp (RFC 5905 format: 64-bit value)
+/// Generate an NTP timestamp (RFC 5905 format: 64-bit value) from the current system time.
 /// Upper 32 bits: seconds since January 1, 1900 00:00 UTC
 /// Lower 32 bits: fractional seconds (2^-32 second resolution)
-/// Panics if system time is before Unix epoch (use ntp_timestamp_from_system_time for fallible version).
-pub fn ntp_timestamp() -> u64 {
-    ntp_timestamp_from_system_time(SystemTime::now()).expect("System time before Unix epoch")
+/// Returns None if system time is before Unix epoch.
+pub fn ntp_timestamp() -> Option<u64> {
+    ntp_timestamp_from_system_time(SystemTime::now())
 }
 
 #[cfg(test)]
@@ -507,14 +507,20 @@ mod tests {
     // ========== ntp_timestamp Tests ==========
 
     #[test]
-    fn test_ntp_timestamp_returns_nonzero() {
+    fn test_ntp_timestamp_returns_some() {
         let ts = ntp_timestamp();
+        assert!(ts.is_some());
+    }
+
+    #[test]
+    fn test_ntp_timestamp_returns_nonzero() {
+        let ts = ntp_timestamp().expect("System time should be valid");
         assert!(ts > 0);
     }
 
     #[test]
     fn test_ntp_timestamp_upper_bits_reasonable() {
-        let ts = ntp_timestamp();
+        let ts = ntp_timestamp().expect("System time should be valid");
         let ntp_secs = ts >> 32;
         // NTP epoch offset from Unix epoch is ~2.2 billion seconds
         // Current time in NTP seconds should be > 3.9 billion (year 2023+)

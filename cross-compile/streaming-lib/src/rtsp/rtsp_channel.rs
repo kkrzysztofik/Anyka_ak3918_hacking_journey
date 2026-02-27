@@ -18,8 +18,6 @@ use super::rtp::rtp_aac::RtpAacUnPacker;
 use super::rtp::rtp_h264::RtpH264UnPacker;
 use super::rtp::rtp_h265::RtpH265UnPacker;
 
-use super::rtp::rtcp::rtcp_context::RtcpContext;
-use super::rtp::rtcp::rtcp_sr::RtcpSenderReport;
 use super::rtp::utils::TPacker;
 use super::rtp::utils::TUnPacker;
 use super::rtsp_codec::RtspCodecId;
@@ -28,6 +26,9 @@ use crate::bytesio::TNetIO;
 use crate::bytesio::bytes_errors::BytesWriteError;
 use crate::bytesio::bytes_reader::BytesReader;
 use crate::bytesio::bytes_writer::AsyncBytesWriter;
+use crate::rtsp::rtp::rtcp::errors::RtcpError;
+use crate::rtsp::rtp::rtcp::rtcp_context::RtcpContext;
+use crate::rtsp::rtp::rtcp::rtcp_sr::RtcpSenderReport;
 use crate::rtsp::rtp::utils::Marshal;
 use crate::rtsp::rtp::utils::Unmarshal;
 use byteorder::BigEndian;
@@ -246,25 +247,24 @@ impl RtcpChannel {
     pub async fn send_sr(
         &mut self,
         rtcp_io: Arc<Mutex<Box<dyn TNetIO + Send + Sync>>>,
-    ) -> Result<bool, BytesWriteError> {
+    ) -> Result<bool, RtcpError> {
         let Some(sr) = self.send_ctx.generate_sr() else {
             return Ok(false);
         };
 
+        let msg = sr.marshal()?;
         let net_type = rtcp_io.lock().await.get_net_type();
-        if let Ok(msg) = sr.marshal() {
-            let mut bytes_writer = AsyncBytesWriter::new(rtcp_io);
-            match net_type {
-                crate::bytesio::NetType::TCP => {
-                    bytes_writer.write_u8(0x24)?;
-                    bytes_writer.write_u8(self.channel_identifier)?;
-                    bytes_writer.write_u16::<BigEndian>(msg.len() as u16)?;
-                }
-                crate::bytesio::NetType::UDP => {}
+        let mut bytes_writer = AsyncBytesWriter::new(rtcp_io);
+        match net_type {
+            crate::bytesio::NetType::TCP => {
+                bytes_writer.write_u8(0x24)?;
+                bytes_writer.write_u8(self.channel_identifier)?;
+                bytes_writer.write_u16::<BigEndian>(msg.len() as u16)?;
             }
-            bytes_writer.write(&msg)?;
-            bytes_writer.flush().await?;
+            crate::bytesio::NetType::UDP => {}
         }
+        bytes_writer.write(&msg)?;
+        bytes_writer.flush().await?;
         Ok(true)
     }
 
