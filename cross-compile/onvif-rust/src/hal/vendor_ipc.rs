@@ -901,13 +901,13 @@ impl VendorIpc {
 
         // Check for dropped-frame notification (Fix 4 integration)
         if notif.is_frame_dropped() {
-            debug!(
+            warn!(
                 event = "push_notification_frame_dropped",
                 diag_monotonic_ms = monotonic_millis(),
                 channel = channel_name,
                 slot_index = notif.slot_index,
                 flags = notif.flags,
-                "frame dropped by daemon during ring overflow - continuing push"
+                "daemon reported dropped frame notification"
             );
             return Err(PlatformError::ResourceBusy(
                 "frame dropped by daemon (P-frame during ring overflow)".into(),
@@ -1543,7 +1543,6 @@ impl crate::hal::imaging::ImagingHalTrait for VendorIpc {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::hal::shm_ring::VD_NOTIFY_FRAME_DROPPED;
     use std::io::{Read, Write};
     use std::os::unix::net::{UnixListener, UnixStream};
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -2010,6 +2009,52 @@ mod tests {
     }
 
     #[test]
+    fn test_recv_pushed_frame_returns_resource_busy_on_frame_drop_notification() {
+        use std::sync::{Arc, Mutex};
+
+        // Create a Unix socket pair - one end goes to VendorIpc, other we write to
+        let (mut reader, mut writer) = UnixStream::pair().unwrap();
+
+        // Construct VendorIpc with only frame_main_stream set (no shm reader needed for drop path)
+        // Use a dummy control socket path that won't actually connect
+        let ipc = VendorIpc {
+            stream: Arc::new(Mutex::new(writer.try_clone().unwrap())),
+            frame_main_stream: Mutex::new(Some(reader)),
+            frame_sub_stream: Mutex::new(None),
+            shm_reader: Mutex::new(None),
+            prefer_sub_on_tie: AtomicBool::new(false),
+        };
+
+        // Write a 12-byte drop notification: slot_index=0, frame_len=0, flags=VD_NOTIFY_FRAME_DROPPED(4)
+        let drop_notification = [
+            0x00, 0x00, 0x00, 0x00, // slot_index = 0
+            0x00, 0x00, 0x00, 0x00, // frame_len = 0
+            0x04, 0x00, 0x00, 0x00, // flags = VD_NOTIFY_FRAME_DROPPED (1 << 2)
+        ];
+        writer.write_all(&drop_notification).unwrap();
+        writer.flush().unwrap();
+
+        // Call recv_pushed_frame - should return early with ResourceBusy due to drop notification
+        let result = ipc.recv_pushed_frame(None);
+
+        // Use is_err() and match directly to avoid Debug requirement
+        if result.is_ok() {
+            panic!("Expected error, got Ok(_)");
+        }
+        let err = result.err().expect("checked is_err above");
+        match err {
+            PlatformError::ResourceBusy(msg) => {
+                assert!(
+                    msg.contains("frame dropped"),
+                    "Expected 'frame dropped' in message, got: {}",
+                    msg
+                );
+            }
+            other => panic!("expected ResourceBusy, got {:?}", other),
+        }
+    }
+
+    #[test]
     fn test_map_shm_slot_read_error_not_ready_becomes_resource_busy() {
         let error =
             PlatformError::InvalidParameter("slot 0 not ready for reading (state: 0)".into());
@@ -2129,62 +2174,5 @@ mod tests {
         assert_eq!(captured.len(), 1);
         assert_eq!(captured[0].0, CMD_VENC_STOP_PUSH);
         assert!(captured[0].1.is_empty());
-    }
-
-    // ============================================================================
-    // Frame Drop Notification Tests
-    // ============================================================================
-
-    /// Verify frame-dropped notification is treated as transient loss (ResourceBusy).
-    ///
-    /// When the daemon reports a dropped frame (VD_NOTIFY_FRAME_DROPPED flag set),
-    /// the push loop should continue rather than treat this as a fatal error.
-    /// This test validates:
-    /// 1. FrameNotification correctly detects the dropped-frame flag
-    /// 2. The error returned is PlatformError::ResourceBusy
-    /// 3. ResourceBusy is classified as transient (so push loop continues)
-    #[test]
-    fn test_frame_drop_notification_returns_transient_resource_busy() {
-        // Create a FrameNotification with the frame dropped flag set
-        let notif_bytes = [
-            0u8,
-            0,
-            0,
-            0, // slot_index = 0
-            0u8,
-            0,
-            0,
-            0, // frame_len = 0
-            (VD_NOTIFY_FRAME_DROPPED as u8),
-            0,
-            0,
-            0, // flags = VD_NOTIFY_FRAME_DROPPED
-        ];
-        let notif = FrameNotification::from_bytes(&notif_bytes);
-
-        // Verify the flag is correctly detected
-        assert!(
-            notif.is_frame_dropped(),
-            "FrameNotification should detect dropped frame flag"
-        );
-
-        // The code path at vendor_ipc.rs:902-915 returns ResourceBusy for dropped frames.
-        // This error type is already tested as transient in anyka.rs::test_push_mode_transient_error_classification.
-        // Here we verify the mapping: frame dropped -> ResourceBusy
-        let error = PlatformError::ResourceBusy(
-            "frame dropped by daemon (P-frame during ring overflow)".into(),
-        );
-
-        // Verify ResourceBusy is classified as transient (allows push loop to continue)
-        // This function is defined in platform/anyka.rs - we inline the transient check here
-        // for test self-containment since we can't access private function from this crate.
-        let is_transient = matches!(
-            error,
-            PlatformError::Timeout | PlatformError::ResourceBusy(_)
-        );
-        assert!(
-            is_transient,
-            "ResourceBusy should be classified as transient error to allow push loop continuation"
-        );
     }
 }
