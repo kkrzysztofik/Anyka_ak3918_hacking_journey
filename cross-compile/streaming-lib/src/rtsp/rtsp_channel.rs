@@ -255,9 +255,9 @@ impl RtcpChannel {
         let msg = sr.marshal().map_err(|err| match err.value {
             RtcpErrorValue::BytesWriteError(e) => e,
             other => BytesWriteError {
-                value: crate::bytesio::bytes_errors::BytesWriteErrorValue::IO(std::io::Error::other(
-                    other,
-                )),
+                value: crate::bytesio::bytes_errors::BytesWriteErrorValue::IO(
+                    std::io::Error::other(other),
+                ),
             },
         })?;
         let net_type = rtcp_io.lock().await.get_net_type();
