@@ -16,7 +16,7 @@ stream = "/main"  # primary stream (used when [[device.streams]] is empty)
 timeout-sec = 10
 initial-timestamp-policy = "permissive"
 username = "admin"
-password = ""
+password = "admin"
 
 [test]
 short-duration-sec = 30

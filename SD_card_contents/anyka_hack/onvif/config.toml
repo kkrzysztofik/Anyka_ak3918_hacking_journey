@@ -275,10 +275,10 @@ enabled = true
 name = "Profile1"
 
 # Video width (160-3840)
-width = 1920
+width = 1280
 
 # Video height (120-2160)
-height = 1080
+height = 720
 
 # Frame rate (1-60)
 framerate = 15
