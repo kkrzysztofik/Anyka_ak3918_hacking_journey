@@ -2013,7 +2013,7 @@ mod tests {
         use std::sync::{Arc, Mutex};
 
         // Create a Unix socket pair - one end goes to VendorIpc, other we write to
-        let (mut reader, mut writer) = UnixStream::pair().unwrap();
+        let (reader, mut writer) = UnixStream::pair().unwrap();
 
         // Construct VendorIpc with only frame_main_stream set (no shm reader needed for drop path)
         // Use a dummy control socket path that won't actually connect
