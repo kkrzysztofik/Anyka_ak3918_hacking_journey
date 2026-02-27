@@ -26,7 +26,7 @@ use crate::bytesio::TNetIO;
 use crate::bytesio::bytes_errors::BytesWriteError;
 use crate::bytesio::bytes_reader::BytesReader;
 use crate::bytesio::bytes_writer::AsyncBytesWriter;
-use crate::rtsp::rtp::rtcp::errors::RtcpError;
+use crate::rtsp::rtp::rtcp::errors::RtcpErrorValue;
 use crate::rtsp::rtp::rtcp::rtcp_context::RtcpContext;
 use crate::rtsp::rtp::rtcp::rtcp_sr::RtcpSenderReport;
 use crate::rtsp::rtp::utils::Marshal;
@@ -247,12 +247,19 @@ impl RtcpChannel {
     pub async fn send_sr(
         &mut self,
         rtcp_io: Arc<Mutex<Box<dyn TNetIO + Send + Sync>>>,
-    ) -> Result<bool, RtcpError> {
+    ) -> Result<bool, BytesWriteError> {
         let Some(sr) = self.send_ctx.generate_sr() else {
             return Ok(false);
         };
 
-        let msg = sr.marshal()?;
+        let msg = sr.marshal().map_err(|err| match err.value {
+            RtcpErrorValue::BytesWriteError(e) => e,
+            other => BytesWriteError {
+                value: crate::bytesio::bytes_errors::BytesWriteErrorValue::IO(std::io::Error::other(
+                    other,
+                )),
+            },
+        })?;
         let net_type = rtcp_io.lock().await.get_net_type();
         let mut bytes_writer = AsyncBytesWriter::new(rtcp_io);
         match net_type {
