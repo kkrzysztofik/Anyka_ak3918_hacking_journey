@@ -10,7 +10,7 @@
 
 ---
 
-### Task 1: Make NTP timestamp non-panicking (skip SR if wall clock invalid)
+## Task 1: Make NTP timestamp non-panicking (skip SR if wall clock invalid)
 
 **Files:**
 - Modify: `cross-compile/streaming-lib/src/rtsp/rtp/utils.rs:145-168`
@@ -48,7 +48,7 @@ Commit message (example): `fix(rtcp): skip sender reports until wall clock valid
 
 ---
 
-### Task 2: H.264 RTP marker bit = end-of-access-unit (not last VCL)
+## Task 2: H.264 RTP marker bit = end-of-access-unit (not last VCL)
 
 **Files:**
 - Modify: `cross-compile/streaming-lib/src/rtsp/rtp/rtp_h264.rs:230-244` (pack loop + marker decision)
@@ -79,7 +79,7 @@ Commit message (example): `fix(rtp): set H264 marker on end of access unit`
 
 ---
 
-### Task 3: Vendor "frame dropped" notification treated as loss (no warn/error semantics)
+## Task 3: Vendor "frame dropped" notification treated as loss (no warn/error semantics)
 
 **Files:**
 - Modify: `cross-compile/onvif-rust/src/hal/vendor_ipc.rs:902-915`
@@ -110,7 +110,7 @@ Commit message (example): `chore(ipc): treat daemon frame drops as transient los
 
 ---
 
-### Task 4 (Optional): Enforce RTSP CSeq presence
+## Task 4 (Optional): Enforce RTSP CSeq presence
 
 **Files:**
 - Modify: `cross-compile/streaming-lib/src/rtsp/session/server_session.rs` (early request validation)
@@ -124,6 +124,7 @@ Commit message (example): `chore(ipc): treat daemon frame drops as transient los
 ---
 
 ### Final verification
+
 Run full workspace gates (already known-good baseline, re-run after changes):
 - `cd cross-compile && ../../toolchain/arm-anykav200-crosstool-ng/bin/cargo fmt --check`
 - `cd cross-compile && ../../toolchain/arm-anykav200-crosstool-ng/bin/cargo clippy --target x86_64-unknown-linux-gnu -- -D warnings`
@@ -131,12 +132,14 @@ Run full workspace gates (already known-good baseline, re-run after changes):
 - `cd cross-compile/vendor-daemon && make`
 
 ### Deliverables
+
 - Code changes implementing Tasks 1–3 (Task 4 optional).
 - Plan doc saved to `docs/plans/2026-02-26-rtsp-udp-h264-rfc-fixes.md` during implementation phase.
 
 ## Handover from Planning Session
 
 ---
+
 ## Discoveries
 
 - RTP timestamp scaling already exists and assumes video `FrameData::Video.timestamp` is **milliseconds**, converting to 90kHz via `scale_rtp_timestamp()` in streaming-lib; onvif-rust feeds ms timestamps unchanged from the daemon/SDK into `FrameData` (`timestamp_ms` stored everywhere). This reduces risk of "timestamp unit mismatch" but means any change to timestamp units upstream would ripple.
