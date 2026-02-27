@@ -2009,6 +2009,52 @@ mod tests {
     }
 
     #[test]
+    fn test_recv_pushed_frame_returns_resource_busy_on_frame_drop_notification() {
+        use std::sync::{Arc, Mutex};
+
+        // Create a Unix socket pair - one end goes to VendorIpc, other we write to
+        let (reader, mut writer) = UnixStream::pair().unwrap();
+
+        // Construct VendorIpc with only frame_main_stream set (no shm reader needed for drop path)
+        // Use a dummy control socket path that won't actually connect
+        let ipc = VendorIpc {
+            stream: Arc::new(Mutex::new(writer.try_clone().unwrap())),
+            frame_main_stream: Mutex::new(Some(reader)),
+            frame_sub_stream: Mutex::new(None),
+            shm_reader: Mutex::new(None),
+            prefer_sub_on_tie: AtomicBool::new(false),
+        };
+
+        // Write a 12-byte drop notification: slot_index=0, frame_len=0, flags=VD_NOTIFY_FRAME_DROPPED(4)
+        let drop_notification = [
+            0x00, 0x00, 0x00, 0x00, // slot_index = 0
+            0x00, 0x00, 0x00, 0x00, // frame_len = 0
+            0x04, 0x00, 0x00, 0x00, // flags = VD_NOTIFY_FRAME_DROPPED (1 << 2)
+        ];
+        writer.write_all(&drop_notification).unwrap();
+        writer.flush().unwrap();
+
+        // Call recv_pushed_frame - should return early with ResourceBusy due to drop notification
+        let result = ipc.recv_pushed_frame(None);
+
+        // Use is_err() and match directly to avoid Debug requirement
+        if result.is_ok() {
+            panic!("Expected error, got Ok(_)");
+        }
+        let err = result.err().expect("checked is_err above");
+        match err {
+            PlatformError::ResourceBusy(msg) => {
+                assert!(
+                    msg.contains("frame dropped"),
+                    "Expected 'frame dropped' in message, got: {}",
+                    msg
+                );
+            }
+            other => panic!("expected ResourceBusy, got {:?}", other),
+        }
+    }
+
+    #[test]
     fn test_map_shm_slot_read_error_not_ready_becomes_resource_busy() {
         let error =
             PlatformError::InvalidParameter("slot 0 not ready for reading (state: 0)".into());

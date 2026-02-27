@@ -18,8 +18,6 @@ use super::rtp::rtp_aac::RtpAacUnPacker;
 use super::rtp::rtp_h264::RtpH264UnPacker;
 use super::rtp::rtp_h265::RtpH265UnPacker;
 
-use super::rtp::rtcp::rtcp_context::RtcpContext;
-use super::rtp::rtcp::rtcp_sr::RtcpSenderReport;
 use super::rtp::utils::TPacker;
 use super::rtp::utils::TUnPacker;
 use super::rtsp_codec::RtspCodecId;
@@ -28,6 +26,9 @@ use crate::bytesio::TNetIO;
 use crate::bytesio::bytes_errors::BytesWriteError;
 use crate::bytesio::bytes_reader::BytesReader;
 use crate::bytesio::bytes_writer::AsyncBytesWriter;
+use crate::rtsp::rtp::rtcp::errors::RtcpErrorValue;
+use crate::rtsp::rtp::rtcp::rtcp_context::RtcpContext;
+use crate::rtsp::rtp::rtcp::rtcp_sr::RtcpSenderReport;
 use crate::rtsp::rtp::utils::Marshal;
 use crate::rtsp::rtp::utils::Unmarshal;
 use byteorder::BigEndian;
@@ -246,24 +247,32 @@ impl RtcpChannel {
     pub async fn send_sr(
         &mut self,
         rtcp_io: Arc<Mutex<Box<dyn TNetIO + Send + Sync>>>,
-    ) -> Result<(), BytesWriteError> {
-        let sr = self.send_ctx.generate_sr();
+    ) -> Result<bool, BytesWriteError> {
+        let Some(sr) = self.send_ctx.generate_sr() else {
+            return Ok(false);
+        };
 
+        let msg = sr.marshal().map_err(|err| match err.value {
+            RtcpErrorValue::BytesWriteError(e) => e,
+            other => BytesWriteError {
+                value: crate::bytesio::bytes_errors::BytesWriteErrorValue::IO(
+                    std::io::Error::other(other),
+                ),
+            },
+        })?;
         let net_type = rtcp_io.lock().await.get_net_type();
-        if let Ok(msg) = sr.marshal() {
-            let mut bytes_writer = AsyncBytesWriter::new(rtcp_io);
-            match net_type {
-                crate::bytesio::NetType::TCP => {
-                    bytes_writer.write_u8(0x24)?;
-                    bytes_writer.write_u8(self.channel_identifier)?;
-                    bytes_writer.write_u16::<BigEndian>(msg.len() as u16)?;
-                }
-                crate::bytesio::NetType::UDP => {}
+        let mut bytes_writer = AsyncBytesWriter::new(rtcp_io);
+        match net_type {
+            crate::bytesio::NetType::TCP => {
+                bytes_writer.write_u8(0x24)?;
+                bytes_writer.write_u8(self.channel_identifier)?;
+                bytes_writer.write_u16::<BigEndian>(msg.len() as u16)?;
             }
-            bytes_writer.write(&msg)?;
-            bytes_writer.flush().await?;
+            crate::bytesio::NetType::UDP => {}
         }
-        Ok(())
+        bytes_writer.write(&msg)?;
+        bytes_writer.flush().await?;
+        Ok(true)
     }
 
     pub async fn send_rr(
@@ -396,14 +405,20 @@ mod tests {
     fn test_rtcp_channel_set_ssrc() {
         let mut channel = RtcpChannel::default();
         channel.set_ssrc(0x12345678, 90000);
-        let sr = channel.send_ctx.generate_sr();
+        let sr = channel
+            .send_ctx
+            .generate_sr()
+            .expect("SR should be generated");
         assert_eq!(sr.ssrc, 0x12345678);
     }
 
     #[test]
     fn test_rtcp_channel_set_ssrc_default_is_zero() {
         let mut channel = RtcpChannel::default();
-        let sr = channel.send_ctx.generate_sr();
+        let sr = channel
+            .send_ctx
+            .generate_sr()
+            .expect("SR should be generated");
         assert_eq!(sr.ssrc, 0);
     }
 

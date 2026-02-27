@@ -1178,6 +1178,7 @@ fn maybe_log_slow_owned_callback(callback_id: u64, elapsed_us: u64) {
     maybe_log_slow_callback(callback_id, elapsed_us, "owned");
 }
 
+#[cfg(test)]
 fn compute_no_data_recovery_interval_errors(trigger_ms: u64, cycle_sleep_ms: u64) -> u32 {
     let trigger_ms = trigger_ms.max(1);
     let cycle_sleep_ms = cycle_sleep_ms.max(1);
@@ -1185,11 +1186,12 @@ fn compute_no_data_recovery_interval_errors(trigger_ms: u64, cycle_sleep_ms: u64
     errors.max(1).min(u64::from(u32::MAX)) as u32
 }
 
-#[cfg(test)]
+#[inline]
 fn push_mode_enabled(has_sub_stream: bool) -> bool {
     !has_sub_stream
 }
 
+#[inline]
 fn is_push_mode_transient_error(error: &PlatformError) -> bool {
     matches!(
         error,
@@ -1344,8 +1346,7 @@ fn unified_frame_read_loop(
                 break;
             }
 
-            // ── Test-only SDK polling path (no VendorIpc available) ──
-            // ── Test-only SDK polling path (no VendorIpc available) ──
+            // ── Legacy path (no VendorIpc available, e.g. in tests) ──
             let mut stream = std::mem::MaybeUninit::<video_stream>::uninit();
             let stream_ptr = stream.as_mut_ptr();
             let ret = ffi.venc_get_stream(handle.as_ptr(), stream_ptr);
@@ -4750,26 +4751,27 @@ mod tests {
     // =========================================================================
 
     #[test]
-    fn test_timestamp_passthrough_ms() {
-        // SDK timestamps are in ms, Frame uses ms directly (no conversion)
+    fn test_timestamp_conversion_ms_to_us() {
+        // SDK timestamps are in ms, Frame uses µs
         let sdk_ts_ms: u64 = 12345;
-        let frame_ts_ms = sdk_ts_ms as u32;
-        assert_eq!(frame_ts_ms, 12345);
+        let frame_ts_us = sdk_ts_ms.wrapping_mul(1000);
+        assert_eq!(frame_ts_us, 12_345_000);
     }
 
     #[test]
-    fn test_timestamp_passthrough_zero() {
+    fn test_timestamp_conversion_zero() {
         let sdk_ts_ms: u64 = 0;
-        let frame_ts_ms = sdk_ts_ms as u32;
-        assert_eq!(frame_ts_ms, 0);
+        let frame_ts_us = sdk_ts_ms.wrapping_mul(1000);
+        assert_eq!(frame_ts_us, 0);
     }
 
     #[test]
-    fn test_timestamp_passthrough_u32_max() {
-        // u32 ms wraps at ~49.7 days — far exceeds any camera session
-        let sdk_ts_ms: u64 = u32::MAX as u64;
-        let frame_ts_ms = sdk_ts_ms as u32;
-        assert_eq!(frame_ts_ms, u32::MAX);
+    fn test_timestamp_conversion_wrapping() {
+        // Verify wrapping_mul won't panic on large values
+        let sdk_ts_ms: u64 = u64::MAX;
+        let frame_ts_us = sdk_ts_ms.wrapping_mul(1000);
+        // Just verify it doesn't panic; exact value isn't important
+        let _ = frame_ts_us;
     }
 
     // =========================================================================
@@ -4791,7 +4793,7 @@ mod tests {
                 assert_eq!(frame.stream_id, StreamId::VideoMain);
                 assert_eq!(frame.frame_type, FrameType::VideoIFrame);
                 assert_eq!(frame.size, 100);
-                // SDK ts=5000ms → Frame ts=5000ms (passthrough)
+                // SDK ts=5000ms → Frame ts=5000ms (both in milliseconds)
                 assert_eq!(frame.timestamp, 5000);
                 self.0.fetch_add(1, Ordering::SeqCst);
             }

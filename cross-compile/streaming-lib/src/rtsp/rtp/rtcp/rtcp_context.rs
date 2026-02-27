@@ -229,19 +229,10 @@ impl RtcpContext {
         self.last_rtp_wallclock_us = utils::current_time();
     }
 
-    pub fn generate_sr(&mut self) -> RtcpSenderReport {
-        // Get current NTP timestamp (64-bit: 32 bits seconds since 1900, 32 bits fractional)
-        let ntp = utils::ntp_timestamp();
+    pub fn generate_sr(&mut self) -> Option<RtcpSenderReport> {
+        let ntp = utils::ntp_timestamp_from_system_time(std::time::SystemTime::now())?;
         let now_us = utils::current_time();
 
-        // Extrapolate the RTP timestamp to match the current NTP wall-clock.
-        //
-        // RFC 3550 §6.4.1 requires the NTP timestamp and RTP timestamp in an
-        // SR to correspond to the *same* wall-clock instant.  Without
-        // extrapolation, the RTP timestamp is whatever was recorded at the
-        // last `send_rtp()` call, which may be tens or hundreds of
-        // milliseconds stale.  This causes a growing NTP/RTP offset that
-        // poisons VLC's AV-sync.
         let rtp_timestamp = if self.last_rtp_wallclock_us > 0 && self.sample_rate > 0 {
             let elapsed_us = now_us.saturating_sub(self.last_rtp_wallclock_us);
             let elapsed_ticks = (elapsed_us as u128 * self.sample_rate as u128 / 1_000_000) as u32;
@@ -250,14 +241,13 @@ impl RtcpContext {
             self.last_rtp_timestamp
         };
 
-        RtcpSenderReport {
+        Some(RtcpSenderReport {
             header: RtcpHeader {
-                // RFC 3550 section 6.1: all RTCP packets use version 2.
                 version: 2,
                 padding_flag: 0,
                 report_count: 0,
                 payload_type: super::RTCP_SR,
-                length: 6, // RFC 3550: (28 bytes / 4) - 1 = 6
+                length: 6,
             },
             ssrc: self.ssrc,
             ntp,
@@ -265,7 +255,7 @@ impl RtcpContext {
             sender_packet_count: self.send_packets as u32,
             sender_octet_count: self.send_bytes as u32,
             report_blocks: Vec::new(),
-        }
+        })
     }
 
     pub fn received_sr(&mut self, sr: &RtcpSenderReport) {
@@ -439,7 +429,9 @@ mod tests {
     #[test]
     fn test_generate_sr_header_fields_match_rfc3550() {
         let mut ctx = RtcpContext::new(12345, 100, 48_000);
-        let sr = ctx.generate_sr();
+        let sr = ctx
+            .generate_sr()
+            .expect("SR should be generated with valid system time");
 
         assert_eq!(sr.header.version, 2);
         assert_eq!(sr.header.payload_type, crate::rtsp::rtp::rtcp::RTCP_SR);
@@ -807,7 +799,9 @@ mod tests {
         // should be greater than the base (1000) by approximately
         // 50ms * 90000 / 1_000_000 = 4500 ticks.
         std::thread::sleep(std::time::Duration::from_millis(50));
-        let sr = ctx.generate_sr();
+        let sr = ctx
+            .generate_sr()
+            .expect("SR should be generated with valid system time");
 
         // The extrapolated timestamp should be ahead of the base.
         let delta = sr.rtp_timestamp.wrapping_sub(1000);
@@ -835,7 +829,9 @@ mod tests {
         ctx.send_rtp(pkt);
 
         std::thread::sleep(std::time::Duration::from_millis(20));
-        let sr = ctx.generate_sr();
+        let sr = ctx
+            .generate_sr()
+            .expect("SR should be generated with valid system time");
 
         // With sample_rate=0, no extrapolation — timestamp stays at 5000.
         assert_eq!(sr.rtp_timestamp, 5000);
