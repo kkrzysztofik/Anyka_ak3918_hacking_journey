@@ -9,7 +9,7 @@ set -e  # Exit on error
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/common.sh"
 
-COMPILER_RT_SRC_DIR="${LLVM_SRC_DIR}/compiler-rt"
+COMPILER_RT_SRC_DIR="${LLVM_SRC_DIR}/compiler-rt/lib/builtins"
 COMPILER_RT_BUILD_DIR="${BUILD_DIR}/.build/compiler-rt-${LLVM_VERSION}-arm"
 
 # Global variable to store actual builtins library location
@@ -26,7 +26,7 @@ check_dependencies() {
         exit 1
     fi
     if [[ ! -d "${COMPILER_RT_SRC_DIR}" ]]; then
-        log_error "Compiler-rt source not found at: ${COMPILER_RT_SRC_DIR}"
+        log_error "Compiler-rt builtins source not found at: ${COMPILER_RT_SRC_DIR}"
         log_error "Please build LLVM first (which downloads the source): ./build_llvm.sh"
         exit 1
     fi
@@ -68,6 +68,10 @@ configure_compiler_rt() {
     # Configure with CMake
     # IMPORTANT: This is a cross-compilation build, so we use the target GCC
     # and set CMAKE_SYSROOT to the target sysroot
+    # Use the standalone lib/builtins CMakeLists.txt so we build ONLY the
+    # builtins library and nothing else — no sanitizers, no CRT, no unwinder.
+    # The full compiler-rt tree still builds sanitizer_common even with
+    # COMPILER_RT_BUILD_SANITIZERS=OFF because CRT depends on it.
     cmake "${COMPILER_RT_SRC_DIR}" \
         -G Ninja \
         -DCMAKE_BUILD_TYPE=Release \
@@ -82,21 +86,9 @@ configure_compiler_rt() {
         -DCMAKE_FIND_ROOT_PATH_MODE_LIBRARY=ONLY \
         -DCMAKE_FIND_ROOT_PATH_MODE_INCLUDE=ONLY \
         -DCMAKE_FIND_ROOT_PATH_MODE_PACKAGE=ONLY \
-        -DCOMPILER_RT_BUILD_BUILTINS=ON \
-        -DCOMPILER_RT_BUILD_SANITIZERS=OFF \
-        -DCOMPILER_RT_BUILD_XRAY=OFF \
-        -DCOMPILER_RT_BUILD_LIBFUZZER=OFF \
-        -DCOMPILER_RT_BUILD_PROFILE=OFF \
-        -DCOMPILER_RT_BUILD_MEMPROF=OFF \
-        -DCOMPILER_RT_BUILD_ORC=OFF \
         -DCOMPILER_RT_DEFAULT_TARGET_ONLY=ON \
-        -DCOMPILER_RT_USE_BUILTINS_LIBRARY=ON \
-        -DCOMPILER_RT_USE_LLVM_UNWINDER=OFF \
-        -DCOMPILER_RT_CAN_EXECUTE_TESTS=OFF \
-        -DCOMPILER_RT_INCLUDE_TESTS=OFF \
-        -DCOMPILER_RT_USE_LIBCXX=OFF \
-        -DCOMPILER_RT_BUILD_CRT=ON \
-        -DCOMPILER_RT_SYSROOT="${SYSROOT}" \
+        -DCOMPILER_RT_BAREMETAL_BUILD=OFF \
+        -DLLVM_CONFIG_PATH="${INSTALL_DIR}/bin/llvm-config" \
         -DCOMPILER_RT_OS_DIR="linux" \
         "${cmake_target_flags[@]}" || {
         log_error "CMake configuration failed"
@@ -116,8 +108,10 @@ build_compiler_rt() {
     local num_jobs=$(nproc)
     log_info "Building with ${num_jobs} parallel jobs..."
 
-    # Build with Ninja
-    if ! ninja -j "${num_jobs}"; then
+    # Build only the builtins target. The CMake source is the standalone
+    # lib/builtins directory so this is the only available target, but
+    # being explicit guards against future CMakeLists changes.
+    if ! ninja -j "${num_jobs}" builtins; then
         log_error "Compiler-rt build failed"
         exit 1
     fi
