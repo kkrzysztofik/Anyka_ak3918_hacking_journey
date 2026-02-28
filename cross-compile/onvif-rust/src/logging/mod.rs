@@ -6,7 +6,6 @@
 //! - Configures log levels from application configuration
 //! - Supports runtime log level changes via `set_log_level()`
 //! - Bridges the `log` crate to `tracing` for dependency logging
-//! - Integrates with platform logging (Anyka SDK's ak_print)
 //! - Supports console and file output
 //!
 //! # Example
@@ -26,12 +25,10 @@
 
 pub mod http;
 pub mod http_memory;
-mod platform;
 pub mod static_assets;
 
 pub use http::{HttpLogConfig, HttpLoggingMiddleware};
 pub use http_memory::memory_check_middleware;
-pub use platform::*;
 pub use static_assets::{StaticAssetLogConfig, static_asset_logging_middleware};
 
 use std::path::Path;

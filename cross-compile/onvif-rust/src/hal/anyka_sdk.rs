@@ -1,75 +1,7 @@
-//! Safe Rust wrappers for Anyka SDK FFI functions.
+//! Hardware type definitions for Anyka AK3918 platform.
 //!
-//! This module provides safe Rust interfaces to the low-level FFI bindings.
-//! All unsafe FFI calls are wrapped with proper error handling and type conversions.
-
-use thiserror::Error;
-
-/// Errors that can occur when calling Anyka SDK functions.
-#[derive(Debug, Error)]
-pub enum AnykaError {
-    /// SDK function returned an error code.
-    #[error("Anyka SDK error: {0}")]
-    SdkError(i32),
-
-    /// Invalid parameter passed to SDK function.
-    #[error("Invalid parameter: {0}")]
-    InvalidParameter(String),
-
-    /// Resource not available.
-    #[error("Resource not available: {0}")]
-    ResourceUnavailable(String),
-
-    /// Operation timed out.
-    #[error("Operation timed out")]
-    Timeout,
-
-    /// Hardware failure.
-    #[error("Hardware failure: {0}")]
-    HardwareFailure(String),
-
-    /// SDK not initialized.
-    #[error("SDK not initialized")]
-    NotInitialized,
-}
-
-/// Result type for Anyka SDK operations.
-pub type AnykaResult<T> = Result<T, AnykaError>;
-
-/// Log level for Anyka SDK logging.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[repr(i32)]
-pub enum LogLevel {
-    /// Reserved (not used).
-    Reserved = 0,
-    /// Error messages.
-    Error = 1,
-    /// Warning messages.
-    Warning = 2,
-    /// Notice messages.
-    Notice = 3,
-    /// Normal messages.
-    Normal = 4,
-    /// Info messages.
-    Info = 5,
-    /// Debug messages.
-    Debug = 6,
-}
-
-impl From<i32> for LogLevel {
-    fn from(value: i32) -> Self {
-        match value {
-            0 => LogLevel::Reserved,
-            1 => LogLevel::Error,
-            2 => LogLevel::Warning,
-            3 => LogLevel::Notice,
-            4 => LogLevel::Normal,
-            5 => LogLevel::Info,
-            6 => LogLevel::Debug,
-            _ => LogLevel::Debug, // Default to debug for unknown levels
-        }
-    }
-}
+//! Core types used by the HAL layer: `VideoDevice`, `Resolution`,
+//! `PtzMotor`, and `PtzDirection`.
 
 /// Video device identifier.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -78,17 +10,6 @@ pub struct VideoDevice(pub u32);
 impl VideoDevice {
     /// Primary video device.
     pub const DEV0: VideoDevice = VideoDevice(0);
-}
-
-/// Video channel identifier.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct VideoChannel(pub u32);
-
-impl VideoChannel {
-    /// Main video channel (high resolution).
-    pub const MAIN: VideoChannel = VideoChannel(0);
-    /// Sub video channel (low resolution).
-    pub const SUB: VideoChannel = VideoChannel(1);
 }
 
 /// Video resolution.
@@ -126,76 +47,6 @@ impl Resolution {
         width: 320,
         height: 240,
     };
-}
-
-/// Video encoding type.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum VideoEncoding {
-    /// H.264/AVC encoding.
-    #[default]
-    H264,
-    /// H.265/HEVC encoding.
-    H265,
-    /// MJPEG encoding.
-    Mjpeg,
-}
-
-/// Bitrate control mode.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum BitrateMode {
-    /// Constant bitrate.
-    #[default]
-    Cbr,
-    /// Variable bitrate.
-    Vbr,
-}
-
-/// Video encoder configuration.
-#[derive(Debug, Clone, Default)]
-pub struct VideoEncoderConfig {
-    /// Output resolution.
-    pub resolution: Resolution,
-    /// Frame rate in frames per second.
-    pub framerate: u32,
-    /// Target bitrate in kbps.
-    pub bitrate: u32,
-    /// Encoding type.
-    pub encoding: VideoEncoding,
-    /// Bitrate control mode.
-    pub bitrate_mode: BitrateMode,
-    /// GOP length (I-frame interval).
-    pub gop_length: u32,
-    /// Quality level (0-100).
-    pub quality: u32,
-}
-
-/// Audio encoding type.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum AudioEncoding {
-    /// G.711 μ-law encoding.
-    #[default]
-    G711U,
-    /// G.711 A-law encoding.
-    G711A,
-    /// AAC encoding.
-    Aac,
-    /// PCM (raw audio).
-    Pcm,
-}
-
-/// Audio encoder configuration.
-#[derive(Debug, Clone, Default)]
-pub struct AudioEncoderConfig {
-    /// Sample rate in Hz.
-    pub sample_rate: u32,
-    /// Number of channels.
-    pub channels: u32,
-    /// Bits per sample.
-    pub bits_per_sample: u32,
-    /// Encoding type.
-    pub encoding: AudioEncoding,
-    /// Bitrate in kbps.
-    pub bitrate: u32,
 }
 
 /// PTZ device (pan/tilt motor).
@@ -242,104 +93,6 @@ impl PtzDirection {
     }
 }
 
-/// PTZ position in degrees.
-#[derive(Debug, Clone, Copy, Default)]
-pub struct PtzPosition {
-    /// Pan position (-180.0 to 180.0 degrees).
-    pub pan: f32,
-    /// Tilt position (-90.0 to 90.0 degrees).
-    pub tilt: f32,
-    /// Zoom level (1.0 to max zoom).
-    pub zoom: f32,
-}
-
-impl PtzPosition {
-    /// Create a new PTZ position.
-    pub fn new(pan: f32, tilt: f32, zoom: f32) -> Self {
-        Self { pan, tilt, zoom }
-    }
-
-    /// Home position (center, no zoom).
-    pub const HOME: PtzPosition = PtzPosition {
-        pan: 0.0,
-        tilt: 0.0,
-        zoom: 1.0,
-    };
-}
-
-/// PTZ preset.
-#[derive(Debug, Clone)]
-pub struct PtzPreset {
-    /// Preset token (identifier).
-    pub token: String,
-    /// Preset name.
-    pub name: String,
-    /// Preset position.
-    pub position: PtzPosition,
-}
-
-// Stub implementations for native builds (testing)
-mod stub_impl {
-    use super::{AnykaResult, LogLevel, PtzDirection, PtzMotor, VideoDevice};
-
-    /// Print a message (stub - does nothing).
-    pub fn ak_log(_level: LogLevel, _message: &str) -> AnykaResult<()> {
-        Ok(())
-    }
-
-    /// Open video input device (stub).
-    #[allow(dead_code)]
-    pub fn video_input_open(_device: VideoDevice) -> AnykaResult<*mut std::ffi::c_void> {
-        // Return a non-null pointer for stub
-        Ok(std::ptr::dangling_mut::<std::ffi::c_void>())
-    }
-
-    /// Close video input device (stub).
-    ///
-    /// # Safety
-    ///
-    /// This function is marked as `unsafe` because it accepts a raw pointer. However, since this is a stub
-    /// implementation that does not dereference the pointer, it is safe to call with any pointer value,
-    /// including null pointers.
-    #[allow(dead_code)]
-    pub unsafe fn video_input_close(_handle: *mut std::ffi::c_void) -> AnykaResult<()> {
-        Ok(())
-    }
-
-    /// Open PTZ motor control (stub).
-    #[allow(dead_code)]
-    pub fn ptz_open() -> AnykaResult<()> {
-        Ok(())
-    }
-
-    /// Close PTZ motor control (stub).
-    #[allow(dead_code)]
-    pub fn ptz_close() -> AnykaResult<()> {
-        Ok(())
-    }
-
-    /// Turn PTZ motor in a direction (stub).
-    #[allow(dead_code)]
-    pub fn ptz_turn(_direction: PtzDirection) -> AnykaResult<()> {
-        Ok(())
-    }
-
-    /// Stop PTZ motor movement (stub).
-    #[allow(dead_code)]
-    pub fn ptz_stop() -> AnykaResult<()> {
-        Ok(())
-    }
-
-    /// Get PTZ motor step position (stub).
-    #[allow(dead_code)]
-    pub fn ptz_get_position(_motor: PtzMotor) -> AnykaResult<i32> {
-        Ok(0)
-    }
-}
-
-#[allow(dead_code)]
-pub use stub_impl::*;
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -349,65 +102,6 @@ mod tests {
         let res = Resolution::new(1920, 1080);
         assert_eq!(res.width, 1920);
         assert_eq!(res.height, 1080);
-    }
-
-    #[test]
-    fn test_ptz_position_home() {
-        assert_eq!(PtzPosition::HOME.pan, 0.0);
-        assert_eq!(PtzPosition::HOME.tilt, 0.0);
-        assert_eq!(PtzPosition::HOME.zoom, 1.0);
-    }
-
-    #[test]
-    fn test_ptz_direction_codes() {
-        assert_eq!(PtzDirection::Left.to_direction_code(), 1);
-        assert_eq!(PtzDirection::Right.to_direction_code(), 2);
-        assert_eq!(PtzDirection::Up.to_direction_code(), 3);
-        assert_eq!(PtzDirection::Down.to_direction_code(), 4);
-    }
-
-    #[test]
-    fn test_log_level_from_i32() {
-        assert_eq!(LogLevel::from(1), LogLevel::Error);
-        assert_eq!(LogLevel::from(2), LogLevel::Warning);
-        assert_eq!(LogLevel::from(6), LogLevel::Debug);
-        assert_eq!(LogLevel::from(99), LogLevel::Debug); // Unknown defaults to Debug
-    }
-
-    #[test]
-    fn test_log_level_all_variants() {
-        assert_eq!(LogLevel::from(0), LogLevel::Reserved);
-        assert_eq!(LogLevel::from(1), LogLevel::Error);
-        assert_eq!(LogLevel::from(2), LogLevel::Warning);
-        assert_eq!(LogLevel::from(3), LogLevel::Notice);
-        assert_eq!(LogLevel::from(4), LogLevel::Normal);
-        assert_eq!(LogLevel::from(5), LogLevel::Info);
-        assert_eq!(LogLevel::from(6), LogLevel::Debug);
-    }
-
-    #[test]
-    fn test_ptz_motor_to_device_id() {
-        assert_eq!(PtzMotor::Horizontal.to_device_id(), 0);
-        assert_eq!(PtzMotor::Vertical.to_device_id(), 1);
-    }
-
-    #[test]
-    fn test_ptz_position_new() {
-        let pos = PtzPosition::new(45.0, -30.0, 2.0);
-        assert_eq!(pos.pan, 45.0);
-        assert_eq!(pos.tilt, -30.0);
-        assert_eq!(pos.zoom, 2.0);
-    }
-
-    #[test]
-    fn test_video_device_constants() {
-        assert_eq!(VideoDevice::DEV0.0, 0);
-    }
-
-    #[test]
-    fn test_video_channel_constants() {
-        assert_eq!(VideoChannel::MAIN.0, 0);
-        assert_eq!(VideoChannel::SUB.0, 1);
     }
 
     #[test]
@@ -423,47 +117,21 @@ mod tests {
     }
 
     #[test]
-    fn test_anyka_error_display() {
-        let err = AnykaError::SdkError(-1);
-        let display = format!("{}", err);
-        assert!(display.contains("Anyka SDK error"));
-
-        let err = AnykaError::InvalidParameter("test".to_string());
-        let display = format!("{}", err);
-        assert!(display.contains("Invalid parameter"));
-        assert!(display.contains("test"));
-
-        let err = AnykaError::ResourceUnavailable("video".to_string());
-        let display = format!("{}", err);
-        assert!(display.contains("Resource not available"));
-        assert!(display.contains("video"));
-
-        let err = AnykaError::Timeout;
-        let display = format!("{}", err);
-        assert!(display.contains("timed out"));
-
-        let err = AnykaError::HardwareFailure("sensor".to_string());
-        let display = format!("{}", err);
-        assert!(display.contains("Hardware failure"));
-        assert!(display.contains("sensor"));
-
-        let err = AnykaError::NotInitialized;
-        let display = format!("{}", err);
-        assert!(display.contains("not initialized"));
+    fn test_ptz_direction_codes() {
+        assert_eq!(PtzDirection::Left.to_direction_code(), 1);
+        assert_eq!(PtzDirection::Right.to_direction_code(), 2);
+        assert_eq!(PtzDirection::Up.to_direction_code(), 3);
+        assert_eq!(PtzDirection::Down.to_direction_code(), 4);
     }
 
     #[test]
-    fn test_video_encoding_default() {
-        assert_eq!(VideoEncoding::H264, VideoEncoding::default());
+    fn test_ptz_motor_to_device_id() {
+        assert_eq!(PtzMotor::Horizontal.to_device_id(), 0);
+        assert_eq!(PtzMotor::Vertical.to_device_id(), 1);
     }
 
     #[test]
-    fn test_audio_encoding_default() {
-        assert_eq!(AudioEncoding::G711U, AudioEncoding::default());
-    }
-
-    #[test]
-    fn test_bitrate_mode_default() {
-        assert_eq!(BitrateMode::Cbr, BitrateMode::default());
+    fn test_video_device_constants() {
+        assert_eq!(VideoDevice::DEV0.0, 0);
     }
 }
