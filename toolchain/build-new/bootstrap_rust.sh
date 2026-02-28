@@ -2,7 +2,8 @@
 # Bootstrap Rust from source with custom LLVM
 # Target: ARMv5TE (armv5te-unknown-linux-uclibceabi) for Anyka AK3918 cameras
 
-set -e  # Exit on error
+set -e          # Exit on error
+set -o pipefail  # Propagate errors through pipes (prevents silent failures in cmd | tee)
 
 # Script directory — must be set before sourcing common.sh
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -115,7 +116,7 @@ use crate::spec::{base, Target, TargetOptions};
 pub fn target() -> Target {
     let base = base::linux_uclibc::opts();
     Target {
-        llvm_target: "arm-unknown-linux-uclibcgnueabi".into(),
+        llvm_target: "armv5te-unknown-linux-gnueabi".into(),
         metadata: crate::spec::TargetMetadata {
             description: None,
             tier: None,
@@ -318,11 +319,14 @@ build_rust() {
     local clang_wrapper="${BUILD_DIR}/${CLANG_WRAPPER}"
     
     # Create ARMv5TE Clang wrapper
+    # IMPORTANT: --target must use the LLVM-valid gnueabi form, NOT uclibcgnueabi.
+    # Clang/LLVM does not recognise 'uclibcgnueabi' as an environment tag.
+    # The sysroot flag is what directs the linker to the uClibc-ng libraries.
     cat > "${clang_wrapper}" << EOF
 #!/bin/bash
 # Clang wrapper for ARMv5TE target with sysroot
 exec "${INSTALL_DIR}/bin/clang" \\
-    --target=arm-unknown-linux-uclibcgnueabi \\
+    --target=armv5te-unknown-linux-gnueabi \\
     --sysroot="${sysroot}" \\
     -march=armv5te \\
     -mfloat-abi=soft \\
