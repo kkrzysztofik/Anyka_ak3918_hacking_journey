@@ -109,16 +109,6 @@ install_crosstool_ng() {
         unset CXX
     fi
 
-    # Apply patch to disable time64 for Linux < 5.1.0 (for ARMv5TE)
-    if [ -f "${BUILD_DIR}/disable_time64.patch" ]; then
-        log_info "Applying patch to disable time64 support for Linux 3.4.35..."
-        if patch -p1 -d "${CTNG_DIR}" < "${BUILD_DIR}/disable_time64.patch" 2>&1 | grep -q "succeeded\|ignored"; then
-            log_info "Patch applied successfully"
-        else
-            log_warn "Patch may have already been applied or failed (this is OK if already patched)"
-        fi
-    fi
-
     make -j$(nproc)
 
     log_info "crosstool-NG installed successfully"
@@ -213,6 +203,18 @@ create_config_file() {
 
     # Set installation path
     sed -i "s|^CT_PREFIX_DIR=.*|CT_PREFIX_DIR=\"${INSTALL_DIR}\"|" "${config_file}"
+
+    # Disable TIME64 in uClibc-ng: AK3918 runs Linux 3.4.35, which is older than
+    # the Linux >= 5.1.0 requirement for 64-bit time_t syscalls on 32-bit ARM.
+    # Without this, uClibc-ng 1.0.54 fails to build with the 3.4.35 kernel headers.
+    local uclibc_config="${BUILD_DIR}/uclibc-ng.config"
+    cp "${CTNG_DIR}/packages/uClibc-ng/config" "${uclibc_config}"
+    echo "# UCLIBC_USE_TIME64 is not set" >> "${uclibc_config}"
+    sed -i "s|^CT_LIBC_UCLIBC_CONFIG_FILE=.*|CT_LIBC_UCLIBC_CONFIG_FILE=\"${uclibc_config}\"|" "${config_file}"
+    if ! grep -q "^CT_LIBC_UCLIBC_CONFIG_FILE=" "${config_file}"; then
+        echo "CT_LIBC_UCLIBC_CONFIG_FILE=\"${uclibc_config}\"" >> "${config_file}"
+    fi
+    log_info "uClibc-ng: TIME64 disabled (required for Linux 3.4.35 target)"
 
     log_info "Configuration file created/updated"
 
