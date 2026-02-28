@@ -12,7 +12,7 @@ use bytes::BytesMut;
 use parking_lot::{Mutex, RwLock};
 use portable_atomic::{AtomicU32, AtomicU64, AtomicUsize};
 use std::collections::VecDeque;
-use std::sync::{Arc, LazyLock};
+use std::sync::Arc;
 use std::time::Instant;
 use streaming_lib::FrameData;
 use tokio::sync::Notify;
@@ -38,6 +38,31 @@ struct QueueTelemetry {
     dropped_on_overflow: AtomicU64,
     dropped_on_flush: AtomicU64,
     max_depth: AtomicUsize,
+}
+
+impl QueueTelemetry {
+    /// Record a successful push: increment enqueued, update max depth, and
+    /// accumulate any drop counters from eviction that occurred before the push.
+    fn record_push(&self, depth: usize, dropped_on_overflow: u64, dropped_on_flush: u64) {
+        self.enqueued
+            .fetch_add(1, portable_atomic::Ordering::Relaxed);
+        if dropped_on_overflow > 0 {
+            self.dropped_on_overflow
+                .fetch_add(dropped_on_overflow, portable_atomic::Ordering::Relaxed);
+        }
+        if dropped_on_flush > 0 {
+            self.dropped_on_flush
+                .fetch_add(dropped_on_flush, portable_atomic::Ordering::Relaxed);
+        }
+        self.max_depth
+            .fetch_max(depth, portable_atomic::Ordering::Relaxed);
+    }
+
+    /// Record a frame drop without enqueue (all IDR slots occupied).
+    fn record_drop(&self, count: u64) {
+        self.dropped_on_overflow
+            .fetch_add(count, portable_atomic::Ordering::Relaxed);
+    }
 }
 
 pub struct LowLatencyFrameQueue {
@@ -85,10 +110,8 @@ impl LowLatencyFrameQueue {
                 queue.remove(index);
                 dropped_on_overflow = 1;
             } else {
-                dropped_on_overflow = 1;
-                self.telemetry
-                    .dropped_on_overflow
-                    .fetch_add(dropped_on_overflow, portable_atomic::Ordering::Relaxed);
+                drop(queue);
+                self.telemetry.record_drop(1);
                 self.maybe_log_telemetry();
                 return;
             }
@@ -104,22 +127,7 @@ impl LowLatencyFrameQueue {
         drop(queue);
 
         self.telemetry
-            .enqueued
-            .fetch_add(1, portable_atomic::Ordering::Relaxed);
-        if dropped_on_overflow > 0 {
-            self.telemetry
-                .dropped_on_overflow
-                .fetch_add(dropped_on_overflow, portable_atomic::Ordering::Relaxed);
-        }
-        if dropped_on_flush > 0 {
-            self.telemetry
-                .dropped_on_flush
-                .fetch_add(dropped_on_flush, portable_atomic::Ordering::Relaxed);
-        }
-        self.telemetry
-            .max_depth
-            .fetch_max(depth, portable_atomic::Ordering::Relaxed);
-
+            .record_push(depth, dropped_on_overflow, dropped_on_flush);
         self.notify.notify_one();
         self.maybe_log_telemetry();
     }
@@ -176,22 +184,47 @@ impl LowLatencyFrameQueue {
             "Low-latency queue telemetry"
         );
     }
+
+    /// Snapshot current queue statistics (non-atomic read of atomic counters).
+    pub fn snapshot(&self) -> QueueSnapshot {
+        QueueSnapshot {
+            enqueued: self
+                .telemetry
+                .enqueued
+                .load(portable_atomic::Ordering::Relaxed),
+            dropped_on_overflow: self
+                .telemetry
+                .dropped_on_overflow
+                .load(portable_atomic::Ordering::Relaxed),
+            dropped_on_flush: self
+                .telemetry
+                .dropped_on_flush
+                .load(portable_atomic::Ordering::Relaxed),
+            max_depth: self
+                .telemetry
+                .max_depth
+                .load(portable_atomic::Ordering::Relaxed),
+        }
+    }
 }
 
+/// Point-in-time snapshot of queue telemetry counters.
+pub struct QueueSnapshot {
+    pub enqueued: u64,
+    pub dropped_on_overflow: u64,
+    pub dropped_on_flush: u64,
+    pub max_depth: usize,
+}
+
+/// Cached SPS/PPS for a single stream, used to carry parameter sets across
+/// bridge re-creation (e.g. when queue capacities change in `StreamingService::start()`).
 #[derive(Default, Clone)]
-struct CachedParameterSets {
-    sps: Option<Vec<u8>>,
-    pps: Option<Vec<u8>>,
+pub struct CachedParameterSets {
+    /// Cached Sequence Parameter Set.
+    pub sps: Option<Vec<u8>>,
+    /// Cached Picture Parameter Set.
+    pub pps: Option<Vec<u8>>,
 }
-
-#[derive(Default)]
-struct CachedStreamParameterSets {
-    main: CachedParameterSets,
-    sub: CachedParameterSets,
-}
-
-static STREAM_PARAMETER_CACHE: LazyLock<RwLock<CachedStreamParameterSets>> =
-    LazyLock::new(|| RwLock::new(CachedStreamParameterSets::default()));
 
 /// Default buffer capacity in bytes (64 KB — covers most P-frames).
 const DEFAULT_POOL_BUFFER_CAPACITY: usize = 64 * 1024;
@@ -310,29 +343,58 @@ impl StreamingBridge {
         sub_queue: Arc<LowLatencyFrameQueue>,
         audio_sample_rate: u32,
     ) -> Self {
-        let bridge = Self {
+        Self::new_with_cached_params(
+            main_queue,
+            sub_queue,
+            audio_sample_rate,
+            CachedParameterSets::default(),
+            CachedParameterSets::default(),
+        )
+    }
+
+    /// Create a new bridge with cached SPS/PPS from a previous bridge instance.
+    ///
+    /// This is used during bridge re-creation (e.g. when `StreamingService::start()`
+    /// rebuilds the bridge with new queue capacities) to carry over parameter sets
+    /// so late-joining subscribers can still receive SPS/PPS before the next IDR frame.
+    pub fn new_with_cached_params(
+        main_queue: Arc<LowLatencyFrameQueue>,
+        sub_queue: Arc<LowLatencyFrameQueue>,
+        audio_sample_rate: u32,
+        main_cached: CachedParameterSets,
+        sub_cached: CachedParameterSets,
+    ) -> Self {
+        Self {
             main_stream: StreamState {
                 frame_queue: main_queue,
-                sps: RwLock::new(None),
-                pps: RwLock::new(None),
+                sps: RwLock::new(main_cached.sps),
+                pps: RwLock::new(main_cached.pps),
                 last_timestamp_ms: Arc::new(AtomicU32::new(0)),
                 bootstrap_idr: RwLock::new(None),
             },
             sub_stream: StreamState {
                 frame_queue: sub_queue,
-                sps: RwLock::new(None),
-                pps: RwLock::new(None),
+                sps: RwLock::new(sub_cached.sps),
+                pps: RwLock::new(sub_cached.pps),
                 last_timestamp_ms: Arc::new(AtomicU32::new(0)),
                 bootstrap_idr: RwLock::new(None),
             },
             audio_config: RwLock::new(None),
             audio_sample_rate,
+        }
+    }
+
+    /// Read the current SPS/PPS for a stream as a `CachedParameterSets`.
+    pub fn cached_params(&self, stream_id: StreamId) -> CachedParameterSets {
+        let stream = match stream_id {
+            StreamId::VideoMain => &self.main_stream,
+            StreamId::VideoSub => &self.sub_stream,
+            StreamId::Audio => return CachedParameterSets::default(),
         };
-
-        bridge.restore_cached_parameter_sets(StreamId::VideoMain);
-        bridge.restore_cached_parameter_sets(StreamId::VideoSub);
-
-        bridge
+        CachedParameterSets {
+            sps: stream.sps.read().clone(),
+            pps: stream.pps.read().clone(),
+        }
     }
 
     /// Convert a raw SDK frame to `FrameData` and route to the appropriate channel(s).
@@ -351,10 +413,10 @@ impl StreamingBridge {
 
         match frame.stream_id {
             StreamId::VideoMain => {
-                self.process_video_frame(&self.main_stream, frame, data, timestamp_ms);
+                self.enqueue_video(&self.main_stream, data, frame.frame_type, timestamp_ms);
             }
             StreamId::VideoSub => {
-                self.process_video_frame(&self.sub_stream, frame, data, timestamp_ms);
+                self.enqueue_video(&self.sub_stream, data, frame.frame_type, timestamp_ms);
             }
             StreamId::Audio => {
                 let frame_data = FrameData::Audio {
@@ -390,7 +452,7 @@ impl StreamingBridge {
 
         match frame.stream_id {
             StreamId::VideoMain => {
-                self.process_owned_video_frame(
+                self.enqueue_video(
                     &self.main_stream,
                     frame.data,
                     frame.frame_type,
@@ -398,12 +460,7 @@ impl StreamingBridge {
                 );
             }
             StreamId::VideoSub => {
-                self.process_owned_video_frame(
-                    &self.sub_stream,
-                    frame.data,
-                    frame.frame_type,
-                    timestamp_ms,
-                );
+                self.enqueue_video(&self.sub_stream, frame.data, frame.frame_type, timestamp_ms);
             }
             StreamId::Audio => {
                 let frame_data = FrameData::Audio {
@@ -421,8 +478,8 @@ impl StreamingBridge {
         }
     }
 
-    /// Process a video frame from the owned path — no extra copy.
-    fn process_owned_video_frame(
+    /// Enqueue a video frame into a stream's low-latency queue.
+    fn enqueue_video(
         &self,
         stream: &StreamState,
         data: BytesMut,
@@ -437,7 +494,7 @@ impl StreamingBridge {
             size = data.len(),
             timestamp_ms,
             frame_type = ?frame_type,
-            "Owned video frame sent to channel"
+            "Video frame enqueued"
         );
 
         let frame_data = FrameData::Video {
@@ -448,43 +505,6 @@ impl StreamingBridge {
             frame_data,
             timestamp_ms,
             frame_type == FrameType::VideoIFrame,
-        );
-    }
-
-    /// Process a video frame in callback context: queue only.
-    fn process_video_frame(
-        &self,
-        stream: &StreamState,
-        frame: &Frame,
-        data: BytesMut,
-        timestamp_ms: u32,
-    ) {
-        let stream_name = match frame.stream_id {
-            StreamId::VideoMain => "main",
-            StreamId::VideoSub => "sub",
-            StreamId::Audio => "audio",
-        };
-
-        stream
-            .last_timestamp_ms
-            .store(timestamp_ms, portable_atomic::Ordering::Relaxed);
-
-        tracing::trace!(
-            stream = stream_name,
-            size = data.len(),
-            timestamp_ms,
-            frame_type = ?frame.frame_type,
-            "Video frame sent to channel"
-        );
-
-        let frame_data = FrameData::Video {
-            timestamp: timestamp_ms,
-            data,
-        };
-        stream.frame_queue.push(
-            frame_data,
-            timestamp_ms,
-            frame.frame_type == FrameType::VideoIFrame,
         );
     }
 
@@ -530,8 +550,6 @@ impl StreamingBridge {
         let mut found_sps = false;
         let mut found_pps = false;
         let mut found_idr_nal = false;
-        let mut sps_to_cache: Option<Vec<u8>> = None;
-        let mut pps_to_cache: Option<Vec<u8>> = None;
 
         for nal in AnnexBIterator::new(data) {
             if nal.is_empty() {
@@ -542,63 +560,20 @@ impl StreamingBridge {
             match nal_type {
                 7 => {
                     // SPS
-                    let hex_prefix: String = nal
-                        .iter()
-                        .take(8)
-                        .map(|b| format!("{:02x}", b))
-                        .collect::<Vec<_>>()
-                        .join(" ");
-                    tracing::debug!(
-                        size = nal.len(),
-                        hex_prefix = %hex_prefix,
-                        "SPS extracted/updated"
-                    );
-                    let sps = nal.to_vec();
-                    *stream.sps.write() = Some(sps.clone());
-                    sps_to_cache = Some(sps);
+                    tracing::debug!(size = nal.len(), "SPS extracted/updated");
+                    *stream.sps.write() = Some(nal.to_vec());
                     found_sps = true;
                 }
                 8 => {
                     // PPS
-                    let hex_prefix: String = nal
-                        .iter()
-                        .take(8)
-                        .map(|b| format!("{:02x}", b))
-                        .collect::<Vec<_>>()
-                        .join(" ");
-                    tracing::debug!(
-                        size = nal.len(),
-                        hex_prefix = %hex_prefix,
-                        "PPS extracted/updated"
-                    );
-                    let pps = nal.to_vec();
-                    *stream.pps.write() = Some(pps.clone());
-                    pps_to_cache = Some(pps);
+                    tracing::debug!(size = nal.len(), "PPS extracted/updated");
+                    *stream.pps.write() = Some(nal.to_vec());
                     found_pps = true;
                 }
                 5 => {
                     found_idr_nal = true;
                 }
                 _ => {}
-            }
-        }
-
-        if let (Some(sps), Some(pps)) = (sps_to_cache, pps_to_cache) {
-            let mut cache = STREAM_PARAMETER_CACHE.write();
-            match stream_id {
-                StreamId::VideoMain => {
-                    cache.main = CachedParameterSets {
-                        sps: Some(sps),
-                        pps: Some(pps),
-                    };
-                }
-                StreamId::VideoSub => {
-                    cache.sub = CachedParameterSets {
-                        sps: Some(sps),
-                        pps: Some(pps),
-                    };
-                }
-                StreamId::Audio => {}
             }
         }
 
@@ -629,28 +604,6 @@ impl StreamingBridge {
                     "IDR frame missing inline SPS/PPS, using cached parameter sets"
                 );
             }
-        }
-    }
-
-    fn restore_cached_parameter_sets(&self, stream_id: StreamId) {
-        let stream = match stream_id {
-            StreamId::VideoMain => &self.main_stream,
-            StreamId::VideoSub => &self.sub_stream,
-            StreamId::Audio => return,
-        };
-
-        let cache = STREAM_PARAMETER_CACHE.read();
-        let cached = match stream_id {
-            StreamId::VideoMain => cache.main.clone(),
-            StreamId::VideoSub => cache.sub.clone(),
-            StreamId::Audio => CachedParameterSets::default(),
-        };
-
-        if let Some(sps) = cached.sps {
-            *stream.sps.write() = Some(sps);
-        }
-        if let Some(pps) = cached.pps {
-            *stream.pps.write() = Some(pps);
         }
     }
 }

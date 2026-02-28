@@ -16,6 +16,7 @@ use bytes::BytesMut;
 use portable_atomic::Ordering;
 
 use super::bridge::{LowLatencyFrameQueue, StreamState};
+use super::telemetry::StreamTelemetry;
 use streaming_lib::streamhub::define::{
     DataReceiver, DataSender, Information, InformationSender, MediaInfo, SubscribeType,
     VideoCodecType,
@@ -217,6 +218,147 @@ impl TStreamHandler for LiveStreamHandler {
     }
 }
 
+/// Async task that routes frames from a bridge queue to RTSP and HTTP-FLV channels.
+///
+/// Extracted from an inline closure to enable independent testing of each concern:
+/// queue consumption, lag tracking, SPS/PPS change detection, and frame dispatch.
+struct FanoutTask {
+    bridge: Arc<StreamingBridge>,
+    bridge_queue: Arc<LowLatencyFrameQueue>,
+    is_main: bool,
+    stream_name: String,
+    rtsp_tx: tokio::sync::mpsc::UnboundedSender<FrameData>,
+    httpflv_tx: tokio::sync::mpsc::UnboundedSender<FrameData>,
+
+    // Mutable state
+    httpflv_remuxer: Option<ValidationHttpFlvRemuxer>,
+    cached_sps: Option<Vec<u8>>,
+    cached_pps: Option<Vec<u8>>,
+    telemetry: StreamTelemetry,
+}
+
+impl FanoutTask {
+    fn new(
+        bridge: Arc<StreamingBridge>,
+        bridge_queue: Arc<LowLatencyFrameQueue>,
+        is_main: bool,
+        stream_name: String,
+        rtsp_tx: tokio::sync::mpsc::UnboundedSender<FrameData>,
+        httpflv_tx: tokio::sync::mpsc::UnboundedSender<FrameData>,
+    ) -> Self {
+        let telemetry = StreamTelemetry::new(stream_name.clone(), Arc::clone(&bridge_queue));
+        Self {
+            bridge,
+            bridge_queue,
+            is_main,
+            stream_name,
+            rtsp_tx,
+            httpflv_tx,
+            httpflv_remuxer: None,
+            cached_sps: None,
+            cached_pps: None,
+            telemetry,
+        }
+    }
+
+    /// Main loop — consumes frames from bridge queue and fans out to RTSP + HTTP-FLV.
+    async fn run(&mut self) {
+        loop {
+            let queued = self.bridge_queue.recv().await;
+            let frame = queued.frame;
+            let queue_delay_ms = queued.enqueue_instant.elapsed().as_millis() as u64;
+
+            self.telemetry.record_lag(queue_delay_ms);
+
+            if !self.telemetry.first_frame_logged {
+                tracing::debug!(
+                    stream = %self.stream_name,
+                    "First frame received in fanout task (pipeline is flowing)"
+                );
+                self.telemetry.first_frame_logged = true;
+            }
+
+            if let FrameData::Video { timestamp, data } = &frame {
+                let stream_id = if self.is_main {
+                    crate::platform::frame::StreamId::VideoMain
+                } else {
+                    crate::platform::frame::StreamId::VideoSub
+                };
+                self.bridge.update_video_metadata(
+                    stream_id,
+                    *timestamp,
+                    data,
+                    StreamingService::is_h264_idr(&frame),
+                );
+            }
+
+            // Track frame statistics
+            let frame_size = match &frame {
+                FrameData::Video { data, .. } | FrameData::Audio { data, .. } => data.len() as u64,
+                _ => 0,
+            };
+            self.telemetry.record_frame(frame_size);
+
+            self.update_remuxer();
+
+            tracing::trace!(
+                stream = %self.stream_name,
+                frame_count = self.telemetry.frame_count,
+                "Fanout dispatching frame"
+            );
+
+            fanout_frame(
+                &self.rtsp_tx,
+                Some(&self.httpflv_tx),
+                self.httpflv_remuxer.as_mut(),
+                frame,
+            );
+
+            self.telemetry.maybe_emit();
+        }
+    }
+
+    /// Check if SPS/PPS changed and refresh the HTTP-FLV remuxer.
+    fn update_remuxer(&mut self) {
+        let stream = if self.is_main {
+            &self.bridge.main_stream
+        } else {
+            &self.bridge.sub_stream
+        };
+
+        let current_sps = stream.sps.read().deref().clone();
+        let current_pps = stream.pps.read().deref().clone();
+
+        let needs_refresh = self.httpflv_remuxer.is_none()
+            || current_sps != self.cached_sps
+            || current_pps != self.cached_pps;
+
+        if needs_refresh && let (Some(sps), Some(pps)) = (current_sps.clone(), current_pps.clone())
+        {
+            if self.httpflv_remuxer.is_none() {
+                tracing::debug!(
+                    stream = %self.stream_name,
+                    "HTTP-FLV remuxer initialized"
+                );
+            } else {
+                tracing::debug!(
+                    stream = %self.stream_name,
+                    "SPS/PPS changed, refreshing HTTP-FLV remuxer"
+                );
+            }
+            let audio_config = self.bridge.audio_config.read().deref().clone();
+            self.httpflv_remuxer = Some(ValidationHttpFlvRemuxer::new(
+                sps.clone(),
+                pps.clone(),
+                audio_config,
+                self.bridge.audio_sample_rate,
+            ));
+            self.cached_sps = Some(sps);
+            self.cached_pps = Some(pps);
+        }
+    }
+}
+
 /// Orchestrates the full streaming pipeline for normal mode.
 ///
 /// Creates the `StreamsHub`, publishes main and sub streams (both RTSP and
@@ -311,11 +453,22 @@ impl StreamingService {
         let main_bridge_queue = LowLatencyFrameQueue::new("main", main_queue_capacity);
         let sub_bridge_queue = LowLatencyFrameQueue::new("sub", sub_queue_capacity);
 
-        // Re-create the bridge with low-latency queues.
-        self.bridge = Arc::new(StreamingBridge::new(
+        // Carry over cached SPS/PPS from the old bridge so late-joining
+        // subscribers still receive parameter sets before the next IDR frame.
+        let main_cached = self
+            .bridge
+            .cached_params(crate::platform::frame::StreamId::VideoMain);
+        let sub_cached = self
+            .bridge
+            .cached_params(crate::platform::frame::StreamId::VideoSub);
+
+        // Re-create the bridge with low-latency queues and cached params.
+        self.bridge = Arc::new(StreamingBridge::new_with_cached_params(
             Arc::clone(&main_bridge_queue),
             Arc::clone(&sub_bridge_queue),
             self.config.audio_sample_rate,
+            main_cached,
+            sub_cached,
         ));
 
         // Publish main stream (RTSP + HTTP-FLV).
@@ -484,134 +637,16 @@ impl StreamingService {
             "Published stream to StreamsHub"
         );
 
-        // Clone bridge ref for the fanout task to read SPS/PPS for remuxer init.
-        let bridge_ref = Arc::clone(&self.bridge);
-
-        // Spawn fanout task: bridge_rx → rtsp_tx + httpflv_tx.
-        let fanout_stream_name = stream_name.to_string();
-        let fanout_handle = tokio::spawn(async move {
-            let mut httpflv_remuxer: Option<ValidationHttpFlvRemuxer> = None;
-            let mut cached_sps: Option<Vec<u8>> = None;
-            let mut cached_pps: Option<Vec<u8>> = None;
-            let mut fanout_frame_count: u64 = 0;
-            let mut fanout_bytes: u64 = 0;
-            let mut first_frame_logged = false;
-            let mut queue_lag_over_250ms: u64 = 0;
-            let mut queue_lag_over_500ms: u64 = 0;
-
-            loop {
-                let queued = bridge_queue.recv().await;
-                let frame = queued.frame;
-                let queue_delay_ms = queued.enqueue_instant.elapsed().as_millis() as u64;
-                if queue_delay_ms > 250 {
-                    queue_lag_over_250ms += 1;
-                }
-                if queue_delay_ms > 500 {
-                    queue_lag_over_500ms += 1;
-                }
-
-                if !first_frame_logged {
-                    tracing::debug!(
-                        stream = %fanout_stream_name,
-                        "First frame received in fanout task (pipeline is flowing)"
-                    );
-                    first_frame_logged = true;
-                }
-
-                if let FrameData::Video { timestamp, data } = &frame {
-                    let stream_id = if is_main {
-                        crate::platform::frame::StreamId::VideoMain
-                    } else {
-                        crate::platform::frame::StreamId::VideoSub
-                    };
-                    bridge_ref.update_video_metadata(
-                        stream_id,
-                        *timestamp,
-                        data,
-                        Self::is_h264_idr(&frame),
-                    );
-                }
-
-                // Track frame statistics
-                match &frame {
-                    FrameData::Video { data, .. } => {
-                        fanout_bytes += data.len() as u64;
-                    }
-                    FrameData::Audio { data, .. } => {
-                        fanout_bytes += data.len() as u64;
-                    }
-                    _ => {}
-                }
-                fanout_frame_count += 1;
-
-                let stream = if is_main {
-                    &bridge_ref.main_stream
-                } else {
-                    &bridge_ref.sub_stream
-                };
-
-                let current_sps = stream.sps.read().deref().clone();
-                let current_pps = stream.pps.read().deref().clone();
-
-                // Check if SPS/PPS have changed or remuxer needs initialization
-                let needs_refresh = httpflv_remuxer.is_none()
-                    || current_sps != cached_sps
-                    || current_pps != cached_pps;
-
-                if needs_refresh
-                    && let (Some(sps), Some(pps)) = (current_sps.clone(), current_pps.clone())
-                {
-                    if httpflv_remuxer.is_none() {
-                        tracing::debug!(
-                            stream = %fanout_stream_name,
-                            "HTTP-FLV remuxer initialized"
-                        );
-                    } else {
-                        tracing::debug!(
-                            stream = %fanout_stream_name,
-                            "SPS/PPS changed, refreshing HTTP-FLV remuxer"
-                        );
-                    }
-                    let audio_config = bridge_ref.audio_config.read().deref().clone();
-                    httpflv_remuxer = Some(ValidationHttpFlvRemuxer::new(
-                        sps.clone(),
-                        pps.clone(),
-                        audio_config,
-                        bridge_ref.audio_sample_rate,
-                    ));
-                    cached_sps = Some(sps);
-                    cached_pps = Some(pps);
-                }
-
-                // Track I-frames
-                if matches!(&frame, FrameData::Video { .. }) {
-                    // We can't easily distinguish I/P frames here, but we count video frames
-                    // in the periodic summary
-                }
-
-                tracing::trace!(
-                    stream = %fanout_stream_name,
-                    frame_count = fanout_frame_count,
-                    "Fanout dispatching frame"
-                );
-
-                // Always fan out to RTSP. HTTP-FLV gets the remuxed version.
-                fanout_frame(&rtsp_tx, Some(&httpflv_tx), httpflv_remuxer.as_mut(), frame);
-
-                // Periodic summary every 300 frames
-                if fanout_frame_count.is_multiple_of(300) {
-                    tracing::debug!(
-                        stream = %fanout_stream_name,
-                        frames = fanout_frame_count,
-                        total_bytes = fanout_bytes,
-                        queue_lag_over_250ms,
-                        queue_lag_over_500ms,
-                        queue_capacity = bridge_queue.capacity(),
-                        "Fanout task progress"
-                    );
-                }
-            }
-        });
+        // Spawn fanout task: bridge_queue → rtsp_tx + httpflv_tx.
+        let mut task = FanoutTask::new(
+            Arc::clone(&self.bridge),
+            bridge_queue,
+            is_main,
+            stream_name.to_string(),
+            rtsp_tx,
+            httpflv_tx,
+        );
+        let fanout_handle = tokio::spawn(async move { task.run().await });
 
         Ok(fanout_handle)
     }

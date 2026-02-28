@@ -386,32 +386,17 @@ impl ShmRingReader {
         }
 
         // Validate magic and version
-        let header = Self::header_from_ptr(base as *const RingHeader);
-        if header.magic != VD_SHM_MAGIC {
+        if let Err(e) = Self::validate_header(base as *const u8) {
             // SAFETY: We own the mmap'd region and fd, must clean up on error.
             unsafe {
                 libc::munmap(base, VD_SHM_TOTAL_SIZE);
                 libc::close(fd);
             }
-            return Err(PlatformError::InvalidParameter(format!(
-                "invalid shm magic: expected {:#x}, got {:#x}",
-                VD_SHM_MAGIC, header.magic
-            )));
-        }
-
-        if header.version < VD_SHM_VERSION_MIN || header.version > VD_SHM_VERSION {
-            // SAFETY: We own the mmap'd region and fd, must clean up on error.
-            unsafe {
-                libc::munmap(base, VD_SHM_TOTAL_SIZE);
-                libc::close(fd);
-            }
-            return Err(PlatformError::InvalidParameter(format!(
-                "unsupported shm version: expected {}-{}, got {}",
-                VD_SHM_VERSION_MIN, VD_SHM_VERSION, header.version
-            )));
+            return Err(e);
         }
 
         // Initialize local read_seq from current value
+        let header = Self::header_from_ptr(base as *const RingHeader);
         let local_read_seq = header.read_seq;
 
         tracing::debug!(
@@ -735,6 +720,47 @@ impl ShmRingReader {
 
     /// Get header from raw pointer (for open_path)
     #[inline]
+    /// Validate the ring buffer header at the given base pointer.
+    ///
+    /// Checks magic number and version range. This is extracted from `open_path`
+    /// so it can be tested independently with anonymous mmap.
+    fn validate_header(base: *const u8) -> PlatformResult<()> {
+        let header = Self::header_from_ptr(base as *const RingHeader);
+        if header.magic != VD_SHM_MAGIC {
+            return Err(PlatformError::InvalidParameter(format!(
+                "invalid shm magic: expected {:#x}, got {:#x}",
+                VD_SHM_MAGIC, header.magic
+            )));
+        }
+        if header.version < VD_SHM_VERSION_MIN || header.version > VD_SHM_VERSION {
+            return Err(PlatformError::InvalidParameter(format!(
+                "unsupported shm version: expected {}-{}, got {}",
+                VD_SHM_VERSION_MIN, VD_SHM_VERSION, header.version
+            )));
+        }
+        Ok(())
+    }
+
+    /// Create a `ShmRingReader` from a raw mmap'd pointer (test-only).
+    ///
+    /// Used with anonymous mmap (`MAP_ANONYMOUS | MAP_SHARED`) to avoid
+    /// file I/O race conditions in unit tests.
+    ///
+    /// # Safety
+    ///
+    /// - `base` must point to a valid mmap'd region of at least `VD_SHM_TOTAL_SIZE` bytes
+    /// - The region must be properly initialized with a valid ring buffer layout
+    /// - When `fd` is -1 (anonymous mmap), Drop will skip `close(fd)`
+    #[cfg(test)]
+    unsafe fn open_from_raw(base: *mut u8) -> Self {
+        Self {
+            base,
+            size: VD_SHM_TOTAL_SIZE,
+            fd: -1,
+            local_read_seq: 0,
+        }
+    }
+
     fn header_from_ptr(ptr: *const RingHeader) -> &'static RingHeader {
         // SAFETY: Called with verified pointer from mmap during open.
         unsafe { &*ptr }
@@ -813,12 +839,15 @@ impl ShmRingReader {
 
 impl Drop for ShmRingReader {
     fn drop(&mut self) {
-        // SAFETY: We own the mmap'd region and fd, must clean up.
-        // munmap and close are safe: we own these resources and no other thread
-        // is accessing them at this point (the type is not Sync).
+        // SAFETY: We own the mmap'd region, must clean up.
+        // munmap is safe: we own this resource and no other thread
+        // is accessing it at this point.
         unsafe {
             libc::munmap(self.base as *mut libc::c_void, self.size);
-            libc::close(self.fd);
+            // fd == -1 for anonymous mmap (test-only), skip close.
+            if self.fd >= 0 {
+                libc::close(self.fd);
+            }
         }
         tracing::debug!("closed shm ring buffer");
     }
@@ -974,6 +1003,76 @@ mod tests {
         Ok(file)
     }
 
+    /// Create an anonymous mmap region initialized as a valid ring buffer.
+    ///
+    /// Returns a `ShmRingReader` backed by anonymous memory (no file I/O),
+    /// eliminating the race condition between file writes and mmap visibility.
+    fn create_test_anon_reader() -> ShmRingReader {
+        // SAFETY: MAP_ANONYMOUS | MAP_SHARED gives us a zeroed memory region
+        // with no file backing, avoiding all file I/O race conditions.
+        let base = unsafe {
+            libc::mmap(
+                std::ptr::null_mut(),
+                VD_SHM_TOTAL_SIZE,
+                libc::PROT_READ | libc::PROT_WRITE,
+                libc::MAP_ANONYMOUS | libc::MAP_SHARED,
+                -1,
+                0,
+            )
+        };
+        assert_ne!(base, libc::MAP_FAILED, "anonymous mmap failed");
+        let base = base as *mut u8;
+
+        // Initialize ring header directly in mmap'd memory.
+        // SAFETY: base points to a freshly allocated, zeroed mmap region of
+        // VD_SHM_TOTAL_SIZE bytes. Writing a RingHeader at offset 0 is safe.
+        unsafe {
+            let header = base as *mut RingHeader;
+            (*header).magic = VD_SHM_MAGIC;
+            (*header).version = VD_SHM_VERSION;
+            (*header).total_size = VD_SHM_TOTAL_SIZE as u32;
+            (*header).slot_count = VD_SHM_SLOT_COUNT;
+            (*header).slot_data_size = VD_SHM_SLOT_DATA_SIZE as u32;
+            // All other fields are zero from mmap, which means:
+            // write_seq=0, read_seq=0, flags=0, all slots state=VD_SLOT_EMPTY
+        }
+
+        // SAFETY: base is a valid mmap'd region with valid ring header.
+        unsafe { ShmRingReader::open_from_raw(base) }
+    }
+
+    /// Write a test frame into a slot of an anonymous mmap-backed reader.
+    ///
+    /// This writes directly into the mmap'd region, no file I/O needed.
+    unsafe fn write_test_slot(
+        reader: &ShmRingReader,
+        slot_index: u32,
+        state: u32,
+        frame_len: u32,
+        timestamp_ms: u32,
+        seq_no: u32,
+        frame_type: u32,
+        stream_id: u32,
+        data: &[u8],
+    ) {
+        let slot_offset = VD_SHM_HEADER_SIZE + (slot_index as usize) * VD_SHM_SLOT_SIZE;
+        // SAFETY: slot_offset is within the mmap'd region, and SlotHeader fits.
+        unsafe {
+            let slot_ptr = reader.base.add(slot_offset) as *mut SlotHeader;
+            (*slot_ptr).state = state;
+            (*slot_ptr).frame_len = frame_len;
+            (*slot_ptr).timestamp_ms = timestamp_ms;
+            (*slot_ptr).seq_no = seq_no;
+            (*slot_ptr).frame_type = frame_type;
+            (*slot_ptr).stream_id = stream_id;
+
+            if !data.is_empty() {
+                let data_ptr = reader.base.add(slot_offset + VD_SHM_SLOT_HDR_SIZE);
+                std::ptr::copy_nonoverlapping(data.as_ptr(), data_ptr, data.len());
+            }
+        }
+    }
+
     #[test]
     fn test_frame_notification_from_bytes() {
         let bytes: [u8; 12] = [
@@ -1030,53 +1129,40 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Disabled due to intermittent segfault - needs investigation
     fn test_open_invalid_magic() {
-        let temp_dir = std::env::temp_dir();
-        let path = temp_dir.join("test_shm_invalid_magic");
+        // Use anonymous mmap to avoid file I/O race conditions that caused
+        // intermittent segfaults with file-backed mmap.
+        let base = unsafe {
+            libc::mmap(
+                std::ptr::null_mut(),
+                VD_SHM_TOTAL_SIZE,
+                libc::PROT_READ | libc::PROT_WRITE,
+                libc::MAP_ANONYMOUS | libc::MAP_SHARED,
+                -1,
+                0,
+            )
+        };
+        assert_ne!(base, libc::MAP_FAILED);
+        let base_ptr = base as *mut u8;
 
-        // Create file with wrong magic
-        {
-            let mut file = OpenOptions::new()
-                .read(true)
-                .write(true)
-                .create(true)
-                .truncate(true)
-                .open(&path)
-                .unwrap();
-            file.set_len(VD_SHM_TOTAL_SIZE as u64).unwrap();
-
-            let header = RingHeader {
-                magic: 0xDEADBEEF, // Invalid magic
-                version: VD_SHM_VERSION,
-                total_size: VD_SHM_TOTAL_SIZE as u32,
-                slot_count: VD_SHM_SLOT_COUNT,
-                slot_data_size: VD_SHM_SLOT_DATA_SIZE as u32,
-                write_seq: 0,
-                read_seq: 0,
-                flags: 0,
-                overflow_count: 0,
-                eviction_count: 0,
-                socket_fallback_count: 0,
-                dropped_count: 0,
-                _padding: [0u8; 16],
-            };
-
-            let header_bytes = unsafe {
-                std::slice::from_raw_parts(
-                    &header as *const RingHeader as *const u8,
-                    VD_SHM_HEADER_SIZE,
-                )
-            };
-            file.write_all(header_bytes).unwrap();
+        // Write invalid magic directly into the mmap'd region
+        unsafe {
+            let header = base_ptr as *mut RingHeader;
+            (*header).magic = 0xDEADBEEF; // Invalid magic
+            (*header).version = VD_SHM_VERSION;
+            (*header).total_size = VD_SHM_TOTAL_SIZE as u32;
+            (*header).slot_count = VD_SHM_SLOT_COUNT;
+            (*header).slot_data_size = VD_SHM_SLOT_DATA_SIZE as u32;
         }
 
-        let result = ShmRingReader::open_path(path.to_str().unwrap());
+        let result = ShmRingReader::validate_header(base_ptr);
         assert!(result.is_err());
         let err = result.err().unwrap();
         assert!(matches!(err, PlatformError::InvalidParameter(_)));
 
-        std::fs::remove_file(&path).ok();
+        unsafe {
+            libc::munmap(base, VD_SHM_TOTAL_SIZE);
+        }
     }
 
     #[test]
@@ -1148,120 +1234,27 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "mmap test has race condition with file I/O in tests"]
     fn test_read_and_release_slot() {
-        let temp_dir = std::env::temp_dir();
-        let path = temp_dir.join("test_shm_read");
-
-        // Define test data outside the block so it's in scope later
         let test_data = b"test frame data 1234567890";
+        let mut reader = create_test_anon_reader();
 
-        // First create and setup the test ring buffer
-        {
-            let mut file = OpenOptions::new()
-                .read(true)
-                .write(true)
-                .create(true)
-                .truncate(true)
-                .open(&path)
-                .unwrap();
-
-            file.set_len(VD_SHM_TOTAL_SIZE as u64).unwrap();
-
-            // Write header
-            let header = RingHeader {
-                magic: VD_SHM_MAGIC,
-                version: VD_SHM_VERSION,
-                total_size: VD_SHM_TOTAL_SIZE as u32,
-                slot_count: VD_SHM_SLOT_COUNT,
-                slot_data_size: VD_SHM_SLOT_DATA_SIZE as u32,
-                write_seq: 0,
-                read_seq: 0,
-                flags: 0,
-                overflow_count: 0,
-                eviction_count: 0,
-                socket_fallback_count: 0,
-                dropped_count: 0,
-                _padding: [0u8; 16],
-            };
-
-            let header_bytes = unsafe {
-                std::slice::from_raw_parts(
-                    &header as *const RingHeader as *const u8,
-                    VD_SHM_HEADER_SIZE,
-                )
-            };
-            file.write_all(header_bytes).unwrap();
-
-            // Write empty slots
-            let empty_slot = SlotHeader {
-                state: VD_SLOT_EMPTY,
-                frame_len: 0,
-                timestamp_ms: 0,
-                _ts_pad: 0,
-                seq_no: 0,
-                frame_type: 0,
-                stream_id: 0,
-                checksum: 0,
-                wall_clock_us: 0,
-                inter_frame_us: 0,
-                _reserved: 0,
-                _padding: [0u8; 16],
-            };
-            let slot_bytes = unsafe {
-                std::slice::from_raw_parts(
-                    &empty_slot as *const SlotHeader as *const u8,
-                    VD_SHM_SLOT_HDR_SIZE,
-                )
-            };
-            for _ in 0..VD_SHM_SLOT_COUNT {
-                file.write_all(slot_bytes).unwrap();
-                file.seek_relative(VD_SHM_SLOT_DATA_SIZE as i64).unwrap();
-            }
-
-            // Now set slot 0 to READY state with test data
-            let slot_offset = VD_SHM_HEADER_SIZE + 0 * VD_SHM_SLOT_SIZE;
-
-            let slot = SlotHeader {
-                state: VD_SLOT_READY,
-                frame_len: 100,
-                timestamp_ms: 1234567,
-                _ts_pad: 0,
-                seq_no: 42,
-                frame_type: 0,
-                stream_id: 0,
-                checksum: 0,
-                wall_clock_us: 0,
-                inter_frame_us: 0,
-                _reserved: 0,
-                _padding: [0u8; 16],
-            };
-
-            let slot_bytes = unsafe {
-                std::slice::from_raw_parts(
-                    &slot as *const SlotHeader as *const u8,
-                    VD_SHM_SLOT_HDR_SIZE,
-                )
-            };
-            file.seek(std::io::SeekFrom::Start(slot_offset as u64))
-                .unwrap();
-            file.write_all(slot_bytes).unwrap();
-
-            // Write test data
-            let data_offset = slot_offset + VD_SHM_SLOT_HDR_SIZE;
-            file.seek(std::io::SeekFrom::Start(data_offset as u64))
-                .unwrap();
-            file.write_all(test_data).unwrap();
-
-            // Sync to ensure mmap sees the writes
-            file.sync_all().unwrap();
+        // Write a READY frame into slot 0 directly in mmap'd memory.
+        // frame_len must match test_data.len() so read_slot returns the right slice.
+        unsafe {
+            write_test_slot(
+                &reader,
+                0,
+                VD_SLOT_READY,
+                test_data.len() as u32,
+                1234567,
+                42,
+                0,
+                0,
+                test_data,
+            );
         }
 
-        let mut reader = ShmRingReader::open_path(path.to_str().unwrap())
-            .unwrap()
-            .unwrap();
-
-        // Now read the slot
+        // Read the slot
         let frame = reader.read_slot(0).unwrap();
         assert_eq!(frame.data, test_data.as_slice());
         assert_eq!(frame.timestamp_ms, 1234567);
@@ -1272,91 +1265,49 @@ mod tests {
         // Release the slot
         reader.release_slot(0).unwrap();
 
-        // Verify state went back to EMPTY
-        let mut file = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .open(&path)
-            .unwrap();
-        let slot_offset = VD_SHM_HEADER_SIZE + 0 * VD_SHM_SLOT_SIZE;
-        file.seek(std::io::SeekFrom::Start(slot_offset as u64))
-            .unwrap();
-        let mut read_slot = [0u8; VD_SHM_SLOT_HDR_SIZE];
-        file.read_exact(&mut read_slot).unwrap();
-        let state = u32::from_le_bytes(read_slot[0..4].try_into().unwrap());
+        // Verify state went back to EMPTY via the atomic accessor
+        let state = reader.slot_state_atomic(0).load(Ordering::Relaxed);
         assert_eq!(state, VD_SLOT_EMPTY);
-
-        std::fs::remove_file(&path).ok();
     }
 
     #[test]
-    #[ignore = "mmap test has race condition with file I/O in tests"]
     fn test_read_slot_into_bytesmut() {
-        let temp_dir = std::env::temp_dir();
-        let path = temp_dir.join("test_shm_bytesmut");
-
-        create_test_ring_buffer(path.to_str().unwrap()).unwrap();
-
-        let mut reader = ShmRingReader::open_path(path.to_str().unwrap())
-            .unwrap()
-            .unwrap();
-
-        // Set slot 0 to READY state with test data
-        let slot_offset = VD_SHM_HEADER_SIZE + 0 * VD_SHM_SLOT_SIZE;
-
-        let mut file = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .open(&path)
-            .unwrap();
-
-        let mut slot = SlotHeader {
-            state: VD_SLOT_READY,
-            frame_len: 100,
-            timestamp_ms: 2000, // 2 seconds in ms
-            _ts_pad: 0,
-            seq_no: 100,
-            frame_type: 1, // I-frame (VD_FRAME_TYPE_I)
-            stream_id: 1,  // Sub stream
-            checksum: 0,
-            wall_clock_us: 0,
-            inter_frame_us: 0,
-            _reserved: 0,
-            _padding: [0u8; 16],
-        };
-
-        file.seek(std::io::SeekFrom::Start(slot_offset as u64))
-            .unwrap();
-        let slot_bytes = unsafe {
-            std::slice::from_raw_parts(
-                &mut slot as *mut SlotHeader as *mut u8,
-                VD_SHM_SLOT_HDR_SIZE,
-            )
-        };
-        file.write_all(slot_bytes).unwrap();
-
         let test_data = b"bytesmut test frame data here";
-        let data_offset = slot_offset + VD_SHM_SLOT_HDR_SIZE;
-        file.seek(std::io::SeekFrom::Start(data_offset as u64))
-            .unwrap();
-        file.write_all(test_data).unwrap();
+        let mut reader = create_test_anon_reader();
+
+        // Write a READY I-frame into slot 0 (frame_type=1, stream_id=1).
+        // frame_len must match test_data.len() for correct slice return.
+        unsafe {
+            write_test_slot(
+                &reader,
+                0,
+                VD_SLOT_READY,
+                test_data.len() as u32,
+                2000,
+                100,
+                1,
+                1,
+                test_data,
+            );
+        }
 
         // Use the method under test
         let pool = BytesMutPool::new(1024, 4);
         let (metadata, buf) = reader.read_slot_into_bytesmut(0, Some(&pool)).unwrap();
 
         // Verify metadata
-        assert_eq!(metadata.timestamp_ms, 2000); // 2000000 us -> 2000 ms
+        assert_eq!(metadata.timestamp_ms, 2000);
         assert_eq!(metadata.seq_no, 100);
         assert_eq!(metadata.frame_type, FrameType::VideoIFrame);
 
         // Verify data was copied
         assert_eq!(buf.as_ref(), test_data.as_slice());
 
-        // Pool should have a buffer available now
+        // Pool starts empty; get() allocated a fresh buffer, so pool is still empty.
+        // Returning the buffer to the pool would make it available.
+        assert_eq!(pool.available(), 0);
+        pool.put(buf);
         assert_eq!(pool.available(), 1);
-
-        std::fs::remove_file(&path).ok();
     }
 
     #[test]
