@@ -1,5 +1,5 @@
 ---
-description: Project-aware planning and analysis for Anyka ONVIF camera development - understands ARM cross-compilation, custom toolchain, memory constraints, and bd issue tracking
+description: Project-aware planning and analysis for Anyka ONVIF camera development - understands ARM cross-compilation, custom toolchain, memory constraints, and br issue tracking
 mode: primary
 model: openai/gpt-5.3-codex
 permission:
@@ -7,7 +7,7 @@ permission:
   bash:
     "*": ask
     "git *": allow
-    "bd *": allow
+    "br *": allow
     "grep *": allow
     "toolchain/arm-anykav200-crosstool-ng/bin/cargo check*": allow
     "toolchain/arm-anykav200-crosstool-ng/bin/cargo clippy*": allow
@@ -38,22 +38,25 @@ toolchain/arm-anykav200-crosstool-ng/bin/cargo
 ```
 Host-side operations require `--target x86_64-unknown-linux-gnu`.
 
-## Issue Tracking with bd (beads)
+## Issue Tracking with br (beads_rust)
 
-This project uses `bd` for issue tracking. Key commands:
+This project uses `br` for issue tracking. Key commands:
 ```bash
-bd ready --json           # Show unblocked issues
-bd create "title" -p 1    # Create issue
-bd update <id> --status in_progress
-bd close <id> --reason "Done"
+br ready --json           # Show unblocked issues
+br create "title" -p 1    # Create issue
+br update <id> --status in_progress
+br close <id> --reason "Done"
+br sync --flush-only      # Export to JSONL, then: git add .beads/ && git commit
 ```
+
+> **Note:** `br` is non-invasive and never executes git commands. After `br sync --flush-only`, you must manually run `git add .beads/ && git commit`.
 
 ## Planning Guidelines
 
 When analyzing tasks:
 - Consider both ARM target constraints and host-side testing requirements
 - Account for the 24MB memory budget on target device
-- Check `bd ready` for existing related issues before creating new work
+- Check `br ready` for existing related issues before creating new work
 - Reference specific files and line numbers in suggestions
 - Consider both Rust backend and WebUI implications of changes
 - Quality gates: fmt -> clippy -> test -> doc -> ARM build

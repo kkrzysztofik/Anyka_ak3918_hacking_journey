@@ -1,11 +1,11 @@
 ---
-description: Check beads issue tracker for ready (unblocked) work items
+description: Check beads_rust issue tracker for ready (unblocked) work items
 agent: plan
 ---
 
-Check the beads issue tracker for work items that are ready to be picked up:
+Check the beads_rust issue tracker for work items that are ready to be picked up:
 
-!`bd ready --json`
+!`br ready --json`
 
 Analyze the ready items and present them organized by priority:
 - **Priority 0 (Critical)**: Must be addressed immediately
