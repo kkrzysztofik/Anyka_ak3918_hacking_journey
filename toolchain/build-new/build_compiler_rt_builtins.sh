@@ -217,6 +217,25 @@ install_compiler_rt() {
         exit 1
     fi
 
+    # Create new-style per-target directory expected by LLVM 21+
+    # compiler-rt standalone builds with COMPILER_RT_DEFAULT_TARGET_ONLY=ON install to:
+    #   ${INSTALL_DIR}/lib/linux/libclang_rt.builtins-arm.a  (old-style)
+    # Clang 21 looks for:
+    #   ${resource_dir}/lib/<target-triple>/libclang_rt.builtins.a  (new-style)
+    # resource_dir = lib/clang/<major_version>
+    local llvm_major="${LLVM_VERSION%%.*}"
+    local new_target_dir="${INSTALL_DIR}/lib/clang/${llvm_major}/lib/armv5te-unknown-linux-gnueabi"
+    local old_style_lib
+    old_style_lib="$(find "${INSTALL_DIR}/lib" -name "libclang_rt.builtins*.a" \
+        -not -path "*/clang/*" 2>/dev/null | head -1)"
+    if [[ -n "${old_style_lib}" ]]; then
+        mkdir -p "${new_target_dir}"
+        cp "${old_style_lib}" "${new_target_dir}/libclang_rt.builtins.a"
+        log_info "Created per-target builtins at: ${new_target_dir}/libclang_rt.builtins.a"
+    else
+        log_warn "Could not find old-style builtins to copy — new-style path may be missing"
+    fi
+
     log_info "Compiler-rt installed successfully"
 }
 
@@ -224,10 +243,9 @@ install_compiler_rt() {
 verify_installation() {
     log_info "Verifying compiler-rt installation for ARMv5TE..."
 
-    # Check for builtins library in expected location
-    # Library is named -armv5te because CMAKE_C_COMPILER_TARGET uses armv5te prefix
-    local builtins_lib
-    builtins_lib="${INSTALL_DIR}/lib/clang/${LLVM_VERSION}/lib/linux/libclang_rt.builtins-armv5te.a"
+    # Check for builtins library in the new-style per-target location (LLVM 21+)
+    local llvm_major="${LLVM_VERSION%%.*}"
+    local builtins_lib="${INSTALL_DIR}/lib/clang/${llvm_major}/lib/armv5te-unknown-linux-gnueabi/libclang_rt.builtins.a"
 
     local found_lib=""
     if [[ -f "${builtins_lib}" ]]; then

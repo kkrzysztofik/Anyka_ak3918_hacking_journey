@@ -318,22 +318,32 @@ build_rust() {
     local clang_wrapper="${BUILD_DIR}/${CLANG_WRAPPER}"
     
     # Create ARMv5TE Clang wrapper.
-    # - --gcc-toolchain: tells Clang/LLD where GCC's crt files live
-    #   (crtbeginS.o, crtendS.o are in lib/gcc/<triple>/<ver>/, not the sysroot)
-    # - --sysroot: uClibc-ng sysroot with headers + runtime libs
-    # - --target: must use a Clang-valid environment tag (gnueabi, not uclibcgnueabi)
-    # The wrapper is self-relocating so it works even if the tree is moved.
+    # - --sysroot:  uClibc-ng sysroot (headers + runtime libs)
+    # - --target:   LLVM-valid triple (gnueabi, not uclibcgnueabi)
+    # - -B:         explicit path to GCC's crt files (crtbeginS.o, crtendS.o)
+    #   Required because --gcc-toolchain triple detection fails when the GCC
+    #   triple (arm-unknown-linux-uclibcgnueabi) differs from --target
+    #   (armv5te-unknown-linux-gnueabi). `ls | sort -V | tail -1` picks the
+    #   highest installed GCC version without hardcoding it.
+    # The wrapper is self-relocating (resolves INSTALL_DIR at runtime).
     cat > "${clang_wrapper}" << 'WRAPPER_EOF'
 #!/bin/bash
 # Clang wrapper for ARMv5TE target with sysroot
-# --gcc-toolchain tells Clang where to find GCC's crt files (crtbeginS.o, etc.)
-# --sysroot  points to the uClibc-ng sysroot (headers + runtime libs)
-# --target   must use an LLVM-valid environment tag (gnueabi, not uclibcgnueabi)
+# --sysroot:      uClibc-ng sysroot (headers + runtime libs)
+# --target:       LLVM-valid triple (gnueabi, not uclibcgnueabi)
+# -B:             explicit path to GCC's crt files (crtbeginS.o, crtendS.o)
+#                 required because --gcc-toolchain triple detection fails when
+#                 the GCC triple (arm-unknown-linux-uclibcgnueabi) doesn't match
+#                 the --target triple (armv5te-unknown-linux-gnueabi)
+# -L GCC_LIB:     adds GCC lib dir to library search path so -lgcc resolves
 INSTALL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../arm-anykav200-crosstool-ng" && pwd)"
+GCC_LIB="${INSTALL_DIR}/lib/gcc/arm-unknown-linux-uclibcgnueabi"
+GCC_VER="$(ls "${GCC_LIB}" 2>/dev/null | sort -V | tail -1)"
 exec "${INSTALL_DIR}/bin/clang" \
     --target=armv5te-unknown-linux-gnueabi \
-    --gcc-toolchain="${INSTALL_DIR}" \
     --sysroot="${INSTALL_DIR}/arm-unknown-linux-uclibcgnueabi/sysroot" \
+    -B "${GCC_LIB}/${GCC_VER}" \
+    -L "${GCC_LIB}/${GCC_VER}" \
     -march=armv5te \
     -mfloat-abi=soft \
     -mtune=arm926ej-s \
