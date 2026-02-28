@@ -4,36 +4,11 @@
 
 set -e  # Exit on error
 
-# Colors for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m' # No Color
-
-# Script directory
+# Script directory — must be set before sourcing common.sh
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-BUILD_DIR="${SCRIPT_DIR}"
+source "${SCRIPT_DIR}/common.sh"
 
-# ARMv5TE toolchain configuration
-INSTALL_DIR="${SCRIPT_DIR}/../arm-anykav200-crosstool-ng"
-TARGET_TUPLE="arm-unknown-linux-uclibcgnueabi"
 CONFIG_FILE="crosstool-ng.config"
-
-CTNG_VERSION="1.28.0"
-CTNG_DIR="${BUILD_DIR}/crosstool-ng-${CTNG_VERSION}"
-
-# Logging functions
-log_info() {
-    echo -e "${GREEN}[INFO]${NC} $1"
-}
-
-log_warn() {
-    echo -e "${YELLOW}[WARN]${NC} $1"
-}
-
-log_error() {
-    echo -e "${RED}[ERROR]${NC} $1"
-}
 
 # Check dependencies
 check_dependencies() {
@@ -192,8 +167,8 @@ create_config_file() {
 
     # GDB version
     if grep -q "CT_GDB_VERSION" "${config_file}"; then
-        sed -i 's/^CT_GDB_VERSION=.*/CT_GDB_VERSION="16.3"/' "${config_file}" || \
-        log_warn "Could not set GDB version to 16.3, using default"
+        sed -i "s/^CT_GDB_VERSION=.*/CT_GDB_VERSION=\"${GDB_VERSION}\"/" "${config_file}" || \
+        log_warn "Could not set GDB version to 17.1, using default"
     fi
 
     log_info "Configuring for ARMv5TE (32-bit ARM, uClibc-ng)..."

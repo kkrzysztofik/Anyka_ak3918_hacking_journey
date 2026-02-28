@@ -1,13 +1,10 @@
 # Modern Toolchain Build
 
-This directory contains scripts and configuration for building modern cross-compilation toolchains using crosstool-NG. The toolchain supports multiple architectures:
+This directory contains scripts and configuration for building a modern cross-compilation toolchain for the Anyka AK3918 embedded camera using crosstool-NG.
 
-- **ARMv5TE** (32-bit): For Anyka AK3918 and similar embedded devices
-- **aarch64** (64-bit): For modern ARM64 systems
+## Target Architecture
 
-## Supported Architectures
-
-### ARMv5TE (Default)
+### ARMv5TE
 
 - **Architecture**: ARMv5TEJ (CPU features: swp, half, fastmult, edsp, java)
 - **Float ABI**: soft (pure software floating point - NO VFP support)
@@ -17,25 +14,16 @@ This directory contains scripts and configuration for building modern cross-comp
 - **Target Tuple**: `arm-unknown-linux-uclibcgnueabi`
 - **Rust Target**: `armv5te-unknown-linux-uclibceabi`
 
-### aarch64
-
-- **Architecture**: aarch64 (64-bit ARM)
-- **Float ABI**: hard (hardware floating point)
-- **C Library**: glibc 2.38
-- **Kernel Headers**: Linux 6.1.0
-- **Target Tuple**: `aarch64-unknown-linux-gnu`
-- **Rust Target**: `aarch64-unknown-linux-gnu` (builtin)
-
 ## Toolchain Components
 
-Both architectures use the same toolchain component versions:
+Toolchain component versions:
 
 - crosstool-NG: 1.28.0
 - GCC: 15.2
 - Binutils: 2.45
-- GDB: 16.3
-- LLVM/Clang: 21.1.8 (optional, for Rust support)
-- Rust: 1.92.0+ (optional, bootstrapped from source)
+- GDB: 17.1
+- LLVM/Clang: 21.1.8 (optional, for Rust support; LLVM 22.x available but requires testing)
+- Rust: 1.93.1+ (optional, bootstrapped from source)
 
 ## Prerequisites
 
@@ -91,18 +79,10 @@ REPO_ROOT="$(git rev-parse --show-toplevel)"
 cd "${REPO_ROOT}/toolchain/build-new"
 ```
 
-### Step 2: Select Architecture and Build
-
-The build script supports multiple architectures via the `ARCH` environment variable:
-
-#### Building ARMv5TE (Default)
+### Step 2: Build the Toolchain
 
 ```bash
-# Default (ARMv5TE)
 ./build_toolchain.sh
-
-# Or explicitly
-ARCH=armv5te ./build_toolchain.sh
 ```
 
 The script will:
@@ -114,51 +94,17 @@ The script will:
 5. Install to `../arm-anykav200-crosstool-ng/usr/`
 6. Verify the installation
 
-#### Building aarch64
-
-```bash
-ARCH=aarch64 ./build_toolchain.sh
-```
-
-The script will:
-
-1. Check for required dependencies
-2. Download and build crosstool-NG 1.28.0 (if not already built)
-3. Configure the toolchain for aarch64 with glibc
-4. Build the complete toolchain (1-3 hours)
-5. Install to `../aarch64-unknown-linux-gnu-toolchain/usr/`
-6. Verify the installation
-
-#### Building Both Architectures
-
-To build both architectures in sequence:
-
-```bash
-./build_all_architectures.sh
-```
-
-This will build ARMv5TE first, then aarch64.
-
 ### Step 3: Verify the Build
 
 After the build completes, verify the toolchain:
-
-**For ARMv5TE:**
 
 ```bash
 ./verify_toolchain.sh new
 ```
 
-**For aarch64:**
+After building, the toolchain will be available at:
 
-```bash
-./verify_toolchain_aarch64.sh
-```
-
-After building, the toolchains will be available at:
-
-- ARMv5TE: `../arm-anykav200-crosstool-ng/usr/bin/arm-unknown-linux-uclibcgnueabi-gcc`
-- aarch64: `../aarch64-unknown-linux-gnu-toolchain/usr/bin/aarch64-unknown-linux-gnu-gcc`
+- `../arm-anykav200-crosstool-ng/usr/bin/arm-unknown-linux-uclibcgnueabi-gcc`
 
 ## Configuration
 
@@ -171,7 +117,7 @@ The toolchain is configured via `crosstool-ng.config` file. Key settings:
 - Kernel Headers: Linux 3.4.35
 - GCC: 15.2
 - Binutils: 2.45
-- GDB: 16.3
+- GDB: 17.1
 
 ### Option 1: Use Menuconfig (Interactive)
 
@@ -236,7 +182,7 @@ If downloads fail due to SSL or network issues:
    wget --no-check-certificate https://gcc.gnu.org/pub/gcc/releases/gcc-15.2.0/gcc-15.2.0.tar.xz
 
    # For GDB:
-   wget --no-check-certificate https://sourceware.org/pub/gdb/releases/gdb-16.3.tar.xz
+   wget --no-check-certificate https://sourceware.org/pub/gdb/releases/gdb-17.1.tar.xz
    ```
 
 2. **Restart build**: The build will detect the existing file and skip the download:
@@ -261,7 +207,7 @@ If configuration is invalid:
 
 ### GDB Version Not Available
 
-If GDB 16.3 is not available in crosstool-NG 1.28.0:
+If GDB 17.1 is not available in crosstool-NG 1.28.0:
 
 1. Check available versions:
 
@@ -303,11 +249,7 @@ LLVM/Clang is required for Rust support. The build process is split into two sta
 2. **Build LLVM/Clang**:
 
    ```bash
-   # For ARMv5TE (default)
    ./build_llvm.sh
-   
-   # For aarch64
-   ARCH=aarch64 ./build_llvm.sh
    ```
 
 3. The script will:
@@ -326,11 +268,7 @@ After Stage 1 completes, build the compiler-rt builtins separately:
 1. **Build compiler-rt builtins**:
 
    ```bash
-   # For ARMv5TE (default)
    ./build_compiler_rt_builtins.sh
-   
-   # For aarch64
-   ARCH=aarch64 ./build_compiler_rt_builtins.sh
    ```
 
 2. The script will:
@@ -354,31 +292,25 @@ After both stages complete:
 ../arm-anykav200-crosstool-ng/bin/clang --version
 ../arm-anykav200-crosstool-ng/bin/llvm-config --version
 
-# Check compiler-rt builtins (ARMv5TE)
+# Check compiler-rt builtins
 ls -lh ../arm-anykav200-crosstool-ng/lib/clang/21.1.8/lib/linux/libclang_rt.builtins-arm.a
-
-# Check compiler-rt builtins (aarch64)
-ls -lh ../aarch64-unknown-linux-gnu-toolchain/lib/clang/21.1.8/lib/linux/libclang_rt.builtins-aarch64.a
 ```
 
-After building, LLVM/Clang will be available at:
-
-- ARMv5TE: `../arm-anykav200-crosstool-ng/bin/clang`
-- aarch64: `../aarch64-unknown-linux-gnu-toolchain/bin/clang`
+After building, LLVM/Clang will be available at `../arm-anykav200-crosstool-ng/bin/clang`.
 
 ## Bootstrapping Rust from Source (Optional)
 
-Rust can be bootstrapped from source using the custom LLVM toolchain. The bootstrap script supports both architectures.
+Rust can be bootstrapped from source using the custom LLVM toolchain.
 
 1. **Prerequisites**:
    - GCC toolchain must be built for the target architecture
    - LLVM/Clang must be built (Stage 1: `./build_llvm.sh`)
    - Compiler-rt builtins must be built (Stage 2: `./build_compiler_rt_builtins.sh`)
 
-2. **Bootstrap Rust for ARMv5TE**:
+2. **Bootstrap Rust**:
 
    ```bash
-   ARCH=armv5te ./bootstrap_rust.sh
+   ./bootstrap_rust.sh
    ```
 
    The script will:
@@ -389,41 +321,15 @@ Rust can be bootstrapped from source using the custom LLVM toolchain. The bootst
    - Install to `../arm-anykav200-crosstool-ng/`
    - Build time: 4-8 hours
 
-3. **Bootstrap Rust for aarch64**:
-
-   ```bash
-   ARCH=aarch64 ./bootstrap_rust.sh
-   ```
-
-   The script will:
-   - Clone Rust source code (stable version)
-   - Configure Rust to use custom LLVM (aarch64 is a builtin target)
-   - Build Rust compiler and std library for the target
-   - Install to `../aarch64-unknown-linux-gnu-toolchain/`
-   - Build time: 4-8 hours
-
-4. **Verify installation**:
-
-   **For ARMv5TE:**
+3. **Verify installation**:
 
    ```bash
    ./verify_rust.sh
    ```
 
-   **For aarch64:**
+4. After building, Rust will be available at `../arm-anykav200-crosstool-ng/bin/rustc`.
 
-   ```bash
-   # Verification script would need to be created or use rustc directly
-   ../aarch64-unknown-linux-gnu-toolchain/bin/rustc --version
-   ```
-
-5. After building, Rust will be available at:
-   - ARMv5TE: `../arm-anykav200-crosstool-ng/bin/rustc`
-   - aarch64: `../aarch64-unknown-linux-gnu-toolchain/bin/rustc`
-
-6. **Using the Rust targets**:
-
-   **For ARMv5TE**, add to your project's `.cargo/config.toml`:
+5. **Using the Rust target**, add to your project's `.cargo/config.toml`:
 
    ```toml
    [build]
@@ -433,24 +339,10 @@ Rust can be bootstrapped from source using the custom LLVM toolchain. The bootst
    linker = "/path/to/arm-anykav200-crosstool-ng/bin/clang"
    ```
 
-   **For aarch64**, add to your project's `.cargo/config.toml`:
-
-   ```toml
-   [build]
-   target = "aarch64-unknown-linux-gnu"
-
-   [target.aarch64-unknown-linux-gnu]
-   linker = "/path/to/aarch64-unknown-linux-gnu-toolchain/bin/clang"
-   ```
-
    Then build with:
 
    ```bash
-   # ARMv5TE
    cargo build --target armv5te-unknown-linux-uclibceabi --release
-
-   # aarch64
-   cargo build --target aarch64-unknown-linux-gnu --release
    ```
 
 ## Installing rust-src Component
@@ -530,21 +422,6 @@ Key characteristics:
 - Float ABI: soft (no hardware floating point)
 - C Library: uClibc-ng
 - OS: Linux 3.4.35
-- Linker: Clang
-
-### aarch64 Target
-
-The `aarch64-unknown-linux-gnu` target is a builtin Rust target:
-
-- `aarch64-unknown-linux-gnu.json` (JSON format, provided for reference)
-- Builtin target in Rust (no source modification needed)
-
-Key characteristics:
-
-- Architecture: aarch64 (64-bit ARM)
-- Float ABI: hard (hardware floating point)
-- C Library: glibc
-- OS: Linux 6.1.0
 - Linker: Clang
 
 ## Integration

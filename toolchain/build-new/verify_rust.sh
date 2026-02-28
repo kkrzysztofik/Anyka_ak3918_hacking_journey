@@ -4,29 +4,12 @@
 
 set -e
 
-# Colors
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m'
-
-log_info() {
-    echo -e "${GREEN}[INFO]${NC} $1"
-}
-
-log_warn() {
-    echo -e "${YELLOW}[WARN]${NC} $1"
-}
-
-log_error() {
-    echo -e "${RED}[ERROR]${NC} $1"
-}
-
-# Script directory
+# Script directory — must be set before sourcing common.sh
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-INSTALL_DIR="${SCRIPT_DIR}/../arm-anykav200-crosstool-ng"
+source "${SCRIPT_DIR}/common.sh"
+
+# Rust target triple (distinct from the GCC TARGET_TUPLE in common.sh)
 TARGET_NAME="armv5te-unknown-linux-uclibceabi"
-SYSROOT="${INSTALL_DIR}/arm-unknown-linux-uclibcgnueabi/sysroot"
 
 RUSTC="${INSTALL_DIR}/bin/rustc"
 CARGO="${INSTALL_DIR}/bin/cargo"
@@ -226,6 +209,38 @@ else
     log_warn "Std library not found for target"
     log_info "This is expected if std library has not been built yet"
     log_info "The bootstrap process should build it"
+fi
+
+# Test 8: Check rust-analyzer-proc-macro-srv binary
+log_info "Test 8: Checking rust-analyzer-proc-macro-srv..."
+PROC_MACRO_SRV=""
+if [[ -f "${INSTALL_DIR}/libexec/rust-analyzer-proc-macro-srv" ]]; then
+    PROC_MACRO_SRV="${INSTALL_DIR}/libexec/rust-analyzer-proc-macro-srv"
+elif [[ -f "${INSTALL_DIR}/bin/rust-analyzer-proc-macro-srv" ]]; then
+    PROC_MACRO_SRV="${INSTALL_DIR}/bin/rust-analyzer-proc-macro-srv"
+fi
+
+if [[ -n "${PROC_MACRO_SRV}" ]]; then
+    log_info "rust-analyzer-proc-macro-srv found: ${PROC_MACRO_SRV}"
+else
+    log_warn "rust-analyzer-proc-macro-srv not found in libexec/ or bin/"
+    log_warn "Proc-macro expansion in rust-analyzer will be disabled"
+    log_warn "To rebuild with proc-macro-srv, run: ./bootstrap_rust.sh"
+    log_warn "Expected locations:"
+    log_warn "  ${INSTALL_DIR}/libexec/rust-analyzer-proc-macro-srv"
+    log_warn "  ${INSTALL_DIR}/bin/rust-analyzer-proc-macro-srv"
+fi
+
+# Test 9: Check rust-analyzer LSP binary
+log_info "Test 9: Checking rust-analyzer..."
+RUST_ANALYZER="${INSTALL_DIR}/bin/rust-analyzer"
+if [[ -f "${RUST_ANALYZER}" ]]; then
+    log_info "rust-analyzer found: ${RUST_ANALYZER}"
+    "${RUST_ANALYZER}" --version 2>/dev/null && log_info "rust-analyzer version OK" || log_warn "rust-analyzer binary exists but --version failed"
+else
+    log_warn "rust-analyzer not found at: ${RUST_ANALYZER}"
+    log_warn "IDE language server features (hover, goto-def, completion) will be unavailable"
+    log_warn "To rebuild with rust-analyzer, run: ./bootstrap_rust.sh"
 fi
 
 # Cleanup
