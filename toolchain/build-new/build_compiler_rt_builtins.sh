@@ -57,12 +57,19 @@ configure_compiler_rt() {
     # Configure compiler-rt as a standalone build
     # We use the target GCC cross-compiler to build the builtins
     # This is a cross-compilation build, so we set CMAKE_SYSTEM_NAME and CMAKE_SYSTEM_PROCESSOR
+    #
+    # IMPORTANT: Use armv5te-* as the compiler target triple, NOT the generic arm-* triple.
+    # compiler-rt's builtin-config-ix.cmake splits the first token of the triple to get the
+    # arch name: "arm" → arm_SOURCES (includes DMB-based sync builtins, requires ARMv6+)
+    #             "armv5te" → armv5te_SOURCES = arm_min_SOURCES (no DMB sync ops, safe for ARMv5TE)
+    # GCC ignores CMAKE_C_COMPILER_TARGET for actual compilation (uses its built-in target),
+    # so this change only affects CMake's source-set selection and library naming.
     local cmake_target_flags
     cmake_target_flags=(
         -DCMAKE_SYSTEM_NAME=Linux
         -DCMAKE_SYSTEM_PROCESSOR=arm
-        -DCMAKE_C_COMPILER_TARGET="${TARGET_TUPLE}"
-        -DCMAKE_CXX_COMPILER_TARGET="${TARGET_TUPLE}"
+        -DCMAKE_C_COMPILER_TARGET="armv5te-unknown-linux-uclibcgnueabi"
+        -DCMAKE_CXX_COMPILER_TARGET="armv5te-unknown-linux-uclibcgnueabi"
     )
 
     # Configure with CMake
@@ -218,8 +225,9 @@ verify_installation() {
     log_info "Verifying compiler-rt installation for ARMv5TE..."
 
     # Check for builtins library in expected location
+    # Library is named -armv5te because CMAKE_C_COMPILER_TARGET uses armv5te prefix
     local builtins_lib
-    builtins_lib="${INSTALL_DIR}/lib/clang/${LLVM_VERSION}/lib/linux/libclang_rt.builtins-arm.a"
+    builtins_lib="${INSTALL_DIR}/lib/clang/${LLVM_VERSION}/lib/linux/libclang_rt.builtins-armv5te.a"
 
     local found_lib=""
     if [[ -f "${builtins_lib}" ]]; then
@@ -272,7 +280,7 @@ main() {
     if [[ -n "${ACTUAL_BUILTINS_LIB}" ]]; then
         log_info "  ${ACTUAL_BUILTINS_LIB}"
     else
-        log_info "  ${INSTALL_DIR}/lib/clang/${LLVM_VERSION}/lib/linux/libclang_rt.builtins-arm.a"
+        log_info "  ${INSTALL_DIR}/lib/clang/${LLVM_VERSION}/lib/linux/libclang_rt.builtins-armv5te.a"
     fi
     log_info ""
     log_info "You can now bootstrap Rust:"
