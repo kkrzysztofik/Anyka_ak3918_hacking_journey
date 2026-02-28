@@ -315,26 +315,30 @@ build_rust() {
 
     # Create or verify Clang wrapper script that includes sysroot and target flags
     # This ensures Clang always has the right flags without affecting host builds
-    local sysroot="${SYSROOT}"
     local clang_wrapper="${BUILD_DIR}/${CLANG_WRAPPER}"
     
-    # Create ARMv5TE Clang wrapper
-    # IMPORTANT: --target must use the LLVM-valid gnueabi form, NOT uclibcgnueabi.
-    # Clang/LLVM does not recognise 'uclibcgnueabi' as an environment tag.
-    # The sysroot flag is what directs the linker to the uClibc-ng libraries.
-    cat > "${clang_wrapper}" << EOF
+    # Create ARMv5TE Clang wrapper.
+    # - --gcc-toolchain: tells Clang/LLD where GCC's crt files live
+    #   (crtbeginS.o, crtendS.o are in lib/gcc/<triple>/<ver>/, not the sysroot)
+    # - --sysroot: uClibc-ng sysroot with headers + runtime libs
+    # - --target: must use a Clang-valid environment tag (gnueabi, not uclibcgnueabi)
+    # The wrapper is self-relocating so it works even if the tree is moved.
+    cat > "${clang_wrapper}" << 'WRAPPER_EOF'
 #!/bin/bash
 # Clang wrapper for ARMv5TE target with sysroot
-exec "${INSTALL_DIR}/bin/clang" \\
-    --target=armv5te-unknown-linux-gnueabi \\
-    --sysroot="${sysroot}" \\
-    -march=armv5te \\
-    -mfloat-abi=soft \\
-    -mtune=arm926ej-s \\
-    -L"${sysroot}/lib" \\
-    -L"${sysroot}/usr/lib" \\
-    "\$@"
-EOF
+# --gcc-toolchain tells Clang where to find GCC's crt files (crtbeginS.o, etc.)
+# --sysroot  points to the uClibc-ng sysroot (headers + runtime libs)
+# --target   must use an LLVM-valid environment tag (gnueabi, not uclibcgnueabi)
+INSTALL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../arm-anykav200-crosstool-ng" && pwd)"
+exec "${INSTALL_DIR}/bin/clang" \
+    --target=armv5te-unknown-linux-gnueabi \
+    --gcc-toolchain="${INSTALL_DIR}" \
+    --sysroot="${INSTALL_DIR}/arm-unknown-linux-uclibcgnueabi/sysroot" \
+    -march=armv5te \
+    -mfloat-abi=soft \
+    -mtune=arm926ej-s \
+    "$@"
+WRAPPER_EOF
     chmod +x "${clang_wrapper}"
     log_info "Created Clang wrapper: ${clang_wrapper}"
 
