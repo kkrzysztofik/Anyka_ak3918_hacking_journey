@@ -1,6 +1,5 @@
 pub mod global_trait;
 // pub mod http;
-pub mod relay;
 pub mod rtp;
 #[path = "rtsp.rs"]
 mod rtsp_impl;

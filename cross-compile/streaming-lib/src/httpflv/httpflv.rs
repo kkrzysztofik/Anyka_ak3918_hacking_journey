@@ -5,7 +5,6 @@ use {
         define::{HttpResponseDataProducer, tag_type},
         errors::{HttpFLvError, HttpFLvErrorValue},
     },
-    crate::container::amf0::amf0_writer::Amf0Writer,
     crate::container::muxer::{FlvMuxer, HEADER_LENGTH},
     crate::streamhub::define::{
         FrameData, FrameDataReceiver, NotifyInfo, StreamHubEvent, StreamHubEventSender,
@@ -135,9 +134,6 @@ impl HttpFlv {
                 self.has_video = true;
                 header_state.cached_frames.push(data);
             }
-            FrameData::MetaData { .. } => {
-                header_state.cached_frames.push(data);
-            }
             _ => {}
         }
 
@@ -196,13 +192,9 @@ impl HttpFlv {
                 self.send_video_statistics(&data);
                 (data, timestamp, tag_type::VIDEO)
             }
-            FrameData::MetaData { timestamp, data } => {
-                let processed = self.process_metadata(data)?;
-                (processed, timestamp, tag_type::SCRIPT_DATA_AMF)
-            }
-            _ => {
+            other => {
                 return Err(HttpFLvError {
-                    value: HttpFLvErrorValue::UnexpectedFrameData(format!("{:?}", channel_data)),
+                    value: HttpFLvErrorValue::UnexpectedFrameData(format!("{other:?}")),
                 });
             }
         };
@@ -239,13 +231,6 @@ impl HttpFlv {
         if let Err(err) = sender.send(statistic_video_data) {
             log::error!("send statistic data err: {}", err);
         }
-    }
-
-    fn process_metadata(&self, data: bytes::BytesMut) -> Result<BytesMut, HttpFLvError> {
-        let mut amf_writer: Amf0Writer = Amf0Writer::new();
-        amf_writer.write_string(&String::from("@setDataFrame"))?;
-        let (_, right) = data.split_at(amf_writer.len());
-        Ok(BytesMut::from(right))
     }
 
     pub fn write_flv_tag(&mut self, channel_data: FrameData) -> Result<(), HttpFLvError> {
@@ -1185,8 +1170,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_write_flv_tag_metadata_success() {
-        let (event_sender, _event_receiver, response_sender, mut response_receiver) =
+    async fn test_write_flv_tag_metadata_rejected() {
+        let (event_sender, _event_receiver, response_sender, _response_receiver) =
             create_test_channels();
         let remote_addr = create_test_socket_addr();
 
@@ -1207,11 +1192,11 @@ mod tests {
             data: meta,
         };
         let result = httpflv.write_flv_tag(frame);
-        assert!(
-            result.is_ok(),
-            "MetaData frame should be writable as FLV tag"
-        );
-        let _ = response_receiver.next().await;
+        assert!(result.is_err(), "MetaData frames should be rejected");
+        match result.unwrap_err().value {
+            HttpFLvErrorValue::UnexpectedFrameData(_) => {}
+            other => panic!("Expected UnexpectedFrameData, got: {other:?}"),
+        }
     }
 
     #[tokio::test]

@@ -1,7 +1,7 @@
 ---
 description: UX/UI design specialist for the Anyka camera WebUI. Creates user research artifacts, journey maps, component specifications, and accessibility checklists for camera operators and network administrators using shadcn/ui within embedded bundle constraints.
 mode: subagent
-model: openai/gpt-5.3-codex
+model: github-copilot/gemini-3.1-pro-preview
 ---
 
 # Designer: Anyka Camera WebUI UX/UI Specialist

@@ -1043,8 +1043,7 @@ use crate::hal::{
 };
 
 use super::frame::{
-    ActiveFrames, CallbackId, Frame, FrameCallback, FrameType, OwnedFrame, OwnedFrameCallback,
-    StreamId,
+    CallbackId, Frame, FrameCallback, FrameType, OwnedFrame, OwnedFrameCallback, StreamId,
 };
 
 /// Encoder lifecycle state.
@@ -1876,8 +1875,7 @@ fn invoke_owned_callbacks_from_map(
 ///   ├── ffi: Arc<dyn VideoHalTrait>       (injected, mockable)
 ///   ├── main_handle: RwLock<Option<Arc<VideoEncoderHandle>>>
 ///   ├── sub_handle:  RwLock<Option<Arc<VideoEncoderHandle>>>
-///   ├── callbacks: RwLock<HashMap<CallbackId, Arc<dyn FrameCallback>>>
-///   └── active_frames: Arc<ActiveFrames>  (ref-counted buffer tracking)
+///   └── callbacks: RwLock<HashMap<CallbackId, Arc<dyn FrameCallback>>>
 /// ```
 struct AnykaVideoEncoder {
     ffi: Arc<dyn crate::hal::video::VideoHalTrait>,
@@ -1892,7 +1890,6 @@ struct AnykaVideoEncoder {
     sub_state: RwLock<EncoderState>,
     callbacks: Arc<RwLock<HashMap<CallbackId, Arc<dyn FrameCallback>>>>,
     owned_callbacks: Arc<RwLock<HashMap<CallbackId, Arc<dyn OwnedFrameCallback>>>>,
-    active_frames: Arc<ActiveFrames>,
     next_callback_id: AtomicU64,
     main_stream_handle: RwLock<Option<Arc<VideoStreamHandle>>>,
     sub_stream_handle: RwLock<Option<Arc<VideoStreamHandle>>>,
@@ -2005,7 +2002,6 @@ impl AnykaVideoEncoder {
             sub_state: RwLock::new(EncoderState::Uninitialized),
             callbacks: Arc::new(RwLock::new(HashMap::new())),
             owned_callbacks: Arc::new(RwLock::new(HashMap::new())),
-            active_frames: Arc::new(ActiveFrames::new()),
             next_callback_id: AtomicU64::new(1),
             main_stream_handle: RwLock::new(None),
             sub_stream_handle: RwLock::new(None),
@@ -2232,11 +2228,6 @@ impl AnykaVideoEncoder {
                 callbacks_write.remove(&id);
             }
         }
-    }
-
-    /// Get a reference to the active frames tracker.
-    pub fn active_frames(&self) -> &Arc<ActiveFrames> {
-        &self.active_frames
     }
 
     /// Start streaming from the encoder by requesting stream handles and spawning
@@ -4584,14 +4575,6 @@ mod tests {
 
         assert!(r1.unwrap().is_ok());
         assert!(r2.unwrap().is_ok());
-    }
-
-    #[test]
-    fn test_encoder_active_frames_accessible() {
-        let mock = MockVideoHalTrait::new();
-        let encoder = AnykaVideoEncoder::with_ffi(Arc::new(mock));
-        let af = encoder.active_frames();
-        assert_eq!(af.active_count(), 0);
     }
 
     // =========================================================================

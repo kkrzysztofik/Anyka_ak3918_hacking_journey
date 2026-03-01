@@ -12,11 +12,9 @@ use rand::RngExt;
 
 use super::rtp::rtp_aac::RtpAacPacker;
 use super::rtp::rtp_h264::RtpH264Packer;
-use super::rtp::rtp_h265::RtpH265Packer;
 
 use super::rtp::rtp_aac::RtpAacUnPacker;
 use super::rtp::rtp_h264::RtpH264UnPacker;
-use super::rtp::rtp_h265::RtpH265UnPacker;
 
 use super::rtp::utils::TPacker;
 use super::rtp::utils::TUnPacker;
@@ -160,7 +158,7 @@ impl TRtpFunc for RtpChannel {
                 self.rtp_unpacker = Some(Box::new(RtpH264UnPacker::new()));
             }
             RtspCodecId::H265 => {
-                self.rtp_unpacker = Some(Box::new(RtpH265UnPacker::new()));
+                // H.265 not supported on AK3918 hardware
             }
             RtspCodecId::AAC => {
                 self.rtp_unpacker = Some(Box::new(RtpAacUnPacker::new()));
@@ -182,13 +180,7 @@ impl TRtpFunc for RtpChannel {
                 )));
             }
             RtspCodecId::H265 => {
-                self.rtp_packer = Some(Box::new(RtpH265Packer::new(
-                    self.codec_info.payload_type,
-                    self.ssrc,
-                    self.init_sequence,
-                    DEFAULT_MAX_RTP_PAYLOAD_SIZE,
-                    io,
-                )));
+                // H.265 not supported on AK3918 hardware
             }
             RtspCodecId::AAC => {
                 self.rtp_packer = Some(Box::new(RtpAacPacker::new(
@@ -330,7 +322,8 @@ mod tests {
             ..Default::default()
         };
         let channel = RtpChannel::new(codec_info);
-        assert!(channel.rtp_unpacker.is_some());
+        // H.265 not supported on AK3918 hardware — no packer/unpacker
+        assert!(channel.rtp_unpacker.is_none());
         assert!(channel.rtp_packer.is_none());
     }
 
@@ -491,7 +484,8 @@ mod tests {
             init_timestamp: 0,
         };
         channel.create_unpacker();
-        assert!(channel.rtp_unpacker.is_some());
+        // H.265 not supported on AK3918 hardware
+        assert!(channel.rtp_unpacker.is_none());
     }
 
     #[test]
@@ -748,7 +742,7 @@ mod tests {
     }
 
     #[test]
-    fn test_create_packer_h265_creates_packer() {
+    fn test_create_packer_h265_no_packer_created() {
         let codec_info = RtspCodecInfo {
             codec_id: RtspCodecId::H265,
             payload_type: 98,
@@ -767,7 +761,8 @@ mod tests {
             Box::new(MockNetIO::new()) as Box<dyn TNetIO + Send + Sync>
         ));
         channel.create_packer(mock_io);
-        assert!(channel.rtp_packer.is_some());
+        // H.265 not supported on AK3918 hardware
+        assert!(channel.rtp_packer.is_none());
     }
 
     #[test]

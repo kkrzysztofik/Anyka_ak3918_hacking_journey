@@ -1,5 +1,3 @@
-pub mod http;
-
 use super::define::StreamHubEventMessage;
 use async_trait::async_trait;
 

@@ -1,8 +1,8 @@
 use crate::streamhub::errors::StreamHubError;
 
 use {
-    crate::container::amf0::errors::Amf0WriteError, crate::container::errors::FlvMuxerError,
-    futures::channel::mpsc::SendError, thiserror::Error, tokio::sync::oneshot::error::RecvError,
+    crate::container::errors::FlvMuxerError, futures::channel::mpsc::SendError, thiserror::Error,
+    tokio::sync::oneshot::error::RecvError,
 };
 
 #[derive(Debug, Error)]
@@ -29,8 +29,6 @@ pub enum HttpFLvErrorValue {
     Error,
     #[error("flv muxer error: {}", _0)]
     MuxerError(FlvMuxerError),
-    #[error("amf write error: {}", _0)]
-    Amf0WriteError(Amf0WriteError),
     #[error("metadata error: {}", _0)]
     MpscSendError(SendError),
     #[error("event execute error: {}", _0)]
@@ -59,14 +57,6 @@ impl From<SendError> for HttpFLvError {
     fn from(error: SendError) -> Self {
         HttpFLvError {
             value: HttpFLvErrorValue::MpscSendError(error),
-        }
-    }
-}
-
-impl From<Amf0WriteError> for HttpFLvError {
-    fn from(error: Amf0WriteError) -> Self {
-        HttpFLvError {
-            value: HttpFLvErrorValue::Amf0WriteError(error),
         }
     }
 }
@@ -162,17 +152,6 @@ mod tests {
         match http_error.value {
             HttpFLvErrorValue::MuxerError(_) => {}
             _ => panic!("Expected MuxerError variant"),
-        }
-    }
-
-    #[test]
-    fn test_httpflv_error_from_amf0_write_error() {
-        use crate::container::amf0::errors::{Amf0WriteError, Amf0WriteErrorValue};
-        let amf_error = Amf0WriteError(Amf0WriteErrorValue::NormalStringTooLong);
-        let http_error: HttpFLvError = amf_error.into();
-        match &http_error.value {
-            HttpFLvErrorValue::Amf0WriteError(_) => {}
-            _ => panic!("Expected Amf0WriteError variant"),
         }
     }
 
@@ -285,15 +264,6 @@ mod tests {
         let error = HttpFLvErrorValue::MuxerError(muxer_error);
         let display = format!("{}", error);
         assert!(display.contains("flv muxer error"));
-    }
-
-    #[test]
-    fn test_httpflv_error_value_amf0_write_error_display() {
-        use crate::container::amf0::errors::{Amf0WriteError, Amf0WriteErrorValue};
-        let amf_error = Amf0WriteError(Amf0WriteErrorValue::NormalStringTooLong);
-        let error = HttpFLvErrorValue::Amf0WriteError(amf_error);
-        let display = format!("{}", error);
-        assert!(display.contains("amf write error"));
     }
 
     // ========== Debug Tests ==========
