@@ -9,7 +9,6 @@
 
 use std::sync::Arc;
 
-use crate::config::ConfigRuntime;
 use crate::onvif::dispatcher::ServiceHandler;
 use crate::onvif::dispatcher::parse_body;
 use crate::onvif::error::{OnvifError, OnvifResult};
@@ -51,45 +50,31 @@ use super::types::{
 pub struct PTZService {
     /// PTZ state manager.
     state: Arc<PTZStateManager>,
-    /// Configuration runtime.
-    #[allow(dead_code)]
-    config: Arc<ConfigRuntime>,
     /// Platform PTZ control (optional for software-only mode).
     ptz_control: Option<Arc<dyn PTZControl>>,
 }
 
 impl PTZService {
     /// Create a new PTZ Service.
-    pub fn new(state: Arc<PTZStateManager>, config: Arc<ConfigRuntime>) -> Self {
+    pub fn new(state: Arc<PTZStateManager>) -> Self {
         Self {
             state,
-            config,
             ptz_control: None,
         }
     }
 
     /// Create a new PTZ Service with platform PTZ control.
-    pub fn with_platform(
-        state: Arc<PTZStateManager>,
-        config: Arc<ConfigRuntime>,
-        platform: Arc<dyn Platform>,
-    ) -> Self {
+    pub fn with_platform(state: Arc<PTZStateManager>, platform: Arc<dyn Platform>) -> Self {
         Self {
             state,
-            config,
             ptz_control: platform.ptz_control(),
         }
     }
 
     /// Create a new PTZ Service with direct PTZ control.
-    pub fn with_ptz_control(
-        state: Arc<PTZStateManager>,
-        config: Arc<ConfigRuntime>,
-        ptz_control: Arc<dyn PTZControl>,
-    ) -> Self {
+    pub fn with_ptz_control(state: Arc<PTZStateManager>, ptz_control: Arc<dyn PTZControl>) -> Self {
         Self {
             state,
-            config,
             ptz_control: Some(ptz_control),
         }
     }
@@ -200,7 +185,6 @@ impl PTZService {
     }
 
     /// Convert PTZVector to platform PtzPosition.
-    #[allow(dead_code)]
     fn vector_to_position(vector: &PTZVector) -> PtzPosition {
         let mut pos = PtzPosition::default();
         if let Some(pt) = &vector.pan_tilt {
@@ -878,8 +862,7 @@ mod tests {
 
     fn create_test_service() -> PTZService {
         let state = Arc::new(PTZStateManager::new());
-        let config = Arc::new(ConfigRuntime::new(Default::default()));
-        PTZService::new(state, config)
+        PTZService::new(state)
     }
 
     // ========================================================================
@@ -1826,9 +1809,8 @@ mod tests {
         use crate::platform::StubPlatformBuilder;
 
         let state = Arc::new(PTZStateManager::new());
-        let config = Arc::new(ConfigRuntime::new(Default::default()));
         let platform = Arc::new(StubPlatformBuilder::new().ptz_supported(true).build());
-        let service = PTZService::with_platform(state, config, platform);
+        let service = PTZService::with_platform(state, platform);
 
         let response = service
             .handle_absolute_move(AbsoluteMove {
@@ -1857,10 +1839,9 @@ mod tests {
         use crate::platform::StubPlatformBuilder;
 
         let state = Arc::new(PTZStateManager::new());
-        let config = Arc::new(ConfigRuntime::new(Default::default()));
         // Create platform that will fail PTZ operations
         let platform = Arc::new(StubPlatformBuilder::new().ptz_supported(false).build());
-        let service = PTZService::with_platform(state, config, platform);
+        let service = PTZService::with_platform(state, platform);
 
         // Should still work (platform failure is handled gracefully)
         let response = service
@@ -1890,9 +1871,8 @@ mod tests {
         use crate::platform::StubPlatformBuilder;
 
         let state = Arc::new(PTZStateManager::new());
-        let config = Arc::new(ConfigRuntime::new(Default::default()));
         let platform = Arc::new(StubPlatformBuilder::new().ptz_supported(true).build());
-        let service = PTZService::with_platform(state, config, platform);
+        let service = PTZService::with_platform(state, platform);
 
         let response = service
             .handle_relative_move(RelativeMove {
@@ -1921,9 +1901,8 @@ mod tests {
         use crate::platform::StubPlatformBuilder;
 
         let state = Arc::new(PTZStateManager::new());
-        let config = Arc::new(ConfigRuntime::new(Default::default()));
         let platform = Arc::new(StubPlatformBuilder::new().ptz_supported(true).build());
-        let service = PTZService::with_platform(state, config, platform);
+        let service = PTZService::with_platform(state, platform);
 
         let response = service
             .handle_continuous_move(ContinuousMove {
@@ -1949,9 +1928,8 @@ mod tests {
         use crate::platform::StubPlatformBuilder;
 
         let state = Arc::new(PTZStateManager::new());
-        let config = Arc::new(ConfigRuntime::new(Default::default()));
         let platform = Arc::new(StubPlatformBuilder::new().ptz_supported(true).build());
-        let service = PTZService::with_platform(state, config, platform);
+        let service = PTZService::with_platform(state, platform);
 
         // Start moving
         service.state.set_moving(true, true);
@@ -1974,9 +1952,8 @@ mod tests {
         use crate::platform::StubPlatformBuilder;
 
         let state = Arc::new(PTZStateManager::new());
-        let config = Arc::new(ConfigRuntime::new(Default::default()));
         let platform = Arc::new(StubPlatformBuilder::new().ptz_supported(true).build());
-        let service = PTZService::with_platform(state, config, platform);
+        let service = PTZService::with_platform(state, platform);
 
         // Create a preset first
         service.state.set_position(&PTZVector {
@@ -2027,9 +2004,8 @@ mod tests {
         use crate::platform::StubPlatformBuilder;
 
         let state = Arc::new(PTZStateManager::new());
-        let config = Arc::new(ConfigRuntime::new(Default::default()));
         let platform = Arc::new(StubPlatformBuilder::new().ptz_supported(true).build());
-        let service = PTZService::with_platform(state, config, platform);
+        let service = PTZService::with_platform(state, platform);
 
         let response = service
             .handle_goto_home_position(GotoHomePosition {

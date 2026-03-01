@@ -69,11 +69,7 @@ pub struct MediaService {
     /// Configuration runtime.
     config: Arc<ConfigRuntime>,
     /// Platform abstraction (optional).
-    #[allow(dead_code)]
     platform: Option<Arc<dyn Platform>>,
-    /// Optional config persistence handle for save requests.
-    #[allow(dead_code)]
-    persistence: Option<ConfigPersistenceHandle>,
 }
 
 impl MediaService {
@@ -84,7 +80,6 @@ impl MediaService {
             profile_manager: Arc::new(ProfileManager::with_config(Arc::clone(&config))),
             config,
             platform: None,
-            persistence: None,
         }
     }
 
@@ -94,7 +89,6 @@ impl MediaService {
             profile_manager: Arc::new(ProfileManager::with_config(Arc::clone(&config))),
             config,
             platform: None,
-            persistence: None,
         }
     }
 
@@ -124,7 +118,6 @@ impl MediaService {
             profile_manager,
             config,
             platform: Some(platform),
-            persistence: None,
         }
     }
 
@@ -153,7 +146,6 @@ impl MediaService {
             profile_manager,
             config,
             platform: Some(platform),
-            persistence: Some(persistence),
         }
     }
 
@@ -169,7 +161,6 @@ impl MediaService {
             )),
             config,
             platform: None,
-            persistence: Some(persistence),
         }
     }
 
@@ -179,7 +170,6 @@ impl MediaService {
             profile_manager,
             config: Arc::new(ConfigRuntime::new(Default::default())),
             platform: None,
-            persistence: None,
         }
     }
 

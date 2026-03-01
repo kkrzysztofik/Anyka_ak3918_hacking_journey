@@ -35,9 +35,6 @@ use super::settings_store::{ImagingSettingsError, ImagingSettingsStore};
 pub struct ImagingService {
     /// Settings storage.
     settings_store: Arc<ImagingSettingsStore>,
-    /// Configuration runtime.
-    #[allow(dead_code)]
-    config: Arc<ConfigRuntime>,
     /// Platform abstraction (optional).
     platform: Option<Arc<dyn Platform>>,
 }
@@ -47,7 +44,6 @@ impl ImagingService {
     pub fn new() -> Self {
         Self {
             settings_store: Arc::new(ImagingSettingsStore::new()),
-            config: Arc::new(ConfigRuntime::new(Default::default())),
             platform: None,
         }
     }
@@ -63,14 +59,13 @@ impl ImagingService {
 
         Self {
             settings_store,
-            config: Arc::new(ConfigRuntime::new(Default::default())),
             platform: Some(platform),
         }
     }
 
     /// Create a new Imaging Service with configuration and platform.
     pub fn with_config_and_platform(
-        config: Arc<ConfigRuntime>,
+        _config: Arc<ConfigRuntime>,
         platform: Arc<dyn Platform>,
     ) -> Self {
         let imaging_control = platform.imaging_control();
@@ -82,7 +77,6 @@ impl ImagingService {
 
         Self {
             settings_store,
-            config,
             platform: Some(platform),
         }
     }

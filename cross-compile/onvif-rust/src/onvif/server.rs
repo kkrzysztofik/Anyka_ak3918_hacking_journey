@@ -466,16 +466,9 @@ impl OnvifServer {
         // Register PTZ Service
         tracing::debug!("Registering PTZ Service");
         let ptz_service = if let Some(platform) = app_state.platform() {
-            PTZService::with_platform(
-                Arc::clone(app_state.ptz_state()),
-                Arc::clone(app_state.config()),
-                Arc::clone(platform),
-            )
+            PTZService::with_platform(Arc::clone(app_state.ptz_state()), Arc::clone(platform))
         } else {
-            PTZService::new(
-                Arc::clone(app_state.ptz_state()),
-                Arc::clone(app_state.config()),
-            )
+            PTZService::new(Arc::clone(app_state.ptz_state()))
         };
         dispatcher.register_service("ptz", Arc::new(ptz_service));
 

@@ -45,18 +45,6 @@ mod tests {
         test_file
     }
 
-    fn create_test_config(file_path: String) -> H264PlaybackConfig {
-        H264PlaybackConfig {
-            file_path,
-            audio_file_path: None,
-            frame_rate: 25,
-            audio_sample_rate: 48000,
-            loop_playback: false,
-            rtsp_port: 8554,
-            httpflv_port: 8080,
-        }
-    }
-
     fn cleanup_file(path: &str) {
         let _ = fs::remove_file(path);
     }

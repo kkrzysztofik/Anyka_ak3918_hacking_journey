@@ -934,7 +934,7 @@ fn shm_stream_id_to_onvif(raw: u32) -> StreamId {
 mod tests {
     use super::*;
     use std::fs::{File, OpenOptions};
-    use std::io::{Read, Seek, Write};
+    use std::io::{Seek, Write};
 
     /// Create a test ring buffer file with valid header
     fn create_test_ring_buffer(path: &str) -> std::io::Result<File> {

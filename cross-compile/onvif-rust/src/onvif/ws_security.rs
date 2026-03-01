@@ -146,9 +146,6 @@ pub enum WsSecurityError {
 struct NonceEntry {
     /// When the nonce was first seen.
     timestamp: DateTime<Utc>,
-    /// Username associated with this nonce.
-    #[allow(dead_code)]
-    username: String,
 }
 
 /// WS-Security validator with nonce replay protection.
@@ -260,7 +257,7 @@ impl WsSecurityValidator {
     /// # Returns
     ///
     /// `Ok(())` if nonce is fresh, `Err(NonceReplay)` if it's a replay.
-    pub fn check_nonce(&self, nonce_b64: &str, username: &str) -> Result<(), WsSecurityError> {
+    pub fn check_nonce(&self, nonce_b64: &str, _username: &str) -> Result<(), WsSecurityError> {
         let mut cache = self.nonce_cache.lock();
 
         // First, purge expired entries if cache is getting large
@@ -278,7 +275,6 @@ impl WsSecurityValidator {
             nonce_b64.to_string(),
             NonceEntry {
                 timestamp: Utc::now(),
-                username: username.to_string(),
             },
         );
 

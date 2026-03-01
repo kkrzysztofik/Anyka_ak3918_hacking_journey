@@ -31,7 +31,6 @@
 //! - [`config`] - Configuration system (TOML-based)
 //! - [`platform`] - Platform abstraction for hardware access
 //! - [`onvif`] - ONVIF service implementations
-//! - [`auth`] - Authentication (WS-Security, HTTP Digest)
 //! - [`security`] - Security hardening (rate limiting, brute force protection)
 //! - [`validation`] - H264 playback validation and memory monitoring
 
@@ -68,7 +67,7 @@ pub mod utils;
 
 pub mod net;
 
-pub mod auth;
+// pub mod auth;
 
 pub mod users;
 

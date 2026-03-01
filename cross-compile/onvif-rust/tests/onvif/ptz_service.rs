@@ -7,7 +7,6 @@
 //! - Home position management
 //! - Service capabilities
 
-use onvif_rust::config::ConfigRuntime;
 use onvif_rust::onvif::ptz::{PTZService, PTZStateManager};
 use onvif_rust::onvif::types::common::{PTZSpeed, PTZVector, Vector1D, Vector2D};
 use onvif_rust::onvif::types::ptz::{
@@ -24,14 +23,12 @@ use std::sync::Arc;
 
 fn create_test_service() -> PTZService {
     let state = Arc::new(PTZStateManager::new());
-    let config = Arc::new(ConfigRuntime::new(Default::default()));
-    PTZService::new(state, config)
+    PTZService::new(state)
 }
 
 fn create_service_with_state() -> (PTZService, Arc<PTZStateManager>) {
     let state = Arc::new(PTZStateManager::new());
-    let config = Arc::new(ConfigRuntime::new(Default::default()));
-    let service = PTZService::new(Arc::clone(&state), config);
+    let service = PTZService::new(Arc::clone(&state));
     (service, state)
 }
 
