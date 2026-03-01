@@ -1,6 +1,6 @@
 ---
 description: Run full Rust quality gate (fmt, clippy, test, doc) using custom toolchain
-agent: build
+agent: devops
 ---
 
 Run the full quality gate for the Rust ONVIF backend. Execute these commands sequentially and report results for each step:

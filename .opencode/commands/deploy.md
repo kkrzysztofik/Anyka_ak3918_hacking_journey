@@ -1,6 +1,6 @@
 ---
 description: Build ARM release binary and deploy to SD card location
-agent: build
+agent: devops
 ---
 
 Build and deploy the ONVIF Rust binary for the Anyka AK3918 target device.

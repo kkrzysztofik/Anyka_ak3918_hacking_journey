@@ -1,6 +1,6 @@
 ---
 description: Code review current branch changes against project standards
-agent: code-reviewer
+agent: reviewer
 subtask: true
 ---
 

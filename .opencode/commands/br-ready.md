@@ -1,6 +1,6 @@
 ---
 description: Check beads_rust issue tracker for ready (unblocked) work items
-agent: plan
+agent: planner
 ---
 
 Check the beads_rust issue tracker for work items that are ready to be picked up:

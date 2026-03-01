@@ -1,6 +1,6 @@
 ---
 description: Run WebUI lint, type-check, and test suite
-agent: build
+agent: devops
 ---
 
 Run the full WebUI quality checks:

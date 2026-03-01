@@ -1,6 +1,6 @@
 ---
 description: Run Rust tests with the custom cargo toolchain
-agent: build
+agent: devops
 ---
 
 Run the Rust test suite for the ONVIF backend using the custom toolchain:
