@@ -57,30 +57,6 @@ pub fn validate_ptz_position(pan: f32, tilt: f32, zoom: f32) -> OnvifResult<()> 
     Ok(())
 }
 
-/// Validate PTZ velocity values.
-///
-/// Ensures pan, tilt, and zoom velocities are within valid ranges:
-/// - Pan velocity: -1.0 to 1.0
-/// - Tilt velocity: -1.0 to 1.0
-/// - Zoom velocity: -1.0 to 1.0
-///
-/// # Arguments
-///
-/// * `pan` - Pan velocity (-1.0 to 1.0)
-/// * `tilt` - Tilt velocity (-1.0 to 1.0)
-/// * `zoom` - Zoom velocity (-1.0 to 1.0)
-///
-/// # Returns
-///
-/// `Ok(())` if valid, or `OnvifError::InvalidArgVal` if out of range.
-#[allow(dead_code)] // Kept for potential future use, currently tested but not used in production
-pub fn validate_ptz_velocity(pan: f32, tilt: f32, zoom: f32) -> OnvifResult<()> {
-    validate_range(pan, -1.0, 1.0, "Pan velocity", "InvalidPanVelocity")?;
-    validate_range(tilt, -1.0, 1.0, "Tilt velocity", "InvalidTiltVelocity")?;
-    validate_range(zoom, -1.0, 1.0, "Zoom velocity", "InvalidZoomVelocity")?;
-    Ok(())
-}
-
 /// Validate a PTZ vector (position or translation).
 ///
 /// Validates all components of a PTZVector if present.
@@ -166,24 +142,6 @@ mod tests {
     fn test_validate_ptz_position_invalid_zoom() {
         assert!(validate_ptz_position(0.0, 0.0, -0.1).is_err());
         assert!(validate_ptz_position(0.0, 0.0, 1.1).is_err());
-    }
-
-    #[test]
-    fn test_validate_ptz_velocity_valid() {
-        assert!(validate_ptz_velocity(0.0, 0.0, 0.0).is_ok());
-        assert!(validate_ptz_velocity(-1.0, -1.0, -1.0).is_ok());
-        assert!(validate_ptz_velocity(1.0, 1.0, 1.0).is_ok());
-        assert!(validate_ptz_velocity(0.5, -0.5, 0.75).is_ok());
-    }
-
-    #[test]
-    fn test_validate_ptz_velocity_invalid() {
-        assert!(validate_ptz_velocity(-1.1, 0.0, 0.0).is_err());
-        assert!(validate_ptz_velocity(1.1, 0.0, 0.0).is_err());
-        assert!(validate_ptz_velocity(0.0, -1.1, 0.0).is_err());
-        assert!(validate_ptz_velocity(0.0, 1.1, 0.0).is_err());
-        assert!(validate_ptz_velocity(0.0, 0.0, -1.1).is_err());
-        assert!(validate_ptz_velocity(0.0, 0.0, 1.1).is_err());
     }
 
     #[test]
@@ -324,14 +282,6 @@ mod tests {
         assert!(validate_ptz_position(-1.0, -1.0, 0.0).is_ok());
         assert!(validate_ptz_position(1.0, 1.0, 1.0).is_ok());
         assert!(validate_ptz_position(0.0, 0.0, 0.0).is_ok());
-    }
-
-    #[test]
-    fn test_validate_ptz_velocity_boundary_values() {
-        // Exact boundaries
-        assert!(validate_ptz_velocity(-1.0, -1.0, -1.0).is_ok());
-        assert!(validate_ptz_velocity(1.0, 1.0, 1.0).is_ok());
-        assert!(validate_ptz_velocity(0.0, 0.0, 0.0).is_ok());
     }
 
     #[test]

@@ -33,14 +33,14 @@ use crate::onvif::types::device::{
     GetServices, GetServicesResponse, GetSystemBackup, GetSystemBackupResponse,
     GetSystemDateAndTime, GetSystemDateAndTimeResponse, GetUsers, GetUsersResponse,
     HostnameInformation, IPAddress, IPv4Configuration, IPv4NetworkInterface, LoadCertificates,
-    LoadCertificatesResponse, NTPInformation, NetworkGateway, NetworkHost, NetworkHostType,
-    NetworkInterface, NetworkInterfaceConnectionSetting, NetworkInterfaceInfo,
-    NetworkInterfaceLink, NetworkProtocol, NetworkProtocolType, PrefixedIPv4Address, RemoveScopes,
-    RemoveScopesResponse, RestoreSystem, RestoreSystemResponse, SetDNS, SetDNSResponse,
-    SetDiscoveryMode, SetDiscoveryModeResponse, SetHostname, SetHostnameResponse, SetNTP,
-    SetNTPResponse, SetNetworkProtocols, SetNetworkProtocolsResponse, SetScopes, SetScopesResponse,
-    SetSystemDateAndTime, SetSystemDateAndTimeResponse, SetSystemFactoryDefault,
-    SetSystemFactoryDefaultResponse, SetUser, SetUserResponse, SystemReboot, SystemRebootResponse,
+    LoadCertificatesResponse, NTPInformation, NetworkGateway, NetworkHost, NetworkInterface,
+    NetworkInterfaceConnectionSetting, NetworkInterfaceInfo, NetworkInterfaceLink, NetworkProtocol,
+    NetworkProtocolType, PrefixedIPv4Address, RemoveScopes, RemoveScopesResponse, RestoreSystem,
+    RestoreSystemResponse, SetDNS, SetDNSResponse, SetDiscoveryMode, SetDiscoveryModeResponse,
+    SetHostname, SetHostnameResponse, SetNTP, SetNTPResponse, SetNetworkProtocols,
+    SetNetworkProtocolsResponse, SetScopes, SetScopesResponse, SetSystemDateAndTime,
+    SetSystemDateAndTimeResponse, SetSystemFactoryDefault, SetSystemFactoryDefaultResponse,
+    SetUser, SetUserResponse, SystemReboot, SystemRebootResponse,
 };
 use crate::platform::{DeviceInfo, Platform};
 use crate::users::{PasswordManager, UserLevel, UserStorage};
@@ -68,9 +68,6 @@ use super::user_types::{validate_password, validate_username};
 pub struct DeviceService {
     /// User storage.
     users: Arc<UserStorage>,
-    /// Password manager for hashing.
-    #[allow(dead_code)]
-    password_manager: Arc<PasswordManager>,
     /// Configuration runtime.
     config: Arc<ConfigRuntime>,
     /// Platform abstraction (optional for backward compatibility).
@@ -83,10 +80,9 @@ pub struct DeviceService {
 
 impl DeviceService {
     /// Create a new Device Service.
-    pub fn new(users: Arc<UserStorage>, password_manager: Arc<PasswordManager>) -> Self {
+    pub fn new(users: Arc<UserStorage>, _password_manager: Arc<PasswordManager>) -> Self {
         Self {
             users,
-            password_manager,
             config: Arc::new(ConfigRuntime::new(Default::default())),
             platform: None,
             scopes: parking_lot::RwLock::new(Self::default_scopes()),
@@ -97,13 +93,12 @@ impl DeviceService {
     /// Create a new Device Service with configuration and platform.
     pub fn with_config_and_platform(
         users: Arc<UserStorage>,
-        password_manager: Arc<PasswordManager>,
+        _password_manager: Arc<PasswordManager>,
         config: Arc<ConfigRuntime>,
         platform: Arc<dyn Platform>,
     ) -> Self {
         Self {
             users,
-            password_manager,
             config,
             platform: Some(platform),
             scopes: parking_lot::RwLock::new(Self::default_scopes()),
@@ -413,23 +408,19 @@ impl DeviceService {
 
     /// Handle SetSystemFactoryDefault request.
     ///
-    /// Resets the device to factory defaults (stub implementation).
+    /// Not supported - returns ActionNotSupported error.
     pub fn handle_set_system_factory_default(
         &self,
         request: SetSystemFactoryDefault,
     ) -> OnvifResult<SetSystemFactoryDefaultResponse> {
-        tracing::info!(
-            "SetSystemFactoryDefault request - factory_default={:?}",
+        tracing::debug!(
+            "SetSystemFactoryDefault request - factory_default={:?} (not supported)",
             request.factory_default
         );
 
-        // Stub implementation - just log and return success
-        // In a real implementation, this would:
-        // - Hard: Reset all settings including network config
-        // - Soft: Reset settings but keep network config
-        tracing::warn!("Factory default reset requested but not implemented (stub)");
-
-        Ok(SetSystemFactoryDefaultResponse {})
+        Err(OnvifError::ActionNotSupported(
+            "SetSystemFactoryDefault".to_string(),
+        ))
     }
 
     /// Handle GetCertificates request.
@@ -782,28 +773,15 @@ impl DeviceService {
 
     /// Handle SetDNS request.
     ///
-    /// Sets DNS configuration.
+    /// Not supported - returns ActionNotSupported error.
     pub async fn handle_set_dns(&self, request: SetDNS) -> OnvifResult<SetDNSResponse> {
         tracing::debug!(
-            "SetDNS request: from_dhcp={}, {} manual servers",
+            "SetDNS request: from_dhcp={}, {} manual servers (not supported)",
             request.from_dhcp,
             request.dns_manual.len()
         );
 
-        // TODO: Implement actual DNS setting via platform
-        // For now, just log and return success
-        tracing::info!(
-            "SetDNS: from_dhcp={}, manual_servers={:?}, search_domains={:?}",
-            request.from_dhcp,
-            request
-                .dns_manual
-                .iter()
-                .filter_map(|ip| ip.ipv4_address.as_ref())
-                .collect::<Vec<_>>(),
-            request.search_domain
-        );
-
-        Ok(SetDNSResponse {})
+        Err(OnvifError::ActionNotSupported("SetDNS".to_string()))
     }
 
     // ========================================================================
@@ -855,33 +833,15 @@ impl DeviceService {
 
     /// Handle SetNTP request.
     ///
-    /// Sets NTP configuration.
+    /// Not supported - returns ActionNotSupported error.
     pub async fn handle_set_ntp(&self, request: SetNTP) -> OnvifResult<SetNTPResponse> {
         tracing::debug!(
-            "SetNTP request: from_dhcp={}, {} manual servers",
+            "SetNTP request: from_dhcp={}, {} manual servers (not supported)",
             request.from_dhcp,
             request.ntp_manual.len()
         );
 
-        // TODO: Implement actual NTP setting via platform
-        // For now, just log and return success
-        let servers: Vec<String> = request
-            .ntp_manual
-            .iter()
-            .filter_map(|host| match host.host_type {
-                NetworkHostType::IPv4 => host.ipv4_address.clone(),
-                NetworkHostType::IPv6 => host.ipv6_address.clone(),
-                NetworkHostType::DNS => host.dns_name.clone(),
-            })
-            .collect();
-
-        tracing::info!(
-            "SetNTP: from_dhcp={}, manual_servers={:?}",
-            request.from_dhcp,
-            servers
-        );
-
-        Ok(SetNTPResponse {})
+        Err(OnvifError::ActionNotSupported("SetNTP".to_string()))
     }
 
     // ========================================================================
@@ -977,28 +937,19 @@ impl DeviceService {
 
     /// Handle SetNetworkProtocols request.
     ///
-    /// Sets network protocol configurations.
+    /// Not supported - returns ActionNotSupported error.
     pub async fn handle_set_network_protocols(
         &self,
         request: SetNetworkProtocols,
     ) -> OnvifResult<SetNetworkProtocolsResponse> {
         tracing::debug!(
-            "SetNetworkProtocols request: {} protocols",
+            "SetNetworkProtocols request: {} protocols (not supported)",
             request.network_protocols.len()
         );
 
-        // TODO: Implement actual protocol setting via platform
-        // For now, just log and return success
-        for protocol in &request.network_protocols {
-            tracing::info!(
-                "SetNetworkProtocols: {:?} enabled={} ports={:?}",
-                protocol.name,
-                protocol.enabled,
-                protocol.port
-            );
-        }
-
-        Ok(SetNetworkProtocolsResponse {})
+        Err(OnvifError::ActionNotSupported(
+            "SetNetworkProtocols".to_string(),
+        ))
     }
 
     // ========================================================================
@@ -1724,48 +1675,6 @@ impl ServiceHandler for DeviceService {
     fn service_name(&self) -> &str {
         "Device"
     }
-
-    /// Get the list of supported actions.
-    fn supported_actions(&self) -> Vec<&str> {
-        vec![
-            "GetDeviceInformation",
-            "GetCapabilities",
-            "GetServices",
-            "GetServiceCapabilities",
-            "GetSystemDateAndTime",
-            "SetSystemDateAndTime",
-            "SystemReboot",
-            "SetSystemFactoryDefault",
-            "GetSystemBackup",
-            "RestoreSystem",
-            "GetCertificates",
-            "GetCertificatesStatus",
-            "CreateCertificate",
-            "LoadCertificates",
-            "DeleteCertificates",
-            "GetRelayOutputs",
-            "GetHostname",
-            "SetHostname",
-            "GetNetworkInterfaces",
-            "GetNetworkDefaultGateway",
-            "GetDNS",
-            "SetDNS",
-            "GetNTP",
-            "SetNTP",
-            "GetNetworkProtocols",
-            "SetNetworkProtocols",
-            "GetScopes",
-            "SetScopes",
-            "AddScopes",
-            "RemoveScopes",
-            "GetDiscoveryMode",
-            "SetDiscoveryMode",
-            "GetUsers",
-            "CreateUsers",
-            "DeleteUsers",
-            "SetUser",
-        ]
-    }
 }
 
 // ============================================================================
@@ -1776,6 +1685,7 @@ impl ServiceHandler for DeviceService {
 mod tests {
     use super::*;
     use crate::onvif::types::common::UserLevel as OnvifUserLevel;
+    use crate::onvif::types::device::NetworkHostType;
 
     fn create_test_service() -> DeviceService {
         let users = Arc::new(UserStorage::new());
@@ -2626,7 +2536,7 @@ mod tests {
     // ========================================================================
 
     #[tokio::test]
-    async fn test_set_dns() {
+    async fn test_set_dns_not_supported() {
         let service = create_test_service();
 
         let result = service
@@ -2637,11 +2547,12 @@ mod tests {
             })
             .await;
 
-        assert!(result.is_ok());
+        assert!(result.is_err());
+        assert!(matches!(result, Err(OnvifError::ActionNotSupported(_))));
     }
 
     #[tokio::test]
-    async fn test_set_dns_with_dhcp() {
+    async fn test_set_dns_with_dhcp_not_supported() {
         let service = create_test_service();
 
         let result = service
@@ -2652,7 +2563,8 @@ mod tests {
             })
             .await;
 
-        assert!(result.is_ok());
+        assert!(result.is_err());
+        assert!(matches!(result, Err(OnvifError::ActionNotSupported(_))));
     }
 
     // ========================================================================
@@ -2674,7 +2586,7 @@ mod tests {
     // ========================================================================
 
     #[tokio::test]
-    async fn test_set_ntp() {
+    async fn test_set_ntp_not_supported() {
         let service = create_test_service();
 
         let result = service
@@ -2684,11 +2596,12 @@ mod tests {
             })
             .await;
 
-        assert!(result.is_ok());
+        assert!(result.is_err());
+        assert!(matches!(result, Err(OnvifError::ActionNotSupported(_))));
     }
 
     #[tokio::test]
-    async fn test_set_ntp_with_dhcp() {
+    async fn test_set_ntp_with_dhcp_not_supported() {
         let service = create_test_service();
 
         let result = service
@@ -2698,7 +2611,8 @@ mod tests {
             })
             .await;
 
-        assert!(result.is_ok());
+        assert!(result.is_err());
+        assert!(matches!(result, Err(OnvifError::ActionNotSupported(_))));
     }
 
     // ========================================================================
@@ -2793,7 +2707,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_set_network_protocols() {
+    async fn test_set_network_protocols_not_supported() {
         let service = create_test_service();
 
         let result = service
@@ -2806,7 +2720,8 @@ mod tests {
             })
             .await;
 
-        assert!(result.is_ok());
+        assert!(result.is_err());
+        assert!(matches!(result, Err(OnvifError::ActionNotSupported(_))));
     }
 
     // ========================================================================
@@ -2874,7 +2789,7 @@ mod tests {
     // ========================================================================
 
     #[tokio::test]
-    async fn test_set_dns_invalid_ip() {
+    async fn test_set_dns_invalid_ip_not_supported() {
         let service = create_test_service();
 
         // Invalid IP address format
@@ -2886,13 +2801,13 @@ mod tests {
             })
             .await;
 
-        // Should still succeed (validation happens at platform level)
-        // But we can test the handler accepts it
-        assert!(result.is_ok());
+        // Now returns ActionNotSupported
+        assert!(result.is_err());
+        assert!(matches!(result, Err(OnvifError::ActionNotSupported(_))));
     }
 
     #[tokio::test]
-    async fn test_set_ntp_invalid_host() {
+    async fn test_set_ntp_invalid_host_not_supported() {
         let service = create_test_service();
 
         // Invalid host format
@@ -2908,8 +2823,9 @@ mod tests {
             })
             .await;
 
-        // Handler should accept it (validation at platform level)
-        assert!(result.is_ok());
+        // Now returns ActionNotSupported
+        assert!(result.is_err());
+        assert!(matches!(result, Err(OnvifError::ActionNotSupported(_))));
     }
 
     // ========================================================================
@@ -3240,15 +3156,13 @@ mod tests {
     // ========================================================================
 
     #[test]
-    fn test_set_system_factory_default() {
+    fn test_set_system_factory_default_not_supported() {
         let service = create_test_service();
-        let response = service
-            .handle_set_system_factory_default(SetSystemFactoryDefault {
-                factory_default: crate::onvif::types::common::FactoryDefaultType::Soft,
-            })
-            .unwrap();
+        let result = service.handle_set_system_factory_default(SetSystemFactoryDefault {
+            factory_default: crate::onvif::types::common::FactoryDefaultType::Soft,
+        });
 
-        // Stub returns empty struct, verify success
-        let _ = response;
+        assert!(result.is_err());
+        assert!(matches!(result, Err(OnvifError::ActionNotSupported(_))));
     }
 }

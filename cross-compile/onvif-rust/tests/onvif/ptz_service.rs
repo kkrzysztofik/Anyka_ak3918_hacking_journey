@@ -84,16 +84,16 @@ fn test_get_node_by_token() {
 
     // First get all nodes
     let nodes_response = service.handle_get_nodes(GetNodes {}).unwrap();
-    let node_token = nodes_response.ptz_nodes[0].token.clone();
+    let node_id = nodes_response.ptz_nodes[0].token.clone();
 
     // Then get specific node
     let response = service
         .handle_get_node(GetNode {
-            node_token: node_token.clone(),
+            node_token: node_id.clone(),
         })
         .unwrap();
 
-    assert_eq!(response.ptz_node.token, node_token);
+    assert_eq!(response.ptz_node.token, node_id);
 }
 
 #[test]
@@ -130,12 +130,12 @@ fn test_get_configuration_has_node_token() {
     let configs_response = service
         .handle_get_configurations(GetConfigurations {})
         .unwrap();
-    let config_token = configs_response.ptz_configurations[0].token.clone();
+    let config_id = configs_response.ptz_configurations[0].token.clone();
 
     // Then get specific config
     let response = service
         .handle_get_configuration(GetConfiguration {
-            ptz_configuration_token: config_token,
+            ptz_configuration_token: config_id,
         })
         .unwrap();
 
@@ -151,12 +151,12 @@ fn test_get_configuration_options_has_spaces() {
     let configs_response = service
         .handle_get_configurations(GetConfigurations {})
         .unwrap();
-    let config_token = configs_response.ptz_configurations[0].token.clone();
+    let config_id = configs_response.ptz_configurations[0].token.clone();
 
     // Then get options
     let response = service
         .handle_get_configuration_options(GetConfigurationOptions {
-            configuration_token: config_token,
+            configuration_token: config_id,
         })
         .unwrap();
 
@@ -180,13 +180,17 @@ fn test_set_configuration_accepts_valid_config() {
         .unwrap();
     let config = configs_response.ptz_configurations[0].clone();
 
-    // Set it back (no changes)
+    // SetConfiguration is not supported - returns ActionNotSupported
     let result = service.handle_set_configuration(SetConfiguration {
         ptz_configuration: config,
         force_persistence: false,
     });
 
-    assert!(result.is_ok());
+    assert!(result.is_err());
+    assert!(matches!(
+        result,
+        Err(onvif_rust::onvif::error::OnvifError::ActionNotSupported(_))
+    ));
 }
 
 // ============================================================================
@@ -1065,11 +1069,11 @@ fn test_get_configuration_options_returns_valid_options() {
     let configs = service
         .handle_get_configurations(GetConfigurations {})
         .unwrap();
-    let config_token = configs.ptz_configurations.first().unwrap().token.clone();
+    let config_id = configs.ptz_configurations.first().unwrap().token.clone();
 
     let response = service
         .handle_get_configuration_options(GetConfigurationOptions {
-            configuration_token: config_token,
+            configuration_token: config_id,
         })
         .unwrap();
 
@@ -1098,7 +1102,7 @@ fn test_get_compatible_configurations_for_profile() {
 }
 
 #[test]
-fn test_set_configuration_updates_config() {
+fn test_set_configuration_not_supported() {
     let service = create_test_service();
 
     let configs = service
@@ -1109,12 +1113,17 @@ fn test_set_configuration_updates_config() {
     // Modify configuration
     config.name = "ModifiedConfig".to_string();
 
+    // SetConfiguration is not supported - returns ActionNotSupported
     let result = service.handle_set_configuration(SetConfiguration {
         ptz_configuration: config,
         force_persistence: true,
     });
 
-    assert!(result.is_ok());
+    assert!(result.is_err());
+    assert!(matches!(
+        result,
+        Err(onvif_rust::onvif::error::OnvifError::ActionNotSupported(_))
+    ));
 }
 
 #[test]

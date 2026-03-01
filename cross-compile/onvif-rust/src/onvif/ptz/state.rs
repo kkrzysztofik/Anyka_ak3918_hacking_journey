@@ -100,7 +100,7 @@ struct MovementState {
 ///
 /// Provides thread-safe access to PTZ state including:
 /// - Current position and movement status
-/// - Preset storage (up to 255 presets)
+/// - Preset storage (up to 255 presets, in-memory only)
 /// - Home position
 ///
 /// # Example
@@ -125,8 +125,6 @@ pub struct PTZStateManager {
     home_position: RwLock<Position>,
     /// Presets (token -> preset data).
     presets: RwLock<HashMap<String, PresetData>>,
-    /// Configuration runtime (optional).
-    config: Option<Arc<ConfigRuntime>>,
     /// Next preset number for auto-generated tokens.
     next_preset_num: RwLock<u32>,
 }
@@ -139,23 +137,13 @@ impl PTZStateManager {
             movement: RwLock::new(MovementState::default()),
             home_position: RwLock::new(Position::home()),
             presets: RwLock::new(HashMap::new()),
-            config: None,
             next_preset_num: RwLock::new(1),
         }
     }
 
     /// Create a new PTZ State Manager with configuration.
-    pub fn with_config(config: Arc<ConfigRuntime>) -> Self {
-        let manager = Self {
-            position: RwLock::new(Position::home()),
-            movement: RwLock::new(MovementState::default()),
-            home_position: RwLock::new(Position::home()),
-            presets: RwLock::new(HashMap::new()),
-            config: Some(config),
-            next_preset_num: RwLock::new(1),
-        };
-        manager.load_presets_from_config();
-        manager
+    pub fn with_config(_config: Arc<ConfigRuntime>) -> Self {
+        Self::new()
     }
 
     // ========================================================================
@@ -317,9 +305,6 @@ impl PTZStateManager {
             },
         );
 
-        // Persist to config if available
-        self.save_presets_to_config();
-
         Ok(preset_token)
     }
 
@@ -352,32 +337,7 @@ impl PTZStateManager {
                 reason: format!("Preset '{}' not found", token),
             })?;
 
-        drop(presets);
-
-        // Persist to config if available
-        self.save_presets_to_config();
-
         Ok(())
-    }
-
-    // ========================================================================
-    // Configuration Persistence
-    // ========================================================================
-
-    /// Load presets from configuration.
-    fn load_presets_from_config(&self) {
-        if let Some(ref _config) = self.config {
-            // TODO: Load presets from TOML config
-            // For now, we start with empty presets
-        }
-    }
-
-    /// Save presets to configuration.
-    fn save_presets_to_config(&self) {
-        if let Some(ref _config) = self.config {
-            // TODO: Save presets to TOML config
-            // For now, presets are only in memory
-        }
     }
 }
 

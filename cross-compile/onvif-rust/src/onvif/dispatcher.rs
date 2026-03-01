@@ -175,9 +175,6 @@ impl AuthContext {
 ///         "Device"
 ///     }
 ///
-///     fn supported_actions(&self) -> Vec<&str> {
-///         vec!["GetDeviceInformation", "GetCapabilities", "GetScopes"]
-///     }
 /// }
 /// ```
 #[async_trait]
@@ -196,9 +193,6 @@ pub trait ServiceHandler: Send + Sync {
 
     /// Get the service name for logging and debugging.
     fn service_name(&self) -> &str;
-
-    /// Get the list of actions supported by this service.
-    fn supported_actions(&self) -> Vec<&str>;
 
     /// Get the required authentication level for an operation.
     ///
@@ -1001,10 +995,6 @@ mod tests {
         fn service_name(&self) -> &str {
             "Test"
         }
-
-        fn supported_actions(&self) -> Vec<&str> {
-            vec!["GetTest"]
-        }
     }
 
     #[test]
@@ -1256,10 +1246,6 @@ mod tests {
 
         fn service_name(&self) -> &str {
             "custom"
-        }
-
-        fn supported_actions(&self) -> Vec<&str> {
-            vec!["PublicOp", "AdminOp"]
         }
 
         fn required_auth_level(&self, action: &str) -> AuthLevel {

@@ -1444,62 +1444,6 @@ impl ServiceHandler for MediaService {
     fn service_name(&self) -> &str {
         "Media"
     }
-
-    /// Get the list of supported actions.
-    fn supported_actions(&self) -> Vec<&str> {
-        vec![
-            // Profile Operations
-            "GetProfiles",
-            "GetProfile",
-            "CreateProfile",
-            "DeleteProfile",
-            // Video Source Operations
-            "GetVideoSources",
-            "GetVideoSourceConfigurations",
-            "GetVideoSourceConfiguration",
-            "SetVideoSourceConfiguration",
-            "GetVideoSourceConfigurationOptions",
-            "AddVideoSourceConfiguration",
-            "RemoveVideoSourceConfiguration",
-            // Video Encoder Operations
-            "GetVideoEncoderConfigurations",
-            "GetVideoEncoderConfiguration",
-            "SetVideoEncoderConfiguration",
-            "GetVideoEncoderConfigurationOptions",
-            "AddVideoEncoderConfiguration",
-            "RemoveVideoEncoderConfiguration",
-            // Audio Source Operations
-            "GetAudioSources",
-            "GetAudioSourceConfigurations",
-            "GetAudioSourceConfiguration",
-            "SetAudioSourceConfiguration",
-            "AddAudioSourceConfiguration",
-            "RemoveAudioSourceConfiguration",
-            // Audio Encoder Operations
-            "GetAudioEncoderConfigurations",
-            "GetAudioEncoderConfiguration",
-            "GetAudioEncoderConfigurationOptions",
-            "SetAudioEncoderConfiguration",
-            "AddAudioEncoderConfiguration",
-            "RemoveAudioEncoderConfiguration",
-            // Stream URI Operations
-            "GetStreamUri",
-            "GetSnapshotUri",
-            // Service Capabilities
-            "GetServiceCapabilities",
-            // Compatible Configurations (FR-002)
-            "GetCompatibleVideoSourceConfigurations",
-            "GetCompatibleVideoEncoderConfigurations",
-            "GetCompatibleAudioSourceConfigurations",
-            "GetCompatibleAudioEncoderConfigurations",
-            // Metadata Configuration (FR-002)
-            "GetMetadataConfigurations",
-            "SetMetadataConfiguration",
-            // Multicast Streaming (FR-002)
-            "StartMulticastStreaming",
-            "StopMulticastStreaming",
-        ]
-    }
 }
 
 #[cfg(test)]
@@ -1653,11 +1597,13 @@ mod tests {
         assert!(result.is_err());
         let err = result.unwrap_err();
         // Verify it's a NoProfile fault
-        match err {
-            OnvifError::InvalidArgVal { subcode, .. } => {
-                assert!(subcode.contains("NoProfile"));
-            }
-            _ => panic!("Expected InvalidArgVal with NoProfile subcode"),
+        if let OnvifError::InvalidArgVal { subcode, .. } = &err {
+            assert!(
+                subcode.contains("NoProfile"),
+                "subcode should contain NoProfile"
+            );
+        } else {
+            assert!(false, "Expected InvalidArgVal error, got: {:?}", err);
         }
     }
 

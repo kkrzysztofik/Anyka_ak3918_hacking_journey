@@ -89,56 +89,6 @@ pub fn log_rate_limit_exceeded(client_ip: &IpAddr, request_count: u32) {
     );
 }
 
-/// Log a successful authentication.
-///
-/// # Arguments
-///
-/// * `client_ip` - The IP address of the client
-/// * `username` - The authenticated username
-#[allow(dead_code)]
-pub fn log_auth_success(client_ip: &IpAddr, username: &str) {
-    info!(
-        event = "auth_success",
-        client_ip = %client_ip,
-        username = %username,
-        "Authentication successful"
-    );
-}
-
-/// Log an IP address being unblocked (manually or due to timeout).
-///
-/// # Arguments
-///
-/// * `client_ip` - The IP address being unblocked
-/// * `reason` - Why the IP was unblocked (e.g., "timeout", "manual")
-#[allow(dead_code)]
-pub fn log_ip_unblocked(client_ip: &IpAddr, reason: &str) {
-    info!(
-        event = "ip_unblocked",
-        client_ip = %client_ip,
-        reason = %reason,
-        "IP address unblocked"
-    );
-}
-
-/// Log a security configuration change.
-///
-/// # Arguments
-///
-/// * `setting` - The setting that was changed
-/// * `old_value` - The previous value
-/// * `new_value` - The new value
-#[allow(dead_code)]
-pub fn log_security_config_change(setting: &str, old_value: &str, new_value: &str) {
-    info!(
-        event = "security_config_change",
-        setting = %setting,
-        old_value = %old_value,
-        new_value = %new_value,
-        "Security configuration changed"
-    );
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -170,22 +120,5 @@ mod tests {
     fn test_log_rate_limit_exceeded() {
         let ip: IpAddr = IpAddr::V4(Ipv4Addr::new(192, 168, 1, 100));
         log_rate_limit_exceeded(&ip, 100);
-    }
-
-    #[test]
-    fn test_log_auth_success() {
-        let ip: IpAddr = IpAddr::V4(Ipv4Addr::new(192, 168, 1, 100));
-        log_auth_success(&ip, "admin");
-    }
-
-    #[test]
-    fn test_log_ip_unblocked() {
-        let ip: IpAddr = IpAddr::V4(Ipv4Addr::new(192, 168, 1, 100));
-        log_ip_unblocked(&ip, "timeout");
-    }
-
-    #[test]
-    fn test_log_security_config_change() {
-        log_security_config_change("auth_enabled", "true", "false");
     }
 }
