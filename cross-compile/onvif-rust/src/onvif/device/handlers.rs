@@ -42,7 +42,7 @@ use crate::onvif::types::device::{
     SetSystemDateAndTimeResponse, SetSystemFactoryDefault, SetSystemFactoryDefaultResponse,
     SetUser, SetUserResponse, SystemReboot, SystemRebootResponse,
 };
-use crate::platform::{DeviceInfo, Platform};
+use crate::platform::{DeviceInfo, Platform, external_ip};
 use crate::users::{PasswordManager, UserLevel, UserStorage};
 
 use super::faults::{validate_hostname, validate_scope};
@@ -109,43 +109,10 @@ impl DeviceService {
     /// Get the base URL for service addresses.
     /// Uses detected IP address for proper XAddr values in capabilities.
     fn base_url(&self) -> String {
-        // Try to get the detected IP first, then fall back to config
-        let address = self
-            .config
-            .get_string("network.detected_ip")
-            .ok()
-            .filter(|s| !s.is_empty())
-            .or_else(|| {
-                self.config
-                    .get_string("network.ip_address")
-                    .ok()
-                    .filter(|s| !s.is_empty())
-            })
-            .unwrap_or_else(|| {
-                // Auto-detect IP as fallback
-                Self::detect_local_ip().unwrap_or_else(|| "127.0.0.1".to_string())
-            });
+        // Use canonical external_ip helper for consistency across all ONVIF services
+        let address = external_ip(&self.config);
         let port = self.config.get_int("server.port").unwrap_or(80) as u16;
         format!("http://{}:{}", address, port)
-    }
-
-    /// Detect local IP address using UDP socket trick.
-    fn detect_local_ip() -> Option<String> {
-        use std::net::UdpSocket;
-        match UdpSocket::bind("0.0.0.0:0") {
-            Ok(socket) => {
-                if socket.connect("8.8.8.8:80").is_ok() {
-                    if let Ok(addr) = socket.local_addr() {
-                        let ip = addr.ip().to_string();
-                        if ip != "0.0.0.0" {
-                            return Some(ip);
-                        }
-                    }
-                }
-                None
-            }
-            Err(_) => None,
-        }
     }
 
     /// Get default scopes.
@@ -708,13 +675,8 @@ impl DeviceService {
 
     /// Fallback method to get network info from config when platform is unavailable.
     fn get_network_info_fallback(&self) -> (String, String, bool) {
-        let ip_address = self
-            .config
-            .get_string("network.detected_ip")
-            .ok()
-            .filter(|s| !s.is_empty())
-            .or_else(Self::detect_local_ip)
-            .unwrap_or_else(|| "192.168.1.100".to_string());
+        // Use canonical external_ip helper for consistency
+        let ip_address = external_ip(&self.config);
 
         let mac_address = self
             .config
@@ -2929,6 +2891,47 @@ mod tests {
     }
 
     #[test]
+    fn test_base_url_uses_static_ip_address() {
+        use crate::config::ConfigRuntime;
+        use crate::platform::StubPlatform;
+
+        let users = Arc::new(UserStorage::new());
+        users
+            .create_user("admin", "admin123", UserLevel::Administrator)
+            .unwrap();
+        let password_manager = Arc::new(PasswordManager::new());
+        let config = {
+            let c = ConfigRuntime::new(Default::default());
+            // Static IP takes highest precedence
+            c.set_string("network.ip_address", "192.168.1.50").unwrap();
+            // These should be ignored when ip_address is set
+            c.set_string("network.detected_ip", "192.168.1.100")
+                .unwrap();
+            c.set_string("server.address", "10.0.0.1").unwrap();
+            c
+        };
+        config.set_int("server.port", 8080).unwrap();
+
+        let platform = Arc::new(StubPlatform::new());
+        let service = DeviceService::with_config_and_platform(
+            users,
+            password_manager,
+            Arc::new(config),
+            platform,
+        );
+
+        // Access base_url through a handler that uses it
+        let response = service
+            .handle_get_capabilities(GetCapabilities { category: vec![] })
+            .unwrap();
+
+        // Verify the URL contains the static IP (not detected_ip or server.address)
+        let device_caps = response.capabilities.device.unwrap();
+        assert!(device_caps.x_addr.contains("192.168.1.50"));
+        assert!(device_caps.x_addr.contains("8080"));
+    }
+
+    #[test]
     fn test_base_url_fallback_to_ip_address() {
         use crate::config::ConfigRuntime;
         use crate::platform::StubPlatform;
@@ -2940,8 +2943,8 @@ mod tests {
         let password_manager = Arc::new(PasswordManager::new());
         let config = {
             let c = ConfigRuntime::new(Default::default());
-            // Don't set detected_ip - we want to test ip_address fallback
-            c.set_string("network.ip_address", "10.0.0.1").unwrap();
+            // Use server.address as per canonical external_ip precedence
+            c.set_string("server.address", "10.0.0.1").unwrap();
             c.set_int("server.port", 9000).unwrap();
             c
         };

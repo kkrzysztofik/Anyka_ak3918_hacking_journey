@@ -21,16 +21,17 @@ use tokio::task::JoinHandle;
 use crate::config::{
     ConfigPersistenceHandle, ConfigPersistenceService, ConfigRuntime, ConfigStorage,
 };
-use crate::discovery::{DiscoveryConfig, WsDiscovery, WsDiscoveryHandle};
 use crate::lifecycle::health::{ComponentHealth, HealthStatus};
 use crate::lifecycle::shutdown::{DEFAULT_SHUTDOWN_TIMEOUT, ShutdownCoordinator};
 use crate::lifecycle::startup::{StartupPhase, StartupProgress};
 use crate::lifecycle::{RuntimeError, ShutdownReport, StartupError};
+use crate::onvif::discovery::{DiscoveryConfig, WsDiscovery, WsDiscoveryHandle};
 use crate::onvif::ptz::PTZStateManager;
 use crate::onvif::server::{OnvifServer, OnvifServerConfig};
 use crate::platform::Platform;
 #[cfg(use_stubs)]
 use crate::platform::StubPlatformBuilder;
+use crate::platform::external_ip;
 use crate::security::RateLimiter;
 use crate::users::password::PasswordManager;
 use crate::users::storage::UserStorage;
@@ -1495,7 +1496,7 @@ impl Application {
 
         let device_ip = if local_ip_config == "auto" {
             // Use shared external_ip helper so discovery matches HTTP/RTSP URLs
-            crate::net::ip_utils::external_ip(config)
+            external_ip(config)
         } else {
             local_ip_config
         };
@@ -1523,7 +1524,7 @@ impl Application {
     /// Start the WS-Discovery service and return the handle and background task.
     async fn start_discovery(
         config: DiscoveryConfig,
-    ) -> Result<(WsDiscoveryHandle, JoinHandle<()>), crate::discovery::DiscoveryError> {
+    ) -> Result<(WsDiscoveryHandle, JoinHandle<()>), crate::onvif::discovery::DiscoveryError> {
         let discovery = WsDiscovery::new(config);
 
         // Start the discovery service - this spawns a background task

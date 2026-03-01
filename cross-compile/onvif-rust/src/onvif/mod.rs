@@ -53,6 +53,7 @@ pub mod ws_security;
 
 // Service modules (to be implemented in later phases)
 pub mod device;
+pub mod discovery;
 pub mod imaging;
 pub mod media;
 pub mod ptz;

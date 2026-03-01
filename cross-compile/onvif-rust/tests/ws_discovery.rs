@@ -18,7 +18,7 @@ use tokio::sync::Notify;
 use tokio::time::timeout;
 
 // Import from the crate under test
-use onvif_rust::discovery::{
+use onvif_rust::onvif::discovery::{
     DiscoveryConfig, DiscoveryError, DiscoveryMode, WS_DISCOVERY_MULTICAST, WS_DISCOVERY_PORT,
     WsDiscovery, WsDiscoveryHandle,
 };

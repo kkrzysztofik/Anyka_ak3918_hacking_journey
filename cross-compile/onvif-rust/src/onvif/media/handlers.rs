@@ -9,7 +9,6 @@
 use std::sync::Arc;
 
 use crate::config::{ConfigPersistenceHandle, ConfigRuntime};
-use crate::net::ip_utils::external_ip;
 use crate::onvif::dispatcher::ServiceHandler;
 use crate::onvif::error::{OnvifError, OnvifResult};
 use crate::onvif::types::common::{MediaUri, StreamSetup, StreamType, TransportProtocol};
@@ -48,6 +47,7 @@ use crate::onvif::types::media::{
     SetVideoSourceConfigurationResponse, StartMulticastStreaming, StartMulticastStreamingResponse,
     StopMulticastStreaming, StopMulticastStreamingResponse, StreamingCapabilities,
 };
+use crate::platform::external_ip;
 use crate::platform::{Platform, Resolution};
 
 use super::profile_manager::ProfileManager;

@@ -31,6 +31,7 @@
 
 pub mod frame;
 pub(crate) mod hw_ptz;
+mod network;
 mod stubs;
 mod traits;
 pub mod validation;
@@ -41,6 +42,7 @@ pub mod validation;
 #[allow(dead_code)]
 mod anyka;
 
+pub use network::external_ip;
 pub use stubs::*;
 pub use traits::*;
 pub use validation::ValidationPlatform;
