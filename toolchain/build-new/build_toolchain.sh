@@ -216,6 +216,11 @@ create_config_file() {
     fi
     log_info "uClibc-ng: TIME64 disabled (required for Linux 3.4.35 target)"
 
+    # Disable native GDB: we don't need a GDB binary running on the AK3918 target,
+    # and it fails to build with the ARMv5TE sysroot on GDB 17.x.
+    sed -i 's/^CT_GDB_NATIVE=.*/# CT_GDB_NATIVE is not set/' "${config_file}"
+    log_info "GDB native: disabled (not needed on embedded target)"
+
     log_info "Configuration file created/updated"
 
     # Save a copy for future reference
@@ -251,7 +256,7 @@ verify_installation() {
     log_info "Verifying toolchain installation for ${ARCH}..."
 
     local gcc_path
-    gcc_path="${INSTALL_DIR}/usr/bin/arm-unknown-linux-uclibcgnueabi-gcc"
+    gcc_path="${INSTALL_DIR}/bin/arm-unknown-linux-uclibcgnueabi-gcc"
 
     if [ ! -f "${gcc_path}" ]; then
         log_error "Toolchain not found at expected location: ${gcc_path}"
@@ -290,7 +295,7 @@ main() {
     log_info "To use the ARMv5TE toolchain, set:"
     log_info "  export ANYKA_TOOLCHAIN_VERSION=new"
     log_info "Or update your build scripts to use:"
-    log_info "  ${INSTALL_DIR}/usr/bin/arm-unknown-linux-uclibcgnueabi-gcc"
+    log_info "  ${INSTALL_DIR}/bin/arm-unknown-linux-uclibcgnueabi-gcc"
 }
 
 # Run main function

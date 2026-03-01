@@ -58,6 +58,7 @@ cross-compile/onvif-rust/**/*.prof*
 # Clangd files
 .clangd/
 .cache/
+.worktrees/
 cross-compile/onvif/.cache/**/*
 clangd-logs/**/*
 compile_commands.json
