@@ -83,18 +83,13 @@ fn main() {
 }
 EOF
 
+    # Use clang-wrapper.sh which handles the triple translation:
+    #   arm-unknown-linux-uclibcgnueabi -> armv5te-unknown-linux-gnueabi
+    # The wrapper also provides sysroot, -march, -mfloat-abi, and GCC crt/lib paths.
     "${RUSTC}" \
     --target "${TARGET_NAME}" \
     --crate-type bin \
-    -C linker="${INSTALL_DIR}/bin/clang" \
-    -C link-arg="--target=arm-unknown-linux-uclibcgnueabi" \
-    -C link-arg="--sysroot=${SYSROOT}" \
-    -C link-arg="-march=armv5te" \
-    -C link-arg="-mfloat-abi=soft" \
-    -C link-arg="-mtune=arm926ej-s" \
-    -C link-arg="-L${SYSROOT}/lib" \
-    -C link-arg="-L${SYSROOT}/usr/lib" \
-    -C link-arg="-static" \
+    -C linker="${SCRIPT_DIR}/clang-wrapper.sh" \
     -o "${TEST_BIN}" \
     "${TEST_SRC}" 2>&1 || {
     log_error "Failed to compile test Rust program"
@@ -159,6 +154,12 @@ if [ -f "${CARGO}" ]; then
 
     if [ -d "${CARGO_PROJECT}" ]; then
         log_info "Cargo project created successfully"
+        # Configure linker for cross-compilation via .cargo/config.toml
+        mkdir -p "${CARGO_PROJECT}/.cargo"
+        cat > "${CARGO_PROJECT}/.cargo/config.toml" << CARGO_EOF
+[target.${TARGET_NAME}]
+linker = "${SCRIPT_DIR}/clang-wrapper.sh"
+CARGO_EOF
         # Try to build (may fail if std not available)
         cd "${CARGO_PROJECT}"
         "${CARGO}" build --target "${TARGET_NAME}" 2>&1 | head -10 || {
@@ -255,7 +256,7 @@ log_info "  [build]"
 log_info "  target = \"${TARGET_NAME}\""
 log_info ""
 log_info "  [target.${TARGET_NAME}]"
-log_info "  linker = \"${INSTALL_DIR}/bin/clang\""
+log_info "  linker = \"${SCRIPT_DIR}/clang-wrapper.sh\""
 log_info ""
-log_info "  Or use RUSTFLAGS:"
-log_info "  export RUSTFLAGS=\"-C link-arg=--target=arm-unknown-linux-uclibcgnueabi -C link-arg=--sysroot=${SYSROOT} -C link-arg=-march=armv5te -C link-arg=-mfloat-abi=soft\""
+log_info "  The clang-wrapper.sh script handles the ARMv5TE triple translation,"
+log_info "  sysroot, and GCC crt/lib paths automatically."
