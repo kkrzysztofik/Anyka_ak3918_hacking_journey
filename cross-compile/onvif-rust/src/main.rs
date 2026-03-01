@@ -13,7 +13,7 @@ use clap::Parser;
 use onvif_rust::app::{Application, DEFAULT_CONFIG_PATH};
 use onvif_rust::config::{ConfigRuntime, ConfigStorage};
 #[cfg(not(use_stubs))]
-use onvif_rust::hal::vendor_ipc;
+use onvif_rust::hal::anyka::vendor_ipc;
 #[cfg(not(use_stubs))]
 use onvif_rust::platform::AnykaPlatform;
 use onvif_rust::platform::Platform;

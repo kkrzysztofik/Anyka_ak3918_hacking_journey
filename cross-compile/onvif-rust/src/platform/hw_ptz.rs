@@ -25,13 +25,14 @@ use parking_lot::{Mutex, RwLock};
 use tokio::sync::Notify;
 use tokio::task::JoinHandle;
 
-use crate::hal::ptz::{PTZHandle, PtzHalTrait, default_ptz_hal, ptz_open_internal};
-use crate::hal::{AK_SUCCESS_I32, PtzDirection};
+use crate::hal::anyka::sdk::PtzDirection;
+use crate::hal::common::AK_SUCCESS_I32;
+use crate::hal::common::ptz::{PTZHandle, PtzHalTrait, default_ptz_hal, ptz_open};
 
 #[cfg(not(use_stubs))]
-use crate::hal::ptz_driver::ptz_turn_direction;
+use crate::hal::anyka::ptz::ptz_turn_direction;
 #[cfg(use_stubs)]
-use crate::hal::ptz_turn_direction;
+use crate::hal::common::ptz_turn_direction;
 
 use super::traits::{
     PTZControl, PlatformError, PlatformResult, PtzLimits, PtzPosition, PtzPreset, PtzVelocity,
@@ -140,7 +141,7 @@ impl HardwarePTZControl {
         if handle.is_some() {
             return Ok(());
         }
-        let h = ptz_open_internal(Arc::clone(&self.ffi))?;
+        let h = ptz_open(Arc::clone(&self.ffi))?;
         *handle = Some(h);
         Ok(())
     }
@@ -431,8 +432,8 @@ impl PTZControl for HardwarePTZControl {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::hal::ptz::MockPtzHalTrait;
-    use crate::hal::{AK_FAILED_I32, AK_SUCCESS_I32};
+    use crate::hal::common::ptz::MockPtzHalTrait;
+    use crate::hal::common::{AK_FAILED_I32, AK_SUCCESS_I32};
 
     /// Helper: create a mock FFI that succeeds on open (including self-check).
     fn mock_with_open() -> MockPtzHalTrait {

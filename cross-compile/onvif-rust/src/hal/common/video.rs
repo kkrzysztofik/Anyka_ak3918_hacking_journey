@@ -9,8 +9,8 @@
 //! All handles implement the Drop trait to automatically clean up resources:
 //!
 //! ```rust,no_run
-//! use onvif_rust::hal::video::*;
-//! use onvif_rust::hal::VideoDevice;
+//! use onvif_rust::hal::common::video::*;
+//! use onvif_rust::hal::anyka::sdk::VideoDevice;
 //!
 //! // Handle is automatically closed when it goes out of scope
 //! {
@@ -32,11 +32,12 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering};
 use std::time::Duration;
 
-use crate::hal::{
-    encode_param, video_channel_attr, video_dev_type, video_resolution, video_stream,
-};
+use super::{encode_param, video_channel_attr, video_dev_type, video_resolution, video_stream};
 
-use crate::hal::{AK_FAILED_I32, AK_SUCCESS_I32, Resolution, VideoDevice};
+#[cfg(test)]
+use super::AK_FAILED_I32;
+use super::{AK_SUCCESS_I32, check_result};
+use crate::hal::anyka::sdk::{Resolution, VideoDevice};
 
 /// Internal trait for abstracting video FFI calls to enable mocking in tests.
 #[cfg_attr(test, mockall::automock)]
@@ -64,129 +65,6 @@ pub(crate) trait VideoHalTrait: Send + Sync {
     fn get_error_no(&self) -> i32;
     /// Get the last SDK error string (thread-local). Returns empty string on stub.
     fn get_error_str(&self) -> String;
-}
-
-/// Default implementation that calls the real FFI functions.
-pub(crate) struct StubVideoHal;
-
-impl VideoHalTrait for StubVideoHal {
-    fn vi_match_sensor(&self, _config_file: *const c_char) -> i32 {
-        AK_SUCCESS_I32
-    }
-
-    fn vi_open(&self, _dev: video_dev_type) -> *mut c_void {
-        std::ptr::NonNull::<c_void>::dangling().as_ptr()
-    }
-
-    fn vi_close(&self, _handle: *mut c_void) -> i32 {
-        AK_SUCCESS_I32
-    }
-
-    fn vi_get_sensor_resolution(&self, _handle: *mut c_void, res: *mut video_resolution) -> i32 {
-        unsafe {
-            (*res).width = 1920;
-            (*res).height = 1080;
-            (*res).max_width = 1920;
-            (*res).max_height = 1080;
-        }
-        AK_SUCCESS_I32
-    }
-
-    fn vi_set_channel_attr(&self, _handle: *mut c_void, _attr: *const video_channel_attr) -> i32 {
-        AK_SUCCESS_I32
-    }
-
-    fn vi_capture_on(&self, _handle: *mut c_void) -> i32 {
-        AK_SUCCESS_I32
-    }
-
-    fn vi_capture_off(&self, _handle: *mut c_void) -> i32 {
-        AK_SUCCESS_I32
-    }
-
-    fn vpss_init(&self, _vi_handle: *mut c_void, _dev: i32) {
-        // Stub: no-op for testing
-    }
-
-    fn vpss_destroy(&self, _dev: i32) {
-        // Stub: no-op for testing
-    }
-
-    fn venc_set_cfg_path(&self, _path: *const c_char) -> i32 {
-        AK_SUCCESS_I32
-    }
-
-    fn venc_open(&self, _param: *const encode_param) -> *mut c_void {
-        std::ptr::NonNull::<c_void>::dangling().as_ptr()
-    }
-
-    fn venc_close(&self, _handle: *mut c_void) -> i32 {
-        AK_SUCCESS_I32
-    }
-
-    fn venc_set_rc(&self, _enc_handle: *mut c_void, _bps: i32) -> i32 {
-        AK_SUCCESS_I32
-    }
-
-    fn venc_set_iframe(&self, _enc_handle: *mut c_void) -> i32 {
-        AK_SUCCESS_I32
-    }
-
-    fn venc_request_stream(
-        &self,
-        _vi_handle: *mut c_void,
-        _venc_handle: *mut c_void,
-    ) -> *mut c_void {
-        std::ptr::NonNull::<c_void>::dangling().as_ptr()
-    }
-
-    fn venc_get_stream(&self, _stream_handle: *mut c_void, _stream: *mut video_stream) -> i32 {
-        AK_FAILED_I32 // No frames in stub mode
-    }
-
-    fn venc_release_stream(&self, _stream_handle: *mut c_void, _stream: *mut video_stream) -> i32 {
-        AK_SUCCESS_I32
-    }
-
-    fn venc_cancel_stream(&self, _stream_handle: *mut c_void) -> i32 {
-        AK_SUCCESS_I32
-    }
-
-    fn get_error_no(&self) -> i32 {
-        0
-    }
-
-    fn get_error_str(&self) -> String {
-        String::new()
-    }
-}
-
-// Global instance for default FFI implementation
-static DEFAULT_VIDEO_HAL: StubVideoHal = StubVideoHal;
-
-/// Helper function to convert SDK return codes to PlatformResult.
-///
-/// # Arguments
-///
-/// * `ret` - SDK return code (0 = AK_SUCCESS, -1 = AK_FAILED, or other error codes)
-/// * `context` - Context string for error messages
-///
-/// # Returns
-///
-/// * `Ok(())` if `ret == AK_SUCCESS`
-/// * `Err(PlatformError::HardwareFailure(...))` otherwise
-fn check_result(ret: i32, context: &str) -> PlatformResult<()> {
-    match ret {
-        AK_SUCCESS_I32 => Ok(()),
-        AK_FAILED_I32 => Err(PlatformError::HardwareFailure(format!(
-            "{} failed (AK_FAILED={})",
-            context, AK_FAILED_I32
-        ))),
-        _ => Err(PlatformError::HardwareFailure(format!(
-            "{}: error code {}",
-            context, ret
-        ))),
-    }
 }
 
 /// Run a blocking FFI call on a dedicated thread with a timeout.
@@ -273,20 +151,6 @@ impl VideoInputHandle {
     /// this returns `std::ptr::null_mut()`. Callers must NOT pass this null pointer to FFI
     /// functions expecting a valid handle, as this would result in undefined behavior.
     ///
-    /// # Examples
-    ///
-    /// The test helper `test_handle()` can produce null handles for testing scenarios where
-    /// mock FFI backends are used:
-    ///
-    /// ```no_run
-    /// # #[cfg(test)]
-    /// # {
-    /// let test_handle = VideoInputHandle::test_handle();
-    /// let ptr = test_handle.as_ptr();
-    /// // ptr is now std::ptr::null_mut() - never pass this to actual FFI functions!
-    /// # }
-    /// ```
-    ///
     /// # Safety
     ///
     /// The returned pointer is only valid while the handle is alive.
@@ -305,7 +169,7 @@ impl VideoInputHandle {
 }
 
 /// Internal helper that takes FFI trait for testability.
-pub(crate) fn video_input_open_internal(
+pub(crate) fn video_input_open(
     device: VideoDevice,
     ffi: &dyn VideoHalTrait,
 ) -> PlatformResult<VideoInputHandle> {
@@ -332,29 +196,8 @@ pub(crate) fn video_input_open_internal(
     }
 }
 
-/// Open a video input device.
-///
-/// # Arguments
-///
-/// * `device` - Video device identifier (typically `VideoDevice::DEV0`)
-///
-/// # Returns
-///
-/// * `Ok(VideoInputHandle)` on success
-/// * `Err(PlatformError::HardwareUnavailable)` if device cannot be opened
-///
-/// # Safety
-///
-/// The FFI call is safe because:
-/// - `ak_vi_open()` returns a handle or NULL
-/// - We validate the result (null check)
-/// - Handle is wrapped in `VideoInputHandle` for RAII cleanup
-pub fn video_input_open(device: VideoDevice) -> PlatformResult<VideoInputHandle> {
-    video_input_open_internal(device, &DEFAULT_VIDEO_HAL)
-}
-
 /// Internal helper that takes FFI trait for testability.
-pub(crate) fn video_input_get_sensor_resolution_internal(
+pub(crate) fn video_input_get_sensor_resolution(
     handle: &VideoInputHandle,
     ffi: &dyn VideoHalTrait,
 ) -> PlatformResult<Resolution> {
@@ -378,22 +221,8 @@ pub(crate) fn video_input_get_sensor_resolution_internal(
     Ok(Resolution { width, height })
 }
 
-/// Get sensor resolution.
-///
-/// # Arguments
-///
-/// * `handle` - Video input handle
-///
-/// # Returns
-///
-/// * `Ok(Resolution)` with sensor resolution on success
-/// * `Err(PlatformError::HardwareFailure)` on SDK error
-pub fn video_input_get_sensor_resolution(handle: &VideoInputHandle) -> PlatformResult<Resolution> {
-    video_input_get_sensor_resolution_internal(handle, &DEFAULT_VIDEO_HAL)
-}
-
 /// Internal helper that takes FFI trait for testability.
-pub(crate) fn video_input_set_channel_attr_internal(
+pub(crate) fn video_input_set_channel_attr(
     handle: &VideoInputHandle,
     attr: &video_channel_attr,
     ffi: &dyn VideoHalTrait,
@@ -402,29 +231,11 @@ pub(crate) fn video_input_set_channel_attr_internal(
     check_result(ret, "ak_vi_set_channel_attr")
 }
 
-/// Set video channel attributes.
-///
-/// # Arguments
-///
-/// * `handle` - Video input handle
-/// * `attr` - Channel attributes to set
-///
-/// # Returns
-///
-/// * `Ok(())` on success
-/// * `Err(PlatformError::HardwareFailure)` on SDK error
-pub fn video_input_set_channel_attr(
-    handle: &VideoInputHandle,
-    attr: &video_channel_attr,
-) -> PlatformResult<()> {
-    video_input_set_channel_attr_internal(handle, attr, &DEFAULT_VIDEO_HAL)
-}
-
 /// Internal helper that takes FFI trait for testability.
 ///
 /// Loads the ISP sensor configuration from the specified path. This must be
 /// called before `ak_vi_open()` so the ISP subsystem has a valid config buffer.
-pub(crate) fn video_input_match_sensor_internal(
+pub(crate) fn video_input_match_sensor(
     config_path: &Path,
     ffi: &dyn VideoHalTrait,
 ) -> PlatformResult<()> {
@@ -440,26 +251,8 @@ pub(crate) fn video_input_match_sensor_internal(
     check_result(ret, "ak_vi_match_sensor")
 }
 
-/// Load ISP sensor configuration for the video input subsystem.
-///
-/// This must be called **before** `video_input_open()` to load the binary ISP
-/// configuration that the sensor requires. Without this call, `ak_vi_open()`
-/// will fail because `isp_init()` expects the config buffer to already be loaded.
-///
-/// # Arguments
-///
-/// * `config_path` - Path to the binary ISP config file (e.g., `isp_gc1084.conf`)
-///
-/// # Errors
-///
-/// * `PlatformError::InvalidParameter` if the path is not valid UTF-8 or contains null bytes
-/// * `PlatformError::HardwareFailure` if the SDK rejects the config file
-pub fn video_input_match_sensor(config_path: &Path) -> PlatformResult<()> {
-    video_input_match_sensor_internal(config_path, &DEFAULT_VIDEO_HAL)
-}
-
 /// Internal helper that takes FFI trait for testability.
-pub(crate) fn video_input_capture_on_internal(
+pub(crate) fn video_input_capture_on(
     handle: &VideoInputHandle,
     ffi: &dyn VideoHalTrait,
 ) -> PlatformResult<()> {
@@ -468,7 +261,7 @@ pub(crate) fn video_input_capture_on_internal(
 }
 
 /// Internal helper that takes FFI trait for testability.
-pub(crate) fn video_input_capture_off_internal(
+pub(crate) fn video_input_capture_off(
     handle: &VideoInputHandle,
     ffi: &dyn VideoHalTrait,
 ) -> PlatformResult<()> {
@@ -476,45 +269,12 @@ pub(crate) fn video_input_capture_off_internal(
     check_result(ret, "ak_vi_capture_off")
 }
 
-/// Start the ISP capture pipeline on the video input device.
-///
-/// This must be called **after** `video_input_set_channel_attr()` to begin
-/// the image capture pipeline. The SDK vendor code calls this as the final
-/// step of video input initialization.
-///
-/// # Arguments
-///
-/// * `handle` - Video input handle from a successful `video_input_open()` call
-///
-/// # Errors
-///
-/// * `PlatformError::HardwareFailure` if the SDK call fails
-pub fn video_input_capture_on(handle: &VideoInputHandle) -> PlatformResult<()> {
-    video_input_capture_on_internal(handle, &DEFAULT_VIDEO_HAL)
-}
-
-/// Stop the ISP capture pipeline on the video input device.
-///
-/// This mirrors `ak_vi_capture_off()` and is used for cleanup/recovery between
-/// capture start attempts.
-///
-/// # Arguments
-///
-/// * `handle` - Video input handle from a successful `video_input_open()` call
-///
-/// # Errors
-///
-/// * `PlatformError::HardwareFailure` if the SDK call fails
-pub fn video_input_capture_off(handle: &VideoInputHandle) -> PlatformResult<()> {
-    video_input_capture_off_internal(handle, &DEFAULT_VIDEO_HAL)
-}
-
 /// Internal helper that takes FFI trait for testability.
 ///
 /// Initializes the Video Post-Processing SubSystem (VPSS).
 /// This MUST be called immediately after `video_input_open()` and
 /// BEFORE any other video operations.
-pub(crate) fn vpss_init_internal(
+pub(crate) fn vpss_init(
     handle: &VideoInputHandle,
     device: VideoDevice,
     ffi: &dyn VideoHalTrait,
@@ -532,54 +292,11 @@ pub(crate) fn vpss_init_internal(
     Ok(())
 }
 
-/// Initialize the Video Post-Processing SubSystem (VPSS).
-///
-/// This function MUST be called immediately after `video_input_open()` and
-/// BEFORE any other video input operations. The reference implementation shows
-/// this is a critical initialization step that sets up the ISP processing pipeline.
-///
-/// # Arguments
-///
-/// * `handle` - Video input handle from a successful `video_input_open()` call
-/// * `device` - Video device identifier (must match the device used in `video_input_open()`)
-///
-/// # Errors
-///
-/// * `PlatformError::InvalidParameter` if device ID is invalid
-///
-/// # Safety
-///
-/// The FFI call is safe because:
-/// - `ak_vpss_init()` is called with a valid vi_handle from `ak_vi_open()`
-/// - The function returns void (no error codes to validate)
-/// - VPSS state is managed internally by the SDK
-///
-/// # Example Initialization Sequence
-///
-/// ```no_run
-/// use onvif_rust::hal::{VideoDevice, video_input_open, vpss_init};
-///
-/// // Step 1: Open video input
-/// let vi_handle = video_input_open(VideoDevice::DEV0)?;
-///
-/// // Step 2: Initialize VPSS (CRITICAL - must be called before other operations)
-/// vpss_init(&vi_handle, VideoDevice::DEV0)?;
-///
-/// // Step 3: Continue with sensor resolution query, channel config, etc.
-/// # Ok::<(), onvif_rust::platform::PlatformError>(())
-/// ```
-pub fn vpss_init(handle: &VideoInputHandle, device: VideoDevice) -> PlatformResult<()> {
-    vpss_init_internal(handle, device, &DEFAULT_VIDEO_HAL)
-}
-
 /// Internal helper that takes FFI trait for testability.
 ///
 /// Destroys the Video Post-Processing SubSystem (VPSS).
 /// This MUST be called BEFORE `video_input_close()` during cleanup.
-pub(crate) fn vpss_destroy_internal(
-    device: VideoDevice,
-    ffi: &dyn VideoHalTrait,
-) -> PlatformResult<()> {
+pub(crate) fn vpss_destroy(device: VideoDevice, ffi: &dyn VideoHalTrait) -> PlatformResult<()> {
     let dev_id = if device == VideoDevice::DEV0 {
         0i32
     } else {
@@ -591,43 +308,6 @@ pub(crate) fn vpss_destroy_internal(
 
     ffi.vpss_destroy(dev_id);
     Ok(())
-}
-
-/// Destroy the Video Post-Processing SubSystem (VPSS).
-///
-/// This function MUST be called BEFORE closing the video input device during
-/// cleanup/shutdown. The reference implementation shows this must be done in
-/// the correct order to avoid resource leaks.
-///
-/// # Arguments
-///
-/// * `device` - Video device identifier (must match the device used in initialization)
-///
-/// # Errors
-///
-/// * `PlatformError::InvalidParameter` if device ID is invalid
-///
-/// # Safety
-///
-/// The FFI call is safe because:
-/// - `ak_vpss_destroy()` takes only a device enum (no pointer validation needed)
-/// - The function returns void (no error codes to validate)
-/// - VPSS state cleanup is managed internally by the SDK
-///
-/// # Example Cleanup Sequence
-///
-/// ```no_run
-/// use onvif_rust::hal::{VideoDevice, vpss_destroy};
-///
-/// // Step 1: Destroy VPSS BEFORE closing video input
-/// vpss_destroy(VideoDevice::DEV0)?;
-///
-/// // Step 2: Close video input (handle Drop will call ak_vi_close)
-/// drop(vi_handle);
-/// # Ok::<(), onvif_rust::platform::PlatformError>(())
-/// ```
-pub fn vpss_destroy(device: VideoDevice) -> PlatformResult<()> {
-    vpss_destroy_internal(device, &DEFAULT_VIDEO_HAL)
 }
 
 /// RAII handle for video encoder.
@@ -923,7 +603,7 @@ impl VideoStreamHandle {
 }
 
 /// Internal helper that takes FFI trait for testability.
-pub(crate) fn video_encoder_open_internal(
+pub(crate) fn video_encoder_open(
     param: &encode_param,
     ffi: &dyn VideoHalTrait,
 ) -> PlatformResult<VideoEncoderHandle> {
@@ -941,29 +621,8 @@ pub(crate) fn video_encoder_open_internal(
     }
 }
 
-/// Open a video encoder.
-///
-/// # Arguments
-///
-/// * `param` - Encoding parameters
-///
-/// # Returns
-///
-/// * `Ok(VideoEncoderHandle)` on success
-/// * `Err(PlatformError::HardwareUnavailable)` if encoder cannot be opened
-///
-/// # Safety
-///
-/// The FFI call is safe because:
-/// - `ak_venc_open()` returns a handle or NULL
-/// - We validate the result (null check)
-/// - Handle is wrapped in `VideoEncoderHandle` for RAII cleanup
-pub fn video_encoder_open(param: &encode_param) -> PlatformResult<VideoEncoderHandle> {
-    video_encoder_open_internal(param, &DEFAULT_VIDEO_HAL)
-}
-
 /// Internal helper that takes FFI trait for testability.
-pub(crate) fn video_encoder_set_rc_internal(
+pub(crate) fn video_encoder_set_rc(
     handle: &VideoEncoderHandle,
     bps: i32,
     ffi: &dyn VideoHalTrait,
@@ -977,23 +636,8 @@ pub(crate) fn video_encoder_set_rc_internal(
     check_result(ret, "ak_venc_set_rc")
 }
 
-/// Set video encoder rate control (bitrate).
-///
-/// # Arguments
-///
-/// * `handle` - Video encoder handle
-/// * `bps` - Target bitrate in bits per second
-///
-/// # Returns
-///
-/// * `Ok(())` on success
-/// * `Err(PlatformError::HardwareFailure)` on SDK error
-pub fn video_encoder_set_rc(handle: &VideoEncoderHandle, bps: i32) -> PlatformResult<()> {
-    video_encoder_set_rc_internal(handle, bps, &DEFAULT_VIDEO_HAL)
-}
-
 /// Internal helper that takes FFI trait for testability.
-pub(crate) fn video_encoder_request_idr_internal(
+pub(crate) fn video_encoder_request_idr(
     handle: &VideoEncoderHandle,
     ffi: &dyn VideoHalTrait,
 ) -> PlatformResult<()> {
@@ -1001,135 +645,10 @@ pub(crate) fn video_encoder_request_idr_internal(
     check_result(ret, "ak_venc_set_iframe")
 }
 
-/// Request next frame to be an I-frame (IDR frame).
-///
-/// This is equivalent to `ak_venc_set_iframe()` in the SDK, which sets
-/// the next encoded frame to be an I-frame.
-///
-/// # Arguments
-///
-/// * `handle` - Video encoder handle
-///
-/// # Returns
-///
-/// * `Ok(())` on success
-/// * `Err(PlatformError::HardwareFailure)` on SDK error
-pub fn video_encoder_request_idr(handle: &VideoEncoderHandle) -> PlatformResult<()> {
-    tracing::debug!(encoder_handle = ?handle.as_ptr(), "Forcing IDR frame");
-    video_encoder_request_idr_internal(handle, &DEFAULT_VIDEO_HAL)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use mockall::predicate::*;
-
-    #[test]
-    fn test_check_result_success() {
-        let result = check_result(AK_SUCCESS_I32, "test_function");
-        assert!(result.is_ok());
-    }
-
-    #[test]
-    fn test_check_result_failed() {
-        let result = check_result(AK_FAILED_I32, "test_function");
-        assert!(result.is_err());
-        match result {
-            Err(PlatformError::HardwareFailure(msg)) => {
-                assert!(msg.contains("test_function"));
-                assert!(msg.contains("failed"));
-            }
-            _ => panic!("Expected HardwareFailure error"),
-        }
-    }
-
-    #[test]
-    fn test_check_result_unknown_error() {
-        let result = check_result(-42, "test_function");
-        assert!(result.is_err());
-        match result {
-            Err(PlatformError::HardwareFailure(msg)) => {
-                assert!(msg.contains("test_function"));
-                assert!(msg.contains("error code -42"));
-            }
-            _ => panic!("Expected HardwareFailure error"),
-        }
-    }
-
-    #[test]
-    #[cfg(use_stubs)]
-    fn test_video_input_open_success() {
-        let result = video_input_open(VideoDevice::DEV0);
-        assert!(result.is_ok());
-        let handle = result.unwrap();
-        assert!(!handle.as_ptr().is_null());
-    }
-
-    #[test]
-    #[cfg(use_stubs)]
-    fn test_video_input_get_sensor_resolution_success() {
-        let handle = video_input_open(VideoDevice::DEV0).unwrap();
-        let result = video_input_get_sensor_resolution(&handle);
-        assert!(result.is_ok());
-        let res = result.unwrap();
-        assert_eq!(res.width, 1920);
-        assert_eq!(res.height, 1080);
-    }
-
-    #[test]
-    #[cfg(use_stubs)]
-    fn test_video_encoder_open_success() {
-        let param = encode_param {
-            width: 1920,
-            height: 1080,
-            minqp: 10,
-            maxqp: 51,
-            fps: 30,
-            goplen: 30,
-            bps: 2000000,
-            ..Default::default()
-        };
-        let result = video_encoder_open(&param);
-        assert!(result.is_ok());
-        let handle = result.unwrap();
-        assert!(!handle.as_ptr().is_null());
-    }
-
-    #[test]
-    #[cfg(use_stubs)]
-    fn test_video_encoder_set_rc_success() {
-        let param = encode_param {
-            width: 1920,
-            height: 1080,
-            minqp: 10,
-            maxqp: 51,
-            fps: 30,
-            goplen: 30,
-            bps: 2000000,
-            ..Default::default()
-        };
-        let handle = video_encoder_open(&param).unwrap();
-        let result = video_encoder_set_rc(&handle, 3000000);
-        assert!(result.is_ok());
-    }
-
-    #[test]
-    #[cfg(use_stubs)]
-    fn test_video_encoder_request_idr_success() {
-        let param = encode_param {
-            width: 1920,
-            height: 1080,
-            minqp: 10,
-            maxqp: 51,
-            fps: 30,
-            goplen: 30,
-            bps: 2000000,
-            ..Default::default()
-        };
-        let handle = video_encoder_open(&param).unwrap();
-        let result = video_encoder_request_idr(&handle);
-        assert!(result.is_ok());
-    }
 
     fn video_dev0() -> video_dev_type {
         video_dev_type::Dev0
@@ -1137,7 +656,7 @@ mod tests {
 
     // Mockall-based tests for wrapper functions
     #[test]
-    fn test_video_input_open_internal_calls_ffi_and_returns_handle() {
+    fn test_video_input_open_calls_ffi_and_returns_handle() {
         let mut mock_ffi = MockVideoHalTrait::new();
         let test_handle = std::ptr::NonNull::<c_void>::dangling().as_ptr();
 
@@ -1148,14 +667,14 @@ mod tests {
             .times(1)
             .returning(move |_| test_handle_usize as *mut c_void);
 
-        let result = video_input_open_internal(VideoDevice::DEV0, &mock_ffi);
+        let result = video_input_open(VideoDevice::DEV0, &mock_ffi);
         assert!(result.is_ok());
         let handle = result.unwrap();
         assert_eq!(handle.as_ptr(), test_handle);
     }
 
     #[test]
-    fn test_video_input_open_internal_returns_error_on_null_handle() {
+    fn test_video_input_open_returns_error_on_null_handle() {
         let mut mock_ffi = MockVideoHalTrait::new();
 
         mock_ffi
@@ -1164,7 +683,7 @@ mod tests {
             .times(1)
             .returning(|_| std::ptr::null_mut());
 
-        let result = video_input_open_internal(VideoDevice::DEV0, &mock_ffi);
+        let result = video_input_open(VideoDevice::DEV0, &mock_ffi);
         assert!(result.is_err());
         match result {
             Err(PlatformError::HardwareUnavailable(_)) => {}
@@ -1173,12 +692,12 @@ mod tests {
     }
 
     #[test]
-    fn test_video_input_open_internal_rejects_invalid_device() {
+    fn test_video_input_open_rejects_invalid_device() {
         let mock_ffi = MockVideoHalTrait::new();
 
         // Try with invalid device ID (not DEV0)
         let invalid_device = VideoDevice(1);
-        let result = video_input_open_internal(invalid_device, &mock_ffi);
+        let result = video_input_open(invalid_device, &mock_ffi);
         assert!(result.is_err());
         match result {
             Err(PlatformError::InvalidParameter(msg)) => {
@@ -1190,7 +709,7 @@ mod tests {
     }
 
     #[test]
-    fn test_video_input_get_sensor_resolution_internal_calls_ffi_and_returns_resolution() {
+    fn test_video_input_get_sensor_resolution_calls_ffi_and_returns_resolution() {
         let mut mock_ffi = MockVideoHalTrait::new();
         let vi_handle = VideoInputHandle::test_handle();
 
@@ -1208,7 +727,7 @@ mod tests {
                 AK_SUCCESS_I32
             });
 
-        let result = video_input_get_sensor_resolution_internal(&vi_handle, &mock_ffi);
+        let result = video_input_get_sensor_resolution(&vi_handle, &mock_ffi);
         assert!(result.is_ok());
         let res = result.unwrap();
         assert_eq!(res.width, 1920);
@@ -1216,7 +735,7 @@ mod tests {
     }
 
     #[test]
-    fn test_video_input_get_sensor_resolution_internal_propagates_error() {
+    fn test_video_input_get_sensor_resolution_propagates_error() {
         let mut mock_ffi = MockVideoHalTrait::new();
         let vi_handle = VideoInputHandle::test_handle();
 
@@ -1226,7 +745,7 @@ mod tests {
             .times(1)
             .returning(|_, _| AK_FAILED_I32);
 
-        let result = video_input_get_sensor_resolution_internal(&vi_handle, &mock_ffi);
+        let result = video_input_get_sensor_resolution(&vi_handle, &mock_ffi);
         assert!(result.is_err());
         match result {
             Err(PlatformError::HardwareFailure(msg)) => {
@@ -1237,7 +756,7 @@ mod tests {
     }
 
     #[test]
-    fn test_video_input_set_channel_attr_internal_calls_ffi() {
+    fn test_video_input_set_channel_attr_calls_ffi() {
         let mut mock_ffi = MockVideoHalTrait::new();
         let vi_handle = VideoInputHandle::test_handle();
         let attr = video_channel_attr::default();
@@ -1248,12 +767,12 @@ mod tests {
             .times(1)
             .returning(|_, _| AK_SUCCESS_I32);
 
-        let result = video_input_set_channel_attr_internal(&vi_handle, &attr, &mock_ffi);
+        let result = video_input_set_channel_attr(&vi_handle, &attr, &mock_ffi);
         assert!(result.is_ok());
     }
 
     #[test]
-    fn test_video_input_set_channel_attr_internal_propagates_error() {
+    fn test_video_input_set_channel_attr_propagates_error() {
         let mut mock_ffi = MockVideoHalTrait::new();
         let vi_handle = VideoInputHandle::test_handle();
         let attr = video_channel_attr::default();
@@ -1264,7 +783,7 @@ mod tests {
             .times(1)
             .returning(|_, _| AK_FAILED_I32);
 
-        let result = video_input_set_channel_attr_internal(&vi_handle, &attr, &mock_ffi);
+        let result = video_input_set_channel_attr(&vi_handle, &attr, &mock_ffi);
         assert!(result.is_err());
         match result {
             Err(PlatformError::HardwareFailure(msg)) => {
@@ -1275,7 +794,7 @@ mod tests {
     }
 
     #[test]
-    fn test_video_encoder_open_internal_calls_ffi_and_returns_handle() {
+    fn test_video_encoder_open_calls_ffi_and_returns_handle() {
         let mut mock_ffi = MockVideoHalTrait::new();
         let test_handle = std::ptr::NonNull::<c_void>::dangling().as_ptr();
         let mut param = encode_param::default();
@@ -1293,14 +812,14 @@ mod tests {
             .times(1)
             .returning(move |_| test_handle_usize as *mut c_void);
 
-        let result = video_encoder_open_internal(&param, &mock_ffi);
+        let result = video_encoder_open(&param, &mock_ffi);
         assert!(result.is_ok());
         let handle = result.unwrap();
         assert_eq!(handle.as_ptr(), test_handle);
     }
 
     #[test]
-    fn test_video_encoder_open_internal_returns_error_on_null_handle() {
+    fn test_video_encoder_open_returns_error_on_null_handle() {
         let mut mock_ffi = MockVideoHalTrait::new();
         let mut param = encode_param::default();
         param.width = 1920;
@@ -1316,7 +835,7 @@ mod tests {
             .times(1)
             .returning(|_| std::ptr::null_mut());
 
-        let result = video_encoder_open_internal(&param, &mock_ffi);
+        let result = video_encoder_open(&param, &mock_ffi);
         assert!(result.is_err());
         match result {
             Err(PlatformError::HardwareUnavailable(_)) => {}
@@ -1325,7 +844,7 @@ mod tests {
     }
 
     #[test]
-    fn test_video_encoder_set_rc_internal_calls_ffi() {
+    fn test_video_encoder_set_rc_calls_ffi() {
         let mut mock_ffi = MockVideoHalTrait::new();
         let enc_handle = VideoEncoderHandle {
             handle: None, // Use None to prevent Drop from calling venc_close on dangling pointer
@@ -1338,12 +857,12 @@ mod tests {
             .times(1)
             .returning(|_, _| AK_SUCCESS_I32);
 
-        let result = video_encoder_set_rc_internal(&enc_handle, 3000000, &mock_ffi);
+        let result = video_encoder_set_rc(&enc_handle, 3000000, &mock_ffi);
         assert!(result.is_ok());
     }
 
     #[test]
-    fn test_video_encoder_set_rc_internal_propagates_error() {
+    fn test_video_encoder_set_rc_propagates_error() {
         let mut mock_ffi = MockVideoHalTrait::new();
         let enc_handle = VideoEncoderHandle {
             handle: None, // Use None to prevent Drop from calling venc_close on dangling pointer
@@ -1356,7 +875,7 @@ mod tests {
             .times(1)
             .returning(|_, _| AK_FAILED_I32);
 
-        let result = video_encoder_set_rc_internal(&enc_handle, 3000000, &mock_ffi);
+        let result = video_encoder_set_rc(&enc_handle, 3000000, &mock_ffi);
         assert!(result.is_err());
         match result {
             Err(PlatformError::HardwareFailure(msg)) => {
@@ -1367,7 +886,7 @@ mod tests {
     }
 
     #[test]
-    fn test_video_encoder_request_idr_internal_calls_ffi() {
+    fn test_video_encoder_request_idr_calls_ffi() {
         let mut mock_ffi = MockVideoHalTrait::new();
         let enc_handle = VideoEncoderHandle {
             handle: None, // Use None to prevent Drop from calling venc_close on dangling pointer
@@ -1380,12 +899,12 @@ mod tests {
             .times(1)
             .returning(|_| AK_SUCCESS_I32);
 
-        let result = video_encoder_request_idr_internal(&enc_handle, &mock_ffi);
+        let result = video_encoder_request_idr(&enc_handle, &mock_ffi);
         assert!(result.is_ok());
     }
 
     #[test]
-    fn test_video_encoder_request_idr_internal_propagates_error() {
+    fn test_video_encoder_request_idr_propagates_error() {
         let mut mock_ffi = MockVideoHalTrait::new();
         let enc_handle = VideoEncoderHandle {
             handle: None, // Use None to prevent Drop from calling venc_close on dangling pointer
@@ -1398,7 +917,7 @@ mod tests {
             .times(1)
             .returning(|_| AK_FAILED_I32);
 
-        let result = video_encoder_request_idr_internal(&enc_handle, &mock_ffi);
+        let result = video_encoder_request_idr(&enc_handle, &mock_ffi);
         assert!(result.is_err());
         match result {
             Err(PlatformError::HardwareFailure(msg)) => {
@@ -1408,10 +927,10 @@ mod tests {
         }
     }
 
-    // ---- Tests for video_input_match_sensor_internal ----
+    // ---- Tests for video_input_match_sensor ----
 
     #[test]
-    fn test_video_input_match_sensor_internal_success() {
+    fn test_video_input_match_sensor_success() {
         let mut mock_ffi = MockVideoHalTrait::new();
 
         mock_ffi
@@ -1420,12 +939,12 @@ mod tests {
             .returning(|_| AK_SUCCESS_I32);
 
         let path = Path::new("/tmp/sensor/isp_gc1084.conf");
-        let result = video_input_match_sensor_internal(path, &mock_ffi);
+        let result = video_input_match_sensor(path, &mock_ffi);
         assert!(result.is_ok());
     }
 
     #[test]
-    fn test_video_input_match_sensor_internal_ffi_failure() {
+    fn test_video_input_match_sensor_ffi_failure() {
         let mut mock_ffi = MockVideoHalTrait::new();
 
         mock_ffi
@@ -1434,7 +953,7 @@ mod tests {
             .returning(|_| AK_FAILED_I32);
 
         let path = Path::new("/tmp/sensor/isp_gc1084.conf");
-        let result = video_input_match_sensor_internal(path, &mock_ffi);
+        let result = video_input_match_sensor(path, &mock_ffi);
         assert!(result.is_err());
         match result {
             Err(PlatformError::HardwareFailure(msg)) => {
@@ -1445,7 +964,7 @@ mod tests {
     }
 
     #[test]
-    fn test_video_input_match_sensor_internal_passes_correct_path() {
+    fn test_video_input_match_sensor_passes_correct_path() {
         let mut mock_ffi = MockVideoHalTrait::new();
 
         mock_ffi
@@ -1458,14 +977,14 @@ mod tests {
             .returning(|_| AK_SUCCESS_I32);
 
         let path = Path::new("/etc/jffs2/isp_gc1084.conf");
-        let result = video_input_match_sensor_internal(path, &mock_ffi);
+        let result = video_input_match_sensor(path, &mock_ffi);
         assert!(result.is_ok());
     }
 
-    // ---- Tests for video_input_capture_on_internal ----
+    // ---- Tests for video_input_capture_on ----
 
     #[test]
-    fn test_video_input_capture_on_internal_success() {
+    fn test_video_input_capture_on_success() {
         let mut mock_ffi = MockVideoHalTrait::new();
         let vi_handle = VideoInputHandle::test_handle();
 
@@ -1474,12 +993,12 @@ mod tests {
             .times(1)
             .returning(|_| AK_SUCCESS_I32);
 
-        let result = video_input_capture_on_internal(&vi_handle, &mock_ffi);
+        let result = video_input_capture_on(&vi_handle, &mock_ffi);
         assert!(result.is_ok());
     }
 
     #[test]
-    fn test_video_input_capture_on_internal_ffi_failure() {
+    fn test_video_input_capture_on_ffi_failure() {
         let mut mock_ffi = MockVideoHalTrait::new();
         let vi_handle = VideoInputHandle::test_handle();
 
@@ -1488,7 +1007,7 @@ mod tests {
             .times(1)
             .returning(|_| AK_FAILED_I32);
 
-        let result = video_input_capture_on_internal(&vi_handle, &mock_ffi);
+        let result = video_input_capture_on(&vi_handle, &mock_ffi);
         assert!(result.is_err());
         match result {
             Err(PlatformError::HardwareFailure(msg)) => {
@@ -1499,13 +1018,13 @@ mod tests {
     }
 
     #[test]
-    fn test_video_input_capture_on_internal_unknown_error_code() {
+    fn test_video_input_capture_on_unknown_error_code() {
         let mut mock_ffi = MockVideoHalTrait::new();
         let vi_handle = VideoInputHandle::test_handle();
 
         mock_ffi.expect_vi_capture_on().times(1).returning(|_| -99);
 
-        let result = video_input_capture_on_internal(&vi_handle, &mock_ffi);
+        let result = video_input_capture_on(&vi_handle, &mock_ffi);
         assert!(result.is_err());
         match result {
             Err(PlatformError::HardwareFailure(msg)) => {
@@ -1516,7 +1035,7 @@ mod tests {
     }
 
     #[test]
-    fn test_video_input_capture_off_internal_success() {
+    fn test_video_input_capture_off_success() {
         let mut mock_ffi = MockVideoHalTrait::new();
         let vi_handle = VideoInputHandle::test_handle();
 
@@ -1525,12 +1044,12 @@ mod tests {
             .times(1)
             .returning(|_| AK_SUCCESS_I32);
 
-        let result = video_input_capture_off_internal(&vi_handle, &mock_ffi);
+        let result = video_input_capture_off(&vi_handle, &mock_ffi);
         assert!(result.is_ok());
     }
 
     #[test]
-    fn test_video_input_capture_off_internal_ffi_failure() {
+    fn test_video_input_capture_off_ffi_failure() {
         let mut mock_ffi = MockVideoHalTrait::new();
         let vi_handle = VideoInputHandle::test_handle();
 
@@ -1539,7 +1058,7 @@ mod tests {
             .times(1)
             .returning(|_| AK_FAILED_I32);
 
-        let result = video_input_capture_off_internal(&vi_handle, &mock_ffi);
+        let result = video_input_capture_off(&vi_handle, &mock_ffi);
         assert!(result.is_err());
         match result {
             Err(PlatformError::HardwareFailure(msg)) => {
@@ -1549,10 +1068,10 @@ mod tests {
         }
     }
 
-    // ---- Tests for vpss_init_internal and vpss_destroy_internal ----
+    // ---- Tests for vpss_init and vpss_destroy ----
 
     #[test]
-    fn test_vpss_init_internal_calls_ffi() {
+    fn test_vpss_init_calls_ffi() {
         let mut mock_ffi = MockVideoHalTrait::new();
         let vi_handle = VideoInputHandle::test_handle();
 
@@ -1562,18 +1081,18 @@ mod tests {
             .times(1)
             .returning(|_, _| ());
 
-        let result = vpss_init_internal(&vi_handle, VideoDevice::DEV0, &mock_ffi);
+        let result = vpss_init(&vi_handle, VideoDevice::DEV0, &mock_ffi);
         assert!(result.is_ok());
     }
 
     #[test]
-    fn test_vpss_init_internal_rejects_invalid_device() {
+    fn test_vpss_init_rejects_invalid_device() {
         let mock_ffi = MockVideoHalTrait::new();
         let vi_handle = VideoInputHandle::test_handle();
 
         // Try with invalid device ID (not DEV0)
         let invalid_device = VideoDevice(1);
-        let result = vpss_init_internal(&vi_handle, invalid_device, &mock_ffi);
+        let result = vpss_init(&vi_handle, invalid_device, &mock_ffi);
         assert!(result.is_err());
         match result {
             Err(PlatformError::InvalidParameter(msg)) => {
@@ -1585,7 +1104,7 @@ mod tests {
     }
 
     #[test]
-    fn test_vpss_destroy_internal_calls_ffi() {
+    fn test_vpss_destroy_calls_ffi() {
         let mut mock_ffi = MockVideoHalTrait::new();
 
         mock_ffi
@@ -1594,17 +1113,17 @@ mod tests {
             .times(1)
             .returning(|_| ());
 
-        let result = vpss_destroy_internal(VideoDevice::DEV0, &mock_ffi);
+        let result = vpss_destroy(VideoDevice::DEV0, &mock_ffi);
         assert!(result.is_ok());
     }
 
     #[test]
-    fn test_vpss_destroy_internal_rejects_invalid_device() {
+    fn test_vpss_destroy_rejects_invalid_device() {
         let mock_ffi = MockVideoHalTrait::new();
 
         // Try with invalid device ID (not DEV0)
         let invalid_device = VideoDevice(1);
-        let result = vpss_destroy_internal(invalid_device, &mock_ffi);
+        let result = vpss_destroy(invalid_device, &mock_ffi);
         assert!(result.is_err());
         match result {
             Err(PlatformError::InvalidParameter(msg)) => {
@@ -1613,20 +1132,5 @@ mod tests {
             }
             _ => panic!("Expected InvalidParameter error"),
         }
-    }
-
-    #[test]
-    #[cfg(use_stubs)]
-    fn test_vpss_init_success() {
-        let handle = video_input_open(VideoDevice::DEV0).unwrap();
-        let result = vpss_init(&handle, VideoDevice::DEV0);
-        assert!(result.is_ok());
-    }
-
-    #[test]
-    #[cfg(use_stubs)]
-    fn test_vpss_destroy_success() {
-        let result = vpss_destroy(VideoDevice::DEV0);
-        assert!(result.is_ok());
     }
 }

@@ -9,7 +9,7 @@
 //! All handles implement the Drop trait to automatically clean up resources:
 //!
 //! ```rust,no_run
-//! use onvif_rust::hal::ptz::*;
+//! use onvif_rust::hal::common::ptz::*;
 //!
 //! // Handle is automatically closed when it goes out of scope
 //! {
@@ -28,14 +28,18 @@ use crate::platform::PlatformResult;
 
 // On ARM we use the Rust native driver; types from ptz_driver (ak_drv_ptz.h omitted from bindgen).
 #[cfg(not(use_stubs))]
-use crate::hal::ptz_driver::{ptz_device, ptz_feedback_pin, ptz_turn_direction};
+use crate::hal::anyka::ptz::{ptz_device, ptz_feedback_pin, ptz_turn_direction};
 
 #[cfg(use_stubs)]
-use crate::hal::{ptz_device, ptz_feedback_pin, ptz_turn_direction};
+use super::{ptz_device, ptz_feedback_pin, ptz_turn_direction};
 
-use crate::hal::{AK_FAILED_I32, AK_SUCCESS_I32, PtzDirection, PtzMotor};
+#[cfg(test)]
+use super::AK_FAILED_I32;
+use super::{AK_SUCCESS_I32, check_result};
+use crate::hal::anyka::sdk::{PtzDirection, PtzMotor};
 
 /// Internal trait for abstracting PTZ FFI calls to enable mocking in tests.
+#[allow(dead_code)] // Some methods only used on ARM targets
 #[cfg_attr(test, mockall::automock)]
 pub(crate) trait PtzHalTrait: Send + Sync {
     fn ptz_open(&self) -> i32;
@@ -46,165 +50,13 @@ pub(crate) trait PtzHalTrait: Send + Sync {
     fn ptz_stop(&self, direction: ptz_turn_direction) -> i32;
 }
 
-/// Stub implementation for host tests (use_stubs). No hardware.
-pub(crate) struct StubPtzHal;
-
-/// Native Rust PTZ driver implementation for ARM. Talks to /dev/ak-motor0, /dev/ak-motor1.
-#[cfg(not(use_stubs))]
-pub(crate) struct NativePtzHal {
-    driver: std::sync::Arc<crate::hal::ptz_driver::NativePtzDriver>,
-}
-
-#[cfg(not(use_stubs))]
-impl NativePtzHal {
-    pub(crate) fn new() -> std::sync::Arc<Self> {
-        std::sync::Arc::new(Self {
-            driver: std::sync::Arc::new(crate::hal::ptz_driver::NativePtzDriver::new()),
-        })
-    }
-}
-
-#[cfg(not(use_stubs))]
-impl PtzHalTrait for NativePtzHal {
-    fn ptz_open(&self) -> i32 {
-        self.driver
-            .open()
-            .map(|()| AK_SUCCESS_I32)
-            .unwrap_or(AK_FAILED_I32)
-    }
-
-    fn ptz_close(&self) -> i32 {
-        self.driver
-            .close()
-            .map(|()| AK_SUCCESS_I32)
-            .unwrap_or(AK_FAILED_I32)
-    }
-
-    fn ptz_check_self(&self, pin_type: ptz_feedback_pin) -> i32 {
-        self.driver
-            .check_self(pin_type)
-            .map(|()| AK_SUCCESS_I32)
-            .unwrap_or(AK_FAILED_I32)
-    }
-
-    fn ptz_turn(&self, direction: ptz_turn_direction, degree: i32) -> i32 {
-        self.driver
-            .turn(direction, degree)
-            .map(|()| AK_SUCCESS_I32)
-            .unwrap_or(AK_FAILED_I32)
-    }
-
-    fn ptz_get_step_pos(&self, motor_no: ptz_device) -> i32 {
-        self.driver.get_step_pos(motor_no).unwrap_or(-1)
-    }
-
-    fn ptz_stop(&self, direction: ptz_turn_direction) -> i32 {
-        self.driver
-            .stop(direction)
-            .map(|()| AK_SUCCESS_I32)
-            .unwrap_or(AK_FAILED_I32)
-    }
-}
-
-impl PtzHalTrait for StubPtzHal {
-    #[cfg(use_stubs)]
-    fn ptz_open(&self) -> i32 {
-        AK_SUCCESS_I32
-    }
-
-    #[cfg(use_stubs)]
-    fn ptz_close(&self) -> i32 {
-        AK_SUCCESS_I32
-    }
-
-    #[cfg(use_stubs)]
-    fn ptz_check_self(&self, _pin_type: ptz_feedback_pin) -> i32 {
-        AK_SUCCESS_I32
-    }
-
-    #[cfg(use_stubs)]
-    fn ptz_turn(&self, _direction: ptz_turn_direction, _degree: i32) -> i32 {
-        AK_SUCCESS_I32
-    }
-
-    #[cfg(use_stubs)]
-    fn ptz_get_step_pos(&self, _motor_no: ptz_device) -> i32 {
-        0 // Return 0 steps for stub
-    }
-
-    #[cfg(use_stubs)]
-    fn ptz_stop(&self, _direction: ptz_turn_direction) -> i32 {
-        AK_SUCCESS_I32
-    }
-
-    // Not used on ARM (NativePtzHal is used). Required so DEFAULT_PTZ_HAL compiles for tests that run on host only.
-    #[cfg(not(use_stubs))]
-    fn ptz_open(&self) -> i32 {
-        AK_FAILED_I32
-    }
-
-    #[cfg(not(use_stubs))]
-    fn ptz_close(&self) -> i32 {
-        AK_SUCCESS_I32
-    }
-
-    #[cfg(not(use_stubs))]
-    fn ptz_check_self(&self, _pin_type: ptz_feedback_pin) -> i32 {
-        AK_FAILED_I32
-    }
-
-    #[cfg(not(use_stubs))]
-    fn ptz_turn(&self, _direction: ptz_turn_direction, _degree: i32) -> i32 {
-        AK_FAILED_I32
-    }
-
-    #[cfg(not(use_stubs))]
-    fn ptz_get_step_pos(&self, _motor_no: ptz_device) -> i32 {
-        -1
-    }
-
-    #[cfg(not(use_stubs))]
-    fn ptz_stop(&self, _direction: ptz_turn_direction) -> i32 {
-        AK_FAILED_I32
-    }
-}
-
 /// Default PTZ FFI: native Rust driver on ARM (/dev/ak-motor*), stub on host.
 /// Used by HardwarePTZControl::new() and ptz_open() so the platform uses the same backend.
 pub(crate) fn default_ptz_hal() -> std::sync::Arc<dyn PtzHalTrait> {
     #[cfg(not(use_stubs))]
-    return NativePtzHal::new();
+    return crate::hal::anyka::ptz::native::NativePtzHal::new();
     #[cfg(use_stubs)]
-    std::sync::Arc::new(StubPtzHal)
-}
-
-// Global instance for stub path (used by tests that inject mocks).
-#[allow(dead_code)]
-static DEFAULT_PTZ_HAL: StubPtzHal = StubPtzHal;
-
-/// Helper function to convert SDK return codes to PlatformResult.
-///
-/// # Arguments
-///
-/// * `ret` - SDK return code (0 = AK_SUCCESS, -1 = AK_FAILED, or other error codes)
-/// * `context` - Context string for error messages
-///
-/// # Returns
-///
-/// * `Ok(())` if `ret == AK_SUCCESS`
-/// * `Err(PlatformError::HardwareFailure(...))` otherwise
-fn check_result(ret: i32, context: &str) -> PlatformResult<()> {
-    match ret {
-        AK_SUCCESS_I32 => Ok(()),
-        AK_FAILED_I32 => Err(PlatformError::HardwareFailure(format!(
-            "{} failed",
-            context
-        ))),
-        _ => Err(PlatformError::HardwareFailure(format!(
-            "{}: error code {}",
-            context, ret
-        ))),
-    }
+    std::sync::Arc::new(crate::hal::stub::ptz::StubPtzHal)
 }
 
 /// RAII handle for PTZ device.
@@ -244,7 +96,7 @@ impl Drop for PTZHandle {
 
 impl PTZHandle {
     /// Check if the handle is opened.
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub(crate) fn is_opened(&self) -> bool {
         self.opened
     }
@@ -256,7 +108,7 @@ impl PTZHandle {
 /// SDK initialization, matching the C adapter's `platform_ptz_init()` sequence.
 /// The self-check calibrates motor positions and transitions the SDK from
 /// `PTZ_WAIT_INIT` to `PTZ_INIT_OK` state.
-pub(crate) fn ptz_open_internal(ffi: std::sync::Arc<dyn PtzHalTrait>) -> PlatformResult<PTZHandle> {
+pub(crate) fn ptz_open(ffi: std::sync::Arc<dyn PtzHalTrait>) -> PlatformResult<PTZHandle> {
     let ret = ffi.ptz_open();
     check_result(ret, "ak_drv_ptz_open")?;
 
@@ -273,18 +125,6 @@ pub(crate) fn ptz_open_internal(ffi: std::sync::Arc<dyn PtzHalTrait>) -> Platfor
     }
 
     Ok(PTZHandle { opened: true, ffi })
-}
-
-/// Open a PTZ device.
-///
-/// On ARM uses the native Rust driver (/dev/ak-motor*). On host (tests) uses stubs.
-///
-/// # Returns
-///
-/// * `Ok(PTZHandle)` on success
-/// * `Err(PlatformError::HardwareFailure)` if device cannot be opened
-pub fn ptz_open() -> PlatformResult<PTZHandle> {
-    ptz_open_internal(default_ptz_hal())
 }
 
 /// Validate pan range (±180 degrees).
@@ -375,8 +215,8 @@ pub fn steps_to_degrees(steps: i32, cycle_steps: i32) -> PlatformResult<f32> {
     Ok((steps as f32 / cycle_steps as f32) * 360.0)
 }
 
-/// Internal helper that takes FFI trait for testability.
-pub(crate) fn ptz_turn_internal(
+#[allow(dead_code)] // Called from platform layer on ARM
+pub(crate) fn ptz_turn(
     _handle: &PTZHandle,
     direction: PtzDirection,
     degrees: f32,
@@ -410,25 +250,8 @@ pub(crate) fn ptz_turn_internal(
     check_result(ret, "ak_drv_ptz_turn")
 }
 
-/// Turn PTZ motor in a direction by a specified angle.
-///
-/// # Arguments
-///
-/// * `handle` - PTZ handle
-/// * `direction` - Direction to turn (Left, Right, Up, Down)
-/// * `degrees` - Angle in degrees (validated: ±180° for pan, ±90° for tilt)
-///
-/// # Returns
-///
-/// * `Ok(())` on success
-/// * `Err(PlatformError::InvalidParameter)` if angle is out of range
-/// * `Err(PlatformError::HardwareFailure)` on SDK error
-pub fn ptz_turn(handle: &PTZHandle, direction: PtzDirection, degrees: f32) -> PlatformResult<()> {
-    ptz_turn_internal(handle, direction, degrees, handle.ffi.as_ref())
-}
-
-/// Internal helper that takes FFI trait for testability.
-pub(crate) fn ptz_get_step_pos_internal(
+#[allow(dead_code)] // Called from platform layer on ARM
+pub(crate) fn ptz_get_step_pos(
     _handle: &PTZHandle,
     motor: PtzMotor,
     ffi: &dyn PtzHalTrait,
@@ -450,23 +273,8 @@ pub(crate) fn ptz_get_step_pos_internal(
     }
 }
 
-/// Get PTZ motor step position.
-///
-/// # Arguments
-///
-/// * `handle` - PTZ handle
-/// * `motor` - Motor to query (Horizontal or Vertical)
-///
-/// # Returns
-///
-/// * `Ok(i32)` with step position on success
-/// * `Err(PlatformError::HardwareFailure)` on SDK error
-pub fn ptz_get_step_pos(handle: &PTZHandle, motor: PtzMotor) -> PlatformResult<i32> {
-    ptz_get_step_pos_internal(handle, motor, handle.ffi.as_ref())
-}
-
-/// Internal helper that takes FFI trait for testability.
-pub(crate) fn ptz_stop_internal(
+#[allow(dead_code)] // Called from platform layer on ARM
+pub(crate) fn ptz_stop(
     _handle: &PTZHandle,
     direction: PtzDirection,
     ffi: &dyn PtzHalTrait,
@@ -482,21 +290,6 @@ pub(crate) fn ptz_stop_internal(
     check_result(ret, "ak_drv_ptz_turn_stop")
 }
 
-/// Stop PTZ motor movement.
-///
-/// # Arguments
-///
-/// * `handle` - PTZ handle
-/// * `direction` - Direction parameter (kept for API compatibility, but SDK stop function stops all movement)
-///
-/// # Returns
-///
-/// * `Ok(())` on success
-/// * `Err(PlatformError::HardwareFailure)` on SDK error
-pub fn ptz_stop(handle: &PTZHandle, direction: PtzDirection) -> PlatformResult<()> {
-    ptz_stop_internal(handle, direction, handle.ffi.as_ref())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -508,38 +301,6 @@ mod tests {
         PTZHandle {
             opened: true,
             ffi: std::sync::Arc::new(mock),
-        }
-    }
-
-    #[test]
-    fn test_check_result_success() {
-        let result = check_result(AK_SUCCESS_I32, "test_function");
-        assert!(result.is_ok());
-    }
-
-    #[test]
-    fn test_check_result_failed() {
-        let result = check_result(AK_FAILED_I32, "test_function");
-        assert!(result.is_err());
-        match result {
-            Err(PlatformError::HardwareFailure(msg)) => {
-                assert!(msg.contains("test_function"));
-                assert!(msg.contains("failed"));
-            }
-            _ => panic!("Expected HardwareFailure error"),
-        }
-    }
-
-    #[test]
-    fn test_check_result_unknown_error() {
-        let result = check_result(-42, "test_function");
-        assert!(result.is_err());
-        match result {
-            Err(PlatformError::HardwareFailure(msg)) => {
-                assert!(msg.contains("test_function"));
-                assert!(msg.contains("error code -42"));
-            }
-            _ => panic!("Expected HardwareFailure error"),
         }
     }
 
@@ -622,16 +383,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(use_stubs)]
-    fn test_ptz_open_success() {
-        let result = ptz_open();
-        assert!(result.is_ok());
-        let handle = result.unwrap();
-        assert!(handle.is_opened());
-    }
-
-    #[test]
-    fn test_ptz_open_internal_calls_ffi_and_returns_handle() {
+    fn test_ptz_open_calls_ffi_and_returns_handle() {
         let mut mock_ffi = MockPtzHalTrait::new();
 
         mock_ffi
@@ -644,14 +396,14 @@ mod tests {
             .returning(|_| AK_SUCCESS_I32);
         mock_ffi.expect_ptz_close().returning(|| AK_SUCCESS_I32);
 
-        let result = ptz_open_internal(std::sync::Arc::new(mock_ffi));
+        let result = ptz_open(std::sync::Arc::new(mock_ffi));
         assert!(result.is_ok());
         let handle = result.unwrap();
         assert!(handle.is_opened());
     }
 
     #[test]
-    fn test_ptz_open_internal_returns_error_on_failure() {
+    fn test_ptz_open_returns_error_on_failure() {
         let mut mock_ffi = MockPtzHalTrait::new();
 
         mock_ffi
@@ -659,7 +411,7 @@ mod tests {
             .times(1)
             .returning(|| AK_FAILED_I32);
 
-        let result = ptz_open_internal(std::sync::Arc::new(mock_ffi));
+        let result = ptz_open(std::sync::Arc::new(mock_ffi));
         assert!(result.is_err());
         match result {
             Err(PlatformError::HardwareFailure(msg)) => {
@@ -670,7 +422,7 @@ mod tests {
     }
 
     #[test]
-    fn test_ptz_turn_internal_calls_ffi() {
+    fn test_ptz_turn_calls_ffi() {
         let mut mock_ffi = MockPtzHalTrait::new();
         let handle = test_handle();
 
@@ -684,17 +436,17 @@ mod tests {
             .times(1)
             .returning(|_, _| AK_SUCCESS_I32);
 
-        let result = ptz_turn_internal(&handle, PtzDirection::Left, 45.0, &mock_ffi);
+        let result = ptz_turn(&handle, PtzDirection::Left, 45.0, &mock_ffi);
         assert!(result.is_ok());
     }
 
     #[test]
-    fn test_ptz_turn_internal_validates_pan_range() {
+    fn test_ptz_turn_validates_pan_range() {
         let mock_ffi = MockPtzHalTrait::new();
         let handle = test_handle();
 
         // Should fail validation before calling FFI
-        let result = ptz_turn_internal(&handle, PtzDirection::Left, 200.0, &mock_ffi);
+        let result = ptz_turn(&handle, PtzDirection::Left, 200.0, &mock_ffi);
         assert!(result.is_err());
         match result {
             Err(PlatformError::InvalidParameter(msg)) => {
@@ -705,12 +457,12 @@ mod tests {
     }
 
     #[test]
-    fn test_ptz_turn_internal_validates_tilt_range() {
+    fn test_ptz_turn_validates_tilt_range() {
         let mock_ffi = MockPtzHalTrait::new();
         let handle = test_handle();
 
         // Should fail validation before calling FFI
-        let result = ptz_turn_internal(&handle, PtzDirection::Up, 100.0, &mock_ffi);
+        let result = ptz_turn(&handle, PtzDirection::Up, 100.0, &mock_ffi);
         assert!(result.is_err());
         match result {
             Err(PlatformError::InvalidParameter(msg)) => {
@@ -721,7 +473,7 @@ mod tests {
     }
 
     #[test]
-    fn test_ptz_turn_internal_propagates_error() {
+    fn test_ptz_turn_propagates_error() {
         let mut mock_ffi = MockPtzHalTrait::new();
         let handle = test_handle();
 
@@ -730,7 +482,7 @@ mod tests {
             .times(1)
             .returning(|_, _| AK_FAILED_I32);
 
-        let result = ptz_turn_internal(&handle, PtzDirection::Right, 30.0, &mock_ffi);
+        let result = ptz_turn(&handle, PtzDirection::Right, 30.0, &mock_ffi);
         assert!(result.is_err());
         match result {
             Err(PlatformError::HardwareFailure(msg)) => {
@@ -741,7 +493,7 @@ mod tests {
     }
 
     #[test]
-    fn test_ptz_get_step_pos_internal_calls_ffi_and_returns_position() {
+    fn test_ptz_get_step_pos_calls_ffi_and_returns_position() {
         let mut mock_ffi = MockPtzHalTrait::new();
         let handle = test_handle();
 
@@ -754,13 +506,13 @@ mod tests {
             .times(1)
             .returning(|_| 1500);
 
-        let result = ptz_get_step_pos_internal(&handle, PtzMotor::Horizontal, &mock_ffi);
+        let result = ptz_get_step_pos(&handle, PtzMotor::Horizontal, &mock_ffi);
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), 1500);
     }
 
     #[test]
-    fn test_ptz_get_step_pos_internal_propagates_error() {
+    fn test_ptz_get_step_pos_propagates_error() {
         let mut mock_ffi = MockPtzHalTrait::new();
         let handle = test_handle();
 
@@ -769,7 +521,7 @@ mod tests {
             .times(1)
             .returning(|_| -1);
 
-        let result = ptz_get_step_pos_internal(&handle, PtzMotor::Vertical, &mock_ffi);
+        let result = ptz_get_step_pos(&handle, PtzMotor::Vertical, &mock_ffi);
         assert!(result.is_err());
         match result {
             Err(PlatformError::HardwareFailure(msg)) => {
@@ -780,7 +532,7 @@ mod tests {
     }
 
     #[test]
-    fn test_ptz_stop_internal_calls_ffi() {
+    fn test_ptz_stop_calls_ffi() {
         let mut mock_ffi = MockPtzHalTrait::new();
         let handle = test_handle();
 
@@ -790,12 +542,12 @@ mod tests {
             .times(1)
             .returning(|_| AK_SUCCESS_I32);
 
-        let result = ptz_stop_internal(&handle, PtzDirection::Right, &mock_ffi);
+        let result = ptz_stop(&handle, PtzDirection::Right, &mock_ffi);
         assert!(result.is_ok());
     }
 
     #[test]
-    fn test_ptz_stop_internal_propagates_error() {
+    fn test_ptz_stop_propagates_error() {
         let mut mock_ffi = MockPtzHalTrait::new();
         let handle = test_handle();
 
@@ -805,7 +557,7 @@ mod tests {
             .times(1)
             .returning(|_| AK_FAILED_I32);
 
-        let result = ptz_stop_internal(&handle, PtzDirection::Down, &mock_ffi);
+        let result = ptz_stop(&handle, PtzDirection::Down, &mock_ffi);
         assert!(result.is_err());
         match result {
             Err(PlatformError::HardwareFailure(msg)) => {

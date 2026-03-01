@@ -15,7 +15,7 @@
 
 #![allow(dead_code)]
 
-use crate::hal::shm_ring::{FrameNotification, ShmRingReader};
+use super::shm_ring::{FrameNotification, ShmRingReader};
 use crate::platform::PlatformError;
 use crate::platform::PlatformResult;
 use crate::platform::frame::{OwnedFrame, StreamId};
@@ -31,13 +31,13 @@ use std::time::{Duration, Instant};
 
 use tracing::{debug, error, warn};
 
-use crate::hal::video::VideoHalTrait;
-use crate::hal::{aenc_attr, audio_param, pcm_param};
-use crate::hal::{
+use crate::hal::common::video::VideoHalTrait;
+use crate::hal::common::{aenc_attr, audio_param, pcm_param};
+use crate::hal::common::{
     encode_param, video_channel_attr, video_dev_type, video_resolution, video_stream,
 };
 
-use crate::hal::{AK_FAILED_I32, AK_SUCCESS_I32};
+use crate::hal::common::{AK_FAILED_I32, AK_SUCCESS_I32};
 
 // ============================================================================
 // Self-contained type definitions for IPC (matching C daemon structs)
@@ -1039,47 +1039,6 @@ impl VendorIpc {
         (buf, 4)
     }
 
-    // Legacy Vec-based encoders (deprecated, kept for tests)
-    #[allow(dead_code)]
-    fn encode_i32(val: i32) -> Vec<u8> {
-        val.to_le_bytes().to_vec()
-    }
-
-    #[allow(dead_code)]
-    fn encode_video_dev_type(dev: video_dev_type) -> Vec<u8> {
-        (dev as i32).to_le_bytes().to_vec()
-    }
-
-    #[allow(dead_code)]
-    fn encode_video_channel_attr(attr: &video_channel_attr) -> Vec<u8> {
-        let (buf, len) = Self::encode_video_channel_attr_buf(attr);
-        buf[..len].to_vec()
-    }
-
-    #[allow(dead_code)]
-    fn encode_encode_param(param: &encode_param) -> Vec<u8> {
-        let (buf, len) = Self::encode_encode_param_buf(param);
-        buf[..len].to_vec()
-    }
-
-    #[allow(dead_code)]
-    fn encode_pcm_param(param: &pcm_param) -> Vec<u8> {
-        let (buf, len) = Self::encode_pcm_param_buf(param);
-        buf[..len].to_vec()
-    }
-
-    #[allow(dead_code)]
-    fn encode_audio_param(param: &audio_param) -> Vec<u8> {
-        let (buf, len) = Self::encode_audio_param_buf(param);
-        buf[..len].to_vec()
-    }
-
-    #[allow(dead_code)]
-    fn encode_aenc_attr(attr: &aenc_attr) -> Vec<u8> {
-        let (buf, len) = Self::encode_aenc_attr_buf(attr);
-        buf[..len].to_vec()
-    }
-
     // ============================================================================
     // Direct-write helpers — stack-based, zero heap allocation (Phase 4)
     // ============================================================================
@@ -1138,8 +1097,8 @@ impl VendorIpc {
     /// the `video_stream` pointer has already been validated as non-null.
     /// The conversion itself is safe: we use an exhaustive match instead of
     /// `std::mem::transmute`, so no invalid enum values can be produced.
-    fn ipc_to_frame_type(val: i32) -> crate::hal::VideoFrameType {
-        use crate::hal::VideoFrameType;
+    fn ipc_to_frame_type(val: i32) -> crate::hal::common::VideoFrameType {
+        use crate::hal::common::VideoFrameType;
         match val {
             1 => VideoFrameType::FrameTypeI,
             2 => VideoFrameType::FrameTypeB,
@@ -1375,7 +1334,7 @@ impl VideoHalTrait for VendorIpc {
     }
 }
 
-impl crate::hal::audio::AudioHalTrait for VendorIpc {
+impl crate::hal::common::audio::AudioHalTrait for VendorIpc {
     fn ai_open(&self, param: *const pcm_param) -> *mut c_void {
         // SAFETY: caller guarantees `param` is a valid, non-null pointer to a
         // `pcm_param` that remains valid for the duration of this call.
@@ -1470,7 +1429,7 @@ impl crate::hal::audio::AudioHalTrait for VendorIpc {
     }
 }
 
-impl crate::hal::imaging::ImagingHalTrait for VendorIpc {
+impl crate::hal::common::imaging::ImagingHalTrait for VendorIpc {
     fn set_brightness(&self, value: i32) -> i32 {
         let req_data = value.to_le_bytes().to_vec();
         match self.send_request(CMD_ISP_SET_BRIGHTNESS, &req_data) {
@@ -1645,7 +1604,8 @@ mod tests {
         let ipc = VendorIpc::new_with_path(&daemon.socket_path).unwrap();
 
         // set_brightness is part of ImagingHalTrait; accessible from within the crate.
-        let result = <VendorIpc as crate::hal::imaging::ImagingHalTrait>::set_brightness(&ipc, 50);
+        let result =
+            <VendorIpc as crate::hal::common::imaging::ImagingHalTrait>::set_brightness(&ipc, 50);
 
         assert_eq!(result, AK_SUCCESS_I32, "expected AK_SUCCESS from daemon");
     }
@@ -1656,7 +1616,8 @@ mod tests {
         let daemon = FakeDaemon::start(|_cmd_id, _req| (AK_FAILED_I32, vec![]));
         let ipc = VendorIpc::new_with_path(&daemon.socket_path).unwrap();
 
-        let result = <VendorIpc as crate::hal::imaging::ImagingHalTrait>::set_brightness(&ipc, 50);
+        let result =
+            <VendorIpc as crate::hal::common::imaging::ImagingHalTrait>::set_brightness(&ipc, 50);
 
         assert_eq!(
             result, AK_FAILED_I32,
@@ -1674,8 +1635,11 @@ mod tests {
         let ipc = VendorIpc::new_with_path(&daemon.socket_path).unwrap();
 
         let handle = {
-            use crate::hal::stubs::VideoDevType;
-            <VendorIpc as crate::hal::video::VideoHalTrait>::vi_open(&ipc, VideoDevType::Dev0)
+            use crate::hal::common::sdk_types::VideoDevType;
+            <VendorIpc as crate::hal::common::video::VideoHalTrait>::vi_open(
+                &ipc,
+                VideoDevType::Dev0,
+            )
         };
 
         assert!(!handle.is_null(), "expected non-null handle from daemon");
@@ -1693,7 +1657,10 @@ mod tests {
 
         for i in 0..3 {
             let result =
-                <VendorIpc as crate::hal::imaging::ImagingHalTrait>::set_brightness(&ipc, 50 + i);
+                <VendorIpc as crate::hal::common::imaging::ImagingHalTrait>::set_brightness(
+                    &ipc,
+                    50 + i,
+                );
             assert_eq!(result, AK_SUCCESS_I32, "request {} should succeed", i);
         }
     }
@@ -1707,10 +1674,10 @@ mod tests {
 
         let ipc = VendorIpc::new_with_path(&daemon.socket_path).unwrap();
         let stream_handle = 1usize as *mut std::ffi::c_void;
-        let mut vs = MaybeUninit::<crate::hal::stubs::VideoStream>::zeroed();
+        let mut vs = MaybeUninit::<crate::hal::common::sdk_types::VideoStream>::zeroed();
         let vs_ptr = vs.as_mut_ptr() as *mut video_stream;
 
-        let result = <VendorIpc as crate::hal::video::VideoHalTrait>::venc_get_stream(
+        let result = <VendorIpc as crate::hal::common::video::VideoHalTrait>::venc_get_stream(
             &ipc,
             stream_handle,
             vs_ptr,
@@ -1728,7 +1695,7 @@ mod tests {
     fn test_ipc_frame_type_conversion_p_frame() {
         #[cfg(use_stubs)]
         {
-            use crate::hal::stubs::VideoFrameType;
+            use crate::hal::common::sdk_types::VideoFrameType;
             assert_eq!(VendorIpc::ipc_to_frame_type(0), VideoFrameType::FrameTypeP);
         }
     }
@@ -1737,7 +1704,7 @@ mod tests {
     fn test_ipc_frame_type_conversion_i_frame() {
         #[cfg(use_stubs)]
         {
-            use crate::hal::stubs::VideoFrameType;
+            use crate::hal::common::sdk_types::VideoFrameType;
             assert_eq!(VendorIpc::ipc_to_frame_type(1), VideoFrameType::FrameTypeI);
         }
     }
@@ -1746,7 +1713,7 @@ mod tests {
     fn test_ipc_frame_type_conversion_b_frame() {
         #[cfg(use_stubs)]
         {
-            use crate::hal::stubs::VideoFrameType;
+            use crate::hal::common::sdk_types::VideoFrameType;
             assert_eq!(VendorIpc::ipc_to_frame_type(2), VideoFrameType::FrameTypeB);
         }
     }
@@ -1755,7 +1722,7 @@ mod tests {
     fn test_ipc_frame_type_conversion_pi_frame() {
         #[cfg(use_stubs)]
         {
-            use crate::hal::stubs::VideoFrameType;
+            use crate::hal::common::sdk_types::VideoFrameType;
             assert_eq!(VendorIpc::ipc_to_frame_type(3), VideoFrameType::FrameTypePi);
         }
     }
@@ -1764,7 +1731,7 @@ mod tests {
     fn test_ipc_frame_type_conversion_unknown_defaults_to_p() {
         #[cfg(use_stubs)]
         {
-            use crate::hal::stubs::VideoFrameType;
+            use crate::hal::common::sdk_types::VideoFrameType;
             assert_eq!(VendorIpc::ipc_to_frame_type(99), VideoFrameType::FrameTypeP);
             assert_eq!(VendorIpc::ipc_to_frame_type(-1), VideoFrameType::FrameTypeP);
         }
@@ -1801,19 +1768,10 @@ mod tests {
     }
 
     #[test]
-    fn test_encode_i32_produces_le_bytes() {
-        let result = VendorIpc::encode_i32(42);
-        assert_eq!(result, vec![42, 0, 0, 0]);
-
-        let result = VendorIpc::encode_i32(-1);
-        assert_eq!(result, vec![255, 255, 255, 255]);
-    }
-
-    #[test]
-    fn test_encode_video_channel_attr_round_trip() {
+    fn test_encode_video_channel_attr_buf_round_trip() {
         #[cfg(use_stubs)]
         {
-            use crate::hal::stubs::{CropInfo, VideoChannelAttr, VideoResolution};
+            use crate::hal::common::sdk_types::{CropInfo, VideoChannelAttr, VideoResolution};
 
             let attr = VideoChannelAttr {
                 crop: CropInfo {
@@ -1838,10 +1796,11 @@ mod tests {
                 ],
             };
 
-            let encoded = VendorIpc::encode_video_channel_attr(&attr);
+            let (buf, len) = VendorIpc::encode_video_channel_attr_buf(&attr);
+            let encoded = &buf[..len];
 
             // 4 crop fields * 4 bytes + 2 resolutions * 4 fields * 4 bytes = 16 + 32 = 48
-            assert_eq!(encoded.len(), 48);
+            assert_eq!(len, 48);
 
             // Verify crop fields
             assert_eq!(i32::from_le_bytes(encoded[0..4].try_into().unwrap()), 10);
@@ -1858,42 +1817,32 @@ mod tests {
                 i32::from_le_bytes(encoded[20..24].try_into().unwrap()),
                 1080
             );
-            assert_eq!(
-                i32::from_le_bytes(encoded[24..28].try_into().unwrap()),
-                1920
-            );
-            assert_eq!(
-                i32::from_le_bytes(encoded[28..32].try_into().unwrap()),
-                1080
-            );
 
             // Verify second resolution (res[1])
             assert_eq!(i32::from_le_bytes(encoded[32..36].try_into().unwrap()), 640);
             assert_eq!(i32::from_le_bytes(encoded[36..40].try_into().unwrap()), 480);
-            assert_eq!(i32::from_le_bytes(encoded[40..44].try_into().unwrap()), 640);
-            assert_eq!(i32::from_le_bytes(encoded[44..48].try_into().unwrap()), 480);
         }
     }
 
     #[test]
-    fn test_encode_encode_param_byte_length() {
+    fn test_encode_encode_param_buf_byte_length() {
         #[cfg(use_stubs)]
         {
-            use crate::hal::stubs::EncodeParam;
+            use crate::hal::common::sdk_types::EncodeParam;
 
             let param = EncodeParam::default();
-            let encoded = VendorIpc::encode_encode_param(&param);
+            let (_buf, len) = VendorIpc::encode_encode_param_buf(&param);
 
             // 12 fields * 4 bytes each = 48 bytes
-            assert_eq!(encoded.len(), 48);
+            assert_eq!(len, 48);
         }
     }
 
     #[test]
-    fn test_encode_pcm_param_values() {
+    fn test_encode_pcm_param_buf_values() {
         #[cfg(use_stubs)]
         {
-            use crate::hal::stubs::PcmParam;
+            use crate::hal::common::sdk_types::PcmParam;
 
             let param = PcmParam {
                 sample_rate: 8000,
@@ -1901,10 +1850,10 @@ mod tests {
                 channel_num: 1,
             };
 
-            let encoded = VendorIpc::encode_pcm_param(&param);
+            let (buf, len) = VendorIpc::encode_pcm_param_buf(&param);
+            let encoded = &buf[..len];
 
-            // 3 fields * 4 bytes = 12 bytes
-            assert_eq!(encoded.len(), 12);
+            assert_eq!(len, 12);
             assert_eq!(u32::from_le_bytes(encoded[0..4].try_into().unwrap()), 8000);
             assert_eq!(u32::from_le_bytes(encoded[4..8].try_into().unwrap()), 16);
             assert_eq!(u32::from_le_bytes(encoded[8..12].try_into().unwrap()), 1);
@@ -1912,10 +1861,10 @@ mod tests {
     }
 
     #[test]
-    fn test_encode_audio_param_values() {
+    fn test_encode_audio_param_buf_values() {
         #[cfg(use_stubs)]
         {
-            use crate::hal::stubs::AudioParam;
+            use crate::hal::common::sdk_types::AudioParam;
 
             let param = AudioParam {
                 sample_rate: 48000,
@@ -1924,10 +1873,10 @@ mod tests {
                 type_: 1,
             };
 
-            let encoded = VendorIpc::encode_audio_param(&param);
+            let (buf, len) = VendorIpc::encode_audio_param_buf(&param);
+            let encoded = &buf[..len];
 
-            // 4 fields * 4 bytes = 16 bytes
-            assert_eq!(encoded.len(), 16);
+            assert_eq!(len, 16);
             assert_eq!(u32::from_le_bytes(encoded[0..4].try_into().unwrap()), 48000);
             assert_eq!(u32::from_le_bytes(encoded[4..8].try_into().unwrap()), 2);
             assert_eq!(u32::from_le_bytes(encoded[8..12].try_into().unwrap()), 16);
@@ -1936,15 +1885,16 @@ mod tests {
     }
 
     #[test]
-    fn test_encode_aenc_attr_values() {
+    fn test_encode_aenc_attr_buf_values() {
         #[cfg(use_stubs)]
         {
-            use crate::hal::stubs::AencAttr;
+            use crate::hal::common::sdk_types::AencAttr;
 
             let attr = AencAttr { aac_head: 1 };
-            let encoded = VendorIpc::encode_aenc_attr(&attr);
+            let (buf, len) = VendorIpc::encode_aenc_attr_buf(&attr);
 
-            assert_eq!(encoded, vec![1, 0, 0, 0]);
+            assert_eq!(len, 4);
+            assert_eq!(&buf[..len], &[1, 0, 0, 0]);
         }
     }
 

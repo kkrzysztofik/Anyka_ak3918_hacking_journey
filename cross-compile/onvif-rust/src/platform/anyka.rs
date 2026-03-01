@@ -29,19 +29,18 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use async_trait::async_trait;
 use parking_lot::RwLock;
 
-use crate::hal::VideoDevice;
-use crate::hal::video::{
-    VideoHalTrait, VideoInputHandle, video_input_capture_off_internal,
-    video_input_capture_on_internal, video_input_get_sensor_resolution_internal,
-    video_input_match_sensor_internal, video_input_open_internal,
-    video_input_set_channel_attr_internal,
+use crate::hal::anyka::sdk::VideoDevice;
+use crate::hal::common::video::{
+    VideoHalTrait, VideoInputHandle, video_input_capture_off, video_input_capture_on,
+    video_input_get_sensor_resolution, video_input_match_sensor, video_input_open,
+    video_input_set_channel_attr,
 };
 
-use crate::hal::vendor_ipc::VendorIpc;
+use crate::hal::anyka::vendor_ipc::VendorIpc;
 
 use crate::streaming::bridge::BytesMutPool;
 
-use crate::hal::{video_channel_attr, video_resolution};
+use crate::hal::common::{video_channel_attr, video_resolution};
 
 use super::traits::{
     AudioEncoder, AudioEncoderConfig, AudioInput, AudioSourceConfig, DeviceInfo, DnsInfo,
@@ -101,8 +100,9 @@ impl AnykaPlatform {
             tracing::info!("AnykaPlatform: using shared VendorIpc client for video/audio/imaging");
 
             let video_ffi: Arc<dyn VideoHalTrait> = shared_ipc.clone();
-            let audio_ffi: Arc<dyn crate::hal::audio::AudioHalTrait> = shared_ipc.clone();
-            let imaging_ffi: Arc<dyn crate::hal::imaging::ImagingHalTrait> = shared_ipc.clone();
+            let audio_ffi: Arc<dyn crate::hal::common::audio::AudioHalTrait> = shared_ipc.clone();
+            let imaging_ffi: Arc<dyn crate::hal::common::imaging::ImagingHalTrait> =
+                shared_ipc.clone();
 
             let video_input = Arc::new(AnykaVideoInput::with_ffi(
                 video_ffi.clone(),
@@ -589,7 +589,7 @@ impl AnykaVideoInput {
     }
 
     /// Get a clone of the video input handle (if opened).
-    pub fn get_handle(&self) -> Option<Arc<crate::hal::VideoInputHandle>> {
+    pub fn get_handle(&self) -> Option<Arc<crate::hal::common::video::VideoInputHandle>> {
         self.handle.read().clone()
     }
 
@@ -613,7 +613,7 @@ impl AnykaVideoInput {
         })?;
 
         // Query sensor resolution to properly set crop area
-        let sensor_res = video_input_get_sensor_resolution_internal(handle, self.ffi.as_ref())?;
+        let sensor_res = video_input_get_sensor_resolution(handle, self.ffi.as_ref())?;
         tracing::debug!(
             "Sensor resolution: {}x{}",
             sensor_res.width,
@@ -685,7 +685,7 @@ impl AnykaVideoInput {
             attr.res[1].max_width,
             attr.res[1].max_height,
         );
-        video_input_set_channel_attr_internal(handle, &attr, self.ffi.as_ref())?;
+        video_input_set_channel_attr(handle, &attr, self.ffi.as_ref())?;
         *self.channel_layout.write() = (
             Resolution::new(attr.res[0].width as u32, attr.res[0].height as u32),
             Resolution::new(attr.res[1].width as u32, attr.res[1].height as u32),
@@ -714,7 +714,7 @@ impl AnykaVideoInput {
                     "Loading ISP sensor config from explicit path: {}",
                     path.display()
                 );
-                return video_input_match_sensor_internal(path, self.ffi.as_ref());
+                return video_input_match_sensor(path, self.ffi.as_ref());
             }
             tracing::warn!(
                 "Explicit ISP config path does not exist: {}, falling back to search paths",
@@ -727,7 +727,7 @@ impl AnykaVideoInput {
             let path = std::path::Path::new(search_path);
             if path.exists() {
                 tracing::info!("Loading ISP sensor config from: {}", search_path);
-                return video_input_match_sensor_internal(path, self.ffi.as_ref());
+                return video_input_match_sensor(path, self.ffi.as_ref());
             }
             tracing::debug!("ISP config not found at: {}", search_path);
         }
@@ -752,7 +752,7 @@ impl AnykaVideoInput {
             PlatformError::HardwareUnavailable("Video input not opened".to_string())
         })?;
 
-        crate::hal::video::vpss_init_internal(handle, VideoDevice::DEV0, self.ffi.as_ref())?;
+        crate::hal::common::video::vpss_init(handle, VideoDevice::DEV0, self.ffi.as_ref())?;
         self.vpss_initialized.store(true, Ordering::SeqCst);
         tracing::info!("VPSS initialized successfully");
         Ok(())
@@ -769,7 +769,7 @@ impl AnykaVideoInput {
             .compare_exchange(true, false, Ordering::SeqCst, Ordering::SeqCst)
             .is_ok()
         {
-            crate::hal::video::vpss_destroy_internal(VideoDevice::DEV0, self.ffi.as_ref())?;
+            crate::hal::common::video::vpss_destroy(VideoDevice::DEV0, self.ffi.as_ref())?;
             tracing::info!("VPSS destroyed successfully");
         }
         Ok(())
@@ -790,7 +790,7 @@ impl AnykaVideoInput {
             PlatformError::HardwareUnavailable("Video input not opened".to_string())
         })?;
 
-        let sensor_res = video_input_get_sensor_resolution_internal(handle, self.ffi.as_ref())?;
+        let sensor_res = video_input_get_sensor_resolution(handle, self.ffi.as_ref())?;
         Ok(Resolution {
             width: sensor_res.width as u32,
             height: sensor_res.height as u32,
@@ -828,7 +828,7 @@ impl AnykaVideoInput {
         // Try to start video capture with retry mechanism
         for attempt in 1..=MAX_RETRIES {
             let attempt_start = std::time::Instant::now();
-            match video_input_capture_on_internal(handle, self.ffi.as_ref()) {
+            match video_input_capture_on(handle, self.ffi.as_ref()) {
                 Ok(()) => {
                     self.capture_started.store(true, Ordering::SeqCst);
                     tracing::info!(
@@ -848,9 +848,7 @@ impl AnykaVideoInput {
                         e
                     );
 
-                    if let Err(cleanup_error) =
-                        video_input_capture_off_internal(handle, self.ffi.as_ref())
-                    {
+                    if let Err(cleanup_error) = video_input_capture_off(handle, self.ffi.as_ref()) {
                         tracing::error!(
                             "ak_vi_capture_off cleanup after attempt {} failed, aborting retries: {}",
                             attempt,
@@ -893,7 +891,7 @@ impl AnykaVideoInput {
             PlatformError::HardwareUnavailable("Video input not opened".to_string())
         })?;
 
-        video_input_capture_off_internal(handle, self.ffi.as_ref())?;
+        video_input_capture_off(handle, self.ffi.as_ref())?;
         self.capture_started.store(false, Ordering::SeqCst);
         tracing::info!("Video capture stopped successfully");
         Ok(())
@@ -944,7 +942,7 @@ impl VideoInput for AnykaVideoInput {
             ));
         }
 
-        let vi_handle = match video_input_open_internal(VideoDevice::DEV0, self.ffi.as_ref()) {
+        let vi_handle = match video_input_open(VideoDevice::DEV0, self.ffi.as_ref()) {
             Ok(handle) => handle,
             Err(error) => {
                 self.opened.store(false, Ordering::SeqCst);
@@ -991,9 +989,9 @@ impl VideoInput for AnykaVideoInput {
             PlatformError::HardwareUnavailable("Video input handle not available".to_string())
         })?;
 
-        let ffi_res = video_input_get_sensor_resolution_internal(handle, self.ffi.as_ref())?;
+        let ffi_res = video_input_get_sensor_resolution(handle, self.ffi.as_ref())?;
 
-        // Convert FFI Resolution (crate::hal::Resolution) to platform Resolution
+        // Convert FFI Resolution (crate::hal::anyka::sdk::Resolution) to platform Resolution
         Ok(Resolution::new(ffi_res.width, ffi_res.height))
     }
 
@@ -1030,14 +1028,14 @@ use std::time::Instant;
 
 use portable_atomic::AtomicU64;
 
-use crate::hal::VideoFrameType;
-use crate::hal::video::{
-    VideoEncoderHandle, VideoStreamHandle, video_encoder_open_internal,
-    video_encoder_request_idr_internal, video_encoder_set_rc_internal,
+use crate::hal::common::VideoFrameType;
+use crate::hal::common::video::{
+    VideoEncoderHandle, VideoStreamHandle, video_encoder_open, video_encoder_request_idr,
+    video_encoder_set_rc,
 };
 #[cfg(test)]
-use crate::hal::video_stream;
-use crate::hal::{
+use crate::hal::common::video_stream;
+use crate::hal::common::{
     bitrate_ctrl_mode, encode_group_type, encode_output_type, encode_param, encode_use_chn,
     profile_mode,
 };
@@ -1280,7 +1278,7 @@ impl StreamHealthCounters {
 fn unified_frame_read_loop(
     main_stream_handle: Arc<VideoStreamHandle>,
     sub_stream_handle: Option<Arc<VideoStreamHandle>>,
-    _ffi: Arc<dyn crate::hal::video::VideoHalTrait>,
+    _ffi: Arc<dyn crate::hal::common::video::VideoHalTrait>,
     callbacks: Arc<RwLock<HashMap<CallbackId, Arc<dyn FrameCallback>>>>,
     owned_callbacks: Arc<RwLock<HashMap<CallbackId, Arc<dyn OwnedFrameCallback>>>>,
     stop_signal: Arc<AtomicBool>,
@@ -1291,7 +1289,7 @@ fn unified_frame_read_loop(
     frame_pool: Option<Arc<BytesMutPool>>,
 ) {
     #[cfg(test)]
-    use crate::hal::AK_SUCCESS_I32;
+    use crate::hal::common::AK_SUCCESS_I32;
 
     /// Per-stream state for the unified reader loop.
     struct StreamState {
@@ -1331,7 +1329,7 @@ fn unified_frame_read_loop(
     #[allow(clippy::too_many_arguments)]
     fn drain_stream(
         handle: &VideoStreamHandle,
-        ffi: &dyn crate::hal::video::VideoHalTrait,
+        ffi: &dyn crate::hal::common::video::VideoHalTrait,
         state: &mut StreamState,
         callbacks: &RwLock<HashMap<CallbackId, Arc<dyn FrameCallback>>>,
         stop_signal: &AtomicBool,
@@ -1878,7 +1876,7 @@ fn invoke_owned_callbacks_from_map(
 ///   └── callbacks: RwLock<HashMap<CallbackId, Arc<dyn FrameCallback>>>
 /// ```
 struct AnykaVideoEncoder {
-    ffi: Arc<dyn crate::hal::video::VideoHalTrait>,
+    ffi: Arc<dyn crate::hal::common::video::VideoHalTrait>,
     /// Optional VendorIpc reference for the zero-copy owned frame path.
     /// This is the same object as `ffi` (when using IPC mode), stored
     /// separately because we can't downcast `dyn VideoHalTrait` to `VendorIpc`.
@@ -1955,7 +1953,7 @@ impl AnykaVideoEncoder {
     ///
     /// Uses `VendorIpc` to connect to the vendor daemon for vendor library access.
     fn new() -> PlatformResult<Self> {
-        let ipc = crate::hal::vendor_ipc::VendorIpc::new().map_err(|e| {
+        let ipc = crate::hal::anyka::vendor_ipc::VendorIpc::new().map_err(|e| {
             PlatformError::InitializationFailed(format!(
                 "AnykaVideoEncoder: VendorIpc connection failed: {}",
                 e
@@ -1968,7 +1966,7 @@ impl AnykaVideoEncoder {
     /// Create a new `AnykaVideoEncoder` with a custom FFI backend.
     ///
     /// Used by tests with `MockVideoHalTrait` for hardware-free testing.
-    fn with_ffi(ffi: Arc<dyn crate::hal::video::VideoHalTrait>) -> Self {
+    fn with_ffi(ffi: Arc<dyn crate::hal::common::video::VideoHalTrait>) -> Self {
         Self {
             ffi,
             vendor_ipc: None, // No VendorIpc available when using custom FFI
@@ -2017,7 +2015,8 @@ impl AnykaVideoEncoder {
     /// The VendorIpc is stored both as the `dyn VideoHalTrait` backend and as a
     /// concrete reference for the zero-copy frame fetch path.
     fn with_vendor_ipc(ipc: Arc<VendorIpc>) -> Self {
-        let mut encoder = Self::with_ffi(ipc.clone() as Arc<dyn crate::hal::video::VideoHalTrait>);
+        let mut encoder =
+            Self::with_ffi(ipc.clone() as Arc<dyn crate::hal::common::video::VideoHalTrait>);
         encoder.vendor_ipc = Some(ipc);
         encoder
     }
@@ -2240,7 +2239,7 @@ impl AnykaVideoEncoder {
     /// * `sub_enc` - Optional sub encoder handle (360p)
     pub fn start_streaming(
         &self,
-        vi_handle: &Arc<crate::hal::VideoInputHandle>,
+        vi_handle: &Arc<crate::hal::common::video::VideoInputHandle>,
         main_enc: &Arc<VideoEncoderHandle>,
         sub_enc: Option<&Arc<VideoEncoderHandle>>,
     ) -> PlatformResult<()> {
@@ -2278,11 +2277,11 @@ impl AnykaVideoEncoder {
 
         // 1c. Kick initial IDR on requested streams after both requests are complete.
         // This keeps request ordering deterministic while still forcing fast decoder sync.
-        if let Err(e) = video_encoder_request_idr_internal(main_enc, self.ffi.as_ref()) {
+        if let Err(e) = video_encoder_request_idr(main_enc, self.ffi.as_ref()) {
             tracing::warn!("Failed to set initial I-frame for main stream: {}", e);
         }
         if let Some(sub) = sub_enc
-            && let Err(e) = video_encoder_request_idr_internal(sub, self.ffi.as_ref())
+            && let Err(e) = video_encoder_request_idr(sub, self.ffi.as_ref())
         {
             tracing::warn!("Failed to set initial I-frame for sub stream: {}", e);
         }
@@ -2481,7 +2480,7 @@ impl AnykaVideoEncoder {
             PlatformError::HardwareUnavailable(format!("{} encoder not initialized", channel))
         })?;
 
-        video_encoder_request_idr_internal(handle, self.ffi.as_ref())
+        video_encoder_request_idr(handle, self.ffi.as_ref())
     }
 
     /// Close a single encoder by token.
@@ -2599,7 +2598,7 @@ impl VideoEncoder for AnykaVideoEncoder {
         let cfg_path = c"/mnt/anyka_hack/onvif/venc.cfg";
         self.ffi.venc_set_cfg_path(cfg_path.as_ptr());
 
-        let enc_handle = video_encoder_open_internal(&param, self.ffi.as_ref())?;
+        let enc_handle = video_encoder_open(&param, self.ffi.as_ref())?;
 
         *handle_lock.write() = Some(Arc::new(enc_handle));
         *state_lock.write() = EncoderState::Initialized;
@@ -2654,7 +2653,7 @@ impl VideoEncoder for AnykaVideoEncoder {
             if let Some(ref current) = current_config {
                 if current.bitrate != config.bitrate {
                     let bps = config.bitrate as i32; // kbps (vendor SDK expects kbps)
-                    video_encoder_set_rc_internal(handle, bps, self.ffi.as_ref())?;
+                    video_encoder_set_rc(handle, bps, self.ffi.as_ref())?;
                     tracing::info!(
                         "Encoder {} bitrate changed: {}kbps → {}kbps",
                         config.token,
@@ -2718,7 +2717,7 @@ impl VideoEncoder for AnykaVideoEncoder {
 /// Anyka audio input implementation.
 struct AnykaAudioInput {
     #[allow(dead_code)]
-    ffi: Arc<dyn crate::hal::audio::AudioHalTrait>,
+    ffi: Arc<dyn crate::hal::common::audio::AudioHalTrait>,
     opened: AtomicBool,
 }
 
@@ -2727,7 +2726,7 @@ impl AnykaAudioInput {
     ///
     /// Uses `VendorIpc` to connect to the vendor daemon for vendor library access.
     fn new() -> PlatformResult<Self> {
-        let ipc = crate::hal::vendor_ipc::VendorIpc::new().map_err(|e| {
+        let ipc = crate::hal::anyka::vendor_ipc::VendorIpc::new().map_err(|e| {
             PlatformError::InitializationFailed(format!(
                 "AnykaAudioInput: VendorIpc connection failed: {}",
                 e
@@ -2740,7 +2739,7 @@ impl AnykaAudioInput {
         })
     }
 
-    fn with_ffi(ffi: Arc<dyn crate::hal::audio::AudioHalTrait>) -> Self {
+    fn with_ffi(ffi: Arc<dyn crate::hal::common::audio::AudioHalTrait>) -> Self {
         Self {
             ffi,
             opened: AtomicBool::new(false),
@@ -2788,7 +2787,7 @@ impl AudioInput for AnykaAudioInput {
 /// Anyka audio encoder implementation.
 struct AnykaAudioEncoder {
     #[allow(dead_code)]
-    ffi: Arc<dyn crate::hal::audio::AudioHalTrait>,
+    ffi: Arc<dyn crate::hal::common::audio::AudioHalTrait>,
     configurations: RwLock<Vec<AudioEncoderConfig>>,
 }
 
@@ -2797,8 +2796,8 @@ impl AnykaAudioEncoder {
     ///
     /// Uses `VendorIpc` to connect to the vendor daemon for vendor library access.
     fn new() -> PlatformResult<Self> {
-        let ffi: Arc<dyn crate::hal::audio::AudioHalTrait> = {
-            let ipc = crate::hal::vendor_ipc::VendorIpc::new().map_err(|e| {
+        let ffi: Arc<dyn crate::hal::common::audio::AudioHalTrait> = {
+            let ipc = crate::hal::anyka::vendor_ipc::VendorIpc::new().map_err(|e| {
                 PlatformError::InitializationFailed(format!(
                     "AnykaAudioEncoder: VendorIpc connection failed: {}",
                     e
@@ -2811,7 +2810,7 @@ impl AnykaAudioEncoder {
         Ok(Self::with_ffi(ffi))
     }
 
-    fn with_ffi(ffi: Arc<dyn crate::hal::audio::AudioHalTrait>) -> Self {
+    fn with_ffi(ffi: Arc<dyn crate::hal::common::audio::AudioHalTrait>) -> Self {
         Self {
             ffi,
             configurations: RwLock::new(vec![AudioEncoderConfig {
@@ -2881,7 +2880,7 @@ type AnykaPTZControl = super::hw_ptz::HardwarePTZControl;
 
 /// Anyka imaging control implementation.
 struct AnykaImagingControl {
-    ffi: Arc<dyn crate::hal::imaging::ImagingHalTrait>,
+    ffi: Arc<dyn crate::hal::common::imaging::ImagingHalTrait>,
     settings: RwLock<ImagingSettings>,
     video_encoder: Option<Weak<AnykaVideoEncoder>>,
 }
@@ -2891,8 +2890,8 @@ impl AnykaImagingControl {
     ///
     /// Uses `VendorIpc` to connect to the vendor daemon for vendor library access.
     fn new() -> PlatformResult<Self> {
-        let ffi: Arc<dyn crate::hal::imaging::ImagingHalTrait> = {
-            let ipc = crate::hal::vendor_ipc::VendorIpc::new().map_err(|e| {
+        let ffi: Arc<dyn crate::hal::common::imaging::ImagingHalTrait> = {
+            let ipc = crate::hal::anyka::vendor_ipc::VendorIpc::new().map_err(|e| {
                 PlatformError::InitializationFailed(format!(
                     "AnykaImagingControl: VendorIpc connection failed: {}",
                     e
@@ -2905,7 +2904,7 @@ impl AnykaImagingControl {
         Ok(Self::with_ffi(ffi))
     }
 
-    fn with_ffi(ffi: Arc<dyn crate::hal::imaging::ImagingHalTrait>) -> Self {
+    fn with_ffi(ffi: Arc<dyn crate::hal::common::imaging::ImagingHalTrait>) -> Self {
         Self {
             ffi,
             settings: RwLock::new(ImagingSettings {
@@ -2923,7 +2922,7 @@ impl AnykaImagingControl {
     }
 
     fn with_ffi_and_video_encoder(
-        ffi: Arc<dyn crate::hal::imaging::ImagingHalTrait>,
+        ffi: Arc<dyn crate::hal::common::imaging::ImagingHalTrait>,
         video_encoder: Arc<AnykaVideoEncoder>,
     ) -> Self {
         let mut control = Self::with_ffi(ffi);
@@ -2967,16 +2966,16 @@ impl ImagingControl for AnykaImagingControl {
 
     async fn set_settings(&self, settings: &ImagingSettings) -> PlatformResult<()> {
         let start = std::time::Instant::now();
-        crate::hal::imaging::imaging_set_brightness_internal(
+        crate::hal::common::imaging::imaging_set_brightness(
             settings.brightness,
             self.ffi.as_ref(),
         )?;
-        crate::hal::imaging::imaging_set_contrast_internal(settings.contrast, self.ffi.as_ref())?;
-        crate::hal::imaging::imaging_set_saturation_internal(
+        crate::hal::common::imaging::imaging_set_contrast(settings.contrast, self.ffi.as_ref())?;
+        crate::hal::common::imaging::imaging_set_saturation(
             settings.saturation,
             self.ffi.as_ref(),
         )?;
-        crate::hal::imaging::imaging_set_sharpness_internal(settings.sharpness, self.ffi.as_ref())?;
+        crate::hal::common::imaging::imaging_set_sharpness(settings.sharpness, self.ffi.as_ref())?;
         *self.settings.write() = settings.clone();
         self.mark_imaging_update_and_request_idr("set_settings");
         tracing::info!(
@@ -2997,7 +2996,7 @@ impl ImagingControl for AnykaImagingControl {
             return Ok(());
         }
         let start = std::time::Instant::now();
-        crate::hal::imaging::imaging_set_brightness_internal(value, self.ffi.as_ref())?;
+        crate::hal::common::imaging::imaging_set_brightness(value, self.ffi.as_ref())?;
         self.settings.write().brightness = value;
         self.mark_imaging_update_and_request_idr("set_brightness");
         tracing::info!(
@@ -3014,7 +3013,7 @@ impl ImagingControl for AnykaImagingControl {
             return Ok(());
         }
         let start = std::time::Instant::now();
-        crate::hal::imaging::imaging_set_contrast_internal(value, self.ffi.as_ref())?;
+        crate::hal::common::imaging::imaging_set_contrast(value, self.ffi.as_ref())?;
         self.settings.write().contrast = value;
         self.mark_imaging_update_and_request_idr("set_contrast");
         tracing::info!(
@@ -3031,7 +3030,7 @@ impl ImagingControl for AnykaImagingControl {
             return Ok(());
         }
         let start = std::time::Instant::now();
-        crate::hal::imaging::imaging_set_saturation_internal(value, self.ffi.as_ref())?;
+        crate::hal::common::imaging::imaging_set_saturation(value, self.ffi.as_ref())?;
         self.settings.write().saturation = value;
         self.mark_imaging_update_and_request_idr("set_saturation");
         tracing::info!(
@@ -3048,7 +3047,7 @@ impl ImagingControl for AnykaImagingControl {
             return Ok(());
         }
         let start = std::time::Instant::now();
-        crate::hal::imaging::imaging_set_sharpness_internal(value, self.ffi.as_ref())?;
+        crate::hal::common::imaging::imaging_set_sharpness(value, self.ffi.as_ref())?;
         self.settings.write().sharpness = value;
         self.mark_imaging_update_and_request_idr("set_sharpness");
         tracing::info!(
@@ -3306,12 +3305,12 @@ impl NetworkInfo for AnykaNetworkInfo {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::hal::video::MockVideoHalTrait;
-    use crate::hal::{AK_FAILED_I32, AK_SUCCESS_I32};
+    use crate::hal::common::video::MockVideoHalTrait;
+    use crate::hal::common::{AK_FAILED_I32, AK_SUCCESS_I32};
     use std::ffi::c_void;
 
-    fn video_dev0() -> crate::hal::video_dev_type {
-        crate::hal::video_dev_type::Dev0
+    fn video_dev0() -> crate::hal::common::video_dev_type {
+        crate::hal::common::video_dev_type::Dev0
     }
 
     /// Create a mock FFI that expects a successful vi_open call.
@@ -4581,7 +4580,7 @@ mod tests {
     // VideoStreamHandle Tests
     // =========================================================================
 
-    use crate::hal::video::VideoStreamHandle;
+    use crate::hal::common::video::VideoStreamHandle;
 
     #[test]
     fn test_video_stream_handle_creation_success() {
@@ -4671,7 +4670,7 @@ mod tests {
     #[cfg(use_stubs)]
     #[test]
     fn test_frame_type_conversion_i_frame() {
-        use crate::hal::VideoFrameType;
+        use crate::hal::common::VideoFrameType;
         assert_eq!(
             sdk_frame_type_to_frame_type(VideoFrameType::FrameTypeI),
             FrameType::VideoIFrame
@@ -4681,7 +4680,7 @@ mod tests {
     #[cfg(use_stubs)]
     #[test]
     fn test_frame_type_conversion_pi_frame() {
-        use crate::hal::VideoFrameType;
+        use crate::hal::common::VideoFrameType;
         assert_eq!(
             sdk_frame_type_to_frame_type(VideoFrameType::FrameTypePi),
             FrameType::VideoPiFrame
@@ -4691,7 +4690,7 @@ mod tests {
     #[cfg(use_stubs)]
     #[test]
     fn test_frame_type_conversion_p_frame() {
-        use crate::hal::VideoFrameType;
+        use crate::hal::common::VideoFrameType;
         assert_eq!(
             sdk_frame_type_to_frame_type(VideoFrameType::FrameTypeP),
             FrameType::VideoPFrame
@@ -4701,7 +4700,7 @@ mod tests {
     #[cfg(use_stubs)]
     #[test]
     fn test_frame_type_conversion_b_frame() {
-        use crate::hal::VideoFrameType;
+        use crate::hal::common::VideoFrameType;
         assert_eq!(
             sdk_frame_type_to_frame_type(VideoFrameType::FrameTypeB),
             FrameType::VideoBFrame
@@ -4764,7 +4763,7 @@ mod tests {
     #[test]
     #[cfg(use_stubs)]
     fn test_frame_read_loop_invokes_callbacks() {
-        use crate::hal::VideoFrameType;
+        use crate::hal::common::VideoFrameType;
         use std::sync::atomic::AtomicUsize;
 
         let call_count = Arc::new(AtomicUsize::new(0));
@@ -4814,7 +4813,7 @@ mod tests {
                     AK_SUCCESS_I32
                 } else {
                     // Subsequent calls: no more frames (breaks drain loop)
-                    crate::hal::AK_FAILED_I32
+                    crate::hal::common::AK_FAILED_I32
                 }
             });
         mock.expect_get_error_no().returning(|| SDK_ERROR_NO_DATA);
@@ -4837,7 +4836,7 @@ mod tests {
         mock.expect_venc_cancel_stream()
             .returning(|_| AK_SUCCESS_I32);
 
-        let ffi: Arc<dyn crate::hal::video::VideoHalTrait> = Arc::new(mock);
+        let ffi: Arc<dyn crate::hal::common::video::VideoHalTrait> = Arc::new(mock);
         let vi_ptr = std::ptr::NonNull::<c_void>::dangling().as_ptr();
         let venc_ptr = std::ptr::NonNull::<c_void>::dangling().as_ptr();
         let sh = Arc::new(VideoStreamHandle::new(vi_ptr, venc_ptr, Arc::clone(&ffi)).unwrap());
@@ -4886,7 +4885,7 @@ mod tests {
             if count >= 1 {
                 stop_clone.store(true, Ordering::SeqCst);
             }
-            crate::hal::AK_FAILED_I32
+            crate::hal::common::AK_FAILED_I32
         });
         // No-data errors don't call get_error_str (only non-no-data errors do)
         mock.expect_get_error_no().returning(|| SDK_ERROR_NO_DATA);
@@ -4899,7 +4898,7 @@ mod tests {
         mock.expect_venc_cancel_stream()
             .returning(|_| AK_SUCCESS_I32);
 
-        let ffi: Arc<dyn crate::hal::video::VideoHalTrait> = Arc::new(mock);
+        let ffi: Arc<dyn crate::hal::common::video::VideoHalTrait> = Arc::new(mock);
         let vi_ptr = std::ptr::NonNull::<c_void>::dangling().as_ptr();
         let venc_ptr = std::ptr::NonNull::<c_void>::dangling().as_ptr();
         let sh = Arc::new(VideoStreamHandle::new(vi_ptr, venc_ptr, Arc::clone(&ffi)).unwrap());
@@ -4945,7 +4944,7 @@ mod tests {
         mock.expect_venc_cancel_stream()
             .returning(|_| AK_SUCCESS_I32);
 
-        let ffi: Arc<dyn crate::hal::video::VideoHalTrait> = Arc::new(mock);
+        let ffi: Arc<dyn crate::hal::common::video::VideoHalTrait> = Arc::new(mock);
         let vi_ptr = std::ptr::NonNull::<c_void>::dangling().as_ptr();
         let venc_ptr = std::ptr::NonNull::<c_void>::dangling().as_ptr();
         let sh = Arc::new(VideoStreamHandle::new(vi_ptr, venc_ptr, Arc::clone(&ffi)).unwrap());
@@ -5013,7 +5012,7 @@ mod tests {
         encoder.init(&config).await.unwrap();
 
         // Create a dummy VI handle for testing
-        let vi_handle = Arc::new(crate::hal::VideoInputHandle::test_handle());
+        let vi_handle = Arc::new(crate::hal::common::video::VideoInputHandle::test_handle());
         let main_enc = encoder.main_handle.read().clone().unwrap();
 
         // Start streaming
@@ -5049,7 +5048,7 @@ mod tests {
             .times(1)
             .returning(|_| AK_SUCCESS_I32);
 
-        let ffi: Arc<dyn crate::hal::video::VideoHalTrait> = Arc::new(mock);
+        let ffi: Arc<dyn crate::hal::common::video::VideoHalTrait> = Arc::new(mock);
         let encoder = AnykaVideoEncoder::with_ffi(Arc::clone(&ffi));
         let vi_ptr = std::ptr::NonNull::<c_void>::dangling().as_ptr();
         let venc_ptr = std::ptr::NonNull::<c_void>::dangling().as_ptr();
@@ -5101,7 +5100,7 @@ mod tests {
             .times(1)
             .returning(|_| AK_SUCCESS_I32);
 
-        let ffi: Arc<dyn crate::hal::video::VideoHalTrait> = Arc::new(mock);
+        let ffi: Arc<dyn crate::hal::common::video::VideoHalTrait> = Arc::new(mock);
         let encoder = AnykaVideoEncoder::with_ffi(Arc::clone(&ffi));
         let vi_ptr = std::ptr::NonNull::<c_void>::dangling().as_ptr();
         let venc_ptr_main = std::ptr::NonNull::<c_void>::dangling().as_ptr();
@@ -5142,7 +5141,7 @@ mod tests {
             .times(1)
             .returning(|_| AK_SUCCESS_I32);
 
-        let ffi: Arc<dyn crate::hal::video::VideoHalTrait> = Arc::new(mock);
+        let ffi: Arc<dyn crate::hal::common::video::VideoHalTrait> = Arc::new(mock);
         let encoder = AnykaVideoEncoder::with_ffi(Arc::clone(&ffi));
         let vi_ptr = std::ptr::NonNull::<c_void>::dangling().as_ptr();
         let venc_ptr_main = std::ptr::NonNull::<c_void>::dangling().as_ptr();
@@ -5239,7 +5238,7 @@ mod tests {
             .times(1)
             .returning(|_| AK_SUCCESS_I32);
 
-        let ffi: Arc<dyn crate::hal::video::VideoHalTrait> = Arc::new(mock);
+        let ffi: Arc<dyn crate::hal::common::video::VideoHalTrait> = Arc::new(mock);
         let encoder = AnykaVideoEncoder::with_ffi(Arc::clone(&ffi));
         let vi_ptr = std::ptr::NonNull::<c_void>::dangling().as_ptr();
         let venc_ptr = std::ptr::NonNull::<c_void>::dangling().as_ptr();
@@ -5279,7 +5278,7 @@ mod tests {
         mock.expect_venc_cancel_stream()
             .returning(|_| AK_SUCCESS_I32);
 
-        let ffi: Arc<dyn crate::hal::video::VideoHalTrait> = Arc::new(mock);
+        let ffi: Arc<dyn crate::hal::common::video::VideoHalTrait> = Arc::new(mock);
         let vi_ptr = std::ptr::NonNull::<c_void>::dangling().as_ptr();
         let venc_ptr = std::ptr::NonNull::<c_void>::dangling().as_ptr();
         let sh = Arc::new(VideoStreamHandle::new(vi_ptr, venc_ptr, Arc::clone(&ffi)).unwrap());
@@ -5330,7 +5329,7 @@ mod tests {
             if count >= 3 {
                 stop_clone.store(true, Ordering::SeqCst);
             }
-            crate::hal::AK_FAILED_I32
+            crate::hal::common::AK_FAILED_I32
         });
         mock.expect_get_error_no().returning(|| SDK_ERROR_NO_DATA);
 
@@ -5340,7 +5339,7 @@ mod tests {
         mock.expect_venc_cancel_stream()
             .returning(|_| AK_SUCCESS_I32);
 
-        let ffi: Arc<dyn crate::hal::video::VideoHalTrait> = Arc::new(mock);
+        let ffi: Arc<dyn crate::hal::common::video::VideoHalTrait> = Arc::new(mock);
         let vi_ptr = std::ptr::NonNull::<c_void>::dangling().as_ptr();
         let venc_ptr = std::ptr::NonNull::<c_void>::dangling().as_ptr();
         let sh = Arc::new(VideoStreamHandle::new(vi_ptr, venc_ptr, Arc::clone(&ffi)).unwrap());
@@ -5399,7 +5398,7 @@ mod tests {
             .returning(move |_, stream_ptr| {
                 let idx = call_idx_clone.fetch_add(1, Ordering::SeqCst);
                 match idx {
-                    0 => crate::hal::AK_FAILED_I32, // no-data: sleep will back off to 100ms
+                    0 => crate::hal::common::AK_FAILED_I32, // no-data: sleep will back off to 100ms
                     1 => {
                         // First call in cycle 2: return frame (sleep resets to 50ms)
                         unsafe {
@@ -5410,13 +5409,13 @@ mod tests {
                             stream.seq_no = 1;
                             stream.frame_type = VideoFrameType::FrameTypeP;
                         }
-                        crate::hal::AK_SUCCESS_I32
+                        crate::hal::common::AK_SUCCESS_I32
                     }
-                    2 => crate::hal::AK_FAILED_I32, // Second call in cycle 2: no-data (sleep 100ms)
-                    3 => crate::hal::AK_FAILED_I32, // no-data (sleep 200ms capped)
+                    2 => crate::hal::common::AK_FAILED_I32, // Second call in cycle 2: no-data (sleep 100ms)
+                    3 => crate::hal::common::AK_FAILED_I32, // no-data (sleep 200ms capped)
                     _ => {
                         stop_clone.store(true, Ordering::SeqCst);
-                        crate::hal::AK_FAILED_I32
+                        crate::hal::common::AK_FAILED_I32
                     }
                 }
             });
@@ -5430,7 +5429,7 @@ mod tests {
         mock.expect_venc_cancel_stream()
             .returning(|_| AK_SUCCESS_I32);
 
-        let ffi: Arc<dyn crate::hal::video::VideoHalTrait> = Arc::new(mock);
+        let ffi: Arc<dyn crate::hal::common::video::VideoHalTrait> = Arc::new(mock);
         let vi_ptr = std::ptr::NonNull::<c_void>::dangling().as_ptr();
         let venc_ptr = std::ptr::NonNull::<c_void>::dangling().as_ptr();
         let sh = Arc::new(VideoStreamHandle::new(vi_ptr, venc_ptr, Arc::clone(&ffi)).unwrap());
@@ -5483,7 +5482,7 @@ mod tests {
             if idx >= 10 {
                 stop_clone.store(true, Ordering::SeqCst);
             }
-            crate::hal::AK_FAILED_I32
+            crate::hal::common::AK_FAILED_I32
         });
         mock.expect_get_error_no()
             .times(1) // Should be called only once (first cycle probes, rest skip)
@@ -5495,7 +5494,7 @@ mod tests {
         mock.expect_venc_cancel_stream()
             .returning(|_| AK_SUCCESS_I32);
 
-        let ffi: Arc<dyn crate::hal::video::VideoHalTrait> = Arc::new(mock);
+        let ffi: Arc<dyn crate::hal::common::video::VideoHalTrait> = Arc::new(mock);
         let vi_ptr = std::ptr::NonNull::<c_void>::dangling().as_ptr();
         let venc_ptr = std::ptr::NonNull::<c_void>::dangling().as_ptr();
         let sh = Arc::new(VideoStreamHandle::new(vi_ptr, venc_ptr, Arc::clone(&ffi)).unwrap());
@@ -5586,7 +5585,7 @@ mod tests {
         mock.expect_venc_cancel_stream()
             .returning(|_| AK_SUCCESS_I32);
 
-        let ffi: Arc<dyn crate::hal::video::VideoHalTrait> = Arc::new(mock);
+        let ffi: Arc<dyn crate::hal::common::video::VideoHalTrait> = Arc::new(mock);
         let vi_ptr = std::ptr::NonNull::<c_void>::dangling().as_ptr();
         let venc_ptr = std::ptr::NonNull::<c_void>::dangling().as_ptr();
         let sh = Arc::new(VideoStreamHandle::new(vi_ptr, venc_ptr, Arc::clone(&ffi)).unwrap());
@@ -5662,7 +5661,7 @@ mod tests {
         mock.expect_venc_cancel_stream()
             .returning(|_| AK_SUCCESS_I32);
 
-        let ffi: Arc<dyn crate::hal::video::VideoHalTrait> = Arc::new(mock);
+        let ffi: Arc<dyn crate::hal::common::video::VideoHalTrait> = Arc::new(mock);
         let vi_ptr = std::ptr::NonNull::<c_void>::dangling().as_ptr();
         let venc_ptr = std::ptr::NonNull::<c_void>::dangling().as_ptr();
         let sh = Arc::new(VideoStreamHandle::new(vi_ptr, venc_ptr, Arc::clone(&ffi)).unwrap());

@@ -9,8 +9,8 @@
 //! All handles implement the Drop trait to automatically clean up resources:
 //!
 //! ```rust,no_run
-//! use onvif_rust::hal::audio::*;
-//! use onvif_rust::hal::pcm_param;
+//! use onvif_rust::hal::common::audio::*;
+//! use onvif_rust::hal::common::pcm_param;
 //!
 //! // Handle is automatically closed when it goes out of scope
 //! {
@@ -29,9 +29,12 @@ use crate::platform::PlatformError;
 use crate::platform::PlatformResult;
 use std::ffi::c_void;
 
-use crate::hal::{aenc_attr, audio_param, pcm_param};
+use super::{aenc_attr, audio_param, pcm_param};
 
-use crate::hal::{AK_FAILED_I32, AK_SUCCESS_I32};
+use super::{AK_SUCCESS_I32, check_result};
+// AK_FAILED_I32 is used by tests via `use super::*` → re-exported from common
+#[cfg(test)]
+use super::AK_FAILED_I32;
 
 /// Internal trait for abstracting audio FFI calls to enable mocking in tests.
 #[cfg_attr(test, mockall::automock)]
@@ -46,67 +49,6 @@ pub(crate) trait AudioHalTrait: Send + Sync {
     fn aenc_set_attr(&self, enc_handle: *mut c_void, attr: *const aenc_attr) -> i32;
 }
 
-/// Default implementation that calls the real FFI functions.
-pub(crate) struct StubAudioHal;
-
-impl AudioHalTrait for StubAudioHal {
-    fn ai_open(&self, _param: *const pcm_param) -> *mut c_void {
-        std::ptr::NonNull::<c_void>::dangling().as_ptr()
-    }
-
-    fn ai_close(&self, _handle: *mut c_void) -> i32 {
-        AK_SUCCESS_I32
-    }
-
-    fn ai_set_adc_volume(&self, _handle: *mut c_void, _vol: i32) -> i32 {
-        AK_SUCCESS_I32
-    }
-
-    fn ai_set_aslc_volume(&self, _handle: *mut c_void, _vol: i32) -> i32 {
-        AK_SUCCESS_I32
-    }
-
-    fn aenc_open(&self, _param: *const audio_param) -> *mut c_void {
-        std::ptr::NonNull::<c_void>::dangling().as_ptr()
-    }
-
-    fn aenc_close(&self, _handle: *mut c_void) -> i32 {
-        AK_SUCCESS_I32
-    }
-
-    fn aenc_set_attr(&self, _enc_handle: *mut c_void, _attr: *const aenc_attr) -> i32 {
-        AK_SUCCESS_I32
-    }
-}
-
-// Global instance for default FFI implementation
-static DEFAULT_AUDIO_HAL: StubAudioHal = StubAudioHal;
-
-/// Helper function to convert SDK return codes to PlatformResult.
-///
-/// # Arguments
-///
-/// * `ret` - SDK return code (0 = AK_SUCCESS, -1 = AK_FAILED, or other error codes)
-/// * `context` - Context string for error messages
-///
-/// # Returns
-///
-/// * `Ok(())` if `ret == AK_SUCCESS`
-/// * `Err(PlatformError::HardwareFailure(...))` otherwise
-fn check_result(ret: i32, context: &str) -> PlatformResult<()> {
-    match ret {
-        AK_SUCCESS_I32 => Ok(()),
-        AK_FAILED_I32 => Err(PlatformError::HardwareFailure(format!(
-            "{} failed",
-            context
-        ))),
-        _ => Err(PlatformError::HardwareFailure(format!(
-            "{}: error code {}",
-            context, ret
-        ))),
-    }
-}
-
 /// RAII handle for audio input device.
 ///
 /// This handle automatically closes the audio input device when dropped,
@@ -116,6 +58,7 @@ fn check_result(ret: i32, context: &str) -> PlatformResult<()> {
 ///
 /// The underlying SDK uses internal mutexes for thread safety, so this handle
 /// is safe to send and share between threads.
+#[allow(dead_code)] // Fields used on ARM targets
 pub struct AudioInputHandle {
     handle: *mut c_void,
 }
@@ -138,13 +81,14 @@ impl AudioInputHandle {
     ///
     /// The returned pointer is only valid while the handle is alive.
     /// Do not use after the handle is dropped.
+    #[allow(dead_code)] // Used on ARM targets
     pub(crate) fn as_ptr(&self) -> *mut c_void {
         self.handle
     }
 }
 
-/// Internal helper that takes FFI trait for testability.
-pub(crate) fn audio_input_open_internal(
+#[allow(dead_code)] // Called from platform layer on ARM
+pub(crate) fn audio_input_open(
     param: &pcm_param,
     ffi: &dyn AudioHalTrait,
 ) -> PlatformResult<AudioInputHandle> {
@@ -159,29 +103,8 @@ pub(crate) fn audio_input_open_internal(
     }
 }
 
-/// Open an audio input device.
-///
-/// # Arguments
-///
-/// * `param` - PCM parameters for audio input
-///
-/// # Returns
-///
-/// * `Ok(AudioInputHandle)` on success
-/// * `Err(PlatformError::HardwareUnavailable)` if device cannot be opened
-///
-/// # Safety
-///
-/// The FFI call is safe because:
-/// - `ak_ai_open()` returns a handle or NULL
-/// - We validate the result (null check)
-/// - Handle is wrapped in `AudioInputHandle` for RAII cleanup
-pub fn audio_input_open(param: &pcm_param) -> PlatformResult<AudioInputHandle> {
-    audio_input_open_internal(param, &DEFAULT_AUDIO_HAL)
-}
-
-/// Internal helper that takes FFI trait for testability.
-pub(crate) fn audio_input_set_volume_internal(
+#[allow(dead_code)] // Called from platform layer on ARM
+pub(crate) fn audio_input_set_volume(
     handle: &AudioInputHandle,
     volume: u8,
     ffi: &dyn AudioHalTrait,
@@ -211,30 +134,6 @@ pub(crate) fn audio_input_set_volume_internal(
     }
 }
 
-/// Set audio input volume.
-///
-/// This function wraps the `ak_ai_set_volume()` macro, which internally
-/// calls `ak_ai_set_adc_volume()` and `ak_ai_set_aslc_volume()`.
-///
-/// # Arguments
-///
-/// * `handle` - Audio input handle
-/// * `volume` - Volume level (0-15, where >=8 uses both ADC and ASLC)
-///
-/// # Returns
-///
-/// * `Ok(())` on success
-/// * `Err(PlatformError::HardwareFailure)` on SDK error
-///
-/// # Notes
-///
-/// The SDK macro `ak_ai_set_volume` splits the volume:
-/// - ADC volume: `volume >= 8 ? 8 : (volume % 8)`
-/// - ASLC volume: `volume >= 8 ? (volume - 8) : 0`
-pub fn audio_input_set_volume(handle: &AudioInputHandle, volume: u8) -> PlatformResult<()> {
-    audio_input_set_volume_internal(handle, volume, &DEFAULT_AUDIO_HAL)
-}
-
 /// RAII handle for audio encoder.
 ///
 /// This handle automatically closes the audio encoder when dropped,
@@ -244,6 +143,7 @@ pub fn audio_input_set_volume(handle: &AudioInputHandle, volume: u8) -> Platform
 ///
 /// The underlying SDK uses internal mutexes for thread safety, so this handle
 /// is safe to send and share between threads.
+#[allow(dead_code)] // Fields used on ARM targets
 pub struct AudioEncoderHandle {
     handle: *mut c_void,
 }
@@ -266,13 +166,14 @@ impl AudioEncoderHandle {
     ///
     /// The returned pointer is only valid while the handle is alive.
     /// Do not use after the handle is dropped.
+    #[allow(dead_code)] // Used on ARM targets
     pub(crate) fn as_ptr(&self) -> *mut c_void {
         self.handle
     }
 }
 
-/// Internal helper that takes FFI trait for testability.
-pub(crate) fn audio_encoder_open_internal(
+#[allow(dead_code)] // Called from platform layer on ARM
+pub(crate) fn audio_encoder_open(
     param: &audio_param,
     ffi: &dyn AudioHalTrait,
 ) -> PlatformResult<AudioEncoderHandle> {
@@ -287,29 +188,8 @@ pub(crate) fn audio_encoder_open_internal(
     }
 }
 
-/// Open an audio encoder.
-///
-/// # Arguments
-///
-/// * `param` - Audio encoding parameters
-///
-/// # Returns
-///
-/// * `Ok(AudioEncoderHandle)` on success
-/// * `Err(PlatformError::HardwareUnavailable)` if encoder cannot be opened
-///
-/// # Safety
-///
-/// The FFI call is safe because:
-/// - `ak_aenc_open()` returns a handle or NULL
-/// - We validate the result (null check)
-/// - Handle is wrapped in `AudioEncoderHandle` for RAII cleanup
-pub fn audio_encoder_open(param: &audio_param) -> PlatformResult<AudioEncoderHandle> {
-    audio_encoder_open_internal(param, &DEFAULT_AUDIO_HAL)
-}
-
-/// Internal helper that takes FFI trait for testability.
-pub(crate) fn audio_encoder_set_config_internal(
+#[allow(dead_code)] // Called from platform layer on ARM
+pub(crate) fn audio_encoder_set_config(
     handle: &AudioEncoderHandle,
     attr: &aenc_attr,
     ffi: &dyn AudioHalTrait,
@@ -318,120 +198,13 @@ pub(crate) fn audio_encoder_set_config_internal(
     check_result(ret, "ak_aenc_set_attr")
 }
 
-/// Set audio encoder configuration.
-///
-/// This wraps `ak_aenc_set_attr()` which sets audio encoder attributes
-/// after the encoder has been opened.
-///
-/// # Arguments
-///
-/// * `handle` - Audio encoder handle
-/// * `attr` - Audio encoder attributes to set
-///
-/// # Returns
-///
-/// * `Ok(())` on success
-/// * `Err(PlatformError::HardwareFailure)` on SDK error
-pub fn audio_encoder_set_config(
-    handle: &AudioEncoderHandle,
-    attr: &aenc_attr,
-) -> PlatformResult<()> {
-    audio_encoder_set_config_internal(handle, attr, &DEFAULT_AUDIO_HAL)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_check_result_success() {
-        let result = check_result(AK_SUCCESS_I32, "test_function");
-        assert!(result.is_ok());
-    }
-
-    #[test]
-    fn test_check_result_failed() {
-        let result = check_result(AK_FAILED_I32, "test_function");
-        assert!(result.is_err());
-        match result {
-            Err(PlatformError::HardwareFailure(msg)) => {
-                assert!(msg.contains("test_function"));
-                assert!(msg.contains("failed"));
-            }
-            _ => panic!("Expected HardwareFailure error"),
-        }
-    }
-
-    #[test]
-    #[cfg(use_stubs)]
-    fn test_audio_input_open_success() {
-        let param = pcm_param {
-            sample_rate: 8000,
-            channel_num: 1,
-            sample_bits: 16,
-        };
-        let result = audio_input_open(&param);
-        assert!(result.is_ok());
-        let handle = result.unwrap();
-        assert!(!handle.as_ptr().is_null());
-    }
-
-    #[test]
-    #[cfg(use_stubs)]
-    fn test_audio_input_set_volume_success() {
-        let param = pcm_param {
-            sample_rate: 8000,
-            channel_num: 1,
-            sample_bits: 16,
-        };
-        let handle = audio_input_open(&param).unwrap();
-        let result = audio_input_set_volume(&handle, 10);
-        assert!(result.is_ok());
-    }
-
-    #[test]
-    #[cfg(use_stubs)]
-    fn test_audio_input_set_volume_low() {
-        let param = pcm_param {
-            sample_rate: 8000,
-            channel_num: 1,
-            sample_bits: 16,
-        };
-        let handle = audio_input_open(&param).unwrap();
-        // Volume < 8: ADC = volume % 8, ASLC = 0
-        let result = audio_input_set_volume(&handle, 5);
-        assert!(result.is_ok());
-    }
-
-    #[test]
-    #[cfg(use_stubs)]
-    fn test_audio_encoder_open_success() {
-        let mut param = audio_param::default();
-        param.sample_rate = 8000;
-        param.channel_num = 1;
-        param.sample_bits = 16;
-        let result = audio_encoder_open(&param);
-        assert!(result.is_ok());
-        let handle = result.unwrap();
-        assert!(!handle.as_ptr().is_null());
-    }
-
-    #[test]
-    #[cfg(use_stubs)]
-    fn test_audio_encoder_set_config_success() {
-        let mut param = audio_param::default();
-        param.sample_rate = 8000;
-        param.channel_num = 1;
-        param.sample_bits = 16;
-        let handle = audio_encoder_open(&param).unwrap();
-        let attr = aenc_attr::default();
-        let result = audio_encoder_set_config(&handle, &attr);
-        assert!(result.is_ok());
-    }
-
     // Mockall-based tests for wrapper functions
     #[test]
-    fn test_audio_input_open_internal_calls_ffi_and_returns_handle() {
+    fn test_audio_input_open_calls_ffi_and_returns_handle() {
         let mut mock_ffi = MockAudioHalTrait::new();
         let test_handle = std::ptr::NonNull::<c_void>::dangling().as_ptr();
         let param = pcm_param {
@@ -446,14 +219,14 @@ mod tests {
             .times(1)
             .returning(move |_| test_handle_usize as *mut c_void);
 
-        let result = audio_input_open_internal(&param, &mock_ffi);
+        let result = audio_input_open(&param, &mock_ffi);
         assert!(result.is_ok());
         let handle = result.unwrap();
         assert_eq!(handle.as_ptr(), test_handle);
     }
 
     #[test]
-    fn test_audio_input_open_internal_returns_error_on_null_handle() {
+    fn test_audio_input_open_returns_error_on_null_handle() {
         let mut mock_ffi = MockAudioHalTrait::new();
         let param = pcm_param {
             sample_rate: 8000,
@@ -466,7 +239,7 @@ mod tests {
             .times(1)
             .returning(|_| std::ptr::null_mut());
 
-        let result = audio_input_open_internal(&param, &mock_ffi);
+        let result = audio_input_open(&param, &mock_ffi);
         assert!(result.is_err());
         match result {
             Err(PlatformError::HardwareUnavailable(_)) => {}
@@ -475,7 +248,7 @@ mod tests {
     }
 
     #[test]
-    fn test_audio_input_set_volume_internal_calls_both_ffi_functions() {
+    fn test_audio_input_set_volume_calls_both_ffi_functions() {
         let mut mock_ffi = MockAudioHalTrait::new();
         let test_handle = std::ptr::NonNull::<c_void>::dangling().as_ptr();
         let ai_handle = AudioInputHandle {
@@ -496,12 +269,12 @@ mod tests {
             .times(1)
             .returning(|_, _| AK_SUCCESS_I32);
 
-        let result = audio_input_set_volume_internal(&ai_handle, 10, &mock_ffi);
+        let result = audio_input_set_volume(&ai_handle, 10, &mock_ffi);
         assert!(result.is_ok());
     }
 
     #[test]
-    fn test_audio_input_set_volume_internal_low_volume_calls_only_adc() {
+    fn test_audio_input_set_volume_low_volume_calls_only_adc() {
         let mut mock_ffi = MockAudioHalTrait::new();
         let test_handle = std::ptr::NonNull::<c_void>::dangling().as_ptr();
         let ai_handle = AudioInputHandle {
@@ -522,12 +295,12 @@ mod tests {
             .times(1)
             .returning(|_, _| AK_SUCCESS_I32);
 
-        let result = audio_input_set_volume_internal(&ai_handle, 5, &mock_ffi);
+        let result = audio_input_set_volume(&ai_handle, 5, &mock_ffi);
         assert!(result.is_ok());
     }
 
     #[test]
-    fn test_audio_input_set_volume_internal_propagates_error_on_adc_failure() {
+    fn test_audio_input_set_volume_propagates_error_on_adc_failure() {
         let mut mock_ffi = MockAudioHalTrait::new();
         let test_handle = std::ptr::NonNull::<c_void>::dangling().as_ptr();
         let ai_handle = AudioInputHandle {
@@ -547,7 +320,7 @@ mod tests {
             .times(0..=1)
             .returning(|_, _| AK_SUCCESS_I32);
 
-        let result = audio_input_set_volume_internal(&ai_handle, 10, &mock_ffi);
+        let result = audio_input_set_volume(&ai_handle, 10, &mock_ffi);
         assert!(result.is_err());
         match result {
             Err(PlatformError::HardwareFailure(msg)) => {
@@ -558,7 +331,7 @@ mod tests {
     }
 
     #[test]
-    fn test_audio_input_set_volume_internal_propagates_error_on_aslc_failure() {
+    fn test_audio_input_set_volume_propagates_error_on_aslc_failure() {
         let mut mock_ffi = MockAudioHalTrait::new();
         let test_handle = std::ptr::NonNull::<c_void>::dangling().as_ptr();
         let ai_handle = AudioInputHandle {
@@ -578,7 +351,7 @@ mod tests {
             .times(1)
             .returning(|_, _| AK_FAILED_I32);
 
-        let result = audio_input_set_volume_internal(&ai_handle, 10, &mock_ffi);
+        let result = audio_input_set_volume(&ai_handle, 10, &mock_ffi);
         assert!(result.is_err());
         match result {
             Err(PlatformError::HardwareFailure(msg)) => {
@@ -589,7 +362,7 @@ mod tests {
     }
 
     #[test]
-    fn test_audio_input_set_volume_internal_rejects_out_of_range_volume() {
+    fn test_audio_input_set_volume_rejects_out_of_range_volume() {
         let mock_ffi = MockAudioHalTrait::new();
         let test_handle = std::ptr::NonNull::<c_void>::dangling().as_ptr();
         let ai_handle = AudioInputHandle {
@@ -597,7 +370,7 @@ mod tests {
         };
 
         // Volume > 15 should be rejected
-        let result = audio_input_set_volume_internal(&ai_handle, 16, &mock_ffi);
+        let result = audio_input_set_volume(&ai_handle, 16, &mock_ffi);
         assert!(result.is_err());
         match result {
             Err(PlatformError::InvalidParameter(msg)) => {
@@ -622,12 +395,12 @@ mod tests {
             .times(1)
             .returning(|_, _| AK_SUCCESS_I32);
 
-        let result = audio_input_set_volume_internal(&ai_handle, 15, &mock_ffi_valid);
+        let result = audio_input_set_volume(&ai_handle, 15, &mock_ffi_valid);
         assert!(result.is_ok());
     }
 
     #[test]
-    fn test_audio_encoder_open_internal_calls_ffi_and_returns_handle() {
+    fn test_audio_encoder_open_calls_ffi_and_returns_handle() {
         let mut mock_ffi = MockAudioHalTrait::new();
         let test_handle = std::ptr::NonNull::<c_void>::dangling().as_ptr();
         let mut param = audio_param::default();
@@ -641,14 +414,14 @@ mod tests {
             .times(1)
             .returning(move |_| test_handle_usize as *mut c_void);
 
-        let result = audio_encoder_open_internal(&param, &mock_ffi);
+        let result = audio_encoder_open(&param, &mock_ffi);
         assert!(result.is_ok());
         let handle = result.unwrap();
         assert_eq!(handle.as_ptr(), test_handle);
     }
 
     #[test]
-    fn test_audio_encoder_open_internal_returns_error_on_null_handle() {
+    fn test_audio_encoder_open_returns_error_on_null_handle() {
         let mut mock_ffi = MockAudioHalTrait::new();
         let mut param = audio_param::default();
         param.sample_rate = 8000;
@@ -660,7 +433,7 @@ mod tests {
             .times(1)
             .returning(|_| std::ptr::null_mut());
 
-        let result = audio_encoder_open_internal(&param, &mock_ffi);
+        let result = audio_encoder_open(&param, &mock_ffi);
         assert!(result.is_err());
         match result {
             Err(PlatformError::HardwareUnavailable(_)) => {}
@@ -669,7 +442,7 @@ mod tests {
     }
 
     #[test]
-    fn test_audio_encoder_set_config_internal_calls_ffi() {
+    fn test_audio_encoder_set_config_calls_ffi() {
         let mut mock_ffi = MockAudioHalTrait::new();
         let test_handle = std::ptr::NonNull::<c_void>::dangling().as_ptr();
         let enc_handle = AudioEncoderHandle {
@@ -684,12 +457,12 @@ mod tests {
             .times(1)
             .returning(|_, _| AK_SUCCESS_I32);
 
-        let result = audio_encoder_set_config_internal(&enc_handle, &attr, &mock_ffi);
+        let result = audio_encoder_set_config(&enc_handle, &attr, &mock_ffi);
         assert!(result.is_ok());
     }
 
     #[test]
-    fn test_audio_encoder_set_config_internal_propagates_error() {
+    fn test_audio_encoder_set_config_propagates_error() {
         let mut mock_ffi = MockAudioHalTrait::new();
         let test_handle = std::ptr::NonNull::<c_void>::dangling().as_ptr();
         let enc_handle = AudioEncoderHandle {
@@ -704,7 +477,7 @@ mod tests {
             .times(1)
             .returning(|_, _| AK_FAILED_I32);
 
-        let result = audio_encoder_set_config_internal(&enc_handle, &attr, &mock_ffi);
+        let result = audio_encoder_set_config(&enc_handle, &attr, &mock_ffi);
         assert!(result.is_err());
         match result {
             Err(PlatformError::HardwareFailure(msg)) => {
