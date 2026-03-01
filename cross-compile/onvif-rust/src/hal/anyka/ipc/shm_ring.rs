@@ -578,7 +578,7 @@ impl ShmRingReader {
 
     /// Copy frame data from a slot into a `BytesMut` buffer.
     ///
-    /// This is the integration point with the existing VendorIpc frame path.
+    /// This is the integration point with the existing AnykaIpc frame path.
     /// It performs one copy from shared memory to the BytesMut buffer.
     ///
     /// # Arguments

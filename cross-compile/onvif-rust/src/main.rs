@@ -13,7 +13,7 @@ use clap::Parser;
 use onvif_rust::app::{Application, DEFAULT_CONFIG_PATH};
 use onvif_rust::config::{ConfigRuntime, ConfigStorage};
 #[cfg(not(use_stubs))]
-use onvif_rust::hal::anyka::vendor_ipc;
+use onvif_rust::hal::anyka::ipc;
 #[cfg(not(use_stubs))]
 use onvif_rust::platform::AnykaPlatform;
 use onvif_rust::platform::Platform;
@@ -350,7 +350,7 @@ fn configure_stream_frame_debug_logging(config: &ConfigRuntime) -> bool {
 fn configure_ipc_debug_logging(config: &ConfigRuntime) -> bool {
     let enabled = config.get_bool("logging.ipc_debug").unwrap_or(false);
     #[cfg(not(use_stubs))]
-    vendor_ipc::set_ipc_debug_logging(enabled);
+    ipc::set_ipc_debug_logging(enabled);
     enabled
 }
 

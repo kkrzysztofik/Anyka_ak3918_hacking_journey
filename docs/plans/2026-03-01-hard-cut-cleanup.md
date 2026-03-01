@@ -66,7 +66,7 @@ Functions currently marked `#[allow(dead_code)]` that will be removed if unused:
 - `src/hal/ptz.rs:182,247` - HAL internals
 - `src/hal/video.rs:43` - HAL internals
 - `src/hal/audio.rs:38` - HAL internals
-- `src/hal/shm_ring.rs:881` - HAL internals
+- `src/hal/anyka/ipc/shm_ring.rs:881` - HAL internals
 
 ---
 
@@ -165,7 +165,7 @@ Files to NOT modify:
 - `src/hal/ptz_driver.rs` - Kernel ABI reserved ioctls
 - `src/hal/vendor_ipc.rs` - SDK struct fields matching C ABI
 - `src/hal/ptz.rs`, `src/hal/video.rs`, `src/hal/audio.rs` - HAL internals may be used by future platform implementations
-- `src/hal/shm_ring.rs` - Shared memory ring buffer internals
+- `src/hal/anyka/ipc/shm_ring.rs` - Shared memory ring buffer internals
 
 ---
 

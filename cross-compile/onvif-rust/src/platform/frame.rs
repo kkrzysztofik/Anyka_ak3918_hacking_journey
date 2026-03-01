@@ -75,7 +75,7 @@ pub struct FrameMetadata {
 /// # Usage
 ///
 /// ```text
-/// vendor_ipc::recv_pushed_frame()
+/// ipc::recv_pushed_frame()
 ///   → OwnedFrame { data: BytesMut, ... }
 ///     → OwnedFrameCallback::on_owned_frame()
 ///       → StreamingBridge::route_owned_frame()  // moves data, no copy

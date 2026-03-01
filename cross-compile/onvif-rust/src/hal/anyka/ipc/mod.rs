@@ -1,8 +1,7 @@
-//! Unix socket IPC client for vendor daemon communication.
+//! Unix socket IPC client for Anyka vendor daemon communication.
 //!
-//! This module provides an alternative FFI implementation that communicates with
-//! a vendor daemon via Unix socket at `/tmp/vendor-daemon.sock` instead of
-//! directly calling the Anyka SDK C functions.
+//! This module provides a HAL backend that communicates with a vendor daemon
+//! via Unix socket instead of directly calling the Anyka SDK C functions.
 //!
 //! # Binary Protocol
 //!
@@ -15,13 +14,18 @@
 
 #![allow(dead_code)]
 
-use super::shm_ring::{FrameNotification, ShmRingReader};
+mod audio;
+mod imaging;
+mod shm_ring;
+mod video;
+
 use crate::platform::PlatformError;
 use crate::platform::PlatformResult;
 use crate::platform::frame::{OwnedFrame, StreamId};
 use crate::streaming::bridge::BytesMutPool;
+use shm_ring::{FrameNotification, ShmRingReader};
 
-use std::ffi::{c_char, c_void};
+use std::ffi::c_void;
 use std::io::{ErrorKind, Read, Write};
 use std::os::fd::AsRawFd;
 use std::os::unix::net::UnixStream;
@@ -29,15 +33,14 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
-use tracing::{debug, error, warn};
+use tracing::{debug, warn};
 
-use crate::hal::common::video::VideoHalTrait;
-use crate::hal::common::{aenc_attr, audio_param, pcm_param};
 use crate::hal::common::{
-    encode_param, video_channel_attr, video_dev_type, video_resolution, video_stream,
+    aenc_attr, audio_param, encode_param, pcm_param, video_channel_attr, video_dev_type,
+    video_resolution,
 };
 
-use crate::hal::common::{AK_FAILED_I32, AK_SUCCESS_I32};
+use crate::hal::common::AK_SUCCESS_I32;
 
 // ============================================================================
 // Self-contained type definitions for IPC (matching C daemon structs)
@@ -273,8 +276,8 @@ const CMD_GET_ERROR_NO: i32 = 200;
 const CMD_GET_ERROR_STR: i32 = 201;
 const PUSH_NOTIFICATION_TIMEOUT: Duration = Duration::from_millis(200);
 
-/// IPC client for vendor daemon communication
-pub struct VendorIpc {
+/// IPC client for Anyka vendor daemon communication.
+pub struct AnykaIpc {
     /// Control socket for command RPCs.
     stream: Arc<Mutex<UnixStream>>,
     /// Dedicated main-stream frame notification socket.
@@ -289,7 +292,7 @@ pub struct VendorIpc {
     prefer_sub_on_tie: AtomicBool,
 }
 
-impl VendorIpc {
+impl AnykaIpc {
     fn cmd_name(cmd_id: i32) -> &'static str {
         match cmd_id {
             CMD_VI_MATCH_SENSOR => "VI_MATCH_SENSOR",
@@ -539,7 +542,11 @@ impl VendorIpc {
     /// Send a request and receive a response over the Unix socket.
     ///
     /// On I/O error, attempts a single reconnect and retries the request.
-    fn send_request(&self, cmd_id: i32, req_data: &[u8]) -> PlatformResult<(i32, Vec<u8>)> {
+    pub(crate) fn send_request(
+        &self,
+        cmd_id: i32,
+        req_data: &[u8],
+    ) -> PlatformResult<(i32, Vec<u8>)> {
         let started = Instant::now();
         let cmd_name = Self::cmd_name(cmd_id);
         if is_ipc_debug_enabled() {
@@ -664,7 +671,11 @@ impl VendorIpc {
     }
 
     /// Send request expecting a handle response (8-byte i64).
-    fn send_handle_request(&self, cmd_id: i32, req_data: &[u8]) -> PlatformResult<*mut c_void> {
+    pub(crate) fn send_handle_request(
+        &self,
+        cmd_id: i32,
+        req_data: &[u8],
+    ) -> PlatformResult<*mut c_void> {
         let (status, resp_data) = self.send_request(cmd_id, req_data)?;
         if status != AK_SUCCESS_I32 || resp_data.len() < 8 {
             return Err(PlatformError::HardwareFailure(format!(
@@ -680,7 +691,7 @@ impl VendorIpc {
     }
 
     /// Send request expecting i32 response.
-    fn send_i32_request(&self, cmd_id: i32, req_data: &[u8]) -> PlatformResult<i32> {
+    pub(crate) fn send_i32_request(&self, cmd_id: i32, req_data: &[u8]) -> PlatformResult<i32> {
         let (status, resp_data) = self.send_request(cmd_id, req_data)?;
         if resp_data.len() >= 4 {
             Ok(i32::from_le_bytes(resp_data[0..4].try_into().map_err(
@@ -947,7 +958,7 @@ impl VendorIpc {
 
     /// Encode video_channel_attr to a fixed-size buffer (48 bytes).
     /// Format: crop (16 bytes) + res[0] (16 bytes) + res[1] (16 bytes)
-    fn encode_video_channel_attr_buf(attr: &video_channel_attr) -> ([u8; 48], usize) {
+    pub(crate) fn encode_video_channel_attr_buf(attr: &video_channel_attr) -> ([u8; 48], usize) {
         let mut buf = [0u8; 48];
         let mut offset = 0;
         // Crop info (16 bytes)
@@ -974,7 +985,7 @@ impl VendorIpc {
     }
 
     /// Encode encode_param to a fixed-size buffer (48 bytes).
-    fn encode_encode_param_buf(param: &encode_param) -> ([u8; 48], usize) {
+    pub(crate) fn encode_encode_param_buf(param: &encode_param) -> ([u8; 48], usize) {
         let mut buf = [0u8; 48];
         let mut offset = 0;
         buf[offset..offset + 4].copy_from_slice(&param.width.to_le_bytes());
@@ -1005,7 +1016,7 @@ impl VendorIpc {
     }
 
     /// Encode pcm_param to a fixed-size buffer (12 bytes).
-    fn encode_pcm_param_buf(param: &pcm_param) -> ([u8; 12], usize) {
+    pub(crate) fn encode_pcm_param_buf(param: &pcm_param) -> ([u8; 12], usize) {
         let mut buf = [0u8; 12];
         let mut offset = 0;
         buf[offset..offset + 4].copy_from_slice(&param.sample_rate.to_le_bytes());
@@ -1018,7 +1029,7 @@ impl VendorIpc {
     }
 
     /// Encode audio_param to a fixed-size buffer (16 bytes).
-    fn encode_audio_param_buf(param: &audio_param) -> ([u8; 16], usize) {
+    pub(crate) fn encode_audio_param_buf(param: &audio_param) -> ([u8; 16], usize) {
         let mut buf = [0u8; 16];
         let mut offset = 0;
         buf[offset..offset + 4].copy_from_slice(&param.sample_rate.to_le_bytes());
@@ -1033,7 +1044,7 @@ impl VendorIpc {
     }
 
     /// Encode aenc_attr to a fixed-size buffer (4 bytes).
-    fn encode_aenc_attr_buf(attr: &aenc_attr) -> ([u8; 4], usize) {
+    pub(crate) fn encode_aenc_attr_buf(attr: &aenc_attr) -> ([u8; 4], usize) {
         let mut buf = [0u8; 4];
         buf.copy_from_slice(&attr.aac_head.to_le_bytes());
         (buf, 4)
@@ -1108,424 +1119,33 @@ impl VendorIpc {
     }
 }
 
-impl VideoHalTrait for VendorIpc {
-    fn vi_match_sensor(&self, config_file: *const c_char) -> i32 {
-        if config_file.is_null() {
-            return AK_FAILED_I32;
-        }
-        // SAFETY: caller guarantees `config_file` is a valid, null-terminated C string
-        // for the duration of this call (same contract as the underlying FFI).
-        let c_str = unsafe { std::ffi::CStr::from_ptr(config_file) };
-        let path_str = match c_str.to_str() {
-            Ok(s) => s,
-            Err(_) => return AK_FAILED_I32,
-        };
-
-        match self.send_i32_request(CMD_VI_MATCH_SENSOR, path_str.as_bytes()) {
-            Ok(status) => status,
-            Err(e) => {
-                error!(error = %e, "vi_match_sensor IPC failed");
-                AK_FAILED_I32
-            }
-        }
-    }
-
-    fn vi_open(&self, dev: video_dev_type) -> *mut c_void {
-        let (req_buf, req_len) = Self::encode_video_dev_type_buf(dev);
-        match self.send_handle_request(CMD_VI_OPEN, &req_buf[..req_len]) {
-            Ok(handle) => handle,
-            Err(e) => {
-                error!(error = %e, "vi_open IPC failed");
-                std::ptr::null_mut()
-            }
-        }
-    }
-
-    fn vi_close(&self, handle: *mut c_void) -> i32 {
-        let handle_val = handle as u64;
-        let req_data = handle_val.to_le_bytes().to_vec();
-        match self.send_request(CMD_VI_CLOSE, &req_data) {
-            Ok((status, _)) => status,
-            Err(e) => {
-                error!(error = %e, "vi_close IPC failed");
-                AK_FAILED_I32
-            }
-        }
-    }
-
-    fn vi_get_sensor_resolution(&self, handle: *mut c_void, res: *mut video_resolution) -> i32 {
-        let handle_val = handle as u64;
-        let req_data = handle_val.to_le_bytes().to_vec();
-        match self.send_request(CMD_VI_GET_SENSOR_RESOLUTION, &req_data) {
-            Ok((status, data)) => {
-                if status == AK_SUCCESS_I32 {
-                    match Self::decode_video_resolution(&data) {
-                        Ok(r) => {
-                            // SAFETY: caller guarantees `res` is a valid, properly aligned
-                            // pointer to a `video_resolution` struct that we may write.
-                            unsafe {
-                                *res = r;
-                            }
-                            return AK_SUCCESS_I32;
-                        }
-                        Err(e) => {
-                            error!(error = %e, "Failed to decode vi_get_sensor_resolution response");
-                            return AK_FAILED_I32;
-                        }
-                    }
-                }
-                status
-            }
-            Err(e) => {
-                error!(error = %e, "vi_get_sensor_resolution IPC failed");
-                AK_FAILED_I32
-            }
-        }
-    }
-
-    fn vi_set_channel_attr(&self, handle: *mut c_void, attr: *const video_channel_attr) -> i32 {
-        let handle_val = handle as u64;
-        let mut req_buf = [0u8; 56]; // 8 bytes handle + 48 bytes attr
-        req_buf[0..8].copy_from_slice(&handle_val.to_le_bytes());
-        // SAFETY: caller guarantees `attr` is a valid, non-null pointer to a
-        // `video_channel_attr` that remains valid for the duration of this call.
-        let (attr_buf, attr_len) = unsafe { Self::encode_video_channel_attr_buf(&*attr) };
-        req_buf[8..8 + attr_len].copy_from_slice(&attr_buf[..attr_len]);
-        match self.send_request(CMD_VI_SET_CHANNEL_ATTR, &req_buf[..8 + attr_len]) {
-            Ok((status, _)) => status,
-            Err(e) => {
-                error!(error = %e, "vi_set_channel_attr IPC failed");
-                AK_FAILED_I32
-            }
-        }
-    }
-
-    fn vi_capture_on(&self, handle: *mut c_void) -> i32 {
-        let handle_val = handle as u64;
-        let req_data = handle_val.to_le_bytes().to_vec();
-        match self.send_request(CMD_VI_CAPTURE_ON, &req_data) {
-            Ok((status, _)) => status,
-            Err(e) => {
-                error!(error = %e, "vi_capture_on IPC failed");
-                AK_FAILED_I32
-            }
-        }
-    }
-
-    fn vi_capture_off(&self, handle: *mut c_void) -> i32 {
-        let handle_val = handle as u64;
-        let req_data = handle_val.to_le_bytes().to_vec();
-        match self.send_request(CMD_VI_CAPTURE_OFF, &req_data) {
-            Ok((status, _)) => status,
-            Err(e) => {
-                error!(error = %e, "vi_capture_off IPC failed");
-                AK_FAILED_I32
-            }
-        }
-    }
-
-    fn vpss_init(&self, _vi_handle: *mut c_void, _dev: i32) {}
-
-    fn vpss_destroy(&self, _dev: i32) {}
-
-    fn venc_set_cfg_path(&self, _path: *const c_char) -> i32 {
-        AK_SUCCESS_I32
-    }
-
-    fn venc_open(&self, param: *const encode_param) -> *mut c_void {
-        // SAFETY: caller guarantees `param` is a valid, non-null pointer to an
-        // `encode_param` that remains valid for the duration of this call.
-        let (req_buf, req_len) = unsafe { Self::encode_encode_param_buf(&*param) };
-        match self.send_handle_request(CMD_VENC_OPEN, &req_buf[..req_len]) {
-            Ok(handle) => handle,
-            Err(e) => {
-                error!(error = %e, "venc_open IPC failed");
-                std::ptr::null_mut()
-            }
-        }
-    }
-
-    fn venc_close(&self, handle: *mut c_void) -> i32 {
-        let handle_val = handle as u64;
-        let req_data = handle_val.to_le_bytes().to_vec();
-        match self.send_request(CMD_VENC_CLOSE, &req_data) {
-            Ok((status, _)) => status,
-            Err(e) => {
-                error!(error = %e, "venc_close IPC failed");
-                AK_FAILED_I32
-            }
-        }
-    }
-
-    fn venc_set_rc(&self, enc_handle: *mut c_void, bps: i32) -> i32 {
-        let handle_val = enc_handle as u64;
-        let mut req_data = handle_val.to_le_bytes().to_vec();
-        req_data.extend_from_slice(&bps.to_le_bytes());
-        match self.send_request(CMD_VENC_SET_RC, &req_data) {
-            Ok((status, _)) => status,
-            Err(e) => {
-                error!(error = %e, "venc_set_rc IPC failed");
-                AK_FAILED_I32
-            }
-        }
-    }
-
-    fn venc_set_iframe(&self, enc_handle: *mut c_void) -> i32 {
-        let handle_val = enc_handle as u64;
-        let req_data = handle_val.to_le_bytes().to_vec();
-        match self.send_request(CMD_VENC_SET_IFRAME, &req_data) {
-            Ok((status, _)) => status,
-            Err(e) => {
-                error!(error = %e, "venc_set_iframe IPC failed");
-                AK_FAILED_I32
-            }
-        }
-    }
-
-    fn venc_request_stream(&self, vi_handle: *mut c_void, venc_handle: *mut c_void) -> *mut c_void {
-        let vi_val = vi_handle as u64;
-        let venc_val = venc_handle as u64;
-        let mut req_data = vi_val.to_le_bytes().to_vec();
-        req_data.extend_from_slice(&venc_val.to_le_bytes());
-        match self.send_handle_request(CMD_VENC_REQUEST_STREAM, &req_data) {
-            Ok(handle) => handle,
-            Err(e) => {
-                error!(error = %e, "venc_request_stream IPC failed");
-                std::ptr::null_mut()
-            }
-        }
-    }
-
-    fn venc_get_stream(&self, stream_handle: *mut c_void, stream: *mut video_stream) -> i32 {
-        let _ = stream_handle;
-        let _ = stream;
-        error!("venc_get_stream is removed in push-only mode");
-        AK_FAILED_I32
-    }
-
-    fn venc_release_stream(&self, stream_handle: *mut c_void, stream: *mut video_stream) -> i32 {
-        let _ = stream_handle;
-        let _ = stream;
-        error!("venc_release_stream is removed in push-only mode");
-        AK_FAILED_I32
-    }
-
-    fn venc_cancel_stream(&self, stream_handle: *mut c_void) -> i32 {
-        let handle_val = stream_handle as u64;
-        let req_data = handle_val.to_le_bytes().to_vec();
-        match self.send_request(CMD_VENC_CANCEL_STREAM, &req_data) {
-            Ok((status, _)) => status,
-            Err(e) => {
-                error!(error = %e, "venc_cancel_stream IPC failed");
-                AK_FAILED_I32
-            }
-        }
-    }
-
-    fn get_error_no(&self) -> i32 {
-        self.send_i32_request(CMD_GET_ERROR_NO, &[]).unwrap_or(-1)
-    }
-
-    fn get_error_str(&self) -> String {
-        match self.send_request(CMD_GET_ERROR_STR, &[]) {
-            Ok((_, data)) => String::from_utf8_lossy(&data).to_string(),
-            Err(_) => String::new(),
-        }
-    }
-}
-
-impl crate::hal::common::audio::AudioHalTrait for VendorIpc {
-    fn ai_open(&self, param: *const pcm_param) -> *mut c_void {
-        // SAFETY: caller guarantees `param` is a valid, non-null pointer to a
-        // `pcm_param` that remains valid for the duration of this call.
-        let (req_buf, req_len) = unsafe { Self::encode_pcm_param_buf(&*param) };
-        match self.send_handle_request(CMD_AI_OPEN, &req_buf[..req_len]) {
-            Ok(handle) => handle,
-            Err(e) => {
-                error!(error = %e, "ai_open IPC failed");
-                std::ptr::null_mut()
-            }
-        }
-    }
-
-    fn ai_close(&self, handle: *mut c_void) -> i32 {
-        let handle_val = handle as u64;
-        let req_data = handle_val.to_le_bytes().to_vec();
-        match self.send_request(CMD_AI_CLOSE, &req_data) {
-            Ok((status, _)) => status,
-            Err(e) => {
-                error!(error = %e, "ai_close IPC failed");
-                AK_FAILED_I32
-            }
-        }
-    }
-
-    fn ai_set_adc_volume(&self, handle: *mut c_void, vol: i32) -> i32 {
-        let handle_val = handle as u64;
-        let mut req_data = handle_val.to_le_bytes().to_vec();
-        req_data.extend_from_slice(&vol.to_le_bytes());
-        match self.send_request(CMD_AI_SET_ADC_VOLUME, &req_data) {
-            Ok((status, _)) => status,
-            Err(e) => {
-                error!(error = %e, "ai_set_adc_volume IPC failed");
-                AK_FAILED_I32
-            }
-        }
-    }
-
-    fn ai_set_aslc_volume(&self, handle: *mut c_void, vol: i32) -> i32 {
-        let handle_val = handle as u64;
-        let mut req_data = handle_val.to_le_bytes().to_vec();
-        req_data.extend_from_slice(&vol.to_le_bytes());
-        match self.send_request(CMD_AI_SET_ASLC_VOLUME, &req_data) {
-            Ok((status, _)) => status,
-            Err(e) => {
-                error!(error = %e, "ai_set_aslc_volume IPC failed");
-                AK_FAILED_I32
-            }
-        }
-    }
-
-    fn aenc_open(&self, param: *const audio_param) -> *mut c_void {
-        // SAFETY: caller guarantees `param` is a valid, non-null pointer to an
-        // `audio_param` that remains valid for the duration of this call.
-        let (req_buf, req_len) = unsafe { Self::encode_audio_param_buf(&*param) };
-        match self.send_handle_request(CMD_AENC_OPEN, &req_buf[..req_len]) {
-            Ok(handle) => handle,
-            Err(e) => {
-                error!(error = %e, "aenc_open IPC failed");
-                std::ptr::null_mut()
-            }
-        }
-    }
-
-    fn aenc_close(&self, handle: *mut c_void) -> i32 {
-        let handle_val = handle as u64;
-        let req_data = handle_val.to_le_bytes().to_vec();
-        match self.send_request(CMD_AENC_CLOSE, &req_data) {
-            Ok((status, _)) => status,
-            Err(e) => {
-                error!(error = %e, "aenc_close IPC failed");
-                AK_FAILED_I32
-            }
-        }
-    }
-
-    fn aenc_set_attr(&self, handle: *mut c_void, attr: *const aenc_attr) -> i32 {
-        let handle_val = handle as u64;
-        let mut req_buf = [0u8; 16]; // 8 bytes handle + 8 bytes padding for alignment
-        req_buf[0..8].copy_from_slice(&handle_val.to_le_bytes());
-        // SAFETY: caller guarantees `attr` is a valid, non-null pointer to an
-        // `aenc_attr` that remains valid for the duration of this call.
-        let (attr_buf, attr_len) = unsafe { Self::encode_aenc_attr_buf(&*attr) };
-        req_buf[8..8 + attr_len].copy_from_slice(&attr_buf[..attr_len]);
-        match self.send_request(CMD_AENC_SET_ATTR, &req_buf[..8 + attr_len]) {
-            Ok((status, _)) => status,
-            Err(e) => {
-                error!(error = %e, "aenc_set_attr IPC failed");
-                AK_FAILED_I32
-            }
-        }
-    }
-}
-
-impl crate::hal::common::imaging::ImagingHalTrait for VendorIpc {
-    fn set_brightness(&self, value: i32) -> i32 {
-        let req_data = value.to_le_bytes().to_vec();
-        match self.send_request(CMD_ISP_SET_BRIGHTNESS, &req_data) {
-            Ok((status, _)) => status,
-            Err(e) => {
-                error!(error = %e, "set_brightness IPC failed");
-                AK_FAILED_I32
-            }
-        }
-    }
-
-    fn set_contrast(&self, value: i32) -> i32 {
-        let req_data = value.to_le_bytes().to_vec();
-        match self.send_request(CMD_ISP_SET_CONTRAST, &req_data) {
-            Ok((status, _)) => status,
-            Err(e) => {
-                error!(error = %e, "set_contrast IPC failed");
-                AK_FAILED_I32
-            }
-        }
-    }
-
-    fn set_saturation(&self, value: i32) -> i32 {
-        let req_data = value.to_le_bytes().to_vec();
-        match self.send_request(CMD_ISP_SET_SATURATION, &req_data) {
-            Ok((status, _)) => status,
-            Err(e) => {
-                error!(error = %e, "set_saturation IPC failed");
-                AK_FAILED_I32
-            }
-        }
-    }
-
-    fn set_sharpness(&self, value: i32) -> i32 {
-        let req_data = value.to_le_bytes().to_vec();
-        match self.send_request(CMD_ISP_SET_SHARPNESS, &req_data) {
-            Ok((status, _)) => status,
-            Err(e) => {
-                error!(error = %e, "set_sharpness IPC failed");
-                AK_FAILED_I32
-            }
-        }
-    }
-
-    fn set_ir_filter(&self, enabled: bool) -> i32 {
-        let value: i32 = if enabled { 1 } else { 0 };
-        let req_data = value.to_le_bytes().to_vec();
-        match self.send_request(CMD_ISP_SET_IR_FILTER, &req_data) {
-            Ok((status, _)) => status,
-            Err(e) => {
-                error!(error = %e, "set_ir_filter IPC failed");
-                AK_FAILED_I32
-            }
-        }
-    }
-
-    fn set_wdr(&self, enabled: bool) -> i32 {
-        let value: i32 = if enabled { 1 } else { 0 };
-        let req_data = value.to_le_bytes().to_vec();
-        match self.send_request(CMD_ISP_SET_WDR, &req_data) {
-            Ok((status, _)) => status,
-            Err(e) => {
-                error!(error = %e, "set_wdr IPC failed");
-                AK_FAILED_I32
-            }
-        }
-    }
-}
+// ============================================================================
+// Test helpers shared across submodules
+// ============================================================================
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod test_helpers {
     use super::*;
     use std::io::{Read, Write};
     use std::os::unix::net::{UnixListener, UnixStream};
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    // ============================================================================
-    // Fake daemon infrastructure
-    // ============================================================================
-
     /// Monotonic counter for unique per-test socket paths.
-    static TEST_DAEMON_COUNTER: AtomicUsize = AtomicUsize::new(0);
+    pub static TEST_DAEMON_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
     /// Helper: spawns a fake vendor daemon on a temporary Unix socket.
     ///
     /// Accepts a single connection and handles IPC requests in a loop until EOF.
     /// The `handler` closure maps `(cmd_id, req_data)` to `(status, resp_data)`.
-    struct FakeDaemon {
-        /// Path of the bound socket; used by tests to connect VendorIpc.
+    pub struct FakeDaemon {
+        /// Path of the bound socket; used by tests to connect AnykaIpc.
         pub socket_path: String,
         /// Background listener thread — kept alive as long as FakeDaemon exists.
         _listener_thread: std::thread::JoinHandle<()>,
     }
 
     impl FakeDaemon {
-        fn start(handler: impl Fn(i32, &[u8]) -> (i32, Vec<u8>) + Send + 'static) -> Self {
+        pub fn start(handler: impl Fn(i32, &[u8]) -> (i32, Vec<u8>) + Send + 'static) -> Self {
             let counter = TEST_DAEMON_COUNTER.fetch_add(1, Ordering::SeqCst);
             let socket_path = format!(
                 "/tmp/test-vendor-daemon-{}-{}.sock",
@@ -1580,11 +1200,11 @@ mod tests {
         }
     }
 
-    fn make_ipc_for_channel_selection_tests() -> VendorIpc {
+    pub fn make_ipc_for_channel_selection_tests() -> AnykaIpc {
         let (ctrl_a, _ctrl_b) = UnixStream::pair().unwrap();
         let (main_a, _main_b) = UnixStream::pair().unwrap();
         let (sub_a, _sub_b) = UnixStream::pair().unwrap();
-        VendorIpc {
+        AnykaIpc {
             stream: std::sync::Arc::new(std::sync::Mutex::new(ctrl_a)),
             frame_main_stream: Mutex::new(Some(main_a)),
             frame_sub_stream: Mutex::new(Some(sub_a)),
@@ -1592,32 +1212,41 @@ mod tests {
             prefer_sub_on_tie: AtomicBool::new(false),
         }
     }
+}
 
-    // ============================================================================
-    // Fake-daemon integration tests
-    // ============================================================================
+// ============================================================================
+// Core protocol and encoding tests (stay in mod.rs)
+// ============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::test_helpers::*;
+    use super::*;
+    use crate::hal::common::AK_FAILED_I32;
+    use std::io::Write;
+    use std::os::unix::net::UnixStream;
 
     /// A simple success command round-trips correctly: set_brightness returns AK_SUCCESS.
     #[test]
-    fn test_vendor_ipc_connect_and_simple_command_returns_success() {
+    fn test_ipc_connect_and_simple_command_returns_success() {
         let daemon = FakeDaemon::start(|_cmd_id, _req| (AK_SUCCESS_I32, vec![]));
-        let ipc = VendorIpc::new_with_path(&daemon.socket_path).unwrap();
+        let ipc = AnykaIpc::new_with_path(&daemon.socket_path).unwrap();
 
         // set_brightness is part of ImagingHalTrait; accessible from within the crate.
         let result =
-            <VendorIpc as crate::hal::common::imaging::ImagingHalTrait>::set_brightness(&ipc, 50);
+            <AnykaIpc as crate::hal::common::imaging::ImagingHalTrait>::set_brightness(&ipc, 50);
 
         assert_eq!(result, AK_SUCCESS_I32, "expected AK_SUCCESS from daemon");
     }
 
     /// When the daemon returns status=-1 (AK_FAILED), the trait method propagates it.
     #[test]
-    fn test_vendor_ipc_error_response_propagates_ak_failed() {
+    fn test_ipc_error_response_propagates_ak_failed() {
         let daemon = FakeDaemon::start(|_cmd_id, _req| (AK_FAILED_I32, vec![]));
-        let ipc = VendorIpc::new_with_path(&daemon.socket_path).unwrap();
+        let ipc = AnykaIpc::new_with_path(&daemon.socket_path).unwrap();
 
         let result =
-            <VendorIpc as crate::hal::common::imaging::ImagingHalTrait>::set_brightness(&ipc, 50);
+            <AnykaIpc as crate::hal::common::imaging::ImagingHalTrait>::set_brightness(&ipc, 50);
 
         assert_eq!(
             result, AK_FAILED_I32,
@@ -1627,16 +1256,16 @@ mod tests {
 
     /// A daemon that sends an 8-byte handle lets vi_open return a non-null pointer.
     #[test]
-    fn test_vendor_ipc_handle_response_returns_non_null_pointer() {
+    fn test_ipc_handle_response_returns_non_null_pointer() {
         let handle_value: i64 = 0x1234_5678;
         let daemon = FakeDaemon::start(move |_cmd_id, _req| {
             (AK_SUCCESS_I32, handle_value.to_le_bytes().to_vec())
         });
-        let ipc = VendorIpc::new_with_path(&daemon.socket_path).unwrap();
+        let ipc = AnykaIpc::new_with_path(&daemon.socket_path).unwrap();
 
         let handle = {
             use crate::hal::common::sdk_types::VideoDevType;
-            <VendorIpc as crate::hal::common::video::VideoHalTrait>::vi_open(
+            <AnykaIpc as crate::hal::common::video::VideoHalTrait>::vi_open(
                 &ipc,
                 VideoDevType::Dev0,
             )
@@ -1651,16 +1280,15 @@ mod tests {
 
     /// Three sequential commands over the same connection all succeed.
     #[test]
-    fn test_vendor_ipc_multiple_requests_same_connection_all_succeed() {
+    fn test_ipc_multiple_requests_same_connection_all_succeed() {
         let daemon = FakeDaemon::start(|_cmd_id, _req| (AK_SUCCESS_I32, vec![]));
-        let ipc = VendorIpc::new_with_path(&daemon.socket_path).unwrap();
+        let ipc = AnykaIpc::new_with_path(&daemon.socket_path).unwrap();
 
         for i in 0..3 {
-            let result =
-                <VendorIpc as crate::hal::common::imaging::ImagingHalTrait>::set_brightness(
-                    &ipc,
-                    50 + i,
-                );
+            let result = <AnykaIpc as crate::hal::common::imaging::ImagingHalTrait>::set_brightness(
+                &ipc,
+                50 + i,
+            );
             assert_eq!(result, AK_SUCCESS_I32, "request {} should succeed", i);
         }
     }
@@ -1668,16 +1296,16 @@ mod tests {
     /// Pull-style venc_get_stream is removed in push-only mode.
     #[test]
     #[cfg(use_stubs)]
-    fn test_vendor_ipc_get_stream_removed_returns_failed() {
+    fn test_ipc_get_stream_removed_returns_failed() {
         use std::mem::MaybeUninit;
         let daemon = FakeDaemon::start(|_cmd_id, _req| (AK_SUCCESS_I32, vec![]));
 
-        let ipc = VendorIpc::new_with_path(&daemon.socket_path).unwrap();
+        let ipc = AnykaIpc::new_with_path(&daemon.socket_path).unwrap();
         let stream_handle = 1usize as *mut std::ffi::c_void;
         let mut vs = MaybeUninit::<crate::hal::common::sdk_types::VideoStream>::zeroed();
-        let vs_ptr = vs.as_mut_ptr() as *mut video_stream;
+        let vs_ptr = vs.as_mut_ptr() as *mut crate::hal::common::video_stream;
 
-        let result = <VendorIpc as crate::hal::common::video::VideoHalTrait>::venc_get_stream(
+        let result = <AnykaIpc as crate::hal::common::video::VideoHalTrait>::venc_get_stream(
             &ipc,
             stream_handle,
             vs_ptr,
@@ -1686,9 +1314,9 @@ mod tests {
     }
 
     #[test]
-    fn test_vendor_ipc_traits_implement_send_sync() {
+    fn test_ipc_traits_implement_send_sync() {
         fn assert_send_sync<T: Send + Sync>() {}
-        assert_send_sync::<VendorIpc>();
+        assert_send_sync::<AnykaIpc>();
     }
 
     #[test]
@@ -1696,7 +1324,7 @@ mod tests {
         #[cfg(use_stubs)]
         {
             use crate::hal::common::sdk_types::VideoFrameType;
-            assert_eq!(VendorIpc::ipc_to_frame_type(0), VideoFrameType::FrameTypeP);
+            assert_eq!(AnykaIpc::ipc_to_frame_type(0), VideoFrameType::FrameTypeP);
         }
     }
 
@@ -1705,7 +1333,7 @@ mod tests {
         #[cfg(use_stubs)]
         {
             use crate::hal::common::sdk_types::VideoFrameType;
-            assert_eq!(VendorIpc::ipc_to_frame_type(1), VideoFrameType::FrameTypeI);
+            assert_eq!(AnykaIpc::ipc_to_frame_type(1), VideoFrameType::FrameTypeI);
         }
     }
 
@@ -1714,7 +1342,7 @@ mod tests {
         #[cfg(use_stubs)]
         {
             use crate::hal::common::sdk_types::VideoFrameType;
-            assert_eq!(VendorIpc::ipc_to_frame_type(2), VideoFrameType::FrameTypeB);
+            assert_eq!(AnykaIpc::ipc_to_frame_type(2), VideoFrameType::FrameTypeB);
         }
     }
 
@@ -1723,7 +1351,7 @@ mod tests {
         #[cfg(use_stubs)]
         {
             use crate::hal::common::sdk_types::VideoFrameType;
-            assert_eq!(VendorIpc::ipc_to_frame_type(3), VideoFrameType::FrameTypePi);
+            assert_eq!(AnykaIpc::ipc_to_frame_type(3), VideoFrameType::FrameTypePi);
         }
     }
 
@@ -1732,15 +1360,15 @@ mod tests {
         #[cfg(use_stubs)]
         {
             use crate::hal::common::sdk_types::VideoFrameType;
-            assert_eq!(VendorIpc::ipc_to_frame_type(99), VideoFrameType::FrameTypeP);
-            assert_eq!(VendorIpc::ipc_to_frame_type(-1), VideoFrameType::FrameTypeP);
+            assert_eq!(AnykaIpc::ipc_to_frame_type(99), VideoFrameType::FrameTypeP);
+            assert_eq!(AnykaIpc::ipc_to_frame_type(-1), VideoFrameType::FrameTypeP);
         }
     }
 
     #[test]
     fn test_decode_video_resolution_rejects_short_input() {
         let short_data = vec![0u8; 8]; // 8 bytes — less than the required 16
-        let result = VendorIpc::decode_video_resolution(&short_data);
+        let result = AnykaIpc::decode_video_resolution(&short_data);
         assert!(result.is_err());
         match result {
             Err(PlatformError::HardwareFailure(msg)) => {
@@ -1758,7 +1386,7 @@ mod tests {
         data.extend_from_slice(&1920i32.to_le_bytes()); // max_width
         data.extend_from_slice(&1080i32.to_le_bytes()); // max_height
 
-        let result = VendorIpc::decode_video_resolution(&data);
+        let result = AnykaIpc::decode_video_resolution(&data);
         assert!(result.is_ok());
         let res = result.unwrap();
         assert_eq!(res.width, 1920);
@@ -1796,7 +1424,7 @@ mod tests {
                 ],
             };
 
-            let (buf, len) = VendorIpc::encode_video_channel_attr_buf(&attr);
+            let (buf, len) = AnykaIpc::encode_video_channel_attr_buf(&attr);
             let encoded = &buf[..len];
 
             // 4 crop fields * 4 bytes + 2 resolutions * 4 fields * 4 bytes = 16 + 32 = 48
@@ -1831,7 +1459,7 @@ mod tests {
             use crate::hal::common::sdk_types::EncodeParam;
 
             let param = EncodeParam::default();
-            let (_buf, len) = VendorIpc::encode_encode_param_buf(&param);
+            let (_buf, len) = AnykaIpc::encode_encode_param_buf(&param);
 
             // 12 fields * 4 bytes each = 48 bytes
             assert_eq!(len, 48);
@@ -1850,7 +1478,7 @@ mod tests {
                 channel_num: 1,
             };
 
-            let (buf, len) = VendorIpc::encode_pcm_param_buf(&param);
+            let (buf, len) = AnykaIpc::encode_pcm_param_buf(&param);
             let encoded = &buf[..len];
 
             assert_eq!(len, 12);
@@ -1873,7 +1501,7 @@ mod tests {
                 type_: 1,
             };
 
-            let (buf, len) = VendorIpc::encode_audio_param_buf(&param);
+            let (buf, len) = AnykaIpc::encode_audio_param_buf(&param);
             let encoded = &buf[..len];
 
             assert_eq!(len, 16);
@@ -1891,7 +1519,7 @@ mod tests {
             use crate::hal::common::sdk_types::AencAttr;
 
             let attr = AencAttr { aac_head: 1 };
-            let (buf, len) = VendorIpc::encode_aenc_attr_buf(&attr);
+            let (buf, len) = AnykaIpc::encode_aenc_attr_buf(&attr);
 
             assert_eq!(len, 4);
             assert_eq!(&buf[..len], &[1, 0, 0, 0]);
@@ -1908,7 +1536,7 @@ mod tests {
 
         assert_eq!(data.len(), 16);
 
-        let result = VendorIpc::decode_video_resolution(&data);
+        let result = AnykaIpc::decode_video_resolution(&data);
         assert!(result.is_ok());
         let res = result.unwrap();
         assert_eq!(res.width, 1280);
@@ -1929,7 +1557,7 @@ mod tests {
 
         assert!(data.len() > 16);
 
-        let result = VendorIpc::decode_video_resolution(&data);
+        let result = AnykaIpc::decode_video_resolution(&data);
         assert!(result.is_ok());
         let res = result.unwrap();
         assert_eq!(res.width, 640);
@@ -1952,7 +1580,7 @@ mod tests {
         writer.write_all(&raw).unwrap();
         writer.flush().unwrap();
 
-        let notif = VendorIpc::read_push_notification(&mut reader, "main").unwrap();
+        let notif = AnykaIpc::read_push_notification(&mut reader, "main").unwrap();
         assert_eq!(notif.slot_index, 2);
         assert_eq!(notif.frame_len, 0x1234);
         assert_eq!(notif.flags, 1);
@@ -1962,12 +1590,11 @@ mod tests {
     fn test_recv_pushed_frame_returns_resource_busy_on_frame_drop_notification() {
         use std::sync::{Arc, Mutex};
 
-        // Create a Unix socket pair - one end goes to VendorIpc, other we write to
+        // Create a Unix socket pair - one end goes to AnykaIpc, other we write to
         let (reader, mut writer) = UnixStream::pair().unwrap();
 
-        // Construct VendorIpc with only frame_main_stream set (no shm reader needed for drop path)
-        // Use a dummy control socket path that won't actually connect
-        let ipc = VendorIpc {
+        // Construct AnykaIpc with only frame_main_stream set (no shm reader needed for drop path)
+        let ipc = AnykaIpc {
             stream: Arc::new(Mutex::new(writer.try_clone().unwrap())),
             frame_main_stream: Mutex::new(Some(reader)),
             frame_sub_stream: Mutex::new(None),
@@ -2008,7 +1635,7 @@ mod tests {
     fn test_map_shm_slot_read_error_not_ready_becomes_resource_busy() {
         let error =
             PlatformError::InvalidParameter("slot 0 not ready for reading (state: 0)".into());
-        let mapped = VendorIpc::map_shm_slot_read_error(error, "main");
+        let mapped = AnykaIpc::map_shm_slot_read_error(error, "main");
 
         match mapped {
             PlatformError::ResourceBusy(msg) => {
@@ -2022,7 +1649,7 @@ mod tests {
     #[test]
     fn test_map_shm_slot_read_error_other_invalid_parameter_passthrough() {
         let error = PlatformError::InvalidParameter("slot index 99 out of range".into());
-        let mapped = VendorIpc::map_shm_slot_read_error(error, "sub");
+        let mapped = AnykaIpc::map_shm_slot_read_error(error, "sub");
 
         match mapped {
             PlatformError::InvalidParameter(msg) => {
@@ -2064,7 +1691,7 @@ mod tests {
                 .push((cmd_id, req.to_vec()));
             (AK_SUCCESS_I32, vec![])
         });
-        let ipc = VendorIpc::new_with_path(&daemon.socket_path).unwrap();
+        let ipc = AnykaIpc::new_with_path(&daemon.socket_path).unwrap();
         let stream_handle = 0x1234_5678usize as *mut std::ffi::c_void;
 
         ipc.start_push(stream_handle, StreamId::VideoSub).unwrap();
@@ -2093,7 +1720,7 @@ mod tests {
                 .push((cmd_id, req.to_vec()));
             (AK_SUCCESS_I32, vec![])
         });
-        let ipc = VendorIpc::new_with_path(&daemon.socket_path).unwrap();
+        let ipc = AnykaIpc::new_with_path(&daemon.socket_path).unwrap();
 
         ipc.stop_push(Some(StreamId::VideoMain)).unwrap();
 
@@ -2116,7 +1743,7 @@ mod tests {
                 .push((cmd_id, req.to_vec()));
             (AK_SUCCESS_I32, vec![])
         });
-        let ipc = VendorIpc::new_with_path(&daemon.socket_path).unwrap();
+        let ipc = AnykaIpc::new_with_path(&daemon.socket_path).unwrap();
 
         ipc.stop_push(None).unwrap();
 

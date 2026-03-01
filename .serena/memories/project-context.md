@@ -33,7 +33,6 @@ anyka-dev/
 │   │   │   ├── hal/         # Hardware Abstraction Layer (IPC-based)
 │   │   │   │   ├── anyka_sdk.rs   # SDK type definitions
 │   │   │   │   ├── vendor_ipc.rs  # Unix socket IPC client (2,132 LOC)
-│   │   │   │   ├── shm_ring.rs    # Shared memory ring buffer (1,435 LOC)
 │   │   │   │   ├── video.rs       # Video HAL
 │   │   │   │   ├── audio.rs       # Audio HAL
 │   │   │   │   ├── imaging.rs     # Imaging HAL
@@ -114,7 +113,7 @@ The project uses a **push-only IPC architecture** where the vendor-daemon (C) ha
 │               │                 │               │
 │  Anyka SDK    │  Shared Memory  │  hal/         │
 │  frame capture│ ──────────────→ │  vendor_ipc   │
-│  encoding     │  Ring Buffer    │  shm_ring     │
+│  encoding     │  Ring Buffer    │  ipc/shm_ring │
 │               │  (zero-copy)    │               │
 │  Dual sockets │                 │  streaming/   │
 │  main + sub   │  Frame notify   │  bridge       │
@@ -207,7 +206,7 @@ strip = true
 - Minimal, documented `unsafe` blocks
 - `mockall` for trait mocking in tests
 - IPC via `hal/vendor_ipc.rs` (never direct FFI)
-- Zero-copy frames via `hal/shm_ring.rs`
+- Zero-copy frames via `hal/anyka/ipc/shm_ring.rs`
 
 ### WebUI
 - Strict TypeScript (no `any`)

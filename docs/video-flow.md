@@ -28,7 +28,7 @@ per-stream Unix sockets. There are no pull/poll operations from the Rust side.
 |-----------------------------------------------------|-----------------------------------------------------------------|
 | `cross-compile/vendor-daemon/src/main.c`            | C daemon: IPC dispatch, push_frame_thread, ring write           |
 | `cross-compile/onvif-rust/src/hal/vendor_ipc.rs`    | Rust IPC client: command protocol, `recv_pushed_frame()`        |
-| `cross-compile/onvif-rust/src/hal/shm_ring.rs`      | Shared memory ring reader: `ShmRingReader`, `FrameNotification` |
+| `cross-compile/onvif-rust/src/hal/anyka/ipc/shm_ring.rs` | Shared memory ring reader: `ShmRingReader`, `FrameNotification` |
 | `cross-compile/onvif-rust/src/platform/anyka.rs`    | Platform init/shutdown, channel configuration                   |
 | `cross-compile/onvif-rust/src/platform/frame.rs`    | `OwnedFrame`, `StreamId`, `FrameType`, `FrameMetadata`          |
 | `cross-compile/onvif-rust/src/streaming/bridge.rs`  | `StreamingBridge`, `LowLatencyFrameQueue`, `BytesMutPool`       |
@@ -214,7 +214,7 @@ ensuring maximum cleanup even if the daemon becomes unresponsive.
 6.  SHM ring write                            → main.c — writes to SHM ring
 7.  Socket notification                       → main.c — sends 12-byte FrameNotification
 8.  VendorIpc::recv_pushed_frame()            → vendor_ipc.rs:800 — poll() on frame sockets
-9.  ShmRingReader::read_slot_into_bytesmut()  → shm_ring.rs — zero-copy read from SHM
+9.  ShmRingReader::read_slot_into_bytesmut()  → ipc/shm_ring.rs — zero-copy read from SHM
 10. OwnedFrame constructed                    → frame.rs — data in BytesMut, no extra copy
 11. StreamingBridge::route_owned_frame()      → bridge.rs:380 — routes by StreamId
 12. LowLatencyFrameQueue::push()              → bridge.rs:75 — bounded push, I-frame flush
@@ -305,8 +305,8 @@ stat /tmp/vendor-frame-ring.shm
 
 **Code locations**:
 
-- Ring layout constants: `shm_ring.rs:74-87`
-- `ShmRingReader::open()`: `shm_ring.rs`
+- Ring layout constants: `ipc/shm_ring.rs:74-87`
+- `ShmRingReader::open()`: `ipc/shm_ring.rs`
 - Ring creation: `main.c` (vendor-daemon creates the file)
 
 **Expected SHM layout**:
@@ -528,7 +528,7 @@ done
 | **Total Slots**    | —                   | **8**    |
 | **Total SHM Size** | **1,048,640 bytes** | —        |
 
-Constants defined in `shm_ring.rs:74-87`:
+Constants defined in `ipc/shm_ring.rs:74-87`:
 
 - `VD_SHM_SLOT_COUNT = 8`
 - `VD_SHM_SLOT_SIZE = 128 KB`

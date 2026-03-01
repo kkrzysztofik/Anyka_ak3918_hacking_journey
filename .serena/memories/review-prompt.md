@@ -17,7 +17,7 @@ You are conducting a **comprehensive code review** of the **ONVIF 24.12 implemen
 - Complete ONVIF daemon with Device, Media, PTZ, and Imaging services
 - RTSP/HTTP-FLV streaming via `streaming-lib` workspace member
 - Asynchronous web server using `axum` and `tokio`
-- HAL layer with IPC-based hardware access (vendor_ipc.rs, shm_ring.rs)
+- HAL layer with IPC-based hardware access (ipc/mod.rs, ipc/shm_ring.rs)
 - Push-only frame delivery via Unix sockets + shared memory ring buffer
 - Platform abstraction layer bridging HAL to ONVIF services
 - Embedded camera system optimization with memory safety guarantees (24MB cap)

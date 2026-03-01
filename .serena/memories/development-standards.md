@@ -148,7 +148,6 @@ src/
 ├── hal/                      # Hardware Abstraction Layer (IPC-based)
 │   ├── anyka_sdk.rs          # SDK type definitions
 │   ├── vendor_ipc.rs         # Unix socket IPC client
-│   ├── shm_ring.rs           # Shared memory ring buffer (zero-copy)
 │   ├── video.rs              # Video HAL
 │   ├── audio.rs              # Audio HAL
 │   ├── imaging.rs            # Imaging HAL

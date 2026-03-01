@@ -36,7 +36,7 @@ use crate::hal::common::video::{
     video_input_set_channel_attr,
 };
 
-use crate::hal::anyka::vendor_ipc::VendorIpc;
+use crate::hal::anyka::ipc::AnykaIpc;
 
 use crate::streaming::bridge::BytesMutPool;
 
@@ -90,14 +90,14 @@ impl AnykaPlatform {
         };
 
         let (video_input, video_encoder, audio_input, audio_encoder, imaging_control) = {
-            let shared_ipc = Arc::new(VendorIpc::new().map_err(|e| {
+            let shared_ipc = Arc::new(AnykaIpc::new().map_err(|e| {
                 PlatformError::InitializationFailed(format!(
-                    "VendorIpc connection failed (is vendor-daemon running?): {}",
+                    "AnykaIpc connection failed (is vendor-daemon running?): {}",
                     e
                 ))
             })?);
 
-            tracing::info!("AnykaPlatform: using shared VendorIpc client for video/audio/imaging");
+            tracing::info!("AnykaPlatform: using shared AnykaIpc client for video/audio/imaging");
 
             let video_ffi: Arc<dyn VideoHalTrait> = shared_ipc.clone();
             let audio_ffi: Arc<dyn crate::hal::common::audio::AudioHalTrait> = shared_ipc.clone();
@@ -108,7 +108,7 @@ impl AnykaPlatform {
                 video_ffi.clone(),
                 isp_config_path.clone(),
             ));
-            let video_encoder = Arc::new(AnykaVideoEncoder::with_vendor_ipc(shared_ipc.clone()));
+            let video_encoder = Arc::new(AnykaVideoEncoder::with_ipc(shared_ipc.clone()));
             let audio_input = Arc::new(AnykaAudioInput::with_ffi(audio_ffi.clone()));
             let audio_encoder = Arc::new(AnykaAudioEncoder::with_ffi(audio_ffi));
             let imaging_control = Some(Arc::new(AnykaImagingControl::with_ffi_and_video_encoder(
@@ -563,13 +563,13 @@ struct AnykaVideoInput {
 impl AnykaVideoInput {
     /// Create a new `AnykaVideoInput` with the default (real) FFI backend.
     fn new(isp_config_path: Option<PathBuf>) -> PlatformResult<Self> {
-        let ipc = VendorIpc::new().map_err(|e| {
+        let ipc = AnykaIpc::new().map_err(|e| {
             PlatformError::InitializationFailed(format!(
-                "VendorIpc connection failed (is vendor-daemon running?): {}",
+                "AnykaIpc connection failed (is vendor-daemon running?): {}",
                 e
             ))
         })?;
-        tracing::info!("AnykaVideoInput: using VendorIpc for vendor library access");
+        tracing::info!("AnykaVideoInput: using AnykaIpc for vendor library access");
         Ok(Self::with_ffi(Arc::new(ipc), isp_config_path))
     }
 
@@ -1256,10 +1256,10 @@ impl StreamHealthCounters {
 
 /// Unified frame reader loop for video callbacks.
 ///
-/// Production mode is push-only: the loop blocks on `VendorIpc::recv_pushed_frame()`,
+/// Production mode is push-only: the loop blocks on `AnykaIpc::recv_pushed_frame()`,
 /// routes frames by stream id, and invokes callbacks.
 ///
-/// In unit tests (when `VendorIpc` is unavailable), a test-only fallback polls
+/// In unit tests (when `AnykaIpc` is unavailable), a test-only fallback polls
 /// `venc_get_stream()` to preserve existing mock-based coverage.
 ///
 /// # Unified reader thread
@@ -1285,7 +1285,7 @@ fn unified_frame_read_loop(
     stream_health: Arc<StreamHealthCounters>,
     main_enc_addr: Option<usize>,
     sub_enc_addr: Option<usize>,
-    vendor_ipc: Option<Arc<VendorIpc>>,
+    anyka_ipc: Option<Arc<AnykaIpc>>,
     frame_pool: Option<Arc<BytesMutPool>>,
 ) {
     #[cfg(test)]
@@ -1343,7 +1343,7 @@ fn unified_frame_read_loop(
                 break;
             }
 
-            // ── Legacy path (no VendorIpc available, e.g. in tests) ──
+            // ── Legacy path (no AnykaIpc available, e.g. in tests) ──
             let mut stream = std::mem::MaybeUninit::<video_stream>::uninit();
             let stream_ptr = stream.as_mut_ptr();
             let ret = ffi.venc_get_stream(handle.as_ptr(), stream_ptr);
@@ -1531,7 +1531,7 @@ fn unified_frame_read_loop(
     let mut main_state = StreamState::new(StreamId::VideoMain, main_enc_addr);
     let mut sub_state = StreamState::new(StreamId::VideoSub, sub_enc_addr);
 
-    if vendor_ipc.is_none() {
+    if anyka_ipc.is_none() {
         #[cfg(test)]
         {
             let idle_poll_sleep_ms = env_var_u64("ANYKA_FRAME_POLL_SLEEP_MS")
@@ -1597,15 +1597,15 @@ fn unified_frame_read_loop(
 
         #[cfg(not(test))]
         {
-            tracing::error!("Push-only mode requires VendorIpc; unified reader exiting");
+            tracing::error!("Push-only mode requires AnykaIpc; unified reader exiting");
             return;
         }
     }
 
-    let ipc = if let Some(ipc) = vendor_ipc.as_ref() {
+    let ipc = if let Some(ipc) = anyka_ipc.as_ref() {
         ipc
     } else {
-        tracing::error!("Push-only mode requires VendorIpc; unified reader exiting");
+        tracing::error!("Push-only mode requires AnykaIpc; unified reader exiting");
         return;
     };
 
@@ -1877,10 +1877,10 @@ fn invoke_owned_callbacks_from_map(
 /// ```
 struct AnykaVideoEncoder {
     ffi: Arc<dyn crate::hal::common::video::VideoHalTrait>,
-    /// Optional VendorIpc reference for the zero-copy owned frame path.
+    /// Optional AnykaIpc reference for the zero-copy owned frame path.
     /// This is the same object as `ffi` (when using IPC mode), stored
-    /// separately because we can't downcast `dyn VideoHalTrait` to `VendorIpc`.
-    vendor_ipc: Option<Arc<VendorIpc>>,
+    /// separately because we can't downcast `dyn VideoHalTrait` to `AnykaIpc`.
+    anyka_ipc: Option<Arc<AnykaIpc>>,
     configurations: RwLock<Vec<VideoEncoderConfig>>,
     main_handle: RwLock<Option<Arc<VideoEncoderHandle>>>,
     sub_handle: RwLock<Option<Arc<VideoEncoderHandle>>>,
@@ -1951,15 +1951,15 @@ fn join_thread_with_timeout(
 impl AnykaVideoEncoder {
     /// Create a new `AnykaVideoEncoder` with the default (real) FFI backend.
     ///
-    /// Uses `VendorIpc` to connect to the vendor daemon for vendor library access.
+    /// Uses `AnykaIpc` to connect to the vendor daemon for vendor library access.
     fn new() -> PlatformResult<Self> {
-        let ipc = crate::hal::anyka::vendor_ipc::VendorIpc::new().map_err(|e| {
+        let ipc = crate::hal::anyka::ipc::AnykaIpc::new().map_err(|e| {
             PlatformError::InitializationFailed(format!(
-                "AnykaVideoEncoder: VendorIpc connection failed: {}",
+                "AnykaVideoEncoder: AnykaIpc connection failed: {}",
                 e
             ))
         })?;
-        tracing::info!("AnykaVideoEncoder: using VendorIpc for vendor library access");
+        tracing::info!("AnykaVideoEncoder: using AnykaIpc for vendor library access");
         Ok(Self::with_ffi(Arc::new(ipc)))
     }
 
@@ -1969,7 +1969,7 @@ impl AnykaVideoEncoder {
     fn with_ffi(ffi: Arc<dyn crate::hal::common::video::VideoHalTrait>) -> Self {
         Self {
             ffi,
-            vendor_ipc: None, // No VendorIpc available when using custom FFI
+            anyka_ipc: None, // No AnykaIpc available when using custom FFI
             configurations: RwLock::new(vec![
                 VideoEncoderConfig {
                     token: "VideoEncoder_1".to_string(),
@@ -2010,14 +2010,14 @@ impl AnykaVideoEncoder {
         }
     }
 
-    /// Create a new `AnykaVideoEncoder` with a shared VendorIpc instance.
+    /// Create a new `AnykaVideoEncoder` with a shared AnykaIpc instance.
     ///
-    /// The VendorIpc is stored both as the `dyn VideoHalTrait` backend and as a
+    /// The AnykaIpc is stored both as the `dyn VideoHalTrait` backend and as a
     /// concrete reference for the zero-copy frame fetch path.
-    fn with_vendor_ipc(ipc: Arc<VendorIpc>) -> Self {
+    fn with_ipc(ipc: Arc<AnykaIpc>) -> Self {
         let mut encoder =
             Self::with_ffi(ipc.clone() as Arc<dyn crate::hal::common::video::VideoHalTrait>);
-        encoder.vendor_ipc = Some(ipc);
+        encoder.anyka_ipc = Some(ipc);
         encoder
     }
 
@@ -2313,9 +2313,9 @@ impl AnykaVideoEncoder {
             let sub_sh_clone = sub_sh.as_ref().map(Arc::clone);
             let main_enc_addr = main_enc.as_ptr() as usize;
             let sub_enc_addr = sub_enc.map(|h| h.as_ptr() as usize);
-            let vendor_ipc = self.vendor_ipc.clone();
+            let anyka_ipc = self.anyka_ipc.clone();
             let owned_callbacks = Arc::clone(&self.owned_callbacks_arc());
-            let frame_pool = vendor_ipc
+            let frame_pool = anyka_ipc
                 .as_ref()
                 .map(|_| Arc::new(BytesMutPool::default_frame_pool()));
             std::thread::Builder::new()
@@ -2331,7 +2331,7 @@ impl AnykaVideoEncoder {
                         stream_health,
                         Some(main_enc_addr),
                         sub_enc_addr,
-                        vendor_ipc,
+                        anyka_ipc,
                         frame_pool,
                     );
                 })
@@ -2724,15 +2724,15 @@ struct AnykaAudioInput {
 impl AnykaAudioInput {
     /// Create a new `AnykaAudioInput`.
     ///
-    /// Uses `VendorIpc` to connect to the vendor daemon for vendor library access.
+    /// Uses `AnykaIpc` to connect to the vendor daemon for vendor library access.
     fn new() -> PlatformResult<Self> {
-        let ipc = crate::hal::anyka::vendor_ipc::VendorIpc::new().map_err(|e| {
+        let ipc = crate::hal::anyka::ipc::AnykaIpc::new().map_err(|e| {
             PlatformError::InitializationFailed(format!(
-                "AnykaAudioInput: VendorIpc connection failed: {}",
+                "AnykaAudioInput: AnykaIpc connection failed: {}",
                 e
             ))
         })?;
-        tracing::info!("AnykaAudioInput: using VendorIpc for vendor library access");
+        tracing::info!("AnykaAudioInput: using AnykaIpc for vendor library access");
         Ok(Self {
             ffi: Arc::new(ipc),
             opened: AtomicBool::new(false),
@@ -2794,16 +2794,16 @@ struct AnykaAudioEncoder {
 impl AnykaAudioEncoder {
     /// Create a new `AnykaAudioEncoder`.
     ///
-    /// Uses `VendorIpc` to connect to the vendor daemon for vendor library access.
+    /// Uses `AnykaIpc` to connect to the vendor daemon for vendor library access.
     fn new() -> PlatformResult<Self> {
         let ffi: Arc<dyn crate::hal::common::audio::AudioHalTrait> = {
-            let ipc = crate::hal::anyka::vendor_ipc::VendorIpc::new().map_err(|e| {
+            let ipc = crate::hal::anyka::ipc::AnykaIpc::new().map_err(|e| {
                 PlatformError::InitializationFailed(format!(
-                    "AnykaAudioEncoder: VendorIpc connection failed: {}",
+                    "AnykaAudioEncoder: AnykaIpc connection failed: {}",
                     e
                 ))
             })?;
-            tracing::info!("AnykaAudioEncoder: using VendorIpc for vendor library access");
+            tracing::info!("AnykaAudioEncoder: using AnykaIpc for vendor library access");
             Arc::new(ipc)
         };
 
@@ -2888,16 +2888,16 @@ struct AnykaImagingControl {
 impl AnykaImagingControl {
     /// Create a new `AnykaImagingControl`.
     ///
-    /// Uses `VendorIpc` to connect to the vendor daemon for vendor library access.
+    /// Uses `AnykaIpc` to connect to the vendor daemon for vendor library access.
     fn new() -> PlatformResult<Self> {
         let ffi: Arc<dyn crate::hal::common::imaging::ImagingHalTrait> = {
-            let ipc = crate::hal::anyka::vendor_ipc::VendorIpc::new().map_err(|e| {
+            let ipc = crate::hal::anyka::ipc::AnykaIpc::new().map_err(|e| {
                 PlatformError::InitializationFailed(format!(
-                    "AnykaImagingControl: VendorIpc connection failed: {}",
+                    "AnykaImagingControl: AnykaIpc connection failed: {}",
                     e
                 ))
             })?;
-            tracing::info!("AnykaImagingControl: using VendorIpc for vendor library access");
+            tracing::info!("AnykaImagingControl: using AnykaIpc for vendor library access");
             Arc::new(ipc)
         };
 
