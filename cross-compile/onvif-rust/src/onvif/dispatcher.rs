@@ -48,7 +48,7 @@ use super::auth_requirements::{AuthLevel, get_required_level};
 use super::error::OnvifError;
 use super::soap::{UsernameToken, parse_soap_request};
 use super::ws_security::{WsSecurityError, WsSecurityValidator};
-use crate::users::{PasswordManager, UserAccount, UserStorage};
+use crate::config::{PasswordManager, UserAccount, UserStorage};
 use crate::utils::validation::{SecurityError, SecurityValidator};
 use base64::{Engine, engine::general_purpose::STANDARD as BASE64};
 use serde::de::DeserializeOwned;
@@ -1280,7 +1280,7 @@ mod tests {
             .create_user(
                 "admin",
                 "password123",
-                crate::users::UserLevel::Administrator,
+                crate::config::UserLevel::Administrator,
             )
             .unwrap();
 
@@ -1329,7 +1329,7 @@ mod tests {
             .create_user(
                 "admin",
                 "password123",
-                crate::users::UserLevel::Administrator,
+                crate::config::UserLevel::Administrator,
             )
             .unwrap();
 
@@ -1509,7 +1509,11 @@ mod tests {
         // Setup auth context
         let user_storage = Arc::new(UserStorage::new());
         user_storage
-            .create_user("operator", "password123", crate::users::UserLevel::Operator)
+            .create_user(
+                "operator",
+                "password123",
+                crate::config::UserLevel::Operator,
+            )
             .unwrap();
 
         let password_manager = Arc::new(PasswordManager::new());

@@ -6,10 +6,10 @@
 //! - Device service handlers
 //! - Authorization checks
 
+use onvif_rust::config::{MAX_USERS, PasswordManager, UserLevel, UserStorage};
 use onvif_rust::onvif::device::DeviceService;
 use onvif_rust::onvif::types::common::{User as OnvifUser, UserLevel as OnvifUserLevel};
 use onvif_rust::onvif::types::device::{CreateUsers, DeleteUsers, GetUsers, SetUser};
-use onvif_rust::users::{MAX_USERS, PasswordManager, UserLevel, UserStorage};
 use std::sync::Arc;
 use tempfile::tempdir;
 
@@ -122,7 +122,7 @@ fn test_password_verify_integration() {
     ];
 
     for password in passwords {
-        let stored = onvif_rust::users::password::SecurePassword::from(password);
+        let stored = onvif_rust::config::users::password::SecurePassword::from(password);
         // Verify correct password matches
         assert!(
             manager.verify_password(password, &stored),

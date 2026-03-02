@@ -66,7 +66,7 @@ pub const MAX_PASSWORD_LENGTH: usize = 128;
 /// # Example
 ///
 /// ```ignore
-/// use onvif_rust::users::password::SecurePassword;
+/// use onvif_rust::config::users::password::SecurePassword;
 ///
 /// let password = SecurePassword::new("my_secret".to_string());
 /// let bytes = password.as_bytes(); // For digest computation

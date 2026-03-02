@@ -21,6 +21,7 @@ use tokio::task::JoinHandle;
 use crate::config::{
     ConfigPersistenceHandle, ConfigPersistenceService, ConfigRuntime, ConfigStorage,
 };
+use crate::config::{PasswordManager, UserStorage};
 use crate::lifecycle::health::{ComponentHealth, HealthStatus};
 use crate::lifecycle::shutdown::{DEFAULT_SHUTDOWN_TIMEOUT, ShutdownCoordinator};
 use crate::lifecycle::startup::{StartupPhase, StartupProgress};
@@ -33,8 +34,6 @@ use crate::platform::Platform;
 use crate::platform::StubPlatformBuilder;
 use crate::platform::external_ip;
 use crate::security::RateLimiter;
-use crate::users::password::PasswordManager;
-use crate::users::storage::UserStorage;
 use streaming_lib::common::auth::{Auth, AuthAlgorithm, AuthType, CredentialValidator};
 
 // ============================================================================
@@ -560,9 +559,7 @@ impl Application {
 
         // Set up config persistence service (debounced save)
         let storage = ConfigStorage::new(config_path);
-        let save_delay = config_runtime
-            .get_int("server.config_save_delay_ms")
-            .unwrap_or(500) as u64;
+        let save_delay = config_runtime.read().server.config_save_delay_ms;
         let (persistence_service, persistence_handle) =
             ConfigPersistenceService::new(Arc::clone(&config_runtime), storage, save_delay);
         let config_persistence_task = Some(tokio::spawn(
@@ -607,9 +604,7 @@ impl Application {
         }
 
         // Initialize rate limiter from config (default: 60 requests per minute)
-        let rate_limit_per_minute = config_runtime
-            .get_int("server.rate_limit_per_minute")
-            .unwrap_or(60) as u32;
+        let rate_limit_per_minute = config_runtime.read().server.rate_limit_per_minute;
         let rate_limiter = Arc::new(RateLimiter::new(rate_limit_per_minute));
         tracing::info!(
             "Rate limiter initialized: {} requests/minute",
@@ -641,9 +636,10 @@ impl Application {
             .map_err(|e| StartupError::Services(e.to_string()))?;
 
         // Start memory logging task (logs every 5 minutes by default)
-        let memory_logging_interval = config_runtime
-            .get_int("memory.logging_interval_secs")
-            .unwrap_or(300) as u64; // Default: 5 minutes
+        let memory_logging_interval = {
+            let secs = config_runtime.read().memory.logging_interval_secs;
+            if secs == 0 { 300 } else { secs as u64 }
+        };
         let memory_logging_task = Some(app_state.memory_monitor().clone().start_periodic_logging(
             Duration::from_secs(memory_logging_interval),
             shutdown_coordinator.subscribe(),
@@ -661,48 +657,36 @@ impl Application {
         progress.begin_phase(StartupPhase::Network);
         tracing::debug!("Starting HTTP server...");
 
-        // Get HTTP settings from config or use defaults
-        let bind_address = config_runtime
-            .get_string("server.bind_address")
-            .unwrap_or_else(|_| "0.0.0.0".to_string());
-        let port = config_runtime.get_int("server.port").unwrap_or(8080) as u16;
-        let request_timeout = config_runtime
-            .get_int("server.request_timeout")
-            .unwrap_or(30) as u64;
-        let max_body_size = config_runtime
-            .get_int("server.max_body_size")
-            .unwrap_or(1024 * 1024) as usize;
-        let http_verbose = config_runtime
-            .get_bool("logging.http_verbose")
-            .unwrap_or(false);
-        let static_root = config_runtime
-            .get_string("server.static_root")
-            .ok()
-            .or_else(|| Some("www".to_string()));
-
-        let server_config = OnvifServerConfig {
-            bind_address,
-            port,
-            request_timeout_secs: request_timeout,
-            max_body_size,
-            enable_cors: false,
-            static_root,
-            http_verbose,
-            tls_enabled: config_runtime
-                .get_bool("server.tls_enabled")
-                .unwrap_or(false),
-            tls_cert_path: config_runtime
-                .get_string("server.tls_cert_path")
-                .ok()
-                .map(std::path::PathBuf::from),
-            tls_key_path: config_runtime
-                .get_string("server.tls_key_path")
-                .ok()
-                .map(std::path::PathBuf::from),
-            rate_limit_per_minute: config_runtime
-                .get_int("server.rate_limit_per_minute")
-                .unwrap_or(60) as u32,
+        // Get HTTP settings from config
+        let server_config = {
+            let c = config_runtime.read();
+            OnvifServerConfig {
+                bind_address: c.server.bind_address.clone(),
+                port: c.server.port,
+                request_timeout_secs: c.server.request_timeout,
+                max_body_size: c.server.max_body_size,
+                enable_cors: false,
+                static_root: if c.server.static_root.is_empty() {
+                    Some("www".to_string())
+                } else {
+                    Some(c.server.static_root.clone())
+                },
+                http_verbose: c.logging.http_verbose,
+                tls_enabled: c.server.tls_enabled,
+                tls_cert_path: if c.server.tls_cert_path.is_empty() {
+                    None
+                } else {
+                    Some(std::path::PathBuf::from(&c.server.tls_cert_path))
+                },
+                tls_key_path: if c.server.tls_key_path.is_empty() {
+                    None
+                } else {
+                    Some(std::path::PathBuf::from(&c.server.tls_key_path))
+                },
+                rate_limit_per_minute: c.server.rate_limit_per_minute,
+            }
         };
+        let port = server_config.port;
 
         let server = Arc::new(
             OnvifServer::with_app_state(server_config, app_state.clone())
@@ -721,7 +705,7 @@ impl Application {
 
         // Phase 5: Discovery
         progress.begin_phase(StartupPhase::Discovery);
-        let discovery_enabled = config_runtime.get_bool("discovery.enabled").unwrap_or(true);
+        let discovery_enabled = config_runtime.read().discovery.enabled;
 
         let (discovery, discovery_task) = if discovery_enabled {
             // Build discovery configuration
@@ -792,11 +776,14 @@ impl Application {
     ) -> Result<Option<Arc<dyn Platform>>, StartupError> {
         #[cfg(not(use_stubs))]
         {
-            let isp_path = config_runtime
-                .get_string("device.isp_config_path")
-                .ok()
-                .filter(|s| !s.is_empty())
-                .map(std::path::PathBuf::from);
+            let isp_path = {
+                let p = config_runtime.read().device.isp_config_path.clone();
+                if p.is_empty() {
+                    None
+                } else {
+                    Some(std::path::PathBuf::from(p))
+                }
+            };
 
             match crate::platform::AnykaPlatform::with_isp_config(isp_path) {
                 Ok(p) => match p.initialize().await {
@@ -932,10 +919,11 @@ impl Application {
     }
 
     fn build_stream_auth(app_state: &AppState) -> anyhow::Result<Option<Auth>> {
-        let auth_enabled = app_state
-            .config()
-            .get_bool("server.auth_enabled")
-            .unwrap_or(true);
+        let c = app_state.config().read();
+        let auth_enabled = c.server.auth_enabled;
+        let realm = c.server.realm.clone();
+        drop(c);
+
         if !auth_enabled {
             tracing::info!("Streaming authentication disabled (server.auth_enabled=false)");
             return Ok(None);
@@ -955,11 +943,6 @@ impl Application {
                 .map(|user| validator_password_manager.verify_password(password, &user.password))
                 .unwrap_or(false)
         });
-
-        let realm = app_state
-            .config()
-            .get_string("server.realm")
-            .unwrap_or_else(|_| "ONVIF Camera".to_string());
         let stream_auth = Auth::new(
             String::new(),
             Self::generate_unpredictable_stream_token(),
@@ -1013,9 +996,7 @@ impl Application {
 
         // Set up config persistence service (debounced save)
         let storage = ConfigStorage::new(config_path);
-        let save_delay = config_runtime
-            .get_int("server.config_save_delay_ms")
-            .unwrap_or(500) as u64;
+        let save_delay = config_runtime.read().server.config_save_delay_ms;
         let (persistence_service, persistence_handle) =
             ConfigPersistenceService::new(Arc::clone(&config_runtime), storage, save_delay);
         let config_persistence_task = Some(tokio::spawn(
@@ -1054,9 +1035,7 @@ impl Application {
             }
         }
 
-        let rate_limit_per_minute = config_runtime
-            .get_int("server.rate_limit_per_minute")
-            .unwrap_or(60) as u32;
+        let rate_limit_per_minute = config_runtime.read().server.rate_limit_per_minute;
         let rate_limiter = Arc::new(RateLimiter::new(rate_limit_per_minute));
         tracing::info!(
             "Rate limiter initialized: {} requests/minute",
@@ -1079,9 +1058,10 @@ impl Application {
             .build()
             .map_err(|e| StartupError::Services(e.to_string()))?;
 
-        let memory_logging_interval = config_runtime
-            .get_int("memory.logging_interval_secs")
-            .unwrap_or(300) as u64;
+        let memory_logging_interval = {
+            let secs = config_runtime.read().memory.logging_interval_secs;
+            if secs == 0 { 300 } else { secs as u64 }
+        };
         let memory_logging_task = Some(app_state.memory_monitor().clone().start_periodic_logging(
             Duration::from_secs(memory_logging_interval),
             shutdown_coordinator.subscribe(),
@@ -1098,47 +1078,35 @@ impl Application {
         progress.begin_phase(StartupPhase::Network);
         tracing::debug!("Starting HTTP server...");
 
-        let bind_address = config_runtime
-            .get_string("server.bind_address")
-            .unwrap_or_else(|_| "0.0.0.0".to_string());
-        let port = config_runtime.get_int("server.port").unwrap_or(8080) as u16;
-        let request_timeout = config_runtime
-            .get_int("server.request_timeout")
-            .unwrap_or(30) as u64;
-        let max_body_size = config_runtime
-            .get_int("server.max_body_size")
-            .unwrap_or(1024 * 1024) as usize;
-        let http_verbose = config_runtime
-            .get_bool("logging.http_verbose")
-            .unwrap_or(false);
-        let static_root = config_runtime
-            .get_string("server.static_root")
-            .ok()
-            .or_else(|| Some("www".to_string()));
-
-        let server_config = OnvifServerConfig {
-            bind_address,
-            port,
-            request_timeout_secs: request_timeout,
-            max_body_size,
-            enable_cors: false,
-            static_root,
-            http_verbose,
-            tls_enabled: config_runtime
-                .get_bool("server.tls_enabled")
-                .unwrap_or(false),
-            tls_cert_path: config_runtime
-                .get_string("server.tls_cert_path")
-                .ok()
-                .map(std::path::PathBuf::from),
-            tls_key_path: config_runtime
-                .get_string("server.tls_key_path")
-                .ok()
-                .map(std::path::PathBuf::from),
-            rate_limit_per_minute: config_runtime
-                .get_int("server.rate_limit_per_minute")
-                .unwrap_or(60) as u32,
+        let server_config = {
+            let c = config_runtime.read();
+            OnvifServerConfig {
+                bind_address: c.server.bind_address.clone(),
+                port: c.server.port,
+                request_timeout_secs: c.server.request_timeout,
+                max_body_size: c.server.max_body_size,
+                enable_cors: false,
+                static_root: if c.server.static_root.is_empty() {
+                    Some("www".to_string())
+                } else {
+                    Some(c.server.static_root.clone())
+                },
+                http_verbose: c.logging.http_verbose,
+                tls_enabled: c.server.tls_enabled,
+                tls_cert_path: if c.server.tls_cert_path.is_empty() {
+                    None
+                } else {
+                    Some(std::path::PathBuf::from(&c.server.tls_cert_path))
+                },
+                tls_key_path: if c.server.tls_key_path.is_empty() {
+                    None
+                } else {
+                    Some(std::path::PathBuf::from(&c.server.tls_key_path))
+                },
+                rate_limit_per_minute: c.server.rate_limit_per_minute,
+            }
         };
+        let port = server_config.port;
 
         let server = Arc::new(
             OnvifServer::with_app_state(server_config, app_state.clone())
@@ -1156,7 +1124,7 @@ impl Application {
 
         // Phase 5: Discovery (optional in custom platform scenarios)
         progress.begin_phase(StartupPhase::Discovery);
-        let discovery_enabled = config_runtime.get_bool("discovery.enabled").unwrap_or(true);
+        let discovery_enabled = config_runtime.read().discovery.enabled;
 
         let (discovery, discovery_task) = if discovery_enabled {
             let discovery_config = Self::make_discovery_config(&config_runtime, port);
@@ -1482,27 +1450,32 @@ impl Application {
     /// - Detects local IP from config or uses a reasonable default
     /// - Sets up scopes based on device capabilities
     fn make_discovery_config(config: &Arc<ConfigRuntime>, http_port: u16) -> DiscoveryConfig {
-        // Get or generate endpoint UUID
-        let endpoint_uuid = config
-            .get_string("discovery.endpoint_uuid")
-            .ok()
-            .filter(|s| !s.is_empty())
-            .unwrap_or_else(|| format!("urn:uuid:{}", uuid::Uuid::new_v4()));
+        let c = config.read();
+        let endpoint_uuid = if c.discovery.endpoint_uuid.is_empty() {
+            format!("urn:uuid:{}", uuid::Uuid::new_v4())
+        } else {
+            c.discovery.endpoint_uuid.clone()
+        };
+
+        let local_ip_config = if c.discovery.local_ip.is_empty() {
+            "auto".to_string()
+        } else {
+            c.discovery.local_ip.clone()
+        };
+
+        let hello_interval_secs = if c.discovery.hello_interval == 0 {
+            300u64
+        } else {
+            c.discovery.hello_interval as u64
+        };
+        drop(c);
 
         // Get local IP - "auto" means we should try to detect, otherwise use external_ip helper
-        let local_ip_config = config
-            .get_string("discovery.local_ip")
-            .unwrap_or_else(|_| "auto".to_string());
-
         let device_ip = if local_ip_config == "auto" {
-            // Use shared external_ip helper so discovery matches HTTP/RTSP URLs
             external_ip(config)
         } else {
             local_ip_config
         };
-
-        // Get hello interval from config
-        let hello_interval_secs = config.get_int("discovery.hello_interval").unwrap_or(300) as u64;
 
         tracing::debug!(
             endpoint_uuid = %endpoint_uuid,
@@ -1544,10 +1517,10 @@ impl Application {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::UserLevel;
     use crate::lifecycle::ShutdownStatus;
     use crate::lifecycle::health::HealthState;
     use crate::platform::StubPlatformBuilder;
-    use crate::users::UserLevel;
     use crate::utils::MemoryMonitor;
     use std::net::TcpListener;
 
@@ -1602,25 +1575,20 @@ mod tests {
         auth_enabled: bool,
     ) -> Arc<ConfigRuntime> {
         let config = Arc::new(ConfigRuntime::new(Default::default()));
-        config
-            .set_bool("media.streaming_enabled", true)
-            .expect("set streaming_enabled");
-        config
-            .set_int("media.rtsp_port", i64::from(rtsp_port))
-            .expect("set rtsp_port");
-        config
-            .set_int("media.httpflv_port", i64::from(httpflv_port))
-            .expect("set httpflv_port");
-        config
-            .set_bool("server.auth_enabled", auth_enabled)
-            .expect("set auth_enabled");
+        {
+            let mut c = config.write();
+            c.media.streaming_enabled = true;
+            c.media.rtsp_port = rtsp_port;
+            c.media.httpflv_port = httpflv_port;
+            c.server.auth_enabled = auth_enabled;
+        }
         config
     }
 
     #[test]
     fn test_build_stream_auth_disabled_returns_none() {
         let config = Arc::new(ConfigRuntime::new(Default::default()));
-        config.set_bool("server.auth_enabled", false).unwrap();
+        config.write().server.auth_enabled = false;
         let app_state = make_app_state_for_stream_auth(config, Arc::new(UserStorage::new()));
 
         let stream_auth = Application::build_stream_auth(&app_state).unwrap();
@@ -1630,7 +1598,7 @@ mod tests {
     #[test]
     fn test_build_stream_auth_enabled_without_users_returns_error() {
         let config = Arc::new(ConfigRuntime::new(Default::default()));
-        config.set_bool("server.auth_enabled", true).unwrap();
+        config.write().server.auth_enabled = true;
         let app_state = make_app_state_for_stream_auth(config, Arc::new(UserStorage::new()));
 
         let result = Application::build_stream_auth(&app_state);
@@ -1640,8 +1608,11 @@ mod tests {
     #[test]
     fn test_build_stream_auth_enabled_uses_user_storage_credentials() {
         let config = Arc::new(ConfigRuntime::new(Default::default()));
-        config.set_bool("server.auth_enabled", true).unwrap();
-        config.set_string("server.realm", "ONVIF Camera").unwrap();
+        {
+            let mut c = config.write();
+            c.server.auth_enabled = true;
+            c.server.realm = "ONVIF Camera".to_string();
+        }
 
         let storage = UserStorage::new();
         storage
@@ -1811,13 +1782,12 @@ mod tests {
     #[test]
     fn test_make_discovery_config_explicit_values() {
         let config = Arc::new(ConfigRuntime::new(Default::default()));
-        config
-            .set_string("discovery.endpoint_uuid", "urn:uuid:explicit-test-id")
-            .unwrap();
-        config
-            .set_string("discovery.local_ip", "192.0.2.50")
-            .unwrap();
-        config.set_int("discovery.hello_interval", 42).unwrap();
+        {
+            let mut c = config.write();
+            c.discovery.endpoint_uuid = "urn:uuid:explicit-test-id".to_string();
+            c.discovery.local_ip = "192.0.2.50".to_string();
+            c.discovery.hello_interval = 42;
+        }
 
         let discovery = Application::make_discovery_config(&config, 8181);
 
@@ -1830,10 +1800,11 @@ mod tests {
     #[test]
     fn test_make_discovery_config_uses_fallbacks_for_empty_uuid_and_auto_ip() {
         let config = Arc::new(ConfigRuntime::new(Default::default()));
-        config.set_string("discovery.endpoint_uuid", "").unwrap();
-        config
-            .set_string("network.detected_ip", "198.51.100.42")
-            .unwrap();
+        {
+            let mut c = config.write();
+            c.discovery.endpoint_uuid = String::new();
+            c.network.detected_ip = "198.51.100.42".to_string();
+        }
 
         let discovery = Application::make_discovery_config(&config, 8080);
 
@@ -1915,9 +1886,10 @@ mod tests {
         .await;
 
         assert!(result.is_err());
+        // Validation now catches port=0 at config load time
         assert!(matches!(
             result,
-            Err(StartupError::Network(ref message)) if message.contains("Port cannot be 0")
+            Err(StartupError::Config(ref message)) if message.contains("server.port")
         ));
 
         let _ = std::fs::remove_file(&temp_config);

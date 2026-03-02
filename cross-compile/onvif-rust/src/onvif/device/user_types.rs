@@ -1,13 +1,13 @@
 //! User management type mappings and conversions.
 //!
 //! This module provides conversions between:
-//! - Internal user storage types (`crate::users::UserLevel`, `crate::users::UserAccount`)
+//! - Internal user storage types (`crate::config::UserLevel`, `crate::config::UserAccount`)
 //! - ONVIF WSDL types (`crate::onvif::types::common::User`, `crate::onvif::types::common::UserLevel`)
 //!
 //! The WSDL types are defined in `devicemgmt.wsdl` and match the ONVIF specification.
 
+use crate::config::{UserAccount, UserLevel as InternalUserLevel};
 use crate::onvif::types::common::{User as OnvifUser, UserLevel as OnvifUserLevel};
-use crate::users::{UserAccount, UserLevel as InternalUserLevel};
 use crate::utils::validation::normalize_unicode;
 
 // ============================================================================

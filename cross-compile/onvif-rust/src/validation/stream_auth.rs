@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use crate::config::ConfigRuntime;
-use crate::users::{PasswordManager, UserStorage};
+use crate::config::{PasswordManager, UserStorage};
 use streaming_lib::common::auth::{Auth, AuthAlgorithm, AuthType, CredentialValidator};
 
 fn users_file_path(config_path: &str) -> PathBuf {
@@ -26,13 +26,16 @@ pub fn build_stream_auth_for_validation_mode(
     config: &ConfigRuntime,
     config_path: &str,
 ) -> Result<Option<Auth>> {
-    let auth_enabled = config.get_bool("server.auth_enabled").unwrap_or(true);
-    if !auth_enabled {
+    let c = config.read();
+    if !c.server.auth_enabled {
         tracing::info!(
             "Validation mode stream authentication disabled (server.auth_enabled=false)"
         );
         return Ok(None);
     }
+
+    let realm = c.server.realm.clone();
+    drop(c);
 
     let users_path = users_file_path(config_path);
     if !users_path.exists() {
@@ -64,9 +67,6 @@ pub fn build_stream_auth_for_validation_mode(
             .unwrap_or(false)
     });
 
-    let realm = config
-        .get_string("server.realm")
-        .unwrap_or_else(|_| "ONVIF Camera".to_string());
     let auth = Auth::new(
         String::new(),
         generate_unpredictable_stream_token(),
@@ -87,16 +87,15 @@ pub fn build_stream_auth_for_validation_mode(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::users::UserLevel;
+    use crate::config::UserLevel;
 
     fn make_config(auth_enabled: bool) -> ConfigRuntime {
         let config = ConfigRuntime::new(Default::default());
-        config
-            .set_bool("server.auth_enabled", auth_enabled)
-            .expect("set auth_enabled");
-        config
-            .set_string("server.realm", "ONVIF Camera")
-            .expect("set realm");
+        {
+            let mut c = config.write();
+            c.server.auth_enabled = auth_enabled;
+            c.server.realm = "ONVIF Camera".to_string();
+        }
         config
     }
 

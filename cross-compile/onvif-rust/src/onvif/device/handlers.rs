@@ -13,6 +13,7 @@ use std::sync::Arc;
 use chrono::{Datelike, Timelike, Utc};
 
 use crate::config::ConfigRuntime;
+use crate::config::{PasswordManager, UserLevel, UserStorage};
 use crate::onvif::dispatcher::parse_body;
 use crate::onvif::error::{OnvifError, OnvifResult};
 use crate::onvif::types::common::{
@@ -43,7 +44,6 @@ use crate::onvif::types::device::{
     SetUser, SetUserResponse, SystemReboot, SystemRebootResponse,
 };
 use crate::platform::{DeviceInfo, Platform, external_ip};
-use crate::users::{PasswordManager, UserLevel, UserStorage};
 
 use super::faults::{validate_hostname, validate_scope};
 use super::types::{
@@ -111,7 +111,7 @@ impl DeviceService {
     fn base_url(&self) -> String {
         // Use canonical external_ip helper for consistency across all ONVIF services
         let address = external_ip(&self.config);
-        let port = self.config.get_int("server.port").unwrap_or(80) as u16;
+        let port = self.config.read().server.port;
         format!("http://{}:{}", address, port)
     }
 
@@ -174,27 +174,13 @@ impl DeviceService {
 
     /// Get device info from configuration.
     fn device_info_from_config(&self) -> DeviceInfo {
+        let c = self.config.read();
         DeviceInfo {
-            manufacturer: self
-                .config
-                .get_string("device.manufacturer")
-                .unwrap_or_else(|_| "Anyka".to_string()),
-            model: self
-                .config
-                .get_string("device.model")
-                .unwrap_or_else(|_| "AK3918 Camera".to_string()),
-            firmware_version: self
-                .config
-                .get_string("device.firmware_version")
-                .unwrap_or_else(|_| "1.0.0".to_string()),
-            serial_number: self
-                .config
-                .get_string("device.serial_number")
-                .unwrap_or_else(|_| "000000000000".to_string()),
-            hardware_id: self
-                .config
-                .get_string("device.hardware_id")
-                .unwrap_or_else(|_| "00001".to_string()),
+            manufacturer: c.device.manufacturer.clone(),
+            model: c.device.model.clone(),
+            firmware_version: c.device.firmware_version.clone(),
+            serial_number: c.device.serial_number.clone(),
+            hardware_id: c.device.hardware_id.clone(),
         }
     }
 
@@ -547,10 +533,14 @@ impl DeviceService {
     pub fn handle_get_hostname(&self, _request: GetHostname) -> OnvifResult<GetHostnameResponse> {
         tracing::debug!("GetHostname request");
 
-        let hostname = self
-            .config
-            .get_string("device.hostname")
-            .unwrap_or_else(|_| "onvif-camera".to_string());
+        let hostname = {
+            let h = self.config.read().device.hostname.clone();
+            if h.is_empty() {
+                "onvif-camera".to_string()
+            } else {
+                h
+            }
+        };
 
         Ok(GetHostnameResponse {
             hostname_information: HostnameInformation {
@@ -571,9 +561,7 @@ impl DeviceService {
         validate_hostname(&request.name)?;
 
         // Save to configuration
-        self.config
-            .set_string("device.hostname", &request.name)
-            .map_err(|e| OnvifError::HardwareFailure(format!("Failed to save hostname: {}", e)))?;
+        self.config.write().device.hostname = request.name.clone();
 
         tracing::info!("SetHostname: hostname set to '{}'", request.name);
 
@@ -678,12 +666,14 @@ impl DeviceService {
         // Use canonical external_ip helper for consistency
         let ip_address = external_ip(&self.config);
 
-        let mac_address = self
-            .config
-            .get_string("network.mac_address")
-            .unwrap_or_else(|_| "00:11:22:33:44:55".to_string());
-
-        let dhcp_enabled = self.config.get_bool("network.dhcp_enabled").unwrap_or(true);
+        let c = self.config.read();
+        let mac_address = if c.network.mac_address.is_empty() {
+            "00:11:22:33:44:55".to_string()
+        } else {
+            c.network.mac_address.clone()
+        };
+        let dhcp_enabled = c.network.dhcp_enabled;
+        drop(c);
 
         (ip_address, mac_address, dhcp_enabled)
     }
@@ -820,12 +810,14 @@ impl DeviceService {
         tracing::debug!("GetNetworkDefaultGateway request");
 
         // Get gateway from config (platform doesn't expose gateway info)
-        let gateway = self
-            .config
-            .get_string("network.gateway")
-            .ok()
-            .filter(|s| !s.is_empty())
-            .unwrap_or_else(|| "192.168.1.1".to_string());
+        let gateway = {
+            let g = self.config.read().network.gateway.clone();
+            if g.is_empty() {
+                "192.168.1.1".to_string()
+            } else {
+                g
+            }
+        };
 
         let network_gateway = NetworkGateway {
             ipv4_address: vec![gateway],
@@ -879,7 +871,7 @@ impl DeviceService {
         }
 
         // Return default protocol info from config if no platform
-        let http_port = self.config.get_int("server.port").unwrap_or(80) as i32;
+        let http_port = self.config.read().server.port as i32;
 
         Ok(GetNetworkProtocolsResponse {
             network_protocols: vec![
@@ -1143,8 +1135,8 @@ impl DeviceService {
             self.users
                 .create_user(&user.username, password, level)
                 .map_err(|e| match e {
-                    crate::users::UserError::MaxUsersReached => OnvifError::MaxUsers,
-                    crate::users::UserError::UserExists(name) => OnvifError::InvalidArgVal {
+                    crate::config::UserError::MaxUsersReached => OnvifError::MaxUsers,
+                    crate::config::UserError::UserExists(name) => OnvifError::InvalidArgVal {
                         subcode: "ter:UsernameExists".to_string(),
                         reason: format!("User '{}' already exists", name),
                     },
@@ -1202,11 +1194,11 @@ impl DeviceService {
 
         for username in &request.usernames {
             self.users.delete_user(username).map_err(|e| match e {
-                crate::users::UserError::UserNotFound(name) => OnvifError::InvalidArgVal {
+                crate::config::UserError::UserNotFound(name) => OnvifError::InvalidArgVal {
                     subcode: "ter:UserNotFound".to_string(),
                     reason: format!("User '{}' not found", name),
                 },
-                crate::users::UserError::CannotDeleteLastAdmin => OnvifError::InvalidArgVal {
+                crate::config::UserError::CannotDeleteLastAdmin => OnvifError::InvalidArgVal {
                     subcode: "ter:FixedUser".to_string(),
                     reason: "Cannot delete the last administrator".to_string(),
                 },
@@ -1275,11 +1267,11 @@ impl DeviceService {
             self.users
                 .update_user(&user.username, password, Some(level))
                 .map_err(|e| match e {
-                    crate::users::UserError::UserNotFound(name) => OnvifError::InvalidArgVal {
+                    crate::config::UserError::UserNotFound(name) => OnvifError::InvalidArgVal {
                         subcode: "ter:UserNotFound".to_string(),
                         reason: format!("User '{}' not found", name),
                     },
-                    crate::users::UserError::CannotDeleteLastAdmin => OnvifError::InvalidArgVal {
+                    crate::config::UserError::CannotDeleteLastAdmin => OnvifError::InvalidArgVal {
                         subcode: "ter:FixedUser".to_string(),
                         reason: "Cannot demote the last administrator".to_string(),
                     },
@@ -2860,16 +2852,14 @@ mod tests {
             .create_user("admin", "admin123", UserLevel::Administrator)
             .unwrap();
         let password_manager = Arc::new(PasswordManager::new());
-        let config = {
-            let c = ConfigRuntime::new(Default::default());
-            c.set_string("network.detected_ip", "192.168.1.100")
-                .unwrap();
-            c.set_string("network.mac_address", "AA:BB:CC:DD:EE:FF")
-                .unwrap();
-            c.set_bool("network.dhcp_enabled", false).unwrap();
-            c
-        };
-        config.set_int("server.port", 8080).unwrap();
+        let config = ConfigRuntime::new(Default::default());
+        {
+            let mut c = config.write();
+            c.network.detected_ip = "192.168.1.100".to_string();
+            c.network.mac_address = "AA:BB:CC:DD:EE:FF".to_string();
+            c.network.dhcp_enabled = false;
+            c.server.port = 8080;
+        }
 
         let platform = Arc::new(StubPlatform::new());
         let service = DeviceService::with_config_and_platform(
@@ -2900,17 +2890,16 @@ mod tests {
             .create_user("admin", "admin123", UserLevel::Administrator)
             .unwrap();
         let password_manager = Arc::new(PasswordManager::new());
-        let config = {
-            let c = ConfigRuntime::new(Default::default());
+        let config = ConfigRuntime::new(Default::default());
+        {
+            let mut c = config.write();
             // Static IP takes highest precedence
-            c.set_string("network.ip_address", "192.168.1.50").unwrap();
+            c.network.ip_address = "192.168.1.50".to_string();
             // These should be ignored when ip_address is set
-            c.set_string("network.detected_ip", "192.168.1.100")
-                .unwrap();
-            c.set_string("server.address", "10.0.0.1").unwrap();
-            c
-        };
-        config.set_int("server.port", 8080).unwrap();
+            c.network.detected_ip = "192.168.1.100".to_string();
+            c.server.address = "10.0.0.1".to_string();
+            c.server.port = 8080;
+        }
 
         let platform = Arc::new(StubPlatform::new());
         let service = DeviceService::with_config_and_platform(
@@ -2941,13 +2930,13 @@ mod tests {
             .create_user("admin", "admin123", UserLevel::Administrator)
             .unwrap();
         let password_manager = Arc::new(PasswordManager::new());
-        let config = {
-            let c = ConfigRuntime::new(Default::default());
+        let config = ConfigRuntime::new(Default::default());
+        {
+            let mut c = config.write();
             // Use server.address as per canonical external_ip precedence
-            c.set_string("server.address", "10.0.0.1").unwrap();
-            c.set_int("server.port", 9000).unwrap();
-            c
-        };
+            c.server.address = "10.0.0.1".to_string();
+            c.server.port = 9000;
+        }
 
         let platform = Arc::new(StubPlatform::new());
         let service = DeviceService::with_config_and_platform(
@@ -3022,14 +3011,13 @@ mod tests {
             .create_user("admin", "admin123", UserLevel::Administrator)
             .unwrap();
         let password_manager = Arc::new(PasswordManager::new());
-        let config = {
-            let c = ConfigRuntime::new(Default::default());
-            c.set_string("network.detected_ip", "192.168.1.50").unwrap();
-            c.set_string("network.mac_address", "AA:BB:CC:DD:EE:FF")
-                .unwrap();
-            c.set_bool("network.dhcp_enabled", false).unwrap();
-            c
-        };
+        let config = ConfigRuntime::new(Default::default());
+        {
+            let mut c = config.write();
+            c.network.detected_ip = "192.168.1.50".to_string();
+            c.network.mac_address = "AA:BB:CC:DD:EE:FF".to_string();
+            c.network.dhcp_enabled = false;
+        }
 
         use crate::platform::StubPlatform;
         let platform = Arc::new(StubPlatform::new());

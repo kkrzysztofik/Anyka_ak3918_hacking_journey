@@ -1,14 +1,59 @@
-//! User storage and account management.
+//! User management module.
 //!
-//! This module provides thread-safe user storage with CRUD operations
-//! and TOML file persistence for the ONVIF user management system.
+//! This module implements ONVIF user management functionality including:
+//! - User storage with CRUD operations
+//! - Password validation and verification
+//! - TOML file persistence
+//!
+//! # Architecture
+//!
+//! The user management system follows these principles:
+//! - **Thread-safe**: All operations use `RwLock` for concurrent access
+//! - **WS-Security compatible**: Passwords stored in plaintext for digest auth
+//! - **Atomic persistence**: TOML file writes use temp file + rename pattern
+//! - **ONVIF compliance**: User levels match ONVIF specification
+//!
+//! # Security Note
+//!
+//! Passwords are stored in plaintext because WS-Security UsernameToken
+//! digest authentication requires computing SHA1(Nonce + Created + Password).
+//! File permissions should be restricted (`chmod 600`).
+//!
+//! # Example
+//!
+//! ```ignore
+//! use onvif_rust::config::users::{UserStorage, PasswordManager, UserLevel};
+//!
+//! let password_mgr = PasswordManager::new();
+//! let storage = UserStorage::new();
+//!
+//! // Validate and create admin user
+//! password_mgr.validate_password("admin123")?;
+//! storage.create_user("admin", "admin123", UserLevel::Administrator)?;
+//!
+//! // Verify password
+//! let user = storage.get_user("admin").unwrap();
+//! assert!(password_mgr.verify_password("admin123", &user.password));
+//! ```
+//!
+//! # ONVIF Operations
+//!
+//! This module supports the following Device Service operations:
+//! - `GetUsers` - List all users (username and level only)
+//! - `CreateUsers` - Create new user accounts (admin only)
+//! - `DeleteUsers` - Remove user accounts (admin only)
+//! - `SetUser` - Update user password or level (admin only)
 
-use crate::users::password::SecurePassword;
+pub mod password;
+
+pub use password::{PasswordError, PasswordManager};
+
 use parking_lot::RwLock;
+use password::SecurePassword;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
-use std::io::{self, Write};
+use std::io;
 use std::path::Path;
 use thiserror::Error;
 
@@ -468,31 +513,7 @@ impl UserStorage {
         };
 
         let content = toml::to_string_pretty(&users_file)?;
-
-        // Create parent directories if needed
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)?;
-        }
-
-        // Atomic write: write to temp file, then rename
-        let temp_path = path.with_extension("toml.tmp");
-
-        {
-            let mut file = fs::File::create(&temp_path)?;
-            file.write_all(content.as_bytes())?;
-            file.sync_all()?;
-        }
-
-        fs::rename(&temp_path, path)?;
-
-        // Set file permissions to owner read/write only (Unix only)
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let mut perms = fs::metadata(path)?.permissions();
-            perms.set_mode(0o600);
-            fs::set_permissions(path, perms)?;
-        }
+        super::file_ops::atomic_write(path, content.as_bytes(), Some(0o600))?;
 
         tracing::debug!("Saved {} users to {:?}", users_file.users.len(), path);
         Ok(())
@@ -554,8 +575,6 @@ impl UserStorage {
     /// Creates a one-time log file with the initial admin credentials.
     /// Sets file permissions to 0o600 (owner read/write only).
     fn log_initial_password(&self, username: &str, password: &str, path: &str) -> io::Result<()> {
-        use std::io::Write;
-
         let content = format!(
             "ONVIF Initial Admin Credentials\n\
              ================================\n\
@@ -572,25 +591,7 @@ impl UserStorage {
             password
         );
 
-        // Create parent directory if needed
-        if let Some(parent) = std::path::Path::new(path).parent() {
-            fs::create_dir_all(parent)?;
-        }
-
-        let mut file = fs::File::create(path)?;
-        file.write_all(content.as_bytes())?;
-        file.sync_all()?;
-
-        // Set restrictive permissions (Unix only)
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let mut perms = fs::metadata(path)?.permissions();
-            perms.set_mode(0o600);
-            fs::set_permissions(path, perms)?;
-        }
-
-        Ok(())
+        super::file_ops::atomic_write(Path::new(path), content.as_bytes(), Some(0o600))
     }
 
     /// Validate credentials against stored users.
@@ -616,6 +617,14 @@ impl Default for UserStorage {
 mod tests {
     use super::*;
     use tempfile::tempdir;
+
+    #[test]
+    fn test_module_exports() {
+        // Verify all public types are accessible
+        let _ = UserLevel::Administrator;
+        let _ = UserError::MaxUsersReached;
+        let _ = PasswordError::EmptyPassword;
+    }
 
     #[test]
     fn test_user_level_default() {

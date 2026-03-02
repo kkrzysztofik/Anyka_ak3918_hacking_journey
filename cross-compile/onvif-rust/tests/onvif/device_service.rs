@@ -7,6 +7,7 @@
 //! - Hostname and scopes management
 //! - Discovery mode configuration
 
+use onvif_rust::config::{PasswordManager, UserLevel, UserStorage};
 use onvif_rust::onvif::device::DeviceService;
 use onvif_rust::onvif::types::common::DiscoveryMode;
 use onvif_rust::onvif::types::device::{
@@ -14,7 +15,6 @@ use onvif_rust::onvif::types::device::{
     GetServiceCapabilities, GetServices, GetSystemDateAndTime, SetDiscoveryMode, SetHostname,
     SetScopes,
 };
-use onvif_rust::users::{PasswordManager, UserLevel, UserStorage};
 use std::sync::Arc;
 
 // ============================================================================

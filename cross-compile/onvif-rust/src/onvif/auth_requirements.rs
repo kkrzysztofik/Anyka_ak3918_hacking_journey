@@ -37,7 +37,7 @@
 use std::collections::HashMap;
 use std::sync::LazyLock;
 
-use crate::users::UserLevel;
+use crate::config::UserLevel;
 
 /// Authentication level required for an operation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

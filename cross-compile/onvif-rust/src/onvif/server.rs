@@ -67,11 +67,11 @@ use super::dispatcher::{AuthContext, ServiceDispatcher};
 use super::error::OnvifError;
 use super::ws_security::{WsSecurityConfig, WsSecurityValidator};
 use crate::app::AppState;
+use crate::config::{PasswordManager, UserStorage};
 use crate::logging::{
     HttpLogConfig, HttpLoggingMiddleware, memory_check_middleware, static_asset_logging_middleware,
 };
 use crate::security::RateLimiter;
-use crate::users::{PasswordManager, UserStorage};
 use crate::utils::MemoryMonitor;
 
 /// Configuration for the ONVIF HTTP server.
@@ -346,10 +346,7 @@ impl OnvifServer {
         }
 
         // Extract auth configuration from ConfigRuntime
-        let auth_enabled = app_state
-            .config()
-            .get_bool("server.auth_enabled")
-            .unwrap_or(true);
+        let auth_enabled = app_state.config().read().server.auth_enabled;
 
         // Validate security configuration
         validate_security_config(&config, auth_enabled)?;
@@ -362,10 +359,7 @@ impl OnvifServer {
         let (shutdown_tx, _) = broadcast::channel(1);
 
         // Extract auth configuration from ConfigRuntime
-        let auth_enabled = app_state
-            .config()
-            .get_bool("server.auth_enabled")
-            .unwrap_or(true);
+        let auth_enabled = app_state.config().read().server.auth_enabled;
 
         // Configure WS-Security based on app config
         let ws_config = WsSecurityConfig {
@@ -985,9 +979,8 @@ mod tests {
     #[test]
     fn test_server_with_app_state_registers_all_services() {
         use crate::config::ConfigRuntime;
+        use crate::config::{PasswordManager, UserStorage};
         use crate::onvif::ptz::PTZStateManager;
-        use crate::users::password::PasswordManager;
-        use crate::users::storage::UserStorage;
         use crate::utils::MemoryMonitor;
 
         let app_state = AppState::builder()
@@ -1239,9 +1232,8 @@ mod tests {
     #[test]
     fn test_server_with_app_state_tls_validation() {
         use crate::config::ConfigRuntime;
+        use crate::config::{PasswordManager, UserStorage};
         use crate::onvif::ptz::PTZStateManager;
-        use crate::users::password::PasswordManager;
-        use crate::users::storage::UserStorage;
         use crate::utils::MemoryMonitor;
 
         let app_state = AppState::builder()

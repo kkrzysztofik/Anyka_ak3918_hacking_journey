@@ -67,8 +67,6 @@ pub mod utils;
 
 // pub mod auth;
 
-pub mod users;
-
 pub mod security;
 
 pub mod hal;

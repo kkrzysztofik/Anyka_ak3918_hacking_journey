@@ -181,17 +181,17 @@ impl MediaService {
     /// Get the base URL for service addresses.
     fn base_url(&self) -> String {
         let address = external_ip(&self.config);
-        let port = self.config.get_int("server.port").unwrap_or(80) as u16;
+        let port = self.config.read().server.port;
         format!("http://{}:{}", address, port)
     }
 
     /// Get the RTSP base URL.
     fn rtsp_url(&self) -> String {
         let address = external_ip(&self.config);
-        let port = self
-            .config
-            .get_int("media.rtsp_port")
-            .unwrap_or(DEFAULT_RTSP_PORT as i64) as u16;
+        let port = {
+            let p = self.config.read().media.rtsp_port;
+            if p == 0 { DEFAULT_RTSP_PORT } else { p }
+        };
         format!("rtsp://{}:{}", address, port)
     }
 
@@ -631,10 +631,14 @@ impl MediaService {
         let _profile = self.profile_manager.get_profile(&request.profile_token)?;
 
         // Build snapshot URI
-        let snapshot_path = self
-            .config
-            .get_string("media.snapshot_path")
-            .unwrap_or_else(|_| DEFAULT_SNAPSHOT_PATH.to_string());
+        let snapshot_path = {
+            let p = self.config.read().media.snapshot_path.clone();
+            if p.is_empty() {
+                DEFAULT_SNAPSHOT_PATH.to_string()
+            } else {
+                p
+            }
+        };
 
         let uri = format!(
             "{}{}?profile={}",

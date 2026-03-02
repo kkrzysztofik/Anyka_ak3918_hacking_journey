@@ -12,7 +12,11 @@ use std::sync::atomic::{AtomicU32, Ordering};
 
 use parking_lot::RwLock;
 
-use crate::config::{ApplicationConfig, ConfigError, ConfigPersistenceHandle, ConfigRuntime};
+use crate::config::profiles::{
+    ProfilesFile, StoredAudioEncoderConfig, StoredAudioSource, StoredAudioSourceConfig,
+    StoredProfile, StoredVideoEncoderConfig, StoredVideoSource, StoredVideoSourceConfig,
+};
+use crate::config::{ConfigPersistenceHandle, ConfigRuntime, ProfileStorage};
 use crate::onvif::error::{OnvifError, OnvifResult};
 use crate::onvif::types::common::{
     AudioEncoderConfiguration, AudioSource, AudioSourceConfiguration, FloatRange, IntRange,
@@ -51,17 +55,6 @@ struct ProfileConfig {
     audio_sample_rate: u32,
 }
 
-/// Snapshot of all media state for persistence.
-struct PersistSnapshot {
-    profiles_data: Vec<(String, Profile)>,
-    video_sources_data: Vec<(String, VideoSource)>,
-    audio_sources_data: Vec<(String, AudioSource)>,
-    video_source_configs_data: Vec<(String, VideoSourceConfiguration)>,
-    video_encoder_configs_data: Vec<(String, VideoEncoderConfiguration)>,
-    audio_source_configs_data: Vec<(String, AudioSourceConfiguration)>,
-    audio_encoder_configs_data: Vec<(String, AudioEncoderConfiguration)>,
-}
-
 /// Profile Manager for managing media profiles.
 ///
 /// Provides thread-safe access to profiles and configurations.
@@ -84,10 +77,15 @@ pub struct ProfileManager {
     profile_counter: AtomicU32,
     /// Maximum sensor resolution for profile validation.
     max_sensor_resolution: Resolution,
-    /// Runtime configuration (optional) used for persistence.
+    /// Runtime configuration (optional) for reading `stream_profile_N` at init.
     config: Option<Arc<ConfigRuntime>>,
-    /// Config persistence handle for debounced saves.
+    /// Config persistence handle for debounced saves (kept for API compatibility).
+    #[allow(dead_code)]
     persistence: Option<ConfigPersistenceHandle>,
+    /// Typed profile storage for `profiles.toml` persistence.
+    profile_storage: Option<Arc<ProfileStorage>>,
+    /// Path to `profiles.toml` for direct saves.
+    profile_path: Option<String>,
 }
 
 impl ProfileManager {
@@ -133,10 +131,8 @@ impl ProfileManager {
             Resolution::new(1920, 1080), // Fallback for tests
         );
 
-        if !manager.load_from_config() {
-            manager.initialize_defaults();
-            manager.persist_all();
-        }
+        manager.initialize_defaults();
+        manager.persist_all();
 
         manager
     }
@@ -154,7 +150,30 @@ impl ProfileManager {
             max_sensor_resolution,
         );
 
-        if !manager.load_from_config() {
+        manager.initialize_defaults();
+        manager.persist_all();
+
+        manager
+    }
+
+    /// Create a ProfileManager with typed profile storage and sensor resolution.
+    ///
+    /// Profile data is loaded from `ProfileStorage` first. If empty, profiles
+    /// are initialized from `stream_profile_N` in ConfigRuntime (or hardcoded defaults)
+    /// and persisted to the storage.
+    pub fn with_storage(
+        config: Arc<ConfigRuntime>,
+        profile_storage: Arc<ProfileStorage>,
+        profile_path: &str,
+        max_sensor_resolution: Resolution,
+    ) -> Self {
+        let mut manager =
+            Self::new_with_dependencies(Some(Arc::clone(&config)), None, max_sensor_resolution);
+        manager.profile_storage = Some(Arc::clone(&profile_storage));
+        manager.profile_path = Some(profile_path.to_string());
+
+        // Try loading from profile storage first
+        if !manager.load_from_storage() {
             manager.initialize_defaults();
             manager.persist_all();
         }
@@ -180,6 +199,8 @@ impl ProfileManager {
             max_sensor_resolution,
             config,
             persistence,
+            profile_storage: None,
+            profile_path: None,
         }
     }
 
@@ -247,18 +268,9 @@ impl ProfileManager {
             audio_source_config,
         );
 
-        // Initialize profiles from configuration if explicit stream profiles exist; otherwise use hardcoded defaults.
+        // Initialize profiles from configuration (stream_profile_1..4 always exist with defaults).
         if let Some(ref config) = self.config {
-            let snapshot = config.snapshot();
-            let has_stream_profiles = snapshot
-                .keys()
-                .any(|key| key.starts_with("stream_profile_"));
-
-            if has_stream_profiles {
-                self.initialize_profiles_from_config(config, default_ptz_config);
-            } else {
-                self.initialize_profiles_hardcoded(default_ptz_config);
-            }
+            self.initialize_profiles_from_config(config, default_ptz_config);
         } else {
             self.initialize_profiles_hardcoded(default_ptz_config);
         }
@@ -274,12 +286,11 @@ impl ProfileManager {
         let mut profile_count = 0;
 
         for profile_num in 1..=4 {
-            let prefix = format!("stream_profile_{}", profile_num);
-            if !Self::is_profile_enabled(config, &prefix) {
+            if !Self::is_profile_enabled(config, profile_num) {
                 continue;
             }
 
-            let profile_config = Self::read_profile_config(config, &prefix, profile_num);
+            let profile_config = Self::read_profile_config(config, profile_num);
 
             // Validate profile resolution against sensor maximum capabilities
             if profile_config.width > self.max_sensor_resolution.width
@@ -350,50 +361,30 @@ impl ProfileManager {
     }
 
     /// Check if a profile is enabled.
-    fn is_profile_enabled(config: &ConfigRuntime, prefix: &str) -> bool {
-        config
-            .get_bool(&format!("{}.enabled", prefix))
-            .unwrap_or(true)
+    fn is_profile_enabled(config: &ConfigRuntime, profile_num: u32) -> bool {
+        config.read().stream_profile(profile_num).enabled
     }
 
     /// Read profile configuration from config.
-    fn read_profile_config(
-        config: &ConfigRuntime,
-        prefix: &str,
-        profile_num: u32,
-    ) -> ProfileConfig {
+    fn read_profile_config(config: &ConfigRuntime, profile_num: u32) -> ProfileConfig {
+        let c = config.read();
+        let sp = c.stream_profile(profile_num);
         ProfileConfig {
-            name: config
-                .get_string(&format!("{}.name", prefix))
-                .unwrap_or_else(|_| format!("Stream{}", profile_num)),
-            width: config.get_int(&format!("{}.width", prefix)).unwrap_or(1920) as u32,
-            height: config
-                .get_int(&format!("{}.height", prefix))
-                .unwrap_or(1080) as u32,
-            framerate: config
-                .get_int(&format!("{}.framerate", prefix))
-                .unwrap_or(30) as u32,
-            bitrate: config
-                .get_int(&format!("{}.bitrate", prefix))
-                .unwrap_or(4000) as u32,
-            encoding_str: config
-                .get_string(&format!("{}.encoding", prefix))
-                .unwrap_or_else(|_| "h264".to_string()),
-            profile_str: config
-                .get_string(&format!("{}.profile", prefix))
-                .unwrap_or_else(|_| "main".to_string()),
-            audio_enabled: config
-                .get_bool(&format!("{}.audio_enabled", prefix))
-                .unwrap_or(false),
-            audio_encoding_str: config
-                .get_string(&format!("{}.audio_encoding", prefix))
-                .unwrap_or_else(|_| "g711".to_string()),
-            audio_bitrate: config
-                .get_int(&format!("{}.audio_bitrate", prefix))
-                .unwrap_or(64) as u32,
-            audio_sample_rate: config
-                .get_int(&format!("{}.audio_sample_rate", prefix))
-                .unwrap_or(8000) as u32,
+            name: if sp.name.is_empty() {
+                format!("Stream{}", profile_num)
+            } else {
+                sp.name.clone()
+            },
+            width: sp.width,
+            height: sp.height,
+            framerate: sp.framerate,
+            bitrate: sp.bitrate,
+            encoding_str: sp.encoding.clone(),
+            profile_str: sp.profile.clone(),
+            audio_enabled: sp.audio_enabled,
+            audio_encoding_str: sp.audio_encoding.clone(),
+            audio_bitrate: sp.audio_bitrate,
+            audio_sample_rate: sp.audio_sample_rate,
         }
     }
 
@@ -1273,40 +1264,41 @@ impl ProfileManager {
         Ok(())
     }
 
-    /// Persist the current profile state to configuration storage if available.
+    /// Persist the current profile state to storage if available.
     fn persist_all(&self) {
-        let Some(config) = &self.config else {
+        let Some(storage) = &self.profile_storage else {
             return;
         };
-
-        if let Err(err) = self.persist_to_config(config) {
-            tracing::warn!("Failed to persist media profiles: {err}");
-        } else if let Some(handle) = &self.persistence {
-            handle.request_save();
+        let snapshot = self.to_stored_snapshot();
+        storage.replace(snapshot);
+        if let Some(path) = &self.profile_path
+            && let Err(e) = storage.save_to_toml(path)
+        {
+            tracing::warn!("Failed to save profiles to {path}: {e}");
         }
     }
 
-    fn persist_to_config(&self, config: &ConfigRuntime) -> Result<(), ConfigError> {
-        let snapshot = self.collect_snapshot();
-        Self::persist_profile_list(config, &snapshot.profiles_data)?;
-        Self::persist_sources(
-            config,
-            &snapshot.video_sources_data,
-            &snapshot.audio_sources_data,
-        )?;
-        Self::persist_configurations(
-            config,
-            &snapshot.video_source_configs_data,
-            &snapshot.video_encoder_configs_data,
-            &snapshot.audio_source_configs_data,
-            &snapshot.audio_encoder_configs_data,
-        )?;
-        Self::persist_profiles(config, &snapshot.profiles_data)?;
-        Ok(())
+    /// Load profiles from typed ProfileStorage. Returns `true` on success.
+    fn load_from_storage(&self) -> bool {
+        let Some(storage) = &self.profile_storage else {
+            return false;
+        };
+
+        let data = storage.snapshot();
+        if data.profiles.is_empty() {
+            return false;
+        }
+
+        self.apply_stored_snapshot(&data);
+        true
     }
 
-    /// Collect a snapshot of all media state.
-    fn collect_snapshot(&self) -> PersistSnapshot {
+    // ========================================================================
+    // Conversion: ONVIF domain types ↔ stored DTOs
+    // ========================================================================
+
+    /// Convert current in-memory state to a `ProfilesFile` for serialization.
+    fn to_stored_snapshot(&self) -> ProfilesFile {
         let profiles = self.profiles.read();
         let video_sources = self.video_sources.read();
         let audio_sources = self.audio_sources.read();
@@ -1315,472 +1307,292 @@ impl ProfileManager {
         let audio_source_configs = self.audio_source_configs.read();
         let audio_encoder_configs = self.audio_encoder_configs.read();
 
-        PersistSnapshot {
-            profiles_data: profiles
-                .iter()
-                .map(|(k, v)| (k.clone(), v.clone()))
+        ProfilesFile {
+            profiles: profiles.values().map(Self::profile_to_stored).collect(),
+            video_sources: video_sources
+                .values()
+                .map(Self::video_source_to_stored)
                 .collect(),
-            video_sources_data: video_sources
-                .iter()
-                .map(|(k, v)| (k.clone(), v.clone()))
+            audio_sources: audio_sources
+                .values()
+                .map(Self::audio_source_to_stored)
                 .collect(),
-            audio_sources_data: audio_sources
-                .iter()
-                .map(|(k, v)| (k.clone(), v.clone()))
+            video_source_configs: video_source_configs
+                .values()
+                .map(Self::video_source_config_to_stored)
                 .collect(),
-            video_source_configs_data: video_source_configs
-                .iter()
-                .map(|(k, v)| (k.clone(), v.clone()))
+            video_encoder_configs: video_encoder_configs
+                .values()
+                .map(Self::video_encoder_config_to_stored)
                 .collect(),
-            video_encoder_configs_data: video_encoder_configs
-                .iter()
-                .map(|(k, v)| (k.clone(), v.clone()))
+            audio_source_configs: audio_source_configs
+                .values()
+                .map(Self::audio_source_config_to_stored)
                 .collect(),
-            audio_source_configs_data: audio_source_configs
-                .iter()
-                .map(|(k, v)| (k.clone(), v.clone()))
-                .collect(),
-            audio_encoder_configs_data: audio_encoder_configs
-                .iter()
-                .map(|(k, v)| (k.clone(), v.clone()))
+            audio_encoder_configs: audio_encoder_configs
+                .values()
+                .map(Self::audio_encoder_config_to_stored)
                 .collect(),
         }
     }
 
-    /// Persist the profile list.
-    fn persist_profile_list(
-        config: &ConfigRuntime,
-        profiles_data: &[(String, Profile)],
-    ) -> Result<(), ConfigError> {
-        let mut tokens: Vec<String> = profiles_data.iter().map(|(k, _)| k.clone()).collect();
-        tokens.sort();
-        config.set_string("media.profiles", &tokens.join(","))?;
-        Ok(())
-    }
-
-    /// Persist video and audio sources.
-    fn persist_sources(
-        config: &ConfigRuntime,
-        video_sources_data: &[(String, VideoSource)],
-        audio_sources_data: &[(String, AudioSource)],
-    ) -> Result<(), ConfigError> {
-        for (token, source) in video_sources_data.iter() {
-            let prefix = format!("media.video_source.{token}");
-            config.set_float(
-                &format!("{}.framerate", prefix),
-                f64::from(source.framerate),
-            )?;
-            config.set_int(&format!("{}.width", prefix), source.resolution.width as i64)?;
-            config.set_int(
-                &format!("{}.height", prefix),
-                source.resolution.height as i64,
-            )?;
-        }
-
-        for (token, source) in audio_sources_data.iter() {
-            let prefix = format!("media.audio_source.{token}");
-            config.set_int(&format!("{}.channels", prefix), source.channels as i64)?;
-        }
-
-        Ok(())
-    }
-
-    /// Persist video and audio configurations.
-    fn persist_configurations(
-        config: &ConfigRuntime,
-        video_source_configs_data: &[(String, VideoSourceConfiguration)],
-        video_encoder_configs_data: &[(String, VideoEncoderConfiguration)],
-        audio_source_configs_data: &[(String, AudioSourceConfiguration)],
-        audio_encoder_configs_data: &[(String, AudioEncoderConfiguration)],
-    ) -> Result<(), ConfigError> {
-        Self::persist_video_source_configs(config, video_source_configs_data)?;
-        Self::persist_video_encoder_configs(config, video_encoder_configs_data)?;
-        Self::persist_audio_source_configs(config, audio_source_configs_data)?;
-        Self::persist_audio_encoder_configs(config, audio_encoder_configs_data)?;
-        Ok(())
-    }
-
-    /// Persist video source configurations.
-    fn persist_video_source_configs(
-        config: &ConfigRuntime,
-        configs: &[(String, VideoSourceConfiguration)],
-    ) -> Result<(), ConfigError> {
-        for (token, cfg) in configs.iter() {
-            let prefix = format!("media.video_source_config.{token}");
-            config.set_string(&format!("{}.source_token", prefix), &cfg.source_token)?;
-            config.set_string(&format!("{}.name", prefix), &cfg.name)?;
-            config.set_int(&format!("{}.use_count", prefix), cfg.use_count as i64)?;
-            config.set_int(&format!("{}.x", prefix), cfg.bounds.x as i64)?;
-            config.set_int(&format!("{}.y", prefix), cfg.bounds.y as i64)?;
-            config.set_int(&format!("{}.width", prefix), cfg.bounds.width as i64)?;
-            config.set_int(&format!("{}.height", prefix), cfg.bounds.height as i64)?;
-        }
-        Ok(())
-    }
-
-    /// Persist video encoder configurations.
-    fn persist_video_encoder_configs(
-        config: &ConfigRuntime,
-        configs: &[(String, VideoEncoderConfiguration)],
-    ) -> Result<(), ConfigError> {
-        for (token, cfg) in configs.iter() {
-            let prefix = format!("media.video_encoder_config.{token}");
-            config.set_string(&format!("{}.name", prefix), &cfg.name)?;
-            config.set_string(
-                &format!("{}.encoding", prefix),
-                match cfg.encoding {
-                    crate::onvif::types::common::VideoEncoding::H264 => "H264",
-                    crate::onvif::types::common::VideoEncoding::JPEG => "MJPEG",
-                    crate::onvif::types::common::VideoEncoding::MPEG4 => "MPEG4",
-                },
-            )?;
-            config.set_int(&format!("{}.width", prefix), cfg.resolution.width as i64)?;
-            config.set_int(&format!("{}.height", prefix), cfg.resolution.height as i64)?;
-            config.set_float(&format!("{}.quality", prefix), f64::from(cfg.quality))?;
-
-            if let Some(rc) = &cfg.rate_control {
-                config.set_int(
-                    &format!("{}.frame_rate_limit", prefix),
-                    rc.frame_rate_limit as i64,
-                )?;
-                config.set_int(
-                    &format!("{}.encoding_interval", prefix),
-                    rc.encoding_interval as i64,
-                )?;
-                config.set_int(
-                    &format!("{}.bitrate_limit", prefix),
-                    rc.bitrate_limit as i64,
-                )?;
-            }
-
-            if let Some(h264) = &cfg.h264 {
-                config.set_int(&format!("{}.gov_length", prefix), h264.gov_length as i64)?;
-                config.set_string(
-                    &format!("{}.h264_profile", prefix),
-                    match h264.h264_profile {
-                        crate::onvif::types::common::H264Profile::Baseline => "Baseline",
-                        crate::onvif::types::common::H264Profile::Main => "Main",
-                        crate::onvif::types::common::H264Profile::Extended => "Extended",
-                        crate::onvif::types::common::H264Profile::High => "High",
-                    },
-                )?;
-            }
-
-            config.set_string(&format!("{}.session_timeout", prefix), &cfg.session_timeout)?;
-        }
-        Ok(())
-    }
-
-    /// Persist audio source configurations.
-    fn persist_audio_source_configs(
-        config: &ConfigRuntime,
-        configs: &[(String, AudioSourceConfiguration)],
-    ) -> Result<(), ConfigError> {
-        for (token, cfg) in configs.iter() {
-            let prefix = format!("media.audio_source_config.{token}");
-            config.set_string(&format!("{}.source_token", prefix), &cfg.source_token)?;
-            config.set_string(&format!("{}.name", prefix), &cfg.name)?;
-            config.set_int(&format!("{}.use_count", prefix), cfg.use_count as i64)?;
-        }
-        Ok(())
-    }
-
-    /// Persist audio encoder configurations.
-    fn persist_audio_encoder_configs(
-        config: &ConfigRuntime,
-        configs: &[(String, AudioEncoderConfiguration)],
-    ) -> Result<(), ConfigError> {
-        for (token, cfg) in configs.iter() {
-            let prefix = format!("media.audio_encoder_config.{token}");
-            config.set_string(&format!("{}.name", prefix), &cfg.name)?;
-            config.set_string(
-                &format!("{}.encoding", prefix),
-                match cfg.encoding {
-                    crate::onvif::types::common::AudioEncoding::G711 => "G711",
-                    crate::onvif::types::common::AudioEncoding::G726 => "G726",
-                    crate::onvif::types::common::AudioEncoding::AAC => "AAC",
-                },
-            )?;
-            config.set_int(&format!("{}.bitrate", prefix), cfg.bitrate as i64)?;
-            config.set_int(&format!("{}.sample_rate", prefix), cfg.sample_rate as i64)?;
-            config.set_string(&format!("{}.session_timeout", prefix), &cfg.session_timeout)?;
-        }
-        Ok(())
-    }
-
-    /// Persist profiles.
-    fn persist_profiles(
-        config: &ConfigRuntime,
-        profiles_data: &[(String, Profile)],
-    ) -> Result<(), ConfigError> {
-        for (token, profile) in profiles_data.iter() {
-            let prefix = format!("media.profile.{token}");
-            config.set_string(&format!("{}.name", prefix), &profile.name)?;
-            config.set_bool(&format!("{}.fixed", prefix), profile.fixed.unwrap_or(false))?;
-
-            if let Some(vs) = &profile.video_source_configuration {
-                config.set_string(&format!("{}.video_source_config", prefix), &vs.token)?;
-            }
-            if let Some(ve) = &profile.video_encoder_configuration {
-                config.set_string(&format!("{}.video_encoder_config", prefix), &ve.token)?;
-            }
-            if let Some(asrc) = &profile.audio_source_configuration {
-                config.set_string(&format!("{}.audio_source_config", prefix), &asrc.token)?;
-            }
-            if let Some(aenc) = &profile.audio_encoder_configuration {
-                config.set_string(&format!("{}.audio_encoder_config", prefix), &aenc.token)?;
-            }
-            if let Some(ptz) = &profile.ptz_configuration {
-                config.set_string(&format!("{}.ptz_config", prefix), &ptz.token)?;
-            }
-        }
-        Ok(())
-    }
-
-    /// Attempt to load profiles from configuration. Returns `true` on success.
-    fn load_from_config(&self) -> bool {
-        let Some(config) = &self.config else {
-            return false;
-        };
-
-        let snapshot = config.snapshot();
-        let Some(tokens) = Self::parse_profile_tokens(&snapshot) else {
-            return false;
-        };
-
-        if tokens.is_empty() {
-            return false;
-        }
-
+    /// Populate in-memory state from a `ProfilesFile`.
+    fn apply_stored_snapshot(&self, data: &ProfilesFile) {
         self.clear_state();
-        let loaded_count = self.load_profiles_from_tokens(&snapshot, &tokens);
 
-        self.profile_counter
-            .store(loaded_count as u32, Ordering::SeqCst);
-        loaded_count > 0
-    }
-
-    /// Parse profile tokens from configuration snapshot.
-    fn parse_profile_tokens(snapshot: &ApplicationConfig) -> Option<Vec<String>> {
-        let tokens_raw = snapshot.get("media.profiles")?;
-        let tokens: Vec<String> = tokens_raw
-            .split(',')
-            .filter(|t| !t.trim().is_empty())
-            .map(|t| t.trim().to_string())
-            .collect();
-        Some(tokens)
-    }
-
-    /// Clear all state before loading.
-    fn clear_state(&self) {
-        let mut profiles_guard = self.profiles.write();
-        let mut video_sources = self.video_sources.write();
-        let mut audio_sources = self.audio_sources.write();
-        let mut video_source_configs = self.video_source_configs.write();
-        let mut video_encoder_configs = self.video_encoder_configs.write();
-        let mut audio_source_configs = self.audio_source_configs.write();
-        let mut audio_encoder_configs = self.audio_encoder_configs.write();
-
-        profiles_guard.clear();
-        video_sources.clear();
-        audio_sources.clear();
-        video_source_configs.clear();
-        video_encoder_configs.clear();
-        audio_source_configs.clear();
-        audio_encoder_configs.clear();
-    }
-
-    /// Load profiles from tokens and return the count of successfully loaded profiles.
-    fn load_profiles_from_tokens(&self, snapshot: &ApplicationConfig, tokens: &[String]) -> usize {
-        let mut profiles_guard = self.profiles.write();
-        let mut video_sources = self.video_sources.write();
-        let mut audio_sources = self.audio_sources.write();
-        let mut video_source_configs = self.video_source_configs.write();
-        let mut video_encoder_configs = self.video_encoder_configs.write();
-        let mut audio_source_configs = self.audio_source_configs.write();
-        let mut audio_encoder_configs = self.audio_encoder_configs.write();
-
-        let mut loaded_count = 0;
-
-        for token in tokens.iter() {
-            if let Some(profile) = self.load_profile(snapshot, token) {
-                Self::load_profile_associated_configs(
-                    snapshot,
-                    &profile,
-                    &mut video_sources,
-                    &mut audio_sources,
-                    &mut video_source_configs,
-                    &mut video_encoder_configs,
-                    &mut audio_source_configs,
-                    &mut audio_encoder_configs,
-                    self,
+        // Load sources first (profiles reference them)
+        {
+            let mut vs = self.video_sources.write();
+            for stored in &data.video_sources {
+                vs.insert(stored.token.clone(), Self::stored_to_video_source(stored));
+            }
+        }
+        {
+            let mut aus = self.audio_sources.write();
+            for stored in &data.audio_sources {
+                aus.insert(stored.token.clone(), Self::stored_to_audio_source(stored));
+            }
+        }
+        {
+            let mut vsc = self.video_source_configs.write();
+            for stored in &data.video_source_configs {
+                vsc.insert(
+                    stored.token.clone(),
+                    Self::stored_to_video_source_config(stored),
                 );
-
-                profiles_guard.insert(token.clone(), profile);
-                loaded_count += 1;
-            } else {
-                tracing::warn!("Skipping profile '{token}' due to missing fields");
+            }
+        }
+        {
+            let mut vec = self.video_encoder_configs.write();
+            for stored in &data.video_encoder_configs {
+                if let Some(cfg) = Self::stored_to_video_encoder_config(stored) {
+                    vec.insert(stored.token.clone(), cfg);
+                }
+            }
+        }
+        {
+            let mut asc = self.audio_source_configs.write();
+            for stored in &data.audio_source_configs {
+                asc.insert(
+                    stored.token.clone(),
+                    Self::stored_to_audio_source_config(stored),
+                );
+            }
+        }
+        {
+            let mut aec = self.audio_encoder_configs.write();
+            for stored in &data.audio_encoder_configs {
+                if let Some(cfg) = Self::stored_to_audio_encoder_config(stored) {
+                    aec.insert(stored.token.clone(), cfg);
+                }
             }
         }
 
-        loaded_count
+        // Load profiles last (they reference configs)
+        {
+            let mut prof = self.profiles.write();
+            for stored in &data.profiles {
+                if let Some(profile) = self.stored_to_profile(stored, data) {
+                    prof.insert(stored.token.clone(), profile);
+                }
+            }
+        }
+
+        let count = data.profiles.len() as u32;
+        self.profile_counter.store(count, Ordering::SeqCst);
     }
 
-    /// Load configuration associated with a profile.
-    #[allow(clippy::too_many_arguments)]
-    fn load_profile_associated_configs(
-        snapshot: &ApplicationConfig,
-        profile: &Profile,
-        video_sources: &mut HashMap<String, VideoSource>,
-        audio_sources: &mut HashMap<String, AudioSource>,
-        video_source_configs: &mut HashMap<String, VideoSourceConfiguration>,
-        video_encoder_configs: &mut HashMap<String, VideoEncoderConfiguration>,
-        audio_source_configs: &mut HashMap<String, AudioSourceConfiguration>,
-        audio_encoder_configs: &mut HashMap<String, AudioEncoderConfiguration>,
-        manager: &ProfileManager,
-    ) {
-        if let Some(ref cfg) = profile.video_source_configuration {
-            video_source_configs.insert(cfg.token.clone(), cfg.clone());
-            if let Some(source) = manager.load_video_source(snapshot, &cfg.source_token) {
-                video_sources.insert(cfg.source_token.clone(), source);
-            }
-        }
+    // --- Individual converters: ONVIF → Stored ---
 
-        if let Some(ref cfg) = profile.audio_source_configuration {
-            audio_source_configs.insert(cfg.token.clone(), cfg.clone());
-            if let Some(source) = manager.load_audio_source(snapshot, &cfg.source_token) {
-                audio_sources.insert(cfg.source_token.clone(), source);
-            }
-        }
-
-        if let Some(ref cfg) = profile.video_encoder_configuration {
-            video_encoder_configs.insert(cfg.token.clone(), cfg.clone());
-        }
-
-        if let Some(ref cfg) = profile.audio_encoder_configuration {
-            audio_encoder_configs.insert(cfg.token.clone(), cfg.clone());
+    fn profile_to_stored(profile: &Profile) -> StoredProfile {
+        StoredProfile {
+            token: profile.token.clone(),
+            name: profile.name.clone(),
+            fixed: profile.fixed.unwrap_or(false),
+            video_source_config: profile
+                .video_source_configuration
+                .as_ref()
+                .map(|c| c.token.clone()),
+            video_encoder_config: profile
+                .video_encoder_configuration
+                .as_ref()
+                .map(|c| c.token.clone()),
+            audio_source_config: profile
+                .audio_source_configuration
+                .as_ref()
+                .map(|c| c.token.clone()),
+            audio_encoder_config: profile
+                .audio_encoder_configuration
+                .as_ref()
+                .map(|c| c.token.clone()),
+            ptz_config: profile.ptz_configuration.as_ref().map(|c| c.token.clone()),
         }
     }
 
-    fn load_profile(&self, snapshot: &ApplicationConfig, token: &str) -> Option<Profile> {
-        let prefix = format!("media.profile.{token}");
-        let name = snapshot.get(&format!("{prefix}.name"))?.clone();
-        let fixed = snapshot
-            .get(&format!("{prefix}.fixed"))
-            .and_then(|s| s.parse::<bool>().ok())
-            .unwrap_or(false);
+    fn video_source_to_stored(s: &VideoSource) -> StoredVideoSource {
+        StoredVideoSource {
+            token: s.token.clone(),
+            framerate: f64::from(s.framerate),
+            width: s.resolution.width as u32,
+            height: s.resolution.height as u32,
+        }
+    }
 
-        let video_source_config_token = snapshot.get(&format!("{prefix}.video_source_config"));
-        let video_encoder_config_token = snapshot.get(&format!("{prefix}.video_encoder_config"));
-        let audio_source_config_token = snapshot.get(&format!("{prefix}.audio_source_config"));
-        let audio_encoder_config_token = snapshot.get(&format!("{prefix}.audio_encoder_config"));
-        let ptz_config_token = snapshot.get(&format!("{prefix}.ptz_config"));
+    fn audio_source_to_stored(s: &AudioSource) -> StoredAudioSource {
+        StoredAudioSource {
+            token: s.token.clone(),
+            channels: s.channels as u32,
+        }
+    }
 
-        let video_source_configuration =
-            video_source_config_token.and_then(|t| self.load_video_source_config(snapshot, t));
-        let video_encoder_configuration =
-            video_encoder_config_token.and_then(|t| self.load_video_encoder_config(snapshot, t));
-        let audio_source_configuration =
-            audio_source_config_token.and_then(|t| self.load_audio_source_config(snapshot, t));
-        let audio_encoder_configuration =
-            audio_encoder_config_token.and_then(|t| self.load_audio_encoder_config(snapshot, t));
+    fn video_source_config_to_stored(c: &VideoSourceConfiguration) -> StoredVideoSourceConfig {
+        StoredVideoSourceConfig {
+            token: c.token.clone(),
+            source_token: c.source_token.clone(),
+            name: c.name.clone(),
+            use_count: c.use_count as u32,
+            x: c.bounds.x,
+            y: c.bounds.y,
+            width: c.bounds.width as u32,
+            height: c.bounds.height as u32,
+        }
+    }
 
-        let ptz_configuration = ptz_config_token.map(|_| Self::create_default_ptz_configuration());
+    fn video_encoder_config_to_stored(c: &VideoEncoderConfiguration) -> StoredVideoEncoderConfig {
+        StoredVideoEncoderConfig {
+            token: c.token.clone(),
+            name: c.name.clone(),
+            encoding: match c.encoding {
+                crate::onvif::types::common::VideoEncoding::H264 => "H264",
+                crate::onvif::types::common::VideoEncoding::JPEG => "MJPEG",
+                crate::onvif::types::common::VideoEncoding::MPEG4 => "MPEG4",
+            }
+            .to_string(),
+            width: c.resolution.width as u32,
+            height: c.resolution.height as u32,
+            quality: f64::from(c.quality),
+            frame_rate_limit: c.rate_control.as_ref().map(|r| r.frame_rate_limit as u32),
+            encoding_interval: c.rate_control.as_ref().map(|r| r.encoding_interval as u32),
+            bitrate_limit: c.rate_control.as_ref().map(|r| r.bitrate_limit as u32),
+            gov_length: c.h264.as_ref().map(|h| h.gov_length as u32),
+            h264_profile: c.h264.as_ref().map(|h| {
+                match h.h264_profile {
+                    crate::onvif::types::common::H264Profile::Baseline => "Baseline",
+                    crate::onvif::types::common::H264Profile::Main => "Main",
+                    crate::onvif::types::common::H264Profile::Extended => "Extended",
+                    crate::onvif::types::common::H264Profile::High => "High",
+                }
+                .to_string()
+            }),
+            session_timeout: Some(c.session_timeout.clone()),
+        }
+    }
 
-        Some(Profile {
-            token: token.to_string(),
-            fixed: Some(fixed),
-            name,
-            video_source_configuration,
-            audio_source_configuration,
-            video_encoder_configuration,
-            audio_encoder_configuration,
-            ptz_configuration,
-            metadata_configuration: None,
+    fn audio_source_config_to_stored(c: &AudioSourceConfiguration) -> StoredAudioSourceConfig {
+        StoredAudioSourceConfig {
+            token: c.token.clone(),
+            source_token: c.source_token.clone(),
+            name: c.name.clone(),
+            use_count: c.use_count as u32,
+        }
+    }
+
+    fn audio_encoder_config_to_stored(c: &AudioEncoderConfiguration) -> StoredAudioEncoderConfig {
+        StoredAudioEncoderConfig {
+            token: c.token.clone(),
+            name: c.name.clone(),
+            encoding: match c.encoding {
+                crate::onvif::types::common::AudioEncoding::G711 => "G711",
+                crate::onvif::types::common::AudioEncoding::G726 => "G726",
+                crate::onvif::types::common::AudioEncoding::AAC => "AAC",
+            }
+            .to_string(),
+            bitrate: Some(c.bitrate as u32),
+            sample_rate: Some(c.sample_rate as u32),
+            session_timeout: Some(c.session_timeout.clone()),
+        }
+    }
+
+    // --- Individual converters: Stored → ONVIF ---
+
+    fn stored_to_video_source(s: &StoredVideoSource) -> VideoSource {
+        VideoSource {
+            token: s.token.clone(),
+            framerate: s.framerate as f32,
+            resolution: VideoResolution {
+                width: s.width as i32,
+                height: s.height as i32,
+            },
+            imaging: None,
             extension: None,
-        })
+        }
     }
 
-    fn load_video_source_config(
-        &self,
-        snapshot: &ApplicationConfig,
-        token: &str,
-    ) -> Option<VideoSourceConfiguration> {
-        let prefix = format!("media.video_source_config.{token}");
-        Some(VideoSourceConfiguration {
-            token: token.to_string(),
-            source_token: snapshot.get(&format!("{prefix}.source_token"))?.clone(),
-            name: snapshot.get(&format!("{prefix}.name"))?.clone(),
-            use_count: snapshot.get(&format!("{prefix}.use_count"))?.parse().ok()?,
+    fn stored_to_audio_source(s: &StoredAudioSource) -> AudioSource {
+        AudioSource {
+            token: s.token.clone(),
+            channels: s.channels as i32,
+        }
+    }
+
+    fn stored_to_video_source_config(s: &StoredVideoSourceConfig) -> VideoSourceConfiguration {
+        VideoSourceConfiguration {
+            token: s.token.clone(),
+            source_token: s.source_token.clone(),
+            name: s.name.clone(),
+            use_count: s.use_count as i32,
             view_mode: None,
             bounds: IntRectangle {
-                x: snapshot.get(&format!("{prefix}.x"))?.parse().ok()?,
-                y: snapshot.get(&format!("{prefix}.y"))?.parse().ok()?,
-                width: snapshot.get(&format!("{prefix}.width"))?.parse().ok()?,
-                height: snapshot.get(&format!("{prefix}.height"))?.parse().ok()?,
+                x: s.x,
+                y: s.y,
+                width: s.width as i32,
+                height: s.height as i32,
             },
             extension: None,
-        })
+        }
     }
 
-    fn load_video_encoder_config(
-        &self,
-        snapshot: &ApplicationConfig,
-        token: &str,
+    fn stored_to_video_encoder_config(
+        s: &StoredVideoEncoderConfig,
     ) -> Option<VideoEncoderConfiguration> {
-        let prefix = format!("media.video_encoder_config.{token}");
-
-        let encoding_str = snapshot.get(&format!("{prefix}.encoding"))?;
-        let encoding = match encoding_str.as_str() {
-            "H264" | "H265" => crate::onvif::types::common::VideoEncoding::H264,
+        let encoding = match s.encoding.as_str() {
+            "H264" => crate::onvif::types::common::VideoEncoding::H264,
             "MJPEG" => crate::onvif::types::common::VideoEncoding::JPEG,
             "MPEG4" => crate::onvif::types::common::VideoEncoding::MPEG4,
             _ => return None,
         };
 
-        let h264_profile = snapshot
-            .get(&format!("{prefix}.h264_profile"))
-            .and_then(|p| match p.as_str() {
-                "Baseline" => Some(crate::onvif::types::common::H264Profile::Baseline),
-                "Main" => Some(crate::onvif::types::common::H264Profile::Main),
-                "Extended" => Some(crate::onvif::types::common::H264Profile::Extended),
-                "High" => Some(crate::onvif::types::common::H264Profile::High),
-                _ => None,
-            });
+        let h264_profile = s.h264_profile.as_deref().and_then(|p| match p {
+            "Baseline" => Some(crate::onvif::types::common::H264Profile::Baseline),
+            "Main" => Some(crate::onvif::types::common::H264Profile::Main),
+            "Extended" => Some(crate::onvif::types::common::H264Profile::Extended),
+            "High" => Some(crate::onvif::types::common::H264Profile::High),
+            _ => None,
+        });
 
-        let rate_control = match (
-            snapshot.get(&format!("{prefix}.frame_rate_limit")),
-            snapshot.get(&format!("{prefix}.encoding_interval")),
-            snapshot.get(&format!("{prefix}.bitrate_limit")),
-        ) {
+        let rate_control = match (s.frame_rate_limit, s.encoding_interval, s.bitrate_limit) {
             (Some(fr), Some(interval), Some(br)) => Some(VideoRateControl {
-                frame_rate_limit: fr.parse().ok()?,
-                encoding_interval: interval.parse().ok()?,
-                bitrate_limit: br.parse().ok()?,
+                frame_rate_limit: fr as i32,
+                encoding_interval: interval as i32,
+                bitrate_limit: br as i32,
             }),
             _ => None,
         };
 
         Some(VideoEncoderConfiguration {
-            token: token.to_string(),
-            name: snapshot.get(&format!("{prefix}.name"))?.clone(),
+            token: s.token.clone(),
+            name: s.name.clone(),
             use_count: 1,
             encoding,
             resolution: VideoResolution {
-                width: snapshot.get(&format!("{prefix}.width"))?.parse().ok()?,
-                height: snapshot.get(&format!("{prefix}.height"))?.parse().ok()?,
+                width: s.width as i32,
+                height: s.height as i32,
             },
-            quality: snapshot
-                .get(&format!("{prefix}.quality"))?
-                .parse()
-                .unwrap_or(0.5),
+            quality: s.quality as f32,
             rate_control,
             mpeg4: None,
             h264: h264_profile.map(|profile| crate::onvif::types::common::H264Configuration {
-                gov_length: snapshot
-                    .get(&format!("{prefix}.gov_length"))
-                    .and_then(|value| value.parse().ok())
-                    .unwrap_or(30),
+                gov_length: s.gov_length.unwrap_or(30) as i32,
                 h264_profile: profile,
             }),
             multicast: Some(MulticastConfiguration {
@@ -1793,35 +1605,26 @@ impl ProfileManager {
                 ttl: 0,
                 auto_start: false,
             }),
-            session_timeout: snapshot
-                .get(&format!("{prefix}.session_timeout"))
-                .cloned()
+            session_timeout: s
+                .session_timeout
+                .clone()
                 .unwrap_or_else(|| "PT60S".to_string()),
         })
     }
 
-    fn load_audio_source_config(
-        &self,
-        snapshot: &ApplicationConfig,
-        token: &str,
-    ) -> Option<AudioSourceConfiguration> {
-        let prefix = format!("media.audio_source_config.{token}");
-        Some(AudioSourceConfiguration {
-            token: token.to_string(),
-            source_token: snapshot.get(&format!("{prefix}.source_token"))?.clone(),
-            name: snapshot.get(&format!("{prefix}.name"))?.clone(),
-            use_count: snapshot.get(&format!("{prefix}.use_count"))?.parse().ok()?,
-        })
+    fn stored_to_audio_source_config(s: &StoredAudioSourceConfig) -> AudioSourceConfiguration {
+        AudioSourceConfiguration {
+            token: s.token.clone(),
+            source_token: s.source_token.clone(),
+            name: s.name.clone(),
+            use_count: s.use_count as i32,
+        }
     }
 
-    fn load_audio_encoder_config(
-        &self,
-        snapshot: &ApplicationConfig,
-        token: &str,
+    fn stored_to_audio_encoder_config(
+        s: &StoredAudioEncoderConfig,
     ) -> Option<AudioEncoderConfiguration> {
-        let prefix = format!("media.audio_encoder_config.{token}");
-        let encoding_str = snapshot.get(&format!("{prefix}.encoding"))?;
-        let encoding = match encoding_str.as_str() {
+        let encoding = match s.encoding.as_str() {
             "G711" | "PCMU" | "PCMA" => crate::onvif::types::common::AudioEncoding::G711,
             "G726" => crate::onvif::types::common::AudioEncoding::G726,
             "AAC" => crate::onvif::types::common::AudioEncoding::AAC,
@@ -1829,15 +1632,12 @@ impl ProfileManager {
         };
 
         Some(AudioEncoderConfiguration {
-            token: token.to_string(),
-            name: snapshot.get(&format!("{prefix}.name"))?.clone(),
+            token: s.token.clone(),
+            name: s.name.clone(),
             use_count: 1,
             encoding,
-            bitrate: snapshot.get(&format!("{prefix}.bitrate"))?.parse().ok()?,
-            sample_rate: snapshot
-                .get(&format!("{prefix}.sample_rate"))?
-                .parse()
-                .ok()?,
+            bitrate: s.bitrate.unwrap_or(64) as i32,
+            sample_rate: s.sample_rate.unwrap_or(8000) as i32,
             multicast: Some(MulticastConfiguration {
                 address: crate::onvif::types::common::IpAddress {
                     address_type: crate::onvif::types::common::IpType::IPv4,
@@ -1848,45 +1648,70 @@ impl ProfileManager {
                 ttl: 0,
                 auto_start: false,
             }),
-            session_timeout: snapshot
-                .get(&format!("{prefix}.session_timeout"))
-                .cloned()
+            session_timeout: s
+                .session_timeout
+                .clone()
                 .unwrap_or_else(|| "PT60S".to_string()),
         })
     }
 
-    fn load_video_source(&self, snapshot: &ApplicationConfig, token: &str) -> Option<VideoSource> {
-        let prefix = format!("media.video_source.{token}");
-        Some(VideoSource {
-            token: token.to_string(),
-            framerate: snapshot
-                .get(&format!("{prefix}.framerate"))
-                .and_then(|v| v.parse().ok())
-                .unwrap_or(30.0),
-            resolution: VideoResolution {
-                width: snapshot
-                    .get(&format!("{prefix}.width"))
-                    .and_then(|v| v.parse().ok())
-                    .unwrap_or(1920),
-                height: snapshot
-                    .get(&format!("{prefix}.height"))
-                    .and_then(|v| v.parse().ok())
-                    .unwrap_or(1080),
-            },
-            imaging: None,
+    fn stored_to_profile(&self, stored: &StoredProfile, file: &ProfilesFile) -> Option<Profile> {
+        let video_source_configuration = stored.video_source_config.as_ref().and_then(|token| {
+            file.video_source_configs
+                .iter()
+                .find(|c| c.token == *token)
+                .map(Self::stored_to_video_source_config)
+        });
+
+        let video_encoder_configuration = stored.video_encoder_config.as_ref().and_then(|token| {
+            file.video_encoder_configs
+                .iter()
+                .find(|c| c.token == *token)
+                .and_then(Self::stored_to_video_encoder_config)
+        });
+
+        let audio_source_configuration = stored.audio_source_config.as_ref().and_then(|token| {
+            file.audio_source_configs
+                .iter()
+                .find(|c| c.token == *token)
+                .map(Self::stored_to_audio_source_config)
+        });
+
+        let audio_encoder_configuration = stored.audio_encoder_config.as_ref().and_then(|token| {
+            file.audio_encoder_configs
+                .iter()
+                .find(|c| c.token == *token)
+                .and_then(Self::stored_to_audio_encoder_config)
+        });
+
+        let ptz_configuration = stored
+            .ptz_config
+            .as_ref()
+            .map(|_| Self::create_default_ptz_configuration());
+
+        Some(Profile {
+            token: stored.token.clone(),
+            fixed: Some(stored.fixed),
+            name: stored.name.clone(),
+            video_source_configuration,
+            audio_source_configuration,
+            video_encoder_configuration,
+            audio_encoder_configuration,
+            ptz_configuration,
+            metadata_configuration: None,
             extension: None,
         })
     }
 
-    fn load_audio_source(&self, snapshot: &ApplicationConfig, token: &str) -> Option<AudioSource> {
-        let prefix = format!("media.audio_source.{token}");
-        Some(AudioSource {
-            token: token.to_string(),
-            channels: snapshot
-                .get(&format!("{prefix}.channels"))
-                .and_then(|v| v.parse().ok())
-                .unwrap_or(1),
-        })
+    /// Clear all state before loading.
+    fn clear_state(&self) {
+        self.profiles.write().clear();
+        self.video_sources.write().clear();
+        self.audio_sources.write().clear();
+        self.video_source_configs.write().clear();
+        self.video_encoder_configs.write().clear();
+        self.audio_source_configs.write().clear();
+        self.audio_encoder_configs.write().clear();
     }
 
     // ========================================================================
@@ -2118,32 +1943,48 @@ mod tests {
     }
 
     #[test]
-    fn test_persist_defaults_into_config_runtime() {
+    fn test_persist_defaults_with_profile_storage() {
         let runtime = Arc::new(ConfigRuntime::new(Default::default()));
-        let _manager = ProfileManager::with_config(Arc::clone(&runtime));
+        let storage = Arc::new(ProfileStorage::new());
+        let manager = ProfileManager::with_storage(
+            Arc::clone(&runtime),
+            Arc::clone(&storage),
+            "/tmp/test_profiles.toml",
+            Resolution::new(1920, 1080),
+        );
 
-        let snapshot = runtime.snapshot();
-        assert!(snapshot.get("media.profiles").is_some());
+        // Storage should have profiles after initialization
+        let snapshot = storage.snapshot();
+        assert!(!snapshot.profiles.is_empty());
+        // Should have at least the enabled default profiles
+        assert!(manager.get_profiles().len() >= 2);
     }
 
     #[test]
-    fn test_load_profiles_from_config_runtime() {
+    fn test_load_profiles_from_storage() {
         let runtime = Arc::new(ConfigRuntime::new(Default::default()));
-        let manager = ProfileManager::with_config(Arc::clone(&runtime));
-        // create new profile and ensure it persists
+        let storage = Arc::new(ProfileStorage::new());
+        let manager = ProfileManager::with_storage(
+            Arc::clone(&runtime),
+            Arc::clone(&storage),
+            "/tmp/test_profiles.toml",
+            Resolution::new(1920, 1080),
+        );
+
+        // Create new profile and ensure it persists to storage
         let profile = manager
             .create_profile("PersistedProfile".to_string(), None)
             .unwrap();
-        let snapshot = runtime.snapshot();
-        assert!(
-            snapshot
-                .get("media.profiles")
-                .map(|p| p.contains(&profile.token))
-                .unwrap_or(false)
-        );
+        let snapshot = storage.snapshot();
+        assert!(snapshot.profiles.iter().any(|p| p.token == profile.token));
 
-        // New manager should load persisted profile
-        let manager_reloaded = ProfileManager::with_config(Arc::clone(&runtime));
+        // New manager with same storage should load persisted profile
+        let manager_reloaded = ProfileManager::with_storage(
+            Arc::clone(&runtime),
+            Arc::clone(&storage),
+            "/tmp/test_profiles.toml",
+            Resolution::new(1920, 1080),
+        );
         let loaded = manager_reloaded.get_profile(&profile.token).unwrap();
         assert_eq!(loaded.name, "PersistedProfile");
     }

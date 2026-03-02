@@ -340,15 +340,13 @@ fn shutdown_requires_hard_exit(report: &onvif_rust::ShutdownReport) -> bool {
 }
 
 fn configure_stream_frame_debug_logging(config: &ConfigRuntime) -> bool {
-    let enabled = config
-        .get_bool("logging.stream_frame_debug")
-        .unwrap_or(false);
+    let enabled = config.read().logging.stream_frame_debug;
     streaming_lib::set_stream_frame_debug_logging(enabled);
     enabled
 }
 
 fn configure_ipc_debug_logging(config: &ConfigRuntime) -> bool {
-    let enabled = config.get_bool("logging.ipc_debug").unwrap_or(false);
+    let enabled = config.read().logging.ipc_debug;
     #[cfg(not(use_stubs))]
     ipc::set_ipc_debug_logging(enabled);
     enabled

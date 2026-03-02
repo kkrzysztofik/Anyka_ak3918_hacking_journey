@@ -141,9 +141,15 @@ pub fn init_logging(config: &ConfigRuntime) -> LoggingResult<()> {
 /// Internal logging initialization implementation.
 fn init_logging_impl(config: &ConfigRuntime) -> LoggingResult<()> {
     // Get log level from configuration
-    let level_str = config
-        .get_string("logging.level")
-        .unwrap_or_else(|_| "info".to_string());
+    let c = config.read();
+    let level_str = if c.logging.level.is_empty() {
+        "info".to_string()
+    } else {
+        c.logging.level.clone()
+    };
+    let console_enabled = c.logging.console_enabled;
+    let file_path = c.logging.file_path.clone();
+    drop(c);
 
     let level = parse_log_level(&level_str)?;
 
@@ -157,10 +163,6 @@ fn init_logging_impl(config: &ConfigRuntime) -> LoggingResult<()> {
 
     // Store the reload handle for runtime log level changes
     let _ = RELOAD_HANDLE.set(reload_handle);
-
-    // Get logging configuration
-    let console_enabled = config.get_bool("logging.console_enabled").unwrap_or(true);
-    let file_path = config.get_string("logging.file_path").unwrap_or_default();
 
     // Create console layer
     let console_layer = fmt::layer()
@@ -286,13 +288,18 @@ pub fn init_static_asset_logging(config: &ConfigRuntime, enabled: bool) -> Loggi
     }
 
     // Get static asset logging path from config
-    let log_path = config
-        .get_string("logging.static_assets.file_path")
-        .unwrap_or_else(|_| "logs".to_string());
-
-    let log_name = config
-        .get_string("logging.static_assets.file_name")
-        .unwrap_or_else(|_| "access".to_string());
+    let c = config.read();
+    let log_path = if c.logging.static_assets.file_path.is_empty() {
+        "logs".to_string()
+    } else {
+        c.logging.static_assets.file_path.clone()
+    };
+    let log_name = if c.logging.static_assets.file_name.is_empty() {
+        "access".to_string()
+    } else {
+        c.logging.static_assets.file_name.clone()
+    };
+    drop(c);
 
     // Log that static asset logging is configured
     // The actual file appender will be created by the middleware when it logs
@@ -561,8 +568,11 @@ mod tests {
         use crate::config::ConfigRuntime;
 
         let config = ConfigRuntime::new(Default::default());
-        config.set_string("logging.level", "debug").unwrap();
-        config.set_bool("logging.console_enabled", true).unwrap();
+        {
+            let mut c = config.write();
+            c.logging.level = "debug".to_string();
+            c.logging.console_enabled = true;
+        }
 
         // Should succeed
         let result = init_logging(&config);
@@ -575,11 +585,12 @@ mod tests {
         use std::fs;
 
         let config = ConfigRuntime::new(Default::default());
-        config.set_string("logging.level", "info").unwrap();
-        config.set_bool("logging.console_enabled", false).unwrap();
-        config
-            .set_string("logging.file_path", "/tmp/test_onvif.log")
-            .unwrap();
+        {
+            let mut c = config.write();
+            c.logging.level = "info".to_string();
+            c.logging.console_enabled = false;
+            c.logging.file_path = "/tmp/test_onvif.log".to_string();
+        }
 
         // Create temp directory if needed
         let _ = fs::create_dir_all("/tmp");
@@ -594,11 +605,12 @@ mod tests {
         use std::fs;
 
         let config = ConfigRuntime::new(Default::default());
-        config.set_string("logging.level", "warn").unwrap();
-        config.set_bool("logging.console_enabled", true).unwrap();
-        config
-            .set_string("logging.file_path", "/tmp/test_both.log")
-            .unwrap();
+        {
+            let mut c = config.write();
+            c.logging.level = "warn".to_string();
+            c.logging.console_enabled = true;
+            c.logging.file_path = "/tmp/test_both.log".to_string();
+        }
 
         let _ = fs::create_dir_all("/tmp");
 
@@ -611,8 +623,11 @@ mod tests {
         use crate::config::ConfigRuntime;
 
         let config = ConfigRuntime::new(Default::default());
-        config.set_string("logging.level", "error").unwrap();
-        config.set_bool("logging.console_enabled", false).unwrap();
+        {
+            let mut c = config.write();
+            c.logging.level = "error".to_string();
+            c.logging.console_enabled = false;
+        }
         // No file_path set
 
         let result = init_logging(&config);
@@ -621,11 +636,6 @@ mod tests {
 
     #[test]
     fn test_init_logging_invalid_level() {
-        use crate::config::ConfigRuntime;
-
-        let config = ConfigRuntime::new(Default::default());
-        config.set_string("logging.level", "invalid_level").unwrap();
-
         // init_logging uses INIT.call_once(), so if logging was already initialized
         // by another test, this will return Ok(()) from the previous initialization.
         // We need to test the parse_log_level function directly instead.
@@ -656,7 +666,6 @@ mod tests {
         use crate::config::ConfigRuntime;
 
         let config = ConfigRuntime::new(Default::default());
-        config.set_string("logging.level", "info").unwrap();
 
         // Initialize first
         let init_result = init_logging(&config);
@@ -698,12 +707,11 @@ mod tests {
         use crate::config::ConfigRuntime;
 
         let config = ConfigRuntime::new(Default::default());
-        config
-            .set_string("logging.static_assets.file_path", "/tmp")
-            .unwrap();
-        config
-            .set_string("logging.static_assets.file_name", "access")
-            .unwrap();
+        {
+            let mut c = config.write();
+            c.logging.static_assets.file_path = "/tmp".to_string();
+            c.logging.static_assets.file_name = "access".to_string();
+        }
 
         let result = init_static_asset_logging(&config, true);
         assert!(result.is_ok());
