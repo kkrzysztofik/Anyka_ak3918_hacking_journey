@@ -1,1 +1,0 @@
-files extrated from: http://www.iotelink.com/frank/ak3918ev300v18
