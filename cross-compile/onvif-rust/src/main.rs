@@ -384,7 +384,8 @@ async fn run_normal_mode(config_path: &str) -> Result<()> {
     }
 
     // Spawn shutdown watchdog — force exit if shutdown hangs beyond hard deadline.
-    // This prevents zombie processes when FFI calls are stuck in kernel D-state.
+    // This prevents zombie processes when vendor-daemon IPC calls are stuck waiting
+    // for a blocked or crashed daemon.
     let watchdog = spawn_shutdown_watchdog(Duration::from_secs(20));
 
     // Perform graceful shutdown
@@ -409,7 +410,7 @@ async fn run_normal_mode(config_path: &str) -> Result<()> {
         }
     }
 
-    let hard_exit_required = shutdown_requires_hard_exit(&report);
+    let hard_exit_required = report.hard_exit_required;
     let exit_code = if hard_exit_required { 1 } else { 0 };
     if hard_exit_required {
         tracing::error!(
@@ -421,13 +422,6 @@ async fn run_normal_mode(config_path: &str) -> Result<()> {
     // Brief pause to allow tracing subscriber to flush
     std::thread::sleep(std::time::Duration::from_millis(50));
     std::process::exit(exit_code);
-}
-
-fn shutdown_requires_hard_exit(report: &onvif_rust::ShutdownReport) -> bool {
-    report
-        .errors
-        .iter()
-        .any(|e| e.contains("unsafe teardown required"))
 }
 
 fn configure_stream_frame_debug_logging(config: &ConfigRuntime) -> bool {
