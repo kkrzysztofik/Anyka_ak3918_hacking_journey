@@ -525,6 +525,39 @@ static inline int vd_ring_release(void *base, uint32_t slot_idx)
 }
 
 /**
+ * @brief Reset ring buffer state for a new push session
+ *
+ * Resets sequences, flags, diagnostic counters, and all slot states to
+ * their initial values.  Must be called before the first push thread
+ * starts writing to avoid stale overflow from a previous session.
+ *
+ * Only the mutable header fields are cleared — magic, version, sizes,
+ * and slot_count are preserved so the Rust consumer can still validate
+ * the header after re-opening.
+ *
+ * @param base  Ring buffer base pointer (must not be NULL)
+ */
+static inline void vd_ring_reset(void *base)
+{
+    struct vd_ring_header *hdr = vd_ring_get_header(base);
+
+    __atomic_store_n(&hdr->write_seq, 0, __ATOMIC_RELEASE);
+    __atomic_store_n(&hdr->read_seq, 0, __ATOMIC_RELEASE);
+    __atomic_store_n(&hdr->flags, 0, __ATOMIC_RELEASE);
+    hdr->overflow_count = 0;
+    hdr->eviction_count = 0;
+    hdr->socket_fallback_count = 0;
+    hdr->dropped_count = 0;
+
+    for (uint32_t i = 0; i < VD_SHM_SLOT_COUNT; i++) {
+        struct vd_slot_header *slot = vd_ring_get_slot_hdr(base, i);
+        __atomic_store_n(&slot->state, VD_SLOT_EMPTY, __ATOMIC_RELEASE);
+    }
+
+    VD_DATA_MEMORY_BARRIER();
+}
+
+/**
  * @brief Signal shutdown to consumer
  */
 static inline void vd_ring_shutdown(void *base)

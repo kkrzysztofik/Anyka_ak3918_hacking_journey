@@ -158,7 +158,7 @@ impl AnykaPlatform {
         })
     }
 
-    // Command server functions removed - vendor-daemon IPC handles all SDK access
+    // All SDK access goes through vendor-daemon IPC; no direct FFI calls in this impl block.
     fn shutdown_video_pipeline(
         video_encoder: &AnykaVideoEncoder,
         video_input: &AnykaVideoInput,
@@ -458,6 +458,10 @@ impl Platform for AnykaPlatform {
             tracing::error!("Platform shutdown ended with error: {:?}", result);
         }
         result
+    }
+
+    fn requires_hard_shutdown(&self) -> bool {
+        self.video_encoder.requires_hard_shutdown()
     }
 
     fn max_sensor_resolution(&self) -> PlatformResult<Resolution> {

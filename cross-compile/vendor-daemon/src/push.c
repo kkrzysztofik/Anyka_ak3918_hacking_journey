@@ -155,6 +155,15 @@ static void *push_frame_thread(void *arg)
                          (unsigned long long)no_data_count,
                          (unsigned long long)diag_monotonic_ms());
             }
+            if (no_data_count >= PUSH_NO_DATA_EXIT_THRESHOLD) {
+                log_error("event=push_thread_lifecycle state=exit_no_data stream=%u handle=%p no_data_count=%llu diag_monotonic_ms=%llu",
+                          state->stream_id,
+                          state->stream_handle,
+                          (unsigned long long)no_data_count,
+                          (unsigned long long)diag_monotonic_ms());
+                state->active = 0;
+                break;
+            }
             struct timespec ts = { .tv_sec = 0, .tv_nsec = PUSH_POLL_SLEEP_MS * 1000000L };
             nanosleep(&ts, NULL);
             continue;
@@ -374,6 +383,16 @@ int handle_venc_start_push(int fd, const uint8_t *req, uint32_t req_len)
     state->stream_handle = req_read_handle(req, 0);
     state->stream_id = stream_id;
     state->active = 1;
+
+    /* Reset ring buffer if this is the first push activation (both slots
+     * were inactive).  Clears stale sequences/flags from a previous session
+     * so the consumer doesn't see immediate overflow. */
+    int other_idx = (idx == 0) ? 1 : 0;
+    if (!g_push_streams[other_idx].active && g_ring_buffer) {
+        vd_ring_reset(g_ring_buffer);
+        log_info("event=ring_reset reason=push_start stream=%u diag_monotonic_ms=%llu",
+                 stream_id, (unsigned long long)diag_monotonic_ms());
+    }
 
     if (pthread_create(&state->thread, NULL, push_frame_thread, state) != 0) {
         log_error("[push] failed to create push thread for stream=%u: %s",

@@ -78,6 +78,12 @@ pub struct ShutdownReport {
     pub failed_components: Vec<String>,
     /// Error messages from failed components.
     pub errors: Vec<String>,
+    /// Whether a hard process exit is required due to unsafe hardware teardown state.
+    ///
+    /// When `true`, the caller must call `hard_terminate_process()` rather than a
+    /// normal `process::exit()`. This avoids running destructors that would invoke
+    /// vendor SDK cleanup in a partially-torn-down state.
+    pub hard_exit_required: bool,
 }
 
 impl ShutdownReport {
@@ -89,6 +95,7 @@ impl ShutdownReport {
             successful_components: Vec::new(),
             failed_components: Vec::new(),
             errors: Vec::new(),
+            hard_exit_required: false,
         }
     }
 
@@ -110,6 +117,12 @@ impl ShutdownReport {
         if self.status != ShutdownStatus::Error {
             self.status = ShutdownStatus::Timeout;
         }
+    }
+
+    /// Signal that the platform entered an unsafe teardown state and a hard
+    /// process exit is required after shutdown completes.
+    pub fn set_hard_exit_required(&mut self) {
+        self.hard_exit_required = true;
     }
 }
 
@@ -165,5 +178,19 @@ mod tests {
         report2.record_failure("test", "error");
         report2.mark_timeout();
         assert_eq!(report2.status, ShutdownStatus::Error);
+    }
+
+    #[test]
+    fn test_shutdown_report_hard_exit_required_defaults_false() {
+        let report = ShutdownReport::new();
+        assert!(!report.hard_exit_required);
+    }
+
+    #[test]
+    fn test_shutdown_report_set_hard_exit_required() {
+        let mut report = ShutdownReport::new();
+        assert!(!report.hard_exit_required);
+        report.set_hard_exit_required();
+        assert!(report.hard_exit_required);
     }
 }

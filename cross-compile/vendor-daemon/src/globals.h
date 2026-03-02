@@ -17,6 +17,14 @@ struct push_stream_state {
 #define PUSH_STREAM_SLOT_COUNT  2
 #define PUSH_POLL_SLEEP_MS      5  /* Sleep on no-data (slightly less than ref's 10ms) */
 
+/*
+ * Maximum consecutive no-data iterations before the push thread self-exits.
+ * At PUSH_POLL_SLEEP_MS=5, 1000 iterations ~ 5 seconds.  Prevents zombie
+ * threads when the SDK pipeline is broken, and guarantees that
+ * stop_push_slot()'s pthread_join() completes in bounded time.
+ */
+#define PUSH_NO_DATA_EXIT_THRESHOLD 1000
+
 /* ---- Shutdown flag ------------------------------------------------------- */
 extern volatile int g_shutdown;
 

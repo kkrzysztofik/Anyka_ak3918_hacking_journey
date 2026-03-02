@@ -637,6 +637,17 @@ pub trait Platform: Send + Sync {
     /// Shutdown the platform.
     async fn shutdown(&self) -> PlatformResult<()>;
 
+    /// Returns `true` if the platform entered an unsafe teardown state during
+    /// `shutdown()` and the process must hard-exit to avoid running destructors
+    /// against partially-torn-down vendor SDK state.
+    ///
+    /// The default implementation returns `false` (safe to do a normal exit).
+    /// Hardware platform implementations should override this to check their
+    /// internal unsafe-shutdown flag.
+    fn requires_hard_shutdown(&self) -> bool {
+        false
+    }
+
     /// Get the maximum resolution supported by the video sensor.
     ///
     /// Returns the native sensor resolution. This is used to constrain
