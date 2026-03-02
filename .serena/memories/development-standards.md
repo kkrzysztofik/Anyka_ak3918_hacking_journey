@@ -181,9 +181,9 @@ src/
 │   └── audit.rs              # Security audit logging
 │
 ├── discovery/                # WS-Discovery (UDP multicast)
-├── config/                   # Configuration management & persistence
+├── config/                   # Configuration management, persistence & user management
+│   └── users/                # User accounts, passwords & ONVIF user levels
 ├── lifecycle/                # App lifecycle (startup, shutdown, health)
-├── users/                    # User management & password hashing
 ├── logging/                  # HTTP & platform logging
 ├── net/                      # Network utilities (IP detection)
 ├── validation/               # H.264 playback & stream validation

@@ -270,16 +270,16 @@ enabled = true
 name = "Profile1"
 
 # Video width (160-3840)
-width = 1920
+width = 1280
 
 # Video height (120-2160)
-height = 1080
+height = 720
 
 # Frame rate (1-60)
-framerate = 25
+framerate = 15
 
 # Video bitrate in kbps (64-16384)
-bitrate = 4000
+bitrate = 2000
 
 # Video encoding (H264, H265, MJPEG)
 encoding = "H264"

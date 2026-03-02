@@ -53,9 +53,8 @@ anyka-dev/
 │   │   │   ├── auth/        # Authentication (WS-Security, HTTP Digest/Basic)
 │   │   │   ├── security/    # Rate limiting, brute force, XML security, audit
 │   │   │   ├── discovery/   # WS-Discovery (UDP multicast)
-│   │   │   ├── config/      # Configuration management & persistence
+│   │   │   ├── config/      # Configuration management, persistence & user management
 │   │   │   ├── lifecycle/   # App lifecycle (startup, shutdown, health)
-│   │   │   ├── users/       # User management & password hashing
 │   │   │   ├── logging/     # HTTP & platform logging
 │   │   │   ├── net/         # Network utilities (IP detection)
 │   │   │   ├── validation/  # H.264 playback & stream validation
