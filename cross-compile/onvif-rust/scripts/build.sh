@@ -186,6 +186,17 @@ if [[ ! -f "${BINARY_PATH}" ]]; then
   exit 1
 fi
 
+# Fix program header ordering for uClibc-ng compatibility.
+# LLD places PT_TLS before PT_DYNAMIC, but uClibc-ng 1.0.54's linker has a
+# `break` in the PT_TLS handler that prevents PT_DYNAMIC from being processed,
+# causing SIGSEGV at _dl_get_ready_to_run. Swap the entries so PT_DYNAMIC
+# is processed first.
+FIX_PHDR="${SCRIPT_DIR}/fix_phdr_order.py"
+if [[ -f "${FIX_PHDR}" ]]; then
+  log_info "Fixing program header order (uClibc-ng PT_TLS/PT_DYNAMIC workaround)..."
+  uv run "${FIX_PHDR}" "${BINARY_PATH}" --verbose
+fi
+
 log_success "Build completed successfully!"
 log_info "Binary location: ${BINARY_PATH}"
 log_info "Binary size: $(du -h "${BINARY_PATH}" | cut -f1)"
@@ -208,19 +219,11 @@ chmod 755 "${DEPLOY_DIR}/onvif-rust.bin"
 
 cat > "${DEPLOY_DIR}/onvif-rust" <<'EOF'
 #!/bin/sh
-# Launcher for ONVIF Rust server with explicit runtime library path.
-
+# Launcher for ONVIF Rust server.
+# The binary has RPATH embedded — no LD_LIBRARY_PATH manipulation needed.
+# Do NOT export LD_LIBRARY_PATH here; it poisons child processes
+# (busybox/date linked against stock uClibc 0.9.33.2).
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname "$0")" && pwd)"
-ANYKA_HACK_DIR="$(dirname "$SCRIPT_DIR")"
-LIB1="${ANYKA_HACK_DIR}/lib"
-LIB2="${SCRIPT_DIR}/lib"
-
-if [ -n "${LD_LIBRARY_PATH:-}" ]; then
-  export LD_LIBRARY_PATH="${LIB1}:${LIB2}:${LD_LIBRARY_PATH}"
-else
-  export LD_LIBRARY_PATH="${LIB1}:${LIB2}"
-fi
-
 exec "${SCRIPT_DIR}/onvif-rust.bin" "$@"
 EOF
 chmod 755 "${DEPLOY_DIR}/onvif-rust"

@@ -93,6 +93,10 @@ rustflags = [
   "link-arg=-no-pie",
   "-C",
   "link-arg=-Wl,--dynamic-linker=/mnt/anyka_hack/lib/ld-uClibc.so.1",
+  "-C",
+  "link-arg=-Wl,--disable-new-dtags,-rpath,/mnt/anyka_hack/lib:/mnt/anyka_hack/onvif/lib",
+  "-C",
+  "link-arg=-Wl,--hash-style=both",
 ]
 
 [env]
