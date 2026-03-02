@@ -395,9 +395,12 @@ impl ShmRingReader {
             return Err(e);
         }
 
-        // Initialize local read_seq from current value
-        let header = Self::header_from_ptr(base as *const RingHeader);
-        let local_read_seq = header.read_seq;
+        // Initialize local read_seq from current value.
+        // SAFETY: Called during open() before daemon interaction — header is stable.
+        let local_read_seq = unsafe {
+            let header = Self::header_from_ptr(base as *const RingHeader);
+            header.read_seq
+        };
 
         tracing::debug!(
             "opened shm ring buffer: {} slots, {} bytes each",
@@ -435,28 +438,25 @@ impl ShmRingReader {
     ///
     /// Returns (overflow_count, eviction_count, socket_fallback_count, dropped_count).
     /// For version 1 ring buffers, all counters return 0.
+    ///
+    /// Uses `read_volatile` to access fields that are concurrently written by the
+    /// C vendor-daemon, avoiding the creation of `&RingHeader` references that would
+    /// violate strict aliasing guarantees.
     pub fn diagnostic_counters(&self) -> (u32, u32, u32, u32) {
-        let header = Self::header_from_ptr(self.base as *const RingHeader);
-        if header.version < 2 {
+        // Read version using volatile read (daemon may update concurrently)
+        // RingHeader field offsets: magic(0) version(4) total_size(8) slot_count(12)
+        //   slot_data_size(16) write_seq(20) read_seq(24) flags(28)
+        //   overflow_count(32) eviction_count(36) socket_fallback_count(40) dropped_count(44)
+        let version = unsafe { self.base.add(4).cast::<u32>().read_volatile() };
+        if version < 2 {
             return (0, 0, 0, 0);
         }
-        // SAFETY: header pointer is from mmap, fields are written atomically by daemon
-        let overflow = unsafe {
-            let ptr = &header.overflow_count as *const u32 as *const AtomicU32;
-            (*ptr).load(Ordering::Relaxed)
-        };
-        let eviction = unsafe {
-            let ptr = &header.eviction_count as *const u32 as *const AtomicU32;
-            (*ptr).load(Ordering::Relaxed)
-        };
-        let fallback = unsafe {
-            let ptr = &header.socket_fallback_count as *const u32 as *const AtomicU32;
-            (*ptr).load(Ordering::Relaxed)
-        };
-        let dropped = unsafe {
-            let ptr = &header.dropped_count as *const u32 as *const AtomicU32;
-            (*ptr).load(Ordering::Relaxed)
-        };
+        // SAFETY: Offsets are within the validated mmap region (VD_SHM_HEADER_SIZE = 64).
+        // Using read_volatile avoids creating &u32 references to concurrently-written memory.
+        let overflow = unsafe { self.base.add(32).cast::<u32>().read_volatile() };
+        let eviction = unsafe { self.base.add(36).cast::<u32>().read_volatile() };
+        let fallback = unsafe { self.base.add(40).cast::<u32>().read_volatile() };
+        let dropped = unsafe { self.base.add(44).cast::<u32>().read_volatile() };
         (overflow, eviction, fallback, dropped)
     }
 
@@ -725,7 +725,8 @@ impl ShmRingReader {
     /// Checks magic number and version range. This is extracted from `open_path`
     /// so it can be tested independently with anonymous mmap.
     fn validate_header(base: *const u8) -> PlatformResult<()> {
-        let header = Self::header_from_ptr(base as *const RingHeader);
+        // SAFETY: Called during open() — header is stable (daemon not yet interacting).
+        let header = unsafe { Self::header_from_ptr(base as *const RingHeader) };
         if header.magic != VD_SHM_MAGIC {
             return Err(PlatformError::InvalidParameter(format!(
                 "invalid shm magic: expected {:#x}, got {:#x}",
@@ -761,28 +762,61 @@ impl ShmRingReader {
         }
     }
 
-    fn header_from_ptr(ptr: *const RingHeader) -> &'static RingHeader {
-        // SAFETY: Called with verified pointer from mmap during open.
+    /// Read the ring header from a raw pointer.
+    ///
+    /// # Safety
+    ///
+    /// Only safe to call when the daemon is NOT concurrently writing header fields
+    /// being accessed through the returned reference (e.g., during initialization
+    /// before the daemon starts writing, or for immutable fields like magic/version).
+    /// For fields written concurrently by the daemon (write_seq, flags, counters),
+    /// use the `*_atomic()` methods or `read_volatile` instead.
+    unsafe fn header_from_ptr<'a>(ptr: *const RingHeader) -> &'a RingHeader {
         unsafe { &*ptr }
     }
 
-    /// Get slot header at index
+    /// Get slot header at index.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `index >= VD_SHM_SLOT_COUNT` or the computed offset exceeds the
+    /// mmap'd region. This is a defense-in-depth check — callers like `read_slot`
+    /// already validate the index, but corrupted data from the daemon socket could
+    /// bypass the public API.
     #[inline]
     fn slot_header(&self, index: u32) -> &SlotHeader {
+        assert!(
+            (index as usize) < VD_SHM_SLOT_COUNT as usize,
+            "slot_header: index {} out of bounds (max {})",
+            index,
+            VD_SHM_SLOT_COUNT - 1
+        );
         let offset = VD_SHM_HEADER_SIZE + (index as usize) * VD_SHM_SLOT_SIZE;
-        // SAFETY: Offset is within bounds, structure fits.
+        debug_assert!(offset + VD_SHM_SLOT_HDR_SIZE <= self.size);
+        // SAFETY: Offset validated by assert above, structure fits within slot.
         unsafe {
             let ptr = self.base.add(offset);
             &*ptr.cast::<SlotHeader>()
         }
     }
 
-    /// Get slot data slice at index
+    /// Get slot data slice at index.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `index >= VD_SHM_SLOT_COUNT`.
     #[inline]
     fn slot_data(&self, index: u32) -> &[u8] {
+        assert!(
+            (index as usize) < VD_SHM_SLOT_COUNT as usize,
+            "slot_data: index {} out of bounds (max {})",
+            index,
+            VD_SHM_SLOT_COUNT - 1
+        );
         let offset =
             VD_SHM_HEADER_SIZE + (index as usize) * VD_SHM_SLOT_SIZE + VD_SHM_SLOT_HDR_SIZE;
-        // SAFETY: Offset and size are within bounds.
+        debug_assert!(offset + VD_SHM_SLOT_DATA_SIZE <= self.size);
+        // SAFETY: Offset validated by assert above, data portion fits within slot.
         unsafe {
             let ptr = self.base.add(offset);
             std::slice::from_raw_parts(ptr, VD_SHM_SLOT_DATA_SIZE)
@@ -825,11 +859,21 @@ impl ShmRingReader {
         }
     }
 
-    /// Get atomic state field for a slot
+    /// Get atomic state field for a slot.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `index >= VD_SHM_SLOT_COUNT`.
     #[inline]
     fn slot_state_atomic(&self, index: u32) -> &AtomicU32 {
+        assert!(
+            (index as usize) < VD_SHM_SLOT_COUNT as usize,
+            "slot_state_atomic: index {} out of bounds (max {})",
+            index,
+            VD_SHM_SLOT_COUNT - 1
+        );
         let offset = VD_SHM_HEADER_SIZE + (index as usize) * VD_SHM_SLOT_SIZE;
-        // SAFETY: Offset is within bounds, state is first field of SlotHeader.
+        // SAFETY: Offset validated by assert above, state is first field of SlotHeader.
         unsafe {
             let ptr = self.base.add(offset);
             &*ptr.cast::<AtomicU32>()

@@ -437,24 +437,11 @@ impl OnvifServer {
 
         // Register Media Service
         tracing::debug!("Registering Media Service");
-        let media_service = match (app_state.config_persistence(), app_state.platform()) {
-            (Some(persistence), Some(platform)) => {
-                MediaService::with_config_and_persistence_and_platform(
-                    Arc::clone(app_state.config()),
-                    persistence.clone(),
-                    Arc::clone(platform),
-                )
-            }
-            (Some(persistence), None) => MediaService::with_config_and_persistence(
-                Arc::clone(app_state.config()),
-                persistence.clone(),
-            ),
-            (None, Some(platform)) => MediaService::with_config_and_platform(
-                Arc::clone(app_state.config()),
-                Arc::clone(platform),
-            ),
-            (None, None) => MediaService::with_config(Arc::clone(app_state.config())),
-        };
+        let media_service = MediaService::with_storage(
+            Arc::clone(app_state.config()),
+            Arc::clone(app_state.profile_storage()),
+            app_state.platform().map(Arc::clone),
+        );
         dispatcher.register_service("media", Arc::new(media_service));
 
         // Register PTZ Service
@@ -979,7 +966,7 @@ mod tests {
     #[test]
     fn test_server_with_app_state_registers_all_services() {
         use crate::config::ConfigRuntime;
-        use crate::config::{PasswordManager, UserStorage};
+        use crate::config::{PasswordManager, ProfileStorage, UserStorage};
         use crate::onvif::ptz::PTZStateManager;
         use crate::utils::MemoryMonitor;
 
@@ -990,6 +977,7 @@ mod tests {
             .config(Arc::new(ConfigRuntime::new(Default::default())))
             .memory_monitor(Arc::new(MemoryMonitor::new()))
             .rate_limiter(Arc::new(crate::security::RateLimiter::new(60)))
+            .profile_storage(Arc::new(ProfileStorage::new("/tmp/test_profiles.toml")))
             .build()
             .unwrap();
 
@@ -1232,7 +1220,7 @@ mod tests {
     #[test]
     fn test_server_with_app_state_tls_validation() {
         use crate::config::ConfigRuntime;
-        use crate::config::{PasswordManager, UserStorage};
+        use crate::config::{PasswordManager, ProfileStorage, UserStorage};
         use crate::onvif::ptz::PTZStateManager;
         use crate::utils::MemoryMonitor;
 
@@ -1243,6 +1231,7 @@ mod tests {
             .config(Arc::new(ConfigRuntime::new(Default::default())))
             .memory_monitor(Arc::new(MemoryMonitor::new()))
             .rate_limiter(Arc::new(crate::security::RateLimiter::new(60)))
+            .profile_storage(Arc::new(ProfileStorage::new("/tmp/test_profiles.toml")))
             .build()
             .unwrap();
 

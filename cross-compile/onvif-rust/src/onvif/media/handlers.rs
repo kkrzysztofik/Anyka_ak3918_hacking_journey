@@ -8,7 +8,7 @@
 
 use std::sync::Arc;
 
-use crate::config::{ConfigPersistenceHandle, ConfigRuntime};
+use crate::config::{ConfigRuntime, ProfileStorage};
 use crate::onvif::dispatcher::ServiceHandler;
 use crate::onvif::error::{OnvifError, OnvifResult};
 use crate::onvif::types::common::{MediaUri, StreamSetup, StreamType, TransportProtocol};
@@ -73,7 +73,7 @@ pub struct MediaService {
 }
 
 impl MediaService {
-    /// Create a new Media Service.
+    /// Create a new Media Service with default configuration (for tests).
     pub fn new() -> Self {
         let config = Arc::new(ConfigRuntime::new(Default::default()));
         Self {
@@ -83,7 +83,7 @@ impl MediaService {
         }
     }
 
-    /// Create a new Media Service with configuration.
+    /// Create a new Media Service with configuration (no persistence).
     pub fn with_config(config: Arc<ConfigRuntime>) -> Self {
         Self {
             profile_manager: Arc::new(ProfileManager::with_config(Arc::clone(&config))),
@@ -92,79 +92,31 @@ impl MediaService {
         }
     }
 
-    /// Create a new Media Service with configuration and platform.
-    /// The platform's max_sensor_resolution is automatically queried and passed to ProfileManager
-    /// to ensure ONVIF profiles are constrained by actual sensor capabilities.
-    pub fn with_config_and_platform(
+    /// Create a Media Service with profile storage and optional platform.
+    ///
+    /// This is the production constructor. Sensor resolution is queried from
+    /// the platform (or defaults to 1920x1080). Profiles are loaded from
+    /// storage first; if empty, they're seeded from config and persisted.
+    pub fn with_storage(
         config: Arc<ConfigRuntime>,
-        platform: Arc<dyn Platform>,
+        profile_storage: Arc<ProfileStorage>,
+        platform: Option<Arc<dyn Platform>>,
     ) -> Self {
-        // Query max sensor resolution from platform for adaptive profile configuration
-        let max_sensor_resolution = platform.max_sensor_resolution().unwrap_or_else(|_| {
-            // Fallback to default if platform not initialized or sensor resolution unavailable
-            tracing::warn!(
-                "Failed to query sensor resolution from platform, using fallback 1920x1080"
-            );
-            Resolution::new(1920, 1080)
-        });
+        let max_res = platform
+            .as_ref()
+            .and_then(|p| p.max_sensor_resolution().ok())
+            .unwrap_or(Resolution::new(1920, 1080));
 
-        let profile_manager = Arc::new(ProfileManager::with_config_and_sensor_resolution(
-            Arc::clone(&config),
-            None,
-            max_sensor_resolution,
-        ));
+        let pm = ProfileManager::with_storage(Arc::clone(&config), profile_storage, max_res);
 
         Self {
-            profile_manager,
+            profile_manager: Arc::new(pm),
             config,
-            platform: Some(platform),
+            platform,
         }
     }
 
-    /// Create a Media Service wired with config persistence and platform.
-    /// The platform's max_sensor_resolution is automatically queried for adaptive profiles.
-    pub fn with_config_and_persistence_and_platform(
-        config: Arc<ConfigRuntime>,
-        persistence: ConfigPersistenceHandle,
-        platform: Arc<dyn Platform>,
-    ) -> Self {
-        // Query max sensor resolution from platform
-        let max_sensor_resolution = platform.max_sensor_resolution().unwrap_or_else(|_| {
-            tracing::warn!(
-                "Failed to query sensor resolution from platform, using fallback 1920x1080"
-            );
-            Resolution::new(1920, 1080)
-        });
-
-        let profile_manager = Arc::new(ProfileManager::with_config_and_sensor_resolution(
-            Arc::clone(&config),
-            Some(persistence.clone()),
-            max_sensor_resolution,
-        ));
-
-        Self {
-            profile_manager,
-            config,
-            platform: Some(platform),
-        }
-    }
-
-    /// Create a Media Service wired with config persistence (without platform).
-    pub fn with_config_and_persistence(
-        config: Arc<ConfigRuntime>,
-        persistence: ConfigPersistenceHandle,
-    ) -> Self {
-        Self {
-            profile_manager: Arc::new(ProfileManager::with_config_and_persistence(
-                Arc::clone(&config),
-                Some(persistence.clone()),
-            )),
-            config,
-            platform: None,
-        }
-    }
-
-    /// Create a new Media Service with a custom profile manager.
+    /// Create a new Media Service with a custom profile manager (for tests).
     pub fn with_profile_manager(profile_manager: Arc<ProfileManager>) -> Self {
         Self {
             profile_manager,

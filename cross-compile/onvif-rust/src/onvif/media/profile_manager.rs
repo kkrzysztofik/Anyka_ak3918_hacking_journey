@@ -16,7 +16,7 @@ use crate::config::profiles::{
     ProfilesFile, StoredAudioEncoderConfig, StoredAudioSource, StoredAudioSourceConfig,
     StoredProfile, StoredVideoEncoderConfig, StoredVideoSource, StoredVideoSourceConfig,
 };
-use crate::config::{ConfigPersistenceHandle, ConfigRuntime, ProfileStorage};
+use crate::config::{ConfigRuntime, ProfileStorage};
 use crate::onvif::error::{OnvifError, OnvifResult};
 use crate::onvif::types::common::{
     AudioEncoderConfiguration, AudioSource, AudioSourceConfiguration, FloatRange, IntRange,
@@ -79,13 +79,8 @@ pub struct ProfileManager {
     max_sensor_resolution: Resolution,
     /// Runtime configuration (optional) for reading `stream_profile_N` at init.
     config: Option<Arc<ConfigRuntime>>,
-    /// Config persistence handle for debounced saves (kept for API compatibility).
-    #[allow(dead_code)]
-    persistence: Option<ConfigPersistenceHandle>,
     /// Typed profile storage for `profiles.toml` persistence.
     profile_storage: Option<Arc<ProfileStorage>>,
-    /// Path to `profiles.toml` for direct saves.
-    profile_path: Option<String>,
 }
 
 impl ProfileManager {
@@ -100,7 +95,6 @@ impl ProfileManager {
     pub fn with_default_resolution() -> Self {
         let manager = Self::new_with_dependencies(
             None,
-            None,
             Resolution::new(1920, 1080), // Fallback for tests without real platform
         );
         manager.initialize_defaults();
@@ -110,24 +104,15 @@ impl ProfileManager {
     /// Create a ProfileManager with specified max sensor resolution.
     /// Use this when you have direct knowledge of the sensor resolution.
     pub fn with_max_resolution(max_sensor_resolution: Resolution) -> Self {
-        let manager = Self::new_with_dependencies(None, None, max_sensor_resolution);
+        let manager = Self::new_with_dependencies(None, max_sensor_resolution);
         manager.initialize_defaults();
         manager
     }
 
-    /// Create a ProfileManager that persists to the given configuration runtime.
+    /// Create a ProfileManager that reads initial profiles from config.
     pub fn with_config(config: Arc<ConfigRuntime>) -> Self {
-        Self::with_config_and_persistence(config, None)
-    }
-
-    /// Create a ProfileManager that persists to the given configuration runtime and save handle.
-    pub fn with_config_and_persistence(
-        config: Arc<ConfigRuntime>,
-        persistence: Option<ConfigPersistenceHandle>,
-    ) -> Self {
         let manager = Self::new_with_dependencies(
             Some(Arc::clone(&config)),
-            persistence,
             Resolution::new(1920, 1080), // Fallback for tests
         );
 
@@ -137,18 +122,13 @@ impl ProfileManager {
         manager
     }
 
-    /// Create a ProfileManager with all dependencies and max sensor resolution.
+    /// Create a ProfileManager with config and max sensor resolution.
     /// Called from phase 3: MediaService will pass sensor resolution from platform.
     pub fn with_config_and_sensor_resolution(
         config: Arc<ConfigRuntime>,
-        persistence: Option<ConfigPersistenceHandle>,
         max_sensor_resolution: Resolution,
     ) -> Self {
-        let manager = Self::new_with_dependencies(
-            Some(Arc::clone(&config)),
-            persistence,
-            max_sensor_resolution,
-        );
+        let manager = Self::new_with_dependencies(Some(Arc::clone(&config)), max_sensor_resolution);
 
         manager.initialize_defaults();
         manager.persist_all();
@@ -164,13 +144,11 @@ impl ProfileManager {
     pub fn with_storage(
         config: Arc<ConfigRuntime>,
         profile_storage: Arc<ProfileStorage>,
-        profile_path: &str,
         max_sensor_resolution: Resolution,
     ) -> Self {
         let mut manager =
-            Self::new_with_dependencies(Some(Arc::clone(&config)), None, max_sensor_resolution);
+            Self::new_with_dependencies(Some(Arc::clone(&config)), max_sensor_resolution);
         manager.profile_storage = Some(Arc::clone(&profile_storage));
-        manager.profile_path = Some(profile_path.to_string());
 
         // Try loading from profile storage first
         if !manager.load_from_storage() {
@@ -184,7 +162,6 @@ impl ProfileManager {
     /// Internal constructor used by public builders.
     fn new_with_dependencies(
         config: Option<Arc<ConfigRuntime>>,
-        persistence: Option<ConfigPersistenceHandle>,
         max_sensor_resolution: Resolution,
     ) -> Self {
         Self {
@@ -198,9 +175,7 @@ impl ProfileManager {
             profile_counter: AtomicU32::new(0),
             max_sensor_resolution,
             config,
-            persistence,
             profile_storage: None,
-            profile_path: None,
         }
     }
 
@@ -1271,10 +1246,11 @@ impl ProfileManager {
         };
         let snapshot = self.to_stored_snapshot();
         storage.replace(snapshot);
-        if let Some(path) = &self.profile_path
-            && let Err(e) = storage.save_to_toml(path)
-        {
-            tracing::warn!("Failed to save profiles to {path}: {e}");
+        if let Err(e) = storage.save() {
+            tracing::warn!(
+                "Failed to save profiles to {}: {e}",
+                storage.path().display()
+            );
         }
     }
 
@@ -1944,12 +1920,12 @@ mod tests {
 
     #[test]
     fn test_persist_defaults_with_profile_storage() {
+        let dir = tempfile::tempdir().unwrap();
         let runtime = Arc::new(ConfigRuntime::new(Default::default()));
-        let storage = Arc::new(ProfileStorage::new());
+        let storage = Arc::new(ProfileStorage::new(dir.path().join("profiles.toml")));
         let manager = ProfileManager::with_storage(
             Arc::clone(&runtime),
             Arc::clone(&storage),
-            "/tmp/test_profiles.toml",
             Resolution::new(1920, 1080),
         );
 
@@ -1962,12 +1938,12 @@ mod tests {
 
     #[test]
     fn test_load_profiles_from_storage() {
+        let dir = tempfile::tempdir().unwrap();
         let runtime = Arc::new(ConfigRuntime::new(Default::default()));
-        let storage = Arc::new(ProfileStorage::new());
+        let storage = Arc::new(ProfileStorage::new(dir.path().join("profiles.toml")));
         let manager = ProfileManager::with_storage(
             Arc::clone(&runtime),
             Arc::clone(&storage),
-            "/tmp/test_profiles.toml",
             Resolution::new(1920, 1080),
         );
 
@@ -1982,7 +1958,6 @@ mod tests {
         let manager_reloaded = ProfileManager::with_storage(
             Arc::clone(&runtime),
             Arc::clone(&storage),
-            "/tmp/test_profiles.toml",
             Resolution::new(1920, 1080),
         );
         let loaded = manager_reloaded.get_profile(&profile.token).unwrap();

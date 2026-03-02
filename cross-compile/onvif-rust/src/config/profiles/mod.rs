@@ -8,7 +8,7 @@
 //! Conversion between stored DTOs and ONVIF domain types happens in `profile_manager.rs`.
 
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
@@ -162,40 +162,46 @@ fn default_channels() -> u32 {
 
 /// Thread-safe profile storage with TOML file persistence.
 ///
-/// Follows the same pattern as `UserStorage`: `RwLock<Data>` with
-/// explicit `load_from_toml` / `save_to_toml` methods.
+/// Owns its file path, following the same pattern as `ConfigStorage`.
+/// Create with `new(path)`, then call `load()` / `save()` as needed.
 pub struct ProfileStorage {
     data: RwLock<ProfilesFile>,
+    path: PathBuf,
 }
 
 impl ProfileStorage {
-    /// Create empty storage.
-    pub fn new() -> Self {
+    /// Create storage bound to a file path. Does not load yet.
+    pub fn new(path: impl Into<PathBuf>) -> Self {
         Self {
             data: RwLock::new(ProfilesFile::default()),
+            path: path.into(),
         }
     }
 
-    /// Load profiles from a TOML file.
+    /// Load profiles from the bound file.
     ///
-    /// If the file does not exist, returns `Ok(())` without loading anything.
-    pub fn load_from_toml(&self, path: impl AsRef<Path>) -> Result<(), ProfileError> {
-        let path = path.as_ref();
-        if !path.exists() {
+    /// If the file does not exist, returns `Ok(())` (no-op).
+    pub fn load(&self) -> Result<(), ProfileError> {
+        if !self.path.exists() {
             return Ok(());
         }
 
-        let content = fs::read_to_string(path)?;
+        let content = fs::read_to_string(&self.path)?;
         let profiles: ProfilesFile = toml::from_str(&content)?;
         *self.data.write() = profiles;
         Ok(())
     }
 
-    /// Save profiles to a TOML file using atomic write.
-    pub fn save_to_toml(&self, path: impl AsRef<Path>) -> Result<(), ProfileError> {
+    /// Save profiles to the bound file atomically.
+    pub fn save(&self) -> Result<(), ProfileError> {
         let content = toml::to_string_pretty(&*self.data.read())?;
-        super::file_ops::atomic_write(path.as_ref(), content.as_bytes(), None)?;
+        super::file_ops::atomic_write(&self.path, content.as_bytes(), None)?;
         Ok(())
+    }
+
+    /// Get the file path.
+    pub fn path(&self) -> &Path {
+        &self.path
     }
 
     /// Check if profile data is empty (no profiles loaded).
@@ -214,12 +220,6 @@ impl ProfileStorage {
     }
 }
 
-impl Default for ProfileStorage {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 // ============================================================================
 // Tests
 // ============================================================================
@@ -231,13 +231,15 @@ mod tests {
 
     #[test]
     fn test_profile_storage_new_is_empty() {
-        let storage = ProfileStorage::new();
+        let dir = tempdir().unwrap();
+        let storage = ProfileStorage::new(dir.path().join("profiles.toml"));
         assert!(storage.is_empty());
     }
 
     #[test]
     fn test_profile_storage_replace_and_snapshot() {
-        let storage = ProfileStorage::new();
+        let dir = tempdir().unwrap();
+        let storage = ProfileStorage::new(dir.path().join("profiles.toml"));
 
         let data = ProfilesFile {
             profiles: vec![StoredProfile {
@@ -274,7 +276,7 @@ mod tests {
         let path = dir.path().join("profiles.toml");
 
         // Save
-        let storage1 = ProfileStorage::new();
+        let storage1 = ProfileStorage::new(&path);
         storage1.replace(ProfilesFile {
             profiles: vec![StoredProfile {
                 token: "Profile_Main".to_string(),
@@ -302,11 +304,11 @@ mod tests {
             }],
             ..Default::default()
         });
-        storage1.save_to_toml(&path).unwrap();
+        storage1.save().unwrap();
 
         // Load
-        let storage2 = ProfileStorage::new();
-        storage2.load_from_toml(&path).unwrap();
+        let storage2 = ProfileStorage::new(&path);
+        storage2.load().unwrap();
 
         let snap = storage2.snapshot();
         assert_eq!(snap.profiles.len(), 1);
@@ -318,8 +320,8 @@ mod tests {
 
     #[test]
     fn test_profile_storage_load_nonexistent_file() {
-        let storage = ProfileStorage::new();
-        let result = storage.load_from_toml("/nonexistent/profiles.toml");
+        let storage = ProfileStorage::new("/nonexistent/profiles.toml");
+        let result = storage.load();
         assert!(result.is_ok());
         assert!(storage.is_empty());
     }
@@ -390,12 +392,12 @@ mod tests {
             }],
         };
 
-        let storage = ProfileStorage::new();
+        let storage = ProfileStorage::new(&path);
         storage.replace(original.clone());
-        storage.save_to_toml(&path).unwrap();
+        storage.save().unwrap();
 
-        let storage2 = ProfileStorage::new();
-        storage2.load_from_toml(&path).unwrap();
+        let storage2 = ProfileStorage::new(&path);
+        storage2.load().unwrap();
 
         let loaded = storage2.snapshot();
         assert_eq!(loaded.profiles.len(), original.profiles.len());

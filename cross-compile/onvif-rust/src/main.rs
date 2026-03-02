@@ -201,7 +201,98 @@ fn install_validation_panic_hook() {
     });
 }
 
+/// Install signal handlers for SIGSEGV, SIGBUS, and SIGABRT to log diagnostic
+/// information before the process dies. Rust's panic hook does NOT fire for these
+/// hardware/OS signals, so this is the only way to capture crash context.
+///
+/// The handler uses only async-signal-safe functions (raw `write()` syscall).
+fn install_crash_signal_handlers() {
+    unsafe extern "C" fn crash_handler(
+        sig: libc::c_int,
+        info: *mut libc::siginfo_t,
+        _ucontext: *mut libc::c_void,
+    ) {
+        // All output uses raw write() — the only safe I/O in a signal handler.
+        // No malloc, no println!, no tracing, no formatting with String.
+
+        fn write_str(fd: libc::c_int, s: &[u8]) {
+            unsafe {
+                libc::write(fd, s.as_ptr() as *const libc::c_void, s.len());
+            }
+        }
+
+        fn write_hex(fd: libc::c_int, val: usize) {
+            let mut buf = [b'0'; 18]; // "0x" + 16 hex digits
+            buf[0] = b'0';
+            buf[1] = b'x';
+            let hex = b"0123456789abcdef";
+            for i in 0..16 {
+                buf[17 - i] = hex[(val >> (i * 4)) & 0xf];
+            }
+            write_str(fd, &buf);
+        }
+
+        /// Write signal diagnostics to a file descriptor (async-signal-safe).
+        fn write_crash_info(fd: libc::c_int, sig: libc::c_int, info: *mut libc::siginfo_t) {
+            write_str(fd, b"\n=== FATAL SIGNAL ===\nsignal: ");
+            match sig {
+                libc::SIGSEGV => write_str(fd, b"SIGSEGV"),
+                libc::SIGBUS => write_str(fd, b"SIGBUS"),
+                libc::SIGABRT => write_str(fd, b"SIGABRT"),
+                _ => write_str(fd, b"unknown"),
+            }
+
+            if !info.is_null() {
+                write_str(fd, b"\nfault addr: ");
+                // SAFETY: info is non-null, checked above. si_addr() reads a union field.
+                write_hex(fd, unsafe { (*info).si_addr() } as usize);
+            }
+
+            write_str(fd, b"\npid: ");
+            write_hex(fd, unsafe { libc::getpid() } as usize);
+            write_str(fd, b"\ntid: ");
+            write_hex(fd, unsafe { libc::syscall(libc::SYS_gettid) } as usize);
+            write_str(fd, b"\n=== END FATAL ===\n");
+        }
+
+        // Write to stderr (fd 2)
+        write_crash_info(libc::STDERR_FILENO, sig, info);
+
+        // Also try to write to the log file (best-effort)
+        // SAFETY: open() with O_CREAT|O_APPEND is async-signal-safe per POSIX.
+        let log_fd = unsafe {
+            libc::open(
+                c"/mnt/logs/onvif_crash.log".as_ptr(),
+                libc::O_WRONLY | libc::O_CREAT | libc::O_APPEND,
+                0o644,
+            )
+        };
+        if log_fd >= 0 {
+            write_crash_info(log_fd, sig, info);
+            unsafe { libc::close(log_fd) };
+        }
+
+        // Re-raise the signal with default handler so we get a coredump
+        unsafe {
+            libc::signal(sig, libc::SIG_DFL);
+            libc::raise(sig);
+        }
+    }
+
+    for &sig in &[libc::SIGSEGV, libc::SIGBUS, libc::SIGABRT] {
+        unsafe {
+            let mut sa: libc::sigaction = std::mem::zeroed();
+            sa.sa_flags = libc::SA_SIGINFO | libc::SA_RESETHAND;
+            sa.sa_sigaction = crash_handler as *const () as usize;
+            libc::sigemptyset(&mut sa.sa_mask);
+            libc::sigaction(sig, &sa, std::ptr::null_mut());
+        }
+    }
+}
+
 fn main() -> Result<()> {
+    install_crash_signal_handlers();
+
     let startup_args = parse_arguments();
     let validation_mode = startup_args.validation_config.is_some();
 

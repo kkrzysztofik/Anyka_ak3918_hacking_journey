@@ -19,7 +19,7 @@ use tokio::sync::broadcast;
 use tokio::task::JoinHandle;
 
 use crate::config::{
-    ConfigPersistenceHandle, ConfigPersistenceService, ConfigRuntime, ConfigStorage,
+    ConfigPersistenceHandle, ConfigPersistenceService, ConfigRuntime, ConfigStorage, ProfileStorage,
 };
 use crate::config::{PasswordManager, UserStorage};
 use crate::lifecycle::health::{ComponentHealth, HealthStatus};
@@ -82,6 +82,8 @@ pub struct AppState {
     platform: Option<Arc<dyn Platform>>,
     /// Optional config persistence handle.
     config_persistence: Option<ConfigPersistenceHandle>,
+    /// Profile storage for ONVIF media profiles (profiles.toml).
+    profile_storage: Arc<ProfileStorage>,
 }
 
 impl AppState {
@@ -129,6 +131,11 @@ impl AppState {
     pub fn config_persistence(&self) -> Option<&ConfigPersistenceHandle> {
         self.config_persistence.as_ref()
     }
+
+    /// Get a reference to the profile storage.
+    pub fn profile_storage(&self) -> &Arc<ProfileStorage> {
+        &self.profile_storage
+    }
 }
 
 impl std::fmt::Debug for AppState {
@@ -151,6 +158,7 @@ impl std::fmt::Debug for AppState {
                     .as_ref()
                     .map(|_| "Some(ConfigPersistenceHandle)"),
             )
+            .field("profile_storage", &"Arc<ProfileStorage>")
             .finish()
     }
 }
@@ -173,6 +181,7 @@ pub struct AppStateBuilder {
     rate_limiter: Option<Arc<RateLimiter>>,
     platform: Option<Arc<dyn Platform>>,
     config_persistence: Option<ConfigPersistenceHandle>,
+    profile_storage: Option<Arc<ProfileStorage>>,
 }
 
 /// Error type for AppState construction failures.
@@ -243,6 +252,12 @@ impl AppStateBuilder {
         self
     }
 
+    /// Set the profile storage.
+    pub fn profile_storage(mut self, storage: Arc<ProfileStorage>) -> Self {
+        self.profile_storage = Some(storage);
+        self
+    }
+
     /// Build the `AppState`, returning an error if required components are missing.
     pub fn build(self) -> Result<AppState, AppStateError> {
         Ok(AppState {
@@ -266,6 +281,9 @@ impl AppStateBuilder {
                 .ok_or_else(|| AppStateError::MissingComponent("rate_limiter".to_string()))?,
             platform: self.platform,
             config_persistence: self.config_persistence,
+            profile_storage: self
+                .profile_storage
+                .ok_or_else(|| AppStateError::MissingComponent("profile_storage".to_string()))?,
         })
     }
 }
@@ -278,6 +296,11 @@ impl AppStateBuilder {
 mod app_state_tests {
     use super::*;
 
+    /// Helper: create a test ProfileStorage backed by a temp path.
+    fn test_profile_storage() -> Arc<ProfileStorage> {
+        Arc::new(ProfileStorage::new("/tmp/test_profiles.toml"))
+    }
+
     #[test]
     fn test_app_state_builder_missing_user_storage() {
         let result = AppState::builder()
@@ -286,6 +309,7 @@ mod app_state_tests {
             .config(Arc::new(ConfigRuntime::new(Default::default())))
             .memory_monitor(Arc::new(crate::utils::MemoryMonitor::new()))
             .rate_limiter(Arc::new(crate::security::RateLimiter::new(60)))
+            .profile_storage(test_profile_storage())
             .build();
 
         assert!(result.is_err());
@@ -304,6 +328,7 @@ mod app_state_tests {
             .config(Arc::new(ConfigRuntime::new(Default::default())))
             .memory_monitor(Arc::new(crate::utils::MemoryMonitor::new()))
             .rate_limiter(Arc::new(crate::security::RateLimiter::new(60)))
+            .profile_storage(test_profile_storage())
             .build();
 
         assert!(result.is_err());
@@ -322,6 +347,7 @@ mod app_state_tests {
             .config(Arc::new(ConfigRuntime::new(Default::default())))
             .memory_monitor(Arc::new(crate::utils::MemoryMonitor::new()))
             .rate_limiter(Arc::new(crate::security::RateLimiter::new(60)))
+            .profile_storage(test_profile_storage())
             .build();
 
         assert!(result.is_err());
@@ -340,6 +366,7 @@ mod app_state_tests {
             .ptz_state(Arc::new(PTZStateManager::new()))
             .memory_monitor(Arc::new(crate::utils::MemoryMonitor::new()))
             .rate_limiter(Arc::new(crate::security::RateLimiter::new(60)))
+            .profile_storage(test_profile_storage())
             .build();
 
         assert!(result.is_err());
@@ -358,6 +385,7 @@ mod app_state_tests {
             .ptz_state(Arc::new(PTZStateManager::new()))
             .config(Arc::new(ConfigRuntime::new(Default::default())))
             .rate_limiter(Arc::new(crate::security::RateLimiter::new(60)))
+            .profile_storage(test_profile_storage())
             .build();
 
         assert!(result.is_err());
@@ -376,12 +404,32 @@ mod app_state_tests {
             .ptz_state(Arc::new(PTZStateManager::new()))
             .config(Arc::new(ConfigRuntime::new(Default::default())))
             .memory_monitor(Arc::new(crate::utils::MemoryMonitor::new()))
+            .profile_storage(test_profile_storage())
             .build();
 
         assert!(result.is_err());
         assert_eq!(
             result.unwrap_err(),
             AppStateError::MissingComponent("rate_limiter".to_string())
+        );
+    }
+
+    #[test]
+    fn test_app_state_builder_missing_profile_storage() {
+        let storage = UserStorage::new();
+        let result = AppState::builder()
+            .user_storage(Arc::new(storage))
+            .password_manager(Arc::new(PasswordManager::new()))
+            .ptz_state(Arc::new(PTZStateManager::new()))
+            .config(Arc::new(ConfigRuntime::new(Default::default())))
+            .memory_monitor(Arc::new(crate::utils::MemoryMonitor::new()))
+            .rate_limiter(Arc::new(crate::security::RateLimiter::new(60)))
+            .build();
+
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err(),
+            AppStateError::MissingComponent("profile_storage".to_string())
         );
     }
 
@@ -395,6 +443,7 @@ mod app_state_tests {
             .config(Arc::new(ConfigRuntime::new(Default::default())))
             .memory_monitor(Arc::new(crate::utils::MemoryMonitor::new()))
             .rate_limiter(Arc::new(crate::security::RateLimiter::new(60)))
+            .profile_storage(test_profile_storage())
             .build();
 
         assert!(result.is_ok());
@@ -412,6 +461,7 @@ mod app_state_tests {
             .config(Arc::new(ConfigRuntime::new(Default::default())))
             .memory_monitor(Arc::new(crate::utils::MemoryMonitor::new()))
             .rate_limiter(Arc::new(crate::security::RateLimiter::new(60)))
+            .profile_storage(test_profile_storage())
             .build()
             .unwrap();
 
@@ -425,6 +475,10 @@ mod app_state_tests {
         assert!(Arc::ptr_eq(state.ptz_state(), cloned.ptz_state()));
         assert!(Arc::ptr_eq(state.config(), cloned.config()));
         assert!(Arc::ptr_eq(state.memory_monitor(), cloned.memory_monitor()));
+        assert!(Arc::ptr_eq(
+            state.profile_storage(),
+            cloned.profile_storage()
+        ));
     }
 
     #[test]
@@ -437,12 +491,14 @@ mod app_state_tests {
             .config(Arc::new(ConfigRuntime::new(Default::default())))
             .memory_monitor(Arc::new(crate::utils::MemoryMonitor::new()))
             .rate_limiter(Arc::new(crate::security::RateLimiter::new(60)))
+            .profile_storage(test_profile_storage())
             .build()
             .unwrap();
 
         let debug_str = format!("{:?}", state);
         assert!(debug_str.contains("AppState"));
         assert!(debug_str.contains("user_storage"));
+        assert!(debug_str.contains("profile_storage"));
     }
 }
 
@@ -603,6 +659,22 @@ impl Application {
             }
         }
 
+        // Create profile storage for ONVIF media profiles
+        let profiles_path = std::path::Path::new(config_path)
+            .parent()
+            .unwrap_or(std::path::Path::new("/etc/onvif"))
+            .join("profiles.toml");
+        let profile_storage = Arc::new(ProfileStorage::new(&profiles_path));
+        if let Err(e) = profile_storage.load() {
+            tracing::warn!(
+                "Failed to load profiles from {}: {}",
+                profiles_path.display(),
+                e
+            );
+        } else if !profile_storage.is_empty() {
+            tracing::info!("Loaded profiles from {}", profiles_path.display());
+        }
+
         // Initialize rate limiter from config (default: 60 requests per minute)
         let rate_limit_per_minute = config_runtime.read().server.rate_limit_per_minute;
         let rate_limiter = Arc::new(RateLimiter::new(rate_limit_per_minute));
@@ -621,7 +693,8 @@ impl Application {
                     StartupError::Services(format!("Failed to initialize memory monitor: {}", e))
                 })?,
             ))
-            .rate_limiter(Arc::clone(&rate_limiter));
+            .rate_limiter(Arc::clone(&rate_limiter))
+            .profile_storage(Arc::clone(&profile_storage));
 
         // Wire config persistence handle
         app_state_builder = app_state_builder.config_persistence(persistence_handle.clone());
@@ -1035,6 +1108,22 @@ impl Application {
             }
         }
 
+        // Create profile storage for ONVIF media profiles
+        let profiles_path = std::path::Path::new(config_path)
+            .parent()
+            .unwrap_or(std::path::Path::new("/etc/onvif"))
+            .join("profiles.toml");
+        let profile_storage = Arc::new(ProfileStorage::new(&profiles_path));
+        if let Err(e) = profile_storage.load() {
+            tracing::warn!(
+                "Failed to load profiles from {}: {}",
+                profiles_path.display(),
+                e
+            );
+        } else if !profile_storage.is_empty() {
+            tracing::info!("Loaded profiles from {}", profiles_path.display());
+        }
+
         let rate_limit_per_minute = config_runtime.read().server.rate_limit_per_minute;
         let rate_limiter = Arc::new(RateLimiter::new(rate_limit_per_minute));
         tracing::info!(
@@ -1055,6 +1144,7 @@ impl Application {
             .rate_limiter(Arc::clone(&rate_limiter))
             .config_persistence(persistence_handle.clone())
             .platform(Arc::clone(&platform))
+            .profile_storage(Arc::clone(&profile_storage))
             .build()
             .map_err(|e| StartupError::Services(e.to_string()))?;
 
@@ -1535,6 +1625,7 @@ mod tests {
             .config(config)
             .memory_monitor(Arc::new(MemoryMonitor::new()))
             .rate_limiter(Arc::new(crate::security::RateLimiter::new(60)))
+            .profile_storage(Arc::new(ProfileStorage::new("/tmp/test_profiles.toml")))
             .build()
             .expect("app state should build")
     }

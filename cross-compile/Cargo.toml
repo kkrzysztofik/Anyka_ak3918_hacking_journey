@@ -18,3 +18,11 @@ opt-level = 3    # Changed from "z" - prioritize speed over size
 lto = true
 codegen-units = 1
 strip = true
+
+# Debug-enabled release build: `cargo build --profile release-debug`
+# Same optimizations as release but retains line-table debug info for coredump analysis.
+# Binary is ~500KB larger but allows GDB to resolve Rust frames.
+[profile.release-debug]
+inherits = "release"
+strip = false
+debug = 1  # Line tables only — sufficient for backtraces without full DWARF bloat
