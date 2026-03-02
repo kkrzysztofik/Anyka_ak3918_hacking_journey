@@ -1,11 +1,19 @@
 #include <string.h>
 #include <stdint.h>
+#include <stdlib.h>
+#include <time.h>
+#include <pthread.h>
 
 #include "handlers_venc.h"
 #include "ipc.h"
 #include "protocol.h"
 #include "log.h"
 #include "ak_venc.h"
+
+/* Timeout in seconds for ak_venc_cancel_stream() before giving up.
+ * If the SDK's internal capture thread is stuck, this prevents the
+ * event loop from blocking forever. */
+#define CANCEL_STREAM_TIMEOUT_SEC 3
 
 /**
  * handle_venc_set_cfg_path - IPC handler for CMD_VENC_SET_CFG_PATH (no-op).
@@ -177,10 +185,39 @@ int handle_venc_request_stream(int fd, const uint8_t *req, uint32_t req_len)
     return send_handle_response(fd, stream_handle);
 }
 
+/* ---- Timeout-guarded cancel_stream helpers ----------------------------- */
+
+struct cancel_arg {
+    void *handle;
+    int   result;
+    volatile int done;   /* set to 1 by worker thread when cancel returns */
+};
+
+/**
+ * cancel_thread_fn - Worker thread that calls ak_venc_cancel_stream().
+ *
+ * Runs detached.  Sets ca->done=1 on completion.  Does NOT free ca —
+ * ownership rules:
+ *   - If the caller sees done=1 within the timeout: caller frees.
+ *   - If the caller times out: 16-byte leak (acceptable for rare error path).
+ *
+ * We cannot have the thread free ca because there is an unavoidable race
+ * between the thread's free() and the caller's read of ca->result.
+ */
+static void *cancel_thread_fn(void *arg)
+{
+    struct cancel_arg *ca = (struct cancel_arg *)arg;
+    ca->result = ak_venc_cancel_stream(ca->handle);
+    __atomic_store_n(&ca->done, 1, __ATOMIC_RELEASE);
+    return NULL;
+}
+
 /**
  * handle_venc_cancel_stream - IPC handler for CMD_VENC_CANCEL_STREAM.
  *
  * Cancels an active stream binding created by CMD_VENC_REQUEST_STREAM.
+ * Uses a detached helper thread with a timeout to prevent blocking the
+ * event loop if the SDK's cancel call hangs.
  *
  * Wire format: [u64 stream_handle] = 8 bytes.
  *
@@ -193,8 +230,48 @@ int handle_venc_cancel_stream(int fd, const uint8_t *req, uint32_t req_len)
 {
     if (req_len < sizeof(uint64_t))
         return send_response(fd, STATUS_ERROR, NULL, 0);
+
     void *stream_handle = req_read_handle(req, 0);
     log_debug("[venc] cancel_stream handle=%p", stream_handle);
-    int ret = ak_venc_cancel_stream(stream_handle);
+
+    struct cancel_arg *ca = (struct cancel_arg *)malloc(sizeof(*ca));
+    if (!ca) {
+        log_error("[venc] cancel_stream: malloc failed");
+        return send_response(fd, STATUS_ERROR, NULL, 0);
+    }
+    ca->handle = stream_handle;
+    ca->result = -1;
+    ca->done = 0;
+
+    pthread_t tid;
+    if (pthread_create(&tid, NULL, cancel_thread_fn, ca) != 0) {
+        log_error("[venc] failed to spawn cancel thread");
+        free(ca);
+        return send_response(fd, STATUS_ERROR, NULL, 0);
+    }
+    pthread_detach(tid);
+
+    struct timespec deadline;
+    clock_gettime(CLOCK_MONOTONIC, &deadline);
+    deadline.tv_sec += CANCEL_STREAM_TIMEOUT_SEC;
+
+    while (!__atomic_load_n(&ca->done, __ATOMIC_ACQUIRE)) {
+        struct timespec now;
+        clock_gettime(CLOCK_MONOTONIC, &now);
+        if (now.tv_sec > deadline.tv_sec ||
+            (now.tv_sec == deadline.tv_sec && now.tv_nsec >= deadline.tv_nsec)) {
+            log_error("[venc] cancel_stream timed out after %ds, handle=%p",
+                      CANCEL_STREAM_TIMEOUT_SEC, stream_handle);
+            /* Intentional leak of ca (16 bytes).  The detached thread may
+             * still be writing to it, so we cannot free here.  It will be
+             * reclaimed when the daemon exits or restarts. */
+            return send_response(fd, STATUS_ERROR, NULL, 0);
+        }
+        struct timespec ts = { .tv_sec = 0, .tv_nsec = 10 * 1000000L }; /* 10ms */
+        nanosleep(&ts, NULL);
+    }
+
+    int ret = ca->result;
+    free(ca);
     return send_response(fd, ret, NULL, 0);
 }

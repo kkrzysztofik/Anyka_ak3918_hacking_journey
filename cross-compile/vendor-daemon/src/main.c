@@ -417,8 +417,12 @@ int main(int argc, char *argv[])
                 {
                     int ret = process_request(client_fd);
                     if (ret == -1) {
-                        /* Control client disconnected or I/O error */
-                        log_info("[daemon] control client fd=%d disconnected", client_fd);
+                        /* Control client disconnected or I/O error —
+                         * stop push threads before releasing control so
+                         * the SDK state is clean for the next client. */
+                        log_info("[daemon] control client fd=%d disconnected, stopping push threads", client_fd);
+                        stop_push_slot(0);
+                        stop_push_slot(1);
                         release_control(client_fd);
                         close(client_fd);
                         fds[i] = fds[nfds - 1];
