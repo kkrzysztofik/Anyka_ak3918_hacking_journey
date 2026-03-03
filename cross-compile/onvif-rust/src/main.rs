@@ -1413,10 +1413,7 @@ mod tests {
 
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
         handler
-            .send_prior_data(
-                DataSender::Frame { sender: tx },
-                SubscribeType::HttpFlvPull,
-            )
+            .send_prior_data(DataSender::Frame { sender: tx }, SubscribeType::HttpFlvPull)
             .await
             .expect("send_prior_data");
 
@@ -1456,10 +1453,7 @@ mod tests {
 
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
         handler
-            .send_prior_data(
-                DataSender::Frame { sender: tx },
-                SubscribeType::HttpFlvPull,
-            )
+            .send_prior_data(DataSender::Frame { sender: tx }, SubscribeType::HttpFlvPull)
             .await
             .expect("send_prior_data");
 
