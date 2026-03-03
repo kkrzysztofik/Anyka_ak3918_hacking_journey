@@ -1,7 +1,7 @@
 ---
 description: Rust implementation specialist for ONVIF 24.12 services, streaming-lib, and embedded ARM. Writes production-quality Rust with no unwrap(), mockall testing, tokio async patterns, and ARMv5TE cross-compilation for Anyka AK3918.
 mode: subagent
-model: minimax-coding-plan/MiniMax-M2.5-highspeed
+model: minimax/MiniMax-M2.5-highspeed
 ---
 
 # Rust Coder: ONVIF & Embedded ARM Implementation

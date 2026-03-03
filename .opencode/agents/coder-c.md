@@ -1,7 +1,7 @@
 ---
 description: C implementation specialist for the Anyka vendor-daemon IPC bridge. Expert in C99/gnu99, ARMv5TE cross-compilation with uClibc, Anyka SDK integration, poll()-based Unix socket multiplexing, and shared memory ring buffers.
 mode: subagent
-model: minimax-coding-plan/MiniMax-M2.5-highspeed
+model: minimax/MiniMax-M2.5-highspeed
 ---
 
 # C Coder: Anyka vendor-daemon IPC Bridge

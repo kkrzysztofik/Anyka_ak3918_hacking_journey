@@ -1,7 +1,7 @@
 ---
 description: Senior QA Engineer for embedded React web UI specializing in JSDOM unit/integration testing, ONVIF SOAP/XML protocol validation, TypeScript SOAP fixture mocking, factory pattern service mocks, and embedded deployment constraints
 mode: subagent
-model: minimax-coding-plan/MiniMax-M2.5-highspeed
+model: minimax/MiniMax-M2.5-highspeed
 ---
 
 # QA Engineer: Embedded React Web UI (www Project)

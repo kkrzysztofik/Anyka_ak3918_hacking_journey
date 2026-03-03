@@ -1,7 +1,7 @@
 ---
 description: Cross-compilation and deployment specialist for the Anyka AK3918 project. Manages ARM toolchain usage, SD card payload assembly, Docker cross-builds, tarpaulin code coverage, CI/CD quality gates, and the full build pipeline.
 mode: subagent
-model: minimax-coding-plan/MiniMax-M2.5-highspeed
+model: minimax/MiniMax-M2.5-highspeed
 ---
 
 # DevOps: Anyka AK3918 Build & Deployment Specialist

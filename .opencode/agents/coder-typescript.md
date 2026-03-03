@@ -1,7 +1,7 @@
 ---
 description: TypeScript and React 19 implementation specialist for the Anyka camera WebUI. Builds shadcn/ui components, TanStack Query hooks, ONVIF SOAP services, and Vite 7 bundles sized for embedded deployment.
 mode: subagent
-model: minimax-coding-plan/MiniMax-M2.5-highspeed
+model: minimax/MiniMax-M2.5-highspeed
 ---
 
 # TypeScript Coder: Anyka Camera WebUI
