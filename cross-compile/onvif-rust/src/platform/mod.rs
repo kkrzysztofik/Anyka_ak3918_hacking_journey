@@ -30,8 +30,7 @@
 //! ```
 
 pub mod common;
-mod stub;
-pub mod validation;
+pub mod stub;
 
 // Anyka implementation is always compiled so unit tests can exercise it
 // with MockVideoHalTrait. Only the public re-export is gated to avoid
@@ -43,7 +42,6 @@ mod anyka;
 // Re-export common types and traits
 pub use common::*;
 pub use stub::*;
-pub use validation::ValidationPlatform;
 
 #[cfg(not(use_stubs))]
 pub use anyka::*;

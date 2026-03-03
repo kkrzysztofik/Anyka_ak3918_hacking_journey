@@ -153,6 +153,58 @@ impl StubPlatformBuilder {
         self
     }
 
+    /// Create a validation preset configuration for H.264 playback testing.
+    ///
+    /// This preset configures the platform with:
+    /// - Device: "AK3918 (Validation)", firmware "24.12", serial "VALIDATION-TEST"
+    /// - Video: token "main", 1280×720, H.264, 25fps, 2048kbps
+    /// - Audio: token "audio_in", G.711 μ-law, 8kHz
+    /// - No PTZ/imaging/network support
+    pub fn validation_preset(mut self) -> Self {
+        self.device_info = Some(DeviceInfo {
+            manufacturer: "Anyka".to_string(),
+            model: "AK3918 (Validation)".to_string(),
+            firmware_version: "24.12".to_string(),
+            serial_number: "VALIDATION-TEST".to_string(),
+            hardware_id: "ak3918-validation".to_string(),
+        });
+        self.video_sources = vec![VideoSourceConfig {
+            token: "main".to_string(),
+            name: "Main Stream".to_string(),
+            resolution: Resolution::new(1280, 720),
+            max_framerate: 25.0,
+        }];
+        self.video_encoders = vec![VideoEncoderConfig {
+            token: "encoder_h264".to_string(),
+            name: "H264 Encoder".to_string(),
+            resolution: Resolution::new(1280, 720),
+            framerate: 25,
+            bitrate: 2048,
+            encoding: VideoEncoding::H264,
+            bitrate_mode: BitrateMode::Vbr,
+            gop_length: 25,
+            quality: 80,
+        }];
+        self.audio_sources = vec![AudioSourceConfig {
+            token: "audio_in".to_string(),
+            name: "Microphone".to_string(),
+            channels: 1,
+        }];
+        self.audio_encoders = vec![AudioEncoderConfig {
+            token: "audio_encoder".to_string(),
+            name: "G.711 μ-law Encoder".to_string(),
+            sample_rate: 8000,
+            channels: 1,
+            encoding: AudioEncoding::G711U,
+            bitrate: 64,
+        }];
+        // Disable PTZ, imaging, and network support for validation
+        self.ptz_supported = false;
+        self.imaging_supported = false;
+        self.network_info_supported = false;
+        self
+    }
+
     /// Build the stub platform with default video/audio if none specified.
     pub fn build(self) -> StubPlatform {
         let video_sources = Self::get_video_sources(self.video_sources);
@@ -454,6 +506,127 @@ impl Platform for StubPlatform {
 
     fn max_sensor_resolution(&self) -> PlatformResult<Resolution> {
         // Return default resolution for testing
+        Ok(Resolution::new(1920, 1080))
+    }
+}
+
+/// Validation platform for H.264 playback testing.
+///
+/// This is a newtype wrapper around `StubPlatform` configured with the
+/// `validation_preset()`. It provides standard platform interfaces for
+/// comprehensive ONVIF validation testing.
+///
+/// The validation preset configures:
+/// - Device: "AK3918 (Validation)", firmware "24.12", serial "VALIDATION-TEST"
+/// - Video: token "main", 1280×720, H.264, 25fps, 2048kbps
+/// - Audio: token "audio_in", G.711 μ-law, 8kHz
+/// - No PTZ/imaging/network support
+///
+/// # Example
+///
+/// ```ignore
+/// use onvif_rust::platform::ValidationPlatform;
+///
+/// let platform = ValidationPlatform::new();
+/// let device_info = platform.get_device_info().await.unwrap();
+/// assert!(device_info.model.contains("Validation"));
+/// ```
+#[derive(Clone)]
+pub struct ValidationPlatform {
+    inner: Arc<StubPlatform>,
+}
+
+impl std::fmt::Debug for ValidationPlatform {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ValidationPlatform")
+            .field("initialized", &self.inner.is_initialized())
+            .finish()
+    }
+}
+
+impl ValidationPlatform {
+    /// Create a new validation platform with the validation preset configuration.
+    pub fn new() -> Self {
+        Self {
+            inner: Arc::new(StubPlatformBuilder::new().validation_preset().build()),
+        }
+    }
+
+    /// Get a reference to the inner StubPlatform.
+    ///
+    /// This allows access to the underlying stub platform for reading
+    /// configuration and state.
+    pub fn inner(&self) -> &StubPlatform {
+        &self.inner
+    }
+
+    /// Get an Arc reference to the inner StubPlatform.
+    ///
+    /// This allows sharing ownership of the underlying stub platform
+    /// while preserving the validation preset configuration.
+    pub fn inner_arc(&self) -> Arc<StubPlatform> {
+        Arc::clone(&self.inner)
+    }
+}
+
+impl Default for ValidationPlatform {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl Platform for ValidationPlatform {
+    async fn get_device_info(&self) -> PlatformResult<DeviceInfo> {
+        self.inner.as_ref().get_device_info().await
+    }
+
+    fn video_input(&self) -> Arc<dyn VideoInput> {
+        self.inner.as_ref().video_input()
+    }
+
+    fn video_encoder(&self) -> Arc<dyn VideoEncoder> {
+        self.inner.as_ref().video_encoder()
+    }
+
+    fn audio_input(&self) -> Arc<dyn AudioInput> {
+        self.inner.as_ref().audio_input()
+    }
+
+    fn audio_encoder(&self) -> Arc<dyn AudioEncoder> {
+        self.inner.as_ref().audio_encoder()
+    }
+
+    fn ptz_control(&self) -> Option<Arc<dyn PTZControl>> {
+        self.inner.as_ref().ptz_control()
+    }
+
+    fn imaging_control(&self) -> Option<Arc<dyn ImagingControl>> {
+        self.inner.as_ref().imaging_control()
+    }
+
+    fn network_info(&self) -> Option<Arc<dyn NetworkInfo>> {
+        self.inner.as_ref().network_info()
+    }
+
+    fn is_initialized(&self) -> bool {
+        self.inner.as_ref().is_initialized()
+    }
+
+    async fn initialize(&self) -> PlatformResult<()> {
+        self.inner.as_ref().initialize().await?;
+        tracing::info!("ValidationPlatform initialized for H.264 playback testing");
+        Ok(())
+    }
+
+    async fn shutdown(&self) -> PlatformResult<()> {
+        self.inner.as_ref().shutdown().await?;
+        tracing::info!("ValidationPlatform shutdown");
+        Ok(())
+    }
+
+    fn max_sensor_resolution(&self) -> PlatformResult<Resolution> {
+        // Return 1920x1080 for validation platform (matching original behavior)
         Ok(Resolution::new(1920, 1080))
     }
 }
@@ -1734,5 +1907,188 @@ mod tests {
         let platform = StubPlatform::default();
         // Just verify it compiles and returns a valid instance
         assert!(!platform.is_initialized());
+    }
+
+    // =====================
+    // ValidationPlatform tests (ported from validation.rs)
+    // =====================
+
+    #[tokio::test]
+    async fn test_validation_platform_creation() {
+        let platform = ValidationPlatform::new();
+        assert!(!platform.is_initialized());
+
+        let device_info = platform.get_device_info().await.unwrap();
+        assert_eq!(device_info.manufacturer, "Anyka");
+        assert!(device_info.model.contains("AK3918"));
+    }
+
+    #[tokio::test]
+    async fn test_validation_platform_initialization() {
+        let platform = ValidationPlatform::new();
+        assert!(platform.initialize().await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_video_encoder_configuration() {
+        let platform = ValidationPlatform::new();
+        let encoder = platform.video_encoder();
+
+        let config = encoder.get_configuration().await.unwrap();
+        assert_eq!(config.encoding, VideoEncoding::H264);
+        assert_eq!(config.framerate, 25);
+    }
+
+    #[tokio::test]
+    async fn test_video_input_sources() {
+        let platform = ValidationPlatform::new();
+        let input = platform.video_input();
+
+        let sources = input.get_sources().await.unwrap();
+        assert!(!sources.is_empty());
+        assert_eq!(sources[0].token, "main");
+    }
+
+    #[tokio::test]
+    async fn test_validation_platform_is_initialized_false_before_init() {
+        let platform = ValidationPlatform::new();
+        assert!(!platform.is_initialized());
+    }
+
+    #[tokio::test]
+    async fn test_validation_platform_is_initialized_true_after_init() {
+        let platform = ValidationPlatform::new();
+        platform.initialize().await.unwrap();
+        assert!(platform.is_initialized());
+    }
+
+    #[tokio::test]
+    async fn test_validation_platform_shutdown_after_init_returns_ok() {
+        let platform = ValidationPlatform::new();
+        platform.initialize().await.unwrap();
+        assert!(platform.is_initialized());
+        let result = platform.shutdown().await;
+        assert!(result.is_ok());
+        assert!(!platform.is_initialized());
+    }
+
+    #[tokio::test]
+    async fn test_validation_platform_audio_input_returns_config() {
+        let platform = ValidationPlatform::new();
+        let input = platform.audio_input();
+        let config = input.get_configuration().await.unwrap();
+        assert_eq!(config.token, "audio_in");
+        assert_eq!(config.name, "Microphone");
+        assert_eq!(config.channels, 1);
+    }
+
+    #[tokio::test]
+    async fn test_validation_platform_audio_encoder_returns_config() {
+        let platform = ValidationPlatform::new();
+        let encoder = platform.audio_encoder();
+        let config = encoder.get_configuration().await.unwrap();
+        assert_eq!(config.token, "audio_encoder");
+        assert_eq!(config.sample_rate, 8000);
+    }
+
+    #[tokio::test]
+    async fn test_validation_platform_shutdown_before_init_returns_ok() {
+        let platform = ValidationPlatform::new();
+        assert!(!platform.is_initialized());
+        let result = platform.shutdown().await;
+        assert!(result.is_ok());
+        assert!(!platform.is_initialized());
+    }
+
+    #[tokio::test]
+    async fn test_validation_platform_ptz_control_returns_none() {
+        let platform = ValidationPlatform::new();
+        assert!(platform.ptz_control().is_none());
+    }
+
+    #[tokio::test]
+    async fn test_validation_platform_imaging_control_returns_none() {
+        let platform = ValidationPlatform::new();
+        assert!(platform.imaging_control().is_none());
+    }
+
+    #[tokio::test]
+    async fn test_validation_platform_network_info_returns_none() {
+        let platform = ValidationPlatform::new();
+        assert!(platform.network_info().is_none());
+    }
+
+    #[tokio::test]
+    async fn test_validation_platform_default_constructs() {
+        let platform = ValidationPlatform::default();
+        assert!(!platform.is_initialized());
+        let device_info = platform.get_device_info().await.unwrap();
+        assert_eq!(device_info.manufacturer, "Anyka");
+    }
+
+    #[tokio::test]
+    async fn test_validation_platform_is_initialized_false_after_shutdown() {
+        let platform = ValidationPlatform::new();
+        platform.initialize().await.unwrap();
+        assert!(platform.is_initialized());
+        platform.shutdown().await.unwrap();
+        assert!(!platform.is_initialized());
+    }
+
+    #[tokio::test]
+    async fn test_validation_platform_init_shutdown_init_cycle() {
+        let platform = ValidationPlatform::new();
+        platform.initialize().await.unwrap();
+        assert!(platform.is_initialized());
+        platform.shutdown().await.unwrap();
+        assert!(!platform.is_initialized());
+        platform.initialize().await.unwrap();
+        assert!(platform.is_initialized());
+    }
+
+    #[tokio::test]
+    async fn test_validation_platform_video_input_get_resolution() {
+        let platform = ValidationPlatform::new();
+        let input = platform.video_input();
+        let resolution = input.get_resolution().await.unwrap();
+        assert_eq!(resolution.width, 1280);
+        assert_eq!(resolution.height, 720);
+    }
+
+    #[tokio::test]
+    async fn test_validation_platform_video_encoder_get_options() {
+        let platform = ValidationPlatform::new();
+        let encoder = platform.video_encoder();
+        let options = encoder.get_options().await.unwrap();
+        assert!(!options.resolutions.is_empty());
+        assert!(options.resolutions.contains(&Resolution::new(1280, 720)));
+        assert_eq!(options.framerate_range, (1, 30));
+    }
+
+    #[tokio::test]
+    async fn test_validation_platform_video_encoder_get_configurations() {
+        let platform = ValidationPlatform::new();
+        let encoder = platform.video_encoder();
+        let configs = encoder.get_configurations().await.unwrap();
+        assert_eq!(configs.len(), 1);
+        assert_eq!(configs[0].token, "encoder_h264");
+    }
+
+    #[tokio::test]
+    async fn test_validation_platform_audio_input_get_sources() {
+        let platform = ValidationPlatform::new();
+        let input = platform.audio_input();
+        let sources = input.get_sources().await.unwrap();
+        assert_eq!(sources.len(), 1);
+        assert_eq!(sources[0].token, "audio_in");
+    }
+
+    #[tokio::test]
+    async fn test_validation_platform_audio_encoder_get_configurations() {
+        let platform = ValidationPlatform::new();
+        let encoder = platform.audio_encoder();
+        let configs = encoder.get_configurations().await.unwrap();
+        assert_eq!(configs.len(), 1);
+        assert_eq!(configs[0].token, "audio_encoder");
     }
 }

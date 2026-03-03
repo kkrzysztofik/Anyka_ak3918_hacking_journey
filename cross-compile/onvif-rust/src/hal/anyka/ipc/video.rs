@@ -190,6 +190,18 @@ impl VideoHalTrait for AnykaIpc {
         }
     }
 
+    fn venc_set_iframe_by_addr(&self, addr: usize) -> i32 {
+        let handle_val = addr as u64;
+        let req_data = handle_val.to_le_bytes().to_vec();
+        match self.send_request(CMD_VENC_SET_IFRAME, &req_data) {
+            Ok((status, _)) => status,
+            Err(e) => {
+                error!(error = %e, "venc_set_iframe_by_addr IPC failed");
+                AK_FAILED_I32
+            }
+        }
+    }
+
     fn venc_request_stream(&self, vi_handle: *mut c_void, venc_handle: *mut c_void) -> *mut c_void {
         let vi_val = vi_handle as u64;
         let venc_val = venc_handle as u64;

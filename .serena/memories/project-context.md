@@ -126,6 +126,14 @@ The project uses a **push-only IPC architecture** where the vendor-daemon (C) ha
 - **Dual-channel**: Separate sockets for main (1280x720) and sub (640x360) streams
 - **Error isolation**: C SDK crashes don't take down Rust process
 
+## Platform vs HAL Boundary
+
+The project enforces strict separation:
+- **Platform** (`src/platform/`): Business logic, policy, state management
+- **HAL** (`src/hal/`): Hardware access, FFI, unsafe code
+
+**Detailed layering rules**: See [`.serena/memories/platform-hal-layering.md`](platform-hal-layering.md)
+
 ## Technology Stack
 
 ### Rust Backend (onvif-rust + streaming-lib)

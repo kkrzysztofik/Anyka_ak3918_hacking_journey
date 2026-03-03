@@ -75,6 +75,10 @@ impl VideoHalTrait for StubVideoHal {
         AK_SUCCESS_I32
     }
 
+    fn venc_set_iframe_by_addr(&self, _addr: usize) -> i32 {
+        AK_SUCCESS_I32
+    }
+
     fn venc_request_stream(
         &self,
         _vi_handle: *mut c_void,

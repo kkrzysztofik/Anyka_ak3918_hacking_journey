@@ -241,6 +241,15 @@ unsafe {
 }
 ```
 
+## Platform-HAL Layering
+
+Platform layer (`src/platform/`) should minimize unsafe code, FFI calls, and raw pointer operations.
+All hardware access should go through HAL traits from `hal/common/`.
+
+**Detailed rules and current exceptions**: See [`.serena/memories/platform-hal-layering.md`](platform-hal-layering.md)
+
+> ⚠️ Note: The layering is **directional guidance**, not strictly enforced. Known violations are tracked in the platform-hal-layering.md document.
+
 ## Documentation
 
 ```rust

@@ -368,8 +368,7 @@ pub(super) fn unified_frame_read_loop(
                     {
                         if state.frame_count > 0 {
                             if let Some(handle_addr) = state.recovery_encoder_handle_addr {
-                                let idr_ret =
-                                    ffi.venc_set_iframe(handle_addr as *mut std::ffi::c_void);
+                                let idr_ret = ffi.venc_set_iframe_by_addr(handle_addr);
                                 if idr_ret == AK_SUCCESS_I32 {
                                     tracing::warn!(
                                         stream = ?state.stream_id,

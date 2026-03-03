@@ -57,6 +57,13 @@ pub(crate) trait VideoHalTrait: Send + Sync {
     fn venc_close(&self, handle: *mut c_void) -> i32;
     fn venc_set_rc(&self, enc_handle: *mut c_void, bps: i32) -> i32;
     fn venc_set_iframe(&self, enc_handle: *mut c_void) -> i32;
+    /// Request an IDR frame using a raw address.
+    ///
+    /// This method accepts a `usize` address and handles the pointer cast internally,
+    /// keeping raw pointer operations in the HAL layer.
+    fn venc_set_iframe_by_addr(&self, addr: usize) -> i32 {
+        self.venc_set_iframe(addr as *mut c_void)
+    }
     fn venc_request_stream(&self, vi_handle: *mut c_void, venc_handle: *mut c_void) -> *mut c_void;
     fn venc_get_stream(&self, stream_handle: *mut c_void, stream: *mut video_stream) -> i32;
     fn venc_release_stream(&self, stream_handle: *mut c_void, stream: *mut video_stream) -> i32;

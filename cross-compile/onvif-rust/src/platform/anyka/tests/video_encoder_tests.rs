@@ -1802,7 +1802,7 @@ fn test_frame_read_loop_requests_idr_after_frames_then_sustained_no_data() {
             }
         });
     mock.expect_get_error_no().returning(|| SDK_ERROR_NO_DATA);
-    mock.expect_venc_set_iframe()
+    mock.expect_venc_set_iframe_by_addr()
         .times(1)
         .returning(|_| AK_SUCCESS_I32);
     mock.expect_venc_release_stream()
