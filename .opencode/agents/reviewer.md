@@ -1,7 +1,7 @@
 ---
 description: Review code against project standards for Rust and embedded systems
 mode: subagent
-model: openai/gpt-5.3-codex
+model: openai/gpt-5.2
 tools:
   write: false
   edit: false

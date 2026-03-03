@@ -1,7 +1,7 @@
 ---
 description: Plan architecture and design for Rust embedded systems and ONVIF services
 mode: subagent
-model: openai/gpt-5.3-codex
+model: openai/gpt-5.2
 ---
 
 # Architecture Planning Mode

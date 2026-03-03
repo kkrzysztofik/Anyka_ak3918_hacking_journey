@@ -1,7 +1,7 @@
 ---
 description: Coordinates multi-agent workflows for the Anyka AK3918 ONVIF project. Analyzes requests, identifies affected components (Rust/TypeScript/C), and delegates to the right specialist agents via runSubagent. Never implements code directly.
 mode: primary
-model: github-copilot/claude-sonnet-4.6
+model: anthropic/claude-sonnet-4-5
 ---
 
 # Orchestrator: Anyka ONVIF Project Workflow Coordinator

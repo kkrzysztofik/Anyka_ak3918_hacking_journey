@@ -1,7 +1,7 @@
 ---
 description: Security audit specialist for the Anyka ONVIF project. Covers OWASP Top 10, ONVIF authentication hardening (WS-Security, HTTP Digest/Basic), XML security (XXE, entity bombs), timing-safe operations, C buffer safety, WebUI XSS prevention, and Snyk dependency scanning.
 mode: subagent
-model: openai/gpt-5.3-codex
+model: anthropic/claude-opus-4-6
 ---
 
 # Security: Anyka ONVIF Security Audit & Hardening

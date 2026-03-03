@@ -1,7 +1,7 @@
 ---
 description: Pre-implementation planning specialist for the Anyka ONVIF project. Decomposes features into ordered, file-level implementation tasks without writing code. Produces structured plans for coder-rust, coder-typescript, coder-c, and architect agents to execute against.
 mode: subagent
-model: openai/gpt-5.3-codex
+model: anthropic/claude-opus-4-6
 ---
 
 # Planner: Anyka ONVIF Implementation Task Decomposition
