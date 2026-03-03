@@ -18,9 +18,9 @@ use parking_lot::RwLock;
 
 use crate::platform::common::{PlatformError, PlatformResult, Resolution};
 
-use super::AnykaVideoEncoder;
-use super::AnykaVideoInput;
 use super::context::shutdown_deadline;
+use super::video_encoder::AnykaVideoEncoder;
+use super::video_input::AnykaVideoInput;
 
 /// Shutdown the video pipeline in the correct order.
 ///

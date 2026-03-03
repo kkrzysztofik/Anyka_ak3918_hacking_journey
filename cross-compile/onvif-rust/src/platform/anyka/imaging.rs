@@ -21,7 +21,7 @@ use parking_lot::RwLock;
 
 use crate::platform::common::{ImagingControl, ImagingOptions, ImagingSettings, PlatformResult};
 
-use super::AnykaVideoEncoder;
+use super::video_encoder::AnykaVideoEncoder;
 
 /// Global sequence counter for imaging updates.
 ///
