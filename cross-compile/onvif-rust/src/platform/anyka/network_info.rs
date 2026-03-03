@@ -78,6 +78,9 @@ impl AnykaNetworkInfo {
     pub(super) fn read_interface_ip(interface: &str) -> (Option<String>, Option<u8>, bool) {
         use std::fs;
 
+        // TODO(github#28): Actually detect IPv4 address using netlink or /proc/net/fib_trie parsing
+        // (functional change - out of scope for refactoring PR)
+        //
         // Try to read from /etc/network/interfaces or similar
         // This is a simplified check - in real embedded Linux, DHCP state
         // might be determined differently

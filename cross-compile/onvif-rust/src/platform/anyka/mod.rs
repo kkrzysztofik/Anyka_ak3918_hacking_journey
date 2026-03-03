@@ -242,7 +242,7 @@ impl Platform for AnykaPlatform {
             return Err(e);
         }
         // Allow the capture pipeline to stabilize before opening encoders.
-        std::thread::sleep(capture_stabilization_delay());
+        tokio::time::sleep(capture_stabilization_delay()).await;
         tracing::info!("Video input initialized: dual-channel config and capture started");
 
         // Initialize dual video encoders (main 720p + sub 360p)

@@ -63,7 +63,7 @@ impl AnykaAudioEncoder {
 #[async_trait]
 impl AudioEncoder for AnykaAudioEncoder {
     async fn init(&self, config: &AudioEncoderConfig) -> PlatformResult<()> {
-        // TODO(kkrzysztofik): Call ak_aenc_open() with actual config via FFI
+        // TODO(github#28): Call ak_aenc_open() with actual config via FFI (functional change - out of scope for refactoring PR)
         let mut configs = self.configurations.write();
         if let Some(cfg) = configs.iter_mut().find(|c| c.token == config.token) {
             *cfg = config.clone();
@@ -82,7 +82,7 @@ impl AudioEncoder for AnykaAudioEncoder {
     }
 
     async fn set_configuration(&self, config: &AudioEncoderConfig) -> PlatformResult<()> {
-        // TODO(kkrzysztofik): Call ak_aenc_set_config() or similar via FFI
+        // TODO(github#28): Call ak_aenc_set_config() or similar via FFI (functional change - out of scope for refactoring PR)
         let mut configs = self.configurations.write();
         if let Some(cfg) = configs.iter_mut().find(|c| c.token == config.token) {
             *cfg = config.clone();
@@ -104,6 +104,9 @@ impl AudioEncoder for AnykaAudioEncoder {
 mod tests {
     use super::*;
 
+    // TODO(github#28): Replace placeholder test with real unit tests using mockall
+    // (functional change - out of scope for refactoring PR)
+    //
     // Note: Full tests would require mock FFI backends which are not available
     // in the test environment. The implementations are tested indirectly through
     // integration tests that exercise the Platform trait.

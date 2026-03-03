@@ -163,6 +163,9 @@ mod tests {
 
     #[test]
     fn test_env_var_truthy_explicit_values() {
+        // TODO(github#28): Update tests to use real env vars via std::env::set_var
+        // (functional change - out of scope for refactoring PR)
+        //
         // Just test the internal parsing logic without setting env vars
         // The function is used elsewhere with actual env vars at runtime
 

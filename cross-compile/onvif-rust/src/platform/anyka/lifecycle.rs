@@ -123,7 +123,7 @@ pub(super) fn execute_shutdown_with_timeout(
 
     let (tx, rx) = std::sync::mpsc::channel();
 
-    std::thread::Builder::new()
+    let handle = std::thread::Builder::new()
         .name("anyka-shutdown-worker".to_string())
         .spawn(move || {
             let result = shutdown_video_pipeline(&video_encoder, &video_input);
@@ -139,26 +139,36 @@ pub(super) fn execute_shutdown_with_timeout(
     let deadline = shutdown_deadline();
 
     match rx.recv_timeout(deadline) {
-        Ok(result) => result,
+        Ok(result) => {
+            // Successful completion - join the thread to ensure clean exit
+            if let Err(e) = handle.join() {
+                tracing::warn!(
+                    "Shutdown worker thread panicked after sending result: {:?}",
+                    e
+                );
+            }
+            result
+        }
         Err(RecvTimeoutError::Timeout) => {
             // Hard deadline exceeded - the worker thread is hung
+            // We cannot safely join here as it would block indefinitely
             video_encoder_for_timeout
                 .mark_unsafe_shutdown("platform shutdown worker exceeded hard deadline");
             tracing::error!(
                 deadline_ms = deadline.as_millis(),
-                "Platform shutdown timed out after {}ms",
+                "Platform shutdown timed out after {}ms (worker thread abandoned)",
                 deadline.as_millis()
             );
             Err(PlatformError::Timeout)
         }
         Err(RecvTimeoutError::Disconnected) => {
             // Worker thread panicked or otherwise terminated without sending result.
-            // This indicates a bug rather than a hardware failure.
+            // Try to join to get panic information
+            if let Err(panic_info) = handle.join() {
+                tracing::error!("Platform shutdown worker thread panicked: {:?}", panic_info);
+            }
             video_encoder_for_timeout
                 .mark_unsafe_shutdown("platform shutdown worker thread disconnected unexpectedly");
-            tracing::error!(
-                "Platform shutdown worker thread disconnected unexpectedly (possible panic)"
-            );
             Err(PlatformError::HardwareFailure(
                 "shutdown worker thread terminated unexpectedly".to_string(),
             ))
@@ -203,13 +213,15 @@ pub(super) fn capture_stabilization_delay() -> Duration {
 /// Align a width value up to the 32-pixel boundary required by the video encoder.
 /// Reference: `VENCODER_WIDTH_ALIGN_REQ` in `ak_vi.c`.
 pub(super) fn align_width_to_32(w: i32) -> i32 {
-    (w + 31) & !31
+    // Use saturating_add to prevent overflow
+    w.saturating_add(31) & !31
 }
 
 /// Align a height value up to the 8-pixel boundary required by the video encoder.
 /// Reference: `VENCODER_HEIGHT_ALIGN_REQ` in `ak_vi.c`.
 pub(super) fn align_height_to_8(h: i32) -> i32 {
-    (h + 7) & !7
+    // Use saturating_add to prevent overflow
+    h.saturating_add(7) & !7
 }
 
 /// Validate that required handles are present after initialization.
