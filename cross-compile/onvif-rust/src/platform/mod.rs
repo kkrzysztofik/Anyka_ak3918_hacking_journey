@@ -30,13 +30,13 @@
 //! ```
 
 pub mod common;
-pub(crate) mod hw_ptz;
 mod stub;
 pub mod validation;
 
 // Anyka implementation is always compiled so unit tests can exercise it
-// with MockVideoHalTrait, similar to hw_ptz.rs. Only the public re-export
-// is gated to avoid name conflicts with stubs in native builds.
+// with MockVideoHalTrait. Only the public re-export is gated to avoid
+// name conflicts with stubs in native builds. See `platform/anyka/ptz_control.rs`
+// for the PTZ implementation pattern.
 #[allow(dead_code)]
 mod anyka;
 

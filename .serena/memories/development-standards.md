@@ -164,7 +164,7 @@ src/
 │   ├── traits.rs             # Platform trait definitions
 │   ├── anyka.rs              # Anyka implementation
 │   ├── frame.rs              # Frame ownership & stream ID
-│   ├── hw_ptz.rs             # Hardware PTZ
+│   ├── anyka/ptz_control.rs  # Hardware PTZ
 │   ├── stubs.rs              # Test stubs
 │   └── validation.rs         # Platform validation
 │

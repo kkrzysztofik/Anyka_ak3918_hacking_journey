@@ -47,7 +47,7 @@ anyka-dev/
 │   │   │   │   ├── traits.rs      # Platform trait definitions
 │   │   │   │   ├── anyka.rs       # Anyka implementation (5,709 LOC)
 │   │   │   │   ├── frame.rs       # Frame ownership & stream ID
-│   │   │   │   ├── hw_ptz.rs      # Hardware PTZ
+│   │   │   │   ├── anyka/ptz_control.rs  # Hardware PTZ
 │   │   │   │   ├── stubs.rs       # Test stubs
 │   │   │   │   └── validation.rs  # Platform validation
 │   │   │   ├── auth/        # Authentication (WS-Security, HTTP Digest/Basic)

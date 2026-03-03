@@ -1,14 +1,13 @@
-//! Hardware PTZ control implementation.
+//! Anyka platform PTZ control implementation.
 //!
 //! This module provides the real PTZ implementation that calls FFI functions
 //! to control the physical stepper motors on the Anyka AK3918 camera.
-//! It is always compiled (not gated behind `cfg(not(use_stubs))`) so that
-//! unit tests can exercise it with `MockPtzHalTrait`.
+//! It uses the native Rust driver from `hal/anyka/ptz/`.
 //!
 //! # Architecture
 //!
 //! ```text
-//! HardwarePTZControl
+//! AnykaPTZControl
 //!   ├── ffi: Arc<dyn PtzHalTrait>  (injected, mockable)
 //!   ├── handle: PTZHandle          (RAII, calls ptz_close on Drop)
 //!   ├── position tracking          (in degrees, matching C adapter)
@@ -34,7 +33,7 @@ use crate::hal::anyka::ptz::ptz_turn_direction;
 #[cfg(use_stubs)]
 use crate::hal::common::ptz_turn_direction;
 
-use super::traits::{
+use crate::platform::traits::{
     PTZControl, PlatformError, PlatformResult, PtzLimits, PtzPosition, PtzPreset, PtzVelocity,
 };
 
@@ -82,7 +81,7 @@ fn iter_ffi_directions(
         .map(|dir| (dir, direction_to_ffi(dir)))
 }
 
-/// Hardware PTZ control that delegates to FFI functions for motor control.
+/// Anyka PTZ control that delegates to FFI functions for motor control.
 ///
 /// This struct is parameterized by `Arc<dyn PtzHalTrait>` to enable mock
 /// injection for unit testing. Position is tracked in degrees (matching
@@ -97,7 +96,7 @@ fn iter_ffi_directions(
 /// 5. `continuous_move_task`
 // Used by anyka.rs on ARM builds; appears unused on x86_64 where use_stubs excludes anyka.rs.
 #[allow(dead_code)]
-pub(crate) struct HardwarePTZControl {
+pub(crate) struct AnykaPTZControl {
     ffi: Arc<dyn PtzHalTrait>,
     handle: RwLock<Option<PTZHandle>>,
     position: RwLock<PtzPosition>,
@@ -110,15 +109,15 @@ pub(crate) struct HardwarePTZControl {
 }
 
 #[allow(dead_code)]
-impl HardwarePTZControl {
-    /// Create a new `HardwarePTZControl` with the default FFI backend.
+impl AnykaPTZControl {
+    /// Create a new `AnykaPTZControl` with the default FFI backend.
     /// On ARM this uses the native Rust PTZ driver (/dev/ak-motor0, /dev/ak-motor1);
     /// on host (use_stubs) uses the stub for tests.
     pub(crate) fn new() -> Self {
         Self::with_ffi(default_ptz_hal())
     }
 
-    /// Create a new `HardwarePTZControl` with a custom FFI backend.
+    /// Create a new `AnykaPTZControl` with a custom FFI backend.
     ///
     /// Used by `anyka.rs` in production and by tests with `MockPtzHalTrait`.
     pub(crate) fn with_ffi(ffi: Arc<dyn PtzHalTrait>) -> Self {
@@ -231,7 +230,7 @@ impl HardwarePTZControl {
 }
 
 #[async_trait]
-impl PTZControl for HardwarePTZControl {
+impl PTZControl for AnykaPTZControl {
     async fn move_to_position(&self, position: PtzPosition) -> PlatformResult<()> {
         self.ensure_open()?;
         self.cancel_continuous_move().await;
@@ -445,9 +444,9 @@ mod tests {
         mock
     }
 
-    /// Helper: create a HardwarePTZControl with mock and open it.
-    fn create_opened(mock: MockPtzHalTrait) -> HardwarePTZControl {
-        let ptz = HardwarePTZControl::with_ffi(Arc::new(mock));
+    /// Helper: create a AnykaPTZControl with mock and open it.
+    fn create_opened(mock: MockPtzHalTrait) -> AnykaPTZControl {
+        let ptz = AnykaPTZControl::with_ffi(Arc::new(mock));
         ptz.open().expect("open should succeed");
         ptz
     }
@@ -459,7 +458,7 @@ mod tests {
     #[test]
     fn test_open_success() {
         let mock = mock_with_open();
-        let ptz = HardwarePTZControl::with_ffi(Arc::new(mock));
+        let ptz = AnykaPTZControl::with_ffi(Arc::new(mock));
         assert!(ptz.open().is_ok());
     }
 
@@ -467,7 +466,7 @@ mod tests {
     fn test_open_failure() {
         let mut mock = MockPtzHalTrait::new();
         mock.expect_ptz_open().returning(|| AK_FAILED_I32);
-        let ptz = HardwarePTZControl::with_ffi(Arc::new(mock));
+        let ptz = AnykaPTZControl::with_ffi(Arc::new(mock));
         let result = ptz.open();
         assert!(result.is_err());
         match result {
@@ -487,7 +486,7 @@ mod tests {
             .times(1)
             .returning(|_| AK_SUCCESS_I32);
         mock.expect_ptz_close().returning(|| AK_SUCCESS_I32);
-        let ptz = HardwarePTZControl::with_ffi(Arc::new(mock));
+        let ptz = AnykaPTZControl::with_ffi(Arc::new(mock));
         assert!(ptz.open().is_ok());
         assert!(ptz.open().is_ok());
     }
@@ -495,7 +494,7 @@ mod tests {
     #[tokio::test]
     async fn test_operation_without_open_fails() {
         let mock = MockPtzHalTrait::new();
-        let ptz = HardwarePTZControl::with_ffi(Arc::new(mock));
+        let ptz = AnykaPTZControl::with_ffi(Arc::new(mock));
         let result = ptz.move_to_position(PtzPosition::HOME).await;
         assert!(result.is_err());
         match result {
@@ -898,7 +897,7 @@ mod tests {
         mock.expect_ptz_close().returning(|| AK_SUCCESS_I32);
         mock.expect_ptz_stop().returning(|_| AK_SUCCESS_I32);
 
-        let ptz = HardwarePTZControl::with_ffi(Arc::new(mock));
+        let ptz = AnykaPTZControl::with_ffi(Arc::new(mock));
         ptz.open().unwrap();
         ptz.close().await;
 

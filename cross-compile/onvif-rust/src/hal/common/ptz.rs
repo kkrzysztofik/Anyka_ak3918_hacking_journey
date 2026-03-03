@@ -51,7 +51,8 @@ pub(crate) trait PtzHalTrait: Send + Sync {
 }
 
 /// Default PTZ FFI: native Rust driver on ARM (/dev/ak-motor*), stub on host.
-/// Used by HardwarePTZControl::new() and ptz_open() so the platform uses the same backend.
+/// Used by `AnykaPTZControl` in `platform/anyka/ptz_control.rs` and ptz_open()
+/// so the platform uses the same backend.
 pub(crate) fn default_ptz_hal() -> std::sync::Arc<dyn PtzHalTrait> {
     #[cfg(not(use_stubs))]
     return crate::hal::anyka::ptz::native::NativePtzHal::new();

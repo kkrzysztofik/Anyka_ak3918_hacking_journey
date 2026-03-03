@@ -13,6 +13,7 @@ pub mod context;
 pub mod imaging;
 pub mod lifecycle;
 pub mod network_info;
+pub mod ptz_control;
 mod video_encoder;
 mod video_input;
 
@@ -424,11 +425,11 @@ impl Platform for AnykaPlatform {
 // PTZ Control Implementation
 // =============================================================================
 
-/// Anyka PTZ control — delegates to `HardwarePTZControl` which calls the FFI layer.
+/// Anyka PTZ control — delegates to `AnykaPTZControl` which calls the FFI layer.
 ///
 /// The PTZ stub has been replaced with a real hardware implementation
-/// (see `hw_ptz.rs`) that controls the physical stepper motors via FFI.
-type AnykaPTZControl = super::hw_ptz::HardwarePTZControl;
+/// (see `ptz_control.rs`) that controls the physical stepper motors via FFI.
+use ptz_control::AnykaPTZControl;
 
 // Re-export from submodules for internal use
 use audio_encoder::AnykaAudioEncoder;
