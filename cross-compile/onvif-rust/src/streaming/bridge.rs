@@ -17,7 +17,7 @@ use std::time::Instant;
 use streaming_lib::FrameData;
 use tokio::sync::Notify;
 
-use crate::platform::frame::{Frame, FrameCallback, FrameType, OwnedFrame, StreamId};
+use crate::platform::common::{Frame, FrameCallback, FrameType, OwnedFrame, StreamId};
 
 const DEFAULT_MAIN_QUEUE_CAPACITY: usize = 4;
 const DEFAULT_SUB_QUEUE_CAPACITY: usize = 6;
@@ -1119,7 +1119,7 @@ mod tests {
 
     #[test]
     fn test_bridge_owned_frame_callback_trait_impl() {
-        use crate::platform::frame::OwnedFrameCallback;
+        use crate::platform::common::OwnedFrameCallback;
 
         let bridge = make_bridge();
         let data = BytesMut::from(&[0x00, 0x00, 0x00, 0x01, 0x41, 0x9a][..]);

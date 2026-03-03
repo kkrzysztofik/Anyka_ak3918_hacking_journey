@@ -29,11 +29,9 @@
 //! let device_info = platform.get_device_info().await?;
 //! ```
 
-pub mod frame;
+pub mod common;
 pub(crate) mod hw_ptz;
-mod network;
-mod stubs;
-mod traits;
+mod stub;
 pub mod validation;
 
 // Anyka implementation is always compiled so unit tests can exercise it
@@ -42,9 +40,9 @@ pub mod validation;
 #[allow(dead_code)]
 mod anyka;
 
-pub use network::external_ip;
-pub use stubs::*;
-pub use traits::*;
+// Re-export common types and traits
+pub use common::*;
+pub use stub::*;
 pub use validation::ValidationPlatform;
 
 #[cfg(not(use_stubs))]

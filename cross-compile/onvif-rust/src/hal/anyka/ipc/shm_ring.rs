@@ -57,7 +57,7 @@ use bytes::BytesMut;
 
 use crate::platform::PlatformError;
 use crate::platform::PlatformResult;
-use crate::platform::frame::{FrameMetadata, FrameType, StreamId};
+use crate::platform::common::{FrameMetadata, FrameType, StreamId};
 use crate::streaming::bridge::BytesMutPool;
 
 // =============================================================================
