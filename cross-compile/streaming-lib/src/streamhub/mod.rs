@@ -592,7 +592,7 @@ impl StreamDataTransceiver {
         statistics_data: &Arc<Mutex<StatisticsStream>>,
     ) {
         match info.sub_type {
-            SubscribeType::RtpPull | SubscribeType::WhepPull => {
+            SubscribeType::RtpPull => {
                 packet_senders.lock().await.remove(&info.id);
             }
             _ => {
@@ -1465,19 +1465,18 @@ mod tests {
     }
 
     fn create_test_stream_identifier() -> StreamIdentifier {
-        StreamIdentifier::Rtmp {
-            app_name: "live".to_string(),
-            stream_name: "test".to_string(),
+        StreamIdentifier::Rtsp {
+            stream_path: "live/test".to_string(),
         }
     }
 
     fn create_test_subscriber_info() -> SubscriberInfo {
         SubscriberInfo {
             id: Uuid::new(crate::streamhub::utils::RandomDigitCount::Four),
-            sub_type: SubscribeType::RtmpPull,
+            sub_type: SubscribeType::HttpFlvPull,
             notify_info: NotifyInfo {
-                request_url: "rtmp://localhost/live/test".to_string(),
-                remote_addr: "127.0.0.1:1935".to_string(),
+                request_url: "http://localhost/live/test.flv".to_string(),
+                remote_addr: "127.0.0.1:8080".to_string(),
             },
             sub_data_type: SubDataType::Frame,
         }
@@ -2200,7 +2199,7 @@ mod tests {
             } => {
                 assert_eq!(routed_identifier, identifier);
                 assert_eq!(routed_info.id, sub_info.id);
-                assert!(matches!(routed_info.sub_type, SubscribeType::RtmpPull));
+                assert!(matches!(routed_info.sub_type, SubscribeType::HttpFlvPull));
             }
             _ => panic!("expected StreamHubEvent::UnSubscribe"),
         }
@@ -2406,7 +2405,7 @@ mod tests {
         StreamDataTransceiver::add_subscriber(
             sub_id,
             "127.0.0.1:5000".to_string(),
-            SubscribeType::RtmpPull,
+            SubscribeType::HttpFlvPull,
             chrono::Local::now(),
             &stats,
         )

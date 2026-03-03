@@ -491,7 +491,7 @@ impl TStreamHandler for ValidationAvStreamHandler {
             };
             send_frame(&frame_sender, FrameData::MediaInfo { media_info })?;
 
-            if matches!(sub_type, SubscribeType::RtmpRemux2HttpFlv) {
+            if matches!(sub_type, SubscribeType::HttpFlvPull) {
                 let mut remuxer = ValidationHttpFlvRemuxer::new(
                     self.sps.clone(),
                     self.pps.clone(),
@@ -953,9 +953,8 @@ fn create_stream_identifiers() -> (StreamIdentifier, StreamIdentifier) {
         StreamIdentifier::Rtsp {
             stream_path: stream_name.clone(),
         },
-        StreamIdentifier::Rtmp {
-            app_name,
-            stream_name,
+        StreamIdentifier::Rtsp {
+            stream_path: format!("{}/{}", app_name, stream_name),
         },
     )
 }
@@ -1416,7 +1415,7 @@ mod tests {
         handler
             .send_prior_data(
                 DataSender::Frame { sender: tx },
-                SubscribeType::RtmpRemux2HttpFlv,
+                SubscribeType::HttpFlvPull,
             )
             .await
             .expect("send_prior_data");
@@ -1459,7 +1458,7 @@ mod tests {
         handler
             .send_prior_data(
                 DataSender::Frame { sender: tx },
-                SubscribeType::RtmpRemux2HttpFlv,
+                SubscribeType::HttpFlvPull,
             )
             .await
             .expect("send_prior_data");

@@ -134,7 +134,7 @@ impl TStreamHandler for LiveStreamHandler {
                     "Sending prior data to subscriber"
                 );
 
-                if matches!(sub_type, SubscribeType::RtmpRemux2HttpFlv) {
+                if matches!(sub_type, SubscribeType::HttpFlvPull) {
                     let mut remuxer = ValidationHttpFlvRemuxer::new(
                         sps,
                         pps,
@@ -592,9 +592,9 @@ impl StreamingService {
 
         // Create HTTP-FLV channel.
         let (httpflv_tx, httpflv_rx) = tokio::sync::mpsc::unbounded_channel::<FrameData>();
-        let httpflv_id = StreamIdentifier::Rtmp {
-            app_name: app_name.clone(),
-            stream_name: stream_name.to_string(),
+        // HTTP-FLV uses app_name/stream_name format to differentiate from RTSP
+        let httpflv_id = StreamIdentifier::Rtsp {
+            stream_path: format!("{}/{}", app_name, stream_name),
         };
 
         // The handler references the bridge's actual stream state so it reads
@@ -768,7 +768,7 @@ mod tests {
         let sender = DataSender::Frame { sender: frame_tx };
 
         let result = handler
-            .send_prior_data(sender, SubscribeType::RtmpRemux2HttpFlv)
+            .send_prior_data(sender, SubscribeType::HttpFlvPull)
             .await;
         assert!(result.is_ok());
 

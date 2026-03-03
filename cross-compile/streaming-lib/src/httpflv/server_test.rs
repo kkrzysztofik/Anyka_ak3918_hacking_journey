@@ -326,23 +326,17 @@ async fn test_response_headers() {
 #[tokio::test]
 async fn test_stream_identifier_creation() {
     // Test that stream identifiers are created correctly from path
-    let app_name = "live";
-    let stream_name = "test";
+    let stream_path = "live/test";
 
-    let identifier = StreamIdentifier::Rtmp {
-        app_name: app_name.to_string(),
-        stream_name: stream_name.to_string(),
+    let identifier = StreamIdentifier::Rtsp {
+        stream_path: stream_path.to_string(),
     };
 
     match identifier {
-        StreamIdentifier::Rtmp {
-            app_name: a,
-            stream_name: s,
-        } => {
-            assert_eq!(a, "live");
-            assert_eq!(s, "test");
+        StreamIdentifier::Rtsp { stream_path: s } => {
+            assert_eq!(s, "live/test");
         }
-        _ => panic!("Expected RTMP identifier"),
+        _ => panic!("Expected RTSP identifier"),
     }
 }
 
@@ -360,9 +354,8 @@ async fn test_event_producer_clone() {
     assert!(
         event_sender
             .send(StreamHubEvent::Request {
-                identifier: StreamIdentifier::Rtmp {
-                    app_name: "test".to_string(),
-                    stream_name: "stream".to_string(),
+                identifier: StreamIdentifier::Rtsp {
+                    stream_path: "test/stream".to_string(),
                 },
                 sender: sender1,
             })
@@ -372,9 +365,8 @@ async fn test_event_producer_clone() {
     assert!(
         cloned
             .send(StreamHubEvent::Request {
-                identifier: StreamIdentifier::Rtmp {
-                    app_name: "test2".to_string(),
-                    stream_name: "stream2".to_string(),
+                identifier: StreamIdentifier::Rtsp {
+                    stream_path: "test2/stream2".to_string(),
                 },
                 sender: sender2,
             })

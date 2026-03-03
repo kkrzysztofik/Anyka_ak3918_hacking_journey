@@ -142,7 +142,7 @@ mod tests {
         let data_sender = DataSender::Frame { sender };
 
         let result = publisher
-            .send_prior_data(data_sender, SubscribeType::RtmpPull)
+            .send_prior_data(data_sender, SubscribeType::RtspPull)
             .await;
         assert!(result.is_ok());
 

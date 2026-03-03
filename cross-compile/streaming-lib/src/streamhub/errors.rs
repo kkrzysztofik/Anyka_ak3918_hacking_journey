@@ -30,8 +30,6 @@ pub enum StreamHubErrorValue {
     RecvError(#[from] RecvError),
     #[error("Serde json error: {}", _0)]
     SerdeError(#[from] Error),
-    #[error("the client session error: {}", _0)]
-    RtspClientSessionError(String),
     #[error("other error: {0}")]
     Other(String),
 }
@@ -150,12 +148,6 @@ mod tests {
     fn test_streamhub_error_value_not_correct_data_sender_type_display() {
         let err = StreamHubErrorValue::NotCorrectDataSenderType;
         assert_eq!(format!("{}", err), "not correct data sender type");
-    }
-
-    #[test]
-    fn test_streamhub_error_value_rtsp_client_session_error_display() {
-        let err = StreamHubErrorValue::RtspClientSessionError("test error".to_string());
-        assert!(format!("{}", err).contains("test error"));
     }
 
     #[test]

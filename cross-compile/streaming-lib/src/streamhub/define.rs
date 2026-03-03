@@ -23,26 +23,10 @@ use {
 /* Subscribe streams from stream hub */
 #[derive(Debug, Serialize, Clone, Eq, PartialEq)]
 pub enum SubscribeType {
-    /* Remote client request pulling(play) a rtmp stream.*/
-    RtmpPull,
-    /* Remote request to play httpflv triggers remux from RTMP to httpflv. */
-    RtmpRemux2HttpFlv,
-    /* The publishing of RTMP stream triggers remuxing from RTMP to HLS protocol.(NOTICE:It is not triggerred by players.)*/
-    RtmpRemux2Hls,
-    /* Relay(Push) local RTMP stream from stream hub to other RTMP nodes.*/
-    RtmpRelay,
     /* Remote client request pulling(play) a rtsp stream.*/
     RtspPull,
-    /* The publishing of RTSP stream triggers remuxing from RTSP to RTMP protocol.*/
-    RtspRemux2Rtmp,
-    /* Relay(Push) local RTSP stream to other RTSP nodes.*/
-    RtspRelay,
-    /* Remote client request pulling(play) stream through whep.*/
-    WhepPull,
-    /* Remuxing webrtc stream to RTMP */
-    WebRTCRemux2Rtmp,
-    /* Relay(Push) the local webRTC stream to other nodes using Whip.*/
-    WhipRelay,
+    /* Remote client request pulling(play) http-flv stream.*/
+    HttpFlvPull,
     /* Pull rtp stream by subscribing from stream hub.*/
     RtpPull,
 }
@@ -50,18 +34,8 @@ pub enum SubscribeType {
 /* Publish streams to stream hub */
 #[derive(Debug, Serialize, Clone, Eq, PartialEq)]
 pub enum PublishType {
-    /* Receive rtmp stream from remote push client. */
-    RtmpPush,
-    /* Relay(Pull) remote RTMP stream to local stream hub. */
-    RtmpRelay,
     /* Receive rtsp stream from remote push client */
     RtspPush,
-    /* Relay(Pull) remote RTSP stream to local stream hub. */
-    RtspRelay,
-    /* Receive whip stream from remote push client. */
-    WhipPush,
-    /* Relay(Pull) remote WebRTC stream to local stream hub using Whep. */
-    WhepRelay,
     /* It used for publishing raw rtp data of rtsp/whbrtc(whip) */
     RtpPush,
 }
@@ -488,24 +462,16 @@ mod tests {
     #[test]
     fn test_subscribe_type_variants() {
         let types = [
-            SubscribeType::RtmpPull,
-            SubscribeType::RtmpRemux2HttpFlv,
-            SubscribeType::RtmpRemux2Hls,
-            SubscribeType::RtmpRelay,
             SubscribeType::RtspPull,
-            SubscribeType::RtspRemux2Rtmp,
-            SubscribeType::RtspRelay,
-            SubscribeType::WhepPull,
-            SubscribeType::WebRTCRemux2Rtmp,
-            SubscribeType::WhipRelay,
+            SubscribeType::HttpFlvPull,
             SubscribeType::RtpPull,
         ];
-        assert_eq!(types.len(), 11);
+        assert_eq!(types.len(), 3);
     }
 
     #[test]
     fn test_subscribe_type_clone_eq() {
-        let t1 = SubscribeType::RtmpPull;
+        let t1 = SubscribeType::RtspPull;
         let t2 = t1.clone();
         assert_eq!(t1, t2);
     }
@@ -519,30 +485,22 @@ mod tests {
 
     #[test]
     fn test_subscribe_type_serialize() {
-        let t = SubscribeType::RtmpPull;
+        let t = SubscribeType::RtspPull;
         let json = serde_json::to_string(&t).unwrap();
-        assert!(json.contains("RtmpPull"));
+        assert!(json.contains("RtspPull"));
     }
 
     // ========== PublishType Tests ==========
 
     #[test]
     fn test_publish_type_variants() {
-        let types = [
-            PublishType::RtmpPush,
-            PublishType::RtmpRelay,
-            PublishType::RtspPush,
-            PublishType::RtspRelay,
-            PublishType::WhipPush,
-            PublishType::WhepRelay,
-            PublishType::RtpPush,
-        ];
-        assert_eq!(types.len(), 7);
+        let types = [PublishType::RtspPush, PublishType::RtpPush];
+        assert_eq!(types.len(), 2);
     }
 
     #[test]
     fn test_publish_type_clone_eq() {
-        let t1 = PublishType::RtmpPush;
+        let t1 = PublishType::RtspPush;
         let t2 = t1.clone();
         assert_eq!(t1, t2);
     }
@@ -556,9 +514,9 @@ mod tests {
 
     #[test]
     fn test_publish_type_serialize() {
-        let t = PublishType::RtmpPush;
+        let t = PublishType::RtspPush;
         let json = serde_json::to_string(&t).unwrap();
-        assert!(json.contains("RtmpPush"));
+        assert!(json.contains("RtspPush"));
     }
 
     // ========== NotifyInfo Tests ==========
@@ -836,9 +794,9 @@ mod tests {
     fn test_subscriber_info_serialize() {
         let info = SubscriberInfo {
             id: Uuid::default(),
-            sub_type: SubscribeType::RtmpPull,
+            sub_type: SubscribeType::HttpFlvPull,
             notify_info: NotifyInfo {
-                request_url: "rtmp://example.com/live/stream".to_string(),
+                request_url: "http://example.com/live/stream.flv".to_string(),
                 remote_addr: "192.168.1.1:5000".to_string(),
             },
             sub_data_type: SubDataType::Frame,
@@ -847,7 +805,7 @@ mod tests {
         assert!(json.contains("id"));
         assert!(json.contains("sub_type"));
         assert!(json.contains("notify_info"));
-        assert!(json.contains("RtmpPull"));
+        assert!(json.contains("HttpFlvPull"));
     }
 
     #[test]
@@ -872,7 +830,7 @@ mod tests {
     fn test_subscriber_info_debug() {
         let info = SubscriberInfo {
             id: Uuid::default(),
-            sub_type: SubscribeType::WhepPull,
+            sub_type: SubscribeType::HttpFlvPull,
             notify_info: NotifyInfo {
                 request_url: "http://test".to_string(),
                 remote_addr: "127.0.0.1:0".to_string(),
@@ -881,7 +839,7 @@ mod tests {
         };
         let debug = format!("{:?}", info);
         assert!(debug.contains("SubscriberInfo"));
-        assert!(debug.contains("WhepPull"));
+        assert!(debug.contains("HttpFlvPull"));
     }
 
     // ========== PublisherInfo Serialize Tests ==========
@@ -890,18 +848,18 @@ mod tests {
     fn test_publisher_info_serialize() {
         let info = PublisherInfo {
             id: Uuid::default(),
-            pub_type: PublishType::RtmpPush,
+            pub_type: PublishType::RtspPush,
             pub_data_type: PubDataType::Both,
             notify_info: NotifyInfo {
-                request_url: "rtmp://example.com/live/stream".to_string(),
-                remote_addr: "192.168.1.1:1935".to_string(),
+                request_url: "rtsp://example.com/live/stream".to_string(),
+                remote_addr: "192.168.1.1:554".to_string(),
             },
         };
         let json = serde_json::to_string(&info).unwrap();
         assert!(json.contains("id"));
         assert!(json.contains("pub_type"));
         assert!(json.contains("notify_info"));
-        assert!(json.contains("RtmpPush"));
+        assert!(json.contains("RtspPush"));
     }
 
     #[test]
@@ -926,8 +884,8 @@ mod tests {
     fn test_publisher_info_debug() {
         let info = PublisherInfo {
             id: Uuid::default(),
-            pub_type: PublishType::WhipPush,
-            pub_data_type: PubDataType::Packet,
+            pub_type: PublishType::RtspPush,
+            pub_data_type: PubDataType::Frame,
             notify_info: NotifyInfo {
                 request_url: "http://test".to_string(),
                 remote_addr: "127.0.0.1:0".to_string(),
@@ -935,7 +893,7 @@ mod tests {
         };
         let debug = format!("{:?}", info);
         assert!(debug.contains("PublisherInfo"));
-        assert!(debug.contains("WhipPush"));
+        assert!(debug.contains("RtspPush"));
     }
 
     // ========== SubDataType / PubDataType Tests ==========
@@ -1016,15 +974,14 @@ mod tests {
 
     #[test]
     fn test_stream_hub_event_to_message_unsubscribe() {
-        let identifier = StreamIdentifier::Rtmp {
-            app_name: "live".to_string(),
-            stream_name: "test".to_string(),
+        let identifier = StreamIdentifier::Rtsp {
+            stream_path: "live/test".to_string(),
         };
         let info = SubscriberInfo {
             id: Uuid::default(),
-            sub_type: SubscribeType::RtmpPull,
+            sub_type: SubscribeType::HttpFlvPull,
             notify_info: NotifyInfo {
-                request_url: "rtmp://localhost/live/test".to_string(),
+                request_url: "http://localhost/live/test.flv".to_string(),
                 remote_addr: "127.0.0.1:1234".to_string(),
             },
             sub_data_type: SubDataType::Frame,
@@ -1063,9 +1020,8 @@ mod tests {
     fn test_stream_hub_event_to_message_request_returns_not_support() {
         let (tx, _rx) = mpsc::unbounded_channel();
         let event = StreamHubEvent::Request {
-            identifier: StreamIdentifier::Rtmp {
-                app_name: "live".to_string(),
-                stream_name: "test".to_string(),
+            identifier: StreamIdentifier::Rtsp {
+                stream_path: "live/test".to_string(),
             },
             sender: tx,
         };
@@ -1094,13 +1050,12 @@ mod tests {
     #[test]
     fn test_stream_hub_event_message_unsubscribe_serialize() {
         let msg = StreamHubEventMessage::UnSubscribe {
-            identifier: StreamIdentifier::Rtmp {
-                app_name: "live".to_string(),
-                stream_name: "test".to_string(),
+            identifier: StreamIdentifier::Rtsp {
+                stream_path: "live/test".to_string(),
             },
             info: SubscriberInfo {
                 id: Uuid::default(),
-                sub_type: SubscribeType::RtmpPull,
+                sub_type: SubscribeType::HttpFlvPull,
                 notify_info: NotifyInfo {
                     request_url: "test".to_string(),
                     remote_addr: "127.0.0.1:0".to_string(),
@@ -1140,9 +1095,8 @@ mod tests {
     #[test]
     fn test_broadcast_event_publish_clone() {
         let event = BroadcastEvent::Publish {
-            identifier: StreamIdentifier::Rtmp {
-                app_name: "live".to_string(),
-                stream_name: "test".to_string(),
+            identifier: StreamIdentifier::Rtsp {
+                stream_path: "live/test".to_string(),
             },
         };
         let cloned = event.clone();
@@ -1164,11 +1118,10 @@ mod tests {
     fn test_broadcast_event_subscribe_debug() {
         let event = BroadcastEvent::Subscribe {
             id: "relay-001".to_string(),
-            identifier: StreamIdentifier::Rtmp {
-                app_name: "live".to_string(),
-                stream_name: "test".to_string(),
+            identifier: StreamIdentifier::Rtsp {
+                stream_path: "live/test".to_string(),
             },
-            server_address: Some("192.168.1.1:1935".to_string()),
+            server_address: Some("192.168.1.1:554".to_string()),
             result_sender: None,
         };
         let debug = format!("{:?}", event);
@@ -1331,12 +1284,7 @@ mod tests {
     #[test]
     fn test_publish_type_all_variants_serialize() {
         let variants = [
-            (PublishType::RtmpPush, "RtmpPush"),
-            (PublishType::RtmpRelay, "RtmpRelay"),
             (PublishType::RtspPush, "RtspPush"),
-            (PublishType::RtspRelay, "RtspRelay"),
-            (PublishType::WhipPush, "WhipPush"),
-            (PublishType::WhepRelay, "WhepRelay"),
             (PublishType::RtpPush, "RtpPush"),
         ];
         for (variant, expected) in variants {
@@ -1355,16 +1303,8 @@ mod tests {
     #[test]
     fn test_subscribe_type_all_variants_serialize() {
         let variants = [
-            (SubscribeType::RtmpPull, "RtmpPull"),
-            (SubscribeType::RtmpRemux2HttpFlv, "RtmpRemux2HttpFlv"),
-            (SubscribeType::RtmpRemux2Hls, "RtmpRemux2Hls"),
-            (SubscribeType::RtmpRelay, "RtmpRelay"),
             (SubscribeType::RtspPull, "RtspPull"),
-            (SubscribeType::RtspRemux2Rtmp, "RtspRemux2Rtmp"),
-            (SubscribeType::RtspRelay, "RtspRelay"),
-            (SubscribeType::WhepPull, "WhepPull"),
-            (SubscribeType::WebRTCRemux2Rtmp, "WebRTCRemux2Rtmp"),
-            (SubscribeType::WhipRelay, "WhipRelay"),
+            (SubscribeType::HttpFlvPull, "HttpFlvPull"),
             (SubscribeType::RtpPull, "RtpPull"),
         ];
         for (variant, expected) in variants {

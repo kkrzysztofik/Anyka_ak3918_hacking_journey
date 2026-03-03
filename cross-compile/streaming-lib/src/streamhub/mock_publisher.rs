@@ -1,9 +1,9 @@
-use crate::codec::h264_file_reader::{H264FileError, H264FileReader, NalUnitType};
 use crate::streamhub::define::{
     DataSender, FrameData, FrameDataSender, Information, InformationSender, MediaInfo,
     SubscribeType, TStreamHandler, VideoCodecType,
 };
 use crate::streamhub::{StatisticsStream, StreamHubError};
+use crate::validation::h264_file_reader::{H264FileError, H264FileReader, NalUnitType};
 use async_trait::async_trait;
 use bytes::BytesMut;
 use portable_atomic::{AtomicU32, Ordering};
@@ -508,7 +508,7 @@ enum ReaderPublishResult {
 /// (e.g., channel closed), or `None` to continue processing.
 #[allow(clippy::too_many_arguments)]
 async fn process_nal_unit(
-    nal: &crate::codec::h264_file_reader::NalUnit,
+    nal: &crate::validation::h264_file_reader::NalUnit,
     sender: &FrameDataSender,
     pending_access_unit: &mut BytesMut,
     pending_access_unit_timestamp: &mut Option<u32>,
@@ -1111,8 +1111,8 @@ mod tests {
         build_pacer, compute_fps, generate_sdp_from_sps_pps, has_no_subscribers,
         is_first_vcl_slice, remove_emulation_prevention_bytes, send_param_set_frame,
     };
-    use crate::codec::h264_file_reader::H264FileReader;
     use crate::streamhub::define::{DataSender, FrameData, SubscribeType, TStreamHandler};
+    use crate::validation::h264_file_reader::H264FileReader;
     use bytes::BytesMut;
     use portable_atomic::Ordering;
     use std::sync::Arc;
@@ -1660,7 +1660,7 @@ mod tests {
 
     #[test]
     fn test_publisher_error_h264_display() {
-        use crate::codec::h264_file_reader::H264FileError;
+        use crate::validation::h264_file_reader::H264FileError;
         let err = PublisherError::H264Error(H264FileError::InvalidFormat);
         let msg = format!("{}", err);
         assert!(msg.contains("H264 file error"));

@@ -259,7 +259,7 @@ impl HttpFlv {
     pub async fn unsubscribe_from_stream_hub(&mut self) -> Result<(), HttpFLvError> {
         let sub_info = SubscriberInfo {
             id: self.subscriber_id,
-            sub_type: SubscribeType::RtmpRemux2HttpFlv,
+            sub_type: SubscribeType::HttpFlvPull,
             sub_data_type: SubDataType::Frame,
             notify_info: NotifyInfo {
                 request_url: self.request_url.clone(),
@@ -267,9 +267,8 @@ impl HttpFlv {
             },
         };
 
-        let identifier = StreamIdentifier::Rtmp {
-            app_name: self.app_name.clone(),
-            stream_name: self.stream_name.clone(),
+        let identifier = StreamIdentifier::Rtsp {
+            stream_path: format!("{}/{}", self.app_name, self.stream_name),
         };
 
         let subscribe_event = StreamHubEvent::UnSubscribe {
@@ -286,7 +285,7 @@ impl HttpFlv {
     pub async fn subscribe_from_stream_hub(&mut self) -> Result<(), HttpFLvError> {
         let sub_info = SubscriberInfo {
             id: self.subscriber_id,
-            sub_type: SubscribeType::RtmpRemux2HttpFlv,
+            sub_type: SubscribeType::HttpFlvPull,
             sub_data_type: SubDataType::Frame,
             notify_info: NotifyInfo {
                 request_url: self.request_url.clone(),
@@ -294,9 +293,8 @@ impl HttpFlv {
             },
         };
 
-        let identifier = StreamIdentifier::Rtmp {
-            app_name: self.app_name.clone(),
-            stream_name: self.stream_name.clone(),
+        let identifier = StreamIdentifier::Rtsp {
+            stream_path: format!("{}/{}", self.app_name, self.stream_name),
         };
 
         let (event_result_sender, event_result_receiver) = oneshot::channel();
@@ -326,7 +324,7 @@ impl HttpFlv {
                 id: self.subscriber_id,
                 remote_addr: self.remote_addr.to_string(),
                 start_time: chrono::Local::now(),
-                sub_type: SubscribeType::RtmpRemux2HttpFlv,
+                sub_type: SubscribeType::HttpFlvPull,
             };
             if let Err(err) = sender.send(statistic_subscriber) {
                 log::error!("send statistic_subscriber err: {}", err);
@@ -657,12 +655,12 @@ mod tests {
 
         let subscriber_info = SubscriberInfo {
             id: Uuid::new(RandomDigitCount::Four),
-            sub_type: SubscribeType::RtmpRemux2HttpFlv,
+            sub_type: SubscribeType::HttpFlvPull,
             sub_data_type: SubDataType::Frame,
             notify_info,
         };
 
-        assert_eq!(subscriber_info.sub_type, SubscribeType::RtmpRemux2HttpFlv);
+        assert_eq!(subscriber_info.sub_type, SubscribeType::HttpFlvPull);
         assert!(matches!(subscriber_info.sub_data_type, SubDataType::Frame));
         assert_eq!(
             subscriber_info.notify_info.request_url,
@@ -684,41 +682,32 @@ mod tests {
     // ========== Stream Identifier Tests ==========
 
     #[test]
-    fn test_stream_identifier_rtmp_creation() {
-        let identifier = StreamIdentifier::Rtmp {
-            app_name: "live".to_string(),
-            stream_name: "test".to_string(),
+    fn test_stream_identifier_rtsp_creation() {
+        let app_name = "live";
+        let stream_name = "test";
+        let identifier = StreamIdentifier::Rtsp {
+            stream_path: format!("{}/{}", app_name, stream_name),
         };
 
-        if let StreamIdentifier::Rtmp {
-            app_name,
-            stream_name,
-        } = identifier
-        {
-            assert_eq!(app_name, "live");
-            assert_eq!(stream_name, "test");
+        if let StreamIdentifier::Rtsp { stream_path } = identifier {
+            assert!(stream_path.contains("live"));
+            assert!(stream_path.contains("test"));
         } else {
-            panic!("Expected Rtmp variant");
+            panic!("Expected Rtsp variant");
         }
     }
 
     #[test]
     fn test_stream_identifier_clone() {
-        let identifier = StreamIdentifier::Rtmp {
-            app_name: "app".to_string(),
-            stream_name: "stream".to_string(),
+        let identifier = StreamIdentifier::Rtsp {
+            stream_path: "app/stream".to_string(),
         };
         let cloned = identifier.clone();
 
-        if let StreamIdentifier::Rtmp {
-            app_name,
-            stream_name,
-        } = cloned
-        {
-            assert_eq!(app_name, "app");
-            assert_eq!(stream_name, "stream");
+        if let StreamIdentifier::Rtsp { stream_path } = cloned {
+            assert_eq!(stream_path, "app/stream");
         } else {
-            panic!("Expected Rtmp variant");
+            panic!("Expected Rtsp variant");
         }
     }
 
@@ -776,7 +765,7 @@ mod tests {
         let stat = StatisticData::Subscriber {
             id: Uuid::new(RandomDigitCount::Four),
             remote_addr: "192.168.1.1:12345".to_string(),
-            sub_type: SubscribeType::RtmpRemux2HttpFlv,
+            sub_type: SubscribeType::HttpFlvPull,
             start_time: chrono::Local::now(),
         };
 
@@ -786,7 +775,7 @@ mod tests {
             ..
         } = stat
         {
-            assert_eq!(sub_type, SubscribeType::RtmpRemux2HttpFlv);
+            assert_eq!(sub_type, SubscribeType::HttpFlvPull);
             assert_eq!(remote_addr, "192.168.1.1:12345");
         } else {
             panic!("Expected Subscriber variant");
@@ -800,14 +789,13 @@ mod tests {
         let (event_sender, mut event_receiver) = tokio_mpsc::unbounded_channel();
         let (result_sender, _result_receiver) = tokio::sync::oneshot::channel();
 
-        let identifier = StreamIdentifier::Rtmp {
-            app_name: "live".to_string(),
-            stream_name: "stream1".to_string(),
+        let identifier = StreamIdentifier::Rtsp {
+            stream_path: "live/stream1".to_string(),
         };
 
         let subscriber_info = SubscriberInfo {
             id: Uuid::new(RandomDigitCount::Four),
-            sub_type: SubscribeType::RtmpRemux2HttpFlv,
+            sub_type: SubscribeType::HttpFlvPull,
             sub_data_type: SubDataType::Frame,
             notify_info: NotifyInfo {
                 request_url: "http://localhost/live/stream1.flv".to_string(),
@@ -827,7 +815,7 @@ mod tests {
         );
 
         if let Some(StreamHubEvent::Subscribe { info, .. }) = event_receiver.recv().await {
-            assert_eq!(info.sub_type, SubscribeType::RtmpRemux2HttpFlv);
+            assert_eq!(info.sub_type, SubscribeType::HttpFlvPull);
         } else {
             panic!("Expected Subscribe event");
         }
@@ -837,14 +825,13 @@ mod tests {
     async fn test_unsubscribe_event_creation() {
         let (event_sender, mut event_receiver) = tokio_mpsc::unbounded_channel();
 
-        let identifier = StreamIdentifier::Rtmp {
-            app_name: "live".to_string(),
-            stream_name: "stream1".to_string(),
+        let identifier = StreamIdentifier::Rtsp {
+            stream_path: "live/stream1".to_string(),
         };
 
         let subscriber_info = SubscriberInfo {
             id: Uuid::new(RandomDigitCount::Four),
-            sub_type: SubscribeType::RtmpRemux2HttpFlv,
+            sub_type: SubscribeType::HttpFlvPull,
             sub_data_type: SubDataType::Frame,
             notify_info: NotifyInfo {
                 request_url: "http://localhost/live/stream1.flv".to_string(),
@@ -863,7 +850,7 @@ mod tests {
         );
 
         if let Some(StreamHubEvent::UnSubscribe { info, .. }) = event_receiver.recv().await {
-            assert_eq!(info.sub_type, SubscribeType::RtmpRemux2HttpFlv);
+            assert_eq!(info.sub_type, SubscribeType::HttpFlvPull);
         } else {
             panic!("Expected UnSubscribe event");
         }
@@ -982,22 +969,22 @@ mod tests {
 
     #[test]
     fn test_subscribe_type_rtmp_remux_2_httpflv() {
-        let sub_type = SubscribeType::RtmpRemux2HttpFlv;
+        let sub_type = SubscribeType::HttpFlvPull;
         let debug_str = format!("{:?}", sub_type);
-        assert!(debug_str.contains("RtmpRemux2HttpFlv"));
+        assert!(debug_str.contains("HttpFlvPull"));
     }
 
     #[test]
     fn test_subscribe_type_clone() {
-        let sub_type = SubscribeType::RtmpRemux2HttpFlv;
+        let sub_type = SubscribeType::HttpFlvPull;
         let cloned = sub_type.clone();
         assert_eq!(sub_type, cloned);
     }
 
     #[test]
     fn test_subscribe_type_eq() {
-        let t1 = SubscribeType::RtmpRemux2HttpFlv;
-        let t2 = SubscribeType::RtmpRemux2HttpFlv;
+        let t1 = SubscribeType::HttpFlvPull;
+        let t2 = SubscribeType::HttpFlvPull;
         assert_eq!(t1, t2);
     }
 
@@ -1356,7 +1343,7 @@ mod tests {
 
         if let Some(event) = event_receiver.recv().await {
             if let StreamHubEvent::UnSubscribe { info, .. } = event {
-                assert_eq!(info.sub_type, SubscribeType::RtmpRemux2HttpFlv);
+                assert_eq!(info.sub_type, SubscribeType::HttpFlvPull);
             } else {
                 panic!("Expected UnSubscribe event");
             }

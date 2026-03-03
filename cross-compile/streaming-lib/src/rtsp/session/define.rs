@@ -47,26 +47,11 @@ pub enum ServerSessionType {
     Push,
 }
 
-pub enum ClientSessionType {
-    Pull,
-    Push,
-}
-
 impl fmt::Display for ServerSessionType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let client_type = match self {
             ServerSessionType::Pull => "pull",
             ServerSessionType::Push => "push",
-        };
-        write!(f, "{client_type}")
-    }
-}
-
-impl fmt::Display for ClientSessionType {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let client_type = match self {
-            ClientSessionType::Pull => "pull",
-            ClientSessionType::Push => "push",
         };
         write!(f, "{client_type}")
     }
@@ -166,20 +151,6 @@ mod tests {
     #[test]
     fn test_server_session_type_push_display() {
         let session_type = ServerSessionType::Push;
-        assert_eq!(format!("{}", session_type), "push");
-    }
-
-    // ========== ClientSessionType Display Tests ==========
-
-    #[test]
-    fn test_client_session_type_pull_display() {
-        let session_type = ClientSessionType::Pull;
-        assert_eq!(format!("{}", session_type), "pull");
-    }
-
-    #[test]
-    fn test_client_session_type_push_display() {
-        let session_type = ClientSessionType::Push;
         assert_eq!(format!("{}", session_type), "push");
     }
 

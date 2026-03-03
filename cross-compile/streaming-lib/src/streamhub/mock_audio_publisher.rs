@@ -1,9 +1,9 @@
-use crate::codec::aac_file_reader::{AacFileError, AacFileReader};
 use crate::streamhub::define::{
     DataSender, FrameData, FrameDataSender, Information, InformationSender, MediaInfo,
     SubscribeType, TStreamHandler, VideoCodecType,
 };
 use crate::streamhub::{StatisticsStream, StreamHubError};
+use crate::validation::aac_file_reader::{AacFileError, AacFileReader};
 use async_trait::async_trait;
 use bytes::BytesMut;
 use portable_atomic::{AtomicU32, Ordering};
@@ -219,10 +219,7 @@ impl TStreamHandler for MockAudioPublisher {
 
             // RTSP/RTP consumers receive AudioSpecificConfig via SDP fmtp config.
             // Sending config as an AAC frame can break depacketizers expecting raw AU data.
-            if !matches!(
-                sub_type,
-                SubscribeType::RtspPull | SubscribeType::RtpPull | SubscribeType::WhepPull
-            ) {
+            if !matches!(sub_type, SubscribeType::RtspPull | SubscribeType::RtpPull) {
                 let config_data = BytesMut::from(self.audio_config.as_slice());
                 let _ = frame_sender.send(FrameData::Audio {
                     timestamp: ts,
@@ -651,7 +648,7 @@ mod tests {
 
     #[test]
     fn test_audio_publisher_error_aac_display() {
-        use crate::codec::aac_file_reader::AacFileError;
+        use crate::validation::aac_file_reader::AacFileError;
         let err = AudioPublisherError::AacError(AacFileError::InvalidAdtsHeader);
         let msg = format!("{}", err);
         assert!(msg.contains("AAC file error"));

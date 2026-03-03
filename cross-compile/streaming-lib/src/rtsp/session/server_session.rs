@@ -3052,6 +3052,7 @@ impl RtspStreamHandler {
         *self.sdp.lock().await = sdp;
     }
 
+    #[allow(dead_code)]
     async fn send_prior_data_rtsp_remux_rtmp(
         &self,
         sender: &FrameDataSender,
@@ -3083,6 +3084,7 @@ impl RtspStreamHandler {
         Ok(())
     }
 
+    #[allow(dead_code)]
     fn send_prior_fmtp_frames(
         sender: &FrameDataSender,
         media: &crate::rtsp::sdp::SdpMediaInfo,
@@ -3149,7 +3151,7 @@ impl TStreamHandler for RtspStreamHandler {
         data_sender: DataSender,
         sub_type: SubscribeType,
     ) -> Result<(), StreamHubError> {
-        let sender = match data_sender {
+        let _sender = match data_sender {
             DataSender::Frame { sender } => sender,
             DataSender::Packet { sender: _ } => {
                 return Err(StreamHubError {
@@ -3157,11 +3159,8 @@ impl TStreamHandler for RtspStreamHandler {
                 });
             }
         };
-        match sub_type {
-            SubscribeType::RtspRemux2Rtmp => self.send_prior_data_rtsp_remux_rtmp(&sender).await?,
-            SubscribeType::RtmpRemux2Hls => {}
-            _ => {}
-        }
+        // No specific handling needed for remaining SubscribeType variants
+        let _ = sub_type;
         Ok(())
     }
     async fn get_statistic_data(&self) -> Option<StatisticsStream> {
