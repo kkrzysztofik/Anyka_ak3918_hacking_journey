@@ -48,11 +48,7 @@ async fn test_stream_identifier_hashmap_usage() {
 /// Tests all SubscribeType variants are distinct.
 #[tokio::test]
 async fn test_subscribe_type_variants() {
-    let subscribe_types = vec![
-        SubscribeType::RtspPull,
-        SubscribeType::HttpFlvPull,
-        SubscribeType::RtpPull,
-    ];
+    let subscribe_types = vec![SubscribeType::RtspPull, SubscribeType::HttpFlvPull];
 
     // Verify all variants are distinct
     for (i, st1) in subscribe_types.iter().enumerate() {
@@ -67,7 +63,7 @@ async fn test_subscribe_type_variants() {
 /// Tests all PublishType variants are distinct.
 #[tokio::test]
 async fn test_publish_type_variants() {
-    let publish_types = vec![PublishType::RtspPush, PublishType::RtpPush];
+    let publish_types = vec![PublishType::RtspPush];
 
     // Verify all variants are distinct
     for (i, pt1) in publish_types.iter().enumerate() {

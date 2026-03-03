@@ -217,9 +217,10 @@ impl TStreamHandler for MockAudioPublisher {
 
             let _ = frame_sender.send(FrameData::MediaInfo { media_info });
 
-            // RTSP/RTP consumers receive AudioSpecificConfig via SDP fmtp config.
+            // RTSP consumers receive AudioSpecificConfig via SDP fmtp config.
             // Sending config as an AAC frame can break depacketizers expecting raw AU data.
-            if !matches!(sub_type, SubscribeType::RtspPull | SubscribeType::RtpPull) {
+            // RtspPull subscribers don't get the config frame - they get it from SDP.
+            if !matches!(sub_type, SubscribeType::RtspPull) {
                 let config_data = BytesMut::from(self.audio_config.as_slice());
                 let _ = frame_sender.send(FrameData::Audio {
                     timestamp: ts,

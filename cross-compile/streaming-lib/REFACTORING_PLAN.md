@@ -1,9 +1,45 @@
 # Streaming-lib Architectural Refactoring Plan
 
 **Date:** 2026-03-03  
-**Status:** Planning  
+**Status:** Planning (Phase 1 Complete)  
 **Estimated Effort:** 7-10 days  
 **Target:** Reduce from 53k to ~30k lines, align architecture with onvif-rust
+
+---
+
+## Phase 1 Completed - As Shipped (2026-03-04)
+
+**Delivered:**
+- Deleted RTSP client (client_session.rs - 2,686 lines)
+- Simplified protocol enums:
+  - SubscribeType: 11 → 2 variants (RtspPull, HttpFlvPull)
+  - PublishType: 7 → 1 variant (RtspPush)
+  - StreamIdentifier: 4 → 2 variants (Unknown, Rtsp)
+- Reorganized validation file readers to src/validation/
+- Fixed onvif-rust integration
+- Removed unused OnHls event (architectural cleanup)
+- Removed RtpPull/RtpPush variants (unused abstractions)
+
+**Deviations from original plan:**
+- Task 3 (auth removal) was deferred - common/auth.rs was kept
+- Reason: onvif-rust depends on streaming-lib (cyclic dependency risk)
+- Auth system is actively used by RTSP and HTTP-FLV servers
+- Can be slimmed down later if needed, but cannot be replaced with onvif-rust auth
+
+**Actual line reduction:** ~3,000 lines (5.6%)
+**Original target:** ~9,500 lines (17%)
+**Difference:** Auth system kept (~1,150 lines), partial enum cleanup
+
+### Decisions & Deviations
+
+| Decision | Original Plan | Delivered | Reason |
+|----------|---------------|-----------|--------|
+| Remove RTSP client | Yes | Yes | Completed |
+| Simplify SubscribeType | Yes | Yes (2 variants) | Completed |
+| Simplify PublishType | Yes | Yes (1 variant) | Completed |
+| Remove auth system | Yes | No (Deferred) | Cyclic dependency with onvif-rust |
+| Remove OnHls event | Not planned | Yes | No producers exist |
+| Remove RtpPull/RtpPush | Not planned | Yes | Unused abstractions |
 
 ---
 

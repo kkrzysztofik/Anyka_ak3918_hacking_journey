@@ -27,8 +27,6 @@ pub enum SubscribeType {
     RtspPull,
     /* Remote client request pulling(play) http-flv stream.*/
     HttpFlvPull,
-    /* Pull rtp stream by subscribing from stream hub.*/
-    RtpPull,
 }
 
 /* Publish streams to stream hub */
@@ -36,8 +34,6 @@ pub enum SubscribeType {
 pub enum PublishType {
     /* Receive rtsp stream from remote push client */
     RtspPush,
-    /* It used for publishing raw rtp data of rtsp/whbrtc(whip) */
-    RtpPush,
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -292,10 +288,6 @@ pub enum StreamHubEvent {
         identifier: StreamIdentifier,
         sender: InformationSender,
     },
-    OnHls {
-        identifier: StreamIdentifier,
-        segment: Segment,
-    },
 }
 
 impl StreamHubEvent {
@@ -461,12 +453,8 @@ mod tests {
 
     #[test]
     fn test_subscribe_type_variants() {
-        let types = [
-            SubscribeType::RtspPull,
-            SubscribeType::HttpFlvPull,
-            SubscribeType::RtpPull,
-        ];
-        assert_eq!(types.len(), 3);
+        let types = [SubscribeType::RtspPull, SubscribeType::HttpFlvPull];
+        assert_eq!(types.len(), 2);
     }
 
     #[test]
@@ -494,8 +482,8 @@ mod tests {
 
     #[test]
     fn test_publish_type_variants() {
-        let types = [PublishType::RtspPush, PublishType::RtpPush];
-        assert_eq!(types.len(), 2);
+        let types = [PublishType::RtspPush];
+        assert_eq!(types.len(), 1);
     }
 
     #[test]
@@ -1283,10 +1271,7 @@ mod tests {
 
     #[test]
     fn test_publish_type_all_variants_serialize() {
-        let variants = [
-            (PublishType::RtspPush, "RtspPush"),
-            (PublishType::RtpPush, "RtpPush"),
-        ];
+        let variants = [(PublishType::RtspPush, "RtspPush")];
         for (variant, expected) in variants {
             let json = serde_json::to_string(&variant).unwrap();
             assert!(
@@ -1305,7 +1290,6 @@ mod tests {
         let variants = [
             (SubscribeType::RtspPull, "RtspPull"),
             (SubscribeType::HttpFlvPull, "HttpFlvPull"),
-            (SubscribeType::RtpPull, "RtpPull"),
         ];
         for (variant, expected) in variants {
             let json = serde_json::to_string(&variant).unwrap();

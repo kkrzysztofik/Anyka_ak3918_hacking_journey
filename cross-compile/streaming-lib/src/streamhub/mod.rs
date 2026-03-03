@@ -515,13 +515,8 @@ impl StreamDataTransceiver {
                         .await
                     }
                     TransceiverEvent::UnSubscribe { info } => {
-                        Self::handle_unsubscribe_event(
-                            &info,
-                            &packet_senders,
-                            &frame_senders,
-                            &statistics_data,
-                        )
-                        .await;
+                        Self::handle_unsubscribe_event(&info, &frame_senders, &statistics_data)
+                            .await;
                         false
                     }
                     TransceiverEvent::UnPublish {} => {
@@ -587,18 +582,11 @@ impl StreamDataTransceiver {
 
     async fn handle_unsubscribe_event(
         info: &define::SubscriberInfo,
-        packet_senders: &Arc<Mutex<HashMap<Uuid, PacketDataSender>>>,
         frame_senders: &Arc<Mutex<HashMap<Uuid, FrameDataSender>>>,
         statistics_data: &Arc<Mutex<StatisticsStream>>,
     ) {
-        match info.sub_type {
-            SubscribeType::RtpPull => {
-                packet_senders.lock().await.remove(&info.id);
-            }
-            _ => {
-                frame_senders.lock().await.remove(&info.id);
-            }
-        }
+        // All subscribe types use frame_senders (PacketData is internal routing only)
+        frame_senders.lock().await.remove(&info.id);
         let mut stats = statistics_data.lock().await;
         stats.subscribers.remove(&info.id);
         stats.subscriber_count -= 1;
@@ -829,12 +817,6 @@ impl StreamsHub {
                 }
                 StreamHubEvent::Request { identifier, sender } => {
                     self.handle_request(identifier, sender);
-                }
-                StreamHubEvent::OnHls {
-                    identifier,
-                    segment,
-                } => {
-                    self.handle_on_hls(identifier, segment).await;
                 }
             }
         }
@@ -1090,13 +1072,6 @@ impl StreamsHub {
     fn handle_request(&mut self, identifier: StreamIdentifier, sender: InformationSender) {
         if let Err(err) = self.request(&identifier, sender) {
             log::error!("handle_request error: {}", err);
-        }
-    }
-
-    async fn handle_on_hls(&mut self, _identifier: StreamIdentifier, _segment: define::Segment) {
-        if let Some(notifier) = &self.notifier {
-            let message = define::StreamHubEventMessage::NotSupport {};
-            notifier.on_hls_notify(&message).await;
         }
     }
 
