@@ -11,7 +11,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use async_trait::async_trait;
 use parking_lot::RwLock;
 
-use super::traits::{
+use super::common::{
     AudioEncoder, AudioEncoderConfig, AudioEncoding, AudioInput, AudioSourceConfig, BitrateMode,
     DeviceInfo, DnsInfo, ImagingControl, ImagingOptions, ImagingSettings, NetworkInfo,
     NetworkInterfaceInfo, NetworkProtocolInfo, NtpInfo, PTZControl, Platform, PlatformError,

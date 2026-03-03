@@ -5,49 +5,46 @@
 //!
 //! This implementation is only compiled when cross-compiling for ARM
 //! (i.e., when `use_stubs` is not defined).
-//!
-//! # Video Input Architecture
-//!
-//! The video input subsystem follows the project's dependency injection pattern:
-//!
-//! ```text
-//! AnykaVideoInput
-//!   ├── ffi: Arc<dyn VideoHalTrait>   (injected, mockable)
-//!   ├── handle: RwLock<Option<Arc<VideoInputHandle>>>  (RAII, calls vi_close on Drop)
-//!   └── opened: AtomicBool            (fast-path state check)
-//! ```
-//!
-//! The `VideoInputHandle` implements `Drop` to automatically close the SDK device,
-//! ensuring proper cleanup even in error paths. Dual-channel configuration
-//! (Main: 1280x720, Sub: 640x360) is applied during platform initialization.
+
+// Submodules
+pub mod audio_encoder;
+pub mod audio_input;
+pub mod context;
+pub mod imaging;
+pub mod lifecycle;
+pub mod network_info;
 
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Weak};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
+
+// Re-export imaging observability statics from imaging.rs (single source of truth)
+// Used by test-only code in drain_stream
+#[cfg(test)]
+use imaging::{
+    LAST_IMAGING_UPDATE_SEQ, LAST_IMAGING_UPDATE_UNIX_MS,
+    current_unix_ms as imaging_current_unix_ms,
+};
 
 use async_trait::async_trait;
 use parking_lot::RwLock;
 
+use crate::hal::anyka::ipc::AnykaIpc;
 use crate::hal::anyka::sdk::VideoDevice;
 use crate::hal::common::video::{
     VideoHalTrait, VideoInputHandle, video_input_capture_off, video_input_capture_on,
     video_input_get_sensor_resolution, video_input_match_sensor, video_input_open,
     video_input_set_channel_attr,
 };
-
-use crate::hal::anyka::ipc::AnykaIpc;
+use crate::hal::common::{video_channel_attr, video_resolution};
 
 use crate::streaming::bridge::BytesMutPool;
 
-use crate::hal::common::{video_channel_attr, video_resolution};
-
-use super::traits::{
-    AudioEncoder, AudioEncoderConfig, AudioInput, AudioSourceConfig, DeviceInfo, DnsInfo,
-    ImagingControl, ImagingOptions, ImagingSettings, NetworkInfo, NetworkInterfaceInfo,
-    NetworkProtocolInfo, NtpInfo, PTZControl, Platform, PlatformError, PlatformResult, Resolution,
-    VideoEncoder, VideoEncoderConfig, VideoEncoderOptions, VideoEncoding, VideoInput,
-    VideoSourceConfig,
+use super::common::{
+    AudioEncoder, AudioInput, DeviceInfo, ImagingControl, NetworkInfo, PTZControl, Platform,
+    PlatformError, PlatformResult, Resolution, VideoEncoder, VideoEncoderConfig,
+    VideoEncoderOptions, VideoEncoding, VideoInput, VideoSourceConfig,
 };
 
 /// Anyka platform implementation using the actual SDK.
@@ -157,48 +154,6 @@ impl AnykaPlatform {
             network_info,
         })
     }
-
-    // All SDK access goes through vendor-daemon IPC; no direct FFI calls in this impl block.
-    fn shutdown_video_pipeline(
-        video_encoder: &AnykaVideoEncoder,
-        video_input: &AnykaVideoInput,
-    ) -> PlatformResult<()> {
-        tracing::info!("Platform shutdown: PTZ stop complete, stopping streaming...");
-        video_encoder.stop_streaming()?;
-        tracing::info!("Platform shutdown: streaming stopped, closing encoders...");
-
-        video_encoder.close_all_encoders()?;
-        tracing::info!("Platform shutdown: encoders closed, stopping capture...");
-
-        // Stop capture BEFORE closing video input.
-        if let Err(e) = video_input.capture_off() {
-            tracing::warn!(
-                "Video capture off failed during shutdown (best-effort, continuing): {}",
-                e
-            );
-        }
-        tracing::info!("Platform shutdown: capture stopped, destroying VPSS...");
-
-        // Destroy VPSS BEFORE closing video input (required by SDK).
-        if let Err(e) = video_input.destroy_vpss() {
-            tracing::warn!(
-                "VPSS destroy failed during shutdown (best-effort, continuing): {}",
-                e
-            );
-        }
-        tracing::info!("Platform shutdown: VPSS destroyed, closing video input...");
-
-        // Close video input (RAII handle will call ak_vi_close)
-        if let Err(e) = video_input.close_blocking() {
-            tracing::warn!(
-                "Video input close failed during shutdown (best-effort, continuing): {}",
-                e
-            );
-        }
-        tracing::info!("Platform shutdown: video input closed");
-
-        Ok(())
-    }
 }
 
 // Default implementation removed - use AnykaPlatform::new() for fallible initialization.
@@ -289,8 +244,7 @@ impl Platform for AnykaPlatform {
             return Err(e);
         }
         // Allow the capture pipeline to stabilize before opening encoders.
-        // The C reference (platform_anyka.c:609) uses PLATFORM_DELAY_MS_RETRY (200ms).
-        std::thread::sleep(Duration::from_millis(200));
+        std::thread::sleep(capture_stabilization_delay());
         tracing::info!("Video input initialized: dual-channel config and capture started");
 
         // Initialize dual video encoders (main 720p + sub 360p)
@@ -372,8 +326,8 @@ impl Platform for AnykaPlatform {
         }
 
         // Step 7: Validate VI/VENC pipeline readiness.
-        let readiness_timeout_ms = env_var_u64("ANYKA_PIPELINE_READY_TIMEOUT_MS").unwrap_or(5000);
-        let require_sub_pipeline = env_var_truthy_or("ANYKA_PIPELINE_REQUIRE_SUB", true);
+        let readiness_timeout_ms = pipeline_ready_timeout_ms();
+        let require_sub_pipeline = pipeline_require_sub();
         if let Err(e) = self.video_encoder.wait_for_stream_readiness(
             Duration::from_millis(readiness_timeout_ms),
             require_sub_pipeline,
@@ -383,7 +337,7 @@ impl Platform for AnykaPlatform {
                 e
             );
             if let Err(rollback_error) =
-                Self::shutdown_video_pipeline(&self.video_encoder, &self.video_input)
+                shutdown_video_pipeline(&self.video_encoder, &self.video_input)
             {
                 tracing::error!(
                     "VI/VENC readiness rollback failed (unsafe): readiness_error='{}', rollback_error='{}'",
@@ -418,35 +372,12 @@ impl Platform for AnykaPlatform {
 
         // Run blocking SDK teardown in a dedicated OS thread with a hard deadline.
         // This avoids async cancellation races around blocking vendor calls.
-        let video_encoder = Arc::clone(&self.video_encoder);
-        let video_input = Arc::clone(&self.video_input);
-        let (tx, rx) = std::sync::mpsc::channel();
-        std::thread::Builder::new()
-            .name("anyka-shutdown-worker".to_string())
-            .spawn(move || {
-                let result = AnykaPlatform::shutdown_video_pipeline(&video_encoder, &video_input);
-                let _ = tx.send(result);
-            })
-            .map_err(|e| {
-                PlatformError::HardwareFailure(format!(
-                    "failed to spawn anyka shutdown worker thread: {}",
-                    e
-                ))
-            })?;
 
-        #[cfg(test)]
-        let shutdown_deadline = Duration::from_millis(200);
-        #[cfg(not(test))]
-        let shutdown_deadline = Duration::from_secs(12);
-
-        let result = match rx.recv_timeout(shutdown_deadline) {
-            Ok(result) => result,
-            Err(_) => {
-                self.video_encoder
-                    .mark_unsafe_shutdown("platform shutdown worker exceeded hard deadline");
-                Err(PlatformError::Timeout)
-            }
-        };
+        // Use the lifecycle module's timeout-aware shutdown helper
+        let result = execute_shutdown_with_timeout(
+            Arc::clone(&self.video_encoder),
+            Arc::clone(&self.video_input),
+        );
 
         // TODO(kkrzysztofik): Call remaining Anyka SDK cleanup functions via FFI
         // - ak_ai_close()
@@ -511,48 +442,23 @@ impl Platform for AnykaPlatform {
 ///
 /// All fields are `Send + Sync`. The `AtomicBool` provides lock-free reads for
 /// the common `is_opened` check, while the `RwLock` protects handle mutations.
-/// Default search paths for the ISP sensor configuration file.
-/// Align a width value up to the 32-pixel boundary required by the video encoder.
-/// Reference: `VENCODER_WIDTH_ALIGN_REQ` in `ak_vi.c`.
-fn align_to_32(w: i32) -> i32 {
-    (w + 31) & !31
-}
+// Re-export helpers from submodules for internal use
+// Note: env_var_u64 is only used in test code
+#[cfg(test)]
+use context::{
+    ISP_CONFIG_SEARCH_PATHS, env_var_u64, pipeline_ready_timeout_ms, pipeline_require_sub,
+    stream_stabilization_ms,
+};
 
-/// Align a height value up to the 8-pixel boundary required by the video encoder.
-/// Reference: `VENCODER_HEIGHT_ALIGN_REQ` in `ak_vi.c`.
-fn align_to_8(h: i32) -> i32 {
-    (h + 7) & !7
-}
-
-fn env_var_truthy(name: &str) -> bool {
-    env_var_truthy_or(name, false)
-}
-
-fn env_var_truthy_or(name: &str, default: bool) -> bool {
-    std::env::var(name)
-        .map(|value| {
-            matches!(
-                value.trim().to_ascii_lowercase().as_str(),
-                "1" | "true" | "yes" | "on"
-            )
-        })
-        .unwrap_or(default)
-}
-
-fn env_var_u64(name: &str) -> Option<u64> {
-    std::env::var(name)
-        .ok()
-        .and_then(|value| value.trim().parse::<u64>().ok())
-}
-
-///
-/// These paths are searched in order when no explicit ISP config path is provided.
-/// The first path that exists on the filesystem is used for `ak_vi_match_sensor()`.
-const ISP_CONFIG_SEARCH_PATHS: &[&str] = &[
-    "/mnt/anyka_hack/onvif/isp_gc1084.conf",
-    "/etc/jffs2/isp_gc1084.conf",
-    "/usr/local/isp_gc1084.conf",
-];
+#[cfg(not(test))]
+use context::{
+    ISP_CONFIG_SEARCH_PATHS, pipeline_ready_timeout_ms, pipeline_require_sub,
+    stream_stabilization_ms,
+};
+use lifecycle::{
+    align_height_to_8, align_width_to_32, capture_stabilization_delay,
+    execute_shutdown_with_timeout, shutdown_video_pipeline,
+};
 
 struct AnykaVideoInput {
     ffi: Arc<dyn VideoHalTrait>,
@@ -637,12 +543,12 @@ impl AnykaVideoInput {
         let sub_width = if sensor_width >= 640 {
             640
         } else {
-            align_to_32(sensor_width.max(32))
+            align_width_to_32(sensor_width.max(32))
         };
         let sub_height = if sensor_height >= 360 {
             360
         } else {
-            align_to_8(sensor_height.max(8))
+            align_height_to_8(sensor_height.max(8))
         };
 
         // libre_anyka_app quirk: in vendor IPC mode, main.max_* drives sub-channel
@@ -1044,7 +950,7 @@ use crate::hal::common::{
     profile_mode,
 };
 
-use super::frame::{
+use super::common::{
     CallbackId, Frame, FrameCallback, FrameType, OwnedFrame, OwnedFrameCallback, StreamId,
 };
 
@@ -1087,15 +993,6 @@ static CALLBACK_DURATION_BUCKET_3: AtomicU64 = AtomicU64::new(0);
 static CALLBACK_DURATION_BUCKET_4: AtomicU64 = AtomicU64::new(0);
 static CALLBACK_DURATION_BUCKET_5: AtomicU64 = AtomicU64::new(0);
 static CALLBACK_SLOW_TOTAL: AtomicU64 = AtomicU64::new(0);
-static LAST_IMAGING_UPDATE_SEQ: AtomicU64 = AtomicU64::new(0);
-static LAST_IMAGING_UPDATE_UNIX_MS: AtomicU64 = AtomicU64::new(0);
-
-fn current_unix_ms() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or(0)
-}
 
 fn callback_bucket_counter(index: usize) -> &'static AtomicU64 {
     match index {
@@ -1457,7 +1354,7 @@ fn unified_frame_read_loop(
                 let latest_imaging_seq = LAST_IMAGING_UPDATE_SEQ.load(Ordering::Relaxed);
                 if latest_imaging_seq > state.last_imaging_seq_frame_logged {
                     let applied_ms = LAST_IMAGING_UPDATE_UNIX_MS.load(Ordering::Relaxed);
-                    let latency_ms = current_unix_ms().saturating_sub(applied_ms);
+                    let latency_ms = imaging_current_unix_ms().saturating_sub(applied_ms);
                     tracing::info!(
                         stream = ?state.stream_id,
                         imaging_seq = latest_imaging_seq,
@@ -1472,7 +1369,7 @@ fn unified_frame_read_loop(
                     && latest_imaging_seq > state.last_imaging_seq_iframe_logged
                 {
                     let applied_ms = LAST_IMAGING_UPDATE_UNIX_MS.load(Ordering::Relaxed);
-                    let latency_ms = current_unix_ms().saturating_sub(applied_ms);
+                    let latency_ms = imaging_current_unix_ms().saturating_sub(applied_ms);
                     tracing::info!(
                         stream = ?state.stream_id,
                         imaging_seq = latest_imaging_seq,
@@ -2297,7 +2194,7 @@ impl AnykaVideoEncoder {
         // pipeline time to produce the first frames. Configurable via env var
         // for on-device tuning; default 300ms exceeds the vendor's recommended
         // PLATFORM_DELAY_MS_RETRY (200ms) stabilization window.
-        let stabilization_ms = env_var_u64("ANYKA_STREAM_STABILIZATION_MS").unwrap_or(300);
+        let stabilization_ms = stream_stabilization_ms();
         std::thread::sleep(Duration::from_millis(stabilization_ms));
         tracing::debug!(stabilization_ms, "Stream stabilization delay complete");
 
@@ -2715,160 +2612,6 @@ impl VideoEncoder for AnykaVideoEncoder {
 }
 
 // =============================================================================
-// Audio Input Implementation
-// =============================================================================
-
-/// Anyka audio input implementation.
-struct AnykaAudioInput {
-    #[allow(dead_code)]
-    ffi: Arc<dyn crate::hal::common::audio::AudioHalTrait>,
-    opened: AtomicBool,
-}
-
-impl AnykaAudioInput {
-    /// Create a new `AnykaAudioInput`.
-    ///
-    /// Uses `AnykaIpc` to connect to the vendor daemon for vendor library access.
-    fn new() -> PlatformResult<Self> {
-        let ipc = crate::hal::anyka::ipc::AnykaIpc::new().map_err(|e| {
-            PlatformError::InitializationFailed(format!(
-                "AnykaAudioInput: AnykaIpc connection failed: {}",
-                e
-            ))
-        })?;
-        tracing::info!("AnykaAudioInput: using AnykaIpc for vendor library access");
-        Ok(Self {
-            ffi: Arc::new(ipc),
-            opened: AtomicBool::new(false),
-        })
-    }
-
-    fn with_ffi(ffi: Arc<dyn crate::hal::common::audio::AudioHalTrait>) -> Self {
-        Self {
-            ffi,
-            opened: AtomicBool::new(false),
-        }
-    }
-}
-
-#[async_trait]
-impl AudioInput for AnykaAudioInput {
-    async fn open(&self) -> PlatformResult<()> {
-        // TODO(kkrzysztofik): Call ak_ai_open() via FFI
-        self.opened.store(true, Ordering::SeqCst);
-        Ok(())
-    }
-
-    async fn close(&self) -> PlatformResult<()> {
-        // TODO(kkrzysztofik): Call ak_ai_close() via FFI
-        self.opened.store(false, Ordering::SeqCst);
-        Ok(())
-    }
-
-    async fn get_configuration(&self) -> PlatformResult<AudioSourceConfig> {
-        // TODO(kkrzysztofik): Get actual audio config from Anyka SDK
-        Ok(AudioSourceConfig {
-            token: "AudioSource_1".to_string(),
-            name: "Microphone".to_string(),
-            channels: 1,
-        })
-    }
-
-    async fn get_sources(&self) -> PlatformResult<Vec<AudioSourceConfig>> {
-        // TODO(kkrzysztofik): Query actual audio sources
-        Ok(vec![AudioSourceConfig {
-            token: "AudioSource_1".to_string(),
-            name: "Microphone".to_string(),
-            channels: 1,
-        }])
-    }
-}
-
-// =============================================================================
-// Audio Encoder Implementation
-// =============================================================================
-
-/// Anyka audio encoder implementation.
-struct AnykaAudioEncoder {
-    #[allow(dead_code)]
-    ffi: Arc<dyn crate::hal::common::audio::AudioHalTrait>,
-    configurations: RwLock<Vec<AudioEncoderConfig>>,
-}
-
-impl AnykaAudioEncoder {
-    /// Create a new `AnykaAudioEncoder`.
-    ///
-    /// Uses `AnykaIpc` to connect to the vendor daemon for vendor library access.
-    fn new() -> PlatformResult<Self> {
-        let ffi: Arc<dyn crate::hal::common::audio::AudioHalTrait> = {
-            let ipc = crate::hal::anyka::ipc::AnykaIpc::new().map_err(|e| {
-                PlatformError::InitializationFailed(format!(
-                    "AnykaAudioEncoder: AnykaIpc connection failed: {}",
-                    e
-                ))
-            })?;
-            tracing::info!("AnykaAudioEncoder: using AnykaIpc for vendor library access");
-            Arc::new(ipc)
-        };
-
-        Ok(Self::with_ffi(ffi))
-    }
-
-    fn with_ffi(ffi: Arc<dyn crate::hal::common::audio::AudioHalTrait>) -> Self {
-        Self {
-            ffi,
-            configurations: RwLock::new(vec![AudioEncoderConfig {
-                token: "AudioEncoder_1".to_string(),
-                name: "Audio Stream".to_string(),
-                sample_rate: 8000,
-                channels: 1,
-                ..Default::default()
-            }]),
-        }
-    }
-}
-
-#[async_trait]
-impl AudioEncoder for AnykaAudioEncoder {
-    async fn init(&self, config: &AudioEncoderConfig) -> PlatformResult<()> {
-        // TODO(kkrzysztofik): Call ak_aenc_open() with actual config via FFI
-        let mut configs = self.configurations.write();
-        if let Some(cfg) = configs.iter_mut().find(|c| c.token == config.token) {
-            *cfg = config.clone();
-        } else {
-            configs.push(config.clone());
-        }
-        Ok(())
-    }
-
-    async fn get_configuration(&self) -> PlatformResult<AudioEncoderConfig> {
-        let configs = self.configurations.read();
-        configs
-            .first()
-            .cloned()
-            .ok_or_else(|| PlatformError::HardwareUnavailable("No audio encoder".to_string()))
-    }
-
-    async fn set_configuration(&self, config: &AudioEncoderConfig) -> PlatformResult<()> {
-        // TODO(kkrzysztofik): Call ak_aenc_set_config() or similar via FFI
-        let mut configs = self.configurations.write();
-        if let Some(cfg) = configs.iter_mut().find(|c| c.token == config.token) {
-            *cfg = config.clone();
-            Ok(())
-        } else {
-            Err(PlatformError::InvalidParameter(format!(
-                "Unknown audio encoder token: {}",
-                config.token
-            )))
-        }
-    }
-
-    async fn get_configurations(&self) -> PlatformResult<Vec<AudioEncoderConfig>> {
-        Ok(self.configurations.read().clone())
-    }
-}
-
-// =============================================================================
 // PTZ Control Implementation
 // =============================================================================
 
@@ -2878,429 +2621,11 @@ impl AudioEncoder for AnykaAudioEncoder {
 /// (see `hw_ptz.rs`) that controls the physical stepper motors via FFI.
 type AnykaPTZControl = super::hw_ptz::HardwarePTZControl;
 
-// =============================================================================
-// Imaging Control Implementation
-// =============================================================================
-
-/// Anyka imaging control implementation.
-struct AnykaImagingControl {
-    ffi: Arc<dyn crate::hal::common::imaging::ImagingHalTrait>,
-    settings: RwLock<ImagingSettings>,
-    video_encoder: Option<Weak<AnykaVideoEncoder>>,
-}
-
-impl AnykaImagingControl {
-    /// Create a new `AnykaImagingControl`.
-    ///
-    /// Uses `AnykaIpc` to connect to the vendor daemon for vendor library access.
-    fn new() -> PlatformResult<Self> {
-        let ffi: Arc<dyn crate::hal::common::imaging::ImagingHalTrait> = {
-            let ipc = crate::hal::anyka::ipc::AnykaIpc::new().map_err(|e| {
-                PlatformError::InitializationFailed(format!(
-                    "AnykaImagingControl: AnykaIpc connection failed: {}",
-                    e
-                ))
-            })?;
-            tracing::info!("AnykaImagingControl: using AnykaIpc for vendor library access");
-            Arc::new(ipc)
-        };
-
-        Ok(Self::with_ffi(ffi))
-    }
-
-    fn with_ffi(ffi: Arc<dyn crate::hal::common::imaging::ImagingHalTrait>) -> Self {
-        Self {
-            ffi,
-            settings: RwLock::new(ImagingSettings {
-                brightness: 50.0,
-                contrast: 50.0,
-                saturation: 50.0,
-                sharpness: 50.0,
-                ir_cut_filter: true,
-                ir_led: false,
-                wdr: false,
-                backlight_compensation: false,
-            }),
-            video_encoder: None,
-        }
-    }
-
-    fn with_ffi_and_video_encoder(
-        ffi: Arc<dyn crate::hal::common::imaging::ImagingHalTrait>,
-        video_encoder: Arc<AnykaVideoEncoder>,
-    ) -> Self {
-        let mut control = Self::with_ffi(ffi);
-        control.video_encoder = Some(Arc::downgrade(&video_encoder));
-        control
-    }
-
-    fn approximately_equal(a: f32, b: f32) -> bool {
-        (a - b).abs() <= 0.001
-    }
-
-    fn mark_imaging_update_and_request_idr(&self, operation: &'static str) {
-        let seq = LAST_IMAGING_UPDATE_SEQ.fetch_add(1, Ordering::Relaxed) + 1;
-        LAST_IMAGING_UPDATE_UNIX_MS.store(current_unix_ms(), Ordering::Relaxed);
-
-        let mut requested_streams = 0u32;
-        if let Some(video_encoder) = self.video_encoder.as_ref().and_then(Weak::upgrade) {
-            if video_encoder.request_idr_frame(true).is_ok() {
-                requested_streams += 1;
-            }
-            if video_encoder.request_idr_frame(false).is_ok() {
-                requested_streams += 1;
-            }
-        }
-
-        tracing::info!(
-            operation,
-            imaging_seq = seq,
-            requested_streams,
-            "Imaging update applied"
-        );
-    }
-}
-
-#[async_trait]
-impl ImagingControl for AnykaImagingControl {
-    async fn get_settings(&self) -> PlatformResult<ImagingSettings> {
-        // TODO(kkrzysztofik): Read actual settings from Anyka imaging SDK
-        Ok(self.settings.read().clone())
-    }
-
-    async fn set_settings(&self, settings: &ImagingSettings) -> PlatformResult<()> {
-        let start = std::time::Instant::now();
-        crate::hal::common::imaging::imaging_set_brightness(
-            settings.brightness,
-            self.ffi.as_ref(),
-        )?;
-        crate::hal::common::imaging::imaging_set_contrast(settings.contrast, self.ffi.as_ref())?;
-        crate::hal::common::imaging::imaging_set_saturation(
-            settings.saturation,
-            self.ffi.as_ref(),
-        )?;
-        crate::hal::common::imaging::imaging_set_sharpness(settings.sharpness, self.ffi.as_ref())?;
-        *self.settings.write() = settings.clone();
-        self.mark_imaging_update_and_request_idr("set_settings");
-        tracing::info!(
-            elapsed_us = start.elapsed().as_micros() as u64,
-            "Applied imaging settings batch"
-        );
-        Ok(())
-    }
-
-    async fn get_options(&self) -> PlatformResult<ImagingOptions> {
-        // TODO(kkrzysztofik): Query actual hardware capabilities
-        Ok(ImagingOptions::default_options())
-    }
-
-    async fn set_brightness(&self, value: f32) -> PlatformResult<()> {
-        if Self::approximately_equal(self.settings.read().brightness, value) {
-            tracing::debug!(value, "Skipping redundant brightness update");
-            return Ok(());
-        }
-        let start = std::time::Instant::now();
-        crate::hal::common::imaging::imaging_set_brightness(value, self.ffi.as_ref())?;
-        self.settings.write().brightness = value;
-        self.mark_imaging_update_and_request_idr("set_brightness");
-        tracing::info!(
-            value,
-            elapsed_us = start.elapsed().as_micros() as u64,
-            "Brightness updated"
-        );
-        Ok(())
-    }
-
-    async fn set_contrast(&self, value: f32) -> PlatformResult<()> {
-        if Self::approximately_equal(self.settings.read().contrast, value) {
-            tracing::debug!(value, "Skipping redundant contrast update");
-            return Ok(());
-        }
-        let start = std::time::Instant::now();
-        crate::hal::common::imaging::imaging_set_contrast(value, self.ffi.as_ref())?;
-        self.settings.write().contrast = value;
-        self.mark_imaging_update_and_request_idr("set_contrast");
-        tracing::info!(
-            value,
-            elapsed_us = start.elapsed().as_micros() as u64,
-            "Contrast updated"
-        );
-        Ok(())
-    }
-
-    async fn set_saturation(&self, value: f32) -> PlatformResult<()> {
-        if Self::approximately_equal(self.settings.read().saturation, value) {
-            tracing::debug!(value, "Skipping redundant saturation update");
-            return Ok(());
-        }
-        let start = std::time::Instant::now();
-        crate::hal::common::imaging::imaging_set_saturation(value, self.ffi.as_ref())?;
-        self.settings.write().saturation = value;
-        self.mark_imaging_update_and_request_idr("set_saturation");
-        tracing::info!(
-            value,
-            elapsed_us = start.elapsed().as_micros() as u64,
-            "Saturation updated"
-        );
-        Ok(())
-    }
-
-    async fn set_sharpness(&self, value: f32) -> PlatformResult<()> {
-        if Self::approximately_equal(self.settings.read().sharpness, value) {
-            tracing::debug!(value, "Skipping redundant sharpness update");
-            return Ok(());
-        }
-        let start = std::time::Instant::now();
-        crate::hal::common::imaging::imaging_set_sharpness(value, self.ffi.as_ref())?;
-        self.settings.write().sharpness = value;
-        self.mark_imaging_update_and_request_idr("set_sharpness");
-        tracing::info!(
-            value,
-            elapsed_us = start.elapsed().as_micros() as u64,
-            "Sharpness updated"
-        );
-        Ok(())
-    }
-}
-
-// =============================================================================
-// Network Info Implementation
-// =============================================================================
-
-/// Anyka network information implementation.
-///
-/// Reads network configuration from the Linux system. Falls back to empty
-/// values if system files cannot be read.
-struct AnykaNetworkInfo;
-
-impl AnykaNetworkInfo {
-    fn new() -> Self {
-        Self
-    }
-
-    /// Read network interfaces from /sys/class/net and /proc/net/route.
-    fn read_interfaces() -> Vec<NetworkInterfaceInfo> {
-        use std::fs;
-        use std::path::Path;
-
-        let net_dir = Path::new("/sys/class/net");
-        let mut interfaces = Vec::new();
-
-        // Try to read available interfaces
-        if let Ok(entries) = fs::read_dir(net_dir) {
-            for entry in entries.flatten() {
-                let name = entry.file_name().to_string_lossy().to_string();
-
-                // Skip loopback
-                if name == "lo" {
-                    continue;
-                }
-
-                // Read MAC address
-                let mac_path = entry.path().join("address");
-                let mac_address = fs::read_to_string(&mac_path)
-                    .ok()
-                    .map(|s| s.trim().to_uppercase());
-
-                // Read operational state
-                let operstate_path = entry.path().join("operstate");
-                let enabled = fs::read_to_string(&operstate_path)
-                    .map(|s| s.trim() == "up")
-                    .unwrap_or(false);
-
-                // Read link speed (in Mbps)
-                let speed_path = entry.path().join("speed");
-                let link_speed = fs::read_to_string(&speed_path)
-                    .ok()
-                    .and_then(|s| s.trim().parse::<u32>().ok());
-
-                // Try to get IP address via ip command output parsing
-                // This is a simplified approach - real implementation might use netlink
-                let (ipv4_address, ipv4_prefix_length, ipv4_dhcp) = Self::read_interface_ip(&name);
-
-                interfaces.push(NetworkInterfaceInfo {
-                    token: name.clone(),
-                    name,
-                    enabled,
-                    ipv4_address,
-                    ipv4_prefix_length,
-                    ipv4_dhcp,
-                    mac_address,
-                    link_speed,
-                });
-            }
-        }
-
-        interfaces
-    }
-
-    /// Read IP address for an interface.
-    fn read_interface_ip(interface: &str) -> (Option<String>, Option<u8>, bool) {
-        use std::fs;
-
-        // Try to read from /etc/network/interfaces or similar
-        // This is a simplified check - in real embedded Linux, DHCP state
-        // might be determined differently
-
-        // Check if DHCP is used (look for dhclient lease)
-        let dhcp_lease_path = format!("/var/lib/dhcp/dhclient.{}.leases", interface);
-        let from_dhcp = std::path::Path::new(&dhcp_lease_path).exists();
-
-        // Try reading from /proc/net/fib_trie or parsing ip addr output
-        // For now, try a simple approach via /proc/net/route
-        if let Ok(route_content) = fs::read_to_string("/proc/net/route") {
-            for line in route_content.lines().skip(1) {
-                let fields: Vec<&str> = line.split_whitespace().collect();
-                if fields.len() >= 8 && fields[0] == interface {
-                    // Parse gateway destination to find interface IP
-                    // This is a simplified approach
-                    if fields[1] == "00000000" {
-                        // Default route - interface has connectivity
-                        // Would need more sophisticated parsing for actual IP
-                    }
-                }
-            }
-        }
-
-        // For a more complete implementation, we'd use netlink or parse
-        // /proc/net/fib_trie, but for now return None (empty will be reported)
-        (None, None, from_dhcp)
-    }
-
-    /// Read DNS configuration from /etc/resolv.conf.
-    fn read_dns_config() -> DnsInfo {
-        use std::fs;
-
-        let mut dns_info = DnsInfo::default();
-
-        if let Ok(content) = fs::read_to_string("/etc/resolv.conf") {
-            for line in content.lines() {
-                let line = line.trim();
-
-                // Skip comments
-                if line.starts_with('#') {
-                    continue;
-                }
-
-                if let Some(domain) = line.strip_prefix("search ") {
-                    dns_info
-                        .search_domains
-                        .extend(domain.split_whitespace().map(String::from));
-                } else if let Some(domain) = line.strip_prefix("domain ") {
-                    dns_info.search_domains.push(domain.trim().to_string());
-                } else if let Some(nameserver) = line.strip_prefix("nameserver ") {
-                    let ns = nameserver.trim().to_string();
-                    // Assume manual unless we detect DHCP
-                    dns_info.dns_manual.push(ns);
-                }
-            }
-        }
-
-        // Check if DNS was obtained via DHCP
-        // Simple heuristic: if /etc/resolv.conf was modified by dhclient
-        if std::path::Path::new("/var/lib/dhcp/dhclient.leases").exists() {
-            dns_info.from_dhcp = true;
-            // Move servers to dhcp list
-            dns_info.dns_from_dhcp = std::mem::take(&mut dns_info.dns_manual);
-        }
-
-        dns_info
-    }
-
-    /// Read NTP configuration from /etc/ntp.conf or similar.
-    fn read_ntp_config() -> NtpInfo {
-        let mut ntp_info = NtpInfo::default();
-
-        if let Some(servers) = Self::parse_ntp_conf() {
-            ntp_info.ntp_manual = servers;
-        } else if let Some(servers) = Self::parse_timesyncd_conf() {
-            ntp_info.ntp_manual = servers;
-        }
-
-        ntp_info
-    }
-
-    /// Parse /etc/ntp.conf file.
-    fn parse_ntp_conf() -> Option<Vec<String>> {
-        use std::fs;
-
-        let content = fs::read_to_string("/etc/ntp.conf").ok()?;
-        let mut servers = Vec::new();
-
-        for line in content.lines() {
-            let line = line.trim();
-            if line.starts_with('#') {
-                continue;
-            }
-
-            if let Some(server) = line.strip_prefix("server ") {
-                let server = server.split_whitespace().next()?.to_string();
-                if !server.is_empty() {
-                    servers.push(server);
-                }
-            }
-        }
-
-        if servers.is_empty() {
-            None
-        } else {
-            Some(servers)
-        }
-    }
-
-    /// Parse /etc/systemd/timesyncd.conf file.
-    fn parse_timesyncd_conf() -> Option<Vec<String>> {
-        use std::fs;
-
-        let content = fs::read_to_string("/etc/systemd/timesyncd.conf").ok()?;
-        let mut servers = Vec::new();
-
-        for line in content.lines() {
-            let line = line.trim();
-            if let Some(servers_str) = line.strip_prefix("NTP=") {
-                servers.extend(servers_str.split_whitespace().map(String::from));
-            }
-        }
-
-        if servers.is_empty() {
-            None
-        } else {
-            Some(servers)
-        }
-    }
-}
-
-#[async_trait]
-impl NetworkInfo for AnykaNetworkInfo {
-    async fn get_network_interfaces(&self) -> PlatformResult<Vec<NetworkInterfaceInfo>> {
-        Ok(Self::read_interfaces())
-    }
-
-    async fn get_dns_info(&self) -> PlatformResult<DnsInfo> {
-        Ok(Self::read_dns_config())
-    }
-
-    async fn get_ntp_info(&self) -> PlatformResult<NtpInfo> {
-        Ok(Self::read_ntp_config())
-    }
-
-    async fn get_network_protocols(&self) -> PlatformResult<Vec<NetworkProtocolInfo>> {
-        // Return the protocols this ONVIF server supports
-        // These are typically configured at build/runtime, not read from system
-        Ok(vec![
-            NetworkProtocolInfo {
-                name: "HTTP".to_string(),
-                enabled: true,
-                ports: vec![80],
-            },
-            NetworkProtocolInfo {
-                name: "RTSP".to_string(),
-                enabled: true,
-                ports: vec![554],
-            },
-        ])
-    }
-}
+// Re-export from submodules for internal use
+use network_info::AnykaNetworkInfo;
+use audio_encoder::AnykaAudioEncoder;
+use audio_input::AnykaAudioInput;
+use imaging::AnykaImagingControl;
 
 // =============================================================================
 // Unit Tests for AnykaVideoInput
@@ -3825,7 +3150,7 @@ mod tests {
     // Video Encoder Tests
     // =========================================================================
 
-    use crate::platform::frame::{Frame, FrameCallback, FrameType, StreamId};
+    use crate::platform::common::{Frame, FrameCallback, FrameType, StreamId};
     use std::sync::atomic::AtomicU32;
 
     /// Create a mock FFI that expects a successful venc_open call.

@@ -21,7 +21,7 @@ mod video;
 
 use crate::platform::PlatformError;
 use crate::platform::PlatformResult;
-use crate::platform::frame::{OwnedFrame, StreamId};
+use crate::platform::common::{OwnedFrame, StreamId};
 use crate::streaming::bridge::BytesMutPool;
 use shm_ring::{FrameNotification, ShmRingReader};
 
