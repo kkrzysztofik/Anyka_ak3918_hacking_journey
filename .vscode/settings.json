@@ -24,6 +24,8 @@
     "--target",
     "x86_64-unknown-linux-gnu"
   ],
+  "rust-analyzer.cargo.allTargets": false,
+  "rust-analyzer.cargo.buildScripts.enable": false,
   "rust-analyzer.check.extraArgs": [
     "--target",
     "x86_64-unknown-linux-gnu",
@@ -42,6 +44,12 @@
   "rust-analyzer.inlayHints.typeHints.enable": false,
   "rust-analyzer.procMacro.enable": true,
   "rust-analyzer.completion.autoimport.enable": false,
+  "rust-analyzer.files.watcherExclude": [
+    "**/target/**",
+    "**/.git/**",
+    "**/cross-compile/patches/**",
+    "**/cross-compile/**/out/**"
+  ],
   // Use cargo check for faster feedback
   "rust-analyzer.check.command": "check",
   // Additional helpful settings
@@ -50,6 +58,9 @@
     "connectionId": "kkrzysztofik",
     "projectKey": "kkrzysztofik_Anyka_ak3918_hacking_journey"
   },
+  "sonarlint.ls.vmargs": "-Xms128m -Xmx512m",
+  "sonarlint.output.showVerboseLogs": false,
+  "sonarlint.trace.server": "off",
   "chat.tools.terminal.autoApprove": {
     "/home/kmk/anyka-dev/toolchain/arm-anykav200-crosstool-ng/bin/cargo": true,
     "/home/kmk/anyka-dev/toolchain/arm-anykav200-crosstool-ng/bin/arm-unknown-linux-uclibcgnueabi-nm": true,

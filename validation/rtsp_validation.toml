@@ -84,7 +84,7 @@ host = "192.168.2.198"
 ssh-port = 22
 user = "root"
 # Prefer RTSP_VALIDATION_DEVICE_PASSWORD env var for secrets.
-password = ""
+password = "www123"
 telemetry = true
 # Paths on device for H.264/AAC validation mode (device binary must be built with validation-mode).
 # These are ignored when real-mode = true.
