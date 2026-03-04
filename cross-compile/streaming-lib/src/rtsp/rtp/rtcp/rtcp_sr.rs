@@ -83,7 +83,26 @@ impl Marshal<Result<BytesMut, RtcpError>> for RtcpSenderReport {
     fn marshal(&self) -> Result<BytesMut, RtcpError> {
         let mut writer = BytesWriter::default();
 
-        let header_bytesmut = self.header.marshal()?;
+        let mut header = self.header.clone();
+        let report_count = self.report_blocks.len();
+        // RFC 3550 section 6.4.1: report_count is 5 bits (max 31)
+        if report_count > 31 {
+            return Err(RtcpError::from(
+                super::errors::RtcpErrorValue::TooManyReportBlocks {
+                    count: report_count,
+                    max: 31,
+                },
+            ));
+        }
+        let report_count = report_count as u8;
+        header.report_count = report_count;
+        // RTCP length field is (packet_length - 4) / 4, i.e., in 32-bit words minus 1
+        // SR: 4 (header) + 4 (SSRC) + 8 (NTP) + 4 (RTP timestamp) + 4 (packet count) + 4 (octet count) + 24 * report_count bytes
+        //    = 28 + 24*n bytes
+        // length = (28 + 24*n) / 4 - 1 = 6 + 6*n
+        header.length = 6 + (6 * report_count as u16);
+
+        let header_bytesmut = header.marshal()?;
         writer.write(&header_bytesmut[..])?;
 
         writer.write_u32::<BigEndian>(self.ssrc)?;
@@ -97,7 +116,17 @@ impl Marshal<Result<BytesMut, RtcpError>> for RtcpSenderReport {
             writer.write(&data[..])?;
         }
 
-        Ok(writer.extract_current_bytes())
+        let result = writer.extract_current_bytes();
+        // Validate: serialized length should match (header.length + 1) * 4
+        debug_assert_eq!(
+            result.len(),
+            (header.length as usize + 1) * 4,
+            "RTCP SR header.length mismatch: header.length={}, actual_bytes={}",
+            header.length,
+            result.len()
+        );
+
+        Ok(result)
     }
 }
 
@@ -441,5 +470,250 @@ mod tests {
             assert_eq!(original.sender_packet_count, unmarshaled.sender_packet_count);
             assert_eq!(original.sender_octet_count, unmarshaled.sender_octet_count);
         }
+    }
+
+    // ============================================
+    // Header Length Calculation Tests (Issue anyka-dev-997)
+    // ============================================
+
+    #[test]
+    fn test_sr_header_length_zero_report_blocks() {
+        // SR with 0 report blocks: length = 6 + 6*0 = 6
+        // Packet size: 4 (header) + 4 (SSRC) + 8 (NTP) + 4 (RTP ts) + 4 (pkt count) + 4 (octet count) = 28 bytes
+        // = 7 * 4 bytes = (6 + 1) * 4
+        let sr = RtcpSenderReport {
+            header: RtcpHeader {
+                version: 2,
+                payload_type: 200,
+                report_count: 0,
+                length: 0, // Will be recomputed by marshal()
+                ..Default::default()
+            },
+            ssrc: 0x12345678,
+            ntp: 0xABCDEF0123456789,
+            rtp_timestamp: 0x11111111,
+            sender_packet_count: 0x22222222,
+            sender_octet_count: 0x33333333,
+            report_blocks: vec![],
+        };
+
+        let result = sr.marshal().unwrap();
+        // Verify header length field is correctly set to 6
+        let mut reader = BytesReader::new(result.clone());
+        let header = RtcpHeader::unmarshal(&mut reader).unwrap();
+        assert_eq!(
+            header.length, 6,
+            "SR with 0 report blocks should have length=6"
+        );
+        assert_eq!(header.report_count, 0);
+        // Verify total packet size: (length + 1) * 4 = (6 + 1) * 4 = 28 bytes
+        assert_eq!(
+            result.len(),
+            28,
+            "SR with 0 report blocks should be 28 bytes"
+        );
+    }
+
+    #[test]
+    fn test_sr_header_length_one_report_block() {
+        // SR with 1 report block: length = 6 + 6*1 = 12
+        // Packet size: 28 + 24 = 52 bytes = 13 * 4 bytes = (12 + 1) * 4
+        let sr = RtcpSenderReport {
+            header: RtcpHeader {
+                version: 2,
+                payload_type: 200,
+                report_count: 0, // Will be set to 1 by marshal()
+                length: 0,       // Will be recomputed by marshal()
+                ..Default::default()
+            },
+            ssrc: 0x12345678,
+            ntp: 0xABCDEF0123456789,
+            rtp_timestamp: 0x11111111,
+            sender_packet_count: 0x22222222,
+            sender_octet_count: 0x33333333,
+            report_blocks: vec![ReportBlock {
+                ssrc: 0xAAAAAAAA,
+                ..Default::default()
+            }],
+        };
+
+        let result = sr.marshal().unwrap();
+        // Verify header length field is correctly set to 12
+        let mut reader = BytesReader::new(result.clone());
+        let header = RtcpHeader::unmarshal(&mut reader).unwrap();
+        assert_eq!(
+            header.length, 12,
+            "SR with 1 report block should have length=12"
+        );
+        assert_eq!(header.report_count, 1);
+        // Verify total packet size: (length + 1) * 4 = (12 + 1) * 4 = 52 bytes
+        assert_eq!(
+            result.len(),
+            52,
+            "SR with 1 report block should be 52 bytes"
+        );
+    }
+
+    #[test]
+    fn test_sr_header_length_multiple_report_blocks() {
+        // SR with 3 report blocks: length = 6 + 6*3 = 24
+        // Packet size: 28 + 24 * 3 = 100 bytes = 25 * 4 bytes = (24 + 1) * 4
+        let sr = RtcpSenderReport {
+            header: RtcpHeader {
+                version: 2,
+                payload_type: 200,
+                report_count: 0,
+                length: 0,
+                ..Default::default()
+            },
+            ssrc: 0x12345678,
+            ntp: 0xABCDEF0123456789,
+            rtp_timestamp: 0x11111111,
+            sender_packet_count: 0x22222222,
+            sender_octet_count: 0x33333333,
+            report_blocks: vec![
+                ReportBlock {
+                    ssrc: 0x11111111,
+                    ..Default::default()
+                },
+                ReportBlock {
+                    ssrc: 0x22222222,
+                    ..Default::default()
+                },
+                ReportBlock {
+                    ssrc: 0x33333333,
+                    ..Default::default()
+                },
+            ],
+        };
+
+        let result = sr.marshal().unwrap();
+        // Verify header length field is correctly set to 24
+        let mut reader = BytesReader::new(result.clone());
+        let header = RtcpHeader::unmarshal(&mut reader).unwrap();
+        assert_eq!(
+            header.length, 24,
+            "SR with 3 report blocks should have length=24"
+        );
+        assert_eq!(header.report_count, 3);
+        // Verify total packet size: (length + 1) * 4 = (24 + 1) * 4 = 100 bytes
+        assert_eq!(
+            result.len(),
+            100,
+            "SR with 3 report blocks should be 100 bytes"
+        );
+    }
+
+    #[test]
+    fn test_sr_marshal_ignores_stale_header_values() {
+        // Test that marshal() ignores stale values in the header and recomputes them
+        let sr = RtcpSenderReport {
+            header: RtcpHeader {
+                version: 2,
+                payload_type: 200,
+                report_count: 0,
+                length: 999, // Stale incorrect value
+                ..Default::default()
+            },
+            ssrc: 0x12345678,
+            ntp: 0xABCDEF0123456789,
+            rtp_timestamp: 0x11111111,
+            sender_packet_count: 0x22222222,
+            sender_octet_count: 0x33333333,
+            report_blocks: vec![
+                ReportBlock {
+                    ssrc: 0xAAAAAAAA,
+                    ..Default::default()
+                },
+                ReportBlock {
+                    ssrc: 0xBBBBBBBB,
+                    ..Default::default()
+                },
+            ],
+        };
+
+        let result = sr.marshal().unwrap();
+        let mut reader = BytesReader::new(result.clone());
+        let header = RtcpHeader::unmarshal(&mut reader).unwrap();
+        // Should be recomputed to 18 (6 + 6*2), not 999
+        assert_eq!(
+            header.length, 18,
+            "marshal() should recompute length from report_blocks"
+        );
+        assert_eq!(header.report_count, 2);
+        assert_eq!(
+            result.len(),
+            76,
+            "SR with 2 report blocks should be 76 bytes"
+        );
+    }
+
+    // ============================================
+    // RFC 3550 report_count Overflow Tests (Issue anyka-dev-997)
+    // ============================================
+
+    #[test]
+    fn test_sr_marshal_too_many_report_blocks() {
+        // RFC 3550 section 6.4.1: report_count is 5 bits (max 31)
+        let mut sr = RtcpSenderReport::default();
+        sr.ssrc = 0x12345678;
+        sr.ntp = 0xABCDEF0123456789;
+        sr.rtp_timestamp = 0x11111111;
+        sr.sender_packet_count = 0x22222222;
+        sr.sender_octet_count = 0x33333333;
+        for i in 0..32 {
+            sr.report_blocks.push(ReportBlock {
+                ssrc: i,
+                ..Default::default()
+            });
+        }
+        let result = sr.marshal();
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(format!("{:?}", err).contains("TooManyReportBlocks"));
+    }
+
+    #[test]
+    fn test_sr_marshal_max_report_blocks_allowed() {
+        // Test that exactly 31 report blocks (max allowed) works correctly
+        let mut sr = RtcpSenderReport::default();
+        sr.ssrc = 0x12345678;
+        sr.ntp = 0xABCDEF0123456789;
+        sr.rtp_timestamp = 0x11111111;
+        sr.sender_packet_count = 0x22222222;
+        sr.sender_octet_count = 0x33333333;
+        for i in 0..31 {
+            sr.report_blocks.push(ReportBlock {
+                ssrc: i,
+                ..Default::default()
+            });
+        }
+        let result = sr.marshal();
+        assert!(result.is_ok());
+        let data = result.unwrap();
+        // Verify report_count field is 31 (0x1F)
+        let mut reader = BytesReader::new(data);
+        let first_byte = reader.read_u8().unwrap();
+        let report_count = first_byte & 0x1F;
+        assert_eq!(report_count, 31);
+    }
+
+    #[test]
+    fn test_sr_marshal_32_report_blocks_fails() {
+        // Test that 32 report blocks fails (exceeds 5-bit max of 31)
+        let mut sr = RtcpSenderReport::default();
+        sr.ssrc = 0x12345678;
+        sr.ntp = 0xABCDEF0123456789;
+        sr.rtp_timestamp = 0x11111111;
+        sr.sender_packet_count = 0x22222222;
+        sr.sender_octet_count = 0x33333333;
+        for i in 0..32 {
+            sr.report_blocks.push(ReportBlock {
+                ssrc: i,
+                ..Default::default()
+            });
+        }
+        let result = sr.marshal();
+        assert!(result.is_err());
     }
 }

@@ -18,6 +18,8 @@ pub enum RtcpErrorValue {
     InvalidPacketLoss { value: u32 },
     #[error("invalid RTCP APP length: {length}")]
     InvalidAppLength { length: u16 },
+    #[error("too many report blocks: {count} exceeds maximum of {max} (RFC 3550 section 6.4.2)")]
+    TooManyReportBlocks { count: usize, max: usize },
 }
 
 impl From<RtcpErrorValue> for RtcpError {
@@ -213,5 +215,57 @@ mod tests {
         };
         let debug_str = format!("{:?}", err);
         assert!(debug_str.contains("InvalidAppLength"));
+    }
+
+    // ========== TooManyReportBlocks Display Tests ==========
+
+    #[test]
+    fn test_rtcp_error_value_too_many_report_blocks_display() {
+        let err = RtcpErrorValue::TooManyReportBlocks { count: 32, max: 31 };
+        let display = format!("{}", err);
+        assert!(display.contains("too many report blocks"));
+        assert!(display.contains("32"));
+        assert!(display.contains("31"));
+    }
+
+    #[test]
+    fn test_rtcp_error_value_too_many_report_blocks_zero() {
+        let err = RtcpErrorValue::TooManyReportBlocks { count: 0, max: 31 };
+        let display = format!("{}", err);
+        assert!(display.contains("0"));
+    }
+
+    #[test]
+    fn test_rtcp_error_from_error_value_too_many_report_blocks() {
+        let val = RtcpErrorValue::TooManyReportBlocks {
+            count: 100,
+            max: 31,
+        };
+        let err: RtcpError = val.into();
+        assert!(matches!(
+            err.value,
+            RtcpErrorValue::TooManyReportBlocks {
+                count: 100,
+                max: 31
+            }
+        ));
+    }
+
+    #[test]
+    fn test_rtcp_error_display_too_many_report_blocks() {
+        let err = RtcpError {
+            value: RtcpErrorValue::TooManyReportBlocks { count: 50, max: 31 },
+        };
+        let display = format!("{}", err);
+        assert!(display.contains("50"));
+    }
+
+    #[test]
+    fn test_rtcp_error_debug_too_many_report_blocks() {
+        let err = RtcpError {
+            value: RtcpErrorValue::TooManyReportBlocks { count: 33, max: 31 },
+        };
+        let debug_str = format!("{:?}", err);
+        assert!(debug_str.contains("TooManyReportBlocks"));
     }
 }
