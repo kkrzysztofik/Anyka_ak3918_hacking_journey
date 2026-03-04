@@ -806,8 +806,7 @@ async fn test_receive_statistics_data_video_keyframe_resets_gop_counter() {
 
 #[tokio::test]
 async fn test_receive_frame_data_prunes_closed_senders() {
-    let senders: Arc<Mutex<HashMap<Uuid, FrameDataSender>>> =
-        Arc::new(Mutex::new(HashMap::new()));
+    let senders: Arc<Mutex<HashMap<Uuid, FrameDataSender>>> = Arc::new(Mutex::new(HashMap::new()));
     let id = Uuid::new(crate::streamhub::utils::RandomDigitCount::Four);
     let (tx, rx) = mpsc::unbounded_channel::<FrameData>();
     drop(rx);
@@ -830,8 +829,7 @@ async fn test_receive_frame_data_prunes_closed_senders() {
 
 #[tokio::test]
 async fn test_receive_packet_data_prunes_closed_senders() {
-    let senders: Arc<Mutex<HashMap<Uuid, PacketDataSender>>> =
-        Arc::new(Mutex::new(HashMap::new()));
+    let senders: Arc<Mutex<HashMap<Uuid, PacketDataSender>>> = Arc::new(Mutex::new(HashMap::new()));
     let id = Uuid::new(crate::streamhub::utils::RandomDigitCount::Four);
     let (tx, rx) = mpsc::unbounded_channel::<PacketData>();
     drop(rx);
@@ -1148,8 +1146,7 @@ async fn test_receive_statistics_data_none() {
 
 #[tokio::test]
 async fn test_receive_frame_data_none_is_noop() {
-    let senders: Arc<Mutex<HashMap<Uuid, FrameDataSender>>> =
-        Arc::new(Mutex::new(HashMap::new()));
+    let senders: Arc<Mutex<HashMap<Uuid, FrameDataSender>>> = Arc::new(Mutex::new(HashMap::new()));
     // Passing None should not panic
     StreamDataTransceiver::receive_frame_data(None, &senders).await;
     assert!(senders.lock().await.is_empty());
@@ -1157,16 +1154,14 @@ async fn test_receive_frame_data_none_is_noop() {
 
 #[tokio::test]
 async fn test_receive_packet_data_none_is_noop() {
-    let senders: Arc<Mutex<HashMap<Uuid, PacketDataSender>>> =
-        Arc::new(Mutex::new(HashMap::new()));
+    let senders: Arc<Mutex<HashMap<Uuid, PacketDataSender>>> = Arc::new(Mutex::new(HashMap::new()));
     StreamDataTransceiver::receive_packet_data(None, &senders).await;
     assert!(senders.lock().await.is_empty());
 }
 
 #[tokio::test]
 async fn test_receive_frame_data_video_forwarded() {
-    let senders: Arc<Mutex<HashMap<Uuid, FrameDataSender>>> =
-        Arc::new(Mutex::new(HashMap::new()));
+    let senders: Arc<Mutex<HashMap<Uuid, FrameDataSender>>> = Arc::new(Mutex::new(HashMap::new()));
     let id = Uuid::new(crate::streamhub::utils::RandomDigitCount::Four);
     let (tx, mut rx) = mpsc::unbounded_channel::<FrameData>();
     senders.lock().await.insert(id, tx);
@@ -1189,8 +1184,7 @@ async fn test_receive_frame_data_video_forwarded() {
 
 #[tokio::test]
 async fn test_receive_packet_data_video_forwarded() {
-    let senders: Arc<Mutex<HashMap<Uuid, PacketDataSender>>> =
-        Arc::new(Mutex::new(HashMap::new()));
+    let senders: Arc<Mutex<HashMap<Uuid, PacketDataSender>>> = Arc::new(Mutex::new(HashMap::new()));
     let id = Uuid::new(crate::streamhub::utils::RandomDigitCount::Four);
     let (tx, mut rx) = mpsc::unbounded_channel::<PacketData>();
     senders.lock().await.insert(id, tx);
