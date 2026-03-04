@@ -1,6 +1,6 @@
 name: "CodeQL Configuration"
 
-# Exclude paths from analysis
+# Exclude paths from analysis (used by Default Setup when under .github/codeql/)
 # Reference: https://docs.github.com/en/code-security/code-scanning/creating-an-advanced-setup-for-code-scanning/customizing-advanced-setup-for-code-scanning#specifying-directories-to-scan
 
 paths-ignore:
