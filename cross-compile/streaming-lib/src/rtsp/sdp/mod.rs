@@ -212,7 +212,12 @@ impl Sdp {
     fn parse_line(&mut self, line: &str) {
         let kv: Vec<&str> = line.trim().splitn(2, '=').collect();
         if kv.len() < 2 {
-            tracing::error!(line = %line, "sdp_parse_error");
+            // Bounded: log length + prefix instead of full unbounded user input
+            tracing::error!(
+                line_len = line.len(),
+                line_prefix = %line.chars().take(64).collect::<String>(),
+                "sdp_parse_error"
+            );
             return;
         }
 
@@ -225,7 +230,12 @@ impl Sdp {
             "m" => self.parse_media(kv[1]),
             "b" => self.parse_bandwidth(kv[1]),
             "a" => self.parse_attribute(kv[1]),
-            _ => tracing::info!(line = %line, "sdp_not_parsed"),
+            // Bounded: log length + prefix instead of full unbounded user input
+            _ => tracing::info!(
+                line_len = line.len(),
+                line_prefix = %line.chars().take(64).collect::<String>(),
+                "sdp_not_parsed"
+            ),
         }
     }
 

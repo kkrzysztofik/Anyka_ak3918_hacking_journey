@@ -11,10 +11,11 @@ use crate::rtsp::session::server_session::LagRecoveryMode;
 /// making the code more testable and thread-safe.
 #[derive(Debug, Clone)]
 pub struct StreamingConfig {
-    /// RTP sample interval in milliseconds (0 = disabled)
+    /// RTP packet sampling interval for debug logging (every N packets, 0 = disabled)
     ///
-    /// When set to a non-zero value, RTCP sender reports will be generated
-    /// at this interval for RTP statistics.
+    /// When set to a non-zero value, every Nth RTP packet will be logged at debug level
+    /// with statistics (SSRC, timestamp, sequence number). This is for troubleshooting
+    /// RTP stream issues, not RTCP sender report generation.
     pub rtp_sample_interval: u32,
 
     /// Maximum age of frames to deliver in milliseconds
@@ -28,8 +29,9 @@ pub struct StreamingConfig {
 
     /// Play ready timeout in milliseconds
     ///
-    /// Maximum time to wait for the client to become ready for playback
-    /// after receiving the PLAY response.
+    /// Maximum time to wait for media tracks (SPS/PPS/codec info) to become available
+    /// after receiving a PLAY request, before sending the PLAY response. If tracks are
+    /// not ready within this timeout, the server sends a 503 Service Unavailable response.
     pub play_ready_timeout_ms: u64,
 
     /// RTSP server listen address
@@ -66,7 +68,7 @@ impl StreamingConfig {
     ///
     /// # Arguments
     ///
-    /// * `interval` - Interval in milliseconds (0 = disabled)
+    /// * `interval` - Sample every N packets (0 = disabled)
     pub fn with_rtp_sample_interval(mut self, interval: u32) -> Self {
         self.rtp_sample_interval = interval;
         self

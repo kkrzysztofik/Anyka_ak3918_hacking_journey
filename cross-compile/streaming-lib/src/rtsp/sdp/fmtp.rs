@@ -1,5 +1,5 @@
 use crate::rtsp::global_trait::{Marshal, Unmarshal};
-use base64::{engine::general_purpose, Engine as _};
+use base64::{Engine as _, engine::general_purpose};
 use bytes::{BufMut, BytesMut};
 
 fn parse_payload_type(raw_data: &str) -> Result<(u16, &str), String> {

@@ -428,7 +428,7 @@ mod tests {
         builder.write_uev(1); // max_num_ref_frames = 1
         builder.write_bit(0); // gaps_in_frame_num_value_allowed_flag = 0
         builder.write_uev(width / 16 - 1); // pic_width_in_mbs_minus1
-                                           // For interlaced, height is halved in map units
+        // For interlaced, height is halved in map units
         builder.write_uev(height / 16 / 2 - 1); // pic_height_in_map_units_minus1
         builder.write_bit(0); // frame_mbs_only_flag = 0 (interlaced)
         builder.write_bit(0); // mb_adaptive_frame_field_flag = 0

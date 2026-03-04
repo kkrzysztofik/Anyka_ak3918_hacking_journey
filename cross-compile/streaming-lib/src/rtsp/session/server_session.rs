@@ -1175,9 +1175,8 @@ pub struct RtspServerSession {
 
     /// Packet-level RTP logging configuration and counters.
     ///
-    /// `rtp_sample_interval` is copied from the global `RTP_SAMPLE_INTERVAL`
-    /// at session creation time so that each session has a consistent view
-    /// even if the global is changed later.
+    /// `rtp_sample_interval` stores the packet sampling interval configured
+    /// at session creation time (every N packets to log, 0 = disabled).
     rtp_sample_interval: u32,
 
     /// Streaming configuration (stored for access in handle_play)
