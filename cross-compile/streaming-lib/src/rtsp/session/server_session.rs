@@ -50,6 +50,7 @@ use crate::bytesio::TNetIO;
 use crate::bytesio::{TcpReadIO, TcpWriteIO};
 use async_trait::async_trait;
 use portable_atomic::AtomicU64;
+use tokio::time::{Duration, timeout};
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -57,7 +58,7 @@ use std::sync::{
     Arc, OnceLock,
     atomic::{AtomicBool, AtomicU32, Ordering},
 };
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
@@ -1176,6 +1177,9 @@ pub struct RtspServerSession {
     remote_addr: SocketAddr,
     shutdown: Arc<AtomicBool>,
 
+    /// Optional shared shutdown flag for graceful shutdown from server
+    shutdown_flag: Option<Arc<AtomicBool>>,
+
     /// Packet-level RTP logging configuration and counters.
     ///
     /// `rtp_sample_interval` is copied from the global `RTP_SAMPLE_INTERVAL`
@@ -1304,11 +1308,17 @@ impl RtspServerSession {
             is_normal_exit: false,
             remote_addr,
             shutdown: Arc::new(AtomicBool::new(false)),
+            shutdown_flag: None,
             rtp_sample_interval: sample_interval,
             rtp_counters: HashMap::new(),
             playback_cancel: None,
             playback_task: None,
         }
+    }
+
+    /// Set the shutdown flag for graceful shutdown from server
+    pub fn set_shutdown_flag(&mut self, flag: Arc<AtomicBool>) {
+        self.shutdown_flag = Some(flag);
     }
 
     /// RFC 2326 §12.37: default session timeout in seconds.
@@ -1358,9 +1368,33 @@ impl RtspServerSession {
         if let Ok(data) = InterleavedBinaryData::new(&mut self.reader) {
             match data {
                 Some(a) => {
+                    const INTERLEAVED_READ_TIMEOUT_SECS: u64 = 30;
+
                     while self.reader.len() < a.length as usize {
-                        let data = self.io_reader.lock().await.read().await?;
-                        self.reader.extend_from_slice(&data[..]);
+                        let read_result = timeout(
+                            Duration::from_secs(INTERLEAVED_READ_TIMEOUT_SECS),
+                            self.io_reader.lock().await.read(),
+                        )
+                        .await;
+
+                        match read_result {
+                            Ok(Ok(data)) => {
+                                self.reader.extend_from_slice(&data[..]);
+                            }
+                            Ok(Err(e)) => {
+                                return Err(SessionError::from(e));
+                            }
+                            Err(_) => {
+                                // Timeout - close connection
+                                return Err(SessionError::from(std::io::Error::new(
+                                    std::io::ErrorKind::TimedOut,
+                                    format!(
+                                        "Interleaved read timeout after {}s",
+                                        INTERLEAVED_READ_TIMEOUT_SECS
+                                    ),
+                                )));
+                            }
+                        }
                     }
                     self.on_rtp_over_rtsp_message(a.channel_identifier, a.length as usize)
                         .await?;
@@ -1374,11 +1408,22 @@ impl RtspServerSession {
     }
 
     pub async fn run(&mut self) -> Result<(), SessionError> {
+        // Clone shutdown flag for the run loop
+        let shutdown_flag = self.shutdown_flag.clone();
+
         let run_result: Result<(), SessionError> = async {
             loop {
                 if self.shutdown.load(Ordering::Acquire) {
                     break;
                 }
+
+                // Check shared shutdown flag if provided
+                if let Some(ref flag) = shutdown_flag
+                    && flag.load(Ordering::Acquire)
+                {
+                    break;
+                }
+
                 self.read_rtsp_data().await?;
 
                 self.handle_interleaved_data().await?;

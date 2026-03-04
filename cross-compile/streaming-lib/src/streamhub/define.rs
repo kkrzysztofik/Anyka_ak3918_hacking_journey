@@ -136,6 +136,17 @@ pub type PacketDataReceiver = mpsc::UnboundedReceiver<PacketData>;
 pub type InformationSender = mpsc::UnboundedSender<Information>;
 pub type InformationReceiver = mpsc::UnboundedReceiver<Information>;
 
+/// Sender for StreamHub events.
+///
+/// # Resource Limits
+///
+/// This sender is unbounded - it does not have a channel capacity limit.
+/// Callers MUST ensure consumers process events promptly to avoid memory exhaustion.
+/// In high-throughput scenarios, consider monitoring event queue depths or
+/// implementing application-level backpressure.
+///
+/// For production deployments with unreliable consumers, consider using
+/// bounded channels with explicit backpressure handling.
 pub type StreamHubEventSender = mpsc::UnboundedSender<StreamHubEvent>;
 pub type StreamHubEventReceiver = mpsc::UnboundedReceiver<StreamHubEvent>;
 

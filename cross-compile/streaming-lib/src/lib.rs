@@ -27,6 +27,9 @@ pub mod service;
 pub mod streamhub;
 pub mod validation;
 
+// Re-export Bytes for use in Frame
+pub use bytes::Bytes;
+
 // Re-export key types from RTSP
 pub use logging_flags::{set_stream_frame_debug_logging, stream_frame_debug_logging_enabled};
 pub use rtsp::session::server_session::RtspServerSession;
@@ -65,31 +68,21 @@ pub trait FrameSource: Send + Sync {
 /// Trait for receiving frame callbacks
 pub trait FrameCallback: Send + Sync {
     /// Called when a new frame is available
-    ///
-    /// # Safety
-    ///
-    /// The frame data pointer is valid only during this call.
-    /// Do not store the pointer. Use pre-allocated buffers for packetization.
     fn on_frame(&self, frame: &Frame);
 }
 
 /// A video or audio frame from the encoder
+///
+/// Uses `bytes::Bytes` for safe, reference-counted data that can be
+/// safely shared across threads without lifetime issues.
 pub struct Frame {
-    /// Read-only pointer to frame data (zero-copy)
-    pub data: *const u8,
-    /// Size of frame data in bytes
-    pub size: usize,
+    /// Reference-counted frame data (zero-copy, safe to share)
+    pub data: Bytes,
     /// Timestamp in milliseconds (SDK source)
     pub timestamp: u32,
     /// Type of frame
     pub frame_type: FrameType,
 }
-
-// SAFETY: `Frame` holds a read-only pointer to immutable frame data that remains valid
-// for `size` bytes during its use across threads. The data is not mutated or freed
-// while shared, so it is safe to mark `Frame` as Send + Sync.
-unsafe impl Send for Frame {}
-unsafe impl Sync for Frame {}
 
 /// Frame type for video and audio
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -136,14 +129,13 @@ mod tests {
 
     #[test]
     fn test_frame_construction() {
-        let data = [0u8; 10];
+        let data = Bytes::from_static(b"test frame data");
         let frame = Frame {
-            data: data.as_ptr(),
-            size: data.len(),
+            data: data.clone(),
             timestamp: 12345,
             frame_type: FrameType::VideoIFrame,
         };
-        assert_eq!(frame.size, 10);
+        assert_eq!(frame.data.len(), 15);
         assert_eq!(frame.timestamp, 12345);
         assert_eq!(frame.frame_type, FrameType::VideoIFrame);
     }
@@ -154,6 +146,29 @@ mod tests {
         fn assert_sync<T: Sync>() {}
         assert_send::<Frame>();
         assert_sync::<Frame>();
+    }
+
+    #[test]
+    fn test_frame_bytes_safe_to_share() {
+        // Verify Bytes provides safe sharing
+        let data = Bytes::from_static(b"shared data");
+
+        // Frame can be safely cloned because Bytes uses reference counting
+        let frame1 = Frame {
+            data: data.clone(),
+            timestamp: 1000,
+            frame_type: FrameType::VideoIFrame,
+        };
+
+        let frame2 = Frame {
+            data: data,
+            timestamp: 2000,
+            frame_type: FrameType::VideoPFrame,
+        };
+
+        // Both frames can access their data independently
+        assert_eq!(frame1.data.len(), 11);
+        assert_eq!(frame2.data.len(), 11);
     }
 
     // ========== Re-export Smoke Tests ==========

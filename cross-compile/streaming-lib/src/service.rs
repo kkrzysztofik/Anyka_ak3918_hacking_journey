@@ -3,50 +3,35 @@
 //! This module provides the `StreamingService` struct for managing the RTSP and HTTP-FLV
 //! servers with proper lifecycle control (startup, graceful shutdown).
 
-use std::fmt;
+use thiserror::Error;
 
-use tokio::io::Error as IoError;
 use tokio::sync::broadcast;
 use tokio::task::JoinSet;
 
+use crate::common::auth::Auth;
 use crate::config::StreamingConfig;
 use crate::httpflv::server::{DefaultHttpFlvServer, HttpFlvServer};
 use crate::rtsp::{DefaultRtspServer, RtspServer};
 use crate::streamhub::define::StreamHubEventSender;
 
 /// Errors that can occur during streaming service operations
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub enum StreamingError {
     /// RTSP server error
+    #[error("RTSP server error: {0}")]
     RtspServer(String),
 
     /// HTTP-FLV server error
+    #[error("HTTP-FLV server error: {0}")]
     HttpFlv(String),
 
     /// Stream hub error
+    #[error("Stream hub error: {0}")]
     StreamHub(String),
 
     /// IO error
+    #[error("IO error: {0}")]
     Io(String),
-}
-
-impl fmt::Display for StreamingError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            StreamingError::RtspServer(s) => write!(f, "RTSP server error: {}", s),
-            StreamingError::HttpFlv(s) => write!(f, "HTTP-FLV server error: {}", s),
-            StreamingError::StreamHub(s) => write!(f, "Stream hub error: {}", s),
-            StreamingError::Io(s) => write!(f, "IO error: {}", s),
-        }
-    }
-}
-
-impl std::error::Error for StreamingError {}
-
-impl From<IoError> for StreamingError {
-    fn from(e: IoError) -> Self {
-        StreamingError::Io(e.to_string())
-    }
 }
 
 /// Streaming service that manages RTSP and HTTP-FLV servers
@@ -65,6 +50,9 @@ impl StreamingService {
     ///
     /// * `config` - Streaming configuration
     /// * `event_sender` - StreamHub event sender for routing messages to the hub
+    /// * `auth` - Authentication configuration. **MUST be provided for production deployments.**
+    ///   Passing `None` allows unauthenticated access and should only be used for
+    ///   local development or testing.
     ///
     /// # Returns
     ///
@@ -72,6 +60,7 @@ impl StreamingService {
     pub async fn new(
         config: StreamingConfig,
         event_sender: StreamHubEventSender,
+        auth: Option<Auth>,
     ) -> Result<Self, StreamingError> {
         let mut tasks = JoinSet::new();
         let (shutdown_tx, _) = broadcast::channel(1);
@@ -81,22 +70,22 @@ impl StreamingService {
         let event_sender_httpflv = event_sender.clone();
 
         // Spawn RTSP server
-        let mut rtsp_shutdown = shutdown_tx.subscribe();
+        let rtsp_shutdown = shutdown_tx.subscribe();
         let rtsp_config = config.clone();
+        let auth_clone = auth.clone();
         tasks.spawn(async move {
             let mut server: DefaultRtspServer = DefaultRtspServer::new(
                 rtsp_config.rtsp_listen_addr.clone(),
                 event_sender_rtsp,
-                None,
+                auth_clone,
             );
             tokio::select! {
-                result = server.run() => {
+                result = server.run(Some(rtsp_shutdown)) => {
                     match result {
                         Ok(()) => Ok(()),
                         Err(e) => Err(StreamingError::RtspServer(e.to_string())),
                     }
                 }
-                _ = rtsp_shutdown.recv() => Ok(()),
             }
         });
 
@@ -107,7 +96,7 @@ impl StreamingService {
             let mut server: DefaultHttpFlvServer = DefaultHttpFlvServer::new(
                 httpflv_config.httpflv_listen_addr.clone(),
                 event_sender_httpflv,
-                None,
+                auth,
             );
             tokio::select! {
                 result = server.run() => {
@@ -249,8 +238,8 @@ mod tests {
 
     #[test]
     fn test_streaming_error_from_io() {
-        let io_err = IoError::new(std::io::ErrorKind::Other, "test error");
-        let streaming_err: StreamingError = io_err.into();
+        let io_err = std::io::Error::new(std::io::ErrorKind::Other, "test error");
+        let streaming_err = StreamingError::Io(io_err.to_string());
         assert!(format!("{}", streaming_err).contains("IO"));
     }
 }
