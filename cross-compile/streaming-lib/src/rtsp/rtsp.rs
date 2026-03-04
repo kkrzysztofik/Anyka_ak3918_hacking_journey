@@ -139,8 +139,8 @@ impl RtspServer for DefaultRtspServer {
                     if let Some(ref mut rx) = shutdown_rx {
                         let _ = rx.recv().await;
                     }
-                    // If no shutdown receiver, never trigger
-                    futures::future::pending::<()>().await;
+                    // If no shutdown receiver provided, this branch will never complete,
+                    // but accept loop will still break on error or when shutdown_flag is set
                 } => {
                     // Shutdown requested via broadcast
                     break;

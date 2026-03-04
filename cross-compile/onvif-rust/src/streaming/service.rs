@@ -690,6 +690,13 @@ mod tests {
         let _bridge = service.bridge();
     }
 
+    #[test]
+    fn test_streaming_service_bridge_accessible_before_start() {
+        let config = StreamingConfig::default();
+        let service = StreamingService::new(config);
+        let _bridge = service.bridge();
+    }
+
     #[tokio::test]
     async fn test_live_stream_handler_send_prior_data_rtsp_no_sps() {
         let (_bridge, handler) = make_main_handler();

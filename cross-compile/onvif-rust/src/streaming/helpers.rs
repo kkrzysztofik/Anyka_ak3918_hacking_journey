@@ -227,7 +227,7 @@ pub fn spawn_rtsp_server(
     let addr = format!("0.0.0.0:{}", port);
     tokio::spawn(async move {
         let mut server = DefaultRtspServer::new(addr, event_sender, stream_auth);
-        if let Err(e) = server.run().await {
+        if let Err(e) = server.run(None).await {
             tracing::error!("RTSP server error: {}", e);
         }
     })
