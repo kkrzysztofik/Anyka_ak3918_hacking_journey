@@ -3,13 +3,14 @@ use crate::streamhub::define::StreamHubEventSender;
 use super::session::server_session::RtspServerSession;
 use crate::common::auth::Auth;
 use async_trait::async_trait;
-use log::{error, info};
+use log::{error, info, warn};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::io::Error;
 use tokio::net::TcpListener;
 use tokio::sync::broadcast;
+use tokio::sync::Semaphore;
 
 /// Trait for RTSP server implementations
 ///
@@ -30,12 +31,17 @@ pub trait RtspServer: Send + Sync {
     fn get_shutdown_flag(&self) -> Option<Arc<AtomicBool>>;
 }
 
+/// Maximum number of concurrent RTSP sessions.
+/// Sized for embedded targets (Anyka AK3918) with limited RAM.
+const MAX_CONCURRENT_SESSIONS: usize = 16;
+
 /// Default implementation of the RTSP server trait
 pub struct DefaultRtspServer {
     address: String,
     event_producer: StreamHubEventSender,
     auth: Option<Auth>,
     shutdown_flag: Option<Arc<AtomicBool>>,
+    session_semaphore: Arc<Semaphore>,
 }
 
 #[async_trait]
@@ -46,6 +52,7 @@ impl RtspServer for DefaultRtspServer {
             event_producer,
             auth,
             shutdown_flag: None,
+            session_semaphore: Arc::new(Semaphore::new(MAX_CONCURRENT_SESSIONS)),
         }
     }
 
@@ -79,6 +86,22 @@ impl RtspServer for DefaultRtspServer {
                 result = listener.accept() => {
                     match result {
                         Ok((tcp_stream, peer_addr)) => {
+                            // Acquire a session permit before spawning.
+                            // try_acquire_owned is non-blocking: if all slots are taken
+                            // we reject immediately (DoS protection).
+                            let permit = match self.session_semaphore.clone().try_acquire_owned() {
+                                Ok(p) => p,
+                                Err(_) => {
+                                    warn!(
+                                        "event=rtsp_session_rejected reason=max_sessions remote_addr={} limit={}",
+                                        peer_addr, MAX_CONCURRENT_SESSIONS
+                                    );
+                                    // Drop the TcpStream (closes connection)
+                                    drop(tcp_stream);
+                                    continue;
+                                }
+                            };
+
                             info!(
                                 "event=rtsp_connection_start remote_addr={} local_addr={}",
                                 peer_addr, socket_addr
@@ -93,6 +116,10 @@ impl RtspServer for DefaultRtspServer {
                             session.set_shutdown_flag(shutdown_flag_clone.clone());
 
                             tokio::spawn(async move {
+                                // Hold the permit for the lifetime of this session.
+                                // When this task completes, `_permit` is dropped, releasing
+                                // the semaphore slot for a new connection.
+                                let _permit = permit;
                                 if let Err(err) = session.run().await {
                                     let session_id = if let Some(id) = session.session_id {
                                         id.to_string()
@@ -138,9 +165,11 @@ impl RtspServer for DefaultRtspServer {
                     // Wait for shutdown signal if provided
                     if let Some(ref mut rx) = shutdown_rx {
                         let _ = rx.recv().await;
+                    } else {
+                        // No shutdown receiver provided - block forever
+                        // This ensures the select! doesn't complete immediately
+                        futures::future::pending::<()>().await;
                     }
-                    // If no shutdown receiver provided, this branch will never complete,
-                    // but accept loop will still break on error or when shutdown_flag is set
                 } => {
                     // Shutdown requested via broadcast
                     break;

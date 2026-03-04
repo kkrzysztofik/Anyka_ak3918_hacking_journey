@@ -56,6 +56,7 @@ indexmap = "2.13"
 lazy_static = "1.5"
 async-trait = "0.1"
 md5 = "0.8"
+subtle = "2.6"
 job_scheduler_ng = "2.4"
 portable-atomic = { version = "1.13", features = ["std"] }
 mockall = "0.14"
