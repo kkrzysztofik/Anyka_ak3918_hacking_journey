@@ -9,6 +9,7 @@ use {
         sync::{Mutex, broadcast::Receiver},
         time,
     },
+    tracing::info,
 };
 
 #[derive(Debug, Clone, Serialize, Default)]
@@ -169,7 +170,7 @@ impl StatisticsCalculate {
                 self.calculate().await;
                },
                _ = self.exit.recv() => {
-                    log::info!("avstatistics shutting down");
+                    info!("avstatistics_shutting_down");
                     return
                },
             }

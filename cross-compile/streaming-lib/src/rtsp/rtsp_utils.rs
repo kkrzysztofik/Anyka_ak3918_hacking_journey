@@ -19,7 +19,7 @@ pub fn debug_print_hex(title: &str, data: &[u8]) {
     }
 
     line.push_str("\n===========");
-    log::debug!("{line}");
+    tracing::debug!(%line);
 }
 
 #[cfg(test)]

@@ -1,3 +1,4 @@
+use crate::config::StreamingConfig;
 use crate::rtsp::global_trait::Marshal;
 use crate::rtsp::global_trait::Unmarshal;
 use crate::rtsp::rtsp_codec;
@@ -76,27 +77,7 @@ use crate::streamhub::{
 };
 use tokio::net::TcpStream;
 use tokio::sync::Mutex;
-
-/// Global RTP sample interval (in packets) used for validation-style logging.
-///
-/// When set to a non-zero value, every Nth RTP packet per track will emit a
-/// `event=rtp_packet_sample` debug log with sequence number, timestamp and size.
-/// This defaults to 0 (disabled) for normal operation and can be enabled by
-/// callers such as the onvif-rust validation mode.
-static RTP_SAMPLE_INTERVAL: AtomicU32 = AtomicU32::new(0);
-
-/// Configure the RTP packet sampling interval for RTSP sessions.
-///
-/// A value of 0 disables sampling (default). A small value like 10 will log
-/// very frequently, while larger values (e.g. 100 or 1000) are better suited
-/// for validation runs.
-pub fn set_rtp_sample_interval(interval: u32) {
-    RTP_SAMPLE_INTERVAL.store(interval, Ordering::Relaxed);
-}
-
-fn rtp_sample_interval() -> u32 {
-    RTP_SAMPLE_INTERVAL.load(Ordering::Relaxed)
-}
+use tracing::{debug, error, info, warn};
 
 fn now_millis() -> u64 {
     SystemTime::now()
@@ -149,14 +130,12 @@ pub enum LagRecoveryMode {
 }
 
 impl LagRecoveryMode {
-    fn from_env() -> Self {
-        match std::env::var("ONVIF_LAG_RECOVERY_MODE")
-            .ok()
-            .unwrap_or_else(|| "latest_idr".to_string())
-            .trim()
-            .to_ascii_lowercase()
-            .as_str()
-        {
+    /// Create a LagRecoveryMode from a string value.
+    ///
+    /// - "off", "none", "disabled" → Disabled
+    /// - Anything else → LatestIdr
+    pub fn from_str_value(s: &str) -> Self {
+        match s.trim().to_ascii_lowercase().as_str() {
             "off" | "none" | "disabled" => Self::Disabled,
             _ => Self::LatestIdr,
         }
@@ -172,16 +151,22 @@ struct PlaybackLatencyPolicy {
 }
 
 impl PlaybackLatencyPolicy {
-    fn from_env() -> Self {
-        let max_frame_age_ms = std::env::var("ONVIF_MAX_FRAME_AGE_MS")
-            .ok()
-            .and_then(|value| value.trim().parse::<u32>().ok())
-            .filter(|value| *value > 0)
-            .unwrap_or(DEFAULT_MAX_FRAME_AGE_MS);
+    /// Create a PlaybackLatencyPolicy from a StreamingConfig.
+    ///
+    /// Uses `config.max_frame_age_ms` with the same `> 0` guard,
+    /// falling back to `DEFAULT_MAX_FRAME_AGE_MS` if the value is 0.
+    /// Uses `config.lag_recovery_mode` directly.
+    /// Keeps `lag_recovery_threshold_ms` and `sustained_lag_frames` as constants.
+    fn from_config(config: &StreamingConfig) -> Self {
+        let max_frame_age_ms = if config.max_frame_age_ms > 0 {
+            config.max_frame_age_ms
+        } else {
+            DEFAULT_MAX_FRAME_AGE_MS
+        };
 
         Self {
             max_frame_age_ms,
-            lag_recovery_mode: LagRecoveryMode::from_env(),
+            lag_recovery_mode: config.lag_recovery_mode,
             lag_recovery_threshold_ms: LAG_RECOVERY_THRESHOLD_MS,
             sustained_lag_frames: LAG_RECOVERY_SUSTAINED_FRAMES,
         }
@@ -495,15 +480,16 @@ async fn send_video_access_unit(
         .or_default()
         .normalize(timestamp, channel.clock_rate(), TrackType::Video);
     if normalized.non_wrap_regressed {
-        log::warn!(
-            "event=rtp_timestamp_non_wrap_regression track=Video session_id={} remote_addr={} stream_path={} prev_scaled={} current_scaled={} corrected_timestamp={} regression_count={}",
-            ctx.session_id,
-            ctx.remote_addr,
-            ctx.request_path,
-            normalized.previous_scaled_timestamp.unwrap_or_default(),
-            normalized.scaled_timestamp,
-            normalized.output_timestamp,
-            normalized.non_wrap_regression_count,
+        warn!(
+            track = ?TrackType::Video,
+            session_id = %ctx.session_id,
+            remote_addr = %ctx.remote_addr,
+            request_path = %ctx.request_path,
+            prev_scaled = normalized.previous_scaled_timestamp.unwrap_or_default(),
+            current_scaled = normalized.scaled_timestamp,
+            corrected_timestamp = normalized.output_timestamp,
+            regression_count = normalized.non_wrap_regression_count,
+            "rtp_timestamp_non_wrap_regression"
         );
     }
     let send_started = Instant::now();
@@ -511,21 +497,22 @@ async fn send_video_access_unit(
         Ok(()) => {
             let send_ms = send_started.elapsed().as_millis();
             if send_ms >= RTP_SEND_SLOW_WARN_MS {
-                log::warn!(
-                    "event=rtp_send_slow track=Video session_id={} remote_addr={} stream_path={} source_ts={} rtp_ts={} payload_len={} send_ms={} diag_monotonic_ms={}",
-                    ctx.session_id,
-                    ctx.remote_addr,
-                    ctx.request_path,
-                    timestamp,
-                    normalized.output_timestamp,
-                    payload_len,
-                    send_ms,
-                    monotonic_millis(),
+                warn!(
+                    track = ?TrackType::Video,
+                    session_id = %ctx.session_id,
+                    remote_addr = %ctx.remote_addr,
+                    request_path = %ctx.request_path,
+                    source_ts = timestamp,
+                    rtp_ts = normalized.output_timestamp,
+                    payload_len = payload_len,
+                    send_ms = send_ms,
+                    diag_monotonic_ms = monotonic_millis(),
+                    "rtp_send_slow"
                 );
             }
         }
         Err(err) => {
-            log::info!("handle_play error: {err}");
+            info!(error = %err, "handle_play_error");
             ctx.shutdown.store(true, Ordering::Release);
         }
     }
@@ -557,35 +544,37 @@ async fn process_audio_frame(
     if crate::stream_frame_debug_logging_enabled()
         && lag_ms >= latency_policy.max_frame_age_ms.saturating_div(2)
     {
-        log::debug!(
-            "event=lag_probe track=Audio session_id={} remote_addr={} stream_path={} lag_ms={} threshold_ms={} source_ts={} prev_source_ts={} waiting_for_idr_recovery={} diag_monotonic_ms={}",
-            session_id,
-            remote_addr,
-            request_path,
-            lag_ms,
-            latency_policy.max_frame_age_ms,
-            timestamp,
-            previous_source_ts,
-            waiting_for_idr_recovery,
-            monotonic_millis(),
+        debug!(
+            track = ?TrackType::Audio,
+            session_id = %session_id,
+            remote_addr = %remote_addr,
+            request_path = %request_path,
+            lag_ms = lag_ms,
+            threshold_ms = latency_policy.max_frame_age_ms,
+            source_ts = timestamp,
+            prev_source_ts = previous_source_ts,
+            waiting_for_idr_recovery = waiting_for_idr_recovery,
+            diag_monotonic_ms = monotonic_millis(),
+            "lag_probe"
         );
     }
     if lag_ms > latency_policy.max_frame_age_ms {
         *dropped_stale_frames += 1;
         let elapsed_ms = audio_lag_tracker.anchor_local.elapsed().as_millis() as u32;
         let expected_source_ts = audio_lag_tracker.anchor_source_ts.wrapping_add(elapsed_ms);
-        log::warn!(
-            "event=stale_frame_drop track=Audio session_id={} remote_addr={} stream_path={} lag_ms={} threshold_ms={} source_ts={} prev_source_ts={} expected_source_ts={} anchor_source_ts={} anchor_elapsed_ms={}",
-            session_id,
-            remote_addr,
-            request_path,
-            lag_ms,
-            latency_policy.max_frame_age_ms,
-            timestamp,
-            previous_source_ts,
-            expected_source_ts,
-            audio_lag_tracker.anchor_source_ts,
-            elapsed_ms,
+        warn!(
+            track = ?TrackType::Audio,
+            session_id = %session_id,
+            remote_addr = %remote_addr,
+            request_path = %request_path,
+            lag_ms = lag_ms,
+            threshold_ms = latency_policy.max_frame_age_ms,
+            source_ts = timestamp,
+            prev_source_ts = previous_source_ts,
+            expected_source_ts = expected_source_ts,
+            anchor_source_ts = audio_lag_tracker.anchor_source_ts,
+            anchor_elapsed_ms = elapsed_ms,
+            "stale_frame_drop"
         );
         return;
     }
@@ -597,25 +586,26 @@ async fn process_audio_frame(
         .normalize(timestamp, channel.clock_rate(), TrackType::Audio);
 
     if crate::stream_frame_debug_logging_enabled() {
-        log::debug!(
-            "server_session: Audio timestamp_in={} clock_rate={} scaled={} output={}",
-            timestamp,
-            channel.clock_rate(),
-            normalized.scaled_timestamp,
-            normalized.output_timestamp
+        debug!(
+            timestamp_in = timestamp,
+            clock_rate = channel.clock_rate(),
+            scaled = normalized.scaled_timestamp,
+            output = normalized.output_timestamp,
+            "audio_timestamp_info"
         );
     }
 
     if normalized.non_wrap_regressed {
-        log::warn!(
-            "event=rtp_timestamp_non_wrap_regression track=Audio session_id={} remote_addr={} stream_path={} prev_scaled={} current_scaled={} corrected_timestamp={} regression_count={}",
-            session_id,
-            remote_addr,
-            request_path,
-            normalized.previous_scaled_timestamp.unwrap_or_default(),
-            normalized.scaled_timestamp,
-            normalized.output_timestamp,
-            normalized.non_wrap_regression_count,
+        warn!(
+            track = ?TrackType::Audio,
+            session_id = %session_id,
+            remote_addr = %remote_addr,
+            request_path = %request_path,
+            prev_scaled = normalized.previous_scaled_timestamp.unwrap_or_default(),
+            current_scaled = normalized.scaled_timestamp,
+            corrected_timestamp = normalized.output_timestamp,
+            regression_count = normalized.non_wrap_regression_count,
+            "rtp_timestamp_non_wrap_regression"
         );
     }
 
@@ -625,21 +615,22 @@ async fn process_audio_frame(
         Ok(()) => {
             let send_ms = send_started.elapsed().as_millis();
             if send_ms >= RTP_SEND_SLOW_WARN_MS {
-                log::warn!(
-                    "event=rtp_send_slow track=Audio session_id={} remote_addr={} stream_path={} source_ts={} rtp_ts={} payload_len={} send_ms={} diag_monotonic_ms={}",
-                    session_id,
-                    remote_addr,
-                    request_path,
-                    timestamp,
-                    normalized.output_timestamp,
-                    payload_len,
-                    send_ms,
-                    monotonic_millis(),
+                warn!(
+                    track = ?TrackType::Audio,
+                    session_id = %session_id,
+                    remote_addr = %remote_addr,
+                    request_path = %request_path,
+                    source_ts = timestamp,
+                    rtp_ts = normalized.output_timestamp,
+                    payload_len = payload_len,
+                    send_ms = send_ms,
+                    diag_monotonic_ms = monotonic_millis(),
+                    "rtp_send_slow"
                 );
             }
         }
         Err(err) => {
-            log::info!("handle_play error: {err}");
+            info!(error = %err, "handle_play_error");
             shutdown.store(true, Ordering::Release);
         }
     }
@@ -676,11 +667,12 @@ async fn process_video_frame(
         }
 
         *waiting_for_idr_recovery = false;
-        log::info!(
-            "event=lag_recovery_resynced track=Video session_id={} remote_addr={} stream_path={}",
-            session_id,
-            remote_addr,
-            request_path,
+        info!(
+            track = ?TrackType::Video,
+            session_id = %session_id,
+            remote_addr = %remote_addr,
+            request_path = %request_path,
+            "lag_recovery_resynced"
         );
     }
 
@@ -689,19 +681,20 @@ async fn process_video_frame(
     if crate::stream_frame_debug_logging_enabled()
         && lag_ms >= latency_policy.max_frame_age_ms.saturating_div(2)
     {
-        log::debug!(
-            "event=lag_probe track=Video session_id={} remote_addr={} stream_path={} lag_ms={} threshold_ms={} source_ts={} prev_source_ts={} contains_idr={} sustained_lag_frames={} waiting_for_idr_recovery={} diag_monotonic_ms={}",
-            session_id,
-            remote_addr,
-            request_path,
-            lag_ms,
-            latency_policy.max_frame_age_ms,
-            flush_ts,
-            previous_source_ts,
-            contains_idr,
-            *sustained_video_lag_frames,
-            *waiting_for_idr_recovery,
-            monotonic_millis(),
+        debug!(
+            track = ?TrackType::Video,
+            session_id = %session_id,
+            remote_addr = %remote_addr,
+            request_path = %request_path,
+            lag_ms = lag_ms,
+            threshold_ms = latency_policy.max_frame_age_ms,
+            source_ts = flush_ts,
+            prev_source_ts = previous_source_ts,
+            contains_idr = contains_idr,
+            sustained_lag_frames = *sustained_video_lag_frames,
+            waiting_for_idr_recovery = *waiting_for_idr_recovery,
+            diag_monotonic_ms = monotonic_millis(),
+            "lag_probe"
         );
     }
     if lag_ms > latency_policy.max_frame_age_ms {
@@ -712,34 +705,36 @@ async fn process_video_frame(
             latency_policy.max_frame_age_ms,
             contains_idr,
         ) {
-            log::warn!(
-                "event=stale_frame_reanchor track=Video session_id={} remote_addr={} stream_path={} lag_ms={} threshold_ms={} source_ts={} prev_source_ts={} contains_idr={}",
-                session_id,
-                remote_addr,
-                request_path,
-                lag_ms,
-                latency_policy.max_frame_age_ms,
-                flush_ts,
-                previous_source_ts,
-                contains_idr,
+            warn!(
+                track = ?TrackType::Video,
+                session_id = %session_id,
+                remote_addr = %remote_addr,
+                request_path = %request_path,
+                lag_ms = lag_ms,
+                threshold_ms = latency_policy.max_frame_age_ms,
+                source_ts = flush_ts,
+                prev_source_ts = previous_source_ts,
+                contains_idr = contains_idr,
+                "stale_frame_reanchor"
             );
         } else {
             *dropped_stale_frames += 1;
             let elapsed_ms = video_lag_tracker.anchor_local.elapsed().as_millis() as u32;
             let expected_source_ts = video_lag_tracker.anchor_source_ts.wrapping_add(elapsed_ms);
-            log::warn!(
-                "event=stale_frame_drop track=Video session_id={} remote_addr={} stream_path={} lag_ms={} threshold_ms={} source_ts={} prev_source_ts={} expected_source_ts={} anchor_source_ts={} anchor_elapsed_ms={} contains_idr={}",
-                session_id,
-                remote_addr,
-                request_path,
-                lag_ms,
-                latency_policy.max_frame_age_ms,
-                flush_ts,
-                previous_source_ts,
-                expected_source_ts,
-                video_lag_tracker.anchor_source_ts,
-                elapsed_ms,
-                contains_idr,
+            warn!(
+                track = ?TrackType::Video,
+                session_id = %session_id,
+                remote_addr = %remote_addr,
+                request_path = %request_path,
+                lag_ms = lag_ms,
+                threshold_ms = latency_policy.max_frame_age_ms,
+                source_ts = flush_ts,
+                prev_source_ts = previous_source_ts,
+                expected_source_ts = expected_source_ts,
+                anchor_source_ts = video_lag_tracker.anchor_source_ts,
+                anchor_elapsed_ms = elapsed_ms,
+                contains_idr = contains_idr,
+                "stale_frame_drop"
             );
             return;
         }
@@ -759,14 +754,15 @@ async fn process_video_frame(
         *sustained_video_lag_frames = 0;
         *dropped_for_recovery += 1;
         *idr_recovery_count += 1;
-        log::warn!(
-            "event=lag_recovery_trigger track=Video session_id={} remote_addr={} stream_path={} lag_ms={} threshold_ms={} sustained_frames={}",
-            session_id,
-            remote_addr,
-            request_path,
-            lag_ms,
-            latency_policy.lag_recovery_threshold_ms,
-            latency_policy.sustained_lag_frames,
+        warn!(
+            track = ?TrackType::Video,
+            session_id = %session_id,
+            remote_addr = %remote_addr,
+            request_path = %request_path,
+            lag_ms = lag_ms,
+            threshold_ms = latency_policy.lag_recovery_threshold_ms,
+            sustained_frames = latency_policy.sustained_lag_frames,
+            "lag_recovery_trigger"
         );
         return;
     }
@@ -933,10 +929,7 @@ async fn handle_no_frame_data(
     .await;
 
     *retry_times += 1;
-    log::info!(
-        "send_channel_data: no data receives ,retry {} times!",
-        *retry_times
-    );
+    info!(retry_times = *retry_times, "no_frame_data_retry");
 
     if *retry_times > 10 {
         shutdown.store(true, Ordering::Release);
@@ -996,14 +989,14 @@ async fn run_playback_loop(
                 if let Some(ts) = timestamp_ms {
                     let paced_sleep_ms = frame_pacer.pace(ts).await;
                     if paced_sleep_ms >= PACER_SLEEP_DIAGNOSTIC_MIN_MS {
-                        log::debug!(
-                            "event=playback_pacer_sleep session_id={} remote_addr={} stream_path={} source_ts={} sleep_ms={} diag_monotonic_ms={}",
-                            session_id,
-                            remote_addr,
-                            request_path,
-                            ts,
-                            paced_sleep_ms,
-                            monotonic_millis(),
+                        debug!(
+                            session_id = %session_id,
+                            remote_addr = %remote_addr,
+                            request_path = %request_path,
+                            source_ts = ts,
+                            sleep_ms = paced_sleep_ms,
+                            diag_monotonic_ms = monotonic_millis(),
+                            "playback_pacer_sleep"
                         );
                     }
                 }
@@ -1051,14 +1044,14 @@ async fn run_playback_loop(
         }
     }
 
-    log::info!(
-        "event=playback_loop_exit session_id={} remote_addr={} stream_path={} dropped_stale_frames={} dropped_for_recovery={} idr_recovery_count={}",
-        session_id,
-        remote_addr,
-        request_path,
-        dropped_stale_frames,
-        dropped_for_recovery,
-        idr_recovery_count,
+    info!(
+        session_id = %session_id,
+        remote_addr = %remote_addr,
+        request_path = %request_path,
+        dropped_stale_frames = dropped_stale_frames,
+        dropped_for_recovery = dropped_for_recovery,
+        idr_recovery_count = idr_recovery_count,
+        "playback_loop_exit"
     );
 }
 
@@ -1186,6 +1179,12 @@ pub struct RtspServerSession {
     /// at session creation time so that each session has a consistent view
     /// even if the global is changed later.
     rtp_sample_interval: u32,
+
+    /// Streaming configuration (stored for access in handle_play)
+    /// TODO: Use config in session methods for streaming behavior
+    #[allow(dead_code)]
+    config: StreamingConfig,
+
     rtp_counters: HashMap<TrackType, RtpCountersHandle>,
     playback_cancel: Option<Arc<AtomicBool>>,
     playback_task: Option<JoinHandle<()>>,
@@ -1205,23 +1204,23 @@ impl InterleavedBinaryData {
     pub fn new(reader: &mut BytesReader) -> Result<Option<Self>, SessionError> {
         let is_dollar_sign = reader.advance_u8()? == 0x24;
         if crate::stream_frame_debug_logging_enabled() {
-            log::debug!("dollar sign: {}", is_dollar_sign);
+            debug!(is_dollar_sign, "interleaved_parse");
         }
         if is_dollar_sign {
             reader.read_u8()?;
             let channel_identifier = reader.read_u8()?;
             if crate::stream_frame_debug_logging_enabled() {
-                log::debug!("channel_identifier: {}", channel_identifier);
+                debug!(channel_identifier = channel_identifier, "channel_id_parse");
             }
             let length = reader.read_u16::<BigEndian>()?;
             if crate::stream_frame_debug_logging_enabled() {
-                log::debug!("length: {}", length);
+                debug!(length = length, "interleaved_length");
             }
             // RFC 2326 §10.12: validate interleaved payload length
             if length == 0 {
-                log::warn!(
-                    "interleaved: zero-length payload on channel {}",
-                    channel_identifier
+                warn!(
+                    channel = channel_identifier,
+                    "zero_length_interleaved_payload"
                 );
             }
             return Ok(Some(InterleavedBinaryData {
@@ -1238,6 +1237,7 @@ impl RtspServerSession {
         stream: TcpStream,
         event_producer: StreamHubEventSender,
         auth: Option<Auth>,
+        config: StreamingConfig,
     ) -> Self {
         let remote_addr = stream
             .peer_addr()
@@ -1247,7 +1247,7 @@ impl RtspServerSession {
         let read_io: Box<dyn TNetIO + Send + Sync> = Box::new(TcpReadIO::new(read_half));
         let write_io: Box<dyn TNetIO + Send + Sync> = Box::new(TcpWriteIO::new(write_half));
 
-        Self::new_with_io_pair(read_io, write_io, event_producer, auth, remote_addr)
+        Self::new_with_io_pair(read_io, write_io, event_producer, auth, remote_addr, config)
     }
 
     pub fn new_with_io(
@@ -1255,10 +1255,11 @@ impl RtspServerSession {
         event_producer: StreamHubEventSender,
         auth: Option<Auth>,
         remote_addr: SocketAddr,
+        config: StreamingConfig,
     ) -> Self {
         // Tests and in-memory sessions can share one IO object for both read and write.
         let io = Arc::new(Mutex::new(io));
-        Self::new_with_shared_io(io, event_producer, auth, remote_addr)
+        Self::new_with_shared_io(io, event_producer, auth, remote_addr, config)
     }
 
     pub fn new_with_io_pair(
@@ -1267,10 +1268,18 @@ impl RtspServerSession {
         event_producer: StreamHubEventSender,
         auth: Option<Auth>,
         remote_addr: SocketAddr,
+        config: StreamingConfig,
     ) -> Self {
         let read_io = Arc::new(Mutex::new(read_io));
         let write_io = Arc::new(Mutex::new(write_io));
-        Self::new_with_reader_writer_io(read_io, write_io, event_producer, auth, remote_addr)
+        Self::new_with_reader_writer_io(
+            read_io,
+            write_io,
+            event_producer,
+            auth,
+            remote_addr,
+            config,
+        )
     }
 
     fn new_with_shared_io(
@@ -1278,8 +1287,9 @@ impl RtspServerSession {
         event_producer: StreamHubEventSender,
         auth: Option<Auth>,
         remote_addr: SocketAddr,
+        config: StreamingConfig,
     ) -> Self {
-        Self::new_with_reader_writer_io(io.clone(), io, event_producer, auth, remote_addr)
+        Self::new_with_reader_writer_io(io.clone(), io, event_producer, auth, remote_addr, config)
     }
 
     fn new_with_reader_writer_io(
@@ -1288,8 +1298,9 @@ impl RtspServerSession {
         event_producer: StreamHubEventSender,
         auth: Option<Auth>,
         remote_addr: SocketAddr,
+        config: StreamingConfig,
     ) -> Self {
-        let sample_interval = rtp_sample_interval();
+        let sample_interval = config.rtp_sample_interval;
         Self {
             io_reader,
             io_writer: io_writer.clone(),
@@ -1310,6 +1321,7 @@ impl RtspServerSession {
             shutdown: Arc::new(AtomicBool::new(false)),
             shutdown_flag: None,
             rtp_sample_interval: sample_interval,
+            config,
             rtp_counters: HashMap::new(),
             playback_cancel: None,
             playback_task: None,
@@ -1339,10 +1351,10 @@ impl RtspServerSession {
             Ok(Ok(data)) => Ok(data),
             Ok(Err(e)) => Err(e.into()),
             Err(_) => {
-                log::info!(
-                    "event=rtsp_session_timeout timeout_secs={} remote_addr={}",
-                    timeout_secs,
-                    remote_addr,
+                info!(
+                    timeout_secs = timeout_secs,
+                    remote_addr = %remote_addr,
+                    "rtsp_session_timeout"
                 );
                 Err(SessionError {
                     value: SessionErrorValue::SessionTimeout(timeout_secs),
@@ -1478,7 +1490,7 @@ impl RtspServerSession {
                 Ok(()) => {}
                 Err(err) if err.is_cancelled() => {}
                 Err(err) => {
-                    log::warn!("playback task join error: {err}");
+                    warn!(error = %err, "playback_task_join_error");
                 }
             }
         }
@@ -1556,10 +1568,10 @@ impl RtspServerSession {
         remote_addr: &SocketAddr,
     ) -> Option<RtspResponse> {
         if rtsp_request.version != "RTSP/1.0" {
-            log::warn!(
-                "event=rtsp_unsupported_version version={} remote_addr={}",
-                rtsp_request.version,
-                remote_addr,
+            warn!(
+                version = %rtsp_request.version,
+                remote_addr = %remote_addr,
+                "rtsp_unsupported_version"
             );
             return Some(Self::gen_response(
                 http::StatusCode::HTTP_VERSION_NOT_SUPPORTED,
@@ -1570,11 +1582,11 @@ impl RtspServerSession {
             let claimed: usize = cl_str.trim().parse().unwrap_or(0);
             let actual = rtsp_request.body.as_ref().map_or(0, |b| b.len());
             if claimed != actual {
-                log::warn!(
-                    "event=rtsp_content_length_mismatch claimed={} actual={} remote_addr={}",
-                    claimed,
-                    actual,
-                    remote_addr,
+                warn!(
+                    claimed = claimed,
+                    actual = actual,
+                    remote_addr = %remote_addr,
+                    "rtsp_content_length_mismatch"
                 );
                 return Some(Self::gen_response(
                     http::StatusCode::BAD_REQUEST,
@@ -1613,7 +1625,7 @@ impl RtspServerSession {
             }
             rtsp_method_name::PLAY => {
                 if let Err(err) = self.handle_play(&rtsp_request).await {
-                    log::info!("handle_play error: {}", err);
+                    info!(error = %err, "handle_play_error");
                 }
             }
             rtsp_method_name::RECORD => {
@@ -1648,10 +1660,10 @@ impl RtspServerSession {
             }
 
             _ => {
-                log::warn!(
-                    "event=rtsp_unknown_method method={} remote_addr={}",
-                    rtsp_request.method,
-                    self.remote_addr,
+                warn!(
+                    method = %rtsp_request.method,
+                    remote_addr = %self.remote_addr,
+                    "rtsp_unknown_method"
                 );
                 let response = Self::gen_response(http::StatusCode::NOT_IMPLEMENTED, &rtsp_request);
                 self.send_response(&response).await?;
@@ -1672,13 +1684,14 @@ impl RtspServerSession {
             .session_id
             .map(|id| id.to_string())
             .unwrap_or_else(|| "none".to_string());
-        log::info!(
-            "event=rtsp_request method=OPTIONS cseq={} session_id={} remote_addr={} stream_path={} session_type={}",
-            cseq,
-            session_id,
-            self.remote_addr,
-            rtsp_request.uri.path,
-            self.session_type,
+        info!(
+            method = "OPTIONS",
+            cseq = %cseq,
+            session_id = %session_id,
+            remote_addr = %self.remote_addr,
+            stream_path = %rtsp_request.uri.path,
+            session_type = ?self.session_type,
+            "rtsp_request"
         );
 
         Ok(())
@@ -1738,10 +1751,10 @@ impl RtspServerSession {
         if let Some(accept) = rtsp_request.get_header("Accept") {
             let dominated = accept.contains("application/sdp") || accept.contains("*/*");
             if !dominated {
-                log::warn!(
-                    "event=rtsp_not_acceptable accept=\"{}\" remote_addr={}",
-                    accept,
-                    self.remote_addr,
+                warn!(
+                    accept = %accept,
+                    remote_addr = %self.remote_addr,
+                    "rtsp_not_acceptable"
                 );
                 let response = Self::gen_response(http::StatusCode::NOT_ACCEPTABLE, rtsp_request);
                 self.send_response(&response).await?;
@@ -1774,14 +1787,15 @@ impl RtspServerSession {
             .map(|id| id.to_string())
             .unwrap_or_else(|| "none".to_string());
         let media_count = self.sdp.medias.len();
-        log::info!(
-            "event=rtsp_request method=DESCRIBE cseq={} session_id={} remote_addr={} stream_path={} session_type={} sdp_media_count={}",
-            cseq,
-            session_id,
-            self.remote_addr,
-            rtsp_request.uri.path,
-            self.session_type,
-            media_count,
+        info!(
+            method = "DESCRIBE",
+            cseq = %cseq,
+            session_id = %session_id,
+            remote_addr = %self.remote_addr,
+            stream_path = %rtsp_request.uri.path,
+            session_type = ?self.session_type,
+            sdp_media_count = media_count,
+            "rtsp_request"
         );
 
         Ok(())
@@ -1842,7 +1856,7 @@ impl RtspServerSession {
             rtp_channel_guard.on_frame_handler(Box::new(
                 move |msg: FrameData| -> Result<(), UnPackerError> {
                     if let Err(err) = sender_out.send(msg) {
-                        log::error!("send frame error: {}", err);
+                        error!(error = %err, "send_frame_error");
                     }
                     Ok(())
                 },
@@ -1965,15 +1979,16 @@ impl RtspServerSession {
             .get_header("Transport")
             .cloned()
             .unwrap_or_default();
-        log::info!(
-            "event=rtsp_request method=SETUP cseq={} session_id={} remote_addr={} stream_path={} session_type={} track_type={:?} transport_req=\"{}\"",
-            cseq,
-            session_id,
-            self.remote_addr,
-            rtsp_request.uri.path,
-            self.session_type,
-            track_type,
-            transport_hdr,
+        info!(
+            method = "SETUP",
+            cseq = %cseq,
+            session_id = %session_id,
+            remote_addr = %self.remote_addr,
+            stream_path = %rtsp_request.uri.path,
+            session_type = ?self.session_type,
+            track_type = ?track_type,
+            transport_req = %transport_hdr,
+            "rtsp_request"
         );
     }
 
@@ -1999,10 +2014,10 @@ impl RtspServerSession {
 
         let transport = RtspTransport::unmarshal(transport_data);
         if let Err(ref err) = transport {
-            log::warn!(
-                "event=rtsp_unsupported_transport error=\"{}\" remote_addr={}",
-                err,
-                self.remote_addr,
+            warn!(
+                error = %err,
+                remote_addr = %self.remote_addr,
+                "rtsp_unsupported_transport"
             );
             let response = Self::gen_response(
                 http::StatusCode::from_u16(461).unwrap_or(http::StatusCode::BAD_REQUEST),
@@ -2218,7 +2233,7 @@ impl RtspServerSession {
                 }
                 Err(err) => {
                     // RFC 2326 §11.3.7 — invalid Range returns 457
-                    log::warn!("handle_play: invalid Range header: {err}");
+                    warn!(error = %err, "invalid_range_header");
                     let err_response = Self::gen_rtsp_response(457, "Invalid Range", rtsp_request);
                     self.send_response(&err_response).await?;
                     Ok(false)
@@ -2294,39 +2309,41 @@ impl RtspServerSession {
                     );
 
                     if stats.seq_gap || stats.seq_regressed || stats.timestamp_regressed {
-                        log::warn!(
-                            "event=rtp_packet_anomaly protocol=TCP track={} session_id={} remote_addr={} stream_path={} prev_seq={:?} seq={} seq_delta={:?} prev_timestamp={:?} timestamp={} timestamp_delta={:?} seq_gap={} seq_regressed={} timestamp_regressed={}",
-                            track_label,
-                            session_id,
-                            remote_for_rtp,
-                            stream_path,
-                            stats.prev_seq,
-                            packet.header.seq_number,
-                            stats.seq_delta,
-                            stats.prev_timestamp,
-                            packet.header.timestamp,
-                            stats.timestamp_delta,
-                            stats.seq_gap,
-                            stats.seq_regressed,
-                            stats.timestamp_regressed,
+                        warn!(
+                            protocol = "TCP",
+                            track = %track_label,
+                            session_id = %session_id,
+                            remote_addr = %remote_for_rtp,
+                            stream_path = %stream_path,
+                            prev_seq = ?stats.prev_seq,
+                            seq = packet.header.seq_number,
+                            seq_delta = ?stats.seq_delta,
+                            prev_timestamp = ?stats.prev_timestamp,
+                            timestamp = packet.header.timestamp,
+                            timestamp_delta = ?stats.timestamp_delta,
+                            seq_gap = stats.seq_gap,
+                            seq_regressed = stats.seq_regressed,
+                            timestamp_regressed = stats.timestamp_regressed,
+                            "rtp_packet_anomaly"
                         );
                     }
 
                     if sample_interval > 0
                         && stats.packets_sent.is_multiple_of(sample_interval as u64)
                     {
-                        log::debug!(
-                            "event=rtp_packet_sample protocol=TCP track={} session_id={} remote_addr={} stream_path={} seq={} timestamp={} marker={} size_bytes={} packets_sent={} bytes_sent={}",
-                            track_label,
-                            session_id,
-                            remote_for_rtp,
-                            stream_path,
-                            packet.header.seq_number,
-                            packet.header.timestamp,
-                            packet.header.marker,
-                            payload_len,
-                            stats.packets_sent,
-                            stats.bytes_sent,
+                        debug!(
+                            protocol = "TCP",
+                            track = %track_label,
+                            session_id = %session_id,
+                            remote_addr = %remote_for_rtp,
+                            stream_path = %stream_path,
+                            seq = packet.header.seq_number,
+                            timestamp = packet.header.timestamp,
+                            marker = packet.header.marker,
+                            size_bytes = payload_len,
+                            packets_sent = stats.packets_sent,
+                            bytes_sent = stats.bytes_sent,
+                            "rtp_packet_sample"
                         );
                     }
 
@@ -2370,39 +2387,41 @@ impl RtspServerSession {
                     );
 
                     if stats.seq_gap || stats.seq_regressed || stats.timestamp_regressed {
-                        log::warn!(
-                            "event=rtp_packet_anomaly protocol=UDP track={} session_id={} remote_addr={} stream_path={} prev_seq={:?} seq={} seq_delta={:?} prev_timestamp={:?} timestamp={} timestamp_delta={:?} seq_gap={} seq_regressed={} timestamp_regressed={}",
-                            track_label,
-                            session_id,
-                            remote_for_rtp,
-                            stream_path,
-                            stats.prev_seq,
-                            packet.header.seq_number,
-                            stats.seq_delta,
-                            stats.prev_timestamp,
-                            packet.header.timestamp,
-                            stats.timestamp_delta,
-                            stats.seq_gap,
-                            stats.seq_regressed,
-                            stats.timestamp_regressed,
+                        warn!(
+                            protocol = "UDP",
+                            track = %track_label,
+                            session_id = %session_id,
+                            remote_addr = %remote_for_rtp,
+                            stream_path = %stream_path,
+                            prev_seq = ?stats.prev_seq,
+                            seq = packet.header.seq_number,
+                            seq_delta = ?stats.seq_delta,
+                            prev_timestamp = ?stats.prev_timestamp,
+                            timestamp = packet.header.timestamp,
+                            timestamp_delta = ?stats.timestamp_delta,
+                            seq_gap = stats.seq_gap,
+                            seq_regressed = stats.seq_regressed,
+                            timestamp_regressed = stats.timestamp_regressed,
+                            "rtp_packet_anomaly"
                         );
                     }
 
                     if sample_interval > 0
                         && stats.packets_sent.is_multiple_of(sample_interval as u64)
                     {
-                        log::debug!(
-                            "event=rtp_packet_sample protocol=UDP track={} session_id={} remote_addr={} stream_path={} seq={} timestamp={} marker={} size_bytes={} packets_sent={} bytes_sent={}",
-                            track_label,
-                            session_id,
-                            remote_for_rtp,
-                            stream_path,
-                            packet.header.seq_number,
-                            packet.header.timestamp,
-                            packet.header.marker,
-                            payload_len,
-                            stats.packets_sent,
-                            stats.bytes_sent,
+                        debug!(
+                            protocol = "UDP",
+                            track = %track_label,
+                            session_id = %session_id,
+                            remote_addr = %remote_for_rtp,
+                            stream_path = %stream_path,
+                            seq = packet.header.seq_number,
+                            timestamp = packet.header.timestamp,
+                            marker = packet.header.marker,
+                            size_bytes = payload_len,
+                            packets_sent = stats.packets_sent,
+                            bytes_sent = stats.bytes_sent,
+                            "rtp_packet_sample"
                         );
                     }
 
@@ -2437,41 +2456,42 @@ impl RtspServerSession {
             .session_id
             .map(|id| id.to_string())
             .unwrap_or_else(|| "none".to_string());
-        log::info!(
-            "event=rtsp_request method=PLAY cseq={} session_id={} remote_addr={} stream_path={} session_type={}",
-            cseq,
-            session_id,
-            self.remote_addr,
-            rtsp_request.uri.path,
-            self.session_type,
+        info!(
+            method = "PLAY",
+            cseq = %cseq,
+            session_id = %session_id,
+            remote_addr = %self.remote_addr,
+            stream_path = %rtsp_request.uri.path,
+            session_type = ?self.session_type,
+            "rtsp_request"
         );
 
         if let Some(range_str) = rtsp_request.get_header("Range")
             && RtspRange::unmarshal(range_str).is_err()
         {
-            log::warn!(
-                "event=play_rejected_invalid_range session_id={} remote_addr={} stream_path={} range={}",
-                session_id,
-                self.remote_addr,
-                rtsp_request.uri.path,
-                range_str,
+            warn!(
+                session_id = %session_id,
+                remote_addr = %self.remote_addr,
+                stream_path = %rtsp_request.uri.path,
+                range = %range_str,
+                "play_rejected_invalid_range"
             );
             let response = Self::gen_rtsp_response(457, "Invalid Range", rtsp_request);
             self.send_response(&response).await?;
             return Ok(());
         }
 
-        let play_gate_timeout_ms = std::env::var("ONVIF_PLAY_READY_TIMEOUT_MS")
-            .ok()
-            .and_then(|value| value.trim().parse::<u64>().ok())
-            .filter(|value| *value > 0)
-            .unwrap_or(DEFAULT_PLAY_READY_TIMEOUT_MS);
-        log::debug!(
-            "event=play_waiting_for_tracks session_id={} remote_addr={} stream_path={} timeout_ms={}",
-            session_id,
-            self.remote_addr,
-            rtsp_request.uri.path,
-            play_gate_timeout_ms,
+        let play_gate_timeout_ms = if self.config.play_ready_timeout_ms > 0 {
+            self.config.play_ready_timeout_ms
+        } else {
+            DEFAULT_PLAY_READY_TIMEOUT_MS
+        };
+        debug!(
+            session_id = %session_id,
+            remote_addr = %self.remote_addr,
+            stream_path = %rtsp_request.uri.path,
+            timeout_ms = play_gate_timeout_ms,
+            "play_waiting_for_tracks"
         );
         if !self
             .wait_for_tracks(
@@ -2480,12 +2500,12 @@ impl RtspServerSession {
             )
             .await?
         {
-            log::warn!(
-                "event=play_rejected_waiting_for_sps_pps session_id={} remote_addr={} stream_path={} timeout_ms={}",
-                session_id,
-                self.remote_addr,
-                rtsp_request.uri.path,
-                play_gate_timeout_ms,
+            warn!(
+                session_id = %session_id,
+                remote_addr = %self.remote_addr,
+                stream_path = %rtsp_request.uri.path,
+                timeout_ms = play_gate_timeout_ms,
+                "play_rejected_waiting_for_sps_pps"
             );
             let response = Self::gen_response(http::StatusCode::SERVICE_UNAVAILABLE, rtsp_request);
             self.send_response(&response).await?;
@@ -2516,7 +2536,7 @@ impl RtspServerSession {
                         .interleaved
                         .map(|i| i[0])
                         .unwrap_or_else(|| {
-                            log::error!("handle_play:should not be here!!!");
+                            error!("unexpected_state");
                             0
                         });
                     let handler = Self::setup_tcp_play_packet_handler(
@@ -2607,17 +2627,17 @@ impl RtspServerSession {
         let request_path = rtsp_request.uri.path.clone();
         let session_id_for_task = session_id.clone();
         let shutdown = self.shutdown.clone();
-        let latency_policy = PlaybackLatencyPolicy::from_env();
+        let latency_policy = PlaybackLatencyPolicy::from_config(&self.config);
 
-        log::info!(
-            "event=playback_latency_policy session_id={} remote_addr={} stream_path={} max_frame_age_ms={} lag_recovery_mode={:?} lag_recovery_threshold_ms={} sustained_lag_frames={}",
-            session_id,
-            self.remote_addr,
-            rtsp_request.uri.path,
-            latency_policy.max_frame_age_ms,
-            latency_policy.lag_recovery_mode,
-            latency_policy.lag_recovery_threshold_ms,
-            latency_policy.sustained_lag_frames,
+        info!(
+            session_id = %session_id,
+            remote_addr = %self.remote_addr,
+            stream_path = %rtsp_request.uri.path,
+            max_frame_age_ms = latency_policy.max_frame_age_ms,
+            lag_recovery_mode = ?latency_policy.lag_recovery_mode,
+            lag_recovery_threshold_ms = latency_policy.lag_recovery_threshold_ms,
+            sustained_lag_frames = latency_policy.sustained_lag_frames,
+            "playback_latency_policy"
         );
 
         self.stop_playback_task().await;
@@ -2654,7 +2674,7 @@ impl RtspServerSession {
                         .insert(String::from("Range"), range.marshal());
                 }
                 Err(err) => {
-                    log::warn!("invalid range header ignored: {err}");
+                    warn!(error = %err, "invalid_range_header_ignored");
                 }
             }
         }
@@ -2758,14 +2778,14 @@ impl RtspServerSession {
             .session_id
             .map(|id| id.to_string())
             .unwrap_or_else(|| "none".to_string());
-        log::info!(
-            "event=rtsp_request method={} cseq={} session_id={} remote_addr={} stream_path={} session_type={}",
-            method,
-            cseq,
-            session_id,
-            self.remote_addr,
-            rtsp_request.uri.path,
-            self.session_type,
+        info!(
+            method = %method,
+            cseq = %cseq,
+            session_id = %session_id,
+            remote_addr = %self.remote_addr,
+            stream_path = %rtsp_request.uri.path,
+            session_type = ?self.session_type,
+            "rtsp_request"
         );
 
         Ok(())
@@ -2773,14 +2793,14 @@ impl RtspServerSession {
 
     fn handle_teardown(&mut self, rtsp_request: &RtspRequest) -> Result<(), SessionError> {
         let identifier = self.resolve_stream_identifier(&rtsp_request.uri.path);
-        log::info!(
-            "event=rtsp_teardown session_id={} remote_addr={} stream_path={} session_type={}",
-            self.session_id
+        info!(
+            session_id = %self.session_id
                 .map(|id| id.to_string())
                 .unwrap_or_else(|| "none".to_string()),
-            self.remote_addr,
-            rtsp_request.uri.path,
-            self.session_type,
+            remote_addr = %self.remote_addr,
+            stream_path = %rtsp_request.uri.path,
+            session_type = ?self.session_type,
+            "rtsp_teardown"
         );
 
         // Best-effort per-track RTP summary at session teardown.
@@ -2798,18 +2818,18 @@ impl RtspServerSession {
                 .as_ref()
                 .map(|id| id.to_string())
                 .unwrap_or_else(|| "unknown".to_string());
-            log::info!(
-                "event=rtp_session_summary reason=teardown track={:?} session_id={} remote_addr={} stream_path={} packets={} bytes={} duration_ms={} bitrate_kbps={}",
-                track_type,
-                self.session_id
+            info!(
+                track = ?track_type,
+                session_id = %self.session_id
                     .map(|id| id.to_string())
                     .unwrap_or_else(|| "none".to_string()),
-                self.remote_addr,
-                stream_path,
-                packets,
-                bytes,
-                duration_ms.unwrap_or(0),
-                bitrate_kbps,
+                remote_addr = %self.remote_addr,
+                stream_path = %stream_path,
+                packets = packets,
+                bytes = bytes,
+                duration_ms = duration_ms.unwrap_or(0),
+                bitrate_kbps = bitrate_kbps,
+                "rtp_session_summary"
             );
         }
         self.exit(identifier)
@@ -2834,9 +2854,7 @@ impl RtspServerSession {
             Some(event) => event,
             None => {
                 self.is_normal_exit = true;
-                log::info!(
-                    "session exit: no publish/subscribe established; skipping streamhub event"
-                );
+                info!("session_exit_no_pubsub");
                 return Ok(());
             }
         };
@@ -2846,14 +2864,14 @@ impl RtspServerSession {
         let rv = self.event_producer.send(event);
         match rv {
             Err(err) => {
-                log::error!("session exit: send event error: {err} for event: {event_json_str}");
+                error!(error = %err, event_json = %event_json_str, "session_exit_send_error");
                 Err(SessionError {
                     value: SessionErrorValue::StreamHubEventSendErr,
                 })
             }
             Ok(()) => {
                 self.is_normal_exit = true;
-                log::info!("session exit: send event success: {event_json_str}");
+                info!(event_json = %event_json_str, "session_exit_success");
                 Ok(())
             }
         }
@@ -2868,7 +2886,7 @@ impl RtspServerSession {
             };
 
             let media_name = &media.media_type;
-            log::info!("media_name: {}", media_name);
+            info!(media_name = %media_name, "media_track_info");
             match media_name.as_str() {
                 "audio" => {
                     let codec_name = media.rtpmap.encoding_name.to_lowercase();
@@ -2901,7 +2919,7 @@ impl RtspServerSession {
                         channel_count,
                     };
 
-                    log::info!("audio codec info: {:?}", codec_info);
+                    info!(codec_info = ?codec_info, "audio_codec_info");
 
                     let track = RtspTrack::new(TrackType::Audio, codec_info, media_control);
                     self.tracks.insert(TrackType::Audio, track);
@@ -3130,7 +3148,7 @@ impl RtspStreamHandler {
                 vcodec,
             },
         }) {
-            log::error!("send media info error: {}", err);
+            error!(error = %err, "send_media_info_error");
         }
         Ok(())
     }
@@ -3158,7 +3176,7 @@ impl RtspStreamHandler {
                     data: bytes_writer.extract_current_bytes(),
                 };
                 if let Err(err) = sender.send(frame_data) {
-                    log::error!("send sps/pps error: {}", err);
+                    error!(error = %err, "send_sps_pps_error");
                 }
                 *video_clock_rate = media.rtpmap.clock_rate;
             }
@@ -3175,7 +3193,7 @@ impl RtspStreamHandler {
                     data: bytes_writer.extract_current_bytes(),
                 };
                 if let Err(err) = sender.send(frame_data) {
-                    log::error!("send sps/pps/vps error: {}", err);
+                    error!(error = %err, "send_sps_pps_vps_error");
                 }
                 *vcodec = VideoCodecType::H265;
                 *video_clock_rate = media.rtpmap.clock_rate;
@@ -3186,7 +3204,7 @@ impl RtspStreamHandler {
                     data: data.asc.clone(),
                 };
                 if let Err(err) = sender.send(frame_data) {
-                    log::error!("send asc error: {}", err);
+                    error!(error = %err, "send_asc_error");
                 }
                 *audio_clock_rate = media.rtpmap.clock_rate;
             }
@@ -3222,7 +3240,7 @@ impl TStreamHandler for RtspStreamHandler {
         if let Err(err) = sender.send(Information::Sdp {
             data: self.sdp.lock().await.marshal(),
         }) {
-            log::error!("send_information of rtsp error: {}", err);
+            error!(error = %err, "send_information_error");
         }
     }
 }

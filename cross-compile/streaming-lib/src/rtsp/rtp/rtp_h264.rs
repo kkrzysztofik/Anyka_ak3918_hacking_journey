@@ -123,7 +123,6 @@ impl RtpH264Packer {
             }
 
             if let Some(f) = &self.on_packet_handler {
-                // log::info!("seq number: {}", packet.header.seq_number);
                 f(self.io.clone(), packet).await?;
             }
 
@@ -589,7 +588,7 @@ impl RtpH264UnPacker {
                 reader.read_u24::<BigEndian>()?;
             }
             _ => {
-                log::warn!("Invalid MTAP type");
+                tracing::warn!("invalid_mtap_type");
             }
         }
         Ok(())

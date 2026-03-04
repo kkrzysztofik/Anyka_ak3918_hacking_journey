@@ -166,10 +166,10 @@ impl HttpFlv {
             if let HttpFLvErrorValue::MpscSendError(err_in) = &err.value
                 && err_in.is_disconnected()
             {
-                log::info!("write_flv_tag: {}", err_in);
+                tracing::debug!(error = %err_in, "write_flv_tag_disconnected");
                 return 11;
             }
-            log::error!("write_flv_tag err: {}", err);
+            tracing::error!(error = %err, "write_flv_tag_error");
             retry_count += 1;
         } else {
             retry_count = 0;
@@ -213,7 +213,7 @@ impl HttpFlv {
             duration: 0,
         };
         if let Err(err) = sender.send(statistic_audio_data) {
-            log::error!("send statistic data err: {}", err);
+            tracing::error!(error = %err, "send_audio_statistics_error");
         }
     }
 
@@ -229,7 +229,7 @@ impl HttpFlv {
             duration: 0,
         };
         if let Err(err) = sender.send(statistic_video_data) {
-            log::error!("send statistic data err: {}", err);
+            tracing::error!(error = %err, "send_video_statistics_error");
         }
     }
 
@@ -276,7 +276,7 @@ impl HttpFlv {
             info: sub_info,
         };
         if let Err(err) = self.event_producer.send(subscribe_event) {
-            log::error!("unsubscribe_from_stream_hub err {}", err);
+            tracing::error!(error = %err, "unsubscribe_from_stream_hub_error");
         }
 
         Ok(())
@@ -327,7 +327,7 @@ impl HttpFlv {
                 sub_type: SubscribeType::HttpFlvPull,
             };
             if let Err(err) = sender.send(statistic_subscriber) {
-                log::error!("send statistic_subscriber err: {}", err);
+                tracing::error!(error = %err, "send_statistic_subscriber_error");
             }
         }
 

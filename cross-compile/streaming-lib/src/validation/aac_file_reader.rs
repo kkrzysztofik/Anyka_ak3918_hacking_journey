@@ -279,10 +279,10 @@ impl AacFileReader {
             return;
         }
 
-        log::warn!(
-            "aac_file_reader: configured sample_rate={} differs from ADTS sample_rate={}, using ADTS value",
-            self.sample_rate,
-            actual_sample_rate
+        tracing::warn!(
+            configured_rate = self.sample_rate,
+            adts_rate = actual_sample_rate,
+            "sample_rate_mismatch_using_adts"
         );
         self.sample_rate = actual_sample_rate;
         self.frame_duration_ms = Self::calculate_frame_duration(actual_sample_rate);

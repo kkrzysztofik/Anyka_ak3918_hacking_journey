@@ -6,6 +6,7 @@
 use bytes::BytesMut;
 use portable_atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use streaming_lib::config::StreamingConfig;
 use streaming_lib::streamhub::errors::StreamHubError;
 use streaming_lib::streamhub::statistics::StatisticsStream;
 use streaming_lib::{
@@ -223,10 +224,11 @@ pub fn spawn_rtsp_server(
     event_sender: streaming_lib::streamhub::define::StreamHubEventSender,
     stream_auth: Option<streaming_lib::common::auth::Auth>,
     port: u16,
+    streaming_config: StreamingConfig,
 ) -> tokio::task::JoinHandle<()> {
     let addr = format!("0.0.0.0:{}", port);
     tokio::spawn(async move {
-        let mut server = DefaultRtspServer::new(addr, event_sender, stream_auth);
+        let mut server = DefaultRtspServer::new(addr, event_sender, stream_auth, streaming_config);
         if let Err(e) = server.run(None).await {
             tracing::error!("RTSP server error: {}", e);
         }

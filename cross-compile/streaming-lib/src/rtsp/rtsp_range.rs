@@ -1,5 +1,4 @@
 use crate::rtsp::global_trait::Marshal;
-use log::error;
 
 use super::global_trait::Unmarshal;
 use super::rtsp_utils;
@@ -23,7 +22,7 @@ impl RtspRange {
     fn parse_clock_time(range_time: &str) -> Result<i64, String> {
         let datetime = chrono::NaiveDateTime::parse_from_str(range_time, "%Y%m%dT%H%M%SZ")
             .map_err(|err| {
-                error!("get_clock_time error: {err}");
+                tracing::error!(error = %err, "get_clock_time_error");
                 format!("invalid clock range: {range_time}")
             })?;
         Ok(datetime.and_utc().timestamp())

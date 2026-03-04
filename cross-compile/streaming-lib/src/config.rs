@@ -26,6 +26,12 @@ pub struct StreamingConfig {
     /// Lag recovery mode for handling playback delays
     pub lag_recovery_mode: LagRecoveryMode,
 
+    /// Play ready timeout in milliseconds
+    ///
+    /// Maximum time to wait for the client to become ready for playback
+    /// after receiving the PLAY response.
+    pub play_ready_timeout_ms: u64,
+
     /// RTSP server listen address
     ///
     /// Format: "0.0.0.0:554" or "[::]:554" for IPv6
@@ -43,6 +49,7 @@ impl Default for StreamingConfig {
             rtp_sample_interval: 0, // disabled by default
             max_frame_age_ms: 1500,
             lag_recovery_mode: LagRecoveryMode::LatestIdr,
+            play_ready_timeout_ms: 1500,
             rtsp_listen_addr: "0.0.0.0:554".to_string(),
             httpflv_listen_addr: "0.0.0.0:8080".to_string(),
         }
@@ -81,6 +88,16 @@ impl StreamingConfig {
         self
     }
 
+    /// Set the play ready timeout
+    ///
+    /// # Arguments
+    ///
+    /// * `timeout_ms` - Timeout in milliseconds
+    pub fn with_play_ready_timeout(mut self, timeout_ms: u64) -> Self {
+        self.play_ready_timeout_ms = timeout_ms;
+        self
+    }
+
     /// Set the RTSP listen address
     pub fn with_rtsp_listen_addr(mut self, addr: impl Into<String>) -> Self {
         self.rtsp_listen_addr = addr.into();
@@ -105,6 +122,7 @@ mod tests {
         assert_eq!(config.rtp_sample_interval, 0);
         assert_eq!(config.max_frame_age_ms, 1500);
         assert_eq!(config.lag_recovery_mode, LagRecoveryMode::LatestIdr);
+        assert_eq!(config.play_ready_timeout_ms, 1500);
         assert_eq!(config.rtsp_listen_addr, "0.0.0.0:554");
         assert_eq!(config.httpflv_listen_addr, "0.0.0.0:8080");
     }
@@ -121,6 +139,20 @@ mod tests {
         assert_eq!(config.max_frame_age_ms, 2000);
         assert_eq!(config.rtsp_listen_addr, "0.0.0.0:8554");
         assert_eq!(config.httpflv_listen_addr, "0.0.0.0:8888");
+    }
+
+    #[test]
+    fn test_play_ready_timeout_builder() {
+        let config = StreamingConfig::new().with_play_ready_timeout(3000);
+
+        assert_eq!(config.play_ready_timeout_ms, 3000);
+    }
+
+    #[test]
+    fn test_play_ready_timeout_default() {
+        let config = StreamingConfig::new();
+
+        assert_eq!(config.play_ready_timeout_ms, 1500);
     }
 
     #[test]

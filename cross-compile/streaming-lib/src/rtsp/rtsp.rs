@@ -2,15 +2,15 @@ use crate::streamhub::define::StreamHubEventSender;
 
 use super::session::server_session::RtspServerSession;
 use crate::common::auth::Auth;
+use crate::config::StreamingConfig;
 use async_trait::async_trait;
-use log::{error, info, warn};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::io::Error;
 use tokio::net::TcpListener;
-use tokio::sync::broadcast;
 use tokio::sync::Semaphore;
+use tokio::sync::broadcast;
 
 /// Trait for RTSP server implementations
 ///
@@ -19,7 +19,12 @@ use tokio::sync::Semaphore;
 #[async_trait]
 pub trait RtspServer: Send + Sync {
     /// Create a new RTSP server instance
-    fn new(address: String, event_producer: StreamHubEventSender, auth: Option<Auth>) -> Self
+    fn new(
+        address: String,
+        event_producer: StreamHubEventSender,
+        auth: Option<Auth>,
+        config: StreamingConfig,
+    ) -> Self
     where
         Self: Sized;
 
@@ -40,17 +45,24 @@ pub struct DefaultRtspServer {
     address: String,
     event_producer: StreamHubEventSender,
     auth: Option<Auth>,
+    config: StreamingConfig,
     shutdown_flag: Option<Arc<AtomicBool>>,
     session_semaphore: Arc<Semaphore>,
 }
 
 #[async_trait]
 impl RtspServer for DefaultRtspServer {
-    fn new(address: String, event_producer: StreamHubEventSender, auth: Option<Auth>) -> Self {
+    fn new(
+        address: String,
+        event_producer: StreamHubEventSender,
+        auth: Option<Auth>,
+        config: StreamingConfig,
+    ) -> Self {
         Self {
             address,
             event_producer,
             auth,
+            config,
             shutdown_flag: None,
             session_semaphore: Arc::new(Semaphore::new(MAX_CONCURRENT_SESSIONS)),
         }
@@ -73,7 +85,7 @@ impl RtspServer for DefaultRtspServer {
                 })?;
         let listener = TcpListener::bind(socket_addr).await?;
 
-        info!("event=rtsp_server_start address=tcp://{}", socket_addr);
+        tracing::info!(address = %socket_addr, "rtsp_server_start");
 
         // Clone flag for the accept loop
         let shutdown_flag_clone = shutdown_flag.clone();
@@ -92,9 +104,10 @@ impl RtspServer for DefaultRtspServer {
                             let permit = match self.session_semaphore.clone().try_acquire_owned() {
                                 Ok(p) => p,
                                 Err(_) => {
-                                    warn!(
-                                        "event=rtsp_session_rejected reason=max_sessions remote_addr={} limit={}",
-                                        peer_addr, MAX_CONCURRENT_SESSIONS
+                                    tracing::warn!(
+                                        remote_addr = %peer_addr,
+                                        limit = %MAX_CONCURRENT_SESSIONS,
+                                        "rtsp_session_rejected_max_sessions"
                                     );
                                     // Drop the TcpStream (closes connection)
                                     drop(tcp_stream);
@@ -102,15 +115,17 @@ impl RtspServer for DefaultRtspServer {
                                 }
                             };
 
-                            info!(
-                                "event=rtsp_connection_start remote_addr={} local_addr={}",
-                                peer_addr, socket_addr
+                            tracing::info!(
+                                remote_addr = %peer_addr,
+                                local_addr = %socket_addr,
+                                "rtsp_connection_start"
                             );
                             // Create session with shared shutdown flag
                             let mut session = RtspServerSession::new(
                                 tcp_stream,
                                 self.event_producer.clone(),
                                 self.auth.clone(),
+                                self.config.clone(),
                             );
                             // Set the shared shutdown flag for graceful shutdown
                             session.set_shutdown_flag(shutdown_flag_clone.clone());
@@ -126,9 +141,11 @@ impl RtspServer for DefaultRtspServer {
                                     } else {
                                         "none".to_string()
                                     };
-                                    info!(
-                                        "session run exit: session id: {} session type: {} , err: {}",
-                                        session_id, session.session_type, err
+                                    tracing::info!(
+                                        session_id = %session_id,
+                                        session_type = %session.session_type,
+                                        error = %err,
+                                        "session_run_exit"
                                     );
 
                                     if !session.is_normal_exit
@@ -136,15 +153,18 @@ impl RtspServer for DefaultRtspServer {
                                     {
                                         match session.exit(identifier) {
                                             Err(err) => {
-                                                error!(
-                                                    "session exit error: session id: {} session type: {}, error info: {}",
-                                                    session_id, session.session_type, err
+                                                tracing::error!(
+                                                    session_id = %session_id,
+                                                    session_type = %session.session_type,
+                                                    error = %err,
+                                                    "session_exit_error"
                                                 );
                                             }
                                             Ok(()) => {
-                                                info!(
-                                                    "session exit successfully: session id: {} session type: {} ",
-                                                    session_id, session.session_type,
+                                                tracing::info!(
+                                                    session_id = %session_id,
+                                                    session_type = %session.session_type,
+                                                    "session_exit_success"
                                                 );
                                             }
                                         }
@@ -157,7 +177,7 @@ impl RtspServer for DefaultRtspServer {
                             if shutdown_flag_clone.load(Ordering::Acquire) {
                                 break;
                             }
-                            error!("Failed to accept connection: {}", e);
+                            tracing::error!(error = %e, "failed_accept_connection");
                         }
                     }
                 }
@@ -180,7 +200,7 @@ impl RtspServer for DefaultRtspServer {
         // Signal all sessions to shut down
         shutdown_flag.store(true, Ordering::Release);
 
-        info!("event=rtsp_server_shutdown_complete");
+        tracing::info!("rtsp_server_shutdown_complete");
         Ok(())
     }
 }
@@ -188,6 +208,7 @@ impl RtspServer for DefaultRtspServer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::StreamingConfig;
     use crate::streamhub::define::StreamHubEventSender;
     use tokio::sync::mpsc;
 
@@ -196,10 +217,15 @@ mod tests {
         tx
     }
 
+    fn create_test_config() -> StreamingConfig {
+        StreamingConfig::default()
+    }
+
     #[test]
     fn test_default_rtsp_server_new() {
         let event_sender = create_test_event_sender();
-        let server = DefaultRtspServer::new("127.0.0.1:0".to_string(), event_sender, None);
+        let config = create_test_config();
+        let server = DefaultRtspServer::new("127.0.0.1:0".to_string(), event_sender, None, config);
         assert_eq!(server.address, "127.0.0.1:0");
         assert!(server.auth.is_none());
     }
@@ -208,6 +234,7 @@ mod tests {
     fn test_default_rtsp_server_new_with_auth() {
         use crate::common::auth::{Auth, AuthAlgorithm, AuthType};
         let event_sender = create_test_event_sender();
+        let config = create_test_config();
         let auth = Auth::new(
             "user".to_string(),
             "pass".to_string(),
@@ -215,7 +242,8 @@ mod tests {
             AuthAlgorithm::Simple,
             AuthType::None,
         );
-        let server = DefaultRtspServer::new("0.0.0.0:554".to_string(), event_sender, Some(auth));
+        let server =
+            DefaultRtspServer::new("0.0.0.0:554".to_string(), event_sender, Some(auth), config);
         assert_eq!(server.address, "0.0.0.0:554");
         assert!(server.auth.is_some());
     }
@@ -223,7 +251,9 @@ mod tests {
     #[tokio::test]
     async fn test_default_rtsp_server_run_invalid_address_returns_err() {
         let event_sender = create_test_event_sender();
-        let mut server = DefaultRtspServer::new("not-an-address".to_string(), event_sender, None);
+        let config = create_test_config();
+        let mut server =
+            DefaultRtspServer::new("not-an-address".to_string(), event_sender, None, config);
         let result = server.run(None).await;
         assert!(result.is_err());
         let err = result.unwrap_err();
@@ -233,7 +263,8 @@ mod tests {
     #[tokio::test]
     async fn test_default_rtsp_server_run_empty_address_returns_err() {
         let event_sender = create_test_event_sender();
-        let mut server = DefaultRtspServer::new("".to_string(), event_sender, None);
+        let config = create_test_config();
+        let mut server = DefaultRtspServer::new("".to_string(), event_sender, None, config);
         let result = server.run(None).await;
         assert!(result.is_err());
         let err = result.unwrap_err();
@@ -243,7 +274,9 @@ mod tests {
     #[tokio::test]
     async fn test_default_rtsp_server_run_invalid_port_returns_err() {
         let event_sender = create_test_event_sender();
-        let mut server = DefaultRtspServer::new("127.0.0.1:99999".to_string(), event_sender, None);
+        let config = create_test_config();
+        let mut server =
+            DefaultRtspServer::new("127.0.0.1:99999".to_string(), event_sender, None, config);
         let result = server.run(None).await;
         assert!(result.is_err());
     }

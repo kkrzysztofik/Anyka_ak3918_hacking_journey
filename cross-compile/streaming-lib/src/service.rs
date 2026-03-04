@@ -73,11 +73,13 @@ impl StreamingService {
         let rtsp_shutdown = shutdown_tx.subscribe();
         let rtsp_config = config.clone();
         let auth_clone = auth.clone();
+        let config_clone = config.clone();
         tasks.spawn(async move {
             let mut server: DefaultRtspServer = DefaultRtspServer::new(
                 rtsp_config.rtsp_listen_addr.clone(),
                 event_sender_rtsp,
                 auth_clone,
+                config_clone,
             );
             tokio::select! {
                 result = server.run(Some(rtsp_shutdown)) => {

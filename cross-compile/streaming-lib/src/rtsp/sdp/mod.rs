@@ -212,7 +212,7 @@ impl Sdp {
     fn parse_line(&mut self, line: &str) {
         let kv: Vec<&str> = line.trim().splitn(2, '=').collect();
         if kv.len() < 2 {
-            log::error!("Sdp current line : {} parse error!", line);
+            tracing::error!(line = %line, "sdp_parse_error");
             return;
         }
 
@@ -225,7 +225,7 @@ impl Sdp {
             "m" => self.parse_media(kv[1]),
             "b" => self.parse_bandwidth(kv[1]),
             "a" => self.parse_attribute(kv[1]),
-            _ => log::info!("not parsed: {}", line),
+            _ => tracing::info!(line = %line, "sdp_not_parsed"),
         }
     }
 

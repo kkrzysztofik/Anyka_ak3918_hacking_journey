@@ -8,6 +8,7 @@ use define::{
 use serde_json::{Value, json};
 use statistics::{StatisticSubscriber, StatisticsStream};
 use tokio::sync::oneshot;
+use tracing::{error, info, warn};
 
 use define::PacketData;
 
@@ -94,10 +95,10 @@ impl StreamDataTransceiver {
 
         for id in to_remove {
             senders.remove(&id);
-            log::warn!(
-                "Transmiter send error: {} subscriber_id={}",
-                error_value,
-                id
+            warn!(
+                error_value = %error_value,
+                subscriber_id = ?id,
+                "transmitter_frame_send_error"
             );
         }
     }
@@ -182,10 +183,10 @@ impl StreamDataTransceiver {
 
         for id in to_remove {
             senders.remove(&id);
-            log::warn!(
-                "Transmiter send error: {} subscriber_id={}",
-                error_value,
-                id
+            warn!(
+                error_value = %error_value,
+                subscriber_id = ?id,
+                "transmitter_packet_send_error"
             );
         }
     }
@@ -521,7 +522,7 @@ impl StreamDataTransceiver {
                     }
                     TransceiverEvent::UnPublish {} => {
                         if let Err(err) = exit.send(()) {
-                            log::error!("TransmitterEvent::UnPublish send error: {}", err);
+                            error!(error = %err, "transmitter_unpublish_send_error");
                         }
                         true
                     }
@@ -557,7 +558,7 @@ impl StreamDataTransceiver {
             .send_prior_data(sender.clone(), info.sub_type.clone())
             .await
         {
-            log::error!("receive_event_loop send_prior_data err: {}", err);
+            error!(error = %err, "receive_event_loop_send_prior_data_error");
             return true;
         }
         match sender {
@@ -573,7 +574,7 @@ impl StreamDataTransceiver {
             }
         }
         if let Err(err) = result_sender.send(statistic_sender.clone()) {
-            log::error!("receive_event_loop:send statistic send err :{:?} ", err);
+            error!(error = ?err, "receive_event_loop_statistic_send_error");
         }
         let mut stats = statistics_data.lock().await;
         stats.subscriber_count += 1;
@@ -597,15 +598,15 @@ impl StreamDataTransceiver {
         uuid: Option<Uuid>,
         statistics_data: &Arc<Mutex<StatisticsStream>>,
     ) {
-        log::info!("api:  stream identifier: {:?}", uuid);
+        info!(stream_id = ?uuid, "api_stream_lookup");
         let statistic_data = if let Some(uid) = uuid {
             statistics_data.lock().await.query_by_uuid(uid)
         } else {
-            log::info!("api2:  stream identifier: {:?}", statistics_data);
+            info!(stream_id = ?statistics_data, "api2_stream_lookup");
             statistics_data.lock().await.clone()
         };
         if let Err(err) = sender.send(statistic_data) {
-            log::info!("Transmitter send avstatistic data err: {}", err);
+            info!(error = %err, "transmitter_send_statistic_data_error");
         }
     }
 
@@ -849,13 +850,13 @@ impl StreamsHub {
                 Ok((frame_sender, packet_sender, Some(statistic_data_sender)))
             }
             Err(err) => {
-                log::error!("handle_publish_event err: {}", err);
+                error!(error = %err, "handle_publish_event_error");
                 Err(err)
             }
         };
 
         if result_sender.send(result).is_err() {
-            log::error!("handle_publish_event error: The receiver dropped.")
+            error!("handle_publish_event_receiver_dropped");
         }
     }
 
@@ -906,10 +907,10 @@ impl StreamsHub {
 
     async fn handle_unpublish_event(&mut self, identifier: StreamIdentifier, info: PublisherInfo) {
         if let Err(err) = self.unpublish(&identifier) {
-            log::error!(
-                "handle_unpublish_event err: {} with identifier: {}",
-                err,
-                identifier
+            error!(
+                error = %err,
+                identifier = %identifier,
+                "handle_unpublish_event_error"
             );
         }
 
@@ -953,13 +954,13 @@ impl StreamsHub {
                 Ok((receiver, Some(statistic_data_sender)))
             }
             Err(err) => {
-                log::error!("handle_subscribe_event error: {}", err);
+                error!(error = %err, "handle_subscribe_event_error");
                 Err(err)
             }
         };
 
         if result_sender.send(rv).is_err() {
-            log::error!("handle_subscribe_event error: The receiver dropped.")
+            error!("handle_subscribe_event_receiver_dropped");
         }
     }
 
@@ -1023,19 +1024,19 @@ impl StreamsHub {
         let result = match self.api_statistic(top_n, identifier, uuid).await {
             Ok(rv) => rv,
             Err(err) => {
-                log::error!("handle_api_statistic error: {}", err);
+                error!(error = %err, "handle_api_statistic_error");
                 json!(err.to_string())
             }
         };
 
         if let Err(err) = result_sender.send(result) {
-            log::error!("handle_api_statistic error: {}", err);
+            error!(error = %err, "handle_api_statistic_send_error");
         }
     }
 
     fn handle_api_kick_client(&mut self, id: Uuid) {
         if let Err(err) = self.api_kick_off_client(id) {
-            log::error!("handle_api_kick_client error: {}", err);
+            error!(error = %err, "handle_api_kick_client_error");
         }
     }
 
@@ -1052,7 +1053,7 @@ impl StreamsHub {
             .await;
 
         if let Err(err) = result_sender.send(result) {
-            log::error!("handle_api_start_relay_stream error: {:?}", err);
+            error!(error = ?err, "handle_api_start_relay_stream_error");
         }
     }
 
@@ -1065,13 +1066,13 @@ impl StreamsHub {
         let result = self.api_stop_relay_stream(id, &relay_type).await;
 
         if let Err(err) = result_sender.send(result) {
-            log::error!("handle_api_stop_relay_stream error: {:?}", err);
+            error!(error = ?err, "handle_api_stop_relay_stream_error");
         }
     }
 
     fn handle_request(&mut self, identifier: StreamIdentifier, sender: InformationSender) {
         if let Err(err) = self.request(&identifier, sender) {
-            log::error!("handle_request error: {}", err);
+            error!(error = %err, "handle_request_error");
         }
     }
 
@@ -1082,7 +1083,7 @@ impl StreamsHub {
     ) -> Result<(), StreamHubError> {
         if let Some(producer) = self.streams.get_mut(identifier) {
             let event = TransceiverEvent::Request { sender };
-            log::info!("Request:  stream identifier: {}", identifier);
+            info!(stream_id = %identifier, "request");
             producer.send(event).map_err(|_| StreamHubError {
                 value: StreamHubErrorValue::SendError,
             })?;
@@ -1098,7 +1099,7 @@ impl StreamsHub {
     ) -> Result<usize, StreamHubError> {
         if let Some(id) = identifier {
             if let Some(event_sender) = self.streams.get_mut(&id) {
-                log::info!("api_statistic:  stream identifier: {}", id);
+                info!(stream_id = %id, "api_statistic_lookup");
                 event_sender
                     .send(TransceiverEvent::Api {
                         sender: stream_sender.clone(),
@@ -1118,7 +1119,7 @@ impl StreamsHub {
                 uuid,
             })
             .map_err(|_| {
-                log::error!("TransmitterEvent  api send data err");
+                error!("transmitter_api_send_data_error");
                 StreamHubError {
                     value: StreamHubErrorValue::SendError,
                 }
@@ -1162,7 +1163,7 @@ impl StreamsHub {
         if self.streams.is_empty() {
             return Ok(json!({}));
         }
-        log::info!("api_statistic:  stream identifier: {:?}", identifier);
+        info!(stream_id = ?identifier, "api_statistic");
         let (stream_sender, stream_receiver) = mpsc::unbounded_channel();
         let stream_count = self.send_api_statistic_events(identifier, uuid, &stream_sender)?;
         let data = Self::collect_stream_statistics(stream_receiver, stream_count).await;
@@ -1203,7 +1204,7 @@ impl StreamsHub {
                 _ => {}
             }
         } else {
-            log::warn!("cannot find uid: {}", uid);
+            warn!(client_id = %uid, "cannot_find_client_id");
         };
 
         Ok(())
@@ -1286,7 +1287,7 @@ impl StreamsHub {
                 info: sub_info,
                 result_sender,
             };
-            log::info!("subscribe:  stream identifier: {}", identifer);
+            info!(stream_id = %identifer, "subscribe");
             event_sender.send(event).map_err(|_| StreamHubError {
                 value: StreamHubErrorValue::SendError,
             })?;
@@ -1295,7 +1296,7 @@ impl StreamsHub {
         }
 
         if self.rtmp_pull_enabled {
-            log::info!("subscribe: try to pull stream, identifier: {}", identifer);
+            info!(stream_id = %identifer, "subscribe_rtmp_pull");
 
             let client_event = BroadcastEvent::Subscribe {
                 id: String::from("rtmp_relay"),
@@ -1324,14 +1325,14 @@ impl StreamsHub {
     ) -> Result<(), StreamHubError> {
         match self.streams.get_mut(identifer) {
             Some(producer) => {
-                log::info!("unsubscribe....:{}", identifer);
+                info!(stream_id = %identifer, "unsubscribe");
                 let event = TransceiverEvent::UnSubscribe { info: sub_info };
                 producer.send(event).map_err(|_| StreamHubError {
                     value: StreamHubErrorValue::SendError,
                 })?;
             }
             None => {
-                log::info!("unsubscribe None....:{}", identifer);
+                info!(stream_id = %identifer, "unsubscribe_not_found");
                 return Err(StreamHubError {
                     value: StreamHubErrorValue::NoAppName,
                 });
@@ -1363,13 +1364,13 @@ impl StreamsHub {
         let identifier_clone = identifier.clone();
 
         if let Err(err) = transceiver.run().await {
-            log::error!(
-                "transceiver run error, idetifier: {}, error: {}",
-                identifier_clone,
-                err,
+            error!(
+                identifier = %identifier_clone,
+                error = %err,
+                "transceiver_run_error"
             );
         } else {
-            log::info!("transceiver run success, idetifier: {}", identifier_clone);
+            info!(identifier = %identifier_clone, "transceiver_run_success");
         }
 
         self.streams.insert(identifier.clone(), event_sender);
@@ -1396,7 +1397,7 @@ impl StreamsHub {
                     value: StreamHubErrorValue::SendError,
                 })?;
                 self.streams.remove(identifier);
-                log::info!("unpublish remove stream, stream identifier: {}", identifier);
+                info!(stream_id = %identifier, "unpublish_remove_stream");
             }
             None => {
                 return Err(StreamHubError {

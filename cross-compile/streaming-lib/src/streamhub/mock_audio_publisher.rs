@@ -10,13 +10,12 @@ use portable_atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use thiserror::Error;
-
-/// AAC-LC samples per frame (fixed by specification)
-/// Per RFC 3640 Section 3.3, RTP timestamps for AAC are in sample units.
-/// AAC-LC uses 1024 samples per frame regardless of sample rate.
-const AAC_SAMPLES_PER_FRAME: u32 = 1024;
 use tokio::sync::Mutex;
 use tokio::time::{self, MissedTickBehavior};
+use tracing::{debug, warn};
+
+/// AAC-LC samples per frame (fixed by specification)
+const AAC_SAMPLES_PER_FRAME: u32 = 1024;
 
 /// Errors that can occur during mock audio publishing
 #[derive(Error, Debug)]
@@ -67,10 +66,10 @@ impl MockAudioPublisher {
         let audio_config = reader.extract_audio_config().await?;
         let detected_sample_rate = reader.sample_rate();
         if detected_sample_rate != sample_rate {
-            log::warn!(
-                "mock_audio_publisher: requested sample_rate={} differs from ADTS sample_rate={}, using ADTS value",
-                sample_rate,
-                detected_sample_rate
+            warn!(
+                requested = sample_rate,
+                detected = detected_sample_rate,
+                "sample_rate_mismatch_using_detected"
             );
         }
 
@@ -370,10 +369,10 @@ fn compute_frame_interval(sample_rate: u32) -> Duration {
 
 fn log_audio_frame(frame_count: u32, timestamp: u32) {
     if crate::stream_frame_debug_logging_enabled() {
-        log::debug!(
-            "mock_audio_publisher: AAC frame_count={} timestamp={} (sample units)",
-            frame_count,
-            timestamp
+        debug!(
+            frame_count = frame_count,
+            timestamp = timestamp,
+            "mock_audio_publish_frame"
         );
     }
 }

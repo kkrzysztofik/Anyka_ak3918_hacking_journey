@@ -74,10 +74,10 @@ impl SpsParser {
 
     pub fn parse(&mut self) -> Result<(u32, u32), H264Error> {
         self.sps.profile_idc = self.bits_reader.read_byte()?;
-        log::info!("profile_idc: {}", self.sps.profile_idc);
+        tracing::debug!(profile_idc = self.sps.profile_idc, "parsed_profile_idc");
         self.sps.flag = self.bits_reader.read_byte()?;
         self.sps.level_idc = self.bits_reader.read_byte()?;
-        log::info!("level_idc: {}", self.sps.level_idc);
+        tracing::debug!(level_idc = self.sps.level_idc, "parsed_level_idc");
         self.sps.seq_parameter_set_id = utils::read_uev(&mut self.bits_reader)?;
 
         self.parse_profile_specific_fields()?;
@@ -109,7 +109,7 @@ impl SpsParser {
         let width = self.calculate_width();
         let height = self.calculate_height();
 
-        log::trace!("parsed sps data: {:?}", self.sps);
+        tracing::trace!(sps = ?self.sps, "parsed_sps_data");
         Ok((width, height))
     }
 
@@ -428,7 +428,7 @@ mod tests {
         builder.write_uev(1); // max_num_ref_frames = 1
         builder.write_bit(0); // gaps_in_frame_num_value_allowed_flag = 0
         builder.write_uev(width / 16 - 1); // pic_width_in_mbs_minus1
-        // For interlaced, height is halved in map units
+                                           // For interlaced, height is halved in map units
         builder.write_uev(height / 16 / 2 - 1); // pic_height_in_map_units_minus1
         builder.write_bit(0); // frame_mbs_only_flag = 0 (interlaced)
         builder.write_bit(0); // mb_adaptive_frame_field_flag = 0

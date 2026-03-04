@@ -1,5 +1,5 @@
 use crate::rtsp::global_trait::{Marshal, Unmarshal};
-use base64::{Engine as _, engine::general_purpose};
+use base64::{engine::general_purpose, Engine as _};
 use bytes::{BufMut, BytesMut};
 
 fn parse_payload_type(raw_data: &str) -> Result<(u16, &str), String> {
@@ -8,7 +8,8 @@ fn parse_payload_type(raw_data: &str) -> Result<(u16, &str), String> {
         return Err("Empty input".to_string());
     }
     let payload_type = parts[0].parse::<u16>().map_err(|_| {
-        log::warn!("Invalid payload type in {}", raw_data);
+        tracing::warn!(raw_len = raw_data.len(), "invalid_payload_type");
+        tracing::debug!(raw_value = %raw_data, "invalid_payload_type_details");
         "Invalid payload type".to_string()
     })?;
     let params = parts.get(1).copied().unwrap_or("");
@@ -118,18 +119,18 @@ impl H264Fmtp {
     fn parse_sprop_parameter_sets(&mut self, value: &str) {
         let spspps: Vec<&str> = value.split(',').collect();
         if spspps.len() < 2 {
-            log::warn!("H264FmtpSdp parse err: missing sps/pps");
+            tracing::warn!("h264_fmtp_missing_sps_pps");
             return;
         }
         if let Some(sps) = decode_base64_to_bytes(spspps[0]) {
             self.sps = sps;
         } else {
-            log::warn!("H264FmtpSdp sps decode err");
+            tracing::warn!("h264_fmtp_sps_decode_error");
         }
         if let Some(pps) = decode_base64_to_bytes(spspps[1]) {
             self.pps = pps;
         } else {
-            log::warn!("H264FmtpSdp pps decode err");
+            tracing::warn!("h264_fmtp_pps_decode_error");
         }
     }
 
@@ -155,7 +156,7 @@ impl Unmarshal for H264Fmtp {
                 "packetization-mode" => h264_fmtp.parse_packetization_mode(value),
                 "sprop-parameter-sets" => h264_fmtp.parse_sprop_parameter_sets(value),
                 "profile-level-id" => h264_fmtp.parse_profile_level_id(value),
-                _ => log::info!("not parsed: {}", key),
+                _ => tracing::debug!(key = %key, "key_not_parsed"),
             }
         }
 
@@ -366,7 +367,7 @@ impl H265Fmtp {
             "sprop-vps" => self.vps = value.into(),
             "sprop-sps" => self.sps = value.into(),
             "sprop-pps" => self.pps = value.into(),
-            _ => log::info!("not parsed: {}", key),
+            _ => tracing::debug!(key = %key, "key_not_parsed"),
         }
     }
 }
@@ -375,7 +376,8 @@ impl Unmarshal for H265Fmtp {
     fn unmarshal(raw_data: &str) -> Result<Self, String> {
         let (payload_type, params) = parse_payload_type(raw_data)?;
         if params.is_empty() {
-            log::warn!("H265FmtpSdp parse err: {}", raw_data);
+            tracing::warn!(raw_len = raw_data.len(), "invalid_h265_fmtp_format");
+            tracing::debug!(raw_value = %raw_data, "invalid_h265_fmtp_format_details");
             return Err("Invalid H265 FMTP format".to_string());
         }
 
@@ -420,7 +422,7 @@ impl Mpeg4Fmtp {
             "indexdeltalength" => {
                 self.parse_u16_param(value, |fmtp, v| fmtp.index_delta_length = v)
             }
-            _ => log::info!("not parsed: {}", key),
+            _ => tracing::debug!(key = %key, "key_not_parsed"),
         }
     }
 
@@ -428,7 +430,7 @@ impl Mpeg4Fmtp {
     fn parse_config(&mut self, value: &str) {
         match hex::decode(value) {
             Ok(asc) => self.asc.put(&asc[..]),
-            Err(err) => log::warn!("Mpeg4FmtpSdp hex decode err: {err}"),
+            Err(err) => tracing::warn!(error = %err, "mpeg4_fmtp_hex_decode_error"),
         }
     }
 
@@ -447,7 +449,8 @@ impl Unmarshal for Mpeg4Fmtp {
     fn unmarshal(raw_data: &str) -> Result<Self, String> {
         let (payload_type, params) = parse_payload_type(raw_data)?;
         if params.is_empty() {
-            log::warn!("Mpeg4FmtpSdp parse err: {}", raw_data);
+            tracing::warn!(raw_len = raw_data.len(), "invalid_mpeg4_fmtp_format");
+            tracing::debug!(raw_value = %raw_data, "invalid_mpeg4_fmtp_format_details");
             return Err("Invalid MPEG4 FMTP format".to_string());
         }
 

@@ -30,6 +30,7 @@ use portable_atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
 use std::backtrace::Backtrace;
 use std::panic::PanicHookInfo;
 use std::sync::{Arc, Once};
+use streaming_lib::config::StreamingConfig;
 use streaming_lib::streamhub::define::{Information, InformationSender};
 use streaming_lib::streamhub::errors::StreamHubError;
 use streaming_lib::streamhub::statistics::StatisticsStream;
@@ -663,7 +664,6 @@ async fn run_validation_mode(config: H264PlaybackConfig, config_path: &str) -> R
 
     let publisher_init_timeout_sec =
         parse_env_timeout("ONVIF_VALIDATION_PUBLISHER_INIT_TIMEOUT_SEC", 30);
-    configure_rtp_sampling();
     tracing::info!("Validation mode: HTTP-FLV and ONVIF application enabled");
     init_validation_logging(config_path);
     validate_source_files(&config)?;
@@ -741,10 +741,26 @@ async fn run_validation_mode(config: H264PlaybackConfig, config_path: &str) -> R
     let audio_pub_handle = start_audio_publisher(&audio_publisher, frame_tx_for_publisher);
 
     let hub_event_sender = streamhub.get_hub_event_sender();
+    let rtp_sample_interval = std::env::var("ONVIF_RTSP_RTP_SAMPLE_INTERVAL")
+        .ok()
+        .and_then(|raw| raw.parse::<u32>().ok())
+        .unwrap_or(0);
+    if rtp_sample_interval > 0 {
+        tracing::info!(
+            "RTSP RTP sampling enabled for validation mode: interval={} packets",
+            rtp_sample_interval
+        );
+    } else {
+        tracing::info!("RTSP RTP sampling disabled for validation mode");
+    }
+    let lib_config = StreamingConfig::new()
+        .with_rtsp_listen_addr(format!("0.0.0.0:{}", config.rtsp_port))
+        .with_rtp_sample_interval(rtp_sample_interval);
     let rtsp_handle = spawn_rtsp_server(
         hub_event_sender.clone(),
         stream_auth.clone(),
         config.rtsp_port,
+        lib_config,
     );
     let flv_handle = spawn_httpflv_server(hub_event_sender, stream_auth, config.httpflv_port);
     let streamhub_handle = spawn_streamhub_event_loop(streamhub);
@@ -866,22 +882,6 @@ fn parse_env_timeout(var: &str, default: u64) -> u64 {
         .and_then(|v| v.parse::<u64>().ok())
         .filter(|v| *v > 0)
         .unwrap_or(default)
-}
-
-fn configure_rtp_sampling() {
-    let interval = std::env::var("ONVIF_RTSP_RTP_SAMPLE_INTERVAL")
-        .ok()
-        .and_then(|raw| raw.parse::<u32>().ok())
-        .unwrap_or(0);
-    streaming_lib::rtsp::session::server_session::set_rtp_sample_interval(interval);
-    if interval > 0 {
-        tracing::info!(
-            "RTSP RTP sampling enabled for validation mode: interval={} packets",
-            interval
-        );
-    } else {
-        tracing::info!("RTSP RTP sampling disabled for validation mode");
-    }
 }
 
 fn init_validation_logging(config_path: &str) {

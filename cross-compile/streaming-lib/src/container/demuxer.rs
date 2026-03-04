@@ -161,12 +161,12 @@ impl FlvVideoTagDemuxer {
                     return Ok(Some(video_data));
                 }
                 _ => {
-                    log::warn!(
-                        "unknown avc_packet_type: {} (timestamp={}, frame_type={}, composition_time={})",
-                        tag_header.avc_packet_type,
-                        timestamp,
-                        tag_header.frame_type,
-                        tag_header.composition_time
+                    tracing::warn!(
+                        avc_packet_type = tag_header.avc_packet_type,
+                        timestamp = timestamp,
+                        frame_type = tag_header.frame_type,
+                        composition_time = tag_header.composition_time,
+                        "unknown_avc_packet_type"
                     );
                 }
             }

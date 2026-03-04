@@ -58,11 +58,11 @@ impl RtpAacPacker {
 impl TPacker for RtpAacPacker {
     async fn pack(&mut self, data: &mut BytesMut, timestamp: u32) -> Result<(), PackerError> {
         if crate::stream_frame_debug_logging_enabled() {
-            log::debug!(
-                "RtpAacPacker::pack: timestamp={} data_len={} seq={}",
-                timestamp,
-                data.len(),
-                self.header.seq_number
+            tracing::debug!(
+                timestamp = %timestamp,
+                data_len = %data.len(),
+                seq = %self.header.seq_number,
+                "RtpAacPacker::pack"
             );
         }
         self.header.timestamp = timestamp;
@@ -192,11 +192,11 @@ impl TUnPacker for RtpAacUnPacker {
             au_lengths.push(au_length);
         }
 
-        log::debug!(
-            "send audio : au_headers_length :{}, aus_number: {}, au_lengths: {:?}",
-            au_headers_length,
-            aus_number,
-            au_lengths,
+        tracing::debug!(
+            au_headers_length = %au_headers_length,
+            aus_number = %aus_number,
+            au_lengths = ?au_lengths,
+            "send_audio"
         );
 
         for (i, item) in au_lengths.iter().enumerate() {

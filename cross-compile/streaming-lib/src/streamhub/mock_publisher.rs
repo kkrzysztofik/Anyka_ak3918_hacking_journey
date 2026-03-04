@@ -12,6 +12,7 @@ use std::time::{Duration, Instant};
 use thiserror::Error;
 use tokio::sync::Mutex;
 use tokio::time::{self, Interval, MissedTickBehavior};
+use tracing::{debug, info, warn};
 
 /// Errors that can occur during mock video publishing
 #[derive(Error, Debug)]
@@ -137,11 +138,11 @@ impl MockVideoPublisher {
         }
 
         let total_bytes: usize = access_units.iter().map(Vec::len).sum();
-        log::info!(
-            "mock_publisher: access-unit cache enabled (frames={} bytes={} source_bytes={})",
-            access_units.len(),
-            total_bytes,
-            file_size
+        info!(
+            frames = access_units.len(),
+            bytes = total_bytes,
+            source_bytes = file_size,
+            "access_unit_cache_enabled"
         );
         Ok(Some(Arc::new(access_units)))
     }
@@ -212,10 +213,10 @@ impl MockVideoPublisher {
         let scanned_bytes = reader.current_position();
         reader.reset().await?;
         if reached_scan_limit {
-            log::warn!(
-                "mock_publisher: bootstrap IDR scan reached {} bytes (scanned={}), continuing without bootstrap IDR",
-                max_scan_bytes,
-                scanned_bytes
+            warn!(
+                max_bytes = max_scan_bytes,
+                scanned_bytes = scanned_bytes,
+                "bootstrap_idr_scan_limit_reached"
             );
         }
         Ok(first_idr)
@@ -746,12 +747,11 @@ fn send_param_set_frame(
     };
     let _ = sender.send(frame);
     if crate::stream_frame_debug_logging_enabled() {
-        log::debug!(
-            "mock_publisher: {} frame_count={} timestamp={} ({}ms)",
-            frame_type,
-            frame_count,
-            timestamp,
-            timestamp
+        debug!(
+            frame_type = frame_type,
+            frame_count = frame_count,
+            timestamp = timestamp,
+            "mock_publish_sps_pps_frame"
         );
     }
 }
@@ -763,12 +763,12 @@ fn log_vcl_frame(frame_count: u32, timestamp: u32, first_slice: bool, unit_type:
         } else {
             "NonIDR"
         };
-        log::debug!(
-            "mock_publisher: {} frame_count={} timestamp={} first_slice={}",
-            frame_type,
-            frame_count,
-            timestamp,
-            first_slice
+        debug!(
+            frame_type = frame_type,
+            frame_count = frame_count,
+            timestamp = timestamp,
+            first_slice = first_slice,
+            "mock_publish_vcl_frame"
         );
     }
 }
@@ -909,11 +909,11 @@ async fn send_access_unit(
     *frames_since_report += 1;
 
     if crate::stream_frame_debug_logging_enabled() {
-        log::debug!(
-            "mock_publisher: access_unit frame_count={} timestamp={} bytes={}",
-            frame_count,
-            timestamp,
-            access_unit_size
+        debug!(
+            frame_count = frame_count,
+            timestamp = timestamp,
+            bytes = access_unit_size,
+            "mock_publish_access_unit"
         );
     }
 
@@ -923,11 +923,11 @@ async fn send_access_unit(
             return true;
         }
         let fps = compute_fps(*frames_since_report, elapsed);
-        log::debug!(
-            "mock_publisher: sent {} frames in {:.2}s ({:.2} fps)",
-            *frames_since_report,
-            elapsed.as_secs_f64(),
-            fps
+        debug!(
+            frames = *frames_since_report,
+            elapsed_secs = elapsed.as_secs_f64(),
+            fps = fps,
+            "mock_publish_frame_rate"
         );
         *frames_since_report = 0;
         *last_report = Instant::now();

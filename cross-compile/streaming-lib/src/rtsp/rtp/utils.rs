@@ -7,7 +7,6 @@ use crate::bytesio::bytes_reader::BytesReader;
 use crate::streamhub::define::FrameData;
 use async_trait::async_trait;
 use bytes::BytesMut;
-use log::error;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -133,7 +132,7 @@ pub fn current_time() -> u64 {
     match duration {
         Ok(result) => (result.as_nanos() / 1000) as u64,
         Err(err) => {
-            error!("current_time error: {err}");
+            tracing::error!(error = %err, "current_time_error");
             0
         }
     }

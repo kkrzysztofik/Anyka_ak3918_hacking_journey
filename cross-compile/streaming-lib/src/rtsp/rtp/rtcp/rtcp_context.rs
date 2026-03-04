@@ -261,9 +261,9 @@ impl RtcpContext {
     pub fn received_sr(&mut self, sr: &RtcpSenderReport) {
         // RFC 3550 §6.4.1: NTP timestamp must be non-zero in a valid SR
         if sr.ntp == 0 {
-            log::warn!(
-                "received_sr: ignoring SR with zero NTP timestamp (SSRC={})",
-                sr.ssrc
+            tracing::warn!(
+                ssrc = %sr.ssrc,
+                "received_sr_ignoring_zero_ntp"
             );
             return;
         }

@@ -17,6 +17,7 @@ use portable_atomic::Ordering;
 
 use super::bridge::{LowLatencyFrameQueue, StreamState};
 use super::telemetry::StreamTelemetry;
+use streaming_lib::config::StreamingConfig as LibStreamingConfig;
 use streaming_lib::streamhub::define::{
     DataReceiver, DataSender, Information, InformationSender, MediaInfo, SubscribeType,
     VideoCodecType,
@@ -491,10 +492,13 @@ impl StreamingService {
 
         // Spawn servers.
         let hub_event_sender = streamhub.get_hub_event_sender();
+        let lib_config = LibStreamingConfig::new()
+            .with_rtsp_listen_addr(format!("0.0.0.0:{}", self.config.rtsp_port));
         self.rtsp_task = Some(spawn_rtsp_server(
             hub_event_sender.clone(),
             self.config.auth.clone(),
             self.config.rtsp_port,
+            lib_config,
         ));
         self.httpflv_task = Some(spawn_httpflv_server(
             hub_event_sender,
@@ -681,20 +685,6 @@ mod tests {
         assert!(service.rtsp_task.is_none());
         assert!(service.httpflv_task.is_none());
         assert!(service.streamhub_task.is_none());
-    }
-
-    #[test]
-    fn test_streaming_service_bridge_accessible_before_start() {
-        let config = StreamingConfig::default();
-        let service = StreamingService::new(config);
-        let _bridge = service.bridge();
-    }
-
-    #[test]
-    fn test_streaming_service_bridge_accessible_before_start() {
-        let config = StreamingConfig::default();
-        let service = StreamingService::new(config);
-        let _bridge = service.bridge();
     }
 
     #[tokio::test]

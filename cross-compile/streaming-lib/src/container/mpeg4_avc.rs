@@ -170,13 +170,13 @@ impl Mpeg4AvcProcessor {
             let mut sps_parser = SpsParser::new(sps_reader);
             (self.mpeg4_avc.width, self.mpeg4_avc.height) = sps_parser.parse()?;
 
-            log::info!("mpeg4 avc profile: {}", self.mpeg4_avc.profile);
-            log::info!("mpeg4 avc compatibility: {}", self.mpeg4_avc.compatibility);
-            log::info!("mpeg4 avc level: {}", self.mpeg4_avc.level);
-            log::info!(
-                "mpeg4 avc resolution: {}x{}",
-                self.mpeg4_avc.width,
-                self.mpeg4_avc.height
+            tracing::info!(
+                profile = self.mpeg4_avc.profile,
+                compatibility = self.mpeg4_avc.compatibility,
+                level = self.mpeg4_avc.level,
+                width = self.mpeg4_avc.width,
+                height = self.mpeg4_avc.height,
+                "mpeg4_avc_parsed"
             );
 
             self.mpeg4_avc.sps.push(sps_data);

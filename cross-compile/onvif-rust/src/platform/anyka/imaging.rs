@@ -13,7 +13,7 @@
 //! request on video encoder(s) when settings change. This ensures that the
 //! video stream applies the new imaging parameters at the earliest opportunity.
 
-use std::sync::atomic::{AtomicU64, Ordering};
+use portable_atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Weak};
 
 use async_trait::async_trait;

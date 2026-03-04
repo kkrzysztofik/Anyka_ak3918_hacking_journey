@@ -43,7 +43,7 @@ impl UdpIO {
         } else {
             format!("{remote_domain}:{remote_port}")
         };
-        log::info!("remote address: {}", remote_address);
+        tracing::debug!(remote_address = %remote_address, "udp_connection_attempt");
         let local_address = format!("0.0.0.0:{local_port}");
         if let Ok(local_socket) = UdpSocket::bind(local_address).await {
             if let Ok(remote_socket_addr) = remote_address.parse::<SocketAddr>() {
@@ -54,12 +54,12 @@ impl UdpIO {
                         });
                     }
                     Err(err) => {
-                        log::error!("connect to remote udp socket error: {}", err);
+                        tracing::error!(error = %err, remote_address = %remote_address, "udp_connect_error");
                         return None;
                     }
                 }
             } else {
-                log::error!("remote_address parse error: {:?}", remote_address);
+                tracing::error!(remote_address = %remote_address, "remote_address_parse_error");
             }
         }
 
@@ -79,7 +79,7 @@ impl UdpIO {
 
     pub fn get_local_port(&self) -> Option<u16> {
         if let Ok(local_addr) = self.socket.local_addr() {
-            log::info!("local address: {}", local_addr);
+            tracing::debug!(local_addr = %local_addr, "local_port_retrieved");
             return Some(local_addr.port());
         }
 
@@ -126,7 +126,11 @@ pub async fn new_udpio_pair() -> Option<(UdpIO, UdpIO)> {
     };
 
     for _attempt_count in 1..=MAX_ATTEMPTS {
-        log::trace!("next local port: {next_local_port} and first port: {first_local_port}");
+        tracing::trace!(
+            next_local_port = next_local_port,
+            first_local_port = first_local_port,
+            "udp_pair_attempt"
+        );
 
         if next_local_port == first_local_port {
             return None;
@@ -142,7 +146,7 @@ pub async fn new_udpio_pair() -> Option<(UdpIO, UdpIO)> {
         next_local_port = next_try_port(next_local_port.wrapping_add(1));
     }
 
-    log::error!("new_udpio_pair exceeded maximum attempts");
+    tracing::error!("new_udpio_pair_max_attempts_exceeded");
     None
 }
 

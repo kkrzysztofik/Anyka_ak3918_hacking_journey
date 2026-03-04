@@ -67,20 +67,20 @@ impl RtspTrack {
             loop {
                 match rtp_io.read().await {
                     Ok(data) => {
-                        //log::info!("read rtp data");
                         reader.extend_from_slice(&data[..]);
                         if let Err(err) = rtp_channel_in.on_packet(&mut reader).await {
-                            log::error!("rtp_receive_loop on_packet error: {}", err);
+                            tracing::error!(error = %err, "rtp_receive_loop_on_packet_error");
                         }
                     }
                     Err(err) => {
-                        log::error!("read error: {:?}", err);
+                        tracing::error!(?err, "rtp_receive_loop_read_error");
                         break;
                     }
                 }
             }
         });
     }
+
     //send and receive rtcp data in a UDP channel
     pub async fn rtcp_receive_loop(&mut self, rtcp_io: Arc<Mutex<Box<dyn TNetIO + Send + Sync>>>) {
         let rtcp_channel_out = self.rtcp_channel.clone();
@@ -93,7 +93,7 @@ impl RtspTrack {
                 let data = match rtcp_io.lock().await.read().await {
                     Ok(data) => data,
                     Err(err) => {
-                        log::error!("read error: {:?}", err);
+                        tracing::error!(?err, "rtcp_receive_loop_read_error");
                         break;
                     }
                 };
@@ -120,10 +120,10 @@ impl RtspTrack {
                 match rtcp_channel_in.send_sr(rtcp_io.clone()).await {
                     Ok(true) => {}
                     Ok(false) => {
-                        log::debug!("Skipped RTCP SR: wall clock not yet valid");
+                        tracing::debug!("rtcp_sr_skipped_wall_clock_not_valid");
                     }
                     Err(err) => {
-                        log::error!("Failed to send RTCP SR: {}", err);
+                        tracing::error!(error = %err, "rtcp_send_loop_send_error");
                         break;
                     }
                 }
@@ -138,7 +138,7 @@ impl RtspTrack {
                 .await
                 .set_channel_identifier(interleaveds[1]);
         } else {
-            log::info!("it is a udp transport!!!");
+            tracing::info!("udp_transport");
         }
 
         self.transport = transport;

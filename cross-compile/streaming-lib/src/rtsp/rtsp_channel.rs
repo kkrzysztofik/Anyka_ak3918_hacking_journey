@@ -221,7 +221,7 @@ impl RtcpChannel {
                     if let Ok(sr) = RtcpSenderReport::unmarshal(reader) {
                         self.recv_ctx.received_sr(&sr);
                         if let Err(err) = self.send_rr(rtcp_io).await {
-                            log::error!("send rr error: {}", err);
+                            tracing::error!(error = %err, "send_rr_error");
                         }
                     }
                 }

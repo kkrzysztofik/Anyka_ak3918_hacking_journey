@@ -47,7 +47,7 @@ impl PpsParser {
             self.parse_slice_group_info()?;
         }
 
-        log::trace!("parsed pps data: {:?}", self.pps);
+        tracing::trace!(pps = ?self.pps, "parsed_pps_data");
         Ok(())
     }
 

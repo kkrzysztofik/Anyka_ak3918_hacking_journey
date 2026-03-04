@@ -1,6 +1,7 @@
 use super::*;
 use crate::bytesio::bytes_reader::BytesReader;
 use crate::common::http::HttpRequest as RtspRequest;
+use crate::config::StreamingConfig;
 use bytes::BytesMut;
 use http::StatusCode;
 
@@ -206,7 +207,13 @@ fn test_validate_session_id_mismatch_returns_454_response() {
     let mock_io = MockNetIO::new();
     let session_io: Box<dyn TNetIO + Send + Sync> = Box::new(mock_io);
     let remote_addr = "127.0.0.1:0".parse().unwrap();
-    let mut session = RtspServerSession::new_with_io(session_io, event_sender, None, remote_addr);
+    let mut session = RtspServerSession::new_with_io(
+        session_io,
+        event_sender,
+        None,
+        remote_addr,
+        StreamingConfig::default(),
+    );
     session.session_id = Some(Uuid::new(SESSION_ID_RANDOM_DIGITS));
 
     let mut request = create_test_request("TEARDOWN", Some("1"));
@@ -226,7 +233,13 @@ fn test_validate_session_id_match_returns_none() {
     let mock_io = MockNetIO::new();
     let session_io: Box<dyn TNetIO + Send + Sync> = Box::new(mock_io);
     let remote_addr = "127.0.0.1:0".parse().unwrap();
-    let mut session = RtspServerSession::new_with_io(session_io, event_sender, None, remote_addr);
+    let mut session = RtspServerSession::new_with_io(
+        session_io,
+        event_sender,
+        None,
+        remote_addr,
+        StreamingConfig::default(),
+    );
     let session_id = Uuid::new(SESSION_ID_RANDOM_DIGITS);
     session.session_id = Some(session_id);
 
@@ -245,7 +258,13 @@ fn test_validate_session_id_no_session_header_returns_none() {
     let mock_io = MockNetIO::new();
     let session_io: Box<dyn TNetIO + Send + Sync> = Box::new(mock_io);
     let remote_addr = "127.0.0.1:0".parse().unwrap();
-    let mut session = RtspServerSession::new_with_io(session_io, event_sender, None, remote_addr);
+    let mut session = RtspServerSession::new_with_io(
+        session_io,
+        event_sender,
+        None,
+        remote_addr,
+        StreamingConfig::default(),
+    );
     session.session_id = Some(Uuid::new(SESSION_ID_RANDOM_DIGITS));
 
     let request = create_test_request("TEARDOWN", Some("1"));
@@ -260,7 +279,13 @@ fn test_validate_session_id_no_current_session_returns_none() {
     let mock_io = MockNetIO::new();
     let session_io: Box<dyn TNetIO + Send + Sync> = Box::new(mock_io);
     let remote_addr = "127.0.0.1:0".parse().unwrap();
-    let session = RtspServerSession::new_with_io(session_io, event_sender, None, remote_addr);
+    let session = RtspServerSession::new_with_io(
+        session_io,
+        event_sender,
+        None,
+        remote_addr,
+        StreamingConfig::default(),
+    );
     assert!(session.session_id.is_none());
 
     let mut request = create_test_request("TEARDOWN", Some("1"));
@@ -278,7 +303,13 @@ fn test_validate_session_id_empty_session_value_returns_none() {
     let mock_io = MockNetIO::new();
     let session_io: Box<dyn TNetIO + Send + Sync> = Box::new(mock_io);
     let remote_addr = "127.0.0.1:0".parse().unwrap();
-    let mut session = RtspServerSession::new_with_io(session_io, event_sender, None, remote_addr);
+    let mut session = RtspServerSession::new_with_io(
+        session_io,
+        event_sender,
+        None,
+        remote_addr,
+        StreamingConfig::default(),
+    );
     session.session_id = Some(Uuid::new(SESSION_ID_RANDOM_DIGITS));
 
     let mut request = create_test_request("TEARDOWN", Some("1"));
@@ -303,7 +334,13 @@ fn test_build_content_base_with_host_and_path_returns_trailing_slash() {
     let mock_io = MockNetIO::new();
     let session_io: Box<dyn TNetIO + Send + Sync> = Box::new(mock_io);
     let remote_addr = "127.0.0.1:0".parse().unwrap();
-    let session = RtspServerSession::new_with_io(session_io, event_sender, None, remote_addr);
+    let session = RtspServerSession::new_with_io(
+        session_io,
+        event_sender,
+        None,
+        remote_addr,
+        StreamingConfig::default(),
+    );
 
     let mut request = create_test_request("DESCRIBE", Some("1"));
     request.uri.host = "127.0.0.1".to_string();
@@ -320,7 +357,13 @@ fn test_build_content_base_host_only_no_path_returns_base() {
     let mock_io = MockNetIO::new();
     let session_io: Box<dyn TNetIO + Send + Sync> = Box::new(mock_io);
     let remote_addr = "127.0.0.1:0".parse().unwrap();
-    let session = RtspServerSession::new_with_io(session_io, event_sender, None, remote_addr);
+    let session = RtspServerSession::new_with_io(
+        session_io,
+        event_sender,
+        None,
+        remote_addr,
+        StreamingConfig::default(),
+    );
 
     let mut request = create_test_request("DESCRIBE", Some("1"));
     request.uri.host = "127.0.0.1".to_string();
@@ -337,7 +380,13 @@ fn test_build_content_base_empty_host_uses_host_header() {
     let mock_io = MockNetIO::new();
     let session_io: Box<dyn TNetIO + Send + Sync> = Box::new(mock_io);
     let remote_addr = "127.0.0.1:0".parse().unwrap();
-    let session = RtspServerSession::new_with_io(session_io, event_sender, None, remote_addr);
+    let session = RtspServerSession::new_with_io(
+        session_io,
+        event_sender,
+        None,
+        remote_addr,
+        StreamingConfig::default(),
+    );
 
     let mut request = create_test_request("DESCRIBE", Some("1"));
     request.uri.host = String::new();
@@ -356,7 +405,13 @@ fn test_build_content_base_empty_host_no_host_header_empty_path_returns_none() {
     let mock_io = MockNetIO::new();
     let session_io: Box<dyn TNetIO + Send + Sync> = Box::new(mock_io);
     let remote_addr = "127.0.0.1:0".parse().unwrap();
-    let session = RtspServerSession::new_with_io(session_io, event_sender, None, remote_addr);
+    let session = RtspServerSession::new_with_io(
+        session_io,
+        event_sender,
+        None,
+        remote_addr,
+        StreamingConfig::default(),
+    );
 
     let mut request = create_test_request("DESCRIBE", Some("1"));
     request.uri.host = String::new();
@@ -372,7 +427,13 @@ fn test_build_content_base_host_header_without_colon_uses_full_header() {
     let mock_io = MockNetIO::new();
     let session_io: Box<dyn TNetIO + Send + Sync> = Box::new(mock_io);
     let remote_addr = "127.0.0.1:0".parse().unwrap();
-    let session = RtspServerSession::new_with_io(session_io, event_sender, None, remote_addr);
+    let session = RtspServerSession::new_with_io(
+        session_io,
+        event_sender,
+        None,
+        remote_addr,
+        StreamingConfig::default(),
+    );
 
     let mut request = create_test_request("DESCRIBE", Some("1"));
     request.uri.host = String::new();
@@ -391,7 +452,13 @@ fn test_build_content_base_host_header_invalid_port_omits_port() {
     let mock_io = MockNetIO::new();
     let session_io: Box<dyn TNetIO + Send + Sync> = Box::new(mock_io);
     let remote_addr = "127.0.0.1:0".parse().unwrap();
-    let session = RtspServerSession::new_with_io(session_io, event_sender, None, remote_addr);
+    let session = RtspServerSession::new_with_io(
+        session_io,
+        event_sender,
+        None,
+        remote_addr,
+        StreamingConfig::default(),
+    );
 
     let mut request = create_test_request("DESCRIBE", Some("1"));
     request.uri.host = String::new();
@@ -411,7 +478,13 @@ fn test_build_content_base_empty_host_no_host_header_non_empty_path_uses_path() 
     let mock_io = MockNetIO::new();
     let session_io: Box<dyn TNetIO + Send + Sync> = Box::new(mock_io);
     let remote_addr = "127.0.0.1:0".parse().unwrap();
-    let session = RtspServerSession::new_with_io(session_io, event_sender, None, remote_addr);
+    let session = RtspServerSession::new_with_io(
+        session_io,
+        event_sender,
+        None,
+        remote_addr,
+        StreamingConfig::default(),
+    );
 
     let mut request = create_test_request("DESCRIBE", Some("1"));
     request.uri.host = String::new();
@@ -427,7 +500,13 @@ fn test_build_content_base_with_port_none_omits_port_in_base() {
     let mock_io = MockNetIO::new();
     let session_io: Box<dyn TNetIO + Send + Sync> = Box::new(mock_io);
     let remote_addr = "127.0.0.1:0".parse().unwrap();
-    let session = RtspServerSession::new_with_io(session_io, event_sender, None, remote_addr);
+    let session = RtspServerSession::new_with_io(
+        session_io,
+        event_sender,
+        None,
+        remote_addr,
+        StreamingConfig::default(),
+    );
 
     let mut request = create_test_request("DESCRIBE", Some("1"));
     request.uri.host = "192.168.1.1".to_string();
@@ -448,7 +527,13 @@ fn test_normalize_rtsp_stream_path_trimmed_no_track_returns_trimmed() {
     let mock_io = MockNetIO::new();
     let session_io: Box<dyn TNetIO + Send + Sync> = Box::new(mock_io);
     let remote_addr = "127.0.0.1:0".parse().unwrap();
-    let session = RtspServerSession::new_with_io(session_io, event_sender, None, remote_addr);
+    let session = RtspServerSession::new_with_io(
+        session_io,
+        event_sender,
+        None,
+        remote_addr,
+        StreamingConfig::default(),
+    );
 
     assert_eq!(
         session.normalize_rtsp_stream_path("/live/stream1/"),
@@ -466,7 +551,13 @@ fn test_normalize_rtsp_stream_path_with_track_segment_returns_base() {
     let mock_io = MockNetIO::new();
     let session_io: Box<dyn TNetIO + Send + Sync> = Box::new(mock_io);
     let remote_addr = "127.0.0.1:0".parse().unwrap();
-    let session = RtspServerSession::new_with_io(session_io, event_sender, None, remote_addr);
+    let session = RtspServerSession::new_with_io(
+        session_io,
+        event_sender,
+        None,
+        remote_addr,
+        StreamingConfig::default(),
+    );
 
     assert_eq!(
         session.normalize_rtsp_stream_path("live/stream1/trackID=0"),
@@ -484,7 +575,13 @@ fn test_normalize_rtsp_stream_path_with_streamid_returns_base() {
     let mock_io = MockNetIO::new();
     let session_io: Box<dyn TNetIO + Send + Sync> = Box::new(mock_io);
     let remote_addr = "127.0.0.1:0".parse().unwrap();
-    let session = RtspServerSession::new_with_io(session_io, event_sender, None, remote_addr);
+    let session = RtspServerSession::new_with_io(
+        session_io,
+        event_sender,
+        None,
+        remote_addr,
+        StreamingConfig::default(),
+    );
 
     assert_eq!(
         session.normalize_rtsp_stream_path("app/stream/streamid=0"),
@@ -498,7 +595,13 @@ fn test_normalize_rtsp_stream_path_empty_returns_empty() {
     let mock_io = MockNetIO::new();
     let session_io: Box<dyn TNetIO + Send + Sync> = Box::new(mock_io);
     let remote_addr = "127.0.0.1:0".parse().unwrap();
-    let session = RtspServerSession::new_with_io(session_io, event_sender, None, remote_addr);
+    let session = RtspServerSession::new_with_io(
+        session_io,
+        event_sender,
+        None,
+        remote_addr,
+        StreamingConfig::default(),
+    );
 
     assert_eq!(session.normalize_rtsp_stream_path(""), "");
     assert_eq!(session.normalize_rtsp_stream_path("/"), "");
@@ -597,7 +700,13 @@ async fn test_rtsp_server_session_options() {
     let session_io: Box<dyn TNetIO + Send + Sync> = Box::new(mock_io);
     let remote_addr = "127.0.0.1:0".parse().unwrap();
 
-    let mut session = RtspServerSession::new_with_io(session_io, event_sender, None, remote_addr);
+    let mut session = RtspServerSession::new_with_io(
+        session_io,
+        event_sender,
+        None,
+        remote_addr,
+        StreamingConfig::default(),
+    );
 
     let request = create_test_request("OPTIONS", Some("1"));
     let result = session.handle_options(&request).await;
@@ -627,7 +736,13 @@ async fn test_rtsp_server_session_on_rtsp_message_leaves_interleaved_binary_buff
 
     let session_io: Box<dyn TNetIO + Send + Sync> = Box::new(mock_io);
     let remote_addr = "127.0.0.1:0".parse().unwrap();
-    let mut session = RtspServerSession::new_with_io(session_io, event_sender, None, remote_addr);
+    let mut session = RtspServerSession::new_with_io(
+        session_io,
+        event_sender,
+        None,
+        remote_addr,
+        StreamingConfig::default(),
+    );
 
     let mut data = BytesMut::from("OPTIONS rtsp://localhost/stream1 RTSP/1.0\r\nCSeq: 1\r\n\r\n");
     data.extend_from_slice(&[0x24, 0x00, 0x00, 0x04, 0xff, 0xff, 0xff, 0xff]);
@@ -659,7 +774,13 @@ async fn test_rtsp_server_session_on_rtsp_message_unsupported_version_returns_50
 
     let session_io: Box<dyn TNetIO + Send + Sync> = Box::new(mock_io);
     let remote_addr = "127.0.0.1:0".parse().unwrap();
-    let mut session = RtspServerSession::new_with_io(session_io, event_sender, None, remote_addr);
+    let mut session = RtspServerSession::new_with_io(
+        session_io,
+        event_sender,
+        None,
+        remote_addr,
+        StreamingConfig::default(),
+    );
 
     let data = BytesMut::from("OPTIONS rtsp://localhost/stream1 RTSP/2.0\r\nCSeq: 1\r\n\r\n");
     session.reader.extend_from_slice(&data[..]);
@@ -686,7 +807,13 @@ async fn test_rtsp_server_session_on_rtsp_message_content_length_body_mismatch_r
 
     let session_io: Box<dyn TNetIO + Send + Sync> = Box::new(mock_io);
     let remote_addr = "127.0.0.1:0".parse().unwrap();
-    let mut session = RtspServerSession::new_with_io(session_io, event_sender, None, remote_addr);
+    let mut session = RtspServerSession::new_with_io(
+        session_io,
+        event_sender,
+        None,
+        remote_addr,
+        StreamingConfig::default(),
+    );
 
     // First Content-Length controls framing (5 bytes body), second is used by header lookup (3)
     // so on_rtsp_message hits the mismatch branch deterministically.
@@ -717,7 +844,13 @@ async fn test_rtsp_server_session_on_rtsp_message_unknown_method_returns_501() {
 
     let session_io: Box<dyn TNetIO + Send + Sync> = Box::new(mock_io);
     let remote_addr = "127.0.0.1:0".parse().unwrap();
-    let mut session = RtspServerSession::new_with_io(session_io, event_sender, None, remote_addr);
+    let mut session = RtspServerSession::new_with_io(
+        session_io,
+        event_sender,
+        None,
+        remote_addr,
+        StreamingConfig::default(),
+    );
 
     let data = BytesMut::from("BREW rtsp://localhost/stream1 RTSP/1.0\r\nCSeq: 1\r\n\r\n");
     session.reader.extend_from_slice(&data[..]);
@@ -745,7 +878,13 @@ async fn test_rtsp_server_session_get_parameter_keep_alive_ok_includes_session()
 
     let session_io: Box<dyn TNetIO + Send + Sync> = Box::new(mock_io);
     let remote_addr = "127.0.0.1:0".parse().unwrap();
-    let mut session = RtspServerSession::new_with_io(session_io, event_sender, None, remote_addr);
+    let mut session = RtspServerSession::new_with_io(
+        session_io,
+        event_sender,
+        None,
+        remote_addr,
+        StreamingConfig::default(),
+    );
 
     let session_id = Uuid::new(SESSION_ID_RANDOM_DIGITS);
     let session_id_str = session_id.to_string();
@@ -778,7 +917,13 @@ async fn test_rtsp_server_session_get_parameter_wrong_session_returns_454() {
 
     let session_io: Box<dyn TNetIO + Send + Sync> = Box::new(mock_io);
     let remote_addr = "127.0.0.1:0".parse().unwrap();
-    let mut session = RtspServerSession::new_with_io(session_io, event_sender, None, remote_addr);
+    let mut session = RtspServerSession::new_with_io(
+        session_io,
+        event_sender,
+        None,
+        remote_addr,
+        StreamingConfig::default(),
+    );
 
     session.session_id = Some(Uuid::new(SESSION_ID_RANDOM_DIGITS));
 
@@ -808,7 +953,13 @@ async fn test_rtsp_server_session_set_parameter_success_returns_200() {
 
     let session_io: Box<dyn TNetIO + Send + Sync> = Box::new(mock_io);
     let remote_addr = "127.0.0.1:0".parse().unwrap();
-    let mut session = RtspServerSession::new_with_io(session_io, event_sender, None, remote_addr);
+    let mut session = RtspServerSession::new_with_io(
+        session_io,
+        event_sender,
+        None,
+        remote_addr,
+        StreamingConfig::default(),
+    );
 
     let session_id = Uuid::new(SESSION_ID_RANDOM_DIGITS);
     session.session_id = Some(session_id);
@@ -839,7 +990,13 @@ async fn test_rtsp_server_session_set_parameter_wrong_session_returns_454() {
 
     let session_io: Box<dyn TNetIO + Send + Sync> = Box::new(mock_io);
     let remote_addr = "127.0.0.1:0".parse().unwrap();
-    let mut session = RtspServerSession::new_with_io(session_io, event_sender, None, remote_addr);
+    let mut session = RtspServerSession::new_with_io(
+        session_io,
+        event_sender,
+        None,
+        remote_addr,
+        StreamingConfig::default(),
+    );
 
     session.session_id = Some(Uuid::new(SESSION_ID_RANDOM_DIGITS));
 
@@ -869,7 +1026,13 @@ async fn test_rtsp_server_session_set_parameter_no_session_header_returns_200() 
 
     let session_io: Box<dyn TNetIO + Send + Sync> = Box::new(mock_io);
     let remote_addr = "127.0.0.1:0".parse().unwrap();
-    let mut session = RtspServerSession::new_with_io(session_io, event_sender, None, remote_addr);
+    let mut session = RtspServerSession::new_with_io(
+        session_io,
+        event_sender,
+        None,
+        remote_addr,
+        StreamingConfig::default(),
+    );
 
     session.session_id = Some(Uuid::new(SESSION_ID_RANDOM_DIGITS));
     let request = create_test_request(rtsp_method_name::SET_PARAMETER, Some("2"));
@@ -896,7 +1059,13 @@ async fn test_rtsp_server_session_set_parameter_no_session_id_returns_200() {
 
     let session_io: Box<dyn TNetIO + Send + Sync> = Box::new(mock_io);
     let remote_addr = "127.0.0.1:0".parse().unwrap();
-    let mut session = RtspServerSession::new_with_io(session_io, event_sender, None, remote_addr);
+    let mut session = RtspServerSession::new_with_io(
+        session_io,
+        event_sender,
+        None,
+        remote_addr,
+        StreamingConfig::default(),
+    );
 
     assert!(session.session_id.is_none());
     let request = create_test_request(rtsp_method_name::SET_PARAMETER, Some("2"));
@@ -924,7 +1093,13 @@ async fn test_rtsp_server_session_pause_unsubscribes_and_responds_ok() {
 
     let session_io: Box<dyn TNetIO + Send + Sync> = Box::new(mock_io);
     let remote_addr = "127.0.0.1:0".parse().unwrap();
-    let mut session = RtspServerSession::new_with_io(session_io, event_sender, None, remote_addr);
+    let mut session = RtspServerSession::new_with_io(
+        session_io,
+        event_sender,
+        None,
+        remote_addr,
+        StreamingConfig::default(),
+    );
 
     session.has_subscribed = true;
     session.session_id = Some(Uuid::new(SESSION_ID_RANDOM_DIGITS));
@@ -962,7 +1137,13 @@ async fn test_rtsp_server_session_pause_event_send_failure_returns_err() {
 
     let session_io: Box<dyn TNetIO + Send + Sync> = Box::new(mock_io);
     let remote_addr = "127.0.0.1:0".parse().unwrap();
-    let mut session = RtspServerSession::new_with_io(session_io, event_sender, None, remote_addr);
+    let mut session = RtspServerSession::new_with_io(
+        session_io,
+        event_sender,
+        None,
+        remote_addr,
+        StreamingConfig::default(),
+    );
 
     session.has_subscribed = true;
     session.stream_identifier = Some(StreamIdentifier::Rtsp {
@@ -998,7 +1179,13 @@ async fn test_rtsp_server_session_redirect_returns_405_with_allow() {
 
     let session_io: Box<dyn TNetIO + Send + Sync> = Box::new(mock_io);
     let remote_addr = "127.0.0.1:0".parse().unwrap();
-    let mut session = RtspServerSession::new_with_io(session_io, event_sender, None, remote_addr);
+    let mut session = RtspServerSession::new_with_io(
+        session_io,
+        event_sender,
+        None,
+        remote_addr,
+        StreamingConfig::default(),
+    );
 
     let request = create_test_request(rtsp_method_name::REDIRECT, Some("1"));
     let result = session.handle_redirect(&request).await;
@@ -1042,7 +1229,13 @@ async fn test_rtsp_server_session_describe() {
     let session_io: Box<dyn TNetIO + Send + Sync> = Box::new(mock_io);
     let remote_addr = "127.0.0.1:0".parse().unwrap();
 
-    let mut session = RtspServerSession::new_with_io(session_io, event_sender, None, remote_addr);
+    let mut session = RtspServerSession::new_with_io(
+        session_io,
+        event_sender,
+        None,
+        remote_addr,
+        StreamingConfig::default(),
+    );
 
     let mut request = create_test_request("DESCRIBE", Some("2"));
     // Need to set a valid path for StreamIdentifier
@@ -1083,7 +1276,13 @@ async fn test_rtsp_server_session_describe_unacceptable_accept_returns_406() {
     let session_io: Box<dyn TNetIO + Send + Sync> = Box::new(mock_io);
     let remote_addr = "127.0.0.1:0".parse().unwrap();
 
-    let mut session = RtspServerSession::new_with_io(session_io, event_sender, None, remote_addr);
+    let mut session = RtspServerSession::new_with_io(
+        session_io,
+        event_sender,
+        None,
+        remote_addr,
+        StreamingConfig::default(),
+    );
 
     let mut request = create_test_request("DESCRIBE", Some("2"));
     request.uri.path = "live/test".to_string();
@@ -1132,7 +1331,13 @@ async fn test_rtsp_server_session_describe_normalizes_path() {
 
     let session_io: Box<dyn TNetIO + Send + Sync> = Box::new(mock_io);
     let remote_addr = "127.0.0.1:0".parse().unwrap();
-    let mut session = RtspServerSession::new_with_io(session_io, event_sender, None, remote_addr);
+    let mut session = RtspServerSession::new_with_io(
+        session_io,
+        event_sender,
+        None,
+        remote_addr,
+        StreamingConfig::default(),
+    );
 
     let mut request = create_test_request("DESCRIBE", Some("3"));
     request.uri.schema = crate::common::http::Schema::RTSP;
@@ -1172,7 +1377,13 @@ async fn test_rtsp_server_session_describe_empty_sdp_returns_not_found() {
 
     let session_io: Box<dyn TNetIO + Send + Sync> = Box::new(mock_io);
     let remote_addr = "127.0.0.1:0".parse().unwrap();
-    let mut session = RtspServerSession::new_with_io(session_io, event_sender, None, remote_addr);
+    let mut session = RtspServerSession::new_with_io(
+        session_io,
+        event_sender,
+        None,
+        remote_addr,
+        StreamingConfig::default(),
+    );
 
     let mut request = create_test_request("DESCRIBE", Some("4"));
     request.uri.schema = crate::common::http::Schema::RTSP;
@@ -1201,7 +1412,13 @@ async fn test_rtsp_server_session_describe_auth_header_without_auth_returns_unau
 
     let session_io: Box<dyn TNetIO + Send + Sync> = Box::new(mock_io);
     let remote_addr = "127.0.0.1:0".parse().unwrap();
-    let mut session = RtspServerSession::new_with_io(session_io, event_sender, None, remote_addr);
+    let mut session = RtspServerSession::new_with_io(
+        session_io,
+        event_sender,
+        None,
+        remote_addr,
+        StreamingConfig::default(),
+    );
 
     let mut request = create_test_request("DESCRIBE", Some("5"));
     request.uri.schema = crate::common::http::Schema::RTSP;
@@ -1258,8 +1475,13 @@ async fn test_rtsp_server_session_describe_with_basic_auth_returns_ok() {
         username == "admin" && password == "secret"
     }))
     .with_basic_realm("ONVIF Camera");
-    let mut session =
-        RtspServerSession::new_with_io(session_io, event_sender, Some(auth), remote_addr);
+    let mut session = RtspServerSession::new_with_io(
+        session_io,
+        event_sender,
+        Some(auth),
+        remote_addr,
+        StreamingConfig::default(),
+    );
 
     let mut request = create_test_request("DESCRIBE", Some("6"));
     request.uri.schema = crate::common::http::Schema::RTSP;
@@ -1306,8 +1528,13 @@ async fn test_rtsp_server_session_describe_auth_failure_returns_challenge() {
         username == "admin" && password == "secret"
     }))
     .with_basic_realm("ONVIF Camera");
-    let mut session =
-        RtspServerSession::new_with_io(session_io, event_sender, Some(auth), remote_addr);
+    let mut session = RtspServerSession::new_with_io(
+        session_io,
+        event_sender,
+        Some(auth),
+        remote_addr,
+        StreamingConfig::default(),
+    );
 
     let mut request = create_test_request("DESCRIBE", Some("7"));
     request.uri.schema = crate::common::http::Schema::RTSP;
@@ -1350,8 +1577,13 @@ async fn test_rtsp_server_session_play_auth_failure_returns_challenge() {
         username == "admin" && password == "secret"
     }))
     .with_basic_realm("ONVIF Camera");
-    let mut session =
-        RtspServerSession::new_with_io(session_io, event_sender, Some(auth), remote_addr);
+    let mut session = RtspServerSession::new_with_io(
+        session_io,
+        event_sender,
+        Some(auth),
+        remote_addr,
+        StreamingConfig::default(),
+    );
 
     let mut request = create_test_request(rtsp_method_name::PLAY, Some("8"));
     request.uri.path = "stream1".to_string();
@@ -1378,7 +1610,13 @@ async fn test_rtsp_server_session_setup() {
     let session_io: Box<dyn TNetIO + Send + Sync> = Box::new(mock_io);
     let remote_addr = "127.0.0.1:0".parse().unwrap();
 
-    let mut session = RtspServerSession::new_with_io(session_io, event_sender, None, remote_addr);
+    let mut session = RtspServerSession::new_with_io(
+        session_io,
+        event_sender,
+        None,
+        remote_addr,
+        StreamingConfig::default(),
+    );
 
     // Pre-populate a track so setup acts on it
     // The track logic requires an existing track in self.tracks map matching the control URI
@@ -1417,7 +1655,13 @@ async fn test_rtsp_server_session_setup_malformed_transport_returns_461() {
     let session_io: Box<dyn TNetIO + Send + Sync> = Box::new(mock_io);
     let remote_addr = "127.0.0.1:0".parse().unwrap();
 
-    let mut session = RtspServerSession::new_with_io(session_io, event_sender, None, remote_addr);
+    let mut session = RtspServerSession::new_with_io(
+        session_io,
+        event_sender,
+        None,
+        remote_addr,
+        StreamingConfig::default(),
+    );
 
     let codec_info = RtspCodecInfo {
         codec_id: crate::rtsp::rtsp_codec::RtspCodecId::H264,
@@ -1453,7 +1697,13 @@ async fn test_rtsp_server_session_setup_base_path_selects_video_track() {
     let session_io: Box<dyn TNetIO + Send + Sync> = Box::new(mock_io);
     let remote_addr = "127.0.0.1:0".parse().unwrap();
 
-    let mut session = RtspServerSession::new_with_io(session_io, event_sender, None, remote_addr);
+    let mut session = RtspServerSession::new_with_io(
+        session_io,
+        event_sender,
+        None,
+        remote_addr,
+        StreamingConfig::default(),
+    );
 
     let codec_info = RtspCodecInfo {
         codec_id: crate::rtsp::rtsp_codec::RtspCodecId::H264,
@@ -1485,7 +1735,13 @@ async fn test_rtsp_server_session_teardown() {
     let session_io: Box<dyn TNetIO + Send + Sync> = Box::new(mock_io);
     let remote_addr = "127.0.0.1:0".parse().unwrap();
 
-    let mut session = RtspServerSession::new_with_io(session_io, event_sender, None, remote_addr);
+    let mut session = RtspServerSession::new_with_io(
+        session_io,
+        event_sender,
+        None,
+        remote_addr,
+        StreamingConfig::default(),
+    );
 
     // Mock event receiver to handle UnSubscribe/UnPublish
     tokio::spawn(async move {
@@ -1508,7 +1764,13 @@ async fn test_rtsp_server_session_teardown_with_rtp_counters_exercises_summary_b
     let session_io: Box<dyn TNetIO + Send + Sync> = Box::new(mock_io);
     let remote_addr = "127.0.0.1:0".parse().unwrap();
 
-    let mut session = RtspServerSession::new_with_io(session_io, event_sender, None, remote_addr);
+    let mut session = RtspServerSession::new_with_io(
+        session_io,
+        event_sender,
+        None,
+        remote_addr,
+        StreamingConfig::default(),
+    );
 
     let counter = Arc::new(RtpTrackCounters::new());
     counter.on_packet_sent(100, 1, 1000);
@@ -1565,7 +1827,13 @@ async fn test_rtsp_server_session_teardown_sends_response() {
     let session_io: Box<dyn TNetIO + Send + Sync> = Box::new(mock_io);
     let remote_addr = "127.0.0.1:0".parse().unwrap();
 
-    let mut session = RtspServerSession::new_with_io(session_io, event_sender, None, remote_addr);
+    let mut session = RtspServerSession::new_with_io(
+        session_io,
+        event_sender,
+        None,
+        remote_addr,
+        StreamingConfig::default(),
+    );
 
     let run_handle = tokio::spawn(async move {
         let _ = session.run().await;
@@ -1640,7 +1908,13 @@ async fn test_rtsp_server_session_play_then_teardown_sends_two_responses_and_uns
         }
     });
 
-    let mut session = RtspServerSession::new_with_io(session_io, event_sender, None, remote_addr);
+    let mut session = RtspServerSession::new_with_io(
+        session_io,
+        event_sender,
+        None,
+        remote_addr,
+        StreamingConfig::default(),
+    );
     add_default_video_track(&mut session);
 
     let run_result = session.run().await;
@@ -1714,7 +1988,13 @@ async fn test_rtsp_server_session_teardown_trailing_slash_unsubscribes_normalize
         }
     });
 
-    let mut session = RtspServerSession::new_with_io(session_io, event_sender, None, remote_addr);
+    let mut session = RtspServerSession::new_with_io(
+        session_io,
+        event_sender,
+        None,
+        remote_addr,
+        StreamingConfig::default(),
+    );
     add_default_video_track(&mut session);
 
     let run_result = session.run().await;
@@ -1770,7 +2050,13 @@ async fn test_rtsp_server_session_run_eof_stops_playback_task() {
 
     let session_io: Box<dyn TNetIO + Send + Sync> = Box::new(mock_io);
     let remote_addr = "127.0.0.1:0".parse().unwrap();
-    let mut session = RtspServerSession::new_with_io(session_io, event_sender, None, remote_addr);
+    let mut session = RtspServerSession::new_with_io(
+        session_io,
+        event_sender,
+        None,
+        remote_addr,
+        StreamingConfig::default(),
+    );
     add_default_video_track(&mut session);
 
     let run_result = session.run().await;
@@ -1792,7 +2078,13 @@ async fn test_rtsp_server_session_run_shutdown_sends_unsubscribe_cleanup() {
 
     let session_io: Box<dyn TNetIO + Send + Sync> = Box::new(mock_io);
     let remote_addr = "127.0.0.1:0".parse().unwrap();
-    let mut session = RtspServerSession::new_with_io(session_io, event_sender, None, remote_addr);
+    let mut session = RtspServerSession::new_with_io(
+        session_io,
+        event_sender,
+        None,
+        remote_addr,
+        StreamingConfig::default(),
+    );
 
     session.has_subscribed = true;
     session.stream_identifier = Some(StreamIdentifier::Rtsp {
@@ -1837,7 +2129,13 @@ async fn test_rtsp_server_session_play() {
     let session_io: Box<dyn TNetIO + Send + Sync> = Box::new(mock_io);
     let remote_addr = "127.0.0.1:0".parse().unwrap();
 
-    let mut session = RtspServerSession::new_with_io(session_io, event_sender, None, remote_addr);
+    let mut session = RtspServerSession::new_with_io(
+        session_io,
+        event_sender,
+        None,
+        remote_addr,
+        StreamingConfig::default(),
+    );
     add_default_video_track(&mut session);
 
     // Ensure we use the aggregate stream identifier for PLAY requests that include track IDs.
@@ -1906,7 +2204,13 @@ async fn test_rtsp_server_session_play_malformed_range_returns_457_without_subsc
     let session_io: Box<dyn TNetIO + Send + Sync> = Box::new(mock_io);
     let remote_addr = "127.0.0.1:0".parse().unwrap();
 
-    let mut session = RtspServerSession::new_with_io(session_io, event_sender, None, remote_addr);
+    let mut session = RtspServerSession::new_with_io(
+        session_io,
+        event_sender,
+        None,
+        remote_addr,
+        StreamingConfig::default(),
+    );
 
     let content = "PLAY rtsp://localhost/live/test/trackID=0 RTSP/1.0\r\nCSeq: 9\r\nRange: npt=bad-value\r\n\r\n";
     let request = RtspRequest::unmarshal(content).unwrap();
@@ -1937,7 +2241,13 @@ async fn test_rtsp_server_session_play_normalizes_track_path() {
     let session_io: Box<dyn TNetIO + Send + Sync> = Box::new(mock_io);
     let remote_addr = "127.0.0.1:0".parse().unwrap();
 
-    let mut session = RtspServerSession::new_with_io(session_io, event_sender, None, remote_addr);
+    let mut session = RtspServerSession::new_with_io(
+        session_io,
+        event_sender,
+        None,
+        remote_addr,
+        StreamingConfig::default(),
+    );
     add_default_video_track(&mut session);
 
     let subscribe_handle = tokio::spawn(async move {
@@ -2002,7 +2312,13 @@ async fn test_rtsp_server_session_play_includes_rtp_info() {
     let session_io: Box<dyn TNetIO + Send + Sync> = Box::new(mock_io);
     let remote_addr = "127.0.0.1:0".parse().unwrap();
 
-    let mut session = RtspServerSession::new_with_io(session_io, event_sender, None, remote_addr);
+    let mut session = RtspServerSession::new_with_io(
+        session_io,
+        event_sender,
+        None,
+        remote_addr,
+        StreamingConfig::default(),
+    );
 
     let codec_info = RtspCodecInfo {
         codec_id: crate::rtsp::rtsp_codec::RtspCodecId::H264,
@@ -2066,8 +2382,13 @@ fn test_rtsp_server_session_exit_without_publish_or_subscribe() {
     let (event_sender, mut event_receiver) = tokio::sync::mpsc::unbounded_channel();
     let mock_io = MockNetIO::new();
     let remote_addr = SocketAddr::from(([127, 0, 0, 1], 0));
-    let mut session =
-        RtspServerSession::new_with_io(Box::new(mock_io), event_sender, None, remote_addr);
+    let mut session = RtspServerSession::new_with_io(
+        Box::new(mock_io),
+        event_sender,
+        None,
+        remote_addr,
+        StreamingConfig::default(),
+    );
     let identifier = StreamIdentifier::Rtsp {
         stream_path: "stream1".to_string(),
     };
@@ -2086,8 +2407,13 @@ fn test_rtsp_server_session_exit_published_sends_unpublish() {
     let (event_sender, mut event_receiver) = tokio::sync::mpsc::unbounded_channel();
     let mock_io = MockNetIO::new();
     let remote_addr = SocketAddr::from(([127, 0, 0, 1], 0));
-    let mut session =
-        RtspServerSession::new_with_io(Box::new(mock_io), event_sender, None, remote_addr);
+    let mut session = RtspServerSession::new_with_io(
+        Box::new(mock_io),
+        event_sender,
+        None,
+        remote_addr,
+        StreamingConfig::default(),
+    );
     session.has_published = true;
 
     let identifier = StreamIdentifier::Rtsp {
@@ -2112,8 +2438,13 @@ fn test_rtsp_server_session_exit_subscribed_sends_unsubscribe() {
     let (event_sender, mut event_receiver) = tokio::sync::mpsc::unbounded_channel();
     let mock_io = MockNetIO::new();
     let remote_addr = SocketAddr::from(([127, 0, 0, 1], 0));
-    let mut session =
-        RtspServerSession::new_with_io(Box::new(mock_io), event_sender, None, remote_addr);
+    let mut session = RtspServerSession::new_with_io(
+        Box::new(mock_io),
+        event_sender,
+        None,
+        remote_addr,
+        StreamingConfig::default(),
+    );
     session.has_subscribed = true;
 
     let identifier = StreamIdentifier::Rtsp {
@@ -2553,18 +2884,6 @@ fn test_has_annexb_start_code_false() {
 // ========================================================================
 
 #[test]
-fn test_set_rtp_sample_interval() {
-    set_rtp_sample_interval(2000);
-    assert_eq!(rtp_sample_interval(), 2000);
-
-    set_rtp_sample_interval(1024);
-    assert_eq!(rtp_sample_interval(), 1024);
-
-    // Reset
-    set_rtp_sample_interval(0);
-}
-
-#[test]
 fn test_now_millis_positive() {
     let now = now_millis();
     assert!(now > 0);
@@ -2981,4 +3300,261 @@ fn test_pacing_timestamp_ms_audio_none() {
         data: BytesMut::new(),
     };
     assert_eq!(pacing_timestamp_ms(&frame), None);
+}
+
+// ========================================================================
+// LagRecoveryMode::from_str_value Tests
+// ========================================================================
+
+#[test]
+fn test_lag_recovery_mode_from_str_value_off_returns_disabled() {
+    let mode = LagRecoveryMode::from_str_value("off");
+    assert_eq!(mode, LagRecoveryMode::Disabled);
+}
+
+#[test]
+fn test_lag_recovery_mode_from_str_value_none_returns_disabled() {
+    let mode = LagRecoveryMode::from_str_value("none");
+    assert_eq!(mode, LagRecoveryMode::Disabled);
+}
+
+#[test]
+fn test_lag_recovery_mode_from_str_value_disabled_returns_disabled() {
+    let mode = LagRecoveryMode::from_str_value("disabled");
+    assert_eq!(mode, LagRecoveryMode::Disabled);
+}
+
+#[test]
+fn test_lag_recovery_mode_from_str_value_latest_idr_returns_latest_idr() {
+    let mode = LagRecoveryMode::from_str_value("latest_idr");
+    assert_eq!(mode, LagRecoveryMode::LatestIdr);
+}
+
+#[test]
+fn test_lag_recovery_mode_from_str_value_anything_else_returns_latest_idr() {
+    let mode = LagRecoveryMode::from_str_value("anything_else");
+    assert_eq!(mode, LagRecoveryMode::LatestIdr);
+}
+
+#[test]
+fn test_lag_recovery_mode_from_str_value_case_insensitive() {
+    assert_eq!(
+        LagRecoveryMode::from_str_value("OFF"),
+        LagRecoveryMode::Disabled
+    );
+    assert_eq!(
+        LagRecoveryMode::from_str_value("None"),
+        LagRecoveryMode::Disabled
+    );
+    assert_eq!(
+        LagRecoveryMode::from_str_value("DISABLED"),
+        LagRecoveryMode::Disabled
+    );
+    assert_eq!(
+        LagRecoveryMode::from_str_value("Latest_Idr"),
+        LagRecoveryMode::LatestIdr
+    );
+}
+
+#[test]
+fn test_lag_recovery_mode_from_str_value_trims_whitespace() {
+    assert_eq!(
+        LagRecoveryMode::from_str_value("  off  "),
+        LagRecoveryMode::Disabled
+    );
+    assert_eq!(
+        LagRecoveryMode::from_str_value("  latest_idr  "),
+        LagRecoveryMode::LatestIdr
+    );
+}
+
+// ========================================================================
+// PlaybackLatencyPolicy::from_config Tests
+// ========================================================================
+
+#[test]
+fn test_playback_latency_policy_from_config_default() {
+    use crate::config::StreamingConfig;
+
+    let config = StreamingConfig::default();
+    let policy = PlaybackLatencyPolicy::from_config(&config);
+
+    // Default config has max_frame_age_ms=1500, lag_recovery_mode=LatestIdr
+    assert_eq!(policy.max_frame_age_ms, 1500);
+    assert_eq!(policy.lag_recovery_mode, LagRecoveryMode::LatestIdr);
+    // These are constants
+    assert_eq!(policy.lag_recovery_threshold_ms, LAG_RECOVERY_THRESHOLD_MS);
+    assert_eq!(policy.sustained_lag_frames, LAG_RECOVERY_SUSTAINED_FRAMES);
+}
+
+#[test]
+fn test_playback_latency_policy_from_config_custom_max_frame_age() {
+    use crate::config::StreamingConfig;
+
+    let config = StreamingConfig::new().with_max_frame_age(2000);
+    let policy = PlaybackLatencyPolicy::from_config(&config);
+
+    assert_eq!(policy.max_frame_age_ms, 2000);
+}
+
+#[test]
+fn test_playback_latency_policy_from_config_zero_max_frame_age_uses_default() {
+    use crate::config::StreamingConfig;
+
+    // Config with max_frame_age_ms = 0 should fall back to DEFAULT_MAX_FRAME_AGE_MS
+    let config = StreamingConfig {
+        max_frame_age_ms: 0,
+        ..Default::default()
+    };
+    let policy = PlaybackLatencyPolicy::from_config(&config);
+
+    assert_eq!(policy.max_frame_age_ms, DEFAULT_MAX_FRAME_AGE_MS);
+}
+
+#[test]
+fn test_playback_latency_policy_from_config_disabled_lag_recovery() {
+    use crate::config::StreamingConfig;
+
+    let config = StreamingConfig::new().with_lag_recovery_mode(LagRecoveryMode::Disabled);
+    let policy = PlaybackLatencyPolicy::from_config(&config);
+
+    assert_eq!(policy.lag_recovery_mode, LagRecoveryMode::Disabled);
+}
+
+// ========================================================================
+// Config Threading Integration Tests
+// ========================================================================
+
+/// Test that session stores custom rtp_sample_interval from config
+#[test]
+fn test_session_uses_config_rtp_sample_interval() {
+    let (event_sender, _event_receiver) = tokio::sync::mpsc::unbounded_channel();
+    let mock_io = MockNetIO::new();
+    let session_io: Box<dyn TNetIO + Send + Sync> = Box::new(mock_io);
+    let remote_addr = "127.0.0.1:0".parse().unwrap();
+
+    // Create session with custom rtp_sample_interval of 42
+    let config = StreamingConfig::new().with_rtp_sample_interval(42);
+    let session =
+        RtspServerSession::new_with_io(session_io, event_sender, None, remote_addr, config);
+
+    // Verify the rtp_sample_interval is stored on the session
+    assert_eq!(session.config.rtp_sample_interval, 42);
+}
+
+/// Test that session has expected default config values
+#[test]
+fn test_session_default_config_has_expected_defaults() {
+    let (event_sender, _event_receiver) = tokio::sync::mpsc::unbounded_channel();
+    let mock_io = MockNetIO::new();
+    let session_io: Box<dyn TNetIO + Send + Sync> = Box::new(mock_io);
+    let remote_addr = "127.0.0.1:0".parse().unwrap();
+
+    // Create session with default config
+    let config = StreamingConfig::default();
+    let session =
+        RtspServerSession::new_with_io(session_io, event_sender, None, remote_addr, config);
+
+    // Verify expected defaults
+    assert_eq!(session.config.rtp_sample_interval, 0);
+    assert_eq!(session.config.max_frame_age_ms, 1500);
+    assert_eq!(session.config.play_ready_timeout_ms, 1500);
+    assert_eq!(session.config.lag_recovery_mode, LagRecoveryMode::LatestIdr);
+    assert_eq!(session.config.rtsp_listen_addr, "0.0.0.0:554");
+    assert_eq!(session.config.httpflv_listen_addr, "0.0.0.0:8080");
+}
+
+/// Test that env vars have no effect on session config (config is explicit)
+#[test]
+fn test_session_ignores_env_vars_uses_config() {
+    // Set a contradictory env var that should NOT affect session behavior
+    // SAFETY: This test uses a known environment variable name that is not used
+    // by the streaming library itself. The variable is cleaned up after the test.
+    unsafe {
+        std::env::set_var("ONVIF_MAX_FRAME_AGE_MS", "9999");
+    }
+
+    let (event_sender, _event_receiver) = tokio::sync::mpsc::unbounded_channel();
+    let mock_io = MockNetIO::new();
+    let session_io: Box<dyn TNetIO + Send + Sync> = Box::new(mock_io);
+    let remote_addr = "127.0.0.1:0".parse().unwrap();
+
+    // Create session with explicit config value (500ms), ignoring the env var
+    let config = StreamingConfig::new().with_max_frame_age(500);
+    let session =
+        RtspServerSession::new_with_io(session_io, event_sender, None, remote_addr, config);
+
+    // Verify session uses the explicit config value (500), NOT the env var (9999)
+    assert_eq!(session.config.max_frame_age_ms, 500);
+
+    // Also verify PlaybackLatencyPolicy uses the config value
+    let policy = PlaybackLatencyPolicy::from_config(&session.config);
+    assert_eq!(policy.max_frame_age_ms, 500);
+
+    // Cleanup: remove the env var
+    // SAFETY: Cleanup of the test environment variable set above
+    unsafe {
+        std::env::remove_var("ONVIF_MAX_FRAME_AGE_MS");
+    }
+}
+
+/// Test that play_ready_timeout_ms is correctly threaded to session
+#[test]
+fn test_play_ready_timeout_from_config() {
+    let (event_sender, _event_receiver) = tokio::sync::mpsc::unbounded_channel();
+    let mock_io = MockNetIO::new();
+    let session_io: Box<dyn TNetIO + Send + Sync> = Box::new(mock_io);
+    let remote_addr = "127.0.0.1:0".parse().unwrap();
+
+    // Create session with custom play_ready_timeout_ms
+    let config = StreamingConfig::new().with_play_ready_timeout(3000);
+    let session =
+        RtspServerSession::new_with_io(session_io, event_sender, None, remote_addr, config);
+
+    // Verify play_ready_timeout_ms is stored on the session config
+    assert_eq!(session.config.play_ready_timeout_ms, 3000);
+}
+
+/// Test that max_frame_age config is correctly threaded to PlaybackLatencyPolicy
+#[test]
+fn test_max_frame_age_config_threaded_to_policy() {
+    // Test various custom values
+    for custom_max_age in [100, 500, 2000, 5000] {
+        let config = StreamingConfig::new().with_max_frame_age(custom_max_age);
+        let policy = PlaybackLatencyPolicy::from_config(&config);
+
+        // Verify the policy uses the config value directly
+        assert_eq!(
+            policy.max_frame_age_ms, custom_max_age,
+            "Policy should use config max_frame_age_ms={}, got {}",
+            custom_max_age, policy.max_frame_age_ms
+        );
+    }
+}
+
+/// Test that lag_recovery_mode config is correctly threaded to PlaybackLatencyPolicy
+#[test]
+fn test_lag_recovery_mode_config_threaded_to_policy() {
+    // Test Disabled mode
+    let config_disabled = StreamingConfig::new().with_lag_recovery_mode(LagRecoveryMode::Disabled);
+    let policy_disabled = PlaybackLatencyPolicy::from_config(&config_disabled);
+    assert_eq!(policy_disabled.lag_recovery_mode, LagRecoveryMode::Disabled);
+
+    // Test LatestIdr mode
+    let config_latest = StreamingConfig::new().with_lag_recovery_mode(LagRecoveryMode::LatestIdr);
+    let policy_latest = PlaybackLatencyPolicy::from_config(&config_latest);
+    assert_eq!(policy_latest.lag_recovery_mode, LagRecoveryMode::LatestIdr);
+}
+
+/// Test that zero max_frame_age falls back to default in policy
+#[test]
+fn test_zero_max_frame_age_falls_back_to_default_in_policy() {
+    let config = StreamingConfig {
+        max_frame_age_ms: 0,
+        ..Default::default()
+    };
+    let policy = PlaybackLatencyPolicy::from_config(&config);
+
+    // Should fall back to DEFAULT_MAX_FRAME_AGE_MS (1500)
+    assert_eq!(policy.max_frame_age_ms, DEFAULT_MAX_FRAME_AGE_MS);
 }

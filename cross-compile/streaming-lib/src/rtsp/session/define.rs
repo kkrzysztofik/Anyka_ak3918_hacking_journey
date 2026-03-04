@@ -42,6 +42,7 @@ pub mod rtsp_method_name {
     ];
 }
 
+#[derive(Debug)]
 pub enum ServerSessionType {
     Pull,
     Push,
