@@ -3,6 +3,7 @@ use crate::streamhub::define::StreamHubEventSender;
 use super::session::server_session::RtspServerSession;
 use crate::common::auth::Auth;
 use async_trait::async_trait;
+use log::{error, info};
 use std::net::SocketAddr;
 use tokio::io::Error;
 use tokio::net::TcpListener;
@@ -48,10 +49,10 @@ impl RtspServer for DefaultRtspServer {
                 })?;
         let listener = TcpListener::bind(socket_addr).await?;
 
-        log::info!("event=rtsp_server_start address=tcp://{}", socket_addr);
+        info!("event=rtsp_server_start address=tcp://{}", socket_addr);
         loop {
             let (tcp_stream, peer_addr) = listener.accept().await?;
-            log::info!(
+            info!(
                 "event=rtsp_connection_start remote_addr={} local_addr={}",
                 peer_addr,
                 socket_addr
@@ -65,7 +66,7 @@ impl RtspServer for DefaultRtspServer {
                     } else {
                         "none".to_string()
                     };
-                    log::info!(
+                    info!(
                         "session run exit: session id: {} session type: {} , err: {}",
                         session_id,
                         session.session_type,
@@ -77,7 +78,7 @@ impl RtspServer for DefaultRtspServer {
                     {
                         match session.exit(identifier) {
                             Err(err) => {
-                                log::error!(
+                                error!(
                                     "session exit error: session id: {} session type: {}, error info: {}",
                                     session_id,
                                     session.session_type,
@@ -85,7 +86,7 @@ impl RtspServer for DefaultRtspServer {
                                 );
                             }
                             Ok(()) => {
-                                log::info!(
+                                info!(
                                     "session exit successfully: session id: {} session type: {} ",
                                     session_id,
                                     session.session_type,

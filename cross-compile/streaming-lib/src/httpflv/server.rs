@@ -11,6 +11,7 @@ use {
         response::Response,
     },
     futures::channel::mpsc::unbounded,
+    log::{error, info},
     std::net::SocketAddr,
     tokio::net::TcpListener,
 };
@@ -79,7 +80,7 @@ pub(crate) async fn handle_connection(
 
             tokio::spawn(async move {
                 if let Err(err) = flv_handler.run().await {
-                    log::error!("flv handler run error {}", err);
+                    error!("flv handler run error {}", err);
                 }
             });
 
@@ -140,7 +141,7 @@ impl HttpFlvServer for DefaultHttpFlvServer {
 
         let listener = TcpListener::bind(sock_addr).await?;
 
-        log::info!("Httpflv server listening on http://{}", sock_addr);
+        info!("Httpflv server listening on http://{}", sock_addr);
 
         let handle_connection =
             handle_connection.with_state((self.event_producer.clone(), self.auth.clone()));

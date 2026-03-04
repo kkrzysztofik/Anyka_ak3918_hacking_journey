@@ -135,9 +135,15 @@ const PACER_SLEEP_DIAGNOSTIC_MIN_MS: u64 = 20;
 /// RFC 2326 §12.36 — Server header value.
 const SERVER_HEADER: &str = "streaming-lib/0.1";
 
+/// Lag recovery mode for handling playback delays
+///
+/// This enum controls how the server handles situations where the client
+/// falls behind in playback.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum LagRecoveryMode {
+pub enum LagRecoveryMode {
+    /// Disabled - no recovery, just deliver frames as they arrive
     Disabled,
+    /// Latest IDR - skip to latest keyframe when lag is detected
     LatestIdr,
 }
 

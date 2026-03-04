@@ -17,10 +17,13 @@
 pub mod bytesio;
 pub mod codec;
 pub mod common;
+pub mod config;
 pub mod container;
 pub mod httpflv;
 mod logging_flags;
+pub mod protocol;
 pub mod rtsp;
+pub mod service;
 pub mod streamhub;
 pub mod validation;
 

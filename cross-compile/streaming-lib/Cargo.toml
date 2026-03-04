@@ -29,6 +29,7 @@ rand = "0.10"
 
 # Logging
 log = "0.4"
+env_logger = "0.11"
 
 # Error handling
 anyhow = "1.0"
@@ -55,9 +56,9 @@ indexmap = "2.13"
 lazy_static = "1.5"
 async-trait = "0.1"
 md5 = "0.8"
-env_logger = "0.11"
 job_scheduler_ng = "2.4"
 portable-atomic = { version = "1.13", features = ["std"] }
+mockall = "0.14"
 
 # Network
 reqwest = { version = "0.13", features = ["native-tls-vendored", "query", "form"] }
