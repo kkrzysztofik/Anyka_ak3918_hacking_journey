@@ -2,8 +2,8 @@
 // Tests end-to-end stream hub operations, publisher/subscriber routing, and data flow
 
 use std::collections::{HashMap, HashSet};
-use streaming_lib::streamhub::define::{PublishType, SubscribeType};
-use streaming_lib::streamhub::stream::StreamIdentifier;
+use streaming_lib::hub::define::{PublishType, SubscribeType};
+use streaming_lib::hub::stream::StreamIdentifier;
 
 /// Tests stream identifier creation for different protocols.
 #[tokio::test]

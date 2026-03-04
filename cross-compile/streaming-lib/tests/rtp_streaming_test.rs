@@ -1,11 +1,11 @@
 // Integration tests for RTP streaming
 // Tests end-to-end RTP packetization, transmission, and depacketization
 
-use streaming_lib::bytesio::bytes_reader::BytesReader;
-use streaming_lib::rtsp::rtp::RtpPacket;
-use streaming_lib::rtsp::rtp::rtp_header::RtpHeader;
-use streaming_lib::rtsp::rtp::utils::Marshal;
-use streaming_lib::rtsp::rtp::utils::Unmarshal;
+use streaming_lib::io::bytes_reader::BytesReader;
+use streaming_lib::protocol::rtsp::rtp::RtpPacket;
+use streaming_lib::protocol::rtsp::rtp::rtp_header::RtpHeader;
+use streaming_lib::protocol::rtsp::rtp::utils::Marshal;
+use streaming_lib::protocol::rtsp::rtp::utils::Unmarshal;
 
 /// Tests RTP packet marshaling/unmarshaling round-trip integrity.
 #[tokio::test]

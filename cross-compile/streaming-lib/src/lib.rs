@@ -5,26 +5,24 @@
 //!
 //! # Components
 //!
-//! - **rtsp**: RTSP server implementation
-//! - **httpflv**: HTTP-FLV server implementation
-//! - **codec**: H.264 codec handling
-//! - **container**: FLV container format support
-//! - **streamhub**: Stream management and routing
-//! - **bytesio**: Binary I/O utilities
+//! - **protocol/rtsp**: RTSP server implementation
+//! - **protocol/httpflv**: HTTP-FLV server implementation
+//! - **codec/h264**: H.264 codec handling
+//! - **container/flv**: FLV container format support
+//! - **hub**: Stream management and routing
+//! - **io**: Binary I/O utilities
 //! - **common**: Common utilities and helpers
 
 // Module declarations
-pub mod bytesio;
 pub mod codec;
 pub mod common;
 pub mod config;
 pub mod container;
-pub mod httpflv;
+pub mod hub;
+pub mod io;
 mod logging_flags;
 pub mod protocol;
-pub mod rtsp;
 pub mod service;
-pub mod streamhub;
 pub mod validation;
 
 // Re-export Bytes for use in Frame
@@ -32,27 +30,27 @@ pub use bytes::Bytes;
 
 // Re-export key types from RTSP
 pub use logging_flags::{set_stream_frame_debug_logging, stream_frame_debug_logging_enabled};
-pub use rtsp::session::server_session::RtspServerSession;
-pub use rtsp::{DefaultRtspServer, RtspServer};
+pub use protocol::rtsp::session::server_session::RtspServerSession;
+pub use protocol::rtsp::{DefaultRtspServer, RtspServer};
 
 /// Stream session type alias for ticket-specified API surface
 /// Represents either an RTSP client or server session
 pub type StreamSession = RtspServerSession;
 
 // Re-export key types from HTTP-FLV
-pub use httpflv::server::{DefaultHttpFlvServer, HttpFlvServer};
+pub use protocol::httpflv::server::{DefaultHttpFlvServer, HttpFlvServer};
 
-// Re-export key types from streamhub
-pub use streamhub::StreamsHub;
-pub use streamhub::define::{
+// Re-export key types from streamhub (hub)
+pub use hub::StreamsHub;
+pub use hub::define::{
     DataReceiver, DataSender, FrameData, MediaInfo, PacketData, PublishType, PublisherInfo,
     StreamHubEvent, StreamHubEventSender, SubscribeType, SubscriberInfo, TStreamHandler,
     VideoCodecType,
 };
-pub use streamhub::stream::StreamIdentifier;
+pub use hub::stream::StreamIdentifier;
 
 // Re-export key types from codec
-pub use codec::sps::Sps;
+pub use codec::h264::sps::Sps;
 
 // Re-export key types from container
 pub use container::demuxer::FlvDemuxer;
@@ -69,6 +67,30 @@ pub trait FrameSource: Send + Sync {
 pub trait FrameCallback: Send + Sync {
     /// Called when a new frame is available
     fn on_frame(&self, frame: &Frame);
+}
+
+// ============================================================
+// Backward Compatibility Aliases (DEPRECATED)
+// ============================================================
+// These aliases provide backward compatibility for code that
+// imports from the old `streaming_lib::streamhub` path.
+// All code should migrate to use `streaming_lib::hub` instead.
+// ============================================================
+
+#[allow(clippy::mixed_attributes_style)]
+#[deprecated(since = "0.2.0", note = "Use hub module instead")]
+/// Deprecated: Use `hub` module instead
+pub mod streamhub {
+    //! Deprecated: Re-exports from hub module for backward compatibility.
+    //! Use `streaming_lib::hub` instead.
+
+    pub use crate::hub::define::*;
+    pub use crate::hub::errors::*;
+    pub use crate::hub::mock_audio_publisher::*;
+    pub use crate::hub::mock_publisher::*;
+    pub use crate::hub::statistics::*;
+    pub use crate::hub::stream::*;
+    pub use crate::hub::*;
 }
 
 /// A video or audio frame from the encoder

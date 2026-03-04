@@ -10,9 +10,9 @@ use tokio::task::JoinSet;
 
 use crate::common::auth::Auth;
 use crate::config::StreamingConfig;
-use crate::httpflv::server::{DefaultHttpFlvServer, HttpFlvServer};
-use crate::rtsp::{DefaultRtspServer, RtspServer};
-use crate::streamhub::define::StreamHubEventSender;
+use crate::hub::define::StreamHubEventSender;
+use crate::protocol::httpflv::server::{DefaultHttpFlvServer, HttpFlvServer};
+use crate::protocol::rtsp::{DefaultRtspServer, RtspServer};
 
 /// Errors that can occur during streaming service operations
 #[derive(Debug, Error)]

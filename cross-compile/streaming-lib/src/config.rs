@@ -3,7 +3,7 @@
 //! This module provides the `StreamingConfig` struct which replaces global state
 //! with explicit configuration passed to components.
 
-use crate::rtsp::session::server_session::LagRecoveryMode;
+use crate::protocol::rtsp::session::server_session::LagRecoveryMode;
 
 /// Configuration for the streaming service
 ///

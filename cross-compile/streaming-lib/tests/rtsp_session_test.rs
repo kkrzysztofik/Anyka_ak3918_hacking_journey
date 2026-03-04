@@ -1,11 +1,11 @@
 // Integration tests for RTSP session handling
 // Tests end-to-end RTSP session establishment, negotiation, and teardown
 
-use streaming_lib::rtsp::global_trait::{Marshal, Unmarshal};
-use streaming_lib::rtsp::rtsp_codec::RtspCodecId;
-use streaming_lib::rtsp::rtsp_transport::{CastType, ProtocolType, RtspTransport};
-use streaming_lib::rtsp::sdp::fmtp::Fmtp;
-use streaming_lib::rtsp::sdp::rtpmap::RtpMap;
+use streaming_lib::protocol::rtsp::global_trait::{Marshal, Unmarshal};
+use streaming_lib::protocol::rtsp::rtsp_codec::RtspCodecId;
+use streaming_lib::protocol::rtsp::rtsp_transport::{CastType, ProtocolType, RtspTransport};
+use streaming_lib::protocol::rtsp::sdp::fmtp::Fmtp;
+use streaming_lib::protocol::rtsp::sdp::rtpmap::RtpMap;
 
 /// Tests SDP offer/answer negotiation basics for RTSP sessions.
 #[tokio::test]
@@ -41,12 +41,12 @@ async fn test_rtsp_transport_setup() {
 #[tokio::test]
 async fn test_rtsp_codec_mapping() {
     let codec_id = RtspCodecId::H264;
-    let codec_name = streaming_lib::rtsp::rtsp_codec::RTSP_CODEC_ID_2_NAME
+    let codec_name = streaming_lib::protocol::rtsp::rtsp_codec::RTSP_CODEC_ID_2_NAME
         .get(&codec_id)
         .unwrap();
     assert_eq!(*codec_name, "h264");
 
-    let mapped_id = streaming_lib::rtsp::rtsp_codec::RTSP_CODEC_NAME_2_ID
+    let mapped_id = streaming_lib::protocol::rtsp::rtsp_codec::RTSP_CODEC_NAME_2_ID
         .get("h264")
         .unwrap();
     assert_eq!(*mapped_id, codec_id);
