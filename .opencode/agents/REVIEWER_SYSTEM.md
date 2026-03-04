@@ -2,7 +2,7 @@
 
 ## Overview
 
-This project uses a **multi-model consensus review system** to ensure code quality through diverse AI perspectives. Three specialized reviewers analyze code independently, and their findings are synthesized via majority consensus.
+This project uses a **4-model consensus review system** to ensure code quality through diverse AI perspectives. Four specialized reviewers analyze code independently, and their findings are synthesized via majority consensus.
 
 ## Architecture
 
@@ -14,11 +14,12 @@ orchestrator (you)
 reviewer (main entry point)
     ↓
 reviewer-consensus (orchestrator)
-    ├─→ reviewer-memory (Sonnet 4.5) ────┐
-    ├─→ reviewer-architecture (GPT-5.2) ─┤ Parallel
-    └─→ reviewer-security (Opus 4-6) ────┘
+    ├─→ reviewer-memory (Sonnet 4.5) ────────┐
+    ├─→ reviewer-architecture (GPT-5.2) ─────┤
+    ├─→ reviewer-security (Opus 4-6) ────────┤ Parallel
+    └─→ reviewer-testing (Gemini 3.1 Pro) ───┘
     ↓
-Consensus Synthesis (2/3 majority)
+Consensus Synthesis (2/4 majority, 3/4 strong, 4/4 critical)
     ↓
 Unified Report
 ```
@@ -80,22 +81,43 @@ Unified Report
 - Embedded security constraints
 - Fault injection analysis
 
+---
+
+### 4. reviewer-testing (Google Gemini 3.1 Pro)
+**Expertise:** Test coverage, quality assurance, code correctness
+
+**Focuses on:**
+- Test coverage completeness
+- Edge case testing
+- Error path testing
+- Mock usage correctness
+- Logic errors and bugs
+- Code correctness verification
+
+**Strengths:**
+- QA perspective
+- Test gap identification
+- Logic error detection
+- Boundary condition analysis
+
 ## Consensus Rules
 
 ### Issue Classification
 
 | Consensus | Meaning | Action |
 |-----------|---------|--------|
-| **3/3 (Unanimous)** | All models agree it's critical | **MUST FIX** before merge |
-| **2/3 (Majority)** | Two models flag the issue | **SHOULD FIX** (likely real) |
-| **1/3 (Minority)** | One model flags it | **CONSIDER** (expertise-specific) |
+| **4/4 (Unanimous)** | All 4 models agree it's critical | **CRITICAL - MUST FIX IMMEDIATELY** |
+| **3/4 (Strong Majority)** | Three models flag the issue | **MUST FIX** (very likely real) |
+| **2/4 (Majority)** | Two models flag the issue | **SHOULD FIX** (likely real) |
+| **1/4 (Minority)** | One model flags it | **CONSIDER** (expertise-specific) |
 
 ### Verdict Synthesis
 
 | Individual Verdicts | Final Verdict |
 |---------------------|---------------|
-| 2+ REJECT | **REQUEST CHANGES** |
-| 1 REJECT, 2 CONDITIONAL | **CONDITIONAL APPROVAL** |
+| 3+ REJECT | **REQUEST CHANGES** (critical) |
+| 2 REJECT | **REQUEST CHANGES** (significant) |
+| 1 REJECT, rest CONDITIONAL | **CONDITIONAL APPROVAL** |
 | All APPROVE/CONDITIONAL | **APPROVE** |
 
 ## Usage
@@ -131,10 +153,10 @@ Task(
 ```markdown
 # Multi-Model Consensus Review Report
 
-**Models:** Sonnet 4.5, GPT-5.2, Opus 4-6
-**Consensus:** 2/3 majority
+**Models:** Sonnet 4.5, GPT-5.2, Opus 4-6, Gemini 3.1 Pro
+**Consensus:** 2/4 majority, 3/4 strong, 4/4 critical
 
-## Critical Issues (Unanimous: 3/3)
+## Critical Issues (Unanimous: 4/4)
 
 **Issue 1: Frame unsafe Send/Sync**
 | Model | Finding |
@@ -142,10 +164,11 @@ Task(
 | Sonnet 4.5 | ❌ UAF risk - raw pointer marked Send |
 | GPT-5.2 | ❌ Memory safety violation |
 | Opus 4-6 | ❌ Exploitable dangling pointer |
+| Gemini 3.1 Pro | ❌ Untested unsafe code |
 
-**Consensus:** MUST FIX
+**Consensus:** CRITICAL - MUST FIX IMMEDIATELY
 
-## Major Issues (Majority: 2/3)
+## Must Fix Issues (Strong Majority: 3/4)
 
 **Issue 2: Config not wired**
 | Model | Finding |
@@ -153,13 +176,26 @@ Task(
 | Sonnet 4.5 | ⚠️ Ownership unclear |
 | GPT-5.2 | ❌ Architecture violation |
 | Opus 4-6 | ✅ Not a security issue |
+| Gemini 3.1 Pro | ❌ Untested config struct |
+
+**Consensus:** MUST FIX
+
+## Should Fix Issues (Majority: 2/4)
+
+**Issue 3: Missing edge case tests**
+| Model | Finding |
+|-------|---------|
+| Sonnet 4.5 | ✅ Memory safe |
+| GPT-5.2 | ✅ Architecture OK |
+| Opus 4-6 | ⚠️ Boundary conditions risky |
+| Gemini 3.1 Pro | ❌ No boundary tests |
 
 **Consensus:** SHOULD FIX
 
 ## Final Verdict
 
 **Status:** REQUEST CHANGES
-**Required:** 2 critical issues to fix
+**Required:** 1 critical + 2 must-fix issues
 ```
 
 ## Why Multi-Model?
@@ -238,7 +274,8 @@ Merge
 └── reviewers/
     ├── reviewer-memory.md         # Sonnet 4.5 - Memory safety
     ├── reviewer-architecture.md   # GPT-5.2 - Architecture  
-    └── reviewer-security.md       # Opus 4-6 - Security
+    ├── reviewer-security.md       # Opus 4-6 - Security
+    └── reviewer-testing.md        # Gemini 3.1 Pro - Testing/QA
 ```
 
 ## Future Enhancements
