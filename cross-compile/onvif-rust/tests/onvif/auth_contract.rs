@@ -141,7 +141,10 @@ async fn test_contract_anonymous_operation_succeeds_without_credentials() {
         .method(Method::POST)
         .uri("/onvif/device_service")
         .header(header::CONTENT_TYPE, "application/soap+xml; charset=utf-8")
-        .header("SOAPAction", "http://www.onvif.org/ver10/device/wsdl/GetSystemDateAndTime")
+        .header(
+            "SOAPAction",
+            "http://www.onvif.org/ver10/device/wsdl/GetSystemDateAndTime",
+        )
         .header(header::AUTHORIZATION, admin_auth)
         .body(Body::from(soap_body.to_string()))
         .unwrap();
@@ -251,7 +254,10 @@ async fn test_contract_operator_level_rejects_user_role() {
         .method(Method::POST)
         .uri("/onvif/device_service")
         .header(header::CONTENT_TYPE, "application/soap+xml; charset=utf-8")
-        .header("SOAPAction", "http://www.onvif.org/ver10/device/wsdl/SetHostname")
+        .header(
+            "SOAPAction",
+            "http://www.onvif.org/ver10/device/wsdl/SetHostname",
+        )
         .header(header::AUTHORIZATION, user_auth)
         .body(Body::from(soap_body.to_string()))
         .unwrap();
@@ -308,7 +314,10 @@ async fn test_contract_admin_level_rejects_operator_role() {
         .method(Method::POST)
         .uri("/onvif/device_service")
         .header(header::CONTENT_TYPE, "application/soap+xml; charset=utf-8")
-        .header("SOAPAction", "http://www.onvif.org/ver10/device/wsdl/CreateUsers")
+        .header(
+            "SOAPAction",
+            "http://www.onvif.org/ver10/device/wsdl/CreateUsers",
+        )
         .header(header::AUTHORIZATION, operator_auth)
         .body(Body::from(soap_body.to_string()))
         .unwrap();
@@ -329,7 +338,7 @@ async fn test_contract_admin_level_rejects_operator_role() {
 /// Test that unknown operations require Admin authentication.
 #[test]
 fn test_contract_unknown_operation_requires_admin() {
-    use onvif_rust::onvif::auth_requirements::{get_required_level, AuthLevel};
+    use onvif_rust::onvif::auth_requirements::{AuthLevel, get_required_level};
 
     // Unknown operations should require Administrator level (fail-secure default)
     let level = get_required_level("device", "UnknownOperation");
@@ -400,10 +409,8 @@ async fn test_contract_auth_disabled_bypasses_all_checks() {
 /// Test that missing credentials returns NotAuthorized.
 #[tokio::test]
 async fn test_contract_missing_credentials_returns_not_authorized() {
-    let (dispatcher, auth_ctx) = create_dispatcher_with_users(
-        &[("admin", "admin123", UserLevel::Administrator)],
-        true,
-    );
+    let (dispatcher, auth_ctx) =
+        create_dispatcher_with_users(&[("admin", "admin123", UserLevel::Administrator)], true);
 
     dispatcher.register_service(
         "device",
@@ -439,10 +446,8 @@ async fn test_contract_missing_credentials_returns_not_authorized() {
 /// Test that invalid password returns NotAuthorized.
 #[tokio::test]
 async fn test_contract_invalid_password_returns_not_authorized() {
-    let (dispatcher, auth_ctx) = create_dispatcher_with_users(
-        &[("admin", "admin123", UserLevel::Administrator)],
-        true,
-    );
+    let (dispatcher, auth_ctx) =
+        create_dispatcher_with_users(&[("admin", "admin123", UserLevel::Administrator)], true);
 
     dispatcher.register_service(
         "device",
@@ -465,7 +470,10 @@ async fn test_contract_invalid_password_returns_not_authorized() {
         .method(Method::POST)
         .uri("/onvif/device_service")
         .header(header::CONTENT_TYPE, "application/soap+xml; charset=utf-8")
-        .header("SOAPAction", "http://www.onvif.org/ver10/device/wsdl/GetDeviceInformation")
+        .header(
+            "SOAPAction",
+            "http://www.onvif.org/ver10/device/wsdl/GetDeviceInformation",
+        )
         .header(header::AUTHORIZATION, wrong_auth)
         .body(Body::from(soap_body.to_string()))
         .unwrap();
@@ -484,10 +492,8 @@ async fn test_contract_invalid_password_returns_not_authorized() {
 /// Test that invalid Base64 in Basic Auth returns NotAuthorized.
 #[tokio::test]
 async fn test_contract_basic_auth_invalid_base64_returns_not_authorized() {
-    let (dispatcher, auth_ctx) = create_dispatcher_with_users(
-        &[("admin", "admin123", UserLevel::Administrator)],
-        true,
-    );
+    let (dispatcher, auth_ctx) =
+        create_dispatcher_with_users(&[("admin", "admin123", UserLevel::Administrator)], true);
 
     dispatcher.register_service(
         "device",
@@ -509,7 +515,10 @@ async fn test_contract_basic_auth_invalid_base64_returns_not_authorized() {
         .method(Method::POST)
         .uri("/onvif/device_service")
         .header(header::CONTENT_TYPE, "application/soap+xml; charset=utf-8")
-        .header("SOAPAction", "http://www.onvif.org/ver10/device/wsdl/GetDeviceInformation")
+        .header(
+            "SOAPAction",
+            "http://www.onvif.org/ver10/device/wsdl/GetDeviceInformation",
+        )
         .header(header::AUTHORIZATION, "Basic !!!invalid-base64!!!")
         .body(Body::from(soap_body.to_string()))
         .unwrap();
@@ -528,10 +537,8 @@ async fn test_contract_basic_auth_invalid_base64_returns_not_authorized() {
 /// Test that missing colon in Basic Auth returns NotAuthorized.
 #[tokio::test]
 async fn test_contract_basic_auth_missing_colon_returns_not_authorized() {
-    let (dispatcher, auth_ctx) = create_dispatcher_with_users(
-        &[("admin", "admin123", UserLevel::Administrator)],
-        true,
-    );
+    let (dispatcher, auth_ctx) =
+        create_dispatcher_with_users(&[("admin", "admin123", UserLevel::Administrator)], true);
 
     dispatcher.register_service(
         "device",
@@ -556,7 +563,10 @@ async fn test_contract_basic_auth_missing_colon_returns_not_authorized() {
         .method(Method::POST)
         .uri("/onvif/device_service")
         .header(header::CONTENT_TYPE, "application/soap+xml; charset=utf-8")
-        .header("SOAPAction", "http://www.onvif.org/ver10/device/wsdl/GetDeviceInformation")
+        .header(
+            "SOAPAction",
+            "http://www.onvif.org/ver10/device/wsdl/GetDeviceInformation",
+        )
         .header(header::AUTHORIZATION, auth_header)
         .body(Body::from(soap_body.to_string()))
         .unwrap();
@@ -578,7 +588,7 @@ async fn test_contract_basic_auth_missing_colon_returns_not_authorized() {
 
 /// Regression test: documents that username existence is currently exposed in error messages.
 ///
-/// This test documents the current behavior where authentication errors *might* 
+/// This test documents the current behavior where authentication errors *might*
 /// reveal whether a username exists in the system.
 ///
 /// Current behavior:
@@ -618,7 +628,10 @@ async fn test_regression_2h2_documents_username_in_error_currently() {
         .method(Method::POST)
         .uri("/onvif/device_service")
         .header(header::CONTENT_TYPE, "application/soap+xml; charset=utf-8")
-        .header("SOAPAction", "http://www.onvif.org/ver10/device/wsdl/GetDeviceInformation")
+        .header(
+            "SOAPAction",
+            "http://www.onvif.org/ver10/device/wsdl/GetDeviceInformation",
+        )
         .header(header::AUTHORIZATION, existing_user_wrong_pass)
         .body(Body::from(soap_body.to_string()))
         .unwrap();
@@ -632,7 +645,10 @@ async fn test_regression_2h2_documents_username_in_error_currently() {
         .method(Method::POST)
         .uri("/onvif/device_service")
         .header(header::CONTENT_TYPE, "application/soap+xml; charset=utf-8")
-        .header("SOAPAction", "http://www.onvif.org/ver10/device/wsdl/GetDeviceInformation")
+        .header(
+            "SOAPAction",
+            "http://www.onvif.org/ver10/device/wsdl/GetDeviceInformation",
+        )
         .header(header::AUTHORIZATION, nonexistent_user)
         .body(Body::from(soap_body.to_string()))
         .unwrap();
@@ -689,7 +705,10 @@ async fn test_xfail_2h2_auth_error_does_not_reveal_username_existence() {
         .method(Method::POST)
         .uri("/onvif/device_service")
         .header(header::CONTENT_TYPE, "application/soap+xml; charset=utf-8")
-        .header("SOAPAction", "http://www.onvif.org/ver10/device/wsdl/GetDeviceInformation")
+        .header(
+            "SOAPAction",
+            "http://www.onvif.org/ver10/device/wsdl/GetDeviceInformation",
+        )
         .header(header::AUTHORIZATION, existing_user_wrong_pass)
         .body(Body::from(soap_body.to_string()))
         .unwrap();
@@ -704,7 +723,10 @@ async fn test_xfail_2h2_auth_error_does_not_reveal_username_existence() {
         .method(Method::POST)
         .uri("/onvif/device_service")
         .header(header::CONTENT_TYPE, "application/soap+xml; charset=utf-8")
-        .header("SOAPAction", "http://www.onvif.org/ver10/device/wsdl/GetDeviceInformation")
+        .header(
+            "SOAPAction",
+            "http://www.onvif.org/ver10/device/wsdl/GetDeviceInformation",
+        )
         .header(header::AUTHORIZATION, nonexistent_user)
         .body(Body::from(soap_body.to_string()))
         .unwrap();
@@ -758,7 +780,10 @@ async fn test_contract_ws_security_digest_token_extracted() {
 
     // The header should contain the WS-Security element with UsernameToken
     let header = envelope.header.unwrap();
-    assert!(header.security.is_some(), "Header should contain Security element");
+    assert!(
+        header.security.is_some(),
+        "Header should contain Security element"
+    );
     let security = header.security.unwrap();
     assert!(
         security.username_token.is_some(),
@@ -767,7 +792,10 @@ async fn test_contract_ws_security_digest_token_extracted() {
 
     // Verify username is extracted
     let username_token = security.username_token.unwrap();
-    assert_eq!(username_token.username, "admin", "Username should be 'admin'");
+    assert_eq!(
+        username_token.username, "admin",
+        "Username should be 'admin'"
+    );
 }
 
 /// Test that WS-Security plaintext token is correctly extracted.
@@ -804,7 +832,10 @@ async fn test_contract_ws_security_plaintext_token_extracted() {
 
     // Verify the parsed header contains the security element with UsernameToken
     let header = envelope.header.unwrap();
-    assert!(header.security.is_some(), "Header should contain Security element");
+    assert!(
+        header.security.is_some(),
+        "Header should contain Security element"
+    );
     let security = header.security.unwrap();
     assert!(
         security.username_token.is_some(),
@@ -813,16 +844,17 @@ async fn test_contract_ws_security_plaintext_token_extracted() {
 
     // Verify username is extracted
     let username_token = security.username_token.unwrap();
-    assert_eq!(username_token.username, "admin", "Username should be 'admin'");
+    assert_eq!(
+        username_token.username, "admin",
+        "Username should be 'admin'"
+    );
 }
 
 /// Test that missing WS-Security token returns appropriate error.
 #[tokio::test]
 async fn test_contract_ws_security_missing_token_returns_error() {
-    let (dispatcher, auth_ctx) = create_dispatcher_with_users(
-        &[("admin", "admin123", UserLevel::Administrator)],
-        true,
-    );
+    let (dispatcher, auth_ctx) =
+        create_dispatcher_with_users(&[("admin", "admin123", UserLevel::Administrator)], true);
 
     dispatcher.register_service(
         "device",
