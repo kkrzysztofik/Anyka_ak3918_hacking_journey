@@ -3,7 +3,6 @@
 //! This module provides the `StreamingService` struct for managing the RTSP and HTTP-FLV
 //! servers with proper lifecycle control (startup, graceful shutdown).
 
-use std::sync::Arc;
 use std::fmt;
 
 use tokio::io::Error as IoError;
@@ -13,20 +12,20 @@ use tokio::task::JoinSet;
 use crate::config::StreamingConfig;
 use crate::httpflv::server::{DefaultHttpFlvServer, HttpFlvServer};
 use crate::rtsp::{DefaultRtspServer, RtspServer};
-use crate::streamhub::StreamsHub;
+use crate::streamhub::define::StreamHubEventSender;
 
 /// Errors that can occur during streaming service operations
 #[derive(Debug)]
 pub enum StreamingError {
     /// RTSP server error
     RtspServer(String),
-    
+
     /// HTTP-FLV server error
     HttpFlv(String),
-    
+
     /// Stream hub error
     StreamHub(String),
-    
+
     /// IO error
     Io(String),
 }
@@ -65,23 +64,22 @@ impl StreamingService {
     /// # Arguments
     ///
     /// * `config` - Streaming configuration
-    /// * `_hub` - The streams hub for message routing (reserved for future use)
+    /// * `event_sender` - StreamHub event sender for routing messages to the hub
     ///
     /// # Returns
     ///
     /// A new `StreamingService` instance with spawned server tasks
-    #[allow(unused_variables)]
-    pub async fn new(config: StreamingConfig, _hub: Arc<StreamsHub>) -> Result<Self, StreamingError> {
+    pub async fn new(
+        config: StreamingConfig,
+        event_sender: StreamHubEventSender,
+    ) -> Result<Self, StreamingError> {
         let mut tasks = JoinSet::new();
         let (shutdown_tx, _) = broadcast::channel(1);
-        
-        // Create an event sender for the servers
-        // Note: In production, this should come from the hub
-        let (event_sender, _) = tokio::sync::mpsc::unbounded_channel::<crate::streamhub::define::StreamHubEvent>();
-        
-        // Clone for RTSP server
+
+        // Clone the event sender for each server
         let event_sender_rtsp = event_sender.clone();
-        
+        let event_sender_httpflv = event_sender.clone();
+
         // Spawn RTSP server
         let mut rtsp_shutdown = shutdown_tx.subscribe();
         let rtsp_config = config.clone();
@@ -101,14 +99,14 @@ impl StreamingService {
                 _ = rtsp_shutdown.recv() => Ok(()),
             }
         });
-        
+
         // Spawn HTTP-FLV server
         let mut httpflv_shutdown = shutdown_tx.subscribe();
         let httpflv_config = config.clone();
         tasks.spawn(async move {
             let mut server: DefaultHttpFlvServer = DefaultHttpFlvServer::new(
                 httpflv_config.httpflv_listen_addr.clone(),
-                event_sender,
+                event_sender_httpflv,
                 None,
             );
             tokio::select! {
@@ -121,10 +119,10 @@ impl StreamingService {
                 _ = httpflv_shutdown.recv() => Ok(()),
             }
         });
-        
+
         Ok(Self { tasks, shutdown_tx })
     }
-    
+
     /// Gracefully shutdown the streaming service
     ///
     /// This method sends a shutdown signal to all servers and waits for them
@@ -137,9 +135,9 @@ impl StreamingService {
     pub async fn shutdown(mut self) -> ShutdownReport {
         // Signal all servers to shut down
         let _ = self.shutdown_tx.send(());
-        
+
         let mut report = ShutdownReport::default();
-        
+
         // Wait for all tasks to complete
         while let Some(result) = self.tasks.join_next().await {
             match result {
@@ -156,10 +154,10 @@ impl StreamingService {
                 }
             }
         }
-        
+
         report
     }
-    
+
     /// Check if the service is still running
     ///
     /// # Returns
@@ -193,7 +191,7 @@ impl ShutdownReport {
     pub fn is_success(&self) -> bool {
         self.failed_count == 0
     }
-    
+
     /// Get the total number of servers that were shut down
     ///
     /// # Returns
@@ -207,11 +205,13 @@ impl ShutdownReport {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
-    fn create_test_hub() -> Arc<StreamsHub> {
-        Arc::new(StreamsHub::new(None))
+    use tokio::sync::mpsc;
+
+    fn create_test_event_sender() -> StreamHubEventSender {
+        let (tx, _) = mpsc::unbounded_channel();
+        tx
     }
-    
+
     #[test]
     fn test_shutdown_report_default() {
         let report = ShutdownReport::default();
@@ -220,7 +220,7 @@ mod tests {
         assert!(report.errors.is_empty());
         assert!(report.is_success());
     }
-    
+
     #[test]
     fn test_shutdown_report_with_errors() {
         let report = ShutdownReport {
@@ -231,22 +231,22 @@ mod tests {
         assert_eq!(report.total(), 2);
         assert!(!report.is_success());
     }
-    
+
     #[test]
     fn test_streaming_error_display() {
         let err = StreamingError::RtspServer("test".to_string());
         assert!(format!("{}", err).contains("RTSP"));
-        
+
         let err = StreamingError::HttpFlv("test".to_string());
         assert!(format!("{}", err).contains("HTTP-FLV"));
-        
+
         let err = StreamingError::StreamHub("test".to_string());
         assert!(format!("{}", err).contains("Stream hub"));
-        
+
         let err = StreamingError::Io("test".to_string());
         assert!(format!("{}", err).contains("IO"));
     }
-    
+
     #[test]
     fn test_streaming_error_from_io() {
         let io_err = IoError::new(std::io::ErrorKind::Other, "test error");

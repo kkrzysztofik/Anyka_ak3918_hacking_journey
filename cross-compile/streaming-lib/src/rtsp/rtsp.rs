@@ -54,8 +54,7 @@ impl RtspServer for DefaultRtspServer {
             let (tcp_stream, peer_addr) = listener.accept().await?;
             info!(
                 "event=rtsp_connection_start remote_addr={} local_addr={}",
-                peer_addr,
-                socket_addr
+                peer_addr, socket_addr
             );
             let mut session =
                 RtspServerSession::new(tcp_stream, self.event_producer.clone(), self.auth.clone());
@@ -68,9 +67,7 @@ impl RtspServer for DefaultRtspServer {
                     };
                     info!(
                         "session run exit: session id: {} session type: {} , err: {}",
-                        session_id,
-                        session.session_type,
-                        err
+                        session_id, session.session_type, err
                     );
 
                     if !session.is_normal_exit
@@ -80,16 +77,13 @@ impl RtspServer for DefaultRtspServer {
                             Err(err) => {
                                 error!(
                                     "session exit error: session id: {} session type: {}, error info: {}",
-                                    session_id,
-                                    session.session_type,
-                                    err
+                                    session_id, session.session_type, err
                                 );
                             }
                             Ok(()) => {
                                 info!(
                                     "session exit successfully: session id: {} session type: {} ",
-                                    session_id,
-                                    session.session_type,
+                                    session_id, session.session_type,
                                 );
                             }
                         }
