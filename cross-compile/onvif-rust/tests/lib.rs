@@ -1,6 +1,9 @@
 // Test utilities module
 mod test_utils;
 
+// Test fixtures
+mod fixtures;
+
 // ONVIF integration tests
 mod onvif;
 
