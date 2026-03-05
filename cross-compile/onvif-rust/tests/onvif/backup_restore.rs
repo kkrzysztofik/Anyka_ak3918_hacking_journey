@@ -16,14 +16,12 @@ use std::sync::Arc;
 fn test_config_to_toml_string() {
     let config = ConfigRuntime::new(Default::default());
 
-    // Set some values first (default config is empty)
-    config.set_string("device.manufacturer", "Test").unwrap();
+    config.write().device.manufacturer = "Test".to_string();
 
     let toml_result = config.to_toml_string();
     assert!(toml_result.is_ok());
 
     let toml_string = toml_result.unwrap();
-    // Should contain expected TOML sections
     assert!(!toml_string.is_empty());
 }
 
@@ -48,10 +46,11 @@ fn test_config_toml_roundtrip() {
     let config = ConfigRuntime::new(Default::default());
 
     // Set some config values
-    config
-        .set_string("device.manufacturer", "Test Manufacturer")
-        .unwrap();
-    config.set_string("device.model", "Test Model").unwrap();
+    {
+        let mut c = config.write();
+        c.device.manufacturer = "Test Manufacturer".to_string();
+        c.device.model = "Test Model".to_string();
+    }
 
     // Serialize to TOML
     let toml_string = config.to_toml_string().unwrap();
@@ -61,14 +60,9 @@ fn test_config_toml_roundtrip() {
     restored_config.load_from_toml_string(&toml_string).unwrap();
 
     // Verify values match
-    assert_eq!(
-        restored_config.get_string("device.manufacturer").unwrap(),
-        "Test Manufacturer"
-    );
-    assert_eq!(
-        restored_config.get_string("device.model").unwrap(),
-        "Test Model"
-    );
+    let c = restored_config.read();
+    assert_eq!(c.device.manufacturer, "Test Manufacturer");
+    assert_eq!(c.device.model, "Test Model");
 }
 
 // ============================================================================
@@ -81,7 +75,7 @@ fn test_backup_produces_base64() {
     use base64::{Engine, engine::general_purpose::STANDARD};
 
     let config = ConfigRuntime::new(Default::default());
-    config.set_string("device.manufacturer", "Test").unwrap();
+    config.write().device.manufacturer = "Test".to_string();
 
     let toml_string = config.to_toml_string().unwrap();
 
@@ -105,12 +99,11 @@ fn test_backup_restore_roundtrip() {
 
     // Setup initial config
     let config = ConfigRuntime::new(Default::default());
-    config
-        .set_string("device.manufacturer", "Backup Test")
-        .unwrap();
-    config
-        .set_string("device.firmware_version", "1.2.3")
-        .unwrap();
+    {
+        let mut c = config.write();
+        c.device.manufacturer = "Backup Test".to_string();
+        c.device.firmware_version = "1.2.3".to_string();
+    }
 
     // Simulate GetSystemBackup: serialize and encode
     let toml_string = config.to_toml_string().unwrap();
@@ -124,14 +117,9 @@ fn test_backup_restore_roundtrip() {
     new_config.load_from_toml_string(&restored_toml).unwrap();
 
     // Verify restoration
-    assert_eq!(
-        new_config.get_string("device.manufacturer").unwrap(),
-        "Backup Test"
-    );
-    assert_eq!(
-        new_config.get_string("device.firmware_version").unwrap(),
-        "1.2.3"
-    );
+    let c = new_config.read();
+    assert_eq!(c.device.manufacturer, "Backup Test");
+    assert_eq!(c.device.firmware_version, "1.2.3");
 }
 
 // ============================================================================
@@ -154,10 +142,11 @@ fn test_invalid_toml_rejected() {
 fn test_partial_toml_loads() {
     let config = ConfigRuntime::new(Default::default());
 
-    // Minimal valid TOML
+    // Minimal valid TOML — serde(default) fills missing fields
     let partial_toml = r#"
-device.manufacturer = "Partial Config"
-device.model = "Minimal"
+[device]
+manufacturer = "Partial Config"
+model = "Minimal"
 "#;
 
     let result = config.load_from_toml_string(partial_toml);
@@ -165,10 +154,7 @@ device.model = "Minimal"
     // Should succeed
     assert!(result.is_ok(), "Partial TOML should load");
 
-    assert_eq!(
-        config.get_string("device.manufacturer").unwrap(),
-        "Partial Config"
-    );
+    assert_eq!(config.read().device.manufacturer, "Partial Config");
 }
 
 /// Test empty string produces error

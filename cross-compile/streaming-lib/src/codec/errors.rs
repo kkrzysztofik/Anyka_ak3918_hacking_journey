@@ -1,5 +1,5 @@
 #![allow(non_local_definitions)]
-use crate::bytesio::bits_errors::BitError;
+use crate::io::bits_errors::BitError;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -25,7 +25,7 @@ impl From<BitError> for H264Error {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::bytesio::bits_errors::{BitError, BitErrorValue};
+    use crate::io::bits_errors::{BitError, BitErrorValue};
 
     // ========== H264ErrorValue Display Tests ==========
 

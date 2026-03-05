@@ -4,8 +4,8 @@
   "rust-analyzer.server.extraEnv": {
     // Override RUSTC to use system rustc for rust-analyzer
     "RUSTC": "rustc",
-    // Prevent using custom toolchain for analysis
-    "RUSTUP_TOOLCHAIN": ""
+    // Explicitly name the stable toolchain (empty string is unreliable)
+    "RUSTUP_TOOLCHAIN": "stable"
   },
   "rust-analyzer.cargo.extraEnv": {
     // Override RUSTC for cargo check operations
@@ -24,15 +24,32 @@
     "--target",
     "x86_64-unknown-linux-gnu"
   ],
+  "rust-analyzer.cargo.allTargets": false,
+  "rust-analyzer.cargo.buildScripts.enable": false,
   "rust-analyzer.check.extraArgs": [
     "--target",
-    "x86_64-unknown-linux-gnu"
+    "x86_64-unknown-linux-gnu",
+    "--no-deps"
   ],
+  // Memory optimization: reduce LRU cache from default 128
+  "rust-analyzer.lru.capacity": 64,
+  // Memory optimization: skip build script evaluation
+  "rust-analyzer.cargo.buildScripts.enable": false,
+  // Memory optimization: limit analysis threads (default uses all cores)
+  "rust-analyzer.numThreads": 2,
+  // Memory optimization: disable experimental diagnostics
+  "rust-analyzer.diagnostics.experimental.enable": false,
   "rust-analyzer.inlayHints.chainingHints.enable": false,
   "rust-analyzer.inlayHints.closingBraceHints.enable": false,
   "rust-analyzer.inlayHints.typeHints.enable": false,
-  "rust-analyzer.procMacro.enable": false,
+  "rust-analyzer.procMacro.enable": true,
   "rust-analyzer.completion.autoimport.enable": false,
+  "rust-analyzer.files.watcherExclude": [
+    "**/target/**",
+    "**/.git/**",
+    "**/cross-compile/patches/**",
+    "**/cross-compile/**/out/**"
+  ],
   // Use cargo check for faster feedback
   "rust-analyzer.check.command": "check",
   // Additional helpful settings
@@ -41,10 +58,22 @@
     "connectionId": "kkrzysztofik",
     "projectKey": "kkrzysztofik_Anyka_ak3918_hacking_journey"
   },
+  "sonarlint.ls.vmargs": "-Xms128m -Xmx512m",
+  "sonarlint.output.showVerboseLogs": false,
+  "sonarlint.trace.server": "off",
   "chat.tools.terminal.autoApprove": {
     "/home/kmk/anyka-dev/toolchain/arm-anykav200-crosstool-ng/bin/cargo": true,
     "/home/kmk/anyka-dev/toolchain/arm-anykav200-crosstool-ng/bin/arm-unknown-linux-uclibcgnueabi-nm": true,
-    "cargo fmt": true
+    "cargo fmt": true,
+    "npm run type-check": true,
+    "npm run test": true,
+    "cargo audit": true,
+    "../../toolchain/arm-anykav200-crosstool-ng/bin/cargo": true,
+    "bd": true,
+    "/^cd /home/kmk/anyka-dev && bd list --json 2>/dev/null \\| python3 -c \"import sys,json; items=json\\.load\\(sys\\.stdin\\); \\[print\\(i\\['id'\\], i\\.get\\('status',''\\), i\\.get\\('title',''\\), i\\.get\\('priority',''\\)\\) for i in items\\[:20\\]\\]\" 2>/dev/null \\|\\| bd list 2>/dev/null \\| head -60$/": {
+      "approve": true,
+      "matchCommandLine": true
+    }
   },
   "cursorpyright.analysis.typeCheckingMode": "strict",
   "cursorpyright.analysis.diagnosticMode": "workspace",

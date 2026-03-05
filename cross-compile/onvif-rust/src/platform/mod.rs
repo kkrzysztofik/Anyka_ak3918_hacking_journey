@@ -29,18 +29,19 @@
 //! let device_info = platform.get_device_info().await?;
 //! ```
 
-pub(crate) mod hw_ptz;
-mod stubs;
-mod traits;
-pub mod validation;
+pub mod common;
+pub mod stub;
 
-// Conditional compilation for Anyka implementation
-#[cfg(not(use_stubs))]
+// Anyka implementation is always compiled so unit tests can exercise it
+// with MockVideoHalTrait. Only the public re-export is gated to avoid
+// name conflicts with stubs in native builds. See `platform/anyka/ptz_control.rs`
+// for the PTZ implementation pattern.
+#[allow(dead_code)]
 mod anyka;
 
-pub use stubs::*;
-pub use traits::*;
-pub use validation::ValidationPlatform;
+// Re-export common types and traits
+pub use common::*;
+pub use stub::*;
 
 #[cfg(not(use_stubs))]
 pub use anyka::*;

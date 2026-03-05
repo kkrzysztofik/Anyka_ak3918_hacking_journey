@@ -274,6 +274,35 @@ async fn update_config(state: &AppState, new_config: Config) -> Result<(), Error
 }
 ```
 
+## IPC Security (Vendor Daemon Communication)
+
+**Unix socket and shared memory security**:
+
+- **Socket Permissions**: Verify `/tmp/vd-frame-main.sock` and `/tmp/vd-frame-sub.sock` have restricted permissions
+- **Shared Memory Access**: Ring buffer memory regions should be accessible only by onvif-rust and vendor-daemon
+- **Input Validation**: Validate all IPC response data before use (status codes, lengths, data integrity)
+- **Buffer Bounds**: Ensure ring buffer slot reads respect size headers to prevent overflows
+- **Protocol Safety**: Validate IPC binary protocol fields (cmd_id, req_len, resp_len) are within expected ranges
+- **Error Isolation**: Vendor daemon crashes must not corrupt shared memory state
+- **Denial of Service**: Rate-limit IPC requests to prevent overwhelming vendor daemon
+- **Frame Integrity**: Validate frame headers (stream ID, timestamp, size) from shared memory before processing
+
+```rust
+// ❌ BAD - Trusting IPC response without validation
+let data = ipc_client.send_command(cmd).await?;
+process_frame(&data);  // No validation of response data
+
+// ✅ GOOD - Validate IPC response
+let response = ipc_client.send_command(cmd).await?;
+if response.status != 0 {
+    return Err(IpcError::CommandFailed(response.status));
+}
+if response.data.len() > MAX_FRAME_SIZE {
+    return Err(IpcError::InvalidFrameSize(response.data.len()));
+}
+process_frame(&response.data);
+```
+
 ## Security Checklist
 
 **Before deploying any code, verify**:
@@ -288,4 +317,6 @@ async fn update_config(state: &AppState, new_config: Config) -> Result<(), Error
 - [ ] **Authorization**: Access controls for all endpoints using `UserLevel`
 - [ ] **XML Security**: XXE and XML bomb protection using `SecurityValidator`
 - [ ] **ONVIF Compliance**: Proper service implementation and error codes
+- [ ] **IPC Security**: Vendor daemon communication validated, socket permissions checked
+- [ ] **Shared Memory**: Ring buffer access bounds-checked, frame integrity validated
 - [ ] **Security Testing**: Malicious input testing completed, no panics in production paths

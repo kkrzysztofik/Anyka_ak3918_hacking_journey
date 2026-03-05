@@ -15,6 +15,8 @@ WORKSPACE_DIR="$(cd "${PROJECT_DIR}/.." && pwd)"
 BUILD_MODE="release"
 TARGET="armv5te-unknown-linux-uclibceabi"
 CLEAN=false
+EXTRA_FEATURES=""
+NO_IPC=false
 
 # Colors for output
 RED='\033[0;31m'
@@ -67,21 +69,31 @@ while [[ $# -gt 0 ]]; do
       CLEAN=true
       shift
       ;;
+    --features)
+      EXTRA_FEATURES="$2"
+      shift 2
+      ;;
+    --no-ipc|--direct-ffi)
+      NO_IPC=true
+      shift
+      ;;
     -h|--help)
       echo "Usage: $0 [OPTIONS]"
       echo ""
       echo "Options:"
-      echo "  --debug          Build in debug mode (default: release)"
-      echo "  --release        Build in release mode (default)"
-      echo "  --target TARGET  Specify target triple (default: armv5te-unknown-linux-uclibceabi)"
-      echo "  --clean          Clean before building"
-      echo "  -h, --help       Show this help message"
+      echo "  --debug               Build in debug mode (default: release)"
+      echo "  --release             Build in release mode (default)"
+      echo "  --target TARGET       Specify target triple (default: armv5te-unknown-linux-uclibceabi)"
+      echo "  --clean               Clean before building"
+      echo "  --clean               Clean before building"
+      echo "  --features FEATURES   Additional cargo features"
+      echo "  --no-ipc              Disable IPC mode (use direct vendor FFI linking)"
+      echo "  -h, --help            Show this help message"
       echo ""
       exit 0
       ;;
     *)
-      local unknown_arg="$1"
-      log_error "Unknown option: ${unknown_arg}"
+      log_error "Unknown option: $1"
       echo "Use --help for usage information" >&2
       exit 1
       ;;
@@ -99,6 +111,7 @@ log_info "Building ONVIF Rust application"
 log_info "Project directory: ${PROJECT_DIR}"
 log_info "Target: ${TARGET}"
 log_info "Build mode: ${BUILD_MODE}"
+[[ -n "${EXTRA_FEATURES}" ]] && log_info "Extra features: ${EXTRA_FEATURES}"
 
 # Use vendored toolchain cargo by default (per project requirements)
 REPO_ROOT="$(cd "${PROJECT_DIR}/../.." && pwd)"
@@ -123,12 +136,32 @@ fi
 # Build the project
 log_info "Building for target ${TARGET} in ${BUILD_MODE} mode..."
 
+FEATURES_ARGS=()
+# No default features - use --features to add any needed features
+DEFAULT_FEATURES=""
+
+# Combine default + extra features
+ALL_FEATURES="${DEFAULT_FEATURES}"
+if [[ -n "${EXTRA_FEATURES}" ]]; then
+  if [[ -n "${ALL_FEATURES}" ]]; then
+    ALL_FEATURES="${ALL_FEATURES},${EXTRA_FEATURES}"
+  else
+    ALL_FEATURES="${EXTRA_FEATURES}"
+  fi
+fi
+
+if [[ -n "${ALL_FEATURES}" ]]; then
+  FEATURES_ARGS=(--features "${ALL_FEATURES}")
+fi
+
+[[ -n "${ALL_FEATURES}" ]] && log_info "Features: ${ALL_FEATURES}"
+
 if [[ "${BUILD_MODE}" = "release" ]]; then
-  "${CARGO}" build --release --target "${TARGET}"
+  "${CARGO}" build --release --target "${TARGET}" "${FEATURES_ARGS[@]}"
   WORKSPACE_BINARY_PATH="${WORKSPACE_DIR}/target/${TARGET}/release/onvif-rust"
   CRATE_BINARY_PATH="${PROJECT_DIR}/target/${TARGET}/release/onvif-rust"
 else
-  "${CARGO}" build --target "${TARGET}"
+  "${CARGO}" build --target "${TARGET}" "${FEATURES_ARGS[@]}"
   WORKSPACE_BINARY_PATH="${WORKSPACE_DIR}/target/${TARGET}/debug/onvif-rust"
   CRATE_BINARY_PATH="${PROJECT_DIR}/target/${TARGET}/debug/onvif-rust"
 fi
@@ -153,6 +186,17 @@ if [[ ! -f "${BINARY_PATH}" ]]; then
   exit 1
 fi
 
+# Fix program header ordering for uClibc-ng compatibility.
+# LLD places PT_TLS before PT_DYNAMIC, but uClibc-ng 1.0.54's linker has a
+# `break` in the PT_TLS handler that prevents PT_DYNAMIC from being processed,
+# causing SIGSEGV at _dl_get_ready_to_run. Swap the entries so PT_DYNAMIC
+# is processed first.
+FIX_PHDR="${SCRIPT_DIR}/fix_phdr_order.py"
+if [[ -f "${FIX_PHDR}" ]]; then
+  log_info "Fixing program header order (uClibc-ng PT_TLS/PT_DYNAMIC workaround)..."
+  uv run "${FIX_PHDR}" "${BINARY_PATH}" --verbose
+fi
+
 log_success "Build completed successfully!"
 log_info "Binary location: ${BINARY_PATH}"
 log_info "Binary size: $(du -h "${BINARY_PATH}" | cut -f1)"
@@ -175,25 +219,28 @@ chmod 755 "${DEPLOY_DIR}/onvif-rust.bin"
 
 cat > "${DEPLOY_DIR}/onvif-rust" <<'EOF'
 #!/bin/sh
-# Launcher for ONVIF Rust server with explicit runtime library path.
-
+# Launcher for ONVIF Rust server.
+# The binary has RPATH embedded — no LD_LIBRARY_PATH manipulation needed.
+# Do NOT export LD_LIBRARY_PATH here; it poisons child processes
+# (busybox/date linked against stock uClibc 0.9.33.2).
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname "$0")" && pwd)"
-ANYKA_HACK_DIR="$(dirname "$SCRIPT_DIR")"
-LIB1="${ANYKA_HACK_DIR}/lib"
-LIB2="${SCRIPT_DIR}/lib"
-
-if [ -n "${LD_LIBRARY_PATH:-}" ]; then
-  export LD_LIBRARY_PATH="${LIB1}:${LIB2}:${LD_LIBRARY_PATH}"
-else
-  export LD_LIBRARY_PATH="${LIB1}:${LIB2}"
-fi
-
 exec "${SCRIPT_DIR}/onvif-rust.bin" "$@"
 EOF
 chmod 755 "${DEPLOY_DIR}/onvif-rust"
 log_success "Binary and launcher copied to deployment directory:"
 log_info "  - ${DEPLOY_DIR}/onvif-rust.bin"
 log_info "  - ${DEPLOY_DIR}/onvif-rust"
+
+# Copy vendor-daemon if built
+VENDOR_DAEMON_BIN="${WORKSPACE_DIR}/vendor-daemon/build/vendor-daemon.bin"
+VENDOR_DAEMON_DEPLOY="${REPO_ROOT}/SD_card_contents/anyka_hack/vendor-daemon"
+if [[ -f "${VENDOR_DAEMON_BIN}" ]]; then
+  mkdir -p "${VENDOR_DAEMON_DEPLOY}"
+  cp "${VENDOR_DAEMON_BIN}" "${VENDOR_DAEMON_DEPLOY}/vendor-daemon.bin"
+  chmod 755 "${VENDOR_DAEMON_DEPLOY}/vendor-daemon.bin"
+  log_success "Vendor daemon copied to deployment directory"
+  log_info "  - ${VENDOR_DAEMON_DEPLOY}/vendor-daemon.bin"
+fi
 
 echo ""
 log_info "To verify the binary, run:"

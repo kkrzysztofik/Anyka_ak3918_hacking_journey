@@ -4,29 +4,12 @@
 
 set -e
 
-# Colors
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m'
-
-log_info() {
-    echo -e "${GREEN}[INFO]${NC} $1"
-}
-
-log_warn() {
-    echo -e "${YELLOW}[WARN]${NC} $1"
-}
-
-log_error() {
-    echo -e "${RED}[ERROR]${NC} $1"
-}
-
-# Script directory
+# Script directory — must be set before sourcing common.sh
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-INSTALL_DIR="${SCRIPT_DIR}/../arm-anykav200-crosstool-ng"
+source "${SCRIPT_DIR}/common.sh"
+
+# Rust target triple (distinct from the GCC TARGET_TUPLE in common.sh)
 TARGET_NAME="armv5te-unknown-linux-uclibceabi"
-SYSROOT="${INSTALL_DIR}/arm-unknown-linux-uclibcgnueabi/sysroot"
 
 RUSTC="${INSTALL_DIR}/bin/rustc"
 CARGO="${INSTALL_DIR}/bin/cargo"
@@ -100,18 +83,13 @@ fn main() {
 }
 EOF
 
+    # Use clang-wrapper.sh which handles the triple translation:
+    #   arm-unknown-linux-uclibcgnueabi -> armv5te-unknown-linux-gnueabi
+    # The wrapper also provides sysroot, -march, -mfloat-abi, and GCC crt/lib paths.
     "${RUSTC}" \
     --target "${TARGET_NAME}" \
     --crate-type bin \
-    -C linker="${INSTALL_DIR}/bin/clang" \
-    -C link-arg="--target=arm-unknown-linux-uclibcgnueabi" \
-    -C link-arg="--sysroot=${SYSROOT}" \
-    -C link-arg="-march=armv5te" \
-    -C link-arg="-mfloat-abi=soft" \
-    -C link-arg="-mtune=arm926ej-s" \
-    -C link-arg="-L${SYSROOT}/lib" \
-    -C link-arg="-L${SYSROOT}/usr/lib" \
-    -C link-arg="-static" \
+    -C linker="${SCRIPT_DIR}/clang-wrapper.sh" \
     -o "${TEST_BIN}" \
     "${TEST_SRC}" 2>&1 || {
     log_error "Failed to compile test Rust program"
@@ -176,6 +154,12 @@ if [ -f "${CARGO}" ]; then
 
     if [ -d "${CARGO_PROJECT}" ]; then
         log_info "Cargo project created successfully"
+        # Configure linker for cross-compilation via .cargo/config.toml
+        mkdir -p "${CARGO_PROJECT}/.cargo"
+        cat > "${CARGO_PROJECT}/.cargo/config.toml" << CARGO_EOF
+[target.${TARGET_NAME}]
+linker = "${SCRIPT_DIR}/clang-wrapper.sh"
+CARGO_EOF
         # Try to build (may fail if std not available)
         cd "${CARGO_PROJECT}"
         "${CARGO}" build --target "${TARGET_NAME}" 2>&1 | head -10 || {
@@ -228,6 +212,38 @@ else
     log_info "The bootstrap process should build it"
 fi
 
+# Test 8: Check rust-analyzer-proc-macro-srv binary
+log_info "Test 8: Checking rust-analyzer-proc-macro-srv..."
+PROC_MACRO_SRV=""
+if [[ -f "${INSTALL_DIR}/libexec/rust-analyzer-proc-macro-srv" ]]; then
+    PROC_MACRO_SRV="${INSTALL_DIR}/libexec/rust-analyzer-proc-macro-srv"
+elif [[ -f "${INSTALL_DIR}/bin/rust-analyzer-proc-macro-srv" ]]; then
+    PROC_MACRO_SRV="${INSTALL_DIR}/bin/rust-analyzer-proc-macro-srv"
+fi
+
+if [[ -n "${PROC_MACRO_SRV}" ]]; then
+    log_info "rust-analyzer-proc-macro-srv found: ${PROC_MACRO_SRV}"
+else
+    log_warn "rust-analyzer-proc-macro-srv not found in libexec/ or bin/"
+    log_warn "Proc-macro expansion in rust-analyzer will be disabled"
+    log_warn "To rebuild with proc-macro-srv, run: ./bootstrap_rust.sh"
+    log_warn "Expected locations:"
+    log_warn "  ${INSTALL_DIR}/libexec/rust-analyzer-proc-macro-srv"
+    log_warn "  ${INSTALL_DIR}/bin/rust-analyzer-proc-macro-srv"
+fi
+
+# Test 9: Check rust-analyzer LSP binary
+log_info "Test 9: Checking rust-analyzer..."
+RUST_ANALYZER="${INSTALL_DIR}/bin/rust-analyzer"
+if [[ -f "${RUST_ANALYZER}" ]]; then
+    log_info "rust-analyzer found: ${RUST_ANALYZER}"
+    "${RUST_ANALYZER}" --version 2>/dev/null && log_info "rust-analyzer version OK" || log_warn "rust-analyzer binary exists but --version failed"
+else
+    log_warn "rust-analyzer not found at: ${RUST_ANALYZER}"
+    log_warn "IDE language server features (hover, goto-def, completion) will be unavailable"
+    log_warn "To rebuild with rust-analyzer, run: ./bootstrap_rust.sh"
+fi
+
 # Cleanup
 rm -rf "${TEST_DIR}"
 
@@ -240,7 +256,7 @@ log_info "  [build]"
 log_info "  target = \"${TARGET_NAME}\""
 log_info ""
 log_info "  [target.${TARGET_NAME}]"
-log_info "  linker = \"${INSTALL_DIR}/bin/clang\""
+log_info "  linker = \"${SCRIPT_DIR}/clang-wrapper.sh\""
 log_info ""
-log_info "  Or use RUSTFLAGS:"
-log_info "  export RUSTFLAGS=\"-C link-arg=--target=arm-unknown-linux-uclibcgnueabi -C link-arg=--sysroot=${SYSROOT} -C link-arg=-march=armv5te -C link-arg=-mfloat-abi=soft\""
+log_info "  The clang-wrapper.sh script handles the ARMv5TE triple translation,"
+log_info "  sysroot, and GCC crt/lib paths automatically."

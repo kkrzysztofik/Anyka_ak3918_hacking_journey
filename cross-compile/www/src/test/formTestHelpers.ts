@@ -81,7 +81,7 @@ export async function submitFormByEvent(
     );
   }
   
-  const submitButton = form.querySelector('button[type="submit"]') as HTMLButtonElement | null;
+  const submitButton = form.querySelector<HTMLButtonElement>('button[type="submit"]');
 
   if (submitButton) {
     await user.click(submitButton);

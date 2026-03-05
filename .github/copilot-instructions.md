@@ -131,11 +131,13 @@ To avoid context pollution in the main agent, **delegate focused tasks to subage
 
 ## Issue Tracking
 
-This project uses **bd (beads)** for issue tracking.
-Run `bd prime` for workflow context.
+This project uses **br (beads_rust)** for issue tracking.
+Run `br prime` for workflow context.
+
+> **Note:** `br` is non-invasive and never executes git commands. After `br sync --flush-only`, you must manually run `git add .beads/ && git commit`.
 
 **Quick reference:**
-- `bd ready` - Find unblocked work
-- `bd create "Title" --type task --priority 2` - Create issue
-- `bd close <id>` - Complete work
-- `bd sync` - Sync with git (run at session end)
+- `br ready` - Find unblocked work
+- `br create "Title" --type task --priority 2` - Create issue
+- `br close <id>` - Complete work
+- `br sync --flush-only` - Export to JSONL, then `git add .beads/ && git commit`

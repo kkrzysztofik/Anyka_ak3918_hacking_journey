@@ -15,10 +15,12 @@ You are a **Senior Embedded Systems Code Review Expert** with 15+ years of exper
 You are conducting a **comprehensive code review** of the **ONVIF 24.12 implementation for Anyka AK3918 cameras**. This is a production-ready Rust implementation featuring:
 
 - Complete ONVIF daemon with Device, Media, PTZ, and Imaging services
-- RTSP streaming capabilities
+- RTSP/HTTP-FLV streaming via `streaming-lib` workspace member
 - Asynchronous web server using `axum` and `tokio`
-- Platform abstraction layer for hardware access
-- Embedded camera system optimization with memory safety guarantees
+- HAL layer with IPC-based hardware access (ipc/mod.rs, ipc/shm_ring.rs)
+- Push-only frame delivery via Unix sockets + shared memory ring buffer
+- Platform abstraction layer bridging HAL to ONVIF services
+- Embedded camera system optimization with memory safety guarantees (24MB cap)
 
 **CRITICAL**: This review must be completed within **2,000-3,000 words maximum** to ensure actionable, focused feedback.
 
@@ -41,18 +43,23 @@ You are conducting a **comprehensive code review** of the **ONVIF 24.12 implemen
 
 ### **Step 1: Automated Analysis (REQUIRED)**
 
+> ⚠️ **CRITICAL**: This project uses a custom Rust toolchain. You MUST use the vendored cargo binary for all operations.
+
 ```bash
+# Define the toolchain cargo path (relative from repo root)
+export CARGO=toolchain/arm-anykav200-crosstool-ng/bin/cargo
+
 # Run clippy linting - MUST complete successfully with no warnings
-cd cross-compile/onvif-rust && cargo clippy -- -D warnings
+cd cross-compile/onvif-rust && $CARGO clippy --target x86_64-unknown-linux-gnu -- -D warnings
 
 # Verify build success - MUST pass
-cargo build --release
+$CARGO build --release --target x86_64-unknown-linux-gnu
 
 # Check test execution - MUST pass
-cargo test
+$CARGO test --target x86_64-unknown-linux-gnu
 
 # Verify code formatting - MUST pass
-cargo fmt --check
+$CARGO fmt --check
 ```
 
 ### **Step 2: Critical Standards Validation (REQUIRED)**
@@ -63,6 +70,24 @@ cargo fmt --check
 - [ ] **Module Organization**: Code properly organized into modules, no circular dependencies
 - [ ] **Test Coverage**: All new functionality has corresponding unit or integration tests
 - [ ] **Documentation**: Public APIs MUST have doc comments (`///`) with examples where appropriate
+
+### Platform-HAL Layering Check
+
+> ⚠️ Note: This is **directional guidance**, not strictly enforced. See [platform-hal-layering.md](platform-hal-layering.md) for current exceptions.
+
+Scan `src/platform/` for violations:
+- `grep -r "unsafe {" src/platform/` - should be empty (except known exceptions)
+- `grep -r "as \*mut\|as \*const" src/platform/` - should be empty
+- `grep -r "extern \"C\"" src/platform/` - should be empty
+- `grep -r "libc::" src/platform/` - should be empty (except test helpers)
+
+**Known acceptable exceptions**:
+- `unsafe impl Send/Sync` for marker traits in `src/platform/common/frame.rs` (acceptable - marker traits)
+- `unsafe {}` blocks in `src/platform/anyka/video_encoder.rs` (transitional - being cleaned up)
+- Direct IPC calls in `src/platform/anyka/ptz_control.rs` (planned - refactor to HAL)
+- Test helper usage in test files (acceptable - test-only)
+
+**Details**: [`.serena/memories/platform-hal-layering.md`](platform-hal-layering.md)
 
 ### **Step 3: Security Assessment (REQUIRED)**
 
@@ -178,7 +203,7 @@ A successful review MUST:
 - **axum Version**: 0.8 (as specified in dependencies)
 - **tokio Version**: 1.0 (as specified in dependencies)
 - **serde Version**: 1.0 (as specified in dependencies)
-- **quick-xml Version**: 0.38 (as specified in dependencies)
+- **quick-xml Version**: 0.39 (as specified in dependencies)
 - **mockall Version**: 0.14 (for testing, as specified in dev-dependencies)
 - **Anyka Platform**: AK3918 (confirmed hardware target)
 

@@ -13,6 +13,7 @@ use std::sync::Arc;
 use chrono::{Datelike, Timelike, Utc};
 
 use crate::config::ConfigRuntime;
+use crate::config::{PasswordManager, UserLevel, UserStorage};
 use crate::onvif::dispatcher::parse_body;
 use crate::onvif::error::{OnvifError, OnvifResult};
 use crate::onvif::types::common::{
@@ -33,17 +34,16 @@ use crate::onvif::types::device::{
     GetServices, GetServicesResponse, GetSystemBackup, GetSystemBackupResponse,
     GetSystemDateAndTime, GetSystemDateAndTimeResponse, GetUsers, GetUsersResponse,
     HostnameInformation, IPAddress, IPv4Configuration, IPv4NetworkInterface, LoadCertificates,
-    LoadCertificatesResponse, NTPInformation, NetworkGateway, NetworkHost, NetworkHostType,
-    NetworkInterface, NetworkInterfaceConnectionSetting, NetworkInterfaceInfo,
-    NetworkInterfaceLink, NetworkProtocol, NetworkProtocolType, PrefixedIPv4Address, RemoveScopes,
-    RemoveScopesResponse, RestoreSystem, RestoreSystemResponse, SetDNS, SetDNSResponse,
-    SetDiscoveryMode, SetDiscoveryModeResponse, SetHostname, SetHostnameResponse, SetNTP,
-    SetNTPResponse, SetNetworkProtocols, SetNetworkProtocolsResponse, SetScopes, SetScopesResponse,
-    SetSystemDateAndTime, SetSystemDateAndTimeResponse, SetSystemFactoryDefault,
-    SetSystemFactoryDefaultResponse, SetUser, SetUserResponse, SystemReboot, SystemRebootResponse,
+    LoadCertificatesResponse, NTPInformation, NetworkGateway, NetworkHost, NetworkInterface,
+    NetworkInterfaceConnectionSetting, NetworkInterfaceInfo, NetworkInterfaceLink, NetworkProtocol,
+    NetworkProtocolType, PrefixedIPv4Address, RemoveScopes, RemoveScopesResponse, RestoreSystem,
+    RestoreSystemResponse, SetDNS, SetDNSResponse, SetDiscoveryMode, SetDiscoveryModeResponse,
+    SetHostname, SetHostnameResponse, SetNTP, SetNTPResponse, SetNetworkProtocols,
+    SetNetworkProtocolsResponse, SetScopes, SetScopesResponse, SetSystemDateAndTime,
+    SetSystemDateAndTimeResponse, SetSystemFactoryDefault, SetSystemFactoryDefaultResponse,
+    SetUser, SetUserResponse, SystemReboot, SystemRebootResponse,
 };
-use crate::platform::{DeviceInfo, Platform};
-use crate::users::{PasswordManager, UserLevel, UserStorage};
+use crate::platform::{DeviceInfo, Platform, external_ip};
 
 use super::faults::{validate_hostname, validate_scope};
 use super::types::{
@@ -68,9 +68,6 @@ use super::user_types::{validate_password, validate_username};
 pub struct DeviceService {
     /// User storage.
     users: Arc<UserStorage>,
-    /// Password manager for hashing.
-    #[allow(dead_code)]
-    password_manager: Arc<PasswordManager>,
     /// Configuration runtime.
     config: Arc<ConfigRuntime>,
     /// Platform abstraction (optional for backward compatibility).
@@ -83,10 +80,9 @@ pub struct DeviceService {
 
 impl DeviceService {
     /// Create a new Device Service.
-    pub fn new(users: Arc<UserStorage>, password_manager: Arc<PasswordManager>) -> Self {
+    pub fn new(users: Arc<UserStorage>, _password_manager: Arc<PasswordManager>) -> Self {
         Self {
             users,
-            password_manager,
             config: Arc::new(ConfigRuntime::new(Default::default())),
             platform: None,
             scopes: parking_lot::RwLock::new(Self::default_scopes()),
@@ -97,13 +93,12 @@ impl DeviceService {
     /// Create a new Device Service with configuration and platform.
     pub fn with_config_and_platform(
         users: Arc<UserStorage>,
-        password_manager: Arc<PasswordManager>,
+        _password_manager: Arc<PasswordManager>,
         config: Arc<ConfigRuntime>,
         platform: Arc<dyn Platform>,
     ) -> Self {
         Self {
             users,
-            password_manager,
             config,
             platform: Some(platform),
             scopes: parking_lot::RwLock::new(Self::default_scopes()),
@@ -114,43 +109,10 @@ impl DeviceService {
     /// Get the base URL for service addresses.
     /// Uses detected IP address for proper XAddr values in capabilities.
     fn base_url(&self) -> String {
-        // Try to get the detected IP first, then fall back to config
-        let address = self
-            .config
-            .get_string("network.detected_ip")
-            .ok()
-            .filter(|s| !s.is_empty())
-            .or_else(|| {
-                self.config
-                    .get_string("network.ip_address")
-                    .ok()
-                    .filter(|s| !s.is_empty())
-            })
-            .unwrap_or_else(|| {
-                // Auto-detect IP as fallback
-                Self::detect_local_ip().unwrap_or_else(|| "127.0.0.1".to_string())
-            });
-        let port = self.config.get_int("server.port").unwrap_or(80) as u16;
+        // Use canonical external_ip helper for consistency across all ONVIF services
+        let address = external_ip(&self.config);
+        let port = self.config.read().server.port;
         format!("http://{}:{}", address, port)
-    }
-
-    /// Detect local IP address using UDP socket trick.
-    fn detect_local_ip() -> Option<String> {
-        use std::net::UdpSocket;
-        match UdpSocket::bind("0.0.0.0:0") {
-            Ok(socket) => {
-                if socket.connect("8.8.8.8:80").is_ok() {
-                    if let Ok(addr) = socket.local_addr() {
-                        let ip = addr.ip().to_string();
-                        if ip != "0.0.0.0" {
-                            return Some(ip);
-                        }
-                    }
-                }
-                None
-            }
-            Err(_) => None,
-        }
     }
 
     /// Get default scopes.
@@ -212,27 +174,13 @@ impl DeviceService {
 
     /// Get device info from configuration.
     fn device_info_from_config(&self) -> DeviceInfo {
+        let c = self.config.read();
         DeviceInfo {
-            manufacturer: self
-                .config
-                .get_string("device.manufacturer")
-                .unwrap_or_else(|_| "Anyka".to_string()),
-            model: self
-                .config
-                .get_string("device.model")
-                .unwrap_or_else(|_| "AK3918 Camera".to_string()),
-            firmware_version: self
-                .config
-                .get_string("device.firmware_version")
-                .unwrap_or_else(|_| "1.0.0".to_string()),
-            serial_number: self
-                .config
-                .get_string("device.serial_number")
-                .unwrap_or_else(|_| "000000000000".to_string()),
-            hardware_id: self
-                .config
-                .get_string("device.hardware_id")
-                .unwrap_or_else(|_| "00001".to_string()),
+            manufacturer: c.device.manufacturer.clone(),
+            model: c.device.model.clone(),
+            firmware_version: c.device.firmware_version.clone(),
+            serial_number: c.device.serial_number.clone(),
+            hardware_id: c.device.hardware_id.clone(),
         }
     }
 
@@ -413,23 +361,19 @@ impl DeviceService {
 
     /// Handle SetSystemFactoryDefault request.
     ///
-    /// Resets the device to factory defaults (stub implementation).
+    /// Not supported - returns ActionNotSupported error.
     pub fn handle_set_system_factory_default(
         &self,
         request: SetSystemFactoryDefault,
     ) -> OnvifResult<SetSystemFactoryDefaultResponse> {
-        tracing::info!(
-            "SetSystemFactoryDefault request - factory_default={:?}",
+        tracing::debug!(
+            "SetSystemFactoryDefault request - factory_default={:?} (not supported)",
             request.factory_default
         );
 
-        // Stub implementation - just log and return success
-        // In a real implementation, this would:
-        // - Hard: Reset all settings including network config
-        // - Soft: Reset settings but keep network config
-        tracing::warn!("Factory default reset requested but not implemented (stub)");
-
-        Ok(SetSystemFactoryDefaultResponse {})
+        Err(OnvifError::ActionNotSupported(
+            "SetSystemFactoryDefault".to_string(),
+        ))
     }
 
     /// Handle GetCertificates request.
@@ -589,10 +533,14 @@ impl DeviceService {
     pub fn handle_get_hostname(&self, _request: GetHostname) -> OnvifResult<GetHostnameResponse> {
         tracing::debug!("GetHostname request");
 
-        let hostname = self
-            .config
-            .get_string("device.hostname")
-            .unwrap_or_else(|_| "onvif-camera".to_string());
+        let hostname = {
+            let h = self.config.read().device.hostname.clone();
+            if h.is_empty() {
+                "onvif-camera".to_string()
+            } else {
+                h
+            }
+        };
 
         Ok(GetHostnameResponse {
             hostname_information: HostnameInformation {
@@ -613,9 +561,7 @@ impl DeviceService {
         validate_hostname(&request.name)?;
 
         // Save to configuration
-        self.config
-            .set_string("device.hostname", &request.name)
-            .map_err(|e| OnvifError::HardwareFailure(format!("Failed to save hostname: {}", e)))?;
+        self.config.write().device.hostname = request.name.clone();
 
         tracing::info!("SetHostname: hostname set to '{}'", request.name);
 
@@ -717,20 +663,17 @@ impl DeviceService {
 
     /// Fallback method to get network info from config when platform is unavailable.
     fn get_network_info_fallback(&self) -> (String, String, bool) {
-        let ip_address = self
-            .config
-            .get_string("network.detected_ip")
-            .ok()
-            .filter(|s| !s.is_empty())
-            .or_else(Self::detect_local_ip)
-            .unwrap_or_else(|| "192.168.1.100".to_string());
+        // Use canonical external_ip helper for consistency
+        let ip_address = external_ip(&self.config);
 
-        let mac_address = self
-            .config
-            .get_string("network.mac_address")
-            .unwrap_or_else(|_| "00:11:22:33:44:55".to_string());
-
-        let dhcp_enabled = self.config.get_bool("network.dhcp_enabled").unwrap_or(true);
+        let c = self.config.read();
+        let mac_address = if c.network.mac_address.is_empty() {
+            "00:11:22:33:44:55".to_string()
+        } else {
+            c.network.mac_address.clone()
+        };
+        let dhcp_enabled = c.network.dhcp_enabled;
+        drop(c);
 
         (ip_address, mac_address, dhcp_enabled)
     }
@@ -782,28 +725,15 @@ impl DeviceService {
 
     /// Handle SetDNS request.
     ///
-    /// Sets DNS configuration.
+    /// Not supported - returns ActionNotSupported error.
     pub async fn handle_set_dns(&self, request: SetDNS) -> OnvifResult<SetDNSResponse> {
         tracing::debug!(
-            "SetDNS request: from_dhcp={}, {} manual servers",
+            "SetDNS request: from_dhcp={}, {} manual servers (not supported)",
             request.from_dhcp,
             request.dns_manual.len()
         );
 
-        // TODO: Implement actual DNS setting via platform
-        // For now, just log and return success
-        tracing::info!(
-            "SetDNS: from_dhcp={}, manual_servers={:?}, search_domains={:?}",
-            request.from_dhcp,
-            request
-                .dns_manual
-                .iter()
-                .filter_map(|ip| ip.ipv4_address.as_ref())
-                .collect::<Vec<_>>(),
-            request.search_domain
-        );
-
-        Ok(SetDNSResponse {})
+        Err(OnvifError::ActionNotSupported("SetDNS".to_string()))
     }
 
     // ========================================================================
@@ -855,33 +785,15 @@ impl DeviceService {
 
     /// Handle SetNTP request.
     ///
-    /// Sets NTP configuration.
+    /// Not supported - returns ActionNotSupported error.
     pub async fn handle_set_ntp(&self, request: SetNTP) -> OnvifResult<SetNTPResponse> {
         tracing::debug!(
-            "SetNTP request: from_dhcp={}, {} manual servers",
+            "SetNTP request: from_dhcp={}, {} manual servers (not supported)",
             request.from_dhcp,
             request.ntp_manual.len()
         );
 
-        // TODO: Implement actual NTP setting via platform
-        // For now, just log and return success
-        let servers: Vec<String> = request
-            .ntp_manual
-            .iter()
-            .filter_map(|host| match host.host_type {
-                NetworkHostType::IPv4 => host.ipv4_address.clone(),
-                NetworkHostType::IPv6 => host.ipv6_address.clone(),
-                NetworkHostType::DNS => host.dns_name.clone(),
-            })
-            .collect();
-
-        tracing::info!(
-            "SetNTP: from_dhcp={}, manual_servers={:?}",
-            request.from_dhcp,
-            servers
-        );
-
-        Ok(SetNTPResponse {})
+        Err(OnvifError::ActionNotSupported("SetNTP".to_string()))
     }
 
     // ========================================================================
@@ -898,12 +810,14 @@ impl DeviceService {
         tracing::debug!("GetNetworkDefaultGateway request");
 
         // Get gateway from config (platform doesn't expose gateway info)
-        let gateway = self
-            .config
-            .get_string("network.gateway")
-            .ok()
-            .filter(|s| !s.is_empty())
-            .unwrap_or_else(|| "192.168.1.1".to_string());
+        let gateway = {
+            let g = self.config.read().network.gateway.clone();
+            if g.is_empty() {
+                "192.168.1.1".to_string()
+            } else {
+                g
+            }
+        };
 
         let network_gateway = NetworkGateway {
             ipv4_address: vec![gateway],
@@ -957,7 +871,7 @@ impl DeviceService {
         }
 
         // Return default protocol info from config if no platform
-        let http_port = self.config.get_int("server.port").unwrap_or(80) as i32;
+        let http_port = self.config.read().server.port as i32;
 
         Ok(GetNetworkProtocolsResponse {
             network_protocols: vec![
@@ -977,28 +891,19 @@ impl DeviceService {
 
     /// Handle SetNetworkProtocols request.
     ///
-    /// Sets network protocol configurations.
+    /// Not supported - returns ActionNotSupported error.
     pub async fn handle_set_network_protocols(
         &self,
         request: SetNetworkProtocols,
     ) -> OnvifResult<SetNetworkProtocolsResponse> {
         tracing::debug!(
-            "SetNetworkProtocols request: {} protocols",
+            "SetNetworkProtocols request: {} protocols (not supported)",
             request.network_protocols.len()
         );
 
-        // TODO: Implement actual protocol setting via platform
-        // For now, just log and return success
-        for protocol in &request.network_protocols {
-            tracing::info!(
-                "SetNetworkProtocols: {:?} enabled={} ports={:?}",
-                protocol.name,
-                protocol.enabled,
-                protocol.port
-            );
-        }
-
-        Ok(SetNetworkProtocolsResponse {})
+        Err(OnvifError::ActionNotSupported(
+            "SetNetworkProtocols".to_string(),
+        ))
     }
 
     // ========================================================================
@@ -1230,8 +1135,8 @@ impl DeviceService {
             self.users
                 .create_user(&user.username, password, level)
                 .map_err(|e| match e {
-                    crate::users::UserError::MaxUsersReached => OnvifError::MaxUsers,
-                    crate::users::UserError::UserExists(name) => OnvifError::InvalidArgVal {
+                    crate::config::UserError::MaxUsersReached => OnvifError::MaxUsers,
+                    crate::config::UserError::UserExists(name) => OnvifError::InvalidArgVal {
                         subcode: "ter:UsernameExists".to_string(),
                         reason: format!("User '{}' already exists", name),
                     },
@@ -1289,11 +1194,11 @@ impl DeviceService {
 
         for username in &request.usernames {
             self.users.delete_user(username).map_err(|e| match e {
-                crate::users::UserError::UserNotFound(name) => OnvifError::InvalidArgVal {
+                crate::config::UserError::UserNotFound(name) => OnvifError::InvalidArgVal {
                     subcode: "ter:UserNotFound".to_string(),
                     reason: format!("User '{}' not found", name),
                 },
-                crate::users::UserError::CannotDeleteLastAdmin => OnvifError::InvalidArgVal {
+                crate::config::UserError::CannotDeleteLastAdmin => OnvifError::InvalidArgVal {
                     subcode: "ter:FixedUser".to_string(),
                     reason: "Cannot delete the last administrator".to_string(),
                 },
@@ -1362,11 +1267,11 @@ impl DeviceService {
             self.users
                 .update_user(&user.username, password, Some(level))
                 .map_err(|e| match e {
-                    crate::users::UserError::UserNotFound(name) => OnvifError::InvalidArgVal {
+                    crate::config::UserError::UserNotFound(name) => OnvifError::InvalidArgVal {
                         subcode: "ter:UserNotFound".to_string(),
                         reason: format!("User '{}' not found", name),
                     },
-                    crate::users::UserError::CannotDeleteLastAdmin => OnvifError::InvalidArgVal {
+                    crate::config::UserError::CannotDeleteLastAdmin => OnvifError::InvalidArgVal {
                         subcode: "ter:FixedUser".to_string(),
                         reason: "Cannot demote the last administrator".to_string(),
                     },
@@ -1724,48 +1629,6 @@ impl ServiceHandler for DeviceService {
     fn service_name(&self) -> &str {
         "Device"
     }
-
-    /// Get the list of supported actions.
-    fn supported_actions(&self) -> Vec<&str> {
-        vec![
-            "GetDeviceInformation",
-            "GetCapabilities",
-            "GetServices",
-            "GetServiceCapabilities",
-            "GetSystemDateAndTime",
-            "SetSystemDateAndTime",
-            "SystemReboot",
-            "SetSystemFactoryDefault",
-            "GetSystemBackup",
-            "RestoreSystem",
-            "GetCertificates",
-            "GetCertificatesStatus",
-            "CreateCertificate",
-            "LoadCertificates",
-            "DeleteCertificates",
-            "GetRelayOutputs",
-            "GetHostname",
-            "SetHostname",
-            "GetNetworkInterfaces",
-            "GetNetworkDefaultGateway",
-            "GetDNS",
-            "SetDNS",
-            "GetNTP",
-            "SetNTP",
-            "GetNetworkProtocols",
-            "SetNetworkProtocols",
-            "GetScopes",
-            "SetScopes",
-            "AddScopes",
-            "RemoveScopes",
-            "GetDiscoveryMode",
-            "SetDiscoveryMode",
-            "GetUsers",
-            "CreateUsers",
-            "DeleteUsers",
-            "SetUser",
-        ]
-    }
 }
 
 // ============================================================================
@@ -1776,6 +1639,7 @@ impl ServiceHandler for DeviceService {
 mod tests {
     use super::*;
     use crate::onvif::types::common::UserLevel as OnvifUserLevel;
+    use crate::onvif::types::device::NetworkHostType;
 
     fn create_test_service() -> DeviceService {
         let users = Arc::new(UserStorage::new());
@@ -2626,7 +2490,7 @@ mod tests {
     // ========================================================================
 
     #[tokio::test]
-    async fn test_set_dns() {
+    async fn test_set_dns_not_supported() {
         let service = create_test_service();
 
         let result = service
@@ -2637,11 +2501,12 @@ mod tests {
             })
             .await;
 
-        assert!(result.is_ok());
+        assert!(result.is_err());
+        assert!(matches!(result, Err(OnvifError::ActionNotSupported(_))));
     }
 
     #[tokio::test]
-    async fn test_set_dns_with_dhcp() {
+    async fn test_set_dns_with_dhcp_not_supported() {
         let service = create_test_service();
 
         let result = service
@@ -2652,7 +2517,8 @@ mod tests {
             })
             .await;
 
-        assert!(result.is_ok());
+        assert!(result.is_err());
+        assert!(matches!(result, Err(OnvifError::ActionNotSupported(_))));
     }
 
     // ========================================================================
@@ -2674,7 +2540,7 @@ mod tests {
     // ========================================================================
 
     #[tokio::test]
-    async fn test_set_ntp() {
+    async fn test_set_ntp_not_supported() {
         let service = create_test_service();
 
         let result = service
@@ -2684,11 +2550,12 @@ mod tests {
             })
             .await;
 
-        assert!(result.is_ok());
+        assert!(result.is_err());
+        assert!(matches!(result, Err(OnvifError::ActionNotSupported(_))));
     }
 
     #[tokio::test]
-    async fn test_set_ntp_with_dhcp() {
+    async fn test_set_ntp_with_dhcp_not_supported() {
         let service = create_test_service();
 
         let result = service
@@ -2698,7 +2565,8 @@ mod tests {
             })
             .await;
 
-        assert!(result.is_ok());
+        assert!(result.is_err());
+        assert!(matches!(result, Err(OnvifError::ActionNotSupported(_))));
     }
 
     // ========================================================================
@@ -2793,7 +2661,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_set_network_protocols() {
+    async fn test_set_network_protocols_not_supported() {
         let service = create_test_service();
 
         let result = service
@@ -2806,7 +2674,8 @@ mod tests {
             })
             .await;
 
-        assert!(result.is_ok());
+        assert!(result.is_err());
+        assert!(matches!(result, Err(OnvifError::ActionNotSupported(_))));
     }
 
     // ========================================================================
@@ -2874,7 +2743,7 @@ mod tests {
     // ========================================================================
 
     #[tokio::test]
-    async fn test_set_dns_invalid_ip() {
+    async fn test_set_dns_invalid_ip_not_supported() {
         let service = create_test_service();
 
         // Invalid IP address format
@@ -2886,13 +2755,13 @@ mod tests {
             })
             .await;
 
-        // Should still succeed (validation happens at platform level)
-        // But we can test the handler accepts it
-        assert!(result.is_ok());
+        // Now returns ActionNotSupported
+        assert!(result.is_err());
+        assert!(matches!(result, Err(OnvifError::ActionNotSupported(_))));
     }
 
     #[tokio::test]
-    async fn test_set_ntp_invalid_host() {
+    async fn test_set_ntp_invalid_host_not_supported() {
         let service = create_test_service();
 
         // Invalid host format
@@ -2908,8 +2777,9 @@ mod tests {
             })
             .await;
 
-        // Handler should accept it (validation at platform level)
-        assert!(result.is_ok());
+        // Now returns ActionNotSupported
+        assert!(result.is_err());
+        assert!(matches!(result, Err(OnvifError::ActionNotSupported(_))));
     }
 
     // ========================================================================
@@ -2982,16 +2852,14 @@ mod tests {
             .create_user("admin", "admin123", UserLevel::Administrator)
             .unwrap();
         let password_manager = Arc::new(PasswordManager::new());
-        let config = {
-            let c = ConfigRuntime::new(Default::default());
-            c.set_string("network.detected_ip", "192.168.1.100")
-                .unwrap();
-            c.set_string("network.mac_address", "AA:BB:CC:DD:EE:FF")
-                .unwrap();
-            c.set_bool("network.dhcp_enabled", false).unwrap();
-            c
-        };
-        config.set_int("server.port", 8080).unwrap();
+        let config = ConfigRuntime::new(Default::default());
+        {
+            let mut c = config.write();
+            c.network.detected_ip = "192.168.1.100".to_string();
+            c.network.mac_address = "AA:BB:CC:DD:EE:FF".to_string();
+            c.network.dhcp_enabled = false;
+            c.server.port = 8080;
+        }
 
         let platform = Arc::new(StubPlatform::new());
         let service = DeviceService::with_config_and_platform(
@@ -3013,6 +2881,46 @@ mod tests {
     }
 
     #[test]
+    fn test_base_url_uses_static_ip_address() {
+        use crate::config::ConfigRuntime;
+        use crate::platform::StubPlatform;
+
+        let users = Arc::new(UserStorage::new());
+        users
+            .create_user("admin", "admin123", UserLevel::Administrator)
+            .unwrap();
+        let password_manager = Arc::new(PasswordManager::new());
+        let config = ConfigRuntime::new(Default::default());
+        {
+            let mut c = config.write();
+            // Static IP takes highest precedence
+            c.network.ip_address = "192.168.1.50".to_string();
+            // These should be ignored when ip_address is set
+            c.network.detected_ip = "192.168.1.100".to_string();
+            c.server.address = "10.0.0.1".to_string();
+            c.server.port = 8080;
+        }
+
+        let platform = Arc::new(StubPlatform::new());
+        let service = DeviceService::with_config_and_platform(
+            users,
+            password_manager,
+            Arc::new(config),
+            platform,
+        );
+
+        // Access base_url through a handler that uses it
+        let response = service
+            .handle_get_capabilities(GetCapabilities { category: vec![] })
+            .unwrap();
+
+        // Verify the URL contains the static IP (not detected_ip or server.address)
+        let device_caps = response.capabilities.device.unwrap();
+        assert!(device_caps.x_addr.contains("192.168.1.50"));
+        assert!(device_caps.x_addr.contains("8080"));
+    }
+
+    #[test]
     fn test_base_url_fallback_to_ip_address() {
         use crate::config::ConfigRuntime;
         use crate::platform::StubPlatform;
@@ -3022,13 +2930,13 @@ mod tests {
             .create_user("admin", "admin123", UserLevel::Administrator)
             .unwrap();
         let password_manager = Arc::new(PasswordManager::new());
-        let config = {
-            let c = ConfigRuntime::new(Default::default());
-            // Don't set detected_ip - we want to test ip_address fallback
-            c.set_string("network.ip_address", "10.0.0.1").unwrap();
-            c.set_int("server.port", 9000).unwrap();
-            c
-        };
+        let config = ConfigRuntime::new(Default::default());
+        {
+            let mut c = config.write();
+            // Use server.address as per canonical external_ip precedence
+            c.server.address = "10.0.0.1".to_string();
+            c.server.port = 9000;
+        }
 
         let platform = Arc::new(StubPlatform::new());
         let service = DeviceService::with_config_and_platform(
@@ -3103,14 +3011,13 @@ mod tests {
             .create_user("admin", "admin123", UserLevel::Administrator)
             .unwrap();
         let password_manager = Arc::new(PasswordManager::new());
-        let config = {
-            let c = ConfigRuntime::new(Default::default());
-            c.set_string("network.detected_ip", "192.168.1.50").unwrap();
-            c.set_string("network.mac_address", "AA:BB:CC:DD:EE:FF")
-                .unwrap();
-            c.set_bool("network.dhcp_enabled", false).unwrap();
-            c
-        };
+        let config = ConfigRuntime::new(Default::default());
+        {
+            let mut c = config.write();
+            c.network.detected_ip = "192.168.1.50".to_string();
+            c.network.mac_address = "AA:BB:CC:DD:EE:FF".to_string();
+            c.network.dhcp_enabled = false;
+        }
 
         use crate::platform::StubPlatform;
         let platform = Arc::new(StubPlatform::new());
@@ -3240,15 +3147,13 @@ mod tests {
     // ========================================================================
 
     #[test]
-    fn test_set_system_factory_default() {
+    fn test_set_system_factory_default_not_supported() {
         let service = create_test_service();
-        let response = service
-            .handle_set_system_factory_default(SetSystemFactoryDefault {
-                factory_default: crate::onvif::types::common::FactoryDefaultType::Soft,
-            })
-            .unwrap();
+        let result = service.handle_set_system_factory_default(SetSystemFactoryDefault {
+            factory_default: crate::onvif::types::common::FactoryDefaultType::Soft,
+        });
 
-        // Stub returns empty struct, verify success
-        let _ = response;
+        assert!(result.is_err());
+        assert!(matches!(result, Err(OnvifError::ActionNotSupported(_))));
     }
 }

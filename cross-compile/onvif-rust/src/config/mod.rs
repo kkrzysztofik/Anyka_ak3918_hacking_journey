@@ -2,9 +2,9 @@
 //!
 //! This module provides a robust configuration system that:
 //!
-//! - Loads configuration from TOML files
-//! - Validates configuration against a schema
-//! - Provides thread-safe runtime access
+//! - Loads configuration from TOML files using serde
+//! - Validates configuration against typed constraints
+//! - Provides thread-safe runtime access via read/write guards
 //! - Supports atomic configuration updates
 //!
 //! # Configuration Sections
@@ -17,26 +17,35 @@
 //! - `[media]` - Media stream settings
 //! - `[ptz]` - PTZ control settings
 //! - `[imaging]` - Imaging settings
+//! - `[discovery]` - WS-Discovery settings
+//! - `[memory]` - Memory management settings
 //! - `[stream_profile_N]` - Stream profile configurations (1-4)
 //!
 //! # Example
 //!
 //! ```ignore
-//! use onvif_rust::config::{ConfigRuntime, ConfigStorage};
+//! use onvif_rust::config::{ConfigRuntime, ConfigStorage, AppConfig};
 //!
-//! let config = ConfigStorage::load("/etc/onvif/config.toml")?;
+//! let config = ConfigStorage::load_or_default("/etc/onvif/config.toml")?;
 //! let runtime = ConfigRuntime::new(config);
 //!
-//! let port = runtime.get_int("server.port")?;
-//! runtime.set_int("server.port", 8080)?;
+//! let port = runtime.read().server.port;
+//! runtime.write().server.port = 8080;
 //! ```
 
+pub(crate) mod file_ops;
 mod persistence;
+pub mod profiles;
 mod runtime;
-mod schema;
 mod storage;
+pub mod types;
+pub mod users;
 
 pub use persistence::*;
+pub use profiles::{ProfileError, ProfileStorage, ProfilesFile};
 pub use runtime::*;
-pub use schema::*;
 pub use storage::*;
+pub use types::AppConfig;
+pub use users::{
+    MAX_USERS, PasswordError, PasswordManager, UserAccount, UserError, UserLevel, UserStorage,
+};

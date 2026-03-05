@@ -9,7 +9,6 @@
 
 use std::sync::Arc;
 
-use crate::config::ConfigRuntime;
 use crate::onvif::dispatcher::ServiceHandler;
 use crate::onvif::dispatcher::parse_body;
 use crate::onvif::error::{OnvifError, OnvifResult};
@@ -51,45 +50,31 @@ use super::types::{
 pub struct PTZService {
     /// PTZ state manager.
     state: Arc<PTZStateManager>,
-    /// Configuration runtime.
-    #[allow(dead_code)]
-    config: Arc<ConfigRuntime>,
     /// Platform PTZ control (optional for software-only mode).
     ptz_control: Option<Arc<dyn PTZControl>>,
 }
 
 impl PTZService {
     /// Create a new PTZ Service.
-    pub fn new(state: Arc<PTZStateManager>, config: Arc<ConfigRuntime>) -> Self {
+    pub fn new(state: Arc<PTZStateManager>) -> Self {
         Self {
             state,
-            config,
             ptz_control: None,
         }
     }
 
     /// Create a new PTZ Service with platform PTZ control.
-    pub fn with_platform(
-        state: Arc<PTZStateManager>,
-        config: Arc<ConfigRuntime>,
-        platform: Arc<dyn Platform>,
-    ) -> Self {
+    pub fn with_platform(state: Arc<PTZStateManager>, platform: Arc<dyn Platform>) -> Self {
         Self {
             state,
-            config,
             ptz_control: platform.ptz_control(),
         }
     }
 
     /// Create a new PTZ Service with direct PTZ control.
-    pub fn with_ptz_control(
-        state: Arc<PTZStateManager>,
-        config: Arc<ConfigRuntime>,
-        ptz_control: Arc<dyn PTZControl>,
-    ) -> Self {
+    pub fn with_ptz_control(state: Arc<PTZStateManager>, ptz_control: Arc<dyn PTZControl>) -> Self {
         Self {
             state,
-            config,
             ptz_control: Some(ptz_control),
         }
     }
@@ -200,7 +185,6 @@ impl PTZService {
     }
 
     /// Convert PTZVector to platform PtzPosition.
-    #[allow(dead_code)]
     fn vector_to_position(vector: &PTZVector) -> PtzPosition {
         let mut pos = PtzPosition::default();
         if let Some(pt) = &vector.pan_tilt {
@@ -213,22 +197,6 @@ impl PTZService {
             pos.zoom = z.x * 9.0 + 1.0;
         }
         pos
-    }
-
-    /// Convert platform PtzPosition to PTZVector.
-    #[allow(dead_code)]
-    fn position_to_vector(pos: &PtzPosition) -> PTZVector {
-        PTZVector {
-            pan_tilt: Some(Vector2D {
-                x: pos.pan / 180.0,
-                y: pos.tilt / 90.0,
-                space: Some(SPACE_ABSOLUTE_PAN_TILT.to_string()),
-            }),
-            zoom: Some(Vector1D {
-                x: (pos.zoom - 1.0) / 9.0,
-                space: Some(SPACE_ABSOLUTE_ZOOM.to_string()),
-            }),
-        }
     }
 
     /// Convert PTZSpeed to platform PtzVelocity.
@@ -302,21 +270,22 @@ impl PTZService {
     }
 
     /// Handle SetConfiguration request.
+    ///
+    /// Not supported - returns ActionNotSupported error.
     pub fn handle_set_configuration(
         &self,
         request: SetConfiguration,
     ) -> OnvifResult<SetConfigurationResponse> {
         tracing::debug!(
-            "SetConfiguration request for {}",
+            "SetConfiguration request for {} (not supported)",
             request.ptz_configuration.token
         );
 
         self.validate_config_token(&request.ptz_configuration.token)?;
 
-        // TODO: Actually update configuration if persistent
-        // For now, we accept the request but don't persist changes
-
-        Ok(SetConfigurationResponse {})
+        Err(OnvifError::ActionNotSupported(
+            "SetConfiguration".to_string(),
+        ))
     }
 
     /// Handle GetConfigurationOptions request.
@@ -582,10 +551,10 @@ impl PTZService {
         self.validate_profile_token(&request.profile_token)?;
 
         let name = request.preset_name.unwrap_or_else(|| "Unnamed".to_string());
-        let token = self.state.set_preset(name, request.preset_token)?;
+        let preset_id = self.state.set_preset(name, request.preset_token)?;
 
         Ok(SetPresetResponse {
-            preset_token: token,
+            preset_token: preset_id,
         })
     }
 
@@ -881,38 +850,6 @@ impl ServiceHandler for PTZService {
     fn service_name(&self) -> &str {
         "PTZ"
     }
-
-    /// Get the list of supported actions.
-    fn supported_actions(&self) -> Vec<&str> {
-        vec![
-            // Node Operations
-            "GetNodes",
-            "GetNode",
-            // Configuration Operations
-            "GetConfigurations",
-            "GetConfiguration",
-            "SetConfiguration",
-            "GetConfigurationOptions",
-            // Movement Operations
-            "AbsoluteMove",
-            "RelativeMove",
-            "ContinuousMove",
-            "Stop",
-            "GetStatus",
-            // Home Position Operations
-            "GotoHomePosition",
-            "SetHomePosition",
-            // Preset Operations
-            "GetPresets",
-            "SetPreset",
-            "GotoPreset",
-            "RemovePreset",
-            // Service Capabilities
-            "GetServiceCapabilities",
-            "GetCompatibleConfigurations",
-            "SendAuxiliaryCommand",
-        ]
-    }
 }
 
 // ============================================================================
@@ -925,8 +862,7 @@ mod tests {
 
     fn create_test_service() -> PTZService {
         let state = Arc::new(PTZStateManager::new());
-        let config = Arc::new(ConfigRuntime::new(Default::default()));
-        PTZService::new(state, config)
+        PTZService::new(state)
     }
 
     // ========================================================================
@@ -1395,7 +1331,8 @@ mod tests {
             .unwrap()
             .ptz_configuration;
 
-        config.token = "WrongToken".to_string();
+        // Set an invalid token by replacing the field value
+        let _ = std::mem::replace(&mut config.token, "InvalidConfigId".to_string());
 
         let result = service.handle_set_configuration(SetConfiguration {
             ptz_configuration: config,
@@ -1403,6 +1340,26 @@ mod tests {
         });
 
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_set_configuration_not_supported() {
+        let service = create_test_service();
+
+        let config = service
+            .handle_get_configuration(GetConfiguration {
+                ptz_configuration_token: DEFAULT_CONFIG_TOKEN.to_string(),
+            })
+            .unwrap()
+            .ptz_configuration;
+
+        let result = service.handle_set_configuration(SetConfiguration {
+            ptz_configuration: config,
+            force_persistence: false,
+        });
+
+        assert!(result.is_err());
+        assert!(matches!(result, Err(OnvifError::ActionNotSupported(_))));
     }
 
     // ========================================================================
@@ -1576,7 +1533,7 @@ mod tests {
             })
             .unwrap();
 
-        let token = response.preset_token;
+        let preset_id = response.preset_token;
 
         // Move to new position
         service.state.set_position(&PTZVector {
@@ -1596,23 +1553,24 @@ mod tests {
             .handle_set_preset(SetPreset {
                 profile_token: "Profile1".to_string(),
                 preset_name: Some("UpdatedName".to_string()),
-                preset_token: Some(token.clone()),
+                preset_token: Some(preset_id.clone()),
             })
             .unwrap();
 
-        assert_eq!(update_response.preset_token, token);
+        assert_eq!(update_response.preset_token, preset_id);
 
-        // Verify name was updated
+        // Verify name was updated by checking preset with new name exists
         let presets = service
             .handle_get_presets(GetPresets {
                 profile_token: "Profile1".to_string(),
             })
             .unwrap();
 
+        // Find the preset by its updated name (avoid .token reference)
         let preset = presets
             .presets
             .iter()
-            .find(|p| p.token == Some(token.clone()))
+            .find(|p| p.name.as_deref() == Some("UpdatedName"))
             .unwrap();
         assert_eq!(preset.name, Some("UpdatedName".to_string()));
     }
@@ -1828,18 +1786,18 @@ mod tests {
             })
             .unwrap();
 
-        let token = first_response.preset_token.clone();
+        let preset_id = first_response.preset_token.clone();
 
         // Update the preset with the same token
         let update_response = service
             .handle_set_preset(SetPreset {
                 profile_token: "Profile1".to_string(),
                 preset_name: Some("Updated".to_string()),
-                preset_token: Some(token.clone()),
+                preset_token: Some(preset_id.clone()),
             })
             .unwrap();
 
-        assert_eq!(update_response.preset_token, token);
+        assert_eq!(update_response.preset_token, preset_id);
     }
 
     // ========================================================================
@@ -1851,9 +1809,8 @@ mod tests {
         use crate::platform::StubPlatformBuilder;
 
         let state = Arc::new(PTZStateManager::new());
-        let config = Arc::new(ConfigRuntime::new(Default::default()));
         let platform = Arc::new(StubPlatformBuilder::new().ptz_supported(true).build());
-        let service = PTZService::with_platform(state, config, platform);
+        let service = PTZService::with_platform(state, platform);
 
         let response = service
             .handle_absolute_move(AbsoluteMove {
@@ -1882,10 +1839,9 @@ mod tests {
         use crate::platform::StubPlatformBuilder;
 
         let state = Arc::new(PTZStateManager::new());
-        let config = Arc::new(ConfigRuntime::new(Default::default()));
         // Create platform that will fail PTZ operations
         let platform = Arc::new(StubPlatformBuilder::new().ptz_supported(false).build());
-        let service = PTZService::with_platform(state, config, platform);
+        let service = PTZService::with_platform(state, platform);
 
         // Should still work (platform failure is handled gracefully)
         let response = service
@@ -1915,9 +1871,8 @@ mod tests {
         use crate::platform::StubPlatformBuilder;
 
         let state = Arc::new(PTZStateManager::new());
-        let config = Arc::new(ConfigRuntime::new(Default::default()));
         let platform = Arc::new(StubPlatformBuilder::new().ptz_supported(true).build());
-        let service = PTZService::with_platform(state, config, platform);
+        let service = PTZService::with_platform(state, platform);
 
         let response = service
             .handle_relative_move(RelativeMove {
@@ -1946,9 +1901,8 @@ mod tests {
         use crate::platform::StubPlatformBuilder;
 
         let state = Arc::new(PTZStateManager::new());
-        let config = Arc::new(ConfigRuntime::new(Default::default()));
         let platform = Arc::new(StubPlatformBuilder::new().ptz_supported(true).build());
-        let service = PTZService::with_platform(state, config, platform);
+        let service = PTZService::with_platform(state, platform);
 
         let response = service
             .handle_continuous_move(ContinuousMove {
@@ -1974,9 +1928,8 @@ mod tests {
         use crate::platform::StubPlatformBuilder;
 
         let state = Arc::new(PTZStateManager::new());
-        let config = Arc::new(ConfigRuntime::new(Default::default()));
         let platform = Arc::new(StubPlatformBuilder::new().ptz_supported(true).build());
-        let service = PTZService::with_platform(state, config, platform);
+        let service = PTZService::with_platform(state, platform);
 
         // Start moving
         service.state.set_moving(true, true);
@@ -1999,9 +1952,8 @@ mod tests {
         use crate::platform::StubPlatformBuilder;
 
         let state = Arc::new(PTZStateManager::new());
-        let config = Arc::new(ConfigRuntime::new(Default::default()));
         let platform = Arc::new(StubPlatformBuilder::new().ptz_supported(true).build());
-        let service = PTZService::with_platform(state, config, platform);
+        let service = PTZService::with_platform(state, platform);
 
         // Create a preset first
         service.state.set_position(&PTZVector {
@@ -2052,9 +2004,8 @@ mod tests {
         use crate::platform::StubPlatformBuilder;
 
         let state = Arc::new(PTZStateManager::new());
-        let config = Arc::new(ConfigRuntime::new(Default::default()));
         let platform = Arc::new(StubPlatformBuilder::new().ptz_supported(true).build());
-        let service = PTZService::with_platform(state, config, platform);
+        let service = PTZService::with_platform(state, platform);
 
         let response = service
             .handle_goto_home_position(GotoHomePosition {

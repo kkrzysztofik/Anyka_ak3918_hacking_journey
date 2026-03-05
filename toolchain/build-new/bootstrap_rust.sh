@@ -1,72 +1,18 @@
 #!/bin/bash
 # Bootstrap Rust from source with custom LLVM
-# Supports: ARMv5TE (armv5te) and aarch64 architectures
+# Target: ARMv5TE (armv5te-unknown-linux-uclibceabi) for Anyka AK3918 cameras
 
-set -e  # Exit on error
+set -e          # Exit on error
+set -o pipefail  # Propagate errors through pipes (prevents silent failures in cmd | tee)
 
-# Colors for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m' # No Color
-
-# Architecture selection (default: armv5te)
-ARCH="${ARCH:-armv5te}"
-
-# Validate architecture
-if [ "${ARCH}" != "armv5te" ] && [ "${ARCH}" != "aarch64" ]; then
-    echo "Error: ARCH must be 'armv5te' or 'aarch64'"
-    echo "Usage: ARCH=armv5te ./bootstrap_rust.sh  (default)"
-    echo "       ARCH=aarch64 ./bootstrap_rust.sh"
-    exit 1
-fi
-
-# Script directory
+# Script directory — must be set before sourcing common.sh
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-BUILD_DIR="${SCRIPT_DIR}"
+source "${SCRIPT_DIR}/common.sh"
 
-# Set target-specific variables based on architecture
-if [ "${ARCH}" = "aarch64" ]; then
-    INSTALL_DIR="${SCRIPT_DIR}/../aarch64-unknown-linux-gnu-toolchain"
-    TARGET_NAME="aarch64-unknown-linux-gnu"
-    TARGET_SPEC="${BUILD_DIR}/${TARGET_NAME}.json"
-    TARGET_TUPLE="aarch64-unknown-linux-gnu"
-    SYSROOT_SUBDIR="aarch64-unknown-linux-gnu"
-    CLANG_WRAPPER="clang-wrapper-aarch64.sh"
-    IS_BUILTIN_TARGET=true
-else
-    INSTALL_DIR="${SCRIPT_DIR}/../arm-anykav200-crosstool-ng"
-    TARGET_NAME="armv5te-unknown-linux-uclibceabi"
-    TARGET_SPEC="${BUILD_DIR}/${TARGET_NAME}.json"
-    TARGET_TUPLE="arm-unknown-linux-uclibcgnueabi"
-    SYSROOT_SUBDIR="arm-unknown-linux-uclibcgnueabi"
-    CLANG_WRAPPER="clang-wrapper.sh"
-    IS_BUILTIN_TARGET=false
-fi
-
-RUST_SRC_DIR="${BUILD_DIR}/rust"
-# Use latest stable Rust version (1.91.1 or newer)
-# This matches the system Rust version for bootstrap compatibility
-RUST_VERSION="1.92.0"  # Latest stable version
-
-# Logging functions
-log_info() {
-    local message="$1"
-    echo -e "${GREEN}[INFO]${NC} ${message}"
-    return 0
-}
-
-log_warn() {
-    local message="$1"
-    echo -e "${YELLOW}[WARN]${NC} ${message}"
-    return 0
-}
-
-log_error() {
-    local message="$1"
-    echo -e "${RED}[ERROR]${NC} ${message}" >&2
-    return 0
-}
+# Rust target triple (distinct from the GCC TARGET_TUPLE in common.sh)
+TARGET_NAME="armv5te-unknown-linux-uclibceabi"
+TARGET_SPEC="${BUILD_DIR}/${TARGET_NAME}.json"
+CLANG_WRAPPER="clang-wrapper.sh"
 
 # Check dependencies
 check_dependencies() {
@@ -83,25 +29,9 @@ check_dependencies() {
     export RANLIB="ranlib"
 
     log_info "Cleared cross-compilation environment variables"
-    log_info "Using native CC: ${CC}"
-    log_info "Using native CXX: ${CXX}"
+    log_info "Using native CC: ${CC}, CXX: ${CXX}"
 
-    local deps=(
-        "python3" "git" "curl" "cmake" "ninja" "perl" "pkg-config" "make" "gcc"
-    )
-
-    local missing=()
-    for dep in "${deps[@]}"; do
-        if ! command -v "${dep}" &> /dev/null; then
-            missing+=("${dep}")
-        fi
-    done
-
-    if [[ ${#missing[@]} -ne 0 ]]; then
-        log_error "Missing dependencies: ${missing[*]}"
-        log_info "Install with: sudo apt-get install -y ${missing[*]}"
-        exit 1
-    fi
+    check_deps python3 git curl cmake ninja perl pkg-config make gcc
 
     # Check for LLVM
     local llvm_config="${INSTALL_DIR}/bin/llvm-config"
@@ -111,16 +41,12 @@ check_dependencies() {
         log_error "LLVM/Clang is required for Rust bootstrap."
         log_error "Please build LLVM first using build_llvm.sh"
         log_error ""
-        log_error "For ${ARCH} architecture, run:"
-        log_error "  ARCH=${ARCH} ./build_llvm.sh"
-        log_error ""
-        log_error "Note: build_llvm.sh needs to be created first."
-        log_error "It should build LLVM 18.1.8 with Clang and LLD for ${ARCH}."
+        log_error "Run: ./build_llvm.sh"
         exit 1
     fi
 
-    # Check for target spec file (only required for non-builtin targets)
-    if [[ "${IS_BUILTIN_TARGET}" = "false" ]] && [[ ! -f "${TARGET_SPEC}" ]]; then
+    # Check for target spec file (required for armv5te-unknown-linux-uclibceabi)
+    if [[ ! -f "${TARGET_SPEC}" ]]; then
         log_error "Target specification not found: ${TARGET_SPEC}"
         exit 1
     fi
@@ -158,11 +84,6 @@ clone_rust() {
 
 # Add target specification to Rust source
 add_target_spec() {
-    if [[ "${IS_BUILTIN_TARGET}" = "true" ]]; then
-        log_info "Target ${TARGET_NAME} is a builtin Rust target, skipping custom spec"
-        return 0
-    fi
-
     log_info "Adding target specification to Rust source..."
 
     # Modern Rust uses compiler/rustc_target/src/spec/targets/
@@ -195,7 +116,7 @@ use crate::spec::{base, Target, TargetOptions};
 pub fn target() -> Target {
     let base = base::linux_uclibc::opts();
     Target {
-        llvm_target: "arm-unknown-linux-uclibcgnueabi".into(),
+        llvm_target: "armv5te-unknown-linux-gnueabi".into(),
         metadata: crate::spec::TargetMetadata {
             description: None,
             tier: None,
@@ -259,7 +180,7 @@ create_rust_config() {
 
     local config_file="${RUST_SRC_DIR}/config.toml"
     local llvm_config="${INSTALL_DIR}/bin/llvm-config"
-    local sysroot="${INSTALL_DIR}/${SYSROOT_SUBDIR}/sysroot"
+    local sysroot="${SYSROOT}"
 
     # Find system Rust toolchain for bootstrap
     local system_rustc=$(which rustc 2>/dev/null || echo "rustc")
@@ -272,21 +193,12 @@ create_rust_config() {
         log_warn "Or ensure rustc and cargo are in your PATH"
     fi
 
-    # Determine compiler paths based on architecture
+    # ARMv5TE compiler paths
     local target_cc target_cxx target_ar target_ranlib
-    if [ "${ARCH}" = "aarch64" ]; then
-        # aarch64 toolchain installs to bin/ directly (not usr/bin/)
-        target_cc="${INSTALL_DIR}/bin/aarch64-unknown-linux-gnu-gcc"
-        target_cxx="${INSTALL_DIR}/bin/aarch64-unknown-linux-gnu-g++"
-        target_ar="${INSTALL_DIR}/bin/aarch64-unknown-linux-gnu-ar"
-        target_ranlib="${INSTALL_DIR}/bin/aarch64-unknown-linux-gnu-ranlib"
-    else
-        # ARMv5TE toolchain installs to bin/ (not usr/bin/)
-        target_cc="${INSTALL_DIR}/bin/arm-unknown-linux-uclibcgnueabi-gcc"
-        target_cxx="${INSTALL_DIR}/bin/arm-unknown-linux-uclibcgnueabi-g++"
-        target_ar="${INSTALL_DIR}/bin/arm-unknown-linux-uclibcgnueabi-ar"
-        target_ranlib="${INSTALL_DIR}/bin/arm-unknown-linux-uclibcgnueabi-ranlib"
-    fi
+    target_cc="${INSTALL_DIR}/bin/arm-unknown-linux-uclibcgnueabi-gcc"
+    target_cxx="${INSTALL_DIR}/bin/arm-unknown-linux-uclibcgnueabi-g++"
+    target_ar="${INSTALL_DIR}/bin/arm-unknown-linux-uclibcgnueabi-ar"
+    target_ranlib="${INSTALL_DIR}/bin/arm-unknown-linux-uclibcgnueabi-ranlib"
 
     cat > "${config_file}" << EOF
 # Rust build configuration for custom LLVM and ${ARCH} target
@@ -309,7 +221,7 @@ rustc = "${system_rustc}"
 cargo = "${system_cargo}"
 # Build extended tools (cargo, rustfmt, clippy, etc.)
 extended = true
-tools = ["cargo", "rustfmt", "clippy", "rustdoc", "src"]
+tools = ["cargo", "rustfmt", "clippy", "rustdoc", "src", "rust-analyzer-proc-macro-srv", "rust-analyzer"]
 
 [install]
 prefix = "${INSTALL_DIR}"
@@ -403,45 +315,63 @@ build_rust() {
 
     # Create or verify Clang wrapper script that includes sysroot and target flags
     # This ensures Clang always has the right flags without affecting host builds
-    local sysroot="${INSTALL_DIR}/${SYSROOT_SUBDIR}/sysroot"
     local clang_wrapper="${BUILD_DIR}/${CLANG_WRAPPER}"
     
-    if [ "${ARCH}" = "aarch64" ]; then
-        # Use the existing aarch64 wrapper if it exists, otherwise create it
-        if [[ ! -f "${clang_wrapper}" ]]; then
-            cat > "${clang_wrapper}" << EOF
+    # Create ARMv5TE Clang wrapper.
+    # - --sysroot:  uClibc-ng sysroot (headers + runtime libs)
+    # - --target:   LLVM-valid triple (gnueabi, not uclibcgnueabi)
+    # - -B:         explicit path to GCC's crt files (crtbeginS.o, crtendS.o)
+    #   Required because --gcc-toolchain triple detection fails when the GCC
+    #   triple (arm-unknown-linux-uclibcgnueabi) differs from --target
+    #   (armv5te-unknown-linux-gnueabi). `ls | sort -V | tail -1` picks the
+    #   highest installed GCC version without hardcoding it.
+    # The wrapper is self-relocating (resolves INSTALL_DIR at runtime).
+    cat > "${clang_wrapper}" << 'WRAPPER_EOF'
 #!/bin/bash
-# Clang wrapper for aarch64 target with sysroot
-exec "${INSTALL_DIR}/bin/clang" \\
-    --target=aarch64-unknown-linux-gnu \\
-    --sysroot="${sysroot}" \\
-    -L"${sysroot}/lib" \\
-    -L"${sysroot}/usr/lib" \\
-    "\$@"
-EOF
-            chmod +x "${clang_wrapper}"
-            log_info "Created Clang wrapper: ${clang_wrapper}"
-        else
-            log_info "Using existing Clang wrapper: ${clang_wrapper}"
-        fi
-    else
-        # Create ARMv5TE wrapper
-        cat > "${clang_wrapper}" << EOF
-#!/bin/bash
-# Clang wrapper for ARMv5TE target with sysroot
-exec "${INSTALL_DIR}/bin/clang" \\
-    --target=arm-unknown-linux-uclibcgnueabi \\
-    --sysroot="${sysroot}" \\
-    -march=armv5te \\
-    -mfloat-abi=soft \\
-    -mtune=arm926ej-s \\
-    -L"${sysroot}/lib" \\
-    -L"${sysroot}/usr/lib" \\
-    "\$@"
-EOF
-        chmod +x "${clang_wrapper}"
-        log_info "Created Clang wrapper: ${clang_wrapper}"
-    fi
+# Clang wrapper for ARMv5TE cross-compilation.
+#
+# Problem: the GCC toolchain triple (arm-unknown-linux-uclibcgnueabi) is not a
+# valid LLVM target because 'uclibcgnueabi' is not a recognized environment.
+# We must always use armv5te-unknown-linux-gnueabi for Clang.
+#
+# When rustc uses this wrapper as its linker it may pass pre-link-args that
+# include --target=arm-unknown-linux-uclibcgnueabi (from the built-in Rust
+# target spec). Clang uses the LAST --target on the command line, so those
+# args would override our good triple. We filter them out below.
+#
+# Flags we always inject:
+#   --target   LLVM-valid triple replaces the GCC triple
+#   --sysroot  uClibc-ng headers + runtime libs
+#   -B         GCC crt files (crtbeginS.o, crtendS.o)
+#   -L         GCC lib dir so -lgcc resolves
+#   -march/-mfloat-abi/-mtune  ARMv5TE soft-float ABI
+INSTALL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../arm-anykav200-crosstool-ng" && pwd)"
+GCC_LIB="${INSTALL_DIR}/lib/gcc/arm-unknown-linux-uclibcgnueabi"
+GCC_VER="$(ls "${GCC_LIB}" 2>/dev/null | sort -V | tail -1)"
+
+# Strip any --target / -target arg from caller's args so it cannot override
+# the known-good triple we inject above.
+filtered=()
+skip_next=false
+for arg in "$@"; do
+    if [[ "${skip_next}" == true ]]; then skip_next=false; continue; fi
+    if [[ "${arg}" == --target=* ]] || [[ "${arg}" == -target=* ]]; then continue; fi
+    if [[ "${arg}" == "--target" ]] || [[ "${arg}" == "-target" ]]; then skip_next=true; continue; fi
+    filtered+=("${arg}")
+done
+
+exec "${INSTALL_DIR}/bin/clang" \
+    --target=armv5te-unknown-linux-gnueabi \
+    --sysroot="${INSTALL_DIR}/arm-unknown-linux-uclibcgnueabi/sysroot" \
+    -B "${GCC_LIB}/${GCC_VER}" \
+    -L "${GCC_LIB}/${GCC_VER}" \
+    -march=armv5te \
+    -mfloat-abi=soft \
+    -mtune=arm926ej-s \
+    "${filtered[@]}"
+WRAPPER_EOF
+    chmod +x "${clang_wrapper}"
+    log_info "Created Clang wrapper: ${clang_wrapper}"
 
     # Update config.toml to use the wrapper (if not already set)
     if ! grep -q "linker = \"${clang_wrapper}\"" "${RUST_SRC_DIR}/config.toml"; then
@@ -593,6 +523,33 @@ install_rust() {
         }
     fi
 
+    # Verify rust-analyzer-proc-macro-srv was installed
+    # It ships to libexec/ in most Rust installs (fallback: bin/)
+    local proc_macro_srv=""
+    if [[ -f "${INSTALL_DIR}/libexec/rust-analyzer-proc-macro-srv" ]]; then
+        proc_macro_srv="${INSTALL_DIR}/libexec/rust-analyzer-proc-macro-srv"
+    elif [[ -f "${INSTALL_DIR}/bin/rust-analyzer-proc-macro-srv" ]]; then
+        proc_macro_srv="${INSTALL_DIR}/bin/rust-analyzer-proc-macro-srv"
+    fi
+
+    if [[ -n "${proc_macro_srv}" ]]; then
+        log_info "rust-analyzer-proc-macro-srv installed: ${proc_macro_srv}"
+    else
+        log_warn "rust-analyzer-proc-macro-srv not found in libexec/ or bin/"
+        log_warn "Proc-macro expansion in rust-analyzer will not work"
+        log_warn "Check build log: ${BUILD_DIR}/rust_install.log"
+    fi
+
+    # Verify rust-analyzer was installed
+    local rust_analyzer="${INSTALL_DIR}/bin/rust-analyzer"
+    if [[ -f "${rust_analyzer}" ]]; then
+        log_info "rust-analyzer installed: ${rust_analyzer}"
+    else
+        log_warn "rust-analyzer not found at: ${rust_analyzer}"
+        log_warn "IDE language server features will not be available"
+        log_warn "Check build log: ${BUILD_DIR}/rust_install.log"
+    fi
+
     log_info "Rust installed successfully!"
     return 0
 }
@@ -642,6 +599,28 @@ verify_installation() {
         else
             log_warn "rust-src not found in components file, but directory exists"
         fi
+    fi
+
+    # Verify rust-analyzer-proc-macro-srv
+    local proc_macro_srv=""
+    if [[ -f "${INSTALL_DIR}/libexec/rust-analyzer-proc-macro-srv" ]]; then
+        proc_macro_srv="${INSTALL_DIR}/libexec/rust-analyzer-proc-macro-srv"
+    elif [[ -f "${INSTALL_DIR}/bin/rust-analyzer-proc-macro-srv" ]]; then
+        proc_macro_srv="${INSTALL_DIR}/bin/rust-analyzer-proc-macro-srv"
+    fi
+
+    if [[ -n "${proc_macro_srv}" ]]; then
+        log_info "rust-analyzer-proc-macro-srv verified: ${proc_macro_srv}"
+    else
+        log_warn "rust-analyzer-proc-macro-srv not found — proc-macro expansion will be unavailable"
+    fi
+
+    # Verify rust-analyzer
+    if [[ -f "${INSTALL_DIR}/bin/rust-analyzer" ]]; then
+        log_info "rust-analyzer verified: ${INSTALL_DIR}/bin/rust-analyzer"
+        "${INSTALL_DIR}/bin/rust-analyzer" --version 2>/dev/null || true
+    else
+        log_warn "rust-analyzer not found at: ${INSTALL_DIR}/bin/rust-analyzer"
     fi
 
     log_info "Rust verification completed"

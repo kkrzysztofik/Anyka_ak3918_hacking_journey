@@ -1,0 +1,445 @@
+//! Anyka platform implementation.
+//!
+//! This module provides the actual platform implementation using
+//! the Anyka SDK for the AK3918 camera hardware.
+//!
+//! This implementation is only compiled when cross-compiling for ARM
+//! (i.e., when `use_stubs` is not defined).
+
+// Submodules
+pub mod audio_encoder;
+pub mod audio_input;
+pub mod context;
+pub mod imaging;
+pub mod lifecycle;
+pub mod network_info;
+pub mod ptz_control;
+mod video_encoder;
+mod video_input;
+
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
+
+use async_trait::async_trait;
+use parking_lot::RwLock;
+
+use crate::hal::anyka::ipc::AnykaIpc;
+use crate::hal::common::video::VideoHalTrait;
+
+use super::common::{
+    AudioEncoder, AudioInput, DeviceInfo, ImagingControl, NetworkInfo, PTZControl, Platform,
+    PlatformError, PlatformResult, Resolution, VideoEncoder, VideoInput,
+};
+
+// Types used by tests
+#[cfg(test)]
+use super::common::{VideoEncoderConfig, VideoEncoding};
+use video_encoder::AnykaVideoEncoder;
+use video_input::AnykaVideoInput;
+
+// Re-export helpers from submodules for internal use
+use context::{pipeline_ready_timeout_ms, pipeline_require_sub};
+
+use lifecycle::{
+    capture_stabilization_delay, execute_shutdown_with_timeout, shutdown_video_pipeline,
+};
+
+/// Anyka platform implementation using the actual SDK.
+///
+/// This implementation wraps the Anyka SDK FFI calls and provides
+/// a safe Rust interface to the hardware.
+pub struct AnykaPlatform {
+    initialized: AtomicBool,
+    device_info: DeviceInfo,
+    sensor_resolution: RwLock<Option<Resolution>>,
+    video_input: Arc<AnykaVideoInput>,
+    video_encoder: Arc<AnykaVideoEncoder>,
+    audio_input: Arc<AnykaAudioInput>,
+    audio_encoder: Arc<AnykaAudioEncoder>,
+    ptz_control: Option<Arc<dyn PTZControl>>,
+    imaging_control: Option<Arc<dyn ImagingControl>>,
+    network_info: Option<Arc<dyn NetworkInfo>>,
+}
+
+impl AnykaPlatform {
+    /// Create a new Anyka platform instance.
+    ///
+    /// Uses auto-detection for the ISP config path. See [`with_isp_config`](Self::with_isp_config)
+    /// to specify an explicit path.
+    pub fn new() -> PlatformResult<Self> {
+        Self::with_isp_config(None)
+    }
+
+    /// Create a new Anyka platform instance with an optional ISP config path.
+    ///
+    /// If `isp_config_path` is `Some`, that path is used directly for
+    /// `ak_vi_match_sensor()`. If `None`, the default search paths are used.
+    pub fn with_isp_config(isp_config_path: Option<PathBuf>) -> PlatformResult<Self> {
+        let device_info = DeviceInfo {
+            manufacturer: "Anyka".to_string(),
+            model: "AK3918".to_string(),
+            firmware_version: "1.0.0".to_string(),
+            serial_number: "AK3918-001".to_string(),
+            hardware_id: "ak3918-hw".to_string(),
+        };
+
+        let (video_input, video_encoder, audio_input, audio_encoder, imaging_control) = {
+            let shared_ipc = Arc::new(AnykaIpc::new().map_err(|e| {
+                PlatformError::InitializationFailed(format!(
+                    "AnykaIpc connection failed (is vendor-daemon running?): {}",
+                    e
+                ))
+            })?);
+
+            tracing::info!("AnykaPlatform: using shared AnykaIpc client for video/audio/imaging");
+
+            let video_ffi: Arc<dyn VideoHalTrait> = shared_ipc.clone();
+            let audio_ffi: Arc<dyn crate::hal::common::audio::AudioHalTrait> = shared_ipc.clone();
+            let imaging_ffi: Arc<dyn crate::hal::common::imaging::ImagingHalTrait> =
+                shared_ipc.clone();
+
+            let video_input = Arc::new(AnykaVideoInput::with_ffi(
+                video_ffi.clone(),
+                isp_config_path.clone(),
+            ));
+            let video_encoder = Arc::new(AnykaVideoEncoder::with_ipc(shared_ipc.clone()));
+            let audio_input = Arc::new(AnykaAudioInput::with_ffi(audio_ffi.clone()));
+            let audio_encoder = Arc::new(AnykaAudioEncoder::with_ffi(audio_ffi));
+            let imaging_control = Some(Arc::new(AnykaImagingControl::with_ffi_and_video_encoder(
+                imaging_ffi,
+                Arc::clone(&video_encoder),
+            )) as Arc<dyn ImagingControl>);
+
+            (
+                video_input,
+                video_encoder,
+                audio_input,
+                audio_encoder,
+                imaging_control,
+            )
+        };
+
+        let ptz_control: Option<Arc<dyn PTZControl>> = {
+            tracing::info!("Initializing PTZ (native Rust driver, /dev/ak-motor0, /dev/ak-motor1)");
+            let ptz = AnykaPTZControl::new();
+            match ptz.open() {
+                Ok(()) => {
+                    tracing::info!("PTZ device opened successfully");
+                    Some(Arc::new(ptz) as Arc<dyn PTZControl>)
+                }
+                Err(e) => {
+                    tracing::error!(
+                        "PTZ device failed to open, PTZ features will be unavailable: {}",
+                        e
+                    );
+                    None
+                }
+            }
+        };
+        let network_info = Some(Arc::new(AnykaNetworkInfo::new()) as Arc<dyn NetworkInfo>);
+
+        Ok(Self {
+            initialized: AtomicBool::new(false),
+            device_info,
+            sensor_resolution: RwLock::new(None),
+            video_input,
+            video_encoder,
+            audio_input,
+            audio_encoder,
+            ptz_control,
+            imaging_control,
+            network_info,
+        })
+    }
+}
+
+// Default implementation removed - use AnykaPlatform::new() for fallible initialization.
+// The Default trait should never panic per Rust best practices.
+
+#[async_trait]
+impl Platform for AnykaPlatform {
+    async fn get_device_info(&self) -> PlatformResult<DeviceInfo> {
+        // TODO(kkrzysztofik): Read actual device info from Anyka SDK
+        Ok(self.device_info.clone())
+    }
+
+    fn video_input(&self) -> Arc<dyn VideoInput> {
+        self.video_input.clone()
+    }
+
+    fn video_encoder(&self) -> Arc<dyn VideoEncoder> {
+        self.video_encoder.clone()
+    }
+
+    fn audio_input(&self) -> Arc<dyn AudioInput> {
+        self.audio_input.clone()
+    }
+
+    fn audio_encoder(&self) -> Arc<dyn AudioEncoder> {
+        self.audio_encoder.clone()
+    }
+
+    fn ptz_control(&self) -> Option<Arc<dyn PTZControl>> {
+        self.ptz_control.clone()
+    }
+
+    fn imaging_control(&self) -> Option<Arc<dyn ImagingControl>> {
+        self.imaging_control.clone()
+    }
+
+    fn network_info(&self) -> Option<Arc<dyn NetworkInfo>> {
+        self.network_info.clone()
+    }
+
+    fn is_initialized(&self) -> bool {
+        self.initialized.load(Ordering::SeqCst)
+    }
+
+    async fn initialize(&self) -> PlatformResult<()> {
+        // Step 1: Load ISP sensor configuration (must precede vi_open)
+        self.video_input.match_sensor()?;
+        tracing::info!("ISP sensor matched successfully");
+
+        // Step 2: Open video input device
+        self.video_input.open().await?;
+
+        // Step 2.5: Initialize VPSS. The Anyka ONVIF reference path performs
+        // ak_vpss_init() early in VI bring-up.
+        if let Err(e) = self.video_input.init_vpss() {
+            tracing::warn!(
+                "VPSS init failed during platform init; continuing without VPSS: {}",
+                e
+            );
+        }
+
+        // Step 3: Query and store sensor resolution
+        let sensor_res = self.video_input.get_sensor_resolution()?;
+        *self.sensor_resolution.write() = Some(sensor_res);
+        tracing::info!(
+            "Sensor resolution detected: {}x{}",
+            sensor_res.width,
+            sensor_res.height
+        );
+
+        // Step 4: Configure dual channels
+        if let Err(e) = self.video_input.set_channel_attr() {
+            tracing::error!("Failed to set channel attributes, rolling back: {}", e);
+            let _ = self.video_input.destroy_vpss();
+            let _ = self.video_input.close().await;
+            return Err(e);
+        }
+        let (main_layout, sub_layout) = self.video_input.channel_layout();
+        self.video_encoder
+            .sync_configurations_to_channel_layout(main_layout, sub_layout);
+
+        // Step 5: Start capture pipeline
+        if let Err(e) = self.video_input.capture_on() {
+            tracing::error!("Failed to start capture pipeline, rolling back: {}", e);
+            let _ = self.video_input.capture_off();
+            let _ = self.video_input.destroy_vpss();
+            let _ = self.video_input.close().await;
+            return Err(e);
+        }
+        // Allow the capture pipeline to stabilize before opening encoders.
+        tokio::time::sleep(capture_stabilization_delay()).await;
+        tracing::info!("Video input initialized: dual-channel config and capture started");
+
+        // Initialize dual video encoders (main 720p + sub 360p)
+        let encoder_configs = self.video_encoder.get_configurations().await?;
+        let mut initialized_encoder_tokens: Vec<String> = Vec::new();
+        for config in &encoder_configs {
+            if let Err(e) = self.video_encoder.init(config).await {
+                tracing::error!("Failed to initialize video encoder {}: {}", config.token, e);
+
+                for token in initialized_encoder_tokens.iter().rev() {
+                    if let Err(close_error) = self.video_encoder.close_encoder(token) {
+                        tracing::warn!(
+                            "Failed to rollback initialized encoder {}: {}",
+                            token,
+                            close_error
+                        );
+                    }
+                }
+
+                // Rollback: stop capture, close video input
+                let _ = self.video_input.capture_off();
+                let _ = self.video_input.destroy_vpss();
+                let _ = self.video_input.close().await;
+                return Err(PlatformError::InitializationFailed(format!(
+                    "Video encoder {} initialization failed: {}",
+                    config.token, e
+                )));
+            }
+            initialized_encoder_tokens.push(config.token.clone());
+        }
+        tracing::info!(
+            "Video encoders initialized: {} channels",
+            encoder_configs.len()
+        );
+
+        // Step 6: Start frame production: bind VI+encoder and spawn polling threads.
+        let vi_handle = match self.video_input.get_handle() {
+            Some(handle) => handle,
+            None => {
+                let _ = self.video_encoder.close_all_encoders();
+                let _ = self.video_input.capture_off();
+                let _ = self.video_input.destroy_vpss();
+                let _ = self.video_input.close().await;
+                return Err(PlatformError::InitializationFailed(
+                    "Video input handle missing after successful open".to_string(),
+                ));
+            }
+        };
+        let main_enc_candidate = {
+            let guard = self.video_encoder.main_handle.read();
+            guard.clone()
+        };
+        let main_enc = match main_enc_candidate {
+            Some(handle) => handle,
+            None => {
+                let _ = self.video_encoder.close_all_encoders();
+                let _ = self.video_input.capture_off();
+                let _ = self.video_input.destroy_vpss();
+                let _ = self.video_input.close().await;
+                return Err(PlatformError::InitializationFailed(
+                    "Main encoder handle missing after successful init".to_string(),
+                ));
+            }
+        };
+        let sub_enc = self.video_encoder.sub_handle.read().clone();
+        if let Err(e) = self
+            .video_encoder
+            .start_streaming(&vi_handle, &main_enc, sub_enc.as_ref())
+        {
+            tracing::error!("Failed to start streaming, rolling back: {}", e);
+            let _ = self.video_encoder.close_all_encoders();
+            let _ = self.video_input.capture_off();
+            let _ = self.video_input.destroy_vpss();
+            let _ = self.video_input.close().await;
+            return Err(PlatformError::InitializationFailed(format!(
+                "Video streaming startup failed: {}",
+                e
+            )));
+        }
+
+        // Step 7: Validate VI/VENC pipeline readiness.
+        let readiness_timeout_ms = pipeline_ready_timeout_ms();
+        let require_sub_pipeline = pipeline_require_sub();
+        if let Err(e) = self.video_encoder.wait_for_stream_readiness(
+            Duration::from_millis(readiness_timeout_ms),
+            require_sub_pipeline,
+        ) {
+            tracing::error!(
+                "VI/VENC pipeline failed readiness validation, rolling back: {}",
+                e
+            );
+            if let Err(rollback_error) =
+                shutdown_video_pipeline(&self.video_encoder, &self.video_input)
+            {
+                tracing::error!(
+                    "VI/VENC readiness rollback failed (unsafe): readiness_error='{}', rollback_error='{}'",
+                    e,
+                    rollback_error
+                );
+                return Err(rollback_error);
+            }
+            return Err(e);
+        }
+
+        // TODO(kkrzysztofik): Call remaining Anyka SDK initialization functions via FFI
+        // - ak_ai_open()
+        // - ak_aenc_open()
+        // PTZ is already opened in AnykaPlatform::new()
+        self.initialized.store(true, Ordering::SeqCst);
+        Ok(())
+    }
+
+    async fn shutdown(&self) -> PlatformResult<()> {
+        tracing::info!("Platform shutdown: starting PTZ stop...");
+        // Best-effort PTZ stop — the PTZHandle Drop will call ptz_close.
+        // We log errors but do not abort shutdown for a single subsystem failure.
+        if let Some(ref ptz) = self.ptz_control
+            && let Err(e) = ptz.stop().await
+        {
+            tracing::warn!(
+                "PTZ stop failed during shutdown (best-effort, continuing): {}",
+                e
+            );
+        }
+
+        // Run blocking SDK teardown in a dedicated OS thread with a hard deadline.
+        // This avoids async cancellation races around blocking vendor calls.
+
+        // Use the lifecycle module's timeout-aware shutdown helper
+        let result = execute_shutdown_with_timeout(
+            Arc::clone(&self.video_encoder),
+            Arc::clone(&self.video_input),
+        );
+
+        // TODO(kkrzysztofik): Call remaining Anyka SDK cleanup functions via FFI
+        // - ak_ai_close()
+        // - ak_aenc_close()
+        if result.is_ok() {
+            self.initialized.store(false, Ordering::SeqCst);
+            tracing::info!("Platform shutdown: complete");
+        } else {
+            tracing::error!("Platform shutdown ended with error: {:?}", result);
+        }
+        result
+    }
+
+    fn requires_hard_shutdown(&self) -> bool {
+        self.video_encoder.requires_hard_shutdown()
+    }
+
+    fn max_sensor_resolution(&self) -> PlatformResult<Resolution> {
+        self.sensor_resolution.read().ok_or_else(|| {
+            PlatformError::InitializationFailed(
+                "Sensor resolution not available - platform not initialized".to_string(),
+            )
+        })
+    }
+
+    fn register_frame_callback(
+        &self,
+        callback: Arc<dyn crate::platform::frame::FrameCallback>,
+    ) -> PlatformResult<()> {
+        let _id = self.video_encoder.register_frame_callback(callback);
+        tracing::info!("Frame callback registered (id={})", _id);
+        Ok(())
+    }
+
+    fn register_owned_frame_callback(
+        &self,
+        callback: Arc<dyn crate::platform::frame::OwnedFrameCallback>,
+    ) -> PlatformResult<()> {
+        let _id = self.video_encoder.register_owned_frame_callback(callback);
+        tracing::info!("Owned frame callback registered (id={})", _id);
+        Ok(())
+    }
+}
+
+// =============================================================================
+// PTZ Control Implementation
+// =============================================================================
+
+/// Anyka PTZ control — delegates to `AnykaPTZControl` which calls the FFI layer.
+///
+/// The PTZ stub has been replaced with a real hardware implementation
+/// (see `ptz_control.rs`) that controls the physical stepper motors via FFI.
+use ptz_control::AnykaPTZControl;
+
+// Re-export from submodules for internal use
+use audio_encoder::AnykaAudioEncoder;
+use audio_input::AnykaAudioInput;
+use imaging::AnykaImagingControl;
+use network_info::AnykaNetworkInfo;
+
+// =============================================================================
+// Unit Tests
+// =============================================================================
+
+#[cfg(test)]
+mod tests;

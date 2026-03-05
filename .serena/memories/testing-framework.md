@@ -14,11 +14,17 @@
 
 **⚠️ Cross-compile note**: Default target is ARM. Use `--target x86_64-unknown-linux-gnu` for host-side testing.
 
-```bash
-cd cross-compile/onvif-rust
+The Rust project is a **workspace** (onvif-rust + streaming-lib). Commands from `cross-compile/` run across both.
 
-# All tests (on host)
+```bash
+cd cross-compile
+
+# All workspace tests (on host)
 cargo test --target x86_64-unknown-linux-gnu
+
+# Specific workspace member
+cargo test --target x86_64-unknown-linux-gnu -p onvif-rust
+cargo test --target x86_64-unknown-linux-gnu -p streaming-lib
 
 # Unit tests only
 cargo test --target x86_64-unknown-linux-gnu --lib
@@ -33,7 +39,11 @@ cargo test --target x86_64-unknown-linux-gnu -- --nocapture
 cargo test --target x86_64-unknown-linux-gnu -- --ignored
 
 # Coverage (requires tarpaulin)
-cargo tarpaulin --target x86_64-unknown-linux-gnu --out Html --output-dir coverage
+cargo tarpaulin \
+  --workspace \
+  --target x86_64-unknown-linux-gnu \
+  --exclude-files "xiu/**" "patches/**" "anyka_reference/**" "onvif/**" \
+  --out Html
 ```
 
 ### Mocking with mockall
@@ -72,6 +82,33 @@ async fn test_brightness_setting() {
 fn test_device_get_info_success() { }
 fn test_device_get_info_unauthorized_returns_error() { }
 fn test_media_create_profile_invalid_name_returns_validation_error() { }
+```
+
+## Streaming-Lib Testing
+
+### Test Suites
+
+| Suite | File | Purpose |
+|-------|------|---------|
+| FLV Muxing | `tests/flv_muxing_test.rs` | HTTP-FLV container format |
+| RTP Streaming | `tests/rtp_streaming_test.rs` | RTP packetization/depacketization |
+| RTSP Session | `tests/rtsp_session_test.rs` | RTSP session lifecycle |
+| Stream Routing | `tests/stream_routing_test.rs` | Stream multiplexing |
+
+```bash
+cd cross-compile
+cargo test --target x86_64-unknown-linux-gnu -p streaming-lib
+```
+
+## Validation Suite
+
+**Location**: `validation/rust/`
+
+Standalone validation tool for H.264 playback and RTSP RFC compliance testing against live cameras.
+
+```bash
+cd validation/rust
+cargo test --target x86_64-unknown-linux-gnu
 ```
 
 ## WebUI Testing

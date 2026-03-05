@@ -93,6 +93,10 @@ uuid = ""
 # Configurable ONVIF scopes (comma-separated, leave empty for defaults)
 scopes = ""
 
+# ISP sensor config file path (leave empty for auto-detection)
+# Auto-detection searches: /mnt/anyka_hack/onvif/, /etc/jffs2/, /usr/local/
+isp_config_path = "/data/sensor/isp_gc1084.conf"
+
 # ============================================================================
 # HTTP Server Settings
 # ============================================================================
@@ -137,7 +141,7 @@ http_verbose = true
 
 # Enable per-frame streaming debug logs (AAC/H.264 timestamp + packetization internals)
 # Set true only when diagnosing frame timing/packetization issues.
-stream_frame_debug = false
+stream_frame_debug = true
 
 # Enable console logging
 console_enabled = true
@@ -171,6 +175,14 @@ snapshot_path = "/snapshot"
 
 # Maximum concurrent streams (1-8)
 max_streams = 4
+
+# HTTP-FLV server port (1-65535)
+httpflv_port = 8080
+
+# Enable live streaming via RTSP and HTTP-FLV (true/false)
+# When enabled, the platform's encoded frames are bridged to StreamsHub and
+# served at rtsp://<ip>:<rtsp_port>/main, /sub and http://<ip>:<httpflv_port>/live/main.flv, /sub.flv
+streaming_enabled = true
 
 # ============================================================================
 # PTZ Control Settings
@@ -258,16 +270,16 @@ enabled = true
 name = "Profile1"
 
 # Video width (160-3840)
-width = 1920
+width = 1280
 
 # Video height (120-2160)
-height = 1080
+height = 720
 
 # Frame rate (1-60)
-framerate = 25
+framerate = 15
 
 # Video bitrate in kbps (64-16384)
-bitrate = 4000
+bitrate = 2000
 
 # Video encoding (H264, H265, MJPEG)
 encoding = "H264"

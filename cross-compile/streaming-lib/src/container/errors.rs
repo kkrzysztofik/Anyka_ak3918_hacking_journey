@@ -1,7 +1,7 @@
 use {
-    crate::bytesio::bits_errors::BitError,
-    crate::bytesio::bytes_errors::{BytesReadError, BytesWriteError},
     crate::codec::errors::H264Error,
+    crate::io::bits_errors::BitError,
+    crate::io::bytes_errors::{BytesReadError, BytesWriteError},
     thiserror::Error,
 };
 
@@ -227,8 +227,8 @@ impl From<BitVecErrorValue> for BitVecError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::bytesio::bytes_errors::{BytesReadError, BytesReadErrorValue};
-    use crate::bytesio::bytes_errors::{BytesWriteError, BytesWriteErrorValue};
+    use crate::io::bytes_errors::{BytesReadError, BytesReadErrorValue};
+    use crate::io::bytes_errors::{BytesWriteError, BytesWriteErrorValue};
 
     // ========== TagParseErrorValue Display Tests ==========
 
@@ -529,7 +529,7 @@ mod tests {
 
     #[test]
     fn test_mpeg4_avc_hevc_error_from_bit_error() {
-        use crate::bytesio::bits_errors::{BitError, BitErrorValue};
+        use crate::io::bits_errors::{BitError, BitErrorValue};
         let bit_err = BitError {
             value: BitErrorValue::TooBig,
         };
@@ -539,7 +539,7 @@ mod tests {
 
     #[test]
     fn test_mpeg4_avc_hevc_error_from_h264_error() {
-        use crate::bytesio::bits_errors::{BitError, BitErrorValue};
+        use crate::io::bits_errors::{BitError, BitErrorValue};
         let h264_err = H264Error {
             value: crate::codec::errors::H264ErrorValue::BitError(BitError {
                 value: BitErrorValue::TooBig,
@@ -558,7 +558,7 @@ mod tests {
 
     #[test]
     fn test_mpeg_aac_error_from_bit_error() {
-        use crate::bytesio::bits_errors::{BitError, BitErrorValue};
+        use crate::io::bits_errors::{BitError, BitErrorValue};
         let bit_err = BitError {
             value: BitErrorValue::InvalidBitValue,
         };

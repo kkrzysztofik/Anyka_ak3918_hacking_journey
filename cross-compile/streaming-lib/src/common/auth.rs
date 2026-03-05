@@ -3,6 +3,7 @@ use std::sync::Arc;
 use base64::Engine;
 use md5;
 use serde_derive::Deserialize;
+use subtle::ConstantTimeEq;
 
 use crate::common::errors::{AuthError, AuthErrorValue};
 use crate::scanf;
@@ -204,16 +205,16 @@ impl Auth {
                 if self.check(stream_name, token.as_str(), is_pull) {
                     return Ok(());
                 }
-                auth_err_reason = format!("token is not correct: {}", token);
+                auth_err_reason = "token is not correct: [REDACTED]".to_string();
                 err = AuthErrorValue::TokenIsNotCorrect;
             }
 
-            log::error!(
-                "Auth error stream_name: {} auth type: {:?} pull: {} reason: {}",
-                stream_name,
-                self.auth_type,
-                is_pull,
-                auth_err_reason,
+            tracing::error!(
+                stream_name = %stream_name,
+                auth_type = ?self.auth_type,
+                is_pull = is_pull,
+                reason = %auth_err_reason,
+                "auth_error"
             );
             return Err(AuthError { value: err });
         }
@@ -234,11 +235,11 @@ impl Auth {
         };
 
         match self.algorithm {
-            AuthAlgorithm::Simple => password == auth_str,
+            AuthAlgorithm::Simple => password.as_bytes().ct_eq(auth_str.as_bytes()).into(),
             AuthAlgorithm::Md5 => {
                 let raw_data = format!("{}{}", self.key, stream_name);
                 let digest_str = format!("{:x}", md5::compute(raw_data));
-                auth_str == digest_str
+                auth_str.as_bytes().ct_eq(digest_str.as_bytes()).into()
             }
         }
     }

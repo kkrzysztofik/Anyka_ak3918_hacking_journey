@@ -1,5 +1,5 @@
 use super::errors::H264Error;
-use crate::bytesio::bits_reader::BitsReader;
+use crate::io::bits_reader::BitsReader;
 
 // ue(v) in 9.1 Parsing process for Exp-Golomb codes
 // ISO_IEC_14496-10-AVC-2012.pdf, page 227.
@@ -35,8 +35,8 @@ pub fn read_sev(bit_reader: &mut BitsReader) -> Result<i32, H264Error> {
 mod tests {
 
     use super::{read_sev, read_uev};
-    use crate::bytesio::bits_reader::BitsReader;
-    use crate::bytesio::bytes_reader::BytesReader;
+    use crate::io::bits_reader::BitsReader;
+    use crate::io::bytes_reader::BytesReader;
     use bytes::BytesMut;
 
     #[test]

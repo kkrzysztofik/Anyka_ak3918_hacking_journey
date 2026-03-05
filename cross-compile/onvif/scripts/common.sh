@@ -189,7 +189,6 @@ process_file_with_mode() {
 # =============================================================================
 
 show_summary() {
-    local total_files="$1"
     local changed_files="$2"
     local error_files="$3"
     local mode="$4"  # "check", "dry-run", or "process"

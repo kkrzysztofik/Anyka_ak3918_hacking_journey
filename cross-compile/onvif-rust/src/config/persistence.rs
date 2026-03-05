@@ -200,11 +200,11 @@ mod tests {
     use super::*;
     use tempfile::NamedTempFile;
 
-    use crate::config::ApplicationConfig;
+    use crate::config::AppConfig;
 
     #[tokio::test]
     async fn test_persistence_handle_request_save() {
-        let config = ApplicationConfig::new();
+        let config = AppConfig::default();
         let runtime = Arc::new(ConfigRuntime::new(config));
         let temp_file = NamedTempFile::new().unwrap();
         let storage = ConfigStorage::new(temp_file.path().to_str().unwrap());
@@ -219,8 +219,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_persistence_service_debounce() {
-        let mut config = ApplicationConfig::new();
-        config.set("test.key", "value1".to_string());
+        let mut config = AppConfig::default();
+        config.device.manufacturer = "DebounceTest".to_string();
         let runtime = Arc::new(ConfigRuntime::new(config));
         let temp_file = NamedTempFile::new().unwrap();
         let storage = ConfigStorage::new(temp_file.path().to_str().unwrap());
@@ -246,15 +246,15 @@ mod tests {
         let _ = shutdown_tx.send(());
         service_handle.await.unwrap();
 
-        // Verify file was saved
+        // Verify file was saved with our custom manufacturer
         let content = std::fs::read_to_string(temp_file.path()).unwrap();
-        assert!(content.contains("test"));
+        assert!(content.contains("DebounceTest"));
     }
 
     #[tokio::test]
     async fn test_persistence_service_shutdown_flushes_pending() {
-        let mut config = ApplicationConfig::new();
-        config.set("flush.test", "pending".to_string());
+        let mut config = AppConfig::default();
+        config.device.manufacturer = "FlushTest".to_string();
         let runtime = Arc::new(ConfigRuntime::new(config));
         let temp_file = NamedTempFile::new().unwrap();
         let storage = ConfigStorage::new(temp_file.path().to_str().unwrap());
@@ -276,6 +276,6 @@ mod tests {
 
         // Verify file was saved despite not waiting for debounce
         let content = std::fs::read_to_string(temp_file.path()).unwrap();
-        assert!(content.contains("flush"));
+        assert!(content.contains("FlushTest"));
     }
 }

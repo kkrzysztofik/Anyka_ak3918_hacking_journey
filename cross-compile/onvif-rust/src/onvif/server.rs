@@ -67,11 +67,11 @@ use super::dispatcher::{AuthContext, ServiceDispatcher};
 use super::error::OnvifError;
 use super::ws_security::{WsSecurityConfig, WsSecurityValidator};
 use crate::app::AppState;
+use crate::config::{PasswordManager, UserStorage};
 use crate::logging::{
     HttpLogConfig, HttpLoggingMiddleware, memory_check_middleware, static_asset_logging_middleware,
 };
 use crate::security::RateLimiter;
-use crate::users::{PasswordManager, UserStorage};
 use crate::utils::MemoryMonitor;
 
 /// Configuration for the ONVIF HTTP server.
@@ -346,10 +346,7 @@ impl OnvifServer {
         }
 
         // Extract auth configuration from ConfigRuntime
-        let auth_enabled = app_state
-            .config()
-            .get_bool("server.auth_enabled")
-            .unwrap_or(true);
+        let auth_enabled = app_state.config().read().server.auth_enabled;
 
         // Validate security configuration
         validate_security_config(&config, auth_enabled)?;
@@ -362,10 +359,7 @@ impl OnvifServer {
         let (shutdown_tx, _) = broadcast::channel(1);
 
         // Extract auth configuration from ConfigRuntime
-        let auth_enabled = app_state
-            .config()
-            .get_bool("server.auth_enabled")
-            .unwrap_or(true);
+        let auth_enabled = app_state.config().read().server.auth_enabled;
 
         // Configure WS-Security based on app config
         let ws_config = WsSecurityConfig {
@@ -443,21 +437,19 @@ impl OnvifServer {
 
         // Register Media Service
         tracing::debug!("Registering Media Service");
-        dispatcher.register_service("media", Arc::new(MediaService::new()));
+        let media_service = MediaService::with_storage(
+            Arc::clone(app_state.config()),
+            Arc::clone(app_state.profile_storage()),
+            app_state.platform().map(Arc::clone),
+        );
+        dispatcher.register_service("media", Arc::new(media_service));
 
         // Register PTZ Service
         tracing::debug!("Registering PTZ Service");
         let ptz_service = if let Some(platform) = app_state.platform() {
-            PTZService::with_platform(
-                Arc::clone(app_state.ptz_state()),
-                Arc::clone(app_state.config()),
-                Arc::clone(platform),
-            )
+            PTZService::with_platform(Arc::clone(app_state.ptz_state()), Arc::clone(platform))
         } else {
-            PTZService::new(
-                Arc::clone(app_state.ptz_state()),
-                Arc::clone(app_state.config()),
-            )
+            PTZService::new(Arc::clone(app_state.ptz_state()))
         };
         dispatcher.register_service("ptz", Arc::new(ptz_service));
 
@@ -974,9 +966,8 @@ mod tests {
     #[test]
     fn test_server_with_app_state_registers_all_services() {
         use crate::config::ConfigRuntime;
+        use crate::config::{PasswordManager, ProfileStorage, UserStorage};
         use crate::onvif::ptz::PTZStateManager;
-        use crate::users::password::PasswordManager;
-        use crate::users::storage::UserStorage;
         use crate::utils::MemoryMonitor;
 
         let app_state = AppState::builder()
@@ -986,6 +977,7 @@ mod tests {
             .config(Arc::new(ConfigRuntime::new(Default::default())))
             .memory_monitor(Arc::new(MemoryMonitor::new()))
             .rate_limiter(Arc::new(crate::security::RateLimiter::new(60)))
+            .profile_storage(Arc::new(ProfileStorage::new("/tmp/test_profiles.toml")))
             .build()
             .unwrap();
 
@@ -1228,9 +1220,8 @@ mod tests {
     #[test]
     fn test_server_with_app_state_tls_validation() {
         use crate::config::ConfigRuntime;
+        use crate::config::{PasswordManager, ProfileStorage, UserStorage};
         use crate::onvif::ptz::PTZStateManager;
-        use crate::users::password::PasswordManager;
-        use crate::users::storage::UserStorage;
         use crate::utils::MemoryMonitor;
 
         let app_state = AppState::builder()
@@ -1240,6 +1231,7 @@ mod tests {
             .config(Arc::new(ConfigRuntime::new(Default::default())))
             .memory_monitor(Arc::new(MemoryMonitor::new()))
             .rate_limiter(Arc::new(crate::security::RateLimiter::new(60)))
+            .profile_storage(Arc::new(ProfileStorage::new("/tmp/test_profiles.toml")))
             .build()
             .unwrap();
 

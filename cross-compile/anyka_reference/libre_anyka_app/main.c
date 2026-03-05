@@ -145,7 +145,7 @@ static struct ak_misc misc_ctrl = {0};
 
 
 volatile sig_atomic_t stop;					//stop if error occurs
-#define cfg "/etc/jffs2"
+#define cfg "/data/sensor"
 
 // Camera vars
 void *vi_handle = NULL;						//vi operating handle
@@ -171,6 +171,13 @@ struct snapshot_t snapshot_ref = {
 	.jpeg = {{0},{0}} //image buffers
 };
 
+/**
+ * stop_capture - Gracefully shuts down all active RTSP streams and the HTTP server.
+ *
+ * Stops both MAIN and SUB RTSP channels, releases the RTSP subsystem, and
+ * terminates the HTTP snapshot server. Should be called before process exit
+ * or on receipt of a termination signal.
+ */
 void stop_capture(){
 	logi("stop_capture");
 	ak_rtsp_stop(VIDEO_CHN_MAIN);
@@ -180,13 +187,27 @@ void stop_capture(){
 	stop_server();
 }
 
+/**
+ * my_handler - POSIX signal handler for graceful shutdown.
+ *
+ * @s: Signal number received (e.g. SIGINT from Ctrl-C).
+ *
+ * Sets the global `stop` flag and calls stop_capture() to wind down all
+ * capture and streaming resources before the process exits.
+ */
 void my_handler(int s){
    printf("Caught signal %d - Exiting... \n",s);
    stop=1;
    stop_capture();
    //exit(1);
 }
-//return: 0 success, -1 failed
+/**
+ * check_sd - Verifies that an SD card is inserted and mounted.
+ *
+ * Queries the Anyka SD card driver for insertion and mount status.
+ *
+ * Returns: 0 if the SD card is present and mounted, -1 otherwise.
+ */
 static int check_sd(){
 	int ret=-1;
 	if(SD_STATUS_CARD_INSERT & ak_sd_check_insert_status()){  //check sd card insert or not
@@ -204,6 +225,17 @@ static int check_sd(){
 	return 0;
 }
 
+/**
+ * venc_open_file - Opens a timestamped output file for encoded video or JPEG data.
+ *
+ * @enc_type: Encoder group type (< ENCODE_PICTURE for H.264 stream, >= for JPEG).
+ *
+ * Constructs a filename under SAVE_PATH using the current local date/time and
+ * the encoder type index. H.264 files use the ".str" suffix; JPEG files use
+ * ".jpg" with an incrementing counter.
+ *
+ * Returns: A FILE pointer opened in append mode, or NULL on failure.
+ */
 static void *venc_open_file(int enc_type)
 {
 	char file[128] = {0};
@@ -238,6 +270,16 @@ static void *venc_open_file(int enc_type)
 	return fp;
 }
 
+/**
+ * venc_save_data - Writes a block of encoded data to a file, retrying until complete.
+ *
+ * @filp: Destination FILE pointer (may be NULL, in which case this is a no-op).
+ * @data: Pointer to the encoded data buffer.
+ * @len:  Number of bytes to write.
+ *
+ * Uses a loop to guarantee that all @len bytes are written even if fwrite()
+ * returns a short count (e.g. due to a full kernel buffer).
+ */
 static void venc_save_data(FILE *filp, unsigned char *data, int len)
 {
 	int ret = len;
@@ -249,6 +291,21 @@ static void venc_save_data(FILE *filp, unsigned char *data, int len)
 	}
 }
 
+/**
+ * venc_demo_open_encoder - Opens and configures a video encoder for one of four roles.
+ *
+ * @index: Encoder slot index:
+ *           0 - Main channel H.264 for SD card recording (CBR 2000 kbps, sensor fps).
+ *           1 - Main channel H.264 for network streaming (CBR 2000 kbps, 10 fps).
+ *           2 - Sub channel H.264 for network streaming (CBR 300 kbps, 10 fps).
+ *           3 - Sub channel MJPEG for JPEG snapshot capture (CBR 500 kbps, 10 fps).
+ *
+ * All encoders use QP range [20, 51], PROFILE_MAIN, and CBR bitrate control.
+ * Main-channel encoders operate at the global w_main x h_main resolution;
+ * sub-channel encoders use snapshot_ref.res_w x snapshot_ref.res_h.
+ *
+ * Returns: An opaque encoder handle on success, or NULL on failure or invalid index.
+ */
 static void *venc_demo_open_encoder(int index)
 {
 	struct encode_param param = {0};
@@ -318,6 +375,15 @@ static void *venc_demo_open_encoder(int index)
 	return ak_venc_open(&param);
 }
 
+/**
+ * venc_stop_stream - Joins the encoder thread and releases all resources for a stream group.
+ *
+ * @grp: Encoder group (encode_group_type) to stop.
+ *
+ * Waits for the associated ak_venc thread to finish, cancels the stream
+ * request, and closes the encoder handle. Safe to call when no thread is
+ * running (detects NULL thread id and returns immediately).
+ */
 static void venc_stop_stream(enum encode_group_type grp)
 {
 	struct video_handle *enc = &ak_venc[grp];
@@ -334,6 +400,22 @@ static void venc_stop_stream(enum encode_group_type grp)
 	enc->venc_handle = NULL;
 }
 
+/**
+ * venc_save_stream_thread - Thread function that saves motion-triggered H.264 frames to disk.
+ *
+ * @arg: Pointer to the struct video_handle for the encoder group to drain.
+ *
+ * Blocks idle (sleeping 10 ms at a time) while md_record_frames == 0.
+ * When the motion detection logic sets md_record_frames > 0, opens a new
+ * timestamped file and drains up to md_max_frames encoded frames into it,
+ * decrementing md_record_frames each iteration. After the file is closed
+ * the loop repeats, waiting for the next trigger.
+ *
+ * Exits when the global `stop` flag is set, then calls venc_stop_stream()
+ * to release encoder resources before the thread terminates.
+ *
+ * Returns: Always NULL.
+ */
 static void *venc_save_stream_thread(void *arg)
 {
 	long int tid = ak_thread_get_tid();
@@ -394,6 +476,17 @@ static void *venc_save_stream_thread(void *arg)
 	return NULL;
 }
 
+/**
+ * venc_start_stream - Opens an encoder and spawns the stream-saving thread for a group.
+ *
+ * @grp: Encoder group (encode_group_type) to start.
+ *
+ * Initialises the encoder handle via venc_demo_open_encoder(), requests a
+ * stream from the global vi_handle, records the group type, and creates a
+ * venc_save_stream_thread with a 100 KB stack at priority 90.
+ *
+ * Returns: 0 on success, -1 if the encoder open or stream request fails.
+ */
 static int venc_start_stream(enum encode_group_type grp)
 {
 	struct video_handle *handle = &ak_venc[grp];
@@ -422,7 +515,22 @@ static int venc_start_stream(enum encode_group_type grp)
 	return 0;
 }
 
-//motion detection
+/**
+ * md_demo - Queries the VPSS motion-detection engine and applies threshold judgement.
+ *
+ * @vi_handle: Opened VI handle passed to the VPSS motion-detection API.
+ * @judge:     Threshold parameters: level_threshold (per-block activity level, [0,65535])
+ *             and blocks_threshold (minimum number of active blocks to declare motion).
+ *
+ * Iterates over the 16x32 block grid returned by ak_vpss_md_get_stat().
+ * A block is considered active when its stat value exceeds level_threshold.
+ * If the total count of active blocks exceeds blocks_threshold, motion is
+ * declared.
+ *
+ * Returns: JUDGE_RESULT_MD if motion is detected,
+ *          JUDGE_RESULT_NO_MD if no motion,
+ *          JUDGE_RESULT_ERR if the VPSS stat query failed.
+ */
 static int md_demo(const void *vi_handle, const struct md_judge_param *judge)
 {
 	struct vpss_md_info md;
@@ -451,6 +559,28 @@ static int md_demo(const void *vi_handle, const struct md_judge_param *judge)
 	return ret;
 }
 
+/**
+ * capture_init - Initialises the video input pipeline for capture.
+ *
+ * Configures dual-channel (MAIN + SUB) video parameters based on the
+ * resolution stored in snapshot_ref, then performs the following steps:
+ *   1. Matches the image sensor ISP configuration from /data/sensor.
+ *   2. Opens the VIDEO_DEV0 video input device.
+ *   3. Queries the sensor's maximum supported resolution and updates the crop
+ *      area accordingly.
+ *   4. Applies channel attributes (resolution, crop) to the driver.
+ *   5. Starts frame capture.
+ *   6. Optionally enables 180-degree flip/mirror if the -u flag was given.
+ *
+ * Resolution routing: resolutions below 640x480 are routed to the SUB
+ * channel; larger resolutions go to the MAIN channel.
+ *
+ * Note: max_width/max_height of the MAIN channel are deliberately set to the
+ * SUB-channel dimensions due to a quirk in the Anyka VI library — this
+ * controls the sub channel resolution, not the main.
+ *
+ * Returns: 1 on success, -1 on any initialisation failure.
+ */
 int capture_init(){
 	logi("image module init");
 
@@ -532,6 +662,17 @@ int capture_init(){
 	return 1;
 }
 
+/**
+ * camera_set_ir - Writes a GPIO value to an IR hardware control sysfs node.
+ *
+ * @value: Integer value to write (0 or 1).
+ * @name:  Path to the sysfs GPIO file (e.g. IRCUT_A_FILE_NAME or IRLED_FILE_NAME).
+ *
+ * Uses a shell command (echo <value> > <name>) to toggle the IR-cut filter
+ * or IR LED via the kernel's user-gpio interface.
+ *
+ * Returns: Always 0.
+ */
 static int camera_set_ir(int value, char *name)
 {
 	char cmd[STRING_LEN];
@@ -546,11 +687,24 @@ static int camera_set_ir(int value, char *name)
 
 
 /**
- * ak_misc_set_video_day_night: set video day or night mode, according to IR value
- * @vi_handle: opened vi handle
- * @ir_val: IR value, [0, 1]
- * @day_level: day control level, [1, 4]
- * return: 0 success, -1 failed
+ * ak_misc_set_video_day_night - Switches the camera between day and night ISP modes.
+ *
+ * @vi_handle: Opened VI handle; must not be NULL.
+ * @ir_val:    Raw IR sensor level: 1 = bright (day), 0 = dark (night).
+ * @day_level: Polarity configuration (DAY_LEVEL_HH/HL/LH/LL) that maps the
+ *             raw IR value to the desired IR-cut filter and LED state:
+ *               HH - ir_switch and day follow ir_val directly.
+ *               HL - ir_switch inverted, day follows ir_val.
+ *               LH - ir_switch inverted, day inverted.
+ *               LL - ir_switch follows ir_val, day inverted.
+ *
+ * In day mode: IR-cut filter is activated then the ISP is switched to
+ * VI_MODE_DAY, and finally the IR LED is turned off.
+ * In night mode: IR LED is turned on first, the ISP is switched to
+ * VI_MODE_NIGHT, then the IR-cut filter is deactivated.
+ * A 300 ms settle delay is inserted after the mode switch.
+ *
+ * Returns: AK_SUCCESS (0) on success, AK_FAILED on invalid handle or level.
  */
 int ak_misc_set_video_day_night(void *vi_handle, int ir_val, int day_level)
 {
@@ -603,6 +757,21 @@ int ak_misc_set_video_day_night(void *vi_handle, int ir_val, int day_level)
 }
 
 
+/**
+ * photosensitive_switch_th_ex - Background thread that polls the IR sensor and
+ *                                switches day/night mode automatically.
+ *
+ * @arg: Unused (required by ak_thread_create signature).
+ *
+ * Runs in a loop sampling ak_drv_ir_get_input_level() every 5 seconds.
+ * When the IR level changes from the previous sample, calls
+ * ak_misc_set_video_day_night() with the new value (inverted, as the
+ * hardware level is active-low) and the global irinvert polarity setting.
+ * The loop exits if misc_ctrl.cur_set_mode is no longer SET_AUTO_MODE or
+ * if misc_ctrl.thread_run is cleared.
+ *
+ * Returns: Always NULL.
+ */
 static void *photosensitive_switch_th_ex(void *arg)
 {
 	long int tid = ak_thread_get_tid();
@@ -636,6 +805,22 @@ static void *photosensitive_switch_th_ex(void *arg)
 	return NULL;
 }
 
+/**
+ * ak_misc_start_photosensitive_switch_ex - Starts the automatic IR / day-night switching service.
+ *
+ * @ps_mode:        Photosensitive mode (HARDWARE_PHOTOSENSITIVE or AUTO_PHOTOSENSITIVE).
+ * @day_night_mode: Initial mode (SET_AUTO_MODE keeps the polling loop active;
+ *                 any other value causes photosensitive_switch_th_ex to exit immediately).
+ *
+ * Idempotent: returns AK_SUCCESS without spawning a second thread if the
+ * service is already running (ircut_run_flag is set).
+ * Retrieves the global VI handle, sets up misc_ctrl state, and creates a
+ * detached thread (photosensitive_switch_th_ex) with a 100 KB stack at
+ * default priority (-1).
+ *
+ * Returns: AK_SUCCESS on success or if already running, ak_thread_create()
+ *          error code on thread creation failure.
+ */
 int ak_misc_start_photosensitive_switch_ex(enum ak_photosensitive_mode ps_mode,
 							 enum day_night_switch_mode day_night_mode)
 {
@@ -663,12 +848,33 @@ int ak_misc_start_photosensitive_switch_ex(enum ak_photosensitive_mode ps_mode,
 }
 
 
+/**
+ * init_other_platform - Initialises peripheral hardware and starts the IR auto-switching service.
+ *
+ * Initialises the IR driver (ak_drv_ir_init()) and then launches the
+ * photosensitive day/night switching thread in HARDWARE_PHOTOSENSITIVE mode
+ * with mode index 2 (maps to SET_AUTO_MODE in the day_night_switch_mode enum).
+ * Called after RTSP initialisation succeeds.
+ */
 static void init_other_platform(void){
 	ak_drv_ir_init();
 	//start photosensitive ircut detect service
 	ak_misc_start_photosensitive_switch_ex(HARDWARE_PHOTOSENSITIVE, 2);
 }
 
+/**
+ * run_rtsp_stuff - Configures and starts the dual-channel RTSP streaming service.
+ *
+ * Populates an rtsp_param structure for two channels:
+ *   Channel 0 (vs0): MAIN channel at w_main x h_main, DEFAULT_FPS,
+ *                    DEFAULT_MAIN_KBPS (2000 kbps), H.264 CBR.
+ *   Channel 1 (vs1): SUB channel at w_sub x h_sub, DEFAULT_FPS,
+ *                    DEFAULT_SUB_KBPS (200 kbps), H.264 CBR.
+ *
+ * Both channels share the global vi_handle. On successful ak_rtsp_init(),
+ * both RTSP streams are started and init_other_platform() is called to
+ * bring up the IR sensor service. Init failure is logged but non-fatal.
+ */
 void run_rtsp_stuff(){
 	struct rtsp_param param = {{{0}}};
 
@@ -720,6 +926,27 @@ void run_rtsp_stuff(){
 }
 
 
+/**
+ * capture_loop - Main capture and motion-detection loop; runs until the `stop` flag is set.
+ *
+ * Opens a dedicated MJPEG encoder (index 3) and requests a JPEG stream for
+ * continuous snapshot capture. If motion recording is enabled (-m flag) and
+ * an SD card is available, also starts the H.264 stream-saving thread.
+ *
+ * Per-iteration behaviour:
+ *   - Motion detection: every 3rd iteration (skip_md counter) the 16x32 VPSS
+ *     block map is evaluated against level_threshold=5000, blocks_threshold=12.
+ *     Two consecutive positive detections are required to trigger recording
+ *     (avoids false positives). Once triggered, md_record_frames is set to
+ *     fps * motion_record_sec frames.
+ *   - JPEG snapshot: ak_venc_get_stream() is called on the JPEG stream; on
+ *     success the double-buffer index is swapped so the HTTP server always
+ *     reads the most recent completed frame.
+ *   - A 100 ms sleep throttles CPU usage between iterations.
+ *
+ * On exit, cancels the JPEG stream, closes the JPEG encoder, and stops the
+ * VI capture pipeline.
+ */
 void capture_loop(){
 
 	//struct video_input_frame frame;
@@ -782,6 +1009,11 @@ void capture_loop(){
 	ak_vi_capture_off(vi_handle);
 	ak_vi_close(vi_handle);
 }
+/**
+ * help_message - Prints usage instructions to stderr.
+ *
+ * @argv: The program argv array; argv[0] is used as the program name.
+ */
 void help_message(char* argv[]){
         fprintf(stderr, "Usage: %s -w <width> -h <height>\n", argv[0]);
         fprintf(stderr, "Example: %s -w 1280 -h 720\n", argv[0]);
@@ -791,6 +1023,21 @@ void help_message(char* argv[]){
 		fprintf(stderr, "to inver IR and day/night: %s -i <value 1-4>\n", argv[0]);
 }
 
+/**
+ * parse_args - Parses command-line arguments and applies them to global configuration.
+ *
+ * @argc: Argument count from main().
+ * @argv: Argument vector from main().
+ *
+ * Supported options:
+ *   -w <width>   Set capture width (stored in snapshot_ref.res_w).
+ *   -h <height>  Set capture height (stored in snapshot_ref.res_h).
+ *   -m <secs>    Enable motion-triggered recording for <secs> seconds per event.
+ *   -u           Enable 180-degree flip/mirror (upside-down mode).
+ *   -i <1-4>     IR invert polarity value (clamped to [1, 4]) for day/night logic.
+ *
+ * Returns: 1 on success, -1 on unrecognised or malformed option.
+ */
 int parse_args(int argc, char* argv[]){
 
     for (;;) {

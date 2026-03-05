@@ -888,7 +888,9 @@ pub fn result_ok(r: &TestResult) -> bool {
 pub fn critical_proto_failed(tests: &[TestResult]) -> bool {
     tests.iter().any(|t| {
         if let TestResult::Fail { name, .. } = t {
-            name == "describe_ok" || name == "play_ok" || name.starts_with("setup_stream_")
+            // Strip optional stream prefix (e.g. "main:describe_ok" → "describe_ok").
+            let base = name.rsplit(':').next().unwrap_or(name);
+            base == "describe_ok" || base == "play_ok" || base.starts_with("setup_stream_")
         } else {
             false
         }

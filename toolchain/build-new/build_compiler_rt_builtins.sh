@@ -1,129 +1,36 @@
 #!/bin/bash
 # Build compiler-rt builtins separately using target GCC cross-compiler
 # This is a second-stage build that runs after build_llvm.sh
-# Supports: ARMv5TE (armv5te) and aarch64 architectures
+# Target: ARMv5TE for Anyka AK3918 cameras
 
 set -e  # Exit on error
 
-# Colors for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m' # No Color
-
-# Architecture selection (default: armv5te)
-ARCH="${ARCH:-armv5te}"
-
-# Validate architecture
-if [ "${ARCH}" != "armv5te" ] && [ "${ARCH}" != "aarch64" ]; then
-    echo "Error: ARCH must be 'armv5te' or 'aarch64'"
-    echo "Usage: ARCH=armv5te ./build_compiler_rt_builtins.sh  (default)"
-    echo "       ARCH=aarch64 ./build_compiler_rt_builtins.sh"
-    exit 1
-fi
-
-# Script directory
+# Script directory — must be set before sourcing common.sh
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-BUILD_DIR="${SCRIPT_DIR}"
+source "${SCRIPT_DIR}/common.sh"
 
-# Set target-specific variables based on architecture
-if [ "${ARCH}" = "aarch64" ]; then
-    INSTALL_DIR="${SCRIPT_DIR}/../aarch64-unknown-linux-gnu-toolchain"
-    TARGET_TRIPLE="aarch64-unknown-linux-gnu"
-    SYSROOT_SUBDIR="aarch64-unknown-linux-gnu"
-    LLVM_TARGET="AArch64"
-    CMAKE_TARGET_ARCH="aarch64"
-    # aarch64 toolchain installs to bin/ directly
-    CROSS_CC="${INSTALL_DIR}/bin/aarch64-unknown-linux-gnu-gcc"
-    CROSS_CXX="${INSTALL_DIR}/bin/aarch64-unknown-linux-gnu-g++"
-    CROSS_AR="${INSTALL_DIR}/bin/aarch64-unknown-linux-gnu-ar"
-    CROSS_RANLIB="${INSTALL_DIR}/bin/aarch64-unknown-linux-gnu-ranlib"
-else
-    INSTALL_DIR="${SCRIPT_DIR}/../arm-anykav200-crosstool-ng"
-    TARGET_TRIPLE="arm-unknown-linux-uclibcgnueabi"
-    SYSROOT_SUBDIR="arm-unknown-linux-uclibcgnueabi"
-    LLVM_TARGET="ARM"
-    CMAKE_TARGET_ARCH="arm"
-    # ARMv5TE toolchain installs to bin/
-    CROSS_CC="${INSTALL_DIR}/bin/arm-unknown-linux-uclibcgnueabi-gcc"
-    CROSS_CXX="${INSTALL_DIR}/bin/arm-unknown-linux-uclibcgnueabi-g++"
-    CROSS_AR="${INSTALL_DIR}/bin/arm-unknown-linux-uclibcgnueabi-ar"
-    CROSS_RANLIB="${INSTALL_DIR}/bin/arm-unknown-linux-uclibcgnueabi-ranlib"
-fi
-
-LLVM_VERSION="21.1.8"
-LLVM_SRC_DIR="${BUILD_DIR}/llvm-${LLVM_VERSION}"
-COMPILER_RT_SRC_DIR="${LLVM_SRC_DIR}/compiler-rt"
-COMPILER_RT_BUILD_DIR="${BUILD_DIR}/.build/compiler-rt-${LLVM_VERSION}-${ARCH}"
-SYSROOT="${INSTALL_DIR}/${SYSROOT_SUBDIR}/sysroot"
+COMPILER_RT_SRC_DIR="${LLVM_SRC_DIR}/compiler-rt/lib/builtins"
+COMPILER_RT_BUILD_DIR="${BUILD_DIR}/.build/compiler-rt-${LLVM_VERSION}-arm"
 
 # Global variable to store actual builtins library location
 ACTUAL_BUILTINS_LIB=""
 
-# Logging functions
-log_info() {
-    local message="$1"
-    echo -e "${GREEN}[INFO]${NC} ${message}"
-    return 0
-}
-
-log_warn() {
-    local message="$1"
-    echo -e "${YELLOW}[WARN]${NC} ${message}"
-    return 0
-}
-
-log_error() {
-    local message="$1"
-    echo -e "${RED}[ERROR]${NC} ${message}" >&2
-    return 0
-}
-
 # Check dependencies
 check_dependencies() {
     log_info "Checking build dependencies..."
-
-    local deps=("cmake" "ninja" "python3")
-
-    local missing=()
-    for dep in "${deps[@]}"; do
-        if ! command -v "${dep}" &> /dev/null; then
-            missing+=("${dep}")
-        fi
-    done
-
-    if [[ ${#missing[@]} -ne 0 ]]; then
-        log_error "Missing dependencies: ${missing[*]}"
-        log_info "Install with: sudo apt-get install -y ${missing[*]}"
-        exit 1
-    fi
-
-    # Check for GCC toolchain
-    if [[ ! -f "${CROSS_CC}" ]]; then
-        log_error "GCC toolchain not found at: ${CROSS_CC}"
-        log_error "Please build the GCC toolchain first:"
-        log_error "  ARCH=${ARCH} ./build_toolchain.sh"
-        exit 1
-    fi
-
-    # Check for sysroot
+    check_deps cmake ninja python3
+    require_toolchain
     if [[ ! -d "${SYSROOT}" ]]; then
         log_error "Sysroot not found at: ${SYSROOT}"
-        log_error "Please build the GCC toolchain first:"
-        log_error "  ARCH=${ARCH} ./build_toolchain.sh"
+        log_error "Please build the GCC toolchain first: ./build_toolchain.sh"
         exit 1
     fi
-
-    # Check for LLVM source
     if [[ ! -d "${COMPILER_RT_SRC_DIR}" ]]; then
-        log_error "Compiler-rt source not found at: ${COMPILER_RT_SRC_DIR}"
-        log_error "Please build LLVM first (which downloads the source):"
-        log_error "  ARCH=${ARCH} ./build_llvm.sh"
+        log_error "Compiler-rt builtins source not found at: ${COMPILER_RT_SRC_DIR}"
+        log_error "Please build LLVM first (which downloads the source): ./build_llvm.sh"
         exit 1
     fi
-
     log_info "All dependencies satisfied"
-    return 0
 }
 
 # Configure compiler-rt build
@@ -141,35 +48,37 @@ configure_compiler_rt() {
     cd "${COMPILER_RT_BUILD_DIR}"
 
     log_info "Running CMake configuration..."
-    log_info "Target triple: ${TARGET_TRIPLE}"
+    log_info "Target triple: ${TARGET_TUPLE}"
     log_info "Sysroot: ${SYSROOT}"
     log_info "Install directory: ${INSTALL_DIR}"
     log_info "Using TARGET compiler (${CROSS_CC}) to build compiler-rt builtins"
-    log_info "Compiler-rt will be built for ${TARGET_TRIPLE}"
+    log_info "Compiler-rt will be built for ${TARGET_TUPLE}"
 
     # Configure compiler-rt as a standalone build
     # We use the target GCC cross-compiler to build the builtins
     # This is a cross-compilation build, so we set CMAKE_SYSTEM_NAME and CMAKE_SYSTEM_PROCESSOR
+    #
+    # IMPORTANT: Use armv5te-* as the compiler target triple, NOT the generic arm-* triple.
+    # compiler-rt's builtin-config-ix.cmake splits the first token of the triple to get the
+    # arch name: "arm" → arm_SOURCES (includes DMB-based sync builtins, requires ARMv6+)
+    #             "armv5te" → armv5te_SOURCES = arm_min_SOURCES (no DMB sync ops, safe for ARMv5TE)
+    # GCC ignores CMAKE_C_COMPILER_TARGET for actual compilation (uses its built-in target),
+    # so this change only affects CMake's source-set selection and library naming.
     local cmake_target_flags
-    if [ "${ARCH}" = "aarch64" ]; then
-        cmake_target_flags=(
-            -DCMAKE_SYSTEM_NAME=Linux
-            -DCMAKE_SYSTEM_PROCESSOR=aarch64
-            -DCMAKE_C_COMPILER_TARGET="${TARGET_TRIPLE}"
-            -DCMAKE_CXX_COMPILER_TARGET="${TARGET_TRIPLE}"
-        )
-    else
-        cmake_target_flags=(
-            -DCMAKE_SYSTEM_NAME=Linux
-            -DCMAKE_SYSTEM_PROCESSOR=arm
-            -DCMAKE_C_COMPILER_TARGET="${TARGET_TRIPLE}"
-            -DCMAKE_CXX_COMPILER_TARGET="${TARGET_TRIPLE}"
-        )
-    fi
+    cmake_target_flags=(
+        -DCMAKE_SYSTEM_NAME=Linux
+        -DCMAKE_SYSTEM_PROCESSOR=arm
+        -DCMAKE_C_COMPILER_TARGET="armv5te-unknown-linux-uclibcgnueabi"
+        -DCMAKE_CXX_COMPILER_TARGET="armv5te-unknown-linux-uclibcgnueabi"
+    )
 
     # Configure with CMake
     # IMPORTANT: This is a cross-compilation build, so we use the target GCC
     # and set CMAKE_SYSROOT to the target sysroot
+    # Use the standalone lib/builtins CMakeLists.txt so we build ONLY the
+    # builtins library and nothing else — no sanitizers, no CRT, no unwinder.
+    # The full compiler-rt tree still builds sanitizer_common even with
+    # COMPILER_RT_BUILD_SANITIZERS=OFF because CRT depends on it.
     cmake "${COMPILER_RT_SRC_DIR}" \
         -G Ninja \
         -DCMAKE_BUILD_TYPE=Release \
@@ -184,21 +93,9 @@ configure_compiler_rt() {
         -DCMAKE_FIND_ROOT_PATH_MODE_LIBRARY=ONLY \
         -DCMAKE_FIND_ROOT_PATH_MODE_INCLUDE=ONLY \
         -DCMAKE_FIND_ROOT_PATH_MODE_PACKAGE=ONLY \
-        -DCOMPILER_RT_BUILD_BUILTINS=ON \
-        -DCOMPILER_RT_BUILD_SANITIZERS=OFF \
-        -DCOMPILER_RT_BUILD_XRAY=OFF \
-        -DCOMPILER_RT_BUILD_LIBFUZZER=OFF \
-        -DCOMPILER_RT_BUILD_PROFILE=OFF \
-        -DCOMPILER_RT_BUILD_MEMPROF=OFF \
-        -DCOMPILER_RT_BUILD_ORC=OFF \
         -DCOMPILER_RT_DEFAULT_TARGET_ONLY=ON \
-        -DCOMPILER_RT_USE_BUILTINS_LIBRARY=ON \
-        -DCOMPILER_RT_USE_LLVM_UNWINDER=OFF \
-        -DCOMPILER_RT_CAN_EXECUTE_TESTS=OFF \
-        -DCOMPILER_RT_INCLUDE_TESTS=OFF \
-        -DCOMPILER_RT_USE_LIBCXX=OFF \
-        -DCOMPILER_RT_BUILD_CRT=ON \
-        -DCOMPILER_RT_SYSROOT="${SYSROOT}" \
+        -DCOMPILER_RT_BAREMETAL_BUILD=OFF \
+        -DLLVM_CONFIG_PATH="${INSTALL_DIR}/bin/llvm-config" \
         -DCOMPILER_RT_OS_DIR="linux" \
         "${cmake_target_flags[@]}" || {
         log_error "CMake configuration failed"
@@ -218,8 +115,10 @@ build_compiler_rt() {
     local num_jobs=$(nproc)
     log_info "Building with ${num_jobs} parallel jobs..."
 
-    # Build with Ninja
-    if ! ninja -j "${num_jobs}"; then
+    # Build only the builtins target. The CMake source is the standalone
+    # lib/builtins directory so this is the only available target, but
+    # being explicit guards against future CMakeLists changes.
+    if ! ninja -j "${num_jobs}" builtins; then
         log_error "Compiler-rt build failed"
         exit 1
     fi
@@ -318,20 +217,35 @@ install_compiler_rt() {
         exit 1
     fi
 
+    # Create new-style per-target directory expected by LLVM 21+
+    # compiler-rt standalone builds with COMPILER_RT_DEFAULT_TARGET_ONLY=ON install to:
+    #   ${INSTALL_DIR}/lib/linux/libclang_rt.builtins-arm.a  (old-style)
+    # Clang 21 looks for:
+    #   ${resource_dir}/lib/<target-triple>/libclang_rt.builtins.a  (new-style)
+    # resource_dir = lib/clang/<major_version>
+    local llvm_major="${LLVM_VERSION%%.*}"
+    local new_target_dir="${INSTALL_DIR}/lib/clang/${llvm_major}/lib/armv5te-unknown-linux-gnueabi"
+    local old_style_lib
+    old_style_lib="$(find "${INSTALL_DIR}/lib" -name "libclang_rt.builtins*.a" \
+        -not -path "*/clang/*" 2>/dev/null | head -1)"
+    if [[ -n "${old_style_lib}" ]]; then
+        mkdir -p "${new_target_dir}"
+        cp "${old_style_lib}" "${new_target_dir}/libclang_rt.builtins.a"
+        log_info "Created per-target builtins at: ${new_target_dir}/libclang_rt.builtins.a"
+    else
+        log_warn "Could not find old-style builtins to copy — new-style path may be missing"
+    fi
+
     log_info "Compiler-rt installed successfully"
 }
 
 # Verify installation
 verify_installation() {
-    log_info "Verifying compiler-rt installation for ${ARCH}..."
+    log_info "Verifying compiler-rt installation for ARMv5TE..."
 
-    # Check for builtins library in expected location
-    local builtins_lib
-    if [ "${ARCH}" = "aarch64" ]; then
-        builtins_lib="${INSTALL_DIR}/lib/clang/${LLVM_VERSION}/lib/linux/libclang_rt.builtins-aarch64.a"
-    else
-        builtins_lib="${INSTALL_DIR}/lib/clang/${LLVM_VERSION}/lib/linux/libclang_rt.builtins-arm.a"
-    fi
+    # Check for builtins library in the new-style per-target location (LLVM 21+)
+    local llvm_major="${LLVM_VERSION%%.*}"
+    local builtins_lib="${INSTALL_DIR}/lib/clang/${llvm_major}/lib/armv5te-unknown-linux-gnueabi/libclang_rt.builtins.a"
 
     local found_lib=""
     if [[ -f "${builtins_lib}" ]]; then
@@ -364,10 +278,10 @@ verify_installation() {
 
 # Main execution
 main() {
-    log_info "Starting compiler-rt builtins build for ${ARCH}"
+    log_info "Starting compiler-rt builtins build for ARMv5TE"
     log_info "Build directory: ${BUILD_DIR}"
     log_info "Install directory: ${INSTALL_DIR}"
-    log_info "Target triple: ${TARGET_TRIPLE}"
+    log_info "Target triple: ${TARGET_TUPLE}"
     log_info "LLVM version: ${LLVM_VERSION}"
 
     check_dependencies
@@ -378,23 +292,17 @@ main() {
 
     log_info "=========================================="
     log_info "Compiler-rt builtins build completed successfully!"
-    log_info "Architecture: ${ARCH}"
     log_info "Installation location: ${INSTALL_DIR}"
     log_info "=========================================="
     log_info "Builtins library installed to:"
     if [[ -n "${ACTUAL_BUILTINS_LIB}" ]]; then
         log_info "  ${ACTUAL_BUILTINS_LIB}"
     else
-        # Fallback to expected location if verification didn't run
-        if [ "${ARCH}" = "aarch64" ]; then
-            log_info "  ${INSTALL_DIR}/lib/clang/${LLVM_VERSION}/lib/linux/libclang_rt.builtins-aarch64.a"
-        else
-            log_info "  ${INSTALL_DIR}/lib/clang/${LLVM_VERSION}/lib/linux/libclang_rt.builtins-arm.a"
-        fi
+        log_info "  ${INSTALL_DIR}/lib/clang/${LLVM_VERSION}/lib/linux/libclang_rt.builtins-armv5te.a"
     fi
     log_info ""
     log_info "You can now bootstrap Rust:"
-    log_info "  ARCH=${ARCH} ./bootstrap_rust.sh"
+    log_info "  ./bootstrap_rust.sh"
 }
 
 # Run main function

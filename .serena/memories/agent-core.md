@@ -119,9 +119,11 @@ Before marking any task as complete, verify:
 
 **⚠️ Cross-compile note**: Default target is ARM. Use `--target x86_64-unknown-linux-gnu` for host operations.
 
+**⚠️ Workspace**: Rust project is a workspace (onvif-rust + streaming-lib). Run from `cross-compile/`.
+
 ```bash
-# Rust (host-side testing/linting)
-cd cross-compile/onvif-rust
+# Rust (host-side testing/linting) — workspace-wide
+cd cross-compile
 cargo fmt && \
 cargo clippy --target x86_64-unknown-linux-gnu -- -D warnings && \
 cargo test --target x86_64-unknown-linux-gnu

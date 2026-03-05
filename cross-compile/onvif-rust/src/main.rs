@@ -13,23 +13,30 @@ use clap::Parser;
 use onvif_rust::app::{Application, DEFAULT_CONFIG_PATH};
 use onvif_rust::config::{ConfigRuntime, ConfigStorage};
 #[cfg(not(use_stubs))]
+use onvif_rust::hal::anyka::ipc;
+#[cfg(not(use_stubs))]
 use onvif_rust::platform::AnykaPlatform;
 use onvif_rust::platform::Platform;
 #[cfg(use_stubs)]
 use onvif_rust::platform::ValidationPlatform;
+use onvif_rust::streaming::helpers::{
+    combined_subscriber_count, fanout_frame, generate_av_sdp, send_frame,
+    send_httpflv_prior_frames, spawn_httpflv_server, spawn_rtsp_server, spawn_streamhub_event_loop,
+};
 use onvif_rust::validation::h264_playback::{H264PlaybackConfig, H264PlaybackMode};
 use onvif_rust::validation::httpflv_remux::ValidationHttpFlvRemuxer;
 use onvif_rust::validation::stream_auth::build_stream_auth_for_validation_mode;
-use portable_atomic::{AtomicU32, AtomicUsize, Ordering};
+use portable_atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
 use std::backtrace::Backtrace;
 use std::panic::PanicHookInfo;
 use std::sync::{Arc, Once};
+use streaming_lib::config::StreamingConfig;
 use streaming_lib::streamhub::define::{Information, InformationSender};
 use streaming_lib::streamhub::errors::StreamHubError;
 use streaming_lib::streamhub::statistics::StatisticsStream;
 use streaming_lib::{
-    DataSender, DefaultHttpFlvServer, DefaultRtspServer, FrameData, HttpFlvServer, MediaInfo,
-    RtspServer, StreamIdentifier, StreamsHub, SubscribeType, TStreamHandler, VideoCodecType,
+    DataSender, FrameData, MediaInfo, StreamIdentifier, StreamsHub, SubscribeType, TStreamHandler,
+    VideoCodecType,
 };
 use tokio::time::{Duration, timeout};
 
@@ -195,7 +202,98 @@ fn install_validation_panic_hook() {
     });
 }
 
+/// Install signal handlers for SIGSEGV, SIGBUS, and SIGABRT to log diagnostic
+/// information before the process dies. Rust's panic hook does NOT fire for these
+/// hardware/OS signals, so this is the only way to capture crash context.
+///
+/// The handler uses only async-signal-safe functions (raw `write()` syscall).
+fn install_crash_signal_handlers() {
+    unsafe extern "C" fn crash_handler(
+        sig: libc::c_int,
+        info: *mut libc::siginfo_t,
+        _ucontext: *mut libc::c_void,
+    ) {
+        // All output uses raw write() — the only safe I/O in a signal handler.
+        // No malloc, no println!, no tracing, no formatting with String.
+
+        fn write_str(fd: libc::c_int, s: &[u8]) {
+            unsafe {
+                libc::write(fd, s.as_ptr() as *const libc::c_void, s.len());
+            }
+        }
+
+        fn write_hex(fd: libc::c_int, val: usize) {
+            let mut buf = [b'0'; 18]; // "0x" + 16 hex digits
+            buf[0] = b'0';
+            buf[1] = b'x';
+            let hex = b"0123456789abcdef";
+            for i in 0..16 {
+                buf[17 - i] = hex[(val >> (i * 4)) & 0xf];
+            }
+            write_str(fd, &buf);
+        }
+
+        /// Write signal diagnostics to a file descriptor (async-signal-safe).
+        fn write_crash_info(fd: libc::c_int, sig: libc::c_int, info: *mut libc::siginfo_t) {
+            write_str(fd, b"\n=== FATAL SIGNAL ===\nsignal: ");
+            match sig {
+                libc::SIGSEGV => write_str(fd, b"SIGSEGV"),
+                libc::SIGBUS => write_str(fd, b"SIGBUS"),
+                libc::SIGABRT => write_str(fd, b"SIGABRT"),
+                _ => write_str(fd, b"unknown"),
+            }
+
+            if !info.is_null() {
+                write_str(fd, b"\nfault addr: ");
+                // SAFETY: info is non-null, checked above. si_addr() reads a union field.
+                write_hex(fd, unsafe { (*info).si_addr() } as usize);
+            }
+
+            write_str(fd, b"\npid: ");
+            write_hex(fd, unsafe { libc::getpid() } as usize);
+            write_str(fd, b"\ntid: ");
+            write_hex(fd, unsafe { libc::syscall(libc::SYS_gettid) } as usize);
+            write_str(fd, b"\n=== END FATAL ===\n");
+        }
+
+        // Write to stderr (fd 2)
+        write_crash_info(libc::STDERR_FILENO, sig, info);
+
+        // Also try to write to the log file (best-effort)
+        // SAFETY: open() with O_CREAT|O_APPEND is async-signal-safe per POSIX.
+        let log_fd = unsafe {
+            libc::open(
+                c"/mnt/logs/onvif_crash.log".as_ptr(),
+                libc::O_WRONLY | libc::O_CREAT | libc::O_APPEND,
+                0o644,
+            )
+        };
+        if log_fd >= 0 {
+            write_crash_info(log_fd, sig, info);
+            unsafe { libc::close(log_fd) };
+        }
+
+        // Re-raise the signal with default handler so we get a coredump
+        unsafe {
+            libc::signal(sig, libc::SIG_DFL);
+            libc::raise(sig);
+        }
+    }
+
+    for &sig in &[libc::SIGSEGV, libc::SIGBUS, libc::SIGABRT] {
+        unsafe {
+            let mut sa: libc::sigaction = std::mem::zeroed();
+            sa.sa_flags = libc::SA_SIGINFO | libc::SA_RESETHAND;
+            sa.sa_sigaction = crash_handler as *const () as usize;
+            libc::sigemptyset(&mut sa.sa_mask);
+            libc::sigaction(sig, &sa, std::ptr::null_mut());
+        }
+    }
+}
+
 fn main() -> Result<()> {
+    install_crash_signal_handlers();
+
     let startup_args = parse_arguments();
     let validation_mode = startup_args.validation_config.is_some();
 
@@ -206,12 +304,17 @@ fn main() -> Result<()> {
         worker_threads, max_blocking_threads
     );
 
+    let worker_name_seq = Arc::new(AtomicUsize::new(0));
+    let worker_name_seq_for_builder = Arc::clone(&worker_name_seq);
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(worker_threads)
         .max_blocking_threads(max_blocking_threads)
         .enable_io()
         .enable_time()
-        .thread_name("onvif-worker")
+        .thread_name_fn(move || {
+            let idx = worker_name_seq_for_builder.fetch_add(1, Ordering::Relaxed) % 100;
+            format!("onvif-w{:02}", idx)
+        })
         .build()
         .context("Failed to create tokio runtime")?;
 
@@ -246,6 +349,7 @@ async fn run_normal_mode(config_path: &str) -> Result<()> {
     if let Ok(app_config) = ConfigStorage::load_or_default(config_path) {
         let config_runtime = ConfigRuntime::new(app_config);
         let _ = configure_stream_frame_debug_logging(&config_runtime);
+        let _ = configure_ipc_debug_logging(&config_runtime);
     }
 
     // Start the application with ordered initialization
@@ -253,6 +357,12 @@ async fn run_normal_mode(config_path: &str) -> Result<()> {
         Ok(app) => app,
         Err(e) => {
             tracing::error!("Failed to start application: {}", e);
+            if e.to_string().contains("unsafe teardown required") {
+                tracing::error!(
+                    "Startup failed in unsafe teardown state; forcing hard process termination"
+                );
+                hard_terminate_process(1);
+            }
             return Err(e.into());
         }
     };
@@ -274,8 +384,16 @@ async fn run_normal_mode(config_path: &str) -> Result<()> {
         tracing::error!("Runtime error: {}", e);
     }
 
+    // Spawn shutdown watchdog — force exit if shutdown hangs beyond hard deadline.
+    // This prevents zombie processes when vendor-daemon IPC calls are stuck waiting
+    // for a blocked or crashed daemon.
+    let watchdog = spawn_shutdown_watchdog(Duration::from_secs(20));
+
     // Perform graceful shutdown
     let report = app.shutdown().await;
+
+    // Cancel watchdog — shutdown completed normally
+    drop(watchdog);
 
     // Log shutdown report
     match report.status {
@@ -293,111 +411,31 @@ async fn run_normal_mode(config_path: &str) -> Result<()> {
         }
     }
 
-    Ok(())
+    let hard_exit_required = report.hard_exit_required;
+    let exit_code = if hard_exit_required { 1 } else { 0 };
+    if hard_exit_required {
+        tracing::error!(
+            "Forcing hard process exit due to unsafe hardware teardown state (exit_code=1)"
+        );
+        hard_terminate_process(exit_code);
+    }
+    tracing::info!("Forcing process exit to terminate any lingering vendor threads");
+    // Brief pause to allow tracing subscriber to flush
+    std::thread::sleep(std::time::Duration::from_millis(50));
+    std::process::exit(exit_code);
 }
 
 fn configure_stream_frame_debug_logging(config: &ConfigRuntime) -> bool {
-    let enabled = config
-        .get_bool("logging.stream_frame_debug")
-        .unwrap_or(false);
+    let enabled = config.read().logging.stream_frame_debug;
     streaming_lib::set_stream_frame_debug_logging(enabled);
     enabled
 }
 
-fn fanout_validation_frame(
-    frame_tx_rtsp: &tokio::sync::mpsc::UnboundedSender<FrameData>,
-    frame_tx_httpflv: Option<&tokio::sync::mpsc::UnboundedSender<FrameData>>,
-    httpflv_remuxer: Option<&mut ValidationHttpFlvRemuxer>,
-    frame: FrameData,
-) {
-    if frame_tx_httpflv.is_none() {
-        let _ = frame_tx_rtsp.send(frame);
-        return;
-    }
-
-    let _ = frame_tx_rtsp.send(frame.clone());
-    if let (Some(tx_httpflv), Some(remuxer)) = (frame_tx_httpflv, httpflv_remuxer) {
-        match remuxer.remux_frame(frame) {
-            Ok(Some(remuxed_frame)) => {
-                let _ = tx_httpflv.send(remuxed_frame);
-            }
-            Ok(None) => {}
-            Err(err) => {
-                tracing::warn!(error = %err, "Failed to remux validation frame for HTTP-FLV");
-            }
-        }
-    }
-}
-
-fn read_subscriber_count(
-    stats_handle: &Arc<tokio::sync::Mutex<StatisticsStream>>,
-    cached_count: &Arc<AtomicUsize>,
-) -> usize {
-    if let Ok(stats) = stats_handle.try_lock() {
-        let count = stats.subscriber_count;
-        cached_count.store(count, Ordering::Relaxed);
-        count
-    } else {
-        cached_count.load(Ordering::Relaxed)
-    }
-}
-
-fn combined_subscriber_count(
-    rtsp_handle: &Arc<tokio::sync::Mutex<StatisticsStream>>,
-    httpflv_handle: &Arc<tokio::sync::Mutex<StatisticsStream>>,
-    rtsp_cached_count: &Arc<AtomicUsize>,
-    httpflv_cached_count: &Arc<AtomicUsize>,
-) -> usize {
-    let rtsp_count = read_subscriber_count(rtsp_handle, rtsp_cached_count);
-    let httpflv_count = read_subscriber_count(httpflv_handle, httpflv_cached_count);
-    rtsp_count.saturating_add(httpflv_count)
-}
-
-fn stream_hub_error(message: impl Into<String>) -> StreamHubError {
-    StreamHubError::from(message.into())
-}
-
-fn send_frame(
-    frame_sender: &tokio::sync::mpsc::UnboundedSender<FrameData>,
-    frame: FrameData,
-) -> Result<(), StreamHubError> {
-    frame_sender
-        .send(frame)
-        .map_err(|err| stream_hub_error(format!("failed to send frame to subscriber: {}", err)))
-}
-
-fn send_httpflv_prior_frames(
-    frame_sender: &tokio::sync::mpsc::UnboundedSender<FrameData>,
-    remuxer: &mut ValidationHttpFlvRemuxer,
-    timestamp: u32,
-    bootstrap_idr: Option<&[u8]>,
-) -> Result<(), StreamHubError> {
-    let video_sequence_header = remuxer.video_sequence_header(timestamp).map_err(|err| {
-        stream_hub_error(format!(
-            "failed to build HTTP-FLV video sequence header: {}",
-            err
-        ))
-    })?;
-    send_frame(frame_sender, video_sequence_header)?;
-
-    if let Some(audio_sequence_header) = remuxer.audio_sequence_header(timestamp) {
-        send_frame(frame_sender, audio_sequence_header)?;
-    }
-
-    if let Some(idr) = bootstrap_idr {
-        match remuxer.remux_video_frame(timestamp, BytesMut::from(idr)) {
-            Ok(Some(frame)) => send_frame(frame_sender, frame)?,
-            Ok(None) => {}
-            Err(err) => {
-                tracing::warn!(
-                    error = %err,
-                    "Skipping malformed bootstrap IDR for HTTP-FLV prior data"
-                );
-            }
-        }
-    }
-
-    Ok(())
+fn configure_ipc_debug_logging(config: &ConfigRuntime) -> bool {
+    let enabled = config.read().logging.ipc_debug;
+    #[cfg(not(use_stubs))]
+    ipc::set_ipc_debug_logging(enabled);
+    enabled
 }
 
 struct ValidationAvStreamHandler {
@@ -454,7 +492,7 @@ impl TStreamHandler for ValidationAvStreamHandler {
             };
             send_frame(&frame_sender, FrameData::MediaInfo { media_info })?;
 
-            if matches!(sub_type, SubscribeType::RtmpRemux2HttpFlv) {
+            if matches!(sub_type, SubscribeType::HttpFlvPull) {
                 let mut remuxer = ValidationHttpFlvRemuxer::new(
                     self.sps.clone(),
                     self.pps.clone(),
@@ -507,81 +545,10 @@ impl TStreamHandler for ValidationAvStreamHandler {
             &self.pps,
             self.audio_config.as_deref(),
             self.audio_sample_rate,
+            None,
         );
         let _ = sender.send(Information::Sdp { data: sdp });
     }
-}
-
-fn generate_av_sdp(
-    sps: &[u8],
-    pps: &[u8],
-    audio_config: Option<&[u8]>,
-    audio_sample_rate: u32,
-) -> String {
-    let profile_level_id = if sps.len() >= 4 {
-        format!("{:02x}{:02x}{:02x}", sps[1], sps[2], sps[3])
-    } else {
-        "42e01e".to_string()
-    };
-
-    let mut sdp = String::new();
-    sdp.push_str("v=0\r\n");
-    sdp.push_str("o=- 0 0 IN IP4 0.0.0.0\r\n");
-    sdp.push_str("s=H264 Validation Stream\r\n");
-    sdp.push_str("c=IN IP4 0.0.0.0\r\n");
-    sdp.push_str("t=0 0\r\n");
-    sdp.push_str("a=tool:onvif-validation\r\n");
-    sdp.push_str("a=control:*\r\n");
-    sdp.push_str("m=video 0 RTP/AVP 96\r\n");
-    sdp.push_str("a=rtpmap:96 H264/90000\r\n");
-    sdp.push_str(&format!(
-        "a=fmtp:96 packetization-mode=1; sprop-parameter-sets={},{}; profile-level-id={}\r\n",
-        base64_encode(sps),
-        base64_encode(pps),
-        profile_level_id
-    ));
-    sdp.push_str("a=control:trackID=0\r\n");
-    sdp.push_str("a=sendonly\r\n");
-
-    if let Some(config) = audio_config {
-        let channels = audio_channels_from_config(config);
-        let config_hex = audio_config_hex(config);
-
-        sdp.push_str("m=audio 0 RTP/AVP 97\r\n");
-        sdp.push_str(&format!(
-            "a=rtpmap:97 MPEG4-GENERIC/{}/{}\r\n",
-            audio_sample_rate, channels
-        ));
-        sdp.push_str(&format!(
-            "a=fmtp:97 profile-level-id=1;mode=AAC-hbr;sizelength=13;indexlength=3;indexdeltalength=3;config={}\r\n",
-            config_hex
-        ));
-        sdp.push_str("a=control:trackID=1\r\n");
-        sdp.push_str("a=sendonly\r\n");
-    }
-
-    sdp
-}
-
-fn audio_channels_from_config(audio_config: &[u8]) -> u32 {
-    if audio_config.len() >= 2 {
-        ((audio_config[1] >> 3) & 0x0F) as u32
-    } else {
-        2
-    }
-}
-
-fn audio_config_hex(audio_config: &[u8]) -> String {
-    audio_config
-        .iter()
-        .map(|b| format!("{:02X}", b))
-        .collect::<String>()
-}
-
-fn base64_encode(data: &[u8]) -> String {
-    use base64::Engine as _;
-    use base64::engine::general_purpose::STANDARD as BASE64;
-    BASE64.encode(data)
 }
 
 /// Publisher initialization result containing video and optional audio publishers (unwrapped)
@@ -697,7 +664,6 @@ async fn run_validation_mode(config: H264PlaybackConfig, config_path: &str) -> R
 
     let publisher_init_timeout_sec =
         parse_env_timeout("ONVIF_VALIDATION_PUBLISHER_INIT_TIMEOUT_SEC", 30);
-    configure_rtp_sampling();
     tracing::info!("Validation mode: HTTP-FLV and ONVIF application enabled");
     init_validation_logging(config_path);
     validate_source_files(&config)?;
@@ -767,6 +733,7 @@ async fn run_validation_mode(config: H264PlaybackConfig, config_path: &str) -> R
 
     let video_publisher = Arc::new(video_publisher);
     let audio_publisher = audio_publisher.map(Arc::new);
+    let platform = create_and_init_platform().await?;
 
     let pub_handle = video_publisher.start_publishing(frame_tx_for_publisher.clone());
     tracing::info!("MockVideoPublisher started emitting frames");
@@ -774,14 +741,29 @@ async fn run_validation_mode(config: H264PlaybackConfig, config_path: &str) -> R
     let audio_pub_handle = start_audio_publisher(&audio_publisher, frame_tx_for_publisher);
 
     let hub_event_sender = streamhub.get_hub_event_sender();
+    let rtp_sample_interval = std::env::var("ONVIF_RTSP_RTP_SAMPLE_INTERVAL")
+        .ok()
+        .and_then(|raw| raw.parse::<u32>().ok())
+        .unwrap_or(0);
+    if rtp_sample_interval > 0 {
+        tracing::info!(
+            "RTSP RTP sampling enabled for validation mode: interval={} packets",
+            rtp_sample_interval
+        );
+    } else {
+        tracing::info!("RTSP RTP sampling disabled for validation mode");
+    }
+    let lib_config = StreamingConfig::new()
+        .with_rtsp_listen_addr(format!("0.0.0.0:{}", config.rtsp_port))
+        .with_rtp_sample_interval(rtp_sample_interval);
     let rtsp_handle = spawn_rtsp_server(
         hub_event_sender.clone(),
         stream_auth.clone(),
         config.rtsp_port,
+        lib_config,
     );
     let flv_handle = spawn_httpflv_server(hub_event_sender, stream_auth, config.httpflv_port);
     let streamhub_handle = spawn_streamhub_event_loop(streamhub);
-    let platform = create_and_init_platform().await?;
 
     let app = start_onvif_application(config_path, platform.clone()).await;
     let playback_mode = init_playback_mode(config.clone(), platform.clone()).await?;
@@ -794,6 +776,9 @@ async fn run_validation_mode(config: H264PlaybackConfig, config_path: &str) -> R
     tracing::info!("Shutdown signal (Ctrl+C) received");
     tracing::info!("Initiating graceful shutdown...");
 
+    // Spawn shutdown watchdog for validation mode
+    let watchdog = spawn_shutdown_watchdog(Duration::from_secs(20));
+
     if let Some(application) = app {
         let report = application.shutdown().await;
         tracing::info!("ONVIF Application shutdown completed: {:?}", report.status);
@@ -801,9 +786,6 @@ async fn run_validation_mode(config: H264PlaybackConfig, config_path: &str) -> R
 
     playback_mode.stop().await?;
     tracing::info!("H264 playback stopped");
-
-    platform.shutdown().await?;
-    tracing::info!("Platform shutdown complete");
 
     video_publisher.stop_publishing().await;
     tracing::info!("MockVideoPublisher stopped");
@@ -821,9 +803,77 @@ async fn run_validation_mode(config: H264PlaybackConfig, config_path: &str) -> R
         audio_pub_handle,
         fanout_handle,
     );
+
+    platform.shutdown().await?;
+    tracing::info!("Platform shutdown complete");
+
+    // Cancel watchdog — shutdown completed normally
+    drop(watchdog);
+
     tracing::info!("All servers and tasks shutdown");
     tracing::info!("H.264 Validation mode stopped");
     Ok(())
+}
+
+/// Spawn a watchdog thread that force-terminates the process if shutdown exceeds the
+/// given deadline. Returns a guard — dropping the guard signals the watchdog to exit
+/// cleanly. If the guard is *not* dropped (e.g. the main thread is stuck), the
+/// watchdog forces process termination, terminating all threads immediately — even
+/// those stuck in uninterruptible kernel I/O.
+fn spawn_shutdown_watchdog(deadline: Duration) -> ShutdownWatchdogGuard {
+    let cancel = Arc::new(AtomicBool::new(false));
+    let cancel_clone = Arc::clone(&cancel);
+
+    let _ = std::thread::Builder::new()
+        .name("shutdown-watchdog".to_string())
+        .spawn(move || {
+            // Sleep in small increments so we can check the cancel flag
+            let start = std::time::Instant::now();
+            while start.elapsed() < deadline {
+                std::thread::sleep(Duration::from_millis(100));
+                if cancel_clone.load(Ordering::Relaxed) {
+                    return; // Shutdown completed normally
+                }
+            }
+            tracing::error!(
+                "SHUTDOWN WATCHDOG: forced exit after {:?} timeout",
+                deadline
+            );
+            hard_terminate_process(1);
+        });
+
+    ShutdownWatchdogGuard { cancel }
+}
+
+fn hard_terminate_process(exit_code: i32) -> ! {
+    #[cfg(target_os = "linux")]
+    unsafe {
+        let _ = libc::syscall(
+            libc::SYS_exit_group as libc::c_long,
+            exit_code as libc::c_int,
+        );
+        let _ = libc::kill(libc::getpid(), libc::SIGKILL);
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    {
+        std::process::exit(exit_code);
+    }
+
+    loop {
+        std::thread::sleep(Duration::from_secs(1));
+    }
+}
+
+/// Guard that cancels the shutdown watchdog when dropped.
+struct ShutdownWatchdogGuard {
+    cancel: Arc<AtomicBool>,
+}
+
+impl Drop for ShutdownWatchdogGuard {
+    fn drop(&mut self) {
+        self.cancel.store(true, Ordering::Relaxed);
+    }
 }
 
 fn parse_env_timeout(var: &str, default: u64) -> u64 {
@@ -834,26 +884,11 @@ fn parse_env_timeout(var: &str, default: u64) -> u64 {
         .unwrap_or(default)
 }
 
-fn configure_rtp_sampling() {
-    let interval = std::env::var("ONVIF_RTSP_RTP_SAMPLE_INTERVAL")
-        .ok()
-        .and_then(|raw| raw.parse::<u32>().ok())
-        .unwrap_or(0);
-    streaming_lib::rtsp::session::server_session::set_rtp_sample_interval(interval);
-    if interval > 0 {
-        tracing::info!(
-            "RTSP RTP sampling enabled for validation mode: interval={} packets",
-            interval
-        );
-    } else {
-        tracing::info!("RTSP RTP sampling disabled for validation mode");
-    }
-}
-
 fn init_validation_logging(config_path: &str) {
     if let Ok(app_config) = ConfigStorage::load_or_default(config_path) {
         let config_runtime = ConfigRuntime::new(app_config);
         let stream_frame_debug_enabled = configure_stream_frame_debug_logging(&config_runtime);
+        let ipc_debug_enabled = configure_ipc_debug_logging(&config_runtime);
         if let Err(e) = onvif_rust::logging::init_logging(&config_runtime) {
             eprintln!("Failed to initialize logging: {}", e);
         } else {
@@ -861,6 +896,7 @@ fn init_validation_logging(config_path: &str) {
                 enabled = stream_frame_debug_enabled,
                 "Per-frame streaming debug logging configured"
             );
+            tracing::info!(enabled = ipc_debug_enabled, "IPC debug logging configured");
             config_runtime.log_loaded_config();
         }
     }
@@ -917,9 +953,8 @@ fn create_stream_identifiers() -> (StreamIdentifier, StreamIdentifier) {
         StreamIdentifier::Rtsp {
             stream_path: stream_name.clone(),
         },
-        StreamIdentifier::Rtmp {
-            app_name,
-            stream_name,
+        StreamIdentifier::Rtsp {
+            stream_path: format!("{}/{}", app_name, stream_name),
         },
     )
 }
@@ -947,7 +982,7 @@ fn spawn_fanout_task(
             ValidationHttpFlvRemuxer::new(video_sps, video_pps, audio_config, audio_sample_rate)
         });
         while let Some(frame) = frame_rx.recv().await {
-            fanout_validation_frame(
+            fanout_frame(
                 &frame_tx_rtsp,
                 frame_tx_httpflv.as_ref(),
                 httpflv_remuxer.as_mut(),
@@ -1047,40 +1082,6 @@ fn start_audio_publisher(
         let handle = pub_.start_publishing(frame_tx);
         tracing::info!("MockAudioPublisher started emitting frames");
         handle
-    })
-}
-
-fn spawn_rtsp_server(
-    event_sender: streaming_lib::streamhub::define::StreamHubEventSender,
-    stream_auth: Option<streaming_lib::common::auth::Auth>,
-    port: u16,
-) -> tokio::task::JoinHandle<()> {
-    let addr = format!("0.0.0.0:{}", port);
-    tokio::spawn(async move {
-        let mut server = DefaultRtspServer::new(addr, event_sender, stream_auth);
-        if let Err(e) = server.run().await {
-            tracing::error!("RTSP server error: {}", e);
-        }
-    })
-}
-
-fn spawn_httpflv_server(
-    event_sender: streaming_lib::streamhub::define::StreamHubEventSender,
-    stream_auth: Option<streaming_lib::common::auth::Auth>,
-    port: u16,
-) -> tokio::task::JoinHandle<()> {
-    let addr = format!("0.0.0.0:{}", port);
-    tokio::spawn(async move {
-        let mut server = DefaultHttpFlvServer::new(addr, event_sender, stream_auth);
-        if let Err(e) = server.run().await {
-            tracing::error!("HTTP-FLV server error: {}", e);
-        }
-    })
-}
-
-fn spawn_streamhub_event_loop(mut streamhub: StreamsHub) -> tokio::task::JoinHandle<()> {
-    tokio::spawn(async move {
-        streamhub.run().await;
     })
 }
 
@@ -1299,42 +1300,6 @@ mod tests {
     }
 
     #[test]
-    fn test_generate_av_sdp_includes_audio() {
-        let sps = vec![0x67, 0x42, 0x00, 0x1e];
-        let pps = vec![0x68, 0xce, 0x06, 0xe2];
-        let audio_config = vec![0x12, 0x10];
-
-        let sdp = generate_av_sdp(&sps, &pps, Some(&audio_config), 48000);
-
-        assert!(sdp.contains("m=video 0 RTP/AVP 96"));
-        assert!(sdp.contains("a=control:trackID=0"));
-        assert!(sdp.contains("m=audio 0 RTP/AVP 97"));
-        assert!(sdp.contains("a=control:trackID=1"));
-    }
-
-    #[test]
-    fn test_generate_av_sdp_short_sps_uses_fallback_profile_level_id() {
-        let sdp = generate_av_sdp(&[0x67, 0x42, 0x00], &[0x68, 0xce, 0x06, 0xe2], None, 48_000);
-
-        assert!(sdp.contains("profile-level-id=42e01e"));
-    }
-
-    #[test]
-    fn test_audio_channels_from_config_two_bytes_extracts_channel_count() {
-        assert_eq!(audio_channels_from_config(&[0x12, 0x10]), 2);
-    }
-
-    #[test]
-    fn test_audio_channels_from_config_short_input_returns_stereo_default() {
-        assert_eq!(audio_channels_from_config(&[0x12]), 2);
-    }
-
-    #[test]
-    fn test_audio_config_hex_formats_uppercase_hex() {
-        assert_eq!(audio_config_hex(&[0x12, 0xab, 0x00]), "12AB00");
-    }
-
-    #[test]
     fn test_panic_message_str_payload_returns_payload() {
         let _guard = PANIC_HOOK_TEST_GUARD.lock().expect("panic hook guard");
         let captured = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
@@ -1448,10 +1413,7 @@ mod tests {
 
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
         handler
-            .send_prior_data(
-                DataSender::Frame { sender: tx },
-                SubscribeType::RtmpRemux2HttpFlv,
-            )
+            .send_prior_data(DataSender::Frame { sender: tx }, SubscribeType::HttpFlvPull)
             .await
             .expect("send_prior_data");
 
@@ -1491,10 +1453,7 @@ mod tests {
 
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
         handler
-            .send_prior_data(
-                DataSender::Frame { sender: tx },
-                SubscribeType::RtmpRemux2HttpFlv,
-            )
+            .send_prior_data(DataSender::Frame { sender: tx }, SubscribeType::HttpFlvPull)
             .await
             .expect("send_prior_data");
 
@@ -1509,191 +1468,6 @@ mod tests {
         }
 
         assert!(saw_video_sequence_header, "expected AVC sequence header");
-    }
-
-    #[tokio::test]
-    async fn test_combined_subscriber_count_sums_rtsp_and_httpflv() {
-        let rtsp_stats = Arc::new(tokio::sync::Mutex::new(StatisticsStream::default()));
-        let httpflv_stats = Arc::new(tokio::sync::Mutex::new(StatisticsStream::default()));
-        let rtsp_cached = Arc::new(AtomicUsize::new(0));
-        let httpflv_cached = Arc::new(AtomicUsize::new(0));
-
-        rtsp_stats.lock().await.subscriber_count = 2;
-        httpflv_stats.lock().await.subscriber_count = 3;
-
-        let count =
-            combined_subscriber_count(&rtsp_stats, &httpflv_stats, &rtsp_cached, &httpflv_cached);
-        assert_eq!(count, 5);
-    }
-
-    #[tokio::test]
-    async fn test_combined_subscriber_count_uses_cache_when_locks_contended() {
-        let rtsp_stats = Arc::new(tokio::sync::Mutex::new(StatisticsStream::default()));
-        let httpflv_stats = Arc::new(tokio::sync::Mutex::new(StatisticsStream::default()));
-        let rtsp_cached = Arc::new(AtomicUsize::new(4));
-        let httpflv_cached = Arc::new(AtomicUsize::new(5));
-
-        let _rtsp_guard = rtsp_stats.lock().await;
-        let _httpflv_guard = httpflv_stats.lock().await;
-        let count =
-            combined_subscriber_count(&rtsp_stats, &httpflv_stats, &rtsp_cached, &httpflv_cached);
-        assert_eq!(count, 9);
-    }
-
-    #[tokio::test]
-    async fn test_read_subscriber_count_lock_success_updates_cache() {
-        let stats = Arc::new(tokio::sync::Mutex::new(StatisticsStream::default()));
-        let cached = Arc::new(AtomicUsize::new(0));
-
-        stats.lock().await.subscriber_count = 7;
-
-        let count = read_subscriber_count(&stats, &cached);
-        assert_eq!(count, 7);
-        assert_eq!(cached.load(Ordering::Relaxed), 7);
-    }
-
-    #[tokio::test]
-    async fn test_read_subscriber_count_lock_contended_returns_cached_value() {
-        let stats = Arc::new(tokio::sync::Mutex::new(StatisticsStream::default()));
-        let cached = Arc::new(AtomicUsize::new(11));
-
-        let _guard = stats.lock().await;
-        let count = read_subscriber_count(&stats, &cached);
-
-        assert_eq!(count, 11);
-    }
-
-    #[test]
-    fn test_send_frame_closed_channel_returns_error() {
-        let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<FrameData>();
-        drop(rx);
-
-        let result = send_frame(
-            &tx,
-            FrameData::Video {
-                timestamp: 99,
-                data: BytesMut::from(&b"frame"[..]),
-            },
-        );
-
-        assert!(result.is_err());
-        let err = result.expect_err("send should fail when receiver is dropped");
-        assert!(
-            err.to_string()
-                .contains("failed to send frame to subscriber"),
-            "unexpected error: {err}"
-        );
-    }
-
-    #[tokio::test]
-    async fn test_send_httpflv_prior_frames_no_audio_no_bootstrap_emits_video_header_only() {
-        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<FrameData>();
-        let mut remuxer = ValidationHttpFlvRemuxer::new(
-            vec![0x67, 0x42, 0x00, 0x1e],
-            vec![0x68, 0xce, 0x06, 0xe2],
-            None,
-            48_000,
-        );
-
-        send_httpflv_prior_frames(&tx, &mut remuxer, 4321, None)
-            .expect("prior frame bootstrap should succeed");
-
-        let first = rx.recv().await.expect("first frame should be present");
-        match first {
-            FrameData::Video { timestamp, data } => {
-                assert_eq!(timestamp, 4321);
-                assert!(data.len() >= 2);
-                assert_eq!(data[1], 0);
-            }
-            _ => panic!("expected video sequence header"),
-        }
-        assert!(rx.try_recv().is_err(), "no additional frames expected");
-    }
-
-    #[tokio::test]
-    async fn test_send_httpflv_prior_frames_malformed_bootstrap_skips_idr_frame() {
-        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<FrameData>();
-        let mut remuxer = ValidationHttpFlvRemuxer::new(
-            vec![0x67, 0x42, 0x00, 0x1e],
-            vec![0x68, 0xce, 0x06, 0xe2],
-            None,
-            48_000,
-        );
-
-        send_httpflv_prior_frames(&tx, &mut remuxer, 4322, Some(&[0x00, 0x00, 0x00]))
-            .expect("malformed bootstrap should be ignored");
-
-        let first = rx.recv().await.expect("first frame should be present");
-        match first {
-            FrameData::Video { data, .. } => {
-                assert!(data.len() >= 2);
-                assert_eq!(data[1], 0);
-            }
-            _ => panic!("expected video sequence header"),
-        }
-        assert!(
-            rx.try_recv().is_err(),
-            "malformed bootstrap should not emit IDR"
-        );
-    }
-
-    #[tokio::test]
-    async fn test_fanout_validation_frame_rtsp_only_routes_without_httpflv() {
-        let (rtsp_tx, mut rtsp_rx) = tokio::sync::mpsc::unbounded_channel::<FrameData>();
-        let frame = FrameData::Video {
-            timestamp: 10,
-            data: BytesMut::from(&b"video"[..]),
-        };
-
-        fanout_validation_frame(&rtsp_tx, None, None, frame);
-        let received = rtsp_rx.recv().await.expect("rtsp frame");
-        assert!(matches!(received, FrameData::Video { timestamp: 10, .. }));
-    }
-
-    #[tokio::test]
-    async fn test_fanout_validation_frame_with_httpflv_routes_to_both() {
-        let (rtsp_tx, mut rtsp_rx) = tokio::sync::mpsc::unbounded_channel::<FrameData>();
-        let (http_tx, mut http_rx) = tokio::sync::mpsc::unbounded_channel::<FrameData>();
-        let mut remuxer = ValidationHttpFlvRemuxer::new(
-            vec![0x67, 0x42, 0x00, 0x1e],
-            vec![0x68, 0xce, 0x06, 0xe2],
-            None,
-            48_000,
-        );
-        let frame = FrameData::Video {
-            timestamp: 20,
-            data: BytesMut::from(
-                &[
-                    0x00, 0x00, 0x00, 0x01, 0x65, 0x88, 0x84, 0x21, 0xA0, 0x00, 0x00, 0x00, 0x01,
-                    0x06, 0xE5,
-                ][..],
-            ),
-        };
-
-        fanout_validation_frame(&rtsp_tx, Some(&http_tx), Some(&mut remuxer), frame);
-
-        let rtsp_frame = rtsp_rx.recv().await.expect("rtsp frame");
-        let http_frame = http_rx.recv().await.expect("httpflv frame");
-        assert!(matches!(rtsp_frame, FrameData::Video { timestamp: 20, .. }));
-        match http_frame {
-            FrameData::Video { timestamp, data } => {
-                assert_eq!(timestamp, 20);
-                assert_eq!(data[0], 0x17);
-                assert_eq!(data[1], 0x01);
-            }
-            _ => panic!("expected remuxed HTTP-FLV video frame"),
-        }
-    }
-
-    #[test]
-    fn test_generate_av_sdp_without_audio() {
-        let sps = vec![0x67, 0x42, 0x00, 0x1e];
-        let pps = vec![0x68, 0xce, 0x06, 0xe2];
-
-        let sdp = generate_av_sdp(&sps, &pps, None, 48000);
-
-        assert!(sdp.contains("m=video 0 RTP/AVP 96"));
-        assert!(!sdp.contains("m=audio 0 RTP/AVP 97"));
     }
 
     #[test]

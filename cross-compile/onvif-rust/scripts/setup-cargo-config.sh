@@ -32,6 +32,43 @@ else
     exit 1
 fi
 
+# Locate or create the clang-wrapper for ARMv5TE linking.
+# The wrapper translates the GCC triple (arm-unknown-linux-uclibcgnueabi) to a
+# valid LLVM triple (armv5te-unknown-linux-gnueabi), injects sysroot/crt/libgcc
+# paths, and filters any --target arg passed by rustc's pre-link-args.
+CLANG_WRAPPER_SRC="${REPO_ROOT}/toolchain/build-new/clang-wrapper.sh"
+if [[ -f "${CLANG_WRAPPER_SRC}" ]]; then
+    CLANG_WRAPPER="${CLANG_WRAPPER_SRC}"
+else
+    # Docker / stripped environment: generate a self-contained wrapper inside
+    # the toolchain's bin/ directory so INSTALL_DIR resolves via dirname/../
+    CLANG_WRAPPER="${TOOLCHAIN_BASE}/bin/clang-wrapper.sh"
+    cat > "${CLANG_WRAPPER}" << 'WRAPPER_EOF'
+#!/bin/bash
+INSTALL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/.."
+GCC_LIB="${INSTALL_DIR}/lib/gcc/arm-unknown-linux-uclibcgnueabi"
+GCC_VER="$(ls "${GCC_LIB}" 2>/dev/null | sort -V | tail -1)"
+filtered=()
+skip_next=false
+for arg in "$@"; do
+    if [[ "${skip_next}" == true ]]; then skip_next=false; continue; fi
+    if [[ "${arg}" == --target=* ]] || [[ "${arg}" == -target=* ]]; then continue; fi
+    if [[ "${arg}" == "--target" ]] || [[ "${arg}" == "-target" ]]; then skip_next=true; continue; fi
+    filtered+=("${arg}")
+done
+exec "${INSTALL_DIR}/bin/clang" \
+    --target=armv5te-unknown-linux-gnueabi \
+    --sysroot="${INSTALL_DIR}/arm-unknown-linux-uclibcgnueabi/sysroot" \
+    -B "${GCC_LIB}/${GCC_VER}" \
+    -L "${GCC_LIB}/${GCC_VER}" \
+    -march=armv5te \
+    -mfloat-abi=soft \
+    -mtune=arm926ej-s \
+    "${filtered[@]}"
+WRAPPER_EOF
+    chmod +x "${CLANG_WRAPPER}"
+fi
+
 # Create .cargo directory if it doesn't exist
 mkdir -p "${CARGO_CONFIG_DIR}"
 
@@ -43,30 +80,23 @@ target = "armv5te-unknown-linux-uclibceabi"
 # Use custom rustc for everything (now has host std library for build scripts)
 rustc = "${TOOLCHAIN_BASE}/bin/rustc"
 
-# Using new LLVM/Clang toolchain with proper ARMv5TE support
+# clang-wrapper.sh handles: --target triple translation, --sysroot, -B (crt
+# files), -L (libgcc), -march, -mfloat-abi, -mtune, and strips any --target
+# pre-link-arg injected by rustc so the invalid uclibcgnueabi triple cannot
+# reach clang. Only project-specific flags remain here.
 [target.armv5te-unknown-linux-uclibceabi]
-linker = "${TOOLCHAIN_BASE}/bin/clang"
+linker = "${CLANG_WRAPPER}"
 rustflags = [
-  "-C",
-  "link-arg=--target=arm-unknown-linux-uclibcgnueabi",
-  "-C",
-  "link-arg=--sysroot=${TOOLCHAIN_BASE}/arm-unknown-linux-uclibcgnueabi/sysroot",
   "-C",
   "link-arg=-fno-pie",
   "-C",
   "link-arg=-no-pie",
   "-C",
-  "link-arg=-L${TOOLCHAIN_BASE}/arm-unknown-linux-uclibcgnueabi/sysroot/lib",
-  "-C",
-  "link-arg=-L${TOOLCHAIN_BASE}/arm-unknown-linux-uclibcgnueabi/sysroot/usr/lib",
-  "-C",
-  "link-arg=-march=armv5te",
-  "-C",
-  "link-arg=-mfloat-abi=soft",
-  "-C",
-  "link-arg=-mtune=arm926ej-s",
-  "-C",
   "link-arg=-Wl,--dynamic-linker=/mnt/anyka_hack/lib/ld-uClibc.so.1",
+  "-C",
+  "link-arg=-Wl,--disable-new-dtags,-rpath,/mnt/anyka_hack/lib:/mnt/anyka_hack/onvif/lib",
+  "-C",
+  "link-arg=-Wl,--hash-style=both",
 ]
 
 [env]

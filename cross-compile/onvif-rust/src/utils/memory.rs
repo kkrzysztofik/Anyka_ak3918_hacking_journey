@@ -85,29 +85,27 @@ impl MemoryMonitor {
     }
 
     /// Load limits from application configuration (if available)
-    ///
-    /// Falls back to defaults if not configured
     pub fn from_config(config: &ConfigRuntime) -> Result<Self> {
-        let soft_mb = config
-            .get_int("memory.soft_limit_mb")
-            .ok()
-            .map(|v| v as usize);
-        let hard_mb = config
-            .get_int("memory.hard_limit_mb")
-            .ok()
-            .map(|v| v as usize);
+        let c = config.read();
+        let soft_mb = c.memory.soft_limit_mb as usize;
+        let hard_mb = c.memory.hard_limit_mb as usize;
 
-        let soft = soft_mb.unwrap_or(16) * 1024 * 1024;
-        let hard = hard_mb.unwrap_or(24) * 1024 * 1024;
+        let soft = if soft_mb > 0 {
+            soft_mb * 1024 * 1024
+        } else {
+            16 * 1024 * 1024
+        };
+        let hard = if hard_mb > 0 {
+            hard_mb * 1024 * 1024
+        } else {
+            24 * 1024 * 1024
+        };
 
         let limits = MemoryLimits::new(soft, hard)?;
         Ok(Self::with_limits(limits))
     }
 
     /// Check if allocation would exceed hard limit
-    ///
-    /// Returns error if request would exceed hard limit
-    /// Logs soft limit warning if approaching capacity
     pub fn check_available(&self, request_size: usize) -> Result<()> {
         let current = self.current_usage();
 
@@ -158,18 +156,6 @@ impl MemoryMonitor {
     }
 
     /// Start a background task that periodically logs memory usage.
-    ///
-    /// The task will log memory usage at the specified interval until
-    /// a shutdown signal is received.
-    ///
-    /// # Arguments
-    ///
-    /// * `interval` - How often to log memory usage (e.g., `Duration::from_secs(300)` for 5 minutes)
-    /// * `shutdown_rx` - Receiver for shutdown signals. The task will exit when a signal is received.
-    ///
-    /// # Returns
-    ///
-    /// A `JoinHandle` that can be used to await the task's completion.
     pub fn start_periodic_logging(
         self: Arc<Self>,
         interval: Duration,
@@ -207,8 +193,6 @@ impl Default for MemoryMonitor {
 // ============================================================================
 
 /// Information about a tracked allocation
-///
-/// Used for debugging memory usage patterns during development.
 #[cfg(feature = "memory-profiling")]
 #[derive(Debug, Clone)]
 pub struct AllocationInfo {
@@ -221,21 +205,6 @@ pub struct AllocationInfo {
 }
 
 /// Tracks memory allocations for profiling during development
-///
-/// This struct is only available when compiled with `--features memory-profiling`.
-/// It uses a `DashMap` for concurrent access from multiple threads.
-///
-/// # Example
-///
-/// ```ignore
-/// #[cfg(feature = "memory-profiling")]
-/// {
-///     let tracker = AllocationTracker::new();
-///     tracker.track_allocation(0x1000, 1024, file!(), line!());
-///     tracker.log_stats();
-///     tracker.track_deallocation(0x1000);
-/// }
-/// ```
 #[cfg(feature = "memory-profiling")]
 pub struct AllocationTracker {
     /// Map of allocation address to allocation info
@@ -256,18 +225,10 @@ impl AllocationTracker {
     }
 
     /// Track a new allocation
-    ///
-    /// # Arguments
-    ///
-    /// * `addr` - Memory address of the allocation
-    /// * `size` - Size of the allocation in bytes
-    /// * `file` - Source file where allocation originated (use `file!()`)
-    /// * `line` - Line number in source file (use `line!()`)
     pub fn track_allocation(&self, addr: usize, size: usize, file: &'static str, line: u32) {
         self.allocations
             .insert(addr, AllocationInfo { size, file, line });
 
-        // Update peak usage if necessary
         let current_total: usize = self.allocations.iter().map(|e| e.size).sum();
         let mut peak = self.peak_usage.load(Ordering::Relaxed);
         while current_total > peak {
@@ -284,17 +245,11 @@ impl AllocationTracker {
     }
 
     /// Stop tracking an allocation (on deallocation)
-    ///
-    /// # Arguments
-    ///
-    /// * `addr` - Memory address being deallocated
     pub fn track_deallocation(&self, addr: usize) {
         self.allocations.remove(&addr);
     }
 
     /// Log current memory statistics
-    ///
-    /// Outputs current usage, peak usage, and allocation count to tracing.
     pub fn log_stats(&self) {
         let total: usize = self.allocations.iter().map(|e| e.size).sum();
         let peak = self.peak_usage.load(Ordering::Relaxed);
@@ -308,8 +263,6 @@ impl AllocationTracker {
     }
 
     /// Get the peak memory usage observed
-    ///
-    /// Returns the maximum total allocation size observed since tracker creation.
     pub fn get_peak_usage(&self) -> usize {
         self.peak_usage.load(Ordering::Relaxed)
     }
@@ -338,10 +291,7 @@ mod tests {
 
     #[test]
     fn test_limits_validation() {
-        // Valid limits
         assert!(MemoryLimits::new(16 * 1024 * 1024, 24 * 1024 * 1024).is_ok());
-
-        // Invalid: soft >= hard
         assert!(MemoryLimits::new(24 * 1024 * 1024, 24 * 1024 * 1024).is_err());
         assert!(MemoryLimits::new(25 * 1024 * 1024, 24 * 1024 * 1024).is_err());
     }
@@ -351,7 +301,6 @@ mod tests {
         let _monitor = MemoryMonitor::new();
         let _monitor = MemoryMonitor::default();
 
-        // Test from_config with default config
         let config = crate::config::ConfigRuntime::new(Default::default());
         assert!(MemoryMonitor::from_config(&config).is_ok());
     }
@@ -362,11 +311,9 @@ mod tests {
         let _current = monitor.current_usage();
         let limit = monitor.limits.hard_limit;
 
-        // Small allocation should succeed
         let small = 1024;
         assert!(monitor.check_available(small).is_ok());
 
-        // Requesting more than available should fail
         let too_large = limit + 1024;
         assert!(monitor.check_available(too_large).is_err());
     }
@@ -375,8 +322,6 @@ mod tests {
     fn test_usage_string() {
         let monitor = MemoryMonitor::new();
         let usage = monitor.usage_string();
-
-        // Should contain MB and percentage
         assert!(usage.contains("MB"));
         assert!(usage.contains("%"));
     }
@@ -396,7 +341,6 @@ mod tests {
         fn test_allocation_tracking() {
             let tracker = AllocationTracker::new();
 
-            // Track some allocations
             tracker.track_allocation(0x1000, 1024, file!(), line!());
             tracker.track_allocation(0x2000, 2048, file!(), line!());
 
@@ -404,12 +348,10 @@ mod tests {
             assert_eq!(tracker.current_total(), 3072);
             assert_eq!(tracker.get_peak_usage(), 3072);
 
-            // Deallocate one
             tracker.track_deallocation(0x1000);
 
             assert_eq!(tracker.allocation_count(), 1);
             assert_eq!(tracker.current_total(), 2048);
-            // Peak should remain at 3072
             assert_eq!(tracker.get_peak_usage(), 3072);
         }
 
@@ -417,18 +359,13 @@ mod tests {
         fn test_peak_usage_tracking() {
             let tracker = AllocationTracker::new();
 
-            // Allocate
             tracker.track_allocation(0x1000, 4096, file!(), line!());
             assert_eq!(tracker.get_peak_usage(), 4096);
 
-            // Deallocate
             tracker.track_deallocation(0x1000);
             assert_eq!(tracker.current_total(), 0);
-
-            // Peak should still be 4096
             assert_eq!(tracker.get_peak_usage(), 4096);
 
-            // New allocation smaller than peak
             tracker.track_allocation(0x3000, 1024, file!(), line!());
             assert_eq!(tracker.get_peak_usage(), 4096);
         }

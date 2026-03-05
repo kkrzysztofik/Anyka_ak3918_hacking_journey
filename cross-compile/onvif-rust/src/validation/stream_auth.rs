@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use crate::config::ConfigRuntime;
-use crate::users::{PasswordManager, UserStorage};
+use crate::config::{PasswordManager, UserStorage};
 use streaming_lib::common::auth::{Auth, AuthAlgorithm, AuthType, CredentialValidator};
 
 fn users_file_path(config_path: &str) -> PathBuf {
@@ -11,6 +11,10 @@ fn users_file_path(config_path: &str) -> PathBuf {
         .parent()
         .unwrap_or(Path::new("/etc/onvif"))
         .join("users.toml")
+}
+
+fn generate_unpredictable_stream_token() -> String {
+    uuid::Uuid::new_v4().simple().to_string()
 }
 
 /// Build stream authentication for validation mode using ONVIF user credentials.
@@ -22,13 +26,16 @@ pub fn build_stream_auth_for_validation_mode(
     config: &ConfigRuntime,
     config_path: &str,
 ) -> Result<Option<Auth>> {
-    let auth_enabled = config.get_bool("server.auth_enabled").unwrap_or(true);
-    if !auth_enabled {
+    let c = config.read();
+    if !c.server.auth_enabled {
         tracing::info!(
             "Validation mode stream authentication disabled (server.auth_enabled=false)"
         );
         return Ok(None);
     }
+
+    let realm = c.server.realm.clone();
+    drop(c);
 
     let users_path = users_file_path(config_path);
     if !users_path.exists() {
@@ -60,12 +67,9 @@ pub fn build_stream_auth_for_validation_mode(
             .unwrap_or(false)
     });
 
-    let realm = config
-        .get_string("server.realm")
-        .unwrap_or_else(|_| "ONVIF Camera".to_string());
     let auth = Auth::new(
         String::new(),
-        "__unused_token__".to_string(),
+        generate_unpredictable_stream_token(),
         None,
         AuthAlgorithm::Simple,
         AuthType::Pull,
@@ -83,16 +87,15 @@ pub fn build_stream_auth_for_validation_mode(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::users::UserLevel;
+    use crate::config::UserLevel;
 
     fn make_config(auth_enabled: bool) -> ConfigRuntime {
         let config = ConfigRuntime::new(Default::default());
-        config
-            .set_bool("server.auth_enabled", auth_enabled)
-            .expect("set auth_enabled");
-        config
-            .set_string("server.realm", "ONVIF Camera")
-            .expect("set realm");
+        {
+            let mut c = config.write();
+            c.server.auth_enabled = auth_enabled;
+            c.server.realm = "ONVIF Camera".to_string();
+        }
         config
     }
 
@@ -128,6 +131,26 @@ mod tests {
     }
 
     #[test]
+    fn test_build_stream_auth_validation_mode_empty_users_returns_error() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let config_path = temp.path().join("config.toml");
+        let users_path = temp.path().join("users.toml");
+        let config = make_config(true);
+
+        std::fs::write(&users_path, "users = []\n").expect("write empty users file");
+
+        let result = build_stream_auth_for_validation_mode(
+            &config,
+            config_path.to_str().expect("config path"),
+        );
+        let message = match result {
+            Ok(_) => panic!("expected empty users file error"),
+            Err(error) => error.to_string(),
+        };
+        assert!(message.contains("users file is empty"));
+    }
+
+    #[test]
     fn test_build_stream_auth_validation_mode_validates_basic_credentials() {
         let temp = tempfile::tempdir().expect("tempdir");
         let config_path = temp.path().join("config.toml");
@@ -153,5 +176,13 @@ mod tests {
         let fail =
             auth.authenticate_request("stream1", &None, Some("Basic YWRtaW46d3Jvbmc="), true);
         assert!(fail.is_err());
+
+        let token_fallback = auth.authenticate_request(
+            "stream1",
+            &Some("token=__unused_token__".to_string()),
+            None,
+            true,
+        );
+        assert!(token_fallback.is_err());
     }
 }

@@ -1,0 +1,8 @@
+/.cproject
+/.project
+# Build artifacts — compiled outputs from platform source
+**/*.o
+**/obj/
+**/output/
+rootfs/**/*
+uiolib/BUILD_libakuio_SO/**/*

@@ -215,22 +215,26 @@ A successful review MUST:
 **MANDATORY**: Use only verified versions from `package.json`:
 
 | Package | Version | Purpose |
-|---------|---------|---------|
-| React | ^19.1.0 | UI framework |
-| React DOM | ^19.1.0 | React renderer |
-| TypeScript | ~5.8.4 | Type checking (strict mode) |
-| Vite | ^7.0.1 | Build tooling |
-| Vitest | ^4.0.1 | Test runner |
-| @tanstack/react-query | ^5.80.1 | Server state management |
-| react-router-dom | ^7.6.1 | Client-side routing |
-| axios | ^1.9.0 | HTTP client |
-| zod | ^3.25.76 | Schema validation |
-| fast-xml-parser | ^5.2.5 | XML/SOAP parsing |
-| dompurify | ^3.3.4 | XSS prevention |
-| tailwindcss | ^4.1.10 | Styling (v4) |
+|---------|---------|---------| 
+| React | ^19.2.4 | UI framework |
+| React DOM | ^19.2.4 | React renderer |
+| TypeScript | ~5.8.x | Type checking (strict mode) |
+| Vite | ^7.3.1 | Build tooling |
+| Vitest | ^4.0.18 | Test runner |
+| @tanstack/react-query | ^5.90.21 | Server state management |
+| react-router-dom | ^7.13.0 | Client-side routing |
+| axios | ^1.13.5 | HTTP client |
+| zod | ^4.3.6 | Schema validation (v4) |
+| react-hook-form | ^7.71.1 | Form state management |
+| @hookform/resolvers | ^5.2.2 | Zod resolver for RHF |
+| fast-xml-parser | ^5.3.6 | XML/SOAP parsing |
+| dompurify | ^3.3.1 | XSS prevention |
+| tailwindcss | ^4.1.18 | Styling (v4) |
+| recharts | ^3.7.0 | Data visualization |
+| sonner | ^2.0.7 | Toast notifications |
 | @radix-ui/* | Various | shadcn/ui base components |
-| msw | ^2.10.2 | API mocking in tests |
-| @testing-library/react | ^16.3.0 | Component testing |
+| msw | ^2.12.10 | API mocking in tests |
+| @testing-library/react | ^16.3.2 | Component testing |
 
 **DO NOT**:
 

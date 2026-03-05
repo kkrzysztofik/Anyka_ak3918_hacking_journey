@@ -32,17 +32,11 @@ use super::settings_store::{ImagingSettingsError, ImagingSettingsStore};
 /// - Image settings management
 /// - Options retrieval
 /// - Status monitoring
-/// - Focus control (when supported)
 pub struct ImagingService {
     /// Settings storage.
     settings_store: Arc<ImagingSettingsStore>,
-    /// Configuration runtime.
-    #[allow(dead_code)]
-    config: Arc<ConfigRuntime>,
     /// Platform abstraction (optional).
     platform: Option<Arc<dyn Platform>>,
-    /// Focus control supported.
-    focus_supported: bool,
 }
 
 impl ImagingService {
@@ -50,9 +44,7 @@ impl ImagingService {
     pub fn new() -> Self {
         Self {
             settings_store: Arc::new(ImagingSettingsStore::new()),
-            config: Arc::new(ConfigRuntime::new(Default::default())),
             platform: None,
-            focus_supported: false,
         }
     }
 
@@ -67,15 +59,13 @@ impl ImagingService {
 
         Self {
             settings_store,
-            config: Arc::new(ConfigRuntime::new(Default::default())),
             platform: Some(platform),
-            focus_supported: false, // Focus control not typically available
         }
     }
 
     /// Create a new Imaging Service with configuration and platform.
     pub fn with_config_and_platform(
-        config: Arc<ConfigRuntime>,
+        _config: Arc<ConfigRuntime>,
         platform: Arc<dyn Platform>,
     ) -> Self {
         let imaging_control = platform.imaging_control();
@@ -87,9 +77,7 @@ impl ImagingService {
 
         Self {
             settings_store,
-            config,
             platform: Some(platform),
-            focus_supported: false,
         }
     }
 
@@ -271,10 +259,10 @@ impl ImagingService {
 
     /// Handle Move request (focus).
     ///
-    /// Performs focus move operation if supported.
+    /// Not supported - returns ActionNotSupported error.
     pub async fn handle_move(&self, request: Move) -> OnvifResult<MoveResponse> {
         tracing::debug!(
-            "Move (focus) request for token: {}",
+            "Move (focus) request for token: {} (not supported)",
             request.video_source_token
         );
 
@@ -289,23 +277,17 @@ impl ImagingService {
             });
         }
 
-        // Focus control is typically not supported on this hardware
-        if !self.focus_supported {
-            return Err(OnvifError::ActionNotSupported(
-                "Focus move operation not supported".to_string(),
-            ));
-        }
-
-        // TODO: Implement focus move when hardware supports it
-        Ok(MoveResponse {})
+        Err(OnvifError::ActionNotSupported(
+            "Focus move operation not supported".to_string(),
+        ))
     }
 
     /// Handle Stop request (focus).
     ///
-    /// Stops focus movement if in progress.
+    /// Not supported - returns ActionNotSupported error.
     pub async fn handle_stop(&self, request: Stop) -> OnvifResult<StopResponse> {
         tracing::debug!(
-            "Stop (focus) request for token: {}",
+            "Stop (focus) request for token: {} (not supported)",
             request.video_source_token
         );
 
@@ -320,15 +302,9 @@ impl ImagingService {
             });
         }
 
-        // Focus control is typically not supported on this hardware
-        if !self.focus_supported {
-            return Err(OnvifError::ActionNotSupported(
-                "Focus stop operation not supported".to_string(),
-            ));
-        }
-
-        // TODO: Implement focus stop when hardware supports it
-        Ok(StopResponse {})
+        Err(OnvifError::ActionNotSupported(
+            "Focus stop operation not supported".to_string(),
+        ))
     }
 
     // ========================================================================
@@ -653,23 +629,6 @@ impl ServiceHandler for ImagingService {
     fn service_name(&self) -> &str {
         "Imaging"
     }
-
-    /// Get the list of supported actions.
-    fn supported_actions(&self) -> Vec<&str> {
-        vec![
-            "GetImagingSettings",
-            "SetImagingSettings",
-            "GetOptions",
-            "GetStatus",
-            "GetMoveOptions",
-            "Move",
-            "Stop",
-            "GetServiceCapabilities",
-            "GetPresets",
-            "GetCurrentPreset",
-            "SetCurrentPreset",
-        ]
-    }
 }
 
 // ============================================================================
@@ -685,7 +644,6 @@ mod tests {
     fn test_new_imaging_service() {
         let service = ImagingService::new();
         assert!(service.platform.is_none());
-        assert!(!service.focus_supported);
     }
 
     #[tokio::test]
@@ -801,10 +759,7 @@ mod tests {
         };
         let result = service.handle_move(request).await;
         assert!(result.is_err());
-        match result {
-            Err(OnvifError::ActionNotSupported(_)) => {}
-            _ => panic!("Expected ActionNotSupported error"),
-        }
+        assert!(matches!(result, Err(OnvifError::ActionNotSupported(_))));
     }
 
     #[tokio::test]
@@ -815,10 +770,7 @@ mod tests {
         };
         let result = service.handle_stop(request).await;
         assert!(result.is_err());
-        match result {
-            Err(OnvifError::ActionNotSupported(_)) => {}
-            _ => panic!("Expected ActionNotSupported error"),
-        }
+        assert!(matches!(result, Err(OnvifError::ActionNotSupported(_))));
     }
 
     #[tokio::test]
@@ -850,12 +802,9 @@ mod tests {
         };
         let result = service.handle_set_imaging_settings(request).await;
         assert!(result.is_err());
-        match result {
-            Err(OnvifError::InvalidArgVal { subcode, .. }) => {
-                assert!(subcode.contains("InvalidToken"));
-            }
-            _ => panic!("Expected InvalidArgVal error with InvalidToken"),
-        }
+        assert!(
+            matches!(&result, Err(OnvifError::InvalidArgVal { subcode, .. }) if subcode.contains("InvalidToken"))
+        );
     }
 
     #[tokio::test]
@@ -1047,32 +996,12 @@ mod tests {
         };
         let result = service.handle_set_current_preset(request).await;
         assert!(result.is_err());
-        match result {
-            Err(OnvifError::ActionNotSupported(_)) => {}
-            _ => panic!("Expected ActionNotSupported error"),
-        }
+        assert!(matches!(result, Err(OnvifError::ActionNotSupported(_))));
     }
 
     // ========================================================================
     // ServiceHandler tests
     // ========================================================================
-
-    #[tokio::test]
-    async fn test_service_handler_supported_actions() {
-        let service = ImagingService::new();
-        let actions = service.supported_actions();
-        assert!(actions.contains(&"GetImagingSettings"));
-        assert!(actions.contains(&"SetImagingSettings"));
-        assert!(actions.contains(&"GetOptions"));
-        assert!(actions.contains(&"GetStatus"));
-        assert!(actions.contains(&"GetMoveOptions"));
-        assert!(actions.contains(&"Move"));
-        assert!(actions.contains(&"Stop"));
-        assert!(actions.contains(&"GetServiceCapabilities"));
-        assert!(actions.contains(&"GetPresets"));
-        assert!(actions.contains(&"GetCurrentPreset"));
-        assert!(actions.contains(&"SetCurrentPreset"));
-    }
 
     #[tokio::test]
     async fn test_service_handler_service_name() {
@@ -1085,12 +1014,9 @@ mod tests {
         let service = ImagingService::new();
         let result = service.handle_operation("UnknownAction", "<test/>").await;
         assert!(result.is_err());
-        match result {
-            Err(OnvifError::ActionNotSupported(action)) => {
-                assert_eq!(action, "UnknownAction");
-            }
-            _ => panic!("Expected ActionNotSupported error"),
-        }
+        assert!(
+            matches!(&result, Err(OnvifError::ActionNotSupported(action)) if action == "UnknownAction")
+        );
     }
 
     #[tokio::test]
@@ -1110,10 +1036,7 @@ mod tests {
         let xml = "<InvalidXml><Broken";
         let result = service.handle_operation("GetImagingSettings", xml).await;
         assert!(result.is_err());
-        match result {
-            Err(OnvifError::WellFormed(_)) => {}
-            _ => panic!("Expected WellFormed error"),
-        }
+        assert!(matches!(result, Err(OnvifError::WellFormed(_))));
     }
 
     // ========================================================================

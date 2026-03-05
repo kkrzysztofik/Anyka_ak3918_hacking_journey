@@ -130,35 +130,65 @@ info!(user = %username, action = "login", "User authenticated");
 
 ```
 src/
-├── lib.rs                    # Library root, public exports
+├── lib.rs                    # Library root, global allocator (cap 24MB)
 ├── main.rs                   # Binary entry point
-├── app.rs                    # Application setup
+├── app.rs                    # Application lifecycle
 │
 ├── onvif/                    # ONVIF services
-│   ├── mod.rs
-│   ├── device/               # Device service
-│   │   ├── mod.rs
-│   │   ├── handlers.rs       # Request handlers
-│   │   ├── types.rs          # Data types
-│   │   └── faults.rs         # Error types
+│   ├── device/               # Device service (handlers, types, faults)
 │   ├── media/                # Media service
 │   ├── ptz/                  # PTZ service
-│   └── imaging/              # Imaging service
+│   ├── imaging/              # Imaging service
+│   ├── types/                # Shared ONVIF type definitions
+│   ├── dispatcher.rs         # SOAP action routing
+│   ├── server.rs             # HTTP/SOAP server
+│   ├── soap.rs               # SOAP envelope handling
+│   └── ws_security.rs        # WS-Security processing
 │
-├── auth/                     # Authentication
-│   ├── mod.rs
-│   ├── ws_security.rs        # WS-Security
-│   ├── http_digest.rs        # HTTP Digest
-│   └── http_basic.rs         # HTTP Basic
+├── hal/                      # Hardware Abstraction Layer (IPC-based)
+│   ├── anyka_sdk.rs          # SDK type definitions
+│   ├── vendor_ipc.rs         # Unix socket IPC client
+│   ├── video.rs              # Video HAL
+│   ├── audio.rs              # Audio HAL
+│   ├── imaging.rs            # Imaging HAL
+│   ├── ptz.rs                # PTZ HAL
+│   └── ptz_driver.rs         # PTZ motor driver
 │
-├── platform/                 # Hardware abstraction
-│   ├── mod.rs
+├── streaming/                # Bridge to streaming-lib
+│   ├── bridge.rs             # Frame delivery bridge
+│   ├── config.rs             # Stream configuration
+│   ├── helpers.rs            # Streaming utilities
+│   └── service.rs            # Streaming service
+│
+├── platform/                 # Platform abstraction
 │   ├── traits.rs             # Platform trait definitions
 │   ├── anyka.rs              # Anyka implementation
-│   └── stubs.rs              # Test stubs
+│   ├── frame.rs              # Frame ownership & stream ID
+│   ├── anyka/ptz_control.rs  # Hardware PTZ
+│   ├── stubs.rs              # Test stubs
+│   └── validation.rs         # Platform validation
+│
+├── auth/                     # Authentication
+│   ├── ws_security.rs        # WS-Security
+│   ├── http_digest.rs        # HTTP Digest
+│   ├── http_basic.rs         # HTTP Basic
+│   └── credentials.rs        # Credential management
+│
+├── security/                 # Security hardening
+│   ├── xml_security.rs       # XXE/XML bomb protection
+│   ├── rate_limit.rs         # Rate limiting
+│   ├── brute_force.rs        # Brute force protection
+│   └── audit.rs              # Security audit logging
+│
+├── discovery/                # WS-Discovery (UDP multicast)
+├── config/                   # Configuration management, persistence & user management
+│   └── users/                # User accounts, passwords & ONVIF user levels
+├── lifecycle/                # App lifecycle (startup, shutdown, health)
+├── logging/                  # HTTP & platform logging
+├── net/                      # Network utilities (IP detection)
+├── validation/               # H.264 playback & stream validation
 │
 └── utils/                    # Shared utilities
-    ├── mod.rs
     ├── validation.rs         # Input validation
     └── memory.rs             # Memory management
 ```
@@ -169,15 +199,21 @@ src/
 | Purpose | Crate |
 |---------|-------|
 | Async runtime | tokio |
-| Web framework | axum |
-| Serialization | serde, quick-xml |
-| Logging | tracing |
-| Errors (lib) | thiserror |
+| Web framework | axum 0.8, tower, tower-http |
+| Serialization | serde, quick-xml 0.39 |
+| Logging | tracing, tracing-subscriber, tracing-appender |
+| Errors (lib) | thiserror 2.0 |
 | Errors (app) | anyhow |
-| Testing | mockall, wiremock |
+| Memory tracking | cap 0.1 (24MB hard limit) |
+| Concurrency | parking_lot, dashmap, portable-atomic |
+| Bytes/buffers | bytes |
+| Testing | mockall 0.14, wiremock 0.6, criterion 0.8 |
 | Validation | validator |
 | Time | chrono |
 | UUID | uuid |
+| Streaming | streaming-lib (workspace path dep) |
+| CLI | clap (derive) |
+| Crypto | argon2, sha1, md-5, hmac, constant_time_eq |
 
 ### Adding Dependencies
 - Prefer well-maintained, widely-used crates
@@ -204,6 +240,15 @@ unsafe {
     *ptr = 42;
 }
 ```
+
+## Platform-HAL Layering
+
+Platform layer (`src/platform/`) should minimize unsafe code, FFI calls, and raw pointer operations.
+All hardware access should go through HAL traits from `hal/common/`.
+
+**Detailed rules and current exceptions**: See [`.serena/memories/platform-hal-layering.md`](platform-hal-layering.md)
+
+> ⚠️ Note: The layering is **directional guidance**, not strictly enforced. Known violations are tracked in the platform-hal-layering.md document.
 
 ## Documentation
 
@@ -238,13 +283,15 @@ pub async fn get_device_info(platform: &impl Platform) -> Result<DeviceInfo, Onv
 ## Pre-Commit Checklist
 
 ```bash
-# Run all checks (note: x86_64 target for host-side operations)
-cd cross-compile/onvif-rust
+# Run all checks across workspace (note: x86_64 target for host-side operations)
+cd cross-compile
 cargo fmt && \
 cargo clippy --target x86_64-unknown-linux-gnu -- -D warnings && \
 cargo test --target x86_64-unknown-linux-gnu && \
 cargo doc --no-deps
 ```
+
+**Note**: Commands run from `cross-compile/` apply to the entire workspace (onvif-rust + streaming-lib).
 
 - [ ] Code formatted (`cargo fmt`)
 - [ ] No clippy warnings (`cargo clippy -- -D warnings`)

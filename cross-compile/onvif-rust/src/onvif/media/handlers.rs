@@ -8,8 +8,7 @@
 
 use std::sync::Arc;
 
-use crate::config::{ConfigPersistenceHandle, ConfigRuntime};
-use crate::net::ip_utils::external_ip;
+use crate::config::{ConfigRuntime, ProfileStorage};
 use crate::onvif::dispatcher::ServiceHandler;
 use crate::onvif::error::{OnvifError, OnvifResult};
 use crate::onvif::types::common::{MediaUri, StreamSetup, StreamType, TransportProtocol};
@@ -48,7 +47,8 @@ use crate::onvif::types::media::{
     SetVideoSourceConfigurationResponse, StartMulticastStreaming, StartMulticastStreamingResponse,
     StopMulticastStreaming, StopMulticastStreamingResponse, StreamingCapabilities,
 };
-use crate::platform::Platform;
+use crate::platform::external_ip;
+use crate::platform::{Platform, Resolution};
 
 use super::profile_manager::ProfileManager;
 use super::types::{DEFAULT_RTSP_PORT, DEFAULT_SNAPSHOT_PATH, MAX_PROFILES};
@@ -69,71 +69,59 @@ pub struct MediaService {
     /// Configuration runtime.
     config: Arc<ConfigRuntime>,
     /// Platform abstraction (optional).
-    #[allow(dead_code)]
     platform: Option<Arc<dyn Platform>>,
-    /// Optional config persistence handle for save requests.
-    #[allow(dead_code)]
-    persistence: Option<ConfigPersistenceHandle>,
 }
 
 impl MediaService {
-    /// Create a new Media Service.
+    /// Create a new Media Service with default configuration (for tests).
     pub fn new() -> Self {
         let config = Arc::new(ConfigRuntime::new(Default::default()));
         Self {
             profile_manager: Arc::new(ProfileManager::with_config(Arc::clone(&config))),
             config,
             platform: None,
-            persistence: None,
         }
     }
 
-    /// Create a new Media Service with configuration.
+    /// Create a new Media Service with configuration (no persistence).
     pub fn with_config(config: Arc<ConfigRuntime>) -> Self {
         Self {
             profile_manager: Arc::new(ProfileManager::with_config(Arc::clone(&config))),
             config,
             platform: None,
-            persistence: None,
         }
     }
 
-    /// Create a new Media Service with configuration and platform.
-    pub fn with_config_and_platform(
+    /// Create a Media Service with profile storage and optional platform.
+    ///
+    /// This is the production constructor. Sensor resolution is queried from
+    /// the platform (or defaults to 1920x1080). Profiles are loaded from
+    /// storage first; if empty, they're seeded from config and persisted.
+    pub fn with_storage(
         config: Arc<ConfigRuntime>,
-        platform: Arc<dyn Platform>,
+        profile_storage: Arc<ProfileStorage>,
+        platform: Option<Arc<dyn Platform>>,
     ) -> Self {
+        let max_res = platform
+            .as_ref()
+            .and_then(|p| p.max_sensor_resolution().ok())
+            .unwrap_or(Resolution::new(1920, 1080));
+
+        let pm = ProfileManager::with_storage(Arc::clone(&config), profile_storage, max_res);
+
         Self {
-            profile_manager: Arc::new(ProfileManager::with_config(Arc::clone(&config))),
+            profile_manager: Arc::new(pm),
             config,
-            platform: Some(platform),
-            persistence: None,
+            platform,
         }
     }
 
-    /// Create a Media Service wired with config persistence.
-    pub fn with_config_and_persistence(
-        config: Arc<ConfigRuntime>,
-        persistence: ConfigPersistenceHandle,
-    ) -> Self {
-        Self {
-            profile_manager: Arc::new(ProfileManager::with_config_and_persistence(
-                Arc::clone(&config),
-                Some(persistence.clone()),
-            )),
-            config,
-            platform: None,
-            persistence: Some(persistence),
-        }
-    }
-
-    /// Create a new Media Service with a custom profile manager.
+    /// Create a new Media Service with a custom profile manager (for tests).
     pub fn with_profile_manager(profile_manager: Arc<ProfileManager>) -> Self {
         Self {
             profile_manager,
             config: Arc::new(ConfigRuntime::new(Default::default())),
             platform: None,
-            persistence: None,
         }
     }
 
@@ -145,17 +133,17 @@ impl MediaService {
     /// Get the base URL for service addresses.
     fn base_url(&self) -> String {
         let address = external_ip(&self.config);
-        let port = self.config.get_int("server.port").unwrap_or(80) as u16;
+        let port = self.config.read().server.port;
         format!("http://{}:{}", address, port)
     }
 
     /// Get the RTSP base URL.
     fn rtsp_url(&self) -> String {
         let address = external_ip(&self.config);
-        let port = self
-            .config
-            .get_int("media.rtsp_port")
-            .unwrap_or(DEFAULT_RTSP_PORT as i64) as u16;
+        let port = {
+            let p = self.config.read().media.rtsp_port;
+            if p == 0 { DEFAULT_RTSP_PORT } else { p }
+        };
         format!("rtsp://{}:{}", address, port)
     }
 
@@ -330,6 +318,7 @@ impl MediaService {
     /// Handle SetVideoEncoderConfiguration request.
     ///
     /// Updates a video encoder configuration.
+    /// Ensures profile resolution does not exceed sensor capabilities.
     pub fn handle_set_video_encoder_configuration(
         &self,
         request: SetVideoEncoderConfiguration,
@@ -349,6 +338,37 @@ impl MediaService {
         if let Some(ref rate_control) = request.configuration.rate_control {
             super::faults::validate_frame_rate(rate_control.frame_rate_limit)?;
             super::faults::validate_bitrate(rate_control.bitrate_limit)?;
+        }
+
+        // Validate that profile resolution doesn't exceed sensor capabilities
+        if let Some(ref platform) = self.platform {
+            let requested_width = request.configuration.resolution.width as u32;
+            let requested_height = request.configuration.resolution.height as u32;
+
+            // Query the actual sensor resolution from the platform
+            let max_resolution = platform.max_sensor_resolution().map_err(|e| {
+                OnvifError::HardwareFailure(format!("Failed to get sensor resolution: {}", e))
+            })?;
+
+            if requested_width > max_resolution.width || requested_height > max_resolution.height {
+                tracing::warn!(
+                    "Profile resolution request exceeds sensor capabilities: requested {}x{}, max {}x{}",
+                    requested_width,
+                    requested_height,
+                    max_resolution.width,
+                    max_resolution.height
+                );
+                return Err(OnvifError::invalid_arg_val(
+                    "ter:InvalidResolution",
+                    format!(
+                        "Requested resolution {}x{} exceeds sensor maximum of {}x{}",
+                        requested_width,
+                        requested_height,
+                        max_resolution.width,
+                        max_resolution.height
+                    ),
+                ));
+            }
         }
 
         self.profile_manager
@@ -563,10 +583,14 @@ impl MediaService {
         let _profile = self.profile_manager.get_profile(&request.profile_token)?;
 
         // Build snapshot URI
-        let snapshot_path = self
-            .config
-            .get_string("media.snapshot_path")
-            .unwrap_or_else(|_| DEFAULT_SNAPSHOT_PATH.to_string());
+        let snapshot_path = {
+            let p = self.config.read().media.snapshot_path.clone();
+            if p.is_empty() {
+                DEFAULT_SNAPSHOT_PATH.to_string()
+            } else {
+                p
+            }
+        };
 
         let uri = format!(
             "{}{}?profile={}",
@@ -1366,62 +1390,6 @@ impl ServiceHandler for MediaService {
     fn service_name(&self) -> &str {
         "Media"
     }
-
-    /// Get the list of supported actions.
-    fn supported_actions(&self) -> Vec<&str> {
-        vec![
-            // Profile Operations
-            "GetProfiles",
-            "GetProfile",
-            "CreateProfile",
-            "DeleteProfile",
-            // Video Source Operations
-            "GetVideoSources",
-            "GetVideoSourceConfigurations",
-            "GetVideoSourceConfiguration",
-            "SetVideoSourceConfiguration",
-            "GetVideoSourceConfigurationOptions",
-            "AddVideoSourceConfiguration",
-            "RemoveVideoSourceConfiguration",
-            // Video Encoder Operations
-            "GetVideoEncoderConfigurations",
-            "GetVideoEncoderConfiguration",
-            "SetVideoEncoderConfiguration",
-            "GetVideoEncoderConfigurationOptions",
-            "AddVideoEncoderConfiguration",
-            "RemoveVideoEncoderConfiguration",
-            // Audio Source Operations
-            "GetAudioSources",
-            "GetAudioSourceConfigurations",
-            "GetAudioSourceConfiguration",
-            "SetAudioSourceConfiguration",
-            "AddAudioSourceConfiguration",
-            "RemoveAudioSourceConfiguration",
-            // Audio Encoder Operations
-            "GetAudioEncoderConfigurations",
-            "GetAudioEncoderConfiguration",
-            "GetAudioEncoderConfigurationOptions",
-            "SetAudioEncoderConfiguration",
-            "AddAudioEncoderConfiguration",
-            "RemoveAudioEncoderConfiguration",
-            // Stream URI Operations
-            "GetStreamUri",
-            "GetSnapshotUri",
-            // Service Capabilities
-            "GetServiceCapabilities",
-            // Compatible Configurations (FR-002)
-            "GetCompatibleVideoSourceConfigurations",
-            "GetCompatibleVideoEncoderConfigurations",
-            "GetCompatibleAudioSourceConfigurations",
-            "GetCompatibleAudioEncoderConfigurations",
-            // Metadata Configuration (FR-002)
-            "GetMetadataConfigurations",
-            "SetMetadataConfiguration",
-            // Multicast Streaming (FR-002)
-            "StartMulticastStreaming",
-            "StopMulticastStreaming",
-        ]
-    }
 }
 
 #[cfg(test)]
@@ -1575,11 +1543,13 @@ mod tests {
         assert!(result.is_err());
         let err = result.unwrap_err();
         // Verify it's a NoProfile fault
-        match err {
-            OnvifError::InvalidArgVal { subcode, .. } => {
-                assert!(subcode.contains("NoProfile"));
-            }
-            _ => panic!("Expected InvalidArgVal with NoProfile subcode"),
+        if let OnvifError::InvalidArgVal { subcode, .. } = &err {
+            assert!(
+                subcode.contains("NoProfile"),
+                "subcode should contain NoProfile"
+            );
+        } else {
+            assert!(false, "Expected InvalidArgVal error, got: {:?}", err);
         }
     }
 

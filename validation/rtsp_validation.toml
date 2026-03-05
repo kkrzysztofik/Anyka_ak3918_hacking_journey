@@ -31,8 +31,8 @@ timeout-sec = 10
 # Handles servers (e.g. MediaMTX) that omit RTP-Info rtptime on PLAY.
 initial-timestamp-policy = "permissive"
 # Optional stream credentials used for BOTH RTSP and HTTP-FLV checks.
-# username = "admin"
-# password = ""
+username = "admin"
+password = ""
 
 [test]
 short-duration-sec = 30
@@ -84,12 +84,28 @@ host = "192.168.2.198"
 ssh-port = 22
 user = "root"
 # Prefer RTSP_VALIDATION_DEVICE_PASSWORD env var for secrets.
-password = ""
+password = "www123"
 telemetry = true
-# Paths on device for H.264/AAC validation mode (device binary must be built with validation-mode)
+# Paths on device for H.264/AAC validation mode (device binary must be built with validation-mode).
+# These are ignored when real-mode = true.
 h264-file = "/mnt/anyka_hack/onvif/test.h264"
 aac-file = "/mnt/anyka_hack/onvif/test_audio.aac"
 loop-playback = true
+# Set real-mode = true to use the camera sensor instead of file playback.
+# When enabled, h264-file and aac-file are ignored and onvif-rust starts
+# without --validation-mode. Both main and sub streams are validated by default.
+# real-mode = false
+#
+# Override which streams to validate in real mode with [[device.streams]]:
+# [[device.streams]]
+# label = "main"
+# rtsp-stream = "/main"
+# httpflv-path = "/live/main.flv"
+#
+# [[device.streams]]
+# label = "sub"
+# rtsp-stream = "/sub"
+# httpflv-path = "/live/sub.flv"
 
 [httpflv]
 # HTTP-FLV streaming endpoint (typically port 80 or 8080)

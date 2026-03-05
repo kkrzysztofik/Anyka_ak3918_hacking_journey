@@ -5,48 +5,52 @@
 //!
 //! # Components
 //!
-//! - **rtsp**: RTSP server implementation
-//! - **httpflv**: HTTP-FLV server implementation
-//! - **codec**: H.264 codec handling
-//! - **container**: FLV container format support
-//! - **streamhub**: Stream management and routing
-//! - **bytesio**: Binary I/O utilities
+//! - **protocol/rtsp**: RTSP server implementation
+//! - **protocol/httpflv**: HTTP-FLV server implementation
+//! - **codec/h264**: H.264 codec handling
+//! - **container/flv**: FLV container format support
+//! - **hub**: Stream management and routing
+//! - **io**: Binary I/O utilities
 //! - **common**: Common utilities and helpers
 
 // Module declarations
-pub mod bytesio;
 pub mod codec;
 pub mod common;
+pub mod config;
 pub mod container;
-pub mod httpflv;
+pub mod hub;
+pub mod io;
 mod logging_flags;
-pub mod rtsp;
-pub mod streamhub;
+pub mod protocol;
+pub mod service;
+pub mod validation;
+
+// Re-export Bytes for use in Frame
+pub use bytes::Bytes;
 
 // Re-export key types from RTSP
 pub use logging_flags::{set_stream_frame_debug_logging, stream_frame_debug_logging_enabled};
-pub use rtsp::session::client_session::RtspClientSession;
-pub use rtsp::session::server_session::RtspServerSession;
-pub use rtsp::{DefaultRtspServer, RtspServer};
+pub use protocol::rtsp::session::server_session::RtspServerSession;
+pub use protocol::rtsp::{DefaultRtspServer, RtspServer};
 
 /// Stream session type alias for ticket-specified API surface
 /// Represents either an RTSP client or server session
 pub type StreamSession = RtspServerSession;
 
 // Re-export key types from HTTP-FLV
-pub use httpflv::server::{DefaultHttpFlvServer, HttpFlvServer};
+pub use protocol::httpflv::server::{DefaultHttpFlvServer, HttpFlvServer};
 
-// Re-export key types from streamhub
-pub use streamhub::StreamsHub;
-pub use streamhub::define::{
+// Re-export key types from streamhub (hub)
+pub use hub::StreamsHub;
+pub use hub::define::{
     DataReceiver, DataSender, FrameData, MediaInfo, PacketData, PublishType, PublisherInfo,
     StreamHubEvent, StreamHubEventSender, SubscribeType, SubscriberInfo, TStreamHandler,
     VideoCodecType,
 };
-pub use streamhub::stream::StreamIdentifier;
+pub use hub::stream::StreamIdentifier;
 
 // Re-export key types from codec
-pub use codec::sps::Sps;
+pub use codec::h264::sps::Sps;
 
 // Re-export key types from container
 pub use container::demuxer::FlvDemuxer;
@@ -62,31 +66,45 @@ pub trait FrameSource: Send + Sync {
 /// Trait for receiving frame callbacks
 pub trait FrameCallback: Send + Sync {
     /// Called when a new frame is available
-    ///
-    /// # Safety
-    ///
-    /// The frame data pointer is valid only during this call.
-    /// Do not store the pointer. Use pre-allocated buffers for packetization.
     fn on_frame(&self, frame: &Frame);
 }
 
+// ============================================================
+// Backward Compatibility Aliases (DEPRECATED)
+// ============================================================
+// These aliases provide backward compatibility for code that
+// imports from the old `streaming_lib::streamhub` path.
+// All code should migrate to use `streaming_lib::hub` instead.
+// ============================================================
+
+#[allow(clippy::mixed_attributes_style)]
+#[deprecated(since = "0.2.0", note = "Use hub module instead")]
+/// Deprecated: Use `hub` module instead
+pub mod streamhub {
+    //! Deprecated: Re-exports from hub module for backward compatibility.
+    //! Use `streaming_lib::hub` instead.
+
+    pub use crate::hub::define::*;
+    pub use crate::hub::errors::*;
+    pub use crate::hub::mock_audio_publisher::*;
+    pub use crate::hub::mock_publisher::*;
+    pub use crate::hub::statistics::*;
+    pub use crate::hub::stream::*;
+    pub use crate::hub::*;
+}
+
 /// A video or audio frame from the encoder
+///
+/// Uses `bytes::Bytes` for safe, reference-counted data that can be
+/// safely shared across threads without lifetime issues.
 pub struct Frame {
-    /// Read-only pointer to frame data (zero-copy)
-    pub data: *const u8,
-    /// Size of frame data in bytes
-    pub size: usize,
-    /// Timestamp in microseconds since epoch
-    pub timestamp: u64,
+    /// Reference-counted frame data (zero-copy, safe to share)
+    pub data: Bytes,
+    /// Timestamp in milliseconds (SDK source)
+    pub timestamp: u32,
     /// Type of frame
     pub frame_type: FrameType,
 }
-
-// SAFETY: `Frame` holds a read-only pointer to immutable frame data that remains valid
-// for `size` bytes during its use across threads. The data is not mutated or freed
-// while shared, so it is safe to mark `Frame` as Send + Sync.
-unsafe impl Send for Frame {}
-unsafe impl Sync for Frame {}
 
 /// Frame type for video and audio
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -133,14 +151,13 @@ mod tests {
 
     #[test]
     fn test_frame_construction() {
-        let data = [0u8; 10];
+        let data = Bytes::from_static(b"test frame data");
         let frame = Frame {
-            data: data.as_ptr(),
-            size: data.len(),
+            data: data.clone(),
             timestamp: 12345,
             frame_type: FrameType::VideoIFrame,
         };
-        assert_eq!(frame.size, 10);
+        assert_eq!(frame.data.len(), 15);
         assert_eq!(frame.timestamp, 12345);
         assert_eq!(frame.frame_type, FrameType::VideoIFrame);
     }
@@ -151,6 +168,29 @@ mod tests {
         fn assert_sync<T: Sync>() {}
         assert_send::<Frame>();
         assert_sync::<Frame>();
+    }
+
+    #[test]
+    fn test_frame_bytes_safe_to_share() {
+        // Verify Bytes provides safe sharing
+        let data = Bytes::from_static(b"shared data");
+
+        // Frame can be safely cloned because Bytes uses reference counting
+        let frame1 = Frame {
+            data: data.clone(),
+            timestamp: 1000,
+            frame_type: FrameType::VideoIFrame,
+        };
+
+        let frame2 = Frame {
+            data: data,
+            timestamp: 2000,
+            frame_type: FrameType::VideoPFrame,
+        };
+
+        // Both frames can access their data independently
+        assert_eq!(frame1.data.len(), 11);
+        assert_eq!(frame2.data.len(), 11);
     }
 
     // ========== Re-export Smoke Tests ==========

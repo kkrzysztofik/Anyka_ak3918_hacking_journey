@@ -23,7 +23,6 @@ target/**/*
 # Reference Code and Original Files
 # -----------------------------------------------------------------------------
 cross-compile/anyka_reference/component/**/*
-cross-compile/anyka_reference/platform/**/*
 orig/**/*
 sample_xml/**/*
 
@@ -59,6 +58,7 @@ cross-compile/onvif-rust/**/*.prof*
 # Clangd files
 .clangd/
 .cache/
+.worktrees/
 cross-compile/onvif/.cache/**/*
 clangd-logs/**/*
 compile_commands.json
@@ -167,12 +167,13 @@ docs/.doctrees/
 __pycache__/
 *.py[cod]
 *$py.class
-*.so
 .Python
 env/
 venv/
 ENV/
 pip-log.txt
+.sonar-home/**/*
+.sonar-scanner/
 
 # Node.js
 node_modules/
@@ -249,3 +250,4 @@ cross-compile/ONVIF-Device-Manager/**/*
 
 # Snyk Security Extension - AI Rules (auto-generated)
 .github/instructions/snyk_rules.instructions.md
+toolchain/build-new/

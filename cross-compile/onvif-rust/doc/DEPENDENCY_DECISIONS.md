@@ -16,7 +16,7 @@ This document explains architectural decisions regarding dependency choices in t
 
 - `src/onvif/device/handlers.rs` - Device service handlers (sync)
 - `src/onvif/dispatcher.rs` - Service dispatcher (sync)
-- `src/users/storage.rs` - User storage (sync)
+- `src/config/users/mod.rs` - User storage (sync)
 - `src/onvif/ws_security.rs` - WS-Security nonce cache (sync, per CRIT-005)
 - `src/platform/anyka.rs` - Platform abstraction (sync)
 - `src/onvif/media/profile_manager.rs` - Profile management (sync)

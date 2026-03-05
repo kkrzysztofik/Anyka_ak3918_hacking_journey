@@ -288,6 +288,26 @@ pub struct LoggingSection {
     pub ffmpeg_level: String,
 }
 
+/// A stream to validate (RTSP + HTTP-FLV paths).
+#[derive(Debug, Clone)]
+pub struct StreamConfig {
+    /// Human-readable label (e.g. "main", "sub").
+    pub label: String,
+    /// RTSP stream path (e.g. "/main").
+    pub rtsp_stream: String,
+    /// HTTP-FLV path (e.g. "/live/main.flv").
+    pub httpflv_path: String,
+}
+
+/// TOML `[[device.streams]]` array entry.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct DeviceStreamSection {
+    pub label: String,
+    pub rtsp_stream: String,
+    pub httpflv_path: String,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct DeviceSection {
@@ -307,6 +327,12 @@ pub struct DeviceSection {
     pub aac_file: Option<String>,
     #[serde(default)]
     pub loop_playback: bool,
+    /// Launch the real camera pipeline (no validation-mode, no H.264/AAC files).
+    #[serde(default)]
+    pub real_mode: bool,
+    /// Streams to validate in real mode.
+    #[serde(default)]
+    pub streams: Vec<DeviceStreamSection>,
 }
 
 impl Default for DeviceSection {
@@ -320,6 +346,8 @@ impl Default for DeviceSection {
             h264_file: None,
             aac_file: None,
             loop_playback: false,
+            real_mode: false,
+            streams: Vec::new(),
         }
     }
 }
@@ -373,6 +401,10 @@ pub struct EffectiveConfig {
     pub device_h264_file: Option<String>,
     pub device_aac_file: Option<String>,
     pub device_loop_playback: bool,
+    /// True when running the real camera pipeline (no validation-mode).
+    pub device_real_mode: bool,
+    /// Streams to validate (1 in normal mode, 2+ in real mode).
+    pub streams: Vec<StreamConfig>,
     pub no_launch: bool,
     pub h264_file: Option<String>,
     pub output: String,
@@ -517,6 +549,13 @@ impl EffectiveConfig {
             .or_else(|| c.device.aac_file.clone())
             .filter(|s| !s.is_empty());
         let device_loop_playback = args.device_loop_playback || c.device.loop_playback;
+        let device_real_mode = args.device_real_mode || c.device.real_mode;
+        // In real mode, force h264/aac files to None (uses camera sensor).
+        let (device_h264_file, device_aac_file) = if device_real_mode {
+            (None, None)
+        } else {
+            (device_h264_file, device_aac_file)
+        };
         let ffmpeg_log_level =
             Self::ffmpeg_log_level_from_config(Some(c), args.ffmpeg_log_level.as_deref());
         let rtsp_host = if launch_on_device {
@@ -591,6 +630,51 @@ impl EffectiveConfig {
             )
         };
 
+        // Build streams list.
+        let streams = if !c.device.streams.is_empty() {
+            // Explicit [[device.streams]] from TOML config.
+            c.device
+                .streams
+                .iter()
+                .map(|s| StreamConfig {
+                    label: s.label.clone(),
+                    rtsp_stream: s.rtsp_stream.clone(),
+                    httpflv_path: s.httpflv_path.clone(),
+                })
+                .collect()
+        } else if device_real_mode && !sources.rtsp_stream {
+            // Real mode with no explicit --rtsp-stream: default to main + sub.
+            vec![
+                StreamConfig {
+                    label: "main".to_string(),
+                    rtsp_stream: "/main".to_string(),
+                    httpflv_path: "/live/main.flv".to_string(),
+                },
+                StreamConfig {
+                    label: "sub".to_string(),
+                    rtsp_stream: "/sub".to_string(),
+                    httpflv_path: "/live/sub.flv".to_string(),
+                },
+            ]
+        } else {
+            // Single stream (backward compatible).
+            vec![StreamConfig {
+                label: String::new(),
+                rtsp_stream: rtsp_stream.clone(),
+                httpflv_path: httpflv_path.clone(),
+            }]
+        };
+
+        // First stream becomes the primary for backward compatibility.
+        let rtsp_stream = streams
+            .first()
+            .map(|s| s.rtsp_stream.clone())
+            .unwrap_or(rtsp_stream);
+        let httpflv_path = streams
+            .first()
+            .map(|s| s.httpflv_path.clone())
+            .unwrap_or(httpflv_path);
+
         Self {
             rtsp_host,
             rtsp_port,
@@ -633,6 +717,8 @@ impl EffectiveConfig {
             device_h264_file,
             device_aac_file,
             device_loop_playback,
+            device_real_mode,
+            streams,
             no_launch,
             h264_file,
             output,
@@ -971,6 +1057,13 @@ pub struct Args {
         help = "Loop device-side playback when using --device-h264-file / --device-aac-file."
     )]
     pub device_loop_playback: bool,
+
+    #[arg(
+        long,
+        help_heading = "Device",
+        help = "Launch onvif-rust on device in real mode (camera sensor, no --validation-mode). Validates both main and sub streams by default."
+    )]
+    pub device_real_mode: bool,
 }
 
 #[derive(ValueEnum, Clone, Copy, Debug)]
@@ -1415,5 +1508,117 @@ harness-startup-latency-ms = 3500
     fn test_load_config_path_override_missing_file_error() {
         let result = load_config(Some("/nonexistent/path/rtsp_validation.toml"));
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_device_real_mode_clears_h264_and_aac() {
+        let parsed = parse_args_from(["rtsp_validation_tool", "--device-real-mode"]).unwrap();
+        let mut cfg = RtspValidationConfig::default();
+        cfg.device.h264_file = Some("/mnt/test.h264".to_string());
+        cfg.device.aac_file = Some("/mnt/test.aac".to_string());
+
+        let effective =
+            EffectiveConfig::from_config_and_args(Some(&cfg), &parsed.args, &parsed.sources);
+        assert!(effective.device_real_mode);
+        assert!(effective.device_h264_file.is_none());
+        assert!(effective.device_aac_file.is_none());
+    }
+
+    #[test]
+    fn test_device_real_mode_defaults_two_streams() {
+        let parsed = parse_args_from(["rtsp_validation_tool", "--device-real-mode"]).unwrap();
+        let effective = EffectiveConfig::from_config_and_args(None, &parsed.args, &parsed.sources);
+        assert_eq!(effective.streams.len(), 2);
+        assert_eq!(effective.streams[0].label, "main");
+        assert_eq!(effective.streams[0].rtsp_stream, "/main");
+        assert_eq!(effective.streams[0].httpflv_path, "/live/main.flv");
+        assert_eq!(effective.streams[1].label, "sub");
+        assert_eq!(effective.streams[1].rtsp_stream, "/sub");
+        assert_eq!(effective.streams[1].httpflv_path, "/live/sub.flv");
+    }
+
+    #[test]
+    fn test_device_real_mode_explicit_stream_override() {
+        let parsed = parse_args_from([
+            "rtsp_validation_tool",
+            "--device-real-mode",
+            "--rtsp-stream",
+            "/sub",
+        ])
+        .unwrap();
+        let effective = EffectiveConfig::from_config_and_args(None, &parsed.args, &parsed.sources);
+        assert_eq!(effective.streams.len(), 1);
+        assert_eq!(effective.streams[0].rtsp_stream, "/sub");
+    }
+
+    #[test]
+    fn test_device_real_mode_from_config_toml() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test.toml");
+        std::fs::write(
+            &path,
+            r#"
+[device]
+real-mode = true
+"#,
+        )
+        .unwrap();
+        let result = load_config(Some(path.to_str().unwrap())).unwrap();
+        let config = result.expect("some config");
+        assert!(config.device.real_mode);
+
+        let parsed = parse_args_from(["rtsp_validation_tool"]).unwrap();
+        let effective =
+            EffectiveConfig::from_config_and_args(Some(&config), &parsed.args, &parsed.sources);
+        assert!(effective.device_real_mode);
+        assert_eq!(effective.streams.len(), 2);
+    }
+
+    #[test]
+    fn test_device_real_mode_streams_from_config() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test.toml");
+        std::fs::write(
+            &path,
+            r#"
+[device]
+real-mode = true
+
+[[device.streams]]
+label = "cam1"
+rtsp-stream = "/cam1"
+httpflv-path = "/live/cam1.flv"
+
+[[device.streams]]
+label = "cam2"
+rtsp-stream = "/cam2"
+httpflv-path = "/live/cam2.flv"
+"#,
+        )
+        .unwrap();
+        let result = load_config(Some(path.to_str().unwrap())).unwrap();
+        let config = result.expect("some config");
+
+        let parsed = parse_args_from(["rtsp_validation_tool"]).unwrap();
+        let effective =
+            EffectiveConfig::from_config_and_args(Some(&config), &parsed.args, &parsed.sources);
+        assert_eq!(effective.streams.len(), 2);
+        assert_eq!(effective.streams[0].label, "cam1");
+        assert_eq!(effective.streams[0].rtsp_stream, "/cam1");
+        assert_eq!(effective.streams[1].label, "cam2");
+        assert_eq!(effective.streams[1].rtsp_stream, "/cam2");
+        // First stream becomes primary
+        assert_eq!(effective.rtsp_stream, "/cam1");
+        assert_eq!(effective.httpflv_path, "/live/cam1.flv");
+    }
+
+    #[test]
+    fn test_non_real_mode_single_stream() {
+        let parsed = parse_args_from(["rtsp_validation_tool"]).unwrap();
+        let effective = EffectiveConfig::from_config_and_args(None, &parsed.args, &parsed.sources);
+        assert!(!effective.device_real_mode);
+        assert_eq!(effective.streams.len(), 1);
+        assert_eq!(effective.streams[0].label, "");
+        assert_eq!(effective.streams[0].rtsp_stream, DEFAULT_RTSP_STREAM);
     }
 }

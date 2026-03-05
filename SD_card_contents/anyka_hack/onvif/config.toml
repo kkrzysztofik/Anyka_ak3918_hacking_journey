@@ -87,6 +87,10 @@ hardware_id = "ak3918"
 # Device hostname
 hostname = "ipcam"
 
+# ISP sensor config file path (leave empty for auto-detection)
+# Auto-detection searches: /mnt/anyka_hack/onvif/, /etc/jffs2/, /usr/local/
+isp_config_path = "/data/sensor/isp_gc1084.conf"
+
 # Device UUID (leave empty to auto-generate)
 uuid = ""
 
@@ -167,6 +171,14 @@ file_name = "access"
 [media]
 # RTSP server port (1-65535)
 rtsp_port = 554
+
+# HTTP-FLV server port (1-65535)
+httpflv_port = 8080
+
+# Enable live streaming via RTSP and HTTP-FLV (true/false)
+# When enabled, the platform's encoded frames are bridged to StreamsHub and
+# served at rtsp://<ip>:<rtsp_port>/main, /sub and http://<ip>:<httpflv_port>/live/main.flv, /sub.flv
+streaming_enabled = true
 
 # Snapshot HTTP port (0 to use main server port)
 snapshot_port = 0
@@ -263,16 +275,16 @@ enabled = true
 name = "Profile1"
 
 # Video width (160-3840)
-width = 1920
+width = 1280
 
 # Video height (120-2160)
-height = 1080
+height = 720
 
 # Frame rate (1-60)
-framerate = 25
+framerate = 15
 
 # Video bitrate in kbps (64-16384)
-bitrate = 4000
+bitrate = 2000
 
 # Video encoding (H264, H265, MJPEG)
 encoding = "H264"

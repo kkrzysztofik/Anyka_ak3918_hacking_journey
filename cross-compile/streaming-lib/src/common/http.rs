@@ -58,7 +58,7 @@ impl Uri {
         } else if url.starts_with("/whip") || url.starts_with("/whep") {
             Schema::WEBRTC
         } else {
-            log::warn!("cannot judge the schema: {}", url);
+            tracing::warn!(url = %url, "cannot_judge_schema");
             Schema::UNKNOWN
         }
     }
@@ -291,10 +291,10 @@ impl Unmarshal for HttpRequest {
         }
 
         let header_end_idx = idx + 4;
-        log::trace!(
-            "header_end_idx is: {} {}",
-            header_end_idx,
-            request_data.len()
+        tracing::trace!(
+            header_end_idx = header_end_idx,
+            request_data_len = request_data.len(),
+            "parsed_header"
         );
 
         let body = if request_data.len() > header_end_idx {

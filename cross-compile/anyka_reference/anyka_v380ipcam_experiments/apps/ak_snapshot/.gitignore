@@ -1,7 +1,0 @@
-
-
-build
-obj
-.config.mk
-.flash.conf.json
-
