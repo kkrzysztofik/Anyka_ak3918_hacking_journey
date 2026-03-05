@@ -3,11 +3,7 @@
 //! This module provides functions for extracting SOAP actions from requests
 //! and parsing SOAP request bodies.
 
-use axum::{
-    body::Body,
-    extract::Request,
-    response::Response,
-};
+use axum::{body::Body, extract::Request, response::Response};
 use serde::de::DeserializeOwned;
 
 use super::response::error_response;
