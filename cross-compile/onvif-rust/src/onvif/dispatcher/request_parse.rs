@@ -6,11 +6,11 @@
 use axum::{
     body::Body,
     extract::Request,
-    http::header,
-    response::{IntoResponse, Response},
+    response::Response,
 };
 use serde::de::DeserializeOwned;
 
+use super::response::error_response;
 use crate::utils::validation::{SecurityError, SecurityValidator};
 
 /// Parse XML body with security validation and deserialization.
@@ -49,19 +49,6 @@ pub fn parse_body<T: DeserializeOwned>(
     quick_xml::de::from_str(body_xml).map_err(|e| {
         crate::onvif::error::OnvifError::WellFormed(format!("Invalid request XML: {}", e))
     })
-}
-
-/// Build an error response from an OnvifError.
-pub(super) fn error_response(error: crate::onvif::error::OnvifError) -> Response {
-    let status = error.http_status();
-    let fault_xml = error.to_soap_fault();
-
-    (
-        status,
-        [(header::CONTENT_TYPE, "application/soap+xml; charset=utf-8")],
-        fault_xml,
-    )
-        .into_response()
 }
 
 /// Extract the SOAPAction from request headers.

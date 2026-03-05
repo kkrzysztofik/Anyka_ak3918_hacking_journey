@@ -20,9 +20,9 @@ use crate::utils::validation::SecurityValidator;
 
 use crate::onvif::dispatcher::auth as auth_mod;
 use crate::onvif::dispatcher::request_parse::{
-    error_response, extract_action, extract_soap_action, read_and_parse_request,
+    extract_action, extract_soap_action, read_and_parse_request,
 };
-use crate::onvif::dispatcher::response as response_mod;
+use crate::onvif::dispatcher::response::{self as response_mod, error_response};
 use crate::onvif::dispatcher::{AuthContext, ServiceHandler};
 
 // Re-export ServiceDispatcher from mod.rs

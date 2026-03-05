@@ -12,7 +12,7 @@ use crate::config::{PasswordManager, UserAccount, UserStorage};
 
 use crate::onvif::auth_requirements::AuthLevel;
 use crate::onvif::dispatcher::ServiceDispatcher;
-use crate::onvif::dispatcher::request_parse::error_response;
+use crate::onvif::dispatcher::response::error_response;
 use crate::onvif::dispatcher::{AuthContext, ServiceHandler};
 use crate::onvif::error::OnvifError;
 use crate::onvif::soap::UsernameToken;

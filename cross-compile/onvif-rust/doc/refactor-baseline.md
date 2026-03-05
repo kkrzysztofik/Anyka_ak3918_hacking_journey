@@ -408,7 +408,7 @@ The following performance targets must be maintained during refactoring:
 | Parse/build cycle | <2ms per iteration | See note below |
 | Full test suite | <15s total | `cargo test` |
 
-**Note on Performance Tests:** The test suite currently does not include dedicated performance benchmarks. The targets above represent expected behavior based on the existing implementation. Consider adding `baseline_perf.rs` with `#[bench]` tests if stricter validation is needed.
+**Note on Performance Tests:** Dedicated performance benchmark tests have been deferred to a future task. The targets above represent expected behavior based on the existing implementation and are provided as guidance for refactoring. The full test suite execution time (<15s) serves as a coarse performance regression gate. Future work may add `criterion`-based benchmarks in `benches/` if stricter validation is needed.
 
 ---
 
