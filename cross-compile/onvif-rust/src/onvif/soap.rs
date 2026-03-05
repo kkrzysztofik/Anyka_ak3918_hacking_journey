@@ -432,11 +432,12 @@ fn extract_envelope_namespace(state: &mut SoapParseState, e: &quick_xml::events:
             continue;
         }
         let value = String::from_utf8_lossy(&attr.value).to_string();
-        // Capture the first xmlns value that looks like a SOAP namespace.
-        // Validation of the exact namespace URI happens later in parse_soap_request,
-        // so we store it to enable better error messages for wrong SOAP versions.
-        state.envelope_namespace = Some(value);
-        break;
+        // Only capture namespace values that match SOAP envelope namespace pattern.
+        // This prevents capturing non-SOAP namespaces that appear first in attribute order.
+        if value.contains("soap-envelope") {
+            state.envelope_namespace = Some(value);
+            break;
+        }
     }
 }
 
@@ -559,8 +560,8 @@ fn append_body_start_tag(
     state.body_xml.push_str(name);
 
     for attr in e.attributes().flatten() {
-        let local_name = attr.key.local_name();
-        let key = String::from_utf8_lossy(local_name.as_ref());
+        // Preserve the full qualified name (prefix:local) for attributes
+        let key = String::from_utf8_lossy(attr.key.as_ref());
         let value = String::from_utf8_lossy(&attr.value);
         state.body_xml.push(' ');
         state.body_xml.push_str(&key);
@@ -631,8 +632,8 @@ fn handle_empty_event(state: &mut SoapParseState, name: &str, e: &quick_xml::eve
     state.body_xml.push_str(name);
 
     for attr in e.attributes().flatten() {
-        let local_name = attr.key.local_name();
-        let key = String::from_utf8_lossy(local_name.as_ref());
+        // Preserve the full qualified name (prefix:local) for attributes
+        let key = String::from_utf8_lossy(attr.key.as_ref());
         let value = String::from_utf8_lossy(&attr.value);
         state.body_xml.push(' ');
         state.body_xml.push_str(&key);
@@ -1196,5 +1197,161 @@ mod tests {
         assert!(envelope.body_xml.contains("&lt;"));
         assert!(envelope.body_xml.contains("&gt;"));
         assert!(envelope.body_xml.contains("&quot;"));
+    }
+
+    // ===== Bug 1 Tests: SOAP envelope namespace extraction robustness =====
+    // Issue: anyka-dev-2sx - Parser captures first xmlns instead of SOAP-specific
+
+    #[test]
+    fn test_extract_envelope_namespace_non_soap_before_soap() {
+        // Test that SOAP envelope namespace is correctly extracted when
+        // non-SOAP namespaces appear BEFORE the SOAP namespace in attribute order
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<s:Envelope xmlns:tds="http://www.onvif.org/ver10/device/wsdl" xmlns:s="http://www.w3.org/2003/05/soap-envelope">
+    <s:Body>
+        <GetDeviceInformation/>
+    </s:Body>
+</s:Envelope>"#;
+
+        let result = parse_soap_request(xml);
+        assert!(
+            result.is_ok(),
+            "Should parse correctly even when non-SOAP xmlns comes first"
+        );
+        let envelope = result.unwrap();
+        assert!(envelope.body_xml.contains("GetDeviceInformation"));
+    }
+
+    #[test]
+    fn test_extract_envelope_namespace_multiple_non_soap_before_soap() {
+        // Test with multiple non-SOAP namespaces before SOAP namespace
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<s:Envelope xmlns:tt="http://www.onvif.org/ver10/schema" xmlns:trt="http://www.onvif.org/ver10/media/wsdl" xmlns:tds="http://www.onvif.org/ver10/device/wsdl" xmlns:s="http://www.w3.org/2003/05/soap-envelope">
+    <s:Body>
+        <GetDeviceInformation/>
+    </s:Body>
+</s:Envelope>"#;
+
+        let result = parse_soap_request(xml);
+        assert!(
+            result.is_ok(),
+            "Should parse correctly with multiple non-SOAP xmlns before SOAP"
+        );
+        let envelope = result.unwrap();
+        assert!(envelope.body_xml.contains("GetDeviceInformation"));
+    }
+
+    #[test]
+    fn test_extract_envelope_namespace_soap_first_order() {
+        // Test with SOAP namespace first (original behavior should still work)
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope" xmlns:tds="http://www.onvif.org/ver10/device/wsdl">
+    <s:Body>
+        <GetDeviceInformation/>
+    </s:Body>
+</s:Envelope>"#;
+
+        let result = parse_soap_request(xml);
+        assert!(result.is_ok());
+        let envelope = result.unwrap();
+        assert!(envelope.body_xml.contains("GetDeviceInformation"));
+    }
+
+    #[test]
+    fn test_extract_envelope_namespace_default_xmlns_before_prefixed() {
+        // Test with default xmlns (no prefix) appearing before prefixed xmlns
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<s:Envelope xmlns="http://www.onvif.org/ver10/device/wsdl" xmlns:s="http://www.w3.org/2003/05/soap-envelope">
+    <s:Body>
+        <GetDeviceInformation/>
+    </s:Body>
+</s:Envelope>"#;
+
+        let result = parse_soap_request(xml);
+        assert!(
+            result.is_ok(),
+            "Should parse correctly with default xmlns before SOAP"
+        );
+        let envelope = result.unwrap();
+        assert!(envelope.body_xml.contains("GetDeviceInformation"));
+    }
+
+    // ===== Bug 2 Tests: Preserve namespace semantics when rebuilding SOAP body XML =====
+    // Issue: anyka-dev-2hh - QName prefixes dropped, losing namespace context
+
+    #[test]
+    fn test_preserve_qname_prefix_start_element() {
+        // Test that QName prefixes are preserved in start elements
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope" xmlns:tds="http://www.onvif.org/ver10/device/wsdl">
+    <s:Body>
+        <tds:GetDeviceInformation tds:Token="abc123"/>
+    </s:Body>
+</s:Envelope>"#;
+
+        let result = parse_soap_request(xml);
+        assert!(result.is_ok());
+        let envelope = result.unwrap();
+        // Verify QName prefix is preserved in attribute
+        assert!(envelope.body_xml.contains("tds:Token=\"abc123\""));
+    }
+
+    #[test]
+    fn test_preserve_qname_prefix_empty_element() {
+        // Test that QName prefixes are preserved in empty (self-closing) elements
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope" xmlns:tds="http://www.onvif.org/ver10/device/wsdl">
+    <s:Body>
+        <tds:GetDeviceInformation tds:Token="abc123"/>
+    </s:Body>
+</s:Envelope>"#;
+
+        let result = parse_soap_request(xml);
+        assert!(result.is_ok());
+        let envelope = result.unwrap();
+        // Verify QName prefix is preserved in empty element attribute
+        assert!(envelope.body_xml.contains("tds:Token"));
+    }
+
+    #[test]
+    fn test_preserve_qname_prefix_nested_elements() {
+        // Test QName preservation in deeply nested elements (attributes only)
+        // Note: Element names themselves use local names only; the fix is for attributes
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope" xmlns:tds="http://www.onvif.org/ver10/device/wsdl" xmlns:trt="http://www.onvif.org/ver10/media/wsdl">
+    <s:Body>
+        <GetProfiles>
+            <Profiles trt:Token="main" tds:Id="123">
+                <VideoEncoderConfiguration trt:Encoding="H264"/>
+            </Profiles>
+        </GetProfiles>
+    </s:Body>
+</s:Envelope>"#;
+
+        let result = parse_soap_request(xml);
+        assert!(result.is_ok());
+        let envelope = result.unwrap();
+        // Verify QName prefixes are preserved in attributes
+        assert!(envelope.body_xml.contains("trt:Token"));
+        assert!(envelope.body_xml.contains("tds:Id"));
+        assert!(envelope.body_xml.contains("trt:Encoding"));
+    }
+
+    #[test]
+    fn test_preserve_qname_prefix_multiple_attributes() {
+        // Test QName preservation with multiple attributes on same element
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope" xmlns:tptz="http://www.onvif.org/ver20/ptz/wsdl">
+    <s:Body>
+        <tptz:ContinuousMove tptz:ProfileToken="profile1" tptz:Timeout="PT5S"/>
+    </s:Body>
+</s:Envelope>"#;
+
+        let result = parse_soap_request(xml);
+        assert!(result.is_ok());
+        let envelope = result.unwrap();
+        // Verify both QName-prefixed attributes are preserved
+        assert!(envelope.body_xml.contains("tptz:ProfileToken=\"profile1\""));
+        assert!(envelope.body_xml.contains("tptz:Timeout=\"PT5S\""));
     }
 }

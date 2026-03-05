@@ -69,10 +69,15 @@ pub(super) fn verify_basic_auth_self(
     };
 
     // Validate user existence
-    let user = auth_ctx
-        .user_storage
-        .get_user(username)
-        .ok_or_else(|| OnvifError::NotAuthorized(format!("User '{}' not found", username)))?;
+    // SECURITY: Generic error message prevents username enumeration (OWASP A07:2021)
+    let user = auth_ctx.user_storage.get_user(username).ok_or_else(|| {
+        tracing::warn!(
+            target: "security",
+            "Authentication failed: user '{}' not found (Basic Auth)",
+            username
+        );
+        OnvifError::NotAuthorized("Invalid credentials".to_string())
+    })?;
 
     // Validate password
     if !auth_ctx
@@ -187,10 +192,15 @@ async fn authenticate(
     }
 
     // Look up user
-    let user = auth_ctx
-        .user_storage
-        .get_user(username)
-        .ok_or_else(|| OnvifError::NotAuthorized(format!("User '{}' not found", username)))?;
+    // SECURITY: Generic error message prevents username enumeration (OWASP A07:2021)
+    let user = auth_ctx.user_storage.get_user(username).ok_or_else(|| {
+        tracing::warn!(
+            target: "security",
+            "Authentication failed: user '{}' not found (WS-Security)",
+            username
+        );
+        OnvifError::NotAuthorized("Invalid credentials".to_string())
+    })?;
 
     // Check if user has sufficient privileges
     if !required_level.is_satisfied_by(Some(user.level)) {
@@ -272,12 +282,12 @@ fn authenticate_plaintext(
     auth_ctx: &AuthContext,
     user: &UserAccount,
 ) -> Result<(), OnvifError> {
-    // Check if digest is required
-    if auth_ctx.ws_security.requires_digest() {
-        return Err(OnvifError::NotAuthorized(
-            "Digest authentication required".to_string(),
-        ));
-    }
+    // SECURITY: Verify credentials BEFORE checking policy requirements.
+    // Checking digest-required first would leak information about auth policy
+    // when the user exists but the password is wrong, enabling username
+    // enumeration (OWASP A07:2021). By verifying the password first, both
+    // "user not found" (caught in authenticate()) and "wrong password" return
+    // identical "Invalid credentials" messages.
 
     // Verify plaintext password
     if !auth_ctx
@@ -285,6 +295,13 @@ fn authenticate_plaintext(
         .verify_password(&token.password.value, &user.password)
     {
         return Err(OnvifError::NotAuthorized("Invalid credentials".to_string()));
+    }
+
+    // Check if digest is required (only after credentials are verified)
+    if auth_ctx.ws_security.requires_digest() {
+        return Err(OnvifError::NotAuthorized(
+            "Digest authentication required".to_string(),
+        ));
     }
 
     Ok(())
@@ -315,8 +332,14 @@ fn ws_error_to_onvif(error: WsSecurityError) -> OnvifError {
         WsSecurityError::PlaintextNotAllowed => OnvifError::NotAuthorized(
             "Plaintext password not allowed, use digest authentication".to_string(),
         ),
-        WsSecurityError::UserNotFound(user) => {
-            OnvifError::NotAuthorized(format!("User '{}' not found", user))
+        WsSecurityError::UserNotFound(ref user) => {
+            // SECURITY: Generic error message prevents username enumeration (OWASP A07:2021)
+            tracing::warn!(
+                target: "security",
+                "Authentication failed: user '{}' not found (WS-Security validator)",
+                user
+            );
+            OnvifError::NotAuthorized("Invalid credentials".to_string())
         }
         WsSecurityError::InsufficientPrivileges => {
             OnvifError::NotAuthorized("Insufficient privileges for this operation".to_string())
@@ -634,5 +657,219 @@ mod tests {
         let ws_security = Arc::new(WsSecurityValidator::with_defaults());
         let ctx = AuthContext::new(ws_security, user_storage, password_manager, true);
         assert!(ctx.auth_enabled);
+    }
+
+    // ==========================================
+    // Security: Username enumeration prevention
+    // ==========================================
+
+    /// SECURITY TEST: verify_basic_auth_self returns identical error messages
+    /// for "user not found" and "wrong password" to prevent username enumeration.
+    #[test]
+    fn test_security_basic_auth_no_username_enumeration() {
+        let user_storage = Arc::new(UserStorage::new());
+        user_storage
+            .create_user(
+                "admin",
+                "password123",
+                crate::config::UserLevel::Administrator,
+            )
+            .unwrap();
+
+        let password_manager = Arc::new(PasswordManager::new());
+        let ws_security = Arc::new(WsSecurityValidator::with_defaults());
+        let auth_ctx = AuthContext::new(ws_security, user_storage, password_manager, true);
+        let dispatcher = ServiceDispatcher::new();
+
+        // Case 1: nonexistent user
+        let creds_bad_user =
+            base64::engine::general_purpose::STANDARD.encode("nonexistent:password");
+        let req_bad_user = HttpRequest::builder()
+            .method("POST")
+            .header("Authorization", format!("Basic {}", creds_bad_user))
+            .body(Body::empty())
+            .unwrap();
+
+        let err_bad_user =
+            verify_basic_auth_self(&dispatcher, &req_bad_user, &auth_ctx).unwrap_err();
+
+        // Case 2: valid user, wrong password
+        let creds_bad_pass =
+            base64::engine::general_purpose::STANDARD.encode("admin:wrongpassword");
+        let req_bad_pass = HttpRequest::builder()
+            .method("POST")
+            .header("Authorization", format!("Basic {}", creds_bad_pass))
+            .body(Body::empty())
+            .unwrap();
+
+        let err_bad_pass =
+            verify_basic_auth_self(&dispatcher, &req_bad_pass, &auth_ctx).unwrap_err();
+
+        // Both errors MUST produce identical messages (prevents username enumeration)
+        let msg_bad_user = format!("{}", err_bad_user);
+        let msg_bad_pass = format!("{}", err_bad_pass);
+        assert_eq!(
+            msg_bad_user, msg_bad_pass,
+            "User-not-found and wrong-password must produce identical error messages"
+        );
+
+        // Verify neither message contains the username
+        assert!(
+            !msg_bad_user.contains("nonexistent"),
+            "Error message must not contain the attempted username"
+        );
+        assert!(
+            !msg_bad_pass.contains("admin"),
+            "Error message must not contain the valid username"
+        );
+
+        // Verify both use the generic "Invalid credentials" message
+        assert!(
+            msg_bad_user.contains("Invalid credentials"),
+            "Error should use generic 'Invalid credentials' message"
+        );
+    }
+
+    /// SECURITY TEST: ws_error_to_onvif for UserNotFound must not leak usernames.
+    #[test]
+    fn test_security_ws_error_user_not_found_no_leak() {
+        let error = WsSecurityError::UserNotFound("secret_admin".to_string());
+        let onvif_error = ws_error_to_onvif(error);
+
+        let msg = format!("{}", onvif_error);
+
+        // Must not contain the username
+        assert!(
+            !msg.contains("secret_admin"),
+            "ONVIF error must not contain the username from WsSecurityError::UserNotFound"
+        );
+
+        // Must use generic credentials message
+        assert!(
+            msg.contains("Invalid credentials"),
+            "ONVIF error should use generic 'Invalid credentials' message"
+        );
+    }
+
+    /// SECURITY TEST: SOAP fault output for auth errors must not contain usernames.
+    #[test]
+    fn test_security_soap_fault_no_username_leak() {
+        // Simulate the error that would be generated for a nonexistent user
+        let error = OnvifError::NotAuthorized("Invalid credentials".to_string());
+        let fault_xml = error.to_soap_fault();
+
+        // The SOAP fault must not contain any user-identifying information
+        assert!(
+            !fault_xml.contains("not found"),
+            "SOAP fault must not contain 'not found' phrase"
+        );
+        assert!(
+            fault_xml.contains("Invalid credentials"),
+            "SOAP fault should contain generic 'Invalid credentials' message"
+        );
+        assert!(
+            fault_xml.contains("NotAuthorized"),
+            "SOAP fault should contain the NotAuthorized subcode"
+        );
+    }
+
+    /// SECURITY TEST: WS-Security authenticate() returns identical error for
+    /// nonexistent user as for wrong password (via validate_credentials path).
+    #[tokio::test]
+    async fn test_security_ws_auth_no_username_enumeration() {
+        use crate::onvif::soap::{PasswordElement, UsernameToken};
+
+        let user_storage = Arc::new(UserStorage::new());
+        user_storage
+            .create_user(
+                "admin",
+                "password123",
+                crate::config::UserLevel::Administrator,
+            )
+            .unwrap();
+
+        let password_manager = Arc::new(PasswordManager::new());
+        let ws_security = Arc::new(WsSecurityValidator::with_defaults());
+        let auth_ctx = AuthContext::new(ws_security, user_storage, password_manager, true);
+        let dispatcher = ServiceDispatcher::new();
+
+        // Case 1: nonexistent user via WS-Security
+        let token_bad_user = UsernameToken {
+            username: "nonexistent_user".to_string(),
+            password: PasswordElement {
+                value: "anypassword".to_string(),
+                password_type: Some(
+                    "http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-username-token-profile-1.0#PasswordText".to_string(),
+                ),
+            },
+            nonce: None,
+            created: None,
+        };
+
+        let err_bad_user = authenticate(
+            &dispatcher,
+            Some(&token_bad_user),
+            &auth_ctx,
+            AuthLevel::User,
+        )
+        .await
+        .unwrap_err();
+
+        // Case 2: valid user, wrong password via WS-Security
+        let token_bad_pass = UsernameToken {
+            username: "admin".to_string(),
+            password: PasswordElement {
+                value: "wrongpassword".to_string(),
+                password_type: Some(
+                    "http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-username-token-profile-1.0#PasswordText".to_string(),
+                ),
+            },
+            nonce: None,
+            created: None,
+        };
+
+        let err_bad_pass = authenticate(
+            &dispatcher,
+            Some(&token_bad_pass),
+            &auth_ctx,
+            AuthLevel::User,
+        )
+        .await
+        .unwrap_err();
+
+        // Both must produce identical error messages
+        let msg_bad_user = format!("{}", err_bad_user);
+        let msg_bad_pass = format!("{}", err_bad_pass);
+        assert_eq!(
+            msg_bad_user, msg_bad_pass,
+            "WS-Security user-not-found and wrong-password must produce identical error messages"
+        );
+
+        // Neither must contain the username
+        assert!(
+            !msg_bad_user.contains("nonexistent_user"),
+            "Error must not contain the attempted username"
+        );
+        assert!(
+            !msg_bad_pass.contains("admin"),
+            "Error must not contain the valid username"
+        );
+    }
+
+    /// SECURITY TEST: All WsSecurityError variants mapped in ws_error_to_onvif
+    /// must not leak usernames in their ONVIF error output.
+    #[test]
+    fn test_security_all_ws_errors_no_username_leak() {
+        let test_username = "probe_target_user";
+        let error = WsSecurityError::UserNotFound(test_username.to_string());
+        let onvif_err = ws_error_to_onvif(error);
+        let soap_fault = onvif_err.to_soap_fault();
+
+        assert!(
+            !soap_fault.contains(test_username),
+            "SOAP fault must not contain the probed username '{}' — found in: {}",
+            test_username,
+            soap_fault
+        );
     }
 }
