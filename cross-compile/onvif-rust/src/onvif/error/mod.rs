@@ -31,10 +31,13 @@
 //! assert!(fault.contains("ActionNotSupported"));
 //! ```
 
+mod fault_mapping;
+
 use axum::http::StatusCode;
 use thiserror::Error;
 
 use super::soap::build_soap_fault;
+use crate::onvif::error::fault_mapping::fault_details;
 
 /// Result type for ONVIF operations.
 pub type OnvifResult<T> = Result<T, OnvifError>;
@@ -113,63 +116,9 @@ impl OnvifError {
     ///
     /// A complete SOAP fault envelope as an XML string.
     pub fn to_soap_fault(&self) -> String {
-        let (code, subcode, reason) = self.fault_details();
-        build_soap_fault(&code, &subcode, &reason)
-    }
-
-    /// Get the SOAP fault details (code, subcode, reason).
-    fn fault_details(&self) -> (String, String, String) {
-        match self {
-            OnvifError::ActionNotSupported(action) => (
-                "s:Sender".to_string(),
-                "ter:ActionNotSupported".to_string(),
-                format!("Action '{}' is not supported", action),
-            ),
-            OnvifError::WellFormed(msg) => (
-                "s:Sender".to_string(),
-                "ter:WellFormed".to_string(),
-                msg.clone(),
-            ),
-            OnvifError::InvalidArgVal { subcode, reason } => (
-                "s:Sender".to_string(),
-                format!("ter:InvalidArgVal/{}", subcode),
-                reason.clone(),
-            ),
-            OnvifError::HardwareFailure(msg) => (
-                "s:Receiver".to_string(),
-                "ter:HardwareFailure".to_string(),
-                msg.clone(),
-            ),
-            OnvifError::NotAuthorized(reason) => (
-                "s:Sender".to_string(),
-                "ter:NotAuthorized".to_string(),
-                if reason.is_empty() {
-                    "The action requires authentication".to_string()
-                } else {
-                    reason.clone()
-                },
-            ),
-            OnvifError::MaxUsers => (
-                "s:Sender".to_string(),
-                "ter:MaxUsers".to_string(),
-                "Maximum number of users has been reached".to_string(),
-            ),
-            OnvifError::ConfigurationConflict(msg) => (
-                "s:Sender".to_string(),
-                "ter:ConfigurationConflict".to_string(),
-                msg.clone(),
-            ),
-            OnvifError::Internal(msg) => (
-                "s:Receiver".to_string(),
-                "ter:InternalError".to_string(),
-                msg.clone(),
-            ),
-            OnvifError::NotFound(msg) => (
-                "s:Sender".to_string(),
-                "ter:NotFound".to_string(),
-                msg.clone(),
-            ),
-        }
+        let details = fault_details(self);
+        let (code, subcode, reason) = details.as_tuple();
+        build_soap_fault(code, subcode, reason)
     }
 
     /// Create an InvalidArgVal error with a specific subcode.
