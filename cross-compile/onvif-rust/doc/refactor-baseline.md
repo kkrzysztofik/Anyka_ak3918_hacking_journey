@@ -16,7 +16,7 @@ This document serves as the **authoritative reference** for the ONVIF service re
 
 The refactoring covers the core ONVIF infrastructure components:
 
-- **SOAP Parsing** (`src/onvif/soap.rs`): Envelope parsing, namespace extraction, WS-Security extraction
+- **SOAP Parsing** (`src/onvif/soap/`): Envelope parsing, namespace extraction, WS-Security extraction
 - **Service Dispatcher** (`src/onvif/dispatcher.rs`): Action extraction, routing, authentication, error mapping
 - **Authentication** (`src/onvif/ws_security.rs`, `src/onvif/auth_requirements.rs`): Basic Auth, WS-Security, auth level enforcement
 - **Error Handling** (`src/onvif/error.rs`): HTTP status mapping, SOAP fault generation
@@ -32,7 +32,7 @@ The refactoring covers the core ONVIF infrastructure components:
 
 ## 2. Behavior Contract: SOAP Parsing
 
-**Module:** `src/onvif/soap.rs`  
+**Module:** `src/onvif/soap/` (modular: model.rs, parse.rs, build.rs)  
 **Public API:** `parse_soap_request(xml: &str) -> Result<RawSoapEnvelope, SoapParseError>`
 
 ### 2.1 Input → Output Contract
@@ -274,7 +274,7 @@ This section documents known bugs that should **NOT** be fixed during refactorin
 
 **Title:** Namespace extraction captures first xmlns attribute instead of SOAP envelope namespace
 
-**Location:** `src/onvif/soap.rs:427-441` - `extract_envelope_namespace()`
+**Location:** `src/onvif/soap/parse.rs` - `extract_envelope_namespace()`
 
 **Description:**
 The current implementation captures the **first** xmlns declaration found in the Envelope element, rather than matching by namespace URI value. This causes issues when non-SOAP xmlns declarations appear before the SOAP namespace.
@@ -303,12 +303,12 @@ Modify `extract_envelope_namespace()` to filter by value matching `SOAP_ENVELOPE
 
 **Title:** QName prefix dropping in body XML reconstruction
 
-**Location:** Multiple locations in `src/onvif/soap.rs`:
-- Line 236: `e.local_name()` in start event
-- Line 240: `e.local_name()` in end event  
-- Line 244: `e.local_name()` in empty event
-- Lines 558-559: `append_body_start_tag()` - uses `name` parameter (already stripped)
-- Lines 618-620: `append_body_end_tag()` - uses stripped `name`
+**Location:** Multiple locations in `src/onvif/soap/parse.rs`:
+- `handle_start_event()`: uses `e.local_name()` in start event
+- `handle_end_event()`: uses `e.local_name()` in end event  
+- `handle_empty_event()`: uses `e.local_name()` in empty event
+- `append_body_start_tag()`: uses stripped `name` parameter
+- `append_body_end_tag()`: uses stripped `name`
 
 **Description:**
 The parser uses `quick_xml::events::BytesStart::local_name()` which returns only the local part of a QName, dropping any namespace prefix. This causes `tds:GetDeviceInformation` to become `GetDeviceInformation` in the reconstructed body XML.

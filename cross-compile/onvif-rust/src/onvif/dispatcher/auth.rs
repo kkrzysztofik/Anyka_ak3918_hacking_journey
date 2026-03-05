@@ -637,8 +637,8 @@ mod tests {
         dispatcher.register_service("custom", Arc::new(CustomAuthHandler));
 
         // Operator trying to access AdminOp (requires Administrator)
-        let credentials = base64::engine::general_purpose::STANDARD
-            .encode(format!("operator:{}", TEST_PASSWORD));
+        let credentials =
+            base64::engine::general_purpose::STANDARD.encode(format!("operator:{}", TEST_PASSWORD));
         let request = HttpRequest::builder()
             .method("POST")
             .header("Content-Type", "application/soap+xml")
