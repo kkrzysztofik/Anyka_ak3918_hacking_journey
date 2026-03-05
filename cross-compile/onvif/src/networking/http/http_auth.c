@@ -284,7 +284,8 @@ http_response_t http_auth_create_401_response(const struct http_auth_config* aut
   // Allocate content_type dynamically to avoid segmentation fault in http_response_free
   response.content_type = malloc(CONTENT_TYPE_BUFFER_SIZE);
   if (response.content_type) {
-    strcpy(response.content_type, "text/html");
+    strncpy(response.content_type, "text/html", CONTENT_TYPE_BUFFER_SIZE - 1);
+    response.content_type[CONTENT_TYPE_BUFFER_SIZE - 1] = '\0';
   }
 
   response.headers = NULL;
@@ -301,20 +302,24 @@ http_response_t http_auth_create_401_response(const struct http_auth_config* aut
                             auth_config->realm);
       if (result < 0 || (size_t)result >= sizeof(body)) {
         platform_log_error("Failed to format response body with realm");
-        strcpy(body, "<html><body><h1>401 Unauthorized</h1><p>Authentication required.</p></body></html>");
+        strncpy(body, "<html><body><h1>401 Unauthorized</h1><p>Authentication required.</p></body></html>", sizeof(body) - 1);
+        body[sizeof(body) - 1] = '\0';
       }
     } else {
       platform_log_warning("Invalid realm in 401 response, using default");
-      strcpy(body, "<html><body><h1>401 Unauthorized</h1><p>Authentication required.</p></body></html>");
+      strncpy(body, "<html><body><h1>401 Unauthorized</h1><p>Authentication required.</p></body></html>", sizeof(body) - 1);
+      body[sizeof(body) - 1] = '\0';
     }
   } else {
-    strcpy(body, "<html><body><h1>401 Unauthorized</h1><p>Authentication required.</p></body></html>");
+    strncpy(body, "<html><body><h1>401 Unauthorized</h1><p>Authentication required.</p></body></html>", sizeof(body) - 1);
+    body[sizeof(body) - 1] = '\0';
   }
 
   response.body_length = strlen(body);
   response.body = malloc(response.body_length + 1);
   if (response.body) {
-    strcpy(response.body, body);
+    strncpy(response.body, body, response.body_length);
+    response.body[response.body_length] = '\0';
   }
 
   // Add WWW-Authenticate header

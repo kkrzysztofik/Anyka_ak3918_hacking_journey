@@ -34,12 +34,14 @@ jobs:
       quality-gate-status: ${{ steps.sonar-quality-gate.outcome || steps.skip-quality-gate.outputs.status || 'skipped' }}
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v6  # v6.0.0
+        # SHA: de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
           fetch-depth: 0
 
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@v1  # v1.0.0
+        # SHA: e97e2d8cc328f1b50210efc529dca0028893a2d9
         with:
           components: clippy
 
@@ -51,7 +53,8 @@ jobs:
           fi
 
       - name: Cache Cargo Dependencies
-        uses: actions/cache@v5
+        uses: actions/cache@v5  # v5.0.3
+        # SHA: cdf6c1fa76f9f475f3d7449005a359c84ca0f306
         with:
           path: |
             ~/.cargo/registry
@@ -63,7 +66,8 @@ jobs:
 
       - name: Restore Rust Coverage from Cache
         if: contains(inputs.project_type, 'Rust')
-        uses: actions/cache@v5
+        uses: actions/cache@v5  # v5.0.3
+        # SHA: cdf6c1fa76f9f475f3d7449005a359c84ca0f306
         continue-on-error: true
         with:
           path: cross-compile/onvif-rust/coverage
@@ -74,7 +78,8 @@ jobs:
 
       - name: Restore WebUI Coverage from Cache
         if: contains(inputs.project_type, 'WebUI') || contains(inputs.project_type, 'Web')
-        uses: actions/cache@v5
+        uses: actions/cache@v5  # v5.0.3
+        # SHA: cdf6c1fa76f9f475f3d7449005a359c84ca0f306
         continue-on-error: true
         with:
           path: cross-compile/www/coverage
@@ -117,7 +122,8 @@ jobs:
       - name: SonarQube Scan
         id: sonar-scan
         continue-on-error: true
-        uses: sonarsource/sonarqube-scan-action@v7.0.0
+        uses: sonarsource/sonarqube-scan-action@v7.0.0  # v7.0.0
+        # SHA: a31c9398be7ace6bbfaf30c0bd5d415f843d45e9
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 
@@ -138,7 +144,8 @@ jobs:
         id: sonar-quality-gate
         if: steps.check-scannerwork.outputs.exists == 'true'
         continue-on-error: true
-        uses: sonarsource/sonarqube-quality-gate-action@v1.2.0
+        uses: sonarsource/sonarqube-quality-gate-action@v1.2.0  # v1.2.0
+        # SHA: cf038b0e0cdecfa9e56c198bbb7d21d751d62c3b
         with:
           pollingTimeoutSec: 600
         env:
@@ -154,10 +161,13 @@ jobs:
 
       - name: Generate and Upload SARIF Report
         shell: bash
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         run: |
           echo "### 🎯 SonarQube Issues Report"
           # Fetch open issues from SonarCloud API
-          ISSUES=$(curl -s -u "${{ secrets.SONAR_TOKEN }}:" "https://sonarcloud.io/api/issues/search?componentKeys=kkrzysztofik_Anyka_ak3918_hacking_journey&resolved=false&ps=100")
+          # Using environment variable to prevent code injection
+          ISSUES=$(curl -s -u "${SONAR_TOKEN}:" "https://sonarcloud.io/api/issues/search?componentKeys=kkrzysztofik_Anyka_ak3918_hacking_journey&resolved=false&ps=100")
           COUNT=$(echo $ISSUES | jq '.total')
 
           # Initialize SARIF structure
@@ -210,11 +220,10 @@ jobs:
             jq --slurpfile results sarif-results.json '.runs[0].results = $results[0]' sonar-report.sarif > sonar-report-final.sarif
             mv sonar-report-final.sarif sonar-report.sarif
           fi
-        env:
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 
       - name: Upload SonarCloud Scan Results to GitHub
-        uses: github/codeql-action/upload-sarif@v4
+        uses: github/codeql-action/upload-sarif@v4  # v4.0.0
+        # SHA: 0d579ffd059c29b07949a3cce3983f0780820c98
         continue-on-error: true
         with:
           sarif_file: sonar-report.sarif

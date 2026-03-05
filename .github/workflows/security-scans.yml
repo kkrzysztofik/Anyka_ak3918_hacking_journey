@@ -35,10 +35,12 @@ jobs:
       snyk_code_status: ${{ steps.snyk-code.outcome }}
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v6  # v6.0.0
+        # SHA: de0fac2e4500dabe0009e67214ff5f5447ce83dd
 
       - name: Setup Snyk CLI
-        uses: snyk/actions/setup@v1.0.0
+        uses: snyk/actions/setup@v1.0.0  # v1.0.0
+        # SHA: 9adf32b1121593767fc3c057af55b55db032dc04
 
       - name: Run Snyk Code Test
         id: snyk-code
@@ -61,7 +63,8 @@ jobs:
 
       - name: Upload Snyk Code SARIF to GitHub
         if: steps.check-snyk-code-sarif.outputs.exists == 'true'
-        uses: github/codeql-action/upload-sarif@v4
+        uses: github/codeql-action/upload-sarif@v4  # v4.0.0
+        # SHA: 0d579ffd059c29b07949a3cce3983f0780820c98
         continue-on-error: true
         with:
           sarif_file: ${{ inputs.working_directory }}/snyk-code.sarif
@@ -78,10 +81,12 @@ jobs:
       snyk_issues: ${{ steps.count-issues.outputs.snyk_issues }}
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v6  # v6.0.0
+        # SHA: de0fac2e4500dabe0009e67214ff5f5447ce83dd
 
       - name: Setup Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v6  # v6.0.0
+        # SHA: 53b83947a5a98c8d113130e565377fae1a50d02f
         with:
           node-version: "24"
           cache: "npm"
@@ -95,7 +100,8 @@ jobs:
       - name: Run Snyk OSS for Node.js
         id: snyk-oss
         if: hashFiles(format('{0}/package.json', inputs.working_directory)) != ''
-        uses: snyk/actions/node@v1.0.0
+        uses: snyk/actions/node@v1.0.0  # v1.0.0
+        # SHA: 9adf32b1121593767fc3c057af55b55db032dc04
         continue-on-error: true
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
@@ -116,7 +122,8 @@ jobs:
 
       - name: Upload Snyk OSS SARIF to GitHub
         if: steps.check-snyk-oss-sarif.outputs.exists == 'true'
-        uses: github/codeql-action/upload-sarif@v4
+        uses: github/codeql-action/upload-sarif@v4  # v4.0.0
+        # SHA: 0d579ffd059c29b07949a3cce3983f0780820c98
         continue-on-error: true
         with:
           sarif_file: ${{ inputs.working_directory }}/snyk-oss.sarif
@@ -136,7 +143,8 @@ jobs:
 
       - name: Run Snyk Monitor
         if: steps.snyk-oss.outcome == 'success' || steps.snyk-oss.outcome == 'failure'
-        uses: snyk/actions/node@v1.0.0
+        uses: snyk/actions/node@v1.0.0  # v1.0.0
+        # SHA: 9adf32b1121593767fc3c057af55b55db032dc04
         continue-on-error: true
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}

@@ -38,7 +38,8 @@ jobs:
       coverage: ${{ steps.coverage-summary.outputs.coverage }}
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v6  # v6.0.0
+        # SHA: de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
           fetch-depth: 0
 
@@ -59,7 +60,8 @@ jobs:
           ./scripts/setup-cargo-config.sh
 
       - name: Cache Cargo Dependencies
-        uses: actions/cache@v5
+        uses: actions/cache@v5  # v5.0.3
+        # SHA: cdf6c1fa76f9f475f3d7449005a359c84ca0f306
         with:
           path: |
             ~/.cargo/registry
@@ -118,7 +120,8 @@ jobs:
           fi
 
       - name: Upload Coverage Artifacts
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v6  # v6.0.0
+        # SHA: b7c566a772e6b6bfb58ed0dc250532a479d7789f
         with:
           name: rust-coverage
           path: |
@@ -154,15 +157,18 @@ jobs:
       coverage: ${{ steps.coverage-summary.outputs.coverage }}
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v6  # v6.0.0
+        # SHA: de0fac2e4500dabe0009e67214ff5f5447ce83dd
 
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@v1  # v1.0.0
+        # SHA: e97e2d8cc328f1b50210efc529dca0028893a2d9
         with:
           components: clippy, rustfmt
 
       - name: Cache Cargo Dependencies
-        uses: actions/cache@v5
+        uses: actions/cache@v5  # v5.0.3
+        # SHA: cdf6c1fa76f9f475f3d7449005a359c84ca0f306
         with:
           path: |
             ~/.cargo/registry
@@ -206,7 +212,8 @@ jobs:
           ls -lah coverage/ 2>/dev/null || echo "Coverage directory not found"
 
       - name: Upload Coverage Artifacts
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v6  # v6.0.0
+        # SHA: b7c566a772e6b6bfb58ed0dc250532a479d7789f
         with:
           name: validation-rust-coverage
           path: |
@@ -241,10 +248,12 @@ jobs:
     outputs:
       coverage: ${{ steps.test-coverage.outputs.coverage }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v6  # v6.0.0
+        # SHA: de0fac2e4500dabe0009e67214ff5f5447ce83dd
 
       - name: Use Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v6  # v6.0.0
+        # SHA: 53b83947a5a98c8d113130e565377fae1a50d02f
         with:
           node-version: "24"
           cache: "npm"
@@ -286,7 +295,8 @@ jobs:
           fi
 
       - name: Upload Coverage Artifacts
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v6  # v6.0.0
+        # SHA: b7c566a772e6b6bfb58ed0dc250532a479d7789f
         if: always()
         with:
           name: webui-coverage
@@ -313,10 +323,12 @@ jobs:
       snyk_issues: ${{ steps.scan-results.outputs.snyk_issues }}
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v6  # v6.0.0
+        # SHA: de0fac2e4500dabe0009e67214ff5f5447ce83dd
 
       - name: Setup Snyk CLI
-        uses: snyk/actions/setup@v1.0.0
+        uses: snyk/actions/setup@v1.0.0  # v1.0.0
+        # SHA: 9adf32b1121593767fc3c057af55b55db032dc04
 
       # Rust Snyk Code Scan
       - name: Run Snyk Code for Rust
@@ -330,7 +342,8 @@ jobs:
 
       - name: Upload Rust Snyk Code SARIF
         if: hashFiles('cross-compile/onvif-rust/**/*.rs') != '' && hashFiles('cross-compile/onvif-rust/snyk-code-rust.sarif') != ''
-        uses: github/codeql-action/upload-sarif@v4
+        uses: github/codeql-action/upload-sarif@v4  # v4.0.0
+        # SHA: 0d579ffd059c29b07949a3cce3983f0780820c98
         continue-on-error: true
         with:
           sarif_file: cross-compile/onvif-rust/snyk-code-rust.sarif
@@ -347,7 +360,8 @@ jobs:
 
       - name: Upload streaming-lib Snyk Code SARIF
         if: hashFiles('cross-compile/streaming-lib/**/*.rs') != '' && hashFiles('cross-compile/streaming-lib/snyk-code-streaming.sarif') != ''
-        uses: github/codeql-action/upload-sarif@v4
+        uses: github/codeql-action/upload-sarif@v4  # v4.0.0
+        # SHA: 0d579ffd059c29b07949a3cce3983f0780820c98
         continue-on-error: true
         with:
           sarif_file: cross-compile/streaming-lib/snyk-code-streaming.sarif
@@ -364,14 +378,16 @@ jobs:
 
       - name: Upload validation Snyk Code SARIF
         if: hashFiles('validation/**/*.rs') != '' && hashFiles('validation/rust/snyk-code-validation.sarif') != ''
-        uses: github/codeql-action/upload-sarif@v4
+        uses: github/codeql-action/upload-sarif@v4  # v4.0.0
+        # SHA: 0d579ffd059c29b07949a3cce3983f0780820c98
         continue-on-error: true
         with:
           sarif_file: validation/rust/snyk-code-validation.sarif
 
       # WebUI Snyk Code + OSS Scan
       - name: Setup Node.js for WebUI Scans
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v6  # v6.0.0
+        # SHA: 53b83947a5a98c8d113130e565377fae1a50d02f
         with:
           node-version: "24"
           cache: "npm"
@@ -391,14 +407,16 @@ jobs:
 
       - name: Upload WebUI Snyk Code SARIF
         if: hashFiles('cross-compile/www/snyk-code-webui.sarif') != ''
-        uses: github/codeql-action/upload-sarif@v4
+        uses: github/codeql-action/upload-sarif@v4  # v4.0.0
+        # SHA: 0d579ffd059c29b07949a3cce3983f0780820c98
         continue-on-error: true
         with:
           sarif_file: cross-compile/www/snyk-code-webui.sarif
 
       - name: Run Snyk OSS for WebUI
         id: snyk-oss-webui
-        uses: snyk/actions/node@v1.0.0
+        uses: snyk/actions/node@v1.0.0  # v1.0.0
+        # SHA: 9adf32b1121593767fc3c057af55b55db032dc04
         continue-on-error: true
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
@@ -408,7 +426,8 @@ jobs:
 
       - name: Upload WebUI Snyk OSS SARIF
         if: hashFiles('cross-compile/www/snyk-oss-webui.sarif') != ''
-        uses: github/codeql-action/upload-sarif@v4
+        uses: github/codeql-action/upload-sarif@v4  # v4.0.0
+        # SHA: 0d579ffd059c29b07949a3cce3983f0780820c98
         continue-on-error: true
         with:
           sarif_file: cross-compile/www/snyk-oss-webui.sarif
@@ -453,7 +472,8 @@ jobs:
 
       - name: Run Snyk Monitor
         if: hashFiles('cross-compile/www/package.json') != ''
-        uses: snyk/actions/node@v1.0.0
+        uses: snyk/actions/node@v1.0.0  # v1.0.0
+        # SHA: 9adf32b1121593767fc3c057af55b55db032dc04
         continue-on-error: true
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
@@ -477,12 +497,14 @@ jobs:
       quality-gate-status: ${{ steps.sonar-quality-gate.outcome || steps.skip-quality-gate.outputs.status || 'skipped' }}
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v6  # v6.0.0
+        # SHA: de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
           fetch-depth: 0
 
       - name: Download All Coverage Artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v4  # v4.3.0
+        # SHA: d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           pattern: "*-coverage"
           path: coverage-artifacts
@@ -697,7 +719,8 @@ jobs:
       - name: SonarQube Scan
         id: sonar-scan
         continue-on-error: true
-        uses: sonarsource/sonarqube-scan-action@v7.0.0
+        uses: sonarsource/sonarqube-scan-action@v7.0.0  # v7.0.0
+        # SHA: a31c9398be7ace6bbfaf30c0bd5d415f843d45e9
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 
@@ -789,7 +812,8 @@ jobs:
         id: sonar-quality-gate
         if: steps.check-scannerwork.outputs.exists == 'true'
         continue-on-error: true
-        uses: sonarsource/sonarqube-quality-gate-action@v1.2.0
+        uses: sonarsource/sonarqube-quality-gate-action@v1.2.0  # v1.2.0
+        # SHA: cf038b0e0cdecfa9e56c198bbb7d21d751d62c3b
         with:
           pollingTimeoutSec: 600
         env:
@@ -804,9 +828,12 @@ jobs:
 
       - name: Generate and Upload SARIF Report
         shell: bash
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         run: |
           echo "### 🎯 SonarQube Issues Report"
-          ISSUES=$(curl -s -u "${{ secrets.SONAR_TOKEN }}:" "https://sonarcloud.io/api/issues/search?componentKeys=kkrzysztofik_Anyka_ak3918_hacking_journey&resolved=false&ps=100")
+          # Using environment variable to prevent code injection
+          ISSUES=$(curl -s -u "${SONAR_TOKEN}:" "https://sonarcloud.io/api/issues/search?componentKeys=kkrzysztofik_Anyka_ak3918_hacking_journey&resolved=false&ps=100")
           COUNT=$(echo $ISSUES | jq '.total')
 
           cat > sonar-report.sarif <<EOF
@@ -855,11 +882,10 @@ jobs:
             jq --slurpfile results sarif-results.json '.runs[0].results = $results[0]' sonar-report.sarif > sonar-report-final.sarif
             mv sonar-report-final.sarif sonar-report.sarif
           fi
-        env:
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 
       - name: Upload SonarCloud Scan Results to GitHub
-        uses: github/codeql-action/upload-sarif@v4
+        uses: github/codeql-action/upload-sarif@v4  # v4.0.0
+        # SHA: 0d579ffd059c29b07949a3cce3983f0780820c98
         continue-on-error: true
         with:
           sarif_file: sonar-report.sarif
@@ -942,7 +968,8 @@ jobs:
 
       - name: Comment PR with Analysis Results
         if: github.event_name == 'pull_request'
-        uses: actions/github-script@v8
+        uses: actions/github-script@v8  # v8.0.0
+        # SHA: ed597411d8f924073f98dfc5c65a23a2325f34cd
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |

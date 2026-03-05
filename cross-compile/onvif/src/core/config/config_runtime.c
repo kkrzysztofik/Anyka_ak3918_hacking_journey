@@ -1300,7 +1300,7 @@ int config_runtime_process_persistence_queue(void) {
   result = config_storage_save(ONVIF_CONFIG_FILE, NULL);
 
   if (result != ONVIF_SUCCESS) {
-    platform_log_error("[CONFIG] Failed to persist %zu configuration updates to %s (error=%d (%s))\n", queue_count, ONVIF_CONFIG_FILE, result,
+    platform_log_error("[CONFIG] Failed to persist %zu configuration updates to %s (error=%d (%s))\n", (size_t)queue_count, ONVIF_CONFIG_FILE, result,
                        onvif_error_to_string(result));
     /* Don't clear queue on failure - allow retry */
     return result;
@@ -2468,7 +2468,7 @@ static int config_runtime_validate_username(const char* username) {
 
   /* Check length */
   if (len < 3 || len > MAX_USERNAME_LENGTH) {
-    platform_log_error("[CONFIG] Invalid username length: %zu (valid range: 3-%d)\n", len, MAX_USERNAME_LENGTH);
+    platform_log_error("[CONFIG] Invalid username length: %zu (valid range: 3-%zu)\n", len, (size_t)MAX_USERNAME_LENGTH);
     return ONVIF_ERROR_INVALID_PARAMETER;
   }
 

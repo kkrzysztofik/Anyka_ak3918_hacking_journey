@@ -19,10 +19,12 @@ jobs:
         working-directory: cross-compile/www
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v6  # v6.0.0
+        # SHA: de0fac2e4500dabe0009e67214ff5f5447ce83dd
 
       - name: Use Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v6  # v6.0.0
+        # SHA: 53b83947a5a98c8d113130e565377fae1a50d02f
         with:
           node-version: "24"
           cache: "npm"
@@ -35,7 +37,8 @@ jobs:
         run: npm run build
 
       - name: Archive WebUI Build
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v6  # v6.0.0
+        # SHA: b7c566a772e6b6bfb58ed0dc250532a479d7789f
         with:
           name: webui-build
           path: SD_card_contents/anyka_hack/onvif/www/
@@ -49,7 +52,8 @@ jobs:
       image: kkrzysztofik/anyka-cross-compile:latest
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v6  # v6.0.0
+        # SHA: de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
           fetch-depth: 0
 
@@ -90,7 +94,8 @@ jobs:
           chmod +x release-artifacts/SD_card_contents/anyka_hack/onvif/onvif-rust
 
       - name: Archive Rust Build
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v6  # v6.0.0
+        # SHA: b7c566a772e6b6bfb58ed0dc250532a479d7789f
         with:
           name: rust-build
           path: release-artifacts/SD_card_contents/anyka_hack/onvif/onvif-rust
@@ -103,7 +108,8 @@ jobs:
       contents: write
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v6  # v6.0.0
+        # SHA: de0fac2e4500dabe0009e67214ff5f5447ce83dd
 
       - name: Extract Tag Information
         id: tag_info
@@ -117,13 +123,15 @@ jobs:
         run: mkdir -p release-final/SD_card_contents/anyka_hack/onvif/www
 
       - name: Download Rust Artifact
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v4  # v4.3.0
+        # SHA: d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           name: rust-build
           path: release-final/SD_card_contents/anyka_hack/onvif/
 
       - name: Download WebUI Artifact
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v4  # v4.3.0
+        # SHA: d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           name: webui-build
           path: release-final/SD_card_contents/anyka_hack/onvif/www

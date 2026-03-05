@@ -53,7 +53,7 @@ int onvif_sha256_to_hex(const uint8_t digest[ONVIF_SHA256_DIGEST_SIZE], char* he
   }
 
   if (output_size < ONVIF_SHA256_HEX_SIZE) {
-    platform_log_error("Output buffer too small: %zu < %d\n", output_size, ONVIF_SHA256_HEX_SIZE);
+    platform_log_error("Output buffer too small: %zu < %zu\n", output_size, (size_t)ONVIF_SHA256_HEX_SIZE);
     return ONVIF_ERROR_BUFFER_TOO_SMALL;
   }
 

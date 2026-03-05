@@ -295,7 +295,8 @@ char* memory_safe_strdup(const char* str) {
   size_t len = strlen(str) + 1;
   char* result = ONVIF_MALLOC(len);
   if (result) {
-    strcpy(result, str);
+    strncpy(result, str, len);
+    result[len - 1] = '\0';
   }
   return result;
 }
@@ -311,7 +312,8 @@ int memory_safe_strcpy(char* dest, size_t dest_size, const char* src) {
     return -1;
   }
 
-  strcpy(dest, src);
+  strncpy(dest, src, dest_size);
+  dest[dest_size - 1] = '\0';
   return ONVIF_SUCCESS;
 }
 
@@ -346,7 +348,7 @@ int memory_safe_snprintf(char* dest, size_t dest_size, const char* format, ...) 
     }
 
     if ((size_t)result >= dest_size) {
-      platform_log_error("Buffer overflow in snprintf: %d >= %zu\n", result, dest_size);
+      platform_log_error("Buffer overflow in snprintf: %zu >= %zu\n", (size_t)result, dest_size);
       return -1;
     }
 
@@ -390,7 +392,7 @@ int memory_safe_snprintf(char* dest, size_t dest_size, const char* format, ...) 
   }
 
   if ((size_t)result >= dest_size) {
-    platform_log_error("Buffer overflow in manual build: %d >= %zu\n", result, dest_size);
+    platform_log_error("Buffer overflow in manual build: %zu >= %zu\n", (size_t)result, dest_size);
     return -1;
   }
 
@@ -818,7 +820,7 @@ int buffer_safe_snprintf(char* dest, size_t dest_size, const char* format, ...) 
   }
 
   if ((size_t)result >= dest_size) {
-    platform_log_error("Buffer overflow in snprintf: %d >= %zu", result, dest_size);
+    platform_log_error("Buffer overflow in snprintf: %zu >= %zu", (size_t)result, dest_size);
     g_buffer_safety_stats.buffer_overflows_prevented++;
     g_buffer_safety_stats.failed_validations++;
     return -1;
@@ -907,7 +909,7 @@ int buffer_safe_append_xml_element(char* buffer, size_t buffer_size, const char*
 
   // Check if we have enough space
   if ((size_t)result >= remaining) {
-    platform_log_error("XML element too large for buffer: %d >= %zu", result, remaining);
+    platform_log_error("XML element too large for buffer: %zu >= %zu", (size_t)result, remaining);
     g_buffer_safety_stats.buffer_overflows_prevented++;
     g_buffer_safety_stats.failed_validations++;
     return -1;
@@ -935,7 +937,8 @@ static int append_html_entity(char* dest, size_t* dest_pos, size_t dest_size, co
     return -1;
   }
 
-  strcpy(dest + *dest_pos, entity);
+  strncpy(dest + *dest_pos, entity, entity_len);
+  dest[*dest_pos + entity_len] = '\0';
   *dest_pos += entity_len;
   return ONVIF_SUCCESS;
 }

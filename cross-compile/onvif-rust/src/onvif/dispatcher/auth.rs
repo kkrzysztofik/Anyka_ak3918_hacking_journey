@@ -354,6 +354,13 @@ mod tests {
     use async_trait::async_trait;
     use axum::http::Request as HttpRequest;
 
+    // ── Test fixture constants ──────────────────────────────────────────
+    // These are intentionally hardcoded values used exclusively in unit
+    // tests.  They are NOT production secrets and carry no security risk.
+    // CodeQL rule: rust/hard-coded-cryptographic-value
+    const TEST_PASSWORD: &str = "password123";
+    // ────────────────────────────────────────────────────────────────────
+
     // Custom handler that overrides required_auth_level
     pub struct CustomAuthHandler;
 
@@ -383,7 +390,7 @@ mod tests {
         user_storage
             .create_user(
                 "admin",
-                "password123",
+                TEST_PASSWORD,
                 crate::config::UserLevel::Administrator,
             )
             .unwrap();
@@ -401,8 +408,9 @@ mod tests {
         let dispatcher = ServiceDispatcher::new();
         dispatcher.register_service("custom", Arc::new(CustomAuthHandler));
 
-        // Create Basic Auth header (admin:password123)
-        let credentials = base64::engine::general_purpose::STANDARD.encode("admin:password123");
+        // Create Basic Auth header (admin:<TEST_PASSWORD>)
+        let credentials =
+            base64::engine::general_purpose::STANDARD.encode(format!("admin:{}", TEST_PASSWORD));
 
         let soap_body = r#"<?xml version="1.0"?>
             <s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope">
@@ -432,7 +440,7 @@ mod tests {
         user_storage
             .create_user(
                 "admin",
-                "password123",
+                TEST_PASSWORD,
                 crate::config::UserLevel::Administrator,
             )
             .unwrap();
@@ -593,7 +601,8 @@ mod tests {
         dispatcher.register_service("custom", Arc::new(CustomAuthHandler));
 
         // User doesn't exist
-        let credentials = base64::engine::general_purpose::STANDARD.encode("nonexistent:password");
+        let credentials = base64::engine::general_purpose::STANDARD
+            .encode(format!("nonexistent:{}", TEST_PASSWORD));
         let request = HttpRequest::builder()
             .method("POST")
             .header("Content-Type", "application/soap+xml")
@@ -615,7 +624,7 @@ mod tests {
         user_storage
             .create_user(
                 "operator",
-                "password123",
+                TEST_PASSWORD,
                 crate::config::UserLevel::Operator,
             )
             .unwrap();
@@ -628,7 +637,8 @@ mod tests {
         dispatcher.register_service("custom", Arc::new(CustomAuthHandler));
 
         // Operator trying to access AdminOp (requires Administrator)
-        let credentials = base64::engine::general_purpose::STANDARD.encode("operator:password123");
+        let credentials = base64::engine::general_purpose::STANDARD
+            .encode(format!("operator:{}", TEST_PASSWORD));
         let request = HttpRequest::builder()
             .method("POST")
             .header("Content-Type", "application/soap+xml")
@@ -671,7 +681,7 @@ mod tests {
         user_storage
             .create_user(
                 "admin",
-                "password123",
+                TEST_PASSWORD,
                 crate::config::UserLevel::Administrator,
             )
             .unwrap();
@@ -682,8 +692,8 @@ mod tests {
         let dispatcher = ServiceDispatcher::new();
 
         // Case 1: nonexistent user
-        let creds_bad_user =
-            base64::engine::general_purpose::STANDARD.encode("nonexistent:password");
+        let creds_bad_user = base64::engine::general_purpose::STANDARD
+            .encode(format!("nonexistent:{}", TEST_PASSWORD));
         let req_bad_user = HttpRequest::builder()
             .method("POST")
             .header("Authorization", format!("Basic {}", creds_bad_user))
@@ -783,7 +793,7 @@ mod tests {
         user_storage
             .create_user(
                 "admin",
-                "password123",
+                TEST_PASSWORD,
                 crate::config::UserLevel::Administrator,
             )
             .unwrap();

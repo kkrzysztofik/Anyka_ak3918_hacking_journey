@@ -38,7 +38,8 @@ int sdp_init_session(struct sdp_session* sdp, const char* session_name, const ch
     strncpy(sdp->session_name, session_name, sizeof(sdp->session_name) - 1);
     sdp->session_name[sizeof(sdp->session_name) - 1] = '\0';
   } else {
-    strcpy(sdp->session_name, "RTSP Session");
+    strncpy(sdp->session_name, "RTSP Session", sizeof(sdp->session_name) - 1);
+    sdp->session_name[sizeof(sdp->session_name) - 1] = '\0';
   }
 
   if (origin) {
@@ -99,14 +100,16 @@ int sdp_add_media(struct sdp_session* sdp,
     strncpy(media->protocol, protocol, sizeof(media->protocol) - 1);
     media->protocol[sizeof(media->protocol) - 1] = '\0';
   } else {
-    strcpy(media->protocol, "RTP/AVP");
+    strncpy(media->protocol, "RTP/AVP", sizeof(media->protocol) - 1);
+    media->protocol[sizeof(media->protocol) - 1] = '\0';
   }
 
   if (encoding) {
     strncpy(media->encoding, encoding, sizeof(media->encoding) - 1);
     media->encoding[sizeof(media->encoding) - 1] = '\0';
   } else {
-    strcpy(media->encoding, "H264");
+    strncpy(media->encoding, "H264", sizeof(media->encoding) - 1);
+    media->encoding[sizeof(media->encoding) - 1] = '\0';
   }
 
   // Add to linked list
