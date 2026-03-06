@@ -533,10 +533,10 @@ async fn test_stream_identifier_equality() {
 async fn test_rtsp_transport_parse_malformed_protocol() {
     let invalid_inputs = vec![
         "INVALID/PROTOCOL",
-        "RTP/AVP/UDP",       // Missing required client_port for UDP
-        "RTP/AVP/TCP",       // Missing required interleaved for TCP
+        "RTP/AVP/UDP", // Missing required client_port for UDP
+        "RTP/AVP/TCP", // Missing required interleaved for TCP
     ];
-    
+
     for input in invalid_inputs {
         let result = RtspTransport::unmarshal(input);
         assert!(result.is_err(), "Expected error for input: {}", input);
@@ -550,7 +550,7 @@ async fn test_rtsp_transport_parse_invalid_port_range() {
     let invalid_port = "RTP/AVP/UDP;unicast;client_port=99999-100000";
     let result = RtspTransport::unmarshal(invalid_port);
     assert!(result.is_err(), "Should fail with port out of range");
-    
+
     // Another invalid case - port too high
     let invalid_port2 = "RTP/AVP/UDP;unicast;client_port=70000-70001";
     let result2 = RtspTransport::unmarshal(invalid_port2);
@@ -572,12 +572,16 @@ async fn test_rtsp_transport_parse_malformed_port_pair() {
         "RTP/AVP/UDP;unicast;client_port=abc-def",
         "RTP/AVP/UDP;unicast;client_port=not-a-port",
     ];
-    
+
     for input in invalid_inputs {
         let result = RtspTransport::unmarshal(input);
         // These should fail validation (missing valid client_port for UDP)
         // Or fail parsing - either is acceptable
-        assert!(result.is_err(), "Expected error for malformed port: {}", input);
+        assert!(
+            result.is_err(),
+            "Expected error for malformed port: {}",
+            input
+        );
     }
 }
 
@@ -603,9 +607,15 @@ async fn test_rtsp_transport_parse_empty_interleaved() {
 async fn test_rtsp_transport_tcp_requires_interleaved() {
     // TCP transport MUST have interleaved parameter
     let result = RtspTransport::unmarshal("RTP/AVP/TCP;unicast");
-    assert!(result.is_err(), "TCP transport without interleaved should be rejected");
+    assert!(
+        result.is_err(),
+        "TCP transport without interleaved should be rejected"
+    );
     let err = result.unwrap_err();
-    assert!(err.contains("interleaved"), "Error should mention interleaved");
+    assert!(
+        err.contains("interleaved"),
+        "Error should mention interleaved"
+    );
 }
 
 /// Tests RTSP transport validation rejects UDP without client_port
@@ -613,9 +623,15 @@ async fn test_rtsp_transport_tcp_requires_interleaved() {
 async fn test_rtsp_transport_udp_requires_client_port() {
     // UDP transport MUST have client_port parameter
     let result = RtspTransport::unmarshal("RTP/AVP/UDP;unicast");
-    assert!(result.is_err(), "UDP transport without client_port should be rejected");
+    assert!(
+        result.is_err(),
+        "UDP transport without client_port should be rejected"
+    );
     let err = result.unwrap_err();
-    assert!(err.contains("client_port"), "Error should mention client_port");
+    assert!(
+        err.contains("client_port"),
+        "Error should mention client_port"
+    );
 }
 
 /// Tests RTSP transport with invalid SSRC format
@@ -638,13 +654,8 @@ async fn test_rtsp_transport_parse_empty_string() {
 /// Tests completely invalid transport string
 #[tokio::test]
 async fn test_rtsp_transport_parse_completely_invalid() {
-    let invalid_inputs = vec![
-        "!!!",
-        "完全不valid",
-        "   ",
-        "\n\t",
-    ];
-    
+    let invalid_inputs = vec!["!!!", "完全不valid", "   ", "\n\t"];
+
     for input in invalid_inputs {
         // These may not parse correctly but shouldn't panic
         let _ = RtspTransport::unmarshal(input);
@@ -655,7 +666,10 @@ async fn test_rtsp_transport_parse_completely_invalid() {
 #[tokio::test]
 async fn test_rtsp_transport_udp_server_port_only() {
     let result = RtspTransport::unmarshal("RTP/AVP/UDP;unicast;server_port=6000-6001");
-    assert!(result.is_err(), "UDP transport with only server_port should fail");
+    assert!(
+        result.is_err(),
+        "UDP transport with only server_port should fail"
+    );
 }
 
 /// Tests multicast transport without required port parameters

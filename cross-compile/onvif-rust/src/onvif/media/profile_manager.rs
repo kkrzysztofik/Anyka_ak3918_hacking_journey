@@ -370,8 +370,8 @@ impl ProfileManager {
             "mjpeg" | "jpeg" => crate::onvif::types::common::VideoEncoding::JPEG,
             "mpeg4" => crate::onvif::types::common::VideoEncoding::MPEG4,
             _ => {
-                eprintln!(
-                    "[WARN] Unknown video encoding '{}', defaulting to H264",
+                tracing::warn!(
+                    "Unknown video encoding '{}', defaulting to H264",
                     encoding_str
                 );
                 crate::onvif::types::common::VideoEncoding::H264
@@ -386,8 +386,8 @@ impl ProfileManager {
             "main" => crate::onvif::types::common::H264Profile::Main,
             "high" => crate::onvif::types::common::H264Profile::High,
             _ => {
-                eprintln!(
-                    "[WARN] Unknown H.264 profile '{}', defaulting to Main",
+                tracing::warn!(
+                    "Unknown H.264 profile '{}', defaulting to Main",
                     profile_str
                 );
                 crate::onvif::types::common::H264Profile::Main
@@ -402,8 +402,8 @@ impl ProfileManager {
             "aac" => crate::onvif::types::common::AudioEncoding::AAC,
             "g726" => crate::onvif::types::common::AudioEncoding::G726,
             _ => {
-                eprintln!(
-                    "[WARN] Unknown audio encoding '{}', defaulting to G711",
+                tracing::warn!(
+                    "Unknown audio encoding '{}', defaulting to G711",
                     encoding_str
                 );
                 crate::onvif::types::common::AudioEncoding::G711
