@@ -15,7 +15,7 @@ reviewer (main entry point)
     ↓
 reviewer-consensus (orchestrator)
     ├─→ reviewer-memory (Sonnet 4.5) ────────┐
-    ├─→ reviewer-architecture (GPT-5.2) ─────┤
+    ├─→ reviewer-architecture (gpt-5.4) ─────┤
     ├─→ reviewer-security (Opus 4-6) ────────┤ Parallel
     └─→ reviewer-testing (Gemini 3.1 Pro) ───┘
     ↓
@@ -45,7 +45,7 @@ Unified Report
 
 ---
 
-### 2. reviewer-architecture (GPT-5.2)
+### 2. reviewer-architecture (gpt-5.4)
 **Expertise:** Architecture patterns, API design, system integration
 
 **Focuses on:**
@@ -153,7 +153,7 @@ Task(
 ```markdown
 # Multi-Model Consensus Review Report
 
-**Models:** Sonnet 4.5, GPT-5.2, Opus 4-6, Gemini 3.1 Pro
+**Models:** Sonnet 4.5, gpt-5.4, Opus 4-6, Gemini 3.1 Pro
 **Consensus:** 2/4 majority, 3/4 strong, 4/4 critical
 
 ## Critical Issues (Unanimous: 4/4)
@@ -162,7 +162,7 @@ Task(
 | Model | Finding |
 |-------|---------|
 | Sonnet 4.5 | ❌ UAF risk - raw pointer marked Send |
-| GPT-5.2 | ❌ Memory safety violation |
+| gpt-5.4 | ❌ Memory safety violation |
 | Opus 4-6 | ❌ Exploitable dangling pointer |
 | Gemini 3.1 Pro | ❌ Untested unsafe code |
 
@@ -174,7 +174,7 @@ Task(
 | Model | Finding |
 |-------|---------|
 | Sonnet 4.5 | ⚠️ Ownership unclear |
-| GPT-5.2 | ❌ Architecture violation |
+| gpt-5.4 | ❌ Architecture violation |
 | Opus 4-6 | ✅ Not a security issue |
 | Gemini 3.1 Pro | ❌ Untested config struct |
 
@@ -186,7 +186,7 @@ Task(
 | Model | Finding |
 |-------|---------|
 | Sonnet 4.5 | ✅ Memory safe |
-| GPT-5.2 | ✅ Architecture OK |
+| gpt-5.4 | ✅ Architecture OK |
 | Opus 4-6 | ⚠️ Boundary conditions risky |
 | Gemini 3.1 Pro | ❌ No boundary tests |
 
@@ -217,12 +217,12 @@ Task(
 ### Empirical Results
 
 In Phase 3 testing:
-- **Single-model (GPT-5.2):** Found 3 critical issues
+- **Single-model (gpt-5.4):** Found 3 critical issues
 - **Multi-model (3 models):** Found 8 critical issues (167% more)
 
 Breakdown:
 - Memory issues: Caught by Sonnet 4.5
-- Architecture breaks: Caught by GPT-5.2
+- Architecture breaks: Caught by gpt-5.4
 - Security vulns: Caught by Opus 4-6
 
 ## When to Use Multi-Model
@@ -273,7 +273,7 @@ Merge
 ├── reviewer-consensus.md          # Orchestrator
 └── reviewers/
     ├── reviewer-memory.md         # Sonnet 4.5 - Memory safety
-    ├── reviewer-architecture.md   # GPT-5.2 - Architecture  
+    ├── reviewer-architecture.md   # gpt-5.4 - Architecture  
     ├── reviewer-security.md       # Opus 4-6 - Security
     └── reviewer-testing.md        # Gemini 3.1 Pro - Testing/QA
 ```

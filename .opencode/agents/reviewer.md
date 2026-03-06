@@ -27,7 +27,7 @@ When invoked, you:
 1. Load the **reviewer-consensus** orchestrator agent
 2. That agent dispatches reviews to 3 specialists in parallel:
    - **reviewer-memory** (Sonnet 4.5) - Memory safety, ownership
-   - **reviewer-architecture** (GPT-5.2) - Patterns, API design
+   - **reviewer-architecture** (gpt-5.4) - Patterns, API design
    - **reviewer-security** (Opus 4-6) - Security, DoS, edge cases
 3. The orchestrator synthesizes findings via 2/3 majority consensus
 4. You receive the unified consensus report
@@ -173,7 +173,7 @@ End with:
 
 By default, reviews are conducted by:
 1. **Claude Sonnet 4.5** — Excellent Rust ownership analysis, memory safety patterns
-2. **GPT-5.2** — Strong architectural patterns, API design evaluation
+2. **gpt-5.4** — Strong architectural patterns, API design evaluation
 3. **Gemini 3.1 Pro** — Comprehensive security analysis, edge case detection
 
 ### When to Use Multi-Model Review
@@ -200,7 +200,7 @@ Reviewer agent automatically dispatches to 3 parallel review agents:
 ```
 [reviewer agent] → 3 parallel reviews:
   ├─ Sonnet 4.5 Review (Rust/Memory/Ownership focus)
-  ├─ GPT-5.2 Review (Architecture/API/Design focus)
+  ├─ gpt-5.4 Review (Architecture/API/Design focus)
   └─ Gemini 3.1 Pro Review (Security/Edge Cases focus)
   ↓
 [Consensus synthesis: majority-vote (2/3 agree) per finding]
@@ -217,7 +217,7 @@ review_config:
   mode: multi-model
   models:
     - sonnet-4.5
-    - gpt-5.2
+    - gpt-5.4
     - gemini-3.1-pro
   consensus_threshold: 2/3  # majority vote
 ```
@@ -229,7 +229,7 @@ review_config:
 ## Multi-Model Consensus Review
 
 **Consensus Threshold**: 2/3 models (majority)
-**Models**: Sonnet 4.5, GPT-5.2, Gemini 3.1 Pro
+**Models**: Sonnet 4.5, gpt-5.4, Gemini 3.1 Pro
 
 **Build Status**: [✅ Success / ❌ Failed]
 **Critical Issues** (unanimous): [X] found
@@ -251,7 +251,7 @@ For each finding, show **side-by-side agreement**:
 | Model | Finding | Evidence |
 |-------|---------|----------|
 | Sonnet 4.5 | ❌ Panic risk | No error handling in async context |
-| GPT-5.2 | ❌ API violation | Breaks Result contract |
+| gpt-5.4 | ❌ API violation | Breaks Result contract |
 | Gemini 3.1 Pro | ❌ Fault injection | Could crash under network error |
 **Consensus**: MUST FIX before merge
 
@@ -263,7 +263,7 @@ For each finding, show **side-by-side agreement**:
 | Model | Finding | Evidence |
 |-------|---------|----------|
 | Sonnet 4.5 | ⚠️ Check: Borrowed lifetime | Borrows live beyond vec drop |
-| GPT-5.2 | ✅ OK | Appears bounded |
+| gpt-5.4 | ✅ OK | Appears bounded |
 | Gemini 3.1 Pro | ⚠️ Check: Resource limit | No backpressure on buffer growth |
 **Consensus**: SHOULD FIX (majority concern)
 
@@ -275,7 +275,7 @@ For each finding, show **side-by-side agreement**:
 | Model | Finding | Evidence |
 |-------|---------|----------|
 | Sonnet 4.5 | 🟢 Nice to have | Improves testability |
-| GPT-5.2 | 🟢 Good fit | Cleaner API |
+| gpt-5.4 | 🟢 Good fit | Cleaner API |
 | Gemini 3.1 Pro | ✅ Skip | Acceptable as-is |
 **Consensus**: OPTIONAL (not majority)
 
@@ -297,14 +297,14 @@ When models disagree:
 - **Split verdict** (not unanimous): Reason through and indicate as "mixed judgment"
 - **Different severity** (one Critical, one Warning): Use majority verdict
 - **Context-dependent** (one says risky, others say OK): Explain the nuance
-  - Example: GPT-5.2 flags regex complexity, Sonnet notes it's bounded — show both perspectives
+  - Example: gpt-5.4 flags regex complexity, Sonnet notes it's bounded — show both perspectives
 
 ### Integration with Orchestrator
 
 The orchestrator should invoke reviewer with mode preference:
 
 ```
-reviewer (mode: multi-model, models: [sonnet-4.5, gpt-5.2, gemini-3.1-pro])
+reviewer (mode: multi-model, models: [sonnet-4.5, gpt-5.4, gemini-3.1-pro])
 // vs.
 reviewer (mode: single-model)
 ```

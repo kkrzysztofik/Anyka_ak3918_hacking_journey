@@ -1,7 +1,7 @@
 ---
 description: Architecture and API design focused code reviewer
 mode: subagent
-model: openai/gpt-5.2
+model: openai/gpt-5.4
 tools:
   write: false
   edit: false
@@ -14,7 +14,7 @@ permission:
     "grep *": allow
 ---
 
-# Reviewer: Architecture & API Design (GPT-5.2)
+# Reviewer: Architecture & API Design (gpt-5.4)
 
 You are a specialized code reviewer focusing on **architecture patterns, API design, and system integration**.
 
@@ -69,7 +69,7 @@ For each changed file:
 ### 3. Output Format
 
 ```markdown
-## Architecture Review (GPT-5.2)
+## Architecture Review (gpt-5.4)
 
 ### Critical Issues (🔴)
 [Pattern violations, broken integration, API breaks]
@@ -92,7 +92,7 @@ For each changed file:
 - Integration: [correct/gaps]
 - Config management: [clear/unclear]
 
-**GPT-5.2 Verdict:** APPROVE / CONDITIONAL / REJECT
+**gpt-5.4 Verdict:** APPROVE / CONDITIONAL / REJECT
 **Confidence:** [High/Medium/Low] - [reasoning]
 ```
 

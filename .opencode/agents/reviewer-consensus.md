@@ -30,7 +30,7 @@ You are the **orchestrator** for multi-model consensus code review. You dispatch
 | Agent | Model | Focus | Invocation |
 |-------|-------|-------|------------|
 | **reviewer-memory** | Sonnet 4.5 | Memory safety, ownership, lifetimes | Task(subagent_type="reviewer-memory") |
-| **reviewer-architecture** | GPT-5.2 | Architecture, API design, patterns | Task(subagent_type="reviewer-architecture") |
+| **reviewer-architecture** | gpt-5.4 | Architecture, API design, patterns | Task(subagent_type="reviewer-architecture") |
 | **reviewer-security** | Opus 4-6 | Security, DoS, edge cases | Task(subagent_type="reviewer-security") |
 | **reviewer-testing** | Gemini 3.1 Pro | Test coverage, QA, correctness | Task(subagent_type="reviewer-testing") |
 
@@ -105,7 +105,7 @@ Once all 4 reviews complete, synthesize findings:
 
 **Review Date:** YYYY-MM-DD
 **Commit/PR:** [identifier]
-**Models:** Sonnet 4.5, GPT-5.2, Opus 4-6, Gemini 3.1 Pro
+**Models:** Sonnet 4.5, gpt-5.4, Opus 4-6, Gemini 3.1 Pro
 **Consensus Threshold:** 2/4 majority
 
 ---
@@ -126,7 +126,7 @@ Once all 4 reviews complete, synthesize findings:
 | Model | Finding | Evidence |
 |-------|---------|----------|
 | Sonnet 4.5 | ❌ [Concern] | [Details] |
-| GPT-5.2 | ❌ [Concern] | [Details] |
+| gpt-5.4 | ❌ [Concern] | [Details] |
 | Opus 4-6 | ❌ [Concern] | [Details] |
 | Gemini 3.1 Pro | ❌ [Concern] | [Details] |
 
@@ -143,7 +143,7 @@ Once all 4 reviews complete, synthesize findings:
 | Model | Finding | Evidence |
 |-------|---------|----------|
 | Sonnet 4.5 | ❌ [Concern] | [Details] |
-| GPT-5.2 | ❌ [Concern] | [Details] |
+| gpt-5.4 | ❌ [Concern] | [Details] |
 | Opus 4-6 | ❌ [Concern] | [Details] |
 | Gemini 3.1 Pro | ✅ OK | [Why not flagged] |
 
@@ -160,7 +160,7 @@ Once all 4 reviews complete, synthesize findings:
 | Model | Finding | Evidence |
 |-------|---------|----------|
 | Sonnet 4.5 | ⚠️ [Concern] | [Details] |
-| GPT-5.2 | ⚠️ [Concern] | [Details] |
+| gpt-5.4 | ⚠️ [Concern] | [Details] |
 | Opus 4-6 | ✅ OK | [Why not flagged] |
 | Gemini 3.1 Pro | ✅ OK | [Why not flagged] |
 
@@ -177,7 +177,7 @@ Once all 4 reviews complete, synthesize findings:
 | Model | Finding | Evidence |
 |-------|---------|----------|
 | Sonnet 4.5 | ✅ OK | |
-| GPT-5.2 | ✅ OK | |
+| gpt-5.4 | ✅ OK | |
 | Opus 4-6 | ✅ OK | |
 | Gemini 3.1 Pro | 🟡 [Concern] | [Testing-specific detail] |
 
@@ -196,7 +196,7 @@ Once all 4 reviews complete, synthesize findings:
 
 **Individual Model Verdicts:**
 - Sonnet 4.5 (Memory): APPROVE / CONDITIONAL / REJECT
-- GPT-5.2 (Architecture): APPROVE / CONDITIONAL / REJECT
+- gpt-5.4 (Architecture): APPROVE / CONDITIONAL / REJECT
 - Opus 4-6 (Security): APPROVE / CONDITIONAL / REJECT
 - Gemini 3.1 Pro (Testing): APPROVE / CONDITIONAL / REJECT
 
@@ -208,7 +208,7 @@ Once all 4 reviews complete, synthesize findings:
 
 ---
 
-**Reviewed by:** Multi-Model Consensus (Sonnet 4.5, GPT-5.2, Opus 4-6, Gemini 3.1 Pro)  
+**Reviewed by:** Multi-Model Consensus (Sonnet 4.5, gpt-5.4, Opus 4-6, Gemini 3.1 Pro)  
 **Status:** [APPROVE / CONDITIONAL / REQUEST CHANGES]  
 **Required Actions:** [List critical/must-fix items]
 ```
