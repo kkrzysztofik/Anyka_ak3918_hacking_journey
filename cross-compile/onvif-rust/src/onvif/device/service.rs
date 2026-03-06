@@ -81,6 +81,142 @@ impl DeviceService {
         let port = self.config.read().server.port;
         format!("http://{}:{}", address, port)
     }
+
+    // ========================================================================
+    // Public handler methods that delegate to ops modules
+    // These preserve the test interface after decomposition
+    // ========================================================================
+
+    /// Handle GetDeviceInformation request.
+    pub async fn handle_get_device_information(
+        &self,
+        _request: GetDeviceInformation,
+    ) -> Result<GetDeviceInformationResponse, OnvifError> {
+        system_ops::handle_get_device_information(&self.platform, &self.config).await
+    }
+
+    /// Handle GetCapabilities request.
+    pub fn handle_get_capabilities(
+        &self,
+        request: GetCapabilities,
+    ) -> Result<GetCapabilitiesResponse, OnvifError> {
+        system_ops::handle_get_capabilities(&self.config, request)
+    }
+
+    /// Handle GetServices request.
+    pub fn handle_get_services(
+        &self,
+        request: GetServices,
+    ) -> Result<GetServicesResponse, OnvifError> {
+        system_ops::handle_get_services(&self.config, request)
+    }
+
+    /// Handle GetServiceCapabilities request.
+    pub fn handle_get_service_capabilities(
+        &self,
+        request: GetServiceCapabilities,
+    ) -> Result<GetServiceCapabilitiesResponse, OnvifError> {
+        system_ops::handle_get_service_capabilities(request)
+    }
+
+    /// Handle GetSystemDateAndTime request.
+    pub fn handle_get_system_date_and_time(
+        &self,
+        request: GetSystemDateAndTime,
+    ) -> Result<GetSystemDateAndTimeResponse, OnvifError> {
+        system_ops::handle_get_system_date_and_time(request)
+    }
+
+    /// Handle GetHostname request.
+    pub fn handle_get_hostname(
+        &self,
+        request: GetHostname,
+    ) -> Result<GetHostnameResponse, OnvifError> {
+        network_ops::handle_get_hostname(&self.config, request)
+    }
+
+    /// Handle SetHostname request.
+    pub fn handle_set_hostname(
+        &self,
+        request: SetHostname,
+    ) -> Result<SetHostnameResponse, OnvifError> {
+        network_ops::handle_set_hostname(&self.config, request)
+    }
+
+    /// Handle GetScopes request.
+    pub fn handle_get_scopes(
+        &self,
+        request: GetScopes,
+    ) -> Result<GetScopesResponse, OnvifError> {
+        discovery_ops::handle_get_scopes(&self.scopes, request)
+    }
+
+    /// Handle SetScopes request.
+    pub fn handle_set_scopes(
+        &self,
+        request: SetScopes,
+    ) -> Result<SetScopesResponse, OnvifError> {
+        discovery_ops::handle_set_scopes(&self.scopes, request)
+    }
+
+    /// Handle AddScopes request.
+    pub fn handle_add_scopes(
+        &self,
+        request: AddScopes,
+    ) -> Result<AddScopesResponse, OnvifError> {
+        discovery_ops::handle_add_scopes(&self.scopes, request)
+    }
+
+    /// Handle GetDiscoveryMode request.
+    pub fn handle_get_discovery_mode(
+        &self,
+        request: GetDiscoveryMode,
+    ) -> Result<GetDiscoveryModeResponse, OnvifError> {
+        discovery_ops::handle_get_discovery_mode(&self.discovery_mode, request)
+    }
+
+    /// Handle SetDiscoveryMode request.
+    pub fn handle_set_discovery_mode(
+        &self,
+        request: SetDiscoveryMode,
+    ) -> Result<SetDiscoveryModeResponse, OnvifError> {
+        discovery_ops::handle_set_discovery_mode(&self.discovery_mode, request)
+    }
+
+    /// Handle GetUsers request.
+    pub fn handle_get_users(
+        &self,
+        request: GetUsers,
+    ) -> Result<GetUsersResponse, OnvifError> {
+        users_ops::handle_get_users(&self.users, request)
+    }
+
+    /// Handle CreateUsers request.
+    pub fn handle_create_users(
+        &self,
+        request: CreateUsers,
+        caller_level: crate::config::UserLevel,
+    ) -> Result<CreateUsersResponse, OnvifError> {
+        users_ops::handle_create_users(&self.users, request, caller_level)
+    }
+
+    /// Handle DeleteUsers request.
+    pub fn handle_delete_users(
+        &self,
+        request: DeleteUsers,
+        caller_level: crate::config::UserLevel,
+    ) -> Result<DeleteUsersResponse, OnvifError> {
+        users_ops::handle_delete_users(&self.users, request, caller_level)
+    }
+
+    /// Handle SetUser request.
+    pub fn handle_set_user(
+        &self,
+        request: SetUser,
+        caller_level: crate::config::UserLevel,
+    ) -> Result<SetUserResponse, OnvifError> {
+        users_ops::handle_set_user(&self.users, request, caller_level)
+    }
 }
 
 // ========================================================================
