@@ -40,8 +40,11 @@
 pub mod faults;
 pub mod ops;
 pub mod service;
+pub mod state;
+pub mod store;
 pub mod types;
 pub mod user_types;
+pub mod validation;
 
 pub use service::DeviceService;
 pub use types::*;

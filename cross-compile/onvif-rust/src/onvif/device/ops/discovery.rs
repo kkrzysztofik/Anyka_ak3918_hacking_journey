@@ -53,6 +53,20 @@ pub fn handle_get_scopes(
     Ok(GetScopesResponse { scopes })
 }
 
+/// Handle GetScopes request with a Vec<Scope>.
+///
+/// Returns device scopes.
+pub fn handle_get_scopes_from_vec(
+    scopes: &[Scope],
+    _request: GetScopes,
+) -> OnvifResult<GetScopesResponse> {
+    tracing::debug!("GetScopes request");
+
+    Ok(GetScopesResponse {
+        scopes: scopes.to_vec(),
+    })
+}
+
 /// Handle SetScopes request.
 ///
 /// Replaces configurable scopes.

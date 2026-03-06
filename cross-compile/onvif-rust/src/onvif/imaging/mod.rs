@@ -7,6 +7,15 @@
 //! - Focus control (Move, Stop, GetMoveOptions)
 //! - Service capabilities (GetServiceCapabilities)
 //!
+//! # Module Structure
+//!
+//! The service is organized into domain-specific operation modules:
+//! - [`ops::settings`] - GetImagingSettings, SetImagingSettings, GetOptions
+//! - [`ops::status`] - GetStatus
+//! - [`ops::focus`] - Move, Stop, GetMoveOptions
+//! - [`ops::capabilities`] - GetServiceCapabilities
+//! - [`ops::presets`] - GetPresets, GetCurrentPreset, SetCurrentPreset
+//!
 //! # Focus Operations
 //!
 //! The imaging service supports focus control when the hardware supports it:
@@ -22,18 +31,23 @@
 //! - `ter:ActionNotSupported` - Focus operations not supported
 //! - `ter:HardwareFailure` - Hardware error during operation
 
-mod handlers;
-pub mod settings_store;
+pub mod faults;
+pub mod ops;
+pub mod service;
+pub mod state;
+pub mod store;
 pub mod types;
+pub mod validation;
 
-pub use handlers::ImagingService;
-pub use settings_store::ImagingSettingsStore;
+pub use service::ImagingService;
+pub use store::ImagingSettingsStore;
 pub use types::*;
 
 // Re-export WSDL types for imaging
 pub use crate::onvif::types::imaging::{
     GetImagingSettings, GetImagingSettingsResponse, GetMoveOptions, GetMoveOptionsResponse,
     GetOptions, GetOptionsResponse, GetServiceCapabilities, GetServiceCapabilitiesResponse,
-    GetStatus, GetStatusResponse, ImagingOptions20, ImagingServiceCapabilities, Move, MoveResponse,
-    SetImagingSettings, SetImagingSettingsResponse, Stop, StopResponse,
+    GetStatus, GetStatusResponse, ImagingOptions20, ImagingServiceCapabilities, Move,
+    MoveOptions20, MoveResponse, SetImagingSettings, SetImagingSettingsResponse, Stop,
+    StopResponse,
 };

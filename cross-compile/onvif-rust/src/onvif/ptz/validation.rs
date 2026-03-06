@@ -3,35 +3,76 @@
 //! This module provides validation for PTZ position and velocity values
 //! to ensure they are within hardware bounds before calling FFI functions.
 
+use crate::onvif::common::validate_range_f32;
 use crate::onvif::error::{OnvifError, OnvifResult};
 use crate::onvif::types::common::PTZVector;
 
-/// Create a validation error with the given subcode and reason
-fn create_validation_error(subcode: &str, reason: String) -> OnvifError {
-    OnvifError::InvalidArgVal {
-        subcode: subcode.to_string(),
-        reason,
-    }
+/// PTZ-specific range validators.
+///
+/// These wrappers provide PTZ-specific subcodes for validation errors.
+fn validate_pan(value: f32) -> OnvifResult<()> {
+    validate_range_f32(value, -1.0, 1.0, "Pan").map_err(|e| match e {
+        OnvifError::InvalidArgVal { subcode, reason } => OnvifError::InvalidArgVal {
+            subcode: format!("InvalidPanValue:{}", subcode),
+            reason,
+        },
+        other => other,
+    })
 }
 
-/// Validate that a value is within the specified range
-fn validate_range(
-    value: f32,
-    min: f32,
-    max: f32,
-    field_name: &str,
-    error_type: &str,
-) -> OnvifResult<()> {
-    if !(min..=max).contains(&value) {
-        return Err(create_validation_error(
-            error_type,
-            format!(
-                "{} value {} out of range ({} to {})",
-                field_name, value, min, max
-            ),
-        ));
-    }
-    Ok(())
+/// Validate tilt position range (-1.0 to 1.0).
+fn validate_tilt(value: f32) -> OnvifResult<()> {
+    validate_range_f32(value, -1.0, 1.0, "Tilt").map_err(|e| match e {
+        OnvifError::InvalidArgVal { subcode, reason } => OnvifError::InvalidArgVal {
+            subcode: format!("InvalidTiltValue:{}", subcode),
+            reason,
+        },
+        other => other,
+    })
+}
+
+/// Validate zoom position range (0.0 to 1.0).
+fn validate_zoom_position(value: f32) -> OnvifResult<()> {
+    validate_range_f32(value, 0.0, 1.0, "Zoom").map_err(|e| match e {
+        OnvifError::InvalidArgVal { subcode, reason } => OnvifError::InvalidArgVal {
+            subcode: format!("InvalidZoomValue:{}", subcode),
+            reason,
+        },
+        other => other,
+    })
+}
+
+/// Validate zoom velocity range (-1.0 to 1.0, allows negative for direction).
+fn validate_zoom_velocity(value: f32) -> OnvifResult<()> {
+    validate_range_f32(value, -1.0, 1.0, "Zoom velocity").map_err(|e| match e {
+        OnvifError::InvalidArgVal { subcode, reason } => OnvifError::InvalidArgVal {
+            subcode: format!("InvalidZoomVelocity:{}", subcode),
+            reason,
+        },
+        other => other,
+    })
+}
+
+/// Validate pan velocity range (-1.0 to 1.0).
+fn validate_pan_velocity(value: f32) -> OnvifResult<()> {
+    validate_range_f32(value, -1.0, 1.0, "Pan velocity").map_err(|e| match e {
+        OnvifError::InvalidArgVal { subcode, reason } => OnvifError::InvalidArgVal {
+            subcode: format!("InvalidPanVelocity:{}", subcode),
+            reason,
+        },
+        other => other,
+    })
+}
+
+/// Validate tilt velocity range (-1.0 to 1.0).
+fn validate_tilt_velocity(value: f32) -> OnvifResult<()> {
+    validate_range_f32(value, -1.0, 1.0, "Tilt velocity").map_err(|e| match e {
+        OnvifError::InvalidArgVal { subcode, reason } => OnvifError::InvalidArgVal {
+            subcode: format!("InvalidTiltVelocity:{}", subcode),
+            reason,
+        },
+        other => other,
+    })
 }
 
 /// Validate PTZ position values.
@@ -51,9 +92,9 @@ fn validate_range(
 ///
 /// `Ok(())` if valid, or `OnvifError::InvalidArgVal` if out of range.
 pub fn validate_ptz_position(pan: f32, tilt: f32, zoom: f32) -> OnvifResult<()> {
-    validate_range(pan, -1.0, 1.0, "Pan", "InvalidPanValue")?;
-    validate_range(tilt, -1.0, 1.0, "Tilt", "InvalidTiltValue")?;
-    validate_range(zoom, 0.0, 1.0, "Zoom", "InvalidZoomValue")?;
+    validate_pan(pan)?;
+    validate_tilt(tilt)?;
+    validate_zoom_position(zoom)?;
     Ok(())
 }
 
@@ -70,12 +111,12 @@ pub fn validate_ptz_position(pan: f32, tilt: f32, zoom: f32) -> OnvifResult<()> 
 /// `Ok(())` if valid, or `OnvifError::InvalidArgVal` if any component is out of range.
 pub fn validate_ptz_vector(vector: &PTZVector) -> OnvifResult<()> {
     if let Some(pan_tilt) = &vector.pan_tilt {
-        validate_range(pan_tilt.x, -1.0, 1.0, "Pan", "InvalidPanValue")?;
-        validate_range(pan_tilt.y, -1.0, 1.0, "Tilt", "InvalidTiltValue")?;
+        validate_pan(pan_tilt.x)?;
+        validate_tilt(pan_tilt.y)?;
     }
 
     if let Some(zoom) = &vector.zoom {
-        validate_range(zoom.x, 0.0, 1.0, "Zoom", "InvalidZoomValue")?;
+        validate_zoom_position(zoom.x)?;
     }
 
     Ok(())
@@ -95,19 +136,13 @@ pub fn validate_ptz_vector(vector: &PTZVector) -> OnvifResult<()> {
 /// `Ok(())` if valid, or `OnvifError::InvalidArgVal` if any component is out of range.
 pub fn validate_ptz_velocity_vector(vector: &PTZVector) -> OnvifResult<()> {
     if let Some(pan_tilt) = &vector.pan_tilt {
-        validate_range(pan_tilt.x, -1.0, 1.0, "Pan velocity", "InvalidPanVelocity")?;
-        validate_range(
-            pan_tilt.y,
-            -1.0,
-            1.0,
-            "Tilt velocity",
-            "InvalidTiltVelocity",
-        )?;
+        validate_pan_velocity(pan_tilt.x)?;
+        validate_tilt_velocity(pan_tilt.y)?;
     }
 
     if let Some(zoom) = &vector.zoom {
         // For velocity, zoom can be negative (unlike position)
-        validate_range(zoom.x, -1.0, 1.0, "Zoom velocity", "InvalidZoomVelocity")?;
+        validate_zoom_velocity(zoom.x)?;
     }
 
     Ok(())
