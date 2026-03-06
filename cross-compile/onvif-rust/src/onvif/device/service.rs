@@ -144,26 +144,17 @@ impl DeviceService {
     }
 
     /// Handle GetScopes request.
-    pub fn handle_get_scopes(
-        &self,
-        request: GetScopes,
-    ) -> Result<GetScopesResponse, OnvifError> {
+    pub fn handle_get_scopes(&self, request: GetScopes) -> Result<GetScopesResponse, OnvifError> {
         discovery_ops::handle_get_scopes(&self.scopes, request)
     }
 
     /// Handle SetScopes request.
-    pub fn handle_set_scopes(
-        &self,
-        request: SetScopes,
-    ) -> Result<SetScopesResponse, OnvifError> {
+    pub fn handle_set_scopes(&self, request: SetScopes) -> Result<SetScopesResponse, OnvifError> {
         discovery_ops::handle_set_scopes(&self.scopes, request)
     }
 
     /// Handle AddScopes request.
-    pub fn handle_add_scopes(
-        &self,
-        request: AddScopes,
-    ) -> Result<AddScopesResponse, OnvifError> {
+    pub fn handle_add_scopes(&self, request: AddScopes) -> Result<AddScopesResponse, OnvifError> {
         discovery_ops::handle_add_scopes(&self.scopes, request)
     }
 
@@ -184,10 +175,7 @@ impl DeviceService {
     }
 
     /// Handle GetUsers request.
-    pub fn handle_get_users(
-        &self,
-        request: GetUsers,
-    ) -> Result<GetUsersResponse, OnvifError> {
+    pub fn handle_get_users(&self, request: GetUsers) -> Result<GetUsersResponse, OnvifError> {
         users_ops::handle_get_users(&self.users, request)
     }
 
