@@ -39,8 +39,7 @@ jobs:
         # SHA: de0fac2e4500dabe0009e67214ff5f5447ce83dd
 
       - name: Setup Snyk CLI
-        uses: snyk/actions/setup@v1.0.0  # v1.0.0
-        # SHA: 9adf32b1121593767fc3c057af55b55db032dc04
+        uses: snyk/actions/setup@9adf32b1121593767fc3c057af55b55db032dc04  # v1.0.0
 
       - name: Run Snyk Code Test
         id: snyk-code
@@ -100,8 +99,7 @@ jobs:
       - name: Run Snyk OSS for Node.js
         id: snyk-oss
         if: hashFiles(format('{0}/package.json', inputs.working_directory)) != ''
-        uses: snyk/actions/node@v1.0.0  # v1.0.0
-        # SHA: 9adf32b1121593767fc3c057af55b55db032dc04
+        uses: snyk/actions/node@9adf32b1121593767fc3c057af55b55db032dc04  # v1.0.0
         continue-on-error: true
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
@@ -143,8 +141,7 @@ jobs:
 
       - name: Run Snyk Monitor
         if: steps.snyk-oss.outcome == 'success' || steps.snyk-oss.outcome == 'failure'
-        uses: snyk/actions/node@v1.0.0  # v1.0.0
-        # SHA: 9adf32b1121593767fc3c057af55b55db032dc04
+        uses: snyk/actions/node@9adf32b1121593767fc3c057af55b55db032dc04  # v1.0.0
         continue-on-error: true
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}

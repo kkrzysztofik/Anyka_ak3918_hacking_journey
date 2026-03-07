@@ -161,9 +161,9 @@ jobs:
         # SHA: de0fac2e4500dabe0009e67214ff5f5447ce83dd
 
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@v1  # v1.0.0
-        # SHA: e97e2d8cc328f1b50210efc529dca0028893a2d9
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9  # v1
         with:
+          toolchain: stable
           components: clippy, rustfmt
 
       - name: Cache Cargo Dependencies
@@ -327,8 +327,7 @@ jobs:
         # SHA: de0fac2e4500dabe0009e67214ff5f5447ce83dd
 
       - name: Setup Snyk CLI
-        uses: snyk/actions/setup@v1.0.0  # v1.0.0
-        # SHA: 9adf32b1121593767fc3c057af55b55db032dc04
+        uses: snyk/actions/setup@9adf32b1121593767fc3c057af55b55db032dc04  # v1.0.0
 
       # Rust Snyk Code Scan
       - name: Run Snyk Code for Rust
@@ -415,8 +414,7 @@ jobs:
 
       - name: Run Snyk OSS for WebUI
         id: snyk-oss-webui
-        uses: snyk/actions/node@v1.0.0  # v1.0.0
-        # SHA: 9adf32b1121593767fc3c057af55b55db032dc04
+        uses: snyk/actions/node@9adf32b1121593767fc3c057af55b55db032dc04  # v1.0.0
         continue-on-error: true
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
@@ -472,8 +470,7 @@ jobs:
 
       - name: Run Snyk Monitor
         if: hashFiles('cross-compile/www/package.json') != ''
-        uses: snyk/actions/node@v1.0.0  # v1.0.0
-        # SHA: 9adf32b1121593767fc3c057af55b55db032dc04
+        uses: snyk/actions/node@9adf32b1121593767fc3c057af55b55db032dc04  # v1.0.0
         continue-on-error: true
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
@@ -719,8 +716,7 @@ jobs:
       - name: SonarQube Scan
         id: sonar-scan
         continue-on-error: true
-        uses: sonarsource/sonarqube-scan-action@v7.0.0  # v7.0.0
-        # SHA: a31c9398be7ace6bbfaf30c0bd5d415f843d45e9
+        uses: sonarsource/sonarqube-scan-action@a31c9398be7ace6bbfaf30c0bd5d415f843d45e9  # v7.0.0
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 
@@ -812,8 +808,7 @@ jobs:
         id: sonar-quality-gate
         if: steps.check-scannerwork.outputs.exists == 'true'
         continue-on-error: true
-        uses: sonarsource/sonarqube-quality-gate-action@v1.2.0  # v1.2.0
-        # SHA: cf038b0e0cdecfa9e56c198bbb7d21d751d62c3b
+        uses: sonarsource/sonarqube-quality-gate-action@cf038b0e0cdecfa9e56c198bbb7d21d751d62c3b  # v1.2.0
         with:
           pollingTimeoutSec: 600
         env:
