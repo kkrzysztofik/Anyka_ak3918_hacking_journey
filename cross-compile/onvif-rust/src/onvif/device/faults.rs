@@ -3,6 +3,7 @@
 //! This module defines faults specific to the Device Service operations
 //! as defined in the ONVIF Device Management WSDL specification.
 
+pub use super::validation::{validate_hostname, validate_scope};
 use crate::onvif::error::OnvifError;
 
 // ============================================================================
@@ -17,46 +18,6 @@ pub fn invalid_hostname(reason: &str) -> OnvifError {
         subcode: "ter:InvalidHostname".to_string(),
         reason: format!("Invalid hostname: {}", reason),
     }
-}
-
-/// Validate a hostname according to RFC 1123.
-///
-/// Returns Ok(()) if valid, or an OnvifError if invalid.
-pub fn validate_hostname(name: &str) -> Result<(), OnvifError> {
-    // Check length
-    if name.is_empty() {
-        return Err(invalid_hostname("hostname cannot be empty"));
-    }
-    if name.len() > 63 {
-        return Err(invalid_hostname("hostname too long (max 63 characters)"));
-    }
-
-    // Check characters (alphanumeric and hyphens only, no leading/trailing hyphens)
-    let chars: Vec<char> = name.chars().collect();
-
-    if chars[0] == '-' || chars[chars.len() - 1] == '-' {
-        return Err(invalid_hostname(
-            "hostname cannot start or end with a hyphen",
-        ));
-    }
-
-    for c in &chars {
-        if !c.is_ascii_alphanumeric() && *c != '-' {
-            return Err(invalid_hostname(&format!(
-                "hostname contains invalid character: '{}'",
-                c
-            )));
-        }
-    }
-
-    // Must start with alphanumeric
-    if !chars[0].is_ascii_alphanumeric() {
-        return Err(invalid_hostname(
-            "hostname must start with a letter or digit",
-        ));
-    }
-
-    Ok(())
 }
 
 // ============================================================================
@@ -115,31 +76,6 @@ pub fn scope_overwrite(reason: &str) -> OnvifError {
         subcode: "ter:ScopeOverwrite".to_string(),
         reason: reason.to_string(),
     }
-}
-
-/// Validate a scope URI.
-///
-/// Scopes must be valid URIs starting with "onvif://www.onvif.org/".
-pub fn validate_scope(scope: &str) -> Result<(), OnvifError> {
-    if scope.is_empty() {
-        return Err(invalid_scope("scope cannot be empty"));
-    }
-
-    // Scopes should be valid URIs
-    if !scope.starts_with("onvif://www.onvif.org/") {
-        return Err(invalid_scope(
-            "scope must start with 'onvif://www.onvif.org/'",
-        ));
-    }
-
-    // Check for invalid characters (basic URI validation)
-    for c in scope.chars() {
-        if c.is_control() || c == ' ' {
-            return Err(invalid_scope("scope contains invalid characters"));
-        }
-    }
-
-    Ok(())
 }
 
 // ============================================================================

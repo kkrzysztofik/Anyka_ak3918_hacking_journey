@@ -14,7 +14,9 @@ use crate::onvif::types::imaging::{
 };
 use crate::platform::Platform;
 
-use crate::onvif::imaging::store::{ImagingSettingsError, ImagingSettingsStore};
+use crate::onvif::imaging::store::ImagingSettingsStore;
+
+use super::error::map_settings_error;
 
 /// Handle GetImagingSettings request.
 ///
@@ -124,35 +126,6 @@ async fn apply_platform_settings(
         if let Err(e) = imaging.set_sharpness(sharpness).await {
             tracing::warn!("Failed to set sharpness: {}", e);
         }
-    }
-}
-
-/// Map settings error to ONVIF error.
-fn map_settings_error(err: ImagingSettingsError) -> crate::onvif::error::OnvifError {
-    use crate::onvif::error::OnvifError;
-
-    match err {
-        ImagingSettingsError::InvalidToken(token) => OnvifError::InvalidArgVal {
-            subcode: "ter:InvalidToken".to_string(),
-            reason: format!("Invalid video source token: {}", token),
-        },
-        ImagingSettingsError::OutOfRange {
-            parameter,
-            value,
-            min,
-            max,
-        } => OnvifError::InvalidArgVal {
-            subcode: "ter:InvalidArgVal".to_string(),
-            reason: format!(
-                "Parameter '{}' value {} is out of range ({} - {})",
-                parameter, value, min, max
-            ),
-        },
-        ImagingSettingsError::PlatformError(msg) => OnvifError::HardwareFailure(msg),
-        ImagingSettingsError::ValidationFailed(msg) => OnvifError::InvalidArgVal {
-            subcode: "ter:InvalidArgVal".to_string(),
-            reason: msg,
-        },
     }
 }
 

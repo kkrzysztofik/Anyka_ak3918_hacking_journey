@@ -48,6 +48,7 @@
 //! - `ter:InvalidArgVal` - Invalid argument value
 //! - `ter:ConfigurationConflict` - Configuration conflict detected
 
+mod defaults;
 pub mod faults;
 pub mod ops;
 pub mod profile_manager;

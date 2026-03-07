@@ -5,7 +5,8 @@
 
 use async_trait::async_trait;
 
-use crate::onvif::dispatcher::{ServiceHandler, parse_body};
+use crate::onvif::common::dispatch_async;
+use crate::onvif::dispatcher::ServiceHandler;
 use crate::onvif::error::{OnvifError, OnvifResult};
 
 use super::types::*;
@@ -118,52 +119,46 @@ impl ServiceHandler for AnalyticsService {
         match action {
             // Service Capabilities
             "GetServiceCapabilities" => {
-                let request: GetServiceCapabilities = parse_body(body_xml)?;
-                let response = self.handle_get_service_capabilities(request).await?;
-                quick_xml::se::to_string(&response).map_err(|e| {
-                    OnvifError::Internal(format!("Failed to serialize response: {}", e))
+                dispatch_async(body_xml, |request: GetServiceCapabilities| {
+                    self.handle_get_service_capabilities(request)
                 })
+                .await
             }
 
             // Analytics Modules
             "GetSupportedAnalyticsModules" => {
-                let request: GetSupportedAnalyticsModules = parse_body(body_xml)?;
-                let response = self.handle_get_supported_analytics_modules(request).await?;
-                quick_xml::se::to_string(&response).map_err(|e| {
-                    OnvifError::Internal(format!("Failed to serialize response: {}", e))
+                dispatch_async(body_xml, |request: GetSupportedAnalyticsModules| {
+                    self.handle_get_supported_analytics_modules(request)
                 })
+                .await
             }
 
             "CreateAnalyticsModules" => {
-                let request: CreateAnalyticsModules = parse_body(body_xml)?;
-                let response = self.handle_create_analytics_modules(request).await?;
-                quick_xml::se::to_string(&response).map_err(|e| {
-                    OnvifError::Internal(format!("Failed to serialize response: {}", e))
+                dispatch_async(body_xml, |request: CreateAnalyticsModules| {
+                    self.handle_create_analytics_modules(request)
                 })
+                .await
             }
 
             "DeleteAnalyticsModules" => {
-                let request: DeleteAnalyticsModules = parse_body(body_xml)?;
-                let response = self.handle_delete_analytics_modules(request).await?;
-                quick_xml::se::to_string(&response).map_err(|e| {
-                    OnvifError::Internal(format!("Failed to serialize response: {}", e))
+                dispatch_async(body_xml, |request: DeleteAnalyticsModules| {
+                    self.handle_delete_analytics_modules(request)
                 })
+                .await
             }
 
             "GetAnalyticsModules" => {
-                let request: GetAnalyticsModules = parse_body(body_xml)?;
-                let response = self.handle_get_analytics_modules(request).await?;
-                quick_xml::se::to_string(&response).map_err(|e| {
-                    OnvifError::Internal(format!("Failed to serialize response: {}", e))
+                dispatch_async(body_xml, |request: GetAnalyticsModules| {
+                    self.handle_get_analytics_modules(request)
                 })
+                .await
             }
 
             "ModifyAnalyticsModules" => {
-                let request: ModifyAnalyticsModules = parse_body(body_xml)?;
-                let response = self.handle_modify_analytics_modules(request).await?;
-                quick_xml::se::to_string(&response).map_err(|e| {
-                    OnvifError::Internal(format!("Failed to serialize response: {}", e))
+                dispatch_async(body_xml, |request: ModifyAnalyticsModules| {
+                    self.handle_modify_analytics_modules(request)
                 })
+                .await
             }
 
             // Unknown action

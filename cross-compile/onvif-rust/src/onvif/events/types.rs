@@ -5,27 +5,13 @@
 
 use serde::{Deserialize, Serialize};
 
+pub use crate::onvif::common::GetServiceCapabilities;
+pub type GetServiceCapabilitiesResponse =
+    crate::onvif::common::SharedGetServiceCapabilitiesResponse<EventsServiceCapabilities>;
+
 // ============================================================================
 // Service Capabilities
 // ============================================================================
-
-/// GetServiceCapabilities request.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(rename = "GetServiceCapabilities", rename_all = "PascalCase")]
-pub struct GetServiceCapabilities {}
-
-/// GetServiceCapabilities response.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(rename = "GetServiceCapabilitiesResponse", rename_all = "PascalCase")]
-pub struct GetServiceCapabilitiesResponse {
-    /// Service capabilities.
-    #[serde(
-        rename = "Capabilities",
-        default,
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub capabilities: Option<EventsServiceCapabilities>,
-}
 
 /// Events Service capabilities.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]

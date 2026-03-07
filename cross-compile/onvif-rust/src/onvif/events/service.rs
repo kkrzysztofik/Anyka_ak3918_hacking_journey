@@ -5,7 +5,8 @@
 
 use async_trait::async_trait;
 
-use crate::onvif::dispatcher::{ServiceHandler, parse_body};
+use crate::onvif::common::dispatch_async;
+use crate::onvif::dispatcher::ServiceHandler;
 use crate::onvif::error::{OnvifError, OnvifResult};
 
 use super::types::*;
@@ -126,56 +127,45 @@ impl ServiceHandler for EventsService {
         match action {
             // Service Capabilities
             "GetServiceCapabilities" => {
-                let request: GetServiceCapabilities = parse_body(body_xml)?;
-                let response = self.handle_get_service_capabilities(request).await?;
-                quick_xml::se::to_string(&response).map_err(|e| {
-                    OnvifError::Internal(format!("Failed to serialize response: {}", e))
+                dispatch_async(body_xml, |request: GetServiceCapabilities| {
+                    self.handle_get_service_capabilities(request)
                 })
+                .await
             }
 
             // Event Properties
             "GetEventProperties" => {
-                let request: GetEventProperties = parse_body(body_xml)?;
-                let response = self.handle_get_event_properties(request).await?;
-                quick_xml::se::to_string(&response).map_err(|e| {
-                    OnvifError::Internal(format!("Failed to serialize response: {}", e))
+                dispatch_async(body_xml, |request: GetEventProperties| {
+                    self.handle_get_event_properties(request)
                 })
+                .await
             }
 
             // Subscriptions
             "CreatePullPointSubscription" => {
-                let request: CreatePullPointSubscription = parse_body(body_xml)?;
-                let response = self.handle_create_pull_point_subscription(request).await?;
-                quick_xml::se::to_string(&response).map_err(|e| {
-                    OnvifError::Internal(format!("Failed to serialize response: {}", e))
+                dispatch_async(body_xml, |request: CreatePullPointSubscription| {
+                    self.handle_create_pull_point_subscription(request)
                 })
+                .await
             }
 
             // Pull Messages
             "PullMessages" => {
-                let request: PullMessages = parse_body(body_xml)?;
-                let response = self.handle_pull_messages(request).await?;
-                quick_xml::se::to_string(&response).map_err(|e| {
-                    OnvifError::Internal(format!("Failed to serialize response: {}", e))
+                dispatch_async(body_xml, |request: PullMessages| {
+                    self.handle_pull_messages(request)
                 })
+                .await
             }
 
             // Seek
-            "Seek" => {
-                let request: Seek = parse_body(body_xml)?;
-                let response = self.handle_seek(request).await?;
-                quick_xml::se::to_string(&response).map_err(|e| {
-                    OnvifError::Internal(format!("Failed to serialize response: {}", e))
-                })
-            }
+            "Seek" => dispatch_async(body_xml, |request: Seek| self.handle_seek(request)).await,
 
             // Synchronization
             "SetSynchronizationPoint" => {
-                let request: SetSynchronizationPoint = parse_body(body_xml)?;
-                let response = self.handle_set_synchronization_point(request).await?;
-                quick_xml::se::to_string(&response).map_err(|e| {
-                    OnvifError::Internal(format!("Failed to serialize response: {}", e))
+                dispatch_async(body_xml, |request: SetSynchronizationPoint| {
+                    self.handle_set_synchronization_point(request)
                 })
+                .await
             }
 
             // Unknown action

@@ -44,11 +44,15 @@ pub use super::ws_security;
 // New Phase 0 modules
 mod dispatch;
 mod faults;
+mod service_capabilities;
 mod validation;
 
 // Re-export new modules for external use
 pub use dispatch::{dispatch_async, dispatch_sync};
 pub use faults::{action_not_supported, hardware_failure, invalid_token, no_entity, out_of_range};
+pub use service_capabilities::{
+    GetServiceCapabilities, GetServiceCapabilitiesResponse as SharedGetServiceCapabilitiesResponse,
+};
 pub use validation::{
     validate_max_length, validate_range_f32, validate_range_i32, validate_reference_token,
 };

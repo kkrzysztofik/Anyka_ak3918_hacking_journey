@@ -17,6 +17,23 @@ use crate::onvif::types::device::{
     SetUser, SetUserResponse,
 };
 
+fn map_user_storage_error(error: crate::config::UserError, last_admin_reason: &str) -> OnvifError {
+    match error {
+        crate::config::UserError::UserNotFound(name) => OnvifError::InvalidArgVal {
+            subcode: "ter:UserNotFound".to_string(),
+            reason: format!("User '{}' not found", name),
+        },
+        crate::config::UserError::CannotDeleteLastAdmin => OnvifError::InvalidArgVal {
+            subcode: "ter:FixedUser".to_string(),
+            reason: last_admin_reason.to_string(),
+        },
+        other => OnvifError::InvalidArgVal {
+            subcode: "ter:InvalidArgVal".to_string(),
+            reason: other.to_string(),
+        },
+    }
+}
+
 /// Handle GetUsers request.
 ///
 /// Returns a list of all users with their usernames and levels.
@@ -171,19 +188,8 @@ pub fn handle_delete_users(
     }
 
     for username in &request.usernames {
-        users.delete_user(username).map_err(|e| match e {
-            crate::config::UserError::UserNotFound(name) => OnvifError::InvalidArgVal {
-                subcode: "ter:UserNotFound".to_string(),
-                reason: format!("User '{}' not found", name),
-            },
-            crate::config::UserError::CannotDeleteLastAdmin => OnvifError::InvalidArgVal {
-                subcode: "ter:FixedUser".to_string(),
-                reason: "Cannot delete the last administrator".to_string(),
-            },
-            _ => OnvifError::InvalidArgVal {
-                subcode: "ter:InvalidArgVal".to_string(),
-                reason: e.to_string(),
-            },
+        users.delete_user(username).map_err(|error| {
+            map_user_storage_error(error, "Cannot delete the last administrator")
         })?;
 
         tracing::info!("DeleteUsers: deleted user '{}'", username);
@@ -244,19 +250,8 @@ pub fn handle_set_user(
         // Update the user
         users
             .update_user(&user.username, password, Some(level))
-            .map_err(|e| match e {
-                crate::config::UserError::UserNotFound(name) => OnvifError::InvalidArgVal {
-                    subcode: "ter:UserNotFound".to_string(),
-                    reason: format!("User '{}' not found", name),
-                },
-                crate::config::UserError::CannotDeleteLastAdmin => OnvifError::InvalidArgVal {
-                    subcode: "ter:FixedUser".to_string(),
-                    reason: "Cannot demote the last administrator".to_string(),
-                },
-                _ => OnvifError::InvalidArgVal {
-                    subcode: "ter:InvalidArgVal".to_string(),
-                    reason: e.to_string(),
-                },
+            .map_err(|error| {
+                map_user_storage_error(error, "Cannot demote the last administrator")
             })?;
 
         tracing::info!("SetUser: updated user '{}'", user.username);
