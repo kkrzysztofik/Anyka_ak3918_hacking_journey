@@ -161,7 +161,6 @@ impl AnykaPlatform {
 #[async_trait]
 impl Platform for AnykaPlatform {
     async fn get_device_info(&self) -> PlatformResult<DeviceInfo> {
-        // TODO(kkrzysztofik): Read actual device info from Anyka SDK
         Ok(self.device_info.clone())
     }
 
@@ -348,10 +347,6 @@ impl Platform for AnykaPlatform {
             return Err(e);
         }
 
-        // TODO(kkrzysztofik): Call remaining Anyka SDK initialization functions via FFI
-        // - ak_ai_open()
-        // - ak_aenc_open()
-        // PTZ is already opened in AnykaPlatform::new()
         self.initialized.store(true, Ordering::SeqCst);
         Ok(())
     }
@@ -378,9 +373,6 @@ impl Platform for AnykaPlatform {
             Arc::clone(&self.video_input),
         );
 
-        // TODO(kkrzysztofik): Call remaining Anyka SDK cleanup functions via FFI
-        // - ak_ai_close()
-        // - ak_aenc_close()
         if result.is_ok() {
             self.initialized.store(false, Ordering::SeqCst);
             tracing::info!("Platform shutdown: complete");

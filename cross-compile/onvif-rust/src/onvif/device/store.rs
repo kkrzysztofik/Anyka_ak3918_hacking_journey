@@ -76,7 +76,7 @@ mod tests {
     #[test]
     fn test_device_store_new() {
         let store = create_test_store();
-        assert!(!Arc::clone(&store.users).as_ref().list_users().is_empty() || true);
+        assert!(Arc::clone(&store.users).as_ref().list_users().is_empty());
     }
 
     #[test]

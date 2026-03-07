@@ -277,10 +277,12 @@ mod tests {
     use crate::onvif::types::common::UserLevel as OnvifUserLevel;
     use std::sync::Arc;
 
+    const TEST_PASSWORD: &str = "test_fixture_pwd_not_real";
+
     fn create_test_users() -> Arc<UserStorage> {
         let users = Arc::new(UserStorage::new());
         users
-            .create_user("admin", "admin123", UserLevel::Administrator)
+            .create_user("admin", TEST_PASSWORD, UserLevel::Administrator)
             .unwrap();
         users
     }

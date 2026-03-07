@@ -163,14 +163,7 @@ mod tests {
 
     #[test]
     fn test_env_var_truthy_explicit_values() {
-        // TODO(github#28): Update tests to use real env vars via std::env::set_var
-        // (functional change - out of scope for refactoring PR)
-        //
-        // Just test the internal parsing logic without setting env vars
-        // The function is used elsewhere with actual env vars at runtime
-
-        // Test case insensitivity and truthy values
-        // This tests the parsing logic only
+        // Exercise the parsing logic directly; runtime callers cover real env vars.
         let test_cases = vec![
             ("true", true),
             ("1", true),

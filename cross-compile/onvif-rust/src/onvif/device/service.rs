@@ -637,13 +637,15 @@ mod tests {
     use crate::config::{PasswordManager, UserLevel, UserStorage};
     use std::sync::Arc;
 
+    const TEST_PASSWORD: &str = "test_fixture_pwd_not_real";
+
     fn create_test_service() -> DeviceService {
         let users = Arc::new(UserStorage::new());
         let password_manager = Arc::new(PasswordManager::new());
 
         // Create initial admin user with plaintext password
         users
-            .create_user("admin", "admin123", UserLevel::Administrator)
+            .create_user("admin", TEST_PASSWORD, UserLevel::Administrator)
             .unwrap();
 
         DeviceService::new(users, password_manager)
@@ -700,7 +702,7 @@ mod tests {
     fn test_base_url_uses_detected_ip() {
         let users = Arc::new(UserStorage::new());
         users
-            .create_user("admin", "admin123", UserLevel::Administrator)
+            .create_user("admin", TEST_PASSWORD, UserLevel::Administrator)
             .unwrap();
         let password_manager = Arc::new(PasswordManager::new());
         let config = ConfigRuntime::new(Default::default());
@@ -737,7 +739,7 @@ mod tests {
     fn test_base_url_uses_static_ip_address() {
         let users = Arc::new(UserStorage::new());
         users
-            .create_user("admin", "admin123", UserLevel::Administrator)
+            .create_user("admin", TEST_PASSWORD, UserLevel::Administrator)
             .unwrap();
         let password_manager = Arc::new(PasswordManager::new());
         let config = ConfigRuntime::new(Default::default());
@@ -776,7 +778,7 @@ mod tests {
     fn test_base_url_fallback_to_ip_address() {
         let users = Arc::new(UserStorage::new());
         users
-            .create_user("admin", "admin123", UserLevel::Administrator)
+            .create_user("admin", TEST_PASSWORD, UserLevel::Administrator)
             .unwrap();
         let password_manager = Arc::new(PasswordManager::new());
         let config = ConfigRuntime::new(Default::default());
@@ -810,7 +812,7 @@ mod tests {
     fn test_base_url_fallback_to_127_0_0_1() {
         let users = Arc::new(UserStorage::new());
         users
-            .create_user("admin", "admin123", UserLevel::Administrator)
+            .create_user("admin", TEST_PASSWORD, UserLevel::Administrator)
             .unwrap();
         let password_manager = Arc::new(PasswordManager::new());
         let config = ConfigRuntime::new(Default::default());

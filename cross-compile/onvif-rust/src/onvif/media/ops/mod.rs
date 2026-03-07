@@ -20,6 +20,6 @@ pub use crate::onvif::media::validation;
 
 use crate::onvif::media::ProfileManager;
 
-/// Type alias for ProfileManager reference.
-/// This allows operations to work with both Arc<ProfileManager> and &ProfileManager.
+/// Type alias for ProfileManager — provides an indirection point so the
+/// concrete type behind operation signatures can be changed in one place.
 pub type ProfileManagerRef = ProfileManager;

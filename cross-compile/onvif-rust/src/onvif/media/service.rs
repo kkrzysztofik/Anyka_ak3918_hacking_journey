@@ -1,7 +1,6 @@
 //! Media Service implementation.
 //!
-//! This module provides the ONVIF Media Service as a thin facade over
-//! the operations modules in `ops/`.
+//! ONVIF Media Service implementation.
 
 use std::sync::Arc;
 
@@ -21,9 +20,6 @@ use super::ops::video_sources as video_source_ops;
 use super::types::DEFAULT_RTSP_PORT;
 
 /// ONVIF Media Service.
-///
-/// This is a thin facade that delegates to operations modules.
-/// Maintains backward compatibility with existing code.
 pub struct MediaService {
     /// Profile manager for media profiles.
     profile_manager: Arc<ProfileManager>,

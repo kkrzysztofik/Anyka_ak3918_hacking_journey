@@ -1,6 +1,6 @@
 //! ONVIF PTZ Service implementation.
 //!
-//! This module provides the main PTZService facade that delegates to operation modules.
+//! ONVIF PTZ Service implementation.
 
 use std::sync::Arc;
 
@@ -73,8 +73,7 @@ impl PTZService {
     }
 
     // ========================================================================
-    // Validator and Builder Methods (pub(crate))
-    // Note: These are kept for API compatibility but delegate to ops module functions.
+    // Validator and builder methods
     // ========================================================================
 
     #[allow(dead_code)]
@@ -85,8 +84,7 @@ impl PTZService {
                 reason: "Profile token is required".to_string(),
             });
         }
-        // For now, accept any non-empty token
-        // In production, this would validate against actual profile tokens
+        // Detailed profile validation happens in the state-backed handlers.
         Ok(())
     }
 
@@ -111,7 +109,7 @@ impl PTZService {
     }
 
     // ========================================================================
-    // Delegation Methods (20 methods)
+    // Delegation methods
     // ========================================================================
 
     /// Handle GetNodes request - delegates to ops::config

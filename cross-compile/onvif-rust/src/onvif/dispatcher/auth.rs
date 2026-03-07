@@ -877,9 +877,7 @@ mod tests {
 
         assert!(
             !soap_fault.contains(test_username),
-            "SOAP fault must not contain the probed username '{}' — found in: {}",
-            test_username,
-            soap_fault
+            "SOAP fault must not leak the probed username"
         );
     }
 }
