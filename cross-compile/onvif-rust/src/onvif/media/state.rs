@@ -64,6 +64,7 @@ impl MediaState {
 
     /// Get all profiles.
     pub fn get_profiles(&self) -> Vec<Profile> {
+        // Note: clone required to release the RwLock before returning
         self.profiles.read().values().cloned().collect()
     }
 
@@ -148,15 +149,20 @@ impl MediaState {
 
     /// Get all video sources.
     pub fn get_video_sources(&self) -> Vec<VideoSource> {
+        // Note: clone required to release the RwLock before returning
         self.video_sources.read().values().cloned().collect()
     }
 
     /// Get all video source configurations.
     pub fn get_video_source_configurations(&self) -> Vec<VideoSourceConfiguration> {
+        // Note: clone required to release the RwLock before returning
         self.video_source_configs.read().values().cloned().collect()
     }
 
     /// Get a video source configuration by token.
+    // TODO: No token format validation (unlike get_profile which validates via
+    // validate_profile_token). Acceptable for now — configuration tokens are
+    // system-generated and not user-supplied in the single-profile camera model.
     pub fn get_video_source_configuration(
         &self,
         token: &str,
@@ -180,6 +186,7 @@ impl MediaState {
 
     /// Get all video encoder configurations.
     pub fn get_video_encoder_configurations(&self) -> Vec<VideoEncoderConfiguration> {
+        // Note: clone required to release the RwLock before returning
         self.video_encoder_configs
             .read()
             .values()
@@ -188,6 +195,8 @@ impl MediaState {
     }
 
     /// Get a video encoder configuration by token.
+    // TODO: No token format validation (unlike get_profile). Configuration tokens are
+    // system-generated, so format validation is not critical for the embedded camera.
     pub fn get_video_encoder_configuration(
         &self,
         token: &str,
@@ -211,15 +220,19 @@ impl MediaState {
 
     /// Get all audio sources.
     pub fn get_audio_sources(&self) -> Vec<AudioSource> {
+        // Note: clone required to release the RwLock before returning
         self.audio_sources.read().values().cloned().collect()
     }
 
     /// Get all audio source configurations.
     pub fn get_audio_source_configurations(&self) -> Vec<AudioSourceConfiguration> {
+        // Note: clone required to release the RwLock before returning
         self.audio_source_configs.read().values().cloned().collect()
     }
 
     /// Get an audio source configuration by token.
+    // TODO: No token format validation (unlike get_profile). Configuration tokens are
+    // system-generated, so format validation is not critical for the embedded camera.
     pub fn get_audio_source_configuration(
         &self,
         token: &str,
@@ -243,6 +256,7 @@ impl MediaState {
 
     /// Get all audio encoder configurations.
     pub fn get_audio_encoder_configurations(&self) -> Vec<AudioEncoderConfiguration> {
+        // Note: clone required to release the RwLock before returning
         self.audio_encoder_configs
             .read()
             .values()
@@ -251,6 +265,8 @@ impl MediaState {
     }
 
     /// Get an audio encoder configuration by token.
+    // TODO: No token format validation (unlike get_profile). Configuration tokens are
+    // system-generated, so format validation is not critical for the embedded camera.
     pub fn get_audio_encoder_configuration(
         &self,
         token: &str,
@@ -420,6 +436,8 @@ impl MediaState {
     }
 
     /// Clear all state.
+    // NOTE: Clear acquires write locks sequentially. Brief inconsistency is acceptable
+    // during service shutdown — no client requests are expected during this window.
     pub fn clear(&self) {
         self.profiles.write().clear();
         self.video_sources.write().clear();

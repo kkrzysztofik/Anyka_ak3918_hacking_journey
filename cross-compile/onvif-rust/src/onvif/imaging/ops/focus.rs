@@ -13,9 +13,24 @@ use crate::onvif::types::imaging::{
 use crate::onvif::imaging::faults;
 use crate::onvif::imaging::store::ImagingSettingsStore;
 
-/// Handle GetMoveOptions request.
+/// Handle the ONVIF GetMoveOptions request for imaging focus.
 ///
-/// Returns supported focus move options for the specified video source.
+/// Returns the supported focus move options for the specified video source.
+/// Since this device does not support motorized focus, the returned options
+/// are empty defaults.
+///
+/// # Arguments
+///
+/// * `store` - Shared imaging settings store used to validate the video source token
+/// * `request` - The `GetMoveOptions` request containing the video source token
+///
+/// # Returns
+///
+/// `GetMoveOptionsResponse` with default (empty) `MoveOptions20`.
+///
+/// # Errors
+///
+/// Returns `ter:InvalidArgVal` / `ter:NoSource` if the video source token is invalid.
 pub async fn get_move_options(
     store: &ImagingSettingsStore,
     request: GetMoveOptions,
@@ -38,9 +53,25 @@ pub async fn get_move_options(
     })
 }
 
-/// Handle Move request (focus).
+/// Handle the ONVIF Move request for imaging focus.
 ///
-/// Not supported - returns ActionNotSupported error.
+/// This device does not support motorized focus, so a valid token produces
+/// an `ActionNotSupported` error after token validation.
+///
+/// # Arguments
+///
+/// * `store` - Shared imaging settings store used to validate the video source token
+/// * `request` - The `Move` request containing the video source token and focus move data
+///
+/// # Returns
+///
+/// This function never returns `Ok`; it always produces an error.
+///
+/// # Errors
+///
+/// * Returns `ter:InvalidArgVal` / `ter:NoSource` if the video source token is invalid.
+/// * Returns `ter:ActionNotSupported` for any valid token because focus move is
+///   not supported on this device.
 pub async fn handle_move(store: &ImagingSettingsStore, request: Move) -> OnvifResult<MoveResponse> {
     tracing::debug!(
         "Move (focus) request for token: {} (not supported)",
@@ -59,9 +90,25 @@ pub async fn handle_move(store: &ImagingSettingsStore, request: Move) -> OnvifRe
     ))
 }
 
-/// Handle Stop request (focus).
+/// Handle the ONVIF Stop request for imaging focus.
 ///
-/// Not supported - returns ActionNotSupported error.
+/// This device does not support motorized focus, so a valid token produces
+/// an `ActionNotSupported` error after token validation.
+///
+/// # Arguments
+///
+/// * `store` - Shared imaging settings store used to validate the video source token
+/// * `request` - The `Stop` request containing the video source token
+///
+/// # Returns
+///
+/// This function never returns `Ok`; it always produces an error.
+///
+/// # Errors
+///
+/// * Returns `ter:InvalidArgVal` / `ter:NoSource` if the video source token is invalid.
+/// * Returns `ter:ActionNotSupported` for any valid token because focus stop is
+///   not supported on this device.
 pub async fn handle_stop(store: &ImagingSettingsStore, request: Stop) -> OnvifResult<StopResponse> {
     tracing::debug!(
         "Stop (focus) request for token: {} (not supported)",
@@ -90,7 +137,7 @@ mod tests {
     use crate::onvif::types::imaging::FocusMove;
 
     #[tokio::test]
-    async fn test_get_move_options() {
+    async fn test_focus_get_move_options_returns_defaults() {
         let store = ImagingSettingsStore::new();
         let request = GetMoveOptions {
             video_source_token: "VideoSource_1".to_string(),
@@ -100,7 +147,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_get_move_options_invalid_token() {
+    async fn test_focus_get_move_options_invalid_token_returns_error() {
         let store = ImagingSettingsStore::new();
         let request = GetMoveOptions {
             video_source_token: "InvalidToken".to_string(),
@@ -110,7 +157,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_move_not_supported() {
+    async fn test_focus_move_valid_token_returns_not_supported() {
         let store = ImagingSettingsStore::new();
         let request = Move {
             video_source_token: "VideoSource_1".to_string(),
@@ -122,7 +169,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_move_invalid_token() {
+    async fn test_focus_move_invalid_token_returns_error() {
         let store = ImagingSettingsStore::new();
         let request = Move {
             video_source_token: "InvalidToken".to_string(),
@@ -133,7 +180,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_stop_not_supported() {
+    async fn test_focus_stop_valid_token_returns_not_supported() {
         let store = ImagingSettingsStore::new();
         let request = Stop {
             video_source_token: "VideoSource_1".to_string(),
@@ -144,7 +191,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_stop_invalid_token() {
+    async fn test_focus_stop_invalid_token_returns_error() {
         let store = ImagingSettingsStore::new();
         let request = Stop {
             video_source_token: "InvalidToken".to_string(),

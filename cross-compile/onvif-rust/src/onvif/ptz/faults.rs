@@ -11,11 +11,11 @@
 //!
 //! // Preset not found
 //! let err = no_preset("Preset999");
-//! assert!(err.to_string().contains("ter:NoPreset"));
+//! assert!(err.to_string().contains("Preset999"));
 //!
 //! // Too many presets
 //! let err = too_many_presets(255);
-//! assert!(err.to_string().contains("ter:TooManyPresets"));
+//! assert!(err.to_string().contains("255"));
 //! ```
 
 use crate::onvif::error::OnvifError;
@@ -38,11 +38,11 @@ use crate::onvif::error::OnvifError;
 /// use onvif_rust::onvif::ptz::faults::no_preset;
 ///
 /// let err = no_preset("Preset001");
-/// assert!(err.to_string().contains("ter:NoPreset"));
 /// assert!(err.to_string().contains("Preset001"));
+/// assert!(err.to_string().contains("not found"));
 /// ```
 pub fn no_preset(token: &str) -> OnvifError {
-    OnvifError::NotFound(format!("Preset '{}' not found (ter:NoPreset)", token))
+    OnvifError::NotFound(format!("Preset '{}' not found", token))
 }
 
 /// Create a "too many presets" fault (ter:TooManyPresets).
@@ -64,7 +64,6 @@ pub fn no_preset(token: &str) -> OnvifError {
 /// use onvif_rust::onvif::ptz::faults::too_many_presets;
 ///
 /// let err = too_many_presets(255);
-/// assert!(err.to_string().contains("ter:TooManyPresets"));
 /// assert!(err.to_string().contains("255"));
 /// ```
 pub fn too_many_presets(max: i32) -> OnvifError {
@@ -89,12 +88,12 @@ pub fn too_many_presets(max: i32) -> OnvifError {
 /// use onvif_rust::onvif::ptz::faults::moving_pan_tilt;
 ///
 /// let err = moving_pan_tilt();
-/// assert!(err.to_string().contains("ter:MovingPanTilt"));
+/// assert!(err.to_string().contains("Pan/Tilt"));
 /// ```
 pub fn moving_pan_tilt() -> OnvifError {
     OnvifError::InvalidArgVal {
         subcode: "ter:MovingPanTilt".to_string(),
-        reason: "Pan/Tilt movement in progress (ter:MovingPanTilt)".to_string(),
+        reason: "Pan/Tilt movement in progress".to_string(),
     }
 }
 
@@ -113,12 +112,12 @@ pub fn moving_pan_tilt() -> OnvifError {
 /// use onvif_rust::onvif::ptz::faults::moving_zoom;
 ///
 /// let err = moving_zoom();
-/// assert!(err.to_string().contains("ter:MovingZoom"));
+/// assert!(err.to_string().contains("Zoom"));
 /// ```
 pub fn moving_zoom() -> OnvifError {
     OnvifError::InvalidArgVal {
         subcode: "ter:MovingZoom".to_string(),
-        reason: "Zoom movement in progress (ter:MovingZoom)".to_string(),
+        reason: "Zoom movement in progress".to_string(),
     }
 }
 
@@ -141,12 +140,10 @@ pub fn moving_zoom() -> OnvifError {
 ///
 /// let err = invalid_node_token("InvalidNode001");
 /// assert!(err.to_string().contains("InvalidNode001"));
+/// assert!(err.to_string().contains("not found"));
 /// ```
 pub fn invalid_node_token(token: &str) -> OnvifError {
-    OnvifError::NotFound(format!(
-        "PTZ node '{}' not found (ter:InvalidNodeToken)",
-        token
-    ))
+    OnvifError::NotFound(format!("PTZ node '{}' not found", token))
 }
 
 /// Create an "invalid configuration token" fault (ter:InvalidPTZConfiguration).
@@ -168,12 +165,10 @@ pub fn invalid_node_token(token: &str) -> OnvifError {
 ///
 /// let err = invalid_config_token("InvalidConfig001");
 /// assert!(err.to_string().contains("InvalidConfig001"));
+/// assert!(err.to_string().contains("not found"));
 /// ```
 pub fn invalid_config_token(token: &str) -> OnvifError {
-    OnvifError::NotFound(format!(
-        "PTZ configuration '{}' not found (ter:InvalidPTZConfiguration)",
-        token
-    ))
+    OnvifError::NotFound(format!("PTZ configuration '{}' not found", token))
 }
 
 #[cfg(test)]
@@ -188,7 +183,7 @@ mod tests {
         match err {
             OnvifError::NotFound(msg) => {
                 assert!(msg.contains("Preset001"));
-                assert!(msg.contains("ter:NoPreset"));
+                assert!(msg.contains("not found"));
             }
             _ => panic!("Expected NotFound variant"),
         }
@@ -198,7 +193,8 @@ mod tests {
     fn test_no_preset_empty_token() {
         let err = no_preset("");
         let msg = err.to_string();
-        assert!(msg.contains("ter:NoPreset"));
+        assert!(msg.contains("Preset"));
+        assert!(msg.contains("not found"));
     }
 
     // Test too_many_presets
@@ -272,7 +268,7 @@ mod tests {
         match err {
             OnvifError::NotFound(msg) => {
                 assert!(msg.contains("Node001"));
-                assert!(msg.contains("ter:InvalidNodeToken"));
+                assert!(msg.contains("not found"));
             }
             _ => panic!("Expected NotFound variant"),
         }
@@ -282,7 +278,7 @@ mod tests {
     fn test_invalid_node_token_soap_fault() {
         let err = invalid_node_token("BadNode");
         let fault = err.to_soap_fault();
-        assert!(fault.contains("InvalidNodeToken"));
+        assert!(fault.contains("NotFound"));
     }
 
     // Test invalid_config_token
@@ -293,7 +289,7 @@ mod tests {
         match err {
             OnvifError::NotFound(msg) => {
                 assert!(msg.contains("Config001"));
-                assert!(msg.contains("ter:InvalidPTZConfiguration"));
+                assert!(msg.contains("not found"));
             }
             _ => panic!("Expected NotFound variant"),
         }
@@ -303,7 +299,7 @@ mod tests {
     fn test_invalid_config_token_soap_fault() {
         let err = invalid_config_token("BadConfig");
         let fault = err.to_soap_fault();
-        assert!(fault.contains("InvalidPTZConfiguration"));
+        assert!(fault.contains("NotFound"));
     }
 
     // Test HTTP status codes

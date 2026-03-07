@@ -78,6 +78,8 @@ pub fn device_info_from_config(config: &Arc<ConfigRuntime>) -> DeviceInfo {
 /// Handle GetCapabilities request (legacy).
 ///
 /// Returns device capabilities in the legacy format.
+// TODO: `request.category` is intentionally ignored — this single-profile embedded camera
+// always returns all capabilities regardless of the requested category filter.
 pub fn handle_get_capabilities(
     config: &Arc<ConfigRuntime>,
     _request: GetCapabilities,
@@ -102,6 +104,9 @@ pub fn handle_get_capabilities(
 /// Handle GetServices request.
 ///
 /// Returns list of available services with namespace URIs and XAddrs.
+// TODO: `request.include_capability` is logged but service-level capabilities are not
+// embedded in the response. All services are always returned — this single-profile
+// embedded camera has no per-service selectors or conditional availability.
 pub fn handle_get_services(
     config: &Arc<ConfigRuntime>,
     request: GetServices,
@@ -194,49 +199,31 @@ pub fn handle_get_system_date_and_time(
 
 /// Handle SetSystemDateAndTime request.
 ///
-/// Sets the system date and time.
+/// Not yet implemented - returns ActionNotSupported fault.
+// TODO: Implement platform call for SetSystemDateAndTime
 pub fn handle_set_system_date_and_time(
     request: SetSystemDateAndTime,
 ) -> OnvifResult<SetSystemDateAndTimeResponse> {
     tracing::debug!(
-        "SetSystemDateAndTime request: type={:?}",
+        "SetSystemDateAndTime request: type={:?} (not implemented)",
         request.date_time_type
     );
 
-    // For now, just log the request - actual time setting would require platform integration
-    match request.date_time_type {
-        SetDateTimeType::NTP => {
-            tracing::info!("SetSystemDateAndTime: NTP mode requested");
-        }
-        SetDateTimeType::Manual => {
-            if let Some(ref utc) = request.utc_date_time {
-                tracing::info!(
-                    "SetSystemDateAndTime: Manual mode - {}-{:02}-{:02} {:02}:{:02}:{:02}",
-                    utc.date.year,
-                    utc.date.month,
-                    utc.date.day,
-                    utc.time.hour,
-                    utc.time.minute,
-                    utc.time.second
-                );
-            }
-        }
-    }
-
-    Ok(SetSystemDateAndTimeResponse {})
+    Err(OnvifError::ActionNotSupported(
+        "SetSystemDateAndTime".to_string(),
+    ))
 }
 
 /// Handle SystemReboot request.
 ///
-/// Initiates system reboot.
+/// Not yet implemented - returns ActionNotSupported fault.
+// TODO: Implement platform call for SystemReboot
 pub fn handle_system_reboot(_request: SystemReboot) -> OnvifResult<SystemRebootResponse> {
-    tracing::info!("SystemReboot request - initiating reboot");
+    tracing::info!("SystemReboot request (not implemented)");
 
-    // In a real implementation, this would trigger a system reboot
-    // For now, just return the expected response
-    Ok(SystemRebootResponse {
-        message: "Rebooting".to_string(),
-    })
+    Err(OnvifError::ActionNotSupported(
+        "SystemReboot".to_string(),
+    ))
 }
 
 /// Handle SetSystemFactoryDefault request.
@@ -500,10 +487,10 @@ mod tests {
     // ========================================================================
 
     #[test]
-    fn test_system_reboot() {
-        let response = handle_system_reboot(SystemReboot {}).unwrap();
-
-        assert_eq!(response.message, "Rebooting");
+    fn test_system_reboot_not_supported() {
+        let result = handle_system_reboot(SystemReboot {});
+        assert!(result.is_err());
+        assert!(matches!(result, Err(OnvifError::ActionNotSupported(_))));
     }
 
     // ========================================================================
@@ -531,7 +518,7 @@ mod tests {
     // ========================================================================
 
     #[test]
-    fn test_set_system_date_and_time() {
+    fn test_set_system_date_and_time_not_supported() {
         let result = handle_set_system_date_and_time(SetSystemDateAndTime {
             date_time_type: SetDateTimeType::Manual,
             daylight_savings: false,
@@ -551,7 +538,8 @@ mod tests {
                 },
             }),
         });
-        assert!(result.is_ok());
+        assert!(result.is_err());
+        assert!(matches!(result, Err(OnvifError::ActionNotSupported(_))));
     }
 
     // ========================================================================

@@ -50,13 +50,13 @@
 
 mod defaults;
 pub mod faults;
-pub mod ops;
+pub(crate) mod ops;
 pub mod profile_manager;
 pub mod service;
-pub mod state;
-pub mod store;
+pub(crate) mod state;
+pub(crate) mod store;
 pub mod types;
-pub mod validation;
+pub(crate) mod validation;
 
 // Re-export for public API
 pub use profile_manager::ProfileManager;

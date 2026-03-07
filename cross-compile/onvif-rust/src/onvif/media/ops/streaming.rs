@@ -88,11 +88,11 @@ pub fn get_snapshot_uri(
 
     // Build snapshot URI
     let snapshot_path = {
-        let p = config.read().media.snapshot_path.clone();
-        if p.is_empty() {
+        let cfg = config.read();
+        if cfg.media.snapshot_path.is_empty() {
             DEFAULT_SNAPSHOT_PATH.to_string()
         } else {
-            p
+            cfg.media.snapshot_path.clone()
         }
     };
 
@@ -187,7 +187,7 @@ mod tests {
     }
 
     #[test]
-    fn test_get_stream_uri() {
+    fn test_streaming_get_uri_main_stream_returns_rtsp() {
         let pm = create_test_pm();
         let config = create_test_config();
         let result = get_stream_uri(
@@ -211,7 +211,7 @@ mod tests {
     }
 
     #[test]
-    fn test_get_stream_uri_sub_stream() {
+    fn test_streaming_get_uri_sub_stream_returns_sub_path() {
         let pm = create_test_pm();
         let config = create_test_config();
         let result = get_stream_uri(
@@ -234,7 +234,7 @@ mod tests {
     }
 
     #[test]
-    fn test_get_stream_uri_multicast() {
+    fn test_streaming_get_uri_multicast_returns_multicast_suffix() {
         let pm = create_test_pm();
         let config = create_test_config();
         let result = get_stream_uri(
@@ -257,7 +257,7 @@ mod tests {
     }
 
     #[test]
-    fn test_get_stream_uri_invalid_profile() {
+    fn test_streaming_get_uri_invalid_profile_returns_error() {
         let pm = create_test_pm();
         let config = create_test_config();
         let result = get_stream_uri(
@@ -278,7 +278,7 @@ mod tests {
     }
 
     #[test]
-    fn test_get_snapshot_uri() {
+    fn test_streaming_get_snapshot_uri_returns_http_url() {
         let pm = create_test_pm();
         let config = create_test_config();
         let result = get_snapshot_uri(
@@ -295,7 +295,7 @@ mod tests {
     }
 
     #[test]
-    fn test_get_snapshot_uri_invalid_profile() {
+    fn test_streaming_get_snapshot_uri_invalid_profile_returns_error() {
         let pm = create_test_pm();
         let config = create_test_config();
         let result = get_snapshot_uri(
@@ -309,7 +309,7 @@ mod tests {
     }
 
     #[test]
-    fn test_start_multicast_streaming_valid_profile() {
+    fn test_streaming_start_multicast_valid_profile_returns_ok() {
         let pm = create_test_pm();
         let result = start_multicast_streaming(
             &pm,
@@ -322,7 +322,7 @@ mod tests {
     }
 
     #[test]
-    fn test_start_multicast_streaming_invalid_profile() {
+    fn test_streaming_start_multicast_invalid_profile_returns_error() {
         let pm = create_test_pm();
         let result = start_multicast_streaming(
             &pm,
@@ -334,7 +334,7 @@ mod tests {
     }
 
     #[test]
-    fn test_stop_multicast_streaming_valid_profile() {
+    fn test_streaming_stop_multicast_valid_profile_returns_ok() {
         let pm = create_test_pm();
         let result = stop_multicast_streaming(
             &pm,
@@ -346,7 +346,7 @@ mod tests {
     }
 
     #[test]
-    fn test_stop_multicast_streaming_invalid_profile() {
+    fn test_streaming_stop_multicast_invalid_profile_returns_error() {
         let pm = create_test_pm();
         let result = stop_multicast_streaming(
             &pm,

@@ -43,6 +43,7 @@ impl DeviceState {
 
     /// Get the current scopes.
     pub async fn get_scopes(&self) -> Vec<crate::onvif::types::common::Scope> {
+        // Note: clone required to release the RwLock before returning
         self.scopes.read().await.clone()
     }
 
@@ -53,6 +54,7 @@ impl DeviceState {
 
     /// Get the current discovery mode.
     pub async fn get_discovery_mode(&self) -> DiscoveryMode {
+        // Note: clone required to release the RwLock before returning
         self.discovery_mode.read().await.clone()
     }
 

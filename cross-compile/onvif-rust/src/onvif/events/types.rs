@@ -170,8 +170,8 @@ pub struct TopicFilter {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename = "TopicExpression", rename_all = "PascalCase")]
 pub struct TopicExpression {
-    /// Dialect.
-    #[serde(rename = "Dialect", default, skip_serializing_if = "Option::is_none")]
+    /// Dialect (XML attribute, not child element).
+    #[serde(rename = "@Dialect", default, skip_serializing_if = "Option::is_none")]
     pub dialect: Option<String>,
 
     /// Content (text).
@@ -404,5 +404,25 @@ mod tests {
         let msg = NotificationMessage::default();
         assert!(msg.topic.is_none());
         assert!(msg.message_number.is_none());
+    }
+
+    #[test]
+    fn test_topic_expression_dialect_is_xml_attribute() {
+        let expr = TopicExpression {
+            dialect: Some("http://www.onvif.org/ver10/tev/topicExpression/ConcreteSet".into()),
+            content: Some("tns1:RuleEngine".into()),
+        };
+        let xml = quick_xml::se::to_string(&expr).expect("serialize TopicExpression");
+        // Dialect must be an XML attribute (@Dialect), not a child element.
+        // Correct:   <TopicExpression Dialect="...">content</TopicExpression>
+        // Incorrect: <TopicExpression><Dialect>...</Dialect>content</TopicExpression>
+        assert!(
+            xml.contains("Dialect=\""),
+            "Dialect should be an XML attribute, got: {xml}"
+        );
+        assert!(
+            !xml.contains("<Dialect>"),
+            "Dialect must not be a child element, got: {xml}"
+        );
     }
 }

@@ -189,10 +189,20 @@ impl PTZStateManager {
         self.set_moving(false, false);
     }
 
-    /// Check if PTZ is currently moving.
+    /// Check if PTZ is currently moving (any axis).
     pub fn is_moving(&self) -> bool {
         let movement = self.movement.read();
         movement.pan_tilt_moving || movement.zoom_moving
+    }
+
+    /// Check if pan/tilt is currently moving.
+    pub fn is_pan_tilt_moving(&self) -> bool {
+        self.movement.read().pan_tilt_moving
+    }
+
+    /// Check if zoom is currently moving.
+    pub fn is_zoom_moving(&self) -> bool {
+        self.movement.read().zoom_moving
     }
 
     // ========================================================================

@@ -12,6 +12,10 @@ use crate::onvif::error::OnvifError;
 /// Create an AnalyticsModuleNotSupported fault.
 ///
 /// Used when the specified analytics module type is not supported.
+///
+/// # Arguments
+///
+/// * `module_type` - The unsupported analytics module type name
 pub fn analytics_module_not_supported(module_type: &str) -> OnvifError {
     OnvifError::ActionNotSupported(format!(
         "Analytics module type not supported: {}",
@@ -26,9 +30,13 @@ pub fn rule_not_supported() -> OnvifError {
     OnvifError::ActionNotSupported("Rule operations are not supported".to_string())
 }
 
-/// Create an AnalyticsModuleNotFound fault.
+/// Create an AnalyticsModuleNotFound fault (ter:NoConfig).
 ///
 /// Used when the specified analytics module cannot be found.
+///
+/// # Arguments
+///
+/// * `name` - The analytics module name that was not found
 pub fn analytics_module_not_found(name: &str) -> OnvifError {
     OnvifError::InvalidArgVal {
         subcode: "ter:NoConfig".to_string(),
@@ -36,9 +44,13 @@ pub fn analytics_module_not_found(name: &str) -> OnvifError {
     }
 }
 
-/// Create an InvalidConfigurationToken fault.
+/// Create an InvalidConfigurationToken fault (ter:InvalidToken).
 ///
 /// Used when the configuration token is invalid or not recognized.
+///
+/// # Arguments
+///
+/// * `token` - The invalid configuration token value
 pub fn invalid_configuration_token(token: &str) -> OnvifError {
     OnvifError::InvalidArgVal {
         subcode: "ter:InvalidToken".to_string(),
@@ -46,9 +58,13 @@ pub fn invalid_configuration_token(token: &str) -> OnvifError {
     }
 }
 
-/// Create a DuplicateName fault.
+/// Create a DuplicateName fault (ter:Duplicate).
 ///
 /// Used when attempting to create an analytics module with a name that already exists.
+///
+/// # Arguments
+///
+/// * `name` - The duplicate analytics module name
 pub fn duplicate_name(name: &str) -> OnvifError {
     OnvifError::InvalidArgVal {
         subcode: "ter:Duplicate".to_string(),

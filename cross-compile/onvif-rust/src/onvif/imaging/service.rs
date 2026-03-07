@@ -35,6 +35,9 @@ pub struct ImagingService {
     settings_store: Arc<ImagingSettingsStore>,
     /// Platform abstraction (optional).
     platform: Option<Arc<dyn Platform>>,
+    /// Runtime configuration (optional).
+    #[allow(dead_code)]
+    config: Option<Arc<ConfigRuntime>>,
     /// Runtime state.
     state: Arc<ImagingState>,
 }
@@ -45,6 +48,7 @@ impl ImagingService {
         Self {
             settings_store: Arc::new(ImagingSettingsStore::new()),
             platform: None,
+            config: None,
             state: super::state::new_state(),
         }
     }
@@ -61,13 +65,14 @@ impl ImagingService {
         Self {
             settings_store,
             platform: Some(platform),
+            config: None,
             state: super::state::new_state(),
         }
     }
 
     /// Create a new Imaging Service with configuration and platform.
     pub fn with_config_and_platform(
-        _config: Arc<ConfigRuntime>,
+        config: Arc<ConfigRuntime>,
         platform: Arc<dyn Platform>,
     ) -> Self {
         let imaging_control = platform.imaging_control();
@@ -80,6 +85,7 @@ impl ImagingService {
         Self {
             settings_store,
             platform: Some(platform),
+            config: Some(config),
             state: super::state::new_state(),
         }
     }
@@ -490,27 +496,25 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_get_presets() {
+    async fn test_get_presets_not_supported() {
         let service = ImagingService::new();
         let request = GetPresets {
             video_source_token: "VideoSource_1".to_string(),
         };
         let result = service.handle_get_presets(request).await;
-        assert!(result.is_ok());
-        let response = result.unwrap();
-        assert!(response.presets.is_empty());
+        assert!(result.is_err());
+        assert!(matches!(result, Err(OnvifError::ActionNotSupported(_))));
     }
 
     #[tokio::test]
-    async fn test_get_current_preset() {
+    async fn test_get_current_preset_not_supported() {
         let service = ImagingService::new();
         let request = GetCurrentPreset {
             video_source_token: "VideoSource_1".to_string(),
         };
         let result = service.handle_get_current_preset(request).await;
-        assert!(result.is_ok());
-        let response = result.unwrap();
-        assert!(response.preset.is_none());
+        assert!(result.is_err());
+        assert!(matches!(result, Err(OnvifError::ActionNotSupported(_))));
     }
 
     #[tokio::test]

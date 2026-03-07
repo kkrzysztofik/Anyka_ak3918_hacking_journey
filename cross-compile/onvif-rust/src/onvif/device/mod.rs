@@ -37,14 +37,14 @@
 //! - `ter:FixedScope` - Cannot modify fixed scope
 //! - `ter:InvalidNetworkInterface` - Network interface not found
 
-pub mod faults;
-pub mod ops;
+pub(crate) mod faults;
+pub(crate) mod ops;
 pub mod service;
-pub mod state;
-pub mod store;
+pub(crate) mod state;
+pub(crate) mod store;
 pub mod types;
 pub mod user_types;
-pub mod validation;
+pub(crate) mod validation;
 
 pub use service::DeviceService;
 pub use types::*;

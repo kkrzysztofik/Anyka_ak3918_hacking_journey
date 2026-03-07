@@ -45,7 +45,7 @@ pub fn get_compatible_configurations(
 pub fn send_auxiliary_command(
     _state: &PTZStateManager,
     profile_token: &str,
-    auxiliary_data: String,
+    auxiliary_data: &str,
 ) -> OnvifResult<Option<String>> {
     tracing::debug!(
         "SendAuxiliaryCommand request for profile {}, command: {}",
@@ -90,7 +90,7 @@ mod tests {
         let state = create_test_state();
 
         let response =
-            send_auxiliary_command(&state, "Profile1", "tt:Wiper|On".to_string()).unwrap();
+            send_auxiliary_command(&state, "Profile1", "tt:Wiper|On").unwrap();
 
         // We return success with no response data
         assert!(response.is_none());

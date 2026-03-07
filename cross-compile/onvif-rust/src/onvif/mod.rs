@@ -10,10 +10,12 @@
 //! │                         OnvifServer                                  │
 //! │  ┌─────────────────────────────────────────────────────────────┐   │
 //! │  │                    axum::Router                              │   │
-//! │  │  /onvif/device_service  → ServiceDispatcher → DeviceService │   │
-//! │  │  /onvif/media_service   → ServiceDispatcher → MediaService  │   │
-//! │  │  /onvif/ptz_service     → ServiceDispatcher → PTZService    │   │
-//! │  │  /onvif/imaging_service → ServiceDispatcher → ImagingService│   │
+//! │  │  /onvif/device_service    → ServiceDispatcher → DeviceService   │
+//! │  │  /onvif/media_service     → ServiceDispatcher → MediaService    │
+//! │  │  /onvif/ptz_service       → ServiceDispatcher → PTZService      │
+//! │  │  /onvif/imaging_service   → ServiceDispatcher → ImagingService  │
+//! │  │  /onvif/events_service    → ServiceDispatcher → EventsService   │
+//! │  │  /onvif/analytics_service → ServiceDispatcher → AnalyticsService│
 //! │  └─────────────────────────────────────────────────────────────┘   │
 //! │                                                                      │
 //! │  Middleware: TimeoutLayer, DefaultBodyLimit, CorsLayer              │
@@ -26,6 +28,16 @@
 //! - [`soap`] - SOAP envelope parsing and building
 //! - [`dispatcher`] - Service routing and action dispatching
 //! - [`error`] - ONVIF error types and SOAP fault generation
+//!
+//! # Service Modules
+//!
+//! - [`device`] - Device management (system, network, users, security)
+//! - [`media`] - Media profiles, video/audio sources and encoder configs
+//! - [`ptz`] - Pan/Tilt/Zoom control, presets, and continuous movement
+//! - [`imaging`] - Image settings (brightness, contrast, focus)
+//! - [`events`] - Event properties and subscription (scaffold)
+//! - [`analytics`] - Video analytics (scaffold)
+//! - [`discovery`] - WS-Discovery for device announcement
 //!
 //! # Example
 //!

@@ -14,19 +14,14 @@ use crate::platform::Platform;
 
 use async_trait::async_trait;
 
-pub use super::ops::discovery;
-pub use super::ops::network;
-pub use super::ops::system;
-pub use super::ops::users;
-
-// Re-export ops modules for external use
-pub use super::ops::{
+// Re-export ops modules for crate-internal use
+pub(crate) use super::ops::{
     discovery as discovery_ops, network as network_ops, system as system_ops, users as users_ops,
 };
 
 // Re-export new modules
-pub use super::state::{DeviceState, DeviceStateRef};
-pub use super::store::{DeviceStore, DeviceStoreRef};
+pub(crate) use super::state::{DeviceState, DeviceStateRef};
+pub(crate) use super::store::{DeviceStore, DeviceStoreRef};
 
 /// ONVIF Device Service.
 ///
@@ -597,6 +592,12 @@ impl ServiceHandler for DeviceService {
                 users_ops::handle_get_users(&users, request)
             }),
 
+            // SECURITY: The dispatcher's auth layer (auth_requirements.rs) enforces
+            // Administrator level before this handler is reached. The hardcoded
+            // UserLevel::Administrator here is a defense-in-depth assertion, not the
+            // primary authorization check. To propagate the actual caller level,
+            // the ServiceHandler trait would need to carry auth context.
+            // TODO: Extend ServiceHandler::handle_operation to accept caller UserLevel
             "CreateUsers" => dispatch_sync(body_xml, |request: CreateUsers| {
                 users_ops::handle_create_users(
                     &users,
@@ -605,6 +606,12 @@ impl ServiceHandler for DeviceService {
                 )
             }),
 
+            // SECURITY: The dispatcher's auth layer (auth_requirements.rs) enforces
+            // Administrator level before this handler is reached. The hardcoded
+            // UserLevel::Administrator here is a defense-in-depth assertion, not the
+            // primary authorization check. To propagate the actual caller level,
+            // the ServiceHandler trait would need to carry auth context.
+            // TODO: Extend ServiceHandler::handle_operation to accept caller UserLevel
             "DeleteUsers" => dispatch_sync(body_xml, |request: DeleteUsers| {
                 users_ops::handle_delete_users(
                     &users,
@@ -613,6 +620,12 @@ impl ServiceHandler for DeviceService {
                 )
             }),
 
+            // SECURITY: The dispatcher's auth layer (auth_requirements.rs) enforces
+            // Administrator level before this handler is reached. The hardcoded
+            // UserLevel::Administrator here is a defense-in-depth assertion, not the
+            // primary authorization check. To propagate the actual caller level,
+            // the ServiceHandler trait would need to carry auth context.
+            // TODO: Extend ServiceHandler::handle_operation to accept caller UserLevel
             "SetUser" => dispatch_sync(body_xml, |request: SetUser| {
                 users_ops::handle_set_user(&users, request, crate::config::UserLevel::Administrator)
             }),

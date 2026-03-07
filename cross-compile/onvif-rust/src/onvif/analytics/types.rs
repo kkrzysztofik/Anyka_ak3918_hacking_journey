@@ -322,4 +322,54 @@ mod tests {
         assert_eq!(req.configuration_token, None);
         assert!(req.analytics_modules.is_none());
     }
+
+    #[test]
+    fn test_analytics_capabilities_roundtrip_xml() {
+        let caps = AnalyticsServiceCapabilities {
+            x_addr: Some("http://192.168.1.1/analytics".to_string()),
+            rule_support: Some(true),
+            analytics_module_support: Some(false),
+            cell_based_analytics: Some(true),
+        };
+
+        let xml = quick_xml::se::to_string(&caps).expect("serialize");
+        let deserialized: AnalyticsServiceCapabilities =
+            quick_xml::de::from_str(&xml).expect("deserialize");
+
+        assert_eq!(caps, deserialized);
+    }
+
+    #[test]
+    fn test_analytics_module_item_roundtrip_xml() {
+        let item = AnalyticsModuleItem {
+            name: Some("MotionDetector".to_string()),
+            module_type: Some("tt:MotionDetection".to_string()),
+            extension: None,
+        };
+
+        let xml = quick_xml::se::to_string(&item).expect("serialize");
+        let deserialized: AnalyticsModuleItem =
+            quick_xml::de::from_str(&xml).expect("deserialize");
+
+        assert_eq!(item, deserialized);
+    }
+
+    #[test]
+    fn test_get_supported_analytics_modules_response_roundtrip_xml() {
+        let response = GetSupportedAnalyticsModulesResponse {
+            supported_analytics_modules: Some(SupportedAnalyticsModules {
+                analytics_module: vec![AnalyticsModuleItem {
+                    name: Some("CellMotion".to_string()),
+                    module_type: Some("tt:CellMotionEngine".to_string()),
+                    extension: None,
+                }],
+            }),
+        };
+
+        let xml = quick_xml::se::to_string(&response).expect("serialize");
+        let deserialized: GetSupportedAnalyticsModulesResponse =
+            quick_xml::de::from_str(&xml).expect("deserialize");
+
+        assert_eq!(response, deserialized);
+    }
 }

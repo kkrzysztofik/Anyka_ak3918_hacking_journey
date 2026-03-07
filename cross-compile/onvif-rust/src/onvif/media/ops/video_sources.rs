@@ -6,9 +6,7 @@
 //! - GetVideoSourceConfigurationOptions
 //! - GetCompatibleVideoSourceConfigurations
 
-#[allow(unused_imports)]
 use crate::onvif::error::OnvifResult;
-#[allow(unused_imports)]
 use crate::onvif::types::media::{
     GetCompatibleVideoSourceConfigurations, GetCompatibleVideoSourceConfigurationsResponse,
     GetVideoSourceConfiguration, GetVideoSourceConfigurationOptions,

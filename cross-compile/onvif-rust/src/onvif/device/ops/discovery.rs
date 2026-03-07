@@ -48,6 +48,7 @@ pub fn handle_get_scopes(
 ) -> OnvifResult<GetScopesResponse> {
     tracing::debug!("GetScopes request");
 
+    // Note: clone required to release the RwLock before returning
     let scopes = scopes.read().clone();
 
     Ok(GetScopesResponse { scopes })
@@ -182,6 +183,7 @@ pub fn handle_get_discovery_mode(
 ) -> OnvifResult<GetDiscoveryModeResponse> {
     tracing::debug!("GetDiscoveryMode request");
 
+    // Note: clone required to release the RwLock before returning
     let mode = discovery_mode.read().clone();
 
     Ok(GetDiscoveryModeResponse {
@@ -420,12 +422,16 @@ mod tests {
 
         // Get a fixed scope
         let scopes_data = scopes.read();
-        let fixed_scope = scopes_data
+        let maybe_fixed = scopes_data
             .iter()
             .find(|s| matches!(s.scope_def, ScopeDefinition::Fixed))
-            .expect("Should have fixed scope")
-            .clone();
+            .cloned();
         drop(scopes_data);
+        assert!(
+            maybe_fixed.is_some(),
+            "Default scopes should contain at least one fixed scope"
+        );
+        let fixed_scope = maybe_fixed.unwrap();
 
         let before_count = scopes.read().len();
 

@@ -30,12 +30,12 @@ pub async fn get_presets(
     }
 
     // Presets not supported on this device
-    Ok(GetPresetsResponse { presets: vec![] })
+    Err(faults::presets_not_supported())
 }
 
 /// Handle GetCurrentPreset request.
 ///
-/// Returns the currently active preset, or None if no preset is active.
+/// Presets are not supported on this device - returns ActionNotSupported.
 pub async fn get_current_preset(
     store: &ImagingSettingsStore,
     request: GetCurrentPreset,
@@ -47,8 +47,8 @@ pub async fn get_current_preset(
         ));
     }
 
-    // No preset currently active (presets not supported)
-    Ok(GetCurrentPresetResponse { preset: None })
+    // Presets not supported on this device
+    Err(faults::presets_not_supported())
 }
 
 /// Handle SetCurrentPreset request.
@@ -80,15 +80,14 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn test_get_presets() {
+    async fn test_get_presets_not_supported() {
         let store = ImagingSettingsStore::new();
         let request = GetPresets {
             video_source_token: "VideoSource_1".to_string(),
         };
         let result = get_presets(&store, request).await;
-        assert!(result.is_ok());
-        let response = result.unwrap();
-        assert!(response.presets.is_empty()); // No presets supported
+        assert!(result.is_err());
+        assert!(matches!(result, Err(OnvifError::ActionNotSupported(_))));
     }
 
     #[tokio::test]
@@ -102,15 +101,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_get_current_preset() {
+    async fn test_get_current_preset_not_supported() {
         let store = ImagingSettingsStore::new();
         let request = GetCurrentPreset {
             video_source_token: "VideoSource_1".to_string(),
         };
         let result = get_current_preset(&store, request).await;
-        assert!(result.is_ok());
-        let response = result.unwrap();
-        assert!(response.preset.is_none()); // No preset active
+        assert!(result.is_err());
+        assert!(matches!(result, Err(OnvifError::ActionNotSupported(_))));
     }
 
     #[tokio::test]
@@ -133,5 +131,18 @@ mod tests {
         let result = set_current_preset(&store, request).await;
         assert!(result.is_err());
         assert!(matches!(result, Err(OnvifError::ActionNotSupported(_))));
+    }
+
+    #[tokio::test]
+    async fn test_set_current_preset_invalid_token() {
+        let store = ImagingSettingsStore::new();
+        let request = SetCurrentPreset {
+            video_source_token: "InvalidToken".to_string(),
+            preset_token: "Preset_1".to_string(),
+        };
+        let result = set_current_preset(&store, request).await;
+        assert!(result.is_err());
+        // Invalid token should return InvalidArgVal, not ActionNotSupported
+        assert!(!matches!(result, Err(OnvifError::ActionNotSupported(_))));
     }
 }

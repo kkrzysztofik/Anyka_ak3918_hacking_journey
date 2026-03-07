@@ -34,6 +34,7 @@ impl EventsService {
     ) -> OnvifResult<GetServiceCapabilitiesResponse> {
         Ok(GetServiceCapabilitiesResponse {
             capabilities: Some(EventsServiceCapabilities {
+                // TODO: Accept config to construct dynamic XAddr from runtime address/port
                 x_addr: Some("http://localhost/onvif/events_service".to_string()),
                 ws_subscription_policy_support: Some(false),
                 ws_pull_point_support: Some(false),

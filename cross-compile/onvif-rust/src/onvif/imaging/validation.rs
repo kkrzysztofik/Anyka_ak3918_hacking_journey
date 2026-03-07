@@ -82,6 +82,14 @@ pub fn validate_range(parameter: &str, value: f32, min: f32, max: f32) -> OnvifR
     }
 }
 
+// Static validation helpers.
+//
+// The functions below perform static range checks using the ONVIF-standard
+// 0-100 range. They are intended for quick sanity checks where the device's
+// actual `ImagingOptions20` are not available. For full validation against
+// the hardware-reported option ranges, use `validate_settings()` above which
+// performs dynamic validation against the options returned by the device.
+
 /// Validate brightness value is within standard range (0-100).
 pub fn validate_brightness(value: f32) -> bool {
     (0.0..=100.0).contains(&value)

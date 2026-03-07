@@ -177,19 +177,21 @@ pub async fn stop(
 ) -> OnvifResult<()> {
     tracing::debug!("Stop request for profile {}", profile_token);
 
-    // Update state
+    // Update state — read per-axis movement independently so that stopping
+    // one axis does not accidentally copy the other axis's state.
     if stop_pan_tilt && stop_zoom {
         state.stop();
     } else {
-        let mut pan_tilt_moving = state.is_moving();
-        let mut zoom_moving = state.is_moving();
-
-        if stop_pan_tilt {
-            pan_tilt_moving = false;
-        }
-        if stop_zoom {
-            zoom_moving = false;
-        }
+        let pan_tilt_moving = if stop_pan_tilt {
+            false
+        } else {
+            state.is_pan_tilt_moving()
+        };
+        let zoom_moving = if stop_zoom {
+            false
+        } else {
+            state.is_zoom_moving()
+        };
         state.set_moving(pan_tilt_moving, zoom_moving);
     }
 
@@ -206,10 +208,9 @@ pub async fn stop(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Arc;
 
-    #[tokio::test]
-    async fn test_vector_to_position() {
+    #[test]
+    fn test_vector_to_position() {
         let vector = PTZVector {
             pan_tilt: Some(Vector2D {
                 x: 0.5,
@@ -228,8 +229,8 @@ mod tests {
         assert_eq!(pos.zoom, 5.5);
     }
 
-    #[tokio::test]
-    async fn test_speed_to_velocity() {
+    #[test]
+    fn test_speed_to_velocity() {
         let speed = PTZSpeed {
             pan_tilt: Some(Vector2D {
                 x: 0.5,

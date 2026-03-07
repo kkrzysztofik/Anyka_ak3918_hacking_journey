@@ -85,11 +85,12 @@ pub fn invalid_token(kind: &str, token: &str) -> OnvifError {
 /// let err = no_entity("ter:ProfileNotFound", "profile", "Profile001");
 /// assert!(err.to_string().contains("profile"));
 /// assert!(err.to_string().contains("Profile001"));
+/// assert!(err.to_string().contains("not found"));
 /// ```
 pub fn no_entity(subcode: &str, entity: &str, token: &str) -> OnvifError {
     OnvifError::NotFound(format!(
-        "{} '{}' not found (token: '{}')",
-        entity, subcode, token
+        "{} with token '{}' not found ({})",
+        entity, token, subcode
     ))
 }
 
@@ -145,11 +146,31 @@ pub fn action_not_supported(action: &str) -> OnvifError {
 /// ```
 pub fn out_of_range(param: &str, value: f32, min: f32, max: f32) -> OnvifError {
     OnvifError::InvalidArgVal {
-        subcode: "OutOfRange".to_string(),
+        subcode: "ter:OutOfRange".to_string(),
         reason: format!(
             "'{}' value {} is out of range (must be between {} and {})",
             param, value, min, max
         ),
+    }
+}
+
+/// Create an invalid video source token error.
+///
+/// This is a specialized form of `invalid_token` for video source tokens,
+/// providing consistent error messages across all services that validate
+/// video source references.
+///
+/// # Arguments
+///
+/// * `token` - The invalid video source token value
+///
+/// # Returns
+///
+/// An `OnvifError::InvalidArgVal` with `ter:InvalidToken` subcode.
+pub fn invalid_video_source(token: &str) -> OnvifError {
+    OnvifError::InvalidArgVal {
+        subcode: "ter:InvalidToken".to_string(),
+        reason: format!("Invalid video source token: {}", token),
     }
 }
 
@@ -214,6 +235,9 @@ mod tests {
                 assert!(msg.contains("profile"));
                 assert!(msg.contains("Profile001"));
                 assert!(msg.contains("ter:ProfileNotFound"));
+                // Verify the message clearly states what entity was not found
+                assert!(msg.contains("with token"));
+                assert!(msg.contains("not found"));
             }
             _ => panic!("Expected NotFound variant"),
         }
@@ -252,7 +276,7 @@ mod tests {
         let err = out_of_range("brightness", 150.0, 0.0, 100.0);
         match err {
             OnvifError::InvalidArgVal { subcode, reason } => {
-                assert_eq!(subcode, "OutOfRange");
+                assert_eq!(subcode, "ter:OutOfRange");
                 assert!(reason.contains("brightness"));
                 assert!(reason.contains("150"));
                 assert!(reason.contains("0"));

@@ -117,6 +117,9 @@ pub fn set_audio_encoder_configuration(
 /// Handle GetAudioEncoderConfigurationOptions request.
 ///
 /// Returns valid options for audio encoder configuration.
+// TODO: Request payload (configuration_token, profile_token) is intentionally ignored.
+// This single-profile embedded camera has one audio encoder, so the options are always
+// the same regardless of which token is specified.
 pub fn get_audio_encoder_configuration_options(
     pm: &ProfileManagerRef,
 ) -> OnvifResult<GetAudioEncoderConfigurationOptionsResponse> {

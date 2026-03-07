@@ -49,7 +49,10 @@ mod validation;
 
 // Re-export new modules for external use
 pub use dispatch::{dispatch_async, dispatch_sync};
-pub use faults::{action_not_supported, hardware_failure, invalid_token, no_entity, out_of_range};
+pub use faults::{
+    action_not_supported, hardware_failure, invalid_token, invalid_video_source, no_entity,
+    out_of_range,
+};
 pub use service_capabilities::{
     GetServiceCapabilities, GetServiceCapabilitiesResponse as SharedGetServiceCapabilitiesResponse,
 };

@@ -12,11 +12,9 @@ use crate::onvif::error::OnvifError;
 /// Create an InvalidVideoSourceToken fault.
 ///
 /// Used when the specified video source token is not recognized.
+/// Delegates to the shared `common::faults::invalid_video_source` for consistency.
 pub fn invalid_video_source_token(token: &str) -> OnvifError {
-    OnvifError::InvalidArgVal {
-        subcode: "ter:InvalidToken".to_string(),
-        reason: format!("Invalid video source token: {}", token),
-    }
+    crate::onvif::common::invalid_video_source(token)
 }
 
 // ============================================================================
@@ -28,9 +26,9 @@ pub fn invalid_video_source_token(token: &str) -> OnvifError {
 /// Used when a parameter value is outside the valid range.
 pub fn parameter_out_of_range(parameter: &str, value: f32, min: f32, max: f32) -> OnvifError {
     OnvifError::InvalidArgVal {
-        subcode: "ter:InvalidArgVal".to_string(),
+        subcode: "ter:OutOfRange".to_string(),
         reason: format!(
-            "Parameter '{}' value {} is out of range ({} - {})",
+            "'{}' value {} is out of range (must be between {} and {})",
             parameter, value, min, max
         ),
     }
@@ -79,7 +77,7 @@ mod tests {
     fn test_parameter_out_of_range() {
         let err = parameter_out_of_range("Brightness", 150.0, 0.0, 100.0);
         assert!(
-            matches!(err, OnvifError::InvalidArgVal { ref subcode, .. } if subcode == "ter:InvalidArgVal")
+            matches!(err, OnvifError::InvalidArgVal { ref subcode, .. } if subcode == "ter:OutOfRange")
         );
         assert!(err.to_string().contains("Brightness"));
         assert!(err.to_string().contains("150"));

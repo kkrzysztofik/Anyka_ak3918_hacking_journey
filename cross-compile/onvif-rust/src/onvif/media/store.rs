@@ -5,6 +5,7 @@
 
 use std::sync::Arc;
 
+// Stored types needed once `save()` serializes state to disk.
 #[allow(unused_imports)]
 use crate::config::profiles::{
     ProfilesFile, StoredAudioEncoderConfig, StoredAudioSource, StoredAudioSourceConfig,
@@ -19,6 +20,7 @@ use crate::platform::Resolution;
 use super::defaults::{self, ProfileConfig};
 use super::state::MediaState;
 
+// Token prefix constants needed once `save()` generates storage keys.
 #[allow(unused_imports)]
 use super::types::{
     AUDIO_ENCODER_CONFIG_PREFIX, AUDIO_SOURCE_CONFIG_PREFIX, DEFAULT_AUDIO_SOURCE_TOKEN,
@@ -27,11 +29,17 @@ use super::types::{
 };
 
 /// Media store handles persistence and data conversion.
+///
+/// Some fields are not yet read outside of construction because the full
+/// persistence path (`save()`) is not yet implemented. The `dead_code`
+/// attributes will be removed once on-disk profile storage is wired up.
 #[allow(dead_code)]
 pub struct MediaStore {
     /// Runtime configuration (optional).
     config: Option<Arc<ConfigRuntime>>,
-    /// Typed profile storage for persistence.
+    /// Typed profile storage for persistence — reserved for the persistence
+    /// milestone; constructed via [`MediaStore::with_storage`] but not yet
+    /// consumed by [`MediaStore::save`].
     #[allow(dead_code)]
     profile_storage: Option<Arc<ProfileStorage>>,
     /// Maximum sensor resolution.
@@ -109,6 +117,8 @@ impl MediaStore {
             let audio_encoding = Self::parse_audio_encoding(&profile_config.audio_encoding_str);
 
             // Create video encoder config
+            // Note: clone required because insert_* takes ownership and the config
+            // is also needed for create_profile below
             let video_encoder_config = Self::create_video_encoder_config(
                 profile_count,
                 &profile_config.name,
@@ -123,6 +133,8 @@ impl MediaStore {
 
             // Create audio encoder config if enabled
             if profile_config.audio_enabled {
+                // Note: clone required because insert_* takes ownership and the config
+                // is also needed for create_profile below
                 let audio_encoder_config = Self::create_audio_encoder_config(
                     profile_count,
                     profile_config.audio_bitrate,
@@ -162,6 +174,8 @@ impl MediaStore {
     fn initialize_profiles_hardcoded(&self, state: &MediaState) {
         let default_ptz_config = Self::create_default_ptz_configuration();
 
+        // Note: clones are required throughout because insert_* takes ownership
+        // and the configs are also needed for create_profile calls below
         let video_encoder_main = Self::create_video_encoder_config(
             0,
             "MainStream",
@@ -299,10 +313,12 @@ impl MediaStore {
     }
 
     /// Save state to storage.
-    pub fn save(&self, _state: &MediaState) {
-        // Note: Full persistence implementation would serialize state to storage
-        // For now, this is a placeholder - the ProfileManager handles persistence
-    }
+    ///
+    /// TODO(persistence): Implement full serialization of `MediaState` to the
+    /// `ProfileStorage` backend. Currently a no-op because the `ProfileManager`
+    /// owns in-memory state and no on-disk persistence path has been wired up
+    /// yet. Tracked as part of the media persistence milestone.
+    pub fn save(&self, _state: &MediaState) {}
 }
 
 #[cfg(test)]

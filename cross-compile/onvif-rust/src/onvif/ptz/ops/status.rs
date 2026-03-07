@@ -14,7 +14,24 @@ use crate::platform::PTZControl;
 use crate::onvif::ptz::ops::movement::vector_to_position;
 use crate::onvif::ptz::state::PTZStateManager;
 
-/// Handle GetStatus request.
+/// Handle the ONVIF PTZ GetStatus request.
+///
+/// Returns the current PTZ status including pan/tilt/zoom position,
+/// movement status, and a UTC timestamp.
+///
+/// # Arguments
+///
+/// * `state` - The PTZ state manager holding current position and movement state
+/// * `profile_token` - The media profile token identifying the PTZ configuration
+///
+/// # Returns
+///
+/// `GetStatusResponse` containing the current `PTZStatus` with position,
+/// move status, and UTC time.
+///
+/// # Errors
+///
+/// This handler is infallible under normal operation.
 pub fn get_status(state: &PTZStateManager, profile_token: &str) -> OnvifResult<GetStatusResponse> {
     tracing::debug!("GetStatus request for profile {}", profile_token);
 
@@ -23,7 +40,24 @@ pub fn get_status(state: &PTZStateManager, profile_token: &str) -> OnvifResult<G
     })
 }
 
-/// Handle GotoHomePosition request.
+/// Handle the ONVIF PTZ GotoHomePosition request.
+///
+/// Moves the PTZ unit to its stored home position. If a platform PTZ
+/// control is available, the movement is also sent to the hardware.
+///
+/// # Arguments
+///
+/// * `state` - The PTZ state manager holding the home position and movement state
+/// * `ptz_control` - Optional platform PTZ control for issuing hardware commands
+/// * `profile_token` - The media profile token identifying the PTZ configuration
+///
+/// # Returns
+///
+/// `()` on success after the PTZ has reached the home position.
+///
+/// # Errors
+///
+/// Returns `HardwareFailure` if the platform PTZ control reports a movement error.
 pub async fn goto_home_position(
     state: &PTZStateManager,
     ptz_control: &Option<Arc<dyn PTZControl>>,
@@ -50,7 +84,23 @@ pub async fn goto_home_position(
     Ok(())
 }
 
-/// Handle SetHomePosition request.
+/// Handle the ONVIF PTZ SetHomePosition request.
+///
+/// Saves the current PTZ position as the home position so that future
+/// `GotoHomePosition` calls return to this location.
+///
+/// # Arguments
+///
+/// * `state` - The PTZ state manager where the home position is stored
+/// * `profile_token` - The media profile token identifying the PTZ configuration
+///
+/// # Returns
+///
+/// `()` on success after the home position has been saved.
+///
+/// # Errors
+///
+/// This handler is infallible under normal operation.
 pub fn set_home_position(state: &PTZStateManager, profile_token: &str) -> OnvifResult<()> {
     tracing::debug!("SetHomePosition request for profile {}", profile_token);
 
@@ -70,7 +120,7 @@ mod tests {
     }
 
     #[test]
-    fn test_get_status() {
+    fn test_status_get_status_returns_position_and_move_status() {
         let state = create_test_state();
 
         let response = get_status(&state, "Profile1").unwrap();
@@ -84,14 +134,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_goto_home_position() {
+    async fn test_status_goto_home_no_platform_returns_ok() {
         let state = create_test_state();
 
         goto_home_position(&state, &None, "Profile1").await.unwrap();
     }
 
     #[test]
-    fn test_set_home_position() {
+    fn test_status_set_home_position_saves_current_position() {
         let state = create_test_state();
 
         // Move to a position

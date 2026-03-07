@@ -4,10 +4,9 @@ use super::super::store::ImagingSettingsError;
 
 pub(super) fn map_settings_error(err: ImagingSettingsError) -> OnvifError {
     match err {
-        ImagingSettingsError::InvalidToken(token) => OnvifError::InvalidArgVal {
-            subcode: "ter:InvalidToken".to_string(),
-            reason: format!("Invalid video source token: {}", token),
-        },
+        ImagingSettingsError::InvalidToken(token) => {
+            crate::onvif::common::invalid_video_source(&token)
+        }
         ImagingSettingsError::OutOfRange {
             parameter,
             value,
@@ -20,7 +19,11 @@ pub(super) fn map_settings_error(err: ImagingSettingsError) -> OnvifError {
                 parameter, value, min, max
             ),
         },
-        ImagingSettingsError::PlatformError(msg) => OnvifError::HardwareFailure(msg),
+        ImagingSettingsError::PlatformError(msg) => {
+            // Log the raw platform error for diagnostics but don't expose internals to client
+            tracing::warn!("Platform imaging error: {}", msg);
+            OnvifError::HardwareFailure("Hardware query failed".to_string())
+        }
         ImagingSettingsError::ValidationFailed(msg) => OnvifError::InvalidArgVal {
             subcode: "ter:InvalidArgVal".to_string(),
             reason: msg,

@@ -3,8 +3,10 @@
 //! This module provides runtime state management for imaging operations.
 //! Currently provides scaffold for focus runtime state (for future hardware support).
 
-use parking_lot::RwLock;
+use std::collections::HashMap;
 use std::sync::Arc;
+
+use parking_lot::RwLock;
 
 /// Focus runtime state.
 ///
@@ -38,14 +40,14 @@ pub enum FocusMoveMode {
 #[derive(Debug, Default)]
 pub struct ImagingState {
     /// Focus runtime state per video source.
-    pub focus_states: RwLock<std::collections::HashMap<String, FocusState>>,
+    pub focus_states: RwLock<HashMap<String, FocusState>>,
 }
 
 impl ImagingState {
     /// Create a new imaging state.
     pub fn new() -> Self {
         Self {
-            focus_states: RwLock::new(std::collections::HashMap::new()),
+            focus_states: RwLock::new(HashMap::new()),
         }
     }
 

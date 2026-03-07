@@ -91,6 +91,9 @@ pub fn handle_create_users(
         ));
     }
 
+    // NOTE: Batch user creation is not atomic — if validation fails partway through,
+    // previously created users in this batch are not rolled back. This is acceptable
+    // for the embedded camera's small user limit (max 8).
     for user in &request.users {
         // Validate username
         validate_username(&user.username).map_err(|e| OnvifError::InvalidArgVal {

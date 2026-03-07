@@ -34,6 +34,7 @@ impl AnalyticsService {
     ) -> OnvifResult<GetServiceCapabilitiesResponse> {
         Ok(GetServiceCapabilitiesResponse {
             capabilities: Some(AnalyticsServiceCapabilities {
+                // TODO: Accept config to construct dynamic XAddr from runtime address/port
                 x_addr: Some("http://localhost/onvif/analytics_service".to_string()),
                 rule_support: Some(false),
                 analytics_module_support: Some(false),

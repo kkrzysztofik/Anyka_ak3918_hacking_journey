@@ -6,7 +6,7 @@
 //! - `discovery` - Scopes and discovery mode management
 //! - `users` - User management operations
 
-pub mod discovery;
-pub mod network;
-pub mod system;
-pub mod users;
+pub(crate) mod discovery;
+pub(crate) mod network;
+pub(crate) mod system;
+pub(crate) mod users;

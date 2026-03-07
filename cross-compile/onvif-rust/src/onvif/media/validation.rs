@@ -6,6 +6,21 @@
 use crate::onvif::error::OnvifError;
 use crate::onvif::types::common::ReferenceToken;
 
+/// Maximum length for ONVIF reference tokens (profile, config, source).
+const MAX_TOKEN_LENGTH: usize = 64;
+
+/// Maximum supported resolution dimension (pixels).
+const MAX_RESOLUTION: i32 = 4096;
+
+/// Maximum supported frame rate (fps).
+const MAX_FRAME_RATE: i32 = 120;
+
+/// Maximum supported bitrate (bits per second, 50 Mbps).
+const MAX_BITRATE: i32 = 50_000_000;
+
+/// Maximum length for profile names.
+const MAX_PROFILE_NAME_LENGTH: usize = 64;
+
 /// Validate a profile token.
 ///
 /// Returns `OnvifError::NoProfile` if the token is empty.
@@ -16,7 +31,7 @@ pub fn validate_profile_token(token: &ReferenceToken) -> Result<(), OnvifError> 
             "Profile token is empty",
         ));
     }
-    if token.len() > 64 {
+    if token.len() > MAX_TOKEN_LENGTH {
         return Err(OnvifError::invalid_arg_val(
             "ter:InvalidToken",
             "Profile token exceeds maximum length of 64 characters",
@@ -35,7 +50,7 @@ pub fn validate_config_token(token: &ReferenceToken) -> Result<(), OnvifError> {
             "Configuration token is empty",
         ));
     }
-    if token.len() > 64 {
+    if token.len() > MAX_TOKEN_LENGTH {
         return Err(OnvifError::invalid_arg_val(
             "ter:InvalidToken",
             "Configuration token exceeds maximum length of 64 characters",
@@ -54,7 +69,7 @@ pub fn validate_source_token(token: &ReferenceToken) -> Result<(), OnvifError> {
             "Source token is empty",
         ));
     }
-    if token.len() > 64 {
+    if token.len() > MAX_TOKEN_LENGTH {
         return Err(OnvifError::invalid_arg_val(
             "ter:InvalidToken",
             "Source token exceeds maximum length of 64 characters",
@@ -73,7 +88,7 @@ pub fn validate_resolution(width: i32, height: i32) -> Result<(), OnvifError> {
             "Resolution width and height must be positive",
         ));
     }
-    if width > 4096 || height > 4096 {
+    if width > MAX_RESOLUTION || height > MAX_RESOLUTION {
         return Err(OnvifError::invalid_arg_val(
             "ter:InvalidResolution",
             "Resolution exceeds maximum supported (4096x4096)",
@@ -92,7 +107,7 @@ pub fn validate_frame_rate(frame_rate: i32) -> Result<(), OnvifError> {
             "Frame rate must be positive",
         ));
     }
-    if frame_rate > 120 {
+    if frame_rate > MAX_FRAME_RATE {
         return Err(OnvifError::invalid_arg_val(
             "ter:InvalidFrameRate",
             "Frame rate exceeds maximum supported (120 fps)",
@@ -111,8 +126,7 @@ pub fn validate_bitrate(bitrate: i32) -> Result<(), OnvifError> {
             "Bitrate must be positive",
         ));
     }
-    if bitrate > 50_000_000 {
-        // 50 Mbps max
+    if bitrate > MAX_BITRATE {
         return Err(OnvifError::invalid_arg_val(
             "ter:InvalidBitrate",
             "Bitrate exceeds maximum supported (50 Mbps)",
@@ -144,7 +158,7 @@ pub fn validate_profile_name(name: &str) -> Result<(), OnvifError> {
             "Profile name is empty",
         ));
     }
-    if name.len() > 64 {
+    if name.len() > MAX_PROFILE_NAME_LENGTH {
         return Err(OnvifError::invalid_arg_val(
             "ter:InvalidName",
             "Profile name exceeds maximum length of 64 characters",

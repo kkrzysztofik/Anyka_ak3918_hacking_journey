@@ -145,7 +145,7 @@ impl OnvifError {
     /// Create an error for missing required argument.
     pub fn missing_arg(name: &str) -> Self {
         OnvifError::InvalidArgVal {
-            subcode: "MissingArg".to_string(),
+            subcode: "ter:MissingArg".to_string(),
             reason: format!("Required argument '{}' is missing", name),
         }
     }
@@ -157,7 +157,7 @@ impl OnvifError {
         max: impl std::fmt::Display,
     ) -> Self {
         OnvifError::InvalidArgVal {
-            subcode: "OutOfRange".to_string(),
+            subcode: "ter:OutOfRange".to_string(),
             reason: format!("'{}' must be between {} and {}", name, min, max),
         }
     }
@@ -305,7 +305,7 @@ mod tests {
 
         match error {
             OnvifError::InvalidArgVal { subcode, reason } => {
-                assert_eq!(subcode, "MissingArg");
+                assert_eq!(subcode, "ter:MissingArg");
                 assert!(reason.contains("ProfileToken"));
             }
             _ => panic!("Expected InvalidArgVal variant"),
@@ -318,7 +318,7 @@ mod tests {
 
         match error {
             OnvifError::InvalidArgVal { subcode, reason } => {
-                assert_eq!(subcode, "OutOfRange");
+                assert_eq!(subcode, "ter:OutOfRange");
                 assert!(reason.contains("brightness"));
                 assert!(reason.contains("0"));
                 assert!(reason.contains("100"));

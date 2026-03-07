@@ -79,17 +79,17 @@ use crate::onvif::dispatcher::parse_body;
 use crate::onvif::error::{OnvifError, OnvifResult};
 use crate::onvif::soap::build_soap_response;
 
-// Test types made public for module testing
+// Test types for module testing - crate-internal only
 #[allow(dead_code)]
 #[derive(serde::Deserialize, serde::Serialize, Debug, PartialEq)]
-pub struct TestRequestDispatch {
-    pub value: Option<String>,
+pub(crate) struct TestRequestDispatch {
+    pub(crate) value: Option<String>,
 }
 
 #[allow(dead_code)]
 #[derive(serde::Deserialize, serde::Serialize, Debug, PartialEq)]
-pub struct TestResponseDispatch {
-    pub result: String,
+pub(crate) struct TestResponseDispatch {
+    pub(crate) result: String,
 }
 
 /// Synchronous dispatch helper for SOAP request handling.

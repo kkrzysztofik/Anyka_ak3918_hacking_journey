@@ -309,7 +309,7 @@ impl PTZService {
         let response = auxiliary::send_auxiliary_command(
             &self.state,
             &request.profile_token,
-            request.auxiliary_data,
+            &request.auxiliary_data,
         )?;
         Ok(SendAuxiliaryCommandResponse {
             auxiliary_response: response,

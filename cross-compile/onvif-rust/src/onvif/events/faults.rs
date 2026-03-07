@@ -11,14 +11,22 @@ use crate::onvif::error::OnvifError;
 
 /// Create a SubscriptionNotSupported fault.
 ///
-/// Used when pull point subscription is not supported.
+/// Returns `ActionNotSupported` because this scaffold implementation does not
+/// provide a WS-BaseNotification subscription manager. ONVIF clients that
+/// attempt `Subscribe` will receive this fault, directing them to use
+/// `CreatePullPointSubscription` instead (which is also unsupported in the
+/// current scaffold — see [`pull_point_not_supported`]).
 pub fn subscription_not_supported() -> OnvifError {
     OnvifError::ActionNotSupported("PullPoint subscription not supported".to_string())
 }
 
 /// Create a PullPointNotSupported fault.
 ///
-/// Used when pull point operations are not supported.
+/// Returns `ActionNotSupported` because pull-point event delivery requires
+/// server-side subscription state and message buffering that are not yet
+/// implemented. This is distinct from [`subscription_not_supported`] which
+/// covers the WS-Notification `Subscribe` path; this fault covers
+/// `PullMessages`, `Seek`, and related pull-point operations.
 pub fn pull_point_not_supported() -> OnvifError {
     OnvifError::ActionNotSupported("Pull point operations not supported".to_string())
 }
@@ -62,7 +70,9 @@ pub fn invalid_filter(reason: &str) -> OnvifError {
 
 /// Create a NotificationStreamFault fault.
 ///
-/// Used when there's an issue with the notification stream.
+/// Returns `Internal` because notification stream errors are server-side
+/// failures (e.g. channel closed, buffer overflow) rather than client input
+/// errors. This maps to the ONVIF `tev:NotificationStreamFault` fault code.
 pub fn notification_stream_fault(reason: &str) -> OnvifError {
     OnvifError::Internal(format!("Notification stream error: {}", reason))
 }

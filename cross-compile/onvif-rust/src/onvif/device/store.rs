@@ -14,11 +14,11 @@ use std::sync::Arc;
 /// - Password manager (for authentication)
 pub struct DeviceStore {
     /// Configuration runtime.
-    pub config: Arc<ConfigRuntime>,
+    pub(crate) config: Arc<ConfigRuntime>,
     /// User storage.
-    pub users: Arc<UserStorage>,
+    pub(crate) users: Arc<UserStorage>,
     /// Password manager (for authentication).
-    pub password_manager: Arc<PasswordManager>,
+    pub(crate) password_manager: Arc<PasswordManager>,
 }
 
 impl DeviceStore {

@@ -106,6 +106,8 @@ pub async fn handle_get_network_interfaces(
             },
             interface_type: 6, // ethernetCsmacd
         }),
+        // TODO: Read actual prefix length from network interface or config.
+        // /24 is a reasonable default for the embedded camera's typical LAN deployment.
         ipv4: Some(IPv4NetworkInterface {
             enabled: true,
             config: IPv4Configuration {

@@ -6,9 +6,7 @@
 //! - GetVideoEncoderConfigurationOptions
 //! - GetCompatibleVideoEncoderConfigurations
 
-#[allow(unused_imports)]
 use crate::onvif::error::OnvifResult;
-#[allow(unused_imports)]
 use crate::onvif::types::media::{
     GetCompatibleVideoEncoderConfigurations, GetCompatibleVideoEncoderConfigurationsResponse,
     GetVideoEncoderConfiguration, GetVideoEncoderConfigurationOptions,
@@ -19,8 +17,6 @@ use crate::onvif::types::media::{
 
 use super::ProfileManagerRef;
 
-/// Validation functions for video encoder configuration.
-#[allow(unused_imports)]
 use crate::onvif::media::validation;
 
 /// Handle GetVideoEncoderConfigurations request.
@@ -102,7 +98,10 @@ pub fn get_compatible_video_encoder_configurations(
     );
     // Verify profile exists
     let _ = pm.get_profile(&request.profile_token)?;
-    // All video encoder configurations are compatible with all profiles
+    // Compatibility: On the AK3918 all video encoder configurations can be
+    // bound to any profile because the hardware supports a single sensor with
+    // shared encoding pipelines. A multi-sensor device would need to filter
+    // by source compatibility here.
     let configurations = pm.get_video_encoder_configurations();
     Ok(GetCompatibleVideoEncoderConfigurationsResponse { configurations })
 }

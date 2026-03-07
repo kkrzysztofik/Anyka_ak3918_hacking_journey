@@ -21,16 +21,14 @@ pub fn validate_hostname(name: &str) -> OnvifResult<()> {
     }
 
     // Check characters (alphanumeric and hyphens only, no leading/trailing hyphens)
-    let chars: Vec<char> = name.chars().collect();
-
-    if chars[0] == '-' || chars[chars.len() - 1] == '-' {
+    if name.starts_with('-') || name.ends_with('-') {
         return Err(invalid_hostname(
             "hostname cannot start or end with a hyphen",
         ));
     }
 
-    for c in &chars {
-        if !c.is_ascii_alphanumeric() && *c != '-' {
+    for c in name.chars() {
+        if !c.is_ascii_alphanumeric() && c != '-' {
             return Err(invalid_hostname(&format!(
                 "hostname contains invalid character: '{}'",
                 c
@@ -39,7 +37,7 @@ pub fn validate_hostname(name: &str) -> OnvifResult<()> {
     }
 
     // Must start with alphanumeric
-    if !chars[0].is_ascii_alphanumeric() {
+    if !name.starts_with(|c: char| c.is_ascii_alphanumeric()) {
         return Err(invalid_hostname(
             "hostname must start with a letter or digit",
         ));

@@ -70,6 +70,9 @@ impl MediaService {
     }
 
     /// Create a new Media Service with a custom profile manager (for tests).
+    // TODO: Uses a default ConfigRuntime — the config from the ProfileManager is not
+    // reused here. This is fine for tests but production code should use `with_config`
+    // or `with_platform` which wire up the real config.
     pub fn with_profile_manager(profile_manager: Arc<ProfileManager>) -> Self {
         Self {
             profile_manager,
@@ -169,6 +172,8 @@ impl MediaService {
     }
 
     /// Handle GetVideoSourceConfigurationOptions request.
+    // TODO: Request tokens (configuration_token, profile_token) are intentionally ignored.
+    // Single-profile camera — options are identical for all video source configurations.
     pub fn handle_get_video_source_configuration_options(
         &self,
         _request: GetVideoSourceConfigurationOptions,
@@ -228,6 +233,8 @@ impl MediaService {
     }
 
     /// Handle GetVideoEncoderConfigurationOptions request.
+    // TODO: Request tokens (configuration_token, profile_token) are intentionally ignored.
+    // Single-profile camera — options are identical for all video encoder configurations.
     pub fn handle_get_video_encoder_configuration_options(
         &self,
         _request: GetVideoEncoderConfigurationOptions,
@@ -288,6 +295,8 @@ impl MediaService {
     }
 
     /// Handle GetAudioEncoderConfigurationOptions request.
+    // TODO: Request tokens (configuration_token, profile_token) are intentionally ignored.
+    // Single-profile camera — options are identical for all audio encoder configurations.
     pub fn handle_get_audio_encoder_configuration_options(
         &self,
         _request: GetAudioEncoderConfigurationOptions,

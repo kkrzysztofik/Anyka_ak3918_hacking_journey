@@ -16,7 +16,7 @@ pub mod video_encoders;
 pub mod video_sources;
 
 // Re-export validation from parent module for use by operations
-pub use crate::onvif::media::validation;
+pub(crate) use crate::onvif::media::validation;
 
 use crate::onvif::media::ProfileManager;
 

@@ -27,6 +27,11 @@ pub fn get_presets(
 }
 
 /// Handle SetPreset request.
+///
+/// `ptz_control` is accepted but not yet used — hardware preset storage
+/// (writing preset positions to the motor controller's non-volatile memory)
+/// will be added when the platform PTZ driver supports it.
+/// TODO(ptz-hw): Forward preset to `ptz_control` for on-device storage.
 #[allow(unused_variables)]
 pub fn set_preset(
     state: &PTZStateManager,
@@ -81,6 +86,10 @@ pub async fn goto_preset(
 }
 
 /// Handle RemovePreset request.
+///
+/// `profile_token` is logged for diagnostics but not used for lookup because
+/// presets are stored globally (not per-profile) in the current implementation.
+/// TODO(ptz-profile): Scope presets per profile if multi-profile PTZ is needed.
 pub fn remove_preset(
     state: &PTZStateManager,
     profile_token: &str,
