@@ -12,9 +12,9 @@
 //! };
 //! use onvif_rust::onvif::error::OnvifError;
 //!
-//! // Invalid token error
+//! // Invalid token error (token value is not echoed for security)
 //! let err = invalid_token("ProfileToken", "InvalidToken123");
-//! assert!(err.to_string().contains("InvalidToken"));
+//! assert!(err.to_string().contains("ProfileToken"));
 //!
 //! // Entity not found
 //! let err = no_entity("ter:ProfileNotFound", "profile", "ProfileToken123");
@@ -56,10 +56,13 @@ use crate::onvif::error::OnvifError;
 ///
 /// let err = invalid_token("ProfileToken", "InvalidProfile123");
 /// assert!(err.to_string().contains("ProfileToken"));
-/// assert!(err.to_string().contains("InvalidProfile123"));
+/// // Token value is intentionally NOT included in the error message
+/// assert!(!err.to_string().contains("InvalidProfile123"));
 /// ```
-pub fn invalid_token(kind: &str, token: &str) -> OnvifError {
-    OnvifError::NotFound(format!("Invalid {}: '{}'", kind, token))
+pub fn invalid_token(kind: &str, _token: &str) -> OnvifError {
+    // SECURITY: Do not echo the token value back to clients — it may reveal
+    // internal naming conventions or be used to probe for valid tokens.
+    OnvifError::NotFound(format!("No such {}", kind))
 }
 
 /// Create a "no entity" error for when a referenced entity doesn't exist.
@@ -146,7 +149,7 @@ pub fn action_not_supported(action: &str) -> OnvifError {
 /// ```
 pub fn out_of_range(param: &str, value: f32, min: f32, max: f32) -> OnvifError {
     OnvifError::InvalidArgVal {
-        subcode: "ter:OutOfRange".to_string(),
+        subcode: "OutOfRange".to_string(),
         reason: format!(
             "'{}' value {} is out of range (must be between {} and {})",
             param, value, min, max
@@ -169,7 +172,7 @@ pub fn out_of_range(param: &str, value: f32, min: f32, max: f32) -> OnvifError {
 /// An `OnvifError::InvalidArgVal` with `ter:InvalidToken` subcode.
 pub fn invalid_video_source(token: &str) -> OnvifError {
     OnvifError::InvalidArgVal {
-        subcode: "ter:InvalidToken".to_string(),
+        subcode: "InvalidToken".to_string(),
         reason: format!("Invalid video source token: {}", token),
     }
 }
@@ -212,7 +215,8 @@ mod tests {
         match err {
             OnvifError::NotFound(msg) => {
                 assert!(msg.contains("ProfileToken"));
-                assert!(msg.contains("InvalidToken123"));
+                // SECURITY: token value must NOT be echoed back
+                assert!(!msg.contains("InvalidToken123"));
             }
             _ => panic!("Expected NotFound variant"),
         }
@@ -276,7 +280,7 @@ mod tests {
         let err = out_of_range("brightness", 150.0, 0.0, 100.0);
         match err {
             OnvifError::InvalidArgVal { subcode, reason } => {
-                assert_eq!(subcode, "ter:OutOfRange");
+                assert_eq!(subcode, "OutOfRange");
                 assert!(reason.contains("brightness"));
                 assert!(reason.contains("150"));
                 assert!(reason.contains("0"));
@@ -349,7 +353,8 @@ mod tests {
     fn test_invalid_token_empty_values() {
         // Should still work with empty values (though not recommended)
         let err = invalid_token("", "");
-        assert!(err.to_string().contains("''"));
+        // Generic "No such " message with empty kind
+        assert!(matches!(err, OnvifError::NotFound(_)));
     }
 
     #[test]

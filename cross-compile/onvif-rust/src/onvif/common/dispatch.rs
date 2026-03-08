@@ -151,8 +151,10 @@ where
     let response = handler(request)?;
 
     // Serialize the response to XML
-    let response_xml = quick_xml::se::to_string(&response)
-        .map_err(|e| OnvifError::Internal(format!("Failed to serialize response: {}", e)))?;
+    let response_xml = quick_xml::se::to_string(&response).map_err(|e| {
+        tracing::error!("SOAP response serialization failed: {}", e);
+        OnvifError::Internal("Internal processing error".to_string())
+    })?;
 
     // Wrap in SOAP response envelope
     Ok(build_soap_response(&response_xml))
@@ -228,8 +230,10 @@ where
     let response = handler(request).await?;
 
     // Serialize the response to XML
-    let response_xml = quick_xml::se::to_string(&response)
-        .map_err(|e| OnvifError::Internal(format!("Failed to serialize response: {}", e)))?;
+    let response_xml = quick_xml::se::to_string(&response).map_err(|e| {
+        tracing::error!("SOAP response serialization failed: {}", e);
+        OnvifError::Internal("Internal processing error".to_string())
+    })?;
 
     // Wrap in SOAP response envelope
     Ok(build_soap_response(&response_xml))
@@ -324,7 +328,8 @@ mod tests {
 
         assert!(result.is_err());
         let err = result.unwrap_err();
-        assert!(err.to_string().contains("serialize"));
+        // Error message is generic to avoid leaking serializer internals to clients
+        assert!(err.to_string().contains("Internal processing error"));
     }
 
     // Test dispatch_async
@@ -417,7 +422,8 @@ mod tests {
 
         assert!(result.is_err());
         let err = result.unwrap_err();
-        assert!(err.to_string().contains("serialize"));
+        // Error message is generic to avoid leaking serializer internals to clients
+        assert!(err.to_string().contains("Internal processing error"));
     }
 
     // Test SOAP envelope structure
