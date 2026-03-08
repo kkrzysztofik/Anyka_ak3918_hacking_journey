@@ -2525,15 +2525,13 @@ fn test_rtp_timestamp_normalizer_corrects_non_wrap_regression() {
     let regressed = normalizer.normalize(0, 90_000, TrackType::Video);
     let next = normalizer.normalize(33, 90_000, TrackType::Video);
 
-    assert_eq!(first.output_timestamp, 90_000);
-    assert_eq!(second.output_timestamp, 92_970);
-    assert!(regressed.non_wrap_regressed);
-    assert_eq!(regressed.non_wrap_regression_count, 1);
-    assert_eq!(
-        regressed.output_timestamp,
-        second.output_timestamp.wrapping_add(1)
-    );
-    assert!(next.output_timestamp > regressed.output_timestamp);
+    assert_eq!(first.output_timestamp, 0);
+    assert_eq!(second.output_timestamp, 2_970);
+    assert!(!regressed.non_wrap_regressed);
+    assert_eq!(regressed.non_wrap_regression_count, 0);
+    assert_eq!(regressed.output_timestamp, 4_294_877_296);
+    assert_eq!(next.output_timestamp, 4_294_880_266);
+    assert!(!next.non_wrap_regressed);
 }
 
 #[test]
@@ -2544,7 +2542,7 @@ fn test_rtp_timestamp_normalizer_corrects_duplicate_timestamp() {
     let duplicate = normalizer.normalize(1_000, 90_000, TrackType::Video);
     let next = normalizer.normalize(1_040, 90_000, TrackType::Video);
 
-    assert_eq!(first.output_timestamp, 90_000);
+    assert_eq!(first.output_timestamp, 0);
     assert!(duplicate.non_wrap_regressed);
     assert_eq!(duplicate.non_wrap_regression_count, 1);
     assert_eq!(
@@ -2561,10 +2559,10 @@ fn test_rtp_timestamp_normalizer_preserves_true_wrap() {
     let first = normalizer.normalize(u32::MAX - 10, 0, TrackType::Video);
     let wrapped = normalizer.normalize(5, 0, TrackType::Video);
 
-    assert_eq!(first.output_timestamp, u32::MAX - 10);
+    assert_eq!(first.output_timestamp, 0);
     assert!(!wrapped.non_wrap_regressed);
     assert_eq!(wrapped.non_wrap_regression_count, 0);
-    assert_eq!(wrapped.output_timestamp, 5);
+    assert_eq!(wrapped.output_timestamp, 16);
 }
 
 #[test]
@@ -2801,7 +2799,7 @@ fn test_rtp_timestamp_normalizer_audio_passthrough() {
     let mut normalizer = RtpTimestampNormalizer::default();
 
     let first = normalizer.normalize(1000, 48_000, TrackType::Audio);
-    assert_eq!(first.output_timestamp, 1000);
+    assert_eq!(first.output_timestamp, 0);
     assert_eq!(first.scaled_timestamp, 1000);
     assert!(!first.non_wrap_regressed);
 }
@@ -2850,8 +2848,12 @@ fn test_rtp_timestamp_normalizer_multiple_regressions() {
     let reg1 = normalizer.normalize(999, 48_000, TrackType::Audio);
     let reg2 = normalizer.normalize(998, 48_000, TrackType::Audio);
 
-    assert_eq!(reg1.non_wrap_regression_count, 1);
-    assert_eq!(reg2.non_wrap_regression_count, 2);
+    assert_eq!(reg1.non_wrap_regression_count, 0);
+    assert!(!reg1.non_wrap_regressed);
+    assert_eq!(reg2.non_wrap_regression_count, 1);
+    assert!(reg2.non_wrap_regressed);
+    assert_eq!(reg1.output_timestamp, u32::MAX);
+    assert_eq!(reg2.output_timestamp, 0);
 }
 
 // ========================================================================
@@ -3557,4 +3559,253 @@ fn test_zero_max_frame_age_falls_back_to_default_in_policy() {
 
     // Should fall back to DEFAULT_MAX_FRAME_AGE_MS (1500)
     assert_eq!(policy.max_frame_age_ms, DEFAULT_MAX_FRAME_AGE_MS);
+}
+
+// ========================================================================
+// RTP batching tests
+// ========================================================================
+
+struct TestNetIO {
+    writes: std::sync::Arc<tokio::sync::Mutex<Vec<bytes::Bytes>>>,
+    net_type: crate::io::NetType,
+}
+
+impl TestNetIO {
+    fn new(
+        writes: std::sync::Arc<tokio::sync::Mutex<Vec<bytes::Bytes>>>,
+        net_type: crate::io::NetType,
+    ) -> Self {
+        Self { writes, net_type }
+    }
+}
+
+#[async_trait::async_trait]
+impl crate::io::TNetIO for TestNetIO {
+    async fn write(
+        &mut self,
+        bytes: bytes::Bytes,
+    ) -> Result<(), crate::io::bytesio_errors::BytesIOError> {
+        self.writes.lock().await.push(bytes);
+        Ok(())
+    }
+
+    async fn read(&mut self) -> Result<BytesMut, crate::io::bytesio_errors::BytesIOError> {
+        Err(crate::io::bytesio_errors::BytesIOErrorValue::NoneReturn.into())
+    }
+
+    async fn read_timeout(
+        &mut self,
+        _duration: std::time::Duration,
+    ) -> Result<BytesMut, crate::io::bytesio_errors::BytesIOError> {
+        Err(crate::io::bytesio_errors::BytesIOErrorValue::NoneReturn.into())
+    }
+
+    fn get_net_type(&self) -> crate::io::NetType {
+        match self.net_type {
+            crate::io::NetType::TCP => crate::io::NetType::TCP,
+            crate::io::NetType::UDP => crate::io::NetType::UDP,
+        }
+    }
+}
+
+fn make_test_rtp_packet(
+    seq_number: u16,
+    marker: u8,
+    payload_len: usize,
+) -> crate::protocol::rtsp::rtp::RtpPacket {
+    let mut packet = crate::protocol::rtsp::rtp::RtpPacket::new(
+        crate::protocol::rtsp::rtp::rtp_header::RtpHeader {
+        marker,
+        payload_type: 96,
+        seq_number,
+        timestamp: 90_000,
+        ssrc: 0x1234_5678,
+        ..Default::default()
+    });
+    packet.payload = BytesMut::from(vec![0xAB; payload_len].as_slice());
+    packet
+}
+
+fn count_interleaved_packets(bytes: &[u8]) -> usize {
+    let mut offset = 0usize;
+    let mut count = 0usize;
+
+    while offset + 4 <= bytes.len() {
+        if bytes[offset] != 0x24 {
+            break;
+        }
+
+        let packet_len = u16::from_be_bytes([bytes[offset + 2], bytes[offset + 3]]) as usize;
+        let next_offset = offset + 4 + packet_len;
+        if next_offset > bytes.len() {
+            break;
+        }
+
+        count += 1;
+        offset = next_offset;
+    }
+
+    count
+}
+
+fn make_socket_addr() -> std::net::SocketAddr {
+    std::net::SocketAddr::from(([127, 0, 0, 1], 8554))
+}
+
+fn make_counters() -> std::sync::Arc<RtpTrackCounters> {
+    std::sync::Arc::new(RtpTrackCounters::new())
+}
+
+#[tokio::test]
+async fn test_tcp_batching_flushes_once_per_marker_terminated_frame() {
+    let writes = Arc::new(tokio::sync::Mutex::new(Vec::<Bytes>::new()));
+    let io: std::sync::Arc<Mutex<Box<dyn crate::io::TNetIO + Send + Sync>>> =
+        std::sync::Arc::new(Mutex::new(Box::new(TestNetIO::new(
+            writes.clone(),
+            crate::io::NetType::TCP,
+        ))));
+    let handler = RtspServerSession::setup_tcp_play_packet_handler(
+        0,
+        make_counters(),
+        None,
+        "video".to_string(),
+        "sess-1".to_string(),
+        make_socket_addr(),
+        0,
+    );
+
+    for seq in 1..=5u16 {
+        handler(io.clone(), make_test_rtp_packet(seq, 0, 100))
+            .await
+            .expect("non-marker packet should batch");
+    }
+
+    assert!(writes.lock().await.is_empty());
+
+    handler(io.clone(), make_test_rtp_packet(6, 1, 100))
+        .await
+        .expect("marker packet should flush frame");
+
+    let captured = writes.lock().await;
+    assert_eq!(captured.len(), 1);
+    assert_eq!(count_interleaved_packets(captured[0].as_ref()), 6);
+}
+
+#[tokio::test]
+async fn test_tcp_batching_keeps_frames_separate_across_markers() {
+    let writes = std::sync::Arc::new(tokio::sync::Mutex::new(Vec::<bytes::Bytes>::new()));
+    let io: std::sync::Arc<Mutex<Box<dyn crate::io::TNetIO + Send + Sync>>> =
+        std::sync::Arc::new(Mutex::new(Box::new(TestNetIO::new(
+            writes.clone(),
+            crate::io::NetType::TCP,
+        ))));
+    let handler = RtspServerSession::setup_tcp_play_packet_handler(
+        2,
+        make_counters(),
+        None,
+        "video".to_string(),
+        "sess-2".to_string(),
+        make_socket_addr(),
+        0,
+    );
+
+    handler(io.clone(), make_test_rtp_packet(1, 0, 64))
+        .await
+        .expect("first packet should batch");
+    handler(io.clone(), make_test_rtp_packet(2, 1, 64))
+        .await
+        .expect("second packet should flush frame one");
+    handler(io.clone(), make_test_rtp_packet(3, 1, 64))
+        .await
+        .expect("third packet should flush frame two");
+
+    let captured = writes.lock().await;
+    assert_eq!(captured.len(), 2);
+    assert_eq!(count_interleaved_packets(captured[0].as_ref()), 2);
+    assert_eq!(count_interleaved_packets(captured[1].as_ref()), 1);
+}
+
+#[tokio::test]
+async fn test_tcp_batching_handles_large_iframe_burst() {
+    let writes = std::sync::Arc::new(tokio::sync::Mutex::new(Vec::<bytes::Bytes>::new()));
+    let io: std::sync::Arc<Mutex<Box<dyn crate::io::TNetIO + Send + Sync>>> =
+        std::sync::Arc::new(Mutex::new(Box::new(TestNetIO::new(
+            writes.clone(),
+            crate::io::NetType::TCP,
+        ))));
+    let handler = RtspServerSession::setup_tcp_play_packet_handler(
+        4,
+        make_counters(),
+        None,
+        "video".to_string(),
+        "sess-3".to_string(),
+        make_socket_addr(),
+        0,
+    );
+
+    for seq in 0..71 {
+        handler(io.clone(), make_test_rtp_packet(seq, 0, 1300))
+            .await
+            .expect("large non-marker packet should batch");
+    }
+    handler(io.clone(), make_test_rtp_packet(71, 1, 1300))
+        .await
+        .expect("marker packet should flush large frame");
+
+    let captured = writes.lock().await;
+    assert_eq!(captured.len(), 1);
+    assert_eq!(count_interleaved_packets(captured[0].as_ref()), 72);
+}
+
+#[tokio::test]
+async fn test_udp_batching_flushes_all_packets_on_marker() {
+    let writes = std::sync::Arc::new(tokio::sync::Mutex::new(Vec::<bytes::Bytes>::new()));
+    let io: std::sync::Arc<Mutex<Box<dyn crate::io::TNetIO + Send + Sync>>> =
+        std::sync::Arc::new(Mutex::new(Box::new(TestNetIO::new(
+            writes.clone(),
+            crate::io::NetType::UDP,
+        ))));
+    let handler = RtspServerSession::setup_udp_play_packet_handler(
+        make_counters(),
+        None,
+        "video".to_string(),
+        "sess-udp".to_string(),
+        make_socket_addr(),
+        0,
+    );
+
+    for seq in 10..20u16 {
+        handler(io.clone(), make_test_rtp_packet(seq, 0, 80))
+            .await
+            .expect("udp packet should batch");
+    }
+    assert!(writes.lock().await.is_empty());
+
+    handler(io.clone(), make_test_rtp_packet(20, 1, 80))
+        .await
+        .expect("udp marker packet should flush");
+
+    let captured = writes.lock().await;
+    assert_eq!(captured.len(), 11);
+}
+
+#[tokio::test]
+async fn test_async_bytes_writer_flush_moves_buffer_contents() {
+    let writes = std::sync::Arc::new(tokio::sync::Mutex::new(Vec::<bytes::Bytes>::new()));
+    let io: std::sync::Arc<Mutex<Box<dyn crate::io::TNetIO + Send + Sync>>> =
+        std::sync::Arc::new(Mutex::new(Box::new(TestNetIO::new(
+            writes.clone(),
+            crate::io::NetType::TCP,
+        ))));
+    let mut writer = crate::io::bytes_writer::AsyncBytesWriter::new(io);
+
+    writer.write(&[1, 2, 3, 4]).expect("write should succeed");
+    assert_eq!(writer.bytes_writer.len(), 4);
+
+    writer.flush().await.expect("flush should succeed");
+
+    assert!(writer.bytes_writer.is_empty());
+    let captured = writes.lock().await;
+    assert_eq!(captured.len(), 1);
+    assert_eq!(captured[0].as_ref(), &[1, 2, 3, 4]);
 }

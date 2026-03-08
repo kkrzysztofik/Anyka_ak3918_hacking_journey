@@ -62,6 +62,7 @@ mockall = "0.14"
 
 # Network
 reqwest = { version = "0.13", features = ["native-tls-vendored", "query", "form"] }
+socket2 = "0.5"
 
 # Note: openssl-src is patched at workspace root for uClibc ARM target support.
 

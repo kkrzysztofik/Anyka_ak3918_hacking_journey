@@ -2,6 +2,8 @@ use crate::config::StreamingConfig;
 use crate::protocol::rtsp::global_trait::Marshal;
 use crate::protocol::rtsp::global_trait::Unmarshal;
 use crate::protocol::rtsp::rtsp_codec;
+use byteorder::BigEndian;
+use bytes::{BufMut, BytesMut};
 use chrono::Utc;
 
 use crate::protocol::rtsp::rtp::define::ANNEXB_NALU_START_CODE;
@@ -28,8 +30,6 @@ use crate::protocol::rtsp::rtsp_transport::RtspTransport;
 
 use crate::io::bytes_reader::BytesReader;
 use crate::io::bytes_writer::AsyncBytesWriter;
-use byteorder::BigEndian;
-use bytes::BytesMut;
 
 use super::errors::SessionError;
 use super::errors::SessionErrorValue;
@@ -302,10 +302,22 @@ struct RtpTimestampSample {
 }
 
 /// Keeps RTP timestamps monotonic for source-side resets while preserving true RTP wrap.
+///
+/// This normalizer addresses two issues:
+/// 1. High initial timestamps from SDK (e.g., 42,543,800 ms → 3.8B RTP units)
+///    cause VLC to miscalculate playback position as "late".
+/// 2. Source-side timestamp resets need monotonic output without false wrap detection.
+///
+/// Solution: Capture the first scaled timestamp as an offset, then subtract it
+/// from all subsequent timestamps. Output starts near 0 and stays monotonic.
 #[derive(Debug, Default)]
 struct RtpTimestampNormalizer {
-    previous_scaled_timestamp: Option<u32>,
-    correction: u32,
+    /// First scaled timestamp (captured on first frame).
+    /// Used to normalize timestamps to start near 0.
+    initial_offset: Option<u32>,
+    /// Tracks the last output timestamp for regression detection.
+    previous_output_timestamp: Option<u32>,
+    /// Count of non-wrap regressions detected (for diagnostics).
     non_wrap_regression_count: u64,
 }
 
@@ -342,29 +354,24 @@ impl RtpTimestampNormalizer {
                 RtspServerSession::scale_rtp_timestamp(source_timestamp, clock_rate)
             }
         };
-        let previous_scaled_timestamp = self.previous_scaled_timestamp;
+        let offset = *self.initial_offset.get_or_insert(scaled_timestamp);
+        let normalized_timestamp = scaled_timestamp.wrapping_sub(offset);
+        let previous_scaled_timestamp = self.previous_output_timestamp;
 
+        let mut output_timestamp = normalized_timestamp;
         let mut non_wrap_regressed = false;
         if let Some(previous) = previous_scaled_timestamp
-            && scaled_timestamp <= previous
-            && previous.wrapping_sub(scaled_timestamp) <= RTP_TIMESTAMP_WRAP_THRESHOLD
+            && output_timestamp <= previous
+            && previous.wrapping_sub(output_timestamp) <= RTP_TIMESTAMP_WRAP_THRESHOLD
         {
-            // RFC 3550 section 5.1 requires RTP timestamps to reflect sampling instant.
-            // In our validation streams (single access unit cadence, no B-frames), equal or
-            // regressed source timestamps usually indicate source-side resets/chunking artifacts.
-            // Shift by a correction offset so emitted access units remain strictly monotonic.
-            let corrected_current = scaled_timestamp.wrapping_add(self.correction);
-            let corrected_previous = previous.wrapping_add(self.correction);
-            let target = corrected_previous.wrapping_add(1);
-            let adjustment = target.wrapping_sub(corrected_current);
-            self.correction = self.correction.wrapping_add(adjustment);
+            output_timestamp = previous.wrapping_add(1);
             self.non_wrap_regression_count += 1;
             non_wrap_regressed = true;
         }
 
-        self.previous_scaled_timestamp = Some(scaled_timestamp);
+        self.previous_output_timestamp = Some(output_timestamp);
         RtpTimestampSample {
-            output_timestamp: scaled_timestamp.wrapping_add(self.correction),
+            output_timestamp,
             scaled_timestamp,
             previous_scaled_timestamp,
             non_wrap_regressed,
@@ -1241,6 +1248,12 @@ impl RtspServerSession {
             .peer_addr()
             .or_else(|_| stream.local_addr())
             .unwrap_or_else(|_| SocketAddr::from(([0, 0, 0, 0], 0)));
+
+        // Enable TCP_NODELAY to reduce latency on small RTP packets
+        if let Err(err) = stream.set_nodelay(true) {
+            tracing::warn!(error = %err, remote_addr = %remote_addr, "failed_to_set_tcp_nodelay");
+        }
+
         let (read_half, write_half) = stream.into_split();
         let read_io: Box<dyn TNetIO + Send + Sync> = Box::new(TcpReadIO::new(read_half));
         let write_io: Box<dyn TNetIO + Send + Sync> = Box::new(TcpWriteIO::new(write_half));
@@ -2287,12 +2300,17 @@ impl RtspServerSession {
         remote_for_rtp: SocketAddr,
         sample_interval: u32,
     ) -> OnRtpPacketFn {
+        // Frame buffer: accumulate interleaved RTP packets (200KB for large I-frames)
+        let frame_buffer: Arc<Mutex<BytesMut>> =
+            Arc::new(Mutex::new(BytesMut::with_capacity(200 * 1024)));
+
         Box::new(
             move |io: Arc<Mutex<Box<dyn TNetIO + Send + Sync>>>, packet: RtpPacket| {
                 let counters = counters.clone();
                 let stream_identifier = stream_identifier.clone();
                 let track_label = track_label.clone();
                 let session_id = session_id.clone();
+                let frame_buffer = frame_buffer.clone();
                 Box::pin(async move {
                     let msg = packet.marshal()?;
                     let payload_len = msg.len();
@@ -2345,12 +2363,36 @@ impl RtspServerSession {
                         );
                     }
 
-                    let mut bytes_writer = AsyncBytesWriter::new(io);
-                    bytes_writer.write_u8(0x24)?;
-                    bytes_writer.write_u8(channel_identifier)?;
-                    bytes_writer.write_u16::<BigEndian>(msg.len() as u16)?;
-                    bytes_writer.write(&msg)?;
-                    bytes_writer.flush().await?;
+                    // Build interleaved RTP packet: 0x24 + channel + length + payload
+                    let mut buffer = frame_buffer.lock().await;
+                    buffer.reserve(4 + msg.len());
+                    buffer.put_u8(0x24);
+                    buffer.put_u8(channel_identifier);
+                    let len_bytes = (msg.len() as u16).to_be_bytes();
+                    buffer.extend_from_slice(&len_bytes);
+                    buffer.extend_from_slice(&msg);
+
+                    // Flush only when marker bit is set (end of frame)
+                    if packet.header.marker == 1 {
+                        let start = std::time::Instant::now();
+                        let data = buffer.split().freeze();
+                        drop(buffer);
+                        io.lock().await.write(data).await?;
+                        let elapsed = start.elapsed();
+
+                        // Log slow writes (>10ms threshold)
+                        if elapsed.as_millis() >= 10 {
+                            tracing::warn!(
+                                protocol = "TCP",
+                                track = %track_label,
+                                session_id = %session_id,
+                                remote_addr = %remote_for_rtp,
+                                elapsed_ms = elapsed.as_millis(),
+                                "slow_tcp_write"
+                            );
+                        }
+                    }
+
                     Ok(())
                 })
             },
@@ -2365,12 +2407,17 @@ impl RtspServerSession {
         remote_for_rtp: SocketAddr,
         sample_interval: u32,
     ) -> OnRtpPacketFn {
+        // Packet buffer: accumulate marshalled packets (150 packets for large I-frames)
+        let packet_buffer: Arc<Mutex<Vec<BytesMut>>> =
+            Arc::new(Mutex::new(Vec::with_capacity(150)));
+
         Box::new(
             move |io: Arc<Mutex<Box<dyn TNetIO + Send + Sync>>>, packet: RtpPacket| {
                 let counters = counters.clone();
                 let stream_identifier = stream_identifier.clone();
                 let track_label = track_label.clone();
                 let session_id = session_id.clone();
+                let packet_buffer = packet_buffer.clone();
                 Box::pin(async move {
                     let msg = packet.marshal()?;
                     let payload_len = msg.len();
@@ -2423,9 +2470,34 @@ impl RtspServerSession {
                         );
                     }
 
-                    let mut bytes_writer = AsyncBytesWriter::new(io);
-                    bytes_writer.write(&msg)?;
-                    bytes_writer.flush().await?;
+                    // Accumulate packet into buffer
+                    let mut buffer = packet_buffer.lock().await;
+                    buffer.push(msg);
+
+                    // Write all accumulated packets when marker bit is set (end of frame)
+                    if packet.header.marker == 1 {
+                        let start = std::time::Instant::now();
+                        let packets: Vec<BytesMut> = buffer.drain(..).collect();
+                        drop(buffer);
+                        let mut io = io.lock().await;
+                        for pkt in packets {
+                            io.write(pkt.into()).await?;
+                        }
+                        let elapsed = start.elapsed();
+
+                        // Log slow writes (>10ms threshold)
+                        if elapsed.as_millis() >= 10 {
+                            tracing::warn!(
+                                protocol = "UDP",
+                                track = %track_label,
+                                session_id = %session_id,
+                                remote_addr = %remote_for_rtp,
+                                elapsed_ms = elapsed.as_millis(),
+                                "slow_udp_write"
+                            );
+                        }
+                    }
+
                     Ok(())
                 })
             },

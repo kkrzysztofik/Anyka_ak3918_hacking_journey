@@ -185,8 +185,8 @@ pub struct SlotHeader {
     pub checksum: u32,
     /// CLOCK_MONOTONIC at ring write time (version >= 2)
     pub wall_clock_us: u64,
-    /// Delta from previous frame in microseconds (version >= 2)
-    pub inter_frame_us: u32,
+    /// Reserved for future use (was inter_frame_us, now unused)
+    pub _reserved2: u32,
     /// Reserved for future use
     pub _reserved: u32,
     /// Padding to 64 bytes (reduced from 32)
@@ -1027,7 +1027,7 @@ mod tests {
             stream_id: 0,
             checksum: 0,
             wall_clock_us: 0,
-            inter_frame_us: 0,
+            _reserved2: 0,
             _reserved: 0,
             _padding: [0u8; 16],
         };

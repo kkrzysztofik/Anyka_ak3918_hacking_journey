@@ -129,7 +129,7 @@ struct vd_slot_header {
     uint32_t checksum;        /* CRC32 of frame data (0 = not computed) */
     /* Timing diagnostics (version >= 2, 16 bytes) */
     uint64_t wall_clock_us;   /* CLOCK_MONOTONIC at ring write time */
-    uint32_t inter_frame_us;  /* Delta from previous frame (same stream) */
+    uint32_t _reserved2;      /* Reserved (was inter_frame_us, now unused) */
     uint32_t _reserved;
     uint8_t  _padding[16];   /* Reduced from 32: pad to 64 bytes */
 } __attribute__((packed));

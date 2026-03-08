@@ -2,6 +2,7 @@ use thiserror::Error;
 
 use crate::io::bytes_errors::BytesReadError;
 use crate::io::bytes_errors::BytesWriteError;
+use crate::io::bytesio_errors::BytesIOError;
 
 #[derive(Debug, Error)]
 #[error("{value}")]
@@ -29,6 +30,14 @@ impl From<BytesWriteError> for PackerError {
     fn from(error: BytesWriteError) -> Self {
         PackerError {
             value: PackerErrorValue::BytesWriteError(error),
+        }
+    }
+}
+
+impl From<BytesIOError> for PackerError {
+    fn from(error: BytesIOError) -> Self {
+        PackerError {
+            value: PackerErrorValue::BytesWriteError(BytesWriteError::from(error)),
         }
     }
 }

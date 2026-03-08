@@ -119,11 +119,8 @@ impl BytesWriter {
         Ok(())
     }
     pub fn extract_current_bytes(&mut self) -> BytesMut {
-        let mut rv_data = BytesMut::new();
-        rv_data.extend_from_slice(&self.bytes.clone()[..]);
-        self.bytes.clear();
-
-        rv_data
+        let data = std::mem::take(&mut self.bytes);
+        BytesMut::from(data.as_slice())
     }
 
     pub fn clear(&mut self) {
@@ -197,31 +194,18 @@ impl AsyncBytesWriter {
     }
 
     pub async fn flush(&mut self) -> Result<(), BytesWriteError> {
-        self.io
-            .lock()
-            .await
-            .write(self.bytes_writer.bytes.clone().into())
-            .await?;
-        self.bytes_writer.bytes.clear();
+        let data = std::mem::take(&mut self.bytes_writer.bytes);
+        self.io.lock().await.write(data.into()).await?;
         Ok(())
     }
 
     pub async fn flush_timeout(&mut self, duration: Duration) -> Result<(), BytesWriteError> {
-        let message = timeout(
-            duration,
-            self.io
-                .lock()
-                .await
-                .write(self.bytes_writer.bytes.clone().into()),
-        )
-        .await;
+        let data = std::mem::take(&mut self.bytes_writer.bytes);
+        let message = timeout(duration, self.io.lock().await.write(data.into())).await;
 
         match message {
             // Handle successful write
-            Ok(Ok(_)) => {
-                self.bytes_writer.bytes.clear();
-                Ok(())
-            }
+            Ok(Ok(_)) => Ok(()),
             // Handle I/O error from write operation
             Ok(Err(io_err)) => Err(BytesWriteError {
                 value: BytesWriteErrorValue::BytesIOError(io_err),

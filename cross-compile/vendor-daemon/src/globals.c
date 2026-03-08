@@ -19,7 +19,5 @@ int g_saved_stdout = -1;
 int g_saved_stderr = -1;
 FILE *g_log_fp = NULL;
 
-uint64_t g_last_wall_clock_us = 0;
-
 /* Zero-initialized at start; main() resets with memset() before use. */
 struct push_stream_state g_push_streams[PUSH_STREAM_SLOT_COUNT];

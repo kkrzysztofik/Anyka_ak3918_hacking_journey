@@ -67,11 +67,9 @@ static uint32_t convert_frame_type(enum video_frame_type sdk_type)
 }
 
 /**
- * fill_slot_timing - Populate wall-clock timing fields in a slot header.
+ * fill_slot_timing - Populate wall-clock timing field in a slot header.
  *
- * Fills wall_clock_us and inter_frame_us in the slot header after a
- * successful vd_ring_write() call.  Also updates g_last_wall_clock_us
- * for the next inter-frame delta calculation.
+ * Fills wall_clock_us in the slot header after a successful vd_ring_write() call.
  *
  * @param ring_base  Base pointer of the shared memory ring buffer.
  * @param slot_idx   Index of the slot to update.
@@ -84,14 +82,6 @@ static void fill_slot_timing(void *ring_base, int slot_idx)
 
     struct vd_slot_header *slot = vd_ring_get_slot_hdr(ring_base, (uint32_t)slot_idx);
     slot->wall_clock_us = wall_us;
-
-    uint32_t delta = 0;
-    if (g_last_wall_clock_us > 0 && wall_us > g_last_wall_clock_us) {
-        uint64_t diff = wall_us - g_last_wall_clock_us;
-        delta = (diff > UINT32_MAX) ? UINT32_MAX : (uint32_t)diff;
-    }
-    slot->inter_frame_us = delta;
-    g_last_wall_clock_us = wall_us;
 }
 
 /**
@@ -169,10 +159,34 @@ static void *push_frame_thread(void *arg)
             continue;
         }
 
+        /* Success — reset consecutive no-data counter */
+        no_data_count = 0;
+
         uint32_t frame_len = vs.len;
-        uint32_t timestamp_ms = (uint32_t)vs.ts;
+        uint32_t raw_timestamp_ms = (uint32_t)vs.ts;
+        uint32_t timestamp_ms;
         uint32_t seq_no = (uint32_t)vs.seq_no;
         uint32_t ring_frame_type = convert_frame_type(vs.frame_type);
+
+        /* Timestamp normalization: subtract first timestamp to produce 0-based values */
+        if (!state->timestamp_initialized) {
+            state->first_timestamp_ms = raw_timestamp_ms;
+            state->timestamp_initialized = 1;
+            timestamp_ms = 0;
+            log_info("event=timestamp_anchor stream=%u first_ts_ms=%u diag_monotonic_ms=%llu",
+                     state->stream_id,
+                     raw_timestamp_ms,
+                     (unsigned long long)diag_monotonic_ms());
+        } else {
+            timestamp_ms = raw_timestamp_ms - state->first_timestamp_ms;
+        }
+
+        log_debug("event=timestamp_normalize stream=%u raw_ts=%u normalized_ts=%u seq_no=%u diag_monotonic_ms=%llu",
+                  state->stream_id,
+                  raw_timestamp_ms,
+                  timestamp_ms,
+                  seq_no,
+                  (unsigned long long)diag_monotonic_ms());
 
         /* Try ring buffer write */
         int ring_slot = -1;
@@ -383,6 +397,9 @@ int handle_venc_start_push(int fd, const uint8_t *req, uint32_t req_len)
     state->stream_handle = req_read_handle(req, 0);
     state->stream_id = stream_id;
     state->active = 1;
+    /* Reset timestamp normalization state on push start */
+    state->timestamp_initialized = 0;
+    state->first_timestamp_ms = 0;
 
     /* Reset ring buffer if this is the first push activation (both slots
      * were inactive).  Clears stale sequences/flags from a previous session

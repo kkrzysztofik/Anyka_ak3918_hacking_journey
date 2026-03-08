@@ -7,6 +7,7 @@ use bytes::Bytes;
 use bytes::BytesMut;
 use futures::SinkExt;
 use futures::StreamExt;
+use socket2::{Domain, Protocol, Socket, Type};
 use tokio::net::TcpStream;
 use tokio::net::UdpSocket;
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
@@ -18,6 +19,9 @@ use super::bytesio_errors::{BytesIOError, BytesIOErrorValue};
 
 /// Maximum UDP datagram size (RFC 768 limit)
 const MAX_UDP_DATAGRAM_SIZE: usize = 65507;
+
+/// Default UDP send buffer size (256KB for high-bitrate video)
+const UDP_SEND_BUFFER_SIZE: usize = 256 * 1024;
 
 pub enum NetType {
     TCP,
@@ -44,37 +48,96 @@ impl UdpIO {
             format!("{remote_domain}:{remote_port}")
         };
         tracing::debug!(remote_address = %remote_address, "udp_connection_attempt");
-        let local_address = format!("0.0.0.0:{local_port}");
-        if let Ok(local_socket) = UdpSocket::bind(local_address).await {
-            if let Ok(remote_socket_addr) = remote_address.parse::<SocketAddr>() {
-                match local_socket.connect(remote_socket_addr).await {
-                    Ok(()) => {
-                        return Some(Self {
-                            socket: local_socket,
-                        });
-                    }
-                    Err(err) => {
-                        tracing::error!(error = %err, remote_address = %remote_address, "udp_connect_error");
-                        return None;
-                    }
-                }
-            } else {
-                tracing::error!(remote_address = %remote_address, "remote_address_parse_error");
+
+        // Create socket2 socket with larger send buffer
+        let socket = match Socket::new(Domain::IPV4, Type::DGRAM, Some(Protocol::UDP)) {
+            Ok(s) => s,
+            Err(err) => {
+                tracing::error!(error = %err, "socket2_create_error");
+                return None;
             }
+        };
+
+        // Set send buffer size for high-bitrate video streaming
+        if let Err(err) = socket.set_send_buffer_size(UDP_SEND_BUFFER_SIZE) {
+            tracing::warn!(error = %err, "failed_to_set_udp_send_buffer_size");
         }
 
-        None
+        let local_address: SocketAddr = format!("0.0.0.0:{local_port}").parse().ok()?;
+        if let Err(err) = socket.bind(&local_address.into()) {
+            tracing::error!(error = %err, local_addr = %local_address, "udp_bind_error");
+            return None;
+        }
+
+        // Connect to remote address
+        let remote_socket_addr: SocketAddr = match remote_address.parse() {
+            Ok(addr) => addr,
+            Err(err) => {
+                tracing::error!(error = %err, remote_address = %remote_address, "remote_address_parse_error");
+                return None;
+            }
+        };
+
+        if let Err(err) = socket.connect(&remote_socket_addr.into()) {
+            tracing::error!(error = %err, remote_address = %remote_address, "udp_connect_error");
+            return None;
+        }
+
+        if let Err(err) = socket.set_nonblocking(true) {
+            tracing::error!(error = %err, "udp_set_nonblocking_error");
+            return None;
+        }
+
+        // Convert socket2 socket to tokio UdpSocket
+        let std_socket: std::net::UdpSocket = socket.into();
+        match tokio::net::UdpSocket::from_std(std_socket) {
+            Ok(local_socket) => Some(Self {
+                socket: local_socket,
+            }),
+            Err(err) => {
+                tracing::error!(error = %err, "tokio_udp_from_std_error");
+                None
+            }
+        }
     }
 
     pub async fn new_with_local_port(local_port: u16) -> Option<Self> {
-        let local_address = format!("0.0.0.0:{local_port}");
+        // Create socket2 socket with larger send buffer
+        let socket = match Socket::new(Domain::IPV4, Type::DGRAM, Some(Protocol::UDP)) {
+            Ok(s) => s,
+            Err(err) => {
+                tracing::error!(error = %err, "socket2_create_error");
+                return None;
+            }
+        };
 
-        if let Ok(local_socket) = UdpSocket::bind(local_address).await {
-            return Some(Self {
-                socket: local_socket,
-            });
+        // Set send buffer size for high-bitrate video streaming
+        if let Err(err) = socket.set_send_buffer_size(UDP_SEND_BUFFER_SIZE) {
+            tracing::warn!(error = %err, "failed_to_set_udp_send_buffer_size");
         }
-        None
+
+        let local_address: SocketAddr = format!("0.0.0.0:{local_port}").parse().ok()?;
+        if let Err(err) = socket.bind(&local_address.into()) {
+            tracing::error!(error = %err, local_addr = %local_address, "udp_bind_error");
+            return None;
+        }
+
+        if let Err(err) = socket.set_nonblocking(true) {
+            tracing::error!(error = %err, "udp_set_nonblocking_error");
+            return None;
+        }
+
+        // Convert socket2 socket to tokio UdpSocket
+        let std_socket: std::net::UdpSocket = socket.into();
+        match tokio::net::UdpSocket::from_std(std_socket) {
+            Ok(local_socket) => Some(Self {
+                socket: local_socket,
+            }),
+            Err(err) => {
+                tracing::error!(error = %err, "tokio_udp_from_std_error");
+                None
+            }
+        }
     }
 
     pub fn get_local_port(&self) -> Option<u16> {
