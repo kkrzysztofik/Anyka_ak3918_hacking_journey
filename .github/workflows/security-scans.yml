@@ -35,8 +35,7 @@ jobs:
       snyk_code_status: ${{ steps.snyk-code.outcome }}
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v6  # v6.0.0
-        # SHA: de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.0
 
       - name: Setup Snyk CLI
         uses: snyk/actions/setup@9adf32b1121593767fc3c057af55b55db032dc04  # v1.0.0
@@ -62,8 +61,7 @@ jobs:
 
       - name: Upload Snyk Code SARIF to GitHub
         if: steps.check-snyk-code-sarif.outputs.exists == 'true'
-        uses: github/codeql-action/upload-sarif@v4  # v4.0.0
-        # SHA: 0d579ffd059c29b07949a3cce3983f0780820c98
+        uses: github/codeql-action/upload-sarif@0d579ffd059c29b07949a3cce3983f0780820c98  # v4.0.0
         continue-on-error: true
         with:
           sarif_file: ${{ inputs.working_directory }}/snyk-code.sarif
@@ -80,8 +78,7 @@ jobs:
       snyk_issues: ${{ steps.count-issues.outputs.snyk_issues }}
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v6  # v6.0.0
-        # SHA: de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.0
 
       - name: Setup Node.js
         uses: actions/setup-node@v6  # v6.0.0
@@ -120,8 +117,7 @@ jobs:
 
       - name: Upload Snyk OSS SARIF to GitHub
         if: steps.check-snyk-oss-sarif.outputs.exists == 'true'
-        uses: github/codeql-action/upload-sarif@v4  # v4.0.0
-        # SHA: 0d579ffd059c29b07949a3cce3983f0780820c98
+        uses: github/codeql-action/upload-sarif@0d579ffd059c29b07949a3cce3983f0780820c98  # v4.0.0
         continue-on-error: true
         with:
           sarif_file: ${{ inputs.working_directory }}/snyk-oss.sarif
