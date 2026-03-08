@@ -196,13 +196,19 @@ pub async fn handle_get_dns(
         let dns_from_dhcp: Vec<IPAddress> = dns_info
             .dns_from_dhcp
             .iter()
-            .map(|addr| IPAddress::ipv4(addr))
+            .map(|addr| {
+                if addr.contains(':') { IPAddress::ipv6(addr) }
+                else { IPAddress::ipv4(addr) }
+            })
             .collect();
 
         let dns_manual: Vec<IPAddress> = dns_info
             .dns_manual
             .iter()
-            .map(|addr| IPAddress::ipv4(addr))
+            .map(|addr| {
+                if addr.contains(':') { IPAddress::ipv6(addr) }
+                else { IPAddress::ipv4(addr) }
+            })
             .collect();
 
         return Ok(GetDNSResponse {
@@ -251,8 +257,9 @@ pub async fn handle_get_ntp(
         // Convert platform NTP info to ONVIF NetworkHost types
         let to_network_host = |addr: &String| {
             // Check if it's an IP address or DNS name
-            if addr.parse::<std::net::IpAddr>().is_ok() {
-                NetworkHost::ipv4(addr)
+            if let Ok(ip) = addr.parse::<std::net::IpAddr>() {
+                if ip.is_ipv6() { NetworkHost::ipv6(addr) }
+                else { NetworkHost::ipv4(addr) }
             } else {
                 NetworkHost::dns(addr)
             }
