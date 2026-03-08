@@ -17,7 +17,7 @@ use crate::onvif::imaging::store::ImagingSettingsStore;
 /// Handle GetPresets request.
 ///
 /// Returns the list of available imaging presets.
-/// Returns empty list if presets are not supported.
+/// Returns `ActionNotSupported` fault; presets are not supported on this device.
 pub async fn get_presets(
     store: &ImagingSettingsStore,
     request: GetPresets,

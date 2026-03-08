@@ -3,7 +3,7 @@
 //! This module provides validation functions for imaging settings
 //! and options.
 
-use crate::onvif::error::OnvifResult;
+use crate::onvif::error::{OnvifError, OnvifResult};
 use crate::onvif::imaging::types::ImagingOptions20;
 use crate::onvif::types::common::ImagingSettings20;
 
@@ -77,7 +77,15 @@ pub fn validate_settings(
 }
 
 /// Validate a single float parameter against a range.
+///
+/// Rejects non-finite values (NaN, +/-infinity) before the range check.
 pub fn validate_range(parameter: &str, value: f32, min: f32, max: f32) -> OnvifResult<()> {
+    if !value.is_finite() {
+        return Err(OnvifError::invalid_arg(
+            "InvalidValue",
+            format!("{} must be a finite number", parameter),
+        ));
+    }
     if value < min || value > max {
         Err(super::faults::parameter_out_of_range(
             parameter, value, min, max,
@@ -167,6 +175,26 @@ mod tests {
         assert!(validate_range("Test", 10.0, 0.0, 10.0).is_ok());
         assert!(validate_range("Test", -1.0, 0.0, 10.0).is_err());
         assert!(validate_range("Test", 11.0, 0.0, 10.0).is_err());
+    }
+
+    #[test]
+    fn test_validate_range_rejects_nan() {
+        assert!(validate_range("Brightness", f32::NAN, 0.0, 100.0).is_err());
+    }
+
+    #[test]
+    fn test_validate_range_rejects_infinity() {
+        assert!(validate_range("Brightness", f32::INFINITY, 0.0, 100.0).is_err());
+    }
+
+    #[test]
+    fn test_validate_range_rejects_neg_infinity() {
+        assert!(validate_range("Brightness", f32::NEG_INFINITY, 0.0, 100.0).is_err());
+    }
+
+    #[test]
+    fn test_validate_range_accepts_finite_in_range() {
+        assert!(validate_range("Brightness", 50.0, 0.0, 100.0).is_ok());
     }
 
     #[test]
