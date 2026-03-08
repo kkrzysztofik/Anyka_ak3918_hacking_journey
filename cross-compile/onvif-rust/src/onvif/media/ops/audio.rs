@@ -117,9 +117,10 @@ pub fn set_audio_encoder_configuration(
 /// Handle GetAudioEncoderConfigurationOptions request.
 ///
 /// Returns valid options for audio encoder configuration.
-// TODO: Request payload (configuration_token, profile_token) is intentionally ignored.
-// This single-profile embedded camera has one audio encoder, so the options are always
-// the same regardless of which token is specified.
+///
+/// The request payload (`configuration_token`, `profile_token`) is intentionally
+/// ignored. The AK3918 is a single-sensor camera with one audio encoder, so the
+/// options are identical regardless of which token the client specifies.
 pub fn get_audio_encoder_configuration_options(
     pm: &ProfileManagerRef,
 ) -> OnvifResult<GetAudioEncoderConfigurationOptionsResponse> {
@@ -131,6 +132,9 @@ pub fn get_audio_encoder_configuration_options(
 /// Handle GetCompatibleAudioSourceConfigurations request.
 ///
 /// Returns audio source configurations compatible with the given profile.
+/// On this single-sensor AK3918 camera all audio source configurations are
+/// compatible with every profile, so the full set is returned after validating
+/// that the requested profile exists.
 pub fn get_compatible_audio_source_configurations(
     pm: &ProfileManagerRef,
     request: GetCompatibleAudioSourceConfigurations,
@@ -149,6 +153,9 @@ pub fn get_compatible_audio_source_configurations(
 /// Handle GetCompatibleAudioEncoderConfigurations request.
 ///
 /// Returns audio encoder configurations compatible with the given profile.
+/// On this single-sensor AK3918 camera all audio encoder configurations are
+/// compatible with every profile, so the full set is returned after validating
+/// that the requested profile exists.
 pub fn get_compatible_audio_encoder_configurations(
     pm: &ProfileManagerRef,
     request: GetCompatibleAudioEncoderConfigurations,

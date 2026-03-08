@@ -9,9 +9,8 @@
 use crate::onvif::error::OnvifResult;
 use crate::onvif::types::media::{
     GetCompatibleVideoSourceConfigurations, GetCompatibleVideoSourceConfigurationsResponse,
-    GetVideoSourceConfiguration, GetVideoSourceConfigurationOptions,
-    GetVideoSourceConfigurationOptionsResponse, GetVideoSourceConfigurationResponse,
-    GetVideoSourceConfigurations, GetVideoSourceConfigurationsResponse, GetVideoSources,
+    GetVideoSourceConfiguration, GetVideoSourceConfigurationOptionsResponse,
+    GetVideoSourceConfigurationResponse, GetVideoSourceConfigurationsResponse,
     GetVideoSourcesResponse, SetVideoSourceConfiguration, SetVideoSourceConfigurationResponse,
 };
 
@@ -70,6 +69,8 @@ pub fn set_video_source_configuration(
 /// Handle GetVideoSourceConfigurationOptions request.
 ///
 /// Returns valid options for video source configuration.
+/// The request payload is intentionally ignored. The AK3918 has a single video
+/// sensor, so the options are identical regardless of which token is specified.
 pub fn get_video_source_configuration_options(
     pm: &ProfileManagerRef,
 ) -> OnvifResult<GetVideoSourceConfigurationOptionsResponse> {
@@ -81,6 +82,9 @@ pub fn get_video_source_configuration_options(
 /// Handle GetCompatibleVideoSourceConfigurations request.
 ///
 /// Returns video source configurations compatible with the given profile.
+/// On this single-sensor AK3918 camera all video source configurations are
+/// compatible with every profile, so the full set is returned after validating
+/// that the requested profile exists.
 pub fn get_compatible_video_source_configurations(
     pm: &ProfileManagerRef,
     request: GetCompatibleVideoSourceConfigurations,

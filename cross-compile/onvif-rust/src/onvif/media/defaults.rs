@@ -226,10 +226,10 @@ pub(crate) fn create_profile(
         fixed: Some(true),
         name: name.to_string(),
         video_source_configuration: Some(VideoSourceConfiguration {
-            token: format!("{}0", VIDEO_SOURCE_CONFIG_PREFIX),
+            token: format!("{}{}", VIDEO_SOURCE_CONFIG_PREFIX, profile_count),
             source_token: DEFAULT_VIDEO_SOURCE_TOKEN.to_string(),
-            name: "VideoSourceConfig_0".to_string(),
-            use_count: (profile_count + 1) as i32,
+            name: format!("VideoSourceConfig_{}", profile_count),
+            use_count: 1,
             view_mode: None,
             bounds: IntRectangle {
                 x: 0,
@@ -246,10 +246,10 @@ pub(crate) fn create_profile(
             extension: None,
         }),
         audio_source_configuration: audio_encoder.as_ref().map(|_| AudioSourceConfiguration {
-            token: format!("{}0", AUDIO_SOURCE_CONFIG_PREFIX),
+            token: format!("{}{}", AUDIO_SOURCE_CONFIG_PREFIX, profile_count),
             source_token: DEFAULT_AUDIO_SOURCE_TOKEN.to_string(),
-            name: "AudioSourceConfig_0".to_string(),
-            use_count: (profile_count + 1) as i32,
+            name: format!("AudioSourceConfig_{}", profile_count),
+            use_count: 1,
         }),
         video_encoder_configuration: video_encoder,
         audio_encoder_configuration: audio_encoder,

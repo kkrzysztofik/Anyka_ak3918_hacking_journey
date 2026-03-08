@@ -21,146 +21,308 @@ const MAX_BITRATE: i32 = 50_000_000;
 /// Maximum length for profile names.
 const MAX_PROFILE_NAME_LENGTH: usize = 64;
 
-/// Validate a profile token.
+/// Validate a profile reference token.
 ///
-/// Returns `OnvifError::NoProfile` if the token is empty.
+/// Checks that the token is non-empty and does not exceed the ONVIF maximum
+/// token length of 64 characters.
+///
+/// # Arguments
+///
+/// * `token` - The profile reference token to validate.
+///
+/// # Returns
+///
+/// `Ok(())` when the token is valid.
+///
+/// # Errors
+///
+/// * `OnvifError::InvalidArgVal("NoProfile", ...)` -- token is empty.
+/// * `OnvifError::InvalidArgVal("InvalidToken", ...)` -- token exceeds 64 characters.
+///
+/// # Examples
+///
+/// ```rust,ignore
+/// assert!(validate_profile_token(&"Profile_0".to_string()).is_ok());
+/// assert!(validate_profile_token(&String::new()).is_err());
+/// ```
 pub fn validate_profile_token(token: &ReferenceToken) -> Result<(), OnvifError> {
     if token.is_empty() {
         return Err(OnvifError::invalid_arg_val(
-            "ter:NoProfile",
+            "NoProfile",
             "Profile token is empty",
         ));
     }
     if token.len() > MAX_TOKEN_LENGTH {
         return Err(OnvifError::invalid_arg_val(
-            "ter:InvalidToken",
+            "InvalidToken",
             "Profile token exceeds maximum length of 64 characters",
         ));
     }
     Ok(())
 }
 
-/// Validate a configuration token.
+/// Validate a configuration reference token.
 ///
-/// Returns `OnvifError::NoConfig` if the token is empty.
+/// Checks that the token is non-empty and within the 64-character ONVIF limit.
+///
+/// # Arguments
+///
+/// * `token` - The configuration reference token to validate.
+///
+/// # Returns
+///
+/// `Ok(())` when the token is valid.
+///
+/// # Errors
+///
+/// * `OnvifError::InvalidArgVal("NoConfig", ...)` -- token is empty.
+/// * `OnvifError::InvalidArgVal("InvalidToken", ...)` -- token exceeds 64 characters.
+///
+/// # Examples
+///
+/// ```rust,ignore
+/// assert!(validate_config_token(&"VideoEncoderConfig_0".to_string()).is_ok());
+/// assert!(validate_config_token(&String::new()).is_err());
+/// ```
 pub fn validate_config_token(token: &ReferenceToken) -> Result<(), OnvifError> {
     if token.is_empty() {
         return Err(OnvifError::invalid_arg_val(
-            "ter:NoConfig",
+            "NoConfig",
             "Configuration token is empty",
         ));
     }
     if token.len() > MAX_TOKEN_LENGTH {
         return Err(OnvifError::invalid_arg_val(
-            "ter:InvalidToken",
+            "InvalidToken",
             "Configuration token exceeds maximum length of 64 characters",
         ));
     }
     Ok(())
 }
 
-/// Validate a source token (video or audio).
+/// Validate a source reference token (video or audio).
 ///
-/// Returns `OnvifError::NoSource` if the token is empty.
+/// Checks that the token is non-empty and within the 64-character ONVIF limit.
+///
+/// # Arguments
+///
+/// * `token` - The source reference token to validate.
+///
+/// # Returns
+///
+/// `Ok(())` when the token is valid.
+///
+/// # Errors
+///
+/// * `OnvifError::InvalidArgVal("NoSource", ...)` -- token is empty.
+/// * `OnvifError::InvalidArgVal("InvalidToken", ...)` -- token exceeds 64 characters.
+///
+/// # Examples
+///
+/// ```rust,ignore
+/// assert!(validate_source_token(&"VideoSource_0".to_string()).is_ok());
+/// assert!(validate_source_token(&String::new()).is_err());
+/// ```
 pub fn validate_source_token(token: &ReferenceToken) -> Result<(), OnvifError> {
     if token.is_empty() {
         return Err(OnvifError::invalid_arg_val(
-            "ter:NoSource",
+            "NoSource",
             "Source token is empty",
         ));
     }
     if token.len() > MAX_TOKEN_LENGTH {
         return Err(OnvifError::invalid_arg_val(
-            "ter:InvalidToken",
+            "InvalidToken",
             "Source token exceeds maximum length of 64 characters",
         ));
     }
     Ok(())
 }
 
-/// Validate video resolution.
+/// Validate video resolution dimensions.
 ///
-/// Returns error if resolution is invalid.
+/// Both dimensions must be positive and at most 4096 pixels.
+///
+/// # Arguments
+///
+/// * `width`  - Horizontal resolution in pixels.
+/// * `height` - Vertical resolution in pixels.
+///
+/// # Returns
+///
+/// `Ok(())` when the resolution is within the supported range.
+///
+/// # Errors
+///
+/// * `OnvifError::InvalidArgVal("InvalidResolution", ...)` -- a dimension is
+///   zero, negative, or exceeds 4096.
+///
+/// # Examples
+///
+/// ```rust,ignore
+/// assert!(validate_resolution(1920, 1080).is_ok());
+/// assert!(validate_resolution(0, 1080).is_err());
+/// ```
 pub fn validate_resolution(width: i32, height: i32) -> Result<(), OnvifError> {
     if width <= 0 || height <= 0 {
         return Err(OnvifError::invalid_arg_val(
-            "ter:InvalidResolution",
+            "InvalidResolution",
             "Resolution width and height must be positive",
         ));
     }
     if width > MAX_RESOLUTION || height > MAX_RESOLUTION {
         return Err(OnvifError::invalid_arg_val(
-            "ter:InvalidResolution",
+            "InvalidResolution",
             "Resolution exceeds maximum supported (4096x4096)",
         ));
     }
     Ok(())
 }
 
-/// Validate frame rate.
+/// Validate a frame rate value.
 ///
-/// Returns error if frame rate is out of range.
+/// The frame rate must be positive and at most 120 fps.
+///
+/// # Arguments
+///
+/// * `frame_rate` - Frame rate in frames per second.
+///
+/// # Returns
+///
+/// `Ok(())` when the frame rate is within the supported range.
+///
+/// # Errors
+///
+/// * `OnvifError::InvalidArgVal("InvalidFrameRate", ...)` -- value is zero,
+///   negative, or exceeds 120.
+///
+/// # Examples
+///
+/// ```rust,ignore
+/// assert!(validate_frame_rate(30).is_ok());
+/// assert!(validate_frame_rate(0).is_err());
+/// ```
 pub fn validate_frame_rate(frame_rate: i32) -> Result<(), OnvifError> {
     if frame_rate <= 0 {
         return Err(OnvifError::invalid_arg_val(
-            "ter:InvalidFrameRate",
+            "InvalidFrameRate",
             "Frame rate must be positive",
         ));
     }
     if frame_rate > MAX_FRAME_RATE {
         return Err(OnvifError::invalid_arg_val(
-            "ter:InvalidFrameRate",
+            "InvalidFrameRate",
             "Frame rate exceeds maximum supported (120 fps)",
         ));
     }
     Ok(())
 }
 
-/// Validate bitrate.
+/// Validate a bitrate value.
 ///
-/// Returns error if bitrate is out of range.
+/// The bitrate must be positive and at most 50 Mbps (50,000,000 bps).
+///
+/// # Arguments
+///
+/// * `bitrate` - Bitrate in bits per second.
+///
+/// # Returns
+///
+/// `Ok(())` when the bitrate is within the supported range.
+///
+/// # Errors
+///
+/// * `OnvifError::InvalidArgVal("InvalidBitrate", ...)` -- value is zero,
+///   negative, or exceeds 50 Mbps.
+///
+/// # Examples
+///
+/// ```rust,ignore
+/// assert!(validate_bitrate(4_000_000).is_ok());
+/// assert!(validate_bitrate(0).is_err());
+/// ```
 pub fn validate_bitrate(bitrate: i32) -> Result<(), OnvifError> {
     if bitrate <= 0 {
         return Err(OnvifError::invalid_arg_val(
-            "ter:InvalidBitrate",
+            "InvalidBitrate",
             "Bitrate must be positive",
         ));
     }
     if bitrate > MAX_BITRATE {
         return Err(OnvifError::invalid_arg_val(
-            "ter:InvalidBitrate",
+            "InvalidBitrate",
             "Bitrate exceeds maximum supported (50 Mbps)",
         ));
     }
     Ok(())
 }
 
-/// Validate quality setting.
+/// Validate a quality setting.
 ///
-/// Returns error if quality is out of range (0.0 to 1.0).
+/// The quality value must be in the inclusive range `[0.0, 1.0]`.
+///
+/// # Arguments
+///
+/// * `quality` - Quality factor where `0.0` is lowest and `1.0` is highest.
+///
+/// # Returns
+///
+/// `Ok(())` when the quality is within range.
+///
+/// # Errors
+///
+/// * `OnvifError::InvalidArgVal("InvalidQuality", ...)` -- value is outside
+///   the `[0.0, 1.0]` range.
+///
+/// # Examples
+///
+/// ```rust,ignore
+/// assert!(validate_quality(0.8).is_ok());
+/// assert!(validate_quality(1.5).is_err());
+/// ```
 pub fn validate_quality(quality: f32) -> Result<(), OnvifError> {
     if !(0.0..=1.0).contains(&quality) {
         return Err(OnvifError::invalid_arg_val(
-            "ter:InvalidQuality",
+            "InvalidQuality",
             "Quality must be between 0.0 and 1.0",
         ));
     }
     Ok(())
 }
 
-/// Validate profile name.
+/// Validate a profile name.
 ///
-/// Returns error if name is empty or too long.
+/// The name must be non-empty and at most 64 characters.
+///
+/// # Arguments
+///
+/// * `name` - The human-readable profile name.
+///
+/// # Returns
+///
+/// `Ok(())` when the name is valid.
+///
+/// # Errors
+///
+/// * `OnvifError::InvalidArgVal("InvalidName", ...)` -- name is empty or
+///   exceeds 64 characters.
+///
+/// # Examples
+///
+/// ```rust,ignore
+/// assert!(validate_profile_name("MainStream").is_ok());
+/// assert!(validate_profile_name("").is_err());
+/// ```
 pub fn validate_profile_name(name: &str) -> Result<(), OnvifError> {
     if name.is_empty() {
         return Err(OnvifError::invalid_arg_val(
-            "ter:InvalidName",
+            "InvalidName",
             "Profile name is empty",
         ));
     }
     if name.len() > MAX_PROFILE_NAME_LENGTH {
         return Err(OnvifError::invalid_arg_val(
-            "ter:InvalidName",
+            "InvalidName",
             "Profile name exceeds maximum length of 64 characters",
         ));
     }

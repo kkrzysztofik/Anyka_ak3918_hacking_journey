@@ -5,7 +5,6 @@
 //! - Add/Remove configuration to/from profiles
 
 use crate::onvif::error::OnvifResult;
-use crate::onvif::types::common::Profile;
 use crate::onvif::types::media::{
     CreateProfile, CreateProfileResponse, DeleteProfile, DeleteProfileResponse, GetProfile,
     GetProfileResponse, GetProfilesResponse,
@@ -53,23 +52,6 @@ pub fn delete_profile(
     tracing::debug!("DeleteProfile request for token: {}", request.profile_token);
     pm.delete_profile(&request.profile_token)?;
     Ok(DeleteProfileResponse {})
-}
-
-/// Get all profiles as a vector.
-///
-/// Convenience wrapper around `ProfileManager::get_profiles` for callers that
-/// need a plain `Vec<Profile>` without the SOAP response envelope (e.g. the
-/// PTZ service validating profile existence).
-pub fn get_all_profiles(pm: &ProfileManagerRef) -> Vec<Profile> {
-    pm.get_profiles()
-}
-
-/// Get a single profile by token.
-///
-/// Convenience wrapper that accepts `&str` instead of `&String`, avoiding an
-/// allocation at the call site. Delegates to `ProfileManager::get_profile`.
-pub fn get_profile_by_token(pm: &ProfileManagerRef, token: &str) -> OnvifResult<Profile> {
-    pm.get_profile(&token.to_string())
 }
 
 #[cfg(test)]

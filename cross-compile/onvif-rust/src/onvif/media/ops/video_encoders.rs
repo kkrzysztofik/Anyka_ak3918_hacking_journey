@@ -9,9 +9,8 @@
 use crate::onvif::error::OnvifResult;
 use crate::onvif::types::media::{
     GetCompatibleVideoEncoderConfigurations, GetCompatibleVideoEncoderConfigurationsResponse,
-    GetVideoEncoderConfiguration, GetVideoEncoderConfigurationOptions,
-    GetVideoEncoderConfigurationOptionsResponse, GetVideoEncoderConfigurationResponse,
-    GetVideoEncoderConfigurations, GetVideoEncoderConfigurationsResponse,
+    GetVideoEncoderConfiguration, GetVideoEncoderConfigurationOptionsResponse,
+    GetVideoEncoderConfigurationResponse, GetVideoEncoderConfigurationsResponse,
     SetVideoEncoderConfiguration, SetVideoEncoderConfigurationResponse,
 };
 

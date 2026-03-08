@@ -23,6 +23,9 @@ use crate::platform::external_ip;
 /// Handle GetStreamUri request.
 ///
 /// Returns the RTSP URI for a profile.
+/// Note: `stream_setup.transport.protocol` is not honored -- the URI is always
+/// an `rtsp://` address. The AK3918 only exposes an RTSP server, so HTTP and
+/// UDP-only transport requests still receive an RTSP URI.
 pub fn get_stream_uri(
     pm: &ProfileManagerRef,
     config: &Arc<ConfigRuntime>,
@@ -51,8 +54,15 @@ pub fn get_stream_uri(
 }
 
 /// Get stream path for a profile.
+///
+/// Channel routing is currently derived from substring matching on the profile
+/// token ("MainStream" / "SubStream"). This works because the fixed profiles
+/// use a predictable naming convention, but user-created profiles will fall
+/// through to the generic "stream" path.
+// TODO: derive channel from the profile's video encoder configuration (or a
+// profile-to-channel map) instead of relying on token naming conventions.
 pub fn get_stream_path(profile_token: &str, stream_setup: &StreamSetup) -> String {
-    // Determine stream name based on profile
+    // Determine stream name based on profile token substring
     let stream_name = if profile_token.contains("MainStream") {
         "main"
     } else if profile_token.contains("SubStream") {
@@ -86,14 +96,13 @@ pub fn get_snapshot_uri(
     // Validate profile exists
     let _ = pm.get_profile(&request.profile_token)?;
 
-    // Build snapshot URI
-    let snapshot_path = {
-        let cfg = config.read();
-        if cfg.media.snapshot_path.is_empty() {
-            DEFAULT_SNAPSHOT_PATH.to_string()
-        } else {
-            cfg.media.snapshot_path.clone()
-        }
+    // Build snapshot URI — read the config path once and avoid cloning when
+    // the default is used.
+    let cfg = config.read();
+    let snapshot_path = if cfg.media.snapshot_path.is_empty() {
+        DEFAULT_SNAPSHOT_PATH
+    } else {
+        &cfg.media.snapshot_path
     };
 
     let uri = format!(

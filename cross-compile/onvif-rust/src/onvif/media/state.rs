@@ -3,6 +3,8 @@
 //! This module provides thread-safe in-memory state management for media profiles,
 //! video/audio sources, and configurations using RwLock primitives.
 
+#![cfg_attr(not(test), allow(dead_code))]
+
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU32, Ordering};
 
@@ -14,12 +16,7 @@ use crate::onvif::types::common::{
 };
 use crate::platform::Resolution;
 
-#[allow(unused_imports)]
-use super::types::{
-    AUDIO_ENCODER_CONFIG_PREFIX, AUDIO_SOURCE_CONFIG_PREFIX, DEFAULT_AUDIO_SOURCE_TOKEN,
-    DEFAULT_PTZ_NODE_TOKEN, DEFAULT_VIDEO_SOURCE_TOKEN, MAX_PROFILES, PROFILE_TOKEN_PREFIX,
-    PTZ_CONFIG_PREFIX, VIDEO_ENCODER_CONFIG_PREFIX, VIDEO_SOURCE_CONFIG_PREFIX,
-};
+use super::types::{MAX_PROFILES, PROFILE_TOKEN_PREFIX};
 use super::validation;
 use crate::onvif::error::{OnvifError, OnvifResult};
 
@@ -47,7 +44,28 @@ pub struct MediaState {
 }
 
 impl MediaState {
-    /// Create a new MediaState with default configuration.
+    /// Create a new empty [`MediaState`] with the given sensor resolution limit.
+    ///
+    /// All internal collections (profiles, sources, configurations) start empty.
+    /// Call [`MediaStore::initialize_defaults`] to populate default profiles.
+    ///
+    /// # Arguments
+    ///
+    /// * `max_resolution` - Maximum sensor resolution used to validate profile
+    ///   configurations. Profiles exceeding this resolution are rejected during
+    ///   initialization.
+    ///
+    /// # Returns
+    ///
+    /// A new `MediaState` with empty collections and a zeroed profile counter.
+    ///
+    /// # Examples
+    ///
+    /// ```rust,ignore
+    /// use crate::platform::Resolution;
+    /// let state = MediaState::new(Resolution::new(1920, 1080));
+    /// assert!(state.get_profiles().is_empty());
+    /// ```
     pub fn new(max_resolution: Resolution) -> Self {
         Self {
             profiles: RwLock::new(HashMap::new()),
@@ -63,8 +81,11 @@ impl MediaState {
     }
 
     /// Get all profiles.
+    ///
+    /// Returns cloned values because the `RwLock` guard cannot outlive this
+    /// method. Returning `&[Profile]` is not possible since the guard would be
+    /// dropped before the caller could use the reference.
     pub fn get_profiles(&self) -> Vec<Profile> {
-        // Note: clone required to release the RwLock before returning
         self.profiles.read().values().cloned().collect()
     }
 
@@ -87,7 +108,7 @@ impl MediaState {
         // Check max profiles limit
         if profiles.len() >= MAX_PROFILES {
             return Err(OnvifError::invalid_arg_val(
-                "ter:MaxProfiles",
+                "MaxProfiles",
                 format!("Maximum number of profiles ({}) reached", MAX_PROFILES),
             ));
         }
@@ -97,14 +118,21 @@ impl MediaState {
             validation::validate_profile_token(&t)?;
             if profiles.contains_key(&t) {
                 return Err(OnvifError::invalid_arg_val(
-                    "ter:TokenConflict",
+                    "TokenConflict",
                     format!("Profile with token '{}' already exists", t),
                 ));
             }
             t
         } else {
-            let counter = self.profile_counter.fetch_add(1, Ordering::SeqCst);
-            format!("{}{}", PROFILE_TOKEN_PREFIX, counter)
+            // Generate a unique token, retrying on collision (e.g. if tokens
+            // were manually inserted via insert_profile with overlapping names).
+            loop {
+                let counter = self.profile_counter.fetch_add(1, Ordering::SeqCst);
+                let candidate = format!("{}{}", PROFILE_TOKEN_PREFIX, counter);
+                if !profiles.contains_key(&candidate) {
+                    break candidate;
+                }
+            }
         };
 
         let profile = Profile {
@@ -138,7 +166,7 @@ impl MediaState {
         // Cannot delete fixed profiles
         if profile.fixed.unwrap_or(false) {
             return Err(OnvifError::invalid_arg_val(
-                "ter:DeletionOfFixedProfile",
+                "DeletionOfFixedProfile",
                 "Cannot delete a fixed profile",
             ));
         }
@@ -148,25 +176,27 @@ impl MediaState {
     }
 
     /// Get all video sources.
+    ///
+    /// Returns cloned values because the `RwLock` guard cannot outlive this
+    /// method (see [`get_profiles`](Self::get_profiles) for rationale).
     pub fn get_video_sources(&self) -> Vec<VideoSource> {
-        // Note: clone required to release the RwLock before returning
         self.video_sources.read().values().cloned().collect()
     }
 
     /// Get all video source configurations.
+    ///
+    /// Returns cloned values because the `RwLock` guard cannot outlive this
+    /// method (see [`get_profiles`](Self::get_profiles) for rationale).
     pub fn get_video_source_configurations(&self) -> Vec<VideoSourceConfiguration> {
-        // Note: clone required to release the RwLock before returning
         self.video_source_configs.read().values().cloned().collect()
     }
 
     /// Get a video source configuration by token.
-    // TODO: No token format validation (unlike get_profile which validates via
-    // validate_profile_token). Acceptable for now — configuration tokens are
-    // system-generated and not user-supplied in the single-profile camera model.
     pub fn get_video_source_configuration(
         &self,
         token: &str,
     ) -> OnvifResult<VideoSourceConfiguration> {
+        validation::validate_config_token(&token.to_string())?;
         self.video_source_configs
             .read()
             .get(token)
@@ -185,8 +215,10 @@ impl MediaState {
     }
 
     /// Get all video encoder configurations.
+    ///
+    /// Returns cloned values because the `RwLock` guard cannot outlive this
+    /// method (see [`get_profiles`](Self::get_profiles) for rationale).
     pub fn get_video_encoder_configurations(&self) -> Vec<VideoEncoderConfiguration> {
-        // Note: clone required to release the RwLock before returning
         self.video_encoder_configs
             .read()
             .values()
@@ -195,12 +227,11 @@ impl MediaState {
     }
 
     /// Get a video encoder configuration by token.
-    // TODO: No token format validation (unlike get_profile). Configuration tokens are
-    // system-generated, so format validation is not critical for the embedded camera.
     pub fn get_video_encoder_configuration(
         &self,
         token: &str,
     ) -> OnvifResult<VideoEncoderConfiguration> {
+        validation::validate_config_token(&token.to_string())?;
         self.video_encoder_configs
             .read()
             .get(token)
@@ -219,24 +250,27 @@ impl MediaState {
     }
 
     /// Get all audio sources.
+    ///
+    /// Returns cloned values because the `RwLock` guard cannot outlive this
+    /// method (see [`get_profiles`](Self::get_profiles) for rationale).
     pub fn get_audio_sources(&self) -> Vec<AudioSource> {
-        // Note: clone required to release the RwLock before returning
         self.audio_sources.read().values().cloned().collect()
     }
 
     /// Get all audio source configurations.
+    ///
+    /// Returns cloned values because the `RwLock` guard cannot outlive this
+    /// method (see [`get_profiles`](Self::get_profiles) for rationale).
     pub fn get_audio_source_configurations(&self) -> Vec<AudioSourceConfiguration> {
-        // Note: clone required to release the RwLock before returning
         self.audio_source_configs.read().values().cloned().collect()
     }
 
     /// Get an audio source configuration by token.
-    // TODO: No token format validation (unlike get_profile). Configuration tokens are
-    // system-generated, so format validation is not critical for the embedded camera.
     pub fn get_audio_source_configuration(
         &self,
         token: &str,
     ) -> OnvifResult<AudioSourceConfiguration> {
+        validation::validate_config_token(&token.to_string())?;
         self.audio_source_configs
             .read()
             .get(token)
@@ -255,8 +289,10 @@ impl MediaState {
     }
 
     /// Get all audio encoder configurations.
+    ///
+    /// Returns cloned values because the `RwLock` guard cannot outlive this
+    /// method (see [`get_profiles`](Self::get_profiles) for rationale).
     pub fn get_audio_encoder_configurations(&self) -> Vec<AudioEncoderConfiguration> {
-        // Note: clone required to release the RwLock before returning
         self.audio_encoder_configs
             .read()
             .values()
@@ -265,12 +301,11 @@ impl MediaState {
     }
 
     /// Get an audio encoder configuration by token.
-    // TODO: No token format validation (unlike get_profile). Configuration tokens are
-    // system-generated, so format validation is not critical for the embedded camera.
     pub fn get_audio_encoder_configuration(
         &self,
         token: &str,
     ) -> OnvifResult<AudioEncoderConfiguration> {
+        validation::validate_config_token(&token.to_string())?;
         self.audio_encoder_configs
             .read()
             .get(token)
@@ -294,6 +329,7 @@ impl MediaState {
         profile_token: &str,
         config_token: &str,
     ) -> OnvifResult<()> {
+        validation::validate_profile_token(&profile_token.to_string())?;
         let config = self.get_video_source_configuration(config_token)?;
         let mut profiles = self.profiles.write();
         let profile = profiles
@@ -319,6 +355,7 @@ impl MediaState {
         profile_token: &str,
         config_token: &str,
     ) -> OnvifResult<()> {
+        validation::validate_profile_token(&profile_token.to_string())?;
         let config = self.get_video_encoder_configuration(config_token)?;
         let mut profiles = self.profiles.write();
         let profile = profiles
@@ -344,6 +381,7 @@ impl MediaState {
         profile_token: &str,
         config_token: &str,
     ) -> OnvifResult<()> {
+        validation::validate_profile_token(&profile_token.to_string())?;
         let config = self.get_audio_source_configuration(config_token)?;
         let mut profiles = self.profiles.write();
         let profile = profiles
@@ -369,6 +407,7 @@ impl MediaState {
         profile_token: &str,
         config_token: &str,
     ) -> OnvifResult<()> {
+        validation::validate_profile_token(&profile_token.to_string())?;
         let config = self.get_audio_encoder_configuration(config_token)?;
         let mut profiles = self.profiles.write();
         let profile = profiles
@@ -389,47 +428,47 @@ impl MediaState {
     }
 
     /// Insert a profile directly (used by store.rs for loading).
-    pub fn insert_profile(&self, profile: Profile) {
+    pub(crate) fn insert_profile(&self, profile: Profile) {
         self.profiles.write().insert(profile.token.clone(), profile);
     }
 
     /// Insert a video source directly.
-    pub fn insert_video_source(&self, source: VideoSource) {
+    pub(crate) fn insert_video_source(&self, source: VideoSource) {
         self.video_sources
             .write()
             .insert(source.token.clone(), source);
     }
 
     /// Insert an audio source directly.
-    pub fn insert_audio_source(&self, source: AudioSource) {
+    pub(crate) fn insert_audio_source(&self, source: AudioSource) {
         self.audio_sources
             .write()
             .insert(source.token.clone(), source);
     }
 
     /// Insert a video source configuration directly.
-    pub fn insert_video_source_config(&self, config: VideoSourceConfiguration) {
+    pub(crate) fn insert_video_source_config(&self, config: VideoSourceConfiguration) {
         self.video_source_configs
             .write()
             .insert(config.token.clone(), config);
     }
 
     /// Insert a video encoder configuration directly.
-    pub fn insert_video_encoder_config(&self, config: VideoEncoderConfiguration) {
+    pub(crate) fn insert_video_encoder_config(&self, config: VideoEncoderConfiguration) {
         self.video_encoder_configs
             .write()
             .insert(config.token.clone(), config);
     }
 
     /// Insert an audio source configuration directly.
-    pub fn insert_audio_source_config(&self, config: AudioSourceConfiguration) {
+    pub(crate) fn insert_audio_source_config(&self, config: AudioSourceConfiguration) {
         self.audio_source_configs
             .write()
             .insert(config.token.clone(), config);
     }
 
     /// Insert an audio encoder configuration directly.
-    pub fn insert_audio_encoder_config(&self, config: AudioEncoderConfiguration) {
+    pub(crate) fn insert_audio_encoder_config(&self, config: AudioEncoderConfiguration) {
         self.audio_encoder_configs
             .write()
             .insert(config.token.clone(), config);
@@ -473,6 +512,16 @@ impl Default for MediaState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::onvif::media::store::MediaStore;
+    use crate::onvif::media::types::PROFILE_TOKEN_PREFIX;
+    use crate::platform::Resolution;
+
+    fn create_initialized_state() -> MediaState {
+        let state = MediaState::new(Resolution::new(1920, 1080));
+        let store = MediaStore::new(None, Resolution::new(1920, 1080));
+        store.initialize_defaults(&state);
+        state
+    }
 
     #[test]
     fn test_media_state_new() {
@@ -511,5 +560,234 @@ mod tests {
         // Next one should fail
         let result = state.create_profile("OneMore".to_string(), None);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_create_profile_duplicate_token_fails() {
+        let state = MediaState::new(Resolution::new(1920, 1080));
+        let token = "Profile_Custom".to_string();
+
+        let created = state
+            .create_profile("Primary".to_string(), Some(token.clone()))
+            .unwrap();
+        assert_eq!(created.token, token);
+
+        let result = state.create_profile("Duplicate".to_string(), Some(token));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_delete_fixed_profile_fails() {
+        let state = create_initialized_state();
+        let profile = state.get_profiles().into_iter().next().unwrap();
+
+        let result = state.delete_profile(&profile.token);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_set_and_get_video_source_configuration() {
+        let state = create_initialized_state();
+        let mut configuration = state.get_video_source_configurations().pop().unwrap();
+        configuration.name = "UpdatedVideoSource".to_string();
+
+        state
+            .set_video_source_configuration(configuration.clone())
+            .unwrap();
+
+        let stored = state
+            .get_video_source_configuration(&configuration.token)
+            .unwrap();
+        assert_eq!(stored.name, "UpdatedVideoSource");
+    }
+
+    #[test]
+    fn test_set_and_get_video_encoder_configuration() {
+        let state = create_initialized_state();
+        let mut configuration = state.get_video_encoder_configurations().pop().unwrap();
+        configuration.name = "UpdatedVideoEncoder".to_string();
+
+        state
+            .set_video_encoder_configuration(configuration.clone())
+            .unwrap();
+
+        let stored = state
+            .get_video_encoder_configuration(&configuration.token)
+            .unwrap();
+        assert_eq!(stored.name, "UpdatedVideoEncoder");
+    }
+
+    #[test]
+    fn test_set_and_get_audio_source_configuration() {
+        let state = create_initialized_state();
+        let mut configuration = state.get_audio_source_configurations().pop().unwrap();
+        configuration.name = "UpdatedAudioSource".to_string();
+
+        state
+            .set_audio_source_configuration(configuration.clone())
+            .unwrap();
+
+        let stored = state
+            .get_audio_source_configuration(&configuration.token)
+            .unwrap();
+        assert_eq!(stored.name, "UpdatedAudioSource");
+    }
+
+    #[test]
+    fn test_set_and_get_audio_encoder_configuration() {
+        let state = create_initialized_state();
+        let mut configuration = state.get_audio_encoder_configurations().pop().unwrap();
+        configuration.name = "UpdatedAudioEncoder".to_string();
+
+        state
+            .set_audio_encoder_configuration(configuration.clone())
+            .unwrap();
+
+        let stored = state
+            .get_audio_encoder_configuration(&configuration.token)
+            .unwrap();
+        assert_eq!(stored.name, "UpdatedAudioEncoder");
+    }
+
+    #[test]
+    fn test_add_and_remove_video_source_configuration() {
+        let state = create_initialized_state();
+        let profile = state
+            .create_profile("AttachVideoSource".to_string(), None)
+            .unwrap();
+        let config = state.get_video_source_configurations().pop().unwrap();
+
+        state
+            .add_video_source_configuration(&profile.token, &config.token)
+            .unwrap();
+        let updated = state.get_profile(&profile.token).unwrap();
+        assert_eq!(
+            updated.video_source_configuration.unwrap().token,
+            config.token
+        );
+
+        state
+            .remove_video_source_configuration(&profile.token)
+            .unwrap();
+        let cleared = state.get_profile(&profile.token).unwrap();
+        assert!(cleared.video_source_configuration.is_none());
+    }
+
+    #[test]
+    fn test_add_and_remove_video_encoder_configuration() {
+        let state = create_initialized_state();
+        let profile = state
+            .create_profile("AttachVideoEncoder".to_string(), None)
+            .unwrap();
+        let config = state.get_video_encoder_configurations().pop().unwrap();
+
+        state
+            .add_video_encoder_configuration(&profile.token, &config.token)
+            .unwrap();
+        let updated = state.get_profile(&profile.token).unwrap();
+        assert_eq!(
+            updated.video_encoder_configuration.unwrap().token,
+            config.token
+        );
+
+        state
+            .remove_video_encoder_configuration(&profile.token)
+            .unwrap();
+        let cleared = state.get_profile(&profile.token).unwrap();
+        assert!(cleared.video_encoder_configuration.is_none());
+    }
+
+    #[test]
+    fn test_add_and_remove_audio_configurations() {
+        let state = create_initialized_state();
+        let profile = state
+            .create_profile("AttachAudio".to_string(), None)
+            .unwrap();
+        let source_config = state.get_audio_source_configurations().pop().unwrap();
+        let encoder_config = state.get_audio_encoder_configurations().pop().unwrap();
+
+        state
+            .add_audio_source_configuration(&profile.token, &source_config.token)
+            .unwrap();
+        state
+            .add_audio_encoder_configuration(&profile.token, &encoder_config.token)
+            .unwrap();
+
+        let updated = state.get_profile(&profile.token).unwrap();
+        assert_eq!(
+            updated.audio_source_configuration.unwrap().token,
+            source_config.token
+        );
+        assert_eq!(
+            updated.audio_encoder_configuration.unwrap().token,
+            encoder_config.token
+        );
+
+        state
+            .remove_audio_source_configuration(&profile.token)
+            .unwrap();
+        state
+            .remove_audio_encoder_configuration(&profile.token)
+            .unwrap();
+
+        let cleared = state.get_profile(&profile.token).unwrap();
+        assert!(cleared.audio_source_configuration.is_none());
+        assert!(cleared.audio_encoder_configuration.is_none());
+    }
+
+    #[test]
+    fn test_configuration_getters_return_error_for_missing_tokens() {
+        let state = create_initialized_state();
+
+        assert!(
+            state
+                .get_video_source_configuration("missing-video-source")
+                .is_err()
+        );
+        assert!(
+            state
+                .get_video_encoder_configuration("missing-video-encoder")
+                .is_err()
+        );
+        assert!(
+            state
+                .get_audio_source_configuration("missing-audio-source")
+                .is_err()
+        );
+        assert!(
+            state
+                .get_audio_encoder_configuration("missing-audio-encoder")
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn test_add_configuration_missing_profile_fails() {
+        let state = create_initialized_state();
+        let video_source = state.get_video_source_configurations().pop().unwrap();
+
+        let result = state.add_video_source_configuration("missing-profile", &video_source.token);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_clear_resets_all_state_and_profile_counter_is_used_for_tokens() {
+        let state = create_initialized_state();
+        state.set_profile_counter(7);
+
+        let created = state.create_profile("Generated".to_string(), None).unwrap();
+        assert_eq!(created.token, format!("{}7", PROFILE_TOKEN_PREFIX));
+        assert_eq!(state.max_sensor_resolution(), Resolution::new(1920, 1080));
+
+        state.clear();
+
+        assert_eq!(state.profile_count(), 0);
+        assert!(state.get_profiles().is_empty());
+        assert!(state.get_video_sources().is_empty());
+        assert!(state.get_audio_sources().is_empty());
+        assert!(state.get_video_source_configurations().is_empty());
+        assert!(state.get_video_encoder_configurations().is_empty());
+        assert!(state.get_audio_source_configurations().is_empty());
+        assert!(state.get_audio_encoder_configurations().is_empty());
     }
 }

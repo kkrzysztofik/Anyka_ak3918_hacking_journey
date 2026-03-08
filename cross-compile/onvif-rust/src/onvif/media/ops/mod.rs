@@ -15,11 +15,9 @@ pub mod streaming;
 pub mod video_encoders;
 pub mod video_sources;
 
-// Re-export validation from parent module for use by operations
-pub(crate) use crate::onvif::media::validation;
-
 use crate::onvif::media::ProfileManager;
 
-/// Type alias for ProfileManager — provides an indirection point so the
-/// concrete type behind operation signatures can be changed in one place.
+/// Type alias for the concrete `ProfileManager` struct — provides an
+/// indirection point so every operation signature can be updated in one
+/// place should the backing type ever change (e.g. to `Arc<ProfileManager>`).
 pub type ProfileManagerRef = ProfileManager;
