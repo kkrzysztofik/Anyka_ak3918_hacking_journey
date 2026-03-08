@@ -282,13 +282,21 @@ impl FramePacer {
         self.last_timestamp_ms = Some(timestamp_ms);
         slept_ms
     }
+
+    fn reset(&mut self) {
+        self.last_send = None;
+        self.last_timestamp_ms = None;
+    }
 }
 
+#[cfg(test)]
 #[inline]
 fn pacing_timestamp_ms(frame_data: &FrameData) -> Option<u32> {
     match frame_data {
         FrameData::Video { timestamp, .. } => Some(*timestamp),
-        FrameData::Audio { .. } | FrameData::MetaData { .. } | FrameData::MediaInfo { .. } => None,
+        FrameData::Audio { .. } | FrameData::MetaData { .. } | FrameData::MediaInfo { .. } => {
+            None
+        }
     }
 }
 
@@ -655,6 +663,7 @@ async fn process_video_frame(
     dropped_stale_frames: &mut u64,
     dropped_for_recovery: &mut u64,
     idr_recovery_count: &mut u64,
+    frame_pacer: &mut FramePacer,
     session_id: &str,
     remote_addr: SocketAddr,
     request_path: &str,
@@ -667,6 +676,7 @@ async fn process_video_frame(
     };
 
     let contains_idr = contains_h264_idr(flush_data.as_ref());
+    let was_waiting_for_idr_recovery = *waiting_for_idr_recovery;
     if *waiting_for_idr_recovery {
         if !contains_idr {
             *dropped_for_recovery += 1;
@@ -674,6 +684,13 @@ async fn process_video_frame(
         }
 
         *waiting_for_idr_recovery = false;
+        // Reset pacing baseline when resyncing on IDR so stale timeline
+        // state does not induce additional sleep on the recovered stream.
+        frame_pacer.reset();
+        video_lag_tracker.anchor_local = Instant::now();
+        video_lag_tracker.anchor_source_ts = flush_ts;
+        video_lag_tracker.last_source_ts = flush_ts;
+        video_lag_tracker.initialized = true;
         info!(
             track = ?TrackType::Video,
             session_id = %session_id,
@@ -781,6 +798,41 @@ async fn process_video_frame(
         shutdown,
     };
 
+    // Pace only when stream is healthy. Under lag/backpressure, extra sleep
+    // worsens delay accumulation and slows recovery.
+    if !was_waiting_for_idr_recovery && lag_ms <= latency_policy.lag_recovery_threshold_ms {
+        let paced_sleep_ms = frame_pacer.pace(flush_ts).await;
+        if paced_sleep_ms >= PACER_SLEEP_DIAGNOSTIC_MIN_MS {
+            debug!(
+                session_id = %session_id,
+                remote_addr = %remote_addr,
+                request_path = %request_path,
+                source_ts = flush_ts,
+                sleep_ms = paced_sleep_ms,
+                lag_ms = lag_ms,
+                diag_monotonic_ms = monotonic_millis(),
+                "playback_pacer_sleep"
+            );
+        }
+    } else if crate::stream_frame_debug_logging_enabled() {
+        let skip_reason = if was_waiting_for_idr_recovery {
+            "recovery"
+        } else {
+            "lagging"
+        };
+        debug!(
+            session_id = %session_id,
+            remote_addr = %remote_addr,
+            request_path = %request_path,
+            source_ts = flush_ts,
+            lag_ms = lag_ms,
+            threshold_ms = latency_policy.lag_recovery_threshold_ms,
+            reason = skip_reason,
+            diag_monotonic_ms = monotonic_millis(),
+            "playback_pacer_skip"
+        );
+    }
+
     send_video_access_unit(
         video_channel,
         timestamp_normalizers,
@@ -853,6 +905,7 @@ async fn handle_playback_frame(
     dropped_stale_frames: &mut u64,
     dropped_for_recovery: &mut u64,
     idr_recovery_count: &mut u64,
+    frame_pacer: &mut FramePacer,
     session_id: &str,
     remote_addr: SocketAddr,
     request_path: &str,
@@ -897,6 +950,7 @@ async fn handle_playback_frame(
                     dropped_stale_frames,
                     dropped_for_recovery,
                     idr_recovery_count,
+                    frame_pacer,
                     session_id,
                     remote_addr,
                     request_path,
@@ -989,25 +1043,6 @@ async fn run_playback_loop(
             Some(frame_data) => {
                 retry_times = 0;
 
-                // Pace frame delivery to approximate real-time timing.
-                // Without this, frames dequeued from the ring buffer are
-                // sent in bursts, overwhelming VLC's jitter buffer.
-                let timestamp_ms = pacing_timestamp_ms(&frame_data);
-                if let Some(ts) = timestamp_ms {
-                    let paced_sleep_ms = frame_pacer.pace(ts).await;
-                    if paced_sleep_ms >= PACER_SLEEP_DIAGNOSTIC_MIN_MS {
-                        debug!(
-                            session_id = %session_id,
-                            remote_addr = %remote_addr,
-                            request_path = %request_path,
-                            source_ts = ts,
-                            sleep_ms = paced_sleep_ms,
-                            diag_monotonic_ms = monotonic_millis(),
-                            "playback_pacer_sleep"
-                        );
-                    }
-                }
-
                 if handle_playback_frame(
                     frame_data,
                     &audio_rtp_channel,
@@ -1022,6 +1057,7 @@ async fn run_playback_loop(
                     &mut dropped_stale_frames,
                     &mut dropped_for_recovery,
                     &mut idr_recovery_count,
+                    &mut frame_pacer,
                     &session_id,
                     remote_addr,
                     &request_path,

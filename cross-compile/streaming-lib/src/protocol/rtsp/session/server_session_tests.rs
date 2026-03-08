@@ -3615,13 +3615,14 @@ fn make_test_rtp_packet(
 ) -> crate::protocol::rtsp::rtp::RtpPacket {
     let mut packet = crate::protocol::rtsp::rtp::RtpPacket::new(
         crate::protocol::rtsp::rtp::rtp_header::RtpHeader {
-        marker,
-        payload_type: 96,
-        seq_number,
-        timestamp: 90_000,
-        ssrc: 0x1234_5678,
-        ..Default::default()
-    });
+            marker,
+            payload_type: 96,
+            seq_number,
+            timestamp: 90_000,
+            ssrc: 0x1234_5678,
+            ..Default::default()
+        },
+    );
     packet.payload = BytesMut::from(vec![0xAB; payload_len].as_slice());
     packet
 }
