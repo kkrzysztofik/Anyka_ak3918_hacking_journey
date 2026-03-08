@@ -38,7 +38,7 @@ use crate::onvif::error::{OnvifError, OnvifResult};
 ///
 /// # Returns
 ///
-/// `Ok(())` if valid, or `OnvifError::NotFound` if invalid/empty.
+/// `Ok(())` if valid, or an appropriate `OnvifError::InvalidArgVal` if invalid/empty.
 ///
 /// # Errors
 ///
@@ -62,27 +62,24 @@ use crate::onvif::error::{OnvifError, OnvifResult};
 /// ```
 pub fn validate_reference_token(token: &str, kind: &str) -> OnvifResult<()> {
     if token.is_empty() {
-        return Err(OnvifError::NotFound(format!(
-            "{} token cannot be empty",
-            kind
-        )));
+        return Err(OnvifError::missing_arg(kind));
     }
 
     // Check for whitespace which is invalid in ONVIF tokens
     if token.chars().any(|c| c.is_whitespace()) {
-        return Err(OnvifError::NotFound(format!(
-            "{} token '{}' contains invalid whitespace",
-            kind, token
-        )));
+        return Err(OnvifError::invalid_arg(
+            "InvalidToken",
+            format!("{} token '{}' contains invalid whitespace", kind, token),
+        ));
     }
 
     // Check for other invalid characters
     let invalid_chars = ['<', '>', '&', '\'', '"'];
     if token.chars().any(|c| invalid_chars.contains(&c)) {
-        return Err(OnvifError::NotFound(format!(
-            "{} token '{}' contains invalid characters",
-            kind, token
-        )));
+        return Err(OnvifError::invalid_arg(
+            "InvalidToken",
+            format!("{} token '{}' contains invalid characters", kind, token),
+        ));
     }
 
     Ok(())
@@ -216,7 +213,8 @@ mod tests {
         let result = validate_reference_token("", "profile");
         assert!(result.is_err());
         let err = result.unwrap_err();
-        assert!(err.to_string().contains("empty"));
+        assert!(err.to_string().contains("MissingArg"));
+        assert!(err.to_string().contains("profile"));
     }
 
     #[test]
@@ -224,6 +222,7 @@ mod tests {
         let result = validate_reference_token("token with space", "profile");
         assert!(result.is_err());
         let err = result.unwrap_err();
+        assert!(err.to_string().contains("InvalidToken"));
         assert!(err.to_string().contains("whitespace"));
     }
 
@@ -232,6 +231,7 @@ mod tests {
         let result = validate_reference_token("token<tag>", "profile");
         assert!(result.is_err());
         let err = result.unwrap_err();
+        assert!(err.to_string().contains("InvalidToken"));
         assert!(err.to_string().contains("invalid characters"));
     }
 

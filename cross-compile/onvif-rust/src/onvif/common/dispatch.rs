@@ -114,6 +114,14 @@ pub(crate) struct TestResponseDispatch {
 ///
 /// A `Result` containing the serialized XML response string, or an `OnvifError`.
 ///
+/// # Errors
+///
+/// Returns an error if:
+/// - The request XML cannot be parsed into the expected `Req` type
+///   (`OnvifError::WellFormed`).
+/// - The handler function returns an error (propagated as-is).
+/// - The response cannot be serialized to XML (`OnvifError::Internal`).
+///
 /// # Example
 ///
 /// ```
@@ -183,6 +191,14 @@ where
 /// # Returns
 ///
 /// A `Result` containing the serialized XML response string, or an `OnvifError`.
+///
+/// # Errors
+///
+/// Returns an error if:
+/// - The request XML cannot be parsed into the expected `Req` type
+///   (`OnvifError::WellFormed`).
+/// - The async handler returns an error (propagated as-is).
+/// - The response cannot be serialized to XML (`OnvifError::Internal`).
 ///
 /// # Example
 ///
