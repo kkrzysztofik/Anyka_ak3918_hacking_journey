@@ -68,7 +68,7 @@ pub fn no_preset(token: &str) -> OnvifError {
 /// ```
 pub fn too_many_presets(max: i32) -> OnvifError {
     OnvifError::InvalidArgVal {
-        subcode: "ter:TooManyPresets".to_string(),
+        subcode: "TooManyPresets".to_string(),
         reason: format!("Maximum number of {} presets reached", max),
     }
 }
@@ -92,7 +92,7 @@ pub fn too_many_presets(max: i32) -> OnvifError {
 /// ```
 pub fn moving_pan_tilt() -> OnvifError {
     OnvifError::InvalidArgVal {
-        subcode: "ter:MovingPanTilt".to_string(),
+        subcode: "MovingPanTilt".to_string(),
         reason: "Pan/Tilt movement in progress".to_string(),
     }
 }
@@ -116,7 +116,7 @@ pub fn moving_pan_tilt() -> OnvifError {
 /// ```
 pub fn moving_zoom() -> OnvifError {
     OnvifError::InvalidArgVal {
-        subcode: "ter:MovingZoom".to_string(),
+        subcode: "MovingZoom".to_string(),
         reason: "Zoom movement in progress".to_string(),
     }
 }
@@ -204,7 +204,7 @@ mod tests {
         let err = too_many_presets(255);
         match err {
             OnvifError::InvalidArgVal { subcode, reason } => {
-                assert_eq!(subcode, "ter:TooManyPresets");
+                assert_eq!(subcode, "TooManyPresets");
                 assert!(reason.contains("255"));
             }
             _ => panic!("Expected InvalidArgVal variant"),
@@ -225,7 +225,7 @@ mod tests {
         let err = moving_pan_tilt();
         match err {
             OnvifError::InvalidArgVal { subcode, reason } => {
-                assert_eq!(subcode, "ter:MovingPanTilt");
+                assert_eq!(subcode, "MovingPanTilt");
                 assert!(reason.contains("Pan/Tilt"));
             }
             _ => panic!("Expected InvalidArgVal variant"),
@@ -246,7 +246,7 @@ mod tests {
         let err = moving_zoom();
         match err {
             OnvifError::InvalidArgVal { subcode, reason } => {
-                assert_eq!(subcode, "ter:MovingZoom");
+                assert_eq!(subcode, "MovingZoom");
                 assert!(reason.contains("Zoom"));
             }
             _ => panic!("Expected InvalidArgVal variant"),

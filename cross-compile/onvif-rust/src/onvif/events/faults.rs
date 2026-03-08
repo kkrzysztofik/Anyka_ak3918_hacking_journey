@@ -36,7 +36,7 @@ pub fn pull_point_not_supported() -> OnvifError {
 /// Used when the subscription token is invalid or expired.
 pub fn invalid_subscription(token: &str) -> OnvifError {
     OnvifError::InvalidArgVal {
-        subcode: "ter:InvalidSubscription".to_string(),
+        subcode: "InvalidSubscription".to_string(),
         reason: format!("Invalid subscription: {}", token),
     }
 }
@@ -46,7 +46,7 @@ pub fn invalid_subscription(token: &str) -> OnvifError {
 /// Used when the specified topic is not recognized.
 pub fn topic_not_supported(topic: &str) -> OnvifError {
     OnvifError::InvalidArgVal {
-        subcode: "ter:TopicNotSupported".to_string(),
+        subcode: "TopicNotSupported".to_string(),
         reason: format!("Topic not supported: {}", topic),
     }
 }
@@ -56,16 +56,21 @@ pub fn topic_not_supported(topic: &str) -> OnvifError {
 /// Used when the specified filter expression is not supported.
 pub fn filter_not_supported() -> OnvifError {
     OnvifError::InvalidArgVal {
-        subcode: "ter:FilterNotSupported".to_string(),
+        subcode: "FilterNotSupported".to_string(),
         reason: "Filter expression not supported".to_string(),
     }
 }
 
-/// Create a InvalidFilter fault.
+/// Create an InvalidFilter fault.
 ///
-/// Used when the filter syntax is invalid.
+/// Used when the filter syntax is invalid. This is a client error (the
+/// submitted filter expression could not be parsed), so it maps to
+/// `InvalidArgVal` rather than `Internal`.
 pub fn invalid_filter(reason: &str) -> OnvifError {
-    OnvifError::Internal(format!("Invalid filter: {}", reason))
+    OnvifError::InvalidArgVal {
+        subcode: "InvalidFilterSyntax".to_string(),
+        reason: format!("Invalid filter: {}", reason),
+    }
 }
 
 /// Create a NotificationStreamFault fault.
@@ -104,7 +109,7 @@ mod tests {
     fn test_invalid_subscription() {
         let err = invalid_subscription("ExpiredToken123");
         assert!(
-            matches!(err, OnvifError::InvalidArgVal { ref subcode, .. } if subcode == "ter:InvalidSubscription")
+            matches!(err, OnvifError::InvalidArgVal { ref subcode, .. } if subcode == "InvalidSubscription")
         );
         assert!(err.to_string().contains("ExpiredToken123"));
     }
@@ -113,7 +118,7 @@ mod tests {
     fn test_topic_not_supported() {
         let err = topic_not_supported("tns1:Device/SomeEvent");
         assert!(
-            matches!(err, OnvifError::InvalidArgVal { ref subcode, .. } if subcode == "ter:TopicNotSupported")
+            matches!(err, OnvifError::InvalidArgVal { ref subcode, .. } if subcode == "TopicNotSupported")
         );
         assert!(err.to_string().contains("SomeEvent"));
     }
@@ -122,14 +127,16 @@ mod tests {
     fn test_filter_not_supported() {
         let err = filter_not_supported();
         assert!(
-            matches!(err, OnvifError::InvalidArgVal { ref subcode, .. } if subcode == "ter:FilterNotSupported")
+            matches!(err, OnvifError::InvalidArgVal { ref subcode, .. } if subcode == "FilterNotSupported")
         );
     }
 
     #[test]
     fn test_invalid_filter() {
         let err = invalid_filter("mismatched parentheses");
-        assert!(matches!(err, OnvifError::Internal(_)));
+        assert!(
+            matches!(err, OnvifError::InvalidArgVal { ref subcode, .. } if subcode == "InvalidFilterSyntax")
+        );
         assert!(err.to_string().contains("mismatched"));
     }
 

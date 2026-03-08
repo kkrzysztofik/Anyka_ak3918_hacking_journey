@@ -11,7 +11,7 @@ use crate::onvif::error::OnvifError;
 /// Create a NoProfile error.
 pub fn no_profile_error(token: &str) -> OnvifError {
     OnvifError::invalid_arg_val(
-        "ter:NoProfile",
+        "NoProfile",
         format!("Profile with token '{}' not found", token),
     )
 }
@@ -19,7 +19,7 @@ pub fn no_profile_error(token: &str) -> OnvifError {
 /// Create a NoConfig error.
 pub fn no_config_error(token: &str) -> OnvifError {
     OnvifError::invalid_arg_val(
-        "ter:NoConfig",
+        "NoConfig",
         format!("Configuration with token '{}' not found", token),
     )
 }
@@ -27,7 +27,7 @@ pub fn no_config_error(token: &str) -> OnvifError {
 /// Create a NoSource error.
 pub fn no_source_error(token: &str) -> OnvifError {
     OnvifError::invalid_arg_val(
-        "ter:NoSource",
+        "NoSource",
         format!("Source with token '{}' not found", token),
     )
 }
@@ -39,7 +39,7 @@ pub fn config_conflict_error(reason: &str) -> OnvifError {
 
 /// Create a ConfigModify error for fixed configurations.
 pub fn config_modify_error() -> OnvifError {
-    OnvifError::invalid_arg_val("ter:ConfigModify", "Cannot modify fixed configuration")
+    OnvifError::invalid_arg_val("ConfigModify", "Cannot modify fixed configuration")
 }
 
 #[cfg(test)]
@@ -138,7 +138,7 @@ mod tests {
     fn test_no_profile_error() {
         let err = no_profile_error("Profile_99");
         assert!(
-            matches!(err, OnvifError::InvalidArgVal { ref subcode, .. } if subcode == "ter:NoProfile")
+            matches!(err, OnvifError::InvalidArgVal { ref subcode, .. } if subcode == "NoProfile")
         );
         assert!(err.to_string().contains("Profile_99"));
     }
@@ -147,7 +147,7 @@ mod tests {
     fn test_no_config_error() {
         let err = no_config_error("Config_99");
         assert!(
-            matches!(err, OnvifError::InvalidArgVal { ref subcode, .. } if subcode == "ter:NoConfig")
+            matches!(err, OnvifError::InvalidArgVal { ref subcode, .. } if subcode == "NoConfig")
         );
         assert!(err.to_string().contains("Config_99"));
     }
@@ -156,7 +156,7 @@ mod tests {
     fn test_no_source_error() {
         let err = no_source_error("Source_99");
         assert!(
-            matches!(err, OnvifError::InvalidArgVal { ref subcode, .. } if subcode == "ter:NoSource")
+            matches!(err, OnvifError::InvalidArgVal { ref subcode, .. } if subcode == "NoSource")
         );
         assert!(err.to_string().contains("Source_99"));
     }
@@ -172,7 +172,7 @@ mod tests {
     fn test_config_modify_error() {
         let err = config_modify_error();
         assert!(
-            matches!(err, OnvifError::InvalidArgVal { ref subcode, .. } if subcode == "ter:ConfigModify")
+            matches!(err, OnvifError::InvalidArgVal { ref subcode, .. } if subcode == "ConfigModify")
         );
         assert!(
             err.to_string()

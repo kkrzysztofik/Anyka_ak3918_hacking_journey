@@ -39,7 +39,7 @@ pub fn rule_not_supported() -> OnvifError {
 /// * `name` - The analytics module name that was not found
 pub fn analytics_module_not_found(name: &str) -> OnvifError {
     OnvifError::InvalidArgVal {
-        subcode: "ter:NoConfig".to_string(),
+        subcode: "NoConfig".to_string(),
         reason: format!("Analytics module not found: {}", name),
     }
 }
@@ -53,7 +53,7 @@ pub fn analytics_module_not_found(name: &str) -> OnvifError {
 /// * `token` - The invalid configuration token value
 pub fn invalid_configuration_token(token: &str) -> OnvifError {
     OnvifError::InvalidArgVal {
-        subcode: "ter:InvalidToken".to_string(),
+        subcode: "InvalidToken".to_string(),
         reason: format!("Invalid configuration token: {}", token),
     }
 }
@@ -67,7 +67,7 @@ pub fn invalid_configuration_token(token: &str) -> OnvifError {
 /// * `name` - The duplicate analytics module name
 pub fn duplicate_name(name: &str) -> OnvifError {
     OnvifError::InvalidArgVal {
-        subcode: "ter:Duplicate".to_string(),
+        subcode: "Duplicate".to_string(),
         reason: format!("Analytics module name already exists: {}", name),
     }
 }
@@ -98,7 +98,7 @@ mod tests {
     fn test_analytics_module_not_found() {
         let err = analytics_module_not_found("MyModule");
         assert!(
-            matches!(err, OnvifError::InvalidArgVal { ref subcode, .. } if subcode == "ter:NoConfig")
+            matches!(err, OnvifError::InvalidArgVal { ref subcode, .. } if subcode == "NoConfig")
         );
         assert!(err.to_string().contains("MyModule"));
     }
@@ -107,7 +107,7 @@ mod tests {
     fn test_invalid_configuration_token() {
         let err = invalid_configuration_token("BadToken");
         assert!(
-            matches!(err, OnvifError::InvalidArgVal { ref subcode, .. } if subcode == "ter:InvalidToken")
+            matches!(err, OnvifError::InvalidArgVal { ref subcode, .. } if subcode == "InvalidToken")
         );
         assert!(err.to_string().contains("BadToken"));
     }
@@ -116,7 +116,7 @@ mod tests {
     fn test_duplicate_name() {
         let err = duplicate_name("ExistingModule");
         assert!(
-            matches!(err, OnvifError::InvalidArgVal { ref subcode, .. } if subcode == "ter:Duplicate")
+            matches!(err, OnvifError::InvalidArgVal { ref subcode, .. } if subcode == "Duplicate")
         );
         assert!(err.to_string().contains("ExistingModule"));
     }
