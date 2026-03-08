@@ -83,7 +83,8 @@ static pthread_mutex_t g_endpoint_uuid_mutex =          // NOLINT
 static void derive_pseudo_mac(unsigned char mac[MAC_ADDRESS_SIZE]) {
   char host[ONVIF_MAX_SERVICE_NAME_LEN];
   if (get_device_hostname(host, sizeof(host)) != 0) {
-    strcpy(host, "anyka");
+    strncpy(host, "anyka", sizeof(host) - 1);
+    host[sizeof(host) - 1] = '\0';
   }
   unsigned hash = DJB2_HASH_INIT;
   for (char* ptr = host; *ptr; ++ptr) {

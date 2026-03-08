@@ -205,11 +205,11 @@ fn test_set_hostname_invalid_empty() {
 // Scopes Management Integration Tests
 // ============================================================================
 
-#[test]
-fn test_get_scopes_includes_fixed_and_configurable() {
+#[tokio::test]
+async fn test_get_scopes_includes_fixed_and_configurable() {
     let service = create_test_service();
 
-    let response = service.handle_get_scopes(GetScopes {}).unwrap();
+    let response = service.handle_get_scopes(GetScopes {}).await.unwrap();
 
     // Should have both fixed and configurable scopes
     let has_fixed = response.scopes.iter().any(|s| {
@@ -229,12 +229,12 @@ fn test_get_scopes_includes_fixed_and_configurable() {
     assert!(has_configurable, "Should have configurable scopes");
 }
 
-#[test]
-fn test_set_scopes_replaces_configurable() {
+#[tokio::test]
+async fn test_set_scopes_replaces_configurable() {
     let service = create_test_service();
 
     // Get initial scopes
-    let initial = service.handle_get_scopes(GetScopes {}).unwrap();
+    let initial = service.handle_get_scopes(GetScopes {}).await.unwrap();
     let initial_fixed_count = initial
         .scopes
         .iter()
@@ -254,10 +254,11 @@ fn test_set_scopes_replaces_configurable() {
                 "onvif://www.onvif.org/location/NewLocation".to_string(),
             ],
         })
+        .await
         .unwrap();
 
     // Verify fixed scopes preserved, configurable replaced
-    let after = service.handle_get_scopes(GetScopes {}).unwrap();
+    let after = service.handle_get_scopes(GetScopes {}).await.unwrap();
     let after_fixed_count = after
         .scopes
         .iter()
@@ -285,13 +286,14 @@ fn test_set_scopes_replaces_configurable() {
     assert!(has_new_location, "Should have new location scope");
 }
 
-#[test]
-fn test_add_scopes_appends_to_existing() {
+#[tokio::test]
+async fn test_add_scopes_appends_to_existing() {
     let service = create_test_service();
 
     // Get initial count
     let initial_count = service
         .handle_get_scopes(GetScopes {})
+        .await
         .unwrap()
         .scopes
         .len();
@@ -301,11 +303,13 @@ fn test_add_scopes_appends_to_existing() {
         .handle_add_scopes(AddScopes {
             scope_item: vec!["onvif://www.onvif.org/hardware/CustomHardware".to_string()],
         })
+        .await
         .unwrap();
 
     // Verify scope was added
     let after_count = service
         .handle_get_scopes(GetScopes {})
+        .await
         .unwrap()
         .scopes
         .len();
@@ -316,19 +320,20 @@ fn test_add_scopes_appends_to_existing() {
 // Discovery Mode Integration Tests
 // ============================================================================
 
-#[test]
-fn test_discovery_mode_default_discoverable() {
+#[tokio::test]
+async fn test_discovery_mode_default_discoverable() {
     let service = create_test_service();
 
     let response = service
         .handle_get_discovery_mode(GetDiscoveryMode {})
+        .await
         .unwrap();
 
     assert_eq!(response.discovery_mode, DiscoveryMode::Discoverable);
 }
 
-#[test]
-fn test_set_discovery_mode_toggle() {
+#[tokio::test]
+async fn test_set_discovery_mode_toggle() {
     let service = create_test_service();
 
     // Set to NonDiscoverable
@@ -336,10 +341,12 @@ fn test_set_discovery_mode_toggle() {
         .handle_set_discovery_mode(SetDiscoveryMode {
             discovery_mode: DiscoveryMode::NonDiscoverable,
         })
+        .await
         .unwrap();
 
     let response = service
         .handle_get_discovery_mode(GetDiscoveryMode {})
+        .await
         .unwrap();
     assert_eq!(response.discovery_mode, DiscoveryMode::NonDiscoverable);
 
@@ -348,10 +355,12 @@ fn test_set_discovery_mode_toggle() {
         .handle_set_discovery_mode(SetDiscoveryMode {
             discovery_mode: DiscoveryMode::Discoverable,
         })
+        .await
         .unwrap();
 
     let response = service
         .handle_get_discovery_mode(GetDiscoveryMode {})
+        .await
         .unwrap();
     assert_eq!(response.discovery_mode, DiscoveryMode::Discoverable);
 }
@@ -548,35 +557,38 @@ fn test_set_hostname_updates_value() {
     }
 }
 
-#[test]
-fn test_get_scopes_returns_default_scopes() {
+#[tokio::test]
+async fn test_get_scopes_returns_default_scopes() {
     let service = create_test_service();
 
-    let response = service.handle_get_scopes(GetScopes {}).unwrap();
+    let response = service.handle_get_scopes(GetScopes {}).await.unwrap();
 
     // Should have at least some default scopes
     assert!(!response.scopes.is_empty());
 }
 
-#[test]
-fn test_add_scopes_increases_scope_count() {
+#[tokio::test]
+async fn test_add_scopes_increases_scope_count() {
     let service = create_test_service();
 
-    let initial_response = service.handle_get_scopes(GetScopes {}).unwrap();
+    let initial_response = service.handle_get_scopes(GetScopes {}).await.unwrap();
     let initial_count = initial_response.scopes.len();
 
-    let _add_response = service.handle_add_scopes(AddScopes {
-        scope_item: vec!["onvif://www.onvif.org/location/test".to_string()],
-    });
+    let _add_response = service
+        .handle_add_scopes(AddScopes {
+            scope_item: vec!["onvif://www.onvif.org/location/test".to_string()],
+        })
+        .await
+        .unwrap();
 
-    let final_response = service.handle_get_scopes(GetScopes {}).unwrap();
+    let final_response = service.handle_get_scopes(GetScopes {}).await.unwrap();
     let final_count = final_response.scopes.len();
 
     assert!(final_count >= initial_count);
 }
 
-#[test]
-fn test_set_scopes_replaces_all_scopes() {
+#[tokio::test]
+async fn test_set_scopes_replaces_all_scopes() {
     let service = create_test_service();
 
     let new_scopes = vec![
@@ -584,11 +596,14 @@ fn test_set_scopes_replaces_all_scopes() {
         "onvif://www.onvif.org/name/TestCamera".to_string(),
     ];
 
-    let _set_response = service.handle_set_scopes(SetScopes {
-        scopes: new_scopes.clone(),
-    });
+    let _set_response = service
+        .handle_set_scopes(SetScopes {
+            scopes: new_scopes.clone(),
+        })
+        .await
+        .unwrap();
 
-    let get_response = service.handle_get_scopes(GetScopes {}).unwrap();
+    let get_response = service.handle_get_scopes(GetScopes {}).await.unwrap();
 
     // Verify new scopes are present
     for scope in &new_scopes {
@@ -596,12 +611,13 @@ fn test_set_scopes_replaces_all_scopes() {
     }
 }
 
-#[test]
-fn test_get_discovery_mode_returns_valid_mode() {
+#[tokio::test]
+async fn test_get_discovery_mode_returns_valid_mode() {
     let service = create_test_service();
 
     let response = service
         .handle_get_discovery_mode(GetDiscoveryMode {})
+        .await
         .unwrap();
 
     // Discovery mode should be one of the valid values
@@ -612,16 +628,20 @@ fn test_get_discovery_mode_returns_valid_mode() {
     }
 }
 
-#[test]
-fn test_set_discovery_mode_updates_mode() {
+#[tokio::test]
+async fn test_set_discovery_mode_updates_mode() {
     let service = create_test_service();
 
-    let _set_response = service.handle_set_discovery_mode(SetDiscoveryMode {
-        discovery_mode: DiscoveryMode::NonDiscoverable,
-    });
+    let _set_response = service
+        .handle_set_discovery_mode(SetDiscoveryMode {
+            discovery_mode: DiscoveryMode::NonDiscoverable,
+        })
+        .await
+        .unwrap();
 
     let get_response = service
         .handle_get_discovery_mode(GetDiscoveryMode {})
+        .await
         .unwrap();
 
     assert_eq!(get_response.discovery_mode, DiscoveryMode::NonDiscoverable);

@@ -1,43 +1,42 @@
-//! PTZ State Manager for managing PTZ position and presets.
+//! PTZ runtime state management.
 //!
-//! This module provides thread-safe state management for PTZ operations including:
+//! This module provides the runtime state management for PTZ operations including:
 //! - Current position tracking
 //! - Movement status tracking
-//! - Preset storage and persistence
 //! - Home position management
+//!
+//! Preset storage is handled by the separate `store::PresetStore` module.
 
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use chrono::Utc;
 use parking_lot::RwLock;
 
-use crate::config::ConfigRuntime;
-use crate::onvif::error::{OnvifError, OnvifResult};
 use crate::onvif::types::common::{
-    MoveStatus, PTZMoveStatus, PTZPreset, PTZStatus, PTZVector, Vector1D, Vector2D,
+    MoveStatus, PTZMoveStatus, PTZStatus, PTZVector, Vector1D, Vector2D,
 };
 
-use super::types::{MAX_PRESETS, SPACE_ABSOLUTE_PAN_TILT, SPACE_ABSOLUTE_ZOOM};
+use super::store::PresetStore;
+use super::types::{SPACE_ABSOLUTE_PAN_TILT, SPACE_ABSOLUTE_ZOOM};
 
 // ============================================================================
-// PTZ State
+// PTZ Runtime State
 // ============================================================================
 
 /// Internal PTZ position state.
 #[derive(Debug, Clone, Default)]
-struct Position {
+pub struct Position {
     /// Pan value (-1.0 to 1.0).
-    pan: f32,
+    pub pan: f32,
     /// Tilt value (-1.0 to 1.0).
-    tilt: f32,
+    pub tilt: f32,
     /// Zoom value (0.0 to 1.0).
-    zoom: f32,
+    pub zoom: f32,
 }
 
 impl Position {
     /// Create a new position at home (center, no zoom).
-    fn home() -> Self {
+    pub fn home() -> Self {
         Self {
             pan: 0.0,
             tilt: 0.0,
@@ -46,7 +45,7 @@ impl Position {
     }
 
     /// Convert to PTZ vector.
-    fn to_ptz_vector(&self) -> PTZVector {
+    pub fn to_ptz_vector(&self) -> PTZVector {
         PTZVector {
             pan_tilt: Some(Vector2D {
                 x: self.pan,
@@ -61,7 +60,7 @@ impl Position {
     }
 
     /// Create from PTZ vector.
-    fn from_ptz_vector(vector: &PTZVector) -> Self {
+    pub fn from_ptz_vector(vector: &PTZVector) -> Self {
         let mut pos = Self::default();
         if let Some(pt) = &vector.pan_tilt {
             pos.pan = pt.x;
@@ -74,22 +73,13 @@ impl Position {
     }
 }
 
-/// Internal preset storage.
-#[derive(Debug, Clone)]
-struct PresetData {
-    /// Preset name.
-    name: String,
-    /// Preset position.
-    position: Position,
-}
-
 /// Movement state.
 #[derive(Debug, Clone, Default)]
-struct MovementState {
+pub struct MovementState {
     /// Pan/tilt moving.
-    pan_tilt_moving: bool,
+    pub pan_tilt_moving: bool,
     /// Zoom moving.
-    zoom_moving: bool,
+    pub zoom_moving: bool,
 }
 
 // ============================================================================
@@ -123,10 +113,8 @@ pub struct PTZStateManager {
     movement: RwLock<MovementState>,
     /// Home position.
     home_position: RwLock<Position>,
-    /// Presets (token -> preset data).
-    presets: RwLock<HashMap<String, PresetData>>,
-    /// Next preset number for auto-generated tokens.
-    next_preset_num: RwLock<u32>,
+    /// Preset store (persistent storage).
+    pub(crate) presets: Arc<PresetStore>,
 }
 
 impl PTZStateManager {
@@ -136,14 +124,18 @@ impl PTZStateManager {
             position: RwLock::new(Position::home()),
             movement: RwLock::new(MovementState::default()),
             home_position: RwLock::new(Position::home()),
-            presets: RwLock::new(HashMap::new()),
-            next_preset_num: RwLock::new(1),
+            presets: PresetStore::new_arc(),
         }
     }
 
-    /// Create a new PTZ State Manager with configuration.
-    pub fn with_config(_config: Arc<ConfigRuntime>) -> Self {
-        Self::new()
+    /// Create a new PTZ State Manager with existing preset store.
+    pub fn with_preset_store(presets: Arc<PresetStore>) -> Self {
+        Self {
+            position: RwLock::new(Position::home()),
+            movement: RwLock::new(MovementState::default()),
+            home_position: RwLock::new(Position::home()),
+            presets,
+        }
     }
 
     // ========================================================================
@@ -197,10 +189,20 @@ impl PTZStateManager {
         self.set_moving(false, false);
     }
 
-    /// Check if PTZ is currently moving.
+    /// Check if PTZ is currently moving (any axis).
     pub fn is_moving(&self) -> bool {
         let movement = self.movement.read();
         movement.pan_tilt_moving || movement.zoom_moving
+    }
+
+    /// Check if pan/tilt is currently moving.
+    pub fn is_pan_tilt_moving(&self) -> bool {
+        self.movement.read().pan_tilt_moving
+    }
+
+    /// Check if zoom is currently moving.
+    pub fn is_zoom_moving(&self) -> bool {
+        self.movement.read().zoom_moving
     }
 
     // ========================================================================
@@ -227,36 +229,20 @@ impl PTZStateManager {
     }
 
     // ========================================================================
-    // Preset Management
+    // Preset Management (delegates to PresetStore)
     // ========================================================================
 
     /// Get all presets.
-    pub fn get_presets(&self) -> Vec<PTZPreset> {
-        let presets = self.presets.read();
-        presets
-            .iter()
-            .map(|(token, data)| PTZPreset {
-                token: Some(token.clone()),
-                name: Some(data.name.clone()),
-                ptz_position: Some(data.position.to_ptz_vector()),
-            })
-            .collect()
+    pub fn get_presets(&self) -> Vec<crate::onvif::types::common::PTZPreset> {
+        self.presets.get_all()
     }
 
     /// Get a specific preset.
-    pub fn get_preset(&self, token: &str) -> OnvifResult<PTZPreset> {
-        let presets = self.presets.read();
-        presets
-            .get(token)
-            .map(|data| PTZPreset {
-                token: Some(token.to_string()),
-                name: Some(data.name.clone()),
-                ptz_position: Some(data.position.to_ptz_vector()),
-            })
-            .ok_or_else(|| OnvifError::InvalidArgVal {
-                subcode: "ter:NoPreset".to_string(),
-                reason: format!("Preset '{}' not found", token),
-            })
+    pub fn get_preset(
+        &self,
+        token: &str,
+    ) -> crate::onvif::OnvifResult<crate::onvif::types::common::PTZPreset> {
+        self.presets.get(token)
     }
 
     /// Set a preset at the current position.
@@ -265,79 +251,34 @@ impl PTZStateManager {
     /// If `token` is None, creates a new preset with auto-generated token.
     ///
     /// Returns the preset token.
-    pub fn set_preset(&self, name: String, token: Option<String>) -> OnvifResult<String> {
-        let mut presets = self.presets.write();
-
-        // Check if we're at max presets (for new presets only)
-        if token.is_none() && presets.len() >= MAX_PRESETS as usize {
-            return Err(OnvifError::InvalidArgVal {
-                subcode: "ter:TooManyPresets".to_string(),
-                reason: format!("Maximum of {} presets reached", MAX_PRESETS),
-            });
-        }
-
-        let preset_token = match token {
-            Some(t) => {
-                // Verify preset exists for updates
-                if !presets.contains_key(&t) {
-                    return Err(OnvifError::InvalidArgVal {
-                        subcode: "ter:NoPreset".to_string(),
-                        reason: format!("Preset '{}' not found", t),
-                    });
-                }
-                t
-            }
-            None => {
-                // Generate new token
-                let mut num = self.next_preset_num.write();
-                let new_token = format!("Preset{}", *num);
-                *num += 1;
-                new_token
-            }
-        };
-
-        let current_position = self.position.read().clone();
-        presets.insert(
-            preset_token.clone(),
-            PresetData {
-                name,
-                position: current_position,
-            },
-        );
-
-        Ok(preset_token)
+    pub fn set_preset(
+        &self,
+        name: String,
+        token: Option<String>,
+    ) -> crate::onvif::OnvifResult<String> {
+        let position = self.get_position();
+        self.presets.set_preset(name, position, token)
     }
 
     /// Go to a preset position.
-    pub fn goto_preset(&self, token: &str) -> OnvifResult<()> {
-        let presets = self.presets.read();
-        let preset = presets
-            .get(token)
-            .ok_or_else(|| OnvifError::InvalidArgVal {
-                subcode: "ter:NoPreset".to_string(),
-                reason: format!("Preset '{}' not found", token),
-            })?;
-
-        let position = preset.position.clone();
-        drop(presets);
-
-        let mut pos = self.position.write();
-        *pos = position;
-
+    ///
+    /// The `presets.get()` call returns `NotFound` via `faults::no_preset` when
+    /// the token is unknown. The separate `ok_or_else` below covers the
+    /// defensive case where a preset exists but has no stored position.
+    pub fn goto_preset(&self, token: &str) -> crate::onvif::OnvifResult<()> {
+        let preset = self.presets.get(token)?;
+        let position = preset.ptz_position.ok_or_else(|| {
+            crate::onvif::OnvifError::Internal(
+                "Preset exists but has no stored position".to_string(),
+            )
+        })?;
+        self.set_position(&position);
         Ok(())
     }
 
     /// Remove a preset.
-    pub fn remove_preset(&self, token: &str) -> OnvifResult<()> {
-        let mut presets = self.presets.write();
-        presets
-            .remove(token)
-            .ok_or_else(|| OnvifError::InvalidArgVal {
-                subcode: "ter:NoPreset".to_string(),
-                reason: format!("Preset '{}' not found", token),
-            })?;
-
-        Ok(())
+    pub fn remove_preset(&self, token: &str) -> crate::onvif::OnvifResult<()> {
+        self.presets.remove(token)
     }
 }
 
@@ -354,6 +295,57 @@ impl Default for PTZStateManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ========================================================================
+    // Position Tests
+    // ========================================================================
+
+    #[test]
+    fn test_position_to_ptz_vector() {
+        let pos = Position {
+            pan: 0.5,
+            tilt: -0.3,
+            zoom: 0.7,
+        };
+
+        let vector = pos.to_ptz_vector();
+
+        let pt = vector.pan_tilt.unwrap();
+        assert_eq!(pt.x, 0.5);
+        assert_eq!(pt.y, -0.3);
+
+        let z = vector.zoom.unwrap();
+        assert_eq!(z.x, 0.7);
+    }
+
+    #[test]
+    fn test_position_from_ptz_vector() {
+        let vector = PTZVector {
+            pan_tilt: Some(Vector2D {
+                x: 0.5,
+                y: -0.3,
+                space: None,
+            }),
+            zoom: Some(Vector1D {
+                x: 0.7,
+                space: None,
+            }),
+        };
+
+        let pos = Position::from_ptz_vector(&vector);
+
+        assert_eq!(pos.pan, 0.5);
+        assert_eq!(pos.tilt, -0.3);
+        assert_eq!(pos.zoom, 0.7);
+    }
+
+    #[test]
+    fn test_position_home() {
+        let pos = Position::home();
+        assert_eq!(pos.pan, 0.0);
+        assert_eq!(pos.tilt, 0.0);
+        assert_eq!(pos.zoom, 0.0);
+    }
 
     // ========================================================================
     // State Manager Construction
@@ -379,6 +371,15 @@ mod tests {
     fn test_default_not_moving() {
         let manager = PTZStateManager::new();
         assert!(!manager.is_moving());
+    }
+
+    #[test]
+    fn test_with_preset_store() {
+        let store = PresetStore::new_arc();
+        let manager = PTZStateManager::with_preset_store(store.clone());
+
+        // Should use the provided store
+        assert!(Arc::ptr_eq(&manager.presets, &store));
     }
 
     // ========================================================================
@@ -501,7 +502,7 @@ mod tests {
     }
 
     // ========================================================================
-    // Preset Management
+    // Preset Management (delegation tests)
     // ========================================================================
 
     #[test]

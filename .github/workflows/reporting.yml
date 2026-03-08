@@ -100,7 +100,8 @@ jobs:
       pull-requests: write
     steps:
       - name: Comment PR with Analysis Results
-        uses: actions/github-script@v8
+        uses: actions/github-script@v8  # v8.0.0
+        # SHA: ed597411d8f924073f98dfc5c65a23a2325f34cd
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |

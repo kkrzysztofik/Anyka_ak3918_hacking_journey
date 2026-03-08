@@ -213,7 +213,9 @@ static size_t escape_character(char character, char* output, size_t out_pos, siz
 
   // Check if we have space for the entity
   if (entity && out_pos + entity_len < output_size) {
-    strcpy(output + out_pos, entity);
+    size_t safe_len = (entity_len < output_size - out_pos) ? entity_len : output_size - out_pos - 1;
+    strncpy(output + out_pos, entity, safe_len);
+    output[out_pos + safe_len] = '\0';
     return entity_len;
   }
 

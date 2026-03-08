@@ -52,7 +52,7 @@ graph TD
 - **Web Server**: `axum` (0.8) handles HTTP/1.1 requests.
 - **Routing**: Routes are defined for standard ONVIF endpoints (e.g., `/onvif/device_service`).
 
-### 2.2. Protocol Layer (`src/onvif/soap.rs`, `src/onvif/ws_security.rs`)
+### 2.2. Protocol Layer (`src/onvif/soap/`, `src/onvif/ws_security.rs`)
 
 - **Serialization**: `quick-xml` and `serde` are used for high-performance XML parsing and generation.
 - **SOAP Handling**: A custom `SoapRequest` extractor parses the SOAP Envelope, Header, and Body.
@@ -90,7 +90,7 @@ src/
 │   ├── ptz/        # PTZ service implementation
 │   ├── imaging/    # Imaging service implementation
 │   ├── types/      # Generated/Manual XML data structures
-│   ├── soap.rs     # SOAP envelope handling
+│   ├── soap/        # SOAP envelope handling (modular: model.rs, parse.rs, build.rs)
 │   └── dispatcher.rs # Request routing
 ├── platform/       # Hardware abstraction layer
 └── utils/          # Common utilities (Time, Net, String)

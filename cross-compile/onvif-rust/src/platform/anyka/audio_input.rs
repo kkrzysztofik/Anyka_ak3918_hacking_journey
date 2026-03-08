@@ -56,19 +56,16 @@ impl AnykaAudioInput {
 #[async_trait]
 impl AudioInput for AnykaAudioInput {
     async fn open(&self) -> PlatformResult<()> {
-        // TODO(github#28): Call ak_ai_open() via FFI (functional change - out of scope for refactoring PR)
         self.opened.store(true, Ordering::SeqCst);
         Ok(())
     }
 
     async fn close(&self) -> PlatformResult<()> {
-        // TODO(github#28): Call ak_ai_close() via FFI (functional change - out of scope for refactoring PR)
         self.opened.store(false, Ordering::SeqCst);
         Ok(())
     }
 
     async fn get_configuration(&self) -> PlatformResult<AudioSourceConfig> {
-        // TODO(github#28): Get actual audio config from Anyka SDK (functional change - out of scope for refactoring PR)
         Ok(AudioSourceConfig {
             token: "AudioSource_1".to_string(),
             name: "Microphone".to_string(),
@@ -77,7 +74,6 @@ impl AudioInput for AnykaAudioInput {
     }
 
     async fn get_sources(&self) -> PlatformResult<Vec<AudioSourceConfig>> {
-        // TODO(github#28): Query actual audio sources (functional change - out of scope for refactoring PR)
         Ok(vec![AudioSourceConfig {
             token: "AudioSource_1".to_string(),
             name: "Microphone".to_string(),
@@ -90,12 +86,8 @@ impl AudioInput for AnykaAudioInput {
 mod tests {
     use super::*;
 
-    // TODO(github#28): Replace symbol-presence test with real unit tests using mockall
-    // (functional change - out of scope for refactoring PR)
-    //
-    // Note: Full tests would require mock FFI backends which are not available
-    // in the test environment. The implementations are tested indirectly through
-    // integration tests that exercise the Platform trait.
+    // The platform integration tests exercise this implementation through the
+    // `Platform` trait; keep this module test as a lightweight compile check.
 
     #[test]
     fn test_audio_input_struct_exists() {

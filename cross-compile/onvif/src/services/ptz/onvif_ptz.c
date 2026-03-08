@@ -167,8 +167,10 @@ int onvif_ptz_get_configuration(const char* config_token, struct ptz_configurati
   ONVIF_CHECK_NULL(config);
 
   /* Default PTZ configuration */
-  strcpy(config->token, "PTZConfig0");
-  strcpy(config->name, "PTZ Configuration");
+  strncpy(config->token, "PTZConfig0", sizeof(config->token) - 1);
+  config->token[sizeof(config->token) - 1] = '\0';
+  strncpy(config->name, "PTZ Configuration", sizeof(config->name) - 1);
+  config->name[sizeof(config->name) - 1] = '\0';
   config->use_count = 1;
   strncpy(config->node_token, g_ptz_node.token, sizeof(config->node_token) - 1);
   config->node_token[sizeof(config->node_token) - 1] = '\0';
@@ -225,7 +227,7 @@ int onvif_ptz_get_status(const char* profile_token, struct ptz_status* status) {
   status->move_status.zoom = PTZ_MOVE_IDLE;
 
   /* Error status */
-  strcpy(status->error, "");
+  status->error[0] = '\0';
 
   /* UTC time - simplified */
   time_t now = time(NULL);

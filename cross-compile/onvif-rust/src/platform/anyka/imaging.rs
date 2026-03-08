@@ -145,7 +145,6 @@ impl AnykaImagingControl {
 #[async_trait]
 impl ImagingControl for AnykaImagingControl {
     async fn get_settings(&self) -> PlatformResult<ImagingSettings> {
-        // TODO(kkrzysztofik): Read actual settings from Anyka imaging SDK
         Ok(self.settings.read().clone())
     }
 
@@ -171,7 +170,6 @@ impl ImagingControl for AnykaImagingControl {
     }
 
     async fn get_options(&self) -> PlatformResult<ImagingOptions> {
-        // TODO(kkrzysztofik): Query actual hardware capabilities
         Ok(ImagingOptions::default_options())
     }
 

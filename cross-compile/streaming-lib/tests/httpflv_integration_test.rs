@@ -575,29 +575,36 @@ async fn test_httpflv_stream_identifier_equality() {
 #[tokio::test]
 async fn test_httpflv_buffer_overflow_protection() {
     let mut muxer = FlvMuxer::new();
-    
+
     // Write header
     muxer.write_flv_header(true, true).unwrap();
-    
+
     // Write multiple large tags - should not cause unbounded memory growth
     // Each tag body is limited by u24 max (16,777,215 bytes)
     let large_data = vec![0xAA; 10000]; // 10KB chunks
-    
+
     for i in 0..100 {
         let body_size = large_data.len() as u32;
         let result = muxer.write_flv_tag_header(tag_type::VIDEO, body_size, i * 33);
         assert!(result.is_ok(), "Should handle tag {} without overflow", i);
-        
+
         let body = BytesMut::from(&large_data[..]);
         let body_result = muxer.write_flv_tag_body(body);
-        assert!(body_result.is_ok(), "Should write body {} without overflow", i);
+        assert!(
+            body_result.is_ok(),
+            "Should write body {} without overflow",
+            i
+        );
     }
-    
+
     // Verify buffer size is bounded (not infinite growth)
     let total_size = muxer.writer.len();
     assert!(total_size > 0, "Should have written data");
     // With 100 tags of 10KB + headers, should be ~1MB (bounded)
-    assert!(total_size < 2_000_000, "Buffer should be bounded, not infinite");
+    assert!(
+        total_size < 2_000_000,
+        "Buffer should be bounded, not infinite"
+    );
 }
 
 /// Tests FLV muxer handles maximum tag size gracefully
@@ -605,14 +612,14 @@ async fn test_httpflv_buffer_overflow_protection() {
 async fn test_httpflv_max_tag_size_handling() {
     let mut muxer = FlvMuxer::new();
     muxer.write_flv_header(true, true).unwrap();
-    
+
     // Maximum allowed data size in FLV is 0xFFFFFF (16,777,215 bytes)
     let max_size_data = vec![0x00; 16_777_215];
     let body_size = max_size_data.len() as u32;
-    
+
     let result = muxer.write_flv_tag_header(tag_type::VIDEO, body_size, 0);
     assert!(result.is_ok(), "Should handle maximum tag size");
-    
+
     let body = BytesMut::from(&max_size_data[..]);
     let body_result = muxer.write_flv_tag_body(body);
     assert!(body_result.is_ok(), "Should write maximum body");
@@ -622,7 +629,7 @@ async fn test_httpflv_max_tag_size_handling() {
 #[tokio::test]
 async fn test_httpflv_rejects_oversized_tag() {
     let mut muxer = FlvMuxer::new();
-    
+
     // Try to write tag larger than u24 max + 1
     // The implementation should handle this gracefully - either fail or truncate
     // We test with a smaller "oversized" value that's still valid
@@ -637,19 +644,21 @@ async fn test_httpflv_rejects_oversized_tag() {
 async fn test_httpflv_rapid_successive_writes() {
     let mut muxer = FlvMuxer::new();
     muxer.write_flv_header(true, true).unwrap();
-    
+
     // Rapid writes should not cause unbounded growth
     // We'll write a fixed number of iterations (bounded test)
     let total_writes = 1000;
-    
+
     for i in 0..total_writes {
         let data = BytesMut::from(&[0x01, 0x02, 0x03][..]);
         let body_size = data.len() as u32;
-        
-        muxer.write_flv_tag_header(tag_type::VIDEO, body_size, i).ok();
+
+        muxer
+            .write_flv_tag_header(tag_type::VIDEO, body_size, i)
+            .ok();
         muxer.write_flv_tag_body(data).ok();
     }
-    
+
     // Verify bounded memory usage - 1000 tags * ~14 bytes each = ~14KB
     let final_size = muxer.writer.len();
     assert!(final_size > 0, "Should have written data");
@@ -664,7 +673,7 @@ async fn test_httpflv_rapid_successive_writes() {
 #[tokio::test]
 async fn test_httpflv_write_tag_invalid_type() {
     let mut muxer = FlvMuxer::new();
-    
+
     // Tag type 0 is reserved, 1-18 are valid per FLV spec
     let result = muxer.write_flv_tag_header(0, 100, 0);
     // Should either fail or handle gracefully
@@ -676,14 +685,14 @@ async fn test_httpflv_write_tag_invalid_type() {
 #[tokio::test]
 async fn test_httpflv_write_tag_empty_body() {
     let mut muxer = FlvMuxer::new();
-    
+
     // Write header
     muxer.write_flv_header(true, true).unwrap();
-    
+
     // Write tag with zero-size body
     let result = muxer.write_flv_tag_header(tag_type::VIDEO, 0, 0);
     assert!(result.is_ok(), "Zero-size body should be allowed");
-    
+
     // Write empty body
     let empty_body = BytesMut::new();
     let body_result = muxer.write_flv_tag_body(empty_body);
@@ -694,10 +703,10 @@ async fn test_httpflv_write_tag_empty_body() {
 #[tokio::test]
 async fn test_httpflv_previous_tag_size_zero() {
     let mut muxer = FlvMuxer::new();
-    
+
     let result = muxer.write_previous_tag_size(0);
     assert!(result.is_ok(), "Zero previous tag size should be allowed");
-    
+
     let bytes = muxer.writer.get_current_bytes();
     assert_eq!(bytes.len(), 4);
     assert_eq!(&bytes[..], &[0x00, 0x00, 0x00, 0x00]);
@@ -707,10 +716,10 @@ async fn test_httpflv_previous_tag_size_zero() {
 #[tokio::test]
 async fn test_httpflv_previous_tag_size_max() {
     let mut muxer = FlvMuxer::new();
-    
+
     let result = muxer.write_previous_tag_size(0xFFFFFFFF);
     assert!(result.is_ok(), "Maximum size should be allowed");
-    
+
     let bytes = muxer.writer.get_current_bytes();
     assert_eq!(&bytes[..], &[0xFF, 0xFF, 0xFF, 0xFF]);
 }
@@ -719,11 +728,11 @@ async fn test_httpflv_previous_tag_size_max() {
 #[tokio::test]
 async fn test_httpflv_tag_extreme_timestamp() {
     let mut muxer = FlvMuxer::new();
-    
+
     // Test with maximum u32 timestamp
     let result = muxer.write_flv_tag_header(tag_type::VIDEO, 100, 0xFFFFFFFF);
     assert!(result.is_ok(), "Should handle extreme timestamp");
-    
+
     // Test with timestamp requiring extended byte overflow
     let result2 = muxer.write_flv_tag_header(tag_type::VIDEO, 100, 0x010000000);
     assert!(result2.is_ok(), "Should handle overflow timestamp");
@@ -735,7 +744,7 @@ async fn test_httpflv_demuxer_invalid_header() {
     // Invalid FLV data - not starting with FLV
     let invalid_data = BytesMut::from(&b"INVALID"[..]);
     let mut demuxer = FlvDemuxer::new(invalid_data);
-    
+
     let result = demuxer.read_flv_header();
     assert!(result.is_err(), "Invalid header should return error");
 }
@@ -746,7 +755,7 @@ async fn test_httpflv_demuxer_truncated_data() {
     // Truncated FLV header (less than 9 bytes)
     let truncated_data = BytesMut::from(&b"FLV\x01\x05"[..]);
     let mut demuxer = FlvDemuxer::new(truncated_data);
-    
+
     let result = demuxer.read_flv_header();
     assert!(result.is_err(), "Truncated data should return error");
 }
@@ -759,10 +768,13 @@ async fn test_httpflv_url_path_traversal() {
         "../../../etc/shadow.flv",
         "..\\..\\windows\\system32.flv",
     ];
-    
+
     // These URLs contain path traversal - they should be rejected
     for url in urls_to_reject {
-        assert!(url.contains(".."), "URL should contain path traversal for testing");
+        assert!(
+            url.contains(".."),
+            "URL should contain path traversal for testing"
+        );
         // In real implementation, this would be detected and rejected
     }
 }
@@ -771,7 +783,7 @@ async fn test_httpflv_url_path_traversal() {
 #[tokio::test]
 async fn test_httpflv_url_null_byte_injection() {
     let url_with_null = "/live/stream\x00.flv";
-    
+
     // Should reject null bytes
     assert!(url_with_null.contains('\0'), "Test URL should contain null");
     // Our parsing should reject this
@@ -785,22 +797,22 @@ async fn test_httpflv_client_connection_limit() {
     // Simulate max clients enforcement
     let max_clients = 10;
     let mut active_connections: Vec<String> = Vec::new();
-    
+
     // Add clients up to limit
     for i in 0..max_clients {
         active_connections.push(format!("client_{}", i));
     }
-    
+
     assert_eq!(active_connections.len(), max_clients);
-    
+
     // Try to add exceeding clients
     let extra_clients = active_connections.len() >= max_clients;
     assert!(extra_clients, "Should enforce connection limit");
-    
+
     // Simulate client disconnection
     active_connections.pop();
     assert_eq!(active_connections.len(), max_clients - 1);
-    
+
     // Now can add new client
     active_connections.push(format!("client_new"));
     assert_eq!(active_connections.len(), max_clients);
@@ -813,20 +825,29 @@ async fn test_httpflv_session_cleanup() {
         id: String,
         last_activity: u64,
     }
-    
+
     let mut sessions: Vec<Session> = Vec::new();
-    
+
     // Add some sessions
-    sessions.push(Session { id: "s1".to_string(), last_activity: 100 });
-    sessions.push(Session { id: "s2".to_string(), last_activity: 50 });
-    sessions.push(Session { id: "s3".to_string(), last_activity: 10 });
-    
+    sessions.push(Session {
+        id: "s1".to_string(),
+        last_activity: 100,
+    });
+    sessions.push(Session {
+        id: "s2".to_string(),
+        last_activity: 50,
+    });
+    sessions.push(Session {
+        id: "s3".to_string(),
+        last_activity: 10,
+    });
+
     // Simulate timeout - remove old sessions (last_activity < 30)
     let current_time = 100u64;
     let timeout_threshold = 30u64;
-    
+
     sessions.retain(|s| current_time - s.last_activity < timeout_threshold);
-    
+
     assert_eq!(sessions.len(), 1);
     assert_eq!(sessions[0].id, "s1");
 }

@@ -9,6 +9,14 @@
 //! - Discovery configuration (GetScopes, SetScopes, AddScopes, GetDiscoveryMode, SetDiscoveryMode)
 //! - User management (GetUsers, CreateUsers, DeleteUsers, SetUser)
 //!
+//! # Module Structure
+//!
+//! The service is organized into domain-specific operation modules:
+//! - [`ops::system`] - Device info, capabilities, date/time, system operations
+//! - [`ops::network`] - Network interfaces, hostname, DNS, NTP, protocols
+//! - [`ops::discovery`] - Scopes and discovery mode management
+//! - [`ops::users`] - User management operations
+//!
 //! # User Management
 //!
 //! User management operations require Administrator privileges (except GetUsers):
@@ -29,12 +37,16 @@
 //! - `ter:FixedScope` - Cannot modify fixed scope
 //! - `ter:InvalidNetworkInterface` - Network interface not found
 
-pub mod faults;
-mod handlers;
+pub(crate) mod faults;
+pub(crate) mod ops;
+pub mod service;
+pub(crate) mod state;
+pub(crate) mod store;
 pub mod types;
 pub mod user_types;
+pub(crate) mod validation;
 
-pub use handlers::DeviceService;
+pub use service::DeviceService;
 pub use types::*;
 pub use user_types::*;
 

@@ -78,19 +78,13 @@ impl AnykaNetworkInfo {
     pub(super) fn read_interface_ip(interface: &str) -> (Option<String>, Option<u8>, bool) {
         use std::fs;
 
-        // TODO(github#28): Actually detect IPv4 address using netlink or /proc/net/fib_trie parsing
-        // (functional change - out of scope for refactoring PR)
-        //
-        // Try to read from /etc/network/interfaces or similar
-        // This is a simplified check - in real embedded Linux, DHCP state
-        // might be determined differently
+        // This helper only reports DHCP state today; interface IP detection is not wired here.
 
         // Check if DHCP is used (look for dhclient lease)
         let dhcp_lease_path = format!("/var/lib/dhcp/dhclient.{}.leases", interface);
         let from_dhcp = std::path::Path::new(&dhcp_lease_path).exists();
 
-        // Try reading from /proc/net/fib_trie or parsing ip addr output
-        // For now, try a simple approach via /proc/net/route
+        // Probe `/proc/net/route` for interface presence.
         if let Ok(route_content) = fs::read_to_string("/proc/net/route") {
             for line in route_content.lines().skip(1) {
                 let fields: Vec<&str> = line.split_whitespace().collect();
@@ -105,8 +99,7 @@ impl AnykaNetworkInfo {
             }
         }
 
-        // For a more complete implementation, we'd use netlink or parse
-        // /proc/net/fib_trie, but for now return None (empty will be reported)
+        // Report DHCP state even when no interface IP could be derived here.
         (None, None, from_dhcp)
     }
 

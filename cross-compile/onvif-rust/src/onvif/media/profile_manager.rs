@@ -19,11 +19,10 @@ use crate::config::profiles::{
 use crate::config::{ConfigRuntime, ProfileStorage};
 use crate::onvif::error::{OnvifError, OnvifResult};
 use crate::onvif::types::common::{
-    AudioEncoderConfiguration, AudioSource, AudioSourceConfiguration, FloatRange, IntRange,
-    IntRectangle, MulticastConfiguration, Name, PTZConfiguration, PTZSpeed, PanTiltLimits, Profile,
-    ReferenceToken, Space1DDescription, Space2DDescription, Vector1D, Vector2D,
+    AudioEncoderConfiguration, AudioSource, AudioSourceConfiguration, IntRange, IntRectangle,
+    MulticastConfiguration, Name, PTZConfiguration, Profile, ReferenceToken,
     VideoEncoderConfiguration, VideoRateControl, VideoResolution, VideoSource,
-    VideoSourceConfiguration, ZoomLimits,
+    VideoSourceConfiguration,
 };
 use crate::onvif::types::media::{
     AudioEncoderConfigurationOptions, H264Options, H264Profile, JpegOptions,
@@ -31,29 +30,15 @@ use crate::onvif::types::media::{
 };
 use crate::platform::Resolution;
 
+use super::defaults::{self, ProfileConfig};
 use super::faults::{
     no_config_error, no_profile_error, validate_profile_name, validate_profile_token,
 };
 use super::types::{
     AUDIO_ENCODER_CONFIG_PREFIX, AUDIO_SOURCE_CONFIG_PREFIX, DEFAULT_AUDIO_SOURCE_TOKEN,
-    DEFAULT_PTZ_NODE_TOKEN, DEFAULT_VIDEO_SOURCE_TOKEN, MAX_PROFILES, PROFILE_TOKEN_PREFIX,
-    PTZ_CONFIG_PREFIX, VIDEO_ENCODER_CONFIG_PREFIX, VIDEO_SOURCE_CONFIG_PREFIX,
+    DEFAULT_VIDEO_SOURCE_TOKEN, MAX_PROFILES, PROFILE_TOKEN_PREFIX, VIDEO_ENCODER_CONFIG_PREFIX,
+    VIDEO_SOURCE_CONFIG_PREFIX,
 };
-
-/// Profile configuration read from config file.
-struct ProfileConfig {
-    name: String,
-    width: u32,
-    height: u32,
-    framerate: u32,
-    bitrate: u32,
-    encoding_str: String,
-    profile_str: String,
-    audio_enabled: bool,
-    audio_encoding_str: String,
-    audio_bitrate: u32,
-    audio_sample_rate: u32,
-}
 
 /// Profile Manager for managing media profiles.
 ///
@@ -184,63 +169,23 @@ impl ProfileManager {
     /// If a ConfigRuntime is available, reads profile settings from stream_profile_1..4 sections.
     /// Otherwise, falls back to hardcoded defaults.
     fn initialize_defaults(&self) {
-        // Create default PTZ configuration used by all profiles
         let default_ptz_config = Self::create_default_ptz_configuration();
-
-        // Create default video source with sensor-aware resolution
-        let video_source = VideoSource {
-            token: DEFAULT_VIDEO_SOURCE_TOKEN.to_string(),
-            framerate: 30.0,
-            resolution: VideoResolution {
-                width: self.max_sensor_resolution.width as i32,
-                height: self.max_sensor_resolution.height as i32,
-            },
-            imaging: None,
-            extension: None,
-        };
-        self.video_sources
-            .write()
-            .insert(DEFAULT_VIDEO_SOURCE_TOKEN.to_string(), video_source);
-
-        // Create default audio source
-        let audio_source = AudioSource {
-            token: DEFAULT_AUDIO_SOURCE_TOKEN.to_string(),
-            channels: 1,
-        };
-        self.audio_sources
-            .write()
-            .insert(DEFAULT_AUDIO_SOURCE_TOKEN.to_string(), audio_source);
-
-        // Create default video source configuration with sensor-aware bounds
-        let video_source_config = VideoSourceConfiguration {
-            token: format!("{}0", VIDEO_SOURCE_CONFIG_PREFIX),
-            source_token: DEFAULT_VIDEO_SOURCE_TOKEN.to_string(),
-            name: "VideoSourceConfig_0".to_string(),
-            use_count: 1,
-            view_mode: None,
-            bounds: IntRectangle {
-                x: 0,
-                y: 0,
-                width: self.max_sensor_resolution.width as i32,
-                height: self.max_sensor_resolution.height as i32,
-            },
-            extension: None,
-        };
+        let default_sources = defaults::create_default_sources(self.max_sensor_resolution);
+        self.video_sources.write().insert(
+            DEFAULT_VIDEO_SOURCE_TOKEN.to_string(),
+            default_sources.video_source,
+        );
+        self.audio_sources.write().insert(
+            DEFAULT_AUDIO_SOURCE_TOKEN.to_string(),
+            default_sources.audio_source,
+        );
         self.video_source_configs.write().insert(
             format!("{}0", VIDEO_SOURCE_CONFIG_PREFIX),
-            video_source_config,
+            default_sources.video_source_config,
         );
-
-        // Create default audio source configuration
-        let audio_source_config = AudioSourceConfiguration {
-            token: format!("{}0", AUDIO_SOURCE_CONFIG_PREFIX),
-            source_token: DEFAULT_AUDIO_SOURCE_TOKEN.to_string(),
-            name: "AudioSourceConfig_0".to_string(),
-            use_count: 1,
-        };
         self.audio_source_configs.write().insert(
             format!("{}0", AUDIO_SOURCE_CONFIG_PREFIX),
-            audio_source_config,
+            default_sources.audio_source_config,
         );
 
         // Initialize profiles from configuration (stream_profile_1..4 always exist with defaults).
@@ -337,78 +282,27 @@ impl ProfileManager {
 
     /// Check if a profile is enabled.
     fn is_profile_enabled(config: &ConfigRuntime, profile_num: u32) -> bool {
-        config.read().stream_profile(profile_num).enabled
+        defaults::is_profile_enabled(config, profile_num)
     }
 
     /// Read profile configuration from config.
     fn read_profile_config(config: &ConfigRuntime, profile_num: u32) -> ProfileConfig {
-        let c = config.read();
-        let sp = c.stream_profile(profile_num);
-        ProfileConfig {
-            name: if sp.name.is_empty() {
-                format!("Stream{}", profile_num)
-            } else {
-                sp.name.clone()
-            },
-            width: sp.width,
-            height: sp.height,
-            framerate: sp.framerate,
-            bitrate: sp.bitrate,
-            encoding_str: sp.encoding.clone(),
-            profile_str: sp.profile.clone(),
-            audio_enabled: sp.audio_enabled,
-            audio_encoding_str: sp.audio_encoding.clone(),
-            audio_bitrate: sp.audio_bitrate,
-            audio_sample_rate: sp.audio_sample_rate,
-        }
+        defaults::read_profile_config(config, profile_num)
     }
 
     /// Parse video encoding string.
     fn parse_video_encoding(encoding_str: &str) -> crate::onvif::types::common::VideoEncoding {
-        match encoding_str.to_lowercase().as_str() {
-            "h264" => crate::onvif::types::common::VideoEncoding::H264,
-            "mjpeg" | "jpeg" => crate::onvif::types::common::VideoEncoding::JPEG,
-            "mpeg4" => crate::onvif::types::common::VideoEncoding::MPEG4,
-            _ => {
-                eprintln!(
-                    "[WARN] Unknown video encoding '{}', defaulting to H264",
-                    encoding_str
-                );
-                crate::onvif::types::common::VideoEncoding::H264
-            }
-        }
+        defaults::parse_video_encoding(encoding_str, true)
     }
 
     /// Parse H.264 profile string.
     fn parse_h264_profile(profile_str: &str) -> crate::onvif::types::common::H264Profile {
-        match profile_str.to_lowercase().as_str() {
-            "baseline" => crate::onvif::types::common::H264Profile::Baseline,
-            "main" => crate::onvif::types::common::H264Profile::Main,
-            "high" => crate::onvif::types::common::H264Profile::High,
-            _ => {
-                eprintln!(
-                    "[WARN] Unknown H.264 profile '{}', defaulting to Main",
-                    profile_str
-                );
-                crate::onvif::types::common::H264Profile::Main
-            }
-        }
+        defaults::parse_h264_profile(profile_str, true)
     }
 
     /// Parse audio encoding string.
     fn parse_audio_encoding(encoding_str: &str) -> crate::onvif::types::common::AudioEncoding {
-        match encoding_str.to_lowercase().as_str() {
-            "g711" => crate::onvif::types::common::AudioEncoding::G711,
-            "aac" => crate::onvif::types::common::AudioEncoding::AAC,
-            "g726" => crate::onvif::types::common::AudioEncoding::G726,
-            _ => {
-                eprintln!(
-                    "[WARN] Unknown audio encoding '{}', defaulting to G711",
-                    encoding_str
-                );
-                crate::onvif::types::common::AudioEncoding::G711
-            }
-        }
+        defaults::parse_audio_encoding(encoding_str, true)
     }
 
     /// Create video encoder configuration.
@@ -423,46 +317,16 @@ impl ProfileManager {
         video_encoding: &crate::onvif::types::common::VideoEncoding,
         h264_profile: crate::onvif::types::common::H264Profile,
     ) -> VideoEncoderConfiguration {
-        let token = format!("{}{}", VIDEO_ENCODER_CONFIG_PREFIX, profile_count);
-        VideoEncoderConfiguration {
-            token: token.clone(),
-            name: name.to_string(),
-            use_count: 1,
-            encoding: video_encoding.clone(),
-            resolution: VideoResolution {
-                width: width as i32,
-                height: height as i32,
-            },
-            quality: 0.8,
-            rate_control: Some(VideoRateControl {
-                frame_rate_limit: framerate as i32,
-                encoding_interval: 1,
-                bitrate_limit: bitrate as i32,
-            }),
-            mpeg4: None,
-            h264: if matches!(
-                video_encoding,
-                crate::onvif::types::common::VideoEncoding::H264
-            ) {
-                Some(crate::onvif::types::common::H264Configuration {
-                    gov_length: framerate as i32,
-                    h264_profile,
-                })
-            } else {
-                None
-            },
-            multicast: Some(MulticastConfiguration {
-                address: crate::onvif::types::common::IpAddress {
-                    address_type: crate::onvif::types::common::IpType::IPv4,
-                    ipv4_address: Some("0.0.0.0".to_string()),
-                    ipv6_address: None,
-                },
-                port: 0,
-                ttl: 0,
-                auto_start: false,
-            }),
-            session_timeout: "PT60S".to_string(),
-        }
+        defaults::create_video_encoder_config(
+            profile_count,
+            name,
+            width,
+            height,
+            framerate,
+            bitrate,
+            video_encoding,
+            h264_profile,
+        )
     }
 
     /// Create audio encoder configuration.
@@ -472,26 +336,7 @@ impl ProfileManager {
         sample_rate: u32,
         encoding: crate::onvif::types::common::AudioEncoding,
     ) -> AudioEncoderConfiguration {
-        let token = format!("{}{}", AUDIO_ENCODER_CONFIG_PREFIX, profile_count);
-        AudioEncoderConfiguration {
-            token: token.clone(),
-            name: format!("AudioEncoderConfig_{}", profile_count),
-            use_count: 1,
-            encoding,
-            bitrate: bitrate as i32,
-            sample_rate: sample_rate as i32,
-            multicast: Some(MulticastConfiguration {
-                address: crate::onvif::types::common::IpAddress {
-                    address_type: crate::onvif::types::common::IpType::IPv4,
-                    ipv4_address: Some("0.0.0.0".to_string()),
-                    ipv6_address: None,
-                },
-                port: 0,
-                ttl: 0,
-                auto_start: false,
-            }),
-            session_timeout: "PT60S".to_string(),
-        }
+        defaults::create_audio_encoder_config(profile_count, bitrate, sample_rate, encoding)
     }
 
     /// Create profile from configuration.
@@ -506,212 +351,81 @@ impl ProfileManager {
         audio_encoder_config: Option<AudioEncoderConfiguration>,
         default_ptz_config: &PTZConfiguration,
     ) -> Profile {
-        let profile_token = format!("{}{}", PROFILE_TOKEN_PREFIX, name);
-        Profile {
-            token: profile_token.clone(),
-            fixed: Some(true),
-            name: name.to_string(),
-            video_source_configuration: Some(VideoSourceConfiguration {
-                token: format!("{}0", VIDEO_SOURCE_CONFIG_PREFIX),
-                source_token: DEFAULT_VIDEO_SOURCE_TOKEN.to_string(),
-                name: "VideoSourceConfig_0".to_string(),
-                use_count: (profile_count + 1) as i32,
-                view_mode: None,
-                bounds: IntRectangle {
-                    x: 0,
-                    y: 0,
-                    width: width as i32,
-                    height: height as i32,
-                },
-                extension: None,
-            }),
-            audio_source_configuration: if audio_enabled {
-                Some(AudioSourceConfiguration {
-                    token: format!("{}0", AUDIO_SOURCE_CONFIG_PREFIX),
-                    source_token: DEFAULT_AUDIO_SOURCE_TOKEN.to_string(),
-                    name: "AudioSourceConfig_0".to_string(),
-                    use_count: (profile_count + 1) as i32,
-                })
+        let _ = (width, height);
+        defaults::create_profile(
+            name,
+            profile_count,
+            Some(video_encoder_config),
+            if audio_enabled {
+                audio_encoder_config
             } else {
                 None
             },
-            video_encoder_configuration: Some(video_encoder_config),
-            audio_encoder_configuration: audio_encoder_config,
-            ptz_configuration: Some(default_ptz_config.clone()),
-            metadata_configuration: None,
-            extension: None,
-        }
+            default_ptz_config,
+        )
     }
 
     /// Initialize hardcoded profiles (fallback when no config is available).
     fn initialize_profiles_hardcoded(&self, default_ptz_config: PTZConfiguration) {
-        // Create default video encoder configuration (Main stream - H.264)
-        let video_encoder_config_main = VideoEncoderConfiguration {
-            token: format!("{}0", VIDEO_ENCODER_CONFIG_PREFIX),
-            name: "MainStream".to_string(),
-            use_count: 1,
-            encoding: crate::onvif::types::common::VideoEncoding::H264,
-            resolution: VideoResolution {
-                width: 1920,
-                height: 1080,
-            },
-            quality: 0.8,
-            rate_control: Some(VideoRateControl {
-                frame_rate_limit: 30,
-                encoding_interval: 1,
-                bitrate_limit: 4000,
-            }),
-            mpeg4: None,
-            h264: Some(crate::onvif::types::common::H264Configuration {
-                gov_length: 30,
-                h264_profile: crate::onvif::types::common::H264Profile::Main,
-            }),
-            multicast: Some(MulticastConfiguration {
-                address: crate::onvif::types::common::IpAddress {
-                    address_type: crate::onvif::types::common::IpType::IPv4,
-                    ipv4_address: Some("0.0.0.0".to_string()),
-                    ipv6_address: None,
-                },
-                port: 0,
-                ttl: 0,
-                auto_start: false,
-            }),
-            session_timeout: "PT60S".to_string(),
-        };
+        let video_encoder_config_main = Self::create_video_encoder_config(
+            0,
+            "MainStream",
+            1920,
+            1080,
+            30,
+            4000,
+            &crate::onvif::types::common::VideoEncoding::H264,
+            crate::onvif::types::common::H264Profile::Main,
+        );
         self.video_encoder_configs.write().insert(
             format!("{}0", VIDEO_ENCODER_CONFIG_PREFIX),
             video_encoder_config_main.clone(),
         );
 
-        // Create sub-stream encoder config (lower resolution)
-        let video_encoder_config_sub = VideoEncoderConfiguration {
-            token: format!("{}1", VIDEO_ENCODER_CONFIG_PREFIX),
-            name: "SubStream".to_string(),
-            use_count: 1,
-            encoding: crate::onvif::types::common::VideoEncoding::H264,
-            resolution: VideoResolution {
-                width: 640,
-                height: 480,
-            },
-            quality: 0.5,
-            rate_control: Some(VideoRateControl {
-                frame_rate_limit: 15,
-                encoding_interval: 1,
-                bitrate_limit: 512,
-            }),
-            mpeg4: None,
-            h264: Some(crate::onvif::types::common::H264Configuration {
-                gov_length: 30,
-                h264_profile: crate::onvif::types::common::H264Profile::Baseline,
-            }),
-            multicast: Some(MulticastConfiguration {
-                address: crate::onvif::types::common::IpAddress {
-                    address_type: crate::onvif::types::common::IpType::IPv4,
-                    ipv4_address: Some("0.0.0.0".to_string()),
-                    ipv6_address: None,
-                },
-                port: 0,
-                ttl: 0,
-                auto_start: false,
-            }),
-            session_timeout: "PT60S".to_string(),
-        };
+        let video_encoder_config_sub = Self::create_video_encoder_config(
+            1,
+            "SubStream",
+            640,
+            480,
+            15,
+            512,
+            &crate::onvif::types::common::VideoEncoding::H264,
+            crate::onvif::types::common::H264Profile::Baseline,
+        );
         self.video_encoder_configs.write().insert(
             format!("{}1", VIDEO_ENCODER_CONFIG_PREFIX),
             video_encoder_config_sub.clone(),
         );
 
-        // Create default audio encoder configuration
-        let audio_encoder_config = AudioEncoderConfiguration {
-            token: format!("{}0", AUDIO_ENCODER_CONFIG_PREFIX),
-            name: "AudioEncoderConfig_0".to_string(),
-            use_count: 1,
-            encoding: crate::onvif::types::common::AudioEncoding::G711,
-            bitrate: 64,
-            sample_rate: 8000,
-            multicast: Some(MulticastConfiguration {
-                address: crate::onvif::types::common::IpAddress {
-                    address_type: crate::onvif::types::common::IpType::IPv4,
-                    ipv4_address: Some("0.0.0.0".to_string()),
-                    ipv6_address: None,
-                },
-                port: 0,
-                ttl: 0,
-                auto_start: false,
-            }),
-            session_timeout: "PT60S".to_string(),
-        };
+        let audio_encoder_config = Self::create_audio_encoder_config(
+            0,
+            64,
+            8000,
+            crate::onvif::types::common::AudioEncoding::G711,
+        );
         self.audio_encoder_configs.write().insert(
             format!("{}0", AUDIO_ENCODER_CONFIG_PREFIX),
             audio_encoder_config.clone(),
         );
 
-        // Create default profile (Main Stream)
-        let main_profile = Profile {
-            token: format!("{}MainStream", PROFILE_TOKEN_PREFIX),
-            fixed: Some(true),
-            name: "MainStream".to_string(),
-            video_source_configuration: Some(VideoSourceConfiguration {
-                token: format!("{}0", VIDEO_SOURCE_CONFIG_PREFIX),
-                source_token: DEFAULT_VIDEO_SOURCE_TOKEN.to_string(),
-                name: "VideoSourceConfig_0".to_string(),
-                use_count: 1,
-                view_mode: None,
-                bounds: IntRectangle {
-                    x: 0,
-                    y: 0,
-                    width: 1920,
-                    height: 1080,
-                },
-                extension: None,
-            }),
-            audio_source_configuration: Some(AudioSourceConfiguration {
-                token: format!("{}0", AUDIO_SOURCE_CONFIG_PREFIX),
-                source_token: DEFAULT_AUDIO_SOURCE_TOKEN.to_string(),
-                name: "AudioSourceConfig_0".to_string(),
-                use_count: 1,
-            }),
-            video_encoder_configuration: Some(video_encoder_config_main),
-            audio_encoder_configuration: Some(audio_encoder_config.clone()),
-            ptz_configuration: Some(default_ptz_config.clone()),
-            metadata_configuration: None,
-            extension: None,
-        };
+        let main_profile = defaults::create_profile(
+            "MainStream",
+            0,
+            Some(video_encoder_config_main),
+            Some(audio_encoder_config.clone()),
+            &default_ptz_config,
+        );
         self.profiles
             .write()
             .insert(format!("{}MainStream", PROFILE_TOKEN_PREFIX), main_profile);
 
-        // Create sub-stream profile
-        let sub_profile = Profile {
-            token: format!("{}SubStream", PROFILE_TOKEN_PREFIX),
-            fixed: Some(true),
-            name: "SubStream".to_string(),
-            video_source_configuration: Some(VideoSourceConfiguration {
-                token: format!("{}0", VIDEO_SOURCE_CONFIG_PREFIX),
-                source_token: DEFAULT_VIDEO_SOURCE_TOKEN.to_string(),
-                name: "VideoSourceConfig_0".to_string(),
-                use_count: 2,
-                view_mode: None,
-                bounds: IntRectangle {
-                    x: 0,
-                    y: 0,
-                    width: 640,
-                    height: 480,
-                },
-                extension: None,
-            }),
-            audio_source_configuration: Some(AudioSourceConfiguration {
-                token: format!("{}0", AUDIO_SOURCE_CONFIG_PREFIX),
-                source_token: DEFAULT_AUDIO_SOURCE_TOKEN.to_string(),
-                name: "AudioSourceConfig_0".to_string(),
-                use_count: 2,
-            }),
-            video_encoder_configuration: Some(video_encoder_config_sub),
-            audio_encoder_configuration: Some(audio_encoder_config),
-            ptz_configuration: Some(default_ptz_config),
-            metadata_configuration: None,
-            extension: None,
-        };
+        let sub_profile = defaults::create_profile(
+            "SubStream",
+            1,
+            Some(video_encoder_config_sub),
+            Some(audio_encoder_config),
+            &default_ptz_config,
+        );
         self.profiles
             .write()
             .insert(format!("{}SubStream", PROFILE_TOKEN_PREFIX), sub_profile);
@@ -1735,67 +1449,7 @@ impl ProfileManager {
     /// This provides a standard PTZ configuration that ODM and other clients expect
     /// to see in profiles for PTZ-capable devices.
     fn create_default_ptz_configuration() -> PTZConfiguration {
-        PTZConfiguration {
-            token: format!("{}0", PTZ_CONFIG_PREFIX),
-            name: "DefaultPTZConfig".to_string(),
-            use_count: 2, // Used by both MainStream and SubStream
-            move_ramp: None,
-            preset_ramp: None,
-            preset_tour_ramp: None,
-            node_token: DEFAULT_PTZ_NODE_TOKEN.to_string(),
-            default_absolute_pan_tilt_position_space: Some(
-                "http://www.onvif.org/ver10/tptz/PanTiltSpaces/PositionGenericSpace".to_string(),
-            ),
-            default_absolute_zoom_position_space: Some(
-                "http://www.onvif.org/ver10/tptz/ZoomSpaces/PositionGenericSpace".to_string(),
-            ),
-            default_relative_pan_tilt_translation_space: Some(
-                "http://www.onvif.org/ver10/tptz/PanTiltSpaces/TranslationGenericSpace".to_string(),
-            ),
-            default_relative_zoom_translation_space: Some(
-                "http://www.onvif.org/ver10/tptz/ZoomSpaces/TranslationGenericSpace".to_string(),
-            ),
-            default_continuous_pan_tilt_velocity_space: Some(
-                "http://www.onvif.org/ver10/tptz/PanTiltSpaces/VelocityGenericSpace".to_string(),
-            ),
-            default_continuous_zoom_velocity_space: Some(
-                "http://www.onvif.org/ver10/tptz/ZoomSpaces/VelocityGenericSpace".to_string(),
-            ),
-            default_ptz_speed: Some(PTZSpeed {
-                pan_tilt: Some(Vector2D {
-                    x: 0.5,
-                    y: 0.5,
-                    space: None,
-                }),
-                zoom: Some(Vector1D {
-                    x: 0.5,
-                    space: None,
-                }),
-            }),
-            default_ptz_timeout: Some("PT5S".to_string()),
-            pan_tilt_limits: Some(PanTiltLimits {
-                range: Space2DDescription {
-                    uri: "http://www.onvif.org/ver10/tptz/PanTiltSpaces/PositionGenericSpace"
-                        .to_string(),
-                    x_range: FloatRange {
-                        min: -1.0,
-                        max: 1.0,
-                    },
-                    y_range: FloatRange {
-                        min: -1.0,
-                        max: 1.0,
-                    },
-                },
-            }),
-            zoom_limits: Some(ZoomLimits {
-                range: Space1DDescription {
-                    uri: "http://www.onvif.org/ver10/tptz/ZoomSpaces/PositionGenericSpace"
-                        .to_string(),
-                    x_range: FloatRange { min: 0.0, max: 1.0 },
-                },
-            }),
-            extension: None,
-        }
+        defaults::create_default_ptz_configuration()
     }
 }
 

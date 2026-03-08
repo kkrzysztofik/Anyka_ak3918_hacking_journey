@@ -3,6 +3,9 @@
 //! This module defines faults specific to the Device Service operations
 //! as defined in the ONVIF Device Management WSDL specification.
 
+#![cfg_attr(not(test), allow(dead_code))]
+
+pub use super::validation::{validate_hostname, validate_scope};
 use crate::onvif::error::OnvifError;
 
 // ============================================================================
@@ -14,49 +17,9 @@ use crate::onvif::error::OnvifError;
 /// Used when SetHostname is called with an invalid hostname format.
 pub fn invalid_hostname(reason: &str) -> OnvifError {
     OnvifError::InvalidArgVal {
-        subcode: "ter:InvalidHostname".to_string(),
+        subcode: "InvalidHostname".to_string(),
         reason: format!("Invalid hostname: {}", reason),
     }
-}
-
-/// Validate a hostname according to RFC 1123.
-///
-/// Returns Ok(()) if valid, or an OnvifError if invalid.
-pub fn validate_hostname(name: &str) -> Result<(), OnvifError> {
-    // Check length
-    if name.is_empty() {
-        return Err(invalid_hostname("hostname cannot be empty"));
-    }
-    if name.len() > 63 {
-        return Err(invalid_hostname("hostname too long (max 63 characters)"));
-    }
-
-    // Check characters (alphanumeric and hyphens only, no leading/trailing hyphens)
-    let chars: Vec<char> = name.chars().collect();
-
-    if chars[0] == '-' || chars[chars.len() - 1] == '-' {
-        return Err(invalid_hostname(
-            "hostname cannot start or end with a hyphen",
-        ));
-    }
-
-    for c in &chars {
-        if !c.is_ascii_alphanumeric() && *c != '-' {
-            return Err(invalid_hostname(&format!(
-                "hostname contains invalid character: '{}'",
-                c
-            )));
-        }
-    }
-
-    // Must start with alphanumeric
-    if !chars[0].is_ascii_alphanumeric() {
-        return Err(invalid_hostname(
-            "hostname must start with a letter or digit",
-        ));
-    }
-
-    Ok(())
 }
 
 // ============================================================================
@@ -68,7 +31,7 @@ pub fn validate_hostname(name: &str) -> Result<(), OnvifError> {
 /// Used when SetNetworkInterfaces is called with unsupported settings.
 pub fn unsupported_network_config(reason: &str) -> OnvifError {
     OnvifError::InvalidArgVal {
-        subcode: "ter:InvalidNetworkInterface".to_string(),
+        subcode: "InvalidNetworkInterface".to_string(),
         reason: format!("Unsupported network configuration: {}", reason),
     }
 }
@@ -78,7 +41,7 @@ pub fn unsupported_network_config(reason: &str) -> OnvifError {
 /// Used when an operation references a non-existent network interface.
 pub fn network_interface_not_found(token: &str) -> OnvifError {
     OnvifError::InvalidArgVal {
-        subcode: "ter:InvalidNetworkInterface".to_string(),
+        subcode: "InvalidNetworkInterface".to_string(),
         reason: format!("Network interface '{}' not found", token),
     }
 }
@@ -92,7 +55,7 @@ pub fn network_interface_not_found(token: &str) -> OnvifError {
 /// Used when SetScopes/AddScopes is called with an invalid scope URI.
 pub fn invalid_scope(reason: &str) -> OnvifError {
     OnvifError::InvalidArgVal {
-        subcode: "ter:InvalidScope".to_string(),
+        subcode: "InvalidScope".to_string(),
         reason: format!("Invalid scope: {}", reason),
     }
 }
@@ -102,7 +65,7 @@ pub fn invalid_scope(reason: &str) -> OnvifError {
 /// Used when trying to remove or modify a fixed scope.
 pub fn fixed_scope(scope: &str) -> OnvifError {
     OnvifError::InvalidArgVal {
-        subcode: "ter:FixedScope".to_string(),
+        subcode: "FixedScope".to_string(),
         reason: format!("Scope '{}' is fixed and cannot be modified", scope),
     }
 }
@@ -112,34 +75,9 @@ pub fn fixed_scope(scope: &str) -> OnvifError {
 /// Used when SetScopes would remove required scopes.
 pub fn scope_overwrite(reason: &str) -> OnvifError {
     OnvifError::InvalidArgVal {
-        subcode: "ter:ScopeOverwrite".to_string(),
+        subcode: "ScopeOverwrite".to_string(),
         reason: reason.to_string(),
     }
-}
-
-/// Validate a scope URI.
-///
-/// Scopes must be valid URIs starting with "onvif://www.onvif.org/".
-pub fn validate_scope(scope: &str) -> Result<(), OnvifError> {
-    if scope.is_empty() {
-        return Err(invalid_scope("scope cannot be empty"));
-    }
-
-    // Scopes should be valid URIs
-    if !scope.starts_with("onvif://www.onvif.org/") {
-        return Err(invalid_scope(
-            "scope must start with 'onvif://www.onvif.org/'",
-        ));
-    }
-
-    // Check for invalid characters (basic URI validation)
-    for c in scope.chars() {
-        if c.is_control() || c == ' ' {
-            return Err(invalid_scope("scope contains invalid characters"));
-        }
-    }
-
-    Ok(())
 }
 
 // ============================================================================
@@ -151,7 +89,7 @@ pub fn validate_scope(scope: &str) -> Result<(), OnvifError> {
 /// Used when SetDiscoveryMode is called with an invalid mode value.
 pub fn invalid_discovery_mode(mode: &str) -> OnvifError {
     OnvifError::InvalidArgVal {
-        subcode: "ter:InvalidDiscoveryMode".to_string(),
+        subcode: "InvalidDiscoveryMode".to_string(),
         reason: format!(
             "Invalid discovery mode: '{}'. Must be 'Discoverable' or 'NonDiscoverable'",
             mode
@@ -168,7 +106,7 @@ pub fn invalid_discovery_mode(mode: &str) -> OnvifError {
 /// Used when SetSystemDateAndTime is called with invalid date/time values.
 pub fn invalid_datetime(reason: &str) -> OnvifError {
     OnvifError::InvalidArgVal {
-        subcode: "ter:InvalidDateTime".to_string(),
+        subcode: "InvalidDateTime".to_string(),
         reason: format!("Invalid date/time: {}", reason),
     }
 }
@@ -178,7 +116,7 @@ pub fn invalid_datetime(reason: &str) -> OnvifError {
 /// Used when an invalid timezone is specified.
 pub fn invalid_timezone(tz: &str) -> OnvifError {
     OnvifError::InvalidArgVal {
-        subcode: "ter:InvalidTimeZone".to_string(),
+        subcode: "InvalidTimeZone".to_string(),
         reason: format!("Invalid timezone: {}", tz),
     }
 }
@@ -258,17 +196,17 @@ mod tests {
     fn test_fault_messages() {
         let err = invalid_hostname("test reason");
         assert!(
-            matches!(err, OnvifError::InvalidArgVal { subcode, .. } if subcode == "ter:InvalidHostname")
+            matches!(err, OnvifError::InvalidArgVal { subcode, .. } if subcode == "InvalidHostname")
         );
 
         let err = invalid_scope("test scope");
         assert!(
-            matches!(err, OnvifError::InvalidArgVal { subcode, .. } if subcode == "ter:InvalidScope")
+            matches!(err, OnvifError::InvalidArgVal { subcode, .. } if subcode == "InvalidScope")
         );
 
         let err = network_interface_not_found("eth0");
         assert!(
-            matches!(err, OnvifError::InvalidArgVal { subcode, .. } if subcode == "ter:InvalidNetworkInterface")
+            matches!(err, OnvifError::InvalidArgVal { subcode, .. } if subcode == "InvalidNetworkInterface")
         );
     }
 
@@ -276,7 +214,7 @@ mod tests {
     fn test_unsupported_network_config() {
         let err = unsupported_network_config("IPv6 not supported");
         assert!(
-            matches!(err, OnvifError::InvalidArgVal { ref subcode, .. } if subcode == "ter:InvalidNetworkInterface")
+            matches!(err, OnvifError::InvalidArgVal { ref subcode, .. } if subcode == "InvalidNetworkInterface")
         );
         assert!(err.to_string().contains("IPv6 not supported"));
     }
@@ -285,7 +223,7 @@ mod tests {
     fn test_network_interface_not_found() {
         let err = network_interface_not_found("eth99");
         assert!(
-            matches!(err, OnvifError::InvalidArgVal { ref subcode, .. } if subcode == "ter:InvalidNetworkInterface")
+            matches!(err, OnvifError::InvalidArgVal { ref subcode, .. } if subcode == "InvalidNetworkInterface")
         );
         assert!(err.to_string().contains("eth99"));
     }
@@ -294,7 +232,7 @@ mod tests {
     fn test_fixed_scope() {
         let err = fixed_scope("onvif://www.onvif.org/type/video_encoder");
         assert!(
-            matches!(err, OnvifError::InvalidArgVal { ref subcode, .. } if subcode == "ter:FixedScope")
+            matches!(err, OnvifError::InvalidArgVal { ref subcode, .. } if subcode == "FixedScope")
         );
         assert!(err.to_string().contains("fixed and cannot be modified"));
     }
@@ -303,7 +241,7 @@ mod tests {
     fn test_scope_overwrite() {
         let err = scope_overwrite("Cannot remove required scope");
         assert!(
-            matches!(err, OnvifError::InvalidArgVal { ref subcode, .. } if subcode == "ter:ScopeOverwrite")
+            matches!(err, OnvifError::InvalidArgVal { ref subcode, .. } if subcode == "ScopeOverwrite")
         );
         assert!(err.to_string().contains("Cannot remove required scope"));
     }
@@ -312,7 +250,7 @@ mod tests {
     fn test_invalid_discovery_mode() {
         let err = invalid_discovery_mode("invalid");
         assert!(
-            matches!(err, OnvifError::InvalidArgVal { ref subcode, .. } if subcode == "ter:InvalidDiscoveryMode")
+            matches!(err, OnvifError::InvalidArgVal { ref subcode, .. } if subcode == "InvalidDiscoveryMode")
         );
         assert!(err.to_string().contains("invalid"));
         assert!(err.to_string().contains("Discoverable"));
@@ -322,7 +260,7 @@ mod tests {
     fn test_invalid_datetime() {
         let err = invalid_datetime("year out of range");
         assert!(
-            matches!(err, OnvifError::InvalidArgVal { ref subcode, .. } if subcode == "ter:InvalidDateTime")
+            matches!(err, OnvifError::InvalidArgVal { ref subcode, .. } if subcode == "InvalidDateTime")
         );
         assert!(err.to_string().contains("year out of range"));
     }
@@ -331,7 +269,7 @@ mod tests {
     fn test_invalid_timezone() {
         let err = invalid_timezone("GMT+99");
         assert!(
-            matches!(err, OnvifError::InvalidArgVal { ref subcode, .. } if subcode == "ter:InvalidTimeZone")
+            matches!(err, OnvifError::InvalidArgVal { ref subcode, .. } if subcode == "InvalidTimeZone")
         );
         assert!(err.to_string().contains("GMT+99"));
     }

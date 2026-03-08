@@ -17,6 +17,13 @@
 //! use crate::onvif::common::soap::SoapEnvelope;
 //! ```
 //!
+//! # New in Phase 0
+//!
+//! Additional common utilities were added in Phase 0 of the refactoring:
+//! - `validation` — Shared token and range validators
+//! - `faults` — SOAP fault builder helpers
+//! - `dispatch` — Dispatch boilerplate helpers
+//!
 //! # What is NOT included
 //!
 //! Service-specific modules are NOT part of common:
@@ -33,6 +40,25 @@ pub use super::server;
 pub use super::soap;
 pub use super::types;
 pub use super::ws_security;
+
+// New Phase 0 modules
+mod dispatch;
+mod faults;
+mod service_capabilities;
+mod validation;
+
+// Re-export new modules for external use
+pub use dispatch::{dispatch_async, dispatch_sync};
+pub use faults::{
+    action_not_supported, hardware_failure, invalid_token, invalid_video_source, no_entity,
+    out_of_range,
+};
+pub use service_capabilities::{
+    GetServiceCapabilities, GetServiceCapabilitiesResponse as SharedGetServiceCapabilitiesResponse,
+};
+pub use validation::{
+    validate_max_length, validate_range_f32, validate_range_i32, validate_reference_token,
+};
 
 #[cfg(test)]
 mod tests {
@@ -156,5 +182,84 @@ mod tests {
         let version = types::OnvifVersion { major: 2, minor: 0 };
         assert_eq!(version.major, 2);
         assert_eq!(version.minor, 0);
+    }
+
+    // Tests for new Phase 0 modules
+
+    /// Test validation module functions are accessible
+    #[test]
+    fn test_validation_module_exports() {
+        // validate_reference_token
+        assert!(validate_reference_token("valid_token", "test").is_ok());
+        assert!(validate_reference_token("", "test").is_err());
+
+        // validate_range_f32
+        assert!(validate_range_f32(50.0, 0.0, 100.0, "test").is_ok());
+        assert!(validate_range_f32(-1.0, 0.0, 100.0, "test").is_err());
+
+        // validate_range_i32
+        assert!(validate_range_i32(5, 1, 10, "test").is_ok());
+        assert!(validate_range_i32(0, 1, 10, "test").is_err());
+
+        // validate_max_length
+        assert!(validate_max_length("short", 64, "test").is_ok());
+        assert!(validate_max_length("a".repeat(100).as_str(), 64, "test").is_err());
+    }
+
+    /// Test faults module functions are accessible
+    #[test]
+    fn test_faults_module_exports() {
+        // invalid_token
+        let err = invalid_token("ProfileToken", "BadToken");
+        assert!(err.to_string().contains("ProfileToken"));
+
+        // no_entity
+        let err = no_entity("ter:NotFound", "profile", "Token123");
+        assert!(err.to_string().contains("profile"));
+
+        // action_not_supported
+        let err = action_not_supported("GetUnknown");
+        assert!(err.to_string().contains("GetUnknown"));
+
+        // out_of_range
+        let err = out_of_range("brightness", 150.0, 0.0, 100.0);
+        assert!(err.to_string().contains("brightness"));
+
+        // hardware_failure
+        let err = hardware_failure("PTZ", "Motor stuck");
+        assert!(err.to_string().contains("PTZ"));
+    }
+
+    /// Test dispatch module functions are accessible
+    #[test]
+    fn test_dispatch_module_exports() {
+        // dispatch_sync should be callable (function type exists)
+        fn _test_fn(
+            _req: crate::onvif::common::dispatch::TestRequestDispatch,
+        ) -> crate::onvif::OnvifResult<crate::onvif::common::dispatch::TestResponseDispatch>
+        {
+            Ok(crate::onvif::common::dispatch::TestResponseDispatch {
+                result: "ok".to_string(),
+            })
+        }
+        // Function exists and has correct signature
+        let _handler: fn(
+            crate::onvif::common::dispatch::TestRequestDispatch,
+        ) -> crate::onvif::OnvifResult<
+            crate::onvif::common::dispatch::TestResponseDispatch,
+        > = _test_fn;
+
+        // Test that the dispatch functions exist and can be used
+        // We test actual functionality in the dispatch module's own tests
+        // Here we just verify the types work
+        let test_request = crate::onvif::common::dispatch::TestRequestDispatch {
+            value: Some("test".to_string()),
+        };
+        let _request = test_request;
+
+        let test_response = crate::onvif::common::dispatch::TestResponseDispatch {
+            result: "test".to_string(),
+        };
+        let _response = test_response;
     }
 }

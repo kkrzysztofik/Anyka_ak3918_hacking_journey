@@ -320,7 +320,9 @@ mod tests {
 
     #[test]
     fn test_profile_storage_load_nonexistent_file() {
-        let storage = ProfileStorage::new("/nonexistent/profiles.toml");
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("does_not_exist.toml");
+        let storage = ProfileStorage::new(&path);
         let result = storage.load();
         assert!(result.is_ok());
         assert!(storage.is_empty());

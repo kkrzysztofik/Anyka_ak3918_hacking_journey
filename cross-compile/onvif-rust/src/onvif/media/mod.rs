@@ -8,6 +8,24 @@
 //! - Stream URI generation (GetStreamUri)
 //! - Snapshot URI generation (GetSnapshotUri)
 //!
+//! # Architecture
+//!
+//! The Media service is organized into the following modules:
+//! - `service.rs` - Main MediaService struct and SOAP handler implementation
+//! - `ops/` - Domain-specific operation handlers
+//!   - `profiles.rs` - Profile management operations
+//!   - `video_sources.rs` - Video source operations
+//!   - `video_encoders.rs` - Video encoder operations
+//!   - `audio.rs` - Audio operations
+//!   - `streaming.rs` - Stream URI operations
+//!   - `capabilities.rs` - Service capabilities
+//! - `state.rs` - In-memory state management with RwLock
+//! - `store.rs` - Persistence and data conversion
+//! - `validation.rs` - Input validation functions
+//! - `faults.rs` - ONVIF fault codes and error helpers
+//! - `types.rs` - Type constants and definitions
+//! - `profile_manager.rs` - ProfileManager facade
+//!
 //! # User Stories
 //!
 //! **User Story 2 (P1)**: Media Service operations for profile and stream configuration.
@@ -30,13 +48,19 @@
 //! - `ter:InvalidArgVal` - Invalid argument value
 //! - `ter:ConfigurationConflict` - Configuration conflict detected
 
+mod defaults;
 pub mod faults;
-mod handlers;
+pub(crate) mod ops;
 pub mod profile_manager;
+pub mod service;
+pub(crate) mod state;
+pub(crate) mod store;
 pub mod types;
+pub(crate) mod validation;
 
-pub use handlers::MediaService;
+// Re-export for public API
 pub use profile_manager::ProfileManager;
+pub use service::MediaService;
 pub use types::*;
 
 // Re-export WSDL types for media operations

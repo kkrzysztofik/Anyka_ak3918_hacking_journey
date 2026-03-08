@@ -1179,8 +1179,7 @@ pub struct RtspServerSession {
     /// at session creation time (every N packets to log, 0 = disabled).
     rtp_sample_interval: u32,
 
-    /// Streaming configuration (stored for access in handle_play)
-    /// TODO: Use config in session methods for streaming behavior
+    /// Streaming configuration for session setup and playback.
     #[allow(dead_code)]
     config: StreamingConfig,
 

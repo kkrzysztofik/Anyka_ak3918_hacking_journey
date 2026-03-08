@@ -38,7 +38,8 @@ int rtsp_auth_init(struct rtsp_auth_config* auth_config) {
   auth_config->auth_type = RTSP_AUTH_NONE;
   auth_config->enabled = false;
   auth_config->users = NULL;
-  strcpy(auth_config->realm, "RTSP Server");
+  strncpy(auth_config->realm, "RTSP Server", sizeof(auth_config->realm) - 1);
+  auth_config->realm[sizeof(auth_config->realm) - 1] = '\0';
 
   return 0;
 }
@@ -256,7 +257,8 @@ static int parse_digest_credentials(const char* credentials, char* username, cha
   if (!credentials_copy) {
     return -1;
   }
-  strcpy(credentials_copy, credentials);
+  strncpy(credentials_copy, credentials, len);
+  credentials_copy[len] = '\0';
 
   char* token = strtok(credentials_copy, ",");
   while (token) {

@@ -244,7 +244,7 @@ async fn test_service_stream_identifiers() {
             panic!("Expected RTSP identifier");
         }
     }
-    
+
     // Unknown stream
     let unknown_stream = StreamIdentifier::Unknown;
     match unknown_stream {
@@ -559,7 +559,7 @@ async fn test_service_max_clients_enforcement() {
         max_clients: usize,
         active_clients: Vec<String>,
     }
-    
+
     impl ClientManager {
         fn new(max_clients: usize) -> Self {
             Self {
@@ -567,7 +567,7 @@ async fn test_service_max_clients_enforcement() {
                 active_clients: Vec::new(),
             }
         }
-        
+
         fn try_add_client(&mut self, client_id: &str) -> Result<(), String> {
             if self.active_clients.len() >= self.max_clients {
                 return Err("max clients reached".to_string());
@@ -575,26 +575,26 @@ async fn test_service_max_clients_enforcement() {
             self.active_clients.push(client_id.to_string());
             Ok(())
         }
-        
+
         fn remove_client(&mut self, client_id: &str) {
             self.active_clients.retain(|c| c != client_id);
         }
     }
-    
+
     let max_clients = 5;
     let mut manager = ClientManager::new(max_clients);
-    
+
     // Add clients up to limit
     for i in 0..max_clients {
         let result = manager.try_add_client(&format!("client_{}", i));
         assert!(result.is_ok(), "Should add client {} up to limit", i);
     }
-    
+
     // Try to exceed limit
     let result = manager.try_add_client("excess_client");
     assert!(result.is_err(), "Should reject excess client");
     assert_eq!(manager.active_clients.len(), max_clients);
-    
+
     // Remove a client and try again
     manager.remove_client("client_0");
     let result2 = manager.try_add_client("new_client");
@@ -607,12 +607,12 @@ async fn test_service_max_clients_enforcement() {
 async fn test_service_buffer_overflow_protection() {
     // Simulate bounded buffer for streaming
     const MAX_BUFFER_SIZE: usize = 64 * 1024; // 64KB max
-    
+
     struct BoundedBuffer {
         data: Vec<u8>,
         max_size: usize,
     }
-    
+
     impl BoundedBuffer {
         fn new(max_size: usize) -> Self {
             Self {
@@ -620,7 +620,7 @@ async fn test_service_buffer_overflow_protection() {
                 max_size,
             }
         }
-        
+
         fn write(&mut self, data: &[u8]) -> Result<(), String> {
             if self.data.len() + data.len() > self.max_size {
                 return Err("buffer overflow".to_string());
@@ -628,18 +628,18 @@ async fn test_service_buffer_overflow_protection() {
             self.data.extend_from_slice(data);
             Ok(())
         }
-        
+
         fn len(&self) -> usize {
             self.data.len()
         }
     }
-    
+
     let mut buffer = BoundedBuffer::new(MAX_BUFFER_SIZE);
-    
+
     // Write data up to limit
     let chunk_size = 1024;
     let mut write_count = 0;
-    
+
     while buffer.len() < MAX_BUFFER_SIZE {
         let chunk = vec![0xAA; chunk_size];
         let result = buffer.write(&chunk);
@@ -648,10 +648,13 @@ async fn test_service_buffer_overflow_protection() {
         }
         write_count += 1;
     }
-    
+
     // Verify buffer didn't exceed limit
-    assert!(buffer.len() <= MAX_BUFFER_SIZE, "Buffer should not exceed max size");
-    
+    assert!(
+        buffer.len() <= MAX_BUFFER_SIZE,
+        "Buffer should not exceed max size"
+    );
+
     // Try to write beyond limit - should fail
     let excess_data = vec![0xBB; chunk_size];
     let result = buffer.write(&excess_data);
@@ -666,12 +669,12 @@ async fn test_service_idle_session_timeout() {
         id: String,
         last_ping: u64,
     }
-    
+
     struct SessionManager {
         sessions: Vec<Session>,
         timeout_ms: u64,
     }
-    
+
     impl SessionManager {
         fn new(timeout_ms: u64) -> Self {
             Self {
@@ -679,41 +682,42 @@ async fn test_service_idle_session_timeout() {
                 timeout_ms,
             }
         }
-        
+
         fn add_session(&mut self, id: &str, timestamp: u64) {
             self.sessions.push(Session {
                 id: id.to_string(),
                 last_ping: timestamp,
             });
         }
-        
+
         fn cleanup_idle(&mut self, current_time: u64) -> usize {
             let before = self.sessions.len();
-            self.sessions.retain(|s| current_time.saturating_sub(s.last_ping) < self.timeout_ms);
+            self.sessions
+                .retain(|s| current_time.saturating_sub(s.last_ping) < self.timeout_ms);
             before - self.sessions.len()
         }
-        
+
         fn session_count(&self) -> usize {
             self.sessions.len()
         }
     }
-    
+
     let timeout_ms = 1000u64;
     let mut manager = SessionManager::new(timeout_ms);
-    
+
     // Add sessions with different last_ping times
-    manager.add_session("session1", 0);      // Age: 1000ms (at limit)
-    manager.add_session("session2", 500);    // Age: 500ms (active)
-    manager.add_session("session3", 900);    // Age: 100ms (active)
-    manager.add_session("session4", 2000);   // Age: 0ms (newest)
-    
+    manager.add_session("session1", 0); // Age: 1000ms (at limit)
+    manager.add_session("session2", 500); // Age: 500ms (active)
+    manager.add_session("session3", 900); // Age: 100ms (active)
+    manager.add_session("session4", 2000); // Age: 0ms (newest)
+
     assert_eq!(manager.session_count(), 4);
-    
+
     // Cleanup at time=1000 - sessions older than 1000ms should be removed
     let removed = manager.cleanup_idle(1000);
     assert_eq!(removed, 1, "Should remove 1 idle session");
     assert_eq!(manager.session_count(), 3);
-    
+
     // Verify correct sessions remain
     assert!(manager.sessions.iter().any(|s| s.id == "session2"));
     assert!(manager.sessions.iter().any(|s| s.id == "session3"));
@@ -727,12 +731,12 @@ async fn test_service_resource_cleanup_on_shutdown() {
         id: u32,
         allocated: bool,
     }
-    
+
     struct Service {
         resources: Vec<Resource>,
         is_shutting_down: bool,
     }
-    
+
     impl Service {
         fn new() -> Self {
             Self {
@@ -740,11 +744,14 @@ async fn test_service_resource_cleanup_on_shutdown() {
                 is_shutting_down: false,
             }
         }
-        
+
         fn allocate(&mut self, id: u32) {
-            self.resources.push(Resource { id, allocated: true });
+            self.resources.push(Resource {
+                id,
+                allocated: true,
+            });
         }
-        
+
         fn shutdown(&mut self) {
             self.is_shutting_down = true;
             // Release all resources
@@ -752,21 +759,21 @@ async fn test_service_resource_cleanup_on_shutdown() {
                 resource.allocated = false;
             }
         }
-        
+
         fn allocated_count(&self) -> usize {
             self.resources.iter().filter(|r| r.allocated).count()
         }
     }
-    
+
     let mut service = Service::new();
-    
+
     // Allocate resources
     for i in 0..10 {
         service.allocate(i);
     }
-    
+
     assert_eq!(service.allocated_count(), 10);
-    
+
     // Shutdown should release all resources
     service.shutdown();
     assert_eq!(service.allocated_count(), 0);
@@ -780,7 +787,7 @@ async fn test_service_connection_rate_limiting() {
         max_connections_per_second: usize,
         connection_timestamps: Vec<u64>,
     }
-    
+
     impl RateLimiter {
         fn new(max_per_second: usize) -> Self {
             Self {
@@ -788,32 +795,33 @@ async fn test_service_connection_rate_limiting() {
                 connection_timestamps: Vec::new(),
             }
         }
-        
+
         fn try_connect(&mut self, timestamp: u64) -> Result<(), String> {
             // Remove old timestamps (older than 1 second)
-            self.connection_timestamps.retain(|t| timestamp.saturating_sub(*t) < 1000);
-            
+            self.connection_timestamps
+                .retain(|t| timestamp.saturating_sub(*t) < 1000);
+
             if self.connection_timestamps.len() >= self.max_connections_per_second {
                 return Err("rate limit exceeded".to_string());
             }
-            
+
             self.connection_timestamps.push(timestamp);
             Ok(())
         }
-        
+
         fn current_rate(&self) -> usize {
             self.connection_timestamps.len()
         }
     }
-    
+
     let mut limiter = RateLimiter::new(10); // 10 connections per second max
-    
+
     // Connect up to limit
     for i in 0..10 {
         let result = limiter.try_connect(i * 100);
         assert!(result.is_ok(), "Should allow connection {}", i);
     }
-    
+
     // Try to connect after 1 second has passed (timestamp >= 1000)
     // This should succeed since old connections are cleaned up
     let result = limiter.try_connect(1000);
@@ -822,7 +830,7 @@ async fn test_service_connection_rate_limiting() {
     if result.is_err() {
         // That's fine too - it's within 1 second window
     }
-    
+
     // Now wait 2 seconds - old connections should be cleaned
     let result2 = limiter.try_connect(2000);
     assert!(result2.is_ok(), "Should allow after old connections expire");
@@ -837,13 +845,13 @@ async fn test_service_connection_rate_limiting() {
 async fn test_service_publish_to_nonexistent_stream() {
     // Simulate hub with no streams
     let hub = StreamsHub::new(None);
-    
+
     // Try to publish to stream that doesn't exist
     // The hub should handle this gracefully without panic
     let stream_id = StreamIdentifier::Rtsp {
         stream_path: "/nonexistent/stream".to_string(),
     };
-    
+
     // Just verify hub can handle this without panic
     // In real implementation, this would return an error
     assert!(matches!(stream_id, StreamIdentifier::Rtsp { .. }));
@@ -856,7 +864,7 @@ async fn test_service_subscribe_to_nonexistent_stream() {
     let stream_id = StreamIdentifier::Rtsp {
         stream_path: "/does/not/exist".to_string(),
     };
-    
+
     // Verify stream ID is valid type
     match stream_id {
         StreamIdentifier::Rtsp { stream_path } => {
@@ -870,18 +878,21 @@ async fn test_service_subscribe_to_nonexistent_stream() {
 #[tokio::test]
 async fn test_service_hub_error_handling() {
     // Test various error scenarios
-    
+
     // 1. Empty stream name error
     let empty_stream = StreamIdentifier::Rtsp {
         stream_path: "".to_string(),
     };
     match empty_stream {
         StreamIdentifier::Rtsp { stream_path } => {
-            assert!(stream_path.is_empty(), "Should allow empty path (handled elsewhere)");
+            assert!(
+                stream_path.is_empty(),
+                "Should allow empty path (handled elsewhere)"
+            );
         }
         StreamIdentifier::Unknown => {}
     }
-    
+
     // 2. Invalid stream path format
     let invalid_path = StreamIdentifier::Rtsp {
         stream_path: "   ".to_string(),
@@ -899,16 +910,16 @@ async fn test_service_hub_error_handling() {
 #[tokio::test]
 async fn test_service_unique_id_no_duplicates() {
     use streaming_lib::hub::utils::{RandomDigitCount, Uuid};
-    
+
     // Generate many IDs and check for uniqueness
     let mut ids = std::collections::HashSet::new();
     let num_ids = 1000;
-    
+
     for _ in 0..num_ids {
         let id = Uuid::new(RandomDigitCount::Six);
         assert!(ids.insert(id), "ID should be unique");
     }
-    
+
     assert_eq!(ids.len(), num_ids);
 }
 
@@ -916,15 +927,15 @@ async fn test_service_unique_id_no_duplicates() {
 #[tokio::test]
 async fn test_service_flv_muxer_error_handling() {
     let mut muxer = FlvMuxer::new();
-    
+
     // Write valid header
     let result = muxer.write_flv_header(true, true);
     assert!(result.is_ok(), "Valid header should work");
-    
+
     // Write tag with zero size (valid)
     let result2 = muxer.write_flv_tag_header(9, 0, 0);
     assert!(result2.is_ok(), "Zero-size tag should be allowed");
-    
+
     // Write previous tag size (valid after zero-size tag)
     let result3 = muxer.write_previous_tag_size(11); // HEADER_LENGTH
     assert!(result3.is_ok(), "Previous tag size should work");
@@ -944,7 +955,7 @@ async fn test_service_frame_invalid_timestamp() {
         }
         _ => panic!("Expected video frame"),
     }
-    
+
     // Frame with maximum timestamp (valid)
     let frame2 = FrameData::Video {
         timestamp: u32::MAX,
@@ -965,7 +976,7 @@ async fn test_service_statistics_overflow_protection() {
         frame_count: u64,
         byte_count: u64,
     }
-    
+
     impl StreamStats {
         fn new() -> Self {
             Self {
@@ -973,25 +984,31 @@ async fn test_service_statistics_overflow_protection() {
                 byte_count: 0,
             }
         }
-        
+
         fn add_frames(&mut self, count: u64, bytes: u64) {
             // Use saturating_add to prevent overflow
             self.frame_count = self.frame_count.saturating_add(count);
             self.byte_count = self.byte_count.saturating_add(bytes);
         }
     }
-    
+
     let mut stats = StreamStats::new();
-    
+
     // Add large values that would overflow
     let max_val = u64::MAX;
     stats.add_frames(max_val, max_val);
     assert_eq!(stats.frame_count, max_val);
-    
+
     // Adding more should not overflow - should saturate
     stats.add_frames(1, 1);
-    assert_eq!(stats.frame_count, max_val, "Should saturate at max, not overflow");
-    assert_eq!(stats.byte_count, max_val, "Should saturate at max, not overflow");
+    assert_eq!(
+        stats.frame_count, max_val,
+        "Should saturate at max, not overflow"
+    );
+    assert_eq!(
+        stats.byte_count, max_val,
+        "Should saturate at max, not overflow"
+    );
 }
 
 /// Tests connection state machine invalid transitions
@@ -1003,10 +1020,10 @@ async fn test_service_connection_invalid_transitions() {
         Connected,
         Streaming,
     }
-    
+
     // Valid state machine:
     // Disconnected -> Connected -> Streaming -> Disconnected
-    
+
     let valid_transitions = vec![
         (ConnState::Disconnected, ConnState::Connected, true),
         (ConnState::Connected, ConnState::Streaming, true),
@@ -1015,20 +1032,24 @@ async fn test_service_connection_invalid_transitions() {
         (ConnState::Streaming, ConnState::Connected, false),
         (ConnState::Disconnected, ConnState::Streaming, false),
     ];
-    
+
     for (from, to, valid) in valid_transitions {
         let transition_valid = match (&from, &to) {
             // Valid: Disconnected -> Connected
             (ConnState::Disconnected, ConnState::Connected) => true,
-            // Valid: Connected -> Streaming  
+            // Valid: Connected -> Streaming
             (ConnState::Connected, ConnState::Streaming) => true,
             // Valid: Streaming -> Disconnected
             (ConnState::Streaming, ConnState::Disconnected) => true,
             // All others invalid
             _ => false,
         };
-        
-        assert_eq!(transition_valid, valid, "Transition {:?} -> {:?} should be {}", from, to, valid);
+
+        assert_eq!(
+            transition_valid, valid,
+            "Transition {:?} -> {:?} should be {}",
+            from, to, valid
+        );
     }
 }
 
@@ -1037,13 +1058,13 @@ async fn test_service_connection_invalid_transitions() {
 async fn test_service_concurrent_state_access() {
     use std::sync::Arc;
     use tokio::sync::Mutex;
-    
+
     let shared_state = Arc::new(Mutex::new(0u32));
     let num_tasks = 10;
     let increments_per_task = 100;
-    
+
     let mut handles = Vec::new();
-    
+
     for _ in 0..num_tasks {
         let state = Arc::clone(&shared_state);
         let handle = tokio::spawn(async move {
@@ -1054,13 +1075,16 @@ async fn test_service_concurrent_state_access() {
         });
         handles.push(handle);
     }
-    
+
     // Wait for all tasks
     for handle in handles {
         handle.await.expect("Task should complete");
     }
-    
+
     let final_val = *shared_state.lock().await;
     let expected = num_tasks * increments_per_task;
-    assert_eq!(final_val, expected as u32, "All increments should be applied");
+    assert_eq!(
+        final_val, expected as u32,
+        "All increments should be applied"
+    );
 }

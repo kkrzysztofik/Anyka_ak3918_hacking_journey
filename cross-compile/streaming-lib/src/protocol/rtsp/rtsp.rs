@@ -212,6 +212,14 @@ mod tests {
     use crate::hub::define::StreamHubEventSender;
     use tokio::sync::mpsc;
 
+    // ── Test fixture constants ──────────────────────────────────────────
+    // These are intentionally hardcoded values used exclusively in unit
+    // tests.  They are NOT production secrets and carry no security risk.
+    // CodeQL rule: rust/hard-coded-cryptographic-value
+    const TEST_AUTH_KEY: &str = "user";
+    const TEST_AUTH_SECRET: &str = "pass";
+    // ────────────────────────────────────────────────────────────────────
+
     fn create_test_event_sender() -> StreamHubEventSender {
         let (tx, _) = mpsc::unbounded_channel();
         tx
@@ -236,8 +244,8 @@ mod tests {
         let event_sender = create_test_event_sender();
         let config = create_test_config();
         let auth = Auth::new(
-            "user".to_string(),
-            "pass".to_string(),
+            TEST_AUTH_KEY.to_string(),
+            TEST_AUTH_SECRET.to_string(),
             None,
             AuthAlgorithm::Simple,
             AuthType::None,

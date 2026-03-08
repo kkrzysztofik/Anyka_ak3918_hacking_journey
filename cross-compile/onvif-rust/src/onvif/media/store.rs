@@ -1,0 +1,469 @@
+//! Media Store - Profile persistence and conversion.
+//!
+//! This module provides persistence layer for media profiles and configurations,
+//! handling serialization/deserialization to/from storage format.
+
+#![cfg_attr(not(test), allow(dead_code))]
+
+use std::sync::Arc;
+
+use crate::config::{ConfigRuntime, ProfileStorage};
+use crate::onvif::types::common::{
+    AudioEncoderConfiguration, PTZConfiguration, VideoEncoderConfiguration,
+};
+use crate::platform::Resolution;
+
+use super::defaults::{self, ProfileConfig};
+use super::state::MediaState;
+
+/// Media store handles persistence and data conversion.
+///
+/// Some fields are not yet read outside of construction because the full
+/// persistence path (`save()`) is not yet implemented. The `dead_code`
+/// attributes will be removed once on-disk profile storage is wired up.
+#[allow(dead_code)]
+pub struct MediaStore {
+    /// Runtime configuration (optional).
+    config: Option<Arc<ConfigRuntime>>,
+    /// Typed profile storage for persistence — reserved for the persistence
+    /// milestone; constructed via [`MediaStore::with_storage`] but not yet
+    /// consumed by [`MediaStore::save`].
+    #[allow(dead_code)]
+    profile_storage: Option<Arc<ProfileStorage>>,
+    /// Maximum sensor resolution.
+    max_sensor_resolution: Resolution,
+}
+
+impl MediaStore {
+    /// Create a new MediaStore.
+    pub fn new(config: Option<Arc<ConfigRuntime>>, max_resolution: Resolution) -> Self {
+        Self {
+            config,
+            profile_storage: None,
+            max_sensor_resolution: max_resolution,
+        }
+    }
+
+    /// Create a MediaStore with profile storage.
+    pub fn with_storage(
+        config: Option<Arc<ConfigRuntime>>,
+        profile_storage: Arc<ProfileStorage>,
+        max_resolution: Resolution,
+    ) -> Self {
+        Self {
+            config,
+            profile_storage: Some(profile_storage),
+            max_sensor_resolution: max_resolution,
+        }
+    }
+
+    /// Initialize default sources, configurations, and profiles in state.
+    pub fn initialize_defaults(&self, state: &MediaState) {
+        let default_sources = defaults::create_default_sources(self.max_sensor_resolution);
+        state.insert_video_source(default_sources.video_source);
+        state.insert_audio_source(default_sources.audio_source);
+        state.insert_video_source_config(default_sources.video_source_config);
+        state.insert_audio_source_config(default_sources.audio_source_config);
+
+        // Initialize profiles from config or hardcoded defaults
+        if let Some(ref config) = self.config {
+            self.initialize_profiles_from_config(state, config);
+        } else {
+            self.initialize_profiles_hardcoded(state);
+        }
+    }
+
+    /// Initialize profiles from config sections.
+    fn initialize_profiles_from_config(&self, state: &MediaState, config: &Arc<ConfigRuntime>) {
+        let mut profile_count = 0u32;
+        let default_ptz_config = Self::create_default_ptz_configuration();
+
+        for profile_num in 1..=4 {
+            if !Self::is_profile_enabled(config, profile_num) {
+                continue;
+            }
+
+            let profile_config = Self::read_profile_config(config, profile_num);
+
+            // Validate against max sensor resolution
+            if profile_config.width > self.max_sensor_resolution.width
+                || profile_config.height > self.max_sensor_resolution.height
+            {
+                tracing::error!(
+                    "Skipping stream_profile_{}: resolution {}x{} exceeds sensor max {}x{}",
+                    profile_num,
+                    profile_config.width,
+                    profile_config.height,
+                    self.max_sensor_resolution.width,
+                    self.max_sensor_resolution.height
+                );
+                continue;
+            }
+
+            let video_encoding = Self::parse_video_encoding(&profile_config.encoding_str);
+            let h264_profile = Self::parse_h264_profile(&profile_config.profile_str);
+            let audio_encoding = Self::parse_audio_encoding(&profile_config.audio_encoding_str);
+
+            // Create video encoder config
+            // Note: clone required because insert_* takes ownership and the config
+            // is also needed for create_profile below
+            let video_encoder_config = Self::create_video_encoder_config(
+                profile_count,
+                &profile_config.name,
+                profile_config.width,
+                profile_config.height,
+                profile_config.framerate,
+                profile_config.bitrate,
+                &video_encoding,
+                h264_profile,
+            );
+            state.insert_video_encoder_config(video_encoder_config.clone());
+
+            // Create audio encoder config if enabled
+            if profile_config.audio_enabled {
+                // Note: clone required because insert_* takes ownership and the config
+                // is also needed for create_profile below
+                let audio_encoder_config = Self::create_audio_encoder_config(
+                    profile_count,
+                    profile_config.audio_bitrate,
+                    profile_config.audio_sample_rate,
+                    audio_encoding,
+                );
+                state.insert_audio_encoder_config(audio_encoder_config.clone());
+
+                // Create profile with audio
+                let profile = Self::create_profile(
+                    &profile_config.name,
+                    profile_count,
+                    Some(video_encoder_config),
+                    Some(audio_encoder_config),
+                    &default_ptz_config,
+                );
+                state.insert_profile(profile);
+            } else {
+                // Create profile without audio
+                let profile = Self::create_profile(
+                    &profile_config.name,
+                    profile_count,
+                    Some(video_encoder_config),
+                    None,
+                    &default_ptz_config,
+                );
+                state.insert_profile(profile);
+            }
+
+            profile_count += 1;
+        }
+
+        state.set_profile_counter(profile_count);
+    }
+
+    /// Initialize hardcoded profiles (fallback).
+    fn initialize_profiles_hardcoded(&self, state: &MediaState) {
+        let default_ptz_config = Self::create_default_ptz_configuration();
+
+        // Note: clones are required throughout because insert_* takes ownership
+        // and the configs are also needed for create_profile calls below
+        let video_encoder_main = Self::create_video_encoder_config(
+            0,
+            "MainStream",
+            1920,
+            1080,
+            30,
+            4000,
+            &crate::onvif::types::common::VideoEncoding::H264,
+            crate::onvif::types::common::H264Profile::Main,
+        );
+        state.insert_video_encoder_config(video_encoder_main.clone());
+
+        let video_encoder_sub = Self::create_video_encoder_config(
+            1,
+            "SubStream",
+            640,
+            480,
+            15,
+            512,
+            &crate::onvif::types::common::VideoEncoding::H264,
+            crate::onvif::types::common::H264Profile::Baseline,
+        );
+        state.insert_video_encoder_config(video_encoder_sub.clone());
+
+        let audio_encoder = Self::create_audio_encoder_config(
+            0,
+            64,
+            8000,
+            crate::onvif::types::common::AudioEncoding::G711,
+        );
+        state.insert_audio_encoder_config(audio_encoder.clone());
+
+        // Main profile
+        let main_profile = Self::create_profile(
+            "MainStream",
+            0,
+            Some(video_encoder_main),
+            Some(audio_encoder.clone()),
+            &default_ptz_config,
+        );
+        state.insert_profile(main_profile);
+
+        // Sub profile
+        let sub_profile = Self::create_profile(
+            "SubStream",
+            1,
+            Some(video_encoder_sub),
+            Some(audio_encoder),
+            &default_ptz_config,
+        );
+        state.insert_profile(sub_profile);
+
+        state.set_profile_counter(2);
+    }
+
+    /// Create a profile with given parameters.
+    fn create_profile(
+        name: &str,
+        profile_count: u32,
+        video_encoder: Option<VideoEncoderConfiguration>,
+        audio_encoder: Option<AudioEncoderConfiguration>,
+        ptz_config: &PTZConfiguration,
+    ) -> crate::onvif::types::common::Profile {
+        defaults::create_profile(
+            name,
+            profile_count,
+            video_encoder,
+            audio_encoder,
+            ptz_config,
+        )
+    }
+
+    /// Check if a profile is enabled in config.
+    fn is_profile_enabled(config: &ConfigRuntime, profile_num: u32) -> bool {
+        defaults::is_profile_enabled(config, profile_num)
+    }
+
+    /// Read profile configuration from config.
+    fn read_profile_config(config: &ConfigRuntime, profile_num: u32) -> ProfileConfig {
+        defaults::read_profile_config(config, profile_num)
+    }
+
+    /// Parse video encoding string.
+    fn parse_video_encoding(encoding_str: &str) -> crate::onvif::types::common::VideoEncoding {
+        defaults::parse_video_encoding(encoding_str, false)
+    }
+
+    /// Parse H.264 profile string.
+    fn parse_h264_profile(profile_str: &str) -> crate::onvif::types::common::H264Profile {
+        defaults::parse_h264_profile(profile_str, false)
+    }
+
+    /// Parse audio encoding string.
+    fn parse_audio_encoding(encoding_str: &str) -> crate::onvif::types::common::AudioEncoding {
+        defaults::parse_audio_encoding(encoding_str, false)
+    }
+
+    /// Create video encoder configuration.
+    #[allow(clippy::too_many_arguments)]
+    fn create_video_encoder_config(
+        profile_count: u32,
+        name: &str,
+        width: u32,
+        height: u32,
+        framerate: u32,
+        bitrate: u32,
+        video_encoding: &crate::onvif::types::common::VideoEncoding,
+        h264_profile: crate::onvif::types::common::H264Profile,
+    ) -> VideoEncoderConfiguration {
+        defaults::create_video_encoder_config(
+            profile_count,
+            name,
+            width,
+            height,
+            framerate,
+            bitrate,
+            video_encoding,
+            h264_profile,
+        )
+    }
+
+    /// Create audio encoder configuration.
+    fn create_audio_encoder_config(
+        profile_count: u32,
+        bitrate: u32,
+        sample_rate: u32,
+        encoding: crate::onvif::types::common::AudioEncoding,
+    ) -> AudioEncoderConfiguration {
+        defaults::create_audio_encoder_config(profile_count, bitrate, sample_rate, encoding)
+    }
+
+    /// Create default PTZ configuration.
+    fn create_default_ptz_configuration() -> PTZConfiguration {
+        defaults::create_default_ptz_configuration()
+    }
+
+    /// Whether this store has a profile storage backend configured.
+    pub fn has_profile_storage(&self) -> bool {
+        self.profile_storage.is_some()
+    }
+
+    /// Get the maximum sensor resolution.
+    pub fn max_sensor_resolution(&self) -> Resolution {
+        self.max_sensor_resolution
+    }
+
+    /// Save state to storage.
+    ///
+    /// TODO(persistence): Implement full serialization of `MediaState` to the
+    /// `ProfileStorage` backend. Currently a no-op because the `ProfileManager`
+    /// owns in-memory state and no on-disk persistence path has been wired up
+    /// yet. Tracked as part of the media persistence milestone.
+    pub fn save(&self, _state: &MediaState) {}
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::ProfileStorage;
+    use crate::onvif::media::types::DEFAULT_PTZ_NODE_TOKEN;
+    use crate::onvif::types::common::{AudioEncoding, H264Profile, VideoEncoding};
+    use tempfile::tempdir;
+
+    fn create_state() -> MediaState {
+        MediaState::new(Resolution::new(1920, 1080))
+    }
+
+    #[test]
+    fn test_media_store_new() {
+        let store = MediaStore::new(None, Resolution::new(1920, 1080));
+        // Basic creation test
+        assert_eq!(store.max_sensor_resolution().width, 1920);
+    }
+
+    #[test]
+    fn test_media_store_with_storage() {
+        let dir = tempdir().unwrap();
+        let storage = Arc::new(ProfileStorage::new(dir.path().join("profiles.toml")));
+        let store =
+            MediaStore::with_storage(None, Arc::clone(&storage), Resolution::new(1280, 720));
+
+        assert!(store.has_profile_storage());
+        assert_eq!(store.max_sensor_resolution(), Resolution::new(1280, 720));
+    }
+
+    #[test]
+    fn test_initialize_defaults_without_config_populates_hardcoded_profiles() {
+        let store = MediaStore::new(None, Resolution::new(1920, 1080));
+        let state = create_state();
+
+        store.initialize_defaults(&state);
+
+        let profiles = state.get_profiles();
+        assert_eq!(profiles.len(), 2);
+        assert!(profiles.iter().any(|profile| profile.name == "MainStream"));
+        assert!(profiles.iter().any(|profile| profile.name == "SubStream"));
+        assert!(!state.get_video_sources().is_empty());
+        assert!(!state.get_video_encoder_configurations().is_empty());
+    }
+
+    #[test]
+    fn test_initialize_defaults_with_config_uses_enabled_profiles() {
+        let config = Arc::new(ConfigRuntime::new(Default::default()));
+        {
+            let mut cfg = config.write();
+            cfg.stream_profile_3.enabled = true;
+            cfg.stream_profile_3.name = "ThirdStream".to_string();
+            cfg.stream_profile_3.width = 320;
+            cfg.stream_profile_3.height = 240;
+            cfg.stream_profile_3.audio_enabled = false;
+        }
+
+        let store = MediaStore::new(Some(config), Resolution::new(1920, 1080));
+        let state = create_state();
+        store.initialize_defaults(&state);
+
+        let profiles = state.get_profiles();
+        assert_eq!(profiles.len(), 3);
+        assert!(profiles.iter().any(|profile| profile.name == "ThirdStream"));
+        assert_eq!(state.profile_count(), 3);
+    }
+
+    #[test]
+    fn test_initialize_defaults_skips_profiles_exceeding_sensor_resolution() {
+        let config = Arc::new(ConfigRuntime::new(Default::default()));
+        {
+            let mut cfg = config.write();
+            cfg.stream_profile_1.width = 4096;
+            cfg.stream_profile_1.height = 2160;
+            cfg.stream_profile_2.enabled = false;
+            cfg.stream_profile_3.enabled = false;
+            cfg.stream_profile_4.enabled = false;
+        }
+
+        let store = MediaStore::new(Some(config), Resolution::new(1920, 1080));
+        let state = create_state();
+        store.initialize_defaults(&state);
+
+        assert!(state.get_profiles().is_empty());
+        assert_eq!(state.profile_count(), 0);
+        assert!(!state.get_video_sources().is_empty());
+    }
+
+    #[test]
+    fn test_parse_helpers_map_known_and_unknown_values() {
+        assert_eq!(
+            MediaStore::parse_video_encoding("jpeg"),
+            VideoEncoding::JPEG
+        );
+        assert_eq!(
+            MediaStore::parse_video_encoding("unexpected"),
+            VideoEncoding::H264
+        );
+
+        assert_eq!(MediaStore::parse_h264_profile("high"), H264Profile::High);
+        assert_eq!(
+            MediaStore::parse_h264_profile("unexpected"),
+            H264Profile::Main
+        );
+
+        assert_eq!(MediaStore::parse_audio_encoding("aac"), AudioEncoding::AAC);
+        assert_eq!(
+            MediaStore::parse_audio_encoding("unexpected"),
+            AudioEncoding::G711
+        );
+    }
+
+    #[test]
+    fn test_create_encoder_helpers_and_default_ptz_configuration() {
+        let video = MediaStore::create_video_encoder_config(
+            2,
+            "ProfileX",
+            1280,
+            720,
+            25,
+            1024,
+            &VideoEncoding::H264,
+            H264Profile::Baseline,
+        );
+        assert_eq!(video.token, "VideoEncoderConfig_2");
+        assert_eq!(video.resolution.width, 1280);
+        assert!(video.h264.is_some());
+
+        let audio = MediaStore::create_audio_encoder_config(2, 64, 8000, AudioEncoding::AAC);
+        assert_eq!(audio.token, "AudioEncoderConfig_2");
+        assert_eq!(audio.sample_rate, 8000);
+
+        let ptz = MediaStore::create_default_ptz_configuration();
+        assert_eq!(ptz.token, "PTZConfig_0");
+        assert_eq!(ptz.node_token, "PTZNode_0");
+    }
+
+    #[test]
+    fn test_save_is_noop() {
+        let store = MediaStore::new(None, Resolution::new(1920, 1080));
+        let state = create_state();
+        store.initialize_defaults(&state);
+
+        store.save(&state);
+
+        assert!(!state.get_profiles().is_empty());
+    }
+}

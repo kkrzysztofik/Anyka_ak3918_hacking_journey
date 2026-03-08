@@ -13,3 +13,8 @@ paths-ignore:
   - "**/build/**"
   - "**/target/**"
   - "**/coverage/**"
+  # Exclude test files — hardcoded credentials in tests are test fixtures, not secrets.
+  # Covers: integration test directories and standalone test source files.
+  - "**/tests/**"
+  - "**/*_test.rs"
+  - "**/*_tests.rs"

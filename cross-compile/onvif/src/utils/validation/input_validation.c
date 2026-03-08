@@ -288,7 +288,7 @@ int validate_soap_action(const char* action) {
     return ONVIF_VALIDATION_FAILED;
   }
   if (len > VALIDATION_MAX_SOAP_ACTION) {
-    platform_log_error("SOAP action too long: %zu (max: %d)\n", len, VALIDATION_MAX_SOAP_ACTION);
+    platform_log_error("SOAP action too long: %zu (max: %zu)\n", (size_t)len, (size_t)VALIDATION_MAX_SOAP_ACTION);
     return ONVIF_VALIDATION_FAILED;
   }
 
@@ -376,31 +376,31 @@ int sanitize_string_input(const char* input, char* output, size_t output_size) {
     switch (character) {
     case '<':
       if (out_pos + XML_ENTITY_LT_LEN < output_size - 1) {
-        strcpy(output + out_pos, "&lt;");
+        strncpy(output + out_pos, "&lt;", XML_ENTITY_LT_LEN);
         out_pos += XML_ENTITY_LT_LEN;
       }
       break;
     case '>':
       if (out_pos + XML_ENTITY_GT_LEN < output_size - 1) {
-        strcpy(output + out_pos, "&gt;");
+        strncpy(output + out_pos, "&gt;", XML_ENTITY_GT_LEN);
         out_pos += XML_ENTITY_GT_LEN;
       }
       break;
     case '&':
       if (out_pos + XML_ENTITY_AMP_LEN < output_size - 1) {
-        strcpy(output + out_pos, "&amp;");
+        strncpy(output + out_pos, "&amp;", XML_ENTITY_AMP_LEN);
         out_pos += XML_ENTITY_AMP_LEN;
       }
       break;
     case '"':
       if (out_pos + XML_ENTITY_QUOT_LEN < output_size - 1) {
-        strcpy(output + out_pos, "&quot;");
+        strncpy(output + out_pos, "&quot;", XML_ENTITY_QUOT_LEN);
         out_pos += XML_ENTITY_QUOT_LEN;
       }
       break;
     case '\'':
       if (out_pos + XML_ENTITY_APOS_LEN < output_size - 1) {
-        strcpy(output + out_pos, "&apos;");
+        strncpy(output + out_pos, "&apos;", XML_ENTITY_APOS_LEN);
         out_pos += XML_ENTITY_APOS_LEN;
       }
       break;

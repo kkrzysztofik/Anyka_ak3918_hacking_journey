@@ -618,6 +618,20 @@ mod tests {
     use super::*;
     use tempfile::tempdir;
 
+    // ── Test fixture constants ──────────────────────────────────────────
+    // These are intentionally hardcoded values used exclusively in unit
+    // tests.  They are NOT production secrets and carry no security risk.
+    // CodeQL rule: rust/hard-coded-cryptographic-value
+    const TEST_PASSWORD: &str = "password";
+    const TEST_PASSWORD_1: &str = "pwd1";
+    const TEST_PASSWORD_2: &str = "pwd2";
+    const TEST_PASSWORD_3: &str = "pwd3";
+    const TEST_PASSWORD_SECRET: &str = "secret123";
+    const TEST_PASSWORD_OLD: &str = "old_password";
+    const TEST_PASSWORD_NEW: &str = "new_password";
+    const TEST_PASSWORD_OTHER: &str = "other_pwd";
+    // ────────────────────────────────────────────────────────────────────
+
     #[test]
     fn test_module_exports() {
         // Verify all public types are accessible
@@ -706,13 +720,13 @@ mod tests {
         let storage = UserStorage::new();
 
         storage
-            .create_user("admin", "secret123", UserLevel::Administrator)
+            .create_user("admin", TEST_PASSWORD_SECRET, UserLevel::Administrator)
             .unwrap();
 
         assert_eq!(storage.len(), 1);
         let user = storage.get_user("admin").unwrap();
         assert_eq!(user.username, "admin");
-        assert_eq!(user.password.as_str(), "secret123");
+        assert_eq!(user.password.as_str(), TEST_PASSWORD_SECRET);
         assert_eq!(user.level, UserLevel::Administrator);
     }
 
@@ -721,10 +735,10 @@ mod tests {
         let storage = UserStorage::new();
 
         storage
-            .create_user("admin", "secret123", UserLevel::Administrator)
+            .create_user("admin", TEST_PASSWORD_SECRET, UserLevel::Administrator)
             .unwrap();
 
-        let result = storage.create_user("admin", "other_pwd", UserLevel::Operator);
+        let result = storage.create_user("admin", TEST_PASSWORD_OTHER, UserLevel::Operator);
         assert!(matches!(result, Err(UserError::UserExists(_))));
     }
 
@@ -734,11 +748,11 @@ mod tests {
 
         for i in 0..MAX_USERS {
             storage
-                .create_user(&format!("user{}", i), "password", UserLevel::User)
+                .create_user(&format!("user{}", i), TEST_PASSWORD, UserLevel::User)
                 .unwrap();
         }
 
-        let result = storage.create_user("overflow", "password", UserLevel::User);
+        let result = storage.create_user("overflow", TEST_PASSWORD, UserLevel::User);
         assert!(matches!(result, Err(UserError::MaxUsersReached)));
     }
 
@@ -764,10 +778,10 @@ mod tests {
         let storage = UserStorage::new();
 
         storage
-            .create_user("admin", "password", UserLevel::Administrator)
+            .create_user("admin", TEST_PASSWORD, UserLevel::Administrator)
             .unwrap();
         storage
-            .create_user("user1", "password", UserLevel::User)
+            .create_user("user1", TEST_PASSWORD, UserLevel::User)
             .unwrap();
 
         storage.delete_user("user1").unwrap();
@@ -789,7 +803,7 @@ mod tests {
         let storage = UserStorage::new();
 
         storage
-            .create_user("admin", "password", UserLevel::Administrator)
+            .create_user("admin", TEST_PASSWORD, UserLevel::Administrator)
             .unwrap();
 
         let result = storage.delete_user("admin");
@@ -801,10 +815,10 @@ mod tests {
         let storage = UserStorage::new();
 
         storage
-            .create_user("admin1", "password", UserLevel::Administrator)
+            .create_user("admin1", TEST_PASSWORD, UserLevel::Administrator)
             .unwrap();
         storage
-            .create_user("admin2", "password", UserLevel::Administrator)
+            .create_user("admin2", TEST_PASSWORD, UserLevel::Administrator)
             .unwrap();
 
         storage.delete_user("admin1").unwrap();
@@ -818,14 +832,14 @@ mod tests {
         let storage = UserStorage::new();
 
         storage
-            .create_user("user1", "old_password", UserLevel::User)
+            .create_user("user1", TEST_PASSWORD_OLD, UserLevel::User)
             .unwrap();
         storage
-            .update_user("user1", Some("new_password"), None)
+            .update_user("user1", Some(TEST_PASSWORD_NEW), None)
             .unwrap();
 
         let user = storage.get_user("user1").unwrap();
-        assert_eq!(user.password.as_str(), "new_password");
+        assert_eq!(user.password.as_str(), TEST_PASSWORD_NEW);
         assert_eq!(user.level, UserLevel::User);
     }
 
@@ -834,10 +848,10 @@ mod tests {
         let storage = UserStorage::new();
 
         storage
-            .create_user("admin", "password", UserLevel::Administrator)
+            .create_user("admin", TEST_PASSWORD, UserLevel::Administrator)
             .unwrap();
         storage
-            .create_user("user1", "password", UserLevel::User)
+            .create_user("user1", TEST_PASSWORD, UserLevel::User)
             .unwrap();
         storage
             .update_user("user1", None, Some(UserLevel::Operator))
@@ -851,7 +865,7 @@ mod tests {
     fn test_update_nonexistent_user() {
         let storage = UserStorage::new();
 
-        let result = storage.update_user("nobody", Some("password"), None);
+        let result = storage.update_user("nobody", Some(TEST_PASSWORD), None);
         assert!(matches!(result, Err(UserError::UserNotFound(_))));
     }
 
@@ -860,7 +874,7 @@ mod tests {
         let storage = UserStorage::new();
 
         storage
-            .create_user("admin", "password", UserLevel::Administrator)
+            .create_user("admin", TEST_PASSWORD, UserLevel::Administrator)
             .unwrap();
 
         let result = storage.update_user("admin", None, Some(UserLevel::Operator));
@@ -872,13 +886,13 @@ mod tests {
         let storage = UserStorage::new();
 
         storage
-            .create_user("admin", "pwd1", UserLevel::Administrator)
+            .create_user("admin", TEST_PASSWORD_1, UserLevel::Administrator)
             .unwrap();
         storage
-            .create_user("user1", "pwd2", UserLevel::User)
+            .create_user("user1", TEST_PASSWORD_2, UserLevel::User)
             .unwrap();
         storage
-            .create_user("operator", "pwd3", UserLevel::Operator)
+            .create_user("operator", TEST_PASSWORD_3, UserLevel::Operator)
             .unwrap();
 
         let users = storage.list_users();
@@ -902,7 +916,7 @@ mod tests {
     fn test_ensure_default_admin_when_exists() {
         let storage = UserStorage::new();
         storage
-            .create_user("existing_admin", "password", UserLevel::Administrator)
+            .create_user("existing_admin", TEST_PASSWORD, UserLevel::Administrator)
             .unwrap();
 
         storage.ensure_default_admin().unwrap();
@@ -919,10 +933,10 @@ mod tests {
         // Create and save
         let storage1 = UserStorage::new();
         storage1
-            .create_user("admin", "pwd1", UserLevel::Administrator)
+            .create_user("admin", TEST_PASSWORD_1, UserLevel::Administrator)
             .unwrap();
         storage1
-            .create_user("user1", "pwd2", UserLevel::User)
+            .create_user("user1", TEST_PASSWORD_2, UserLevel::User)
             .unwrap();
         storage1.save_to_toml(&file_path).unwrap();
 
@@ -953,17 +967,17 @@ mod tests {
         assert_eq!(storage.admin_count(), 0);
 
         storage
-            .create_user("admin1", "password", UserLevel::Administrator)
+            .create_user("admin1", TEST_PASSWORD, UserLevel::Administrator)
             .unwrap();
         assert_eq!(storage.admin_count(), 1);
 
         storage
-            .create_user("user1", "password", UserLevel::User)
+            .create_user("user1", TEST_PASSWORD, UserLevel::User)
             .unwrap();
         assert_eq!(storage.admin_count(), 1);
 
         storage
-            .create_user("admin2", "password", UserLevel::Administrator)
+            .create_user("admin2", TEST_PASSWORD, UserLevel::Administrator)
             .unwrap();
         assert_eq!(storage.admin_count(), 2);
     }

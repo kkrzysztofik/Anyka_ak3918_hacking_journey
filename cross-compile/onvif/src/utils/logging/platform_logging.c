@@ -125,10 +125,11 @@ int platform_log_printf(
   /* Get timestamp if enabled */
   if (g_log_config.use_timestamps) {
     if (get_timestamp(timestamp, sizeof(timestamp)) != 0) {
-      strcpy(timestamp, "0000-00-00 00:00:00.000");
+      strncpy(timestamp, "0000-00-00 00:00:00.000", sizeof(timestamp) - 1);
+      timestamp[sizeof(timestamp) - 1] = '\0';
     }
   } else {
-    strcpy(timestamp, "");
+    timestamp[0] = '\0';
   }
 
   /* Start with timestamp */

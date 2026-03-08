@@ -1,20 +1,12 @@
-//! PTZ Service request handlers.
+//! ONVIF PTZ Service implementation.
 //!
-//! This module implements the ONVIF PTZ Service operation handlers including:
-//! - Node and configuration discovery
-//! - Movement operations (absolute, relative, continuous, stop)
-//! - Preset management
-//! - Home position management
-//! - Service capabilities
+//! ONVIF PTZ Service implementation.
 
 use std::sync::Arc;
 
 use crate::onvif::dispatcher::ServiceHandler;
 use crate::onvif::dispatcher::parse_body;
 use crate::onvif::error::{OnvifError, OnvifResult};
-use crate::onvif::types::common::{
-    PTZConfiguration, PTZSpeed, PTZVector, PanTiltLimits, Vector1D, Vector2D, ZoomLimits,
-};
 use crate::onvif::types::ptz::{
     AbsoluteMove, AbsoluteMoveResponse, ContinuousMove, ContinuousMoveResponse,
     GetCompatibleConfigurations, GetCompatibleConfigurationsResponse, GetConfiguration,
@@ -27,14 +19,15 @@ use crate::onvif::types::ptz::{
     SendAuxiliaryCommandResponse, SetConfiguration, SetConfigurationResponse, SetHomePosition,
     SetHomePositionResponse, SetPreset, SetPresetResponse, Stop, StopResponse,
 };
-use crate::platform::{PTZControl, Platform, PtzPosition, PtzVelocity};
+use crate::platform::{PTZControl, Platform};
 
+use super::ops::auxiliary;
+use super::ops::config;
+use super::ops::movement;
+use super::ops::presets;
+use super::ops::status;
 use super::state::PTZStateManager;
-use super::types::{
-    DEFAULT_CONFIG_TOKEN, DEFAULT_NODE_TOKEN, DEFAULT_PTZ_TIMEOUT, MAX_PRESETS,
-    SPACE_ABSOLUTE_PAN_TILT, SPACE_ABSOLUTE_ZOOM, build_configuration_options, build_ptz_spaces,
-    build_service_capabilities,
-};
+use super::types::*;
 
 // ============================================================================
 // PTZService
@@ -44,18 +37,32 @@ use super::types::{
 ///
 /// Handles PTZ Service operations including:
 /// - Node discovery and configuration
-/// - Movement operations
-/// - Preset management
+/// - Movement operations (absolute, relative, continuous)
+/// - Preset management (get, set, goto, remove)
 /// - Home position management
+/// - Auxiliary commands and service capabilities
+///
+/// The service supports an optional platform PTZ control backend for
+/// forwarding commands to real hardware. When no platform is provided,
+/// the service operates in software-only mode using in-memory state.
 pub struct PTZService {
-    /// PTZ state manager.
-    state: Arc<PTZStateManager>,
+    /// PTZ state manager (position, movement, presets).
+    pub(crate) state: Arc<PTZStateManager>,
     /// Platform PTZ control (optional for software-only mode).
-    ptz_control: Option<Arc<dyn PTZControl>>,
+    pub(crate) ptz_control: Option<Arc<dyn PTZControl>>,
 }
 
 impl PTZService {
-    /// Create a new PTZ Service.
+    /// Create a new PTZ Service in software-only mode.
+    ///
+    /// # Arguments
+    ///
+    /// * `state` - Shared PTZ state manager for position and preset tracking
+    ///
+    /// # Returns
+    ///
+    /// A `PTZService` with no platform backend. All PTZ operations are
+    /// handled in-memory only.
     pub fn new(state: Arc<PTZStateManager>) -> Self {
         Self {
             state,
@@ -64,6 +71,11 @@ impl PTZService {
     }
 
     /// Create a new PTZ Service with platform PTZ control.
+    ///
+    /// # Arguments
+    ///
+    /// * `state` - Shared PTZ state manager
+    /// * `platform` - Platform abstraction providing hardware PTZ control
     pub fn with_platform(state: Arc<PTZStateManager>, platform: Arc<dyn Platform>) -> Self {
         Self {
             state,
@@ -80,578 +92,250 @@ impl PTZService {
     }
 
     // ========================================================================
-    // Helper Methods
+    // Validator and builder methods
     // ========================================================================
 
-    /// Validate profile token.
-    fn validate_profile_token(&self, token: &str) -> OnvifResult<()> {
+    /// Validate a profile token.
+    ///
+    /// Performs a fast-fail check for empty tokens. The AK3918 device has a
+    /// single fixed profile ("Profile_1"), so any non-empty token is accepted
+    /// here; individual handlers may apply stricter checks when needed.
+    #[allow(dead_code)]
+    pub(crate) fn validate_profile_token(&self, token: &str) -> OnvifResult<()> {
         if token.is_empty() {
             return Err(OnvifError::InvalidArgVal {
-                subcode: "ter:NoToken".to_string(),
+                subcode: "NoToken".to_string(),
                 reason: "Profile token is required".to_string(),
             });
         }
-        // For now, accept any non-empty token
-        // In production, this would validate against actual profile tokens
         Ok(())
     }
 
-    /// Validate configuration token.
-    fn validate_config_token(&self, token: &str) -> OnvifResult<()> {
-        if token != DEFAULT_CONFIG_TOKEN {
-            return Err(OnvifError::InvalidArgVal {
-                subcode: "ter:InvalidToken".to_string(),
-                reason: format!("Configuration '{}' not found", token),
-            });
-        }
-        Ok(())
+    #[allow(dead_code)]
+    pub(crate) fn validate_config_token(&self, token: &str) -> OnvifResult<()> {
+        config::validate_config_token(token)
     }
 
-    /// Validate node token.
-    fn validate_node_token(&self, token: &str) -> OnvifResult<()> {
-        if token != DEFAULT_NODE_TOKEN {
-            return Err(OnvifError::InvalidArgVal {
-                subcode: "ter:InvalidToken".to_string(),
-                reason: format!("Node '{}' not found", token),
-            });
-        }
-        Ok(())
+    #[allow(dead_code)]
+    pub(crate) fn validate_node_token(&self, token: &str) -> OnvifResult<()> {
+        config::validate_node_token(token)
     }
 
-    /// Build default PTZ node.
-    fn build_ptz_node(&self) -> PTZNode {
-        PTZNode {
-            token: DEFAULT_NODE_TOKEN.to_string(),
-            fixed_home_position: Some(false),
-            geo_move: Some(false),
-            name: Some("PTZ Node".to_string()),
-            supported_ptz_spaces: build_ptz_spaces(),
-            maximum_number_of_presets: MAX_PRESETS,
-            home_supported: true,
-            auxiliary_commands: vec![],
-            extension: None,
-        }
+    #[allow(dead_code)]
+    pub(crate) fn build_ptz_node(&self) -> PTZNode {
+        config::build_ptz_node()
     }
 
-    /// Build default PTZ configuration.
-    fn build_ptz_configuration(&self) -> PTZConfiguration {
-        PTZConfiguration {
-            token: DEFAULT_CONFIG_TOKEN.to_string(),
-            name: "PTZ Configuration".to_string(),
-            use_count: 1,
-            node_token: DEFAULT_NODE_TOKEN.to_string(),
-            default_absolute_pan_tilt_position_space: Some(SPACE_ABSOLUTE_PAN_TILT.to_string()),
-            default_absolute_zoom_position_space: Some(SPACE_ABSOLUTE_ZOOM.to_string()),
-            default_relative_pan_tilt_translation_space: None,
-            default_relative_zoom_translation_space: None,
-            default_continuous_pan_tilt_velocity_space: None,
-            default_continuous_zoom_velocity_space: None,
-            default_ptz_speed: Some(PTZSpeed {
-                pan_tilt: Some(Vector2D {
-                    x: 0.5,
-                    y: 0.5,
-                    space: None,
-                }),
-                zoom: Some(Vector1D {
-                    x: 0.5,
-                    space: None,
-                }),
-            }),
-            default_ptz_timeout: Some(DEFAULT_PTZ_TIMEOUT.to_string()),
-            pan_tilt_limits: Some(PanTiltLimits {
-                range: crate::onvif::types::common::Space2DDescription {
-                    uri: SPACE_ABSOLUTE_PAN_TILT.to_string(),
-                    x_range: crate::onvif::types::common::FloatRange {
-                        min: -1.0,
-                        max: 1.0,
-                    },
-                    y_range: crate::onvif::types::common::FloatRange {
-                        min: -1.0,
-                        max: 1.0,
-                    },
-                },
-            }),
-            zoom_limits: Some(ZoomLimits {
-                range: crate::onvif::types::common::Space1DDescription {
-                    uri: SPACE_ABSOLUTE_ZOOM.to_string(),
-                    x_range: crate::onvif::types::common::FloatRange { min: 0.0, max: 1.0 },
-                },
-            }),
-            extension: None,
-            move_ramp: None,
-            preset_ramp: None,
-            preset_tour_ramp: None,
-        }
-    }
-
-    /// Convert PTZVector to platform PtzPosition.
-    fn vector_to_position(vector: &PTZVector) -> PtzPosition {
-        let mut pos = PtzPosition::default();
-        if let Some(pt) = &vector.pan_tilt {
-            // ONVIF uses -1 to 1, platform uses degrees
-            pos.pan = pt.x * 180.0;
-            pos.tilt = pt.y * 90.0;
-        }
-        if let Some(z) = &vector.zoom {
-            // ONVIF uses 0 to 1, platform uses 1 to 10
-            pos.zoom = z.x * 9.0 + 1.0;
-        }
-        pos
-    }
-
-    /// Convert PTZSpeed to platform PtzVelocity.
-    fn speed_to_velocity(speed: &PTZSpeed) -> PtzVelocity {
-        let mut vel = PtzVelocity::STOP;
-        if let Some(pt) = &speed.pan_tilt {
-            vel.pan = pt.x;
-            vel.tilt = pt.y;
-        }
-        if let Some(z) = &speed.zoom {
-            vel.zoom = z.x;
-        }
-        vel
+    #[allow(dead_code)]
+    pub(crate) fn build_ptz_configuration(&self) -> PTZConfiguration {
+        config::build_ptz_configuration()
     }
 
     // ========================================================================
-    // Node Operations
+    // Delegation methods
     // ========================================================================
 
-    /// Handle GetNodes request.
+    /// Handle GetNodes request - delegates to ops::config
     pub fn handle_get_nodes(&self, _request: GetNodes) -> OnvifResult<GetNodesResponse> {
-        tracing::debug!("GetNodes request");
-
-        Ok(GetNodesResponse {
-            ptz_nodes: vec![self.build_ptz_node()],
-        })
+        config::get_nodes(&self.state)
     }
 
-    /// Handle GetNode request.
+    /// Handle GetNode request - delegates to ops::config
     pub fn handle_get_node(&self, request: GetNode) -> OnvifResult<GetNodeResponse> {
-        tracing::debug!("GetNode request for {}", request.node_token);
-
-        self.validate_node_token(&request.node_token)?;
-
-        Ok(GetNodeResponse {
-            ptz_node: self.build_ptz_node(),
-        })
+        config::get_node(&self.state, request.node_token)
     }
 
-    // ========================================================================
-    // Configuration Operations
-    // ========================================================================
-
-    /// Handle GetConfigurations request.
+    /// Handle GetConfigurations request - delegates to ops::config
     pub fn handle_get_configurations(
         &self,
         _request: GetConfigurations,
     ) -> OnvifResult<GetConfigurationsResponse> {
-        tracing::debug!("GetConfigurations request");
-
-        Ok(GetConfigurationsResponse {
-            ptz_configurations: vec![self.build_ptz_configuration()],
-        })
+        config::get_configurations(&self.state)
     }
 
-    /// Handle GetConfiguration request.
+    /// Handle GetConfiguration request - delegates to ops::config
     pub fn handle_get_configuration(
         &self,
         request: GetConfiguration,
     ) -> OnvifResult<GetConfigurationResponse> {
-        tracing::debug!(
-            "GetConfiguration request for {}",
-            request.ptz_configuration_token
-        );
-
-        self.validate_config_token(&request.ptz_configuration_token)?;
-
-        Ok(GetConfigurationResponse {
-            ptz_configuration: self.build_ptz_configuration(),
-        })
+        config::get_configuration(&self.state, request.ptz_configuration_token)
     }
 
-    /// Handle SetConfiguration request.
-    ///
-    /// Not supported - returns ActionNotSupported error.
+    /// Handle SetConfiguration request - delegates to ops::config
     pub fn handle_set_configuration(
         &self,
         request: SetConfiguration,
     ) -> OnvifResult<SetConfigurationResponse> {
-        tracing::debug!(
-            "SetConfiguration request for {} (not supported)",
-            request.ptz_configuration.token
-        );
-
-        self.validate_config_token(&request.ptz_configuration.token)?;
-
-        Err(OnvifError::ActionNotSupported(
-            "SetConfiguration".to_string(),
-        ))
+        config::set_configuration(&self.state, request.ptz_configuration)?;
+        Ok(SetConfigurationResponse {})
     }
 
-    /// Handle GetConfigurationOptions request.
+    /// Handle GetConfigurationOptions request - delegates to ops::config
     pub fn handle_get_configuration_options(
         &self,
         request: GetConfigurationOptions,
     ) -> OnvifResult<GetConfigurationOptionsResponse> {
-        tracing::debug!(
-            "GetConfigurationOptions request for {}",
-            request.configuration_token
-        );
-
-        self.validate_config_token(&request.configuration_token)?;
-
-        Ok(GetConfigurationOptionsResponse {
-            ptz_configuration_options: build_configuration_options(),
-        })
+        config::get_configuration_options(&self.state, request.configuration_token)
     }
 
-    // ========================================================================
-    // Movement Operations
-    // ========================================================================
-
-    /// Handle AbsoluteMove request.
+    /// Handle AbsoluteMove request - delegates to ops::movement
     pub async fn handle_absolute_move(
         &self,
         request: AbsoluteMove,
     ) -> OnvifResult<AbsoluteMoveResponse> {
-        tracing::debug!("AbsoluteMove request for profile {}", request.profile_token);
-
         self.validate_profile_token(&request.profile_token)?;
-
-        // Validate PTZ position values before calling FFI
-        super::validation::validate_ptz_vector(&request.position)?;
-
-        // Update state
-        self.state.set_position(&request.position);
-        self.state.set_moving(true, true);
-
-        // Call platform if available
-        if let Some(ref ptz) = self.ptz_control {
-            let pos = Self::vector_to_position(&request.position);
-            ptz.move_to_position(pos).await.map_err(|e| {
-                self.state.stop();
-                OnvifError::HardwareFailure(format!("PTZ move failed: {}", e))
-            })?;
-        }
-
-        // Mark as stopped (instant move for stub)
-        self.state.stop();
-
+        movement::absolute_move(
+            &self.state,
+            &self.ptz_control,
+            &request.profile_token,
+            request.position,
+        )
+        .await?;
         Ok(AbsoluteMoveResponse {})
     }
 
-    /// Handle RelativeMove request.
+    /// Handle RelativeMove request - delegates to ops::movement
     pub async fn handle_relative_move(
         &self,
         request: RelativeMove,
     ) -> OnvifResult<RelativeMoveResponse> {
-        tracing::debug!("RelativeMove request for profile {}", request.profile_token);
-
         self.validate_profile_token(&request.profile_token)?;
-
-        // Validate PTZ translation values before applying
-        super::validation::validate_ptz_velocity_vector(&request.translation)?;
-
-        // Get current position and apply translation
-        let current = self.state.get_position();
-        let mut new_pos = current.clone();
-
-        if let (Some(cur_pt), Some(trans_pt)) = (&current.pan_tilt, &request.translation.pan_tilt) {
-            new_pos.pan_tilt = Some(Vector2D {
-                x: (cur_pt.x + trans_pt.x).clamp(-1.0, 1.0),
-                y: (cur_pt.y + trans_pt.y).clamp(-1.0, 1.0),
-                space: cur_pt.space.clone(),
-            });
-        }
-
-        if let (Some(cur_z), Some(trans_z)) = (&current.zoom, &request.translation.zoom) {
-            new_pos.zoom = Some(Vector1D {
-                x: (cur_z.x + trans_z.x).clamp(0.0, 1.0),
-                space: cur_z.space.clone(),
-            });
-        }
-
-        // Update state
-        self.state.set_position(&new_pos);
-        self.state.set_moving(true, true);
-
-        // Call platform if available
-        if let Some(ref ptz) = self.ptz_control {
-            let pos = Self::vector_to_position(&new_pos);
-            ptz.move_to_position(pos).await.map_err(|e| {
-                self.state.stop();
-                OnvifError::HardwareFailure(format!("PTZ relative move failed: {}", e))
-            })?;
-        }
-
-        // Mark as stopped
-        self.state.stop();
-
+        movement::relative_move(
+            &self.state,
+            &self.ptz_control,
+            &request.profile_token,
+            request.translation,
+        )
+        .await?;
         Ok(RelativeMoveResponse {})
     }
 
-    /// Handle ContinuousMove request.
+    /// Handle ContinuousMove request - delegates to ops::movement
     pub async fn handle_continuous_move(
         &self,
         request: ContinuousMove,
     ) -> OnvifResult<ContinuousMoveResponse> {
-        tracing::debug!(
-            "ContinuousMove request for profile {}",
-            request.profile_token
-        );
-
         self.validate_profile_token(&request.profile_token)?;
-
-        // Validate PTZ velocity values before calling FFI
-        // Convert PTZSpeed to PTZVector for validation
-        let velocity_vector = PTZVector {
-            pan_tilt: request.velocity.pan_tilt.clone(),
-            zoom: request.velocity.zoom.clone(),
-        };
-        super::validation::validate_ptz_velocity_vector(&velocity_vector)?;
-
-        // Set moving state
-        let pan_tilt_moving = request
-            .velocity
-            .pan_tilt
-            .as_ref()
-            .is_some_and(|pt| pt.x != 0.0 || pt.y != 0.0);
-        let zoom_moving = request.velocity.zoom.as_ref().is_some_and(|z| z.x != 0.0);
-        self.state.set_moving(pan_tilt_moving, zoom_moving);
-
-        // Call platform if available
-        if let Some(ref ptz) = self.ptz_control {
-            let vel = Self::speed_to_velocity(&request.velocity);
-            ptz.continuous_move(vel).await.map_err(|e| {
-                self.state.stop();
-                OnvifError::HardwareFailure(format!("PTZ continuous move failed: {}", e))
-            })?;
-        }
-
+        movement::continuous_move(
+            &self.state,
+            &self.ptz_control,
+            &request.profile_token,
+            request.velocity,
+        )
+        .await?;
         Ok(ContinuousMoveResponse {})
     }
 
-    /// Handle Stop request.
+    /// Handle Stop request - delegates to ops::movement
     pub async fn handle_stop(&self, request: Stop) -> OnvifResult<StopResponse> {
-        tracing::debug!("Stop request for profile {}", request.profile_token);
-
         self.validate_profile_token(&request.profile_token)?;
-
         let stop_pan_tilt = request.pan_tilt.unwrap_or(true);
         let stop_zoom = request.zoom.unwrap_or(true);
-
-        // Update state
-        if stop_pan_tilt && stop_zoom {
-            self.state.stop();
-        } else {
-            let mut pan_tilt_moving = self.state.is_moving();
-            let mut zoom_moving = self.state.is_moving();
-
-            if stop_pan_tilt {
-                pan_tilt_moving = false;
-            }
-            if stop_zoom {
-                zoom_moving = false;
-            }
-            self.state.set_moving(pan_tilt_moving, zoom_moving);
-        }
-
-        // Call platform if available
-        if let Some(ref ptz) = self.ptz_control {
-            ptz.stop()
-                .await
-                .map_err(|e| OnvifError::HardwareFailure(format!("PTZ stop failed: {}", e)))?;
-        }
-
+        movement::stop(
+            &self.state,
+            &self.ptz_control,
+            &request.profile_token,
+            stop_pan_tilt,
+            stop_zoom,
+        )
+        .await?;
         Ok(StopResponse {})
     }
 
-    /// Handle GetStatus request.
+    /// Handle GetStatus request - delegates to ops::status
     pub fn handle_get_status(&self, request: GetStatus) -> OnvifResult<GetStatusResponse> {
-        tracing::debug!("GetStatus request for profile {}", request.profile_token);
-
         self.validate_profile_token(&request.profile_token)?;
-
-        Ok(GetStatusResponse {
-            ptz_status: self.state.get_status(),
-        })
+        status::get_status(&self.state, &request.profile_token)
     }
 
-    // ========================================================================
-    // Home Position Operations
-    // ========================================================================
-
-    /// Handle GotoHomePosition request.
+    /// Handle GotoHomePosition request - delegates to ops::status
     pub async fn handle_goto_home_position(
         &self,
         request: GotoHomePosition,
     ) -> OnvifResult<GotoHomePositionResponse> {
-        tracing::debug!(
-            "GotoHomePosition request for profile {}",
-            request.profile_token
-        );
-
         self.validate_profile_token(&request.profile_token)?;
-
-        // Get home position and move there
-        self.state.set_moving(true, true);
-        self.state.goto_home();
-
-        // Call platform if available
-        if let Some(ref ptz) = self.ptz_control {
-            let home_pos = self.state.get_position();
-            let pos = Self::vector_to_position(&home_pos);
-            ptz.move_to_position(pos).await.map_err(|e| {
-                self.state.stop();
-                OnvifError::HardwareFailure(format!("PTZ goto home failed: {}", e))
-            })?;
-        }
-
-        self.state.stop();
-
+        status::goto_home_position(&self.state, &self.ptz_control, &request.profile_token).await?;
         Ok(GotoHomePositionResponse {})
     }
 
-    /// Handle SetHomePosition request.
+    /// Handle SetHomePosition request - delegates to ops::status
     pub fn handle_set_home_position(
         &self,
         request: SetHomePosition,
     ) -> OnvifResult<SetHomePositionResponse> {
-        tracing::debug!(
-            "SetHomePosition request for profile {}",
-            request.profile_token
-        );
-
         self.validate_profile_token(&request.profile_token)?;
-
-        self.state.set_home_position();
-
+        status::set_home_position(&self.state, &request.profile_token)?;
         Ok(SetHomePositionResponse {})
     }
 
-    // ========================================================================
-    // Preset Operations
-    // ========================================================================
-
-    /// Handle GetPresets request.
+    /// Handle GetPresets request - delegates to ops::presets
     pub fn handle_get_presets(&self, request: GetPresets) -> OnvifResult<GetPresetsResponse> {
-        tracing::debug!("GetPresets request for profile {}", request.profile_token);
-
         self.validate_profile_token(&request.profile_token)?;
-
-        Ok(GetPresetsResponse {
-            presets: self.state.get_presets(),
-        })
+        presets::get_presets(&self.state, &request.profile_token)
     }
 
-    /// Handle SetPreset request.
+    /// Handle SetPreset request - delegates to ops::presets
     pub fn handle_set_preset(&self, request: SetPreset) -> OnvifResult<SetPresetResponse> {
-        tracing::debug!("SetPreset request for profile {}", request.profile_token);
-
         self.validate_profile_token(&request.profile_token)?;
-
-        let name = request.preset_name.unwrap_or_else(|| "Unnamed".to_string());
-        let preset_id = self.state.set_preset(name, request.preset_token)?;
-
-        Ok(SetPresetResponse {
-            preset_token: preset_id,
-        })
+        presets::set_preset(
+            &self.state,
+            &self.ptz_control,
+            &request.profile_token,
+            request.preset_name,
+            request.preset_token,
+        )
     }
 
-    /// Handle GotoPreset request.
+    /// Handle GotoPreset request - delegates to ops::presets
     pub async fn handle_goto_preset(&self, request: GotoPreset) -> OnvifResult<GotoPresetResponse> {
-        tracing::debug!(
-            "GotoPreset request for profile {}, preset {}",
-            request.profile_token,
-            request.preset_token
-        );
-
         self.validate_profile_token(&request.profile_token)?;
-
-        // Set moving state
-        self.state.set_moving(true, true);
-
-        // Go to preset position
-        self.state.goto_preset(&request.preset_token)?;
-
-        // Call platform if available
-        if let Some(ref ptz) = self.ptz_control {
-            ptz.goto_preset(&request.preset_token).await.map_err(|e| {
-                self.state.stop();
-                OnvifError::HardwareFailure(format!("PTZ goto preset failed: {}", e))
-            })?;
-        }
-
-        self.state.stop();
-
+        presets::goto_preset(
+            &self.state,
+            &self.ptz_control,
+            &request.profile_token,
+            request.preset_token,
+        )
+        .await?;
         Ok(GotoPresetResponse {})
     }
 
-    /// Handle RemovePreset request.
+    /// Handle RemovePreset request - delegates to ops::presets
     pub fn handle_remove_preset(&self, request: RemovePreset) -> OnvifResult<RemovePresetResponse> {
-        tracing::debug!(
-            "RemovePreset request for profile {}, preset {}",
-            request.profile_token,
-            request.preset_token
-        );
-
         self.validate_profile_token(&request.profile_token)?;
-
-        self.state.remove_preset(&request.preset_token)?;
-
+        presets::remove_preset(&self.state, &request.profile_token, request.preset_token)?;
         Ok(RemovePresetResponse {})
     }
 
-    // ========================================================================
-    // Service Capabilities
-    // ========================================================================
-
-    /// Handle GetServiceCapabilities request.
+    /// Handle GetServiceCapabilities request - delegates to ops::auxiliary
     pub fn handle_get_service_capabilities(
         &self,
         _request: GetServiceCapabilities,
     ) -> OnvifResult<GetServiceCapabilitiesResponse> {
-        tracing::debug!("GetServiceCapabilities request");
-
-        Ok(GetServiceCapabilitiesResponse {
-            capabilities: build_service_capabilities(),
-        })
+        auxiliary::get_service_capabilities(&self.state)
     }
 
-    /// Handle GetCompatibleConfigurations request.
+    /// Handle GetCompatibleConfigurations request - delegates to ops::auxiliary
     pub fn handle_get_compatible_configurations(
         &self,
         request: GetCompatibleConfigurations,
     ) -> OnvifResult<GetCompatibleConfigurationsResponse> {
-        tracing::debug!(
-            "GetCompatibleConfigurations request for profile {}",
-            request.profile_token
-        );
-
         self.validate_profile_token(&request.profile_token)?;
-
-        // Return all configurations (we only have one)
-        Ok(GetCompatibleConfigurationsResponse {
-            ptz_configurations: vec![self.build_ptz_configuration()],
-        })
+        auxiliary::get_compatible_configurations(&self.state, &request.profile_token)
     }
 
-    /// Handle SendAuxiliaryCommand request.
+    /// Handle SendAuxiliaryCommand request - delegates to ops::auxiliary
     pub fn handle_send_auxiliary_command(
         &self,
         request: SendAuxiliaryCommand,
     ) -> OnvifResult<SendAuxiliaryCommandResponse> {
-        tracing::debug!(
-            "SendAuxiliaryCommand request for profile {}, command: {}",
-            request.profile_token,
-            request.auxiliary_data
-        );
-
         self.validate_profile_token(&request.profile_token)?;
-
-        // We don't support auxiliary commands, return success with empty response
+        let response = auxiliary::send_auxiliary_command(
+            &self.state,
+            &request.profile_token,
+            &request.auxiliary_data,
+        )?;
         Ok(SendAuxiliaryCommandResponse {
-            auxiliary_response: None,
+            auxiliary_response: response,
         })
     }
 }

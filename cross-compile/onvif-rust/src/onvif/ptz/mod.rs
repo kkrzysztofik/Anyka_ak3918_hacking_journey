@@ -26,13 +26,18 @@
 //! - `ter:MovingZoom` - Cannot operate while zooming
 //! - `ter:NotAuthorized` - Insufficient privileges
 
-mod handlers;
-mod state;
+pub mod faults;
+pub mod ops;
+pub mod service;
+pub mod state;
+pub mod store;
 pub mod types;
 mod validation;
 
-pub use handlers::PTZService;
+pub use faults::*;
+pub use service::PTZService;
 pub use state::PTZStateManager;
+pub use store::PresetStore;
 pub use types::*;
 pub use validation::{validate_ptz_position, validate_ptz_vector, validate_ptz_velocity_vector};
 
