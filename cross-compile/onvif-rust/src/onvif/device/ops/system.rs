@@ -221,9 +221,7 @@ pub fn handle_set_system_date_and_time(
 pub fn handle_system_reboot(_request: SystemReboot) -> OnvifResult<SystemRebootResponse> {
     tracing::info!("SystemReboot request (not implemented)");
 
-    Err(OnvifError::ActionNotSupported(
-        "SystemReboot".to_string(),
-    ))
+    Err(OnvifError::ActionNotSupported("SystemReboot".to_string()))
 }
 
 /// Handle SetSystemFactoryDefault request.
@@ -387,7 +385,6 @@ fn base_url(config: &Arc<ConfigRuntime>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{PasswordManager, UserLevel, UserStorage};
     use std::sync::Arc;
 
     fn create_test_config() -> Arc<ConfigRuntime> {

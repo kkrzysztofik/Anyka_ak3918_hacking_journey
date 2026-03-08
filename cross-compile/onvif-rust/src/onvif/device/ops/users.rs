@@ -20,15 +20,15 @@ use crate::onvif::types::device::{
 fn map_user_storage_error(error: crate::config::UserError, last_admin_reason: &str) -> OnvifError {
     match error {
         crate::config::UserError::UserNotFound(name) => OnvifError::InvalidArgVal {
-            subcode: "ter:UserNotFound".to_string(),
+            subcode: "UserNotFound".to_string(),
             reason: format!("User '{}' not found", name),
         },
         crate::config::UserError::CannotDeleteLastAdmin => OnvifError::InvalidArgVal {
-            subcode: "ter:FixedUser".to_string(),
+            subcode: "FixedUser".to_string(),
             reason: last_admin_reason.to_string(),
         },
         other => OnvifError::InvalidArgVal {
-            subcode: "ter:InvalidArgVal".to_string(),
+            subcode: "InvalidArgVal".to_string(),
             reason: other.to_string(),
         },
     }
@@ -97,34 +97,23 @@ pub fn handle_create_users(
     for user in &request.users {
         // Validate username
         validate_username(&user.username).map_err(|e| OnvifError::InvalidArgVal {
-            subcode: "ter:InvalidUsername".to_string(),
+            subcode: "InvalidUsername".to_string(),
             reason: e.to_string(),
         })?;
 
-        // Validate password (required for create)
-        // Note: validate_password returns error for None when required=true
+        // Extract and validate password (required for create)
         let password = user
             .password
             .as_deref()
             .ok_or_else(|| OnvifError::InvalidArgVal {
-                subcode: "ter:InvalidPassword".to_string(),
+                subcode: "InvalidPassword".to_string(),
                 reason: "Password is required when creating a user".to_string(),
             })?;
 
-        // Additional validation (defense in depth - in case validate_password changes)
         validate_password(Some(password), true).map_err(|e| OnvifError::InvalidArgVal {
-            subcode: "ter:InvalidPassword".to_string(),
+            subcode: "InvalidPassword".to_string(),
             reason: e.to_string(),
         })?;
-
-        // Get the password - must be present for create operation
-        let password = user
-            .password
-            .as_deref()
-            .ok_or_else(|| OnvifError::InvalidArgVal {
-                subcode: "ter:MissingPassword".to_string(),
-                reason: "Password is required when creating a user".to_string(),
-            })?;
 
         // Convert ONVIF user level to internal level
         let level: UserLevel = user.user_level.clone().into();
@@ -135,11 +124,11 @@ pub fn handle_create_users(
             .map_err(|e| match e {
                 crate::config::UserError::MaxUsersReached => OnvifError::MaxUsers,
                 crate::config::UserError::UserExists(name) => OnvifError::InvalidArgVal {
-                    subcode: "ter:UsernameExists".to_string(),
+                    subcode: "UsernameExists".to_string(),
                     reason: format!("User '{}' already exists", name),
                 },
                 _ => OnvifError::InvalidArgVal {
-                    subcode: "ter:InvalidArgVal".to_string(),
+                    subcode: "InvalidArgVal".to_string(),
                     reason: e.to_string(),
                 },
             })?;
@@ -239,7 +228,7 @@ pub fn handle_set_user(
         // Validate password if provided
         validate_password(user.password.as_deref(), false).map_err(|e| {
             OnvifError::InvalidArgVal {
-                subcode: "ter:InvalidPassword".to_string(),
+                subcode: "InvalidPassword".to_string(),
                 reason: e.to_string(),
             }
         })?;
@@ -271,7 +260,7 @@ pub fn handle_set_user(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{PasswordManager, UserLevel, UserStorage};
+    use crate::config::{UserLevel, UserStorage};
     use crate::onvif::types::common::UserLevel as OnvifUserLevel;
     use std::sync::Arc;
 
@@ -388,7 +377,7 @@ mod tests {
         let result = handle_create_users(&users, request, UserLevel::Administrator);
         assert!(matches!(
             result,
-            Err(OnvifError::InvalidArgVal { subcode, .. }) if subcode == "ter:UsernameExists"
+            Err(OnvifError::InvalidArgVal { subcode, .. }) if subcode == "UsernameExists"
         ));
     }
 
@@ -424,7 +413,7 @@ mod tests {
         // PasswordRequired maps to ter:InvalidPassword
         assert!(matches!(
             result,
-            Err(OnvifError::InvalidArgVal { subcode, .. }) if subcode == "ter:InvalidPassword"
+            Err(OnvifError::InvalidArgVal { subcode, .. }) if subcode == "InvalidPassword"
         ));
     }
 
@@ -482,7 +471,7 @@ mod tests {
         let result = handle_delete_users(&users, request, UserLevel::Administrator);
         assert!(matches!(
             result,
-            Err(OnvifError::InvalidArgVal { subcode, .. }) if subcode == "ter:FixedUser"
+            Err(OnvifError::InvalidArgVal { subcode, .. }) if subcode == "FixedUser"
         ));
     }
 
@@ -554,7 +543,7 @@ mod tests {
         let result = handle_set_user(&users, request, UserLevel::Administrator);
         assert!(matches!(
             result,
-            Err(OnvifError::InvalidArgVal { subcode, .. }) if subcode == "ter:UserNotFound"
+            Err(OnvifError::InvalidArgVal { subcode, .. }) if subcode == "UserNotFound"
         ));
     }
 

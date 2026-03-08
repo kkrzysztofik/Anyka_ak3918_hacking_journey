@@ -3,6 +3,8 @@
 //! This module provides the DeviceStore struct which wraps persistent state
 //! that is saved to disk. This includes configuration and user storage.
 
+#![cfg_attr(not(test), allow(dead_code))]
+
 use crate::config::{ConfigRuntime, PasswordManager, UserStorage};
 use std::sync::Arc;
 

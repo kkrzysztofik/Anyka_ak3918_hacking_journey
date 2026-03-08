@@ -4,6 +4,8 @@
 //! - Scopes (GetScopes, SetScopes, AddScopes, RemoveScopes)
 //! - Discovery mode (GetDiscoveryMode, SetDiscoveryMode)
 
+#![cfg_attr(not(test), allow(dead_code))]
+
 use crate::onvif::device::faults::validate_scope;
 use crate::onvif::error::OnvifResult;
 use crate::onvif::types::common::{DiscoveryMode, Scope, ScopeDefinition};
@@ -313,7 +315,7 @@ mod tests {
         );
         assert!(matches!(
             result,
-            Err(crate::onvif::error::OnvifError::InvalidArgVal { subcode, .. }) if subcode == "ter:InvalidScope"
+            Err(crate::onvif::error::OnvifError::InvalidArgVal { subcode, .. }) if subcode == "InvalidScope"
         ));
     }
 

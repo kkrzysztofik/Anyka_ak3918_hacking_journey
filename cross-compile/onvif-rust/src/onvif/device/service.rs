@@ -160,6 +160,10 @@ impl DeviceService {
             super::validation::validate_scope(scope)?;
         }
 
+        // Read-copy-write: get_scopes() clones under read lock, then set_scopes()
+        // takes write lock. The tokio RwLock cannot be held across await points for
+        // both read and write in the same critical section. A concurrent mutation
+        // between the two calls is possible but acceptable for this embedded device.
         let scopes = self.state.get_scopes().await;
 
         // Keep fixed scopes, replace configurable ones
@@ -201,6 +205,7 @@ impl DeviceService {
             super::validation::validate_scope(scope)?;
         }
 
+        // Read-copy-write pattern (see handle_set_scopes comment for rationale)
         let mut scopes = self.state.get_scopes().await;
 
         for scope in request.scope_item {
@@ -470,6 +475,7 @@ impl ServiceHandler for DeviceService {
                             super::validation::validate_scope(scope)?;
                         }
 
+                        // Read-copy-write (see public handle_set_scopes for rationale)
                         let scopes = state.get_scopes().await;
 
                         // Keep fixed scopes, replace configurable ones
@@ -514,6 +520,7 @@ impl ServiceHandler for DeviceService {
                             super::validation::validate_scope(scope)?;
                         }
 
+                        // Read-copy-write (see public handle_set_scopes for rationale)
                         let mut scopes = state.get_scopes().await;
 
                         for scope in request.scope_item {
@@ -535,6 +542,7 @@ impl ServiceHandler for DeviceService {
                 dispatch_async(body_xml, |request: RemoveScopes| {
                     let state = state.clone();
                     async move {
+                        // Read-copy-write (see public handle_set_scopes for rationale)
                         let mut scopes = state.get_scopes().await;
                         let mut removed = Vec::new();
 

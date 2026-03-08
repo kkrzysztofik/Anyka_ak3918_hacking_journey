@@ -445,7 +445,7 @@ mod tests {
         );
         assert!(matches!(
             result,
-            Err(OnvifError::InvalidArgVal { subcode, .. }) if subcode == "ter:InvalidHostname"
+            Err(OnvifError::InvalidArgVal { subcode, .. }) if subcode == "InvalidHostname"
         ));
     }
 
@@ -460,7 +460,7 @@ mod tests {
         );
         assert!(matches!(
             result,
-            Err(OnvifError::InvalidArgVal { subcode, .. }) if subcode == "ter:InvalidHostname"
+            Err(OnvifError::InvalidArgVal { subcode, .. }) if subcode == "InvalidHostname"
         ));
     }
 
@@ -475,7 +475,7 @@ mod tests {
         );
         assert!(matches!(
             result,
-            Err(OnvifError::InvalidArgVal { subcode, .. }) if subcode == "ter:InvalidHostname"
+            Err(OnvifError::InvalidArgVal { subcode, .. }) if subcode == "InvalidHostname"
         ));
     }
 

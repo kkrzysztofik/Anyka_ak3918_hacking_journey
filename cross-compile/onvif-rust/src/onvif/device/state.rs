@@ -4,6 +4,8 @@
 //! that changes during operation but is not persisted to disk.
 //! This includes scopes, discovery mode, and other transient state.
 
+#![cfg_attr(not(test), allow(dead_code))]
+
 use crate::onvif::types::common::DiscoveryMode;
 use std::sync::Arc;
 use tokio::sync::RwLock;
