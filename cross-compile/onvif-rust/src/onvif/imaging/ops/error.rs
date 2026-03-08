@@ -2,6 +2,14 @@ use crate::onvif::error::OnvifError;
 
 use super::super::store::ImagingSettingsError;
 
+/// Map an [`ImagingSettingsError`] from the settings store / HAL layer into
+/// the corresponding [`OnvifError`] fault suitable for SOAP responses.
+///
+/// * `InvalidToken` -- `InvalidArgVal` with subcode `InvalidToken`
+/// * `OutOfRange` -- `InvalidArgVal` with a human-readable reason
+/// * `PlatformError` -- `HardwareFailure` (internal details are logged,
+///   not exposed to the client)
+/// * `ValidationFailed` -- `InvalidArgVal`
 pub(super) fn map_settings_error(err: ImagingSettingsError) -> OnvifError {
     match err {
         ImagingSettingsError::InvalidToken(token) => {
@@ -42,7 +50,9 @@ mod tests {
         match error {
             OnvifError::InvalidArgVal { subcode, reason } => {
                 assert_eq!(subcode, "InvalidToken");
-                assert!(reason.contains("bad-token"));
+                // Token value must NOT appear in error message (security)
+                assert!(!reason.contains("bad-token"));
+                assert!(reason.contains("Invalid video source token"));
             }
             other => panic!("expected InvalidArgVal, got: {:?}", other),
         }

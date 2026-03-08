@@ -170,10 +170,10 @@ pub fn out_of_range(param: &str, value: f32, min: f32, max: f32) -> OnvifError {
 /// # Returns
 ///
 /// An `OnvifError::InvalidArgVal` with `ter:InvalidToken` subcode.
-pub fn invalid_video_source(token: &str) -> OnvifError {
+pub fn invalid_video_source(_token: &str) -> OnvifError {
     OnvifError::InvalidArgVal {
         subcode: "InvalidToken".to_string(),
-        reason: format!("Invalid video source token: {}", token),
+        reason: "Invalid video source token".to_string(),
     }
 }
 
