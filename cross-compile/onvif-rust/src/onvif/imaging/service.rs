@@ -71,6 +71,11 @@ impl ImagingService {
     }
 
     /// Create a new Imaging Service with configuration and platform.
+    ///
+    /// The `config` parameter is stored for future use (e.g. persistence
+    /// settings, device-specific defaults) but is not read during normal
+    /// operation yet. Removing it would break the public constructor API
+    /// that callers in `server.rs` depend on.
     pub fn with_config_and_platform(
         config: Arc<ConfigRuntime>,
         platform: Arc<dyn Platform>,

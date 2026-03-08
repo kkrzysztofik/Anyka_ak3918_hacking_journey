@@ -8,7 +8,7 @@
 //! - `presets` - GetPresets, GetCurrentPreset, SetCurrentPreset
 
 pub mod capabilities;
-pub mod error;
+pub(crate) mod error;
 pub mod focus;
 pub mod presets;
 pub mod settings;

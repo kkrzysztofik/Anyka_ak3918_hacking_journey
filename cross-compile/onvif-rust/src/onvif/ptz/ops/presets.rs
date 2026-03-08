@@ -15,6 +15,10 @@ use crate::platform::PTZControl;
 use crate::onvif::ptz::state::PTZStateManager;
 
 /// Handle GetPresets request.
+///
+/// Presets are stored globally and shared across all profiles. The
+/// `profile_token` is logged for diagnostics but does not filter the
+/// returned preset list.
 pub fn get_presets(
     state: &PTZStateManager,
     profile_token: &str,

@@ -37,18 +37,32 @@ use super::types::*;
 ///
 /// Handles PTZ Service operations including:
 /// - Node discovery and configuration
-/// - Movement operations
-/// - Preset management
+/// - Movement operations (absolute, relative, continuous)
+/// - Preset management (get, set, goto, remove)
 /// - Home position management
+/// - Auxiliary commands and service capabilities
+///
+/// The service supports an optional platform PTZ control backend for
+/// forwarding commands to real hardware. When no platform is provided,
+/// the service operates in software-only mode using in-memory state.
 pub struct PTZService {
-    /// PTZ state manager.
+    /// PTZ state manager (position, movement, presets).
     pub(crate) state: Arc<PTZStateManager>,
     /// Platform PTZ control (optional for software-only mode).
     pub(crate) ptz_control: Option<Arc<dyn PTZControl>>,
 }
 
 impl PTZService {
-    /// Create a new PTZ Service.
+    /// Create a new PTZ Service in software-only mode.
+    ///
+    /// # Arguments
+    ///
+    /// * `state` - Shared PTZ state manager for position and preset tracking
+    ///
+    /// # Returns
+    ///
+    /// A `PTZService` with no platform backend. All PTZ operations are
+    /// handled in-memory only.
     pub fn new(state: Arc<PTZStateManager>) -> Self {
         Self {
             state,
@@ -57,6 +71,11 @@ impl PTZService {
     }
 
     /// Create a new PTZ Service with platform PTZ control.
+    ///
+    /// # Arguments
+    ///
+    /// * `state` - Shared PTZ state manager
+    /// * `platform` - Platform abstraction providing hardware PTZ control
     pub fn with_platform(state: Arc<PTZStateManager>, platform: Arc<dyn Platform>) -> Self {
         Self {
             state,
@@ -76,15 +95,19 @@ impl PTZService {
     // Validator and builder methods
     // ========================================================================
 
+    /// Validate a profile token.
+    ///
+    /// Performs a fast-fail check for empty tokens. The AK3918 device has a
+    /// single fixed profile ("Profile_1"), so any non-empty token is accepted
+    /// here; individual handlers may apply stricter checks when needed.
     #[allow(dead_code)]
     pub(crate) fn validate_profile_token(&self, token: &str) -> OnvifResult<()> {
         if token.is_empty() {
             return Err(OnvifError::InvalidArgVal {
-                subcode: "ter:NoToken".to_string(),
+                subcode: "NoToken".to_string(),
                 reason: "Profile token is required".to_string(),
             });
         }
-        // Detailed profile validation happens in the state-backed handlers.
         Ok(())
     }
 

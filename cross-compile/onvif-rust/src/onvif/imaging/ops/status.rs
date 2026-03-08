@@ -13,6 +13,35 @@ use super::error::map_settings_error;
 /// Handle GetStatus request.
 ///
 /// Returns imaging status including focus status for the specified video source.
+///
+/// # Arguments
+///
+/// * `store` - Imaging settings store providing current device state
+/// * `request` - The ONVIF GetStatus request containing the video source token
+///
+/// # Returns
+///
+/// `GetStatusResponse` with the current imaging status (focus position,
+/// move status, and error state).
+///
+/// # Errors
+///
+/// * `InvalidArgVal` with subcode `"InvalidToken"` — the video source token
+///   is not recognized by the device.
+///
+/// # Example
+///
+/// ```rust,no_run
+/// use onvif_rust::onvif::imaging::ops::status::get_status;
+/// use onvif_rust::onvif::imaging::store::ImagingSettingsStore;
+/// use onvif_rust::onvif::types::imaging::GetStatus;
+///
+/// # async fn example() {
+/// let store = ImagingSettingsStore::new();
+/// let request = GetStatus { video_source_token: "VideoSource_1".to_string() };
+/// let response = get_status(&store, request).await.unwrap();
+/// # }
+/// ```
 pub async fn get_status(
     store: &ImagingSettingsStore,
     request: GetStatus,

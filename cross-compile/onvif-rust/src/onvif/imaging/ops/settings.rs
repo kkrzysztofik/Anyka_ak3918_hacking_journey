@@ -174,9 +174,7 @@ async fn apply_platform_settings(
         imaging
             .set_saturation(saturation)
             .await
-            .map_err(|e| {
-                OnvifError::HardwareFailure(format!("Failed to set saturation: {}", e))
-            })?;
+            .map_err(|e| OnvifError::HardwareFailure(format!("Failed to set saturation: {}", e)))?;
     }
 
     if let Some(sharpness) = settings.sharpness {
@@ -367,11 +365,8 @@ mod tests {
         use crate::platform::stub::StubPlatformBuilder;
 
         let store = ImagingSettingsStore::new();
-        let platform: Arc<dyn Platform> = Arc::new(
-            StubPlatformBuilder::new()
-                .imaging_supported(true)
-                .build(),
-        );
+        let platform: Arc<dyn Platform> =
+            Arc::new(StubPlatformBuilder::new().imaging_supported(true).build());
         let settings = ImagingSettings20 {
             brightness: Some(75.0),
             contrast: Some(60.0),

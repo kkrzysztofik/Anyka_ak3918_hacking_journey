@@ -27,7 +27,7 @@ use crate::onvif::ptz::types::{
 pub fn validate_config_token(token: &str) -> OnvifResult<()> {
     if token != DEFAULT_CONFIG_TOKEN {
         return Err(OnvifError::InvalidArgVal {
-            subcode: "ter:InvalidToken".to_string(),
+            subcode: "InvalidToken".to_string(),
             reason: format!("Configuration '{}' not found", token),
         });
     }
@@ -38,7 +38,7 @@ pub fn validate_config_token(token: &str) -> OnvifResult<()> {
 pub fn validate_node_token(token: &str) -> OnvifResult<()> {
     if token != DEFAULT_NODE_TOKEN {
         return Err(OnvifError::InvalidArgVal {
-            subcode: "ter:InvalidToken".to_string(),
+            subcode: "InvalidToken".to_string(),
             reason: format!("Node '{}' not found", token),
         });
     }

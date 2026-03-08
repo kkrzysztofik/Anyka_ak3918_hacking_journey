@@ -7,9 +7,14 @@ use crate::onvif::error::OnvifResult;
 use crate::onvif::imaging::types::ImagingOptions20;
 use crate::onvif::types::common::ImagingSettings20;
 
-/// Validate imaging settings against options.
+/// Validate imaging settings against device-reported option ranges (dynamic validation).
 ///
-/// Returns Ok(()) if valid, or an error if any parameter is out of range.
+/// Each setting value is checked against the corresponding range from
+/// `ImagingOptions20`. Settings whose option range is `None` are
+/// unconstrained and always accepted.
+///
+/// For quick sanity checks without device options, use the static helpers
+/// (`validate_brightness`, `validate_contrast`, etc.) below.
 #[allow(clippy::collapsible_if)]
 pub fn validate_settings(
     settings: &ImagingSettings20,

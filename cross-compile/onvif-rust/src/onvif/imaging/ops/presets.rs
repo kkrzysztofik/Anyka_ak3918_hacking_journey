@@ -5,7 +5,7 @@
 //! - GetCurrentPreset - Get currently active preset
 //! - SetCurrentPreset - Apply a specific preset
 
-use crate::onvif::error::{OnvifError, OnvifResult};
+use crate::onvif::error::OnvifResult;
 use crate::onvif::types::imaging::{
     GetCurrentPreset, GetCurrentPresetResponse, GetPresets, GetPresetsResponse, SetCurrentPreset,
     SetCurrentPresetResponse,
@@ -66,9 +66,7 @@ pub async fn set_current_preset(
     }
 
     // Presets not supported - return error
-    Err(OnvifError::ActionNotSupported(
-        "Imaging presets are not supported on this device".to_string(),
-    ))
+    Err(faults::presets_not_supported())
 }
 
 // ============================================================================
@@ -78,6 +76,7 @@ pub async fn set_current_preset(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::onvif::error::OnvifError;
 
     #[tokio::test]
     async fn test_get_presets_not_supported() {
@@ -143,6 +142,22 @@ mod tests {
         let result = set_current_preset(&store, request).await;
         assert!(result.is_err());
         // Invalid token should return InvalidArgVal, not ActionNotSupported
-        assert!(!matches!(result, Err(OnvifError::ActionNotSupported(_))));
+        assert!(
+            matches!(result, Err(OnvifError::InvalidArgVal { ref subcode, .. }) if subcode == "InvalidToken"),
+            "expected InvalidArgVal with subcode InvalidToken"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_get_presets_invalid_token_returns_invalid_arg_val() {
+        let store = ImagingSettingsStore::new();
+        let request = GetPresets {
+            video_source_token: "BadToken".to_string(),
+        };
+        let result = get_presets(&store, request).await;
+        assert!(
+            matches!(result, Err(OnvifError::InvalidArgVal { ref subcode, .. }) if subcode == "InvalidToken"),
+            "expected InvalidArgVal with subcode InvalidToken"
+        );
     }
 }

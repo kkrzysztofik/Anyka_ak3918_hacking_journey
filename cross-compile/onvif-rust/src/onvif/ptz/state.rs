@@ -261,10 +261,16 @@ impl PTZStateManager {
     }
 
     /// Go to a preset position.
+    ///
+    /// The `presets.get()` call returns `NotFound` via `faults::no_preset` when
+    /// the token is unknown. The separate `ok_or_else` below covers the
+    /// defensive case where a preset exists but has no stored position.
     pub fn goto_preset(&self, token: &str) -> crate::onvif::OnvifResult<()> {
         let preset = self.presets.get(token)?;
         let position = preset.ptz_position.ok_or_else(|| {
-            crate::onvif::OnvifError::NotFound("Preset has no position".to_string())
+            crate::onvif::OnvifError::Internal(
+                "Preset exists but has no stored position".to_string(),
+            )
         })?;
         self.set_position(&position);
         Ok(())
