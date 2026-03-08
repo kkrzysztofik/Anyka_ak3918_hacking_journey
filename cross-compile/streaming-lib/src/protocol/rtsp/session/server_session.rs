@@ -294,9 +294,7 @@ impl FramePacer {
 fn pacing_timestamp_ms(frame_data: &FrameData) -> Option<u32> {
     match frame_data {
         FrameData::Video { timestamp, .. } => Some(*timestamp),
-        FrameData::Audio { .. } | FrameData::MetaData { .. } | FrameData::MediaInfo { .. } => {
-            None
-        }
+        FrameData::Audio { .. } | FrameData::MetaData { .. } | FrameData::MediaInfo { .. } => None,
     }
 }
 
