@@ -263,6 +263,7 @@ pub(crate) fn create_default_ptz_configuration() -> PTZConfiguration {
     PTZConfiguration {
         token: format!("{}0", PTZ_CONFIG_PREFIX),
         name: "DefaultPTZConfig".to_string(),
+        // Two default profiles (MainStream and SubStream) share this PTZ configuration
         use_count: 2,
         move_ramp: None,
         preset_ramp: None,

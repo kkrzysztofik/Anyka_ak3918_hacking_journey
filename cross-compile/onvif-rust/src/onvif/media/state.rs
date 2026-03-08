@@ -493,7 +493,7 @@ impl MediaState {
     }
 
     /// Set profile counter.
-    pub fn set_profile_counter(&self, count: u32) {
+    pub(crate) fn set_profile_counter(&self, count: u32) {
         self.profile_counter.store(count, Ordering::SeqCst);
     }
 

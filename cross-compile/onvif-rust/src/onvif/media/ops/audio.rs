@@ -6,15 +6,12 @@
 //! - SetAudioSourceConfiguration, SetAudioEncoderConfiguration
 //! - GetCompatible* configurations
 
-#[allow(unused_imports)]
 use crate::onvif::error::OnvifResult;
-#[allow(unused_imports)]
 use crate::onvif::types::media::{
-    GetAudioEncoderConfiguration, GetAudioEncoderConfigurationOptions,
-    GetAudioEncoderConfigurationOptionsResponse, GetAudioEncoderConfigurationResponse,
-    GetAudioEncoderConfigurations, GetAudioEncoderConfigurationsResponse,
-    GetAudioSourceConfiguration, GetAudioSourceConfigurationResponse, GetAudioSourceConfigurations,
-    GetAudioSourceConfigurationsResponse, GetAudioSources, GetAudioSourcesResponse,
+    GetAudioEncoderConfiguration, GetAudioEncoderConfigurationOptionsResponse,
+    GetAudioEncoderConfigurationResponse, GetAudioEncoderConfigurationsResponse,
+    GetAudioSourceConfiguration, GetAudioSourceConfigurationResponse,
+    GetAudioSourceConfigurationsResponse, GetAudioSourcesResponse,
     GetCompatibleAudioEncoderConfigurations, GetCompatibleAudioEncoderConfigurationsResponse,
     GetCompatibleAudioSourceConfigurations, GetCompatibleAudioSourceConfigurationsResponse,
     SetAudioEncoderConfiguration, SetAudioEncoderConfigurationResponse,

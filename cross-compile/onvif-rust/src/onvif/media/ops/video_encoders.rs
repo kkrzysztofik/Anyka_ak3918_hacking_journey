@@ -69,6 +69,8 @@ pub fn set_video_encoder_configuration(
         validation::validate_bitrate(rate_control.bitrate_limit)?;
     }
 
+    // TODO: force_persistence is accepted per ONVIF spec but not yet implemented;
+    // all configuration changes are currently persisted immediately.
     pm.set_video_encoder_configuration(request.configuration)?;
     Ok(SetVideoEncoderConfigurationResponse {})
 }

@@ -1172,6 +1172,48 @@ mod tests {
         assert!(result.is_err());
     }
 
+    // ========================================================================
+    // ServiceHandler Error Path Tests
+    // ========================================================================
+
+    #[tokio::test]
+    async fn test_service_handler_unknown_action_media() {
+        let service = MediaService::new();
+        let result = service.handle_operation("UnknownAction", "<test/>").await;
+        assert!(result.is_err());
+        assert!(matches!(result, Err(OnvifError::ActionNotSupported(_))));
+    }
+
+    #[tokio::test]
+    async fn test_service_handler_invalid_xml() {
+        let service = MediaService::new();
+        let result = service
+            .handle_operation("GetProfiles", "<InvalidXml><Broken")
+            .await;
+        assert!(result.is_err());
+        assert!(matches!(result, Err(OnvifError::WellFormed(_))));
+    }
+
+    #[tokio::test]
+    async fn test_service_handler_get_profiles_xml() {
+        let service = MediaService::new();
+        let xml = r#"<GetProfiles/>"#;
+        let result = service.handle_operation("GetProfiles", xml).await;
+        assert!(result.is_ok());
+        let response_xml = result.unwrap();
+        assert!(response_xml.contains("GetProfilesResponse"));
+    }
+
+    #[tokio::test]
+    async fn test_service_handler_get_video_sources_xml() {
+        let service = MediaService::new();
+        let xml = r#"<GetVideoSources/>"#;
+        let result = service.handle_operation("GetVideoSources", xml).await;
+        assert!(result.is_ok());
+        let response_xml = result.unwrap();
+        assert!(response_xml.contains("GetVideoSourcesResponse"));
+    }
+
     #[test]
     fn test_set_video_encoder_configuration_invalid_quality() {
         use crate::onvif::types::common::{
