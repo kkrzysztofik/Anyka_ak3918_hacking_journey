@@ -51,7 +51,7 @@ pub struct EventsServiceCapabilities {
         default,
         skip_serializing_if = "Option::is_none"
     )]
-    pub max_notification_producers: Option<i32>,
+    pub max_notification_producers: Option<u32>,
 
     /// MaxPullPoints.
     #[serde(
@@ -59,7 +59,7 @@ pub struct EventsServiceCapabilities {
         default,
         skip_serializing_if = "Option::is_none"
     )]
-    pub max_pull_points: Option<i32>,
+    pub max_pull_points: Option<u32>,
 
     /// PersistentNotificationStorage.
     #[serde(
@@ -125,7 +125,7 @@ pub struct GetEventPropertiesResponse {
         default,
         skip_serializing_if = "Option::is_none"
     )]
-    pub production_limit: Option<i32>,
+    pub production_limit: Option<u32>,
 
     /// Production node.
     #[serde(
@@ -247,7 +247,7 @@ pub struct PullMessages {
         default,
         skip_serializing_if = "Option::is_none"
     )]
-    pub max_message_count: Option<i32>,
+    pub max_message_count: Option<u32>,
 }
 
 /// PullMessages response.
