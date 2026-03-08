@@ -135,21 +135,25 @@ struct vd_slot_header {
 } __attribute__((packed));
 
 /**
- * @brief Frame notification (12 bytes, sent on Unix socket)
+ * @brief Frame notification (20 bytes, sent on Unix socket)
  *
  * Sent from daemon to Rust when a new frame is ready.
+ * Includes enough metadata for Rust to reject stale notifications when a slot
+ * has already been reused before the socket notification is consumed.
  * Must match the Rust equivalent exactly.
  */
 struct vd_frame_notify {
     uint32_t slot_index;      /* Which ring buffer slot */
     uint32_t frame_len;       /* Frame data length */
     uint32_t flags;          /* bit 0: is_last_fragment, bit 1: socket_fallback */
+    uint32_t stream_id;      /* Stream encoded into the slot */
+    uint32_t seq_no;         /* Frame sequence number encoded into the slot */
 } __attribute__((packed));
 
 /* Compile-time assertion for struct sizes */
 _Static_assert(sizeof(struct vd_ring_header) == 64, "vd_ring_header must be 64 bytes");
 _Static_assert(sizeof(struct vd_slot_header) == 64, "vd_slot_header must be 64 bytes");
-_Static_assert(sizeof(struct vd_frame_notify) == 12, "vd_frame_notify must be 12 bytes");
+_Static_assert(sizeof(struct vd_frame_notify) == 20, "vd_frame_notify must be 20 bytes");
 
 /*============================================================================
  * Helper Macros

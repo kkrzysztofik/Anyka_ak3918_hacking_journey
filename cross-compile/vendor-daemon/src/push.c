@@ -110,7 +110,7 @@ static const char *slot_state_name(uint32_t state)
  * push_frame_thread - Dedicated pthread entry point for push-based frame delivery.
  *
  * Polls ak_venc_get_stream() in a tight loop, writes frames to the ring
- * buffer, and pushes unsolicited 12-byte notifications to the frame client.
+ * buffer, and pushes unsolicited 20-byte notifications to the frame client.
  * The Rust side just reads notifications — zero polling, zero wasted IPC.
  *
  * @param arg   Pointer to the struct push_stream_state for this stream slot.
@@ -263,6 +263,8 @@ static void *push_frame_thread(void *arg)
             notif.slot_index = (uint32_t)ring_slot;
             notif.frame_len = frame_len;
             notif.flags = VD_NOTIFY_LAST_FRAGMENT;
+            notif.stream_id = ring_stream_id;
+            notif.seq_no = seq_no;
             if (send_frame_notification(state->stream_id, &notif) != 0) {
                 log_warn("[push] notification write failed, client may have disconnected");
             }
@@ -273,6 +275,8 @@ static void *push_frame_thread(void *arg)
             notif.slot_index = 0;
             notif.frame_len = 0;
             notif.flags = VD_NOTIFY_FRAME_DROPPED;
+            notif.stream_id = ring_stream_id;
+            notif.seq_no = seq_no;
             (void)send_frame_notification(state->stream_id, &notif);
             log_warn("event=push_drop_notify stream=%u seq_no=%u frame_type=%u diag_monotonic_ms=%llu",
                      state->stream_id,

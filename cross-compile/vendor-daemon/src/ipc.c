@@ -135,7 +135,7 @@ uint64_t diag_monotonic_ms(void)
 }
 
 /**
- * send_frame_notification - Send a 12-byte frame notification to the frame client.
+ * send_frame_notification - Send a 20-byte frame notification to the frame client.
  *
  * Locks the per-stream mutex, checks whether a frame client is connected,
  * and writes the vd_frame_notify struct on the dedicated frame socket.
@@ -156,31 +156,40 @@ int send_frame_notification(uint32_t stream_id, const struct vd_frame_notify *no
         if (write_exact(client_fd, notif, sizeof(*notif)) != 0) {
             ret = -1;
             log_warn(
-                "event=push_notify_send stream=%u fd=%d slot=%u flags=0x%x status=error errno=%d diag_monotonic_ms=%llu",
+                "event=push_notify_send stream=%u fd=%d slot=%u frame_len=%u flags=0x%x notif_stream=%u notif_seq_no=%u status=error errno=%d diag_monotonic_ms=%llu",
                 stream_id,
                 client_fd,
                 notif->slot_index,
+                notif->frame_len,
                 notif->flags,
+                notif->stream_id,
+                notif->seq_no,
                 errno,
                 (unsigned long long)diag_monotonic_ms()
             );
         } else {
             log_debug(
-                "event=push_notify_send stream=%u fd=%d slot=%u flags=0x%x status=ok diag_monotonic_ms=%llu",
+                "event=push_notify_send stream=%u fd=%d slot=%u frame_len=%u flags=0x%x notif_stream=%u notif_seq_no=%u status=ok diag_monotonic_ms=%llu",
                 stream_id,
                 client_fd,
                 notif->slot_index,
+                notif->frame_len,
                 notif->flags,
+                notif->stream_id,
+                notif->seq_no,
                 (unsigned long long)diag_monotonic_ms()
             );
         }
     } else {
         log_debug(
-            "event=push_notify_send stream=%u fd=%d slot=%u flags=0x%x status=no_client diag_monotonic_ms=%llu",
+            "event=push_notify_send stream=%u fd=%d slot=%u frame_len=%u flags=0x%x notif_stream=%u notif_seq_no=%u status=no_client diag_monotonic_ms=%llu",
             stream_id,
             client_fd,
             notif->slot_index,
+            notif->frame_len,
             notif->flags,
+            notif->stream_id,
+            notif->seq_no,
             (unsigned long long)diag_monotonic_ms()
         );
     }

@@ -9,7 +9,7 @@
 //! Response format: status (i32) + resp_len (u32) + resp_data (bytes)
 //!
 //! Frame delivery is push-only: vendor-daemon writes encoded frames into a
-//! shared-memory ring and sends 12-byte notifications over
+//! shared-memory ring and sends 20-byte notifications over
 //! `/tmp/vd-frame-main.sock` and `/tmp/vd-frame-sub.sock`.
 
 #![allow(dead_code)]
@@ -23,7 +23,7 @@ use crate::platform::PlatformError;
 use crate::platform::PlatformResult;
 use crate::platform::common::{OwnedFrame, StreamId};
 use crate::streaming::bridge::BytesMutPool;
-use shm_ring::{FrameNotification, ShmRingReader};
+use shm_ring::{FrameNotification, ShmRingReader, VD_NOTIFY_WIRE_SIZE};
 
 use std::ffi::c_void;
 use std::io::{ErrorKind, Read, Write};
@@ -488,7 +488,7 @@ impl AnykaIpc {
                 ))
             })?;
 
-        let mut notif_bytes = [0u8; 12];
+        let mut notif_bytes = [0u8; VD_NOTIFY_WIRE_SIZE];
         stream
             .read_exact(&mut notif_bytes)
             .map_err(|e| match e.kind() {
@@ -505,7 +505,10 @@ impl AnykaIpc {
                 diag_monotonic_ms = monotonic_millis(),
                 channel,
                 slot_index = notif.slot_index,
+                frame_len = notif.frame_len,
                 flags = notif.flags,
+                stream_id = notif.stream_id,
+                seq_no = notif.seq_no,
                 socket_fallback = notif.is_socket_fallback(),
                 frame_dropped = notif.is_frame_dropped(),
                 "received push notification"
@@ -786,7 +789,7 @@ impl AnykaIpc {
     /// Start push-based frame delivery from the daemon.
     ///
     /// The daemon spawns a dedicated thread that polls `ak_venc_get_stream()`,
-    /// writes frames to the ring buffer, and pushes unsolicited 12-byte
+    /// writes frames to the ring buffer, and pushes unsolicited 20-byte
     /// notifications over the frame socket. Returns `Ok(())` if the daemon
     /// accepted the command, or an error if the daemon doesn't support push mode.
     pub fn start_push(
@@ -873,7 +876,7 @@ impl AnykaIpc {
 
     /// Receive the next pushed frame from the daemon.
     ///
-    /// In push mode, the daemon sends 12-byte notifications proactively.
+    /// In push mode, the daemon sends 20-byte notifications proactively.
     /// This method blocks until a notification arrives (no polling needed).
     /// The frame data is read from shared memory using the slot index in
     /// the notification.
@@ -1003,7 +1006,7 @@ impl AnykaIpc {
         })?;
 
         let (metadata, frame_data) = shm
-            .read_slot_into_bytesmut(notif.slot_index, pool)
+            .read_notified_slot_into_bytesmut(&notif, pool)
             .map_err(|e| Self::map_shm_slot_read_error(e, channel_name))?;
 
         Ok(OwnedFrame {
@@ -1700,12 +1703,14 @@ mod tests {
     }
 
     #[test]
-    fn test_read_push_notification_reads_12_byte_notification() {
+    fn test_read_push_notification_reads_20_byte_notification() {
         let (mut writer, mut reader) = UnixStream::pair().unwrap();
         let raw = [
             0x02, 0x00, 0x00, 0x00, // slot_index = 2
             0x34, 0x12, 0x00, 0x00, // frame_len = 0x1234
             0x01, 0x00, 0x00, 0x00, // flags = VD_NOTIFY_LAST_FRAGMENT
+            0x01, 0x00, 0x00, 0x00, // stream_id = sub
+            0x66, 0x00, 0x00, 0x00, // seq_no = 102
         ];
         writer.write_all(&raw).unwrap();
         writer.flush().unwrap();
@@ -1714,6 +1719,8 @@ mod tests {
         assert_eq!(notif.slot_index, 2);
         assert_eq!(notif.frame_len, 0x1234);
         assert_eq!(notif.flags, 1);
+        assert_eq!(notif.stream_id, 1);
+        assert_eq!(notif.seq_no, 102);
     }
 
     #[test]
@@ -1732,11 +1739,13 @@ mod tests {
             prefer_sub_on_tie: AtomicBool::new(false),
         };
 
-        // Write a 12-byte drop notification: slot_index=0, frame_len=0, flags=VD_NOTIFY_FRAME_DROPPED(4)
+        // Write a 20-byte drop notification: slot_index=0, frame_len=0, flags=VD_NOTIFY_FRAME_DROPPED(4)
         let drop_notification = [
             0x00, 0x00, 0x00, 0x00, // slot_index = 0
             0x00, 0x00, 0x00, 0x00, // frame_len = 0
             0x04, 0x00, 0x00, 0x00, // flags = VD_NOTIFY_FRAME_DROPPED (1 << 2)
+            0x00, 0x00, 0x00, 0x00, // stream_id = main
+            0x09, 0x00, 0x00, 0x00, // seq_no = 9
         ];
         writer.write_all(&drop_notification).unwrap();
         writer.flush().unwrap();
