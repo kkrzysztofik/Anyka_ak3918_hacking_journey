@@ -80,6 +80,10 @@ pub struct EventsServiceCapabilities {
 pub struct GetEventProperties {}
 
 /// GetEventProperties response.
+///
+/// # Missing ONVIF fields
+/// TODO: Add `topic_set: Option<TopicSet>` -- the ONVIF spec requires a TopicSet element
+/// that describes the fixed topic tree. Omitted until the TopicSet schema is modelled.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename = "GetEventPropertiesResponse", rename_all = "PascalCase")]
 pub struct GetEventPropertiesResponse {
@@ -167,6 +171,11 @@ pub struct TopicFilter {
 }
 
 /// Topic expression.
+///
+/// Current limitation: `content` captures only the text node via `$value`.
+/// ONVIF topic expressions are plain text (e.g. `tns1:RuleEngine/...`), so
+/// this is sufficient for the ConcreteSet dialect. Namespace-prefixed or
+/// XPath-based dialects may require richer parsing in the future.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename = "TopicExpression", rename_all = "PascalCase")]
 pub struct TopicExpression {
@@ -271,6 +280,11 @@ pub struct PullMessagesResponse {
 }
 
 /// Notification message.
+///
+/// Current limitation: the `message` field is a plain `String` and cannot
+/// carry structured ONVIF Message payloads (Source, Key, Data child elements).
+/// This is acceptable for the scaffold since PullMessages returns
+/// `ActionNotSupported`, but must be revisited when event delivery is implemented.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename = "NotificationMessage", rename_all = "PascalCase")]
 pub struct NotificationMessage {

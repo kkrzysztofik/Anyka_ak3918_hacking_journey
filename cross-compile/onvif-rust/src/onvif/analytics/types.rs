@@ -145,6 +145,9 @@ pub struct CreateAnalyticsModules {
 }
 
 /// Analytics modules list for creation.
+// TODO: CreateAnalyticsModulesList and GetAnalyticsModulesList are structurally
+// identical (both wrap Vec<AnalyticsModuleItem>). Consider consolidating into a
+// single AnalyticsModulesList type once all callers are surveyed.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename = "AnalyticsModules", rename_all = "PascalCase")]
 pub struct CreateAnalyticsModulesList {
@@ -348,8 +351,7 @@ mod tests {
         };
 
         let xml = quick_xml::se::to_string(&item).expect("serialize");
-        let deserialized: AnalyticsModuleItem =
-            quick_xml::de::from_str(&xml).expect("deserialize");
+        let deserialized: AnalyticsModuleItem = quick_xml::de::from_str(&xml).expect("deserialize");
 
         assert_eq!(item, deserialized);
     }
