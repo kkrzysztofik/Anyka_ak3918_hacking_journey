@@ -1,3 +1,11 @@
+//! Shared ONVIF `GetServiceCapabilities` request/response wrappers.
+//!
+//! Multiple ONVIF services (Device, Media, PTZ, Imaging, Events, Analytics)
+//! share the same `GetServiceCapabilities` request shape (empty body) and a
+//! generic response that wraps service-specific capability structs. This module
+//! provides the common envelope types so each service only needs to define its
+//! own `Capabilities` struct.
+
 use serde::{Deserialize, Serialize};
 
 /// Shared empty request wrapper used by services that expose `GetServiceCapabilities`.

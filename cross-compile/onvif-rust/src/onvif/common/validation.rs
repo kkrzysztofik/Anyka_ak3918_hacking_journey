@@ -182,6 +182,8 @@ pub fn validate_range_i32(value: i32, min: i32, max: i32, param: &str) -> OnvifR
 /// assert!(validate_max_length("a".repeat(65).as_str(), 64, "name").is_err());
 /// ```
 pub fn validate_max_length(value: &str, max: usize, param: &str) -> OnvifResult<()> {
+    // NOTE: Uses byte length (.len()), not character count (.chars().count()).
+    // ONVIF tokens are ASCII-only (xs:token), so byte length == character count.
     if value.len() > max {
         return Err(OnvifError::invalid_arg(
             "TooLong",
