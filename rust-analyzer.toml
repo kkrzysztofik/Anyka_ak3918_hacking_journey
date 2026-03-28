@@ -1,5 +1,6 @@
 # Mirrors .vscode/settings.json rust-analyzer configuration for non-VSCode clients (e.g., Serena).
-linkedProjects = ["/home/kmk/anyka-dev/cross-compile/Cargo.toml"]
+# Paths are repo-relative (same tree as ANYKA_REPO_ROOT from setenv.sh when cwd is repo root).
+linkedProjects = ["cross-compile/Cargo.toml"]
 
 [server]
 extraEnv = { RUSTC = "rustc", RUSTUP_TOOLCHAIN = "" }

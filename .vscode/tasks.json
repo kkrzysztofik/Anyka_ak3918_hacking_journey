@@ -4,11 +4,10 @@
     {
       "label": "build-debug",
       "type": "shell",
-      "command": "make",
+      "command": "bash",
       "args": [
-        "-C",
-        "${workspaceFolder}/cross-compile/onvif",
-        "debug"
+        "-c",
+        "source '${workspaceFolder}/setenv.sh' && make -C '${workspaceFolder}/cross-compile/onvif' debug"
       ],
       "group": {
         "kind": "build",
@@ -32,11 +31,10 @@
     {
       "label": "build-release",
       "type": "shell",
-      "command": "make",
+      "command": "bash",
       "args": [
-        "-C",
-        "${workspaceFolder}/cross-compile/onvif",
-        "release"
+        "-c",
+        "source '${workspaceFolder}/setenv.sh' && make -C '${workspaceFolder}/cross-compile/onvif' release"
       ],
       "group": "build",
       "presentation": {
@@ -57,11 +55,10 @@
     {
       "label": "clean",
       "type": "shell",
-      "command": "make",
+      "command": "bash",
       "args": [
-        "-C",
-        "${workspaceFolder}/cross-compile/onvif",
-        "clean"
+        "-c",
+        "source '${workspaceFolder}/setenv.sh' && make -C '${workspaceFolder}/cross-compile/onvif' clean"
       ],
       "group": "build",
       "presentation": {
@@ -79,11 +76,10 @@
     {
       "label": "docs",
       "type": "shell",
-      "command": "make",
+      "command": "bash",
       "args": [
-        "-C",
-        "${workspaceFolder}/cross-compile/onvif",
-        "docs"
+        "-c",
+        "source '${workspaceFolder}/setenv.sh' && make -C '${workspaceFolder}/cross-compile/onvif' docs"
       ],
       "group": "build",
       "presentation": {
@@ -101,11 +97,10 @@
     {
       "label": "test",
       "type": "shell",
-      "command": "make",
+      "command": "bash",
       "args": [
-        "-C",
-        "${workspaceFolder}/cross-compile/onvif",
-        "test"
+        "-c",
+        "source '${workspaceFolder}/setenv.sh' && make -C '${workspaceFolder}/cross-compile/onvif' test"
       ],
       "group": "test",
       "presentation": {
@@ -126,7 +121,7 @@
       "command": "bash",
       "args": [
         "-c",
-        "cp ${workspaceFolder}/cross-compile/onvif/out/onvifd ${workspaceFolder}/SD_card_contents/anyka_hack/usr/bin/ && echo 'Binary copied to SD card payload'"
+        "source '${workspaceFolder}/setenv.sh' && cp '${workspaceFolder}/cross-compile/onvif/out/onvifd' '${workspaceFolder}/SD_card_contents/anyka_hack/usr/bin/' && echo 'Binary copied to SD card payload'"
       ],
       "group": "build",
       "presentation": {
@@ -145,11 +140,10 @@
     {
       "label": "generate-compile-commands",
       "type": "shell",
-      "command": "make",
+      "command": "bash",
       "args": [
-        "-C",
-        "${workspaceFolder}/cross-compile/onvif",
-        "compile-commands"
+        "-c",
+        "source '${workspaceFolder}/setenv.sh' && make -C '${workspaceFolder}/cross-compile/onvif' compile-commands"
       ],
       "group": "build",
       "presentation": {
@@ -160,7 +154,10 @@
         "showReuseMessage": true,
         "clear": false
       },
-      "problemMatcher": []
+      "problemMatcher": [],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      }
     }
   ]
 }
