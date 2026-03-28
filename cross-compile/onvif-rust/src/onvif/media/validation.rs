@@ -3,11 +3,9 @@
 //! This module provides validation helpers for Media Service operations.
 //! These functions validate input parameters according to ONVIF specifications.
 
+use crate::onvif::common::limits::MAX_REFERENCE_TOKEN_CHARS;
 use crate::onvif::error::OnvifError;
 use crate::onvif::types::common::ReferenceToken;
-
-/// Maximum length for ONVIF reference tokens (profile, config, source).
-const MAX_TOKEN_LENGTH: usize = 64;
 
 /// Maximum supported resolution dimension (pixels).
 const MAX_RESOLUTION: i32 = 4096;
@@ -23,8 +21,8 @@ const MAX_PROFILE_NAME_LENGTH: usize = 64;
 
 /// Validate a profile reference token.
 ///
-/// Checks that the token is non-empty and does not exceed the ONVIF maximum
-/// token length of 64 characters.
+/// Checks that the token is non-empty and does not exceed
+/// [`MAX_REFERENCE_TOKEN_CHARS`].
 ///
 /// # Arguments
 ///
@@ -37,7 +35,7 @@ const MAX_PROFILE_NAME_LENGTH: usize = 64;
 /// # Errors
 ///
 /// * `OnvifError::InvalidArgVal("NoProfile", ...)` -- token is empty.
-/// * `OnvifError::InvalidArgVal("InvalidToken", ...)` -- token exceeds 64 characters.
+/// * `OnvifError::InvalidArgVal("InvalidToken", ...)` -- token exceeds max length.
 ///
 /// # Examples
 ///
@@ -52,10 +50,13 @@ pub fn validate_profile_token(token: &ReferenceToken) -> Result<(), OnvifError> 
             "Profile token is empty",
         ));
     }
-    if token.len() > MAX_TOKEN_LENGTH {
+    if token.len() > MAX_REFERENCE_TOKEN_CHARS {
         return Err(OnvifError::invalid_arg_val(
             "InvalidToken",
-            "Profile token exceeds maximum length of 64 characters",
+            format!(
+                "Profile token exceeds maximum length of {} characters",
+                MAX_REFERENCE_TOKEN_CHARS
+            ),
         ));
     }
     Ok(())
@@ -76,7 +77,7 @@ pub fn validate_profile_token(token: &ReferenceToken) -> Result<(), OnvifError> 
 /// # Errors
 ///
 /// * `OnvifError::InvalidArgVal("NoConfig", ...)` -- token is empty.
-/// * `OnvifError::InvalidArgVal("InvalidToken", ...)` -- token exceeds 64 characters.
+/// * `OnvifError::InvalidArgVal("InvalidToken", ...)` -- token exceeds max length.
 ///
 /// # Examples
 ///
@@ -91,10 +92,13 @@ pub fn validate_config_token(token: &ReferenceToken) -> Result<(), OnvifError> {
             "Configuration token is empty",
         ));
     }
-    if token.len() > MAX_TOKEN_LENGTH {
+    if token.len() > MAX_REFERENCE_TOKEN_CHARS {
         return Err(OnvifError::invalid_arg_val(
             "InvalidToken",
-            "Configuration token exceeds maximum length of 64 characters",
+            format!(
+                "Configuration token exceeds maximum length of {} characters",
+                MAX_REFERENCE_TOKEN_CHARS
+            ),
         ));
     }
     Ok(())
@@ -102,7 +106,7 @@ pub fn validate_config_token(token: &ReferenceToken) -> Result<(), OnvifError> {
 
 /// Validate a source reference token (video or audio).
 ///
-/// Checks that the token is non-empty and within the 64-character ONVIF limit.
+/// Checks that the token is non-empty and within [`MAX_REFERENCE_TOKEN_CHARS`].
 ///
 /// # Arguments
 ///
@@ -115,7 +119,7 @@ pub fn validate_config_token(token: &ReferenceToken) -> Result<(), OnvifError> {
 /// # Errors
 ///
 /// * `OnvifError::InvalidArgVal("NoSource", ...)` -- token is empty.
-/// * `OnvifError::InvalidArgVal("InvalidToken", ...)` -- token exceeds 64 characters.
+/// * `OnvifError::InvalidArgVal("InvalidToken", ...)` -- token exceeds max length.
 ///
 /// # Examples
 ///
@@ -130,10 +134,13 @@ pub fn validate_source_token(token: &ReferenceToken) -> Result<(), OnvifError> {
             "Source token is empty",
         ));
     }
-    if token.len() > MAX_TOKEN_LENGTH {
+    if token.len() > MAX_REFERENCE_TOKEN_CHARS {
         return Err(OnvifError::invalid_arg_val(
             "InvalidToken",
-            "Source token exceeds maximum length of 64 characters",
+            format!(
+                "Source token exceeds maximum length of {} characters",
+                MAX_REFERENCE_TOKEN_CHARS
+            ),
         ));
     }
     Ok(())
@@ -347,7 +354,7 @@ mod tests {
 
     #[test]
     fn test_validate_profile_token_too_long() {
-        let long_token = "x".repeat(65);
+        let long_token = "x".repeat(MAX_REFERENCE_TOKEN_CHARS + 1);
         let result = validate_profile_token(&long_token);
         assert!(result.is_err());
     }
@@ -386,10 +393,9 @@ mod tests {
     fn test_validate_config_token() {
         assert!(validate_config_token(&"Config_1".to_string()).is_ok());
         assert!(validate_config_token(&String::new()).is_err());
-        let long_token = "x".repeat(65);
+        let long_token = "x".repeat(MAX_REFERENCE_TOKEN_CHARS + 1);
         assert!(validate_config_token(&long_token).is_err());
-        // Exactly 64 characters should be valid
-        let max_token = "x".repeat(64);
+        let max_token = "x".repeat(MAX_REFERENCE_TOKEN_CHARS);
         assert!(validate_config_token(&max_token).is_ok());
     }
 
@@ -397,10 +403,9 @@ mod tests {
     fn test_validate_source_token() {
         assert!(validate_source_token(&"Source_1".to_string()).is_ok());
         assert!(validate_source_token(&String::new()).is_err());
-        let long_token = "x".repeat(65);
+        let long_token = "x".repeat(MAX_REFERENCE_TOKEN_CHARS + 1);
         assert!(validate_source_token(&long_token).is_err());
-        // Exactly 64 characters should be valid
-        let max_token = "x".repeat(64);
+        let max_token = "x".repeat(MAX_REFERENCE_TOKEN_CHARS);
         assert!(validate_source_token(&max_token).is_ok());
     }
 

@@ -38,6 +38,7 @@
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use chrono::{DateTime, Duration, Utc};
+use constant_time_eq::constant_time_eq;
 use sha1::{Digest, Sha1};
 use std::collections::HashMap;
 // CRIT-005: Use parking_lot::Mutex instead of std::sync::Mutex for better performance
@@ -311,19 +312,6 @@ impl WsSecurityValidator {
     pub fn config(&self) -> &WsSecurityConfig {
         &self.config
     }
-}
-
-/// Constant-time byte array comparison to prevent timing attacks.
-fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
-    if a.len() != b.len() {
-        return false;
-    }
-
-    let mut result = 0u8;
-    for (x, y) in a.iter().zip(b.iter()) {
-        result |= x ^ y;
-    }
-    result == 0
 }
 
 /// Compute a WS-Security password digest.

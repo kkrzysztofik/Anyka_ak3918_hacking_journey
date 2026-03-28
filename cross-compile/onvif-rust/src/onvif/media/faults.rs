@@ -45,6 +45,7 @@ pub fn config_modify_error() -> OnvifError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::onvif::common::limits::MAX_REFERENCE_TOKEN_CHARS;
 
     #[test]
     fn test_validate_profile_token_empty() {
@@ -60,7 +61,7 @@ mod tests {
 
     #[test]
     fn test_validate_profile_token_too_long() {
-        let long_token = "x".repeat(65);
+        let long_token = "x".repeat(MAX_REFERENCE_TOKEN_CHARS + 1);
         let result = validate_profile_token(&long_token);
         assert!(result.is_err());
     }
@@ -99,10 +100,9 @@ mod tests {
     fn test_validate_config_token() {
         assert!(validate_config_token(&"Config_1".to_string()).is_ok());
         assert!(validate_config_token(&String::new()).is_err());
-        let long_token = "x".repeat(65);
+        let long_token = "x".repeat(MAX_REFERENCE_TOKEN_CHARS + 1);
         assert!(validate_config_token(&long_token).is_err());
-        // Exactly 64 characters should be valid
-        let max_token = "x".repeat(64);
+        let max_token = "x".repeat(MAX_REFERENCE_TOKEN_CHARS);
         assert!(validate_config_token(&max_token).is_ok());
     }
 
@@ -110,10 +110,9 @@ mod tests {
     fn test_validate_source_token() {
         assert!(validate_source_token(&"Source_1".to_string()).is_ok());
         assert!(validate_source_token(&String::new()).is_err());
-        let long_token = "x".repeat(65);
+        let long_token = "x".repeat(MAX_REFERENCE_TOKEN_CHARS + 1);
         assert!(validate_source_token(&long_token).is_err());
-        // Exactly 64 characters should be valid
-        let max_token = "x".repeat(64);
+        let max_token = "x".repeat(MAX_REFERENCE_TOKEN_CHARS);
         assert!(validate_source_token(&max_token).is_ok());
     }
 

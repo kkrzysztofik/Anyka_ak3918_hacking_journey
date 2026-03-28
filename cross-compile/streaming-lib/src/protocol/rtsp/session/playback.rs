@@ -18,9 +18,9 @@ use crate::protocol::rtsp::rtsp_channel::RtpChannel;
 use crate::protocol::rtsp::rtsp_track::TrackType;
 use super::rtp_counters::RTP_TIMESTAMP_WRAP_THRESHOLD;
 
-const DEFAULT_MAX_FRAME_AGE_MS: u32 = 1500;
-const LAG_RECOVERY_THRESHOLD_MS: u32 = 1000;
-const LAG_RECOVERY_SUSTAINED_FRAMES: u32 = 8;
+const DEFAULT_MAX_FRAME_AGE_MS: u32 = 1000;
+const LAG_RECOVERY_THRESHOLD_MS: u32 = 500;
+const LAG_RECOVERY_SUSTAINED_FRAMES: u32 = 4;
 const SOURCE_TIMESTAMP_RESET_THRESHOLD_MS: u32 = 10_000;
 const RTP_SEND_SLOW_WARN_MS: u128 = 25;
 const PACER_SLEEP_DIAGNOSTIC_MIN_MS: u64 = 20;
@@ -809,7 +809,7 @@ fn maybe_reanchor_video_lag_tracker_on_stale_idr(
     // Give headroom for I-frame send cost on slow ARM hardware.
     // Without headroom, lag from the next I-frame send (~50ms) plus pacing
     // immediately exceeds the threshold again, creating a recovery loop.
-    // Half of max_frame_age (750ms at default 1500ms) absorbs the send cost
+    // Half of max_frame_age (500ms at default 1000ms) absorbs the send cost
     // while still maintaining pressure to catch up.
     let headroom_ms = max_frame_age_ms / 2;
     video_lag_tracker.anchor_local =

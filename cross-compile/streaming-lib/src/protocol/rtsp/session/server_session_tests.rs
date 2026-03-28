@@ -2594,7 +2594,7 @@ fn test_session_default_config_has_expected_defaults() {
 
     // Verify expected defaults
     assert_eq!(session.config.rtp_sample_interval, 0);
-    assert_eq!(session.config.max_frame_age_ms, 1500);
+    assert_eq!(session.config.max_frame_age_ms, 1000);
     assert_eq!(session.config.play_ready_timeout_ms, 1500);
     assert_eq!(session.config.lag_recovery_mode, LagRecoveryMode::LatestIdr);
     assert_eq!(session.config.rtsp_listen_addr, "0.0.0.0:554");

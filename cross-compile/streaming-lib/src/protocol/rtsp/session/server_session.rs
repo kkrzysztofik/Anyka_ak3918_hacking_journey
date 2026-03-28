@@ -1350,9 +1350,17 @@ impl RtspServerSession {
                         let start = std::time::Instant::now();
                         let packets: Vec<BytesMut> = buffer.drain(..).collect();
                         drop(buffer);
+                        let packet_count = packets.len();
                         let mut io = io.lock().await;
-                        for pkt in packets {
+                        // Pace UDP writes: yield every N packets to let the kernel
+                        // drain the socket buffer and the NIC transmit queued
+                        // packets, preventing client-side receive buffer overflow.
+                        const UDP_PACE_BATCH: usize = 10;
+                        for (i, pkt) in packets.into_iter().enumerate() {
                             io.write(pkt.into()).await?;
+                            if (i + 1) % UDP_PACE_BATCH == 0 && i + 1 < packet_count {
+                                tokio::task::yield_now().await;
+                            }
                         }
                         let elapsed = start.elapsed();
 

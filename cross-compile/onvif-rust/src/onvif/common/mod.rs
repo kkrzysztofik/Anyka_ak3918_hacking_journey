@@ -21,6 +21,7 @@
 //!
 //! Additional common utilities were added in Phase 0 of the refactoring:
 //! - `validation` — Shared token and range validators
+//! - `limits` — Central string length caps for inputs
 //! - `faults` — SOAP fault builder helpers
 //! - `dispatch` — Dispatch boilerplate helpers
 //!
@@ -44,6 +45,7 @@ pub use super::ws_security;
 // New Phase 0 modules
 mod dispatch;
 mod faults;
+pub mod limits;
 mod service_capabilities;
 mod validation;
 
@@ -53,6 +55,7 @@ pub use faults::{
     action_not_supported, hardware_failure, invalid_token, invalid_video_source, no_entity,
     out_of_range,
 };
+pub use limits::{MAX_REFERENCE_TOKEN_CHARS, MAX_SCOPE_URI_CHARS, MAX_USERNAME_CHARS};
 pub use service_capabilities::{
     GetServiceCapabilities, GetServiceCapabilitiesResponse as SharedGetServiceCapabilitiesResponse,
 };

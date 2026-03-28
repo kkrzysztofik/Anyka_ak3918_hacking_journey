@@ -21,6 +21,12 @@
 //! This per-instance approach is acceptable for single-instance deployments and
 //! provides protection against abuse without requiring external dependencies.
 //!
+//! ## Tracked IP cap
+//!
+//! The number of distinct IP keys is capped at [`MAX_TRACKED_IPS`]. When the map is
+//! full, [`RateLimiter::cleanup`] runs before rejecting a **new** IP, so expired
+//! windows can free slots. Existing IPs continue to be rate-limited normally.
+//!
 //! # Example
 //!
 //! ```
@@ -51,6 +57,12 @@ pub const DEFAULT_RATE_LIMIT: u32 = 60;
 
 /// Default window duration in seconds.
 pub const DEFAULT_WINDOW_SECONDS: u64 = 60;
+
+/// Maximum distinct IP addresses tracked in the map.
+///
+/// Without a cap, a LAN scan with unique source IPs can grow the `DashMap`
+/// without bound and exhaust memory on embedded targets.
+pub const MAX_TRACKED_IPS: usize = 10_000;
 
 /// Request count for a single IP within a time window.
 #[derive(Debug, Clone)]
@@ -129,6 +141,14 @@ impl RateLimiter {
     /// `true` if the request is allowed, `false` if rate limit exceeded.
     pub fn check_rate_limit(&self, ip: &IpAddr) -> bool {
         let now = Instant::now();
+
+        // Bound memory: reject new IPs once at capacity (after trying cleanup).
+        if !self.counts.contains_key(ip) && self.counts.len() >= MAX_TRACKED_IPS {
+            self.cleanup();
+            if self.counts.len() >= MAX_TRACKED_IPS {
+                return false;
+            }
+        }
 
         // Use entry API for atomic update
         let mut entry = self.counts.entry(*ip).or_insert_with(|| RequestCount {
@@ -480,5 +500,33 @@ mod tests {
     fn test_max_requests_getter() {
         let limiter = RateLimiter::new(42);
         assert_eq!(limiter.max_requests(), 42);
+    }
+
+    /// Filling the map with distinct IPs must not grow past [`MAX_TRACKED_IPS`];
+    /// additional unique IPs are denied until entries expire and `cleanup` runs.
+    #[test]
+    fn test_tracked_ip_cap_rejects_new_ip_when_full() {
+        // One request per long window so each IP stays in the map as a distinct key.
+        let limiter = RateLimiter::with_window(10, 3600);
+
+        for i in 0..MAX_TRACKED_IPS {
+            let ip = IpAddr::V4(std::net::Ipv4Addr::from(i as u32));
+            assert!(
+                limiter.check_rate_limit(&ip),
+                "request for ip index {i} should be allowed"
+            );
+        }
+
+        assert_eq!(limiter.tracked_ips(), MAX_TRACKED_IPS);
+
+        let overflow_ip = IpAddr::V4(std::net::Ipv4Addr::from(MAX_TRACKED_IPS as u32));
+        assert!(
+            !limiter.check_rate_limit(&overflow_ip),
+            "new IP should be rejected when map is at capacity"
+        );
+
+        // Known IP still works (cap applies only to new keys).
+        let first = IpAddr::V4(std::net::Ipv4Addr::from(0u32));
+        assert!(limiter.check_rate_limit(&first));
     }
 }

@@ -1072,35 +1072,52 @@ mod tests {
         // - FLV header includes video tag
         // - Content-Type is video/x-flv
         // - Stream can be read over HTTP
+        //
+        // Use an ephemeral port: a fixed port (e.g. 8080) may be taken by another
+        // process; the old code silently skipped the server on bind failure while the
+        // client could still connect to whatever was listening, producing bogus asserts.
 
         let flv_data = generate_flv_data();
         let flv_data_clone = flv_data.clone();
 
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind ephemeral port for HTTP-FLV e2e test");
+        let port = listener.local_addr().expect("listener local_addr").port();
+
         let server_handle = tokio::spawn(async move {
-            if let Ok(listener) = tokio::net::TcpListener::bind("127.0.0.1:8080").await {
-                if let Ok((socket, _)) = listener.accept().await {
+            match listener.accept().await {
+                Ok((socket, _)) => {
                     let _ = handle_httpflv_client(socket, flv_data_clone).await;
+                }
+                Err(e) => {
+                    panic!("accept failed in test HTTP-FLV server: {e}");
                 }
             }
         });
 
-        tokio::time::sleep(Duration::from_millis(10)).await;
+        // Let the spawned task register accept; connect then completes the handshake.
+        tokio::task::yield_now().await;
 
-        if let Ok(mut stream) = tokio::net::TcpStream::connect("127.0.0.1:8080").await {
-            use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let mut stream = tokio::net::TcpStream::connect(format!("127.0.0.1:{port}"))
+            .await
+            .expect("connect to test HTTP-FLV server");
 
-            let http_req = "GET /live/stream1.flv HTTP/1.1\r\n\
-                            Host: 127.0.0.1:8080\r\n\
-                            Connection: close\r\n\
-                            \r\n";
-            stream.write_all(http_req.as_bytes()).await.unwrap();
-            stream.flush().await.unwrap();
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-            let mut buffer = Vec::new();
-            stream.read_to_end(&mut buffer).await.unwrap();
-            let response_str = String::from_utf8_lossy(&buffer);
-            assert_httpflv_response(&response_str);
-        }
+        let http_req = format!(
+            "GET /live/stream1.flv HTTP/1.1\r\n\
+             Host: 127.0.0.1:{port}\r\n\
+             Connection: close\r\n\
+             \r\n"
+        );
+        stream.write_all(http_req.as_bytes()).await.unwrap();
+        stream.flush().await.unwrap();
+
+        let mut buffer = Vec::new();
+        stream.read_to_end(&mut buffer).await.unwrap();
+        let response_str = String::from_utf8_lossy(&buffer);
+        assert_httpflv_response(&response_str);
 
         let _ = server_handle.await;
     }

@@ -7,6 +7,7 @@
 //! The WSDL types are defined in `devicemgmt.wsdl` and match the ONVIF specification.
 
 use crate::config::{UserAccount, UserLevel as InternalUserLevel};
+use crate::onvif::common::limits::MAX_USERNAME_CHARS;
 use crate::onvif::types::common::{User as OnvifUser, UserLevel as OnvifUserLevel};
 use crate::utils::validation::normalize_unicode;
 
@@ -103,7 +104,7 @@ pub enum UserValidationError {
 /// Validate a username.
 ///
 /// Requirements:
-/// - 3-64 characters
+/// - 3 to 64 characters ([`MAX_USERNAME_CHARS`](crate::onvif::common::limits::MAX_USERNAME_CHARS))
 /// - Alphanumeric and underscore only (no hyphens or dots)
 pub fn validate_username(username: &str) -> Result<(), UserValidationError> {
     // Normalize Unicode to prevent variant-based bypasses
@@ -115,7 +116,7 @@ pub fn validate_username(username: &str) -> Result<(), UserValidationError> {
     if normalized.len() < 3 {
         return Err(UserValidationError::UsernameTooShort);
     }
-    if normalized.len() > 64 {
+    if normalized.len() > MAX_USERNAME_CHARS {
         return Err(UserValidationError::UsernameTooLong);
     }
     // Allow alphanumeric and underscore only (removed hyphen and dot)

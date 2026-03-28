@@ -20,8 +20,9 @@ use super::bytesio_errors::{BytesIOError, BytesIOErrorValue};
 /// Maximum UDP datagram size (RFC 768 limit)
 const MAX_UDP_DATAGRAM_SIZE: usize = 65507;
 
-/// Default UDP send buffer size (256KB for high-bitrate video)
-const UDP_SEND_BUFFER_SIZE: usize = 256 * 1024;
+/// Default UDP send buffer size (512KB for high-bitrate video).
+/// Linux doubles this internally via SO_SNDBUF, giving ~1MB actual.
+const UDP_SEND_BUFFER_SIZE: usize = 512 * 1024;
 
 pub enum NetType {
     TCP,
@@ -61,6 +62,15 @@ impl UdpIO {
         // Set send buffer size for high-bitrate video streaming
         if let Err(err) = socket.set_send_buffer_size(UDP_SEND_BUFFER_SIZE) {
             tracing::warn!(error = %err, "failed_to_set_udp_send_buffer_size");
+        }
+        if let Ok(actual) = socket.send_buffer_size()
+            && actual < UDP_SEND_BUFFER_SIZE
+        {
+            tracing::warn!(
+                requested = UDP_SEND_BUFFER_SIZE,
+                actual = actual,
+                "udp_send_buffer_size_capped_by_kernel"
+            );
         }
 
         let local_address: SocketAddr = format!("0.0.0.0:{local_port}").parse().ok()?;
@@ -114,6 +124,15 @@ impl UdpIO {
         // Set send buffer size for high-bitrate video streaming
         if let Err(err) = socket.set_send_buffer_size(UDP_SEND_BUFFER_SIZE) {
             tracing::warn!(error = %err, "failed_to_set_udp_send_buffer_size");
+        }
+        if let Ok(actual) = socket.send_buffer_size()
+            && actual < UDP_SEND_BUFFER_SIZE
+        {
+            tracing::warn!(
+                requested = UDP_SEND_BUFFER_SIZE,
+                actual = actual,
+                "udp_send_buffer_size_capped_by_kernel"
+            );
         }
 
         let local_address: SocketAddr = format!("0.0.0.0:{local_port}").parse().ok()?;

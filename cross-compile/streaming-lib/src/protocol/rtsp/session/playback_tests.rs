@@ -496,20 +496,20 @@ fn test_reanchor_headroom_absorbs_iframe_send_cost() {
         initialized: true,
     };
 
-    // Reanchor with max_frame_age_ms=1500 → headroom = 750ms
+    // Reanchor with max_frame_age_ms=1000 → headroom = 500ms
     let did_reanchor =
-        maybe_reanchor_video_lag_tracker_on_stale_idr(&mut tracker, 2000, 1600, 1500, true);
+        maybe_reanchor_video_lag_tracker_on_stale_idr(&mut tracker, 2000, 1600, 1000, true);
     assert!(did_reanchor);
 
-    // Immediately after reanchor, current_lag_ms should reflect the 750ms headroom.
-    // anchor_local was set to now() - 750ms, so elapsed ≈ 750ms.
-    // expected = anchor_source_ts(2000) + elapsed(~750) = ~2750
+    // Immediately after reanchor, current_lag_ms should reflect the 500ms headroom.
+    // anchor_local was set to now() - 500ms, so elapsed ≈ 500ms.
+    // expected = anchor_source_ts(2000) + elapsed(~500) = ~2500
     // last_source_ts = 2000
-    // lag = ~2750 - 2000 = ~750
+    // lag = ~2500 - 2000 = ~500
     let lag = tracker.current_lag_ms();
     assert!(
-        lag >= 700 && lag <= 800,
-        "expected ~750ms headroom lag, got {}",
+        lag >= 450 && lag <= 550,
+        "expected ~500ms headroom lag, got {}",
         lag
     );
 }
@@ -525,7 +525,7 @@ fn test_reanchor_does_not_trigger_for_non_idr() {
 
     let original_anchor_ts = tracker.anchor_source_ts;
     let did_reanchor =
-        maybe_reanchor_video_lag_tracker_on_stale_idr(&mut tracker, 2000, 1600, 1500, false);
+        maybe_reanchor_video_lag_tracker_on_stale_idr(&mut tracker, 2000, 1600, 1000, false);
     assert!(!did_reanchor);
     assert_eq!(tracker.anchor_source_ts, original_anchor_ts);
 }
@@ -727,8 +727,8 @@ fn test_playback_latency_policy_from_config_default() {
     let config = StreamingConfig::default();
     let policy = PlaybackLatencyPolicy::from_config(&config);
 
-    // Default config has max_frame_age_ms=1500, lag_recovery_mode=LatestIdr
-    assert_eq!(policy.max_frame_age_ms, 1500);
+    // Default config has max_frame_age_ms=1000, lag_recovery_mode=LatestIdr
+    assert_eq!(policy.max_frame_age_ms, 1000);
     assert_eq!(policy.lag_recovery_mode, LagRecoveryMode::LatestIdr);
     // These are constants
     assert_eq!(policy.lag_recovery_threshold_ms, LAG_RECOVERY_THRESHOLD_MS);
@@ -804,6 +804,6 @@ fn test_zero_max_frame_age_falls_back_to_default_in_policy() {
     };
     let policy = PlaybackLatencyPolicy::from_config(&config);
 
-    // Should fall back to DEFAULT_MAX_FRAME_AGE_MS (1500)
+    // Should fall back to DEFAULT_MAX_FRAME_AGE_MS (1000)
     assert_eq!(policy.max_frame_age_ms, DEFAULT_MAX_FRAME_AGE_MS);
 }

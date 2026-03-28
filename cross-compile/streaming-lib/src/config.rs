@@ -49,7 +49,7 @@ impl Default for StreamingConfig {
     fn default() -> Self {
         Self {
             rtp_sample_interval: 0, // disabled by default
-            max_frame_age_ms: 1500,
+            max_frame_age_ms: 1000,
             lag_recovery_mode: LagRecoveryMode::LatestIdr,
             play_ready_timeout_ms: 1500,
             rtsp_listen_addr: "0.0.0.0:554".to_string(),
@@ -122,7 +122,7 @@ mod tests {
         let config = StreamingConfig::default();
 
         assert_eq!(config.rtp_sample_interval, 0);
-        assert_eq!(config.max_frame_age_ms, 1500);
+        assert_eq!(config.max_frame_age_ms, 1000);
         assert_eq!(config.lag_recovery_mode, LagRecoveryMode::LatestIdr);
         assert_eq!(config.play_ready_timeout_ms, 1500);
         assert_eq!(config.rtsp_listen_addr, "0.0.0.0:554");

@@ -3,6 +3,14 @@
 //! This module provides helper functions for dispatching SOAP requests
 //! to handlers, reducing the boilerplate needed in each service implementation.
 //!
+//! # Response contract
+//!
+//! [`dispatch_sync`] and [`dispatch_async`] return **SOAP body XML only** (the serialized
+//! operation response element). The HTTP/SOAP layer wraps that with
+//! [`crate::onvif::soap::build_soap_response`] exactly once in
+//! [`crate::onvif::dispatcher::routing`] / [`crate::onvif::dispatcher::response`].
+//! Do not call `build_soap_response` on the return value of these helpers.
+//!
 //! # Usage
 //!
 //! These helpers combine XML parsing, validation, and response serialization
@@ -33,8 +41,8 @@
 //! }
 //!
 //! let body_xml = r#"<GetDeviceInformation xmlns="http://www.onvif.org/ver10/device/wsdl"/>"#;
-//! let response = dispatch_sync(body_xml, handle_get_device_info).unwrap();
-//! assert!(response.contains("Anyka"));
+//! let body_xml_out = dispatch_sync(body_xml, handle_get_device_info).unwrap();
+//! assert!(body_xml_out.contains("Anyka"));
 //! ```
 //!
 //! ## Async Dispatch
@@ -66,10 +74,10 @@
 //! }
 //!
 //! let body_xml = r#"<GetProfiles xmlns="http://www.onvif.org/ver10/media/wsdl"/>"#;
-//! let response = tokio::runtime::Runtime::new().unwrap().block_on(
+//! let body_xml_out = tokio::runtime::Runtime::new().unwrap().block_on(
 //!     dispatch_async(body_xml, handle_get_profiles)
 //! ).unwrap();
-//! assert!(response.contains("Main"));
+//! assert!(body_xml_out.contains("Main"));
 //! ```
 
 use serde::Serialize;
@@ -77,7 +85,6 @@ use serde::de::DeserializeOwned;
 
 use crate::onvif::dispatcher::parse_body;
 use crate::onvif::error::{OnvifError, OnvifResult};
-use crate::onvif::soap::build_soap_response;
 
 // Test types for module testing - crate-internal only
 #[allow(dead_code)]
@@ -112,7 +119,7 @@ pub(crate) struct TestResponseDispatch {
 ///
 /// # Returns
 ///
-/// A `Result` containing the serialized XML response string, or an `OnvifError`.
+/// A `Result` containing the serialized **SOAP body** XML (response element only), or an `OnvifError`.
 ///
 /// # Errors
 ///
@@ -164,8 +171,7 @@ where
         OnvifError::Internal("Internal processing error".to_string())
     })?;
 
-    // Wrap in SOAP response envelope
-    Ok(build_soap_response(&response_xml))
+    Ok(response_xml)
 }
 
 /// Asynchronous dispatch helper for SOAP request handling.
@@ -190,7 +196,7 @@ where
 ///
 /// # Returns
 ///
-/// A `Result` containing the serialized XML response string, or an `OnvifError`.
+/// A `Result` containing the serialized **SOAP body** XML (response element only), or an `OnvifError`.
 ///
 /// # Errors
 ///
@@ -251,13 +257,13 @@ where
         OnvifError::Internal("Internal processing error".to_string())
     })?;
 
-    // Wrap in SOAP response envelope
-    Ok(build_soap_response(&response_xml))
+    Ok(response_xml)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::onvif::soap::build_soap_response;
 
     // Test request/response types
     #[derive(serde::Deserialize, Debug, PartialEq)]
@@ -289,9 +295,10 @@ mod tests {
         let response = result.unwrap();
         assert!(response.contains("handled"));
         assert!(response.contains("test-ns"));
-        // Check it's wrapped in SOAP envelope
-        assert!(response.contains("Envelope"));
-        assert!(response.contains("Body"));
+        assert!(
+            !response.contains("Envelope"),
+            "dispatch returns body fragment only"
+        );
     }
 
     #[test]
@@ -442,10 +449,10 @@ mod tests {
         assert!(err.to_string().contains("Internal processing error"));
     }
 
-    // Test SOAP envelope structure
+    // Body XML + single envelope wrap (as the dispatcher does)
 
     #[test]
-    fn test_dispatch_sync_soap_envelope_structure() {
+    fn test_dispatch_sync_body_then_wrapped_envelope() {
         #[derive(serde::Serialize)]
         struct SimpleResponse {
             #[serde(rename = "Value")]
@@ -457,18 +464,19 @@ mod tests {
         }
 
         let xml = r#"<TestRequest xmlns="http://test.example.com/"/>"#;
-        let result = dispatch_sync(xml, handler).unwrap();
+        let body = dispatch_sync(xml, handler).unwrap();
+        assert!(body.contains("<Value>42</Value>"));
+        assert!(!body.contains("Envelope"));
 
-        // Check SOAP envelope structure (uses "s:" namespace prefix)
-        assert!(result.contains("xmlns:s="));
-        assert!(result.contains("s:Envelope"));
-        assert!(result.contains("s:Body"));
-        // Check our response is inside the body
-        assert!(result.contains("<Value>42</Value>"));
+        let soap = build_soap_response(&body);
+        assert!(soap.contains("xmlns:s="));
+        assert!(soap.contains("s:Envelope"));
+        assert!(soap.contains("s:Body"));
+        assert!(soap.contains("<Value>42</Value>"));
     }
 
     #[tokio::test]
-    async fn test_dispatch_async_soap_envelope_structure() {
+    async fn test_dispatch_async_body_then_wrapped_envelope() {
         #[derive(serde::Serialize)]
         struct AsyncResponse {
             #[serde(rename = "Items")]
@@ -482,11 +490,12 @@ mod tests {
         }
 
         let xml = r#"<TestRequest xmlns="http://test.example.com/"/>"#;
-        let result = dispatch_async(xml, handler).await.unwrap();
+        let body = dispatch_async(xml, handler).await.unwrap();
+        assert!(!body.contains("Envelope"));
+        assert!(body.contains("<Items>a</Items>"));
+        assert!(body.contains("<Items>b</Items>"));
 
-        assert!(result.contains("s:Envelope"));
-        // Vec<String> serializes as repeated element tags
-        assert!(result.contains("<Items>a</Items>"));
-        assert!(result.contains("<Items>b</Items>"));
+        let soap = build_soap_response(&body);
+        assert!(soap.contains("s:Envelope"));
     }
 }
