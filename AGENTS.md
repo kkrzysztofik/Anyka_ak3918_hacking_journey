@@ -8,12 +8,22 @@
 
 **⚠️ TOOLCHAIN REQUIREMENT**: This project uses a **custom Rust toolchain** vendored in this repo at `toolchain/arm-anykav200-crosstool-ng/`.
 
-You MUST use the cargo binary from this toolchain for ALL cargo commands:
+You MUST use the toolchain binaries from this toolchain for ALL Rust commands (`cargo`, `rustc`, and `rustdoc`):
 
 - Repo-relative: `toolchain/arm-anykav200-crosstool-ng/bin/cargo`
+- Repo-relative: `toolchain/arm-anykav200-crosstool-ng/bin/rustc`
+- Repo-relative: `toolchain/arm-anykav200-crosstool-ng/bin/rustdoc`
 - Absolute (example): `/home/<user>/anyka-dev/toolchain/arm-anykav200-crosstool-ng/bin/cargo`
 
-Using system `cargo` may cause compilation errors due to version/target mismatches.
+Using system Rust tools may cause compilation or doctest failures due to version/target mismatches.
+
+**Recommended setup (from repo root):**
+
+```bash
+source ./setenv.sh
+```
+
+This exports `CARGO`, `RUSTC`, and `RUSTDOC` to the vendored toolchain and prepends the toolchain `bin/` directory to `PATH`.
 
 ## Project Overview
 
@@ -40,8 +50,8 @@ The project focuses on creating a fully ONVIF 24.12 compliant implementation whi
 **⚠️ CRITICAL: Always use the custom toolchain's cargo binary**
 
 ```bash
-# Define custom cargo path (use this in all commands)
-export CARGO=toolchain/arm-anykav200-crosstool-ng/bin/cargo
+# Load vendored Rust toolchain env (preferred)
+source ./setenv.sh
 
 # Build & Test
 cd cross-compile/onvif-rust && $CARGO build --release  # Build
