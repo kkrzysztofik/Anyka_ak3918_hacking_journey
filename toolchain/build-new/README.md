@@ -9,7 +9,7 @@ This directory contains scripts and configuration for building a modern cross-co
 - **Architecture**: ARMv5TEJ (CPU features: swp, half, fastmult, edsp, java)
 - **Float ABI**: soft (pure software floating point - NO VFP support)
 - **VFP/NEON**: None (CPU does not support VFP or NEON)
-- **C Library**: uClibc-ng 1.0.54
+- **C Library**: uClibc-ng 1.0.57
 - **Kernel Headers**: Linux 3.4.35
 - **Target Tuple**: `arm-unknown-linux-uclibcgnueabi`
 - **Rust Target**: `armv5te-unknown-linux-uclibceabi`
@@ -18,12 +18,13 @@ This directory contains scripts and configuration for building a modern cross-co
 
 Toolchain component versions:
 
-- crosstool-NG: 1.28.0
+- crosstool-NG: git `37190d5b1e8050832610ba5e899911c7a723d798` (includes binutils 2.46.0); host tree under `crosstool-ng-src/`
 - GCC: 15.2
-- Binutils: 2.45
+- Binutils: 2.46.0
 - GDB: 17.1
-- LLVM/Clang: 21.1.8 (optional, for Rust support; LLVM 22.x available but requires testing)
-- Rust: 1.93.1+ (optional, bootstrapped from source)
+- LLVM/Clang: 22.1.2 (optional, for Rust support)
+- Rust: 1.94.1+ (optional, bootstrapped from source)
+- uClibc-ng 1.0.57 uses vendored package metadata in `vendor/crosstool-ng/uClibc-ng/` (not yet in upstream crosstool-NG at that commit); `build_toolchain.sh` copies it in and re-runs `./bootstrap` when needed.
 
 ## Prerequisites
 
@@ -88,7 +89,7 @@ cd "${REPO_ROOT}/toolchain/build-new"
 The script will:
 
 1. Check for required dependencies
-2. Download and build crosstool-NG 1.28.0
+2. Clone the pinned crosstool-NG commit, install vendored uClibc-ng 1.0.57 metadata, run `./bootstrap` if needed, and build the `ct-ng` host tool
 3. Configure the toolchain for ARMv5TEJ with uClibc-ng
 4. Build the complete toolchain (1-3 hours)
 5. Install to `../arm-anykav200-crosstool-ng/usr/`
@@ -113,10 +114,10 @@ The toolchain is configured via `crosstool-ng.config` file. Key settings:
 - Target: `arm-unknown-linux-uclibcgnueabi`
 - Architecture: ARMv5TEJ
 - Float ABI: soft
-- C Library: uClibc-ng 1.0.54
+- C Library: uClibc-ng 1.0.57
 - Kernel Headers: Linux 3.4.35
 - GCC: 15.2
-- Binutils: 2.45
+- Binutils: 2.46.0
 - GDB: 17.1
 
 ### Option 1: Use Menuconfig (Interactive)
@@ -126,7 +127,7 @@ After the initial configuration is created, you can customize it:
 ```bash
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 cd "${REPO_ROOT}/toolchain/build-new"
-./crosstool-ng-1.28.0/ct-ng menuconfig
+./crosstool-ng-src/ct-ng menuconfig
 ```
 
 Key settings to verify:
@@ -135,9 +136,9 @@ Key settings to verify:
 - **Target options** → **CPU**: armv5te
 - **Target options** → **Float ABI**: soft
 - **C-library**: uClibc-ng
-- **C-library version**: 1.0.54
+- **C-library version**: 1.0.57
 - **GCC version**: 15.2
-- **Binutils version**: 2.45
+- **Binutils version**: 2.46.0
 - **Kernel version**: 3.4.35
 
 ### Option 2: Edit Config File Directly
@@ -201,18 +202,18 @@ If configuration is invalid:
 3. Or start from a known-good sample:
 
    ```bash
-   ./crosstool-ng-1.28.0/ct-ng arm-unknown-linux-uclibcgnueabi
-   ./crosstool-ng-1.28.0/ct-ng menuconfig
+   ./crosstool-ng-src/ct-ng arm-unknown-linux-uclibcgnueabi
+   ./crosstool-ng-src/ct-ng menuconfig
    ```
 
 ### GDB Version Not Available
 
-If GDB 17.1 is not available in crosstool-NG 1.28.0:
+If GDB 17.1 is not available in this crosstool-NG revision:
 
 1. Check available versions:
 
    ```bash
-   ./crosstool-ng-1.28.0/ct-ng menuconfig
+   ./crosstool-ng-src/ct-ng menuconfig
    # Navigate to Debug facilities → GDB version
    ```
 
@@ -253,7 +254,7 @@ LLVM/Clang is required for Rust support. The build process is split into two sta
    ```
 
 3. The script will:
-   - Download LLVM 21.1.8 source code (latest stable)
+   - Download LLVM 22.1.2 source (see `LLVM_VERSION` in `common.sh`)
    - Configure for native build (LLVM itself is built natively)
    - Build Clang and LLD (compiler-rt builtins are skipped in this stage)
    - Install to the appropriate toolchain directory (alongside GCC)
@@ -293,7 +294,7 @@ After both stages complete:
 ../arm-anykav200-crosstool-ng/bin/llvm-config --version
 
 # Check compiler-rt builtins
-ls -lh ../arm-anykav200-crosstool-ng/lib/clang/21.1.8/lib/linux/libclang_rt.builtins-arm.a
+ls -lh ../arm-anykav200-crosstool-ng/lib/clang/22/lib/armv5te-unknown-linux-gnueabi/libclang_rt.builtins.a
 ```
 
 After building, LLVM/Clang will be available at `../arm-anykav200-crosstool-ng/bin/clang`.
@@ -451,7 +452,7 @@ To start fresh:
 ```bash
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 cd "${REPO_ROOT}/toolchain/build-new"
-rm -rf crosstool-ng-1.28.0 .config .build
+rm -rf crosstool-ng-src llvm-22.1.2 rust .config .build
 ./build_toolchain.sh
 ```
 

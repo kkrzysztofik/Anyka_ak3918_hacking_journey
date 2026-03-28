@@ -50,36 +50,57 @@ check_dependencies() {
 
 # Download and build crosstool-NG
 install_crosstool_ng() {
-    log_info "Installing crosstool-NG ${CTNG_VERSION}..."
+    log_info "Installing crosstool-NG @ ${CTNG_GIT_REF}..."
 
     if [ -d "${CTNG_DIR}" ]; then
-        log_warn "crosstool-NG directory exists, skipping download"
-    else
-        log_info "Downloading crosstool-NG ${CTNG_VERSION}..."
+        if [ ! -d "${CTNG_DIR}/.git" ]; then
+            log_warn "Removing non-git tree at ${CTNG_DIR} (expected git checkout)"
+            rm -rf "${CTNG_DIR}"
+        else
+            cd "${CTNG_DIR}"
+            local cur=""
+            cur="$(git rev-parse HEAD 2>/dev/null || true)"
+            if [ "${cur}" != "${CTNG_GIT_REF}" ]; then
+                log_info "Fetching crosstool-NG ${CTNG_GIT_REF}..."
+                git fetch --depth 1 origin "${CTNG_GIT_REF}"
+                git checkout FETCH_HEAD
+            fi
+            cd "${BUILD_DIR}"
+        fi
+    fi
+
+    if [ ! -d "${CTNG_DIR}" ]; then
+        log_info "Cloning crosstool-NG (single-commit fetch)..."
+        mkdir -p "${CTNG_DIR}"
+        cd "${CTNG_DIR}"
+        git init
+        git remote add origin "${CTNG_GIT_URL}"
+        if ! git fetch --depth 1 origin "${CTNG_GIT_REF}"; then
+            log_error "Failed to fetch crosstool-NG ${CTNG_GIT_REF}"
+            exit 1
+        fi
+        git checkout FETCH_HEAD
         cd "${BUILD_DIR}"
-        local archive_file="crosstool-ng-${CTNG_VERSION}.tar.xz"
-        if ! wget "https://github.com/crosstool-ng/crosstool-ng/releases/download/crosstool-ng-${CTNG_VERSION}/${archive_file}"; then
-            log_error "Failed to download crosstool-NG ${CTNG_VERSION}"
-            log_error "Please check your network connection and try again"
-            exit 1
+    fi
+
+    log_info "Installing vendored uClibc-ng ${UCLIBC_NG_VERSION} package metadata..."
+    mkdir -p "${CTNG_DIR}/packages/uClibc-ng"
+    rm -rf "${CTNG_DIR}/packages/uClibc-ng/${UCLIBC_NG_VERSION}"
+    cp -a "${SCRIPT_DIR}/vendor/crosstool-ng/uClibc-ng/${UCLIBC_NG_VERSION}" \
+        "${CTNG_DIR}/packages/uClibc-ng/"
+
+    if [ ! -f "${CTNG_DIR}/configure" ] || ! grep -q 'UCLIBC_NG_V_1_0_57' "${CTNG_DIR}/config/versions/uClibc-ng.in" 2>/dev/null; then
+        log_info "Running ./bootstrap in crosstool-NG (Kconfig regeneration)..."
+        (cd "${CTNG_DIR}" && ./bootstrap)
+        if [ -f "${CTNG_DIR}/Makefile" ] || [ -f "${CTNG_DIR}/config.status" ]; then
+            log_warn "Cleaning crosstool-NG host build after bootstrap..."
+            (cd "${CTNG_DIR}" && make distclean 2>/dev/null || true)
+            rm -f "${CTNG_DIR}/Makefile" "${CTNG_DIR}/config.status" "${CTNG_DIR}/config.cache"
         fi
-        
-        log_info "Extracting crosstool-NG ${CTNG_VERSION}..."
-        if ! tar -xf "${archive_file}"; then
-            log_error "Failed to extract crosstool-NG archive"
-            exit 1
-        fi
-        
-        rm "${archive_file}"
-        log_info "crosstool-NG ${CTNG_VERSION} downloaded and extracted successfully"
     fi
 
     log_info "Building crosstool-NG..."
     cd "${CTNG_DIR}"
-
-    if [ ! -f "configure" ]; then
-        ./bootstrap
-    fi
 
     # Clean up any previous failed configure attempts
     if [ -f "config.log" ] && ! grep -q "config.status: creating Makefile" "config.log" 2>/dev/null; then
@@ -153,7 +174,6 @@ create_config_file() {
 
     # Set common versions (same for both architectures)
     sed -i 's/^CT_GCC_VERSION=.*/CT_GCC_VERSION="15.2.0"/' "${config_file}"
-    sed -i 's/^CT_BINUTILS_VERSION=.*/CT_BINUTILS_VERSION="2.45"/' "${config_file}"
 
     # GDB version
     if grep -q "CT_GDB_VERSION" "${config_file}"; then
@@ -179,8 +199,6 @@ create_config_file() {
         echo 'CT_LINUX_VERSION="3.4.35"' >> "${config_file}"
     fi
 
-    # Set uClibc-ng version
-    sed -i 's/^CT_UCLIBC_VERSION=.*/CT_UCLIBC_VERSION="1.0.54"/' "${config_file}"
     sed -i '/^CT_GLIBC_VERSION=/d' "${config_file}"
 
     # Enable uClibc-ng and disable glibc
@@ -199,14 +217,19 @@ create_config_file() {
     fi
 
     log_info "Set Linux kernel version to 3.4.35"
-    log_info "Set uClibc-ng version to 1.0.54"
 
     # Set installation path
     sed -i "s|^CT_PREFIX_DIR=.*|CT_PREFIX_DIR=\"${INSTALL_DIR}\"|" "${config_file}"
 
+    # Pin binutils 2.46.0 + vendored uClibc-ng (see fragments/ and vendor/).
+    if ! python3 "${SCRIPT_DIR}/inject_ct_config_fragments.py" "${config_file}"; then
+        log_error "Failed to inject binutils / uClibc-ng config fragments"
+        exit 1
+    fi
+
     # Disable TIME64 in uClibc-ng: AK3918 runs Linux 3.4.35, which is older than
     # the Linux >= 5.1.0 requirement for 64-bit time_t syscalls on 32-bit ARM.
-    # Without this, uClibc-ng 1.0.54 fails to build with the 3.4.35 kernel headers.
+    # Without this, uClibc-ng fails to build with the 3.4.35 kernel headers.
     local uclibc_config="${BUILD_DIR}/uclibc-ng.config"
     cp "${CTNG_DIR}/packages/uClibc-ng/config" "${uclibc_config}"
     echo "# UCLIBC_USE_TIME64 is not set" >> "${uclibc_config}"
@@ -214,7 +237,7 @@ create_config_file() {
     if ! grep -q "^CT_LIBC_UCLIBC_CONFIG_FILE=" "${config_file}"; then
         echo "CT_LIBC_UCLIBC_CONFIG_FILE=\"${uclibc_config}\"" >> "${config_file}"
     fi
-    log_info "uClibc-ng: TIME64 disabled (required for Linux 3.4.35 target)"
+    log_info "uClibc-ng ${UCLIBC_NG_VERSION}: TIME64 disabled (required for Linux 3.4.35 target)"
 
     # Disable native GDB: we don't need a GDB binary running on the AK3918 target,
     # and it fails to build with the ARMv5TE sysroot on GDB 17.x.
@@ -245,7 +268,26 @@ build_toolchain() {
         exit 1
     fi
 
-    log_info "Starting build process..."
+    # Build up to libc headers first, so Linux sources are unpacked before we
+    # patch legacy kernel host-tool sources for modern host compilers.
+    log_info "Building up to libc headers (pre-kernel-headers stage)..."
+    STOP=libc_headers "${CTNG_BIN}" build
+
+    # Linux 3.4.35 scripts/unifdef.c uses 'constexpr' as an identifier, which
+    # fails with modern GCC where constexpr is a reserved keyword in C mode.
+    local unifdef_path="${BUILD_DIR}/.build/src/linux-3.4.35/scripts/unifdef.c"
+    if [ -f "${unifdef_path}" ]; then
+        log_info "Applying Linux 3.4.35 host-compiler compatibility fix..."
+        sed -i 's/\<constexpr\>/const_expr/g' "${unifdef_path}"
+    else
+        log_warn "Expected file not found for patch: ${unifdef_path}"
+        log_warn "Continuing build; kernel headers step may fail if source layout changed"
+    fi
+
+    # Continue with a normal ct-ng build. Because the state directory was left
+    # intact by STOP=libc_headers, ct-ng will continue from the next step.
+    # Using RESTART here requires CT_DEBUG_CT_SAVE_STEPS and fails otherwise.
+    log_info "Continuing full build after compatibility patch..."
     "${CTNG_BIN}" build
 
     log_info "Toolchain build completed successfully!"

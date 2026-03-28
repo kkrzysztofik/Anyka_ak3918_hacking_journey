@@ -133,7 +133,7 @@ if [[ "${OPT_DRY_RUN}" != "true" ]]; then
 fi
 
 # ── Stages ────────────────────────────────────────────────────────────────────
-run_stage "toolchain"   "build_toolchain.sh"            "GCC cross-compiler (crosstool-NG ${CTNG_VERSION})"
+run_stage "toolchain"   "build_toolchain.sh"            "GCC cross-compiler (crosstool-NG git ${CTNG_GIT_REF:0:12})"
 run_stage "llvm"        "build_llvm.sh"                 "LLVM/Clang ${LLVM_VERSION}"
 run_stage "compiler_rt" "build_compiler_rt_builtins.sh" "compiler-rt builtins (cross-compiled)"
 

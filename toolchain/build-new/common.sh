@@ -49,12 +49,15 @@ LLVM_TARGET="ARM"
 CMAKE_TARGET_ARCH="arm"
 
 # ── Component versions ────────────────────────────────────────────────────────
-LLVM_VERSION="21.1.8"
+LLVM_VERSION="22.1.2"
 LLVM_SRC_DIR="${BUILD_DIR}/llvm-${LLVM_VERSION}"
 GDB_VERSION="17.1"
-CTNG_VERSION="1.28.0"
-CTNG_DIR="${BUILD_DIR}/crosstool-ng-${CTNG_VERSION}"
-RUST_VERSION="1.93.1"
+# crosstool-NG: pinned git commit (binutils 2.46.0). Vendored packages: see vendor/crosstool-ng/.
+CTNG_GIT_URL="https://github.com/crosstool-ng/crosstool-ng.git"
+CTNG_GIT_REF="37190d5b1e8050832610ba5e899911c7a723d798"
+CTNG_DIR="${BUILD_DIR}/crosstool-ng-src"
+UCLIBC_NG_VERSION="1.0.57"
+RUST_VERSION="1.94.1"
 RUST_SRC_DIR="${BUILD_DIR}/rust"
 
 # ── Utility functions ─────────────────────────────────────────────────────────
