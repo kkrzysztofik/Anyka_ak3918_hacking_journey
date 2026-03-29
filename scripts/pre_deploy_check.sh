@@ -16,32 +16,15 @@ for _pre_arg in "$@"; do
 done
 PACKAGING_FAILED=0
 
-# Define paths
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-TOOLCHAIN_CARGO="$PROJECT_ROOT/toolchain/arm-anykav200-crosstool-ng/bin/cargo"
-
-# Colors for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m' # No Color
-
-log_info() {
-    echo -e "${GREEN}[INFO]${NC} $1"
-}
+# shellcheck source=scripts/common.sh
+source "${SCRIPT_DIR}/common.sh"
+PROJECT_ROOT="${ANYKA_REPO_ROOT}"
+TOOLCHAIN_CARGO="${ANYKA_CARGO}"
 
 log_warn() {
     WARN_COUNT=$((WARN_COUNT + 1))
     echo -e "${YELLOW}[WARN]${NC} $1" >&2
-}
-
-log_error() {
-    echo -e "${RED}[ERROR]${NC} $1" >&2
-}
-
-log_success() {
-    echo -e "${GREEN}[PASS]${NC} $1"
 }
 
 log_fail() {
@@ -54,12 +37,7 @@ echo "  Pre-Deployment Validation"
 echo "=============================================="
 echo ""
 
-# Check toolchain cargo exists
-if [ ! -x "$TOOLCHAIN_CARGO" ]; then
-    log_error "Toolchain cargo not found at: $TOOLCHAIN_CARGO"
-    exit 1
-fi
-
+anyka_require_vendored_cargo
 log_info "Using cargo: $TOOLCHAIN_CARGO"
 echo ""
 

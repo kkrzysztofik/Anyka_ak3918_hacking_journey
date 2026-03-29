@@ -8,6 +8,8 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=scripts/common.sh
+source "$(cd "${SCRIPT_DIR}/../.." && pwd)/scripts/common.sh"
 cd "$SCRIPT_DIR"
 
 # Crate versions to download
@@ -19,30 +21,6 @@ declare -A CRATES=(
     ["tokio-metrics"]="0.2.2"
     ["openssl-src"]="300.2.3+3.2.1"
 )
-
-# Color output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m'
-
-log_info() {
-    local message="$1"
-    printf "%s[INFO]%s %s\n" "${GREEN}" "${NC}" "${message}"
-    return 0
-}
-
-log_warn() {
-    local message="$1"
-    printf "%s[WARN]%s %s\n" "${YELLOW}" "${NC}" "${message}"
-    return 0
-}
-
-log_error() {
-    local message="$1"
-    printf "%s[ERROR]%s %s\n" "${RED}" "${NC}" "${message}"
-    return 0
-}
 
 clean_patched() {
     log_info "Cleaning existing patched directories..."

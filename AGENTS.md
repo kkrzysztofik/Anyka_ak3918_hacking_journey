@@ -364,6 +364,15 @@ For more details, see README.md and docs/QUICKSTART.md.
 
 <!-- END BEADS INTEGRATION -->
 
+## Learned User Preferences
+
+- Prefer IDE and tooling configuration that survives different clone paths (avoid hardcoded absolute repo paths in workspace settings where rust-analyzer and similar tools allow workspace-relative or portable patterns).
+
+## Learned Workspace Facts
+
+- Host-side shell refactors and shared libraries such as `scripts/common.sh` exclude the entire `SD_card_contents/` tree.
+- `cross-compile/onvif/scripts/` is legacy ONVIF C tooling, deprecated and slated for removal; do not refactor it or wire it into new shared host script libraries.
+
 ````markdown
 ## UBS Quick Reference for AI Agents
 

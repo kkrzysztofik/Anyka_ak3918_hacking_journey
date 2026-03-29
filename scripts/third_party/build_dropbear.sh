@@ -4,7 +4,9 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+# shellcheck source=scripts/common.sh
+source "$(cd "${SCRIPT_DIR}/../.." && pwd)/scripts/common.sh"
+REPO_ROOT="${ANYKA_REPO_ROOT}"
 
 DEFAULT_VERSION="2024.86"
 DEFAULT_SHA256="e78936dffc395f2e0db099321d6be659190966b99712b55c530dd0a1822e0a5e"

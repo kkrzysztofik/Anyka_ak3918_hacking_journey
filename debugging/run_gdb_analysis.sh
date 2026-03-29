@@ -18,9 +18,10 @@ if [ $# -ge 2 ]; then
     BINARY_FILE="$2"
 fi
 
-# Get script location and project root
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+# shellcheck source=scripts/common.sh
+source "${SCRIPT_DIR}/../scripts/common.sh"
+PROJECT_ROOT="${ANYKA_REPO_ROOT}"
 
 # Set paths
 ONVIF_DIR="$PROJECT_ROOT/cross-compile/onvif"

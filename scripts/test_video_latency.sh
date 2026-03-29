@@ -7,6 +7,8 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=scripts/common.sh
+source "${SCRIPT_DIR}/common.sh"
 
 cleanup() {
     if [ -n "${ONVIF_PID:-}" ]; then
@@ -17,33 +19,6 @@ cleanup() {
     fi
 }
 trap cleanup EXIT INT TERM
-
-# Colors for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m' # No Color
-
-log_info() {
-    echo -e "${GREEN}[INFO]${NC} $1"
-}
-
-log_warn() {
-    echo -e "${YELLOW}[WARN]${NC} $1"
-}
-
-log_error() {
-    echo -e "${RED}[ERROR]${NC} $1"
-}
-
-log_step() {
-    echo -e "${BLUE}[STEP]${NC} $1"
-}
-
-log_success() {
-    echo -e "${GREEN}[OK]${NC} $1"
-}
 
 # Wait up to $2 seconds for no matching pgrep -f process; returns 0 if gone.
 wait_proc_gone() {

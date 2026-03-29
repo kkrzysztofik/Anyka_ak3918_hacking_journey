@@ -3,27 +3,30 @@
 
 set -euo pipefail
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=scripts/common.sh
+source "${SCRIPT_DIR}/../scripts/common.sh"
+REPO_ROOT="${ANYKA_REPO_ROOT}"
 VALIDATION_DIR="${REPO_ROOT}/validation"
 RUST_DIR="${VALIDATION_DIR}/rust"
 
-export CARGO="${CARGO:-${REPO_ROOT}/toolchain/arm-anykav200-crosstool-ng/bin/cargo}"
+export CARGO="${CARGO:-${ANYKA_CARGO}}"
 
 cd "$RUST_DIR"
 
-echo "[INFO] Building rtsp_validation_tool (release)..."
+log_info "Building rtsp_validation_tool (release)..."
 "$CARGO" build --release
 
 BIN_SRC="${VALIDATION_DIR}/target/x86_64-unknown-linux-gnu/release/rtsp_validation_tool"
 BIN_DST="${VALIDATION_DIR}/rtsp_validation_tool"
 
 if [ ! -f "$BIN_SRC" ]; then
-  echo "[ERROR] Expected binary not found at: $BIN_SRC" >&2
+  log_error "Expected binary not found at: $BIN_SRC"
   exit 1
 fi
 
 cp -f "$BIN_SRC" "$BIN_DST"
 chmod +x "$BIN_DST" || true
 
-echo "[INFO] Wrote: $BIN_DST"
+log_info "Wrote: $BIN_DST"
 

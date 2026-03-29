@@ -4,40 +4,13 @@
 
 set -e
 
-# Colors for output
-readonly RED='\033[0;31m'
-readonly GREEN='\033[0;32m'
-readonly YELLOW='\033[1;33m'
-readonly BLUE='\033[0;34m'
-readonly NC='\033[0m' # No Color
-
-log_info() {
-    local message="$1"
-    echo -e "${BLUE}[INFO]${NC} ${message}"
-    return 0
-}
-
-log_success() {
-    local message="$1"
-    echo -e "${GREEN}[SUCCESS]${NC} ${message}"
-    return 0
-}
-
-log_error() {
-    local message="$1"
-    echo -e "${RED}[ERROR]${NC} ${message}" >&2
-    return 0
-}
-
-log_warn() {
-    local message="$1"
-    echo -e "${YELLOW}[WARN]${NC} ${message}"
-    return 0
-}
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=scripts/common.sh
+source "$(cd "${SCRIPT_DIR}/.." && pwd)/scripts/common.sh"
 
 # Configuration
 IMAGE_TAG="${IMAGE_TAG:-anyka-cross-compile:test}"
-PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+PROJECT_ROOT="${ANYKA_REPO_ROOT}"
 ONVIF_RUST_DIR="${PROJECT_ROOT}/cross-compile/onvif-rust"
 
 # Check if image exists

@@ -1,18 +1,16 @@
 #!/bin/bash
 # Generate a test H.264 file for RTSP validation
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=scripts/common.sh
+source "${SCRIPT_DIR}/../scripts/common.sh"
+
 OUTPUT_FILE="${1:-test_video.h264}"
 DURATION="${2:-10}"
 FPS="${3:-25}"
 RESOLUTION="${4:-1920x1080}"
 
-log_info() { echo "[INFO] $*"; }
-log_error() { echo "[ERROR] $*" >&2; }
-
-if ! command -v ffmpeg &> /dev/null; then
-    log_error "ffmpeg not found. Install with: sudo apt-get install ffmpeg"
-    exit 1
-fi
+anyka_check_commands ffmpeg
 
 log_info "Generating test H.264 file..."
 log_info "  Output: $OUTPUT_FILE"

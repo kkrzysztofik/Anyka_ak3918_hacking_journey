@@ -22,24 +22,18 @@
 
 set -euo pipefail
 
-# Colors for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m' # No Color
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=scripts/common.sh
+source "${SCRIPT_DIR}/common.sh"
+PROJECT_ROOT="${ANYKA_REPO_ROOT}"
 
 # Default values
 DEVICE_IP=""
 DEVICE_USER="admin"
 DEVICE_PASS="admin"
 PCAP_FILE=""
-OUTPUT_FILE="../cross-compile/streaming-lib/src/codec/test_fixtures.rs"
+OUTPUT_FILE="${PROJECT_ROOT}/cross-compile/streaming-lib/src/codec/test_fixtures.rs"
 RTSP_PORT="554"
-
-# Script directory
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 usage() {
     cat << EOF
@@ -70,29 +64,11 @@ EOF
     exit 0
 }
 
-log_info() { echo -e "${BLUE}[INFO]${NC} $*"; }
-log_success() { echo -e "${GREEN}[SUCCESS]${NC} $*"; }
-log_warn() { echo -e "${YELLOW}[WARN]${NC} $*"; }
-log_error() { echo -e "${RED}[ERROR]${NC} $*" >&2; }
-
 check_dependencies() {
-    local missing=()
-    
-    if ! command -v ffprobe &> /dev/null; then
-        missing+=("ffprobe")
-    fi
-    
-    if ! command -v base64 &> /dev/null; then
-        missing+=("base64")
-    fi
-    
-    if [[ -n "$PCAP_FILE" ]] && ! command -v tshark &> /dev/null; then
-        missing+=("tshark")
-    fi
-    
-    if [[ ${#missing[@]} -gt 0 ]]; then
-        log_error "Missing dependencies: ${missing[*]}"
-        log_error "Install with: sudo apt-get install ffmpeg wireshark-common"
+    anyka_check_commands ffprobe base64
+    if [[ -n "$PCAP_FILE" ]] && ! command -v tshark &>/dev/null; then
+        log_error "Missing dependency: tshark (required with --pcap)"
+        log_error "Install with: sudo apt-get install wireshark-common"
         exit 1
     fi
 }

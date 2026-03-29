@@ -5,27 +5,15 @@
 
 set -e
 
-# Colors for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m' # No Color
-
-# Check if cloc is installed
-if ! command -v cloc &> /dev/null; then
-    echo -e "${RED}Error: cloc is not installed. Please install it first:${NC}"
-    echo "  Ubuntu/Debian: sudo apt-get install cloc"
-    echo "  macOS: brew install cloc"
-    echo "  Or download from: https://github.com/AlDanial/cloc"
-    exit 1
-fi
-
-# Get script directory
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+# shellcheck source=scripts/common.sh
+source "${SCRIPT_DIR}/common.sh"
 
-echo -e "${BLUE}Counting lines of code for our custom implementation...${NC}"
+anyka_check_commands cloc
+
+PROJECT_ROOT="${ANYKA_REPO_ROOT}"
+
+log_info "Counting lines of code for our custom implementation..."
 echo -e "${YELLOW}Project root: $PROJECT_ROOT${NC}"
 echo
 

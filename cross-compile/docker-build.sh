@@ -8,51 +8,16 @@ set -e
 # Configuration and Constants
 # =============================================================================
 
-# Script directory
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# Project root (parent of cross-compile directory)
-PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+# shellcheck source=scripts/common.sh
+source "$(cd "${SCRIPT_DIR}/.." && pwd)/scripts/common.sh"
+PROJECT_ROOT="${ANYKA_REPO_ROOT}"
 
 # Default values
 DOCKERFILE="${SCRIPT_DIR}/Dockerfile"
 IMAGE_TAG="anyka-cross-compile"
 BUILD_ARGS=""
 NO_CACHE=false
-
-# Colors for output
-readonly RED='\033[0;31m'
-readonly GREEN='\033[0;32m'
-readonly YELLOW='\033[1;33m'
-readonly BLUE='\033[0;34m'
-readonly NC='\033[0m' # No Color
-
-# =============================================================================
-# Logging Functions
-# =============================================================================
-
-log_info() {
-    local message="$1"
-    echo -e "${BLUE}[INFO]${NC} ${message}"
-    return 0
-}
-
-log_success() {
-    local message="$1"
-    echo -e "${GREEN}[SUCCESS]${NC} ${message}"
-    return 0
-}
-
-log_error() {
-    local message="$1"
-    echo -e "${RED}[ERROR]${NC} ${message}" >&2
-    return 0
-}
-
-log_warn() {
-    local message="$1"
-    echo -e "${YELLOW}[WARN]${NC} ${message}"
-    return 0
-}
 
 # =============================================================================
 # Utility Functions

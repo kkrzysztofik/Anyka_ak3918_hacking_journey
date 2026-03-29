@@ -60,18 +60,13 @@ if [[ $# -gt 0 ]]; then
   fi
 fi
 
-# Colors for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m' # No Color
+# shellcheck source=scripts/common.sh
+source "$(cd "${SCRIPT_DIR}/../../.." && pwd)/scripts/common.sh"
 
-# Test results
+# Test results (custom log_success/log_error increment counters)
 TESTS_PASSED=0
 TESTS_FAILED=0
 
-# Logging functions
 log_info() {
   local message="$1"
   echo -e "${BLUE}[INFO]${NC} ${message}"
