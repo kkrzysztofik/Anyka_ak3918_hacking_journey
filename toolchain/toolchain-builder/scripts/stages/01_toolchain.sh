@@ -8,6 +8,11 @@ source "${SCRIPTS_DIR}/common.sh"
 
 STAGE_NAME="toolchain"
 
+# CTNG_SRC_DIR is set here at module scope so it is visible to all helper
+# functions (_install_ctng, _configure_ctng, _build_ctng) without needing
+# to be passed as an argument or re-derived in each function.
+CTNG_SRC_DIR="${BUILD_DIR}/crosstool-ng-${CROSSTOOL_NG_VERSION}"
+
 # ---------------------------------------------------------------------------
 # _install_ctng — download, vendor-patch, and build the ct-ng host tool
 #
@@ -17,7 +22,6 @@ STAGE_NAME="toolchain"
 # ---------------------------------------------------------------------------
 _install_ctng() {
     local tarball="${BUILD_DIR}/crosstool-ng-${CROSSTOOL_NG_VERSION}.tar.xz"
-    CTNG_SRC_DIR="${BUILD_DIR}/crosstool-ng-${CROSSTOOL_NG_VERSION}"
 
     # ── 1. Download source tarball ──────────────────────────────────────────
     if [[ ! -d "${CTNG_SRC_DIR}" ]]; then
