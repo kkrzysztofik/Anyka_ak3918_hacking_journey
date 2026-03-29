@@ -32,14 +32,17 @@ else
     exit 1
 fi
 
-# Locate or create the clang-wrapper for ARMv5TE linking.
+# Locate the clang-wrapper for ARMv5TE linking.
 # The wrapper translates the GCC triple (arm-unknown-linux-uclibcgnueabi) to a
 # valid LLVM triple (armv5te-unknown-linux-gnueabi), injects sysroot/crt/libgcc
 # paths, and filters any --target arg passed by rustc's pre-link-args.
-CLANG_WRAPPER_SRC="${REPO_ROOT}/toolchain/build-new/clang-wrapper.sh"
-if [[ -f "${CLANG_WRAPPER_SRC}" ]]; then
-    CLANG_WRAPPER="${CLANG_WRAPPER_SRC}"
+# Use wrapper from installed toolchain (created during build) or generate one.
+if [[ -f "${TOOLCHAIN_BASE}/bin/clang-wrapper.sh" ]]; then
+    CLANG_WRAPPER="${TOOLCHAIN_BASE}/bin/clang-wrapper.sh"
 else
+    # Generate a self-contained wrapper inside the toolchain's bin/ directory
+    # This is the final fallback - normally the wrapper is created during toolchain build
+    CLANG_WRAPPER="${TOOLCHAIN_BASE}/bin/clang-wrapper.sh"
     # Docker / stripped environment: generate a self-contained wrapper inside
     # the toolchain's bin/ directory so INSTALL_DIR resolves via dirname/../
     CLANG_WRAPPER="${TOOLCHAIN_BASE}/bin/clang-wrapper.sh"

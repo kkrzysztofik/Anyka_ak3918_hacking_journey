@@ -1,173 +1,208 @@
 #!/bin/bash
-# build.sh — Orchestrates the complete toolchain build for Anyka AK3918 cameras.
 #
-# Runs all stages in sequence:
-#   1. build_toolchain.sh            GCC cross-compiler via crosstool-NG
-#   2. build_llvm.sh                 LLVM/Clang (native, needed by Rust)
-#   3. build_compiler_rt_builtins.sh compiler-rt builtins (cross-compiled)
-#   4. bootstrap_rust.sh             Rust compiler from source
-#   5. install_rust_src.sh           rust-src component (IDE support)
-#   6. verify_rust.sh                Rust installation verification
-#   7. rebuild_gdb.sh                GDB with embedded dynamic linker
+# Unified Toolchain Build Entrypoint
+# 
+# Builds complete cross-compilation toolchain for Anyka AK3918 (ARMv5TE) or ARM64 targets.
+# Single command to build everything: GCC, LLVM, Rust, GDB.
 #
-# USAGE:
-#   ./build.sh [OPTIONS]
+# Usage:
+#   ./build.sh                        # Build all stages (armv5te default)
+#   ./build.sh --arch aarch64         # Build for ARM64 instead
+#   ./build.sh --no-rust              # Skip Rust (faster iteration)
+#   ./build.sh --no-gdb               # Skip GDB rebuild
+#   ./build.sh --resume               # Resume from last checkpoint
+#   ./build.sh --clean                 # Clear all checkpoints and rebuild
+#   ./build.sh --dry-run               # Show what would be built without building
+#   ./build.sh --help                  # Show this help
 #
-# OPTIONS:
-#   --no-rust    Skip Rust stages (4, 5, 6) — saves ~6 hours
-#   --no-gdb     Skip GDB rebuild (stage 7)
-#   --resume     Skip stages with an existing checkpoint (.build/checkpoints/.done_*)
-#   --dry-run    Print what would run without executing anything
-#   -h, --help   Show this help message
+# Checkpoints:
+#   Stages that complete successfully are checkpointed. Use --resume to skip
+#   completed stages on subsequent runs. Use --clean to force full rebuild.
+#
+# Environment:
+#   ARCH=armv5te   # or aarch64
+#   DRY_RUN=true   # echo actions without executing
+#
 
 set -euo pipefail
 
-# Script directory — must be set before sourcing common.sh
+# Script directory and project root
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=common.sh
-source "${SCRIPT_DIR}/common.sh"
+export readonly ROOT_DIR="${SCRIPT_DIR}"
+export readonly SCRIPTS_DIR="${SCRIPT_DIR}/scripts"
 
-# ── Option parsing ────────────────────────────────────────────────────────────
-OPT_NO_RUST=false
-OPT_NO_GDB=false
-OPT_RESUME=false
-OPT_DRY_RUN=false
+# =============================================================================
+# Usage and Help
+# =============================================================================
+show_help() {
+    cat << EOF
+Unified Toolchain Build System
+==============================
 
-usage() {
-    sed -n '/^# USAGE:/,/^[^#]/{ /^[^#]/d; p }' "$0" | sed 's/^# //; s/^#$//'
-    exit 0
+USAGE:
+    $(basename "$0") [OPTIONS]
+
+OPTIONS:
+    --arch ARCH       Target architecture: armv5te (default) or aarch64
+    --no-rust        Skip Rust bootstrap stage
+    --no-gdb         Skip GDB rebuild stage
+    --resume         Resume from last checkpoint (default behavior)
+    --clean          Clear all checkpoints and rebuild from scratch
+    --dry-run        Show what would be built without executing
+    -h, --help       Show this help message
+
+EXAMPLES:
+    # Full build (armv5te default)
+    ./build.sh
+
+    # Build for ARM64
+    ./build.sh --arch aarch64
+
+    # Build without Rust (faster if you only need GCC+LLVM)
+    ./build.sh --no-rust
+
+    # Resume interrupted build
+    ./build.sh --resume
+
+    # Force clean rebuild
+    ./build.sh --clean
+
+    # Dry run to see what would happen
+    ./build.sh --dry-run
+
+CHECKPOINTS:
+    Build progress is saved to ${ROOT_DIR}/build/.checkpoints/
+    Remove specific checkpoints with: rm ${ROOT_DIR}/build/.checkpoints/*
+
+EOF
 }
 
-for arg in "$@"; do
-    case "${arg}" in
-        --no-rust)  OPT_NO_RUST=true ;;
-        --no-gdb)   OPT_NO_GDB=true ;;
-        --resume)   OPT_RESUME=true ;;
-        --dry-run)  OPT_DRY_RUN=true ;;
-        -h|--help)  usage ;;
+# =============================================================================
+# Parse Arguments
+# =============================================================================
+ARCH="armv5te"
+SKIP_RUST=false
+SKIP_GDB=false
+CLEAN=false
+RESUME=false
+DRY_RUN=false
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --arch)
+            ARCH="$2"
+            shift 2
+            ;;
+        --no-rust)
+            SKIP_RUST=true
+            shift
+            ;;
+        --no-gdb)
+            SKIP_GDB=true
+            shift
+            ;;
+        --clean)
+            CLEAN=true
+            shift
+            ;;
+        --resume)
+            RESUME=true
+            shift
+            ;;
+        --dry-run)
+            DRY_RUN=true
+            shift
+            ;;
+        -h|--help)
+            show_help
+            exit 0
+            ;;
         *)
-            log_error "Unknown option: ${arg}"
-            log_info  "Run with --help for usage."
+            echo "ERROR: Unknown option: $1" >&2
+            show_help
             exit 1
             ;;
     esac
 done
 
-# ── Log file ──────────────────────────────────────────────────────────────────
-if [[ "${OPT_DRY_RUN}" != "true" ]]; then
-    mkdir -p "${BUILD_DIR}/.build"
-    LOG_FILE="${BUILD_DIR}/.build/build_$(date +%Y%m%d_%H%M%S).log"
-    exec > >(tee -a "${LOG_FILE}") 2>&1
-fi
+export ARCH
+export DRY_RUN
 
-# ── Checkpoint helpers ────────────────────────────────────────────────────────
-CHECKPOINT_DIR="${BUILD_DIR}/.build/checkpoints"
-mkdir -p "${CHECKPOINT_DIR}"
+# =============================================================================
+# Main Build Pipeline
+# =============================================================================
+main() {
+    echo "=============================================="
+    echo "Unified Toolchain Build"
+    echo "=============================================="
+    echo "Architecture: ${ARCH}"
+    echo "Dry run:      ${DRY_RUN}"
+    echo "Clean:        ${CLEAN}"
+    echo "Skip Rust:    ${SKIP_RUST}"
+    echo "Skip GDB:     ${SKIP_GDB}"
+    echo "=============================================="
 
-checkpoint_done() { [[ -f "${CHECKPOINT_DIR}/.done_${1}" ]]; }
-checkpoint_save() { touch "${CHECKPOINT_DIR}/.done_${1}"; }
+    # Source common functions
+    source "${SCRIPTS_DIR}/common.sh"
 
-# ── Stage count ───────────────────────────────────────────────────────────────
-stage_current=0
-stage_total=3  # always: toolchain + llvm + compiler_rt
-[[ "${OPT_NO_RUST}" != "true" ]] && stage_total=$(( stage_total + 3 ))
-[[ "${OPT_NO_GDB}" != "true" ]]  && stage_total=$(( stage_total + 1 ))
+    # Handle clean
+    if [[ "${CLEAN}" == "true" ]]; then
+        echo ""
+        echo ">>> Clearing all checkpoints..."
+        rm -rf "${ROOT_DIR}/build/.checkpoints"
+        echo "Checkpoints cleared."
+    fi
 
-trap 'log_error "Build failed at stage ${stage_current}/${stage_total}. Use --resume to skip completed stages."' ERR
+    # Ensure directories exist
+    ensure_dirs
 
-# ── Stage runner ──────────────────────────────────────────────────────────────
-# run_stage <checkpoint-name> <script-filename> <description>
-run_stage() {
-    local name="$1"
-    local script="$2"
-    local desc="$3"
+    # Stage 1: GCC toolchain (crosstool-NG)
+    source "${SCRIPTS_DIR}/stages/01_toolchain.sh"
+    stage_toolchain
 
-    stage_current=$(( stage_current + 1 ))
+    # Stage 2: LLVM/Clang
+    source "${SCRIPTS_DIR}/stages/02_llvm.sh"
+    stage_llvm
+
+    # Stage 3: compiler-rt builtins (ARM only)
+    source "${SCRIPTS_DIR}/stages/03_compiler_rt.sh"
+    stage_compiler_rt
+
+    # Stage 4: Rust (optional)
+    if [[ "${SKIP_RUST}" == "false" ]]; then
+        source "${SCRIPTS_DIR}/stages/04_rust.sh"
+        stage_rust
+    else
+        echo ""
+        echo ">>> Skipping Rust (--no-rust)"
+    fi
+
+    # Stage 5: GDB (optional)
+    if [[ "${SKIP_GDB}" == "false" ]]; then
+        source "${SCRIPTS_DIR}/stages/05_gdb.sh"
+        stage_gdb
+    else
+        echo ""
+        echo ">>> Skipping GDB (--no-gdb)"
+    fi
+
     echo ""
-    log_info "=========================================="
-    log_info "Stage ${stage_current}/${stage_total}: ${desc}"
-    log_info "=========================================="
-
-    if [[ "${OPT_RESUME}" == "true" ]] && checkpoint_done "${name}"; then
-        log_warn "  Skipping — checkpoint .done_${name} exists."
-        log_warn "  Delete ${CHECKPOINT_DIR}/.done_${name} to force a re-run."
-        return 0
+    echo "=============================================="
+    echo "BUILD COMPLETE"
+    echo "=============================================="
+    echo "Toolchain installed to: ${INSTALL_DIR}"
+    echo ""
+    echo "Key binaries:"
+    echo "  ${INSTALL_DIR}/bin/${TARGET_TUPLE}-gcc"
+    echo "  ${INSTALL_DIR}/bin/clang"
+    if [[ "${SKIP_RUST}" == "false" ]]; then
+        echo "  ${INSTALL_DIR}/bin/rustc"
+        echo "  ${INSTALL_DIR}/bin/cargo"
     fi
-
-    if [[ "${OPT_DRY_RUN}" == "true" ]]; then
-        log_info "  [DRY-RUN] Would execute: ${SCRIPT_DIR}/${script}"
-        return 0
+    if [[ "${SKIP_GDB}" == "false" ]]; then
+        echo "  ${INSTALL_DIR}/bin/${TARGET_TUPLE}-gdb"
     fi
-
-    "${SCRIPT_DIR}/${script}"
-    checkpoint_save "${name}"
-    log_info "Stage '${name}' complete."
+    echo "=============================================="
 }
 
-# ── Banner ────────────────────────────────────────────────────────────────────
-echo ""
-log_info "=========================================="
-log_info "  Anyka AK3918 — Full Toolchain Build"
-log_info "=========================================="
-echo ""
-log_info "Target:      ${TARGET_TUPLE}"
-log_info "Install dir: ${INSTALL_DIR}"
-log_info "Stages:      ${stage_total}"
-echo ""
-[[ "${OPT_NO_RUST}" == "true" ]]  && log_info "  --no-rust  (skipping Rust stages 4-6)"
-[[ "${OPT_NO_GDB}" == "true" ]]   && log_info "  --no-gdb   (skipping GDB rebuild)"
-[[ "${OPT_RESUME}" == "true" ]]   && log_info "  --resume   (completed stages will be skipped)"
-[[ "${OPT_DRY_RUN}" == "true" ]]  && log_info "  --dry-run  (no commands will be executed)"
-
-est_hours=6  # toolchain 2-3h + llvm 3-4h + compiler-rt ~1h
-[[ "${OPT_NO_RUST}" != "true" ]] && est_hours=$(( est_hours + 7 ))
-[[ "${OPT_NO_GDB}" != "true" ]]  && est_hours=$(( est_hours + 1 ))
-echo ""
-log_warn "Estimated build time: ${est_hours}+ hours (varies by CPU and network speed)"
-log_warn "Tip: run inside 'tmux' or 'screen' to survive disconnects."
-echo ""
-
-if [[ "${OPT_DRY_RUN}" != "true" ]]; then
-    log_info "Starting in 5 seconds — press Ctrl+C to abort."
-    sleep 5
-fi
-
-# ── Stages ────────────────────────────────────────────────────────────────────
-run_stage "toolchain"   "build_toolchain.sh"            "GCC cross-compiler (crosstool-NG git ${CTNG_GIT_REF:0:12})"
-run_stage "llvm"        "build_llvm.sh"                 "LLVM/Clang ${LLVM_VERSION}"
-run_stage "compiler_rt" "build_compiler_rt_builtins.sh" "compiler-rt builtins (cross-compiled)"
-
-if [[ "${OPT_NO_RUST}" != "true" ]]; then
-    run_stage "rust"        "bootstrap_rust.sh"   "Rust ${RUST_VERSION} from source"
-    run_stage "rust_src"    "install_rust_src.sh" "rust-src component"
-    run_stage "verify_rust" "verify_rust.sh"      "Rust installation verification"
-fi
-
-if [[ "${OPT_NO_GDB}" != "true" ]]; then
-    run_stage "gdb" "rebuild_gdb.sh" "GDB ${GDB_VERSION} with embedded dynamic linker"
-fi
-
-# ── Summary ───────────────────────────────────────────────────────────────────
-echo ""
-log_info "=========================================="
-log_info "  Build complete!"
-log_info "=========================================="
-echo ""
-log_info "Toolchain installed to: ${INSTALL_DIR}"
-echo ""
-log_info "Key binaries:"
-log_info "  ${INSTALL_DIR}/bin/${TARGET_TUPLE}-gcc"
-log_info "  ${INSTALL_DIR}/bin/${TARGET_TUPLE}-g++"
-log_info "  ${INSTALL_DIR}/bin/clang"
-if [[ "${OPT_NO_RUST}" != "true" ]]; then
-    log_info "  ${INSTALL_DIR}/bin/rustc"
-    log_info "  ${INSTALL_DIR}/bin/cargo"
-fi
-echo ""
-log_info "To use in a Cargo project, add to .cargo/config.toml:"
-log_info "  [target.armv5te-unknown-linux-uclibceabi]"
-log_info "  linker = \"${INSTALL_DIR}/bin/clang\""
-echo ""
-if [[ "${OPT_DRY_RUN}" != "true" ]]; then
-    log_info "Full build log: ${LOG_FILE}"
-fi
+main "$@"

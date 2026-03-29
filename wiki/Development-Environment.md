@@ -48,99 +48,46 @@ The toolchain build system supports multiple architectures:
 - **ARMv5TE** (default): For Anyka AK3918 and embedded devices
 - **aarch64**: For modern ARM64 systems
 
-### Step 1: Navigate to the build directory
+### Quick Start: Single Command Build
 
 ```bash
 cd /home/kmk/anyka-dev/toolchain/build-new
+./build.sh
 ```
 
-### Step 2: Build the GCC toolchain
+This builds everything: GCC, LLVM/Clang, compiler-rt, Rust, and GDB.
 
-#### Building ARMv5TE (Default)
+### Build Options
 
 ```bash
-# Default (ARMv5TE)
-./build_toolchain.sh
+./build.sh --help
 
-# Or explicitly
-ARCH=armv5te ./build_toolchain.sh
+Options:
+    --arch ARCH       Target architecture: armv5te (default) or aarch64
+    --no-rust        Skip Rust bootstrap (faster for iteration)
+    --no-gdb         Skip GDB rebuild
+    --resume         Resume from last checkpoint (default)
+    --clean          Clear all checkpoints and rebuild from scratch
+    --dry-run        Show what would be built without executing
 ```
 
-This will:
-
-- Download and build crosstool-NG 1.28.0
-- Configure for ARMv5TEJ with uClibc-ng
-- Build GCC 15.2, Binutils 2.45, and GDB 16.3
-- Install to `../arm-anykav200-crosstool-ng/usr/`
-
-#### Building aarch64
+### Examples
 
 ```bash
-ARCH=aarch64 ./build_toolchain.sh
-```
+# Full build (armv5te default)
+./build.sh
 
-This will:
+# Build for ARM64
+./build.sh --arch aarch64
 
-- Use existing crosstool-NG (if already built)
-- Configure for aarch64 with glibc
-- Build GCC 15.2, Binutils 2.45, and GDB 16.3
-- Install to `../aarch64-unknown-linux-gnu-toolchain/usr/`
+# Build without Rust (faster)
+./build.sh --no-rust
 
-#### Building Both Architectures
+# Resume interrupted build
+./build.sh --resume
 
-To build both architectures in sequence:
-
-```bash
-./build_all_architectures.sh
-```
-
-### Step 3: Build LLVM/Clang (Required for Rust)
-
-```bash
-./build_llvm.sh
-```
-
-This builds LLVM 21.1.8 (latest stable) with Clang and LLD for cross-compilation support.
-
-### Step 4: Bootstrap Rust from Source
-
-#### For ARMv5TE
-
-```bash
-ARCH=armv5te ./bootstrap_rust.sh
-```
-
-This will:
-
-- Clone Rust source code
-- Add `armv5te-unknown-linux-uclibceabi` target specification
-- Configure Rust to use the custom LLVM
-- Build Rust compiler and std library for the target
-- Install to `../arm-anykav200-crosstool-ng/`
-
-#### For aarch64
-
-```bash
-ARCH=aarch64 ./bootstrap_rust.sh
-```
-
-This will:
-
-- Clone Rust source code (if not already cloned)
-- Configure Rust to use the custom LLVM (aarch64 is a builtin target)
-- Build Rust compiler and std library for the target
-- Install to `../aarch64-unknown-linux-gnu-toolchain/`
-
-### Step 5: Verify the installation
-
-**For ARMv5TE:**
-```bash
-./verify_rust.sh
-```
-
-**For aarch64:**
-```bash
-./verify_toolchain_aarch64.sh
+# Force clean rebuild
+./build.sh --clean
 ```
 
 After building, the toolchains will be available at:

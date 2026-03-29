@@ -1,474 +1,142 @@
-# Modern Toolchain Build
+# Toolchain Build System
 
-This directory contains scripts and configuration for building a modern cross-compilation toolchain for the Anyka AK3918 embedded camera using crosstool-NG.
+Unified build system for the Anyka AK3918 cross-compilation toolchain.
 
-## Target Architecture
+## Quick Start
 
-### ARMv5TE
+Build the complete toolchain with a single command:
 
-- **Architecture**: ARMv5TEJ (CPU features: swp, half, fastmult, edsp, java)
-- **Float ABI**: soft (pure software floating point - NO VFP support)
-- **VFP/NEON**: None (CPU does not support VFP or NEON)
-- **C Library**: uClibc-ng 1.0.57
-- **Kernel Headers**: Linux 3.4.35
-- **Target Tuple**: `arm-unknown-linux-uclibcgnueabi`
-- **Rust Target**: `armv5te-unknown-linux-uclibceabi`
+```bash
+cd toolchain/build-new
+./build.sh
+```
 
-## Toolchain Components
+This builds everything: GCC (via crosstool-NG), LLVM/Clang, compiler-rt, Rust, and GDB.
 
-| Component | Version / location |
-| --------- | -------------------- |
-| crosstool-NG | Git `37190d5b1e8050832610ba5e899911c7a723d798` |
-| GCC | 15.2 |
-| Binutils | 2.46.0 |
-| GDB | 17.1 |
-| LLVM/Clang | 22.1.2 (optional, for Rust support) |
-| Rust | 1.94.1+ (optional, bootstrapped from source) |
-| uClibc-ng | `1.0.57` |
+## Usage
 
-### Notes
+```bash
+./build.sh [OPTIONS]
 
-- **crosstool-NG host tree**: checked out under `crosstool-ng-src/` next to these scripts (see `build_toolchain.sh`).
-- **uClibc-ng metadata**: vendored under `vendor/crosstool-ng/uClibc-ng/<version>/` (checksum stubs for the release tarball).
-- **Pinned upstream vs. Kconfig**: the crosstool-NG commit in `common.sh` may not define every uClibc-ng version line your `.config` selects; `build_toolchain.sh` copies the vendored package tree into `crosstool-ng-src/packages/uClibc-ng/` and re-runs `./bootstrap` when required Kconfig tokens are missing from `config/versions/uClibc-ng.in`.
-- **Binutils**: the pinned crosstool-NG revision includes binutils 2.46.0 (see `common.sh` / config fragments).
+Options:
+    --arch ARCH       Target architecture: armv5te (default) or aarch64
+    --no-rust        Skip Rust bootstrap (faster for iteration)
+    --no-gdb         Skip GDB rebuild
+    --resume         Resume from last checkpoint (default)
+    --clean          Clear all checkpoints and rebuild from scratch
+    --dry-run        Show what would be built without executing
+    -h, --help       Show help message
+```
+
+### Examples
+
+```bash
+# Full build (armv5te default)
+./build.sh
+
+# Build for ARM64
+./build.sh --arch aarch64
+
+# Build without Rust (faster)
+./build.sh --no-rust
+
+# Resume interrupted build
+./build.sh --resume
+
+# Force clean rebuild
+./build.sh --clean
+
+# See what would happen without running
+./build.sh --dry-run
+```
+
+## Architecture
+
+```
+toolchain/build-new/
+├── build.sh              # Unified entrypoint (single command)
+├── README.md             # This file
+├── scripts/              # Build scripts (tracked in git)
+│   ├── common.sh         # Shared functions and path model
+│   ├── inject_ct_config_fragments.py  # Config patcher
+│   └── stages/           # Stage modules
+│       ├── 01_toolchain.sh    # GCC via crosstool-NG
+│       ├── 02_llvm.sh         # LLVM/Clang
+│       ├── 03_compiler_rt.sh  # compiler-rt builtins (ARM)
+│       ├── 04_rust.sh         # Rust bootstrap
+│       └── 05_gdb.sh          # GDB rebuild
+├── build/                # Generated artifacts (gitignored)
+│   ├── .checkpoints/    # Build progress
+│   ├── .build/          # crosstool-NG work
+│   ├── rust/            # Rust source checkout
+│   └── llvm-*/          # LLVM source checkout
+└── crosstool-ng.config  # crosstool-NG configuration
+```
+
+## Checkpoints
+
+The build system uses checkpoints to track progress. Completed stages are skipped on subsequent runs.
+
+- View checkpoints: `ls toolchain/build-new/build/.checkpoints/`
+- Resume: `build.sh --resume` (default)
+- Clean: `build.sh --clean` (force full rebuild)
+
+## Output
+
+After successful build, the toolchain is installed to:
+
+- **ARMv5TE**: `toolchain/arm-anykav200-crosstool-ng/`
+- **ARM64**: `toolchain/aarch64-unknown-linux-gnu-toolchain/`
+
+Key binaries:
+- `bin/arm-unknown-linux-uclibcgnueabi-gcc`
+- `bin/clang`
+- `bin/rustc`
+- `bin/cargo`
+- `bin/armv5te-unknown-linux-uclibceabi-gdb`
 
 ## Prerequisites
 
-### System Requirements
-
-- Linux or WSL environment
-- At least 10GB free disk space
-- 4GB+ RAM recommended
-- 2-4 hours build time (depending on CPU)
-
-### Install Build Dependencies
-
 ```bash
-sudo apt-get update
 sudo apt-get install -y \
-    build-essential \
-    libncurses-dev \
-    gperf \
-    bison \
-    flex \
-    texinfo \
-    help2man \
-    gawk \
-    libtool-bin \  # Note: libtool package is not enough, need libtool-bin for libtool command
-    automake \
-    autoconf \
-    wget \
-    git \
-    file \
-    python3 \
-    python3-dev \
-    cmake \
-    ninja-build \
-    curl \
-    unzip \
-    xz-utils \
-    perl \
-    pkg-config
+    build-essential libncurses-dev gperf bison flex texinfo \
+    help2man gawk libtool-bin automake autoconf wget git file \
+    python3 python3-dev cmake ninja-build curl unzip xz-utils \
+    perl pkg-config libgmp-dev libmpfr-dev
 ```
 
-**Note for Rust projects with OpenSSL**: If you plan to build Rust projects that use OpenSSL (like the `xiu` project with `native-tls-vendored` feature), ensure `perl` and `pkg-config` are installed. These are required for OpenSSL to be compiled from source during the Rust build process. Additionally:
+## For Developers
 
-- `perl` - Required by OpenSSL build scripts
-- `pkg-config` - Used by openssl-sys for detection
-- `make` and `gcc` - Already included in build-essential
+The build system is designed for easy iteration:
 
-## Building the Toolchain
+1. **Partial builds**: Use `--no-rust` or `--no-gdb` to skip time-consuming stages
+2. **Resumability**: Checkpoints allow resuming from any stage
+3. **Dry runs**: Test changes without waiting for full build
+4. **Clean state**: `--clean` forces complete rebuild
 
-### Step 1: Navigate to Build Directory
+### Adding New Stages
 
-```bash
-REPO_ROOT="$(git rev-parse --show-toplevel)"
-cd "${REPO_ROOT}/toolchain/build-new"
-```
-
-### Step 2: Build the Toolchain
-
-```bash
-./build_toolchain.sh
-```
-
-The script will:
-
-1. Check for required dependencies
-2. Clone the pinned crosstool-NG Git commit (`CTNG_GIT_REF` in `common.sh`)
-3. Install vendored uClibc-ng 1.0.57 package metadata into the crosstool-NG tree
-4. Run `./bootstrap` in crosstool-NG when Kconfig regeneration is required
-5. Build the `ct-ng` host tool
-6. Configure the toolchain for ARMv5TEJ with uClibc-ng
-7. Build the complete toolchain (1-3 hours)
-8. Install to `../arm-anykav200-crosstool-ng/usr/`
-9. Verify the installation
-
-### Step 3: Verify the Build
-
-After the build completes, verify the toolchain:
-
-```bash
-./verify_toolchain.sh new
-```
-
-After building, the toolchain will be available at:
-
-- `../arm-anykav200-crosstool-ng/usr/bin/arm-unknown-linux-uclibcgnueabi-gcc`
-
-## Configuration
-
-The toolchain is configured via `crosstool-ng.config` file. Key settings:
-
-- Target: `arm-unknown-linux-uclibcgnueabi`
-- Architecture: ARMv5TEJ
-- Float ABI: soft
-- C Library: uClibc-ng 1.0.57
-- Kernel Headers: Linux 3.4.35
-- GCC: 15.2
-- Binutils: 2.46.0
-- GDB: 17.1
-
-### Option 1: Use Menuconfig (Interactive)
-
-After the initial configuration is created, you can customize it:
-
-```bash
-REPO_ROOT="$(git rev-parse --show-toplevel)"
-cd "${REPO_ROOT}/toolchain/build-new"
-./crosstool-ng-src/ct-ng menuconfig
-```
-
-Key settings to verify:
-
-- **Target options** → **Architecture**: ARM
-- **Target options** → **CPU**: armv5te
-- **Target options** → **Float ABI**: soft
-- **C-library**: uClibc-ng
-- **C-library version**: 1.0.57
-- **GCC version**: 15.2
-- **Binutils version**: 2.46.0
-- **Kernel version**: 3.4.35
-
-### Option 2: Edit Config File Directly
-
-Edit `crosstool-ng.config` and re-run the build script:
-
-```bash
-nano crosstool-ng.config
-./build_toolchain.sh
-```
+1. Add a new stage script in `scripts/stages/`
+2. Source `common.sh` and define `stage_<name>()` function
+3. Add `source` and function call in `build.sh`
 
 ## Troubleshooting
 
-### Build Fails with "Missing Dependency"
+### Checkpoint Issues
 
-Install the missing dependency and re-run:
-
+If a stage fails and you want to retry:
 ```bash
-sudo apt-get install <missing-package>
-./build_toolchain.sh
+rm toolchain/build-new/build/.checkpoints/<stage_name>
+./build.sh --resume
 ```
 
-### Build Fails During Compilation
+### Clean Rebuild
 
-1. Check available disk space: `df -h`
-2. Check available memory: `free -h`
-3. Reduce parallel jobs: Edit script and change `-j$(nproc)` to `-j2`
-4. Check build logs in `.build/` directory
-
-### Download Failures (SSL/Network Issues)
-
-If downloads fail due to SSL or network issues:
-
-1. **Manual download**: Download the tarball manually and place it in `.build/tarballs/`:
-
-   ```bash
-   cd toolchain/build-new
-   mkdir -p .build/tarballs
-   cd .build/tarballs
-
-   # For GCC:
-   wget --no-check-certificate https://gcc.gnu.org/pub/gcc/releases/gcc-15.2.0/gcc-15.2.0.tar.xz
-
-   # For GDB:
-   wget --no-check-certificate https://sourceware.org/pub/gdb/releases/gdb-17.1.tar.xz
-   ```
-
-2. **Restart build**: The build will detect the existing file and skip the download:
-
-   ```bash
-   cd toolchain/build-new
-   ./build_toolchain.sh
-   ```
-
-### Configuration Errors
-
-If configuration is invalid:
-
-1. Delete `.config` and `crosstool-ng.config`
-2. Re-run the build script to regenerate
-3. Or start from a known-good sample:
-
-   ```bash
-   ./crosstool-ng-src/ct-ng arm-unknown-linux-uclibcgnueabi
-   ./crosstool-ng-src/ct-ng menuconfig
-   ```
-
-### GDB Version Not Available
-
-If GDB 17.1 is not available in this crosstool-NG revision:
-
-1. Check available versions:
-
-   ```bash
-   ./crosstool-ng-src/ct-ng menuconfig
-   # Navigate to Debug facilities → GDB version
-   ```
-
-2. Select the latest available version
-3. Or build GDB separately if needed
-
-## Build Output
-
-After successful build, the toolchain will be installed at:
-
-```text
-toolchain/arm-anykav200-crosstool-ng/usr/
-├── bin/
-│   ├── arm-unknown-linux-uclibcgnueabi-gcc
-│   ├── arm-unknown-linux-uclibcgnueabi-g++
-│   ├── arm-unknown-linux-uclibcgnueabi-ld
-│   └── ...
-├── arm-unknown-linux-uclibcgnueabi/
-│   └── sysroot/
-│       ├── lib/
-│       ├── usr/
-│       └── ...
-└── ...
-```
-
-## Building LLVM/Clang (Optional)
-
-LLVM/Clang is required for Rust support. The build process is split into two stages:
-
-### Stage 1: Build LLVM/Clang Core
-
-1. **Prerequisites**: The GCC toolchain must be built first (see above)
-
-2. **Build LLVM/Clang**:
-
-   ```bash
-   ./build_llvm.sh
-   ```
-
-3. The script will:
-   - Download LLVM 22.1.2 source (see `LLVM_VERSION` in `common.sh`)
-   - Configure for native build (LLVM itself is built natively)
-   - Build Clang and LLD (compiler-rt builtins are skipped in this stage)
-   - Install to the appropriate toolchain directory (alongside GCC)
-   - Build time: 2-4 hours
-
-4. **Note**: Compiler-rt builtins are not built in this stage because they require cross-compilation with the target GCC, which conflicts with building LLVM natively.
-
-### Stage 2: Build Compiler-RT Builtins (Required for Rust)
-
-After Stage 1 completes, build the compiler-rt builtins separately:
-
-1. **Build compiler-rt builtins**:
-
-   ```bash
-   ./build_compiler_rt_builtins.sh
-   ```
-
-2. The script will:
-   - Use the target GCC cross-compiler to build compiler-rt builtins
-   - Configure for cross-compilation (target architecture)
-   - Build only the builtins library (sanitizers, etc. are disabled)
-   - Install builtins to the toolchain directory
-   - Build time: 30-60 minutes
-
-3. **Why two stages?**
-   - LLVM/Clang must be built natively (host compiler) for performance
-   - Compiler-rt builtins must be cross-compiled (target compiler) for the target architecture
-   - These requirements conflict, so we build them separately
-
-### Verify Installation
-
-After both stages complete:
-
+To force a complete rebuild:
 ```bash
-# Check LLVM tools
-../arm-anykav200-crosstool-ng/bin/clang --version
-../arm-anykav200-crosstool-ng/bin/llvm-config --version
-
-# Check compiler-rt builtins
-ls -lh ../arm-anykav200-crosstool-ng/lib/clang/22/lib/armv5te-unknown-linux-uclibceabi/libclang_rt.builtins.a
+./build.sh --clean
 ```
 
-After building, LLVM/Clang will be available at `../arm-anykav200-crosstool-ng/bin/clang`.
+### Verbose Output
 
-## Bootstrapping Rust from Source (Optional)
-
-Rust can be bootstrapped from source using the custom LLVM toolchain.
-
-1. **Prerequisites**:
-   - GCC toolchain must be built for the target architecture
-   - LLVM/Clang must be built (Stage 1: `./build_llvm.sh`)
-   - Compiler-rt builtins must be built (Stage 2: `./build_compiler_rt_builtins.sh`)
-
-2. **Bootstrap Rust**:
-
-   ```bash
-   ./bootstrap_rust.sh
-   ```
-
-   The script will:
-   - Clone Rust source code (stable version)
-   - Add `armv5te-unknown-linux-uclibceabi` target specification
-   - Configure Rust to use custom LLVM
-   - Build Rust compiler and std library for the target
-   - Install to `../arm-anykav200-crosstool-ng/`
-   - Build time: 4-8 hours
-
-3. **Verify installation**:
-
-   ```bash
-   ./verify_rust.sh
-   ```
-
-4. After building, Rust will be available at `../arm-anykav200-crosstool-ng/bin/rustc`.
-
-5. **Using the Rust target**, add to your project's `.cargo/config.toml`:
-
-   ```toml
-   [build]
-   target = "armv5te-unknown-linux-uclibceabi"
-
-   [target.armv5te-unknown-linux-uclibceabi]
-   linker = "/path/to/arm-anykav200-crosstool-ng/bin/clang"
-   ```
-
-   Then build with:
-
-   ```bash
-   cargo build --target armv5te-unknown-linux-uclibceabi --release
-   ```
-
-## Installing rust-src Component
-
-The `rust-src` component contains the Rust standard library source code, which is required by rust-analyzer for IDE features like "go to definition" and hover documentation.
-
-### Option 1: Quick Installation (Recommended)
-
-If you already have the custom Rust toolchain built and just need to add `rust-src`:
-
-```bash
-REPO_ROOT="$(git rev-parse --show-toplevel)"
-cd "${REPO_ROOT}/toolchain/build-new"
-./install_rust_src.sh
-```
-
-This script will:
-
-- Install the `rust-src` component to your existing toolchain
-- Verify the installation
-- Takes only a few minutes (vs 4-8 hours for full rebuild)
-
-**Prerequisites**: The Rust source directory (`rust/`) must still exist from the original bootstrap build.
-
-### Option 2: Full Rebuild
-
-If you're building the toolchain from scratch or the Rust source directory was deleted:
-
-```bash
-REPO_ROOT="$(git rev-parse --show-toplevel)"
-cd "${REPO_ROOT}/toolchain/build-new"
-./bootstrap_rust.sh
-```
-
-The bootstrap script now automatically includes `rust-src` component installation.
-
-### Verifying rust-src Installation
-
-After installation, verify that rust-src is available:
-
-```bash
-REPO_ROOT="$(git rev-parse --show-toplevel)"
-TOOLCHAIN_DIR="${REPO_ROOT}/toolchain/arm-anykav200-crosstool-ng"
-
-# Check components file
-grep rust-src "${TOOLCHAIN_DIR}/lib/rustlib/components"
-
-# Check source directory exists
-ls -la "${TOOLCHAIN_DIR}/lib/rustlib/src/rust/library/"
-```
-
-Expected output:
-
-- `rust-src` appears in the components list
-- Source directory contains `std/`, `core/`, `alloc/` subdirectories
-
-### Using with rust-analyzer
-
-After installing `rust-src`, restart VS Code or reload the window. rust-analyzer should now be able to:
-
-- Show documentation on hover for standard library types
-- Navigate to standard library source code with "Go to Definition"
-- Provide accurate auto-completion for std library items
-
-## Target Specifications
-
-### ARMv5TE Target
-
-The `armv5te-unknown-linux-uclibceabi` target specification is available at:
-
-- `armv5te-unknown-linux-uclibceabi.json` (JSON format for rustup)
-- Integrated into Rust source tree during bootstrap
-
-Key characteristics:
-
-- Architecture: ARMv5TE (arm926ej-s CPU)
-- Float ABI: soft (no hardware floating point)
-- C Library: uClibc-ng
-- OS: Linux 3.4.35
-- Linker: Clang
-
-## Integration
-
-After building, update your project's build configurations to use the new toolchain:
-
-- Set `ANYKA_TOOLCHAIN_VERSION=new` to use the new toolchain
-- Or leave unset to use the old toolchain
-
-For Rust projects, configure Cargo as shown above.
-
-### Next Steps
-
-After building:
-
-1. **Verify the toolchain**: `./verify_toolchain.sh new`
-2. **Update build configurations**: See `TOOLCHAIN_INTEGRATION.md`
-3. **Test with a simple project**: Build a hello-world program
-4. **Migrate projects gradually**: Start with one project at a time
-
-See the main project documentation for integration details.
-
-## Clean Build
-
-To start fresh:
-
-```bash
-REPO_ROOT="$(git rev-parse --show-toplevel)"
-cd "${REPO_ROOT}/toolchain/build-new"
-rm -rf crosstool-ng-src llvm-22.1.2 rust .config .build
-./build_toolchain.sh
-```
-
-## Notes
-
-- The build process downloads source code automatically
-- Build artifacts are stored in `.build/` directory
-- Configuration is saved in `crosstool-ng.config`
-- The toolchain is self-contained and can be moved/copied
+For more detailed output during build, the scripts use `log_info`, `log_warn`, and `log_error` functions. Check the build logs in `build/*.log` for detailed error information.
