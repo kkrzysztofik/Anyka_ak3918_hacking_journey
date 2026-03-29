@@ -120,10 +120,11 @@ build_gdb_host() {
     mkdir -p "${build_dir}"
     cd "${build_dir}"
 
-    # Check for GMP/MPFR
-    local gmp_h="/usr/include/gmp.h"
+    # Check for GMP/MPFR — headers may be in arch-specific subdirs on Debian/Ubuntu
+    local gmp_h
+    gmp_h="$(find /usr/include -name "gmp.h" 2>/dev/null | head -1)"
     local mpfr_h="/usr/include/mpfr.h"
-    if [[ ! -f "${gmp_h}" ]] || [[ ! -f "${mpfr_h}" ]]; then
+    if [[ -z "${gmp_h}" ]] || [[ ! -f "${mpfr_h}" ]]; then
         log_error "GMP or MPFR development headers not found"
         log_error "Install: sudo apt-get install libgmp-dev libmpfr-dev"
         exit 1

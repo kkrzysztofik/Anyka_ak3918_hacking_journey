@@ -185,7 +185,10 @@ create_clang_wrapper() {
     cat > "${wrapper}" << 'WRAPPER_EOF'
 #!/bin/bash
 # Clang wrapper for ARMv5TE cross-compilation
-INSTALL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../arm-anykav200-crosstool-ng" && pwd)"
+# The wrapper lives at $INSTALL_DIR/bin/clang-wrapper.sh, so one level up
+# (dirname of the script + "..") resolves to $INSTALL_DIR regardless of
+# what the directory is named.
+INSTALL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 GCC_LIB="${INSTALL_DIR}/lib/gcc/arm-unknown-linux-uclibcgnueabi"
 GCC_VER="$(ls "${GCC_LIB}" 2>/dev/null | sort -V | tail -1)"
 
@@ -203,6 +206,7 @@ exec "${INSTALL_DIR}/bin/clang" \
     --sysroot="${INSTALL_DIR}/arm-unknown-linux-uclibcgnueabi/sysroot" \
     -B "${GCC_LIB}/${GCC_VER}" \
     -L "${GCC_LIB}/${GCC_VER}" \
+    -fuse-ld="${INSTALL_DIR}/bin/arm-unknown-linux-uclibcgnueabi-ld.bfd" \
     -march=armv5te \
     -mfloat-abi=soft \
     -mtune=arm926ej-s \

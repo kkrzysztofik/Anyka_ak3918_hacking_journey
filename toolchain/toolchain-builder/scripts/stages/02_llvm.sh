@@ -94,6 +94,12 @@ stage_llvm() {
     ninja -j"$(nproc)"
 
     # Install LLVM
+    # ct-ng installs the toolchain with read-only dirs (dr-xr-xr-x) to
+    # prevent accidental modification.  We need write permission before
+    # LLVM can install alongside it.
+    log_info "Ensuring install prefix is writable..."
+    chmod -R u+w "${llvm_install}"
+
     log_info "Installing LLVM..."
     ninja install
 
