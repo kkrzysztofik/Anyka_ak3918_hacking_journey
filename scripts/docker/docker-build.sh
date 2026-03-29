@@ -2,7 +2,7 @@
 # Build script for Anyka cross-compilation Docker image
 # Builds the Docker container with ARM cross-compilation toolchain
 
-set -e
+set -euo pipefail
 
 # =============================================================================
 # Configuration and Constants
@@ -10,7 +10,7 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/common.sh
-source "$(cd "${SCRIPT_DIR}/.." && pwd)/scripts/common.sh"
+source "${SCRIPT_DIR}/../common.sh"
 PROJECT_ROOT="${ANYKA_REPO_ROOT}"
 
 # Default values
@@ -22,13 +22,6 @@ NO_CACHE=false
 # =============================================================================
 # Utility Functions
 # =============================================================================
-
-# Check if a command exists
-command_exists() {
-    local cmd="$1"
-    command -v "${cmd}" &> /dev/null
-    return 0
-}
 
 # Print usage information
 print_usage() {
@@ -64,13 +57,13 @@ EOF
 check_prerequisites() {
     log_info "Checking prerequisites..."
 
-    if ! command_exists docker; then
+    if ! command -v docker &>/dev/null; then
         log_error "Docker is not installed or not in PATH"
         log_info "Please install Docker: https://docs.docker.com/get-docker/"
         exit 1
     fi
 
-    if ! docker info &> /dev/null; then
+    if ! docker info &>/dev/null; then
         log_error "Docker daemon is not running"
         log_info "Please start Docker daemon and try again"
         exit 1

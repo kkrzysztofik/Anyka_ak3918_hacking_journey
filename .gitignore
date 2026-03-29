@@ -47,7 +47,7 @@ cross-compile/rust-hello/target/**/*
 
 # Rust ONVIF workspace outputs
 cross-compile/onvif-rust/.cargo/**/*
-!cross-compile/onvif-rust/.cargo/config.toml
+!cross-compile/onvif-rust/.cargo/config.toml.template
 cross-compile/onvif-rust/target/**/*
 cross-compile/onvif-rust/debug/**/*
 cross-compile/onvif-rust/release/**/*

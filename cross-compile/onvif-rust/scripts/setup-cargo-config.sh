@@ -8,6 +8,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 CARGO_CONFIG_DIR="${PROJECT_DIR}/.cargo"
 CARGO_CONFIG="${CARGO_CONFIG_DIR}/config.toml"
+CARGO_CONFIG_TEMPLATE="${CARGO_CONFIG_DIR}/config.toml.template"
 
 # Detect toolchain location
 #
@@ -75,54 +76,12 @@ fi
 # Create .cargo directory if it doesn't exist
 mkdir -p "${CARGO_CONFIG_DIR}"
 
-# Generate config.toml
-cat > "${CARGO_CONFIG}" <<EOF
-[build]
-# Use new Rust toolchain target for ARMv5TE with uClibc
-target = "armv5te-unknown-linux-uclibceabi"
-# Use custom rustc for everything (now has host std library for build scripts)
-rustc = "${TOOLCHAIN_BASE}/bin/rustc"
+if [[ ! -f "${CARGO_CONFIG_TEMPLATE}" ]]; then
+    echo "ERROR: template not found: ${CARGO_CONFIG_TEMPLATE}" >&2
+    exit 1
+fi
 
-# clang-wrapper.sh handles: --target triple translation, --sysroot, -B (crt
-# files), -L (libgcc), -march, -mfloat-abi, -mtune, and strips any --target
-# pre-link-arg injected by rustc so the invalid uclibcgnueabi triple cannot
-# reach clang. Only project-specific flags remain here.
-[target.armv5te-unknown-linux-uclibceabi]
-linker = "${CLANG_WRAPPER}"
-rustflags = [
-  "-C",
-  "link-arg=-fno-pie",
-  "-C",
-  "link-arg=-no-pie",
-  "-C",
-  "link-arg=-Wl,--dynamic-linker=/mnt/anyka_hack/lib/ld-uClibc.so.1",
-  "-C",
-  "link-arg=-Wl,--disable-new-dtags,-rpath,/mnt/anyka_hack/lib:/mnt/anyka_hack/onvif/lib",
-  "-C",
-  "link-arg=-Wl,--hash-style=both",
-]
-
-[env]
-SYSROOT_armv5te_unknown_linux_uclibceabi = "${TOOLCHAIN_BASE}/arm-unknown-linux-uclibcgnueabi/sysroot"
-
-# ARM target compiler configuration
-CC_armv5te_unknown_linux_uclibceabi = "${TOOLCHAIN_BASE}/bin/arm-unknown-linux-uclibcgnueabi-gcc"
-CXX_armv5te_unknown_linux_uclibceabi = "${TOOLCHAIN_BASE}/bin/arm-unknown-linux-uclibcgnueabi-g++"
-AR_armv5te_unknown_linux_uclibceabi = "${TOOLCHAIN_BASE}/bin/arm-unknown-linux-uclibcgnueabi-ar"
-
-# Ensure C/C++ build scripts (cc/cmake) use the toolchain sysroot.
-# Without this, crates like aws-lc-sys may fail with missing headers (stdlib.h)
-# and missing CRT objects (crt1.o, crti.o) during try-compile/link steps.
-CFLAGS_armv5te_unknown_linux_uclibceabi = "--sysroot=${TOOLCHAIN_BASE}/arm-unknown-linux-uclibcgnueabi/sysroot"
-CXXFLAGS_armv5te_unknown_linux_uclibceabi = "--sysroot=${TOOLCHAIN_BASE}/arm-unknown-linux-uclibcgnueabi/sysroot"
-CPPFLAGS_armv5te_unknown_linux_uclibceabi = "--sysroot=${TOOLCHAIN_BASE}/arm-unknown-linux-uclibcgnueabi/sysroot"
-LDFLAGS_armv5te_unknown_linux_uclibceabi = "--sysroot=${TOOLCHAIN_BASE}/arm-unknown-linux-uclibcgnueabi/sysroot"
-
-# Host build linker configuration
-# Custom rustc defaults to gnu-lld-cc which requires CRT files we don't have
-# Use system gcc linker for x86_64 host builds (proc-macros, build scripts)
-[target.x86_64-unknown-linux-gnu]
-linker = "/usr/bin/gcc"
-EOF
+# Substitute @TOOLCHAIN_BASE@ placeholder and write config.toml
+sed "s|@TOOLCHAIN_BASE@|${TOOLCHAIN_BASE}|g" "${CARGO_CONFIG_TEMPLATE}" > "${CARGO_CONFIG}"
 
 echo "Generated ${CARGO_CONFIG} for environment: ${ENV_TYPE}"

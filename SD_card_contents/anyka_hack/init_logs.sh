@@ -4,6 +4,7 @@
 # This script should be called early in the boot process to ensure consistent logging
 
 MAIN_LOG_DIR=/mnt/logs
+CORE_DUMP_DIR=/mnt/coredumps
 FALLBACK_LOG_DIR=/mnt/tmp/logs
 FALLBACK_BASE_DIR=/mnt/tmp
 mkdir -p /mnt/tmp 2>/dev/null || true
@@ -28,6 +29,13 @@ init_log_directories() {
 
 # Create essential log directories
 init_log_directories
+
+# Create coredump directory
+if mkdir -p "$CORE_DUMP_DIR" 2>/dev/null; then
+  printf '[INFO] Coredump directory ready: %s\n' "$CORE_DUMP_DIR"
+else
+  printf '[WARN] Failed to create coredump directory: %s\n' "$CORE_DUMP_DIR"
+fi
 
 # Log the initialization
 timestamp="$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null || date)"

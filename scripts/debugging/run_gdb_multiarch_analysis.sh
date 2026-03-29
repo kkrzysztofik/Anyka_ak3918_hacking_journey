@@ -1,14 +1,14 @@
 #!/bin/bash
 
-# GDB Multiarch analysis script for ONVIF coredumps
+# GDB Multiarch analysis script for onvif-rust coredumps
 # Usage: ./run_gdb_multiarch_analysis.sh [coredump_file] [binary_file]
-# Example: ./run_gdb_multiarch_analysis.sh core.onvifd_debug.20685 onvifd_debug
+# Example: ./run_gdb_multiarch_analysis.sh core.onvif-rust.12345 onvif-rust
 
 set -e
 
 # Default values
-COREDUMP_FILE="core.onvifd_debug.20685"
-BINARY_FILE="onvifd_debug"
+COREDUMP_FILE="core.onvif-rust.1"
+BINARY_FILE="onvif-rust"
 
 # Parse arguments
 if [ $# -ge 1 ]; then
@@ -24,10 +24,10 @@ source "${SCRIPT_DIR}/../scripts/common.sh"
 PROJECT_ROOT="${ANYKA_REPO_ROOT}"
 
 # Set paths
-ONVIF_DIR="$PROJECT_ROOT/cross-compile/onvif"
-SD_LIB_DIR="$PROJECT_ROOT/SD_card_contents/anyka_hack/onvif/lib"
-BINARY_DIR="$ONVIF_DIR/out"
-COREDUMP_DIR="$SCRIPT_DIR/coredump"
+ONVIF_DIR="$PROJECT_ROOT/cross-compile/onvif-rust"
+SD_LIB_DIR="$PROJECT_ROOT/SD_card_contents/anyka_hack/lib"
+BINARY_DIR="$ONVIF_DIR/target/arm-anykav200-crosstool-ng/release"
+COREDUMP_DIR="$PROJECT_ROOT/debugging/coredump"
 
 # Set up shared library search path for GDB
 TOOLCHAIN_LIB_DIR="$PROJECT_ROOT/toolchain/arm-anykav200-crosstool/usr/lib"
@@ -68,7 +68,7 @@ gdb-multiarch --batch \
     --ex "set architecture arm" \
     --ex "set substitute-path /workspace $ONVIF_DIR" \
     --ex "set substitute-path /mnt/anyka_hack/onvif $ONVIF_DIR" \
-    --ex "set substitute-path /workspace/cross-compile/onvif $ONVIF_DIR" \
+    --ex "set substitute-path /workspace/cross-compile/onvif-rust $ONVIF_DIR" \
     --ex "set solib-search-path $SOLIB_SEARCH_PATH" \
     --ex "file $BINARY_PATH" \
     --ex "core-file $COREDUMP_PATH" \
@@ -121,3 +121,6 @@ echo "  (gdb) set architecture arm"
 echo "  (gdb) set solib-search-path $SOLIB_SEARCH_PATH"
 echo "  (gdb) core-file $COREDUMP_PATH"
 echo "  (gdb) bt full"
+echo ""
+echo "To collect coredumps from device:"
+echo "  $PROJECT_ROOT/scripts/debugging/collect_coredump.sh"

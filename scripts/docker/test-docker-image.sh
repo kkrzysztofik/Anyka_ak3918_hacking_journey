@@ -2,11 +2,11 @@
 # Test script to verify Docker image works with onvif-rust project
 # Tests all steps from GitHub Actions workflows
 
-set -e
+set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/common.sh
-source "$(cd "${SCRIPT_DIR}/.." && pwd)/scripts/common.sh"
+source "${SCRIPT_DIR}/../common.sh"
 
 # Configuration
 IMAGE_TAG="${IMAGE_TAG:-anyka-cross-compile:test}"

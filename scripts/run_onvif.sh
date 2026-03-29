@@ -1,19 +1,23 @@
 #!/bin/bash
 
-# Execute ONVIF daemon on device via telnet
+# Execute onvif-rust on device via telnet
 # Usage: ./run_onvif.sh [device_ip] [username] [password] [release|debug]
 #
-# This script connects to the device via telnet and executes the ONVIF daemon.
-# It uses native cross-compilation tools as per project guidelines.
-# Device output is automatically saved to ../debugging/logs/ for debugging.
+# The mode selects the config file (config.toml vs config_debug.toml).
+# Device output is saved to the debugging/logs/ directory for analysis.
 
-set -e
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=scripts/common.sh
+source "${SCRIPT_DIR}/common.sh"
+PROJECT_ROOT="${ANYKA_REPO_ROOT}"
 
 # Default values
 DEFAULT_IP="192.168.1.100"
 DEFAULT_USER="admin"
 DEFAULT_PASS="admin"
-DEFAULT_MODE="debug"
+DEFAULT_MODE="release"
 
 # Get parameters
 DEVICE_IP="${1:-$DEFAULT_IP}"
@@ -21,154 +25,93 @@ USERNAME="${2:-$DEFAULT_USER}"
 PASSWORD="${3:-$DEFAULT_PASS}"
 MODE="${4:-$DEFAULT_MODE}"
 
-# Binary paths on device
-BINARY_PATH="/mnt/anyka_hack/onvif/"
-BINARY_RELEASE="onvifd"
-BINARY_DEBUG="onvifd_debug"
+# On-device paths
+ONVIF_DIR="/mnt/anyka_hack/onvif"
+BINARY_NAME="onvif-rust"
+FULL_BINARY_PATH="$ONVIF_DIR/$BINARY_NAME"
 
-echo "=== ONVIF Daemon Execution Script ==="
-echo "Device IP: $DEVICE_IP"
-echo "Username: $USERNAME"
-echo "Mode: $MODE"
-echo "Log Output: ../debugging/logs/"
+if [ "$MODE" = "debug" ]; then
+    CONFIG_FILE="$ONVIF_DIR/config_debug.toml"
+else
+    CONFIG_FILE="$ONVIF_DIR/config.toml"
+fi
+
+log_info "=== onvif-rust Execution Script ==="
+log_info "Device IP:  $DEVICE_IP"
+log_info "Mode:       $MODE (config: $CONFIG_FILE)"
+log_info "Log output: $PROJECT_ROOT/debugging/logs/"
 echo ""
 
-# Validate input parameters
 if [ -z "$DEVICE_IP" ] || [ -z "$USERNAME" ] || [ -z "$PASSWORD" ]; then
-    echo "ERROR: Invalid parameters provided"
-    echo "Usage: $0 [device_ip] [username] [password] [release|debug]"
-    echo ""
-    echo "Device output is automatically saved to ../debugging/logs/"
-    echo ""
-    echo "Examples:"
-    echo "  $0                                    # Use defaults (debug mode)"
-    echo "  $0 192.168.1.100 admin admin release # Run release mode"
-    echo "  $0 192.168.1.100 admin admin debug   # Run debug mode"
+    log_error "Usage: $0 [device_ip] [username] [password] [release|debug]"
     exit 1
 fi
 
-# Validate mode
 if [ "$MODE" != "release" ] && [ "$MODE" != "debug" ]; then
-    echo "ERROR: Invalid mode '$MODE'. Use 'release' or 'debug'"
-    echo "Usage: $0 [device_ip] [username] [password] [release|debug]"
+    log_error "Invalid mode '$MODE'. Use 'release' or 'debug'."
     exit 1
 fi
 
-# Select binary based on mode
-if [ "$MODE" = "release" ]; then
-    BINARY_NAME="$BINARY_RELEASE"
-else
-    BINARY_NAME="$BINARY_DEBUG"
-fi
+anyka_check_commands telnet
 
-FULL_BINARY_PATH="$BINARY_PATH/$BINARY_NAME"
+log_info "Connecting to device and starting $BINARY_NAME..."
 
-# Check if telnet command is available
-if ! command -v telnet &> /dev/null; then
-    echo "ERROR: telnet command not found. Please install telnet client."
-    echo "Install with: sudo apt-get install telnet"
-    exit 1
-fi
-
-echo "Connecting to device and executing $BINARY_NAME..."
-
-# Create telnet script with improved error handling
-cat > /tmp/telnet_run_onvif.txt << EOF
-# Kill any existing onvifd processes
-echo "Stopping existing ONVIF daemon processes..."
-killall onvifd 2>/dev/null || true
-killall onvifd_debug 2>/dev/null || true
-
-# Wait for processes to terminate
+TELNET_SCRIPT=$(mktemp /tmp/telnet_run_onvif_rust.XXXXXX)
+cat > "$TELNET_SCRIPT" << EOF
+echo "Stopping any existing onvif-rust process..."
+killall onvif-rust 2>/dev/null || true
 sleep 2
 
-# Check if binary exists
 if [ ! -f "$FULL_BINARY_PATH" ]; then
-    echo "ERROR: Binary $FULL_BINARY_PATH not found on device"
-    echo "Please deploy the binary first using:"
-    echo "  ./deploy_onvif.sh $DEVICE_IP $USERNAME $PASSWORD"
+    echo "ERROR: $FULL_BINARY_PATH not found. Deploy first: ./deploy_onvif.sh $DEVICE_IP $USERNAME $PASSWORD"
     exit 1
 fi
 
-# Make sure binary is executable
 chmod +x "$FULL_BINARY_PATH"
 
-# Set up core dump handling
-echo "Configuring core dump handling..."
+# Core dump setup
 ulimit -c unlimited
-echo "/mnt/anyka_hack/onvif/core.%e.%p" > /proc/sys/kernel/core_pattern
+mkdir -p /mnt/coredumps 2>/dev/null || true
+echo '/mnt/coredumps/core.%e.%p.%t' > /proc/sys/kernel/core_pattern 2>/dev/null || true
 
-# Check available memory
-echo "System memory status:"
+echo "Memory status:"
 free -m
 
-# Start the daemon
-echo "Starting $BINARY_NAME in $MODE mode..."
-cd $BINARY_PATH
-./$BINARY_NAME
+echo "Starting $BINARY_NAME ($MODE mode)..."
+cd $ONVIF_DIR
+./$BINARY_NAME $CONFIG_FILE
 EOF
 
-# Execute via telnet with timeout and capture output
-echo "Executing commands on device..."
-TELNET_OUTPUT="/tmp/telnet_output_$$.txt"
+TELNET_OUTPUT=$(mktemp /tmp/telnet_output_onvif_rust.XXXXXX)
 
-# Capture telnet output to file
-if timeout 30 telnet $DEVICE_IP 24 < /tmp/telnet_run_onvif.txt > "$TELNET_OUTPUT" 2>&1; then
-    echo "✓ Commands executed successfully"
-    TELNET_EXIT_CODE=0
+if timeout 30 telnet "$DEVICE_IP" 24 < "$TELNET_SCRIPT" > "$TELNET_OUTPUT" 2>&1; then
+    log_success "Commands executed successfully"
 else
-    echo "✗ Failed to execute commands on device or connection timed out"
-    echo "This may be normal if the daemon is running in foreground mode"
-    TELNET_EXIT_CODE=$?
+    log_warn "Telnet exited (may be normal if daemon runs in foreground)"
 fi
 
-# Display captured output
-if [ -f "$TELNET_OUTPUT" ] && [ -s "$TELNET_OUTPUT" ]; then
+rm -f "$TELNET_SCRIPT"
+
+if [ -s "$TELNET_OUTPUT" ]; then
     echo ""
     echo "=== Device Output ==="
     cat "$TELNET_OUTPUT"
-    echo ""
     echo "=== End Device Output ==="
 
-    # Always save to log file
-    LOG_DIR="../debugging/logs"
+    LOG_DIR="$PROJECT_ROOT/debugging/logs"
     mkdir -p "$LOG_DIR"
-    TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
-    LOG_FILE="$LOG_DIR/onvif_execution_${TIMESTAMP}.log"
-
-    echo "Saving device output to: $LOG_FILE"
+    LOG_FILE="$LOG_DIR/onvif_execution_$(date +%Y%m%d_%H%M%S).log"
     cp "$TELNET_OUTPUT" "$LOG_FILE"
-    echo "Log saved successfully"
-else
-    echo "No output captured from device"
+    log_info "Log saved to: $LOG_FILE"
 fi
 
-# Clean up output file
 rm -f "$TELNET_OUTPUT"
 
-# Clean up temporary file
-rm -f /tmp/telnet_run_onvif.txt
-
 echo ""
-echo "=== Execution Complete ==="
-echo "ONVIF daemon ($MODE mode) should now be running on device"
-echo "Device output has been saved to: ../debugging/logs/"
+log_info "onvif-rust should now be running on device."
 echo ""
-echo "To check if it's running:"
-echo "  telnet $DEVICE_IP"
-echo "  ps | grep onvifd"
-echo ""
-echo "To stop the daemon:"
-echo "  telnet $DEVICE_IP"
-echo "  killall onvifd"
-echo ""
-echo "To collect core dumps:"
-echo "  ./collect_coredump.sh $DEVICE_IP $USERNAME $PASSWORD"
-echo ""
-echo "To view logs (if available):"
-echo "  telnet $DEVICE_IP"
-echo "  dmesg | tail -20"
-echo ""
-echo "To view saved execution logs:"
-echo "  ls -la ../debugging/logs/"
-echo "  cat ../debugging/logs/onvif_execution_*.log"
+echo "Useful follow-up commands:"
+echo "  Check running:   telnet $DEVICE_IP 24  →  ps | grep onvif-rust"
+echo "  Stop:            telnet $DEVICE_IP 24  →  killall onvif-rust"
+echo "  Collect coredump: ./debugging/collect_coredump.sh $DEVICE_IP $USERNAME $PASSWORD"
+echo "  View logs:        ls $PROJECT_ROOT/debugging/logs/"

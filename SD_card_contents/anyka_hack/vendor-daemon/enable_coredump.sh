@@ -4,7 +4,7 @@
 # Usage: ./enable_coredump.sh [dump_dir]
 
 # Default dump directory (on device)
-DUMP_DIR="${1:-/mnt/anyka_hack/vendor-daemon}"
+DUMP_DIR="${1:-/mnt/coredumps}"
 
 echo "=== Enabling Kernel Coredumps ==="
 echo ""
@@ -44,7 +44,7 @@ fi
 # Set core dump pattern with full path
 if [ -w /proc/sys/kernel/core_pattern ]; then
     echo "Setting core dump pattern..."
-    # Pattern: /mnt/anyka_hack/vendor-daemon/core.%e.%p.%t (full path, executable name, PID, timestamp)
+    # Pattern: /mnt/coredumps/core.%e.%p.%t (full path, executable name, PID, timestamp)
     echo "$DUMP_DIR/core.%e.%p.%t" > /proc/sys/kernel/core_pattern
     echo "  /proc/sys/kernel/core_pattern = $(cat /proc/sys/kernel/core_pattern)"
 else

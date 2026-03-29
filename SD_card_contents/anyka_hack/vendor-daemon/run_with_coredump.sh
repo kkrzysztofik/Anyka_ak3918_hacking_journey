@@ -6,9 +6,12 @@
 # Enable core dumps
 ulimit -c unlimited 2>/dev/null
 
-# Change to dump directory to ensure core dumps are saved there
-# (if core_pattern is relative)
-cd /mnt/anyka_hack/vendor-daemon 2>/dev/null || cd /tmp
+# Ensure coredump directory exists and set the kernel pattern
+mkdir -p /mnt/coredumps 2>/dev/null || true
+echo '/mnt/coredumps/core.%e.%p.%t' > /proc/sys/kernel/core_pattern 2>/dev/null || true
+
+# Change into coredump dir so relative paths also land there
+cd /mnt/coredumps 2>/dev/null || cd /tmp
 
 # Verify core dump settings
 if [ -r /proc/sys/kernel/core_pattern ]; then
