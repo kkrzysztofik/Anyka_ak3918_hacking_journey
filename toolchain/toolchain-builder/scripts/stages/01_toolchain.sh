@@ -9,17 +9,6 @@ source "${SCRIPTS_DIR}/common.sh"
 STAGE_NAME="toolchain"
 
 # ---------------------------------------------------------------------------
-# check_toolchain_deps — verify host packages needed for ct-ng
-# ---------------------------------------------------------------------------
-_check_toolchain_deps() {
-    check_deps \
-        gcc g++ make \
-        gperf bison flex texinfo help2man gawk \
-        libtool automake autoconf \
-        wget git file python3 perl pkg-config
-}
-
-# ---------------------------------------------------------------------------
 # _install_ctng — download, vendor-patch, and build the ct-ng host tool
 #
 # Uses --enable-local so ct-ng runs in-place from ${CTNG_SRC_DIR}.
@@ -238,7 +227,6 @@ stage_toolchain() {
 
     ensure_dirs
 
-    _check_toolchain_deps
     _install_ctng        # sets CTNG_SRC_DIR
     _configure_ctng
     _build_ctng

@@ -96,6 +96,10 @@ log_error() {
 # =============================================================================
 # Dependency Check Helpers
 # =============================================================================
+
+# check_deps <cmd> [cmd ...] — exit 1 if any command is not found in PATH.
+# For a friendlier error that also shows the apt install command, prefer
+# check_all_build_deps (called once up-front from build.sh).
 check_deps() {
     local missing=()
     for dep in "$@"; do
@@ -104,10 +108,104 @@ check_deps() {
         fi
     done
     if [[ ${#missing[@]} -gt 0 ]]; then
-        log_error "Missing dependencies: ${missing[*]}"
+        log_error "Missing commands: ${missing[*]}"
         return 1
     fi
     return 0
+}
+
+# check_all_build_deps — verify every host package required by all build
+# stages and emit a single actionable error with the full apt-get command.
+#
+# Covers:
+#   Stage 1 (ct-ng)    : gcc g++ make gperf bison flex texinfo help2man gawk
+#                        libtool-bin automake autoconf wget git file python3
+#                        perl pkg-config libncurses-dev xz-utils
+#   Stage 2 (LLVM)     : cmake ninja-build
+#   Stage 3 (crt)      : cmake ninja-build  (same)
+#   Stage 4 (Rust)     : rsync python3-dev  (system rustc/cargo checked separately)
+#   Stage 5 (GDB)      : libgmp-dev libmpfr-dev
+#
+# Format: each entry is "command:apt-package" where command is what we look
+# for in PATH and apt-package is what apt-get install expects.  When the
+# command name matches the package name, only the command is listed.
+check_all_build_deps() {
+    # "command:apt-package" — colon separates when they differ
+    local entries=(
+        # ── Stage 1: crosstool-NG host build ─────────────────────────────
+        "gcc"
+        "g++"
+        "make"
+        "gperf"
+        "bison"
+        "flex"
+        "makeinfo:texinfo"       # makeinfo is the binary; texinfo is the package
+        "help2man"
+        "gawk"
+        "libtool:libtool-bin"    # libtool binary is in libtool-bin package
+        "automake"
+        "autoconf"
+        "wget"
+        "git"
+        "file"
+        "python3"
+        "perl"
+        "pkg-config"
+        "xz:xz-utils"           # needed to unpack .tar.xz archives
+        # libncurses-dev: no binary to check — verified via header below
+        # ── Stage 2 & 3: LLVM / compiler-rt ─────────────────────────────
+        "cmake"
+        "ninja:ninja-build"      # ninja binary; ninja-build is the package
+        # ── Stage 4: Rust bootstrap ───────────────────────────────────────
+        "rsync"
+        "python3-config:python3-dev"  # python3-config binary from python3-dev
+        # ── Stage 5: GDB ─────────────────────────────────────────────────
+        # libgmp-dev / libmpfr-dev: no binary — verified via headers below
+    )
+
+    local missing_pkgs=()
+
+    for entry in "${entries[@]}"; do
+        local cmd="${entry%%:*}"
+        local pkg="${entry##*:}"
+        if ! command -v "${cmd}" &>/dev/null; then
+            missing_pkgs+=("${pkg}")
+        fi
+    done
+
+    # ── Library-only deps (no binary in PATH) ────────────────────────────
+    # Check for development headers as a proxy for the -dev packages.
+    if ! printf '#include <ncurses.h>\nint main(){}\n' \
+            | gcc -x c - -lncurses -o /dev/null 2>/dev/null; then
+        missing_pkgs+=("libncurses-dev")
+    fi
+
+    if ! printf '#include <gmp.h>\nint main(){}\n' \
+            | gcc -x c - -lgmp -o /dev/null 2>/dev/null; then
+        missing_pkgs+=("libgmp-dev")
+    fi
+
+    if ! printf '#include <mpfr.h>\nint main(){}\n' \
+            | gcc -x c - -lmpfr -o /dev/null 2>/dev/null; then
+        missing_pkgs+=("libmpfr-dev")
+    fi
+
+    if [[ ${#missing_pkgs[@]} -eq 0 ]]; then
+        log_info "All build dependencies satisfied."
+        return 0
+    fi
+
+    log_error "Missing host packages required to build the toolchain:"
+    log_error ""
+    for pkg in "${missing_pkgs[@]}"; do
+        log_error "  - ${pkg}"
+    done
+    log_error ""
+    log_error "Install all missing packages with:"
+    log_error ""
+    log_error "  sudo apt-get install -y ${missing_pkgs[*]}"
+    log_error ""
+    return 1
 }
 
 require_toolchain() {
