@@ -3,7 +3,7 @@
 //! This module provides validation helpers for Media Service operations.
 //! These functions validate input parameters according to ONVIF specifications.
 
-use crate::onvif::common::limits::MAX_REFERENCE_TOKEN_CHARS;
+use crate::onvif::common::MAX_REFERENCE_TOKEN_CHARS;
 use crate::onvif::error::OnvifError;
 use crate::onvif::types::common::ReferenceToken;
 
@@ -18,6 +18,15 @@ const MAX_BITRATE: i32 = 50_000_000;
 
 /// Maximum length for profile names.
 const MAX_PROFILE_NAME_LENGTH: usize = 64;
+
+/// Static error text for oversized profile tokens (avoid heap `format!` on hot path).
+const PROFILE_TOKEN_EXCEEDS_MAX_LENGTH: &str = "Profile token exceeds maximum length";
+
+/// Static error text for oversized configuration tokens (avoid heap `format!` on hot path).
+const CONFIG_TOKEN_EXCEEDS_MAX_LENGTH: &str = "Configuration token exceeds maximum length";
+
+/// Static error text for oversized source tokens (avoid heap `format!` on hot path).
+const SOURCE_TOKEN_EXCEEDS_MAX_LENGTH: &str = "Source token exceeds maximum length";
 
 /// Validate a profile reference token.
 ///
@@ -53,10 +62,7 @@ pub fn validate_profile_token(token: &ReferenceToken) -> Result<(), OnvifError> 
     if token.len() > MAX_REFERENCE_TOKEN_CHARS {
         return Err(OnvifError::invalid_arg_val(
             "InvalidToken",
-            format!(
-                "Profile token exceeds maximum length of {} characters",
-                MAX_REFERENCE_TOKEN_CHARS
-            ),
+            PROFILE_TOKEN_EXCEEDS_MAX_LENGTH,
         ));
     }
     Ok(())
@@ -95,10 +101,7 @@ pub fn validate_config_token(token: &ReferenceToken) -> Result<(), OnvifError> {
     if token.len() > MAX_REFERENCE_TOKEN_CHARS {
         return Err(OnvifError::invalid_arg_val(
             "InvalidToken",
-            format!(
-                "Configuration token exceeds maximum length of {} characters",
-                MAX_REFERENCE_TOKEN_CHARS
-            ),
+            CONFIG_TOKEN_EXCEEDS_MAX_LENGTH,
         ));
     }
     Ok(())
@@ -137,10 +140,7 @@ pub fn validate_source_token(token: &ReferenceToken) -> Result<(), OnvifError> {
     if token.len() > MAX_REFERENCE_TOKEN_CHARS {
         return Err(OnvifError::invalid_arg_val(
             "InvalidToken",
-            format!(
-                "Source token exceeds maximum length of {} characters",
-                MAX_REFERENCE_TOKEN_CHARS
-            ),
+            SOURCE_TOKEN_EXCEEDS_MAX_LENGTH,
         ));
     }
     Ok(())
@@ -357,6 +357,8 @@ mod tests {
         let long_token = "x".repeat(MAX_REFERENCE_TOKEN_CHARS + 1);
         let result = validate_profile_token(&long_token);
         assert!(result.is_err());
+        let valid_token = "x".repeat(MAX_REFERENCE_TOKEN_CHARS);
+        assert!(validate_profile_token(&valid_token).is_ok());
     }
 
     #[test]

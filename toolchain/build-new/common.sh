@@ -56,6 +56,7 @@ GDB_VERSION="17.1"
 CTNG_GIT_URL="https://github.com/crosstool-ng/crosstool-ng.git"
 CTNG_GIT_REF="37190d5b1e8050832610ba5e899911c7a723d798"
 CTNG_DIR="${BUILD_DIR}/crosstool-ng-src"
+# Vendored under vendor/crosstool-ng/uClibc-ng/${UCLIBC_NG_VERSION}/ (must match that tree).
 UCLIBC_NG_VERSION="1.0.57"
 RUST_VERSION="1.94.1"
 RUST_SRC_DIR="${BUILD_DIR}/rust"

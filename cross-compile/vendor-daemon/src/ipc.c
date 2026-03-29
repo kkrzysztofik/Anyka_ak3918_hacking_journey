@@ -134,6 +134,27 @@ uint64_t diag_monotonic_ms(void)
     return ((uint64_t)now.tv_sec * 1000ULL) + ((uint64_t)now.tv_nsec / 1000000ULL);
 }
 
+static void log_push_notify_send_debug(
+    uint32_t stream_id,
+    int client_fd,
+    const struct vd_frame_notify *notif,
+    const char *status
+)
+{
+    log_debug(
+        "event=push_notify_send stream=%u fd=%d slot=%u frame_len=%u flags=0x%x notif_stream=%u notif_seq_no=%u status=%s diag_monotonic_ms=%llu",
+        stream_id,
+        client_fd,
+        notif->slot_index,
+        notif->frame_len,
+        notif->flags,
+        notif->stream_id,
+        notif->seq_no,
+        status,
+        (unsigned long long)diag_monotonic_ms()
+    );
+}
+
 /**
  * send_frame_notification - Send a 20-byte frame notification to the frame client.
  *
@@ -168,30 +189,10 @@ int send_frame_notification(uint32_t stream_id, const struct vd_frame_notify *no
                 (unsigned long long)diag_monotonic_ms()
             );
         } else {
-            log_debug(
-                "event=push_notify_send stream=%u fd=%d slot=%u frame_len=%u flags=0x%x notif_stream=%u notif_seq_no=%u status=ok diag_monotonic_ms=%llu",
-                stream_id,
-                client_fd,
-                notif->slot_index,
-                notif->frame_len,
-                notif->flags,
-                notif->stream_id,
-                notif->seq_no,
-                (unsigned long long)diag_monotonic_ms()
-            );
+            log_push_notify_send_debug(stream_id, client_fd, notif, "ok");
         }
     } else {
-        log_debug(
-            "event=push_notify_send stream=%u fd=%d slot=%u frame_len=%u flags=0x%x notif_stream=%u notif_seq_no=%u status=no_client diag_monotonic_ms=%llu",
-            stream_id,
-            client_fd,
-            notif->slot_index,
-            notif->frame_len,
-            notif->flags,
-            notif->stream_id,
-            notif->seq_no,
-            (unsigned long long)diag_monotonic_ms()
-        );
+        log_push_notify_send_debug(stream_id, client_fd, notif, "no_client");
     }
     pthread_mutex_unlock(lock);
     return ret;

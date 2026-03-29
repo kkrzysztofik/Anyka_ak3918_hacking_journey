@@ -120,7 +120,10 @@ impl BytesWriter {
     }
     pub fn extract_current_bytes(&mut self) -> BytesMut {
         let data = std::mem::take(&mut self.bytes);
-        BytesMut::from(data.as_slice())
+        // `bytes` 1.x does not implement `From<Vec<u8>>` for `BytesMut`. `Bytes::from(Vec<u8>)`
+        // reuses the `Vec` buffer when uniquely owned; `BytesMut::from(Bytes)` can then take that
+        // allocation without copying when the `Bytes` handle is sole owner (see `bytes` crate).
+        BytesMut::from(bytes::Bytes::from(data))
     }
 
     pub fn clear(&mut self) {
@@ -194,23 +197,33 @@ impl AsyncBytesWriter {
     }
 
     pub async fn flush(&mut self) -> Result<(), BytesWriteError> {
-        let data = std::mem::take(&mut self.bytes_writer.bytes);
-        self.io.lock().await.write(data.into()).await?;
+        if self.bytes_writer.bytes.is_empty() {
+            return Ok(());
+        }
+        // Take the buffer to avoid an extra copy; on write error the pending data is dropped
+        // (same as a failed flush after partial send).
+        let buf = std::mem::take(&mut self.bytes_writer.bytes);
+        let data = bytes::Bytes::from(buf);
+        self.io.lock().await.write(data).await?;
         Ok(())
     }
 
     pub async fn flush_timeout(&mut self, duration: Duration) -> Result<(), BytesWriteError> {
-        let data = std::mem::take(&mut self.bytes_writer.bytes);
-        let message = timeout(duration, self.io.lock().await.write(data.into())).await;
-
-        match message {
-            // Handle successful write
-            Ok(Ok(_)) => Ok(()),
-            // Handle I/O error from write operation
+        if self.bytes_writer.bytes.is_empty() {
+            return Ok(());
+        }
+        let data = bytes::Bytes::copy_from_slice(&self.bytes_writer.bytes);
+        let mut io = self.io.lock().await;
+        let write_fut = io.write(data);
+        match timeout(duration, write_fut).await {
+            Ok(Ok(())) => {
+                drop(io);
+                self.bytes_writer.bytes.clear();
+                Ok(())
+            }
             Ok(Err(io_err)) => Err(BytesWriteError {
                 value: BytesWriteErrorValue::BytesIOError(io_err),
             }),
-            // Handle timeout
             Err(_) => Err(BytesWriteError {
                 value: BytesWriteErrorValue::Timeout,
             }),

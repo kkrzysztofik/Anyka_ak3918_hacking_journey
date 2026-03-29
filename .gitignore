@@ -63,6 +63,9 @@ cross-compile/onvif/.cache/**/*
 clangd-logs/**/*
 compile_commands.json
 
+# Cursor / IDE hook runtime state (not project config)
+.cursor/hooks/state/
+
 # VS Code - Keep project configs, ignore personal files
 .vscode/browse.vc.db*
 .vscode/launch.json.old

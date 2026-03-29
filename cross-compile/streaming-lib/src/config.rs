@@ -4,6 +4,7 @@
 //! with explicit configuration passed to components.
 
 use crate::protocol::rtsp::session::server_session::LagRecoveryMode;
+use tracing::{debug, warn};
 
 /// Configuration for the streaming service
 ///
@@ -22,6 +23,11 @@ pub struct StreamingConfig {
     ///
     /// Frames older than this will be dropped during playback to ensure
     /// latency doesn't grow unbounded.
+    ///
+    /// Default **1500 ms**, aligned with [`Self::play_ready_timeout_ms`] so playback
+    /// does not drop frames while tracks are still warming up after PLAY. Adjust
+    /// both together if you tighten staleness (e.g. lower `max_frame_age_ms` only
+    /// after measuring that IDR/SPS/PPS delivery fits within the smaller window).
     pub max_frame_age_ms: u32,
 
     /// Lag recovery mode for handling playback delays
@@ -33,6 +39,24 @@ pub struct StreamingConfig {
     /// after receiving a PLAY request, before sending the PLAY response. If tracks are
     /// not ready within this timeout, the server sends a 503 Service Unavailable response.
     pub play_ready_timeout_ms: u64,
+
+    /// Yield every this many UDP RTP packets while flushing one framed unit (marker bit).
+    /// Helps the kernel drain TX queues on embedded targets. Ignored when ≤1.
+    pub udp_pace_batch: usize,
+
+    /// Sleep duration between UDP pace batches (microseconds). Used with [`Self::udp_pace_batch`]
+    /// so pacing is time-based, not only scheduler yields. `0` means use the library default.
+    pub udp_pace_sleep_micros: u32,
+
+    /// Maximum bytes buffered for one logical TCP interleaved RTP frame (until the RTP marker
+    /// bit ends the frame).
+    ///
+    /// Default **1 MiB** (`1024 * 1024`). That is a large per-connection allocation on very small
+    /// targets (for example ~24 MiB RAM); consider **64 KiB–256 KiB** if you control max GOP/I-frame
+    /// size and want to cap worst-case buffering. The same value bounds UDP marker-terminated
+    /// packet accumulation in the play path. Lower this before raising stream bitrates only after
+    /// validating that your largest access units still fit.
+    pub tcp_interleaved_buffer_max: usize,
 
     /// RTSP server listen address
     ///
@@ -49,9 +73,12 @@ impl Default for StreamingConfig {
     fn default() -> Self {
         Self {
             rtp_sample_interval: 0, // disabled by default
-            max_frame_age_ms: 1000,
+            max_frame_age_ms: 1500,
             lag_recovery_mode: LagRecoveryMode::LatestIdr,
             play_ready_timeout_ms: 1500,
+            udp_pace_batch: 10,
+            udp_pace_sleep_micros: 300,
+            tcp_interleaved_buffer_max: 1024 * 1024,
             rtsp_listen_addr: "0.0.0.0:554".to_string(),
             httpflv_listen_addr: "0.0.0.0:8080".to_string(),
         }
@@ -111,6 +138,79 @@ impl StreamingConfig {
         self.httpflv_listen_addr = addr.into();
         self
     }
+
+    /// Configure UDP RTP pacing during a marker-terminated flush.
+    ///
+    /// # Arguments
+    ///
+    /// * `batch` — Emit a pacing delay after every this many packets within one flush.
+    ///   Values **`0` or `1` disable pacing** (the runtime treats them like “no batching”; see
+    ///   field [`Self::udp_pace_batch`]).
+    ///
+    /// # Note
+    ///
+    /// Actual delays use [`Self::udp_pace_sleep_micros`] (see default in [`Default::default`]).
+    /// Very large `batch` values only reduce how often that sleep runs; they do not disable it
+    /// unless pacing is effectively skipped by batch size.
+    pub fn with_udp_pace_batch(mut self, batch: usize) -> Self {
+        if batch <= 1 {
+            debug!(
+                batch = batch,
+                "udp_pace_batch disables inter-packet pacing for values <= 1"
+            );
+        }
+        self.udp_pace_batch = batch;
+        self
+    }
+
+    /// Override TCP interleaved frame buffer cap (bytes until RTP marker).
+    ///
+    /// # Arguments
+    ///
+    /// * `max_bytes` — Upper bound on buffered bytes for one logical interleaved RTP frame
+    ///   (until the RTP marker bit ends the frame).
+    ///
+    /// Values below **1** are rejected: `0` is replaced with [`Default::default`] and a warning
+    /// is logged (`tcp_interleaved_buffer_max` field name in logs).
+    pub fn with_tcp_interleaved_buffer_max(mut self, max_bytes: usize) -> Self {
+        if max_bytes < 1 {
+            warn!(
+                field = "tcp_interleaved_buffer_max",
+                value = max_bytes,
+                "invalid tcp_interleaved_buffer_max; using default {}",
+                Self::default().tcp_interleaved_buffer_max
+            );
+            self.tcp_interleaved_buffer_max = Self::default().tcp_interleaved_buffer_max;
+        } else {
+            self.tcp_interleaved_buffer_max = max_bytes;
+        }
+        self
+    }
+
+    /// Override UDP inter-packet pacing sleep (microseconds).
+    ///
+    /// # Arguments
+    ///
+    /// * `micros` — Sleep between pace batches during a marker-terminated UDP flush.
+    ///
+    /// # Note
+    ///
+    /// `0` is not stored: it is normalized to [`Default::default`] so pacing always uses a
+    /// positive sleep (see server session fallback). A warning is logged (`udp_pace_sleep_micros`).
+    pub fn with_udp_pace_sleep_micros(mut self, micros: u32) -> Self {
+        if micros < 1 {
+            warn!(
+                field = "udp_pace_sleep_micros",
+                value = micros,
+                "invalid udp_pace_sleep_micros; using default {}",
+                Self::default().udp_pace_sleep_micros
+            );
+            self.udp_pace_sleep_micros = Self::default().udp_pace_sleep_micros;
+        } else {
+            self.udp_pace_sleep_micros = micros;
+        }
+        self
+    }
 }
 
 #[cfg(test)]
@@ -122,9 +222,12 @@ mod tests {
         let config = StreamingConfig::default();
 
         assert_eq!(config.rtp_sample_interval, 0);
-        assert_eq!(config.max_frame_age_ms, 1000);
+        assert_eq!(config.max_frame_age_ms, 1500);
         assert_eq!(config.lag_recovery_mode, LagRecoveryMode::LatestIdr);
         assert_eq!(config.play_ready_timeout_ms, 1500);
+        assert_eq!(config.udp_pace_batch, 10);
+        assert_eq!(config.udp_pace_sleep_micros, 300);
+        assert_eq!(config.tcp_interleaved_buffer_max, 1024 * 1024);
         assert_eq!(config.rtsp_listen_addr, "0.0.0.0:554");
         assert_eq!(config.httpflv_listen_addr, "0.0.0.0:8080");
     }
@@ -155,6 +258,33 @@ mod tests {
         let config = StreamingConfig::new();
 
         assert_eq!(config.play_ready_timeout_ms, 1500);
+    }
+
+    #[test]
+    fn test_udp_pace_batch_builder_sets_field() {
+        let config = StreamingConfig::new().with_udp_pace_batch(25);
+        assert_eq!(config.udp_pace_batch, 25);
+        assert_eq!(
+            config.play_ready_timeout_ms, 1500,
+            "other defaults unchanged"
+        );
+    }
+
+    #[test]
+    fn test_udp_pace_sleep_micros_builder_sets_field() {
+        let config = StreamingConfig::new().with_udp_pace_sleep_micros(500);
+        assert_eq!(config.udp_pace_sleep_micros, 500);
+        assert_eq!(config.udp_pace_batch, 10, "other defaults unchanged");
+    }
+
+    #[test]
+    fn test_tcp_interleaved_buffer_max_builder_sets_field() {
+        let config = StreamingConfig::new().with_tcp_interleaved_buffer_max(512 * 1024);
+        assert_eq!(config.tcp_interleaved_buffer_max, 512 * 1024);
+        assert_eq!(
+            config.rtsp_listen_addr, "0.0.0.0:554",
+            "other defaults unchanged"
+        );
     }
 
     #[test]

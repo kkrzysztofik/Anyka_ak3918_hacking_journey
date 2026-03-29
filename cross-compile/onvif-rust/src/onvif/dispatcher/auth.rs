@@ -79,8 +79,7 @@ pub(super) fn verify_basic_auth_self(
         OnvifError::NotAuthorized("Invalid credentials".to_string())
     })?;
 
-    // Validate password (timing-safe: see `PasswordManager::verify_password` /
-    // `constant_time_eq` in `config::users::password`).
+    // Validate password (timing-safe via PasswordManager::verify_password → constant_time_eq in config::users::password).
     if !auth_ctx
         .password_manager
         .verify_password(password, &user.password)

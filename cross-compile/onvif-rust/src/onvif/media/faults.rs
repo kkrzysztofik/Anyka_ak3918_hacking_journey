@@ -45,7 +45,7 @@ pub fn config_modify_error() -> OnvifError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::onvif::common::limits::MAX_REFERENCE_TOKEN_CHARS;
+    use crate::onvif::common::MAX_REFERENCE_TOKEN_CHARS;
 
     #[test]
     fn test_validate_profile_token_empty() {

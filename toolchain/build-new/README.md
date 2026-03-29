@@ -16,15 +16,22 @@ This directory contains scripts and configuration for building a modern cross-co
 
 ## Toolchain Components
 
-Toolchain component versions:
+| Component | Version / location |
+| --------- | -------------------- |
+| crosstool-NG | Git `37190d5b1e8050832610ba5e899911c7a723d798` |
+| GCC | 15.2 |
+| Binutils | 2.46.0 |
+| GDB | 17.1 |
+| LLVM/Clang | 22.1.2 (optional, for Rust support) |
+| Rust | 1.94.1+ (optional, bootstrapped from source) |
+| uClibc-ng | `1.0.57` |
 
-- crosstool-NG: git `37190d5b1e8050832610ba5e899911c7a723d798` (includes binutils 2.46.0); host tree under `crosstool-ng-src/`
-- GCC: 15.2
-- Binutils: 2.46.0
-- GDB: 17.1
-- LLVM/Clang: 22.1.2 (optional, for Rust support)
-- Rust: 1.94.1+ (optional, bootstrapped from source)
-- uClibc-ng 1.0.57 uses vendored package metadata in `vendor/crosstool-ng/uClibc-ng/` (not yet in upstream crosstool-NG at that commit); `build_toolchain.sh` copies it in and re-runs `./bootstrap` when needed.
+### Notes
+
+- **crosstool-NG host tree**: checked out under `crosstool-ng-src/` next to these scripts (see `build_toolchain.sh`).
+- **uClibc-ng metadata**: vendored under `vendor/crosstool-ng/uClibc-ng/<version>/` (checksum stubs for the release tarball).
+- **Pinned upstream vs. Kconfig**: the crosstool-NG commit in `common.sh` may not define every uClibc-ng version line your `.config` selects; `build_toolchain.sh` copies the vendored package tree into `crosstool-ng-src/packages/uClibc-ng/` and re-runs `./bootstrap` when required Kconfig tokens are missing from `config/versions/uClibc-ng.in`.
+- **Binutils**: the pinned crosstool-NG revision includes binutils 2.46.0 (see `common.sh` / config fragments).
 
 ## Prerequisites
 
@@ -89,11 +96,14 @@ cd "${REPO_ROOT}/toolchain/build-new"
 The script will:
 
 1. Check for required dependencies
-2. Clone the pinned crosstool-NG commit, install vendored uClibc-ng 1.0.57 metadata, run `./bootstrap` if needed, and build the `ct-ng` host tool
-3. Configure the toolchain for ARMv5TEJ with uClibc-ng
-4. Build the complete toolchain (1-3 hours)
-5. Install to `../arm-anykav200-crosstool-ng/usr/`
-6. Verify the installation
+2. Clone the pinned crosstool-NG Git commit (`CTNG_GIT_REF` in `common.sh`)
+3. Install vendored uClibc-ng 1.0.57 package metadata into the crosstool-NG tree
+4. Run `./bootstrap` in crosstool-NG when Kconfig regeneration is required
+5. Build the `ct-ng` host tool
+6. Configure the toolchain for ARMv5TEJ with uClibc-ng
+7. Build the complete toolchain (1-3 hours)
+8. Install to `../arm-anykav200-crosstool-ng/usr/`
+9. Verify the installation
 
 ### Step 3: Verify the Build
 
@@ -294,7 +304,7 @@ After both stages complete:
 ../arm-anykav200-crosstool-ng/bin/llvm-config --version
 
 # Check compiler-rt builtins
-ls -lh ../arm-anykav200-crosstool-ng/lib/clang/22/lib/armv5te-unknown-linux-gnueabi/libclang_rt.builtins.a
+ls -lh ../arm-anykav200-crosstool-ng/lib/clang/22/lib/armv5te-unknown-linux-uclibceabi/libclang_rt.builtins.a
 ```
 
 After building, LLVM/Clang will be available at `../arm-anykav200-crosstool-ng/bin/clang`.

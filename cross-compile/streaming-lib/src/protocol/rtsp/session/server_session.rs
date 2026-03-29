@@ -40,7 +40,7 @@ use crate::io::bytes_writer::BytesWriter;
 use http::StatusCode;
 use tokio::sync::oneshot;
 
-use crate::protocol::rtsp::rtp::errors::UnPackerError;
+use crate::protocol::rtsp::rtp::errors::{PackerError, PackerErrorValue, UnPackerError};
 use crate::protocol::rtsp::rtp::utils::OnRtpPacketFn;
 use crate::protocol::rtsp::sdp::Sdp;
 
@@ -74,17 +74,23 @@ use crate::hub::{
     utils::{RandomDigitCount, Uuid},
 };
 use tokio::net::TcpStream;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, Notify};
 use tracing::{debug, error, info, warn};
 
-use super::playback::{PlaybackLatencyPolicy, run_playback_loop};
 pub use super::playback::LagRecoveryMode;
+use super::playback::{PlaybackLatencyPolicy, run_playback_loop};
 
 const SESSION_ID_RANDOM_DIGITS: RandomDigitCount = RandomDigitCount::Four;
 const DEFAULT_PLAY_READY_TIMEOUT_MS: u64 = 1500;
 
 /// RFC 2326 §12.36 — Server header value.
 const SERVER_HEADER: &str = "streaming-lib/0.1";
+
+/// Log threshold for slow TCP/UDP RTP writes (wall-clock flush time, milliseconds).
+const SLOW_WRITE_THRESHOLD_MS: u128 = 10;
+
+/// Default UDP inter-batch sleep when `udp_pace_sleep_micros` is `0` (embedded TX pacing).
+const DEFAULT_UDP_PACE_SLEEP_MICROS: u64 = 300;
 
 pub struct RtspServerSession {
     io_reader: Arc<Mutex<Box<dyn TNetIO + Send + Sync>>>,
@@ -123,7 +129,7 @@ pub struct RtspServerSession {
     config: StreamingConfig,
 
     rtp_counters: HashMap<TrackType, RtpCountersHandle>,
-    playback_cancel: Option<Arc<AtomicBool>>,
+    playback_cancel: Option<Arc<Notify>>,
     playback_task: Option<JoinHandle<()>>,
 }
 
@@ -374,7 +380,7 @@ impl RtspServerSession {
 
     fn abort_playback_task(&mut self) {
         if let Some(cancel) = self.playback_cancel.take() {
-            cancel.store(true, Ordering::Release);
+            cancel.notify_waiters();
         }
         if let Some(handle) = self.playback_task.take() {
             handle.abort();
@@ -383,7 +389,7 @@ impl RtspServerSession {
 
     async fn stop_playback_task(&mut self) {
         if let Some(cancel) = self.playback_cancel.take() {
-            cancel.store(true, Ordering::Release);
+            cancel.notify_waiters();
         }
         if let Some(handle) = self.playback_task.take() {
             handle.abort();
@@ -1162,6 +1168,7 @@ impl RtspServerSession {
         trimmed.to_string()
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn setup_tcp_play_packet_handler(
         channel_identifier: u8,
         counters: Arc<RtpTrackCounters>,
@@ -1170,10 +1177,12 @@ impl RtspServerSession {
         session_id: String,
         remote_for_rtp: SocketAddr,
         sample_interval: u32,
+        max_tcp_interleaved_frame_bytes: usize,
     ) -> OnRtpPacketFn {
-        // Frame buffer: accumulate interleaved RTP packets (200KB for large I-frames)
+        // Initial capacity tracks [`StreamingConfig::tcp_interleaved_buffer_max`] so embedded
+        // deployments can lower per-connection RAM (default 1 MiB in config).
         let frame_buffer: Arc<Mutex<BytesMut>> =
-            Arc::new(Mutex::new(BytesMut::with_capacity(200 * 1024)));
+            Arc::new(Mutex::new(BytesMut::with_capacity(max_tcp_interleaved_frame_bytes)));
 
         Box::new(
             move |io: Arc<Mutex<Box<dyn TNetIO + Send + Sync>>>, packet: RtpPacket| {
@@ -1235,11 +1244,47 @@ impl RtspServerSession {
                     }
 
                     // Build interleaved RTP packet: 0x24 + channel + length + payload
+                    let interleaved_chunk = 4usize.saturating_add(payload_len);
+                    if payload_len > u16::MAX as usize {
+                        error!(
+                            protocol = "TCP",
+                            track = %track_label,
+                            session_id = %session_id,
+                            payload_len = payload_len,
+                            "interleaved_rtsp_payload_exceeds_u16"
+                        );
+                        return Err(PackerError {
+                            value: PackerErrorValue::InterleavedFraming(format!(
+                                "RTP payload length {} exceeds {}",
+                                payload_len,
+                                u16::MAX
+                            )),
+                        });
+                    }
                     let mut buffer = frame_buffer.lock().await;
-                    buffer.reserve(4 + msg.len());
+                    let new_total = buffer.len().saturating_add(interleaved_chunk);
+                    if new_total > max_tcp_interleaved_frame_bytes {
+                        warn!(
+                            protocol = "TCP",
+                            session_id = %session_id,
+                            track = %track_label,
+                            channel_identifier = channel_identifier,
+                            current_len = buffer.len(),
+                            incoming = interleaved_chunk,
+                            max = max_tcp_interleaved_frame_bytes,
+                            "tcp_interleaved_frame_buffer_overflow"
+                        );
+                        buffer.clear();
+                        return Err(PackerError {
+                            value: PackerErrorValue::InterleavedFraming(
+                                "tcp interleaved frame buffer overflow".to_string(),
+                            ),
+                        });
+                    }
+                    buffer.reserve(interleaved_chunk);
                     buffer.put_u8(0x24);
                     buffer.put_u8(channel_identifier);
-                    let len_bytes = (msg.len() as u16).to_be_bytes();
+                    let len_bytes = (payload_len as u16).to_be_bytes();
                     buffer.extend_from_slice(&len_bytes);
                     buffer.extend_from_slice(&msg);
 
@@ -1251,8 +1296,8 @@ impl RtspServerSession {
                         io.lock().await.write(data).await?;
                         let elapsed = start.elapsed();
 
-                        // Log slow writes (>10ms threshold)
-                        if elapsed.as_millis() >= 10 {
+                        // Log slow writes (see SLOW_WRITE_THRESHOLD_MS)
+                        if elapsed.as_millis() >= SLOW_WRITE_THRESHOLD_MS {
                             tracing::warn!(
                                 protocol = "TCP",
                                 track = %track_label,
@@ -1270,6 +1315,7 @@ impl RtspServerSession {
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn setup_udp_play_packet_handler(
         counters: Arc<RtpTrackCounters>,
         stream_identifier: Option<StreamIdentifier>,
@@ -1277,10 +1323,14 @@ impl RtspServerSession {
         session_id: String,
         remote_for_rtp: SocketAddr,
         sample_interval: u32,
+        udp_pace_batch: usize,
+        udp_pace_sleep_micros: u32,
+        max_udp_accumulated_frame_bytes: usize,
     ) -> OnRtpPacketFn {
-        // Packet buffer: accumulate marshalled packets (150 packets for large I-frames)
-        let packet_buffer: Arc<Mutex<Vec<BytesMut>>> =
-            Arc::new(Mutex::new(Vec::with_capacity(150)));
+        // Packet buffer: accumulate marshalled packets (150 packets for large I-frames).
+        // Second element is running total of `buffer` payload bytes (avoids O(n) sum per packet).
+        let udp_accum: Arc<Mutex<(Vec<BytesMut>, usize)>> =
+            Arc::new(Mutex::new((Vec::with_capacity(150), 0)));
 
         Box::new(
             move |io: Arc<Mutex<Box<dyn TNetIO + Send + Sync>>>, packet: RtpPacket| {
@@ -1288,7 +1338,7 @@ impl RtspServerSession {
                 let stream_identifier = stream_identifier.clone();
                 let track_label = track_label.clone();
                 let session_id = session_id.clone();
-                let packet_buffer = packet_buffer.clone();
+                let udp_accum = udp_accum.clone();
                 Box::pin(async move {
                     let msg = packet.marshal()?;
                     let payload_len = msg.len();
@@ -1341,31 +1391,64 @@ impl RtspServerSession {
                         );
                     }
 
-                    // Accumulate packet into buffer
-                    let mut buffer = packet_buffer.lock().await;
+                    // Accumulate packet into buffer (bounded; same cap as TCP interleaved framing).
+                    let mut guard = udp_accum.lock().await;
+                    let (buffer, accumulated) = &mut *guard;
+                    let incoming = msg.len();
+                    let current = *accumulated;
+                    let new_total = current.saturating_add(incoming);
+                    if new_total > max_udp_accumulated_frame_bytes {
+                        error!(
+                            protocol = "UDP",
+                            session_id = %session_id,
+                            track = %track_label,
+                            remote_addr = %remote_for_rtp,
+                            current_accumulated = current,
+                            incoming = incoming,
+                            max = max_udp_accumulated_frame_bytes,
+                            "udp_playback_packet_buffer_overflow"
+                        );
+                        buffer.clear();
+                        *accumulated = 0;
+                        return Err(PackerError {
+                            value: PackerErrorValue::InterleavedFraming(format!(
+                                "udp playback packet buffer overflow: {} + {} > {}",
+                                current, incoming, max_udp_accumulated_frame_bytes
+                            )),
+                        });
+                    }
                     buffer.push(msg);
+                    *accumulated = new_total;
 
                     // Write all accumulated packets when marker bit is set (end of frame)
                     if packet.header.marker == 1 {
                         let start = std::time::Instant::now();
-                        let packets: Vec<BytesMut> = buffer.drain(..).collect();
-                        drop(buffer);
+                        let packets: Vec<BytesMut> =
+                            std::mem::replace(buffer, Vec::with_capacity(150));
+                        *accumulated = 0;
+                        drop(guard);
                         let packet_count = packets.len();
                         let mut io = io.lock().await;
                         // Pace UDP writes: yield every N packets to let the kernel
                         // drain the socket buffer and the NIC transmit queued
                         // packets, preventing client-side receive buffer overflow.
-                        const UDP_PACE_BATCH: usize = 10;
+                        let pace_batch = udp_pace_batch.max(1);
+                        let sleep_micros = if udp_pace_sleep_micros == 0 {
+                            DEFAULT_UDP_PACE_SLEEP_MICROS
+                        } else {
+                            u64::from(udp_pace_sleep_micros)
+                        };
+                        let pace_sleep = Duration::from_micros(sleep_micros.max(1));
                         for (i, pkt) in packets.into_iter().enumerate() {
                             io.write(pkt.into()).await?;
-                            if (i + 1) % UDP_PACE_BATCH == 0 && i + 1 < packet_count {
-                                tokio::task::yield_now().await;
+                            if (i + 1) % pace_batch == 0 && i + 1 < packet_count {
+                                tokio::time::sleep(pace_sleep).await;
                             }
                         }
                         let elapsed = start.elapsed();
 
-                        // Log slow writes (>10ms threshold)
-                        if elapsed.as_millis() >= 10 {
+                        // Log slow writes (see SLOW_WRITE_THRESHOLD_MS)
+                        if elapsed.as_millis() >= SLOW_WRITE_THRESHOLD_MS {
                             tracing::warn!(
                                 protocol = "UDP",
                                 track = %track_label,
@@ -1462,6 +1545,9 @@ impl RtspServerSession {
         }
 
         let sample_interval = self.rtp_sample_interval;
+        let udp_pace_batch = self.config.udp_pace_batch;
+        let udp_pace_sleep_micros = self.config.udp_pace_sleep_micros;
+        let tcp_interleaved_buffer_max = self.config.tcp_interleaved_buffer_max;
         let session_id_for_rtp = session_id.clone();
         let remote_for_rtp = self.remote_addr;
         let stream_identifier = self.stream_identifier.clone();
@@ -1496,10 +1582,14 @@ impl RtspServerSession {
                         session_id_clone,
                         remote_for_rtp,
                         sample_interval,
+                        tcp_interleaved_buffer_max,
                     );
                     track.rtp_channel.lock().await.on_packet_handler(handler);
                 }
                 ProtocolType::UDP => {
+                    // `tcp_interleaved_buffer_max` is the shared per-session cap on buffered bytes
+                    // for one logical RTP frame (until marker); UDP uses the same field to bound
+                    // accumulated packet payloads before flush (not TCP interleaving).
                     let handler = Self::setup_udp_play_packet_handler(
                         counters,
                         stream_id_clone,
@@ -1507,6 +1597,9 @@ impl RtspServerSession {
                         session_id_clone,
                         remote_for_rtp,
                         sample_interval,
+                        udp_pace_batch,
+                        udp_pace_sleep_micros,
+                        tcp_interleaved_buffer_max,
                     );
                     track.rtp_channel.lock().await.on_packet_handler(handler);
                 }
@@ -1590,7 +1683,7 @@ impl RtspServerSession {
         );
 
         self.stop_playback_task().await;
-        let playback_cancel = Arc::new(AtomicBool::new(false));
+        let playback_cancel = Arc::new(Notify::new());
         let playback_cancel_for_task = playback_cancel.clone();
         self.playback_cancel = Some(playback_cancel);
 

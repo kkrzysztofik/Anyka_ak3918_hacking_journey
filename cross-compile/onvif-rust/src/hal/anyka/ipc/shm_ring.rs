@@ -195,8 +195,12 @@ pub struct SlotHeader {
     pub _padding: [u8; 16],
 }
 
-/// Frame notification received from daemon (20 bytes)
-/// This is received via socket to indicate a frame is ready in shm.
+/// Frame notification received from the vendor daemon (**20 bytes**, Unix socket / SCM payload).
+///
+/// Layout must match C `struct vd_frame_notify` in `vendor-daemon/include/vd_ring_buffer.h` and
+/// [`VD_NOTIFY_WIRE_SIZE`]. Bump the shared ring header `version` (or deploy daemon + consumer
+/// together) whenever this wire format changes so both sides stay aligned on `slot_index`,
+/// `frame_len`, `flags`, `stream_id`, and `seq_no`.
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FrameNotification {
@@ -225,10 +229,8 @@ impl FrameNotification {
     ///
     /// Parsed `FrameNotification` struct
     pub fn from_bytes(bytes: &[u8; VD_NOTIFY_WIRE_SIZE]) -> Self {
-        // SAFETY: The array is exactly 20 bytes and the sub-slices are exactly 4 bytes,
-        // so try_into() for [u8; 4] is infallible. Using unwrap is safe here because
-        // the fixed-size input guarantees correct sub-slice lengths.
-        // However, to follow project standards, use explicit array conversion:
+        // Input is exactly [`VD_NOTIFY_WIRE_SIZE`] (20) bytes; each field uses four contiguous
+        // bytes, so explicit `from_le_bytes` on fixed arrays is infallible (no `unsafe`).
         Self {
             slot_index: u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]),
             frame_len: u32::from_le_bytes([bytes[4], bytes[5], bytes[6], bytes[7]]),
@@ -610,10 +612,47 @@ impl ShmRingReader {
         self.read_slot_into_bytesmut_inner(slot_index, None, pool)
     }
 
-    /// Copy frame data from a notified slot into a `BytesMut` buffer.
+    /// Copy frame data from a socket-notified slot into a `BytesMut` buffer.
     ///
-    /// This validates the socket notification against the slot contents so a
-    /// stale notification is downgraded to a recoverable race.
+    /// Like [`Self::read_slot_into_bytesmut`], this acquires the slot, copies
+    /// payload bytes into a pooled or freshly allocated [`BytesMut`], and returns
+    /// [`FrameMetadata`]. When `notification` is supplied, the implementation
+    /// first verifies that the notification’s `(frame_len, seq_no, stream_id)`
+    /// still matches the slot header after the read lease is taken. If the
+    /// notification is **stale** (the producer advanced while the reader was
+    /// scheduling work), the slot is cleared without advancing the reader’s
+    /// sequence counter and this method returns [`PlatformError::ResourceBusy`]
+    /// with a message containing `"stale notification"` so callers can retry.
+    ///
+    /// # Arguments
+    ///
+    /// * `notification` - The [`FrameNotification`] received over the socket;
+    ///   its `slot_index` selects the slot; `frame_len`, `seq_no`, and
+    ///   `stream_id` must match the slot for the read to proceed.
+    /// * `pool` - Optional [`BytesMutPool`] for buffer reuse; same semantics as
+    ///   [`Self::read_slot_into_bytesmut`].
+    ///
+    /// # Returns
+    ///
+    /// * `Ok((FrameMetadata, BytesMut))` - Metadata and frame bytes when the
+    ///   notification matches the slot contents.
+    ///
+    /// # Errors
+    ///
+    /// * [`PlatformError::ResourceBusy`] - Stale notification (message includes
+    ///   `"stale notification"` and the slot index) or other races while
+    ///   acquiring/releasing the slot.
+    /// * Other [`PlatformError`] variants - Same failure modes as
+    ///   [`Self::read_slot_into_bytesmut`] (invalid slot, hardware/shutdown
+    ///   issues, allocation failures).
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// // After receiving FrameNotification from the vendor socket:
+    /// let pool = BytesMutPool::new(65536, 4);
+    /// let (_meta, buf) = reader.read_notified_slot_into_bytesmut(&notification, Some(&pool))?;
+    /// ```
     pub fn read_notified_slot_into_bytesmut(
         &mut self,
         notification: &FrameNotification,
@@ -649,8 +688,7 @@ impl ShmRingReader {
                 slot_frame_len,
                 "shared memory notification no longer matches slot contents"
             );
-            if let Err(release_error) = self.release_slot_with_expectation(slot_index, Some(notif))
-            {
+            if let Err(release_error) = self.release_slot_without_advancing_read_seq(slot_index) {
                 tracing::warn!(
                     event = "shm_notification_stale_release_error",
                     diag_monotonic_ms = monotonic_millis(),
@@ -714,6 +752,34 @@ impl ShmRingReader {
         self.release_slot_with_expectation(slot_index, None)
     }
 
+    /// Clear a slot from `READING` to `EMPTY` without advancing `local_read_seq`.
+    ///
+    /// Used when a notification proves stale after the frame was read: the slot
+    /// must be returned to the daemon, but the reader must not consume a frame
+    /// from the logical read sequence (no successful delivery occurred).
+    fn release_slot_without_advancing_read_seq(&mut self, slot_index: u32) -> PlatformResult<()> {
+        if slot_index >= VD_SHM_SLOT_COUNT {
+            return Err(PlatformError::InvalidParameter(format!(
+                "slot index {} out of range",
+                slot_index
+            )));
+        }
+
+        let state_atomic = self.slot_state_atomic(slot_index);
+        match state_atomic.compare_exchange(
+            VD_SLOT_READING,
+            VD_SLOT_EMPTY,
+            Ordering::AcqRel,
+            Ordering::Acquire,
+        ) {
+            Ok(_) => Ok(()),
+            Err(current) => Err(PlatformError::HardwareFailure(format!(
+                "failed to clear stale slot {}: expected state {}, got {}",
+                slot_index, VD_SLOT_READING, current
+            ))),
+        }
+    }
+
     fn release_slot_with_expectation(
         &mut self,
         slot_index: u32,
@@ -748,6 +814,9 @@ impl ShmRingReader {
                 let header = self.slot_header(slot_index);
                 let write_seq = self.write_seq();
                 let available_frames = write_seq.wrapping_sub(self.local_read_seq);
+                let notif_stream_id = notification.map(|notif| notif.stream_id);
+                let notif_seq_no = notification.map(|notif| notif.seq_no);
+                let notif_frame_len = notification.map(|notif| notif.frame_len);
                 let notification_matches_header = notification
                     .map(|notif| {
                         notif.matches_slot(header.frame_len, header.seq_no, header.stream_id)
@@ -764,9 +833,9 @@ impl ShmRingReader {
                     frame_seq_no = header.seq_no,
                     frame_stream_id = header.stream_id,
                     frame_len = header.frame_len,
-                    notif_stream_id = notification.map(|notif| notif.stream_id),
-                    notif_seq_no = notification.map(|notif| notif.seq_no),
-                    notif_frame_len = notification.map(|notif| notif.frame_len),
+                    notif_stream_id,
+                    notif_seq_no,
+                    notif_frame_len,
                     notification_matches_header,
                     frame_timestamp_ms = header.timestamp_ms,
                     write_seq,
@@ -774,13 +843,18 @@ impl ShmRingReader {
                     available_frames,
                     "shared memory slot release observed unexpected state"
                 );
+                // CAS failed: another writer/reader changed the slot state. If we had a live
+                // notification and its stream/seq/len no longer match the slot header, treat it
+                // as a producer/consumer race and surface [`PlatformError::ResourceBusy`] so the
+                // caller can retry; otherwise the mismatch is unexpected hardware/state — return
+                // [`PlatformError::HardwareFailure`] below.
                 if notification.is_some() && !notification_matches_header {
                     return Err(PlatformError::ResourceBusy(format!(
                         "stale notification release race on slot {}: expected stream/seq/len {:?}/{:?}/{:?}, got {}/{}/{}",
                         slot_index,
-                        notification.map(|notif| notif.stream_id),
-                        notification.map(|notif| notif.seq_no),
-                        notification.map(|notif| notif.frame_len),
+                        notif_stream_id,
+                        notif_seq_no,
+                        notif_frame_len,
                         header.stream_id,
                         header.seq_no,
                         header.frame_len
@@ -1464,6 +1538,42 @@ mod tests {
     }
 
     #[test]
+    fn test_read_notified_slot_into_bytesmut_success_drains_slot() {
+        let test_data = b"notified read ok";
+        let mut reader = create_test_anon_reader();
+        unsafe {
+            write_test_slot(
+                &reader,
+                0,
+                VD_SLOT_READY,
+                test_data.len() as u32,
+                3000,
+                200,
+                1,
+                0,
+                test_data,
+            );
+        }
+        let notification = FrameNotification {
+            slot_index: 0,
+            frame_len: test_data.len() as u32,
+            flags: VD_NOTIFY_LAST_FRAGMENT,
+            stream_id: 0,
+            seq_no: 200,
+        };
+        let pool = BytesMutPool::new(1024, 2);
+        let (metadata, buf) = reader
+            .read_notified_slot_into_bytesmut(&notification, Some(&pool))
+            .expect("matching notification should read slot");
+        assert_eq!(metadata.seq_no, 200);
+        assert_eq!(buf.as_ref(), test_data.as_slice());
+        assert_eq!(
+            reader.slot_state_atomic(0).load(Ordering::Relaxed),
+            VD_SLOT_EMPTY
+        );
+    }
+
+    #[test]
     fn test_read_notified_slot_into_bytesmut_rejects_stale_notification_as_resource_busy() {
         let test_data = b"newest frame";
         let mut reader = create_test_anon_reader();
@@ -1505,6 +1615,144 @@ mod tests {
 
         let state = reader.slot_state_atomic(0).load(Ordering::Relaxed);
         assert_eq!(state, VD_SLOT_EMPTY);
+    }
+
+    #[test]
+    fn test_read_notified_slot_into_bytesmut_rejects_stale_seq_only_as_resource_busy() {
+        let test_data = b"seq mismatch only";
+        let mut reader = create_test_anon_reader();
+
+        unsafe {
+            write_test_slot(
+                &reader,
+                0,
+                VD_SLOT_READY,
+                test_data.len() as u32,
+                1000,
+                42,
+                1,
+                2,
+                test_data,
+            );
+        }
+
+        let pool = BytesMutPool::new(1024, 2);
+        let stale_notification = FrameNotification {
+            slot_index: 0,
+            frame_len: test_data.len() as u32,
+            flags: VD_NOTIFY_LAST_FRAGMENT,
+            stream_id: 2,
+            seq_no: 99,
+        };
+
+        let err = reader
+            .read_notified_slot_into_bytesmut(&stale_notification, Some(&pool))
+            .expect_err("stale seq_no should be recoverable");
+
+        match err {
+            PlatformError::ResourceBusy(message) => {
+                assert!(message.contains("stale notification"), "{}", message);
+                assert!(message.contains("slot 0"), "{}", message);
+            }
+            other => panic!("expected ResourceBusy, got {:?}", other),
+        }
+
+        assert_eq!(
+            reader.slot_state_atomic(0).load(Ordering::Relaxed),
+            VD_SLOT_EMPTY
+        );
+    }
+
+    #[test]
+    fn test_read_notified_slot_into_bytesmut_rejects_stale_stream_only_as_resource_busy() {
+        let test_data = b"stream mismatch only";
+        let mut reader = create_test_anon_reader();
+
+        unsafe {
+            write_test_slot(
+                &reader,
+                0,
+                VD_SLOT_READY,
+                test_data.len() as u32,
+                2000,
+                50,
+                1,
+                0,
+                test_data,
+            );
+        }
+
+        let pool = BytesMutPool::new(1024, 2);
+        let stale_notification = FrameNotification {
+            slot_index: 0,
+            frame_len: test_data.len() as u32,
+            flags: VD_NOTIFY_LAST_FRAGMENT,
+            stream_id: 7,
+            seq_no: 50,
+        };
+
+        let err = reader
+            .read_notified_slot_into_bytesmut(&stale_notification, Some(&pool))
+            .expect_err("stale stream_id should be recoverable");
+
+        match err {
+            PlatformError::ResourceBusy(message) => {
+                assert!(message.contains("stale notification"), "{}", message);
+                assert!(message.contains("slot 0"), "{}", message);
+            }
+            other => panic!("expected ResourceBusy, got {:?}", other),
+        }
+
+        assert_eq!(
+            reader.slot_state_atomic(0).load(Ordering::Relaxed),
+            VD_SLOT_EMPTY
+        );
+    }
+
+    #[test]
+    fn test_read_notified_slot_into_bytesmut_rejects_stale_frame_len_only_as_resource_busy() {
+        let test_data = b"frame len mismatch only";
+        let mut reader = create_test_anon_reader();
+
+        unsafe {
+            write_test_slot(
+                &reader,
+                0,
+                VD_SLOT_READY,
+                test_data.len() as u32,
+                4000,
+                33,
+                1,
+                5,
+                test_data,
+            );
+        }
+
+        let pool = BytesMutPool::new(1024, 2);
+        let stale_notification = FrameNotification {
+            slot_index: 0,
+            frame_len: (test_data.len() as u32).saturating_add(100),
+            flags: VD_NOTIFY_LAST_FRAGMENT,
+            stream_id: 5,
+            seq_no: 33,
+        };
+
+        let err = reader
+            .read_notified_slot_into_bytesmut(&stale_notification, Some(&pool))
+            .expect_err("stale frame_len only should be recoverable");
+
+        match err {
+            PlatformError::ResourceBusy(message) => {
+                assert!(message.contains("stale notification"), "{}", message);
+                assert!(message.contains("slot 0"), "{}", message);
+            }
+            other => panic!("expected ResourceBusy, got {:?}", other),
+        }
+
+        assert_eq!(
+            reader.slot_state_atomic(0).load(Ordering::Relaxed),
+            VD_SLOT_EMPTY
+        );
     }
 
     #[test]

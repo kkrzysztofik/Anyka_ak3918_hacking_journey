@@ -49,6 +49,8 @@ portable-atomic = { version = "1.13", features = ["std", "serde", "float"] }
 validator = { version = "0.20", features = ["derive"] }
 zeroize = { version = "1.8", features = ["derive"] }
 unicode-normalization = "0.1"
+# Grapheme cluster counting for ONVIF username validation (`onvif/device/user_types.rs`); required for spec-aligned length limits on embedded targets.
+unicode-segmentation = "1.12"
 streaming-lib = { path = "../streaming-lib" }
 
 [dev-dependencies]

@@ -79,14 +79,15 @@
   "chat.tools.terminal.autoApprove": {
     "${workspaceFolder}/toolchain/arm-anykav200-crosstool-ng/bin/cargo": true,
     "${workspaceFolder}/toolchain/arm-anykav200-crosstool-ng/bin/arm-unknown-linux-uclibcgnueabi-nm": true,
-    "../../toolchain/arm-anykav200-crosstool-ng/bin/cargo": true,
-    "../../toolchain/arm-anykav200-crosstool-ng/bin/arm-unknown-linux-uclibcgnueabi-nm": true,
     "cargo fmt": true,
     "npm run type-check": true,
     "npm run test": true,
     "cargo audit": true,
     "bd": true,
-    "/^cd .* && bd list --json 2>/dev/null \\| python3 -c \"import sys,json; items=json\\.load\\(sys\\.stdin\\); \\[print\\(i\\['id'\\], i\\.get\\('status',''\\), i\\.get\\('title',''\\), i\\.get\\('priority',''\\)\\) for i in items\\[:20\\]\\]\" 2>/dev/null \\|\\| bd list 2>/dev/null \\| head -60$/": {
+    // Approve `bd list` with optional flags and shell pipelines (e.g. `--json`, `| head`).
+    // A single long regex for the JSON+Python one-liner was hard to maintain; this pattern
+    // still matches the common automation shape without encoding the full pipeline.
+    "/\\bbd\\s+list\\b/": {
       "approve": true,
       "matchCommandLine": true
     }

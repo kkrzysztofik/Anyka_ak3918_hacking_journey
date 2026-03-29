@@ -178,7 +178,22 @@ static void *push_frame_thread(void *arg)
                      raw_timestamp_ms,
                      (unsigned long long)diag_monotonic_ms());
         } else {
-            timestamp_ms = raw_timestamp_ms - state->first_timestamp_ms;
+            /* 32-bit SDK timestamps wrap ~every 49.7 days; extend with u64 before subtract */
+            uint64_t raw64 = (uint64_t)raw_timestamp_ms;
+            uint64_t first64 = (uint64_t)state->first_timestamp_ms;
+            if (raw64 < first64) {
+                log_warn("event=timestamp_wrap stream=%u raw_ts=%u first_ts=%u diag_monotonic_ms=%llu",
+                         state->stream_id,
+                         raw_timestamp_ms,
+                         state->first_timestamp_ms,
+                         (unsigned long long)diag_monotonic_ms());
+                /* 32-bit SDK clock may wrap multiple times over very long runs; extend until aligned. */
+                while (raw64 < first64) {
+                    raw64 += (uint64_t)1U << 32;
+                }
+            }
+            uint64_t delta = raw64 - first64;
+            timestamp_ms = (delta > UINT32_MAX) ? UINT32_MAX : (uint32_t)delta;
         }
 
         log_debug("event=timestamp_normalize stream=%u raw_ts=%u normalized_ts=%u seq_no=%u diag_monotonic_ms=%llu",

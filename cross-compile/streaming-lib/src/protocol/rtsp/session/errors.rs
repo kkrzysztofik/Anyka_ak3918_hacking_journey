@@ -50,6 +50,9 @@ pub enum SessionErrorValue {
     MissingSessionId,
     #[error("corrupted rtsp message: {0}")]
     RtspMessageCorrupted(String),
+    /// Interleaved RTP header announced length 0 (invalid per session rules).
+    #[error("zero-length interleaved RTP payload")]
+    ZeroLengthInterleavedPayload,
     #[error("RTSP session timed out after {0}s")]
     SessionTimeout(u64),
 }
@@ -171,6 +174,12 @@ mod tests {
     fn test_session_error_value_channel_recv_error() {
         let error = SessionErrorValue::ChannelRecvError;
         assert_eq!(format!("{}", error), "Channel receive error");
+    }
+
+    #[test]
+    fn test_session_error_value_zero_length_interleaved_payload() {
+        let error = SessionErrorValue::ZeroLengthInterleavedPayload;
+        assert_eq!(format!("{}", error), "zero-length interleaved RTP payload");
     }
 
     #[test]
@@ -313,6 +322,7 @@ mod tests {
         let _ = SessionErrorValue::StreamHubEventSendErr;
         let _ = SessionErrorValue::CannotReceiveFrameData;
         let _ = SessionErrorValue::ChannelRecvError;
+        let _ = SessionErrorValue::ZeroLengthInterleavedPayload;
         let _ = SessionErrorValue::RtspResponseStatusError;
     }
 }

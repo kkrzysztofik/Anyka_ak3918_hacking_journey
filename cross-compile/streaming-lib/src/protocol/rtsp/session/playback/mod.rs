@@ -7,21 +7,25 @@ use std::sync::{
 };
 use std::time::Instant;
 use tokio::sync::Mutex;
+use tokio::sync::Notify;
 use tokio::sync::mpsc;
 use tokio::time::Duration;
-use tracing::{debug, info, warn};
+use tracing::{debug, error, info, warn};
 
+use super::rtp_counters::RTP_TIMESTAMP_WRAP_THRESHOLD;
 use crate::config::StreamingConfig;
 use crate::hub::define::FrameData;
 use crate::protocol::rtsp::rtp::define::ANNEXB_NALU_START_CODE;
 use crate::protocol::rtsp::rtsp_channel::RtpChannel;
 use crate::protocol::rtsp::rtsp_track::TrackType;
-use super::rtp_counters::RTP_TIMESTAMP_WRAP_THRESHOLD;
 
 const DEFAULT_MAX_FRAME_AGE_MS: u32 = 1000;
 const LAG_RECOVERY_THRESHOLD_MS: u32 = 500;
 const LAG_RECOVERY_SUSTAINED_FRAMES: u32 = 4;
 const SOURCE_TIMESTAMP_RESET_THRESHOLD_MS: u32 = 10_000;
+/// Band (ms) near `u32::MAX` used with [`LagTracker::lag_ms`] to treat a large backwards step as
+/// natural millisecond-counter wrap rather than an encoder timestamp reset.
+const SOURCE_TIMESTAMP_WRAP_PROXIMITY_MS: u32 = 60_000;
 const RTP_SEND_SLOW_WARN_MS: u128 = 25;
 const PACER_SLEEP_DIAGNOSTIC_MIN_MS: u64 = 20;
 
@@ -40,6 +44,10 @@ const PACE_MIN_SLEEP_MS: u64 = 2;
 /// to avoid visible freezes.
 const PACE_MAX_DELTA_MS: u64 = 200;
 
+/// Monotonic milliseconds since the first call in this process.
+///
+/// A static [`std::sync::OnceLock`] holds the baseline [`Instant`] from the first
+/// invocation; subsequent calls return `elapsed().as_millis()` as `u64`.
 pub(super) fn monotonic_millis() -> u64 {
     static START: OnceLock<Instant> = OnceLock::new();
     START.get_or_init(Instant::now).elapsed().as_millis() as u64
@@ -51,12 +59,20 @@ pub(super) fn monotonic_millis() -> u64 {
 ///
 /// # Arguments
 ///
-/// * `timestamp_ms` - Timestamp in milliseconds
-/// * `clock_rate` - Target RTP clock rate (typically 90000 for video)
+/// * `timestamp_ms` — Timestamp in milliseconds.
+/// * `clock_rate` — Target RTP clock rate (for example 90_000 for video).
 ///
 /// # Returns
 ///
-/// Timestamp scaled to clock_rate units
+/// Timestamp scaled to `clock_rate` units.
+///
+/// # Edge cases
+///
+/// * If `clock_rate == 0`, returns `timestamp_ms` unchanged (avoids division by zero).
+///   Callers should ensure `clock_rate` is initialized; a `debug_assert!(clock_rate != 0)`
+///   can be added at call sites if you want to catch misconfiguration in debug builds.
+/// * The multiply/divide is done in `u64` then cast to `u32`; large inputs can wrap,
+///   which matches common RTP timestamp arithmetic.
 pub(super) fn scale_rtp_timestamp(timestamp_ms: u32, clock_rate: u32) -> u32 {
     if clock_rate == 0 {
         return timestamp_ms;
@@ -64,31 +80,71 @@ pub(super) fn scale_rtp_timestamp(timestamp_ms: u32, clock_rate: u32) -> u32 {
     ((timestamp_ms as u64).saturating_mul(clock_rate as u64) / 1000) as u32
 }
 
-/// Lag recovery mode for handling playback delays
+/// How aggressively to resync when the viewer falls behind during playback.
 ///
-/// This enum controls how the server handles situations where the client
-/// falls behind in playback.
+/// # Examples
+///
+/// - [`LagRecoveryMode::Disabled`] — deliver every frame in order; no IDR-based catch-up.
+/// - [`LagRecoveryMode::LatestIdr`] — after sustained lag, drop until the next H.264 IDR (keyframe).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LagRecoveryMode {
-    /// Disabled - no recovery, just deliver frames as they arrive
+    /// No recovery: deliver frames as they arrive even if the viewer is behind.
     Disabled,
-    /// Latest IDR - skip to latest keyframe when lag is detected
+    /// After sustained lag, prefer skipping to the latest IDR (intra) frame.
     LatestIdr,
 }
 
 impl LagRecoveryMode {
-    /// Create a LagRecoveryMode from a string value.
+    /// Parse a [`LagRecoveryMode`] from a configuration string.
     ///
-    /// - "off", "none", "disabled" → Disabled
-    /// - Anything else → LatestIdr
+    /// # Arguments
+    ///
+    /// * `s` — Raw setting (trimmed, ASCII case-insensitive for known tokens).
+    ///
+    /// # Returns
+    ///
+    /// * `Disabled` for `"off"`, `"none"`, or `"disabled"`.
+    /// * `LatestIdr` for empty input, `"latestidr"`, `"latest_idr"`, `"on"`, `"true"`, or any other
+    ///   unrecognized value (logs at debug and defaults to latest-IDR behavior).
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// // Typical config strings:
+    /// // from_str_value("off") -> Disabled
+    /// // from_str_value("LatestIdr") -> LatestIdr
+    /// ```
     pub fn from_str_value(s: &str) -> Self {
-        match s.trim().to_ascii_lowercase().as_str() {
-            "off" | "none" | "disabled" => Self::Disabled,
-            _ => Self::LatestIdr,
+        let t = s.trim();
+        if t.eq_ignore_ascii_case("off")
+            || t.eq_ignore_ascii_case("none")
+            || t.eq_ignore_ascii_case("disabled")
+        {
+            Self::Disabled
+        } else {
+            let known_latest_idr = t.is_empty()
+                || t.eq_ignore_ascii_case("latestidr")
+                || t.eq_ignore_ascii_case("latest_idr")
+                || t.eq_ignore_ascii_case("on")
+                || t.eq_ignore_ascii_case("true");
+            if !known_latest_idr {
+                debug!(
+                    input = %t,
+                    "lag_recovery_mode unrecognized; defaulting to LatestIdr"
+                );
+            }
+            Self::LatestIdr
         }
     }
 }
 
+/// Tunables for playback latency, stale-frame drops, and IDR-based recovery.
+///
+/// * `max_frame_age_ms` — Source-time lag above this causes drops (milliseconds).
+/// * `lag_recovery_mode` — When [`LagRecoveryMode::LatestIdr`], sustained lag can
+///   trigger “wait for IDR” recovery; [`LagRecoveryMode::Disabled`] never does.
+/// * `lag_recovery_threshold_ms` / `sustained_lag_frames` — Consecutive “late”
+///   video frames above threshold before recovery engages.
 #[derive(Debug, Clone, Copy)]
 pub(super) struct PlaybackLatencyPolicy {
     pub(super) max_frame_age_ms: u32,
@@ -120,6 +176,25 @@ impl PlaybackLatencyPolicy {
     }
 }
 
+/// Tracks playback lag between source timestamps (encoder timeline) and local wall-clock.
+///
+/// The anchor pair (`anchor_local`, `anchor_source_ts`) defines the expected source time at
+/// “now”; [`LagTracker::lag_ms`] compares the next frame’s source timestamp to that expectation.
+///
+/// # Fields
+///
+/// * `anchor_local` — Wall-clock instant when the anchor was established.
+/// * `anchor_source_ts` — Source timestamp (ms) corresponding to `anchor_local`.
+/// * `last_source_ts` — Last consumed source timestamp (ms), used for wrap/reset detection.
+/// * `initialized` — Whether the first frame has established anchors.
+///
+/// # `u32` wrap vs reset
+///
+/// When `source_timestamp_ms` moves backward, [`LagTracker::lag_ms`] checks
+/// [`SOURCE_TIMESTAMP_WRAP_PROXIMITY_MS`]: if the previous timestamp is near `u32::MAX` and the
+/// new value is small, the step is treated as natural millisecond-counter wrap, not a reset.
+/// Otherwise, if the backward jump exceeds [`SOURCE_TIMESTAMP_RESET_THRESHOLD_MS`], anchors are
+/// re-established (encoder restart / discontinuity).
 #[derive(Debug)]
 struct LagTracker {
     anchor_local: Instant,
@@ -140,6 +215,9 @@ impl Default for LagTracker {
 }
 
 impl LagTracker {
+    /// Consumes `source_timestamp_ms` for this frame and returns estimated lag (ms).
+    ///
+    /// Updates `last_source_ts` and may re-anchor on timestamp resets or first frame.
     fn lag_ms(&mut self, source_timestamp_ms: u32) -> u32 {
         if !self.initialized {
             self.initialized = true;
@@ -149,9 +227,14 @@ impl LagTracker {
             return 0;
         }
 
+        let looks_like_natural_u32_wrap = self.last_source_ts
+            > u32::MAX.saturating_sub(SOURCE_TIMESTAMP_WRAP_PROXIMITY_MS)
+            && source_timestamp_ms < SOURCE_TIMESTAMP_WRAP_PROXIMITY_MS;
+
         if source_timestamp_ms < self.last_source_ts
             && self.last_source_ts.wrapping_sub(source_timestamp_ms)
                 > SOURCE_TIMESTAMP_RESET_THRESHOLD_MS
+            && !looks_like_natural_u32_wrap
         {
             self.anchor_local = Instant::now();
             self.anchor_source_ts = source_timestamp_ms;
@@ -165,11 +248,10 @@ impl LagTracker {
         expected_source_ts.saturating_sub(source_timestamp_ms)
     }
 
-    /// Peek at current lag without consuming a frame timestamp.
+    /// Peek at lag for the last consumed source timestamp without advancing state.
     ///
-    /// Returns the same value that `lag_ms()` would report for a frame
-    /// carrying `last_source_ts`, based on how much wall-clock time has
-    /// elapsed since the anchor was set.
+    /// Uses `last_source_ts` and elapsed wall time since the anchor; does not update anchors
+    /// or consume a new frame timestamp (unlike [`LagTracker::lag_ms`]).
     fn current_lag_ms(&self) -> u32 {
         if !self.initialized {
             return 0;
@@ -404,9 +486,16 @@ fn has_annexb_start_code(data: &[u8]) -> bool {
     data.starts_with(&[0x00, 0x00, 0x01]) || data.starts_with(&ANNEXB_NALU_START_CODE[..])
 }
 
+/// Returns true if `data` contains an H.264 IDR NAL (type 5) in Annex-B form.
+///
+/// Scans for 3-byte (`0x000001`) or 4-byte ([`ANNEXB_NALU_START_CODE`]) start codes
+/// and checks `nal_unit_type` in the first byte after the start code. Does not
+/// parse length-prefixed bitstreams; stops when fewer than four bytes remain
+/// after a candidate start. Returns false on empty input or if only non-IDR NALs
+/// (e.g. SPS/PPS) are present.
 fn contains_h264_idr(data: &[u8]) -> bool {
     let mut i = 0usize;
-    while i + 4 < data.len() {
+    while i + 2 < data.len() {
         let nal_start = if data[i..].starts_with(&ANNEXB_NALU_START_CODE[..]) {
             i + 4
         } else if data[i..].starts_with(&[0x00, 0x00, 0x01]) {
@@ -478,75 +567,82 @@ async fn send_video_access_unit(
             }
         }
         Err(err) => {
-            info!(error = %err, "handle_play_error");
+            error!(error = %err, "RTP send failure in send_video_access_unit");
             ctx.shutdown.store(true, Ordering::Release);
         }
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-async fn process_audio_frame(
-    audio_channel: &Arc<Mutex<RtpChannel>>,
-    timestamp_normalizers: &mut HashMap<TrackType, RtpTimestampNormalizer>,
+struct AudioProcessContext<'a> {
+    audio_channel: &'a Arc<Mutex<RtpChannel>>,
+    timestamp_normalizers: &'a mut HashMap<TrackType, RtpTimestampNormalizer>,
     latency_policy: PlaybackLatencyPolicy,
-    audio_lag_tracker: &mut LagTracker,
-    session_id: &str,
+    audio_lag_tracker: &'a mut LagTracker,
+    session_id: &'a str,
     remote_addr: SocketAddr,
-    request_path: &str,
-    shutdown: &Arc<AtomicBool>,
+    request_path: &'a str,
+    shutdown: &'a Arc<AtomicBool>,
+    dropped_stale_frames: &'a mut u64,
+    waiting_for_idr_recovery: bool,
+    dropped_for_recovery: &'a mut u64,
+}
+
+async fn process_audio_frame(
+    ctx: &mut AudioProcessContext<'_>,
     timestamp: u32,
     data: &mut BytesMut,
-    dropped_stale_frames: &mut u64,
-    waiting_for_idr_recovery: bool,
-    dropped_for_recovery: &mut u64,
 ) {
-    if waiting_for_idr_recovery {
-        *dropped_for_recovery += 1;
+    if ctx.waiting_for_idr_recovery {
+        *ctx.dropped_for_recovery += 1;
         return;
     }
 
-    let previous_source_ts = audio_lag_tracker.last_source_ts;
-    let lag_ms = audio_lag_tracker.lag_ms(timestamp);
+    let previous_source_ts = ctx.audio_lag_tracker.last_source_ts;
+    let lag_ms = ctx.audio_lag_tracker.lag_ms(timestamp);
     if crate::stream_frame_debug_logging_enabled()
-        && lag_ms >= latency_policy.max_frame_age_ms.saturating_div(2)
+        && lag_ms >= ctx.latency_policy.max_frame_age_ms.saturating_div(2)
     {
         debug!(
             track = ?TrackType::Audio,
-            session_id = %session_id,
-            remote_addr = %remote_addr,
-            request_path = %request_path,
+            session_id = %ctx.session_id,
+            remote_addr = %ctx.remote_addr,
+            request_path = %ctx.request_path,
             lag_ms = lag_ms,
-            threshold_ms = latency_policy.max_frame_age_ms,
+            threshold_ms = ctx.latency_policy.max_frame_age_ms,
             source_ts = timestamp,
             prev_source_ts = previous_source_ts,
-            waiting_for_idr_recovery = waiting_for_idr_recovery,
+            waiting_for_idr_recovery = ctx.waiting_for_idr_recovery,
             diag_monotonic_ms = monotonic_millis(),
             "lag_probe"
         );
     }
-    if lag_ms > latency_policy.max_frame_age_ms {
-        *dropped_stale_frames += 1;
-        let elapsed_ms = audio_lag_tracker.anchor_local.elapsed().as_millis() as u32;
-        let expected_source_ts = audio_lag_tracker.anchor_source_ts.wrapping_add(elapsed_ms);
+    if lag_ms > ctx.latency_policy.max_frame_age_ms {
+        *ctx.dropped_stale_frames += 1;
+        let elapsed_ms = ctx.audio_lag_tracker.anchor_local.elapsed().as_millis() as u32;
+        let expected_source_ts = ctx
+            .audio_lag_tracker
+            .anchor_source_ts
+            .wrapping_add(elapsed_ms);
         warn!(
             track = ?TrackType::Audio,
-            session_id = %session_id,
-            remote_addr = %remote_addr,
-            request_path = %request_path,
+            session_id = %ctx.session_id,
+            remote_addr = %ctx.remote_addr,
+            request_path = %ctx.request_path,
             lag_ms = lag_ms,
-            threshold_ms = latency_policy.max_frame_age_ms,
+            threshold_ms = ctx.latency_policy.max_frame_age_ms,
             source_ts = timestamp,
             prev_source_ts = previous_source_ts,
             expected_source_ts = expected_source_ts,
-            anchor_source_ts = audio_lag_tracker.anchor_source_ts,
+            anchor_source_ts = ctx.audio_lag_tracker.anchor_source_ts,
             anchor_elapsed_ms = elapsed_ms,
             "stale_frame_drop"
         );
         return;
     }
 
-    let mut channel = audio_channel.lock().await;
-    let normalized = timestamp_normalizers
+    let mut channel = ctx.audio_channel.lock().await;
+    let normalized = ctx
+        .timestamp_normalizers
         .entry(TrackType::Audio)
         .or_default()
         .normalize(timestamp, channel.clock_rate(), TrackType::Audio);
@@ -564,9 +660,9 @@ async fn process_audio_frame(
     if normalized.non_wrap_regressed {
         warn!(
             track = ?TrackType::Audio,
-            session_id = %session_id,
-            remote_addr = %remote_addr,
-            request_path = %request_path,
+            session_id = %ctx.session_id,
+            remote_addr = %ctx.remote_addr,
+            request_path = %ctx.request_path,
             prev_scaled = normalized.previous_scaled_timestamp.unwrap_or_default(),
             current_scaled = normalized.scaled_timestamp,
             corrected_timestamp = normalized.output_timestamp,
@@ -583,9 +679,9 @@ async fn process_audio_frame(
             if send_ms >= RTP_SEND_SLOW_WARN_MS {
                 warn!(
                     track = ?TrackType::Audio,
-                    session_id = %session_id,
-                    remote_addr = %remote_addr,
-                    request_path = %request_path,
+                    session_id = %ctx.session_id,
+                    remote_addr = %ctx.remote_addr,
+                    request_path = %ctx.request_path,
                     source_ts = timestamp,
                     rtp_ts = normalized.output_timestamp,
                     payload_len = payload_len,
@@ -596,169 +692,166 @@ async fn process_audio_frame(
             }
         }
         Err(err) => {
-            info!(error = %err, "handle_play_error");
-            shutdown.store(true, Ordering::Release);
+            error!(error = %err, "RTP send failure in process_audio_frame");
+            ctx.shutdown.store(true, Ordering::Release);
         }
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-async fn process_video_frame(
-    video_channel: &Arc<Mutex<RtpChannel>>,
-    video_assembler: &mut VideoAccessUnitAssembler,
-    timestamp_normalizers: &mut HashMap<TrackType, RtpTimestampNormalizer>,
+struct VideoProcessContext<'a> {
+    video_channel: &'a Arc<Mutex<RtpChannel>>,
+    video_assembler: &'a mut VideoAccessUnitAssembler,
+    timestamp_normalizers: &'a mut HashMap<TrackType, RtpTimestampNormalizer>,
     latency_policy: PlaybackLatencyPolicy,
-    video_lag_tracker: &mut LagTracker,
-    sustained_video_lag_frames: &mut u32,
-    waiting_for_idr_recovery: &mut bool,
-    dropped_stale_frames: &mut u64,
-    dropped_for_recovery: &mut u64,
-    idr_recovery_count: &mut u64,
-    frame_pacer: &mut FramePacer,
-    session_id: &str,
+    video_lag_tracker: &'a mut LagTracker,
+    sustained_video_lag_frames: &'a mut u32,
+    waiting_for_idr_recovery: &'a mut bool,
+    dropped_stale_frames: &'a mut u64,
+    dropped_for_recovery: &'a mut u64,
+    idr_recovery_count: &'a mut u64,
+    frame_pacer: &'a mut FramePacer,
+    session_id: &'a str,
     remote_addr: SocketAddr,
-    request_path: &str,
-    shutdown: &Arc<AtomicBool>,
-    timestamp: u32,
-    data: BytesMut,
-) {
-    let Some((flush_ts, mut flush_data)) = video_assembler.push(timestamp, data) else {
-        return;
-    };
+    request_path: &'a str,
+    shutdown: &'a Arc<AtomicBool>,
+}
 
-    let contains_idr = contains_h264_idr(flush_data.as_ref());
-    let was_waiting_for_idr_recovery = *waiting_for_idr_recovery;
-    if *waiting_for_idr_recovery {
-        if !contains_idr {
-            *dropped_for_recovery += 1;
-            return;
-        }
-
-        *waiting_for_idr_recovery = false;
-        // Reset pacing baseline when resyncing on IDR so stale timeline
-        // state does not induce additional sleep on the recovered stream.
-        frame_pacer.reset();
-        video_lag_tracker.anchor_local = Instant::now();
-        video_lag_tracker.anchor_source_ts = flush_ts;
-        video_lag_tracker.last_source_ts = flush_ts;
-        video_lag_tracker.initialized = true;
-        info!(
-            track = ?TrackType::Video,
-            session_id = %session_id,
-            remote_addr = %remote_addr,
-            request_path = %request_path,
-            "lag_recovery_resynced"
-        );
+fn handle_idr_recovery(
+    ctx: &mut VideoProcessContext<'_>,
+    flush_ts: u32,
+    contains_idr: bool,
+) -> bool {
+    if !*ctx.waiting_for_idr_recovery {
+        return false;
+    }
+    if !contains_idr {
+        *ctx.dropped_for_recovery += 1;
+        return true;
     }
 
-    let previous_source_ts = video_lag_tracker.last_source_ts;
-    let lag_ms = video_lag_tracker.lag_ms(flush_ts);
-    if crate::stream_frame_debug_logging_enabled()
-        && lag_ms >= latency_policy.max_frame_age_ms.saturating_div(2)
-    {
-        debug!(
+    *ctx.waiting_for_idr_recovery = false;
+    // Reset pacing baseline when resyncing on IDR so stale timeline
+    // state does not induce additional sleep on the recovered stream.
+    ctx.frame_pacer.reset();
+    ctx.video_lag_tracker.anchor_local = Instant::now();
+    ctx.video_lag_tracker.anchor_source_ts = flush_ts;
+    ctx.video_lag_tracker.last_source_ts = flush_ts;
+    ctx.video_lag_tracker.initialized = true;
+    info!(
+        track = ?TrackType::Video,
+        session_id = %ctx.session_id,
+        remote_addr = %ctx.remote_addr,
+        request_path = %ctx.request_path,
+        "lag_recovery_resynced"
+    );
+    false
+}
+
+fn maybe_handle_stale_frame(
+    ctx: &mut VideoProcessContext<'_>,
+    flush_ts: u32,
+    contains_idr: bool,
+    lag_ms: u32,
+    previous_source_ts: u32,
+) -> bool {
+    if lag_ms <= ctx.latency_policy.max_frame_age_ms {
+        return false;
+    }
+
+    if maybe_reanchor_video_lag_tracker_on_stale_idr(
+        ctx.video_lag_tracker,
+        flush_ts,
+        lag_ms,
+        ctx.latency_policy.max_frame_age_ms,
+        contains_idr,
+    ) {
+        warn!(
             track = ?TrackType::Video,
-            session_id = %session_id,
-            remote_addr = %remote_addr,
-            request_path = %request_path,
+            session_id = %ctx.session_id,
+            remote_addr = %ctx.remote_addr,
+            request_path = %ctx.request_path,
             lag_ms = lag_ms,
-            threshold_ms = latency_policy.max_frame_age_ms,
+            threshold_ms = ctx.latency_policy.max_frame_age_ms,
             source_ts = flush_ts,
             prev_source_ts = previous_source_ts,
             contains_idr = contains_idr,
-            sustained_lag_frames = *sustained_video_lag_frames,
-            waiting_for_idr_recovery = *waiting_for_idr_recovery,
-            diag_monotonic_ms = monotonic_millis(),
-            "lag_probe"
+            "stale_frame_reanchor"
         );
-    }
-    if lag_ms > latency_policy.max_frame_age_ms {
-        if maybe_reanchor_video_lag_tracker_on_stale_idr(
-            video_lag_tracker,
-            flush_ts,
-            lag_ms,
-            latency_policy.max_frame_age_ms,
-            contains_idr,
-        ) {
-            warn!(
-                track = ?TrackType::Video,
-                session_id = %session_id,
-                remote_addr = %remote_addr,
-                request_path = %request_path,
-                lag_ms = lag_ms,
-                threshold_ms = latency_policy.max_frame_age_ms,
-                source_ts = flush_ts,
-                prev_source_ts = previous_source_ts,
-                contains_idr = contains_idr,
-                "stale_frame_reanchor"
-            );
-        } else {
-            *dropped_stale_frames += 1;
-            let elapsed_ms = video_lag_tracker.anchor_local.elapsed().as_millis() as u32;
-            let expected_source_ts = video_lag_tracker.anchor_source_ts.wrapping_add(elapsed_ms);
-            warn!(
-                track = ?TrackType::Video,
-                session_id = %session_id,
-                remote_addr = %remote_addr,
-                request_path = %request_path,
-                lag_ms = lag_ms,
-                threshold_ms = latency_policy.max_frame_age_ms,
-                source_ts = flush_ts,
-                prev_source_ts = previous_source_ts,
-                expected_source_ts = expected_source_ts,
-                anchor_source_ts = video_lag_tracker.anchor_source_ts,
-                anchor_elapsed_ms = elapsed_ms,
-                contains_idr = contains_idr,
-                "stale_frame_drop"
-            );
-            return;
-        }
+        return false;
     }
 
-    if lag_ms > latency_policy.lag_recovery_threshold_ms {
-        *sustained_video_lag_frames = sustained_video_lag_frames.saturating_add(1);
-    } else {
-        *sustained_video_lag_frames = 0;
+    *ctx.dropped_stale_frames += 1;
+    let elapsed_ms = ctx.video_lag_tracker.anchor_local.elapsed().as_millis() as u32;
+    let expected_source_ts = ctx
+        .video_lag_tracker
+        .anchor_source_ts
+        .wrapping_add(elapsed_ms);
+    warn!(
+        track = ?TrackType::Video,
+        session_id = %ctx.session_id,
+        remote_addr = %ctx.remote_addr,
+        request_path = %ctx.request_path,
+        lag_ms = lag_ms,
+        threshold_ms = ctx.latency_policy.max_frame_age_ms,
+        source_ts = flush_ts,
+        prev_source_ts = previous_source_ts,
+        expected_source_ts = expected_source_ts,
+        anchor_source_ts = ctx.video_lag_tracker.anchor_source_ts,
+        anchor_elapsed_ms = elapsed_ms,
+        contains_idr = contains_idr,
+        "stale_frame_drop"
+    );
+    true
+}
+
+fn maybe_trigger_lag_recovery(
+    ctx: &mut VideoProcessContext<'_>,
+    contains_idr: bool,
+    lag_ms: u32,
+) -> bool {
+    if ctx.latency_policy.lag_recovery_mode != LagRecoveryMode::LatestIdr {
+        return false;
+    }
+    if *ctx.sustained_video_lag_frames < ctx.latency_policy.sustained_lag_frames {
+        return false;
+    }
+    if contains_idr {
+        return false;
     }
 
-    if latency_policy.lag_recovery_mode == LagRecoveryMode::LatestIdr
-        && *sustained_video_lag_frames >= latency_policy.sustained_lag_frames
-        && !contains_idr
-    {
-        *waiting_for_idr_recovery = true;
-        *sustained_video_lag_frames = 0;
-        *dropped_for_recovery += 1;
-        *idr_recovery_count += 1;
-        warn!(
-            track = ?TrackType::Video,
-            session_id = %session_id,
-            remote_addr = %remote_addr,
-            request_path = %request_path,
-            lag_ms = lag_ms,
-            threshold_ms = latency_policy.lag_recovery_threshold_ms,
-            sustained_frames = latency_policy.sustained_lag_frames,
-            "lag_recovery_trigger"
-        );
-        return;
-    }
+    *ctx.waiting_for_idr_recovery = true;
+    *ctx.sustained_video_lag_frames = 0;
+    *ctx.dropped_for_recovery += 1;
+    *ctx.idr_recovery_count += 1;
+    warn!(
+        track = ?TrackType::Video,
+        session_id = %ctx.session_id,
+        remote_addr = %ctx.remote_addr,
+        request_path = %ctx.request_path,
+        lag_ms = lag_ms,
+        threshold_ms = ctx.latency_policy.lag_recovery_threshold_ms,
+        sustained_frames = ctx.latency_policy.sustained_lag_frames,
+        "lag_recovery_trigger"
+    );
+    true
+}
 
-    let ctx = PlaybackVideoSendContext {
-        session_id,
-        remote_addr,
-        request_path,
-        shutdown,
-    };
-
+async fn pace_if_healthy(
+    ctx: &mut VideoProcessContext<'_>,
+    was_waiting_for_idr_recovery: bool,
+    flush_ts: u32,
+    lag_ms: u32,
+) {
     // Pace only when stream is healthy. Under lag/backpressure, extra sleep
     // worsens delay accumulation and slows recovery.
-    if !was_waiting_for_idr_recovery && lag_ms <= latency_policy.lag_recovery_threshold_ms {
-        let current_lag = video_lag_tracker.current_lag_ms();
-        let paced_sleep_ms = frame_pacer.pace(flush_ts, current_lag).await;
+    if !was_waiting_for_idr_recovery && lag_ms <= ctx.latency_policy.lag_recovery_threshold_ms {
+        let current_lag = ctx.video_lag_tracker.current_lag_ms();
+        let paced_sleep_ms = ctx.frame_pacer.pace(flush_ts, current_lag).await;
         if paced_sleep_ms >= PACER_SLEEP_DIAGNOSTIC_MIN_MS {
             debug!(
-                session_id = %session_id,
-                remote_addr = %remote_addr,
-                request_path = %request_path,
+                session_id = %ctx.session_id,
+                remote_addr = %ctx.remote_addr,
+                request_path = %ctx.request_path,
                 source_ts = flush_ts,
                 sleep_ms = paced_sleep_ms,
                 lag_ms = lag_ms,
@@ -773,22 +866,80 @@ async fn process_video_frame(
             "lagging"
         };
         debug!(
-            session_id = %session_id,
-            remote_addr = %remote_addr,
-            request_path = %request_path,
+            session_id = %ctx.session_id,
+            remote_addr = %ctx.remote_addr,
+            request_path = %ctx.request_path,
             source_ts = flush_ts,
             lag_ms = lag_ms,
-            threshold_ms = latency_policy.lag_recovery_threshold_ms,
+            threshold_ms = ctx.latency_policy.lag_recovery_threshold_ms,
             reason = skip_reason,
             diag_monotonic_ms = monotonic_millis(),
             "playback_pacer_skip"
         );
     }
+}
+
+async fn process_video_frame(ctx: &mut VideoProcessContext<'_>, timestamp: u32, data: BytesMut) {
+    let Some((flush_ts, mut flush_data)) = ctx.video_assembler.push(timestamp, data) else {
+        return;
+    };
+
+    let contains_idr = contains_h264_idr(flush_data.as_ref());
+    let was_waiting_for_idr_recovery = *ctx.waiting_for_idr_recovery;
+
+    if handle_idr_recovery(ctx, flush_ts, contains_idr) {
+        return;
+    }
+
+    let previous_source_ts = ctx.video_lag_tracker.last_source_ts;
+    let lag_ms = ctx.video_lag_tracker.lag_ms(flush_ts);
+    if crate::stream_frame_debug_logging_enabled()
+        && lag_ms >= ctx.latency_policy.max_frame_age_ms.saturating_div(2)
+    {
+        debug!(
+            track = ?TrackType::Video,
+            session_id = %ctx.session_id,
+            remote_addr = %ctx.remote_addr,
+            request_path = %ctx.request_path,
+            lag_ms = lag_ms,
+            threshold_ms = ctx.latency_policy.max_frame_age_ms,
+            source_ts = flush_ts,
+            prev_source_ts = previous_source_ts,
+            contains_idr = contains_idr,
+            sustained_lag_frames = *ctx.sustained_video_lag_frames,
+            waiting_for_idr_recovery = *ctx.waiting_for_idr_recovery,
+            diag_monotonic_ms = monotonic_millis(),
+            "lag_probe"
+        );
+    }
+
+    if maybe_handle_stale_frame(ctx, flush_ts, contains_idr, lag_ms, previous_source_ts) {
+        return;
+    }
+
+    if lag_ms > ctx.latency_policy.lag_recovery_threshold_ms {
+        *ctx.sustained_video_lag_frames = (*ctx.sustained_video_lag_frames).saturating_add(1);
+    } else {
+        *ctx.sustained_video_lag_frames = 0;
+    }
+
+    if maybe_trigger_lag_recovery(ctx, contains_idr, lag_ms) {
+        return;
+    }
+
+    let ctx_send = PlaybackVideoSendContext {
+        session_id: ctx.session_id,
+        remote_addr: ctx.remote_addr,
+        request_path: ctx.request_path,
+        shutdown: ctx.shutdown,
+    };
+
+    pace_if_healthy(ctx, was_waiting_for_idr_recovery, flush_ts, lag_ms).await;
 
     send_video_access_unit(
-        video_channel,
-        timestamp_normalizers,
-        &ctx,
+        ctx.video_channel,
+        ctx.timestamp_normalizers,
+        &ctx_send,
         flush_ts,
         &mut flush_data,
     )
@@ -812,11 +963,54 @@ fn maybe_reanchor_video_lag_tracker_on_stale_idr(
     // Half of max_frame_age (500ms at default 1000ms) absorbs the send cost
     // while still maintaining pressure to catch up.
     let headroom_ms = max_frame_age_ms / 2;
-    video_lag_tracker.anchor_local =
-        Instant::now() - Duration::from_millis(headroom_ms as u64);
+    let headroom = Duration::from_millis(headroom_ms as u64);
+    video_lag_tracker.anchor_local = Instant::now()
+        .checked_sub(headroom)
+        .unwrap_or_else(Instant::now);
     video_lag_tracker.anchor_source_ts = source_timestamp_ms;
     video_lag_tracker.last_source_ts = source_timestamp_ms;
     true
+}
+
+/// Mutable state shared across [`handle_playback_frame`] invocations for one playback session.
+struct PlaybackLoopState {
+    video_assembler: VideoAccessUnitAssembler,
+    timestamp_normalizers: HashMap<TrackType, RtpTimestampNormalizer>,
+    audio_lag_tracker: LagTracker,
+    video_lag_tracker: LagTracker,
+    sustained_video_lag_frames: u32,
+    waiting_for_idr_recovery: bool,
+    dropped_stale_frames: u64,
+    dropped_for_recovery: u64,
+    idr_recovery_count: u64,
+    frame_pacer: FramePacer,
+}
+
+impl Default for PlaybackLoopState {
+    fn default() -> Self {
+        Self {
+            video_assembler: VideoAccessUnitAssembler::default(),
+            timestamp_normalizers: HashMap::new(),
+            audio_lag_tracker: LagTracker::default(),
+            video_lag_tracker: LagTracker::default(),
+            sustained_video_lag_frames: 0,
+            waiting_for_idr_recovery: false,
+            dropped_stale_frames: 0,
+            dropped_for_recovery: 0,
+            idr_recovery_count: 0,
+            frame_pacer: FramePacer::new(),
+        }
+    }
+}
+
+/// Per-iteration handles for optional RTP channels and logging context.
+struct PlaybackFrameEnv<'a> {
+    audio_rtp_channel: &'a Option<Arc<Mutex<RtpChannel>>>,
+    video_rtp_channel: &'a Option<Arc<Mutex<RtpChannel>>>,
+    session_id: &'a str,
+    remote_addr: SocketAddr,
+    request_path: &'a str,
+    shutdown: &'a Arc<AtomicBool>,
 }
 
 async fn flush_pending_video(
@@ -849,199 +1043,151 @@ async fn flush_pending_video(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 async fn handle_playback_frame(
     frame_data: FrameData,
-    audio_rtp_channel: &Option<Arc<Mutex<RtpChannel>>>,
-    video_rtp_channel: &Option<Arc<Mutex<RtpChannel>>>,
-    video_assembler: &mut VideoAccessUnitAssembler,
-    timestamp_normalizers: &mut HashMap<TrackType, RtpTimestampNormalizer>,
+    env: &PlaybackFrameEnv<'_>,
     latency_policy: PlaybackLatencyPolicy,
-    audio_lag_tracker: &mut LagTracker,
-    video_lag_tracker: &mut LagTracker,
-    sustained_video_lag_frames: &mut u32,
-    waiting_for_idr_recovery: &mut bool,
-    dropped_stale_frames: &mut u64,
-    dropped_for_recovery: &mut u64,
-    idr_recovery_count: &mut u64,
-    frame_pacer: &mut FramePacer,
-    session_id: &str,
-    remote_addr: SocketAddr,
-    request_path: &str,
-    shutdown: &Arc<AtomicBool>,
+    state: &mut PlaybackLoopState,
 ) -> bool {
     match frame_data {
         FrameData::Audio {
             timestamp,
             mut data,
         } => {
-            if let Some(audio_channel) = audio_rtp_channel {
-                process_audio_frame(
+            if let Some(audio_channel) = env.audio_rtp_channel {
+                let mut audio_ctx = AudioProcessContext {
                     audio_channel,
-                    timestamp_normalizers,
+                    timestamp_normalizers: &mut state.timestamp_normalizers,
                     latency_policy,
-                    audio_lag_tracker,
-                    session_id,
-                    remote_addr,
-                    request_path,
-                    shutdown,
-                    timestamp,
-                    &mut data,
-                    dropped_stale_frames,
-                    *waiting_for_idr_recovery,
-                    dropped_for_recovery,
-                )
-                .await;
+                    audio_lag_tracker: &mut state.audio_lag_tracker,
+                    session_id: env.session_id,
+                    remote_addr: env.remote_addr,
+                    request_path: env.request_path,
+                    shutdown: env.shutdown,
+                    dropped_stale_frames: &mut state.dropped_stale_frames,
+                    waiting_for_idr_recovery: state.waiting_for_idr_recovery,
+                    dropped_for_recovery: &mut state.dropped_for_recovery,
+                };
+                process_audio_frame(&mut audio_ctx, timestamp, &mut data).await;
 
-                return shutdown.load(Ordering::Acquire);
+                return env.shutdown.load(Ordering::Acquire);
             }
         }
         FrameData::Video { timestamp, data } => {
-            if let Some(video_channel) = video_rtp_channel {
-                process_video_frame(
+            if let Some(video_channel) = env.video_rtp_channel {
+                let mut video_ctx = VideoProcessContext {
                     video_channel,
-                    video_assembler,
-                    timestamp_normalizers,
+                    video_assembler: &mut state.video_assembler,
+                    timestamp_normalizers: &mut state.timestamp_normalizers,
                     latency_policy,
-                    video_lag_tracker,
-                    sustained_video_lag_frames,
-                    waiting_for_idr_recovery,
-                    dropped_stale_frames,
-                    dropped_for_recovery,
-                    idr_recovery_count,
-                    frame_pacer,
-                    session_id,
-                    remote_addr,
-                    request_path,
-                    shutdown,
-                    timestamp,
-                    data,
-                )
-                .await;
+                    video_lag_tracker: &mut state.video_lag_tracker,
+                    sustained_video_lag_frames: &mut state.sustained_video_lag_frames,
+                    waiting_for_idr_recovery: &mut state.waiting_for_idr_recovery,
+                    dropped_stale_frames: &mut state.dropped_stale_frames,
+                    dropped_for_recovery: &mut state.dropped_for_recovery,
+                    idr_recovery_count: &mut state.idr_recovery_count,
+                    frame_pacer: &mut state.frame_pacer,
+                    session_id: env.session_id,
+                    remote_addr: env.remote_addr,
+                    request_path: env.request_path,
+                    shutdown: env.shutdown,
+                };
+                process_video_frame(&mut video_ctx, timestamp, data).await;
+                return env.shutdown.load(Ordering::Acquire);
             }
         }
-        _ => {}
+        FrameData::MetaData { .. } => {
+            // Playback loop only forwards A/V to RTP; metadata is handled on other hub paths.
+        }
+        FrameData::MediaInfo { .. } => {
+            // Codec/timing info for subscribers is applied before playback; ignore here.
+        }
     }
 
     false
 }
 
-#[allow(clippy::too_many_arguments)]
 async fn handle_no_frame_data(
-    video_rtp_channel: &Option<Arc<Mutex<RtpChannel>>>,
-    video_assembler: &mut VideoAccessUnitAssembler,
-    timestamp_normalizers: &mut HashMap<TrackType, RtpTimestampNormalizer>,
-    session_id: &str,
-    remote_addr: SocketAddr,
-    request_path: &str,
-    shutdown: &Arc<AtomicBool>,
-    retry_times: &mut usize,
+    env: &PlaybackFrameEnv<'_>,
+    state: &mut PlaybackLoopState,
 ) -> bool {
+    // `receiver.recv()` returned `None`: the frame channel is closed (sender dropped). Flush the
+    // video assembler once, then signal shutdown so the session exits promptly.
     flush_pending_video(
-        video_rtp_channel,
-        video_assembler,
-        timestamp_normalizers,
-        session_id,
-        remote_addr,
-        request_path,
-        shutdown,
+        env.video_rtp_channel,
+        &mut state.video_assembler,
+        &mut state.timestamp_normalizers,
+        env.session_id,
+        env.remote_addr,
+        env.request_path,
+        env.shutdown,
     )
     .await;
 
-    *retry_times += 1;
-    info!(retry_times = *retry_times, "no_frame_data_retry");
-
-    if *retry_times > 10 {
-        shutdown.store(true, Ordering::Release);
-        return true;
-    }
-
-    false
+    env.shutdown.store(true, Ordering::Release);
+    true
 }
 
+/// Consumes `receiver` and sends RTP for each [`FrameData`] until cancel, shutdown, or error.
+///
+/// Handles optional audio/video [`RtpChannel`]s, lag policy, IDR recovery, and pacing.
+/// On send failures, sets `shutdown` so the session can exit.
+/// When `playback_cancel` is notified, runs [`flush_pending_video`] to drain the assembler, then
+/// breaks out (same shutdown path as normal teardown for partial AU data).
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn run_playback_loop(
     mut receiver: mpsc::UnboundedReceiver<FrameData>,
     audio_rtp_channel: Option<Arc<Mutex<RtpChannel>>>,
     video_rtp_channel: Option<Arc<Mutex<RtpChannel>>>,
-    playback_cancel: Arc<AtomicBool>,
+    playback_cancel: Arc<Notify>,
     shutdown: Arc<AtomicBool>,
     session_id: String,
     remote_addr: SocketAddr,
     request_path: String,
     latency_policy: PlaybackLatencyPolicy,
 ) {
-    let mut timestamp_normalizers: HashMap<TrackType, RtpTimestampNormalizer> = HashMap::new();
-    let mut retry_times: usize = 0;
-    let mut video_assembler = VideoAccessUnitAssembler::default();
-    let mut audio_lag_tracker = LagTracker::default();
-    let mut video_lag_tracker = LagTracker::default();
-    let mut sustained_video_lag_frames = 0u32;
-    let mut waiting_for_idr_recovery = false;
-    let mut dropped_stale_frames = 0u64;
-    let mut dropped_for_recovery = 0u64;
-    let mut idr_recovery_count = 0u64;
-    let mut frame_pacer = FramePacer::new();
+    let mut state = PlaybackLoopState::default();
 
-    loop {
-        if playback_cancel.load(Ordering::Acquire) {
-            flush_pending_video(
-                &video_rtp_channel,
-                &mut video_assembler,
-                &mut timestamp_normalizers,
-                &session_id,
-                remote_addr,
-                &request_path,
-                &shutdown,
-            )
-            .await;
-            break;
-        }
+    'playback: loop {
+        let env = PlaybackFrameEnv {
+            audio_rtp_channel: &audio_rtp_channel,
+            video_rtp_channel: &video_rtp_channel,
+            session_id: session_id.as_str(),
+            remote_addr,
+            request_path: request_path.as_str(),
+            shutdown: &shutdown,
+        };
 
-        match receiver.recv().await {
-            Some(frame_data) => {
-                retry_times = 0;
-
-                if handle_playback_frame(
-                    frame_data,
-                    &audio_rtp_channel,
-                    &video_rtp_channel,
-                    &mut video_assembler,
-                    &mut timestamp_normalizers,
-                    latency_policy,
-                    &mut audio_lag_tracker,
-                    &mut video_lag_tracker,
-                    &mut sustained_video_lag_frames,
-                    &mut waiting_for_idr_recovery,
-                    &mut dropped_stale_frames,
-                    &mut dropped_for_recovery,
-                    &mut idr_recovery_count,
-                    &mut frame_pacer,
-                    &session_id,
-                    remote_addr,
-                    &request_path,
-                    &shutdown,
-                )
-                .await
-                {
-                    break;
+        tokio::select! {
+            biased;
+            frame = receiver.recv() => {
+                match frame {
+                    Some(frame_data) => {
+                        if handle_playback_frame(frame_data, &env, latency_policy, &mut state)
+                            .await
+                        {
+                            break 'playback;
+                        }
+                    }
+                    None => {
+                        if handle_no_frame_data(&env, &mut state).await {
+                            break 'playback;
+                        }
+                    }
                 }
             }
-            None => {
-                if handle_no_frame_data(
+            _ = playback_cancel.notified() => {
+                flush_pending_video(
                     &video_rtp_channel,
-                    &mut video_assembler,
-                    &mut timestamp_normalizers,
+                    &mut state.video_assembler,
+                    &mut state.timestamp_normalizers,
                     &session_id,
                     remote_addr,
                     &request_path,
                     &shutdown,
-                    &mut retry_times,
                 )
-                .await
-                {
-                    break;
-                }
+                .await;
+                break 'playback;
             }
         }
     }
@@ -1050,13 +1196,12 @@ pub(super) async fn run_playback_loop(
         session_id = %session_id,
         remote_addr = %remote_addr,
         request_path = %request_path,
-        dropped_stale_frames = dropped_stale_frames,
-        dropped_for_recovery = dropped_for_recovery,
-        idr_recovery_count = idr_recovery_count,
+        dropped_stale_frames = state.dropped_stale_frames,
+        dropped_for_recovery = state.dropped_for_recovery,
+        idr_recovery_count = state.idr_recovery_count,
         "playback_loop_exit"
     );
 }
 
 #[cfg(test)]
-#[path = "playback_tests.rs"]
 mod tests;

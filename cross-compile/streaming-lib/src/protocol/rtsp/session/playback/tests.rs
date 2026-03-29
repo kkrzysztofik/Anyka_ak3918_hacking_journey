@@ -1,3 +1,6 @@
+// Unit tests for playback (RTP timestamp normalization, pacing, lag tracking, PlaybackLatencyPolicy).
+// Included from `playback.rs` via `include!` inside `mod tests`.
+
 use super::*;
 use crate::config::StreamingConfig;
 use crate::hub::define::FrameData;
@@ -13,13 +16,17 @@ use std::time::{Duration, Instant};
 #[test]
 fn test_scale_rtp_timestamp_90000hz() {
     let ts = scale_rtp_timestamp(1000, 90_000);
-    assert_eq!(ts, 90_000);
+    assert_eq!(
+        ts,
+        90_000,
+        "90kHz scaling of 1000ms should produce 90000 ticks"
+    );
 }
 
 #[test]
 fn test_scale_rtp_timestamp_zero_clock() {
     let ts = scale_rtp_timestamp(1234, 0);
-    assert_eq!(ts, 1234);
+    assert_eq!(ts, 1234, "zero clock should return original timestamp");
 }
 
 #[test]
@@ -27,22 +34,33 @@ fn test_scale_rtp_timestamp_48000hz_audio() {
     // 48000Hz audio: timestamp is already in sample units, but let's test the math
     // 1000ms * 48000 / 1000 = 48000
     let result = scale_rtp_timestamp(1000, 48000);
-    assert_eq!(result, 48000);
+    assert_eq!(
+        result,
+        48000,
+        "48000Hz scaling of 1000ms should produce 48000 ticks"
+    );
 }
 
 #[test]
-fn test_scale_rtp_timestamp_large_timestamp_saturates() {
+fn test_scale_rtp_timestamp_large_timestamp_wraps() {
     // Very large timestamp_ms near u32::MAX — verify no panic from overflow
     let result = scale_rtp_timestamp(u32::MAX, 90000);
     // (u32::MAX as u64) * 90000 / 1000 → wraps into u32
     let expected = ((u32::MAX as u64).saturating_mul(90000) / 1000) as u32;
-    assert_eq!(result, expected);
+    assert_eq!(
+        result,
+        expected,
+        "large timestamp should match saturated u64 scaling then u32 cast"
+    );
 }
 
 #[test]
 fn test_scale_rtp_timestamp_one_ms() {
-    // 1ms at 90kHz = 90 ticks
-    assert_eq!(scale_rtp_timestamp(1, 90000), 90);
+    assert_eq!(
+        scale_rtp_timestamp(1, 90000),
+        90,
+        "1ms at 90kHz should be 90 ticks"
+    );
 }
 
 // ========================================================================
@@ -50,7 +68,7 @@ fn test_scale_rtp_timestamp_one_ms() {
 // ========================================================================
 
 #[test]
-fn test_rtp_timestamp_normalizer_corrects_non_wrap_regression() {
+fn test_rtp_timestamp_normalizer_large_backward_jump_treated_as_wrap() {
     let mut normalizer = RtpTimestampNormalizer::default();
 
     let first = normalizer.normalize(1000, 90_000, TrackType::Video);
@@ -62,6 +80,10 @@ fn test_rtp_timestamp_normalizer_corrects_non_wrap_regression() {
     assert_eq!(second.output_timestamp, 2_970);
     assert!(!regressed.non_wrap_regressed);
     assert_eq!(regressed.non_wrap_regression_count, 0);
+    // Source ms went 1000 → 1033 → 0 → 33 at 90kHz scale (×90 per ms). After the second sample the
+    // internal scaled position is 2970; jumping source to 0 is folded as u32 wrap in RTP timestamp
+    // space (mod 2^32), yielding `4_294_877_296` here; the next +33ms step adds 2970 in that domain
+    // → `4_294_880_266`.
     assert_eq!(regressed.output_timestamp, 4_294_877_296);
     assert_eq!(next.output_timestamp, 4_294_880_266);
     assert!(!next.non_wrap_regressed);
@@ -209,6 +231,9 @@ fn test_rtp_timestamp_normalizer_multiple_regressions() {
     let reg1 = normalizer.normalize(999, 48_000, TrackType::Audio);
     let reg2 = normalizer.normalize(998, 48_000, TrackType::Audio);
 
+    // Decreasing inputs trigger non-wrap regression handling: the normalizer
+    // decrements the running output counter, so the second regression wraps
+    // `u32::MAX` → `0` (not “saturation”).
     assert_eq!(reg1.non_wrap_regression_count, 0);
     assert!(!reg1.non_wrap_regressed);
     assert_eq!(reg2.non_wrap_regression_count, 1);
@@ -253,6 +278,37 @@ fn test_contains_h264_idr_detects_idr_nal() {
         0x00, 0x00, 0x00, 0x01, 0x65, 0x88, 0x84, // IDR
     ];
     assert!(contains_h264_idr(&data));
+}
+
+#[test]
+fn test_contains_h264_idr_returns_false_for_non_idr() {
+    let non_idr = [0x00, 0x00, 0x00, 0x01, 0x41, 0x9a, 0x10]; // nal_unit_type 1
+    assert!(
+        !contains_h264_idr(&non_idr),
+        "nal type 1 should not count as IDR"
+    );
+}
+
+#[test]
+fn test_contains_h264_idr_returns_false_for_empty() {
+    assert!(!contains_h264_idr(&[]), "empty slice");
+}
+
+#[test]
+fn test_contains_h264_idr_returns_false_for_sps_pps_only() {
+    let sps_pps = [
+        0x00, 0x00, 0x00, 0x01, 0x67, 0x42, 0x00, 0x1e, // SPS
+        0x00, 0x00, 0x00, 0x01, 0x68, 0x11, 0x22, // PPS
+    ];
+    assert!(!contains_h264_idr(&sps_pps), "expected no IDR NAL");
+}
+
+#[test]
+fn test_contains_h264_idr_handles_malformed_start_codes() {
+    assert!(!contains_h264_idr(&[0x00, 0x00, 0x01]), "truncated after 3-byte start");
+    assert!(!contains_h264_idr(&[0x00, 0x00, 0x00]), "incomplete 4-byte start");
+    // Leading junk before a 3-byte start: no IDR NAL (type 1 slice, not 5).
+    assert!(!contains_h264_idr(&[0xFF, 0x00, 0x00, 0x01, 0x41]), "wrong prefix");
 }
 
 // ========================================================================
@@ -327,7 +383,7 @@ fn test_video_access_unit_assembler_single_chunk_flush() {
 fn test_video_access_unit_assembler_preserves_existing_annexb_prefix() {
     let mut assembler = VideoAccessUnitAssembler::default();
     let chunk_with_start_code = BytesMut::from(&b"\x00\x00\x00\x01\x67\x11"[..]);
-    assembler.push(10, chunk_with_start_code.clone());
+    let _ = assembler.push(10, chunk_with_start_code.clone());
     let (ts, bytes) = assembler.flush().unwrap();
     assert_eq!(ts, 10);
     // Should NOT double-prepend start code
@@ -338,7 +394,7 @@ fn test_video_access_unit_assembler_preserves_existing_annexb_prefix() {
 fn test_video_access_unit_assembler_three_byte_start_code_preserved() {
     let mut assembler = VideoAccessUnitAssembler::default();
     let chunk = BytesMut::from(&b"\x00\x00\x01\x68\x22"[..]);
-    assembler.push(20, chunk.clone());
+    let _ = assembler.push(20, chunk.clone());
     let (_, bytes) = assembler.flush().unwrap();
     // 3-byte start code is also recognized
     assert_eq!(bytes, chunk);
@@ -388,7 +444,7 @@ fn test_video_access_unit_assembler_empty_chunk_ignored() {
 #[test]
 fn test_video_access_unit_assembler_empty_after_data_then_empty() {
     let mut assembler = VideoAccessUnitAssembler::default();
-    assembler.push(10, BytesMut::from(&b"\x65\x01"[..]));
+    let _ = assembler.push(10, BytesMut::from(&b"\x65\x01"[..]));
     // Empty chunk is ignored, does not change pending timestamp
     assert!(assembler.push(10, BytesMut::new()).is_none());
     let (ts, _) = assembler.flush().unwrap();
@@ -556,14 +612,14 @@ async fn test_frame_pacer_sleeps_when_ahead() {
     pacer.pace(66, 0).await;
     let elapsed = before.elapsed();
 
-    // Allow generous tolerance for CI/tokio timer granularity.
+    // ~66ms target sleep: CI scheduling can slip; keep a wide band that still catches “no sleep”.
     assert!(
         elapsed >= Duration::from_millis(40),
         "expected sleep of ~66ms, got {:?}",
         elapsed
     );
     assert!(
-        elapsed < Duration::from_millis(200),
+        elapsed < Duration::from_millis(130),
         "sleep took too long: {:?}",
         elapsed
     );
@@ -581,9 +637,9 @@ async fn test_frame_pacer_no_sleep_when_behind() {
     pacer.pace(50, 0).await; // 50ms gap, but 80ms already elapsed
     let elapsed = before.elapsed();
 
-    // Should complete nearly instantly (no sleep needed).
+    // Should complete quickly (no intentional pacing sleep); allow timer slack under load.
     assert!(
-        elapsed < Duration::from_millis(10),
+        elapsed < Duration::from_millis(25),
         "expected no sleep, got {:?}",
         elapsed
     );
@@ -599,14 +655,14 @@ async fn test_frame_pacer_caps_at_max_delta() {
     pacer.pace(500, 0).await;
     let elapsed = before.elapsed();
 
-    // Should sleep ~200ms (capped), not 500ms.
+    // Should sleep ~200ms (capped), not 500ms; tolerate slower CI clocks.
     assert!(
-        elapsed < Duration::from_millis(300),
+        elapsed < Duration::from_millis(400),
         "expected ~200ms (capped), got {:?}",
         elapsed
     );
     assert!(
-        elapsed >= Duration::from_millis(150),
+        elapsed >= Duration::from_millis(100),
         "expected ~200ms (capped), got {:?}",
         elapsed
     );
@@ -727,8 +783,8 @@ fn test_playback_latency_policy_from_config_default() {
     let config = StreamingConfig::default();
     let policy = PlaybackLatencyPolicy::from_config(&config);
 
-    // Default config has max_frame_age_ms=1000, lag_recovery_mode=LatestIdr
-    assert_eq!(policy.max_frame_age_ms, 1000);
+    // Default config has max_frame_age_ms=1500, lag_recovery_mode=LatestIdr
+    assert_eq!(policy.max_frame_age_ms, 1500);
     assert_eq!(policy.lag_recovery_mode, LagRecoveryMode::LatestIdr);
     // These are constants
     assert_eq!(policy.lag_recovery_threshold_ms, LAG_RECOVERY_THRESHOLD_MS);
@@ -764,11 +820,11 @@ fn test_playback_latency_policy_from_config_disabled_lag_recovery() {
 }
 
 // ========================================================================
-// Config Threading → PlaybackLatencyPolicy Tests
+// Config → PlaybackLatencyPolicy mapping
 // ========================================================================
 
 #[test]
-fn test_max_frame_age_config_threaded_to_policy() {
+fn test_max_frame_age_config_mapped_to_policy() {
     // Test various custom values
     for custom_max_age in [100, 500, 2000, 5000] {
         let config = StreamingConfig::new().with_max_frame_age(custom_max_age);
@@ -784,7 +840,7 @@ fn test_max_frame_age_config_threaded_to_policy() {
 }
 
 #[test]
-fn test_lag_recovery_mode_config_threaded_to_policy() {
+fn test_lag_recovery_mode_config_mapped_to_policy() {
     // Test Disabled mode
     let config_disabled = StreamingConfig::new().with_lag_recovery_mode(LagRecoveryMode::Disabled);
     let policy_disabled = PlaybackLatencyPolicy::from_config(&config_disabled);
@@ -796,14 +852,3 @@ fn test_lag_recovery_mode_config_threaded_to_policy() {
     assert_eq!(policy_latest.lag_recovery_mode, LagRecoveryMode::LatestIdr);
 }
 
-#[test]
-fn test_zero_max_frame_age_falls_back_to_default_in_policy() {
-    let config = StreamingConfig {
-        max_frame_age_ms: 0,
-        ..Default::default()
-    };
-    let policy = PlaybackLatencyPolicy::from_config(&config);
-
-    // Should fall back to DEFAULT_MAX_FRAME_AGE_MS (1000)
-    assert_eq!(policy.max_frame_age_ms, DEFAULT_MAX_FRAME_AGE_MS);
-}

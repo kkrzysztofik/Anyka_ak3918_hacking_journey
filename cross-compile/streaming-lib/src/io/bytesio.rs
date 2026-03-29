@@ -1,4 +1,4 @@
-use std::net::SocketAddr;
+use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -24,6 +24,32 @@ const MAX_UDP_DATAGRAM_SIZE: usize = 65507;
 /// Linux doubles this internally via SO_SNDBUF, giving ~1MB actual.
 const UDP_SEND_BUFFER_SIZE: usize = 512 * 1024;
 
+fn create_configured_udp_socket() -> Option<Socket> {
+    let socket = match Socket::new(Domain::IPV4, Type::DGRAM, Some(Protocol::UDP)) {
+        Ok(s) => s,
+        Err(err) => {
+            tracing::error!(error = %err, "socket2_create_error");
+            return None;
+        }
+    };
+
+    if let Err(err) = socket.set_send_buffer_size(UDP_SEND_BUFFER_SIZE) {
+        tracing::warn!(error = %err, "failed_to_set_udp_send_buffer_size");
+    }
+    if let Ok(actual) = socket.send_buffer_size()
+        && actual < UDP_SEND_BUFFER_SIZE
+    {
+        tracing::warn!(
+            requested = UDP_SEND_BUFFER_SIZE,
+            actual = actual,
+            "udp_send_buffer_size_capped_by_kernel"
+        );
+    }
+
+    Some(socket)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NetType {
     TCP,
     UDP,
@@ -50,30 +76,9 @@ impl UdpIO {
         };
         tracing::debug!(remote_address = %remote_address, "udp_connection_attempt");
 
-        // Create socket2 socket with larger send buffer
-        let socket = match Socket::new(Domain::IPV4, Type::DGRAM, Some(Protocol::UDP)) {
-            Ok(s) => s,
-            Err(err) => {
-                tracing::error!(error = %err, "socket2_create_error");
-                return None;
-            }
-        };
+        let socket = create_configured_udp_socket()?;
 
-        // Set send buffer size for high-bitrate video streaming
-        if let Err(err) = socket.set_send_buffer_size(UDP_SEND_BUFFER_SIZE) {
-            tracing::warn!(error = %err, "failed_to_set_udp_send_buffer_size");
-        }
-        if let Ok(actual) = socket.send_buffer_size()
-            && actual < UDP_SEND_BUFFER_SIZE
-        {
-            tracing::warn!(
-                requested = UDP_SEND_BUFFER_SIZE,
-                actual = actual,
-                "udp_send_buffer_size_capped_by_kernel"
-            );
-        }
-
-        let local_address: SocketAddr = format!("0.0.0.0:{local_port}").parse().ok()?;
+        let local_address = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, local_port));
         if let Err(err) = socket.bind(&local_address.into()) {
             tracing::error!(error = %err, local_addr = %local_address, "udp_bind_error");
             return None;
@@ -111,31 +116,35 @@ impl UdpIO {
         }
     }
 
+    /// Binds a UDP [`UdpIO`] to `0.0.0.0:{local_port}` with the standard large send buffer.
+    ///
+    /// Unlike [`UdpIO::new`], this does **not** connect to a remote host: it only listens on all
+    /// interfaces on the given port.
+    ///
+    /// # Arguments
+    ///
+    /// * `local_port` — UDP port to bind (host byte order), e.g. `8554`.
+    ///
+    /// # Returns
+    ///
+    /// * `Some(UdpIO)` when [`create_configured_udp_socket`], `bind`, `set_nonblocking`, and
+    ///   [`tokio::net::UdpSocket::from_std`] all succeed.
+    /// * `None` on parse/bind/nonblocking/Tokio conversion failure (errors are logged).
+    ///
+    /// # Errors
+    ///
+    /// Failures mirror [`UdpIO::new`]: invalid/unavailable local address, `set_nonblocking`,
+    /// or moving the std socket into the Tokio runtime.
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// let udp = UdpIO::new_with_local_port(8554).await?;
+    /// ```
     pub async fn new_with_local_port(local_port: u16) -> Option<Self> {
-        // Create socket2 socket with larger send buffer
-        let socket = match Socket::new(Domain::IPV4, Type::DGRAM, Some(Protocol::UDP)) {
-            Ok(s) => s,
-            Err(err) => {
-                tracing::error!(error = %err, "socket2_create_error");
-                return None;
-            }
-        };
+        let socket = create_configured_udp_socket()?;
 
-        // Set send buffer size for high-bitrate video streaming
-        if let Err(err) = socket.set_send_buffer_size(UDP_SEND_BUFFER_SIZE) {
-            tracing::warn!(error = %err, "failed_to_set_udp_send_buffer_size");
-        }
-        if let Ok(actual) = socket.send_buffer_size()
-            && actual < UDP_SEND_BUFFER_SIZE
-        {
-            tracing::warn!(
-                requested = UDP_SEND_BUFFER_SIZE,
-                actual = actual,
-                "udp_send_buffer_size_capped_by_kernel"
-            );
-        }
-
-        let local_address: SocketAddr = format!("0.0.0.0:{local_port}").parse().ok()?;
+        let local_address = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, local_port));
         if let Err(err) = socket.bind(&local_address.into()) {
             tracing::error!(error = %err, local_addr = %local_address, "udp_bind_error");
             return None;

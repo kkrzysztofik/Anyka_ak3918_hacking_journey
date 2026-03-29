@@ -24,7 +24,7 @@
 //! validate_max_length("some_string", 64, "name")?;
 //! ```
 
-use crate::onvif::common::limits::MAX_REFERENCE_TOKEN_CHARS;
+use crate::onvif::common::MAX_REFERENCE_TOKEN_CHARS;
 use crate::onvif::error::{OnvifError, OnvifResult};
 
 /// Validate a reference token (used for profiles, tokens, etc.).
@@ -239,11 +239,18 @@ mod tests {
     }
 
     #[test]
-    fn test_validate_reference_token_too_long() {
+    fn test_validate_reference_token_too_long_fails() {
         let token = "a".repeat(MAX_REFERENCE_TOKEN_CHARS + 1);
         let result = validate_reference_token(&token, "profile");
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("TooLong"));
+    }
+
+    #[test]
+    fn test_validate_reference_token_max_length_succeeds() {
+        let token = "a".repeat(MAX_REFERENCE_TOKEN_CHARS);
+        assert_eq!(token.len(), MAX_REFERENCE_TOKEN_CHARS);
+        assert!(validate_reference_token(&token, "profile").is_ok());
     }
 
     // Test validate_range_f32

@@ -6,7 +6,7 @@ This checklist validates the complete video latency fix for the Anyka AK3918 dev
 
 The fix addresses three issues:
 1. **Timestamp normalization**: Timestamps now start at 0 instead of ~42M ms
-2. **RTP send batching**: Packets batched per frame (190-285ms → <10ms expected)
+2. **RTP send batching**: Packets batched per frame (190-285ms → **<15ms expected** for large I-frames, ideally **<10ms**; see RTP Send Performance below)
 3. **Removed inter_frame_us**: Field removed from ring buffer
 
 ---
@@ -82,7 +82,7 @@ The fix addresses three issues:
 
 ### Expected Log Patterns
 
-```
+```text
 # vendor_daemon.log should contain:
 event=timestamp_anchor stream=0 first_ts_ms=42543800...
 event=timestamp_anchor stream=1 first_ts_ms=42543800...
@@ -112,7 +112,7 @@ event=timestamp_anchor stream=1 first_ts_ms=42543800...
 
 ### Expected Log Patterns
 
-```
+```text
 # onvif.log should contain:
 frame_send_ms=8
 payload_len=104527 packet_count=72 send_ms=8
@@ -204,7 +204,7 @@ payload_len=104527 packet_count=72 send_ms=8
 ### Expected Patterns
 
 **vendor_daemon.log:**
-```
+```text
 event=timestamp_anchor stream=0 first_ts_ms=42543800 diag_monotonic_ms=...
 event=timestamp_normalize stream=0 raw_ts=42543860 normalized_ts=60 seq_no=5
 slot_ts_ms=0
@@ -215,7 +215,7 @@ slot_ts_ms=260
 ```
 
 **onvif.log:**
-```
+```text
 frame_send_ms=8
 payload_len=104527 packet_count=72 send_ms=8
 NO "rtp_send_slow" warnings

@@ -1039,7 +1039,9 @@ mod tests {
             tracing::info!("RTSP DESCRIBE response validated");
         }
 
-        let _ = server_handle.await;
+        server_handle
+            .await
+            .expect("RTSP test server task failed (panic in accept/handler)");
         let _ = fs::remove_file(&test_file);
     }
 
@@ -1085,7 +1087,9 @@ mod tests {
             .expect("bind ephemeral port for HTTP-FLV e2e test");
         let port = listener.local_addr().expect("listener local_addr").port();
 
+        let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
         let server_handle = tokio::spawn(async move {
+            let _ = ready_tx.send(());
             match listener.accept().await {
                 Ok((socket, _)) => {
                     let _ = handle_httpflv_client(socket, flv_data_clone).await;
@@ -1096,8 +1100,9 @@ mod tests {
             }
         });
 
-        // Let the spawned task register accept; connect then completes the handshake.
-        tokio::task::yield_now().await;
+        ready_rx
+            .await
+            .expect("server task should signal readiness before accept races the client");
 
         let mut stream = tokio::net::TcpStream::connect(format!("127.0.0.1:{port}"))
             .await
@@ -1119,7 +1124,9 @@ mod tests {
         let response_str = String::from_utf8_lossy(&buffer);
         assert_httpflv_response(&response_str);
 
-        let _ = server_handle.await;
+        server_handle
+            .await
+            .expect("HTTP-FLV server task failed (panic in accept/handler)");
     }
 
     /// Helper function to connect an RTSP client and verify SDP response
@@ -1235,7 +1242,9 @@ mod tests {
         assert!(result1, "Client 1 did not receive valid SDP");
         assert!(result2, "Client 2 did not receive valid SDP");
 
-        let _ = server_handle.await;
+        server_handle
+            .await
+            .expect("concurrent RTSP test server task failed (panic in accept/handler)");
         let _ = fs::remove_file(&test_file);
 
         tracing::info!("Concurrent RTSP clients validated");

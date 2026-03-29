@@ -16,20 +16,21 @@ Output:
     - Detailed findings
 """
 
+import argparse
 import sys
 import re
-import os
 from typing import List, Tuple, Dict, Any
 
 
 class Colors:
-    """Terminal colors for output"""
+    """Terminal colors for output (disabled when stdout is not a TTY)."""
 
-    GREEN = "\033[0;32m"
-    RED = "\033[0;31m"
-    YELLOW = "\033[1;33m"
-    BLUE = "\033[0;34m"
-    NC = "\033[0m"  # No Color
+    _use_color = sys.stdout.isatty()
+    GREEN = "\033[0;32m" if _use_color else ""
+    RED = "\033[0;31m" if _use_color else ""
+    YELLOW = "\033[1;33m" if _use_color else ""
+    BLUE = "\033[0;34m" if _use_color else ""
+    NC = "\033[0m" if _use_color else ""  # No Color
 
 
 def log_info(msg: str):
@@ -49,13 +50,13 @@ def log_warn(msg: str):
 
 
 def read_log_file(filepath: str) -> List[str]:
-    """Read log file and return lines"""
-    if not os.path.exists(filepath):
-        log_fail(f"Log file not found: {filepath}")
+    """Read log file and return lines; on missing path or I/O error, log and return []."""
+    try:
+        with open(filepath, "r", encoding="utf-8", errors="ignore") as f:
+            return f.readlines()
+    except OSError as err:
+        log_fail(f"Failed to read log file {filepath}: {err}")
         return []
-
-    with open(filepath, "r", encoding="utf-8", errors="ignore") as f:
-        return f.readlines()
 
 
 def analyze_timestamp_normalization(daemon_lines: List[str]) -> Dict[str, Any]:
@@ -80,7 +81,9 @@ def analyze_timestamp_normalization(daemon_lines: List[str]) -> Dict[str, Any]:
     if anchors:
         results["first_anchor_raw_ts"] = int(anchors[0])
         log_info(f"Timestamp anchors found: {len(anchors)}")
-        log_info(f"First anchor raw timestamp: ~{int(anchors[0]) / 1000000:.1f}M ms")
+        raw_ts = int(anchors[0])
+        seconds = raw_ts / 1_000_000
+        log_info(f"First anchor raw timestamp: ~{seconds:.1f} s (raw={raw_ts})")
 
     # Extract slot timestamps
     slot_timestamps = re.findall(r"slot_ts_ms=(\d+)", daemon_content)
@@ -141,7 +144,7 @@ def analyze_rtp_performance(onvif_lines: List[str]) -> Dict[str, Any]:
     results["slow_sends"] = len(re.findall(r"rtp_send_slow", onvif_content))
 
     if results["slow_sends"] == 0:
-        log_pass(f"No slow RTP sends (was: many)")
+        log_pass("No slow RTP sends detected")
     else:
         log_fail(f"Slow RTP sends found: {results['slow_sends']}")
 
@@ -245,29 +248,23 @@ def analyze_logs(daemon_log: str, onvif_log: str) -> Tuple[bool, bool]:
 
 def main():
     """Main entry point"""
-    if len(sys.argv) != 3:
-        print(f"Usage: {sys.argv[0]} <daemon.log> <onvif.log>")
-        print()
-        print("Example:")
-        print(
-            f"  {sys.argv[0]} /tmp/video_latency_test_daemon.log /tmp/video_latency_test_onvif.log"
-        )
-        sys.exit(1)
-
-    daemon_log = sys.argv[1]
-    onvif_log = sys.argv[2]
-
-    # Check files exist
-    if not os.path.exists(daemon_log):
-        log_fail(f"Daemon log not found: {daemon_log}")
-        sys.exit(1)
-
-    if not os.path.exists(onvif_log):
-        log_fail(f"ONVIF log not found: {onvif_log}")
-        sys.exit(1)
+    parser = argparse.ArgumentParser(
+        description="Analyze vendor-daemon and onvif-rust logs for timestamp + RTP checks."
+    )
+    parser.add_argument(
+        "daemon_log",
+        metavar="daemon.log",
+        help="Path to vendor-daemon log file",
+    )
+    parser.add_argument(
+        "onvif_log",
+        metavar="onvif.log",
+        help="Path to onvif-rust log file",
+    )
+    args = parser.parse_args()
 
     # Analyze
-    ts_pass, rtp_pass = analyze_logs(daemon_log, onvif_log)
+    ts_pass, rtp_pass = analyze_logs(args.daemon_log, args.onvif_log)
 
     # Exit with appropriate code
     if ts_pass and rtp_pass:

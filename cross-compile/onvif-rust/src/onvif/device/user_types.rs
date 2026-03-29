@@ -7,9 +7,10 @@
 //! The WSDL types are defined in `devicemgmt.wsdl` and match the ONVIF specification.
 
 use crate::config::{UserAccount, UserLevel as InternalUserLevel};
-use crate::onvif::common::limits::MAX_USERNAME_CHARS;
+use crate::onvif::common::{MAX_PASSWORD_CHARS, MAX_USERNAME_CHARS};
 use crate::onvif::types::common::{User as OnvifUser, UserLevel as OnvifUserLevel};
 use crate::utils::validation::normalize_unicode;
+use unicode_segmentation::UnicodeSegmentation;
 
 // ============================================================================
 // UserLevel Conversions
@@ -104,7 +105,7 @@ pub enum UserValidationError {
 /// Validate a username.
 ///
 /// Requirements:
-/// - 3 to 64 characters ([`MAX_USERNAME_CHARS`](crate::onvif::common::limits::MAX_USERNAME_CHARS))
+/// - 3 to 64 user-perceived grapheme clusters ([`MAX_USERNAME_CHARS`](crate::onvif::common::MAX_USERNAME_CHARS))
 /// - Alphanumeric and underscore only (no hyphens or dots)
 pub fn validate_username(username: &str) -> Result<(), UserValidationError> {
     // Normalize Unicode to prevent variant-based bypasses
@@ -113,10 +114,11 @@ pub fn validate_username(username: &str) -> Result<(), UserValidationError> {
     if normalized.is_empty() {
         return Err(UserValidationError::EmptyUsername);
     }
-    if normalized.len() < 3 {
+    let char_count = normalized.graphemes(true).count();
+    if char_count < 3 {
         return Err(UserValidationError::UsernameTooShort);
     }
-    if normalized.len() > MAX_USERNAME_CHARS {
+    if char_count > MAX_USERNAME_CHARS {
         return Err(UserValidationError::UsernameTooLong);
     }
     // Allow alphanumeric and underscore only (removed hyphen and dot)
@@ -129,8 +131,8 @@ pub fn validate_username(username: &str) -> Result<(), UserValidationError> {
 /// Validate a password.
 ///
 /// Requirements:
-/// - Minimum 8 characters (if required)
-/// - Maximum 64 characters
+/// - Minimum 8 Unicode scalar values (if required)
+/// - Maximum [`MAX_PASSWORD_CHARS`](crate::onvif::common::MAX_PASSWORD_CHARS) scalar values (distinct from username grapheme limit)
 /// - Must contain at least one letter, one number, or one special character
 pub fn validate_password(
     password: Option<&str>,
@@ -138,10 +140,11 @@ pub fn validate_password(
 ) -> Result<(), UserValidationError> {
     match password {
         Some(pwd) => {
-            if pwd.len() < 8 {
+            let char_count = pwd.chars().count();
+            if char_count < 8 {
                 return Err(UserValidationError::PasswordTooShort);
             }
-            if pwd.len() > 64 {
+            if char_count > MAX_PASSWORD_CHARS {
                 return Err(UserValidationError::PasswordTooLong);
             }
             // Complexity requirement: at least one letter, one number, or one special char
@@ -169,6 +172,8 @@ pub fn validate_password(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::onvif::common::{MAX_PASSWORD_CHARS, MAX_USERNAME_CHARS};
+    use unicode_segmentation::UnicodeSegmentation;
 
     #[test]
     fn test_user_level_conversion_to_onvif() {
@@ -232,11 +237,25 @@ mod tests {
     fn test_validate_username_invalid() {
         assert!(validate_username("").is_err());
         assert!(validate_username("ab").is_err()); // Too short (less than 3)
-        assert!(validate_username(&"a".repeat(65)).is_err()); // Too long
+        assert!(validate_username(&"a".repeat(MAX_USERNAME_CHARS + 1)).is_err()); // Too long
         assert!(validate_username("user@domain").is_err()); // Invalid chars
         assert!(validate_username("user name").is_err()); // Invalid chars
         assert!(validate_username("user-name").is_err()); // Hyphen not allowed
         assert!(validate_username("user.name").is_err()); // Dot not allowed
+    }
+
+    #[test]
+    fn test_validate_username_at_max_length_ok() {
+        let u = format!("ab{}", "c".repeat(MAX_USERNAME_CHARS - 2));
+        assert_eq!(u.graphemes(true).count(), MAX_USERNAME_CHARS);
+        assert!(validate_username(&u).is_ok());
+    }
+
+    #[test]
+    fn test_validate_username_one_over_max_rejected() {
+        let u = format!("abc{}", "d".repeat(MAX_USERNAME_CHARS - 2));
+        assert_eq!(u.graphemes(true).count(), MAX_USERNAME_CHARS + 1);
+        assert!(validate_username(&u).is_err());
     }
 
     #[test]
@@ -253,7 +272,7 @@ mod tests {
         assert!(validate_password(None, true).is_err());
         assert!(validate_password(Some("abc"), true).is_err()); // Too short (< 8)
         assert!(validate_password(Some("short"), true).is_err()); // Too short (< 8)
-        assert!(validate_password(Some(&"a".repeat(65)), true).is_err()); // Too long
+        assert!(validate_password(Some(&"a".repeat(MAX_PASSWORD_CHARS + 1)), true).is_err()); // Too long
         assert!(validate_password(Some("        "), true).is_err()); // Only spaces, no complexity
     }
 
@@ -268,5 +287,25 @@ mod tests {
         let result1 = validate_username(composed);
         let result2 = validate_username(decomposed);
         assert_eq!(result1.is_ok(), result2.is_ok());
+    }
+
+    #[test]
+    fn test_validate_username_grapheme_vs_chars() {
+        let composed = "café";
+        let decomposed = "cafe\u{0301}";
+        assert_eq!(composed.graphemes(true).count(), 4);
+        assert_eq!(decomposed.graphemes(true).count(), 4);
+        assert!(decomposed.chars().count() > composed.chars().count());
+        assert!(validate_username(composed).is_ok());
+        assert!(validate_username(decomposed).is_ok());
+
+        // Multi-scalar grapheme: one user-perceived character, multiple Unicode scalars.
+        let family = "👨‍👩‍👧";
+        assert_eq!(family.graphemes(true).count(), 1);
+        assert!(family.chars().count() > 1);
+
+        let u = format!("ab{}", "c".repeat(MAX_USERNAME_CHARS - 2));
+        assert_eq!(u.graphemes(true).count(), MAX_USERNAME_CHARS);
+        assert!(validate_username(&u).is_ok());
     }
 }

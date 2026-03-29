@@ -60,10 +60,24 @@ install_crosstool_ng() {
             cd "${CTNG_DIR}"
             local cur=""
             cur="$(git rev-parse HEAD 2>/dev/null || true)"
-            if [ "${cur}" != "${CTNG_GIT_REF}" ]; then
-                log_info "Fetching crosstool-NG ${CTNG_GIT_REF}..."
+            local target_sha=""
+            target_sha="$(git rev-parse --verify "${CTNG_GIT_REF}^{commit}" 2>/dev/null || true)"
+            if [ -z "${target_sha}" ]; then
+                target_sha="$(git ls-remote origin "${CTNG_GIT_REF}" 2>/dev/null | awk '{print $1; exit}')"
+            fi
+            if [ -z "${target_sha}" ]; then
+                log_error "Could not resolve CTNG_GIT_REF=${CTNG_GIT_REF} to a commit SHA"
+                exit 1
+            fi
+            if [ "${cur}" != "${target_sha}" ]; then
+                log_info "Fetching crosstool-NG ${CTNG_GIT_REF} (${target_sha})..."
                 git fetch --depth 1 origin "${CTNG_GIT_REF}"
                 git checkout FETCH_HEAD
+            fi
+            cur="$(git rev-parse HEAD)"
+            if [ "${cur}" != "${target_sha}" ]; then
+                log_error "crosstool-NG HEAD mismatch: expected ${target_sha}, got ${cur}"
+                exit 1
             fi
             cd "${BUILD_DIR}"
         fi
@@ -75,21 +89,54 @@ install_crosstool_ng() {
         cd "${CTNG_DIR}"
         git init
         git remote add origin "${CTNG_GIT_URL}"
-        if ! git fetch --depth 1 origin "${CTNG_GIT_REF}"; then
+        local target_sha=""
+        if [[ "${CTNG_GIT_REF}" =~ ^[0-9a-fA-F]{40}$ ]]; then
+            target_sha="$(echo "${CTNG_GIT_REF}" | tr '[:upper:]' '[:lower:]')"
+        else
+            target_sha="$(git ls-remote "${CTNG_GIT_URL}" "${CTNG_GIT_REF}" 2>/dev/null | awk '{print $1; exit}')"
+        fi
+        if [ -z "${target_sha}" ]; then
+            log_info "ls-remote did not resolve CTNG_GIT_REF=${CTNG_GIT_REF}; trying fetch by ref..."
+            if ! git fetch origin "${CTNG_GIT_REF}"; then
+                log_error "Could not resolve CTNG_GIT_REF=${CTNG_GIT_REF} to a commit SHA"
+                exit 1
+            fi
+            target_sha="$(git rev-parse FETCH_HEAD)"
+        fi
+        if [ -z "${target_sha}" ]; then
+            log_error "Could not resolve CTNG_GIT_REF=${CTNG_GIT_REF} to a commit SHA"
+            exit 1
+        fi
+        if ! git fetch --depth 1 origin "${target_sha}"; then
             log_error "Failed to fetch crosstool-NG ${CTNG_GIT_REF}"
             exit 1
         fi
         git checkout FETCH_HEAD
+        local cur=""
+        cur="$(git rev-parse HEAD)"
+        if [ "${cur}" != "${target_sha}" ]; then
+            log_error "crosstool-NG clone checkout mismatch: expected ${target_sha}, got ${cur}"
+            exit 1
+        fi
         cd "${BUILD_DIR}"
     fi
 
     log_info "Installing vendored uClibc-ng ${UCLIBC_NG_VERSION} package metadata..."
+    if [ -z "${UCLIBC_NG_VERSION}" ]; then
+        log_error "UCLIBC_NG_VERSION is unset"
+        exit 1
+    fi
+    local _vendored_uclibc="${SCRIPT_DIR}/vendor/crosstool-ng/uClibc-ng/${UCLIBC_NG_VERSION}"
+    if [ ! -d "${_vendored_uclibc}" ]; then
+        log_error "Vendored uClibc-ng metadata not found: ${_vendored_uclibc} (UCLIBC_NG_VERSION=${UCLIBC_NG_VERSION})"
+        exit 1
+    fi
     mkdir -p "${CTNG_DIR}/packages/uClibc-ng"
     rm -rf "${CTNG_DIR}/packages/uClibc-ng/${UCLIBC_NG_VERSION}"
-    cp -a "${SCRIPT_DIR}/vendor/crosstool-ng/uClibc-ng/${UCLIBC_NG_VERSION}" \
-        "${CTNG_DIR}/packages/uClibc-ng/"
+    cp -a "${_vendored_uclibc}" "${CTNG_DIR}/packages/uClibc-ng/"
 
-    if [ ! -f "${CTNG_DIR}/configure" ] || ! grep -q 'UCLIBC_NG_V_1_0_57' "${CTNG_DIR}/config/versions/uClibc-ng.in" 2>/dev/null; then
+    local _uclibc_kconfig_token="UCLIBC_NG_V_${UCLIBC_NG_VERSION//./_}"
+    if [ ! -f "${CTNG_DIR}/configure" ] || ! grep -q "${_uclibc_kconfig_token}" "${CTNG_DIR}/config/versions/uClibc-ng.in" 2>/dev/null; then
         log_info "Running ./bootstrap in crosstool-NG (Kconfig regeneration)..."
         (cd "${CTNG_DIR}" && ./bootstrap)
         if [ -f "${CTNG_DIR}/Makefile" ] || [ -f "${CTNG_DIR}/config.status" ]; then
@@ -231,7 +278,12 @@ create_config_file() {
     # the Linux >= 5.1.0 requirement for 64-bit time_t syscalls on 32-bit ARM.
     # Without this, uClibc-ng fails to build with the 3.4.35 kernel headers.
     local uclibc_config="${BUILD_DIR}/uclibc-ng.config"
-    cp "${CTNG_DIR}/packages/uClibc-ng/config" "${uclibc_config}"
+    local uclibc_seed="${CTNG_DIR}/packages/uClibc-ng/config"
+    if [ ! -f "${uclibc_seed}" ]; then
+        log_error "Missing uClibc-ng Kconfig seed at ${uclibc_seed} (install vendored uClibc-ng package and run bootstrap if needed)"
+        exit 1
+    fi
+    cp "${uclibc_seed}" "${uclibc_config}"
     echo "# UCLIBC_USE_TIME64 is not set" >> "${uclibc_config}"
     sed -i "s|^CT_LIBC_UCLIBC_CONFIG_FILE=.*|CT_LIBC_UCLIBC_CONFIG_FILE=\"${uclibc_config}\"|" "${config_file}"
     if ! grep -q "^CT_LIBC_UCLIBC_CONFIG_FILE=" "${config_file}"; then
@@ -270,25 +322,30 @@ build_toolchain() {
 
     # Build up to libc headers first, so Linux sources are unpacked before we
     # patch legacy kernel host-tool sources for modern host compilers.
+    # Persist step state so the follow-up build resumes instead of restarting from scratch
+    # (otherwise the unifdef.c patch below can be lost).
+    export CT_DEBUG_CT_SAVE_STEPS=y
     log_info "Building up to libc headers (pre-kernel-headers stage)..."
     STOP=libc_headers "${CTNG_BIN}" build
 
-    # Linux 3.4.35 scripts/unifdef.c uses 'constexpr' as an identifier, which
+    # Legacy Linux scripts/unifdef.c uses 'constexpr' as an identifier, which
     # fails with modern GCC where constexpr is a reserved keyword in C mode.
-    local unifdef_path="${BUILD_DIR}/.build/src/linux-3.4.35/scripts/unifdef.c"
+    local CT_LINUX_VER="3.4.35"
+    if [ -f "${BUILD_DIR}/.config" ]; then
+        CT_LINUX_VER="$(grep '^CT_LINUX_VERSION=' "${BUILD_DIR}/.config" | head -1 | cut -d= -f2- | tr -d '\"')"
+    fi
+    local unifdef_path="${BUILD_DIR}/.build/src/linux-${CT_LINUX_VER}/scripts/unifdef.c"
     if [ -f "${unifdef_path}" ]; then
-        log_info "Applying Linux 3.4.35 host-compiler compatibility fix..."
+        log_info "Applying Linux ${CT_LINUX_VER} host-compiler compatibility fix (unifdef.c)..."
         sed -i 's/\<constexpr\>/const_expr/g' "${unifdef_path}"
     else
         log_warn "Expected file not found for patch: ${unifdef_path}"
         log_warn "Continuing build; kernel headers step may fail if source layout changed"
     fi
 
-    # Continue with a normal ct-ng build. Because the state directory was left
-    # intact by STOP=libc_headers, ct-ng will continue from the next step.
-    # Using RESTART here requires CT_DEBUG_CT_SAVE_STEPS and fails otherwise.
+    # Resume after the patch; RESTART=kernel_headers skips re-unpacking Linux when step saves are on.
     log_info "Continuing full build after compatibility patch..."
-    "${CTNG_BIN}" build
+    RESTART=kernel_headers "${CTNG_BIN}" build
 
     log_info "Toolchain build completed successfully!"
 }

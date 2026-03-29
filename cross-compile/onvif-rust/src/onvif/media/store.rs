@@ -323,7 +323,6 @@ impl MediaStore {
 mod tests {
     use super::*;
     use crate::config::ProfileStorage;
-    use crate::onvif::media::types::DEFAULT_PTZ_NODE_TOKEN;
     use crate::onvif::types::common::{AudioEncoding, H264Profile, VideoEncoding};
     use tempfile::tempdir;
 

@@ -2,9 +2,19 @@
 
 # Pre-Deployment Validation Script
 # Validates build, tests, and struct sizes before SD card deployment
-# Usage: ./pre_deploy_check.sh
+# Usage: ./pre_deploy_check.sh [--strict]
+# Environment: STRICT_MODE=1 same as --strict (fail if SD packaging is missing or errors)
 
-set -e
+set -euo pipefail
+
+WARN_COUNT=0
+STRICT_MODE="${STRICT_MODE:-0}"
+for _pre_arg in "$@"; do
+    if [[ "${_pre_arg}" == "--strict" ]]; then
+        STRICT_MODE=1
+    fi
+done
+PACKAGING_FAILED=0
 
 # Define paths
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -22,11 +32,12 @@ log_info() {
 }
 
 log_warn() {
-    echo -e "${YELLOW}[WARN]${NC} $1"
+    WARN_COUNT=$((WARN_COUNT + 1))
+    echo -e "${YELLOW}[WARN]${NC} $1" >&2
 }
 
 log_error() {
-    echo -e "${RED}[ERROR]${NC} $1"
+    echo -e "${RED}[ERROR]${NC} $1" >&2
 }
 
 log_success() {
@@ -34,7 +45,7 @@ log_success() {
 }
 
 log_fail() {
-    echo -e "${RED}[FAIL]${NC} $1"
+    echo -e "${RED}[FAIL]${NC} $1" >&2
     exit 1
 }
 
@@ -74,8 +85,8 @@ if make; then
     if [ -f "vendor-daemon" ]; then
         log_info "Binary size: $(ls -lh vendor-daemon | awk '{print $5}')"
     else
-        log_warn "Binary 'vendor-daemon' not found, checking for alternatives..."
-        ls -la *.o 2>/dev/null || true
+        log_error "Binary 'vendor-daemon' not found after successful build — expected ./vendor-daemon"
+        exit 1
     fi
 else
     log_fail "vendor-daemon build failed"
@@ -90,12 +101,15 @@ log_info "=== Step 2: Building onvif-rust (Rust) ==="
 
 cd "$PROJECT_ROOT/cross-compile/onvif-rust"
 
-if $TOOLCHAIN_CARGO build --release; then
+if "$TOOLCHAIN_CARGO" build --release --target arm-anykav200-crosstool-ng; then
     log_success "onvif-rust built successfully"
     
     # Check binary
     if [ -f "target/arm-anykav200-crosstool-ng/release/onvif-rust" ]; then
         log_info "Binary size: $(ls -lh target/arm-anykav200-crosstool-ng/release/onvif-rust | awk '{print $5}')"
+    else
+        log_error "Release binary not found at target/arm-anykav200-crosstool-ng/release/onvif-rust — likely target/config mismatch; run: $TOOLCHAIN_CARGO build --release --target arm-anykav200-crosstool-ng"
+        exit 1
     fi
 else
     log_fail "onvif-rust build failed"
@@ -111,11 +125,10 @@ log_info "=== Step 3: Verifying struct sizes ==="
 cd "$PROJECT_ROOT/cross-compile/onvif-rust"
 
 # Run struct size tests on host (x86_64)
-if $TOOLCHAIN_CARGO test --target x86_64-unknown-linux-gnu --release test_vd_slot_header_size 2>&1; then
+if "$TOOLCHAIN_CARGO" test --target x86_64-unknown-linux-gnu --release test_vd_slot_header_size 2>&1; then
     log_success "Struct size assertions passed"
 else
-    log_warn "Struct size test may not exist or failed - checking for vd_slot_header tests..."
-    $TOOLCHAIN_CARGO test --target x86_64-unknown-linux-gnu --release vd_slot 2>&1 | tail -20 || true
+    log_fail "Struct size test test_vd_slot_header_size failed — fix layout/C header alignment before deploy"
 fi
 
 echo ""
@@ -128,7 +141,7 @@ log_info "=== Step 4: Running unit tests (host x86_64) ==="
 cd "$PROJECT_ROOT/cross-compile/onvif-rust"
 
 # Run lib tests only (unit tests)
-if $TOOLCHAIN_CARGO test --target x86_64-unknown-linux-gnu --lib; then
+if "$TOOLCHAIN_CARGO" test --target x86_64-unknown-linux-gnu --lib; then
     log_success "All unit tests passed"
 else
     log_fail "Unit tests failed"
@@ -145,19 +158,18 @@ cd "$PROJECT_ROOT/cross-compile/onvif-rust"
 
 # Check formatting
 log_info "Checking code formatting..."
-if cargo fmt --check; then
+if "$TOOLCHAIN_CARGO" fmt --check; then
     log_success "Code formatting OK"
 else
-    log_warn "Code formatting issues - run 'cargo fmt' to fix"
-    cargo fmt --check 2>&1 || true
+    log_fail "Code formatting failed — run '$TOOLCHAIN_CARGO fmt' and re-check"
 fi
 
 # Check clippy
 log_info "Running clippy lints..."
-if $TOOLCHAIN_CARGO clippy --target x86_64-unknown-linux-gnu -- -D warnings 2>&1; then
+if "$TOOLCHAIN_CARGO" clippy --target x86_64-unknown-linux-gnu -- -D warnings 2>&1; then
     log_success "Clippy linting passed (zero warnings)"
 else
-    log_warn "Clippy found issues - please review"
+    log_fail "Clippy found issues (-D warnings) — fix before deploy"
 fi
 
 echo ""
@@ -175,16 +187,26 @@ if [ -f "$SCRIPT_DIR/package_sd_payload.sh" ]; then
         log_success "SD card payload packaged successfully"
     else
         log_warn "SD card packaging failed or not configured"
+        PACKAGING_FAILED=1
     fi
 else
     log_warn "package_sd_payload.sh not found - skipping"
+    PACKAGING_FAILED=1
 fi
 
 echo ""
 echo "=============================================="
 echo "  Pre-Deployment Validation Complete"
 echo "=============================================="
-log_success "All validation steps passed - ready for deployment"
+if [[ "${STRICT_MODE}" -eq 1 && "${PACKAGING_FAILED}" -eq 1 ]]; then
+    log_error "Strict mode: SD card packaging is required (script must exist and succeed). Re-run without --strict or fix packaging."
+    exit 1
+fi
+if [ "$WARN_COUNT" -gt 0 ]; then
+    log_warn "Completed with $WARN_COUNT warning(s) — review messages above before deployment."
+else
+    log_success "All validation steps passed - ready for deployment"
+fi
 echo ""
 echo "Next steps:"
 echo "  1. Copy binaries to SD card"

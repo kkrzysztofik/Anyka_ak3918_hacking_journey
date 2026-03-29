@@ -45,7 +45,7 @@ pub use super::ws_security;
 // New Phase 0 modules
 mod dispatch;
 mod faults;
-pub mod limits;
+mod limits;
 mod service_capabilities;
 mod validation;
 
@@ -55,7 +55,9 @@ pub use faults::{
     action_not_supported, hardware_failure, invalid_token, invalid_video_source, no_entity,
     out_of_range,
 };
-pub use limits::{MAX_REFERENCE_TOKEN_CHARS, MAX_SCOPE_URI_CHARS, MAX_USERNAME_CHARS};
+pub use limits::{
+    MAX_PASSWORD_CHARS, MAX_REFERENCE_TOKEN_CHARS, MAX_SCOPE_URI_CHARS, MAX_USERNAME_CHARS,
+};
 pub use service_capabilities::{
     GetServiceCapabilities, GetServiceCapabilitiesResponse as SharedGetServiceCapabilitiesResponse,
 };
@@ -231,6 +233,27 @@ mod tests {
         // hardware_failure
         let err = hardware_failure("PTZ", "Motor stuck");
         assert!(err.to_string().contains("PTZ"));
+    }
+
+    /// Test max reference token length is 128.
+    #[test]
+    fn test_limits_max_reference_token_is_128() {
+        assert_eq!(MAX_REFERENCE_TOKEN_CHARS, 128);
+        assert!(MAX_REFERENCE_TOKEN_CHARS > 0 && MAX_REFERENCE_TOKEN_CHARS <= 512);
+    }
+
+    /// Test max scope URI length is 256 and greater than reference token limit.
+    #[test]
+    fn test_limits_max_scope_uri_is_256_and_gt_reference() {
+        assert_eq!(MAX_SCOPE_URI_CHARS, 256);
+        assert!(MAX_SCOPE_URI_CHARS > MAX_REFERENCE_TOKEN_CHARS);
+    }
+
+    /// Test max username length is 64 grapheme clusters.
+    #[test]
+    fn test_limits_max_username_is_64() {
+        assert_eq!(MAX_USERNAME_CHARS, 64);
+        assert!(MAX_USERNAME_CHARS > 0 && MAX_USERNAME_CHARS <= 256);
     }
 
     /// Test dispatch module functions are accessible

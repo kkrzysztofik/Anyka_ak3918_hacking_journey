@@ -38,7 +38,7 @@ pub trait RtspServer: Send + Sync {
 
 /// Maximum number of concurrent RTSP sessions.
 /// Sized for embedded targets (Anyka AK3918) with limited RAM.
-const MAX_CONCURRENT_SESSIONS: usize = 16;
+pub(super) const MAX_CONCURRENT_SESSIONS: usize = 16;
 
 /// Default implementation of the RTSP server trait
 pub struct DefaultRtspServer {
@@ -206,6 +206,14 @@ impl RtspServer for DefaultRtspServer {
 }
 
 #[cfg(test)]
+impl DefaultRtspServer {
+    /// Exposes how many concurrent session permits are free (for unit tests of session limits).
+    fn available_session_permits_for_test(&self) -> usize {
+        self.session_semaphore.available_permits()
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::config::StreamingConfig;
@@ -236,6 +244,30 @@ mod tests {
         let server = DefaultRtspServer::new("127.0.0.1:0".to_string(), event_sender, None, config);
         assert_eq!(server.address, "127.0.0.1:0");
         assert!(server.auth.is_none());
+    }
+
+    #[test]
+    fn test_default_rtsp_server_new_initializes_max_permits() {
+        let event_sender = create_test_event_sender();
+        let config = create_test_config();
+        let server = DefaultRtspServer::new("127.0.0.1:0".to_string(), event_sender, None, config);
+        assert_eq!(
+            server.available_session_permits_for_test(),
+            MAX_CONCURRENT_SESSIONS,
+            "fresh server should expose all session permits"
+        );
+    }
+
+    #[test]
+    fn test_max_concurrent_sessions_constant_bounds() {
+        assert!(
+            MAX_CONCURRENT_SESSIONS > 0,
+            "session cap must allow at least one client"
+        );
+        assert!(
+            MAX_CONCURRENT_SESSIONS <= 256,
+            "session cap should stay within a small u8-friendly bound for embedded targets"
+        );
     }
 
     #[test]

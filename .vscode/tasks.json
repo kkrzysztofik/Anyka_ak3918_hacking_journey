@@ -121,7 +121,7 @@
       "command": "bash",
       "args": [
         "-c",
-        "source '${workspaceFolder}/setenv.sh' && cp '${workspaceFolder}/cross-compile/onvif/out/onvifd' '${workspaceFolder}/SD_card_contents/anyka_hack/usr/bin/' && echo 'Binary copied to SD card payload'"
+        "cp '${workspaceFolder}/cross-compile/onvif/out/onvifd' '${workspaceFolder}/SD_card_contents/anyka_hack/usr/bin/' && echo 'Binary copied to SD card payload'"
       ],
       "group": "build",
       "presentation": {

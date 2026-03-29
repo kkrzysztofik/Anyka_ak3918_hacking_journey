@@ -4,7 +4,19 @@
 # Tests video latency fixes on the Anyka AK3918 device
 # Usage: Run this script on the device via SSH or serial console
 
-set -e
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+cleanup() {
+    if [ -n "${ONVIF_PID:-}" ]; then
+        kill "$ONVIF_PID" 2>/dev/null || true
+    fi
+    if [ -n "${DAEMON_PID:-}" ]; then
+        kill "$DAEMON_PID" 2>/dev/null || true
+    fi
+}
+trap cleanup EXIT INT TERM
 
 # Colors for output
 RED='\033[0;31m'
@@ -27,6 +39,22 @@ log_error() {
 
 log_step() {
     echo -e "${BLUE}[STEP]${NC} $1"
+}
+
+log_success() {
+    echo -e "${GREEN}[OK]${NC} $1"
+}
+
+# Wait up to $2 seconds for no matching pgrep -f process; returns 0 if gone.
+wait_proc_gone() {
+    local pattern=$1
+    local timeout_sec=${2:-5}
+    local i=0
+    while pgrep -f "$pattern" >/dev/null 2>&1 && [ "$i" -lt "$timeout_sec" ]; do
+        sleep 1
+        i=$((i + 1))
+    done
+    ! pgrep -f "$pattern" >/dev/null 2>&1
 }
 
 # Configuration
@@ -57,7 +85,12 @@ pkill -f vendor-daemon 2>/dev/null || true
 pkill -f onvif-rust 2>/dev/null || true
 pkill -f onvifd 2>/dev/null || true
 
-sleep 2
+for proc in "vendor-daemon" "onvif-rust" "onvifd"; do
+    if ! wait_proc_gone "$proc" 8; then
+        log_error "Process still running after pkill (waited up to 8s): $proc"
+        exit 1
+    fi
+done
 log_info "Services stopped"
 
 # ============================================
@@ -98,41 +131,45 @@ echo ""
 # ============================================
 log_step "Starting vendor-daemon..."
 
-cd /mnt
-$DAEMON_BIN > "$DAEMON_LOG" 2>&1 &
+pushd /mnt >/dev/null || {
+    log_error "Cannot change directory to /mnt"
+    exit 1
+}
+"$DAEMON_BIN" > "$DAEMON_LOG" 2>&1 &
 DAEMON_PID=$!
 log_info "vendor-daemon started (PID: $DAEMON_PID)"
 
 sleep 3
 
-# Check if daemon is running
-if ps | grep -q "[v]endor-daemon"; then
+# Check if daemon is running (PID-based — avoids fragile ps|grep races)
+if [ -n "${DAEMON_PID:-}" ] && kill -0 "$DAEMON_PID" 2>/dev/null; then
     log_success "vendor-daemon is running"
 else
     log_error "vendor-daemon failed to start"
     log_error "Check log: $DAEMON_LOG"
+    popd >/dev/null || true
     exit 1
 fi
+popd >/dev/null || true
 
 # ============================================
 # 5. Start onvif-rust
 # ============================================
 log_step "Starting onvif-rust..."
 
-cd /mnt
-$ONVIF_BIN > "$ONVIF_LOG" 2>&1 &
+"$ONVIF_BIN" > "$ONVIF_LOG" 2>&1 &
 ONVIF_PID=$!
 log_info "onvif-rust started (PID: $ONVIF_PID)"
 
 sleep 3
 
 # Check if onvif is running
-if ps | grep -q "[o]nvif-rust"; then
+if [ -n "${ONVIF_PID:-}" ] && kill -0 "$ONVIF_PID" 2>/dev/null; then
     log_success "onvif-rust is running"
 else
     log_error "onvif-rust failed to start"
     log_error "Check log: $ONVIF_LOG"
-    kill $DAEMON_PID 2>/dev/null || true
+    kill "$DAEMON_PID" 2>/dev/null || true
     exit 1
 fi
 
@@ -145,18 +182,22 @@ log_step "Checking RTSP port..."
 
 sleep 2
 
-if netstat -ln 2>/dev/null | grep -q ":8554 "; then
+RTSP_PORT_GREP='(^|[:.])8554($|[^0-9])'
+if netstat -ln 2>/dev/null | grep -E -q "${RTSP_PORT_GREP}"; then
     log_success "RTSP port 8554 is listening"
-elif ss -ln 2>/dev/null | grep -q ":8554 "; then
+elif ss -ln 2>/dev/null | grep -E -q "${RTSP_PORT_GREP}"; then
     log_success "RTSP port 8554 is listening"
 else
     log_warn "RTSP port 8554 not detected yet - may take a moment"
     sleep 2
-    if netstat -ln 2>/dev/null | grep -q ":8554 "; then
+    if netstat -ln 2>/dev/null | grep -E -q "${RTSP_PORT_GREP}"; then
+        log_success "RTSP port 8554 is now listening"
+    elif ss -ln 2>/dev/null | grep -E -q "${RTSP_PORT_GREP}"; then
         log_success "RTSP port 8554 is now listening"
     else
         log_error "RTSP port 8554 not listening"
         log_error "Check onvif log: $ONVIF_LOG"
+        exit 1
     fi
 fi
 
@@ -198,7 +239,12 @@ echo "  - No 'picture is too late' warnings"
 echo ""
 echo "Let the stream run for at least 30 seconds, then press ENTER to continue..."
 echo ""
-read -r
+if [ -t 0 ]; then
+    read -r
+else
+    log_warn "Non-interactive stdin: skipping ENTER wait (sleeping 30s to match minimum stream run, then continuing)"
+    sleep 30
+fi
 
 # ============================================
 # 9. Collect diagnostic information
@@ -245,12 +291,49 @@ echo ""
 # ============================================
 log_step "Stopping services..."
 
-kill $ONVIF_PID $DAEMON_PID 2>/dev/null || true
+if [ -n "${ONVIF_PID:-}" ]; then
+    kill "$ONVIF_PID" 2>/dev/null || true
+fi
+if [ -n "${DAEMON_PID:-}" ]; then
+    kill "$DAEMON_PID" 2>/dev/null || true
+fi
 sleep 1
 
 # Force kill if still running
 pkill -f vendor-daemon 2>/dev/null || true
 pkill -f onvif-rust 2>/dev/null || true
+
+for proc in "vendor-daemon" "onvif-rust"; do
+    if ! wait_proc_gone "$proc" 8; then
+        log_error "Process still running after stop (waited up to 8s): $proc"
+        exit 1
+    fi
+done
+
+if [ -n "${ONVIF_PID:-}" ]; then
+    for _i in $(seq 1 8); do
+        if ! kill -0 "$ONVIF_PID" 2>/dev/null; then
+            break
+        fi
+        sleep 1
+    done
+    if kill -0 "$ONVIF_PID" 2>/dev/null; then
+        log_error "ONVIF_PID=$ONVIF_PID still running after stop"
+        exit 1
+    fi
+fi
+if [ -n "${DAEMON_PID:-}" ]; then
+    for _i in $(seq 1 8); do
+        if ! kill -0 "$DAEMON_PID" 2>/dev/null; then
+            break
+        fi
+        sleep 1
+    done
+    if kill -0 "$DAEMON_PID" 2>/dev/null; then
+        log_error "DAEMON_PID=$DAEMON_PID still running after stop"
+        exit 1
+    fi
+fi
 
 log_info "Services stopped"
 
@@ -274,8 +357,8 @@ echo "=============================================="
 echo "  Integration Test Complete"
 echo "=============================================="
 echo ""
-log_info "To analyze logs, run:"
-echo "  python3 scripts/analyze_test_logs.py \\"
+log_info "To analyze logs (paths relative to repo root, or use this script's directory):"
+echo "  python3 \"${SCRIPT_DIR}/analyze_test_logs.py\" \\"
 echo "    ${LOG_PREFIX}_daemon.log \\"
 echo "    ${LOG_PREFIX}_onvif.log"
 echo ""

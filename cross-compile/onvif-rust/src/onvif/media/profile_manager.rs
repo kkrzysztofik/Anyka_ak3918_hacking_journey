@@ -1951,7 +1951,24 @@ mod tests {
     }
 
     #[test]
-    fn test_max_profiles_limit() {
+    fn test_profile_manager_create_profile_at_limit_succeeds() {
+        let manager = ProfileManager::new();
+        assert_eq!(manager.get_profiles().len(), 2);
+        for i in 0..(MAX_PROFILES - 2) {
+            assert!(
+                manager
+                    .create_profile(format!("Profile{}", i), None)
+                    .is_ok(),
+                "Failed to create profile {} when under limit (MAX_PROFILES={})",
+                i,
+                MAX_PROFILES
+            );
+        }
+        assert_eq!(manager.get_profiles().len(), MAX_PROFILES);
+    }
+
+    #[test]
+    fn test_profile_manager_create_profile_exceeds_limit_fails() {
         let manager = ProfileManager::new();
         // Verify manager starts with 2 default profiles
         assert_eq!(

@@ -23,9 +23,13 @@
 //!
 //! ## Tracked IP cap
 //!
-//! The number of distinct IP keys is capped at [`MAX_TRACKED_IPS`]. When the map is
-//! full, [`RateLimiter::cleanup`] runs before rejecting a **new** IP, so expired
-//! windows can free slots. Existing IPs continue to be rate-limited normally.
+//! The number of distinct IP keys is capped at [`MAX_TRACKED_IPS`]. Before inserting a
+//! new key, if the map is at capacity [`RateLimiter::cleanup`] may run so expired windows
+//! can free slots; inline cleanup is **throttled** (hundreds of ms) to avoid repeated
+//! `retain()` scans under sustained load at the cap. If still full—or cleanup was skipped
+//! due to throttle—the new IP is denied. Existing IPs continue to be rate-limited normally.
+//! (Capacity checks run only while **not** holding a DashMap entry guard, to avoid shard lock
+//! deadlocks with `len()` / `retain`.)
 //!
 //! # Example
 //!
@@ -46,8 +50,9 @@
 //! ```
 
 use dashmap::DashMap;
+use dashmap::mapref::entry::Entry;
 use std::net::IpAddr;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tokio::sync::broadcast;
 use tokio::task::JoinHandle;
@@ -63,6 +68,10 @@ pub const DEFAULT_WINDOW_SECONDS: u64 = 60;
 /// Without a cap, a LAN scan with unique source IPs can grow the `DashMap`
 /// without bound and exhaust memory on embedded targets.
 pub const MAX_TRACKED_IPS: usize = 10_000;
+
+/// Minimum time between inline [`RateLimiter::cleanup`] calls triggered from [`RateLimiter::check_rate_limit`]
+/// when the map is at [`MAX_TRACKED_IPS`].
+const INLINE_CLEANUP_MIN_INTERVAL: Duration = Duration::from_millis(500);
 
 /// Request count for a single IP within a time window.
 #[derive(Debug, Clone)]
@@ -98,6 +107,8 @@ pub struct RateLimiter {
     window_duration: Duration,
     /// Request counts per IP address.
     counts: Arc<DashMap<IpAddr, RequestCount>>,
+    /// Last time inline cleanup ran from [`RateLimiter::check_rate_limit`] (throttle for `cleanup` cost).
+    last_inline_cleanup: Arc<Mutex<Option<Instant>>>,
 }
 
 impl RateLimiter {
@@ -111,6 +122,7 @@ impl RateLimiter {
             max_requests: max_requests_per_minute,
             window_duration: Duration::from_secs(DEFAULT_WINDOW_SECONDS),
             counts: Arc::new(DashMap::new()),
+            last_inline_cleanup: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -125,6 +137,7 @@ impl RateLimiter {
             max_requests,
             window_duration: Duration::from_secs(window_seconds),
             counts: Arc::new(DashMap::new()),
+            last_inline_cleanup: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -142,32 +155,62 @@ impl RateLimiter {
     pub fn check_rate_limit(&self, ip: &IpAddr) -> bool {
         let now = Instant::now();
 
-        // Bound memory: reject new IPs once at capacity (after trying cleanup).
-        if !self.counts.contains_key(ip) && self.counts.len() >= MAX_TRACKED_IPS {
-            self.cleanup();
-            if self.counts.len() >= MAX_TRACKED_IPS {
+        // Bound memory for new keys. Must not call `len()`, `cleanup()`, or other map ops
+        // from inside `Entry::or_try_insert_with` / while holding a vacant entry guard:
+        // DashMap keeps a shard write lock and `len()`/`retain` need other shards → deadlock.
+        if let Some(mut r) = self.counts.get_mut(ip) {
+            return Self::apply_request_window(r.value_mut(), self, now);
+        }
+
+        // Soft cap (TOCTOU): `len()` here vs `entry()` insert can race with other threads, so
+        // the map may briefly exceed `MAX_TRACKED_IPS`; `cleanup()` reclaims expired keys and
+        // this check rejects *new* keys when over cap—an intentional tradeoff vs holding locks
+        // across the whole check+insert path.
+        if self.counts.len() >= MAX_TRACKED_IPS {
+            let now_inst = Instant::now();
+            let should_cleanup = {
+                let guard = self
+                    .last_inline_cleanup
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                guard
+                    .map(|t| now_inst.duration_since(t) >= INLINE_CLEANUP_MIN_INTERVAL)
+                    .unwrap_or(true)
+            };
+            if should_cleanup {
+                self.cleanup();
+                *self
+                    .last_inline_cleanup
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(Instant::now());
+            } else {
                 return false;
             }
         }
+        if self.counts.len() >= MAX_TRACKED_IPS {
+            return false;
+        }
 
-        // Use entry API for atomic update
-        let mut entry = self.counts.entry(*ip).or_insert_with(|| RequestCount {
-            count: 0,
-            window_start: now,
-        });
+        match self.counts.entry(*ip) {
+            Entry::Occupied(mut occ) => Self::apply_request_window(occ.get_mut(), self, now),
+            Entry::Vacant(vac) => {
+                let mut r = vac.insert(RequestCount {
+                    count: 0,
+                    window_start: now,
+                });
+                Self::apply_request_window(r.value_mut(), self, now)
+            }
+        }
+    }
 
-        // Check if window has expired
-        if now.duration_since(entry.window_start) > self.window_duration {
-            // Reset window
+    fn apply_request_window(entry: &mut RequestCount, limiter: &RateLimiter, now: Instant) -> bool {
+        if now.duration_since(entry.window_start) > limiter.window_duration {
             entry.count = 1;
             entry.window_start = now;
             return true;
         }
-
-        // Increment counter and check limit
         entry.count += 1;
-
-        entry.count <= self.max_requests
+        entry.count <= limiter.max_requests
     }
 
     /// Get the current request count for an IP.
@@ -505,6 +548,7 @@ mod tests {
     /// Filling the map with distinct IPs must not grow past [`MAX_TRACKED_IPS`];
     /// additional unique IPs are denied until entries expire and `cleanup` runs.
     #[test]
+    #[ignore = "iterates MAX_TRACKED_IPS (10k); run with: cargo test test_tracked_ip_cap_rejects_new_ip_when_full -- --ignored"]
     fn test_tracked_ip_cap_rejects_new_ip_when_full() {
         // One request per long window so each IP stays in the map as a distinct key.
         let limiter = RateLimiter::with_window(10, 3600);

@@ -2594,7 +2594,7 @@ fn test_session_default_config_has_expected_defaults() {
 
     // Verify expected defaults
     assert_eq!(session.config.rtp_sample_interval, 0);
-    assert_eq!(session.config.max_frame_age_ms, 1000);
+    assert_eq!(session.config.max_frame_age_ms, 1500);
     assert_eq!(session.config.play_ready_timeout_ms, 1500);
     assert_eq!(session.config.lag_recovery_mode, LagRecoveryMode::LatestIdr);
     assert_eq!(session.config.rtsp_listen_addr, "0.0.0.0:554");
@@ -2692,10 +2692,7 @@ impl crate::io::TNetIO for TestNetIO {
     }
 
     fn get_net_type(&self) -> crate::io::NetType {
-        match self.net_type {
-            crate::io::NetType::TCP => crate::io::NetType::TCP,
-            crate::io::NetType::UDP => crate::io::NetType::UDP,
-        }
+        self.net_type
     }
 }
 
@@ -2751,8 +2748,8 @@ fn make_counters() -> std::sync::Arc<RtpTrackCounters> {
 #[tokio::test]
 async fn test_tcp_batching_flushes_once_per_marker_terminated_frame() {
     let writes = Arc::new(tokio::sync::Mutex::new(Vec::<Bytes>::new()));
-    let io: std::sync::Arc<Mutex<Box<dyn crate::io::TNetIO + Send + Sync>>> =
-        std::sync::Arc::new(Mutex::new(Box::new(TestNetIO::new(
+    let io: std::sync::Arc<tokio::sync::Mutex<Box<dyn crate::io::TNetIO + Send + Sync>>> =
+        std::sync::Arc::new(tokio::sync::Mutex::new(Box::new(TestNetIO::new(
             writes.clone(),
             crate::io::NetType::TCP,
         ))));
@@ -2764,6 +2761,7 @@ async fn test_tcp_batching_flushes_once_per_marker_terminated_frame() {
         "sess-1".to_string(),
         make_socket_addr(),
         0,
+        1024 * 1024,
     );
 
     for seq in 1..=5u16 {
@@ -2786,8 +2784,8 @@ async fn test_tcp_batching_flushes_once_per_marker_terminated_frame() {
 #[tokio::test]
 async fn test_tcp_batching_keeps_frames_separate_across_markers() {
     let writes = std::sync::Arc::new(tokio::sync::Mutex::new(Vec::<bytes::Bytes>::new()));
-    let io: std::sync::Arc<Mutex<Box<dyn crate::io::TNetIO + Send + Sync>>> =
-        std::sync::Arc::new(Mutex::new(Box::new(TestNetIO::new(
+    let io: std::sync::Arc<tokio::sync::Mutex<Box<dyn crate::io::TNetIO + Send + Sync>>> =
+        std::sync::Arc::new(tokio::sync::Mutex::new(Box::new(TestNetIO::new(
             writes.clone(),
             crate::io::NetType::TCP,
         ))));
@@ -2799,6 +2797,7 @@ async fn test_tcp_batching_keeps_frames_separate_across_markers() {
         "sess-2".to_string(),
         make_socket_addr(),
         0,
+        1024 * 1024,
     );
 
     handler(io.clone(), make_test_rtp_packet(1, 0, 64))
@@ -2820,8 +2819,8 @@ async fn test_tcp_batching_keeps_frames_separate_across_markers() {
 #[tokio::test]
 async fn test_tcp_batching_handles_large_iframe_burst() {
     let writes = std::sync::Arc::new(tokio::sync::Mutex::new(Vec::<bytes::Bytes>::new()));
-    let io: std::sync::Arc<Mutex<Box<dyn crate::io::TNetIO + Send + Sync>>> =
-        std::sync::Arc::new(Mutex::new(Box::new(TestNetIO::new(
+    let io: std::sync::Arc<tokio::sync::Mutex<Box<dyn crate::io::TNetIO + Send + Sync>>> =
+        std::sync::Arc::new(tokio::sync::Mutex::new(Box::new(TestNetIO::new(
             writes.clone(),
             crate::io::NetType::TCP,
         ))));
@@ -2833,6 +2832,7 @@ async fn test_tcp_batching_handles_large_iframe_burst() {
         "sess-3".to_string(),
         make_socket_addr(),
         0,
+        1024 * 1024,
     );
 
     for seq in 0..71 {
@@ -2852,8 +2852,8 @@ async fn test_tcp_batching_handles_large_iframe_burst() {
 #[tokio::test]
 async fn test_udp_batching_flushes_all_packets_on_marker() {
     let writes = std::sync::Arc::new(tokio::sync::Mutex::new(Vec::<bytes::Bytes>::new()));
-    let io: std::sync::Arc<Mutex<Box<dyn crate::io::TNetIO + Send + Sync>>> =
-        std::sync::Arc::new(Mutex::new(Box::new(TestNetIO::new(
+    let io: std::sync::Arc<tokio::sync::Mutex<Box<dyn crate::io::TNetIO + Send + Sync>>> =
+        std::sync::Arc::new(tokio::sync::Mutex::new(Box::new(TestNetIO::new(
             writes.clone(),
             crate::io::NetType::UDP,
         ))));
@@ -2864,6 +2864,9 @@ async fn test_udp_batching_flushes_all_packets_on_marker() {
         "sess-udp".to_string(),
         make_socket_addr(),
         0,
+        10,
+        300,
+        1024 * 1024,
     );
 
     for seq in 10..20u16 {
@@ -2884,8 +2887,8 @@ async fn test_udp_batching_flushes_all_packets_on_marker() {
 #[tokio::test]
 async fn test_async_bytes_writer_flush_moves_buffer_contents() {
     let writes = std::sync::Arc::new(tokio::sync::Mutex::new(Vec::<bytes::Bytes>::new()));
-    let io: std::sync::Arc<Mutex<Box<dyn crate::io::TNetIO + Send + Sync>>> =
-        std::sync::Arc::new(Mutex::new(Box::new(TestNetIO::new(
+    let io: std::sync::Arc<tokio::sync::Mutex<Box<dyn crate::io::TNetIO + Send + Sync>>> =
+        std::sync::Arc::new(tokio::sync::Mutex::new(Box::new(TestNetIO::new(
             writes.clone(),
             crate::io::NetType::TCP,
         ))));

@@ -1,8 +1,12 @@
+// Tests for RTP send counters and TCP interleaved header parsing (`InterleavedBinaryData`).
+//
+// Covers anomaly detection (sequence gaps/regressions, timestamp wrap), snapshot timing, and
+// framing edge cases used by the RTSP session layer.
+
 use super::*;
 use crate::io::bytes_reader::BytesReader;
+use crate::protocol::rtsp::session::errors::SessionErrorValue;
 use bytes::BytesMut;
-use std::sync::atomic::Ordering;
-
 // ========================================================================
 // InterleavedBinaryData Tests
 // ========================================================================
@@ -13,11 +17,16 @@ fn test_interleaved_binary_data_parse_valid() {
     let data: &[u8] = &[0x24, 0x00, 0x00, 0x04, 0xDE, 0xAD, 0xBE, 0xEF];
     let mut reader = BytesReader::new(BytesMut::from(data));
 
-    let result = InterleavedBinaryData::new(&mut reader).unwrap();
-    assert!(result.is_some());
-    let interleaved = result.unwrap();
-    assert_eq!(interleaved.channel_identifier, 0x00);
-    assert_eq!(interleaved.length, 4);
+    let parsed = InterleavedBinaryData::new(&mut reader).unwrap();
+    let Some(interleaved) = parsed else {
+        panic!("expected Some for valid interleaved header");
+    };
+    assert_eq!(
+        interleaved.channel_identifier, 0x00,
+        "channel id: got {}",
+        interleaved.channel_identifier
+    );
+    assert_eq!(interleaved.length, 4, "length: got {}", interleaved.length);
 }
 
 #[test]
@@ -27,8 +36,9 @@ fn test_interleaved_binary_data_parse_channel_1() {
     let mut reader = BytesReader::new(BytesMut::from(data));
 
     let result = InterleavedBinaryData::new(&mut reader).unwrap();
-    assert!(result.is_some());
-    let interleaved = result.unwrap();
+    let Some(interleaved) = result else {
+        panic!("expected Some for channel 1");
+    };
     assert_eq!(interleaved.channel_identifier, 0x01);
     assert_eq!(interleaved.length, 10);
 }
@@ -40,8 +50,9 @@ fn test_interleaved_binary_data_parse_large_length() {
     let mut reader = BytesReader::new(BytesMut::from(data));
 
     let result = InterleavedBinaryData::new(&mut reader).unwrap();
-    assert!(result.is_some());
-    let interleaved = result.unwrap();
+    let Some(interleaved) = result else {
+        panic!("expected Some for 0xFFFF length");
+    };
     assert_eq!(interleaved.channel_identifier, 0x02);
     assert_eq!(interleaved.length, 65535);
 }
@@ -53,7 +64,7 @@ fn test_interleaved_binary_data_no_dollar_sign() {
     let mut reader = BytesReader::new(BytesMut::from(data));
 
     let result = InterleavedBinaryData::new(&mut reader).unwrap();
-    assert!(result.is_none());
+    assert!(result.is_none(), "expected None when not starting with $");
 }
 
 #[test]
@@ -63,8 +74,7 @@ fn test_interleaved_binary_data_insufficient_data() {
     let mut reader = BytesReader::new(BytesMut::from(data));
 
     let result = InterleavedBinaryData::new(&mut reader);
-    // Should return an error due to insufficient bytes
-    assert!(result.is_err());
+    assert!(result.is_err(), "expected Err for truncated header after $");
 }
 
 #[test]
@@ -73,7 +83,19 @@ fn test_interleaved_binary_data_empty() {
     let mut reader = BytesReader::new(BytesMut::from(data));
 
     let result = InterleavedBinaryData::new(&mut reader);
-    assert!(result.is_err());
+    assert!(result.is_err(), "expected Err for empty reader");
+}
+
+#[test]
+fn test_interleaved_binary_data_zero_length_errors() {
+    let data: &[u8] = &[0x24, 0x01, 0x00, 0x00];
+    let mut reader = BytesReader::new(BytesMut::from(data));
+    let err = InterleavedBinaryData::new(&mut reader).expect_err("zero length must error");
+    assert!(
+        matches!(err.value, SessionErrorValue::ZeroLengthInterleavedPayload),
+        "expected ZeroLengthInterleavedPayload, got {:?}",
+        err.value
+    );
 }
 
 // ========================================================================
@@ -83,12 +105,12 @@ fn test_interleaved_binary_data_empty() {
 #[test]
 fn test_rtp_track_counters_new_initial_state() {
     let counters = RtpTrackCounters::new();
-    assert_eq!(counters.packet_count.load(Ordering::Relaxed), 0);
-    assert_eq!(counters.byte_count.load(Ordering::Relaxed), 0);
-    assert_eq!(counters.first_send_ms.load(Ordering::Relaxed), 0);
-    assert_eq!(counters.last_send_ms.load(Ordering::Relaxed), 0);
-    assert_eq!(counters.last_seq.load(Ordering::Relaxed), u32::MAX);
-    assert_eq!(counters.last_timestamp.load(Ordering::Relaxed), u32::MAX);
+    assert_eq!(counters.packet_count(), 0);
+    assert_eq!(counters.byte_count(), 0);
+    assert_eq!(counters.first_send_ms(), 0);
+    assert_eq!(counters.last_send_ms(), 0);
+    assert_eq!(counters.last_seq_raw(), u32::MAX);
+    assert_eq!(counters.last_timestamp_raw(), u32::MAX);
 }
 
 #[test]
@@ -153,7 +175,10 @@ fn test_rtp_track_counters_sequence_regression_detected() {
     counters.on_packet_sent(100, 1005, 45000);
     let obs = counters.on_packet_sent(150, 1000, 48000);
 
-    assert!(obs.seq_delta.unwrap() >= 0x8000);
+    let seq_delta = obs
+        .seq_delta
+        .expect("expected seq_delta to be Some for backwards sequence step");
+    assert!(seq_delta >= RTP_SEQUENCE_WRAP_THRESHOLD);
     assert!(obs.seq_regressed);
     assert!(!obs.seq_gap);
 }
@@ -185,14 +210,15 @@ fn test_rtp_track_counters_snapshot_initial() {
 fn test_rtp_track_counters_snapshot_after_sends() {
     let counters = RtpTrackCounters::new();
     counters.on_packet_sent(100, 1000, 45000);
-    std::thread::sleep(std::time::Duration::from_millis(10));
+    std::thread::sleep(std::time::Duration::from_millis(100));
     counters.on_packet_sent(150, 1001, 48000);
 
     let (packets, bytes, duration) = counters.snapshot();
     assert_eq!(packets, 2);
     assert_eq!(bytes, 250);
     assert!(duration.is_some());
-    assert!(duration.unwrap() >= 10);
+    // 100ms wall sleep: allow CI jitter; still require a clearly non-zero gap.
+    assert!(duration.unwrap() >= 50, "duration_ms={:?}", duration);
 }
 
 // ========================================================================

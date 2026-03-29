@@ -30,9 +30,10 @@ pub const MEDIA_SERVICE_NAMESPACE: &str = "http://www.onvif.org/ver10/media/wsdl
 
 /// Default maximum number of media profiles (concurrent) supported on device.
 ///
-/// This is the enforced limit used by capabilities and `create_profile` paths;
-/// it is intentionally **16** (not 10) to match current product defaults while
-/// staying bounded for embedded heaps.
+/// Set to **16** to align with current product defaults and avoid regressions for
+/// deployments that already rely on that cap, while keeping a fixed upper bound
+/// suitable for small embedded heaps. The limit is enforced in capabilities and
+/// `create_profile` paths.
 pub const MAX_PROFILES: usize = 16;
 
 /// Default video source token.

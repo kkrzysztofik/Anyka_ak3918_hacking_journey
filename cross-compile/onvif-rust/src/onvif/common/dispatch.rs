@@ -21,7 +21,7 @@
 //! For handlers that don't need async:
 //!
 //! ```
-//! use onvif_rust::onvif::common::dispatch::dispatch_sync;
+//! use onvif_rust::onvif::common::dispatch_sync;
 //! use onvif_rust::onvif::error::OnvifResult;
 //!
 //! #[derive(serde::Deserialize)]
@@ -40,9 +40,12 @@
 //!     })
 //! }
 //!
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! let body_xml = r#"<GetDeviceInformation xmlns="http://www.onvif.org/ver10/device/wsdl"/>"#;
-//! let body_xml_out = dispatch_sync(body_xml, handle_get_device_info).unwrap();
+//! let body_xml_out = dispatch_sync(body_xml, handle_get_device_info)?;
 //! assert!(body_xml_out.contains("Anyka"));
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! ## Async Dispatch
@@ -50,7 +53,7 @@
 //! For handlers that need async (most real handlers):
 //!
 //! ```
-//! use onvif_rust::onvif::common::dispatch::dispatch_async;
+//! use onvif_rust::onvif::common::dispatch_async;
 //! use onvif_rust::onvif::error::OnvifResult;
 //! use tokio;
 //!
@@ -73,11 +76,14 @@
 //!     })
 //! }
 //!
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! let body_xml = r#"<GetProfiles xmlns="http://www.onvif.org/ver10/media/wsdl"/>"#;
-//! let body_xml_out = tokio::runtime::Runtime::new().unwrap().block_on(
-//!     dispatch_async(body_xml, handle_get_profiles)
-//! ).unwrap();
+//! let body_xml_out: String = tokio::runtime::Runtime::new()?.block_on(async {
+//!     dispatch_async(body_xml, handle_get_profiles).await
+//! })?;
 //! assert!(body_xml_out.contains("Main"));
+//! # Ok(())
+//! # }
 //! ```
 
 use serde::Serialize;
@@ -132,7 +138,7 @@ pub(crate) struct TestResponseDispatch {
 /// # Example
 ///
 /// ```
-/// use onvif_rust::onvif::common::dispatch::dispatch_sync;
+/// use onvif_rust::onvif::common::dispatch_sync;
 /// use onvif_rust::onvif::error::OnvifResult;
 ///
 /// #[derive(serde::Deserialize)]
@@ -147,9 +153,12 @@ pub(crate) struct TestResponseDispatch {
 ///     Ok(GetHostnameResponse { hostname: "camera".to_string() })
 /// }
 ///
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// let xml = r#"<GetHostname xmlns="http://www.onvif.org/ver10/device/wsdl"/>"#;
-/// let result = dispatch_sync(xml, handle);
-/// assert!(result.is_ok());
+/// let body_xml_out = dispatch_sync(xml, handle)?;
+/// assert!(body_xml_out.contains("camera"));
+/// # Ok(())
+/// # }
 /// ```
 pub fn dispatch_sync<Req, Resp>(
     body_xml: &str,
@@ -209,7 +218,7 @@ where
 /// # Example
 ///
 /// ```
-/// use onvif_rust::onvif::common::dispatch::dispatch_async;
+/// use onvif_rust::onvif::common::dispatch_async;
 /// use onvif_rust::onvif::error::OnvifResult;
 /// use tokio;
 ///
@@ -232,11 +241,14 @@ where
 ///     })
 /// }
 ///
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// let xml = r#"<GetProfiles xmlns="http://www.onvif.org/ver10/media/wsdl"/>"#;
-/// let result = tokio::runtime::Runtime::new().unwrap().block_on(
-///     dispatch_async(xml, handle)
-/// );
-/// assert!(result.is_ok());
+/// let body_xml_out: String = tokio::runtime::Runtime::new()?.block_on(async {
+///     dispatch_async(xml, handle).await
+/// })?;
+/// assert!(body_xml_out.contains("main"));
+/// # Ok(())
+/// # }
 /// ```
 pub async fn dispatch_async<Req, Resp, F, Fut>(body_xml: &str, handler: F) -> OnvifResult<String>
 where

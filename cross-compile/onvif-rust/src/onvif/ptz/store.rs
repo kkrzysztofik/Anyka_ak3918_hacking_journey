@@ -383,7 +383,23 @@ mod tests {
     }
 
     #[test]
-    fn test_max_presets() {
+    fn test_create_preset_at_limit_succeeds() {
+        let store = PresetStore::new();
+        let position = create_test_position();
+        for i in 0..MAX_PRESETS {
+            assert!(
+                store
+                    .set_preset(format!("Preset{}", i), position.clone(), None)
+                    .is_ok(),
+                "Failed to create preset {}",
+                i
+            );
+        }
+        assert_eq!(store.len(), MAX_PRESETS as usize);
+    }
+
+    #[test]
+    fn test_preset_set_exceeds_limit_returns_error() {
         let store = PresetStore::new();
         let position = create_test_position();
 
