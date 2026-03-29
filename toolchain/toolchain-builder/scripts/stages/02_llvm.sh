@@ -66,11 +66,13 @@ stage_llvm() {
     local cmake_args=(
         -G Ninja
         -DCMAKE_BUILD_TYPE=Release
-        # Host compiler (native x86-64 gcc/g++) — NOT the ARM cross-compiler
-        -DCMAKE_C_COMPILER=gcc
-        -DCMAKE_CXX_COMPILER=g++
-        -DCMAKE_AR=ar
-        -DCMAKE_RANLIB=ranlib
+        # Host compiler (native x86-64 gcc/g++) — NOT the ARM cross-compiler.
+        # Use full paths: cmake resolves bare names relative to the build
+        # directory, causing ar/ranlib to be looked up in the wrong place.
+        -DCMAKE_C_COMPILER="$(command -v gcc)"
+        -DCMAKE_CXX_COMPILER="$(command -v g++)"
+        -DCMAKE_AR="$(command -v ar)"
+        -DCMAKE_RANLIB="$(command -v ranlib)"
         # Target backends to include in the built LLVM
         -DLLVM_TARGETS_TO_BUILD="${llvm_targets}"
         -DLLVM_DEFAULT_TARGET_TRIPLE="${TARGET_TUPLE}"
