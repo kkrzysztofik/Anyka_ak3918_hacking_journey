@@ -43,24 +43,31 @@ stage_llvm() {
     cd "${llvm_build}"
 
     # Configure LLVM
-    log_info "Configuring LLVM ${LLVM_VERSION}..."
+    # LLVM is a HOST tool (runs on x86-64, emits ARM code).
+    # It MUST be built with the native compiler, NOT the cross-compiler.
+    log_info "Configuring LLVM ${LLVM_VERSION} (host build targeting ${ARCH})..."
+
+    # Select which LLVM backends to build based on target architecture.
+    local llvm_targets
+    case "${ARCH}" in
+        armv5te)  llvm_targets="ARM" ;;
+        aarch64)  llvm_targets="AArch64" ;;
+        *)        llvm_targets="ARM;AArch64" ;;
+    esac
 
     local cmake_args=(
         -G Ninja
         -DCMAKE_BUILD_TYPE=Release
-        -DLLVM_TARGETS_TO_BUILD="ARM;AArch64"
+        # Host compiler (native x86-64 gcc/g++) — NOT the ARM cross-compiler
+        -DCMAKE_C_COMPILER=gcc
+        -DCMAKE_CXX_COMPILER=g++
+        -DCMAKE_AR=ar
+        -DCMAKE_RANLIB=ranlib
+        # Target backends to include in the built LLVM
+        -DLLVM_TARGETS_TO_BUILD="${llvm_targets}"
         -DLLVM_DEFAULT_TARGET_TRIPLE="${TARGET_TUPLE}"
-        -DCMAKE_C_COMPILER="${CROSS_CC}"
-        -DCMAKE_CXX_COMPILER="${CROSS_CXX}"
-        -DCMAKE_AR="${CROSS_AR}"
-        -DCMAKE_RANLIB="${CROSS_RANLIB}"
-        -DCMAKE_SYSROOT="${SYSROOT}"
-        -DCMAKE_FIND_ROOT_PATH="${SYSROOT}"
-        -DCMAKE_FIND_ROOT_PATH_MODE_PROGRAM=NEVER
-        -DCMAKE_FIND_ROOT_PATH_MODE_LIBRARY=ONLY
-        -DCMAKE_FIND_ROOT_PATH_MODE_INCLUDE=ONLY
-        -DLLVM_ENABLE_PROJECTS="clang;lld;compiler-rt"
-        -DLLVM_ENABLE_RUNTIMES="compiler-rt"
+        # Build clang + lld; compiler-rt builtins are built separately in stage 3
+        -DLLVM_ENABLE_PROJECTS="clang;lld"
         -DCLANG_ENABLE_ARCMOVE=OFF
         -DCLANG_ENABLE_STATIC_ANALYZER=OFF
         -DCLANG_ENABLE_OBJC_REWRITER=OFF
@@ -69,14 +76,6 @@ stage_llvm() {
         -DLLVM_INCLUDE_DOCS=OFF
         -DCMAKE_INSTALL_PREFIX="${llvm_install}"
     )
-
-    # ARM-specific configuration
-    if [[ "${ARCH}" == "armv5te" ]]; then
-        cmake_args+=(
-            -DLLVM_TARGET_ARCH=ARM
-            -DLLVM_TARGETS_TO_BUILD=ARM
-        )
-    fi
 
     cmake "${llvm_src}/llvm" "${cmake_args[@]}"
 
