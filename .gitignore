@@ -18,6 +18,7 @@ toolchain/toolchain-builder/crosstool-ng-*/**/*
 toolchain/toolchain-builder/compiler-rt-*/**/*
 toolchain/toolchain-builder/*.log
 toolchain/toolchain-builder/.config.old
+toolchain/toolchain-builder/.config
 cross-compile/gsoap/**/*
 target/**/*
 
