@@ -29,7 +29,13 @@ stage_gdb() {
         log_info "Downloading GDB ${GDB_VERSION}..."
         cd "${BUILD_DIR}"
         if [[ ! -f "${gdb_tarball}" ]]; then
-            wget -q "https://sourceware.org/pub/gdb/releases/${gdb_tarball}"
+            local gdb_url="https://sourceware.org/pub/gdb/releases/${gdb_tarball}"
+            log_info "Fetching ${gdb_url}"
+            wget "${gdb_url}" -O "${gdb_tarball}" || {
+                rm -f "${gdb_tarball}"
+                log_error "Failed to download GDB ${GDB_VERSION}"
+                exit 1
+            }
         fi
         tar -xf "${gdb_tarball}"
     fi

@@ -27,9 +27,13 @@ _install_ctng() {
     if [[ ! -d "${CTNG_SRC_DIR}" ]]; then
         log_info "Downloading crosstool-NG ${CROSSTOOL_NG_VERSION}..."
         if [[ ! -f "${tarball}" ]]; then
-            wget -q \
-                "https://github.com/crosstool-ng/crosstool-ng/releases/download/crosstool-ng-${CROSSTOOL_NG_VERSION}/crosstool-ng-${CROSSTOOL_NG_VERSION}.tar.xz" \
-                -O "${tarball}"
+            local ctng_url="https://github.com/crosstool-ng/crosstool-ng/releases/download/crosstool-ng-${CROSSTOOL_NG_VERSION}/crosstool-ng-${CROSSTOOL_NG_VERSION}.tar.xz"
+            log_info "Fetching ${ctng_url}"
+            wget "${ctng_url}" -O "${tarball}" || {
+                rm -f "${tarball}"
+                log_error "Failed to download crosstool-NG ${CROSSTOOL_NG_VERSION}"
+                exit 1
+            }
         fi
         tar -xf "${tarball}" -C "${BUILD_DIR}"
     fi

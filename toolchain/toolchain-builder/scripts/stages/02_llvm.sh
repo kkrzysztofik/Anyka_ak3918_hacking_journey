@@ -25,17 +25,25 @@ stage_llvm() {
     local llvm_build="${BUILD_DIR}/.build/llvm-${LLVM_VERSION}"
     local llvm_install="${INSTALL_DIR}"
 
-    # Download LLVM source if needed
+    # Download LLVM source if needed.
+    # GitHub releases use the ".src.tar.xz" suffix for source tarballs.
     if [[ ! -d "${llvm_src}" ]]; then
         log_info "Downloading LLVM ${LLVM_VERSION}..."
         mkdir -p "$(dirname "${llvm_src}")"
-        local llvm_project="llvm-project-${LLVM_VERSION}.tar.xz"
+        local llvm_tarball="llvm-project-${LLVM_VERSION}.src.tar.xz"
+        local llvm_url="https://github.com/llvm/llvm-project/releases/download/llvmorg-${LLVM_VERSION}/${llvm_tarball}"
         cd "${BUILD_DIR}"
-        if [[ ! -f "${llvm_project}" ]]; then
-            wget -q "https://github.com/llvm/llvm-project/releases/download/llvmorg-${LLVM_VERSION}/${llvm_project}"
+        if [[ ! -f "${llvm_tarball}" ]]; then
+            log_info "Fetching ${llvm_url}"
+            wget "${llvm_url}" -O "${llvm_tarball}" || {
+                rm -f "${llvm_tarball}"
+                log_error "Failed to download LLVM ${LLVM_VERSION} from: ${llvm_url}"
+                exit 1
+            }
         fi
+        log_info "Extracting LLVM source..."
         mkdir -p "${llvm_src}"
-        tar --strip-components=1 -xf "${llvm_project}" -C "${llvm_src}"
+        tar --strip-components=1 -xf "${llvm_tarball}" -C "${llvm_src}"
     fi
 
     # Create build directory
