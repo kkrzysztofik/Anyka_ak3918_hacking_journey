@@ -7,7 +7,7 @@ Unified build system for the Anyka AK3918 cross-compilation toolchain.
 Build the complete toolchain with a single command:
 
 ```bash
-cd toolchain/build-new
+cd toolchain/toolchain-builder
 ./build.sh
 ```
 
@@ -53,7 +53,7 @@ Options:
 ## Architecture
 
 ```
-toolchain/build-new/
+toolchain/toolchain-builder/
 ├── build.sh              # Unified entrypoint (single command)
 ├── README.md             # This file
 ├── scripts/              # Build scripts (tracked in git)
@@ -77,7 +77,7 @@ toolchain/build-new/
 
 The build system uses checkpoints to track progress. Completed stages are skipped on subsequent runs.
 
-- View checkpoints: `ls toolchain/build-new/build/.checkpoints/`
+- View checkpoints: `ls toolchain/toolchain-builder/build/.checkpoints/`
 - Resume: `build.sh --resume` (default)
 - Clean: `build.sh --clean` (force full rebuild)
 
@@ -126,7 +126,7 @@ The build system is designed for easy iteration:
 
 If a stage fails and you want to retry:
 ```bash
-rm toolchain/build-new/build/.checkpoints/<stage_name>
+rm toolchain/toolchain-builder/build/.checkpoints/<stage_name>
 ./build.sh --resume
 ```
 

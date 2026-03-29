@@ -51,7 +51,7 @@ The toolchain build system supports multiple architectures:
 ### Quick Start: Single Command Build
 
 ```bash
-cd /home/kmk/anyka-dev/toolchain/build-new
+cd /home/kmk/anyka-dev/toolchain/toolchain-builder
 ./build.sh
 ```
 
@@ -101,7 +101,7 @@ After building, the toolchains will be available at:
   - `../aarch64-unknown-linux-gnu-toolchain/bin/cargo`
   - `../aarch64-unknown-linux-gnu-toolchain/bin/clang`
 
-For detailed toolchain build instructions, see the [Toolchain Build README](toolchain/build-new/README.md).
+For detailed toolchain build instructions, see the [Toolchain Build README](toolchain/toolchain-builder/README.md).
 
 ## Rust Development Setup
 

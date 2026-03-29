@@ -7,7 +7,7 @@ set -euo pipefail
 # =============================================================================
 # Path Model - Centralized for entire build system
 # =============================================================================
-# All paths are relative to the build-new/ root for portability
+# All paths are relative to the toolchain-builder/ root for portability
 # and relative to absolute paths when invoked from elsewhere
 
 # Root of the build system (where build.sh lives)
@@ -27,7 +27,7 @@ fi
 export BUILD_DIR="${ROOT_DIR}/build"
 
 # Install directory (final toolchain destination)
-# Default: sibling to build-new/ (arm-anykav200-crosstool-ng/)
+# Default: sibling to toolchain-builder/ (arm-anykav200-crosstool-ng/)
 # Set based on ARCH after ARCH is determined below
 
 # =============================================================================
