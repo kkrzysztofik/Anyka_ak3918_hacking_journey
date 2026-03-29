@@ -145,6 +145,10 @@ main() {
     # Source common functions
     source "${SCRIPTS_DIR}/common.sh"
 
+    # Check if newer upstream versions are available (informational, never fails)
+    source "${SCRIPTS_DIR}/check-versions.sh"
+    check_upstream_versions
+
     # Check all host dependencies upfront so the user gets one clear message
     # listing every missing package and the full apt-get install command,
     # rather than discovering missing tools mid-build hours later.
