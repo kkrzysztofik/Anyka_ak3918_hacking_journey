@@ -213,7 +213,7 @@ describe('crypto utilities', () => {
       const originalCrypto = globalThis.crypto;
 
       const mockCrypto = {
-        getRandomValues: (arr: Uint8Array) => originalCrypto.getRandomValues(arr),
+        getRandomValues: originalCrypto.getRandomValues.bind(originalCrypto),
       };
 
       vi.stubGlobal('crypto', mockCrypto);
@@ -231,7 +231,7 @@ describe('crypto utilities', () => {
       const originalCrypto = globalThis.crypto;
 
       const mockCrypto = {
-        getRandomValues: (arr: Uint8Array) => originalCrypto.getRandomValues(arr),
+        getRandomValues: originalCrypto.getRandomValues.bind(originalCrypto),
       };
 
       vi.stubGlobal('crypto', mockCrypto);

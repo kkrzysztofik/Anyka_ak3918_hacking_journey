@@ -15,7 +15,7 @@ When working in this subtree, load and follow:
 ```bash
 cd cross-compile/www
 npm run lint
-npm run type-check
+npm run type-check   # TS 7 (`tsc`) then TS 6 (`tsc6`) side-by-side
 npm run test
 ```
 

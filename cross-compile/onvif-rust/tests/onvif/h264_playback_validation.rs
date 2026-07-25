@@ -102,7 +102,7 @@ mod tests {
             .await
             .unwrap();
 
-        let (sender, mut receiver) = mpsc::unbounded_channel();
+        let (sender, mut receiver) = streaming_lib::frame_data_channel();
         let handle = publisher.start_publishing(sender);
 
         let mut frame_count = 0;
@@ -138,7 +138,7 @@ mod tests {
             .await
             .unwrap();
 
-        let (sender, mut receiver) = mpsc::unbounded_channel();
+        let (sender, mut receiver) = streaming_lib::frame_data_channel();
         let data_sender = DataSender::Frame { sender };
 
         let result = publisher
@@ -238,7 +238,7 @@ mod tests {
 
         assert!(!publisher.is_publishing().await);
 
-        let (sender, _receiver) = mpsc::unbounded_channel();
+        let (sender, _receiver) = streaming_lib::frame_data_channel();
         let handle = publisher.start_publishing(sender);
 
         tokio::time::sleep(Duration::from_millis(20)).await;

@@ -387,8 +387,8 @@ async fn test_stop_pan_tilt_only() {
     // This test documents expected behavior
 }
 
-#[test]
-fn test_get_status_returns_position_and_movement() {
+#[tokio::test]
+async fn test_get_status_returns_position_and_movement() {
     let (service, state) = create_service_with_state();
 
     // Set a known position
@@ -408,6 +408,7 @@ fn test_get_status_returns_position_and_movement() {
         .handle_get_status(GetStatus {
             profile_token: "Profile1".to_string(),
         })
+        .await
         .unwrap();
 
     // Check position
@@ -689,13 +690,15 @@ fn test_get_compatible_configurations() {
 // Error Handling Integration Tests
 // ============================================================================
 
-#[test]
-fn test_empty_profile_token_rejected() {
+#[tokio::test]
+async fn test_empty_profile_token_rejected() {
     let service = create_test_service();
 
-    let result = service.handle_get_status(GetStatus {
-        profile_token: "".to_string(),
-    });
+    let result = service
+        .handle_get_status(GetStatus {
+            profile_token: "".to_string(),
+        })
+        .await;
 
     assert!(result.is_err());
 }
@@ -1147,28 +1150,30 @@ fn test_get_service_capabilities_has_reverse_support() {
     let _reverse = response.capabilities.reverse;
 }
 
-#[test]
-fn test_get_status_has_position() {
+#[tokio::test]
+async fn test_get_status_has_position() {
     let (service, _state) = create_service_with_state();
 
     let response = service
         .handle_get_status(GetStatus {
             profile_token: "Profile1".to_string(),
         })
+        .await
         .unwrap();
 
     // Should have position information
     assert!(response.ptz_status.position.is_some());
 }
 
-#[test]
-fn test_get_status_has_move_status() {
+#[tokio::test]
+async fn test_get_status_has_move_status() {
     let (service, _state) = create_service_with_state();
 
     let response = service
         .handle_get_status(GetStatus {
             profile_token: "Profile1".to_string(),
         })
+        .await
         .unwrap();
 
     // Should have move status

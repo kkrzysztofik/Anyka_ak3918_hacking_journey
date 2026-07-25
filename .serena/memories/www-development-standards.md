@@ -6,7 +6,9 @@
 ```bash
 cd cross-compile/www
 npm run lint                       # ESLint check (zero warnings)
-npm run type-check                 # TypeScript validation (no errors)
+npm run type-check                 # TS 7 (`tsc`) then TS 6 (`tsc6`) side-by-side
+npm run type-check:ts7             # TypeScript 7 native checker only
+npm run type-check:ts6             # TypeScript 6 checker only (eslint API peer)
 npm run test                       # All tests must pass
 npm run prettier                   # Format code
 ```
