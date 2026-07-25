@@ -47,7 +47,21 @@ impl PtzHalTrait for NativePtzHal {
     fn ptz_turn(&self, direction: ptz_turn_direction, degree: i32) -> i32 {
         self.driver
             .turn(direction, degree)
-            .map(|()| AK_SUCCESS_I32)
+            .map(|_| AK_SUCCESS_I32)
+            .unwrap_or(AK_FAILED_I32)
+    }
+
+    fn ptz_start_turn(&self, direction: ptz_turn_direction, degree: i32) -> i32 {
+        self.driver
+            .start_turn(direction, degree)
+            .map(|_| AK_SUCCESS_I32)
+            .unwrap_or(AK_FAILED_I32)
+    }
+
+    fn ptz_wait_turn(&self, direction: ptz_turn_direction) -> i32 {
+        self.driver
+            .wait_turn(direction)
+            .map(|_| AK_SUCCESS_I32)
             .unwrap_or(AK_FAILED_I32)
     }
 
@@ -60,5 +74,9 @@ impl PtzHalTrait for NativePtzHal {
             .stop(direction)
             .map(|()| AK_SUCCESS_I32)
             .unwrap_or(AK_FAILED_I32)
+    }
+
+    fn ptz_interrupt(&self) {
+        self.driver.interrupt();
     }
 }

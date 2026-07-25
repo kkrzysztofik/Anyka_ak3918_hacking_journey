@@ -3,15 +3,30 @@
 //! Talks directly to `/dev/ak-motor0` (horizontal) and `/dev/ak-motor1` (vertical)
 //! via ioctl/read. ABI matches [qiwen/anycloud39ev300 SDK kernel ak_motor.h](https://github.com/...).
 //! No C PTZ library dependency.
+//!
+//! # Concurrency model
+//!
+//! Motor completion is signalled asynchronously by the kernel via `read()`. Waiting
+//! for that signal must never block the driver `Mutex`, otherwise a concurrent `Stop`
+//! (or a superseding move) cannot preempt an in-flight turn. Two mechanisms make the
+//! wait cooperative:
+//!
+//! 1. `turn`/`wait_turn` clone an `Arc<MotorHandle>` out of the driver `Mutex` and
+//!    release the lock **before** entering the blocking `select()`/`read()` loop, so
+//!    the stop path can still reach the motor fds.
+//! 2. `wait_event_interruptible` polls a shared [`AtomicBool`] stop flag on a ~100ms
+//!    cadence; when the flag is set it issues `AK_MOTOR_TURN_STOP` and returns
+//!    `interrupted = true` instead of blocking for the full timeout.
 
 use std::fs::File;
 use std::io::{Read, Result as IoResult};
-use std::os::unix::io::AsRawFd;
+use std::os::unix::io::{AsRawFd, RawFd};
 use std::path::Path;
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use libc::{c_int, c_uint};
-use tracing;
 
 use crate::platform::PlatformError;
 use crate::platform::PlatformResult;
@@ -94,6 +109,22 @@ pub struct MotorMessage {
     pub attach_timer: c_int,
 }
 
+/// Outcome of waiting for a motor turn to finish.
+///
+/// `step_pos` is reconciled from `MOTOR_GET_STATUS` after the wait so callers can use
+/// the hardware's own position accounting instead of dead-reckoning from the commanded
+/// step count.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct TurnOutcome {
+    /// `true` if the wait ended because the stop flag was set (preempted), not because
+    /// the motor signalled completion.
+    pub interrupted: bool,
+    /// Motor step position read back from `MOTOR_GET_STATUS` after the turn.
+    pub step_pos: i32,
+    /// Raw event bitmask from the kernel `notify_data` (0 when interrupted).
+    pub event: c_int,
+}
+
 // --- PTZ types matching SDK (for PtzHalTrait) - no C header dependency ---
 
 /// PTZ device (motor index). Matches C enum ptz_device.
@@ -137,8 +168,16 @@ const RESET_STEP: i32 = 2048 / 2;
 const DEFAULT_SPEED: c_int = 100;
 /// Timeout for calibration move to limit (full rotation can be slow).
 const CALIBRATION_TIMEOUT_SECS: u64 = 120;
+/// Upper bound for a single motor turn to complete before we give up.
+const TURN_TIMEOUT_SECS: u64 = 60;
+/// Poll cadence for the interruptible wait loop (milliseconds).
+const WAIT_POLL_MS: i64 = 100;
 
-/// Single motor handle (one fd). Not thread-safe; use NativePtzDriver for concurrent access.
+/// Single motor handle (one fd).
+///
+/// All methods take `&self`: the kernel serialises ioctls, and `read()` is performed
+/// through `&File` (via `impl Read for &File`). This lets a single `Arc<MotorHandle>`
+/// be shared between the turning path and the stop path without a per-handle mutex.
 struct MotorHandle {
     file: File,
     cycle_step: i32,
@@ -153,8 +192,12 @@ impl MotorHandle {
         })
     }
 
+    fn raw_fd(&self) -> RawFd {
+        self.file.as_raw_fd()
+    }
+
     fn set_speed(&self, speed: c_int) -> PlatformResult<()> {
-        let fd = self.file.as_raw_fd();
+        let fd = self.raw_fd();
         let mut val = speed;
         let ret = unsafe { libc::ioctl(fd, AK_MOTOR_SET_ANG_SPEED as libc::c_ulong, &mut val) };
         if ret != 0 {
@@ -167,7 +210,7 @@ impl MotorHandle {
     }
 
     fn turn_steps(&self, steps: i32, clockwise: bool) -> PlatformResult<()> {
-        let fd = self.file.as_raw_fd();
+        let fd = self.raw_fd();
         let mut val = steps;
         let cmd = if clockwise {
             AK_MOTOR_TURN_CLKWISE
@@ -185,7 +228,7 @@ impl MotorHandle {
     }
 
     fn turn_stop(&self) -> PlatformResult<()> {
-        let fd = self.file.as_raw_fd();
+        let fd = self.raw_fd();
         let ret = unsafe {
             libc::ioctl(
                 fd,
@@ -203,7 +246,7 @@ impl MotorHandle {
     }
 
     fn get_step_pos(&self) -> PlatformResult<i32> {
-        let fd = self.file.as_raw_fd();
+        let fd = self.raw_fd();
         let mut msg = MotorMessage::default();
         let ret = unsafe {
             libc::ioctl(
@@ -221,38 +264,11 @@ impl MotorHandle {
         Ok(msg.pos)
     }
 
-    /// Block until the motor signals an event (HIT or STOP) via read().
-    fn wait_event(&mut self, timeout_secs: u64) -> PlatformResult<NotifyData> {
+    /// Read the pending `notify_data` from the motor fd (fd already known readable).
+    fn read_notify(&self) -> PlatformResult<NotifyData> {
         let mut buf = NotifyData::default();
-        let fd = self.file.as_raw_fd();
-        let mut read_fds: libc::fd_set = unsafe { std::mem::zeroed() };
-        unsafe {
-            libc::FD_ZERO(&mut read_fds);
-            libc::FD_SET(fd, &mut read_fds);
-        }
-        let tv_sec_i32 = timeout_secs.min(i32::MAX as u64) as i32;
-        let mut tv = libc::timeval {
-            #[allow(clippy::useless_conversion)] // tv_sec is i32 on host, i64 on ARM target
-            tv_sec: tv_sec_i32.into(),
-            tv_usec: 0,
-        };
-        let ret = unsafe {
-            libc::select(
-                fd + 1,
-                &mut read_fds,
-                std::ptr::null_mut(),
-                std::ptr::null_mut(),
-                &mut tv,
-            )
-        };
-        if ret <= 0 {
-            return Err(PlatformError::HardwareFailure(format!(
-                "select timeout or error: {}",
-                std::io::Error::last_os_error()
-            )));
-        }
-        let n = self
-            .file
+        // `impl Read for &File` lets us read without a `&mut self`.
+        let n = (&self.file)
             .read(unsafe {
                 std::slice::from_raw_parts_mut(
                     &mut buf as *mut NotifyData as *mut u8,
@@ -268,17 +284,79 @@ impl MotorHandle {
         Ok(buf)
     }
 
+    /// Block until the motor signals an event, the deadline elapses, or `stop_flag`
+    /// is set. On stop-flag set, issue `AK_MOTOR_TURN_STOP` and return with
+    /// `interrupted = true`.
+    fn wait_event_interruptible(
+        &self,
+        timeout_secs: u64,
+        stop_flag: &AtomicBool,
+    ) -> PlatformResult<(NotifyData, bool)> {
+        let fd = self.raw_fd();
+        let deadline = Instant::now() + Duration::from_secs(timeout_secs);
+        loop {
+            if stop_flag.load(Ordering::SeqCst) {
+                // Preempted: stop the motor and report the interruption.
+                if let Err(e) = self.turn_stop() {
+                    tracing::warn!("TURN_STOP during interrupt failed: {}", e);
+                }
+                return Ok((NotifyData::default(), true));
+            }
+
+            let mut read_fds: libc::fd_set = unsafe { std::mem::zeroed() };
+            unsafe {
+                libc::FD_ZERO(&mut read_fds);
+                libc::FD_SET(fd, &mut read_fds);
+            }
+            let mut tv = libc::timeval {
+                tv_sec: 0,
+                tv_usec: (WAIT_POLL_MS * 1000) as libc::suseconds_t,
+            };
+            let ret = unsafe {
+                libc::select(
+                    fd + 1,
+                    &mut read_fds,
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                    &mut tv,
+                )
+            };
+            if ret < 0 {
+                let err = std::io::Error::last_os_error();
+                if err.raw_os_error() == Some(libc::EINTR) {
+                    continue;
+                }
+                return Err(PlatformError::HardwareFailure(format!(
+                    "select error: {}",
+                    err
+                )));
+            }
+            if ret == 0 {
+                // Poll tick with no event: re-check stop flag and deadline.
+                if Instant::now() >= deadline {
+                    return Err(PlatformError::HardwareFailure(
+                        "motor wait timed out".to_string(),
+                    ));
+                }
+                continue;
+            }
+            // fd readable → consume the notify_data.
+            let notify = self.read_notify()?;
+            return Ok((notify, false));
+        }
+    }
+
     fn degree_to_steps(&self, degree: i32) -> i32 {
         (self.cycle_step as i64 * degree as i64 / 360) as i32
     }
 
     /// Run calibration sequence matching C driver get_motor_param():
     /// turn anticlockwise to limit (HIT or STOP), then clockwise to middle (RESET_STEP).
-    fn calibrate(&mut self) -> PlatformResult<()> {
+    fn calibrate(&self, stop_flag: &AtomicBool) -> PlatformResult<()> {
         self.set_speed(DEFAULT_SPEED)?;
         // Turn anticlockwise to physical limit; wait for HIT or STOP event.
         self.turn_steps(CYCLE_STEP, false)?;
-        let notify = self.wait_event(CALIBRATION_TIMEOUT_SECS)?;
+        let (notify, _) = self.wait_event_interruptible(CALIBRATION_TIMEOUT_SECS, stop_flag)?;
         if (notify.event & AK_MOTOR_EVENT_HIT) != 0 {
             tracing::debug!(
                 "calibration: motor hit limit, remain_steps={}",
@@ -292,43 +370,72 @@ impl MotorHandle {
         }
         // Turn clockwise to middle position (same as C driver reset_step).
         self.turn_steps(RESET_STEP, true)?;
-        self.wait_event(60)?;
+        self.wait_event_interruptible(TURN_TIMEOUT_SECS, stop_flag)?;
         Ok(())
     }
 }
 
 /// Native PTZ driver: two motors, thread-safe via Mutex.
+///
+/// The `Mutex` only guards open/close and the brief clone of an `Arc<MotorHandle>`.
+/// Blocking motor waits happen on the cloned handle **without** holding the lock, so a
+/// concurrent stop or superseding move can always make progress.
 pub struct NativePtzDriver {
     inner: Mutex<Option<NativePtzDriverInner>>,
+    /// Shared interrupt flag polled by in-flight waits. Setting it preempts the
+    /// current turn; movement paths clear it before starting.
+    stop_flag: Arc<AtomicBool>,
 }
 
 struct NativePtzDriverInner {
-    motor_h: MotorHandle,
-    motor_v: MotorHandle,
+    motor_h: Arc<MotorHandle>,
+    motor_v: Arc<MotorHandle>,
 }
 
 impl NativePtzDriver {
     pub fn new() -> Self {
         Self {
             inner: Mutex::new(None),
+            stop_flag: Arc::new(AtomicBool::new(false)),
         }
     }
 
-    fn with_open<F, T>(&self, f: F) -> PlatformResult<T>
-    where
-        F: FnOnce(&mut NativePtzDriverInner) -> PlatformResult<T>,
-    {
-        let mut guard = self
+    /// Clone the `Arc<MotorHandle>` (and clockwise flag) for a direction, holding the
+    /// lock only for the clone. Returns an error if the device is not open or the
+    /// direction is not a real motor movement.
+    fn motor_for(&self, direction: ptz_turn_direction) -> PlatformResult<(Arc<MotorHandle>, bool)> {
+        let guard = self
             .inner
             .lock()
             .map_err(|e| PlatformError::HardwareFailure(format!("lock poisoned: {}", e)))?;
-        let inner = guard.as_mut().ok_or_else(|| {
+        let inner = guard.as_ref().ok_or_else(|| {
             PlatformError::HardwareUnavailable("PTZ device not opened".to_string())
         })?;
-        f(inner)
+        Ok(match direction {
+            ptz_turn_direction::PTZ_TURN_LEFT => (Arc::clone(&inner.motor_h), false),
+            ptz_turn_direction::PTZ_TURN_RIGHT => (Arc::clone(&inner.motor_h), true),
+            ptz_turn_direction::PTZ_TURN_UP => (Arc::clone(&inner.motor_v), true),
+            ptz_turn_direction::PTZ_TURN_DOWN => (Arc::clone(&inner.motor_v), false),
+            ptz_turn_direction::PTZ_TURN_RESERVED => {
+                return Err(PlatformError::InvalidParameter(
+                    "PTZ_TURN_RESERVED not valid for turn".to_string(),
+                ));
+            }
+        })
     }
 
-    /// Open both motor devices and run minimal calibration (no feedback pin).
+    /// Clone both motor handles for the stop path (brief lock only).
+    fn both_motors(&self) -> PlatformResult<Option<(Arc<MotorHandle>, Arc<MotorHandle>)>> {
+        let guard = self
+            .inner
+            .lock()
+            .map_err(|e| PlatformError::HardwareFailure(format!("lock poisoned: {}", e)))?;
+        Ok(guard
+            .as_ref()
+            .map(|inner| (Arc::clone(&inner.motor_h), Arc::clone(&inner.motor_v))))
+    }
+
+    /// Open both motor devices and set default speed.
     pub fn open(&self) -> PlatformResult<()> {
         let mut guard = self
             .inner
@@ -345,7 +452,10 @@ impl NativePtzDriver {
         })?;
         motor_h.set_speed(DEFAULT_SPEED)?;
         motor_v.set_speed(DEFAULT_SPEED)?;
-        *guard = Some(NativePtzDriverInner { motor_h, motor_v });
+        *guard = Some(NativePtzDriverInner {
+            motor_h: Arc::new(motor_h),
+            motor_v: Arc::new(motor_v),
+        });
         Ok(())
     }
 
@@ -361,72 +471,101 @@ impl NativePtzDriver {
     /// check_self: run calibration (turn to limit, then to middle) for both motors.
     /// Matches C driver get_motor_param() so the physical calibration movement is heard.
     pub fn check_self(&self, _pin_type: ptz_feedback_pin) -> PlatformResult<()> {
-        self.with_open(|inner| {
-            tracing::info!("PTZ calibration: horizontal motor (limit then middle)");
-            inner.motor_h.calibrate()?;
-            tracing::info!("PTZ calibration: vertical motor (limit then middle)");
-            inner.motor_v.calibrate()?;
-            tracing::info!("PTZ calibration complete");
-            Ok(())
+        self.stop_flag.store(false, Ordering::SeqCst);
+        let (motor_h, motor_v) = self
+            .both_motors()?
+            .ok_or_else(|| PlatformError::HardwareUnavailable("PTZ device not opened".into()))?;
+        tracing::info!("PTZ calibration: horizontal motor (limit then middle)");
+        motor_h.calibrate(&self.stop_flag)?;
+        tracing::info!("PTZ calibration: vertical motor (limit then middle)");
+        motor_v.calibrate(&self.stop_flag)?;
+        tracing::info!("PTZ calibration complete");
+        Ok(())
+    }
+
+    /// Issue a turn command without waiting for completion. Clears the stop flag so a
+    /// fresh movement is not immediately preempted by a stale interrupt. Returns
+    /// `Ok(false)` when the requested move rounds to zero steps (no-op).
+    pub fn start_turn(&self, direction: ptz_turn_direction, degree: i32) -> PlatformResult<bool> {
+        let (motor, clockwise) = self.motor_for(direction)?;
+        let steps = motor.degree_to_steps(degree);
+        if steps <= 0 {
+            return Ok(false);
+        }
+        self.stop_flag.store(false, Ordering::SeqCst);
+        motor.turn_steps(steps, clockwise)?;
+        Ok(true)
+    }
+
+    /// Wait for the in-flight turn on `direction`'s motor to finish or be interrupted,
+    /// then reconcile position from `MOTOR_GET_STATUS`. Does not hold the driver lock
+    /// while blocking.
+    pub fn wait_turn(&self, direction: ptz_turn_direction) -> PlatformResult<TurnOutcome> {
+        let (motor, _) = self.motor_for(direction)?;
+        let (notify, interrupted) =
+            motor.wait_event_interruptible(TURN_TIMEOUT_SECS, &self.stop_flag)?;
+        let step_pos = motor.get_step_pos().unwrap_or(-1);
+        Ok(TurnOutcome {
+            interrupted,
+            step_pos,
+            event: notify.event,
         })
     }
 
-    /// Turn one motor by degree. direction maps to which motor and clockwise/anticlockwise.
-    pub fn turn(&self, direction: ptz_turn_direction, degree: i32) -> PlatformResult<()> {
-        self.with_open(|inner| {
-            let (motor, clockwise) = match direction {
-                ptz_turn_direction::PTZ_TURN_LEFT => (&mut inner.motor_h, false),
-                ptz_turn_direction::PTZ_TURN_RIGHT => (&mut inner.motor_h, true),
-                ptz_turn_direction::PTZ_TURN_UP => (&mut inner.motor_v, true),
-                ptz_turn_direction::PTZ_TURN_DOWN => (&mut inner.motor_v, false),
-                ptz_turn_direction::PTZ_TURN_RESERVED => {
-                    return Err(PlatformError::InvalidParameter(
-                        "PTZ_TURN_RESERVED not valid for turn".to_string(),
-                    ));
-                }
-            };
-            let steps = motor.degree_to_steps(degree);
-            if steps <= 0 {
-                return Ok(());
-            }
-            motor.turn_steps(steps, clockwise)?;
-            // Wait for completion (kernel signals via read).
-            let timeout = 60u64;
-            let notify = motor.wait_event(timeout)?;
-            if (notify.event & AK_MOTOR_EVENT_STOP) != 0 {
-                tracing::debug!("motor turn stopped by event");
-            }
-            Ok(())
-        })
+    /// Turn one motor by degree and block until completion/interrupt.
+    /// Convenience wrapper over `start_turn` + `wait_turn`.
+    pub fn turn(&self, direction: ptz_turn_direction, degree: i32) -> PlatformResult<TurnOutcome> {
+        if !self.start_turn(direction, degree)? {
+            return Ok(TurnOutcome::default());
+        }
+        self.wait_turn(direction)
     }
 
     pub fn get_step_pos(&self, motor_no: ptz_device) -> PlatformResult<i32> {
-        self.with_open(|inner| {
-            let motor = match motor_no {
-                ptz_device::PTZ_DEV_H => &inner.motor_h,
-                ptz_device::PTZ_DEV_V => &inner.motor_v,
-            };
-            motor.get_step_pos()
-        })
+        let motor = {
+            let guard = self
+                .inner
+                .lock()
+                .map_err(|e| PlatformError::HardwareFailure(format!("lock poisoned: {}", e)))?;
+            let inner = guard.as_ref().ok_or_else(|| {
+                PlatformError::HardwareUnavailable("PTZ device not opened".to_string())
+            })?;
+            match motor_no {
+                ptz_device::PTZ_DEV_H => Arc::clone(&inner.motor_h),
+                ptz_device::PTZ_DEV_V => Arc::clone(&inner.motor_v),
+            }
+        };
+        motor.get_step_pos()
     }
 
-    /// Stop the motor(s) for the given direction (or both if needed). Kernel TURN_STOP stops that motor.
+    /// Set the interrupt flag so any in-flight `wait_turn`/`turn` returns promptly.
+    /// The waiting path issues `AK_MOTOR_TURN_STOP` when it observes the flag.
+    pub fn interrupt(&self) {
+        self.stop_flag.store(true, Ordering::SeqCst);
+    }
+
+    /// Stop the motor(s) for the given direction. Runs off the main-turn wait since
+    /// `turn`/`wait_turn` do not hold the lock while blocking. Also sets the interrupt
+    /// flag so a concurrent in-flight wait unwinds.
     pub fn stop(&self, direction: ptz_turn_direction) -> PlatformResult<()> {
-        self.with_open(|inner| {
-            match direction {
-                ptz_turn_direction::PTZ_TURN_LEFT | ptz_turn_direction::PTZ_TURN_RIGHT => {
-                    inner.motor_h.turn_stop()?;
-                }
-                ptz_turn_direction::PTZ_TURN_UP | ptz_turn_direction::PTZ_TURN_DOWN => {
-                    inner.motor_v.turn_stop()?;
-                }
-                ptz_turn_direction::PTZ_TURN_RESERVED => {
-                    inner.motor_h.turn_stop()?;
-                    inner.motor_v.turn_stop()?;
-                }
+        self.stop_flag.store(true, Ordering::SeqCst);
+        let Some((motor_h, motor_v)) = self.both_motors()? else {
+            // Not open: nothing to stop.
+            return Ok(());
+        };
+        match direction {
+            ptz_turn_direction::PTZ_TURN_LEFT | ptz_turn_direction::PTZ_TURN_RIGHT => {
+                motor_h.turn_stop()?;
             }
-            Ok(())
-        })
+            ptz_turn_direction::PTZ_TURN_UP | ptz_turn_direction::PTZ_TURN_DOWN => {
+                motor_v.turn_stop()?;
+            }
+            ptz_turn_direction::PTZ_TURN_RESERVED => {
+                motor_h.turn_stop()?;
+                motor_v.turn_stop()?;
+            }
+        }
+        Ok(())
     }
 }
 
@@ -457,5 +596,40 @@ mod tests {
         assert_eq!(ptz_turn_direction::PTZ_TURN_RIGHT as i32, 2);
         assert_eq!(ptz_turn_direction::PTZ_TURN_UP as i32, 3);
         assert_eq!(ptz_turn_direction::PTZ_TURN_DOWN as i32, 4);
+    }
+
+    #[test]
+    fn test_start_turn_without_open_returns_unavailable() {
+        let driver = NativePtzDriver::new();
+        let result = driver.start_turn(ptz_turn_direction::PTZ_TURN_LEFT, 30);
+        assert!(matches!(
+            result,
+            Err(PlatformError::HardwareUnavailable(_))
+        ));
+    }
+
+    #[test]
+    fn test_turn_reserved_direction_is_invalid() {
+        let driver = NativePtzDriver::new();
+        // Reserved is rejected at motor selection even before the open check ordering,
+        // but with a closed device the unavailable check fires first; open-less drivers
+        // still must not panic.
+        let result = driver.turn(ptz_turn_direction::PTZ_TURN_RESERVED, 10);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_stop_without_open_is_ok() {
+        let driver = NativePtzDriver::new();
+        // Stopping a closed device is a no-op success (nothing to stop).
+        assert!(driver.stop(ptz_turn_direction::PTZ_TURN_RESERVED).is_ok());
+    }
+
+    #[test]
+    fn test_interrupt_sets_stop_flag() {
+        let driver = NativePtzDriver::new();
+        assert!(!driver.stop_flag.load(Ordering::SeqCst));
+        driver.interrupt();
+        assert!(driver.stop_flag.load(Ordering::SeqCst));
     }
 }

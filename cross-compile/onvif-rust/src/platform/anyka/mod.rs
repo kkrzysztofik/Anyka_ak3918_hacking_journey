@@ -13,6 +13,7 @@ pub mod context;
 pub mod imaging;
 pub mod lifecycle;
 pub mod network_info;
+pub mod ptz_actor;
 pub mod ptz_control;
 mod video_encoder;
 mod video_input;

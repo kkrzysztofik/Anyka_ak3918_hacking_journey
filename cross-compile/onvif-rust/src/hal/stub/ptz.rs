@@ -27,6 +27,14 @@ impl PtzHalTrait for StubPtzHal {
         AK_SUCCESS_I32
     }
 
+    fn ptz_start_turn(&self, _direction: ptz_turn_direction, _degree: i32) -> i32 {
+        AK_SUCCESS_I32
+    }
+
+    fn ptz_wait_turn(&self, _direction: ptz_turn_direction) -> i32 {
+        AK_SUCCESS_I32
+    }
+
     fn ptz_get_step_pos(&self, _motor_no: ptz_device) -> i32 {
         0 // Return 0 steps for stub
     }
@@ -34,6 +42,8 @@ impl PtzHalTrait for StubPtzHal {
     fn ptz_stop(&self, _direction: ptz_turn_direction) -> i32 {
         AK_SUCCESS_I32
     }
+
+    fn ptz_interrupt(&self) {}
 }
 
 #[cfg(all(test, use_stubs))]
