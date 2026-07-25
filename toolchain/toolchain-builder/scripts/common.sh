@@ -68,9 +68,9 @@ export CROSS_RANLIB="${INSTALL_DIR}/bin/${TARGET_TUPLE}-ranlib"
 # =============================================================================
 export CROSSTOOL_NG_VERSION="1.28.0"
 export UCLIBC_NG_VERSION="1.0.57"
-export LLVM_VERSION="22.1.2"
-export RUST_VERSION="1.94.1"
-export GDB_VERSION="17.1"
+export LLVM_VERSION="22.1.8"
+export RUST_VERSION="1.97.1"
+export GDB_VERSION="17.2"
 
 # =============================================================================
 # Build Directory Subdirectories
