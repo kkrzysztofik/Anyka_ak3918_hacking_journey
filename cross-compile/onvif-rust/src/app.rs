@@ -28,6 +28,7 @@ use crate::lifecycle::shutdown::{DEFAULT_SHUTDOWN_TIMEOUT, ShutdownCoordinator};
 use crate::lifecycle::startup::{StartupPhase, StartupProgress};
 use crate::lifecycle::{RuntimeError, ShutdownReport, StartupError};
 use crate::onvif::discovery::{DiscoveryConfig, WsDiscovery, WsDiscoveryHandle};
+use crate::onvif::imaging::ImagingSettingsStore;
 use crate::onvif::ptz::PTZStateManager;
 use crate::onvif::server::{OnvifServer, OnvifServerConfig};
 use crate::platform::Platform;
@@ -87,6 +88,8 @@ pub struct AppState {
     profile_storage: Arc<ProfileStorage>,
     /// Optional debounced persistence handle for profiles (off-executor saves).
     profile_persistence: Option<PersistenceHandle>,
+    /// Imaging settings store (optional; production wires persistence at startup).
+    imaging_settings_store: Option<Arc<ImagingSettingsStore>>,
 }
 
 impl AppState {
@@ -144,6 +147,11 @@ impl AppState {
     pub fn profile_persistence(&self) -> Option<&PersistenceHandle> {
         self.profile_persistence.as_ref()
     }
+
+    /// Get the imaging settings store, if available.
+    pub fn imaging_settings_store(&self) -> Option<&Arc<ImagingSettingsStore>> {
+        self.imaging_settings_store.as_ref()
+    }
 }
 
 impl std::fmt::Debug for AppState {
@@ -167,6 +175,13 @@ impl std::fmt::Debug for AppState {
                     .map(|_| "Some(ConfigPersistenceHandle)"),
             )
             .field("profile_storage", &"Arc<ProfileStorage>")
+            .field(
+                "imaging_settings_store",
+                &self
+                    .imaging_settings_store
+                    .as_ref()
+                    .map(|_| "Some(Arc<ImagingSettingsStore>)"),
+            )
             .field(
                 "profile_persistence",
                 &self
@@ -198,6 +213,7 @@ pub struct AppStateBuilder {
     config_persistence: Option<ConfigPersistenceHandle>,
     profile_storage: Option<Arc<ProfileStorage>>,
     profile_persistence: Option<PersistenceHandle>,
+    imaging_settings_store: Option<Arc<ImagingSettingsStore>>,
 }
 
 /// Error type for AppState construction failures.
@@ -280,6 +296,12 @@ impl AppStateBuilder {
         self
     }
 
+    /// Set the imaging settings store (with persistence already attached).
+    pub fn imaging_settings_store(mut self, store: Arc<ImagingSettingsStore>) -> Self {
+        self.imaging_settings_store = Some(store);
+        self
+    }
+
     /// Build the `AppState`, returning an error if required components are missing.
     pub fn build(self) -> Result<AppState, AppStateError> {
         Ok(AppState {
@@ -307,6 +329,7 @@ impl AppStateBuilder {
                 .profile_storage
                 .ok_or_else(|| AppStateError::MissingComponent("profile_storage".to_string()))?,
             profile_persistence: self.profile_persistence,
+            imaging_settings_store: self.imaging_settings_store,
         })
     }
 }
@@ -588,6 +611,9 @@ pub struct Application {
     /// Handle to the profile persistence task.
     profile_persistence_task: Option<JoinHandle<()>>,
 
+    /// Handle to the imaging persistence task.
+    imaging_persistence_task: Option<JoinHandle<()>>,
+
     /// WS-Discovery service handle for device discovery control.
     discovery: Option<WsDiscoveryHandle>,
 
@@ -605,6 +631,47 @@ pub struct Application {
 }
 
 impl Application {
+    /// Create imaging settings store with debounced off-executor persistence.
+    fn wire_imaging_persistence(
+        config_path: &str,
+        platform: Option<&Arc<dyn Platform>>,
+        save_delay: u64,
+        shutdown_coordinator: &ShutdownCoordinator,
+    ) -> (Arc<ImagingSettingsStore>, JoinHandle<()>) {
+        let imaging_path = std::path::Path::new(config_path)
+            .parent()
+            .unwrap_or(std::path::Path::new("/etc/onvif"))
+            .join("imaging.toml");
+
+        let imaging_store = match platform.and_then(|p| p.imaging_control()) {
+            Some(control) => Arc::new(ImagingSettingsStore::with_platform_and_persistence(
+                control,
+                &imaging_path,
+            )),
+            None => Arc::new(ImagingSettingsStore::with_persistence(&imaging_path)),
+        };
+
+        if imaging_path.exists() {
+            if let Err(e) = imaging_store.load_from_file() {
+                tracing::warn!(
+                    "Failed to load imaging settings from {}: {}",
+                    imaging_path.display(),
+                    e
+                );
+            } else {
+                tracing::info!("Loaded imaging settings from {}", imaging_path.display());
+            }
+        }
+
+        let (imaging_persistence_service, imaging_persistence_handle) =
+            imaging_store.persistence_service(save_delay);
+        imaging_store.set_persistence(imaging_persistence_handle);
+        let imaging_persistence_task =
+            tokio::spawn(imaging_persistence_service.run(shutdown_coordinator.subscribe()));
+
+        (imaging_store, imaging_persistence_task)
+    }
+
     /// Start the application with ordered initialization.
     ///
     /// This is the **only** way to create an `Application` instance. It performs
@@ -746,6 +813,14 @@ impl Application {
             profile_persistence_service.run(shutdown_coordinator.subscribe()),
         ));
 
+        let (imaging_settings_store, imaging_persistence_task) = Self::wire_imaging_persistence(
+            config_path,
+            platform.as_ref(),
+            save_delay,
+            &shutdown_coordinator,
+        );
+        let imaging_persistence_task = Some(imaging_persistence_task);
+
         // Initialize rate limiter from config (default: 60 requests per minute)
         let rate_limit_per_minute = config_runtime.read().server.rate_limit_per_minute;
         let rate_limiter = Arc::new(RateLimiter::new(rate_limit_per_minute));
@@ -766,7 +841,8 @@ impl Application {
             ))
             .rate_limiter(Arc::clone(&rate_limiter))
             .profile_storage(Arc::clone(&profile_storage))
-            .profile_persistence(profile_persistence_handle.clone());
+            .profile_persistence(profile_persistence_handle.clone())
+            .imaging_settings_store(Arc::clone(&imaging_settings_store));
 
         // Wire config persistence handle
         app_state_builder = app_state_builder.config_persistence(persistence_handle.clone());
@@ -905,6 +981,7 @@ impl Application {
             config_persistence_task,
             user_persistence_task,
             profile_persistence_task,
+            imaging_persistence_task,
             memory_logging_task,
             rate_limiter_cleanup_task,
             streaming_service,
@@ -1241,6 +1318,14 @@ impl Application {
             profile_persistence_service.run(shutdown_coordinator.subscribe()),
         ));
 
+        let (imaging_settings_store, imaging_persistence_task) = Self::wire_imaging_persistence(
+            config_path,
+            Some(&platform),
+            save_delay,
+            &shutdown_coordinator,
+        );
+        let imaging_persistence_task = Some(imaging_persistence_task);
+
         let rate_limit_per_minute = config_runtime.read().server.rate_limit_per_minute;
         let rate_limiter = Arc::new(RateLimiter::new(rate_limit_per_minute));
         tracing::info!(
@@ -1263,6 +1348,7 @@ impl Application {
             .platform(Arc::clone(&platform))
             .profile_storage(Arc::clone(&profile_storage))
             .profile_persistence(profile_persistence_handle.clone())
+            .imaging_settings_store(Arc::clone(&imaging_settings_store))
             .build()
             .map_err(|e| StartupError::Services(e.to_string()))?;
 
@@ -1386,6 +1472,7 @@ impl Application {
             config_persistence_task,
             user_persistence_task,
             profile_persistence_task,
+            imaging_persistence_task,
             memory_logging_task,
             rate_limiter_cleanup_task,
             streaming_service,
@@ -1528,6 +1615,10 @@ impl Application {
         }
 
         if let Some(task) = self.profile_persistence_task.take() {
+            let _ = tokio::time::timeout(Duration::from_secs(2), task).await;
+        }
+
+        if let Some(task) = self.imaging_persistence_task.take() {
             let _ = tokio::time::timeout(Duration::from_secs(2), task).await;
         }
 
@@ -1772,6 +1863,7 @@ mod tests {
             config_persistence_task: None,
             user_persistence_task: None,
             profile_persistence_task: None,
+            imaging_persistence_task: None,
             discovery: None,
             discovery_task: None,
             memory_logging_task: None,
@@ -2207,6 +2299,7 @@ mod tests {
             config_persistence_task: None,
             user_persistence_task: None,
             profile_persistence_task: None,
+            imaging_persistence_task: None,
             discovery: None,
             discovery_task: None,
             memory_logging_task: None,
@@ -2265,6 +2358,7 @@ mod tests {
             config_persistence_task: None,
             user_persistence_task: None,
             profile_persistence_task: None,
+            imaging_persistence_task: None,
             discovery: None,
             discovery_task: None,
             memory_logging_task: None,

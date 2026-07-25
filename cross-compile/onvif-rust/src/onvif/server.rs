@@ -454,9 +454,23 @@ impl OnvifServer {
         };
         dispatcher.register_service("ptz", Arc::new(ptz_service));
 
-        // Register Imaging Service
+        // Register Imaging Service (use AppState store when persistence is wired)
         tracing::debug!("Registering Imaging Service");
-        dispatcher.register_service("imaging", Arc::new(ImagingService::new()));
+        let imaging_service = if let Some(store) = app_state.imaging_settings_store() {
+            ImagingService::with_store(
+                Arc::clone(store),
+                app_state.platform().map(Arc::clone),
+                Some(Arc::clone(app_state.config())),
+            )
+        } else if let Some(platform) = app_state.platform() {
+            ImagingService::with_config_and_platform(
+                Arc::clone(app_state.config()),
+                Arc::clone(platform),
+            )
+        } else {
+            ImagingService::new()
+        };
+        dispatcher.register_service("imaging", Arc::new(imaging_service));
 
         tracing::info!(
             "Registered {} ONVIF service(s) (full mode)",
