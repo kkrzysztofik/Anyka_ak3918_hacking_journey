@@ -228,8 +228,8 @@ struct FanoutTask {
     bridge_queue: Arc<LowLatencyFrameQueue>,
     is_main: bool,
     stream_name: String,
-    rtsp_tx: tokio::sync::mpsc::UnboundedSender<FrameData>,
-    httpflv_tx: tokio::sync::mpsc::UnboundedSender<FrameData>,
+    rtsp_tx: tokio::sync::mpsc::Sender<FrameData>,
+    httpflv_tx: tokio::sync::mpsc::Sender<FrameData>,
 
     // Mutable state
     httpflv_remuxer: Option<ValidationHttpFlvRemuxer>,
@@ -244,8 +244,8 @@ impl FanoutTask {
         bridge_queue: Arc<LowLatencyFrameQueue>,
         is_main: bool,
         stream_name: String,
-        rtsp_tx: tokio::sync::mpsc::UnboundedSender<FrameData>,
-        httpflv_tx: tokio::sync::mpsc::UnboundedSender<FrameData>,
+        rtsp_tx: tokio::sync::mpsc::Sender<FrameData>,
+        httpflv_tx: tokio::sync::mpsc::Sender<FrameData>,
     ) -> Self {
         let telemetry = StreamTelemetry::new(stream_name.clone(), Arc::clone(&bridge_queue));
         Self {
@@ -313,7 +313,8 @@ impl FanoutTask {
                 Some(&self.httpflv_tx),
                 self.httpflv_remuxer.as_mut(),
                 frame,
-            );
+            )
+            .await;
 
             self.telemetry.maybe_emit();
         }
@@ -588,14 +589,14 @@ impl StreamingService {
     ) -> Result<JoinHandle<()>, anyhow::Error> {
         let app_name = self.config.app_name.clone();
 
-        // Create RTSP channel.
-        let (rtsp_tx, rtsp_rx) = tokio::sync::mpsc::unbounded_channel::<FrameData>();
+        // Bounded publisher→hub channels: when hub stalls, fanout awaits and the
+        // LowLatencyFrameQueue bridge applies drop-oldest (keeps RSS flat).
+        let (rtsp_tx, rtsp_rx) = streaming_lib::frame_data_channel();
         let rtsp_id = StreamIdentifier::Rtsp {
             stream_path: stream_name.to_string(),
         };
 
-        // Create HTTP-FLV channel.
-        let (httpflv_tx, httpflv_rx) = tokio::sync::mpsc::unbounded_channel::<FrameData>();
+        let (httpflv_tx, httpflv_rx) = streaming_lib::frame_data_channel();
         // HTTP-FLV uses app_name/stream_name format to differentiate from RTSP
         let httpflv_id = StreamIdentifier::Rtsp {
             stream_path: format!("{}/{}", app_name, stream_name),
@@ -690,7 +691,7 @@ mod tests {
     #[tokio::test]
     async fn test_live_stream_handler_send_prior_data_rtsp_no_sps() {
         let (_bridge, handler) = make_main_handler();
-        let (frame_tx, mut frame_rx) = mpsc::unbounded_channel::<FrameData>();
+        let (frame_tx, mut frame_rx) = streaming_lib::frame_data_channel();
         let sender = DataSender::Frame { sender: frame_tx };
 
         let result = handler
@@ -717,7 +718,7 @@ mod tests {
             .last_timestamp_ms
             .store(2000, Ordering::Relaxed);
 
-        let (frame_tx, mut frame_rx) = mpsc::unbounded_channel::<FrameData>();
+        let (frame_tx, mut frame_rx) = streaming_lib::frame_data_channel();
         let sender = DataSender::Frame { sender: frame_tx };
 
         let result = handler
@@ -761,7 +762,7 @@ mod tests {
             .last_timestamp_ms
             .store(3000, Ordering::Relaxed);
 
-        let (frame_tx, mut frame_rx) = mpsc::unbounded_channel::<FrameData>();
+        let (frame_tx, mut frame_rx) = streaming_lib::frame_data_channel();
         let sender = DataSender::Frame { sender: frame_tx };
 
         let result = handler

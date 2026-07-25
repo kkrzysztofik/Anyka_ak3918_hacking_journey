@@ -43,9 +43,9 @@ pub use protocol::httpflv::server::{DefaultHttpFlvServer, HttpFlvServer};
 // Re-export key types from streamhub (hub)
 pub use hub::StreamsHub;
 pub use hub::define::{
-    DataReceiver, DataSender, FrameData, MediaInfo, PacketData, PublishType, PublisherInfo,
-    StreamHubEvent, StreamHubEventSender, SubscribeType, SubscriberInfo, TStreamHandler,
-    VideoCodecType,
+    DataReceiver, DataSender, FRAME_DATA_CHANNEL_CAPACITY, FrameData, MediaInfo, PacketData,
+    PublishType, PublisherInfo, StreamHubEvent, StreamHubEventSender, SubscribeType,
+    SubscriberInfo, TStreamHandler, VideoCodecType, frame_data_channel,
 };
 pub use hub::stream::StreamIdentifier;
 
