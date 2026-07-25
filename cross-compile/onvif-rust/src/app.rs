@@ -1693,6 +1693,9 @@ impl Application {
         }
     }
 
+    /// Maximum silence from venc-read before `stream_health` is marked degraded.
+    const STREAM_HEALTH_SILENCE_SECS: u64 = 5;
+
     /// Get the current health status of the application.
     ///
     /// This can be used for health check endpoints (e.g., `/health`, `/ready`).
@@ -1704,6 +1707,41 @@ impl Application {
         status.add_component("platform", ComponentHealth::healthy("Platform"));
         status.add_component("device", ComponentHealth::healthy("Device Service"));
         status.add_component("media", ComponentHealth::healthy("Media Service"));
+
+        // Runtime stream liveness (not just startup readiness).
+        if self.streaming_service.is_some() {
+            match self
+                .app_state
+                .as_ref()
+                .and_then(|s| s.platform())
+                .and_then(|p| p.stream_frame_age_ms())
+            {
+                Some(age_ms) if age_ms > Self::STREAM_HEALTH_SILENCE_SECS * 1000 => {
+                    status.add_component(
+                        "stream_health",
+                        ComponentHealth::degraded(
+                            "Stream Health",
+                            format!("No frames for {}ms (venc-read likely stalled)", age_ms),
+                        ),
+                    );
+                    status.mark_degraded("stream_health");
+                }
+                Some(_) => {
+                    status
+                        .add_component("stream_health", ComponentHealth::healthy("Stream Health"));
+                }
+                None => {
+                    status.add_component(
+                        "stream_health",
+                        ComponentHealth::degraded(
+                            "Stream Health",
+                            "Streaming enabled but no frames observed yet",
+                        ),
+                    );
+                    status.mark_degraded("stream_health");
+                }
+            }
+        }
 
         // Mark degraded services
         for service in &self.degraded_services {

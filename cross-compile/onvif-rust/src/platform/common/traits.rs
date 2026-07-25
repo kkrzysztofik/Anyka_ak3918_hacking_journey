@@ -613,6 +613,14 @@ pub trait Platform: Send + Sync {
     /// Get video encoder interface.
     fn video_encoder(&self) -> Arc<dyn VideoEncoder>;
 
+    /// Age of the newest video frame from the venc-read path, if known.
+    ///
+    /// Used by the health monitor to detect a dead frame thread at runtime.
+    /// Default: `None` (unknown / not applicable).
+    fn stream_frame_age_ms(&self) -> Option<u64> {
+        None
+    }
+
     /// Get audio input interface.
     fn audio_input(&self) -> Arc<dyn AudioInput>;
 

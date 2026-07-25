@@ -192,6 +192,8 @@ pub(super) struct StreamHealthCounters {
     pub(super) sub_frames: AtomicU64,
     pub(super) main_no_data_errors: AtomicU64,
     pub(super) sub_no_data_errors: AtomicU64,
+    /// Monotonic millis of the most recent frame (0 = never).
+    pub(super) last_frame_ms: AtomicU64,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -203,23 +205,42 @@ struct StreamHealthSnapshot {
 }
 
 impl StreamHealthCounters {
+    fn now_ms() -> u64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0)
+    }
+
     fn reset(&self) {
         self.main_frames.store(0, Ordering::SeqCst);
         self.sub_frames.store(0, Ordering::SeqCst);
         self.main_no_data_errors.store(0, Ordering::SeqCst);
         self.sub_no_data_errors.store(0, Ordering::SeqCst);
+        self.last_frame_ms.store(0, Ordering::SeqCst);
     }
 
     fn record_frame(&self, stream_id: StreamId) {
         match stream_id {
             StreamId::VideoMain => {
                 self.main_frames.fetch_add(1, Ordering::SeqCst);
+                self.last_frame_ms.store(Self::now_ms(), Ordering::SeqCst);
             }
             StreamId::VideoSub => {
                 self.sub_frames.fetch_add(1, Ordering::SeqCst);
+                self.last_frame_ms.store(Self::now_ms(), Ordering::SeqCst);
             }
             StreamId::Audio => {}
         }
+    }
+
+    /// Age of the most recent frame in milliseconds, if any frame was ever seen.
+    pub(super) fn last_frame_age_ms(&self) -> Option<u64> {
+        let last = self.last_frame_ms.load(Ordering::SeqCst);
+        if last == 0 {
+            return None;
+        }
+        Some(Self::now_ms().saturating_sub(last))
     }
 
     fn record_no_data_error(&self, stream_id: StreamId) {
@@ -1073,6 +1094,11 @@ impl AnykaVideoEncoder {
             sub.width,
             sub.height
         );
+    }
+
+    /// Age of the newest venc-read frame, for runtime health monitoring.
+    pub(super) fn stream_frame_age_ms(&self) -> Option<u64> {
+        self.stream_health.last_frame_age_ms()
     }
 
     pub(super) fn wait_for_stream_readiness(

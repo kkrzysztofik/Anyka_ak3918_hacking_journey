@@ -43,6 +43,32 @@ pub(super) fn speed_to_velocity(speed: &PTZSpeed) -> PtzVelocity {
     vel
 }
 
+/// Convert platform degrees/zoom to ONVIF normalized PTZVector.
+pub(super) fn position_to_vector(pos: &PtzPosition) -> PTZVector {
+    PTZVector {
+        pan_tilt: Some(Vector2D {
+            x: (pos.pan / 180.0).clamp(-1.0, 1.0),
+            y: (pos.tilt / 90.0).clamp(-1.0, 1.0),
+            space: None,
+        }),
+        zoom: Some(Vector1D {
+            x: ((pos.zoom - 1.0) / 9.0).clamp(0.0, 1.0),
+            space: None,
+        }),
+    }
+}
+
+/// Refresh ONVIF state position from the platform's live reading.
+pub(crate) async fn sync_position_from_platform(
+    state: &PTZStateManager,
+    ptz: &Arc<dyn PTZControl>,
+) {
+    match ptz.get_position().await {
+        Ok(pos) => state.set_position(&position_to_vector(&pos)),
+        Err(e) => tracing::debug!(error = %e, "PTZ get_position failed during status sync"),
+    }
+}
+
 /// Handle AbsoluteMove request.
 pub async fn absolute_move(
     state: &PTZStateManager,
@@ -55,21 +81,24 @@ pub async fn absolute_move(
     // Validate PTZ position values before calling FFI
     validation::validate_ptz_vector(&position)?;
 
-    // Update state
-    state.set_position(&position);
+    // Mark moving before hardware accepts the command — do NOT write the target
+    // position yet (truth comes from the platform after accept / completion).
     state.set_moving(true, true);
 
-    // Call platform if available
     if let Some(ptz) = ptz_control {
         let pos = vector_to_position(&position);
         ptz.move_to_position(pos).await.map_err(|e| {
             state.stop();
             crate::onvif::error::OnvifError::HardwareFailure(format!("PTZ move failed: {}", e))
         })?;
+        // Command accepted: sync whatever live position the platform reports now.
+        sync_position_from_platform(state, ptz).await;
+        // Leave moving=true; Stop / completion path clears it. GetStatus reads live.
+    } else {
+        // No hardware: apply requested position immediately (stub / unit tests).
+        state.set_position(&position);
+        state.stop();
     }
-
-    // Mark as stopped (instant move for stub)
-    state.stop();
 
     Ok(())
 }
@@ -105,11 +134,8 @@ pub async fn relative_move(
         });
     }
 
-    // Update state
-    state.set_position(&new_pos);
     state.set_moving(true, true);
 
-    // Call platform if available
     if let Some(ptz) = ptz_control {
         let pos = vector_to_position(&new_pos);
         ptz.move_to_position(pos).await.map_err(|e| {
@@ -119,10 +145,11 @@ pub async fn relative_move(
                 e
             ))
         })?;
+        sync_position_from_platform(state, ptz).await;
+    } else {
+        state.set_position(&new_pos);
+        state.stop();
     }
-
-    // Mark as stopped
-    state.stop();
 
     Ok(())
 }

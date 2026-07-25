@@ -173,6 +173,10 @@ impl Platform for AnykaPlatform {
         self.video_encoder.clone()
     }
 
+    fn stream_frame_age_ms(&self) -> Option<u64> {
+        self.video_encoder.stream_frame_age_ms()
+    }
+
     fn audio_input(&self) -> Arc<dyn AudioInput> {
         self.audio_input.clone()
     }
