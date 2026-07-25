@@ -762,7 +762,7 @@ impl RtspServerSession {
 
             rtp_channel_guard.on_frame_handler(Box::new(
                 move |msg: FrameData| -> Result<(), UnPackerError> {
-                    if let Err(err) = sender_out.send(msg) {
+                    if let Err(err) = sender_out.try_send(msg) {
                         error!(error = %err, "send_frame_error");
                     }
                     Ok(())
@@ -1181,8 +1181,9 @@ impl RtspServerSession {
     ) -> OnRtpPacketFn {
         // Initial capacity tracks [`StreamingConfig::tcp_interleaved_buffer_max`] so embedded
         // deployments can lower per-connection RAM (default 1 MiB in config).
-        let frame_buffer: Arc<Mutex<BytesMut>> =
-            Arc::new(Mutex::new(BytesMut::with_capacity(max_tcp_interleaved_frame_bytes)));
+        let frame_buffer: Arc<Mutex<BytesMut>> = Arc::new(Mutex::new(BytesMut::with_capacity(
+            max_tcp_interleaved_frame_bytes,
+        )));
 
         Box::new(
             move |io: Arc<Mutex<Box<dyn TNetIO + Send + Sync>>>, packet: RtpPacket| {
@@ -2183,7 +2184,7 @@ impl RtspStreamHandler {
             )?;
         }
 
-        if let Err(err) = sender.send(FrameData::MediaInfo {
+        if let Err(err) = sender.try_send(FrameData::MediaInfo {
             media_info: MediaInfo {
                 audio_clock_rate,
                 video_clock_rate,
@@ -2217,7 +2218,7 @@ impl RtspStreamHandler {
                     timestamp: 0,
                     data: bytes_writer.extract_current_bytes(),
                 };
-                if let Err(err) = sender.send(frame_data) {
+                if let Err(err) = sender.try_send(frame_data) {
                     error!(error = %err, "send_sps_pps_error");
                 }
                 *video_clock_rate = media.rtpmap.clock_rate;
@@ -2234,7 +2235,7 @@ impl RtspStreamHandler {
                     timestamp: 0,
                     data: bytes_writer.extract_current_bytes(),
                 };
-                if let Err(err) = sender.send(frame_data) {
+                if let Err(err) = sender.try_send(frame_data) {
                     error!(error = %err, "send_sps_pps_vps_error");
                 }
                 *vcodec = VideoCodecType::H265;
@@ -2245,7 +2246,7 @@ impl RtspStreamHandler {
                     timestamp: 0,
                     data: data.asc.clone(),
                 };
-                if let Err(err) = sender.send(frame_data) {
+                if let Err(err) = sender.try_send(frame_data) {
                     error!(error = %err, "send_asc_error");
                 }
                 *audio_clock_rate = media.rtpmap.clock_rate;

@@ -6,7 +6,7 @@
 use std::sync::Arc;
 
 use super::driver::{NativePtzDriver, ptz_device, ptz_feedback_pin, ptz_turn_direction};
-use crate::hal::common::ptz::PtzHalTrait;
+use crate::hal::common::ptz::{PtzHalTrait, PtzWaitOutcome};
 use crate::hal::common::{AK_FAILED_I32, AK_SUCCESS_I32};
 
 /// Native Rust PTZ driver implementation for ARM. Talks to /dev/ak-motor0, /dev/ak-motor1.
@@ -47,8 +47,33 @@ impl PtzHalTrait for NativePtzHal {
     fn ptz_turn(&self, direction: ptz_turn_direction, degree: i32) -> i32 {
         self.driver
             .turn(direction, degree)
-            .map(|()| AK_SUCCESS_I32)
+            .map(|_| AK_SUCCESS_I32)
             .unwrap_or(AK_FAILED_I32)
+    }
+
+    fn ptz_start_turn(&self, direction: ptz_turn_direction, degree: i32) -> i32 {
+        self.driver
+            .start_turn(direction, degree)
+            .map(|_| AK_SUCCESS_I32)
+            .unwrap_or(AK_FAILED_I32)
+    }
+
+    fn ptz_wait_turn(&self, direction: ptz_turn_direction) -> PtzWaitOutcome {
+        match self.driver.wait_turn(direction) {
+            Ok(outcome) => PtzWaitOutcome {
+                interrupted: outcome.interrupted,
+                step_pos: outcome.step_pos,
+            },
+            Err(e) => {
+                // Log here (the trait no longer carries an i32 error channel) and hand
+                // back a best-effort outcome so the caller can still make progress.
+                tracing::warn!("ptz_wait_turn failed: {}", e);
+                PtzWaitOutcome {
+                    interrupted: false,
+                    step_pos: -1,
+                }
+            }
+        }
     }
 
     fn ptz_get_step_pos(&self, motor_no: ptz_device) -> i32 {
@@ -60,5 +85,9 @@ impl PtzHalTrait for NativePtzHal {
             .stop(direction)
             .map(|()| AK_SUCCESS_I32)
             .unwrap_or(AK_FAILED_I32)
+    }
+
+    fn ptz_interrupt(&self) {
+        self.driver.interrupt();
     }
 }

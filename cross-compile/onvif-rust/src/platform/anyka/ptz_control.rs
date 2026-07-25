@@ -1,17 +1,23 @@
 //! Anyka platform PTZ control implementation.
 //!
-//! This module provides the real PTZ implementation that calls FFI functions
-//! to control the physical stepper motors on the Anyka AK3918 camera.
-//! It uses the native Rust driver from `hal/anyka/ptz/`.
+//! This module provides the real PTZ implementation that drives the physical stepper
+//! motors on the Anyka AK3918 camera via the native Rust HAL driver in
+//! `hal/anyka/ptz/`.
 //!
 //! # Architecture
 //!
+//! The async trait methods are thin shims: they submit a [`PtzCommand`] to the PTZ
+//! actor (a dedicated OS thread owning the motor HAL) over a bounded channel and await
+//! the reply under a `tokio::time::timeout`. All blocking motor waits happen on the
+//! actor thread, never on a tokio worker.
+//!
 //! ```text
-//! AnykaPTZControl
-//!   ├── ffi: Arc<dyn PtzHalTrait>  (injected, mockable)
-//!   ├── handle: PTZHandle          (RAII, calls ptz_close on Drop)
-//!   ├── position tracking          (in degrees, matching C adapter)
-//!   └── continuous move task       (tokio::spawn with Notify cancellation)
+//! AnykaPTZControl (async shim)
+//!   ├── ffi: Arc<dyn PtzHalTrait>   (injected, mockable; also used for ptz_interrupt)
+//!   ├── handle: PTZHandle           (RAII, calls ptz_close on Drop)
+//!   ├── shared: Arc<PtzActorState>  (position/velocity truth, written by the actor)
+//!   ├── cmd_tx → PTZ actor thread   (bounded mpsc + oneshot replies)
+//!   └── continuous timeout task     (tokio, routes auto-stop through the actor)
 //! ```
 
 use std::collections::HashMap;
@@ -21,11 +27,10 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use parking_lot::{Mutex, RwLock};
-use tokio::sync::Notify;
+use tokio::sync::{Notify, mpsc, oneshot};
 use tokio::task::JoinHandle;
 
 use crate::hal::anyka::sdk::PtzDirection;
-use crate::hal::common::AK_SUCCESS_I32;
 use crate::hal::common::ptz::{PTZHandle, PtzHalTrait, default_ptz_hal, ptz_open};
 
 #[cfg(not(use_stubs))]
@@ -37,33 +42,35 @@ use crate::platform::traits::{
     PTZControl, PlatformError, PlatformResult, PtzLimits, PtzPosition, PtzPreset, PtzVelocity,
 };
 
+use super::ptz_actor::{self, PtzActorState, PtzCommand};
+
 // Hardware constants matching the C adapter (ptz_adapter.c:31-34).
-#[allow(dead_code)]
-const PTZ_MAX_PAN_DEGREES: f32 = 350.0;
-#[allow(dead_code)]
-const PTZ_MIN_PAN_DEGREES: f32 = -350.0;
-#[allow(dead_code)]
-const PTZ_MAX_TILT_DEGREES: f32 = 130.0;
-#[allow(dead_code)]
-const PTZ_MIN_TILT_DEGREES: f32 = -130.0;
-#[allow(dead_code)]
+pub(crate) const PTZ_MAX_PAN_DEGREES: f32 = 350.0;
+pub(crate) const PTZ_MIN_PAN_DEGREES: f32 = -350.0;
+pub(crate) const PTZ_MAX_TILT_DEGREES: f32 = 130.0;
+pub(crate) const PTZ_MIN_TILT_DEGREES: f32 = -130.0;
+/// Auto-stop timeout for a continuous move (mirrors the C adapter timeout thread).
 const PTZ_CONTINUOUS_TIMEOUT_SECS: u64 = 10;
-#[allow(dead_code)]
-const PTZ_MIN_MOVE_THRESHOLD: f32 = 0.5;
-#[allow(dead_code)]
-const PTZ_STOP_DIRECTIONS: [PtzDirection; 4] = [
+/// Minimum absolute-move delta (degrees) worth issuing a turn for.
+pub(crate) const PTZ_MIN_MOVE_THRESHOLD: f32 = 0.5;
+/// Directions issued to guarantee every axis is stopped.
+pub(crate) const PTZ_STOP_DIRECTIONS: [PtzDirection; 4] = [
     PtzDirection::Left,
     PtzDirection::Right,
     PtzDirection::Up,
     PtzDirection::Down,
 ];
+/// Upper bound on how long a caller waits for the actor to reply before the request is
+/// turned into a `PlatformError::Timeout` (→ SOAP fault) instead of parking a worker.
+const PTZ_CMD_TIMEOUT: Duration = Duration::from_secs(15);
+/// Bounded command queue depth. Small: supersede semantics collapse bursts anyway.
+const PTZ_CMD_QUEUE_CAP: usize = 8;
 
 /// Convert a `PtzDirection` to the FFI `ptz_turn_direction`.
 ///
 /// Uses an exhaustive match instead of transmute so the compiler catches any
 /// future enum changes at compile time rather than producing silent UB.
-#[allow(dead_code)]
-fn direction_to_ffi(direction: PtzDirection) -> ptz_turn_direction {
+pub(crate) fn direction_to_ffi(direction: PtzDirection) -> ptz_turn_direction {
     match direction {
         PtzDirection::Left => ptz_turn_direction::PTZ_TURN_LEFT,
         PtzDirection::Right => ptz_turn_direction::PTZ_TURN_RIGHT,
@@ -72,7 +79,7 @@ fn direction_to_ffi(direction: PtzDirection) -> ptz_turn_direction {
     }
 }
 
-fn iter_ffi_directions(
+pub(crate) fn iter_ffi_directions(
     directions: &[PtzDirection],
 ) -> impl Iterator<Item = (PtzDirection, ptz_turn_direction)> + '_ {
     directions
@@ -81,28 +88,20 @@ fn iter_ffi_directions(
         .map(|dir| (dir, direction_to_ffi(dir)))
 }
 
-/// Anyka PTZ control that delegates to FFI functions for motor control.
+/// Anyka PTZ control: async front-end for the PTZ actor thread.
 ///
-/// This struct is parameterized by `Arc<dyn PtzHalTrait>` to enable mock
-/// injection for unit testing. Position is tracked in degrees (matching
-/// the C adapter pattern) rather than querying hardware on every call.
-///
-/// # Lock ordering (acquire in this order to prevent deadlocks)
-///
-/// 1. `handle`
-/// 2. `position`
-/// 3. `velocity`
-/// 4. `presets` + `next_preset_id` (always acquired together)
-/// 5. `continuous_move_task`
+/// Parameterized by `Arc<dyn PtzHalTrait>` for mock injection in unit tests.
 // Used by anyka.rs on ARM builds; appears unused on x86_64 where use_stubs excludes anyka.rs.
 #[allow(dead_code)]
 pub(crate) struct AnykaPTZControl {
     ffi: Arc<dyn PtzHalTrait>,
     handle: RwLock<Option<PTZHandle>>,
-    position: RwLock<PtzPosition>,
-    velocity: RwLock<PtzVelocity>,
+    shared: Arc<PtzActorState>,
     presets: RwLock<HashMap<String, PtzPreset>>,
     next_preset_id: RwLock<u32>,
+    cmd_tx: Mutex<Option<mpsc::Sender<PtzCommand>>>,
+    actor_handle: Mutex<Option<std::thread::JoinHandle<()>>>,
+    continuous_timeout: Duration,
     continuous_move_active: Arc<AtomicBool>,
     continuous_move_cancel: Arc<Notify>,
     continuous_move_task: Mutex<Option<JoinHandle<()>>>,
@@ -111,23 +110,53 @@ pub(crate) struct AnykaPTZControl {
 #[allow(dead_code)]
 impl AnykaPTZControl {
     /// Create a new `AnykaPTZControl` with the default FFI backend.
-    /// On ARM this uses the native Rust PTZ driver (/dev/ak-motor0, /dev/ak-motor1);
-    /// on host (use_stubs) uses the stub for tests.
     pub(crate) fn new() -> Self {
         Self::with_ffi(default_ptz_hal())
     }
 
     /// Create a new `AnykaPTZControl` with a custom FFI backend.
     ///
-    /// Used by `anyka.rs` in production and by tests with `MockPtzHalTrait`.
+    /// Spawns the PTZ actor thread immediately; it idles until commands arrive.
     pub(crate) fn with_ffi(ffi: Arc<dyn PtzHalTrait>) -> Self {
+        Self::build(ffi, Duration::from_secs(PTZ_CONTINUOUS_TIMEOUT_SECS))
+    }
+
+    /// Test-only constructor with a custom continuous-move auto-stop timeout so the
+    /// timeout path can be exercised in real time without a 10s wait.
+    #[cfg(test)]
+    pub(crate) fn with_ffi_and_timeout(
+        ffi: Arc<dyn PtzHalTrait>,
+        continuous_timeout: Duration,
+    ) -> Self {
+        Self::build(ffi, continuous_timeout)
+    }
+
+    fn build(ffi: Arc<dyn PtzHalTrait>, continuous_timeout: Duration) -> Self {
+        let shared = Arc::new(PtzActorState::new());
+        let (tx, rx) = mpsc::channel::<PtzCommand>(PTZ_CMD_QUEUE_CAP);
+
+        let actor_ffi = Arc::clone(&ffi);
+        let actor_shared = Arc::clone(&shared);
+        let (cmd_tx, actor_handle) = match std::thread::Builder::new()
+            .name("ptz-actor".to_string())
+            .spawn(move || ptz_actor::run_actor(actor_ffi, actor_shared, rx))
+        {
+            Ok(handle) => (Some(tx), Some(handle)),
+            Err(e) => {
+                tracing::error!("Failed to spawn PTZ actor thread: {}", e);
+                (None, None)
+            }
+        };
+
         Self {
             ffi,
             handle: RwLock::new(None),
-            position: RwLock::new(PtzPosition::HOME),
-            velocity: RwLock::new(PtzVelocity::STOP),
+            shared,
             presets: RwLock::new(HashMap::new()),
             next_preset_id: RwLock::new(1),
+            cmd_tx: Mutex::new(cmd_tx),
+            actor_handle: Mutex::new(actor_handle),
+            continuous_timeout,
             continuous_move_active: Arc::new(AtomicBool::new(false)),
             continuous_move_cancel: Arc::new(Notify::new()),
             continuous_move_task: Mutex::new(None),
@@ -145,10 +174,10 @@ impl AnykaPTZControl {
         Ok(())
     }
 
-    /// Close the PTZ device. Cancels any continuous move and drops the handle.
+    /// Close the PTZ device. Cancels the continuous-move timeout and drops the handle.
+    /// The actor thread keeps running so the device can be reopened.
     pub(crate) async fn close(&self) {
-        self.cancel_continuous_move().await;
-        // Drop the handle — PTZHandle::Drop calls ptz_close via RAII
+        self.cancel_continuous_timeout().await;
         let _ = self.handle.write().take();
     }
 
@@ -162,69 +191,99 @@ impl AnykaPTZControl {
         Ok(())
     }
 
-    /// Cancel any active continuous move and await its completion.
-    async fn cancel_continuous_move(&self) {
+    /// Cancel any active continuous-move timeout task and await its completion.
+    async fn cancel_continuous_timeout(&self) {
         if self.continuous_move_active.swap(false, Ordering::SeqCst) {
             self.continuous_move_cancel.notify_one();
         }
         let task = self.continuous_move_task.lock().take();
         if let Some(handle) = task
             && let Err(e) = handle.await
+            && !e.is_cancelled()
         {
-            tracing::error!(
-                "PTZ continuous move task failed: {}. This indicates a bug in the timeout task.",
-                e
-            );
+            tracing::error!("PTZ continuous timeout task failed: {}", e);
         }
     }
 
-    /// Clamp a pan value to hardware limits.
-    fn clamp_pan(pan: f32) -> f32 {
-        pan.clamp(PTZ_MIN_PAN_DEGREES, PTZ_MAX_PAN_DEGREES)
-    }
+    /// Submit a command to the actor and await its reply under a timeout.
+    ///
+    /// Before sending, the driver interrupt flag is set so any in-flight turn unwinds
+    /// promptly and can be superseded by this command.
+    async fn submit<F>(&self, build: F) -> PlatformResult<()>
+    where
+        F: FnOnce(oneshot::Sender<PlatformResult<()>>) -> PtzCommand,
+    {
+        self.ensure_open()?;
+        let tx = self.cmd_tx.lock().clone().ok_or_else(|| {
+            PlatformError::HardwareUnavailable("PTZ actor unavailable".to_string())
+        })?;
 
-    /// Clamp a tilt value to hardware limits.
-    fn clamp_tilt(tilt: f32) -> f32 {
-        tilt.clamp(PTZ_MIN_TILT_DEGREES, PTZ_MAX_TILT_DEGREES)
-    }
+        // Preempt any in-flight turn so this command supersedes it quickly.
+        self.ffi.ptz_interrupt();
 
-    /// Issue a turn command via FFI.
-    fn turn(&self, direction: PtzDirection, degrees: f32) -> PlatformResult<()> {
-        let sdk_dir = direction_to_ffi(direction);
-        let degree_int = degrees.round() as i32;
-        let ret = self.ffi.ptz_turn(sdk_dir, degree_int);
-        if ret == AK_SUCCESS_I32 {
-            Ok(())
-        } else {
-            Err(PlatformError::HardwareFailure(format!(
-                "ptz_turn({:?}, {}) failed: error code {}",
-                direction, degree_int, ret
-            )))
+        let (reply_tx, reply_rx) = oneshot::channel();
+        tx.send(build(reply_tx))
+            .await
+            .map_err(|_| PlatformError::HardwareUnavailable("PTZ actor stopped".to_string()))?;
+
+        match tokio::time::timeout(PTZ_CMD_TIMEOUT, reply_rx).await {
+            Ok(Ok(result)) => result,
+            Ok(Err(_)) => Err(PlatformError::HardwareFailure(
+                "PTZ actor dropped reply".to_string(),
+            )),
+            Err(_) => Err(PlatformError::Timeout),
         }
     }
 
-    /// Issue stop commands for all four directions via FFI.
-    ///
-    /// Matches the C adapter pattern (ptz_adapter.c:376-382) which calls
-    /// `platform_ptz_turn_stop()` for Left, Right, Up, and Down to ensure
-    /// all motors are stopped regardless of which axis was moving.
-    ///
-    /// Unlike a simple `?`-based loop, this attempts to stop **all** axes
-    /// even if one fails, then returns the first error (if any).
-    fn stop_hardware(&self) -> PlatformResult<()> {
-        let mut first_error: Option<PlatformError> = None;
-        for (dir, sdk_dir) in iter_ffi_directions(&PTZ_STOP_DIRECTIONS) {
-            let ret = self.ffi.ptz_stop(sdk_dir);
-            if ret != AK_SUCCESS_I32 && first_error.is_none() {
-                first_error = Some(PlatformError::HardwareFailure(format!(
-                    "ptz_turn_stop({:?}) failed: error code {}",
-                    dir, ret
-                )));
+    /// Spawn the continuous-move auto-stop timeout. On expiry it routes a `Stop`
+    /// through the actor (no `spawn_blocking`); cancelled by any superseding command.
+    fn spawn_continuous_timeout(&self) {
+        self.continuous_move_active.store(true, Ordering::SeqCst);
+        let active = self.continuous_move_active.clone();
+        let cancel = self.continuous_move_cancel.clone();
+        let ffi = Arc::clone(&self.ffi);
+        let timeout = self.continuous_timeout;
+        // WeakSender so this task never keeps the actor channel alive past Drop.
+        let weak_tx = self.cmd_tx.lock().as_ref().map(mpsc::Sender::downgrade);
+
+        let task = tokio::spawn(async move {
+            tokio::select! {
+                () = tokio::time::sleep(timeout) => {
+                    if active.swap(false, Ordering::SeqCst) {
+                        tracing::info!(
+                            "PTZ continuous move timeout after {:?}, stopping via actor",
+                            timeout
+                        );
+                        // Interrupt the in-flight sweep, then enqueue a Stop.
+                        ffi.ptz_interrupt();
+                        if let Some(tx) = weak_tx.and_then(|w| w.upgrade()) {
+                            let (reply_tx, _reply_rx) = oneshot::channel();
+                            if let Err(e) = tx.send(PtzCommand::Stop { reply: reply_tx }).await {
+                                tracing::error!("PTZ timeout stop enqueue failed: {}", e);
+                            }
+                        }
+                    }
+                }
+                () = cancel.notified() => {}
             }
+        });
+
+        *self.continuous_move_task.lock() = Some(task);
+    }
+}
+
+impl Drop for AnykaPTZControl {
+    fn drop(&mut self) {
+        // Cancel the timeout task (it only holds a WeakSender, so it cannot keep the
+        // channel open), then close the channel and join the actor thread.
+        if let Some(task) = self.continuous_move_task.lock().take() {
+            task.abort();
         }
-        match first_error {
-            Some(e) => Err(e),
-            None => Ok(()),
+        *self.cmd_tx.lock() = None;
+        if let Some(handle) = self.actor_handle.lock().take()
+            && handle.join().is_err()
+        {
+            tracing::error!("PTZ actor thread panicked on shutdown");
         }
     }
 }
@@ -232,141 +291,27 @@ impl AnykaPTZControl {
 #[async_trait]
 impl PTZControl for AnykaPTZControl {
     async fn move_to_position(&self, position: PtzPosition) -> PlatformResult<()> {
-        self.ensure_open()?;
-        self.cancel_continuous_move().await;
-
-        let clamped_pan = Self::clamp_pan(position.pan);
-        let clamped_tilt = Self::clamp_tilt(position.tilt);
-
-        let current = *self.position.read();
-        let pan_delta = clamped_pan - current.pan;
-        let tilt_delta = clamped_tilt - current.tilt;
-
-        // Pan movement — direction convention:
-        // positive delta → Right, negative → Left.
-        // NOTE: The C adapter relative_move (ptz_adapter.c:258) uses the opposite
-        // convention (positive → Left), but its continuous_move (ptz_adapter.c:331)
-        // maps positive → Right. We follow the continuous_move convention and the
-        // plan specification consistently for both move types.
-        if pan_delta.abs() > PTZ_MIN_MOVE_THRESHOLD {
-            let direction = if pan_delta > 0.0 {
-                PtzDirection::Right
-            } else {
-                PtzDirection::Left
-            };
-            self.turn(direction, pan_delta.abs())?;
-            // Update tracked position immediately after successful pan turn,
-            // so partial failure (pan OK, tilt fail) still reflects the pan movement.
-            self.position.write().pan = clamped_pan;
-        }
-
-        // Tilt movement — direction mapping matches C adapter (ptz_adapter.c:274):
-        // positive delta → Down, negative → Up
-        if tilt_delta.abs() > PTZ_MIN_MOVE_THRESHOLD {
-            let direction = if tilt_delta > 0.0 {
-                PtzDirection::Down
-            } else {
-                PtzDirection::Up
-            };
-            self.turn(direction, tilt_delta.abs())?;
-            self.position.write().tilt = clamped_tilt;
-        }
-
-        // Always update zoom (no FFI call involved, no hardware zoom on AK3918)
-        self.position.write().zoom = position.zoom.clamp(1.0, 1.0);
-
-        *self.velocity.write() = PtzVelocity::STOP;
-
-        Ok(())
+        self.cancel_continuous_timeout().await;
+        self.submit(|reply| PtzCommand::MoveTo { position, reply })
+            .await
     }
 
     async fn get_position(&self) -> PlatformResult<PtzPosition> {
         self.ensure_open()?;
-        Ok(*self.position.read())
+        Ok(*self.shared.position.read())
     }
 
     async fn continuous_move(&self, velocity: PtzVelocity) -> PlatformResult<()> {
-        self.ensure_open()?;
-        self.cancel_continuous_move().await;
-
-        // Start movement — direction mapping matches C adapter (ptz_adapter.c:331-339):
-        // positive velocity → Right/Down, negative → Left/Up
-        if velocity.pan.abs() > f32::EPSILON {
-            let direction = if velocity.pan > 0.0 {
-                PtzDirection::Right
-            } else {
-                PtzDirection::Left
-            };
-            self.turn(direction, PTZ_MAX_PAN_DEGREES)?;
-        }
-
-        if velocity.tilt.abs() > f32::EPSILON {
-            let direction = if velocity.tilt > 0.0 {
-                PtzDirection::Down
-            } else {
-                PtzDirection::Up
-            };
-            self.turn(direction, PTZ_MAX_TILT_DEGREES)?;
-        }
-
-        *self.velocity.write() = velocity;
-        self.continuous_move_active.store(true, Ordering::SeqCst);
-
-        // Spawn timeout task — mirrors C adapter's pthread timeout thread
-        let active = self.continuous_move_active.clone();
-        let cancel = self.continuous_move_cancel.clone();
-        let ffi = self.ffi.clone();
-
-        let task = tokio::spawn(async move {
-            tokio::select! {
-                () = tokio::time::sleep(Duration::from_secs(PTZ_CONTINUOUS_TIMEOUT_SECS)) => {
-                    if active.swap(false, Ordering::SeqCst) {
-                        tracing::info!(
-                            "PTZ continuous move timeout after {}s, stopping",
-                            PTZ_CONTINUOUS_TIMEOUT_SECS
-                        );
-                        // Stop all four directions by running the stop loop in spawn_blocking
-                        // to avoid blocking the Tokio executor with synchronous FFI calls.
-                        // Matching C adapter pattern (ptz_adapter.c:376-382).
-                        let ffi_clone = ffi.clone();
-                        let stop_result = tokio::task::spawn_blocking(move || {
-                            for (dir, sdk_dir) in iter_ffi_directions(&PTZ_STOP_DIRECTIONS) {
-                                let ret = ffi_clone.ptz_stop(sdk_dir);
-                                if ret != AK_SUCCESS_I32 {
-                                    tracing::error!(
-                                        "CRITICAL: PTZ stop({:?}) failed after timeout \
-                                         (error code {}), motor may still be running!",
-                                        dir, ret
-                                    );
-                                }
-                            }
-                        }).await;
-
-                        if let Err(e) = stop_result {
-                            tracing::error!(
-                                "PTZ stop task failed after timeout (possible task panic): {}",
-                                e
-                            );
-                        }
-                    }
-                }
-                () = cancel.notified() => {
-                    // Cancelled by another operation (stop, move_to_position, or new continuous_move)
-                }
-            }
-        });
-
-        *self.continuous_move_task.lock() = Some(task);
-
+        self.cancel_continuous_timeout().await;
+        self.submit(|reply| PtzCommand::Continuous { velocity, reply })
+            .await?;
+        self.spawn_continuous_timeout();
         Ok(())
     }
 
     async fn stop(&self) -> PlatformResult<()> {
-        self.ensure_open()?;
-        self.cancel_continuous_move().await;
-        self.stop_hardware()?;
-        *self.velocity.write() = PtzVelocity::STOP;
-        Ok(())
+        self.cancel_continuous_timeout().await;
+        self.submit(|reply| PtzCommand::Stop { reply }).await
     }
 
     async fn get_presets(&self) -> PlatformResult<Vec<PtzPreset>> {
@@ -374,7 +319,7 @@ impl PTZControl for AnykaPTZControl {
     }
 
     async fn set_preset(&self, name: &str) -> PlatformResult<String> {
-        let position = *self.position.read();
+        let position = *self.shared.position.read();
         let mut presets = self.presets.write();
         let mut next_id = self.next_preset_id.write();
         let token = format!("preset_{}", *next_id);
@@ -431,16 +376,45 @@ impl PTZControl for AnykaPTZControl {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::hal::common::ptz::MockPtzHalTrait;
+    use crate::hal::common::ptz::{MockPtzHalTrait, PtzWaitOutcome};
     use crate::hal::common::{AK_FAILED_I32, AK_SUCCESS_I32};
 
+    /// Wait (bounded) until the actor has fully finished more commands than `before`.
+    ///
+    /// Absolute/continuous moves reply on *acceptance*; the position/velocity commit
+    /// happens on the actor thread afterwards. This lets a test observe that async tail
+    /// deterministically (the counter increments once the actor finishes a command).
+    async fn await_actor_completed(ptz: &AnykaPTZControl, before: u32) {
+        for _ in 0..2000 {
+            if ptz.shared.commands_completed.load(Ordering::SeqCst) > before {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(1)).await;
+        }
+        panic!("PTZ actor did not complete the command in time");
+    }
+
+    /// Submit an absolute move and wait for its async completion tail to land, so a
+    /// subsequent `get_position` observes the committed position deterministically.
+    async fn move_and_settle(ptz: &AnykaPTZControl, position: PtzPosition) -> PlatformResult<()> {
+        let before = ptz.shared.commands_completed.load(Ordering::SeqCst);
+        let result = ptz.move_to_position(position).await;
+        await_actor_completed(ptz, before).await;
+        result
+    }
+
     /// Helper: create a mock FFI that succeeds on open (including self-check).
+    ///
+    /// `ptz_interrupt` is set up permissively because every submitted command sets the
+    /// interrupt flag before sending.
     fn mock_with_open() -> MockPtzHalTrait {
         let mut mock = MockPtzHalTrait::new();
         mock.expect_ptz_open().returning(|| AK_SUCCESS_I32);
         mock.expect_ptz_check_self().returning(|_| AK_SUCCESS_I32);
         // Allow close to be called during Drop
         mock.expect_ptz_close().returning(|| AK_SUCCESS_I32);
+        // Every submitted command interrupts any in-flight turn first.
+        mock.expect_ptz_interrupt().returning(|| ());
         mock
     }
 
@@ -486,6 +460,7 @@ mod tests {
             .times(1)
             .returning(|_| AK_SUCCESS_I32);
         mock.expect_ptz_close().returning(|| AK_SUCCESS_I32);
+        mock.expect_ptz_interrupt().returning(|| ());
         let ptz = AnykaPTZControl::with_ffi(Arc::new(mock));
         assert!(ptz.open().is_ok());
         assert!(ptz.open().is_ok());
@@ -512,14 +487,16 @@ mod tests {
     #[tokio::test]
     async fn test_move_positive_pan_turns_right() {
         let mut mock = mock_with_open();
-        mock.expect_ptz_turn()
+        mock.expect_ptz_start_turn()
             .withf(|dir, deg| *dir == ptz_turn_direction::PTZ_TURN_RIGHT && *deg == 90)
             .times(1)
             .returning(|_, _| AK_SUCCESS_I32);
+        mock.expect_ptz_wait_turn()
+            .returning(|_| PtzWaitOutcome::default());
         mock.expect_ptz_stop().returning(|_| AK_SUCCESS_I32);
 
         let ptz = create_opened(mock);
-        let result = ptz.move_to_position(PtzPosition::new(90.0, 0.0, 1.0)).await;
+        let result = move_and_settle(&ptz, PtzPosition::new(90.0, 0.0, 1.0)).await;
         assert!(result.is_ok());
 
         let pos = ptz.get_position().await.unwrap();
@@ -529,16 +506,16 @@ mod tests {
     #[tokio::test]
     async fn test_move_negative_pan_turns_left() {
         let mut mock = mock_with_open();
-        mock.expect_ptz_turn()
+        mock.expect_ptz_start_turn()
             .withf(|dir, deg| *dir == ptz_turn_direction::PTZ_TURN_LEFT && *deg == 45)
             .times(1)
             .returning(|_, _| AK_SUCCESS_I32);
+        mock.expect_ptz_wait_turn()
+            .returning(|_| PtzWaitOutcome::default());
         mock.expect_ptz_stop().returning(|_| AK_SUCCESS_I32);
 
         let ptz = create_opened(mock);
-        let result = ptz
-            .move_to_position(PtzPosition::new(-45.0, 0.0, 1.0))
-            .await;
+        let result = move_and_settle(&ptz, PtzPosition::new(-45.0, 0.0, 1.0)).await;
         assert!(result.is_ok());
 
         let pos = ptz.get_position().await.unwrap();
@@ -548,14 +525,16 @@ mod tests {
     #[tokio::test]
     async fn test_move_positive_tilt_turns_down() {
         let mut mock = mock_with_open();
-        mock.expect_ptz_turn()
+        mock.expect_ptz_start_turn()
             .withf(|dir, deg| *dir == ptz_turn_direction::PTZ_TURN_DOWN && *deg == 60)
             .times(1)
             .returning(|_, _| AK_SUCCESS_I32);
+        mock.expect_ptz_wait_turn()
+            .returning(|_| PtzWaitOutcome::default());
         mock.expect_ptz_stop().returning(|_| AK_SUCCESS_I32);
 
         let ptz = create_opened(mock);
-        let result = ptz.move_to_position(PtzPosition::new(0.0, 60.0, 1.0)).await;
+        let result = move_and_settle(&ptz, PtzPosition::new(0.0, 60.0, 1.0)).await;
         assert!(result.is_ok());
 
         let pos = ptz.get_position().await.unwrap();
@@ -565,16 +544,16 @@ mod tests {
     #[tokio::test]
     async fn test_move_negative_tilt_turns_up() {
         let mut mock = mock_with_open();
-        mock.expect_ptz_turn()
+        mock.expect_ptz_start_turn()
             .withf(|dir, deg| *dir == ptz_turn_direction::PTZ_TURN_UP && *deg == 30)
             .times(1)
             .returning(|_, _| AK_SUCCESS_I32);
+        mock.expect_ptz_wait_turn()
+            .returning(|_| PtzWaitOutcome::default());
         mock.expect_ptz_stop().returning(|_| AK_SUCCESS_I32);
 
         let ptz = create_opened(mock);
-        let result = ptz
-            .move_to_position(PtzPosition::new(0.0, -30.0, 1.0))
-            .await;
+        let result = move_and_settle(&ptz, PtzPosition::new(0.0, -30.0, 1.0)).await;
         assert!(result.is_ok());
 
         let pos = ptz.get_position().await.unwrap();
@@ -584,19 +563,20 @@ mod tests {
     #[tokio::test]
     async fn test_move_both_pan_and_tilt() {
         let mut mock = mock_with_open();
-        // Expect pan Right, then tilt Down
         let call_count = Arc::new(std::sync::atomic::AtomicU32::new(0));
         let count_clone = call_count.clone();
-        mock.expect_ptz_turn().times(2).returning(move |_, _| {
-            count_clone.fetch_add(1, Ordering::SeqCst);
-            AK_SUCCESS_I32
-        });
+        mock.expect_ptz_start_turn()
+            .times(2)
+            .returning(move |_, _| {
+                count_clone.fetch_add(1, Ordering::SeqCst);
+                AK_SUCCESS_I32
+            });
+        mock.expect_ptz_wait_turn()
+            .returning(|_| PtzWaitOutcome::default());
         mock.expect_ptz_stop().returning(|_| AK_SUCCESS_I32);
 
         let ptz = create_opened(mock);
-        let result = ptz
-            .move_to_position(PtzPosition::new(100.0, 50.0, 1.0))
-            .await;
+        let result = move_and_settle(&ptz, PtzPosition::new(100.0, 50.0, 1.0)).await;
         assert!(result.is_ok());
         assert_eq!(call_count.load(Ordering::SeqCst), 2);
     }
@@ -605,16 +585,16 @@ mod tests {
     async fn test_move_clamps_to_limits() {
         let mut mock = mock_with_open();
         // Pan should be clamped to 350, not 500
-        mock.expect_ptz_turn()
+        mock.expect_ptz_start_turn()
             .withf(|dir, deg| *dir == ptz_turn_direction::PTZ_TURN_RIGHT && *deg == 350)
             .times(1)
             .returning(|_, _| AK_SUCCESS_I32);
+        mock.expect_ptz_wait_turn()
+            .returning(|_| PtzWaitOutcome::default());
         mock.expect_ptz_stop().returning(|_| AK_SUCCESS_I32);
 
         let ptz = create_opened(mock);
-        let result = ptz
-            .move_to_position(PtzPosition::new(500.0, 0.0, 1.0))
-            .await;
+        let result = move_and_settle(&ptz, PtzPosition::new(500.0, 0.0, 1.0)).await;
         assert!(result.is_ok());
 
         let pos = ptz.get_position().await.unwrap();
@@ -624,27 +604,31 @@ mod tests {
     #[tokio::test]
     async fn test_move_small_delta_ignored() {
         let mut mock = mock_with_open();
-        // No ptz_turn expected for a 0.3 degree move (below threshold)
-        mock.expect_ptz_turn().never();
+        // No turn expected for a 0.3 degree move (below threshold)
+        mock.expect_ptz_start_turn().never();
+        mock.expect_ptz_wait_turn().never();
         mock.expect_ptz_stop().returning(|_| AK_SUCCESS_I32);
 
         let ptz = create_opened(mock);
-        let result = ptz.move_to_position(PtzPosition::new(0.3, 0.2, 1.0)).await;
+        let result = move_and_settle(&ptz, PtzPosition::new(0.3, 0.2, 1.0)).await;
         assert!(result.is_ok());
     }
 
     #[tokio::test]
     async fn test_move_ffi_error_propagation() {
         let mut mock = mock_with_open();
-        mock.expect_ptz_turn().returning(|_, _| AK_FAILED_I32);
+        // A failed start means the command cannot be accepted → error returned to caller.
+        mock.expect_ptz_start_turn().returning(|_, _| AK_FAILED_I32);
+        mock.expect_ptz_wait_turn()
+            .returning(|_| PtzWaitOutcome::default());
         mock.expect_ptz_stop().returning(|_| AK_SUCCESS_I32);
 
         let ptz = create_opened(mock);
-        let result = ptz.move_to_position(PtzPosition::new(90.0, 0.0, 1.0)).await;
+        let result = move_and_settle(&ptz, PtzPosition::new(90.0, 0.0, 1.0)).await;
         assert!(result.is_err());
         match result {
             Err(PlatformError::HardwareFailure(msg)) => {
-                assert!(msg.contains("ptz_turn"));
+                assert!(msg.contains("start_turn"));
             }
             _ => panic!("Expected HardwareFailure"),
         }
@@ -653,13 +637,16 @@ mod tests {
     #[tokio::test]
     async fn test_move_position_tracking_updates() {
         let mut mock = mock_with_open();
-        mock.expect_ptz_turn().returning(|_, _| AK_SUCCESS_I32);
+        mock.expect_ptz_start_turn()
+            .returning(|_, _| AK_SUCCESS_I32);
+        mock.expect_ptz_wait_turn()
+            .returning(|_| PtzWaitOutcome::default());
         mock.expect_ptz_stop().returning(|_| AK_SUCCESS_I32);
 
         let ptz = create_opened(mock);
 
         // Move to (50, 30)
-        ptz.move_to_position(PtzPosition::new(50.0, 30.0, 1.0))
+        move_and_settle(&ptz, PtzPosition::new(50.0, 30.0, 1.0))
             .await
             .unwrap();
         let pos = ptz.get_position().await.unwrap();
@@ -667,7 +654,7 @@ mod tests {
         assert!((pos.tilt - 30.0).abs() < f32::EPSILON);
 
         // Move to (80, 10) — delta is (30, -20)
-        ptz.move_to_position(PtzPosition::new(80.0, 10.0, 1.0))
+        move_and_settle(&ptz, PtzPosition::new(80.0, 10.0, 1.0))
             .await
             .unwrap();
         let pos = ptz.get_position().await.unwrap();
@@ -682,10 +669,12 @@ mod tests {
     #[tokio::test]
     async fn test_continuous_move_positive_pan() {
         let mut mock = mock_with_open();
-        mock.expect_ptz_turn()
+        mock.expect_ptz_start_turn()
             .withf(|dir, deg| *dir == ptz_turn_direction::PTZ_TURN_RIGHT && *deg == 350)
             .times(1)
             .returning(|_, _| AK_SUCCESS_I32);
+        mock.expect_ptz_wait_turn()
+            .returning(|_| PtzWaitOutcome::default());
         mock.expect_ptz_stop().returning(|_| AK_SUCCESS_I32);
 
         let ptz = create_opened(mock);
@@ -699,10 +688,12 @@ mod tests {
     #[tokio::test]
     async fn test_continuous_move_negative_tilt() {
         let mut mock = mock_with_open();
-        mock.expect_ptz_turn()
+        mock.expect_ptz_start_turn()
             .withf(|dir, deg| *dir == ptz_turn_direction::PTZ_TURN_UP && *deg == 130)
             .times(1)
             .returning(|_, _| AK_SUCCESS_I32);
+        mock.expect_ptz_wait_turn()
+            .returning(|_| PtzWaitOutcome::default());
         mock.expect_ptz_stop().returning(|_| AK_SUCCESS_I32);
 
         let ptz = create_opened(mock);
@@ -715,7 +706,10 @@ mod tests {
     #[tokio::test]
     async fn test_continuous_move_cancelled_by_stop() {
         let mut mock = mock_with_open();
-        mock.expect_ptz_turn().returning(|_, _| AK_SUCCESS_I32);
+        mock.expect_ptz_start_turn()
+            .returning(|_, _| AK_SUCCESS_I32);
+        mock.expect_ptz_wait_turn()
+            .returning(|_| PtzWaitOutcome::default());
         mock.expect_ptz_stop().returning(|_| AK_SUCCESS_I32);
 
         let ptz = create_opened(mock);
@@ -730,7 +724,10 @@ mod tests {
     #[tokio::test]
     async fn test_continuous_move_cancelled_by_new_move() {
         let mut mock = mock_with_open();
-        mock.expect_ptz_turn().returning(|_, _| AK_SUCCESS_I32);
+        mock.expect_ptz_start_turn()
+            .returning(|_, _| AK_SUCCESS_I32);
+        mock.expect_ptz_wait_turn()
+            .returning(|_| PtzWaitOutcome::default());
         mock.expect_ptz_stop().returning(|_| AK_SUCCESS_I32);
 
         let ptz = create_opened(mock);
@@ -741,7 +738,7 @@ mod tests {
             .unwrap();
 
         // New move_to_position should cancel the continuous move
-        let result = ptz.move_to_position(PtzPosition::new(50.0, 0.0, 1.0)).await;
+        let result = move_and_settle(&ptz, PtzPosition::new(50.0, 0.0, 1.0)).await;
         assert!(result.is_ok());
     }
 
@@ -752,7 +749,7 @@ mod tests {
     #[tokio::test]
     async fn test_stop_calls_ffi() {
         let mut mock = mock_with_open();
-        // stop_hardware calls ptz_stop for all 4 directions (Left, Right, Up, Down)
+        // do_stop calls ptz_stop for all 4 directions (Left, Right, Up, Down)
         mock.expect_ptz_stop()
             .times(4)
             .returning(|_| AK_SUCCESS_I32);
@@ -765,7 +762,10 @@ mod tests {
     #[tokio::test]
     async fn test_stop_clears_velocity() {
         let mut mock = mock_with_open();
-        mock.expect_ptz_turn().returning(|_, _| AK_SUCCESS_I32);
+        mock.expect_ptz_start_turn()
+            .returning(|_, _| AK_SUCCESS_I32);
+        mock.expect_ptz_wait_turn()
+            .returning(|_| PtzWaitOutcome::default());
         mock.expect_ptz_stop().returning(|_| AK_SUCCESS_I32);
 
         let ptz = create_opened(mock);
@@ -774,7 +774,7 @@ mod tests {
             .unwrap();
         ptz.stop().await.unwrap();
 
-        let vel = *ptz.velocity.read();
+        let vel = *ptz.shared.velocity.read();
         assert!((vel.pan).abs() < f32::EPSILON);
         assert!((vel.tilt).abs() < f32::EPSILON);
     }
@@ -811,24 +811,29 @@ mod tests {
     async fn test_goto_preset_triggers_move() {
         let mut mock = mock_with_open();
         // First move to set up position
-        mock.expect_ptz_turn().returning(|_, _| AK_SUCCESS_I32);
+        mock.expect_ptz_start_turn()
+            .returning(|_, _| AK_SUCCESS_I32);
+        mock.expect_ptz_wait_turn()
+            .returning(|_| PtzWaitOutcome::default());
         mock.expect_ptz_stop().returning(|_| AK_SUCCESS_I32);
 
         let ptz = create_opened(mock);
 
         // Move to (90, 45), then set a preset there
-        ptz.move_to_position(PtzPosition::new(90.0, 45.0, 1.0))
+        move_and_settle(&ptz, PtzPosition::new(90.0, 45.0, 1.0))
             .await
             .unwrap();
         let token = ptz.set_preset("Corner").await.unwrap();
 
         // Move back to home
-        ptz.move_to_position(PtzPosition::new(0.0, 0.0, 1.0))
+        move_and_settle(&ptz, PtzPosition::new(0.0, 0.0, 1.0))
             .await
             .unwrap();
 
         // Goto preset should move back to (90, 45)
+        let before = ptz.shared.commands_completed.load(Ordering::SeqCst);
         ptz.goto_preset(&token).await.unwrap();
+        await_actor_completed(&ptz, before).await;
         let pos = ptz.get_position().await.unwrap();
         assert!((pos.pan - 90.0).abs() < f32::EPSILON);
         assert!((pos.tilt - 45.0).abs() < f32::EPSILON);
@@ -896,6 +901,7 @@ mod tests {
         mock.expect_ptz_check_self().returning(|_| AK_SUCCESS_I32);
         mock.expect_ptz_close().returning(|| AK_SUCCESS_I32);
         mock.expect_ptz_stop().returning(|_| AK_SUCCESS_I32);
+        mock.expect_ptz_interrupt().returning(|| ());
 
         let ptz = AnykaPTZControl::with_ffi(Arc::new(mock));
         ptz.open().unwrap();
@@ -906,45 +912,48 @@ mod tests {
     }
 
     // =========================================================================
-    // Timeout, clamping, FFI error propagation, direction verification
+    // Timeout, position tracking, FFI error propagation
     // =========================================================================
 
-    #[tokio::test(start_paused = true)]
+    #[tokio::test]
     async fn test_continuous_move_timeout_fires_stop() {
+        // Uses a real (short) timeout instead of paused time: the actor replies from a
+        // separate OS thread, which paused-time auto-advance would race against.
         let mut mock = mock_with_open();
-        mock.expect_ptz_turn().returning(|_, _| AK_SUCCESS_I32);
-        // ptz_stop should be called 4 times — by the timeout task (once per direction)
+        mock.expect_ptz_start_turn()
+            .returning(|_, _| AK_SUCCESS_I32);
+        mock.expect_ptz_wait_turn()
+            .returning(|_| PtzWaitOutcome::default());
+        // ptz_stop should be called 4 times by the timeout-driven actor Stop.
         mock.expect_ptz_stop()
             .times(4)
             .returning(|_| AK_SUCCESS_I32);
 
-        let ptz = create_opened(mock);
+        let ptz = AnykaPTZControl::with_ffi_and_timeout(Arc::new(mock), Duration::from_millis(50));
+        ptz.open().expect("open should succeed");
         ptz.continuous_move(PtzVelocity::new(1.0, 0.0, 0.0))
             .await
             .unwrap();
 
-        // Yield first so the spawned task gets polled and registers its sleep timer
-        tokio::task::yield_now().await;
-        // Now advance past the 10-second timeout — this triggers the registered timer
-        tokio::time::advance(Duration::from_secs(PTZ_CONTINUOUS_TIMEOUT_SECS + 1)).await;
-        // Yield again to let the spawned task process the timer and call ptz_stop
-        tokio::task::yield_now().await;
+        // Wait past the 50ms auto-stop timeout so the timeout task enqueues a Stop and
+        // the actor thread processes it.
+        tokio::time::sleep(Duration::from_millis(300)).await;
 
-        // Clean up — properly join the timeout task so mock assertions fire
-        ptz.close().await;
-        // Mock drop verifies ptz_stop was called exactly once
+        // Dropping joins the actor thread, ensuring the Stop was processed before the
+        // mock verifies the expected ptz_stop call count.
+        drop(ptz);
     }
 
     #[tokio::test]
     async fn test_position_unchanged_after_pan_ffi_failure() {
         let mut mock = mock_with_open();
-        mock.expect_ptz_turn().returning(|_, _| AK_FAILED_I32);
+        mock.expect_ptz_start_turn().returning(|_, _| AK_FAILED_I32);
+        mock.expect_ptz_wait_turn()
+            .returning(|_| PtzWaitOutcome::default());
         mock.expect_ptz_stop().returning(|_| AK_SUCCESS_I32);
 
         let ptz = create_opened(mock);
-        let result = ptz
-            .move_to_position(PtzPosition::new(90.0, 45.0, 1.0))
-            .await;
+        let result = move_and_settle(&ptz, PtzPosition::new(90.0, 45.0, 1.0)).await;
         assert!(result.is_err());
 
         // Position should remain at HOME — pan turn failed before update
@@ -959,7 +968,7 @@ mod tests {
         let call_count = Arc::new(std::sync::atomic::AtomicU32::new(0));
         let count_clone = call_count.clone();
         // First call (pan) succeeds, second call (tilt) fails
-        mock.expect_ptz_turn().returning(move |_, _| {
+        mock.expect_ptz_start_turn().returning(move |_, _| {
             let count = count_clone.fetch_add(1, Ordering::SeqCst);
             if count == 0 {
                 AK_SUCCESS_I32
@@ -967,12 +976,12 @@ mod tests {
                 AK_FAILED_I32
             }
         });
+        mock.expect_ptz_wait_turn()
+            .returning(|_| PtzWaitOutcome::default());
         mock.expect_ptz_stop().returning(|_| AK_SUCCESS_I32);
 
         let ptz = create_opened(mock);
-        let result = ptz
-            .move_to_position(PtzPosition::new(90.0, 45.0, 1.0))
-            .await;
+        let result = move_and_settle(&ptz, PtzPosition::new(90.0, 45.0, 1.0)).await;
         assert!(result.is_err());
 
         // Pan should be updated (turn succeeded), tilt should remain at 0
@@ -984,7 +993,9 @@ mod tests {
     #[tokio::test]
     async fn test_continuous_move_ffi_error_propagation() {
         let mut mock = mock_with_open();
-        mock.expect_ptz_turn().returning(|_, _| AK_FAILED_I32);
+        mock.expect_ptz_start_turn().returning(|_, _| AK_FAILED_I32);
+        mock.expect_ptz_wait_turn()
+            .returning(|_| PtzWaitOutcome::default());
         mock.expect_ptz_stop().returning(|_| AK_SUCCESS_I32);
 
         let ptz = create_opened(mock);
@@ -992,7 +1003,7 @@ mod tests {
         assert!(result.is_err());
         match result {
             Err(PlatformError::HardwareFailure(msg)) => {
-                assert!(msg.contains("ptz_turn"));
+                assert!(msg.contains("ptz_start_turn"));
             }
             _ => panic!("Expected HardwareFailure"),
         }
@@ -1002,16 +1013,16 @@ mod tests {
     async fn test_move_clamps_negative_pan_to_limits() {
         let mut mock = mock_with_open();
         // Pan -500 should be clamped to -350, turning Left 350 degrees
-        mock.expect_ptz_turn()
+        mock.expect_ptz_start_turn()
             .withf(|dir, deg| *dir == ptz_turn_direction::PTZ_TURN_LEFT && *deg == 350)
             .times(1)
             .returning(|_, _| AK_SUCCESS_I32);
+        mock.expect_ptz_wait_turn()
+            .returning(|_| PtzWaitOutcome::default());
         mock.expect_ptz_stop().returning(|_| AK_SUCCESS_I32);
 
         let ptz = create_opened(mock);
-        let result = ptz
-            .move_to_position(PtzPosition::new(-500.0, 0.0, 1.0))
-            .await;
+        let result = move_and_settle(&ptz, PtzPosition::new(-500.0, 0.0, 1.0)).await;
         assert!(result.is_ok());
 
         let pos = ptz.get_position().await.unwrap();
@@ -1022,16 +1033,16 @@ mod tests {
     async fn test_move_clamps_negative_tilt_to_limits() {
         let mut mock = mock_with_open();
         // Tilt -200 should be clamped to -130, turning Up 130 degrees
-        mock.expect_ptz_turn()
+        mock.expect_ptz_start_turn()
             .withf(|dir, deg| *dir == ptz_turn_direction::PTZ_TURN_UP && *deg == 130)
             .times(1)
             .returning(|_, _| AK_SUCCESS_I32);
+        mock.expect_ptz_wait_turn()
+            .returning(|_| PtzWaitOutcome::default());
         mock.expect_ptz_stop().returning(|_| AK_SUCCESS_I32);
 
         let ptz = create_opened(mock);
-        let result = ptz
-            .move_to_position(PtzPosition::new(0.0, -200.0, 1.0))
-            .await;
+        let result = move_and_settle(&ptz, PtzPosition::new(0.0, -200.0, 1.0)).await;
         assert!(result.is_ok());
 
         let pos = ptz.get_position().await.unwrap();
@@ -1044,25 +1055,25 @@ mod tests {
         let mut seq = mockall::Sequence::new();
 
         // First call: pan Right 100 degrees (positive pan delta)
-        mock.expect_ptz_turn()
+        mock.expect_ptz_start_turn()
             .withf(|dir, deg| *dir == ptz_turn_direction::PTZ_TURN_RIGHT && *deg == 100)
             .times(1)
             .in_sequence(&mut seq)
             .returning(|_, _| AK_SUCCESS_I32);
 
         // Second call: tilt Up 50 degrees (negative tilt delta → Up)
-        mock.expect_ptz_turn()
+        mock.expect_ptz_start_turn()
             .withf(|dir, deg| *dir == ptz_turn_direction::PTZ_TURN_UP && *deg == 50)
             .times(1)
             .in_sequence(&mut seq)
             .returning(|_, _| AK_SUCCESS_I32);
 
+        mock.expect_ptz_wait_turn()
+            .returning(|_| PtzWaitOutcome::default());
         mock.expect_ptz_stop().returning(|_| AK_SUCCESS_I32);
 
         let ptz = create_opened(mock);
-        let result = ptz
-            .move_to_position(PtzPosition::new(100.0, -50.0, 1.0))
-            .await;
+        let result = move_and_settle(&ptz, PtzPosition::new(100.0, -50.0, 1.0)).await;
         assert!(result.is_ok());
     }
 }

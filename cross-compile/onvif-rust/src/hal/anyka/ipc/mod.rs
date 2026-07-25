@@ -30,9 +30,10 @@ use std::io::{ErrorKind, Read, Write};
 use std::os::fd::AsRawFd;
 use std::os::unix::net::UnixStream;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
+use tokio::sync::{mpsc, oneshot};
 use tracing::{debug, warn};
 
 use crate::hal::common::{
@@ -278,15 +279,128 @@ const PUSH_NOTIFICATION_TIMEOUT: Duration = Duration::from_millis(200);
 
 /// Timeout for blocking reads/writes on the IPC control socket.
 ///
-/// If the vendor daemon stops responding, this bounds how long `send_request_once`
-/// will block before returning an error. The caller's reconnect logic will then
-/// attempt one retry.
+/// If the vendor daemon stops responding, this bounds how long a single owner-thread
+/// send/receive cycle will block before returning an error. The owner thread then
+/// attempts one reconnect + retry.
 const IPC_CTRL_TIMEOUT: Duration = Duration::from_secs(10);
 
+/// Timeout for the public async IPC API, set slightly above `IPC_CTRL_TIMEOUT` so the
+/// owner thread's socket-level timeout fires first and surfaces a `Timeout` error to the
+/// async caller. This bounds how long an executor task awaits a control RPC even if the
+/// owner thread is still retrying in the background.
+const IPC_PUBLIC_TIMEOUT: Duration = Duration::from_secs(12);
+
+/// Bounded depth of the control-socket job queue handed to the owner thread.
+///
+/// Backpressure: if more than this many control RPCs are outstanding, additional
+/// async senders await and blocking senders block until the owner drains the queue.
+const IPC_JOB_QUEUE_CAP: usize = 32;
+
+/// Result of a control-socket RPC: `(status, response bytes)` or a platform error.
+type IpcResponse = PlatformResult<(i32, Vec<u8>)>;
+
+/// Reply channel the owner thread uses to return an [`IpcResponse`] to a caller.
+type IpcReplyRx = oneshot::Receiver<IpcResponse>;
+
+/// A single control-socket request handed to the owner thread, paired with the
+/// oneshot channel the owner uses to return the response.
+struct IpcJob {
+    cmd_id: i32,
+    req_data: Vec<u8>,
+    reply: oneshot::Sender<IpcResponse>,
+}
+
+/// Describes how the owner thread (re)connects the control `UnixStream`.
+///
+/// The initial connection may target a production or a test-only path, but a
+/// reconnect after an I/O error always targets the production control/legacy paths
+/// where the real vendor daemon lives. In unit tests those production paths are
+/// absent, so a reconnect fails fast — keeping the timeout tests single-attempt and
+/// their timing assertions meaningful.
+#[derive(Clone)]
+enum CtrlConnect {
+    /// Production: connect to `/tmp/vd-ctrl.sock`, falling back to the legacy path.
+    Production,
+    /// Test-only: connect to an explicit socket path (e.g. a `FakeDaemon`).
+    #[cfg(test)]
+    Path(String),
+}
+
+impl CtrlConnect {
+    /// Establish the initial control-socket connection.
+    fn connect(&self) -> PlatformResult<UnixStream> {
+        match self {
+            CtrlConnect::Production => connect_production_ctrl(),
+            #[cfg(test)]
+            CtrlConnect::Path(path) => {
+                let stream = UnixStream::connect(path).map_err(|e| {
+                    PlatformError::HardwareUnavailable(format!(
+                        "Failed to connect to vendor daemon at {}: {}",
+                        path, e
+                    ))
+                })?;
+                configure_ctrl_timeouts(&stream)?;
+                Ok(stream)
+            }
+        }
+    }
+
+    /// Reconnect after an I/O error. Always targets the production control paths where
+    /// the real daemon lives (and would reappear after a restart).
+    fn reconnect(&self) -> PlatformResult<UnixStream> {
+        connect_production_ctrl()
+    }
+}
+
+/// Connect to the production control socket, falling back to the legacy path.
+fn connect_production_ctrl() -> PlatformResult<UnixStream> {
+    let stream = UnixStream::connect(CTRL_SOCKET_PATH)
+        .or_else(|_| UnixStream::connect(VENDOR_SOCKET_PATH))
+        .map_err(|e| {
+            PlatformError::HardwareUnavailable(format!(
+                "Cannot connect to vendor daemon (tried {} and {}): {}",
+                CTRL_SOCKET_PATH, VENDOR_SOCKET_PATH, e
+            ))
+        })?;
+    configure_ctrl_timeouts(&stream)?;
+    Ok(stream)
+}
+
+/// Apply the bounded read/write timeouts to a freshly connected control socket.
+fn configure_ctrl_timeouts(stream: &UnixStream) -> PlatformResult<()> {
+    stream
+        .set_read_timeout(Some(IPC_CTRL_TIMEOUT))
+        .map_err(|e| {
+            PlatformError::HardwareFailure(format!(
+                "Failed to set IPC control socket read timeout: {}",
+                e
+            ))
+        })?;
+    stream
+        .set_write_timeout(Some(IPC_CTRL_TIMEOUT))
+        .map_err(|e| {
+            PlatformError::HardwareFailure(format!(
+                "Failed to set IPC control socket write timeout: {}",
+                e
+            ))
+        })?;
+    Ok(())
+}
+
 /// IPC client for Anyka vendor daemon communication.
+///
+/// The control socket is owned exclusively by a dedicated OS thread (see
+/// [`AnykaIpc::run_owner`]). Callers never touch the `UnixStream` directly; instead
+/// they submit [`IpcJob`]s over a bounded channel and receive responses via oneshot
+/// channels. This keeps blocking socket I/O off the tokio worker threads.
 pub struct AnykaIpc {
-    /// Control socket for command RPCs.
-    stream: Arc<Mutex<UnixStream>>,
+    /// Bounded queue of control-socket jobs handed to the owner thread.
+    ///
+    /// `None` only during `Drop`, after the sender has been dropped to signal the
+    /// owner thread to exit.
+    job_tx: Option<mpsc::Sender<IpcJob>>,
+    /// Join handle for the control-socket owner thread, taken and joined on `Drop`.
+    owner_thread: Option<std::thread::JoinHandle<()>>,
     /// Dedicated main-stream frame notification socket.
     frame_main_stream: Mutex<Option<UnixStream>>,
     /// Dedicated sub-stream frame notification socket.
@@ -297,6 +411,17 @@ pub struct AnykaIpc {
     shm_reader: Mutex<Option<ShmRingReader>>,
     /// Tie-breaker when both channels are ready at once; toggles to prevent starvation.
     prefer_sub_on_tie: AtomicBool,
+}
+
+impl Drop for AnykaIpc {
+    fn drop(&mut self) {
+        // Dropping the only sender closes the job channel, causing the owner thread's
+        // `blocking_recv` to return `None` and the owner loop to exit.
+        self.job_tx.take();
+        if let Some(handle) = self.owner_thread.take() {
+            let _ = handle.join();
+        }
+    }
 }
 
 impl AnykaIpc {
@@ -341,37 +466,14 @@ impl AnykaIpc {
 
     /// Create a new IPC client connected to the vendor daemon.
     pub fn new() -> PlatformResult<Self> {
-        // Connect to control socket: try new path first, fall back to legacy
-        // The daemon now uses /tmp/vd-ctrl.sock (replacing /tmp/vendor-daemon.sock)
-        let stream = UnixStream::connect(CTRL_SOCKET_PATH)
-            .or_else(|_| UnixStream::connect(VENDOR_SOCKET_PATH))
-            .map_err(|e| {
-                PlatformError::HardwareUnavailable(format!(
-                    "Cannot connect to vendor daemon (tried {} and {}): {}",
-                    CTRL_SOCKET_PATH, VENDOR_SOCKET_PATH, e
-                ))
-            })?;
+        // Connect to control socket: try new path first, fall back to legacy.
+        // The daemon now uses /tmp/vd-ctrl.sock (replacing /tmp/vendor-daemon.sock).
+        // Timeouts are applied by `connect`.
+        let connect = CtrlConnect::Production;
+        let stream = connect.connect()?;
         if is_ipc_debug_enabled() {
             debug!(socket = CTRL_SOCKET_PATH, "Connected to vendor daemon");
         }
-
-        // Set timeouts on the control socket to bound blocking I/O.
-        stream
-            .set_read_timeout(Some(IPC_CTRL_TIMEOUT))
-            .map_err(|e| {
-                PlatformError::HardwareFailure(format!(
-                    "Failed to set IPC control socket read timeout: {}",
-                    e
-                ))
-            })?;
-        stream
-            .set_write_timeout(Some(IPC_CTRL_TIMEOUT))
-            .map_err(|e| {
-                PlatformError::HardwareFailure(format!(
-                    "Failed to set IPC control socket write timeout: {}",
-                    e
-                ))
-            })?;
 
         // Push-only mode requires dedicated frame sockets for main and sub streams.
         let frame_main_stream = UnixStream::connect(FRAME_MAIN_SOCKET_PATH).map_err(|e| {
@@ -409,8 +511,11 @@ impl AnykaIpc {
         };
         tracing::info!("Shared memory ring buffer opened");
 
+        let (job_tx, owner_thread) = Self::spawn_owner(stream, connect)?;
+
         Ok(Self {
-            stream: Arc::new(Mutex::new(stream)),
+            job_tx: Some(job_tx),
+            owner_thread: Some(owner_thread),
             frame_main_stream: Mutex::new(Some(frame_main_stream)),
             frame_sub_stream: Mutex::new(Some(frame_sub_stream)),
             shm_reader: Mutex::new(Some(shm_reader)),
@@ -421,30 +526,9 @@ impl AnykaIpc {
     /// Create a new IPC client connected to a custom socket path (test-only).
     #[cfg(test)]
     pub fn new_with_path(path: &str) -> PlatformResult<Self> {
-        let mut stream = UnixStream::connect(path).map_err(|e| {
-            PlatformError::HardwareUnavailable(format!(
-                "Failed to connect to vendor daemon at {}: {}",
-                path, e
-            ))
-        })?;
-
-        // Set timeouts on the control socket to bound blocking I/O (same as production).
-        stream
-            .set_read_timeout(Some(IPC_CTRL_TIMEOUT))
-            .map_err(|e| {
-                PlatformError::HardwareFailure(format!(
-                    "Failed to set IPC control socket read timeout: {}",
-                    e
-                ))
-            })?;
-        stream
-            .set_write_timeout(Some(IPC_CTRL_TIMEOUT))
-            .map_err(|e| {
-                PlatformError::HardwareFailure(format!(
-                    "Failed to set IPC control socket write timeout: {}",
-                    e
-                ))
-            })?;
+        // Timeouts are applied by `connect` (same values as production).
+        let connect = CtrlConnect::Path(path.to_string());
+        let stream = connect.connect()?;
 
         if is_ipc_debug_enabled() {
             debug!(socket = path, "Connected to vendor daemon (test)");
@@ -466,13 +550,40 @@ impl AnykaIpc {
             _ => None,
         };
 
+        let (job_tx, owner_thread) = Self::spawn_owner(stream, connect)?;
+
         Ok(Self {
-            stream: Arc::new(Mutex::new(stream)),
+            job_tx: Some(job_tx),
+            owner_thread: Some(owner_thread),
             frame_main_stream: Mutex::new(frame_main_stream),
             frame_sub_stream: Mutex::new(frame_sub_stream),
             shm_reader: Mutex::new(shm_reader),
             prefer_sub_on_tie: AtomicBool::new(false),
         })
+    }
+
+    /// Construct an `AnykaIpc` from pre-built parts for unit tests, spawning the owner
+    /// thread on the provided control stream.
+    #[cfg(test)]
+    pub(crate) fn from_parts_for_test(
+        ctrl_stream: UnixStream,
+        frame_main_stream: Option<UnixStream>,
+        frame_sub_stream: Option<UnixStream>,
+        shm_reader: Option<ShmRingReader>,
+    ) -> Self {
+        let _ = configure_ctrl_timeouts(&ctrl_stream);
+        // Reconnects target the (absent) production paths in tests, so they fail fast;
+        // these tests never trigger a reconnect anyway.
+        let (job_tx, owner_thread) =
+            Self::spawn_owner(ctrl_stream, CtrlConnect::Production).expect("spawn owner thread");
+        Self {
+            job_tx: Some(job_tx),
+            owner_thread: Some(owner_thread),
+            frame_main_stream: Mutex::new(frame_main_stream),
+            frame_sub_stream: Mutex::new(frame_sub_stream),
+            shm_reader: Mutex::new(shm_reader),
+            prefer_sub_on_tie: AtomicBool::new(false),
+        }
     }
 
     fn read_push_notification(
@@ -561,120 +672,119 @@ impl AnykaIpc {
         }
     }
 
-    /// Attempt to reconnect to the vendor daemon, replacing the existing socket.
-    fn reconnect(&self) -> PlatformResult<()> {
-        warn!(
-            socket = CTRL_SOCKET_PATH,
-            "Attempting to reconnect to vendor daemon"
-        );
-        // Try new path first, fall back to legacy
-        let new_stream = UnixStream::connect(CTRL_SOCKET_PATH)
-            .or_else(|_| UnixStream::connect(VENDOR_SOCKET_PATH))
+    /// Spawn the dedicated owner thread that exclusively owns the control `UnixStream`.
+    ///
+    /// Returns the sender half of the bounded job queue and the thread's join handle.
+    fn spawn_owner(
+        stream: UnixStream,
+        connect: CtrlConnect,
+    ) -> PlatformResult<(mpsc::Sender<IpcJob>, std::thread::JoinHandle<()>)> {
+        let (job_tx, job_rx) = mpsc::channel::<IpcJob>(IPC_JOB_QUEUE_CAP);
+        let handle = std::thread::Builder::new()
+            .name("vd-ctrl-owner".to_string())
+            .spawn(move || Self::run_owner(stream, connect, job_rx))
             .map_err(|e| {
-                PlatformError::HardwareUnavailable(format!(
-                    "Failed to reconnect to vendor daemon: {}",
+                PlatformError::InitializationFailed(format!(
+                    "Failed to spawn IPC control owner thread: {}",
                     e
                 ))
             })?;
-        let mut guard = self.stream.lock().map_err(|e| {
-            PlatformError::HardwareFailure(format!("IPC mutex poisoned on reconnect: {}", e))
-        })?;
-        *guard = new_stream;
-        guard
-            .set_read_timeout(Some(IPC_CTRL_TIMEOUT))
-            .map_err(|e| {
-                PlatformError::HardwareFailure(format!(
-                    "Failed to set IPC control socket read timeout after reconnect: {}",
-                    e
-                ))
-            })?;
-        guard
-            .set_write_timeout(Some(IPC_CTRL_TIMEOUT))
-            .map_err(|e| {
-                PlatformError::HardwareFailure(format!(
-                    "Failed to set IPC control socket write timeout after reconnect: {}",
-                    e
-                ))
-            })?;
-        if is_ipc_debug_enabled() {
-            debug!(socket = VENDOR_SOCKET_PATH, "Reconnected to vendor daemon");
-        }
-        Ok(())
+        Ok((job_tx, handle))
     }
 
-    /// Send a request and receive a response over the Unix socket.
+    /// Owner-thread main loop.
     ///
-    /// On I/O error, attempts a single reconnect and retries the request.
-    pub(crate) fn send_request(
-        &self,
-        cmd_id: i32,
-        req_data: &[u8],
-    ) -> PlatformResult<(i32, Vec<u8>)> {
-        let started = Instant::now();
-        let cmd_name = Self::cmd_name(cmd_id);
-        if is_ipc_debug_enabled() {
-            debug!(
-                cmd_id,
-                cmd_name,
-                req_len = req_data.len(),
-                "IPC request start"
-            );
-        }
-        match self.send_request_once(cmd_id, req_data) {
-            Ok(result) => {
-                let elapsed_ms = started.elapsed().as_millis();
-                if is_ipc_debug_enabled() {
-                    debug!(
-                        cmd_id,
-                        cmd_name,
-                        status = result.0,
-                        resp_len = result.1.len(),
-                        elapsed_ms,
-                        "IPC request done"
-                    );
-                }
-                Ok(result)
-            }
-            Err(e) => {
-                let elapsed_ms = started.elapsed().as_millis();
-                warn!(
-                    cmd_id,
+    /// Consumes jobs from the bounded queue, performs a blocking send/receive cycle on
+    /// the exclusively-owned control stream, and on I/O error attempts a single
+    /// reconnect + retry before returning the result over the job's oneshot channel.
+    /// Exits when the job channel is closed (all senders dropped).
+    fn run_owner(mut stream: UnixStream, connect: CtrlConnect, mut job_rx: mpsc::Receiver<IpcJob>) {
+        while let Some(job) = job_rx.blocking_recv() {
+            let started = Instant::now();
+            let cmd_name = Self::cmd_name(job.cmd_id);
+            if is_ipc_debug_enabled() {
+                debug!(
+                    cmd_id = job.cmd_id,
                     cmd_name,
-                    elapsed_ms,
+                    req_len = job.req_data.len(),
+                    "IPC request start"
+                );
+            }
+
+            let mut result = Self::exec_on_stream(&mut stream, job.cmd_id, &job.req_data);
+
+            if let Err(ref e) = result {
+                warn!(
+                    cmd_id = job.cmd_id,
+                    cmd_name,
+                    elapsed_ms = started.elapsed().as_millis(),
                     error = %e,
                     "IPC request failed; attempting reconnect"
                 );
-                self.reconnect()?;
-                if is_ipc_debug_enabled() {
-                    debug!(cmd_id, cmd_name, "IPC request retry start");
-                }
-                let retry_started = Instant::now();
-                let retry_result = self.send_request_once(cmd_id, req_data);
-                match &retry_result {
-                    Ok((status, resp_data)) => {
+                match connect.reconnect() {
+                    Ok(new_stream) => {
+                        stream = new_stream;
                         if is_ipc_debug_enabled() {
-                            debug!(
-                                cmd_id,
-                                cmd_name,
-                                status,
-                                resp_len = resp_data.len(),
-                                elapsed_ms = retry_started.elapsed().as_millis(),
-                                "IPC request retry done"
-                            );
+                            debug!(cmd_id = job.cmd_id, cmd_name, "IPC request retry start");
+                        }
+                        let retry_started = Instant::now();
+                        result = Self::exec_on_stream(&mut stream, job.cmd_id, &job.req_data);
+                        match &result {
+                            Ok((status, resp_data)) => {
+                                if is_ipc_debug_enabled() {
+                                    debug!(
+                                        cmd_id = job.cmd_id,
+                                        cmd_name,
+                                        status = *status,
+                                        resp_len = resp_data.len(),
+                                        elapsed_ms = retry_started.elapsed().as_millis(),
+                                        "IPC request retry done"
+                                    );
+                                }
+                            }
+                            Err(err) => {
+                                warn!(
+                                    cmd_id = job.cmd_id,
+                                    cmd_name,
+                                    elapsed_ms = retry_started.elapsed().as_millis(),
+                                    error = %err,
+                                    "IPC request retry failed"
+                                );
+                            }
                         }
                     }
-                    Err(err) => {
+                    Err(reconnect_err) => {
                         warn!(
-                            cmd_id,
+                            cmd_id = job.cmd_id,
                             cmd_name,
-                            elapsed_ms = retry_started.elapsed().as_millis(),
-                            error = %err,
-                            "IPC request retry failed"
+                            error = %reconnect_err,
+                            "IPC reconnect failed"
                         );
+                        result = Err(reconnect_err);
                     }
                 }
-                retry_result
+            } else if is_ipc_debug_enabled() {
+                let (status, resp_len) = result
+                    .as_ref()
+                    .map(|(s, d)| (*s, d.len()))
+                    .unwrap_or((0, 0));
+                debug!(
+                    cmd_id = job.cmd_id,
+                    cmd_name,
+                    status,
+                    resp_len,
+                    elapsed_ms = started.elapsed().as_millis(),
+                    "IPC request done"
+                );
             }
+
+            // The receiver may have gone away (async caller timed out and dropped the
+            // oneshot); that is expected and not an error.
+            let _ = job.reply.send(result);
+        }
+
+        if is_ipc_debug_enabled() {
+            debug!("IPC control owner thread exiting");
         }
     }
 
@@ -687,13 +797,15 @@ impl AnykaIpc {
         }
     }
 
-    /// Perform a single send/receive cycle without reconnect logic.
-    fn send_request_once(&self, cmd_id: i32, req_data: &[u8]) -> PlatformResult<(i32, Vec<u8>)> {
-        let mut stream = self
-            .stream
-            .lock()
-            .map_err(|e| PlatformError::HardwareFailure(format!("IPC mutex poisoned: {}", e)))?;
-
+    /// Perform a single send/receive cycle directly on the owned control stream.
+    ///
+    /// Runs only on the owner thread, so it takes `&mut UnixStream` directly with no
+    /// locking.
+    fn exec_on_stream(
+        stream: &mut UnixStream,
+        cmd_id: i32,
+        req_data: &[u8],
+    ) -> PlatformResult<(i32, Vec<u8>)> {
         // Write request: cmd_id (i32 LE) + req_len (u32 LE) + req_data
         let req_len = req_data.len() as u32;
         stream
@@ -740,6 +852,102 @@ impl AnykaIpc {
         }
 
         Ok((status, resp_data))
+    }
+
+    /// Build a control-socket job and its reply receiver for the owner thread.
+    fn make_job(cmd_id: i32, req_data: &[u8]) -> (IpcJob, IpcReplyRx) {
+        let (reply_tx, reply_rx) = oneshot::channel();
+        let job = IpcJob {
+            cmd_id,
+            req_data: req_data.to_vec(),
+            reply: reply_tx,
+        };
+        (job, reply_rx)
+    }
+
+    /// Submit a control-socket request and await the response asynchronously.
+    ///
+    /// This is the public async IPC API used by executor tasks (imaging/settings and
+    /// initialization paths). It never blocks a worker thread: the request is handed to
+    /// the owner thread and the caller awaits a oneshot, bounded by [`IPC_PUBLIC_TIMEOUT`].
+    pub(crate) async fn request_async(
+        &self,
+        cmd_id: i32,
+        req_data: &[u8],
+    ) -> PlatformResult<(i32, Vec<u8>)> {
+        let sender = self.job_tx.as_ref().ok_or_else(|| {
+            PlatformError::HardwareUnavailable("IPC owner thread stopped".to_string())
+        })?;
+        let (job, reply_rx) = Self::make_job(cmd_id, req_data);
+        sender.send(job).await.map_err(|_| {
+            PlatformError::HardwareUnavailable("IPC owner thread stopped".to_string())
+        })?;
+        match tokio::time::timeout(IPC_PUBLIC_TIMEOUT, reply_rx).await {
+            Ok(Ok(result)) => result,
+            Ok(Err(_)) => Err(PlatformError::HardwareFailure(
+                "IPC owner dropped reply".to_string(),
+            )),
+            Err(_) => Err(PlatformError::Timeout),
+        }
+    }
+
+    /// Submit a control-socket request and block the current OS thread for the response.
+    ///
+    /// This is the sync-by-need variant for true OS threads (the `venc-read` frame thread
+    /// issuing IDR/venc commands and shutdown workers). It MUST NOT be called directly from
+    /// a tokio executor task — [`Self::send_request`] routes async contexts to
+    /// [`Self::request_async`] instead.
+    pub(crate) fn request_blocking(
+        &self,
+        cmd_id: i32,
+        req_data: &[u8],
+    ) -> PlatformResult<(i32, Vec<u8>)> {
+        let sender = self.job_tx.as_ref().ok_or_else(|| {
+            PlatformError::HardwareUnavailable("IPC owner thread stopped".to_string())
+        })?;
+        let (job, reply_rx) = Self::make_job(cmd_id, req_data);
+        sender.blocking_send(job).map_err(|_| {
+            PlatformError::HardwareUnavailable("IPC owner thread stopped".to_string())
+        })?;
+        reply_rx
+            .blocking_recv()
+            .map_err(|_| PlatformError::HardwareFailure("IPC owner dropped reply".to_string()))?
+    }
+
+    /// Context-adaptive synchronous request for the remaining **sync-only** callers.
+    ///
+    /// This is intended for two cases and *only* these two cases:
+    /// - **Plain OS threads** with no tokio runtime context (e.g. the `venc-read` frame
+    ///   thread issuing IDR/venc commands, shutdown workers) → routes to
+    ///   [`Self::request_blocking`].
+    /// - The **one-time init `block_on` driver** thread (the multi-thread runtime's
+    ///   `block_on` entry, which is a runtime context but not a task being polled) →
+    ///   drives [`Self::request_async`] under `block_in_place`.
+    ///
+    /// # WARNING: must not be called from an async task / handler
+    /// `block_in_place` does **not** free the calling worker — it only allows tokio to
+    /// spawn an *additional* worker. The calling worker stays parked for the full RPC
+    /// (up to [`IPC_PUBLIC_TIMEOUT`]). Async handlers (imaging/settings and any other
+    /// ONVIF control RPC running on a tokio worker) MUST `.await` [`Self::request_async`]
+    /// directly instead of calling this method. The imaging HAL path was migrated to
+    /// `request_async` in Phase 2 for exactly this reason. Do not reintroduce
+    /// `send_request` on an async-handler path.
+    ///
+    /// # Panics
+    /// `block_in_place` panics on a `current_thread` runtime. Production uses a
+    /// multi-thread runtime; unit tests that exercise this from an async context use the
+    /// multi-thread flavor.
+    pub(crate) fn send_request(
+        &self,
+        cmd_id: i32,
+        req_data: &[u8],
+    ) -> PlatformResult<(i32, Vec<u8>)> {
+        match tokio::runtime::Handle::try_current() {
+            Ok(handle) => tokio::task::block_in_place(move || {
+                handle.block_on(self.request_async(cmd_id, req_data))
+            }),
+            Err(_) => self.request_blocking(cmd_id, req_data),
+        }
     }
 
     /// Send request expecting a handle response (8-byte i64).
@@ -1333,16 +1541,12 @@ pub(crate) mod test_helpers {
     }
 
     pub fn make_ipc_for_channel_selection_tests() -> AnykaIpc {
+        // The owner thread idles on the control stream (these tests issue no control
+        // RPCs), so the peer end can be dropped without affecting the test.
         let (ctrl_a, _ctrl_b) = UnixStream::pair().unwrap();
         let (main_a, _main_b) = UnixStream::pair().unwrap();
         let (sub_a, _sub_b) = UnixStream::pair().unwrap();
-        AnykaIpc {
-            stream: std::sync::Arc::new(std::sync::Mutex::new(ctrl_a)),
-            frame_main_stream: Mutex::new(Some(main_a)),
-            frame_sub_stream: Mutex::new(Some(sub_a)),
-            shm_reader: Mutex::new(None),
-            prefer_sub_on_tie: AtomicBool::new(false),
-        }
+        AnykaIpc::from_parts_for_test(ctrl_a, Some(main_a), Some(sub_a), None)
     }
 }
 
@@ -1360,26 +1564,28 @@ mod tests {
     use std::time::Duration;
 
     /// A simple success command round-trips correctly: set_brightness returns AK_SUCCESS.
-    #[test]
-    fn test_ipc_connect_and_simple_command_returns_success() {
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_ipc_connect_and_simple_command_returns_success() {
         let daemon = FakeDaemon::start(|_cmd_id, _req| (AK_SUCCESS_I32, vec![]));
         let ipc = AnykaIpc::new_with_path(&daemon.socket_path).unwrap();
 
         // set_brightness is part of ImagingHalTrait; accessible from within the crate.
         let result =
-            <AnykaIpc as crate::hal::common::imaging::ImagingHalTrait>::set_brightness(&ipc, 50);
+            <AnykaIpc as crate::hal::common::imaging::ImagingHalTrait>::set_brightness(&ipc, 50)
+                .await;
 
         assert_eq!(result, AK_SUCCESS_I32, "expected AK_SUCCESS from daemon");
     }
 
     /// When the daemon returns status=-1 (AK_FAILED), the trait method propagates it.
-    #[test]
-    fn test_ipc_error_response_propagates_ak_failed() {
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_ipc_error_response_propagates_ak_failed() {
         let daemon = FakeDaemon::start(|_cmd_id, _req| (AK_FAILED_I32, vec![]));
         let ipc = AnykaIpc::new_with_path(&daemon.socket_path).unwrap();
 
         let result =
-            <AnykaIpc as crate::hal::common::imaging::ImagingHalTrait>::set_brightness(&ipc, 50);
+            <AnykaIpc as crate::hal::common::imaging::ImagingHalTrait>::set_brightness(&ipc, 50)
+                .await;
 
         assert_eq!(
             result, AK_FAILED_I32,
@@ -1412,16 +1618,18 @@ mod tests {
     }
 
     /// Three sequential commands over the same connection all succeed.
-    #[test]
-    fn test_ipc_multiple_requests_same_connection_all_succeed() {
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_ipc_multiple_requests_same_connection_all_succeed() {
         let daemon = FakeDaemon::start(|_cmd_id, _req| (AK_SUCCESS_I32, vec![]));
         let ipc = AnykaIpc::new_with_path(&daemon.socket_path).unwrap();
 
         for i in 0..3 {
-            let result = <AnykaIpc as crate::hal::common::imaging::ImagingHalTrait>::set_brightness(
-                &ipc,
-                50 + i,
-            );
+            let result =
+                <AnykaIpc as crate::hal::common::imaging::ImagingHalTrait>::set_brightness(
+                    &ipc,
+                    50 + i,
+                )
+                .await;
             assert_eq!(result, AK_SUCCESS_I32, "request {} should succeed", i);
         }
     }
@@ -1725,19 +1933,15 @@ mod tests {
 
     #[test]
     fn test_recv_pushed_frame_returns_resource_busy_on_frame_drop_notification() {
-        use std::sync::{Arc, Mutex};
-
         // Create a Unix socket pair - one end goes to AnykaIpc, other we write to
         let (reader, mut writer) = UnixStream::pair().unwrap();
 
+        // A throwaway control stream for the owner thread; this test only exercises the
+        // frame-drop path and issues no control RPCs.
+        let (ctrl_a, _ctrl_b) = UnixStream::pair().unwrap();
+
         // Construct AnykaIpc with only frame_main_stream set (no shm reader needed for drop path)
-        let ipc = AnykaIpc {
-            stream: Arc::new(Mutex::new(writer.try_clone().unwrap())),
-            frame_main_stream: Mutex::new(Some(reader)),
-            frame_sub_stream: Mutex::new(None),
-            shm_reader: Mutex::new(None),
-            prefer_sub_on_tie: AtomicBool::new(false),
-        };
+        let ipc = AnykaIpc::from_parts_for_test(ctrl_a, Some(reader), None, None);
 
         // Write a 20-byte drop notification: slot_index=0, frame_len=0, flags=VD_NOTIFY_FRAME_DROPPED(4)
         let drop_notification = [
@@ -1895,8 +2099,8 @@ mod tests {
     /// Test that IPC control socket times out when the daemon hangs (stops responding).
     /// This verifies that the IPC_CTRL_TIMEOUT (10 seconds) is properly enforced and
     /// returns PlatformError::Timeout rather than hanging forever or returning HardwareFailure.
-    #[test]
-    fn test_ipc_ctrl_socket_times_out_on_hung_daemon() {
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_ipc_ctrl_socket_times_out_on_hung_daemon() {
         use std::time::{Duration, Instant};
 
         // Create a fake daemon that delays response longer than the timeout (10 seconds)
@@ -1909,7 +2113,8 @@ mod tests {
         // Time the request - it should timeout
         let start = Instant::now();
         let result =
-            <AnykaIpc as crate::hal::common::imaging::ImagingHalTrait>::set_brightness(&ipc, 50);
+            <AnykaIpc as crate::hal::common::imaging::ImagingHalTrait>::set_brightness(&ipc, 50)
+                .await;
         let elapsed = start.elapsed();
 
         // Verify we got a timeout error (AK_FAILED_I32 = -1 is returned on error from the trait,
@@ -1941,8 +2146,8 @@ mod tests {
 
     /// Test that IPC control socket times out within a reasonable window (< 15 seconds)
     /// when the daemon hangs. This is a more explicit timing verification.
-    #[test]
-    fn test_ipc_ctrl_socket_timeout_fires_within_15_seconds() {
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_ipc_ctrl_socket_timeout_fires_within_15_seconds() {
         // Create a fake daemon that delays response for 20 seconds (longer than timeout + margin)
         let delay = Duration::from_secs(20);
         let daemon = FakeDaemon::start_with_delay(delay, |_cmd_id, _req| (AK_SUCCESS_I32, vec![]));
@@ -1951,7 +2156,8 @@ mod tests {
 
         let start = Instant::now();
         let _result =
-            <AnykaIpc as crate::hal::common::imaging::ImagingHalTrait>::set_brightness(&ipc, 50);
+            <AnykaIpc as crate::hal::common::imaging::ImagingHalTrait>::set_brightness(&ipc, 50)
+                .await;
         let elapsed = start.elapsed();
 
         // The timeout should fire well within 15 seconds (IPC_CTRL_TIMEOUT is 10 seconds)
@@ -1965,5 +2171,114 @@ mod tests {
             elapsed_secs = elapsed.as_secs(),
             "IPC timeout fired within expected window"
         );
+    }
+
+    // ------------------------------------------------------------------------
+    // Phase 2: owner-thread async / blocking / adaptive request paths
+    // ------------------------------------------------------------------------
+
+    /// The async public API round-trips a request through the owner thread.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_request_async_success() {
+        let daemon = FakeDaemon::start(|_cmd_id, _req| (AK_SUCCESS_I32, vec![]));
+        let ipc = AnykaIpc::new_with_path(&daemon.socket_path).unwrap();
+
+        let (status, resp) = ipc
+            .request_async(CMD_ISP_SET_BRIGHTNESS, &50i32.to_le_bytes())
+            .await
+            .expect("request_async should succeed");
+        assert_eq!(status, AK_SUCCESS_I32);
+        assert!(resp.is_empty());
+    }
+
+    /// The async public API returns an error (rather than hanging) when the daemon is
+    /// hung, bounded by the socket timeout and [`IPC_PUBLIC_TIMEOUT`].
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_request_async_errors_on_hung_daemon() {
+        use std::time::Instant;
+        let daemon = FakeDaemon::start_with_delay(Duration::from_secs(15), |_c, _r| {
+            (AK_SUCCESS_I32, vec![])
+        });
+        let ipc = AnykaIpc::new_with_path(&daemon.socket_path).unwrap();
+
+        let start = Instant::now();
+        let result = ipc
+            .request_async(CMD_ISP_SET_BRIGHTNESS, &50i32.to_le_bytes())
+            .await;
+        let elapsed = start.elapsed();
+
+        assert!(result.is_err(), "hung daemon should yield an error");
+        assert!(
+            elapsed >= Duration::from_secs(10),
+            "should wait for the socket timeout, took {:?}",
+            elapsed
+        );
+        assert!(
+            elapsed < Duration::from_secs(13),
+            "should be bounded by the public timeout, took {:?}",
+            elapsed
+        );
+    }
+
+    /// While one task awaits a hung control RPC, the executor keeps scheduling other
+    /// tasks/timers promptly — the awaiting task must not occupy a worker thread.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_request_async_does_not_stall_executor() {
+        use std::time::Instant;
+        let daemon = FakeDaemon::start_with_delay(Duration::from_secs(15), |_c, _r| {
+            (AK_SUCCESS_I32, vec![])
+        });
+        let ipc = AnykaIpc::new_with_path(&daemon.socket_path).unwrap();
+
+        let hung = tokio::spawn(async move {
+            ipc.request_async(CMD_ISP_SET_BRIGHTNESS, &50i32.to_le_bytes())
+                .await
+        });
+
+        // Unrelated timers must keep firing while the control RPC is stuck.
+        let start = Instant::now();
+        for _ in 0..5 {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        assert!(
+            start.elapsed() < Duration::from_secs(1),
+            "executor stalled: unrelated timers took {:?}",
+            start.elapsed()
+        );
+
+        // Drain the hung task so teardown is orderly (it errors once the owner's socket
+        // timeout fires).
+        let _ = hung.await;
+    }
+
+    /// The context-adaptive `send_request` works from the multi-thread runtime's
+    /// `block_on` driver thread (the init path) without panicking in `block_in_place`.
+    #[test]
+    fn test_send_request_within_multi_thread_block_on_succeeds() {
+        let daemon = FakeDaemon::start(|_cmd_id, _req| (AK_SUCCESS_I32, vec![]));
+        let ipc = AnykaIpc::new_with_path(&daemon.socket_path).unwrap();
+
+        let rt = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .enable_all()
+            .build()
+            .unwrap();
+
+        let result =
+            rt.block_on(async { ipc.send_request(CMD_ISP_SET_BRIGHTNESS, &50i32.to_le_bytes()) });
+        let (status, _resp) = result.expect("send_request from block_on driver should succeed");
+        assert_eq!(status, AK_SUCCESS_I32);
+    }
+
+    /// `request_blocking` works from a plain OS thread (the venc-read / shutdown path).
+    #[test]
+    fn test_request_blocking_from_os_thread_succeeds() {
+        let daemon = FakeDaemon::start(|_cmd_id, _req| (AK_SUCCESS_I32, vec![]));
+        let ipc = AnykaIpc::new_with_path(&daemon.socket_path).unwrap();
+
+        let (status, _resp) = ipc
+            .request_blocking(CMD_ISP_SET_BRIGHTNESS, &50i32.to_le_bytes())
+            .expect("request_blocking should succeed");
+        assert_eq!(status, AK_SUCCESS_I32);
     }
 }

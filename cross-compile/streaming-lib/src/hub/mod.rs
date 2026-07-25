@@ -88,8 +88,20 @@ impl StreamDataTransceiver {
         let mut to_remove: Vec<Uuid> = Vec::new();
 
         for (id, sender) in senders.iter() {
-            if sender.send(data.clone()).is_err() {
-                to_remove.push(*id);
+            // try_send: drop newest when a slow subscriber's bounded channel is full
+            // so one stalled client cannot grow RSS unboundedly.
+            match sender.try_send(data.clone()) {
+                Ok(()) => {}
+                Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
+                    warn!(
+                        error_value = %error_value,
+                        subscriber_id = ?id,
+                        "transmitter_frame_channel_full_dropped"
+                    );
+                }
+                Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
+                    to_remove.push(*id);
+                }
             }
         }
 
@@ -869,7 +881,7 @@ impl StreamsHub {
     ) {
         match pub_data_type {
             define::PubDataType::Frame => {
-                let (sender_chan, receiver_chan) = mpsc::unbounded_channel();
+                let (sender_chan, receiver_chan) = define::frame_data_channel();
                 (
                     Some(sender_chan),
                     None,
@@ -891,7 +903,7 @@ impl StreamsHub {
                 )
             }
             define::PubDataType::Both => {
-                let (sender_frame_chan, receiver_frame_chan) = mpsc::unbounded_channel();
+                let (sender_frame_chan, receiver_frame_chan) = define::frame_data_channel();
                 let (sender_packet_chan, receiver_packet_chan) = mpsc::unbounded_channel();
                 (
                     Some(sender_frame_chan),
@@ -969,7 +981,7 @@ impl StreamsHub {
     ) -> (DataSender, DataReceiver) {
         match sub_data_type {
             define::SubDataType::Frame => {
-                let (sender_chan, receiver_chan) = mpsc::unbounded_channel();
+                let (sender_chan, receiver_chan) = define::frame_data_channel();
                 (
                     DataSender::Frame {
                         sender: sender_chan,

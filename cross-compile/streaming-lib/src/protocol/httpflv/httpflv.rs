@@ -16,7 +16,6 @@ use {
     },
     bytes::BytesMut,
     std::net::SocketAddr,
-    tokio::sync::mpsc,
 };
 
 /// Upper bound on frames to wait before assuming missing audio/video.
@@ -65,7 +64,7 @@ impl HttpFlv {
         request_url: String,
         remote_addr: SocketAddr,
     ) -> Self {
-        let (_, data_receiver) = mpsc::unbounded_channel();
+        let (_, data_receiver) = crate::hub::define::frame_data_channel();
         let subscriber_id = Uuid::new(RandomDigitCount::Four);
 
         Self {
@@ -1205,7 +1204,7 @@ mod tests {
             if let Some(StreamHubEvent::Subscribe { result_sender, .. }) =
                 event_receiver.recv().await
             {
-                let (frame_tx, frame_rx) = tokio_mpsc::unbounded_channel();
+                let (frame_tx, frame_rx) = crate::hub::define::frame_data_channel();
                 drop(frame_tx);
                 let data_receiver = DataReceiver {
                     frame_receiver: Some(frame_rx),
@@ -1461,18 +1460,18 @@ mod tests {
             if let Some(StreamHubEvent::Subscribe { result_sender, .. }) =
                 event_receiver.recv().await
             {
-                let (frame_tx, frame_rx) = tokio_mpsc::unbounded_channel();
+                let (frame_tx, frame_rx) = crate::hub::define::frame_data_channel();
                 let data_receiver = DataReceiver {
                     frame_receiver: Some(frame_rx),
                     packet_receiver: None,
                 };
                 let _ = result_sender.send(Ok((data_receiver, None)));
 
-                let _ = frame_tx.send(FrameData::Audio {
+                let _ = frame_tx.try_send(FrameData::Audio {
                     timestamp: 0,
                     data: BytesMut::from(&[0x01, 0x02][..]),
                 });
-                let _ = frame_tx.send(FrameData::Video {
+                let _ = frame_tx.try_send(FrameData::Video {
                     timestamp: 0,
                     data: BytesMut::from(&[0x00, 0x01][..]),
                 });
@@ -1511,7 +1510,7 @@ mod tests {
             if let Some(StreamHubEvent::Subscribe { result_sender, .. }) =
                 event_receiver.recv().await
             {
-                let (frame_tx, frame_rx) = tokio_mpsc::unbounded_channel();
+                let (frame_tx, frame_rx) = crate::hub::define::frame_data_channel();
                 let data_receiver = DataReceiver {
                     frame_receiver: Some(frame_rx),
                     packet_receiver: None,
@@ -1521,15 +1520,15 @@ mod tests {
                 let mut meta = BytesMut::new();
                 meta.extend_from_slice(b"@setDataFrame");
                 meta.extend_from_slice(b"onMetaData");
-                let _ = frame_tx.send(FrameData::MetaData {
+                let _ = frame_tx.try_send(FrameData::MetaData {
                     timestamp: 0,
                     data: meta,
                 });
-                let _ = frame_tx.send(FrameData::Audio {
+                let _ = frame_tx.try_send(FrameData::Audio {
                     timestamp: 100,
                     data: BytesMut::from(&[0x01][..]),
                 });
-                let _ = frame_tx.send(FrameData::Video {
+                let _ = frame_tx.try_send(FrameData::Video {
                     timestamp: 200,
                     data: BytesMut::from(&[0x00, 0x01][..]),
                 });
@@ -1568,7 +1567,7 @@ mod tests {
             if let Some(StreamHubEvent::Subscribe { result_sender, .. }) =
                 event_receiver.recv().await
             {
-                let (frame_tx, frame_rx) = tokio_mpsc::unbounded_channel();
+                let (frame_tx, frame_rx) = crate::hub::define::frame_data_channel();
                 let data_receiver = DataReceiver {
                     frame_receiver: Some(frame_rx),
                     packet_receiver: None,
@@ -1579,7 +1578,7 @@ mod tests {
                     let mut meta = BytesMut::new();
                     meta.extend_from_slice(b"@setDataFrame");
                     meta.extend_from_slice(b"onMetaData");
-                    let _ = frame_tx.send(FrameData::MetaData {
+                    let _ = frame_tx.try_send(FrameData::MetaData {
                         timestamp: 0,
                         data: meta,
                     });
@@ -1619,22 +1618,22 @@ mod tests {
             if let Some(StreamHubEvent::Subscribe { result_sender, .. }) =
                 event_receiver.recv().await
             {
-                let (frame_tx, frame_rx) = tokio_mpsc::unbounded_channel();
+                let (frame_tx, frame_rx) = crate::hub::define::frame_data_channel();
                 let data_receiver = DataReceiver {
                     frame_receiver: Some(frame_rx),
                     packet_receiver: None,
                 };
                 let _ = result_sender.send(Ok((data_receiver, None)));
 
-                let _ = frame_tx.send(FrameData::Audio {
+                let _ = frame_tx.try_send(FrameData::Audio {
                     timestamp: 0,
                     data: BytesMut::from(&[0x01][..]),
                 });
-                let _ = frame_tx.send(FrameData::Video {
+                let _ = frame_tx.try_send(FrameData::Video {
                     timestamp: 0,
                     data: BytesMut::from(&[0x00][..]),
                 });
-                let _ = frame_tx.send(FrameData::Audio {
+                let _ = frame_tx.try_send(FrameData::Audio {
                     timestamp: 100,
                     data: BytesMut::from(&[0x02][..]),
                 });
@@ -1681,23 +1680,23 @@ mod tests {
             if let Some(StreamHubEvent::Subscribe { result_sender, .. }) =
                 event_receiver.recv().await
             {
-                let (frame_tx, frame_rx) = tokio_mpsc::unbounded_channel();
+                let (frame_tx, frame_rx) = crate::hub::define::frame_data_channel();
                 let data_receiver = DataReceiver {
                     frame_receiver: Some(frame_rx),
                     packet_receiver: None,
                 };
                 let _ = result_sender.send(Ok((data_receiver, None)));
 
-                let _ = frame_tx.send(FrameData::Audio {
+                let _ = frame_tx.try_send(FrameData::Audio {
                     timestamp: 0,
                     data: BytesMut::from(&[0x01][..]),
                 });
-                let _ = frame_tx.send(FrameData::Video {
+                let _ = frame_tx.try_send(FrameData::Video {
                     timestamp: 0,
                     data: BytesMut::from(&[0x00, 0x01][..]),
                 });
                 for i in 0..5 {
-                    let _ = frame_tx.send(FrameData::Video {
+                    let _ = frame_tx.try_send(FrameData::Video {
                         timestamp: (i + 1) * 33,
                         data: BytesMut::from(&[0x00, 0x01, 0x02][..]),
                     });

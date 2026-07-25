@@ -150,16 +150,14 @@ impl ImagingControl for AnykaImagingControl {
 
     async fn set_settings(&self, settings: &ImagingSettings) -> PlatformResult<()> {
         let start = std::time::Instant::now();
-        crate::hal::common::imaging::imaging_set_brightness(
-            settings.brightness,
-            self.ffi.as_ref(),
-        )?;
-        crate::hal::common::imaging::imaging_set_contrast(settings.contrast, self.ffi.as_ref())?;
-        crate::hal::common::imaging::imaging_set_saturation(
-            settings.saturation,
-            self.ffi.as_ref(),
-        )?;
-        crate::hal::common::imaging::imaging_set_sharpness(settings.sharpness, self.ffi.as_ref())?;
+        crate::hal::common::imaging::imaging_set_brightness(settings.brightness, self.ffi.as_ref())
+            .await?;
+        crate::hal::common::imaging::imaging_set_contrast(settings.contrast, self.ffi.as_ref())
+            .await?;
+        crate::hal::common::imaging::imaging_set_saturation(settings.saturation, self.ffi.as_ref())
+            .await?;
+        crate::hal::common::imaging::imaging_set_sharpness(settings.sharpness, self.ffi.as_ref())
+            .await?;
         *self.settings.write() = settings.clone();
         self.mark_imaging_update_and_request_idr("set_settings");
         tracing::info!(
@@ -179,7 +177,7 @@ impl ImagingControl for AnykaImagingControl {
             return Ok(());
         }
         let start = std::time::Instant::now();
-        crate::hal::common::imaging::imaging_set_brightness(value, self.ffi.as_ref())?;
+        crate::hal::common::imaging::imaging_set_brightness(value, self.ffi.as_ref()).await?;
         self.settings.write().brightness = value;
         self.mark_imaging_update_and_request_idr("set_brightness");
         tracing::info!(
@@ -196,7 +194,7 @@ impl ImagingControl for AnykaImagingControl {
             return Ok(());
         }
         let start = std::time::Instant::now();
-        crate::hal::common::imaging::imaging_set_contrast(value, self.ffi.as_ref())?;
+        crate::hal::common::imaging::imaging_set_contrast(value, self.ffi.as_ref()).await?;
         self.settings.write().contrast = value;
         self.mark_imaging_update_and_request_idr("set_contrast");
         tracing::info!(
@@ -213,7 +211,7 @@ impl ImagingControl for AnykaImagingControl {
             return Ok(());
         }
         let start = std::time::Instant::now();
-        crate::hal::common::imaging::imaging_set_saturation(value, self.ffi.as_ref())?;
+        crate::hal::common::imaging::imaging_set_saturation(value, self.ffi.as_ref()).await?;
         self.settings.write().saturation = value;
         self.mark_imaging_update_and_request_idr("set_saturation");
         tracing::info!(
@@ -230,7 +228,7 @@ impl ImagingControl for AnykaImagingControl {
             return Ok(());
         }
         let start = std::time::Instant::now();
-        crate::hal::common::imaging::imaging_set_sharpness(value, self.ffi.as_ref())?;
+        crate::hal::common::imaging::imaging_set_sharpness(value, self.ffi.as_ref()).await?;
         self.settings.write().sharpness = value;
         self.mark_imaging_update_and_request_idr("set_sharpness");
         tracing::info!(

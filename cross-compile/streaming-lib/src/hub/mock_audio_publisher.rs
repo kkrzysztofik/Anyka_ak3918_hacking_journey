@@ -214,14 +214,14 @@ impl TStreamHandler for MockAudioPublisher {
                 vcodec: VideoCodecType::H264, // Placeholder, audio-only stream
             };
 
-            let _ = frame_sender.send(FrameData::MediaInfo { media_info });
+            let _ = frame_sender.try_send(FrameData::MediaInfo { media_info });
 
             // RTSP consumers receive AudioSpecificConfig via SDP fmtp config.
             // Sending config as an AAC frame can break depacketizers expecting raw AU data.
             // RtspPull subscribers don't get the config frame - they get it from SDP.
             if !matches!(sub_type, SubscribeType::RtspPull) {
                 let config_data = BytesMut::from(self.audio_config.as_slice());
-                let _ = frame_sender.send(FrameData::Audio {
+                let _ = frame_sender.try_send(FrameData::Audio {
                     timestamp: ts,
                     data: config_data,
                 });
@@ -339,7 +339,7 @@ async fn publish_audio_frames(
 
         log_audio_frame(frame_count, timestamp);
 
-        if sender.send(frame_data).is_err() {
+        if sender.try_send(frame_data).is_err() {
             return AudioPublishResult::ChannelClosed;
         }
         last_timestamp_ms.store(timestamp, Ordering::Relaxed);
@@ -406,7 +406,6 @@ mod tests {
     use crate::hub::define::{DataSender, FrameData, SubscribeType, TStreamHandler};
     use portable_atomic::Ordering;
     use std::sync::Arc;
-    use tokio::sync::mpsc;
 
     #[tokio::test]
     async fn test_send_prior_data_uses_last_timestamp() {
@@ -425,7 +424,7 @@ mod tests {
             .expect("publisher new");
         publisher.last_timestamp_ms.store(12_345, Ordering::Relaxed);
 
-        let (tx, mut rx) = mpsc::unbounded_channel();
+        let (tx, mut rx) = crate::hub::define::frame_data_channel();
         let sender = DataSender::Frame { sender: tx };
         publisher
             .send_prior_data(sender, SubscribeType::RtspPull)
@@ -550,7 +549,7 @@ mod tests {
             .await
             .expect("create publisher");
 
-        let (tx, mut rx) = mpsc::unbounded_channel();
+        let (tx, mut rx) = crate::hub::define::frame_data_channel();
         let _handle = publisher.start_publishing(tx);
 
         // Collect first few frames

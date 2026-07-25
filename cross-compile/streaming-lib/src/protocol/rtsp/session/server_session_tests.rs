@@ -1817,7 +1817,7 @@ async fn test_rtsp_server_session_play_then_teardown_sends_two_responses_and_uns
         while let Some(event) = event_receiver.recv().await {
             match event {
                 StreamHubEvent::Subscribe { result_sender, .. } => {
-                    let (frame_sender, frame_receiver) = tokio::sync::mpsc::unbounded_channel();
+                    let (frame_sender, frame_receiver) = crate::hub::define::frame_data_channel();
                     held_frame_sender = Some(frame_sender);
                     let data_receiver = DataReceiver {
                         frame_receiver: Some(frame_receiver),
@@ -1892,7 +1892,7 @@ async fn test_rtsp_server_session_teardown_trailing_slash_unsubscribes_normalize
         while let Some(event) = event_receiver.recv().await {
             match event {
                 StreamHubEvent::Subscribe { result_sender, .. } => {
-                    let (frame_sender, frame_receiver) = tokio::sync::mpsc::unbounded_channel();
+                    let (frame_sender, frame_receiver) = crate::hub::define::frame_data_channel();
                     held_frame_sender = Some(frame_sender);
                     let data_receiver = DataReceiver {
                         frame_receiver: Some(frame_receiver),
@@ -1965,7 +1965,7 @@ async fn test_rtsp_server_session_run_eof_stops_playback_task() {
     let event_handle = tokio::spawn(async move {
         use crate::hub::define::DataReceiver;
         if let Some(StreamHubEvent::Subscribe { result_sender, .. }) = event_receiver.recv().await {
-            let (frame_sender, frame_receiver) = tokio::sync::mpsc::unbounded_channel();
+            let (frame_sender, frame_receiver) = crate::hub::define::frame_data_channel();
             let _hold_sender = frame_sender;
             let data_receiver = DataReceiver {
                 frame_receiver: Some(frame_receiver),
@@ -2087,7 +2087,7 @@ async fn test_rtsp_server_session_play() {
                     _ => panic!("Expected RTSP identifier"),
                 }
                 // Create a channel for frame data that we immediately close to simulate end/error
-                let (_frame_sender, frame_receiver) = tokio::sync::mpsc::unbounded_channel();
+                let (_frame_sender, frame_receiver) = crate::hub::define::frame_data_channel();
 
                 let data_receiver = DataReceiver {
                     frame_receiver: Some(frame_receiver),
@@ -2192,7 +2192,7 @@ async fn test_rtsp_server_session_play_normalizes_track_path() {
                     }
                     _ => panic!("Expected RTSP identifier"),
                 }
-                let (_frame_sender, frame_receiver) = tokio::sync::mpsc::unbounded_channel();
+                let (_frame_sender, frame_receiver) = crate::hub::define::frame_data_channel();
 
                 let data_receiver = DataReceiver {
                     frame_receiver: Some(frame_receiver),
@@ -2263,7 +2263,7 @@ async fn test_rtsp_server_session_play_includes_rtp_info() {
         use crate::hub::define::DataReceiver;
         if let Some(event) = event_receiver.recv().await {
             if let StreamHubEvent::Subscribe { result_sender, .. } = event {
-                let (_frame_sender, frame_receiver) = tokio::sync::mpsc::unbounded_channel();
+                let (_frame_sender, frame_receiver) = crate::hub::define::frame_data_channel();
                 drop(_frame_sender);
                 let data_receiver = DataReceiver {
                     frame_receiver: Some(frame_receiver),

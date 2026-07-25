@@ -356,18 +356,18 @@ impl TStreamHandler for MockVideoPublisher {
                 vcodec: VideoCodecType::H264,
             };
 
-            let _ = frame_sender.send(FrameData::MediaInfo { media_info });
+            let _ = frame_sender.try_send(FrameData::MediaInfo { media_info });
 
             // Send SPS as video frame
             let sps_data = BytesMut::from(self.sps.as_slice());
-            let _ = frame_sender.send(FrameData::Video {
+            let _ = frame_sender.try_send(FrameData::Video {
                 timestamp: ts,
                 data: sps_data,
             });
 
             // Send PPS as video frame
             let pps_data = BytesMut::from(self.pps.as_slice());
-            let _ = frame_sender.send(FrameData::Video {
+            let _ = frame_sender.try_send(FrameData::Video {
                 timestamp: ts,
                 data: pps_data,
             });
@@ -375,7 +375,7 @@ impl TStreamHandler for MockVideoPublisher {
             // Ensure new subscribers can decode immediately even when joining mid-GOP.
             if let Some(idr) = self.bootstrap_idr.as_ref() {
                 let idr_data = BytesMut::from(idr.as_slice());
-                let _ = frame_sender.send(FrameData::Video {
+                let _ = frame_sender.try_send(FrameData::Video {
                     timestamp: ts,
                     data: idr_data,
                 });
@@ -745,7 +745,7 @@ fn send_param_set_frame(
         timestamp,
         data: BytesMut::from(data),
     };
-    let _ = sender.send(frame);
+    let _ = sender.try_send(frame);
     if crate::stream_frame_debug_logging_enabled() {
         debug!(
             frame_type = frame_type,
@@ -901,7 +901,10 @@ async fn send_access_unit(
         interval.tick().await;
     }
 
-    if sender.send(FrameData::Video { timestamp, data }).is_err() {
+    if sender
+        .try_send(FrameData::Video { timestamp, data })
+        .is_err()
+    {
         return false;
     }
 
@@ -1117,7 +1120,6 @@ mod tests {
     use portable_atomic::Ordering;
     use std::sync::Arc;
     use std::time::Duration;
-    use tokio::sync::mpsc;
 
     fn annexb_nal(nal: &[u8]) -> Vec<u8> {
         let mut out = vec![0x00, 0x00, 0x00, 0x01];
@@ -1177,7 +1179,7 @@ mod tests {
             .expect("publisher new");
         publisher.last_timestamp_ms.store(12_345, Ordering::Relaxed);
 
-        let (tx, mut rx) = mpsc::unbounded_channel();
+        let (tx, mut rx) = crate::hub::define::frame_data_channel();
         let sender = DataSender::Frame { sender: tx };
         publisher
             .send_prior_data(sender, SubscribeType::RtspPull)
@@ -1235,7 +1237,7 @@ mod tests {
             .await
             .expect("publisher new");
 
-        let (tx, mut rx) = mpsc::unbounded_channel();
+        let (tx, mut rx) = crate::hub::define::frame_data_channel();
         let _handle = publisher.start_publishing(tx);
 
         let mut saw_sps = false;
@@ -1297,7 +1299,7 @@ mod tests {
         let publisher = MockVideoPublisher::new("stream1".to_string(), &path, 25, false)
             .await
             .expect("publisher new");
-        let (tx, mut rx) = mpsc::unbounded_channel();
+        let (tx, mut rx) = crate::hub::define::frame_data_channel();
         let _handle = publisher.start_publishing(tx);
 
         let mut timestamps: Vec<u32> = Vec::new();
@@ -1682,7 +1684,7 @@ mod tests {
 
     #[test]
     fn test_send_param_set_frame_sends_video_data() {
-        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let (tx, mut rx) = crate::hub::define::frame_data_channel();
         send_param_set_frame(&tx, &[0x67, 0x42], 0, 0, 40, "SPS");
         let frame = rx.try_recv().unwrap();
         match frame {
@@ -1696,7 +1698,7 @@ mod tests {
 
     #[test]
     fn test_send_param_set_frame_computes_timestamp() {
-        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let (tx, mut rx) = crate::hub::define::frame_data_channel();
         send_param_set_frame(&tx, &[0x68], 100, 5, 40, "PPS");
         let frame = rx.try_recv().unwrap();
         match frame {

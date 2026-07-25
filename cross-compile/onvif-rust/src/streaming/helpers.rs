@@ -19,22 +19,25 @@ use crate::validation::httpflv_remux::ValidationHttpFlvRemuxer;
 ///
 /// For RTSP, the frame is sent as-is (Annex-B).
 /// For HTTP-FLV, the frame is remuxed to FLV tag format.
-pub fn fanout_frame(
-    frame_tx_rtsp: &tokio::sync::mpsc::UnboundedSender<FrameData>,
-    frame_tx_httpflv: Option<&tokio::sync::mpsc::UnboundedSender<FrameData>>,
+///
+/// Uses bounded channels: awaits when full so backpressure reaches the
+/// drop-oldest bridge queue instead of growing RSS unboundedly.
+pub async fn fanout_frame(
+    frame_tx_rtsp: &tokio::sync::mpsc::Sender<FrameData>,
+    frame_tx_httpflv: Option<&tokio::sync::mpsc::Sender<FrameData>>,
     httpflv_remuxer: Option<&mut ValidationHttpFlvRemuxer>,
     frame: FrameData,
 ) {
     if frame_tx_httpflv.is_none() {
-        let _ = frame_tx_rtsp.send(frame);
+        let _ = frame_tx_rtsp.send(frame).await;
         return;
     }
 
-    let _ = frame_tx_rtsp.send(frame.clone());
+    let _ = frame_tx_rtsp.send(frame.clone()).await;
     if let (Some(tx_httpflv), Some(remuxer)) = (frame_tx_httpflv, httpflv_remuxer) {
         match remuxer.remux_frame(frame) {
             Ok(Some(remuxed_frame)) => {
-                let _ = tx_httpflv.send(remuxed_frame);
+                let _ = tx_httpflv.send(remuxed_frame).await;
             }
             Ok(None) => {}
             Err(err) => {
@@ -77,19 +80,29 @@ pub fn stream_hub_error(message: impl Into<String>) -> StreamHubError {
 }
 
 /// Send a single `FrameData` to a subscriber's frame channel.
+///
+/// Uses `try_send` so a slow subscriber drops frames instead of blocking the
+/// caller or growing an unbounded buffer.
 pub fn send_frame(
-    frame_sender: &tokio::sync::mpsc::UnboundedSender<FrameData>,
+    frame_sender: &tokio::sync::mpsc::Sender<FrameData>,
     frame: FrameData,
 ) -> Result<(), StreamHubError> {
-    frame_sender
-        .send(frame)
-        .map_err(|err| stream_hub_error(format!("failed to send frame to subscriber: {}", err)))
+    match frame_sender.try_send(frame) {
+        Ok(()) => Ok(()),
+        Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
+            tracing::debug!("frame channel full; dropping frame for slow subscriber");
+            Ok(())
+        }
+        Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => Err(stream_hub_error(
+            "failed to send frame to subscriber: channel closed",
+        )),
+    }
 }
 
 /// Send HTTP-FLV prior data (sequence headers + optional bootstrap IDR) to a
 /// late-joining subscriber.
 pub fn send_httpflv_prior_frames(
-    frame_sender: &tokio::sync::mpsc::UnboundedSender<FrameData>,
+    frame_sender: &tokio::sync::mpsc::Sender<FrameData>,
     remuxer: &mut ValidationHttpFlvRemuxer,
     timestamp: u32,
     bootstrap_idr: Option<&[u8]>,
@@ -335,7 +348,7 @@ mod tests {
 
     #[test]
     fn test_send_frame_closed_channel_returns_error() {
-        let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<FrameData>();
+        let (tx, rx) = streaming_lib::frame_data_channel();
         drop(rx);
 
         let result = send_frame(
@@ -409,21 +422,21 @@ mod tests {
 
     #[tokio::test]
     async fn test_fanout_frame_rtsp_only_routes_without_httpflv() {
-        let (rtsp_tx, mut rtsp_rx) = tokio::sync::mpsc::unbounded_channel::<FrameData>();
+        let (rtsp_tx, mut rtsp_rx) = streaming_lib::frame_data_channel();
         let frame = FrameData::Video {
             timestamp: 10,
             data: BytesMut::from(&b"video"[..]),
         };
 
-        fanout_frame(&rtsp_tx, None, None, frame);
+        fanout_frame(&rtsp_tx, None, None, frame).await;
         let received = rtsp_rx.recv().await.expect("rtsp frame");
         assert!(matches!(received, FrameData::Video { timestamp: 10, .. }));
     }
 
     #[tokio::test]
     async fn test_fanout_frame_with_httpflv_routes_to_both() {
-        let (rtsp_tx, mut rtsp_rx) = tokio::sync::mpsc::unbounded_channel::<FrameData>();
-        let (http_tx, mut http_rx) = tokio::sync::mpsc::unbounded_channel::<FrameData>();
+        let (rtsp_tx, mut rtsp_rx) = streaming_lib::frame_data_channel();
+        let (http_tx, mut http_rx) = streaming_lib::frame_data_channel();
         let mut remuxer = ValidationHttpFlvRemuxer::new(
             vec![0x67, 0x42, 0x00, 0x1e],
             vec![0x68, 0xce, 0x06, 0xe2],
@@ -440,7 +453,7 @@ mod tests {
             ),
         };
 
-        fanout_frame(&rtsp_tx, Some(&http_tx), Some(&mut remuxer), frame);
+        fanout_frame(&rtsp_tx, Some(&http_tx), Some(&mut remuxer), frame).await;
 
         let rtsp_frame = rtsp_rx.recv().await.expect("rtsp frame");
         let http_frame = http_rx.recv().await.expect("httpflv frame");
@@ -457,7 +470,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_send_httpflv_prior_frames_no_audio_no_bootstrap_emits_video_header_only() {
-        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<FrameData>();
+        let (tx, mut rx) = streaming_lib::frame_data_channel();
         let mut remuxer = ValidationHttpFlvRemuxer::new(
             vec![0x67, 0x42, 0x00, 0x1e],
             vec![0x68, 0xce, 0x06, 0xe2],
@@ -482,7 +495,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_send_httpflv_prior_frames_malformed_bootstrap_skips_idr_frame() {
-        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<FrameData>();
+        let (tx, mut rx) = streaming_lib::frame_data_channel();
         let mut remuxer = ValidationHttpFlvRemuxer::new(
             vec![0x67, 0x42, 0x00, 0x1e],
             vec![0x68, 0xce, 0x06, 0xe2],

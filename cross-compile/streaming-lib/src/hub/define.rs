@@ -122,10 +122,22 @@ pub enum Information {
     Sdp { data: String },
 }
 
+/// Capacity for publisher→hub and hub→subscriber frame channels.
+///
+/// Bounded so a stalled consumer cannot grow RSS unboundedly on the 32MB
+/// camera. When full, producers either await (backpressure into drop-oldest
+/// bridge queues) or `try_send` and drop the newest frame.
+pub const FRAME_DATA_CHANNEL_CAPACITY: usize = 32;
+
+/// Create a bounded frame data channel.
+pub fn frame_data_channel() -> (FrameDataSender, FrameDataReceiver) {
+    mpsc::channel(FRAME_DATA_CHANNEL_CAPACITY)
+}
+
 //used to transfer a/v frame between different protocols(rtmp/rtsp/webrtc/http-flv/hls)
 //or send a/v frame data from publisher to subscribers.
-pub type FrameDataSender = mpsc::UnboundedSender<FrameData>;
-pub type FrameDataReceiver = mpsc::UnboundedReceiver<FrameData>;
+pub type FrameDataSender = mpsc::Sender<FrameData>;
+pub type FrameDataReceiver = mpsc::Receiver<FrameData>;
 
 //used to transfer rtp packet data,it includles the following directions:
 // rtsp(publisher)->stream hub->rtsp(subscriber)
@@ -946,7 +958,7 @@ mod tests {
 
     #[test]
     fn test_data_sender_frame_variant() {
-        let (tx, _rx) = mpsc::unbounded_channel();
+        let (tx, _rx) = frame_data_channel();
         let sender = DataSender::Frame { sender: tx };
         let debug = format!("{:?}", sender);
         assert!(debug.contains("Frame"));
@@ -962,7 +974,7 @@ mod tests {
 
     #[test]
     fn test_data_sender_clone() {
-        let (tx, _rx) = mpsc::unbounded_channel();
+        let (tx, _rx) = frame_data_channel();
         let sender = DataSender::Frame { sender: tx };
         let cloned = sender.clone();
         let debug = format!("{:?}", cloned);

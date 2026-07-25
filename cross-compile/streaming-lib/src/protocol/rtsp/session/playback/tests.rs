@@ -17,8 +17,7 @@ use std::time::{Duration, Instant};
 fn test_scale_rtp_timestamp_90000hz() {
     let ts = scale_rtp_timestamp(1000, 90_000);
     assert_eq!(
-        ts,
-        90_000,
+        ts, 90_000,
         "90kHz scaling of 1000ms should produce 90000 ticks"
     );
 }
@@ -35,8 +34,7 @@ fn test_scale_rtp_timestamp_48000hz_audio() {
     // 1000ms * 48000 / 1000 = 48000
     let result = scale_rtp_timestamp(1000, 48000);
     assert_eq!(
-        result,
-        48000,
+        result, 48000,
         "48000Hz scaling of 1000ms should produce 48000 ticks"
     );
 }
@@ -48,8 +46,7 @@ fn test_scale_rtp_timestamp_large_timestamp_wraps() {
     // (u32::MAX as u64) * 90000 / 1000 → wraps into u32
     let expected = ((u32::MAX as u64).saturating_mul(90000) / 1000) as u32;
     assert_eq!(
-        result,
-        expected,
+        result, expected,
         "large timestamp should match saturated u64 scaling then u32 cast"
     );
 }
@@ -305,10 +302,19 @@ fn test_contains_h264_idr_returns_false_for_sps_pps_only() {
 
 #[test]
 fn test_contains_h264_idr_handles_malformed_start_codes() {
-    assert!(!contains_h264_idr(&[0x00, 0x00, 0x01]), "truncated after 3-byte start");
-    assert!(!contains_h264_idr(&[0x00, 0x00, 0x00]), "incomplete 4-byte start");
+    assert!(
+        !contains_h264_idr(&[0x00, 0x00, 0x01]),
+        "truncated after 3-byte start"
+    );
+    assert!(
+        !contains_h264_idr(&[0x00, 0x00, 0x00]),
+        "incomplete 4-byte start"
+    );
     // Leading junk before a 3-byte start: no IDR NAL (type 1 slice, not 5).
-    assert!(!contains_h264_idr(&[0xFF, 0x00, 0x00, 0x01, 0x41]), "wrong prefix");
+    assert!(
+        !contains_h264_idr(&[0xFF, 0x00, 0x00, 0x01, 0x41]),
+        "wrong prefix"
+    );
 }
 
 // ========================================================================
@@ -851,4 +857,3 @@ fn test_lag_recovery_mode_config_mapped_to_policy() {
     let policy_latest = PlaybackLatencyPolicy::from_config(&config_latest);
     assert_eq!(policy_latest.lag_recovery_mode, LagRecoveryMode::LatestIdr);
 }
-

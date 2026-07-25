@@ -38,6 +38,22 @@ use super::AK_FAILED_I32;
 use super::{AK_SUCCESS_I32, check_result};
 use crate::hal::anyka::sdk::{PtzDirection, PtzMotor};
 
+/// Result of waiting for an in-flight motor turn to finish or be interrupted.
+///
+/// Carries enough for the platform layer to reconcile tracked position after a turn:
+/// whether the wait ended because it was preempted, and the motor step position read
+/// back from hardware (`MOTOR_GET_STATUS`). This is the HAL-trait-facing, host-safe
+/// projection of the driver's internal `TurnOutcome` (which also carries the raw kernel
+/// event bitmask that the platform layer does not need).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct PtzWaitOutcome {
+    /// `true` if the wait ended because the stop/interrupt flag was set (preempted),
+    /// not because the motor signalled completion.
+    pub interrupted: bool,
+    /// Motor step position read back after the turn, or `-1` if it could not be read.
+    pub step_pos: i32,
+}
+
 /// Internal trait for abstracting PTZ FFI calls to enable mocking in tests.
 #[allow(dead_code)] // Some methods only used on ARM targets
 #[cfg_attr(test, mockall::automock)]
@@ -45,9 +61,23 @@ pub(crate) trait PtzHalTrait: Send + Sync {
     fn ptz_open(&self) -> i32;
     fn ptz_close(&self) -> i32;
     fn ptz_check_self(&self, pin_type: ptz_feedback_pin) -> i32;
+    /// Issue a turn and block until it completes or is interrupted.
     fn ptz_turn(&self, direction: ptz_turn_direction, degree: i32) -> i32;
+    /// Issue a turn without waiting for completion (non-blocking).
+    ///
+    /// Used by the PTZ actor for continuous moves so it can acknowledge the command
+    /// immediately and then wait for completion separately via [`Self::ptz_wait_turn`].
+    fn ptz_start_turn(&self, direction: ptz_turn_direction, degree: i32) -> i32;
+    /// Block until the in-flight turn on `direction`'s motor completes or is
+    /// interrupted, reconciling position from `MOTOR_GET_STATUS`. Returns a
+    /// [`PtzWaitOutcome`] so the caller can tell whether the turn was preempted and
+    /// use the hardware step position for position reconciliation.
+    fn ptz_wait_turn(&self, direction: ptz_turn_direction) -> PtzWaitOutcome;
     fn ptz_get_step_pos(&self, motor_no: ptz_device) -> i32;
     fn ptz_stop(&self, direction: ptz_turn_direction) -> i32;
+    /// Set the interrupt flag so any in-flight turn/wait returns promptly. Safe to call
+    /// concurrently with a pending turn (does not take the driver's main lock).
+    fn ptz_interrupt(&self);
 }
 
 /// Default PTZ FFI: native Rust driver on ARM (/dev/ak-motor*), stub on host.

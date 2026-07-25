@@ -1107,10 +1107,7 @@ async fn handle_playback_frame(
     false
 }
 
-async fn handle_no_frame_data(
-    env: &PlaybackFrameEnv<'_>,
-    state: &mut PlaybackLoopState,
-) -> bool {
+async fn handle_no_frame_data(env: &PlaybackFrameEnv<'_>, state: &mut PlaybackLoopState) -> bool {
     // `receiver.recv()` returned `None`: the frame channel is closed (sender dropped). Flush the
     // video assembler once, then signal shutdown so the session exits promptly.
     flush_pending_video(
@@ -1136,7 +1133,7 @@ async fn handle_no_frame_data(
 /// breaks out (same shutdown path as normal teardown for partial AU data).
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn run_playback_loop(
-    mut receiver: mpsc::UnboundedReceiver<FrameData>,
+    mut receiver: mpsc::Receiver<FrameData>,
     audio_rtp_channel: Option<Arc<Mutex<RtpChannel>>>,
     video_rtp_channel: Option<Arc<Mutex<RtpChannel>>>,
     playback_cancel: Arc<Notify>,

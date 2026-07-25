@@ -660,8 +660,6 @@ async fn init_validation_publishers(
 
 /// Run the daemon in H.264 playback validation mode
 async fn run_validation_mode(config: H264PlaybackConfig, config_path: &str) -> Result<()> {
-    use tokio::sync::mpsc;
-
     let publisher_init_timeout_sec =
         parse_env_timeout("ONVIF_VALIDATION_PUBLISHER_INIT_TIMEOUT_SEC", 30);
     tracing::info!("Validation mode: HTTP-FLV and ONVIF application enabled");
@@ -691,8 +689,8 @@ async fn run_validation_mode(config: H264PlaybackConfig, config_path: &str) -> R
 
     let mut streamhub = StreamsHub::new(None);
     let (rtsp_stream_id, httpflv_stream_id) = create_stream_identifiers();
-    let (frame_tx_for_publisher, frame_rx_from_publisher) = mpsc::unbounded_channel::<FrameData>();
-    let (frame_tx_rtsp, frame_rx_rtsp) = mpsc::unbounded_channel::<FrameData>();
+    let (frame_tx_for_publisher, frame_rx_from_publisher) = streaming_lib::frame_data_channel();
+    let (frame_tx_rtsp, frame_rx_rtsp) = streaming_lib::frame_data_channel();
     let (frame_tx_httpflv, frame_rx_httpflv) = create_httpflv_channel();
 
     let fanout_handle = spawn_fanout_task(
@@ -960,18 +958,18 @@ fn create_stream_identifiers() -> (StreamIdentifier, StreamIdentifier) {
 }
 
 fn create_httpflv_channel() -> (
-    Option<tokio::sync::mpsc::UnboundedSender<FrameData>>,
-    Option<tokio::sync::mpsc::UnboundedReceiver<FrameData>>,
+    Option<tokio::sync::mpsc::Sender<FrameData>>,
+    Option<tokio::sync::mpsc::Receiver<FrameData>>,
 ) {
-    let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<FrameData>();
+    let (tx, rx) = streaming_lib::frame_data_channel();
     (Some(tx), Some(rx))
 }
 
 #[allow(clippy::too_many_arguments)]
 fn spawn_fanout_task(
-    mut frame_rx: tokio::sync::mpsc::UnboundedReceiver<FrameData>,
-    frame_tx_rtsp: tokio::sync::mpsc::UnboundedSender<FrameData>,
-    frame_tx_httpflv: Option<tokio::sync::mpsc::UnboundedSender<FrameData>>,
+    mut frame_rx: tokio::sync::mpsc::Receiver<FrameData>,
+    frame_tx_rtsp: tokio::sync::mpsc::Sender<FrameData>,
+    frame_tx_httpflv: Option<tokio::sync::mpsc::Sender<FrameData>>,
     video_sps: Vec<u8>,
     video_pps: Vec<u8>,
     audio_config: Option<Vec<u8>>,
@@ -987,7 +985,8 @@ fn spawn_fanout_task(
                 frame_tx_httpflv.as_ref(),
                 httpflv_remuxer.as_mut(),
                 frame,
-            );
+            )
+            .await;
         }
     })
 }
@@ -997,8 +996,8 @@ async fn publish_to_streamhub(
     streamhub: &mut StreamsHub,
     rtsp_stream_id: StreamIdentifier,
     httpflv_stream_id: StreamIdentifier,
-    frame_rx_rtsp: tokio::sync::mpsc::UnboundedReceiver<FrameData>,
-    frame_rx_httpflv: Option<tokio::sync::mpsc::UnboundedReceiver<FrameData>>,
+    frame_rx_rtsp: tokio::sync::mpsc::Receiver<FrameData>,
+    frame_rx_httpflv: Option<tokio::sync::mpsc::Receiver<FrameData>>,
     stream_handler: Arc<ValidationAvStreamHandler>,
 ) -> Result<(
     Arc<tokio::sync::Mutex<StatisticsStream>>,
@@ -1076,7 +1075,7 @@ fn start_audio_publisher(
     audio_publisher: &Option<
         Arc<streaming_lib::streamhub::mock_audio_publisher::MockAudioPublisher>,
     >,
-    frame_tx: tokio::sync::mpsc::UnboundedSender<FrameData>,
+    frame_tx: tokio::sync::mpsc::Sender<FrameData>,
 ) -> Option<tokio::task::JoinHandle<()>> {
     audio_publisher.as_ref().map(|pub_| {
         let handle = pub_.start_publishing(frame_tx);
