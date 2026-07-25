@@ -5,7 +5,7 @@
 pub(crate) struct StubPtzHal;
 
 #[cfg(use_stubs)]
-use crate::hal::common::ptz::PtzHalTrait;
+use crate::hal::common::ptz::{PtzHalTrait, PtzWaitOutcome};
 #[cfg(use_stubs)]
 use crate::hal::common::{AK_SUCCESS_I32, ptz_device, ptz_feedback_pin, ptz_turn_direction};
 
@@ -31,8 +31,8 @@ impl PtzHalTrait for StubPtzHal {
         AK_SUCCESS_I32
     }
 
-    fn ptz_wait_turn(&self, _direction: ptz_turn_direction) -> i32 {
-        AK_SUCCESS_I32
+    fn ptz_wait_turn(&self, _direction: ptz_turn_direction) -> PtzWaitOutcome {
+        PtzWaitOutcome::default()
     }
 
     fn ptz_get_step_pos(&self, _motor_no: ptz_device) -> i32 {

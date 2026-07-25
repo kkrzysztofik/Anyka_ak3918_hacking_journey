@@ -602,10 +602,7 @@ mod tests {
     fn test_start_turn_without_open_returns_unavailable() {
         let driver = NativePtzDriver::new();
         let result = driver.start_turn(ptz_turn_direction::PTZ_TURN_LEFT, 30);
-        assert!(matches!(
-            result,
-            Err(PlatformError::HardwareUnavailable(_))
-        ));
+        assert!(matches!(result, Err(PlatformError::HardwareUnavailable(_))));
     }
 
     #[test]

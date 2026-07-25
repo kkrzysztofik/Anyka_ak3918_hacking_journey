@@ -18,13 +18,14 @@
 //! the actor's blocking wait unwinds quickly.
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, Ordering};
 
 use parking_lot::RwLock;
 use tokio::sync::{mpsc, oneshot};
 
 use crate::hal::anyka::sdk::PtzDirection;
 use crate::hal::common::AK_SUCCESS_I32;
-use crate::hal::common::ptz::PtzHalTrait;
+use crate::hal::common::ptz::{PtzHalTrait, PtzWaitOutcome};
 
 use crate::platform::traits::{PlatformError, PlatformResult, PtzPosition, PtzVelocity};
 
@@ -40,6 +41,11 @@ use super::ptz_control::{
 pub(crate) struct PtzActorState {
     pub position: RwLock<PtzPosition>,
     pub velocity: RwLock<PtzVelocity>,
+    /// Monotonic count of commands the actor has *fully* finished processing (including
+    /// the asynchronous completion/reconciliation tail that runs after an acceptance
+    /// reply). Lets observers know when an accepted-but-async move has actually landed.
+    /// `u32` (not `u64`) so it is lock-free on the 32-bit ARM target.
+    pub commands_completed: AtomicU32,
 }
 
 impl PtzActorState {
@@ -47,13 +53,16 @@ impl PtzActorState {
         Self {
             position: RwLock::new(PtzPosition::HOME),
             velocity: RwLock::new(PtzVelocity::STOP),
+            commands_completed: AtomicU32::new(0),
         }
     }
 }
 
 /// A PTZ command submitted to the actor. Each variant carries a `oneshot` reply channel.
 pub(crate) enum PtzCommand {
-    /// Absolute move. Replied once the move completes (or fails).
+    /// Absolute move. Replied once the command is *accepted* (all axis turns issued to
+    /// hardware); ONVIF absolute moves are asynchronous, so the actor then keeps
+    /// draining each axis to completion/interrupt and reconciles tracked position.
     MoveTo {
         position: PtzPosition,
         reply: oneshot::Sender<PlatformResult<()>>,
@@ -118,13 +127,15 @@ fn dispatch_batch(ffi: &dyn PtzHalTrait, state: &PtzActorState, batch: Vec<PtzCo
             let _ = cmd.into_reply().send(Ok(()));
         }
     }
+
+    // The winner has fully finished (including any post-acceptance wait/reconcile tail).
+    state.commands_completed.fetch_add(1, Ordering::SeqCst);
 }
 
 fn execute(ffi: &dyn PtzHalTrait, state: &PtzActorState, cmd: PtzCommand) {
     match cmd {
         PtzCommand::MoveTo { position, reply } => {
-            let result = do_move(ffi, state, position);
-            let _ = reply.send(result);
+            do_move(ffi, state, position, reply);
         }
         PtzCommand::Continuous { velocity, reply } => {
             do_continuous(ffi, state, velocity, reply);
@@ -136,56 +147,106 @@ fn execute(ffi: &dyn PtzHalTrait, state: &PtzActorState, cmd: PtzCommand) {
     }
 }
 
-/// Blocking absolute move: turn each axis to its target, committing tracked position
-/// after each axis completes (never on submission).
-fn do_move(ffi: &dyn PtzHalTrait, state: &PtzActorState, position: PtzPosition) -> PlatformResult<()> {
+/// Absolute move.
+///
+/// ONVIF treats absolute moves as asynchronous: this issues the (non-blocking) turn on
+/// each active axis, replies **once the command is accepted** (all axis turns issued to
+/// hardware), and only then drains each axis to completion/interrupt and reconciles
+/// tracked position. Acceptance fails (reply `Err`) only if an axis turn cannot be
+/// issued at all.
+///
+/// Note: while draining `ptz_wait_turn` below the actor is *not* dequeuing new commands;
+/// a superseding command (e.g. `Stop`) preempts the wait via the driver interrupt flag
+/// (`ptz_interrupt`, set by the platform layer before each submit), which bounds
+/// preemption latency to one ~100ms poll tick in the driver's wait loop.
+fn do_move(
+    ffi: &dyn PtzHalTrait,
+    state: &PtzActorState,
+    position: PtzPosition,
+    reply: oneshot::Sender<PlatformResult<()>>,
+) {
     let clamped_pan = position.pan.clamp(PTZ_MIN_PAN_DEGREES, PTZ_MAX_PAN_DEGREES);
-    let clamped_tilt = position.tilt.clamp(PTZ_MIN_TILT_DEGREES, PTZ_MAX_TILT_DEGREES);
+    let clamped_tilt = position
+        .tilt
+        .clamp(PTZ_MIN_TILT_DEGREES, PTZ_MAX_TILT_DEGREES);
 
     let current = *state.position.read();
     let pan_delta = clamped_pan - current.pan;
     let tilt_delta = clamped_tilt - current.tilt;
 
+    // Build the per-axis plan (direction + committed target once that axis completes).
     // Pan: positive delta → Right, negative → Left (continuous_move convention).
+    // Tilt: positive delta → Down, negative → Up (matches C adapter).
+    let mut plan: Vec<(PtzDirection, f32, Axis)> = Vec::new();
     if pan_delta.abs() > PTZ_MIN_MOVE_THRESHOLD {
         let direction = if pan_delta > 0.0 {
             PtzDirection::Right
         } else {
             PtzDirection::Left
         };
-        turn_blocking(ffi, direction, pan_delta.abs())?;
-        state.position.write().pan = clamped_pan;
+        plan.push((direction, pan_delta.abs(), Axis::Pan(clamped_pan)));
     }
-
-    // Tilt: positive delta → Down, negative → Up (matches C adapter).
     if tilt_delta.abs() > PTZ_MIN_MOVE_THRESHOLD {
         let direction = if tilt_delta > 0.0 {
             PtzDirection::Down
         } else {
             PtzDirection::Up
         };
-        turn_blocking(ffi, direction, tilt_delta.abs())?;
-        state.position.write().tilt = clamped_tilt;
+        plan.push((direction, tilt_delta.abs(), Axis::Tilt(clamped_tilt)));
+    }
+
+    // Issue each axis turn (non-blocking). Acceptance = all planned turns issued.
+    let mut started = Vec::new();
+    let mut result = Ok(());
+    for (direction, degrees, axis) in plan {
+        let sdk_dir = direction_to_ffi(direction);
+        let ret = ffi.ptz_start_turn(sdk_dir, degrees.round() as i32);
+        if ret != AK_SUCCESS_I32 {
+            result = Err(PlatformError::HardwareFailure(format!(
+                "ptz_start_turn({:?}) failed: error code {}",
+                direction, ret
+            )));
+            break;
+        }
+        started.push((sdk_dir, axis));
+    }
+
+    // Reply on acceptance (before waiting for the motor to finish).
+    let _ = reply.send(result);
+
+    // Drain each started axis off the tokio workers; commit its target once it lands.
+    // A `TurnOutcome`/`PtzWaitOutcome` is used (never discarded): on interruption we
+    // stop reconciling further axes and leave the last known position untouched rather
+    // than committing a target the motor never reached.
+    for (sdk_dir, axis) in started {
+        let outcome: PtzWaitOutcome = ffi.ptz_wait_turn(sdk_dir);
+        if outcome.interrupted {
+            tracing::debug!(
+                "absolute move preempted on {:?} (step_pos={}); leaving tracked position",
+                axis,
+                outcome.step_pos
+            );
+            break;
+        }
+        // Completed cleanly: commit the clamped target for this axis. (Hardware-step →
+        // degree reconciliation via `outcome.step_pos` awaits calibration wiring.)
+        match axis {
+            Axis::Pan(target) => state.position.write().pan = target,
+            Axis::Tilt(target) => state.position.write().tilt = target,
+        }
     }
 
     // No hardware zoom on AK3918.
     state.position.write().zoom = position.zoom.clamp(1.0, 1.0);
     *state.velocity.write() = PtzVelocity::STOP;
-    Ok(())
 }
 
-fn turn_blocking(ffi: &dyn PtzHalTrait, direction: PtzDirection, degrees: f32) -> PlatformResult<()> {
-    let sdk_dir = direction_to_ffi(direction);
-    let degree_int = degrees.round() as i32;
-    let ret = ffi.ptz_turn(sdk_dir, degree_int);
-    if ret == AK_SUCCESS_I32 {
-        Ok(())
-    } else {
-        Err(PlatformError::HardwareFailure(format!(
-            "ptz_turn({:?}, {}) failed: error code {}",
-            direction, degree_int, ret
-        )))
-    }
+/// Which axis a planned/started turn belongs to, carrying the target degrees to commit
+/// once the turn completes cleanly.
+#[derive(Debug, Clone, Copy)]
+enum Axis {
+    Pan(f32),
+    Tilt(f32),
 }
 
 /// Continuous move: issue the (non-blocking) start on each active axis, acknowledge
@@ -219,7 +280,11 @@ fn do_continuous(
         if axis_velocity.abs() <= f32::EPSILON {
             continue;
         }
-        let direction = if axis_velocity > 0.0 { dir_pos } else { dir_neg };
+        let direction = if axis_velocity > 0.0 {
+            dir_pos
+        } else {
+            dir_neg
+        };
         let sdk_dir = direction_to_ffi(direction);
         let ret = ffi.ptz_start_turn(sdk_dir, sweep.round() as i32);
         if ret != AK_SUCCESS_I32 {
@@ -239,11 +304,19 @@ fn do_continuous(
     let _ = reply.send(result);
 
     // Drain each started axis's completion/interrupt off the tokio workers.
+    //
+    // While blocked here the actor is *not* dequeuing new commands; a superseding
+    // command (e.g. `Stop`) preempts via the driver interrupt flag (`ptz_interrupt`,
+    // set by the platform layer before each submit), bounding preemption latency to one
+    // ~100ms poll tick in the driver's wait loop. The `PtzWaitOutcome` is consumed (not
+    // discarded) for the reconciled step position / interrupt signal.
     for sdk_dir in started {
-        let ret = ffi.ptz_wait_turn(sdk_dir);
-        if ret != AK_SUCCESS_I32 {
-            tracing::warn!("ptz_wait_turn failed after continuous start: error code {}", ret);
-        }
+        let outcome: PtzWaitOutcome = ffi.ptz_wait_turn(sdk_dir);
+        tracing::debug!(
+            "continuous axis wait finished: interrupted={}, step_pos={}",
+            outcome.interrupted,
+            outcome.step_pos
+        );
     }
 }
 
