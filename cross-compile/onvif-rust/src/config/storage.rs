@@ -71,10 +71,22 @@ impl ConfigStorage {
         }
     }
 
-    /// Save configuration to the file atomically.
-    pub fn save(&self, config: &AppConfig) -> StorageResult<()> {
+    /// Save configuration to the file atomically on a blocking thread.
+    pub async fn save(&self, config: &AppConfig) -> StorageResult<()> {
         let content = toml::to_string_pretty(config)?;
-        super::file_ops::atomic_write(Path::new(&self.path), content.as_bytes(), None)?;
+        let path = self.path.clone();
+
+        tokio::task::spawn_blocking(move || {
+            super::file_ops::atomic_write(Path::new(&path), content.as_bytes(), None)
+        })
+        .await
+        .map_err(|e| {
+            StorageError::Io(io::Error::other(format!(
+                "config save task panicked: {}",
+                e
+            )))
+        })??;
+
         Ok(())
     }
 
@@ -123,8 +135,8 @@ model = "TestModel"
         assert_eq!(config.device.manufacturer, "Anyka");
     }
 
-    #[test]
-    fn test_config_storage_load_save() {
+    #[tokio::test]
+    async fn test_config_storage_load_save() {
         let mut temp_file = NamedTempFile::new().unwrap();
         let toml_content = r#"[server]
 port = 9000
@@ -140,7 +152,7 @@ manufacturer = "LoadTest"
 
         // Save config
         let storage = ConfigStorage::new(temp_file.path().to_str().unwrap());
-        storage.save(&config).unwrap();
+        storage.save(&config).await.unwrap();
 
         // Reload and verify
         let reloaded = ConfigStorage::load(temp_file.path().to_str().unwrap()).unwrap();
@@ -163,8 +175,8 @@ manufacturer = "LoadTest"
         assert!(sample.contains("port = 80"));
     }
 
-    #[test]
-    fn test_config_storage_save_creates_valid_toml() {
+    #[tokio::test]
+    async fn test_config_storage_save_creates_valid_toml() {
         let temp_file = NamedTempFile::new().unwrap();
         let storage = ConfigStorage::new(temp_file.path().to_str().unwrap());
 
@@ -173,7 +185,7 @@ manufacturer = "LoadTest"
         config.server.auth_enabled = true;
         config.device.manufacturer = "Test".to_string();
 
-        storage.save(&config).unwrap();
+        storage.save(&config).await.unwrap();
 
         let content = std::fs::read_to_string(temp_file.path()).unwrap();
         assert!(content.contains("[server]"));

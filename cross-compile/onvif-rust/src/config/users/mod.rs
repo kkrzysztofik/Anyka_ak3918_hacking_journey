@@ -55,7 +55,10 @@ use std::collections::HashMap;
 use std::fs;
 use std::io;
 use std::path::Path;
+use std::sync::OnceLock;
 use thiserror::Error;
+
+use super::persistence::PersistenceHandle;
 
 /// Maximum number of users allowed.
 ///
@@ -289,6 +292,12 @@ struct UsersFile {
 pub struct UserStorage {
     /// In-memory user storage.
     users: RwLock<HashMap<String, UserAccount>>,
+    /// Optional debounced, off-executor persistence handle.
+    ///
+    /// Set once during application startup via [`Self::set_persistence`]. When
+    /// present, mutating handlers call [`Self::request_save`] (non-blocking)
+    /// instead of writing to disk synchronously on the async executor.
+    persistence: OnceLock<PersistenceHandle>,
 }
 
 impl UserStorage {
@@ -296,6 +305,7 @@ impl UserStorage {
     pub fn new() -> Self {
         Self {
             users: RwLock::new(HashMap::with_capacity(MAX_USERS)),
+            persistence: OnceLock::new(),
         }
     }
 
@@ -303,7 +313,42 @@ impl UserStorage {
     pub fn with_file(_file_path: impl Into<String>) -> Self {
         Self {
             users: RwLock::new(HashMap::with_capacity(MAX_USERS)),
+            persistence: OnceLock::new(),
         }
+    }
+
+    /// Attach a debounced persistence handle.
+    ///
+    /// Idempotent: only the first call installs a handle. Subsequent calls are
+    /// ignored (a warning is logged) since the handle is expected to be wired
+    /// exactly once at startup.
+    pub fn set_persistence(&self, handle: PersistenceHandle) {
+        if self.persistence.set(handle).is_err() {
+            tracing::warn!("UserStorage persistence handle already set; ignoring");
+        }
+    }
+
+    /// Request a non-blocking, debounced save of the current user set.
+    ///
+    /// No-op (with a debug log) when no persistence handle is configured, which
+    /// is the case in unit tests and when persistence is disabled.
+    pub fn request_save(&self) {
+        match self.persistence.get() {
+            Some(handle) => handle.request_save(),
+            None => tracing::debug!("No user persistence handle configured; skipping save request"),
+        }
+    }
+
+    /// Serialize the current users to TOML bytes for atomic persistence.
+    ///
+    /// Used by the persistence service's snapshot closure. Runs under the read
+    /// lock via [`Self::list_users`].
+    pub fn to_toml_bytes(&self) -> Result<Vec<u8>, UserError> {
+        let users_file = UsersFile {
+            users: self.list_users(),
+        };
+        let content = toml::to_string_pretty(&users_file)?;
+        Ok(content.into_bytes())
     }
 
     /// Get the number of users.

@@ -4,7 +4,7 @@
 
 use std::sync::Arc;
 
-use crate::config::{ConfigRuntime, ProfileStorage};
+use crate::config::{ConfigRuntime, PersistenceHandle, ProfileStorage};
 use crate::onvif::dispatcher::ServiceHandler;
 use crate::onvif::error::{OnvifError, OnvifResult};
 use crate::onvif::types::media::*;
@@ -55,12 +55,28 @@ impl MediaService {
         profile_storage: Arc<ProfileStorage>,
         platform: Option<Arc<dyn Platform>>,
     ) -> Self {
+        Self::with_storage_and_persistence(config, profile_storage, platform, None)
+    }
+
+    /// Create a Media Service with profile storage, optional platform, and an
+    /// optional debounced persistence handle for off-executor profile saves.
+    pub fn with_storage_and_persistence(
+        config: Arc<ConfigRuntime>,
+        profile_storage: Arc<ProfileStorage>,
+        platform: Option<Arc<dyn Platform>>,
+        persistence: Option<PersistenceHandle>,
+    ) -> Self {
         let max_res = platform
             .as_ref()
             .and_then(|p| p.max_sensor_resolution().ok())
             .unwrap_or(Resolution::new(1920, 1080));
 
-        let pm = ProfileManager::with_storage(Arc::clone(&config), profile_storage, max_res);
+        let pm = ProfileManager::with_storage_and_persistence(
+            Arc::clone(&config),
+            profile_storage,
+            max_res,
+            persistence,
+        );
 
         Self {
             profile_manager: Arc::new(pm),

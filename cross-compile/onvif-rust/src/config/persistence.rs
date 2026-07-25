@@ -1,16 +1,19 @@
 //! Async configuration persistence service.
 //!
-//! This module provides a background service that handles configuration saves
-//! with debouncing to avoid excessive disk writes. Changes are queued and
-//! saved after a configurable delay, allowing multiple rapid changes to be
-//! batched into a single write.
+//! This module provides a generic background service that handles debounced,
+//! off-executor persistence for any shared state that can be snapshotted under
+//! a lock and serialized to a file. Changes are queued via a non-blocking
+//! [`PersistenceHandle::request_save`] and flushed after a configurable delay,
+//! allowing multiple rapid changes to be batched into a single write.
 //!
 //! # Features
 //!
-//! - Configurable debounce delay via `[server] config_save_delay_ms`
+//! - Configurable debounce delay
 //! - Graceful shutdown with pending save flush
-//! - Non-blocking save requests from handlers
-//! - Integration with application shutdown coordinator
+//! - Non-blocking save requests from async handlers
+//! - Snapshots state under the caller's lock, then performs the blocking file
+//!   write (temp + `fsync` + rename) on a `spawn_blocking` thread so the async
+//!   executor is never blocked on SD-card fsync latency
 //!
 //! # Example
 //!
@@ -34,12 +37,14 @@
 //! handle.request_save();
 //! ```
 
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
 use tokio::sync::{broadcast, mpsc};
 use tokio::time::{Instant, sleep};
 
+use super::file_ops::atomic_write;
 use super::runtime::ConfigRuntime;
 use super::storage::ConfigStorage;
 
@@ -49,18 +54,36 @@ pub const DEFAULT_SAVE_DELAY_MS: u64 = 500;
 /// Capacity of the save request channel.
 const CHANNEL_CAPACITY: usize = 16;
 
-/// Handle for requesting configuration saves.
+/// A serialized snapshot ready to be flushed to disk atomically.
+///
+/// Produced by a [`SnapshotFn`] while holding the source state's lock, then
+/// written on a blocking thread without holding any lock.
+pub struct PendingWrite {
+    /// Target file path.
+    pub path: PathBuf,
+    /// Serialized bytes to write.
+    pub bytes: Vec<u8>,
+    /// Optional Unix file permissions (e.g. `Some(0o600)` for secrets).
+    pub mode: Option<u32>,
+}
+
+/// Snapshot closure: acquires the source lock, serializes state, and returns
+/// the bytes to persist. Returns `None` when there is nothing to persist or
+/// serialization fails (the closure is responsible for logging in that case).
+pub type SnapshotFn = Box<dyn Fn() -> Option<PendingWrite> + Send + Sync>;
+
+/// Handle for requesting persistence flushes.
 ///
 /// This handle can be cloned and shared across multiple tasks/handlers.
 /// Calling `request_save()` is non-blocking.
 #[derive(Clone)]
-pub struct ConfigPersistenceHandle {
+pub struct PersistenceHandle {
     /// Sender for save requests.
     save_tx: mpsc::Sender<()>,
 }
 
-impl ConfigPersistenceHandle {
-    /// Request a configuration save.
+impl PersistenceHandle {
+    /// Request a save.
     ///
     /// This is a non-blocking operation. If the channel is full, the request
     /// is dropped (a save is already pending anyway).
@@ -70,100 +93,83 @@ impl ConfigPersistenceHandle {
     }
 }
 
-/// Configuration persistence service.
+/// Generic debounced, off-executor persistence service.
 ///
-/// Runs in the background and handles save requests with debouncing.
-pub struct ConfigPersistenceService {
-    /// Runtime configuration to save.
-    runtime: Arc<ConfigRuntime>,
-    /// Storage backend.
-    storage: ConfigStorage,
+/// Runs in the background and handles save requests with debouncing. When the
+/// debounce timer fires (or on shutdown), it invokes the snapshot closure to
+/// serialize state under its lock, then performs the atomic file write on a
+/// `spawn_blocking` thread.
+pub struct PersistenceService {
+    /// Human-readable name for logging (e.g. "config", "profiles", "users").
+    name: &'static str,
     /// Debounce delay.
     save_delay: Duration,
     /// Receiver for save requests.
     save_rx: mpsc::Receiver<()>,
+    /// Snapshot + serialize closure.
+    snapshot: SnapshotFn,
 }
 
-impl ConfigPersistenceService {
+impl PersistenceService {
     /// Create a new persistence service and handle.
-    ///
-    /// # Arguments
-    ///
-    /// * `runtime` - The configuration runtime to persist
-    /// * `storage` - The storage backend for saving
-    /// * `save_delay_ms` - Debounce delay in milliseconds
-    ///
-    /// # Returns
-    ///
-    /// A tuple of (service, handle). The service should be spawned as a task,
-    /// and the handle is used to request saves.
     pub fn new(
-        runtime: Arc<ConfigRuntime>,
-        storage: ConfigStorage,
+        name: &'static str,
         save_delay_ms: u64,
-    ) -> (Self, ConfigPersistenceHandle) {
+        snapshot: SnapshotFn,
+    ) -> (Self, PersistenceHandle) {
         let (save_tx, save_rx) = mpsc::channel(CHANNEL_CAPACITY);
-
         let service = Self {
-            runtime,
-            storage,
+            name,
             save_delay: Duration::from_millis(save_delay_ms),
             save_rx,
+            snapshot,
         };
-
-        let handle = ConfigPersistenceHandle { save_tx };
-
-        (service, handle)
+        (service, PersistenceHandle { save_tx })
     }
 
-    /// Run the persistence service.
+    /// Run the persistence service until shutdown is signaled.
     ///
-    /// This method runs until shutdown is signaled. On shutdown, any pending
-    /// save is flushed with a short timeout.
-    ///
-    /// # Arguments
-    ///
-    /// * `shutdown_rx` - Receiver for shutdown signal
+    /// On shutdown, any pending save is flushed.
     pub async fn run(mut self, mut shutdown_rx: broadcast::Receiver<()>) {
-        tracing::info!("Config persistence service started");
+        tracing::info!("{} persistence service started", self.name);
 
         let mut pending_save = false;
         let mut last_request: Option<Instant> = None;
 
         loop {
             tokio::select! {
-                // Handle save requests
                 result = self.save_rx.recv() => {
                     match result {
                         Some(()) => {
                             pending_save = true;
                             last_request = Some(Instant::now());
-                            tracing::debug!("Config save requested, debouncing for {:?}", self.save_delay);
+                            tracing::debug!(
+                                "{} save requested, debouncing for {:?}",
+                                self.name,
+                                self.save_delay
+                            );
                         }
                         None => {
-                            // All senders dropped, exit
-                            tracing::debug!("All save handles dropped, shutting down");
+                            tracing::debug!("All {} save handles dropped, shutting down", self.name);
                             break;
                         }
                     }
                 }
 
-                // Handle shutdown signal
                 _ = shutdown_rx.recv() => {
-                    tracing::info!("Config persistence service received shutdown signal");
+                    tracing::info!("{} persistence service received shutdown signal", self.name);
                     if pending_save {
-                        tracing::info!("Flushing pending config save before shutdown");
-                        self.do_save();
+                        tracing::info!("Flushing pending {} save before shutdown", self.name);
+                        self.do_save().await;
                     }
                     break;
                 }
 
-                // Handle debounce timer
                 _ = sleep(self.save_delay), if pending_save => {
                     if let Some(last) = last_request
                         && last.elapsed() >= self.save_delay
                     {
-                        self.do_save();
+                        self.do_save().await;
                         pending_save = false;
                         last_request = None;
                     }
@@ -171,27 +177,91 @@ impl ConfigPersistenceService {
             }
         }
 
-        tracing::info!("Config persistence service stopped");
+        tracing::info!("{} persistence service stopped", self.name);
     }
 
-    /// Perform the actual save operation.
-    fn do_save(&self) {
-        tracing::debug!("Saving configuration to {}", self.storage.path());
+    /// Snapshot state (under lock) and perform the atomic write on a blocking thread.
+    async fn do_save(&self) {
+        let Some(pending) = (self.snapshot)() else {
+            return;
+        };
 
-        // Get a snapshot of the current config
-        let config = self.runtime.snapshot();
+        let name = self.name;
+        let path_for_log = pending.path.clone();
+        let result = tokio::task::spawn_blocking(move || {
+            atomic_write(&pending.path, &pending.bytes, pending.mode)
+        })
+        .await;
 
-        match self.storage.save(&config) {
-            Ok(()) => {
-                tracing::info!(
-                    "Configuration saved successfully to {}",
-                    self.storage.path()
+        match result {
+            Ok(Ok(())) => {
+                tracing::info!("{} saved successfully to {}", name, path_for_log.display());
+            }
+            Ok(Err(e)) => {
+                tracing::error!(
+                    "Failed to save {} to {}: {}",
+                    name,
+                    path_for_log.display(),
+                    e
                 );
             }
             Err(e) => {
-                tracing::error!("Failed to save configuration: {}", e);
+                tracing::error!("{} save task panicked: {}", name, e);
             }
         }
+    }
+}
+
+/// Handle for requesting configuration saves.
+///
+/// Alias of the generic [`PersistenceHandle`], kept as a distinct name for the
+/// configuration wiring in [`crate::app`].
+pub type ConfigPersistenceHandle = PersistenceHandle;
+
+/// Configuration persistence service.
+///
+/// Thin wrapper around [`PersistenceService`] that snapshots [`ConfigRuntime`]
+/// and serializes it to the [`ConfigStorage`] path.
+pub struct ConfigPersistenceService {
+    inner: PersistenceService,
+}
+
+impl ConfigPersistenceService {
+    /// Create a new configuration persistence service and handle.
+    ///
+    /// # Arguments
+    ///
+    /// * `runtime` - The configuration runtime to persist
+    /// * `storage` - The storage backend (used for its file path)
+    /// * `save_delay_ms` - Debounce delay in milliseconds
+    pub fn new(
+        runtime: Arc<ConfigRuntime>,
+        storage: ConfigStorage,
+        save_delay_ms: u64,
+    ) -> (Self, ConfigPersistenceHandle) {
+        let path = PathBuf::from(storage.path());
+        let snapshot: SnapshotFn = Box::new(move || {
+            let config = runtime.snapshot();
+            match toml::to_string_pretty(&config) {
+                Ok(content) => Some(PendingWrite {
+                    path: path.clone(),
+                    bytes: content.into_bytes(),
+                    mode: None,
+                }),
+                Err(e) => {
+                    tracing::error!("Failed to serialize configuration: {}", e);
+                    None
+                }
+            }
+        });
+
+        let (inner, handle) = PersistenceService::new("config", save_delay_ms, snapshot);
+        (Self { inner }, handle)
+    }
+
+    /// Run the persistence service until shutdown is signaled.
+    pub async fn run(self, shutdown_rx: broadcast::Receiver<()>) {
+        self.inner.run(shutdown_rx).await;
     }
 }
 
@@ -240,7 +310,7 @@ mod tests {
         handle.request_save();
 
         // Wait for debounce
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        tokio::time::sleep(Duration::from_millis(150)).await;
 
         // Shutdown
         let _ = shutdown_tx.send(());
