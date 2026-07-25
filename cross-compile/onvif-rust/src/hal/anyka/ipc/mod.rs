@@ -914,13 +914,24 @@ impl AnykaIpc {
             .map_err(|_| PlatformError::HardwareFailure("IPC owner dropped reply".to_string()))?
     }
 
-    /// Context-adaptive synchronous request used by the sync HAL trait methods.
+    /// Context-adaptive synchronous request for the remaining **sync-only** callers.
     ///
-    /// - On a tokio runtime (worker or the multi-thread `block_on` driver) it drives
-    ///   [`Self::request_async`] under `block_in_place`, so the executor is never stalled
-    ///   while awaiting the owner thread.
-    /// - On a plain OS thread (no runtime context, e.g. `venc-read`) it uses
+    /// This is intended for two cases and *only* these two cases:
+    /// - **Plain OS threads** with no tokio runtime context (e.g. the `venc-read` frame
+    ///   thread issuing IDR/venc commands, shutdown workers) → routes to
     ///   [`Self::request_blocking`].
+    /// - The **one-time init `block_on` driver** thread (the multi-thread runtime's
+    ///   `block_on` entry, which is a runtime context but not a task being polled) →
+    ///   drives [`Self::request_async`] under `block_in_place`.
+    ///
+    /// # WARNING: must not be called from an async task / handler
+    /// `block_in_place` does **not** free the calling worker — it only allows tokio to
+    /// spawn an *additional* worker. The calling worker stays parked for the full RPC
+    /// (up to [`IPC_PUBLIC_TIMEOUT`]). Async handlers (imaging/settings and any other
+    /// ONVIF control RPC running on a tokio worker) MUST `.await` [`Self::request_async`]
+    /// directly instead of calling this method. The imaging HAL path was migrated to
+    /// `request_async` in Phase 2 for exactly this reason. Do not reintroduce
+    /// `send_request` on an async-handler path.
     ///
     /// # Panics
     /// `block_in_place` panics on a `current_thread` runtime. Production uses a
@@ -1553,26 +1564,28 @@ mod tests {
     use std::time::Duration;
 
     /// A simple success command round-trips correctly: set_brightness returns AK_SUCCESS.
-    #[test]
-    fn test_ipc_connect_and_simple_command_returns_success() {
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_ipc_connect_and_simple_command_returns_success() {
         let daemon = FakeDaemon::start(|_cmd_id, _req| (AK_SUCCESS_I32, vec![]));
         let ipc = AnykaIpc::new_with_path(&daemon.socket_path).unwrap();
 
         // set_brightness is part of ImagingHalTrait; accessible from within the crate.
         let result =
-            <AnykaIpc as crate::hal::common::imaging::ImagingHalTrait>::set_brightness(&ipc, 50);
+            <AnykaIpc as crate::hal::common::imaging::ImagingHalTrait>::set_brightness(&ipc, 50)
+                .await;
 
         assert_eq!(result, AK_SUCCESS_I32, "expected AK_SUCCESS from daemon");
     }
 
     /// When the daemon returns status=-1 (AK_FAILED), the trait method propagates it.
-    #[test]
-    fn test_ipc_error_response_propagates_ak_failed() {
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_ipc_error_response_propagates_ak_failed() {
         let daemon = FakeDaemon::start(|_cmd_id, _req| (AK_FAILED_I32, vec![]));
         let ipc = AnykaIpc::new_with_path(&daemon.socket_path).unwrap();
 
         let result =
-            <AnykaIpc as crate::hal::common::imaging::ImagingHalTrait>::set_brightness(&ipc, 50);
+            <AnykaIpc as crate::hal::common::imaging::ImagingHalTrait>::set_brightness(&ipc, 50)
+                .await;
 
         assert_eq!(
             result, AK_FAILED_I32,
@@ -1605,16 +1618,18 @@ mod tests {
     }
 
     /// Three sequential commands over the same connection all succeed.
-    #[test]
-    fn test_ipc_multiple_requests_same_connection_all_succeed() {
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_ipc_multiple_requests_same_connection_all_succeed() {
         let daemon = FakeDaemon::start(|_cmd_id, _req| (AK_SUCCESS_I32, vec![]));
         let ipc = AnykaIpc::new_with_path(&daemon.socket_path).unwrap();
 
         for i in 0..3 {
-            let result = <AnykaIpc as crate::hal::common::imaging::ImagingHalTrait>::set_brightness(
-                &ipc,
-                50 + i,
-            );
+            let result =
+                <AnykaIpc as crate::hal::common::imaging::ImagingHalTrait>::set_brightness(
+                    &ipc,
+                    50 + i,
+                )
+                .await;
             assert_eq!(result, AK_SUCCESS_I32, "request {} should succeed", i);
         }
     }
@@ -2084,8 +2099,8 @@ mod tests {
     /// Test that IPC control socket times out when the daemon hangs (stops responding).
     /// This verifies that the IPC_CTRL_TIMEOUT (10 seconds) is properly enforced and
     /// returns PlatformError::Timeout rather than hanging forever or returning HardwareFailure.
-    #[test]
-    fn test_ipc_ctrl_socket_times_out_on_hung_daemon() {
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_ipc_ctrl_socket_times_out_on_hung_daemon() {
         use std::time::{Duration, Instant};
 
         // Create a fake daemon that delays response longer than the timeout (10 seconds)
@@ -2098,7 +2113,8 @@ mod tests {
         // Time the request - it should timeout
         let start = Instant::now();
         let result =
-            <AnykaIpc as crate::hal::common::imaging::ImagingHalTrait>::set_brightness(&ipc, 50);
+            <AnykaIpc as crate::hal::common::imaging::ImagingHalTrait>::set_brightness(&ipc, 50)
+                .await;
         let elapsed = start.elapsed();
 
         // Verify we got a timeout error (AK_FAILED_I32 = -1 is returned on error from the trait,
@@ -2130,8 +2146,8 @@ mod tests {
 
     /// Test that IPC control socket times out within a reasonable window (< 15 seconds)
     /// when the daemon hangs. This is a more explicit timing verification.
-    #[test]
-    fn test_ipc_ctrl_socket_timeout_fires_within_15_seconds() {
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_ipc_ctrl_socket_timeout_fires_within_15_seconds() {
         // Create a fake daemon that delays response for 20 seconds (longer than timeout + margin)
         let delay = Duration::from_secs(20);
         let daemon = FakeDaemon::start_with_delay(delay, |_cmd_id, _req| (AK_SUCCESS_I32, vec![]));
@@ -2140,7 +2156,8 @@ mod tests {
 
         let start = Instant::now();
         let _result =
-            <AnykaIpc as crate::hal::common::imaging::ImagingHalTrait>::set_brightness(&ipc, 50);
+            <AnykaIpc as crate::hal::common::imaging::ImagingHalTrait>::set_brightness(&ipc, 50)
+                .await;
         let elapsed = start.elapsed();
 
         // The timeout should fire well within 15 seconds (IPC_CTRL_TIMEOUT is 10 seconds)
