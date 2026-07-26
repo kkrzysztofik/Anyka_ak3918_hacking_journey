@@ -259,3 +259,8 @@ cross-compile/ONVIF-Device-Manager/**/*
 
 # Snyk Security Extension - AI Rules (auto-generated)
 .github/instructions/snyk_rules.instructions.md
+
+# Built WebUI assets, produced by cross-compile/www `npm run build`.
+# The deploy staging copy is generated, not source; the ONVIF binary next to it
+# is tracked deliberately, this directory is not.
+SD_card_contents/anyka_hack/onvif/www/
