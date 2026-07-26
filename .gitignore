@@ -7,6 +7,8 @@
 # -----------------------------------------------------------------------------
 toolchain/arm-anykav200-crosstool/**/*
 toolchain/arm-anykav200-crosstool-ng/**/*
+toolchain/cargo-home/
+.cargo-targets/
 toolchain/aarch64-unknown-linux-gnu-toolchain/**/*
 toolchain/go-custom-armv5/**/*
 toolchain/go-source/**/*

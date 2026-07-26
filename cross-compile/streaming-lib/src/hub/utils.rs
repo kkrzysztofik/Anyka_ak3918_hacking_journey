@@ -126,7 +126,7 @@ impl fmt::Display for Uuid {
             .iter()
             .take(10 + self.random_count as usize)
             .collect();
-        write!(f, "{}", &val)
+        write!(f, "{val}")
     }
 }
 
