@@ -24,7 +24,7 @@ import {
   Users,
   Wrench,
 } from 'lucide-react';
-import { NavLink, Outlet, useLocation } from 'react-router-dom';
+import { NavLink, Outlet, useLocation } from 'react-router';
 
 import { AboutDialog } from '@/components/AboutDialog';
 import { ChangePasswordDialog } from '@/components/ChangePasswordDialog';
