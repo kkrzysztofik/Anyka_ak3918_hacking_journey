@@ -15,6 +15,8 @@
 //! All functions return `Result<T, PlatformError>`, converting SDK error codes
 //! (`AK_SUCCESS`/`AK_FAILED`) into appropriate `PlatformError` variants.
 
+use async_trait::async_trait;
+
 use crate::platform::PlatformError;
 use crate::platform::PlatformResult;
 
@@ -34,15 +36,20 @@ const ONVIF_MIN: f32 = 0.0;
 const ONVIF_MAX: f32 = 100.0;
 
 /// Internal trait for abstracting imaging FFI calls to enable mocking in tests.
+///
+/// Methods are `async` so that IPC-backed implementations (e.g. `AnykaIpc`) can
+/// `.await` the control-socket owner thread instead of parking a tokio worker on a
+/// blocking RPC. Non-blocking implementations (stubs) simply return immediately.
 #[cfg_attr(test, mockall::automock)]
+#[async_trait]
 #[allow(dead_code)] // Some methods only used on ARM targets
 pub(crate) trait ImagingHalTrait: Send + Sync {
-    fn set_brightness(&self, value: i32) -> i32;
-    fn set_contrast(&self, value: i32) -> i32;
-    fn set_saturation(&self, value: i32) -> i32;
-    fn set_sharpness(&self, value: i32) -> i32;
-    fn set_ir_filter(&self, enabled: bool) -> i32;
-    fn set_wdr(&self, enabled: bool) -> i32;
+    async fn set_brightness(&self, value: i32) -> i32;
+    async fn set_contrast(&self, value: i32) -> i32;
+    async fn set_saturation(&self, value: i32) -> i32;
+    async fn set_sharpness(&self, value: i32) -> i32;
+    async fn set_ir_filter(&self, enabled: bool) -> i32;
+    async fn set_wdr(&self, enabled: bool) -> i32;
 }
 
 /// Validate ONVIF imaging parameter range (0.0-100.0).
@@ -82,49 +89,64 @@ pub(crate) fn onvif_to_sdk_value(onvif_value: f32, sdk_max: i32) -> i32 {
 }
 
 /// Internal helper that takes FFI trait for testability.
-pub(crate) fn imaging_set_brightness(value: f32, ffi: &dyn ImagingHalTrait) -> PlatformResult<()> {
+pub(crate) async fn imaging_set_brightness(
+    value: f32,
+    ffi: &dyn ImagingHalTrait,
+) -> PlatformResult<()> {
     validate_onvif_range(value, "brightness")?;
     let sdk_value = onvif_to_sdk_value(value, SDK_MAX_VALUE);
-    let ret = ffi.set_brightness(sdk_value);
+    let ret = ffi.set_brightness(sdk_value).await;
     check_result(ret, "imaging_set_brightness")
 }
 
 /// Internal helper that takes FFI trait for testability.
-pub(crate) fn imaging_set_contrast(value: f32, ffi: &dyn ImagingHalTrait) -> PlatformResult<()> {
+pub(crate) async fn imaging_set_contrast(
+    value: f32,
+    ffi: &dyn ImagingHalTrait,
+) -> PlatformResult<()> {
     validate_onvif_range(value, "contrast")?;
     let sdk_value = onvif_to_sdk_value(value, SDK_MAX_VALUE);
-    let ret = ffi.set_contrast(sdk_value);
+    let ret = ffi.set_contrast(sdk_value).await;
     check_result(ret, "imaging_set_contrast")
 }
 
 /// Internal helper that takes FFI trait for testability.
-pub(crate) fn imaging_set_saturation(value: f32, ffi: &dyn ImagingHalTrait) -> PlatformResult<()> {
+pub(crate) async fn imaging_set_saturation(
+    value: f32,
+    ffi: &dyn ImagingHalTrait,
+) -> PlatformResult<()> {
     validate_onvif_range(value, "saturation")?;
     let sdk_value = onvif_to_sdk_value(value, SDK_MAX_VALUE);
-    let ret = ffi.set_saturation(sdk_value);
+    let ret = ffi.set_saturation(sdk_value).await;
     check_result(ret, "imaging_set_saturation")
 }
 
 /// Internal helper that takes FFI trait for testability.
-pub(crate) fn imaging_set_sharpness(value: f32, ffi: &dyn ImagingHalTrait) -> PlatformResult<()> {
+pub(crate) async fn imaging_set_sharpness(
+    value: f32,
+    ffi: &dyn ImagingHalTrait,
+) -> PlatformResult<()> {
     validate_onvif_range(value, "sharpness")?;
     let sdk_value = onvif_to_sdk_value(value, SDK_MAX_VALUE);
-    let ret = ffi.set_sharpness(sdk_value);
+    let ret = ffi.set_sharpness(sdk_value).await;
     check_result(ret, "imaging_set_sharpness")
 }
 
 #[allow(dead_code)] // Called from platform layer on ARM
-pub(crate) fn imaging_set_ir_filter(
+pub(crate) async fn imaging_set_ir_filter(
     enabled: bool,
     ffi: &dyn ImagingHalTrait,
 ) -> PlatformResult<()> {
-    let ret = ffi.set_ir_filter(enabled);
+    let ret = ffi.set_ir_filter(enabled).await;
     check_result(ret, "imaging_set_ir_filter")
 }
 
 #[allow(dead_code)] // Called from platform layer on ARM
-pub(crate) fn imaging_set_wdr(enabled: bool, ffi: &dyn ImagingHalTrait) -> PlatformResult<()> {
-    let ret = ffi.set_wdr(enabled);
+pub(crate) async fn imaging_set_wdr(
+    enabled: bool,
+    ffi: &dyn ImagingHalTrait,
+) -> PlatformResult<()> {
+    let ret = ffi.set_wdr(enabled).await;
     check_result(ret, "imaging_set_wdr")
 }
 
@@ -165,8 +187,8 @@ mod tests {
         assert_eq!(onvif_to_sdk_value(50.0, 100), 50);
     }
 
-    #[test]
-    fn test_imaging_set_brightness_calls_ffi() {
+    #[tokio::test]
+    async fn test_imaging_set_brightness_calls_ffi() {
         let mut mock_ffi = MockImagingHalTrait::new();
 
         mock_ffi
@@ -175,16 +197,16 @@ mod tests {
             .times(1)
             .returning(|_| AK_SUCCESS_I32);
 
-        let result = imaging_set_brightness(50.0, &mock_ffi);
+        let result = imaging_set_brightness(50.0, &mock_ffi).await;
         assert!(result.is_ok());
     }
 
-    #[test]
-    fn test_imaging_set_brightness_validates_range() {
+    #[tokio::test]
+    async fn test_imaging_set_brightness_validates_range() {
         let mock_ffi = MockImagingHalTrait::new();
 
         // Should fail validation before calling FFI
-        let result = imaging_set_brightness(150.0, &mock_ffi);
+        let result = imaging_set_brightness(150.0, &mock_ffi).await;
         assert!(result.is_err());
         match result {
             Err(PlatformError::InvalidParameter(msg)) => {
@@ -194,8 +216,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_imaging_set_brightness_propagates_error() {
+    #[tokio::test]
+    async fn test_imaging_set_brightness_propagates_error() {
         let mut mock_ffi = MockImagingHalTrait::new();
 
         mock_ffi
@@ -203,7 +225,7 @@ mod tests {
             .times(1)
             .returning(|_| AK_FAILED_I32);
 
-        let result = imaging_set_brightness(50.0, &mock_ffi);
+        let result = imaging_set_brightness(50.0, &mock_ffi).await;
         assert!(result.is_err());
         match result {
             Err(PlatformError::HardwareFailure(msg)) => {
@@ -213,8 +235,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_imaging_set_contrast_calls_ffi() {
+    #[tokio::test]
+    async fn test_imaging_set_contrast_calls_ffi() {
         let mut mock_ffi = MockImagingHalTrait::new();
 
         mock_ffi
@@ -223,12 +245,12 @@ mod tests {
             .times(1)
             .returning(|_| AK_SUCCESS_I32);
 
-        let result = imaging_set_contrast(100.0, &mock_ffi);
+        let result = imaging_set_contrast(100.0, &mock_ffi).await;
         assert!(result.is_ok());
     }
 
-    #[test]
-    fn test_imaging_set_saturation_calls_ffi() {
+    #[tokio::test]
+    async fn test_imaging_set_saturation_calls_ffi() {
         let mut mock_ffi = MockImagingHalTrait::new();
 
         mock_ffi
@@ -237,12 +259,12 @@ mod tests {
             .times(1)
             .returning(|_| AK_SUCCESS_I32);
 
-        let result = imaging_set_saturation(0.0, &mock_ffi);
+        let result = imaging_set_saturation(0.0, &mock_ffi).await;
         assert!(result.is_ok());
     }
 
-    #[test]
-    fn test_imaging_set_sharpness_calls_ffi() {
+    #[tokio::test]
+    async fn test_imaging_set_sharpness_calls_ffi() {
         let mut mock_ffi = MockImagingHalTrait::new();
 
         mock_ffi
@@ -251,12 +273,12 @@ mod tests {
             .times(1)
             .returning(|_| AK_SUCCESS_I32);
 
-        let result = imaging_set_sharpness(25.0, &mock_ffi);
+        let result = imaging_set_sharpness(25.0, &mock_ffi).await;
         assert!(result.is_ok());
     }
 
-    #[test]
-    fn test_imaging_set_ir_filter_calls_ffi_enabled() {
+    #[tokio::test]
+    async fn test_imaging_set_ir_filter_calls_ffi_enabled() {
         let mut mock_ffi = MockImagingHalTrait::new();
 
         mock_ffi
@@ -265,12 +287,12 @@ mod tests {
             .times(1)
             .returning(|_| AK_SUCCESS_I32);
 
-        let result = imaging_set_ir_filter(true, &mock_ffi);
+        let result = imaging_set_ir_filter(true, &mock_ffi).await;
         assert!(result.is_ok());
     }
 
-    #[test]
-    fn test_imaging_set_ir_filter_calls_ffi_disabled() {
+    #[tokio::test]
+    async fn test_imaging_set_ir_filter_calls_ffi_disabled() {
         let mut mock_ffi = MockImagingHalTrait::new();
 
         mock_ffi
@@ -279,12 +301,12 @@ mod tests {
             .times(1)
             .returning(|_| AK_SUCCESS_I32);
 
-        let result = imaging_set_ir_filter(false, &mock_ffi);
+        let result = imaging_set_ir_filter(false, &mock_ffi).await;
         assert!(result.is_ok());
     }
 
-    #[test]
-    fn test_imaging_set_ir_filter_propagates_error() {
+    #[tokio::test]
+    async fn test_imaging_set_ir_filter_propagates_error() {
         let mut mock_ffi = MockImagingHalTrait::new();
 
         mock_ffi
@@ -292,7 +314,7 @@ mod tests {
             .times(1)
             .returning(|_| AK_FAILED_I32);
 
-        let result = imaging_set_ir_filter(true, &mock_ffi);
+        let result = imaging_set_ir_filter(true, &mock_ffi).await;
         assert!(result.is_err());
         match result {
             Err(PlatformError::HardwareFailure(msg)) => {
@@ -302,8 +324,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_imaging_set_wdr_calls_ffi_enabled() {
+    #[tokio::test]
+    async fn test_imaging_set_wdr_calls_ffi_enabled() {
         let mut mock_ffi = MockImagingHalTrait::new();
 
         mock_ffi
@@ -312,12 +334,12 @@ mod tests {
             .times(1)
             .returning(|_| AK_SUCCESS_I32);
 
-        let result = imaging_set_wdr(true, &mock_ffi);
+        let result = imaging_set_wdr(true, &mock_ffi).await;
         assert!(result.is_ok());
     }
 
-    #[test]
-    fn test_imaging_set_wdr_calls_ffi_disabled() {
+    #[tokio::test]
+    async fn test_imaging_set_wdr_calls_ffi_disabled() {
         let mut mock_ffi = MockImagingHalTrait::new();
 
         mock_ffi
@@ -326,12 +348,12 @@ mod tests {
             .times(1)
             .returning(|_| AK_SUCCESS_I32);
 
-        let result = imaging_set_wdr(false, &mock_ffi);
+        let result = imaging_set_wdr(false, &mock_ffi).await;
         assert!(result.is_ok());
     }
 
-    #[test]
-    fn test_imaging_set_wdr_propagates_error() {
+    #[tokio::test]
+    async fn test_imaging_set_wdr_propagates_error() {
         let mut mock_ffi = MockImagingHalTrait::new();
 
         mock_ffi
@@ -339,7 +361,7 @@ mod tests {
             .times(1)
             .returning(|_| AK_FAILED_I32);
 
-        let result = imaging_set_wdr(true, &mock_ffi);
+        let result = imaging_set_wdr(true, &mock_ffi).await;
         assert!(result.is_err());
         match result {
             Err(PlatformError::HardwareFailure(msg)) => {

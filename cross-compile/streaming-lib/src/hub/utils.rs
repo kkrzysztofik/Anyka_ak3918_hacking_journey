@@ -126,7 +126,7 @@ impl fmt::Display for Uuid {
             .iter()
             .take(10 + self.random_count as usize)
             .collect();
-        write!(f, "{}", &val)
+        write!(f, "{val}")
     }
 }
 
@@ -299,7 +299,7 @@ mod tests {
     #[test]
     fn test_uuid_clone() {
         let uuid = Uuid::new(RandomDigitCount::Four);
-        let cloned = uuid.clone();
+        let cloned = uuid;
         assert_eq!(uuid, cloned);
     }
 

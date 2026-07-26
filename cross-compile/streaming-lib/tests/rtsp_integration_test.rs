@@ -160,15 +160,8 @@ async fn test_rtp_timestamp_90khz_calculation() {
 #[tokio::test]
 async fn test_rtsp_codec_id_mapping() {
     let codec_id = RtspCodecId::H264;
-    let codec_name = streaming_lib::protocol::rtsp::rtsp_codec::RTSP_CODEC_ID_2_NAME
-        .get(&codec_id)
-        .unwrap();
-    assert_eq!(*codec_name, "h264");
-
-    let mapped_id = streaming_lib::protocol::rtsp::rtsp_codec::RTSP_CODEC_NAME_2_ID
-        .get("h264")
-        .unwrap();
-    assert_eq!(*mapped_id, RtspCodecId::H264);
+    assert_eq!(codec_id.name(), "h264");
+    assert_eq!(RtspCodecId::from_name("h264"), Some(RtspCodecId::H264));
 }
 
 /// Tests multiple simultaneous RTSP session tracking
@@ -197,8 +190,8 @@ async fn test_rtsp_multiple_sessions_tracking() {
     // Test removal on teardown
     sessions.remove(&session1_id);
     assert_eq!(sessions.len(), 1);
-    assert!(sessions.get(&session1_id).is_none());
-    assert!(sessions.get(&session2_id).is_some());
+    assert!(!sessions.contains_key(&session1_id));
+    assert!(sessions.contains_key(&session2_id));
 }
 
 /// Tests invalid RTSP transport header handling
@@ -292,6 +285,7 @@ async fn test_rtsp_session_state_transitions() {
     }
 
     let mut state = RtspSessionState::Init;
+    assert_eq!(state, RtspSessionState::Init);
 
     // DESCRIBE -> Described
     state = RtspSessionState::Described;
@@ -362,12 +356,7 @@ async fn test_rtsp_subscribe_type() {
 #[tokio::test]
 async fn test_rtsp_publish_type() {
     let pub_type = PublishType::RtspPush;
-    match pub_type {
-        PublishType::RtspPush => {
-            // Expected variant
-        }
-        _ => panic!("Expected RtspPush"),
-    }
+    assert!(matches!(pub_type, PublishType::RtspPush));
 }
 
 /// Tests frame data creation for video

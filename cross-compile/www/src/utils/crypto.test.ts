@@ -213,15 +213,13 @@ describe('crypto utilities', () => {
       const originalCrypto = globalThis.crypto;
 
       const mockCrypto = {
-        getRandomValues: (arr: Uint8Array) => originalCrypto.getRandomValues(arr),
+        getRandomValues: originalCrypto.getRandomValues.bind(originalCrypto),
       };
 
       vi.stubGlobal('crypto', mockCrypto);
 
       try {
-        await expect(encrypt('test password')).rejects.toThrow(
-          'Credential storage requires HTTPS',
-        );
+        await expect(encrypt('test password')).rejects.toThrow('Credential storage requires HTTPS');
       } finally {
         vi.unstubAllGlobals();
       }
@@ -231,7 +229,7 @@ describe('crypto utilities', () => {
       const originalCrypto = globalThis.crypto;
 
       const mockCrypto = {
-        getRandomValues: (arr: Uint8Array) => originalCrypto.getRandomValues(arr),
+        getRandomValues: originalCrypto.getRandomValues.bind(originalCrypto),
       };
 
       vi.stubGlobal('crypto', mockCrypto);
@@ -242,9 +240,7 @@ describe('crypto utilities', () => {
           iv: btoa('fakeiv'),
           method: 'aes-gcm',
         };
-        await expect(decrypt(fakeEncrypted)).rejects.toThrow(
-          'Credential storage requires HTTPS',
-        );
+        await expect(decrypt(fakeEncrypted)).rejects.toThrow('Credential storage requires HTTPS');
       } finally {
         vi.unstubAllGlobals();
       }

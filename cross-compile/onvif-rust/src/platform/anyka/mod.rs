@@ -13,6 +13,7 @@ pub mod context;
 pub mod imaging;
 pub mod lifecycle;
 pub mod network_info;
+pub mod ptz_actor;
 pub mod ptz_control;
 mod video_encoder;
 mod video_input;
@@ -170,6 +171,10 @@ impl Platform for AnykaPlatform {
 
     fn video_encoder(&self) -> Arc<dyn VideoEncoder> {
         self.video_encoder.clone()
+    }
+
+    fn stream_frame_age_ms(&self) -> Option<u64> {
+        self.video_encoder.stream_frame_age_ms()
     }
 
     fn audio_input(&self) -> Arc<dyn AudioInput> {
@@ -392,15 +397,6 @@ impl Platform for AnykaPlatform {
                 "Sensor resolution not available - platform not initialized".to_string(),
             )
         })
-    }
-
-    fn register_frame_callback(
-        &self,
-        callback: Arc<dyn crate::platform::frame::FrameCallback>,
-    ) -> PlatformResult<()> {
-        let _id = self.video_encoder.register_frame_callback(callback);
-        tracing::info!("Frame callback registered (id={})", _id);
-        Ok(())
     }
 
     fn register_owned_frame_callback(

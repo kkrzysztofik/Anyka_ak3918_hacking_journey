@@ -1,6 +1,6 @@
 //! Live streaming infrastructure for RTSP and HTTP-FLV delivery.
 //!
-//! This module bridges the platform's frame delivery (`FrameCallback`) to
+//! This module bridges the platform's frame delivery (`OwnedFrameCallback`) to
 //! `streaming-lib`'s `StreamsHub`, enabling live RTSP and HTTP-FLV streaming
 //! for both main and sub video channels.
 //!
@@ -9,10 +9,10 @@
 //! ```text
 //! Anyka SDK encoder callbacks
 //!     ↓
-//! Platform::register_frame_callback()
+//! Platform::register_owned_frame_callback()
 //!     ↓
-//! StreamingBridge::on_frame(Frame)
-//!     ↓ copies data into BytesMut, routes by StreamId
+//! StreamingBridge::on_owned_frame(OwnedFrame)
+//!     ↓ moves the BytesMut, routes by StreamId
 //!     ├── main_tx → fanout → RTSP channel (main)  → StreamsHub → RTSP server
 //!     │                    → HTTP-FLV channel (main) → StreamsHub → HTTP-FLV server
 //!     └── sub_tx  → fanout → RTSP channel (sub)   → StreamsHub → RTSP server

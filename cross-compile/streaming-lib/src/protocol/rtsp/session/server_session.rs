@@ -2,6 +2,7 @@ use crate::config::StreamingConfig;
 use crate::protocol::rtsp::global_trait::Marshal;
 use crate::protocol::rtsp::global_trait::Unmarshal;
 use crate::protocol::rtsp::rtsp_codec;
+use bytes::{BufMut, BytesMut};
 use chrono::Utc;
 
 use crate::protocol::rtsp::rtp::define::ANNEXB_NALU_START_CODE;
@@ -19,7 +20,6 @@ use crate::protocol::rtsp::rtsp_range::RtspRange;
 
 use crate::protocol::rtsp::sdp::fmtp::Fmtp;
 
-use crate::protocol::rtsp::rtsp_channel::RtpChannel;
 use crate::protocol::rtsp::rtsp_codec::RtspCodecInfo;
 use crate::protocol::rtsp::rtsp_track::RtspTrack;
 use crate::protocol::rtsp::rtsp_track::TrackType;
@@ -28,11 +28,10 @@ use crate::protocol::rtsp::rtsp_transport::RtspTransport;
 
 use crate::io::bytes_reader::BytesReader;
 use crate::io::bytes_writer::AsyncBytesWriter;
-use byteorder::BigEndian;
-use bytes::BytesMut;
 
 use super::errors::SessionError;
 use super::errors::SessionErrorValue;
+use super::rtp_counters::{InterleavedBinaryData, RtpCountersHandle, RtpTrackCounters};
 use crate::hub::define::DataSender;
 use crate::hub::define::MediaInfo;
 use crate::hub::define::VideoCodecType;
@@ -41,7 +40,7 @@ use crate::io::bytes_writer::BytesWriter;
 use http::StatusCode;
 use tokio::sync::oneshot;
 
-use crate::protocol::rtsp::rtp::errors::UnPackerError;
+use crate::protocol::rtsp::rtp::errors::{PackerError, PackerErrorValue, UnPackerError};
 use crate::protocol::rtsp::rtp::utils::OnRtpPacketFn;
 use crate::protocol::rtsp::sdp::Sdp;
 
@@ -50,16 +49,15 @@ use super::define::rtsp_method_name;
 use crate::io::TNetIO;
 use crate::io::{TcpReadIO, TcpWriteIO};
 use async_trait::async_trait;
-use portable_atomic::AtomicU64;
 use tokio::time::{Duration, timeout};
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::{
-    Arc, OnceLock,
-    atomic::{AtomicBool, AtomicU32, Ordering},
+    Arc,
+    atomic::{AtomicBool, Ordering},
 };
-use std::time::{Instant, SystemTime, UNIX_EPOCH};
+use std::time::Instant;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
@@ -76,1076 +74,23 @@ use crate::hub::{
     utils::{RandomDigitCount, Uuid},
 };
 use tokio::net::TcpStream;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, Notify};
 use tracing::{debug, error, info, warn};
 
-fn now_millis() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as u64
-}
+pub use super::playback::LagRecoveryMode;
+use super::playback::{PlaybackLatencyPolicy, run_playback_loop};
 
-fn monotonic_millis() -> u64 {
-    static START: OnceLock<Instant> = OnceLock::new();
-    START.get_or_init(Instant::now).elapsed().as_millis() as u64
-}
-
-/// Lightweight per-track RTP counters for logging.
-///
-/// These use atomics so they can be safely updated from async contexts
-/// without introducing additional locking on the hot path.
-struct RtpTrackCounters {
-    packet_count: AtomicU64,
-    byte_count: AtomicU64,
-    first_send_ms: AtomicU64,
-    last_send_ms: AtomicU64,
-    last_seq: AtomicU32,
-    last_timestamp: AtomicU32,
-}
-
-const RTP_TIMESTAMP_WRAP_THRESHOLD: u32 = 0x8000_0000;
 const SESSION_ID_RANDOM_DIGITS: RandomDigitCount = RandomDigitCount::Four;
-const DEFAULT_MAX_FRAME_AGE_MS: u32 = 1500;
-const LAG_RECOVERY_THRESHOLD_MS: u32 = 1000;
-const LAG_RECOVERY_SUSTAINED_FRAMES: u32 = 8;
-const SOURCE_TIMESTAMP_RESET_THRESHOLD_MS: u32 = 10_000;
 const DEFAULT_PLAY_READY_TIMEOUT_MS: u64 = 1500;
-const RTP_SEND_SLOW_WARN_MS: u128 = 25;
-const PACER_SLEEP_DIAGNOSTIC_MIN_MS: u64 = 20;
 
 /// RFC 2326 §12.36 — Server header value.
 const SERVER_HEADER: &str = "streaming-lib/0.1";
 
-/// Lag recovery mode for handling playback delays
-///
-/// This enum controls how the server handles situations where the client
-/// falls behind in playback.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum LagRecoveryMode {
-    /// Disabled - no recovery, just deliver frames as they arrive
-    Disabled,
-    /// Latest IDR - skip to latest keyframe when lag is detected
-    LatestIdr,
-}
-
-impl LagRecoveryMode {
-    /// Create a LagRecoveryMode from a string value.
-    ///
-    /// - "off", "none", "disabled" → Disabled
-    /// - Anything else → LatestIdr
-    pub fn from_str_value(s: &str) -> Self {
-        match s.trim().to_ascii_lowercase().as_str() {
-            "off" | "none" | "disabled" => Self::Disabled,
-            _ => Self::LatestIdr,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-struct PlaybackLatencyPolicy {
-    max_frame_age_ms: u32,
-    lag_recovery_mode: LagRecoveryMode,
-    lag_recovery_threshold_ms: u32,
-    sustained_lag_frames: u32,
-}
-
-impl PlaybackLatencyPolicy {
-    /// Create a PlaybackLatencyPolicy from a StreamingConfig.
-    ///
-    /// Uses `config.max_frame_age_ms` with the same `> 0` guard,
-    /// falling back to `DEFAULT_MAX_FRAME_AGE_MS` if the value is 0.
-    /// Uses `config.lag_recovery_mode` directly.
-    /// Keeps `lag_recovery_threshold_ms` and `sustained_lag_frames` as constants.
-    fn from_config(config: &StreamingConfig) -> Self {
-        let max_frame_age_ms = if config.max_frame_age_ms > 0 {
-            config.max_frame_age_ms
-        } else {
-            DEFAULT_MAX_FRAME_AGE_MS
-        };
-
-        Self {
-            max_frame_age_ms,
-            lag_recovery_mode: config.lag_recovery_mode,
-            lag_recovery_threshold_ms: LAG_RECOVERY_THRESHOLD_MS,
-            sustained_lag_frames: LAG_RECOVERY_SUSTAINED_FRAMES,
-        }
-    }
-}
-
-#[derive(Debug)]
-struct LagTracker {
-    anchor_local: Instant,
-    anchor_source_ts: u32,
-    last_source_ts: u32,
-    initialized: bool,
-}
-
-impl Default for LagTracker {
-    fn default() -> Self {
-        Self {
-            anchor_local: Instant::now(),
-            anchor_source_ts: 0,
-            last_source_ts: 0,
-            initialized: false,
-        }
-    }
-}
-
-impl LagTracker {
-    fn lag_ms(&mut self, source_timestamp_ms: u32) -> u32 {
-        if !self.initialized {
-            self.initialized = true;
-            self.anchor_local = Instant::now();
-            self.anchor_source_ts = source_timestamp_ms;
-            self.last_source_ts = source_timestamp_ms;
-            return 0;
-        }
-
-        if source_timestamp_ms < self.last_source_ts
-            && self.last_source_ts.wrapping_sub(source_timestamp_ms)
-                > SOURCE_TIMESTAMP_RESET_THRESHOLD_MS
-        {
-            self.anchor_local = Instant::now();
-            self.anchor_source_ts = source_timestamp_ms;
-            self.last_source_ts = source_timestamp_ms;
-            return 0;
-        }
-
-        self.last_source_ts = source_timestamp_ms;
-        let elapsed_ms = self.anchor_local.elapsed().as_millis() as u32;
-        let expected_source_ts = self.anchor_source_ts.wrapping_add(elapsed_ms);
-        expected_source_ts.saturating_sub(source_timestamp_ms)
-    }
-}
-
-/// Minimum sleep threshold in milliseconds.
-///
-/// Sleeps shorter than ~2ms are unreliable on Linux due to timer resolution
-/// and context-switch overhead. On the Anyka ARM SoC this is especially true
-/// at the default HZ=100 tick rate.
-const PACE_MIN_SLEEP_MS: u64 = 2;
-
-/// Maximum inter-frame sleep cap in milliseconds.
-///
-/// After a gap in the source stream (e.g. encoder restart, I/O stall) the
-/// timestamp delta can be very large. Sleeping for the full delta would stall
-/// playback. 200ms is long enough to absorb normal jitter but short enough
-/// to avoid visible freezes.
-const PACE_MAX_DELTA_MS: u64 = 200;
-
-/// Paces RTP frame delivery to approximate real-time timing.
-///
-/// Without pacing, the playback loop dequeues and sends frames as fast as
-/// the network allows, causing bursts that overwhelm VLC's jitter buffer.
-/// `FramePacer` compares the wall-clock elapsed time against the frame
-/// timestamp delta and sleeps when the sender is running ahead of real-time.
-///
-/// Each RTSP session gets its own `FramePacer` instance so clients joining
-/// at different times are paced independently.
-struct FramePacer {
-    /// Wall-clock instant when the last frame was sent.
-    last_send: Option<Instant>,
-    /// Source timestamp (in milliseconds) of the last sent frame.
-    last_timestamp_ms: Option<u32>,
-}
-
-impl FramePacer {
-    fn new() -> Self {
-        Self {
-            last_send: None,
-            last_timestamp_ms: None,
-        }
-    }
-
-    /// Pace a frame by sleeping if the sender is ahead of real-time.
-    ///
-    /// `timestamp_ms` is the source frame timestamp in milliseconds.
-    /// On the first frame, no delay is introduced.
-    async fn pace(&mut self, timestamp_ms: u32) -> u64 {
-        let mut slept_ms = 0;
-        if let (Some(last_send), Some(last_ts)) = (self.last_send, self.last_timestamp_ms) {
-            let ts_delta_ms = timestamp_ms.wrapping_sub(last_ts) as u64;
-            let wall_delta = last_send.elapsed();
-            let wall_delta_ms = wall_delta.as_millis() as u64;
-
-            if ts_delta_ms > wall_delta_ms {
-                let sleep_ms = std::cmp::min(ts_delta_ms - wall_delta_ms, PACE_MAX_DELTA_MS);
-                if sleep_ms >= PACE_MIN_SLEEP_MS {
-                    tokio::time::sleep(Duration::from_millis(sleep_ms)).await;
-                    slept_ms = sleep_ms;
-                }
-            }
-        }
-
-        self.last_send = Some(Instant::now());
-        self.last_timestamp_ms = Some(timestamp_ms);
-        slept_ms
-    }
-}
-
-#[inline]
-fn pacing_timestamp_ms(frame_data: &FrameData) -> Option<u32> {
-    match frame_data {
-        FrameData::Video { timestamp, .. } => Some(*timestamp),
-        FrameData::Audio { .. } | FrameData::MetaData { .. } | FrameData::MediaInfo { .. } => None,
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-struct RtpTimestampSample {
-    output_timestamp: u32,
-    scaled_timestamp: u32,
-    previous_scaled_timestamp: Option<u32>,
-    non_wrap_regressed: bool,
-    non_wrap_regression_count: u64,
-}
-
-/// Keeps RTP timestamps monotonic for source-side resets while preserving true RTP wrap.
-#[derive(Debug, Default)]
-struct RtpTimestampNormalizer {
-    previous_scaled_timestamp: Option<u32>,
-    correction: u32,
-    non_wrap_regression_count: u64,
-}
-
-impl RtpTimestampNormalizer {
-    /// Normalize RTP timestamps for audio or video.
-    ///
-    /// # Arguments
-    ///
-    /// * `source_timestamp` - For audio: timestamp in sample units (per RFC 3640).
-    ///   For video: timestamp in milliseconds.
-    /// * `clock_rate` - RTP clock rate (e.g., 48000 for AAC, 90000 for H264)
-    /// * `track_type` - Audio or Video track type
-    ///
-    /// # Timestamp Units
-    ///
-    /// - **Audio (AAC)**: Timestamps are already in sample units (1024 samples/frame)
-    ///   and match the clock_rate. No scaling is performed.
-    /// - **Video (H264/H265)**: Timestamps are in milliseconds and must be scaled
-    ///   to 90kHz RTP clock rate.
-    fn normalize(
-        &mut self,
-        source_timestamp: u32,
-        clock_rate: u32,
-        track_type: TrackType,
-    ) -> RtpTimestampSample {
-        // Audio timestamps are already in sample units (RFC 3640), don't scale.
-        // Video timestamps are in milliseconds, scale to 90kHz RTP clock.
-        let scaled_timestamp = match track_type {
-            TrackType::Audio => source_timestamp,
-            TrackType::Video => {
-                RtspServerSession::scale_rtp_timestamp(source_timestamp, clock_rate)
-            }
-            TrackType::Application => {
-                RtspServerSession::scale_rtp_timestamp(source_timestamp, clock_rate)
-            }
-        };
-        let previous_scaled_timestamp = self.previous_scaled_timestamp;
-
-        let mut non_wrap_regressed = false;
-        if let Some(previous) = previous_scaled_timestamp
-            && scaled_timestamp <= previous
-            && previous.wrapping_sub(scaled_timestamp) <= RTP_TIMESTAMP_WRAP_THRESHOLD
-        {
-            // RFC 3550 section 5.1 requires RTP timestamps to reflect sampling instant.
-            // In our validation streams (single access unit cadence, no B-frames), equal or
-            // regressed source timestamps usually indicate source-side resets/chunking artifacts.
-            // Shift by a correction offset so emitted access units remain strictly monotonic.
-            let corrected_current = scaled_timestamp.wrapping_add(self.correction);
-            let corrected_previous = previous.wrapping_add(self.correction);
-            let target = corrected_previous.wrapping_add(1);
-            let adjustment = target.wrapping_sub(corrected_current);
-            self.correction = self.correction.wrapping_add(adjustment);
-            self.non_wrap_regression_count += 1;
-            non_wrap_regressed = true;
-        }
-
-        self.previous_scaled_timestamp = Some(scaled_timestamp);
-        RtpTimestampSample {
-            output_timestamp: scaled_timestamp.wrapping_add(self.correction),
-            scaled_timestamp,
-            previous_scaled_timestamp,
-            non_wrap_regressed,
-            non_wrap_regression_count: self.non_wrap_regression_count,
-        }
-    }
-}
-
-/// Coalesce H.264 access-units that arrive as multiple same-timestamp chunks.
-///
-/// Some publishers emit one `FrameData::Video` per NAL unit while keeping the
-/// same timestamp for all NALs belonging to an access unit. RTP packetizers
-/// expect a full access unit per `on_frame` call; sending NALs individually
-/// causes multiple marker-terminated access units at the same RTP timestamp,
-/// which strict demuxers flag as "same timestamp as previous access unit".
-#[derive(Debug, Default)]
-struct VideoAccessUnitAssembler {
-    pending_timestamp: Option<u32>,
-    pending_bytes: BytesMut,
-}
-
-impl VideoAccessUnitAssembler {
-    fn push(&mut self, timestamp: u32, chunk: BytesMut) -> Option<(u32, BytesMut)> {
-        if chunk.is_empty() {
-            return None;
-        }
-
-        match self.pending_timestamp {
-            None => {
-                self.pending_timestamp = Some(timestamp);
-                self.append_as_annexb(&chunk[..]);
-                None
-            }
-            Some(pending_ts) if pending_ts == timestamp => {
-                self.append_as_annexb(&chunk[..]);
-                None
-            }
-            Some(_pending_ts) => {
-                let flushed = self.flush();
-                self.pending_timestamp = Some(timestamp);
-                self.append_as_annexb(&chunk[..]);
-                flushed
-            }
-        }
-    }
-
-    fn flush(&mut self) -> Option<(u32, BytesMut)> {
-        let timestamp = self.pending_timestamp.take()?;
-        if self.pending_bytes.is_empty() {
-            return None;
-        }
-        let bytes = std::mem::take(&mut self.pending_bytes);
-        Some((timestamp, bytes))
-    }
-
-    fn append_as_annexb(&mut self, chunk: &[u8]) {
-        if chunk.is_empty() {
-            return;
-        }
-        if has_annexb_start_code(chunk) {
-            self.pending_bytes.extend_from_slice(chunk);
-            return;
-        }
-        self.pending_bytes
-            .extend_from_slice(&ANNEXB_NALU_START_CODE[..]);
-        self.pending_bytes.extend_from_slice(chunk);
-    }
-}
-
-fn has_annexb_start_code(data: &[u8]) -> bool {
-    data.starts_with(&[0x00, 0x00, 0x01]) || data.starts_with(&ANNEXB_NALU_START_CODE[..])
-}
-
-fn contains_h264_idr(data: &[u8]) -> bool {
-    let mut i = 0usize;
-    while i + 4 < data.len() {
-        let nal_start = if data[i..].starts_with(&ANNEXB_NALU_START_CODE[..]) {
-            i + 4
-        } else if data[i..].starts_with(&[0x00, 0x00, 0x01]) {
-            i + 3
-        } else {
-            i += 1;
-            continue;
-        };
-
-        if nal_start < data.len() && (data[nal_start] & 0x1F) == 5 {
-            return true;
-        }
-
-        i = nal_start;
-    }
-    false
-}
-
-struct PlaybackVideoSendContext<'a> {
-    session_id: &'a str,
-    remote_addr: std::net::SocketAddr,
-    request_path: &'a str,
-    shutdown: &'a Arc<AtomicBool>,
-}
-
-async fn send_video_access_unit(
-    video_channel: &Arc<Mutex<RtpChannel>>,
-    timestamp_normalizers: &mut HashMap<TrackType, RtpTimestampNormalizer>,
-    ctx: &PlaybackVideoSendContext<'_>,
-    timestamp: u32,
-    data: &mut BytesMut,
-) {
-    let mut channel = video_channel.lock().await;
-    let payload_len = data.len();
-    let normalized = timestamp_normalizers
-        .entry(TrackType::Video)
-        .or_default()
-        .normalize(timestamp, channel.clock_rate(), TrackType::Video);
-    if normalized.non_wrap_regressed {
-        warn!(
-            track = ?TrackType::Video,
-            session_id = %ctx.session_id,
-            remote_addr = %ctx.remote_addr,
-            request_path = %ctx.request_path,
-            prev_scaled = normalized.previous_scaled_timestamp.unwrap_or_default(),
-            current_scaled = normalized.scaled_timestamp,
-            corrected_timestamp = normalized.output_timestamp,
-            regression_count = normalized.non_wrap_regression_count,
-            "rtp_timestamp_non_wrap_regression"
-        );
-    }
-    let send_started = Instant::now();
-    match channel.on_frame(data, normalized.output_timestamp).await {
-        Ok(()) => {
-            let send_ms = send_started.elapsed().as_millis();
-            if send_ms >= RTP_SEND_SLOW_WARN_MS {
-                warn!(
-                    track = ?TrackType::Video,
-                    session_id = %ctx.session_id,
-                    remote_addr = %ctx.remote_addr,
-                    request_path = %ctx.request_path,
-                    source_ts = timestamp,
-                    rtp_ts = normalized.output_timestamp,
-                    payload_len = payload_len,
-                    send_ms = send_ms,
-                    diag_monotonic_ms = monotonic_millis(),
-                    "rtp_send_slow"
-                );
-            }
-        }
-        Err(err) => {
-            info!(error = %err, "handle_play_error");
-            ctx.shutdown.store(true, Ordering::Release);
-        }
-    }
-}
-
-#[allow(clippy::too_many_arguments)]
-async fn process_audio_frame(
-    audio_channel: &Arc<Mutex<RtpChannel>>,
-    timestamp_normalizers: &mut HashMap<TrackType, RtpTimestampNormalizer>,
-    latency_policy: PlaybackLatencyPolicy,
-    audio_lag_tracker: &mut LagTracker,
-    session_id: &str,
-    remote_addr: SocketAddr,
-    request_path: &str,
-    shutdown: &Arc<AtomicBool>,
-    timestamp: u32,
-    data: &mut BytesMut,
-    dropped_stale_frames: &mut u64,
-    waiting_for_idr_recovery: bool,
-    dropped_for_recovery: &mut u64,
-) {
-    if waiting_for_idr_recovery {
-        *dropped_for_recovery += 1;
-        return;
-    }
-
-    let previous_source_ts = audio_lag_tracker.last_source_ts;
-    let lag_ms = audio_lag_tracker.lag_ms(timestamp);
-    if crate::stream_frame_debug_logging_enabled()
-        && lag_ms >= latency_policy.max_frame_age_ms.saturating_div(2)
-    {
-        debug!(
-            track = ?TrackType::Audio,
-            session_id = %session_id,
-            remote_addr = %remote_addr,
-            request_path = %request_path,
-            lag_ms = lag_ms,
-            threshold_ms = latency_policy.max_frame_age_ms,
-            source_ts = timestamp,
-            prev_source_ts = previous_source_ts,
-            waiting_for_idr_recovery = waiting_for_idr_recovery,
-            diag_monotonic_ms = monotonic_millis(),
-            "lag_probe"
-        );
-    }
-    if lag_ms > latency_policy.max_frame_age_ms {
-        *dropped_stale_frames += 1;
-        let elapsed_ms = audio_lag_tracker.anchor_local.elapsed().as_millis() as u32;
-        let expected_source_ts = audio_lag_tracker.anchor_source_ts.wrapping_add(elapsed_ms);
-        warn!(
-            track = ?TrackType::Audio,
-            session_id = %session_id,
-            remote_addr = %remote_addr,
-            request_path = %request_path,
-            lag_ms = lag_ms,
-            threshold_ms = latency_policy.max_frame_age_ms,
-            source_ts = timestamp,
-            prev_source_ts = previous_source_ts,
-            expected_source_ts = expected_source_ts,
-            anchor_source_ts = audio_lag_tracker.anchor_source_ts,
-            anchor_elapsed_ms = elapsed_ms,
-            "stale_frame_drop"
-        );
-        return;
-    }
-
-    let mut channel = audio_channel.lock().await;
-    let normalized = timestamp_normalizers
-        .entry(TrackType::Audio)
-        .or_default()
-        .normalize(timestamp, channel.clock_rate(), TrackType::Audio);
-
-    if crate::stream_frame_debug_logging_enabled() {
-        debug!(
-            timestamp_in = timestamp,
-            clock_rate = channel.clock_rate(),
-            scaled = normalized.scaled_timestamp,
-            output = normalized.output_timestamp,
-            "audio_timestamp_info"
-        );
-    }
-
-    if normalized.non_wrap_regressed {
-        warn!(
-            track = ?TrackType::Audio,
-            session_id = %session_id,
-            remote_addr = %remote_addr,
-            request_path = %request_path,
-            prev_scaled = normalized.previous_scaled_timestamp.unwrap_or_default(),
-            current_scaled = normalized.scaled_timestamp,
-            corrected_timestamp = normalized.output_timestamp,
-            regression_count = normalized.non_wrap_regression_count,
-            "rtp_timestamp_non_wrap_regression"
-        );
-    }
-
-    let payload_len = data.len();
-    let send_started = Instant::now();
-    match channel.on_frame(data, normalized.output_timestamp).await {
-        Ok(()) => {
-            let send_ms = send_started.elapsed().as_millis();
-            if send_ms >= RTP_SEND_SLOW_WARN_MS {
-                warn!(
-                    track = ?TrackType::Audio,
-                    session_id = %session_id,
-                    remote_addr = %remote_addr,
-                    request_path = %request_path,
-                    source_ts = timestamp,
-                    rtp_ts = normalized.output_timestamp,
-                    payload_len = payload_len,
-                    send_ms = send_ms,
-                    diag_monotonic_ms = monotonic_millis(),
-                    "rtp_send_slow"
-                );
-            }
-        }
-        Err(err) => {
-            info!(error = %err, "handle_play_error");
-            shutdown.store(true, Ordering::Release);
-        }
-    }
-}
-
-#[allow(clippy::too_many_arguments)]
-async fn process_video_frame(
-    video_channel: &Arc<Mutex<RtpChannel>>,
-    video_assembler: &mut VideoAccessUnitAssembler,
-    timestamp_normalizers: &mut HashMap<TrackType, RtpTimestampNormalizer>,
-    latency_policy: PlaybackLatencyPolicy,
-    video_lag_tracker: &mut LagTracker,
-    sustained_video_lag_frames: &mut u32,
-    waiting_for_idr_recovery: &mut bool,
-    dropped_stale_frames: &mut u64,
-    dropped_for_recovery: &mut u64,
-    idr_recovery_count: &mut u64,
-    session_id: &str,
-    remote_addr: SocketAddr,
-    request_path: &str,
-    shutdown: &Arc<AtomicBool>,
-    timestamp: u32,
-    data: BytesMut,
-) {
-    let Some((flush_ts, mut flush_data)) = video_assembler.push(timestamp, data) else {
-        return;
-    };
-
-    let contains_idr = contains_h264_idr(flush_data.as_ref());
-    if *waiting_for_idr_recovery {
-        if !contains_idr {
-            *dropped_for_recovery += 1;
-            return;
-        }
-
-        *waiting_for_idr_recovery = false;
-        info!(
-            track = ?TrackType::Video,
-            session_id = %session_id,
-            remote_addr = %remote_addr,
-            request_path = %request_path,
-            "lag_recovery_resynced"
-        );
-    }
-
-    let previous_source_ts = video_lag_tracker.last_source_ts;
-    let lag_ms = video_lag_tracker.lag_ms(flush_ts);
-    if crate::stream_frame_debug_logging_enabled()
-        && lag_ms >= latency_policy.max_frame_age_ms.saturating_div(2)
-    {
-        debug!(
-            track = ?TrackType::Video,
-            session_id = %session_id,
-            remote_addr = %remote_addr,
-            request_path = %request_path,
-            lag_ms = lag_ms,
-            threshold_ms = latency_policy.max_frame_age_ms,
-            source_ts = flush_ts,
-            prev_source_ts = previous_source_ts,
-            contains_idr = contains_idr,
-            sustained_lag_frames = *sustained_video_lag_frames,
-            waiting_for_idr_recovery = *waiting_for_idr_recovery,
-            diag_monotonic_ms = monotonic_millis(),
-            "lag_probe"
-        );
-    }
-    if lag_ms > latency_policy.max_frame_age_ms {
-        if maybe_reanchor_video_lag_tracker_on_stale_idr(
-            video_lag_tracker,
-            flush_ts,
-            lag_ms,
-            latency_policy.max_frame_age_ms,
-            contains_idr,
-        ) {
-            warn!(
-                track = ?TrackType::Video,
-                session_id = %session_id,
-                remote_addr = %remote_addr,
-                request_path = %request_path,
-                lag_ms = lag_ms,
-                threshold_ms = latency_policy.max_frame_age_ms,
-                source_ts = flush_ts,
-                prev_source_ts = previous_source_ts,
-                contains_idr = contains_idr,
-                "stale_frame_reanchor"
-            );
-        } else {
-            *dropped_stale_frames += 1;
-            let elapsed_ms = video_lag_tracker.anchor_local.elapsed().as_millis() as u32;
-            let expected_source_ts = video_lag_tracker.anchor_source_ts.wrapping_add(elapsed_ms);
-            warn!(
-                track = ?TrackType::Video,
-                session_id = %session_id,
-                remote_addr = %remote_addr,
-                request_path = %request_path,
-                lag_ms = lag_ms,
-                threshold_ms = latency_policy.max_frame_age_ms,
-                source_ts = flush_ts,
-                prev_source_ts = previous_source_ts,
-                expected_source_ts = expected_source_ts,
-                anchor_source_ts = video_lag_tracker.anchor_source_ts,
-                anchor_elapsed_ms = elapsed_ms,
-                contains_idr = contains_idr,
-                "stale_frame_drop"
-            );
-            return;
-        }
-    }
-
-    if lag_ms > latency_policy.lag_recovery_threshold_ms {
-        *sustained_video_lag_frames = sustained_video_lag_frames.saturating_add(1);
-    } else {
-        *sustained_video_lag_frames = 0;
-    }
-
-    if latency_policy.lag_recovery_mode == LagRecoveryMode::LatestIdr
-        && *sustained_video_lag_frames >= latency_policy.sustained_lag_frames
-        && !contains_idr
-    {
-        *waiting_for_idr_recovery = true;
-        *sustained_video_lag_frames = 0;
-        *dropped_for_recovery += 1;
-        *idr_recovery_count += 1;
-        warn!(
-            track = ?TrackType::Video,
-            session_id = %session_id,
-            remote_addr = %remote_addr,
-            request_path = %request_path,
-            lag_ms = lag_ms,
-            threshold_ms = latency_policy.lag_recovery_threshold_ms,
-            sustained_frames = latency_policy.sustained_lag_frames,
-            "lag_recovery_trigger"
-        );
-        return;
-    }
-
-    let ctx = PlaybackVideoSendContext {
-        session_id,
-        remote_addr,
-        request_path,
-        shutdown,
-    };
-
-    send_video_access_unit(
-        video_channel,
-        timestamp_normalizers,
-        &ctx,
-        flush_ts,
-        &mut flush_data,
-    )
-    .await;
-}
-
-fn maybe_reanchor_video_lag_tracker_on_stale_idr(
-    video_lag_tracker: &mut LagTracker,
-    source_timestamp_ms: u32,
-    lag_ms: u32,
-    max_frame_age_ms: u32,
-    contains_idr: bool,
-) -> bool {
-    if !contains_idr || lag_ms <= max_frame_age_ms {
-        return false;
-    }
-
-    video_lag_tracker.anchor_local = Instant::now();
-    video_lag_tracker.anchor_source_ts = source_timestamp_ms;
-    video_lag_tracker.last_source_ts = source_timestamp_ms;
-    true
-}
-
-async fn flush_pending_video(
-    video_channel: &Option<Arc<Mutex<RtpChannel>>>,
-    video_assembler: &mut VideoAccessUnitAssembler,
-    timestamp_normalizers: &mut HashMap<TrackType, RtpTimestampNormalizer>,
-    session_id: &str,
-    remote_addr: SocketAddr,
-    request_path: &str,
-    shutdown: &Arc<AtomicBool>,
-) {
-    if let (Some(video_channel), Some((timestamp, mut data))) =
-        (video_channel, video_assembler.flush())
-    {
-        let ctx = PlaybackVideoSendContext {
-            session_id,
-            remote_addr,
-            request_path,
-            shutdown,
-        };
-
-        send_video_access_unit(
-            video_channel,
-            timestamp_normalizers,
-            &ctx,
-            timestamp,
-            &mut data,
-        )
-        .await;
-    }
-}
-
-#[allow(clippy::too_many_arguments)]
-async fn handle_playback_frame(
-    frame_data: FrameData,
-    audio_rtp_channel: &Option<Arc<Mutex<RtpChannel>>>,
-    video_rtp_channel: &Option<Arc<Mutex<RtpChannel>>>,
-    video_assembler: &mut VideoAccessUnitAssembler,
-    timestamp_normalizers: &mut HashMap<TrackType, RtpTimestampNormalizer>,
-    latency_policy: PlaybackLatencyPolicy,
-    audio_lag_tracker: &mut LagTracker,
-    video_lag_tracker: &mut LagTracker,
-    sustained_video_lag_frames: &mut u32,
-    waiting_for_idr_recovery: &mut bool,
-    dropped_stale_frames: &mut u64,
-    dropped_for_recovery: &mut u64,
-    idr_recovery_count: &mut u64,
-    session_id: &str,
-    remote_addr: SocketAddr,
-    request_path: &str,
-    shutdown: &Arc<AtomicBool>,
-) -> bool {
-    match frame_data {
-        FrameData::Audio {
-            timestamp,
-            mut data,
-        } => {
-            if let Some(audio_channel) = audio_rtp_channel {
-                process_audio_frame(
-                    audio_channel,
-                    timestamp_normalizers,
-                    latency_policy,
-                    audio_lag_tracker,
-                    session_id,
-                    remote_addr,
-                    request_path,
-                    shutdown,
-                    timestamp,
-                    &mut data,
-                    dropped_stale_frames,
-                    *waiting_for_idr_recovery,
-                    dropped_for_recovery,
-                )
-                .await;
-
-                return shutdown.load(Ordering::Acquire);
-            }
-        }
-        FrameData::Video { timestamp, data } => {
-            if let Some(video_channel) = video_rtp_channel {
-                process_video_frame(
-                    video_channel,
-                    video_assembler,
-                    timestamp_normalizers,
-                    latency_policy,
-                    video_lag_tracker,
-                    sustained_video_lag_frames,
-                    waiting_for_idr_recovery,
-                    dropped_stale_frames,
-                    dropped_for_recovery,
-                    idr_recovery_count,
-                    session_id,
-                    remote_addr,
-                    request_path,
-                    shutdown,
-                    timestamp,
-                    data,
-                )
-                .await;
-            }
-        }
-        _ => {}
-    }
-
-    false
-}
-
-#[allow(clippy::too_many_arguments)]
-async fn handle_no_frame_data(
-    video_rtp_channel: &Option<Arc<Mutex<RtpChannel>>>,
-    video_assembler: &mut VideoAccessUnitAssembler,
-    timestamp_normalizers: &mut HashMap<TrackType, RtpTimestampNormalizer>,
-    session_id: &str,
-    remote_addr: SocketAddr,
-    request_path: &str,
-    shutdown: &Arc<AtomicBool>,
-    retry_times: &mut usize,
-) -> bool {
-    flush_pending_video(
-        video_rtp_channel,
-        video_assembler,
-        timestamp_normalizers,
-        session_id,
-        remote_addr,
-        request_path,
-        shutdown,
-    )
-    .await;
-
-    *retry_times += 1;
-    info!(retry_times = *retry_times, "no_frame_data_retry");
-
-    if *retry_times > 10 {
-        shutdown.store(true, Ordering::Release);
-        return true;
-    }
-
-    false
-}
-
-#[allow(clippy::too_many_arguments)]
-async fn run_playback_loop(
-    mut receiver: mpsc::UnboundedReceiver<FrameData>,
-    audio_rtp_channel: Option<Arc<Mutex<RtpChannel>>>,
-    video_rtp_channel: Option<Arc<Mutex<RtpChannel>>>,
-    playback_cancel: Arc<AtomicBool>,
-    shutdown: Arc<AtomicBool>,
-    session_id: String,
-    remote_addr: SocketAddr,
-    request_path: String,
-    latency_policy: PlaybackLatencyPolicy,
-) {
-    let mut timestamp_normalizers: HashMap<TrackType, RtpTimestampNormalizer> = HashMap::new();
-    let mut retry_times: usize = 0;
-    let mut video_assembler = VideoAccessUnitAssembler::default();
-    let mut audio_lag_tracker = LagTracker::default();
-    let mut video_lag_tracker = LagTracker::default();
-    let mut sustained_video_lag_frames = 0u32;
-    let mut waiting_for_idr_recovery = false;
-    let mut dropped_stale_frames = 0u64;
-    let mut dropped_for_recovery = 0u64;
-    let mut idr_recovery_count = 0u64;
-    let mut frame_pacer = FramePacer::new();
-
-    loop {
-        if playback_cancel.load(Ordering::Acquire) {
-            flush_pending_video(
-                &video_rtp_channel,
-                &mut video_assembler,
-                &mut timestamp_normalizers,
-                &session_id,
-                remote_addr,
-                &request_path,
-                &shutdown,
-            )
-            .await;
-            break;
-        }
-
-        match receiver.recv().await {
-            Some(frame_data) => {
-                retry_times = 0;
-
-                // Pace frame delivery to approximate real-time timing.
-                // Without this, frames dequeued from the ring buffer are
-                // sent in bursts, overwhelming VLC's jitter buffer.
-                let timestamp_ms = pacing_timestamp_ms(&frame_data);
-                if let Some(ts) = timestamp_ms {
-                    let paced_sleep_ms = frame_pacer.pace(ts).await;
-                    if paced_sleep_ms >= PACER_SLEEP_DIAGNOSTIC_MIN_MS {
-                        debug!(
-                            session_id = %session_id,
-                            remote_addr = %remote_addr,
-                            request_path = %request_path,
-                            source_ts = ts,
-                            sleep_ms = paced_sleep_ms,
-                            diag_monotonic_ms = monotonic_millis(),
-                            "playback_pacer_sleep"
-                        );
-                    }
-                }
-
-                if handle_playback_frame(
-                    frame_data,
-                    &audio_rtp_channel,
-                    &video_rtp_channel,
-                    &mut video_assembler,
-                    &mut timestamp_normalizers,
-                    latency_policy,
-                    &mut audio_lag_tracker,
-                    &mut video_lag_tracker,
-                    &mut sustained_video_lag_frames,
-                    &mut waiting_for_idr_recovery,
-                    &mut dropped_stale_frames,
-                    &mut dropped_for_recovery,
-                    &mut idr_recovery_count,
-                    &session_id,
-                    remote_addr,
-                    &request_path,
-                    &shutdown,
-                )
-                .await
-                {
-                    break;
-                }
-            }
-            None => {
-                if handle_no_frame_data(
-                    &video_rtp_channel,
-                    &mut video_assembler,
-                    &mut timestamp_normalizers,
-                    &session_id,
-                    remote_addr,
-                    &request_path,
-                    &shutdown,
-                    &mut retry_times,
-                )
-                .await
-                {
-                    break;
-                }
-            }
-        }
-    }
-
-    info!(
-        session_id = %session_id,
-        remote_addr = %remote_addr,
-        request_path = %request_path,
-        dropped_stale_frames = dropped_stale_frames,
-        dropped_for_recovery = dropped_for_recovery,
-        idr_recovery_count = idr_recovery_count,
-        "playback_loop_exit"
-    );
-}
-
-#[derive(Debug, Clone, Copy)]
-struct RtpPacketObservation {
-    packets_sent: u64,
-    bytes_sent: u64,
-    prev_seq: Option<u16>,
-    seq_delta: Option<u16>,
-    prev_timestamp: Option<u32>,
-    timestamp_delta: Option<u32>,
-    seq_gap: bool,
-    seq_regressed: bool,
-    timestamp_regressed: bool,
-}
-
-impl RtpTrackCounters {
-    fn new() -> Self {
-        Self {
-            packet_count: AtomicU64::new(0),
-            byte_count: AtomicU64::new(0),
-            first_send_ms: AtomicU64::new(0),
-            last_send_ms: AtomicU64::new(0),
-            last_seq: AtomicU32::new(u32::MAX),
-            last_timestamp: AtomicU32::new(u32::MAX),
-        }
-    }
-
-    /// Record a sent RTP packet and return counters plus monotonicity checks.
-    fn on_packet_sent(&self, payload_len: usize, seq: u16, timestamp: u32) -> RtpPacketObservation {
-        let now = now_millis();
-
-        // First-send timestamp (best-effort, race-safe).
-        let _ = self
-            .first_send_ms
-            .compare_exchange(0, now, Ordering::Relaxed, Ordering::Relaxed);
-        self.last_send_ms.store(now, Ordering::Relaxed);
-
-        let packets = self.packet_count.fetch_add(1, Ordering::Relaxed) + 1;
-        let bytes = self
-            .byte_count
-            .fetch_add(payload_len as u64, Ordering::Relaxed)
-            + payload_len as u64;
-
-        let prev_seq_raw = self.last_seq.swap(seq as u32, Ordering::Relaxed);
-        let prev_timestamp_raw = self.last_timestamp.swap(timestamp, Ordering::Relaxed);
-
-        let prev_seq = if prev_seq_raw == u32::MAX {
-            None
-        } else {
-            Some(prev_seq_raw as u16)
-        };
-        let prev_timestamp = if prev_timestamp_raw == u32::MAX {
-            None
-        } else {
-            Some(prev_timestamp_raw)
-        };
-
-        let seq_delta = prev_seq.map(|prev| seq.wrapping_sub(prev));
-        let seq_gap = matches!(seq_delta, Some(delta) if delta > 1 && delta < 0x8000);
-        let seq_regressed = matches!(seq_delta, Some(delta) if delta >= 0x8000);
-
-        let timestamp_delta = prev_timestamp.map(|prev| timestamp.wrapping_sub(prev));
-        let timestamp_regressed =
-            matches!(timestamp_delta, Some(delta) if delta > RTP_TIMESTAMP_WRAP_THRESHOLD);
-
-        RtpPacketObservation {
-            packets_sent: packets,
-            bytes_sent: bytes,
-            prev_seq,
-            seq_delta,
-            prev_timestamp,
-            timestamp_delta,
-            seq_gap,
-            seq_regressed,
-            timestamp_regressed,
-        }
-    }
-
-    fn snapshot(&self) -> (u64, u64, Option<u64>) {
-        let packets = self.packet_count.load(Ordering::Relaxed);
-        let bytes = self.byte_count.load(Ordering::Relaxed);
-        let first = self.first_send_ms.load(Ordering::Relaxed);
-        let last = self.last_send_ms.load(Ordering::Relaxed);
-        let duration_ms = if first > 0 && last >= first {
-            Some(last - first)
-        } else {
-            None
-        };
-        (packets, bytes, duration_ms)
-    }
-}
-
-type RtpCountersHandle = Arc<RtpTrackCounters>;
+/// Log threshold for slow TCP/UDP RTP writes (wall-clock flush time, milliseconds).
+const SLOW_WRITE_THRESHOLD_MS: u128 = 10;
+
+/// Default UDP inter-batch sleep when `udp_pace_sleep_micros` is `0` (embedded TX pacing).
+const DEFAULT_UDP_PACE_SLEEP_MICROS: u64 = 300;
 
 pub struct RtspServerSession {
     io_reader: Arc<Mutex<Box<dyn TNetIO + Send + Sync>>>,
@@ -1184,50 +129,8 @@ pub struct RtspServerSession {
     config: StreamingConfig,
 
     rtp_counters: HashMap<TrackType, RtpCountersHandle>,
-    playback_cancel: Option<Arc<AtomicBool>>,
+    playback_cancel: Option<Arc<Notify>>,
     playback_task: Option<JoinHandle<()>>,
-}
-
-pub struct InterleavedBinaryData {
-    pub channel_identifier: u8,
-    pub length: u16,
-}
-
-impl InterleavedBinaryData {
-    // 10.12 Embedded (Interleaved) Binary Data
-    // Stream data such as RTP packets is encapsulated by an ASCII dollar
-    // sign (24 hexadecimal), followed by a one-byte channel identifier,
-    // followed by the length of the encapsulated binary data as a binary,
-    // two-byte integer in network byte order
-    pub fn new(reader: &mut BytesReader) -> Result<Option<Self>, SessionError> {
-        let is_dollar_sign = reader.advance_u8()? == 0x24;
-        if crate::stream_frame_debug_logging_enabled() {
-            debug!(is_dollar_sign, "interleaved_parse");
-        }
-        if is_dollar_sign {
-            reader.read_u8()?;
-            let channel_identifier = reader.read_u8()?;
-            if crate::stream_frame_debug_logging_enabled() {
-                debug!(channel_identifier = channel_identifier, "channel_id_parse");
-            }
-            let length = reader.read_u16::<BigEndian>()?;
-            if crate::stream_frame_debug_logging_enabled() {
-                debug!(length = length, "interleaved_length");
-            }
-            // RFC 2326 §10.12: validate interleaved payload length
-            if length == 0 {
-                warn!(
-                    channel = channel_identifier,
-                    "zero_length_interleaved_payload"
-                );
-            }
-            return Ok(Some(InterleavedBinaryData {
-                channel_identifier,
-                length,
-            }));
-        }
-        Ok(None)
-    }
 }
 
 impl RtspServerSession {
@@ -1241,6 +144,12 @@ impl RtspServerSession {
             .peer_addr()
             .or_else(|_| stream.local_addr())
             .unwrap_or_else(|_| SocketAddr::from(([0, 0, 0, 0], 0)));
+
+        // Enable TCP_NODELAY to reduce latency on small RTP packets
+        if let Err(err) = stream.set_nodelay(true) {
+            tracing::warn!(error = %err, remote_addr = %remote_addr, "failed_to_set_tcp_nodelay");
+        }
+
         let (read_half, write_half) = stream.into_split();
         let read_io: Box<dyn TNetIO + Send + Sync> = Box::new(TcpReadIO::new(read_half));
         let write_io: Box<dyn TNetIO + Send + Sync> = Box::new(TcpWriteIO::new(write_half));
@@ -1471,7 +380,7 @@ impl RtspServerSession {
 
     fn abort_playback_task(&mut self) {
         if let Some(cancel) = self.playback_cancel.take() {
-            cancel.store(true, Ordering::Release);
+            cancel.notify_waiters();
         }
         if let Some(handle) = self.playback_task.take() {
             handle.abort();
@@ -1480,7 +389,7 @@ impl RtspServerSession {
 
     async fn stop_playback_task(&mut self) {
         if let Some(cancel) = self.playback_cancel.take() {
-            cancel.store(true, Ordering::Release);
+            cancel.notify_waiters();
         }
         if let Some(handle) = self.playback_task.take() {
             handle.abort();
@@ -1853,7 +762,7 @@ impl RtspServerSession {
 
             rtp_channel_guard.on_frame_handler(Box::new(
                 move |msg: FrameData| -> Result<(), UnPackerError> {
-                    if let Err(err) = sender_out.send(msg) {
+                    if let Err(err) = sender_out.try_send(msg) {
                         error!(error = %err, "send_frame_error");
                     }
                     Ok(())
@@ -2259,25 +1168,7 @@ impl RtspServerSession {
         trimmed.to_string()
     }
 
-    /// Scale timestamp from milliseconds to RTP clock rate units.
-    ///
-    /// Used for video timestamps only. Audio timestamps are already in sample units.
-    ///
-    /// # Arguments
-    ///
-    /// * `timestamp_ms` - Timestamp in milliseconds
-    /// * `clock_rate` - Target RTP clock rate (typically 90000 for video)
-    ///
-    /// # Returns
-    ///
-    /// Timestamp scaled to clock_rate units
-    fn scale_rtp_timestamp(timestamp_ms: u32, clock_rate: u32) -> u32 {
-        if clock_rate == 0 {
-            return timestamp_ms;
-        }
-        ((timestamp_ms as u64).saturating_mul(clock_rate as u64) / 1000) as u32
-    }
-
+    #[allow(clippy::too_many_arguments)]
     fn setup_tcp_play_packet_handler(
         channel_identifier: u8,
         counters: Arc<RtpTrackCounters>,
@@ -2286,13 +1177,21 @@ impl RtspServerSession {
         session_id: String,
         remote_for_rtp: SocketAddr,
         sample_interval: u32,
+        max_tcp_interleaved_frame_bytes: usize,
     ) -> OnRtpPacketFn {
+        // Initial capacity tracks [`StreamingConfig::tcp_interleaved_buffer_max`] so embedded
+        // deployments can lower per-connection RAM (default 1 MiB in config).
+        let frame_buffer: Arc<Mutex<BytesMut>> = Arc::new(Mutex::new(BytesMut::with_capacity(
+            max_tcp_interleaved_frame_bytes,
+        )));
+
         Box::new(
             move |io: Arc<Mutex<Box<dyn TNetIO + Send + Sync>>>, packet: RtpPacket| {
                 let counters = counters.clone();
                 let stream_identifier = stream_identifier.clone();
                 let track_label = track_label.clone();
                 let session_id = session_id.clone();
+                let frame_buffer = frame_buffer.clone();
                 Box::pin(async move {
                     let msg = packet.marshal()?;
                     let payload_len = msg.len();
@@ -2345,18 +1244,79 @@ impl RtspServerSession {
                         );
                     }
 
-                    let mut bytes_writer = AsyncBytesWriter::new(io);
-                    bytes_writer.write_u8(0x24)?;
-                    bytes_writer.write_u8(channel_identifier)?;
-                    bytes_writer.write_u16::<BigEndian>(msg.len() as u16)?;
-                    bytes_writer.write(&msg)?;
-                    bytes_writer.flush().await?;
+                    // Build interleaved RTP packet: 0x24 + channel + length + payload
+                    let interleaved_chunk = 4usize.saturating_add(payload_len);
+                    if payload_len > u16::MAX as usize {
+                        error!(
+                            protocol = "TCP",
+                            track = %track_label,
+                            session_id = %session_id,
+                            payload_len = payload_len,
+                            "interleaved_rtsp_payload_exceeds_u16"
+                        );
+                        return Err(PackerError {
+                            value: PackerErrorValue::InterleavedFraming(format!(
+                                "RTP payload length {} exceeds {}",
+                                payload_len,
+                                u16::MAX
+                            )),
+                        });
+                    }
+                    let mut buffer = frame_buffer.lock().await;
+                    let new_total = buffer.len().saturating_add(interleaved_chunk);
+                    if new_total > max_tcp_interleaved_frame_bytes {
+                        warn!(
+                            protocol = "TCP",
+                            session_id = %session_id,
+                            track = %track_label,
+                            channel_identifier = channel_identifier,
+                            current_len = buffer.len(),
+                            incoming = interleaved_chunk,
+                            max = max_tcp_interleaved_frame_bytes,
+                            "tcp_interleaved_frame_buffer_overflow"
+                        );
+                        buffer.clear();
+                        return Err(PackerError {
+                            value: PackerErrorValue::InterleavedFraming(
+                                "tcp interleaved frame buffer overflow".to_string(),
+                            ),
+                        });
+                    }
+                    buffer.reserve(interleaved_chunk);
+                    buffer.put_u8(0x24);
+                    buffer.put_u8(channel_identifier);
+                    let len_bytes = (payload_len as u16).to_be_bytes();
+                    buffer.extend_from_slice(&len_bytes);
+                    buffer.extend_from_slice(&msg);
+
+                    // Flush only when marker bit is set (end of frame)
+                    if packet.header.marker == 1 {
+                        let start = std::time::Instant::now();
+                        let data = buffer.split().freeze();
+                        drop(buffer);
+                        io.lock().await.write(data).await?;
+                        let elapsed = start.elapsed();
+
+                        // Log slow writes (see SLOW_WRITE_THRESHOLD_MS)
+                        if elapsed.as_millis() >= SLOW_WRITE_THRESHOLD_MS {
+                            tracing::warn!(
+                                protocol = "TCP",
+                                track = %track_label,
+                                session_id = %session_id,
+                                remote_addr = %remote_for_rtp,
+                                elapsed_ms = elapsed.as_millis(),
+                                "slow_tcp_write"
+                            );
+                        }
+                    }
+
                     Ok(())
                 })
             },
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn setup_udp_play_packet_handler(
         counters: Arc<RtpTrackCounters>,
         stream_identifier: Option<StreamIdentifier>,
@@ -2364,13 +1324,22 @@ impl RtspServerSession {
         session_id: String,
         remote_for_rtp: SocketAddr,
         sample_interval: u32,
+        udp_pace_batch: usize,
+        udp_pace_sleep_micros: u32,
+        max_udp_accumulated_frame_bytes: usize,
     ) -> OnRtpPacketFn {
+        // Packet buffer: accumulate marshalled packets (150 packets for large I-frames).
+        // Second element is running total of `buffer` payload bytes (avoids O(n) sum per packet).
+        let udp_accum: Arc<Mutex<(Vec<BytesMut>, usize)>> =
+            Arc::new(Mutex::new((Vec::with_capacity(150), 0)));
+
         Box::new(
             move |io: Arc<Mutex<Box<dyn TNetIO + Send + Sync>>>, packet: RtpPacket| {
                 let counters = counters.clone();
                 let stream_identifier = stream_identifier.clone();
                 let track_label = track_label.clone();
                 let session_id = session_id.clone();
+                let udp_accum = udp_accum.clone();
                 Box::pin(async move {
                     let msg = packet.marshal()?;
                     let payload_len = msg.len();
@@ -2423,9 +1392,75 @@ impl RtspServerSession {
                         );
                     }
 
-                    let mut bytes_writer = AsyncBytesWriter::new(io);
-                    bytes_writer.write(&msg)?;
-                    bytes_writer.flush().await?;
+                    // Accumulate packet into buffer (bounded; same cap as TCP interleaved framing).
+                    let mut guard = udp_accum.lock().await;
+                    let (buffer, accumulated) = &mut *guard;
+                    let incoming = msg.len();
+                    let current = *accumulated;
+                    let new_total = current.saturating_add(incoming);
+                    if new_total > max_udp_accumulated_frame_bytes {
+                        error!(
+                            protocol = "UDP",
+                            session_id = %session_id,
+                            track = %track_label,
+                            remote_addr = %remote_for_rtp,
+                            current_accumulated = current,
+                            incoming = incoming,
+                            max = max_udp_accumulated_frame_bytes,
+                            "udp_playback_packet_buffer_overflow"
+                        );
+                        buffer.clear();
+                        *accumulated = 0;
+                        return Err(PackerError {
+                            value: PackerErrorValue::InterleavedFraming(format!(
+                                "udp playback packet buffer overflow: {} + {} > {}",
+                                current, incoming, max_udp_accumulated_frame_bytes
+                            )),
+                        });
+                    }
+                    buffer.push(msg);
+                    *accumulated = new_total;
+
+                    // Write all accumulated packets when marker bit is set (end of frame)
+                    if packet.header.marker == 1 {
+                        let start = std::time::Instant::now();
+                        let packets: Vec<BytesMut> =
+                            std::mem::replace(buffer, Vec::with_capacity(150));
+                        *accumulated = 0;
+                        drop(guard);
+                        let packet_count = packets.len();
+                        let mut io = io.lock().await;
+                        // Pace UDP writes: yield every N packets to let the kernel
+                        // drain the socket buffer and the NIC transmit queued
+                        // packets, preventing client-side receive buffer overflow.
+                        let pace_batch = udp_pace_batch.max(1);
+                        let sleep_micros = if udp_pace_sleep_micros == 0 {
+                            DEFAULT_UDP_PACE_SLEEP_MICROS
+                        } else {
+                            u64::from(udp_pace_sleep_micros)
+                        };
+                        let pace_sleep = Duration::from_micros(sleep_micros.max(1));
+                        for (i, pkt) in packets.into_iter().enumerate() {
+                            io.write(pkt.into()).await?;
+                            if (i + 1) % pace_batch == 0 && i + 1 < packet_count {
+                                tokio::time::sleep(pace_sleep).await;
+                            }
+                        }
+                        let elapsed = start.elapsed();
+
+                        // Log slow writes (see SLOW_WRITE_THRESHOLD_MS)
+                        if elapsed.as_millis() >= SLOW_WRITE_THRESHOLD_MS {
+                            tracing::warn!(
+                                protocol = "UDP",
+                                track = %track_label,
+                                session_id = %session_id,
+                                remote_addr = %remote_for_rtp,
+                                elapsed_ms = elapsed.as_millis(),
+                                "slow_udp_write"
+                            );
+                        }
+                    }
+
                     Ok(())
                 })
             },
@@ -2511,6 +1546,9 @@ impl RtspServerSession {
         }
 
         let sample_interval = self.rtp_sample_interval;
+        let udp_pace_batch = self.config.udp_pace_batch;
+        let udp_pace_sleep_micros = self.config.udp_pace_sleep_micros;
+        let tcp_interleaved_buffer_max = self.config.tcp_interleaved_buffer_max;
         let session_id_for_rtp = session_id.clone();
         let remote_for_rtp = self.remote_addr;
         let stream_identifier = self.stream_identifier.clone();
@@ -2545,10 +1583,14 @@ impl RtspServerSession {
                         session_id_clone,
                         remote_for_rtp,
                         sample_interval,
+                        tcp_interleaved_buffer_max,
                     );
                     track.rtp_channel.lock().await.on_packet_handler(handler);
                 }
                 ProtocolType::UDP => {
+                    // `tcp_interleaved_buffer_max` is the shared per-session cap on buffered bytes
+                    // for one logical RTP frame (until marker); UDP uses the same field to bound
+                    // accumulated packet payloads before flush (not TCP interleaving).
                     let handler = Self::setup_udp_play_packet_handler(
                         counters,
                         stream_id_clone,
@@ -2556,6 +1598,9 @@ impl RtspServerSession {
                         session_id_clone,
                         remote_for_rtp,
                         sample_interval,
+                        udp_pace_batch,
+                        udp_pace_sleep_micros,
+                        tcp_interleaved_buffer_max,
                     );
                     track.rtp_channel.lock().await.on_packet_handler(handler);
                 }
@@ -2639,7 +1684,7 @@ impl RtspServerSession {
         );
 
         self.stop_playback_task().await;
-        let playback_cancel = Arc::new(AtomicBool::new(false));
+        let playback_cancel = Arc::new(Notify::new());
         let playback_cancel_for_task = playback_cancel.clone();
         self.playback_cancel = Some(playback_cancel);
 
@@ -2888,15 +1933,14 @@ impl RtspServerSession {
             match media_name.as_str() {
                 "audio" => {
                     let codec_name = media.rtpmap.encoding_name.to_lowercase();
-                    let codec_id = rtsp_codec::RTSP_CODEC_NAME_2_ID
-                        .get(codec_name.as_str())
-                        .cloned()
-                        .ok_or(SessionError {
+                    let codec_id = rtsp_codec::RtspCodecId::from_name(codec_name.as_str()).ok_or(
+                        SessionError {
                             value: SessionErrorValue::RtspMessageCorrupted(format!(
                                 "unsupported audio codec: {}",
                                 codec_name
                             )),
-                        })?;
+                        },
+                    )?;
                     let channel_count = if media.rtpmap.encoding_param.is_empty() {
                         1
                     } else {
@@ -2927,15 +1971,14 @@ impl RtspServerSession {
                 }
                 "video" => {
                     let codec_name = media.rtpmap.encoding_name.to_lowercase();
-                    let codec_id = rtsp_codec::RTSP_CODEC_NAME_2_ID
-                        .get(codec_name.as_str())
-                        .cloned()
-                        .ok_or(SessionError {
+                    let codec_id = rtsp_codec::RtspCodecId::from_name(codec_name.as_str()).ok_or(
+                        SessionError {
                             value: SessionErrorValue::RtspMessageCorrupted(format!(
                                 "unsupported video codec: {}",
                                 codec_name
                             )),
-                        })?;
+                        },
+                    )?;
                     let codec_info = RtspCodecInfo {
                         codec_id,
                         payload_type: media.rtpmap.payload_type as u8,
@@ -3139,7 +2182,7 @@ impl RtspStreamHandler {
             )?;
         }
 
-        if let Err(err) = sender.send(FrameData::MediaInfo {
+        if let Err(err) = sender.try_send(FrameData::MediaInfo {
             media_info: MediaInfo {
                 audio_clock_rate,
                 video_clock_rate,
@@ -3173,7 +2216,7 @@ impl RtspStreamHandler {
                     timestamp: 0,
                     data: bytes_writer.extract_current_bytes(),
                 };
-                if let Err(err) = sender.send(frame_data) {
+                if let Err(err) = sender.try_send(frame_data) {
                     error!(error = %err, "send_sps_pps_error");
                 }
                 *video_clock_rate = media.rtpmap.clock_rate;
@@ -3190,7 +2233,7 @@ impl RtspStreamHandler {
                     timestamp: 0,
                     data: bytes_writer.extract_current_bytes(),
                 };
-                if let Err(err) = sender.send(frame_data) {
+                if let Err(err) = sender.try_send(frame_data) {
                     error!(error = %err, "send_sps_pps_vps_error");
                 }
                 *vcodec = VideoCodecType::H265;
@@ -3201,7 +2244,7 @@ impl RtspStreamHandler {
                     timestamp: 0,
                     data: data.asc.clone(),
                 };
-                if let Err(err) = sender.send(frame_data) {
+                if let Err(err) = sender.try_send(frame_data) {
                     error!(error = %err, "send_asc_error");
                 }
                 *audio_clock_rate = media.rtpmap.clock_rate;

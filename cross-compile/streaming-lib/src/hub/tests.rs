@@ -73,7 +73,7 @@ async fn test_streams_hub_set_flags() {
 async fn test_streams_hub_publish_success() {
     let mut hub = StreamsHub::new(None);
     let identifier = create_test_stream_identifier();
-    let (_frame_sender, frame_receiver) = mpsc::unbounded_channel();
+    let (_frame_sender, frame_receiver) = crate::hub::define::frame_data_channel();
     let receiver = DataReceiver {
         frame_receiver: Some(frame_receiver),
         packet_receiver: None,
@@ -98,8 +98,8 @@ async fn test_streams_hub_publish_success() {
 async fn test_streams_hub_publish_duplicate() {
     let mut hub = StreamsHub::new(None);
     let identifier = create_test_stream_identifier();
-    let (_frame_sender1, frame_receiver1) = mpsc::unbounded_channel();
-    let (_frame_sender2, frame_receiver2) = mpsc::unbounded_channel();
+    let (_frame_sender1, frame_receiver1) = crate::hub::define::frame_data_channel();
+    let (_frame_sender2, frame_receiver2) = crate::hub::define::frame_data_channel();
 
     let receiver1 = DataReceiver {
         frame_receiver: Some(frame_receiver1),
@@ -143,7 +143,7 @@ async fn test_streams_hub_publish_duplicate() {
 async fn test_streams_hub_subscribe_success() {
     let mut hub = StreamsHub::new(None);
     let identifier = create_test_stream_identifier();
-    let (_frame_sender, frame_receiver) = mpsc::unbounded_channel();
+    let (_frame_sender, frame_receiver) = crate::hub::define::frame_data_channel();
     let receiver = DataReceiver {
         frame_receiver: Some(frame_receiver),
         packet_receiver: None,
@@ -162,7 +162,7 @@ async fn test_streams_hub_subscribe_success() {
 
     // Then subscribe
     let sub_info = create_test_subscriber_info();
-    let (sender, _) = mpsc::unbounded_channel();
+    let (sender, _) = crate::hub::define::frame_data_channel();
     let data_sender = DataSender::Frame { sender };
 
     let result = hub
@@ -177,7 +177,7 @@ async fn test_streams_hub_subscribe_no_stream() {
     let mut hub = StreamsHub::new(None);
     let identifier = create_test_stream_identifier();
     let sub_info = create_test_subscriber_info();
-    let (sender, _) = mpsc::unbounded_channel();
+    let (sender, _) = crate::hub::define::frame_data_channel();
     let data_sender = DataSender::Frame { sender };
 
     let result = hub.subscribe(&identifier, sub_info, data_sender).await;
@@ -196,7 +196,7 @@ async fn test_streams_hub_subscribe_no_stream_emits_pull_event_when_enabled() {
 
     let identifier = create_test_stream_identifier();
     let sub_info = create_test_subscriber_info();
-    let (sender, _) = mpsc::unbounded_channel();
+    let (sender, _) = crate::hub::define::frame_data_channel();
     let data_sender = DataSender::Frame { sender };
     let mut client_event_receiver = hub.get_client_event_consumer();
 
@@ -236,7 +236,7 @@ async fn test_streams_hub_subscribe_no_stream_emits_pull_event_when_enabled() {
 async fn test_streams_hub_unsubscribe_success() {
     let mut hub = StreamsHub::new(None);
     let identifier = create_test_stream_identifier();
-    let (_frame_sender, frame_receiver) = mpsc::unbounded_channel();
+    let (_frame_sender, frame_receiver) = crate::hub::define::frame_data_channel();
     let receiver = DataReceiver {
         frame_receiver: Some(frame_receiver),
         packet_receiver: None,
@@ -255,7 +255,7 @@ async fn test_streams_hub_unsubscribe_success() {
 
     // Subscribe
     let sub_info = create_test_subscriber_info();
-    let (sender, _) = mpsc::unbounded_channel();
+    let (sender, _) = crate::hub::define::frame_data_channel();
     let data_sender = DataSender::Frame { sender };
     let _ = hub
         .subscribe(&identifier, sub_info.clone(), data_sender)
@@ -284,7 +284,7 @@ async fn test_streams_hub_unsubscribe_no_stream() {
 async fn test_streams_hub_unpublish_success() {
     let mut hub = StreamsHub::new(None);
     let identifier = create_test_stream_identifier();
-    let (_frame_sender, frame_receiver) = mpsc::unbounded_channel();
+    let (_frame_sender, frame_receiver) = crate::hub::define::frame_data_channel();
     let receiver = DataReceiver {
         frame_receiver: Some(frame_receiver),
         packet_receiver: None,
@@ -326,7 +326,7 @@ async fn test_streams_hub_unpublish_no_stream() {
 async fn test_streams_hub_request_success() {
     let mut hub = StreamsHub::new(None);
     let identifier = create_test_stream_identifier();
-    let (_frame_sender, frame_receiver) = mpsc::unbounded_channel();
+    let (_frame_sender, frame_receiver) = crate::hub::define::frame_data_channel();
     let receiver = DataReceiver {
         frame_receiver: Some(frame_receiver),
         packet_receiver: None,
@@ -405,7 +405,7 @@ async fn test_handle_api_statistic_result_sender_dropped_completes_without_panic
 async fn test_handle_api_statistic_with_stream_success() {
     let mut hub = StreamsHub::new(None);
     let identifier = create_test_stream_identifier();
-    let (_frame_sender, frame_receiver) = mpsc::unbounded_channel();
+    let (_frame_sender, frame_receiver) = crate::hub::define::frame_data_channel();
     let receiver = DataReceiver {
         frame_receiver: Some(frame_receiver),
         packet_receiver: None,
@@ -567,7 +567,7 @@ async fn test_handle_api_stop_relay_stream_pull_failure() {
 
 #[tokio::test]
 async fn test_stream_data_transceiver_new() {
-    let (_data_sender, data_receiver) = mpsc::unbounded_channel();
+    let (_data_sender, data_receiver) = crate::hub::define::frame_data_channel();
     let (_event_sender, event_receiver) = mpsc::unbounded_channel();
     let identifier = create_test_stream_identifier();
     let mock_handler = Arc::new(MockStreamHandler::new());
@@ -593,7 +593,7 @@ async fn test_stream_data_transceiver_new() {
 }
 #[tokio::test]
 async fn test_stream_data_transceiver_frame_forwarding() {
-    let (frame_sender, frame_receiver) = mpsc::unbounded_channel();
+    let (frame_sender, frame_receiver) = crate::hub::define::frame_data_channel();
     let (event_sender, event_receiver) = mpsc::unbounded_channel();
     let identifier = create_test_stream_identifier();
     let mut mock_handler = MockStreamHandler::new();
@@ -616,7 +616,7 @@ async fn test_stream_data_transceiver_frame_forwarding() {
     });
 
     // 1. Subscribe
-    let (sub_frame_sender, mut sub_frame_receiver) = mpsc::unbounded_channel();
+    let (sub_frame_sender, mut sub_frame_receiver) = crate::hub::define::frame_data_channel();
     let sub_info = create_test_subscriber_info();
     let data_sender = DataSender::Frame {
         sender: sub_frame_sender,
@@ -640,7 +640,7 @@ async fn test_stream_data_transceiver_frame_forwarding() {
         data: BytesMut::from(&[0x01, 0x02, 0x03][..]),
     };
 
-    frame_sender.send(frame_data).unwrap();
+    frame_sender.try_send(frame_data).unwrap();
 
     // 3. Verify Subscriber Received Data
     let received = tokio::time::timeout(
@@ -808,7 +808,7 @@ async fn test_receive_statistics_data_video_keyframe_resets_gop_counter() {
 async fn test_receive_frame_data_prunes_closed_senders() {
     let senders: Arc<Mutex<HashMap<Uuid, FrameDataSender>>> = Arc::new(Mutex::new(HashMap::new()));
     let id = Uuid::new(crate::hub::utils::RandomDigitCount::Four);
-    let (tx, rx) = mpsc::unbounded_channel::<FrameData>();
+    let (tx, rx) = crate::hub::define::frame_data_channel();
     drop(rx);
 
     {
@@ -854,7 +854,7 @@ async fn test_receive_packet_data_prunes_closed_senders() {
 async fn test_get_subscriber_count_initially_zero() {
     // Test that a newly created transceiver has 0 subscribers
     let identifier = create_test_stream_identifier();
-    let (_frame_sender, frame_receiver) = mpsc::unbounded_channel();
+    let (_frame_sender, frame_receiver) = crate::hub::define::frame_data_channel();
     let (_event_sender, event_receiver) = mpsc::unbounded_channel();
     let receiver = DataReceiver {
         frame_receiver: Some(frame_receiver),
@@ -879,7 +879,7 @@ async fn test_get_subscriber_count_increments_on_subscribe() {
     // Test that subscriber count increases when a subscriber is added
     let mut hub = StreamsHub::new(None);
     let identifier = create_test_stream_identifier();
-    let (_frame_sender, frame_receiver) = mpsc::unbounded_channel();
+    let (_frame_sender, frame_receiver) = crate::hub::define::frame_data_channel();
     let receiver = DataReceiver {
         frame_receiver: Some(frame_receiver),
         packet_receiver: None,
@@ -901,7 +901,7 @@ async fn test_get_subscriber_count_increments_on_subscribe() {
 
     // Subscribe first subscriber
     let sub_info_1 = create_test_subscriber_info();
-    let (sender_1, _) = mpsc::unbounded_channel();
+    let (sender_1, _) = crate::hub::define::frame_data_channel();
     let data_sender_1 = DataSender::Frame { sender: sender_1 };
 
     hub.subscribe(&identifier, sub_info_1.clone(), data_sender_1)
@@ -1163,7 +1163,7 @@ async fn test_receive_packet_data_none_is_noop() {
 async fn test_receive_frame_data_video_forwarded() {
     let senders: Arc<Mutex<HashMap<Uuid, FrameDataSender>>> = Arc::new(Mutex::new(HashMap::new()));
     let id = Uuid::new(crate::hub::utils::RandomDigitCount::Four);
-    let (tx, mut rx) = mpsc::unbounded_channel::<FrameData>();
+    let (tx, mut rx) = crate::hub::define::frame_data_channel();
     senders.lock().await.insert(id, tx);
 
     let frame = FrameData::Video {
@@ -1210,7 +1210,7 @@ async fn test_get_subscriber_count_decrements_on_unsubscribe() {
     // Test that subscriber count decreases when a subscriber is removed
     let mut hub = StreamsHub::new(None);
     let identifier = create_test_stream_identifier();
-    let (_frame_sender, frame_receiver) = mpsc::unbounded_channel();
+    let (_frame_sender, frame_receiver) = crate::hub::define::frame_data_channel();
     let receiver = DataReceiver {
         frame_receiver: Some(frame_receiver),
         packet_receiver: None,
@@ -1229,7 +1229,7 @@ async fn test_get_subscriber_count_decrements_on_unsubscribe() {
 
     // Subscribe
     let sub_info = create_test_subscriber_info();
-    let (sender, _) = mpsc::unbounded_channel();
+    let (sender, _) = crate::hub::define::frame_data_channel();
     let data_sender = DataSender::Frame { sender };
     hub.subscribe(&identifier, sub_info.clone(), data_sender)
         .await

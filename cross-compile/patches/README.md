@@ -18,11 +18,6 @@ This directory contains patches to enable Rust crates to compile for the ARMv5TE
 patches/
 ├── setup.sh              # Download and patch script
 ├── diffs/                # Patch files (tracked in git)
-│   ├── webrtc-util-0.7.0.patch
-│   ├── webrtc-ice-0.9.1.patch
-│   ├── webrtc-sctp-0.8.0.patch
-│   ├── rtp-0.8.0.patch
-│   ├── tokio-metrics-0.2.2.patch
 │   └── openssl-src-300.2.3+3.2.1.patch
 ├── originals/            # Downloaded crates (git-ignored)
 └── *-full/               # Patched crates (git-ignored)
@@ -32,11 +27,6 @@ patches/
 
 |Crate|Version|Change|
 |-----|-------|-----|
-|webrtc-util|0.7.0|Replace `AtomicU64` with `portable-atomic`|
-|webrtc-ice|0.9.1|Replace `AtomicU64` with `portable-atomic`|
-|webrtc-sctp|0.8.0|Replace `AtomicU64` with `portable-atomic`|
-|rtp|0.8.0|Replace `AtomicU64` with `portable-atomic`|
-|tokio-metrics|0.2.2|Replace `AtomicU64` with `portable-atomic`|
 |openssl-src|300.2.3+3.2.1|Add uClibc target support|
 
 ## Why Patches?

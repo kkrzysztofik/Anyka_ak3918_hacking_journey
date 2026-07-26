@@ -388,9 +388,7 @@ export async function setVideoEncoderConfiguration(
  */
 function parseH264Options(h264: Record<string, unknown>): VideoEncoderConfigurationOptions['h264'] {
   const resolutions = h264.ResolutionsAvailable as
-    | Array<Record<string, unknown>>
-    | Record<string, unknown>
-    | undefined;
+    Array<Record<string, unknown>> | Record<string, unknown> | undefined;
   const frameRateRange = h264.FrameRateRange as Record<string, unknown> | undefined;
   const encodingIntervalRange = h264.EncodingIntervalRange as Record<string, unknown> | undefined;
   const bitrateRange = h264.BitrateRange as Record<string, unknown> | undefined;
@@ -436,9 +434,7 @@ function parseH264Options(h264: Record<string, unknown>): VideoEncoderConfigurat
  */
 function parseJpegOptions(jpeg: Record<string, unknown>): VideoEncoderConfigurationOptions['jpeg'] {
   const resolutions = jpeg.ResolutionsAvailable as
-    | Array<Record<string, unknown>>
-    | Record<string, unknown>
-    | undefined;
+    Array<Record<string, unknown>> | Record<string, unknown> | undefined;
   const frameRateRange = jpeg.FrameRateRange as Record<string, unknown> | undefined;
   const encodingIntervalRange = jpeg.EncodingIntervalRange as Record<string, unknown> | undefined;
 

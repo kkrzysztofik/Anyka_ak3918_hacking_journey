@@ -14,14 +14,16 @@ start_onvif_rust() {
   # Enable core dumps for this process
   ulimit -c unlimited 2>/dev/null || log WARN "Failed to set ulimit -c unlimited"
 
-  # Configure kernel core pattern to write to persistent storage with process info
-  echo '/mnt/logs/core.%e.%p' > /proc/sys/kernel/core_pattern 2>/dev/null \
+  # Configure kernel core pattern to write to /mnt/coredumps
+  mkdir -p /mnt/coredumps 2>/dev/null || log WARN "Failed to create /mnt/coredumps"
+  echo '/mnt/coredumps/core.%e.%p.%t' > /proc/sys/kernel/core_pattern 2>/dev/null \
     || log WARN "Failed to set core_pattern (non-root or read-only procfs)"
 
   # Verify sufficient disk space for coredumps (need at least 5MB free)
-  FREE_KB=$(df /mnt 2>/dev/null | awk 'NR==2{print $4}')
+  FREE_KB=$(df /mnt/coredumps 2>/dev/null | awk 'NR==2{print $4}')
+  [ -z "$FREE_KB" ] && FREE_KB=$(df /mnt 2>/dev/null | awk 'NR==2{print $4}')
   if [ -n "$FREE_KB" ] && [ "$FREE_KB" -lt 5120 ]; then
-    log WARN "Low disk space on /mnt: ${FREE_KB}KB free — coredumps may be truncated"
+    log WARN "Low disk space for coredumps: ${FREE_KB}KB free — coredumps may be truncated"
   fi
 
   # Binary has RPATH embedded — no LD_LIBRARY_PATH needed.

@@ -6,79 +6,6 @@ use bytes::BytesMut;
 use http::StatusCode;
 
 // ========================================================================
-// InterleavedBinaryData Tests
-// ========================================================================
-
-#[test]
-fn test_interleaved_binary_data_parse_valid() {
-    // Dollar sign (0x24) + channel (0x00) + length (0x0004)
-    let data: &[u8] = &[0x24, 0x00, 0x00, 0x04, 0xDE, 0xAD, 0xBE, 0xEF];
-    let mut reader = BytesReader::new(BytesMut::from(data));
-
-    let result = InterleavedBinaryData::new(&mut reader).unwrap();
-    assert!(result.is_some());
-    let interleaved = result.unwrap();
-    assert_eq!(interleaved.channel_identifier, 0x00);
-    assert_eq!(interleaved.length, 4);
-}
-
-#[test]
-fn test_interleaved_binary_data_parse_channel_1() {
-    // Dollar sign + channel 1 + length 10
-    let data: &[u8] = &[0x24, 0x01, 0x00, 0x0A];
-    let mut reader = BytesReader::new(BytesMut::from(data));
-
-    let result = InterleavedBinaryData::new(&mut reader).unwrap();
-    assert!(result.is_some());
-    let interleaved = result.unwrap();
-    assert_eq!(interleaved.channel_identifier, 0x01);
-    assert_eq!(interleaved.length, 10);
-}
-
-#[test]
-fn test_interleaved_binary_data_parse_large_length() {
-    // Dollar sign + channel 2 + length 0xFFFF (65535)
-    let data: &[u8] = &[0x24, 0x02, 0xFF, 0xFF];
-    let mut reader = BytesReader::new(BytesMut::from(data));
-
-    let result = InterleavedBinaryData::new(&mut reader).unwrap();
-    assert!(result.is_some());
-    let interleaved = result.unwrap();
-    assert_eq!(interleaved.channel_identifier, 0x02);
-    assert_eq!(interleaved.length, 65535);
-}
-
-#[test]
-fn test_interleaved_binary_data_no_dollar_sign() {
-    // Not starting with dollar sign - should return None
-    let data: &[u8] = &[0x52, 0x54, 0x53, 0x50]; // "RTSP"
-    let mut reader = BytesReader::new(BytesMut::from(data));
-
-    let result = InterleavedBinaryData::new(&mut reader).unwrap();
-    assert!(result.is_none());
-}
-
-#[test]
-fn test_interleaved_binary_data_insufficient_data() {
-    // Only dollar sign, not enough for full header
-    let data: &[u8] = &[0x24];
-    let mut reader = BytesReader::new(BytesMut::from(data));
-
-    let result = InterleavedBinaryData::new(&mut reader);
-    // Should return an error due to insufficient bytes
-    assert!(result.is_err());
-}
-
-#[test]
-fn test_interleaved_binary_data_empty() {
-    let data: &[u8] = &[];
-    let mut reader = BytesReader::new(BytesMut::from(data));
-
-    let result = InterleavedBinaryData::new(&mut reader);
-    assert!(result.is_err());
-}
-
-// ========================================================================
 // gen_response Tests
 // ========================================================================
 
@@ -1211,18 +1138,17 @@ async fn test_rtsp_server_session_describe() {
 
     // Start a mock StreamHub event loop to handle the Request event
     tokio::spawn(async move {
-        if let Some(event) = event_receiver.recv().await {
-            if let StreamHubEvent::Request {
+        if let Some(event) = event_receiver.recv().await
+            && let StreamHubEvent::Request {
                 identifier: _,
                 sender,
             } = event
-            {
-                // Respond with a minimal valid SDP containing one media block
-                let dummy_sdp = "v=0\r\no=- 0 0 IN IP4 127.0.0.1\r\ns=No Name\r\nc=IN IP4 127.0.0.1\r\nt=0 0\r\nm=video 0 RTP/AVP 96\r\na=rtpmap:96 H264/90000\r\n";
-                let _ = sender.send(Information::Sdp {
-                    data: dummy_sdp.to_string(),
-                });
-            }
+        {
+            // Respond with a minimal valid SDP containing one media block
+            let dummy_sdp = "v=0\r\no=- 0 0 IN IP4 127.0.0.1\r\ns=No Name\r\nc=IN IP4 127.0.0.1\r\nt=0 0\r\nm=video 0 RTP/AVP 96\r\na=rtpmap:96 H264/90000\r\n";
+            let _ = sender.send(Information::Sdp {
+                data: dummy_sdp.to_string(),
+            });
         }
     });
 
@@ -1313,19 +1239,19 @@ async fn test_rtsp_server_session_describe_normalizes_path() {
         .returning(|_| Ok(()));
 
     tokio::spawn(async move {
-        if let Some(event) = event_receiver.recv().await {
-            if let StreamHubEvent::Request { identifier, sender } = event {
-                match identifier {
-                    StreamIdentifier::Rtsp { stream_path } => {
-                        assert_eq!(stream_path, "live/test");
-                    }
-                    _ => panic!("unexpected identifier type"),
+        if let Some(event) = event_receiver.recv().await
+            && let StreamHubEvent::Request { identifier, sender } = event
+        {
+            match identifier {
+                StreamIdentifier::Rtsp { stream_path } => {
+                    assert_eq!(stream_path, "live/test");
                 }
-                let dummy_sdp = "v=0\r\no=- 0 0 IN IP4 127.0.0.1\r\ns=No Name\r\nc=IN IP4 127.0.0.1\r\nt=0 0\r\nm=video 0 RTP/AVP 96\r\na=rtpmap:96 H264/90000\r\n";
-                let _ = sender.send(Information::Sdp {
-                    data: dummy_sdp.to_string(),
-                });
+                _ => panic!("unexpected identifier type"),
             }
+            let dummy_sdp = "v=0\r\no=- 0 0 IN IP4 127.0.0.1\r\ns=No Name\r\nc=IN IP4 127.0.0.1\r\nt=0 0\r\nm=video 0 RTP/AVP 96\r\na=rtpmap:96 H264/90000\r\n";
+            let _ = sender.send(Information::Sdp {
+                data: dummy_sdp.to_string(),
+            });
         }
     });
 
@@ -1890,7 +1816,7 @@ async fn test_rtsp_server_session_play_then_teardown_sends_two_responses_and_uns
         while let Some(event) = event_receiver.recv().await {
             match event {
                 StreamHubEvent::Subscribe { result_sender, .. } => {
-                    let (frame_sender, frame_receiver) = tokio::sync::mpsc::unbounded_channel();
+                    let (frame_sender, frame_receiver) = crate::hub::define::frame_data_channel();
                     held_frame_sender = Some(frame_sender);
                     let data_receiver = DataReceiver {
                         frame_receiver: Some(frame_receiver),
@@ -1965,7 +1891,7 @@ async fn test_rtsp_server_session_teardown_trailing_slash_unsubscribes_normalize
         while let Some(event) = event_receiver.recv().await {
             match event {
                 StreamHubEvent::Subscribe { result_sender, .. } => {
-                    let (frame_sender, frame_receiver) = tokio::sync::mpsc::unbounded_channel();
+                    let (frame_sender, frame_receiver) = crate::hub::define::frame_data_channel();
                     held_frame_sender = Some(frame_sender);
                     let data_receiver = DataReceiver {
                         frame_receiver: Some(frame_receiver),
@@ -2038,7 +1964,7 @@ async fn test_rtsp_server_session_run_eof_stops_playback_task() {
     let event_handle = tokio::spawn(async move {
         use crate::hub::define::DataReceiver;
         if let Some(StreamHubEvent::Subscribe { result_sender, .. }) = event_receiver.recv().await {
-            let (frame_sender, frame_receiver) = tokio::sync::mpsc::unbounded_channel();
+            let (frame_sender, frame_receiver) = crate::hub::define::frame_data_channel();
             let _hold_sender = frame_sender;
             let data_receiver = DataReceiver {
                 frame_receiver: Some(frame_receiver),
@@ -2146,29 +2072,28 @@ async fn test_rtsp_server_session_play() {
     // Mock StreamHub handling Subscribe
     let subscribe_handle = tokio::spawn(async move {
         use crate::hub::define::DataReceiver;
-        if let Some(event) = event_receiver.recv().await {
-            if let StreamHubEvent::Subscribe {
+        if let Some(event) = event_receiver.recv().await
+            && let StreamHubEvent::Subscribe {
                 identifier,
                 result_sender,
                 ..
             } = event
-            {
-                match identifier {
-                    StreamIdentifier::Rtsp { stream_path } => {
-                        assert_eq!(stream_path, "live/test");
-                    }
-                    _ => panic!("Expected RTSP identifier"),
+        {
+            match identifier {
+                StreamIdentifier::Rtsp { stream_path } => {
+                    assert_eq!(stream_path, "live/test");
                 }
-                // Create a channel for frame data that we immediately close to simulate end/error
-                let (_frame_sender, frame_receiver) = tokio::sync::mpsc::unbounded_channel();
-
-                let data_receiver = DataReceiver {
-                    frame_receiver: Some(frame_receiver),
-                    packet_receiver: None,
-                };
-
-                let _ = result_sender.send(Ok((data_receiver, None)));
+                _ => panic!("Expected RTSP identifier"),
             }
+            // Create a channel for frame data that we immediately close to simulate end/error
+            let (_frame_sender, frame_receiver) = crate::hub::define::frame_data_channel();
+
+            let data_receiver = DataReceiver {
+                frame_receiver: Some(frame_receiver),
+                packet_receiver: None,
+            };
+
+            let _ = result_sender.send(Ok((data_receiver, None)));
         }
     });
 
@@ -2252,28 +2177,27 @@ async fn test_rtsp_server_session_play_normalizes_track_path() {
 
     let subscribe_handle = tokio::spawn(async move {
         use crate::hub::define::DataReceiver;
-        if let Some(event) = event_receiver.recv().await {
-            if let StreamHubEvent::Subscribe {
+        if let Some(event) = event_receiver.recv().await
+            && let StreamHubEvent::Subscribe {
                 identifier,
                 result_sender,
                 ..
             } = event
-            {
-                match identifier {
-                    StreamIdentifier::Rtsp { stream_path } => {
-                        assert_eq!(stream_path, "live/test");
-                    }
-                    _ => panic!("Expected RTSP identifier"),
+        {
+            match identifier {
+                StreamIdentifier::Rtsp { stream_path } => {
+                    assert_eq!(stream_path, "live/test");
                 }
-                let (_frame_sender, frame_receiver) = tokio::sync::mpsc::unbounded_channel();
-
-                let data_receiver = DataReceiver {
-                    frame_receiver: Some(frame_receiver),
-                    packet_receiver: None,
-                };
-
-                let _ = result_sender.send(Ok((data_receiver, None)));
+                _ => panic!("Expected RTSP identifier"),
             }
+            let (_frame_sender, frame_receiver) = crate::hub::define::frame_data_channel();
+
+            let data_receiver = DataReceiver {
+                frame_receiver: Some(frame_receiver),
+                packet_receiver: None,
+            };
+
+            let _ = result_sender.send(Ok((data_receiver, None)));
         }
     });
 
@@ -2334,16 +2258,16 @@ async fn test_rtsp_server_session_play_includes_rtp_info() {
 
     let subscribe_handle = tokio::spawn(async move {
         use crate::hub::define::DataReceiver;
-        if let Some(event) = event_receiver.recv().await {
-            if let StreamHubEvent::Subscribe { result_sender, .. } = event {
-                let (_frame_sender, frame_receiver) = tokio::sync::mpsc::unbounded_channel();
-                drop(_frame_sender);
-                let data_receiver = DataReceiver {
-                    frame_receiver: Some(frame_receiver),
-                    packet_receiver: None,
-                };
-                let _ = result_sender.send(Ok((data_receiver, None)));
-            }
+        if let Some(event) = event_receiver.recv().await
+            && let StreamHubEvent::Subscribe { result_sender, .. } = event
+        {
+            let (_frame_sender, frame_receiver) = crate::hub::define::frame_data_channel();
+            drop(_frame_sender);
+            let data_receiver = DataReceiver {
+                frame_receiver: Some(frame_receiver),
+                packet_receiver: None,
+            };
+            let _ = result_sender.send(Ok((data_receiver, None)));
         }
     });
 
@@ -2504,391 +2428,6 @@ fn test_gen_response_method_not_allowed() {
     assert_eq!(response.reason_phrase, "Method Not Allowed");
 }
 
-#[test]
-fn test_scale_rtp_timestamp_90000hz() {
-    let ts = RtspServerSession::scale_rtp_timestamp(1000, 90_000);
-    assert_eq!(ts, 90_000);
-}
-
-#[test]
-fn test_scale_rtp_timestamp_zero_clock() {
-    let ts = RtspServerSession::scale_rtp_timestamp(1234, 0);
-    assert_eq!(ts, 1234);
-}
-
-#[test]
-fn test_rtp_timestamp_normalizer_corrects_non_wrap_regression() {
-    let mut normalizer = RtpTimestampNormalizer::default();
-
-    let first = normalizer.normalize(1000, 90_000, TrackType::Video);
-    let second = normalizer.normalize(1033, 90_000, TrackType::Video);
-    let regressed = normalizer.normalize(0, 90_000, TrackType::Video);
-    let next = normalizer.normalize(33, 90_000, TrackType::Video);
-
-    assert_eq!(first.output_timestamp, 90_000);
-    assert_eq!(second.output_timestamp, 92_970);
-    assert!(regressed.non_wrap_regressed);
-    assert_eq!(regressed.non_wrap_regression_count, 1);
-    assert_eq!(
-        regressed.output_timestamp,
-        second.output_timestamp.wrapping_add(1)
-    );
-    assert!(next.output_timestamp > regressed.output_timestamp);
-}
-
-#[test]
-fn test_rtp_timestamp_normalizer_corrects_duplicate_timestamp() {
-    let mut normalizer = RtpTimestampNormalizer::default();
-
-    let first = normalizer.normalize(1_000, 90_000, TrackType::Video);
-    let duplicate = normalizer.normalize(1_000, 90_000, TrackType::Video);
-    let next = normalizer.normalize(1_040, 90_000, TrackType::Video);
-
-    assert_eq!(first.output_timestamp, 90_000);
-    assert!(duplicate.non_wrap_regressed);
-    assert_eq!(duplicate.non_wrap_regression_count, 1);
-    assert_eq!(
-        duplicate.output_timestamp,
-        first.output_timestamp.wrapping_add(1)
-    );
-    assert!(next.output_timestamp > duplicate.output_timestamp);
-}
-
-#[test]
-fn test_rtp_timestamp_normalizer_preserves_true_wrap() {
-    let mut normalizer = RtpTimestampNormalizer::default();
-
-    let first = normalizer.normalize(u32::MAX - 10, 0, TrackType::Video);
-    let wrapped = normalizer.normalize(5, 0, TrackType::Video);
-
-    assert_eq!(first.output_timestamp, u32::MAX - 10);
-    assert!(!wrapped.non_wrap_regressed);
-    assert_eq!(wrapped.non_wrap_regression_count, 0);
-    assert_eq!(wrapped.output_timestamp, 5);
-}
-
-#[test]
-fn test_rtp_timestamp_normalizer_audio_no_scaling() {
-    // Audio timestamps are already in sample units, should not be scaled
-    let mut normalizer = RtpTimestampNormalizer::default();
-
-    // AAC @ 48kHz: First frame at 0 samples
-    let first = normalizer.normalize(0, 48_000, TrackType::Audio);
-    assert_eq!(first.output_timestamp, 0);
-
-    // Second frame at 1024 samples
-    let second = normalizer.normalize(1024, 48_000, TrackType::Audio);
-    assert_eq!(second.output_timestamp, 1024);
-
-    // Third frame at 2048 samples
-    let third = normalizer.normalize(2048, 48_000, TrackType::Audio);
-    assert_eq!(third.output_timestamp, 2048);
-
-    // No scaling should occur
-    assert_eq!(second.scaled_timestamp, 1024);
-    assert_eq!(third.scaled_timestamp, 2048);
-}
-
-#[test]
-fn test_rtp_timestamp_normalizer_video_scaling() {
-    // Video timestamps are in milliseconds, should be scaled to 90kHz
-    let mut normalizer = RtpTimestampNormalizer::default();
-
-    // First frame at 0ms
-    let first = normalizer.normalize(0, 90_000, TrackType::Video);
-    assert_eq!(first.output_timestamp, 0);
-
-    // Second frame at 33ms (typical for 30fps)
-    let second = normalizer.normalize(33, 90_000, TrackType::Video);
-    assert_eq!(second.output_timestamp, 2970); // 33 * 90000 / 1000
-
-    // Third frame at 66ms
-    let third = normalizer.normalize(66, 90_000, TrackType::Video);
-    assert_eq!(third.output_timestamp, 5940); // 66 * 90000 / 1000
-}
-
-#[test]
-fn test_rtp_timestamp_audio_sequence_monotonic() {
-    // Verify audio timestamps produce monotonic sequence without precision loss
-    let mut normalizer = RtpTimestampNormalizer::default();
-
-    // Simulate 100 AAC frames @ 48kHz (1024 samples/frame)
-    for i in 0..100 {
-        let timestamp = i * 1024;
-        let result = normalizer.normalize(timestamp, 48_000, TrackType::Audio);
-
-        // Timestamp should exactly match input (no scaling)
-        assert_eq!(result.output_timestamp, timestamp);
-        assert_eq!(result.scaled_timestamp, timestamp);
-        assert!(!result.non_wrap_regressed);
-    }
-}
-
-#[test]
-fn test_video_access_unit_assembler_coalesces_same_timestamp() {
-    let mut assembler = VideoAccessUnitAssembler::default();
-
-    let ts1 = 100u32;
-    let ts2 = 200u32;
-
-    // First chunk is a raw NAL (no Annex-B prefix).
-    assert!(
-        assembler
-            .push(ts1, BytesMut::from(&b"\x67\x11\x22"[..]))
-            .is_none()
-    );
-
-    // Second chunk already has a 3-byte Annex-B start code.
-    assert!(
-        assembler
-            .push(ts1, BytesMut::from(&b"\x00\x00\x01\x68\x33"[..]))
-            .is_none()
-    );
-
-    // Timestamp change flushes the previous access unit.
-    let flushed = assembler
-        .push(ts2, BytesMut::from(&b"\x65\x44"[..]))
-        .expect("expected flush on timestamp change");
-
-    assert_eq!(flushed.0, ts1);
-    let mut expected = BytesMut::new();
-    expected.extend_from_slice(&ANNEXB_NALU_START_CODE[..]);
-    expected.extend_from_slice(&b"\x67\x11\x22"[..]);
-    expected.extend_from_slice(&b"\x00\x00\x01\x68\x33"[..]);
-    assert_eq!(flushed.1, expected);
-
-    let (ts, bytes) = assembler.flush().expect("expected pending access unit");
-    assert_eq!(ts, ts2);
-    let mut expected2 = BytesMut::new();
-    expected2.extend_from_slice(&ANNEXB_NALU_START_CODE[..]);
-    expected2.extend_from_slice(&b"\x65\x44"[..]);
-    assert_eq!(bytes, expected2);
-}
-
-#[test]
-fn test_video_access_unit_assembler_flush_empty_returns_none() {
-    let mut assembler = VideoAccessUnitAssembler::default();
-    assert!(assembler.flush().is_none());
-    assert!(assembler.push(1, BytesMut::new()).is_none());
-    assert!(assembler.flush().is_none());
-}
-
-// ========================================================================
-// RtpTrackCounters Tests
-// ========================================================================
-
-#[test]
-fn test_rtp_track_counters_new_initial_state() {
-    let counters = RtpTrackCounters::new();
-    assert_eq!(counters.packet_count.load(Ordering::Relaxed), 0);
-    assert_eq!(counters.byte_count.load(Ordering::Relaxed), 0);
-    assert_eq!(counters.first_send_ms.load(Ordering::Relaxed), 0);
-    assert_eq!(counters.last_send_ms.load(Ordering::Relaxed), 0);
-    assert_eq!(counters.last_seq.load(Ordering::Relaxed), u32::MAX);
-    assert_eq!(counters.last_timestamp.load(Ordering::Relaxed), u32::MAX);
-}
-
-#[test]
-fn test_rtp_track_counters_first_packet() {
-    let counters = RtpTrackCounters::new();
-    let obs = counters.on_packet_sent(100, 1000, 45000);
-
-    assert_eq!(obs.packets_sent, 1);
-    assert_eq!(obs.bytes_sent, 100);
-    assert!(obs.prev_seq.is_none());
-    assert!(obs.prev_timestamp.is_none());
-    assert!(obs.seq_delta.is_none());
-    assert!(obs.timestamp_delta.is_none());
-    assert!(!obs.seq_gap);
-    assert!(!obs.seq_regressed);
-    assert!(!obs.timestamp_regressed);
-}
-
-#[test]
-fn test_rtp_track_counters_sequential_packets() {
-    let counters = RtpTrackCounters::new();
-    counters.on_packet_sent(100, 1000, 45000);
-    let obs = counters.on_packet_sent(150, 1001, 48000);
-
-    assert_eq!(obs.packets_sent, 2);
-    assert_eq!(obs.bytes_sent, 250);
-    assert_eq!(obs.prev_seq, Some(1000));
-    assert_eq!(obs.seq_delta, Some(1));
-    assert_eq!(obs.prev_timestamp, Some(45000));
-    assert_eq!(obs.timestamp_delta, Some(3000));
-    assert!(!obs.seq_gap);
-    assert!(!obs.seq_regressed);
-    assert!(!obs.timestamp_regressed);
-}
-
-#[test]
-fn test_rtp_track_counters_sequence_gap_detected() {
-    let counters = RtpTrackCounters::new();
-    counters.on_packet_sent(100, 1000, 45000);
-    let obs = counters.on_packet_sent(150, 1005, 48000);
-
-    assert_eq!(obs.seq_delta, Some(5));
-    assert!(obs.seq_gap);
-    assert!(!obs.seq_regressed);
-}
-
-#[test]
-fn test_rtp_track_counters_sequence_wraparound() {
-    let counters = RtpTrackCounters::new();
-    counters.on_packet_sent(100, 65535, 45000);
-    let obs = counters.on_packet_sent(150, 0, 48000);
-
-    assert_eq!(obs.prev_seq, Some(65535));
-    assert_eq!(obs.seq_delta, Some(1));
-    assert!(!obs.seq_gap);
-    assert!(!obs.seq_regressed);
-}
-
-#[test]
-fn test_rtp_track_counters_sequence_regression_detected() {
-    let counters = RtpTrackCounters::new();
-    counters.on_packet_sent(100, 1005, 45000);
-    let obs = counters.on_packet_sent(150, 1000, 48000);
-
-    assert!(obs.seq_delta.unwrap() >= 0x8000);
-    assert!(obs.seq_regressed);
-    assert!(!obs.seq_gap);
-}
-
-#[test]
-fn test_rtp_track_counters_timestamp_regression_detected() {
-    let counters = RtpTrackCounters::new();
-    // Use values where current < previous with small gap -> wrapping delta > threshold
-    counters.on_packet_sent(100, 1000, 0x1000);
-    let obs = counters.on_packet_sent(150, 1001, 0x0500);
-
-    let delta = obs.timestamp_delta.unwrap();
-    // 0x0500 - 0x1000 wraps to 0xFFFFF500, which exceeds the threshold
-    assert!(delta > RTP_TIMESTAMP_WRAP_THRESHOLD);
-    assert!(obs.timestamp_regressed);
-}
-
-#[test]
-fn test_rtp_track_counters_snapshot_initial() {
-    let counters = RtpTrackCounters::new();
-    let (packets, bytes, duration) = counters.snapshot();
-
-    assert_eq!(packets, 0);
-    assert_eq!(bytes, 0);
-    assert!(duration.is_none());
-}
-
-#[test]
-fn test_rtp_track_counters_snapshot_after_sends() {
-    let counters = RtpTrackCounters::new();
-    counters.on_packet_sent(100, 1000, 45000);
-    std::thread::sleep(std::time::Duration::from_millis(10));
-    counters.on_packet_sent(150, 1001, 48000);
-
-    let (packets, bytes, duration) = counters.snapshot();
-    assert_eq!(packets, 2);
-    assert_eq!(bytes, 250);
-    assert!(duration.is_some());
-    assert!(duration.unwrap() >= 10);
-}
-
-// ========================================================================
-// RtpTimestampNormalizer Tests
-// ========================================================================
-
-#[test]
-fn test_rtp_timestamp_normalizer_audio_passthrough() {
-    let mut normalizer = RtpTimestampNormalizer::default();
-
-    let first = normalizer.normalize(1000, 48_000, TrackType::Audio);
-    assert_eq!(first.output_timestamp, 1000);
-    assert_eq!(first.scaled_timestamp, 1000);
-    assert!(!first.non_wrap_regressed);
-}
-
-#[test]
-fn test_rtp_timestamp_normalizer_regression_correction() {
-    let mut normalizer = RtpTimestampNormalizer::default();
-
-    normalizer.normalize(0, 90_000, TrackType::Video);
-    let second = normalizer.normalize(33, 90_000, TrackType::Video);
-
-    // Third frame has lower timestamp -> regression
-    let third = normalizer.normalize(20, 90_000, TrackType::Video);
-    assert!(third.output_timestamp > second.output_timestamp);
-    assert!(third.non_wrap_regressed);
-    assert_eq!(third.non_wrap_regression_count, 1);
-}
-
-#[test]
-fn test_rtp_timestamp_normalizer_equal_timestamp_correction() {
-    let mut normalizer = RtpTimestampNormalizer::default();
-
-    let first = normalizer.normalize(1000, 48_000, TrackType::Audio);
-    let second = normalizer.normalize(1000, 48_000, TrackType::Audio);
-
-    assert!(second.output_timestamp > first.output_timestamp);
-    assert!(second.non_wrap_regressed);
-}
-
-#[test]
-fn test_rtp_timestamp_normalizer_true_wrap_not_corrected() {
-    let mut normalizer = RtpTimestampNormalizer::default();
-
-    normalizer.normalize(0xFFFF_0000, 90_000, TrackType::Video);
-    let second = normalizer.normalize(0x0000_1000, 90_000, TrackType::Video);
-
-    // True wrap (large gap > threshold) should NOT be flagged as regression
-    assert!(!second.non_wrap_regressed);
-}
-
-#[test]
-fn test_rtp_timestamp_normalizer_multiple_regressions() {
-    let mut normalizer = RtpTimestampNormalizer::default();
-
-    normalizer.normalize(1000, 48_000, TrackType::Audio);
-    let reg1 = normalizer.normalize(999, 48_000, TrackType::Audio);
-    let reg2 = normalizer.normalize(998, 48_000, TrackType::Audio);
-
-    assert_eq!(reg1.non_wrap_regression_count, 1);
-    assert_eq!(reg2.non_wrap_regression_count, 2);
-}
-
-// ========================================================================
-// has_annexb_start_code Tests
-// ========================================================================
-
-#[test]
-fn test_has_annexb_start_code_3byte() {
-    assert!(has_annexb_start_code(&[0x00, 0x00, 0x01]));
-    assert!(has_annexb_start_code(&[0x00, 0x00, 0x01, 0x67]));
-}
-
-#[test]
-fn test_has_annexb_start_code_4byte() {
-    assert!(has_annexb_start_code(&[0x00, 0x00, 0x00, 0x01]));
-    assert!(has_annexb_start_code(&[0x00, 0x00, 0x00, 0x01, 0x68]));
-}
-
-#[test]
-fn test_has_annexb_start_code_false() {
-    assert!(!has_annexb_start_code(&[0x00, 0x00, 0x02]));
-    assert!(!has_annexb_start_code(&[0x67, 0x00, 0x01]));
-    assert!(!has_annexb_start_code(&[0x00, 0x01, 0x00]));
-    assert!(!has_annexb_start_code(&[]));
-    assert!(!has_annexb_start_code(&[0x00]));
-}
-
-// ========================================================================
-// Helper Function Tests
-// ========================================================================
-
-#[test]
-fn test_now_millis_positive() {
-    let now = now_millis();
-    assert!(now > 0);
-}
-
 // ========================================================================
 // validate_rtsp_request_headers Tests
 // ========================================================================
@@ -3017,411 +2556,6 @@ fn test_validate_rtsp_request_headers_content_length_with_whitespace() {
 }
 
 // ========================================================================
-// VideoAccessUnitAssembler Additional Edge Case Tests
-// ========================================================================
-
-#[test]
-fn test_video_access_unit_assembler_single_chunk_flush() {
-    let mut assembler = VideoAccessUnitAssembler::default();
-    // Push one chunk, then flush it
-    assert!(
-        assembler
-            .push(42, BytesMut::from(&b"\x65\xAA\xBB"[..]))
-            .is_none()
-    );
-    let (ts, bytes) = assembler.flush().expect("expected pending data");
-    assert_eq!(ts, 42);
-    // Should have Annex-B prefix prepended (raw NAL, no start code)
-    assert!(bytes.starts_with(&ANNEXB_NALU_START_CODE[..]));
-}
-
-#[test]
-fn test_video_access_unit_assembler_preserves_existing_annexb_prefix() {
-    let mut assembler = VideoAccessUnitAssembler::default();
-    let chunk_with_start_code = BytesMut::from(&b"\x00\x00\x00\x01\x67\x11"[..]);
-    assembler.push(10, chunk_with_start_code.clone());
-    let (ts, bytes) = assembler.flush().unwrap();
-    assert_eq!(ts, 10);
-    // Should NOT double-prepend start code
-    assert_eq!(bytes, chunk_with_start_code);
-}
-
-#[test]
-fn test_video_access_unit_assembler_three_byte_start_code_preserved() {
-    let mut assembler = VideoAccessUnitAssembler::default();
-    let chunk = BytesMut::from(&b"\x00\x00\x01\x68\x22"[..]);
-    assembler.push(20, chunk.clone());
-    let (_, bytes) = assembler.flush().unwrap();
-    // 3-byte start code is also recognized
-    assert_eq!(bytes, chunk);
-}
-
-#[test]
-fn test_video_access_unit_assembler_multiple_timestamp_transitions() {
-    let mut assembler = VideoAccessUnitAssembler::default();
-
-    // ts=100, two chunks
-    assert!(
-        assembler
-            .push(100, BytesMut::from(&b"\x67\x01"[..]))
-            .is_none()
-    );
-    assert!(
-        assembler
-            .push(100, BytesMut::from(&b"\x68\x02"[..]))
-            .is_none()
-    );
-
-    // ts=200 flushes ts=100 AU
-    let flushed = assembler.push(200, BytesMut::from(&b"\x65\x03"[..]));
-    assert!(flushed.is_some());
-    let (ts, _) = flushed.unwrap();
-    assert_eq!(ts, 100);
-
-    // ts=300 flushes ts=200 AU
-    let flushed2 = assembler.push(300, BytesMut::from(&b"\x65\x04"[..]));
-    assert!(flushed2.is_some());
-    let (ts2, _) = flushed2.unwrap();
-    assert_eq!(ts2, 200);
-
-    // Final flush for ts=300
-    let (ts3, _) = assembler.flush().unwrap();
-    assert_eq!(ts3, 300);
-}
-
-#[test]
-fn test_video_access_unit_assembler_empty_chunk_ignored() {
-    let mut assembler = VideoAccessUnitAssembler::default();
-    assert!(assembler.push(50, BytesMut::new()).is_none());
-    // No pending data
-    assert!(assembler.flush().is_none());
-}
-
-#[test]
-fn test_video_access_unit_assembler_empty_after_data_then_empty() {
-    let mut assembler = VideoAccessUnitAssembler::default();
-    assembler.push(10, BytesMut::from(&b"\x65\x01"[..]));
-    // Empty chunk is ignored, does not change pending timestamp
-    assert!(assembler.push(10, BytesMut::new()).is_none());
-    let (ts, _) = assembler.flush().unwrap();
-    assert_eq!(ts, 10);
-}
-
-// ========================================================================
-// scale_rtp_timestamp Additional Edge Case Tests
-// ========================================================================
-
-#[test]
-fn test_scale_rtp_timestamp_48000hz_audio() {
-    // 48000Hz audio: timestamp is already in sample units, but let's test the math
-    // 1000ms * 48000 / 1000 = 48000
-    let result = RtspServerSession::scale_rtp_timestamp(1000, 48000);
-    assert_eq!(result, 48000);
-}
-
-#[test]
-fn test_scale_rtp_timestamp_large_timestamp_saturates() {
-    // Very large timestamp_ms near u32::MAX — verify no panic from overflow
-    let result = RtspServerSession::scale_rtp_timestamp(u32::MAX, 90000);
-    // (u32::MAX as u64) * 90000 / 1000 → wraps into u32
-    let expected = ((u32::MAX as u64).saturating_mul(90000) / 1000) as u32;
-    assert_eq!(result, expected);
-}
-
-#[test]
-fn test_scale_rtp_timestamp_one_ms() {
-    // 1ms at 90kHz = 90 ticks
-    assert_eq!(RtspServerSession::scale_rtp_timestamp(1, 90000), 90);
-}
-
-#[test]
-fn test_contains_h264_idr_detects_idr_nal() {
-    let data = [
-        0x00, 0x00, 0x00, 0x01, 0x67, 0x42, 0x00, 0x1e, // SPS
-        0x00, 0x00, 0x00, 0x01, 0x65, 0x88, 0x84, // IDR
-    ];
-    assert!(contains_h264_idr(&data));
-}
-
-#[test]
-fn test_lag_tracker_reports_positive_lag_for_old_frame() {
-    let mut tracker = LagTracker {
-        anchor_local: Instant::now() - Duration::from_millis(500),
-        anchor_source_ts: 1000,
-        last_source_ts: 1200,
-        initialized: true,
-    };
-    let lag_ms = tracker.lag_ms(1200);
-    assert!(lag_ms >= 200);
-}
-
-#[test]
-fn test_lag_tracker_resets_on_large_timestamp_regression() {
-    let mut tracker = LagTracker {
-        anchor_local: Instant::now() - Duration::from_millis(500),
-        anchor_source_ts: 10_000,
-        last_source_ts: 20_000,
-        initialized: true,
-    };
-    let lag_ms = tracker.lag_ms(100);
-    assert_eq!(lag_ms, 0);
-    assert_eq!(tracker.anchor_source_ts, 100);
-}
-
-#[test]
-fn test_maybe_reanchor_video_lag_tracker_on_stale_idr_reanchors() {
-    let mut tracker = LagTracker {
-        anchor_local: Instant::now() - Duration::from_millis(750),
-        anchor_source_ts: 5_000,
-        last_source_ts: 5_400,
-        initialized: true,
-    };
-
-    let did_reanchor =
-        maybe_reanchor_video_lag_tracker_on_stale_idr(&mut tracker, 5_420, 650, 600, true);
-
-    assert!(did_reanchor);
-    assert_eq!(tracker.anchor_source_ts, 5_420);
-    assert_eq!(tracker.last_source_ts, 5_420);
-}
-
-#[test]
-fn test_maybe_reanchor_video_lag_tracker_on_stale_non_idr_does_not_reanchor() {
-    let mut tracker = LagTracker {
-        anchor_local: Instant::now() - Duration::from_millis(750),
-        anchor_source_ts: 5_000,
-        last_source_ts: 5_400,
-        initialized: true,
-    };
-
-    let did_reanchor =
-        maybe_reanchor_video_lag_tracker_on_stale_idr(&mut tracker, 5_420, 650, 600, false);
-
-    assert!(!did_reanchor);
-    assert_eq!(tracker.anchor_source_ts, 5_000);
-    assert_eq!(tracker.last_source_ts, 5_400);
-}
-
-// ========================================================================
-// FramePacer Tests
-// ========================================================================
-
-#[tokio::test]
-async fn test_frame_pacer_first_frame_no_sleep() {
-    let mut pacer = FramePacer::new();
-    let before = Instant::now();
-    pacer.pace(1000).await;
-    // First frame should complete instantly (well under 10ms).
-    assert!(before.elapsed() < Duration::from_millis(10));
-    assert!(pacer.last_send.is_some());
-    assert_eq!(pacer.last_timestamp_ms, Some(1000));
-}
-
-#[tokio::test]
-async fn test_frame_pacer_sleeps_when_ahead() {
-    let mut pacer = FramePacer::new();
-    pacer.pace(0).await;
-
-    // Send second frame with 66ms timestamp gap but essentially zero
-    // wall-clock elapsed — the pacer should sleep ~66ms.
-    let before = Instant::now();
-    pacer.pace(66).await;
-    let elapsed = before.elapsed();
-
-    // Allow generous tolerance for CI/tokio timer granularity.
-    assert!(
-        elapsed >= Duration::from_millis(40),
-        "expected sleep of ~66ms, got {:?}",
-        elapsed
-    );
-    assert!(
-        elapsed < Duration::from_millis(200),
-        "sleep took too long: {:?}",
-        elapsed
-    );
-}
-
-#[tokio::test]
-async fn test_frame_pacer_no_sleep_when_behind() {
-    let mut pacer = FramePacer::new();
-    pacer.pace(0).await;
-
-    // Wait longer than the timestamp delta before sending next frame.
-    tokio::time::sleep(Duration::from_millis(80)).await;
-
-    let before = Instant::now();
-    pacer.pace(50).await; // 50ms gap, but 80ms already elapsed
-    let elapsed = before.elapsed();
-
-    // Should complete nearly instantly (no sleep needed).
-    assert!(
-        elapsed < Duration::from_millis(10),
-        "expected no sleep, got {:?}",
-        elapsed
-    );
-}
-
-#[tokio::test]
-async fn test_frame_pacer_caps_at_max_delta() {
-    let mut pacer = FramePacer::new();
-    pacer.pace(0).await;
-
-    // 500ms timestamp gap should be capped at PACE_MAX_DELTA_MS (200ms).
-    let before = Instant::now();
-    pacer.pace(500).await;
-    let elapsed = before.elapsed();
-
-    // Should sleep ~200ms (capped), not 500ms.
-    assert!(
-        elapsed < Duration::from_millis(300),
-        "expected ~200ms (capped), got {:?}",
-        elapsed
-    );
-    assert!(
-        elapsed >= Duration::from_millis(150),
-        "expected ~200ms (capped), got {:?}",
-        elapsed
-    );
-}
-
-#[test]
-fn test_pacing_timestamp_ms_video() {
-    let frame = FrameData::Video {
-        timestamp: 1234,
-        data: BytesMut::new(),
-    };
-    assert_eq!(pacing_timestamp_ms(&frame), Some(1234));
-}
-
-#[test]
-fn test_pacing_timestamp_ms_audio_none() {
-    let frame = FrameData::Audio {
-        timestamp: 48_000,
-        data: BytesMut::new(),
-    };
-    assert_eq!(pacing_timestamp_ms(&frame), None);
-}
-
-// ========================================================================
-// LagRecoveryMode::from_str_value Tests
-// ========================================================================
-
-#[test]
-fn test_lag_recovery_mode_from_str_value_off_returns_disabled() {
-    let mode = LagRecoveryMode::from_str_value("off");
-    assert_eq!(mode, LagRecoveryMode::Disabled);
-}
-
-#[test]
-fn test_lag_recovery_mode_from_str_value_none_returns_disabled() {
-    let mode = LagRecoveryMode::from_str_value("none");
-    assert_eq!(mode, LagRecoveryMode::Disabled);
-}
-
-#[test]
-fn test_lag_recovery_mode_from_str_value_disabled_returns_disabled() {
-    let mode = LagRecoveryMode::from_str_value("disabled");
-    assert_eq!(mode, LagRecoveryMode::Disabled);
-}
-
-#[test]
-fn test_lag_recovery_mode_from_str_value_latest_idr_returns_latest_idr() {
-    let mode = LagRecoveryMode::from_str_value("latest_idr");
-    assert_eq!(mode, LagRecoveryMode::LatestIdr);
-}
-
-#[test]
-fn test_lag_recovery_mode_from_str_value_anything_else_returns_latest_idr() {
-    let mode = LagRecoveryMode::from_str_value("anything_else");
-    assert_eq!(mode, LagRecoveryMode::LatestIdr);
-}
-
-#[test]
-fn test_lag_recovery_mode_from_str_value_case_insensitive() {
-    assert_eq!(
-        LagRecoveryMode::from_str_value("OFF"),
-        LagRecoveryMode::Disabled
-    );
-    assert_eq!(
-        LagRecoveryMode::from_str_value("None"),
-        LagRecoveryMode::Disabled
-    );
-    assert_eq!(
-        LagRecoveryMode::from_str_value("DISABLED"),
-        LagRecoveryMode::Disabled
-    );
-    assert_eq!(
-        LagRecoveryMode::from_str_value("Latest_Idr"),
-        LagRecoveryMode::LatestIdr
-    );
-}
-
-#[test]
-fn test_lag_recovery_mode_from_str_value_trims_whitespace() {
-    assert_eq!(
-        LagRecoveryMode::from_str_value("  off  "),
-        LagRecoveryMode::Disabled
-    );
-    assert_eq!(
-        LagRecoveryMode::from_str_value("  latest_idr  "),
-        LagRecoveryMode::LatestIdr
-    );
-}
-
-// ========================================================================
-// PlaybackLatencyPolicy::from_config Tests
-// ========================================================================
-
-#[test]
-fn test_playback_latency_policy_from_config_default() {
-    use crate::config::StreamingConfig;
-
-    let config = StreamingConfig::default();
-    let policy = PlaybackLatencyPolicy::from_config(&config);
-
-    // Default config has max_frame_age_ms=1500, lag_recovery_mode=LatestIdr
-    assert_eq!(policy.max_frame_age_ms, 1500);
-    assert_eq!(policy.lag_recovery_mode, LagRecoveryMode::LatestIdr);
-    // These are constants
-    assert_eq!(policy.lag_recovery_threshold_ms, LAG_RECOVERY_THRESHOLD_MS);
-    assert_eq!(policy.sustained_lag_frames, LAG_RECOVERY_SUSTAINED_FRAMES);
-}
-
-#[test]
-fn test_playback_latency_policy_from_config_custom_max_frame_age() {
-    use crate::config::StreamingConfig;
-
-    let config = StreamingConfig::new().with_max_frame_age(2000);
-    let policy = PlaybackLatencyPolicy::from_config(&config);
-
-    assert_eq!(policy.max_frame_age_ms, 2000);
-}
-
-#[test]
-fn test_playback_latency_policy_from_config_zero_max_frame_age_uses_default() {
-    use crate::config::StreamingConfig;
-
-    // Config with max_frame_age_ms = 0 should fall back to DEFAULT_MAX_FRAME_AGE_MS
-    let config = StreamingConfig {
-        max_frame_age_ms: 0,
-        ..Default::default()
-    };
-    let policy = PlaybackLatencyPolicy::from_config(&config);
-
-    assert_eq!(policy.max_frame_age_ms, DEFAULT_MAX_FRAME_AGE_MS);
-}
-
-#[test]
-fn test_playback_latency_policy_from_config_disabled_lag_recovery() {
-    use crate::config::StreamingConfig;
-
-    let config = StreamingConfig::new().with_lag_recovery_mode(LagRecoveryMode::Disabled);
-    let policy = PlaybackLatencyPolicy::from_config(&config);
-
-    assert_eq!(policy.lag_recovery_mode, LagRecoveryMode::Disabled);
-}
-
-// ========================================================================
 // Config Threading Integration Tests
 // ========================================================================
 
@@ -3515,46 +2649,255 @@ fn test_play_ready_timeout_from_config() {
     assert_eq!(session.config.play_ready_timeout_ms, 3000);
 }
 
-/// Test that max_frame_age config is correctly threaded to PlaybackLatencyPolicy
-#[test]
-fn test_max_frame_age_config_threaded_to_policy() {
-    // Test various custom values
-    for custom_max_age in [100, 500, 2000, 5000] {
-        let config = StreamingConfig::new().with_max_frame_age(custom_max_age);
-        let policy = PlaybackLatencyPolicy::from_config(&config);
+// ========================================================================
+// RTP batching tests
+// ========================================================================
 
-        // Verify the policy uses the config value directly
-        assert_eq!(
-            policy.max_frame_age_ms, custom_max_age,
-            "Policy should use config max_frame_age_ms={}, got {}",
-            custom_max_age, policy.max_frame_age_ms
-        );
+struct TestNetIO {
+    writes: std::sync::Arc<tokio::sync::Mutex<Vec<bytes::Bytes>>>,
+    net_type: crate::io::NetType,
+}
+
+impl TestNetIO {
+    fn new(
+        writes: std::sync::Arc<tokio::sync::Mutex<Vec<bytes::Bytes>>>,
+        net_type: crate::io::NetType,
+    ) -> Self {
+        Self { writes, net_type }
     }
 }
 
-/// Test that lag_recovery_mode config is correctly threaded to PlaybackLatencyPolicy
-#[test]
-fn test_lag_recovery_mode_config_threaded_to_policy() {
-    // Test Disabled mode
-    let config_disabled = StreamingConfig::new().with_lag_recovery_mode(LagRecoveryMode::Disabled);
-    let policy_disabled = PlaybackLatencyPolicy::from_config(&config_disabled);
-    assert_eq!(policy_disabled.lag_recovery_mode, LagRecoveryMode::Disabled);
+#[async_trait::async_trait]
+impl crate::io::TNetIO for TestNetIO {
+    async fn write(
+        &mut self,
+        bytes: bytes::Bytes,
+    ) -> Result<(), crate::io::bytesio_errors::BytesIOError> {
+        self.writes.lock().await.push(bytes);
+        Ok(())
+    }
 
-    // Test LatestIdr mode
-    let config_latest = StreamingConfig::new().with_lag_recovery_mode(LagRecoveryMode::LatestIdr);
-    let policy_latest = PlaybackLatencyPolicy::from_config(&config_latest);
-    assert_eq!(policy_latest.lag_recovery_mode, LagRecoveryMode::LatestIdr);
+    async fn read(&mut self) -> Result<BytesMut, crate::io::bytesio_errors::BytesIOError> {
+        Err(crate::io::bytesio_errors::BytesIOErrorValue::NoneReturn.into())
+    }
+
+    async fn read_timeout(
+        &mut self,
+        _duration: std::time::Duration,
+    ) -> Result<BytesMut, crate::io::bytesio_errors::BytesIOError> {
+        Err(crate::io::bytesio_errors::BytesIOErrorValue::NoneReturn.into())
+    }
+
+    fn get_net_type(&self) -> crate::io::NetType {
+        self.net_type
+    }
 }
 
-/// Test that zero max_frame_age falls back to default in policy
-#[test]
-fn test_zero_max_frame_age_falls_back_to_default_in_policy() {
-    let config = StreamingConfig {
-        max_frame_age_ms: 0,
-        ..Default::default()
-    };
-    let policy = PlaybackLatencyPolicy::from_config(&config);
+fn make_test_rtp_packet(
+    seq_number: u16,
+    marker: u8,
+    payload_len: usize,
+) -> crate::protocol::rtsp::rtp::RtpPacket {
+    let mut packet = crate::protocol::rtsp::rtp::RtpPacket::new(
+        crate::protocol::rtsp::rtp::rtp_header::RtpHeader {
+            marker,
+            payload_type: 96,
+            seq_number,
+            timestamp: 90_000,
+            ssrc: 0x1234_5678,
+            ..Default::default()
+        },
+    );
+    packet.payload = BytesMut::from(vec![0xAB; payload_len].as_slice());
+    packet
+}
 
-    // Should fall back to DEFAULT_MAX_FRAME_AGE_MS (1500)
-    assert_eq!(policy.max_frame_age_ms, DEFAULT_MAX_FRAME_AGE_MS);
+fn count_interleaved_packets(bytes: &[u8]) -> usize {
+    let mut offset = 0usize;
+    let mut count = 0usize;
+
+    while offset + 4 <= bytes.len() {
+        if bytes[offset] != 0x24 {
+            break;
+        }
+
+        let packet_len = u16::from_be_bytes([bytes[offset + 2], bytes[offset + 3]]) as usize;
+        let next_offset = offset + 4 + packet_len;
+        if next_offset > bytes.len() {
+            break;
+        }
+
+        count += 1;
+        offset = next_offset;
+    }
+
+    count
+}
+
+fn make_socket_addr() -> std::net::SocketAddr {
+    std::net::SocketAddr::from(([127, 0, 0, 1], 8554))
+}
+
+fn make_counters() -> std::sync::Arc<RtpTrackCounters> {
+    std::sync::Arc::new(RtpTrackCounters::new())
+}
+
+#[tokio::test]
+async fn test_tcp_batching_flushes_once_per_marker_terminated_frame() {
+    let writes = Arc::new(tokio::sync::Mutex::new(Vec::<Bytes>::new()));
+    let io: std::sync::Arc<tokio::sync::Mutex<Box<dyn crate::io::TNetIO + Send + Sync>>> =
+        std::sync::Arc::new(tokio::sync::Mutex::new(Box::new(TestNetIO::new(
+            writes.clone(),
+            crate::io::NetType::TCP,
+        ))));
+    let handler = RtspServerSession::setup_tcp_play_packet_handler(
+        0,
+        make_counters(),
+        None,
+        "video".to_string(),
+        "sess-1".to_string(),
+        make_socket_addr(),
+        0,
+        1024 * 1024,
+    );
+
+    for seq in 1..=5u16 {
+        handler(io.clone(), make_test_rtp_packet(seq, 0, 100))
+            .await
+            .expect("non-marker packet should batch");
+    }
+
+    assert!(writes.lock().await.is_empty());
+
+    handler(io.clone(), make_test_rtp_packet(6, 1, 100))
+        .await
+        .expect("marker packet should flush frame");
+
+    let captured = writes.lock().await;
+    assert_eq!(captured.len(), 1);
+    assert_eq!(count_interleaved_packets(captured[0].as_ref()), 6);
+}
+
+#[tokio::test]
+async fn test_tcp_batching_keeps_frames_separate_across_markers() {
+    let writes = std::sync::Arc::new(tokio::sync::Mutex::new(Vec::<bytes::Bytes>::new()));
+    let io: std::sync::Arc<tokio::sync::Mutex<Box<dyn crate::io::TNetIO + Send + Sync>>> =
+        std::sync::Arc::new(tokio::sync::Mutex::new(Box::new(TestNetIO::new(
+            writes.clone(),
+            crate::io::NetType::TCP,
+        ))));
+    let handler = RtspServerSession::setup_tcp_play_packet_handler(
+        2,
+        make_counters(),
+        None,
+        "video".to_string(),
+        "sess-2".to_string(),
+        make_socket_addr(),
+        0,
+        1024 * 1024,
+    );
+
+    handler(io.clone(), make_test_rtp_packet(1, 0, 64))
+        .await
+        .expect("first packet should batch");
+    handler(io.clone(), make_test_rtp_packet(2, 1, 64))
+        .await
+        .expect("second packet should flush frame one");
+    handler(io.clone(), make_test_rtp_packet(3, 1, 64))
+        .await
+        .expect("third packet should flush frame two");
+
+    let captured = writes.lock().await;
+    assert_eq!(captured.len(), 2);
+    assert_eq!(count_interleaved_packets(captured[0].as_ref()), 2);
+    assert_eq!(count_interleaved_packets(captured[1].as_ref()), 1);
+}
+
+#[tokio::test]
+async fn test_tcp_batching_handles_large_iframe_burst() {
+    let writes = std::sync::Arc::new(tokio::sync::Mutex::new(Vec::<bytes::Bytes>::new()));
+    let io: std::sync::Arc<tokio::sync::Mutex<Box<dyn crate::io::TNetIO + Send + Sync>>> =
+        std::sync::Arc::new(tokio::sync::Mutex::new(Box::new(TestNetIO::new(
+            writes.clone(),
+            crate::io::NetType::TCP,
+        ))));
+    let handler = RtspServerSession::setup_tcp_play_packet_handler(
+        4,
+        make_counters(),
+        None,
+        "video".to_string(),
+        "sess-3".to_string(),
+        make_socket_addr(),
+        0,
+        1024 * 1024,
+    );
+
+    for seq in 0..71 {
+        handler(io.clone(), make_test_rtp_packet(seq, 0, 1300))
+            .await
+            .expect("large non-marker packet should batch");
+    }
+    handler(io.clone(), make_test_rtp_packet(71, 1, 1300))
+        .await
+        .expect("marker packet should flush large frame");
+
+    let captured = writes.lock().await;
+    assert_eq!(captured.len(), 1);
+    assert_eq!(count_interleaved_packets(captured[0].as_ref()), 72);
+}
+
+#[tokio::test]
+async fn test_udp_batching_flushes_all_packets_on_marker() {
+    let writes = std::sync::Arc::new(tokio::sync::Mutex::new(Vec::<bytes::Bytes>::new()));
+    let io: std::sync::Arc<tokio::sync::Mutex<Box<dyn crate::io::TNetIO + Send + Sync>>> =
+        std::sync::Arc::new(tokio::sync::Mutex::new(Box::new(TestNetIO::new(
+            writes.clone(),
+            crate::io::NetType::UDP,
+        ))));
+    let handler = RtspServerSession::setup_udp_play_packet_handler(
+        make_counters(),
+        None,
+        "video".to_string(),
+        "sess-udp".to_string(),
+        make_socket_addr(),
+        0,
+        10,
+        300,
+        1024 * 1024,
+    );
+
+    for seq in 10..20u16 {
+        handler(io.clone(), make_test_rtp_packet(seq, 0, 80))
+            .await
+            .expect("udp packet should batch");
+    }
+    assert!(writes.lock().await.is_empty());
+
+    handler(io.clone(), make_test_rtp_packet(20, 1, 80))
+        .await
+        .expect("udp marker packet should flush");
+
+    let captured = writes.lock().await;
+    assert_eq!(captured.len(), 11);
+}
+
+#[tokio::test]
+async fn test_async_bytes_writer_flush_moves_buffer_contents() {
+    let writes = std::sync::Arc::new(tokio::sync::Mutex::new(Vec::<bytes::Bytes>::new()));
+    let io: std::sync::Arc<tokio::sync::Mutex<Box<dyn crate::io::TNetIO + Send + Sync>>> =
+        std::sync::Arc::new(tokio::sync::Mutex::new(Box::new(TestNetIO::new(
+            writes.clone(),
+            crate::io::NetType::TCP,
+        ))));
+    let mut writer = crate::io::bytes_writer::AsyncBytesWriter::new(io);
+
+    writer.write(&[1, 2, 3, 4]).expect("write should succeed");
+    assert_eq!(writer.bytes_writer.len(), 4);
+
+    writer.flush().await.expect("flush should succeed");
+
+    assert!(writer.bytes_writer.is_empty());
+    let captured = writes.lock().await;
+    assert_eq!(captured.len(), 1);
+    assert_eq!(captured[0].as_ref(), &[1, 2, 3, 4]);
 }

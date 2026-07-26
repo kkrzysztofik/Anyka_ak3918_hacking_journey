@@ -67,11 +67,9 @@ static uint32_t convert_frame_type(enum video_frame_type sdk_type)
 }
 
 /**
- * fill_slot_timing - Populate wall-clock timing fields in a slot header.
+ * fill_slot_timing - Populate wall-clock timing field in a slot header.
  *
- * Fills wall_clock_us and inter_frame_us in the slot header after a
- * successful vd_ring_write() call.  Also updates g_last_wall_clock_us
- * for the next inter-frame delta calculation.
+ * Fills wall_clock_us in the slot header after a successful vd_ring_write() call.
  *
  * @param ring_base  Base pointer of the shared memory ring buffer.
  * @param slot_idx   Index of the slot to update.
@@ -84,14 +82,6 @@ static void fill_slot_timing(void *ring_base, int slot_idx)
 
     struct vd_slot_header *slot = vd_ring_get_slot_hdr(ring_base, (uint32_t)slot_idx);
     slot->wall_clock_us = wall_us;
-
-    uint32_t delta = 0;
-    if (g_last_wall_clock_us > 0 && wall_us > g_last_wall_clock_us) {
-        uint64_t diff = wall_us - g_last_wall_clock_us;
-        delta = (diff > UINT32_MAX) ? UINT32_MAX : (uint32_t)diff;
-    }
-    slot->inter_frame_us = delta;
-    g_last_wall_clock_us = wall_us;
 }
 
 /**
@@ -120,7 +110,7 @@ static const char *slot_state_name(uint32_t state)
  * push_frame_thread - Dedicated pthread entry point for push-based frame delivery.
  *
  * Polls ak_venc_get_stream() in a tight loop, writes frames to the ring
- * buffer, and pushes unsolicited 12-byte notifications to the frame client.
+ * buffer, and pushes unsolicited 20-byte notifications to the frame client.
  * The Rust side just reads notifications — zero polling, zero wasted IPC.
  *
  * @param arg   Pointer to the struct push_stream_state for this stream slot.
@@ -169,10 +159,49 @@ static void *push_frame_thread(void *arg)
             continue;
         }
 
+        /* Success — reset consecutive no-data counter */
+        no_data_count = 0;
+
         uint32_t frame_len = vs.len;
-        uint32_t timestamp_ms = (uint32_t)vs.ts;
+        uint32_t raw_timestamp_ms = (uint32_t)vs.ts;
+        uint32_t timestamp_ms;
         uint32_t seq_no = (uint32_t)vs.seq_no;
         uint32_t ring_frame_type = convert_frame_type(vs.frame_type);
+
+        /* Timestamp normalization: subtract first timestamp to produce 0-based values */
+        if (!state->timestamp_initialized) {
+            state->first_timestamp_ms = raw_timestamp_ms;
+            state->timestamp_initialized = 1;
+            timestamp_ms = 0;
+            log_info("event=timestamp_anchor stream=%u first_ts_ms=%u diag_monotonic_ms=%llu",
+                     state->stream_id,
+                     raw_timestamp_ms,
+                     (unsigned long long)diag_monotonic_ms());
+        } else {
+            /* 32-bit SDK timestamps wrap ~every 49.7 days; extend with u64 before subtract */
+            uint64_t raw64 = (uint64_t)raw_timestamp_ms;
+            uint64_t first64 = (uint64_t)state->first_timestamp_ms;
+            if (raw64 < first64) {
+                log_warn("event=timestamp_wrap stream=%u raw_ts=%u first_ts=%u diag_monotonic_ms=%llu",
+                         state->stream_id,
+                         raw_timestamp_ms,
+                         state->first_timestamp_ms,
+                         (unsigned long long)diag_monotonic_ms());
+                /* 32-bit SDK clock may wrap multiple times over very long runs; extend until aligned. */
+                while (raw64 < first64) {
+                    raw64 += (uint64_t)1U << 32;
+                }
+            }
+            uint64_t delta = raw64 - first64;
+            timestamp_ms = (delta > UINT32_MAX) ? UINT32_MAX : (uint32_t)delta;
+        }
+
+        log_debug("event=timestamp_normalize stream=%u raw_ts=%u normalized_ts=%u seq_no=%u diag_monotonic_ms=%llu",
+                  state->stream_id,
+                  raw_timestamp_ms,
+                  timestamp_ms,
+                  seq_no,
+                  (unsigned long long)diag_monotonic_ms());
 
         /* Try ring buffer write */
         int ring_slot = -1;
@@ -249,6 +278,8 @@ static void *push_frame_thread(void *arg)
             notif.slot_index = (uint32_t)ring_slot;
             notif.frame_len = frame_len;
             notif.flags = VD_NOTIFY_LAST_FRAGMENT;
+            notif.stream_id = ring_stream_id;
+            notif.seq_no = seq_no;
             if (send_frame_notification(state->stream_id, &notif) != 0) {
                 log_warn("[push] notification write failed, client may have disconnected");
             }
@@ -259,6 +290,8 @@ static void *push_frame_thread(void *arg)
             notif.slot_index = 0;
             notif.frame_len = 0;
             notif.flags = VD_NOTIFY_FRAME_DROPPED;
+            notif.stream_id = ring_stream_id;
+            notif.seq_no = seq_no;
             (void)send_frame_notification(state->stream_id, &notif);
             log_warn("event=push_drop_notify stream=%u seq_no=%u frame_type=%u diag_monotonic_ms=%llu",
                      state->stream_id,
@@ -383,6 +416,9 @@ int handle_venc_start_push(int fd, const uint8_t *req, uint32_t req_len)
     state->stream_handle = req_read_handle(req, 0);
     state->stream_id = stream_id;
     state->active = 1;
+    /* Reset timestamp normalization state on push start */
+    state->timestamp_initialized = 0;
+    state->first_timestamp_ms = 0;
 
     /* Reset ring buffer if this is the first push activation (both slots
      * were inactive).  Clears stale sequences/flags from a previous session

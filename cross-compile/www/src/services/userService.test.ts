@@ -85,8 +85,12 @@ describe('userService', () => {
       await createUser('new<user>&"\'"', 'pass<word>&"\'"', 'User');
 
       const payload = vi.mocked(apiClient.post).mock.calls[0][1] as string;
-      expect(payload).toContain('<tt:Username>new&lt;user&gt;&amp;&quot;&apos;&quot;</tt:Username>');
-      expect(payload).toContain('<tt:Password>pass&lt;word&gt;&amp;&quot;&apos;&quot;</tt:Password>');
+      expect(payload).toContain(
+        '<tt:Username>new&lt;user&gt;&amp;&quot;&apos;&quot;</tt:Username>',
+      );
+      expect(payload).toContain(
+        '<tt:Password>pass&lt;word&gt;&amp;&quot;&apos;&quot;</tt:Password>',
+      );
     });
   });
 
@@ -112,7 +116,9 @@ describe('userService', () => {
       await deleteUser('old<user>&"\'"');
 
       const payload = vi.mocked(apiClient.post).mock.calls[0][1] as string;
-      expect(payload).toContain('<tds:Username>old&lt;user&gt;&amp;&quot;&apos;&quot;</tds:Username>');
+      expect(payload).toContain(
+        '<tds:Username>old&lt;user&gt;&amp;&quot;&apos;&quot;</tds:Username>',
+      );
     });
   });
 
@@ -139,7 +145,9 @@ describe('userService', () => {
 
       const payload = vi.mocked(apiClient.post).mock.calls[0][1] as string;
       expect(payload).toContain('<tt:Username>ad&lt;min&gt;&amp;&quot;&apos;&quot;</tt:Username>');
-      expect(payload).toContain('<tt:Password>new&lt;password&gt;&amp;&quot;&apos;&quot;</tt:Password>');
+      expect(payload).toContain(
+        '<tt:Password>new&lt;password&gt;&amp;&quot;&apos;&quot;</tt:Password>',
+      );
     });
   });
 });

@@ -65,8 +65,12 @@ const StatusCardItem = React.forwardRef<
     data-testid={props['data-testid' as keyof typeof props] || 'status-card-item'}
     {...props}
   >
-    <h4 className="mb-[4px] text-[13px] text-[#6b6b6f]" data-testid="status-card-item-label">{label}</h4>
-    <div className="font-mono text-[15px] text-white" data-testid="status-card-item-value">{value}</div>
+    <h4 className="mb-[4px] text-[13px] text-[#6b6b6f]" data-testid="status-card-item-label">
+      {label}
+    </h4>
+    <div className="font-mono text-[15px] text-white" data-testid="status-card-item-value">
+      {value}
+    </div>
   </div>
 ));
 StatusCardItem.displayName = 'StatusCardItem';

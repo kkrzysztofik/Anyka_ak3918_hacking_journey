@@ -206,8 +206,10 @@ mod tests {
 
     #[test]
     fn test_clone_rtcp_receiver_report() {
-        let mut rr = RtcpReceiverReport::default();
-        rr.ssrc = 0x12345678;
+        let mut rr = RtcpReceiverReport {
+            ssrc: 0x12345678,
+            ..Default::default()
+        };
         rr.header.report_count = 1;
         rr.report_blocks.push(ReportBlock {
             ssrc: 0xAAAAAAAA,
@@ -647,8 +649,10 @@ mod tests {
     #[test]
     fn test_rr_marshal_too_many_report_blocks() {
         // RFC 3550 section 6.4.2: report_count is 5 bits (max 31)
-        let mut rr = RtcpReceiverReport::default();
-        rr.ssrc = 0x12345678;
+        let mut rr = RtcpReceiverReport {
+            ssrc: 0x12345678,
+            ..Default::default()
+        };
         for i in 0..32 {
             rr.report_blocks.push(ReportBlock {
                 ssrc: i,
@@ -664,8 +668,10 @@ mod tests {
     #[test]
     fn test_rr_marshal_max_report_blocks_allowed() {
         // Test that exactly 31 report blocks (max allowed) works correctly
-        let mut rr = RtcpReceiverReport::default();
-        rr.ssrc = 0x12345678;
+        let mut rr = RtcpReceiverReport {
+            ssrc: 0x12345678,
+            ..Default::default()
+        };
         for i in 0..31 {
             rr.report_blocks.push(ReportBlock {
                 ssrc: i,
@@ -685,8 +691,10 @@ mod tests {
     #[test]
     fn test_rr_marshal_32_report_blocks_fails() {
         // Test that 32 report blocks fails (exceeds 5-bit max of 31)
-        let mut rr = RtcpReceiverReport::default();
-        rr.ssrc = 0x12345678;
+        let mut rr = RtcpReceiverReport {
+            ssrc: 0x12345678,
+            ..Default::default()
+        };
         for i in 0..32 {
             rr.report_blocks.push(ReportBlock {
                 ssrc: i,

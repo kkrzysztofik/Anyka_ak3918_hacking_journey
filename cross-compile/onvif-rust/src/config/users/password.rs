@@ -316,6 +316,20 @@ mod tests {
         assert!(!manager.verify_password("wrong", &stored));
     }
 
+    /// Exercises [`PasswordManager::verify_password`] when the candidate string diverges from the
+    /// stored value (suffix mismatch). Does **not** measure constant-time properties.
+    #[test]
+    fn test_verify_password_suffix_mismatch_returns_false() {
+        let manager = PasswordManager::new();
+        let stored = SecurePassword::new("secret".to_string());
+
+        assert!(
+            !manager.verify_password("secret!", &stored),
+            "verify_password should return false for candidate {:?} vs stored prefix match",
+            "secret!"
+        );
+    }
+
     #[test]
     fn test_verify_password_empty() {
         let manager = PasswordManager::new();

@@ -41,15 +41,8 @@ async fn test_rtsp_transport_setup() {
 #[tokio::test]
 async fn test_rtsp_codec_mapping() {
     let codec_id = RtspCodecId::H264;
-    let codec_name = streaming_lib::protocol::rtsp::rtsp_codec::RTSP_CODEC_ID_2_NAME
-        .get(&codec_id)
-        .unwrap();
-    assert_eq!(*codec_name, "h264");
-
-    let mapped_id = streaming_lib::protocol::rtsp::rtsp_codec::RTSP_CODEC_NAME_2_ID
-        .get("h264")
-        .unwrap();
-    assert_eq!(*mapped_id, codec_id);
+    assert_eq!(codec_id.name(), "h264");
+    assert_eq!(RtspCodecId::from_name("h264"), Some(codec_id));
 }
 
 /// Tests basic RTSP session flow round-trip for SDP and transport.
@@ -59,7 +52,7 @@ async fn test_rtsp_session_round_trip() {
     let rtpmap_str = "96 H264/90000";
     let rtpmap = RtpMap::unmarshal(rtpmap_str).unwrap();
     let marshaled = rtpmap.marshal();
-    let rtpmap2 = RtpMap::unmarshal(&marshaled.trim()).unwrap();
+    let rtpmap2 = RtpMap::unmarshal(marshaled.trim()).unwrap();
     assert_eq!(rtpmap.encoding_name, rtpmap2.encoding_name);
     assert_eq!(rtpmap.clock_rate, rtpmap2.clock_rate);
 

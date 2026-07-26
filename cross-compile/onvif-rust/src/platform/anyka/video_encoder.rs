@@ -10,6 +10,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
+#[cfg(test)]
+use bytes::BytesMut;
 use parking_lot::RwLock;
 use portable_atomic::AtomicU64;
 
@@ -26,9 +28,8 @@ use crate::hal::common::{
 use crate::streaming::bridge::BytesMutPool;
 
 use crate::platform::common::{
-    CallbackId, Frame, FrameCallback, FrameType, OwnedFrame, OwnedFrameCallback, PlatformError,
-    PlatformResult, Resolution, StreamId, VideoEncoder, VideoEncoderConfig, VideoEncoderOptions,
-    VideoEncoding,
+    CallbackId, FrameType, OwnedFrame, OwnedFrameCallback, PlatformError, PlatformResult,
+    Resolution, StreamId, VideoEncoder, VideoEncoderConfig, VideoEncoderOptions, VideoEncoding,
 };
 
 use super::context::stream_stabilization_ms;
@@ -174,11 +175,6 @@ fn compute_no_data_recovery_interval_errors(trigger_ms: u64, cycle_sleep_ms: u64
 }
 
 #[inline]
-pub(super) fn push_mode_enabled(has_sub_stream: bool) -> bool {
-    !has_sub_stream
-}
-
-#[inline]
 pub(super) fn is_push_mode_transient_error(error: &PlatformError) -> bool {
     matches!(
         error,
@@ -192,6 +188,8 @@ pub(super) struct StreamHealthCounters {
     pub(super) sub_frames: AtomicU64,
     pub(super) main_no_data_errors: AtomicU64,
     pub(super) sub_no_data_errors: AtomicU64,
+    /// Monotonic millis of the most recent frame (0 = never).
+    pub(super) last_frame_ms: AtomicU64,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -203,23 +201,42 @@ struct StreamHealthSnapshot {
 }
 
 impl StreamHealthCounters {
+    fn now_ms() -> u64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0)
+    }
+
     fn reset(&self) {
         self.main_frames.store(0, Ordering::SeqCst);
         self.sub_frames.store(0, Ordering::SeqCst);
         self.main_no_data_errors.store(0, Ordering::SeqCst);
         self.sub_no_data_errors.store(0, Ordering::SeqCst);
+        self.last_frame_ms.store(0, Ordering::SeqCst);
     }
 
     fn record_frame(&self, stream_id: StreamId) {
         match stream_id {
             StreamId::VideoMain => {
                 self.main_frames.fetch_add(1, Ordering::SeqCst);
+                self.last_frame_ms.store(Self::now_ms(), Ordering::SeqCst);
             }
             StreamId::VideoSub => {
                 self.sub_frames.fetch_add(1, Ordering::SeqCst);
+                self.last_frame_ms.store(Self::now_ms(), Ordering::SeqCst);
             }
             StreamId::Audio => {}
         }
+    }
+
+    /// Age of the most recent frame in milliseconds, if any frame was ever seen.
+    pub(super) fn last_frame_age_ms(&self) -> Option<u64> {
+        let last = self.last_frame_ms.load(Ordering::SeqCst);
+        if last == 0 {
+            return None;
+        }
+        Some(Self::now_ms().saturating_sub(last))
     }
 
     fn record_no_data_error(&self, stream_id: StreamId) {
@@ -269,7 +286,6 @@ pub(super) fn unified_frame_read_loop(
     main_stream_handle: Arc<VideoStreamHandle>,
     sub_stream_handle: Option<Arc<VideoStreamHandle>>,
     _ffi: Arc<dyn crate::hal::common::video::VideoHalTrait>,
-    callbacks: Arc<RwLock<HashMap<CallbackId, Arc<dyn FrameCallback>>>>,
     owned_callbacks: Arc<RwLock<HashMap<CallbackId, Arc<dyn OwnedFrameCallback>>>>,
     stop_signal: Arc<AtomicBool>,
     stream_health: Arc<StreamHealthCounters>,
@@ -321,7 +337,7 @@ pub(super) fn unified_frame_read_loop(
         handle: &VideoStreamHandle,
         ffi: &dyn crate::hal::common::video::VideoHalTrait,
         state: &mut StreamState,
-        callbacks: &RwLock<HashMap<CallbackId, Arc<dyn FrameCallback>>>,
+        callbacks: &RwLock<HashMap<CallbackId, Arc<dyn OwnedFrameCallback>>>,
         stop_signal: &AtomicBool,
         stream_health: &StreamHealthCounters,
         no_data_recovery_interval_errors: u32,
@@ -479,9 +495,13 @@ pub(super) fn unified_frame_read_loop(
                     );
                 }
 
-                let frame = Frame {
-                    data: stream_data.data as *const u8,
-                    size: frame_size,
+                // SAFETY: the SDK guarantees `data` points to `frame_size` readable
+                // bytes until `venc_release_stream` is called below.
+                let payload = unsafe {
+                    std::slice::from_raw_parts(stream_data.data as *const u8, frame_size)
+                };
+                let frame = OwnedFrame {
+                    data: BytesMut::from(payload),
                     // SDK timestamps are in milliseconds
                     timestamp: stream_data.ts as u32,
                     frame_type,
@@ -489,7 +509,7 @@ pub(super) fn unified_frame_read_loop(
                 };
 
                 // Invoke all callbacks (panic-isolated)
-                invoke_callbacks_from_map(callbacks, &frame);
+                invoke_owned_callbacks_from_map(callbacks, frame);
             } else {
                 tracing::trace!(
                     stream = ?state.stream_id,
@@ -536,7 +556,7 @@ pub(super) fn unified_frame_read_loop(
             let mut current_sleep_ms: u64 = idle_poll_sleep_ms;
 
             while !stop_signal.load(Ordering::SeqCst) {
-                let has_active_callbacks = !callbacks.read().is_empty();
+                let has_active_callbacks = !owned_callbacks.read().is_empty();
                 let cycle_sleep_ms = if has_active_callbacks {
                     active_poll_sleep_ms
                 } else {
@@ -551,7 +571,7 @@ pub(super) fn unified_frame_read_loop(
                     &main_stream_handle,
                     _ffi.as_ref(),
                     &mut main_state,
-                    &callbacks,
+                    &owned_callbacks,
                     &stop_signal,
                     &stream_health,
                     no_data_recovery_interval_errors,
@@ -562,7 +582,7 @@ pub(super) fn unified_frame_read_loop(
                         sub_sh,
                         _ffi.as_ref(),
                         &mut sub_state,
-                        &callbacks,
+                        &owned_callbacks,
                         &stop_signal,
                         &stream_health,
                         no_data_recovery_interval_errors,
@@ -656,18 +676,12 @@ pub(super) fn unified_frame_read_loop(
                     );
                 }
 
-                if let Some(remaining) =
-                    invoke_owned_callbacks_from_map(&owned_callbacks, owned_frame)
-                {
-                    let frame = Frame {
-                        data: remaining.data.as_ptr(),
-                        size: frame_size,
-                        timestamp: remaining.timestamp,
-                        frame_type,
-                        stream_id: remaining.stream_id,
-                    };
-                    invoke_callbacks_from_map(&callbacks, &frame);
-                }
+                invoke_owned_callbacks_from_map(&owned_callbacks, owned_frame);
+            }
+            Err(PlatformError::Shutdown(reason)) => {
+                // Orderly producer shutdown — not a failure, so exit quietly.
+                tracing::info!(%reason, "Push mode ending: vendor-daemon shut down");
+                break;
             }
             Err(e) => {
                 tracing::debug!("Push recv error: {}", e);
@@ -699,71 +713,22 @@ pub(super) fn unified_frame_read_loop(
     );
 }
 
-/// Invoke all registered callbacks with a frame, isolating panics.
-///
-/// This is a standalone function (not a method) so it can be used from
-/// the `frame_read_loop` thread without holding a reference to `AnykaVideoEncoder`.
-fn invoke_callbacks_from_map(
-    callbacks: &RwLock<HashMap<CallbackId, Arc<dyn FrameCallback>>>,
-    frame: &Frame,
-) {
-    let cbs = callbacks.read();
-    let cb_count = cbs.len();
-    tracing::trace!(
-        callback_count = cb_count,
-        stream = ?frame.stream_id,
-        "Invoking frame callbacks"
-    );
-    let mut failed = Vec::new();
-
-    for (id, cb) in cbs.iter() {
-        let start = std::time::Instant::now();
-        let result = std::panic::catch_unwind(AssertUnwindSafe(|| {
-            cb.on_frame(frame);
-        }));
-        let elapsed = start.elapsed();
-        let elapsed_us = elapsed.as_micros() as u64;
-        record_callback_duration(elapsed_us);
-
-        if elapsed_us > CALLBACK_SLOW_WARN_THRESHOLD_US {
-            maybe_log_slow_callback(*id, elapsed_us, "borrowed");
-        }
-
-        if result.is_err() {
-            tracing::error!("Frame callback {} panicked, marking for removal", id);
-            failed.push(*id);
-        }
-    }
-
-    if !failed.is_empty() {
-        drop(cbs);
-        let mut cbs_write = callbacks.write();
-        for id in failed {
-            cbs_write.remove(&id);
-        }
-    }
-
-    maybe_log_callback_histogram();
-}
-
 /// Invoke all registered owned-frame callbacks, transferring ownership.
-///
-/// If there are no owned callbacks, returns `Some(owned_frame)` so the caller
-/// can fall back to the legacy `FrameCallback` path.
 ///
 /// If there is exactly one callback (common case — just `StreamingBridge`),
 /// the `OwnedFrame` is moved directly — true zero-copy.
 ///
 /// If there are multiple callbacks, each except the last receives a clone.
+/// With no callbacks registered the frame is simply dropped.
 pub(super) fn invoke_owned_callbacks_from_map(
     owned_callbacks: &RwLock<HashMap<CallbackId, Arc<dyn OwnedFrameCallback>>>,
     owned_frame: OwnedFrame,
-) -> Option<OwnedFrame> {
+) {
     let cbs = owned_callbacks.read();
     let cb_count = cbs.len();
 
     if cb_count == 0 {
-        return Some(owned_frame);
+        return;
     }
 
     tracing::trace!(
@@ -843,8 +808,6 @@ pub(super) fn invoke_owned_callbacks_from_map(
     }
 
     maybe_log_callback_histogram();
-
-    None // Frame was consumed by owned callbacks
 }
 
 /// Anyka video encoder implementation with FFI integration and callback support.
@@ -862,7 +825,7 @@ pub(super) fn invoke_owned_callbacks_from_map(
 ///   ├── ffi: Arc<dyn VideoHalTrait>       (injected, mockable)
 ///   ├── main_handle: RwLock<Option<Arc<VideoEncoderHandle>>>
 ///   ├── sub_handle:  RwLock<Option<Arc<VideoEncoderHandle>>>
-///   └── callbacks: RwLock<HashMap<CallbackId, Arc<dyn FrameCallback>>>
+///   └── owned_callbacks: RwLock<HashMap<CallbackId, Arc<dyn OwnedFrameCallback>>>
 /// ```
 pub(super) struct AnykaVideoEncoder {
     pub(super) ffi: Arc<dyn crate::hal::common::video::VideoHalTrait>,
@@ -875,7 +838,6 @@ pub(super) struct AnykaVideoEncoder {
     pub(super) sub_handle: RwLock<Option<Arc<VideoEncoderHandle>>>,
     pub(super) main_state: RwLock<EncoderState>,
     pub(super) sub_state: RwLock<EncoderState>,
-    pub(super) callbacks: Arc<RwLock<HashMap<CallbackId, Arc<dyn FrameCallback>>>>,
     pub(super) owned_callbacks: Arc<RwLock<HashMap<CallbackId, Arc<dyn OwnedFrameCallback>>>>,
     pub(super) next_callback_id: AtomicU64,
     pub(super) main_stream_handle: RwLock<Option<Arc<VideoStreamHandle>>>,
@@ -987,7 +949,6 @@ impl AnykaVideoEncoder {
             sub_handle: RwLock::new(None),
             main_state: RwLock::new(EncoderState::Uninitialized),
             sub_state: RwLock::new(EncoderState::Uninitialized),
-            callbacks: Arc::new(RwLock::new(HashMap::new())),
             owned_callbacks: Arc::new(RwLock::new(HashMap::new())),
             next_callback_id: AtomicU64::new(1),
             main_stream_handle: RwLock::new(None),
@@ -1075,6 +1036,11 @@ impl AnykaVideoEncoder {
         );
     }
 
+    /// Age of the newest venc-read frame, for runtime health monitoring.
+    pub(super) fn stream_frame_age_ms(&self) -> Option<u64> {
+        self.stream_health.last_frame_age_ms()
+    }
+
     pub(super) fn wait_for_stream_readiness(
         &self,
         timeout: Duration,
@@ -1144,21 +1110,6 @@ impl AnykaVideoEncoder {
         }
     }
 
-    /// Register a frame callback.
-    ///
-    /// Returns a `CallbackId` that can be used to unregister the callback.
-    /// Multiple callbacks can be registered (e.g., RTSP + HTTP-FLV).
-    pub fn register_frame_callback(&self, callback: Arc<dyn FrameCallback>) -> CallbackId {
-        let id = self.next_callback_id.fetch_add(1, Ordering::SeqCst);
-        self.callbacks.write().insert(id, callback);
-        id
-    }
-
-    /// Unregister a previously registered frame callback.
-    pub fn unregister_frame_callback(&self, id: CallbackId) -> bool {
-        self.callbacks.write().remove(&id).is_some()
-    }
-
     /// Register an owned frame callback (zero-copy path).
     ///
     /// Returns a `CallbackId` that can be used to unregister the callback.
@@ -1174,48 +1125,6 @@ impl AnykaVideoEncoder {
     /// Unregister a previously registered owned frame callback.
     pub fn unregister_owned_frame_callback(&self, id: CallbackId) -> bool {
         self.owned_callbacks.write().remove(&id).is_some()
-    }
-
-    /// Invoke all registered callbacks with a frame, isolating panics.
-    ///
-    /// Each callback is invoked in a `catch_unwind` boundary. If a callback
-    /// panics, it is logged and marked for removal. Callbacks that take
-    /// longer than 2ms generate a warning log.
-    pub fn invoke_callbacks(&self, frame: &Frame) {
-        let callbacks = self.callbacks.read();
-        let mut failed_callbacks = Vec::new();
-
-        for (id, callback) in callbacks.iter() {
-            let start = Instant::now();
-
-            let result = std::panic::catch_unwind(AssertUnwindSafe(|| {
-                callback.on_frame(frame);
-            }));
-
-            let duration = start.elapsed();
-
-            if duration > Duration::from_millis(2) {
-                tracing::warn!(
-                    "Frame callback {} took {:?} (exceeds 2ms threshold)",
-                    id,
-                    duration
-                );
-            }
-
-            if result.is_err() {
-                tracing::error!("Frame callback {} panicked, marking for removal", id);
-                failed_callbacks.push(*id);
-            }
-        }
-
-        // Remove panicked callbacks outside the read lock
-        if !failed_callbacks.is_empty() {
-            drop(callbacks);
-            let mut callbacks_write = self.callbacks.write();
-            for id in failed_callbacks {
-                callbacks_write.remove(&id);
-            }
-        }
     }
 
     /// Start streaming from the encoder by requesting stream handles and spawning
@@ -1295,7 +1204,6 @@ impl AnykaVideoEncoder {
 
         let reader_thread = {
             let ffi = Arc::clone(&self.ffi);
-            let callbacks = Arc::clone(&self.callbacks_arc());
             let stop = Arc::clone(&self.stop_signal);
             let stream_health = Arc::clone(&self.stream_health);
             let main_sh_clone = Arc::clone(&main_sh);
@@ -1314,7 +1222,6 @@ impl AnykaVideoEncoder {
                         main_sh_clone,
                         sub_sh_clone,
                         ffi,
-                        callbacks,
                         owned_callbacks,
                         stop,
                         stream_health,
@@ -1440,11 +1347,6 @@ impl AnykaVideoEncoder {
 
         tracing::info!("Streaming stopped");
         Ok(())
-    }
-
-    /// Get a cloned `Arc` reference to the callbacks map for thread sharing.
-    fn callbacks_arc(&self) -> Arc<RwLock<HashMap<CallbackId, Arc<dyn FrameCallback>>>> {
-        Arc::clone(&self.callbacks)
     }
 
     /// Get a cloned `Arc` reference to the owned callbacks map for thread sharing.

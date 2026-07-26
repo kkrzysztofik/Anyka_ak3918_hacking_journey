@@ -53,7 +53,8 @@ export default function LiveViewPage() {
     queryFn: getProfiles,
   });
 
-  const profileToken = profiles?.find((p) => p.ptzConfiguration)?.token ?? profiles?.[0]?.token ?? '';
+  const profileToken =
+    profiles?.find((p) => p.ptzConfiguration)?.token ?? profiles?.[0]?.token ?? '';
 
   // Fetch presets for the active profile
   const { data: presets } = useQuery({
@@ -206,7 +207,7 @@ export default function LiveViewPage() {
               </div>
               <div className="flex items-center gap-2">
                 {/* Semantic fieldset for stream type selection with reset styles */}
-                <fieldset className="flex border-0 p-0 m-0 appearance-none rounded-lg border border-zinc-700/50 bg-zinc-900/80 p-1">
+                <fieldset className="m-0 flex appearance-none rounded-lg border border-0 border-zinc-700/50 bg-zinc-900/80 p-0 p-1">
                   <legend className="sr-only">Stream type</legend>
                   <button
                     onClick={() => setStreamType('main')}
@@ -398,8 +399,15 @@ export default function LiveViewPage() {
                       onMouseDown={() => handlePtzStart('up-left')}
                       onMouseUp={handlePtzStop}
                       onMouseLeave={handlePtzStop}
-                      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handlePtzStart('up-left'); } }}
-                      onKeyUp={(e) => { if (e.key === 'Enter' || e.key === ' ') handlePtzStop(); }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          handlePtzStart('up-left');
+                        }
+                      }}
+                      onKeyUp={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') handlePtzStop();
+                      }}
                       aria-label="Pan up-left"
                       className="hover:bg-accent-red group flex h-11 w-11 items-center justify-center rounded-lg bg-zinc-800 transition-colors active:bg-red-700 md:h-12 md:w-12"
                       data-testid="liveview-ptz-up-left-button"
@@ -413,8 +421,15 @@ export default function LiveViewPage() {
                       onMouseDown={() => handlePtzStart('up')}
                       onMouseUp={handlePtzStop}
                       onMouseLeave={handlePtzStop}
-                      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handlePtzStart('up'); } }}
-                      onKeyUp={(e) => { if (e.key === 'Enter' || e.key === ' ') handlePtzStop(); }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          handlePtzStart('up');
+                        }
+                      }}
+                      onKeyUp={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') handlePtzStop();
+                      }}
                       aria-label="Pan up"
                       className="hover:bg-accent-red flex h-11 w-11 items-center justify-center rounded-lg bg-zinc-800 transition-colors active:bg-red-700 md:h-12 md:w-12"
                       data-testid="liveview-ptz-up-button"
@@ -426,8 +441,15 @@ export default function LiveViewPage() {
                       onMouseDown={() => handlePtzStart('up-right')}
                       onMouseUp={handlePtzStop}
                       onMouseLeave={handlePtzStop}
-                      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handlePtzStart('up-right'); } }}
-                      onKeyUp={(e) => { if (e.key === 'Enter' || e.key === ' ') handlePtzStop(); }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          handlePtzStart('up-right');
+                        }
+                      }}
+                      onKeyUp={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') handlePtzStop();
+                      }}
                       aria-label="Pan up-right"
                       className="hover:bg-accent-red flex h-11 w-11 items-center justify-center rounded-lg bg-zinc-800 transition-colors active:bg-red-700 md:h-12 md:w-12"
                       data-testid="liveview-ptz-up-right-button"
@@ -445,8 +467,15 @@ export default function LiveViewPage() {
                       onMouseDown={() => handlePtzStart('left')}
                       onMouseUp={handlePtzStop}
                       onMouseLeave={handlePtzStop}
-                      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handlePtzStart('left'); } }}
-                      onKeyUp={(e) => { if (e.key === 'Enter' || e.key === ' ') handlePtzStop(); }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          handlePtzStart('left');
+                        }
+                      }}
+                      onKeyUp={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') handlePtzStop();
+                      }}
                       aria-label="Pan left"
                       className="hover:bg-accent-red flex h-11 w-11 items-center justify-center rounded-lg bg-zinc-800 transition-colors active:bg-red-700 md:h-12 md:w-12"
                       data-testid="liveview-ptz-left-button"
@@ -467,8 +496,15 @@ export default function LiveViewPage() {
                       onMouseDown={() => handlePtzStart('right')}
                       onMouseUp={handlePtzStop}
                       onMouseLeave={handlePtzStop}
-                      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handlePtzStart('right'); } }}
-                      onKeyUp={(e) => { if (e.key === 'Enter' || e.key === ' ') handlePtzStop(); }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          handlePtzStart('right');
+                        }
+                      }}
+                      onKeyUp={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') handlePtzStop();
+                      }}
                       aria-label="Pan right"
                       className="hover:bg-accent-red flex h-11 w-11 items-center justify-center rounded-lg bg-zinc-800 transition-colors active:bg-red-700 md:h-12 md:w-12"
                       data-testid="liveview-ptz-right-button"
@@ -484,8 +520,15 @@ export default function LiveViewPage() {
                       onMouseDown={() => handlePtzStart('down-left')}
                       onMouseUp={handlePtzStop}
                       onMouseLeave={handlePtzStop}
-                      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handlePtzStart('down-left'); } }}
-                      onKeyUp={(e) => { if (e.key === 'Enter' || e.key === ' ') handlePtzStop(); }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          handlePtzStart('down-left');
+                        }
+                      }}
+                      onKeyUp={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') handlePtzStop();
+                      }}
                       aria-label="Pan down-left"
                       className="hover:bg-accent-red flex h-11 w-11 items-center justify-center rounded-lg bg-zinc-800 transition-colors active:bg-red-700 md:h-12 md:w-12"
                       data-testid="liveview-ptz-down-left-button"
@@ -499,8 +542,15 @@ export default function LiveViewPage() {
                       onMouseDown={() => handlePtzStart('down')}
                       onMouseUp={handlePtzStop}
                       onMouseLeave={handlePtzStop}
-                      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handlePtzStart('down'); } }}
-                      onKeyUp={(e) => { if (e.key === 'Enter' || e.key === ' ') handlePtzStop(); }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          handlePtzStart('down');
+                        }
+                      }}
+                      onKeyUp={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') handlePtzStop();
+                      }}
                       aria-label="Pan down"
                       className="hover:bg-accent-red flex h-11 w-11 items-center justify-center rounded-lg bg-zinc-800 transition-colors active:bg-red-700 md:h-12 md:w-12"
                       data-testid="liveview-ptz-down-button"
@@ -512,8 +562,15 @@ export default function LiveViewPage() {
                       onMouseDown={() => handlePtzStart('down-right')}
                       onMouseUp={handlePtzStop}
                       onMouseLeave={handlePtzStop}
-                      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handlePtzStart('down-right'); } }}
-                      onKeyUp={(e) => { if (e.key === 'Enter' || e.key === ' ') handlePtzStop(); }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          handlePtzStart('down-right');
+                        }
+                      }}
+                      onKeyUp={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') handlePtzStop();
+                      }}
                       aria-label="Pan down-right"
                       className="hover:bg-accent-red flex h-11 w-11 items-center justify-center rounded-lg bg-zinc-800 transition-colors active:bg-red-700 md:h-12 md:w-12"
                       data-testid="liveview-ptz-down-right-button"

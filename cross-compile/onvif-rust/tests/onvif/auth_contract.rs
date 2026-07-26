@@ -122,7 +122,6 @@ async fn test_contract_anonymous_operation_succeeds_without_credentials() {
         "device",
         Arc::new(onvif_rust::onvif::device::DeviceService::new(
             user_storage.clone(),
-            password_manager.clone(),
         )),
     );
 
@@ -185,7 +184,6 @@ async fn test_contract_user_level_operation_requires_authentication() {
         "device",
         Arc::new(onvif_rust::onvif::device::DeviceService::new(
             user_storage.clone(),
-            password_manager.clone(),
         )),
     );
 
@@ -232,7 +230,6 @@ async fn test_contract_operator_level_rejects_user_role() {
         "device",
         Arc::new(onvif_rust::onvif::device::DeviceService::new(
             auth_ctx.user_storage.clone(),
-            auth_ctx.password_manager.clone(),
         )),
     );
 
@@ -290,7 +287,6 @@ async fn test_contract_admin_level_rejects_operator_role() {
         "device",
         Arc::new(onvif_rust::onvif::device::DeviceService::new(
             auth_ctx.user_storage.clone(),
-            auth_ctx.password_manager.clone(),
         )),
     );
 
@@ -374,7 +370,6 @@ async fn test_contract_auth_disabled_bypasses_all_checks() {
         "device",
         Arc::new(onvif_rust::onvif::device::DeviceService::new(
             user_storage.clone(),
-            password_manager.clone(),
         )),
     );
 
@@ -416,7 +411,6 @@ async fn test_contract_missing_credentials_returns_not_authorized() {
         "device",
         Arc::new(onvif_rust::onvif::device::DeviceService::new(
             auth_ctx.user_storage.clone(),
-            auth_ctx.password_manager.clone(),
         )),
     );
 
@@ -453,7 +447,6 @@ async fn test_contract_invalid_password_returns_not_authorized() {
         "device",
         Arc::new(onvif_rust::onvif::device::DeviceService::new(
             auth_ctx.user_storage.clone(),
-            auth_ctx.password_manager.clone(),
         )),
     );
 
@@ -499,7 +492,6 @@ async fn test_contract_basic_auth_invalid_base64_returns_not_authorized() {
         "device",
         Arc::new(onvif_rust::onvif::device::DeviceService::new(
             auth_ctx.user_storage.clone(),
-            auth_ctx.password_manager.clone(),
         )),
     );
 
@@ -544,7 +536,6 @@ async fn test_contract_basic_auth_missing_colon_returns_not_authorized() {
         "device",
         Arc::new(onvif_rust::onvif::device::DeviceService::new(
             auth_ctx.user_storage.clone(),
-            auth_ctx.password_manager.clone(),
         )),
     );
 
@@ -611,7 +602,6 @@ async fn test_regression_2h2_documents_username_in_error_currently() {
         "device",
         Arc::new(onvif_rust::onvif::device::DeviceService::new(
             auth_ctx.user_storage.clone(),
-            auth_ctx.password_manager.clone(),
         )),
     );
 
@@ -688,7 +678,6 @@ async fn test_xfail_2h2_auth_error_does_not_reveal_username_existence() {
         "device",
         Arc::new(onvif_rust::onvif::device::DeviceService::new(
             auth_ctx.user_storage.clone(),
-            auth_ctx.password_manager.clone(),
         )),
     );
 
@@ -860,7 +849,6 @@ async fn test_contract_ws_security_missing_token_returns_error() {
         "device",
         Arc::new(onvif_rust::onvif::device::DeviceService::new(
             auth_ctx.user_storage.clone(),
-            auth_ctx.password_manager.clone(),
         )),
     );
 

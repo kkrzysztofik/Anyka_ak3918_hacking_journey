@@ -7,15 +7,20 @@
 # -----------------------------------------------------------------------------
 toolchain/arm-anykav200-crosstool/**/*
 toolchain/arm-anykav200-crosstool-ng/**/*
+toolchain/cargo-home/
+.cargo-targets/
 toolchain/aarch64-unknown-linux-gnu-toolchain/**/*
 toolchain/go-custom-armv5/**/*
 toolchain/go-source/**/*
-toolchain/build-new/rust/**/*
-toolchain/build-new/build/**/*
-toolchain/build-new/.build/**/*
-toolchain/build-new/llvm-*/**/*
-toolchain/build-new/crosstool-ng-*/**/*
-toolchain/build-new/compiler-rt-*/**/*
+toolchain/toolchain-builder/rust/**/*
+toolchain/toolchain-builder/build/**/*
+toolchain/toolchain-builder/.build/**/*
+toolchain/toolchain-builder/llvm-*/**/*
+toolchain/toolchain-builder/crosstool-ng-*/**/*
+toolchain/toolchain-builder/compiler-rt-*/**/*
+toolchain/toolchain-builder/*.log
+toolchain/toolchain-builder/.config.old
+toolchain/toolchain-builder/.config
 cross-compile/gsoap/**/*
 target/**/*
 
@@ -44,6 +49,7 @@ cross-compile/rust-hello/target/**/*
 
 # Rust ONVIF workspace outputs
 cross-compile/onvif-rust/.cargo/**/*
+!cross-compile/onvif-rust/.cargo/config.toml.template
 cross-compile/onvif-rust/target/**/*
 cross-compile/onvif-rust/debug/**/*
 cross-compile/onvif-rust/release/**/*
@@ -62,6 +68,9 @@ cross-compile/onvif-rust/**/*.prof*
 cross-compile/onvif/.cache/**/*
 clangd-logs/**/*
 compile_commands.json
+
+# Cursor / IDE hook runtime state (not project config)
+.cursor/hooks/state/
 
 # VS Code - Keep project configs, ignore personal files
 .vscode/browse.vc.db*
@@ -250,4 +259,8 @@ cross-compile/ONVIF-Device-Manager/**/*
 
 # Snyk Security Extension - AI Rules (auto-generated)
 .github/instructions/snyk_rules.instructions.md
-toolchain/build-new/
+
+# Built WebUI assets, produced by cross-compile/www `npm run build`.
+# The deploy staging copy is generated, not source; the ONVIF binary next to it
+# is tracked deliberately, this directory is not.
+SD_card_contents/anyka_hack/onvif/www/

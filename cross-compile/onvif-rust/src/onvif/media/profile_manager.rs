@@ -16,7 +16,7 @@ use crate::config::profiles::{
     ProfilesFile, StoredAudioEncoderConfig, StoredAudioSource, StoredAudioSourceConfig,
     StoredProfile, StoredVideoEncoderConfig, StoredVideoSource, StoredVideoSourceConfig,
 };
-use crate::config::{ConfigRuntime, ProfileStorage};
+use crate::config::{ConfigRuntime, PersistenceHandle, ProfileStorage};
 use crate::onvif::error::{OnvifError, OnvifResult};
 use crate::onvif::types::common::{
     AudioEncoderConfiguration, AudioSource, AudioSourceConfiguration, IntRange, IntRectangle,
@@ -66,6 +66,12 @@ pub struct ProfileManager {
     config: Option<Arc<ConfigRuntime>>,
     /// Typed profile storage for `profiles.toml` persistence.
     profile_storage: Option<Arc<ProfileStorage>>,
+    /// Debounced, off-executor persistence handle (optional).
+    ///
+    /// When present, `persist_all` snapshots into `profile_storage` and then
+    /// requests a non-blocking save; the actual `fsync` happens on a background
+    /// task. When absent (e.g. tests without persistence), saves are skipped.
+    persistence: Option<PersistenceHandle>,
 }
 
 impl ProfileManager {
@@ -131,9 +137,24 @@ impl ProfileManager {
         profile_storage: Arc<ProfileStorage>,
         max_sensor_resolution: Resolution,
     ) -> Self {
+        Self::with_storage_and_persistence(config, profile_storage, max_sensor_resolution, None)
+    }
+
+    /// Create a ProfileManager with typed profile storage, sensor resolution,
+    /// and an optional debounced persistence handle.
+    ///
+    /// When `persistence` is provided, mutations request a non-blocking save and
+    /// the actual disk write happens off the async executor.
+    pub fn with_storage_and_persistence(
+        config: Arc<ConfigRuntime>,
+        profile_storage: Arc<ProfileStorage>,
+        max_sensor_resolution: Resolution,
+        persistence: Option<PersistenceHandle>,
+    ) -> Self {
         let mut manager =
             Self::new_with_dependencies(Some(Arc::clone(&config)), max_sensor_resolution);
         manager.profile_storage = Some(Arc::clone(&profile_storage));
+        manager.persistence = persistence;
 
         // Try loading from profile storage first
         if !manager.load_from_storage() {
@@ -161,6 +182,7 @@ impl ProfileManager {
             max_sensor_resolution,
             config,
             profile_storage: None,
+            persistence: None,
         }
     }
 
@@ -954,17 +976,21 @@ impl ProfileManager {
     }
 
     /// Persist the current profile state to storage if available.
+    ///
+    /// Snapshots the in-memory state into `profile_storage` (cheap, under lock)
+    /// and enqueues a non-blocking save request when a persistence task is wired.
     fn persist_all(&self) {
         let Some(storage) = &self.profile_storage else {
             return;
         };
         let snapshot = self.to_stored_snapshot();
         storage.replace(snapshot);
-        if let Err(e) = storage.save() {
-            tracing::warn!(
-                "Failed to save profiles to {}: {e}",
-                storage.path().display()
-            );
+
+        match &self.persistence {
+            Some(handle) => handle.request_save(),
+            None => {
+                tracing::debug!("No profile persistence handle configured; skipping save request")
+            }
         }
     }
 
@@ -1467,6 +1493,8 @@ mod tests {
     use super::*;
     use std::sync::Arc;
 
+    use crate::config::{PendingWrite, PersistenceService};
+
     #[test]
     fn test_profile_manager_new() {
         let manager = ProfileManager::new();
@@ -1588,6 +1616,48 @@ mod tests {
         assert!(!snapshot.profiles.is_empty());
         // Should have at least the enabled default profiles
         assert!(manager.get_profiles().len() >= 2);
+    }
+
+    #[tokio::test]
+    async fn test_profile_persistence_enqueues_save_without_direct_write() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("profiles.toml");
+        let runtime = Arc::new(ConfigRuntime::new(Default::default()));
+        let storage = Arc::new(ProfileStorage::new(&path));
+        let snapshot_storage = Arc::clone(&storage);
+        let snapshot_path = path.clone();
+        let (service, handle) = PersistenceService::new(
+            "profiles",
+            5,
+            Box::new(move || {
+                let content = toml::to_string_pretty(&snapshot_storage.snapshot()).unwrap();
+                Some(PendingWrite {
+                    path: snapshot_path.clone(),
+                    bytes: content.into_bytes(),
+                    mode: None,
+                })
+            }),
+        );
+
+        let manager = ProfileManager::with_storage_and_persistence(
+            Arc::clone(&runtime),
+            Arc::clone(&storage),
+            Resolution::new(1920, 1080),
+            Some(handle),
+        );
+        let profile = manager
+            .create_profile("QueuedProfile".to_string(), None)
+            .unwrap();
+        assert!(!path.exists(), "handler path must not write synchronously");
+
+        let (shutdown_tx, shutdown_rx) = tokio::sync::broadcast::channel(1);
+        let service_handle = tokio::spawn(service.run(shutdown_rx));
+        tokio::time::sleep(std::time::Duration::from_millis(30)).await;
+        let _ = shutdown_tx.send(());
+        service_handle.await.unwrap();
+
+        let content = std::fs::read_to_string(&path).unwrap();
+        assert!(content.contains(&profile.token));
     }
 
     #[test]
@@ -1951,7 +2021,24 @@ mod tests {
     }
 
     #[test]
-    fn test_max_profiles_limit() {
+    fn test_profile_manager_create_profile_at_limit_succeeds() {
+        let manager = ProfileManager::new();
+        assert_eq!(manager.get_profiles().len(), 2);
+        for i in 0..(MAX_PROFILES - 2) {
+            assert!(
+                manager
+                    .create_profile(format!("Profile{}", i), None)
+                    .is_ok(),
+                "Failed to create profile {} when under limit (MAX_PROFILES={})",
+                i,
+                MAX_PROFILES
+            );
+        }
+        assert_eq!(manager.get_profiles().len(), MAX_PROFILES);
+    }
+
+    #[test]
+    fn test_profile_manager_create_profile_exceeds_limit_fails() {
         let manager = ProfileManager::new();
         // Verify manager starts with 2 default profiles
         assert_eq!(

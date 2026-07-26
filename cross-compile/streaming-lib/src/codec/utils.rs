@@ -138,8 +138,13 @@ mod tests {
         // code_num 6 -> "00111" -> se(v) = -3
         // bitstream: 00100 00101 00110 0 (pad)
         let mut bytes_reader = BytesReader::new(BytesMut::new());
-        bytes_reader.extend_from_slice(&[0b00100_001]);
-        bytes_reader.extend_from_slice(&[0b01_00110_0]);
+        // Groupings deliberately mirror the exp-Golomb field boundaries documented
+        // above, not byte nibbles.
+        #[allow(clippy::unusual_byte_groupings)]
+        {
+            bytes_reader.extend_from_slice(&[0b00100_001]);
+            bytes_reader.extend_from_slice(&[0b01_00110_0]);
+        }
 
         let mut bits_reader = BitsReader::new(bytes_reader);
 

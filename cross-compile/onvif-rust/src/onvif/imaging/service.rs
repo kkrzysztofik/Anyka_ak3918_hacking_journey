@@ -95,6 +95,23 @@ impl ImagingService {
         }
     }
 
+    /// Create Imaging Service from a pre-wired settings store (production path).
+    ///
+    /// The store should already have persistence path/handle attached by the
+    /// application startup code so `SetImagingSettings` can enqueue saves.
+    pub fn with_store(
+        settings_store: Arc<ImagingSettingsStore>,
+        platform: Option<Arc<dyn Platform>>,
+        config: Option<Arc<ConfigRuntime>>,
+    ) -> Self {
+        Self {
+            settings_store,
+            platform,
+            config,
+            state: super::state::new_state(),
+        }
+    }
+
     /// Get the settings store.
     pub fn settings_store(&self) -> Arc<ImagingSettingsStore> {
         self.settings_store.clone()
@@ -532,6 +549,15 @@ mod tests {
         let result = service.handle_set_current_preset(request).await;
         assert!(result.is_err());
         assert!(matches!(result, Err(OnvifError::ActionNotSupported(_))));
+    }
+
+    #[test]
+    fn test_with_store_exposes_prewired_settings_store() {
+        let store = Arc::new(ImagingSettingsStore::with_persistence(
+            "/tmp/test_imaging_prewired.toml",
+        ));
+        let service = ImagingService::with_store(Arc::clone(&store), None, None);
+        assert!(Arc::ptr_eq(&service.settings_store(), &store));
     }
 
     // ========================================================================

@@ -24,7 +24,7 @@ import {
   Users,
   Wrench,
 } from 'lucide-react';
-import { NavLink, Outlet, useLocation } from 'react-router-dom';
+import { NavLink, Outlet, useLocation } from 'react-router';
 
 import { AboutDialog } from '@/components/AboutDialog';
 import { ChangePasswordDialog } from '@/components/ChangePasswordDialog';
@@ -81,25 +81,20 @@ function NavLinkItem({
   onClick?: () => void;
   isMobile?: boolean;
 }>) {
-  const [isOpen, setIsOpen] = useState(false);
   const location = useLocation();
+  const pathOpen = Boolean(item.children && location.pathname.startsWith(item.path));
+  const [manualOpen, setManualOpen] = useState(false);
+  const isOpen = pathOpen || manualOpen;
   const isActive =
     item.path === '/settings'
       ? location.pathname.startsWith('/settings')
       : location.pathname === item.path;
 
-  // Auto-expand if child is active
-  React.useEffect(() => {
-    if (item.children && location.pathname.startsWith(item.path)) {
-      setIsOpen(true);
-    }
-  }, [location.pathname, item.path, item.children]);
-
   if (item.children) {
     return (
       <div className="flex flex-col gap-1">
         <button
-          onClick={() => setIsOpen(!isOpen)}
+          onClick={() => setManualOpen((open) => !(pathOpen || open))}
           className={cn(
             'group relative flex w-full items-center gap-4 rounded-lg px-4 py-3 text-left transition-all duration-200',
             isActive
@@ -454,7 +449,11 @@ export default function Layout() {
       </aside>
       <div className="flex min-w-0 flex-1 flex-col">
         <Header />
-        <main className="flex-1 overflow-y-auto p-6 md:p-8" aria-label="Page content" data-testid="layout-main-content">
+        <main
+          className="flex-1 overflow-y-auto p-6 md:p-8"
+          aria-label="Page content"
+          data-testid="layout-main-content"
+        >
           <div className="page-enter h-full w-full">
             <Outlet />
           </div>

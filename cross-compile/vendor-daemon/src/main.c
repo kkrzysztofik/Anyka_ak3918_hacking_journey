@@ -19,7 +19,7 @@
  *
  * Shared Memory Ring Buffer (Approach A):
  *   - Zero-copy frame delivery via shared memory
- *   - 12-byte notification protocol on frame socket
+ *   - 20-byte notification protocol on frame socket
  *   - Falls back to socket-based delivery on ring buffer overflow
  *
  * Connection model:

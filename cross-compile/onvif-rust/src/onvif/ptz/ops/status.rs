@@ -32,8 +32,17 @@ use crate::onvif::ptz::state::PTZStateManager;
 /// # Errors
 ///
 /// This handler is infallible under normal operation.
-pub fn get_status(state: &PTZStateManager, profile_token: &str) -> OnvifResult<GetStatusResponse> {
+pub async fn get_status(
+    state: &PTZStateManager,
+    ptz_control: &Option<Arc<dyn PTZControl>>,
+    profile_token: &str,
+) -> OnvifResult<GetStatusResponse> {
     tracing::debug!("GetStatus request for profile {}", profile_token);
+
+    // Prefer live hardware position over stale dead-reckoning state.
+    if let Some(ptz) = ptz_control {
+        crate::onvif::ptz::ops::movement::sync_position_from_platform(state, ptz).await;
+    }
 
     Ok(GetStatusResponse {
         ptz_status: state.get_status(),
@@ -65,21 +74,19 @@ pub async fn goto_home_position(
 ) -> OnvifResult<()> {
     tracing::debug!("GotoHomePosition request for profile {}", profile_token);
 
-    // Get home position and move there
     state.set_moving(true, true);
     state.goto_home();
 
-    // Call platform if available
     if let Some(ptz) = ptz_control {
-        let home_pos = state.get_position();
-        let pos = vector_to_position(&home_pos);
+        let pos = vector_to_position(&state.get_position());
         ptz.move_to_position(pos).await.map_err(|e| {
             state.stop();
             crate::onvif::error::OnvifError::HardwareFailure(format!("PTZ goto home failed: {}", e))
         })?;
+        crate::onvif::ptz::ops::movement::sync_position_from_platform(state, ptz).await;
+    } else {
+        state.stop();
     }
-
-    state.stop();
 
     Ok(())
 }
@@ -119,11 +126,11 @@ mod tests {
         Arc::new(PTZStateManager::new())
     }
 
-    #[test]
-    fn test_status_get_status_returns_position_and_move_status() {
+    #[tokio::test]
+    async fn test_status_get_status_returns_position_and_move_status() {
         let state = create_test_state();
 
-        let response = get_status(&state, "Profile1").unwrap();
+        let response = get_status(&state, &None, "Profile1").await.unwrap();
 
         // Should have position
         assert!(response.ptz_status.position.is_some());

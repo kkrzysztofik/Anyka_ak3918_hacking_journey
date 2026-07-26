@@ -4,7 +4,11 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+# shellcheck source=scripts/common.sh
+source "$(cd "${SCRIPT_DIR}/../.." && pwd)/scripts/common.sh"
+# shellcheck source=scripts/third_party/build_lib.sh
+source "${SCRIPT_DIR}/build_lib.sh"
+REPO_ROOT="${ANYKA_REPO_ROOT}"
 
 DEFAULT_VERSION="3.4.35"
 DEFAULT_SHA256="4421d79d5f2c75af9f9ed1fe206a8365d0371cc9551dc8f1e1a5ef95df07d4bf"
@@ -57,62 +61,16 @@ Examples:
 USAGE
 }
 
+tp_parse_common_args "$@"
+# Detect whether the user explicitly provided --sha256 (differs from the default).
+[ "${sha256}" != "${DEFAULT_SHA256}" ] && sha256_explicit="1"
+if [ "${#TP_EXTRA_ARGS[@]}" -gt 0 ]; then set -- "${TP_EXTRA_ARGS[@]}"; else set --; fi
 while [ "$#" -gt 0 ]; do
   case "$1" in
-    --version)
-      version="$2"
-      shift 2
-      ;;
-    --sha256)
-      sha256="$2"
-      sha256_explicit="1"
-      shift 2
-      ;;
-    --url)
-      url="$2"
-      shift 2
-      ;;
-    --archive)
-      archive_override="$2"
-      shift 2
-      ;;
-    --toolchain-dir)
-      toolchain_dir="$2"
-      shift 2
-      ;;
-    --target)
-      target_triple="$2"
-      shift 2
-      ;;
-    --link-mode)
-      link_mode="$2"
-      shift 2
-      ;;
-    --output-bin-dir)
-      output_bin_dir="$2"
-      shift 2
-      ;;
-    --output-lib-dir)
-      output_lib_dir="$2"
-      shift 2
-      ;;
-    --work-root)
-      work_root="$2"
-      shift 2
-      ;;
-    --jobs)
-      jobs="$2"
-      shift 2
-      ;;
-    -h|--help)
-      usage
-      exit 0
-      ;;
-    *)
-      echo "Unknown option: $1" >&2
-      usage
-      exit 1
-      ;;
+    --output-bin-dir) output_bin_dir="$2"; shift 2 ;;
+    --output-lib-dir) output_lib_dir="$2"; shift 2 ;;
+    -h|--help)        usage; exit 0 ;;
+    *) echo "Unknown option: $1" >&2; usage; exit 1 ;;
   esac
 done
 
@@ -135,60 +93,22 @@ if [ -z "${url}" ]; then
   fi
 fi
 
-if [ ! -d "${toolchain_dir}" ]; then
-  echo "ERROR: toolchain not found: ${toolchain_dir}" >&2
-  exit 1
-fi
-
-if ! [ "${jobs}" -gt 0 ] 2>/dev/null; then
-  echo "ERROR: --jobs must be a positive integer" >&2
-  exit 1
-fi
-
-if [ "${link_mode}" != "static" ] && [ "${link_mode}" != "dynamic" ]; then
-  echo "ERROR: --link-mode must be one of: static, dynamic" >&2
-  exit 1
-fi
+tp_validate_toolchain
+tp_validate_link_mode
+tp_validate_jobs
 
 mkdir -p "${work_root}" "${output_bin_dir}" "${output_lib_dir}"
 
 build_dir="${work_root}/linux-${version}"
-archive_path="${build_dir}/linux-${version}.tar.xz"
-source_root="${build_dir}/src/linux-${version}"
-perf_dir="${source_root}/tools/perf"
-
 rm -rf "${build_dir}"
-mkdir -p "${build_dir}/src"
-
-if [ -n "${archive_override}" ]; then
-  if [ ! -f "${archive_override}" ]; then
-    echo "ERROR: archive not found: ${archive_override}" >&2
-    exit 1
-  fi
-  cp -f "${archive_override}" "${archive_path}"
-else
-  echo "Downloading: ${url}"
-  curl -fL --retry 3 --connect-timeout 20 -o "${archive_path}" "${url}"
-fi
-
-echo "Verifying checksum..."
-echo "${sha256}  ${archive_path}" | sha256sum -c -
-
-echo "Extracting archive..."
-tar -xJf "${archive_path}" -C "${build_dir}/src"
+tp_fetch_archive "linux-${version}" "tar.xz" "${url}" "${sha256}" "${archive_override}" "${build_dir}"
+source_root="${source_dir}"  # tp_fetch_archive sets source_dir
+perf_dir="${source_root}/tools/perf"
 
 if [ ! -d "${perf_dir}" ]; then
   echo "ERROR: perf source directory not found: ${perf_dir}" >&2
   exit 1
 fi
-
-sysroot="${toolchain_dir}/${target_triple}/sysroot"
-if [ ! -d "${sysroot}" ]; then
-  echo "ERROR: sysroot not found: ${sysroot}" >&2
-  exit 1
-fi
-
-export PATH="${toolchain_dir}/bin:${PATH}"
 
 cd "${perf_dir}"
 
@@ -279,47 +199,7 @@ exec "${PERF_BIN}" "$@"
 WRAP
 chmod 0755 "${output_bin_dir}/perf"
 
-echo "Validating output binary..."
-file "${output_bin_dir}/perf.bin"
-"${target_triple}-readelf" -h "${output_bin_dir}/perf.bin" | sed -n '1,20p'
-
-needed_libs="$("${target_triple}-readelf" -d "${output_bin_dir}/perf.bin" 2>/dev/null | awk '/NEEDED/ { gsub(/\[|\]/, "", $5); print $5 }' || true)"
-if [ "${link_mode}" = "static" ] && [ -n "${needed_libs}" ]; then
-  echo "ERROR: static link requested but perf.bin still has dynamic dependencies:" >&2
-  while IFS= read -r needed; do
-    [ -n "${needed}" ] && echo "  - ${needed}" >&2
-  done <<EOF
-${needed_libs}
-EOF
-  echo "hint: static libs may be missing in sysroot; use --link-mode dynamic if needed." >&2
-  exit 1
-fi
-
-if [ -n "${needed_libs}" ]; then
-  echo "Dynamic dependencies detected; bundling from sysroot into ${output_lib_dir}"
-  for needed in ${needed_libs}; do
-    src_path=""
-    if [ -e "${sysroot}/lib/${needed}" ]; then
-      src_path="${sysroot}/lib/${needed}"
-    elif [ -e "${sysroot}/usr/lib/${needed}" ]; then
-      src_path="${sysroot}/usr/lib/${needed}"
-    fi
-
-    if [ -z "${src_path}" ]; then
-      echo "WARNING: could not find ${needed} in sysroot" >&2
-      continue
-    fi
-
-    resolved_path="$(readlink -f "${src_path}")"
-    resolved_name="$(basename "${resolved_path}")"
-
-    install -m 0644 "${resolved_path}" "${output_lib_dir}/${resolved_name}"
-    if [ "${needed}" != "${resolved_name}" ]; then
-      install -m 0644 "${resolved_path}" "${output_lib_dir}/${needed}"
-    fi
-  done
-else
-  echo "perf has no dynamic dependencies"
-fi
+tp_show_binary_info "${output_bin_dir}/perf.bin"
+tp_bundle_libs "${output_bin_dir}/perf.bin" "${output_lib_dir}"
 
 echo "perf build complete: ${output_bin_dir}/perf"

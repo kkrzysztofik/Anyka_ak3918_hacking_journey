@@ -5,10 +5,11 @@
 
 use parking_lot::RwLock;
 use std::fs;
-use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use thiserror::Error;
+
+use crate::config::{PendingWrite, PersistenceHandle, PersistenceService};
 
 use crate::onvif::types::common::{FloatRange, ImagingSettings20, ImagingStatus20};
 use crate::onvif::types::imaging::ImagingOptions20;
@@ -75,6 +76,9 @@ pub struct ImagingSettingsStore {
 
     /// Path to persistence file (optional).
     persistence_path: Option<PathBuf>,
+
+    /// Optional debounced, off-executor persistence handle.
+    persistence: OnceLock<PersistenceHandle>,
 }
 
 /// TOML file structure for persisting imaging settings.
@@ -108,6 +112,7 @@ impl ImagingSettingsStore {
             platform_control: None,
             video_source_tokens: RwLock::new(vec!["VideoSource_1".to_string()]),
             persistence_path: None,
+            persistence: OnceLock::new(),
         }
     }
 
@@ -126,6 +131,7 @@ impl ImagingSettingsStore {
             platform_control: Some(platform_control),
             video_source_tokens: RwLock::new(vec!["VideoSource_1".to_string()]),
             persistence_path: None,
+            persistence: OnceLock::new(),
         }
     }
 
@@ -140,12 +146,58 @@ impl ImagingSettingsStore {
             platform_control: Some(platform_control),
             video_source_tokens: RwLock::new(vec!["VideoSource_1".to_string()]),
             persistence_path: Some(path.as_ref().to_path_buf()),
+            persistence: OnceLock::new(),
         }
     }
 
     /// Set the persistence path.
     pub fn set_persistence_path(&mut self, path: impl AsRef<Path>) {
         self.persistence_path = Some(path.as_ref().to_path_buf());
+    }
+
+    /// Attach a debounced persistence handle.
+    pub fn set_persistence(&self, handle: PersistenceHandle) {
+        if self.persistence.set(handle).is_err() {
+            tracing::warn!("Imaging settings persistence handle already set; ignoring");
+        }
+    }
+
+    /// Request a non-blocking, debounced save of cached imaging settings.
+    pub fn request_save(&self) {
+        match self.persistence.get() {
+            Some(handle) => handle.request_save(),
+            None => {
+                tracing::debug!("No imaging persistence handle configured; skipping save request")
+            }
+        }
+    }
+
+    /// Create a persistence service for this store.
+    pub fn persistence_service(
+        self: &Arc<Self>,
+        save_delay_ms: u64,
+    ) -> (PersistenceService, PersistenceHandle) {
+        let store = Arc::clone(self);
+        let snapshot = Box::new(move || {
+            let Some(path) = store.persistence_path.clone() else {
+                tracing::debug!("No persistence path configured, skipping imaging snapshot");
+                return None;
+            };
+
+            match store.snapshot_settings_toml() {
+                Ok(bytes) => Some(PendingWrite {
+                    path,
+                    bytes,
+                    mode: None,
+                }),
+                Err(e) => {
+                    tracing::error!("Failed to serialize imaging settings: {}", e);
+                    None
+                }
+            }
+        });
+
+        PersistenceService::new("imaging", save_delay_ms, snapshot)
     }
 
     /// Load settings from persistence file.
@@ -275,9 +327,10 @@ impl ImagingSettingsStore {
             cache.insert(video_source_token.to_string(), settings.clone());
         }
 
-        // Persist if requested
+        // Persist if requested. This only enqueues a debounced save; the
+        // snapshot and blocking temp+fsync+rename happen on the persistence task.
         if force_persistence {
-            self.persist_settings(video_source_token, settings)?;
+            self.request_save();
         }
 
         Ok(())
@@ -428,75 +481,27 @@ impl ImagingSettingsStore {
         Ok(ImagingStatus20::default())
     }
 
-    /// Persist settings to configuration file.
-    fn persist_settings(
-        &self,
-        video_source_token: &str,
-        settings: &ImagingSettings20,
-    ) -> ImagingSettingsResult<()> {
-        let path = match &self.persistence_path {
-            Some(p) => p,
-            None => {
-                tracing::debug!("No persistence path configured, skipping persist");
-                return Ok(());
-            }
-        };
-
-        // Load existing file or create new
-        let mut file = if path.exists() {
-            let content = fs::read_to_string(path).map_err(|e| {
-                ImagingSettingsError::ValidationFailed(format!("Failed to read file: {}", e))
-            })?;
-            toml::from_str(&content).unwrap_or_else(|_| ImagingSettingsFile {
-                video_sources: std::collections::HashMap::new(),
-            })
-        } else {
+    /// Serialize all cached imaging settings to TOML bytes.
+    ///
+    /// The in-memory cache is the source of truth (populated from disk at
+    /// startup via [`Self::load_from_file`] and updated on every
+    /// [`Self::set_settings`]), so a whole-cache snapshot fully represents the
+    /// desired persisted state. Runs under the settings read lock.
+    fn snapshot_settings_toml(&self) -> ImagingSettingsResult<Vec<u8>> {
+        let file = {
+            let cache = self.settings.read();
             ImagingSettingsFile {
-                video_sources: std::collections::HashMap::new(),
+                video_sources: cache
+                    .iter()
+                    .map(|(token, settings)| (token.clone(), Self::onvif_to_persisted(settings)))
+                    .collect(),
             }
         };
 
-        // Update settings for this video source
-        let persisted = Self::onvif_to_persisted(settings);
-        file.video_sources
-            .insert(video_source_token.to_string(), persisted);
-
-        // Serialize to TOML
         let content = toml::to_string_pretty(&file).map_err(|e| {
             ImagingSettingsError::ValidationFailed(format!("Failed to serialize TOML: {}", e))
         })?;
-
-        // Create parent directories if needed
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent).map_err(|e| {
-                ImagingSettingsError::ValidationFailed(format!("Failed to create directory: {}", e))
-            })?;
-        }
-
-        // Atomic write: write to temp file, then rename
-        let temp_path = path.with_extension("toml.tmp");
-        {
-            let mut file = fs::File::create(&temp_path).map_err(|e| {
-                ImagingSettingsError::ValidationFailed(format!("Failed to create temp file: {}", e))
-            })?;
-            file.write_all(content.as_bytes()).map_err(|e| {
-                ImagingSettingsError::ValidationFailed(format!("Failed to write file: {}", e))
-            })?;
-            file.sync_all().map_err(|e| {
-                ImagingSettingsError::ValidationFailed(format!("Failed to sync file: {}", e))
-            })?;
-        }
-
-        fs::rename(&temp_path, path).map_err(|e| {
-            ImagingSettingsError::ValidationFailed(format!("Failed to rename temp file: {}", e))
-        })?;
-
-        tracing::debug!(
-            "Persisted imaging settings for {} to {:?}",
-            video_source_token,
-            path
-        );
-        Ok(())
+        Ok(content.into_bytes())
     }
 
     /// Convert persisted settings to ONVIF format.
@@ -911,6 +916,33 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_set_settings_force_persistence_enqueues_save_without_direct_write() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("imaging.toml");
+        let store = Arc::new(ImagingSettingsStore::with_persistence(&path));
+        let (service, handle) = store.persistence_service(5);
+        store.set_persistence(handle);
+
+        let mut settings = ImagingSettingsStore::default_settings();
+        settings.brightness = Some(75.0);
+
+        store
+            .set_settings("VideoSource_1", &settings, true)
+            .await
+            .unwrap();
+        assert!(!path.exists(), "handler path must not write synchronously");
+
+        let (shutdown_tx, shutdown_rx) = tokio::sync::broadcast::channel(1);
+        let service_handle = tokio::spawn(service.run(shutdown_rx));
+        tokio::time::sleep(std::time::Duration::from_millis(30)).await;
+        let _ = shutdown_tx.send(());
+        service_handle.await.unwrap();
+
+        let content = std::fs::read_to_string(&path).unwrap();
+        assert!(content.contains("brightness = 75.0"));
+    }
+
+    #[tokio::test]
     async fn test_set_settings_invalid_value() {
         let store = ImagingSettingsStore::new();
         let mut settings = ImagingSettingsStore::default_settings();
@@ -1131,20 +1163,26 @@ mod tests {
         use crate::onvif::types::common::ImagingSettings20;
 
         // Test contrast out of range
-        let mut settings = ImagingSettings20::default();
-        settings.contrast = Some(200.0);
+        let settings = ImagingSettings20 {
+            contrast: Some(200.0),
+            ..Default::default()
+        };
         let result = store.validate_settings("VideoSource_1", &settings).await;
         assert!(result.is_err());
 
         // Test saturation out of range
-        let mut settings = ImagingSettings20::default();
-        settings.color_saturation = Some(-10.0);
+        let settings = ImagingSettings20 {
+            color_saturation: Some(-10.0),
+            ..Default::default()
+        };
         let result = store.validate_settings("VideoSource_1", &settings).await;
         assert!(result.is_err());
 
         // Test sharpness out of range
-        let mut settings = ImagingSettings20::default();
-        settings.sharpness = Some(150.0);
+        let settings = ImagingSettings20 {
+            sharpness: Some(150.0),
+            ..Default::default()
+        };
         let result = store.validate_settings("VideoSource_1", &settings).await;
         assert!(result.is_err());
     }

@@ -2,6 +2,7 @@ use thiserror::Error;
 
 use crate::io::bytes_errors::BytesReadError;
 use crate::io::bytes_errors::BytesWriteError;
+use crate::io::bytesio_errors::BytesIOError;
 
 #[derive(Debug, Error)]
 #[error("{value}")]
@@ -15,6 +16,12 @@ pub enum PackerErrorValue {
     BytesReadError(#[source] BytesReadError),
     #[error("bytes write error: {}", _0)]
     BytesWriteError(#[from] BytesWriteError),
+    /// Underlying transport read/write failed while packing or sending RTSP/RTP data.
+    #[error("bytes io error: {0}")]
+    BytesIOError(#[from] BytesIOError),
+    /// Invalid or oversized RTSP TCP interleaved (`$`) framing, or related reassembly errors.
+    #[error("interleaved framing: {0}")]
+    InterleavedFraming(String),
 }
 
 impl From<BytesReadError> for PackerError {
@@ -29,6 +36,14 @@ impl From<BytesWriteError> for PackerError {
     fn from(error: BytesWriteError) -> Self {
         PackerError {
             value: PackerErrorValue::BytesWriteError(error),
+        }
+    }
+}
+
+impl From<BytesIOError> for PackerError {
+    fn from(error: BytesIOError) -> Self {
+        PackerError {
+            value: PackerErrorValue::BytesIOError(error),
         }
     }
 }
@@ -70,6 +85,7 @@ mod tests {
     use super::*;
     use crate::io::bytes_errors::{BytesReadError, BytesReadErrorValue};
     use crate::io::bytes_errors::{BytesWriteError, BytesWriteErrorValue};
+    use crate::io::bytesio_errors::{BytesIOError, BytesIOErrorValue};
 
     // ========== PackerErrorValue Display Tests ==========
 
@@ -111,6 +127,15 @@ mod tests {
         assert!(matches!(err.value, PackerErrorValue::BytesWriteError(_)));
     }
 
+    #[test]
+    fn test_packer_error_from_bytes_io_error_write_path() {
+        let bytesio_err = BytesIOError {
+            value: BytesIOErrorValue::NotEnoughBytes,
+        };
+        let err: PackerError = bytesio_err.into();
+        assert!(matches!(err.value, PackerErrorValue::BytesIOError(_)));
+    }
+
     // ========== PackerError Display Tests ==========
 
     #[test]
@@ -122,6 +147,24 @@ mod tests {
             value: PackerErrorValue::BytesReadError(read_err),
         };
         assert!(format!("{}", err).contains("bytes read error"));
+    }
+
+    #[test]
+    fn test_packer_error_display_bytes_io_error() {
+        let bytesio_err = BytesIOError {
+            value: BytesIOErrorValue::NotEnoughBytes,
+        };
+        let err: PackerError = bytesio_err.into();
+        let s = format!("{}", err);
+        assert!(s.contains("bytes io error"), "display was: {s}");
+    }
+
+    #[test]
+    fn test_packer_error_value_interleaved_framing_display() {
+        let err = PackerErrorValue::InterleavedFraming("bad channel".to_string());
+        let s = format!("{}", err);
+        assert!(s.contains("interleaved framing"), "display was: {s}");
+        assert!(s.contains("bad channel"), "display was: {s}");
     }
 
     // ========== UnPackerErrorValue Display Tests ==========

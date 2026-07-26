@@ -88,8 +88,20 @@ impl StreamDataTransceiver {
         let mut to_remove: Vec<Uuid> = Vec::new();
 
         for (id, sender) in senders.iter() {
-            if sender.send(data.clone()).is_err() {
-                to_remove.push(*id);
+            // try_send: drop newest when a slow subscriber's bounded channel is full
+            // so one stalled client cannot grow RSS unboundedly.
+            match sender.try_send(data.clone()) {
+                Ok(()) => {}
+                Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
+                    warn!(
+                        error_value = %error_value,
+                        subscriber_id = ?id,
+                        "transmitter_frame_channel_full_dropped"
+                    );
+                }
+                Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
+                    to_remove.push(*id);
+                }
             }
         }
 
@@ -869,7 +881,7 @@ impl StreamsHub {
     ) {
         match pub_data_type {
             define::PubDataType::Frame => {
-                let (sender_chan, receiver_chan) = mpsc::unbounded_channel();
+                let (sender_chan, receiver_chan) = define::frame_data_channel();
                 (
                     Some(sender_chan),
                     None,
@@ -891,7 +903,7 @@ impl StreamsHub {
                 )
             }
             define::PubDataType::Both => {
-                let (sender_frame_chan, receiver_frame_chan) = mpsc::unbounded_channel();
+                let (sender_frame_chan, receiver_frame_chan) = define::frame_data_channel();
                 let (sender_packet_chan, receiver_packet_chan) = mpsc::unbounded_channel();
                 (
                     Some(sender_frame_chan),
@@ -969,7 +981,7 @@ impl StreamsHub {
     ) -> (DataSender, DataReceiver) {
         match sub_data_type {
             define::SubDataType::Frame => {
-                let (sender_chan, receiver_chan) = mpsc::unbounded_channel();
+                let (sender_chan, receiver_chan) = define::frame_data_channel();
                 (
                     DataSender::Frame {
                         sender: sender_chan,
@@ -1147,7 +1159,7 @@ impl StreamsHub {
     ) -> Result<Value, StreamHubError> {
         if let Some(topn) = top_n {
             let mut sorted = data;
-            sorted.sort_by(|a, b| b.subscriber_count.cmp(&a.subscriber_count));
+            sorted.sort_by_key(|a| std::cmp::Reverse(a.subscriber_count));
             let top_streams: Vec<StatisticsStream> = sorted.into_iter().take(topn).collect();
             return Ok(serde_json::to_value(top_streams)?);
         }
@@ -1174,32 +1186,24 @@ impl StreamsHub {
         if let Some(event) = self.un_pub_sub_events.get(&uid) {
             match event {
                 StreamHubEvent::UnPublish { identifier, info } => {
-                    if self
-                        .hub_event_sender
+                    self.hub_event_sender
                         .send(StreamHubEvent::UnPublish {
                             identifier: identifier.clone(),
                             info: info.clone(),
                         })
-                        .is_err()
-                    {
-                        return Err(StreamHubError {
+                        .map_err(|_| StreamHubError {
                             value: StreamHubErrorValue::SendError,
-                        });
-                    }
+                        })?;
                 }
                 StreamHubEvent::UnSubscribe { identifier, info } => {
-                    if self
-                        .hub_event_sender
+                    self.hub_event_sender
                         .send(StreamHubEvent::UnSubscribe {
                             identifier: identifier.clone(),
                             info: info.clone(),
                         })
-                        .is_err()
-                    {
-                        return Err(StreamHubError {
+                        .map_err(|_| StreamHubError {
                             value: StreamHubErrorValue::SendError,
-                        });
-                    }
+                        })?;
                 }
                 _ => {}
             }

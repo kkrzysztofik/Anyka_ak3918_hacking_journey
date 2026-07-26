@@ -21,13 +21,13 @@ vi.mock('@/services/authService', () => ({
   verifyCredentials: vi.fn(),
 }));
 
-// Mock react-router-dom
+// Mock react-router
 const mockNavigate = vi.fn();
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const mockLocation = { state: null as any, pathname: '/login', hash: '', search: '', key: 'test' };
 
-vi.mock('react-router-dom', async () => {
-  const actual = await vi.importActual('react-router-dom');
+vi.mock('react-router', async () => {
+  const actual = await vi.importActual('react-router');
   return {
     ...actual,
     useNavigate: () => mockNavigate,

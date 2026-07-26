@@ -95,14 +95,13 @@ mod tests {
     #[tokio::test]
     async fn test_mock_publisher_frame_emission() {
         use streaming_lib::streamhub::mock_publisher::MockVideoPublisher;
-        use tokio::sync::mpsc;
 
         let test_file = setup_test_h264_file();
         let publisher = MockVideoPublisher::new("test_stream".to_string(), &test_file, 25, true)
             .await
             .unwrap();
 
-        let (sender, mut receiver) = mpsc::unbounded_channel();
+        let (sender, mut receiver) = streaming_lib::frame_data_channel();
         let handle = publisher.start_publishing(sender);
 
         let mut frame_count = 0;
@@ -131,14 +130,13 @@ mod tests {
     async fn test_tstream_handler_prior_data() {
         use streaming_lib::streamhub::define::{DataSender, FrameData, SubscribeType};
         use streaming_lib::streamhub::mock_publisher::MockVideoPublisher;
-        use tokio::sync::mpsc;
 
         let test_file = setup_test_h264_file();
         let publisher = MockVideoPublisher::new("test_stream".to_string(), &test_file, 25, true)
             .await
             .unwrap();
 
-        let (sender, mut receiver) = mpsc::unbounded_channel();
+        let (sender, mut receiver) = streaming_lib::frame_data_channel();
         let data_sender = DataSender::Frame { sender };
 
         let result = publisher
@@ -176,23 +174,21 @@ mod tests {
         let (sender, mut receiver) = mpsc::unbounded_channel();
         publisher.send_information(sender).await;
 
-        let mut received_sdp = false;
         let timeout = Duration::from_millis(500);
 
-        while let Ok(Some(info)) = tokio::time::timeout(timeout, receiver.recv()).await {
-            let Information::Sdp { data } = info;
-            received_sdp = true;
-            assert!(data.contains("v=0"));
-            assert!(data.contains("o="));
-            assert!(data.contains("s="));
-            assert!(data.contains("m=video"));
-            assert!(data.contains("a=rtpmap:96 H264/90000"));
-            assert!(data.contains("profile-level-id="));
-            assert!(data.contains("sprop-parameter-sets="));
-            break;
-        }
+        let info = tokio::time::timeout(timeout, receiver.recv())
+            .await
+            .expect("timed out waiting for SDP information")
+            .expect("information channel closed before SDP arrived");
 
-        assert!(received_sdp, "Did not receive SDP information");
+        let Information::Sdp { data } = info;
+        assert!(data.contains("v=0"));
+        assert!(data.contains("o="));
+        assert!(data.contains("s="));
+        assert!(data.contains("m=video"));
+        assert!(data.contains("a=rtpmap:96 H264/90000"));
+        assert!(data.contains("profile-level-id="));
+        assert!(data.contains("sprop-parameter-sets="));
         cleanup_file(&test_file);
     }
 
@@ -229,7 +225,6 @@ mod tests {
     #[tokio::test]
     async fn test_publisher_lifecycle() {
         use streaming_lib::streamhub::mock_publisher::MockVideoPublisher;
-        use tokio::sync::mpsc;
 
         let test_file = setup_test_h264_file();
         let publisher = MockVideoPublisher::new("test_stream".to_string(), &test_file, 25, false)
@@ -238,7 +233,7 @@ mod tests {
 
         assert!(!publisher.is_publishing().await);
 
-        let (sender, _receiver) = mpsc::unbounded_channel();
+        let (sender, _receiver) = streaming_lib::frame_data_channel();
         let handle = publisher.start_publishing(sender);
 
         tokio::time::sleep(Duration::from_millis(20)).await;
@@ -988,10 +983,10 @@ mod tests {
         // Spawn minimal RTSP server
         let sdp_clone = sdp.clone();
         let server_handle = tokio::spawn(async move {
-            if let Ok(listener) = tokio::net::TcpListener::bind("127.0.0.1:8554").await {
-                if let Ok((socket, _)) = listener.accept().await {
-                    let _ = handle_rtsp_client(socket, sdp_clone).await;
-                }
+            if let Ok(listener) = tokio::net::TcpListener::bind("127.0.0.1:8554").await
+                && let Ok((socket, _)) = listener.accept().await
+            {
+                let _ = handle_rtsp_client(socket, sdp_clone).await;
             }
         });
 
@@ -1039,7 +1034,9 @@ mod tests {
             tracing::info!("RTSP DESCRIBE response validated");
         }
 
-        let _ = server_handle.await;
+        server_handle
+            .await
+            .expect("RTSP test server task failed (panic in accept/handler)");
         let _ = fs::remove_file(&test_file);
     }
 
@@ -1072,37 +1069,59 @@ mod tests {
         // - FLV header includes video tag
         // - Content-Type is video/x-flv
         // - Stream can be read over HTTP
+        //
+        // Use an ephemeral port: a fixed port (e.g. 8080) may be taken by another
+        // process; the old code silently skipped the server on bind failure while the
+        // client could still connect to whatever was listening, producing bogus asserts.
 
         let flv_data = generate_flv_data();
         let flv_data_clone = flv_data.clone();
 
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind ephemeral port for HTTP-FLV e2e test");
+        let port = listener.local_addr().expect("listener local_addr").port();
+
+        let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
         let server_handle = tokio::spawn(async move {
-            if let Ok(listener) = tokio::net::TcpListener::bind("127.0.0.1:8080").await {
-                if let Ok((socket, _)) = listener.accept().await {
+            let _ = ready_tx.send(());
+            match listener.accept().await {
+                Ok((socket, _)) => {
                     let _ = handle_httpflv_client(socket, flv_data_clone).await;
+                }
+                Err(e) => {
+                    panic!("accept failed in test HTTP-FLV server: {e}");
                 }
             }
         });
 
-        tokio::time::sleep(Duration::from_millis(10)).await;
+        ready_rx
+            .await
+            .expect("server task should signal readiness before accept races the client");
 
-        if let Ok(mut stream) = tokio::net::TcpStream::connect("127.0.0.1:8080").await {
-            use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let mut stream = tokio::net::TcpStream::connect(format!("127.0.0.1:{port}"))
+            .await
+            .expect("connect to test HTTP-FLV server");
 
-            let http_req = "GET /live/stream1.flv HTTP/1.1\r\n\
-                            Host: 127.0.0.1:8080\r\n\
-                            Connection: close\r\n\
-                            \r\n";
-            stream.write_all(http_req.as_bytes()).await.unwrap();
-            stream.flush().await.unwrap();
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-            let mut buffer = Vec::new();
-            stream.read_to_end(&mut buffer).await.unwrap();
-            let response_str = String::from_utf8_lossy(&buffer);
-            assert_httpflv_response(&response_str);
-        }
+        let http_req = format!(
+            "GET /live/stream1.flv HTTP/1.1\r\n\
+             Host: 127.0.0.1:{port}\r\n\
+             Connection: close\r\n\
+             \r\n"
+        );
+        stream.write_all(http_req.as_bytes()).await.unwrap();
+        stream.flush().await.unwrap();
 
-        let _ = server_handle.await;
+        let mut buffer = Vec::new();
+        stream.read_to_end(&mut buffer).await.unwrap();
+        let response_str = String::from_utf8_lossy(&buffer);
+        assert_httpflv_response(&response_str);
+
+        server_handle
+            .await
+            .expect("HTTP-FLV server task failed (panic in accept/handler)");
     }
 
     /// Helper function to connect an RTSP client and verify SDP response
@@ -1218,7 +1237,9 @@ mod tests {
         assert!(result1, "Client 1 did not receive valid SDP");
         assert!(result2, "Client 2 did not receive valid SDP");
 
-        let _ = server_handle.await;
+        server_handle
+            .await
+            .expect("concurrent RTSP test server task failed (panic in accept/handler)");
         let _ = fs::remove_file(&test_file);
 
         tracing::info!("Concurrent RTSP clients validated");

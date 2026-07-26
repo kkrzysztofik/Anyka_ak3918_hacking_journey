@@ -24,6 +24,7 @@
 //! validate_max_length("some_string", 64, "name")?;
 //! ```
 
+use crate::onvif::common::MAX_REFERENCE_TOKEN_CHARS;
 use crate::onvif::error::{OnvifError, OnvifResult};
 
 /// Validate a reference token (used for profiles, tokens, etc.).
@@ -64,6 +65,8 @@ pub fn validate_reference_token(token: &str, kind: &str) -> OnvifResult<()> {
     if token.is_empty() {
         return Err(OnvifError::missing_arg(kind));
     }
+
+    validate_max_length(token, MAX_REFERENCE_TOKEN_CHARS, kind)?;
 
     // Check for whitespace which is invalid in ONVIF tokens
     if token.chars().any(|c| c.is_whitespace()) {
@@ -233,6 +236,21 @@ mod tests {
         let err = result.unwrap_err();
         assert!(err.to_string().contains("InvalidToken"));
         assert!(err.to_string().contains("invalid characters"));
+    }
+
+    #[test]
+    fn test_validate_reference_token_too_long_fails() {
+        let token = "a".repeat(MAX_REFERENCE_TOKEN_CHARS + 1);
+        let result = validate_reference_token(&token, "profile");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("TooLong"));
+    }
+
+    #[test]
+    fn test_validate_reference_token_max_length_succeeds() {
+        let token = "a".repeat(MAX_REFERENCE_TOKEN_CHARS);
+        assert_eq!(token.len(), MAX_REFERENCE_TOKEN_CHARS);
+        assert!(validate_reference_token(&token, "profile").is_ok());
     }
 
     // Test validate_range_f32

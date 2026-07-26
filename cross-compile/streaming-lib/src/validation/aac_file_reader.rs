@@ -113,11 +113,8 @@ impl AacFileReader {
         // AAC-LC: 1024 samples/frame
         // @ 48kHz: 1024 samples / 48000 Hz * 1000 = ~21.3ms
         // @ 44.1kHz: 1024 samples / 44100 Hz * 1000 = ~23.2ms
-        let frame_duration_ms = if sample_rate > 0 {
-            (1024 * 1000) / sample_rate
-        } else {
-            21 // Default for 48kHz
-        };
+        // Default 21ms (~48kHz) when sample_rate is 0
+        let frame_duration_ms = (1024u32 * 1000).checked_div(sample_rate).unwrap_or(21);
 
         Ok(Self {
             file,
@@ -289,11 +286,7 @@ impl AacFileReader {
     }
 
     fn calculate_frame_duration(sample_rate: u32) -> u32 {
-        if sample_rate > 0 {
-            (1024 * 1000) / sample_rate
-        } else {
-            21
-        }
+        (1024u32 * 1000).checked_div(sample_rate).unwrap_or(21)
     }
 }
 

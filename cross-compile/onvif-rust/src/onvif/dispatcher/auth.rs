@@ -79,7 +79,7 @@ pub(super) fn verify_basic_auth_self(
         OnvifError::NotAuthorized("Invalid credentials".to_string())
     })?;
 
-    // Validate password
+    // Validate password (timing-safe via PasswordManager::verify_password → constant_time_eq in config::users::password).
     if !auth_ctx
         .password_manager
         .verify_password(password, &user.password)
@@ -289,7 +289,7 @@ fn authenticate_plaintext(
     // "user not found" (caught in authenticate()) and "wrong password" return
     // identical "Invalid credentials" messages.
 
-    // Verify plaintext password
+    // Verify plaintext password (timing-safe via `PasswordManager::verify_password`).
     if !auth_ctx
         .password_manager
         .verify_password(&token.password.value, &user.password)

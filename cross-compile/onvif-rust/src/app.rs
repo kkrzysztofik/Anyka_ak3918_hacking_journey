@@ -19,7 +19,8 @@ use tokio::sync::broadcast;
 use tokio::task::JoinHandle;
 
 use crate::config::{
-    ConfigPersistenceHandle, ConfigPersistenceService, ConfigRuntime, ConfigStorage, ProfileStorage,
+    ConfigPersistenceHandle, ConfigPersistenceService, ConfigRuntime, ConfigStorage, PendingWrite,
+    PersistenceHandle, PersistenceService, ProfileStorage,
 };
 use crate::config::{PasswordManager, UserStorage};
 use crate::lifecycle::health::{ComponentHealth, HealthStatus};
@@ -27,6 +28,7 @@ use crate::lifecycle::shutdown::{DEFAULT_SHUTDOWN_TIMEOUT, ShutdownCoordinator};
 use crate::lifecycle::startup::{StartupPhase, StartupProgress};
 use crate::lifecycle::{RuntimeError, ShutdownReport, StartupError};
 use crate::onvif::discovery::{DiscoveryConfig, WsDiscovery, WsDiscoveryHandle};
+use crate::onvif::imaging::ImagingSettingsStore;
 use crate::onvif::ptz::PTZStateManager;
 use crate::onvif::server::{OnvifServer, OnvifServerConfig};
 use crate::platform::Platform;
@@ -84,6 +86,10 @@ pub struct AppState {
     config_persistence: Option<ConfigPersistenceHandle>,
     /// Profile storage for ONVIF media profiles (profiles.toml).
     profile_storage: Arc<ProfileStorage>,
+    /// Optional debounced persistence handle for profiles (off-executor saves).
+    profile_persistence: Option<PersistenceHandle>,
+    /// Imaging settings store (optional; production wires persistence at startup).
+    imaging_settings_store: Option<Arc<ImagingSettingsStore>>,
 }
 
 impl AppState {
@@ -136,6 +142,16 @@ impl AppState {
     pub fn profile_storage(&self) -> &Arc<ProfileStorage> {
         &self.profile_storage
     }
+
+    /// Get the profile persistence handle, if available.
+    pub fn profile_persistence(&self) -> Option<&PersistenceHandle> {
+        self.profile_persistence.as_ref()
+    }
+
+    /// Get the imaging settings store, if available.
+    pub fn imaging_settings_store(&self) -> Option<&Arc<ImagingSettingsStore>> {
+        self.imaging_settings_store.as_ref()
+    }
 }
 
 impl std::fmt::Debug for AppState {
@@ -159,6 +175,20 @@ impl std::fmt::Debug for AppState {
                     .map(|_| "Some(ConfigPersistenceHandle)"),
             )
             .field("profile_storage", &"Arc<ProfileStorage>")
+            .field(
+                "imaging_settings_store",
+                &self
+                    .imaging_settings_store
+                    .as_ref()
+                    .map(|_| "Some(Arc<ImagingSettingsStore>)"),
+            )
+            .field(
+                "profile_persistence",
+                &self
+                    .profile_persistence
+                    .as_ref()
+                    .map(|_| "Some(PersistenceHandle)"),
+            )
             .finish()
     }
 }
@@ -182,6 +212,8 @@ pub struct AppStateBuilder {
     platform: Option<Arc<dyn Platform>>,
     config_persistence: Option<ConfigPersistenceHandle>,
     profile_storage: Option<Arc<ProfileStorage>>,
+    profile_persistence: Option<PersistenceHandle>,
+    imaging_settings_store: Option<Arc<ImagingSettingsStore>>,
 }
 
 /// Error type for AppState construction failures.
@@ -258,6 +290,18 @@ impl AppStateBuilder {
         self
     }
 
+    /// Set the profile persistence handle.
+    pub fn profile_persistence(mut self, handle: PersistenceHandle) -> Self {
+        self.profile_persistence = Some(handle);
+        self
+    }
+
+    /// Set the imaging settings store (with persistence already attached).
+    pub fn imaging_settings_store(mut self, store: Arc<ImagingSettingsStore>) -> Self {
+        self.imaging_settings_store = Some(store);
+        self
+    }
+
     /// Build the `AppState`, returning an error if required components are missing.
     pub fn build(self) -> Result<AppState, AppStateError> {
         Ok(AppState {
@@ -284,6 +328,8 @@ impl AppStateBuilder {
             profile_storage: self
                 .profile_storage
                 .ok_or_else(|| AppStateError::MissingComponent("profile_storage".to_string()))?,
+            profile_persistence: self.profile_persistence,
+            imaging_settings_store: self.imaging_settings_store,
         })
     }
 }
@@ -559,6 +605,15 @@ pub struct Application {
     /// Handle to the config persistence task.
     config_persistence_task: Option<JoinHandle<()>>,
 
+    /// Handle to the user persistence task.
+    user_persistence_task: Option<JoinHandle<()>>,
+
+    /// Handle to the profile persistence task.
+    profile_persistence_task: Option<JoinHandle<()>>,
+
+    /// Handle to the imaging persistence task.
+    imaging_persistence_task: Option<JoinHandle<()>>,
+
     /// WS-Discovery service handle for device discovery control.
     discovery: Option<WsDiscoveryHandle>,
 
@@ -576,6 +631,47 @@ pub struct Application {
 }
 
 impl Application {
+    /// Create imaging settings store with debounced off-executor persistence.
+    fn wire_imaging_persistence(
+        config_path: &str,
+        platform: Option<&Arc<dyn Platform>>,
+        save_delay: u64,
+        shutdown_coordinator: &ShutdownCoordinator,
+    ) -> (Arc<ImagingSettingsStore>, JoinHandle<()>) {
+        let imaging_path = std::path::Path::new(config_path)
+            .parent()
+            .unwrap_or(std::path::Path::new("/etc/onvif"))
+            .join("imaging.toml");
+
+        let imaging_store = match platform.and_then(|p| p.imaging_control()) {
+            Some(control) => Arc::new(ImagingSettingsStore::with_platform_and_persistence(
+                control,
+                &imaging_path,
+            )),
+            None => Arc::new(ImagingSettingsStore::with_persistence(&imaging_path)),
+        };
+
+        if imaging_path.exists() {
+            if let Err(e) = imaging_store.load_from_file() {
+                tracing::warn!(
+                    "Failed to load imaging settings from {}: {}",
+                    imaging_path.display(),
+                    e
+                );
+            } else {
+                tracing::info!("Loaded imaging settings from {}", imaging_path.display());
+            }
+        }
+
+        let (imaging_persistence_service, imaging_persistence_handle) =
+            imaging_store.persistence_service(save_delay);
+        imaging_store.set_persistence(imaging_persistence_handle);
+        let imaging_persistence_task =
+            tokio::spawn(imaging_persistence_service.run(shutdown_coordinator.subscribe()));
+
+        (imaging_store, imaging_persistence_task)
+    }
+
     /// Start the application with ordered initialization.
     ///
     /// This is the **only** way to create an `Application` instance. It performs
@@ -642,22 +738,41 @@ impl Application {
         progress.begin_phase(StartupPhase::Services);
         tracing::debug!("Initializing ONVIF services...");
 
-        // Create user storage with optional persistence
-        let user_storage = UserStorage::new();
-        // Try to load existing users from TOML file
+        // Create user storage with debounced off-executor persistence
+        let user_storage = Arc::new(UserStorage::new());
         let users_path = std::path::Path::new(config_path)
             .parent()
             .unwrap_or(std::path::Path::new("/etc/onvif"))
             .join("users.toml");
         if users_path.exists() {
-            if let Err(e) =
-                user_storage.load_from_toml(users_path.to_str().unwrap_or("/etc/onvif/users.toml"))
-            {
+            if let Err(e) = user_storage.load_from_toml(&users_path) {
                 tracing::warn!("Failed to load users from {}: {}", users_path.display(), e);
             } else {
                 tracing::info!("Loaded users from {}", users_path.display());
             }
         }
+
+        let user_persistence_storage = Arc::clone(&user_storage);
+        let user_persistence_path = users_path.clone();
+        let (user_persistence_service, user_persistence_handle) = PersistenceService::new(
+            "users",
+            save_delay,
+            Box::new(move || match user_persistence_storage.to_toml_bytes() {
+                Ok(bytes) => Some(PendingWrite {
+                    path: user_persistence_path.clone(),
+                    bytes,
+                    mode: Some(0o600),
+                }),
+                Err(e) => {
+                    tracing::error!("Failed to serialize users: {}", e);
+                    None
+                }
+            }),
+        );
+        user_storage.set_persistence(user_persistence_handle);
+        let user_persistence_task = Some(tokio::spawn(
+            user_persistence_service.run(shutdown_coordinator.subscribe()),
+        ));
 
         // Create profile storage for ONVIF media profiles
         let profiles_path = std::path::Path::new(config_path)
@@ -675,6 +790,37 @@ impl Application {
             tracing::info!("Loaded profiles from {}", profiles_path.display());
         }
 
+        let profile_persistence_storage = Arc::clone(&profile_storage);
+        let profile_persistence_path = profiles_path.clone();
+        let (profile_persistence_service, profile_persistence_handle) = PersistenceService::new(
+            "profiles",
+            save_delay,
+            Box::new(move || {
+                match toml::to_string_pretty(&profile_persistence_storage.snapshot()) {
+                    Ok(content) => Some(PendingWrite {
+                        path: profile_persistence_path.clone(),
+                        bytes: content.into_bytes(),
+                        mode: None,
+                    }),
+                    Err(e) => {
+                        tracing::error!("Failed to serialize profiles: {}", e);
+                        None
+                    }
+                }
+            }),
+        );
+        let profile_persistence_task = Some(tokio::spawn(
+            profile_persistence_service.run(shutdown_coordinator.subscribe()),
+        ));
+
+        let (imaging_settings_store, imaging_persistence_task) = Self::wire_imaging_persistence(
+            config_path,
+            platform.as_ref(),
+            save_delay,
+            &shutdown_coordinator,
+        );
+        let imaging_persistence_task = Some(imaging_persistence_task);
+
         // Initialize rate limiter from config (default: 60 requests per minute)
         let rate_limit_per_minute = config_runtime.read().server.rate_limit_per_minute;
         let rate_limiter = Arc::new(RateLimiter::new(rate_limit_per_minute));
@@ -684,7 +830,7 @@ impl Application {
         );
 
         let mut app_state_builder = AppState::builder()
-            .user_storage(Arc::new(user_storage))
+            .user_storage(Arc::clone(&user_storage))
             .password_manager(Arc::new(PasswordManager::new()))
             .ptz_state(Arc::new(PTZStateManager::new()))
             .config(Arc::clone(&config_runtime))
@@ -694,7 +840,9 @@ impl Application {
                 })?,
             ))
             .rate_limiter(Arc::clone(&rate_limiter))
-            .profile_storage(Arc::clone(&profile_storage));
+            .profile_storage(Arc::clone(&profile_storage))
+            .profile_persistence(profile_persistence_handle.clone())
+            .imaging_settings_store(Arc::clone(&imaging_settings_store));
 
         // Wire config persistence handle
         app_state_builder = app_state_builder.config_persistence(persistence_handle.clone());
@@ -831,6 +979,9 @@ impl Application {
             discovery,
             discovery_task,
             config_persistence_task,
+            user_persistence_task,
+            profile_persistence_task,
+            imaging_persistence_task,
             memory_logging_task,
             rate_limiter_cleanup_task,
             streaming_service,
@@ -949,32 +1100,18 @@ impl Application {
             Ok(bridge) => {
                 // Register the bridge as an owned frame callback with the platform (zero-copy path).
                 if let Some(platform) = app_state.platform() {
-                    match platform.register_owned_frame_callback(bridge.clone()) {
+                    match platform.register_owned_frame_callback(bridge) {
                         Ok(()) => {
                             tracing::info!(
                                 "Owned frame callback registered with platform (zero-copy)"
                             );
                         }
                         Err(e) => {
-                            // Fall back to legacy FrameCallback if owned not supported
-                            tracing::info!(
-                                "Owned frame callback not supported ({}), falling back to FrameCallback",
+                            tracing::warn!(
+                                "Failed to register owned frame callback (streaming will work but \
+                                 won't receive live frames from encoder): {}",
                                 e
                             );
-                            match platform.register_frame_callback(bridge) {
-                                Ok(()) => {
-                                    tracing::info!(
-                                        "Frame callback registered with platform (legacy)"
-                                    );
-                                }
-                                Err(e2) => {
-                                    tracing::warn!(
-                                        "Failed to register frame callback (streaming will work but \
-                                         won't receive live frames from encoder): {}",
-                                        e2
-                                    );
-                                }
-                            }
                         }
                     }
                 }
@@ -1093,20 +1230,40 @@ impl Application {
         progress.begin_phase(StartupPhase::Services);
         tracing::debug!("Initializing ONVIF services...");
 
-        let user_storage = UserStorage::new();
+        let user_storage = Arc::new(UserStorage::new());
         let users_path = std::path::Path::new(config_path)
             .parent()
             .unwrap_or(std::path::Path::new("/etc/onvif"))
             .join("users.toml");
         if users_path.exists() {
-            if let Err(e) =
-                user_storage.load_from_toml(users_path.to_str().unwrap_or("/etc/onvif/users.toml"))
-            {
+            if let Err(e) = user_storage.load_from_toml(&users_path) {
                 tracing::warn!("Failed to load users from {}: {}", users_path.display(), e);
             } else {
                 tracing::info!("Loaded users from {}", users_path.display());
             }
         }
+
+        let user_persistence_storage = Arc::clone(&user_storage);
+        let user_persistence_path = users_path.clone();
+        let (user_persistence_service, user_persistence_handle) = PersistenceService::new(
+            "users",
+            save_delay,
+            Box::new(move || match user_persistence_storage.to_toml_bytes() {
+                Ok(bytes) => Some(PendingWrite {
+                    path: user_persistence_path.clone(),
+                    bytes,
+                    mode: Some(0o600),
+                }),
+                Err(e) => {
+                    tracing::error!("Failed to serialize users: {}", e);
+                    None
+                }
+            }),
+        );
+        user_storage.set_persistence(user_persistence_handle);
+        let user_persistence_task = Some(tokio::spawn(
+            user_persistence_service.run(shutdown_coordinator.subscribe()),
+        ));
 
         // Create profile storage for ONVIF media profiles
         let profiles_path = std::path::Path::new(config_path)
@@ -1124,6 +1281,37 @@ impl Application {
             tracing::info!("Loaded profiles from {}", profiles_path.display());
         }
 
+        let profile_persistence_storage = Arc::clone(&profile_storage);
+        let profile_persistence_path = profiles_path.clone();
+        let (profile_persistence_service, profile_persistence_handle) = PersistenceService::new(
+            "profiles",
+            save_delay,
+            Box::new(move || {
+                match toml::to_string_pretty(&profile_persistence_storage.snapshot()) {
+                    Ok(content) => Some(PendingWrite {
+                        path: profile_persistence_path.clone(),
+                        bytes: content.into_bytes(),
+                        mode: None,
+                    }),
+                    Err(e) => {
+                        tracing::error!("Failed to serialize profiles: {}", e);
+                        None
+                    }
+                }
+            }),
+        );
+        let profile_persistence_task = Some(tokio::spawn(
+            profile_persistence_service.run(shutdown_coordinator.subscribe()),
+        ));
+
+        let (imaging_settings_store, imaging_persistence_task) = Self::wire_imaging_persistence(
+            config_path,
+            Some(&platform),
+            save_delay,
+            &shutdown_coordinator,
+        );
+        let imaging_persistence_task = Some(imaging_persistence_task);
+
         let rate_limit_per_minute = config_runtime.read().server.rate_limit_per_minute;
         let rate_limiter = Arc::new(RateLimiter::new(rate_limit_per_minute));
         tracing::info!(
@@ -1132,7 +1320,7 @@ impl Application {
         );
 
         let app_state = AppState::builder()
-            .user_storage(Arc::new(user_storage))
+            .user_storage(Arc::clone(&user_storage))
             .password_manager(Arc::new(PasswordManager::new()))
             .ptz_state(Arc::new(PTZStateManager::new()))
             .config(Arc::clone(&config_runtime))
@@ -1145,6 +1333,8 @@ impl Application {
             .config_persistence(persistence_handle.clone())
             .platform(Arc::clone(&platform))
             .profile_storage(Arc::clone(&profile_storage))
+            .profile_persistence(profile_persistence_handle.clone())
+            .imaging_settings_store(Arc::clone(&imaging_settings_store))
             .build()
             .map_err(|e| StartupError::Services(e.to_string()))?;
 
@@ -1266,6 +1456,9 @@ impl Application {
             discovery,
             discovery_task,
             config_persistence_task,
+            user_persistence_task,
+            profile_persistence_task,
+            imaging_persistence_task,
             memory_logging_task,
             rate_limiter_cleanup_task,
             streaming_service,
@@ -1403,6 +1596,18 @@ impl Application {
             let _ = tokio::time::timeout(Duration::from_secs(2), task).await;
         }
 
+        if let Some(task) = self.user_persistence_task.take() {
+            let _ = tokio::time::timeout(Duration::from_secs(2), task).await;
+        }
+
+        if let Some(task) = self.profile_persistence_task.take() {
+            let _ = tokio::time::timeout(Duration::from_secs(2), task).await;
+        }
+
+        if let Some(task) = self.imaging_persistence_task.take() {
+            let _ = tokio::time::timeout(Duration::from_secs(2), task).await;
+        }
+
         if let Some(task) = self.memory_logging_task.take() {
             let _ = tokio::time::timeout(Duration::from_secs(1), task).await;
         }
@@ -1474,6 +1679,9 @@ impl Application {
         }
     }
 
+    /// Maximum silence from venc-read before `stream_health` is marked degraded.
+    const STREAM_HEALTH_SILENCE_SECS: u64 = 5;
+
     /// Get the current health status of the application.
     ///
     /// This can be used for health check endpoints (e.g., `/health`, `/ready`).
@@ -1485,6 +1693,41 @@ impl Application {
         status.add_component("platform", ComponentHealth::healthy("Platform"));
         status.add_component("device", ComponentHealth::healthy("Device Service"));
         status.add_component("media", ComponentHealth::healthy("Media Service"));
+
+        // Runtime stream liveness (not just startup readiness).
+        if self.streaming_service.is_some() {
+            match self
+                .app_state
+                .as_ref()
+                .and_then(|s| s.platform())
+                .and_then(|p| p.stream_frame_age_ms())
+            {
+                Some(age_ms) if age_ms > Self::STREAM_HEALTH_SILENCE_SECS * 1000 => {
+                    status.add_component(
+                        "stream_health",
+                        ComponentHealth::degraded(
+                            "Stream Health",
+                            format!("No frames for {}ms (venc-read likely stalled)", age_ms),
+                        ),
+                    );
+                    status.mark_degraded("stream_health");
+                }
+                Some(_) => {
+                    status
+                        .add_component("stream_health", ComponentHealth::healthy("Stream Health"));
+                }
+                None => {
+                    status.add_component(
+                        "stream_health",
+                        ComponentHealth::degraded(
+                            "Stream Health",
+                            "Streaming enabled but no frames observed yet",
+                        ),
+                    );
+                    status.mark_degraded("stream_health");
+                }
+            }
+        }
 
         // Mark degraded services
         for service in &self.degraded_services {
@@ -1642,6 +1885,9 @@ mod tests {
             server: None,
             server_task: None,
             config_persistence_task: None,
+            user_persistence_task: None,
+            profile_persistence_task: None,
+            imaging_persistence_task: None,
             discovery: None,
             discovery_task: None,
             memory_logging_task: None,
@@ -2075,6 +2321,9 @@ mod tests {
             server: None,
             server_task: None,
             config_persistence_task: None,
+            user_persistence_task: None,
+            profile_persistence_task: None,
+            imaging_persistence_task: None,
             discovery: None,
             discovery_task: None,
             memory_logging_task: None,
@@ -2083,7 +2332,7 @@ mod tests {
         };
 
         // Create a ShutdownReport with hard_exit_required = false (normal shutdown)
-        let mut report = ShutdownReport::new();
+        let report = ShutdownReport::new();
         assert!(
             !report.hard_exit_required,
             "hard_exit_required should default to false"
@@ -2131,6 +2380,9 @@ mod tests {
             server: None,
             server_task: None,
             config_persistence_task: None,
+            user_persistence_task: None,
+            profile_persistence_task: None,
+            imaging_persistence_task: None,
             discovery: None,
             discovery_task: None,
             memory_logging_task: None,

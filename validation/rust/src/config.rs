@@ -289,22 +289,16 @@ pub struct LoggingSection {
 }
 
 /// A stream to validate (RTSP + HTTP-FLV paths).
-#[derive(Debug, Clone)]
+///
+/// Also the schema for a TOML `[[device.streams]]` array entry.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct StreamConfig {
     /// Human-readable label (e.g. "main", "sub").
     pub label: String,
     /// RTSP stream path (e.g. "/main").
     pub rtsp_stream: String,
     /// HTTP-FLV path (e.g. "/live/main.flv").
-    pub httpflv_path: String,
-}
-
-/// TOML `[[device.streams]]` array entry.
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "kebab-case", deny_unknown_fields)]
-pub struct DeviceStreamSection {
-    pub label: String,
-    pub rtsp_stream: String,
     pub httpflv_path: String,
 }
 
@@ -332,7 +326,7 @@ pub struct DeviceSection {
     pub real_mode: bool,
     /// Streams to validate in real mode.
     #[serde(default)]
-    pub streams: Vec<DeviceStreamSection>,
+    pub streams: Vec<StreamConfig>,
 }
 
 impl Default for DeviceSection {
@@ -633,15 +627,7 @@ impl EffectiveConfig {
         // Build streams list.
         let streams = if !c.device.streams.is_empty() {
             // Explicit [[device.streams]] from TOML config.
-            c.device
-                .streams
-                .iter()
-                .map(|s| StreamConfig {
-                    label: s.label.clone(),
-                    rtsp_stream: s.rtsp_stream.clone(),
-                    httpflv_path: s.httpflv_path.clone(),
-                })
-                .collect()
+            c.device.streams.clone()
         } else if device_real_mode && !sources.rtsp_stream {
             // Real mode with no explicit --rtsp-stream: default to main + sub.
             vec![

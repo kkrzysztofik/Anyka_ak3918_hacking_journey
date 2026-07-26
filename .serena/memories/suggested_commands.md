@@ -159,7 +159,7 @@ git push -u origin feature/your-feature-name
 ## CI/CD Notes
 
 - GitHub Actions runs tests/lint with `--target x86_64-unknown-linux-gnu`
-- Container: `kkrzysztofik/anyka-cross-compile:rust-1.91.1`
+- Container: `kkrzysztofik/anyka-cross-compile:rust-1.97.1`
 - Coverage reports uploaded to SonarCloud
 - Security scans via Snyk (SAST + SCA)
 - Quality gates must pass before merge

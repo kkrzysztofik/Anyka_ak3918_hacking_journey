@@ -403,10 +403,12 @@ mod tests {
     fn test_audio_encoder_open_calls_ffi_and_returns_handle() {
         let mut mock_ffi = MockAudioHalTrait::new();
         let test_handle = std::ptr::NonNull::<c_void>::dangling().as_ptr();
-        let mut param = audio_param::default();
-        param.sample_rate = 8000;
-        param.channel_num = 1;
-        param.sample_bits = 16;
+        let param = audio_param {
+            sample_rate: 8000,
+            channel_num: 1,
+            sample_bits: 16,
+            ..Default::default()
+        };
 
         let test_handle_usize = test_handle as usize;
         mock_ffi
@@ -423,10 +425,12 @@ mod tests {
     #[test]
     fn test_audio_encoder_open_returns_error_on_null_handle() {
         let mut mock_ffi = MockAudioHalTrait::new();
-        let mut param = audio_param::default();
-        param.sample_rate = 8000;
-        param.channel_num = 1;
-        param.sample_bits = 16;
+        let param = audio_param {
+            sample_rate: 8000,
+            channel_num: 1,
+            sample_bits: 16,
+            ..Default::default()
+        };
 
         mock_ffi
             .expect_aenc_open()

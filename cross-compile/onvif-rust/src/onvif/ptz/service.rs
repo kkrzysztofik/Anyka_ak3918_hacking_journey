@@ -243,9 +243,9 @@ impl PTZService {
     }
 
     /// Handle GetStatus request - delegates to ops::status
-    pub fn handle_get_status(&self, request: GetStatus) -> OnvifResult<GetStatusResponse> {
+    pub async fn handle_get_status(&self, request: GetStatus) -> OnvifResult<GetStatusResponse> {
         self.validate_profile_token(&request.profile_token)?;
-        status::get_status(&self.state, &request.profile_token)
+        status::get_status(&self.state, &self.ptz_control, &request.profile_token).await
     }
 
     /// Handle GotoHomePosition request - delegates to ops::status
@@ -439,7 +439,7 @@ impl ServiceHandler for PTZService {
 
             "GetStatus" => {
                 let request: GetStatus = parse_body(body_xml)?;
-                let response = self.handle_get_status(request)?;
+                let response = self.handle_get_status(request).await?;
                 quick_xml::se::to_string(&response).map_err(|e| {
                     OnvifError::Internal(format!("Failed to serialize response: {}", e))
                 })
@@ -745,14 +745,15 @@ mod tests {
         assert!(!service.state.is_moving());
     }
 
-    #[test]
-    fn test_get_status() {
+    #[tokio::test]
+    async fn test_get_status() {
         let service = create_test_service();
 
         let response = service
             .handle_get_status(GetStatus {
                 profile_token: "Profile1".to_string(),
             })
+            .await
             .unwrap();
 
         // Should have position
@@ -971,13 +972,15 @@ mod tests {
     // Validation Tests
     // ========================================================================
 
-    #[test]
-    fn test_empty_profile_token() {
+    #[tokio::test]
+    async fn test_empty_profile_token() {
         let service = create_test_service();
 
-        let result = service.handle_get_status(GetStatus {
-            profile_token: "".to_string(),
-        });
+        let result = service
+            .handle_get_status(GetStatus {
+                profile_token: "".to_string(),
+            })
+            .await;
 
         assert!(result.is_err());
     }

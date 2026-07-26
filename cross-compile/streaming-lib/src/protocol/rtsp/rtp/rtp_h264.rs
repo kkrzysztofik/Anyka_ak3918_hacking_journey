@@ -743,7 +743,7 @@ mod tests {
             *last_marker_clone.lock().unwrap() = packet.header.marker;
             assert_eq!(packet.header.payload_type, 96);
             // Verify FU-A structure
-            if packet.payload.len() > 0 {
+            if !packet.payload.is_empty() {
                 let fu_indicator = packet.payload[0];
                 assert_eq!(fu_indicator & 0x1F, define::FU_A);
             }

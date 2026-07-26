@@ -23,14 +23,14 @@ use std::sync::Arc;
 
 fn create_test_service() -> DeviceService {
     let users = Arc::new(UserStorage::new());
-    let password_manager = Arc::new(PasswordManager::new());
+    let _password_manager = Arc::new(PasswordManager::new());
 
     // Create initial admin user with plaintext password
     users
         .create_user("admin", "admin123", UserLevel::Administrator)
         .unwrap();
 
-    DeviceService::new(users, password_manager)
+    DeviceService::new(users)
 }
 
 // ============================================================================

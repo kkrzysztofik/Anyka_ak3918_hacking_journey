@@ -421,9 +421,7 @@ export async function expandProfile(
 /**
  * Wait for the video encoder section to appear in an expanded profile
  */
-export async function waitForVideoEncoderSection(
-  profileToken = 'ProfileToken1',
-): Promise<void> {
+export async function waitForVideoEncoderSection(profileToken = 'ProfileToken1'): Promise<void> {
   await waitFor(
     () => {
       expect(screen.getByTestId(`video-encoder-config-${profileToken}`)).toBeInTheDocument();

@@ -1,4 +1,4 @@
-use super::server::{DefaultHttpFlvServer, HttpFlvServer, handle_connection};
+use super::server::{DefaultHttpFlvServer, handle_connection};
 use crate::common::auth::Auth;
 use crate::hub::define::{StreamHubEvent, StreamHubEventSender};
 use crate::hub::stream::StreamIdentifier;
@@ -74,13 +74,10 @@ async fn test_handle_connection_invalid_path() {
     let req = Request::builder().uri(uri).body(Body::empty()).unwrap();
 
     let path = req.uri().path();
-    match path.find(".flv") {
-        Some(_) => panic!("Should not find .flv in invalid path"),
-        None => {
-            // Should return NOT_FOUND
-            assert!(true);
-        }
-    }
+    assert!(
+        path.find(".flv").is_none(),
+        "invalid path must not be treated as an FLV request"
+    );
 }
 
 #[tokio::test]
@@ -90,15 +87,15 @@ async fn test_handle_connection_path_too_few_segments_yields_bad_request_path() 
     let req = Request::builder().uri(uri).body(Body::empty()).unwrap();
 
     let path = req.uri().path();
-    if let Some(index) = path.find(".flv") {
-        if index > 0 {
-            let (left, _) = path.split_at(index);
-            let rv: Vec<_> = left.split('/').collect();
-            assert!(
-                rv.len() < 3,
-                "Path with single segment before .flv should yield fewer than 3 segments for BAD_REQUEST"
-            );
-        }
+    if let Some(index) = path.find(".flv")
+        && index > 0
+    {
+        let (left, _) = path.split_at(index);
+        let rv: Vec<_> = left.split('/').collect();
+        assert!(
+            rv.len() < 3,
+            "Path with single segment before .flv should yield fewer than 3 segments for BAD_REQUEST"
+        );
     }
 }
 

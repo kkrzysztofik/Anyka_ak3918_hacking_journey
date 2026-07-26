@@ -1,5 +1,6 @@
 {
   // Rust-analyzer configuration for cross-compilation project
+  // linkedProjects: ${workspaceFolder} equals ANYKA_REPO_ROOT after `source ./setenv.sh` at repo root
   // Use system rustc and x86_64 target for IDE analysis
   "rust-analyzer.server.extraEnv": {
     // Override RUSTC to use system rustc for rust-analyzer
@@ -15,9 +16,9 @@
   "rust-analyzer.rustc.source": "discover",
   // Use x86_64 target for analysis (not ARM) as per project standards
   "rust-analyzer.cargo.target": "x86_64-unknown-linux-gnu",
-  // Set explicit workspace location
+  // Portable path (same tree as setenv.sh ANYKA_REPO_ROOT)
   "rust-analyzer.linkedProjects": [
-    "/home/kmk/anyka-dev/cross-compile/Cargo.toml"
+    "${workspaceFolder}/cross-compile/Cargo.toml"
   ],
   // Specify target explicitly in cargo commands
   "rust-analyzer.cargo.extraArgs": [
@@ -33,8 +34,6 @@
   ],
   // Memory optimization: reduce LRU cache from default 128
   "rust-analyzer.lru.capacity": 64,
-  // Memory optimization: skip build script evaluation
-  "rust-analyzer.cargo.buildScripts.enable": false,
   // Memory optimization: limit analysis threads (default uses all cores)
   "rust-analyzer.numThreads": 2,
   // Memory optimization: disable experimental diagnostics
@@ -54,6 +53,22 @@
   "rust-analyzer.check.command": "check",
   // Additional helpful settings
   "rust-analyzer.diagnostics.enable": true,
+  // Integrated terminal: load vendored toolchain via setenv.sh (see terminal-anyka.bashrc)
+  "terminal.integrated.profiles.linux": {
+    "bash": {
+      "path": "bash",
+      "icon": "terminal-bash"
+    },
+    "Anyka (setenv)": {
+      "path": "bash",
+      "args": [
+        "--rcfile",
+        "${workspaceFolder}/.vscode/terminal-anyka.bashrc"
+      ],
+      "icon": "terminal-bash"
+    }
+  },
+  "terminal.integrated.defaultProfile.linux": "Anyka (setenv)",
   "sonarlint.connectedMode.project": {
     "connectionId": "kkrzysztofik",
     "projectKey": "kkrzysztofik_Anyka_ak3918_hacking_journey"
@@ -62,21 +77,22 @@
   "sonarlint.output.showVerboseLogs": false,
   "sonarlint.trace.server": "off",
   "chat.tools.terminal.autoApprove": {
-    "/home/kmk/anyka-dev/toolchain/arm-anykav200-crosstool-ng/bin/cargo": true,
-    "/home/kmk/anyka-dev/toolchain/arm-anykav200-crosstool-ng/bin/arm-unknown-linux-uclibcgnueabi-nm": true,
+    "${workspaceFolder}/toolchain/arm-anykav200-crosstool-ng/bin/cargo": true,
+    "${workspaceFolder}/toolchain/arm-anykav200-crosstool-ng/bin/arm-unknown-linux-uclibcgnueabi-nm": true,
     "cargo fmt": true,
     "npm run type-check": true,
     "npm run test": true,
     "cargo audit": true,
-    "../../toolchain/arm-anykav200-crosstool-ng/bin/cargo": true,
     "bd": true,
-    "/^cd /home/kmk/anyka-dev && bd list --json 2>/dev/null \\| python3 -c \"import sys,json; items=json\\.load\\(sys\\.stdin\\); \\[print\\(i\\['id'\\], i\\.get\\('status',''\\), i\\.get\\('title',''\\), i\\.get\\('priority',''\\)\\) for i in items\\[:20\\]\\]\" 2>/dev/null \\|\\| bd list 2>/dev/null \\| head -60$/": {
+    // Approve `bd list` with optional flags and shell pipelines (e.g. `--json`, `| head`).
+    // A single long regex for the JSON+Python one-liner was hard to maintain; this pattern
+    // still matches the common automation shape without encoding the full pipeline.
+    "/\\bbd\\s+list\\b/": {
       "approve": true,
       "matchCommandLine": true
     }
   },
   "cursorpyright.analysis.typeCheckingMode": "strict",
   "cursorpyright.analysis.diagnosticMode": "workspace",
-  "snyk.advanced.organization": "50e31838-4e3f-4e58-ba5e-c5e116e29a8a",
   "snyk.advanced.autoSelectOrganization": true
 }

@@ -5,7 +5,7 @@
  */
 import React, { type ReactNode, Suspense } from 'react';
 
-import { HashRouter, Navigate, Route, Routes, useLocation } from 'react-router-dom';
+import { HashRouter, Navigate, Route, Routes, useLocation } from 'react-router';
 
 import Layout from '@/Layout';
 import { ErrorBoundary } from '@/components/common/ErrorBoundary';

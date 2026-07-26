@@ -2,10 +2,12 @@
 members = ["onvif-rust", "streaming-lib"]
 resolver = "2"
 
-[patch.crates-io]
-# uClibc target support patch for openssl-src
-# Enables cross-compilation for armv5te-unknown-linux-uclibceabi
-openssl-src = { path = "patches/openssl-src-300.2.3+3.2.1-full" }
+# No [patch.crates-io] entries are needed: nothing in the graph pulls openssl-src
+# any more (streaming-lib's unused `reqwest` dependency was the only path to it).
+# If a native-tls-backed dependency returns, restore:
+#   [patch.crates-io]
+#   openssl-src = { path = "patches/openssl-src-300.2.3+3.2.1-full" }
+# The patch and its setup.sh entry are still tracked under patches/.
 
 # Release profile for all workspace members
 # Phase 4 optimization: Changed from opt-level="z" to "3" for performance gains

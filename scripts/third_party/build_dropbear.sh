@@ -4,7 +4,11 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+# shellcheck source=scripts/common.sh
+source "$(cd "${SCRIPT_DIR}/../.." && pwd)/scripts/common.sh"
+# shellcheck source=scripts/third_party/build_lib.sh
+source "${SCRIPT_DIR}/build_lib.sh"
+REPO_ROOT="${ANYKA_REPO_ROOT}"
 
 DEFAULT_VERSION="2024.86"
 DEFAULT_SHA256="e78936dffc395f2e0db099321d6be659190966b99712b55c530dd0a1822e0a5e"
@@ -45,57 +49,14 @@ Examples:
 USAGE
 }
 
+tp_parse_common_args "$@"
+if [ "${#TP_EXTRA_ARGS[@]}" -gt 0 ]; then set -- "${TP_EXTRA_ARGS[@]}"; else set --; fi
 while [ "$#" -gt 0 ]; do
   case "$1" in
-    --version)
-      version="$2"
-      shift 2
-      ;;
-    --sha256)
-      sha256="$2"
-      shift 2
-      ;;
-    --url)
-      url="$2"
-      shift 2
-      ;;
-    --archive)
-      archive_override="$2"
-      shift 2
-      ;;
-    --toolchain-dir)
-      toolchain_dir="$2"
-      shift 2
-      ;;
-    --target)
-      target_triple="$2"
-      shift 2
-      ;;
-    --link-mode)
-      link_mode="$2"
-      shift 2
-      ;;
-    --output-dir)
-      output_dir="$2"
-      shift 2
-      ;;
-    --output-lib-dir)
-      output_lib_dir="$2"
-      shift 2
-      ;;
-    --work-root)
-      work_root="$2"
-      shift 2
-      ;;
-    -h|--help)
-      usage
-      exit 0
-      ;;
-    *)
-      echo "Unknown option: $1" >&2
-      usage
-      exit 1
-      ;;
+    --output-dir)     output_dir="$2";     shift 2 ;;
+    --output-lib-dir) output_lib_dir="$2"; shift 2 ;;
+    -h|--help)        usage; exit 0 ;;
+    *) echo "Unknown option: $1" >&2; usage; exit 1 ;;
   esac
 done
 
@@ -108,74 +69,27 @@ if [ -z "${url}" ]; then
   url="https://matt.ucc.asn.au/dropbear/releases/dropbear-${version}.tar.bz2"
 fi
 
-if [ ! -d "${toolchain_dir}" ]; then
-  echo "ERROR: toolchain not found: ${toolchain_dir}" >&2
-  exit 1
-fi
-
-if [ "${link_mode}" != "static" ] && [ "${link_mode}" != "dynamic" ]; then
-  echo "ERROR: --link-mode must be one of: static, dynamic" >&2
-  exit 1
-fi
+tp_validate_toolchain
+tp_validate_link_mode
 
 mkdir -p "${work_root}" "${output_dir}" "${output_lib_dir}"
 
 build_dir="${work_root}/dropbear-${version}"
-archive_path="${build_dir}/dropbear-${version}.tar.bz2"
-source_dir="${build_dir}/src/dropbear-${version}"
-
 rm -rf "${build_dir}"
-mkdir -p "${build_dir}/src"
 
-fetch_archive() {
-  local src_url="$1"
-  echo "Downloading: ${src_url}"
-  if curl -fL --retry 3 --connect-timeout 20 -o "${archive_path}" "${src_url}"; then
-    return 0
-  fi
-  return 1
-}
+# Dropbear has a fallback URL; derive it from the template URL.
+fallback_url="${FALLBACK_URL/dropbear-${DEFAULT_VERSION}/dropbear-${version}}"
+tp_fetch_archive "dropbear-${version}" "tar.bz2" "${url}" "${sha256}" "${archive_override}" "${build_dir}" "${fallback_url}"
+# source_dir set by tp_fetch_archive
 
-if [ -n "${archive_override}" ]; then
-  if [ ! -f "${archive_override}" ]; then
-    echo "ERROR: archive not found: ${archive_override}" >&2
-    exit 1
-  fi
-  cp -f "${archive_override}" "${archive_path}"
-else
-  if ! fetch_archive "${url}"; then
-    echo "Primary URL failed, trying fallback URL..."
-    fetch_archive "${FALLBACK_URL/dropbear-${DEFAULT_VERSION}/dropbear-${version}}"
-  fi
-fi
-
-echo "Verifying checksum..."
-echo "${sha256}  ${archive_path}" | sha256sum -c -
-
-echo "Extracting archive..."
-tar -xjf "${archive_path}" -C "${build_dir}/src"
-
-sysroot="${toolchain_dir}/${target_triple}/sysroot"
-if [ ! -d "${sysroot}" ]; then
-  echo "ERROR: sysroot not found: ${sysroot}" >&2
-  exit 1
-fi
-
-export PATH="${toolchain_dir}/bin:${PATH}"
+# Dropbear requires --sysroot embedded in CC/CXX (configure does not honour
+# CPPFLAGS/CFLAGS --sysroot reliably for all checks).
+tp_setup_cross_env
 export CC="${target_triple}-gcc --sysroot=${sysroot}"
 export CXX="${target_triple}-g++ --sysroot=${sysroot}"
-export AR="${target_triple}-ar"
-export RANLIB="${target_triple}-ranlib"
-export STRIP="${target_triple}-strip"
-export CPPFLAGS="--sysroot=${sysroot} -I${sysroot}/usr/include"
 export CFLAGS="${CFLAGS:-} --sysroot=${sysroot} -fno-pie"
 export CXXFLAGS="${CXXFLAGS:-} --sysroot=${sysroot} -fno-pie"
-base_ldflags="--sysroot=${sysroot} -L${sysroot}/usr/lib -L${sysroot}/lib -no-pie"
-if [ "${link_mode}" = "static" ]; then
-  export LDFLAGS="${base_ldflags} -static"
-else
-  export LDFLAGS="${base_ldflags}"
-fi
+export LDFLAGS="$(tp_ldflags) -no-pie"
 
 cd "${source_dir}"
 
@@ -206,39 +120,7 @@ fi
 
 install -m 0755 "${source_dir}/dropbearmulti" "${output_dir}/dropbearmulti"
 
-echo "Validating output binary..."
-file "${output_dir}/dropbearmulti"
-"${target_triple}-readelf" -h "${output_dir}/dropbearmulti" | sed -n '1,20p'
-
-if "${target_triple}-readelf" -d "${output_dir}/dropbearmulti" 2>/dev/null | grep -q NEEDED; then
-  if [ "${link_mode}" = "static" ]; then
-    echo "ERROR: static link mode requested but dynamic dependencies are still present" >&2
-    exit 1
-  fi
-  echo "Dynamic dependencies detected; bundling from sysroot into ${output_lib_dir}"
-  needed_libs="$("${target_triple}-readelf" -d "${output_dir}/dropbearmulti" 2>/dev/null | awk '/NEEDED/ { gsub(/\[|\]/, "", $5); print $5 }')"
-  for needed in ${needed_libs}; do
-    src_path=""
-    if [ -e "${sysroot}/lib/${needed}" ]; then
-      src_path="${sysroot}/lib/${needed}"
-    elif [ -e "${sysroot}/usr/lib/${needed}" ]; then
-      src_path="${sysroot}/usr/lib/${needed}"
-    fi
-
-    if [ -z "${src_path}" ]; then
-      echo "WARNING: could not find ${needed} in sysroot" >&2
-      continue
-    fi
-
-    resolved_path="$(readlink -f "${src_path}")"
-    resolved_name="$(basename "${resolved_path}")"
-    install -m 0644 "${resolved_path}" "${output_lib_dir}/${resolved_name}"
-    if [ "${needed}" != "${resolved_name}" ]; then
-      install -m 0644 "${resolved_path}" "${output_lib_dir}/${needed}"
-    fi
-  done
-else
-  echo "dropbearmulti has no dynamic dependencies"
-fi
+tp_show_binary_info "${output_dir}/dropbearmulti"
+tp_bundle_libs "${output_dir}/dropbearmulti" "${output_lib_dir}"
 
 echo "Dropbear build complete: ${output_dir}/dropbearmulti"

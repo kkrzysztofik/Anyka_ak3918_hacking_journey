@@ -152,7 +152,16 @@ describe('LiveViewPage', () => {
   it('should render PTZ control buttons', () => {
     renderWithProviders(<LiveViewPage />);
     expect(screen.getByTestId('liveview-ptz-title')).toHaveTextContent('Pan & Tilt');
-    const directions = ['up', 'down', 'left', 'right', 'up-left', 'up-right', 'down-left', 'down-right'];
+    const directions = [
+      'up',
+      'down',
+      'left',
+      'right',
+      'up-left',
+      'up-right',
+      'down-left',
+      'down-right',
+    ];
     for (const dir of directions) {
       expect(screen.getByTestId(`liveview-ptz-${dir}-button`)).toBeInTheDocument();
     }
@@ -253,8 +262,14 @@ describe('LiveViewPage', () => {
       });
 
       const directions = [
-        'up', 'down', 'left', 'right',
-        'up-left', 'up-right', 'down-left', 'down-right',
+        'up',
+        'down',
+        'left',
+        'right',
+        'up-left',
+        'up-right',
+        'down-left',
+        'down-right',
       ];
 
       for (const direction of directions) {

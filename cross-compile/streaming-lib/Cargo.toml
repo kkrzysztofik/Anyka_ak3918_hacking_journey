@@ -9,7 +9,7 @@ readme = "README.md"
 
 [dependencies]
 # Async runtime
-tokio = { version = "1.49", default-features = false, features = [
+tokio = { version = "1.53", default-features = false, features = [
   "rt-multi-thread",
   "net",
   "sync",
@@ -19,11 +19,10 @@ tokio = { version = "1.49", default-features = false, features = [
   "fs",  # Added for async file I/O (Phase 1 optimization)
 ] }
 tokio-util = { version = "0.7", features = ["codec"] }
-tokio-stream = "0.1"
 futures = "0.3"
 
 # Binary I/O
-bytes = "1.11"
+bytes = "1.12"
 byteorder = "1.5"
 rand = "0.10"
 
@@ -35,9 +34,9 @@ anyhow = "1.0"
 thiserror = "2.0"
 
 # HTTP/Web
-http = "1.4.0"
-axum = "0.8.8"
-base64 = "0.22.1"
+http = "1.4.2"
+axum = "0.8.9"
+base64 = "0.23.0"
 hex = "0.4"
 
 # Serialization
@@ -51,22 +50,15 @@ serde_derive = "1.0"
 
 # Utilities
 chrono = { version = "0.4", features = ["serde"] }
-indexmap = "2.13"
-lazy_static = "1.5"
+indexmap = "2.14"
 async-trait = "0.1"
 md5 = "0.8"
 subtle = "2.6"
-job_scheduler_ng = "2.4"
-portable-atomic = { version = "1.13", features = ["std"] }
-mockall = "0.14"
+portable-atomic = { version = "1.14", features = ["std"] }
 
 # Network
-reqwest = { version = "0.13", features = ["native-tls-vendored", "query", "form"] }
-
-# Note: openssl-src is patched at workspace root for uClibc ARM target support.
+socket2 = "0.6"
 
 [dev-dependencies]
-mockall = "0.14"
-tokio-test = "0.4"
-proptest = "1.10"
-wiremock = "0.6"
+mockall = "0.15"
+proptest = "1.11"

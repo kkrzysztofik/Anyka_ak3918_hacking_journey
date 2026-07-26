@@ -8,7 +8,7 @@ import React, { useState } from 'react';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { Camera, Loader2 } from 'lucide-react';
 import { useForm } from 'react-hook-form';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router';
 import { toast } from 'sonner';
 import { z } from 'zod';
 

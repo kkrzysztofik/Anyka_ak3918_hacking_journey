@@ -4,6 +4,7 @@
 //! These functions are extracted from faults.rs to separate validation logic
 //! from fault construction.
 
+use crate::onvif::common::MAX_SCOPE_URI_CHARS;
 use crate::onvif::error::OnvifResult;
 
 /// Validate a hostname according to RFC 1123.
@@ -54,6 +55,10 @@ pub fn validate_scope(scope: &str) -> OnvifResult<()> {
 
     if scope.is_empty() {
         return Err(invalid_scope("scope cannot be empty"));
+    }
+
+    if scope.len() > MAX_SCOPE_URI_CHARS {
+        return Err(invalid_scope("scope exceeds maximum length"));
     }
 
     // Scopes should be valid URIs
@@ -160,5 +165,23 @@ mod tests {
 
         // Valid: special URI characters
         assert!(validate_scope("onvif://www.onvif.org/name/Camera%20Name").is_ok());
+    }
+
+    #[test]
+    fn test_scope_length_exceeds_max_returns_err() {
+        let prefix = "onvif://www.onvif.org/name/";
+        let filler = "x".repeat(MAX_SCOPE_URI_CHARS - prefix.len() + 1);
+        let long_scope = format!("{prefix}{filler}");
+        assert!(long_scope.len() > MAX_SCOPE_URI_CHARS);
+        assert!(validate_scope(&long_scope).is_err());
+    }
+
+    #[test]
+    fn test_scope_length_equals_max_returns_ok() {
+        let prefix = "onvif://www.onvif.org/name/";
+        let filler = "x".repeat(MAX_SCOPE_URI_CHARS - prefix.len());
+        let scope = format!("{prefix}{filler}");
+        assert_eq!(scope.len(), MAX_SCOPE_URI_CHARS);
+        assert!(validate_scope(&scope).is_ok());
     }
 }

@@ -11,8 +11,8 @@ use tokio::task::JoinSet;
 use crate::common::auth::Auth;
 use crate::config::StreamingConfig;
 use crate::hub::define::StreamHubEventSender;
-use crate::protocol::httpflv::server::{DefaultHttpFlvServer, HttpFlvServer};
-use crate::protocol::rtsp::{DefaultRtspServer, RtspServer};
+use crate::protocol::httpflv::server::DefaultHttpFlvServer;
+use crate::protocol::rtsp::DefaultRtspServer;
 
 /// Errors that can occur during streaming service operations
 #[derive(Debug, Error)]
@@ -196,12 +196,6 @@ impl ShutdownReport {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tokio::sync::mpsc;
-
-    fn create_test_event_sender() -> StreamHubEventSender {
-        let (tx, _) = mpsc::unbounded_channel();
-        tx
-    }
 
     #[test]
     fn test_shutdown_report_default() {
@@ -240,7 +234,7 @@ mod tests {
 
     #[test]
     fn test_streaming_error_from_io() {
-        let io_err = std::io::Error::new(std::io::ErrorKind::Other, "test error");
+        let io_err = std::io::Error::other("test error");
         let streaming_err = StreamingError::Io(io_err.to_string());
         assert!(format!("{}", streaming_err).contains("IO"));
     }

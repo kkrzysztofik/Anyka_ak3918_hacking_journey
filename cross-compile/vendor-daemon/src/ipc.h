@@ -40,7 +40,7 @@ pthread_mutex_t *frame_client_lock_for_stream(uint32_t stream_id);
 int *frame_client_fd_for_stream(uint32_t stream_id);
 
 /**
- * send_frame_notification - send one 12-byte frame notification on the
+ * send_frame_notification - send one 20-byte frame notification on the
  * dedicated channel for the given stream.
  */
 int send_frame_notification(uint32_t stream_id, const struct vd_frame_notify *notif);

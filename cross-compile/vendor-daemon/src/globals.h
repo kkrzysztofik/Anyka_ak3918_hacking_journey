@@ -12,6 +12,9 @@ struct push_stream_state {
     volatile int    active;
     void           *stream_handle;
     uint32_t        stream_id;
+    /* Timestamp normalization state */
+    uint32_t        first_timestamp_ms;   /* First SDK timestamp seen */
+    int             timestamp_initialized; /* 0 = not set, 1 = initialized */
 };
 
 #define PUSH_STREAM_SLOT_COUNT  2
@@ -49,9 +52,6 @@ extern pthread_mutex_t g_frame_sub_client_lock;
 extern int g_saved_stdout;
 extern int g_saved_stderr;
 extern FILE *g_log_fp;
-
-/* ---- Wall-clock timing for inter-frame delta tracking ------------------ */
-extern uint64_t g_last_wall_clock_us;
 
 /* ---- Push stream state array ------------------------------------------- */
 extern struct push_stream_state g_push_streams[PUSH_STREAM_SLOT_COUNT];

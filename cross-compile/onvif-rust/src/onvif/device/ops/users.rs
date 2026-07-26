@@ -140,10 +140,8 @@ pub fn handle_create_users(
         );
     }
 
-    // Persist users to config file
-    if let Err(e) = users.save_to_toml("/mnt/anyka_hack/onvif/users.toml") {
-        tracing::warn!("Failed to save users to file: {}", e);
-    }
+    // Persist users off-executor (non-blocking, debounced).
+    users.request_save();
 
     Ok(CreateUsersResponse {})
 }
@@ -187,10 +185,8 @@ pub fn handle_delete_users(
         tracing::info!("DeleteUsers: deleted user '{}'", username);
     }
 
-    // Persist users to config file
-    if let Err(e) = users.save_to_toml("/mnt/anyka_hack/onvif/users.toml") {
-        tracing::warn!("Failed to save users to file: {}", e);
-    }
+    // Persist users off-executor (non-blocking, debounced).
+    users.request_save();
 
     Ok(DeleteUsersResponse {})
 }
@@ -249,10 +245,8 @@ pub fn handle_set_user(
         tracing::info!("SetUser: updated user '{}'", user.username);
     }
 
-    // Persist users to config file
-    if let Err(e) = users.save_to_toml("/mnt/anyka_hack/onvif/users.toml") {
-        tracing::warn!("Failed to save users to file: {}", e);
-    }
+    // Persist users off-executor (non-blocking, debounced).
+    users.request_save();
 
     Ok(SetUserResponse {})
 }

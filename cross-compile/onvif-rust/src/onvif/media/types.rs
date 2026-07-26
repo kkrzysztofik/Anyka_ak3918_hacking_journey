@@ -2,6 +2,17 @@
 //!
 //! This module re-exports WSDL-generated types and provides any
 //! implementation-specific extensions needed for Media Service operations.
+//!
+//! # Resource limits (embedded)
+//!
+//! - **Concurrent media profiles**: Hard-capped at [`MAX_PROFILES`] (enforced in
+//!   [`crate::onvif::media::state::MediaState`] and
+//!   [`crate::onvif::media::profile_manager::ProfileManager`]).
+//! - **Event / pull-point sessions**: No in-memory session cap yet; the Events
+//!   service does not allocate subscription state while pull-point operations
+//!   remain unsupported ([`crate::onvif::events::service`]).
+//! - **PTZ presets**: Limited by `ptz.max_presets` in application config and the
+//!   PTZ preset store (not part of this module).
 
 // Re-export all WSDL types from the generated types module
 pub use crate::onvif::types::media::*;
@@ -17,7 +28,12 @@ pub use crate::onvif::types::common::{
 /// Media Service namespace URI.
 pub const MEDIA_SERVICE_NAMESPACE: &str = "http://www.onvif.org/ver10/media/wsdl";
 
-/// Default maximum number of profiles supported.
+/// Default maximum number of media profiles (concurrent) supported on device.
+///
+/// Set to **16** to align with current product defaults and avoid regressions for
+/// deployments that already rely on that cap, while keeping a fixed upper bound
+/// suitable for small embedded heaps. The limit is enforced in capabilities and
+/// `create_profile` paths.
 pub const MAX_PROFILES: usize = 16;
 
 /// Default video source token.

@@ -2,7 +2,6 @@ use {
     super::HttpFlv,
     crate::common::auth::Auth,
     crate::hub::define::StreamHubEventSender,
-    async_trait::async_trait,
     axum::{
         body::Body,
         extract::{ConnectInfo, Request, State},
@@ -101,32 +100,16 @@ pub(crate) async fn handle_connection(
     }
 }
 
-/// Trait for HTTP-FLV server implementations
-///
-/// This trait provides the abstraction for HTTP-FLV server functionality,
-/// allowing platform-specific implementations (e.g., Anyka hardware integration).
-#[async_trait]
-pub trait HttpFlvServer: Send + Sync {
-    /// Create a new HTTP-FLV server instance
-    fn new(address: String, event_producer: StreamHubEventSender, auth: Option<Auth>) -> Self
-    where
-        Self: Sized;
-
-    /// Run the HTTP-FLV server
-    async fn run(&mut self) -> Result<()>;
-}
-
-/// Default implementation of the HTTP-FLV server trait
+/// HTTP-FLV server: serves live FLV streams over HTTP.
 pub struct DefaultHttpFlvServer {
     address: String,
     event_producer: StreamHubEventSender,
     auth: Option<Auth>,
 }
 
-#[async_trait]
-impl HttpFlvServer for DefaultHttpFlvServer {
+impl DefaultHttpFlvServer {
     /// Create a new HTTP-FLV server instance
-    fn new(address: String, event_producer: StreamHubEventSender, auth: Option<Auth>) -> Self {
+    pub fn new(address: String, event_producer: StreamHubEventSender, auth: Option<Auth>) -> Self {
         Self {
             address,
             event_producer,
@@ -135,7 +118,7 @@ impl HttpFlvServer for DefaultHttpFlvServer {
     }
 
     /// Run the HTTP-FLV server
-    async fn run(&mut self) -> Result<()> {
+    pub async fn run(&mut self) -> Result<()> {
         let sock_addr: SocketAddr = self.address.parse()?;
 
         let listener = TcpListener::bind(sock_addr).await?;

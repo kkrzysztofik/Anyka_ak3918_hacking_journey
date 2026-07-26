@@ -502,7 +502,7 @@ describe('ImagingPage', () => {
 
       const selects = screen.getAllByRole('combobox');
       const irCutFilterSelect =
-        selects.find((select) => {
+        selects.find((select: HTMLElement) => {
           const label = screen.getByTestId('imaging-ir-cut-filter-mode-label');
           return select.closest('div')?.contains(label) || false;
         }) || selects[0];

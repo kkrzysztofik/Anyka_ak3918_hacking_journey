@@ -14,14 +14,7 @@ export interface PTZPreset {
 
 /** Valid PTZ movement directions */
 export type PTZDirection =
-  | 'up'
-  | 'down'
-  | 'left'
-  | 'right'
-  | 'up-left'
-  | 'up-right'
-  | 'down-left'
-  | 'down-right';
+  'up' | 'down' | 'left' | 'right' | 'up-left' | 'up-right' | 'down-left' | 'down-right';
 
 /** Direction-to-velocity unit vector mapping */
 const DIRECTION_VELOCITIES: Record<PTZDirection, { pan: number; tilt: number }> = {

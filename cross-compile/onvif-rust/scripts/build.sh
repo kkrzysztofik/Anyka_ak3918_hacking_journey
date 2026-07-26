@@ -4,11 +4,10 @@
 
 set -e
 
-# Script directory
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# Go up 1 level: scripts -> onvif-rust
+# shellcheck source=scripts/common.sh
+source "$(cd "${SCRIPT_DIR}/../../.." && pwd)/scripts/common.sh"
 PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
-# Workspace root: onvif-rust -> cross-compile
 WORKSPACE_DIR="$(cd "${PROJECT_DIR}/.." && pwd)"
 
 # Default values
@@ -17,38 +16,6 @@ TARGET="armv5te-unknown-linux-uclibceabi"
 CLEAN=false
 EXTRA_FEATURES=""
 NO_IPC=false
-
-# Colors for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m' # No Color
-
-# Logging functions
-log_info() {
-  local message="$1"
-  echo -e "${BLUE}[INFO]${NC} ${message}"
-  return 0
-}
-
-log_success() {
-  local message="$1"
-  echo -e "${GREEN}[SUCCESS]${NC} ${message}"
-  return 0
-}
-
-log_error() {
-  local message="$1"
-  echo -e "${RED}[ERROR]${NC} ${message}" >&2
-  return 0
-}
-
-log_warn() {
-  local message="$1"
-  echo -e "${YELLOW}[WARN]${NC} ${message}"
-  return 0
-}
 
 # Parse command line arguments
 while [[ $# -gt 0 ]]; do
@@ -114,14 +81,12 @@ log_info "Build mode: ${BUILD_MODE}"
 [[ -n "${EXTRA_FEATURES}" ]] && log_info "Extra features: ${EXTRA_FEATURES}"
 
 # Use vendored toolchain cargo by default (per project requirements)
-REPO_ROOT="$(cd "${PROJECT_DIR}/../.." && pwd)"
-DEFAULT_CARGO="${REPO_ROOT}/toolchain/arm-anykav200-crosstool-ng/bin/cargo"
-export CARGO="${CARGO:-${DEFAULT_CARGO}}"
+export CARGO="${CARGO:-${ANYKA_CARGO}}"
 
 if [[ ! -x "${CARGO}" ]]; then
   log_error "cargo not found or not executable at: ${CARGO}"
   log_error "Set CARGO to the vendored toolchain cargo, e.g.:"
-  log_error "  export CARGO=${DEFAULT_CARGO}"
+  log_error "  export CARGO=${ANYKA_CARGO}"
   exit 1
 fi
 
@@ -212,7 +177,7 @@ if command -v file &> /dev/null; then
 fi
 
 # Copy binary to deployment directory
-DEPLOY_DIR="${REPO_ROOT}/SD_card_contents/anyka_hack/onvif"
+DEPLOY_DIR="${ANYKA_REPO_ROOT}/SD_card_contents/anyka_hack/onvif"
 mkdir -p "${DEPLOY_DIR}"
 cp "${BINARY_PATH}" "${DEPLOY_DIR}/onvif-rust.bin"
 chmod 755 "${DEPLOY_DIR}/onvif-rust.bin"
@@ -233,7 +198,7 @@ log_info "  - ${DEPLOY_DIR}/onvif-rust"
 
 # Copy vendor-daemon if built
 VENDOR_DAEMON_BIN="${WORKSPACE_DIR}/vendor-daemon/build/vendor-daemon.bin"
-VENDOR_DAEMON_DEPLOY="${REPO_ROOT}/SD_card_contents/anyka_hack/vendor-daemon"
+VENDOR_DAEMON_DEPLOY="${ANYKA_REPO_ROOT}/SD_card_contents/anyka_hack/vendor-daemon"
 if [[ -f "${VENDOR_DAEMON_BIN}" ]]; then
   mkdir -p "${VENDOR_DAEMON_DEPLOY}"
   cp "${VENDOR_DAEMON_BIN}" "${VENDOR_DAEMON_DEPLOY}/vendor-daemon.bin"

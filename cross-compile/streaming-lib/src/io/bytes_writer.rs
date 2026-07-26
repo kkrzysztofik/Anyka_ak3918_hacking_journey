@@ -119,11 +119,11 @@ impl BytesWriter {
         Ok(())
     }
     pub fn extract_current_bytes(&mut self) -> BytesMut {
-        let mut rv_data = BytesMut::new();
-        rv_data.extend_from_slice(&self.bytes.clone()[..]);
-        self.bytes.clear();
-
-        rv_data
+        let data = std::mem::take(&mut self.bytes);
+        // `bytes` 1.x does not implement `From<Vec<u8>>` for `BytesMut`. `Bytes::from(Vec<u8>)`
+        // reuses the `Vec` buffer when uniquely owned; `BytesMut::from(Bytes)` can then take that
+        // allocation without copying when the `Bytes` handle is sole owner (see `bytes` crate).
+        BytesMut::from(bytes::Bytes::from(data))
     }
 
     pub fn clear(&mut self) {
@@ -197,36 +197,33 @@ impl AsyncBytesWriter {
     }
 
     pub async fn flush(&mut self) -> Result<(), BytesWriteError> {
-        self.io
-            .lock()
-            .await
-            .write(self.bytes_writer.bytes.clone().into())
-            .await?;
-        self.bytes_writer.bytes.clear();
+        if self.bytes_writer.bytes.is_empty() {
+            return Ok(());
+        }
+        // Take the buffer to avoid an extra copy; on write error the pending data is dropped
+        // (same as a failed flush after partial send).
+        let buf = std::mem::take(&mut self.bytes_writer.bytes);
+        let data = bytes::Bytes::from(buf);
+        self.io.lock().await.write(data).await?;
         Ok(())
     }
 
     pub async fn flush_timeout(&mut self, duration: Duration) -> Result<(), BytesWriteError> {
-        let message = timeout(
-            duration,
-            self.io
-                .lock()
-                .await
-                .write(self.bytes_writer.bytes.clone().into()),
-        )
-        .await;
-
-        match message {
-            // Handle successful write
-            Ok(Ok(_)) => {
+        if self.bytes_writer.bytes.is_empty() {
+            return Ok(());
+        }
+        let data = bytes::Bytes::copy_from_slice(&self.bytes_writer.bytes);
+        let mut io = self.io.lock().await;
+        let write_fut = io.write(data);
+        match timeout(duration, write_fut).await {
+            Ok(Ok(())) => {
+                drop(io);
                 self.bytes_writer.bytes.clear();
                 Ok(())
             }
-            // Handle I/O error from write operation
             Ok(Err(io_err)) => Err(BytesWriteError {
                 value: BytesWriteErrorValue::BytesIOError(io_err),
             }),
-            // Handle timeout
             Err(_) => Err(BytesWriteError {
                 value: BytesWriteErrorValue::Timeout,
             }),
@@ -1347,7 +1344,7 @@ mod tests {
             Box::new(MockNetIO::new()) as Box<dyn TNetIO + Send + Sync>
         ));
         let mut writer = AsyncBytesWriter::new(mock_io);
-        writer.write_f64::<BigEndian>(3.14159).unwrap();
+        writer.write_f64::<BigEndian>(std::f64::consts::PI).unwrap();
         assert_eq!(writer.bytes_writer.len(), 8);
     }
 

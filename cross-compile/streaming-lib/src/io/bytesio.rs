@@ -1,4 +1,4 @@
-use std::net::SocketAddr;
+use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -7,6 +7,7 @@ use bytes::Bytes;
 use bytes::BytesMut;
 use futures::SinkExt;
 use futures::StreamExt;
+use socket2::{Domain, Protocol, Socket, Type};
 use tokio::net::TcpStream;
 use tokio::net::UdpSocket;
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
@@ -19,6 +20,36 @@ use super::bytesio_errors::{BytesIOError, BytesIOErrorValue};
 /// Maximum UDP datagram size (RFC 768 limit)
 const MAX_UDP_DATAGRAM_SIZE: usize = 65507;
 
+/// Default UDP send buffer size (512KB for high-bitrate video).
+/// Linux doubles this internally via SO_SNDBUF, giving ~1MB actual.
+const UDP_SEND_BUFFER_SIZE: usize = 512 * 1024;
+
+fn create_configured_udp_socket() -> Option<Socket> {
+    let socket = match Socket::new(Domain::IPV4, Type::DGRAM, Some(Protocol::UDP)) {
+        Ok(s) => s,
+        Err(err) => {
+            tracing::error!(error = %err, "socket2_create_error");
+            return None;
+        }
+    };
+
+    if let Err(err) = socket.set_send_buffer_size(UDP_SEND_BUFFER_SIZE) {
+        tracing::warn!(error = %err, "failed_to_set_udp_send_buffer_size");
+    }
+    if let Ok(actual) = socket.send_buffer_size()
+        && actual < UDP_SEND_BUFFER_SIZE
+    {
+        tracing::warn!(
+            requested = UDP_SEND_BUFFER_SIZE,
+            actual = actual,
+            "udp_send_buffer_size_capped_by_kernel"
+        );
+    }
+
+    Some(socket)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NetType {
     TCP,
     UDP,
@@ -44,37 +75,97 @@ impl UdpIO {
             format!("{remote_domain}:{remote_port}")
         };
         tracing::debug!(remote_address = %remote_address, "udp_connection_attempt");
-        let local_address = format!("0.0.0.0:{local_port}");
-        if let Ok(local_socket) = UdpSocket::bind(local_address).await {
-            if let Ok(remote_socket_addr) = remote_address.parse::<SocketAddr>() {
-                match local_socket.connect(remote_socket_addr).await {
-                    Ok(()) => {
-                        return Some(Self {
-                            socket: local_socket,
-                        });
-                    }
-                    Err(err) => {
-                        tracing::error!(error = %err, remote_address = %remote_address, "udp_connect_error");
-                        return None;
-                    }
-                }
-            } else {
-                tracing::error!(remote_address = %remote_address, "remote_address_parse_error");
+
+        let socket = create_configured_udp_socket()?;
+
+        let local_address = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, local_port));
+        if let Err(err) = socket.bind(&local_address.into()) {
+            tracing::error!(error = %err, local_addr = %local_address, "udp_bind_error");
+            return None;
+        }
+
+        // Connect to remote address
+        let remote_socket_addr: SocketAddr = match remote_address.parse() {
+            Ok(addr) => addr,
+            Err(err) => {
+                tracing::error!(error = %err, remote_address = %remote_address, "remote_address_parse_error");
+                return None;
+            }
+        };
+
+        if let Err(err) = socket.connect(&remote_socket_addr.into()) {
+            tracing::error!(error = %err, remote_address = %remote_address, "udp_connect_error");
+            return None;
+        }
+
+        if let Err(err) = socket.set_nonblocking(true) {
+            tracing::error!(error = %err, "udp_set_nonblocking_error");
+            return None;
+        }
+
+        // Convert socket2 socket to tokio UdpSocket
+        let std_socket: std::net::UdpSocket = socket.into();
+        match tokio::net::UdpSocket::from_std(std_socket) {
+            Ok(local_socket) => Some(Self {
+                socket: local_socket,
+            }),
+            Err(err) => {
+                tracing::error!(error = %err, "tokio_udp_from_std_error");
+                None
             }
         }
-
-        None
     }
 
+    /// Binds a UDP [`UdpIO`] to `0.0.0.0:{local_port}` with the standard large send buffer.
+    ///
+    /// Unlike [`UdpIO::new`], this does **not** connect to a remote host: it only listens on all
+    /// interfaces on the given port.
+    ///
+    /// # Arguments
+    ///
+    /// * `local_port` — UDP port to bind (host byte order), e.g. `8554`.
+    ///
+    /// # Returns
+    ///
+    /// * `Some(UdpIO)` when [`create_configured_udp_socket`], `bind`, `set_nonblocking`, and
+    ///   [`tokio::net::UdpSocket::from_std`] all succeed.
+    /// * `None` on parse/bind/nonblocking/Tokio conversion failure (errors are logged).
+    ///
+    /// # Errors
+    ///
+    /// Failures mirror [`UdpIO::new`]: invalid/unavailable local address, `set_nonblocking`,
+    /// or moving the std socket into the Tokio runtime.
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// let udp = UdpIO::new_with_local_port(8554).await?;
+    /// ```
     pub async fn new_with_local_port(local_port: u16) -> Option<Self> {
-        let local_address = format!("0.0.0.0:{local_port}");
+        let socket = create_configured_udp_socket()?;
 
-        if let Ok(local_socket) = UdpSocket::bind(local_address).await {
-            return Some(Self {
-                socket: local_socket,
-            });
+        let local_address = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, local_port));
+        if let Err(err) = socket.bind(&local_address.into()) {
+            tracing::error!(error = %err, local_addr = %local_address, "udp_bind_error");
+            return None;
         }
-        None
+
+        if let Err(err) = socket.set_nonblocking(true) {
+            tracing::error!(error = %err, "udp_set_nonblocking_error");
+            return None;
+        }
+
+        // Convert socket2 socket to tokio UdpSocket
+        let std_socket: std::net::UdpSocket = socket.into();
+        match tokio::net::UdpSocket::from_std(std_socket) {
+            Ok(local_socket) => Some(Self {
+                socket: local_socket,
+            }),
+            Err(err) => {
+                tracing::error!(error = %err, "tokio_udp_from_std_error");
+                None
+            }
+        }
     }
 
     pub fn get_local_port(&self) -> Option<u16> {
@@ -337,20 +428,12 @@ mod tests {
 
     #[test]
     fn test_net_type_tcp_variant_exists() {
-        let net_type = NetType::TCP;
-        match net_type {
-            NetType::TCP => assert!(true),
-            NetType::UDP => panic!("Expected TCP variant"),
-        }
+        assert!(matches!(NetType::TCP, NetType::TCP));
     }
 
     #[test]
     fn test_net_type_udp_variant_exists() {
-        let net_type = NetType::UDP;
-        match net_type {
-            NetType::UDP => assert!(true),
-            NetType::TCP => panic!("Expected UDP variant"),
-        }
+        assert!(matches!(NetType::UDP, NetType::UDP));
     }
 
     // ========== TcpIO Tests ==========
@@ -989,45 +1072,45 @@ mod tests {
     #[tokio::test]
     async fn test_udpio_new_with_specific_port() {
         // First get an available port
-        if let Some(temp_udpio) = UdpIO::new_with_local_port(0).await {
-            if let Some(port) = temp_udpio.get_local_port() {
-                // Drop the temp socket to free the port
-                drop(temp_udpio);
+        if let Some(temp_udpio) = UdpIO::new_with_local_port(0).await
+            && let Some(port) = temp_udpio.get_local_port()
+        {
+            // Drop the temp socket to free the port
+            drop(temp_udpio);
 
-                // Now try to bind to the same port (may fail if port is reused)
-                // Just verify the function doesn't panic
-                let _ = UdpIO::new_with_local_port(port).await;
-            }
+            // Now try to bind to the same port (may fail if port is reused)
+            // Just verify the function doesn't panic
+            let _ = UdpIO::new_with_local_port(port).await;
         }
     }
 
     #[tokio::test]
     async fn test_udpio_write_and_read_roundtrip() {
-        if let Some((udpio1, udpio2)) = new_udpio_pair().await {
-            if let (Some(port1), Some(port2)) = (udpio1.get_local_port(), udpio2.get_local_port()) {
-                // Create new UDP sockets connected to each other
-                if let (Some(mut sender), Some(mut receiver)) = (
-                    UdpIO::new("127.0.0.1".to_string(), port2, port1).await,
-                    UdpIO::new("127.0.0.1".to_string(), port1, port2).await,
-                ) {
-                    drop(udpio1);
-                    drop(udpio2);
+        if let Some((udpio1, udpio2)) = new_udpio_pair().await
+            && let (Some(port1), Some(port2)) = (udpio1.get_local_port(), udpio2.get_local_port())
+        {
+            // Create new UDP sockets connected to each other
+            if let (Some(mut sender), Some(mut receiver)) = (
+                UdpIO::new("127.0.0.1".to_string(), port2, port1).await,
+                UdpIO::new("127.0.0.1".to_string(), port1, port2).await,
+            ) {
+                drop(udpio1);
+                drop(udpio2);
 
-                    let send_task = tokio::spawn(async move {
-                        let data = Bytes::from("udp test message");
-                        let result = sender.write(data).await;
-                        assert!(result.is_ok(), "UDP write should succeed");
-                    });
+                let send_task = tokio::spawn(async move {
+                    let data = Bytes::from("udp test message");
+                    let result = sender.write(data).await;
+                    assert!(result.is_ok(), "UDP write should succeed");
+                });
 
-                    let recv_task = tokio::spawn(async move {
-                        let result = receiver.read().await;
-                        assert!(result.is_ok(), "UDP read should succeed");
-                        let data = result.unwrap();
-                        assert_eq!(&data[..], b"udp test message");
-                    });
+                let recv_task = tokio::spawn(async move {
+                    let result = receiver.read().await;
+                    assert!(result.is_ok(), "UDP read should succeed");
+                    let data = result.unwrap();
+                    assert_eq!(&data[..], b"udp test message");
+                });
 
-                    let _ = tokio::try_join!(send_task, recv_task);
-                }
+                let _ = tokio::try_join!(send_task, recv_task);
             }
         }
     }
@@ -1092,13 +1175,13 @@ mod tests {
         // get the first available port
 
         let mut first_local_port = 0;
-        if let Some(udpio_0) = UdpIO::new_with_local_port(0).await {
-            if let Some(local_port_0) = udpio_0.get_local_port() {
-                first_local_port = local_port_0;
-            }
-
-            // std::mem::drop(udpio_0);
+        if let Some(udpio_0) = UdpIO::new_with_local_port(0).await
+            && let Some(local_port_0) = udpio_0.get_local_port()
+        {
+            first_local_port = local_port_0;
         }
+
+        // std::mem::drop(udpio_0);
         //The object udpio_0 is automatically cleared and released when it goes out of scope here.
         println!("first_local_port: {}", first_local_port);
 
@@ -1154,30 +1237,29 @@ mod tests {
 
     #[tokio::test]
     async fn test_udpio_read_timeout_success() {
-        if let Some((udpio1, udpio2)) = new_udpio_pair().await {
-            if let (Some(port1), Some(port2)) = (udpio1.get_local_port(), udpio2.get_local_port()) {
-                if let (Some(mut sender), Some(mut receiver)) = (
-                    UdpIO::new("127.0.0.1".to_string(), port2, port1).await,
-                    UdpIO::new("127.0.0.1".to_string(), port1, port2).await,
-                ) {
-                    drop(udpio1);
-                    drop(udpio2);
-                    let send_data = Bytes::from("udp timeout test");
-                    let send_task = tokio::spawn(async move {
-                        let _ = sender.write(send_data).await;
-                    });
-                    let recv_task = tokio::spawn(async move {
-                        let result = receiver.read_timeout(Duration::from_secs(2)).await;
-                        assert!(
-                            result.is_ok(),
-                            "Read_timeout should succeed when data arrives"
-                        );
-                        let data = result.unwrap();
-                        assert_eq!(&data[..], b"udp timeout test");
-                    });
-                    let _ = tokio::try_join!(send_task, recv_task);
-                }
-            }
+        if let Some((udpio1, udpio2)) = new_udpio_pair().await
+            && let (Some(port1), Some(port2)) = (udpio1.get_local_port(), udpio2.get_local_port())
+            && let (Some(mut sender), Some(mut receiver)) = (
+                UdpIO::new("127.0.0.1".to_string(), port2, port1).await,
+                UdpIO::new("127.0.0.1".to_string(), port1, port2).await,
+            )
+        {
+            drop(udpio1);
+            drop(udpio2);
+            let send_data = Bytes::from("udp timeout test");
+            let send_task = tokio::spawn(async move {
+                let _ = sender.write(send_data).await;
+            });
+            let recv_task = tokio::spawn(async move {
+                let result = receiver.read_timeout(Duration::from_secs(2)).await;
+                assert!(
+                    result.is_ok(),
+                    "Read_timeout should succeed when data arrives"
+                );
+                let data = result.unwrap();
+                assert_eq!(&data[..], b"udp timeout test");
+            });
+            let _ = tokio::try_join!(send_task, recv_task);
         }
     }
 
@@ -1362,14 +1444,14 @@ mod tests {
 
     #[tokio::test]
     async fn test_udpio_new_with_local_port_bind_fails_when_port_in_use() {
-        if let Some(udpio) = UdpIO::new_with_local_port(0).await {
-            if let Some(port) = udpio.get_local_port() {
-                let result = UdpIO::new_with_local_port(port).await;
-                assert!(
-                    result.is_none(),
-                    "Binding to already-used port should return None"
-                );
-            }
+        if let Some(udpio) = UdpIO::new_with_local_port(0).await
+            && let Some(port) = udpio.get_local_port()
+        {
+            let result = UdpIO::new_with_local_port(port).await;
+            assert!(
+                result.is_none(),
+                "Binding to already-used port should return None"
+            );
         }
     }
 }
