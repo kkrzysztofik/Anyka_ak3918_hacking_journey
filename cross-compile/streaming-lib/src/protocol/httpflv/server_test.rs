@@ -88,14 +88,15 @@ async fn test_handle_connection_path_too_few_segments_yields_bad_request_path() 
 
     let path = req.uri().path();
     if let Some(index) = path.find(".flv")
-        && index > 0 {
-            let (left, _) = path.split_at(index);
-            let rv: Vec<_> = left.split('/').collect();
-            assert!(
-                rv.len() < 3,
-                "Path with single segment before .flv should yield fewer than 3 segments for BAD_REQUEST"
-            );
-        }
+        && index > 0
+    {
+        let (left, _) = path.split_at(index);
+        let rv: Vec<_> = left.split('/').collect();
+        assert!(
+            rv.len() < 3,
+            "Path with single segment before .flv should yield fewer than 3 segments for BAD_REQUEST"
+        );
+    }
 }
 
 #[tokio::test]

@@ -1143,13 +1143,13 @@ async fn test_rtsp_server_session_describe() {
                 identifier: _,
                 sender,
             } = event
-            {
-                // Respond with a minimal valid SDP containing one media block
-                let dummy_sdp = "v=0\r\no=- 0 0 IN IP4 127.0.0.1\r\ns=No Name\r\nc=IN IP4 127.0.0.1\r\nt=0 0\r\nm=video 0 RTP/AVP 96\r\na=rtpmap:96 H264/90000\r\n";
-                let _ = sender.send(Information::Sdp {
-                    data: dummy_sdp.to_string(),
-                });
-            }
+        {
+            // Respond with a minimal valid SDP containing one media block
+            let dummy_sdp = "v=0\r\no=- 0 0 IN IP4 127.0.0.1\r\ns=No Name\r\nc=IN IP4 127.0.0.1\r\nt=0 0\r\nm=video 0 RTP/AVP 96\r\na=rtpmap:96 H264/90000\r\n";
+            let _ = sender.send(Information::Sdp {
+                data: dummy_sdp.to_string(),
+            });
+        }
     });
 
     let session_io: Box<dyn TNetIO + Send + Sync> = Box::new(mock_io);
@@ -1240,18 +1240,19 @@ async fn test_rtsp_server_session_describe_normalizes_path() {
 
     tokio::spawn(async move {
         if let Some(event) = event_receiver.recv().await
-            && let StreamHubEvent::Request { identifier, sender } = event {
-                match identifier {
-                    StreamIdentifier::Rtsp { stream_path } => {
-                        assert_eq!(stream_path, "live/test");
-                    }
-                    _ => panic!("unexpected identifier type"),
+            && let StreamHubEvent::Request { identifier, sender } = event
+        {
+            match identifier {
+                StreamIdentifier::Rtsp { stream_path } => {
+                    assert_eq!(stream_path, "live/test");
                 }
-                let dummy_sdp = "v=0\r\no=- 0 0 IN IP4 127.0.0.1\r\ns=No Name\r\nc=IN IP4 127.0.0.1\r\nt=0 0\r\nm=video 0 RTP/AVP 96\r\na=rtpmap:96 H264/90000\r\n";
-                let _ = sender.send(Information::Sdp {
-                    data: dummy_sdp.to_string(),
-                });
+                _ => panic!("unexpected identifier type"),
             }
+            let dummy_sdp = "v=0\r\no=- 0 0 IN IP4 127.0.0.1\r\ns=No Name\r\nc=IN IP4 127.0.0.1\r\nt=0 0\r\nm=video 0 RTP/AVP 96\r\na=rtpmap:96 H264/90000\r\n";
+            let _ = sender.send(Information::Sdp {
+                data: dummy_sdp.to_string(),
+            });
+        }
     });
 
     let session_io: Box<dyn TNetIO + Send + Sync> = Box::new(mock_io);
@@ -2077,23 +2078,23 @@ async fn test_rtsp_server_session_play() {
                 result_sender,
                 ..
             } = event
-            {
-                match identifier {
-                    StreamIdentifier::Rtsp { stream_path } => {
-                        assert_eq!(stream_path, "live/test");
-                    }
-                    _ => panic!("Expected RTSP identifier"),
+        {
+            match identifier {
+                StreamIdentifier::Rtsp { stream_path } => {
+                    assert_eq!(stream_path, "live/test");
                 }
-                // Create a channel for frame data that we immediately close to simulate end/error
-                let (_frame_sender, frame_receiver) = crate::hub::define::frame_data_channel();
-
-                let data_receiver = DataReceiver {
-                    frame_receiver: Some(frame_receiver),
-                    packet_receiver: None,
-                };
-
-                let _ = result_sender.send(Ok((data_receiver, None)));
+                _ => panic!("Expected RTSP identifier"),
             }
+            // Create a channel for frame data that we immediately close to simulate end/error
+            let (_frame_sender, frame_receiver) = crate::hub::define::frame_data_channel();
+
+            let data_receiver = DataReceiver {
+                frame_receiver: Some(frame_receiver),
+                packet_receiver: None,
+            };
+
+            let _ = result_sender.send(Ok((data_receiver, None)));
+        }
     });
 
     let content = "PLAY rtsp://localhost/live/test/trackID=0 RTSP/1.0\r\nCSeq: 5\r\nRange: npt=0.000-\r\n\r\n";
@@ -2182,22 +2183,22 @@ async fn test_rtsp_server_session_play_normalizes_track_path() {
                 result_sender,
                 ..
             } = event
-            {
-                match identifier {
-                    StreamIdentifier::Rtsp { stream_path } => {
-                        assert_eq!(stream_path, "live/test");
-                    }
-                    _ => panic!("Expected RTSP identifier"),
+        {
+            match identifier {
+                StreamIdentifier::Rtsp { stream_path } => {
+                    assert_eq!(stream_path, "live/test");
                 }
-                let (_frame_sender, frame_receiver) = crate::hub::define::frame_data_channel();
-
-                let data_receiver = DataReceiver {
-                    frame_receiver: Some(frame_receiver),
-                    packet_receiver: None,
-                };
-
-                let _ = result_sender.send(Ok((data_receiver, None)));
+                _ => panic!("Expected RTSP identifier"),
             }
+            let (_frame_sender, frame_receiver) = crate::hub::define::frame_data_channel();
+
+            let data_receiver = DataReceiver {
+                frame_receiver: Some(frame_receiver),
+                packet_receiver: None,
+            };
+
+            let _ = result_sender.send(Ok((data_receiver, None)));
+        }
     });
 
     let content = "PLAY rtsp://localhost/live/test/trackID=0 RTSP/1.0\r\nCSeq: 5\r\nRange: npt=0.000-\r\n\r\n";
@@ -2258,15 +2259,16 @@ async fn test_rtsp_server_session_play_includes_rtp_info() {
     let subscribe_handle = tokio::spawn(async move {
         use crate::hub::define::DataReceiver;
         if let Some(event) = event_receiver.recv().await
-            && let StreamHubEvent::Subscribe { result_sender, .. } = event {
-                let (_frame_sender, frame_receiver) = crate::hub::define::frame_data_channel();
-                drop(_frame_sender);
-                let data_receiver = DataReceiver {
-                    frame_receiver: Some(frame_receiver),
-                    packet_receiver: None,
-                };
-                let _ = result_sender.send(Ok((data_receiver, None)));
-            }
+            && let StreamHubEvent::Subscribe { result_sender, .. } = event
+        {
+            let (_frame_sender, frame_receiver) = crate::hub::define::frame_data_channel();
+            drop(_frame_sender);
+            let data_receiver = DataReceiver {
+                frame_receiver: Some(frame_receiver),
+                packet_receiver: None,
+            };
+            let _ = result_sender.send(Ok((data_receiver, None)));
+        }
     });
 
     let content = "PLAY rtsp://127.0.0.1:8554/live/test/trackID=0 RTSP/1.0\r\nCSeq: 5\r\nRange: npt=0.000-\r\n\r\n";

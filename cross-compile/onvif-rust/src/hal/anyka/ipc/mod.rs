@@ -1971,8 +1971,7 @@ mod tests {
         let shm = create_test_anon_reader();
         shm.set_shutdown_for_test();
 
-        let ipc =
-            AnykaIpc::from_parts_for_test(ctrl_a, Some(frame_reader), None, Some(shm));
+        let ipc = AnykaIpc::from_parts_for_test(ctrl_a, Some(frame_reader), None, Some(shm));
 
         match ipc.recv_pushed_frame(None) {
             Err(PlatformError::Shutdown(reason)) => {

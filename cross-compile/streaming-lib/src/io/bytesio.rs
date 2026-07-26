@@ -1073,44 +1073,46 @@ mod tests {
     async fn test_udpio_new_with_specific_port() {
         // First get an available port
         if let Some(temp_udpio) = UdpIO::new_with_local_port(0).await
-            && let Some(port) = temp_udpio.get_local_port() {
-                // Drop the temp socket to free the port
-                drop(temp_udpio);
+            && let Some(port) = temp_udpio.get_local_port()
+        {
+            // Drop the temp socket to free the port
+            drop(temp_udpio);
 
-                // Now try to bind to the same port (may fail if port is reused)
-                // Just verify the function doesn't panic
-                let _ = UdpIO::new_with_local_port(port).await;
-            }
+            // Now try to bind to the same port (may fail if port is reused)
+            // Just verify the function doesn't panic
+            let _ = UdpIO::new_with_local_port(port).await;
+        }
     }
 
     #[tokio::test]
     async fn test_udpio_write_and_read_roundtrip() {
         if let Some((udpio1, udpio2)) = new_udpio_pair().await
-            && let (Some(port1), Some(port2)) = (udpio1.get_local_port(), udpio2.get_local_port()) {
-                // Create new UDP sockets connected to each other
-                if let (Some(mut sender), Some(mut receiver)) = (
-                    UdpIO::new("127.0.0.1".to_string(), port2, port1).await,
-                    UdpIO::new("127.0.0.1".to_string(), port1, port2).await,
-                ) {
-                    drop(udpio1);
-                    drop(udpio2);
+            && let (Some(port1), Some(port2)) = (udpio1.get_local_port(), udpio2.get_local_port())
+        {
+            // Create new UDP sockets connected to each other
+            if let (Some(mut sender), Some(mut receiver)) = (
+                UdpIO::new("127.0.0.1".to_string(), port2, port1).await,
+                UdpIO::new("127.0.0.1".to_string(), port1, port2).await,
+            ) {
+                drop(udpio1);
+                drop(udpio2);
 
-                    let send_task = tokio::spawn(async move {
-                        let data = Bytes::from("udp test message");
-                        let result = sender.write(data).await;
-                        assert!(result.is_ok(), "UDP write should succeed");
-                    });
+                let send_task = tokio::spawn(async move {
+                    let data = Bytes::from("udp test message");
+                    let result = sender.write(data).await;
+                    assert!(result.is_ok(), "UDP write should succeed");
+                });
 
-                    let recv_task = tokio::spawn(async move {
-                        let result = receiver.read().await;
-                        assert!(result.is_ok(), "UDP read should succeed");
-                        let data = result.unwrap();
-                        assert_eq!(&data[..], b"udp test message");
-                    });
+                let recv_task = tokio::spawn(async move {
+                    let result = receiver.read().await;
+                    assert!(result.is_ok(), "UDP read should succeed");
+                    let data = result.unwrap();
+                    assert_eq!(&data[..], b"udp test message");
+                });
 
-                    let _ = tokio::try_join!(send_task, recv_task);
-                }
+                let _ = tokio::try_join!(send_task, recv_task);
             }
+        }
     }
 
     #[tokio::test]
@@ -1174,11 +1176,12 @@ mod tests {
 
         let mut first_local_port = 0;
         if let Some(udpio_0) = UdpIO::new_with_local_port(0).await
-            && let Some(local_port_0) = udpio_0.get_local_port() {
-                first_local_port = local_port_0;
-            }
+            && let Some(local_port_0) = udpio_0.get_local_port()
+        {
+            first_local_port = local_port_0;
+        }
 
-            // std::mem::drop(udpio_0);
+        // std::mem::drop(udpio_0);
         //The object udpio_0 is automatically cleared and released when it goes out of scope here.
         println!("first_local_port: {}", first_local_port);
 
@@ -1236,27 +1239,28 @@ mod tests {
     async fn test_udpio_read_timeout_success() {
         if let Some((udpio1, udpio2)) = new_udpio_pair().await
             && let (Some(port1), Some(port2)) = (udpio1.get_local_port(), udpio2.get_local_port())
-                && let (Some(mut sender), Some(mut receiver)) = (
-                    UdpIO::new("127.0.0.1".to_string(), port2, port1).await,
-                    UdpIO::new("127.0.0.1".to_string(), port1, port2).await,
-                ) {
-                    drop(udpio1);
-                    drop(udpio2);
-                    let send_data = Bytes::from("udp timeout test");
-                    let send_task = tokio::spawn(async move {
-                        let _ = sender.write(send_data).await;
-                    });
-                    let recv_task = tokio::spawn(async move {
-                        let result = receiver.read_timeout(Duration::from_secs(2)).await;
-                        assert!(
-                            result.is_ok(),
-                            "Read_timeout should succeed when data arrives"
-                        );
-                        let data = result.unwrap();
-                        assert_eq!(&data[..], b"udp timeout test");
-                    });
-                    let _ = tokio::try_join!(send_task, recv_task);
-                }
+            && let (Some(mut sender), Some(mut receiver)) = (
+                UdpIO::new("127.0.0.1".to_string(), port2, port1).await,
+                UdpIO::new("127.0.0.1".to_string(), port1, port2).await,
+            )
+        {
+            drop(udpio1);
+            drop(udpio2);
+            let send_data = Bytes::from("udp timeout test");
+            let send_task = tokio::spawn(async move {
+                let _ = sender.write(send_data).await;
+            });
+            let recv_task = tokio::spawn(async move {
+                let result = receiver.read_timeout(Duration::from_secs(2)).await;
+                assert!(
+                    result.is_ok(),
+                    "Read_timeout should succeed when data arrives"
+                );
+                let data = result.unwrap();
+                assert_eq!(&data[..], b"udp timeout test");
+            });
+            let _ = tokio::try_join!(send_task, recv_task);
+        }
     }
 
     #[tokio::test]
@@ -1441,12 +1445,13 @@ mod tests {
     #[tokio::test]
     async fn test_udpio_new_with_local_port_bind_fails_when_port_in_use() {
         if let Some(udpio) = UdpIO::new_with_local_port(0).await
-            && let Some(port) = udpio.get_local_port() {
-                let result = UdpIO::new_with_local_port(port).await;
-                assert!(
-                    result.is_none(),
-                    "Binding to already-used port should return None"
-                );
-            }
+            && let Some(port) = udpio.get_local_port()
+        {
+            let result = UdpIO::new_with_local_port(port).await;
+            assert!(
+                result.is_none(),
+                "Binding to already-used port should return None"
+            );
+        }
     }
 }

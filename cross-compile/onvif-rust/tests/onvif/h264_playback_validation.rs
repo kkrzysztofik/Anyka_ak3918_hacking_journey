@@ -95,7 +95,6 @@ mod tests {
     #[tokio::test]
     async fn test_mock_publisher_frame_emission() {
         use streaming_lib::streamhub::mock_publisher::MockVideoPublisher;
-        
 
         let test_file = setup_test_h264_file();
         let publisher = MockVideoPublisher::new("test_stream".to_string(), &test_file, 25, true)
@@ -131,7 +130,6 @@ mod tests {
     async fn test_tstream_handler_prior_data() {
         use streaming_lib::streamhub::define::{DataSender, FrameData, SubscribeType};
         use streaming_lib::streamhub::mock_publisher::MockVideoPublisher;
-        
 
         let test_file = setup_test_h264_file();
         let publisher = MockVideoPublisher::new("test_stream".to_string(), &test_file, 25, true)
@@ -227,7 +225,6 @@ mod tests {
     #[tokio::test]
     async fn test_publisher_lifecycle() {
         use streaming_lib::streamhub::mock_publisher::MockVideoPublisher;
-        
 
         let test_file = setup_test_h264_file();
         let publisher = MockVideoPublisher::new("test_stream".to_string(), &test_file, 25, false)
@@ -987,9 +984,10 @@ mod tests {
         let sdp_clone = sdp.clone();
         let server_handle = tokio::spawn(async move {
             if let Ok(listener) = tokio::net::TcpListener::bind("127.0.0.1:8554").await
-                && let Ok((socket, _)) = listener.accept().await {
-                    let _ = handle_rtsp_client(socket, sdp_clone).await;
-                }
+                && let Ok((socket, _)) = listener.accept().await
+            {
+                let _ = handle_rtsp_client(socket, sdp_clone).await;
+            }
         });
 
         // Allow server to start

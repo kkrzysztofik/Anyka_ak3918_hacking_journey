@@ -30,8 +30,8 @@ pub use bytes::Bytes;
 
 // Re-export key types from RTSP
 pub use logging_flags::{set_stream_frame_debug_logging, stream_frame_debug_logging_enabled};
-pub use protocol::rtsp::session::server_session::RtspServerSession;
 pub use protocol::rtsp::DefaultRtspServer;
+pub use protocol::rtsp::session::server_session::RtspServerSession;
 
 /// Stream session type alias for ticket-specified API surface
 /// Represents either an RTSP client or server session

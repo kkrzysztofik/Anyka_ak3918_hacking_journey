@@ -497,8 +497,9 @@ pub(super) fn unified_frame_read_loop(
 
                 // SAFETY: the SDK guarantees `data` points to `frame_size` readable
                 // bytes until `venc_release_stream` is called below.
-                let payload =
-                    unsafe { std::slice::from_raw_parts(stream_data.data as *const u8, frame_size) };
+                let payload = unsafe {
+                    std::slice::from_raw_parts(stream_data.data as *const u8, frame_size)
+                };
                 let frame = OwnedFrame {
                     data: BytesMut::from(payload),
                     // SDK timestamps are in milliseconds
@@ -1347,7 +1348,6 @@ impl AnykaVideoEncoder {
         tracing::info!("Streaming stopped");
         Ok(())
     }
-
 
     /// Get a cloned `Arc` reference to the owned callbacks map for thread sharing.
     fn owned_callbacks_arc(&self) -> Arc<RwLock<HashMap<CallbackId, Arc<dyn OwnedFrameCallback>>>> {

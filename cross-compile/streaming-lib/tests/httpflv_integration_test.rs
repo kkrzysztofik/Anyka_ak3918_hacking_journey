@@ -366,7 +366,9 @@ async fn test_httpflv_frame_data() {
 #[tokio::test]
 async fn test_httpflv_chunked_encoding() {
     // Simulate chunked transfer encoding
-    let chunks = ["4\r\n", "Wiki", "\r\n", "5\r\n", "\nWiki", "\r\n", "0\r\n", "\r\n"];
+    let chunks = [
+        "4\r\n", "Wiki", "\r\n", "5\r\n", "\nWiki", "\r\n", "0\r\n", "\r\n",
+    ];
 
     let total_length: usize = chunks.iter().map(|s| s.len()).sum();
     assert!(total_length > 0);
@@ -413,9 +415,11 @@ async fn test_httpflv_connection_cleanup() {
 #[tokio::test]
 async fn test_httpflv_response_headers() {
     // Required headers for HTTP-FLV
-    let required_headers = ["Content-Type: video/x-flv",
+    let required_headers = [
+        "Content-Type: video/x-flv",
         "Cache-Control: no-cache",
-        "Access-Control-Allow-Origin: *"];
+        "Access-Control-Allow-Origin: *",
+    ];
 
     assert!(
         required_headers

@@ -328,7 +328,8 @@ async fn test_service_flv_muxer() {
 #[tokio::test]
 async fn test_service_frame_timestamps() {
     // Video frames at different timestamps
-    let timestamps = [FrameData::Video {
+    let timestamps = [
+        FrameData::Video {
             timestamp: 0,
             data: BytesMut::from(&b"\x00\x00\x00\x01"[..]),
         },
@@ -339,7 +340,8 @@ async fn test_service_frame_timestamps() {
         FrameData::Video {
             timestamp: 66,
             data: BytesMut::from(&b"\x00\x00\x00\x01"[..]),
-        }];
+        },
+    ];
 
     assert_eq!(timestamps.len(), 3);
 
@@ -801,7 +803,6 @@ async fn test_service_connection_rate_limiting() {
             self.connection_timestamps.push(timestamp);
             Ok(())
         }
-
     }
 
     let mut limiter = RateLimiter::new(10); // 10 connections per second max

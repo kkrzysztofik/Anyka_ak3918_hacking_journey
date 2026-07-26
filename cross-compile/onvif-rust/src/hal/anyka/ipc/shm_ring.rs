@@ -241,7 +241,6 @@ impl FrameNotification {
         self.flags & VD_NOTIFY_SOCKET_FALLBACK != 0
     }
 
-
     /// Check if the daemon intentionally dropped this frame.
     ///
     /// During ring buffer overflow, P-frames are dropped instead of using
@@ -424,7 +423,8 @@ impl ShmRingReader {
     /// Set the shutdown flag, standing in for the daemon during tests.
     #[cfg(test)]
     pub(in crate::hal::anyka::ipc) fn set_shutdown_for_test(&self) {
-        self.flags_atomic().fetch_or(VD_FLAG_SHUTDOWN, Ordering::Release);
+        self.flags_atomic()
+            .fetch_or(VD_FLAG_SHUTDOWN, Ordering::Release);
     }
 
     /// Check whether the daemon has shut the ring buffer down.
@@ -1689,7 +1689,6 @@ pub(in crate::hal::anyka::ipc) mod tests {
             VD_SLOT_EMPTY
         );
     }
-
 
     #[test]
     fn test_is_shutdown_reflects_ring_header_flag() {

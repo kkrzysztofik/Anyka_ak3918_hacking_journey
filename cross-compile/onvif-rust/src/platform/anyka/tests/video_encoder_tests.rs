@@ -11,9 +11,7 @@ use crate::hal::common::{
     AK_FAILED_I32, AK_SUCCESS_I32, VideoFrameType, bitrate_ctrl_mode, encode_group_type,
     encode_output_type, encode_use_chn,
 };
-use crate::platform::common::{
-    CallbackId, FrameType, OwnedFrame, OwnedFrameCallback, StreamId,
-};
+use crate::platform::common::{CallbackId, FrameType, OwnedFrame, OwnedFrameCallback, StreamId};
 use parking_lot::RwLock;
 use portable_atomic::AtomicU64;
 use std::collections::HashMap;

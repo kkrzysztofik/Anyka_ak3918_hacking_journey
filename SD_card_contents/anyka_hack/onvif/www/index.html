@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en" class="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ONVIF Camera Web Interface</title>
+
+    <style>
+      /* Reset margin/padding to eliminate white borders */
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+      }
+
+      /* Loading styles */
+      .loading-container {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        height: 100vh;
+        background: #0d0d0d;
+        color: #fff;
+        font-family: system-ui, sans-serif;
+        font-weight: 500;
+      }
+
+      .loading-spinner {
+        width: 40px;
+        height: 40px;
+        border: 4px solid #374151;
+        border-top: 4px solid #3b82f6;
+        border-radius: 50%;
+        animation: spin 1s linear infinite;
+        margin-right: 15px;
+      }
+
+      @keyframes spin {
+        0% {
+          transform: rotate(0deg);
+        }
+
+        100% {
+          transform: rotate(360deg);
+        }
+      }
+    </style>
+    <script type="module" crossorigin src="/js/index-DvJG5P9t.js"></script>
+    <link rel="modulepreload" crossorigin href="/js/rolldown-runtime-NMqb_1LM.js">
+    <link rel="modulepreload" crossorigin href="/js/charts-vendor-B-Zhtnrr.js">
+    <link rel="modulepreload" crossorigin href="/js/query-vendor-ziFuaOnw.js">
+    <link rel="modulepreload" crossorigin href="/js/ui-vendor-DgXe0UiL.js">
+    <link rel="modulepreload" crossorigin href="/js/vendor-Cg9cfeND.js">
+    <link rel="modulepreload" crossorigin href="/js/http-vendor-Bl-q6-AN.js">
+    <link rel="modulepreload" crossorigin href="/js/utils-vendor-DbOxoFqQ.js">
+    <link rel="stylesheet" crossorigin href="/css/index-En1BspeG.css">
+  </head>
+
+  <body>
+    <div id="root">
+      <!-- Loading fallback while React loads -->
+      <div class="loading-container">
+        <div class="loading-spinner"></div>
+        <span>Loading application...</span>
+      </div>
+    </div>
+
+    <!-- Application bundle will be loaded here -->
+  </body>
+</html>

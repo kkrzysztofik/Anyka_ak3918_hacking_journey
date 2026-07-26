@@ -735,11 +735,7 @@ mod tests {
         }
 
         let platform = Arc::new(crate::platform::StubPlatform::new());
-        let service = DeviceService::with_config_and_platform(
-            users,
-            Arc::new(config),
-            platform,
-        );
+        let service = DeviceService::with_config_and_platform(users, Arc::new(config), platform);
 
         // Access base_url through a handler that uses it
         let response = system_ops::handle_get_capabilities(
@@ -773,11 +769,7 @@ mod tests {
         }
 
         let platform = Arc::new(crate::platform::StubPlatform::new());
-        let service = DeviceService::with_config_and_platform(
-            users,
-            Arc::new(config),
-            platform,
-        );
+        let service = DeviceService::with_config_and_platform(users, Arc::new(config), platform);
 
         // Access base_url through a handler that uses it
         let response = system_ops::handle_get_capabilities(
@@ -808,11 +800,7 @@ mod tests {
         }
 
         let platform = Arc::new(crate::platform::StubPlatform::new());
-        let service = DeviceService::with_config_and_platform(
-            users,
-            Arc::new(config),
-            platform,
-        );
+        let service = DeviceService::with_config_and_platform(users, Arc::new(config), platform);
 
         let response = system_ops::handle_get_capabilities(
             &service.store.config,
@@ -836,11 +824,7 @@ mod tests {
         // No IP config, should fallback to 127.0.0.1
 
         let platform = Arc::new(crate::platform::StubPlatform::new());
-        let service = DeviceService::with_config_and_platform(
-            users,
-            Arc::new(config),
-            platform,
-        );
+        let service = DeviceService::with_config_and_platform(users, Arc::new(config), platform);
 
         let response = system_ops::handle_get_capabilities(
             &service.store.config,
