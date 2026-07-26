@@ -1159,7 +1159,7 @@ impl StreamsHub {
     ) -> Result<Value, StreamHubError> {
         if let Some(topn) = top_n {
             let mut sorted = data;
-            sorted.sort_by(|a, b| b.subscriber_count.cmp(&a.subscriber_count));
+            sorted.sort_by_key(|a| std::cmp::Reverse(a.subscriber_count));
             let top_streams: Vec<StatisticsStream> = sorted.into_iter().take(topn).collect();
             return Ok(serde_json::to_value(top_streams)?);
         }
@@ -1186,32 +1186,24 @@ impl StreamsHub {
         if let Some(event) = self.un_pub_sub_events.get(&uid) {
             match event {
                 StreamHubEvent::UnPublish { identifier, info } => {
-                    if self
-                        .hub_event_sender
+                    self.hub_event_sender
                         .send(StreamHubEvent::UnPublish {
                             identifier: identifier.clone(),
                             info: info.clone(),
                         })
-                        .is_err()
-                    {
-                        return Err(StreamHubError {
+                        .map_err(|_| StreamHubError {
                             value: StreamHubErrorValue::SendError,
-                        });
-                    }
+                        })?;
                 }
                 StreamHubEvent::UnSubscribe { identifier, info } => {
-                    if self
-                        .hub_event_sender
+                    self.hub_event_sender
                         .send(StreamHubEvent::UnSubscribe {
                             identifier: identifier.clone(),
                             info: info.clone(),
                         })
-                        .is_err()
-                    {
-                        return Err(StreamHubError {
+                        .map_err(|_| StreamHubError {
                             value: StreamHubErrorValue::SendError,
-                        });
-                    }
+                        })?;
                 }
                 _ => {}
             }

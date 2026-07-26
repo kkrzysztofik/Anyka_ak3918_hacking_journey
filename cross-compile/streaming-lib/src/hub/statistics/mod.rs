@@ -156,7 +156,7 @@ impl StatisticsCalculate {
             stream_statistics_clone.publisher.recv_bytes * 8 / 5000;
         stream_statistics_clone.publisher.recv_bytes = 0;
 
-        for (_, subscriber) in stream_statistics_clone.subscribers.iter_mut() {
+        for subscriber in stream_statistics_clone.subscribers.values_mut() {
             subscriber.send_bitrate = subscriber.send_bytes * 8 / 5000;
             subscriber.send_bytes = 0;
         }

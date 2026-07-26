@@ -1369,7 +1369,7 @@ mod tests {
             48_000,
         );
 
-        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let (tx, mut rx) = streaming_lib::frame_data_channel();
         handler
             .send_prior_data(DataSender::Frame { sender: tx }, SubscribeType::RtspPull)
             .await
@@ -1410,7 +1410,7 @@ mod tests {
             48_000,
         );
 
-        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let (tx, mut rx) = streaming_lib::frame_data_channel();
         handler
             .send_prior_data(DataSender::Frame { sender: tx }, SubscribeType::HttpFlvPull)
             .await
@@ -1450,7 +1450,7 @@ mod tests {
             48_000,
         );
 
-        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let (tx, mut rx) = streaming_lib::frame_data_channel();
         handler
             .send_prior_data(DataSender::Frame { sender: tx }, SubscribeType::HttpFlvPull)
             .await

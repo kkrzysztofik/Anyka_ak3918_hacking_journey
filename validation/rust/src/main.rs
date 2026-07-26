@@ -197,7 +197,7 @@ fn device_failure_diagnostics(artifacts_dir: &Path) -> String {
         logs.push((modified, path));
     }
 
-    logs.sort_by(|a, b| b.0.cmp(&a.0));
+    logs.sort_by_key(|b| std::cmp::Reverse(b.0));
     if logs.is_empty() {
         return format!(
             "no copied device onvif logs found in artifacts dir {}",
@@ -565,14 +565,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_wait_for_server_timeout_returns_error() {
-        let probe = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let port = probe.local_addr().unwrap().port();
-        drop(probe);
-
         let dir = tempfile::tempdir().unwrap();
+        // Use privileged port 1 so nothing in this suite can bind it and race the
+        // probe/drop/reuse pattern that flakes under parallel tokio tests.
         let err = wait_for_server_with_retries(
             "127.0.0.1",
-            port,
+            1,
             None,
             dir.path(),
             2,

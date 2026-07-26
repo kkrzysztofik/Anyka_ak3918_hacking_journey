@@ -507,7 +507,9 @@ function VideoEncoderEditDialog({
 
   // Stabilize onClose so it doesn't cause re-fetches when the parent re-renders
   const onCloseRef = useRef(onClose);
-  onCloseRef.current = onClose;
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
 
   // Fetch encoder configuration and options
   useEffect(() => {

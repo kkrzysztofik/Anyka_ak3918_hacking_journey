@@ -412,12 +412,7 @@ fn process_opening_tag(after_open: &str, element_name: &str) -> TagProcessResult
     };
 
     let processed_len = content_start + close_pos + close_pattern.len();
-    let sanitized = format!(
-        "{}{}{}",
-        &after_open[..content_start],
-        "***",
-        &close_pattern
-    );
+    let sanitized = format!("{}{}{}", &after_open[..content_start], "***", close_pattern);
 
     TagProcessResult::WithContent(processed_len, sanitized)
 }

@@ -139,6 +139,7 @@ host = ["x86_64-unknown-linux-gnu"]
 target = ["x86_64-unknown-linux-gnu", "${RUST_TARGET}"]
 rustc = "${system_rustc}"
 cargo = "${system_cargo}"
+docs = false
 extended = true
 tools = ["cargo", "rustfmt", "clippy", "rustdoc", "src", "rust-analyzer-proc-macro-srv", "rust-analyzer"]
 
@@ -242,7 +243,7 @@ install_rust() {
     export CC="gcc" CXX="g++" AR="ar" RANLIB="ranlib"
     export LLVM_CONFIG="${INSTALL_DIR}/bin/llvm-config"
 
-    python3 x.py install --stage 2 2>&1 | tee -a "${BUILD_DIR}/rust_install.log" || {
+    python3 x.py install --stage 2 --set build.docs=false 2>&1 | tee -a "${BUILD_DIR}/rust_install.log" || {
         log_error "Rust installation failed"
         exit 1
     }

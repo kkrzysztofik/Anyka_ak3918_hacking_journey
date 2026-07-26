@@ -121,11 +121,8 @@ impl H264FileReader {
         let file_size = file.seek(SeekFrom::End(0)).await?;
         file.seek(SeekFrom::Start(0)).await?;
 
-        let frame_duration_ms = if frame_rate > 0 {
-            1000 / frame_rate
-        } else {
-            40 // Default to 25fps
-        };
+        // Default to 40ms (25fps) when frame_rate is 0
+        let frame_duration_ms = 1000u32.checked_div(frame_rate).unwrap_or(40);
 
         let nal_format = Self::detect_nal_format(&mut file, file_size).await?;
 

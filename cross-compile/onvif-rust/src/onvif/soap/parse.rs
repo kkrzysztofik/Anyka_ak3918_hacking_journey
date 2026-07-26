@@ -480,10 +480,10 @@ pub(crate) fn handle_empty_event(
 /// Handle a Text event during SOAP parsing.
 pub(crate) fn handle_text_event(state: &mut SoapParseState, e: &quick_xml::events::BytesText) {
     if state.in_body {
-        let text = e.xml_content().unwrap_or_default();
+        let text = e.xml10_content().unwrap_or_default();
         state.body_xml.push_str(&text);
     } else if state.in_username_token {
-        let text = e.xml_content().unwrap_or_default().to_string();
+        let text = e.xml10_content().unwrap_or_default().to_string();
         if let Some(ref elem) = state.current_element {
             match elem.as_str() {
                 "Username" => state.security_data.username = Some(text),

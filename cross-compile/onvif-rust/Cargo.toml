@@ -17,27 +17,27 @@ axum = "0.8"
 axum-extra = { version = "0.12", features = ["typed-header"] }
 headers = "0.4"
 tower = { version = "0.5", features = ["timeout", "limit"] }
-tower-http = { version = "0.6", features = ["trace", "timeout", "limit", "fs", "compression-br", "compression-gzip"] }
-quick-xml = { version = "0.39", features = ["serialize"] }
-toml = "1.0"
+tower-http = { version = "0.7", features = ["trace", "timeout", "limit", "fs", "compression-br", "compression-gzip"] }
+quick-xml = { version = "0.41", features = ["serialize"] }
+toml = "1.1"
 serde = { version = "1.0", features = ["derive"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tracing-appender = "0.2"
 tracing-log = "0.2"
 argon2 = "0.5"
-sha1 = "0.10"
-md-5 = "0.10"
-hmac = "0.12"
-base64 = "0.22"
+sha1 = "0.11"
+md-5 = "0.11"
+hmac = "0.13"
+base64 = "0.23"
 rand = "0.10"
-constant_time_eq = "0.4"
+constant_time_eq = "0.5"
 socket2 = "0.6"
 chrono = { version = "0.4", features = ["serde"] }
-uuid = { version = "1.21", features = ["v4"] }
+uuid = { version = "1.24", features = ["v4"] }
 parking_lot = "0.12"
-dashmap = "6.1"
-bytes = "1.11.1"
+dashmap = "6.2"
+bytes = "1.12.1"
 http-body-util = "0.1"
 libc = "0.2"
 anyhow = "1.0"
@@ -45,22 +45,22 @@ thiserror = "2.0"
 clap = { version = "4", features = ["derive"] }
 cap = "0.1"  # Memory allocation tracking and hard-limit enforcement for embedded targets
 async-trait = "0.1"
-portable-atomic = { version = "1.13", features = ["std", "serde", "float"] }
+portable-atomic = { version = "1.14", features = ["std", "serde", "float"] }
 validator = { version = "0.20", features = ["derive"] }
-zeroize = { version = "1.8", features = ["derive"] }
+zeroize = { version = "1.9", features = ["derive"] }
 unicode-normalization = "0.1"
 # Grapheme cluster counting for ONVIF username validation (`onvif/device/user_types.rs`); required for spec-aligned length limits on embedded targets.
-unicode-segmentation = "1.12"
+unicode-segmentation = "1.13"
 streaming-lib = { path = "../streaming-lib" }
 
 [dev-dependencies]
 tokio-test = "0.4"
-mockall = "0.14"
+mockall = "0.15"
 reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"] }
 wiremock = "0.6"
 criterion = "0.8"
-tempfile = "3.25"
-regex = "1.12"
+tempfile = "3.27"
+regex = "1.13"
 serde_json = "1.0"
 clap = { version = "4", features = ["derive"] }
 

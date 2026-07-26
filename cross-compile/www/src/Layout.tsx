@@ -81,25 +81,20 @@ function NavLinkItem({
   onClick?: () => void;
   isMobile?: boolean;
 }>) {
-  const [isOpen, setIsOpen] = useState(false);
   const location = useLocation();
+  const pathOpen = Boolean(item.children && location.pathname.startsWith(item.path));
+  const [manualOpen, setManualOpen] = useState(false);
+  const isOpen = pathOpen || manualOpen;
   const isActive =
     item.path === '/settings'
       ? location.pathname.startsWith('/settings')
       : location.pathname === item.path;
 
-  // Auto-expand if child is active
-  React.useEffect(() => {
-    if (item.children && location.pathname.startsWith(item.path)) {
-      setIsOpen(true);
-    }
-  }, [location.pathname, item.path, item.children]);
-
   if (item.children) {
     return (
       <div className="flex flex-col gap-1">
         <button
-          onClick={() => setIsOpen(!isOpen)}
+          onClick={() => setManualOpen((open) => !(pathOpen || open))}
           className={cn(
             'group relative flex w-full items-center gap-4 rounded-lg px-4 py-3 text-left transition-all duration-200',
             isActive
