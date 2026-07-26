@@ -5,6 +5,7 @@ This directory contains the camera WebUI (React + TypeScript) used to configure 
 ## Mandatory docs to load (before changes)
 
 When working in this subtree, load and follow:
+
 - `.serena/memories/www-development-standards.md` (TS/React standards + testing)
 - `.serena/memories/www-design-system.md` (design system: colors/spacing/components)
 - `.serena/memories/quality-gates.md` (review checklist and required gates)
@@ -25,4 +26,3 @@ npm run test
 - Prefer shadcn/ui primitives from `src/components/ui/` (don’t invent new base components).
 - Strict TypeScript: avoid `any`; use `unknown` + type guards where needed.
 - Testing: use `data-testid` selectors (no role/text/class selectors).
-

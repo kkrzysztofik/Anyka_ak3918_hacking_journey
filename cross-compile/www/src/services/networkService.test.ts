@@ -132,8 +132,12 @@ describe('networkService', () => {
       await setNetworkInterface('eth0<bad>&"\'"', false, '192.168.1.50<bad>&"\'"', 24);
 
       const payload = vi.mocked(apiClient.post).mock.calls[0][1] as string;
-      expect(payload).toContain('<tds:InterfaceToken>eth0&lt;bad&gt;&amp;&quot;&apos;&quot;</tds:InterfaceToken>');
-      expect(payload).toContain('<tt:Address>192.168.1.50&lt;bad&gt;&amp;&quot;&apos;&quot;</tt:Address>');
+      expect(payload).toContain(
+        '<tds:InterfaceToken>eth0&lt;bad&gt;&amp;&quot;&apos;&quot;</tds:InterfaceToken>',
+      );
+      expect(payload).toContain(
+        '<tt:Address>192.168.1.50&lt;bad&gt;&amp;&quot;&apos;&quot;</tt:Address>',
+      );
     });
 
     it('should throw on failure', async () => {
@@ -184,7 +188,9 @@ describe('networkService', () => {
       await setDNS(false, ['8.8.8.8<bad>&"\'"']);
 
       const payload = vi.mocked(apiClient.post).mock.calls[0][1] as string;
-      expect(payload).toContain('<tt:IPv4Address>8.8.8.8&lt;bad&gt;&amp;&quot;&apos;&quot;</tt:IPv4Address>');
+      expect(payload).toContain(
+        '<tt:IPv4Address>8.8.8.8&lt;bad&gt;&amp;&quot;&apos;&quot;</tt:IPv4Address>',
+      );
     });
 
     it('should throw on failure', async () => {

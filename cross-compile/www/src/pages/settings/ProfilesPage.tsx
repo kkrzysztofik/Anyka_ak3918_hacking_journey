@@ -342,7 +342,10 @@ export default function ProfilesPage() {
           ))}
 
           {profiles?.length === 0 && (
-            <div className="py-[48px] text-center text-[#a1a1a6]" data-testid="profiles-empty-state">
+            <div
+              className="py-[48px] text-center text-[#a1a1a6]"
+              data-testid="profiles-empty-state"
+            >
               No media profiles found. Create one to get started.
             </div>
           )}

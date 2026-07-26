@@ -449,7 +449,11 @@ export default function Layout() {
       </aside>
       <div className="flex min-w-0 flex-1 flex-col">
         <Header />
-        <main className="flex-1 overflow-y-auto p-6 md:p-8" aria-label="Page content" data-testid="layout-main-content">
+        <main
+          className="flex-1 overflow-y-auto p-6 md:p-8"
+          aria-label="Page content"
+          data-testid="layout-main-content"
+        >
           <div className="page-enter h-full w-full">
             <Outlet />
           </div>
