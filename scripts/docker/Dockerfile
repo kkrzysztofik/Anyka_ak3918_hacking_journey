@@ -36,23 +36,17 @@ RUN rm -rf /opt/arm-anykav200-crosstool-ng/share/doc \
   2>/dev/null || true && \
   find /opt/arm-anykav200-crosstool-ng/bin -type f -executable -exec strip --strip-debug {} \; 2>/dev/null || true
 
-ENV PATH="/opt/arm-anykav200-crosstool-ng/bin:${PATH}"
+# Toolchain bin first; ~/.cargo/bin only for tools installed with `cargo install`
+# (e.g. tarpaulin). Never put rustup proxies ahead of the vendored toolchain.
+ENV PATH="/opt/arm-anykav200-crosstool-ng/bin:/root/.cargo/bin:${PATH}"
 
-# Install build-essential for host builds (gcc for x86_64 proc-macros and build scripts)
-# Install cargo via rustup (toolchain's cargo is a symlink that won't work in Docker)
-# Preinstall cargo-tarpaulin to avoid per-job installs (uses vendored OpenSSL)
-# Install Snyk CLI and verify installation
+# Host gcc for x86_64 proc-macros/build scripts. Use vendored cargo/rustc/clippy
+# from /opt (real binaries — do NOT install rustup stable; rustup cargo-clippy
+# proxies clash with 1.97.1-dev → E0514). Preinstall tarpaulin + Snyk for CI.
 RUN apt-get update && apt-get install -y --no-install-recommends build-essential && \
   rm -rf /var/lib/apt/lists/* && apt-get clean && \
-  if ! command -v cargo >/dev/null 2>&1; then \
-  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --profile minimal --component cargo --component rustfmt --component clippy && \
-  /root/.cargo/bin/cargo --version && \
-  rm -rf /root/.rustup/toolchains/*/share/doc \
-  /root/.rustup/toolchains/*/share/man \
-  /root/.rustup/toolchains/*/lib/rustlib/*/doc \
-  /root/.rustup/toolchains/*/lib/rustlib/*/src \
-  /root/.rustup/toolchains/*/lib/rustlib/src; \
-  fi && \
+  test "$(command -v cargo)" = "/opt/arm-anykav200-crosstool-ng/bin/cargo" && \
+  test "$(command -v rustc)" = "/opt/arm-anykav200-crosstool-ng/bin/rustc" && \
   cargo install cargo-tarpaulin --locked --features vendored-openssl && \
   rm -rf /root/.cargo/registry/index/* /root/.cargo/git/db/* && \
   curl --proto '=https' --tlsv1.2 --location --fail --show-error -Lo snyk-linux https://downloads.snyk.io/cli/stable/snyk-linux \
@@ -61,18 +55,21 @@ RUN apt-get update && apt-get install -y --no-install-recommends build-essential
   && chmod +x snyk-linux \
   && mv snyk-linux /usr/local/bin/snyk \
   && rm snyk-linux.sha256 && \
-  arm-unknown-linux-uclibcgnueabi-gcc --version || arm-anykav200-linux-uclibcgnueabi-gcc --version && \
+  (arm-unknown-linux-uclibcgnueabi-gcc --version || arm-anykav200-linux-uclibcgnueabi-gcc --version) && \
   EXPECTED_RUSTC="/opt/arm-anykav200-crosstool-ng/bin/rustc" && \
-  ACTUAL_RUSTC=$(which rustc) && \
+  ACTUAL_RUSTC=$(command -v rustc) && \
   rustc --version && \
   if [ "$ACTUAL_RUSTC" != "$EXPECTED_RUSTC" ]; then \
   echo "ERROR: rustc is not from toolchain! Expected: $EXPECTED_RUSTC, Found: $ACTUAL_RUSTC" && \
   exit 1; \
   fi && \
+  rustc --version | grep -q '1\.97' && \
   cargo --version && \
-  clang --version && \
+  clang --version 2>&1 | tee /tmp/clang-version.txt | grep -q '22\.1\.8' && \
   snyk --version && \
-  ccache --version
+  ccache --version && \
+  command -v cargo-tarpaulin && \
+  command -v clippy-driver
 
 # Set working directory
 WORKDIR /workspace

@@ -32,7 +32,7 @@ jobs:
     permissions:
       contents: read
     container:
-      image: kkrzysztofik/anyka-cross-compile:rust-1.91.1
+      image: kkrzysztofik/anyka-cross-compile:rust-1.97.1
       options: --security-opt seccomp=unconfined
     outputs:
       coverage: ${{ steps.coverage-summary.outputs.coverage }}

@@ -175,7 +175,7 @@ The project enforces strict separation:
 
 ### CI/CD
 - **Platform**: GitHub Actions
-- **Container**: `kkrzysztofik/anyka-cross-compile:rust-1.91.1`
+- **Container**: `kkrzysztofik/anyka-cross-compile:rust-1.97.1`
 - **Rust**: fmt, clippy, test, tarpaulin (coverage)
 - **WebUI**: lint, type-check, test, coverage
 - **Security**: Snyk (SAST + SCA), SonarQube

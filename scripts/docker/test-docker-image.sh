@@ -103,5 +103,7 @@ echo ""
 
 log_success "All tests passed! Docker image is ready for use."
 log_info "You can now push the image:"
+log_info "  docker tag ${IMAGE_TAG} kkrzysztofik/anyka-cross-compile:rust-1.97.1"
 log_info "  docker tag ${IMAGE_TAG} kkrzysztofik/anyka-cross-compile:latest"
+log_info "  docker push kkrzysztofik/anyka-cross-compile:rust-1.97.1"
 log_info "  docker push kkrzysztofik/anyka-cross-compile:latest"
