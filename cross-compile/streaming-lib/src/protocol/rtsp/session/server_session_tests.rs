@@ -1138,8 +1138,8 @@ async fn test_rtsp_server_session_describe() {
 
     // Start a mock StreamHub event loop to handle the Request event
     tokio::spawn(async move {
-        if let Some(event) = event_receiver.recv().await {
-            if let StreamHubEvent::Request {
+        if let Some(event) = event_receiver.recv().await
+            && let StreamHubEvent::Request {
                 identifier: _,
                 sender,
             } = event
@@ -1150,7 +1150,6 @@ async fn test_rtsp_server_session_describe() {
                     data: dummy_sdp.to_string(),
                 });
             }
-        }
     });
 
     let session_io: Box<dyn TNetIO + Send + Sync> = Box::new(mock_io);
@@ -1240,8 +1239,8 @@ async fn test_rtsp_server_session_describe_normalizes_path() {
         .returning(|_| Ok(()));
 
     tokio::spawn(async move {
-        if let Some(event) = event_receiver.recv().await {
-            if let StreamHubEvent::Request { identifier, sender } = event {
+        if let Some(event) = event_receiver.recv().await
+            && let StreamHubEvent::Request { identifier, sender } = event {
                 match identifier {
                     StreamIdentifier::Rtsp { stream_path } => {
                         assert_eq!(stream_path, "live/test");
@@ -1253,7 +1252,6 @@ async fn test_rtsp_server_session_describe_normalizes_path() {
                     data: dummy_sdp.to_string(),
                 });
             }
-        }
     });
 
     let session_io: Box<dyn TNetIO + Send + Sync> = Box::new(mock_io);
@@ -2073,8 +2071,8 @@ async fn test_rtsp_server_session_play() {
     // Mock StreamHub handling Subscribe
     let subscribe_handle = tokio::spawn(async move {
         use crate::hub::define::DataReceiver;
-        if let Some(event) = event_receiver.recv().await {
-            if let StreamHubEvent::Subscribe {
+        if let Some(event) = event_receiver.recv().await
+            && let StreamHubEvent::Subscribe {
                 identifier,
                 result_sender,
                 ..
@@ -2096,7 +2094,6 @@ async fn test_rtsp_server_session_play() {
 
                 let _ = result_sender.send(Ok((data_receiver, None)));
             }
-        }
     });
 
     let content = "PLAY rtsp://localhost/live/test/trackID=0 RTSP/1.0\r\nCSeq: 5\r\nRange: npt=0.000-\r\n\r\n";
@@ -2179,8 +2176,8 @@ async fn test_rtsp_server_session_play_normalizes_track_path() {
 
     let subscribe_handle = tokio::spawn(async move {
         use crate::hub::define::DataReceiver;
-        if let Some(event) = event_receiver.recv().await {
-            if let StreamHubEvent::Subscribe {
+        if let Some(event) = event_receiver.recv().await
+            && let StreamHubEvent::Subscribe {
                 identifier,
                 result_sender,
                 ..
@@ -2201,7 +2198,6 @@ async fn test_rtsp_server_session_play_normalizes_track_path() {
 
                 let _ = result_sender.send(Ok((data_receiver, None)));
             }
-        }
     });
 
     let content = "PLAY rtsp://localhost/live/test/trackID=0 RTSP/1.0\r\nCSeq: 5\r\nRange: npt=0.000-\r\n\r\n";
@@ -2261,8 +2257,8 @@ async fn test_rtsp_server_session_play_includes_rtp_info() {
 
     let subscribe_handle = tokio::spawn(async move {
         use crate::hub::define::DataReceiver;
-        if let Some(event) = event_receiver.recv().await {
-            if let StreamHubEvent::Subscribe { result_sender, .. } = event {
+        if let Some(event) = event_receiver.recv().await
+            && let StreamHubEvent::Subscribe { result_sender, .. } = event {
                 let (_frame_sender, frame_receiver) = crate::hub::define::frame_data_channel();
                 drop(_frame_sender);
                 let data_receiver = DataReceiver {
@@ -2271,7 +2267,6 @@ async fn test_rtsp_server_session_play_includes_rtp_info() {
                 };
                 let _ = result_sender.send(Ok((data_receiver, None)));
             }
-        }
     });
 
     let content = "PLAY rtsp://127.0.0.1:8554/live/test/trackID=0 RTSP/1.0\r\nCSeq: 5\r\nRange: npt=0.000-\r\n\r\n";

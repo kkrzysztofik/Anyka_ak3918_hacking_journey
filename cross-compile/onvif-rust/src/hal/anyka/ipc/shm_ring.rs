@@ -39,21 +39,20 @@
 //!     return Err(...);
 //! }
 //!
-//! // Read frame from shared memory
+//! // Read frame from shared memory; the slot is released back to the daemon
+//! // as part of this call.
 //! let (metadata, data) = reader.read_notified_slot_into_bytesmut(&notif, Some(&pool))?;
 //!
 //! // Process frame...
-//!
-//! // Release slot back to daemon
-//! reader.release_slot(notif.slot_index)?;
 //! ```
 
 use std::ffi::CString;
-use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::time::Instant;
 
 use bytes::BytesMut;
+
+// Shared with the parent IPC module so both log against the same epoch.
+use super::monotonic_millis;
 
 use crate::platform::PlatformError;
 use crate::platform::PlatformResult;
@@ -121,12 +120,6 @@ fn slot_state_name(state: u32) -> &'static str {
         VD_SLOT_READING => "READING",
         _ => "UNKNOWN",
     }
-}
-
-#[inline]
-fn monotonic_millis() -> u64 {
-    static START: OnceLock<Instant> = OnceLock::new();
-    START.get_or_init(Instant::now).elapsed().as_millis() as u64
 }
 
 // =============================================================================
@@ -248,10 +241,6 @@ impl FrameNotification {
         self.flags & VD_NOTIFY_SOCKET_FALLBACK != 0
     }
 
-    /// Check if this is the last fragment of a multi-packet frame.
-    pub fn is_last_fragment(&self) -> bool {
-        self.flags & VD_NOTIFY_LAST_FRAGMENT != 0
-    }
 
     /// Check if the daemon intentionally dropped this frame.
     ///
@@ -430,26 +419,24 @@ impl ShmRingReader {
         }))
     }
 
-    /// Check if the ring buffer has been shut down by the daemon.
-    ///
-    /// When the daemon terminates, it sets the VD_FLAG_SHUTDOWN flag to
-    /// notify readers to stop.
-    pub fn is_shutdown(&self) -> bool {
-        let flags = self.flags_atomic().load(Ordering::Acquire);
-        flags & VD_FLAG_SHUTDOWN != 0
-    }
-
-    /// Check if a ring buffer overflow has occurred.
-    ///
-    /// This flag is set when the daemon detects that the reader is falling behind
-    /// and frames are being dropped.
-    pub fn has_overflow(&self) -> bool {
-        let flags = self.flags_atomic().load(Ordering::Acquire);
-        flags & VD_FLAG_OVERFLOW != 0
-    }
-
     /// Read diagnostic counters from the ring header (version >= 2).
     ///
+    /// Set the shutdown flag, standing in for the daemon during tests.
+    #[cfg(test)]
+    pub(in crate::hal::anyka::ipc) fn set_shutdown_for_test(&self) {
+        self.flags_atomic().fetch_or(VD_FLAG_SHUTDOWN, Ordering::Release);
+    }
+
+    /// Check whether the daemon has shut the ring buffer down.
+    ///
+    /// The vendor-daemon sets `VD_FLAG_SHUTDOWN` before it stops producing frames.
+    /// A clean shutdown does not necessarily close the notification socket, so this
+    /// flag is the only signal distinguishing "daemon is done" from "no frames yet";
+    /// the push receive loop consults it whenever a notification poll times out.
+    pub fn is_shutdown(&self) -> bool {
+        self.flags_atomic().load(Ordering::Acquire) & VD_FLAG_SHUTDOWN != 0
+    }
+
     /// Returns (overflow_count, eviction_count, socket_fallback_count, dropped_count).
     /// For version 1 ring buffers, all counters return 0.
     ///
@@ -590,37 +577,14 @@ impl ShmRingReader {
         }
     }
 
-    /// Copy frame data from a slot into a `BytesMut` buffer.
-    ///
-    /// This is the integration point with the existing AnykaIpc frame path.
-    /// It performs one copy from shared memory to the BytesMut buffer.
-    ///
-    /// # Arguments
-    ///
-    /// * `slot_index` - Index of the slot to read
-    /// * `pool` - Optional BytesMutPool for buffer allocation
-    ///
-    /// # Returns
-    ///
-    /// * `Ok((FrameMetadata, BytesMut))` - Frame metadata and data buffer
-    /// * `Err(PlatformError)` - Error reading the slot
-    pub fn read_slot_into_bytesmut(
-        &mut self,
-        slot_index: u32,
-        pool: Option<&BytesMutPool>,
-    ) -> PlatformResult<(FrameMetadata, BytesMut)> {
-        self.read_slot_into_bytesmut_inner(slot_index, None, pool)
-    }
-
     /// Copy frame data from a socket-notified slot into a `BytesMut` buffer.
     ///
-    /// Like [`Self::read_slot_into_bytesmut`], this acquires the slot, copies
-    /// payload bytes into a pooled or freshly allocated [`BytesMut`], and returns
-    /// [`FrameMetadata`]. When `notification` is supplied, the implementation
-    /// first verifies that the notification’s `(frame_len, seq_no, stream_id)`
-    /// still matches the slot header after the read lease is taken. If the
+    /// Acquires the slot, copies payload bytes into a pooled or freshly allocated
+    /// [`BytesMut`], and returns [`FrameMetadata`]. When `notification` is supplied,
+    /// the implementation first verifies that the notification's `(frame_len, seq_no,
+    /// stream_id)` still matches the slot header after the read lease is taken. If the
     /// notification is **stale** (the producer advanced while the reader was
-    /// scheduling work), the slot is cleared without advancing the reader’s
+    /// scheduling work), the slot is cleared without advancing the reader's
     /// sequence counter and this method returns [`PlatformError::ResourceBusy`]
     /// with a message containing `"stale notification"` so callers can retry.
     ///
@@ -629,8 +593,7 @@ impl ShmRingReader {
     /// * `notification` - The [`FrameNotification`] received over the socket;
     ///   its `slot_index` selects the slot; `frame_len`, `seq_no`, and
     ///   `stream_id` must match the slot for the read to proceed.
-    /// * `pool` - Optional [`BytesMutPool`] for buffer reuse; same semantics as
-    ///   [`Self::read_slot_into_bytesmut`].
+    /// * `pool` - Optional [`BytesMutPool`] for buffer reuse.
     ///
     /// # Returns
     ///
@@ -642,9 +605,8 @@ impl ShmRingReader {
     /// * [`PlatformError::ResourceBusy`] - Stale notification (message includes
     ///   `"stale notification"` and the slot index) or other races while
     ///   acquiring/releasing the slot.
-    /// * Other [`PlatformError`] variants - Same failure modes as
-    ///   [`Self::read_slot_into_bytesmut`] (invalid slot, hardware/shutdown
-    ///   issues, allocation failures).
+    /// * Other [`PlatformError`] variants - Invalid slot, hardware/shutdown
+    ///   issues, allocation failures.
     ///
     /// # Examples
     ///
@@ -733,23 +695,6 @@ impl ShmRingReader {
         self.release_slot_with_expectation(slot_index, notification)?;
 
         Ok((metadata, buf))
-    }
-
-    /// Release a slot back to the daemon for reuse.
-    ///
-    /// This atomically transitions the slot from Reading to EMPTY state
-    /// and advances the local read sequence counter.
-    ///
-    /// # Arguments
-    ///
-    /// * `slot_index` - Index of the slot to release
-    ///
-    /// # Returns
-    ///
-    /// * `Ok(())` - Slot successfully released
-    /// * `Err(PlatformError)` - Slot not in READING state
-    pub fn release_slot(&mut self, slot_index: u32) -> PlatformResult<()> {
-        self.release_slot_with_expectation(slot_index, None)
     }
 
     /// Clear a slot from `READING` to `EMPTY` without advancing `local_read_seq`.
@@ -880,15 +825,6 @@ impl ShmRingReader {
     /// This is updated by this reader when it releases a slot.
     pub fn read_seq(&self) -> u32 {
         self.local_read_seq
-    }
-
-    /// Get the number of available frames (slots in READY state).
-    ///
-    /// This is a snapshot and may be stale by the time it's used.
-    pub fn available_frames(&self) -> u32 {
-        let write = self.write_seq();
-        // Simple wrapping subtraction works for monotonically increasing u32 sequences
-        write.wrapping_sub(self.local_read_seq)
     }
 
     // =============================================================================
@@ -1152,7 +1088,7 @@ fn shm_stream_id_to_onvif(raw: u32) -> StreamId {
 // =============================================================================
 
 #[cfg(test)]
-mod tests {
+pub(in crate::hal::anyka::ipc) mod tests {
     use super::*;
     use std::fs::{File, OpenOptions};
     use std::io::{Seek, Write};
@@ -1228,7 +1164,7 @@ mod tests {
     ///
     /// Returns a `ShmRingReader` backed by anonymous memory (no file I/O),
     /// eliminating the race condition between file writes and mmap visibility.
-    fn create_test_anon_reader() -> ShmRingReader {
+    pub(in crate::hal::anyka::ipc) fn create_test_anon_reader() -> ShmRingReader {
         // SAFETY: MAP_ANONYMOUS | MAP_SHARED gives us a zeroed memory region
         // with no file backing, avoiding all file I/O race conditions.
         let base = unsafe {
@@ -1265,6 +1201,7 @@ mod tests {
     /// Write a test frame into a slot of an anonymous mmap-backed reader.
     ///
     /// This writes directly into the mmap'd region, no file I/O needed.
+    #[allow(clippy::too_many_arguments)] // mirrors the C slot header field-for-field
     unsafe fn write_test_slot(
         reader: &ShmRingReader,
         slot_index: u32,
@@ -1310,7 +1247,6 @@ mod tests {
         assert_eq!(notif.frame_len, 4224);
         assert_eq!(notif.stream_id, 1);
         assert_eq!(notif.seq_no, 42);
-        assert!(notif.is_last_fragment());
         assert!(!notif.is_socket_fallback());
     }
 
@@ -1327,7 +1263,6 @@ mod tests {
         let notif = FrameNotification::from_bytes(&bytes);
 
         assert!(notif.is_socket_fallback());
-        assert!(!notif.is_last_fragment());
     }
 
     #[test]
@@ -1412,8 +1347,6 @@ mod tests {
 
         // Check initial state
         let reader = reader.unwrap();
-        assert!(!reader.is_shutdown());
-        assert!(!reader.has_overflow());
         assert_eq!(reader.write_seq(), 0);
         assert_eq!(reader.read_seq(), 0);
 
@@ -1490,7 +1423,7 @@ mod tests {
         assert_eq!(frame.stream_id, 0);
 
         // Release the slot
-        reader.release_slot(0).unwrap();
+        reader.release_slot_with_expectation(0, None).unwrap();
 
         // Verify state went back to EMPTY via the atomic accessor
         let state = reader.slot_state_atomic(0).load(Ordering::Relaxed);
@@ -1520,7 +1453,9 @@ mod tests {
 
         // Use the method under test
         let pool = BytesMutPool::new(1024, 4);
-        let (metadata, buf) = reader.read_slot_into_bytesmut(0, Some(&pool)).unwrap();
+        let (metadata, buf) = reader
+            .read_slot_into_bytesmut_inner(0, None, Some(&pool))
+            .unwrap();
 
         // Verify metadata
         assert_eq!(metadata.timestamp_ms, 2000);
@@ -1755,71 +1690,40 @@ mod tests {
         );
     }
 
+
     #[test]
-    fn test_shutdown_flag() {
-        let temp_dir = std::env::temp_dir();
-        let path = temp_dir.join("test_shm_shutdown");
+    fn test_is_shutdown_reflects_ring_header_flag() {
+        let reader = create_test_anon_reader();
+        assert!(
+            !reader.is_shutdown(),
+            "freshly mapped ring must not report shutdown"
+        );
 
-        create_test_ring_buffer(path.to_str().unwrap()).unwrap();
-
-        let reader = ShmRingReader::open_path(path.to_str().unwrap())
-            .unwrap()
-            .unwrap();
-
-        // Initially not shutdown
-        assert!(!reader.is_shutdown());
-
-        // Set shutdown flag via file
-        let mut file = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .open(&path)
-            .unwrap();
-
-        // flags is at offset 28 (7 * 4 bytes) in header
-        let flags_offset = 28usize;
-        let shutdown_flags: u32 = VD_FLAG_SHUTDOWN;
-        file.seek(std::io::SeekFrom::Start(flags_offset as u64))
-            .unwrap();
-        file.write_all(&shutdown_flags.to_le_bytes()).unwrap();
-
-        // Now it should show as shutdown
+        // Daemon sets VD_FLAG_SHUTDOWN in the ring header when it stops producing.
+        reader
+            .flags_atomic()
+            .store(VD_FLAG_SHUTDOWN, Ordering::Release);
         assert!(reader.is_shutdown());
-
-        std::fs::remove_file(&path).ok();
     }
 
     #[test]
-    fn test_overflow_flag() {
-        let temp_dir = std::env::temp_dir();
-        let path = temp_dir.join("test_shm_overflow");
+    fn test_is_shutdown_ignores_unrelated_flags() {
+        let reader = create_test_anon_reader();
+        reader
+            .flags_atomic()
+            .store(VD_FLAG_OVERFLOW, Ordering::Release);
+        assert!(
+            !reader.is_shutdown(),
+            "overflow alone must not be read as shutdown"
+        );
 
-        create_test_ring_buffer(path.to_str().unwrap()).unwrap();
-
-        let reader = ShmRingReader::open_path(path.to_str().unwrap())
-            .unwrap()
-            .unwrap();
-
-        // Initially no overflow
-        assert!(!reader.has_overflow());
-
-        // Set overflow flag via file
-        let mut file = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .open(&path)
-            .unwrap();
-
-        let flags_offset = 28usize;
-        let overflow_flags: u32 = VD_FLAG_OVERFLOW;
-        file.seek(std::io::SeekFrom::Start(flags_offset as u64))
-            .unwrap();
-        file.write_all(&overflow_flags.to_le_bytes()).unwrap();
-
-        // Now it should show overflow
-        assert!(reader.has_overflow());
-
-        std::fs::remove_file(&path).ok();
+        reader
+            .flags_atomic()
+            .store(VD_FLAG_OVERFLOW | VD_FLAG_SHUTDOWN, Ordering::Release);
+        assert!(
+            reader.is_shutdown(),
+            "shutdown must be detected alongside other flags"
+        );
     }
 
     #[test]

@@ -490,9 +490,11 @@ mod tests {
         let mut ctx = RtcpContext::new(12345, 100, 48000);
 
         // Create default SR and set public fields
-        let mut sr = RtcpSenderReport::default();
-        sr.ssrc = 54321;
-        sr.ntp = 0x0011223344556677;
+        let sr = RtcpSenderReport {
+            ssrc: 54321,
+            ntp: 0x0011223344556677,
+            ..Default::default()
+        };
 
         ctx.received_sr(&sr);
 
@@ -521,8 +523,10 @@ mod tests {
 
     #[test]
     fn test_rtcp_source_clone() {
-        let mut source = RtcpSource::default();
-        source.max_seq = 1000;
+        let source = RtcpSource {
+            max_seq: 1000,
+            ..Default::default()
+        };
         let cloned = source.clone();
         assert_eq!(cloned.max_seq, source.max_seq);
     }
@@ -767,9 +771,11 @@ mod tests {
         let mut ctx = RtcpContext::new(12345, 100, 48000);
 
         // Receive an SR first
-        let mut sr = RtcpSenderReport::default();
-        sr.ssrc = 54321;
-        sr.ntp = 0x0011223344556677;
+        let sr = RtcpSenderReport {
+            ssrc: 54321,
+            ntp: 0x0011223344556677,
+            ..Default::default()
+        };
         ctx.received_sr(&sr);
 
         // Now generate RR
@@ -811,7 +817,7 @@ mod tests {
         // Allow a wide range: 2000..8000 ticks (22ms..89ms at 90kHz)
         // to account for timing variability in CI.
         assert!(
-            delta >= 2000 && delta <= 8000,
+            (2000..=8000).contains(&delta),
             "expected extrapolated delta ~4500 ticks, got {}",
             delta
         );

@@ -1,8 +1,10 @@
 //! Bridge between platform frame callbacks and streaming-lib channels.
 //!
-//! `StreamingBridge` implements [`FrameCallback`] to receive raw encoded frames
+//! `StreamingBridge` implements [`OwnedFrameCallback`] to receive encoded frames
 //! from the Anyka SDK and converts them into [`FrameData`] for the streaming
 //! pipeline. It routes frames by [`StreamId`]:
+//!
+//! [`OwnedFrameCallback`]: crate::platform::common::OwnedFrameCallback
 //!
 //! - `VideoMain` → main stream channel
 //! - `VideoSub` → sub stream channel
@@ -17,7 +19,7 @@ use std::time::Instant;
 use streaming_lib::FrameData;
 use tokio::sync::Notify;
 
-use crate::platform::common::{Frame, FrameCallback, FrameType, OwnedFrame, StreamId};
+use crate::platform::common::{FrameType, OwnedFrame, StreamId};
 
 const DEFAULT_MAIN_QUEUE_CAPACITY: usize = 4;
 const DEFAULT_SUB_QUEUE_CAPACITY: usize = 6;
@@ -322,9 +324,11 @@ pub struct StreamState {
 
 /// Bridge that receives raw SDK frames and routes them to streaming channels.
 ///
-/// Implements [`FrameCallback`] for integration with the platform abstraction.
-/// The `on_frame` method must complete within 2ms — it performs only a memcpy
-/// into `BytesMut` and a bounded queue push.
+/// Implements [`OwnedFrameCallback`] for integration with the platform abstraction.
+/// The `on_owned_frame` method must complete within 2ms — it performs only a move
+/// of the `BytesMut` and a bounded queue push.
+///
+/// [`OwnedFrameCallback`]: crate::platform::common::OwnedFrameCallback
 pub struct StreamingBridge {
     /// State for the main video stream.
     pub main_stream: StreamState,
@@ -397,48 +401,10 @@ impl StreamingBridge {
         }
     }
 
-    /// Convert a raw SDK frame to `FrameData` and route to the appropriate channel(s).
-    pub fn route_frame(&self, frame: &Frame) {
-        // SAFETY: frame.data is valid for frame.size bytes during this callback.
-        let data = BytesMut::from(unsafe { std::slice::from_raw_parts(frame.data, frame.size) });
-        let timestamp_ms = frame.timestamp;
-
-        tracing::trace!(
-            stream = ?frame.stream_id,
-            size = frame.size,
-            timestamp_ms,
-            frame_type = ?frame.frame_type,
-            "Bridge routing frame"
-        );
-
-        match frame.stream_id {
-            StreamId::VideoMain => {
-                self.enqueue_video(&self.main_stream, data, frame.frame_type, timestamp_ms);
-            }
-            StreamId::VideoSub => {
-                self.enqueue_video(&self.sub_stream, data, frame.frame_type, timestamp_ms);
-            }
-            StreamId::Audio => {
-                let frame_data = FrameData::Audio {
-                    timestamp: timestamp_ms,
-                    data: data.clone(),
-                };
-                // Audio goes to both streams.
-                self.main_stream
-                    .frame_queue
-                    .push(frame_data.clone(), timestamp_ms, false);
-                self.sub_stream
-                    .frame_queue
-                    .push(frame_data, timestamp_ms, false);
-            }
-        }
-    }
-
     /// Route an owned frame through the streaming pipeline — zero-copy path.
     ///
-    /// Unlike [`Self::route_frame`] which copies frame data into a new `BytesMut`,
-    /// this method moves the existing `BytesMut` from the `OwnedFrame` directly
-    /// into the streaming queue. This eliminates Copy 2 from the frame path.
+    /// Moves the existing `BytesMut` from the `OwnedFrame` directly into the
+    /// streaming queue rather than copying it, eliminating Copy 2 from the frame path.
     pub fn route_owned_frame(&self, frame: OwnedFrame) {
         let timestamp_ms = frame.timestamp;
 
@@ -608,12 +574,6 @@ impl StreamingBridge {
     }
 }
 
-impl FrameCallback for StreamingBridge {
-    fn on_frame(&self, frame: &Frame) {
-        self.route_frame(frame);
-    }
-}
-
 impl crate::platform::frame::OwnedFrameCallback for StreamingBridge {
     fn on_owned_frame(&self, frame: OwnedFrame) {
         self.route_owned_frame(frame);
@@ -698,10 +658,9 @@ mod tests {
     use super::*;
     use bytes::BytesMut;
 
-    fn make_frame(data: &[u8], frame_type: FrameType, stream_id: StreamId) -> Frame {
-        Frame {
-            data: data.as_ptr(),
-            size: data.len(),
+    fn make_frame(data: &[u8], frame_type: FrameType, stream_id: StreamId) -> OwnedFrame {
+        OwnedFrame {
+            data: BytesMut::from(data),
             timestamp: 2_000, // 2 seconds in milliseconds
             frame_type,
             stream_id,
@@ -730,7 +689,7 @@ mod tests {
 
         let payload = vec![0x00, 0x00, 0x00, 0x01, 0x41, 0x9a, 0x24];
         let frame = make_frame(&payload, FrameType::VideoPFrame, StreamId::VideoMain);
-        bridge.on_frame(&frame);
+        bridge.route_owned_frame(frame);
 
         assert!(bridge.main_stream.frame_queue.try_recv().is_some());
         assert!(bridge.sub_stream.frame_queue.try_recv().is_none());
@@ -742,7 +701,7 @@ mod tests {
 
         let payload = vec![0x00, 0x00, 0x00, 0x01, 0x41, 0x9a, 0x24];
         let frame = make_frame(&payload, FrameType::VideoPFrame, StreamId::VideoSub);
-        bridge.on_frame(&frame);
+        bridge.route_owned_frame(frame);
 
         assert!(bridge.main_stream.frame_queue.try_recv().is_none());
         assert!(bridge.sub_stream.frame_queue.try_recv().is_some());
@@ -754,7 +713,7 @@ mod tests {
 
         let payload = vec![0xFF, 0xF1, 0x50, 0x80]; // Fake AAC frame
         let frame = make_frame(&payload, FrameType::AudioPacket, StreamId::Audio);
-        bridge.on_frame(&frame);
+        bridge.route_owned_frame(frame);
 
         assert!(bridge.main_stream.frame_queue.try_recv().is_some());
         assert!(bridge.sub_stream.frame_queue.try_recv().is_some());
@@ -826,15 +785,14 @@ mod tests {
     fn test_bridge_timestamp_passthrough_ms() {
         let bridge = make_bridge();
 
-        let payload = vec![0x00, 0x00, 0x00, 0x01, 0x41, 0x9a];
-        let frame = Frame {
-            data: payload.as_ptr(),
-            size: payload.len(),
+        let payload = [0x00, 0x00, 0x00, 0x01, 0x41, 0x9a];
+        let frame = OwnedFrame {
+            data: BytesMut::from(&payload[..]),
             timestamp: 3500, // 3500ms directly
             frame_type: FrameType::VideoPFrame,
             stream_id: StreamId::VideoMain,
         };
-        bridge.on_frame(&frame);
+        bridge.route_owned_frame(frame);
 
         let received = bridge.main_stream.frame_queue.try_recv().unwrap().frame;
         match received {
@@ -851,7 +809,7 @@ mod tests {
 
         let idr_frame = vec![0x00, 0x00, 0x00, 0x01, 0x65, 0x88, 0x84];
         let frame = make_frame(&idr_frame, FrameType::VideoIFrame, StreamId::VideoMain);
-        bridge.on_frame(&frame);
+        bridge.route_owned_frame(frame);
 
         let received = bridge.main_stream.frame_queue.try_recv().unwrap().frame;
         assert!(matches!(received, FrameData::Video { .. }));
@@ -863,7 +821,7 @@ mod tests {
 
         let p_frame = vec![0x00, 0x00, 0x00, 0x01, 0x41, 0x9a, 0x24];
         let frame = make_frame(&p_frame, FrameType::VideoPFrame, StreamId::VideoMain);
-        bridge.on_frame(&frame);
+        bridge.route_owned_frame(frame);
 
         let received = bridge.main_stream.frame_queue.try_recv().unwrap().frame;
         assert!(matches!(received, FrameData::Video { .. }));

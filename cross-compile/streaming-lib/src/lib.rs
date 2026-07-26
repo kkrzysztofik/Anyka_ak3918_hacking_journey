@@ -31,14 +31,14 @@ pub use bytes::Bytes;
 // Re-export key types from RTSP
 pub use logging_flags::{set_stream_frame_debug_logging, stream_frame_debug_logging_enabled};
 pub use protocol::rtsp::session::server_session::RtspServerSession;
-pub use protocol::rtsp::{DefaultRtspServer, RtspServer};
+pub use protocol::rtsp::DefaultRtspServer;
 
 /// Stream session type alias for ticket-specified API surface
 /// Represents either an RTSP client or server session
 pub type StreamSession = RtspServerSession;
 
 // Re-export key types from HTTP-FLV
-pub use protocol::httpflv::server::{DefaultHttpFlvServer, HttpFlvServer};
+pub use protocol::httpflv::server::DefaultHttpFlvServer;
 
 // Re-export key types from streamhub (hub)
 pub use hub::StreamsHub;
@@ -55,19 +55,6 @@ pub use codec::h264::sps::Sps;
 // Re-export key types from container
 pub use container::demuxer::FlvDemuxer;
 pub use container::muxer::FlvMuxer;
-
-// Frame delivery interface (for future integration with platform layer)
-/// Trait for frame sources that can register callbacks
-pub trait FrameSource: Send + Sync {
-    /// Register a frame callback
-    fn register_callback(&self, callback: Box<dyn FrameCallback>);
-}
-
-/// Trait for receiving frame callbacks
-pub trait FrameCallback: Send + Sync {
-    /// Called when a new frame is available
-    fn on_frame(&self, frame: &Frame);
-}
 
 // ============================================================
 // Backward Compatibility Aliases (DEPRECATED)
@@ -183,7 +170,7 @@ mod tests {
         };
 
         let frame2 = Frame {
-            data: data,
+            data,
             timestamp: 2000,
             frame_type: FrameType::VideoPFrame,
         };

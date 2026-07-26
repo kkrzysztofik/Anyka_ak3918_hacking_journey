@@ -92,9 +92,11 @@ mod tests {
 
     #[test]
     fn test_rtcp_app_clone() {
-        let mut app = RtcpApp::default();
-        app.ssrc = 0x12345678;
-        app.name = BytesMut::from(&b"TEST"[..]);
+        let app = RtcpApp {
+            ssrc: 0x12345678,
+            name: BytesMut::from(&b"TEST"[..]),
+            ..Default::default()
+        };
 
         let cloned = app.clone();
         assert_eq!(cloned.ssrc, app.ssrc);

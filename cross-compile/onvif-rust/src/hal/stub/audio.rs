@@ -90,10 +90,12 @@ mod tests {
     #[test]
     fn test_audio_encoder_open_success() {
         let stub = StubAudioHal;
-        let mut param = audio_param::default();
-        param.sample_rate = 8000;
-        param.channel_num = 1;
-        param.sample_bits = 16;
+        let param = audio_param {
+            sample_rate: 8000,
+            channel_num: 1,
+            sample_bits: 16,
+            ..Default::default()
+        };
         let result = audio_encoder_open(&param, &stub);
         assert!(result.is_ok());
         let handle = result.unwrap();
@@ -103,10 +105,12 @@ mod tests {
     #[test]
     fn test_audio_encoder_set_config_success() {
         let stub = StubAudioHal;
-        let mut param = audio_param::default();
-        param.sample_rate = 8000;
-        param.channel_num = 1;
-        param.sample_bits = 16;
+        let param = audio_param {
+            sample_rate: 8000,
+            channel_num: 1,
+            sample_bits: 16,
+            ..Default::default()
+        };
         let handle = audio_encoder_open(&param, &stub).unwrap();
         let attr = aenc_attr::default();
         let result = audio_encoder_set_config(&handle, &attr, &stub);

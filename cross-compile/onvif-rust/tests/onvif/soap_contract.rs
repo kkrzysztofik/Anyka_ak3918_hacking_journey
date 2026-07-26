@@ -277,20 +277,21 @@ fn test_xfail_2sx_namespace_captures_envelope_uri_not_first_xmlns() {
 /// This test PASSES with current code and documents the known bug behavior
 /// where the first xmlns declaration is captured instead of the SOAP envelope namespace.
 #[test]
-fn test_regression_2sx_documents_current_first_xmlns_behavior() {
-    // This test verifies the current (buggy) behavior is documented
-    // It should pass to show we're aware of the bug
-    let result = parse_soap_request(NON_SOAP_XMLNS_FIRST);
+fn test_regression_2sx_multiple_xmlns_on_envelope_parses() {
+    // An envelope carrying several xmlns declarations must still be recognised by
+    // its SOAP-envelope binding (xmlns:s), not by whichever xmlns happens to be first.
+    let result = parse_soap_request(MULTIPLE_XMLNS_ON_ENVELOPE);
 
-    // Note: This may or may not fail depending on current implementation
-    // The important thing is we document the behavior
-    let _ = result;
-
-    // Document that this test exists to track the regression
-    // The actual bug is in extract_envelope_namespace() function
     assert!(
-        true,
-        "Regression guard test - documents anyka-dev-2sx behavior"
+        result.is_ok(),
+        "envelope with multiple xmlns declarations should parse: {:?}",
+        result.err()
+    );
+    let envelope = result.expect("parsed above");
+    assert!(
+        envelope.body_xml.contains("GetDeviceInformation"),
+        "body action must survive multiple namespace declarations, got: {}",
+        envelope.body_xml
     );
 }
 

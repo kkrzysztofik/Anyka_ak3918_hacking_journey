@@ -1933,15 +1933,14 @@ impl RtspServerSession {
             match media_name.as_str() {
                 "audio" => {
                     let codec_name = media.rtpmap.encoding_name.to_lowercase();
-                    let codec_id = rtsp_codec::RTSP_CODEC_NAME_2_ID
-                        .get(codec_name.as_str())
-                        .cloned()
-                        .ok_or(SessionError {
+                    let codec_id = rtsp_codec::RtspCodecId::from_name(codec_name.as_str()).ok_or(
+                        SessionError {
                             value: SessionErrorValue::RtspMessageCorrupted(format!(
                                 "unsupported audio codec: {}",
                                 codec_name
                             )),
-                        })?;
+                        },
+                    )?;
                     let channel_count = if media.rtpmap.encoding_param.is_empty() {
                         1
                     } else {
@@ -1972,15 +1971,14 @@ impl RtspServerSession {
                 }
                 "video" => {
                     let codec_name = media.rtpmap.encoding_name.to_lowercase();
-                    let codec_id = rtsp_codec::RTSP_CODEC_NAME_2_ID
-                        .get(codec_name.as_str())
-                        .cloned()
-                        .ok_or(SessionError {
+                    let codec_id = rtsp_codec::RtspCodecId::from_name(codec_name.as_str()).ok_or(
+                        SessionError {
                             value: SessionErrorValue::RtspMessageCorrupted(format!(
                                 "unsupported video codec: {}",
                                 codec_name
                             )),
-                        })?;
+                        },
+                    )?;
                     let codec_info = RtspCodecInfo {
                         codec_id,
                         payload_type: media.rtpmap.payload_type as u8,

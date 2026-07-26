@@ -1175,7 +1175,7 @@ mod tests {
         fn new(chunks: Vec<&[u8]>) -> Self {
             let queue = chunks
                 .into_iter()
-                .map(|c| BytesMut::from(c))
+                .map(BytesMut::from)
                 .collect::<VecDeque<_>>();
             Self {
                 chunks: tokio::sync::Mutex::new(queue),

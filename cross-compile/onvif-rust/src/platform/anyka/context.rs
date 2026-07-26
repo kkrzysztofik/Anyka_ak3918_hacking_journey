@@ -79,6 +79,15 @@ const STABILIZATION_MS_MAX: u64 = 10_000;
 /// Default stream stabilization delay in milliseconds.
 const STABILIZATION_MS_DEFAULT: u64 = 300;
 
+// Bounds consistency is a property of the constants above, so check it at
+// compile time rather than in a test — a bad edit fails the build immediately.
+const _: () = assert!(PIPELINE_READY_TIMEOUT_MS_MIN < PIPELINE_READY_TIMEOUT_MS_MAX);
+const _: () = assert!(PIPELINE_READY_TIMEOUT_MS_DEFAULT >= PIPELINE_READY_TIMEOUT_MS_MIN);
+const _: () = assert!(PIPELINE_READY_TIMEOUT_MS_DEFAULT <= PIPELINE_READY_TIMEOUT_MS_MAX);
+const _: () = assert!(STABILIZATION_MS_MIN < STABILIZATION_MS_MAX);
+const _: () = assert!(STABILIZATION_MS_DEFAULT >= STABILIZATION_MS_MIN);
+const _: () = assert!(STABILIZATION_MS_DEFAULT <= STABILIZATION_MS_MAX);
+
 /// Get the pipeline readiness timeout in milliseconds.
 ///
 /// Can be overridden via ANYKA_PIPELINE_READY_TIMEOUT_MS environment variable.
@@ -262,19 +271,6 @@ mod tests {
         assert!(max > 300); // max > default
     }
 
-    #[test]
-    fn test_pipeline_ready_timeout_bounds_are_valid() {
-        // Verify the bounds form a valid range
-        assert!(PIPELINE_READY_TIMEOUT_MS_MIN < PIPELINE_READY_TIMEOUT_MS_MAX);
-        assert!(PIPELINE_READY_TIMEOUT_MS_DEFAULT >= PIPELINE_READY_TIMEOUT_MS_MIN);
-        assert!(PIPELINE_READY_TIMEOUT_MS_DEFAULT <= PIPELINE_READY_TIMEOUT_MS_MAX);
-    }
-
-    #[test]
-    fn test_stream_stabilization_bounds_are_valid() {
-        // Verify the bounds form a valid range
-        assert!(STABILIZATION_MS_MIN < STABILIZATION_MS_MAX);
-        assert!(STABILIZATION_MS_DEFAULT >= STABILIZATION_MS_MIN);
-        assert!(STABILIZATION_MS_DEFAULT <= STABILIZATION_MS_MAX);
-    }
+    // Bounds consistency for both timeout families is asserted at compile time
+    // near the constant definitions above.
 }

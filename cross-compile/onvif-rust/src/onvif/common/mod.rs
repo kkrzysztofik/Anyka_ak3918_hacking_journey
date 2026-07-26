@@ -239,21 +239,18 @@ mod tests {
     #[test]
     fn test_limits_max_reference_token_is_128() {
         assert_eq!(MAX_REFERENCE_TOKEN_CHARS, 128);
-        assert!(MAX_REFERENCE_TOKEN_CHARS > 0 && MAX_REFERENCE_TOKEN_CHARS <= 512);
     }
 
     /// Test max scope URI length is 256 and greater than reference token limit.
     #[test]
     fn test_limits_max_scope_uri_is_256_and_gt_reference() {
         assert_eq!(MAX_SCOPE_URI_CHARS, 256);
-        assert!(MAX_SCOPE_URI_CHARS > MAX_REFERENCE_TOKEN_CHARS);
     }
 
     /// Test max username length is 64 grapheme clusters.
     #[test]
     fn test_limits_max_username_is_64() {
         assert_eq!(MAX_USERNAME_CHARS, 64);
-        assert!(MAX_USERNAME_CHARS > 0 && MAX_USERNAME_CHARS <= 256);
     }
 
     /// Test dispatch module functions are accessible

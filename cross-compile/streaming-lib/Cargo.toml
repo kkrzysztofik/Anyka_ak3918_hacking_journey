@@ -19,7 +19,6 @@ tokio = { version = "1.53", default-features = false, features = [
   "fs",  # Added for async file I/O (Phase 1 optimization)
 ] }
 tokio-util = { version = "0.7", features = ["codec"] }
-tokio-stream = "0.1"
 futures = "0.3"
 
 # Binary I/O
@@ -52,22 +51,14 @@ serde_derive = "1.0"
 # Utilities
 chrono = { version = "0.4", features = ["serde"] }
 indexmap = "2.14"
-lazy_static = "1.5"
 async-trait = "0.1"
 md5 = "0.8"
 subtle = "2.6"
-job_scheduler_ng = "2.4"
 portable-atomic = { version = "1.14", features = ["std"] }
-mockall = "0.15"
 
 # Network
-reqwest = { version = "0.13", features = ["native-tls-vendored", "query", "form"] }
 socket2 = "0.6"
-
-# Note: openssl-src is patched at workspace root for uClibc ARM target support.
 
 [dev-dependencies]
 mockall = "0.15"
-tokio-test = "0.4"
 proptest = "1.11"
-wiremock = "0.6"

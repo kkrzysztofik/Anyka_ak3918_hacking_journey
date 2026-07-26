@@ -1163,20 +1163,26 @@ mod tests {
         use crate::onvif::types::common::ImagingSettings20;
 
         // Test contrast out of range
-        let mut settings = ImagingSettings20::default();
-        settings.contrast = Some(200.0);
+        let settings = ImagingSettings20 {
+            contrast: Some(200.0),
+            ..Default::default()
+        };
         let result = store.validate_settings("VideoSource_1", &settings).await;
         assert!(result.is_err());
 
         // Test saturation out of range
-        let mut settings = ImagingSettings20::default();
-        settings.color_saturation = Some(-10.0);
+        let settings = ImagingSettings20 {
+            color_saturation: Some(-10.0),
+            ..Default::default()
+        };
         let result = store.validate_settings("VideoSource_1", &settings).await;
         assert!(result.is_err());
 
         // Test sharpness out of range
-        let mut settings = ImagingSettings20::default();
-        settings.sharpness = Some(150.0);
+        let settings = ImagingSettings20 {
+            sharpness: Some(150.0),
+            ..Default::default()
+        };
         let result = store.validate_settings("VideoSource_1", &settings).await;
         assert!(result.is_err());
     }

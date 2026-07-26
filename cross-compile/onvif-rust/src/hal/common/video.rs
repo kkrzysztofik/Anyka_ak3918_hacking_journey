@@ -804,14 +804,16 @@ mod tests {
     fn test_video_encoder_open_calls_ffi_and_returns_handle() {
         let mut mock_ffi = MockVideoHalTrait::new();
         let test_handle = std::ptr::NonNull::<c_void>::dangling().as_ptr();
-        let mut param = encode_param::default();
-        param.width = 1920;
-        param.height = 1080;
-        param.minqp = 10;
-        param.maxqp = 51;
-        param.fps = 30;
-        param.goplen = 30;
-        param.bps = 2000000;
+        let param = encode_param {
+            width: 1920,
+            height: 1080,
+            minqp: 10,
+            maxqp: 51,
+            fps: 30,
+            goplen: 30,
+            bps: 2000000,
+            ..Default::default()
+        };
 
         let test_handle_usize = test_handle as usize;
         mock_ffi
@@ -828,14 +830,16 @@ mod tests {
     #[test]
     fn test_video_encoder_open_returns_error_on_null_handle() {
         let mut mock_ffi = MockVideoHalTrait::new();
-        let mut param = encode_param::default();
-        param.width = 1920;
-        param.height = 1080;
-        param.minqp = 10;
-        param.maxqp = 51;
-        param.fps = 30;
-        param.goplen = 30;
-        param.bps = 2000000;
+        let param = encode_param {
+            width: 1920,
+            height: 1080,
+            minqp: 10,
+            maxqp: 51,
+            fps: 30,
+            goplen: 30,
+            bps: 2000000,
+            ..Default::default()
+        };
 
         mock_ffi
             .expect_venc_open()

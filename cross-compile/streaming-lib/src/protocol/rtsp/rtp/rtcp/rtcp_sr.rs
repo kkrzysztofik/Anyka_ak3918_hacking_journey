@@ -149,9 +149,11 @@ mod tests {
 
     #[test]
     fn test_clone_rtcp_sender_report() {
-        let mut sr = RtcpSenderReport::default();
-        sr.ssrc = 0x12345678;
-        sr.ntp = 0xABCDEF0123456789;
+        let mut sr = RtcpSenderReport {
+            ssrc: 0x12345678,
+            ntp: 0xABCDEF0123456789,
+            ..Default::default()
+        };
         sr.header.report_count = 2;
 
         let cloned = sr.clone();
@@ -655,12 +657,14 @@ mod tests {
     #[test]
     fn test_sr_marshal_too_many_report_blocks() {
         // RFC 3550 section 6.4.1: report_count is 5 bits (max 31)
-        let mut sr = RtcpSenderReport::default();
-        sr.ssrc = 0x12345678;
-        sr.ntp = 0xABCDEF0123456789;
-        sr.rtp_timestamp = 0x11111111;
-        sr.sender_packet_count = 0x22222222;
-        sr.sender_octet_count = 0x33333333;
+        let mut sr = RtcpSenderReport {
+            ssrc: 0x12345678,
+            ntp: 0xABCDEF0123456789,
+            rtp_timestamp: 0x11111111,
+            sender_packet_count: 0x22222222,
+            sender_octet_count: 0x33333333,
+            ..Default::default()
+        };
         for i in 0..32 {
             sr.report_blocks.push(ReportBlock {
                 ssrc: i,
@@ -676,12 +680,14 @@ mod tests {
     #[test]
     fn test_sr_marshal_max_report_blocks_allowed() {
         // Test that exactly 31 report blocks (max allowed) works correctly
-        let mut sr = RtcpSenderReport::default();
-        sr.ssrc = 0x12345678;
-        sr.ntp = 0xABCDEF0123456789;
-        sr.rtp_timestamp = 0x11111111;
-        sr.sender_packet_count = 0x22222222;
-        sr.sender_octet_count = 0x33333333;
+        let mut sr = RtcpSenderReport {
+            ssrc: 0x12345678,
+            ntp: 0xABCDEF0123456789,
+            rtp_timestamp: 0x11111111,
+            sender_packet_count: 0x22222222,
+            sender_octet_count: 0x33333333,
+            ..Default::default()
+        };
         for i in 0..31 {
             sr.report_blocks.push(ReportBlock {
                 ssrc: i,
@@ -701,12 +707,14 @@ mod tests {
     #[test]
     fn test_sr_marshal_32_report_blocks_fails() {
         // Test that 32 report blocks fails (exceeds 5-bit max of 31)
-        let mut sr = RtcpSenderReport::default();
-        sr.ssrc = 0x12345678;
-        sr.ntp = 0xABCDEF0123456789;
-        sr.rtp_timestamp = 0x11111111;
-        sr.sender_packet_count = 0x22222222;
-        sr.sender_octet_count = 0x33333333;
+        let mut sr = RtcpSenderReport {
+            ssrc: 0x12345678,
+            ntp: 0xABCDEF0123456789,
+            rtp_timestamp: 0x11111111,
+            sender_packet_count: 0x22222222,
+            sender_octet_count: 0x33333333,
+            ..Default::default()
+        };
         for i in 0..32 {
             sr.report_blocks.push(ReportBlock {
                 ssrc: i,

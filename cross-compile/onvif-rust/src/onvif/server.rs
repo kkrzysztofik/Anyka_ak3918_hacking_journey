@@ -423,15 +423,11 @@ impl OnvifServer {
         let device_service = if let Some(platform) = app_state.platform() {
             DeviceService::with_config_and_platform(
                 Arc::clone(app_state.user_storage()),
-                Arc::clone(app_state.password_manager()),
                 Arc::clone(app_state.config()),
                 Arc::clone(platform),
             )
         } else {
-            DeviceService::new(
-                Arc::clone(app_state.user_storage()),
-                Arc::clone(app_state.password_manager()),
-            )
+            DeviceService::new(Arc::clone(app_state.user_storage()))
         };
         dispatcher.register_service("device", Arc::new(device_service));
 

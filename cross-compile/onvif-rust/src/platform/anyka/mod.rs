@@ -399,15 +399,6 @@ impl Platform for AnykaPlatform {
         })
     }
 
-    fn register_frame_callback(
-        &self,
-        callback: Arc<dyn crate::platform::frame::FrameCallback>,
-    ) -> PlatformResult<()> {
-        let _id = self.video_encoder.register_frame_callback(callback);
-        tracing::info!("Frame callback registered (id={})", _id);
-        Ok(())
-    }
-
     fn register_owned_frame_callback(
         &self,
         callback: Arc<dyn crate::platform::frame::OwnedFrameCallback>,

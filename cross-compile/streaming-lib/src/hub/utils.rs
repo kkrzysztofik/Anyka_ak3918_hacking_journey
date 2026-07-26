@@ -299,7 +299,7 @@ mod tests {
     #[test]
     fn test_uuid_clone() {
         let uuid = Uuid::new(RandomDigitCount::Four);
-        let cloned = uuid.clone();
+        let cloned = uuid;
         assert_eq!(uuid, cloned);
     }
 

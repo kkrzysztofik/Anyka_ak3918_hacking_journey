@@ -98,23 +98,6 @@ log_error() {
 # Dependency Check Helpers
 # =============================================================================
 
-# check_deps <cmd> [cmd ...] — exit 1 if any command is not found in PATH.
-# For a friendlier error that also shows the apt install command, prefer
-# check_all_build_deps (called once up-front from build.sh).
-check_deps() {
-    local missing=()
-    for dep in "$@"; do
-        if ! command -v "${dep}" &> /dev/null; then
-            missing+=("${dep}")
-        fi
-    done
-    if [[ ${#missing[@]} -gt 0 ]]; then
-        log_error "Missing commands: ${missing[*]}"
-        return 1
-    fi
-    return 0
-}
-
 # check_all_build_deps — verify every host package required by all build
 # stages and emit a single actionable error with the full apt-get command.
 #
@@ -175,21 +158,14 @@ check_all_build_deps() {
     done
 
     # ── Library-only deps (no binary in PATH) ────────────────────────────
-    # Check for development headers as a proxy for the -dev packages.
-    if ! printf '#include <ncurses.h>\nint main(){}\n' \
-            | gcc -x c - -lncurses -o /dev/null 2>/dev/null; then
-        missing_pkgs+=("libncurses-dev")
-    fi
-
-    if ! printf '#include <gmp.h>\nint main(){}\n' \
-            | gcc -x c - -lgmp -o /dev/null 2>/dev/null; then
-        missing_pkgs+=("libgmp-dev")
-    fi
-
-    if ! printf '#include <mpfr.h>\nint main(){}\n' \
-            | gcc -x c - -lmpfr -o /dev/null 2>/dev/null; then
-        missing_pkgs+=("libmpfr-dev")
-    fi
+    # Ask dpkg directly instead of compiling a probe program — this also works
+    # when the compiler itself is one of the missing packages.
+    for pkg in libncurses-dev libgmp-dev libmpfr-dev; do
+        if ! dpkg-query -W -f='${Status}' "${pkg}" 2>/dev/null \
+                | grep -q "^install ok installed$"; then
+            missing_pkgs+=("${pkg}")
+        fi
+    done
 
     if [[ ${#missing_pkgs[@]} -eq 0 ]]; then
         log_info "All build dependencies satisfied."
@@ -237,11 +213,6 @@ mark_checkpoint() {
 has_checkpoint() {
     local name="$1"
     [[ -f "${CHECKPOINT_DIR}/${name}" ]]
-}
-
-clear_checkpoint() {
-    local name="$1"
-    rm -f "${CHECKPOINT_DIR}/${name}"
 }
 
 # =============================================================================

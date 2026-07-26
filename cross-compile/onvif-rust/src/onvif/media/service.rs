@@ -1151,7 +1151,7 @@ mod tests {
                 "subcode should contain NoProfile"
             );
         } else {
-            assert!(false, "Expected InvalidArgVal error, got: {:?}", err);
+            panic!("Expected InvalidArgVal error, got: {:?}", err);
         }
     }
 

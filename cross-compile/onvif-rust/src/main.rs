@@ -1425,11 +1425,10 @@ mod tests {
                         saw_video_sequence_header = true;
                     }
                 }
-                FrameData::Audio { data, .. } if data.len() >= 2 => {
-                    if data[1] == 0 {
+                FrameData::Audio { data, .. } if data.len() >= 2
+                    && data[1] == 0 => {
                         saw_audio_sequence_header = true;
                     }
-                }
                 _ => {}
             }
         }

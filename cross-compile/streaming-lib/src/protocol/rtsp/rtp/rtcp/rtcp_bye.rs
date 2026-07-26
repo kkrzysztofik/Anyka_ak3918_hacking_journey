@@ -90,10 +90,12 @@ mod tests {
 
     #[test]
     fn test_rtcp_bye_clone() {
-        let mut bye = RtcpBye::default();
-        bye.ssrcs = vec![0x12345678, 0xAABBCCDD];
-        bye.length = 5;
-        bye.reason = BytesMut::from(&b"leave"[..]);
+        let bye = RtcpBye {
+            ssrcs: vec![0x12345678, 0xAABBCCDD],
+            length: 5,
+            reason: BytesMut::from(&b"leave"[..]),
+            ..Default::default()
+        };
 
         let cloned = bye.clone();
         assert_eq!(cloned.ssrcs, bye.ssrcs);

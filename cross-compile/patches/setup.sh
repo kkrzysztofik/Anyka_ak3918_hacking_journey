@@ -14,11 +14,6 @@ cd "$SCRIPT_DIR"
 
 # Crate versions to download
 declare -A CRATES=(
-    ["webrtc-util"]="0.7.0"
-    ["webrtc-ice"]="0.9.1"
-    ["webrtc-sctp"]="0.8.0"
-    ["rtp"]="0.8.0"
-    ["tokio-metrics"]="0.2.2"
     ["openssl-src"]="300.2.3+3.2.1"
 )
 

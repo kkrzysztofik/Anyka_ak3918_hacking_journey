@@ -19,14 +19,14 @@ use tempfile::tempdir;
 
 fn create_service_with_admin() -> DeviceService {
     let users = Arc::new(UserStorage::new());
-    let password_manager = Arc::new(PasswordManager::new());
+    let _password_manager = Arc::new(PasswordManager::new());
 
     // Create initial admin user with plaintext password
     users
         .create_user("admin", "admin123", UserLevel::Administrator)
         .unwrap();
 
-    DeviceService::new(users, password_manager)
+    DeviceService::new(users)
 }
 
 // ============================================================================

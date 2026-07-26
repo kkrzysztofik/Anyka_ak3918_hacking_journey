@@ -1,7 +1,4 @@
-use lazy_static::lazy_static;
-use std::collections::HashMap;
-
-#[derive(Debug, Clone, Default, Hash, Eq, PartialEq)]
+#[derive(Debug, Clone, Copy, Default, Hash, Eq, PartialEq)]
 pub enum RtspCodecId {
     #[default]
     H264,
@@ -10,24 +7,29 @@ pub enum RtspCodecId {
     G711A,
 }
 
-lazy_static! {
-    pub static ref RTSP_CODEC_ID_2_NAME: HashMap<RtspCodecId, &'static str> = {
-        let mut m = HashMap::new();
-        m.insert(RtspCodecId::H264, "h264");
-        m.insert(RtspCodecId::H265, "h265");
-        m.insert(RtspCodecId::AAC, "mpeg4-generic");
-        m.insert(RtspCodecId::G711A, "pcma");
-        m
-    };
-    pub static ref RTSP_CODEC_NAME_2_ID: HashMap<&'static str, RtspCodecId> = {
-        let mut m = HashMap::new();
-        m.insert("h264", RtspCodecId::H264);
-        m.insert("h265", RtspCodecId::H265);
-        m.insert("mpeg4-generic", RtspCodecId::AAC);
-        m.insert("pcma", RtspCodecId::G711A);
-        m
-    };
+impl RtspCodecId {
+    /// Canonical RTSP/SDP encoding name for this codec.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::H264 => "h264",
+            Self::H265 => "h265",
+            Self::AAC => "mpeg4-generic",
+            Self::G711A => "pcma",
+        }
+    }
+
+    /// Parse a codec from its RTSP/SDP encoding name. Exact, case-sensitive match.
+    pub fn from_name(name: &str) -> Option<Self> {
+        match name {
+            "h264" => Some(Self::H264),
+            "h265" => Some(Self::H265),
+            "mpeg4-generic" => Some(Self::AAC),
+            "pcma" => Some(Self::G711A),
+            _ => None,
+        }
+    }
 }
+
 #[derive(Debug, Clone, Default)]
 pub struct RtspCodecInfo {
     pub codec_id: RtspCodecId,
@@ -53,7 +55,7 @@ mod tests {
     #[test]
     fn test_rtsp_codec_id_clone() {
         let codec_id = RtspCodecId::H265;
-        let cloned = codec_id.clone();
+        let cloned = codec_id;
         assert_eq!(codec_id, cloned);
     }
 
@@ -70,25 +72,22 @@ mod tests {
 
     #[test]
     fn test_codec_id_to_name_h264() {
-        assert_eq!(RTSP_CODEC_ID_2_NAME.get(&RtspCodecId::H264), Some(&"h264"));
+        assert_eq!(RtspCodecId::H264.name(), "h264");
     }
 
     #[test]
     fn test_codec_id_to_name_h265() {
-        assert_eq!(RTSP_CODEC_ID_2_NAME.get(&RtspCodecId::H265), Some(&"h265"));
+        assert_eq!(RtspCodecId::H265.name(), "h265");
     }
 
     #[test]
     fn test_codec_id_to_name_aac() {
-        assert_eq!(
-            RTSP_CODEC_ID_2_NAME.get(&RtspCodecId::AAC),
-            Some(&"mpeg4-generic")
-        );
+        assert_eq!(RtspCodecId::AAC.name(), "mpeg4-generic");
     }
 
     #[test]
     fn test_codec_id_to_name_g711a() {
-        assert_eq!(RTSP_CODEC_ID_2_NAME.get(&RtspCodecId::G711A), Some(&"pcma"));
+        assert_eq!(RtspCodecId::G711A.name(), "pcma");
     }
 
     // ============================================
@@ -97,30 +96,30 @@ mod tests {
 
     #[test]
     fn test_codec_name_to_id_h264() {
-        assert_eq!(RTSP_CODEC_NAME_2_ID.get("h264"), Some(&RtspCodecId::H264));
+        assert_eq!(RtspCodecId::from_name("h264"), Some(RtspCodecId::H264));
     }
 
     #[test]
     fn test_codec_name_to_id_h265() {
-        assert_eq!(RTSP_CODEC_NAME_2_ID.get("h265"), Some(&RtspCodecId::H265));
+        assert_eq!(RtspCodecId::from_name("h265"), Some(RtspCodecId::H265));
     }
 
     #[test]
     fn test_codec_name_to_id_aac() {
         assert_eq!(
-            RTSP_CODEC_NAME_2_ID.get("mpeg4-generic"),
-            Some(&RtspCodecId::AAC)
+            RtspCodecId::from_name("mpeg4-generic"),
+            Some(RtspCodecId::AAC)
         );
     }
 
     #[test]
     fn test_codec_name_to_id_g711a() {
-        assert_eq!(RTSP_CODEC_NAME_2_ID.get("pcma"), Some(&RtspCodecId::G711A));
+        assert_eq!(RtspCodecId::from_name("pcma"), Some(RtspCodecId::G711A));
     }
 
     #[test]
     fn test_codec_name_to_id_unknown() {
-        assert_eq!(RTSP_CODEC_NAME_2_ID.get("unknown"), None);
+        assert_eq!(RtspCodecId::from_name("unknown"), None);
     }
 
     // ============================================
@@ -128,51 +127,16 @@ mod tests {
     // ============================================
 
     #[test]
-    fn test_codec_id_name_roundtrip_h264() {
-        let codec_id = RtspCodecId::H264;
-        let name = RTSP_CODEC_ID_2_NAME.get(&codec_id).unwrap();
-        let back_to_id = RTSP_CODEC_NAME_2_ID.get(name).unwrap();
-        assert_eq!(&codec_id, back_to_id);
-    }
-
-    #[test]
-    fn test_codec_id_name_roundtrip_h265() {
-        let codec_id = RtspCodecId::H265;
-        let name = RTSP_CODEC_ID_2_NAME.get(&codec_id).unwrap();
-        let back_to_id = RTSP_CODEC_NAME_2_ID.get(name).unwrap();
-        assert_eq!(&codec_id, back_to_id);
-    }
-
-    #[test]
-    fn test_codec_id_name_roundtrip_aac() {
-        let codec_id = RtspCodecId::AAC;
-        let name = RTSP_CODEC_ID_2_NAME.get(&codec_id).unwrap();
-        let back_to_id = RTSP_CODEC_NAME_2_ID.get(name).unwrap();
-        assert_eq!(&codec_id, back_to_id);
-    }
-
-    #[test]
-    fn test_codec_id_name_roundtrip_g711a() {
-        let codec_id = RtspCodecId::G711A;
-        let name = RTSP_CODEC_ID_2_NAME.get(&codec_id).unwrap();
-        let back_to_id = RTSP_CODEC_NAME_2_ID.get(name).unwrap();
-        assert_eq!(&codec_id, back_to_id);
-    }
-
-    #[test]
     fn test_codec_id_name_roundtrip_all() {
-        let codecs = vec![
+        for codec_id in [
             RtspCodecId::H264,
             RtspCodecId::H265,
             RtspCodecId::AAC,
             RtspCodecId::G711A,
-        ];
-
-        for codec_id in codecs {
-            let name = RTSP_CODEC_ID_2_NAME.get(&codec_id).unwrap();
-            let back_to_id = RTSP_CODEC_NAME_2_ID.get(name).unwrap();
+        ] {
             assert_eq!(
-                &codec_id, back_to_id,
+                RtspCodecId::from_name(codec_id.name()),
+                Some(codec_id),
                 "Round-trip failed for {:?}",
                 codec_id
             );
@@ -263,16 +227,16 @@ mod tests {
     #[test]
     fn test_codec_name_case_sensitivity() {
         // Names should be case-sensitive
-        assert_eq!(RTSP_CODEC_NAME_2_ID.get("H264"), None); // Uppercase
-        assert_eq!(RTSP_CODEC_NAME_2_ID.get("h264"), Some(&RtspCodecId::H264)); // Lowercase
+        assert_eq!(RtspCodecId::from_name("H264"), None); // Uppercase
+        assert_eq!(RtspCodecId::from_name("h264"), Some(RtspCodecId::H264)); // Lowercase
     }
 
     #[test]
     fn test_codec_name_exact_match() {
         // Should require exact match
-        assert_eq!(RTSP_CODEC_NAME_2_ID.get("h264"), Some(&RtspCodecId::H264));
-        assert_eq!(RTSP_CODEC_NAME_2_ID.get("h264 "), None); // With space
-        assert_eq!(RTSP_CODEC_NAME_2_ID.get(" h264"), None); // With space
-        assert_eq!(RTSP_CODEC_NAME_2_ID.get("h264x"), None); // With suffix
+        assert_eq!(RtspCodecId::from_name("h264"), Some(RtspCodecId::H264));
+        assert_eq!(RtspCodecId::from_name("h264 "), None); // With space
+        assert_eq!(RtspCodecId::from_name(" h264"), None); // With space
+        assert_eq!(RtspCodecId::from_name("h264x"), None); // With suffix
     }
 }

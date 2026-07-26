@@ -351,13 +351,16 @@ mod tests {
     use std::net::SocketAddr;
     use tokio::sync::mpsc as tokio_mpsc;
 
-    /// Helper function to create test channels
-    fn create_test_channels() -> (
+    /// Both halves of the stream-hub event channel and the HTTP response body channel.
+    type TestChannels = (
         tokio_mpsc::UnboundedSender<StreamHubEvent>,
         tokio_mpsc::UnboundedReceiver<StreamHubEvent>,
         futures_mpsc::UnboundedSender<std::io::Result<BytesMut>>,
         futures_mpsc::UnboundedReceiver<std::io::Result<BytesMut>>,
-    ) {
+    );
+
+    /// Helper function to create test channels
+    fn create_test_channels() -> TestChannels {
         let (event_sender, event_receiver) = tokio_mpsc::unbounded_channel();
         let (response_sender, response_receiver) = futures_mpsc::unbounded();
         (
@@ -1037,8 +1040,8 @@ mod tests {
     fn test_bytes_mut_split_at() {
         let data = BytesMut::from(&[0x01, 0x02, 0x03, 0x04][..]);
         let (left, right) = data.split_at(2);
-        assert_eq!(&left[..], &[0x01, 0x02]);
-        assert_eq!(&right[..], &[0x03, 0x04]);
+        assert_eq!(left, &[0x01, 0x02]);
+        assert_eq!(right, &[0x03, 0x04]);
     }
 
     // ========== SocketAddr Edge Cases ==========
@@ -1714,7 +1717,7 @@ mod tests {
         assert!(result.is_ok());
 
         let mut count = 0;
-        while let Some(_) = response_receiver.next().await {
+        while (response_receiver.next().await).is_some() {
             count += 1;
             if count >= 3 {
                 break;

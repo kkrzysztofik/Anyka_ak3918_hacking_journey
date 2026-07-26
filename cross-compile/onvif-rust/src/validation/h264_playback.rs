@@ -1,4 +1,6 @@
 use crate::platform::Platform;
+use base64::Engine as _;
+use base64::engine::general_purpose::STANDARD as BASE64;
 use std::sync::Arc;
 use thiserror::Error;
 use tokio::sync::RwLock;
@@ -126,8 +128,8 @@ impl H264PlaybackMode {
              m=video 0 RTP/AVP 96\r\n\
              a=rtpmap:96 H264/90000\r\n\
              a=fmtp:96 packetization-mode=1; sprop-parameter-sets={},{}; profile-level-id={}\r\n",
-            base64_encode(sps),
-            base64_encode(pps),
+            BASE64.encode(sps),
+            BASE64.encode(pps),
             profile_level_id
         );
 
@@ -158,41 +160,6 @@ impl H264PlaybackMode {
 
         sdp
     }
-}
-
-/// Helper function to base64 encode data
-fn base64_encode(data: &[u8]) -> String {
-    const BASE64_CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut result = String::new();
-
-    for chunk in data.chunks(3) {
-        let mut buf = [0u8; 3];
-        for (i, &b) in chunk.iter().enumerate() {
-            buf[i] = b;
-        }
-
-        let b1 = (buf[0] >> 2) as usize;
-        let b2 = (((buf[0] & 0x03) << 4) | (buf[1] >> 4)) as usize;
-        let b3 = (((buf[1] & 0x0f) << 2) | (buf[2] >> 6)) as usize;
-        let b4 = (buf[2] & 0x3f) as usize;
-
-        result.push(BASE64_CHARS[b1] as char);
-        result.push(BASE64_CHARS[b2] as char);
-
-        if chunk.len() > 1 {
-            result.push(BASE64_CHARS[b3] as char);
-        } else {
-            result.push('=');
-        }
-
-        if chunk.len() > 2 {
-            result.push(BASE64_CHARS[b4] as char);
-        } else {
-            result.push('=');
-        }
-    }
-
-    result
 }
 
 #[cfg(test)]
@@ -235,7 +202,7 @@ mod tests {
     #[test]
     fn test_base64_encoding() {
         let data = b"hello";
-        let encoded = base64_encode(data);
+        let encoded = BASE64.encode(data);
         assert_eq!(encoded, "aGVsbG8=");
     }
 

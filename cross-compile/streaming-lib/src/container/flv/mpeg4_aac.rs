@@ -573,7 +573,7 @@ mod tests {
         let data = BytesMut::from(&[0x11, 0x90][..]);
         processor.extend_data(data);
         // Data should be extended
-        assert!(processor.bytes_reader.len() > 0);
+        assert!(!processor.bytes_reader.is_empty());
     }
 
     #[test]
@@ -983,7 +983,7 @@ mod tests {
         processor.mpeg4_aac.sampling_frequency_index = 4;
         processor.mpeg4_aac.channel_configuration = 2;
 
-        let payload = vec![0x00; 100];
+        let payload = [0x00; 100];
         processor.bytes_reader =
             crate::io::bytes_reader::BytesReader::new(BytesMut::from(&payload[..]));
 

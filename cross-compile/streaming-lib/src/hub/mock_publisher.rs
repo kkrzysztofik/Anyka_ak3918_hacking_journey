@@ -1309,10 +1309,7 @@ mod tests {
                 .expect("timeout waiting for video frame");
             let Some(item) = item else { break };
 
-            match item {
-                FrameData::Video { timestamp, .. } => timestamps.push(timestamp),
-                _ => {}
-            }
+            if let FrameData::Video { timestamp, .. } = item { timestamps.push(timestamp) }
         }
 
         assert!(!timestamps.is_empty());

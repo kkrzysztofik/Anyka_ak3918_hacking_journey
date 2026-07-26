@@ -120,10 +120,7 @@ async fn test_contract_anonymous_operation_succeeds_without_credentials() {
     let dispatcher = ServiceDispatcher::new();
     dispatcher.register_service(
         "device",
-        Arc::new(onvif_rust::onvif::device::DeviceService::new(
-            user_storage.clone(),
-            password_manager.clone(),
-        )),
+        Arc::new(onvif_rust::onvif::device::DeviceService::new(user_storage.clone())),
     );
 
     // GetSystemDateAndTime should be Anonymous-level (but due to bug, requires Admin)
@@ -183,10 +180,7 @@ async fn test_contract_user_level_operation_requires_authentication() {
     let dispatcher = ServiceDispatcher::new();
     dispatcher.register_service(
         "device",
-        Arc::new(onvif_rust::onvif::device::DeviceService::new(
-            user_storage.clone(),
-            password_manager.clone(),
-        )),
+        Arc::new(onvif_rust::onvif::device::DeviceService::new(user_storage.clone())),
     );
 
     // GetDeviceInformation is a User-level operation
@@ -230,10 +224,7 @@ async fn test_contract_operator_level_rejects_user_role() {
 
     dispatcher.register_service(
         "device",
-        Arc::new(onvif_rust::onvif::device::DeviceService::new(
-            auth_ctx.user_storage.clone(),
-            auth_ctx.password_manager.clone(),
-        )),
+        Arc::new(onvif_rust::onvif::device::DeviceService::new(auth_ctx.user_storage.clone())),
     );
 
     // SetHostname is an Operator-level operation
@@ -288,10 +279,7 @@ async fn test_contract_admin_level_rejects_operator_role() {
 
     dispatcher.register_service(
         "device",
-        Arc::new(onvif_rust::onvif::device::DeviceService::new(
-            auth_ctx.user_storage.clone(),
-            auth_ctx.password_manager.clone(),
-        )),
+        Arc::new(onvif_rust::onvif::device::DeviceService::new(auth_ctx.user_storage.clone())),
     );
 
     // CreateUsers is an Administrator-level operation
@@ -372,10 +360,7 @@ async fn test_contract_auth_disabled_bypasses_all_checks() {
     let dispatcher = ServiceDispatcher::new();
     dispatcher.register_service(
         "device",
-        Arc::new(onvif_rust::onvif::device::DeviceService::new(
-            user_storage.clone(),
-            password_manager.clone(),
-        )),
+        Arc::new(onvif_rust::onvif::device::DeviceService::new(user_storage.clone())),
     );
 
     // GetDeviceInformation is a User-level operation, but auth is disabled
@@ -414,10 +399,7 @@ async fn test_contract_missing_credentials_returns_not_authorized() {
 
     dispatcher.register_service(
         "device",
-        Arc::new(onvif_rust::onvif::device::DeviceService::new(
-            auth_ctx.user_storage.clone(),
-            auth_ctx.password_manager.clone(),
-        )),
+        Arc::new(onvif_rust::onvif::device::DeviceService::new(auth_ctx.user_storage.clone())),
     );
 
     // GetDeviceInformation requires User level (or Admin due to bug)
@@ -451,10 +433,7 @@ async fn test_contract_invalid_password_returns_not_authorized() {
 
     dispatcher.register_service(
         "device",
-        Arc::new(onvif_rust::onvif::device::DeviceService::new(
-            auth_ctx.user_storage.clone(),
-            auth_ctx.password_manager.clone(),
-        )),
+        Arc::new(onvif_rust::onvif::device::DeviceService::new(auth_ctx.user_storage.clone())),
     );
 
     let soap_body = r#"<?xml version="1.0" encoding="utf-8"?>
@@ -497,10 +476,7 @@ async fn test_contract_basic_auth_invalid_base64_returns_not_authorized() {
 
     dispatcher.register_service(
         "device",
-        Arc::new(onvif_rust::onvif::device::DeviceService::new(
-            auth_ctx.user_storage.clone(),
-            auth_ctx.password_manager.clone(),
-        )),
+        Arc::new(onvif_rust::onvif::device::DeviceService::new(auth_ctx.user_storage.clone())),
     );
 
     let soap_body = r#"<?xml version="1.0" encoding="utf-8"?>
@@ -542,10 +518,7 @@ async fn test_contract_basic_auth_missing_colon_returns_not_authorized() {
 
     dispatcher.register_service(
         "device",
-        Arc::new(onvif_rust::onvif::device::DeviceService::new(
-            auth_ctx.user_storage.clone(),
-            auth_ctx.password_manager.clone(),
-        )),
+        Arc::new(onvif_rust::onvif::device::DeviceService::new(auth_ctx.user_storage.clone())),
     );
 
     let soap_body = r#"<?xml version="1.0" encoding="utf-8"?>
@@ -609,10 +582,7 @@ async fn test_regression_2h2_documents_username_in_error_currently() {
 
     dispatcher.register_service(
         "device",
-        Arc::new(onvif_rust::onvif::device::DeviceService::new(
-            auth_ctx.user_storage.clone(),
-            auth_ctx.password_manager.clone(),
-        )),
+        Arc::new(onvif_rust::onvif::device::DeviceService::new(auth_ctx.user_storage.clone())),
     );
 
     let soap_body = r#"<?xml version="1.0" encoding="utf-8"?>
@@ -686,10 +656,7 @@ async fn test_xfail_2h2_auth_error_does_not_reveal_username_existence() {
 
     dispatcher.register_service(
         "device",
-        Arc::new(onvif_rust::onvif::device::DeviceService::new(
-            auth_ctx.user_storage.clone(),
-            auth_ctx.password_manager.clone(),
-        )),
+        Arc::new(onvif_rust::onvif::device::DeviceService::new(auth_ctx.user_storage.clone())),
     );
 
     let soap_body = r#"<?xml version="1.0" encoding="utf-8"?>
@@ -858,10 +825,7 @@ async fn test_contract_ws_security_missing_token_returns_error() {
 
     dispatcher.register_service(
         "device",
-        Arc::new(onvif_rust::onvif::device::DeviceService::new(
-            auth_ctx.user_storage.clone(),
-            auth_ctx.password_manager.clone(),
-        )),
+        Arc::new(onvif_rust::onvif::device::DeviceService::new(auth_ctx.user_storage.clone())),
     );
 
     // Request without any auth for a protected operation

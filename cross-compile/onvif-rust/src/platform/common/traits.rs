@@ -44,6 +44,14 @@ pub enum PlatformError {
     /// Permission denied.
     #[error("Permission denied")]
     PermissionDenied,
+
+    /// The backing hardware producer signalled an orderly shutdown.
+    ///
+    /// Distinct from [`PlatformError::HardwareFailure`]: nothing went wrong, the
+    /// producer is simply done and no further data will arrive. Consumers should
+    /// stop reading rather than retry.
+    #[error("Producer signalled shutdown: {0}")]
+    Shutdown(String),
 }
 
 /// Result type for platform operations.
@@ -665,31 +673,15 @@ pub trait Platform: Send + Sync {
     /// Returns `PlatformError::InitializationFailed` if the platform has not been initialized.
     fn max_sensor_resolution(&self) -> PlatformResult<Resolution>;
 
-    /// Register a callback to receive encoded frames from the platform.
+    /// Register a callback to receive owned frames (zero-copy path).
     ///
-    /// The platform calls `callback.on_frame()` for each encoded video/audio
-    /// frame produced by the hardware encoder. The callback must complete
-    /// quickly (< 2ms) — typically just a memcpy into a channel.
+    /// The platform calls `callback.on_owned_frame()` for each encoded video/audio
+    /// frame produced by the hardware encoder, transferring ownership of the
+    /// `BytesMut` buffer. The callback must complete quickly (< 2ms) — typically
+    /// just a move into a channel.
     ///
     /// Default implementation returns `NotSupported` for platforms that do not
     /// produce encoded frames (e.g., stubs used in testing).
-    fn register_frame_callback(
-        &self,
-        _callback: Arc<dyn crate::platform::frame::FrameCallback>,
-    ) -> PlatformResult<()> {
-        Err(PlatformError::NotSupported(
-            "register_frame_callback".to_string(),
-        ))
-    }
-
-    /// Register a callback to receive owned frames (zero-copy path).
-    ///
-    /// The platform calls `callback.on_owned_frame()` for each encoded frame,
-    /// transferring ownership of the `BytesMut` buffer. This eliminates the
-    /// memcpy that `FrameCallback::on_frame()` requires.
-    ///
-    /// Default implementation returns `NotSupported` for platforms that do not
-    /// support owned frame delivery.
     fn register_owned_frame_callback(
         &self,
         _callback: Arc<dyn crate::platform::frame::OwnedFrameCallback>,
@@ -762,7 +754,7 @@ mod tests {
     #[test]
     fn test_resolution_clone() {
         let res1 = Resolution::new(1920, 1080);
-        let res2 = res1.clone();
+        let res2 = res1;
         assert_eq!(res1, res2);
     }
 

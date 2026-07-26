@@ -570,7 +570,7 @@ fn test_reanchor_headroom_absorbs_iframe_send_cost() {
     // lag = ~2500 - 2000 = ~500
     let lag = tracker.current_lag_ms();
     assert!(
-        lag >= 450 && lag <= 550,
+        (450..=550).contains(&lag),
         "expected ~500ms headroom lag, got {}",
         lag
     );

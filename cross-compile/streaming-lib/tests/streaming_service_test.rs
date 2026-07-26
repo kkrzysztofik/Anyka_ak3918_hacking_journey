@@ -3,35 +3,31 @@
 
 use bytes::BytesMut;
 use std::collections::HashMap;
-use std::sync::Arc;
 use streaming_lib::container::muxer::FlvMuxer;
 use streaming_lib::hub::StreamsHub;
 use streaming_lib::hub::define::{FrameData, PublishType, SubscribeType};
 use streaming_lib::hub::stream::StreamIdentifier;
 use streaming_lib::hub::utils::{RandomDigitCount, Uuid};
-use tokio::sync::Mutex;
 
 /// Tests stream hub creation
 #[tokio::test]
 async fn test_service_stream_hub_creation() {
-    let hub = StreamsHub::new(None);
-    // Just verify it can be created
-    assert!(true);
+    let _hub = StreamsHub::new(None);
+    // Construction must not panic.
 }
 
 /// Tests stream hub publish and subscribe cycle
 #[tokio::test]
 async fn test_service_publish_subscribe_cycle() {
-    let mut hub = StreamsHub::new(None);
+    let _hub = StreamsHub::new(None);
 
-    let stream_id = StreamIdentifier::Rtsp {
+    let _stream_id = StreamIdentifier::Rtsp {
         stream_path: "/test/stream".to_string(),
     };
 
     // Verify initial state - hub has no streams
     // Note: The hub runs in its own event loop, so we can't easily check internal state
-    // Just verify hub can be created without panicking
-    assert!(true);
+    // Construction must not panic.
 }
 
 /// Tests multiple stream management
@@ -119,6 +115,8 @@ async fn test_service_frame_data_propagation() {
 /// Tests session tracking for multiple clients
 #[tokio::test]
 async fn test_service_session_tracking() {
+    // `id` models the real session shape; only `active` is asserted on.
+    #[allow(dead_code)]
     struct Session {
         id: String,
         active: bool,
@@ -202,6 +200,8 @@ async fn test_service_concurrent_clients() {
 /// Tests resource cleanup on shutdown simulation
 #[tokio::test]
 async fn test_service_resource_cleanup() {
+    // `id` models the real resource shape; only `allocated` is asserted on.
+    #[allow(dead_code)]
     struct Resource {
         id: u32,
         allocated: bool,
@@ -328,8 +328,7 @@ async fn test_service_flv_muxer() {
 #[tokio::test]
 async fn test_service_frame_timestamps() {
     // Video frames at different timestamps
-    let timestamps = vec![
-        FrameData::Video {
+    let timestamps = [FrameData::Video {
             timestamp: 0,
             data: BytesMut::from(&b"\x00\x00\x00\x01"[..]),
         },
@@ -340,8 +339,7 @@ async fn test_service_frame_timestamps() {
         FrameData::Video {
             timestamp: 66,
             data: BytesMut::from(&b"\x00\x00\x00\x01"[..]),
-        },
-    ];
+        }];
 
     assert_eq!(timestamps.len(), 3);
 
@@ -368,10 +366,8 @@ async fn test_service_connection_states() {
         Disconnecting,
     }
 
-    let mut state = ConnectionState::Disconnected;
-
     // Connect
-    state = ConnectionState::Connecting;
+    let mut state = ConnectionState::Connecting;
     assert_eq!(state, ConnectionState::Connecting);
 
     // Connected
@@ -529,10 +525,8 @@ async fn test_service_graceful_shutdown() {
         Complete,
     }
 
-    let mut phase = ShutdownPhase::StopAccepting;
-
     // Phase 1: Stop accepting new connections
-    phase = ShutdownPhase::StopAccepting;
+    let mut phase = ShutdownPhase::StopAccepting;
     assert_eq!(phase, ShutdownPhase::StopAccepting);
 
     // Phase 2: Wait for existing clients
@@ -638,15 +632,12 @@ async fn test_service_buffer_overflow_protection() {
 
     // Write data up to limit
     let chunk_size = 1024;
-    let mut write_count = 0;
 
     while buffer.len() < MAX_BUFFER_SIZE {
         let chunk = vec![0xAA; chunk_size];
-        let result = buffer.write(&chunk);
-        if result.is_err() {
+        if buffer.write(&chunk).is_err() {
             break;
         }
-        write_count += 1;
     }
 
     // Verify buffer didn't exceed limit
@@ -727,6 +718,8 @@ async fn test_service_idle_session_timeout() {
 /// Tests resource cleanup on service shutdown
 #[tokio::test]
 async fn test_service_resource_cleanup_on_shutdown() {
+    // `id` models the real resource shape; only `allocated` is asserted on.
+    #[allow(dead_code)]
     struct Resource {
         id: u32,
         allocated: bool,
@@ -809,9 +802,6 @@ async fn test_service_connection_rate_limiting() {
             Ok(())
         }
 
-        fn current_rate(&self) -> usize {
-            self.connection_timestamps.len()
-        }
     }
 
     let mut limiter = RateLimiter::new(10); // 10 connections per second max
@@ -844,7 +834,7 @@ async fn test_service_connection_rate_limiting() {
 #[tokio::test]
 async fn test_service_publish_to_nonexistent_stream() {
     // Simulate hub with no streams
-    let hub = StreamsHub::new(None);
+    let _hub = StreamsHub::new(None);
 
     // Try to publish to stream that doesn't exist
     // The hub should handle this gracefully without panic

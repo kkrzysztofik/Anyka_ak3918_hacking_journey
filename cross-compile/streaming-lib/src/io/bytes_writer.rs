@@ -1344,7 +1344,7 @@ mod tests {
             Box::new(MockNetIO::new()) as Box<dyn TNetIO + Send + Sync>
         ));
         let mut writer = AsyncBytesWriter::new(mock_io);
-        writer.write_f64::<BigEndian>(3.14159).unwrap();
+        writer.write_f64::<BigEndian>(std::f64::consts::PI).unwrap();
         assert_eq!(writer.bytes_writer.len(), 8);
     }
 

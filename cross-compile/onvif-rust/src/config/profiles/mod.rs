@@ -447,7 +447,7 @@ height = 1080
 "#;
 
         let data: ProfilesFile = toml::from_str(toml_str).unwrap();
-        assert_eq!(data.profiles[0].fixed, false);
+        assert!(!data.profiles[0].fixed);
         assert_eq!(data.video_sources[0].framerate, 30.0); // default
         assert!(data.audio_sources.is_empty()); // missing = empty vec
     }

@@ -5,7 +5,7 @@
 
 use std::sync::Arc;
 
-use crate::config::{ConfigRuntime, PasswordManager, UserStorage};
+use crate::config::{ConfigRuntime, UserStorage};
 use crate::onvif::common::{dispatch_async, dispatch_sync};
 use crate::onvif::dispatcher::ServiceHandler;
 use crate::onvif::error::{OnvifError, OnvifResult};
@@ -42,8 +42,8 @@ pub struct DeviceService {
 
 impl DeviceService {
     /// Create a new Device Service.
-    pub fn new(users: Arc<UserStorage>, password_manager: Arc<PasswordManager>) -> Self {
-        let store = Arc::new(DeviceStore::new(users, password_manager));
+    pub fn new(users: Arc<UserStorage>) -> Self {
+        let store = Arc::new(DeviceStore::new(users));
         let state = Arc::new(DeviceState::new());
 
         Self {
@@ -56,11 +56,10 @@ impl DeviceService {
     /// Create a new Device Service with configuration and platform.
     pub fn with_config_and_platform(
         users: Arc<UserStorage>,
-        password_manager: Arc<PasswordManager>,
         config: Arc<ConfigRuntime>,
         platform: Arc<dyn Platform>,
     ) -> Self {
-        let store = Arc::new(DeviceStore::with_config(users, password_manager, config));
+        let store = Arc::new(DeviceStore::with_config(users, config));
         let state = Arc::new(DeviceState::new());
 
         Self {
@@ -662,14 +661,14 @@ mod tests {
 
     fn create_test_service() -> DeviceService {
         let users = Arc::new(UserStorage::new());
-        let password_manager = Arc::new(PasswordManager::new());
+        let _password_manager = Arc::new(PasswordManager::new());
 
         // Create initial admin user with plaintext password
         users
             .create_user("admin", TEST_PASSWORD, UserLevel::Administrator)
             .unwrap();
 
-        DeviceService::new(users, password_manager)
+        DeviceService::new(users)
     }
 
     // ========================================================================
@@ -725,7 +724,7 @@ mod tests {
         users
             .create_user("admin", TEST_PASSWORD, UserLevel::Administrator)
             .unwrap();
-        let password_manager = Arc::new(PasswordManager::new());
+        let _password_manager = Arc::new(PasswordManager::new());
         let config = ConfigRuntime::new(Default::default());
         {
             let mut c = config.write();
@@ -738,7 +737,6 @@ mod tests {
         let platform = Arc::new(crate::platform::StubPlatform::new());
         let service = DeviceService::with_config_and_platform(
             users,
-            password_manager,
             Arc::new(config),
             platform,
         );
@@ -762,7 +760,7 @@ mod tests {
         users
             .create_user("admin", TEST_PASSWORD, UserLevel::Administrator)
             .unwrap();
-        let password_manager = Arc::new(PasswordManager::new());
+        let _password_manager = Arc::new(PasswordManager::new());
         let config = ConfigRuntime::new(Default::default());
         {
             let mut c = config.write();
@@ -777,7 +775,6 @@ mod tests {
         let platform = Arc::new(crate::platform::StubPlatform::new());
         let service = DeviceService::with_config_and_platform(
             users,
-            password_manager,
             Arc::new(config),
             platform,
         );
@@ -801,7 +798,7 @@ mod tests {
         users
             .create_user("admin", TEST_PASSWORD, UserLevel::Administrator)
             .unwrap();
-        let password_manager = Arc::new(PasswordManager::new());
+        let _password_manager = Arc::new(PasswordManager::new());
         let config = ConfigRuntime::new(Default::default());
         {
             let mut c = config.write();
@@ -813,7 +810,6 @@ mod tests {
         let platform = Arc::new(crate::platform::StubPlatform::new());
         let service = DeviceService::with_config_and_platform(
             users,
-            password_manager,
             Arc::new(config),
             platform,
         );
@@ -835,14 +831,13 @@ mod tests {
         users
             .create_user("admin", TEST_PASSWORD, UserLevel::Administrator)
             .unwrap();
-        let password_manager = Arc::new(PasswordManager::new());
+        let _password_manager = Arc::new(PasswordManager::new());
         let config = ConfigRuntime::new(Default::default());
         // No IP config, should fallback to 127.0.0.1
 
         let platform = Arc::new(crate::platform::StubPlatform::new());
         let service = DeviceService::with_config_and_platform(
             users,
-            password_manager,
             Arc::new(config),
             platform,
         );

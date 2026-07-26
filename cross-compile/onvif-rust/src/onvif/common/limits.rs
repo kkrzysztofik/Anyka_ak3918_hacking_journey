@@ -19,6 +19,12 @@ pub const MAX_REFERENCE_TOKEN_CHARS: usize = 128;
 /// Maximum Device Service scope URI length (`onvif://www.onvif.org/...`).
 pub const MAX_SCOPE_URI_CHARS: usize = 256;
 
+// Sanity bounds on the limits themselves. These are properties of the constants,
+// so check them at compile time — a bad edit fails the build, not a test run.
+const _: () = assert!(MAX_USERNAME_CHARS > 0 && MAX_USERNAME_CHARS <= 256);
+const _: () = assert!(MAX_REFERENCE_TOKEN_CHARS > 0 && MAX_REFERENCE_TOKEN_CHARS <= 512);
+const _: () = assert!(MAX_SCOPE_URI_CHARS > MAX_REFERENCE_TOKEN_CHARS);
+
 #[cfg(test)]
 mod tests {
     use super::{

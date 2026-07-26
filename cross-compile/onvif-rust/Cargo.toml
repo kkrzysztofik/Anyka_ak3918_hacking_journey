@@ -17,7 +17,7 @@ axum = "0.8"
 axum-extra = { version = "0.12", features = ["typed-header"] }
 headers = "0.4"
 tower = { version = "0.5", features = ["timeout", "limit"] }
-tower-http = { version = "0.7", features = ["trace", "timeout", "limit", "fs", "compression-br", "compression-gzip"] }
+tower-http = { version = "0.6", features = ["trace", "timeout", "limit", "fs", "compression-br", "compression-gzip"] }
 quick-xml = { version = "0.41", features = ["serialize"] }
 toml = "1.1"
 serde = { version = "1.0", features = ["derive"] }
@@ -36,7 +36,7 @@ socket2 = "0.6"
 chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1.24", features = ["v4"] }
 parking_lot = "0.12"
-dashmap = "6.2"
+dashmap = "6.1"
 bytes = "1.12.1"
 http-body-util = "0.1"
 libc = "0.2"
@@ -67,5 +67,3 @@ clap = { version = "4", features = ["derive"] }
 [features]
 default = []
 memory-profiling = []
-verbose-logging = []
-validation-mode = []

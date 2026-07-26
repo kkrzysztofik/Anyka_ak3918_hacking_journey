@@ -222,11 +222,13 @@ mod tests {
 
     #[test]
     fn test_video_info_clone() {
-        let mut video = VideoInfo::default();
-        video.width = 1920;
-        video.height = 1080;
-        video.bitrate = 4000;
-        video.frame_rate = 30;
+        let video = VideoInfo {
+            width: 1920,
+            height: 1080,
+            bitrate: 4000,
+            frame_rate: 30,
+            ..Default::default()
+        };
 
         let cloned = video.clone();
         assert_eq!(cloned.width, 1920);
@@ -244,12 +246,14 @@ mod tests {
 
     #[test]
     fn test_video_info_serialize_skips_internal_fields() {
-        let mut video = VideoInfo::default();
-        video.recv_bytes = 999;
-        video.recv_frame_count = 100;
-        video.recv_frame_count_for_gop = 50;
-        video.bitrate = 4000;
-        video.frame_rate = 30;
+        let video = VideoInfo {
+            recv_bytes: 999,
+            recv_frame_count: 100,
+            recv_frame_count_for_gop: 50,
+            bitrate: 4000,
+            frame_rate: 30,
+            ..Default::default()
+        };
 
         let json = serde_json::to_string(&video).unwrap();
         // recv_bytes, recv_frame_count, recv_frame_count_for_gop are skip_serializing
@@ -273,10 +277,12 @@ mod tests {
 
     #[test]
     fn test_audio_info_clone() {
-        let mut audio = AudioInfo::default();
-        audio.samplerate = 44100;
-        audio.channels = 2;
-        audio.bitrate = 128;
+        let audio = AudioInfo {
+            samplerate: 44100,
+            channels: 2,
+            bitrate: 128,
+            ..Default::default()
+        };
 
         let cloned = audio.clone();
         assert_eq!(cloned.samplerate, 44100);
@@ -293,9 +299,11 @@ mod tests {
 
     #[test]
     fn test_audio_info_serialize_skips_internal_fields() {
-        let mut audio = AudioInfo::default();
-        audio.recv_bytes = 500;
-        audio.bitrate = 128;
+        let audio = AudioInfo {
+            recv_bytes: 500,
+            bitrate: 128,
+            ..Default::default()
+        };
 
         let json = serde_json::to_string(&audio).unwrap();
         assert!(!json.contains("recv_bytes"));

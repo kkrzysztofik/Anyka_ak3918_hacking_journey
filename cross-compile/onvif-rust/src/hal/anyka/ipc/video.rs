@@ -288,7 +288,7 @@ mod tests {
         let daemon = FakeDaemon::start(|_cmd_id, _req| (AK_SUCCESS_I32, vec![]));
 
         let ipc = AnykaIpc::new_with_path(&daemon.socket_path).unwrap();
-        let stream_handle = 1usize as *mut std::ffi::c_void;
+        let stream_handle = std::ptr::dangling_mut::<std::ffi::c_void>();
         let mut vs = MaybeUninit::<crate::hal::common::sdk_types::VideoStream>::zeroed();
         let vs_ptr = vs.as_mut_ptr() as *mut video_stream;
 

@@ -1100,32 +1100,18 @@ impl Application {
             Ok(bridge) => {
                 // Register the bridge as an owned frame callback with the platform (zero-copy path).
                 if let Some(platform) = app_state.platform() {
-                    match platform.register_owned_frame_callback(bridge.clone()) {
+                    match platform.register_owned_frame_callback(bridge) {
                         Ok(()) => {
                             tracing::info!(
                                 "Owned frame callback registered with platform (zero-copy)"
                             );
                         }
                         Err(e) => {
-                            // Fall back to legacy FrameCallback if owned not supported
-                            tracing::info!(
-                                "Owned frame callback not supported ({}), falling back to FrameCallback",
+                            tracing::warn!(
+                                "Failed to register owned frame callback (streaming will work but \
+                                 won't receive live frames from encoder): {}",
                                 e
                             );
-                            match platform.register_frame_callback(bridge) {
-                                Ok(()) => {
-                                    tracing::info!(
-                                        "Frame callback registered with platform (legacy)"
-                                    );
-                                }
-                                Err(e2) => {
-                                    tracing::warn!(
-                                        "Failed to register frame callback (streaming will work but \
-                                         won't receive live frames from encoder): {}",
-                                        e2
-                                    );
-                                }
-                            }
                         }
                     }
                 }

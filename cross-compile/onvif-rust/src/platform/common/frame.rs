@@ -6,14 +6,10 @@
 //! # Architecture
 //!
 //! ```text
-//! SDK callback → Frame (zero-copy ptr) → FrameCallback consumers
-//!                                          ├── RTSP packetizer
-//!                                          └── HTTP-FLV muxer
+//! SDK callback → OwnedFrame (moved BytesMut) → OwnedFrameCallback consumers
+//!                                                ├── RTSP packetizer
+//!                                                └── HTTP-FLV muxer
 //! ```
-//!
-//! # Safety
-//!
-//! - `Frame` holds a read-only pointer into SDK-owned memory
 
 use bytes::BytesMut;
 
@@ -66,7 +62,6 @@ pub struct FrameMetadata {
 
 /// Frame with owned data buffer — no copy needed downstream.
 ///
-/// Unlike [`Frame`] which holds a borrowed raw pointer into SDK memory,
 /// `OwnedFrame` owns its data via `BytesMut`. This enables zero-extra-copy
 /// delivery through the streaming pipeline: the frame data is read from the
 /// IPC socket directly into `BytesMut`, which is then moved (not copied)
@@ -91,11 +86,10 @@ pub struct OwnedFrame {
     pub stream_id: StreamId,
 }
 
-/// Extended callback trait that receives owned frames.
+/// Callback trait for receiving encoded frames from the platform.
 ///
-/// This is the zero-copy counterpart to [`FrameCallback`]. Implementations
-/// receive an `OwnedFrame` with `BytesMut` data that can be moved directly
-/// into the streaming pipeline without additional copies.
+/// Implementations receive an `OwnedFrame` with `BytesMut` data that can be
+/// moved directly into the streaming pipeline without additional copies.
 ///
 /// Callbacks must be `Send + Sync` and should complete quickly (target < 2ms).
 pub trait OwnedFrameCallback: Send + Sync {
@@ -105,47 +99,6 @@ pub trait OwnedFrameCallback: Send + Sync {
     /// `BytesMut` buffer. The callback may consume, store, or forward the
     /// frame data without any copy.
     fn on_owned_frame(&self, frame: OwnedFrame);
-}
-
-/// A single encoded frame delivered from the SDK.
-///
-/// Contains a zero-copy read-only pointer into SDK-managed memory.
-/// The pointer is only valid for the duration of the callback invocation
-/// unless the consumer acquires a [`FrameHandle`] for extended lifetime.
-///
-/// # Safety
-///
-/// - `data` points into SDK-owned buffer memory
-/// - Consumers must NOT write to `data`
-/// - Consumers must NOT use `data` after the callback returns
-pub struct Frame {
-    /// Read-only pointer to encoded frame data.
-    pub data: *const u8,
-    /// Size of the frame data in bytes.
-    pub size: usize,
-    /// Timestamp in milliseconds (SDK source).
-    pub timestamp: u32,
-    /// Type of frame (I-frame, P-frame, etc.).
-    pub frame_type: FrameType,
-    /// Which stream this frame belongs to.
-    pub stream_id: StreamId,
-}
-
-// SAFETY: Frame contains a raw pointer but is only used as a read-only
-// reference during callback invocation. The pointer is never written to.
-unsafe impl Send for Frame {}
-unsafe impl Sync for Frame {}
-
-/// Trait for receiving frame callbacks.
-///
-/// Implementations must be `Send + Sync` as callbacks may be invoked from
-/// any thread. Callbacks should complete quickly (target < 2ms) to avoid
-/// blocking the encoder pipeline.
-pub trait FrameCallback: Send + Sync {
-    /// Called when a new frame is available.
-    ///
-    /// The `frame` reference is only valid for the duration of this call.
-    fn on_frame(&self, frame: &Frame);
 }
 
 #[cfg(test)]
@@ -165,25 +118,9 @@ mod tests {
     }
 
     #[test]
-    fn test_frame_send_sync() {
+    fn test_owned_frame_send_sync() {
         fn assert_send_sync<T: Send + Sync>() {}
-        assert_send_sync::<Frame>();
-    }
-
-    #[test]
-    fn test_frame_construction() {
-        let data = [0u8; 64];
-        let frame = Frame {
-            data: data.as_ptr(),
-            size: 64,
-            timestamp: 1_000,
-            frame_type: FrameType::VideoIFrame,
-            stream_id: StreamId::VideoMain,
-        };
-        assert_eq!(frame.size, 64);
-        assert_eq!(frame.timestamp, 1_000);
-        assert_eq!(frame.frame_type, FrameType::VideoIFrame);
-        assert_eq!(frame.stream_id, StreamId::VideoMain);
+        assert_send_sync::<OwnedFrame>();
     }
 
     #[test]

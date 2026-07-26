@@ -443,7 +443,7 @@ impl StreamingService {
     ///
     /// Creates the StreamsHub, publishes both streams, spawns servers, and
     /// starts fanout tasks. Returns the bridge that should be registered with
-    /// the platform as a `FrameCallback`.
+    /// the platform as an `OwnedFrameCallback`.
     pub async fn start(&mut self) -> Result<Arc<StreamingBridge>, anyhow::Error> {
         Self::verify_port_available(self.config.rtsp_port, "RTSP")?;
         Self::verify_port_available(self.config.httpflv_port, "HTTP-FLV")?;

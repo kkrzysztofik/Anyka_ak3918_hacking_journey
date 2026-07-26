@@ -3,15 +3,15 @@
 //! These functions were extracted from `main.rs` to avoid duplication between
 //! the validation-mode streaming pipeline and the normal-mode live streaming.
 
+use base64::Engine as _;
+use base64::engine::general_purpose::STANDARD as BASE64;
 use bytes::BytesMut;
 use portable_atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use streaming_lib::config::StreamingConfig;
 use streaming_lib::streamhub::errors::StreamHubError;
 use streaming_lib::streamhub::statistics::StatisticsStream;
-use streaming_lib::{
-    DefaultHttpFlvServer, DefaultRtspServer, FrameData, HttpFlvServer, RtspServer, StreamsHub,
-};
+use streaming_lib::{DefaultHttpFlvServer, DefaultRtspServer, FrameData, StreamsHub};
 
 use crate::validation::httpflv_remux::ValidationHttpFlvRemuxer;
 
@@ -178,8 +178,8 @@ pub fn generate_av_sdp(
     sdp.push_str("a=rtpmap:96 H264/90000\r\n");
     sdp.push_str(&format!(
         "a=fmtp:96 packetization-mode=1; sprop-parameter-sets={},{}; profile-level-id={}\r\n",
-        base64_encode(sps),
-        base64_encode(pps),
+        BASE64.encode(sps),
+        BASE64.encode(pps),
         profile_level_id
     ));
     sdp.push_str("a=control:trackID=0\r\n");
@@ -223,13 +223,6 @@ pub fn audio_config_hex(audio_config: &[u8]) -> String {
         .iter()
         .map(|b| format!("{:02X}", b))
         .collect::<String>()
-}
-
-/// Base64-encode a byte slice (standard encoding, no padding stripping).
-pub fn base64_encode(data: &[u8]) -> String {
-    use base64::Engine as _;
-    use base64::engine::general_purpose::STANDARD as BASE64;
-    BASE64.encode(data)
 }
 
 /// Spawn an RTSP server on the given port.

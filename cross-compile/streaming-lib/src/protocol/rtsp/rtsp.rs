@@ -3,7 +3,6 @@ use crate::hub::define::StreamHubEventSender;
 use super::session::server_session::RtspServerSession;
 use crate::common::auth::Auth;
 use crate::config::StreamingConfig;
-use async_trait::async_trait;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -12,35 +11,17 @@ use tokio::net::TcpListener;
 use tokio::sync::Semaphore;
 use tokio::sync::broadcast;
 
-/// Trait for RTSP server implementations
-///
-/// This trait provides the abstraction for RTSP server functionality,
-/// allowing platform-specific implementations (e.g., Anyka hardware integration).
-#[async_trait]
-pub trait RtspServer: Send + Sync {
-    /// Create a new RTSP server instance
-    fn new(
-        address: String,
-        event_producer: StreamHubEventSender,
-        auth: Option<Auth>,
-        config: StreamingConfig,
-    ) -> Self
-    where
-        Self: Sized;
-
-    /// Run the RTSP server
-    /// The `shutdown_rx` parameter is optional - when received, signals server to stop
-    async fn run(&mut self, shutdown_rx: Option<broadcast::Receiver<()>>) -> Result<(), Error>;
-
-    /// Get shutdown flag for graceful shutdown
-    fn get_shutdown_flag(&self) -> Option<Arc<AtomicBool>>;
-}
-
 /// Maximum number of concurrent RTSP sessions.
 /// Sized for embedded targets (Anyka AK3918) with limited RAM.
 pub(super) const MAX_CONCURRENT_SESSIONS: usize = 16;
 
-/// Default implementation of the RTSP server trait
+// Properties of the constant above, so checked at compile time.
+// Lower: the cap must allow at least one client.
+// Upper: stay within a small u8-friendly bound for embedded targets.
+const _: () = assert!(MAX_CONCURRENT_SESSIONS > 0);
+const _: () = assert!(MAX_CONCURRENT_SESSIONS <= 256);
+
+/// RTSP server: accepts TCP connections and drives one [`RtspServerSession`] per client.
 pub struct DefaultRtspServer {
     address: String,
     event_producer: StreamHubEventSender,
@@ -50,9 +31,8 @@ pub struct DefaultRtspServer {
     session_semaphore: Arc<Semaphore>,
 }
 
-#[async_trait]
-impl RtspServer for DefaultRtspServer {
-    fn new(
+impl DefaultRtspServer {
+    pub fn new(
         address: String,
         event_producer: StreamHubEventSender,
         auth: Option<Auth>,
@@ -68,11 +48,13 @@ impl RtspServer for DefaultRtspServer {
         }
     }
 
-    fn get_shutdown_flag(&self) -> Option<Arc<AtomicBool>> {
+    /// Shutdown flag for graceful shutdown; `None` until [`Self::run`] starts.
+    pub fn get_shutdown_flag(&self) -> Option<Arc<AtomicBool>> {
         self.shutdown_flag.clone()
     }
 
-    async fn run(&mut self, shutdown_rx: Option<broadcast::Receiver<()>>) -> Result<(), Error> {
+    /// Run the RTSP server. `shutdown_rx`, when it receives, signals the server to stop.
+    pub async fn run(&mut self, shutdown_rx: Option<broadcast::Receiver<()>>) -> Result<(), Error> {
         // Create shutdown flag for graceful shutdown
         let shutdown_flag = Arc::new(AtomicBool::new(false));
         self.shutdown_flag = Some(shutdown_flag.clone());
@@ -255,18 +237,6 @@ mod tests {
             server.available_session_permits_for_test(),
             MAX_CONCURRENT_SESSIONS,
             "fresh server should expose all session permits"
-        );
-    }
-
-    #[test]
-    fn test_max_concurrent_sessions_constant_bounds() {
-        assert!(
-            MAX_CONCURRENT_SESSIONS > 0,
-            "session cap must allow at least one client"
-        );
-        assert!(
-            MAX_CONCURRENT_SESSIONS <= 256,
-            "session cap should stay within a small u8-friendly bound for embedded targets"
         );
     }
 

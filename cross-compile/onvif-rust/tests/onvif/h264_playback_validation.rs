@@ -95,7 +95,7 @@ mod tests {
     #[tokio::test]
     async fn test_mock_publisher_frame_emission() {
         use streaming_lib::streamhub::mock_publisher::MockVideoPublisher;
-        use tokio::sync::mpsc;
+        
 
         let test_file = setup_test_h264_file();
         let publisher = MockVideoPublisher::new("test_stream".to_string(), &test_file, 25, true)
@@ -131,7 +131,7 @@ mod tests {
     async fn test_tstream_handler_prior_data() {
         use streaming_lib::streamhub::define::{DataSender, FrameData, SubscribeType};
         use streaming_lib::streamhub::mock_publisher::MockVideoPublisher;
-        use tokio::sync::mpsc;
+        
 
         let test_file = setup_test_h264_file();
         let publisher = MockVideoPublisher::new("test_stream".to_string(), &test_file, 25, true)
@@ -176,23 +176,21 @@ mod tests {
         let (sender, mut receiver) = mpsc::unbounded_channel();
         publisher.send_information(sender).await;
 
-        let mut received_sdp = false;
         let timeout = Duration::from_millis(500);
 
-        while let Ok(Some(info)) = tokio::time::timeout(timeout, receiver.recv()).await {
-            let Information::Sdp { data } = info;
-            received_sdp = true;
-            assert!(data.contains("v=0"));
-            assert!(data.contains("o="));
-            assert!(data.contains("s="));
-            assert!(data.contains("m=video"));
-            assert!(data.contains("a=rtpmap:96 H264/90000"));
-            assert!(data.contains("profile-level-id="));
-            assert!(data.contains("sprop-parameter-sets="));
-            break;
-        }
+        let info = tokio::time::timeout(timeout, receiver.recv())
+            .await
+            .expect("timed out waiting for SDP information")
+            .expect("information channel closed before SDP arrived");
 
-        assert!(received_sdp, "Did not receive SDP information");
+        let Information::Sdp { data } = info;
+        assert!(data.contains("v=0"));
+        assert!(data.contains("o="));
+        assert!(data.contains("s="));
+        assert!(data.contains("m=video"));
+        assert!(data.contains("a=rtpmap:96 H264/90000"));
+        assert!(data.contains("profile-level-id="));
+        assert!(data.contains("sprop-parameter-sets="));
         cleanup_file(&test_file);
     }
 
@@ -229,7 +227,7 @@ mod tests {
     #[tokio::test]
     async fn test_publisher_lifecycle() {
         use streaming_lib::streamhub::mock_publisher::MockVideoPublisher;
-        use tokio::sync::mpsc;
+        
 
         let test_file = setup_test_h264_file();
         let publisher = MockVideoPublisher::new("test_stream".to_string(), &test_file, 25, false)
@@ -988,11 +986,10 @@ mod tests {
         // Spawn minimal RTSP server
         let sdp_clone = sdp.clone();
         let server_handle = tokio::spawn(async move {
-            if let Ok(listener) = tokio::net::TcpListener::bind("127.0.0.1:8554").await {
-                if let Ok((socket, _)) = listener.accept().await {
+            if let Ok(listener) = tokio::net::TcpListener::bind("127.0.0.1:8554").await
+                && let Ok((socket, _)) = listener.accept().await {
                     let _ = handle_rtsp_client(socket, sdp_clone).await;
                 }
-            }
         });
 
         // Allow server to start

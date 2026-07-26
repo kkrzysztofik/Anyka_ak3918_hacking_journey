@@ -428,20 +428,12 @@ mod tests {
 
     #[test]
     fn test_net_type_tcp_variant_exists() {
-        let net_type = NetType::TCP;
-        match net_type {
-            NetType::TCP => assert!(true),
-            NetType::UDP => panic!("Expected TCP variant"),
-        }
+        assert!(matches!(NetType::TCP, NetType::TCP));
     }
 
     #[test]
     fn test_net_type_udp_variant_exists() {
-        let net_type = NetType::UDP;
-        match net_type {
-            NetType::UDP => assert!(true),
-            NetType::TCP => panic!("Expected UDP variant"),
-        }
+        assert!(matches!(NetType::UDP, NetType::UDP));
     }
 
     // ========== TcpIO Tests ==========
@@ -1080,8 +1072,8 @@ mod tests {
     #[tokio::test]
     async fn test_udpio_new_with_specific_port() {
         // First get an available port
-        if let Some(temp_udpio) = UdpIO::new_with_local_port(0).await {
-            if let Some(port) = temp_udpio.get_local_port() {
+        if let Some(temp_udpio) = UdpIO::new_with_local_port(0).await
+            && let Some(port) = temp_udpio.get_local_port() {
                 // Drop the temp socket to free the port
                 drop(temp_udpio);
 
@@ -1089,13 +1081,12 @@ mod tests {
                 // Just verify the function doesn't panic
                 let _ = UdpIO::new_with_local_port(port).await;
             }
-        }
     }
 
     #[tokio::test]
     async fn test_udpio_write_and_read_roundtrip() {
-        if let Some((udpio1, udpio2)) = new_udpio_pair().await {
-            if let (Some(port1), Some(port2)) = (udpio1.get_local_port(), udpio2.get_local_port()) {
+        if let Some((udpio1, udpio2)) = new_udpio_pair().await
+            && let (Some(port1), Some(port2)) = (udpio1.get_local_port(), udpio2.get_local_port()) {
                 // Create new UDP sockets connected to each other
                 if let (Some(mut sender), Some(mut receiver)) = (
                     UdpIO::new("127.0.0.1".to_string(), port2, port1).await,
@@ -1120,7 +1111,6 @@ mod tests {
                     let _ = tokio::try_join!(send_task, recv_task);
                 }
             }
-        }
     }
 
     #[tokio::test]
@@ -1183,13 +1173,12 @@ mod tests {
         // get the first available port
 
         let mut first_local_port = 0;
-        if let Some(udpio_0) = UdpIO::new_with_local_port(0).await {
-            if let Some(local_port_0) = udpio_0.get_local_port() {
+        if let Some(udpio_0) = UdpIO::new_with_local_port(0).await
+            && let Some(local_port_0) = udpio_0.get_local_port() {
                 first_local_port = local_port_0;
             }
 
             // std::mem::drop(udpio_0);
-        }
         //The object udpio_0 is automatically cleared and released when it goes out of scope here.
         println!("first_local_port: {}", first_local_port);
 
@@ -1245,9 +1234,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_udpio_read_timeout_success() {
-        if let Some((udpio1, udpio2)) = new_udpio_pair().await {
-            if let (Some(port1), Some(port2)) = (udpio1.get_local_port(), udpio2.get_local_port()) {
-                if let (Some(mut sender), Some(mut receiver)) = (
+        if let Some((udpio1, udpio2)) = new_udpio_pair().await
+            && let (Some(port1), Some(port2)) = (udpio1.get_local_port(), udpio2.get_local_port())
+                && let (Some(mut sender), Some(mut receiver)) = (
                     UdpIO::new("127.0.0.1".to_string(), port2, port1).await,
                     UdpIO::new("127.0.0.1".to_string(), port1, port2).await,
                 ) {
@@ -1268,8 +1257,6 @@ mod tests {
                     });
                     let _ = tokio::try_join!(send_task, recv_task);
                 }
-            }
-        }
     }
 
     #[tokio::test]
@@ -1453,14 +1440,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_udpio_new_with_local_port_bind_fails_when_port_in_use() {
-        if let Some(udpio) = UdpIO::new_with_local_port(0).await {
-            if let Some(port) = udpio.get_local_port() {
+        if let Some(udpio) = UdpIO::new_with_local_port(0).await
+            && let Some(port) = udpio.get_local_port() {
                 let result = UdpIO::new_with_local_port(port).await;
                 assert!(
                     result.is_none(),
                     "Binding to already-used port should return None"
                 );
             }
-        }
     }
 }

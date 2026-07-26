@@ -535,14 +535,8 @@ impl AnykaIpc {
         }
 
         // In test mode, try to connect to frame sockets if they exist.
-        let frame_main_stream = match UnixStream::connect(FRAME_MAIN_SOCKET_PATH) {
-            Ok(fs) => Some(fs),
-            Err(_) => None,
-        };
-        let frame_sub_stream = match UnixStream::connect(FRAME_SUB_SOCKET_PATH) {
-            Ok(fs) => Some(fs),
-            Err(_) => None,
-        };
+        let frame_main_stream = UnixStream::connect(FRAME_MAIN_SOCKET_PATH).ok();
+        let frame_sub_stream = UnixStream::connect(FRAME_SUB_SOCKET_PATH).ok();
 
         // In test mode, try to open shm if available
         let shm_reader = match ShmRingReader::open() {
@@ -1068,6 +1062,33 @@ impl AnykaIpc {
         Ok(())
     }
 
+    /// Whether the vendor-daemon has signalled shutdown via the shared ring header.
+    ///
+    /// Returns `false` when the shm reader is unavailable or the lock is contended —
+    /// callers treat that as "not shut down" and fall back to socket-level detection.
+    pub fn shm_is_shutdown(&self) -> bool {
+        match self.shm_reader.try_lock() {
+            Ok(guard) => guard.as_ref().is_some_and(|shm| shm.is_shutdown()),
+            Err(_) => false,
+        }
+    }
+
+    /// Map a "no frame available" condition onto [`PlatformError::Shutdown`] when the
+    /// daemon has flagged shutdown, otherwise return `fallback` unchanged.
+    fn shutdown_or(&self, fallback: PlatformError) -> PlatformError {
+        if self.shm_is_shutdown() {
+            warn!(
+                event = "push_daemon_shutdown_flagged",
+                diag_monotonic_ms = monotonic_millis(),
+                suppressed = %fallback,
+                "vendor-daemon set VD_FLAG_SHUTDOWN; ending push frame delivery"
+            );
+            PlatformError::Shutdown("vendor-daemon set VD_FLAG_SHUTDOWN".into())
+        } else {
+            fallback
+        }
+    }
+
     /// Read ring buffer diagnostic counters (overflow, eviction, fallback, dropped).
     ///
     /// Returns `(0, 0, 0, 0)` if the shm reader is not available or version < 2.
@@ -1140,7 +1161,10 @@ impl AnykaIpc {
             )));
         }
         if poll_ret == 0 {
-            return Err(PlatformError::Timeout);
+            // A daemon that shuts down cleanly sets VD_FLAG_SHUTDOWN but need not
+            // close the notification socket, so poll just keeps timing out. Without
+            // this check the caller would retry forever on a producer that is gone.
+            return Err(self.shutdown_or(PlatformError::Timeout));
         }
 
         let main_ready = main_idx
@@ -1182,12 +1206,13 @@ impl AnykaIpc {
                 (channel, Self::read_push_notification(stream, channel)?)
             }
         } else if main_hup_err || sub_hup_err {
-            return Err(PlatformError::HardwareFailure(format!(
+            // A hang-up after the daemon flagged shutdown is orderly, not a failure.
+            return Err(self.shutdown_or(PlatformError::HardwareFailure(format!(
                 "push notification socket disconnected (main_hup_err={}, sub_hup_err={})",
                 main_hup_err, sub_hup_err
-            )));
+            ))));
         } else {
-            return Err(PlatformError::Timeout);
+            return Err(self.shutdown_or(PlatformError::Timeout));
         };
 
         // Check for dropped-frame notification (Fix 4 integration)
@@ -1556,6 +1581,9 @@ pub(crate) mod test_helpers {
 
 #[cfg(test)]
 mod tests {
+    /// `(cmd_id, request_bytes)` captured by the fake daemon, shared with the test thread.
+    type CapturedCommands = std::sync::Arc<std::sync::Mutex<Vec<(i32, Vec<u8>)>>>;
+
     use super::test_helpers::*;
     use super::*;
     use crate::hal::common::AK_FAILED_I32;
@@ -1642,7 +1670,7 @@ mod tests {
         let daemon = FakeDaemon::start(|_cmd_id, _req| (AK_SUCCESS_I32, vec![]));
 
         let ipc = AnykaIpc::new_with_path(&daemon.socket_path).unwrap();
-        let stream_handle = 1usize as *mut std::ffi::c_void;
+        let stream_handle = std::ptr::dangling_mut::<std::ffi::c_void>();
         let mut vs = MaybeUninit::<crate::hal::common::sdk_types::VideoStream>::zeroed();
         let vs_ptr = vs.as_mut_ptr() as *mut crate::hal::common::video_stream;
 
@@ -1932,6 +1960,55 @@ mod tests {
     }
 
     #[test]
+    fn test_recv_pushed_frame_reports_shutdown_when_daemon_flags_it() {
+        use super::shm_ring::tests::create_test_anon_reader;
+
+        // Frame socket stays open but silent, so poll() times out with no data —
+        // exactly what a cleanly-stopped daemon looks like from the reader's side.
+        let (frame_reader, _frame_writer) = UnixStream::pair().unwrap();
+        let (ctrl_a, _ctrl_b) = UnixStream::pair().unwrap();
+
+        let shm = create_test_anon_reader();
+        shm.set_shutdown_for_test();
+
+        let ipc =
+            AnykaIpc::from_parts_for_test(ctrl_a, Some(frame_reader), None, Some(shm));
+
+        match ipc.recv_pushed_frame(None) {
+            Err(PlatformError::Shutdown(reason)) => {
+                assert!(
+                    reason.contains("VD_FLAG_SHUTDOWN"),
+                    "reason should name the flag, got: {reason}"
+                );
+            }
+            Err(other) => panic!("expected Shutdown once the daemon flags it, got: {other:?}"),
+            Ok(_) => panic!("expected Shutdown once the daemon flags it, got a frame"),
+        }
+    }
+
+    #[test]
+    fn test_recv_pushed_frame_still_times_out_when_shutdown_not_flagged() {
+        use super::shm_ring::tests::create_test_anon_reader;
+
+        // Same silent-socket setup, but the daemon has *not* flagged shutdown, so the
+        // caller must still see a retryable Timeout rather than a terminal error.
+        let (frame_reader, _frame_writer) = UnixStream::pair().unwrap();
+        let (ctrl_a, _ctrl_b) = UnixStream::pair().unwrap();
+
+        let ipc = AnykaIpc::from_parts_for_test(
+            ctrl_a,
+            Some(frame_reader),
+            None,
+            Some(create_test_anon_reader()),
+        );
+
+        assert!(
+            matches!(ipc.recv_pushed_frame(None), Err(PlatformError::Timeout)),
+            "a live-but-idle daemon must stay retryable"
+        );
+    }
+
+    #[test]
     fn test_recv_pushed_frame_returns_resource_busy_on_frame_drop_notification() {
         // Create a Unix socket pair - one end goes to AnykaIpc, other we write to
         let (reader, mut writer) = UnixStream::pair().unwrap();
@@ -2025,7 +2102,7 @@ mod tests {
     fn test_start_push_encodes_stream_handle_and_stream_id() {
         use std::sync::{Arc, Mutex};
 
-        let captured: Arc<Mutex<Vec<(i32, Vec<u8>)>>> = Arc::new(Mutex::new(Vec::new()));
+        let captured: CapturedCommands = Arc::new(Mutex::new(Vec::new()));
         let captured_closure = Arc::clone(&captured);
         let daemon = FakeDaemon::start(move |cmd_id, req| {
             captured_closure
@@ -2054,7 +2131,7 @@ mod tests {
     fn test_stop_push_with_stream_id_encodes_payload() {
         use std::sync::{Arc, Mutex};
 
-        let captured: Arc<Mutex<Vec<(i32, Vec<u8>)>>> = Arc::new(Mutex::new(Vec::new()));
+        let captured: CapturedCommands = Arc::new(Mutex::new(Vec::new()));
         let captured_closure = Arc::clone(&captured);
         let daemon = FakeDaemon::start(move |cmd_id, req| {
             captured_closure
@@ -2077,7 +2154,7 @@ mod tests {
     fn test_stop_push_without_stream_id_sends_empty_payload() {
         use std::sync::{Arc, Mutex};
 
-        let captured: Arc<Mutex<Vec<(i32, Vec<u8>)>>> = Arc::new(Mutex::new(Vec::new()));
+        let captured: CapturedCommands = Arc::new(Mutex::new(Vec::new()));
         let captured_closure = Arc::clone(&captured);
         let daemon = FakeDaemon::start(move |cmd_id, req| {
             captured_closure

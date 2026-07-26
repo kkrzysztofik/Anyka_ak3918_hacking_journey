@@ -308,7 +308,7 @@ async fn test_httpflv_multiple_clients_tracking() {
     // Simulate client disconnect
     clients.remove(&client1_id);
     assert_eq!(clients.len(), 1);
-    assert!(clients.get(&client1_id).is_none());
+    assert!(!clients.contains_key(&client1_id));
 }
 
 /// Tests HTTP-FLV subscribe type
@@ -366,9 +366,7 @@ async fn test_httpflv_frame_data() {
 #[tokio::test]
 async fn test_httpflv_chunked_encoding() {
     // Simulate chunked transfer encoding
-    let chunks = vec![
-        "4\r\n", "Wiki", "\r\n", "5\r\n", "\nWiki", "\r\n", "0\r\n", "\r\n",
-    ];
+    let chunks = ["4\r\n", "Wiki", "\r\n", "5\r\n", "\nWiki", "\r\n", "0\r\n", "\r\n"];
 
     let total_length: usize = chunks.iter().map(|s| s.len()).sum();
     assert!(total_length > 0);
@@ -381,6 +379,8 @@ async fn test_httpflv_chunked_encoding() {
 #[tokio::test]
 async fn test_httpflv_connection_cleanup() {
     // Simulate connection state tracking
+    // `id`/`stream` model the real connection shape; only `active` is asserted on.
+    #[allow(dead_code)]
     struct Connection {
         id: String,
         stream: StreamIdentifier,
@@ -413,11 +413,9 @@ async fn test_httpflv_connection_cleanup() {
 #[tokio::test]
 async fn test_httpflv_response_headers() {
     // Required headers for HTTP-FLV
-    let required_headers = vec![
-        "Content-Type: video/x-flv",
+    let required_headers = ["Content-Type: video/x-flv",
         "Cache-Control: no-cache",
-        "Access-Control-Allow-Origin: *",
-    ];
+        "Access-Control-Allow-Origin: *"];
 
     assert!(
         required_headers
@@ -466,7 +464,7 @@ async fn test_httpflv_stream_identifier() {
 /// Tests FLV timestamp monotonicity
 #[tokio::test]
 async fn test_httpflv_timestamp_monotonicity() {
-    let timestamps = vec![0u32, 33, 66, 100, 133, 166, 200];
+    let timestamps = [0u32, 33, 66, 100, 133, 166, 200];
 
     for i in 1..timestamps.len() {
         assert!(timestamps[i] >= timestamps[i - 1]);
@@ -814,7 +812,7 @@ async fn test_httpflv_client_connection_limit() {
     assert_eq!(active_connections.len(), max_clients - 1);
 
     // Now can add new client
-    active_connections.push(format!("client_new"));
+    active_connections.push("client_new".to_string());
     assert_eq!(active_connections.len(), max_clients);
 }
 
