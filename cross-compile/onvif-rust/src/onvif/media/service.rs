@@ -7,7 +7,41 @@ use std::sync::Arc;
 use crate::config::{ConfigRuntime, PersistenceHandle, ProfileStorage};
 use crate::onvif::dispatcher::ServiceHandler;
 use crate::onvif::error::{OnvifError, OnvifResult};
-use crate::onvif::types::media::*;
+use crate::onvif::types::media::{
+    AddAudioEncoderConfiguration, AddAudioEncoderConfigurationResponse,
+    AddAudioSourceConfiguration, AddAudioSourceConfigurationResponse, AddVideoEncoderConfiguration,
+    AddVideoEncoderConfigurationResponse, AddVideoSourceConfiguration,
+    AddVideoSourceConfigurationResponse, CreateProfile, CreateProfileResponse, DeleteProfile,
+    DeleteProfileResponse, GetAudioEncoderConfiguration, GetAudioEncoderConfigurationOptions,
+    GetAudioEncoderConfigurationOptionsResponse, GetAudioEncoderConfigurationResponse,
+    GetAudioEncoderConfigurations, GetAudioEncoderConfigurationsResponse,
+    GetAudioSourceConfiguration, GetAudioSourceConfigurationResponse, GetAudioSourceConfigurations,
+    GetAudioSourceConfigurationsResponse, GetAudioSources, GetAudioSourcesResponse,
+    GetCompatibleAudioEncoderConfigurations, GetCompatibleAudioEncoderConfigurationsResponse,
+    GetCompatibleAudioSourceConfigurations, GetCompatibleAudioSourceConfigurationsResponse,
+    GetCompatibleVideoEncoderConfigurations, GetCompatibleVideoEncoderConfigurationsResponse,
+    GetCompatibleVideoSourceConfigurations, GetCompatibleVideoSourceConfigurationsResponse,
+    GetMetadataConfigurations, GetMetadataConfigurationsResponse, GetProfile, GetProfileResponse,
+    GetProfiles, GetProfilesResponse, GetServiceCapabilities, GetServiceCapabilitiesResponse,
+    GetSnapshotUri, GetSnapshotUriResponse, GetStreamUri, GetStreamUriResponse,
+    GetVideoEncoderConfiguration, GetVideoEncoderConfigurationOptions,
+    GetVideoEncoderConfigurationOptionsResponse, GetVideoEncoderConfigurationResponse,
+    GetVideoEncoderConfigurations, GetVideoEncoderConfigurationsResponse,
+    GetVideoSourceConfiguration, GetVideoSourceConfigurationOptions,
+    GetVideoSourceConfigurationOptionsResponse, GetVideoSourceConfigurationResponse,
+    GetVideoSourceConfigurations, GetVideoSourceConfigurationsResponse, GetVideoSources,
+    GetVideoSourcesResponse, RemoveAudioEncoderConfiguration,
+    RemoveAudioEncoderConfigurationResponse, RemoveAudioSourceConfiguration,
+    RemoveAudioSourceConfigurationResponse, RemoveVideoEncoderConfiguration,
+    RemoveVideoEncoderConfigurationResponse, RemoveVideoSourceConfiguration,
+    RemoveVideoSourceConfigurationResponse, SetAudioEncoderConfiguration,
+    SetAudioEncoderConfigurationResponse, SetAudioSourceConfiguration,
+    SetAudioSourceConfigurationResponse, SetMetadataConfiguration,
+    SetMetadataConfigurationResponse, SetVideoEncoderConfiguration,
+    SetVideoEncoderConfigurationResponse, SetVideoSourceConfiguration,
+    SetVideoSourceConfigurationResponse, StartMulticastStreaming, StartMulticastStreamingResponse,
+    StopMulticastStreaming, StopMulticastStreamingResponse,
+};
 use crate::platform::{Platform, Resolution};
 
 use super::ProfileManager;

@@ -131,7 +131,8 @@ int log_add_fp(FILE *fp, int level) {
 static void init_event(log_Event *ev, void *udata) {
   if (!ev->time) {
     time_t t = time(NULL);
-    ev->time = localtime(&t);
+    localtime_r(&t, &ev->time_buf);
+    ev->time = &ev->time_buf;
   }
   ev->udata = udata;
 }

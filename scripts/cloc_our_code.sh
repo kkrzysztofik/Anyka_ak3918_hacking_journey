@@ -25,19 +25,6 @@ cloc \
     --exclude-dir=anyka_reference,gsoap,xiu,patches,node_modules,target,coverage,out,lib,include,wsdl,generated,orig,toolchain,e2e,testspecs,verbose \
     --exclude-ext=o,so,a,log,json,ini,dat,xsd,wsdl,nsmap,lock \
     --exclude-list-file=<(cat << 'EOF'
-# Generated files (legacy C++ ONVIF)
-cross-compile/onvif/src/generated/
-cross-compile/onvif/out/
-cross-compile/onvif/lib/
-cross-compile/onvif/include/
-cross-compile/onvif/wsdl/
-cross-compile/onvif/compile_commands.json
-cross-compile/onvif/Doxyfile
-cross-compile/onvif/*.log
-cross-compile/onvif/out.log
-cross-compile/onvif/RECV.log
-cross-compile/onvif/TEST.log
-
 # Cargo dependencies and build artifacts (Rust)
 cross-compile/target/
 cross-compile/onvif-rust/target/
@@ -104,7 +91,6 @@ echo -e "${GREEN}Done! This count includes only our custom implementation code.$
 echo -e "${YELLOW}Included projects:${NC}"
 echo "  - onvif-rust (Rust ONVIF implementation)"
 echo "  - www (React WebUI)"
-echo "  - Legacy C++ ONVIF (cross-compile/onvif)"
 echo "  - Scripts and validation tools"
 echo
 echo -e "${YELLOW}Excluded:${NC}"

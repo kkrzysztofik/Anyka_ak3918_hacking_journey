@@ -449,7 +449,7 @@ For more details, see README.md and docs/QUICKSTART.md.
 ## Learned Workspace Facts
 
 - Host-side shell refactors and shared libraries such as `scripts/common.sh` exclude the entire `SD_card_contents/` tree.
-- `cross-compile/onvif/scripts/` is legacy ONVIF C tooling, deprecated and slated for removal; do not refactor it or wire it into new shared host script libraries.
+- The legacy C ONVIF implementation (`cross-compile/onvif/`) has been removed; `cross-compile/onvif-rust/` is the sole ONVIF implementation.
 
 ````markdown
 ## UBS Quick Reference for AI Agents

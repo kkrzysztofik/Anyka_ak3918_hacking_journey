@@ -7,7 +7,7 @@
       "command": "bash",
       "args": [
         "-c",
-        "source '${workspaceFolder}/setenv.sh' && make -C '${workspaceFolder}/cross-compile/onvif' debug"
+        "source '${workspaceFolder}/setenv.sh' && cd '${workspaceFolder}/cross-compile/onvif-rust' && \"$CARGO\" build"
       ],
       "group": {
         "kind": "build",
@@ -22,7 +22,7 @@
         "clear": false
       },
       "problemMatcher": [
-        "$msCompile"
+        "$rustc"
       ],
       "options": {
         "cwd": "${workspaceFolder}"
@@ -34,7 +34,7 @@
       "command": "bash",
       "args": [
         "-c",
-        "source '${workspaceFolder}/setenv.sh' && make -C '${workspaceFolder}/cross-compile/onvif' release"
+        "source '${workspaceFolder}/setenv.sh' && cd '${workspaceFolder}/cross-compile/onvif-rust' && \"$CARGO\" build --release"
       ],
       "group": "build",
       "presentation": {
@@ -46,7 +46,7 @@
         "clear": false
       },
       "problemMatcher": [
-        "$msCompile"
+        "$rustc"
       ],
       "options": {
         "cwd": "${workspaceFolder}"
@@ -58,28 +58,7 @@
       "command": "bash",
       "args": [
         "-c",
-        "source '${workspaceFolder}/setenv.sh' && make -C '${workspaceFolder}/cross-compile/onvif' clean"
-      ],
-      "group": "build",
-      "presentation": {
-        "echo": true,
-        "reveal": "always",
-        "focus": false,
-        "panel": "shared",
-        "showReuseMessage": true,
-        "clear": false
-      },
-      "options": {
-        "cwd": "${workspaceFolder}"
-      }
-    },
-    {
-      "label": "docs",
-      "type": "shell",
-      "command": "bash",
-      "args": [
-        "-c",
-        "source '${workspaceFolder}/setenv.sh' && make -C '${workspaceFolder}/cross-compile/onvif' docs"
+        "source '${workspaceFolder}/setenv.sh' && cd '${workspaceFolder}/cross-compile/onvif-rust' && \"$CARGO\" clean"
       ],
       "group": "build",
       "presentation": {
@@ -100,7 +79,7 @@
       "command": "bash",
       "args": [
         "-c",
-        "source '${workspaceFolder}/setenv.sh' && make -C '${workspaceFolder}/cross-compile/onvif' test"
+        "cd '${workspaceFolder}/cross-compile/onvif-rust' && cargo test --target x86_64-unknown-linux-gnu"
       ],
       "group": "test",
       "presentation": {
@@ -121,7 +100,7 @@
       "command": "bash",
       "args": [
         "-c",
-        "cp '${workspaceFolder}/cross-compile/onvif/out/onvifd' '${workspaceFolder}/SD_card_contents/anyka_hack/usr/bin/' && echo 'Binary copied to SD card payload'"
+        "cp '${workspaceFolder}/cross-compile/onvif-rust/target/armv5te-unknown-linux-uclibceabi/debug/onvifd' '${workspaceFolder}/SD_card_contents/anyka_hack/usr/bin/' && echo 'Binary copied to SD card payload'"
       ],
       "group": "build",
       "presentation": {
@@ -138,12 +117,12 @@
       "dependsOn": "build-debug"
     },
     {
-      "label": "generate-compile-commands",
+      "label": "build-vendor-daemon-debug",
       "type": "shell",
       "command": "bash",
       "args": [
         "-c",
-        "source '${workspaceFolder}/setenv.sh' && make -C '${workspaceFolder}/cross-compile/onvif' compile-commands"
+        "make -C '${workspaceFolder}/cross-compile/vendor-daemon' debug"
       ],
       "group": "build",
       "presentation": {
@@ -154,7 +133,33 @@
         "showReuseMessage": true,
         "clear": false
       },
-      "problemMatcher": [],
+      "problemMatcher": [
+        "$gcc"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      }
+    },
+    {
+      "label": "build-vendor-daemon-release",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "-c",
+        "make -C '${workspaceFolder}/cross-compile/vendor-daemon' release"
+      ],
+      "group": "build",
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "focus": false,
+        "panel": "shared",
+        "showReuseMessage": true,
+        "clear": false
+      },
+      "problemMatcher": [
+        "$gcc"
+      ],
       "options": {
         "cwd": "${workspaceFolder}"
       }

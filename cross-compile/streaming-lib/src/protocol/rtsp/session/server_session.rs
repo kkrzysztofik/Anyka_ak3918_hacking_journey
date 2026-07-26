@@ -31,7 +31,9 @@ use crate::io::bytes_writer::AsyncBytesWriter;
 
 use super::errors::SessionError;
 use super::errors::SessionErrorValue;
-use super::rtp_counters::{InterleavedBinaryData, RtpCountersHandle, RtpTrackCounters};
+use super::rtp_counters::{
+    InterleavedBinaryData, RtpCountersHandle, RtpPacketObservation, RtpTrackCounters,
+};
 use crate::hub::define::DataSender;
 use crate::hub::define::MediaInfo;
 use crate::hub::define::VideoCodecType;
@@ -131,6 +133,103 @@ pub struct RtspServerSession {
     rtp_counters: HashMap<TrackType, RtpCountersHandle>,
     playback_cancel: Option<Arc<Notify>>,
     playback_task: Option<JoinHandle<()>>,
+}
+
+/// Log RTP sequence/timestamp anomalies and periodic packet samples for a UDP track.
+#[allow(clippy::too_many_arguments)]
+fn log_udp_rtp_packet(
+    stats: &RtpPacketObservation,
+    packet: &RtpPacket,
+    payload_len: usize,
+    sample_interval: u32,
+    track_label: &str,
+    session_id: &str,
+    remote_for_rtp: SocketAddr,
+    stream_path: &str,
+) {
+    if stats.seq_gap || stats.seq_regressed || stats.timestamp_regressed {
+        warn!(
+            protocol = "UDP",
+            track = %track_label,
+            session_id = %session_id,
+            remote_addr = %remote_for_rtp,
+            stream_path = %stream_path,
+            prev_seq = ?stats.prev_seq,
+            seq = packet.header.seq_number,
+            seq_delta = ?stats.seq_delta,
+            prev_timestamp = ?stats.prev_timestamp,
+            timestamp = packet.header.timestamp,
+            timestamp_delta = ?stats.timestamp_delta,
+            seq_gap = stats.seq_gap,
+            seq_regressed = stats.seq_regressed,
+            timestamp_regressed = stats.timestamp_regressed,
+            "rtp_packet_anomaly"
+        );
+    }
+
+    if sample_interval > 0 && stats.packets_sent.is_multiple_of(sample_interval as u64) {
+        debug!(
+            protocol = "UDP",
+            track = %track_label,
+            session_id = %session_id,
+            remote_addr = %remote_for_rtp,
+            stream_path = %stream_path,
+            seq = packet.header.seq_number,
+            timestamp = packet.header.timestamp,
+            marker = packet.header.marker,
+            size_bytes = payload_len,
+            packets_sent = stats.packets_sent,
+            bytes_sent = stats.bytes_sent,
+            "rtp_packet_sample"
+        );
+    }
+}
+
+/// Write one accumulated frame's worth of RTP packets to the UDP socket.
+///
+/// Pace UDP writes: yield every N packets to let the kernel drain the socket
+/// buffer and the NIC transmit queued packets, preventing client-side receive
+/// buffer overflow.
+async fn write_udp_frame(
+    io: &Arc<Mutex<Box<dyn TNetIO + Send + Sync>>>,
+    packets: Vec<BytesMut>,
+    udp_pace_batch: usize,
+    udp_pace_sleep_micros: u32,
+    track_label: &str,
+    session_id: &str,
+    remote_for_rtp: SocketAddr,
+) -> Result<(), PackerError> {
+    let start = std::time::Instant::now();
+    let packet_count = packets.len();
+    let mut io = io.lock().await;
+    let pace_batch = udp_pace_batch.max(1);
+    let sleep_micros = if udp_pace_sleep_micros == 0 {
+        DEFAULT_UDP_PACE_SLEEP_MICROS
+    } else {
+        u64::from(udp_pace_sleep_micros)
+    };
+    let pace_sleep = Duration::from_micros(sleep_micros.max(1));
+    for (i, pkt) in packets.into_iter().enumerate() {
+        io.write(pkt.into()).await?;
+        if (i + 1) % pace_batch == 0 && i + 1 < packet_count {
+            tokio::time::sleep(pace_sleep).await;
+        }
+    }
+    let elapsed = start.elapsed();
+
+    // Log slow writes (see SLOW_WRITE_THRESHOLD_MS)
+    if elapsed.as_millis() >= SLOW_WRITE_THRESHOLD_MS {
+        tracing::warn!(
+            protocol = "UDP",
+            track = %track_label,
+            session_id = %session_id,
+            remote_addr = %remote_for_rtp,
+            elapsed_ms = elapsed.as_millis(),
+            "slow_udp_write"
+        );
+    }
+
+    Ok(())
 }
 
 impl RtspServerSession {
@@ -1316,6 +1415,7 @@ impl RtspServerSession {
         )
     }
 
+    /// Set up the per-packet callback for a UDP `PLAY` track.
     #[allow(clippy::too_many_arguments)]
     fn setup_udp_play_packet_handler(
         counters: Arc<RtpTrackCounters>,
@@ -1353,44 +1453,16 @@ impl RtspServerSession {
                         packet.header.timestamp,
                     );
 
-                    if stats.seq_gap || stats.seq_regressed || stats.timestamp_regressed {
-                        warn!(
-                            protocol = "UDP",
-                            track = %track_label,
-                            session_id = %session_id,
-                            remote_addr = %remote_for_rtp,
-                            stream_path = %stream_path,
-                            prev_seq = ?stats.prev_seq,
-                            seq = packet.header.seq_number,
-                            seq_delta = ?stats.seq_delta,
-                            prev_timestamp = ?stats.prev_timestamp,
-                            timestamp = packet.header.timestamp,
-                            timestamp_delta = ?stats.timestamp_delta,
-                            seq_gap = stats.seq_gap,
-                            seq_regressed = stats.seq_regressed,
-                            timestamp_regressed = stats.timestamp_regressed,
-                            "rtp_packet_anomaly"
-                        );
-                    }
-
-                    if sample_interval > 0
-                        && stats.packets_sent.is_multiple_of(sample_interval as u64)
-                    {
-                        debug!(
-                            protocol = "UDP",
-                            track = %track_label,
-                            session_id = %session_id,
-                            remote_addr = %remote_for_rtp,
-                            stream_path = %stream_path,
-                            seq = packet.header.seq_number,
-                            timestamp = packet.header.timestamp,
-                            marker = packet.header.marker,
-                            size_bytes = payload_len,
-                            packets_sent = stats.packets_sent,
-                            bytes_sent = stats.bytes_sent,
-                            "rtp_packet_sample"
-                        );
-                    }
+                    log_udp_rtp_packet(
+                        &stats,
+                        &packet,
+                        payload_len,
+                        sample_interval,
+                        &track_label,
+                        &session_id,
+                        remote_for_rtp,
+                        &stream_path,
+                    );
 
                     // Accumulate packet into buffer (bounded; same cap as TCP interleaved framing).
                     let mut guard = udp_accum.lock().await;
@@ -1423,42 +1495,20 @@ impl RtspServerSession {
 
                     // Write all accumulated packets when marker bit is set (end of frame)
                     if packet.header.marker == 1 {
-                        let start = std::time::Instant::now();
                         let packets: Vec<BytesMut> =
                             std::mem::replace(buffer, Vec::with_capacity(150));
                         *accumulated = 0;
                         drop(guard);
-                        let packet_count = packets.len();
-                        let mut io = io.lock().await;
-                        // Pace UDP writes: yield every N packets to let the kernel
-                        // drain the socket buffer and the NIC transmit queued
-                        // packets, preventing client-side receive buffer overflow.
-                        let pace_batch = udp_pace_batch.max(1);
-                        let sleep_micros = if udp_pace_sleep_micros == 0 {
-                            DEFAULT_UDP_PACE_SLEEP_MICROS
-                        } else {
-                            u64::from(udp_pace_sleep_micros)
-                        };
-                        let pace_sleep = Duration::from_micros(sleep_micros.max(1));
-                        for (i, pkt) in packets.into_iter().enumerate() {
-                            io.write(pkt.into()).await?;
-                            if (i + 1) % pace_batch == 0 && i + 1 < packet_count {
-                                tokio::time::sleep(pace_sleep).await;
-                            }
-                        }
-                        let elapsed = start.elapsed();
-
-                        // Log slow writes (see SLOW_WRITE_THRESHOLD_MS)
-                        if elapsed.as_millis() >= SLOW_WRITE_THRESHOLD_MS {
-                            tracing::warn!(
-                                protocol = "UDP",
-                                track = %track_label,
-                                session_id = %session_id,
-                                remote_addr = %remote_for_rtp,
-                                elapsed_ms = elapsed.as_millis(),
-                                "slow_udp_write"
-                            );
-                        }
+                        write_udp_frame(
+                            &io,
+                            packets,
+                            udp_pace_batch,
+                            udp_pace_sleep_micros,
+                            &track_label,
+                            &session_id,
+                            remote_for_rtp,
+                        )
+                        .await?;
                     }
 
                     Ok(())

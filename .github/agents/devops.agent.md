@@ -165,10 +165,12 @@ cp cross-compile/onvif-rust/target/armv5te-unknown-linux-uclibceabi/debug/onvifd
 
 ```bash
 # Equivalent to the VS Code task IDs:
-#   shell: build-debug      → make -C cross-compile/onvif debug
-#   shell: build-release    → make -C cross-compile/onvif release
-#   shell: test             → make -C cross-compile/onvif test
-#   shell: copy-to-sd       → copies binary after build-debug
+#   shell: build-debug                 → cargo build (onvif-rust)
+#   shell: build-release               → cargo build --release (onvif-rust)
+#   shell: test                        → cargo test --target x86_64-unknown-linux-gnu (onvif-rust)
+#   shell: copy-to-sd                  → copies binary after build-debug
+#   shell: build-vendor-daemon-debug   → make -C cross-compile/vendor-daemon debug
+#   shell: build-vendor-daemon-release → make -C cross-compile/vendor-daemon release
 ```
 
 ---

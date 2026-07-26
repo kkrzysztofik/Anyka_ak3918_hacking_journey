@@ -672,6 +672,157 @@ impl Application {
         (imaging_store, imaging_persistence_task)
     }
 
+    /// Create user storage and wire its debounced off-executor persistence task.
+    fn wire_user_persistence(
+        config_path: &str,
+        save_delay: u64,
+        shutdown_coordinator: &ShutdownCoordinator,
+    ) -> (Arc<UserStorage>, JoinHandle<()>) {
+        let user_storage = Arc::new(UserStorage::new());
+        let users_path = std::path::Path::new(config_path)
+            .parent()
+            .unwrap_or(std::path::Path::new("/etc/onvif"))
+            .join("users.toml");
+        if users_path.exists() {
+            if let Err(e) = user_storage.load_from_toml(&users_path) {
+                tracing::warn!("Failed to load users from {}: {}", users_path.display(), e);
+            } else {
+                tracing::info!("Loaded users from {}", users_path.display());
+            }
+        }
+
+        let user_persistence_storage = Arc::clone(&user_storage);
+        let user_persistence_path = users_path.clone();
+        let (user_persistence_service, user_persistence_handle) = PersistenceService::new(
+            "users",
+            save_delay,
+            Box::new(move || match user_persistence_storage.to_toml_bytes() {
+                Ok(bytes) => Some(PendingWrite {
+                    path: user_persistence_path.clone(),
+                    bytes,
+                    mode: Some(0o600),
+                }),
+                Err(e) => {
+                    tracing::error!("Failed to serialize users: {}", e);
+                    None
+                }
+            }),
+        );
+        user_storage.set_persistence(user_persistence_handle);
+        let user_persistence_task =
+            tokio::spawn(user_persistence_service.run(shutdown_coordinator.subscribe()));
+
+        (user_storage, user_persistence_task)
+    }
+
+    /// Create profile storage and wire its debounced off-executor persistence task.
+    fn wire_profile_persistence(
+        config_path: &str,
+        save_delay: u64,
+        shutdown_coordinator: &ShutdownCoordinator,
+    ) -> (Arc<ProfileStorage>, PersistenceHandle, JoinHandle<()>) {
+        let profiles_path = std::path::Path::new(config_path)
+            .parent()
+            .unwrap_or(std::path::Path::new("/etc/onvif"))
+            .join("profiles.toml");
+        let profile_storage = Arc::new(ProfileStorage::new(&profiles_path));
+        if let Err(e) = profile_storage.load() {
+            tracing::warn!(
+                "Failed to load profiles from {}: {}",
+                profiles_path.display(),
+                e
+            );
+        } else if !profile_storage.is_empty() {
+            tracing::info!("Loaded profiles from {}", profiles_path.display());
+        }
+
+        let profile_persistence_storage = Arc::clone(&profile_storage);
+        let profile_persistence_path = profiles_path.clone();
+        let (profile_persistence_service, profile_persistence_handle) = PersistenceService::new(
+            "profiles",
+            save_delay,
+            Box::new(move || {
+                match toml::to_string_pretty(&profile_persistence_storage.snapshot()) {
+                    Ok(content) => Some(PendingWrite {
+                        path: profile_persistence_path.clone(),
+                        bytes: content.into_bytes(),
+                        mode: None,
+                    }),
+                    Err(e) => {
+                        tracing::error!("Failed to serialize profiles: {}", e);
+                        None
+                    }
+                }
+            }),
+        );
+        let profile_persistence_task =
+            tokio::spawn(profile_persistence_service.run(shutdown_coordinator.subscribe()));
+
+        (
+            profile_storage,
+            profile_persistence_handle,
+            profile_persistence_task,
+        )
+    }
+
+    /// Build the HTTP server configuration from the runtime configuration.
+    fn build_server_config(config_runtime: &Arc<ConfigRuntime>) -> OnvifServerConfig {
+        let c = config_runtime.read();
+        OnvifServerConfig {
+            bind_address: c.server.bind_address.clone(),
+            port: c.server.port,
+            request_timeout_secs: c.server.request_timeout,
+            max_body_size: c.server.max_body_size,
+            enable_cors: false,
+            static_root: if c.server.static_root.is_empty() {
+                Some("www".to_string())
+            } else {
+                Some(c.server.static_root.clone())
+            },
+            http_verbose: c.logging.http_verbose,
+            tls_enabled: c.server.tls_enabled,
+            tls_cert_path: if c.server.tls_cert_path.is_empty() {
+                None
+            } else {
+                Some(std::path::PathBuf::from(&c.server.tls_cert_path))
+            },
+            tls_key_path: if c.server.tls_key_path.is_empty() {
+                None
+            } else {
+                Some(std::path::PathBuf::from(&c.server.tls_key_path))
+            },
+            rate_limit_per_minute: c.server.rate_limit_per_minute,
+        }
+    }
+
+    /// Run the discovery startup phase, degrading gracefully on failure.
+    async fn start_discovery_phase(
+        config_runtime: &Arc<ConfigRuntime>,
+        port: u16,
+        progress: &mut StartupProgress,
+    ) -> (Option<WsDiscoveryHandle>, Option<JoinHandle<()>>) {
+        if !config_runtime.read().discovery.enabled {
+            tracing::info!("WS-Discovery is disabled in configuration");
+            return (None, None);
+        }
+
+        let discovery_config = Self::make_discovery_config(config_runtime, port);
+        match Self::start_discovery(discovery_config).await {
+            Ok((disc, task)) => {
+                tracing::info!("WS-Discovery service started successfully");
+                (Some(disc), Some(task))
+            }
+            Err(e) => {
+                tracing::warn!(
+                    "WS-Discovery failed to start, continuing in degraded mode: {}",
+                    e
+                );
+                progress.record_degraded("discovery", e.to_string());
+                (None, None)
+            }
+        }
+    }
+
     /// Start the application with ordered initialization.
     ///
     /// This is the **only** way to create an `Application` instance. It performs
@@ -739,79 +890,14 @@ impl Application {
         tracing::debug!("Initializing ONVIF services...");
 
         // Create user storage with debounced off-executor persistence
-        let user_storage = Arc::new(UserStorage::new());
-        let users_path = std::path::Path::new(config_path)
-            .parent()
-            .unwrap_or(std::path::Path::new("/etc/onvif"))
-            .join("users.toml");
-        if users_path.exists() {
-            if let Err(e) = user_storage.load_from_toml(&users_path) {
-                tracing::warn!("Failed to load users from {}: {}", users_path.display(), e);
-            } else {
-                tracing::info!("Loaded users from {}", users_path.display());
-            }
-        }
-
-        let user_persistence_storage = Arc::clone(&user_storage);
-        let user_persistence_path = users_path.clone();
-        let (user_persistence_service, user_persistence_handle) = PersistenceService::new(
-            "users",
-            save_delay,
-            Box::new(move || match user_persistence_storage.to_toml_bytes() {
-                Ok(bytes) => Some(PendingWrite {
-                    path: user_persistence_path.clone(),
-                    bytes,
-                    mode: Some(0o600),
-                }),
-                Err(e) => {
-                    tracing::error!("Failed to serialize users: {}", e);
-                    None
-                }
-            }),
-        );
-        user_storage.set_persistence(user_persistence_handle);
-        let user_persistence_task = Some(tokio::spawn(
-            user_persistence_service.run(shutdown_coordinator.subscribe()),
-        ));
+        let (user_storage, user_persistence_task) =
+            Self::wire_user_persistence(config_path, save_delay, &shutdown_coordinator);
+        let user_persistence_task = Some(user_persistence_task);
 
         // Create profile storage for ONVIF media profiles
-        let profiles_path = std::path::Path::new(config_path)
-            .parent()
-            .unwrap_or(std::path::Path::new("/etc/onvif"))
-            .join("profiles.toml");
-        let profile_storage = Arc::new(ProfileStorage::new(&profiles_path));
-        if let Err(e) = profile_storage.load() {
-            tracing::warn!(
-                "Failed to load profiles from {}: {}",
-                profiles_path.display(),
-                e
-            );
-        } else if !profile_storage.is_empty() {
-            tracing::info!("Loaded profiles from {}", profiles_path.display());
-        }
-
-        let profile_persistence_storage = Arc::clone(&profile_storage);
-        let profile_persistence_path = profiles_path.clone();
-        let (profile_persistence_service, profile_persistence_handle) = PersistenceService::new(
-            "profiles",
-            save_delay,
-            Box::new(move || {
-                match toml::to_string_pretty(&profile_persistence_storage.snapshot()) {
-                    Ok(content) => Some(PendingWrite {
-                        path: profile_persistence_path.clone(),
-                        bytes: content.into_bytes(),
-                        mode: None,
-                    }),
-                    Err(e) => {
-                        tracing::error!("Failed to serialize profiles: {}", e);
-                        None
-                    }
-                }
-            }),
-        );
-        let profile_persistence_task = Some(tokio::spawn(
-            profile_persistence_service.run(shutdown_coordinator.subscribe()),
-        ));
+        let (profile_storage, profile_persistence_handle, profile_persistence_task) =
+            Self::wire_profile_persistence(config_path, save_delay, &shutdown_coordinator);
+        let profile_persistence_task = Some(profile_persistence_task);
 
         let (imaging_settings_store, imaging_persistence_task) = Self::wire_imaging_persistence(
             config_path,
@@ -879,34 +965,7 @@ impl Application {
         tracing::debug!("Starting HTTP server...");
 
         // Get HTTP settings from config
-        let server_config = {
-            let c = config_runtime.read();
-            OnvifServerConfig {
-                bind_address: c.server.bind_address.clone(),
-                port: c.server.port,
-                request_timeout_secs: c.server.request_timeout,
-                max_body_size: c.server.max_body_size,
-                enable_cors: false,
-                static_root: if c.server.static_root.is_empty() {
-                    Some("www".to_string())
-                } else {
-                    Some(c.server.static_root.clone())
-                },
-                http_verbose: c.logging.http_verbose,
-                tls_enabled: c.server.tls_enabled,
-                tls_cert_path: if c.server.tls_cert_path.is_empty() {
-                    None
-                } else {
-                    Some(std::path::PathBuf::from(&c.server.tls_cert_path))
-                },
-                tls_key_path: if c.server.tls_key_path.is_empty() {
-                    None
-                } else {
-                    Some(std::path::PathBuf::from(&c.server.tls_key_path))
-                },
-                rate_limit_per_minute: c.server.rate_limit_per_minute,
-            }
-        };
+        let server_config = Self::build_server_config(&config_runtime);
         let port = server_config.port;
 
         let server = Arc::new(
@@ -926,30 +985,8 @@ impl Application {
 
         // Phase 5: Discovery
         progress.begin_phase(StartupPhase::Discovery);
-        let discovery_enabled = config_runtime.read().discovery.enabled;
-
-        let (discovery, discovery_task) = if discovery_enabled {
-            // Build discovery configuration
-            let discovery_config = Self::make_discovery_config(&config_runtime, port);
-
-            match Self::start_discovery(discovery_config).await {
-                Ok((disc, task)) => {
-                    tracing::info!("WS-Discovery service started successfully");
-                    (Some(disc), Some(task))
-                }
-                Err(e) => {
-                    tracing::warn!(
-                        "WS-Discovery failed to start, continuing in degraded mode: {}",
-                        e
-                    );
-                    progress.record_degraded("discovery", e.to_string());
-                    (None, None)
-                }
-            }
-        } else {
-            tracing::info!("WS-Discovery is disabled in configuration");
-            (None, None)
-        };
+        let (discovery, discovery_task) =
+            Self::start_discovery_phase(&config_runtime, port, &mut progress).await;
         progress.complete_phase();
 
         // Phase 6: Streaming (optional, gracefully degrades)
@@ -1230,79 +1267,14 @@ impl Application {
         progress.begin_phase(StartupPhase::Services);
         tracing::debug!("Initializing ONVIF services...");
 
-        let user_storage = Arc::new(UserStorage::new());
-        let users_path = std::path::Path::new(config_path)
-            .parent()
-            .unwrap_or(std::path::Path::new("/etc/onvif"))
-            .join("users.toml");
-        if users_path.exists() {
-            if let Err(e) = user_storage.load_from_toml(&users_path) {
-                tracing::warn!("Failed to load users from {}: {}", users_path.display(), e);
-            } else {
-                tracing::info!("Loaded users from {}", users_path.display());
-            }
-        }
-
-        let user_persistence_storage = Arc::clone(&user_storage);
-        let user_persistence_path = users_path.clone();
-        let (user_persistence_service, user_persistence_handle) = PersistenceService::new(
-            "users",
-            save_delay,
-            Box::new(move || match user_persistence_storage.to_toml_bytes() {
-                Ok(bytes) => Some(PendingWrite {
-                    path: user_persistence_path.clone(),
-                    bytes,
-                    mode: Some(0o600),
-                }),
-                Err(e) => {
-                    tracing::error!("Failed to serialize users: {}", e);
-                    None
-                }
-            }),
-        );
-        user_storage.set_persistence(user_persistence_handle);
-        let user_persistence_task = Some(tokio::spawn(
-            user_persistence_service.run(shutdown_coordinator.subscribe()),
-        ));
+        let (user_storage, user_persistence_task) =
+            Self::wire_user_persistence(config_path, save_delay, &shutdown_coordinator);
+        let user_persistence_task = Some(user_persistence_task);
 
         // Create profile storage for ONVIF media profiles
-        let profiles_path = std::path::Path::new(config_path)
-            .parent()
-            .unwrap_or(std::path::Path::new("/etc/onvif"))
-            .join("profiles.toml");
-        let profile_storage = Arc::new(ProfileStorage::new(&profiles_path));
-        if let Err(e) = profile_storage.load() {
-            tracing::warn!(
-                "Failed to load profiles from {}: {}",
-                profiles_path.display(),
-                e
-            );
-        } else if !profile_storage.is_empty() {
-            tracing::info!("Loaded profiles from {}", profiles_path.display());
-        }
-
-        let profile_persistence_storage = Arc::clone(&profile_storage);
-        let profile_persistence_path = profiles_path.clone();
-        let (profile_persistence_service, profile_persistence_handle) = PersistenceService::new(
-            "profiles",
-            save_delay,
-            Box::new(move || {
-                match toml::to_string_pretty(&profile_persistence_storage.snapshot()) {
-                    Ok(content) => Some(PendingWrite {
-                        path: profile_persistence_path.clone(),
-                        bytes: content.into_bytes(),
-                        mode: None,
-                    }),
-                    Err(e) => {
-                        tracing::error!("Failed to serialize profiles: {}", e);
-                        None
-                    }
-                }
-            }),
-        );
-        let profile_persistence_task = Some(tokio::spawn(
-            profile_persistence_service.run(shutdown_coordinator.subscribe()),
-        ));
+        let (profile_storage, profile_persistence_handle, profile_persistence_task) =
+            Self::wire_profile_persistence(config_path, save_delay, &shutdown_coordinator);
+        let profile_persistence_task = Some(profile_persistence_task);
 
         let (imaging_settings_store, imaging_persistence_task) = Self::wire_imaging_persistence(
             config_path,
@@ -1358,34 +1330,7 @@ impl Application {
         progress.begin_phase(StartupPhase::Network);
         tracing::debug!("Starting HTTP server...");
 
-        let server_config = {
-            let c = config_runtime.read();
-            OnvifServerConfig {
-                bind_address: c.server.bind_address.clone(),
-                port: c.server.port,
-                request_timeout_secs: c.server.request_timeout,
-                max_body_size: c.server.max_body_size,
-                enable_cors: false,
-                static_root: if c.server.static_root.is_empty() {
-                    Some("www".to_string())
-                } else {
-                    Some(c.server.static_root.clone())
-                },
-                http_verbose: c.logging.http_verbose,
-                tls_enabled: c.server.tls_enabled,
-                tls_cert_path: if c.server.tls_cert_path.is_empty() {
-                    None
-                } else {
-                    Some(std::path::PathBuf::from(&c.server.tls_cert_path))
-                },
-                tls_key_path: if c.server.tls_key_path.is_empty() {
-                    None
-                } else {
-                    Some(std::path::PathBuf::from(&c.server.tls_key_path))
-                },
-                rate_limit_per_minute: c.server.rate_limit_per_minute,
-            }
-        };
+        let server_config = Self::build_server_config(&config_runtime);
         let port = server_config.port;
 
         let server = Arc::new(
@@ -1404,29 +1349,8 @@ impl Application {
 
         // Phase 5: Discovery (optional in custom platform scenarios)
         progress.begin_phase(StartupPhase::Discovery);
-        let discovery_enabled = config_runtime.read().discovery.enabled;
-
-        let (discovery, discovery_task) = if discovery_enabled {
-            let discovery_config = Self::make_discovery_config(&config_runtime, port);
-
-            match Self::start_discovery(discovery_config).await {
-                Ok((disc, task)) => {
-                    tracing::info!("WS-Discovery service started successfully");
-                    (Some(disc), Some(task))
-                }
-                Err(e) => {
-                    tracing::warn!(
-                        "WS-Discovery failed to start, continuing in degraded mode: {}",
-                        e
-                    );
-                    progress.record_degraded("discovery", e.to_string());
-                    (None, None)
-                }
-            }
-        } else {
-            tracing::info!("WS-Discovery is disabled in configuration");
-            (None, None)
-        };
+        let (discovery, discovery_task) =
+            Self::start_discovery_phase(&config_runtime, port, &mut progress).await;
         progress.complete_phase();
 
         // Phase 6: Streaming (optional, gracefully degrades)

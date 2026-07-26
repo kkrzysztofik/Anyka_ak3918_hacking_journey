@@ -242,7 +242,10 @@ export const soapBodies = {
         return '0';
       }
       // Clamp to 3 decimal places and convert to string, removing trailing zeros
-      return (Math.round(speed * 1000) / 1000).toFixed(3).replace(/\.?0+$/, '');
+      // (split into a single-quantifier regex + endsWith check to avoid a
+      // ReDoS-prone combined `\.?0+$` pattern; behavior is identical for toFixed(3) output)
+      const fixed = (Math.round(speed * 1000) / 1000).toFixed(3).replace(/0+$/, '');
+      return fixed.endsWith('.') ? fixed.slice(0, -1) : fixed;
     };
     return `<tptz:ContinuousMove><tptz:ProfileToken>${escapeXml(profileToken)}</tptz:ProfileToken><tptz:Velocity><tt:PanTilt x="${formatSpeed(panSpeed)}" y="${formatSpeed(tiltSpeed)}" /></tptz:Velocity></tptz:ContinuousMove>`;
   },

@@ -11,6 +11,9 @@ import http from 'http'
 
 const PORT = process.env.PORT || 8081
 
+// Strip CR/LF so a crafted request URL can't forge extra log lines.
+const sanitizeForLog = value => String(value).replace(/[\r\n]/g, '')
+
 // Static SOAP responses for common operations
 const responses = {
   GetDeviceInformation: `<?xml version="1.0" encoding="UTF-8"?>
@@ -117,11 +120,11 @@ const server = http.createServer((req, res) => {
     const operation = detectOperation(body)
 
     if (operation && responses[operation]) {
-      console.log(`[MOCK] ${req.url} -> ${operation}`)
+      console.log(`[MOCK] ${sanitizeForLog(req.url)} -> ${operation}`)
       res.writeHead(200, { 'Content-Type': 'application/soap+xml; charset=utf-8' })
       res.end(responses[operation])
     } else {
-      console.log(`[MOCK] ${req.url} -> Unknown operation`)
+      console.log(`[MOCK] ${sanitizeForLog(req.url)} -> Unknown operation`)
       res.writeHead(400, { 'Content-Type': 'text/plain' })
       res.end('Unknown ONVIF operation')
     }

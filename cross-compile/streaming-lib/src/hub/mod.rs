@@ -1209,7 +1209,7 @@ impl StreamsHub {
             }
         } else {
             warn!(client_id = %uid, "cannot_find_client_id");
-        };
+        }
 
         Ok(())
     }

@@ -27,7 +27,7 @@ use super::ops::movement;
 use super::ops::presets;
 use super::ops::status;
 use super::state::PTZStateManager;
-use super::types::*;
+use super::types::PTZConfiguration;
 
 // ============================================================================
 // PTZService
@@ -543,6 +543,10 @@ impl ServiceHandler for PTZService {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::onvif::ptz::types::{
+        DEFAULT_CONFIG_TOKEN, DEFAULT_NODE_TOKEN, MAX_PRESETS, PTZSpeed, PTZVector, Vector1D,
+        Vector2D,
+    };
 
     fn create_test_service() -> PTZService {
         let state = Arc::new(PTZStateManager::new());

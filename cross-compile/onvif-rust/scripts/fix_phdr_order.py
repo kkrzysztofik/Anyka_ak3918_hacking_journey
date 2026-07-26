@@ -57,7 +57,7 @@ def fix_phdr_order(path, verbose=False):
 
         if tls_idx == -1 or dyn_idx == -1:
             if verbose:
-                print(f"No PT_TLS or PT_DYNAMIC found — skipping")
+                print("No PT_TLS or PT_DYNAMIC found — skipping")
             return False
 
         if dyn_idx < tls_idx:
@@ -98,5 +98,5 @@ if __name__ == '__main__':
 
     path = sys.argv[1]
     verbose = '--verbose' in sys.argv
-    modified = fix_phdr_order(path, verbose=True)
-    sys.exit(0 if not modified else 0)
+    fix_phdr_order(path, verbose=True)
+    sys.exit(0)

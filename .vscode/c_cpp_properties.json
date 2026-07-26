@@ -3,8 +3,8 @@
     {
       "name": "WSL GCC (Linux)",
       "includePath": [
-        "${workspaceFolder}/cross-compile/onvif/include",
-        "${workspaceFolder}/cross-compile/onvif/src",
+        "${workspaceFolder}/cross-compile/vendor-daemon/include",
+        "${workspaceFolder}/cross-compile/vendor-daemon/src",
         "${workspaceFolder}/cross-compile/anyka_reference/component",
         "${workspaceFolder}/cross-compile/anyka_reference/platform",
         "${workspaceFolder}/cross-compile/anyka_reference/akipc/include",
@@ -34,7 +34,7 @@
       ],
       "browse": {
         "path": [
-          "${workspaceFolder}/cross-compile/onvif",
+          "${workspaceFolder}/cross-compile/vendor-daemon",
           "${workspaceFolder}/cross-compile/anyka_reference"
         ],
         "limitSymbolsToIncludedHeaders": false,
@@ -45,8 +45,8 @@
     {
       "name": "Anyka AK3918 Cross-Compile (ARM)",
       "includePath": [
-        "${workspaceFolder}/cross-compile/onvif/include",
-        "${workspaceFolder}/cross-compile/onvif/src",
+        "${workspaceFolder}/cross-compile/vendor-daemon/include",
+        "${workspaceFolder}/cross-compile/vendor-daemon/src",
         "${workspaceFolder}/cross-compile/anyka_reference/component",
         "${workspaceFolder}/cross-compile/anyka_reference/platform",
         "${workspaceFolder}/cross-compile/anyka_reference/akipc/include",
@@ -73,7 +73,7 @@
       ],
       "browse": {
         "path": [
-          "${workspaceFolder}/cross-compile/onvif",
+          "${workspaceFolder}/cross-compile/vendor-daemon",
           "${workspaceFolder}/cross-compile/anyka_reference"
         ],
         "limitSymbolsToIncludedHeaders": false,

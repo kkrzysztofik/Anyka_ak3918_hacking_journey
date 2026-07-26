@@ -154,54 +154,12 @@ impl AnykaPlatform {
             network_info,
         })
     }
-}
 
-// Default implementation removed - use AnykaPlatform::new() for fallible initialization.
-// The Default trait should never panic per Rust best practices.
-
-#[async_trait]
-impl Platform for AnykaPlatform {
-    async fn get_device_info(&self) -> PlatformResult<DeviceInfo> {
-        Ok(self.device_info.clone())
-    }
-
-    fn video_input(&self) -> Arc<dyn VideoInput> {
-        self.video_input.clone()
-    }
-
-    fn video_encoder(&self) -> Arc<dyn VideoEncoder> {
-        self.video_encoder.clone()
-    }
-
-    fn stream_frame_age_ms(&self) -> Option<u64> {
-        self.video_encoder.stream_frame_age_ms()
-    }
-
-    fn audio_input(&self) -> Arc<dyn AudioInput> {
-        self.audio_input.clone()
-    }
-
-    fn audio_encoder(&self) -> Arc<dyn AudioEncoder> {
-        self.audio_encoder.clone()
-    }
-
-    fn ptz_control(&self) -> Option<Arc<dyn PTZControl>> {
-        self.ptz_control.clone()
-    }
-
-    fn imaging_control(&self) -> Option<Arc<dyn ImagingControl>> {
-        self.imaging_control.clone()
-    }
-
-    fn network_info(&self) -> Option<Arc<dyn NetworkInfo>> {
-        self.network_info.clone()
-    }
-
-    fn is_initialized(&self) -> bool {
-        self.initialized.load(Ordering::SeqCst)
-    }
-
-    async fn initialize(&self) -> PlatformResult<()> {
+    /// Initialize steps 1-5 of platform bring-up: sensor match, VI open, VPSS,
+    /// sensor resolution, dual-channel config and capture start.
+    ///
+    /// Each failure path rolls back only what this stage brought up.
+    async fn init_video_input(&self) -> PlatformResult<()> {
         // Step 1: Load ISP sensor configuration (must precede vi_open)
         self.video_input.match_sensor()?;
         tracing::info!("ISP sensor matched successfully");
@@ -250,22 +208,21 @@ impl Platform for AnykaPlatform {
         tokio::time::sleep(capture_stabilization_delay()).await;
         tracing::info!("Video input initialized: dual-channel config and capture started");
 
-        // Initialize dual video encoders (main 720p + sub 360p)
+        Ok(())
+    }
+
+    /// Initialize the dual video encoders (main 720p + sub 360p).
+    ///
+    /// On failure, closes any encoders opened by this stage (newest first) and
+    /// tears down the video input brought up by `init_video_input`.
+    async fn init_video_encoders(&self) -> PlatformResult<()> {
         let encoder_configs = self.video_encoder.get_configurations().await?;
         let mut initialized_encoder_tokens: Vec<String> = Vec::new();
         for config in &encoder_configs {
             if let Err(e) = self.video_encoder.init(config).await {
                 tracing::error!("Failed to initialize video encoder {}: {}", config.token, e);
 
-                for token in initialized_encoder_tokens.iter().rev() {
-                    if let Err(close_error) = self.video_encoder.close_encoder(token) {
-                        tracing::warn!(
-                            "Failed to rollback initialized encoder {}: {}",
-                            token,
-                            close_error
-                        );
-                    }
-                }
+                self.rollback_initialized_encoders(&initialized_encoder_tokens);
 
                 // Rollback: stop capture, close video input
                 let _ = self.video_input.capture_off();
@@ -283,14 +240,28 @@ impl Platform for AnykaPlatform {
             encoder_configs.len()
         );
 
-        // Step 6: Start frame production: bind VI+encoder and spawn polling threads.
+        Ok(())
+    }
+
+    /// Close already-initialized encoders in reverse order, logging failures.
+    fn rollback_initialized_encoders(&self, tokens: &[String]) {
+        for token in tokens.iter().rev() {
+            if let Err(close_error) = self.video_encoder.close_encoder(token) {
+                tracing::warn!(
+                    "Failed to rollback initialized encoder {}: {}",
+                    token,
+                    close_error
+                );
+            }
+        }
+    }
+
+    /// Step 6: bind VI + encoder handles and spawn the frame polling threads.
+    async fn start_frame_production(&self) -> PlatformResult<()> {
         let vi_handle = match self.video_input.get_handle() {
             Some(handle) => handle,
             None => {
-                let _ = self.video_encoder.close_all_encoders();
-                let _ = self.video_input.capture_off();
-                let _ = self.video_input.destroy_vpss();
-                let _ = self.video_input.close().await;
+                self.rollback_video_pipeline().await;
                 return Err(PlatformError::InitializationFailed(
                     "Video input handle missing after successful open".to_string(),
                 ));
@@ -303,10 +274,7 @@ impl Platform for AnykaPlatform {
         let main_enc = match main_enc_candidate {
             Some(handle) => handle,
             None => {
-                let _ = self.video_encoder.close_all_encoders();
-                let _ = self.video_input.capture_off();
-                let _ = self.video_input.destroy_vpss();
-                let _ = self.video_input.close().await;
+                self.rollback_video_pipeline().await;
                 return Err(PlatformError::InitializationFailed(
                     "Main encoder handle missing after successful init".to_string(),
                 ));
@@ -318,17 +286,26 @@ impl Platform for AnykaPlatform {
             .start_streaming(&vi_handle, &main_enc, sub_enc.as_ref())
         {
             tracing::error!("Failed to start streaming, rolling back: {}", e);
-            let _ = self.video_encoder.close_all_encoders();
-            let _ = self.video_input.capture_off();
-            let _ = self.video_input.destroy_vpss();
-            let _ = self.video_input.close().await;
+            self.rollback_video_pipeline().await;
             return Err(PlatformError::InitializationFailed(format!(
                 "Video streaming startup failed: {}",
                 e
             )));
         }
 
-        // Step 7: Validate VI/VENC pipeline readiness.
+        Ok(())
+    }
+
+    /// Best-effort teardown of encoders + video input during step 6 rollback.
+    async fn rollback_video_pipeline(&self) {
+        let _ = self.video_encoder.close_all_encoders();
+        let _ = self.video_input.capture_off();
+        let _ = self.video_input.destroy_vpss();
+        let _ = self.video_input.close().await;
+    }
+
+    /// Step 7: validate VI/VENC pipeline readiness, rolling back on failure.
+    fn validate_pipeline_readiness(&self) -> PlatformResult<()> {
         let readiness_timeout_ms = pipeline_ready_timeout_ms();
         let require_sub_pipeline = pipeline_require_sub();
         if let Err(e) = self.video_encoder.wait_for_stream_readiness(
@@ -351,6 +328,61 @@ impl Platform for AnykaPlatform {
             }
             return Err(e);
         }
+
+        Ok(())
+    }
+}
+
+// Default implementation removed - use AnykaPlatform::new() for fallible initialization.
+// The Default trait should never panic per Rust best practices.
+
+#[async_trait]
+impl Platform for AnykaPlatform {
+    async fn get_device_info(&self) -> PlatformResult<DeviceInfo> {
+        Ok(self.device_info.clone())
+    }
+
+    fn video_input(&self) -> Arc<dyn VideoInput> {
+        self.video_input.clone()
+    }
+
+    fn video_encoder(&self) -> Arc<dyn VideoEncoder> {
+        self.video_encoder.clone()
+    }
+
+    fn stream_frame_age_ms(&self) -> Option<u64> {
+        self.video_encoder.stream_frame_age_ms()
+    }
+
+    fn audio_input(&self) -> Arc<dyn AudioInput> {
+        self.audio_input.clone()
+    }
+
+    fn audio_encoder(&self) -> Arc<dyn AudioEncoder> {
+        self.audio_encoder.clone()
+    }
+
+    fn ptz_control(&self) -> Option<Arc<dyn PTZControl>> {
+        self.ptz_control.clone()
+    }
+
+    fn imaging_control(&self) -> Option<Arc<dyn ImagingControl>> {
+        self.imaging_control.clone()
+    }
+
+    fn network_info(&self) -> Option<Arc<dyn NetworkInfo>> {
+        self.network_info.clone()
+    }
+
+    fn is_initialized(&self) -> bool {
+        self.initialized.load(Ordering::SeqCst)
+    }
+
+    async fn initialize(&self) -> PlatformResult<()> {
+        self.init_video_input().await?;
+        self.init_video_encoders().await?;
+        self.start_frame_production().await?;
+        self.validate_pipeline_readiness()?;
 
         self.initialized.store(true, Ordering::SeqCst);
         Ok(())

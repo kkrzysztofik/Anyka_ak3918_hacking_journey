@@ -197,6 +197,8 @@ describe('networkService', () => {
       const mockResponse = createMockSOAPFaultResponse('soap:Sender', 'DNS Failed');
 
       vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
+
+      await expect(setDNS(true)).rejects.toThrow();
     });
   });
 });

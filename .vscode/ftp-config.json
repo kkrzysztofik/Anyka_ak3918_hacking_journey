@@ -33,11 +33,11 @@
     "examples": [
       {
         "description": "Upload binary via SCP",
-        "command": "scp cross-compile/onvif/out/onvifd root@192.168.1.100:/tmp/"
+        "command": "scp cross-compile/onvif-rust/target/armv5te-unknown-linux-uclibceabi/release/onvifd root@192.168.1.100:/tmp/"
       },
       {
         "description": "Copy to SD card payload",
-        "command": "cp cross-compile/onvif/out/onvifd SD_card_contents/anyka_hack/usr/bin/"
+        "command": "cp cross-compile/onvif-rust/target/armv5te-unknown-linux-uclibceabi/release/onvifd SD_card_contents/anyka_hack/usr/bin/"
       }
     ]
   }
