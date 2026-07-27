@@ -2111,6 +2111,12 @@ impl RtspServerSession {
         {
             let requested = Self::parse_session_header(session_hdr);
             if !requested.is_empty() && requested != current.to_string() {
+                warn!(
+                    remote_addr = %self.remote_addr,
+                    requested = ?requested,
+                    current = ?current.to_string(),
+                    "session_id_mismatch"
+                );
                 return Some(Self::gen_rtsp_response(
                     454,
                     "Session Not Found",
