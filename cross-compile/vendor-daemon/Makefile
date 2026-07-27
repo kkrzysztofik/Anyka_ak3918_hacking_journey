@@ -20,11 +20,21 @@
 #   ANYKA_INCLUDE_DIR - SDK include directory (default: ./include)
 #   ANYKA_LIB_DIR     - SDK shared-library directory (default: ./lib)
 
-ANYKA_CC          ?= /home/kmk/anyka-dev/toolchain/arm-anykav200-crosstool/usr/bin/arm-anykav200-linux-uclibcgnueabi-gcc
+# Prefer repo-local crosstool-ng (works on modern x86_64 hosts). Override with ANYKA_CC=...
+REPO_ROOT         := $(abspath $(CURDIR)/../..)
+TOOLCHAIN_NG_CC   := $(REPO_ROOT)/toolchain/arm-anykav200-crosstool-ng/bin/arm-unknown-linux-uclibcgnueabi-gcc
+TOOLCHAIN_LEGACY_CC := $(REPO_ROOT)/toolchain/arm-anykav200-crosstool/usr/bin/arm-anykav200-linux-uclibcgnueabi-gcc
+
+ifeq ($(wildcard $(TOOLCHAIN_NG_CC)),)
+  ANYKA_CC ?= $(TOOLCHAIN_LEGACY_CC)
+else
+  ANYKA_CC ?= $(TOOLCHAIN_NG_CC)
+endif
+
 ANYKA_INCLUDE_DIR ?= $(CURDIR)/include
 ANYKA_LIB_DIR     ?= $(CURDIR)/lib
 
-SD_DEPLOY_DIR = /home/kmk/anyka-dev/SD_card_contents/anyka_hack/vendor-daemon
+SD_DEPLOY_DIR ?= $(REPO_ROOT)/SD_card_contents/anyka_hack/vendor-daemon
 
 CC = $(ANYKA_CC)
 
