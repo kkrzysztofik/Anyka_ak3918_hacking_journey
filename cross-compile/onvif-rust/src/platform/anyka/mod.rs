@@ -73,18 +73,51 @@ impl AnykaPlatform {
         Self::with_isp_config(None)
     }
 
-    /// Create a new Anyka platform instance with an optional ISP config path.
-    ///
-    /// If `isp_config_path` is `Some`, that path is used directly for
-    /// `ak_vi_match_sensor()`. If `None`, the default search paths are used.
-    pub fn with_isp_config(isp_config_path: Option<PathBuf>) -> PlatformResult<Self> {
-        let device_info = DeviceInfo {
+    /// Static hardware descriptor reported by `get_device_info`.
+    fn device_descriptor() -> DeviceInfo {
+        DeviceInfo {
             manufacturer: "Anyka".to_string(),
             model: "AK3918".to_string(),
             firmware_version: "1.0.0".to_string(),
             serial_number: "AK3918-001".to_string(),
             hardware_id: "ak3918-hw".to_string(),
-        };
+        }
+    }
+
+    /// Build a platform backed by caller-supplied mock HALs (tests only).
+    ///
+    /// Skips the `AnykaIpc` connection that `with_isp_config` requires, so the
+    /// bring-up and teardown orchestration can be exercised without hardware.
+    /// PTZ/imaging/network are left absent — they are independently tested.
+    #[cfg(test)]
+    pub(super) fn with_mocked_hal(
+        video_ffi: Arc<dyn VideoHalTrait>,
+        audio_ffi: Arc<dyn crate::hal::common::audio::AudioHalTrait>,
+        isp_config_path: Option<PathBuf>,
+    ) -> Self {
+        Self {
+            initialized: AtomicBool::new(false),
+            device_info: Self::device_descriptor(),
+            sensor_resolution: RwLock::new(None),
+            video_input: Arc::new(AnykaVideoInput::with_ffi(
+                video_ffi.clone(),
+                isp_config_path,
+            )),
+            video_encoder: Arc::new(AnykaVideoEncoder::with_ffi(video_ffi)),
+            audio_input: Arc::new(AnykaAudioInput::with_ffi(audio_ffi.clone())),
+            audio_encoder: Arc::new(AnykaAudioEncoder::with_ffi(audio_ffi)),
+            ptz_control: None,
+            imaging_control: None,
+            network_info: None,
+        }
+    }
+
+    /// Create a new Anyka platform instance with an optional ISP config path.
+    ///
+    /// If `isp_config_path` is `Some`, that path is used directly for
+    /// `ak_vi_match_sensor()`. If `None`, the default search paths are used.
+    pub fn with_isp_config(isp_config_path: Option<PathBuf>) -> PlatformResult<Self> {
+        let device_info = Self::device_descriptor();
 
         let (video_input, video_encoder, audio_input, audio_encoder, imaging_control) = {
             let shared_ipc = Arc::new(AnykaIpc::new().map_err(|e| {

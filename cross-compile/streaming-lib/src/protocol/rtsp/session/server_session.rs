@@ -188,6 +188,49 @@ fn log_rtp_packet_stats(
     }
 }
 
+/// Marshal a packet, account it against the track counters, and emit the shared
+/// anomaly/sample logs.
+///
+/// Shared preamble of the UDP and TCP-interleaved send paths; returns the
+/// marshalled bytes and their length for the transport-specific framing that
+/// follows.
+#[allow(clippy::too_many_arguments)]
+fn marshal_and_log_rtp_packet(
+    protocol: &str,
+    packet: &RtpPacket,
+    counters: &RtpTrackCounters,
+    stream_identifier: Option<&StreamIdentifier>,
+    sample_interval: u32,
+    track_label: &str,
+    session_id: &str,
+    remote_for_rtp: SocketAddr,
+) -> Result<(BytesMut, usize), PackerError> {
+    let msg = packet.marshal()?;
+    let payload_len = msg.len();
+    let stream_path = stream_identifier
+        .map(|id| id.to_string())
+        .unwrap_or_else(|| "unknown".to_string());
+    let stats = counters.on_packet_sent(
+        payload_len,
+        packet.header.seq_number,
+        packet.header.timestamp,
+    );
+
+    log_rtp_packet_stats(
+        protocol,
+        &stats,
+        packet,
+        payload_len,
+        sample_interval,
+        track_label,
+        session_id,
+        remote_for_rtp,
+        &stream_path,
+    );
+
+    Ok((msg, payload_len))
+}
+
 /// Write one accumulated frame's worth of RTP packets to the UDP socket.
 ///
 /// Pace UDP writes: yield every N packets to let the kernel drain the socket
@@ -1275,29 +1318,16 @@ impl RtspServerSession {
                 let session_id = session_id.clone();
                 let frame_buffer = frame_buffer.clone();
                 Box::pin(async move {
-                    let msg = packet.marshal()?;
-                    let payload_len = msg.len();
-                    let stream_path = stream_identifier
-                        .as_ref()
-                        .map(|id| id.to_string())
-                        .unwrap_or_else(|| "unknown".to_string());
-                    let stats = counters.on_packet_sent(
-                        payload_len,
-                        packet.header.seq_number,
-                        packet.header.timestamp,
-                    );
-
-                    log_rtp_packet_stats(
+                    let (msg, payload_len) = marshal_and_log_rtp_packet(
                         "TCP",
-                        &stats,
                         &packet,
-                        payload_len,
+                        &counters,
+                        stream_identifier.as_ref(),
                         sample_interval,
                         &track_label,
                         &session_id,
                         remote_for_rtp,
-                        &stream_path,
-                    );
+                    )?;
 
                     // Build interleaved RTP packet: 0x24 + channel + length + payload
                     let interleaved_chunk = 4usize.saturating_add(payload_len);
@@ -1397,29 +1427,16 @@ impl RtspServerSession {
                 let session_id = session_id.clone();
                 let udp_accum = udp_accum.clone();
                 Box::pin(async move {
-                    let msg = packet.marshal()?;
-                    let payload_len = msg.len();
-                    let stream_path = stream_identifier
-                        .as_ref()
-                        .map(|id| id.to_string())
-                        .unwrap_or_else(|| "unknown".to_string());
-                    let stats = counters.on_packet_sent(
-                        payload_len,
-                        packet.header.seq_number,
-                        packet.header.timestamp,
-                    );
-
-                    log_rtp_packet_stats(
+                    let (msg, _payload_len) = marshal_and_log_rtp_packet(
                         "UDP",
-                        &stats,
                         &packet,
-                        payload_len,
+                        &counters,
+                        stream_identifier.as_ref(),
                         sample_interval,
                         &track_label,
                         &session_id,
                         remote_for_rtp,
-                        &stream_path,
-                    );
+                    )?;
 
                     // Accumulate packet into buffer (bounded; same cap as TCP interleaved framing).
                     let mut guard = udp_accum.lock().await;

@@ -554,107 +554,138 @@ fn test_invoke_owned_callbacks_from_map_panic_recovery() {
 
 // ===== handle_pushed_frame / run_push_loop Tests =====
 
+/// Shared setup for the push-delivery tests: an `AnykaIpc` over socketpairs, one
+/// registered counting callback, and fresh per-stream state.
+struct PushFixture {
+    ipc: crate::hal::anyka::ipc::AnykaIpc,
+    owned_callbacks: Arc<RwLock<HashMap<CallbackId, Arc<dyn OwnedFrameCallback>>>>,
+    cb: Arc<CountingOwnedCallback>,
+    stream_health: StreamHealthCounters,
+    main_state: StreamState,
+    sub_state: StreamState,
+    // Peer ends are kept alive so the sockets stay open (a dropped peer would
+    // turn a quiet poll into POLLHUP).
+    _ctrl_peer: std::os::unix::net::UnixStream,
+    _frame_peer: Option<std::os::unix::net::UnixStream>,
+}
+
+impl PushFixture {
+    /// `with_frame_socket` attaches a silent frame-notification socket, so
+    /// `recv_pushed_frame` polls and times out instead of failing immediately.
+    fn new(with_frame_socket: bool) -> Self {
+        use std::os::unix::net::UnixStream;
+
+        let (ctrl_a, ctrl_peer) = UnixStream::pair().unwrap();
+        let (frame_reader, frame_peer) = if with_frame_socket {
+            let (reader, peer) = UnixStream::pair().unwrap();
+            (Some(reader), Some(peer))
+        } else {
+            (None, None)
+        };
+        let ipc =
+            crate::hal::anyka::ipc::AnykaIpc::from_parts_for_test(ctrl_a, frame_reader, None, None);
+
+        let owned_callbacks: Arc<RwLock<HashMap<CallbackId, Arc<dyn OwnedFrameCallback>>>> =
+            Arc::new(RwLock::new(HashMap::new()));
+        let cb = Arc::new(CountingOwnedCallback::new());
+        register_owned_callback_for_test(
+            &owned_callbacks,
+            Arc::clone(&cb) as Arc<dyn OwnedFrameCallback>,
+        );
+
+        Self {
+            ipc,
+            owned_callbacks,
+            cb,
+            stream_health: StreamHealthCounters::default(),
+            main_state: StreamState::new(StreamId::VideoMain, None),
+            sub_state: StreamState::new(StreamId::VideoSub, None),
+            _ctrl_peer: ctrl_peer,
+            _frame_peer: frame_peer,
+        }
+    }
+
+    fn push(&mut self, frame: OwnedFrame) {
+        handle_pushed_frame(
+            &self.ipc,
+            &self.owned_callbacks,
+            &self.stream_health,
+            &mut self.main_state,
+            &mut self.sub_state,
+            frame,
+        );
+    }
+}
+
+fn test_frame(payload: &[u8], frame_type: FrameType, stream_id: StreamId) -> OwnedFrame {
+    OwnedFrame {
+        data: bytes::BytesMut::from(payload),
+        timestamp: 1000,
+        frame_type,
+        stream_id,
+    }
+}
+
 #[test]
 fn test_handle_pushed_frame_updates_state_and_invokes_callback() {
-    use std::os::unix::net::UnixStream;
+    let mut fx = PushFixture::new(false);
+    let payload = b"iframe payload";
 
-    let (ctrl_a, _ctrl_b) = UnixStream::pair().unwrap();
-    let ipc = crate::hal::anyka::ipc::AnykaIpc::from_parts_for_test(ctrl_a, None, None, None);
+    fx.push(test_frame(
+        payload,
+        FrameType::VideoIFrame,
+        StreamId::VideoMain,
+    ));
 
-    let owned_callbacks: Arc<RwLock<HashMap<CallbackId, Arc<dyn OwnedFrameCallback>>>> =
-        Arc::new(RwLock::new(HashMap::new()));
-    let cb = Arc::new(CountingOwnedCallback::new());
-    let cb_ref = Arc::clone(&cb);
-    register_owned_callback_for_test(&owned_callbacks, cb);
+    assert_eq!(fx.cb.call_count(), 1);
+    assert_eq!(fx.cb.last_size(), payload.len() as u64);
+    assert_eq!(fx.main_state.frame_count, 1);
+    assert_eq!(fx.main_state.iframe_count, 1);
+    assert_eq!(fx.main_state.total_bytes, payload.len() as u64);
+    assert_eq!(fx.sub_state.frame_count, 0);
+    assert_eq!(fx.stream_health.main_frames.load(Ordering::SeqCst), 1);
+    assert_eq!(fx.stream_health.sub_frames.load(Ordering::SeqCst), 0);
+}
 
-    let stream_health = StreamHealthCounters::default();
-    let mut main_state = StreamState::new(StreamId::VideoMain, None);
-    let mut sub_state = StreamState::new(StreamId::VideoSub, None);
+#[test]
+fn test_handle_pushed_frame_routes_sub_stream_and_skips_iframe_count() {
+    let mut fx = PushFixture::new(false);
+    let payload = b"pframe payload";
 
-    let owned_frame = OwnedFrame {
-        data: bytes::BytesMut::from(&b"iframe payload"[..]),
-        timestamp: 1000,
-        frame_type: FrameType::VideoIFrame,
-        stream_id: StreamId::VideoMain,
-    };
+    fx.push(test_frame(
+        payload,
+        FrameType::VideoPFrame,
+        StreamId::VideoSub,
+    ));
 
-    handle_pushed_frame(
-        &ipc,
-        &owned_callbacks,
-        &stream_health,
-        &mut main_state,
-        &mut sub_state,
-        owned_frame,
-    );
-
-    assert_eq!(cb_ref.call_count(), 1);
-    assert_eq!(cb_ref.last_size(), "iframe payload".len() as u64);
-    assert_eq!(main_state.frame_count, 1);
-    assert_eq!(main_state.iframe_count, 1);
-    assert_eq!(main_state.total_bytes, "iframe payload".len() as u64);
-    assert_eq!(sub_state.frame_count, 0);
-    assert_eq!(stream_health.main_frames.load(Ordering::SeqCst), 1);
-    assert_eq!(stream_health.sub_frames.load(Ordering::SeqCst), 0);
+    assert_eq!(fx.cb.call_count(), 1);
+    assert_eq!(fx.sub_state.frame_count, 1);
+    assert_eq!(fx.sub_state.iframe_count, 0);
+    assert_eq!(fx.main_state.frame_count, 0);
+    assert_eq!(fx.stream_health.sub_frames.load(Ordering::SeqCst), 1);
+    assert_eq!(fx.stream_health.main_frames.load(Ordering::SeqCst), 0);
 }
 
 #[test]
 fn test_handle_pushed_frame_ignores_audio_frame() {
-    use std::os::unix::net::UnixStream;
+    let mut fx = PushFixture::new(false);
 
-    let (ctrl_a, _ctrl_b) = UnixStream::pair().unwrap();
-    let ipc = crate::hal::anyka::ipc::AnykaIpc::from_parts_for_test(ctrl_a, None, None, None);
+    fx.push(test_frame(
+        b"audio payload",
+        FrameType::AudioPacket,
+        StreamId::Audio,
+    ));
 
-    let owned_callbacks: Arc<RwLock<HashMap<CallbackId, Arc<dyn OwnedFrameCallback>>>> =
-        Arc::new(RwLock::new(HashMap::new()));
-    let cb = Arc::new(CountingOwnedCallback::new());
-    let cb_ref = Arc::clone(&cb);
-    register_owned_callback_for_test(&owned_callbacks, cb);
-
-    let stream_health = StreamHealthCounters::default();
-    let mut main_state = StreamState::new(StreamId::VideoMain, None);
-    let mut sub_state = StreamState::new(StreamId::VideoSub, None);
-
-    let owned_frame = OwnedFrame {
-        data: bytes::BytesMut::from(&b"audio payload"[..]),
-        timestamp: 1000,
-        frame_type: FrameType::AudioPacket,
-        stream_id: StreamId::Audio,
-    };
-
-    handle_pushed_frame(
-        &ipc,
-        &owned_callbacks,
-        &stream_health,
-        &mut main_state,
-        &mut sub_state,
-        owned_frame,
-    );
-
-    assert_eq!(cb_ref.call_count(), 0);
-    assert_eq!(main_state.frame_count, 0);
-    assert_eq!(sub_state.frame_count, 0);
+    assert_eq!(fx.cb.call_count(), 0);
+    assert_eq!(fx.main_state.frame_count, 0);
+    assert_eq!(fx.sub_state.frame_count, 0);
 }
 
 #[test]
 fn test_run_push_loop_exits_on_stop_signal_without_invoking_callbacks() {
-    use std::os::unix::net::UnixStream;
-
     // Frame socket stays open but silent, so each poll cycle times out with no
     // data — exactly what run_push_loop sees while waiting for a stop signal.
-    let (frame_reader, _frame_writer) = UnixStream::pair().unwrap();
-    let (ctrl_a, _ctrl_b) = UnixStream::pair().unwrap();
-    let ipc = crate::hal::anyka::ipc::AnykaIpc::from_parts_for_test(
-        ctrl_a,
-        Some(frame_reader),
-        None,
-        None,
-    );
-
-    let owned_callbacks: Arc<RwLock<HashMap<CallbackId, Arc<dyn OwnedFrameCallback>>>> =
-        Arc::new(RwLock::new(HashMap::new()));
-    let cb = Arc::new(CountingOwnedCallback::new());
-    let cb_ref = Arc::clone(&cb);
-    register_owned_callback_for_test(&owned_callbacks, cb);
+    let mut fx = PushFixture::new(true);
 
     let stop_signal = Arc::new(AtomicBool::new(false));
     let stop_signal_setter = Arc::clone(&stop_signal);
@@ -663,24 +694,20 @@ fn test_run_push_loop_exits_on_stop_signal_without_invoking_callbacks() {
         stop_signal_setter.store(true, Ordering::SeqCst);
     });
 
-    let stream_health = StreamHealthCounters::default();
-    let mut main_state = StreamState::new(StreamId::VideoMain, None);
-    let mut sub_state = StreamState::new(StreamId::VideoSub, None);
-
     run_push_loop(
-        &ipc,
-        &owned_callbacks,
+        &fx.ipc,
+        &fx.owned_callbacks,
         &stop_signal,
-        &stream_health,
+        &fx.stream_health,
         None,
-        &mut main_state,
-        &mut sub_state,
+        &mut fx.main_state,
+        &mut fx.sub_state,
     );
 
     setter_thread.join().unwrap();
 
-    assert_eq!(cb_ref.call_count(), 0);
-    assert_eq!(stream_health.main_frames.load(Ordering::SeqCst), 0);
+    assert_eq!(fx.cb.call_count(), 0);
+    assert_eq!(fx.stream_health.main_frames.load(Ordering::SeqCst), 0);
 }
 
 #[tokio::test]
