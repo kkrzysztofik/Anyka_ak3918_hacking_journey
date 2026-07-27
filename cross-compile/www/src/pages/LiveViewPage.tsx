@@ -210,6 +210,7 @@ export default function LiveViewPage() {
                 <fieldset className="m-0 flex appearance-none rounded-lg border border-0 border-zinc-700/50 bg-zinc-900/80 p-0 p-1">
                   <legend className="sr-only">Stream type</legend>
                   <button
+                    type="button"
                     onClick={() => setStreamType('main')}
                     className={cn(
                       'rounded-md px-3 py-1 text-xs font-medium transition-colors',
@@ -223,6 +224,7 @@ export default function LiveViewPage() {
                     Main Stream
                   </button>
                   <button
+                    type="button"
                     onClick={() => setStreamType('sub')}
                     className={cn(
                       'rounded-md px-3 py-1 text-xs font-medium transition-colors',

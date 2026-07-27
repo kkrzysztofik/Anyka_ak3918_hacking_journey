@@ -173,6 +173,16 @@ const TURN_TIMEOUT_SECS: u64 = 60;
 /// Poll cadence for the interruptible wait loop (milliseconds).
 const WAIT_POLL_MS: i64 = 100;
 
+/// Outcome of a single `select()` poll tick on a motor fd.
+enum PollOutcome {
+    /// The fd is readable; `notify_data` is pending.
+    Readable,
+    /// The poll tick expired with no event.
+    TimedOut,
+    /// `select()` was interrupted by a signal.
+    Interrupted,
+}
+
 /// Single motor handle (one fd).
 ///
 /// All methods take `&self`: the kernel serialises ioctls, and `read()` is performed
@@ -303,47 +313,68 @@ impl MotorHandle {
                 return Ok((NotifyData::default(), true));
             }
 
-            let mut read_fds: libc::fd_set = unsafe { std::mem::zeroed() };
-            unsafe {
-                libc::FD_ZERO(&mut read_fds);
-                libc::FD_SET(fd, &mut read_fds);
-            }
-            let mut tv = libc::timeval {
-                tv_sec: 0,
-                tv_usec: (WAIT_POLL_MS * 1000) as libc::suseconds_t,
-            };
-            let ret = unsafe {
-                libc::select(
-                    fd + 1,
-                    &mut read_fds,
-                    std::ptr::null_mut(),
-                    std::ptr::null_mut(),
-                    &mut tv,
-                )
-            };
-            if ret < 0 {
-                let err = std::io::Error::last_os_error();
-                if err.raw_os_error() == Some(libc::EINTR) {
+            match Self::poll_readable(fd)? {
+                // Interrupted by a signal: re-check the stop flag and poll again.
+                PollOutcome::Interrupted => continue,
+                PollOutcome::TimedOut => {
+                    // Poll tick with no event: re-check stop flag and deadline.
+                    if Instant::now() >= deadline {
+                        return Err(PlatformError::HardwareFailure(
+                            "motor wait timed out".to_string(),
+                        ));
+                    }
                     continue;
                 }
-                return Err(PlatformError::HardwareFailure(format!(
-                    "select error: {}",
-                    err
-                )));
-            }
-            if ret == 0 {
-                // Poll tick with no event: re-check stop flag and deadline.
-                if Instant::now() >= deadline {
-                    return Err(PlatformError::HardwareFailure(
-                        "motor wait timed out".to_string(),
-                    ));
+                PollOutcome::Readable => {
+                    // fd readable → consume the notify_data.
+                    let notify = self.read_notify()?;
+                    return Ok((notify, false));
                 }
-                continue;
             }
-            // fd readable → consume the notify_data.
-            let notify = self.read_notify()?;
-            return Ok((notify, false));
         }
+    }
+
+    /// Wait up to one `WAIT_POLL_MS` tick for the motor fd to become readable.
+    fn poll_readable(fd: RawFd) -> PlatformResult<PollOutcome> {
+        // SAFETY: fd_set is a plain-old-data bitset; all-zero bits is a valid
+        // representation, so zero-initializing it is sound.
+        let mut read_fds: libc::fd_set = unsafe { std::mem::zeroed() };
+        // SAFETY: `read_fds` is a valid, live `fd_set` from the line above.
+        // `fd` is the caller-owned motor device fd and is within FD_SETSIZE.
+        unsafe {
+            libc::FD_ZERO(&mut read_fds);
+            libc::FD_SET(fd, &mut read_fds);
+        }
+        let mut tv = libc::timeval {
+            tv_sec: 0,
+            tv_usec: (WAIT_POLL_MS * 1000) as libc::suseconds_t,
+        };
+        // SAFETY: `read_fds` and `tv` are valid, live, and properly
+        // initialized above; the write/except sets are null, which
+        // `select(2)` accepts; `fd + 1` matches the single fd registered.
+        let ret = unsafe {
+            libc::select(
+                fd + 1,
+                &mut read_fds,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                &mut tv,
+            )
+        };
+        if ret < 0 {
+            let err = std::io::Error::last_os_error();
+            if err.raw_os_error() == Some(libc::EINTR) {
+                return Ok(PollOutcome::Interrupted);
+            }
+            return Err(PlatformError::HardwareFailure(format!(
+                "select error: {}",
+                err
+            )));
+        }
+        if ret == 0 {
+            return Ok(PollOutcome::TimedOut);
+        }
+        Ok(PollOutcome::Readable)
     }
 
     fn degree_to_steps(&self, degree: i32) -> i32 {
@@ -628,5 +659,29 @@ mod tests {
         assert!(!driver.stop_flag.load(Ordering::SeqCst));
         driver.interrupt();
         assert!(driver.stop_flag.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn test_poll_readable_returns_readable_when_data_available() {
+        use std::io::Write;
+        use std::os::unix::io::AsRawFd;
+        use std::os::unix::net::UnixStream;
+
+        let (mut writer, reader) = UnixStream::pair().expect("socketpair");
+        writer.write_all(b"x").expect("write");
+
+        let outcome = MotorHandle::poll_readable(reader.as_raw_fd());
+        assert!(matches!(outcome, Ok(PollOutcome::Readable)));
+    }
+
+    #[test]
+    fn test_poll_readable_times_out_when_no_data() {
+        use std::os::unix::io::AsRawFd;
+        use std::os::unix::net::UnixStream;
+
+        let (_writer, reader) = UnixStream::pair().expect("socketpair");
+
+        let outcome = MotorHandle::poll_readable(reader.as_raw_fd());
+        assert!(matches!(outcome, Ok(PollOutcome::TimedOut)));
     }
 }

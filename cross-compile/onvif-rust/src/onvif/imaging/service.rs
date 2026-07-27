@@ -8,7 +8,13 @@ use std::sync::Arc;
 use crate::config::ConfigRuntime;
 use crate::onvif::dispatcher::ServiceHandler;
 use crate::onvif::error::{OnvifError, OnvifResult};
-use crate::onvif::types::imaging::*;
+use crate::onvif::types::imaging::{
+    GetCurrentPreset, GetCurrentPresetResponse, GetImagingSettings, GetImagingSettingsResponse,
+    GetMoveOptions, GetMoveOptionsResponse, GetOptions, GetOptionsResponse, GetPresets,
+    GetPresetsResponse, GetServiceCapabilities, GetServiceCapabilitiesResponse, GetStatus,
+    GetStatusResponse, Move, MoveResponse, SetCurrentPreset, SetCurrentPresetResponse,
+    SetImagingSettings, SetImagingSettingsResponse, Stop, StopResponse,
+};
 use crate::platform::Platform;
 
 use async_trait::async_trait;
@@ -335,6 +341,7 @@ impl ServiceHandler for ImagingService {
 mod tests {
     use super::*;
     use crate::onvif::types::common::ImagingSettings20;
+    use crate::onvif::types::imaging::FocusMove;
 
     #[test]
     fn test_new_imaging_service() {

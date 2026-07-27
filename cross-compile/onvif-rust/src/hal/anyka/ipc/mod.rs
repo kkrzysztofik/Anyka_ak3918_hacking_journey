@@ -694,92 +694,115 @@ impl AnykaIpc {
     /// Exits when the job channel is closed (all senders dropped).
     fn run_owner(mut stream: UnixStream, connect: CtrlConnect, mut job_rx: mpsc::Receiver<IpcJob>) {
         while let Some(job) = job_rx.blocking_recv() {
-            let started = Instant::now();
-            let cmd_name = Self::cmd_name(job.cmd_id);
-            if is_ipc_debug_enabled() {
-                debug!(
-                    cmd_id = job.cmd_id,
-                    cmd_name,
-                    req_len = job.req_data.len(),
-                    "IPC request start"
-                );
-            }
-
-            let mut result = Self::exec_on_stream(&mut stream, job.cmd_id, &job.req_data);
-
-            if let Err(ref e) = result {
-                warn!(
-                    cmd_id = job.cmd_id,
-                    cmd_name,
-                    elapsed_ms = started.elapsed().as_millis(),
-                    error = %e,
-                    "IPC request failed; attempting reconnect"
-                );
-                match connect.reconnect() {
-                    Ok(new_stream) => {
-                        stream = new_stream;
-                        if is_ipc_debug_enabled() {
-                            debug!(cmd_id = job.cmd_id, cmd_name, "IPC request retry start");
-                        }
-                        let retry_started = Instant::now();
-                        result = Self::exec_on_stream(&mut stream, job.cmd_id, &job.req_data);
-                        match &result {
-                            Ok((status, resp_data)) => {
-                                if is_ipc_debug_enabled() {
-                                    debug!(
-                                        cmd_id = job.cmd_id,
-                                        cmd_name,
-                                        status = *status,
-                                        resp_len = resp_data.len(),
-                                        elapsed_ms = retry_started.elapsed().as_millis(),
-                                        "IPC request retry done"
-                                    );
-                                }
-                            }
-                            Err(err) => {
-                                warn!(
-                                    cmd_id = job.cmd_id,
-                                    cmd_name,
-                                    elapsed_ms = retry_started.elapsed().as_millis(),
-                                    error = %err,
-                                    "IPC request retry failed"
-                                );
-                            }
-                        }
-                    }
-                    Err(reconnect_err) => {
-                        warn!(
-                            cmd_id = job.cmd_id,
-                            cmd_name,
-                            error = %reconnect_err,
-                            "IPC reconnect failed"
-                        );
-                        result = Err(reconnect_err);
-                    }
-                }
-            } else if is_ipc_debug_enabled() {
-                let (status, resp_len) = result
-                    .as_ref()
-                    .map(|(s, d)| (*s, d.len()))
-                    .unwrap_or((0, 0));
-                debug!(
-                    cmd_id = job.cmd_id,
-                    cmd_name,
-                    status,
-                    resp_len,
-                    elapsed_ms = started.elapsed().as_millis(),
-                    "IPC request done"
-                );
-            }
-
-            // The receiver may have gone away (async caller timed out and dropped the
-            // oneshot); that is expected and not an error.
-            let _ = job.reply.send(result);
+            Self::process_job(&mut stream, &connect, job);
         }
 
         if is_ipc_debug_enabled() {
             debug!("IPC control owner thread exiting");
         }
+    }
+
+    /// Execute a single job on the owned stream and reply over its oneshot channel.
+    ///
+    /// On I/O error, attempts one reconnect + retry before replying.
+    fn process_job(stream: &mut UnixStream, connect: &CtrlConnect, job: IpcJob) {
+        let started = Instant::now();
+        let cmd_name = Self::cmd_name(job.cmd_id);
+        if is_ipc_debug_enabled() {
+            debug!(
+                cmd_id = job.cmd_id,
+                cmd_name,
+                req_len = job.req_data.len(),
+                "IPC request start"
+            );
+        }
+
+        let mut result = Self::exec_on_stream(stream, job.cmd_id, &job.req_data);
+
+        if let Err(ref e) = result {
+            warn!(
+                cmd_id = job.cmd_id,
+                cmd_name,
+                elapsed_ms = started.elapsed().as_millis(),
+                error = %e,
+                "IPC request failed; attempting reconnect"
+            );
+            result =
+                Self::reconnect_and_retry(stream, connect, job.cmd_id, cmd_name, &job.req_data);
+        } else if is_ipc_debug_enabled() {
+            let (status, resp_len) = result
+                .as_ref()
+                .map(|(s, d)| (*s, d.len()))
+                .unwrap_or((0, 0));
+            debug!(
+                cmd_id = job.cmd_id,
+                cmd_name,
+                status,
+                resp_len,
+                elapsed_ms = started.elapsed().as_millis(),
+                "IPC request done"
+            );
+        }
+
+        // The receiver may have gone away (async caller timed out and dropped the
+        // oneshot); that is expected and not an error.
+        let _ = job.reply.send(result);
+    }
+
+    /// Reconnect the control stream and retry the request once.
+    ///
+    /// On reconnect failure the reconnect error is returned and `stream` is left
+    /// untouched.
+    fn reconnect_and_retry(
+        stream: &mut UnixStream,
+        connect: &CtrlConnect,
+        cmd_id: i32,
+        cmd_name: &'static str,
+        req_data: &[u8],
+    ) -> PlatformResult<(i32, Vec<u8>)> {
+        let new_stream = match connect.reconnect() {
+            Ok(new_stream) => new_stream,
+            Err(reconnect_err) => {
+                warn!(
+                    cmd_id,
+                    cmd_name,
+                    error = %reconnect_err,
+                    "IPC reconnect failed"
+                );
+                return Err(reconnect_err);
+            }
+        };
+        *stream = new_stream;
+
+        if is_ipc_debug_enabled() {
+            debug!(cmd_id, cmd_name, "IPC request retry start");
+        }
+        let retry_started = Instant::now();
+        let result = Self::exec_on_stream(stream, cmd_id, req_data);
+        match &result {
+            Ok((status, resp_data)) => {
+                if is_ipc_debug_enabled() {
+                    debug!(
+                        cmd_id,
+                        cmd_name,
+                        status = *status,
+                        resp_len = resp_data.len(),
+                        elapsed_ms = retry_started.elapsed().as_millis(),
+                        "IPC request retry done"
+                    );
+                }
+            }
+            Err(err) => {
+                warn!(
+                    cmd_id,
+                    cmd_name,
+                    elapsed_ms = retry_started.elapsed().as_millis(),
+                    error = %err,
+                    "IPC request retry failed"
+                );
+            }
+        }
+        result
     }
 
     /// Map I/O errors to PlatformError, distinguishing timeouts from hardware failures.
@@ -1463,35 +1486,9 @@ pub(crate) mod test_helpers {
             let path_clone = socket_path.clone();
             let handle = std::thread::spawn(move || {
                 if let Ok((mut stream, _)) = listener.accept() {
-                    loop {
-                        // Read cmd_id (i32 LE)
-                        let mut cmd_buf = [0u8; 4];
-                        if stream.read_exact(&mut cmd_buf).is_err() {
-                            break;
-                        }
-                        let cmd_id = i32::from_le_bytes(cmd_buf);
-
-                        // Read req_len (u32 LE)
-                        let mut len_buf = [0u8; 4];
-                        if stream.read_exact(&mut len_buf).is_err() {
-                            break;
-                        }
-                        let req_len = u32::from_le_bytes(len_buf) as usize;
-
-                        // Read req_data
-                        let mut req_data = vec![0u8; req_len];
-                        if req_len > 0 && stream.read_exact(&mut req_data).is_err() {
-                            break;
-                        }
-
-                        // Invoke handler and write response
+                    while let Some((cmd_id, req_data)) = Self::read_request(&mut stream) {
                         let (status, resp_data) = handler(cmd_id, &req_data);
-                        let _ = stream.write_all(&status.to_le_bytes());
-                        let _ = stream.write_all(&(resp_data.len() as u32).to_le_bytes());
-                        if !resp_data.is_empty() {
-                            let _ = stream.write_all(&resp_data);
-                        }
-                        let _ = stream.flush();
+                        Self::write_response(&mut stream, status, &resp_data);
                     }
                 }
                 let _ = std::fs::remove_file(&path_clone);
@@ -1502,6 +1499,35 @@ pub(crate) mod test_helpers {
                 socket_path,
                 _listener_thread: handle,
             }
+        }
+
+        /// Read one request frame: cmd_id (i32 LE) + req_len (u32 LE) + req_data.
+        ///
+        /// Returns `None` on EOF or any read error, signalling the serve loop to stop.
+        fn read_request(stream: &mut UnixStream) -> Option<(i32, Vec<u8>)> {
+            let mut cmd_buf = [0u8; 4];
+            stream.read_exact(&mut cmd_buf).ok()?;
+            let cmd_id = i32::from_le_bytes(cmd_buf);
+
+            let mut len_buf = [0u8; 4];
+            stream.read_exact(&mut len_buf).ok()?;
+            let req_len = u32::from_le_bytes(len_buf) as usize;
+
+            let mut req_data = vec![0u8; req_len];
+            if req_len > 0 {
+                stream.read_exact(&mut req_data).ok()?;
+            }
+            Some((cmd_id, req_data))
+        }
+
+        /// Write one response frame: status (i32 LE) + resp_len (u32 LE) + resp_data.
+        fn write_response(stream: &mut UnixStream, status: i32, resp_data: &[u8]) {
+            let _ = stream.write_all(&status.to_le_bytes());
+            let _ = stream.write_all(&(resp_data.len() as u32).to_le_bytes());
+            if !resp_data.is_empty() {
+                let _ = stream.write_all(resp_data);
+            }
+            let _ = stream.flush();
         }
 
         /// Spawns a fake daemon that delays before responding, simulating a hung vendor daemon.

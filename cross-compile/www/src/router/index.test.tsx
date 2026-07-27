@@ -81,37 +81,29 @@ describe('Router', () => {
       );
     };
 
-    it('should render login page at /login', async () => {
-      globalThis.history.replaceState(null, '', '#/login');
-      render(
-        <AuthProvider>
-          <AppRouter />
-        </AuthProvider>,
-      );
+    const loginRedirectCases = [
+      { path: '#/login', description: 'accessing /login directly' },
+      { path: '#/live', description: 'accessing a protected route without auth' },
+    ];
 
-      await waitFor(
-        () => {
-          expect(screen.getByTestId('page-login')).toBeInTheDocument();
-        },
-        { timeout: 3000 },
-      );
-    });
+    it.each(loginRedirectCases)(
+      'should render login page when $description',
+      async ({ path }) => {
+        globalThis.history.replaceState(null, '', path);
+        render(
+          <AuthProvider>
+            <AppRouter />
+          </AuthProvider>,
+        );
 
-    it('should redirect to login when accessing protected route without auth', async () => {
-      globalThis.history.replaceState(null, '', '#/live');
-      render(
-        <AuthProvider>
-          <AppRouter />
-        </AuthProvider>,
-      );
-
-      await waitFor(
-        () => {
-          expect(screen.getByTestId('page-login')).toBeInTheDocument();
-        },
-        { timeout: 3000 },
-      );
-    });
+        await waitFor(
+          () => {
+            expect(screen.getByTestId('page-login')).toBeInTheDocument();
+          },
+          { timeout: 3000 },
+        );
+      },
+    );
 
     // Authenticated routes tests
     const routes = [
@@ -147,20 +139,5 @@ describe('Router', () => {
       );
     });
 
-    it('should preserve navigation state when redirecting to login', async () => {
-      globalThis.history.replaceState(null, '', '#/live');
-      render(
-        <AuthProvider>
-          <AppRouter />
-        </AuthProvider>,
-      );
-
-      await waitFor(
-        () => {
-          expect(screen.getByTestId('page-login')).toBeInTheDocument();
-        },
-        { timeout: 3000 },
-      );
-    });
   });
 });

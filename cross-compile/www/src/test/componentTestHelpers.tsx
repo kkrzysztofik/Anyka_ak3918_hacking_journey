@@ -522,7 +522,7 @@ export const MockDialog = {
     <div data-testid="dialog" data-open={open}>
       {open && (
         <div data-testid="dialog-container">
-          <button onClick={() => onOpenChange(false)} data-testid="dialog-overlay">
+          <button type="button" onClick={() => onOpenChange(false)} data-testid="dialog-overlay">
             Close
           </button>
           {children}

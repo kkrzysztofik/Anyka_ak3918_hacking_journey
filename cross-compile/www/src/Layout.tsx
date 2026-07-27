@@ -94,6 +94,7 @@ function NavLinkItem({
     return (
       <div className="flex flex-col gap-1">
         <button
+          type="button"
           onClick={() => setManualOpen((open) => !(pathOpen || open))}
           className={cn(
             'group relative flex w-full items-center gap-4 rounded-lg px-4 py-3 text-left transition-all duration-200',
@@ -275,6 +276,7 @@ function SidebarContent({ onClose }: Readonly<{ onClose?: () => void }>) {
 
                 <div className="py-1">
                   <button
+                    type="button"
                     className="text-dark-secondary-text hover:bg-dark-hover flex w-full items-center px-4 py-2 text-sm transition-colors hover:text-white"
                     onClick={() => {
                       setIsMenuOpen(false);
@@ -288,6 +290,7 @@ function SidebarContent({ onClose }: Readonly<{ onClose?: () => void }>) {
 
                   <button
                     key="about"
+                    type="button"
                     onClick={() => {
                       setIsMenuOpen(false);
                       setIsAboutOpen(true);
@@ -302,6 +305,7 @@ function SidebarContent({ onClose }: Readonly<{ onClose?: () => void }>) {
 
                 <div className="border-dark-border border-t py-1">
                   <button
+                    type="button"
                     className="text-accent-red hover:bg-dark-hover flex w-full items-center px-4 py-2 text-sm transition-colors"
                     onClick={() => {
                       setIsMenuOpen(false);
@@ -318,6 +322,7 @@ function SidebarContent({ onClose }: Readonly<{ onClose?: () => void }>) {
           )}
 
           <button
+            type="button"
             onClick={() => setIsMenuOpen(!isMenuOpen)}
             className="bg-dark-card border-dark-border hover:bg-dark-hover group flex w-full items-center justify-between gap-3 rounded-lg border px-2 py-2 transition-colors"
             data-testid="layout-user-menu-button"

@@ -9,7 +9,13 @@ use crate::onvif::common::dispatch_async;
 use crate::onvif::dispatcher::ServiceHandler;
 use crate::onvif::error::{OnvifError, OnvifResult};
 
-use super::types::*;
+use super::types::{
+    AnalyticsServiceCapabilities, CreateAnalyticsModules, CreateAnalyticsModulesResponse,
+    DeleteAnalyticsModules, DeleteAnalyticsModulesResponse, GetAnalyticsModules,
+    GetAnalyticsModulesResponse, GetServiceCapabilities, GetServiceCapabilitiesResponse,
+    GetSupportedAnalyticsModules, GetSupportedAnalyticsModulesResponse, ModifyAnalyticsModules,
+    ModifyAnalyticsModulesResponse, SupportedAnalyticsModules,
+};
 
 /// ONVIF Analytics Service (scaffold implementation).
 ///

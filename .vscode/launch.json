@@ -5,13 +5,13 @@
       "name": "Debug ONVIF Daemon (WSL)",
       "type": "cppdbg",
       "request": "launch",
-      "program": "${workspaceFolder}/cross-compile/onvif/out/onvifd",
+      "program": "${workspaceFolder}/cross-compile/onvif-rust/target/armv5te-unknown-linux-uclibceabi/debug/onvifd",
       "args": [
         "--debug",
         "--log-level=DEBUG"
       ],
       "stopAtEntry": false,
-      "cwd": "${workspaceFolder}/cross-compile/onvif",
+      "cwd": "${workspaceFolder}/cross-compile/onvif-rust",
       "environment": [
         {
           "name": "LOG_LEVEL",

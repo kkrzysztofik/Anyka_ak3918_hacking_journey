@@ -321,6 +321,20 @@ describe('SOAP Client', () => {
       expect(body).toContain('y="-0.3"');
     });
 
+    it('should strip trailing zeros and a dangling decimal point from velocity', () => {
+      // 1.0 rounds to "1.000" and 0.25 rounds to "0.250"; both must have
+      // trailing zeros (and the dot, when fully whole) stripped.
+      const body = soapBodies.continuousMove('ProfileToken1', 1, 0.25);
+      expect(body).toContain('x="1"');
+      expect(body).toContain('y="0.25"');
+    });
+
+    it('should format zero and non-finite velocity as "0"', () => {
+      const body = soapBodies.continuousMove('ProfileToken1', 0, NaN);
+      expect(body).toContain('x="0"');
+      expect(body).toContain('y="0"');
+    });
+
     it('should create ptzStop body', () => {
       const body = soapBodies.ptzStop('ProfileToken1');
       expect(body).toContain('tptz:Stop');

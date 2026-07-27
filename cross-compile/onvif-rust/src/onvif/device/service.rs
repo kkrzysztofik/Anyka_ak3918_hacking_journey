@@ -9,7 +9,20 @@ use crate::config::{ConfigRuntime, UserStorage};
 use crate::onvif::common::{dispatch_async, dispatch_sync};
 use crate::onvif::dispatcher::ServiceHandler;
 use crate::onvif::error::{OnvifError, OnvifResult};
-use crate::onvif::types::device::*;
+use crate::onvif::types::device::{
+    AddScopes, AddScopesResponse, CreateCertificate, CreateUsers, CreateUsersResponse,
+    DeleteCertificates, DeleteUsers, DeleteUsersResponse, GetCapabilities, GetCapabilitiesResponse,
+    GetCertificates, GetCertificatesStatus, GetDNS, GetDeviceInformation,
+    GetDeviceInformationResponse, GetDiscoveryMode, GetDiscoveryModeResponse, GetHostname,
+    GetHostnameResponse, GetNTP, GetNetworkDefaultGateway, GetNetworkInterfaces,
+    GetNetworkProtocols, GetRelayOutputs, GetScopes, GetScopesResponse, GetServiceCapabilities,
+    GetServiceCapabilitiesResponse, GetServices, GetServicesResponse, GetSystemBackup,
+    GetSystemDateAndTime, GetSystemDateAndTimeResponse, GetUsers, GetUsersResponse,
+    LoadCertificates, RemoveScopes, RemoveScopesResponse, RestoreSystem, SetDNS, SetDiscoveryMode,
+    SetDiscoveryModeResponse, SetHostname, SetHostnameResponse, SetNTP, SetNetworkProtocols,
+    SetScopes, SetScopesResponse, SetSystemDateAndTime, SetSystemFactoryDefault, SetUser,
+    SetUserResponse, SystemReboot,
+};
 use crate::platform::Platform;
 
 use async_trait::async_trait;
@@ -154,44 +167,7 @@ impl DeviceService {
         &self,
         request: SetScopes,
     ) -> Result<SetScopesResponse, OnvifError> {
-        // Validate all scopes
-        for scope in &request.scopes {
-            super::validation::validate_scope(scope)?;
-        }
-
-        // Read-copy-write: get_scopes() clones under read lock, then set_scopes()
-        // takes write lock. The tokio RwLock cannot be held across await points for
-        // both read and write in the same critical section. A concurrent mutation
-        // between the two calls is possible but acceptable for this embedded device.
-        let scopes = self.state.get_scopes().await;
-
-        // Keep fixed scopes, replace configurable ones
-        let fixed_scopes: Vec<_> = scopes
-            .into_iter()
-            .filter(|s| {
-                matches!(
-                    s.scope_def,
-                    crate::onvif::types::common::ScopeDefinition::Fixed
-                )
-            })
-            .collect();
-
-        let new_configurable: Vec<_> = request
-            .scopes
-            .into_iter()
-            .map(|s| crate::onvif::types::common::Scope {
-                scope_def: crate::onvif::types::common::ScopeDefinition::Configurable,
-                scope_item: s,
-            })
-            .collect();
-
-        let mut new_scopes = fixed_scopes;
-        new_scopes.extend(new_configurable);
-
-        self.state.set_scopes(new_scopes.clone()).await;
-
-        tracing::info!("SetScopes: updated to {} scopes", new_scopes.len());
-        Ok(SetScopesResponse {})
+        apply_set_scopes(&self.state, request).await
     }
 
     /// Handle AddScopes request.
@@ -199,23 +175,7 @@ impl DeviceService {
         &self,
         request: AddScopes,
     ) -> Result<AddScopesResponse, OnvifError> {
-        // Validate all scopes
-        for scope in &request.scope_item {
-            super::validation::validate_scope(scope)?;
-        }
-
-        // Read-copy-write pattern (see handle_set_scopes comment for rationale)
-        let mut scopes = self.state.get_scopes().await;
-
-        for scope in request.scope_item {
-            scopes.push(crate::onvif::types::common::Scope {
-                scope_def: crate::onvif::types::common::ScopeDefinition::Configurable,
-                scope_item: scope,
-            });
-        }
-
-        self.state.set_scopes(scopes).await;
-        Ok(AddScopesResponse {})
+        apply_add_scopes(&self.state, request).await
     }
 
     /// Handle GetDiscoveryMode request.
@@ -269,6 +229,109 @@ impl DeviceService {
     ) -> Result<SetUserResponse, OnvifError> {
         users_ops::handle_set_user(&self.store.users, request, caller_level)
     }
+}
+
+// ========================================================================
+// Scope mutation helpers (shared by the public handlers and the dispatcher)
+// ========================================================================
+
+/// Replace the configurable scopes, keeping the fixed ones.
+async fn apply_set_scopes(
+    state: &DeviceStateRef,
+    request: SetScopes,
+) -> Result<SetScopesResponse, OnvifError> {
+    // Validate all scopes
+    for scope in &request.scopes {
+        super::validation::validate_scope(scope)?;
+    }
+
+    // Read-copy-write: get_scopes() clones under read lock, then set_scopes()
+    // takes write lock. The tokio RwLock cannot be held across await points for
+    // both read and write in the same critical section. A concurrent mutation
+    // between the two calls is possible but acceptable for this embedded device.
+    let scopes = state.get_scopes().await;
+
+    // Keep fixed scopes, replace configurable ones
+    let fixed_scopes: Vec<_> = scopes
+        .into_iter()
+        .filter(|s| {
+            matches!(
+                s.scope_def,
+                crate::onvif::types::common::ScopeDefinition::Fixed
+            )
+        })
+        .collect();
+
+    let new_configurable: Vec<_> = request
+        .scopes
+        .into_iter()
+        .map(|s| crate::onvif::types::common::Scope {
+            scope_def: crate::onvif::types::common::ScopeDefinition::Configurable,
+            scope_item: s,
+        })
+        .collect();
+
+    let mut new_scopes = fixed_scopes;
+    new_scopes.extend(new_configurable);
+
+    state.set_scopes(new_scopes.clone()).await;
+
+    tracing::info!("SetScopes: updated to {} scopes", new_scopes.len());
+    Ok(SetScopesResponse {})
+}
+
+/// Append configurable scopes to the current scope list.
+async fn apply_add_scopes(
+    state: &DeviceStateRef,
+    request: AddScopes,
+) -> Result<AddScopesResponse, OnvifError> {
+    // Validate all scopes
+    for scope in &request.scope_item {
+        super::validation::validate_scope(scope)?;
+    }
+
+    // Read-copy-write pattern (see apply_set_scopes comment for rationale)
+    let mut scopes = state.get_scopes().await;
+
+    for scope in request.scope_item {
+        scopes.push(crate::onvif::types::common::Scope {
+            scope_def: crate::onvif::types::common::ScopeDefinition::Configurable,
+            scope_item: scope,
+        });
+    }
+
+    state.set_scopes(scopes).await;
+    Ok(AddScopesResponse {})
+}
+
+/// Remove the requested configurable scopes, reporting the ones actually removed.
+async fn apply_remove_scopes(
+    state: &DeviceStateRef,
+    request: RemoveScopes,
+) -> Result<RemoveScopesResponse, OnvifError> {
+    // Read-copy-write pattern (see apply_set_scopes comment for rationale)
+    let mut scopes = state.get_scopes().await;
+    let mut removed = Vec::new();
+
+    for scope_item in &request.scope_item {
+        if let Some(pos) = scopes.iter().position(|s| {
+            s.scope_item == *scope_item
+                && matches!(
+                    s.scope_def,
+                    crate::onvif::types::common::ScopeDefinition::Configurable
+                )
+        }) {
+            removed.push(scopes[pos].scope_item.clone());
+            scopes.remove(pos);
+        }
+    }
+
+    state.set_scopes(scopes).await;
+    tracing::info!("RemoveScopes: removed {} scopes", removed.len());
+
+    Ok(RemoveScopesResponse {
+        scope_item: removed,
+    })
 }
 
 // ========================================================================
@@ -468,44 +531,7 @@ impl ServiceHandler for DeviceService {
             "SetScopes" => {
                 dispatch_async(body_xml, |request: SetScopes| {
                     let state = state.clone();
-                    async move {
-                        // Validate all scopes
-                        for scope in &request.scopes {
-                            super::validation::validate_scope(scope)?;
-                        }
-
-                        // Read-copy-write (see public handle_set_scopes for rationale)
-                        let scopes = state.get_scopes().await;
-
-                        // Keep fixed scopes, replace configurable ones
-                        let fixed_scopes: Vec<_> = scopes
-                            .into_iter()
-                            .filter(|s| {
-                                matches!(
-                                    s.scope_def,
-                                    crate::onvif::types::common::ScopeDefinition::Fixed
-                                )
-                            })
-                            .collect();
-
-                        let new_configurable: Vec<_> = request
-                            .scopes
-                            .into_iter()
-                            .map(|s| crate::onvif::types::common::Scope {
-                                scope_def:
-                                    crate::onvif::types::common::ScopeDefinition::Configurable,
-                                scope_item: s,
-                            })
-                            .collect();
-
-                        let mut new_scopes = fixed_scopes;
-                        new_scopes.extend(new_configurable);
-
-                        state.set_scopes(new_scopes.clone()).await;
-
-                        tracing::info!("SetScopes: updated to {} scopes", new_scopes.len());
-                        Ok(SetScopesResponse {})
-                    }
+                    async move { apply_set_scopes(&state, request).await }
                 })
                 .await
             }
@@ -513,26 +539,7 @@ impl ServiceHandler for DeviceService {
             "AddScopes" => {
                 dispatch_async(body_xml, |request: AddScopes| {
                     let state = state.clone();
-                    async move {
-                        // Validate all scopes
-                        for scope in &request.scope_item {
-                            super::validation::validate_scope(scope)?;
-                        }
-
-                        // Read-copy-write (see public handle_set_scopes for rationale)
-                        let mut scopes = state.get_scopes().await;
-
-                        for scope in request.scope_item {
-                            scopes.push(crate::onvif::types::common::Scope {
-                                scope_def:
-                                    crate::onvif::types::common::ScopeDefinition::Configurable,
-                                scope_item: scope,
-                            });
-                        }
-
-                        state.set_scopes(scopes).await;
-                        Ok(AddScopesResponse {})
-                    }
+                    async move { apply_add_scopes(&state, request).await }
                 })
                 .await
             }
@@ -540,31 +547,7 @@ impl ServiceHandler for DeviceService {
             "RemoveScopes" => {
                 dispatch_async(body_xml, |request: RemoveScopes| {
                     let state = state.clone();
-                    async move {
-                        // Read-copy-write (see public handle_set_scopes for rationale)
-                        let mut scopes = state.get_scopes().await;
-                        let mut removed = Vec::new();
-
-                        for scope_item in &request.scope_item {
-                            if let Some(pos) = scopes.iter().position(|s| {
-                                s.scope_item == *scope_item
-                                    && matches!(
-                                        s.scope_def,
-                                        crate::onvif::types::common::ScopeDefinition::Configurable
-                                    )
-                            }) {
-                                removed.push(scopes[pos].scope_item.clone());
-                                scopes.remove(pos);
-                            }
-                        }
-
-                        state.set_scopes(scopes).await;
-                        tracing::info!("RemoveScopes: removed {} scopes", removed.len());
-
-                        Ok(RemoveScopesResponse {
-                            scope_item: removed,
-                        })
-                    }
+                    async move { apply_remove_scopes(&state, request).await }
                 })
                 .await
             }
@@ -835,5 +818,152 @@ mod tests {
         let device_caps = response.capabilities.device.unwrap();
         // Should contain 127.0.0.1 or detected IP
         assert!(device_caps.x_addr.contains("http://"));
+    }
+
+    // ========================================================================
+    // Scope mutation tests (apply_set_scopes / apply_add_scopes / apply_remove_scopes)
+    // ========================================================================
+
+    #[tokio::test]
+    async fn test_apply_set_scopes_keeps_fixed_replaces_configurable() {
+        let state: DeviceStateRef = Arc::new(DeviceState::new());
+        let fixed_before: Vec<_> = state
+            .get_scopes()
+            .await
+            .into_iter()
+            .filter(|s| {
+                matches!(
+                    s.scope_def,
+                    crate::onvif::types::common::ScopeDefinition::Fixed
+                )
+            })
+            .collect();
+        assert!(
+            !fixed_before.is_empty(),
+            "default scopes must include fixed entries"
+        );
+
+        let response = apply_set_scopes(
+            &state,
+            SetScopes {
+                scopes: vec!["onvif://www.onvif.org/name/NewCamera".to_string()],
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(response, SetScopesResponse {});
+
+        let scopes = state.get_scopes().await;
+        let fixed_after: Vec<_> = scopes
+            .iter()
+            .filter(|s| {
+                matches!(
+                    s.scope_def,
+                    crate::onvif::types::common::ScopeDefinition::Fixed
+                )
+            })
+            .collect();
+        assert_eq!(fixed_after.len(), fixed_before.len());
+
+        let configurable: Vec<_> = scopes
+            .iter()
+            .filter(|s| {
+                matches!(
+                    s.scope_def,
+                    crate::onvif::types::common::ScopeDefinition::Configurable
+                )
+            })
+            .collect();
+        assert_eq!(configurable.len(), 1);
+        assert_eq!(
+            configurable[0].scope_item,
+            "onvif://www.onvif.org/name/NewCamera"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_apply_set_scopes_rejects_invalid_scope() {
+        let state: DeviceStateRef = Arc::new(DeviceState::new());
+        let result = apply_set_scopes(
+            &state,
+            SetScopes {
+                scopes: vec!["not-a-valid-scope".to_string()],
+            },
+        )
+        .await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_apply_add_scopes_appends_configurable() {
+        let state: DeviceStateRef = Arc::new(DeviceState::new());
+        let before_len = state.get_scopes().await.len();
+
+        let response = apply_add_scopes(
+            &state,
+            AddScopes {
+                scope_item: vec!["onvif://www.onvif.org/location/Lobby".to_string()],
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(response, AddScopesResponse {});
+
+        let scopes = state.get_scopes().await;
+        assert_eq!(scopes.len(), before_len + 1);
+        assert!(scopes.iter().any(|s| {
+            s.scope_item == "onvif://www.onvif.org/location/Lobby"
+                && matches!(
+                    s.scope_def,
+                    crate::onvif::types::common::ScopeDefinition::Configurable
+                )
+        }));
+    }
+
+    #[tokio::test]
+    async fn test_apply_remove_scopes_removes_matching_configurable_only() {
+        let state: DeviceStateRef = Arc::new(DeviceState::new());
+        let initial_scopes = state.get_scopes().await;
+        let configurable_item = initial_scopes
+            .iter()
+            .find(|s| {
+                matches!(
+                    s.scope_def,
+                    crate::onvif::types::common::ScopeDefinition::Configurable
+                )
+            })
+            .map(|s| s.scope_item.clone())
+            .expect("default scopes must include a configurable entry");
+        let fixed_item = initial_scopes
+            .iter()
+            .find(|s| {
+                matches!(
+                    s.scope_def,
+                    crate::onvif::types::common::ScopeDefinition::Fixed
+                )
+            })
+            .map(|s| s.scope_item.clone())
+            .expect("default scopes must include a fixed entry");
+
+        // Request removal of both a real configurable scope and a fixed scope's
+        // string (fixed scopes are not removable) plus a nonexistent one.
+        let response = apply_remove_scopes(
+            &state,
+            RemoveScopes {
+                scope_item: vec![
+                    configurable_item.clone(),
+                    fixed_item.clone(),
+                    "onvif://www.onvif.org/does/not/exist".to_string(),
+                ],
+            },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(response.scope_item, vec![configurable_item.clone()]);
+
+        let remaining = state.get_scopes().await;
+        assert!(!remaining.iter().any(|s| s.scope_item == configurable_item));
+        assert!(remaining.iter().any(|s| s.scope_item == fixed_item));
     }
 }

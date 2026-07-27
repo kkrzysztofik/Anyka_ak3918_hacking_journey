@@ -100,6 +100,7 @@ const SystemInfo: React.FC<SystemInfoProps> = ({ cameraIP, onvifStatus, onStatus
 
         <div className="mb-4">
           <button
+            type="button"
             onClick={onStatusCheck}
             className="rounded-lg bg-gray-700 px-4 py-2 text-sm transition-colors hover:bg-gray-600"
             data-testid="system-info-refresh-button"

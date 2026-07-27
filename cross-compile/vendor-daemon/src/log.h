@@ -20,6 +20,7 @@ typedef struct {
   const char *fmt;
   const char *file;
   struct tm *time;
+  struct tm time_buf; /* backing storage for `time`, filled via localtime_r */
   void *udata;
   int line;
   int level;

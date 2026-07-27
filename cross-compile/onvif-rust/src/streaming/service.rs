@@ -71,6 +71,57 @@ impl LiveStreamHandler {
             &self.bridge.sub_stream
         }
     }
+
+    /// Send the cached codec parameter sets (and bootstrap IDR) to a new subscriber.
+    ///
+    /// HTTP-FLV pull subscribers get FLV sequence headers; everyone else gets a
+    /// single Annex-B access unit.
+    #[allow(clippy::too_many_arguments)]
+    fn send_parameter_sets(
+        &self,
+        frame_sender: &tokio::sync::mpsc::Sender<FrameData>,
+        sub_type: SubscribeType,
+        timestamp: u32,
+        sps: Vec<u8>,
+        pps: Vec<u8>,
+        bootstrap_idr: Option<&[u8]>,
+        audio_config: Option<Vec<u8>>,
+    ) -> Result<(), StreamHubError> {
+        if matches!(sub_type, SubscribeType::HttpFlvPull) {
+            let mut remuxer = ValidationHttpFlvRemuxer::new(
+                sps,
+                pps,
+                audio_config,
+                self.bridge.audio_sample_rate,
+            );
+            send_httpflv_prior_frames(frame_sender, &mut remuxer, timestamp, bootstrap_idr)?;
+        } else {
+            // Combine SPS+PPS(+IDR) into a single Annex-B access unit.
+            // Sending them as separate FrameData::Video messages with
+            // the same timestamp causes DTS collisions at the RTP layer
+            // (the assembler/normalizer interaction produces duplicate
+            // timestamps that ffmpeg reports as "non monotonically
+            // increasing dts").
+            let mut au = BytesMut::new();
+            au.extend_from_slice(&[0, 0, 0, 1]);
+            au.extend_from_slice(&sps);
+            au.extend_from_slice(&[0, 0, 0, 1]);
+            au.extend_from_slice(&pps);
+            if let Some(idr) = bootstrap_idr {
+                au.extend_from_slice(&[0, 0, 0, 1]);
+                au.extend_from_slice(idr);
+            }
+            send_frame(
+                frame_sender,
+                FrameData::Video {
+                    timestamp,
+                    data: au,
+                },
+            )?;
+        }
+
+        Ok(())
+    }
 }
 
 #[async_trait]
@@ -135,43 +186,15 @@ impl TStreamHandler for LiveStreamHandler {
                     "Sending prior data to subscriber"
                 );
 
-                if matches!(sub_type, SubscribeType::HttpFlvPull) {
-                    let mut remuxer = ValidationHttpFlvRemuxer::new(
-                        sps,
-                        pps,
-                        audio_config,
-                        self.bridge.audio_sample_rate,
-                    );
-                    send_httpflv_prior_frames(
-                        &frame_sender,
-                        &mut remuxer,
-                        timestamp,
-                        bootstrap_idr.as_deref(),
-                    )?;
-                } else {
-                    // Combine SPS+PPS(+IDR) into a single Annex-B access unit.
-                    // Sending them as separate FrameData::Video messages with
-                    // the same timestamp causes DTS collisions at the RTP layer
-                    // (the assembler/normalizer interaction produces duplicate
-                    // timestamps that ffmpeg reports as "non monotonically
-                    // increasing dts").
-                    let mut au = BytesMut::new();
-                    au.extend_from_slice(&[0, 0, 0, 1]);
-                    au.extend_from_slice(&sps);
-                    au.extend_from_slice(&[0, 0, 0, 1]);
-                    au.extend_from_slice(&pps);
-                    if let Some(idr) = bootstrap_idr.as_ref() {
-                        au.extend_from_slice(&[0, 0, 0, 1]);
-                        au.extend_from_slice(idr);
-                    }
-                    send_frame(
-                        &frame_sender,
-                        FrameData::Video {
-                            timestamp,
-                            data: au,
-                        },
-                    )?;
-                }
+                self.send_parameter_sets(
+                    &frame_sender,
+                    sub_type,
+                    timestamp,
+                    sps,
+                    pps,
+                    bootstrap_idr.as_deref(),
+                    audio_config,
+                )?;
             }
         }
 

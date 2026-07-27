@@ -457,37 +457,7 @@ impl Platform for StubPlatform {
         Ok(self.device_info.clone())
     }
 
-    fn video_input(&self) -> Arc<dyn VideoInput> {
-        self.video_input.clone()
-    }
-
-    fn video_encoder(&self) -> Arc<dyn VideoEncoder> {
-        self.video_encoder.clone()
-    }
-
-    fn audio_input(&self) -> Arc<dyn AudioInput> {
-        self.audio_input.clone()
-    }
-
-    fn audio_encoder(&self) -> Arc<dyn AudioEncoder> {
-        self.audio_encoder.clone()
-    }
-
-    fn ptz_control(&self) -> Option<Arc<dyn PTZControl>> {
-        self.ptz_control.clone()
-    }
-
-    fn imaging_control(&self) -> Option<Arc<dyn ImagingControl>> {
-        self.imaging_control.clone()
-    }
-
-    fn network_info(&self) -> Option<Arc<dyn NetworkInfo>> {
-        self.network_info.clone()
-    }
-
-    fn is_initialized(&self) -> bool {
-        self.initialized.load(Ordering::SeqCst)
-    }
+    crate::impl_platform_accessors!();
 
     async fn initialize(&self) -> PlatformResult<()> {
         if self.fail_init {

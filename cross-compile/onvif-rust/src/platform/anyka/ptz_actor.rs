@@ -24,6 +24,12 @@ use parking_lot::RwLock;
 use tokio::sync::{mpsc, oneshot};
 
 use crate::hal::anyka::sdk::PtzDirection;
+
+#[cfg(not(use_stubs))]
+use crate::hal::anyka::ptz::ptz_turn_direction;
+#[cfg(use_stubs)]
+use crate::hal::common::ptz_turn_direction;
+
 use crate::hal::common::AK_SUCCESS_I32;
 use crate::hal::common::ptz::{PtzHalTrait, PtzWaitOutcome};
 
@@ -174,26 +180,7 @@ fn do_move(
     let pan_delta = clamped_pan - current.pan;
     let tilt_delta = clamped_tilt - current.tilt;
 
-    // Build the per-axis plan (direction + committed target once that axis completes).
-    // Pan: positive delta → Right, negative → Left (continuous_move convention).
-    // Tilt: positive delta → Down, negative → Up (matches C adapter).
-    let mut plan: Vec<(PtzDirection, f32, Axis)> = Vec::new();
-    if pan_delta.abs() > PTZ_MIN_MOVE_THRESHOLD {
-        let direction = if pan_delta > 0.0 {
-            PtzDirection::Right
-        } else {
-            PtzDirection::Left
-        };
-        plan.push((direction, pan_delta.abs(), Axis::Pan(clamped_pan)));
-    }
-    if tilt_delta.abs() > PTZ_MIN_MOVE_THRESHOLD {
-        let direction = if tilt_delta > 0.0 {
-            PtzDirection::Down
-        } else {
-            PtzDirection::Up
-        };
-        plan.push((direction, tilt_delta.abs(), Axis::Tilt(clamped_tilt)));
-    }
+    let plan = build_move_plan(pan_delta, tilt_delta, clamped_pan, clamped_tilt);
 
     // Issue each axis turn (non-blocking). Acceptance = all planned turns issued.
     let mut started = Vec::new();
@@ -214,10 +201,53 @@ fn do_move(
     // Reply on acceptance (before waiting for the motor to finish).
     let _ = reply.send(result);
 
-    // Drain each started axis off the tokio workers; commit its target once it lands.
-    // A `TurnOutcome`/`PtzWaitOutcome` is used (never discarded): on interruption we
-    // stop reconciling further axes and leave the last known position untouched rather
-    // than committing a target the motor never reached.
+    drain_started_turns(ffi, state, started);
+
+    // No hardware zoom on AK3918.
+    state.position.write().zoom = position.zoom.clamp(1.0, 1.0);
+    *state.velocity.write() = PtzVelocity::STOP;
+}
+
+/// Build the per-axis plan (direction + committed target once that axis completes).
+///
+/// Pan: positive delta → Right, negative → Left (continuous_move convention).
+/// Tilt: positive delta → Down, negative → Up (matches C adapter).
+fn build_move_plan(
+    pan_delta: f32,
+    tilt_delta: f32,
+    clamped_pan: f32,
+    clamped_tilt: f32,
+) -> Vec<(PtzDirection, f32, Axis)> {
+    let mut plan: Vec<(PtzDirection, f32, Axis)> = Vec::new();
+    if pan_delta.abs() > PTZ_MIN_MOVE_THRESHOLD {
+        let direction = if pan_delta > 0.0 {
+            PtzDirection::Right
+        } else {
+            PtzDirection::Left
+        };
+        plan.push((direction, pan_delta.abs(), Axis::Pan(clamped_pan)));
+    }
+    if tilt_delta.abs() > PTZ_MIN_MOVE_THRESHOLD {
+        let direction = if tilt_delta > 0.0 {
+            PtzDirection::Down
+        } else {
+            PtzDirection::Up
+        };
+        plan.push((direction, tilt_delta.abs(), Axis::Tilt(clamped_tilt)));
+    }
+    plan
+}
+
+/// Drain each started axis off the tokio workers; commit its target once it lands.
+///
+/// A `TurnOutcome`/`PtzWaitOutcome` is used (never discarded): on interruption we
+/// stop reconciling further axes and leave the last known position untouched rather
+/// than committing a target the motor never reached.
+fn drain_started_turns(
+    ffi: &dyn PtzHalTrait,
+    state: &PtzActorState,
+    started: Vec<(ptz_turn_direction, Axis)>,
+) {
     for (sdk_dir, axis) in started {
         let outcome: PtzWaitOutcome = ffi.ptz_wait_turn(sdk_dir);
         if outcome.interrupted {
@@ -235,10 +265,6 @@ fn do_move(
             Axis::Tilt(target) => state.position.write().tilt = target,
         }
     }
-
-    // No hardware zoom on AK3918.
-    state.position.write().zoom = position.zoom.clamp(1.0, 1.0);
-    *state.velocity.write() = PtzVelocity::STOP;
 }
 
 /// Which axis a planned/started turn belongs to, carrying the target degrees to commit

@@ -87,7 +87,7 @@ describe('Sheet', () => {
       });
     });
 
-    it('should close sheet when close button is clicked', async () => {
+    it('should remove sheet content from DOM after clicking close button', async () => {
       const user = userEvent.setup();
       render(
         <Sheet defaultOpen>

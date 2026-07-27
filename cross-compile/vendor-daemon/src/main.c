@@ -42,6 +42,7 @@
 #include <string.h>
 #include <stdint.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <signal.h>
 #include <unistd.h>
 #include <sys/socket.h>
@@ -126,12 +127,21 @@ int main(int argc, char *argv[])
      * LOGGING INITIALIZATION
      * ================================================================ */
 
-    /* Open log file */
-    g_log_fp = fopen(log_file_path, "a");
-    if (!g_log_fp) {
+    /* Open log file with an explicit non-world-writable mode; fopen()'s
+     * default creation mode (0666 before umask) would make the file
+     * world-writable under a permissive umask. */
+    int log_fd = open(log_file_path, O_WRONLY | O_CREAT | O_APPEND, 0644);
+    if (log_fd < 0) {
         fprintf(stderr, "Failed to open log file %s: %s\n",
                 log_file_path, strerror(errno));
         g_log_fp = NULL;
+    } else {
+        g_log_fp = fdopen(log_fd, "a");
+        if (!g_log_fp) {
+            fprintf(stderr, "Failed to open log file %s: %s\n",
+                    log_file_path, strerror(errno));
+            close(log_fd);
+        }
     }
 
     /* Save original stdout/stderr for restoration on shutdown */
