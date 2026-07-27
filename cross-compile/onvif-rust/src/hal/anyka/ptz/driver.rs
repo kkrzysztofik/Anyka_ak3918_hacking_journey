@@ -336,7 +336,11 @@ impl MotorHandle {
 
     /// Wait up to one `WAIT_POLL_MS` tick for the motor fd to become readable.
     fn poll_readable(fd: RawFd) -> PlatformResult<PollOutcome> {
+        // SAFETY: fd_set is a plain-old-data bitset; all-zero bits is a valid
+        // representation, so zero-initializing it is sound.
         let mut read_fds: libc::fd_set = unsafe { std::mem::zeroed() };
+        // SAFETY: `read_fds` is a valid, live `fd_set` from the line above.
+        // `fd` is the caller-owned motor device fd and is within FD_SETSIZE.
         unsafe {
             libc::FD_ZERO(&mut read_fds);
             libc::FD_SET(fd, &mut read_fds);
@@ -345,6 +349,9 @@ impl MotorHandle {
             tv_sec: 0,
             tv_usec: (WAIT_POLL_MS * 1000) as libc::suseconds_t,
         };
+        // SAFETY: `read_fds` and `tv` are valid, live, and properly
+        // initialized above; the write/except sets are null, which
+        // `select(2)` accepts; `fd + 1` matches the single fd registered.
         let ret = unsafe {
             libc::select(
                 fd + 1,
@@ -652,5 +659,29 @@ mod tests {
         assert!(!driver.stop_flag.load(Ordering::SeqCst));
         driver.interrupt();
         assert!(driver.stop_flag.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn test_poll_readable_returns_readable_when_data_available() {
+        use std::io::Write;
+        use std::os::unix::io::AsRawFd;
+        use std::os::unix::net::UnixStream;
+
+        let (mut writer, reader) = UnixStream::pair().expect("socketpair");
+        writer.write_all(b"x").expect("write");
+
+        let outcome = MotorHandle::poll_readable(reader.as_raw_fd());
+        assert!(matches!(outcome, Ok(PollOutcome::Readable)));
+    }
+
+    #[test]
+    fn test_poll_readable_times_out_when_no_data() {
+        use std::os::unix::io::AsRawFd;
+        use std::os::unix::net::UnixStream;
+
+        let (_writer, reader) = UnixStream::pair().expect("socketpair");
+
+        let outcome = MotorHandle::poll_readable(reader.as_raw_fd());
+        assert!(matches!(outcome, Ok(PollOutcome::TimedOut)));
     }
 }

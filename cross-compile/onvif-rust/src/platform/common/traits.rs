@@ -609,6 +609,47 @@ pub trait NetworkInfo: Send + Sync {
     }
 }
 
+/// Implements the trivial field-accessor methods of [`Platform`] (`video_input`,
+/// `video_encoder`, `audio_input`, `audio_encoder`, `ptz_control`,
+/// `imaging_control`, `network_info`, `is_initialized`) in terms of
+/// identically-named struct fields, shared by every `Platform` implementation.
+#[macro_export]
+macro_rules! impl_platform_accessors {
+    () => {
+        fn video_input(&self) -> std::sync::Arc<dyn $crate::platform::VideoInput> {
+            self.video_input.clone()
+        }
+
+        fn video_encoder(&self) -> std::sync::Arc<dyn $crate::platform::VideoEncoder> {
+            self.video_encoder.clone()
+        }
+
+        fn audio_input(&self) -> std::sync::Arc<dyn $crate::platform::AudioInput> {
+            self.audio_input.clone()
+        }
+
+        fn audio_encoder(&self) -> std::sync::Arc<dyn $crate::platform::AudioEncoder> {
+            self.audio_encoder.clone()
+        }
+
+        fn ptz_control(&self) -> Option<std::sync::Arc<dyn $crate::platform::PTZControl>> {
+            self.ptz_control.clone()
+        }
+
+        fn imaging_control(&self) -> Option<std::sync::Arc<dyn $crate::platform::ImagingControl>> {
+            self.imaging_control.clone()
+        }
+
+        fn network_info(&self) -> Option<std::sync::Arc<dyn $crate::platform::NetworkInfo>> {
+            self.network_info.clone()
+        }
+
+        fn is_initialized(&self) -> bool {
+            self.initialized.load(std::sync::atomic::Ordering::SeqCst)
+        }
+    };
+}
+
 /// Main platform trait combining all hardware abstractions.
 #[async_trait]
 pub trait Platform: Send + Sync {

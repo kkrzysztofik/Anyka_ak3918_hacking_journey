@@ -819,4 +819,151 @@ mod tests {
         // Should contain 127.0.0.1 or detected IP
         assert!(device_caps.x_addr.contains("http://"));
     }
+
+    // ========================================================================
+    // Scope mutation tests (apply_set_scopes / apply_add_scopes / apply_remove_scopes)
+    // ========================================================================
+
+    #[tokio::test]
+    async fn test_apply_set_scopes_keeps_fixed_replaces_configurable() {
+        let state: DeviceStateRef = Arc::new(DeviceState::new());
+        let fixed_before: Vec<_> = state
+            .get_scopes()
+            .await
+            .into_iter()
+            .filter(|s| {
+                matches!(
+                    s.scope_def,
+                    crate::onvif::types::common::ScopeDefinition::Fixed
+                )
+            })
+            .collect();
+        assert!(
+            !fixed_before.is_empty(),
+            "default scopes must include fixed entries"
+        );
+
+        let response = apply_set_scopes(
+            &state,
+            SetScopes {
+                scopes: vec!["onvif://www.onvif.org/name/NewCamera".to_string()],
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(response, SetScopesResponse {});
+
+        let scopes = state.get_scopes().await;
+        let fixed_after: Vec<_> = scopes
+            .iter()
+            .filter(|s| {
+                matches!(
+                    s.scope_def,
+                    crate::onvif::types::common::ScopeDefinition::Fixed
+                )
+            })
+            .collect();
+        assert_eq!(fixed_after.len(), fixed_before.len());
+
+        let configurable: Vec<_> = scopes
+            .iter()
+            .filter(|s| {
+                matches!(
+                    s.scope_def,
+                    crate::onvif::types::common::ScopeDefinition::Configurable
+                )
+            })
+            .collect();
+        assert_eq!(configurable.len(), 1);
+        assert_eq!(
+            configurable[0].scope_item,
+            "onvif://www.onvif.org/name/NewCamera"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_apply_set_scopes_rejects_invalid_scope() {
+        let state: DeviceStateRef = Arc::new(DeviceState::new());
+        let result = apply_set_scopes(
+            &state,
+            SetScopes {
+                scopes: vec!["not-a-valid-scope".to_string()],
+            },
+        )
+        .await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_apply_add_scopes_appends_configurable() {
+        let state: DeviceStateRef = Arc::new(DeviceState::new());
+        let before_len = state.get_scopes().await.len();
+
+        let response = apply_add_scopes(
+            &state,
+            AddScopes {
+                scope_item: vec!["onvif://www.onvif.org/location/Lobby".to_string()],
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(response, AddScopesResponse {});
+
+        let scopes = state.get_scopes().await;
+        assert_eq!(scopes.len(), before_len + 1);
+        assert!(scopes.iter().any(|s| {
+            s.scope_item == "onvif://www.onvif.org/location/Lobby"
+                && matches!(
+                    s.scope_def,
+                    crate::onvif::types::common::ScopeDefinition::Configurable
+                )
+        }));
+    }
+
+    #[tokio::test]
+    async fn test_apply_remove_scopes_removes_matching_configurable_only() {
+        let state: DeviceStateRef = Arc::new(DeviceState::new());
+        let initial_scopes = state.get_scopes().await;
+        let configurable_item = initial_scopes
+            .iter()
+            .find(|s| {
+                matches!(
+                    s.scope_def,
+                    crate::onvif::types::common::ScopeDefinition::Configurable
+                )
+            })
+            .map(|s| s.scope_item.clone())
+            .expect("default scopes must include a configurable entry");
+        let fixed_item = initial_scopes
+            .iter()
+            .find(|s| {
+                matches!(
+                    s.scope_def,
+                    crate::onvif::types::common::ScopeDefinition::Fixed
+                )
+            })
+            .map(|s| s.scope_item.clone())
+            .expect("default scopes must include a fixed entry");
+
+        // Request removal of both a real configurable scope and a fixed scope's
+        // string (fixed scopes are not removable) plus a nonexistent one.
+        let response = apply_remove_scopes(
+            &state,
+            RemoveScopes {
+                scope_item: vec![
+                    configurable_item.clone(),
+                    fixed_item.clone(),
+                    "onvif://www.onvif.org/does/not/exist".to_string(),
+                ],
+            },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(response.scope_item, vec![configurable_item.clone()]);
+
+        let remaining = state.get_scopes().await;
+        assert!(!remaining.iter().any(|s| s.scope_item == configurable_item));
+        assert!(remaining.iter().any(|s| s.scope_item == fixed_item));
+    }
 }

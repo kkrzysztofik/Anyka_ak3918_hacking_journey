@@ -262,15 +262,15 @@ impl StreamHealthCounters {
 }
 
 /// Per-stream state for the unified reader loop.
-struct StreamState {
-    stream_id: StreamId,
-    consecutive_no_data: u32,
-    frame_count: u64,
-    total_bytes: u64,
-    iframe_count: u64,
-    error_count: u64,
-    last_error_was_no_data: bool,
-    recovery_encoder_handle_addr: Option<usize>,
+pub(super) struct StreamState {
+    pub(super) stream_id: StreamId,
+    pub(super) consecutive_no_data: u32,
+    pub(super) frame_count: u64,
+    pub(super) total_bytes: u64,
+    pub(super) iframe_count: u64,
+    pub(super) error_count: u64,
+    pub(super) last_error_was_no_data: bool,
+    pub(super) recovery_encoder_handle_addr: Option<usize>,
     #[cfg(test)]
     last_imaging_seq_frame_logged: u64,
     #[cfg(test)]
@@ -278,7 +278,7 @@ struct StreamState {
 }
 
 impl StreamState {
-    fn new(stream_id: StreamId, recovery_encoder_handle_addr: Option<usize>) -> Self {
+    pub(super) fn new(stream_id: StreamId, recovery_encoder_handle_addr: Option<usize>) -> Self {
         Self {
             stream_id,
             consecutive_no_data: 0,
@@ -621,7 +621,7 @@ fn run_legacy_poll_loop(
 /// Account for one pushed frame and hand it to the registered callbacks.
 ///
 /// Audio frames are ignored here; the video loop only tracks the two video streams.
-fn handle_pushed_frame(
+pub(super) fn handle_pushed_frame(
     ipc: &AnykaIpc,
     owned_callbacks: &RwLock<HashMap<CallbackId, Arc<dyn OwnedFrameCallback>>>,
     stream_health: &StreamHealthCounters,
@@ -671,7 +671,7 @@ fn handle_pushed_frame(
 /// Blocking push-delivery loop: receive frames from the vendor daemon until the
 /// stop signal is set, the producer shuts down, or a non-transient error occurs.
 #[allow(clippy::too_many_arguments)]
-fn run_push_loop(
+pub(super) fn run_push_loop(
     ipc: &AnykaIpc,
     owned_callbacks: &RwLock<HashMap<CallbackId, Arc<dyn OwnedFrameCallback>>>,
     stop_signal: &AtomicBool,

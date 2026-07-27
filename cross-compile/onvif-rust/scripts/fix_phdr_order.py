@@ -22,7 +22,9 @@ import sys
 def fix_phdr_order(path, verbose=False):
     """Ensure PT_DYNAMIC appears before PT_TLS in program headers.
 
-    Returns True if the file was modified, False if no change was needed.
+    Returns True if the file was modified, False if no change was needed
+    (already correctly ordered, or no PT_TLS/PT_DYNAMIC present), or None
+    if the file is not a valid ELF32 binary.
     """
     PT_DYNAMIC = 2
     PT_TLS = 7
@@ -31,12 +33,12 @@ def fix_phdr_order(path, verbose=False):
         magic = f.read(4)
         if magic != b'\x7fELF':
             print(f"ERROR: {path} is not an ELF file", file=sys.stderr)
-            return False
+            return None
 
         ei_class = struct.unpack('B', f.read(1))[0]
         if ei_class != 1:
             print(f"ERROR: expected ELF32, got class {ei_class}", file=sys.stderr)
-            return False
+            return None
 
         f.seek(28)
         phoff = struct.unpack('<I', f.read(4))[0]
@@ -98,5 +100,5 @@ if __name__ == '__main__':
 
     path = sys.argv[1]
     verbose = '--verbose' in sys.argv
-    fix_phdr_order(path, verbose=True)
-    sys.exit(0)
+    result = fix_phdr_order(path, verbose=verbose)
+    sys.exit(1 if result is None else 0)

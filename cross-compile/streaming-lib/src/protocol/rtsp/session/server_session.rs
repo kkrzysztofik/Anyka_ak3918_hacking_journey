@@ -135,9 +135,12 @@ pub struct RtspServerSession {
     playback_task: Option<JoinHandle<()>>,
 }
 
-/// Log RTP sequence/timestamp anomalies and periodic packet samples for a UDP track.
+/// Log RTP sequence/timestamp anomalies and periodic packet samples for a track.
+///
+/// Shared by the UDP and TCP-interleaved send paths, which differ only in `protocol`.
 #[allow(clippy::too_many_arguments)]
-fn log_udp_rtp_packet(
+fn log_rtp_packet_stats(
+    protocol: &str,
     stats: &RtpPacketObservation,
     packet: &RtpPacket,
     payload_len: usize,
@@ -149,7 +152,7 @@ fn log_udp_rtp_packet(
 ) {
     if stats.seq_gap || stats.seq_regressed || stats.timestamp_regressed {
         warn!(
-            protocol = "UDP",
+            protocol = protocol,
             track = %track_label,
             session_id = %session_id,
             remote_addr = %remote_for_rtp,
@@ -169,7 +172,7 @@ fn log_udp_rtp_packet(
 
     if sample_interval > 0 && stats.packets_sent.is_multiple_of(sample_interval as u64) {
         debug!(
-            protocol = "UDP",
+            protocol = protocol,
             track = %track_label,
             session_id = %session_id,
             remote_addr = %remote_for_rtp,
@@ -729,29 +732,9 @@ impl RtspServerSession {
             }
         }
 
-        // The sender is used for sending sdp information from the server session to client session
-        // receiver is used to receive the sdp information
-        let (sender, mut receiver) = mpsc::unbounded_channel();
-
-        let stream_path = self.normalize_rtsp_stream_path(&rtsp_request.uri.path);
-        let identifier = StreamIdentifier::Rtsp { stream_path };
-        self.stream_identifier = Some(identifier.clone());
-
-        let request_event = StreamHubEvent::Request { identifier, sender };
-
-        if self.event_producer.send(request_event).is_err() {
-            return Err(SessionError {
-                value: SessionErrorValue::StreamHubEventSendErr,
-            });
-        }
-
-        if let Some(Information::Sdp { data }) = receiver.recv().await
-            && let Ok(sdp) = Sdp::unmarshal(&data)
-        {
-            self.sdp = sdp;
-            //it can new tracks when get the sdp information;
-            self.new_tracks()?;
-        }
+        // Request the stream from the hub and wait for its SDP (populates
+        // self.sdp and self.tracks); shared with `ensure_tracks_from_streamhub`.
+        self.ensure_tracks_from_streamhub(rtsp_request).await?;
 
         // M-02: RFC 2326 §12.1: honour Accept header in DESCRIBE
         if let Some(accept) = rtsp_request.get_header("Accept") {
@@ -1304,44 +1287,17 @@ impl RtspServerSession {
                         packet.header.timestamp,
                     );
 
-                    if stats.seq_gap || stats.seq_regressed || stats.timestamp_regressed {
-                        warn!(
-                            protocol = "TCP",
-                            track = %track_label,
-                            session_id = %session_id,
-                            remote_addr = %remote_for_rtp,
-                            stream_path = %stream_path,
-                            prev_seq = ?stats.prev_seq,
-                            seq = packet.header.seq_number,
-                            seq_delta = ?stats.seq_delta,
-                            prev_timestamp = ?stats.prev_timestamp,
-                            timestamp = packet.header.timestamp,
-                            timestamp_delta = ?stats.timestamp_delta,
-                            seq_gap = stats.seq_gap,
-                            seq_regressed = stats.seq_regressed,
-                            timestamp_regressed = stats.timestamp_regressed,
-                            "rtp_packet_anomaly"
-                        );
-                    }
-
-                    if sample_interval > 0
-                        && stats.packets_sent.is_multiple_of(sample_interval as u64)
-                    {
-                        debug!(
-                            protocol = "TCP",
-                            track = %track_label,
-                            session_id = %session_id,
-                            remote_addr = %remote_for_rtp,
-                            stream_path = %stream_path,
-                            seq = packet.header.seq_number,
-                            timestamp = packet.header.timestamp,
-                            marker = packet.header.marker,
-                            size_bytes = payload_len,
-                            packets_sent = stats.packets_sent,
-                            bytes_sent = stats.bytes_sent,
-                            "rtp_packet_sample"
-                        );
-                    }
+                    log_rtp_packet_stats(
+                        "TCP",
+                        &stats,
+                        &packet,
+                        payload_len,
+                        sample_interval,
+                        &track_label,
+                        &session_id,
+                        remote_for_rtp,
+                        &stream_path,
+                    );
 
                     // Build interleaved RTP packet: 0x24 + channel + length + payload
                     let interleaved_chunk = 4usize.saturating_add(payload_len);
@@ -1453,7 +1409,8 @@ impl RtspServerSession {
                         packet.header.timestamp,
                     );
 
-                    log_udp_rtp_packet(
+                    log_rtp_packet_stats(
+                        "UDP",
                         &stats,
                         &packet,
                         payload_len,

@@ -84,7 +84,6 @@ describe('Router', () => {
     const loginRedirectCases = [
       { path: '#/login', description: 'accessing /login directly' },
       { path: '#/live', description: 'accessing a protected route without auth' },
-      { path: '#/live', description: 'accessing a protected route (navigation state preserved)' },
     ];
 
     it.each(loginRedirectCases)(

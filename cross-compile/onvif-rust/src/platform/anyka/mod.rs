@@ -30,8 +30,8 @@ use crate::hal::anyka::ipc::AnykaIpc;
 use crate::hal::common::video::VideoHalTrait;
 
 use super::common::{
-    AudioEncoder, AudioInput, DeviceInfo, ImagingControl, NetworkInfo, PTZControl, Platform,
-    PlatformError, PlatformResult, Resolution, VideoEncoder, VideoInput,
+    DeviceInfo, ImagingControl, NetworkInfo, PTZControl, Platform, PlatformError, PlatformResult,
+    Resolution, VideoEncoder, VideoInput,
 };
 
 // Types used by tests
@@ -213,27 +213,20 @@ impl AnykaPlatform {
 
     /// Initialize the dual video encoders (main 720p + sub 360p).
     ///
-    /// On failure, closes any encoders opened by this stage (newest first) and
-    /// tears down the video input brought up by `init_video_input`.
+    /// On failure, tears down the whole video pipeline (any encoders opened by
+    /// this stage plus the video input brought up by `init_video_input`).
     async fn init_video_encoders(&self) -> PlatformResult<()> {
         let encoder_configs = self.video_encoder.get_configurations().await?;
-        let mut initialized_encoder_tokens: Vec<String> = Vec::new();
         for config in &encoder_configs {
             if let Err(e) = self.video_encoder.init(config).await {
                 tracing::error!("Failed to initialize video encoder {}: {}", config.token, e);
 
-                self.rollback_initialized_encoders(&initialized_encoder_tokens);
-
-                // Rollback: stop capture, close video input
-                let _ = self.video_input.capture_off();
-                let _ = self.video_input.destroy_vpss();
-                let _ = self.video_input.close().await;
+                self.rollback_video_pipeline().await;
                 return Err(PlatformError::InitializationFailed(format!(
                     "Video encoder {} initialization failed: {}",
                     config.token, e
                 )));
             }
-            initialized_encoder_tokens.push(config.token.clone());
         }
         tracing::info!(
             "Video encoders initialized: {} channels",
@@ -241,19 +234,6 @@ impl AnykaPlatform {
         );
 
         Ok(())
-    }
-
-    /// Close already-initialized encoders in reverse order, logging failures.
-    fn rollback_initialized_encoders(&self, tokens: &[String]) {
-        for token in tokens.iter().rev() {
-            if let Err(close_error) = self.video_encoder.close_encoder(token) {
-                tracing::warn!(
-                    "Failed to rollback initialized encoder {}: {}",
-                    token,
-                    close_error
-                );
-            }
-        }
     }
 
     /// Step 6: bind VI + encoder handles and spawn the frame polling threads.
@@ -342,40 +322,10 @@ impl Platform for AnykaPlatform {
         Ok(self.device_info.clone())
     }
 
-    fn video_input(&self) -> Arc<dyn VideoInput> {
-        self.video_input.clone()
-    }
-
-    fn video_encoder(&self) -> Arc<dyn VideoEncoder> {
-        self.video_encoder.clone()
-    }
+    crate::impl_platform_accessors!();
 
     fn stream_frame_age_ms(&self) -> Option<u64> {
         self.video_encoder.stream_frame_age_ms()
-    }
-
-    fn audio_input(&self) -> Arc<dyn AudioInput> {
-        self.audio_input.clone()
-    }
-
-    fn audio_encoder(&self) -> Arc<dyn AudioEncoder> {
-        self.audio_encoder.clone()
-    }
-
-    fn ptz_control(&self) -> Option<Arc<dyn PTZControl>> {
-        self.ptz_control.clone()
-    }
-
-    fn imaging_control(&self) -> Option<Arc<dyn ImagingControl>> {
-        self.imaging_control.clone()
-    }
-
-    fn network_info(&self) -> Option<Arc<dyn NetworkInfo>> {
-        self.network_info.clone()
-    }
-
-    fn is_initialized(&self) -> bool {
-        self.initialized.load(Ordering::SeqCst)
     }
 
     async fn initialize(&self) -> PlatformResult<()> {

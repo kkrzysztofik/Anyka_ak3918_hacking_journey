@@ -630,6 +630,14 @@ pub struct Application {
     streaming_service: Option<crate::streaming::service::StreamingService>,
 }
 
+/// How `start_internal` should obtain the platform abstraction.
+enum PlatformSource {
+    /// Autodetect the platform (real hardware, falling back to a stub).
+    Detect,
+    /// Use a caller-supplied platform implementation.
+    Custom(Arc<dyn Platform>),
+}
+
 impl Application {
     /// Create imaging settings store with debounced off-executor persistence.
     fn wire_imaging_persistence(
@@ -842,10 +850,26 @@ impl Application {
     ///
     /// Returns `StartupError` if any required component fails to initialize.
     pub async fn start(config_path: &str) -> Result<Self, StartupError> {
+        Self::start_internal(config_path, PlatformSource::Detect).await
+    }
+
+    /// Shared implementation for [`Self::start`] and [`Self::start_with_platform`].
+    ///
+    /// The only difference between the two public entry points is how the
+    /// platform abstraction is obtained: autodetected vs. supplied by the caller.
+    async fn start_internal(
+        config_path: &str,
+        platform_source: PlatformSource,
+    ) -> Result<Self, StartupError> {
         let started_at = Instant::now();
         let mut progress = StartupProgress::new();
 
-        tracing::info!("Starting ONVIF application...");
+        match &platform_source {
+            PlatformSource::Detect => tracing::info!("Starting ONVIF application..."),
+            PlatformSource::Custom(_) => {
+                tracing::info!("Starting ONVIF application with custom platform...")
+            }
+        }
         tracing::info!("Configuration path: {}", config_path);
 
         // Create shutdown channel
@@ -882,7 +906,13 @@ impl Application {
 
         // Phase 2: Platform
         progress.begin_phase(StartupPhase::Platform);
-        let platform = Self::init_platform(&mut progress, &config_runtime).await?;
+        let platform = match platform_source {
+            PlatformSource::Detect => Self::init_platform(&mut progress, &config_runtime).await?,
+            PlatformSource::Custom(p) => {
+                tracing::info!("Using provided custom platform implementation");
+                Some(p)
+            }
+        };
         progress.complete_phase();
 
         // Phase 3: Services - Build AppState
@@ -1224,169 +1254,7 @@ impl Application {
         config_path: &str,
         platform: Arc<dyn Platform>,
     ) -> Result<Self, StartupError> {
-        let started_at = Instant::now();
-        let mut progress = StartupProgress::new();
-
-        tracing::info!("Starting ONVIF application with custom platform...");
-        tracing::info!("Configuration path: {}", config_path);
-
-        // Create shutdown channel
-        let (shutdown_tx, _) = broadcast::channel(SHUTDOWN_CHANNEL_CAPACITY);
-        let shutdown_coordinator =
-            ShutdownCoordinator::new(shutdown_tx.clone(), DEFAULT_SHUTDOWN_TIMEOUT);
-
-        // Phase 1: Configuration
-        progress.begin_phase(StartupPhase::Configuration);
-        let app_config = ConfigStorage::load_or_default(config_path)
-            .map_err(|e| StartupError::Config(e.to_string()))?;
-        let config_runtime = Arc::new(ConfigRuntime::new(app_config));
-
-        // Set up config persistence service (debounced save)
-        let storage = ConfigStorage::new(config_path);
-        let save_delay = config_runtime.read().server.config_save_delay_ms;
-        let (persistence_service, persistence_handle) =
-            ConfigPersistenceService::new(Arc::clone(&config_runtime), storage, save_delay);
-        let config_persistence_task = Some(tokio::spawn(
-            persistence_service.run(shutdown_coordinator.subscribe()),
-        ));
-
-        // Initialize logging
-        if let Err(e) = crate::logging::init_logging(&config_runtime) {
-            eprintln!("Failed to initialize logging: {}", e);
-        }
-
-        config_runtime.log_loaded_config();
-        progress.complete_phase();
-
-        // Phase 2: Platform - Use the provided custom platform
-        progress.begin_phase(StartupPhase::Platform);
-        tracing::info!("Using provided custom platform implementation");
-        progress.complete_phase();
-
-        // Phase 3: Services - Build AppState
-        progress.begin_phase(StartupPhase::Services);
-        tracing::debug!("Initializing ONVIF services...");
-
-        let (user_storage, user_persistence_task) =
-            Self::wire_user_persistence(config_path, save_delay, &shutdown_coordinator);
-        let user_persistence_task = Some(user_persistence_task);
-
-        // Create profile storage for ONVIF media profiles
-        let (profile_storage, profile_persistence_handle, profile_persistence_task) =
-            Self::wire_profile_persistence(config_path, save_delay, &shutdown_coordinator);
-        let profile_persistence_task = Some(profile_persistence_task);
-
-        let (imaging_settings_store, imaging_persistence_task) = Self::wire_imaging_persistence(
-            config_path,
-            Some(&platform),
-            save_delay,
-            &shutdown_coordinator,
-        );
-        let imaging_persistence_task = Some(imaging_persistence_task);
-
-        let rate_limit_per_minute = config_runtime.read().server.rate_limit_per_minute;
-        let rate_limiter = Arc::new(RateLimiter::new(rate_limit_per_minute));
-        tracing::info!(
-            "Rate limiter initialized: {} requests/minute",
-            rate_limit_per_minute
-        );
-
-        let app_state = AppState::builder()
-            .user_storage(Arc::clone(&user_storage))
-            .password_manager(Arc::new(PasswordManager::new()))
-            .ptz_state(Arc::new(PTZStateManager::new()))
-            .config(Arc::clone(&config_runtime))
-            .memory_monitor(Arc::new(
-                crate::utils::MemoryMonitor::from_config(&config_runtime).map_err(|e| {
-                    StartupError::Services(format!("Failed to initialize memory monitor: {}", e))
-                })?,
-            ))
-            .rate_limiter(Arc::clone(&rate_limiter))
-            .config_persistence(persistence_handle.clone())
-            .platform(Arc::clone(&platform))
-            .profile_storage(Arc::clone(&profile_storage))
-            .profile_persistence(profile_persistence_handle.clone())
-            .imaging_settings_store(Arc::clone(&imaging_settings_store))
-            .build()
-            .map_err(|e| StartupError::Services(e.to_string()))?;
-
-        let memory_logging_interval = {
-            let secs = config_runtime.read().memory.logging_interval_secs;
-            if secs == 0 { 300 } else { secs as u64 }
-        };
-        let memory_logging_task = Some(app_state.memory_monitor().clone().start_periodic_logging(
-            Duration::from_secs(memory_logging_interval),
-            shutdown_coordinator.subscribe(),
-        ));
-
-        let rate_limiter_cleanup_task = Some(
-            rate_limiter
-                .start_cleanup_task(Duration::from_secs(60), shutdown_coordinator.subscribe()),
-        );
-
-        progress.complete_phase();
-
-        // Phase 4: Network - Start HTTP Server
-        progress.begin_phase(StartupPhase::Network);
-        tracing::debug!("Starting HTTP server...");
-
-        let server_config = Self::build_server_config(&config_runtime);
-        let port = server_config.port;
-
-        let server = Arc::new(
-            OnvifServer::with_app_state(server_config, app_state.clone())
-                .map_err(|e| StartupError::Network(e.to_string()))?,
-        );
-
-        let server_clone: Arc<OnvifServer> = Arc::clone(&server);
-        let server_task = tokio::spawn(async move {
-            if let Err(e) = server_clone.start().await {
-                tracing::error!("HTTP server error: {}", e);
-            }
-        });
-
-        progress.complete_phase();
-
-        // Phase 5: Discovery (optional in custom platform scenarios)
-        progress.begin_phase(StartupPhase::Discovery);
-        let (discovery, discovery_task) =
-            Self::start_discovery_phase(&config_runtime, port, &mut progress).await;
-        progress.complete_phase();
-
-        // Phase 6: Streaming (optional, gracefully degrades)
-        let streaming_service =
-            Self::start_streaming(&config_runtime, &app_state, &mut progress).await;
-
-        let startup_duration = started_at.elapsed();
-        if progress.has_degraded_services() {
-            tracing::warn!(
-                "Application started in DEGRADED mode in {:?}. Unavailable services: {:?}",
-                startup_duration,
-                progress.degraded_services()
-            );
-        } else {
-            tracing::info!("Application started successfully in {:?}", startup_duration);
-        }
-
-        Ok(Self {
-            started_at,
-            shutdown_coordinator,
-            shutdown_tx,
-            degraded_services: progress.degraded_services().to_vec(),
-            config_path: config_path.to_string(),
-            app_state: Some(app_state),
-            server: Some(server),
-            server_task: Some(server_task),
-            discovery,
-            discovery_task,
-            config_persistence_task,
-            user_persistence_task,
-            profile_persistence_task,
-            imaging_persistence_task,
-            memory_logging_task,
-            rate_limiter_cleanup_task,
-            streaming_service,
-        })
+        Self::start_internal(config_path, PlatformSource::Custom(platform)).await
     }
 
     /// Run the application until a shutdown signal is received.
