@@ -14,6 +14,17 @@
 
 /* ---- Internal helpers (file-static) ------------------------------------- */
 
+/*
+ * The main and sub push threads share the single global ring buffer, but
+ * vd_ring_write() is a single-producer primitive: it loads write_seq, derives a
+ * slot from it, copies the payload and only then increments write_seq. Two
+ * unsynchronised producers can therefore select the same slot, clobber each
+ * other's payload and advance write_seq twice for one usable frame — the
+ * consumer rejects the duplicate as a stale notification and never advances
+ * read_seq for it, so the ring permanently loses capacity.
+ */
+static pthread_mutex_t g_ring_write_lock = PTHREAD_MUTEX_INITIALIZER;
+
 /**
  * push_slot_index - Map a stream_id to a g_push_streams array index.
  *
@@ -206,6 +217,7 @@ static void *push_frame_thread(void *arg)
         /* Try ring buffer write */
         int ring_slot = -1;
         if (g_ring_buffer != NULL && frame_len <= VD_SHM_SLOT_DATA_SIZE) {
+            pthread_mutex_lock(&g_ring_write_lock);
             ring_slot = vd_ring_write(g_ring_buffer, vs.data, frame_len,
                                        timestamp_ms, seq_no,
                                        ring_frame_type, ring_stream_id);
@@ -250,12 +262,15 @@ static void *push_frame_thread(void *arg)
                          hdr->dropped_count,
                          (unsigned long long)diag_monotonic_ms());
             }
+
+            if (ring_slot >= 0) {
+                /* Populate wall-clock timing in the slot */
+                fill_slot_timing(g_ring_buffer, ring_slot);
+            }
+            pthread_mutex_unlock(&g_ring_write_lock);
         }
 
         if (ring_slot >= 0) {
-            /* Populate wall-clock timing in the slot */
-            fill_slot_timing(g_ring_buffer, ring_slot);
-
             {
                 struct vd_ring_header *hdr = vd_ring_get_header(g_ring_buffer);
                 struct vd_slot_header *slot_hdr = vd_ring_get_slot_hdr(g_ring_buffer, (uint32_t)ring_slot);
