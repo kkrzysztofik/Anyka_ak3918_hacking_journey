@@ -2583,6 +2583,7 @@ dependencies = [
  "hex",
  "http",
  "indexmap",
+ "libc",
  "md5",
  "mockall",
  "portable-atomic",

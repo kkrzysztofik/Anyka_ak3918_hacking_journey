@@ -10,7 +10,7 @@ use tokio::sync::Mutex;
 use tokio::sync::Notify;
 use tokio::sync::mpsc;
 use tokio::time::Duration;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info, trace, warn};
 
 use super::rtp_counters::RTP_TIMESTAMP_WRAP_THRESHOLD;
 use crate::config::StreamingConfig;
@@ -847,8 +847,10 @@ async fn pace_if_healthy(
     if !was_waiting_for_idr_recovery && lag_ms <= ctx.latency_policy.lag_recovery_threshold_ms {
         let current_lag = ctx.video_lag_tracker.current_lag_ms();
         let paced_sleep_ms = ctx.frame_pacer.pace(flush_ts, current_lag).await;
+        // Sleeping here is the pacer doing its job on a healthy stream — one line per frame at
+        // `lag_ms=0` is noise, so keep it at trace for when someone is actually studying pacing.
         if paced_sleep_ms >= PACER_SLEEP_DIAGNOSTIC_MIN_MS {
-            debug!(
+            trace!(
                 session_id = %ctx.session_id,
                 remote_addr = %ctx.remote_addr,
                 request_path = %ctx.request_path,
