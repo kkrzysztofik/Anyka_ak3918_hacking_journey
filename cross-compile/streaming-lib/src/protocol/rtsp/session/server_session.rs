@@ -2,7 +2,7 @@ use crate::config::StreamingConfig;
 use crate::protocol::rtsp::global_trait::Marshal;
 use crate::protocol::rtsp::global_trait::Unmarshal;
 use crate::protocol::rtsp::rtsp_codec;
-use bytes::{BufMut, BytesMut};
+use bytes::{BufMut, Bytes, BytesMut};
 use chrono::Utc;
 
 use crate::protocol::rtsp::rtp::define::ANNEXB_NALU_START_CODE;
@@ -255,9 +255,15 @@ async fn write_udp_frame(
         u64::from(udp_pace_sleep_micros)
     };
     let pace_sleep = Duration::from_micros(sleep_micros.max(1));
-    for (i, pkt) in packets.into_iter().enumerate() {
-        io.write(pkt.into()).await?;
-        if (i + 1) % pace_batch == 0 && i + 1 < packet_count {
+    // Hand each pacing batch to the transport in one call rather than one await per datagram:
+    // the per-datagram cost dominates a frame's send time, and the pacing contract (yield every
+    // `pace_batch` packets so the kernel and NIC can drain) is unchanged by how a batch is issued.
+    let mut written = 0;
+    for chunk in packets.chunks(pace_batch) {
+        let batch: Vec<Bytes> = chunk.iter().map(|pkt| pkt.clone().freeze()).collect();
+        io.write_batch(batch).await?;
+        written += chunk.len();
+        if written < packet_count {
             tokio::time::sleep(pace_sleep).await;
         }
     }
