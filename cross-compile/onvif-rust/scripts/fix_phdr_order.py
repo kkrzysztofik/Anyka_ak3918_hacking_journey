@@ -15,8 +15,31 @@ table so PT_DYNAMIC is processed first by the uClibc-ng dynamic linker.
 
 Safe to run on binaries that don't need fixing (it checks the order first).
 """
+import os
 import struct
 import sys
+
+# This script only ever patches build artifacts belonging to this repository.
+# Confining CLI input to that tree stops a mistyped or hostile argument from
+# rewriting an arbitrary ELF file elsewhere on the system.
+REPO_ROOT = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
+)
+
+
+def resolve_target(arg, base=REPO_ROOT):
+    """Resolve a CLI path argument, rejecting anything outside `base`.
+
+    Returns the real path, or None if it escapes `base` or is not a regular file.
+    """
+    real = os.path.realpath(os.path.join(base, arg))
+    if real != base and not real.startswith(base + os.sep):
+        print(f"ERROR: {arg} is outside {base}", file=sys.stderr)
+        return None
+    if not os.path.isfile(real):
+        print(f"ERROR: {arg} is not a regular file", file=sys.stderr)
+        return None
+    return real
 
 
 def fix_phdr_order(path, verbose=False):
@@ -98,7 +121,10 @@ if __name__ == '__main__':
         print("to work around uClibc-ng 1.0.54 ldso.c break-on-TLS bug.")
         sys.exit(1)
 
-    path = sys.argv[1]
+    target = resolve_target(sys.argv[1])
+    if target is None:
+        sys.exit(1)
+
     verbose = '--verbose' in sys.argv
-    result = fix_phdr_order(path, verbose=verbose)
+    result = fix_phdr_order(target, verbose=verbose)
     sys.exit(1 if result is None else 0)

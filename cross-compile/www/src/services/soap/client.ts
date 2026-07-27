@@ -236,17 +236,11 @@ export const soapBodies = {
 
   // PTZ service
   continuousMove: (profileToken: string, panSpeed: number, tiltSpeed: number) => {
-    // Helper to round floating-point speeds to 3 decimal places for stable XML output
-    const formatSpeed = (speed: number): string => {
-      if (!Number.isFinite(speed)) {
-        return '0';
-      }
-      // Clamp to 3 decimal places and convert to string, removing trailing zeros
-      // (split into a single-quantifier regex + endsWith check to avoid a
-      // ReDoS-prone combined `\.?0+$` pattern; behavior is identical for toFixed(3) output)
-      const fixed = (Math.round(speed * 1000) / 1000).toFixed(3).replace(/0+$/, '');
-      return fixed.endsWith('.') ? fixed.slice(0, -1) : fixed;
-    };
+    // Round floating-point speeds to 3 decimal places for stable XML output.
+    // Number->string conversion already drops trailing zeros ("1", "0.25"),
+    // so no trailing-zero regex is needed.
+    const formatSpeed = (speed: number): string =>
+      Number.isFinite(speed) ? String(Math.round(speed * 1000) / 1000) : '0';
     return `<tptz:ContinuousMove><tptz:ProfileToken>${escapeXml(profileToken)}</tptz:ProfileToken><tptz:Velocity><tt:PanTilt x="${formatSpeed(panSpeed)}" y="${formatSpeed(tiltSpeed)}" /></tptz:Velocity></tptz:ContinuousMove>`;
   },
 

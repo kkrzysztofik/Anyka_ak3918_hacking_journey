@@ -5,6 +5,7 @@ Builds minimal synthetic "ELF32" files containing just the bytes
 fix_phdr_order() actually reads (e_ident, e_phoff, e_phentsize, e_phnum,
 and p_type per program header), rather than full valid ELF binaries.
 """
+import shutil
 import struct
 import subprocess
 import sys
@@ -13,7 +14,7 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from fix_phdr_order import fix_phdr_order  # noqa: E402
+from fix_phdr_order import REPO_ROOT, fix_phdr_order, resolve_target  # noqa: E402
 
 PT_NULL = 0
 PT_DYNAMIC = 2
@@ -41,6 +42,15 @@ def write_temp_file(data):
     f.write(data)
     f.close()
     return f.name
+
+
+def write_repo_temp_file(testcase, data):
+    """Write `data` inside REPO_ROOT, which is the only tree the CLI accepts."""
+    tmpdir = tempfile.mkdtemp(dir=REPO_ROOT)
+    testcase.addCleanup(shutil.rmtree, tmpdir, True)
+    path = Path(tmpdir) / 'artifact.bin'
+    path.write_bytes(data)
+    return str(path)
 
 
 class FixPhdrOrderTests(unittest.TestCase):
@@ -78,7 +88,7 @@ class FixPhdrOrderTests(unittest.TestCase):
         self.assertEqual(second_type, PT_TLS)
 
     def test_main_rejects_invalid_elf_with_nonzero_exit(self):
-        path = write_temp_file(b'garbage')
+        path = write_repo_temp_file(self, b'garbage')
         result = subprocess.run(
             [sys.executable, str(Path(__file__).parent / 'fix_phdr_order.py'), path],
             capture_output=True,
@@ -86,12 +96,33 @@ class FixPhdrOrderTests(unittest.TestCase):
         self.assertEqual(result.returncode, 1)
 
     def test_main_succeeds_on_already_correct_binary(self):
-        path = write_temp_file(build_fake_elf32([PT_DYNAMIC, PT_TLS]))
+        path = write_repo_temp_file(self, build_fake_elf32([PT_DYNAMIC, PT_TLS]))
         result = subprocess.run(
             [sys.executable, str(Path(__file__).parent / 'fix_phdr_order.py'), path, '--verbose'],
             capture_output=True,
         )
         self.assertEqual(result.returncode, 0)
+
+    def test_resolve_target_accepts_file_inside_repo(self):
+        path = write_repo_temp_file(self, b'garbage')
+        self.assertEqual(resolve_target(path), path)
+
+    def test_resolve_target_rejects_path_outside_repo(self):
+        self.assertIsNone(resolve_target(write_temp_file(b'garbage')))
+
+    def test_resolve_target_rejects_traversal_escape(self):
+        self.assertIsNone(resolve_target('../' * 12 + 'etc/passwd'))
+
+    def test_resolve_target_rejects_directory(self):
+        self.assertIsNone(resolve_target(REPO_ROOT))
+
+    def test_main_rejects_path_outside_repo(self):
+        path = write_temp_file(build_fake_elf32([PT_TLS, PT_DYNAMIC]))
+        result = subprocess.run(
+            [sys.executable, str(Path(__file__).parent / 'fix_phdr_order.py'), path],
+            capture_output=True,
+        )
+        self.assertEqual(result.returncode, 1)
 
     def test_main_missing_argument_exits_nonzero(self):
         result = subprocess.run(
