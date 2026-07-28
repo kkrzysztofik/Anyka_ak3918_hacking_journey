@@ -40,8 +40,19 @@ pub struct StreamingConfig {
     /// not ready within this timeout, the server sends a 503 Service Unavailable response.
     pub play_ready_timeout_ms: u64,
 
-    /// Yield every this many UDP RTP packets while flushing one framed unit (marker bit).
-    /// Helps the kernel drain TX queues on embedded targets. Ignored when ≤1.
+    /// Sleep every this many UDP RTP packets while flushing one framed unit (marker bit).
+    /// Values ≤1 disable intra-frame pacing; **the default is 0 (off)**.
+    ///
+    /// Pacing was meant to help the kernel drain TX queues on embedded targets, but on the
+    /// AK3918 camera it cost far more than it saved. Two tokio workers share one core with the
+    /// vendor daemon and the WiFi TX thread, so a `sleep(300us)` resolves to ~12 ms: measured
+    /// across 1301 logged frames, `send_ms ~= 31.6 + 12.1 * (batches - 1)`. At the previous
+    /// default of 10, a ~110 KB I-frame became 8 batches and took ~116 ms to leave the box —
+    /// against a 66 ms frame budget at 15 fps — with ~85 ms of that spent asleep.
+    ///
+    /// The kernel already paces this path: the UDP send buffer (~304 KB after the `wmem_max`
+    /// clamp) exceeds any single frame, and the device reported zero `SndbufErrors` across 287k
+    /// datagrams. Set a positive value only on a link where the socket buffer measurably fills.
     pub udp_pace_batch: usize,
 
     /// Sleep duration between UDP pace batches (microseconds). Used with [`Self::udp_pace_batch`]
@@ -76,7 +87,7 @@ impl Default for StreamingConfig {
             max_frame_age_ms: 1500,
             lag_recovery_mode: LagRecoveryMode::LatestIdr,
             play_ready_timeout_ms: 1500,
-            udp_pace_batch: 10,
+            udp_pace_batch: 0, // intra-frame pacing off; see field docs for the measurement
             udp_pace_sleep_micros: 300,
             tcp_interleaved_buffer_max: 1024 * 1024,
             rtsp_listen_addr: "0.0.0.0:554".to_string(),
@@ -144,14 +155,14 @@ impl StreamingConfig {
     /// # Arguments
     ///
     /// * `batch` — Emit a pacing delay after every this many packets within one flush.
-    ///   Values **`0` or `1` disable pacing** (the runtime treats them like “no batching”; see
-    ///   field [`Self::udp_pace_batch`]).
+    ///   Values **`0` or `1` disable pacing**: the frame is handed over in a single call. This
+    ///   is the default; see field [`Self::udp_pace_batch`] for why.
     ///
     /// # Note
     ///
     /// Actual delays use [`Self::udp_pace_sleep_micros`] (see default in [`Default::default`]).
-    /// Very large `batch` values only reduce how often that sleep runs; they do not disable it
-    /// unless pacing is effectively skipped by batch size.
+    /// Larger `batch` values only reduce how often that sleep runs. Budget roughly one scheduler
+    /// quantum per sleep, not the requested microseconds, whenever the target's cores are shared.
     pub fn with_udp_pace_batch(mut self, batch: usize) -> Self {
         if batch <= 1 {
             debug!(
@@ -225,7 +236,10 @@ mod tests {
         assert_eq!(config.max_frame_age_ms, 1500);
         assert_eq!(config.lag_recovery_mode, LagRecoveryMode::LatestIdr);
         assert_eq!(config.play_ready_timeout_ms, 1500);
-        assert_eq!(config.udp_pace_batch, 10);
+        assert_eq!(
+            config.udp_pace_batch, 0,
+            "intra-frame pacing off by default"
+        );
         assert_eq!(config.udp_pace_sleep_micros, 300);
         assert_eq!(config.tcp_interleaved_buffer_max, 1024 * 1024);
         assert_eq!(config.rtsp_listen_addr, "0.0.0.0:554");
@@ -274,7 +288,7 @@ mod tests {
     fn test_udp_pace_sleep_micros_builder_sets_field() {
         let config = StreamingConfig::new().with_udp_pace_sleep_micros(500);
         assert_eq!(config.udp_pace_sleep_micros, 500);
-        assert_eq!(config.udp_pace_batch, 10, "other defaults unchanged");
+        assert_eq!(config.udp_pace_batch, 0, "other defaults unchanged");
     }
 
     #[test]

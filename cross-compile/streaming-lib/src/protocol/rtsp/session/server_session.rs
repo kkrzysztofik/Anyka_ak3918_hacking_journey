@@ -238,9 +238,11 @@ fn marshal_and_log_rtp_packet(
 
 /// Write one accumulated frame's worth of RTP packets to the UDP socket.
 ///
-/// Pace UDP writes: yield every N packets to let the kernel drain the socket
-/// buffer and the NIC transmit queued packets, preventing client-side receive
-/// buffer overflow.
+/// Optionally paces the write: after every `udp_pace_batch` packets, sleep so the kernel can
+/// drain the socket buffer and the NIC can transmit what is queued. Pacing is **off by default**
+/// because that sleep is not free on a contended single-core target — see
+/// [`StreamingConfig::udp_pace_batch`] for the measurement. `udp_pace_batch <= 1` disables it and
+/// hands the whole frame over in one call.
 #[allow(clippy::too_many_arguments)] // matches the other RTP write/handler helpers here
 async fn write_udp_frame(
     io: &Arc<Mutex<Box<dyn TNetIO + Send + Sync>>>,
@@ -258,7 +260,14 @@ async fn write_udp_frame(
     let packets: Vec<Bytes> = packets.into_iter().map(BytesMut::freeze).collect();
     let packet_count = packets.len();
     let mut io = io.lock().await;
-    let pace_batch = udp_pace_batch.max(1);
+    // `<= 1` means "no intra-frame pacing", as documented on the config field. Collapsing to a
+    // single chunk (rather than `.max(1)`, which paced after *every* packet) is what makes that
+    // contract true.
+    let pace_batch = if udp_pace_batch <= 1 {
+        packet_count.max(1)
+    } else {
+        udp_pace_batch
+    };
     let sleep_micros = if udp_pace_sleep_micros == 0 {
         DEFAULT_UDP_PACE_SLEEP_MICROS
     } else {

@@ -2922,3 +2922,74 @@ fn test_redact_session_id_does_not_panic_on_multibyte_input() {
     assert_eq!(RtspServerSession::redact_session_id(""), "...");
     assert_eq!(RtspServerSession::redact_session_id("ab"), "...ab");
 }
+
+// ========================================================================
+// UDP intra-frame pacing
+// ========================================================================
+
+/// Records the length of every `write_batch` call so a test can see how a frame was split.
+struct BatchRecordingIO(std::sync::Arc<std::sync::Mutex<Vec<usize>>>);
+
+#[async_trait]
+impl TNetIO for BatchRecordingIO {
+    fn get_net_type(&self) -> NetType {
+        NetType::UDP
+    }
+
+    async fn write(&mut self, _bytes: Bytes) -> Result<(), BytesIOError> {
+        unreachable!("write_udp_frame must batch, never write one datagram at a time")
+    }
+
+    async fn write_batch(&mut self, messages: &[Bytes]) -> Result<(), BytesIOError> {
+        self.0.lock().unwrap().push(messages.len());
+        Ok(())
+    }
+
+    async fn read(&mut self) -> Result<BytesMut, BytesIOError> {
+        unreachable!("send-only test IO")
+    }
+
+    async fn read_timeout(&mut self, _d: std::time::Duration) -> Result<BytesMut, BytesIOError> {
+        unreachable!("send-only test IO")
+    }
+}
+
+/// A main-stream I-frame must leave the box as one `sendmmsg`, with no intra-frame sleep.
+///
+/// Every extra pacing batch costs a `tokio::time::sleep`. On the camera's contended
+/// single core that sleep resolves to ~12 ms, not the 300 us it asks for: measured over
+/// 1301 logged frames, `send_ms ~= 31.6 + 12.1 * (batches - 1)`. At the old default of 10
+/// packets per batch a ~110 KB I-frame is 8 batches, so it spent ~85 ms of its ~116 ms
+/// asleep -- against a 66 ms frame budget at 15 fps. The kernel already paces this path:
+/// the socket buffer is ~304 KB (larger than any single frame) and the device reported
+/// zero `SndbufErrors` across 287k datagrams.
+#[tokio::test]
+async fn default_udp_pacing_writes_an_iframe_in_a_single_batch() {
+    let config = StreamingConfig::default();
+    // ~110 KB I-frame at the 1400-byte RTP MTU used by rtsp_channel.
+    let packets: Vec<BytesMut> = (0..80).map(|_| BytesMut::from(&[0u8; 1400][..])).collect();
+
+    let calls = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let io: Arc<Mutex<Box<dyn TNetIO + Send + Sync>>> =
+        Arc::new(Mutex::new(Box::new(BatchRecordingIO(calls.clone()))));
+    let throttle = LogThrottle::new(SLOW_WRITE_REPORT_PERIOD);
+
+    write_udp_frame(
+        &io,
+        packets,
+        config.udp_pace_batch,
+        config.udp_pace_sleep_micros,
+        "Video",
+        "test-session",
+        "127.0.0.1:5004".parse().unwrap(),
+        &throttle,
+    )
+    .await
+    .expect("frame write");
+
+    assert_eq!(
+        *calls.lock().unwrap(),
+        vec![80],
+        "an I-frame must be one batch; each extra batch costs ~12 ms of scheduler latency"
+    );
+}
