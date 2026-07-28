@@ -96,3 +96,24 @@ async fn test_rollback_video_pipeline_is_best_effort_when_hal_is_unopened() {
 
     assert!(!platform.is_initialized());
 }
+
+/// `ptz.enabled = false` must skip PTZ bring-up entirely.
+///
+/// The config key existed but reached nothing except a `tracing::info!` line, so PTZ always
+/// started: an actor thread, an open of /dev/ak-motor{0,1}, and a `ptz_check_self` calibration
+/// sweep that costs ~2.1 s of every startup on the device (and then fails with -1 before the
+/// vertical motor is even attempted). Disabled means none of that runs.
+///
+/// On host the stub HAL reports a successful open, so the enabled path yields `Some` — that is
+/// what makes this test able to tell the gate apart from a plain hardware-open failure.
+#[test]
+fn test_init_ptz_control_skips_bring_up_when_disabled() {
+    assert!(
+        super::super::init_ptz_control(false).is_none(),
+        "ptz.enabled = false must skip the actor thread, the motor open and the calibration sweep"
+    );
+    assert!(
+        super::super::init_ptz_control(true).is_some(),
+        "ptz.enabled = true must still bring PTZ up (stub HAL opens successfully on host)"
+    );
+}

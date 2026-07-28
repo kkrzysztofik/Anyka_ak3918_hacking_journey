@@ -1076,7 +1076,9 @@ impl Application {
                 }
             };
 
-            match crate::platform::AnykaPlatform::with_isp_config(isp_path) {
+            let ptz_enabled = config_runtime.read().ptz.enabled;
+
+            match crate::platform::AnykaPlatform::with_isp_config(isp_path, ptz_enabled) {
                 Ok(p) => match p.initialize().await {
                     Ok(()) => {
                         tracing::info!("AnykaPlatform initialized (real hardware)");

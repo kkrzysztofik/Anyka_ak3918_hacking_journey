@@ -194,7 +194,7 @@ max_streams = 4
 # ============================================================================
 [ptz]
 # Enable PTZ control (true/false)
-enabled = true
+enabled = false
 
 # Default pan speed (0.0-1.0)
 pan_speed = 0.5
