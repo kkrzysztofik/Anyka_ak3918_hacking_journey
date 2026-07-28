@@ -59,16 +59,25 @@
 #include "vd_ring_buffer.h"
 
 /**
- * signal_handler - SIGINT/SIGTERM signal handler.
+ * signal_handler - SIGINT/SIGTERM/SIGHUP signal handler.
  *
- * Sets the global g_shutdown flag to 1, which causes the main event loop
- * to exit cleanly on the next poll() iteration.
+ * First signal sets the global g_shutdown flag to 1, which causes the main
+ * event loop to exit cleanly on the next poll() iteration.
  *
- * @param sig  Signal number received; unused.
+ * A second signal exits immediately.  The graceful path joins the push
+ * threads, and a push thread parked inside a blocking SDK call cannot be
+ * interrupted -- without this escape hatch the daemon would appear to ignore
+ * SIGTERM outright, leaving `kill -9` as the only way out.  _exit() is
+ * async-signal-safe; exit() is not, as it would run atexit handlers and flush
+ * stdio from a signal context.
+ *
+ * @param sig  Signal number received.
  */
 static void signal_handler(int sig)
 {
-    (void)sig;
+    if (g_shutdown) {
+        _exit(128 + sig);
+    }
     g_shutdown = 1;
 }
 
@@ -184,6 +193,10 @@ int main(int argc, char *argv[])
     sigemptyset(&sa.sa_mask);
     sigaction(SIGINT,  &sa, NULL);
     sigaction(SIGTERM, &sa, NULL);
+    /* SIGHUP too: the daemon runs in the foreground of run_vendor_daemon.sh with
+     * no setsid/nohup, so a dropped telnet session would otherwise kill it via the
+     * default action -- no thread stop, no ring teardown. */
+    sigaction(SIGHUP,  &sa, NULL);
 
     /* Ignore SIGPIPE so write errors return EPIPE instead of killing us */
     signal(SIGPIPE, SIG_IGN);
@@ -501,16 +514,28 @@ shutdown:
     /* Stop push threads before destroying ring buffer */
     log_info("event=push_thread_lifecycle state=shutdown_stop_begin diag_monotonic_ms=%llu",
              (unsigned long long)diag_monotonic_ms());
-    stop_push_slot(0);
-    stop_push_slot(1);
-    log_info("event=push_thread_lifecycle state=shutdown_stop_done diag_monotonic_ms=%llu",
+    int wedged = 0;
+    wedged |= (stop_push_slot(0) != 0);
+    wedged |= (stop_push_slot(1) != 0);
+    log_info("event=push_thread_lifecycle state=shutdown_stop_done wedged=%d diag_monotonic_ms=%llu",
+             wedged,
              (unsigned long long)diag_monotonic_ms());
 
     /* Clean up shared memory ring buffer */
     if (g_ring_buffer) {
-        vd_ring_shutdown(g_ring_buffer);
-        vd_ring_destroy(g_ring_buffer, 1);
-        g_ring_buffer = NULL;
+        if (wedged) {
+            /* A push thread is still live inside the SDK and may still write into
+             * the ring.  vd_ring_destroy() munmaps it, which would turn a wedged
+             * encoder into a SIGSEGV on the way out.  Leave the mapping for the
+             * kernel to reclaim: the shm path is reopened with O_CREAT and
+             * re-truncated on next start, so a stale one costs nothing. */
+            log_error("event=shutdown state=ring_teardown_skipped reason=push_thread_wedged diag_monotonic_ms=%llu",
+                      (unsigned long long)diag_monotonic_ms());
+        } else {
+            vd_ring_shutdown(g_ring_buffer);
+            vd_ring_destroy(g_ring_buffer, 1);
+            g_ring_buffer = NULL;
+        }
     }
 
     log_info("vendor-daemon stopped");

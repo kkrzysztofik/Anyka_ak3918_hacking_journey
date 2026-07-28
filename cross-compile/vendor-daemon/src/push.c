@@ -1,3 +1,6 @@
+/* pthread_timedjoin_np is a GNU extension; must precede every header. */
+#define _GNU_SOURCE
+
 #include <string.h>
 #include <stdlib.h>
 #include <errno.h>
@@ -345,24 +348,31 @@ static void *push_frame_thread(void *arg)
 /**
  * stop_push_slot - Signal the push thread at slot idx to stop and join it.
  *
- * Sets the active flag to 0 and calls pthread_join(), blocking until the
- * thread exits.  Does nothing if the slot is out of range or already
+ * Sets the active flag to 0 and waits up to PUSH_JOIN_TIMEOUT_SEC for the
+ * thread to exit.  Does nothing if the slot is out of range or already
  * inactive.
  *
+ * The wait is bounded because the thread's loop condition is only re-tested
+ * between ak_venc_get_stream() calls: if the SDK parks inside that call, the
+ * thread never observes the flag and an unbounded join would hang shutdown
+ * forever.  On timeout the thread is detached and the caller told, so it can
+ * decide whether teardown of memory the thread may still touch is safe.
+ *
  * @param idx  Index into g_push_streams (0 for main stream, 1 for sub stream).
+ * @return     0 if the thread was joined, -1 if it timed out and was detached.
  */
-void stop_push_slot(int idx)
+int stop_push_slot(int idx)
 {
     struct push_stream_state *state;
     if (idx < 0 || idx >= PUSH_STREAM_SLOT_COUNT) {
-        return;
+        return 0;
     }
     state = &g_push_streams[idx];
     if (!state->active) {
         log_info("event=push_thread_lifecycle state=stop_skip slot=%d active=0 diag_monotonic_ms=%llu",
                  idx,
                  (unsigned long long)diag_monotonic_ms());
-        return;
+        return 0;
     }
     log_info("event=push_thread_lifecycle state=stop_request stream=%u slot=%d active_before=%d diag_monotonic_ms=%llu",
              state->stream_id,
@@ -370,12 +380,32 @@ void stop_push_slot(int idx)
              state->active,
              (unsigned long long)diag_monotonic_ms());
     state->active = 0;
-    pthread_join(state->thread, NULL);
+
+    struct timespec deadline;
+    /* pthread_timedjoin_np deadlines are absolute and on CLOCK_REALTIME. */
+    clock_gettime(CLOCK_REALTIME, &deadline);
+    deadline.tv_sec += PUSH_JOIN_TIMEOUT_SEC;
+
+    int rc = pthread_timedjoin_np(state->thread, NULL, &deadline);
+    if (rc != 0) {
+        log_error("event=push_thread_lifecycle state=join_timeout stream=%u slot=%d timeout_sec=%d rc=%d diag_monotonic_ms=%llu",
+                  state->stream_id,
+                  idx,
+                  PUSH_JOIN_TIMEOUT_SEC,
+                  rc,
+                  (unsigned long long)diag_monotonic_ms());
+        /* Detach so the thread's resources are reclaimed if it ever does return. */
+        pthread_detach(state->thread);
+        state->stream_handle = NULL;
+        return -1;
+    }
+
     log_info("event=push_thread_lifecycle state=joined stream=%u slot=%d diag_monotonic_ms=%llu",
              state->stream_id,
              idx,
              (unsigned long long)diag_monotonic_ms());
     state->stream_handle = NULL;
+    return 0;
 }
 
 /**

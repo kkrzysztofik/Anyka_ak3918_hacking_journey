@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <pthread.h>
+#include <signal.h>
 
 /* ---- Push-mode frame delivery state ------------------------------------- */
 
@@ -23,13 +24,29 @@ struct push_stream_state {
 /*
  * Maximum consecutive no-data iterations before the push thread self-exits.
  * At PUSH_POLL_SLEEP_MS=5, 1000 iterations ~ 5 seconds.  Prevents zombie
- * threads when the SDK pipeline is broken, and guarantees that
- * stop_push_slot()'s pthread_join() completes in bounded time.
+ * threads when the SDK pipeline is broken.
+ *
+ * NOTE: this bounds the loop only when ak_venc_get_stream() *returns*.  If it
+ * blocks inside the SDK the counter never advances, so it cannot on its own
+ * bound stop_push_slot() -- see PUSH_JOIN_TIMEOUT_SEC.
  */
 #define PUSH_NO_DATA_EXIT_THRESHOLD 1000
 
+/*
+ * How long stop_push_slot() waits for a push thread before giving up on it.
+ * A thread parked inside a blocking SDK call cannot be interrupted, and an
+ * unbounded pthread_join() there turns a wedged encoder into a daemon that
+ * ignores SIGTERM entirely.
+ */
+#define PUSH_JOIN_TIMEOUT_SEC 3
+
 /* ---- Shutdown flag ------------------------------------------------------- */
-extern volatile int g_shutdown;
+/*
+ * sig_atomic_t, not int: C11 7.14.1.1p5 only guarantees a signal handler may
+ * assign to a volatile sig_atomic_t (or a lock-free atomic).  Anything else is
+ * undefined, however well a 32-bit aligned store happens to behave on ARM.
+ */
+extern volatile sig_atomic_t g_shutdown;
 
 /* ---- Control client guard ------------------------------------------------ */
 extern int g_control_fd;
