@@ -1118,8 +1118,12 @@ impl AnykaIpc {
     /// A poisoned lock or absent reader must not report `(0, 0)`: that reads as an empty
     /// ring, which is the opposite conclusion from the wedged ring this telemetry exists to
     /// catch.
+    ///
+    /// `try_lock`, matching [`AnykaIpc::shm_is_shutdown`]: the caller reads this while holding
+    /// both frame-socket mutexes, so blocking on a contended ring would stall frame delivery
+    /// for a diagnostic. Contention reports the ring as unavailable, which it effectively is.
     fn shm_ring_sequences(&self) -> Option<(u32, u32)> {
-        let guard = self.shm_reader.lock().ok()?;
+        let guard = self.shm_reader.try_lock().ok()?;
         guard.as_ref().map(|shm| (shm.write_seq(), shm.read_seq()))
     }
 
@@ -2105,6 +2109,69 @@ mod tests {
             }
             other => panic!("expected ResourceBusy, got {:?}", other),
         }
+    }
+
+    /// An idle ring reads `(0, 0)`. That must come back as `Some((0, 0))`, not `None`: the
+    /// whole point of the `Option` is that "empty" and "unavailable" are different answers.
+    #[test]
+    fn test_shm_ring_sequences_reports_an_idle_ring_as_zero_not_unavailable() {
+        use super::shm_ring::tests::create_test_anon_reader;
+
+        let (ctrl_a, _ctrl_b) = UnixStream::pair().unwrap();
+        let ipc =
+            AnykaIpc::from_parts_for_test(ctrl_a, None, None, Some(create_test_anon_reader()));
+
+        assert_eq!(
+            ipc.shm_ring_sequences(),
+            Some((0, 0)),
+            "an available but idle ring must report occupancy, not unavailability"
+        );
+    }
+
+    /// No reader at all is genuinely unavailable, and the dropped-frame warning must omit the
+    /// occupancy fields rather than publish a zero that reads as an empty ring.
+    #[test]
+    fn test_shm_ring_sequences_reports_none_when_reader_absent() {
+        let (ctrl_a, _ctrl_b) = UnixStream::pair().unwrap();
+        let ipc = AnykaIpc::from_parts_for_test(ctrl_a, None, None, None);
+
+        assert_eq!(ipc.shm_ring_sequences(), None);
+    }
+
+    /// The caller reads ring occupancy while holding both frame-socket mutexes, so a contended
+    /// ring must report unavailable instead of blocking frame delivery for a diagnostic.
+    ///
+    /// The holder releases on a timeout rather than waiting for this thread, so a regression to
+    /// a blocking `lock()` fails the assertion instead of hanging the suite.
+    #[test]
+    fn test_shm_ring_sequences_reports_none_while_the_ring_lock_is_held() {
+        use super::shm_ring::tests::create_test_anon_reader;
+        use std::sync::mpsc;
+
+        let (ctrl_a, _ctrl_b) = UnixStream::pair().unwrap();
+        let ipc =
+            AnykaIpc::from_parts_for_test(ctrl_a, None, None, Some(create_test_anon_reader()));
+
+        let (held_tx, held_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel::<()>();
+
+        let holder = &ipc;
+        std::thread::scope(|scope| {
+            // `move` so the non-Sync Receiver is owned by the holder rather than borrowed.
+            scope.spawn(move || {
+                let _guard = holder.shm_reader.lock().expect("hold the ring lock");
+                held_tx.send(()).expect("signal that the lock is held");
+                let _ = release_rx.recv_timeout(Duration::from_secs(2));
+            });
+
+            held_rx.recv().expect("ring lock should be held");
+            assert_eq!(
+                ipc.shm_ring_sequences(),
+                None,
+                "a contended ring must report unavailable rather than wait for the lock"
+            );
+            let _ = release_tx.send(());
+        });
     }
 
     #[test]
