@@ -1112,17 +1112,15 @@ impl AnykaIpc {
         }
     }
 
-    /// Current `(write_seq, read_seq)` from the shared ring header, or `(0, 0)` when the
-    /// ring is unavailable.
-    fn shm_ring_sequences(&self) -> (u32, u32) {
-        let guard = match self.shm_reader.lock() {
-            Ok(g) => g,
-            Err(_) => return (0, 0),
-        };
-        match guard.as_ref() {
-            Some(shm) => (shm.write_seq(), shm.read_seq()),
-            None => (0, 0),
-        }
+    /// Current `(write_seq, read_seq)` from the shared ring header, or `None` when the ring
+    /// is unavailable.
+    ///
+    /// A poisoned lock or absent reader must not report `(0, 0)`: that reads as an empty
+    /// ring, which is the opposite conclusion from the wedged ring this telemetry exists to
+    /// catch.
+    fn shm_ring_sequences(&self) -> Option<(u32, u32)> {
+        let guard = self.shm_reader.lock().ok()?;
+        guard.as_ref().map(|shm| (shm.write_seq(), shm.read_seq()))
     }
 
     /// Read ring buffer diagnostic counters (overflow, eviction, fallback, dropped).
@@ -1256,19 +1254,31 @@ impl AnykaIpc {
             // Ring occupancy is the only thing that distinguishes a transient burst from a
             // permanently wedged ring (`write_seq - read_seq` stuck at or above the slot
             // count), and the periodic delivery telemetry stops firing once drops are total.
-            let (write_seq, read_seq) = self.shm_ring_sequences();
-            warn!(
-                event = "push_notification_frame_dropped",
-                diag_monotonic_ms = monotonic_millis(),
-                channel = channel_name,
-                slot_index = notif.slot_index,
-                flags = notif.flags,
-                write_seq,
-                read_seq,
-                in_flight = write_seq.wrapping_sub(read_seq),
-                slot_count = VD_SHM_SLOT_COUNT,
-                "daemon reported dropped frame notification"
-            );
+            match self.shm_ring_sequences() {
+                Some((write_seq, read_seq)) => warn!(
+                    event = "push_notification_frame_dropped",
+                    diag_monotonic_ms = monotonic_millis(),
+                    channel = channel_name,
+                    slot_index = notif.slot_index,
+                    flags = notif.flags,
+                    write_seq,
+                    read_seq,
+                    in_flight = write_seq.wrapping_sub(read_seq),
+                    slot_count = VD_SHM_SLOT_COUNT,
+                    "daemon reported dropped frame notification"
+                ),
+                // Occupancy fields omitted rather than zeroed: unavailable is not "empty".
+                None => warn!(
+                    event = "push_notification_frame_dropped",
+                    diag_monotonic_ms = monotonic_millis(),
+                    channel = channel_name,
+                    slot_index = notif.slot_index,
+                    flags = notif.flags,
+                    ring_state = "unavailable",
+                    slot_count = VD_SHM_SLOT_COUNT,
+                    "daemon reported dropped frame notification"
+                ),
+            }
             return Err(PlatformError::ResourceBusy(
                 "frame dropped by daemon (P-frame during ring overflow)".into(),
             ));
