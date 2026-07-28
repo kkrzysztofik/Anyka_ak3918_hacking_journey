@@ -61,6 +61,60 @@ pub trait TNetIO: Send + Sync {
     async fn read(&mut self) -> Result<BytesMut, BytesIOError>;
     async fn read_timeout(&mut self, duration: Duration) -> Result<BytesMut, BytesIOError>;
     fn get_net_type(&self) -> NetType;
+
+    /// Write a run of independent messages.
+    ///
+    /// Datagram transports can hand the whole run to the kernel in one call; the default is a
+    /// plain loop, which is what stream transports want anyway (they have no message
+    /// boundaries to preserve).
+    async fn write_batch(&mut self, messages: &[Bytes]) -> Result<(), BytesIOError> {
+        for msg in messages {
+            self.write(msg.clone()).await?;
+        }
+        Ok(())
+    }
+}
+
+/// Kernel cap on messages per `sendmmsg(2)` call (`UIO_MAXIOV`).
+#[cfg(target_os = "linux")]
+const SENDMMSG_MAX_MESSAGES: usize = 1024;
+
+/// Send as many of `messages` as the kernel accepts in one `sendmmsg(2)`, returning the count.
+///
+/// The socket is connected, so `msg_name` stays null. Each datagram gets exactly one iovec:
+/// UDP messages are all-or-nothing, so any message the kernel reports as sent is complete.
+#[cfg(target_os = "linux")]
+fn sendmmsg(socket: &UdpSocket, messages: &[Bytes]) -> std::io::Result<usize> {
+    use std::os::fd::AsRawFd;
+
+    let count = messages.len().min(SENDMMSG_MAX_MESSAGES);
+    let mut iovecs: Vec<libc::iovec> = messages[..count]
+        .iter()
+        .map(|m| libc::iovec {
+            iov_base: m.as_ptr() as *mut libc::c_void,
+            iov_len: m.len(),
+        })
+        .collect();
+
+    // SAFETY: `mmsghdr` is a plain C struct with no invalid bit patterns; zeroing it is the
+    // documented way to leave `msg_name`/`msg_control` unset on a connected socket.
+    let mut msgs: Vec<libc::mmsghdr> = (0..count)
+        .map(|i| {
+            let mut m: libc::mmsghdr = unsafe { std::mem::zeroed() };
+            m.msg_hdr.msg_iov = &mut iovecs[i];
+            m.msg_hdr.msg_iovlen = 1;
+            m
+        })
+        .collect();
+
+    // SAFETY: `msgs` holds `count` initialised headers, each pointing at an iovec that borrows
+    // a live `Bytes` in `messages`; both vectors outlive the call.
+    let rv = unsafe { libc::sendmmsg(socket.as_raw_fd(), msgs.as_mut_ptr(), count as u32, 0) };
+    if rv < 0 {
+        Err(std::io::Error::last_os_error())
+    } else {
+        Ok(rv as usize)
+    }
 }
 
 pub struct UdpIO {
@@ -252,6 +306,39 @@ impl TNetIO for UdpIO {
         Ok(())
     }
 
+    /// Hand a whole frame's datagrams to the kernel with `sendmmsg(2)`.
+    ///
+    /// One RTP frame is 7 datagrams typically and ~30 for an I-frame. Issuing them one await at
+    /// a time costs ~2.4 ms each on the camera — linear in packet count, and not backpressure
+    /// (a 45 KB burst cannot fill a 304 KB socket buffer), so it is per-operation overhead.
+    /// Batching collapses the run into a single syscall.
+    #[cfg(target_os = "linux")]
+    async fn write_batch(&mut self, messages: &[Bytes]) -> Result<(), BytesIOError> {
+        let mut sent = 0;
+        while sent < messages.len() {
+            self.socket.writable().await?;
+            let remaining = &messages[sent..];
+            match self.socket.try_io(tokio::io::Interest::WRITABLE, || {
+                sendmmsg(&self.socket, remaining)
+            }) {
+                Ok(0) => continue,
+                Ok(n) => sent += n,
+                // A partial send comes back as `Ok(n)`, never as an error, so an interrupted
+                // call sent nothing and retrying cannot duplicate a datagram.
+                Err(ref e)
+                    if matches!(
+                        e.kind(),
+                        std::io::ErrorKind::WouldBlock | std::io::ErrorKind::Interrupted
+                    ) =>
+                {
+                    continue;
+                }
+                Err(e) => return Err(e.into()),
+            }
+        }
+        Ok(())
+    }
+
     async fn read_timeout(&mut self, duration: Duration) -> Result<BytesMut, BytesIOError> {
         match tokio::time::timeout(duration, self.read()).await {
             Ok(data) => data,
@@ -434,6 +521,55 @@ mod tests {
     #[test]
     fn test_net_type_udp_variant_exists() {
         assert!(matches!(NetType::UDP, NetType::UDP));
+    }
+
+    // ========== UdpIO batched write Tests ==========
+
+    /// `write_batch` goes through `sendmmsg(2)` on Linux, so this exercises the raw FFI: every
+    /// datagram must arrive, intact, in order, with message boundaries preserved.
+    #[tokio::test]
+    async fn test_udpio_write_batch_delivers_every_datagram_in_order() {
+        let receiver = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let recv_port = receiver.local_addr().unwrap().port();
+
+        let mut udpio = UdpIO::new("127.0.0.1".to_string(), recv_port, 0)
+            .await
+            .expect("UdpIO should bind");
+
+        // More than one pacing batch worth, with varying lengths to catch iovec mix-ups.
+        let payloads: Vec<Bytes> = (0..64u32)
+            .map(|i| Bytes::from(vec![i as u8; 1 + (i as usize % 97)]))
+            .collect();
+
+        udpio.write_batch(&payloads).await.unwrap();
+
+        let mut buf = vec![0u8; 2048];
+        for (i, expected) in payloads.iter().enumerate() {
+            let len = tokio::time::timeout(Duration::from_secs(2), receiver.recv(&mut buf))
+                .await
+                .unwrap_or_else(|_| panic!("datagram {i} never arrived"))
+                .unwrap();
+            assert_eq!(&buf[..len], expected.as_ref(), "datagram {i} mismatched");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_udpio_write_batch_empty_is_a_noop() {
+        let receiver = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let recv_port = receiver.local_addr().unwrap().port();
+        let mut udpio = UdpIO::new("127.0.0.1".to_string(), recv_port, 0)
+            .await
+            .expect("UdpIO should bind");
+
+        udpio.write_batch(&[]).await.unwrap();
+
+        let mut buf = vec![0u8; 64];
+        assert!(
+            tokio::time::timeout(Duration::from_millis(200), receiver.recv(&mut buf))
+                .await
+                .is_err(),
+            "empty batch must not emit a datagram"
+        );
     }
 
     // ========== TcpIO Tests ==========

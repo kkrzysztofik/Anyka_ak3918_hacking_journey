@@ -80,7 +80,14 @@ impl Uuid {
             _ => 0,
         };
 
-        let seconds_str = seconds.to_string();
+        Self::new_with_seconds(seconds, random_digit_count)
+    }
+
+    fn new_with_seconds(seconds: u64, random_digit_count: RandomDigitCount) -> Self {
+        // Zero-pad to the full 10-character slot: the random counter below is written at a
+        // fixed offset of 10, so a shorter timestamp (devices without an RTC report ~1970
+        // epochs, i.e. 6 digits) would otherwise leave NUL chars inside the rendered id.
+        let seconds_str = format!("{seconds:010}");
         let mut value: [char; 16] = ['\0'; 16];
         for (i, c) in seconds_str.chars().enumerate() {
             if i >= 10 {
@@ -200,6 +207,17 @@ mod tests {
         let uuid = Uuid::new(RandomDigitCount::Six);
         let s = uuid.to_string();
         assert_eq!(s.len(), 16);
+    }
+
+    #[test]
+    fn test_uuid_unsynced_clock_has_no_embedded_nuls() {
+        // Cameras without an RTC boot at ~1970, so the epoch is only 6 digits long.
+        let uuid = Uuid::new_with_seconds(116_188, RandomDigitCount::Four);
+        let s = uuid.to_string();
+        assert_eq!(s.len(), 14);
+        assert!(s.chars().all(|c| c.is_ascii_digit()), "rendered as {s:?}");
+        assert!(s.starts_with("0000116188"), "rendered as {s:?}");
+        assert!(Uuid::from_str(&s).is_some());
     }
 
     #[test]

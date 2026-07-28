@@ -2,7 +2,7 @@ use crate::config::StreamingConfig;
 use crate::protocol::rtsp::global_trait::Marshal;
 use crate::protocol::rtsp::global_trait::Unmarshal;
 use crate::protocol::rtsp::rtsp_codec;
-use bytes::{BufMut, BytesMut};
+use bytes::{BufMut, Bytes, BytesMut};
 use chrono::Utc;
 
 use crate::protocol::rtsp::rtp::define::ANNEXB_NALU_START_CODE;
@@ -14,6 +14,7 @@ use crate::common::http::HttpResponse as RtspResponse;
 use crate::common::http::Marshal as RtspMarshal;
 use crate::common::http::Unmarshal as RtspUnmarshal;
 use crate::common::http::try_get_complete_message_len;
+use crate::common::utils::LogThrottle;
 
 use crate::protocol::rtsp::rtp::RtpPacket;
 use crate::protocol::rtsp::rtsp_range::RtspRange;
@@ -90,6 +91,10 @@ const SERVER_HEADER: &str = "streaming-lib/0.1";
 
 /// Log threshold for slow TCP/UDP RTP writes (wall-clock flush time, milliseconds).
 const SLOW_WRITE_THRESHOLD_MS: u128 = 10;
+
+/// How often a session may report slow writes. Crossing the threshold is a steady state on a
+/// constrained transmit path, so it is reported as a rate rather than once per frame.
+const SLOW_WRITE_REPORT_PERIOD: Duration = Duration::from_secs(30);
 
 /// Default UDP inter-batch sleep when `udp_pace_sleep_micros` is `0` (embedded TX pacing).
 const DEFAULT_UDP_PACE_SLEEP_MICROS: u64 = 300;
@@ -236,6 +241,7 @@ fn marshal_and_log_rtp_packet(
 /// Pace UDP writes: yield every N packets to let the kernel drain the socket
 /// buffer and the NIC transmit queued packets, preventing client-side receive
 /// buffer overflow.
+#[allow(clippy::too_many_arguments)] // matches the other RTP write/handler helpers here
 async fn write_udp_frame(
     io: &Arc<Mutex<Box<dyn TNetIO + Send + Sync>>>,
     packets: Vec<BytesMut>,
@@ -244,8 +250,12 @@ async fn write_udp_frame(
     track_label: &str,
     session_id: &str,
     remote_for_rtp: SocketAddr,
+    slow_write_throttle: &LogThrottle,
 ) -> Result<(), PackerError> {
     let start = std::time::Instant::now();
+    // `BytesMut::clone` deep-copies; `freeze` is a refcount handoff. Convert once so the pacing
+    // loop below hands out slices instead of copying every datagram it sends.
+    let packets: Vec<Bytes> = packets.into_iter().map(BytesMut::freeze).collect();
     let packet_count = packets.len();
     let mut io = io.lock().await;
     let pace_batch = udp_pace_batch.max(1);
@@ -255,22 +265,33 @@ async fn write_udp_frame(
         u64::from(udp_pace_sleep_micros)
     };
     let pace_sleep = Duration::from_micros(sleep_micros.max(1));
-    for (i, pkt) in packets.into_iter().enumerate() {
-        io.write(pkt.into()).await?;
-        if (i + 1) % pace_batch == 0 && i + 1 < packet_count {
+    // Hand each pacing batch to the transport in one call rather than one await per datagram:
+    // the per-datagram cost dominates a frame's send time, and the pacing contract (yield every
+    // `pace_batch` packets so the kernel and NIC can drain) is unchanged by how a batch is issued.
+    let mut written = 0;
+    for chunk in packets.chunks(pace_batch) {
+        io.write_batch(chunk).await?;
+        written += chunk.len();
+        if written < packet_count {
             tokio::time::sleep(pace_sleep).await;
         }
     }
     let elapsed = start.elapsed();
 
-    // Log slow writes (see SLOW_WRITE_THRESHOLD_MS)
-    if elapsed.as_millis() >= SLOW_WRITE_THRESHOLD_MS {
+    // Log slow writes (see SLOW_WRITE_THRESHOLD_MS). On a constrained transmit path every
+    // frame can cross the threshold, so report a rate rather than a line per frame.
+    if elapsed.as_millis() >= SLOW_WRITE_THRESHOLD_MS
+        && let Some(burst) = slow_write_throttle.record(elapsed.as_millis() as u64)
+    {
         tracing::warn!(
             protocol = "UDP",
             track = %track_label,
             session_id = %session_id,
             remote_addr = %remote_for_rtp,
             elapsed_ms = elapsed.as_millis(),
+            occurrences = burst.occurrences,
+            peak_ms = burst.peak,
+            window_secs = SLOW_WRITE_REPORT_PERIOD.as_secs(),
             "slow_udp_write"
         );
     }
@@ -1418,6 +1439,8 @@ impl RtspServerSession {
         // Second element is running total of `buffer` payload bytes (avoids O(n) sum per packet).
         let udp_accum: Arc<Mutex<(Vec<BytesMut>, usize)>> =
             Arc::new(Mutex::new((Vec::with_capacity(150), 0)));
+        // Per-session, so one struggling client cannot mask another's slow writes.
+        let slow_write_throttle = Arc::new(LogThrottle::new(SLOW_WRITE_REPORT_PERIOD));
 
         Box::new(
             move |io: Arc<Mutex<Box<dyn TNetIO + Send + Sync>>>, packet: RtpPacket| {
@@ -1426,6 +1449,7 @@ impl RtspServerSession {
                 let track_label = track_label.clone();
                 let session_id = session_id.clone();
                 let udp_accum = udp_accum.clone();
+                let slow_write_throttle = slow_write_throttle.clone();
                 Box::pin(async move {
                     let (msg, _payload_len) = marshal_and_log_rtp_packet(
                         "UDP",
@@ -1481,6 +1505,7 @@ impl RtspServerSession {
                             &track_label,
                             &session_id,
                             remote_for_rtp,
+                            &slow_write_throttle,
                         )
                         .await?;
                     }
@@ -2111,6 +2136,12 @@ impl RtspServerSession {
         {
             let requested = Self::parse_session_header(session_hdr);
             if !requested.is_empty() && requested != current.to_string() {
+                warn!(
+                    remote_addr = %self.remote_addr,
+                    requested = ?requested,
+                    current = ?current.to_string(),
+                    "session_id_mismatch"
+                );
                 return Some(Self::gen_rtsp_response(
                     454,
                     "Session Not Found",

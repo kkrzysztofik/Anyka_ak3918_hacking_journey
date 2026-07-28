@@ -138,14 +138,30 @@ pub fn current_time() -> u64 {
     }
 }
 
+/// Earliest wall-clock second we treat as a real, disciplined clock (2020-01-01 UTC).
+///
+/// Devices without an RTC boot at the Unix epoch and only reach a true wall clock once NTP
+/// lands, if ever. An RTCP Sender Report built from such a clock is worse than no report at
+/// all: RFC 3550 §6.4.1 defines the NTP field as the sender's wall clock, and receivers
+/// (live555, hence VLC) switch from arrival-time playout to NTP-derived playout the moment
+/// they accept one. Anchored 50+ years in the past, every presentation time then falls
+/// outside the receiver's conversion window and playback degrades until it stalls.
+const MIN_PLAUSIBLE_WALL_CLOCK_SECS: u64 = 1_577_836_800;
+
 /// Generate an NTP timestamp (RFC 5905 format: 64-bit value) from a SystemTime.
 /// Upper 32 bits: seconds since January 1, 1900 00:00 UTC
 /// Lower 32 bits: fractional seconds (2^-32 second resolution)
-/// Returns None if the system time is before the Unix epoch.
+///
+/// Returns `None` if the system time is before the Unix epoch, or so far in the past that it
+/// cannot be a real wall clock — callers must then omit the Sender Report rather than publish
+/// a bogus synchronisation anchor.
 pub fn ntp_timestamp_from_system_time(st: SystemTime) -> Option<u64> {
     const NTP_UNIX_EPOCH_DIFF: u64 = 2208988800;
 
     let duration = st.duration_since(SystemTime::UNIX_EPOCH).ok()?;
+    if duration.as_secs() < MIN_PLAUSIBLE_WALL_CLOCK_SECS {
+        return None;
+    }
 
     let unix_secs = duration.as_secs();
     let unix_nanos = duration.subsec_nanos() as u64;
@@ -478,28 +494,40 @@ mod tests {
     }
 
     #[test]
-    fn test_ntp_timestamp_from_system_time_valid_after_unix_epoch() {
+    fn test_ntp_timestamp_from_system_time_valid_wall_clock() {
         use std::time::Duration;
-        let valid_time = SystemTime::UNIX_EPOCH + Duration::from_secs(1);
+        let valid_time =
+            SystemTime::UNIX_EPOCH + Duration::from_secs(super::MIN_PLAUSIBLE_WALL_CLOCK_SECS + 1);
         let result = super::ntp_timestamp_from_system_time(valid_time);
-        assert!(
-            result.is_some(),
-            "Expected Some for valid time after Unix epoch"
+        assert!(result.is_some(), "Expected Some for a disciplined clock");
+        let ntp_secs = result.unwrap() >> 32;
+        assert_eq!(
+            ntp_secs,
+            2208988800 + super::MIN_PLAUSIBLE_WALL_CLOCK_SECS + 1,
+            "NTP seconds should be epoch diff + unix seconds"
         );
-        let ntp = result.unwrap();
-        let ntp_secs = ntp >> 32;
-        assert_eq!(ntp_secs, 2208988801, "NTP seconds should be epoch diff + 1");
+    }
+
+    /// A camera with no RTC reports 1970 + uptime. Publishing that as the Sender Report's
+    /// synchronisation anchor makes live555/VLC schedule playout against a clock 50 years
+    /// adrift, so no report must be produced at all until the clock is real.
+    #[test]
+    fn test_ntp_timestamp_rejected_for_unsynced_device_clock() {
+        use std::time::Duration;
+        let uptime_only_clock = SystemTime::UNIX_EPOCH + Duration::from_secs(52_479);
+        assert!(
+            super::ntp_timestamp_from_system_time(uptime_only_clock).is_none(),
+            "Expected None for a 1970-based uptime clock"
+        );
     }
 
     #[test]
     fn test_ntp_timestamp_from_system_time_unix_epoch_zero() {
-        let result = super::ntp_timestamp_from_system_time(SystemTime::UNIX_EPOCH);
-        assert!(result.is_some());
-        let ntp = result.unwrap();
-        let ntp_secs = ntp >> 32;
-        assert_eq!(
-            ntp_secs, 2208988800,
-            "NTP seconds at Unix epoch should be epoch diff"
+        // The Unix epoch is arithmetically representable but is never a real wall clock; it is
+        // what an un-synced device reports, so it must not anchor a Sender Report.
+        assert!(
+            super::ntp_timestamp_from_system_time(SystemTime::UNIX_EPOCH).is_none(),
+            "Expected None at the bare Unix epoch"
         );
     }
 

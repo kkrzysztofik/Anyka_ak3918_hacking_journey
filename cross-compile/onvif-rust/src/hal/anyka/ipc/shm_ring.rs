@@ -276,8 +276,6 @@ pub struct ShmRingReader {
     size: usize,
     /// File descriptor (for cleanup)
     fd: i32,
-    /// Local copy of read_seq for tracking position
-    local_read_seq: u32,
 }
 
 // SAFETY: ShmRingReader uses atomic operations for all shared state access.
@@ -397,13 +395,6 @@ impl ShmRingReader {
             return Err(e);
         }
 
-        // Initialize local read_seq from current value.
-        // SAFETY: Called during open() before daemon interaction — header is stable.
-        let local_read_seq = unsafe {
-            let header = Self::header_from_ptr(base as *const RingHeader);
-            header.read_seq
-        };
-
         tracing::debug!(
             "opened shm ring buffer: {} slots, {} bytes each",
             VD_SHM_SLOT_COUNT,
@@ -414,7 +405,6 @@ impl ShmRingReader {
             base: base as *mut u8,
             size: VD_SHM_TOTAL_SIZE,
             fd,
-            local_read_seq,
         }))
     }
 
@@ -494,7 +484,7 @@ impl ShmRingReader {
         // Verify slot is ready
         if state != VD_SLOT_READY {
             let write_seq = self.write_seq();
-            let available_frames = write_seq.wrapping_sub(self.local_read_seq);
+            let available_frames = write_seq.wrapping_sub(self.read_seq());
             tracing::warn!(
                 event = "shm_slot_not_ready",
                 diag_monotonic_ms = monotonic_millis(),
@@ -504,7 +494,7 @@ impl ShmRingReader {
                 expected_state = VD_SLOT_READY,
                 expected_state_name = slot_state_name(VD_SLOT_READY),
                 write_seq,
-                local_read_seq = self.local_read_seq,
+                read_seq = self.read_seq(),
                 available_frames,
                 "shared memory slot not ready during read"
             );
@@ -554,7 +544,7 @@ impl ShmRingReader {
             }
             Err(current) => {
                 let write_seq = self.write_seq();
-                let available_frames = write_seq.wrapping_sub(self.local_read_seq);
+                let available_frames = write_seq.wrapping_sub(self.read_seq());
                 tracing::warn!(
                     event = "shm_slot_acquire_race",
                     diag_monotonic_ms = monotonic_millis(),
@@ -564,7 +554,7 @@ impl ShmRingReader {
                     current_state = current,
                     current_state_name = slot_state_name(current),
                     write_seq,
-                    local_read_seq = self.local_read_seq,
+                    read_seq = self.read_seq(),
                     available_frames,
                     "shared memory slot changed while acquiring read lease"
                 );
@@ -697,7 +687,7 @@ impl ShmRingReader {
         Ok((metadata, buf))
     }
 
-    /// Clear a slot from `READING` to `EMPTY` without advancing `local_read_seq`.
+    /// Clear a slot from `READING` to `EMPTY` without advancing `read_seq`.
     ///
     /// Used when a notification proves stale after the frame was read: the slot
     /// must be returned to the daemon, but the reader must not consume a frame
@@ -749,16 +739,19 @@ impl ShmRingReader {
 
         match prev {
             Ok(_) => {
-                // Advance local read_seq
-                self.local_read_seq += 1;
-                self.read_seq_atomic()
-                    .store(self.local_read_seq, Ordering::Release);
+                // Advance `read_seq` with a relative increment, matching the daemon's
+                // `vd_ring_release()` contract. An absolute store would rewind the
+                // increments the daemon makes itself (I-frame eviction) and would
+                // resurrect a stale position after `vd_ring_reset()`, either of which
+                // permanently inflates `write_seq - read_seq` until the ring reports
+                // itself full forever.
+                self.read_seq_atomic().fetch_add(1, Ordering::AcqRel);
                 Ok(())
             }
             Err(current) => {
                 let header = self.slot_header(slot_index);
                 let write_seq = self.write_seq();
-                let available_frames = write_seq.wrapping_sub(self.local_read_seq);
+                let available_frames = write_seq.wrapping_sub(self.read_seq());
                 let notif_stream_id = notification.map(|notif| notif.stream_id);
                 let notif_seq_no = notification.map(|notif| notif.seq_no);
                 let notif_frame_len = notification.map(|notif| notif.frame_len);
@@ -784,7 +777,7 @@ impl ShmRingReader {
                     notification_matches_header,
                     frame_timestamp_ms = header.timestamp_ms,
                     write_seq,
-                    local_read_seq = self.local_read_seq,
+                    read_seq = self.read_seq(),
                     available_frames,
                     "shared memory slot release observed unexpected state"
                 );
@@ -822,9 +815,11 @@ impl ShmRingReader {
 
     /// Get the current read sequence number.
     ///
-    /// This is updated by this reader when it releases a slot.
+    /// Read straight from the shared header: this reader advances it on release, but
+    /// the daemon also advances it when it evicts a P-frame, and resets it between
+    /// push sessions. A cached copy would drift from both.
     pub fn read_seq(&self) -> u32 {
-        self.local_read_seq
+        self.read_seq_atomic().load(Ordering::Acquire)
     }
 
     // =============================================================================
@@ -871,7 +866,6 @@ impl ShmRingReader {
             base,
             size: VD_SHM_TOTAL_SIZE,
             fd: -1,
-            local_read_seq: 0,
         }
     }
 
@@ -1428,6 +1422,38 @@ pub(in crate::hal::anyka::ipc) mod tests {
         // Verify state went back to EMPTY via the atomic accessor
         let state = reader.slot_state_atomic(0).load(Ordering::Relaxed);
         assert_eq!(state, VD_SLOT_EMPTY);
+    }
+
+    /// The daemon advances `read_seq` itself when it evicts a P-frame to make room for an
+    /// I-frame. Releasing a slot must add to that, not overwrite it: an absolute store
+    /// rewinds the eviction and permanently costs the ring one slot of capacity, until
+    /// `write_seq - read_seq` pins at the slot count and every frame is dropped.
+    #[test]
+    fn test_release_preserves_daemon_read_seq_advance() {
+        let test_data = b"eviction accounting";
+        let mut reader = create_test_anon_reader();
+
+        // Daemon evicted one P-frame: read_seq is now 1 without the reader consuming it.
+        reader.read_seq_atomic().store(1, Ordering::Release);
+
+        unsafe {
+            write_test_slot(
+                &reader,
+                0,
+                VD_SLOT_READY,
+                test_data.len() as u32,
+                1234567,
+                7,
+                0,
+                0,
+                test_data,
+            );
+        }
+
+        reader.read_slot(0).unwrap();
+        reader.release_slot_with_expectation(0, None).unwrap();
+
+        assert_eq!(reader.read_seq(), 2, "release must not rewind the eviction");
     }
 
     #[test]

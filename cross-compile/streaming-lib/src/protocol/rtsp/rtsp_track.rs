@@ -114,13 +114,24 @@ impl RtspTrack {
 
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(5));
+            // Default `Burst` fires back-to-back to make up ticks missed while the pipeline was
+            // stalled, which would emit a burst of Sender Reports right after a stall. Reports
+            // describe "now", so a missed one is worth nothing — skip it and keep the cadence.
+            interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            // The clock either gets set or it does not; once is enough to explain the absence.
+            let mut skip_logged = false;
             loop {
                 interval.tick().await;
                 let mut rtcp_channel_in = rtcp_channel_out.lock().await;
                 match rtcp_channel_in.send_sr(rtcp_io.clone()).await {
                     Ok(true) => {}
                     Ok(false) => {
-                        tracing::debug!("rtcp_sr_skipped_wall_clock_not_valid");
+                        if !skip_logged {
+                            skip_logged = true;
+                            tracing::debug!(
+                                "rtcp_sr_skipped_wall_clock_not_valid (further skips silent)"
+                            );
+                        }
                     }
                     Err(err) => {
                         tracing::error!(error = %err, "rtcp_send_loop_send_error");
