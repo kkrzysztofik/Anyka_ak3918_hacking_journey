@@ -49,7 +49,7 @@ use crate::protocol::rtsp::sdp::Sdp;
 
 use super::define;
 use super::define::rtsp_method_name;
-use crate::io::TNetIO;
+use crate::io::{BatchWriteStats, TNetIO};
 use crate::io::{TcpReadIO, TcpWriteIO};
 use async_trait::async_trait;
 use tokio::time::{Duration, timeout};
@@ -259,7 +259,11 @@ async fn write_udp_frame(
     // loop below hands out slices instead of copying every datagram it sends.
     let packets: Vec<Bytes> = packets.into_iter().map(BytesMut::freeze).collect();
     let packet_count = packets.len();
+    // Timed on its own: waiting here means another track holds the transport, which is a
+    // different fault from the kernel refusing the datagrams, and wants a different fix.
+    let lock_started = std::time::Instant::now();
     let mut io = io.lock().await;
+    let lock_micros = lock_started.elapsed().as_micros() as u64;
     // `<= 1` means "no intra-frame pacing", as documented on the config field. Collapsing to a
     // single chunk (rather than `.max(1)`, which paced after *every* packet) is what makes that
     // contract true.
@@ -278,8 +282,15 @@ async fn write_udp_frame(
     // the per-datagram cost dominates a frame's send time, and the pacing contract (yield every
     // `pace_batch` packets so the kernel and NIC can drain) is unchanged by how a batch is issued.
     let mut written = 0;
+    // Summed rather than sampled from the last chunk: with pacing on, a frame's park cost is
+    // spread across every chunk, and the last one is usually the cheapest.
+    let mut batch = BatchWriteStats::default();
     for chunk in packets.chunks(pace_batch) {
         io.write_batch(chunk).await?;
+        if let Some(stats) = io.take_batch_stats() {
+            batch.attempts += stats.attempts;
+            batch.park_micros += stats.park_micros;
+        }
         written += chunk.len();
         if written < packet_count {
             tokio::time::sleep(pace_sleep).await;
@@ -289,6 +300,16 @@ async fn write_udp_frame(
 
     // Log slow writes (see SLOW_WRITE_THRESHOLD_MS). On a constrained transmit path every
     // frame can cross the threshold, so report a rate rather than a line per frame.
+    //
+    // The `lock_us`/`park_us`/`send_attempts` split is what makes this line diagnostic rather
+    // than merely alarming. `elapsed_ms` on its own cannot tell apart the three things that
+    // make a frame slow, and they have opposite fixes:
+    //   - `lock_us` high  -> the other track is holding the transport (contention).
+    //   - `park_us` high  -> the kernel had no room; the link has not drained the last frame.
+    //     `send_attempts > 1` confirms it: the kernel took a partial run.
+    //   - both low        -> the time went to marshalling upstream, not to the transport.
+    // Subtracting `elapsed_ms` from the enclosing `rtp_send_slow` `send_ms` gives the
+    // packetisation cost, which no timer in this function can see.
     if elapsed.as_millis() >= SLOW_WRITE_THRESHOLD_MS
         && let Some(burst) = slow_write_throttle.record(elapsed.as_millis() as u64)
     {
@@ -298,6 +319,10 @@ async fn write_udp_frame(
             session_id = %session_id,
             remote_addr = %remote_for_rtp,
             elapsed_ms = elapsed.as_millis(),
+            packets = packet_count,
+            lock_us = lock_micros,
+            park_us = batch.park_micros,
+            send_attempts = batch.attempts,
             occurrences = burst.occurrences,
             peak_ms = burst.peak,
             window_secs = SLOW_WRITE_REPORT_PERIOD.as_secs(),

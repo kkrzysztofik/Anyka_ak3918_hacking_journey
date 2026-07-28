@@ -2993,3 +2993,76 @@ async fn default_udp_pacing_writes_an_iframe_in_a_single_batch() {
         "an I-frame must be one batch; each extra batch costs ~12 ms of scheduler latency"
     );
 }
+
+/// A transport that reports a fixed cost per batch and counts how often it is asked for it.
+struct StatsAccountingIO {
+    batches: std::sync::Arc<std::sync::Mutex<u32>>,
+    takes: std::sync::Arc<std::sync::Mutex<u32>>,
+}
+
+#[async_trait]
+impl TNetIO for StatsAccountingIO {
+    fn get_net_type(&self) -> NetType {
+        NetType::UDP
+    }
+    async fn write(&mut self, _bytes: Bytes) -> Result<(), BytesIOError> {
+        unreachable!("write_udp_frame must batch, never write one datagram at a time")
+    }
+    async fn write_batch(&mut self, _messages: &[Bytes]) -> Result<(), BytesIOError> {
+        *self.batches.lock().unwrap() += 1;
+        Ok(())
+    }
+    fn take_batch_stats(&mut self) -> Option<BatchWriteStats> {
+        *self.takes.lock().unwrap() += 1;
+        Some(BatchWriteStats {
+            attempts: 3,
+            park_micros: 5_000,
+        })
+    }
+    async fn read(&mut self) -> Result<BytesMut, BytesIOError> {
+        unreachable!("send-only test IO")
+    }
+    async fn read_timeout(&mut self, _d: std::time::Duration) -> Result<BytesMut, BytesIOError> {
+        unreachable!("send-only test IO")
+    }
+}
+
+/// Every `write_batch` must have its cost collected, not just the last one.
+///
+/// Pacing is off by default, so the common case is one batch per frame and the distinction is
+/// invisible. But `udp_pace_batch` is still a supported knob, and reading the stats only after
+/// the loop would silently divide a paced frame's reported park time by the number of chunks --
+/// which would understate exactly the cost this instrumentation exists to find.
+#[tokio::test]
+async fn udp_frame_diagnostics_account_for_every_pacing_chunk() {
+    let packets: Vec<BytesMut> = (0..80).map(|_| BytesMut::from(&[0u8; 1400][..])).collect();
+    let batches = std::sync::Arc::new(std::sync::Mutex::new(0u32));
+    let takes = std::sync::Arc::new(std::sync::Mutex::new(0u32));
+    let io: Arc<Mutex<Box<dyn TNetIO + Send + Sync>>> =
+        Arc::new(Mutex::new(Box::new(StatsAccountingIO {
+            batches: batches.clone(),
+            takes: takes.clone(),
+        })));
+    let throttle = LogThrottle::new(SLOW_WRITE_REPORT_PERIOD);
+
+    // 80 packets, 20 per pacing chunk => 4 batches.
+    write_udp_frame(
+        &io,
+        packets,
+        20,
+        1,
+        "Video",
+        "test-session",
+        "127.0.0.1:5004".parse().unwrap(),
+        &throttle,
+    )
+    .await
+    .expect("frame write");
+
+    assert_eq!(*batches.lock().unwrap(), 4, "80 packets / 20 per chunk");
+    assert_eq!(
+        *takes.lock().unwrap(),
+        4,
+        "each batch's park cost must be collected, or a paced frame under-reports"
+    );
+}

@@ -55,6 +55,23 @@ pub enum NetType {
     UDP,
 }
 
+/// What the last [`TNetIO::write_batch`] actually spent, for transports that can block mid-run.
+///
+/// A frame's send time splits into work and waiting, and only the waiting scales with how full
+/// the kernel's transmit path already is. Separating them is the difference between "the CPU is
+/// too slow to marshal this frame" and "the link has not drained the previous frame yet" — two
+/// problems with opposite fixes.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct BatchWriteStats {
+    /// Trips through the send loop. `1` is the happy path: the kernel took every datagram in one
+    /// `sendmmsg(2)`. More means it took a partial run and the rest had to wait for room.
+    pub attempts: u32,
+    /// Wall time parked in `writable()`, i.e. waiting for the kernel to make room. On a loaded
+    /// single-core box each park costs a full scheduler quantum, not the microseconds of actual
+    /// drain time, so this is the term that makes a small frame as expensive as a large one.
+    pub park_micros: u64,
+}
+
 #[async_trait]
 pub trait TNetIO: Send + Sync {
     async fn write(&mut self, bytes: Bytes) -> Result<(), BytesIOError>;
@@ -72,6 +89,14 @@ pub trait TNetIO: Send + Sync {
             self.write(msg.clone()).await?;
         }
         Ok(())
+    }
+
+    /// Take and reset the accounting for the last [`TNetIO::write_batch`].
+    ///
+    /// `None` means this transport does not measure itself, which is honest rather than zero:
+    /// a stream transport's backpressure lives in its framing layer, not in one call.
+    fn take_batch_stats(&mut self) -> Option<BatchWriteStats> {
+        None
     }
 }
 
@@ -119,6 +144,8 @@ fn sendmmsg(socket: &UdpSocket, messages: &[Bytes]) -> std::io::Result<usize> {
 
 pub struct UdpIO {
     socket: UdpSocket,
+    /// Accounting for the last `write_batch`, drained by [`TNetIO::take_batch_stats`].
+    last_batch: BatchWriteStats,
 }
 
 impl UdpIO {
@@ -162,6 +189,7 @@ impl UdpIO {
         match tokio::net::UdpSocket::from_std(std_socket) {
             Ok(local_socket) => Some(Self {
                 socket: local_socket,
+                last_batch: BatchWriteStats::default(),
             }),
             Err(err) => {
                 tracing::error!(error = %err, "tokio_udp_from_std_error");
@@ -214,6 +242,7 @@ impl UdpIO {
         match tokio::net::UdpSocket::from_std(std_socket) {
             Ok(local_socket) => Some(Self {
                 socket: local_socket,
+                last_batch: BatchWriteStats::default(),
             }),
             Err(err) => {
                 tracing::error!(error = %err, "tokio_udp_from_std_error");
@@ -314,9 +343,17 @@ impl TNetIO for UdpIO {
     /// Batching collapses the run into a single syscall.
     #[cfg(target_os = "linux")]
     async fn write_batch(&mut self, messages: &[Bytes]) -> Result<(), BytesIOError> {
+        // Reset up front so a failed call reports its own partial cost rather than the previous
+        // call's, and so the stats are never stale if we return early.
+        self.last_batch = BatchWriteStats::default();
         let mut sent = 0;
         while sent < messages.len() {
+            self.last_batch.attempts += 1;
+            // `writable()` returns immediately when there is already room, so this only
+            // accumulates when the kernel's transmit path is genuinely backed up.
+            let park_started = std::time::Instant::now();
             self.socket.writable().await?;
+            self.last_batch.park_micros += park_started.elapsed().as_micros() as u64;
             let remaining = &messages[sent..];
             match self.socket.try_io(tokio::io::Interest::WRITABLE, || {
                 sendmmsg(&self.socket, remaining)
@@ -337,6 +374,11 @@ impl TNetIO for UdpIO {
             }
         }
         Ok(())
+    }
+
+    #[cfg(target_os = "linux")]
+    fn take_batch_stats(&mut self) -> Option<BatchWriteStats> {
+        Some(std::mem::take(&mut self.last_batch))
     }
 
     async fn read_timeout(&mut self, duration: Duration) -> Result<BytesMut, BytesIOError> {
@@ -551,6 +593,41 @@ mod tests {
                 .unwrap();
             assert_eq!(&buf[..len], expected.as_ref(), "datagram {i} mismatched");
         }
+    }
+
+    /// The `slow_udp_write` diagnostic attributes a frame's cost to parking vs. sending, which
+    /// is only meaningful if each frame reports its own numbers. Stats that accumulated across
+    /// calls would make every frame after a slow one look slow too, and the intercept we are
+    /// chasing would never be pinned to a single frame.
+    #[tokio::test]
+    async fn test_udpio_batch_stats_are_per_call_not_cumulative() {
+        let receiver = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let recv_port = receiver.local_addr().unwrap().port();
+        let mut udpio = UdpIO::new("127.0.0.1".to_string(), recv_port, 0)
+            .await
+            .expect("UdpIO should bind");
+
+        let payloads: Vec<Bytes> = (0..8u32).map(|i| Bytes::from(vec![i as u8; 64])).collect();
+
+        udpio.write_batch(&payloads).await.unwrap();
+        let first = udpio
+            .take_batch_stats()
+            .expect("the UDP transport must report batch stats");
+        assert!(
+            first.attempts >= 1,
+            "a non-empty batch issues at least one sendmmsg"
+        );
+
+        udpio.write_batch(&payloads).await.unwrap();
+        let second = udpio
+            .take_batch_stats()
+            .expect("every batch must report stats, not just the first");
+        assert!(
+            second.attempts >= 1 && second.attempts <= first.attempts,
+            "attempts must reset per call, not accumulate: {} then {}",
+            first.attempts,
+            second.attempts
+        );
     }
 
     #[tokio::test]
