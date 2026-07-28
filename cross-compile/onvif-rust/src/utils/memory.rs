@@ -208,7 +208,7 @@ pub struct AllocationInfo {
 #[cfg(feature = "memory-profiling")]
 pub struct AllocationTracker {
     /// Map of allocation address to allocation info
-    allocations: dashmap::DashMap<usize, AllocationInfo>,
+    allocations: std::sync::Mutex<std::collections::HashMap<usize, AllocationInfo>>,
     /// Peak memory usage observed
     peak_usage: std::sync::atomic::AtomicUsize,
 }
@@ -219,17 +219,29 @@ impl AllocationTracker {
     pub fn new() -> Self {
         info!("Memory profiling enabled - allocation tracking active");
         Self {
-            allocations: dashmap::DashMap::new(),
+            allocations: std::sync::Mutex::new(std::collections::HashMap::new()),
             peak_usage: std::sync::atomic::AtomicUsize::new(0),
         }
     }
 
+    /// Lock the allocation map, recovering from poisoning.
+    fn allocations(
+        &self,
+    ) -> std::sync::MutexGuard<'_, std::collections::HashMap<usize, AllocationInfo>> {
+        self.allocations
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
     /// Track a new allocation
     pub fn track_allocation(&self, addr: usize, size: usize, file: &'static str, line: u32) {
-        self.allocations
-            .insert(addr, AllocationInfo { size, file, line });
-
-        let current_total: usize = self.allocations.iter().map(|e| e.size).sum();
+        // ponytail: re-sums the whole map per allocation; keep a running total if profiling
+        // ever gets used in anger. Preserved as-is so this stays a pure dependency swap.
+        let current_total: usize = {
+            let mut allocations = self.allocations();
+            allocations.insert(addr, AllocationInfo { size, file, line });
+            allocations.values().map(|info| info.size).sum()
+        };
         let mut peak = self.peak_usage.load(Ordering::Relaxed);
         while current_total > peak {
             match self.peak_usage.compare_exchange_weak(
@@ -246,18 +258,24 @@ impl AllocationTracker {
 
     /// Stop tracking an allocation (on deallocation)
     pub fn track_deallocation(&self, addr: usize) {
-        self.allocations.remove(&addr);
+        self.allocations().remove(&addr);
     }
 
     /// Log current memory statistics
     pub fn log_stats(&self) {
-        let total: usize = self.allocations.iter().map(|e| e.size).sum();
+        let (total, allocation_count) = {
+            let allocations = self.allocations();
+            (
+                allocations.values().map(|info| info.size).sum::<usize>(),
+                allocations.len(),
+            )
+        };
         let peak = self.peak_usage.load(Ordering::Relaxed);
 
         info!(
             current_kb = total / 1024,
             peak_kb = peak / 1024,
-            allocation_count = self.allocations.len(),
+            allocation_count,
             "Memory profiling stats"
         );
     }
@@ -269,12 +287,12 @@ impl AllocationTracker {
 
     /// Get current total allocation size
     pub fn current_total(&self) -> usize {
-        self.allocations.iter().map(|e| e.size).sum()
+        self.allocations().values().map(|info| info.size).sum()
     }
 
     /// Get count of active allocations
     pub fn allocation_count(&self) -> usize {
-        self.allocations.len()
+        self.allocations().len()
     }
 }
 
