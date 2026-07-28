@@ -25,9 +25,9 @@
 //! protection.clear_failures(&ip);
 //! ```
 
-use dashmap::DashMap;
+use std::collections::HashMap;
 use std::net::IpAddr;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
 /// Default maximum failures before blocking.
@@ -83,7 +83,10 @@ pub struct BruteForceProtection {
     /// How long to block an IP.
     block_duration: Duration,
     /// Failure records per IP.
-    records: Arc<DashMap<IpAddr, FailureRecord>>,
+    ///
+    /// One lock rather than a sharded map: the target is a single-core armv5te, so striping
+    /// buys nothing and a global lock keeps read-modify-write on a record trivially atomic.
+    records: Arc<Mutex<HashMap<IpAddr, FailureRecord>>>,
 }
 
 impl BruteForceProtection {
@@ -103,8 +106,17 @@ impl BruteForceProtection {
             max_failures,
             failure_window: Duration::from_secs(failure_window_seconds),
             block_duration: Duration::from_secs(block_duration_seconds),
-            records: Arc::new(DashMap::new()),
+            records: Arc::new(Mutex::new(HashMap::new())),
         }
+    }
+
+    /// Lock the failure records, recovering from poisoning.
+    ///
+    /// A panicked request must not disable brute-force protection for the whole process.
+    fn records(&self) -> MutexGuard<'_, HashMap<IpAddr, FailureRecord>> {
+        self.records
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
     /// Check if an IP address is currently blocked.
@@ -117,10 +129,9 @@ impl BruteForceProtection {
     ///
     /// `true` if the IP is blocked, `false` otherwise.
     pub fn is_blocked(&self, ip: &IpAddr) -> bool {
-        if let Some(record) = self.records.get(ip) {
-            return record.is_blocked();
-        }
-        false
+        self.records()
+            .get(ip)
+            .is_some_and(|record| record.is_blocked())
     }
 
     /// Record an authentication failure for an IP.
@@ -138,7 +149,8 @@ impl BruteForceProtection {
     pub fn record_failure(&self, ip: &IpAddr) -> bool {
         let now = Instant::now();
 
-        let mut entry = self.records.entry(*ip).or_insert_with(|| FailureRecord {
+        let mut records = self.records();
+        let entry = records.entry(*ip).or_insert_with(|| FailureRecord {
             count: 0,
             first_failure: now,
             blocked_until: None,
@@ -177,7 +189,7 @@ impl BruteForceProtection {
     ///
     /// * `ip` - The IP address to clear
     pub fn clear_failures(&self, ip: &IpAddr) {
-        self.records.remove(ip);
+        self.records().remove(ip);
     }
 
     /// Get the failure count for an IP.
@@ -186,7 +198,7 @@ impl BruteForceProtection {
     ///
     /// The current failure count, or 0 if no failures recorded.
     pub fn get_failure_count(&self, ip: &IpAddr) -> u32 {
-        self.records.get(ip).map(|r| r.count).unwrap_or(0)
+        self.records().get(ip).map(|r| r.count).unwrap_or(0)
     }
 
     /// Get the remaining time an IP is blocked for.
@@ -195,7 +207,7 @@ impl BruteForceProtection {
     ///
     /// The remaining block duration, or `None` if not blocked.
     pub fn remaining_block_time(&self, ip: &IpAddr) -> Option<Duration> {
-        self.records.get(ip).and_then(|record| {
+        self.records().get(ip).and_then(|record| {
             record.blocked_until.and_then(|until| {
                 let now = Instant::now();
                 if now < until { Some(until - now) } else { None }
@@ -213,8 +225,7 @@ impl BruteForceProtection {
         let block_duration = duration.unwrap_or(self.block_duration);
         let until = Instant::now() + block_duration;
 
-        let mut entry = self.records.entry(*ip).or_default();
-        entry.blocked_until = Some(until);
+        self.records().entry(*ip).or_default().blocked_until = Some(until);
     }
 
     /// Unblock an IP address immediately.
@@ -223,7 +234,8 @@ impl BruteForceProtection {
     ///
     /// * `ip` - The IP address to unblock
     pub fn unblock_ip(&self, ip: &IpAddr) {
-        if let Some(mut record) = self.records.get_mut(ip) {
+        let mut records = self.records();
+        if let Some(record) = records.get_mut(ip) {
             record.blocked_until = None;
             record.count = 0;
         }
@@ -234,19 +246,20 @@ impl BruteForceProtection {
     /// Removes records where the failure window has expired and the IP is not blocked.
     pub fn cleanup(&self) {
         let now = Instant::now();
-        self.records.retain(|_, record| {
+        let failure_window = self.failure_window;
+        self.records().retain(|_, record| {
             // Keep if blocked
             if record.blocked_until.is_some_and(|until| now < until) {
                 return true;
             }
             // Keep if failure window hasn't expired
-            now.duration_since(record.first_failure) <= self.failure_window
+            now.duration_since(record.first_failure) <= failure_window
         });
     }
 
     /// Get the number of tracked IPs.
     pub fn tracked_ips(&self) -> usize {
-        self.records.len()
+        self.records().len()
     }
 
     /// Get the current configuration.
@@ -257,12 +270,17 @@ impl BruteForceProtection {
 
 impl std::fmt::Debug for BruteForceProtection {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("BruteForceProtection")
-            .field("max_failures", &self.max_failures)
+        let mut out = f.debug_struct("BruteForceProtection");
+        out.field("max_failures", &self.max_failures)
             .field("failure_window", &self.failure_window)
-            .field("block_duration", &self.block_duration)
-            .field("tracked_ips", &self.records.len())
-            .finish()
+            .field("block_duration", &self.block_duration);
+        // `try_lock`, not `lock`: formatting from inside a section holding the records lock
+        // would otherwise deadlock, and a diagnostic is never worth that.
+        match self.records.try_lock() {
+            Ok(records) => out.field("tracked_ips", &records.len()),
+            Err(_) => out.field("tracked_ips", &"<locked>"),
+        };
+        out.finish()
     }
 }
 

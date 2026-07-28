@@ -1,7 +1,8 @@
 //! Per-IP rate limiting.
 //!
 //! Limits the number of requests from a single IP address within a time window.
-//! Uses DashMap for concurrent access without global locking.
+//! State lives behind one mutex: the target is a single-core armv5te, where a sharded map
+//! costs a dependency and an inexact capacity bound to stripe locks nothing contends on.
 //!
 //! ## Important Limitations
 //!
@@ -28,8 +29,8 @@
 //! can free slots; inline cleanup is **throttled** (hundreds of ms) to avoid repeated
 //! `retain()` scans under sustained load at the cap. If still full—or cleanup was skipped
 //! due to throttle—the new IP is denied. Existing IPs continue to be rate-limited normally.
-//! (Capacity checks run only while **not** holding a DashMap entry guard, to avoid shard lock
-//! deadlocks with `len()` / `retain`.)
+//! The cap is exact: the check and the insert happen under one held lock, so no concurrent
+//! caller can slip a key in past it.
 //!
 //! # Example
 //!
@@ -49,10 +50,10 @@
 //! }
 //! ```
 
-use dashmap::DashMap;
-use dashmap::mapref::entry::Entry;
+use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 use std::net::IpAddr;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 use tokio::sync::broadcast;
 use tokio::task::JoinHandle;
@@ -65,8 +66,8 @@ pub const DEFAULT_WINDOW_SECONDS: u64 = 60;
 
 /// Maximum distinct IP addresses tracked in the map.
 ///
-/// Without a cap, a LAN scan with unique source IPs can grow the `DashMap`
-/// without bound and exhaust memory on embedded targets.
+/// Without a cap, a LAN scan with unique source IPs can grow the map without
+/// bound and exhaust memory on embedded targets.
 pub const MAX_TRACKED_IPS: usize = 10_000;
 
 /// Minimum time between inline [`RateLimiter::cleanup`] calls triggered from [`RateLimiter::check_rate_limit`]
@@ -98,6 +99,19 @@ impl Default for RequestCount {
     }
 }
 
+/// Everything the limiter mutates, behind one lock.
+///
+/// A single lock rather than a sharded map: the target is a single-core armv5te, so striping
+/// buys nothing, and one lock lets [`RateLimiter::check_rate_limit`] hold the guard across
+/// check-cap-insert. That makes [`MAX_TRACKED_IPS`] an exact bound instead of a racy one.
+#[derive(Debug)]
+struct RateLimitState {
+    /// Request counts per IP address.
+    counts: HashMap<IpAddr, RequestCount>,
+    /// Last time inline cleanup ran from [`RateLimiter::check_rate_limit`] (throttle for `cleanup` cost).
+    last_inline_cleanup: Option<Instant>,
+}
+
 /// Per-IP rate limiter using sliding window algorithm.
 #[derive(Clone)]
 pub struct RateLimiter {
@@ -105,10 +119,8 @@ pub struct RateLimiter {
     max_requests: u32,
     /// Window duration.
     window_duration: Duration,
-    /// Request counts per IP address.
-    counts: Arc<DashMap<IpAddr, RequestCount>>,
-    /// Last time inline cleanup ran from [`RateLimiter::check_rate_limit`] (throttle for `cleanup` cost).
-    last_inline_cleanup: Arc<Mutex<Option<Instant>>>,
+    /// Mutable tracking state.
+    state: Arc<Mutex<RateLimitState>>,
 }
 
 impl RateLimiter {
@@ -121,9 +133,25 @@ impl RateLimiter {
         Self {
             max_requests: max_requests_per_minute,
             window_duration: Duration::from_secs(DEFAULT_WINDOW_SECONDS),
-            counts: Arc::new(DashMap::new()),
-            last_inline_cleanup: Arc::new(Mutex::new(None)),
+            state: Self::new_state(),
         }
+    }
+
+    fn new_state() -> Arc<Mutex<RateLimitState>> {
+        Arc::new(Mutex::new(RateLimitState {
+            counts: HashMap::new(),
+            last_inline_cleanup: None,
+        }))
+    }
+
+    /// Lock the tracking state, recovering from poisoning.
+    ///
+    /// A panicked request must not take the server's rate limiting down with it; the counters
+    /// are advisory and a torn update is worth less than a dead listener.
+    fn state(&self) -> MutexGuard<'_, RateLimitState> {
+        self.state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
     /// Create a rate limiter with custom window duration.
@@ -136,8 +164,7 @@ impl RateLimiter {
         Self {
             max_requests,
             window_duration: Duration::from_secs(window_seconds),
-            counts: Arc::new(DashMap::new()),
-            last_inline_cleanup: Arc::new(Mutex::new(None)),
+            state: Self::new_state(),
         }
     }
 
@@ -154,53 +181,49 @@ impl RateLimiter {
     /// `true` if the request is allowed, `false` if rate limit exceeded.
     pub fn check_rate_limit(&self, ip: &IpAddr) -> bool {
         let now = Instant::now();
+        let mut state = self.state();
 
-        // Bound memory for new keys. Must not call `len()`, `cleanup()`, or other map ops
-        // from inside `Entry::or_try_insert_with` / while holding a vacant entry guard:
-        // DashMap keeps a shard write lock and `len()`/`retain` need other shards → deadlock.
-        if let Some(mut r) = self.counts.get_mut(ip) {
-            return Self::apply_request_window(r.value_mut(), self, now);
+        if let Some(entry) = state.counts.get_mut(ip) {
+            return Self::apply_request_window(entry, self, now);
         }
 
-        // Soft cap (TOCTOU): `len()` here vs `entry()` insert can race with other threads, so
-        // the map may briefly exceed `MAX_TRACKED_IPS`; `cleanup()` reclaims expired keys and
-        // this check rejects *new* keys when over cap—an intentional tradeoff vs holding locks
-        // across the whole check+insert path.
-        if self.counts.len() >= MAX_TRACKED_IPS {
-            let now_inst = Instant::now();
-            let should_cleanup = {
-                let guard = self
-                    .last_inline_cleanup
-                    .lock()
-                    .unwrap_or_else(|poisoned| poisoned.into_inner());
-                guard
-                    .map(|t| now_inst.duration_since(t) >= INLINE_CLEANUP_MIN_INTERVAL)
-                    .unwrap_or(true)
-            };
-            if should_cleanup {
-                self.cleanup();
-                *self
-                    .last_inline_cleanup
-                    .lock()
-                    .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(Instant::now());
-            } else {
+        // Bound memory for new keys. The guard is held across check-cap-insert, so the cap is
+        // exact: no window in which another thread can insert past it.
+        if state.counts.len() >= MAX_TRACKED_IPS {
+            let due = state
+                .last_inline_cleanup
+                .map(|last| now.duration_since(last) >= INLINE_CLEANUP_MIN_INTERVAL)
+                .unwrap_or(true);
+            if !due {
+                return false;
+            }
+            // Must not call `self.cleanup()` here: `std::sync::Mutex` is not reentrant and we
+            // already hold the guard, so that would deadlock instantly.
+            Self::retain_unexpired(&mut state.counts, self.window_duration);
+            // Stamp after the scan, not with the `now` from entry: the throttle bounds the
+            // duty cycle of `retain_unexpired`, and anchoring it at scan *start* would let a
+            // scan that outran the interval be followed immediately by another.
+            state.last_inline_cleanup = Some(Instant::now());
+            if state.counts.len() >= MAX_TRACKED_IPS {
                 return false;
             }
         }
-        if self.counts.len() >= MAX_TRACKED_IPS {
-            return false;
-        }
 
-        match self.counts.entry(*ip) {
+        match state.counts.entry(*ip) {
             Entry::Occupied(mut occ) => Self::apply_request_window(occ.get_mut(), self, now),
             Entry::Vacant(vac) => {
-                let mut r = vac.insert(RequestCount {
+                let entry = vac.insert(RequestCount {
                     count: 0,
                     window_start: now,
                 });
-                Self::apply_request_window(r.value_mut(), self, now)
+                Self::apply_request_window(entry, self, now)
             }
         }
+    }
+
+    /// Drop entries whose window has already closed. Caller holds the state lock.
+    fn retain_unexpired(counts: &mut HashMap<IpAddr, RequestCount>, window_duration: Duration) {
+        counts.retain(|_, entry| entry.window_start.elapsed() <= window_duration);
     }
 
     fn apply_request_window(entry: &mut RequestCount, limiter: &RateLimiter, now: Instant) -> bool {
@@ -217,7 +240,7 @@ impl RateLimiter {
     ///
     /// Returns `None` if the IP has no recorded requests.
     pub fn get_count(&self, ip: &IpAddr) -> Option<u32> {
-        self.counts.get(ip).map(|entry| entry.count)
+        self.state().counts.get(ip).map(|entry| entry.count)
     }
 
     /// Get the remaining requests allowed for an IP.
@@ -230,7 +253,7 @@ impl RateLimiter {
     ///
     /// The number of remaining requests, or the full limit if no requests recorded.
     pub fn remaining(&self, ip: &IpAddr) -> u32 {
-        match self.counts.get(ip) {
+        match self.state().counts.get(ip) {
             Some(entry) => {
                 // Check if window expired
                 if entry.window_start.elapsed() > self.window_duration {
@@ -247,13 +270,13 @@ impl RateLimiter {
     ///
     /// Call this periodically (e.g., every minute).
     pub fn cleanup(&self) {
-        self.counts
-            .retain(|_, entry| entry.window_start.elapsed() <= self.window_duration);
+        let window_duration = self.window_duration;
+        Self::retain_unexpired(&mut self.state().counts, window_duration);
     }
 
     /// Reset rate limit for a specific IP.
     pub fn reset(&self, ip: &IpAddr) {
-        self.counts.remove(ip);
+        self.state().counts.remove(ip);
     }
 
     /// Get the maximum requests per window.
@@ -268,7 +291,7 @@ impl RateLimiter {
 
     /// Get the number of tracked IPs.
     pub fn tracked_ips(&self) -> usize {
-        self.counts.len()
+        self.state().counts.len()
     }
 
     /// Start a background task that periodically cleans up expired entries.
@@ -313,11 +336,16 @@ impl RateLimiter {
 
 impl std::fmt::Debug for RateLimiter {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("RateLimiter")
-            .field("max_requests", &self.max_requests)
-            .field("window_duration", &self.window_duration)
-            .field("tracked_ips", &self.counts.len())
-            .finish()
+        let mut out = f.debug_struct("RateLimiter");
+        out.field("max_requests", &self.max_requests)
+            .field("window_duration", &self.window_duration);
+        // `try_lock`, not `lock`: formatting a `RateLimiter` from inside a section that already
+        // holds the state lock would otherwise deadlock, and a diagnostic is never worth that.
+        match self.state.try_lock() {
+            Ok(state) => out.field("tracked_ips", &state.counts.len()),
+            Err(_) => out.field("tracked_ips", &"<locked>"),
+        };
+        out.finish()
     }
 }
 
@@ -572,5 +600,45 @@ mod tests {
         // Known IP still works (cap applies only to new keys).
         let first = IpAddr::V4(std::net::Ipv4Addr::from(0u32));
         assert!(limiter.check_rate_limit(&first));
+    }
+
+    /// The sharded map made each read-modify-write atomic behind its entry guard. The single
+    /// mutex has to keep that: a lost increment would let the effective limit drift upward
+    /// with the number of concurrent callers, which is a rate limiter that does not limit.
+    #[test]
+    fn test_concurrent_requests_on_one_ip_do_not_lose_increments() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        const THREADS: usize = 8;
+        const PER_THREAD: usize = 50;
+        const LIMIT: u32 = 100;
+
+        // Long window so nothing expires mid-test.
+        let limiter = RateLimiter::with_window(LIMIT, 3600);
+        let allowed = AtomicUsize::new(0);
+        let ip = IpAddr::V4(std::net::Ipv4Addr::new(10, 0, 0, 1));
+
+        std::thread::scope(|scope| {
+            for _ in 0..THREADS {
+                scope.spawn(|| {
+                    for _ in 0..PER_THREAD {
+                        if limiter.check_rate_limit(&ip) {
+                            allowed.fetch_add(1, Ordering::Relaxed);
+                        }
+                    }
+                });
+            }
+        });
+
+        assert_eq!(
+            allowed.load(Ordering::Relaxed),
+            LIMIT as usize,
+            "exactly the limit may pass, regardless of how the attempts interleave"
+        );
+        assert_eq!(
+            limiter.get_count(&ip),
+            Some((THREADS * PER_THREAD) as u32),
+            "every attempt must be counted; a lost update means a dropped increment"
+        );
     }
 }
