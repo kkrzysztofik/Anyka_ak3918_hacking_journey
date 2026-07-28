@@ -200,7 +200,10 @@ impl RateLimiter {
             // Must not call `self.cleanup()` here: `std::sync::Mutex` is not reentrant and we
             // already hold the guard, so that would deadlock instantly.
             Self::retain_unexpired(&mut state.counts, self.window_duration);
-            state.last_inline_cleanup = Some(now);
+            // Stamp after the scan, not with the `now` from entry: the throttle bounds the
+            // duty cycle of `retain_unexpired`, and anchoring it at scan *start* would let a
+            // scan that outran the interval be followed immediately by another.
+            state.last_inline_cleanup = Some(Instant::now());
             if state.counts.len() >= MAX_TRACKED_IPS {
                 return false;
             }
