@@ -2901,3 +2901,24 @@ async fn test_async_bytes_writer_flush_moves_buffer_contents() {
     assert_eq!(captured.len(), 1);
     assert_eq!(captured[0].as_ref(), &[1, 2, 3, 4]);
 }
+
+/// A mismatched Session header must not put either session id in the log: whoever reads the
+/// log would hold a credential good for PLAY or TEARDOWN on the live session.
+#[test]
+fn test_redact_session_id_keeps_only_a_short_suffix() {
+    let redacted = RtspServerSession::redact_session_id("1234567890abcdef");
+    assert_eq!(redacted, "...cdef");
+    assert!(
+        !redacted.contains("1234567890"),
+        "redaction must not leak the leading bytes of a session id"
+    );
+}
+
+/// The requested id is taken straight off the wire, so it can be arbitrary UTF-8. Slicing it
+/// by byte offset would panic mid-character and drop the session.
+#[test]
+fn test_redact_session_id_does_not_panic_on_multibyte_input() {
+    assert_eq!(RtspServerSession::redact_session_id("aaaa€€€€"), "...€€€€");
+    assert_eq!(RtspServerSession::redact_session_id(""), "...");
+    assert_eq!(RtspServerSession::redact_session_id("ab"), "...ab");
+}

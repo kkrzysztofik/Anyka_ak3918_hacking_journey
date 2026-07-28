@@ -2126,6 +2126,22 @@ impl RtspServerSession {
             .to_string()
     }
 
+    /// Trailing characters of a session id, for correlating log lines without writing a live
+    /// credential to the log: whoever holds a session id can PLAY or TEARDOWN that session.
+    ///
+    /// Truncates on a character boundary — the requested id comes straight off the wire and
+    /// may be arbitrary UTF-8, so byte slicing here would be a remote panic.
+    fn redact_session_id(id: &str) -> String {
+        const KEEP: usize = 4;
+        let start = id
+            .char_indices()
+            .rev()
+            .take(KEEP)
+            .last()
+            .map_or(id.len(), |(idx, _)| idx);
+        format!("...{}", &id[start..])
+    }
+
     /// Validate that the Session header in the request (if any) matches the current session ID.
     /// Returns `Some(response)` with a 454 "Session Not Found" if there is a mismatch,
     /// or `None` if the session ID is valid or no Session header is present.
@@ -2135,18 +2151,23 @@ impl RtspServerSession {
             && let Some(current) = self.session_id
         {
             let requested = Self::parse_session_header(session_hdr);
-            if !requested.is_empty() && requested != current.to_string() {
-                warn!(
-                    remote_addr = %self.remote_addr,
-                    requested = ?requested,
-                    current = ?current.to_string(),
-                    "session_id_mismatch"
-                );
-                return Some(Self::gen_rtsp_response(
-                    454,
-                    "Session Not Found",
-                    rtsp_request,
-                ));
+            if !requested.is_empty() {
+                // Render once: the comparison needs it on every request carrying a Session
+                // header, and the warning needs the same value again on mismatch.
+                let current = current.to_string();
+                if requested != current {
+                    warn!(
+                        remote_addr = %self.remote_addr,
+                        requested_suffix = %Self::redact_session_id(&requested),
+                        current_suffix = %Self::redact_session_id(&current),
+                        "session_id_mismatch"
+                    );
+                    return Some(Self::gen_rtsp_response(
+                        454,
+                        "Session Not Found",
+                        rtsp_request,
+                    ));
+                }
             }
         }
         None
