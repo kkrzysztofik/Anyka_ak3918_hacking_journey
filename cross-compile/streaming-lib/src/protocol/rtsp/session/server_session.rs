@@ -1471,8 +1471,18 @@ impl RtspServerSession {
     ) -> OnRtpPacketFn {
         // Packet buffer: accumulate marshalled packets (150 packets for large I-frames).
         // Second element is running total of `buffer` payload bytes (avoids O(n) sum per packet).
-        let udp_accum: Arc<Mutex<(Vec<BytesMut>, usize)>> =
-            Arc::new(Mutex::new((Vec::with_capacity(150), 0)));
+        //
+        // Deliberately a `std` mutex, not a tokio one. Only this handler ever touches the
+        // accumulator, so it is never actually contended -- but a tokio `Mutex::lock` is a
+        // *resource operation*, and tokio's cooperative scheduler gives each task a budget of
+        // 128 of those. Past the budget the next such await returns `Pending` however ready it
+        // is, forcing a reschedule; on this device a reschedule costs a full ~12 ms quantum.
+        // At one lock per datagram an 80-packet I-frame burned through that budget every frame,
+        // which is why the cost was flat in packet count instead of proportional to it.
+        // A `std` mutex is not a tokio resource, so it spends no budget. The guard must not be
+        // held across an await -- the compiler enforces that, since the guard is not `Send`.
+        let udp_accum: Arc<std::sync::Mutex<(Vec<BytesMut>, usize)>> =
+            Arc::new(std::sync::Mutex::new((Vec::with_capacity(150), 0)));
         // Per-session, so one struggling client cannot mask another's slow writes.
         let slow_write_throttle = Arc::new(LogThrottle::new(SLOW_WRITE_REPORT_PERIOD));
 
@@ -1497,40 +1507,54 @@ impl RtspServerSession {
                     )?;
 
                     // Accumulate packet into buffer (bounded; same cap as TCP interleaved framing).
-                    let mut guard = udp_accum.lock().await;
-                    let (buffer, accumulated) = &mut *guard;
-                    let incoming = msg.len();
-                    let current = *accumulated;
-                    let new_total = current.saturating_add(incoming);
-                    if new_total > max_udp_accumulated_frame_bytes {
-                        error!(
-                            protocol = "UDP",
-                            session_id = %session_id,
-                            track = %track_label,
-                            remote_addr = %remote_for_rtp,
-                            current_accumulated = current,
-                            incoming = incoming,
-                            max = max_udp_accumulated_frame_bytes,
-                            "udp_playback_packet_buffer_overflow"
-                        );
-                        buffer.clear();
-                        *accumulated = 0;
-                        return Err(PackerError {
-                            value: PackerErrorValue::InterleavedFraming(format!(
-                                "udp playback packet buffer overflow: {} + {} > {}",
-                                current, incoming, max_udp_accumulated_frame_bytes
-                            )),
-                        });
-                    }
-                    buffer.push(msg);
-                    *accumulated = new_total;
+                    //
+                    // The guard lives in its own block so it is provably released before the
+                    // write below. A `std` guard is not `Send`, and an explicit `drop` inside a
+                    // branch is not enough to convince the compiler of that -- the future would
+                    // fail to be `Send`. Yielding the frame out of the block and awaiting
+                    // outside it makes the release unconditional and obvious.
+                    let frame_packets: Option<Vec<BytesMut>> = {
+                        // Recover from poisoning rather than propagating it: the guarded region
+                        // only pushes to a `Vec` and adds two integers, so a poisoned lock means
+                        // an unrelated panic, and killing every later frame over it helps nobody.
+                        let mut guard = udp_accum.lock().unwrap_or_else(|e| e.into_inner());
+                        let (buffer, accumulated) = &mut *guard;
+                        let incoming = msg.len();
+                        let current = *accumulated;
+                        let new_total = current.saturating_add(incoming);
+                        if new_total > max_udp_accumulated_frame_bytes {
+                            error!(
+                                protocol = "UDP",
+                                session_id = %session_id,
+                                track = %track_label,
+                                remote_addr = %remote_for_rtp,
+                                current_accumulated = current,
+                                incoming = incoming,
+                                max = max_udp_accumulated_frame_bytes,
+                                "udp_playback_packet_buffer_overflow"
+                            );
+                            buffer.clear();
+                            *accumulated = 0;
+                            return Err(PackerError {
+                                value: PackerErrorValue::InterleavedFraming(format!(
+                                    "udp playback packet buffer overflow: {} + {} > {}",
+                                    current, incoming, max_udp_accumulated_frame_bytes
+                                )),
+                            });
+                        }
+                        buffer.push(msg);
+                        *accumulated = new_total;
 
-                    // Write all accumulated packets when marker bit is set (end of frame)
-                    if packet.header.marker == 1 {
-                        let packets: Vec<BytesMut> =
-                            std::mem::replace(buffer, Vec::with_capacity(150));
-                        *accumulated = 0;
-                        drop(guard);
+                        // Hand off the whole frame when the marker bit closes the access unit.
+                        if packet.header.marker == 1 {
+                            *accumulated = 0;
+                            Some(std::mem::replace(buffer, Vec::with_capacity(150)))
+                        } else {
+                            None
+                        }
+                    };
+
+                    if let Some(packets) = frame_packets {
                         write_udp_frame(
                             &io,
                             packets,
