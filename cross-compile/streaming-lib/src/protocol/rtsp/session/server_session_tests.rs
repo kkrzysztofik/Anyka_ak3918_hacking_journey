@@ -2857,8 +2857,8 @@ async fn test_udp_batching_flushes_all_packets_on_marker() {
     let handler = RtspServerSession::setup_udp_play_packet_handler(
         make_counters(),
         None,
-        "video".to_string(),
-        "sess-udp".to_string(),
+        "video".into(),
+        "sess-udp".into(),
         make_socket_addr(),
         0,
         10,

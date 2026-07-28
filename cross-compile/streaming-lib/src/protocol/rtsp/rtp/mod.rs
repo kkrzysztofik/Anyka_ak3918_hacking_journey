@@ -67,12 +67,35 @@ impl Unmarshal<&mut BytesReader, Result<Self, BytesReadError>> for RtpPacket {
     }
 }
 
+impl RtpPacket {
+    /// Exact serialised size, so [`Marshal::marshal`] can allocate once.
+    ///
+    /// Kept next to `marshal` deliberately: the two must agree, and a mismatch is silent -- too
+    /// small only costs a reallocation, so it would never show up as a failure.
+    fn marshalled_len(&self) -> usize {
+        let extension = if self.header.extension_flag == 1 {
+            4 + self.header_extension_payload.len()
+        } else {
+            0
+        };
+        let padding = if self.header.padding_flag == 1 {
+            self.padding.len()
+        } else {
+            0
+        };
+        self.header.marshalled_len() + extension + self.payload.len() + padding
+    }
+}
+
 impl Marshal<Result<BytesMut, BytesWriteError>> for RtpPacket {
     fn marshal(&self) -> Result<BytesMut, BytesWriteError> {
-        let mut writer = BytesWriter::new();
+        // Sized up front and the header written in place. Growing from empty reallocated and
+        // recopied the whole datagram as the payload went in, and `header.marshal()` allocated a
+        // separate buffer for 12 bytes purely to copy them here -- two allocations per datagram,
+        // ~180 datagrams a second on the main stream alone.
+        let mut writer = BytesWriter::with_capacity(self.marshalled_len());
 
-        let header_bytesmut = self.header.marshal()?;
-        writer.write(&header_bytesmut[..])?;
+        self.header.marshal_into(&mut writer)?;
 
         if self.header.extension_flag == 1 {
             writer.write_u16::<BigEndian>(self.header_extension_profile)?;
@@ -361,5 +384,54 @@ mod tests {
         let mut reader = BytesReader::new(buf);
         let pkt = RtpPacket::unmarshal(&mut reader).unwrap();
         assert!(pkt.payload.is_empty());
+    }
+
+    /// `marshalled_len` must equal what `marshal` actually writes.
+    ///
+    /// This is asserted rather than assumed because getting it wrong is *silent*: too small only
+    /// costs the reallocation the pre-sizing existed to avoid, and too large only wastes memory.
+    /// Neither shows up as a test failure anywhere else, so the sizing would quietly rot.
+    #[test]
+    fn marshalled_len_matches_marshal_output_for_every_shape() {
+        let mut reader = BytesReader::new(make_basic_rtp_bytes());
+        let base = RtpPacket::unmarshal(&mut reader).unwrap();
+
+        // Plain packet: fixed header + payload.
+        assert_eq!(
+            base.marshalled_len(),
+            base.marshal().unwrap().len(),
+            "plain"
+        );
+
+        // With CSRCs, which extend the header by a word each.
+        let mut with_csrcs = base.clone();
+        with_csrcs.header.csrcs = vec![1, 2, 3];
+        assert_eq!(
+            with_csrcs.marshalled_len(),
+            with_csrcs.marshal().unwrap().len(),
+            "csrcs"
+        );
+
+        // With a header extension: 2-byte profile + 2-byte length + payload.
+        let mut with_ext = base.clone();
+        with_ext.header.extension_flag = 1;
+        with_ext.header_extension_profile = 0xBEDE;
+        with_ext.header_extension_length = 2;
+        with_ext.header_extension_payload = BytesMut::from(&[1u8, 2, 3, 4, 5, 6, 7, 8][..]);
+        assert_eq!(
+            with_ext.marshalled_len(),
+            with_ext.marshal().unwrap().len(),
+            "extension"
+        );
+
+        // With padding.
+        let mut with_padding = base.clone();
+        with_padding.header.padding_flag = 1;
+        with_padding.padding = BytesMut::from(&[0u8, 0, 0, 4][..]);
+        assert_eq!(
+            with_padding.marshalled_len(),
+            with_padding.marshal().unwrap().len(),
+            "padding"
+        );
     }
 }

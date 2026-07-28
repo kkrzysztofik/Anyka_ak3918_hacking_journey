@@ -140,6 +140,21 @@ pub struct RtspServerSession {
     playback_task: Option<JoinHandle<()>>,
 }
 
+/// `Display` for an optional stream identifier, formatted only if a log line actually renders it.
+///
+/// Building the label eagerly cost one `String` allocation per datagram for a value used only by
+/// lines that fire on an anomaly or a sample interval -- effectively never, on a healthy stream.
+struct StreamPath<'a>(Option<&'a StreamIdentifier>);
+
+impl std::fmt::Display for StreamPath<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.0 {
+            Some(id) => write!(f, "{id}"),
+            None => f.write_str("unknown"),
+        }
+    }
+}
+
 /// Log RTP sequence/timestamp anomalies and periodic packet samples for a track.
 ///
 /// Shared by the UDP and TCP-interleaved send paths, which differ only in `protocol`.
@@ -153,7 +168,7 @@ fn log_rtp_packet_stats(
     track_label: &str,
     session_id: &str,
     remote_for_rtp: SocketAddr,
-    stream_path: &str,
+    stream_path: StreamPath<'_>,
 ) {
     if stats.seq_gap || stats.seq_regressed || stats.timestamp_regressed {
         warn!(
@@ -212,9 +227,6 @@ fn marshal_and_log_rtp_packet(
 ) -> Result<(BytesMut, usize), PackerError> {
     let msg = packet.marshal()?;
     let payload_len = msg.len();
-    let stream_path = stream_identifier
-        .map(|id| id.to_string())
-        .unwrap_or_else(|| "unknown".to_string());
     let stats = counters.on_packet_sent(
         payload_len,
         packet.header.seq_number,
@@ -230,7 +242,7 @@ fn marshal_and_log_rtp_packet(
         track_label,
         session_id,
         remote_for_rtp,
-        &stream_path,
+        StreamPath(stream_identifier),
     );
 
     Ok((msg, payload_len))
@@ -1457,12 +1469,17 @@ impl RtspServerSession {
     }
 
     /// Set up the per-packet callback for a UDP `PLAY` track.
+    ///
+    /// The label parameters are `Arc`s rather than owned values because the returned closure clones
+    /// every captured variable on each datagram. As `String`/`StreamIdentifier` that was three heap
+    /// allocations per packet -- ~540 a second on the main stream -- to hand identical text to a log
+    /// line that almost never fires. An `Arc` clone is a refcount bump.
     #[allow(clippy::too_many_arguments)]
     fn setup_udp_play_packet_handler(
         counters: Arc<RtpTrackCounters>,
-        stream_identifier: Option<StreamIdentifier>,
-        track_label: String,
-        session_id: String,
+        stream_identifier: Option<Arc<StreamIdentifier>>,
+        track_label: Arc<str>,
+        session_id: Arc<str>,
         remote_for_rtp: SocketAddr,
         sample_interval: u32,
         udp_pace_batch: usize,
@@ -1499,7 +1516,7 @@ impl RtspServerSession {
                         "UDP",
                         &packet,
                         &counters,
-                        stream_identifier.as_ref(),
+                        stream_identifier.as_deref(),
                         sample_interval,
                         &track_label,
                         &session_id,
@@ -1698,11 +1715,13 @@ impl RtspServerSession {
                     // `tcp_interleaved_buffer_max` is the shared per-session cap on buffered bytes
                     // for one logical RTP frame (until marker); UDP uses the same field to bound
                     // accumulated packet payloads before flush (not TCP interleaving).
+                    // Converted once here, at PLAY setup, so the per-datagram closure clones
+                    // refcounts instead of re-allocating this text for every packet it sends.
                     let handler = Self::setup_udp_play_packet_handler(
                         counters,
-                        stream_id_clone,
-                        track_label,
-                        session_id_clone,
+                        stream_id_clone.map(Arc::new),
+                        track_label.into(),
+                        session_id_clone.into(),
                         remote_for_rtp,
                         sample_interval,
                         udp_pace_batch,
