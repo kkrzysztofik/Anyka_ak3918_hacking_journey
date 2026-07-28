@@ -107,7 +107,9 @@ mod throttle_tests {
         assert!(throttle.record_at(5, start).is_some());
         for i in 1..=9 {
             assert!(
-                throttle.record_at(i * 2, start + Duration::from_millis(i)).is_none(),
+                throttle
+                    .record_at(i * 2, start + Duration::from_millis(i))
+                    .is_none(),
                 "occurrence {i} within the period must be suppressed"
             );
         }
@@ -130,8 +132,14 @@ mod throttle_tests {
         let burst = throttle
             .record_at(4, start + Duration::from_secs(2))
             .expect("must emit");
-        assert_eq!(burst.occurrences, 1, "previous burst must not be counted again");
-        assert_eq!(burst.peak, 4, "peak must not carry over from a reported burst");
+        assert_eq!(
+            burst.occurrences, 1,
+            "previous burst must not be counted again"
+        );
+        assert_eq!(
+            burst.peak, 4,
+            "peak must not carry over from a reported burst"
+        );
     }
 }
 
