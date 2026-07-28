@@ -40,6 +40,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>   /* strcasecmp */
 #include <stdint.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -57,6 +58,52 @@
 #include "push.h"
 #include "protocol.h"
 #include "vd_ring_buffer.h"
+
+/* ---- Log level selection ------------------------------------------------- */
+
+/*
+ * The daemon runs two independent log systems and both were pinned to their
+ * most verbose setting: log.c for our own lines, and the Anyka SDK's ak_print.
+ * At DEBUG the per-frame lines in push.c and ipc.c alone produce tens of
+ * megabytes an hour onto vfat on the SD card, contending for the single core
+ * that also has to encode and send the video. One name drives both.
+ */
+struct log_level_name {
+    const char *name;
+    int         daemon_level;  /* log.c enum:      LOG_TRACE .. LOG_FATAL */
+    int         sdk_level;     /* ak_common.h:     enum LOG_LEVEL         */
+};
+
+static const struct log_level_name LOG_LEVEL_NAMES[] = {
+    { "trace", LOG_TRACE, LOG_LEVEL_DEBUG   },
+    { "debug", LOG_DEBUG, LOG_LEVEL_DEBUG   },
+    { "info",  LOG_INFO,  LOG_LEVEL_INFO    },
+    { "warn",  LOG_WARN,  LOG_LEVEL_WARNING },
+    { "error", LOG_ERROR, LOG_LEVEL_ERROR   },
+};
+
+/* Quiet enough to stream against, verbose enough to keep the lifecycle and
+ * shutdown records that make an incident diagnosable after the fact. */
+#define LOG_LEVEL_DEFAULT_INDEX 2  /* "info" */
+
+/**
+ * resolve_log_level - Map VENDOR_DAEMON_LOG_LEVEL onto both log systems.
+ *
+ * @param name  Value of the environment variable, or NULL when unset.
+ * @return      Matching table entry; the "info" entry when unset or unknown.
+ *              Never NULL, so callers need no fallback of their own.
+ */
+static const struct log_level_name *resolve_log_level(const char *name)
+{
+    if (name != NULL && name[0] != '\0') {
+        for (size_t i = 0; i < ARRAY_SIZE(LOG_LEVEL_NAMES); i++) {
+            if (strcasecmp(name, LOG_LEVEL_NAMES[i].name) == 0) {
+                return &LOG_LEVEL_NAMES[i];
+            }
+        }
+    }
+    return &LOG_LEVEL_NAMES[LOG_LEVEL_DEFAULT_INDEX];
+}
 
 /**
  * signal_handler - SIGINT/SIGTERM/SIGHUP signal handler.
@@ -163,25 +210,34 @@ int main(int argc, char *argv[])
         dup2(fileno(g_log_fp), STDERR_FILENO);
     }
 
-    /* Initialize log.c - quiet mode suppresses stderr (we redirected it) */
-    log_set_level(LOG_DEBUG);
+    /* Env var: VENDOR_DAEMON_LOG_LEVEL = trace|debug|info|warn|error.
+     * Unset or unrecognised falls back to info rather than failing to start:
+     * a typo here should cost log detail, not the video pipeline. */
+    const char *env_log_level = getenv("VENDOR_DAEMON_LOG_LEVEL");
+    const struct log_level_name *level = resolve_log_level(env_log_level);
+
+    /* Initialize log.c - quiet mode suppresses stderr (we redirected it).
+     * Both the global level and the file callback's own level must be set;
+     * a callback registered at a more verbose level would emit regardless. */
+    log_set_level(level->daemon_level);
     if (g_log_fp) {
-        log_add_fp(g_log_fp, LOG_DEBUG);
+        log_add_fp(g_log_fp, level->daemon_level);
         log_set_quiet(true);  /* Only write via file callback, not stderr */
     }
 
     log_info("========================================");
     log_info("vendor-daemon starting");
     log_info("log file: %s", log_file_path);
+    log_info("log level: %s%s", level->name,
+             (env_log_level && env_log_level[0] != '\0') ? "" : " (default)");
 
     /* Configure Anyka SDK logging:
-     * - Set print level to DEBUG so all SDK messages go to stdout
-     *   (which we redirected to our log file)
+     * - SDK messages go to stdout, which we redirected to our log file
      * - Disable syslog output to avoid duplicate messages
      */
-    ak_print_set_level(LOG_LEVEL_DEBUG);
+    ak_print_set_level(level->sdk_level);
     ak_print_set_syslog_level(0);
-    log_info("SDK logging: level=DEBUG, syslog=disabled");
+    log_info("SDK logging: level=%d, syslog=disabled", level->sdk_level);
 
     /* ================================================================
      * SIGNAL HANDLING
