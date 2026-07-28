@@ -67,9 +67,9 @@ pub trait TNetIO: Send + Sync {
     /// Datagram transports can hand the whole run to the kernel in one call; the default is a
     /// plain loop, which is what stream transports want anyway (they have no message
     /// boundaries to preserve).
-    async fn write_batch(&mut self, messages: Vec<Bytes>) -> Result<(), BytesIOError> {
+    async fn write_batch(&mut self, messages: &[Bytes]) -> Result<(), BytesIOError> {
         for msg in messages {
-            self.write(msg).await?;
+            self.write(msg.clone()).await?;
         }
         Ok(())
     }
@@ -313,18 +313,26 @@ impl TNetIO for UdpIO {
     /// (a 45 KB burst cannot fill a 304 KB socket buffer), so it is per-operation overhead.
     /// Batching collapses the run into a single syscall.
     #[cfg(target_os = "linux")]
-    async fn write_batch(&mut self, messages: Vec<Bytes>) -> Result<(), BytesIOError> {
+    async fn write_batch(&mut self, messages: &[Bytes]) -> Result<(), BytesIOError> {
         let mut sent = 0;
         while sent < messages.len() {
             self.socket.writable().await?;
             let remaining = &messages[sent..];
-            match self
-                .socket
-                .try_io(tokio::io::Interest::WRITABLE, || sendmmsg(&self.socket, remaining))
-            {
+            match self.socket.try_io(tokio::io::Interest::WRITABLE, || {
+                sendmmsg(&self.socket, remaining)
+            }) {
                 Ok(0) => continue,
                 Ok(n) => sent += n,
-                Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => continue,
+                // A partial send comes back as `Ok(n)`, never as an error, so an interrupted
+                // call sent nothing and retrying cannot duplicate a datagram.
+                Err(ref e)
+                    if matches!(
+                        e.kind(),
+                        std::io::ErrorKind::WouldBlock | std::io::ErrorKind::Interrupted
+                    ) =>
+                {
+                    continue;
+                }
                 Err(e) => return Err(e.into()),
             }
         }
@@ -533,7 +541,7 @@ mod tests {
             .map(|i| Bytes::from(vec![i as u8; 1 + (i as usize % 97)]))
             .collect();
 
-        udpio.write_batch(payloads.clone()).await.unwrap();
+        udpio.write_batch(&payloads).await.unwrap();
 
         let mut buf = vec![0u8; 2048];
         for (i, expected) in payloads.iter().enumerate() {
@@ -553,7 +561,7 @@ mod tests {
             .await
             .expect("UdpIO should bind");
 
-        udpio.write_batch(Vec::new()).await.unwrap();
+        udpio.write_batch(&[]).await.unwrap();
 
         let mut buf = vec![0u8; 64];
         assert!(

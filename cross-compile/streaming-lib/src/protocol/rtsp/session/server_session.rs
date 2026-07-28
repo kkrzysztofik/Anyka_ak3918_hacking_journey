@@ -253,6 +253,9 @@ async fn write_udp_frame(
     slow_write_throttle: &LogThrottle,
 ) -> Result<(), PackerError> {
     let start = std::time::Instant::now();
+    // `BytesMut::clone` deep-copies; `freeze` is a refcount handoff. Convert once so the pacing
+    // loop below hands out slices instead of copying every datagram it sends.
+    let packets: Vec<Bytes> = packets.into_iter().map(BytesMut::freeze).collect();
     let packet_count = packets.len();
     let mut io = io.lock().await;
     let pace_batch = udp_pace_batch.max(1);
@@ -267,8 +270,7 @@ async fn write_udp_frame(
     // `pace_batch` packets so the kernel and NIC can drain) is unchanged by how a batch is issued.
     let mut written = 0;
     for chunk in packets.chunks(pace_batch) {
-        let batch: Vec<Bytes> = chunk.iter().map(|pkt| pkt.clone().freeze()).collect();
-        io.write_batch(batch).await?;
+        io.write_batch(chunk).await?;
         written += chunk.len();
         if written < packet_count {
             tokio::time::sleep(pace_sleep).await;
