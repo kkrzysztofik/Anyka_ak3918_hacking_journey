@@ -1112,9 +1112,6 @@ impl AnykaIpc {
         }
     }
 
-    /// Read ring buffer diagnostic counters (overflow, eviction, fallback, dropped).
-    ///
-    /// Returns `(0, 0, 0, 0)` if the shm reader is not available or version < 2.
     /// Current `(write_seq, read_seq)` from the shared ring header, or `(0, 0)` when the
     /// ring is unavailable.
     fn shm_ring_sequences(&self) -> (u32, u32) {
@@ -1128,6 +1125,9 @@ impl AnykaIpc {
         }
     }
 
+    /// Read ring buffer diagnostic counters (overflow, eviction, fallback, dropped).
+    ///
+    /// Returns `(0, 0, 0, 0)` if the shm reader is not available or version < 2.
     pub fn shm_diagnostic_counters(&self) -> (u32, u32, u32, u32) {
         let guard = match self.shm_reader.lock() {
             Ok(g) => g,
