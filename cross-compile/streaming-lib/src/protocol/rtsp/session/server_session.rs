@@ -2151,18 +2151,23 @@ impl RtspServerSession {
             && let Some(current) = self.session_id
         {
             let requested = Self::parse_session_header(session_hdr);
-            if !requested.is_empty() && requested != current.to_string() {
-                warn!(
-                    remote_addr = %self.remote_addr,
-                    requested_suffix = %Self::redact_session_id(&requested),
-                    current_suffix = %Self::redact_session_id(&current.to_string()),
-                    "session_id_mismatch"
-                );
-                return Some(Self::gen_rtsp_response(
-                    454,
-                    "Session Not Found",
-                    rtsp_request,
-                ));
+            if !requested.is_empty() {
+                // Render once: the comparison needs it on every request carrying a Session
+                // header, and the warning needs the same value again on mismatch.
+                let current = current.to_string();
+                if requested != current {
+                    warn!(
+                        remote_addr = %self.remote_addr,
+                        requested_suffix = %Self::redact_session_id(&requested),
+                        current_suffix = %Self::redact_session_id(&current),
+                        "session_id_mismatch"
+                    );
+                    return Some(Self::gen_rtsp_response(
+                        454,
+                        "Session Not Found",
+                        rtsp_request,
+                    ));
+                }
             }
         }
         None
