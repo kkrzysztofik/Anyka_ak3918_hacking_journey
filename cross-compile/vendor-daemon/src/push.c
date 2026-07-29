@@ -151,7 +151,7 @@ static void *push_frame_thread(void *arg)
         if (ret != 0) {
             /* No data — brief sleep to avoid busy-spin */
             no_data_count++;
-            if (no_data_count == 1 || no_data_count % 1000 == 0) {
+            if (no_data_count % PUSH_NO_DATA_WARN_INTERVAL == 0) {
                 log_warn("event=push_get_stream_error stream=%u handle=%p sdk_ret=%d no_data_count=%llu diag_monotonic_ms=%llu",
                          state->stream_id,
                          state->stream_handle,
@@ -358,8 +358,15 @@ static void *push_frame_thread(void *arg)
  * forever.  On timeout the thread is detached and the caller told, so it can
  * decide whether teardown of memory the thread may still touch is safe.
  *
+ * A slot whose join failed keeps join_pending set for the life of the process.
+ * It is not retried: the thread was detached, so it can no longer be joined,
+ * and a worker parked in the SDK will not become joinable by asking again --
+ * retrying would only spend another PUSH_JOIN_TIMEOUT_SEC per attempt. The flag
+ * exists to stop the slot being reused, which is the actual hazard.
+ *
  * @param idx  Index into g_push_streams (0 for main stream, 1 for sub stream).
- * @return     0 if the thread was joined, -1 if it timed out and was detached.
+ * @return     0 if the thread was joined, -1 if it did not join (this call or an
+ *             earlier one); in that case the worker may still be running.
  */
 int stop_push_slot(int idx)
 {
@@ -368,6 +375,16 @@ int stop_push_slot(int idx)
         return 0;
     }
     state = &g_push_streams[idx];
+    if (state->join_pending) {
+        /* An earlier stop gave up on this worker.  It may still be running, so this is not the
+         * "nothing to do" case: reporting success here would let the caller tear down memory the
+         * thread can still touch. */
+        log_error("event=push_thread_lifecycle state=stop_still_wedged stream=%u slot=%d diag_monotonic_ms=%llu",
+                  state->stream_id,
+                  idx,
+                  (unsigned long long)diag_monotonic_ms());
+        return -1;
+    }
     if (!state->active) {
         log_info("event=push_thread_lifecycle state=stop_skip slot=%d active=0 diag_monotonic_ms=%llu",
                  idx,
@@ -388,15 +405,38 @@ int stop_push_slot(int idx)
 
     int rc = pthread_timedjoin_np(state->thread, NULL, &deadline);
     if (rc != 0) {
-        log_error("event=push_thread_lifecycle state=join_timeout stream=%u slot=%d timeout_sec=%d rc=%d diag_monotonic_ms=%llu",
-                  state->stream_id,
-                  idx,
-                  PUSH_JOIN_TIMEOUT_SEC,
-                  rc,
-                  (unsigned long long)diag_monotonic_ms());
-        /* Detach so the thread's resources are reclaimed if it ever does return. */
-        pthread_detach(state->thread);
-        state->stream_handle = NULL;
+        /* Either way the thread is unaccounted for, so the slot stays reserved.  But the two
+         * cases are not the same fault and must not share a log line: ETIMEDOUT means the worker
+         * is still running inside the SDK, while EINVAL/ESRCH mean the join itself was invalid,
+         * which is a bug here rather than a wedged vendor call. */
+        state->join_pending = 1;
+
+        if (rc == ETIMEDOUT) {
+            log_error("event=push_thread_lifecycle state=join_timeout stream=%u slot=%d timeout_sec=%d diag_monotonic_ms=%llu",
+                      state->stream_id,
+                      idx,
+                      PUSH_JOIN_TIMEOUT_SEC,
+                      (unsigned long long)diag_monotonic_ms());
+            /* Detach so the thread's resources are reclaimed if it ever does return.
+             * Do not clear stream_handle here: the detached worker may still call
+             * ak_venc_get_stream/ak_venc_release_stream with it. */
+            int drc = pthread_detach(state->thread);
+            if (drc != 0) {
+                /* Neither joined nor detached: the thread is unreachable and its stack will not
+                 * be reclaimed.  Say so rather than let the timeout line imply a clean handoff. */
+                log_error("event=push_thread_lifecycle state=detach_failed stream=%u slot=%d rc=%d diag_monotonic_ms=%llu",
+                          state->stream_id,
+                          idx,
+                          drc,
+                          (unsigned long long)diag_monotonic_ms());
+            }
+        } else {
+            log_error("event=push_thread_lifecycle state=join_error stream=%u slot=%d rc=%d diag_monotonic_ms=%llu",
+                      state->stream_id,
+                      idx,
+                      rc,
+                      (unsigned long long)diag_monotonic_ms());
+        }
         return -1;
     }
 
@@ -449,6 +489,13 @@ int handle_venc_start_push(int fd, const uint8_t *req, uint32_t req_len)
     }
 
     state = &g_push_streams[idx];
+    if (state->join_pending) {
+        /* A previous worker on this slot never returned.  Starting another would hand it the same
+         * state struct, overwrite the thread handle the old one is still associated with, and
+         * reset the ring the old one may still be writing. */
+        log_error("[push] stream=%u slot=%d has an unjoined worker, refusing start_push", stream_id, idx);
+        return send_response(fd, STATUS_ERROR, NULL, 0);
+    }
     if (state->active) {
         log_warn("[push] stream=%u already active, ignoring start_push", stream_id);
         log_info("event=push_cmd cmd=19 status=ok stream=%u active_before=%d reason=already_active diag_monotonic_ms=%llu",
@@ -527,7 +574,13 @@ int handle_venc_stop_push(int fd, const uint8_t *req, uint32_t req_len)
                       (unsigned long long)diag_monotonic_ms());
             return send_response(fd, STATUS_ERROR, NULL, 0);
         }
-        stop_push_slot(idx);
+        if (stop_push_slot(idx) != 0) {
+            log_error("[push] failed to stop push-based frame delivery (stream=%u)", stream_id);
+            log_error("event=push_cmd cmd=20 status=error scope=single stream=%u reason=stop_failed diag_monotonic_ms=%llu",
+                      stream_id,
+                      (unsigned long long)diag_monotonic_ms());
+            return send_response(fd, STATUS_ERROR, NULL, 0);
+        }
         log_info("[push] push-based frame delivery stopped (stream=%u)", stream_id);
         log_info("event=push_cmd cmd=20 status=ok scope=single stream=%u diag_monotonic_ms=%llu",
                  stream_id,
@@ -535,8 +588,15 @@ int handle_venc_stop_push(int fd, const uint8_t *req, uint32_t req_len)
         return send_response(fd, STATUS_OK, NULL, 0);
     }
 
-    stop_push_slot(0);
-    stop_push_slot(1);
+    int failed = 0;
+    failed |= (stop_push_slot(0) != 0);
+    failed |= (stop_push_slot(1) != 0);
+    if (failed) {
+        log_error("[push] failed to stop push-based frame delivery (all streams)");
+        log_error("event=push_cmd cmd=20 status=error scope=all reason=stop_failed diag_monotonic_ms=%llu",
+                  (unsigned long long)diag_monotonic_ms());
+        return send_response(fd, STATUS_ERROR, NULL, 0);
+    }
     log_info("[push] push-based frame delivery stopped (all streams)");
     log_info("event=push_cmd cmd=20 status=ok scope=all diag_monotonic_ms=%llu",
              (unsigned long long)diag_monotonic_ms());

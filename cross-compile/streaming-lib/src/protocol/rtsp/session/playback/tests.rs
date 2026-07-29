@@ -5,8 +5,13 @@ use super::*;
 use crate::config::StreamingConfig;
 use crate::hub::define::FrameData;
 use crate::protocol::rtsp::rtp::define::ANNEXB_NALU_START_CODE;
+use crate::protocol::rtsp::rtsp_channel::RtpChannel;
+use crate::protocol::rtsp::rtsp_codec::{RtspCodecId, RtspCodecInfo};
 use crate::protocol::rtsp::rtsp_track::TrackType;
 use bytes::BytesMut;
+use std::net::SocketAddr;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 // ========================================================================
@@ -856,4 +861,77 @@ fn test_lag_recovery_mode_config_mapped_to_policy() {
     let config_latest = StreamingConfig::new().with_lag_recovery_mode(LagRecoveryMode::LatestIdr);
     let policy_latest = PlaybackLatencyPolicy::from_config(&config_latest);
     assert_eq!(policy_latest.lag_recovery_mode, LagRecoveryMode::LatestIdr);
+}
+
+/// The threshold must come from the interval the frame had to fit in, not a fixed number.
+///
+/// A fixed 25 ms warned on every I-frame of a 15 fps stream that was keeping up perfectly — the
+/// send took ~45 ms of a 66 ms budget. The regression this guards is re-hardcoding a constant, or
+/// trusting a nonsense delta from a first frame or a timestamp reset.
+#[test]
+fn test_slow_send_threshold_tracks_the_frame_interval() {
+    // 15 fps and 30 fps get their own budgets, not a shared magic number.
+    assert_eq!(slow_send_threshold_ms(Some(66)), 66);
+    assert_eq!(slow_send_threshold_ms(Some(33)), 33);
+
+    // A 45 ms send is late at 30 fps and fine at 15 fps — the whole point of deriving it.
+    assert!(45 < slow_send_threshold_ms(Some(66)));
+    assert!(45 > slow_send_threshold_ms(Some(33)));
+
+    // Teardown flush, and deltas that are a reset or a wrap rather than an interval.
+    assert_eq!(slow_send_threshold_ms(None), RTP_SEND_SLOW_FALLBACK_MS);
+    assert_eq!(slow_send_threshold_ms(Some(0)), RTP_SEND_SLOW_FALLBACK_MS);
+    assert_eq!(slow_send_threshold_ms(Some(5)), RTP_SEND_SLOW_FALLBACK_MS);
+    assert_eq!(
+        slow_send_threshold_ms(Some(4_000_000_000)),
+        RTP_SEND_SLOW_FALLBACK_MS
+    );
+}
+
+/// Teardown flush must wire the video throttle and a `None` interval (no predecessor frame).
+///
+/// Without a packer, `on_frame` is a no-op that still runs the slow-send threshold check — so this
+/// covers the new `PlaybackLoopState` throttle defaults and the flush context fields Sonar marks
+/// as uncovered on the PR.
+#[tokio::test]
+async fn test_flush_pending_video_uses_slow_send_throttle_and_no_interval()
+-> Result<(), Box<dyn std::error::Error>> {
+    let mut state = PlaybackLoopState::default();
+    assert!(
+        state
+            .video_assembler
+            .push(1_000, BytesMut::from(&b"\x00\x00\x00\x01\x65\x01"[..]))
+            .is_none(),
+        "first chunk stays pending until flush or a new timestamp"
+    );
+
+    let codec_info = RtspCodecInfo {
+        codec_id: RtspCodecId::H264,
+        payload_type: 96,
+        sample_rate: 90_000,
+        channel_count: 0,
+    };
+    let video_channel = Arc::new(tokio::sync::Mutex::new(RtpChannel::new(codec_info)));
+    let shutdown = Arc::new(AtomicBool::new(false));
+    let remote_addr: SocketAddr = "127.0.0.1:5004".parse()?;
+
+    flush_pending_video(
+        &Some(video_channel),
+        &mut state,
+        "test-session",
+        remote_addr,
+        "/live/main",
+        &shutdown,
+    )
+    .await;
+
+    assert!(
+        !shutdown.load(Ordering::Acquire),
+        "a packer-less channel must not treat the flush as a send failure"
+    );
+    assert!(
+        state.video_assembler.flush().is_none(),
+        "flush_pending_video must drain the assembler"
+    );
+    Ok(())
 }

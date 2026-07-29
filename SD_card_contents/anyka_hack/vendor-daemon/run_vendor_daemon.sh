@@ -133,8 +133,11 @@ ulimit -c unlimited 2>/dev/null || log WARN "Failed to enable core dumps (ulimit
 # =============================================================================
 
 # Pass through only when the caller set it, so the binary's own default applies
-# otherwise and there is exactly one place defining it.
-export VENDOR_DAEMON_LOG_LEVEL="${VENDOR_DAEMON_LOG_LEVEL:-}"
+# otherwise and there is exactly one place defining it. Do not invent an empty
+# export: getenv() would then see "" instead of unset, and the comment would lie.
+if [ -n "${VENDOR_DAEMON_LOG_LEVEL+x}" ]; then
+  export VENDOR_DAEMON_LOG_LEVEL
+fi
 
 log INFO "Starting vendor-daemon: ${VENDOR_DAEMON_BIN}"
 log INFO "Socket will appear at: ${VENDOR_DAEMON_SOCK}"

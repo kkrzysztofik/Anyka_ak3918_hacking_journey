@@ -16,6 +16,7 @@ pub mod network_info;
 pub mod ptz_actor;
 pub mod ptz_control;
 mod video_encoder;
+pub use video_encoder::StreamOpenParams;
 mod video_input;
 
 use std::path::PathBuf;
@@ -102,7 +103,12 @@ impl AnykaPlatform {
     /// Uses auto-detection for the ISP config path and brings PTZ up. See
     /// [`with_isp_config`](Self::with_isp_config) to specify an explicit path or to disable PTZ.
     pub fn new() -> PlatformResult<Self> {
-        Self::with_isp_config(None, true)
+        Self::with_isp_config(
+            None,
+            true,
+            StreamOpenParams::default(),
+            StreamOpenParams::default(),
+        )
     }
 
     /// Static hardware descriptor reported by `get_device_info`.
@@ -151,9 +157,14 @@ impl AnykaPlatform {
     ///
     /// `ptz_enabled` carries `[ptz] enabled` from the config; see [`init_ptz_control`] for what
     /// skipping it avoids.
+    ///
+    /// `main_encoder`/`sub_encoder` carry the parameters that only `ak_venc_open` can apply, so
+    /// they must arrive here rather than through `set_configuration`. See [`StreamOpenParams`].
     pub fn with_isp_config(
         isp_config_path: Option<PathBuf>,
         ptz_enabled: bool,
+        main_encoder: StreamOpenParams,
+        sub_encoder: StreamOpenParams,
     ) -> PlatformResult<Self> {
         let device_info = Self::device_descriptor();
 
@@ -176,7 +187,11 @@ impl AnykaPlatform {
                 video_ffi.clone(),
                 isp_config_path.clone(),
             ));
-            let video_encoder = Arc::new(AnykaVideoEncoder::with_ipc(shared_ipc.clone()));
+            let video_encoder = Arc::new(AnykaVideoEncoder::with_ipc(
+                shared_ipc.clone(),
+                main_encoder,
+                sub_encoder,
+            ));
             let audio_input = Arc::new(AnykaAudioInput::with_ffi(audio_ffi.clone()));
             let audio_encoder = Arc::new(AnykaAudioEncoder::with_ffi(audio_ffi));
             let imaging_control = Some(Arc::new(AnykaImagingControl::with_ffi_and_video_encoder(

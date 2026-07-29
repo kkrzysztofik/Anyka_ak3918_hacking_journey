@@ -129,6 +129,14 @@ pub struct VideoEncoderConfig {
     pub gop_length: u32,
     /// Quality level (0-100).
     pub quality: u32,
+    /// Quantiser floor for `encode_param.minqp`; the SDK documents `[20,25]`.
+    ///
+    /// **Currently ineffective on the AK3918**: measured on device, an I-frame encoded at QP 23
+    /// with the floor set to 25, so the encoder discards the field. The value is still carried
+    /// and clamped faithfully, since a different firmware may honour it.
+    ///
+    /// `0` (what `Default` yields) is out of range and reads as "use the SDK floor".
+    pub min_qp: u32,
 }
 
 /// Audio encoding type.

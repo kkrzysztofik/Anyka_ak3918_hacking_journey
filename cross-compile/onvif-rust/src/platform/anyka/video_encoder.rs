@@ -44,6 +44,36 @@ use super::imaging::{
 #[cfg(test)]
 use crate::hal::common::video_stream;
 
+/// Range `ak_venc.h:60` documents for `encode_param.minqp`: "Dynamic bit rate parameter[20,25]".
+pub(super) const SDK_MIN_QP_RANGE: std::ops::RangeInclusive<u32> = 20..=25;
+
+/// Encoder parameters that reach the hardware only through `ak_venc_open`.
+///
+/// The SDK exports `ak_venc_set_rc`, `set_kbps`, `set_gop_len`, `set_fps`, `set_br`, `set_profile`
+/// and `set_rc_weight`, but **no** runtime setter for the quantiser floor — so `min_qp` has to be
+/// right before the encoder is opened, and changing it means restarting the encoder.
+///
+/// `gop_length` is here for a different reason: it was never read from config at all. The encoder
+/// seeded itself from constants in [`AnykaVideoEncoder::with_ffi`], which is why a device
+/// configured for `gop_length = 50` reported `gop=30` from the SDK.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StreamOpenParams {
+    /// I-frame interval in frames.
+    pub gop_length: u32,
+    /// Quantiser floor; see [`SDK_MIN_QP_RANGE`].
+    pub min_qp: u32,
+}
+
+impl Default for StreamOpenParams {
+    /// The values the encoder used before either was configurable, so an absent config is a no-op.
+    fn default() -> Self {
+        Self {
+            gop_length: 30,
+            min_qp: *SDK_MIN_QP_RANGE.start(),
+        }
+    }
+}
+
 /// Encoder lifecycle state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum EncoderState {
@@ -1101,8 +1131,27 @@ impl AnykaVideoEncoder {
 
     /// Create a new `AnykaVideoEncoder` with a custom FFI backend.
     ///
-    /// Used by tests with `MockVideoHalTrait` for hardware-free testing.
+    /// Used by tests with `MockVideoHalTrait` for hardware-free testing. Open-time parameters
+    /// take their built-in defaults; see [`AnykaVideoEncoder::with_ffi_and_params`].
     pub(super) fn with_ffi(ffi: Arc<dyn crate::hal::common::video::VideoHalTrait>) -> Self {
+        Self::with_ffi_and_params(
+            ffi,
+            StreamOpenParams::default(),
+            StreamOpenParams::default(),
+        )
+    }
+
+    /// Create a new `AnykaVideoEncoder` with the open-time parameters the caller read from config.
+    ///
+    /// These seed `configurations`, which is what `config_to_encode_param` turns into the
+    /// `encode_param` handed to `ak_venc_open`. They cannot be applied later: the SDK exports no
+    /// runtime setter for the quantiser floor, and `set_configuration` only reaches a live handle
+    /// for bitrate.
+    pub(super) fn with_ffi_and_params(
+        ffi: Arc<dyn crate::hal::common::video::VideoHalTrait>,
+        main: StreamOpenParams,
+        sub: StreamOpenParams,
+    ) -> Self {
         Self {
             ffi,
             anyka_ipc: None, // No AnykaIpc available when using custom FFI
@@ -1114,8 +1163,9 @@ impl AnykaVideoEncoder {
                     framerate: 15,
                     bitrate: 2000,
                     encoding: VideoEncoding::H264,
-                    gop_length: 30,
+                    gop_length: main.gop_length,
                     quality: 80,
+                    min_qp: main.min_qp,
                     ..Default::default()
                 },
                 VideoEncoderConfig {
@@ -1125,8 +1175,9 @@ impl AnykaVideoEncoder {
                     framerate: 15,
                     bitrate: 300,
                     encoding: VideoEncoding::H264,
-                    gop_length: 30,
+                    gop_length: sub.gop_length,
                     quality: 70,
+                    min_qp: sub.min_qp,
                     ..Default::default()
                 },
             ]),
@@ -1149,9 +1200,16 @@ impl AnykaVideoEncoder {
     ///
     /// The AnykaIpc is stored both as the `dyn VideoHalTrait` backend and as a
     /// concrete reference for the zero-copy frame fetch path.
-    pub(super) fn with_ipc(ipc: Arc<AnykaIpc>) -> Self {
-        let mut encoder =
-            Self::with_ffi(ipc.clone() as Arc<dyn crate::hal::common::video::VideoHalTrait>);
+    pub(super) fn with_ipc(
+        ipc: Arc<AnykaIpc>,
+        main: StreamOpenParams,
+        sub: StreamOpenParams,
+    ) -> Self {
+        let mut encoder = Self::with_ffi_and_params(
+            ipc.clone() as Arc<dyn crate::hal::common::video::VideoHalTrait>,
+            main,
+            sub,
+        );
         encoder.anyka_ipc = Some(ipc);
         encoder
     }
@@ -1262,6 +1320,25 @@ impl AnykaVideoEncoder {
         }
     }
 
+    /// Resolve `config.min_qp` against the range `ak_venc.h` documents for `encode_param.minqp`.
+    ///
+    /// Clamps rather than rejects: a value outside `[20,25]` is a misconfiguration, and refusing
+    /// to open the encoder over it would take the camera off the air. It warns, because silently
+    /// ignoring a configured value is exactly how `gop_length` went unnoticed for so long.
+    pub(super) fn resolve_min_qp(min_qp: u32, token: &str) -> i32 {
+        let clamped = min_qp.clamp(*SDK_MIN_QP_RANGE.start(), *SDK_MIN_QP_RANGE.end());
+        if clamped != min_qp {
+            tracing::warn!(
+                encoder = token,
+                requested = min_qp,
+                applied = clamped,
+                range = ?SDK_MIN_QP_RANGE,
+                "min_qp outside the SDK's documented range; clamped"
+            );
+        }
+        clamped as i32
+    }
+
     /// Map a `VideoEncoderConfig` to FFI `encode_param`.
     pub(super) fn config_to_encode_param(
         config: &VideoEncoderConfig,
@@ -1279,7 +1356,7 @@ impl AnykaVideoEncoder {
         encode_param {
             width: config.resolution.width,
             height: config.resolution.height,
-            minqp: 20,
+            minqp: Self::resolve_min_qp(config.min_qp, &config.token),
             maxqp: 51,
             fps: config.framerate as i32,
             goplen: config.gop_length as i32,
@@ -1705,14 +1782,19 @@ impl VideoEncoder for AnykaVideoEncoder {
                     );
                 }
 
-                // Warn about changes that require encoder restart
+                // Warn about changes that require encoder restart. `min_qp` belongs here for the
+                // same reason as gop: it is only read out of `encode_param` by `ak_venc_open`, so
+                // storing it without saying so is how a configured value silently does nothing.
+                // (On this hardware it does nothing either way -- see `VideoEncoderConfig::min_qp`
+                // -- but that is the encoder discarding it, not us dropping it.)
                 if current.resolution != config.resolution
                     || current.framerate != config.framerate
                     || current.gop_length != config.gop_length
                     || current.encoding != config.encoding
+                    || current.min_qp != config.min_qp
                 {
                     tracing::warn!(
-                        "Encoder {} configuration change requires restart for: resolution/fps/gop/encoding",
+                        "Encoder {} configuration change requires restart for: resolution/fps/gop/encoding/min_qp",
                         config.token
                     );
                 }

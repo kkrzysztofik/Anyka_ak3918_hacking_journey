@@ -24,6 +24,9 @@ pub struct StreamingConfig {
     pub auth: Option<streaming_lib::common::auth::Auth>,
     /// Whether streaming is enabled (default: true).
     pub enabled: bool,
+    /// UDP RTP datagrams per pacing batch; `0`/`1` hands a whole frame over in one `sendmmsg`.
+    /// See [`crate::config::MediaConfig::udp_pace_batch`] for the trade-off.
+    pub udp_pace_batch: usize,
 }
 
 impl StreamingConfig {
@@ -69,6 +72,7 @@ impl StreamingConfig {
             app_name: "live".to_string(),
             auth: None,
             enabled: c.media.streaming_enabled,
+            udp_pace_batch: c.media.udp_pace_batch,
         }
     }
 }
@@ -85,6 +89,7 @@ impl Default for StreamingConfig {
             app_name: "live".to_string(),
             auth: None,
             enabled: true,
+            udp_pace_batch: 0,
         }
     }
 }
@@ -105,6 +110,17 @@ mod tests {
         assert_eq!(config.app_name, "live");
         assert!(config.auth.is_none());
         assert!(config.enabled);
+        assert_eq!(config.udp_pace_batch, 0);
+    }
+
+    /// The knob is only useful if it survives the trip from `[media]` to the streaming layer;
+    /// a field added to the struct but never read from the runtime config fails silently.
+    #[test]
+    fn test_config_from_runtime_carries_udp_pace_batch() {
+        let runtime = ConfigRuntime::new(Default::default());
+        runtime.write().media.udp_pace_batch = 32;
+
+        assert_eq!(StreamingConfig::from_config(&runtime).udp_pace_batch, 32);
     }
 
     #[test]

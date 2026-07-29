@@ -13,6 +13,7 @@ use tokio::time::Duration;
 use tracing::{debug, error, info, trace, warn};
 
 use super::rtp_counters::RTP_TIMESTAMP_WRAP_THRESHOLD;
+use crate::common::utils::LogThrottle;
 use crate::config::StreamingConfig;
 use crate::hub::define::FrameData;
 use crate::protocol::rtsp::rtp::define::ANNEXB_NALU_START_CODE;
@@ -26,7 +27,26 @@ const SOURCE_TIMESTAMP_RESET_THRESHOLD_MS: u32 = 10_000;
 /// Band (ms) near `u32::MAX` used with [`LagTracker::lag_ms`] to treat a large backwards step as
 /// natural millisecond-counter wrap rather than an encoder timestamp reset.
 const SOURCE_TIMESTAMP_WRAP_PROXIMITY_MS: u32 = 60_000;
-const RTP_SEND_SLOW_WARN_MS: u128 = 25;
+/// Threshold used when a frame's own interval is not known: the 15 fps budget.
+///
+/// A send is only late if it did not fit in the interval the frame was given. The previous fixed
+/// 25 ms warned at well under half a 66 ms budget, so every I-frame on this hardware tripped it
+/// while the stream was keeping up perfectly -- `source_ts` tracked wall clock 1:1 throughout.
+/// Used for audio, whose timestamps are in sample units and carry no millisecond interval, and
+/// for the teardown flush, which has no predecessor to measure against.
+const RTP_SEND_SLOW_FALLBACK_MS: u128 = 66;
+
+/// Plausible inter-frame intervals, in ms. Outside this band the delta is a first frame, a
+/// timestamp reset or a wrap rather than a real interval, so fall back rather than trust it.
+const FRAME_INTERVAL_SANE_MS: std::ops::RangeInclusive<u32> = 16..=1000;
+
+/// Reporting period for `rtp_send_slow`, matching `slow_udp_write` and `slow_rtp_pack`.
+///
+/// A genuinely overloaded send path crosses the threshold on *every* frame, and a line per frame
+/// at 15 fps buries the log it is supposed to explain -- on this device the log lands on the SD
+/// card, so it also costs the core that is already too slow.
+const RTP_SEND_SLOW_REPORT_PERIOD: Duration = Duration::from_secs(30);
+
 const PACER_SLEEP_DIAGNOSTIC_MIN_MS: u64 = 20;
 
 /// Minimum sleep threshold in milliseconds.
@@ -519,6 +539,17 @@ struct PlaybackVideoSendContext<'a> {
     remote_addr: std::net::SocketAddr,
     request_path: &'a str,
     shutdown: &'a Arc<AtomicBool>,
+    /// This frame's own interval, from the source timestamps. `None` at teardown.
+    frame_interval_ms: Option<u32>,
+    slow_send_throttle: &'a LogThrottle,
+}
+
+/// How long a send may take before it is worth a line: the interval this frame had to fit in.
+fn slow_send_threshold_ms(frame_interval_ms: Option<u32>) -> u128 {
+    match frame_interval_ms {
+        Some(interval) if FRAME_INTERVAL_SANE_MS.contains(&interval) => u128::from(interval),
+        _ => RTP_SEND_SLOW_FALLBACK_MS,
+    }
 }
 
 async fn send_video_access_unit(
@@ -551,7 +582,10 @@ async fn send_video_access_unit(
     match channel.on_frame(data, normalized.output_timestamp).await {
         Ok(()) => {
             let send_ms = send_started.elapsed().as_millis();
-            if send_ms >= RTP_SEND_SLOW_WARN_MS {
+            let threshold_ms = slow_send_threshold_ms(ctx.frame_interval_ms);
+            if send_ms >= threshold_ms
+                && let Some(burst) = ctx.slow_send_throttle.record(send_ms as u64)
+            {
                 warn!(
                     track = ?TrackType::Video,
                     session_id = %ctx.session_id,
@@ -561,6 +595,10 @@ async fn send_video_access_unit(
                     rtp_ts = normalized.output_timestamp,
                     payload_len = payload_len,
                     send_ms = send_ms,
+                    threshold_ms = threshold_ms,
+                    occurrences = burst.occurrences,
+                    peak_ms = burst.peak,
+                    window_secs = RTP_SEND_SLOW_REPORT_PERIOD.as_secs(),
                     diag_monotonic_ms = monotonic_millis(),
                     "rtp_send_slow"
                 );
@@ -585,6 +623,8 @@ struct AudioProcessContext<'a> {
     dropped_stale_frames: &'a mut u64,
     waiting_for_idr_recovery: bool,
     dropped_for_recovery: &'a mut u64,
+    /// Separate from the video throttle so one track's rate cannot mask the other's.
+    slow_send_throttle: &'a LogThrottle,
 }
 
 async fn process_audio_frame(
@@ -676,7 +716,11 @@ async fn process_audio_frame(
     match channel.on_frame(data, normalized.output_timestamp).await {
         Ok(()) => {
             let send_ms = send_started.elapsed().as_millis();
-            if send_ms >= RTP_SEND_SLOW_WARN_MS {
+            // Audio timestamps are in sample units (RFC 3640), so they carry no millisecond
+            // interval to derive a budget from; the fallback stands in.
+            if send_ms >= RTP_SEND_SLOW_FALLBACK_MS
+                && let Some(burst) = ctx.slow_send_throttle.record(send_ms as u64)
+            {
                 warn!(
                     track = ?TrackType::Audio,
                     session_id = %ctx.session_id,
@@ -686,6 +730,10 @@ async fn process_audio_frame(
                     rtp_ts = normalized.output_timestamp,
                     payload_len = payload_len,
                     send_ms = send_ms,
+                    threshold_ms = RTP_SEND_SLOW_FALLBACK_MS,
+                    occurrences = burst.occurrences,
+                    peak_ms = burst.peak,
+                    window_secs = RTP_SEND_SLOW_REPORT_PERIOD.as_secs(),
                     diag_monotonic_ms = monotonic_millis(),
                     "rtp_send_slow"
                 );
@@ -714,6 +762,7 @@ struct VideoProcessContext<'a> {
     remote_addr: SocketAddr,
     request_path: &'a str,
     shutdown: &'a Arc<AtomicBool>,
+    slow_send_throttle: &'a LogThrottle,
 }
 
 fn handle_idr_recovery(
@@ -934,6 +983,10 @@ async fn process_video_frame(ctx: &mut VideoProcessContext<'_>, timestamp: u32, 
         remote_addr: ctx.remote_addr,
         request_path: ctx.request_path,
         shutdown: ctx.shutdown,
+        // The gap this frame had to be sent within. `previous_source_ts` was captured before the
+        // lag tracker consumed `flush_ts`, so this is the real inter-frame interval.
+        frame_interval_ms: Some(flush_ts.wrapping_sub(previous_source_ts)),
+        slow_send_throttle: ctx.slow_send_throttle,
     };
 
     pace_if_healthy(ctx, was_waiting_for_idr_recovery, flush_ts, lag_ms).await;
@@ -986,6 +1039,8 @@ struct PlaybackLoopState {
     dropped_for_recovery: u64,
     idr_recovery_count: u64,
     frame_pacer: FramePacer,
+    video_slow_send_throttle: LogThrottle,
+    audio_slow_send_throttle: LogThrottle,
 }
 
 impl Default for PlaybackLoopState {
@@ -1001,6 +1056,8 @@ impl Default for PlaybackLoopState {
             dropped_for_recovery: 0,
             idr_recovery_count: 0,
             frame_pacer: FramePacer::new(),
+            video_slow_send_throttle: LogThrottle::new(RTP_SEND_SLOW_REPORT_PERIOD),
+            audio_slow_send_throttle: LogThrottle::new(RTP_SEND_SLOW_REPORT_PERIOD),
         }
     }
 }
@@ -1017,26 +1074,28 @@ struct PlaybackFrameEnv<'a> {
 
 async fn flush_pending_video(
     video_channel: &Option<Arc<Mutex<RtpChannel>>>,
-    video_assembler: &mut VideoAccessUnitAssembler,
-    timestamp_normalizers: &mut HashMap<TrackType, RtpTimestampNormalizer>,
+    state: &mut PlaybackLoopState,
     session_id: &str,
     remote_addr: SocketAddr,
     request_path: &str,
     shutdown: &Arc<AtomicBool>,
 ) {
     if let (Some(video_channel), Some((timestamp, mut data))) =
-        (video_channel, video_assembler.flush())
+        (video_channel, state.video_assembler.flush())
     {
         let ctx = PlaybackVideoSendContext {
             session_id,
             remote_addr,
             request_path,
             shutdown,
+            // Teardown: the partial access unit has no predecessor to measure an interval against.
+            frame_interval_ms: None,
+            slow_send_throttle: &state.video_slow_send_throttle,
         };
 
         send_video_access_unit(
             video_channel,
-            timestamp_normalizers,
+            &mut state.timestamp_normalizers,
             &ctx,
             timestamp,
             &mut data,
@@ -1069,6 +1128,7 @@ async fn handle_playback_frame(
                     dropped_stale_frames: &mut state.dropped_stale_frames,
                     waiting_for_idr_recovery: state.waiting_for_idr_recovery,
                     dropped_for_recovery: &mut state.dropped_for_recovery,
+                    slow_send_throttle: &state.audio_slow_send_throttle,
                 };
                 process_audio_frame(&mut audio_ctx, timestamp, &mut data).await;
 
@@ -1093,6 +1153,7 @@ async fn handle_playback_frame(
                     remote_addr: env.remote_addr,
                     request_path: env.request_path,
                     shutdown: env.shutdown,
+                    slow_send_throttle: &state.video_slow_send_throttle,
                 };
                 process_video_frame(&mut video_ctx, timestamp, data).await;
                 return env.shutdown.load(Ordering::Acquire);
@@ -1114,8 +1175,7 @@ async fn handle_no_frame_data(env: &PlaybackFrameEnv<'_>, state: &mut PlaybackLo
     // video assembler once, then signal shutdown so the session exits promptly.
     flush_pending_video(
         env.video_rtp_channel,
-        &mut state.video_assembler,
-        &mut state.timestamp_normalizers,
+        state,
         env.session_id,
         env.remote_addr,
         env.request_path,
@@ -1178,8 +1238,7 @@ pub(super) async fn run_playback_loop(
             _ = playback_cancel.notified() => {
                 flush_pending_video(
                     &video_rtp_channel,
-                    &mut state.video_assembler,
-                    &mut state.timestamp_normalizers,
+                    &mut state,
                     &session_id,
                     remote_addr,
                     &request_path,

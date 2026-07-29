@@ -246,6 +246,16 @@ impl AppConfig {
                 1,
                 100,
             );
+            // The SDK documents [20,25] for encode_param.minqp. Out-of-range values are clamped
+            // at the encoder rather than rejected, but flagging them here is what stops a typo
+            // from silently doing nothing.
+            range(
+                &mut errors,
+                &format!("stream_profile_{n}.min_qp"),
+                profile.min_qp,
+                20,
+                25,
+            );
             range(
                 &mut errors,
                 &format!("stream_profile_{n}.audio_bitrate"),
@@ -497,6 +507,15 @@ pub struct MediaConfig {
     pub streaming_enabled: bool,
     /// HTTP-FLV port (set at runtime by streaming subsystem).
     pub httpflv_port: u16,
+    /// Split each UDP RTP frame into batches of this many datagrams (`0`/`1` = one `sendmmsg`).
+    ///
+    /// Exposed because the right value is a property of the *receiver*, not of this device, so it
+    /// cannot be settled at build time. An I-frame here is ~100 KB / ~75 datagrams, and with
+    /// pacing off the whole run leaves in a single syscall; a receiver whose socket buffer is
+    /// smaller than that clump drops part of every I-frame, and a partial I-frame costs the whole
+    /// GOP. Batching trades latency for burst size: each batch boundary sleeps, and on this SoC a
+    /// sleep costs ~12 ms whatever you ask for, so `32` on a 75-packet frame is ~24 ms added.
+    pub udp_pace_batch: usize,
 }
 
 impl Default for MediaConfig {
@@ -508,6 +527,7 @@ impl Default for MediaConfig {
             max_streams: 4,
             streaming_enabled: true,
             httpflv_port: 0,
+            udp_pace_batch: 0,
         }
     }
 }
@@ -658,6 +678,18 @@ pub struct StreamProfileConfig {
     pub encoding: String,
     pub gop_length: u32,
     pub quality: u32,
+    /// Quantiser floor passed to `ak_venc_open`, SDK range `[20,25]`.
+    ///
+    /// **The AK3918 encoder ignores this.** Measured on device: with `min_qp = 25` the I-frame
+    /// still encoded at QP 23, read from the bitstream via
+    /// `SliceQP = 26 + pic_init_qp_minus26 + slice_qp_delta`. A floor that is honoured cannot be
+    /// undercut, and I-frame size was unchanged (83.8 KB at 20 vs 84.7 KB at 25).
+    ///
+    /// Kept because the value does travel correctly to `ak_venc_open` and the SDK documents the
+    /// field; a different firmware may honour it. Do not expect changing it to alter the encoded
+    /// output on this hardware. `ak_venc_set_rc_weight` is the knob that plausibly does, and is
+    /// not wired up.
+    pub min_qp: u32,
     /// H264 profile (`"Baseline"`, `"Main"`, `"High"`).
     pub profile: String,
     pub audio_enabled: bool,
@@ -678,6 +710,7 @@ impl Default for StreamProfileConfig {
             encoding: "H264".to_string(),
             gop_length: 50,
             quality: 80,
+            min_qp: 20,
             profile: String::new(),
             audio_enabled: true,
             audio_encoding: "G711".to_string(),
@@ -700,6 +733,7 @@ impl StreamProfileConfig {
             encoding: "H264".to_string(),
             gop_length: 30,
             quality: 80,
+            min_qp: 20,
             profile: String::new(),
             audio_enabled: false,
             audio_encoding: "G711".to_string(),
@@ -882,5 +916,29 @@ file_name = "static"
         assert!(sample.contains("[device]"));
         assert!(sample.contains("port = 80"));
         assert!(sample.contains("manufacturer = \"Anyka\""));
+    }
+
+    /// `min_qp` is documented as an inclusive `[20, 25]` range, so the boundaries themselves must
+    /// validate and the values just outside must not. Off-by-one here is silent: `validate` only
+    /// reports, so a wrongly-rejected 25 would look like a config typo to whoever hit it.
+    #[test]
+    fn test_validate_min_qp_inclusive_boundaries() {
+        let validate_with = |min_qp: u32| {
+            let mut config = AppConfig::default();
+            config.stream_profile_1.min_qp = min_qp;
+            config.validate()
+        };
+
+        assert!(validate_with(20).is_ok(), "20 is the inclusive lower bound");
+        assert!(validate_with(25).is_ok(), "25 is the inclusive upper bound");
+
+        for out_of_range in [19, 26] {
+            let errors = validate_with(out_of_range)
+                .expect_err("a min_qp outside [20, 25] must be reported");
+            assert!(
+                errors.iter().any(|e| e.contains("stream_profile_1.min_qp")),
+                "the error must name the field that is wrong, got {errors:?}"
+            );
+        }
     }
 }

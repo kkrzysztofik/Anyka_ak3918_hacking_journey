@@ -2857,8 +2857,8 @@ async fn test_udp_batching_flushes_all_packets_on_marker() {
     let handler = RtspServerSession::setup_udp_play_packet_handler(
         make_counters(),
         None,
-        "video".to_string(),
-        "sess-udp".to_string(),
+        "video".into(),
+        "sess-udp".into(),
         make_socket_addr(),
         0,
         10,
@@ -2923,6 +2923,21 @@ fn test_redact_session_id_does_not_panic_on_multibyte_input() {
     assert_eq!(RtspServerSession::redact_session_id("ab"), "...ab");
 }
 
+/// Lazy `Display` must format both a known path and the missing-path sentinel without allocating
+/// up front — the whole point of deferring the label until a log line actually renders.
+#[test]
+fn test_stream_path_display_formats_known_and_unknown() {
+    let id = StreamIdentifier::Rtsp {
+        stream_path: "/live/main".to_string(),
+    };
+    assert_eq!(
+        format!("{}", StreamPath(Some(&id))),
+        format!("{id}"),
+        "StreamPath must forward to StreamIdentifier's Display"
+    );
+    assert_eq!(format!("{}", StreamPath(None)), "unknown");
+}
+
 // ========================================================================
 // UDP intra-frame pacing
 // ========================================================================
@@ -2941,7 +2956,10 @@ impl TNetIO for BatchRecordingIO {
     }
 
     async fn write_batch(&mut self, messages: &[Bytes]) -> Result<(), BytesIOError> {
-        self.0.lock().unwrap().push(messages.len());
+        self.0
+            .lock()
+            .map_err(|e| std::io::Error::other(e.to_string()))?
+            .push(messages.len());
         Ok(())
     }
 
@@ -2964,14 +2982,17 @@ impl TNetIO for BatchRecordingIO {
 /// the socket buffer is ~304 KB (larger than any single frame) and the device reported
 /// zero `SndbufErrors` across 287k datagrams.
 #[tokio::test]
-async fn default_udp_pacing_writes_an_iframe_in_a_single_batch() {
+async fn default_udp_pacing_writes_an_iframe_in_a_single_batch()
+-> Result<(), Box<dyn std::error::Error>> {
     let config = StreamingConfig::default();
     // ~110 KB I-frame at the 1400-byte RTP MTU used by rtsp_channel.
     let packets: Vec<BytesMut> = (0..80).map(|_| BytesMut::from(&[0u8; 1400][..])).collect();
 
     let calls = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let recording_io = BatchRecordingIO(calls.clone());
+    assert_eq!(recording_io.get_net_type(), NetType::UDP);
     let io: Arc<Mutex<Box<dyn TNetIO + Send + Sync>>> =
-        Arc::new(Mutex::new(Box::new(BatchRecordingIO(calls.clone()))));
+        Arc::new(Mutex::new(Box::new(recording_io)));
     let throttle = LogThrottle::new(SLOW_WRITE_REPORT_PERIOD);
 
     write_udp_frame(
@@ -2981,17 +3002,18 @@ async fn default_udp_pacing_writes_an_iframe_in_a_single_batch() {
         config.udp_pace_sleep_micros,
         "Video",
         "test-session",
-        "127.0.0.1:5004".parse().unwrap(),
+        "127.0.0.1:5004".parse()?,
         &throttle,
     )
-    .await
-    .expect("frame write");
+    .await?;
 
+    let recorded = calls.lock().map_err(|_| "calls mutex poisoned")?.clone();
     assert_eq!(
-        *calls.lock().unwrap(),
+        recorded,
         vec![80],
         "an I-frame must be one batch; each extra batch costs ~12 ms of scheduler latency"
     );
+    Ok(())
 }
 
 /// A transport that reports a fixed cost per batch and counts how often it is asked for it.
@@ -3009,11 +3031,14 @@ impl TNetIO for StatsAccountingIO {
         unreachable!("write_udp_frame must batch, never write one datagram at a time")
     }
     async fn write_batch(&mut self, _messages: &[Bytes]) -> Result<(), BytesIOError> {
-        *self.batches.lock().unwrap() += 1;
+        *self
+            .batches
+            .lock()
+            .map_err(|e| std::io::Error::other(e.to_string()))? += 1;
         Ok(())
     }
     fn take_batch_stats(&mut self) -> Option<BatchWriteStats> {
-        *self.takes.lock().unwrap() += 1;
+        *self.takes.lock().ok()? += 1;
         Some(BatchWriteStats {
             attempts: 3,
             park_micros: 5_000,
@@ -3034,15 +3059,18 @@ impl TNetIO for StatsAccountingIO {
 /// the loop would silently divide a paced frame's reported park time by the number of chunks --
 /// which would understate exactly the cost this instrumentation exists to find.
 #[tokio::test]
-async fn udp_frame_diagnostics_account_for_every_pacing_chunk() {
+async fn udp_frame_diagnostics_account_for_every_pacing_chunk()
+-> Result<(), Box<dyn std::error::Error>> {
     let packets: Vec<BytesMut> = (0..80).map(|_| BytesMut::from(&[0u8; 1400][..])).collect();
     let batches = std::sync::Arc::new(std::sync::Mutex::new(0u32));
     let takes = std::sync::Arc::new(std::sync::Mutex::new(0u32));
+    let accounting_io = StatsAccountingIO {
+        batches: batches.clone(),
+        takes: takes.clone(),
+    };
+    assert_eq!(accounting_io.get_net_type(), NetType::UDP);
     let io: Arc<Mutex<Box<dyn TNetIO + Send + Sync>>> =
-        Arc::new(Mutex::new(Box::new(StatsAccountingIO {
-            batches: batches.clone(),
-            takes: takes.clone(),
-        })));
+        Arc::new(Mutex::new(Box::new(accounting_io)));
     let throttle = LogThrottle::new(SLOW_WRITE_REPORT_PERIOD);
 
     // 80 packets, 20 per pacing chunk => 4 batches.
@@ -3053,16 +3081,17 @@ async fn udp_frame_diagnostics_account_for_every_pacing_chunk() {
         1,
         "Video",
         "test-session",
-        "127.0.0.1:5004".parse().unwrap(),
+        "127.0.0.1:5004".parse()?,
         &throttle,
     )
-    .await
-    .expect("frame write");
+    .await?;
 
-    assert_eq!(*batches.lock().unwrap(), 4, "80 packets / 20 per chunk");
+    let batch_count = *batches.lock().map_err(|_| "batches mutex poisoned")?;
+    let take_count = *takes.lock().map_err(|_| "takes mutex poisoned")?;
+    assert_eq!(batch_count, 4, "80 packets / 20 per chunk");
     assert_eq!(
-        *takes.lock().unwrap(),
-        4,
+        take_count, 4,
         "each batch's park cost must be collected, or a paced frame under-reports"
     );
+    Ok(())
 }
