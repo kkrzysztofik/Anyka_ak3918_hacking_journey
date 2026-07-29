@@ -394,9 +394,10 @@ int stop_push_slot(int idx)
                   PUSH_JOIN_TIMEOUT_SEC,
                   rc,
                   (unsigned long long)diag_monotonic_ms());
-        /* Detach so the thread's resources are reclaimed if it ever does return. */
+        /* Detach so the thread's resources are reclaimed if it ever does return.
+         * Do not clear stream_handle here: the detached worker may still call
+         * ak_venc_get_stream/ak_venc_release_stream with it. */
         pthread_detach(state->thread);
-        state->stream_handle = NULL;
         return -1;
     }
 

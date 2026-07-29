@@ -97,11 +97,13 @@ class Telnet:
                 try:
                     chunk = self._sock.recv(4096)
                 except BlockingIOError:
-                    chunk = b""
-                if chunk:
-                    self._raw.extend(chunk)
+                    # select said readable, but nothing is available yet.
+                    pass
                 else:
-                    self._eof = True
+                    if chunk:
+                        self._raw.extend(chunk)
+                    else:
+                        self._eof = True
         self._process_raw()
 
     def _process_raw(self) -> None:
@@ -149,11 +151,11 @@ class Telnet:
         if out:
             self._cooked.extend(out)
         if replies:
-            self._sock.setblocking(True)
+            self._sock.settimeout(5.0)
             try:
                 self._sock.sendall(replies)
             finally:
-                self._sock.setblocking(False)
+                self._sock.settimeout(0.0)
 
 
 def read_until_prompt(tn: Telnet, timeout: int = 5) -> str:

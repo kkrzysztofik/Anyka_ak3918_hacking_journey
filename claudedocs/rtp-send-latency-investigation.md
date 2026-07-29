@@ -1,6 +1,6 @@
 # RTP Send Latency on the AK3918 — Investigation Record
 
-**Date:** 2026-07-28 / 2026-07-29
+**Date:** 2026-07-28
 **Device:** Anyka AK3918 (armv5te, uClibc), 192.168.2.198
 **Branch:** `fix/rtp-udp-pacing-scheduler-latency`
 **Symptom:** persistent `rtp_send_slow` warnings and visible video stutter on the main RTSP stream.
@@ -35,7 +35,7 @@ yields waits a full scheduler quantum before it is rescheduled.
 
 Measured by regressing `send_ms` over 1301 `rtp_send_slow` lines:
 
-```
+```text
 send_ms ~= 31.6 + 12.1 * (batches - 1)
 ```
 
@@ -77,7 +77,7 @@ On the PLAY path it is `None`, so the deep copy never runs.
 
 Predicted `park_us` in the thousands and `send_attempts` of 2-5. Measured, three separate times:
 
-```
+```text
 lock_us=10  park_us=20  send_attempts=1   (78 packets)
 lock_us=10  park_us=19  send_attempts=1   (17 packets)
 lock_us=18  park_us=21  send_attempts=1   (70 packets)
@@ -131,7 +131,7 @@ the frame out, and awaiting outside it, makes the release unconditional. Because
 
 **Result: real but modest.**
 
-```
+```text
 before:  send_ms ~= 32.0 + 0.300 * packets
 after:   send_ms ~= 27.2 + 0.266 * packets
 ```
@@ -146,7 +146,7 @@ Intercept −15%, slope −11%. The coop budget was one of ~6 per-packet costs, 
 
 `slow_udp_write` (transport):
 
-```
+```text
 elapsed_ms=42 packets=70 lock_us=18 park_us=21 send_attempts=1 peak_ms=42
 ```
 
@@ -156,7 +156,7 @@ elapsed_ms=42 packets=70 lock_us=18 park_us=21 send_attempts=1 peak_ms=42
 
 `slow_rtp_pack` (packetisation):
 
-```
+```text
 elapsed_ms=12 extract_us=1242 emit_us=11501 frame_bytes=16038 nalus=1 occurrences=279 peak_ms=108
 ```
 
@@ -216,7 +216,7 @@ wrong for the hardware.
 
 At 1.56 ms/packet:
 
-```
+```text
 main @ 2000 kbps -> 179 pkt/s -> 279 ms/s = 27.9% of the one core
 sub  @  512 kbps ->  46 pkt/s ->  71 ms/s =  7.1%
                                             -----
@@ -242,10 +242,12 @@ Burst cost, which is what presents as stutter:
    exactly what lets I-frames balloon, since rate control spends its lowest QP there. The SDK documents
    the range as `[20,25]`; we are pinned at the aggressive end.
 3. **Wire `METHOD_ISIZE_CTRL`.** The SDK's purpose-built I-frame cap:
+
    ```c
    enum enc_method { METHOD_DEFAULT, METHOD_ISIZE_CTRL /* take I size under some value */, METHOD_SMART_H264 };
    int ak_venc_set_method(void *enc_handle, enum enc_method method);
    ```
+
    **Never called anywhere.** vendor-daemon only ever calls `ak_venc_set_rc(bps)`. Needs a new IPC
    command plus the onvif-rust call. The only option that caps the spike without degrading P-frames.
 
@@ -281,7 +283,7 @@ Investigated after the daemon reportedly ignored Ctrl-C and `kill`.
 
 **The handlers are installed and correct** — proven from the running process, not the source:
 
-```
+```text
 SigCgt: 0000000180004002    bit 1 = SIGINT, bit 14 = SIGTERM
 SigIgn: 0000000000001004    bit 12 = SIGPIPE
 ```

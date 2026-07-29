@@ -392,23 +392,20 @@ mod tests {
     /// costs the reallocation the pre-sizing existed to avoid, and too large only wastes memory.
     /// Neither shows up as a test failure anywhere else, so the sizing would quietly rot.
     #[test]
-    fn marshalled_len_matches_marshal_output_for_every_shape() {
+    fn marshalled_len_matches_marshal_output_for_every_shape()
+    -> Result<(), Box<dyn std::error::Error>> {
         let mut reader = BytesReader::new(make_basic_rtp_bytes());
-        let base = RtpPacket::unmarshal(&mut reader).unwrap();
+        let base = RtpPacket::unmarshal(&mut reader)?;
 
         // Plain packet: fixed header + payload.
-        assert_eq!(
-            base.marshalled_len(),
-            base.marshal().unwrap().len(),
-            "plain"
-        );
+        assert_eq!(base.marshalled_len(), base.marshal()?.len(), "plain");
 
         // With CSRCs, which extend the header by a word each.
         let mut with_csrcs = base.clone();
         with_csrcs.header.csrcs = vec![1, 2, 3];
         assert_eq!(
             with_csrcs.marshalled_len(),
-            with_csrcs.marshal().unwrap().len(),
+            with_csrcs.marshal()?.len(),
             "csrcs"
         );
 
@@ -418,11 +415,7 @@ mod tests {
         with_ext.header_extension_profile = 0xBEDE;
         with_ext.header_extension_length = 2;
         with_ext.header_extension_payload = BytesMut::from(&[1u8, 2, 3, 4, 5, 6, 7, 8][..]);
-        assert_eq!(
-            with_ext.marshalled_len(),
-            with_ext.marshal().unwrap().len(),
-            "extension"
-        );
+        assert_eq!(with_ext.marshalled_len(), with_ext.marshal()?.len(), "extension");
 
         // With padding.
         let mut with_padding = base.clone();
@@ -430,8 +423,9 @@ mod tests {
         with_padding.padding = BytesMut::from(&[0u8, 0, 0, 4][..]);
         assert_eq!(
             with_padding.marshalled_len(),
-            with_padding.marshal().unwrap().len(),
+            with_padding.marshal()?.len(),
             "padding"
         );
+        Ok(())
     }
 }

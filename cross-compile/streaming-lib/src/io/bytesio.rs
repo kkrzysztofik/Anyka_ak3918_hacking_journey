@@ -600,34 +600,36 @@ mod tests {
     /// calls would make every frame after a slow one look slow too, and the intercept we are
     /// chasing would never be pinned to a single frame.
     #[tokio::test]
-    async fn test_udpio_batch_stats_are_per_call_not_cumulative() {
-        let receiver = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
-        let recv_port = receiver.local_addr().unwrap().port();
+    async fn test_udpio_batch_stats_are_per_call_not_cumulative()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let receiver = tokio::net::UdpSocket::bind("127.0.0.1:0").await?;
+        let recv_port = receiver.local_addr()?.port();
         let mut udpio = UdpIO::new("127.0.0.1".to_string(), recv_port, 0)
             .await
-            .expect("UdpIO should bind");
+            .ok_or("UdpIO should bind")?;
 
         let payloads: Vec<Bytes> = (0..8u32).map(|i| Bytes::from(vec![i as u8; 64])).collect();
 
-        udpio.write_batch(&payloads).await.unwrap();
+        udpio.write_batch(&payloads).await?;
         let first = udpio
             .take_batch_stats()
-            .expect("the UDP transport must report batch stats");
+            .ok_or("the UDP transport must report batch stats")?;
         assert!(
             first.attempts >= 1,
             "a non-empty batch issues at least one sendmmsg"
         );
 
-        udpio.write_batch(&payloads).await.unwrap();
+        udpio.write_batch(&payloads).await?;
         let second = udpio
             .take_batch_stats()
-            .expect("every batch must report stats, not just the first");
+            .ok_or("every batch must report stats, not just the first")?;
         assert!(
             second.attempts >= 1 && second.attempts <= first.attempts,
             "attempts must reset per call, not accumulate: {} then {}",
             first.attempts,
             second.attempts
         );
+        Ok(())
     }
 
     #[tokio::test]

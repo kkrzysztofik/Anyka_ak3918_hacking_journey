@@ -1065,6 +1065,8 @@ impl Application {
         progress: &mut StartupProgress,
         config_runtime: &Arc<ConfigRuntime>,
     ) -> Result<Option<Arc<dyn Platform>>, StartupError> {
+        let ptz_enabled = config_runtime.read().ptz.enabled;
+
         #[cfg(not(use_stubs))]
         {
             let isp_path = {
@@ -1075,8 +1077,6 @@ impl Application {
                     Some(std::path::PathBuf::from(p))
                 }
             };
-
-            let ptz_enabled = config_runtime.read().ptz.enabled;
 
             match crate::platform::AnykaPlatform::with_isp_config(isp_path, ptz_enabled) {
                 Ok(p) => match p.initialize().await {
@@ -1112,9 +1112,8 @@ impl Application {
         }
         #[cfg(use_stubs)]
         {
-            let _ = config_runtime;
             let stub_platform = StubPlatformBuilder::new()
-                .ptz_supported(true)
+                .ptz_supported(ptz_enabled)
                 .imaging_supported(true)
                 .build();
             match stub_platform.initialize().await {
