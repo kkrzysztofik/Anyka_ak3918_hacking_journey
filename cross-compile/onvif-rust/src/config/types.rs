@@ -497,6 +497,15 @@ pub struct MediaConfig {
     pub streaming_enabled: bool,
     /// HTTP-FLV port (set at runtime by streaming subsystem).
     pub httpflv_port: u16,
+    /// Split each UDP RTP frame into batches of this many datagrams (`0`/`1` = one `sendmmsg`).
+    ///
+    /// Exposed because the right value is a property of the *receiver*, not of this device, so it
+    /// cannot be settled at build time. An I-frame here is ~100 KB / ~75 datagrams, and with
+    /// pacing off the whole run leaves in a single syscall; a receiver whose socket buffer is
+    /// smaller than that clump drops part of every I-frame, and a partial I-frame costs the whole
+    /// GOP. Batching trades latency for burst size: each batch boundary sleeps, and on this SoC a
+    /// sleep costs ~12 ms whatever you ask for, so `32` on a 75-packet frame is ~24 ms added.
+    pub udp_pace_batch: usize,
 }
 
 impl Default for MediaConfig {
@@ -508,6 +517,7 @@ impl Default for MediaConfig {
             max_streams: 4,
             streaming_enabled: true,
             httpflv_port: 0,
+            udp_pace_batch: 0,
         }
     }
 }

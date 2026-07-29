@@ -189,6 +189,17 @@ snapshot_path = "/snapshot"
 # Maximum concurrent streams (1-8)
 max_streams = 4
 
+# Datagrams per UDP RTP pacing batch (0 or 1 = send a whole frame in one syscall)
+#
+# With pacing off, a ~100 KB I-frame leaves as a single ~75-datagram burst. A receiver whose
+# socket buffer is smaller than that clump loses part of every I-frame, and a partial I-frame
+# costs the whole GOP (~2 s of video). Set 32 to split the burst into ~45 KB chunks.
+#
+# Cost: each batch boundary sleeps, and on this SoC a sleep costs ~12 ms regardless of the
+# requested duration, so 32 adds ~24 ms of latency to a 75-packet frame. Raise only if a client
+# stutters on I-frames over UDP; RTSP-over-TCP does not need this at all.
+udp_pace_batch = 0
+
 # ============================================================================
 # PTZ Control Settings
 # ============================================================================
@@ -284,7 +295,11 @@ height = 720
 framerate = 15
 
 # Video bitrate in kbps (64-16384)
-bitrate = 2000
+#
+# 1500, not 2000: at 2000 the encoder produced ~113 KB I-frames, which need ~129 ms to packetise
+# and send against a 66 ms frame budget at 15 fps, and burst ~80 datagrams at the client in one
+# syscall. Lowering the ceiling shrinks the I-frame, which is the dominant cost on both counts.
+bitrate = 1500
 
 # Video encoding (H264, H265, MJPEG)
 encoding = "H264"
