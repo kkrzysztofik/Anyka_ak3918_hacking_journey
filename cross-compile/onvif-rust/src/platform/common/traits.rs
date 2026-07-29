@@ -129,6 +129,12 @@ pub struct VideoEncoderConfig {
     pub gop_length: u32,
     /// Quality level (0-100).
     pub quality: u32,
+    /// Quantiser floor. Lower spends more bits; the SDK documents `[20,25]`.
+    ///
+    /// This is the knob that governs I-frame size: rate control spends its lowest QP on the
+    /// I-frame because the whole GOP references it, so the floor is where the I-frame lands.
+    /// `0` (what `Default` yields) is out of range and reads as "use the SDK floor".
+    pub min_qp: u32,
 }
 
 /// Audio encoding type.

@@ -304,11 +304,27 @@ bitrate = 1500
 # Video encoding (H264, H265, MJPEG)
 encoding = "H264"
 
-# GOP length (1-300)
+# GOP length (1-300): frames between I-frames.
+#
+# Applied by ak_venc_open only, so a change needs an onvif-rust restart. Note this changes
+# how OFTEN the I-frame cost is paid, not how big it is -- see min_qp for the size lever.
 gop_length = 50
 
 # Video quality level (1-100)
 quality = 80
+
+# Quantiser floor (SDK range 20-25). THE lever for I-frame size.
+#
+# Rate control gives the I-frame its lowest permitted QP, because the whole GOP references it, so
+# the I-frame lands exactly here. Lowering `bitrate` does not shrink it -- measured on an AK3918,
+# 2000 -> 1500 kbps cut P-frames 37% and I-frames only 9%.
+#
+# 20 is the aggressive end (largest I-frames, best keyframe quality). Each +1 costs roughly 11%
+# of I-frame size, so 25 is around half of 20. Smaller I-frames mean a smaller UDP burst and less
+# packetisation CPU; the cost is softer keyframes, though CBR hands the saved bits to P-frames.
+#
+# Applied by ak_venc_open only: changing this needs an onvif-rust restart.
+min_qp = 20
 
 # Audio enabled for this profile (true/false)
 audio_enabled = true
@@ -353,6 +369,19 @@ gop_length = 30
 # Video quality level (1-100)
 quality = 80
 
+# Quantiser floor (SDK range 20-25). THE lever for I-frame size.
+#
+# Rate control gives the I-frame its lowest permitted QP, because the whole GOP references it, so
+# the I-frame lands exactly here. Lowering `bitrate` does not shrink it -- measured on an AK3918,
+# 2000 -> 1500 kbps cut P-frames 37% and I-frames only 9%.
+#
+# 20 is the aggressive end (largest I-frames, best keyframe quality). Each +1 costs roughly 11%
+# of I-frame size, so 25 is around half of 20. Smaller I-frames mean a smaller UDP burst and less
+# packetisation CPU; the cost is softer keyframes, though CBR hands the saved bits to P-frames.
+#
+# Applied by ak_venc_open only: changing this needs an onvif-rust restart.
+min_qp = 20
+
 # Audio enabled for this profile (true/false)
 audio_enabled = false
 
@@ -396,6 +425,19 @@ gop_length = 30
 # Video quality level (1-100)
 quality = 80
 
+# Quantiser floor (SDK range 20-25). THE lever for I-frame size.
+#
+# Rate control gives the I-frame its lowest permitted QP, because the whole GOP references it, so
+# the I-frame lands exactly here. Lowering `bitrate` does not shrink it -- measured on an AK3918,
+# 2000 -> 1500 kbps cut P-frames 37% and I-frames only 9%.
+#
+# 20 is the aggressive end (largest I-frames, best keyframe quality). Each +1 costs roughly 11%
+# of I-frame size, so 25 is around half of 20. Smaller I-frames mean a smaller UDP burst and less
+# packetisation CPU; the cost is softer keyframes, though CBR hands the saved bits to P-frames.
+#
+# Applied by ak_venc_open only: changing this needs an onvif-rust restart.
+min_qp = 20
+
 # Audio enabled for this profile (true/false)
 audio_enabled = false
 
@@ -438,6 +480,19 @@ gop_length = 30
 
 # Video quality level (1-100)
 quality = 80
+
+# Quantiser floor (SDK range 20-25). THE lever for I-frame size.
+#
+# Rate control gives the I-frame its lowest permitted QP, because the whole GOP references it, so
+# the I-frame lands exactly here. Lowering `bitrate` does not shrink it -- measured on an AK3918,
+# 2000 -> 1500 kbps cut P-frames 37% and I-frames only 9%.
+#
+# 20 is the aggressive end (largest I-frames, best keyframe quality). Each +1 costs roughly 11%
+# of I-frame size, so 25 is around half of 20. Smaller I-frames mean a smaller UDP burst and less
+# packetisation CPU; the cost is softer keyframes, though CBR hands the saved bits to P-frames.
+#
+# Applied by ak_venc_open only: changing this needs an onvif-rust restart.
+min_qp = 20
 
 # Audio enabled for this profile (true/false)
 audio_enabled = false

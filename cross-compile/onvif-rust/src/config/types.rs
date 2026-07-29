@@ -246,6 +246,16 @@ impl AppConfig {
                 1,
                 100,
             );
+            // The SDK documents [20,25] for encode_param.minqp. Out-of-range values are clamped
+            // at the encoder rather than rejected, but flagging them here is what stops a typo
+            // from silently doing nothing.
+            range(
+                &mut errors,
+                &format!("stream_profile_{n}.min_qp"),
+                profile.min_qp,
+                20,
+                25,
+            );
             range(
                 &mut errors,
                 &format!("stream_profile_{n}.audio_bitrate"),
@@ -668,6 +678,15 @@ pub struct StreamProfileConfig {
     pub encoding: String,
     pub gop_length: u32,
     pub quality: u32,
+    /// Quantiser floor, SDK range `[20,25]`. Lower spends more bits on the I-frame.
+    ///
+    /// This is the only lever that caps I-frame size: rate control gives the I-frame its lowest
+    /// permitted QP because the whole GOP references it, so lowering `bitrate` shrinks P-frames
+    /// while the I-frame stays pinned at this floor. Measured on an AK3918: 2000 → 1500 kbps cut
+    /// P-frames 37% and I-frames only 9%.
+    ///
+    /// Applied by `ak_venc_open` only, so a change needs an encoder restart.
+    pub min_qp: u32,
     /// H264 profile (`"Baseline"`, `"Main"`, `"High"`).
     pub profile: String,
     pub audio_enabled: bool,
@@ -688,6 +707,7 @@ impl Default for StreamProfileConfig {
             encoding: "H264".to_string(),
             gop_length: 50,
             quality: 80,
+            min_qp: 20,
             profile: String::new(),
             audio_enabled: true,
             audio_encoding: "G711".to_string(),
@@ -710,6 +730,7 @@ impl StreamProfileConfig {
             encoding: "H264".to_string(),
             gop_length: 30,
             quality: 80,
+            min_qp: 20,
             profile: String::new(),
             audio_enabled: false,
             audio_encoding: "G711".to_string(),
