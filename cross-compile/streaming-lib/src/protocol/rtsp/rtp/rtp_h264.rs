@@ -12,6 +12,7 @@ use super::utils::TRtpReceiverForRtcp;
 use super::utils::TUnPacker;
 use super::utils::TVideoPacker;
 use super::utils::Unmarshal;
+use crate::common::utils::LogThrottle;
 use crate::hub::define::FrameData;
 use crate::io::TNetIO;
 use crate::io::bytes_errors::{BytesReadError, BytesReadErrorValue};
@@ -43,12 +44,19 @@ impl NalType {
     }
 }
 
+/// A frame's packetisation cost is only worth a line when it is large enough to matter, and
+/// then only at a rate a human can read.
+const SLOW_PACK_THRESHOLD_MS: u128 = 10;
+const SLOW_PACK_REPORT_PERIOD: std::time::Duration = std::time::Duration::from_secs(30);
+
 pub struct RtpH264Packer {
     header: RtpHeader,
     mtu: usize,
     on_packet_handler: Option<OnRtpPacketFn>,
     on_packet_for_rtcp_handler: Option<OnRtpPacketFn2>,
     io: Arc<Mutex<Box<dyn TNetIO + Send + Sync>>>,
+    /// Rate limiter for `slow_rtp_pack`; every frame can cross the threshold on a slow box.
+    slow_pack_throttle: LogThrottle,
 }
 
 impl RtpH264Packer {
@@ -76,6 +84,7 @@ impl RtpH264Packer {
             io,
             on_packet_handler: None,
             on_packet_for_rtcp_handler: None,
+            slow_pack_throttle: LogThrottle::new(SLOW_PACK_REPORT_PERIOD),
         }
     }
 
@@ -228,13 +237,43 @@ impl TPacker for RtpH264Packer {
     //pack annexb h264 data
     async fn pack(&mut self, nalus: &mut BytesMut, timestamp: u32) -> Result<(), PackerError> {
         self.header.timestamp = timestamp; // ((timestamp as u64 * self.clock_rate as u64) / 1000) as u32;
-        let extracted_nalus = Self::extract_nalus_from_frame(nalus);
-        let last_index = extracted_nalus.len().saturating_sub(1);
 
+        // Split the two halves of packetisation, because they scale with different things and
+        // the difference is the whole diagnosis. `extract_us` scales with frame *bytes* (it
+        // scans for start codes); `emit_us` scales with *packets*. Measured on the camera, the
+        // cost of this function was flat against both -- a 17-packet frame cost nearly as much
+        // as a 78-packet one -- which is the signature of a fixed count of scheduler yields
+        // rather than of work. This line says which half is paying for them.
+        let frame_bytes = nalus.len();
+        let started = std::time::Instant::now();
+        let extracted_nalus = Self::extract_nalus_from_frame(nalus);
+        let extract_micros = started.elapsed().as_micros() as u64;
+        let nalu_count = extracted_nalus.len();
+        let last_index = nalu_count.saturating_sub(1);
+
+        let emit_started = std::time::Instant::now();
         for (index, nalu) in extracted_nalus.into_iter().enumerate() {
             let mark_end_of_access_unit = index == last_index;
             self.pack_nalu_with_marker(nalu, mark_end_of_access_unit)
                 .await?;
+        }
+        let emit_micros = emit_started.elapsed().as_micros() as u64;
+
+        let total = started.elapsed();
+        if total.as_millis() >= SLOW_PACK_THRESHOLD_MS
+            && let Some(burst) = self.slow_pack_throttle.record(total.as_millis() as u64)
+        {
+            tracing::warn!(
+                elapsed_ms = total.as_millis(),
+                extract_us = extract_micros,
+                emit_us = emit_micros,
+                frame_bytes = frame_bytes,
+                nalus = nalu_count,
+                occurrences = burst.occurrences,
+                peak_ms = burst.peak,
+                window_secs = SLOW_PACK_REPORT_PERIOD.as_secs(),
+                "slow_rtp_pack"
+            );
         }
         Ok(())
     }

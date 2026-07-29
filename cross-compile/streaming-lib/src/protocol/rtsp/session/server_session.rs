@@ -49,7 +49,7 @@ use crate::protocol::rtsp::sdp::Sdp;
 
 use super::define;
 use super::define::rtsp_method_name;
-use crate::io::TNetIO;
+use crate::io::{BatchWriteStats, TNetIO};
 use crate::io::{TcpReadIO, TcpWriteIO};
 use async_trait::async_trait;
 use tokio::time::{Duration, timeout};
@@ -140,6 +140,21 @@ pub struct RtspServerSession {
     playback_task: Option<JoinHandle<()>>,
 }
 
+/// `Display` for an optional stream identifier, formatted only if a log line actually renders it.
+///
+/// Building the label eagerly cost one `String` allocation per datagram for a value used only by
+/// lines that fire on an anomaly or a sample interval -- effectively never, on a healthy stream.
+struct StreamPath<'a>(Option<&'a StreamIdentifier>);
+
+impl std::fmt::Display for StreamPath<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.0 {
+            Some(id) => write!(f, "{id}"),
+            None => f.write_str("unknown"),
+        }
+    }
+}
+
 /// Log RTP sequence/timestamp anomalies and periodic packet samples for a track.
 ///
 /// Shared by the UDP and TCP-interleaved send paths, which differ only in `protocol`.
@@ -153,7 +168,7 @@ fn log_rtp_packet_stats(
     track_label: &str,
     session_id: &str,
     remote_for_rtp: SocketAddr,
-    stream_path: &str,
+    stream_path: StreamPath<'_>,
 ) {
     if stats.seq_gap || stats.seq_regressed || stats.timestamp_regressed {
         warn!(
@@ -212,9 +227,6 @@ fn marshal_and_log_rtp_packet(
 ) -> Result<(BytesMut, usize), PackerError> {
     let msg = packet.marshal()?;
     let payload_len = msg.len();
-    let stream_path = stream_identifier
-        .map(|id| id.to_string())
-        .unwrap_or_else(|| "unknown".to_string());
     let stats = counters.on_packet_sent(
         payload_len,
         packet.header.seq_number,
@@ -230,7 +242,7 @@ fn marshal_and_log_rtp_packet(
         track_label,
         session_id,
         remote_for_rtp,
-        &stream_path,
+        StreamPath(stream_identifier),
     );
 
     Ok((msg, payload_len))
@@ -238,9 +250,11 @@ fn marshal_and_log_rtp_packet(
 
 /// Write one accumulated frame's worth of RTP packets to the UDP socket.
 ///
-/// Pace UDP writes: yield every N packets to let the kernel drain the socket
-/// buffer and the NIC transmit queued packets, preventing client-side receive
-/// buffer overflow.
+/// Optionally paces the write: after every `udp_pace_batch` packets, sleep so the kernel can
+/// drain the socket buffer and the NIC can transmit what is queued. Pacing is **off by default**
+/// because that sleep is not free on a contended single-core target — see
+/// [`StreamingConfig::udp_pace_batch`] for the measurement. `udp_pace_batch <= 1` disables it and
+/// hands the whole frame over in one call.
 #[allow(clippy::too_many_arguments)] // matches the other RTP write/handler helpers here
 async fn write_udp_frame(
     io: &Arc<Mutex<Box<dyn TNetIO + Send + Sync>>>,
@@ -257,8 +271,19 @@ async fn write_udp_frame(
     // loop below hands out slices instead of copying every datagram it sends.
     let packets: Vec<Bytes> = packets.into_iter().map(BytesMut::freeze).collect();
     let packet_count = packets.len();
+    // Timed on its own: waiting here means another track holds the transport, which is a
+    // different fault from the kernel refusing the datagrams, and wants a different fix.
+    let lock_started = std::time::Instant::now();
     let mut io = io.lock().await;
-    let pace_batch = udp_pace_batch.max(1);
+    let lock_micros = lock_started.elapsed().as_micros() as u64;
+    // `<= 1` means "no intra-frame pacing", as documented on the config field. Collapsing to a
+    // single chunk (rather than `.max(1)`, which paced after *every* packet) is what makes that
+    // contract true.
+    let pace_batch = if udp_pace_batch <= 1 {
+        packet_count.max(1)
+    } else {
+        udp_pace_batch
+    };
     let sleep_micros = if udp_pace_sleep_micros == 0 {
         DEFAULT_UDP_PACE_SLEEP_MICROS
     } else {
@@ -269,8 +294,15 @@ async fn write_udp_frame(
     // the per-datagram cost dominates a frame's send time, and the pacing contract (yield every
     // `pace_batch` packets so the kernel and NIC can drain) is unchanged by how a batch is issued.
     let mut written = 0;
+    // Summed rather than sampled from the last chunk: with pacing on, a frame's park cost is
+    // spread across every chunk, and the last one is usually the cheapest.
+    let mut batch = BatchWriteStats::default();
     for chunk in packets.chunks(pace_batch) {
         io.write_batch(chunk).await?;
+        if let Some(stats) = io.take_batch_stats() {
+            batch.attempts += stats.attempts;
+            batch.park_micros += stats.park_micros;
+        }
         written += chunk.len();
         if written < packet_count {
             tokio::time::sleep(pace_sleep).await;
@@ -280,6 +312,16 @@ async fn write_udp_frame(
 
     // Log slow writes (see SLOW_WRITE_THRESHOLD_MS). On a constrained transmit path every
     // frame can cross the threshold, so report a rate rather than a line per frame.
+    //
+    // The `lock_us`/`park_us`/`send_attempts` split is what makes this line diagnostic rather
+    // than merely alarming. `elapsed_ms` on its own cannot tell apart the three things that
+    // make a frame slow, and they have opposite fixes:
+    //   - `lock_us` high  -> the other track is holding the transport (contention).
+    //   - `park_us` high  -> the kernel had no room; the link has not drained the last frame.
+    //     `send_attempts > 1` confirms it: the kernel took a partial run.
+    //   - both low        -> the time went to marshalling upstream, not to the transport.
+    // Subtracting `elapsed_ms` from the enclosing `rtp_send_slow` `send_ms` gives the
+    // packetisation cost, which no timer in this function can see.
     if elapsed.as_millis() >= SLOW_WRITE_THRESHOLD_MS
         && let Some(burst) = slow_write_throttle.record(elapsed.as_millis() as u64)
     {
@@ -289,6 +331,10 @@ async fn write_udp_frame(
             session_id = %session_id,
             remote_addr = %remote_for_rtp,
             elapsed_ms = elapsed.as_millis(),
+            packets = packet_count,
+            lock_us = lock_micros,
+            park_us = batch.park_micros,
+            send_attempts = batch.attempts,
             occurrences = burst.occurrences,
             peak_ms = burst.peak,
             window_secs = SLOW_WRITE_REPORT_PERIOD.as_secs(),
@@ -1423,12 +1469,17 @@ impl RtspServerSession {
     }
 
     /// Set up the per-packet callback for a UDP `PLAY` track.
+    ///
+    /// The label parameters are `Arc`s rather than owned values because the returned closure clones
+    /// every captured variable on each datagram. As `String`/`StreamIdentifier` that was three heap
+    /// allocations per packet -- ~540 a second on the main stream -- to hand identical text to a log
+    /// line that almost never fires. An `Arc` clone is a refcount bump.
     #[allow(clippy::too_many_arguments)]
     fn setup_udp_play_packet_handler(
         counters: Arc<RtpTrackCounters>,
-        stream_identifier: Option<StreamIdentifier>,
-        track_label: String,
-        session_id: String,
+        stream_identifier: Option<Arc<StreamIdentifier>>,
+        track_label: Arc<str>,
+        session_id: Arc<str>,
         remote_for_rtp: SocketAddr,
         sample_interval: u32,
         udp_pace_batch: usize,
@@ -1437,8 +1488,18 @@ impl RtspServerSession {
     ) -> OnRtpPacketFn {
         // Packet buffer: accumulate marshalled packets (150 packets for large I-frames).
         // Second element is running total of `buffer` payload bytes (avoids O(n) sum per packet).
-        let udp_accum: Arc<Mutex<(Vec<BytesMut>, usize)>> =
-            Arc::new(Mutex::new((Vec::with_capacity(150), 0)));
+        //
+        // Deliberately a `std` mutex, not a tokio one. Only this handler ever touches the
+        // accumulator, so it is never actually contended -- but a tokio `Mutex::lock` is a
+        // *resource operation*, and tokio's cooperative scheduler gives each task a budget of
+        // 128 of those. Past the budget the next such await returns `Pending` however ready it
+        // is, forcing a reschedule; on this device a reschedule costs a full ~12 ms quantum.
+        // At one lock per datagram an 80-packet I-frame burned through that budget every frame,
+        // which is why the cost was flat in packet count instead of proportional to it.
+        // A `std` mutex is not a tokio resource, so it spends no budget. The guard must not be
+        // held across an await -- the compiler enforces that, since the guard is not `Send`.
+        let udp_accum: Arc<std::sync::Mutex<(Vec<BytesMut>, usize)>> =
+            Arc::new(std::sync::Mutex::new((Vec::with_capacity(150), 0)));
         // Per-session, so one struggling client cannot mask another's slow writes.
         let slow_write_throttle = Arc::new(LogThrottle::new(SLOW_WRITE_REPORT_PERIOD));
 
@@ -1455,7 +1516,7 @@ impl RtspServerSession {
                         "UDP",
                         &packet,
                         &counters,
-                        stream_identifier.as_ref(),
+                        stream_identifier.as_deref(),
                         sample_interval,
                         &track_label,
                         &session_id,
@@ -1463,40 +1524,54 @@ impl RtspServerSession {
                     )?;
 
                     // Accumulate packet into buffer (bounded; same cap as TCP interleaved framing).
-                    let mut guard = udp_accum.lock().await;
-                    let (buffer, accumulated) = &mut *guard;
-                    let incoming = msg.len();
-                    let current = *accumulated;
-                    let new_total = current.saturating_add(incoming);
-                    if new_total > max_udp_accumulated_frame_bytes {
-                        error!(
-                            protocol = "UDP",
-                            session_id = %session_id,
-                            track = %track_label,
-                            remote_addr = %remote_for_rtp,
-                            current_accumulated = current,
-                            incoming = incoming,
-                            max = max_udp_accumulated_frame_bytes,
-                            "udp_playback_packet_buffer_overflow"
-                        );
-                        buffer.clear();
-                        *accumulated = 0;
-                        return Err(PackerError {
-                            value: PackerErrorValue::InterleavedFraming(format!(
-                                "udp playback packet buffer overflow: {} + {} > {}",
-                                current, incoming, max_udp_accumulated_frame_bytes
-                            )),
-                        });
-                    }
-                    buffer.push(msg);
-                    *accumulated = new_total;
+                    //
+                    // The guard lives in its own block so it is provably released before the
+                    // write below. A `std` guard is not `Send`, and an explicit `drop` inside a
+                    // branch is not enough to convince the compiler of that -- the future would
+                    // fail to be `Send`. Yielding the frame out of the block and awaiting
+                    // outside it makes the release unconditional and obvious.
+                    let frame_packets: Option<Vec<BytesMut>> = {
+                        // Recover from poisoning rather than propagating it: the guarded region
+                        // only pushes to a `Vec` and adds two integers, so a poisoned lock means
+                        // an unrelated panic, and killing every later frame over it helps nobody.
+                        let mut guard = udp_accum.lock().unwrap_or_else(|e| e.into_inner());
+                        let (buffer, accumulated) = &mut *guard;
+                        let incoming = msg.len();
+                        let current = *accumulated;
+                        let new_total = current.saturating_add(incoming);
+                        if new_total > max_udp_accumulated_frame_bytes {
+                            error!(
+                                protocol = "UDP",
+                                session_id = %session_id,
+                                track = %track_label,
+                                remote_addr = %remote_for_rtp,
+                                current_accumulated = current,
+                                incoming = incoming,
+                                max = max_udp_accumulated_frame_bytes,
+                                "udp_playback_packet_buffer_overflow"
+                            );
+                            buffer.clear();
+                            *accumulated = 0;
+                            return Err(PackerError {
+                                value: PackerErrorValue::InterleavedFraming(format!(
+                                    "udp playback packet buffer overflow: {} + {} > {}",
+                                    current, incoming, max_udp_accumulated_frame_bytes
+                                )),
+                            });
+                        }
+                        buffer.push(msg);
+                        *accumulated = new_total;
 
-                    // Write all accumulated packets when marker bit is set (end of frame)
-                    if packet.header.marker == 1 {
-                        let packets: Vec<BytesMut> =
-                            std::mem::replace(buffer, Vec::with_capacity(150));
-                        *accumulated = 0;
-                        drop(guard);
+                        // Hand off the whole frame when the marker bit closes the access unit.
+                        if packet.header.marker == 1 {
+                            *accumulated = 0;
+                            Some(std::mem::replace(buffer, Vec::with_capacity(150)))
+                        } else {
+                            None
+                        }
+                    };
+
+                    if let Some(packets) = frame_packets {
                         write_udp_frame(
                             &io,
                             packets,
@@ -1640,11 +1715,13 @@ impl RtspServerSession {
                     // `tcp_interleaved_buffer_max` is the shared per-session cap on buffered bytes
                     // for one logical RTP frame (until marker); UDP uses the same field to bound
                     // accumulated packet payloads before flush (not TCP interleaving).
+                    // Converted once here, at PLAY setup, so the per-datagram closure clones
+                    // refcounts instead of re-allocating this text for every packet it sends.
                     let handler = Self::setup_udp_play_packet_handler(
                         counters,
-                        stream_id_clone,
-                        track_label,
-                        session_id_clone,
+                        stream_id_clone.map(Arc::new),
+                        track_label.into(),
+                        session_id_clone.into(),
                         remote_for_rtp,
                         sample_interval,
                         udp_pace_batch,

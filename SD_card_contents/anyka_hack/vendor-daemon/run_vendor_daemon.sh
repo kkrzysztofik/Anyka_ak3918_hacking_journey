@@ -22,6 +22,12 @@
 #
 # Environment variables honoured (set in /data/gergesettings.txt):
 #   VENDOR_DAEMON_LOG_FILE  - Override vendor-daemon log file path (default: /mnt/logs/vendor_daemon.log)
+#   VENDOR_DAEMON_LOG_LEVEL - trace|debug|info|warn|error (default: info)
+#                             Sets both the daemon's own log level and the Anyka
+#                             SDK's. debug emits per-frame lines from push.c and
+#                             ipc.c: tens of MB/hour onto the SD card, competing
+#                             for the one core that also encodes and sends video.
+#                             Raise it only while actively diagnosing.
 #   LOG_FILE  - Override shell script log file name (default: vendor_daemon.log)
 #   DEBUG     - Set to 1 for debug-level logging
 #   VERBOSE   - Set to 1 for verbose logging
@@ -126,9 +132,17 @@ ulimit -c unlimited 2>/dev/null || log WARN "Failed to enable core dumps (ulimit
 # LAUNCH VENDOR-DAEMON IN FOREGROUND
 # =============================================================================
 
+# Pass through only when the caller set it, so the binary's own default applies
+# otherwise and there is exactly one place defining it. Do not invent an empty
+# export: getenv() would then see "" instead of unset, and the comment would lie.
+if [ -n "${VENDOR_DAEMON_LOG_LEVEL+x}" ]; then
+  export VENDOR_DAEMON_LOG_LEVEL
+fi
+
 log INFO "Starting vendor-daemon: ${VENDOR_DAEMON_BIN}"
 log INFO "Socket will appear at: ${VENDOR_DAEMON_SOCK}"
 log INFO "LD_LIBRARY_PATH=${LD_LIBRARY_PATH}"
+log INFO "VENDOR_DAEMON_LOG_LEVEL=${VENDOR_DAEMON_LOG_LEVEL:-<unset, binary default: info>}"
 
 # Run in foreground — this IS the daemon process. stdout/stderr go to the log
 # file so that the process supervisor can track it, while vendor-daemon also

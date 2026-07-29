@@ -26,6 +26,17 @@ impl BytesWriter {
         Self { bytes: Vec::new() }
     }
 
+    /// Start with room for `capacity` bytes already reserved.
+    ///
+    /// A writer that starts empty reallocates as it grows, copying everything written so far each
+    /// time. On the RTP send path that happens once per datagram, so callers that know their final
+    /// size say so up front.
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self {
+            bytes: Vec::with_capacity(capacity),
+        }
+    }
+
     pub fn write_u8(&mut self, byte: u8) -> Result<(), BytesWriteError> {
         self.bytes.write_u8(byte)?;
         Ok(())

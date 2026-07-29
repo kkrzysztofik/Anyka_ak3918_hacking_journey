@@ -1,8 +1,8 @@
 //! Tests for AnykaVideoEncoder and streaming functionality.
 
 use super::super::video_encoder::{
-    EncoderState, NO_DATA_IDR_RECOVERY_EVERY_ERRORS, SDK_ERROR_NO_DATA, StreamHealthCounters,
-    StreamState, handle_pushed_frame, invoke_owned_callbacks_from_map,
+    EncoderState, NO_DATA_IDR_RECOVERY_EVERY_ERRORS, SDK_ERROR_NO_DATA, SDK_MIN_QP_RANGE,
+    StreamHealthCounters, StreamState, handle_pushed_frame, invoke_owned_callbacks_from_map,
     is_push_mode_transient_error, run_push_loop, sdk_frame_type_to_frame_type,
     unified_frame_read_loop,
 };
@@ -1794,4 +1794,82 @@ fn test_frame_read_loop_requests_idr_after_frames_then_sustained_no_data() {
 
     assert!(no_data_count.load(Ordering::SeqCst) > NO_DATA_IDR_RECOVERY_EVERY_ERRORS);
     drop(frame_data);
+}
+
+/// `min_qp` must survive the trip from config into `encode_param`, and stay inside the range
+/// `ak_venc.h` documents for it.
+///
+/// Both halves matter. The value was a hardcoded `20` in `config_to_encode_param`, so a
+/// configured floor that never reached `ak_venc_open` would look exactly like today's behaviour
+/// and go unnoticed — which is how `gop_length` stayed broken. And an out-of-range floor must
+/// clamp rather than reach the SDK, since `encode_param` is only validated by the encoder opening
+/// or not, and a camera that fails to open is worse than one at the wrong quantiser.
+#[test]
+fn test_min_qp_reaches_encode_param_and_clamps_to_sdk_range() {
+    let param_for = |min_qp: u32| {
+        AnykaVideoEncoder::config_to_encode_param(
+            &VideoEncoderConfig {
+                token: "VideoEncoder_1".to_string(),
+                resolution: Resolution::new(1280, 720),
+                framerate: 15,
+                bitrate: 1500,
+                encoding: VideoEncoding::H264,
+                gop_length: 50,
+                min_qp,
+                ..Default::default()
+            },
+            encode_use_chn::ENCODE_MAIN_CHN,
+        )
+    };
+
+    // In range: passed through untouched. This asserts propagation and clamping only -- the
+    // AK3918 encoder discards `minqp` (an I-frame measured at QP 23 with the floor set to 25),
+    // so nothing here claims anything about the encoded output.
+    assert_eq!(param_for(20).minqp, 20);
+    assert_eq!(param_for(25).minqp, 25);
+    assert_eq!(param_for(23).minqp, 23);
+
+    // `Default` yields 0, which must read as the SDK floor, not as 0 — otherwise every
+    // default-constructed config would silently ask the encoder for an illegal quantiser.
+    assert_eq!(param_for(0).minqp, *SDK_MIN_QP_RANGE.start() as i32);
+    assert_eq!(param_for(19).minqp, 20);
+    assert_eq!(param_for(51).minqp, 25);
+
+    // gop_length travels the same path and must not be re-hardcoded either.
+    assert_eq!(param_for(20).goplen, 50);
+}
+
+/// The constructor is the only place `gop_length` and `min_qp` can be set, so it must actually
+/// use what the caller passed instead of the built-in defaults.
+#[tokio::test]
+async fn test_open_params_seed_both_encoder_configurations() {
+    let encoder = AnykaVideoEncoder::with_ffi_and_params(
+        Arc::new(MockVideoHalTrait::new()),
+        StreamOpenParams {
+            gop_length: 50,
+            min_qp: 25,
+        },
+        StreamOpenParams {
+            gop_length: 45,
+            min_qp: 22,
+        },
+    );
+
+    let configs = encoder.get_configurations().await.unwrap();
+    let main = configs
+        .iter()
+        .find(|c| c.token == "VideoEncoder_1")
+        .expect("main encoder configuration");
+    let sub = configs
+        .iter()
+        .find(|c| c.token == "VideoEncoder_2")
+        .expect("sub encoder configuration");
+
+    assert_eq!((main.gop_length, main.min_qp), (50, 25));
+    assert_eq!((sub.gop_length, sub.min_qp), (45, 22));
+
+    // An absent config must reproduce the values the encoder used before this was configurable.
+    let defaults = AnykaVideoEncoder::with_ffi(Arc::new(MockVideoHalTrait::new()));
+    let defaults = defaults.get_configurations().await.unwrap();
+    assert_eq!((defaults[0].gop_length, defaults[0].min_qp), (30, 20));
 }

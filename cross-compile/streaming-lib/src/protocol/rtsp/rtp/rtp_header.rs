@@ -5,6 +5,7 @@ use crate::io::bytes_writer::BytesWriter;
 use byteorder::BigEndian;
 use bytes::BytesMut;
 
+use super::define::RTP_FIXED_HEADER_LEN;
 use super::utils::Marshal;
 use super::utils::Unmarshal;
 
@@ -82,8 +83,24 @@ impl Marshal<Result<BytesMut, BytesWriteError>> for RtpHeader {
     // |                             ....                              |
     // +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
     fn marshal(&self) -> Result<BytesMut, BytesWriteError> {
-        let mut writer = BytesWriter::default();
+        let mut writer = BytesWriter::with_capacity(self.marshalled_len());
+        self.marshal_into(&mut writer)?;
+        Ok(writer.extract_current_bytes())
+    }
+}
 
+impl RtpHeader {
+    /// Serialised size in bytes: the 12-byte fixed header plus one word per CSRC.
+    pub fn marshalled_len(&self) -> usize {
+        RTP_FIXED_HEADER_LEN + self.csrcs.len() * 4
+    }
+
+    /// Write this header into an existing writer.
+    ///
+    /// [`Marshal::marshal`] allocates a fresh buffer for what is usually 12 bytes. On the send path
+    /// that is one allocation per datagram whose only purpose is to be copied into the packet's
+    /// buffer and dropped, so [`RtpPacket::marshal`] writes the header straight into its own.
+    pub fn marshal_into(&self, writer: &mut BytesWriter) -> Result<(), BytesWriteError> {
         let csrc_count = (self.csrcs.len() as u8) & 0x0F;
         let byte_1st: u8 = (self.version << 6)
             | (self.padding_flag << 5)
@@ -102,7 +119,7 @@ impl Marshal<Result<BytesMut, BytesWriteError>> for RtpHeader {
             writer.write_u32::<BigEndian>(*csrc)?;
         }
 
-        Ok(writer.extract_current_bytes())
+        Ok(())
     }
 }
 

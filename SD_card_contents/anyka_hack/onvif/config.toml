@@ -189,12 +189,23 @@ snapshot_path = "/snapshot"
 # Maximum concurrent streams (1-8)
 max_streams = 4
 
+# Datagrams per UDP RTP pacing batch (0 or 1 = send a whole frame in one syscall)
+#
+# With pacing off, a ~100 KB I-frame leaves as a single ~75-datagram burst. A receiver whose
+# socket buffer is smaller than that clump loses part of every I-frame, and a partial I-frame
+# costs the whole GOP (~2 s of video). Set 32 to split the burst into ~45 KB chunks.
+#
+# Cost: each batch boundary sleeps, and on this SoC a sleep costs ~12 ms regardless of the
+# requested duration, so 32 adds ~24 ms of latency to a 75-packet frame. Raise only if a client
+# stutters on I-frames over UDP; RTSP-over-TCP does not need this at all.
+udp_pace_batch = 0
+
 # ============================================================================
 # PTZ Control Settings
 # ============================================================================
 [ptz]
 # Enable PTZ control (true/false)
-enabled = true
+enabled = false
 
 # Default pan speed (0.0-1.0)
 pan_speed = 0.5
@@ -284,16 +295,36 @@ height = 720
 framerate = 15
 
 # Video bitrate in kbps (64-16384)
-bitrate = 2000
+#
+# 1500, not 2000: at 2000 the encoder produced ~113 KB I-frames, which need ~129 ms to packetise
+# and send against a 66 ms frame budget at 15 fps, and burst ~80 datagrams at the client in one
+# syscall. Lowering the ceiling shrinks the I-frame, which is the dominant cost on both counts.
+bitrate = 1500
 
 # Video encoding (H264, H265, MJPEG)
 encoding = "H264"
 
-# GOP length (1-300)
+# GOP length (1-300): frames between I-frames.
+#
+# Applied by ak_venc_open only, so a change needs an onvif-rust restart. Note this changes
+# how OFTEN the I-frame cost is paid, not how big it is -- see min_qp for the size lever.
 gop_length = 50
 
 # Video quality level (1-100)
 quality = 80
+
+# Quantiser floor passed to ak_venc_open (SDK range 20-25).
+#
+# THIS SETTING DOES NOTHING ON THIS HARDWARE. Measured on device: with min_qp = 25 the encoder
+# still produced I-frames at QP 23, read out of the bitstream with
+#   ffmpeg -bsf:v trace_headers   ->  SliceQP = 26 + pic_init_qp_minus26 + slice_qp_delta
+# A floor that is honoured cannot be undercut. I-frame size was unchanged: 83.8 KB at 20 against
+# 84.7 KB at 25.
+#
+# The value does reach ak_venc_open correctly -- it is the encoder that discards it. Left
+# configurable because the SDK documents the field and another firmware may honour it.
+# ak_venc_set_rc_weight is the knob that plausibly controls quality here, and is not wired up.
+min_qp = 20
 
 # Audio enabled for this profile (true/false)
 audio_enabled = true
@@ -338,6 +369,19 @@ gop_length = 30
 # Video quality level (1-100)
 quality = 80
 
+# Quantiser floor passed to ak_venc_open (SDK range 20-25).
+#
+# THIS SETTING DOES NOTHING ON THIS HARDWARE. Measured on device: with min_qp = 25 the encoder
+# still produced I-frames at QP 23, read out of the bitstream with
+#   ffmpeg -bsf:v trace_headers   ->  SliceQP = 26 + pic_init_qp_minus26 + slice_qp_delta
+# A floor that is honoured cannot be undercut. I-frame size was unchanged: 83.8 KB at 20 against
+# 84.7 KB at 25.
+#
+# The value does reach ak_venc_open correctly -- it is the encoder that discards it. Left
+# configurable because the SDK documents the field and another firmware may honour it.
+# ak_venc_set_rc_weight is the knob that plausibly controls quality here, and is not wired up.
+min_qp = 20
+
 # Audio enabled for this profile (true/false)
 audio_enabled = false
 
@@ -381,6 +425,19 @@ gop_length = 30
 # Video quality level (1-100)
 quality = 80
 
+# Quantiser floor passed to ak_venc_open (SDK range 20-25).
+#
+# THIS SETTING DOES NOTHING ON THIS HARDWARE. Measured on device: with min_qp = 25 the encoder
+# still produced I-frames at QP 23, read out of the bitstream with
+#   ffmpeg -bsf:v trace_headers   ->  SliceQP = 26 + pic_init_qp_minus26 + slice_qp_delta
+# A floor that is honoured cannot be undercut. I-frame size was unchanged: 83.8 KB at 20 against
+# 84.7 KB at 25.
+#
+# The value does reach ak_venc_open correctly -- it is the encoder that discards it. Left
+# configurable because the SDK documents the field and another firmware may honour it.
+# ak_venc_set_rc_weight is the knob that plausibly controls quality here, and is not wired up.
+min_qp = 20
+
 # Audio enabled for this profile (true/false)
 audio_enabled = false
 
@@ -423,6 +480,19 @@ gop_length = 30
 
 # Video quality level (1-100)
 quality = 80
+
+# Quantiser floor passed to ak_venc_open (SDK range 20-25).
+#
+# THIS SETTING DOES NOTHING ON THIS HARDWARE. Measured on device: with min_qp = 25 the encoder
+# still produced I-frames at QP 23, read out of the bitstream with
+#   ffmpeg -bsf:v trace_headers   ->  SliceQP = 26 + pic_init_qp_minus26 + slice_qp_delta
+# A floor that is honoured cannot be undercut. I-frame size was unchanged: 83.8 KB at 20 against
+# 84.7 KB at 25.
+#
+# The value does reach ak_venc_open correctly -- it is the encoder that discards it. Left
+# configurable because the SDK documents the field and another firmware may honour it.
+# ak_venc_set_rc_weight is the knob that plausibly controls quality here, and is not wired up.
+min_qp = 20
 
 # Audio enabled for this profile (true/false)
 audio_enabled = false

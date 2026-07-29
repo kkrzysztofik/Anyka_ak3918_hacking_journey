@@ -1,6 +1,6 @@
 #include "globals.h"
 
-volatile int g_shutdown = 0;
+volatile sig_atomic_t g_shutdown = 0;
 
 int g_control_fd = -1;
 

@@ -1065,8 +1065,28 @@ impl Application {
         progress: &mut StartupProgress,
         config_runtime: &Arc<ConfigRuntime>,
     ) -> Result<Option<Arc<dyn Platform>>, StartupError> {
+        let ptz_enabled = config_runtime.read().ptz.enabled;
+
         #[cfg(not(use_stubs))]
         {
+            // `gop_length` and `min_qp` only reach the hardware through `ak_venc_open`, so the
+            // encoder has to be constructed already knowing them. This is the path that was
+            // missing: the encoder seeded itself from constants, which is why a device configured
+            // for `gop_length = 50` ran at the built-in 30.
+            let (main_encoder, sub_encoder) = {
+                let c = config_runtime.read();
+                (
+                    crate::platform::StreamOpenParams {
+                        gop_length: c.stream_profile_1.gop_length,
+                        min_qp: c.stream_profile_1.min_qp,
+                    },
+                    crate::platform::StreamOpenParams {
+                        gop_length: c.stream_profile_2.gop_length,
+                        min_qp: c.stream_profile_2.min_qp,
+                    },
+                )
+            };
+
             let isp_path = {
                 let p = config_runtime.read().device.isp_config_path.clone();
                 if p.is_empty() {
@@ -1076,7 +1096,12 @@ impl Application {
                 }
             };
 
-            match crate::platform::AnykaPlatform::with_isp_config(isp_path) {
+            match crate::platform::AnykaPlatform::with_isp_config(
+                isp_path,
+                ptz_enabled,
+                main_encoder,
+                sub_encoder,
+            ) {
                 Ok(p) => match p.initialize().await {
                     Ok(()) => {
                         tracing::info!("AnykaPlatform initialized (real hardware)");
@@ -1110,9 +1135,8 @@ impl Application {
         }
         #[cfg(use_stubs)]
         {
-            let _ = config_runtime;
             let stub_platform = StubPlatformBuilder::new()
-                .ptz_supported(true)
+                .ptz_supported(ptz_enabled)
                 .imaging_supported(true)
                 .build();
             match stub_platform.initialize().await {

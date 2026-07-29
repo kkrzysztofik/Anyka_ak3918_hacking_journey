@@ -517,7 +517,8 @@ impl StreamingService {
         // Spawn servers.
         let hub_event_sender = streamhub.get_hub_event_sender();
         let lib_config = LibStreamingConfig::new()
-            .with_rtsp_listen_addr(format!("0.0.0.0:{}", self.config.rtsp_port));
+            .with_rtsp_listen_addr(format!("0.0.0.0:{}", self.config.rtsp_port))
+            .with_udp_pace_batch(self.config.udp_pace_batch);
         self.rtsp_task = Some(spawn_rtsp_server(
             hub_event_sender.clone(),
             self.config.auth.clone(),

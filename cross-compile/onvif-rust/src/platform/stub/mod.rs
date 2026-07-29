@@ -184,6 +184,7 @@ impl StubPlatformBuilder {
             bitrate_mode: BitrateMode::Vbr,
             gop_length: 25,
             quality: 80,
+            min_qp: 20,
         }];
         self.audio_sources = vec![AudioSourceConfig {
             token: "audio_in".to_string(),
@@ -292,6 +293,7 @@ impl StubPlatformBuilder {
                     encoding: VideoEncoding::H264,
                     bitrate_mode: BitrateMode::Vbr,
                     gop_length: 50,
+                    min_qp: 20,
                     quality: 80,
                 },
                 VideoEncoderConfig {
@@ -303,6 +305,7 @@ impl StubPlatformBuilder {
                     encoding: VideoEncoding::H264,
                     bitrate_mode: BitrateMode::Vbr,
                     gop_length: 30,
+                    min_qp: 20,
                     quality: 60,
                 },
             ]
@@ -1276,6 +1279,7 @@ mod tests {
             bitrate_mode: BitrateMode::Cbr,
             gop_length: 60,
             quality: 90,
+            min_qp: 20,
         };
 
         let platform = StubPlatformBuilder::new()
@@ -1753,6 +1757,7 @@ mod tests {
             encoding: VideoEncoding::H264,
             bitrate_mode: BitrateMode::Vbr,
             gop_length: 30,
+            min_qp: 20,
             quality: 70,
         };
 
@@ -1774,6 +1779,7 @@ mod tests {
             encoding: VideoEncoding::H265,
             bitrate_mode: BitrateMode::Cbr,
             gop_length: 50,
+            min_qp: 20,
             quality: 85,
         };
 
