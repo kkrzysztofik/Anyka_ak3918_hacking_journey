@@ -109,6 +109,12 @@ export default defineConfig(() => ({
     sourcemap: false,
     rollupOptions: {
       output: {
+        minify: {
+          compress: {
+            dropConsole: true,
+            dropDebugger: true,
+          },
+        },
         manualChunks: (id) => getChunkName(id),
         chunkFileNames: () => {
           return `js/[name]-[hash].js`;
@@ -130,13 +136,9 @@ export default defineConfig(() => ({
     },
     // Optimize chunk size
     chunkSizeWarningLimit: 200,
-    // Enable minification
-    minify: 'terser',
-    terserOptions: {
-      compress: {
-        drop_console: true,
-        drop_debugger: true,
-      },
-    },
+    // Oxc is the Vite 8 default minifier; Terser was an explicit opt-in and is
+    // markedly slower. Oxc does not support property mangling, which this
+    // project never used.
+    minify: 'oxc',
   },
 }));
