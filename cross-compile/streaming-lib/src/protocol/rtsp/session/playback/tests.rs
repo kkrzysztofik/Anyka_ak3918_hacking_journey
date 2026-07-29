@@ -5,8 +5,13 @@ use super::*;
 use crate::config::StreamingConfig;
 use crate::hub::define::FrameData;
 use crate::protocol::rtsp::rtp::define::ANNEXB_NALU_START_CODE;
+use crate::protocol::rtsp::rtsp_channel::RtpChannel;
+use crate::protocol::rtsp::rtsp_codec::{RtspCodecId, RtspCodecInfo};
 use crate::protocol::rtsp::rtsp_track::TrackType;
 use bytes::BytesMut;
+use std::net::SocketAddr;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 // ========================================================================
@@ -880,5 +885,51 @@ fn test_slow_send_threshold_tracks_the_frame_interval() {
     assert_eq!(
         slow_send_threshold_ms(Some(4_000_000_000)),
         RTP_SEND_SLOW_FALLBACK_MS
+    );
+}
+
+/// Teardown flush must wire the video throttle and a `None` interval (no predecessor frame).
+///
+/// Without a packer, `on_frame` is a no-op that still runs the slow-send threshold check — so this
+/// covers the new `PlaybackLoopState` throttle defaults and the flush context fields Sonar marks
+/// as uncovered on the PR.
+#[tokio::test]
+async fn test_flush_pending_video_uses_slow_send_throttle_and_no_interval() {
+    let mut state = PlaybackLoopState::default();
+    assert!(
+        state
+            .video_assembler
+            .push(1_000, BytesMut::from(&b"\x00\x00\x00\x01\x65\x01"[..]))
+            .is_none(),
+        "first chunk stays pending until flush or a new timestamp"
+    );
+
+    let codec_info = RtspCodecInfo {
+        codec_id: RtspCodecId::H264,
+        payload_type: 96,
+        sample_rate: 90_000,
+        channel_count: 0,
+    };
+    let video_channel = Arc::new(tokio::sync::Mutex::new(RtpChannel::new(codec_info)));
+    let shutdown = Arc::new(AtomicBool::new(false));
+    let remote_addr: SocketAddr = "127.0.0.1:5004".parse().expect("static addr");
+
+    flush_pending_video(
+        &Some(video_channel),
+        &mut state,
+        "test-session",
+        remote_addr,
+        "/live/main",
+        &shutdown,
+    )
+    .await;
+
+    assert!(
+        !shutdown.load(Ordering::Acquire),
+        "a packer-less channel must not treat the flush as a send failure"
+    );
+    assert!(
+        state.video_assembler.flush().is_none(),
+        "flush_pending_video must drain the assembler"
     );
 }

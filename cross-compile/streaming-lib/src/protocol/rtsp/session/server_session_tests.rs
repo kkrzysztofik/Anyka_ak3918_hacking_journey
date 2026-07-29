@@ -2923,6 +2923,21 @@ fn test_redact_session_id_does_not_panic_on_multibyte_input() {
     assert_eq!(RtspServerSession::redact_session_id("ab"), "...ab");
 }
 
+/// Lazy `Display` must format both a known path and the missing-path sentinel without allocating
+/// up front — the whole point of deferring the label until a log line actually renders.
+#[test]
+fn test_stream_path_display_formats_known_and_unknown() {
+    let id = StreamIdentifier::Rtsp {
+        stream_path: "/live/main".to_string(),
+    };
+    assert_eq!(
+        format!("{}", StreamPath(Some(&id))),
+        format!("{id}"),
+        "StreamPath must forward to StreamIdentifier's Display"
+    );
+    assert_eq!(format!("{}", StreamPath(None)), "unknown");
+}
+
 // ========================================================================
 // UDP intra-frame pacing
 // ========================================================================
@@ -2971,8 +2986,10 @@ async fn default_udp_pacing_writes_an_iframe_in_a_single_batch()
     let packets: Vec<BytesMut> = (0..80).map(|_| BytesMut::from(&[0u8; 1400][..])).collect();
 
     let calls = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let recording_io = BatchRecordingIO(calls.clone());
+    assert_eq!(recording_io.get_net_type(), NetType::UDP);
     let io: Arc<Mutex<Box<dyn TNetIO + Send + Sync>>> =
-        Arc::new(Mutex::new(Box::new(BatchRecordingIO(calls.clone()))));
+        Arc::new(Mutex::new(Box::new(recording_io)));
     let throttle = LogThrottle::new(SLOW_WRITE_REPORT_PERIOD);
 
     write_udp_frame(
@@ -3044,11 +3061,13 @@ async fn udp_frame_diagnostics_account_for_every_pacing_chunk()
     let packets: Vec<BytesMut> = (0..80).map(|_| BytesMut::from(&[0u8; 1400][..])).collect();
     let batches = std::sync::Arc::new(std::sync::Mutex::new(0u32));
     let takes = std::sync::Arc::new(std::sync::Mutex::new(0u32));
+    let accounting_io = StatsAccountingIO {
+        batches: batches.clone(),
+        takes: takes.clone(),
+    };
+    assert_eq!(accounting_io.get_net_type(), NetType::UDP);
     let io: Arc<Mutex<Box<dyn TNetIO + Send + Sync>>> =
-        Arc::new(Mutex::new(Box::new(StatsAccountingIO {
-            batches: batches.clone(),
-            takes: takes.clone(),
-        })));
+        Arc::new(Mutex::new(Box::new(accounting_io)));
     let throttle = LogThrottle::new(SLOW_WRITE_REPORT_PERIOD);
 
     // 80 packets, 20 per pacing chunk => 4 batches.
