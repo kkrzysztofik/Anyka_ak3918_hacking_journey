@@ -21,6 +21,10 @@ function getChunkName(id: string): string | undefined {
 
   if (id.includes('@tanstack/react-query')) return 'query-vendor';
   if (id.includes('recharts')) return 'charts-vendor';
+  // zod and its resolver must land together: @hookform/resolvers imports
+  // `zod/v4/core` while app code imports `zod`, and Rolldown cannot dedupe
+  // those across a manual chunk boundary.
+  if (id.includes('/zod/') || id.includes('@hookform/resolvers')) return 'validation-vendor';
   if (
     id.includes('lucide-react') ||
     id.includes('@radix-ui') ||
