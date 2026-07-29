@@ -32,7 +32,6 @@ function getChunkName(id: string): string | undefined {
     id.includes('sonner')
   )
     return 'ui-vendor';
-  if (id.includes('axios')) return 'http-vendor';
   if (id.includes('fast-xml-parser') || id.includes('dompurify')) return 'utils-vendor';
   return 'vendor';
 }
@@ -75,7 +74,7 @@ export default defineConfig(() => ({
   },
   // Optimize dependencies
   optimizeDeps: {
-    include: ['react', 'react-dom', 'react-router-dom', 'axios', 'lucide-react'],
+    include: ['react', 'react-dom', 'react-router-dom', 'lucide-react'],
   },
   server: {
     // NOSONAR: S5332 - Binding to 0.0.0.0 is required for embedded device access

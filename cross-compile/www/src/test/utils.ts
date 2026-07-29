@@ -1,22 +1,17 @@
 /**
  * Test utilities and mock helpers
  */
-import type { AxiosResponse } from 'axios';
 import { vi } from 'vitest';
 
+import type { ApiResponse } from '@/services/api';
+
 /**
- * Create a mock Axios response
+ * Create a mock API response
  */
-export function createMockResponse<T>(data: T, status = 200): AxiosResponse<T> {
+export function createMockResponse<T>(data: T, status = 200): ApiResponse<T> {
   return {
     data,
     status,
-    statusText: 'OK',
-    headers: {},
-    config: {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      headers: {} as any,
-    },
   };
 }
 
@@ -57,27 +52,27 @@ export function createSOAPSuccessResponse(bodyContent: string): string {
 }
 
 /**
- * Create a full Axios response with SOAP envelope
+ * Create a full API response with SOAP envelope
  * @param bodyContent - XML body content
  * @param status - HTTP status code (default: 200)
- * @returns Axios response with SOAP envelope in data
+ * @returns API response with SOAP envelope in data
  */
-export function createMockSOAPResponse(bodyContent: string, status = 200): AxiosResponse<string> {
+export function createMockSOAPResponse(bodyContent: string, status = 200): ApiResponse<string> {
   return createMockResponse(createTestSOAPResponse(bodyContent), status);
 }
 
 /**
- * Create a full Axios response with SOAP fault
+ * Create a full API response with SOAP fault
  * @param code - SOAP fault code (e.g., 'soap:Sender', 'soap:Receiver')
  * @param reason - Fault reason text
  * @param status - HTTP status code (default: 200)
- * @returns Axios response with SOAP fault in data
+ * @returns API response with SOAP fault in data
  */
 export function createMockSOAPFaultResponse(
   code: string,
   reason: string,
   status = 200,
-): AxiosResponse<string> {
+): ApiResponse<string> {
   return createMockResponse(createSOAPFaultResponse(code, reason), status);
 }
 
