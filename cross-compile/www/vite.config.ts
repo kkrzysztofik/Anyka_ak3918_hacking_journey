@@ -137,8 +137,10 @@ export default defineConfig(() => ({
         },
       },
     },
-    // Optimize chunk size
-    chunkSizeWarningLimit: 200,
+    // `vendor` (react-dom + react-router) is legitimately ~310 kB raw and is
+    // not further splittable without hurting caching. Set above it so this
+    // warning means something when it fires.
+    chunkSizeWarningLimit: 350,
     // Oxc is the Vite 8 default minifier; Terser was an explicit opt-in and is
     // markedly slower. Oxc does not support property mangling, which this
     // project never used.
