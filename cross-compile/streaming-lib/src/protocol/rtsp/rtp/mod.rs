@@ -415,7 +415,11 @@ mod tests {
         with_ext.header_extension_profile = 0xBEDE;
         with_ext.header_extension_length = 2;
         with_ext.header_extension_payload = BytesMut::from(&[1u8, 2, 3, 4, 5, 6, 7, 8][..]);
-        assert_eq!(with_ext.marshalled_len(), with_ext.marshal()?.len(), "extension");
+        assert_eq!(
+            with_ext.marshalled_len(),
+            with_ext.marshal()?.len(),
+            "extension"
+        );
 
         // With padding.
         let mut with_padding = base.clone();

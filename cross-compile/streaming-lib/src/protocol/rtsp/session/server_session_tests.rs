@@ -2987,10 +2987,7 @@ async fn default_udp_pacing_writes_an_iframe_in_a_single_batch()
     )
     .await?;
 
-    let recorded = calls
-        .lock()
-        .map_err(|_| "calls mutex poisoned")?
-        .clone();
+    let recorded = calls.lock().map_err(|_| "calls mutex poisoned")?.clone();
     assert_eq!(
         recorded,
         vec![80],
@@ -3071,8 +3068,7 @@ async fn udp_frame_diagnostics_account_for_every_pacing_chunk()
     let take_count = *takes.lock().map_err(|_| "takes mutex poisoned")?;
     assert_eq!(batch_count, 4, "80 packets / 20 per chunk");
     assert_eq!(
-        take_count,
-        4,
+        take_count, 4,
         "each batch's park cost must be collected, or a paced frame under-reports"
     );
     Ok(())
