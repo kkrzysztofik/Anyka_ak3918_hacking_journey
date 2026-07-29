@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "vite build && node scripts/precompress.mjs ../../SD_card_contents/anyka_hack/onvif/www",
     "preview": "vite preview",
     "lint": "eslint . --report-unused-disable-directives --max-warnings 0",
     "lint:fix": "eslint . --fix",
@@ -81,7 +81,6 @@
     "typescript": "npm:@typescript/typescript6@^6.0.2",
     "typescript-eslint": "^8.65.0",
     "vite": "^8.1.5",
-    "vite-plugin-compression": "^0.5.1",
     "vitest": "^4.1.10"
   },
   "overrides": {

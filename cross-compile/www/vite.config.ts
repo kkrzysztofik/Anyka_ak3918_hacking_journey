@@ -2,7 +2,6 @@ import react from '@vitejs/plugin-react';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vite';
-import viteCompression from 'vite-plugin-compression';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -61,11 +60,7 @@ export default defineConfig(({ mode }) => ({
       ],
     },
   },
-  plugins: [
-    react(),
-    viteCompression({ algorithm: 'gzip' }),
-    viteCompression({ algorithm: 'brotliCompress', ext: '.br' }),
-  ],
+  plugins: [react()],
   resolve: {
     alias: {
       '@': resolve(__dirname, './src'),
