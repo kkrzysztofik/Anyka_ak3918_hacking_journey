@@ -152,10 +152,17 @@ else
   fi
   (
     cd "${WWW_DIR}"
-    if [[ -f package-lock.json ]]; then
-      npm ci
+    lock_hash_file="node_modules/.anyka-lock-hash"
+    current_hash="$(sha256sum package-lock.json 2>/dev/null | cut -d' ' -f1)"
+    if [[ -d node_modules && -f "${lock_hash_file}" && "$(cat "${lock_hash_file}")" == "${current_hash}" ]]; then
+      log_info "Dependencies unchanged, skipping npm ci"
     else
-      npm install
+      if [[ -f package-lock.json ]]; then
+        npm ci
+      else
+        npm install
+      fi
+      printf '%s' "${current_hash}" > "${lock_hash_file}"
     fi
     npm run build
   )
