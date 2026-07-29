@@ -894,7 +894,8 @@ fn test_slow_send_threshold_tracks_the_frame_interval() {
 /// covers the new `PlaybackLoopState` throttle defaults and the flush context fields Sonar marks
 /// as uncovered on the PR.
 #[tokio::test]
-async fn test_flush_pending_video_uses_slow_send_throttle_and_no_interval() {
+async fn test_flush_pending_video_uses_slow_send_throttle_and_no_interval()
+-> Result<(), Box<dyn std::error::Error>> {
     let mut state = PlaybackLoopState::default();
     assert!(
         state
@@ -912,7 +913,7 @@ async fn test_flush_pending_video_uses_slow_send_throttle_and_no_interval() {
     };
     let video_channel = Arc::new(tokio::sync::Mutex::new(RtpChannel::new(codec_info)));
     let shutdown = Arc::new(AtomicBool::new(false));
-    let remote_addr: SocketAddr = "127.0.0.1:5004".parse().expect("static addr");
+    let remote_addr: SocketAddr = "127.0.0.1:5004".parse()?;
 
     flush_pending_video(
         &Some(video_channel),
@@ -932,4 +933,5 @@ async fn test_flush_pending_video_uses_slow_send_throttle_and_no_interval() {
         state.video_assembler.flush().is_none(),
         "flush_pending_video must drain the assembler"
     );
+    Ok(())
 }

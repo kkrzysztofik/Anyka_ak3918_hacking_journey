@@ -650,21 +650,21 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_udpio_write_batch_empty_is_a_noop() {
+    async fn test_udpio_write_batch_empty_is_a_noop() -> Result<(), Box<dyn std::error::Error>> {
         let receiver = match tokio::net::UdpSocket::bind("127.0.0.1:0").await {
             Ok(socket) => socket,
             Err(err) if err.kind() == std::io::ErrorKind::PermissionDenied => {
                 eprintln!("skipping empty UDP batch test: bind denied ({err})");
-                return;
+                return Ok(());
             }
-            Err(err) => panic!("UDP bind failed: {err}"),
+            Err(err) => return Err(err.into()),
         };
-        let recv_port = receiver.local_addr().unwrap().port();
+        let recv_port = receiver.local_addr()?.port();
         let mut udpio = UdpIO::new("127.0.0.1".to_string(), recv_port, 0)
             .await
-            .expect("UdpIO should bind");
+            .ok_or("UdpIO should bind")?;
 
-        udpio.write_batch(&[]).await.unwrap();
+        udpio.write_batch(&[]).await?;
 
         let mut buf = vec![0u8; 64];
         assert!(
@@ -673,6 +673,7 @@ mod tests {
                 .is_err(),
             "empty batch must not emit a datagram"
         );
+        Ok(())
     }
 
     // ========== TcpIO Tests ==========

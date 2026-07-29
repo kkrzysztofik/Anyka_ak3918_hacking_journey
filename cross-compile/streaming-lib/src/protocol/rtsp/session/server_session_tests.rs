@@ -2956,7 +2956,10 @@ impl TNetIO for BatchRecordingIO {
     }
 
     async fn write_batch(&mut self, messages: &[Bytes]) -> Result<(), BytesIOError> {
-        self.0.lock().unwrap().push(messages.len());
+        self.0
+            .lock()
+            .map_err(|e| std::io::Error::other(e.to_string()))?
+            .push(messages.len());
         Ok(())
     }
 

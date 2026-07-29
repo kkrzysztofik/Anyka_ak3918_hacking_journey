@@ -574,7 +574,13 @@ int handle_venc_stop_push(int fd, const uint8_t *req, uint32_t req_len)
                       (unsigned long long)diag_monotonic_ms());
             return send_response(fd, STATUS_ERROR, NULL, 0);
         }
-        stop_push_slot(idx);
+        if (stop_push_slot(idx) != 0) {
+            log_error("[push] failed to stop push-based frame delivery (stream=%u)", stream_id);
+            log_error("event=push_cmd cmd=20 status=error scope=single stream=%u reason=stop_failed diag_monotonic_ms=%llu",
+                      stream_id,
+                      (unsigned long long)diag_monotonic_ms());
+            return send_response(fd, STATUS_ERROR, NULL, 0);
+        }
         log_info("[push] push-based frame delivery stopped (stream=%u)", stream_id);
         log_info("event=push_cmd cmd=20 status=ok scope=single stream=%u diag_monotonic_ms=%llu",
                  stream_id,
@@ -582,8 +588,15 @@ int handle_venc_stop_push(int fd, const uint8_t *req, uint32_t req_len)
         return send_response(fd, STATUS_OK, NULL, 0);
     }
 
-    stop_push_slot(0);
-    stop_push_slot(1);
+    int failed = 0;
+    failed |= (stop_push_slot(0) != 0);
+    failed |= (stop_push_slot(1) != 0);
+    if (failed) {
+        log_error("[push] failed to stop push-based frame delivery (all streams)");
+        log_error("event=push_cmd cmd=20 status=error scope=all reason=stop_failed diag_monotonic_ms=%llu",
+                  (unsigned long long)diag_monotonic_ms());
+        return send_response(fd, STATUS_ERROR, NULL, 0);
+    }
     log_info("[push] push-based frame delivery stopped (all streams)");
     log_info("event=push_cmd cmd=20 status=ok scope=all diag_monotonic_ms=%llu",
              (unsigned long long)diag_monotonic_ms());

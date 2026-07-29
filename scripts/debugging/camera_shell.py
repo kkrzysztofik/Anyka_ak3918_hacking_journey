@@ -41,6 +41,9 @@ def main(argv: list[str]) -> int:
             except ValueError:
                 print(f"--port must be an integer, got {value!r}", file=sys.stderr)
                 return 2
+            if not 1 <= port <= 65535:
+                print(f"--port must be 1..65535, got {port}", file=sys.stderr)
+                return 2
     if not argv:
         print(__doc__)
         return 2
