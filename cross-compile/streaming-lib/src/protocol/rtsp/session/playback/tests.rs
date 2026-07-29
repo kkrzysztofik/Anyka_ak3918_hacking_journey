@@ -857,3 +857,28 @@ fn test_lag_recovery_mode_config_mapped_to_policy() {
     let policy_latest = PlaybackLatencyPolicy::from_config(&config_latest);
     assert_eq!(policy_latest.lag_recovery_mode, LagRecoveryMode::LatestIdr);
 }
+
+/// The threshold must come from the interval the frame had to fit in, not a fixed number.
+///
+/// A fixed 25 ms warned on every I-frame of a 15 fps stream that was keeping up perfectly — the
+/// send took ~45 ms of a 66 ms budget. The regression this guards is re-hardcoding a constant, or
+/// trusting a nonsense delta from a first frame or a timestamp reset.
+#[test]
+fn test_slow_send_threshold_tracks_the_frame_interval() {
+    // 15 fps and 30 fps get their own budgets, not a shared magic number.
+    assert_eq!(slow_send_threshold_ms(Some(66)), 66);
+    assert_eq!(slow_send_threshold_ms(Some(33)), 33);
+
+    // A 45 ms send is late at 30 fps and fine at 15 fps — the whole point of deriving it.
+    assert!(45 < slow_send_threshold_ms(Some(66)));
+    assert!(45 > slow_send_threshold_ms(Some(33)));
+
+    // Teardown flush, and deltas that are a reset or a wrap rather than an interval.
+    assert_eq!(slow_send_threshold_ms(None), RTP_SEND_SLOW_FALLBACK_MS);
+    assert_eq!(slow_send_threshold_ms(Some(0)), RTP_SEND_SLOW_FALLBACK_MS);
+    assert_eq!(slow_send_threshold_ms(Some(5)), RTP_SEND_SLOW_FALLBACK_MS);
+    assert_eq!(
+        slow_send_threshold_ms(Some(4_000_000_000)),
+        RTP_SEND_SLOW_FALLBACK_MS
+    );
+}
