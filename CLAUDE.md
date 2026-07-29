@@ -9,9 +9,7 @@ Use `AGENTS.md` for:
 - mandatory document-loading protocol
 - toolchain requirements
 - coding, testing, and quality workflow
-- issue tracking with `br`
 - branch/session completion rules
-- UBS usage guidance
 
 Keep this file focused on Claude-specific operational guidance so it does not drift from `AGENTS.md`.
 
@@ -21,7 +19,6 @@ Keep this file focused on Claude-specific operational guidance so it does not dr
 - Use the vendored Rust toolchain at `toolchain/arm-anykav200-crosstool-ng/bin/cargo` for all cargo commands.
 - For host-side Rust operations, always use `--target x86_64-unknown-linux-gnu`.
 - Follow the workflow and quality gates defined in `AGENTS.md`; do not skip tests, linting, or documentation updates when they apply.
-- Use `br` for project task tracking instead of ad-hoc markdown task lists.
 - Before claiming completion, run verification and request code review using the matching project workflow.
 
 ## Claude-Specific Skill And Subagent Routing

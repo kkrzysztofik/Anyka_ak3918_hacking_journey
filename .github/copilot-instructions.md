@@ -129,15 +129,3 @@ To avoid context pollution in the main agent, **delegate focused tasks to subage
 - **Debugging**: Spawn subagents to investigate different root cause hypotheses
 - **Refactoring**: Spawn subagent to find all usages before making changes
 
-## Issue Tracking
-
-This project uses **br (beads_rust)** for issue tracking.
-Run `br prime` for workflow context.
-
-> **Note:** `br` is non-invasive and never executes git commands. After `br sync --flush-only`, you must manually run `git add .beads/ && git commit`.
-
-**Quick reference:**
-- `br ready` - Find unblocked work
-- `br create "Title" --type task --priority 2` - Create issue
-- `br close <id>` - Complete work
-- `br sync --flush-only` - Export to JSONL, then `git add .beads/ && git commit`
