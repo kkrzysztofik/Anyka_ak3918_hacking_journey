@@ -11,16 +11,7 @@ import {
   Thermometer,
   Wifi,
 } from 'lucide-react';
-import {
-  Area,
-  AreaChart,
-  CartesianGrid,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from 'recharts';
-
+import { Sparkline } from '@/components/common/Sparkline';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
@@ -96,34 +87,6 @@ function StatCard({
     </div>
   );
 }
-
-interface CustomTooltipProps {
-  active?: boolean;
-  payload?: Array<{
-    name: string;
-    value: number;
-    color: string;
-    unit?: string;
-  }>;
-  label?: string | number;
-}
-
-export const CustomTooltip = ({ active, payload, label }: CustomTooltipProps) => {
-  if (active && payload?.length) {
-    return (
-      <div className="border-border bg-card/95 text-foreground rounded-lg border p-2 text-xs shadow-xl backdrop-blur-md">
-        <p className="text-muted-foreground mb-1 font-mono">{`Time: +${label}s`}</p>
-        {payload.map((entry) => (
-          <p key={`${entry.name}-${entry.value}`} style={{ color: entry.color }}>
-            {entry.name}: {Number(entry.value).toFixed(1)}
-            {entry.unit}
-          </p>
-        ))}
-      </div>
-    );
-  }
-  return null;
-};
 
 export default function DiagnosticsPage() {
   const cpuData = React.useMemo(() => generateData(30, 45, 15), []);
@@ -217,35 +180,11 @@ export default function DiagnosticsPage() {
           </CardHeader>
           <CardContent className="pt-4">
             <div className="h-[180px] w-full">
-              <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={cpuData}>
-                  <defs>
-                    <linearGradient id="colorCpu" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#ef4444" stopOpacity={0.3} />
-                      <stop offset="95%" stopColor="#ef4444" stopOpacity={0} />
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#333" vertical={false} />
-                  {/* Hidden Axis but keep domain */}
-                  <XAxis dataKey="time" hide />
-                  <YAxis domain={[0, 100]} hide />
-                  <Tooltip
-                    content={<CustomTooltip />}
-                    cursor={{ stroke: '#333', strokeWidth: 1 }}
-                  />
-                  <Area
-                    type="monotone"
-                    dataKey="value"
-                    stroke="#ef4444"
-                    fillOpacity={1}
-                    fill="url(#colorCpu)"
-                    name="CPU"
-                    unit="%"
-                    strokeWidth={2}
-                    isAnimationActive={false}
-                  />
-                </AreaChart>
-              </ResponsiveContainer>
+              <Sparkline
+                data={cpuData}
+                series={[{ key: 'value', label: 'CPU', color: '#ef4444', unit: '%' }]}
+                domain={[0, 100]}
+              />
             </div>
             <div className="text-muted-foreground mt-2 flex justify-between font-mono text-xs">
               <span>00:00</span>
@@ -289,34 +228,11 @@ export default function DiagnosticsPage() {
           </CardHeader>
           <CardContent className="pt-4">
             <div className="h-[180px] w-full">
-              <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={memoryData}>
-                  <defs>
-                    <linearGradient id="colorMem" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#eab308" stopOpacity={0.3} />
-                      <stop offset="95%" stopColor="#eab308" stopOpacity={0} />
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#333" vertical={false} />
-                  <XAxis dataKey="time" hide />
-                  <YAxis domain={[0, 100]} hide />
-                  <Tooltip
-                    content={<CustomTooltip />}
-                    cursor={{ stroke: '#333', strokeWidth: 1 }}
-                  />
-                  <Area
-                    type="monotone"
-                    dataKey="value"
-                    stroke="#eab308"
-                    fillOpacity={1}
-                    fill="url(#colorMem)"
-                    name="Memory"
-                    unit="%"
-                    strokeWidth={2}
-                    isAnimationActive={false}
-                  />
-                </AreaChart>
-              </ResponsiveContainer>
+              <Sparkline
+                data={memoryData}
+                series={[{ key: 'value', label: 'Memory', color: '#eab308', unit: '%' }]}
+                domain={[0, 100]}
+              />
             </div>
             <div className="text-muted-foreground mt-2 flex justify-between font-mono text-xs">
               <span>00:00</span>
@@ -368,46 +284,13 @@ export default function DiagnosticsPage() {
         </CardHeader>
         <CardContent className="pt-4">
           <div className="relative h-[120px] w-full">
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={networkData}>
-                <defs>
-                  <linearGradient id="colorDown" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3} />
-                    <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
-                  </linearGradient>
-                  <linearGradient id="colorUp" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#22c55e" stopOpacity={0.3} />
-                    <stop offset="95%" stopColor="#22c55e" stopOpacity={0} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="#333" vertical={false} />
-                <XAxis dataKey="time" hide />
-                <YAxis hide />
-                <Tooltip content={<CustomTooltip />} cursor={{ stroke: '#333', strokeWidth: 1 }} />
-                <Area
-                  type="monotone"
-                  dataKey="download"
-                  stroke="#3b82f6"
-                  fillOpacity={1}
-                  fill="url(#colorDown)"
-                  name="Download"
-                  unit=" Mbps"
-                  strokeWidth={2}
-                  isAnimationActive={false}
-                />
-                <Area
-                  type="monotone"
-                  dataKey="upload"
-                  stroke="#22c55e"
-                  fillOpacity={1}
-                  fill="url(#colorUp)"
-                  name="Upload"
-                  unit=" Mbps"
-                  strokeWidth={2}
-                  isAnimationActive={false}
-                />
-              </AreaChart>
-            </ResponsiveContainer>
+            <Sparkline
+              data={networkData}
+              series={[
+                { key: 'download', label: 'Download', color: '#3b82f6', unit: ' Mbps' },
+                { key: 'upload', label: 'Upload', color: '#22c55e', unit: ' Mbps' },
+              ]}
+            />
           </div>
           <div className="text-muted-foreground mt-2 flex justify-between font-mono text-xs">
             <span>00:00</span>
