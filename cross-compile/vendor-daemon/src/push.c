@@ -151,7 +151,7 @@ static void *push_frame_thread(void *arg)
         if (ret != 0) {
             /* No data — brief sleep to avoid busy-spin */
             no_data_count++;
-            if (no_data_count == 1 || no_data_count % 1000 == 0) {
+            if (no_data_count % PUSH_NO_DATA_WARN_INTERVAL == 0) {
                 log_warn("event=push_get_stream_error stream=%u handle=%p sdk_ret=%d no_data_count=%llu diag_monotonic_ms=%llu",
                          state->stream_id,
                          state->stream_handle,

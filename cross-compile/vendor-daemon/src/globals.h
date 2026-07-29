@@ -33,6 +33,19 @@ struct push_stream_state {
 #define PUSH_NO_DATA_EXIT_THRESHOLD 1000
 
 /*
+ * How many consecutive no-data polls before the run is worth a log line.
+ *
+ * An empty poll is the *normal* case: frames arrive every ~66 ms at 15 fps and
+ * PUSH_POLL_SLEEP_MS is 5, so every inter-frame gap produces ~13 of them.  The
+ * counter resets on each frame, so logging the first one of a run (`== 1`) fired
+ * ~15x/s per stream and wrote ~4.5 KB/s to vfat on the SD card, permanently --
+ * 88 MB observed on-device, contending for the one core that also encodes and
+ * sends video.  At 5 ms per poll this threshold means "silent below 1 s, then a
+ * line per second", which is the only regime that indicates a real stall.
+ */
+#define PUSH_NO_DATA_WARN_INTERVAL 200
+
+/*
  * How long stop_push_slot() waits for a push thread before giving up on it.
  * A thread parked inside a blocking SDK call cannot be interrupted, and an
  * unbounded pthread_join() there turns a wedged encoder into a daemon that
