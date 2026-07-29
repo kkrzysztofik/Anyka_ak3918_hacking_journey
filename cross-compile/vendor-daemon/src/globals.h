@@ -16,6 +16,16 @@ struct push_stream_state {
     /* Timestamp normalization state */
     uint32_t        first_timestamp_ms;   /* First SDK timestamp seen */
     int             timestamp_initialized; /* 0 = not set, 1 = initialized */
+    /*
+     * Set when stop_push_slot() gave up waiting for this worker.
+     *
+     * Distinct from `active`, which is only the stop *request*: a wedged thread has already seen
+     * active=0 and still not returned, so the slot's `thread`, `stream_handle` and `stream_id`
+     * may still be read by it.  Reusing the slot in that window would hand a second thread the
+     * same state and reset the ring underneath the first.  Main thread only; the worker never
+     * reads it.
+     */
+    int             join_pending;
 };
 
 #define PUSH_STREAM_SLOT_COUNT  2

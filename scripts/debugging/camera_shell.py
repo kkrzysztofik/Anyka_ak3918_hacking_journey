@@ -28,11 +28,19 @@ from camera_ntp_sync import (  # noqa: E402
 def main(argv: list[str]) -> int:
     host, port = DEFAULT_HOST, DEFAULT_PORT
     while argv and argv[0] in ("--host", "--port"):
-        flag, value, argv = argv[0], argv[1], argv[2:]
+        flag, argv = argv[0], argv[1:]
+        if not argv:
+            print(f"{flag} requires a value", file=sys.stderr)
+            return 2
+        value, argv = argv[0], argv[1:]
         if flag == "--host":
             host = value
         else:
-            port = int(value)
+            try:
+                port = int(value)
+            except ValueError:
+                print(f"--port must be an integer, got {value!r}", file=sys.stderr)
+                return 2
     if not argv:
         print(__doc__)
         return 2

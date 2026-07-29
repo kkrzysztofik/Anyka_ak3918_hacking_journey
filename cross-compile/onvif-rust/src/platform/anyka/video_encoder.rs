@@ -1782,14 +1782,19 @@ impl VideoEncoder for AnykaVideoEncoder {
                     );
                 }
 
-                // Warn about changes that require encoder restart
+                // Warn about changes that require encoder restart. `min_qp` belongs here for the
+                // same reason as gop: it is only read out of `encode_param` by `ak_venc_open`, so
+                // storing it without saying so is how a configured value silently does nothing.
+                // (On this hardware it does nothing either way -- see `VideoEncoderConfig::min_qp`
+                // -- but that is the encoder discarding it, not us dropping it.)
                 if current.resolution != config.resolution
                     || current.framerate != config.framerate
                     || current.gop_length != config.gop_length
                     || current.encoding != config.encoding
+                    || current.min_qp != config.min_qp
                 {
                     tracing::warn!(
-                        "Encoder {} configuration change requires restart for: resolution/fps/gop/encoding",
+                        "Encoder {} configuration change requires restart for: resolution/fps/gop/encoding/min_qp",
                         config.token
                     );
                 }

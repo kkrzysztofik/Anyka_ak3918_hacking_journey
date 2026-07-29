@@ -129,10 +129,12 @@ pub struct VideoEncoderConfig {
     pub gop_length: u32,
     /// Quality level (0-100).
     pub quality: u32,
-    /// Quantiser floor. Lower spends more bits; the SDK documents `[20,25]`.
+    /// Quantiser floor for `encode_param.minqp`; the SDK documents `[20,25]`.
     ///
-    /// This is the knob that governs I-frame size: rate control spends its lowest QP on the
-    /// I-frame because the whole GOP references it, so the floor is where the I-frame lands.
+    /// **Currently ineffective on the AK3918**: measured on device, an I-frame encoded at QP 23
+    /// with the floor set to 25, so the encoder discards the field. The value is still carried
+    /// and clamped faithfully, since a different firmware may honour it.
+    ///
     /// `0` (what `Default` yields) is out of range and reads as "use the SDK floor".
     pub min_qp: u32,
 }

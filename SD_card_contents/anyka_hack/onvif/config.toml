@@ -313,17 +313,17 @@ gop_length = 50
 # Video quality level (1-100)
 quality = 80
 
-# Quantiser floor (SDK range 20-25). THE lever for I-frame size.
+# Quantiser floor passed to ak_venc_open (SDK range 20-25).
 #
-# Rate control gives the I-frame its lowest permitted QP, because the whole GOP references it, so
-# the I-frame lands exactly here. Lowering `bitrate` does not shrink it -- measured on an AK3918,
-# 2000 -> 1500 kbps cut P-frames 37% and I-frames only 9%.
+# THIS SETTING DOES NOTHING ON THIS HARDWARE. Measured on device: with min_qp = 25 the encoder
+# still produced I-frames at QP 23, read out of the bitstream with
+#   ffmpeg -bsf:v trace_headers   ->  SliceQP = 26 + pic_init_qp_minus26 + slice_qp_delta
+# A floor that is honoured cannot be undercut. I-frame size was unchanged: 83.8 KB at 20 against
+# 84.7 KB at 25.
 #
-# 20 is the aggressive end (largest I-frames, best keyframe quality). Each +1 costs roughly 11%
-# of I-frame size, so 25 is around half of 20. Smaller I-frames mean a smaller UDP burst and less
-# packetisation CPU; the cost is softer keyframes, though CBR hands the saved bits to P-frames.
-#
-# Applied by ak_venc_open only: changing this needs an onvif-rust restart.
+# The value does reach ak_venc_open correctly -- it is the encoder that discards it. Left
+# configurable because the SDK documents the field and another firmware may honour it.
+# ak_venc_set_rc_weight is the knob that plausibly controls quality here, and is not wired up.
 min_qp = 20
 
 # Audio enabled for this profile (true/false)
@@ -369,17 +369,17 @@ gop_length = 30
 # Video quality level (1-100)
 quality = 80
 
-# Quantiser floor (SDK range 20-25). THE lever for I-frame size.
+# Quantiser floor passed to ak_venc_open (SDK range 20-25).
 #
-# Rate control gives the I-frame its lowest permitted QP, because the whole GOP references it, so
-# the I-frame lands exactly here. Lowering `bitrate` does not shrink it -- measured on an AK3918,
-# 2000 -> 1500 kbps cut P-frames 37% and I-frames only 9%.
+# THIS SETTING DOES NOTHING ON THIS HARDWARE. Measured on device: with min_qp = 25 the encoder
+# still produced I-frames at QP 23, read out of the bitstream with
+#   ffmpeg -bsf:v trace_headers   ->  SliceQP = 26 + pic_init_qp_minus26 + slice_qp_delta
+# A floor that is honoured cannot be undercut. I-frame size was unchanged: 83.8 KB at 20 against
+# 84.7 KB at 25.
 #
-# 20 is the aggressive end (largest I-frames, best keyframe quality). Each +1 costs roughly 11%
-# of I-frame size, so 25 is around half of 20. Smaller I-frames mean a smaller UDP burst and less
-# packetisation CPU; the cost is softer keyframes, though CBR hands the saved bits to P-frames.
-#
-# Applied by ak_venc_open only: changing this needs an onvif-rust restart.
+# The value does reach ak_venc_open correctly -- it is the encoder that discards it. Left
+# configurable because the SDK documents the field and another firmware may honour it.
+# ak_venc_set_rc_weight is the knob that plausibly controls quality here, and is not wired up.
 min_qp = 20
 
 # Audio enabled for this profile (true/false)
@@ -425,17 +425,17 @@ gop_length = 30
 # Video quality level (1-100)
 quality = 80
 
-# Quantiser floor (SDK range 20-25). THE lever for I-frame size.
+# Quantiser floor passed to ak_venc_open (SDK range 20-25).
 #
-# Rate control gives the I-frame its lowest permitted QP, because the whole GOP references it, so
-# the I-frame lands exactly here. Lowering `bitrate` does not shrink it -- measured on an AK3918,
-# 2000 -> 1500 kbps cut P-frames 37% and I-frames only 9%.
+# THIS SETTING DOES NOTHING ON THIS HARDWARE. Measured on device: with min_qp = 25 the encoder
+# still produced I-frames at QP 23, read out of the bitstream with
+#   ffmpeg -bsf:v trace_headers   ->  SliceQP = 26 + pic_init_qp_minus26 + slice_qp_delta
+# A floor that is honoured cannot be undercut. I-frame size was unchanged: 83.8 KB at 20 against
+# 84.7 KB at 25.
 #
-# 20 is the aggressive end (largest I-frames, best keyframe quality). Each +1 costs roughly 11%
-# of I-frame size, so 25 is around half of 20. Smaller I-frames mean a smaller UDP burst and less
-# packetisation CPU; the cost is softer keyframes, though CBR hands the saved bits to P-frames.
-#
-# Applied by ak_venc_open only: changing this needs an onvif-rust restart.
+# The value does reach ak_venc_open correctly -- it is the encoder that discards it. Left
+# configurable because the SDK documents the field and another firmware may honour it.
+# ak_venc_set_rc_weight is the knob that plausibly controls quality here, and is not wired up.
 min_qp = 20
 
 # Audio enabled for this profile (true/false)
@@ -481,17 +481,17 @@ gop_length = 30
 # Video quality level (1-100)
 quality = 80
 
-# Quantiser floor (SDK range 20-25). THE lever for I-frame size.
+# Quantiser floor passed to ak_venc_open (SDK range 20-25).
 #
-# Rate control gives the I-frame its lowest permitted QP, because the whole GOP references it, so
-# the I-frame lands exactly here. Lowering `bitrate` does not shrink it -- measured on an AK3918,
-# 2000 -> 1500 kbps cut P-frames 37% and I-frames only 9%.
+# THIS SETTING DOES NOTHING ON THIS HARDWARE. Measured on device: with min_qp = 25 the encoder
+# still produced I-frames at QP 23, read out of the bitstream with
+#   ffmpeg -bsf:v trace_headers   ->  SliceQP = 26 + pic_init_qp_minus26 + slice_qp_delta
+# A floor that is honoured cannot be undercut. I-frame size was unchanged: 83.8 KB at 20 against
+# 84.7 KB at 25.
 #
-# 20 is the aggressive end (largest I-frames, best keyframe quality). Each +1 costs roughly 11%
-# of I-frame size, so 25 is around half of 20. Smaller I-frames mean a smaller UDP burst and less
-# packetisation CPU; the cost is softer keyframes, though CBR hands the saved bits to P-frames.
-#
-# Applied by ak_venc_open only: changing this needs an onvif-rust restart.
+# The value does reach ak_venc_open correctly -- it is the encoder that discards it. Left
+# configurable because the SDK documents the field and another firmware may honour it.
+# ak_venc_set_rc_weight is the knob that plausibly controls quality here, and is not wired up.
 min_qp = 20
 
 # Audio enabled for this profile (true/false)

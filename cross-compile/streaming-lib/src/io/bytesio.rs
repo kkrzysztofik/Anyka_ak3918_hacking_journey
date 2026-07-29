@@ -619,15 +619,23 @@ mod tests {
             "a non-empty batch issues at least one sendmmsg"
         );
 
+        // Leave the previous call's stats in place, then issue an empty batch. `write_batch`
+        // resets on entry and an empty run sends nothing, so a correct implementation reports
+        // exactly zero here and an accumulating one reports the run above.
+        //
+        // Comparing two live calls instead (`second.attempts <= first.attempts`) looked like the
+        // obvious test and is not one: `attempts` counts trips through the send loop, so a kernel
+        // that takes a partial run makes the second call legitimately larger and fails a correct
+        // implementation. This has no dependence on `WouldBlock` timing.
         udpio.write_batch(&payloads).await?;
-        let second = udpio
+        udpio.write_batch(&[]).await?;
+        let after_empty = udpio
             .take_batch_stats()
             .ok_or("every batch must report stats, not just the first")?;
-        assert!(
-            second.attempts >= 1 && second.attempts <= first.attempts,
-            "attempts must reset per call, not accumulate: {} then {}",
-            first.attempts,
-            second.attempts
+        assert_eq!(
+            after_empty,
+            BatchWriteStats::default(),
+            "an empty batch must report its own zero cost, not the previous call's {first:?}"
         );
         Ok(())
     }

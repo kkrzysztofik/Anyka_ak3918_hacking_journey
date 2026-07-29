@@ -678,14 +678,17 @@ pub struct StreamProfileConfig {
     pub encoding: String,
     pub gop_length: u32,
     pub quality: u32,
-    /// Quantiser floor, SDK range `[20,25]`. Lower spends more bits on the I-frame.
+    /// Quantiser floor passed to `ak_venc_open`, SDK range `[20,25]`.
     ///
-    /// This is the only lever that caps I-frame size: rate control gives the I-frame its lowest
-    /// permitted QP because the whole GOP references it, so lowering `bitrate` shrinks P-frames
-    /// while the I-frame stays pinned at this floor. Measured on an AK3918: 2000 → 1500 kbps cut
-    /// P-frames 37% and I-frames only 9%.
+    /// **The AK3918 encoder ignores this.** Measured on device: with `min_qp = 25` the I-frame
+    /// still encoded at QP 23, read from the bitstream via
+    /// `SliceQP = 26 + pic_init_qp_minus26 + slice_qp_delta`. A floor that is honoured cannot be
+    /// undercut, and I-frame size was unchanged (83.8 KB at 20 vs 84.7 KB at 25).
     ///
-    /// Applied by `ak_venc_open` only, so a change needs an encoder restart.
+    /// Kept because the value does travel correctly to `ak_venc_open` and the SDK documents the
+    /// field; a different firmware may honour it. Do not expect changing it to alter the encoded
+    /// output on this hardware. `ak_venc_set_rc_weight` is the knob that plausibly does, and is
+    /// not wired up.
     pub min_qp: u32,
     /// H264 profile (`"Baseline"`, `"Main"`, `"High"`).
     pub profile: String,
@@ -913,5 +916,29 @@ file_name = "static"
         assert!(sample.contains("[device]"));
         assert!(sample.contains("port = 80"));
         assert!(sample.contains("manufacturer = \"Anyka\""));
+    }
+
+    /// `min_qp` is documented as an inclusive `[20, 25]` range, so the boundaries themselves must
+    /// validate and the values just outside must not. Off-by-one here is silent: `validate` only
+    /// reports, so a wrongly-rejected 25 would look like a config typo to whoever hit it.
+    #[test]
+    fn test_validate_min_qp_inclusive_boundaries() {
+        let validate_with = |min_qp: u32| {
+            let mut config = AppConfig::default();
+            config.stream_profile_1.min_qp = min_qp;
+            config.validate()
+        };
+
+        assert!(validate_with(20).is_ok(), "20 is the inclusive lower bound");
+        assert!(validate_with(25).is_ok(), "25 is the inclusive upper bound");
+
+        for out_of_range in [19, 26] {
+            let errors = validate_with(out_of_range)
+                .expect_err("a min_qp outside [20, 25] must be reported");
+            assert!(
+                errors.iter().any(|e| e.contains("stream_profile_1.min_qp")),
+                "the error must name the field that is wrong, got {errors:?}"
+            );
+        }
     }
 }

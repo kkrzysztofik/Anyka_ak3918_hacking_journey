@@ -1822,7 +1822,9 @@ fn test_min_qp_reaches_encode_param_and_clamps_to_sdk_range() {
         )
     };
 
-    // In range: passed through untouched. 25 is the setting that halves I-frame size.
+    // In range: passed through untouched. This asserts propagation and clamping only -- the
+    // AK3918 encoder discards `minqp` (an I-frame measured at QP 23 with the floor set to 25),
+    // so nothing here claims anything about the encoded output.
     assert_eq!(param_for(20).minqp, 20);
     assert_eq!(param_for(25).minqp, 25);
     assert_eq!(param_for(23).minqp, 23);
