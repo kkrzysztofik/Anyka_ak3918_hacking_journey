@@ -24,9 +24,10 @@ export function setAuthHeaderGetter(getter: () => Promise<string | null>) {
  * - Accept: Indicates server can respond with SOAP/XML formats
  * - Accept-Encoding: Allows server to compress response with gzip or deflate
  *
- * Note on Brotli: While .br files are pre-compressed in build output,
- * Brotli support requires server-side configuration to serve .br files
- * with Content-Encoding: br header when Accept-Encoding: br is present.
+ * Note on Brotli: build output is pre-compressed to .br and .gz by
+ * scripts/precompress.mjs, and onvif-rust serves them via ServeDir's
+ * precompressed_br()/precompressed_gzip(). Browsers negotiate via
+ * Accept-Encoding; no client-side handling is needed here.
  */
 export const apiClient: AxiosInstance = axios.create({
   timeout: 10000,
