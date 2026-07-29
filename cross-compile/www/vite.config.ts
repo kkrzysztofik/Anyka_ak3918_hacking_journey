@@ -35,7 +35,7 @@ function getChunkName(id: string): string | undefined {
 }
 
 // https://vitejs.dev/config/
-export default defineConfig(({ mode }) => ({
+export default defineConfig(() => ({
   // Vitest configuration
   test: {
     globals: true,
@@ -65,15 +65,6 @@ export default defineConfig(({ mode }) => ({
     alias: {
       '@': resolve(__dirname, './src'),
     },
-  },
-  esbuild: {
-    // Use esbuild for TypeScript compilation (faster than tsc)
-    // Target ES2024 for modern browser support (Chrome 117+, Firefox 119+, Safari 17.4+, Edge 117+)
-    target: 'es2024',
-    // Enable type checking in type-check mode
-    ...(mode === 'type-check' && {
-      logLevel: 'warning',
-    }),
   },
   // Define environment variables
   define: {
@@ -110,6 +101,9 @@ export default defineConfig(({ mode }) => ({
     },
   },
   build: {
+    // Modern browsers only: Chrome 117+, Firefox 119+, Safari 17.4+, Edge 117+.
+    // Was previously set under `esbuild`, which Vite 8 ignores (Oxc replaced it).
+    target: 'es2024',
     outDir: '../../SD_card_contents/anyka_hack/onvif/www',
     emptyOutDir: true,
     sourcemap: false,
