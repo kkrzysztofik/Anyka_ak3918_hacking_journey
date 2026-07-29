@@ -164,6 +164,8 @@ else
       fi
       printf '%s' "${current_hash}" > "${lock_hash_file}"
     fi
+    npm run type-check
+    npm run lint
     npm run build
   )
   log_success "WebUI built to ${ANYKA_HACK}/onvif/www/"
