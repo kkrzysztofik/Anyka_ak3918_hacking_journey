@@ -433,12 +433,15 @@ impl OnvifServer {
 
         // Register Media Service
         tracing::debug!("Registering Media Service");
-        let media_service = MediaService::with_storage_and_persistence(
+        let mut media_service = MediaService::with_storage_and_persistence(
             Arc::clone(app_state.config()),
             Arc::clone(app_state.profile_storage()),
             app_state.platform().map(Arc::clone),
             app_state.profile_persistence().cloned(),
         );
+        if let Some(rx) = app_state.availability() {
+            media_service = media_service.with_availability(rx.clone());
+        }
         dispatcher.register_service("media", Arc::new(media_service));
 
         // Register PTZ Service

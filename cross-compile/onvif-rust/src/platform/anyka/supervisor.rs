@@ -31,16 +31,7 @@ const BACKOFF_MAX: Duration = Duration::from_secs(15);
 /// into a crash loop if attach is what kills the daemon.
 const ATTACH_FAILURE_LIMIT: u32 = 10;
 
-/// What the rest of the application observes about the attachment.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Availability {
-    /// Attached and the hardware pipeline is initialised.
-    Available,
-    /// Not attached; the supervisor is retrying.
-    Unavailable,
-    /// The breaker is open. No further attach attempts without intervention.
-    GivenUp,
-}
+pub use crate::platform::common::Availability;
 
 /// How often the ring epoch is polled while attached.
 const EPOCH_POLL_INTERVAL: Duration = Duration::from_secs(1);

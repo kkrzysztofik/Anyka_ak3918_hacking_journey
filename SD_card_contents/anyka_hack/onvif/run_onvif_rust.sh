@@ -61,15 +61,22 @@ if pidof onvif-rust >/dev/null 2>&1; then
   exit 0
 fi
 
-# Verify vendor-daemon is running (required for IPC mode)
-# NOTE: vendor-daemon must be started separately via run_vendor_daemon.sh
+# vendor-daemon is NOT required to start.
+#
+# onvif-rust now boots degraded and its attach supervisor waits for the daemon,
+# retrying with backoff and recovering from a restart in either order. Aborting
+# here was actively wrong: it made "daemon absent at boot" a separate, untested
+# path from "daemon restarted later", which is exactly the split this design
+# removes. The device service answers throughout; media reports unavailable
+# until the pipeline attaches.
+#
+# NOTE: vendor-daemon is still started separately via run_vendor_daemon.sh
 # because it requires its own library set and LD_LIBRARY_PATH configuration.
-if ! pidof vendor-daemon.bin >/dev/null 2>&1; then
-  log ERROR "vendor-daemon is not running; start it first with run_vendor_daemon.sh"
-  log ERROR "vendor-daemon is required for IPC mode — aborting"
-  exit 1
+if pidof vendor-daemon.bin >/dev/null 2>&1; then
+  log INFO "vendor-daemon is running"
+else
+  log WARN "vendor-daemon is not running; starting degraded, supervisor will attach when it appears"
 fi
-log INFO "vendor-daemon is running"
 
 # Import settings
 [ -f /data/gergesettings.txt ] && . /data/gergesettings.txt || log WARN "Missing settings file"

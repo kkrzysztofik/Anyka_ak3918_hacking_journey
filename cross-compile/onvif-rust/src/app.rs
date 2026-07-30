@@ -31,16 +31,27 @@ use crate::onvif::discovery::{DiscoveryConfig, WsDiscovery, WsDiscoveryHandle};
 use crate::onvif::imaging::ImagingSettingsStore;
 use crate::onvif::ptz::PTZStateManager;
 use crate::onvif::server::{OnvifServer, OnvifServerConfig};
-use crate::platform::Platform;
 #[cfg(use_stubs)]
 use crate::platform::StubPlatformBuilder;
 use crate::platform::external_ip;
+use crate::platform::{Availability, Platform};
 use crate::security::RateLimiter;
 use streaming_lib::common::auth::{Auth, AuthAlgorithm, AuthType, CredentialValidator};
 
 // ============================================================================
 // AppState - Shared application state for dependency injection
 // ============================================================================
+/// What platform bring-up produced: the platform itself, plus the supervisor's
+/// availability channel when one is running.
+///
+/// `Default` is the degraded case — no platform, no supervisor.
+#[derive(Default)]
+pub struct PlatformInit {
+    /// The platform abstraction, absent in degraded mode.
+    pub platform: Option<Arc<dyn Platform>>,
+    /// Live attach state; `None` in stub builds and degraded mode.
+    pub availability: Option<tokio::sync::watch::Receiver<Availability>>,
+}
 
 /// Shared application state for dependency injection.
 ///
@@ -82,6 +93,7 @@ pub struct AppState {
     rate_limiter: Arc<RateLimiter>,
     /// Platform abstraction (optional for testing without hardware).
     platform: Option<Arc<dyn Platform>>,
+    availability: Option<tokio::sync::watch::Receiver<Availability>>,
     /// Optional config persistence handle.
     config_persistence: Option<ConfigPersistenceHandle>,
     /// Profile storage for ONVIF media profiles (profiles.toml).
@@ -131,6 +143,14 @@ impl AppState {
     /// Get a reference to the platform abstraction, if available.
     pub fn platform(&self) -> Option<&Arc<dyn Platform>> {
         self.platform.as_ref()
+    }
+
+    /// Live attach state from the vendor-daemon supervisor, if one is running.
+    ///
+    /// `None` in stub builds. Services treat absence as "no opinion", never as
+    /// unavailable.
+    pub fn availability(&self) -> Option<&tokio::sync::watch::Receiver<Availability>> {
+        self.availability.as_ref()
     }
 
     /// Get the config persistence handle, if available.
@@ -210,6 +230,7 @@ pub struct AppStateBuilder {
     memory_monitor: Option<Arc<crate::utils::MemoryMonitor>>,
     rate_limiter: Option<Arc<RateLimiter>>,
     platform: Option<Arc<dyn Platform>>,
+    availability: Option<tokio::sync::watch::Receiver<Availability>>,
     config_persistence: Option<ConfigPersistenceHandle>,
     profile_storage: Option<Arc<ProfileStorage>>,
     profile_persistence: Option<PersistenceHandle>,
@@ -278,6 +299,12 @@ impl AppStateBuilder {
         self
     }
 
+    /// Set the supervisor's availability channel.
+    pub fn availability(mut self, rx: tokio::sync::watch::Receiver<Availability>) -> Self {
+        self.availability = Some(rx);
+        self
+    }
+
     /// Set the config persistence handle.
     pub fn config_persistence(mut self, handle: ConfigPersistenceHandle) -> Self {
         self.config_persistence = Some(handle);
@@ -324,6 +351,7 @@ impl AppStateBuilder {
                 .rate_limiter
                 .ok_or_else(|| AppStateError::MissingComponent("rate_limiter".to_string()))?,
             platform: self.platform,
+            availability: self.availability,
             config_persistence: self.config_persistence,
             profile_storage: self
                 .profile_storage
@@ -906,11 +934,18 @@ impl Application {
 
         // Phase 2: Platform
         progress.begin_phase(StartupPhase::Platform);
-        let platform = match platform_source {
+        let PlatformInit {
+            platform,
+            availability,
+        } = match platform_source {
             PlatformSource::Detect => Self::init_platform(&mut progress, &config_runtime).await?,
             PlatformSource::Custom(p) => {
                 tracing::info!("Using provided custom platform implementation");
-                Some(p)
+                // A caller-supplied platform brings no supervisor with it.
+                PlatformInit {
+                    platform: Some(p),
+                    availability: None,
+                }
             }
         };
         progress.complete_phase();
@@ -966,6 +1001,12 @@ impl Application {
         // Add platform if available
         if let Some(ref p) = platform {
             app_state_builder = app_state_builder.platform(Arc::clone(p));
+        }
+
+        // Wire the supervisor's availability channel so media operations can
+        // report the pipeline as down instead of handing out dead stream URIs.
+        if let Some(ref rx) = availability {
+            app_state_builder = app_state_builder.availability(rx.clone());
         }
 
         let app_state = app_state_builder
@@ -1064,7 +1105,7 @@ impl Application {
     async fn init_platform(
         progress: &mut StartupProgress,
         config_runtime: &Arc<ConfigRuntime>,
-    ) -> Result<Option<Arc<dyn Platform>>, StartupError> {
+    ) -> Result<PlatformInit, StartupError> {
         let ptz_enabled = config_runtime.read().ptz.enabled;
 
         #[cfg(not(use_stubs))]
@@ -1102,27 +1143,23 @@ impl Application {
                 main_encoder,
                 sub_encoder,
             ) {
-                Ok(p) => match p.initialize().await {
-                    Ok(()) => {
-                        tracing::info!("AnykaPlatform initialized (real hardware)");
-                        return Ok(Some(Arc::new(p) as Arc<dyn Platform>));
-                    }
-                    Err(e) => {
-                        let msg = e.to_string();
-                        if msg.contains("unsafe teardown required") {
-                            tracing::error!(
-                                "AnykaPlatform initialization entered unsafe teardown state; refusing degraded startup: {}",
-                                msg
-                            );
-                            return Err(StartupError::Platform(msg));
-                        }
-                        tracing::warn!(
-                            "AnykaPlatform initialization failed, continuing in degraded mode: {}",
-                            msg
-                        );
-                        progress.record_degraded("platform", msg);
-                    }
-                },
+                Ok(p) => {
+                    // Construction no longer touches the daemon, and bring-up is no
+                    // longer done here: the supervisor owns attach → initialize →
+                    // rollback → detach so that a daemon which is absent at boot is
+                    // the same code path as one that restarts later. Startup does not
+                    // block on it, which is what lets the device service answer while
+                    // the video pipeline is still down.
+                    let platform = Arc::new(p);
+                    let availability = platform.spawn_supervisor();
+                    tracing::info!(
+                        "AnykaPlatform created; attach supervisor started (degraded until attached)"
+                    );
+                    return Ok(PlatformInit {
+                        platform: Some(platform as Arc<dyn Platform>),
+                        availability: Some(availability),
+                    });
+                }
                 Err(e) => {
                     tracing::warn!(
                         "AnykaPlatform creation failed, continuing in degraded mode: {}",
@@ -1131,7 +1168,7 @@ impl Application {
                     progress.record_degraded("platform", e.to_string());
                 }
             }
-            Ok(None)
+            Ok(PlatformInit::default())
         }
         #[cfg(use_stubs)]
         {
@@ -1142,7 +1179,12 @@ impl Application {
             match stub_platform.initialize().await {
                 Ok(()) => {
                     tracing::info!("Platform initialized (stub mode)");
-                    Ok(Some(Arc::new(stub_platform) as Arc<dyn Platform>))
+                    // No supervisor in stub builds: availability stays None, which
+                    // services read as "no opinion" rather than "unavailable".
+                    Ok(PlatformInit {
+                        platform: Some(Arc::new(stub_platform) as Arc<dyn Platform>),
+                        availability: None,
+                    })
                 }
                 Err(e) => {
                     tracing::warn!(
@@ -1150,7 +1192,7 @@ impl Application {
                         e
                     );
                     progress.record_degraded("platform", e.to_string());
-                    Ok(None)
+                    Ok(PlatformInit::default())
                 }
             }
         }
