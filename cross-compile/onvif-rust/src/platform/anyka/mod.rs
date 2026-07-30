@@ -15,6 +15,7 @@ pub mod lifecycle;
 pub mod network_info;
 pub mod ptz_actor;
 pub mod ptz_control;
+pub mod supervisor;
 mod video_encoder;
 pub use video_encoder::StreamOpenParams;
 mod video_input;

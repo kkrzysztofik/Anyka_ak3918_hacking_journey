@@ -1105,6 +1105,66 @@ impl AnykaIpc {
         result
     }
 
+    /// Refresh `observed_epoch` from the ring and report whether it still matches.
+    ///
+    /// Uses `try_lock`: the frame reader holds `shm_reader` during a read, and the
+    /// poller must never block behind it. Contention means "no new information this
+    /// tick", which is correct — the next tick is 1 s away.
+    ///
+    /// A live epoch of 0 reports *healthy*. That is not a hole in the gate: 0 only
+    /// appears in the brief window where `vd_ring_create()` has memset the header but
+    /// not yet stamped the new generation, and [`Self::epoch_gate`] already refuses
+    /// every request while `observed != attached`. Tearing the pipeline down on that
+    /// sample would trade a guaranteed-transient blip for a real restart; the next
+    /// tick sees the new generation and reports loss properly.
+    pub(crate) fn refresh_observed_epoch(&self) -> bool {
+        let Ok(guard) = self.shm_reader.try_lock() else {
+            return true; // no information; do not report loss on lock contention
+        };
+        let Some(reader) = guard.as_ref() else {
+            return false; // detached
+        };
+        let live = reader.epoch();
+        self.observed_epoch.store(live, Ordering::Release);
+        let attached = self.attached_epoch.load(Ordering::Acquire);
+        live == EPOCH_DETACHED || live == attached
+    }
+
+    /// Attach to a freshly created anonymous ring stamped with `epoch`.
+    ///
+    /// Test seam for the supervisor, which cannot reach `shm_ring`'s module-private
+    /// test helpers.
+    #[cfg(test)]
+    pub(crate) fn attach_anon_ring_for_test(&self, epoch: u32) {
+        let reader = shm_ring::tests::create_test_anon_reader();
+        // SAFETY: offset 48 is inside the validated 64-byte header.
+        unsafe {
+            reader
+                .base_ptr_for_test()
+                .add(48)
+                .cast::<u32>()
+                .write_volatile(epoch);
+        }
+        *self.shm_reader.lock().unwrap_or_else(|e| e.into_inner()) = Some(reader);
+        self.observed_epoch.store(epoch, Ordering::Release);
+        self.attached_epoch.store(epoch, Ordering::Release);
+    }
+
+    /// Stamp a new generation into the mapped ring, standing in for a daemon restart.
+    #[cfg(test)]
+    pub(crate) fn stamp_ring_epoch_for_test(&self, epoch: u32) {
+        let guard = self.shm_reader.lock().unwrap_or_else(|e| e.into_inner());
+        let reader = guard.as_ref().expect("no ring mapped");
+        // SAFETY: offset 48 is inside the validated 64-byte header.
+        unsafe {
+            reader
+                .base_ptr_for_test()
+                .add(48)
+                .cast::<u32>()
+                .write_volatile(epoch);
+        }
+    }
+
     /// Tear down the current attachment.
     ///
     /// Clears the epoch first: from this instant every in-flight request is refused
