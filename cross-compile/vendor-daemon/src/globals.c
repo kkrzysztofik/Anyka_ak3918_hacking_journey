@@ -7,6 +7,9 @@
 #include "ak_ai.h"
 #include "ak_aenc.h"
 
+/* Ring header, for the daemon epoch baked into handle tokens. */
+#include "vd_ring_buffer.h"
+
 volatile sig_atomic_t g_shutdown = 0;
 
 int g_control_fd = -1;
@@ -32,6 +35,75 @@ struct push_stream_state g_push_streams[PUSH_STREAM_SLOT_COUNT];
 /* Built empty at daemon start, so it can never hold an object from a previous
  * generation. */
 struct vd_obj_slot g_obj_slots[VD_OBJ_SLOTS];
+
+/* Low 16 bits of this daemon generation's epoch, or 0 if the ring is absent.
+ * Truncation is forced by the 32-bit token layout; see globals.h. It weakens
+ * the daemon-side collision margin to 2^-16, which is acceptable because this
+ * check is defence in depth -- the client's epoch gate still compares the full
+ * 32-bit value before anything is sent. */
+static uint16_t vd_daemon_epoch16(void)
+{
+    if (g_ring_buffer == NULL)
+        return 0;
+    return (uint16_t)(vd_ring_get_header(g_ring_buffer)->epoch & VD_TOK_EPOCH_MASK);
+}
+
+uint64_t vd_obj_token(int slot)
+{
+    uint32_t token;
+
+    if (slot < 0 || slot >= VD_OBJ_SLOTS || !g_obj_slots[slot].live)
+        return 0;
+
+    token  = (uint32_t)(g_obj_slots[slot].kind & VD_TOK_KIND_MASK);
+    token |= ((uint32_t)slot & VD_TOK_INDEX_MASK) << VD_TOK_INDEX_SHIFT;
+    token |= ((uint32_t)g_obj_slots[slot].slot_gen & VD_TOK_GEN_MASK) << VD_TOK_GEN_SHIFT;
+    token |= ((uint32_t)vd_daemon_epoch16()) << VD_TOK_EPOCH_SHIFT;
+    return (uint64_t)token;
+}
+
+int vd_obj_resolve(uint64_t token, uint8_t expect_kind, void **out_ptr)
+{
+    uint32_t t = (uint32_t)token;
+    uint8_t  kind;
+    uint32_t index;
+    uint16_t gen;
+    uint16_t epoch;
+
+    if (g_ring_buffer == NULL) {
+        log_warn("[obj] resolve with no ring; rejecting token 0x%08x", t);
+        return -1;
+    }
+
+    kind  = (uint8_t)(t & VD_TOK_KIND_MASK);
+    index = (t >> VD_TOK_INDEX_SHIFT) & VD_TOK_INDEX_MASK;
+    gen   = (uint16_t)((t >> VD_TOK_GEN_SHIFT) & VD_TOK_GEN_MASK);
+    epoch = (uint16_t)((t >> VD_TOK_EPOCH_SHIFT) & VD_TOK_EPOCH_MASK);
+
+    if (kind != expect_kind) {
+        log_warn("[obj] token 0x%08x kind=%u but command expects %u",
+                 t, (unsigned)kind, (unsigned)expect_kind);
+        return -1;
+    }
+    if (epoch != vd_daemon_epoch16()) {
+        log_warn("[obj] token 0x%08x from epoch %u, current %u (stale)",
+                 t, (unsigned)epoch, (unsigned)vd_daemon_epoch16());
+        return -1;
+    }
+    if (index >= VD_OBJ_SLOTS || !g_obj_slots[index].live) {
+        log_warn("[obj] token 0x%08x names slot %u which is not live", t, index);
+        return -1;
+    }
+    if ((g_obj_slots[index].slot_gen & VD_TOK_GEN_MASK) != gen) {
+        log_warn("[obj] token 0x%08x slot_gen %u but slot %u is at %u (reused)",
+                 t, (unsigned)gen, index,
+                 (unsigned)(g_obj_slots[index].slot_gen & VD_TOK_GEN_MASK));
+        return -1;
+    }
+
+    *out_ptr = g_obj_slots[index].ptr;
+    return 0;
+}
 
 int vd_obj_register(uint8_t kind, void *ptr)
 {

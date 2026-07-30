@@ -86,8 +86,13 @@ int handle_venc_open(int fd, const uint8_t *req, uint32_t req_len)
         log_error("[venc] open failed (NULL handle)");
         return send_response(fd, STATUS_ERROR, NULL, 0);
     }
-    vd_obj_register(VD_OBJ_KIND_VENC, handle);
-    return send_handle_response(fd, handle);
+    int slot = vd_obj_register(VD_OBJ_KIND_VENC, handle);
+    if (slot < 0) {
+        log_error("[venc] object table full; refusing open");
+        ak_venc_close(handle);
+        return send_response(fd, STATUS_ERROR, NULL, 0);
+    }
+    return send_token_response(fd, vd_obj_token(slot));
 }
 
 /**
@@ -106,7 +111,9 @@ int handle_venc_close(int fd, const uint8_t *req, uint32_t req_len)
 {
     if (req_len < sizeof(uint64_t))
         return send_response(fd, STATUS_ERROR, NULL, 0);
-    void *handle = req_read_handle(req, 0);
+    void *handle;
+    if (vd_obj_resolve(req_read_u64(req, 0), VD_OBJ_KIND_VENC, &handle) != 0)
+        return send_response(fd, VD_STATUS_STALE_EPOCH, NULL, 0);
     log_debug("[venc] close handle=%p", handle);
     int ret = ak_venc_close(handle);
     vd_obj_unregister(VD_OBJ_KIND_VENC, handle);
@@ -130,7 +137,9 @@ int handle_venc_set_rc(int fd, const uint8_t *req, uint32_t req_len)
     /* u64 handle + i32 bps = 12 bytes */
     if (req_len < 8 + 4)
         return send_response(fd, STATUS_ERROR, NULL, 0);
-    void *handle = req_read_handle(req, 0);
+    void *handle;
+    if (vd_obj_resolve(req_read_u64(req, 0), VD_OBJ_KIND_VENC, &handle) != 0)
+        return send_response(fd, VD_STATUS_STALE_EPOCH, NULL, 0);
     int32_t bps  = req_read_i32(req, 8);
     int ret = ak_venc_set_rc(handle, (int)bps);
     return send_response(fd, ret, NULL, 0);
@@ -152,7 +161,9 @@ int handle_venc_set_iframe(int fd, const uint8_t *req, uint32_t req_len)
 {
     if (req_len < sizeof(uint64_t))
         return send_response(fd, STATUS_ERROR, NULL, 0);
-    void *handle = req_read_handle(req, 0);
+    void *handle;
+    if (vd_obj_resolve(req_read_u64(req, 0), VD_OBJ_KIND_VENC, &handle) != 0)
+        return send_response(fd, VD_STATUS_STALE_EPOCH, NULL, 0);
     int ret = ak_venc_set_iframe(handle);
     return send_response(fd, ret, NULL, 0);
 }
@@ -176,8 +187,11 @@ int handle_venc_request_stream(int fd, const uint8_t *req, uint32_t req_len)
     /* u64 vi_handle + u64 venc_handle = 16 bytes */
     if (req_len < 16)
         return send_response(fd, STATUS_ERROR, NULL, 0);
-    void *vi_handle   = req_read_handle(req, 0);
-    void *venc_handle = req_read_handle(req, 8);
+    void *vi_handle;
+    void *venc_handle;
+    if (vd_obj_resolve(req_read_u64(req, 0), VD_OBJ_KIND_VI, &vi_handle) != 0 ||
+        vd_obj_resolve(req_read_u64(req, 8), VD_OBJ_KIND_VENC, &venc_handle) != 0)
+        return send_response(fd, VD_STATUS_STALE_EPOCH, NULL, 0);
 
     log_debug("[venc] request_stream vi=%p venc=%p", vi_handle, venc_handle);
     void *stream_handle = ak_venc_request_stream(vi_handle, venc_handle);
@@ -185,7 +199,12 @@ int handle_venc_request_stream(int fd, const uint8_t *req, uint32_t req_len)
         log_error("[venc] request_stream failed (NULL)");
         return send_response(fd, STATUS_ERROR, NULL, 0);
     }
-    return send_handle_response(fd, stream_handle);
+    int slot = vd_obj_register(VD_OBJ_KIND_STREAM, stream_handle);
+    if (slot < 0) {
+        log_error("[venc] object table full; refusing open");
+        return send_response(fd, STATUS_ERROR, NULL, 0);
+    }
+    return send_token_response(fd, vd_obj_token(slot));
 }
 
 /* ---- Timeout-guarded cancel_stream helpers ----------------------------- */
@@ -234,7 +253,9 @@ int handle_venc_cancel_stream(int fd, const uint8_t *req, uint32_t req_len)
     if (req_len < sizeof(uint64_t))
         return send_response(fd, STATUS_ERROR, NULL, 0);
 
-    void *stream_handle = req_read_handle(req, 0);
+    void *stream_handle;
+    if (vd_obj_resolve(req_read_u64(req, 0), VD_OBJ_KIND_STREAM, &stream_handle) != 0)
+        return send_response(fd, VD_STATUS_STALE_EPOCH, NULL, 0);
     log_debug("[venc] cancel_stream handle=%p", stream_handle);
 
     struct cancel_arg *ca = (struct cancel_arg *)malloc(sizeof(*ca));
@@ -245,6 +266,11 @@ int handle_venc_cancel_stream(int fd, const uint8_t *req, uint32_t req_len)
     ca->handle = stream_handle;
     ca->result = -1;
     ca->done = 0;
+
+    /* Retire the token before the cancel runs, not after: the cancel can time
+     * out and leave the detached thread still working on the object, and a
+     * client retry must not be able to resolve it again in the meantime. */
+    vd_obj_unregister(VD_OBJ_KIND_STREAM, stream_handle);
 
     pthread_t tid;
     if (pthread_create(&tid, NULL, cancel_thread_fn, ca) != 0) {

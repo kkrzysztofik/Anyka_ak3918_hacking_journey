@@ -5,6 +5,7 @@
 #include "ipc.h"
 #include "protocol.h"
 #include "log.h"
+#include "globals.h"
 #include "ak_vpss.h"
 #include "ak_vi.h"
 
@@ -31,7 +32,9 @@ int handle_isp_effect(int fd, const uint8_t *req, uint32_t req_len,
         log_warn("[isp] %s: req too short (%u)", name, req_len);
         return send_response(fd, STATUS_ERROR, NULL, 0);
     }
-    void   *vi_handle = req_read_handle(req, 0);
+    void *vi_handle;
+    if (vd_obj_resolve(req_read_u64(req, 0), VD_OBJ_KIND_VI, &vi_handle) != 0)
+        return send_response(fd, VD_STATUS_STALE_EPOCH, NULL, 0);
     int32_t value     = req_read_i32(req, 8);
 
     log_debug("[isp] %s vi=%p value=%d", name, vi_handle, (int)value);
@@ -78,7 +81,9 @@ int handle_isp_set_ir_filter(int fd, const uint8_t *req, uint32_t req_len)
 {
     if (req_len < 8 + 4)
         return send_response(fd, STATUS_ERROR, NULL, 0);
-    void   *vi_handle = req_read_handle(req, 0);
+    void *vi_handle;
+    if (vd_obj_resolve(req_read_u64(req, 0), VD_OBJ_KIND_VI, &vi_handle) != 0)
+        return send_response(fd, VD_STATUS_STALE_EPOCH, NULL, 0);
     int32_t mode      = req_read_i32(req, 8);
 
     enum video_daynight_mode dn = (mode != 0) ? VI_MODE_NIGHT : VI_MODE_DAY;

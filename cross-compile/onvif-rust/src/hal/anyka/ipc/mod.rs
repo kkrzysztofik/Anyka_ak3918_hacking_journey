@@ -281,6 +281,15 @@ const CMD_GET_ERROR_STR: i32 = 201;
 /// The only command exempt from the epoch gate — it is how the epoch is learned.
 const CMD_HELLO: i32 = 300;
 
+/// Daemon rejected a handle token: dead generation, reused slot, or wrong object
+/// kind. Mirrors `VD_STATUS_STALE_EPOCH` in the daemon's `protocol.h`.
+///
+/// Distinct from the generic error status so this reads as an attachment problem
+/// rather than a bad argument. Reaching the client at all means defence in depth
+/// caught something the epoch gate should already have refused — a bug or a
+/// version skew, worth a loud message either way.
+const VD_STATUS_STALE_EPOCH: i32 = -2;
+
 /// Sentinel meaning "not attached to any daemon generation".
 ///
 /// The daemon guarantees a non-zero epoch, so 0 can never collide with a real one.
@@ -1373,6 +1382,13 @@ impl AnykaIpc {
         req_data: &[u8],
     ) -> PlatformResult<*mut c_void> {
         let (status, resp_data) = self.send_request(cmd_id, req_data)?;
+        if status == VD_STATUS_STALE_EPOCH {
+            return Err(PlatformError::HardwareUnavailable(format!(
+                "vendor daemon rejected {} as a stale handle; the attachment is from a \
+                 dead generation",
+                Self::cmd_name(cmd_id)
+            )));
+        }
         if status != AK_SUCCESS_I32 || resp_data.len() < 8 {
             return Err(PlatformError::HardwareFailure(format!(
                 "IPC request failed with status: {}",
@@ -2970,6 +2986,26 @@ mod tests {
 
         assert_eq!(epoch, 0x1234_5678);
         assert_eq!(version, 3);
+    }
+
+    #[test]
+    fn stale_handle_status_is_reported_as_unavailable_not_a_generic_failure() {
+        // The daemon returns VD_STATUS_STALE_EPOCH when a token names a dead
+        // generation, a reused slot, or the wrong object kind. That is an
+        // attachment problem, not a bad argument, and must read as such.
+        let daemon =
+            test_helpers::FakeDaemon::start(|_c, _r| (VD_STATUS_STALE_EPOCH, vec![0u8; 8]));
+        let ipc = AnykaIpc::new_with_path(&daemon.socket_path).unwrap();
+        ipc.set_epochs_for_test(1, 1);
+
+        let err = ipc.send_handle_request(CMD_VI_OPEN, &[0u8; 4]).unwrap_err();
+
+        match err {
+            PlatformError::HardwareUnavailable(msg) => {
+                assert!(msg.contains("stale"), "message should say stale: {msg}");
+            }
+            other => panic!("expected HardwareUnavailable, got {other:?}"),
+        }
     }
 
     #[tokio::test]

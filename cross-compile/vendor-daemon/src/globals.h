@@ -163,4 +163,59 @@ void vd_obj_unregister(uint8_t kind, void *ptr);
  */
 void vd_obj_close_all(void);
 
+/* ---- Handle tokens ------------------------------------------------------
+ *
+ * Handles are opaque tokens naming a table slot, never raw SDK pointers. A
+ * pointer marshalled across the process boundary is meaningless to the client
+ * and, after a restart, the allocator can hand the same address back -- so a
+ * stale handle from the previous generation would look perfectly valid.
+ *
+ * Layout is 32 bits, NOT 64. The client is 32-bit ARM and carries handles as
+ * `void *` (`hal/common/video.rs`), so anything above bit 31 is truncated on
+ * the way back and cannot be validated:
+ *
+ *   bits 31..16  epoch      (16)  low half of the daemon generation
+ *   bits 15..10  slot_gen   (6)   bumped on every reuse of the slot
+ *   bits  9..4   slot_index (6)   VD_OBJ_SLOTS == 64
+ *   bits  3..0   kind       (4)   VD_OBJ_KIND_*
+ *
+ * `kind` is never 0 for a live object, so a valid token is never 0 and cannot
+ * be confused with a NULL handle.
+ *
+ * slot_gen is what stops an epoch-local ABA: close a VI on slot 3 and open
+ * another within the same generation, and a stale token for the old occupant
+ * still matches epoch and index. The per-slot generation makes it stop
+ * matching.
+ */
+#define VD_TOK_KIND_MASK    0x0Fu
+#define VD_TOK_INDEX_SHIFT  4
+#define VD_TOK_INDEX_MASK   0x3Fu
+#define VD_TOK_GEN_SHIFT    10
+#define VD_TOK_GEN_MASK     0x3Fu
+#define VD_TOK_EPOCH_SHIFT  16
+#define VD_TOK_EPOCH_MASK   0xFFFFu
+
+/**
+ * vd_obj_token - Build the client-facing token naming @p slot.
+ *
+ * @param slot  Slot index returned by vd_obj_register().
+ * @return      Token, or 0 if @p slot is out of range or free.
+ */
+uint64_t vd_obj_token(int slot);
+
+/**
+ * vd_obj_resolve - Validate a token and yield the SDK pointer it names.
+ *
+ * Validates in order: kind matches what the command expects (a VENC token
+ * handed to a VI command is rejected, not dereferenced), epoch matches this
+ * daemon generation, index is in bounds, the slot is live, and slot_gen
+ * matches the slot's current value.
+ *
+ * @param token        Token received from the client.
+ * @param expect_kind  VD_OBJ_KIND_* the calling command requires.
+ * @param out_ptr      Receives the SDK pointer on success.
+ * @return             0 on success, -1 if the token is stale or malformed.
+ */
+int vd_obj_resolve(uint64_t token, uint8_t expect_kind, void **out_ptr);
+
 #endif /* VENDOR_DAEMON_GLOBALS_H */

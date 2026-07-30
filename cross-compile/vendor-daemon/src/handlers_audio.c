@@ -41,8 +41,13 @@ int handle_ai_open(int fd, const uint8_t *req, uint32_t req_len)
         log_error("[ai] open failed (NULL handle)");
         return send_response(fd, STATUS_ERROR, NULL, 0);
     }
-    vd_obj_register(VD_OBJ_KIND_AI, handle);
-    return send_handle_response(fd, handle);
+    int slot = vd_obj_register(VD_OBJ_KIND_AI, handle);
+    if (slot < 0) {
+        log_error("[ai] object table full; refusing open");
+        ak_ai_close(handle);
+        return send_response(fd, STATUS_ERROR, NULL, 0);
+    }
+    return send_token_response(fd, vd_obj_token(slot));
 }
 
 /**
@@ -61,7 +66,9 @@ int handle_ai_close(int fd, const uint8_t *req, uint32_t req_len)
 {
     if (req_len < sizeof(uint64_t))
         return send_response(fd, STATUS_ERROR, NULL, 0);
-    void *handle = req_read_handle(req, 0);
+    void *handle;
+    if (vd_obj_resolve(req_read_u64(req, 0), VD_OBJ_KIND_AI, &handle) != 0)
+        return send_response(fd, VD_STATUS_STALE_EPOCH, NULL, 0);
     int ret = ak_ai_close(handle);
     vd_obj_unregister(VD_OBJ_KIND_AI, handle);
     return send_response(fd, ret, NULL, 0);
@@ -144,8 +151,13 @@ int handle_aenc_open(int fd, const uint8_t *req, uint32_t req_len)
         log_error("[aenc] open failed (NULL handle)");
         return send_response(fd, STATUS_ERROR, NULL, 0);
     }
-    vd_obj_register(VD_OBJ_KIND_AENC, handle);
-    return send_handle_response(fd, handle);
+    int slot = vd_obj_register(VD_OBJ_KIND_AENC, handle);
+    if (slot < 0) {
+        log_error("[aenc] object table full; refusing open");
+        ak_aenc_close(handle);
+        return send_response(fd, STATUS_ERROR, NULL, 0);
+    }
+    return send_token_response(fd, vd_obj_token(slot));
 }
 
 /**
@@ -164,7 +176,9 @@ int handle_aenc_close(int fd, const uint8_t *req, uint32_t req_len)
 {
     if (req_len < sizeof(uint64_t))
         return send_response(fd, STATUS_ERROR, NULL, 0);
-    void *handle = req_read_handle(req, 0);
+    void *handle;
+    if (vd_obj_resolve(req_read_u64(req, 0), VD_OBJ_KIND_AENC, &handle) != 0)
+        return send_response(fd, VD_STATUS_STALE_EPOCH, NULL, 0);
     int ret = ak_aenc_close(handle);
     vd_obj_unregister(VD_OBJ_KIND_AENC, handle);
     return send_response(fd, ret, NULL, 0);
@@ -187,7 +201,9 @@ int handle_aenc_set_attr(int fd, const uint8_t *req, uint32_t req_len)
     /* u64 handle + i32 aac_head = 12 bytes */
     if (req_len < 8 + 4)
         return send_response(fd, STATUS_ERROR, NULL, 0);
-    void *handle    = req_read_handle(req, 0);
+    void *handle;
+    if (vd_obj_resolve(req_read_u64(req, 0), VD_OBJ_KIND_AENC, &handle) != 0)
+        return send_response(fd, VD_STATUS_STALE_EPOCH, NULL, 0);
     int32_t aac_head_i32 = req_read_i32(req, 8);
 
     struct aenc_attr attr;

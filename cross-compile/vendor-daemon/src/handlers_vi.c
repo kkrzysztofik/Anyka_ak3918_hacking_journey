@@ -62,8 +62,13 @@ int handle_vi_open(int fd, const uint8_t *req, uint32_t req_len)
         log_error("[vi] open failed (NULL handle)");
         return send_response(fd, STATUS_ERROR, NULL, 0);
     }
-    vd_obj_register(VD_OBJ_KIND_VI, handle);
-    return send_handle_response(fd, handle);
+    int slot = vd_obj_register(VD_OBJ_KIND_VI, handle);
+    if (slot < 0) {
+        log_error("[vi] object table full; refusing open");
+        ak_vi_close(handle);
+        return send_response(fd, STATUS_ERROR, NULL, 0);
+    }
+    return send_token_response(fd, vd_obj_token(slot));
 }
 
 /**
@@ -83,7 +88,9 @@ int handle_vi_close(int fd, const uint8_t *req, uint32_t req_len)
     if (req_len < sizeof(uint64_t)) {
         return send_response(fd, STATUS_ERROR, NULL, 0);
     }
-    void *handle = req_read_handle(req, 0);
+    void *handle;
+    if (vd_obj_resolve(req_read_u64(req, 0), VD_OBJ_KIND_VI, &handle) != 0)
+        return send_response(fd, VD_STATUS_STALE_EPOCH, NULL, 0);
 
     log_debug("[vi] close handle=%p", handle);
     int ret = ak_vi_close(handle);
@@ -110,7 +117,9 @@ int handle_vi_get_sensor_resolution(int fd, const uint8_t *req, uint32_t req_len
     if (req_len < sizeof(uint64_t)) {
         return send_response(fd, STATUS_ERROR, NULL, 0);
     }
-    void *handle = req_read_handle(req, 0);
+    void *handle;
+    if (vd_obj_resolve(req_read_u64(req, 0), VD_OBJ_KIND_VI, &handle) != 0)
+        return send_response(fd, VD_STATUS_STALE_EPOCH, NULL, 0);
 
     struct video_resolution res;
     memset(&res, 0, sizeof(res));
@@ -153,7 +162,9 @@ int handle_vi_set_channel_attr(int fd, const uint8_t *req, uint32_t req_len)
         log_warn("[vi] set_channel_attr: req too short (%u)", req_len);
         return send_response(fd, STATUS_ERROR, NULL, 0);
     }
-    void *handle = req_read_handle(req, 0);
+    void *handle;
+    if (vd_obj_resolve(req_read_u64(req, 0), VD_OBJ_KIND_VI, &handle) != 0)
+        return send_response(fd, VD_STATUS_STALE_EPOCH, NULL, 0);
 
     struct video_channel_attr attr;
     memset(&attr, 0, sizeof(attr));
@@ -219,7 +230,9 @@ int handle_vi_capture_on(int fd, const uint8_t *req, uint32_t req_len)
 {
     if (req_len < sizeof(uint64_t))
         return send_response(fd, STATUS_ERROR, NULL, 0);
-    void *handle = req_read_handle(req, 0);
+    void *handle;
+    if (vd_obj_resolve(req_read_u64(req, 0), VD_OBJ_KIND_VI, &handle) != 0)
+        return send_response(fd, VD_STATUS_STALE_EPOCH, NULL, 0);
     int ret = ak_vi_capture_on(handle);
     return send_response(fd, ret, NULL, 0);
 }
@@ -240,7 +253,9 @@ int handle_vi_capture_off(int fd, const uint8_t *req, uint32_t req_len)
 {
     if (req_len < sizeof(uint64_t))
         return send_response(fd, STATUS_ERROR, NULL, 0);
-    void *handle = req_read_handle(req, 0);
+    void *handle;
+    if (vd_obj_resolve(req_read_u64(req, 0), VD_OBJ_KIND_VI, &handle) != 0)
+        return send_response(fd, VD_STATUS_STALE_EPOCH, NULL, 0);
     int ret = ak_vi_capture_off(handle);
     return send_response(fd, ret, NULL, 0);
 }

@@ -10,6 +10,10 @@
 #define MAX_REQUEST_SIZE        (1 * 1024 * 1024)  /* 1 MB – for frame data */
 #define STATUS_OK               0
 #define STATUS_ERROR            (-1)
+/* Handle belongs to a dead daemon generation, a reused slot, or the wrong
+ * object kind. Distinct from STATUS_ERROR so the client logs "stale handle"
+ * rather than a confusing argument error. */
+#define VD_STATUS_STALE_EPOCH   (-2)
 
 /* ---- Connection limits -------------------------------------------------- */
 /* Maximum simultaneous clients (control + streaming + snapshot + spare) */
