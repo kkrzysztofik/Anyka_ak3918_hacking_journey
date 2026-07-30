@@ -1011,6 +1011,100 @@ impl AnykaIpc {
         }
     }
 
+    /// Establish frame sockets, ring mapping and epoch against a live daemon.
+    ///
+    /// Connects in *reverse* creation order. The daemon creates the ring, then the
+    /// control socket, then frame-main, then frame-sub, so a successful frame-sub
+    /// connect proves the rest already exists. Attaching in creation order would
+    /// race a still-initialising daemon and waste the retry budget.
+    ///
+    /// On any failure the partial attachment is rolled back via [`Self::detach`],
+    /// so a failed attempt never leaves half a connection behind.
+    pub(crate) async fn attach(&self) -> PlatformResult<u32> {
+        let result = self.try_attach().await;
+        if result.is_err() {
+            self.detach();
+        }
+        result
+    }
+
+    async fn try_attach(&self) -> PlatformResult<u32> {
+        // Readiness barrier: frame-sub is the last thing the daemon creates.
+        let frame_sub = UnixStream::connect(FRAME_SUB_SOCKET_PATH).map_err(|e| {
+            PlatformError::HardwareUnavailable(format!(
+                "sub frame socket {FRAME_SUB_SOCKET_PATH} not ready: {e}"
+            ))
+        })?;
+        let frame_main = UnixStream::connect(FRAME_MAIN_SOCKET_PATH).map_err(|e| {
+            PlatformError::HardwareUnavailable(format!(
+                "main frame socket {FRAME_MAIN_SOCKET_PATH} not ready: {e}"
+            ))
+        })?;
+        *self
+            .frame_sub_stream
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = Some(frame_sub);
+        *self
+            .frame_main_stream
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = Some(frame_main);
+
+        // Control last of the three, per the documented order. `finish_attach`
+        // issues CMD_HELLO through the owner thread, which replies
+        // HardwareUnavailable while its stream is `None`, so the owner must be
+        // holding a live stream before the handshake runs.
+        let ctrl = connect_production_ctrl()?;
+        // Must complete before finish_attach: `hello()` goes through the same
+        // owner thread, and if installation were merely queued the handshake
+        // could reach the owner first and be refused as HardwareUnavailable.
+        self.give_ctrl_stream(ctrl).await?;
+
+        let reader = ShmRingReader::open()?.ok_or_else(|| {
+            PlatformError::HardwareUnavailable("shared memory ring not present".to_string())
+        })?;
+        self.finish_attach(reader).await
+    }
+
+    /// Handshake and epoch agreement, given an already-opened ring reader.
+    ///
+    /// Split out from `try_attach` so tests can supply an anonymous ring.
+    async fn finish_attach(&self, reader: ShmRingReader) -> PlatformResult<u32> {
+        let (epoch, version) = self.hello().await?;
+
+        let ring_epoch = reader.epoch();
+        if ring_epoch != epoch {
+            return Err(PlatformError::HardwareUnavailable(format!(
+                "daemon generation changed mid-attach (HELLO {epoch}, ring {ring_epoch}); retrying"
+            )));
+        }
+
+        *self.shm_reader.lock().unwrap_or_else(|e| e.into_inner()) = Some(reader);
+        // observed before attached: the gate reads attached first, so this ordering
+        // can never leave a window where attached is set but observed is stale.
+        self.observed_epoch.store(epoch, Ordering::Release);
+        self.attached_epoch.store(epoch, Ordering::Release);
+
+        tracing::info!(
+            event = "ipc_attached",
+            epoch,
+            shm_version = version,
+            "IPC attached to vendor daemon"
+        );
+        Ok(epoch)
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn finish_attach_for_test(
+        &self,
+        reader: ShmRingReader,
+    ) -> PlatformResult<u32> {
+        let result = self.finish_attach(reader).await;
+        if result.is_err() {
+            self.detach();
+        }
+        result
+    }
+
     /// Tear down the current attachment.
     ///
     /// Clears the epoch first: from this instant every in-flight request is refused
@@ -2766,6 +2860,59 @@ mod tests {
     // ========================================================================
     // Attach / detach lifecycle
     // ========================================================================
+
+    #[tokio::test]
+    async fn attach_rejects_a_ring_epoch_that_disagrees_with_hello() {
+        // Daemon restarted between HELLO and the ring being mapped: the two epochs
+        // disagree, so the attachment is already stale and must not be pinned.
+        let daemon = test_helpers::FakeDaemon::start(|_c, _r| {
+            let mut resp = Vec::new();
+            resp.extend_from_slice(&11u32.to_le_bytes());
+            resp.extend_from_slice(&3u32.to_le_bytes());
+            (AK_SUCCESS_I32, resp)
+        });
+        let ipc = AnykaIpc::new_with_path(&daemon.socket_path).unwrap();
+
+        let reader = shm_ring::tests::create_test_anon_reader();
+        // SAFETY: offset 48 is inside the validated header.
+        unsafe {
+            reader
+                .base_ptr_for_test()
+                .add(48)
+                .cast::<u32>()
+                .write_volatile(12);
+        }
+
+        let err = ipc.finish_attach_for_test(reader).await.unwrap_err();
+
+        assert!(matches!(err, PlatformError::HardwareUnavailable(_)));
+        assert_eq!(ipc.attached_epoch_for_test(), EPOCH_DETACHED);
+    }
+
+    #[tokio::test]
+    async fn attach_pins_the_epoch_when_hello_and_ring_agree() {
+        let daemon = test_helpers::FakeDaemon::start(|_c, _r| {
+            let mut resp = Vec::new();
+            resp.extend_from_slice(&11u32.to_le_bytes());
+            resp.extend_from_slice(&3u32.to_le_bytes());
+            (AK_SUCCESS_I32, resp)
+        });
+        let ipc = AnykaIpc::new_with_path(&daemon.socket_path).unwrap();
+
+        let reader = shm_ring::tests::create_test_anon_reader();
+        unsafe {
+            reader
+                .base_ptr_for_test()
+                .add(48)
+                .cast::<u32>()
+                .write_volatile(11);
+        }
+
+        ipc.finish_attach_for_test(reader).await.unwrap();
+
+        assert_eq!(ipc.attached_epoch_for_test(), 11);
+        assert_eq!(ipc.observed_epoch_for_test(), 11);
+    }
 
     #[test]
     fn new_detached_succeeds_without_a_daemon() {
