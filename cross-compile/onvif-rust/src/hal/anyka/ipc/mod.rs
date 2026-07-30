@@ -290,14 +290,14 @@ const PUSH_NOTIFICATION_TIMEOUT: Duration = Duration::from_millis(200);
 /// Timeout for blocking reads/writes on the IPC control socket.
 ///
 /// If the vendor daemon stops responding, this bounds how long a single owner-thread
-/// send/receive cycle will block before returning an error. The owner thread then
-/// attempts one reconnect + retry.
+/// send/receive cycle will block before returning an error. The error is surfaced to
+/// the caller; the owner thread does not retry.
 const IPC_CTRL_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Timeout for the public async IPC API, set slightly above `IPC_CTRL_TIMEOUT` so the
 /// owner thread's socket-level timeout fires first and surfaces a `Timeout` error to the
 /// async caller. This bounds how long an executor task awaits a control RPC even if the
-/// owner thread is still retrying in the background.
+/// owner thread is still blocked on the socket.
 const IPC_PUBLIC_TIMEOUT: Duration = Duration::from_secs(12);
 
 /// Bounded depth of the control-socket job queue handed to the owner thread.
@@ -320,13 +320,11 @@ struct IpcJob {
     reply: oneshot::Sender<IpcResponse>,
 }
 
-/// Describes how the owner thread (re)connects the control `UnixStream`.
+/// Describes how the owner thread connects the control `UnixStream`.
 ///
-/// The initial connection may target a production or a test-only path, but a
-/// reconnect after an I/O error always targets the production control/legacy paths
-/// where the real vendor daemon lives. In unit tests those production paths are
-/// absent, so a reconnect fails fast — keeping the timeout tests single-attempt and
-/// their timing assertions meaningful.
+/// Connect-only: there is deliberately no reconnect path. A reconnect that resumed
+/// with the previous generation's SDK handles is the hazard the epoch gate exists to
+/// prevent, so recovery is the supervisor's job and it goes through `attach()`.
 #[derive(Clone)]
 enum CtrlConnect {
     /// Production: connect to `/tmp/vd-ctrl.sock`, falling back to the legacy path.
@@ -353,12 +351,6 @@ impl CtrlConnect {
                 Ok(stream)
             }
         }
-    }
-
-    /// Reconnect after an I/O error. Always targets the production control paths where
-    /// the real daemon lives (and would reappear after a restart).
-    fn reconnect(&self) -> PlatformResult<UnixStream> {
-        connect_production_ctrl()
     }
 }
 
@@ -537,7 +529,7 @@ impl AnykaIpc {
         };
         tracing::info!("Shared memory ring buffer opened");
 
-        let (job_tx, owner_thread) = Self::spawn_owner(stream, connect)?;
+        let (job_tx, owner_thread) = Self::spawn_owner(stream)?;
 
         Ok(Self {
             job_tx: Some(job_tx),
@@ -572,7 +564,7 @@ impl AnykaIpc {
             _ => None,
         };
 
-        let (job_tx, owner_thread) = Self::spawn_owner(stream, connect)?;
+        let (job_tx, owner_thread) = Self::spawn_owner(stream)?;
 
         Ok(Self {
             job_tx: Some(job_tx),
@@ -596,10 +588,7 @@ impl AnykaIpc {
         shm_reader: Option<ShmRingReader>,
     ) -> Self {
         let _ = configure_ctrl_timeouts(&ctrl_stream);
-        // Reconnects target the (absent) production paths in tests, so they fail fast;
-        // these tests never trigger a reconnect anyway.
-        let (job_tx, owner_thread) =
-            Self::spawn_owner(ctrl_stream, CtrlConnect::Production).expect("spawn owner thread");
+        let (job_tx, owner_thread) = Self::spawn_owner(ctrl_stream).expect("spawn owner thread");
         Self {
             job_tx: Some(job_tx),
             owner_thread: Some(owner_thread),
@@ -703,12 +692,11 @@ impl AnykaIpc {
     /// Returns the sender half of the bounded job queue and the thread's join handle.
     fn spawn_owner(
         stream: UnixStream,
-        connect: CtrlConnect,
     ) -> PlatformResult<(mpsc::Sender<IpcJob>, std::thread::JoinHandle<()>)> {
         let (job_tx, job_rx) = mpsc::channel::<IpcJob>(IPC_JOB_QUEUE_CAP);
         let handle = std::thread::Builder::new()
             .name("vd-ctrl-owner".to_string())
-            .spawn(move || Self::run_owner(stream, connect, job_rx))
+            .spawn(move || Self::run_owner(stream, job_rx))
             .map_err(|e| {
                 PlatformError::InitializationFailed(format!(
                     "Failed to spawn IPC control owner thread: {}",
@@ -721,12 +709,13 @@ impl AnykaIpc {
     /// Owner-thread main loop.
     ///
     /// Consumes jobs from the bounded queue, performs a blocking send/receive cycle on
-    /// the exclusively-owned control stream, and on I/O error attempts a single
-    /// reconnect + retry before returning the result over the job's oneshot channel.
+    /// the exclusively-owned control stream, and returns the result over the job's
+    /// oneshot channel. I/O errors are reported, never repaired here: re-attaching is
+    /// the supervisor's job alone.
     /// Exits when the job channel is closed (all senders dropped).
-    fn run_owner(mut stream: UnixStream, connect: CtrlConnect, mut job_rx: mpsc::Receiver<IpcJob>) {
+    fn run_owner(mut stream: UnixStream, mut job_rx: mpsc::Receiver<IpcJob>) {
         while let Some(job) = job_rx.blocking_recv() {
-            Self::process_job(&mut stream, &connect, job);
+            Self::process_job(&mut stream, job);
         }
 
         if is_ipc_debug_enabled() {
@@ -736,8 +725,9 @@ impl AnykaIpc {
 
     /// Execute a single job on the owned stream and reply over its oneshot channel.
     ///
-    /// On I/O error, attempts one reconnect + retry before replying.
-    fn process_job(stream: &mut UnixStream, connect: &CtrlConnect, job: IpcJob) {
+    /// On I/O error the error is surfaced to the caller and logged. It is deliberately
+    /// not repaired here — see the warning arm below.
+    fn process_job(stream: &mut UnixStream, job: IpcJob) {
         let started = Instant::now();
         let cmd_name = Self::cmd_name(job.cmd_id);
         if is_ipc_debug_enabled() {
@@ -749,7 +739,7 @@ impl AnykaIpc {
             );
         }
 
-        let mut result = Self::exec_on_stream(stream, job.cmd_id, &job.req_data);
+        let result = Self::exec_on_stream(stream, job.cmd_id, &job.req_data);
 
         if let Err(ref e) = result {
             warn!(
@@ -757,10 +747,11 @@ impl AnykaIpc {
                 cmd_name,
                 elapsed_ms = started.elapsed().as_millis(),
                 error = %e,
-                "IPC request failed; attempting reconnect"
+                "IPC request failed; reporting peer loss to the supervisor"
             );
-            result =
-                Self::reconnect_and_retry(stream, connect, job.cmd_id, cmd_name, &job.req_data);
+            // Do NOT reconnect here. A reconnect that resumes with the same
+            // handles is exactly the hazard the epoch gate exists to prevent;
+            // re-attaching is the supervisor's job and only its job.
         } else if is_ipc_debug_enabled() {
             let (status, resp_len) = result
                 .as_ref()
@@ -779,62 +770,6 @@ impl AnykaIpc {
         // The receiver may have gone away (async caller timed out and dropped the
         // oneshot); that is expected and not an error.
         let _ = job.reply.send(result);
-    }
-
-    /// Reconnect the control stream and retry the request once.
-    ///
-    /// On reconnect failure the reconnect error is returned and `stream` is left
-    /// untouched.
-    fn reconnect_and_retry(
-        stream: &mut UnixStream,
-        connect: &CtrlConnect,
-        cmd_id: i32,
-        cmd_name: &'static str,
-        req_data: &[u8],
-    ) -> PlatformResult<(i32, Vec<u8>)> {
-        let new_stream = match connect.reconnect() {
-            Ok(new_stream) => new_stream,
-            Err(reconnect_err) => {
-                warn!(
-                    cmd_id,
-                    cmd_name,
-                    error = %reconnect_err,
-                    "IPC reconnect failed"
-                );
-                return Err(reconnect_err);
-            }
-        };
-        *stream = new_stream;
-
-        if is_ipc_debug_enabled() {
-            debug!(cmd_id, cmd_name, "IPC request retry start");
-        }
-        let retry_started = Instant::now();
-        let result = Self::exec_on_stream(stream, cmd_id, req_data);
-        match &result {
-            Ok((status, resp_data)) => {
-                if is_ipc_debug_enabled() {
-                    debug!(
-                        cmd_id,
-                        cmd_name,
-                        status = *status,
-                        resp_len = resp_data.len(),
-                        elapsed_ms = retry_started.elapsed().as_millis(),
-                        "IPC request retry done"
-                    );
-                }
-            }
-            Err(err) => {
-                warn!(
-                    cmd_id,
-                    cmd_name,
-                    elapsed_ms = retry_started.elapsed().as_millis(),
-                    error = %err,
-                    "IPC request retry failed"
-                );
-            }
-        }
-        result
     }
 
     /// Map I/O errors to PlatformError, distinguishing timeouts from hardware failures.
@@ -1663,6 +1598,31 @@ pub(crate) mod test_helpers {
                 let _ = stream.write_all(resp_data);
             }
             let _ = stream.flush();
+        }
+
+        /// Spawns a daemon that accepts one connection then immediately closes it,
+        /// simulating a daemon that died mid-request.
+        pub fn start_then_hangup() -> Self {
+            let counter = TEST_DAEMON_COUNTER.fetch_add(1, Ordering::SeqCst);
+            let socket_path = format!(
+                "/tmp/test-vendor-daemon-hangup-{}-{}.sock",
+                std::process::id(),
+                counter
+            );
+            let _ = std::fs::remove_file(&socket_path);
+            let listener = UnixListener::bind(&socket_path).unwrap();
+            let path_clone = socket_path.clone();
+            let handle = std::thread::spawn(move || {
+                if let Ok((stream, _)) = listener.accept() {
+                    drop(stream);
+                }
+                let _ = std::fs::remove_file(&path_clone);
+            });
+            std::thread::sleep(std::time::Duration::from_millis(50));
+            Self {
+                socket_path,
+                _listener_thread: handle,
+            }
         }
 
         /// Spawns a fake daemon that delays before responding, simulating a hung vendor daemon.
@@ -2637,6 +2597,28 @@ mod tests {
 
         assert_eq!(epoch, 0x1234_5678);
         assert_eq!(version, 3);
+    }
+
+    #[tokio::test]
+    async fn ctrl_io_error_does_not_silently_reconnect() {
+        // A daemon that accepts, then hangs up. The old code reconnected to the
+        // production socket and retried; that must no longer happen.
+        let daemon = test_helpers::FakeDaemon::start_then_hangup();
+        let ipc = AnykaIpc::new_with_path(&daemon.socket_path).unwrap();
+        ipc.set_epochs_for_test(1, 1);
+
+        let err = ipc
+            .request_async(CMD_VI_CLOSE, &[0u8; 8])
+            .await
+            .unwrap_err();
+
+        assert!(
+            matches!(
+                err,
+                PlatformError::HardwareFailure(_) | PlatformError::Timeout
+            ),
+            "expected the I/O error to surface, got {err:?}"
+        );
     }
 
     // ========================================================================
