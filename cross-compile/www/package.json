@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "vite build && node scripts/precompress.mjs ../../SD_card_contents/anyka_hack/onvif/www",
     "preview": "vite preview",
     "lint": "eslint . --report-unused-disable-directives --max-warnings 0",
     "lint:fix": "eslint . --fix",
@@ -13,6 +13,7 @@
     "type-check:ts7": "tsc -p tsconfig.json --noEmit",
     "type-check:ts6": "tsc6 -p tsconfig.json --noEmit",
     "test": "vitest run",
+    "analyze": "out=$(mktemp -d) && trap 'rm -rf \"$out\"' EXIT && vite build --outDir \"$out\" --sourcemap --emptyOutDir >/dev/null && node scripts/analyze-bundle.mjs \"$out/js\"",
     "test:coverage": "vitest run --coverage",
     "prettier": "prettier --write ."
   },
@@ -31,7 +32,6 @@
     "@radix-ui/react-slot": "^1.3.3",
     "@radix-ui/react-switch": "^1.3.7",
     "@tanstack/react-query": "^5.101.4",
-    "axios": "^1.18.1",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "dompurify": "^3.4.12",
@@ -41,7 +41,6 @@
     "react-dom": "^19.2.8",
     "react-hook-form": "^7.83.0",
     "react-router": "^8.3.0",
-    "recharts": "^3.10.1",
     "sonner": "^2.0.7",
     "tailwind-merge": "^3.6.0",
     "zod": "^4.4.3"
@@ -54,7 +53,6 @@
     "@testing-library/react": "^16.3.2",
     "@testing-library/user-event": "^14.6.1",
     "@trivago/prettier-plugin-sort-imports": "^6.0.2",
-    "@types/dompurify": "^3.2.0",
     "@types/node": "^26.1.1",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
@@ -77,11 +75,9 @@
     "prettier-plugin-tailwindcss": "^0.8.1",
     "tailwindcss": "^4.3.3",
     "tailwindcss-animate": "^1.0.7",
-    "terser": "^5.49.0",
     "typescript": "npm:@typescript/typescript6@^6.0.2",
     "typescript-eslint": "^8.65.0",
     "vite": "^8.1.5",
-    "vite-plugin-compression": "^0.5.1",
     "vitest": "^4.1.10"
   },
   "overrides": {

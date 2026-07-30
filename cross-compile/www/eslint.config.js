@@ -13,6 +13,13 @@ export default tseslint.config(
     files: ['**/*.{ts,tsx}'],
   })),
   {
+    files: ['scripts/**/*.{js,mjs,cjs}'],
+    languageOptions: {
+      ecmaVersion: 2024,
+      globals: globals.node,
+    },
+  },
+  {
     files: ['**/*.{ts,tsx}'],
     languageOptions: {
       ecmaVersion: 2020,

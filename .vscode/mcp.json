@@ -7,10 +7,5 @@
 			"password": true
 		}
 	],
-	"servers": {
-    "beads": {
-      "command": "beads-mcp"
-    }
-  }
+	"servers": {}
 }
-

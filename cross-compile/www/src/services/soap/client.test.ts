@@ -24,6 +24,7 @@ describe('SOAP Client', () => {
     it('should make a request and return partial response', async () => {
       vi.mocked(apiClient.post).mockResolvedValue({
         data: '<?xml version="1.0"?><soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope"><soap:Body><GetProfilesResponse><Profiles><Name>Profile1</Name></Profiles></GetProfilesResponse></soap:Body></soap:Envelope>',
+        status: 200,
       });
 
       const result = await soapRequest<Record<string, unknown>>(
@@ -39,6 +40,7 @@ describe('SOAP Client', () => {
     it('should throw error on failure', async () => {
       vi.mocked(apiClient.post).mockResolvedValue({
         data: '<?xml version="1.0"?><soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope"><soap:Body><soap:Fault><soap:Code><soap:Value>soap:Sender</soap:Value></soap:Code><soap:Reason><soap:Text>Error</soap:Text></soap:Reason></soap:Fault></soap:Body></soap:Envelope>',
+        status: 200,
       });
 
       await expect(

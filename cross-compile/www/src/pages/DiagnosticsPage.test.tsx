@@ -3,29 +3,11 @@
  */
 import { screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import { renderWithProviders } from '@/test/componentTestHelpers';
 
-import DiagnosticsPage, { CustomTooltip } from './DiagnosticsPage';
-
-// Mock recharts components
-vi.mock('recharts', () => ({
-  ResponsiveContainer: ({ children }: { children: React.ReactNode }) => (
-    <div data-testid="responsive-container">{children}</div>
-  ),
-  AreaChart: ({ children }: { children: React.ReactNode }) => (
-    <svg data-testid="area-chart">
-      <title>Area Chart</title>
-      {children}
-    </svg>
-  ),
-  Area: () => <div data-testid="area" />,
-  CartesianGrid: () => <div data-testid="cartesian-grid" />,
-  XAxis: () => <div data-testid="x-axis" />,
-  YAxis: () => <div data-testid="y-axis" />,
-  Tooltip: () => <div data-testid="tooltip" />,
-}));
+import DiagnosticsPage from './DiagnosticsPage';
 
 describe('DiagnosticsPage', () => {
   const renderDiagnosticsPage = () => renderWithProviders(<DiagnosticsPage />);
@@ -105,7 +87,7 @@ describe('DiagnosticsPage', () => {
       expect(screen.getByTestId(titleTestId)).toBeInTheDocument();
       expect(screen.getByTestId(descriptionTestId)).toBeInTheDocument();
       if (hasCharts) {
-        expect(screen.getAllByTestId('area-chart').length).toBeGreaterThan(0);
+        expect(screen.getAllByTestId('sparkline-area').length).toBeGreaterThan(0);
       }
       if (additionalTestIds) {
         additionalTestIds.forEach((testId) => {
@@ -162,82 +144,6 @@ describe('DiagnosticsPage', () => {
   it('should render log entries', () => {
     renderDiagnosticsPage();
     expect(screen.getByTestId('diagnostics-system-logs-title')).toBeInTheDocument();
-  });
-
-  describe('CustomTooltip', () => {
-    it('should render charts with tooltip support', () => {
-      renderDiagnosticsPage();
-      const charts = screen.getAllByTestId('area-chart');
-      expect(charts.length).toBeGreaterThan(0);
-      const tooltips = screen.getAllByTestId('tooltip');
-      expect(tooltips.length).toBeGreaterThan(0);
-    });
-
-    it.each([
-      { chartName: 'CPU', titleTestId: 'diagnostics-cpu-usage-title' },
-      { chartName: 'memory', titleTestId: 'diagnostics-memory-usage-title' },
-      { chartName: 'network', titleTestId: 'diagnostics-network-throughput-title' },
-    ])('should have tooltip configured for $chartName chart', ({ titleTestId }) => {
-      renderDiagnosticsPage();
-      expect(screen.getByTestId(titleTestId)).toBeInTheDocument();
-      expect(screen.getAllByTestId('tooltip').length).toBeGreaterThan(0);
-    });
-
-    it.each([
-      { description: 'null payload' },
-      { description: 'empty payload array' },
-      { description: 'active is false' },
-    ])('should handle CustomTooltip with $description', () => {
-      renderDiagnosticsPage();
-      expect(screen.getAllByTestId('area-chart').length).toBeGreaterThan(0);
-    });
-
-    // Test CustomTooltip rendering with actual data
-    it('should render CustomTooltip when active and payload has data', () => {
-      const payload = [
-        { name: 'CPU', value: 45.5, color: '#ef4444', unit: '%' },
-        { name: 'Memory', value: 60.2, color: '#eab308', unit: '%' },
-      ];
-      const label = 10;
-
-      const { container } = renderWithProviders(
-        <CustomTooltip active={true} payload={payload} label={label} />,
-      );
-
-      // Verify tooltip renders with time label
-      expect(container.textContent).toContain('Time: +10s');
-      // Verify payload entries are rendered
-      expect(container.textContent).toContain('CPU: 45.5%');
-      expect(container.textContent).toContain('Memory: 60.2%');
-    });
-
-    it('should render CustomTooltip with multiple payload entries', () => {
-      const payload = [
-        { name: 'Download', value: 3.5, color: '#3b82f6', unit: ' Mbps' },
-        { name: 'Upload', value: 2.1, color: '#22c55e', unit: ' Mbps' },
-      ];
-      const label = 5;
-
-      const { container } = renderWithProviders(
-        <CustomTooltip active={true} payload={payload} label={label} />,
-      );
-
-      expect(container.textContent).toContain('Time: +5s');
-      expect(container.textContent).toContain('Download: 3.5 Mbps');
-      expect(container.textContent).toContain('Upload: 2.1 Mbps');
-    });
-
-    it('should render CustomTooltip with payload entry without unit', () => {
-      const payload = [{ name: 'Value', value: 75.8, color: '#ef4444' }];
-      const label = 20;
-
-      const { container } = renderWithProviders(
-        <CustomTooltip active={true} payload={payload} label={label} />,
-      );
-
-      expect(container.textContent).toContain('Time: +20s');
-      expect(container.textContent).toContain('Value: 75.8');
-    });
   });
 
   describe('StatCard component', () => {

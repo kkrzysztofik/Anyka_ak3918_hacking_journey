@@ -152,11 +152,21 @@ else
   fi
   (
     cd "${WWW_DIR}"
-    if [[ -f package-lock.json ]]; then
-      npm ci
-    else
+    lock_hash_file="node_modules/.anyka-lock-hash"
+    # Empty when there is no lockfile to fingerprint. Caching on an empty hash
+    # would match the empty stamp written by the previous run and skip installs
+    # forever, so the no-lockfile path never reads or writes the stamp.
+    current_hash="$(sha256sum package-lock.json 2>/dev/null | cut -d' ' -f1)"
+    if [[ -z "${current_hash}" ]]; then
       npm install
+    elif [[ -d node_modules && -f "${lock_hash_file}" && "$(cat "${lock_hash_file}")" == "${current_hash}" ]]; then
+      log_info "Dependencies unchanged, skipping npm ci"
+    else
+      npm ci
+      printf '%s' "${current_hash}" > "${lock_hash_file}"
     fi
+    npm run type-check
+    npm run lint
     npm run build
   )
   log_success "WebUI built to ${ANYKA_HACK}/onvif/www/"
