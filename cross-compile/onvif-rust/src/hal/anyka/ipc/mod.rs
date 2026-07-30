@@ -320,6 +320,24 @@ struct IpcJob {
     reply: oneshot::Sender<IpcResponse>,
 }
 
+/// A detection site's report that the vendor daemon peer is gone.
+///
+/// Carries a reason for the log only. Detection sites *report*; they never attach —
+/// the daemon's single-owner guards reject a concurrent second attacher rather than
+/// serialising it, so re-attaching is the supervisor's job alone.
+#[derive(Debug, Clone)]
+pub struct PeerLoss {
+    /// Which site noticed, and how. Log-only.
+    pub reason: String,
+}
+
+/// Depth of the peer-loss channel.
+///
+/// One queued loss is exactly as informative as ten — the supervisor's response is
+/// the same either way — and a bounded channel with `try_send` guarantees the owner
+/// thread and frame reader never block on a busy supervisor.
+const PEER_LOSS_QUEUE_CAP: usize = 1;
+
 /// Everything the owner thread accepts, on one ordered queue.
 ///
 /// Stream installation travels the *same* queue as requests on purpose. The attach
@@ -439,6 +457,10 @@ pub struct AnykaIpc {
     /// the daemon process, so they are only meaningful for the generation that minted
     /// them.
     attached_epoch: AtomicU32,
+    /// Reports peer loss to the supervisor. Never used to attach.
+    loss_tx: mpsc::Sender<PeerLoss>,
+    /// Receiving half, handed to the supervisor exactly once via `take_loss_rx`.
+    loss_rx: Mutex<Option<mpsc::Receiver<PeerLoss>>>,
     /// Latest epoch observed in the ring header, refreshed by the supervisor's poller.
     ///
     /// Kept as an atomic rather than read from the mmap on demand so the request path
@@ -548,7 +570,8 @@ impl AnykaIpc {
         };
         tracing::info!("Shared memory ring buffer opened");
 
-        let (job_tx, owner_thread) = Self::spawn_owner(Some(stream))?;
+        let (loss_tx, loss_rx) = mpsc::channel::<PeerLoss>(PEER_LOSS_QUEUE_CAP);
+        let (job_tx, owner_thread) = Self::spawn_owner(Some(stream), loss_tx.clone())?;
 
         Ok(Self {
             job_tx: Some(job_tx),
@@ -557,6 +580,8 @@ impl AnykaIpc {
             frame_sub_stream: Mutex::new(Some(frame_sub_stream)),
             shm_reader: Mutex::new(Some(shm_reader)),
             prefer_sub_on_tie: AtomicBool::new(false),
+            loss_tx,
+            loss_rx: Mutex::new(Some(loss_rx)),
             attached_epoch: AtomicU32::new(EPOCH_DETACHED),
             observed_epoch: AtomicU32::new(EPOCH_DETACHED),
         })
@@ -583,7 +608,8 @@ impl AnykaIpc {
             _ => None,
         };
 
-        let (job_tx, owner_thread) = Self::spawn_owner(Some(stream))?;
+        let (loss_tx, loss_rx) = mpsc::channel::<PeerLoss>(PEER_LOSS_QUEUE_CAP);
+        let (job_tx, owner_thread) = Self::spawn_owner(Some(stream), loss_tx.clone())?;
 
         Ok(Self {
             job_tx: Some(job_tx),
@@ -592,6 +618,8 @@ impl AnykaIpc {
             frame_sub_stream: Mutex::new(frame_sub_stream),
             shm_reader: Mutex::new(shm_reader),
             prefer_sub_on_tie: AtomicBool::new(false),
+            loss_tx,
+            loss_rx: Mutex::new(Some(loss_rx)),
             attached_epoch: AtomicU32::new(EPOCH_DETACHED),
             observed_epoch: AtomicU32::new(EPOCH_DETACHED),
         })
@@ -607,8 +635,9 @@ impl AnykaIpc {
         shm_reader: Option<ShmRingReader>,
     ) -> Self {
         let _ = configure_ctrl_timeouts(&ctrl_stream);
+        let (loss_tx, loss_rx) = mpsc::channel::<PeerLoss>(PEER_LOSS_QUEUE_CAP);
         let (job_tx, owner_thread) =
-            Self::spawn_owner(Some(ctrl_stream)).expect("spawn owner thread");
+            Self::spawn_owner(Some(ctrl_stream), loss_tx.clone()).expect("spawn owner thread");
         Self {
             job_tx: Some(job_tx),
             owner_thread: Some(owner_thread),
@@ -616,6 +645,8 @@ impl AnykaIpc {
             frame_sub_stream: Mutex::new(frame_sub_stream),
             shm_reader: Mutex::new(shm_reader),
             prefer_sub_on_tie: AtomicBool::new(false),
+            loss_tx,
+            loss_rx: Mutex::new(Some(loss_rx)),
             attached_epoch: AtomicU32::new(EPOCH_DETACHED),
             observed_epoch: AtomicU32::new(EPOCH_DETACHED),
         }
@@ -712,11 +743,12 @@ impl AnykaIpc {
     /// Returns the sender half of the bounded job queue and the thread's join handle.
     fn spawn_owner(
         stream: Option<UnixStream>,
+        loss_tx: mpsc::Sender<PeerLoss>,
     ) -> PlatformResult<(mpsc::Sender<OwnerMsg>, std::thread::JoinHandle<()>)> {
         let (job_tx, job_rx) = mpsc::channel::<OwnerMsg>(IPC_JOB_QUEUE_CAP);
         let handle = std::thread::Builder::new()
             .name("vd-ctrl-owner".to_string())
-            .spawn(move || Self::run_owner(stream, job_rx))
+            .spawn(move || Self::run_owner(stream, job_rx, loss_tx))
             .map_err(|e| {
                 PlatformError::InitializationFailed(format!(
                     "Failed to spawn IPC control owner thread: {}",
@@ -733,11 +765,15 @@ impl AnykaIpc {
     /// oneshot channel. I/O errors are reported, never repaired here: re-attaching is
     /// the supervisor's job alone.
     /// Exits when the job channel is closed (all senders dropped).
-    fn run_owner(mut stream: Option<UnixStream>, mut job_rx: mpsc::Receiver<OwnerMsg>) {
+    fn run_owner(
+        mut stream: Option<UnixStream>,
+        mut job_rx: mpsc::Receiver<OwnerMsg>,
+        loss_tx: mpsc::Sender<PeerLoss>,
+    ) {
         while let Some(msg) = job_rx.blocking_recv() {
             match msg {
                 OwnerMsg::Job(job) => match stream.as_mut() {
-                    Some(s) => Self::process_job(s, job),
+                    Some(s) => Self::process_job(s, job, &loss_tx),
                     None => {
                         // Detached: no stream to run on. Reply rather than panic —
                         // the gate normally catches this first, but a request can
@@ -768,7 +804,7 @@ impl AnykaIpc {
     ///
     /// On I/O error the error is surfaced to the caller and logged. It is deliberately
     /// not repaired here — see the warning arm below.
-    fn process_job(stream: &mut UnixStream, job: IpcJob) {
+    fn process_job(stream: &mut UnixStream, job: IpcJob, loss_tx: &mpsc::Sender<PeerLoss>) {
         let started = Instant::now();
         let cmd_name = Self::cmd_name(job.cmd_id);
         if is_ipc_debug_enabled() {
@@ -793,6 +829,7 @@ impl AnykaIpc {
             // Do NOT reconnect here. A reconnect that resumes with the same
             // handles is exactly the hazard the epoch gate exists to prevent;
             // re-attaching is the supervisor's job and only its job.
+            Self::send_peer_loss(loss_tx, format!("control socket error: {e}"));
         } else if is_ipc_debug_enabled() {
             let (status, resp_len) = result
                 .as_ref()
@@ -962,7 +999,8 @@ impl AnykaIpc {
     /// [`EPOCH_DETACHED`], so [`Self::epoch_gate`] refuses every request until the
     /// supervisor attaches. This is what lets cold start and recovery share one path.
     pub fn new_detached() -> PlatformResult<Self> {
-        let (job_tx, owner_thread) = Self::spawn_owner(None)?;
+        let (loss_tx, loss_rx) = mpsc::channel::<PeerLoss>(PEER_LOSS_QUEUE_CAP);
+        let (job_tx, owner_thread) = Self::spawn_owner(None, loss_tx.clone())?;
         Ok(Self {
             job_tx: Some(job_tx),
             owner_thread: Some(owner_thread),
@@ -970,6 +1008,8 @@ impl AnykaIpc {
             frame_sub_stream: Mutex::new(None),
             shm_reader: Mutex::new(None),
             prefer_sub_on_tie: AtomicBool::new(false),
+            loss_tx,
+            loss_rx: Mutex::new(Some(loss_rx)),
             attached_epoch: AtomicU32::new(EPOCH_DETACHED),
             observed_epoch: AtomicU32::new(EPOCH_DETACHED),
         })
@@ -1103,6 +1143,34 @@ impl AnykaIpc {
             self.detach();
         }
         result
+    }
+
+    /// Report peer loss to the supervisor. Never blocks, never attaches.
+    ///
+    /// `try_send` on a depth-1 channel: if a loss is already queued the supervisor
+    /// has not yet acted on it, and a second report would tell it nothing new.
+    /// Dropping is correct here — blocking the owner thread or the frame reader on a
+    /// busy supervisor would turn a recoverable outage into a stall.
+    fn send_peer_loss(tx: &mpsc::Sender<PeerLoss>, reason: impl Into<String>) {
+        let _ = tx.try_send(PeerLoss {
+            reason: reason.into(),
+        });
+    }
+
+    /// Report peer loss from a detection site that has `&self`.
+    pub(crate) fn report_peer_loss(&self, reason: impl Into<String>) {
+        Self::send_peer_loss(&self.loss_tx, reason);
+    }
+
+    /// Take the peer-loss receiver. Returns `Some` exactly once.
+    ///
+    /// Handing it out twice would split the loss stream between two consumers, so
+    /// only the supervisor ever calls this.
+    pub(crate) fn take_loss_rx(&self) -> Option<mpsc::Receiver<PeerLoss>> {
+        self.loss_rx
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .take()
     }
 
     /// Refresh `observed_epoch` from the ring and report whether it still matches.
@@ -1576,10 +1644,19 @@ impl AnykaIpc {
             }
         } else if main_hup_err || sub_hup_err {
             // A hang-up after the daemon flagged shutdown is orderly, not a failure.
-            return Err(self.shutdown_or(PlatformError::HardwareFailure(format!(
+            let err = self.shutdown_or(PlatformError::HardwareFailure(format!(
                 "push notification socket disconnected (main_hup_err={}, sub_hup_err={})",
                 main_hup_err, sub_hup_err
-            ))));
+            )));
+            // Report only an unexpected hang-up. A shutdown the daemon announced is
+            // not peer loss, and waking the supervisor for it would have it attach
+            // into a daemon that is on its way out.
+            if !self.shm_is_shutdown() {
+                self.report_peer_loss(format!(
+                    "frame socket EOF (main_hup_err={main_hup_err}, sub_hup_err={sub_hup_err})"
+                ));
+            }
+            return Err(err);
         } else {
             return Err(self.shutdown_or(PlatformError::Timeout));
         };
@@ -2893,6 +2970,49 @@ mod tests {
 
         assert_eq!(epoch, 0x1234_5678);
         assert_eq!(version, 3);
+    }
+
+    #[tokio::test]
+    async fn ctrl_error_reports_peer_loss_without_attaching() {
+        let daemon = test_helpers::FakeDaemon::start_then_hangup();
+        let ipc = AnykaIpc::new_with_path(&daemon.socket_path).unwrap();
+        ipc.set_epochs_for_test(4, 4);
+        let mut loss_rx = ipc.take_loss_rx().expect("receiver available once");
+
+        let _ = ipc.request_async(CMD_VI_CLOSE, &[0u8; 8]).await;
+
+        let loss = loss_rx.recv().await.expect("ctrl error must report loss");
+        assert!(
+            loss.reason.contains("control"),
+            "reason should name the site, got {:?}",
+            loss.reason
+        );
+        // The detection site reports; it must never attach or detach on its own.
+        assert_eq!(ipc.attached_epoch_for_test(), 4, "must not self-heal");
+    }
+
+    #[tokio::test]
+    async fn repeated_losses_do_not_block_the_reporter() {
+        // The channel is bounded at 1: one queued loss is as informative as ten,
+        // and the owner thread must never block on a supervisor that is busy.
+        let daemon = test_helpers::FakeDaemon::start(|_c, _r| (AK_SUCCESS_I32, vec![]));
+        let ipc = AnykaIpc::new_with_path(&daemon.socket_path).unwrap();
+        let _rx = ipc.take_loss_rx();
+
+        for _ in 0..100 {
+            ipc.report_peer_loss("synthetic");
+        }
+        // Reaching here without hanging is the assertion.
+    }
+
+    #[test]
+    fn loss_receiver_is_handed_out_once() {
+        let ipc = AnykaIpc::new_detached().unwrap();
+        assert!(ipc.take_loss_rx().is_some());
+        assert!(
+            ipc.take_loss_rx().is_none(),
+            "a second owner would split the loss stream"
+        );
     }
 
     #[tokio::test]

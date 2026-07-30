@@ -11,7 +11,9 @@ use std::time::Duration;
 
 use tokio::sync::watch;
 
-use crate::hal::anyka::ipc::AnykaIpc;
+use tokio::sync::mpsc;
+
+use crate::hal::anyka::ipc::{AnykaIpc, PeerLoss};
 use crate::platform::PlatformResult;
 use crate::platform::common::Platform;
 
@@ -64,16 +66,42 @@ pub fn poll_epoch_once(ipc: &AnykaIpc, tx: &watch::Sender<Availability>) {
     }
 }
 
-/// Poll the ring epoch until loss is detected, then return.
+/// Wait for peer loss, from whichever detector notices first.
 ///
-/// Separated from [`poll_epoch_once`] so the tick logic stays synchronously testable.
-pub async fn watch_epoch_until_loss(ipc: &AnykaIpc, tx: &watch::Sender<Availability>) {
+/// Two independent detectors, because neither covers the other's case:
+/// - the **reports** channel fires immediately on a control-socket error or frame
+///   EOF, but only when there is traffic to fail;
+/// - the **poller** is the only thing that notices while idle, where there is no
+///   traffic and so no socket ever errors.
+///
+/// Scenario 4 of the hardware matrix — restart with push stopped and no RTSP client
+/// — is precisely the case only the poller catches.
+pub async fn watch_epoch_until_loss(
+    ipc: &AnykaIpc,
+    tx: &watch::Sender<Availability>,
+    reports: &mut mpsc::Receiver<PeerLoss>,
+) {
     let mut ticker = tokio::time::interval(EPOCH_POLL_INTERVAL);
     loop {
-        ticker.tick().await;
-        poll_epoch_once(ipc, tx);
-        if *tx.borrow() != Availability::Available {
-            return;
+        tokio::select! {
+            reported = reports.recv() => {
+                match reported {
+                    Some(loss) => {
+                        tracing::warn!(reason = %loss.reason, "peer loss reported by detection site");
+                        let _ = tx.send(Availability::Unavailable);
+                        return;
+                    }
+                    // Senders are held by the IPC client for its whole life, so this
+                    // only happens if the client is being torn down.
+                    None => return,
+                }
+            }
+            _ = ticker.tick() => {
+                poll_epoch_once(ipc, tx);
+                if *tx.borrow() != Availability::Available {
+                    return;
+                }
+            }
         }
     }
 }
@@ -106,11 +134,23 @@ pub trait AttachTarget: Send + Sync {
 /// reuses both rather than growing a second copy that can drift.
 pub struct PlatformAttachTarget {
     platform: Arc<AnykaPlatform>,
+    /// Peer-loss reports from the control owner thread and the frame reader.
+    ///
+    /// `Mutex` only because `wait_for_loss` takes `&self`; there is exactly one
+    /// supervisor, so it is never contended.
+    reports: tokio::sync::Mutex<mpsc::Receiver<PeerLoss>>,
 }
 
 impl PlatformAttachTarget {
     pub fn new(platform: Arc<AnykaPlatform>) -> Self {
-        Self { platform }
+        let reports = platform
+            .ipc()
+            .take_loss_rx()
+            .expect("the supervisor is the only owner of the peer-loss receiver");
+        Self {
+            platform,
+            reports: tokio::sync::Mutex::new(reports),
+        }
     }
 }
 
@@ -133,7 +173,8 @@ impl AttachTarget for PlatformAttachTarget {
     }
 
     async fn wait_for_loss(&self, tx: &watch::Sender<Availability>) {
-        watch_epoch_until_loss(self.platform.ipc(), tx).await;
+        let mut reports = self.reports.lock().await;
+        watch_epoch_until_loss(self.platform.ipc(), tx, &mut reports).await;
     }
 }
 
@@ -293,6 +334,23 @@ mod tests {
         poll_epoch_once(&ipc, &tx);
 
         assert_eq!(*rx.borrow_and_update(), Availability::Available);
+    }
+
+    #[tokio::test]
+    async fn a_reported_loss_wakes_the_wait_without_the_epoch_moving() {
+        // Control-socket errors and frame EOF must not wait out a poll interval.
+        let ipc = AnykaIpc::new_detached().unwrap();
+        ipc.attach_anon_ring_for_test(11);
+        let mut reports = ipc.take_loss_rx().unwrap();
+        let (tx, _rx) = watch::channel(Availability::Available);
+
+        ipc.report_peer_loss("control socket error: broken pipe");
+
+        // The ring epoch is untouched, so only the reports channel can end this.
+        watch_epoch_until_loss(&ipc, &tx, &mut reports).await;
+
+        assert_eq!(*tx.borrow(), Availability::Unavailable);
+        assert_eq!(ipc.observed_epoch_for_test(), 11, "epoch never moved");
     }
 
     #[tokio::test]
