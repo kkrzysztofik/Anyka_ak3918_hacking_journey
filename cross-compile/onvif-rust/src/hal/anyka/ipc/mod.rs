@@ -915,6 +915,50 @@ impl AnykaIpc {
         self.observed_epoch.store(observed, Ordering::Release);
     }
 
+    /// Tear down the current attachment.
+    ///
+    /// Clears the epoch first: from this instant every in-flight request is refused
+    /// by [`Self::epoch_gate`], so no stale handle can race the teardown. Then drops
+    /// the frame sockets and unmaps the ring.
+    ///
+    /// Idempotent — the supervisor calls it on every failed attach attempt as well as
+    /// on peer loss. Uses the poisoned-lock recovery path deliberately: a panicked
+    /// frame reader must not make the connection permanently un-teardownable.
+    pub(crate) fn detach(&self) {
+        self.attached_epoch.store(EPOCH_DETACHED, Ordering::Release);
+        self.observed_epoch.store(EPOCH_DETACHED, Ordering::Release);
+
+        let mut main = self
+            .frame_main_stream
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        *main = None;
+        drop(main);
+
+        let mut sub = self
+            .frame_sub_stream
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        *sub = None;
+        drop(sub);
+
+        let mut shm = self.shm_reader.lock().unwrap_or_else(|e| e.into_inner());
+        *shm = None;
+        drop(shm);
+
+        tracing::info!(event = "ipc_detached", "IPC detached from vendor daemon");
+    }
+
+    #[cfg(test)]
+    pub(crate) fn attached_epoch_for_test(&self) -> u32 {
+        self.attached_epoch.load(Ordering::Acquire)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn observed_epoch_for_test(&self) -> u32 {
+        self.observed_epoch.load(Ordering::Acquire)
+    }
+
     /// Perform the attach handshake and learn this daemon generation's epoch.
     ///
     /// Returns `(epoch, shm_version)`. Exempt from the epoch gate by construction:
@@ -2619,6 +2663,37 @@ mod tests {
             ),
             "expected the I/O error to surface, got {err:?}"
         );
+    }
+
+    // ========================================================================
+    // Attach / detach lifecycle
+    // ========================================================================
+
+    #[test]
+    fn detach_clears_every_resource_and_the_epoch() {
+        let daemon = test_helpers::FakeDaemon::start(|_c, _r| (AK_SUCCESS_I32, vec![]));
+        let ipc = AnykaIpc::new_with_path(&daemon.socket_path).unwrap();
+        ipc.set_epochs_for_test(5, 5);
+
+        ipc.detach();
+
+        assert_eq!(ipc.attached_epoch_for_test(), EPOCH_DETACHED);
+        assert_eq!(ipc.observed_epoch_for_test(), EPOCH_DETACHED);
+        assert!(ipc.frame_main_stream.lock().unwrap().is_none());
+        assert!(ipc.frame_sub_stream.lock().unwrap().is_none());
+        assert!(ipc.shm_reader.lock().unwrap().is_none());
+    }
+
+    #[test]
+    fn detach_is_idempotent() {
+        let daemon = test_helpers::FakeDaemon::start(|_c, _r| (AK_SUCCESS_I32, vec![]));
+        let ipc = AnykaIpc::new_with_path(&daemon.socket_path).unwrap();
+        ipc.set_epochs_for_test(5, 5);
+
+        ipc.detach();
+        ipc.detach(); // must not panic or poison a mutex
+
+        assert_eq!(ipc.attached_epoch_for_test(), EPOCH_DETACHED);
     }
 
     // ========================================================================
