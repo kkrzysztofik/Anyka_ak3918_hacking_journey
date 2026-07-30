@@ -275,6 +275,16 @@ const CMD_ISP_SET_IR_FILTER: i32 = 104;
 const CMD_ISP_SET_WDR: i32 = 105;
 const CMD_GET_ERROR_NO: i32 = 200;
 const CMD_GET_ERROR_STR: i32 = 201;
+
+/// Attach handshake. Returns `[u32 epoch][u32 shm_version]`.
+///
+/// The only command exempt from the epoch gate — it is how the epoch is learned.
+const CMD_HELLO: i32 = 300;
+
+/// Sentinel meaning "not attached to any daemon generation".
+///
+/// The daemon guarantees a non-zero epoch, so 0 can never collide with a real one.
+const EPOCH_DETACHED: u32 = 0;
 const PUSH_NOTIFICATION_TIMEOUT: Duration = Duration::from_millis(200);
 
 /// Timeout for blocking reads/writes on the IPC control socket.
@@ -460,6 +470,7 @@ impl AnykaIpc {
             CMD_ISP_SET_WDR => "ISP_SET_WDR",
             CMD_GET_ERROR_NO => "GET_ERROR_NO",
             CMD_GET_ERROR_STR => "GET_ERROR_STR",
+            CMD_HELLO => "HELLO",
             _ => "UNKNOWN",
         }
     }
@@ -906,6 +917,33 @@ impl AnykaIpc {
             )),
             Err(_) => Err(PlatformError::Timeout),
         }
+    }
+
+    /// Perform the attach handshake and learn this daemon generation's epoch.
+    ///
+    /// Returns `(epoch, shm_version)`. Exempt from the epoch gate by construction:
+    /// `epoch_gate` short-circuits on `CMD_HELLO`.
+    pub(crate) async fn hello(&self) -> PlatformResult<(u32, u32)> {
+        let (status, resp) = self.request_async(CMD_HELLO, &[]).await?;
+        if status != AK_SUCCESS_I32 {
+            return Err(PlatformError::HardwareUnavailable(format!(
+                "vendor daemon rejected CMD_HELLO with status {status}"
+            )));
+        }
+        if resp.len() < 8 {
+            return Err(PlatformError::HardwareFailure(format!(
+                "CMD_HELLO response too short: {} bytes (want 8)",
+                resp.len()
+            )));
+        }
+        let epoch = u32::from_le_bytes([resp[0], resp[1], resp[2], resp[3]]);
+        let version = u32::from_le_bytes([resp[4], resp[5], resp[6], resp[7]]);
+        if epoch == EPOCH_DETACHED {
+            return Err(PlatformError::HardwareUnavailable(
+                "vendor daemon reported epoch 0; it is pre-v3 or misbehaving".to_string(),
+            ));
+        }
+        Ok((epoch, version))
     }
 
     /// Submit a control-socket request and block the current OS thread for the response.
@@ -2480,5 +2518,49 @@ mod tests {
             .request_blocking(CMD_ISP_SET_BRIGHTNESS, &50i32.to_le_bytes())
             .expect("request_blocking should succeed");
         assert_eq!(status, AK_SUCCESS_I32);
+    }
+
+    // ========================================================================
+    // Attach handshake (CMD_HELLO)
+    // ========================================================================
+
+    #[tokio::test]
+    async fn hello_parses_epoch_and_version_from_the_daemon() {
+        let daemon = test_helpers::FakeDaemon::start(|cmd_id, _req| {
+            if cmd_id == CMD_HELLO {
+                let mut resp = Vec::with_capacity(8);
+                resp.extend_from_slice(&0x1234_5678u32.to_le_bytes());
+                resp.extend_from_slice(&3u32.to_le_bytes());
+                (AK_SUCCESS_I32, resp)
+            } else {
+                (AK_FAILED_I32, vec![])
+            }
+        });
+        let ipc = AnykaIpc::new_with_path(&daemon.socket_path).unwrap();
+
+        let (epoch, version) = ipc.hello().await.unwrap();
+
+        assert_eq!(epoch, 0x1234_5678);
+        assert_eq!(version, 3);
+    }
+
+    #[tokio::test]
+    async fn hello_rejects_a_zero_epoch() {
+        // A daemon that reports epoch 0 is either pre-v3 or broken. Either way we
+        // must not pin 0, because 0 is our own "detached" sentinel.
+        let daemon = test_helpers::FakeDaemon::start(|_cmd_id, _req| {
+            let mut resp = Vec::with_capacity(8);
+            resp.extend_from_slice(&0u32.to_le_bytes());
+            resp.extend_from_slice(&3u32.to_le_bytes());
+            (AK_SUCCESS_I32, resp)
+        });
+        let ipc = AnykaIpc::new_with_path(&daemon.socket_path).unwrap();
+
+        let err = ipc.hello().await.unwrap_err();
+
+        assert!(
+            matches!(err, PlatformError::HardwareUnavailable(_)),
+            "expected HardwareUnavailable, got {err:?}"
+        );
     }
 }
