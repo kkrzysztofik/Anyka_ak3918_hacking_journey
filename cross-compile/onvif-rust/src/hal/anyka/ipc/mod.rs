@@ -29,7 +29,7 @@ use std::ffi::c_void;
 use std::io::{ErrorKind, Read, Write};
 use std::os::fd::AsRawFd;
 use std::os::unix::net::UnixStream;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
@@ -421,6 +421,21 @@ pub struct AnykaIpc {
     shm_reader: Mutex<Option<ShmRingReader>>,
     /// Tie-breaker when both channels are ready at once; toggles to prevent starvation.
     prefer_sub_on_tie: AtomicBool,
+    /// Daemon generation this client attached to, or [`EPOCH_DETACHED`].
+    ///
+    /// Set once by `attach`, cleared by `detach`. Every outstanding SDK handle is
+    /// implicitly tagged with this value: the handles are raw pointers minted inside
+    /// the daemon process, so they are only meaningful for the generation that minted
+    /// them.
+    attached_epoch: AtomicU32,
+    /// Latest epoch observed in the ring header, refreshed by the supervisor's poller.
+    ///
+    /// Kept as an atomic rather than read from the mmap on demand so the request path
+    /// never contends with the frame reader for the `shm_reader` mutex.
+    /// 0 means the ring is not stamped — while detached, or because the daemon is
+    /// re-creating it. Never a usable generation: the gate refuses on 0 like any
+    /// other mismatch.
+    observed_epoch: AtomicU32,
 }
 
 impl Drop for AnykaIpc {
@@ -531,6 +546,8 @@ impl AnykaIpc {
             frame_sub_stream: Mutex::new(Some(frame_sub_stream)),
             shm_reader: Mutex::new(Some(shm_reader)),
             prefer_sub_on_tie: AtomicBool::new(false),
+            attached_epoch: AtomicU32::new(EPOCH_DETACHED),
+            observed_epoch: AtomicU32::new(EPOCH_DETACHED),
         })
     }
 
@@ -564,6 +581,8 @@ impl AnykaIpc {
             frame_sub_stream: Mutex::new(frame_sub_stream),
             shm_reader: Mutex::new(shm_reader),
             prefer_sub_on_tie: AtomicBool::new(false),
+            attached_epoch: AtomicU32::new(EPOCH_DETACHED),
+            observed_epoch: AtomicU32::new(EPOCH_DETACHED),
         })
     }
 
@@ -588,6 +607,8 @@ impl AnykaIpc {
             frame_sub_stream: Mutex::new(frame_sub_stream),
             shm_reader: Mutex::new(shm_reader),
             prefer_sub_on_tie: AtomicBool::new(false),
+            attached_epoch: AtomicU32::new(EPOCH_DETACHED),
+            observed_epoch: AtomicU32::new(EPOCH_DETACHED),
         }
     }
 
@@ -903,6 +924,7 @@ impl AnykaIpc {
         cmd_id: i32,
         req_data: &[u8],
     ) -> PlatformResult<(i32, Vec<u8>)> {
+        self.epoch_gate(cmd_id)?;
         let sender = self.job_tx.as_ref().ok_or_else(|| {
             PlatformError::HardwareUnavailable("IPC owner thread stopped".to_string())
         })?;
@@ -917,6 +939,45 @@ impl AnykaIpc {
             )),
             Err(_) => Err(PlatformError::Timeout),
         }
+    }
+
+    /// Refuse a request whose SDK handles belong to a dead daemon generation.
+    ///
+    /// This is the single chokepoint every handle must pass through: all 39 HAL
+    /// trait methods are implemented on `AnykaIpc` and funnel into `request_async` /
+    /// `request_blocking`. Checking here makes every outstanding handle inert at
+    /// once, which is why handle ownership does not need to move.
+    fn epoch_gate(&self, cmd_id: i32) -> PlatformResult<()> {
+        if cmd_id == CMD_HELLO {
+            return Ok(());
+        }
+        let attached = self.attached_epoch.load(Ordering::Acquire);
+        if attached == EPOCH_DETACHED {
+            return Err(PlatformError::HardwareUnavailable(
+                "not attached to a vendor daemon".to_string(),
+            ));
+        }
+        let observed = self.observed_epoch.load(Ordering::Acquire);
+        // No exemption for observed == 0. Once attached, `attached` is a non-zero
+        // v3 epoch (hello() rejects 0) and finish_attach seeds `observed` before
+        // `attached`, so there is no legitimate "not yet polled" window. A zero
+        // read therefore means the daemon is re-creating the ring right now —
+        // vd_ring_create() memsets the header — which is precisely when stale
+        // handles must be refused, not waved through.
+        if observed != attached {
+            return Err(PlatformError::HardwareUnavailable(format!(
+                "vendor daemon restarted (attached epoch {attached}, observed {observed}); \
+                 handles from the previous generation are stale"
+            )));
+        }
+        Ok(())
+    }
+
+    /// Force both epochs, standing in for attach and the poller during tests.
+    #[cfg(test)]
+    pub(crate) fn set_epochs_for_test(&self, attached: u32, observed: u32) {
+        self.attached_epoch.store(attached, Ordering::Release);
+        self.observed_epoch.store(observed, Ordering::Release);
     }
 
     /// Perform the attach handshake and learn this daemon generation's epoch.
@@ -957,6 +1018,7 @@ impl AnykaIpc {
         cmd_id: i32,
         req_data: &[u8],
     ) -> PlatformResult<(i32, Vec<u8>)> {
+        self.epoch_gate(cmd_id)?;
         let sender = self.job_tx.as_ref().ok_or_else(|| {
             PlatformError::HardwareUnavailable("IPC owner thread stopped".to_string())
         })?;
@@ -1695,6 +1757,9 @@ mod tests {
     async fn test_ipc_connect_and_simple_command_returns_success() {
         let daemon = FakeDaemon::start(|_cmd_id, _req| (AK_SUCCESS_I32, vec![]));
         let ipc = AnykaIpc::new_with_path(&daemon.socket_path).unwrap();
+        // Stand in for a completed attach: the epoch gate refuses every
+        // request while detached.
+        ipc.set_epochs_for_test(1, 1);
 
         // set_brightness is part of ImagingHalTrait; accessible from within the crate.
         let result =
@@ -1728,6 +1793,9 @@ mod tests {
             (AK_SUCCESS_I32, handle_value.to_le_bytes().to_vec())
         });
         let ipc = AnykaIpc::new_with_path(&daemon.socket_path).unwrap();
+        // Stand in for a completed attach: the epoch gate refuses every
+        // request while detached.
+        ipc.set_epochs_for_test(1, 1);
 
         let handle = {
             use crate::hal::common::sdk_types::VideoDevType;
@@ -1749,6 +1817,9 @@ mod tests {
     async fn test_ipc_multiple_requests_same_connection_all_succeed() {
         let daemon = FakeDaemon::start(|_cmd_id, _req| (AK_SUCCESS_I32, vec![]));
         let ipc = AnykaIpc::new_with_path(&daemon.socket_path).unwrap();
+        // Stand in for a completed attach: the epoch gate refuses every
+        // request while detached.
+        ipc.set_epochs_for_test(1, 1);
 
         for i in 0..3 {
             let result =
@@ -2273,6 +2344,9 @@ mod tests {
             (AK_SUCCESS_I32, vec![])
         });
         let ipc = AnykaIpc::new_with_path(&daemon.socket_path).unwrap();
+        // Stand in for a completed attach: the epoch gate refuses every
+        // request while detached.
+        ipc.set_epochs_for_test(1, 1);
         let stream_handle = 0x1234_5678usize as *mut std::ffi::c_void;
 
         ipc.start_push(stream_handle, StreamId::VideoSub).unwrap();
@@ -2302,6 +2376,9 @@ mod tests {
             (AK_SUCCESS_I32, vec![])
         });
         let ipc = AnykaIpc::new_with_path(&daemon.socket_path).unwrap();
+        // Stand in for a completed attach: the epoch gate refuses every
+        // request while detached.
+        ipc.set_epochs_for_test(1, 1);
 
         ipc.stop_push(Some(StreamId::VideoMain)).unwrap();
 
@@ -2325,6 +2402,9 @@ mod tests {
             (AK_SUCCESS_I32, vec![])
         });
         let ipc = AnykaIpc::new_with_path(&daemon.socket_path).unwrap();
+        // Stand in for a completed attach: the epoch gate refuses every
+        // request while detached.
+        ipc.set_epochs_for_test(1, 1);
 
         ipc.stop_push(None).unwrap();
 
@@ -2347,6 +2427,9 @@ mod tests {
         let daemon = FakeDaemon::start_with_delay(delay, |_cmd_id, _req| (AK_SUCCESS_I32, vec![]));
 
         let ipc = AnykaIpc::new_with_path(&daemon.socket_path).unwrap();
+        // Stand in for a completed attach: the epoch gate refuses every
+        // request while detached.
+        ipc.set_epochs_for_test(1, 1);
 
         // Time the request - it should timeout
         let start = Instant::now();
@@ -2420,6 +2503,9 @@ mod tests {
     async fn test_request_async_success() {
         let daemon = FakeDaemon::start(|_cmd_id, _req| (AK_SUCCESS_I32, vec![]));
         let ipc = AnykaIpc::new_with_path(&daemon.socket_path).unwrap();
+        // Stand in for a completed attach: the epoch gate refuses every
+        // request while detached.
+        ipc.set_epochs_for_test(1, 1);
 
         let (status, resp) = ipc
             .request_async(CMD_ISP_SET_BRIGHTNESS, &50i32.to_le_bytes())
@@ -2438,6 +2524,9 @@ mod tests {
             (AK_SUCCESS_I32, vec![])
         });
         let ipc = AnykaIpc::new_with_path(&daemon.socket_path).unwrap();
+        // Stand in for a completed attach: the epoch gate refuses every
+        // request while detached.
+        ipc.set_epochs_for_test(1, 1);
 
         let start = Instant::now();
         let result = ipc
@@ -2495,6 +2584,9 @@ mod tests {
     fn test_send_request_within_multi_thread_block_on_succeeds() {
         let daemon = FakeDaemon::start(|_cmd_id, _req| (AK_SUCCESS_I32, vec![]));
         let ipc = AnykaIpc::new_with_path(&daemon.socket_path).unwrap();
+        // Stand in for a completed attach: the epoch gate refuses every
+        // request while detached.
+        ipc.set_epochs_for_test(1, 1);
 
         let rt = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(2)
@@ -2513,6 +2605,9 @@ mod tests {
     fn test_request_blocking_from_os_thread_succeeds() {
         let daemon = FakeDaemon::start(|_cmd_id, _req| (AK_SUCCESS_I32, vec![]));
         let ipc = AnykaIpc::new_with_path(&daemon.socket_path).unwrap();
+        // Stand in for a completed attach: the epoch gate refuses every
+        // request while detached.
+        ipc.set_epochs_for_test(1, 1);
 
         let (status, _resp) = ipc
             .request_blocking(CMD_ISP_SET_BRIGHTNESS, &50i32.to_le_bytes())
@@ -2542,6 +2637,81 @@ mod tests {
 
         assert_eq!(epoch, 0x1234_5678);
         assert_eq!(version, 3);
+    }
+
+    // ========================================================================
+    // Epoch gate
+    // ========================================================================
+
+    #[tokio::test]
+    async fn request_is_refused_without_writing_when_the_epoch_moved() {
+        use std::sync::Arc as StdArc;
+        use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
+
+        let seen = StdArc::new(AtomicUsize::new(0));
+        let seen_in_daemon = StdArc::clone(&seen);
+        let daemon = test_helpers::FakeDaemon::start(move |_cmd_id, _req| {
+            seen_in_daemon.fetch_add(1, AtomicOrdering::SeqCst);
+            (AK_SUCCESS_I32, vec![])
+        });
+        let ipc = AnykaIpc::new_with_path(&daemon.socket_path).unwrap();
+
+        // Attached to generation 7, but the ring now reports generation 8.
+        ipc.set_epochs_for_test(7, 8);
+
+        let err = ipc
+            .request_async(CMD_VI_CLOSE, &[0u8; 8])
+            .await
+            .unwrap_err();
+
+        assert!(matches!(err, PlatformError::HardwareUnavailable(_)));
+        assert_eq!(
+            seen.load(AtomicOrdering::SeqCst),
+            0,
+            "a stale handle must never reach the daemon"
+        );
+    }
+
+    #[tokio::test]
+    async fn request_is_refused_when_detached() {
+        let daemon = test_helpers::FakeDaemon::start(|_c, _r| (AK_SUCCESS_I32, vec![]));
+        let ipc = AnykaIpc::new_with_path(&daemon.socket_path).unwrap();
+        ipc.set_epochs_for_test(EPOCH_DETACHED, 0);
+
+        let err = ipc
+            .request_async(CMD_VI_CLOSE, &[0u8; 8])
+            .await
+            .unwrap_err();
+
+        assert!(matches!(err, PlatformError::HardwareUnavailable(_)));
+    }
+
+    #[tokio::test]
+    async fn request_passes_when_epochs_agree() {
+        let daemon = test_helpers::FakeDaemon::start(|_c, _r| (AK_SUCCESS_I32, vec![]));
+        let ipc = AnykaIpc::new_with_path(&daemon.socket_path).unwrap();
+        ipc.set_epochs_for_test(7, 7);
+
+        let (status, _) = ipc.request_async(CMD_VI_CLOSE, &[0u8; 8]).await.unwrap();
+
+        assert_eq!(status, AK_SUCCESS_I32);
+    }
+
+    #[test]
+    fn hello_is_exempt_from_the_gate() {
+        let daemon = test_helpers::FakeDaemon::start(|_c, _r| {
+            let mut resp = Vec::new();
+            resp.extend_from_slice(&9u32.to_le_bytes());
+            resp.extend_from_slice(&3u32.to_le_bytes());
+            (AK_SUCCESS_I32, resp)
+        });
+        let ipc = AnykaIpc::new_with_path(&daemon.socket_path).unwrap();
+        ipc.set_epochs_for_test(EPOCH_DETACHED, 0);
+
+        // Must succeed while detached, or attach could never happen.
+        let (status, _) = ipc.request_blocking(CMD_HELLO, &[]).unwrap();
+
+        assert_eq!(status, AK_SUCCESS_I32);
     }
 
     #[tokio::test]
