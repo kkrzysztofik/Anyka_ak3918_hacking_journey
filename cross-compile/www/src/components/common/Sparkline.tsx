@@ -34,6 +34,17 @@ function buildPaths(
   return { line, area: `${line}L${VIEW_W},${VIEW_H}L0,${VIEW_H}Z` };
 }
 
+/** "CPU 42%, Memory 61%" — the label alone conveys nothing to a screen reader. */
+function describe(data: Array<Record<string, number>>, series: SparklineSeries[]) {
+  const latest = data[data.length - 1];
+  return series
+    .map((s) => {
+      const value = latest?.[s.key];
+      return value === undefined ? s.label : `${s.label} ${value}${s.unit ?? ''}`;
+    })
+    .join(', ');
+}
+
 export function Sparkline({ data, series, domain, className }: Readonly<SparklineProps>) {
   const gradientId = useId();
 
@@ -51,7 +62,7 @@ export function Sparkline({ data, series, domain, className }: Readonly<Sparklin
       preserveAspectRatio="none"
       className={className ?? 'h-full w-full'}
       role="img"
-      aria-label={series.map((s) => s.label).join(', ')}
+      aria-label={describe(data, series)}
     >
       <defs>
         {series.map((s) => (

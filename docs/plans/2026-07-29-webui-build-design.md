@@ -68,11 +68,11 @@ comparison, and a device smoke test at `192.168.2.198`.
 Touches `vite.config.ts`, `scripts/build_sd_contents.sh`, `package.json`. No
 application source.
 
-- Replace both `viteCompression` plugins with `scripts/precompress_www.mjs`
+- Replace both `viteCompression` plugins with `scripts/precompress.mjs`
   using Node's built-in `zlib.brotliCompressSync` and `gzipSync`. The `brotli`
   CLI is not installed on the build host and Node's zlib needs no dependency.
-  **The script exits non-zero if any asset produces no output** — the silent
-  failure mode becomes a build failure.
+  **The script exits non-zero when it finds zero compressible assets** — the
+  silent failure mode becomes a build failure.
 - Move `esbuild.target` to `build.target: 'es2024'`.
 - Switch `minify: 'terser'` to `'oxc'` (the Vite 8 default; terser was an
   explicit opt-in here). `drop_console` and `drop_debugger` move to
@@ -81,12 +81,12 @@ application source.
   use it.
 - Route `zod` and `@hookform/resolvers` to the same chunk to remove the
   duplicate.
-- Skip `npm ci` when `package-lock.json` matches
-  `node_modules/.package-lock.json`.
+- Skip `npm ci` when the `package-lock.json` hash matches the stamp in
+  `node_modules/.anyka-lock-hash`.
 - Remove the deprecated `@types/dompurify` stub package.
 - Run `type-check` and `lint` before `vite build` in the SD path. `vite build`
   does not typecheck, so type errors currently reach the SD card.
-- Raise `chunkSizeWarningLimit` from 200 to 400 with a comment naming the
+- Raise `chunkSizeWarningLimit` from 200 to 350 with a comment naming the
   reason. After Phase 3 the only chunk above 200 kB should be `vendor`.
 
 Verification: `find www -name '*.br' | wc -l` returns non-zero.

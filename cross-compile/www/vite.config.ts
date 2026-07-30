@@ -109,7 +109,7 @@ export default defineConfig(() => ({
     outDir: '../../SD_card_contents/anyka_hack/onvif/www',
     emptyOutDir: true,
     sourcemap: false,
-    rollupOptions: {
+    rolldownOptions: {
       output: {
         minify: {
           compress: {

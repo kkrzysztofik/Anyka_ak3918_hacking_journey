@@ -306,15 +306,21 @@ Before marking any task as complete, verify:
 
 1. **Note remaining work** - Capture follow-ups in commit messages, PR description, or whatever tracker you choose later
 2. **Run quality gates** (if code changed) - Tests, linters, builds
-3. **PUSH TO REMOTE** - This is MANDATORY:
+3. **Commit everything** - `git status` must be clean before you rebase; an
+   uncommitted change will block `git pull --rebase` or be silently left behind
+   ```bash
+   git add -A
+   git commit
+   ```
+4. **PUSH TO REMOTE** - This is MANDATORY:
    ```bash
    git pull --rebase
    git push
    git status  # MUST show "up to date with origin"
    ```
-4. **Clean up** - Clear stashes, prune remote branches
-5. **Verify** - All changes committed AND pushed
-6. **Hand off** - Provide context for next session
+5. **Clean up** - Clear stashes, prune remote branches
+6. **Verify** - All changes committed AND pushed
+7. **Hand off** - Provide context for next session
 
 **CRITICAL RULES:**
 - Work is NOT complete until `git push` succeeds

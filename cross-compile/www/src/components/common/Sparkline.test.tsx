@@ -69,4 +69,25 @@ describe('Sparkline', () => {
     render(<Sparkline data={[]} series={[{ key: 'value', label: 'CPU', color: '#ef4444' }]} />);
     expect(screen.queryAllByTestId('sparkline-area')).toHaveLength(0);
   });
+
+  it('announces the latest value with its unit per series', () => {
+    render(
+      <Sparkline
+        data={[
+          { time: 0, upload: 2, download: 4 },
+          { time: 1, upload: 3, download: 5 },
+        ]}
+        series={[
+          { key: 'download', label: 'Download', color: '#3b82f6', unit: ' Mbps' },
+          { key: 'upload', label: 'Upload', color: '#22c55e', unit: ' Mbps' },
+        ]}
+      />,
+    );
+    expect(screen.getByRole('img')).toHaveAttribute('aria-label', 'Download 5 Mbps, Upload 3 Mbps');
+  });
+
+  it('falls back to the bare label for a series with no unit', () => {
+    render(<Sparkline data={points} series={[{ key: 'value', label: 'CPU', color: '#ef4444' }]} />);
+    expect(screen.getByRole('img')).toHaveAttribute('aria-label', 'CPU 30');
+  });
 });

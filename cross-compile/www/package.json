@@ -13,7 +13,7 @@
     "type-check:ts7": "tsc -p tsconfig.json --noEmit",
     "type-check:ts6": "tsc6 -p tsconfig.json --noEmit",
     "test": "vitest run",
-    "analyze": "vite build --outDir /tmp/webui-analyze --sourcemap --emptyOutDir >/dev/null && node scripts/analyze-bundle.mjs /tmp/webui-analyze/js && rm -rf /tmp/webui-analyze",
+    "analyze": "out=$(mktemp -d) && trap 'rm -rf \"$out\"' EXIT && vite build --outDir \"$out\" --sourcemap --emptyOutDir >/dev/null && node scripts/analyze-bundle.mjs \"$out/js\"",
     "test:coverage": "vitest run --coverage",
     "prettier": "prettier --write ."
   },

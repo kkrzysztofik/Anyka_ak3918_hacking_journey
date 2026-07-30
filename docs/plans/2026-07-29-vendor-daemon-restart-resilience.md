@@ -26,7 +26,8 @@ export HOST=x86_64-unknown-linux-gnu
 - Host-side tests always pass `--target $HOST`.
 - Run a single test with: `$CARGO test --target $HOST --lib -- <test_name> --exact --nocapture`
 - Before every commit: `$CARGO clippy --target $HOST -- -D warnings` and `$CARGO fmt --check`.
-- Pipe long command output through `distill` with an explicit question, per the repo convention.
+- Command output below is shown unfiltered. Long runs are easier to read piped
+  through `2>&1 | tail -30`, or whatever summariser you have to hand.
 
 **Field offsets in the ring header** (needed repeatedly, all `u32`):
 
@@ -196,7 +197,7 @@ Expected: `test_ring_epoch: PASS`
 **Step 5: Verify the daemon still cross-compiles**
 
 ```bash
-make -C cross-compile/vendor-daemon 2>&1 | distill "did the build succeed? Return OK or FAIL plus any errors."
+make -C cross-compile/vendor-daemon 2>&1
 ```
 
 Expected: OK.
@@ -245,7 +246,7 @@ fn epoch_reads_back_the_value_the_daemon_stamped() {
 **Step 2: Run it to verify it fails**
 
 ```bash
-$CARGO test --target $HOST --lib -- epoch_reads_back_the_value_the_daemon_stamped --exact 2>&1 | distill "did it compile and pass? Return PASS, FAIL, or COMPILE_ERROR plus the error."
+$CARGO test --target $HOST --lib -- epoch_reads_back_the_value_the_daemon_stamped --exact 2>&1
 ```
 
 Expected: COMPILE_ERROR — no method `epoch`.
@@ -295,7 +296,7 @@ Add next to `is_shutdown()`:
 **Step 4: Run the test to verify it passes**
 
 ```bash
-$CARGO test --target $HOST --lib -- epoch_reads_back_the_value_the_daemon_stamped --exact 2>&1 | distill "PASS or FAIL?"
+$CARGO test --target $HOST --lib -- epoch_reads_back_the_value_the_daemon_stamped --exact 2>&1
 ```
 
 Expected: PASS.
@@ -303,7 +304,7 @@ Expected: PASS.
 **Step 5: Run the whole shm_ring suite — the struct changed**
 
 ```bash
-$CARGO test --target $HOST --lib -- shm_ring 2>&1 | distill "How many passed/failed? List failing test names."
+$CARGO test --target $HOST --lib -- shm_ring 2>&1
 ```
 
 Expected: all pass. If any test asserts on `_padding` length or `VD_SHM_VERSION == 2`, update it — the version bump is intentional.
@@ -372,7 +373,7 @@ Dispatch it **before** the `acquire_control()` check at `dispatcher.c:176` — a
 **Step 2: Verify it builds**
 
 ```bash
-make -C cross-compile/vendor-daemon 2>&1 | distill "did the build succeed? Return OK or FAIL plus errors."
+make -C cross-compile/vendor-daemon 2>&1
 ```
 
 Expected: OK.
@@ -439,7 +440,7 @@ async fn hello_rejects_a_zero_epoch() {
 **Step 2: Run to verify it fails**
 
 ```bash
-$CARGO test --target $HOST --lib -- hello_ 2>&1 | distill "PASS, FAIL, or COMPILE_ERROR? Include the error."
+$CARGO test --target $HOST --lib -- hello_ 2>&1
 ```
 
 Expected: COMPILE_ERROR — no `CMD_HELLO`, no `hello`.
@@ -494,7 +495,7 @@ Add `"HELLO"` to `cmd_name()`. Then:
 **Step 4: Run to verify it passes**
 
 ```bash
-$CARGO test --target $HOST --lib -- hello_ 2>&1 | distill "PASS or FAIL? List failures."
+$CARGO test --target $HOST --lib -- hello_ 2>&1
 ```
 
 Expected: both PASS.
@@ -602,7 +603,7 @@ fn hello_is_exempt_from_the_gate() {
 **Step 2: Run to verify it fails**
 
 ```bash
-$CARGO test --target $HOST --lib -- epoch 2>&1 | distill "PASS, FAIL, or COMPILE_ERROR? Include the error."
+$CARGO test --target $HOST --lib -- epoch 2>&1
 ```
 
 Expected: COMPILE_ERROR — no `set_epochs_for_test`.
@@ -676,7 +677,7 @@ Add `use std::sync::atomic::AtomicU32;` to the imports.
 **Step 4: Run to verify it passes**
 
 ```bash
-$CARGO test --target $HOST --lib -- epoch 2>&1 | distill "PASS or FAIL? List failures."
+$CARGO test --target $HOST --lib -- epoch 2>&1
 ```
 
 Expected: all PASS.
@@ -684,7 +685,7 @@ Expected: all PASS.
 **Step 5: Run the full suite — this gate touches every IPC caller**
 
 ```bash
-$CARGO test --target $HOST 2>&1 | distill "How many passed/failed? List every failing test name."
+$CARGO test --target $HOST 2>&1
 ```
 
 Expected: **failures.** Existing tests construct `AnykaIpc` and issue requests without attaching, so the gate now refuses them. Fix each by calling `set_epochs_for_test(1, 1)` after construction. Do **not** weaken the gate to make tests pass — the tests are asserting the old, unsafe behaviour.
@@ -762,7 +763,7 @@ Add the helper to `test_helpers`:
 **Step 2: Run to verify it fails**
 
 ```bash
-$CARGO test --target $HOST --lib -- ctrl_io_error_does_not_silently_reconnect --exact 2>&1 | distill "PASS, FAIL, or COMPILE_ERROR?"
+$CARGO test --target $HOST --lib -- ctrl_io_error_does_not_silently_reconnect --exact 2>&1
 ```
 
 Expected: COMPILE_ERROR, then FAIL once the helper exists (the current code reconnects).
@@ -792,7 +793,7 @@ Expected: COMPILE_ERROR, then FAIL once the helper exists (the current code reco
 **Step 4: Run to verify it passes**
 
 ```bash
-$CARGO test --target $HOST --lib -- ctrl_io_error 2>&1 | distill "PASS or FAIL?"
+$CARGO test --target $HOST --lib -- ctrl_io_error 2>&1
 ```
 
 Expected: PASS.
@@ -800,7 +801,7 @@ Expected: PASS.
 **Step 5: Fix the timeout tests that depended on reconnect semantics**
 
 ```bash
-$CARGO test --target $HOST --lib -- timeout 2>&1 | distill "List failing test names and their assertion messages."
+$CARGO test --target $HOST --lib -- timeout 2>&1
 ```
 
 The tests at `:2309`, `:2353`, `:2399`, `:2428` use `start_with_delay` and assert single-attempt timing. Their comment at `:313-327` explains they relied on reconnects failing fast against absent production paths. That reasoning is now moot; the timing assertions should get simpler, not looser. Update the comments to match reality.
@@ -858,7 +859,7 @@ fn detach_is_idempotent() {
 **Step 2: Run to verify it fails**
 
 ```bash
-$CARGO test --target $HOST --lib -- detach_ 2>&1 | distill "PASS, FAIL, or COMPILE_ERROR?"
+$CARGO test --target $HOST --lib -- detach_ 2>&1
 ```
 
 Expected: COMPILE_ERROR.
@@ -914,7 +915,7 @@ Expected: COMPILE_ERROR.
 **Step 4: Run to verify it passes**
 
 ```bash
-$CARGO test --target $HOST --lib -- detach_ 2>&1 | distill "PASS or FAIL?"
+$CARGO test --target $HOST --lib -- detach_ 2>&1
 ```
 
 **Step 5: Commit**
@@ -985,7 +986,7 @@ async fn attach_pins_the_epoch_when_hello_and_ring_agree() {
 **Step 2: Run to verify it fails**
 
 ```bash
-$CARGO test --target $HOST --lib -- attach_ 2>&1 | distill "PASS, FAIL, or COMPILE_ERROR?"
+$CARGO test --target $HOST --lib -- attach_ 2>&1
 ```
 
 **Step 3: Implement**
@@ -1028,6 +1029,17 @@ $CARGO test --target $HOST --lib -- attach_ 2>&1 | distill "PASS, FAIL, or COMPI
             .frame_main_stream
             .lock()
             .unwrap_or_else(|e| e.into_inner()) = Some(frame_main);
+
+        // Control last of the three, per the documented order. `finish_attach`
+        // issues CMD_HELLO through the owner thread, which replies
+        // HardwareUnavailable while its stream is `None` (Task 9), so the owner
+        // must be holding a live stream before the handshake runs.
+        let ctrl = UnixStream::connect(CTRL_SOCKET_PATH).map_err(|e| {
+            PlatformError::HardwareUnavailable(format!(
+                "control socket {CTRL_SOCKET_PATH} not ready: {e}"
+            ))
+        })?;
+        self.give_ctrl_stream(ctrl);
 
         let reader = ShmRingReader::open()?.ok_or_else(|| {
             PlatformError::HardwareUnavailable("shared memory ring not present".to_string())
@@ -1079,7 +1091,7 @@ $CARGO test --target $HOST --lib -- attach_ 2>&1 | distill "PASS, FAIL, or COMPI
 **Step 4: Run to verify it passes**
 
 ```bash
-$CARGO test --target $HOST --lib -- attach_ 2>&1 | distill "PASS or FAIL?"
+$CARGO test --target $HOST --lib -- attach_ 2>&1
 ```
 
 **Step 5: Commit**
@@ -1131,12 +1143,12 @@ Add a constructor that builds the owner thread with a *lazily* connected control
     pub fn new_detached() -> PlatformResult<Self> { /* … */ }
 ```
 
-**Note:** the control-socket owner thread currently requires a connected `UnixStream` up front (`spawn_owner` at `:672`). Change `run_owner` to hold `Option<UnixStream>` and reply `HardwareUnavailable` to any job while it is `None`; `attach` hands it a connected stream. This is the one structural change in the phase — do it here, not spread across tasks.
+**Note:** the control-socket owner thread currently requires a connected `UnixStream` up front (`spawn_owner` at `:672`). Change `run_owner` to hold `Option<UnixStream>` and reply `HardwareUnavailable` to any job while it is `None`. Expose `give_ctrl_stream(UnixStream)` and `drop_ctrl_stream()` so the owner's stream can be installed and cleared without respawning the thread — `try_attach` (Task 8) calls the former, `detach` the latter. This is the one structural change in the phase — do it here, not spread across tasks. Task 8's `try_attach` is written against `give_ctrl_stream`, so if you are running the tasks strictly in order, stub it as `unimplemented!()` in Task 8 and fill it in here.
 
 **Step 4: Run the full suite**
 
 ```bash
-$CARGO test --target $HOST 2>&1 | distill "How many passed/failed? List failing test names."
+$CARGO test --target $HOST 2>&1
 ```
 
 **Step 5: Commit**
@@ -1202,7 +1214,7 @@ fn circuit_breaker_resets_on_success() {
 **Step 2: Run to verify it fails**
 
 ```bash
-$CARGO test --target $HOST --lib -- supervisor 2>&1 | distill "PASS, FAIL, or COMPILE_ERROR?"
+$CARGO test --target $HOST --lib -- supervisor 2>&1
 ```
 
 **Step 3: Implement**
@@ -1411,9 +1423,29 @@ so cleanup has to live here to cover every way the client can vanish."
 ### Task 15: Reject stale-epoch handle commands in the dispatcher
 
 **Files:**
-- Modify: `cross-compile/vendor-daemon/src/dispatcher.c:176`
+- Modify: `cross-compile/vendor-daemon/src/dispatcher.c:176` (`req_read_handle`), `handlers_vi.c:59-64`, `handlers_venc.c` (every site returning a raw pointer as a handle)
 
 Defence in depth: the client already refuses to send, so this only catches bugs and version skew. Return a distinct status the client can log.
+
+**The handle must carry its epoch, or this check cannot work.** Today
+`handle_vi_open()` returns `ak_vi_open()`'s pointer straight through as a `u64`
+and `req_read_handle()` casts it back — no session tag (see design finding 2).
+A bare registry of live pointers is *not* sufficient: after a restart the
+allocator can hand out the same address, so a stale handle from the previous
+generation would look valid. Bind the epoch into the handle itself:
+
+- Stop returning pointers. Keep a per-generation table of open SDK objects and
+  return an opaque `u64` of `((u64)epoch << 32) | slot_index`. The table is
+  built empty at daemon start, so it holds nothing from a previous generation.
+- `req_read_handle()` splits the value, rejects when the high 32 bits differ
+  from the daemon's current `epoch`, then bounds-checks `slot_index` and
+  rejects a freed slot. Only then does it yield the pointer.
+- Reject with a status distinct from the generic invalid-argument one — the
+  client logs "stale epoch" rather than a confusing argument error. Add
+  `VD_STATUS_STALE_EPOCH` alongside the existing status codes.
+
+This also removes the raw-pointer marshalling across the process boundary,
+which is worth doing on its own.
 
 **Commit:**
 

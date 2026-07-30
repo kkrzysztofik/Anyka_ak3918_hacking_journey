@@ -435,9 +435,9 @@ matters, because `@hookform` is matched by the existing `ui-vendor` branch:
 **Step 3: Verify the duplicate is gone**
 
 ```bash
-npx vite build --outDir /tmp/zod-check --sourcemap --emptyOutDir >/dev/null 2>&1
-grep -l "node_modules/zod/" /tmp/zod-check/js/*.js.map | wc -l
-rm -rf /tmp/zod-check
+out=$(mktemp -d) && trap 'rm -rf "$out"' EXIT
+npx vite build --outDir "$out" --sourcemap --emptyOutDir >/dev/null 2>&1
+grep -l "node_modules/zod/" "$out"/js/*.js.map | wc -l
 ```
 
 Expected: `1`. If still `2`, your rule is being shadowed — check that it
@@ -709,11 +709,12 @@ for (const file of maps) {
 
 **Step 2: Add the npm script**
 
-In `package.json` scripts — note this builds to `/tmp`, never to the SD output
-directory, so running it cannot disturb a deployed build:
+In `package.json` scripts — note this builds to a private `mktemp -d`
+directory, never to the SD output directory, so running it cannot disturb a
+deployed build, and the `trap` reclaims only that directory on exit:
 
 ```json
-    "analyze": "vite build --outDir /tmp/webui-analyze --sourcemap --emptyOutDir >/dev/null && node scripts/analyze-bundle.mjs /tmp/webui-analyze/js && rm -rf /tmp/webui-analyze",
+    "analyze": "out=$(mktemp -d) && trap 'rm -rf \"$out\"' EXIT && vite build --outDir \"$out\" --sourcemap --emptyOutDir >/dev/null && node scripts/analyze-bundle.mjs \"$out/js\"",
 ```
 
 **Step 3: Run it**

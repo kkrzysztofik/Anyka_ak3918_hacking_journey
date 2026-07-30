@@ -16,12 +16,12 @@ export function setAuthHeaderGetter(getter: (() => Promise<string | null>) | nul
   getAuthHeader = getter;
 }
 
-const DEFAULT_HEADERS: Readonly<Record<string, string>> = {
+export const DEFAULT_HEADERS: Readonly<Record<string, string>> = {
   'Content-Type': 'application/soap+xml; charset=utf-8',
   Accept: 'application/soap+xml, application/xml, */*',
 };
 
-const DEFAULT_TIMEOUT_MS = 10_000;
+export const DEFAULT_TIMEOUT_MS = 10_000;
 
 export class ApiError extends Error {
   constructor(
@@ -62,15 +62,18 @@ async function request(
   body: string,
   config: ApiRequestConfig = {},
 ): Promise<ApiResponse> {
-  const headers: Record<string, string> = {
-    ...DEFAULT_HEADERS,
-    ...config.headers,
-  };
+  // Headers, not a plain object: header names are case-insensitive, so a caller
+  // passing `authorization` must suppress the injected `Authorization` rather
+  // than end up with both merged into one comma-joined value.
+  const headers = new Headers(DEFAULT_HEADERS);
+  for (const [name, value] of Object.entries(config.headers ?? {})) {
+    headers.set(name, value);
+  }
 
-  if (!headers.Authorization && getAuthHeader) {
+  if (!headers.has('Authorization') && getAuthHeader) {
     const authHeader = await getAuthHeader();
     if (authHeader) {
-      headers.Authorization = authHeader;
+      headers.set('Authorization', authHeader);
     }
   }
 
@@ -98,20 +101,8 @@ async function request(
 }
 
 export const apiClient: {
-  defaults: {
-    timeout: number;
-    headers: Record<string, string>;
-  };
-  post: (
-    url: string,
-    body: string,
-    config?: ApiRequestConfig,
-  ) => Promise<ApiResponse>;
+  post: (url: string, body: string, config?: ApiRequestConfig) => Promise<ApiResponse>;
 } = {
-  defaults: {
-    timeout: DEFAULT_TIMEOUT_MS,
-    headers: { ...DEFAULT_HEADERS },
-  },
   post: request,
 };
 

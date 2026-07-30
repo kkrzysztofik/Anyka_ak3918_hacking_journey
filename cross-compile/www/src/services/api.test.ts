@@ -3,7 +3,14 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { ApiError, ENDPOINTS, apiClient, setAuthHeaderGetter } from './api';
+import {
+  ApiError,
+  DEFAULT_HEADERS,
+  DEFAULT_TIMEOUT_MS,
+  ENDPOINTS,
+  apiClient,
+  setAuthHeaderGetter,
+} from './api';
 
 describe('api', () => {
   beforeEach(() => {
@@ -43,14 +50,43 @@ describe('api', () => {
 
   describe('apiClient configuration', () => {
     it('should have correct default headers', () => {
-      expect(apiClient.defaults.headers['Content-Type']).toBe(
-        'application/soap+xml; charset=utf-8',
-      );
-      expect(apiClient.defaults.headers.Accept).toBe('application/soap+xml, application/xml, */*');
+      expect(DEFAULT_HEADERS['Content-Type']).toBe('application/soap+xml; charset=utf-8');
+      expect(DEFAULT_HEADERS.Accept).toBe('application/soap+xml, application/xml, */*');
     });
 
     it('should have correct timeout', () => {
-      expect(apiClient.defaults.timeout).toBe(10000);
+      expect(DEFAULT_TIMEOUT_MS).toBe(10000);
+    });
+
+    it('should send the default headers on a request', async () => {
+      const fetchMock = vi.fn(
+        async (_url: string, _init?: RequestInit) => new Response('ok', { status: 200 }),
+      );
+      vi.stubGlobal('fetch', fetchMock);
+
+      await apiClient.post('/test', '<body />');
+
+      const headers = new Headers(fetchMock.mock.calls[0][1]?.headers);
+      expect(headers.get('Content-Type')).toBe('application/soap+xml; charset=utf-8');
+      expect(headers.get('Accept')).toBe('application/soap+xml, application/xml, */*');
+    });
+
+    it('should let a lowercase authorization header suppress the injected one', async () => {
+      const mockGetter = vi.fn().mockResolvedValue('Basic from-getter');
+      setAuthHeaderGetter(mockGetter);
+
+      const fetchMock = vi.fn(
+        async (_url: string, _init?: RequestInit) => new Response('ok', { status: 200 }),
+      );
+      vi.stubGlobal('fetch', fetchMock);
+
+      await apiClient.post('/test', '<body />', {
+        headers: { authorization: 'Basic explicit' },
+      });
+
+      const headers = new Headers(fetchMock.mock.calls[0][1]?.headers);
+      expect(headers.get('Authorization')).toBe('Basic explicit');
+      expect(mockGetter).not.toHaveBeenCalled();
     });
   });
 
