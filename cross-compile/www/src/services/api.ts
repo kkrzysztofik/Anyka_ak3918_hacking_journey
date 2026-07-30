@@ -46,6 +46,27 @@ export interface ApiRequestConfig {
 }
 
 /**
+ * Abort as soon as either input signal aborts, preserving the reason.
+ *
+ * `AbortSignal.any()` would do this in one line but needs Firefox 124, and the
+ * build targets Firefox 119 (see the browser list in vite.config.ts). Listeners
+ * are registered against the output signal, so aborting removes them.
+ */
+function raceSignals(a: AbortSignal, b: AbortSignal): AbortSignal {
+  const controller = new AbortController();
+  for (const source of [a, b]) {
+    if (source.aborted) {
+      controller.abort(source.reason);
+      return controller.signal;
+    }
+    source.addEventListener('abort', () => controller.abort(source.reason), {
+      signal: controller.signal,
+    });
+  }
+  return controller.signal;
+}
+
+/**
  * Configured fetch client for ONVIF SOAP requests
  *
  * Headers:
@@ -79,7 +100,7 @@ async function request(
 
   const timeoutMs = config.timeout ?? DEFAULT_TIMEOUT_MS;
   const timeout = AbortSignal.timeout(timeoutMs);
-  const signal = config.signal ? AbortSignal.any([config.signal, timeout]) : timeout;
+  const signal = config.signal ? raceSignals(config.signal, timeout) : timeout;
 
   const response = await fetch(url, {
     method: 'POST',

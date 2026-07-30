@@ -184,6 +184,49 @@ describe('api', () => {
     });
   });
 
+  describe('abort signal', () => {
+    // AbortSignal.any() is unavailable on the declared Firefox target, so the
+    // combining is hand-rolled; these cover the three ways it can resolve.
+    const captureSignal = () => {
+      const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        init?.signal?.throwIfAborted();
+        return new Response('ok', { status: 200 });
+      });
+      vi.stubGlobal('fetch', fetchMock);
+      return fetchMock;
+    };
+
+    it('should abort when the caller aborts', async () => {
+      captureSignal();
+      const controller = new AbortController();
+      const pending = apiClient.post('/test', '<body />', { signal: controller.signal });
+      controller.abort(new Error('caller cancelled'));
+
+      await expect(pending).rejects.toThrow('caller cancelled');
+    });
+
+    it('should abort when the timeout fires before the caller aborts', async () => {
+      captureSignal();
+      const controller = new AbortController();
+
+      await expect(
+        apiClient.post('/test', '<body />', { signal: controller.signal, timeout: 1 }),
+      ).rejects.toThrow(/timed out|abort/i);
+    });
+
+    it('should abort immediately when the caller signal is already aborted', async () => {
+      const fetchMock = captureSignal();
+      const controller = new AbortController();
+      controller.abort(new Error('already gone'));
+
+      await expect(
+        apiClient.post('/test', '<body />', { signal: controller.signal }),
+      ).rejects.toThrow('already gone');
+      expect(fetchMock.mock.calls[0][1]?.signal?.aborted).toBe(true);
+    });
+  });
+
   describe('response handling', () => {
     it('should return data and status on success', async () => {
       vi.stubGlobal(
