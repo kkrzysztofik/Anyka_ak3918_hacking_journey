@@ -96,4 +96,71 @@ extern FILE *g_log_fp;
 /* ---- Push stream state array ------------------------------------------- */
 extern struct push_stream_state g_push_streams[PUSH_STREAM_SLOT_COUNT];
 
+/* ---- Session object registry -------------------------------------------
+ *
+ * Every SDK object opened on behalf of the control client is recorded here so
+ * it can be closed when that client goes away.
+ *
+ * This exists because cleanup cannot live on the client side: four of six
+ * client-side handle Drops are deliberate no-ops in IPC mode, so onvif-rust
+ * never sends CLOSE, and no Drop runs at all under SIGKILL -- which is exactly
+ * the case that matters. Resetting here covers every way the client can vanish.
+ *
+ * The table is also the backing store for handle tokens: a token names a slot
+ * rather than carrying a raw SDK pointer across the process boundary.
+ */
+
+/* Object kinds. These are the `kind` nibble of a handle token, so they must fit
+ * in 4 bits and their values must never change. */
+#define VD_OBJ_KIND_NONE    0
+#define VD_OBJ_KIND_VI      1
+#define VD_OBJ_KIND_VENC    2
+#define VD_OBJ_KIND_AI      3
+#define VD_OBJ_KIND_AENC    4
+#define VD_OBJ_KIND_STREAM  5
+#define VD_OBJ_KIND_COUNT   6
+
+/* Live objects tracked per generation. The token reserves 12 bits for the slot
+ * index, but this box opens a handful: 2 VI + 2 VENC + 2 stream + audio. 64 is
+ * far more than can ever be live and keeps the table in one cache-friendly
+ * block. */
+#define VD_OBJ_SLOTS 64
+
+struct vd_obj_slot {
+    void    *ptr;       /* SDK object; meaningless unless live */
+    uint16_t slot_gen;  /* bumped on every allocation of this slot */
+    uint8_t  kind;      /* VD_OBJ_KIND_* */
+    uint8_t  live;      /* 1 while the object is open */
+};
+
+extern struct vd_obj_slot g_obj_slots[VD_OBJ_SLOTS];
+
+/**
+ * vd_obj_register - Record a freshly opened SDK object.
+ *
+ * @param kind  VD_OBJ_KIND_* describing the object.
+ * @param ptr   SDK pointer to remember.
+ * @return      Slot index on success, -1 if the table is full.
+ */
+int vd_obj_register(uint8_t kind, void *ptr);
+
+/**
+ * vd_obj_unregister - Forget an object the client closed explicitly.
+ *
+ * Idempotent: unknown pointers are ignored, so a double CLOSE is harmless.
+ *
+ * @param kind  VD_OBJ_KIND_* the caller expects.
+ * @param ptr   SDK pointer to release.
+ */
+void vd_obj_unregister(uint8_t kind, void *ptr);
+
+/**
+ * vd_obj_close_all - Close every live object and empty the table.
+ *
+ * Closes in reverse dependency order (streams, then encoders, then inputs), the
+ * same order a clean shutdown uses. Best-effort: a failing close is logged and
+ * the sweep continues, because the alternative is leaking the rest too.
+ */
+void vd_obj_close_all(void);
+
 #endif /* VENDOR_DAEMON_GLOBALS_H */

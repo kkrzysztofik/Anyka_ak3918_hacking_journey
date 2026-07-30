@@ -8,6 +8,7 @@
 #include "ipc.h"
 #include "protocol.h"
 #include "log.h"
+#include "globals.h"
 #include "ak_venc.h"
 
 /* Timeout in seconds for ak_venc_cancel_stream() before giving up.
@@ -85,6 +86,7 @@ int handle_venc_open(int fd, const uint8_t *req, uint32_t req_len)
         log_error("[venc] open failed (NULL handle)");
         return send_response(fd, STATUS_ERROR, NULL, 0);
     }
+    vd_obj_register(VD_OBJ_KIND_VENC, handle);
     return send_handle_response(fd, handle);
 }
 
@@ -107,6 +109,7 @@ int handle_venc_close(int fd, const uint8_t *req, uint32_t req_len)
     void *handle = req_read_handle(req, 0);
     log_debug("[venc] close handle=%p", handle);
     int ret = ak_venc_close(handle);
+    vd_obj_unregister(VD_OBJ_KIND_VENC, handle);
     return send_response(fd, ret, NULL, 0);
 }
 

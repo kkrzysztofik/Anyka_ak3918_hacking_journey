@@ -5,6 +5,7 @@
 #include "ipc.h"
 #include "protocol.h"
 #include "log.h"
+#include "globals.h"
 #include "ak_vi.h"
 
 /**
@@ -61,6 +62,7 @@ int handle_vi_open(int fd, const uint8_t *req, uint32_t req_len)
         log_error("[vi] open failed (NULL handle)");
         return send_response(fd, STATUS_ERROR, NULL, 0);
     }
+    vd_obj_register(VD_OBJ_KIND_VI, handle);
     return send_handle_response(fd, handle);
 }
 
@@ -85,6 +87,7 @@ int handle_vi_close(int fd, const uint8_t *req, uint32_t req_len)
 
     log_debug("[vi] close handle=%p", handle);
     int ret = ak_vi_close(handle);
+    vd_obj_unregister(VD_OBJ_KIND_VI, handle);
     return send_response(fd, ret, NULL, 0);
 }
 

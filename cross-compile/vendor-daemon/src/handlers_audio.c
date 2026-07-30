@@ -5,6 +5,7 @@
 #include "ipc.h"
 #include "protocol.h"
 #include "log.h"
+#include "globals.h"
 #include "ak_ai.h"
 #include "ak_aenc.h"
 
@@ -40,6 +41,7 @@ int handle_ai_open(int fd, const uint8_t *req, uint32_t req_len)
         log_error("[ai] open failed (NULL handle)");
         return send_response(fd, STATUS_ERROR, NULL, 0);
     }
+    vd_obj_register(VD_OBJ_KIND_AI, handle);
     return send_handle_response(fd, handle);
 }
 
@@ -61,6 +63,7 @@ int handle_ai_close(int fd, const uint8_t *req, uint32_t req_len)
         return send_response(fd, STATUS_ERROR, NULL, 0);
     void *handle = req_read_handle(req, 0);
     int ret = ak_ai_close(handle);
+    vd_obj_unregister(VD_OBJ_KIND_AI, handle);
     return send_response(fd, ret, NULL, 0);
 }
 
@@ -141,6 +144,7 @@ int handle_aenc_open(int fd, const uint8_t *req, uint32_t req_len)
         log_error("[aenc] open failed (NULL handle)");
         return send_response(fd, STATUS_ERROR, NULL, 0);
     }
+    vd_obj_register(VD_OBJ_KIND_AENC, handle);
     return send_handle_response(fd, handle);
 }
 
@@ -162,6 +166,7 @@ int handle_aenc_close(int fd, const uint8_t *req, uint32_t req_len)
         return send_response(fd, STATUS_ERROR, NULL, 0);
     void *handle = req_read_handle(req, 0);
     int ret = ak_aenc_close(handle);
+    vd_obj_unregister(VD_OBJ_KIND_AENC, handle);
     return send_response(fd, ret, NULL, 0);
 }
 
