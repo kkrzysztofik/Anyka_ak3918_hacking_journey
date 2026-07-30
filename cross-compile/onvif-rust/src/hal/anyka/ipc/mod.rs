@@ -320,6 +320,25 @@ struct IpcJob {
     reply: oneshot::Sender<IpcResponse>,
 }
 
+/// Everything the owner thread accepts, on one ordered queue.
+///
+/// Stream installation travels the *same* queue as requests on purpose. The attach
+/// path issues `CMD_HELLO` immediately after handing over the stream, and a side
+/// channel would let the handshake overtake the installation and be refused on a
+/// perfectly healthy daemon.
+enum OwnerMsg {
+    /// Run a control RPC on the currently installed stream.
+    Job(IpcJob),
+    /// Install a freshly connected control stream, acknowledging when it is live.
+    GiveStream {
+        stream: UnixStream,
+        ack: oneshot::Sender<()>,
+    },
+    /// Drop the installed stream. Fire-and-forget: it only makes later requests
+    /// fail sooner.
+    DropStream,
+}
+
 /// Describes how the owner thread connects the control `UnixStream`.
 ///
 /// Connect-only: there is deliberately no reconnect path. A reconnect that resumed
@@ -400,7 +419,7 @@ pub struct AnykaIpc {
     ///
     /// `None` only during `Drop`, after the sender has been dropped to signal the
     /// owner thread to exit.
-    job_tx: Option<mpsc::Sender<IpcJob>>,
+    job_tx: Option<mpsc::Sender<OwnerMsg>>,
     /// Join handle for the control-socket owner thread, taken and joined on `Drop`.
     owner_thread: Option<std::thread::JoinHandle<()>>,
     /// Dedicated main-stream frame notification socket.
@@ -529,7 +548,7 @@ impl AnykaIpc {
         };
         tracing::info!("Shared memory ring buffer opened");
 
-        let (job_tx, owner_thread) = Self::spawn_owner(stream)?;
+        let (job_tx, owner_thread) = Self::spawn_owner(Some(stream))?;
 
         Ok(Self {
             job_tx: Some(job_tx),
@@ -564,7 +583,7 @@ impl AnykaIpc {
             _ => None,
         };
 
-        let (job_tx, owner_thread) = Self::spawn_owner(stream)?;
+        let (job_tx, owner_thread) = Self::spawn_owner(Some(stream))?;
 
         Ok(Self {
             job_tx: Some(job_tx),
@@ -588,7 +607,8 @@ impl AnykaIpc {
         shm_reader: Option<ShmRingReader>,
     ) -> Self {
         let _ = configure_ctrl_timeouts(&ctrl_stream);
-        let (job_tx, owner_thread) = Self::spawn_owner(ctrl_stream).expect("spawn owner thread");
+        let (job_tx, owner_thread) =
+            Self::spawn_owner(Some(ctrl_stream)).expect("spawn owner thread");
         Self {
             job_tx: Some(job_tx),
             owner_thread: Some(owner_thread),
@@ -691,9 +711,9 @@ impl AnykaIpc {
     ///
     /// Returns the sender half of the bounded job queue and the thread's join handle.
     fn spawn_owner(
-        stream: UnixStream,
-    ) -> PlatformResult<(mpsc::Sender<IpcJob>, std::thread::JoinHandle<()>)> {
-        let (job_tx, job_rx) = mpsc::channel::<IpcJob>(IPC_JOB_QUEUE_CAP);
+        stream: Option<UnixStream>,
+    ) -> PlatformResult<(mpsc::Sender<OwnerMsg>, std::thread::JoinHandle<()>)> {
+        let (job_tx, job_rx) = mpsc::channel::<OwnerMsg>(IPC_JOB_QUEUE_CAP);
         let handle = std::thread::Builder::new()
             .name("vd-ctrl-owner".to_string())
             .spawn(move || Self::run_owner(stream, job_rx))
@@ -713,9 +733,30 @@ impl AnykaIpc {
     /// oneshot channel. I/O errors are reported, never repaired here: re-attaching is
     /// the supervisor's job alone.
     /// Exits when the job channel is closed (all senders dropped).
-    fn run_owner(mut stream: UnixStream, mut job_rx: mpsc::Receiver<IpcJob>) {
-        while let Some(job) = job_rx.blocking_recv() {
-            Self::process_job(&mut stream, job);
+    fn run_owner(mut stream: Option<UnixStream>, mut job_rx: mpsc::Receiver<OwnerMsg>) {
+        while let Some(msg) = job_rx.blocking_recv() {
+            match msg {
+                OwnerMsg::Job(job) => match stream.as_mut() {
+                    Some(s) => Self::process_job(s, job),
+                    None => {
+                        // Detached: no stream to run on. Reply rather than panic —
+                        // the gate normally catches this first, but a request can
+                        // race a detach.
+                        let _ = job.reply.send(Err(PlatformError::HardwareUnavailable(
+                            "IPC not attached: no control stream installed".to_string(),
+                        )));
+                    }
+                },
+                OwnerMsg::GiveStream { stream: s, ack } => {
+                    stream = Some(s);
+                    // Acknowledge only after installation, so the caller's next
+                    // request is guaranteed to find the stream in place.
+                    let _ = ack.send(());
+                }
+                OwnerMsg::DropStream => {
+                    stream = None;
+                }
+            }
         }
 
         if is_ipc_debug_enabled() {
@@ -839,13 +880,13 @@ impl AnykaIpc {
     }
 
     /// Build a control-socket job and its reply receiver for the owner thread.
-    fn make_job(cmd_id: i32, req_data: &[u8]) -> (IpcJob, IpcReplyRx) {
+    fn make_job(cmd_id: i32, req_data: &[u8]) -> (OwnerMsg, IpcReplyRx) {
         let (reply_tx, reply_rx) = oneshot::channel();
-        let job = IpcJob {
+        let job = OwnerMsg::Job(IpcJob {
             cmd_id,
             req_data: req_data.to_vec(),
             reply: reply_tx,
-        };
+        });
         (job, reply_rx)
     }
 
@@ -915,6 +956,61 @@ impl AnykaIpc {
         self.observed_epoch.store(observed, Ordering::Release);
     }
 
+    /// Construct an unattached client.
+    ///
+    /// No daemon needs to exist. Every resource is `None` and the epoch is
+    /// [`EPOCH_DETACHED`], so [`Self::epoch_gate`] refuses every request until the
+    /// supervisor attaches. This is what lets cold start and recovery share one path.
+    pub fn new_detached() -> PlatformResult<Self> {
+        let (job_tx, owner_thread) = Self::spawn_owner(None)?;
+        Ok(Self {
+            job_tx: Some(job_tx),
+            owner_thread: Some(owner_thread),
+            frame_main_stream: Mutex::new(None),
+            frame_sub_stream: Mutex::new(None),
+            shm_reader: Mutex::new(None),
+            prefer_sub_on_tie: AtomicBool::new(false),
+            attached_epoch: AtomicU32::new(EPOCH_DETACHED),
+            observed_epoch: AtomicU32::new(EPOCH_DETACHED),
+        })
+    }
+
+    /// Install a freshly connected control stream on the owner thread, and wait for
+    /// the owner to confirm it is live.
+    ///
+    /// Acknowledged rather than fire-and-forget on purpose: `finish_attach` issues
+    /// `CMD_HELLO` on this same queue immediately afterwards. If installation were
+    /// only queued, the handshake could reach the owner while its stream is still
+    /// `None` and attach would fail spuriously against a healthy daemon.
+    pub(crate) async fn give_ctrl_stream(&self, stream: UnixStream) -> PlatformResult<()> {
+        let sender = self.job_tx.as_ref().ok_or_else(|| {
+            PlatformError::HardwareUnavailable("IPC owner thread stopped".to_string())
+        })?;
+        let (ack_tx, ack_rx) = oneshot::channel();
+        sender
+            .send(OwnerMsg::GiveStream {
+                stream,
+                ack: ack_tx,
+            })
+            .await
+            .map_err(|_| {
+                PlatformError::HardwareUnavailable("IPC owner thread stopped".to_string())
+            })?;
+        ack_rx.await.map_err(|_| {
+            PlatformError::HardwareFailure("IPC owner dropped the stream ack".to_string())
+        })
+    }
+
+    /// Clear the owner thread's control stream.
+    ///
+    /// Fire-and-forget: unlike installation this has no ordering requirement, because
+    /// it can only ever make a subsequent request fail sooner.
+    pub(crate) fn drop_ctrl_stream(&self) {
+        if let Some(sender) = self.job_tx.as_ref() {
+            let _ = sender.try_send(OwnerMsg::DropStream);
+        }
+    }
+
     /// Tear down the current attachment.
     ///
     /// Clears the epoch first: from this instant every in-flight request is refused
@@ -945,6 +1041,8 @@ impl AnykaIpc {
         let mut shm = self.shm_reader.lock().unwrap_or_else(|e| e.into_inner());
         *shm = None;
         drop(shm);
+
+        self.drop_ctrl_stream();
 
         tracing::info!(event = "ipc_detached", "IPC detached from vendor daemon");
     }
@@ -2668,6 +2766,51 @@ mod tests {
     // ========================================================================
     // Attach / detach lifecycle
     // ========================================================================
+
+    #[test]
+    fn new_detached_succeeds_without_a_daemon() {
+        // R5: cold start and recovery share one path, so construction must not
+        // require a live daemon. Attaching is the supervisor's job.
+        let ipc = AnykaIpc::new_detached().expect("construction must not need a daemon");
+
+        assert_eq!(ipc.attached_epoch_for_test(), EPOCH_DETACHED);
+        assert!(ipc.frame_main_stream.lock().unwrap().is_none());
+        assert!(ipc.shm_reader.lock().unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn detached_owner_refuses_requests_until_a_stream_is_installed() {
+        // The owner thread holds no stream after new_detached(). A request that
+        // slips past the gate must still get a clean error, not a panic.
+        let ipc = AnykaIpc::new_detached().unwrap();
+        ipc.set_epochs_for_test(1, 1); // bypass the gate to reach the owner
+
+        let err = ipc
+            .request_async(CMD_VI_CLOSE, &[0u8; 8])
+            .await
+            .unwrap_err();
+
+        assert!(
+            matches!(err, PlatformError::HardwareUnavailable(_)),
+            "expected HardwareUnavailable, got {err:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn give_ctrl_stream_is_ordered_ahead_of_the_next_request() {
+        // give_ctrl_stream must be acknowledged, not fire-and-forget: hello() goes
+        // through the same owner thread immediately afterwards and would otherwise
+        // race the installation and be refused on a healthy daemon.
+        let daemon = test_helpers::FakeDaemon::start(|_c, _r| (AK_SUCCESS_I32, vec![]));
+        let ipc = AnykaIpc::new_detached().unwrap();
+        ipc.set_epochs_for_test(1, 1);
+
+        let stream = UnixStream::connect(&daemon.socket_path).unwrap();
+        ipc.give_ctrl_stream(stream).await.unwrap();
+
+        let (status, _) = ipc.request_async(CMD_VI_CLOSE, &[0u8; 8]).await.unwrap();
+        assert_eq!(status, AK_SUCCESS_I32);
+    }
 
     #[test]
     fn detach_clears_every_resource_and_the_epoch() {
