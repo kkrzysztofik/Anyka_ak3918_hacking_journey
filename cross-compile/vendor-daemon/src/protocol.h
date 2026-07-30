@@ -68,6 +68,15 @@ enum cmd_id {
     /* Utility */
     CMD_GET_ERROR_NO              = 200,
     CMD_GET_ERROR_STR             = 201,
+
+    /* ---- Session ---------------------------------------------------------
+     * CMD_HELLO is the client's attach handshake.  It is the only command a
+     * client may send before the epoch gate is satisfied, so it must never
+     * require an existing session -- it is deliberately absent from
+     * is_lifecycle_cmd(), which is what exempts it from acquire_control().
+     * Response: [u32 epoch][u32 shm_version] = 8 bytes.
+     */
+    CMD_HELLO                     = 300,
     CMD_SHUTDOWN                  = 255
 };
 

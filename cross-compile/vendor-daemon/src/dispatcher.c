@@ -15,6 +15,7 @@
 #include "handlers_audio.h"
 #include "handlers_isp.h"
 #include "push.h"
+#include "vd_ring_buffer.h"
 
 /* ---- Internal helpers (file-static) ------------------------------------- */
 
@@ -74,6 +75,32 @@ static int acquire_control(int fd)
         return 1;
     }
     return 0;
+}
+
+/*
+ * handle_hello - IPC handler for CMD_HELLO.
+ *
+ * Reports this daemon generation's epoch and the shm protocol version so the
+ * client can pin them for the lifetime of its attachment.
+ *
+ * Deliberately requires no control-client status: a second client must be able
+ * to say hello in order to discover that it lost the control race.
+ *
+ * Response: [u32 epoch][u32 shm_version]
+ */
+static int handle_hello(int fd)
+{
+    uint8_t resp[8];
+    uint32_t epoch = 0;
+    uint32_t version = VD_SHM_VERSION;
+
+    if (g_ring_buffer != NULL) {
+        epoch = vd_ring_get_header(g_ring_buffer)->epoch;
+    }
+
+    memcpy(&resp[0], &epoch, 4);
+    memcpy(&resp[4], &version, 4);
+    return send_response(fd, STATUS_OK, resp, sizeof(resp));
 }
 
 /**
@@ -303,6 +330,11 @@ int process_request(int fd)
         break;
     case CMD_GET_ERROR_STR:
         ret = handle_get_error_str(fd);
+        break;
+
+    /* --- Session --- */
+    case CMD_HELLO:
+        ret = handle_hello(fd);
         break;
 
     case CMD_SHUTDOWN:
