@@ -414,8 +414,9 @@ source (230 kB raw in `vendor`, 35 kB raw in `ui-vendor`).
 
 ```bash
 cd cross-compile/www
-npx vite build --outDir /tmp/zod-check --sourcemap --emptyOutDir >/dev/null 2>&1
-grep -l "node_modules/zod/" /tmp/zod-check/js/*.js.map | wc -l
+out=$(mktemp -d) && trap 'rm -rf "$out"' EXIT
+npx vite build --outDir "$out" --sourcemap >/dev/null 2>&1
+grep -l "node_modules/zod/" "$out"/js/*.js.map | wc -l
 ```
 
 Expected: `2`. That is the duplication.
@@ -436,7 +437,7 @@ matters, because `@hookform` is matched by the existing `ui-vendor` branch:
 
 ```bash
 out=$(mktemp -d) && trap 'rm -rf "$out"' EXIT
-npx vite build --outDir "$out" --sourcemap --emptyOutDir >/dev/null 2>&1
+npx vite build --outDir "$out" --sourcemap >/dev/null 2>&1
 grep -l "node_modules/zod/" "$out"/js/*.js.map | wc -l
 ```
 

@@ -163,25 +163,54 @@ And add this helper immediately above `vd_ring_create()`:
 /**
  * @brief Generate a fresh, non-zero epoch for this daemon generation.
  *
- * Mixes PID with CLOCK_MONOTONIC nanoseconds so two starts within the same
- * second still differ.  Collisions are harmless in principle but would delay
- * restart detection, so the inputs are chosen to make them very unlikely.
+ * Drawn from /dev/urandom.  PID and CLOCK_MONOTONIC are a poor source on this
+ * target: a reboot restarts the monotonic clock near zero and hands out the
+ * same PIDs in the same boot order, so two generations at the same point in
+ * two boots can land very close together.  The epoch's only job is to differ
+ * from the previous generation, so it is drawn from real entropy instead.
+ *
+ * Retries on a zero draw -- 0 is reserved for "detached" on the client side.
+ * Clamping to 1 instead would make 0 twice as likely as any other value, which
+ * matters here only in that it is free to avoid.
  */
 static inline uint32_t vd_ring_new_epoch(void)
 {
-    struct timespec ts;
-    uint32_t epoch;
+    uint32_t epoch = 0;
+    int fd;
 
-    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) {
-        ts.tv_sec = 0;
-        ts.tv_nsec = 0;
+    fd = open("/dev/urandom", O_RDONLY | O_CLOEXEC);
+    if (fd >= 0) {
+        while (epoch == 0) {
+            if (read(fd, &epoch, sizeof(epoch)) != (ssize_t)sizeof(epoch)) {
+                epoch = 0;
+                break;
+            }
+        }
+        close(fd);
     }
-    epoch = (uint32_t)getpid() * 2654435761u;
-    epoch ^= (uint32_t)ts.tv_nsec;
-    epoch ^= (uint32_t)ts.tv_sec << 16;
 
-    /* 0 is reserved for "detached" on the client side. */
-    return epoch == 0 ? 1u : epoch;
+    if (epoch == 0) {
+        /* Degraded: no entropy source.  Fall back to the PID/clock mix rather
+         * than failing ring creation and taking the camera down for a missing
+         * /dev/urandom.  Restart detection still works; only the collision
+         * margin is worse.  No logging here on purpose -- this header is
+         * compiled standalone by tests/test_ring_epoch.c and must not pull in
+         * the daemon's log.h.  vd_ring_create() is the place to log it. */
+        struct timespec ts;
+
+        if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) {
+            ts.tv_sec = 0;
+            ts.tv_nsec = 0;
+        }
+        epoch = (uint32_t)getpid() * 2654435761u;
+        epoch ^= (uint32_t)ts.tv_nsec;
+        epoch ^= (uint32_t)ts.tv_sec << 16;
+        if (epoch == 0) {
+            epoch = 1u;
+        }
+    }
+
+    return epoch;
 }
 ```
 
@@ -274,8 +303,10 @@ Add next to `is_shutdown()`:
 ```rust
     /// Read the daemon generation counter from the ring header (version >= 3).
     ///
-    /// Returns 0 for a v1/v2 ring, or for a ring the daemon has not stamped yet.
-    /// The caller treats 0 as "no epoch information", never as a valid generation.
+    /// Returns 0 for a v1/v2 ring, or for a ring the daemon has not stamped yet —
+    /// including the window in which `vd_ring_create()` has memset the header
+    /// during a restart. 0 is never a valid generation, and the epoch gate treats
+    /// it as a mismatch rather than as "no information".
     ///
     /// Uses `read_volatile`: the daemon rewrites this field concurrently on
     /// restart, and creating a `&u32` to it would violate strict aliasing.
@@ -291,7 +322,17 @@ Add next to `is_shutdown()`:
     }
 ```
 
-**Note on `VD_SHM_VERSION_MIN`:** leave it at 1. A v2 daemon paired with a v3 client still works — `epoch()` returns 0 and the gate (Task 5) treats 0 as "no epoch information" and does not block. Do not raise the minimum; that would turn a version skew into a hard outage.
+**Note on `VD_SHM_VERSION_MIN`:** leave it at 1 — `ShmRingReader::open()` still maps an older ring rather than failing there. But be clear that this does **not** buy pre-v3 compatibility: `hello()` (Task 4) rejects a reported epoch of 0 outright, so a v1/v2 daemon cannot complete the attach handshake and the client stays detached. Pre-v3 daemons are rejected deliberately and explicitly.
+
+This is the whole zero-epoch contract, and it must be read as one rule:
+
+| where | epoch 0 means | behaviour |
+| --- | --- | --- |
+| `hello()` response | daemon is pre-v3 or misbehaving | reject the attach |
+| ring, after a successful attach | daemon is re-creating the ring | refuse the request |
+| `attached_epoch` | not attached | refuse the request |
+
+There is deliberately **no** "0 means no information, carry on" path. Allowing one would open the exact hole this design exists to close: `vd_ring_create()` memsets the header on restart, so a v3 client polling mid-restart reads 0, and treating that as permissive would let handles from the dead generation through at the worst possible moment. Since `finish_attach` seeds `observed_epoch` before `attached_epoch`, there is no startup window where 0 is legitimate either.
 
 **Step 4: Run the test to verify it passes**
 
@@ -624,7 +665,9 @@ Add two fields to `AnykaIpc`:
     ///
     /// Kept as an atomic rather than read from the mmap on demand so the request path
     /// never contends with the frame reader for the `shm_reader` mutex.
-    /// 0 means "no epoch information" (pre-v3 daemon, or not yet polled).
+    /// 0 means the ring is not stamped — while detached, or because the daemon is
+    /// re-creating it. Never a usable generation: the gate refuses on 0 like any
+    /// other mismatch.
     observed_epoch: AtomicU32,
 ```
 
@@ -650,10 +693,13 @@ Add the gate and the test seam:
             ));
         }
         let observed = self.observed_epoch.load(Ordering::Acquire);
-        // observed == 0 means we have no epoch information (pre-v3 daemon or the
-        // poller has not run yet). Degrade to pre-epoch behaviour rather than
-        // refusing every request.
-        if observed != EPOCH_DETACHED && observed != attached {
+        // No exemption for observed == 0. Once attached, `attached` is a non-zero
+        // v3 epoch (hello() rejects 0) and finish_attach seeds `observed` before
+        // `attached`, so there is no legitimate "not yet polled" window. A zero
+        // read therefore means the daemon is re-creating the ring right now —
+        // vd_ring_create() memsets the header — which is precisely when stale
+        // handles must be refused, not waved through.
+        if observed != attached {
             return Err(PlatformError::HardwareUnavailable(format!(
                 "vendor daemon restarted (attached epoch {attached}, observed {observed}); \
                  handles from the previous generation are stale"
@@ -1039,7 +1085,10 @@ $CARGO test --target $HOST --lib -- attach_ 2>&1
                 "control socket {CTRL_SOCKET_PATH} not ready: {e}"
             ))
         })?;
-        self.give_ctrl_stream(ctrl);
+        // Must complete before finish_attach: `hello()` goes through the same
+        // owner thread, and if installation were merely queued the handshake
+        // could reach the owner first and be refused as HardwareUnavailable.
+        self.give_ctrl_stream(ctrl).await?;
 
         let reader = ShmRingReader::open()?.ok_or_else(|| {
             PlatformError::HardwareUnavailable("shared memory ring not present".to_string())
@@ -1144,6 +1193,8 @@ Add a constructor that builds the owner thread with a *lazily* connected control
 ```
 
 **Note:** the control-socket owner thread currently requires a connected `UnixStream` up front (`spawn_owner` at `:672`). Change `run_owner` to hold `Option<UnixStream>` and reply `HardwareUnavailable` to any job while it is `None`. Expose `give_ctrl_stream(UnixStream)` and `drop_ctrl_stream()` so the owner's stream can be installed and cleared without respawning the thread — `try_attach` (Task 8) calls the former, `detach` the latter. This is the one structural change in the phase — do it here, not spread across tasks. Task 8's `try_attach` is written against `give_ctrl_stream`, so if you are running the tasks strictly in order, stub it as `unimplemented!()` in Task 8 and fill it in here.
+
+**`give_ctrl_stream` must be acknowledged, not fire-and-forget.** Send it as a job on the same queue the requests use and await the owner's reply, so installation is ordered ahead of the `CMD_HELLO` that `finish_attach` issues immediately afterwards. Handing the stream over on a side channel — or storing it in a field the owner picks up "eventually" — leaves a window where the handshake reaches the owner while its stream is still `None` and attach fails spuriously on a healthy daemon. `drop_ctrl_stream()` can stay fire-and-forget: it only ever makes subsequent requests fail sooner.
 
 **Step 4: Run the full suite**
 
@@ -1434,15 +1485,32 @@ A bare registry of live pointers is *not* sufficient: after a restart the
 allocator can hand out the same address, so a stale handle from the previous
 generation would look valid. Bind the epoch into the handle itself:
 
-- Stop returning pointers. Keep a per-generation table of open SDK objects and
-  return an opaque `u64` of `((u64)epoch << 32) | slot_index`. The table is
-  built empty at daemon start, so it holds nothing from a previous generation.
-- `req_read_handle()` splits the value, rejects when the high 32 bits differ
-  from the daemon's current `epoch`, then bounds-checks `slot_index` and
-  rejects a freed slot. Only then does it yield the pointer.
+- Stop returning pointers. Keep tables of open SDK objects, one per resource
+  kind, built empty at daemon start so they hold nothing from a previous
+  generation. Return an opaque `u64` token laid out as:
+
+  ```
+  bits 63..32  epoch       (32)  daemon generation
+  bits 31..16  slot_gen    (16)  bumped every time the slot is reused
+  bits 15..4   slot_index  (12)  up to 4096 live objects per kind
+  bits  3..0   kind        (4)   VI, VENC, ... — selects the table
+  ```
+
+- **`slot_gen` is what stops an epoch-local ABA.** Epoch alone is not enough:
+  close a VI on slot 3 and open another within the *same* generation, and a
+  stale token for the old occupant still matches epoch and index. Each table
+  entry stores its own `slot_gen`, incremented on every allocation of that
+  slot, so a token from the previous occupant no longer matches.
+- `req_read_handle()` validates in order: `kind` selects the table and must
+  match what the command expects (a VENC token handed to a VI command is
+  rejected, not dereferenced); `epoch` must equal the daemon's current epoch;
+  `slot_index` must be in bounds; the entry must be live; and `slot_gen` must
+  equal the entry's. Only then does it yield the pointer.
 - Reject with a status distinct from the generic invalid-argument one — the
   client logs "stale epoch" rather than a confusing argument error. Add
-  `VD_STATUS_STALE_EPOCH` alongside the existing status codes.
+  `VD_STATUS_STALE_EPOCH` alongside the existing status codes. A `slot_gen` or
+  `kind` mismatch uses it too: from the client's side these all mean "this
+  handle is no longer yours".
 
 This also removes the raw-pointer marshalling across the process boundary,
 which is worth doing on its own.

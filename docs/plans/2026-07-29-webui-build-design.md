@@ -103,8 +103,10 @@ re-deriving the analysis.
 The charts are mock for now and are intended to plot real telemetry later, so
 they stay on screen; only the renderer changes.
 
-Add a `<Sparkline data={points} />` component — roughly 40 lines producing an
-SVG area path with a hover line. Mock data feeds it today; `/utilization`
+Add a `<Sparkline data={points} />` component — roughly 40 lines producing a
+static SVG area path. No hover line or tooltip: the shipped component has no
+interaction, and adding one is future work if the telemetry ever warrants it.
+Mock data feeds it today; `/utilization`
 feeds it later with no bundle change at swap time. `AreaChart` with
 `CartesianGrid`, `Tooltip`, `XAxis` and `YAxis` is more chart than 30 synthetic
 points justify.
