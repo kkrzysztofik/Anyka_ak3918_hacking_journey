@@ -43,19 +43,22 @@ export default defineConfig(() => ({
     globals: true,
     environment: 'jsdom',
     setupFiles: ['./src/test/setup.ts'],
-    include: ['src/**/*.{test,spec}.{js,mjs,cjs,ts,mts,cts,jsx,tsx}'],
+    include: [
+      'src/**/*.{test,spec}.{js,mjs,cjs,ts,mts,cts,jsx,tsx}',
+      'scripts/**/*.{test,spec}.mjs',
+    ],
     testTimeout: 15000, // Increase timeout for complex UI interaction tests
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json', 'json-summary', 'html', 'lcov'],
       // Include all source files in coverage report, even if not executed during tests
       // This ensures SonarQube sees all files (with 0% coverage if not tested) rather than missing them
-      include: ['src/**/*.{ts,tsx}'],
+      include: ['src/**/*.{ts,tsx}', 'scripts/**/*.mjs'],
       exclude: [
         'node_modules/',
         'src/test/',
-        '**/*.test.{ts,tsx}',
-        '**/*.spec.{ts,tsx}',
+        '**/*.test.{ts,tsx,mjs}',
+        '**/*.spec.{ts,tsx,mjs}',
         '**/*.d.ts',
         '**/*.config.{ts,js}',
         '**/types/**',
