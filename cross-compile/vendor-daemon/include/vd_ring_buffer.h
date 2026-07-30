@@ -18,6 +18,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <errno.h>
+#include <time.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -33,8 +34,9 @@ extern "C" {
 /** Protocol version - bump on incompatible layout changes
  *  v1: Initial layout (8 header fields + 32 bytes padding)
  *  v2: Added overflow diagnostic counters in header, wall-clock timing in slot header
+ *  v3: Added the `epoch` field used to detect daemon restarts
  */
-#define VD_SHM_VERSION     2
+#define VD_SHM_VERSION     3
 
 /** Default total shared memory size: 1 MB */
 #define VD_SHM_DEFAULT_SIZE (1024 * 1024)
@@ -110,7 +112,17 @@ struct vd_ring_header {
     uint32_t eviction_count;       /* P-frame evictions for I-frame priority */
     uint32_t socket_fallback_count;/* Frames sent via socket fallback */
     uint32_t dropped_count;        /* P-frames dropped during overflow */
-    uint8_t  _padding[16];         /* Reduced from 32: pad to 64 bytes */
+    /*
+     * Daemon generation counter (version >= 3).  Re-randomised on every
+     * vd_ring_create(), i.e. on every daemon start.  Never 0 -- 0 is reserved
+     * by the client to mean "not attached".
+     *
+     * This exists because the ring file is REUSED across restarts (O_CREAT
+     * without O_TRUNC, same inode) and the magic/version are rewritten
+     * identically, so the mapping itself carries no evidence of a restart.
+     */
+    uint32_t epoch;
+    uint8_t  _padding[12];         /* pad to 64 bytes */
 } __attribute__((packed));
 
 /**
@@ -211,6 +223,59 @@ static inline void *vd_ring_get_slot_data(void *base, uint32_t idx)
 }
 
 /**
+ * @brief Generate a fresh, non-zero epoch for this daemon generation.
+ *
+ * Drawn from /dev/urandom.  PID and CLOCK_MONOTONIC are a poor source on this
+ * target: a reboot restarts the monotonic clock near zero and hands out the
+ * same PIDs in the same boot order, so two generations at the same point in
+ * two boots can land very close together.  The epoch's only job is to differ
+ * from the previous generation, so it is drawn from real entropy instead.
+ *
+ * Retries on a zero draw -- 0 is reserved for "detached" on the client side.
+ * Clamping to 1 instead would make 0 twice as likely as any other value, which
+ * matters here only in that it is free to avoid.
+ */
+static inline uint32_t vd_ring_new_epoch(void)
+{
+    uint32_t epoch = 0;
+    int fd;
+
+    fd = open("/dev/urandom", O_RDONLY | O_CLOEXEC);
+    if (fd >= 0) {
+        while (epoch == 0) {
+            if (read(fd, &epoch, sizeof(epoch)) != (ssize_t)sizeof(epoch)) {
+                epoch = 0;
+                break;
+            }
+        }
+        close(fd);
+    }
+
+    if (epoch == 0) {
+        /* Degraded: no entropy source.  Fall back to the PID/clock mix rather
+         * than failing ring creation and taking the camera down for a missing
+         * /dev/urandom.  Restart detection still works; only the collision
+         * margin is worse.  No logging here on purpose -- this header is
+         * compiled standalone by tests/test_ring_epoch.c and must not pull in
+         * the daemon's log.h.  vd_ring_create() is the place to log it. */
+        struct timespec ts;
+
+        if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) {
+            ts.tv_sec = 0;
+            ts.tv_nsec = 0;
+        }
+        epoch = (uint32_t)getpid() * 2654435761u;
+        epoch ^= (uint32_t)ts.tv_nsec;
+        epoch ^= (uint32_t)ts.tv_sec << 16;
+        if (epoch == 0) {
+            epoch = 1u;
+        }
+    }
+
+    return epoch;
+}
+
+/**
  * @brief Create and initialize the ring buffer (daemon side)
  *
  * Creates the shared memory file, truncates to VD_SHM_TOTAL_SIZE,
@@ -265,6 +330,7 @@ static inline void *vd_ring_create(void)
     hdr->write_seq = 0;
     hdr->read_seq = 0;
     hdr->flags = 0;
+    hdr->epoch = vd_ring_new_epoch();
 
     /* Initialize all slots to EMPTY state */
     for (uint32_t i = 0; i < VD_SHM_SLOT_COUNT; i++) {
