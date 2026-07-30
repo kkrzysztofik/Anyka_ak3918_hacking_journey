@@ -6,11 +6,16 @@
 //! (`dispatcher.c` `acquire_control` for control, `main.c` for the frame sockets), so
 //! two simultaneous attaches leave a half-attached mess rather than one winner.
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use tokio::sync::watch;
 
 use crate::hal::anyka::ipc::AnykaIpc;
+use crate::platform::PlatformResult;
+use crate::platform::common::Platform;
+
+use super::AnykaPlatform;
 
 /// First retry delay; doubles up to [`BACKOFF_MAX`].
 const BACKOFF_START: Duration = Duration::from_millis(500);
@@ -73,6 +78,123 @@ pub async fn watch_epoch_until_loss(ipc: &AnykaIpc, tx: &watch::Sender<Availabil
     }
 }
 
+/// The four operations the supervisor drives, as one seam.
+///
+/// Exists so [`run_supervisor`] can be tested without a daemon or an SDK. The
+/// production implementation delegates straight to `AnykaIpc` and `AnykaPlatform`;
+/// it deliberately adds no logic of its own, because
+/// `AnykaPlatform::initialize`/`rollback_video_pipeline` already own bring-up and
+/// unwind and must not be reimplemented here.
+#[async_trait::async_trait]
+pub trait AttachTarget: Send + Sync {
+    /// Connect frame sockets and ring, then pin the daemon epoch.
+    async fn attach(&self) -> PlatformResult<u32>;
+    /// Run the four hardware bring-up stages.
+    async fn initialize(&self) -> PlatformResult<()>;
+    /// Unwind a partial or complete bring-up. Best-effort; must not fail.
+    async fn rollback(&self);
+    /// Release the attachment, making every outstanding handle inert.
+    fn detach(&self);
+    /// Block until peer loss is observed.
+    async fn wait_for_loss(&self, tx: &watch::Sender<Availability>);
+}
+
+/// Production [`AttachTarget`]: delegates to the existing platform machinery.
+///
+/// Deliberately thin. `AnykaPlatform::initialize` already runs the four bring-up
+/// stages and `rollback_video_pipeline` already unwinds them in reverse, so this
+/// reuses both rather than growing a second copy that can drift.
+pub struct PlatformAttachTarget {
+    platform: Arc<AnykaPlatform>,
+}
+
+impl PlatformAttachTarget {
+    pub fn new(platform: Arc<AnykaPlatform>) -> Self {
+        Self { platform }
+    }
+}
+
+#[async_trait::async_trait]
+impl AttachTarget for PlatformAttachTarget {
+    async fn attach(&self) -> PlatformResult<u32> {
+        self.platform.ipc().attach().await
+    }
+
+    async fn initialize(&self) -> PlatformResult<()> {
+        self.platform.initialize().await
+    }
+
+    async fn rollback(&self) {
+        self.platform.rollback_for_supervisor().await;
+    }
+
+    fn detach(&self) {
+        self.platform.ipc().detach();
+    }
+
+    async fn wait_for_loss(&self, tx: &watch::Sender<Availability>) {
+        watch_epoch_until_loss(self.platform.ipc(), tx).await;
+    }
+}
+
+/// Drive attach → initialize → serve → unwind, retrying until the breaker opens.
+///
+/// Returns only when the breaker has latched open, having published
+/// [`Availability::GivenUp`]. A backoff that hides a permanent failure would leave
+/// the camera dark with evidence only in the logs; publishing `GivenUp` is what makes
+/// it visible to the ONVIF services.
+pub async fn run_supervisor(target: Arc<dyn AttachTarget>, tx: &watch::Sender<Availability>) {
+    let mut backoff = Backoff::new();
+    let mut breaker = CircuitBreaker::new();
+
+    loop {
+        if breaker.is_open() {
+            tracing::error!(
+                event = "attach_given_up",
+                limit = ATTACH_FAILURE_LIMIT,
+                "vendor-daemon attach failed repeatedly; giving up"
+            );
+            let _ = tx.send(Availability::GivenUp);
+            return;
+        }
+
+        match target.attach().await {
+            Err(e) => {
+                tracing::warn!(error = %e, "attach failed");
+                let _ = tx.send(Availability::Unavailable);
+                breaker.record_failure();
+                tokio::time::sleep(backoff.next()).await;
+            }
+            Ok(epoch) => match target.initialize().await {
+                Err(e) => {
+                    tracing::warn!(epoch, error = %e, "bring-up failed; unwinding");
+                    // Partial bring-up MUST be unwound. Without this, each retry
+                    // does another VI_OPEN/VENC_OPEN cycle against an SDK that
+                    // wedges.
+                    target.rollback().await;
+                    target.detach();
+                    let _ = tx.send(Availability::Unavailable);
+                    breaker.record_failure();
+                    tokio::time::sleep(backoff.next()).await;
+                }
+                Ok(()) => {
+                    tracing::info!(event = "attach_available", epoch, "vendor daemon available");
+                    breaker.record_success();
+                    backoff.reset();
+                    let _ = tx.send(Availability::Available);
+
+                    target.wait_for_loss(tx).await;
+
+                    tracing::warn!(epoch, "peer loss observed; unwinding");
+                    let _ = tx.send(Availability::Unavailable);
+                    target.rollback().await;
+                    target.detach();
+                }
+            },
+        }
+    }
+}
+
 /// Exponential retry delay, capped at [`BACKOFF_MAX`].
 ///
 /// Deliberately not jittered: there is exactly one supervisor on this box, so there
@@ -84,7 +206,9 @@ pub struct Backoff {
 
 impl Backoff {
     pub fn new() -> Self {
-        Self { next: BACKOFF_START }
+        Self {
+            next: BACKOFF_START,
+        }
     }
 
     /// Return the current delay and double it for next time, saturating at the cap.
@@ -180,6 +304,136 @@ mod tests {
         poll_epoch_once(&ipc, &tx);
 
         assert_eq!(*rx.borrow_and_update(), Availability::Unavailable);
+    }
+
+    // ------------------------------------------------------------------
+    // Supervisor loop
+    // ------------------------------------------------------------------
+
+    use crate::platform::PlatformError;
+    use std::sync::Mutex as StdMutex;
+    use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
+
+    /// Scripted stand-in for `attach + AnykaPlatform::initialize + rollback + detach`.
+    struct MockTarget {
+        attach_ok: bool,
+        /// `initialize` returns `Ok` for the first N calls, then `Err` forever.
+        init_ok_count: usize,
+        attach_calls: AtomicUsize,
+        init_calls: AtomicUsize,
+        rollback_calls: AtomicUsize,
+        detach_calls: AtomicUsize,
+        /// Availability observed at the top of each `wait_for_loss`.
+        seen_while_waiting: StdMutex<Vec<Availability>>,
+    }
+
+    impl MockTarget {
+        fn new(attach_ok: bool, init_ok_count: usize) -> Self {
+            Self {
+                attach_ok,
+                init_ok_count,
+                attach_calls: AtomicUsize::new(0),
+                init_calls: AtomicUsize::new(0),
+                rollback_calls: AtomicUsize::new(0),
+                detach_calls: AtomicUsize::new(0),
+                seen_while_waiting: StdMutex::new(Vec::new()),
+            }
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl AttachTarget for MockTarget {
+        async fn attach(&self) -> PlatformResult<u32> {
+            self.attach_calls.fetch_add(1, AtomicOrdering::SeqCst);
+            if self.attach_ok {
+                Ok(7)
+            } else {
+                Err(PlatformError::HardwareUnavailable("no daemon".into()))
+            }
+        }
+
+        async fn initialize(&self) -> PlatformResult<()> {
+            let n = self.init_calls.fetch_add(1, AtomicOrdering::SeqCst);
+            if n < self.init_ok_count {
+                Ok(())
+            } else {
+                Err(PlatformError::InitializationFailed("wedged SDK".into()))
+            }
+        }
+
+        async fn rollback(&self) {
+            self.rollback_calls.fetch_add(1, AtomicOrdering::SeqCst);
+        }
+
+        fn detach(&self) {
+            self.detach_calls.fetch_add(1, AtomicOrdering::SeqCst);
+        }
+
+        async fn wait_for_loss(&self, tx: &watch::Sender<Availability>) {
+            self.seen_while_waiting.lock().unwrap().push(*tx.borrow());
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn supervisor_gives_up_after_the_breaker_opens_on_attach_failures() {
+        let target = std::sync::Arc::new(MockTarget::new(false, 0));
+        let (tx, _rx) = watch::channel(Availability::Unavailable);
+
+        run_supervisor(target.clone(), &tx).await;
+
+        assert_eq!(
+            target.attach_calls.load(AtomicOrdering::SeqCst),
+            ATTACH_FAILURE_LIMIT as usize,
+            "must stop attempting once the breaker opens"
+        );
+        assert_eq!(
+            target.rollback_calls.load(AtomicOrdering::SeqCst),
+            0,
+            "attach never succeeded, so there is nothing to unwind"
+        );
+        assert_eq!(*tx.borrow(), Availability::GivenUp);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn supervisor_rolls_back_once_per_failed_initialize() {
+        // Partial bring-up MUST be unwound, or each retry does another
+        // VI_OPEN/VENC_OPEN cycle against an SDK that wedges.
+        let target = std::sync::Arc::new(MockTarget::new(true, 0));
+        let (tx, _rx) = watch::channel(Availability::Unavailable);
+
+        run_supervisor(target.clone(), &tx).await;
+
+        let failures = ATTACH_FAILURE_LIMIT as usize;
+        assert_eq!(target.init_calls.load(AtomicOrdering::SeqCst), failures);
+        assert_eq!(
+            target.rollback_calls.load(AtomicOrdering::SeqCst),
+            failures,
+            "one rollback per failed initialize"
+        );
+        assert_eq!(target.detach_calls.load(AtomicOrdering::SeqCst), failures);
+        assert_eq!(*tx.borrow(), Availability::GivenUp);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn supervisor_publishes_available_then_unwinds_on_loss() {
+        // One clean bring-up, then peer loss, then repeated failures until the
+        // breaker opens.
+        let target = std::sync::Arc::new(MockTarget::new(true, 1));
+        let (tx, _rx) = watch::channel(Availability::Unavailable);
+
+        run_supervisor(target.clone(), &tx).await;
+
+        assert_eq!(
+            *target.seen_while_waiting.lock().unwrap(),
+            vec![Availability::Available],
+            "Available must be published before the supervisor waits for loss"
+        );
+        // 1 unwind for the loss + one per subsequent failed initialize.
+        assert_eq!(
+            target.rollback_calls.load(AtomicOrdering::SeqCst),
+            ATTACH_FAILURE_LIMIT as usize + 1
+        );
+        assert_eq!(*tx.borrow(), Availability::GivenUp);
     }
 
     #[test]
