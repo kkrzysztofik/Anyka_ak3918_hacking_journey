@@ -65,8 +65,8 @@ use crate::streaming::bridge::BytesMutPool;
 
 /// Magic value identifying the shared memory region ("VDFS")
 pub const VD_SHM_MAGIC: u32 = 0x5644_4653;
-/// Version of the shared memory protocol (v2 adds diagnostic counters + wall-clock timing)
-pub const VD_SHM_VERSION: u32 = 2;
+/// Version of the shared memory protocol (v3 adds the daemon `epoch`)
+pub const VD_SHM_VERSION: u32 = 3;
 /// Minimum supported version (v1 layout still accepted for backward compat)
 pub const VD_SHM_VERSION_MIN: u32 = 1;
 /// Number of slots in the ring buffer
@@ -154,8 +154,10 @@ pub struct RingHeader {
     pub socket_fallback_count: u32,
     /// Diagnostic: P-frames dropped during overflow (version >= 2)
     pub dropped_count: u32,
-    /// Padding to 64 bytes (reduced from 32)
-    pub _padding: [u8; 16],
+    /// Daemon generation counter (version >= 3); 0 means "no epoch reported".
+    pub epoch: u32,
+    /// Padding to 64 bytes
+    pub _padding: [u8; 12],
 }
 
 /// Slot header (64 bytes, must match C struct exactly)
@@ -425,6 +427,26 @@ impl ShmRingReader {
     /// the push receive loop consults it whenever a notification poll times out.
     pub fn is_shutdown(&self) -> bool {
         self.flags_atomic().load(Ordering::Acquire) & VD_FLAG_SHUTDOWN != 0
+    }
+
+    /// Read the daemon generation counter from the ring header (version >= 3).
+    ///
+    /// Returns 0 for a v1/v2 ring, or for a ring the daemon has not stamped yet —
+    /// including the window in which `vd_ring_create()` has memset the header
+    /// during a restart. 0 is never a valid generation, and the epoch gate treats
+    /// it as a mismatch rather than as "no information".
+    ///
+    /// Uses `read_volatile`: the daemon rewrites this field concurrently on
+    /// restart, and creating a `&u32` to it would violate strict aliasing.
+    pub fn epoch(&self) -> u32 {
+        // SAFETY: offset 48 is within the validated VD_SHM_HEADER_SIZE (64) region.
+        unsafe { self.base.add(48).cast::<u32>().read_volatile() }
+    }
+
+    /// Raw base pointer, for tests that stand in for the daemon.
+    #[cfg(test)]
+    pub(in crate::hal::anyka::ipc) fn base_ptr_for_test(&self) -> *mut u8 {
+        self.base
     }
 
     /// Returns (overflow_count, eviction_count, socket_fallback_count, dropped_count).
@@ -1112,7 +1134,8 @@ pub(in crate::hal::anyka::ipc) mod tests {
             eviction_count: 0,
             socket_fallback_count: 0,
             dropped_count: 0,
-            _padding: [0u8; 16],
+            epoch: 0,
+            _padding: [0u8; 12],
         };
 
         let header_bytes = unsafe {
@@ -1766,5 +1789,25 @@ pub(in crate::hal::anyka::ipc) mod tests {
         assert_eq!(notif.slot_index, u32::MAX);
         assert_eq!(notif.stream_id, u32::MAX);
         assert_eq!(notif.seq_no, u32::MAX - 1);
+    }
+
+    #[test]
+    fn epoch_reads_back_the_value_the_daemon_stamped() {
+        let reader = create_test_anon_reader();
+
+        // create_test_anon_reader leaves epoch at 0 (freshly zeroed mmap), which is
+        // exactly what "no epoch / v2 daemon" looks like.
+        assert_eq!(reader.epoch(), 0, "zeroed ring must report epoch 0");
+
+        // Stand in for the daemon stamping a generation.
+        // SAFETY: offset 48 is inside the validated 64-byte header.
+        unsafe {
+            reader
+                .base_ptr_for_test()
+                .add(48)
+                .cast::<u32>()
+                .write_volatile(0xDEAD_BEEF);
+        }
+        assert_eq!(reader.epoch(), 0xDEAD_BEEF);
     }
 }
