@@ -185,7 +185,7 @@ const schema = z.object({
 |----------|----------|
 | Functional Spec | `specs/003-frontend-onvif-spec/spec.md` |
 | Implementation Plan | `specs/003-frontend-onvif-spec/plan.md` |
-| Design Assets | `.ai/design/` (Figma + CSS) |
+| Design Assets | `docs/design/` (Figma + CSS) |
 | Design System | See `www-design-system` memory |
 
 ## Performance Requirements

@@ -6,6 +6,7 @@
 |---|---|---|
 | Design + implementation plans | `docs/plans/` | `YYYY-MM-DD-<topic>-design.md` and `YYYY-MM-DD-<topic>.md` |
 | Durable analyses and investigations | `docs/reference/` | free-form |
+| WebUI design source | `docs/design/` | Figma file, exported components, screenshots — not prose |
 | Superseded conventions | `docs/archive/` | frozen — never add, never edit |
 | User-facing documentation | `wiki/` | published to the GitHub Wiki |
 | Agent standards loaded by `AGENTS.md` | `.serena/memories/` | see `AGENTS.md` |
@@ -47,6 +48,21 @@ deliberately — renaming for symmetry is churn with no reader benefit.
 | `docs/reference/rtp-send-latency-investigation.md` | Why RTP sends stall on the AK3918 |
 | `docs/reference/video-flow.md` | Video path from sensor to client |
 | `docs/reference/hack-process.md` | Reverse-engineering narrative for the camera |
+
+## Design
+
+`docs/design/` holds the WebUI design source, not documentation about it:
+
+| Item | What |
+|---|---|
+| `docs/design/ONVIF.fig` | Figma source, authoritative for the Camera.UI theme |
+| `docs/design/styles/globals.css` | Theme CSS, authoritative |
+| `docs/design/components/`, `imports/`, `App.tsx` | Figma-exported React components, reference only — not the shipping WebUI, which lives in `cross-compile/www/` |
+| `docs/design/img/` | Figma screenshots and mockups |
+| `docs/design/prd.md`, `design_proposal.md`, `DESIGN_REVIEW.md` | Product requirements, design proposal, and design review for the web interface |
+| `docs/design/export_figma_screenshots.py` | Regenerates `img/` |
+
+Excluded from Snyk and DeepCode analysis by `.snyk` and `.dcignore` — most of it is generated.
 
 ## Archive
 

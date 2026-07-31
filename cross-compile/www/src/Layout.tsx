@@ -2,7 +2,7 @@
  * Main Layout Component
  *
  * Responsive layout with integrated sidebar navigation, header, and mobile sheet nav.
- * Matches the premium dark theme design from .ai/design.
+ * Matches the premium dark theme design from docs/design.
  */
 import React, { useState } from 'react';
 

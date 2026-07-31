@@ -10,7 +10,7 @@ exclude:
     # Third-party libraries and tools
     - "cross-compile/gsoap/**"
     - "toolchain/**"
-    - ".ai/**"
+    - "docs/design/**"
     - "cross-compile/xiu/**"
 
     # Original firmware filesystem dump - read-only reference

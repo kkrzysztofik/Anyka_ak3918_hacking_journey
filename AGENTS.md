@@ -221,6 +221,7 @@ This documentation is organized into focused modules to reduce context usage and
 |---|---|
 | Designs and implementation plans | `docs/plans/` |
 | Durable analyses and investigations | `docs/reference/` |
+| WebUI design source (Figma, exports, screenshots) | `docs/design/` |
 | Superseded conventions | `docs/archive/` — frozen, never add, never edit |
 | User-facing documentation | `wiki/` — published to the GitHub Wiki |
 
