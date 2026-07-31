@@ -38,10 +38,13 @@ const EPOCH_POLL_INTERVAL: Duration = Duration::from_secs(1);
 
 /// One tick of the epoch poller: refresh from the ring, publish loss if it moved.
 ///
-/// This is the only thing that detects a restart while idle. With push stopped and
-/// no RTSP client there is no frame traffic, so no socket ever errors and no EOF ever
-/// arrives — the camera would otherwise sit streaming nothing indefinitely. The cost
-/// is a single volatile `u32` read of an already-mapped page.
+/// A detection *backstop*, not the primary detector. In this build push stays
+/// active regardless of RTSP clients, so a daemon restart trips frame-socket
+/// errors within milliseconds and the frame reader / control owner report it
+/// first. The poller still earns its keep on two races those miss: a daemon that
+/// restarts fast enough to re-stamp the ring before the frame reader notices the
+/// old socket died, and a half-dead daemon whose socket never EOFs. Cost is one
+/// volatile u32 read of an already-mapped page per tick.
 pub fn poll_epoch_once(ipc: &AnykaIpc, tx: &watch::Sender<Availability>) {
     if !ipc.refresh_observed_epoch() {
         // send_if_modified keeps the channel quiet while the loss persists, so
@@ -59,14 +62,15 @@ pub fn poll_epoch_once(ipc: &AnykaIpc, tx: &watch::Sender<Availability>) {
 
 /// Wait for peer loss, from whichever detector notices first.
 ///
-/// Two independent detectors, because neither covers the other's case:
-/// - the **reports** channel fires immediately on a control-socket error or frame
-///   EOF, but only when there is traffic to fail;
-/// - the **poller** is the only thing that notices while idle, where there is no
-///   traffic and so no socket ever errors.
+/// Detection is layered, fastest first:
+/// - frame-socket EOF/error — milliseconds — the primary detector while push is
+///   active (which, in this build, is always);
+/// - control-socket error — on the next control request;
+/// - epoch poller — 1 s — a backstop for restart races and non-EOF daemon death.
 ///
-/// Scenario 4 of the hardware matrix — restart with push stopped and no RTSP client
-/// — is precisely the case only the poller catches.
+/// The `reports` channel carries the first two; the ticker drives the poller.
+/// (`idle-stop-push`, which would make the poller the sole idle detector, is
+/// deliberately not implemented — see the S4 design.)
 pub async fn watch_epoch_until_loss(
     ipc: &AnykaIpc,
     tx: &watch::Sender<Availability>,
