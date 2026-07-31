@@ -10,6 +10,9 @@
 /* Ring header, for the daemon epoch baked into handle tokens. */
 #include "vd_ring_buffer.h"
 
+#include <pthread.h>
+#include <time.h>
+
 volatile sig_atomic_t g_shutdown = 0;
 
 int g_control_fd = -1;
@@ -155,16 +158,83 @@ static const uint8_t g_obj_close_order[] = {
     VD_OBJ_KIND_AI,
 };
 
+/* Timeout for the SDK stream cancel during session cleanup, seconds. Mirrors
+ * CANCEL_STREAM_TIMEOUT_SEC in handlers_venc.c. */
+#define VD_OBJ_CANCEL_TIMEOUT_SEC 3
+
+struct vd_cancel_arg {
+    void        *handle;
+    volatile int done;   /* set by the worker when ak_venc_cancel_stream returns */
+};
+
+static void *vd_cancel_worker(void *arg)
+{
+    struct vd_cancel_arg *ca = (struct vd_cancel_arg *)arg;
+    (void)ak_venc_cancel_stream(ca->handle);
+    __atomic_store_n(&ca->done, 1, __ATOMIC_RELEASE);
+    return NULL;
+}
+
+/*
+ * vd_cancel_stream_bounded - Cancel an SDK stream, giving up after a timeout.
+ *
+ * ak_venc_cancel_stream stops libmpi_venc's internal capture_thread, which must
+ * happen before the VI it feeds on is closed (otherwise that thread calls
+ * ak_vi_release_frame on freed state and the daemon segfaults). The call can
+ * block indefinitely on a wedged encoder, so it runs on a detached thread and we
+ * wait only VD_OBJ_CANCEL_TIMEOUT_SEC. On timeout we leak the small arg (the
+ * detached thread may still touch it) and continue teardown: a leaked capture
+ * thread is less bad than hanging the accept loop.
+ */
+static void vd_cancel_stream_bounded(void *handle)
+{
+    struct vd_cancel_arg *ca = (struct vd_cancel_arg *)malloc(sizeof(*ca));
+    if (ca == NULL) {
+        log_error("[obj] cancel_stream: malloc failed; skipping cancel ptr=%p", handle);
+        return;
+    }
+    ca->handle = handle;
+    ca->done = 0;
+
+    pthread_t tid;
+    if (pthread_create(&tid, NULL, vd_cancel_worker, ca) != 0) {
+        log_error("[obj] cancel_stream: pthread_create failed ptr=%p", handle);
+        free(ca);
+        return;
+    }
+    pthread_detach(tid);
+
+    struct timespec deadline;
+    clock_gettime(CLOCK_MONOTONIC, &deadline);
+    deadline.tv_sec += VD_OBJ_CANCEL_TIMEOUT_SEC;
+
+    while (!__atomic_load_n(&ca->done, __ATOMIC_ACQUIRE)) {
+        struct timespec now;
+        clock_gettime(CLOCK_MONOTONIC, &now);
+        if (now.tv_sec > deadline.tv_sec ||
+            (now.tv_sec == deadline.tv_sec && now.tv_nsec >= deadline.tv_nsec)) {
+            log_error("[obj] cancel_stream timed out after %ds ptr=%p (leaking arg)",
+                      VD_OBJ_CANCEL_TIMEOUT_SEC, handle);
+            return; /* intentional leak of ca; worker may still write it */
+        }
+        struct timespec ts = { .tv_sec = 0, .tv_nsec = 10 * 1000000L };
+        nanosleep(&ts, NULL);
+    }
+
+    log_info("[obj] cancelled leaked stream ptr=%p", handle);
+    free(ca);
+}
+
 static void vd_obj_close_one(uint8_t kind, void *ptr)
 {
     int ret = 0;
 
     switch (kind) {
     case VD_OBJ_KIND_STREAM:
-        /* Not ak_venc_cancel_stream(): that call can block indefinitely on a
-         * wedged encoder, and this runs on the accept loop. stop_push_slot()
-         * already cancels the streams the push threads own, which is every
-         * stream this daemon hands out. */
+        /* Cancel the SDK stream so libmpi_venc's capture_thread stops before the
+         * VI it reads is closed. stop_push_slot() only stops the daemon's own
+         * push reader, NOT this thread. */
+        vd_cancel_stream_bounded(ptr);
         return;
     case VD_OBJ_KIND_VENC:
         ret = ak_venc_close(ptr);
@@ -173,6 +243,9 @@ static void vd_obj_close_one(uint8_t kind, void *ptr)
         ret = ak_aenc_close(ptr);
         break;
     case VD_OBJ_KIND_VI:
+        /* capture_off before close: the safe teardown onvif-rust does on clean
+         * shutdown, moved here so a SIGKILLed client gets it too. */
+        (void)ak_vi_capture_off(ptr);
         ret = ak_vi_close(ptr);
         break;
     case VD_OBJ_KIND_AI:
