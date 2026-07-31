@@ -72,6 +72,15 @@ pub async fn watch_epoch_until_loss(
     tx: &watch::Sender<Availability>,
     reports: &mut mpsc::Receiver<PeerLoss>,
 ) {
+    // Discard reports left over from a previous generation. Tearing down the old
+    // attachment — the frame reader hitting EOF, rollback's CLOSE calls racing the
+    // dead socket — emits broken-pipe reports that land in this depth-1 channel.
+    // One survives into the freshly attached generation and, without this drain,
+    // fires on the first `recv()` below, unwinding a healthy attach ~1 ms after it
+    // went Available. A real loss for the new generation instead re-arrives from its
+    // own traffic, or is caught by the epoch poller within one tick.
+    while reports.try_recv().is_ok() {}
+
     let mut ticker = tokio::time::interval(EPOCH_POLL_INTERVAL);
     loop {
         tokio::select! {
@@ -327,15 +336,51 @@ mod tests {
         assert_eq!(*rx.borrow_and_update(), Availability::Available);
     }
 
-    #[tokio::test]
-    async fn a_reported_loss_wakes_the_wait_without_the_epoch_moving() {
-        // Control-socket errors and frame EOF must not wait out a poll interval.
+    #[tokio::test(start_paused = true)]
+    async fn a_stale_report_from_a_dead_generation_does_not_unwind_the_new_one() {
+        // Regression for the hardware flap: tearing down generation N leaves a
+        // broken-pipe report buffered in the depth-1 channel. It must not unwind the
+        // freshly attached generation N+1, which is healthy and whose epoch matches.
         let ipc = AnykaIpc::new_detached().unwrap();
+        ipc.attach_anon_ring_for_test(12); // new generation, ring == attached
+        let mut reports = ipc.take_loss_rx().unwrap();
+
+        // A leftover report from before the re-attach is sitting in the channel.
+        ipc.report_peer_loss("control socket error: Broken pipe (from dead gen)");
+
+        let (tx, _rx) = watch::channel(Availability::Available);
+
+        // With the stale report drained, nothing ends the wait until real loss;
+        // time out the wait to prove it stayed up rather than unwinding.
+        let waited = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            watch_epoch_until_loss(&ipc, &tx, &mut reports),
+        )
+        .await;
+
+        assert!(
+            waited.is_err(),
+            "wait returned early — the stale report unwound a healthy attach"
+        );
+        assert_eq!(*tx.borrow(), Availability::Available, "must stay available");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_reported_loss_during_the_wait_wakes_it_without_the_epoch_moving() {
+        // Control-socket errors and frame EOF arriving *during* the wait must not
+        // sit through a poll interval. Distinct from a stale pre-wait report, which
+        // is drained: this one is generated after the wait has begun.
+        let ipc = std::sync::Arc::new(AnykaIpc::new_detached().unwrap());
         ipc.attach_anon_ring_for_test(11);
         let mut reports = ipc.take_loss_rx().unwrap();
         let (tx, _rx) = watch::channel(Availability::Available);
 
-        ipc.report_peer_loss("control socket error: broken pipe");
+        let reporter = std::sync::Arc::clone(&ipc);
+        tokio::spawn(async move {
+            // Let the drain run and the select loop start, then report.
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            reporter.report_peer_loss("control socket error: broken pipe");
+        });
 
         // The ring epoch is untouched, so only the reports channel can end this.
         watch_epoch_until_loss(&ipc, &tx, &mut reports).await;
