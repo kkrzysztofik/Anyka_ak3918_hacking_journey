@@ -536,6 +536,80 @@ Do not claim completion unless P1–P5 all pass with output shown.
 
 ---
 
+## Task 9: Move `.ai/` to `docs/design/`
+
+Added after Tasks 1–8 shipped. `.ai/` holds the WebUI design source: 87 tracked files.
+Unlike every other directory in this consolidation, it has live inbound references, so the
+move and the reference rewrites must land in the same commit.
+
+**Files:**
+- Move: all 87 tracked files under `.ai/` → `docs/design/`, flattening `.ai/design/*` up one
+  level (`.ai/design/ONVIF.fig` → `docs/design/ONVIF.fig`, not `docs/design/design/…`)
+- Modify: 6 files carrying 9 reference lines (table in Step 3)
+- Modify: `docs/README.md` and `AGENTS.md` to list the new category
+
+**Step 1: Move**
+
+```bash
+mkdir -p docs/design
+git mv .ai/design/ONVIF.fig .ai/design/App.tsx docs/design/
+git mv .ai/design/components .ai/design/imports .ai/design/styles docs/design/
+git mv .ai/img docs/design/img
+git mv .ai/prd.md .ai/design_proposal.md .ai/DESIGN_REVIEW.md docs/design/
+git mv .ai/export_figma_screenshots.py docs/design/
+```
+
+**Step 2: Verify the count survived**
+
+```bash
+git ls-tree -r --name-only HEAD .ai | wc -l     # ground truth before the move
+find docs/design -type f | wc -l
+```
+
+Both must be 87.
+
+**Step 3: Rewrite the 9 references — by hand, one Edit call each**
+
+| File | Old | New |
+|---|---|---|
+| `.dcignore` | `.ai/**` | `docs/design/**` |
+| `.snyk` | `- ".ai/**"` | `- "docs/design/**"` |
+| `.claude/skills/camera-webui-components/SKILL.md` | `.ai/design/ONVIF.fig`, `.ai/design/styles/globals.css` | `docs/design/ONVIF.fig`, `docs/design/styles/globals.css` |
+| `.serena/memories/www-design-system.md` (4 lines) | `.ai/design/ONVIF.fig`, `.ai/design_proposal.md`, `.ai/design/styles/globals.css`, `.ai/design/` | `docs/design/…` equivalents |
+| `.serena/memories/www-project-context.md` | `.ai/design/` | `docs/design/` |
+| `cross-compile/www/src/Layout.tsx` | `.ai/design` | `docs/design` |
+
+The `.dcignore` and `.snyk` rewrites are load-bearing: both exclude by literal path, and
+without them the move silently re-enables DeepCode and Snyk scanning on 65 generated Figma
+files. Sonar never excluded `.ai/`, so it needs no change.
+
+Do NOT edit `docs/archive/speckit/003-frontend-onvif-spec/**`, which also mentions `.ai/`.
+The archive is frozen.
+
+**Step 4: Verify no stale references outside the archive**
+
+```bash
+git grep -n -- '\.ai/' -- ':!docs/archive' ':!cross-compile/anyka_reference'
+```
+
+Expected: no output. (`cross-compile/anyka_reference/**` is excluded because its C code
+contains `av_ctrl.ai.` struct-field accesses that match the pattern by coincidence.)
+
+**Step 5: Add the category to `docs/README.md` and `AGENTS.md`**
+
+Insert a `docs/design/` row into the "Where things go" table in `docs/README.md` and the
+matching table in the `## Documentation Layout` section of `AGENTS.md`, described as
+design source — Figma, exported components, screenshots — not prose.
+
+**Step 6: Commit**
+
+```bash
+git add -A
+git commit -m "docs: move .ai design source into docs/design"
+```
+
+---
+
 ## Not in this plan
 
 `.superpowers/sdd/phase-3-report.md` is session scratch that leaked into git — the rest of

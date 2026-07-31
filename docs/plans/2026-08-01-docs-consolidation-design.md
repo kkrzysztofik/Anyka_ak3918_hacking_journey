@@ -144,7 +144,41 @@ Per `AGENTS.md`, all edits are manual. No scripted transformations.
 that directory is ignored. Untracking it needs `git rm --cached`, an index deletion
 requiring explicit permission under `AGENTS.md` RULE 1. Not part of this work.
 
+## Addendum: `.ai/` (approved 2026-08-01, after the original design)
+
+The original design omitted `.ai/` — 87 tracked files holding the WebUI design source:
+a Figma file, 65 exported TSX/CSS files, 18 screenshots, an export script, and three
+markdown documents (`prd.md`, `design_proposal.md`, `DESIGN_REVIEW.md`).
+
+`.ai/` differs from every other directory in this consolidation: it has **live inbound
+references**, where the others were orphaned.
+
+| Referrer | What it points at |
+|---|---|
+| `.claude/skills/camera-webui-components/SKILL.md` | `.ai/design/ONVIF.fig`, `.ai/design/styles/globals.css` as authoritative styles |
+| `.serena/memories/www-design-system.md` | design source, design proposal, theme CSS |
+| `.serena/memories/www-project-context.md` | design assets |
+| `cross-compile/www/src/Layout.tsx` | source comment citing the theme |
+| `.dcignore`, `.snyk` | exclude `.ai/**` from static analysis |
+
+**Decision: move all 87 files to `docs/design/`**, flattening `.ai/design/*` up one level
+so the path is `docs/design/ONVIF.fig`, not `docs/design/design/ONVIF.fig`.
+
+An alternative — move only the three markdown files and leave the assets — was raised and
+rejected by the user. The stated risk of the full move is that `.dcignore` and `.snyk`
+exclude by literal path, so relocating generated Figma output under `docs/` would silently
+re-enable DeepCode and Snyk scanning on 65 files that are not hand-written. **Mitigation:
+both globs are rewritten to `docs/design/**` in the same change**, so scan coverage is
+identical before and after. Sonar never excluded `.ai/`, so it is unaffected either way.
+
+`docs/design/` becomes a fourth top-level category alongside `plans/`, `reference/`, and
+`archive/`: design *source*, not prose. It is listed in `docs/README.md` and the
+`AGENTS.md` layout table.
+
 ## Authorization
 
 User approved the design as presented on 2026-08-01 ("yes"), including freezing
 `docs/specs/004-hw-integration` under `docs/archive/speckit/`.
+
+User approved the `.ai/` addendum on 2026-08-01, selecting "Move all of .ai/ to
+docs/design/" after the scanning-coverage risk was stated.
