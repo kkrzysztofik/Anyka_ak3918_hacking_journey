@@ -29,9 +29,9 @@ def negotiate(sock: socket.socket, data: bytes) -> bytes:
             out.append(data[i])
             i += 1
             continue
-        if i + 2 >= len(data) + 1:
+        if i + 2 >= len(data):
             break
-        cmd, opt = data[i + 1], data[i + 2] if i + 2 < len(data) else 0
+        cmd, opt = data[i + 1], data[i + 2]
         # Refuse everything: WILL->DONT, DO->WONT.
         if cmd == WILL:
             sock.sendall(bytes([IAC, DONT, opt]))
