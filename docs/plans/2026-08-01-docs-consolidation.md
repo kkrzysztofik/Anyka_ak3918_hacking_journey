@@ -589,11 +589,22 @@ The archive is frozen.
 **Step 4: Verify no stale references outside the archive**
 
 ```bash
-git grep -n -- '\.ai/' -- ':!docs/archive' ':!cross-compile/anyka_reference'
+git grep -n -- '\.ai/' -- ':!docs/archive' ':!cross-compile/anyka_reference' ':!docs/plans'
 ```
 
-Expected: no output. (`cross-compile/anyka_reference/**` is excluded because its C code
-contains `av_ctrl.ai.` struct-field accesses that match the pattern by coincidence.)
+Expected: no output. Three exclusions, each for a different reason:
+- `cross-compile/anyka_reference/**` — its C code has `av_ctrl.ai.` struct-field accesses
+  that match the pattern by coincidence.
+- `docs/archive/**` — frozen by policy.
+- `docs/plans/**` — this plan and its design doc quote the old paths and the literal
+  `git mv .ai/…` commands. They are the audit trail for the move; rewriting them would
+  produce `git mv docs/design/ docs/design/` and destroy the record.
+
+**Also grep for the path as a write target, not just as a reference.** `.ai/export_figma_screenshots.py`
+hardcoded `Path('.ai/img')` as its *output* directory — a reference that points out of the
+moved tree and back into it. Left unfixed, running the script would recreate `.ai/img/`
+outside the new exclusion glob, silently undoing the scan-coverage guarantee above. It is
+fixed to `Path('docs/design/img')` in this task.
 
 **Step 5: Add the category to `docs/README.md` and `AGENTS.md`**
 
