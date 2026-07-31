@@ -211,6 +211,21 @@ This documentation is organized into focused modules to reduce context usage and
 
 **LOADING RULE**: If your task involves multiple areas (e.g., coding + testing), you MUST load ALL relevant documents.
 
+## Documentation Layout
+
+**New design and plan docs go in `docs/plans/`** as `YYYY-MM-DD-<topic>-design.md` and
+`YYYY-MM-DD-<topic>.md`. These are the paths the superpowers `brainstorming` and
+`writing-plans` skills already write to — do not invent a new location.
+
+| Kind | Location |
+|---|---|
+| Designs and implementation plans | `docs/plans/` |
+| Durable analyses and investigations | `docs/reference/` |
+| Superseded conventions | `docs/archive/` — frozen, never add, never edit |
+| User-facing documentation | `wiki/` — published to the GitHub Wiki |
+
+A plan has an end date; reference does not. See `docs/README.md` for the index.
+
 ## Key Development Areas
 
 - **`cross-compile/onvif-rust/`** — **CURRENT FOCUS** - Complete ONVIF 24.12 implementation
