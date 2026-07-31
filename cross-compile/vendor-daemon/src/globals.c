@@ -11,6 +11,7 @@
 #include "vd_ring_buffer.h"
 
 #include <pthread.h>
+#include <stdlib.h>
 #include <time.h>
 
 volatile sig_atomic_t g_shutdown = 0;
