@@ -9,9 +9,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use tokio::sync::watch;
-
-use tokio::sync::mpsc;
+use tokio::sync::{broadcast, mpsc, watch};
 
 use crate::hal::anyka::ipc::{AnykaIpc, PeerLoss};
 use crate::platform::common::Platform;
@@ -191,7 +189,11 @@ impl AttachTarget for PlatformAttachTarget {
 /// When the breaker does latch open it publishes [`Availability::GivenUp`], because a
 /// backoff that hides a permanent failure would leave the camera dark with evidence
 /// only in the logs; publishing `GivenUp` is what makes it visible to the ONVIF services.
-pub async fn run_supervisor(target: Arc<dyn AttachTarget>, tx: &watch::Sender<Availability>) {
+pub async fn run_supervisor(
+    target: Arc<dyn AttachTarget>,
+    tx: &watch::Sender<Availability>,
+    mut shutdown: broadcast::Receiver<()>,
+) {
     let mut backoff = Backoff::new();
     let mut breaker = CircuitBreaker::new();
 
@@ -206,44 +208,83 @@ pub async fn run_supervisor(target: Arc<dyn AttachTarget>, tx: &watch::Sender<Av
             return;
         }
 
-        match target.attach().await {
-            Err(e) => {
-                // Do NOT count this toward the breaker. attach() fails here because
-                // the daemon is absent, not yet listening, or restarting mid-attach
-                // — no SDK call happened, so there is no VI_OPEN/VENC_OPEN churn to
-                // bound. The breaker exists only for a live-but-wedged daemon, which
-                // is the initialize() arm below. Counting absent-daemon failures
-                // here is what made degraded boot give up on a late daemon (S3).
-                tracing::warn!(error = %e, "attach failed; retrying (daemon absent)");
-                let _ = tx.send(Availability::Unavailable);
-                tokio::time::sleep(backoff.next()).await;
+        let epoch = tokio::select! {
+            _ = shutdown.recv() => {
+                tracing::info!(event = "supervisor_shutdown", "attach supervisor exiting");
+                return;
             }
-            Ok(epoch) => match target.initialize().await {
+            result = target.attach() => match result {
                 Err(e) => {
-                    tracing::warn!(epoch, error = %e, "bring-up failed; unwinding");
-                    // Partial bring-up MUST be unwound. Without this, each retry
-                    // does another VI_OPEN/VENC_OPEN cycle against an SDK that
-                    // wedges.
-                    target.rollback().await;
-                    target.detach();
+                    // Do NOT count this toward the breaker. attach() fails here because
+                    // the daemon is absent, not yet listening, or restarting mid-attach
+                    // — no SDK call happened, so there is no VI_OPEN/VENC_OPEN churn to
+                    // bound. The breaker exists only for a live-but-wedged daemon, which
+                    // is the initialize() arm below. Counting absent-daemon failures
+                    // here is what made degraded boot give up on a late daemon (S3).
+                    tracing::warn!(error = %e, "attach failed; retrying (daemon absent)");
                     let _ = tx.send(Availability::Unavailable);
-                    breaker.record_failure();
-                    tokio::time::sleep(backoff.next()).await;
+                    tokio::select! {
+                        _ = shutdown.recv() => {
+                            tracing::info!(event = "supervisor_shutdown", "attach supervisor exiting");
+                            return;
+                        }
+                        _ = tokio::time::sleep(backoff.next()) => {}
+                    }
+                    continue;
                 }
-                Ok(()) => {
-                    tracing::info!(event = "attach_available", epoch, "vendor daemon available");
-                    breaker.record_success();
-                    backoff.reset();
-                    let _ = tx.send(Availability::Available);
+                Ok(epoch) => epoch,
+            }
+        };
 
-                    target.wait_for_loss(tx).await;
+        let init_result = tokio::select! {
+            _ = shutdown.recv() => {
+                tracing::info!(event = "supervisor_shutdown", "attach supervisor exiting");
+                target.detach();
+                return;
+            }
+            result = target.initialize() => result,
+        };
 
-                    tracing::warn!(epoch, "peer loss observed; unwinding");
-                    let _ = tx.send(Availability::Unavailable);
-                    target.rollback().await;
-                    target.detach();
+        match init_result {
+            Err(e) => {
+                tracing::warn!(epoch, error = %e, "bring-up failed; unwinding");
+                // Partial bring-up MUST be unwound. Without this, each retry
+                // does another VI_OPEN/VENC_OPEN cycle against an SDK that
+                // wedges.
+                target.rollback().await;
+                target.detach();
+                let _ = tx.send(Availability::Unavailable);
+                breaker.record_failure();
+                tokio::select! {
+                    _ = shutdown.recv() => {
+                        tracing::info!(event = "supervisor_shutdown", "attach supervisor exiting");
+                        return;
+                    }
+                    _ = tokio::time::sleep(backoff.next()) => {}
                 }
-            },
+            }
+            Ok(()) => {
+                tracing::info!(event = "attach_available", epoch, "vendor daemon available");
+                breaker.record_success();
+                backoff.reset();
+                let _ = tx.send(Availability::Available);
+
+                tokio::select! {
+                    _ = shutdown.recv() => {
+                        tracing::info!(event = "supervisor_shutdown", "attach supervisor exiting");
+                        let _ = tx.send(Availability::Unavailable);
+                        target.rollback().await;
+                        target.detach();
+                        return;
+                    }
+                    _ = target.wait_for_loss(tx) => {}
+                }
+
+                tracing::warn!(epoch, "peer loss observed; unwinding");
+                let _ = tx.send(Availability::Unavailable);
+                target.rollback().await;
+                target.detach();
+            }
         }
     }
 }
@@ -324,7 +365,7 @@ mod tests {
     use tokio::sync::watch;
 
     #[tokio::test]
-    async fn poller_reports_loss_when_the_ring_epoch_changes() {
+    async fn test_poller_ring_epoch_changed_reports_loss() {
         let ipc = AnykaIpc::new_detached().unwrap();
         ipc.attach_anon_ring_for_test(11);
         let (tx, mut rx) = watch::channel(Availability::Available);
@@ -338,7 +379,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn poller_is_quiet_while_the_epoch_holds() {
+    async fn test_poller_epoch_holds_stays_available() {
         let ipc = AnykaIpc::new_detached().unwrap();
         ipc.attach_anon_ring_for_test(11);
         let (tx, mut rx) = watch::channel(Availability::Available);
@@ -349,7 +390,7 @@ mod tests {
     }
 
     #[tokio::test(start_paused = true)]
-    async fn a_stale_report_from_a_dead_generation_does_not_unwind_the_new_one() {
+    async fn test_watch_stale_report_does_not_unwind_new_generation() {
         // Regression for the hardware flap: tearing down generation N leaves a
         // broken-pipe report buffered in the depth-1 channel. It must not unwind the
         // freshly attached generation N+1, which is healthy and whose epoch matches.
@@ -378,7 +419,7 @@ mod tests {
     }
 
     #[tokio::test(start_paused = true)]
-    async fn a_reported_loss_during_the_wait_wakes_it_without_the_epoch_moving() {
+    async fn test_watch_reported_loss_wakes_without_epoch_move() {
         // Control-socket errors and frame EOF arriving *during* the wait must not
         // sit through a poll interval. Distinct from a stale pre-wait report, which
         // is drained: this one is generated after the wait has begun.
@@ -402,7 +443,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn poller_reports_loss_when_detached() {
+    async fn test_poller_detached_reports_loss() {
         // No ring mapped at all: the supervisor must learn the attachment is gone.
         let ipc = AnykaIpc::new_detached().unwrap();
         let (tx, mut rx) = watch::channel(Availability::Available);
@@ -410,6 +451,26 @@ mod tests {
         poll_epoch_once(&ipc, &tx);
 
         assert_eq!(*rx.borrow_and_update(), Availability::Unavailable);
+    }
+
+    #[tokio::test]
+    async fn test_poller_already_unavailable_does_not_republish() {
+        let ipc = AnykaIpc::new_detached().unwrap();
+        let (tx, rx) = watch::channel(Availability::Unavailable);
+
+        poll_epoch_once(&ipc, &tx);
+
+        assert!(
+            !rx.has_changed().unwrap_or(true),
+            "must stay quiet while already Unavailable"
+        );
+        assert_eq!(*rx.borrow(), Availability::Unavailable);
+    }
+
+    #[test]
+    fn test_backoff_and_circuit_breaker_default_construct() {
+        assert_eq!(Backoff::default().next(), Duration::from_millis(500));
+        assert!(!CircuitBreaker::default().is_open());
     }
 
     // ------------------------------------------------------------------
@@ -481,7 +542,7 @@ mod tests {
     }
 
     #[tokio::test(start_paused = true)]
-    async fn supervisor_gives_up_after_the_breaker_opens_on_initialize_failures() {
+    async fn test_supervisor_init_failures_opens_breaker_gives_up() {
         // The breaker opens only via the real path: a live daemon (attach
         // succeeds) whose bring-up wedges (initialize always fails). Each failed
         // initialize is a VI_OPEN/VENC_OPEN cycle against the SDK — that churn is
@@ -489,7 +550,8 @@ mod tests {
         let target = std::sync::Arc::new(MockTarget::new(true, 0));
         let (tx, _rx) = watch::channel(Availability::Unavailable);
 
-        run_supervisor(target.clone(), &tx).await;
+        let (_shutdown_tx, shutdown_rx) = broadcast::channel(1);
+        run_supervisor(target.clone(), &tx, shutdown_rx).await;
 
         assert_eq!(
             target.init_calls.load(AtomicOrdering::SeqCst),
@@ -500,7 +562,7 @@ mod tests {
     }
 
     #[tokio::test(start_paused = true)]
-    async fn an_absent_daemon_never_opens_the_breaker() {
+    async fn test_supervisor_absent_daemon_never_opens_breaker() {
         // attach() failing because the daemon is not there yet must be retried
         // forever: no SDK call happened, so there is no churn to bound. Only
         // bring-up (initialize) failures against a live daemon count.
@@ -511,9 +573,10 @@ mod tests {
         // (retries forever), so a timeout is the pass signal.
         // 600s must exceed enough capped (15s) backoff cycles to drive attach_calls
         // past ATTACH_FAILURE_LIMIT; do not trim it or the assertion below weakens.
+        let (_shutdown_tx, shutdown_rx) = broadcast::channel(1);
         let stop = tokio::time::timeout(
             std::time::Duration::from_secs(600),
-            run_supervisor(target.clone(), &tx),
+            run_supervisor(target.clone(), &tx, shutdown_rx),
         )
         .await;
 
@@ -526,13 +589,14 @@ mod tests {
     }
 
     #[tokio::test(start_paused = true)]
-    async fn supervisor_rolls_back_once_per_failed_initialize() {
+    async fn test_supervisor_failed_initialize_rolls_back_once() {
         // Partial bring-up MUST be unwound, or each retry does another
         // VI_OPEN/VENC_OPEN cycle against an SDK that wedges.
         let target = std::sync::Arc::new(MockTarget::new(true, 0));
         let (tx, _rx) = watch::channel(Availability::Unavailable);
 
-        run_supervisor(target.clone(), &tx).await;
+        let (_shutdown_tx, shutdown_rx) = broadcast::channel(1);
+        run_supervisor(target.clone(), &tx, shutdown_rx).await;
 
         let failures = ATTACH_FAILURE_LIMIT as usize;
         assert_eq!(target.init_calls.load(AtomicOrdering::SeqCst), failures);
@@ -546,13 +610,95 @@ mod tests {
     }
 
     #[tokio::test(start_paused = true)]
-    async fn supervisor_publishes_available_then_unwinds_on_loss() {
+    async fn test_supervisor_shutdown_during_attach_retry_exits_cleanly() {
+        let target = std::sync::Arc::new(MockTarget::new(false, 0));
+        let (tx, _rx) = watch::channel(Availability::Unavailable);
+        let (shutdown_tx, shutdown_rx) = broadcast::channel(1);
+
+        let run = tokio::spawn({
+            let target = target.clone();
+            let tx = tx.clone();
+            async move { run_supervisor(target, &tx, shutdown_rx).await }
+        });
+
+        // Let the absent-daemon retry path start, then cancel.
+        tokio::time::advance(Duration::from_millis(10)).await;
+        let _ = shutdown_tx.send(());
+
+        tokio::time::timeout(Duration::from_secs(1), run)
+            .await
+            .expect("supervisor must exit on shutdown")
+            .expect("supervisor task must not panic");
+        assert_ne!(*tx.borrow(), Availability::GivenUp);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn test_supervisor_shutdown_while_available_rolls_back_and_exits() {
+        let (tx, _rx) = watch::channel(Availability::Unavailable);
+        let (shutdown_tx, shutdown_rx) = broadcast::channel(1);
+
+        let run = tokio::spawn({
+            let target = std::sync::Arc::new(HoldingTarget {
+                inner: MockTarget::new(true, 1),
+                hold: true,
+            });
+            let tx = tx.clone();
+            async move { run_supervisor(target, &tx, shutdown_rx).await }
+        });
+
+        // Advance until Available is published and wait_for_loss is holding.
+        tokio::time::advance(Duration::from_millis(50)).await;
+        assert_eq!(*tx.borrow(), Availability::Available);
+        let _ = shutdown_tx.send(());
+
+        tokio::time::timeout(Duration::from_secs(1), run)
+            .await
+            .expect("supervisor must exit on shutdown while available")
+            .expect("supervisor task must not panic");
+        assert_eq!(*tx.borrow(), Availability::Unavailable);
+    }
+
+    /// Like [`MockTarget`], but `wait_for_loss` parks until cancelled by shutdown.
+    struct HoldingTarget {
+        inner: MockTarget,
+        hold: bool,
+    }
+
+    #[async_trait::async_trait]
+    impl AttachTarget for HoldingTarget {
+        async fn attach(&self) -> PlatformResult<u32> {
+            self.inner.attach().await
+        }
+        async fn initialize(&self) -> PlatformResult<()> {
+            self.inner.initialize().await
+        }
+        async fn rollback(&self) {
+            self.inner.rollback().await;
+        }
+        fn detach(&self) {
+            self.inner.detach();
+        }
+        async fn wait_for_loss(&self, tx: &watch::Sender<Availability>) {
+            self.inner
+                .seen_while_waiting
+                .lock()
+                .unwrap()
+                .push(*tx.borrow());
+            if self.hold {
+                std::future::pending::<()>().await;
+            }
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn test_supervisor_available_then_unwinds_on_loss() {
         // One clean bring-up, then peer loss, then repeated failures until the
         // breaker opens.
         let target = std::sync::Arc::new(MockTarget::new(true, 1));
         let (tx, _rx) = watch::channel(Availability::Unavailable);
 
-        run_supervisor(target.clone(), &tx).await;
+        let (_shutdown_tx, shutdown_rx) = broadcast::channel(1);
+        run_supervisor(target.clone(), &tx, shutdown_rx).await;
 
         assert_eq!(
             *target.seen_while_waiting.lock().unwrap(),
@@ -568,7 +714,7 @@ mod tests {
     }
 
     #[test]
-    fn backoff_grows_and_caps() {
+    fn test_backoff_grows_and_caps() {
         let mut b = Backoff::new();
         assert_eq!(b.next(), Duration::from_millis(500));
         assert_eq!(b.next(), Duration::from_secs(1));
@@ -582,7 +728,7 @@ mod tests {
     }
 
     #[test]
-    fn circuit_breaker_opens_after_the_threshold_and_stays_open() {
+    fn test_circuit_breaker_opens_after_threshold_stays_open() {
         let mut cb = CircuitBreaker::new();
         for _ in 0..ATTACH_FAILURE_LIMIT - 1 {
             cb.record_failure();
@@ -595,7 +741,7 @@ mod tests {
     }
 
     #[test]
-    fn circuit_breaker_resets_on_success() {
+    fn test_circuit_breaker_resets_on_success() {
         let mut cb = CircuitBreaker::new();
         cb.record_failure();
         cb.record_failure();

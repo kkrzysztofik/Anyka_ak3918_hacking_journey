@@ -96,6 +96,9 @@ static int handle_hello(int fd)
 
     if (g_ring_buffer != NULL) {
         epoch = vd_ring_get_header(g_ring_buffer)->epoch;
+        /* Ring mapped but not yet stamped: refuse until the generation is live. */
+        if (epoch == 0)
+            return send_response(fd, STATUS_ERROR, NULL, 0);
     }
 
     memcpy(&resp[0], &epoch, 4);

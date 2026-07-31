@@ -381,9 +381,10 @@ static inline void *vd_ring_open(void)
         return NULL;
     }
 
-    /* Validate header (accept version 1 or 2 for backward compatibility) */
+    /* Validate header (accept every supported version 1..VD_SHM_VERSION) */
     hdr = vd_ring_get_header(base);
-    if (hdr->magic != VD_SHM_MAGIC || (hdr->version != 1 && hdr->version != 2)) {
+    if (hdr->magic != VD_SHM_MAGIC ||
+        hdr->version < 1 || hdr->version > VD_SHM_VERSION) {
         munmap(base, VD_SHM_TOTAL_SIZE);
         return NULL;
     }

@@ -28,7 +28,8 @@ use std::time::Duration;
 use async_trait::async_trait;
 use parking_lot::RwLock;
 
-use tokio::sync::watch;
+use tokio::sync::{broadcast, watch};
+use tokio::task::JoinHandle;
 
 use crate::hal::anyka::ipc::AnykaIpc;
 use crate::hal::common::video::VideoHalTrait;
@@ -239,18 +240,24 @@ impl AnykaPlatform {
         })
     }
 
-    /// Start the attach supervisor and return the availability channel.
+    /// Start the attach supervisor and return the availability channel plus task handle.
     ///
     /// The supervisor is the sole owner of the attachment: it drives the same
     /// `attach → initialize → serve → rollback → detach` path for cold start and for
     /// recovery, so a daemon that is absent at boot is not a special case.
-    pub fn spawn_supervisor(self: &Arc<Self>) -> PlatformResult<watch::Receiver<Availability>> {
+    ///
+    /// `shutdown` cancels attach / wait / backoff so Application can await the
+    /// JoinHandle before platform teardown.
+    pub fn spawn_supervisor(
+        self: &Arc<Self>,
+        shutdown: broadcast::Receiver<()>,
+    ) -> PlatformResult<(watch::Receiver<Availability>, JoinHandle<()>)> {
         let (tx, rx) = watch::channel(Availability::Unavailable);
         let target: Arc<dyn AttachTarget> = Arc::new(PlatformAttachTarget::new(Arc::clone(self))?);
-        tokio::spawn(async move {
-            run_supervisor(target, &tx).await;
+        let handle = tokio::spawn(async move {
+            run_supervisor(target, &tx, shutdown).await;
         });
-        Ok(rx)
+        Ok((rx, handle))
     }
 
     /// Best-effort unwind of a partial or complete bring-up, for the supervisor.

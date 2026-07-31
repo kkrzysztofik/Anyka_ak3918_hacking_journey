@@ -50,3 +50,32 @@ impl Availability {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::Availability;
+
+    #[test]
+    fn test_availability_is_available_only_for_available() {
+        assert!(Availability::Available.is_available());
+        assert!(!Availability::Unavailable.is_available());
+        assert!(!Availability::GivenUp.is_available());
+    }
+
+    #[test]
+    fn test_availability_unavailable_reason_distinguishes_given_up() {
+        assert!(Availability::Available.unavailable_reason().is_none());
+        assert!(
+            Availability::Unavailable
+                .unavailable_reason()
+                .unwrap()
+                .contains("retrying")
+        );
+        assert!(
+            Availability::GivenUp
+                .unavailable_reason()
+                .unwrap()
+                .contains("manual intervention")
+        );
+    }
+}

@@ -42,7 +42,7 @@ use streaming_lib::common::auth::{Auth, AuthAlgorithm, AuthType, CredentialValid
 // AppState - Shared application state for dependency injection
 // ============================================================================
 /// What platform bring-up produced: the platform itself, plus the supervisor's
-/// availability channel when one is running.
+/// availability channel and task handle when one is running.
 ///
 /// `Default` is the degraded case — no platform, no supervisor.
 #[derive(Default)]
@@ -51,6 +51,8 @@ pub struct PlatformInit {
     pub platform: Option<Arc<dyn Platform>>,
     /// Live attach state; `None` in stub builds and degraded mode.
     pub availability: Option<tokio::sync::watch::Receiver<Availability>>,
+    /// Supervisor task; awaited on shutdown before platform teardown.
+    pub supervisor_task: Option<JoinHandle<()>>,
 }
 
 /// Shared application state for dependency injection.
@@ -526,6 +528,27 @@ mod app_state_tests {
     }
 
     #[test]
+    fn test_app_state_builder_availability_is_retained() {
+        let (_tx, rx) = tokio::sync::watch::channel(Availability::Available);
+        let state = AppState::builder()
+            .user_storage(Arc::new(UserStorage::new()))
+            .password_manager(Arc::new(PasswordManager::new()))
+            .ptz_state(Arc::new(PTZStateManager::new()))
+            .config(Arc::new(ConfigRuntime::new(Default::default())))
+            .memory_monitor(Arc::new(crate::utils::MemoryMonitor::new()))
+            .rate_limiter(Arc::new(crate::security::RateLimiter::new(60)))
+            .profile_storage(test_profile_storage())
+            .availability(rx)
+            .build()
+            .expect("app state should build");
+
+        let availability = state
+            .availability()
+            .expect("availability channel must be retained");
+        assert_eq!(*availability.borrow(), Availability::Available);
+    }
+
+    #[test]
     fn test_app_state_clone() {
         let storage = UserStorage::new();
         let state = AppState::builder()
@@ -653,6 +676,9 @@ pub struct Application {
 
     /// Handle to the rate limiter cleanup task.
     rate_limiter_cleanup_task: Option<JoinHandle<()>>,
+
+    /// Handle to the vendor-daemon attach supervisor task.
+    supervisor_task: Option<JoinHandle<()>>,
 
     /// Live streaming service (RTSP + HTTP-FLV).
     streaming_service: Option<crate::streaming::service::StreamingService>,
@@ -937,14 +963,23 @@ impl Application {
         let PlatformInit {
             platform,
             availability,
+            supervisor_task,
         } = match platform_source {
-            PlatformSource::Detect => Self::init_platform(&mut progress, &config_runtime).await?,
+            PlatformSource::Detect => {
+                Self::init_platform(
+                    &mut progress,
+                    &config_runtime,
+                    shutdown_coordinator.subscribe(),
+                )
+                .await?
+            }
             PlatformSource::Custom(p) => {
                 tracing::info!("Using provided custom platform implementation");
                 // A caller-supplied platform brings no supervisor with it.
                 PlatformInit {
                     platform: Some(p),
                     availability: None,
+                    supervisor_task: None,
                 }
             }
         };
@@ -1092,6 +1127,7 @@ impl Application {
             imaging_persistence_task,
             memory_logging_task,
             rate_limiter_cleanup_task,
+            supervisor_task,
             streaming_service,
         })
     }
@@ -1105,8 +1141,12 @@ impl Application {
     async fn init_platform(
         progress: &mut StartupProgress,
         config_runtime: &Arc<ConfigRuntime>,
+        shutdown: broadcast::Receiver<()>,
     ) -> Result<PlatformInit, StartupError> {
         let ptz_enabled = config_runtime.read().ptz.enabled;
+
+        #[cfg(use_stubs)]
+        let _ = shutdown;
 
         #[cfg(not(use_stubs))]
         {
@@ -1151,15 +1191,19 @@ impl Application {
                     // block on it, which is what lets the device service answer while
                     // the video pipeline is still down.
                     let platform = Arc::new(p);
-                    let availability = platform.spawn_supervisor().map_err(|e| {
-                        StartupError::Platform(format!("failed to start attach supervisor: {e}"))
-                    })?;
+                    let (availability, supervisor_task) =
+                        platform.spawn_supervisor(shutdown).map_err(|e| {
+                            StartupError::Platform(format!(
+                                "failed to start attach supervisor: {e}"
+                            ))
+                        })?;
                     tracing::info!(
                         "AnykaPlatform created; attach supervisor started (degraded until attached)"
                     );
                     return Ok(PlatformInit {
                         platform: Some(platform as Arc<dyn Platform>),
                         availability: Some(availability),
+                        supervisor_task: Some(supervisor_task),
                     });
                 }
                 Err(e) => {
@@ -1186,6 +1230,7 @@ impl Application {
                     Ok(PlatformInit {
                         platform: Some(Arc::new(stub_platform) as Arc<dyn Platform>),
                         availability: None,
+                        supervisor_task: None,
                     })
                 }
                 Err(e) => {
@@ -1475,6 +1520,16 @@ impl Application {
         if let Some(task) = self.rate_limiter_cleanup_task.take() {
             let _ = tokio::time::timeout(Duration::from_secs(1), task).await;
         }
+
+        // Await the attach supervisor before platform teardown so it can
+        // rollback/detach cleanly after the shutdown broadcast.
+        if let Some(task) = self.supervisor_task.take() {
+            match tokio::time::timeout(Duration::from_secs(5), task).await {
+                Ok(Ok(())) => {}
+                Ok(Err(e)) => tracing::warn!(error = %e, "attach supervisor task panicked"),
+                Err(_) => tracing::warn!("attach supervisor shutdown timed out after 5s"),
+            }
+        }
     }
 
     fn record_service_shutdown(report: &mut ShutdownReport) {
@@ -1752,6 +1807,7 @@ mod tests {
             discovery_task: None,
             memory_logging_task: None,
             rate_limiter_cleanup_task: None,
+            supervisor_task: None,
             streaming_service: None,
         }
     }
@@ -2188,6 +2244,7 @@ mod tests {
             discovery_task: None,
             memory_logging_task: None,
             rate_limiter_cleanup_task: None,
+            supervisor_task: None,
             streaming_service: None,
         };
 
@@ -2247,6 +2304,7 @@ mod tests {
             discovery_task: None,
             memory_logging_task: None,
             rate_limiter_cleanup_task: None,
+            supervisor_task: None,
             streaming_service: None,
         };
 

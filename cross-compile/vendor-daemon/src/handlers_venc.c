@@ -1,8 +1,5 @@
-#include <string.h>
 #include <stdint.h>
-#include <stdlib.h>
-#include <time.h>
-#include <pthread.h>
+#include <string.h>
 
 #include "handlers_venc.h"
 #include "ipc.h"
@@ -10,11 +7,6 @@
 #include "log.h"
 #include "globals.h"
 #include "ak_venc.h"
-
-/* Timeout in seconds for ak_venc_cancel_stream() before giving up.
- * If the SDK's internal capture thread is stuck, this prevents the
- * event loop from blocking forever. */
-#define CANCEL_STREAM_TIMEOUT_SEC 3
 
 /**
  * handle_venc_set_cfg_path - IPC handler for CMD_VENC_SET_CFG_PATH (no-op).
@@ -185,8 +177,6 @@ int handle_venc_set_iframe(int fd, const uint8_t *req, uint32_t req_len)
  * @param req_len Length of @p req in bytes.
  * @return        0 on success, -1 on I/O error.
  */
-static void cancel_untracked_stream(void *handle);
-
 int handle_venc_request_stream(int fd, const uint8_t *req, uint32_t req_len)
 {
     /* u64 vi_handle + u64 venc_handle = 16 bytes */
@@ -206,46 +196,23 @@ int handle_venc_request_stream(int fd, const uint8_t *req, uint32_t req_len)
     }
     int slot = vd_obj_register(VD_OBJ_KIND_STREAM, stream_handle);
     if (slot < 0) {
-        log_error("[venc] object table full; refusing open");
-        cancel_untracked_stream(stream_handle);
+        log_error("[venc] object table full; refusing request_stream");
+        /* Transfer ownership before cancel so malloc/pthread/timeout failure
+         * still leaves a reclaim path via vd_obj_close_all. */
+        vd_stream_orphan_set(stream_handle);
+        if (vd_cancel_stream_bounded(stream_handle, NULL) == 0)
+            vd_stream_orphan_clear(stream_handle);
         return send_response(fd, STATUS_ERROR, NULL, 0);
     }
     return send_token_response(fd, vd_obj_token(slot));
-}
-
-/* ---- Timeout-guarded cancel_stream helpers ----------------------------- */
-
-struct cancel_arg {
-    void *handle;
-    int   result;
-    volatile int done;   /* set to 1 by worker thread when cancel returns */
-};
-
-/**
- * cancel_thread_fn - Worker thread that calls ak_venc_cancel_stream().
- *
- * Runs detached.  Sets ca->done=1 on completion.  Does NOT free ca —
- * ownership rules:
- *   - If the caller sees done=1 within the timeout: caller frees.
- *   - If the caller times out: 16-byte leak (acceptable for rare error path).
- *
- * We cannot have the thread free ca because there is an unavoidable race
- * between the thread's free() and the caller's read of ca->result.
- */
-static void *cancel_thread_fn(void *arg)
-{
-    struct cancel_arg *ca = (struct cancel_arg *)arg;
-    ca->result = ak_venc_cancel_stream(ca->handle);
-    __atomic_store_n(&ca->done, 1, __ATOMIC_RELEASE);
-    return NULL;
 }
 
 /**
  * handle_venc_cancel_stream - IPC handler for CMD_VENC_CANCEL_STREAM.
  *
  * Cancels an active stream binding created by CMD_VENC_REQUEST_STREAM.
- * Uses a detached helper thread with a timeout to prevent blocking the
- * event loop if the SDK's cancel call hangs.
+ * Uses the shared bounded cancel helper so a wedged SDK cancel cannot block
+ * the accept loop forever.
  *
  * Wire format: [u64 stream_handle] = 8 bytes.
  *
@@ -254,53 +221,6 @@ static void *cancel_thread_fn(void *arg)
  * @param req_len Length of @p req in bytes.
  * @return        0 on success, -1 on I/O error.
  */
-/*
- * cancel_untracked_stream - Bounded cancel for a stream that was never registered.
- *
- * Used when ak_venc_request_stream succeeded but vd_obj_register failed: the
- * SDK capture_thread must still be stopped. No vd_obj_unregister — the pointer
- * never entered the table.
- */
-static void cancel_untracked_stream(void *handle)
-{
-    struct cancel_arg *ca = (struct cancel_arg *)malloc(sizeof(*ca));
-    if (ca == NULL) {
-        log_error("[venc] cancel_untracked: malloc failed ptr=%p", handle);
-        return;
-    }
-    ca->handle = handle;
-    ca->result = -1;
-    ca->done = 0;
-
-    pthread_t tid;
-    if (pthread_create(&tid, NULL, cancel_thread_fn, ca) != 0) {
-        log_error("[venc] cancel_untracked: pthread_create failed ptr=%p", handle);
-        free(ca);
-        return;
-    }
-    pthread_detach(tid);
-
-    struct timespec deadline;
-    clock_gettime(CLOCK_MONOTONIC, &deadline);
-    deadline.tv_sec += CANCEL_STREAM_TIMEOUT_SEC;
-
-    while (!__atomic_load_n(&ca->done, __ATOMIC_ACQUIRE)) {
-        struct timespec now;
-        clock_gettime(CLOCK_MONOTONIC, &now);
-        if (now.tv_sec > deadline.tv_sec ||
-            (now.tv_sec == deadline.tv_sec && now.tv_nsec >= deadline.tv_nsec)) {
-            log_error("[venc] cancel_untracked timed out after %ds ptr=%p (leaking arg)",
-                      CANCEL_STREAM_TIMEOUT_SEC, handle);
-            return;
-        }
-        struct timespec ts = { .tv_sec = 0, .tv_nsec = 10 * 1000000L };
-        nanosleep(&ts, NULL);
-    }
-
-    log_info("[venc] cancelled untracked stream ptr=%p ret=%d", handle, ca->result);
-    free(ca);
-}
-
 int handle_venc_cancel_stream(int fd, const uint8_t *req, uint32_t req_len)
 {
     if (req_len < sizeof(uint64_t))
@@ -311,49 +231,29 @@ int handle_venc_cancel_stream(int fd, const uint8_t *req, uint32_t req_len)
         return send_response(fd, VD_STATUS_STALE_EPOCH, NULL, 0);
     log_debug("[venc] cancel_stream handle=%p", stream_handle);
 
-    struct cancel_arg *ca = (struct cancel_arg *)malloc(sizeof(*ca));
-    if (!ca) {
-        log_error("[venc] cancel_stream: malloc failed");
-        return send_response(fd, STATUS_ERROR, NULL, 0);
-    }
-    ca->handle = stream_handle;
-    ca->result = -1;
-    ca->done = 0;
-
     /* Retire the token before the cancel runs, not after: the cancel can time
      * out and leave the detached thread still working on the object, and a
      * client retry must not be able to resolve it again in the meantime. */
     vd_obj_unregister(VD_OBJ_KIND_STREAM, stream_handle);
 
-    pthread_t tid;
-    if (pthread_create(&tid, NULL, cancel_thread_fn, ca) != 0) {
-        log_error("[venc] failed to spawn cancel thread");
-        free(ca);
+    int sdk_ret = -1;
+    int rc = vd_cancel_stream_bounded(stream_handle, &sdk_ret);
+    if (rc == -1) {
+        /* Worker never started: restore registry reachability so a retry or
+         * close_all can still find the live SDK stream. */
+        if (vd_obj_register(VD_OBJ_KIND_STREAM, stream_handle) < 0) {
+            log_error("[venc] cancel_stream: pthread/malloc failed and re-register "
+                      "failed; parking %p as orphan", stream_handle);
+            vd_stream_orphan_set(stream_handle);
+        }
         return send_response(fd, STATUS_ERROR, NULL, 0);
     }
-    pthread_detach(tid);
-
-    struct timespec deadline;
-    clock_gettime(CLOCK_MONOTONIC, &deadline);
-    deadline.tv_sec += CANCEL_STREAM_TIMEOUT_SEC;
-
-    while (!__atomic_load_n(&ca->done, __ATOMIC_ACQUIRE)) {
-        struct timespec now;
-        clock_gettime(CLOCK_MONOTONIC, &now);
-        if (now.tv_sec > deadline.tv_sec ||
-            (now.tv_sec == deadline.tv_sec && now.tv_nsec >= deadline.tv_nsec)) {
-            log_error("[venc] cancel_stream timed out after %ds, handle=%p",
-                      CANCEL_STREAM_TIMEOUT_SEC, stream_handle);
-            /* Intentional leak of ca (16 bytes).  The detached thread may
-             * still be writing to it, so we cannot free here.  It will be
-             * reclaimed when the daemon exits or restarts. */
-            return send_response(fd, STATUS_ERROR, NULL, 0);
-        }
-        struct timespec ts = { .tv_sec = 0, .tv_nsec = 10 * 1000000L }; /* 10ms */
-        nanosleep(&ts, NULL);
+    if (rc == -2) {
+        /* Detached worker still owns the cancel call; park for close_all in
+         * case the worker never finishes. */
+        vd_stream_orphan_set(stream_handle);
+        return send_response(fd, STATUS_ERROR, NULL, 0);
     }
 
-    int ret = ca->result;
-    free(ca);
-    return send_response(fd, ret, NULL, 0);
+    return send_response(fd, sdk_ret, NULL, 0);
 }

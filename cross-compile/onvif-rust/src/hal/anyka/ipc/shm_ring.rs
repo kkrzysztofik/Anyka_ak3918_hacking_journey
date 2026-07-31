@@ -1792,7 +1792,7 @@ pub(in crate::hal::anyka::ipc) mod tests {
     }
 
     #[test]
-    fn epoch_reads_back_the_value_the_daemon_stamped() {
+    fn test_shm_ring_epoch_stamped_value_reads_back() {
         let reader = create_test_anon_reader();
 
         // create_test_anon_reader leaves epoch at 0 (freshly zeroed mmap), which is

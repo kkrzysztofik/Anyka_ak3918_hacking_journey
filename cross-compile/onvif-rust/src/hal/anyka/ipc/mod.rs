@@ -294,6 +294,13 @@ const VD_STATUS_STALE_EPOCH: i32 = -2;
 ///
 /// The daemon guarantees a non-zero epoch, so 0 can never collide with a real one.
 const EPOCH_DETACHED: u32 = 0;
+
+/// Consecutive ring samples of epoch 0 tolerated before reporting loss.
+///
+/// A single zero can appear in the brief window where `vd_ring_create()` has
+/// memset the header but not yet stamped the new generation. Persistent zeros
+/// while attached mean the daemon is wedged mid-recreate.
+const MAX_ZERO_EPOCH_SAMPLES: u32 = 3;
 const PUSH_NOTIFICATION_TIMEOUT: Duration = Duration::from_millis(200);
 
 /// Timeout for blocking reads/writes on the IPC control socket.
@@ -478,6 +485,8 @@ pub struct AnykaIpc {
     /// re-creating it. Never a usable generation: the gate refuses on 0 like any
     /// other mismatch.
     observed_epoch: AtomicU32,
+    /// Consecutive zero-epoch samples seen by [`Self::refresh_observed_epoch`].
+    zero_epoch_samples: AtomicU32,
 }
 
 impl Drop for AnykaIpc {
@@ -593,6 +602,7 @@ impl AnykaIpc {
             loss_rx: Mutex::new(Some(loss_rx)),
             attached_epoch: AtomicU32::new(EPOCH_DETACHED),
             observed_epoch: AtomicU32::new(EPOCH_DETACHED),
+            zero_epoch_samples: AtomicU32::new(0),
         })
     }
 
@@ -631,6 +641,7 @@ impl AnykaIpc {
             loss_rx: Mutex::new(Some(loss_rx)),
             attached_epoch: AtomicU32::new(EPOCH_DETACHED),
             observed_epoch: AtomicU32::new(EPOCH_DETACHED),
+            zero_epoch_samples: AtomicU32::new(0),
         })
     }
 
@@ -658,6 +669,7 @@ impl AnykaIpc {
             loss_rx: Mutex::new(Some(loss_rx)),
             attached_epoch: AtomicU32::new(EPOCH_DETACHED),
             observed_epoch: AtomicU32::new(EPOCH_DETACHED),
+            zero_epoch_samples: AtomicU32::new(0),
         }
     }
 
@@ -1021,6 +1033,7 @@ impl AnykaIpc {
             loss_rx: Mutex::new(Some(loss_rx)),
             attached_epoch: AtomicU32::new(EPOCH_DETACHED),
             observed_epoch: AtomicU32::new(EPOCH_DETACHED),
+            zero_epoch_samples: AtomicU32::new(0),
         })
     }
 
@@ -1132,6 +1145,7 @@ impl AnykaIpc {
         // can never leave a window where attached is set but observed is stale.
         self.observed_epoch.store(epoch, Ordering::Release);
         self.attached_epoch.store(epoch, Ordering::Release);
+        self.zero_epoch_samples.store(0, Ordering::Release);
 
         tracing::info!(
             event = "ipc_attached",
@@ -1188,23 +1202,27 @@ impl AnykaIpc {
     /// poller must never block behind it. Contention means "no new information this
     /// tick", which is correct — the next tick is 1 s away.
     ///
-    /// A live epoch of 0 reports *healthy*. That is not a hole in the gate: 0 only
-    /// appears in the brief window where `vd_ring_create()` has memset the header but
-    /// not yet stamped the new generation, and [`Self::epoch_gate`] already refuses
-    /// every request while `observed != attached`. Tearing the pipeline down on that
-    /// sample would trade a guaranteed-transient blip for a real restart; the next
-    /// tick sees the new generation and reports loss properly.
+    /// A single live epoch of 0 is tolerated: it can appear in the brief window where
+    /// `vd_ring_create()` has memset the header but not yet stamped the new generation.
+    /// [`MAX_ZERO_EPOCH_SAMPLES`] consecutive zeros while attached report loss.
+    /// [`Self::epoch_gate`] already refuses every request while `observed != attached`.
     pub(crate) fn refresh_observed_epoch(&self) -> bool {
         let Ok(guard) = self.shm_reader.try_lock() else {
             return true; // no information; do not report loss on lock contention
         };
         let Some(reader) = guard.as_ref() else {
+            self.zero_epoch_samples.store(0, Ordering::Release);
             return false; // detached
         };
         let live = reader.epoch();
         self.observed_epoch.store(live, Ordering::Release);
         let attached = self.attached_epoch.load(Ordering::Acquire);
-        live == EPOCH_DETACHED || live == attached
+        if live == EPOCH_DETACHED {
+            let samples = self.zero_epoch_samples.fetch_add(1, Ordering::AcqRel) + 1;
+            return samples < MAX_ZERO_EPOCH_SAMPLES;
+        }
+        self.zero_epoch_samples.store(0, Ordering::Release);
+        live == attached
     }
 
     /// Attach to a freshly created anonymous ring stamped with `epoch`.
@@ -1254,6 +1272,7 @@ impl AnykaIpc {
     pub(crate) fn detach(&self) {
         self.attached_epoch.store(EPOCH_DETACHED, Ordering::Release);
         self.observed_epoch.store(EPOCH_DETACHED, Ordering::Release);
+        self.zero_epoch_samples.store(0, Ordering::Release);
 
         let mut main = self
             .frame_main_stream
@@ -1307,6 +1326,11 @@ impl AnykaIpc {
         }
         let epoch = u32::from_le_bytes([resp[0], resp[1], resp[2], resp[3]]);
         let version = u32::from_le_bytes([resp[4], resp[5], resp[6], resp[7]]);
+        if version < 3 {
+            return Err(PlatformError::HardwareFailure(format!(
+                "vendor daemon shm protocol version {version} is unsupported; need >= 3"
+            )));
+        }
         if epoch == EPOCH_DETACHED {
             return Err(PlatformError::HardwareUnavailable(
                 "vendor daemon reported epoch 0; it is pre-v3 or misbehaving".to_string(),
@@ -1376,6 +1400,14 @@ impl AnykaIpc {
     }
 
     /// Send request expecting a handle response (8-byte i64).
+    fn stale_epoch_error(cmd_id: i32) -> PlatformError {
+        PlatformError::HardwareUnavailable(format!(
+            "vendor daemon rejected {} as a stale handle; the attachment is from a \
+             dead generation",
+            Self::cmd_name(cmd_id)
+        ))
+    }
+
     pub(crate) fn send_handle_request(
         &self,
         cmd_id: i32,
@@ -1383,11 +1415,7 @@ impl AnykaIpc {
     ) -> PlatformResult<*mut c_void> {
         let (status, resp_data) = self.send_request(cmd_id, req_data)?;
         if status == VD_STATUS_STALE_EPOCH {
-            return Err(PlatformError::HardwareUnavailable(format!(
-                "vendor daemon rejected {} as a stale handle; the attachment is from a \
-                 dead generation",
-                Self::cmd_name(cmd_id)
-            )));
+            return Err(Self::stale_epoch_error(cmd_id));
         }
         if status != AK_SUCCESS_I32 || resp_data.len() < 8 {
             return Err(PlatformError::HardwareFailure(format!(
@@ -1405,6 +1433,9 @@ impl AnykaIpc {
     /// Send request expecting i32 response.
     pub(crate) fn send_i32_request(&self, cmd_id: i32, req_data: &[u8]) -> PlatformResult<i32> {
         let (status, resp_data) = self.send_request(cmd_id, req_data)?;
+        if status == VD_STATUS_STALE_EPOCH {
+            return Err(Self::stale_epoch_error(cmd_id));
+        }
         if resp_data.len() >= 4 {
             Ok(i32::from_le_bytes(resp_data[0..4].try_into().map_err(
                 |_| PlatformError::HardwareFailure("Invalid i32 response".to_string()),
@@ -1449,6 +1480,9 @@ impl AnykaIpc {
         req[0..8].copy_from_slice(&handle_val.to_le_bytes());
         req[8..12].copy_from_slice(&Self::stream_id_to_wire(stream_id).to_le_bytes());
         let (status, _) = self.send_request(CMD_VENC_START_PUSH, &req)?;
+        if status == VD_STATUS_STALE_EPOCH {
+            return Err(Self::stale_epoch_error(CMD_VENC_START_PUSH));
+        }
         if status != AK_SUCCESS_I32 {
             warn!(
                 event = "push_start_failed",
@@ -1480,6 +1514,9 @@ impl AnykaIpc {
         let req = stream_id.map(|id| Self::stream_id_to_wire(id).to_le_bytes().to_vec());
         let req_slice = req.as_deref().unwrap_or(&[]);
         let (status, _) = self.send_request(CMD_VENC_STOP_PUSH, req_slice)?;
+        if status == VD_STATUS_STALE_EPOCH {
+            return Err(Self::stale_epoch_error(CMD_VENC_STOP_PUSH));
+        }
         if status != AK_SUCCESS_I32 {
             warn!(
                 event = "push_stop_failed",
@@ -2969,7 +3006,25 @@ mod tests {
     // ========================================================================
 
     #[tokio::test]
-    async fn hello_parses_epoch_and_version_from_the_daemon() {
+    async fn test_hello_version_below_3_rejected() {
+        let daemon = test_helpers::FakeDaemon::start(|_cmd_id, _req| {
+            let mut resp = Vec::with_capacity(8);
+            resp.extend_from_slice(&9u32.to_le_bytes());
+            resp.extend_from_slice(&2u32.to_le_bytes());
+            (AK_SUCCESS_I32, resp)
+        });
+        let ipc = AnykaIpc::new_with_path(&daemon.socket_path).unwrap();
+
+        let err = ipc.hello().await.unwrap_err();
+
+        assert!(
+            matches!(err, PlatformError::HardwareFailure(_)),
+            "expected HardwareFailure for unsupported version, got {err:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_hello_parses_epoch_and_version() {
         let daemon = test_helpers::FakeDaemon::start(|cmd_id, _req| {
             if cmd_id == CMD_HELLO {
                 let mut resp = Vec::with_capacity(8);
@@ -3006,6 +3061,112 @@ mod tests {
             }
             other => panic!("expected HardwareUnavailable, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn test_send_i32_stale_epoch_is_hardware_unavailable() {
+        let daemon = test_helpers::FakeDaemon::start(|_c, _r| (VD_STATUS_STALE_EPOCH, vec![]));
+        let ipc = AnykaIpc::new_with_path(&daemon.socket_path).unwrap();
+        ipc.set_epochs_for_test(1, 1);
+
+        let err = ipc.send_i32_request(CMD_VI_CLOSE, &[0u8; 8]).unwrap_err();
+        assert!(
+            matches!(err, PlatformError::HardwareUnavailable(_)),
+            "expected HardwareUnavailable, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn test_send_i32_returns_payload_when_present() {
+        let daemon = test_helpers::FakeDaemon::start(|_c, _r| {
+            (AK_SUCCESS_I32, 42i32.to_le_bytes().to_vec())
+        });
+        let ipc = AnykaIpc::new_with_path(&daemon.socket_path).unwrap();
+        ipc.set_epochs_for_test(1, 1);
+
+        assert_eq!(ipc.send_i32_request(CMD_VI_CLOSE, &[]).unwrap(), 42);
+    }
+
+    #[test]
+    fn test_start_push_stale_epoch_is_hardware_unavailable() {
+        let daemon = test_helpers::FakeDaemon::start(|_c, _r| (VD_STATUS_STALE_EPOCH, vec![]));
+        let ipc = AnykaIpc::new_with_path(&daemon.socket_path).unwrap();
+        ipc.set_epochs_for_test(1, 1);
+
+        let err = ipc
+            .start_push(std::ptr::null_mut(), StreamId::VideoMain)
+            .unwrap_err();
+        assert!(
+            matches!(err, PlatformError::HardwareUnavailable(_)),
+            "expected HardwareUnavailable, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn test_stop_push_stale_epoch_is_hardware_unavailable() {
+        let daemon = test_helpers::FakeDaemon::start(|_c, _r| (VD_STATUS_STALE_EPOCH, vec![]));
+        let ipc = AnykaIpc::new_with_path(&daemon.socket_path).unwrap();
+        ipc.set_epochs_for_test(1, 1);
+
+        let err = ipc.stop_push(Some(StreamId::VideoMain)).unwrap_err();
+        assert!(
+            matches!(err, PlatformError::HardwareUnavailable(_)),
+            "expected HardwareUnavailable, got {err:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_hello_rejects_non_success_status() {
+        let daemon = test_helpers::FakeDaemon::start(|_c, _r| (AK_FAILED_I32, vec![]));
+        let ipc = AnykaIpc::new_with_path(&daemon.socket_path).unwrap();
+
+        let err = ipc.hello().await.unwrap_err();
+        assert!(
+            matches!(err, PlatformError::HardwareUnavailable(_)),
+            "expected HardwareUnavailable, got {err:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_hello_rejects_short_response() {
+        let daemon = test_helpers::FakeDaemon::start(|_c, _r| (AK_SUCCESS_I32, vec![1, 2, 3]));
+        let ipc = AnykaIpc::new_with_path(&daemon.socket_path).unwrap();
+
+        let err = ipc.hello().await.unwrap_err();
+        assert!(
+            matches!(err, PlatformError::HardwareFailure(_)),
+            "expected HardwareFailure, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn test_refresh_observed_epoch_healthy_on_lock_contention() {
+        use super::shm_ring::tests::create_test_anon_reader;
+        use std::sync::mpsc;
+
+        let (ctrl_a, _ctrl_b) = UnixStream::pair().unwrap();
+        let ipc =
+            AnykaIpc::from_parts_for_test(ctrl_a, None, None, Some(create_test_anon_reader()));
+        ipc.set_epochs_for_test(11, 11);
+
+        let (held_tx, held_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel::<()>();
+
+        let holder = &ipc;
+        std::thread::scope(|scope| {
+            scope.spawn(move || {
+                let _guard = holder.shm_reader.lock().expect("hold the ring lock");
+                held_tx.send(()).expect("signal that the lock is held");
+                let _ = release_rx.recv_timeout(Duration::from_secs(2));
+            });
+
+            held_rx.recv().expect("ring lock should be held");
+            assert!(
+                ipc.refresh_observed_epoch(),
+                "lock contention must not report loss"
+            );
+            let _ = release_tx.send(());
+        });
     }
 
     #[tokio::test]
@@ -3207,7 +3368,59 @@ mod tests {
     // ========================================================================
 
     #[tokio::test]
-    async fn request_is_refused_without_writing_when_the_epoch_moved() {
+    async fn test_epoch_gate_persistent_zero_ring_refuses_request() {
+        use std::sync::Arc as StdArc;
+        use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
+
+        let seen = StdArc::new(AtomicUsize::new(0));
+        let seen_in_daemon = StdArc::clone(&seen);
+        let daemon = test_helpers::FakeDaemon::start(move |_cmd_id, _req| {
+            seen_in_daemon.fetch_add(1, AtomicOrdering::SeqCst);
+            (AK_SUCCESS_I32, vec![])
+        });
+        let ipc = AnykaIpc::new_with_path(&daemon.socket_path).unwrap();
+
+        ipc.attach_anon_ring_for_test(11);
+        ipc.stamp_ring_epoch_for_test(0);
+        assert!(
+            ipc.refresh_observed_epoch(),
+            "first zero sample is tolerated"
+        );
+        assert_eq!(ipc.observed_epoch_for_test(), 0);
+
+        let err = ipc
+            .request_async(CMD_VI_CLOSE, &[0u8; 8])
+            .await
+            .unwrap_err();
+
+        assert!(matches!(err, PlatformError::HardwareUnavailable(_)));
+        assert_eq!(
+            seen.load(AtomicOrdering::SeqCst),
+            0,
+            "a zero-epoch attachment must never reach the daemon"
+        );
+    }
+
+    #[test]
+    fn test_refresh_observed_epoch_zero_samples_report_loss_after_bound() {
+        let ipc = AnykaIpc::new_detached().unwrap();
+        ipc.attach_anon_ring_for_test(11);
+        ipc.stamp_ring_epoch_for_test(0);
+
+        for _ in 0..(MAX_ZERO_EPOCH_SAMPLES - 1) {
+            assert!(
+                ipc.refresh_observed_epoch(),
+                "zeros below the bound must not report loss"
+            );
+        }
+        assert!(
+            !ipc.refresh_observed_epoch(),
+            "persistent zero epoch must report loss after MAX_ZERO_EPOCH_SAMPLES"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_epoch_gate_moved_refuses_without_daemon() {
         use std::sync::Arc as StdArc;
         use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
 
@@ -3236,7 +3449,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn request_is_refused_when_detached() {
+    async fn test_epoch_gate_detached_refuses_request() {
         let daemon = test_helpers::FakeDaemon::start(|_c, _r| (AK_SUCCESS_I32, vec![]));
         let ipc = AnykaIpc::new_with_path(&daemon.socket_path).unwrap();
         ipc.set_epochs_for_test(EPOCH_DETACHED, 0);
@@ -3250,7 +3463,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn request_passes_when_epochs_agree() {
+    async fn test_epoch_gate_agreeing_epochs_passes() {
         let daemon = test_helpers::FakeDaemon::start(|_c, _r| (AK_SUCCESS_I32, vec![]));
         let ipc = AnykaIpc::new_with_path(&daemon.socket_path).unwrap();
         ipc.set_epochs_for_test(7, 7);
@@ -3261,7 +3474,7 @@ mod tests {
     }
 
     #[test]
-    fn hello_is_exempt_from_the_gate() {
+    fn test_epoch_gate_hello_exempt() {
         let daemon = test_helpers::FakeDaemon::start(|_c, _r| {
             let mut resp = Vec::new();
             resp.extend_from_slice(&9u32.to_le_bytes());
@@ -3278,7 +3491,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn hello_rejects_a_zero_epoch() {
+    async fn test_hello_zero_epoch_rejected() {
         // A daemon that reports epoch 0 is either pre-v3 or broken. Either way we
         // must not pin 0, because 0 is our own "detached" sentinel.
         let daemon = test_helpers::FakeDaemon::start(|_cmd_id, _req| {

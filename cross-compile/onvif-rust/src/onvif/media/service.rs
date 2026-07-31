@@ -1162,7 +1162,7 @@ mod tests {
     }
 
     #[test]
-    fn get_stream_uri_is_refused_while_the_pipeline_is_unavailable() {
+    fn test_get_stream_uri_unavailable_pipeline_refused() {
         use crate::onvif::types::common::{StreamSetup, StreamType, TransportProtocol};
 
         // Handing out a URI that will never produce frames is worse than a fault:
@@ -1190,7 +1190,7 @@ mod tests {
     }
 
     #[test]
-    fn get_stream_uri_succeeds_once_available() {
+    fn test_get_stream_uri_available_succeeds() {
         use crate::onvif::types::common::{StreamSetup, StreamType, TransportProtocol};
 
         let (_tx, rx) = tokio::sync::watch::channel(Availability::Available);
@@ -1211,7 +1211,7 @@ mod tests {
     }
 
     #[test]
-    fn get_stream_uri_without_an_availability_channel_is_unchanged() {
+    fn test_get_stream_uri_no_availability_channel_unchanged() {
         use crate::onvif::types::common::{StreamSetup, StreamType, TransportProtocol};
 
         // Stub builds and tests have no supervisor; absence must not mean "down".

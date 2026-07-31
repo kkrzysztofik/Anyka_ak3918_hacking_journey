@@ -120,7 +120,7 @@ extern struct push_stream_state g_push_streams[PUSH_STREAM_SLOT_COUNT];
 #define VD_OBJ_KIND_STREAM  5
 #define VD_OBJ_KIND_COUNT   6
 
-/* Live objects tracked per generation. The token reserves 12 bits for the slot
+/* Live objects tracked per generation. The token reserves 6 bits for the slot
  * index, but this box opens a handful: 2 VI + 2 VENC + 2 stream + audio. 64 is
  * far more than can ever be live and keeps the table in one cache-friendly
  * block. */
@@ -163,6 +163,32 @@ void vd_obj_unregister(uint8_t kind, void *ptr);
  */
 void vd_obj_close_all(void);
 
+/**
+ * vd_cancel_stream_bounded - Cancel an SDK stream, giving up after a timeout.
+ *
+ * Runs ak_venc_cancel_stream on a detached worker and waits a bounded time.
+ * On timeout the small worker arg is intentionally leaked (the worker may still
+ * write it).
+ *
+ * @param handle      Stream handle from ak_venc_request_stream.
+ * @param out_result  Optional; set to the SDK return code when cancel completes.
+ * @return            0 if cancel completed, -1 on malloc/pthread failure,
+ *                    -2 on timeout.
+ */
+int vd_cancel_stream_bounded(void *handle, int *out_result);
+
+/**
+ * vd_stream_orphan_set - Remember a live STREAM that has no object-table slot.
+ *
+ * Used when register fails or cancel spawn fails after unregister, so
+ * vd_obj_close_all can still reclaim the SDK capture_thread. Displacing a
+ * previous orphan best-effort cancels it first.
+ */
+void vd_stream_orphan_set(void *handle);
+
+/** Clear the orphan slot if it still names @p handle (e.g. after cancel OK). */
+void vd_stream_orphan_clear(void *handle);
+
 /* ---- Handle tokens ------------------------------------------------------
  *
  * Handles are opaque tokens naming a table slot, never raw SDK pointers. A
@@ -194,6 +220,12 @@ void vd_obj_close_all(void);
 #define VD_TOK_GEN_MASK     0x3Fu
 #define VD_TOK_EPOCH_SHIFT  16
 #define VD_TOK_EPOCH_MASK   0xFFFFu
+
+/* Compile-time layout guards: table sizes must fit the token bit fields. */
+typedef char vd_tok_slots_fit[
+    (VD_OBJ_SLOTS <= (VD_TOK_INDEX_MASK + 1)) ? 1 : -1];
+typedef char vd_tok_kinds_fit[
+    (VD_OBJ_KIND_COUNT <= (VD_TOK_KIND_MASK + 1)) ? 1 : -1];
 
 /**
  * vd_obj_token - Build the client-facing token naming @p slot.

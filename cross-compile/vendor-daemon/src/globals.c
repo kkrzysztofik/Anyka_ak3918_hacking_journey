@@ -159,19 +159,20 @@ static const uint8_t g_obj_close_order[] = {
     VD_OBJ_KIND_AI,
 };
 
-/* Timeout for the SDK stream cancel during session cleanup, seconds. Mirrors
- * CANCEL_STREAM_TIMEOUT_SEC in handlers_venc.c. */
-#define VD_OBJ_CANCEL_TIMEOUT_SEC 3
+/* Timeout for the SDK stream cancel, seconds. Shared by session cleanup and
+ * the VENC cancel-stream handler. */
+#define VD_CANCEL_STREAM_TIMEOUT_SEC 3
 
 struct vd_cancel_arg {
     void        *handle;
+    int          result;
     volatile int done;   /* set by the worker when ak_venc_cancel_stream returns */
 };
 
 static void *vd_cancel_worker(void *arg)
 {
     struct vd_cancel_arg *ca = (struct vd_cancel_arg *)arg;
-    (void)ak_venc_cancel_stream(ca->handle);
+    ca->result = ak_venc_cancel_stream(ca->handle);
     __atomic_store_n(&ca->done, 1, __ATOMIC_RELEASE);
     return NULL;
 }
@@ -183,31 +184,32 @@ static void *vd_cancel_worker(void *arg)
  * happen before the VI it feeds on is closed (otherwise that thread calls
  * ak_vi_release_frame on freed state and the daemon segfaults). The call can
  * block indefinitely on a wedged encoder, so it runs on a detached thread and we
- * wait only VD_OBJ_CANCEL_TIMEOUT_SEC. On timeout we leak the small arg (the
+ * wait only VD_CANCEL_STREAM_TIMEOUT_SEC. On timeout we leak the small arg (the
  * detached thread may still touch it) and continue teardown: a leaked capture
  * thread is less bad than hanging the accept loop.
  */
-static void vd_cancel_stream_bounded(void *handle)
+int vd_cancel_stream_bounded(void *handle, int *out_result)
 {
     struct vd_cancel_arg *ca = (struct vd_cancel_arg *)malloc(sizeof(*ca));
     if (ca == NULL) {
         log_error("[obj] cancel_stream: malloc failed; skipping cancel ptr=%p", handle);
-        return;
+        return -1;
     }
     ca->handle = handle;
+    ca->result = -1;
     ca->done = 0;
 
     pthread_t tid;
     if (pthread_create(&tid, NULL, vd_cancel_worker, ca) != 0) {
         log_error("[obj] cancel_stream: pthread_create failed ptr=%p", handle);
         free(ca);
-        return;
+        return -1;
     }
     pthread_detach(tid);
 
     struct timespec deadline;
     clock_gettime(CLOCK_MONOTONIC, &deadline);
-    deadline.tv_sec += VD_OBJ_CANCEL_TIMEOUT_SEC;
+    deadline.tv_sec += VD_CANCEL_STREAM_TIMEOUT_SEC;
 
     while (!__atomic_load_n(&ca->done, __ATOMIC_ACQUIRE)) {
         struct timespec now;
@@ -215,15 +217,18 @@ static void vd_cancel_stream_bounded(void *handle)
         if (now.tv_sec > deadline.tv_sec ||
             (now.tv_sec == deadline.tv_sec && now.tv_nsec >= deadline.tv_nsec)) {
             log_error("[obj] cancel_stream timed out after %ds ptr=%p (leaking arg)",
-                      VD_OBJ_CANCEL_TIMEOUT_SEC, handle);
-            return; /* intentional leak of ca; worker may still write it */
+                      VD_CANCEL_STREAM_TIMEOUT_SEC, handle);
+            return -2; /* intentional leak of ca; worker may still write it */
         }
         struct timespec ts = { .tv_sec = 0, .tv_nsec = 10 * 1000000L };
         nanosleep(&ts, NULL);
     }
 
-    log_info("[obj] cancelled leaked stream ptr=%p", handle);
+    if (out_result != NULL)
+        *out_result = ca->result;
+    log_info("[obj] cancelled stream ptr=%p ret=%d", handle, ca->result);
     free(ca);
+    return 0;
 }
 
 static void vd_obj_close_one(uint8_t kind, void *ptr)
@@ -235,7 +240,7 @@ static void vd_obj_close_one(uint8_t kind, void *ptr)
         /* Cancel the SDK stream so libmpi_venc's capture_thread stops before the
          * VI it reads is closed. stop_push_slot() only stops the daemon's own
          * push reader, NOT this thread. */
-        vd_cancel_stream_bounded(ptr);
+        (void)vd_cancel_stream_bounded(ptr, NULL);
         return;
     case VD_OBJ_KIND_VENC:
         ret = ak_venc_close(ptr);
@@ -263,10 +268,39 @@ static void vd_obj_close_one(uint8_t kind, void *ptr)
         log_info("[obj] closed leaked kind=%u ptr=%p", (unsigned)kind, ptr);
 }
 
+/* Live STREAM that never entered (or fell out of) the token table. Reclaimed
+ * by vd_obj_close_all so a failed cancel spawn cannot leave an untracked
+ * capture_thread. */
+static void *g_stream_orphan = NULL;
+
+void vd_stream_orphan_set(void *handle)
+{
+    if (handle == NULL)
+        return;
+    if (g_stream_orphan != NULL && g_stream_orphan != handle) {
+        log_error("[obj] displacing orphan stream %p with %p", g_stream_orphan, handle);
+        (void)vd_cancel_stream_bounded(g_stream_orphan, NULL);
+    }
+    g_stream_orphan = handle;
+}
+
+void vd_stream_orphan_clear(void *handle)
+{
+    if (g_stream_orphan == handle)
+        g_stream_orphan = NULL;
+}
+
 void vd_obj_close_all(void)
 {
     size_t k;
     int i;
+
+    if (g_stream_orphan != NULL) {
+        void *orphan = g_stream_orphan;
+        g_stream_orphan = NULL;
+        log_warn("[obj] reclaiming orphan stream %p", orphan);
+        (void)vd_cancel_stream_bounded(orphan, NULL);
+    }
 
     for (k = 0; k < sizeof(g_obj_close_order) / sizeof(g_obj_close_order[0]); k++) {
         uint8_t kind = g_obj_close_order[k];

@@ -17,11 +17,15 @@ import sys
 import time
 import uuid
 
-IAC, DONT, WONT, WILL, DO = 255, 254, 252, 251, 253
+IAC, DONT, WONT, WILL, DO, SB, SE = 255, 254, 252, 251, 253, 250, 240
 
 
 def negotiate(sock: socket.socket, data: bytes) -> bytes:
-    """Strip telnet IAC sequences, refusing every option, and return the text."""
+    """Strip telnet IAC sequences, refusing every option, and return the text.
+
+    Incomplete IAC sequences at the end of a recv chunk are discarded; a later
+    chunk may drop a split sequence rather than buffering across reads.
+    """
     out = bytearray()
     i = 0
     while i < len(data):
@@ -29,9 +33,30 @@ def negotiate(sock: socket.socket, data: bytes) -> bytes:
             out.append(data[i])
             i += 1
             continue
+        if i + 1 >= len(data):
+            # Incomplete IAC at end of chunk — discard the dangling byte.
+            break
+        cmd = data[i + 1]
+        if cmd == IAC:
+            # IAC IAC is one literal 0xFF.
+            out.append(IAC)
+            i += 2
+            continue
+        if cmd == SB:
+            # Skip subnegotiation through the terminating IAC SE.
+            j = i + 2
+            while j + 1 < len(data):
+                if data[j] == IAC and data[j + 1] == SE:
+                    i = j + 2
+                    break
+                j += 1
+            else:
+                # Incomplete SB payload — discard remainder of chunk.
+                break
+            continue
         if i + 2 >= len(data):
             break
-        cmd, opt = data[i + 1], data[i + 2]
+        opt = data[i + 2]
         # Refuse everything: WILL->DONT, DO->WONT.
         if cmd == WILL:
             sock.sendall(bytes([IAC, DONT, opt]))
@@ -41,24 +66,23 @@ def negotiate(sock: socket.socket, data: bytes) -> bytes:
     return bytes(out)
 
 
-def read_until(sock: socket.socket, needle: bytes, deadline: float, count: int = 1) -> bytes:
-    """Read until `needle` has been seen `count` times, or the deadline passes.
+def read_until(sock: socket.socket, needle: bytes, deadline: float) -> bytes:
+    """Read until `needle` appears at least once, or the deadline passes.
 
-    `count=2` is what the command path uses: the shell echoes our command line
-    back before running it, so the sentinel always appears once in the echo
-    before the real one.
+    Callers that need the final (post-echo) occurrence locate it themselves
+    after this returns; this helper only waits for the first sighting.
     """
     buf = bytearray()
     while time.time() < deadline:
         sock.settimeout(max(0.2, deadline - time.time()))
         try:
             chunk = sock.recv(4096)
-        except socket.timeout:
+        except TimeoutError:
             continue
         if not chunk:
             break
         buf += negotiate(sock, chunk)
-        if bytes(buf).count(needle) >= count:
+        if needle in buf:
             break
     return bytes(buf)
 
@@ -74,43 +98,47 @@ def main() -> int:
     args = ap.parse_args()
 
     deadline = time.time() + args.timeout
-    sock = socket.create_connection((args.host, args.port), timeout=args.timeout)
+    with socket.create_connection((args.host, args.port), timeout=args.timeout) as sock:
+        # This device drops straight to a root shell after IAC negotiation; there is
+        # no login prompt. Handle both shapes so the script keeps working if the
+        # firmware ever grows one.
+        banner = read_until(sock, b"# ", min(deadline, time.time() + 8))
+        if b"ogin:" in banner:
+            sock.sendall(args.user.encode() + b"\n")
+            prompt = read_until(sock, b"assword:", min(deadline, time.time() + 5))
+            if b"assword:" in prompt:
+                sock.sendall(args.password.encode() + b"\n")
+            read_until(sock, b"# ", min(deadline, time.time() + 8))
 
-    # This device drops straight to a root shell after IAC negotiation; there is
-    # no login prompt. Handle both shapes so the script keeps working if the
-    # firmware ever grows one.
-    banner = read_until(sock, b"# ", min(deadline, time.time() + 8))
-    if b"ogin:" in banner:
-        sock.sendall(args.user.encode() + b"\n")
-        prompt = read_until(sock, b"assword:", min(deadline, time.time() + 5))
-        if b"assword:" in prompt:
-            sock.sendall(args.password.encode() + b"\n")
-        read_until(sock, b"# ", min(deadline, time.time() + 8))
+        # Kill terminal echo: the telnet server echoes our command back, and a long
+        # command wraps across lines, which makes the echo impossible to strip
+        # reliably by line count.
+        sock.sendall(b"stty -echo\n")
+        read_until(sock, b"# ", min(deadline, time.time() + 5))
 
-    # Kill terminal echo: the telnet server echoes our command back, and a long
-    # command wraps across lines, which makes the echo impossible to strip
-    # reliably by line count.
-    sock.sendall(b"stty -echo\n")
-    read_until(sock, b"# ", min(deadline, time.time() + 5))
+        # Keep the sentinel value out of the echoed command line by defining it
+        # via a shell variable, then locate the *last* occurrence when parsing so
+        # residual echo cannot steal the exit status.
+        sentinel = f"__END_{uuid.uuid4().hex[:12]}__"
+        sock.sendall(
+            f"S={sentinel}; {args.command} 2>&1; echo \"$S\"$?\n".encode()
+        )
 
-    sentinel = f"__END_{uuid.uuid4().hex[:12]}__"
-    # `2>&1` so stderr is not lost; the sentinel carries the exit status.
-    sock.sendall(f"{args.command} 2>&1; echo {sentinel}$?\n".encode())
+        raw = read_until(sock, sentinel.encode(), deadline)
+        text = raw.decode("utf-8", "replace")
 
-    raw = read_until(sock, sentinel.encode(), deadline)
-    text = raw.decode("utf-8", "replace")
+        idx = text.rfind(sentinel)
+        if idx >= 0:
+            body = text[:idx]
+            tail = text[idx + len(sentinel) :]
+            status = tail.split()[0].strip() if tail.split() else "?"
+        else:
+            body, status = text, "TIMEOUT"
 
-    if sentinel in text:
-        body, _, tail = text.partition(sentinel)
-        status = tail.split()[0].strip() if tail.split() else "?"
-    else:
-        body, status = text, "TIMEOUT"
+        print(body.strip())
+        print(f"[exit={status}]", file=sys.stderr)
 
-    print(body.strip())
-    print(f"[exit={status}]", file=sys.stderr)
-
-    sock.close()
-    return 0 if status == "0" else 1
+        return 0 if status == "0" else 1
 
 
 if __name__ == "__main__":

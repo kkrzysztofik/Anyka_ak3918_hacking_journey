@@ -111,6 +111,7 @@ Host only:
 3. `$CARGO fmt` / `fmt --check`
 4. `PATH=$TOOLBIN:$PATH $CARGO clippy --target x86_64-unknown-linux-gnu --lib --tests -- -D warnings`
 5. `$CARGO test --target x86_64-unknown-linux-gnu --lib`
+6. `$CARGO doc --no-deps`
 
 No device redeploy or Task 5 matrix for this follow-up.
 

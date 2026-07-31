@@ -1,6 +1,6 @@
 # PR #51 Copilot Review Fixes Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Do not use Markdown checkbox task-state markers; track work with `br` issues if needed, otherwise proceed step-by-step without checkbox syntax.
 
 **Goal:** Resolve all seven Copilot comments on PR #51 with surgical patches (unregister-on-successful-close, stream register-failure cancel, stdlib include, `spawn_supervisor` `Result`, cam_exec IAC fix).
 
@@ -47,7 +47,7 @@
 - Consumes: none
 - Produces: explicit `malloc`/`free` declarations for `vd_cancel_stream_bounded`
 
-- [ ] **Step 1: Add the include**
+**Step 1: Add the include**
 
 After the existing `#include <time.h>` line, ensure the block is:
 
@@ -59,17 +59,18 @@ After the existing `#include <time.h>` line, ensure the block is:
 
 (Order among the three system headers may match nearby files; `stdlib.h` must be present.)
 
-- [ ] **Step 2: Rebuild daemon**
+**Step 2: Rebuild daemon**
 
 ```bash
 cd /home/kmk/dev/anyka-dev
 make -C cross-compile/vendor-daemon clean
-make -C cross-compile/vendor-daemon 2>&1 | grep -iE "warning|error"; echo "make_exit=${PIPESTATUS[0]}"
+set -o pipefail
+make -C cross-compile/vendor-daemon 2>&1 | tee /tmp/vd-make.log | { grep -iE "warning|error" || true; }
 ```
 
-Expected: `make_exit=0`, no warning/error lines.
+Expected: make exits 0 (pipefail), no warning/error lines.
 
-- [ ] **Step 3: Commit**
+**Step 3: Commit**
 
 ```bash
 git add cross-compile/vendor-daemon/src/globals.c
@@ -97,7 +98,7 @@ EOF
 
 No C unit tests; verify with rebuild. Leave `handle_venc_cancel_stream` unchanged (still unregisters before cancel).
 
-- [ ] **Step 1: Update `handle_venc_close`**
+**Step 1: Update `handle_venc_close`**
 
 Replace the close+unregister tail with:
 
@@ -111,7 +112,7 @@ Replace the close+unregister tail with:
     return send_response(fd, ret, NULL, 0);
 ```
 
-- [ ] **Step 2: Update `handle_vi_close`**
+**Step 2: Update `handle_vi_close`**
 
 ```c
     log_debug("[vi] close handle=%p", handle);
@@ -123,20 +124,21 @@ Replace the close+unregister tail with:
     return send_response(fd, ret, NULL, 0);
 ```
 
-- [ ] **Step 3: Update `handle_ai_close` and `handle_aenc_close`**
+**Step 3: Update `handle_ai_close` and `handle_aenc_close`**
 
 Same pattern with `VD_OBJ_KIND_AI` / `VD_OBJ_KIND_AENC` and `[ai]` / `[aenc]` log tags.
 
-- [ ] **Step 4: Rebuild**
+**Step 4: Rebuild**
 
 ```bash
 make -C cross-compile/vendor-daemon clean
-make -C cross-compile/vendor-daemon 2>&1 | grep -iE "warning|error"; echo "make_exit=${PIPESTATUS[0]}"
+set -o pipefail
+make -C cross-compile/vendor-daemon 2>&1 | tee /tmp/vd-make.log | { grep -iE "warning|error" || true; }
 ```
 
-Expected: `make_exit=0`.
+Expected: make exits 0 (pipefail).
 
-- [ ] **Step 5: Commit**
+**Step 5: Commit**
 
 ```bash
 git add cross-compile/vendor-daemon/src/handlers_venc.c \
@@ -160,94 +162,50 @@ EOF
 - Modify: `cross-compile/vendor-daemon/src/handlers_venc.c` — add static helper; update `handle_venc_request_stream`
 
 **Interfaces:**
-- Consumes: `cancel_thread_fn`, `CANCEL_STREAM_TIMEOUT_SEC`, `ak_venc_request_stream`, `vd_obj_register`
-- Produces: `cancel_untracked_stream(void *handle)` — bounded cancel without unregister
+- Consumes: `vd_cancel_stream_bounded`, `vd_stream_orphan_set` / `clear`, `ak_venc_request_stream`, `vd_obj_register`
+- Produces: register-failure path that transfers ownership before any cancel failure return
 
-- [ ] **Step 1: Add static helper above `handle_venc_cancel_stream`**
+**Step 1: Fix `handle_venc_request_stream` register-failure ownership**
 
-Place after `cancel_thread_fn`, before `handle_venc_cancel_stream`:
-
-```c
-/*
- * cancel_untracked_stream - Bounded cancel for a stream that was never registered.
- *
- * Used when ak_venc_request_stream succeeded but vd_obj_register failed: the
- * SDK capture_thread must still be stopped. No vd_obj_unregister — the pointer
- * never entered the table.
- */
-static void cancel_untracked_stream(void *handle)
-{
-    struct cancel_arg *ca = (struct cancel_arg *)malloc(sizeof(*ca));
-    if (ca == NULL) {
-        log_error("[venc] cancel_untracked: malloc failed ptr=%p", handle);
-        return;
-    }
-    ca->handle = handle;
-    ca->result = -1;
-    ca->done = 0;
-
-    pthread_t tid;
-    if (pthread_create(&tid, NULL, cancel_thread_fn, ca) != 0) {
-        log_error("[venc] cancel_untracked: pthread_create failed ptr=%p", handle);
-        free(ca);
-        return;
-    }
-    pthread_detach(tid);
-
-    struct timespec deadline;
-    clock_gettime(CLOCK_MONOTONIC, &deadline);
-    deadline.tv_sec += CANCEL_STREAM_TIMEOUT_SEC;
-
-    while (!__atomic_load_n(&ca->done, __ATOMIC_ACQUIRE)) {
-        struct timespec now;
-        clock_gettime(CLOCK_MONOTONIC, &now);
-        if (now.tv_sec > deadline.tv_sec ||
-            (now.tv_sec == deadline.tv_sec && now.tv_nsec >= deadline.tv_nsec)) {
-            log_error("[venc] cancel_untracked timed out after %ds ptr=%p (leaking arg)",
-                      CANCEL_STREAM_TIMEOUT_SEC, handle);
-            return;
-        }
-        struct timespec ts = { .tv_sec = 0, .tv_nsec = 10 * 1000000L };
-        nanosleep(&ts, NULL);
-    }
-
-    log_info("[venc] cancelled untracked stream ptr=%p ret=%d", handle, ca->result);
-    free(ca);
-}
-```
-
-- [ ] **Step 2: Call it from `handle_venc_request_stream`**
-
-Replace the register-failure arm:
+Use the shared `vd_cancel_stream_bounded()` helper (in `globals.c`). On `vd_obj_register`
+failure, transfer cleanup ownership **before** returning from any failure path:
 
 ```c
     int slot = vd_obj_register(VD_OBJ_KIND_STREAM, stream_handle);
     if (slot < 0) {
-        log_error("[venc] object table full; refusing open");
-        cancel_untracked_stream(stream_handle);
+        log_error("[venc] object table full; refusing request_stream");
+        /* Ownership first: malloc/pthread/timeout must not leave an untracked stream. */
+        vd_stream_orphan_set(stream_handle);
+        if (vd_cancel_stream_bounded(stream_handle, NULL) == 0)
+            vd_stream_orphan_clear(stream_handle);
         return send_response(fd, STATUS_ERROR, NULL, 0);
     }
-    return send_token_response(fd, vd_obj_token(slot));
 ```
 
-- [ ] **Step 3: Rebuild**
+`vd_obj_close_all` must reclaim `g_stream_orphan` so a failed cancel spawn or timeout
+still has a cleanup owner.
+
+**Step 2: Rebuild**
 
 ```bash
 make -C cross-compile/vendor-daemon clean
-make -C cross-compile/vendor-daemon 2>&1 | grep -iE "warning|error"; echo "make_exit=${PIPESTATUS[0]}"
+set -o pipefail
+make -C cross-compile/vendor-daemon 2>&1 | tee /tmp/vd-make.log | { grep -iE "warning|error" || true; }
 ```
 
-Expected: `make_exit=0`.
+Expected: make exits 0 (pipefail).
 
-- [ ] **Step 4: Commit**
+**Step 3: Commit**
 
 ```bash
-git add cross-compile/vendor-daemon/src/handlers_venc.c
+git add cross-compile/vendor-daemon/src/handlers_venc.c \
+        cross-compile/vendor-daemon/src/globals.c \
+        cross-compile/vendor-daemon/src/globals.h
 git commit -m "$(cat <<'EOF'
 fix(vendor-daemon): cancel stream if object-table register fails
 
 Prevents leaking an SDK capture_thread when request_stream succeeds but
-vd_obj_register fails (Copilot #4).
+vd_obj_register fails (Copilot #4). Orphan slot keeps reclaim ownership.
 
 EOF
 )"
@@ -269,13 +227,13 @@ EOF
   - `PlatformAttachTarget::new(platform: Arc<AnykaPlatform>) -> PlatformResult<Self>`
   - `AnykaPlatform::spawn_supervisor(self: &Arc<Self>) -> PlatformResult<watch::Receiver<Availability>>`
 
-- [ ] **Step 1: Write the failing test**
+**Step 1: Write the failing test**
 
 Add to `cross-compile/onvif-rust/src/platform/anyka/tests/platform_tests.rs` (or `supervisor.rs` `mod tests` if mocks are easier — prefer platform_tests with `with_mocked_hal`). Follow the existing `with_mocked_hal` setup in that file for video/audio mocks:
 
 ```rust
 #[tokio::test]
-async fn spawn_supervisor_fails_if_loss_receiver_already_taken() {
+async fn test_spawn_supervisor_loss_receiver_taken_returns_initialization_failed() {
     let platform = Arc::new(AnykaPlatform::with_mocked_hal(
         // same mock args as neighboring tests in this file
         video_ffi,
@@ -303,18 +261,19 @@ async fn spawn_supervisor_fails_if_loss_receiver_already_taken() {
 
 Fill `video_ffi` / `audio_ffi` exactly as the nearest existing `with_mocked_hal` test in that file.
 
-- [ ] **Step 2: Run test — expect FAIL (panic or compile error until API changes)**
+**Step 2: Run test — expect FAIL (panic or compile error until API changes)**
 
 ```bash
 cd /home/kmk/dev/anyka-dev && source ./setenv.sh
 export HOST=x86_64-unknown-linux-gnu
 cd cross-compile/onvif-rust
-$CARGO test --target $HOST --lib -- spawn_supervisor_fails_if_loss_receiver_already_taken 2>&1 | tail -30
+set -o pipefail
+$CARGO test --target $HOST --lib -- test_spawn_supervisor_loss_receiver_taken_returns_initialization_failed 2>&1 | tee /tmp/spawn-sup-test.log | tail -30
 ```
 
 Expected: FAIL (current `expect` panics, or test does not compile until `spawn_supervisor` returns `Result`).
 
-- [ ] **Step 3: Implement `PlatformAttachTarget::new`**
+**Step 3: Implement `PlatformAttachTarget::new`**
 
 ```rust
 impl PlatformAttachTarget {
@@ -334,7 +293,7 @@ impl PlatformAttachTarget {
 
 Ensure `PlatformError` / `PlatformResult` are already imported in `supervisor.rs`.
 
-- [ ] **Step 4: Implement `spawn_supervisor`**
+**Step 4: Implement `spawn_supervisor`**
 
 ```rust
 pub fn spawn_supervisor(self: &Arc<Self>) -> PlatformResult<watch::Receiver<Availability>> {
@@ -347,7 +306,7 @@ pub fn spawn_supervisor(self: &Arc<Self>) -> PlatformResult<watch::Receiver<Avai
 }
 ```
 
-- [ ] **Step 5: Wire `app.rs` hard-fail**
+**Step 5: Wire `app.rs` hard-fail**
 
 In `init_platform`, replace the infallible spawn with:
 
@@ -369,21 +328,25 @@ In `init_platform`, replace the infallible spawn with:
 
 Do **not** treat this as degraded-continue (unlike `with_isp_config` failure).
 
-- [ ] **Step 6: Run the new test + supervisor suite**
+**Step 6: Run the new test + supervisor suite**
 
 ```bash
-$CARGO test --target $HOST --lib -- spawn_supervisor_fails_if_loss_receiver_already_taken 2>&1 | tail -15
-$CARGO test --target $HOST --lib -- supervisor 2>&1 | tail -20
+set -o pipefail
+$CARGO test --target $HOST --lib -- test_spawn_supervisor_loss_receiver_taken_returns_initialization_failed 2>&1 | tee /tmp/spawn-sup-test.log | tail -15
+set -o pipefail
+$CARGO test --target $HOST --lib -- supervisor 2>&1 | tee /tmp/supervisor-test.log | tail -20
 ```
 
 Expected: all PASS.
 
-- [ ] **Step 7: fmt + clippy + commit**
+**Step 7: fmt + clippy + commit**
 
 ```bash
 $CARGO fmt
-PATH=$TOOLBIN:$PATH $CARGO clippy --target $HOST --lib --tests -- -D warnings 2>&1 | tail -5
+set -o pipefail
+PATH=$TOOLBIN:$PATH $CARGO clippy --target $HOST --lib --tests -- -D warnings 2>&1 | tee /tmp/clippy.log | tail -5
 $CARGO fmt --check && echo fmt-clean
+$CARGO doc --no-deps
 cd /home/kmk/dev/anyka-dev
 git add cross-compile/onvif-rust/src/platform/anyka/supervisor.rs \
         cross-compile/onvif-rust/src/platform/anyka/mod.rs \
@@ -412,7 +375,7 @@ EOF
 - Consumes: none
 - Produces: incomplete IAC sequences left in buffer for the next recv
 
-- [ ] **Step 1: Fix the guard**
+**Step 1: Fix the guard**
 
 Change:
 
@@ -434,7 +397,7 @@ Remove the now-redundant `if i + 2 < len(data) else 0` on the next line — afte
         cmd, opt = data[i + 1], data[i + 2]
 ```
 
-- [ ] **Step 2: Sanity-check with a tiny inline Python assertion**
+**Step 2: Sanity-check with a tiny inline Python assertion**
 
 ```bash
 cd /home/kmk/dev/anyka-dev
@@ -468,7 +431,7 @@ PY
 
 Expected: `cam_exec negotiate checks ok`.
 
-- [ ] **Step 3: Commit**
+**Step 3: Commit**
 
 ```bash
 git add scripts/debugging/cam_exec.py
@@ -487,7 +450,7 @@ EOF
 
 **Files:** none (verification + PR hygiene)
 
-- [ ] **Step 1: Full host gates**
+**Step 1: Full host gates**
 
 ```bash
 cd /home/kmk/dev/anyka-dev && source ./setenv.sh
@@ -495,24 +458,28 @@ export HOST=x86_64-unknown-linux-gnu
 export TOOLBIN=/home/kmk/dev/anyka-dev/toolchain/arm-anykav200-crosstool-ng/bin
 
 make -C cross-compile/vendor-daemon clean
-make -C cross-compile/vendor-daemon 2>&1 | grep -iE "warning|error"; echo "make_exit=${PIPESTATUS[0]}"
+set -o pipefail
+make -C cross-compile/vendor-daemon 2>&1 | tee /tmp/vd-make.log | { grep -iE "warning|error" || true; }
 
 cd cross-compile/onvif-rust
-$CARGO test --target $HOST --lib 2>&1 | grep -E "test result:|FAILED" | head
+set -o pipefail
+$CARGO test --target $HOST --lib 2>&1 | tee /tmp/lib-tests.log | { grep -E "test result:|FAILED" || true; }
 $CARGO fmt --check && echo fmt-clean
-PATH=$TOOLBIN:$PATH $CARGO clippy --target $HOST --lib --tests -- -D warnings 2>&1 | tail -3
+set -o pipefail
+PATH=$TOOLBIN:$PATH $CARGO clippy --target $HOST --lib --tests -- -D warnings 2>&1 | tee /tmp/clippy.log | tail -3
+$CARGO doc --no-deps
 ```
 
-Expected: `make_exit=0`, all test results ok, `fmt-clean`, clippy Finished with no warnings.
+Expected: make/tests/clippy exit 0 (pipefail), `fmt-clean`, `$CARGO doc --no-deps` succeeds.
 
-- [ ] **Step 2: Push branch**
+**Step 2: Push branch**
 
 ```bash
 cd /home/kmk/dev/anyka-dev
 git push origin HEAD
 ```
 
-- [ ] **Step 3: Reply on each Copilot thread**
+**Step 3: Reply on each Copilot thread**
 
 Use `gh api` (or `gh pr comment` / reply endpoints) on PR #51 discussions:
 
@@ -528,7 +495,7 @@ Use `gh api` (or `gh pr comment` / reply endpoints) on PR #51 discussions:
 
 Do not open or reply on CodeRabbit threads.
 
-- [ ] **Step 4: Done**
+**Step 4: Done**
 
 Confirm `git status` clean and PR #51 shows the new commits.
 
@@ -552,4 +519,4 @@ Confirm `git status` clean and PR #51 shows the new commits.
 - No TBD/TODO left.
 - `PlatformError::InitializationFailed` used consistently for missing loss RX.
 - `StartupError::Platform` used for app hard-fail.
-- `cancel_untracked_stream` does not unregister; `handle_venc_cancel_stream` still does.
+- Register-failure cancel uses `vd_cancel_stream_bounded` + orphan ownership; `handle_venc_cancel_stream` still unregisters before cancel.
