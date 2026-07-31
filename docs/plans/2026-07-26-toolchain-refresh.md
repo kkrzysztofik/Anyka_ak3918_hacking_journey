@@ -10,7 +10,7 @@
 
 ## Global Constraints
 
-- Spec: `docs/superpowers/specs/2026-07-26-toolchain-refresh-design.md`
+- Spec: `docs/plans/2026-07-26-toolchain-refresh-design.md`
 - Do **not** bump `UCLIBC_NG_VERSION` above 1.0.57
 - Do **not** delete files without explicit user permission
 - Pipe large build logs through `distill` with explicit PASS/FAIL prompts
