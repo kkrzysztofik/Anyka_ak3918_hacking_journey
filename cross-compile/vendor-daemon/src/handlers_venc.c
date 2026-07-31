@@ -185,6 +185,8 @@ int handle_venc_set_iframe(int fd, const uint8_t *req, uint32_t req_len)
  * @param req_len Length of @p req in bytes.
  * @return        0 on success, -1 on I/O error.
  */
+static void cancel_untracked_stream(void *handle);
+
 int handle_venc_request_stream(int fd, const uint8_t *req, uint32_t req_len)
 {
     /* u64 vi_handle + u64 venc_handle = 16 bytes */
@@ -205,6 +207,7 @@ int handle_venc_request_stream(int fd, const uint8_t *req, uint32_t req_len)
     int slot = vd_obj_register(VD_OBJ_KIND_STREAM, stream_handle);
     if (slot < 0) {
         log_error("[venc] object table full; refusing open");
+        cancel_untracked_stream(stream_handle);
         return send_response(fd, STATUS_ERROR, NULL, 0);
     }
     return send_token_response(fd, vd_obj_token(slot));
@@ -251,6 +254,53 @@ static void *cancel_thread_fn(void *arg)
  * @param req_len Length of @p req in bytes.
  * @return        0 on success, -1 on I/O error.
  */
+/*
+ * cancel_untracked_stream - Bounded cancel for a stream that was never registered.
+ *
+ * Used when ak_venc_request_stream succeeded but vd_obj_register failed: the
+ * SDK capture_thread must still be stopped. No vd_obj_unregister — the pointer
+ * never entered the table.
+ */
+static void cancel_untracked_stream(void *handle)
+{
+    struct cancel_arg *ca = (struct cancel_arg *)malloc(sizeof(*ca));
+    if (ca == NULL) {
+        log_error("[venc] cancel_untracked: malloc failed ptr=%p", handle);
+        return;
+    }
+    ca->handle = handle;
+    ca->result = -1;
+    ca->done = 0;
+
+    pthread_t tid;
+    if (pthread_create(&tid, NULL, cancel_thread_fn, ca) != 0) {
+        log_error("[venc] cancel_untracked: pthread_create failed ptr=%p", handle);
+        free(ca);
+        return;
+    }
+    pthread_detach(tid);
+
+    struct timespec deadline;
+    clock_gettime(CLOCK_MONOTONIC, &deadline);
+    deadline.tv_sec += CANCEL_STREAM_TIMEOUT_SEC;
+
+    while (!__atomic_load_n(&ca->done, __ATOMIC_ACQUIRE)) {
+        struct timespec now;
+        clock_gettime(CLOCK_MONOTONIC, &now);
+        if (now.tv_sec > deadline.tv_sec ||
+            (now.tv_sec == deadline.tv_sec && now.tv_nsec >= deadline.tv_nsec)) {
+            log_error("[venc] cancel_untracked timed out after %ds ptr=%p (leaking arg)",
+                      CANCEL_STREAM_TIMEOUT_SEC, handle);
+            return;
+        }
+        struct timespec ts = { .tv_sec = 0, .tv_nsec = 10 * 1000000L };
+        nanosleep(&ts, NULL);
+    }
+
+    log_info("[venc] cancelled untracked stream ptr=%p ret=%d", handle, ca->result);
+    free(ca);
+}
+
 int handle_venc_cancel_stream(int fd, const uint8_t *req, uint32_t req_len)
 {
     if (req_len < sizeof(uint64_t))
