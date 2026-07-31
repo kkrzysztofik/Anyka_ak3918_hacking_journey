@@ -94,7 +94,10 @@ int handle_vi_close(int fd, const uint8_t *req, uint32_t req_len)
 
     log_debug("[vi] close handle=%p", handle);
     int ret = ak_vi_close(handle);
-    vd_obj_unregister(VD_OBJ_KIND_VI, handle);
+    if (ret == 0)
+        vd_obj_unregister(VD_OBJ_KIND_VI, handle);
+    else
+        log_warn("[vi] close failed ret=%d; keeping object tracked for reclaim", ret);
     return send_response(fd, ret, NULL, 0);
 }
 

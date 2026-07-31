@@ -69,8 +69,12 @@ int handle_ai_close(int fd, const uint8_t *req, uint32_t req_len)
     void *handle;
     if (vd_obj_resolve(req_read_u64(req, 0), VD_OBJ_KIND_AI, &handle) != 0)
         return send_response(fd, VD_STATUS_STALE_EPOCH, NULL, 0);
+    log_debug("[ai] close handle=%p", handle);
     int ret = ak_ai_close(handle);
-    vd_obj_unregister(VD_OBJ_KIND_AI, handle);
+    if (ret == 0)
+        vd_obj_unregister(VD_OBJ_KIND_AI, handle);
+    else
+        log_warn("[ai] close failed ret=%d; keeping object tracked for reclaim", ret);
     return send_response(fd, ret, NULL, 0);
 }
 
@@ -179,8 +183,12 @@ int handle_aenc_close(int fd, const uint8_t *req, uint32_t req_len)
     void *handle;
     if (vd_obj_resolve(req_read_u64(req, 0), VD_OBJ_KIND_AENC, &handle) != 0)
         return send_response(fd, VD_STATUS_STALE_EPOCH, NULL, 0);
+    log_debug("[aenc] close handle=%p", handle);
     int ret = ak_aenc_close(handle);
-    vd_obj_unregister(VD_OBJ_KIND_AENC, handle);
+    if (ret == 0)
+        vd_obj_unregister(VD_OBJ_KIND_AENC, handle);
+    else
+        log_warn("[aenc] close failed ret=%d; keeping object tracked for reclaim", ret);
     return send_response(fd, ret, NULL, 0);
 }
 

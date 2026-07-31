@@ -116,7 +116,10 @@ int handle_venc_close(int fd, const uint8_t *req, uint32_t req_len)
         return send_response(fd, VD_STATUS_STALE_EPOCH, NULL, 0);
     log_debug("[venc] close handle=%p", handle);
     int ret = ak_venc_close(handle);
-    vd_obj_unregister(VD_OBJ_KIND_VENC, handle);
+    if (ret == 0)
+        vd_obj_unregister(VD_OBJ_KIND_VENC, handle);
+    else
+        log_warn("[venc] close failed ret=%d; keeping object tracked for reclaim", ret);
     return send_response(fd, ret, NULL, 0);
 }
 
