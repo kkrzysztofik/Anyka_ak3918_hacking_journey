@@ -72,6 +72,12 @@ compile_commands.json
 # Cursor / IDE hook runtime state (not project config)
 .cursor/hooks/state/
 
+# Superpowers session scratch: per-task briefs, reports, review diffs.
+# Working artifacts of a single session, not project history. A local
+# .superpowers/sdd/.gitignore also exists but is itself untracked, so it
+# does not survive a clone — this line is the one that holds.
+.superpowers/
+
 # VS Code - Keep project configs, ignore personal files
 .vscode/browse.vc.db*
 .vscode/launch.json.old
