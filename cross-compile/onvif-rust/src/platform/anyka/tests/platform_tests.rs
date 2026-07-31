@@ -117,3 +117,28 @@ fn test_init_ptz_control_skips_bring_up_when_disabled() {
         "ptz.enabled = true must still bring PTZ up (stub HAL opens successfully on host)"
     );
 }
+
+#[tokio::test]
+async fn spawn_supervisor_fails_if_loss_receiver_already_taken() {
+    let platform = Arc::new(AnykaPlatform::with_mocked_hal(
+        Arc::new(MockVideoHalTrait::new()),
+        Arc::new(MockAudioHalTrait::new()),
+        None,
+    ));
+    assert!(
+        platform.ipc().take_loss_rx().is_some(),
+        "first take must succeed"
+    );
+    let err = platform
+        .spawn_supervisor()
+        .expect_err("second ownership of loss rx must fail without panicking");
+    match err {
+        PlatformError::InitializationFailed(msg) => {
+            assert!(
+                msg.contains("peer-loss") || msg.contains("already taken"),
+                "got {msg}"
+            );
+        }
+        other => panic!("expected InitializationFailed, got {other:?}"),
+    }
+}

@@ -244,13 +244,13 @@ impl AnykaPlatform {
     /// The supervisor is the sole owner of the attachment: it drives the same
     /// `attach → initialize → serve → rollback → detach` path for cold start and for
     /// recovery, so a daemon that is absent at boot is not a special case.
-    pub fn spawn_supervisor(self: &Arc<Self>) -> watch::Receiver<Availability> {
+    pub fn spawn_supervisor(self: &Arc<Self>) -> PlatformResult<watch::Receiver<Availability>> {
         let (tx, rx) = watch::channel(Availability::Unavailable);
-        let target: Arc<dyn AttachTarget> = Arc::new(PlatformAttachTarget::new(Arc::clone(self)));
+        let target: Arc<dyn AttachTarget> = Arc::new(PlatformAttachTarget::new(Arc::clone(self))?);
         tokio::spawn(async move {
             run_supervisor(target, &tx).await;
         });
-        rx
+        Ok(rx)
     }
 
     /// Best-effort unwind of a partial or complete bring-up, for the supervisor.

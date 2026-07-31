@@ -1151,7 +1151,9 @@ impl Application {
                     // block on it, which is what lets the device service answer while
                     // the video pipeline is still down.
                     let platform = Arc::new(p);
-                    let availability = platform.spawn_supervisor();
+                    let availability = platform.spawn_supervisor().map_err(|e| {
+                        StartupError::Platform(format!("failed to start attach supervisor: {e}"))
+                    })?;
                     tracing::info!(
                         "AnykaPlatform created; attach supervisor started (degraded until attached)"
                     );

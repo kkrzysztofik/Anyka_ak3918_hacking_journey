@@ -14,8 +14,8 @@ use tokio::sync::watch;
 use tokio::sync::mpsc;
 
 use crate::hal::anyka::ipc::{AnykaIpc, PeerLoss};
-use crate::platform::PlatformResult;
 use crate::platform::common::Platform;
+use crate::platform::{PlatformError, PlatformResult};
 
 use super::AnykaPlatform;
 
@@ -146,15 +146,16 @@ pub struct PlatformAttachTarget {
 }
 
 impl PlatformAttachTarget {
-    pub fn new(platform: Arc<AnykaPlatform>) -> Self {
-        let reports = platform
-            .ipc()
-            .take_loss_rx()
-            .expect("the supervisor is the only owner of the peer-loss receiver");
-        Self {
+    pub fn new(platform: Arc<AnykaPlatform>) -> PlatformResult<Self> {
+        let reports = platform.ipc().take_loss_rx().ok_or_else(|| {
+            PlatformError::InitializationFailed(
+                "peer-loss receiver already taken; supervisor must be spawned once".to_string(),
+            )
+        })?;
+        Ok(Self {
             platform,
             reports: tokio::sync::Mutex::new(reports),
-        }
+        })
     }
 }
 
