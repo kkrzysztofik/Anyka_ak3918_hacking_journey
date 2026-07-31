@@ -42,7 +42,8 @@ use crate::onvif::types::media::{
     SetVideoSourceConfigurationResponse, StartMulticastStreaming, StartMulticastStreamingResponse,
     StopMulticastStreaming, StopMulticastStreamingResponse,
 };
-use crate::platform::{Platform, Resolution};
+use crate::platform::{Availability, Platform, Resolution};
+use tokio::sync::watch;
 
 use super::ProfileManager;
 use super::ops::audio as audio_ops;
@@ -61,6 +62,12 @@ pub struct MediaService {
     config: Arc<ConfigRuntime>,
     /// Platform abstraction (optional).
     platform: Option<Arc<dyn Platform>>,
+    /// Live attach state from the vendor-daemon supervisor.
+    ///
+    /// `None` in stub builds and unit tests, where there is no supervisor. Absence
+    /// means "no opinion", never "unavailable" -- treating it as down would break
+    /// every stub deployment.
+    availability: Option<watch::Receiver<Availability>>,
 }
 
 impl MediaService {
@@ -71,6 +78,7 @@ impl MediaService {
             profile_manager: Arc::new(ProfileManager::with_config(Arc::clone(&config))),
             config,
             platform: None,
+            availability: None,
         }
     }
 
@@ -80,6 +88,7 @@ impl MediaService {
             profile_manager: Arc::new(ProfileManager::with_config(Arc::clone(&config))),
             config,
             platform: None,
+            availability: None,
         }
     }
 
@@ -116,6 +125,7 @@ impl MediaService {
             profile_manager: Arc::new(pm),
             config,
             platform,
+            availability: None,
         }
     }
 
@@ -128,6 +138,7 @@ impl MediaService {
             profile_manager,
             config: Arc::new(ConfigRuntime::new(Default::default())),
             platform: None,
+            availability: None,
         }
     }
 
@@ -354,6 +365,33 @@ impl MediaService {
         audio_ops::get_audio_encoder_configuration_options(&self.profile_manager)
     }
 
+    /// Attach the supervisor's availability channel.
+    ///
+    /// Without this the service has no way to know the video pipeline is down and
+    /// would hand out stream URIs that can never produce frames.
+    pub fn with_availability(mut self, availability: watch::Receiver<Availability>) -> Self {
+        self.availability = Some(availability);
+        self
+    }
+
+    /// Reject media operations while the video pipeline cannot serve them.
+    ///
+    /// A backoff that hides a permanent failure leaves the camera dark with
+    /// evidence only in the logs. Faulting here is what makes it visible to the
+    /// client: it gets a reason instead of a URI that times out on SETUP.
+    fn require_available(&self) -> OnvifResult<()> {
+        let Some(rx) = self.availability.as_ref() else {
+            return Ok(()); // no supervisor (stub build): no opinion
+        };
+        match rx.borrow().unavailable_reason() {
+            None => Ok(()),
+            Some(reason) => {
+                tracing::warn!(reason, "refusing media request: pipeline unavailable");
+                Err(OnvifError::HardwareFailure(reason.to_string()))
+            }
+        }
+    }
+
     // ========================================================================
     // Stream URI Handlers (delegate to ops::streaming)
     // ========================================================================
@@ -363,6 +401,7 @@ impl MediaService {
         &self,
         request: GetStreamUri,
     ) -> OnvifResult<GetStreamUriResponse> {
+        self.require_available()?;
         streaming_ops::get_stream_uri(&self.profile_manager, &self.config, request)
     }
 
@@ -371,6 +410,7 @@ impl MediaService {
         &self,
         request: GetSnapshotUri,
     ) -> OnvifResult<GetSnapshotUriResponse> {
+        self.require_available()?;
         streaming_ops::get_snapshot_uri(&self.profile_manager, &self.config, request)
     }
 
@@ -1119,6 +1159,76 @@ mod tests {
         assert!(result.is_ok());
         let response = result.unwrap();
         assert!(!response.audio_sources.is_empty());
+    }
+
+    #[test]
+    fn test_get_stream_uri_unavailable_pipeline_refused() {
+        use crate::onvif::types::common::{StreamSetup, StreamType, TransportProtocol};
+
+        // Handing out a URI that will never produce frames is worse than a fault:
+        // the client sets up, waits, and times out with no explanation.
+        let (_tx, rx) = tokio::sync::watch::channel(Availability::Unavailable);
+        let service = MediaService::new().with_availability(rx);
+
+        let err = service
+            .handle_get_stream_uri(GetStreamUri {
+                stream_setup: StreamSetup {
+                    stream: StreamType::RtpUnicast,
+                    transport: crate::onvif::types::common::Transport {
+                        protocol: TransportProtocol::RTSP,
+                        tunnel: None,
+                    },
+                },
+                profile_token: "Profile_MainStream".to_string(),
+            })
+            .unwrap_err();
+
+        assert!(
+            format!("{err}").contains("not attached"),
+            "fault should explain why, got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_get_stream_uri_available_succeeds() {
+        use crate::onvif::types::common::{StreamSetup, StreamType, TransportProtocol};
+
+        let (_tx, rx) = tokio::sync::watch::channel(Availability::Available);
+        let service = MediaService::new().with_availability(rx);
+
+        let result = service.handle_get_stream_uri(GetStreamUri {
+            stream_setup: StreamSetup {
+                stream: StreamType::RtpUnicast,
+                transport: crate::onvif::types::common::Transport {
+                    protocol: TransportProtocol::RTSP,
+                    tunnel: None,
+                },
+            },
+            profile_token: "Profile_MainStream".to_string(),
+        });
+
+        assert!(result.is_ok(), "available pipeline must serve URIs");
+    }
+
+    #[test]
+    fn test_get_stream_uri_no_availability_channel_unchanged() {
+        use crate::onvif::types::common::{StreamSetup, StreamType, TransportProtocol};
+
+        // Stub builds and tests have no supervisor; absence must not mean "down".
+        let service = MediaService::new();
+
+        let result = service.handle_get_stream_uri(GetStreamUri {
+            stream_setup: StreamSetup {
+                stream: StreamType::RtpUnicast,
+                transport: crate::onvif::types::common::Transport {
+                    protocol: TransportProtocol::RTSP,
+                    tunnel: None,
+                },
+            },
+            profile_token: "Profile_MainStream".to_string(),
+        });
+
+        assert!(result.is_ok());
     }
 
     #[test]

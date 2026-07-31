@@ -89,36 +89,34 @@ static inline int32_t req_read_i32(const uint8_t *req, uint32_t offset)
 }
 
 /**
- * req_read_handle - Decode a 64-bit opaque SDK handle from a request buffer.
- *
- * Reads a u64 at @p offset and converts it to a void pointer suitable for
- * passing to Anyka SDK functions.
+ * req_read_u64 - Decode a 64-bit handle token from a request buffer.
  *
  * @param req    Request payload buffer.
- * @param offset Byte offset into @p req where the u64 handle is stored.
- * @return       The SDK handle as a void pointer.
+ * @param offset Byte offset into @p req where the token is stored.
+ * @return       The raw token; validate it with vd_obj_resolve().
  */
-static inline void *req_read_handle(const uint8_t *req, uint32_t offset)
+static inline uint64_t req_read_u64(const uint8_t *req, uint32_t offset)
 {
     uint64_t h;
     memcpy(&h, req + offset, sizeof(h));
-    return (void *)(uintptr_t)h;
+    return h;
 }
 
 /**
- * send_handle_response - Send a STATUS_OK response carrying a single SDK handle.
+ * send_token_response - Send a STATUS_OK response carrying a handle token.
  *
- * Converts @p handle to a signed i64 and sends it as the response payload,
- * which is the standard way handles are returned to the Rust caller.
+ * Tokens name a table slot; raw SDK pointers are never marshalled across the
+ * process boundary. See globals.h for the layout and why it is 32 bits.
  *
- * @param fd     Client socket file descriptor.
- * @param handle SDK handle returned by an open/request call.
- * @return       0 on success, -1 on I/O error.
+ * @param fd    Client socket file descriptor.
+ * @param token Token from vd_obj_token().
+ * @return      0 on success, -1 on I/O error.
  */
-static inline int send_handle_response(int fd, void *handle)
+static inline int send_token_response(int fd, uint64_t token)
 {
-    int64_t h64 = (int64_t)(uintptr_t)handle;
-    return send_response(fd, STATUS_OK, &h64, sizeof(h64));
+    int64_t t64 = (int64_t)token;
+    return send_response(fd, STATUS_OK, &t64, sizeof(t64));
 }
+
 
 #endif /* VENDOR_DAEMON_IPC_H */

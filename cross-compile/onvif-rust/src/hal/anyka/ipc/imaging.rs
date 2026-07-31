@@ -100,6 +100,9 @@ mod tests {
     async fn test_set_brightness_roundtrip() {
         let daemon = FakeDaemon::start(|_cmd_id, _req| (AK_SUCCESS_I32, vec![]));
         let ipc = AnykaIpc::new_with_path(&daemon.socket_path).unwrap();
+        // Stand in for a completed attach: the epoch gate refuses every
+        // request while detached.
+        ipc.set_epochs_for_test(1, 1);
 
         let result = <AnykaIpc as ImagingHalTrait>::set_brightness(&ipc, 50).await;
         assert_eq!(result, AK_SUCCESS_I32, "expected AK_SUCCESS from daemon");
@@ -110,6 +113,9 @@ mod tests {
     async fn test_concurrent_set_brightness() {
         let daemon = FakeDaemon::start(|_cmd_id, _req| (AK_SUCCESS_I32, vec![]));
         let ipc = AnykaIpc::new_with_path(&daemon.socket_path).unwrap();
+        // Stand in for a completed attach: the epoch gate refuses every
+        // request while detached.
+        ipc.set_epochs_for_test(1, 1);
 
         for i in 0..3 {
             let result = <AnykaIpc as ImagingHalTrait>::set_brightness(&ipc, 50 + i).await;
@@ -128,6 +134,8 @@ mod tests {
             (AK_SUCCESS_I32, vec![])
         });
         let ipc = Arc::new(AnykaIpc::new_with_path(&daemon.socket_path).unwrap());
+        // Stand in for a completed attach so the delayed fake-daemon path is reached.
+        ipc.set_epochs_for_test(1, 1);
 
         // Drive the imaging HAL method (not `request_async` directly) from a task.
         let ipc_task = Arc::clone(&ipc);

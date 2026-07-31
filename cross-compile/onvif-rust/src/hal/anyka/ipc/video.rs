@@ -267,6 +267,9 @@ mod tests {
             (AK_SUCCESS_I32, handle_value.to_le_bytes().to_vec())
         });
         let ipc = AnykaIpc::new_with_path(&daemon.socket_path).unwrap();
+        // Stand in for a completed attach: the epoch gate refuses every
+        // request while detached.
+        ipc.set_epochs_for_test(1, 1);
 
         let handle = {
             use crate::hal::common::sdk_types::VideoDevType;

@@ -15,6 +15,7 @@ pub mod lifecycle;
 pub mod network_info;
 pub mod ptz_actor;
 pub mod ptz_control;
+pub mod supervisor;
 mod video_encoder;
 pub use video_encoder::StreamOpenParams;
 mod video_input;
@@ -27,8 +28,12 @@ use std::time::Duration;
 use async_trait::async_trait;
 use parking_lot::RwLock;
 
+use tokio::sync::{broadcast, watch};
+use tokio::task::JoinHandle;
+
 use crate::hal::anyka::ipc::AnykaIpc;
 use crate::hal::common::video::VideoHalTrait;
+use supervisor::{AttachTarget, Availability, PlatformAttachTarget, run_supervisor};
 
 use super::common::{
     DeviceInfo, ImagingControl, NetworkInfo, PTZControl, Platform, PlatformError, PlatformResult,
@@ -63,6 +68,12 @@ pub struct AnykaPlatform {
     ptz_control: Option<Arc<dyn PTZControl>>,
     imaging_control: Option<Arc<dyn ImagingControl>>,
     network_info: Option<Arc<dyn NetworkInfo>>,
+    /// The shared IPC client, kept so the supervisor can attach and detach it.
+    ///
+    /// Construction leaves it detached: every request is refused until the
+    /// supervisor completes an attach. That is what lets cold start and recovery
+    /// share one path.
+    ipc: Arc<AnykaIpc>,
 }
 
 /// Bring PTZ up, or skip it entirely when `enabled` is false.
@@ -147,6 +158,9 @@ impl AnykaPlatform {
             ptz_control: None,
             imaging_control: None,
             network_info: None,
+            // Detached: these tests drive the mocked HALs directly and never
+            // route through the real IPC client.
+            ipc: Arc::new(AnykaIpc::new_detached().expect("detached IPC needs no daemon")),
         }
     }
 
@@ -168,15 +182,14 @@ impl AnykaPlatform {
     ) -> PlatformResult<Self> {
         let device_info = Self::device_descriptor();
 
-        let (video_input, video_encoder, audio_input, audio_encoder, imaging_control) = {
-            let shared_ipc = Arc::new(AnykaIpc::new().map_err(|e| {
-                PlatformError::InitializationFailed(format!(
-                    "AnykaIpc connection failed (is vendor-daemon running?): {}",
-                    e
-                ))
+        let (video_input, video_encoder, audio_input, audio_encoder, imaging_control, ipc) = {
+            let shared_ipc = Arc::new(AnykaIpc::new_detached().map_err(|e| {
+                PlatformError::InitializationFailed(format!("AnykaIpc construction failed: {}", e))
             })?);
 
-            tracing::info!("AnykaPlatform: using shared AnykaIpc client for video/audio/imaging");
+            tracing::info!(
+                "AnykaPlatform: using shared AnykaIpc client (detached; supervisor will attach)"
+            );
 
             let video_ffi: Arc<dyn VideoHalTrait> = shared_ipc.clone();
             let audio_ffi: Arc<dyn crate::hal::common::audio::AudioHalTrait> = shared_ipc.clone();
@@ -205,6 +218,7 @@ impl AnykaPlatform {
                 audio_input,
                 audio_encoder,
                 imaging_control,
+                shared_ipc,
             )
         };
 
@@ -222,7 +236,39 @@ impl AnykaPlatform {
             ptz_control,
             imaging_control,
             network_info,
+            ipc,
         })
+    }
+
+    /// Start the attach supervisor and return the availability channel plus task handle.
+    ///
+    /// The supervisor is the sole owner of the attachment: it drives the same
+    /// `attach → initialize → serve → rollback → detach` path for cold start and for
+    /// recovery, so a daemon that is absent at boot is not a special case.
+    ///
+    /// `shutdown` cancels attach / wait / backoff so Application can await the
+    /// JoinHandle before platform teardown.
+    pub fn spawn_supervisor(
+        self: &Arc<Self>,
+        shutdown: broadcast::Receiver<()>,
+    ) -> PlatformResult<(watch::Receiver<Availability>, JoinHandle<()>)> {
+        let (tx, rx) = watch::channel(Availability::Unavailable);
+        let target: Arc<dyn AttachTarget> = Arc::new(PlatformAttachTarget::new(Arc::clone(self))?);
+        let handle = tokio::spawn(async move {
+            run_supervisor(target, &tx, shutdown).await;
+        });
+        Ok((rx, handle))
+    }
+
+    /// Best-effort unwind of a partial or complete bring-up, for the supervisor.
+    pub(super) async fn rollback_for_supervisor(&self) {
+        self.rollback_video_pipeline().await;
+        self.initialized.store(false, Ordering::SeqCst);
+    }
+
+    /// The shared IPC client, for the supervisor.
+    pub(super) fn ipc(&self) -> &Arc<AnykaIpc> {
+        &self.ipc
     }
 
     /// Initialize steps 1-5 of platform bring-up: sensor match, VI open, VPSS,

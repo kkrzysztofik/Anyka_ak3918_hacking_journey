@@ -29,7 +29,7 @@ use std::ffi::c_void;
 use std::io::{ErrorKind, Read, Write};
 use std::os::fd::AsRawFd;
 use std::os::unix::net::UnixStream;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
@@ -275,19 +275,45 @@ const CMD_ISP_SET_IR_FILTER: i32 = 104;
 const CMD_ISP_SET_WDR: i32 = 105;
 const CMD_GET_ERROR_NO: i32 = 200;
 const CMD_GET_ERROR_STR: i32 = 201;
+
+/// Attach handshake. Returns `[u32 epoch][u32 shm_version]`.
+///
+/// The only command exempt from the epoch gate — it is how the epoch is learned.
+const CMD_HELLO: i32 = 300;
+
+/// Daemon rejected a handle token: dead generation, reused slot, or wrong object
+/// kind. Mirrors `VD_STATUS_STALE_EPOCH` in the daemon's `protocol.h`.
+///
+/// Distinct from the generic error status so this reads as an attachment problem
+/// rather than a bad argument. Reaching the client at all means defence in depth
+/// caught something the epoch gate should already have refused — a bug or a
+/// version skew, worth a loud message either way.
+const VD_STATUS_STALE_EPOCH: i32 = -2;
+
+/// Sentinel meaning "not attached to any daemon generation".
+///
+/// The daemon guarantees a non-zero epoch, so 0 can never collide with a real one.
+const EPOCH_DETACHED: u32 = 0;
+
+/// Consecutive ring samples of epoch 0 tolerated before reporting loss.
+///
+/// A single zero can appear in the brief window where `vd_ring_create()` has
+/// memset the header but not yet stamped the new generation. Persistent zeros
+/// while attached mean the daemon is wedged mid-recreate.
+const MAX_ZERO_EPOCH_SAMPLES: u32 = 3;
 const PUSH_NOTIFICATION_TIMEOUT: Duration = Duration::from_millis(200);
 
 /// Timeout for blocking reads/writes on the IPC control socket.
 ///
 /// If the vendor daemon stops responding, this bounds how long a single owner-thread
-/// send/receive cycle will block before returning an error. The owner thread then
-/// attempts one reconnect + retry.
+/// send/receive cycle will block before returning an error. The error is surfaced to
+/// the caller; the owner thread does not retry.
 const IPC_CTRL_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Timeout for the public async IPC API, set slightly above `IPC_CTRL_TIMEOUT` so the
 /// owner thread's socket-level timeout fires first and surfaces a `Timeout` error to the
 /// async caller. This bounds how long an executor task awaits a control RPC even if the
-/// owner thread is still retrying in the background.
+/// owner thread is still blocked on the socket.
 const IPC_PUBLIC_TIMEOUT: Duration = Duration::from_secs(12);
 
 /// Bounded depth of the control-socket job queue handed to the owner thread.
@@ -310,13 +336,48 @@ struct IpcJob {
     reply: oneshot::Sender<IpcResponse>,
 }
 
-/// Describes how the owner thread (re)connects the control `UnixStream`.
+/// A detection site's report that the vendor daemon peer is gone.
 ///
-/// The initial connection may target a production or a test-only path, but a
-/// reconnect after an I/O error always targets the production control/legacy paths
-/// where the real vendor daemon lives. In unit tests those production paths are
-/// absent, so a reconnect fails fast — keeping the timeout tests single-attempt and
-/// their timing assertions meaningful.
+/// Carries a reason for the log only. Detection sites *report*; they never attach —
+/// the daemon's single-owner guards reject a concurrent second attacher rather than
+/// serialising it, so re-attaching is the supervisor's job alone.
+#[derive(Debug, Clone)]
+pub struct PeerLoss {
+    /// Which site noticed, and how. Log-only.
+    pub reason: String,
+}
+
+/// Depth of the peer-loss channel.
+///
+/// One queued loss is exactly as informative as ten — the supervisor's response is
+/// the same either way — and a bounded channel with `try_send` guarantees the owner
+/// thread and frame reader never block on a busy supervisor.
+const PEER_LOSS_QUEUE_CAP: usize = 1;
+
+/// Everything the owner thread accepts, on one ordered queue.
+///
+/// Stream installation travels the *same* queue as requests on purpose. The attach
+/// path issues `CMD_HELLO` immediately after handing over the stream, and a side
+/// channel would let the handshake overtake the installation and be refused on a
+/// perfectly healthy daemon.
+enum OwnerMsg {
+    /// Run a control RPC on the currently installed stream.
+    Job(IpcJob),
+    /// Install a freshly connected control stream, acknowledging when it is live.
+    GiveStream {
+        stream: UnixStream,
+        ack: oneshot::Sender<()>,
+    },
+    /// Drop the installed stream. Fire-and-forget: it only makes later requests
+    /// fail sooner.
+    DropStream,
+}
+
+/// Describes how the owner thread connects the control `UnixStream`.
+///
+/// Connect-only: there is deliberately no reconnect path. A reconnect that resumed
+/// with the previous generation's SDK handles is the hazard the epoch gate exists to
+/// prevent, so recovery is the supervisor's job and it goes through `attach()`.
 #[derive(Clone)]
 enum CtrlConnect {
     /// Production: connect to `/tmp/vd-ctrl.sock`, falling back to the legacy path.
@@ -343,12 +404,6 @@ impl CtrlConnect {
                 Ok(stream)
             }
         }
-    }
-
-    /// Reconnect after an I/O error. Always targets the production control paths where
-    /// the real daemon lives (and would reappear after a restart).
-    fn reconnect(&self) -> PlatformResult<UnixStream> {
-        connect_production_ctrl()
     }
 }
 
@@ -398,7 +453,7 @@ pub struct AnykaIpc {
     ///
     /// `None` only during `Drop`, after the sender has been dropped to signal the
     /// owner thread to exit.
-    job_tx: Option<mpsc::Sender<IpcJob>>,
+    job_tx: Option<mpsc::Sender<OwnerMsg>>,
     /// Join handle for the control-socket owner thread, taken and joined on `Drop`.
     owner_thread: Option<std::thread::JoinHandle<()>>,
     /// Dedicated main-stream frame notification socket.
@@ -411,6 +466,27 @@ pub struct AnykaIpc {
     shm_reader: Mutex<Option<ShmRingReader>>,
     /// Tie-breaker when both channels are ready at once; toggles to prevent starvation.
     prefer_sub_on_tie: AtomicBool,
+    /// Daemon generation this client attached to, or [`EPOCH_DETACHED`].
+    ///
+    /// Set once by `attach`, cleared by `detach`. Every outstanding SDK handle is
+    /// implicitly tagged with this value: the handles are raw pointers minted inside
+    /// the daemon process, so they are only meaningful for the generation that minted
+    /// them.
+    attached_epoch: AtomicU32,
+    /// Reports peer loss to the supervisor. Never used to attach.
+    loss_tx: mpsc::Sender<PeerLoss>,
+    /// Receiving half, handed to the supervisor exactly once via `take_loss_rx`.
+    loss_rx: Mutex<Option<mpsc::Receiver<PeerLoss>>>,
+    /// Latest epoch observed in the ring header, refreshed by the supervisor's poller.
+    ///
+    /// Kept as an atomic rather than read from the mmap on demand so the request path
+    /// never contends with the frame reader for the `shm_reader` mutex.
+    /// 0 means the ring is not stamped — while detached, or because the daemon is
+    /// re-creating it. Never a usable generation: the gate refuses on 0 like any
+    /// other mismatch.
+    observed_epoch: AtomicU32,
+    /// Consecutive zero-epoch samples seen by [`Self::refresh_observed_epoch`].
+    zero_epoch_samples: AtomicU32,
 }
 
 impl Drop for AnykaIpc {
@@ -460,6 +536,7 @@ impl AnykaIpc {
             CMD_ISP_SET_WDR => "ISP_SET_WDR",
             CMD_GET_ERROR_NO => "GET_ERROR_NO",
             CMD_GET_ERROR_STR => "GET_ERROR_STR",
+            CMD_HELLO => "HELLO",
             _ => "UNKNOWN",
         }
     }
@@ -511,7 +588,8 @@ impl AnykaIpc {
         };
         tracing::info!("Shared memory ring buffer opened");
 
-        let (job_tx, owner_thread) = Self::spawn_owner(stream, connect)?;
+        let (loss_tx, loss_rx) = mpsc::channel::<PeerLoss>(PEER_LOSS_QUEUE_CAP);
+        let (job_tx, owner_thread) = Self::spawn_owner(Some(stream), loss_tx.clone())?;
 
         Ok(Self {
             job_tx: Some(job_tx),
@@ -520,6 +598,11 @@ impl AnykaIpc {
             frame_sub_stream: Mutex::new(Some(frame_sub_stream)),
             shm_reader: Mutex::new(Some(shm_reader)),
             prefer_sub_on_tie: AtomicBool::new(false),
+            loss_tx,
+            loss_rx: Mutex::new(Some(loss_rx)),
+            attached_epoch: AtomicU32::new(EPOCH_DETACHED),
+            observed_epoch: AtomicU32::new(EPOCH_DETACHED),
+            zero_epoch_samples: AtomicU32::new(0),
         })
     }
 
@@ -544,7 +627,8 @@ impl AnykaIpc {
             _ => None,
         };
 
-        let (job_tx, owner_thread) = Self::spawn_owner(stream, connect)?;
+        let (loss_tx, loss_rx) = mpsc::channel::<PeerLoss>(PEER_LOSS_QUEUE_CAP);
+        let (job_tx, owner_thread) = Self::spawn_owner(Some(stream), loss_tx.clone())?;
 
         Ok(Self {
             job_tx: Some(job_tx),
@@ -553,6 +637,11 @@ impl AnykaIpc {
             frame_sub_stream: Mutex::new(frame_sub_stream),
             shm_reader: Mutex::new(shm_reader),
             prefer_sub_on_tie: AtomicBool::new(false),
+            loss_tx,
+            loss_rx: Mutex::new(Some(loss_rx)),
+            attached_epoch: AtomicU32::new(EPOCH_DETACHED),
+            observed_epoch: AtomicU32::new(EPOCH_DETACHED),
+            zero_epoch_samples: AtomicU32::new(0),
         })
     }
 
@@ -566,10 +655,9 @@ impl AnykaIpc {
         shm_reader: Option<ShmRingReader>,
     ) -> Self {
         let _ = configure_ctrl_timeouts(&ctrl_stream);
-        // Reconnects target the (absent) production paths in tests, so they fail fast;
-        // these tests never trigger a reconnect anyway.
+        let (loss_tx, loss_rx) = mpsc::channel::<PeerLoss>(PEER_LOSS_QUEUE_CAP);
         let (job_tx, owner_thread) =
-            Self::spawn_owner(ctrl_stream, CtrlConnect::Production).expect("spawn owner thread");
+            Self::spawn_owner(Some(ctrl_stream), loss_tx.clone()).expect("spawn owner thread");
         Self {
             job_tx: Some(job_tx),
             owner_thread: Some(owner_thread),
@@ -577,6 +665,11 @@ impl AnykaIpc {
             frame_sub_stream: Mutex::new(frame_sub_stream),
             shm_reader: Mutex::new(shm_reader),
             prefer_sub_on_tie: AtomicBool::new(false),
+            loss_tx,
+            loss_rx: Mutex::new(Some(loss_rx)),
+            attached_epoch: AtomicU32::new(EPOCH_DETACHED),
+            observed_epoch: AtomicU32::new(EPOCH_DETACHED),
+            zero_epoch_samples: AtomicU32::new(0),
         }
     }
 
@@ -670,13 +763,13 @@ impl AnykaIpc {
     ///
     /// Returns the sender half of the bounded job queue and the thread's join handle.
     fn spawn_owner(
-        stream: UnixStream,
-        connect: CtrlConnect,
-    ) -> PlatformResult<(mpsc::Sender<IpcJob>, std::thread::JoinHandle<()>)> {
-        let (job_tx, job_rx) = mpsc::channel::<IpcJob>(IPC_JOB_QUEUE_CAP);
+        stream: Option<UnixStream>,
+        loss_tx: mpsc::Sender<PeerLoss>,
+    ) -> PlatformResult<(mpsc::Sender<OwnerMsg>, std::thread::JoinHandle<()>)> {
+        let (job_tx, job_rx) = mpsc::channel::<OwnerMsg>(IPC_JOB_QUEUE_CAP);
         let handle = std::thread::Builder::new()
             .name("vd-ctrl-owner".to_string())
-            .spawn(move || Self::run_owner(stream, connect, job_rx))
+            .spawn(move || Self::run_owner(stream, job_rx, loss_tx))
             .map_err(|e| {
                 PlatformError::InitializationFailed(format!(
                     "Failed to spawn IPC control owner thread: {}",
@@ -689,12 +782,38 @@ impl AnykaIpc {
     /// Owner-thread main loop.
     ///
     /// Consumes jobs from the bounded queue, performs a blocking send/receive cycle on
-    /// the exclusively-owned control stream, and on I/O error attempts a single
-    /// reconnect + retry before returning the result over the job's oneshot channel.
+    /// the exclusively-owned control stream, and returns the result over the job's
+    /// oneshot channel. I/O errors are reported, never repaired here: re-attaching is
+    /// the supervisor's job alone.
     /// Exits when the job channel is closed (all senders dropped).
-    fn run_owner(mut stream: UnixStream, connect: CtrlConnect, mut job_rx: mpsc::Receiver<IpcJob>) {
-        while let Some(job) = job_rx.blocking_recv() {
-            Self::process_job(&mut stream, &connect, job);
+    fn run_owner(
+        mut stream: Option<UnixStream>,
+        mut job_rx: mpsc::Receiver<OwnerMsg>,
+        loss_tx: mpsc::Sender<PeerLoss>,
+    ) {
+        while let Some(msg) = job_rx.blocking_recv() {
+            match msg {
+                OwnerMsg::Job(job) => match stream.as_mut() {
+                    Some(s) => Self::process_job(s, job, &loss_tx),
+                    None => {
+                        // Detached: no stream to run on. Reply rather than panic —
+                        // the gate normally catches this first, but a request can
+                        // race a detach.
+                        let _ = job.reply.send(Err(PlatformError::HardwareUnavailable(
+                            "IPC not attached: no control stream installed".to_string(),
+                        )));
+                    }
+                },
+                OwnerMsg::GiveStream { stream: s, ack } => {
+                    stream = Some(s);
+                    // Acknowledge only after installation, so the caller's next
+                    // request is guaranteed to find the stream in place.
+                    let _ = ack.send(());
+                }
+                OwnerMsg::DropStream => {
+                    stream = None;
+                }
+            }
         }
 
         if is_ipc_debug_enabled() {
@@ -704,8 +823,9 @@ impl AnykaIpc {
 
     /// Execute a single job on the owned stream and reply over its oneshot channel.
     ///
-    /// On I/O error, attempts one reconnect + retry before replying.
-    fn process_job(stream: &mut UnixStream, connect: &CtrlConnect, job: IpcJob) {
+    /// On I/O error the error is surfaced to the caller and logged. It is deliberately
+    /// not repaired here — see the warning arm below.
+    fn process_job(stream: &mut UnixStream, job: IpcJob, loss_tx: &mpsc::Sender<PeerLoss>) {
         let started = Instant::now();
         let cmd_name = Self::cmd_name(job.cmd_id);
         if is_ipc_debug_enabled() {
@@ -717,7 +837,7 @@ impl AnykaIpc {
             );
         }
 
-        let mut result = Self::exec_on_stream(stream, job.cmd_id, &job.req_data);
+        let result = Self::exec_on_stream(stream, job.cmd_id, &job.req_data);
 
         if let Err(ref e) = result {
             warn!(
@@ -725,10 +845,12 @@ impl AnykaIpc {
                 cmd_name,
                 elapsed_ms = started.elapsed().as_millis(),
                 error = %e,
-                "IPC request failed; attempting reconnect"
+                "IPC request failed; reporting peer loss to the supervisor"
             );
-            result =
-                Self::reconnect_and_retry(stream, connect, job.cmd_id, cmd_name, &job.req_data);
+            // Do NOT reconnect here. A reconnect that resumes with the same
+            // handles is exactly the hazard the epoch gate exists to prevent;
+            // re-attaching is the supervisor's job and only its job.
+            Self::send_peer_loss(loss_tx, format!("control socket error: {e}"));
         } else if is_ipc_debug_enabled() {
             let (status, resp_len) = result
                 .as_ref()
@@ -747,62 +869,6 @@ impl AnykaIpc {
         // The receiver may have gone away (async caller timed out and dropped the
         // oneshot); that is expected and not an error.
         let _ = job.reply.send(result);
-    }
-
-    /// Reconnect the control stream and retry the request once.
-    ///
-    /// On reconnect failure the reconnect error is returned and `stream` is left
-    /// untouched.
-    fn reconnect_and_retry(
-        stream: &mut UnixStream,
-        connect: &CtrlConnect,
-        cmd_id: i32,
-        cmd_name: &'static str,
-        req_data: &[u8],
-    ) -> PlatformResult<(i32, Vec<u8>)> {
-        let new_stream = match connect.reconnect() {
-            Ok(new_stream) => new_stream,
-            Err(reconnect_err) => {
-                warn!(
-                    cmd_id,
-                    cmd_name,
-                    error = %reconnect_err,
-                    "IPC reconnect failed"
-                );
-                return Err(reconnect_err);
-            }
-        };
-        *stream = new_stream;
-
-        if is_ipc_debug_enabled() {
-            debug!(cmd_id, cmd_name, "IPC request retry start");
-        }
-        let retry_started = Instant::now();
-        let result = Self::exec_on_stream(stream, cmd_id, req_data);
-        match &result {
-            Ok((status, resp_data)) => {
-                if is_ipc_debug_enabled() {
-                    debug!(
-                        cmd_id,
-                        cmd_name,
-                        status = *status,
-                        resp_len = resp_data.len(),
-                        elapsed_ms = retry_started.elapsed().as_millis(),
-                        "IPC request retry done"
-                    );
-                }
-            }
-            Err(err) => {
-                warn!(
-                    cmd_id,
-                    cmd_name,
-                    elapsed_ms = retry_started.elapsed().as_millis(),
-                    error = %err,
-                    "IPC request retry failed"
-                );
-            }
-        }
-        result
     }
 
     /// Map I/O errors to PlatformError, distinguishing timeouts from hardware failures.
@@ -872,13 +938,13 @@ impl AnykaIpc {
     }
 
     /// Build a control-socket job and its reply receiver for the owner thread.
-    fn make_job(cmd_id: i32, req_data: &[u8]) -> (IpcJob, IpcReplyRx) {
+    fn make_job(cmd_id: i32, req_data: &[u8]) -> (OwnerMsg, IpcReplyRx) {
         let (reply_tx, reply_rx) = oneshot::channel();
-        let job = IpcJob {
+        let job = OwnerMsg::Job(IpcJob {
             cmd_id,
             req_data: req_data.to_vec(),
             reply: reply_tx,
-        };
+        });
         (job, reply_rx)
     }
 
@@ -892,6 +958,7 @@ impl AnykaIpc {
         cmd_id: i32,
         req_data: &[u8],
     ) -> PlatformResult<(i32, Vec<u8>)> {
+        self.epoch_gate(cmd_id)?;
         let sender = self.job_tx.as_ref().ok_or_else(|| {
             PlatformError::HardwareUnavailable("IPC owner thread stopped".to_string())
         })?;
@@ -908,6 +975,370 @@ impl AnykaIpc {
         }
     }
 
+    /// Refuse a request whose SDK handles belong to a dead daemon generation.
+    ///
+    /// This is the single chokepoint every handle must pass through: all 39 HAL
+    /// trait methods are implemented on `AnykaIpc` and funnel into `request_async` /
+    /// `request_blocking`. Checking here makes every outstanding handle inert at
+    /// once, which is why handle ownership does not need to move.
+    fn epoch_gate(&self, cmd_id: i32) -> PlatformResult<()> {
+        if cmd_id == CMD_HELLO {
+            return Ok(());
+        }
+        let attached = self.attached_epoch.load(Ordering::Acquire);
+        if attached == EPOCH_DETACHED {
+            return Err(PlatformError::HardwareUnavailable(
+                "not attached to a vendor daemon".to_string(),
+            ));
+        }
+        let observed = self.observed_epoch.load(Ordering::Acquire);
+        // No exemption for observed == 0. Once attached, `attached` is a non-zero
+        // v3 epoch (hello() rejects 0) and finish_attach seeds `observed` before
+        // `attached`, so there is no legitimate "not yet polled" window. A zero
+        // read therefore means the daemon is re-creating the ring right now —
+        // vd_ring_create() memsets the header — which is precisely when stale
+        // handles must be refused, not waved through.
+        if observed != attached {
+            return Err(PlatformError::HardwareUnavailable(format!(
+                "vendor daemon restarted (attached epoch {attached}, observed {observed}); \
+                 handles from the previous generation are stale"
+            )));
+        }
+        Ok(())
+    }
+
+    /// Force both epochs, standing in for attach and the poller during tests.
+    #[cfg(test)]
+    pub(crate) fn set_epochs_for_test(&self, attached: u32, observed: u32) {
+        self.attached_epoch.store(attached, Ordering::Release);
+        self.observed_epoch.store(observed, Ordering::Release);
+    }
+
+    /// Construct an unattached client.
+    ///
+    /// No daemon needs to exist. Every resource is `None` and the epoch is
+    /// [`EPOCH_DETACHED`], so [`Self::epoch_gate`] refuses every request until the
+    /// supervisor attaches. This is what lets cold start and recovery share one path.
+    pub fn new_detached() -> PlatformResult<Self> {
+        let (loss_tx, loss_rx) = mpsc::channel::<PeerLoss>(PEER_LOSS_QUEUE_CAP);
+        let (job_tx, owner_thread) = Self::spawn_owner(None, loss_tx.clone())?;
+        Ok(Self {
+            job_tx: Some(job_tx),
+            owner_thread: Some(owner_thread),
+            frame_main_stream: Mutex::new(None),
+            frame_sub_stream: Mutex::new(None),
+            shm_reader: Mutex::new(None),
+            prefer_sub_on_tie: AtomicBool::new(false),
+            loss_tx,
+            loss_rx: Mutex::new(Some(loss_rx)),
+            attached_epoch: AtomicU32::new(EPOCH_DETACHED),
+            observed_epoch: AtomicU32::new(EPOCH_DETACHED),
+            zero_epoch_samples: AtomicU32::new(0),
+        })
+    }
+
+    /// Install a freshly connected control stream on the owner thread, and wait for
+    /// the owner to confirm it is live.
+    ///
+    /// Acknowledged rather than fire-and-forget on purpose: `finish_attach` issues
+    /// `CMD_HELLO` on this same queue immediately afterwards. If installation were
+    /// only queued, the handshake could reach the owner while its stream is still
+    /// `None` and attach would fail spuriously against a healthy daemon.
+    pub(crate) async fn give_ctrl_stream(&self, stream: UnixStream) -> PlatformResult<()> {
+        let sender = self.job_tx.as_ref().ok_or_else(|| {
+            PlatformError::HardwareUnavailable("IPC owner thread stopped".to_string())
+        })?;
+        let (ack_tx, ack_rx) = oneshot::channel();
+        sender
+            .send(OwnerMsg::GiveStream {
+                stream,
+                ack: ack_tx,
+            })
+            .await
+            .map_err(|_| {
+                PlatformError::HardwareUnavailable("IPC owner thread stopped".to_string())
+            })?;
+        ack_rx.await.map_err(|_| {
+            PlatformError::HardwareFailure("IPC owner dropped the stream ack".to_string())
+        })
+    }
+
+    /// Clear the owner thread's control stream.
+    ///
+    /// Fire-and-forget: unlike installation this has no ordering requirement, because
+    /// it can only ever make a subsequent request fail sooner.
+    pub(crate) fn drop_ctrl_stream(&self) {
+        if let Some(sender) = self.job_tx.as_ref() {
+            let _ = sender.try_send(OwnerMsg::DropStream);
+        }
+    }
+
+    /// Establish frame sockets, ring mapping and epoch against a live daemon.
+    ///
+    /// Connects in *reverse* creation order. The daemon creates the ring, then the
+    /// control socket, then frame-main, then frame-sub, so a successful frame-sub
+    /// connect proves the rest already exists. Attaching in creation order would
+    /// race a still-initialising daemon and waste the retry budget.
+    ///
+    /// On any failure the partial attachment is rolled back via [`Self::detach`],
+    /// so a failed attempt never leaves half a connection behind.
+    pub(crate) async fn attach(&self) -> PlatformResult<u32> {
+        let result = self.try_attach().await;
+        if result.is_err() {
+            self.detach();
+        }
+        result
+    }
+
+    async fn try_attach(&self) -> PlatformResult<u32> {
+        // Readiness barrier: frame-sub is the last thing the daemon creates.
+        let frame_sub = UnixStream::connect(FRAME_SUB_SOCKET_PATH).map_err(|e| {
+            PlatformError::HardwareUnavailable(format!(
+                "sub frame socket {FRAME_SUB_SOCKET_PATH} not ready: {e}"
+            ))
+        })?;
+        let frame_main = UnixStream::connect(FRAME_MAIN_SOCKET_PATH).map_err(|e| {
+            PlatformError::HardwareUnavailable(format!(
+                "main frame socket {FRAME_MAIN_SOCKET_PATH} not ready: {e}"
+            ))
+        })?;
+        *self
+            .frame_sub_stream
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = Some(frame_sub);
+        *self
+            .frame_main_stream
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = Some(frame_main);
+
+        // Control last of the three, per the documented order. `finish_attach`
+        // issues CMD_HELLO through the owner thread, which replies
+        // HardwareUnavailable while its stream is `None`, so the owner must be
+        // holding a live stream before the handshake runs.
+        let ctrl = connect_production_ctrl()?;
+        // Must complete before finish_attach: `hello()` goes through the same
+        // owner thread, and if installation were merely queued the handshake
+        // could reach the owner first and be refused as HardwareUnavailable.
+        self.give_ctrl_stream(ctrl).await?;
+
+        let reader = ShmRingReader::open()?.ok_or_else(|| {
+            PlatformError::HardwareUnavailable("shared memory ring not present".to_string())
+        })?;
+        self.finish_attach(reader).await
+    }
+
+    /// Handshake and epoch agreement, given an already-opened ring reader.
+    ///
+    /// Split out from `try_attach` so tests can supply an anonymous ring.
+    async fn finish_attach(&self, reader: ShmRingReader) -> PlatformResult<u32> {
+        let (epoch, version) = self.hello().await?;
+
+        let ring_epoch = reader.epoch();
+        if ring_epoch != epoch {
+            return Err(PlatformError::HardwareUnavailable(format!(
+                "daemon generation changed mid-attach (HELLO {epoch}, ring {ring_epoch}); retrying"
+            )));
+        }
+
+        *self.shm_reader.lock().unwrap_or_else(|e| e.into_inner()) = Some(reader);
+        // observed before attached: the gate reads attached first, so this ordering
+        // can never leave a window where attached is set but observed is stale.
+        self.observed_epoch.store(epoch, Ordering::Release);
+        self.attached_epoch.store(epoch, Ordering::Release);
+        self.zero_epoch_samples.store(0, Ordering::Release);
+
+        tracing::info!(
+            event = "ipc_attached",
+            epoch,
+            shm_version = version,
+            "IPC attached to vendor daemon"
+        );
+        Ok(epoch)
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn finish_attach_for_test(
+        &self,
+        reader: ShmRingReader,
+    ) -> PlatformResult<u32> {
+        let result = self.finish_attach(reader).await;
+        if result.is_err() {
+            self.detach();
+        }
+        result
+    }
+
+    /// Report peer loss to the supervisor. Never blocks, never attaches.
+    ///
+    /// `try_send` on a depth-1 channel: if a loss is already queued the supervisor
+    /// has not yet acted on it, and a second report would tell it nothing new.
+    /// Dropping is correct here — blocking the owner thread or the frame reader on a
+    /// busy supervisor would turn a recoverable outage into a stall.
+    fn send_peer_loss(tx: &mpsc::Sender<PeerLoss>, reason: impl Into<String>) {
+        let _ = tx.try_send(PeerLoss {
+            reason: reason.into(),
+        });
+    }
+
+    /// Report peer loss from a detection site that has `&self`.
+    pub(crate) fn report_peer_loss(&self, reason: impl Into<String>) {
+        Self::send_peer_loss(&self.loss_tx, reason);
+    }
+
+    /// Take the peer-loss receiver. Returns `Some` exactly once.
+    ///
+    /// Handing it out twice would split the loss stream between two consumers, so
+    /// only the supervisor ever calls this.
+    pub(crate) fn take_loss_rx(&self) -> Option<mpsc::Receiver<PeerLoss>> {
+        self.loss_rx
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .take()
+    }
+
+    /// Refresh `observed_epoch` from the ring and report whether it still matches.
+    ///
+    /// Uses `try_lock`: the frame reader holds `shm_reader` during a read, and the
+    /// poller must never block behind it. Contention means "no new information this
+    /// tick", which is correct — the next tick is 1 s away.
+    ///
+    /// A single live epoch of 0 is tolerated: it can appear in the brief window where
+    /// `vd_ring_create()` has memset the header but not yet stamped the new generation.
+    /// [`MAX_ZERO_EPOCH_SAMPLES`] consecutive zeros while attached report loss.
+    /// [`Self::epoch_gate`] already refuses every request while `observed != attached`.
+    pub(crate) fn refresh_observed_epoch(&self) -> bool {
+        let Ok(guard) = self.shm_reader.try_lock() else {
+            return true; // no information; do not report loss on lock contention
+        };
+        let Some(reader) = guard.as_ref() else {
+            self.zero_epoch_samples.store(0, Ordering::Release);
+            return false; // detached
+        };
+        let live = reader.epoch();
+        self.observed_epoch.store(live, Ordering::Release);
+        let attached = self.attached_epoch.load(Ordering::Acquire);
+        if live == EPOCH_DETACHED {
+            let samples = self.zero_epoch_samples.fetch_add(1, Ordering::AcqRel) + 1;
+            return samples < MAX_ZERO_EPOCH_SAMPLES;
+        }
+        self.zero_epoch_samples.store(0, Ordering::Release);
+        live == attached
+    }
+
+    /// Attach to a freshly created anonymous ring stamped with `epoch`.
+    ///
+    /// Test seam for the supervisor, which cannot reach `shm_ring`'s module-private
+    /// test helpers.
+    #[cfg(test)]
+    pub(crate) fn attach_anon_ring_for_test(&self, epoch: u32) {
+        let reader = shm_ring::tests::create_test_anon_reader();
+        // SAFETY: offset 48 is inside the validated 64-byte header.
+        unsafe {
+            reader
+                .base_ptr_for_test()
+                .add(48)
+                .cast::<u32>()
+                .write_volatile(epoch);
+        }
+        *self.shm_reader.lock().unwrap_or_else(|e| e.into_inner()) = Some(reader);
+        self.observed_epoch.store(epoch, Ordering::Release);
+        self.attached_epoch.store(epoch, Ordering::Release);
+    }
+
+    /// Stamp a new generation into the mapped ring, standing in for a daemon restart.
+    #[cfg(test)]
+    pub(crate) fn stamp_ring_epoch_for_test(&self, epoch: u32) {
+        let guard = self.shm_reader.lock().unwrap_or_else(|e| e.into_inner());
+        let reader = guard.as_ref().expect("no ring mapped");
+        // SAFETY: offset 48 is inside the validated 64-byte header.
+        unsafe {
+            reader
+                .base_ptr_for_test()
+                .add(48)
+                .cast::<u32>()
+                .write_volatile(epoch);
+        }
+    }
+
+    /// Tear down the current attachment.
+    ///
+    /// Clears the epoch first: from this instant every in-flight request is refused
+    /// by [`Self::epoch_gate`], so no stale handle can race the teardown. Then drops
+    /// the frame sockets and unmaps the ring.
+    ///
+    /// Idempotent — the supervisor calls it on every failed attach attempt as well as
+    /// on peer loss. Uses the poisoned-lock recovery path deliberately: a panicked
+    /// frame reader must not make the connection permanently un-teardownable.
+    pub(crate) fn detach(&self) {
+        self.attached_epoch.store(EPOCH_DETACHED, Ordering::Release);
+        self.observed_epoch.store(EPOCH_DETACHED, Ordering::Release);
+        self.zero_epoch_samples.store(0, Ordering::Release);
+
+        let mut main = self
+            .frame_main_stream
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        *main = None;
+        drop(main);
+
+        let mut sub = self
+            .frame_sub_stream
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        *sub = None;
+        drop(sub);
+
+        let mut shm = self.shm_reader.lock().unwrap_or_else(|e| e.into_inner());
+        *shm = None;
+        drop(shm);
+
+        self.drop_ctrl_stream();
+
+        tracing::info!(event = "ipc_detached", "IPC detached from vendor daemon");
+    }
+
+    #[cfg(test)]
+    pub(crate) fn attached_epoch_for_test(&self) -> u32 {
+        self.attached_epoch.load(Ordering::Acquire)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn observed_epoch_for_test(&self) -> u32 {
+        self.observed_epoch.load(Ordering::Acquire)
+    }
+
+    /// Perform the attach handshake and learn this daemon generation's epoch.
+    ///
+    /// Returns `(epoch, shm_version)`. Exempt from the epoch gate by construction:
+    /// `epoch_gate` short-circuits on `CMD_HELLO`.
+    pub(crate) async fn hello(&self) -> PlatformResult<(u32, u32)> {
+        let (status, resp) = self.request_async(CMD_HELLO, &[]).await?;
+        if status != AK_SUCCESS_I32 {
+            return Err(PlatformError::HardwareUnavailable(format!(
+                "vendor daemon rejected CMD_HELLO with status {status}"
+            )));
+        }
+        if resp.len() < 8 {
+            return Err(PlatformError::HardwareFailure(format!(
+                "CMD_HELLO response too short: {} bytes (want 8)",
+                resp.len()
+            )));
+        }
+        let epoch = u32::from_le_bytes([resp[0], resp[1], resp[2], resp[3]]);
+        let version = u32::from_le_bytes([resp[4], resp[5], resp[6], resp[7]]);
+        if version < 3 {
+            return Err(PlatformError::HardwareFailure(format!(
+                "vendor daemon shm protocol version {version} is unsupported; need >= 3"
+            )));
+        }
+        if epoch == EPOCH_DETACHED {
+            return Err(PlatformError::HardwareUnavailable(
+                "vendor daemon reported epoch 0; it is pre-v3 or misbehaving".to_string(),
+            ));
+        }
+        Ok((epoch, version))
+    }
+
     /// Submit a control-socket request and block the current OS thread for the response.
     ///
     /// This is the sync-by-need variant for true OS threads (the `venc-read` frame thread
@@ -919,6 +1350,7 @@ impl AnykaIpc {
         cmd_id: i32,
         req_data: &[u8],
     ) -> PlatformResult<(i32, Vec<u8>)> {
+        self.epoch_gate(cmd_id)?;
         let sender = self.job_tx.as_ref().ok_or_else(|| {
             PlatformError::HardwareUnavailable("IPC owner thread stopped".to_string())
         })?;
@@ -968,12 +1400,23 @@ impl AnykaIpc {
     }
 
     /// Send request expecting a handle response (8-byte i64).
+    fn stale_epoch_error(cmd_id: i32) -> PlatformError {
+        PlatformError::HardwareUnavailable(format!(
+            "vendor daemon rejected {} as a stale handle; the attachment is from a \
+             dead generation",
+            Self::cmd_name(cmd_id)
+        ))
+    }
+
     pub(crate) fn send_handle_request(
         &self,
         cmd_id: i32,
         req_data: &[u8],
     ) -> PlatformResult<*mut c_void> {
         let (status, resp_data) = self.send_request(cmd_id, req_data)?;
+        if status == VD_STATUS_STALE_EPOCH {
+            return Err(Self::stale_epoch_error(cmd_id));
+        }
         if status != AK_SUCCESS_I32 || resp_data.len() < 8 {
             return Err(PlatformError::HardwareFailure(format!(
                 "IPC request failed with status: {}",
@@ -990,6 +1433,9 @@ impl AnykaIpc {
     /// Send request expecting i32 response.
     pub(crate) fn send_i32_request(&self, cmd_id: i32, req_data: &[u8]) -> PlatformResult<i32> {
         let (status, resp_data) = self.send_request(cmd_id, req_data)?;
+        if status == VD_STATUS_STALE_EPOCH {
+            return Err(Self::stale_epoch_error(cmd_id));
+        }
         if resp_data.len() >= 4 {
             Ok(i32::from_le_bytes(resp_data[0..4].try_into().map_err(
                 |_| PlatformError::HardwareFailure("Invalid i32 response".to_string()),
@@ -1034,6 +1480,9 @@ impl AnykaIpc {
         req[0..8].copy_from_slice(&handle_val.to_le_bytes());
         req[8..12].copy_from_slice(&Self::stream_id_to_wire(stream_id).to_le_bytes());
         let (status, _) = self.send_request(CMD_VENC_START_PUSH, &req)?;
+        if status == VD_STATUS_STALE_EPOCH {
+            return Err(Self::stale_epoch_error(CMD_VENC_START_PUSH));
+        }
         if status != AK_SUCCESS_I32 {
             warn!(
                 event = "push_start_failed",
@@ -1065,6 +1514,9 @@ impl AnykaIpc {
         let req = stream_id.map(|id| Self::stream_id_to_wire(id).to_le_bytes().to_vec());
         let req_slice = req.as_deref().unwrap_or(&[]);
         let (status, _) = self.send_request(CMD_VENC_STOP_PUSH, req_slice)?;
+        if status == VD_STATUS_STALE_EPOCH {
+            return Err(Self::stale_epoch_error(CMD_VENC_STOP_PUSH));
+        }
         if status != AK_SUCCESS_I32 {
             warn!(
                 event = "push_stop_failed",
@@ -1245,10 +1697,19 @@ impl AnykaIpc {
             }
         } else if main_hup_err || sub_hup_err {
             // A hang-up after the daemon flagged shutdown is orderly, not a failure.
-            return Err(self.shutdown_or(PlatformError::HardwareFailure(format!(
+            let err = self.shutdown_or(PlatformError::HardwareFailure(format!(
                 "push notification socket disconnected (main_hup_err={}, sub_hup_err={})",
                 main_hup_err, sub_hup_err
-            ))));
+            )));
+            // Report only an unexpected hang-up. A shutdown the daemon announced is
+            // not peer loss, and waking the supervisor for it would have it attach
+            // into a daemon that is on its way out.
+            if !self.shm_is_shutdown() {
+                self.report_peer_loss(format!(
+                    "frame socket EOF (main_hup_err={main_hup_err}, sub_hup_err={sub_hup_err})"
+                ));
+            }
+            return Err(err);
         } else {
             return Err(self.shutdown_or(PlatformError::Timeout));
         };
@@ -1565,6 +2026,31 @@ pub(crate) mod test_helpers {
             let _ = stream.flush();
         }
 
+        /// Spawns a daemon that accepts one connection then immediately closes it,
+        /// simulating a daemon that died mid-request.
+        pub fn start_then_hangup() -> Self {
+            let counter = TEST_DAEMON_COUNTER.fetch_add(1, Ordering::SeqCst);
+            let socket_path = format!(
+                "/tmp/test-vendor-daemon-hangup-{}-{}.sock",
+                std::process::id(),
+                counter
+            );
+            let _ = std::fs::remove_file(&socket_path);
+            let listener = UnixListener::bind(&socket_path).unwrap();
+            let path_clone = socket_path.clone();
+            let handle = std::thread::spawn(move || {
+                if let Ok((stream, _)) = listener.accept() {
+                    drop(stream);
+                }
+                let _ = std::fs::remove_file(&path_clone);
+            });
+            std::thread::sleep(std::time::Duration::from_millis(50));
+            Self {
+                socket_path,
+                _listener_thread: handle,
+            }
+        }
+
         /// Spawns a fake daemon that delays before responding, simulating a hung vendor daemon.
         ///
         /// The `delay` parameter specifies how long to sleep before sending the response.
@@ -1657,6 +2143,9 @@ mod tests {
     async fn test_ipc_connect_and_simple_command_returns_success() {
         let daemon = FakeDaemon::start(|_cmd_id, _req| (AK_SUCCESS_I32, vec![]));
         let ipc = AnykaIpc::new_with_path(&daemon.socket_path).unwrap();
+        // Stand in for a completed attach: the epoch gate refuses every
+        // request while detached.
+        ipc.set_epochs_for_test(1, 1);
 
         // set_brightness is part of ImagingHalTrait; accessible from within the crate.
         let result =
@@ -1690,6 +2179,9 @@ mod tests {
             (AK_SUCCESS_I32, handle_value.to_le_bytes().to_vec())
         });
         let ipc = AnykaIpc::new_with_path(&daemon.socket_path).unwrap();
+        // Stand in for a completed attach: the epoch gate refuses every
+        // request while detached.
+        ipc.set_epochs_for_test(1, 1);
 
         let handle = {
             use crate::hal::common::sdk_types::VideoDevType;
@@ -1711,6 +2203,9 @@ mod tests {
     async fn test_ipc_multiple_requests_same_connection_all_succeed() {
         let daemon = FakeDaemon::start(|_cmd_id, _req| (AK_SUCCESS_I32, vec![]));
         let ipc = AnykaIpc::new_with_path(&daemon.socket_path).unwrap();
+        // Stand in for a completed attach: the epoch gate refuses every
+        // request while detached.
+        ipc.set_epochs_for_test(1, 1);
 
         for i in 0..3 {
             let result =
@@ -2235,6 +2730,9 @@ mod tests {
             (AK_SUCCESS_I32, vec![])
         });
         let ipc = AnykaIpc::new_with_path(&daemon.socket_path).unwrap();
+        // Stand in for a completed attach: the epoch gate refuses every
+        // request while detached.
+        ipc.set_epochs_for_test(1, 1);
         let stream_handle = 0x1234_5678usize as *mut std::ffi::c_void;
 
         ipc.start_push(stream_handle, StreamId::VideoSub).unwrap();
@@ -2264,6 +2762,9 @@ mod tests {
             (AK_SUCCESS_I32, vec![])
         });
         let ipc = AnykaIpc::new_with_path(&daemon.socket_path).unwrap();
+        // Stand in for a completed attach: the epoch gate refuses every
+        // request while detached.
+        ipc.set_epochs_for_test(1, 1);
 
         ipc.stop_push(Some(StreamId::VideoMain)).unwrap();
 
@@ -2287,6 +2788,9 @@ mod tests {
             (AK_SUCCESS_I32, vec![])
         });
         let ipc = AnykaIpc::new_with_path(&daemon.socket_path).unwrap();
+        // Stand in for a completed attach: the epoch gate refuses every
+        // request while detached.
+        ipc.set_epochs_for_test(1, 1);
 
         ipc.stop_push(None).unwrap();
 
@@ -2309,6 +2813,9 @@ mod tests {
         let daemon = FakeDaemon::start_with_delay(delay, |_cmd_id, _req| (AK_SUCCESS_I32, vec![]));
 
         let ipc = AnykaIpc::new_with_path(&daemon.socket_path).unwrap();
+        // Stand in for a completed attach: the epoch gate refuses every
+        // request while detached.
+        ipc.set_epochs_for_test(1, 1);
 
         // Time the request - it should timeout
         let start = Instant::now();
@@ -2382,6 +2889,9 @@ mod tests {
     async fn test_request_async_success() {
         let daemon = FakeDaemon::start(|_cmd_id, _req| (AK_SUCCESS_I32, vec![]));
         let ipc = AnykaIpc::new_with_path(&daemon.socket_path).unwrap();
+        // Stand in for a completed attach: the epoch gate refuses every
+        // request while detached.
+        ipc.set_epochs_for_test(1, 1);
 
         let (status, resp) = ipc
             .request_async(CMD_ISP_SET_BRIGHTNESS, &50i32.to_le_bytes())
@@ -2400,6 +2910,9 @@ mod tests {
             (AK_SUCCESS_I32, vec![])
         });
         let ipc = AnykaIpc::new_with_path(&daemon.socket_path).unwrap();
+        // Stand in for a completed attach: the epoch gate refuses every
+        // request while detached.
+        ipc.set_epochs_for_test(1, 1);
 
         let start = Instant::now();
         let result = ipc
@@ -2457,6 +2970,9 @@ mod tests {
     fn test_send_request_within_multi_thread_block_on_succeeds() {
         let daemon = FakeDaemon::start(|_cmd_id, _req| (AK_SUCCESS_I32, vec![]));
         let ipc = AnykaIpc::new_with_path(&daemon.socket_path).unwrap();
+        // Stand in for a completed attach: the epoch gate refuses every
+        // request while detached.
+        ipc.set_epochs_for_test(1, 1);
 
         let rt = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(2)
@@ -2475,10 +2991,522 @@ mod tests {
     fn test_request_blocking_from_os_thread_succeeds() {
         let daemon = FakeDaemon::start(|_cmd_id, _req| (AK_SUCCESS_I32, vec![]));
         let ipc = AnykaIpc::new_with_path(&daemon.socket_path).unwrap();
+        // Stand in for a completed attach: the epoch gate refuses every
+        // request while detached.
+        ipc.set_epochs_for_test(1, 1);
 
         let (status, _resp) = ipc
             .request_blocking(CMD_ISP_SET_BRIGHTNESS, &50i32.to_le_bytes())
             .expect("request_blocking should succeed");
         assert_eq!(status, AK_SUCCESS_I32);
+    }
+
+    // ========================================================================
+    // Attach handshake (CMD_HELLO)
+    // ========================================================================
+
+    #[tokio::test]
+    async fn test_hello_version_below_3_rejected() {
+        let daemon = test_helpers::FakeDaemon::start(|_cmd_id, _req| {
+            let mut resp = Vec::with_capacity(8);
+            resp.extend_from_slice(&9u32.to_le_bytes());
+            resp.extend_from_slice(&2u32.to_le_bytes());
+            (AK_SUCCESS_I32, resp)
+        });
+        let ipc = AnykaIpc::new_with_path(&daemon.socket_path).unwrap();
+
+        let err = ipc.hello().await.unwrap_err();
+
+        assert!(
+            matches!(err, PlatformError::HardwareFailure(_)),
+            "expected HardwareFailure for unsupported version, got {err:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_hello_parses_epoch_and_version() {
+        let daemon = test_helpers::FakeDaemon::start(|cmd_id, _req| {
+            if cmd_id == CMD_HELLO {
+                let mut resp = Vec::with_capacity(8);
+                resp.extend_from_slice(&0x1234_5678u32.to_le_bytes());
+                resp.extend_from_slice(&3u32.to_le_bytes());
+                (AK_SUCCESS_I32, resp)
+            } else {
+                (AK_FAILED_I32, vec![])
+            }
+        });
+        let ipc = AnykaIpc::new_with_path(&daemon.socket_path).unwrap();
+
+        let (epoch, version) = ipc.hello().await.unwrap();
+
+        assert_eq!(epoch, 0x1234_5678);
+        assert_eq!(version, 3);
+    }
+
+    #[test]
+    fn stale_handle_status_is_reported_as_unavailable_not_a_generic_failure() {
+        // The daemon returns VD_STATUS_STALE_EPOCH when a token names a dead
+        // generation, a reused slot, or the wrong object kind. That is an
+        // attachment problem, not a bad argument, and must read as such.
+        let daemon =
+            test_helpers::FakeDaemon::start(|_c, _r| (VD_STATUS_STALE_EPOCH, vec![0u8; 8]));
+        let ipc = AnykaIpc::new_with_path(&daemon.socket_path).unwrap();
+        ipc.set_epochs_for_test(1, 1);
+
+        let err = ipc.send_handle_request(CMD_VI_OPEN, &[0u8; 4]).unwrap_err();
+
+        match err {
+            PlatformError::HardwareUnavailable(msg) => {
+                assert!(msg.contains("stale"), "message should say stale: {msg}");
+            }
+            other => panic!("expected HardwareUnavailable, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_send_i32_stale_epoch_is_hardware_unavailable() {
+        let daemon = test_helpers::FakeDaemon::start(|_c, _r| (VD_STATUS_STALE_EPOCH, vec![]));
+        let ipc = AnykaIpc::new_with_path(&daemon.socket_path).unwrap();
+        ipc.set_epochs_for_test(1, 1);
+
+        let err = ipc.send_i32_request(CMD_VI_CLOSE, &[0u8; 8]).unwrap_err();
+        assert!(
+            matches!(err, PlatformError::HardwareUnavailable(_)),
+            "expected HardwareUnavailable, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn test_send_i32_returns_payload_when_present() {
+        let daemon = test_helpers::FakeDaemon::start(|_c, _r| {
+            (AK_SUCCESS_I32, 42i32.to_le_bytes().to_vec())
+        });
+        let ipc = AnykaIpc::new_with_path(&daemon.socket_path).unwrap();
+        ipc.set_epochs_for_test(1, 1);
+
+        assert_eq!(ipc.send_i32_request(CMD_VI_CLOSE, &[]).unwrap(), 42);
+    }
+
+    #[test]
+    fn test_start_push_stale_epoch_is_hardware_unavailable() {
+        let daemon = test_helpers::FakeDaemon::start(|_c, _r| (VD_STATUS_STALE_EPOCH, vec![]));
+        let ipc = AnykaIpc::new_with_path(&daemon.socket_path).unwrap();
+        ipc.set_epochs_for_test(1, 1);
+
+        let err = ipc
+            .start_push(std::ptr::null_mut(), StreamId::VideoMain)
+            .unwrap_err();
+        assert!(
+            matches!(err, PlatformError::HardwareUnavailable(_)),
+            "expected HardwareUnavailable, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn test_stop_push_stale_epoch_is_hardware_unavailable() {
+        let daemon = test_helpers::FakeDaemon::start(|_c, _r| (VD_STATUS_STALE_EPOCH, vec![]));
+        let ipc = AnykaIpc::new_with_path(&daemon.socket_path).unwrap();
+        ipc.set_epochs_for_test(1, 1);
+
+        let err = ipc.stop_push(Some(StreamId::VideoMain)).unwrap_err();
+        assert!(
+            matches!(err, PlatformError::HardwareUnavailable(_)),
+            "expected HardwareUnavailable, got {err:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_hello_rejects_non_success_status() {
+        let daemon = test_helpers::FakeDaemon::start(|_c, _r| (AK_FAILED_I32, vec![]));
+        let ipc = AnykaIpc::new_with_path(&daemon.socket_path).unwrap();
+
+        let err = ipc.hello().await.unwrap_err();
+        assert!(
+            matches!(err, PlatformError::HardwareUnavailable(_)),
+            "expected HardwareUnavailable, got {err:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_hello_rejects_short_response() {
+        let daemon = test_helpers::FakeDaemon::start(|_c, _r| (AK_SUCCESS_I32, vec![1, 2, 3]));
+        let ipc = AnykaIpc::new_with_path(&daemon.socket_path).unwrap();
+
+        let err = ipc.hello().await.unwrap_err();
+        assert!(
+            matches!(err, PlatformError::HardwareFailure(_)),
+            "expected HardwareFailure, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn test_refresh_observed_epoch_healthy_on_lock_contention() {
+        use super::shm_ring::tests::create_test_anon_reader;
+        use std::sync::mpsc;
+
+        let (ctrl_a, _ctrl_b) = UnixStream::pair().unwrap();
+        let ipc =
+            AnykaIpc::from_parts_for_test(ctrl_a, None, None, Some(create_test_anon_reader()));
+        ipc.set_epochs_for_test(11, 11);
+
+        let (held_tx, held_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel::<()>();
+
+        let holder = &ipc;
+        std::thread::scope(|scope| {
+            scope.spawn(move || {
+                let _guard = holder.shm_reader.lock().expect("hold the ring lock");
+                held_tx.send(()).expect("signal that the lock is held");
+                let _ = release_rx.recv_timeout(Duration::from_secs(2));
+            });
+
+            held_rx.recv().expect("ring lock should be held");
+            assert!(
+                ipc.refresh_observed_epoch(),
+                "lock contention must not report loss"
+            );
+            let _ = release_tx.send(());
+        });
+    }
+
+    #[tokio::test]
+    async fn ctrl_error_reports_peer_loss_without_attaching() {
+        let daemon = test_helpers::FakeDaemon::start_then_hangup();
+        let ipc = AnykaIpc::new_with_path(&daemon.socket_path).unwrap();
+        ipc.set_epochs_for_test(4, 4);
+        let mut loss_rx = ipc.take_loss_rx().expect("receiver available once");
+
+        let _ = ipc.request_async(CMD_VI_CLOSE, &[0u8; 8]).await;
+
+        let loss = loss_rx.recv().await.expect("ctrl error must report loss");
+        assert!(
+            loss.reason.contains("control"),
+            "reason should name the site, got {:?}",
+            loss.reason
+        );
+        // The detection site reports; it must never attach or detach on its own.
+        assert_eq!(ipc.attached_epoch_for_test(), 4, "must not self-heal");
+    }
+
+    #[tokio::test]
+    async fn repeated_losses_do_not_block_the_reporter() {
+        // The channel is bounded at 1: one queued loss is as informative as ten,
+        // and the owner thread must never block on a supervisor that is busy.
+        let daemon = test_helpers::FakeDaemon::start(|_c, _r| (AK_SUCCESS_I32, vec![]));
+        let ipc = AnykaIpc::new_with_path(&daemon.socket_path).unwrap();
+        let _rx = ipc.take_loss_rx();
+
+        for _ in 0..100 {
+            ipc.report_peer_loss("synthetic");
+        }
+        // Reaching here without hanging is the assertion.
+    }
+
+    #[test]
+    fn loss_receiver_is_handed_out_once() {
+        let ipc = AnykaIpc::new_detached().unwrap();
+        assert!(ipc.take_loss_rx().is_some());
+        assert!(
+            ipc.take_loss_rx().is_none(),
+            "a second owner would split the loss stream"
+        );
+    }
+
+    #[tokio::test]
+    async fn ctrl_io_error_does_not_silently_reconnect() {
+        // A daemon that accepts, then hangs up. The old code reconnected to the
+        // production socket and retried; that must no longer happen.
+        let daemon = test_helpers::FakeDaemon::start_then_hangup();
+        let ipc = AnykaIpc::new_with_path(&daemon.socket_path).unwrap();
+        ipc.set_epochs_for_test(1, 1);
+
+        let err = ipc
+            .request_async(CMD_VI_CLOSE, &[0u8; 8])
+            .await
+            .unwrap_err();
+
+        assert!(
+            matches!(
+                err,
+                PlatformError::HardwareFailure(_) | PlatformError::Timeout
+            ),
+            "expected the I/O error to surface, got {err:?}"
+        );
+    }
+
+    // ========================================================================
+    // Attach / detach lifecycle
+    // ========================================================================
+
+    #[tokio::test]
+    async fn attach_rejects_a_ring_epoch_that_disagrees_with_hello() {
+        // Daemon restarted between HELLO and the ring being mapped: the two epochs
+        // disagree, so the attachment is already stale and must not be pinned.
+        let daemon = test_helpers::FakeDaemon::start(|_c, _r| {
+            let mut resp = Vec::new();
+            resp.extend_from_slice(&11u32.to_le_bytes());
+            resp.extend_from_slice(&3u32.to_le_bytes());
+            (AK_SUCCESS_I32, resp)
+        });
+        let ipc = AnykaIpc::new_with_path(&daemon.socket_path).unwrap();
+
+        let reader = shm_ring::tests::create_test_anon_reader();
+        // SAFETY: offset 48 is inside the validated header.
+        unsafe {
+            reader
+                .base_ptr_for_test()
+                .add(48)
+                .cast::<u32>()
+                .write_volatile(12);
+        }
+
+        let err = ipc.finish_attach_for_test(reader).await.unwrap_err();
+
+        assert!(matches!(err, PlatformError::HardwareUnavailable(_)));
+        assert_eq!(ipc.attached_epoch_for_test(), EPOCH_DETACHED);
+    }
+
+    #[tokio::test]
+    async fn attach_pins_the_epoch_when_hello_and_ring_agree() {
+        let daemon = test_helpers::FakeDaemon::start(|_c, _r| {
+            let mut resp = Vec::new();
+            resp.extend_from_slice(&11u32.to_le_bytes());
+            resp.extend_from_slice(&3u32.to_le_bytes());
+            (AK_SUCCESS_I32, resp)
+        });
+        let ipc = AnykaIpc::new_with_path(&daemon.socket_path).unwrap();
+
+        let reader = shm_ring::tests::create_test_anon_reader();
+        unsafe {
+            reader
+                .base_ptr_for_test()
+                .add(48)
+                .cast::<u32>()
+                .write_volatile(11);
+        }
+
+        ipc.finish_attach_for_test(reader).await.unwrap();
+
+        assert_eq!(ipc.attached_epoch_for_test(), 11);
+        assert_eq!(ipc.observed_epoch_for_test(), 11);
+    }
+
+    #[test]
+    fn new_detached_succeeds_without_a_daemon() {
+        // R5: cold start and recovery share one path, so construction must not
+        // require a live daemon. Attaching is the supervisor's job.
+        let ipc = AnykaIpc::new_detached().expect("construction must not need a daemon");
+
+        assert_eq!(ipc.attached_epoch_for_test(), EPOCH_DETACHED);
+        assert!(ipc.frame_main_stream.lock().unwrap().is_none());
+        assert!(ipc.shm_reader.lock().unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn detached_owner_refuses_requests_until_a_stream_is_installed() {
+        // The owner thread holds no stream after new_detached(). A request that
+        // slips past the gate must still get a clean error, not a panic.
+        let ipc = AnykaIpc::new_detached().unwrap();
+        ipc.set_epochs_for_test(1, 1); // bypass the gate to reach the owner
+
+        let err = ipc
+            .request_async(CMD_VI_CLOSE, &[0u8; 8])
+            .await
+            .unwrap_err();
+
+        assert!(
+            matches!(err, PlatformError::HardwareUnavailable(_)),
+            "expected HardwareUnavailable, got {err:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn give_ctrl_stream_is_ordered_ahead_of_the_next_request() {
+        // give_ctrl_stream must be acknowledged, not fire-and-forget: hello() goes
+        // through the same owner thread immediately afterwards and would otherwise
+        // race the installation and be refused on a healthy daemon.
+        let daemon = test_helpers::FakeDaemon::start(|_c, _r| (AK_SUCCESS_I32, vec![]));
+        let ipc = AnykaIpc::new_detached().unwrap();
+        ipc.set_epochs_for_test(1, 1);
+
+        let stream = UnixStream::connect(&daemon.socket_path).unwrap();
+        ipc.give_ctrl_stream(stream).await.unwrap();
+
+        let (status, _) = ipc.request_async(CMD_VI_CLOSE, &[0u8; 8]).await.unwrap();
+        assert_eq!(status, AK_SUCCESS_I32);
+    }
+
+    #[test]
+    fn detach_clears_every_resource_and_the_epoch() {
+        let daemon = test_helpers::FakeDaemon::start(|_c, _r| (AK_SUCCESS_I32, vec![]));
+        let ipc = AnykaIpc::new_with_path(&daemon.socket_path).unwrap();
+        ipc.set_epochs_for_test(5, 5);
+
+        ipc.detach();
+
+        assert_eq!(ipc.attached_epoch_for_test(), EPOCH_DETACHED);
+        assert_eq!(ipc.observed_epoch_for_test(), EPOCH_DETACHED);
+        assert!(ipc.frame_main_stream.lock().unwrap().is_none());
+        assert!(ipc.frame_sub_stream.lock().unwrap().is_none());
+        assert!(ipc.shm_reader.lock().unwrap().is_none());
+    }
+
+    #[test]
+    fn detach_is_idempotent() {
+        let daemon = test_helpers::FakeDaemon::start(|_c, _r| (AK_SUCCESS_I32, vec![]));
+        let ipc = AnykaIpc::new_with_path(&daemon.socket_path).unwrap();
+        ipc.set_epochs_for_test(5, 5);
+
+        ipc.detach();
+        ipc.detach(); // must not panic or poison a mutex
+
+        assert_eq!(ipc.attached_epoch_for_test(), EPOCH_DETACHED);
+    }
+
+    // ========================================================================
+    // Epoch gate
+    // ========================================================================
+
+    #[tokio::test]
+    async fn test_epoch_gate_persistent_zero_ring_refuses_request() {
+        use std::sync::Arc as StdArc;
+        use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
+
+        let seen = StdArc::new(AtomicUsize::new(0));
+        let seen_in_daemon = StdArc::clone(&seen);
+        let daemon = test_helpers::FakeDaemon::start(move |_cmd_id, _req| {
+            seen_in_daemon.fetch_add(1, AtomicOrdering::SeqCst);
+            (AK_SUCCESS_I32, vec![])
+        });
+        let ipc = AnykaIpc::new_with_path(&daemon.socket_path).unwrap();
+
+        ipc.attach_anon_ring_for_test(11);
+        ipc.stamp_ring_epoch_for_test(0);
+        assert!(
+            ipc.refresh_observed_epoch(),
+            "first zero sample is tolerated"
+        );
+        assert_eq!(ipc.observed_epoch_for_test(), 0);
+
+        let err = ipc
+            .request_async(CMD_VI_CLOSE, &[0u8; 8])
+            .await
+            .unwrap_err();
+
+        assert!(matches!(err, PlatformError::HardwareUnavailable(_)));
+        assert_eq!(
+            seen.load(AtomicOrdering::SeqCst),
+            0,
+            "a zero-epoch attachment must never reach the daemon"
+        );
+    }
+
+    #[test]
+    fn test_refresh_observed_epoch_zero_samples_report_loss_after_bound() {
+        let ipc = AnykaIpc::new_detached().unwrap();
+        ipc.attach_anon_ring_for_test(11);
+        ipc.stamp_ring_epoch_for_test(0);
+
+        for _ in 0..(MAX_ZERO_EPOCH_SAMPLES - 1) {
+            assert!(
+                ipc.refresh_observed_epoch(),
+                "zeros below the bound must not report loss"
+            );
+        }
+        assert!(
+            !ipc.refresh_observed_epoch(),
+            "persistent zero epoch must report loss after MAX_ZERO_EPOCH_SAMPLES"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_epoch_gate_moved_refuses_without_daemon() {
+        use std::sync::Arc as StdArc;
+        use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
+
+        let seen = StdArc::new(AtomicUsize::new(0));
+        let seen_in_daemon = StdArc::clone(&seen);
+        let daemon = test_helpers::FakeDaemon::start(move |_cmd_id, _req| {
+            seen_in_daemon.fetch_add(1, AtomicOrdering::SeqCst);
+            (AK_SUCCESS_I32, vec![])
+        });
+        let ipc = AnykaIpc::new_with_path(&daemon.socket_path).unwrap();
+
+        // Attached to generation 7, but the ring now reports generation 8.
+        ipc.set_epochs_for_test(7, 8);
+
+        let err = ipc
+            .request_async(CMD_VI_CLOSE, &[0u8; 8])
+            .await
+            .unwrap_err();
+
+        assert!(matches!(err, PlatformError::HardwareUnavailable(_)));
+        assert_eq!(
+            seen.load(AtomicOrdering::SeqCst),
+            0,
+            "a stale handle must never reach the daemon"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_epoch_gate_detached_refuses_request() {
+        let daemon = test_helpers::FakeDaemon::start(|_c, _r| (AK_SUCCESS_I32, vec![]));
+        let ipc = AnykaIpc::new_with_path(&daemon.socket_path).unwrap();
+        ipc.set_epochs_for_test(EPOCH_DETACHED, 0);
+
+        let err = ipc
+            .request_async(CMD_VI_CLOSE, &[0u8; 8])
+            .await
+            .unwrap_err();
+
+        assert!(matches!(err, PlatformError::HardwareUnavailable(_)));
+    }
+
+    #[tokio::test]
+    async fn test_epoch_gate_agreeing_epochs_passes() {
+        let daemon = test_helpers::FakeDaemon::start(|_c, _r| (AK_SUCCESS_I32, vec![]));
+        let ipc = AnykaIpc::new_with_path(&daemon.socket_path).unwrap();
+        ipc.set_epochs_for_test(7, 7);
+
+        let (status, _) = ipc.request_async(CMD_VI_CLOSE, &[0u8; 8]).await.unwrap();
+
+        assert_eq!(status, AK_SUCCESS_I32);
+    }
+
+    #[test]
+    fn test_epoch_gate_hello_exempt() {
+        let daemon = test_helpers::FakeDaemon::start(|_c, _r| {
+            let mut resp = Vec::new();
+            resp.extend_from_slice(&9u32.to_le_bytes());
+            resp.extend_from_slice(&3u32.to_le_bytes());
+            (AK_SUCCESS_I32, resp)
+        });
+        let ipc = AnykaIpc::new_with_path(&daemon.socket_path).unwrap();
+        ipc.set_epochs_for_test(EPOCH_DETACHED, 0);
+
+        // Must succeed while detached, or attach could never happen.
+        let (status, _) = ipc.request_blocking(CMD_HELLO, &[]).unwrap();
+
+        assert_eq!(status, AK_SUCCESS_I32);
+    }
+
+    #[tokio::test]
+    async fn test_hello_zero_epoch_rejected() {
+        // A daemon that reports epoch 0 is either pre-v3 or broken. Either way we
+        // must not pin 0, because 0 is our own "detached" sentinel.
+        let daemon = test_helpers::FakeDaemon::start(|_cmd_id, _req| {
+            let mut resp = Vec::with_capacity(8);
+            resp.extend_from_slice(&0u32.to_le_bytes());
+            resp.extend_from_slice(&3u32.to_le_bytes());
+            (AK_SUCCESS_I32, resp)
+        });
+        let ipc = AnykaIpc::new_with_path(&daemon.socket_path).unwrap();
+
+        let err = ipc.hello().await.unwrap_err();
+
+        assert!(
+            matches!(err, PlatformError::HardwareUnavailable(_)),
+            "expected HardwareUnavailable, got {err:?}"
+        );
     }
 }

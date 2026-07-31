@@ -1,19 +1,12 @@
-#include <string.h>
 #include <stdint.h>
-#include <stdlib.h>
-#include <time.h>
-#include <pthread.h>
+#include <string.h>
 
 #include "handlers_venc.h"
 #include "ipc.h"
 #include "protocol.h"
 #include "log.h"
+#include "globals.h"
 #include "ak_venc.h"
-
-/* Timeout in seconds for ak_venc_cancel_stream() before giving up.
- * If the SDK's internal capture thread is stuck, this prevents the
- * event loop from blocking forever. */
-#define CANCEL_STREAM_TIMEOUT_SEC 3
 
 /**
  * handle_venc_set_cfg_path - IPC handler for CMD_VENC_SET_CFG_PATH (no-op).
@@ -85,7 +78,13 @@ int handle_venc_open(int fd, const uint8_t *req, uint32_t req_len)
         log_error("[venc] open failed (NULL handle)");
         return send_response(fd, STATUS_ERROR, NULL, 0);
     }
-    return send_handle_response(fd, handle);
+    int slot = vd_obj_register(VD_OBJ_KIND_VENC, handle);
+    if (slot < 0) {
+        log_error("[venc] object table full; refusing open");
+        ak_venc_close(handle);
+        return send_response(fd, STATUS_ERROR, NULL, 0);
+    }
+    return send_token_response(fd, vd_obj_token(slot));
 }
 
 /**
@@ -104,9 +103,15 @@ int handle_venc_close(int fd, const uint8_t *req, uint32_t req_len)
 {
     if (req_len < sizeof(uint64_t))
         return send_response(fd, STATUS_ERROR, NULL, 0);
-    void *handle = req_read_handle(req, 0);
+    void *handle;
+    if (vd_obj_resolve(req_read_u64(req, 0), VD_OBJ_KIND_VENC, &handle) != 0)
+        return send_response(fd, VD_STATUS_STALE_EPOCH, NULL, 0);
     log_debug("[venc] close handle=%p", handle);
     int ret = ak_venc_close(handle);
+    if (ret == 0)
+        vd_obj_unregister(VD_OBJ_KIND_VENC, handle);
+    else
+        log_warn("[venc] close failed ret=%d; keeping object tracked for reclaim", ret);
     return send_response(fd, ret, NULL, 0);
 }
 
@@ -127,7 +132,9 @@ int handle_venc_set_rc(int fd, const uint8_t *req, uint32_t req_len)
     /* u64 handle + i32 bps = 12 bytes */
     if (req_len < 8 + 4)
         return send_response(fd, STATUS_ERROR, NULL, 0);
-    void *handle = req_read_handle(req, 0);
+    void *handle;
+    if (vd_obj_resolve(req_read_u64(req, 0), VD_OBJ_KIND_VENC, &handle) != 0)
+        return send_response(fd, VD_STATUS_STALE_EPOCH, NULL, 0);
     int32_t bps  = req_read_i32(req, 8);
     int ret = ak_venc_set_rc(handle, (int)bps);
     return send_response(fd, ret, NULL, 0);
@@ -149,7 +156,9 @@ int handle_venc_set_iframe(int fd, const uint8_t *req, uint32_t req_len)
 {
     if (req_len < sizeof(uint64_t))
         return send_response(fd, STATUS_ERROR, NULL, 0);
-    void *handle = req_read_handle(req, 0);
+    void *handle;
+    if (vd_obj_resolve(req_read_u64(req, 0), VD_OBJ_KIND_VENC, &handle) != 0)
+        return send_response(fd, VD_STATUS_STALE_EPOCH, NULL, 0);
     int ret = ak_venc_set_iframe(handle);
     return send_response(fd, ret, NULL, 0);
 }
@@ -173,8 +182,11 @@ int handle_venc_request_stream(int fd, const uint8_t *req, uint32_t req_len)
     /* u64 vi_handle + u64 venc_handle = 16 bytes */
     if (req_len < 16)
         return send_response(fd, STATUS_ERROR, NULL, 0);
-    void *vi_handle   = req_read_handle(req, 0);
-    void *venc_handle = req_read_handle(req, 8);
+    void *vi_handle;
+    void *venc_handle;
+    if (vd_obj_resolve(req_read_u64(req, 0), VD_OBJ_KIND_VI, &vi_handle) != 0 ||
+        vd_obj_resolve(req_read_u64(req, 8), VD_OBJ_KIND_VENC, &venc_handle) != 0)
+        return send_response(fd, VD_STATUS_STALE_EPOCH, NULL, 0);
 
     log_debug("[venc] request_stream vi=%p venc=%p", vi_handle, venc_handle);
     void *stream_handle = ak_venc_request_stream(vi_handle, venc_handle);
@@ -182,42 +194,25 @@ int handle_venc_request_stream(int fd, const uint8_t *req, uint32_t req_len)
         log_error("[venc] request_stream failed (NULL)");
         return send_response(fd, STATUS_ERROR, NULL, 0);
     }
-    return send_handle_response(fd, stream_handle);
-}
-
-/* ---- Timeout-guarded cancel_stream helpers ----------------------------- */
-
-struct cancel_arg {
-    void *handle;
-    int   result;
-    volatile int done;   /* set to 1 by worker thread when cancel returns */
-};
-
-/**
- * cancel_thread_fn - Worker thread that calls ak_venc_cancel_stream().
- *
- * Runs detached.  Sets ca->done=1 on completion.  Does NOT free ca —
- * ownership rules:
- *   - If the caller sees done=1 within the timeout: caller frees.
- *   - If the caller times out: 16-byte leak (acceptable for rare error path).
- *
- * We cannot have the thread free ca because there is an unavoidable race
- * between the thread's free() and the caller's read of ca->result.
- */
-static void *cancel_thread_fn(void *arg)
-{
-    struct cancel_arg *ca = (struct cancel_arg *)arg;
-    ca->result = ak_venc_cancel_stream(ca->handle);
-    __atomic_store_n(&ca->done, 1, __ATOMIC_RELEASE);
-    return NULL;
+    int slot = vd_obj_register(VD_OBJ_KIND_STREAM, stream_handle);
+    if (slot < 0) {
+        log_error("[venc] object table full; refusing request_stream");
+        /* Transfer ownership before cancel so malloc/pthread/timeout failure
+         * still leaves a reclaim path via vd_obj_close_all. */
+        vd_stream_orphan_set(stream_handle);
+        if (vd_cancel_stream_bounded(stream_handle, NULL) == 0)
+            vd_stream_orphan_clear(stream_handle);
+        return send_response(fd, STATUS_ERROR, NULL, 0);
+    }
+    return send_token_response(fd, vd_obj_token(slot));
 }
 
 /**
  * handle_venc_cancel_stream - IPC handler for CMD_VENC_CANCEL_STREAM.
  *
  * Cancels an active stream binding created by CMD_VENC_REQUEST_STREAM.
- * Uses a detached helper thread with a timeout to prevent blocking the
- * event loop if the SDK's cancel call hangs.
+ * Uses the shared bounded cancel helper so a wedged SDK cancel cannot block
+ * the accept loop forever.
  *
  * Wire format: [u64 stream_handle] = 8 bytes.
  *
@@ -231,47 +226,34 @@ int handle_venc_cancel_stream(int fd, const uint8_t *req, uint32_t req_len)
     if (req_len < sizeof(uint64_t))
         return send_response(fd, STATUS_ERROR, NULL, 0);
 
-    void *stream_handle = req_read_handle(req, 0);
+    void *stream_handle;
+    if (vd_obj_resolve(req_read_u64(req, 0), VD_OBJ_KIND_STREAM, &stream_handle) != 0)
+        return send_response(fd, VD_STATUS_STALE_EPOCH, NULL, 0);
     log_debug("[venc] cancel_stream handle=%p", stream_handle);
 
-    struct cancel_arg *ca = (struct cancel_arg *)malloc(sizeof(*ca));
-    if (!ca) {
-        log_error("[venc] cancel_stream: malloc failed");
-        return send_response(fd, STATUS_ERROR, NULL, 0);
-    }
-    ca->handle = stream_handle;
-    ca->result = -1;
-    ca->done = 0;
+    /* Retire the token before the cancel runs, not after: the cancel can time
+     * out and leave the detached thread still working on the object, and a
+     * client retry must not be able to resolve it again in the meantime. */
+    vd_obj_unregister(VD_OBJ_KIND_STREAM, stream_handle);
 
-    pthread_t tid;
-    if (pthread_create(&tid, NULL, cancel_thread_fn, ca) != 0) {
-        log_error("[venc] failed to spawn cancel thread");
-        free(ca);
-        return send_response(fd, STATUS_ERROR, NULL, 0);
-    }
-    pthread_detach(tid);
-
-    struct timespec deadline;
-    clock_gettime(CLOCK_MONOTONIC, &deadline);
-    deadline.tv_sec += CANCEL_STREAM_TIMEOUT_SEC;
-
-    while (!__atomic_load_n(&ca->done, __ATOMIC_ACQUIRE)) {
-        struct timespec now;
-        clock_gettime(CLOCK_MONOTONIC, &now);
-        if (now.tv_sec > deadline.tv_sec ||
-            (now.tv_sec == deadline.tv_sec && now.tv_nsec >= deadline.tv_nsec)) {
-            log_error("[venc] cancel_stream timed out after %ds, handle=%p",
-                      CANCEL_STREAM_TIMEOUT_SEC, stream_handle);
-            /* Intentional leak of ca (16 bytes).  The detached thread may
-             * still be writing to it, so we cannot free here.  It will be
-             * reclaimed when the daemon exits or restarts. */
-            return send_response(fd, STATUS_ERROR, NULL, 0);
+    int sdk_ret = -1;
+    int rc = vd_cancel_stream_bounded(stream_handle, &sdk_ret);
+    if (rc == -1) {
+        /* Worker never started: restore registry reachability so a retry or
+         * close_all can still find the live SDK stream. */
+        if (vd_obj_register(VD_OBJ_KIND_STREAM, stream_handle) < 0) {
+            log_error("[venc] cancel_stream: pthread/malloc failed and re-register "
+                      "failed; parking %p as orphan", stream_handle);
+            vd_stream_orphan_set(stream_handle);
         }
-        struct timespec ts = { .tv_sec = 0, .tv_nsec = 10 * 1000000L }; /* 10ms */
-        nanosleep(&ts, NULL);
+        return send_response(fd, STATUS_ERROR, NULL, 0);
+    }
+    if (rc == -2) {
+        /* Detached worker still owns the cancel call; park for close_all in
+         * case the worker never finishes. */
+        vd_stream_orphan_set(stream_handle);
+        return send_response(fd, STATUS_ERROR, NULL, 0);
     }
 
-    int ret = ca->result;
-    free(ca);
-    return send_response(fd, ret, NULL, 0);
+    return send_response(fd, sdk_ret, NULL, 0);
 }

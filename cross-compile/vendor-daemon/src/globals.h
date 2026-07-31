@@ -96,4 +96,158 @@ extern FILE *g_log_fp;
 /* ---- Push stream state array ------------------------------------------- */
 extern struct push_stream_state g_push_streams[PUSH_STREAM_SLOT_COUNT];
 
+/* ---- Session object registry -------------------------------------------
+ *
+ * Every SDK object opened on behalf of the control client is recorded here so
+ * it can be closed when that client goes away.
+ *
+ * This exists because cleanup cannot live on the client side: four of six
+ * client-side handle Drops are deliberate no-ops in IPC mode, so onvif-rust
+ * never sends CLOSE, and no Drop runs at all under SIGKILL -- which is exactly
+ * the case that matters. Resetting here covers every way the client can vanish.
+ *
+ * The table is also the backing store for handle tokens: a token names a slot
+ * rather than carrying a raw SDK pointer across the process boundary.
+ */
+
+/* Object kinds. These are the `kind` nibble of a handle token, so they must fit
+ * in 4 bits and their values must never change. */
+#define VD_OBJ_KIND_NONE    0
+#define VD_OBJ_KIND_VI      1
+#define VD_OBJ_KIND_VENC    2
+#define VD_OBJ_KIND_AI      3
+#define VD_OBJ_KIND_AENC    4
+#define VD_OBJ_KIND_STREAM  5
+#define VD_OBJ_KIND_COUNT   6
+
+/* Live objects tracked per generation. The token reserves 6 bits for the slot
+ * index, but this box opens a handful: 2 VI + 2 VENC + 2 stream + audio. 64 is
+ * far more than can ever be live and keeps the table in one cache-friendly
+ * block. */
+#define VD_OBJ_SLOTS 64
+
+struct vd_obj_slot {
+    void    *ptr;       /* SDK object; meaningless unless live */
+    uint16_t slot_gen;  /* bumped on every allocation of this slot */
+    uint8_t  kind;      /* VD_OBJ_KIND_* */
+    uint8_t  live;      /* 1 while the object is open */
+};
+
+extern struct vd_obj_slot g_obj_slots[VD_OBJ_SLOTS];
+
+/**
+ * vd_obj_register - Record a freshly opened SDK object.
+ *
+ * @param kind  VD_OBJ_KIND_* describing the object.
+ * @param ptr   SDK pointer to remember.
+ * @return      Slot index on success, -1 if the table is full.
+ */
+int vd_obj_register(uint8_t kind, void *ptr);
+
+/**
+ * vd_obj_unregister - Forget an object the client closed explicitly.
+ *
+ * Idempotent: unknown pointers are ignored, so a double CLOSE is harmless.
+ *
+ * @param kind  VD_OBJ_KIND_* the caller expects.
+ * @param ptr   SDK pointer to release.
+ */
+void vd_obj_unregister(uint8_t kind, void *ptr);
+
+/**
+ * vd_obj_close_all - Close every live object and empty the table.
+ *
+ * Closes in reverse dependency order (streams, then encoders, then inputs), the
+ * same order a clean shutdown uses. Best-effort: a failing close is logged and
+ * the sweep continues, because the alternative is leaking the rest too.
+ */
+void vd_obj_close_all(void);
+
+/**
+ * vd_cancel_stream_bounded - Cancel an SDK stream, giving up after a timeout.
+ *
+ * Runs ak_venc_cancel_stream on a detached worker and waits a bounded time.
+ * On timeout the small worker arg is intentionally leaked (the worker may still
+ * write it).
+ *
+ * @param handle      Stream handle from ak_venc_request_stream.
+ * @param out_result  Optional; set to the SDK return code when cancel completes.
+ * @return            0 if cancel completed, -1 on malloc/pthread failure,
+ *                    -2 on timeout.
+ */
+int vd_cancel_stream_bounded(void *handle, int *out_result);
+
+/**
+ * vd_stream_orphan_set - Remember a live STREAM that has no object-table slot.
+ *
+ * Used when register fails or cancel spawn fails after unregister, so
+ * vd_obj_close_all can still reclaim the SDK capture_thread. Displacing a
+ * previous orphan best-effort cancels it first.
+ */
+void vd_stream_orphan_set(void *handle);
+
+/** Clear the orphan slot if it still names @p handle (e.g. after cancel OK). */
+void vd_stream_orphan_clear(void *handle);
+
+/* ---- Handle tokens ------------------------------------------------------
+ *
+ * Handles are opaque tokens naming a table slot, never raw SDK pointers. A
+ * pointer marshalled across the process boundary is meaningless to the client
+ * and, after a restart, the allocator can hand the same address back -- so a
+ * stale handle from the previous generation would look perfectly valid.
+ *
+ * Layout is 32 bits, NOT 64. The client is 32-bit ARM and carries handles as
+ * `void *` (`hal/common/video.rs`), so anything above bit 31 is truncated on
+ * the way back and cannot be validated:
+ *
+ *   bits 31..16  epoch      (16)  low half of the daemon generation
+ *   bits 15..10  slot_gen   (6)   bumped on every reuse of the slot
+ *   bits  9..4   slot_index (6)   VD_OBJ_SLOTS == 64
+ *   bits  3..0   kind       (4)   VD_OBJ_KIND_*
+ *
+ * `kind` is never 0 for a live object, so a valid token is never 0 and cannot
+ * be confused with a NULL handle.
+ *
+ * slot_gen is what stops an epoch-local ABA: close a VI on slot 3 and open
+ * another within the same generation, and a stale token for the old occupant
+ * still matches epoch and index. The per-slot generation makes it stop
+ * matching.
+ */
+#define VD_TOK_KIND_MASK    0x0Fu
+#define VD_TOK_INDEX_SHIFT  4
+#define VD_TOK_INDEX_MASK   0x3Fu
+#define VD_TOK_GEN_SHIFT    10
+#define VD_TOK_GEN_MASK     0x3Fu
+#define VD_TOK_EPOCH_SHIFT  16
+#define VD_TOK_EPOCH_MASK   0xFFFFu
+
+/* Compile-time layout guards: table sizes must fit the token bit fields. */
+typedef char vd_tok_slots_fit[
+    (VD_OBJ_SLOTS <= (VD_TOK_INDEX_MASK + 1)) ? 1 : -1];
+typedef char vd_tok_kinds_fit[
+    (VD_OBJ_KIND_COUNT <= (VD_TOK_KIND_MASK + 1)) ? 1 : -1];
+
+/**
+ * vd_obj_token - Build the client-facing token naming @p slot.
+ *
+ * @param slot  Slot index returned by vd_obj_register().
+ * @return      Token, or 0 if @p slot is out of range or free.
+ */
+uint64_t vd_obj_token(int slot);
+
+/**
+ * vd_obj_resolve - Validate a token and yield the SDK pointer it names.
+ *
+ * Validates in order: kind matches what the command expects (a VENC token
+ * handed to a VI command is rejected, not dereferenced), epoch matches this
+ * daemon generation, index is in bounds, the slot is live, and slot_gen
+ * matches the slot's current value.
+ *
+ * @param token        Token received from the client.
+ * @param expect_kind  VD_OBJ_KIND_* the calling command requires.
+ * @param out_ptr      Receives the SDK pointer on success.
+ * @return             0 on success, -1 if the token is stale or malformed.
+ */
+int vd_obj_resolve(uint64_t token, uint8_t expect_kind, void **out_ptr);
+
 #endif /* VENDOR_DAEMON_GLOBALS_H */

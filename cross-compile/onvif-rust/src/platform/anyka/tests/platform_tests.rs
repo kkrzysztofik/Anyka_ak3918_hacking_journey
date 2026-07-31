@@ -117,3 +117,57 @@ fn test_init_ptz_control_skips_bring_up_when_disabled() {
         "ptz.enabled = true must still bring PTZ up (stub HAL opens successfully on host)"
     );
 }
+
+#[tokio::test]
+async fn test_spawn_supervisor_loss_receiver_taken_returns_initialization_failed() {
+    let platform = Arc::new(AnykaPlatform::with_mocked_hal(
+        Arc::new(MockVideoHalTrait::new()),
+        Arc::new(MockAudioHalTrait::new()),
+        None,
+    ));
+    assert!(
+        platform.ipc().take_loss_rx().is_some(),
+        "first take must succeed"
+    );
+    let (_shutdown_tx, shutdown_rx) = tokio::sync::broadcast::channel(1);
+    let err = platform
+        .spawn_supervisor(shutdown_rx)
+        .expect_err("second ownership of loss rx must fail without panicking");
+    match err {
+        PlatformError::InitializationFailed(msg) => {
+            assert!(
+                msg.contains("peer-loss") || msg.contains("already taken"),
+                "got {msg}"
+            );
+        }
+        other => panic!("expected InitializationFailed, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn test_spawn_supervisor_success_shuts_down_on_signal() {
+    let platform = Arc::new(AnykaPlatform::with_mocked_hal(
+        Arc::new(MockVideoHalTrait::new()),
+        Arc::new(MockAudioHalTrait::new()),
+        None,
+    ));
+    let (shutdown_tx, shutdown_rx) = tokio::sync::broadcast::channel(1);
+    let (availability, handle) = platform
+        .spawn_supervisor(shutdown_rx)
+        .expect("first spawn must succeed");
+
+    assert_eq!(
+        *availability.borrow(),
+        crate::platform::common::Availability::Unavailable
+    );
+    assert!(
+        platform.ipc().take_loss_rx().is_none(),
+        "supervisor owns the loss receiver"
+    );
+
+    let _ = shutdown_tx.send(());
+    tokio::time::timeout(std::time::Duration::from_secs(2), handle)
+        .await
+        .expect("supervisor must exit after shutdown")
+        .expect("supervisor task must not panic");
+}

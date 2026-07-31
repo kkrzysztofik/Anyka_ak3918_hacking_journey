@@ -10,6 +10,10 @@
 #define MAX_REQUEST_SIZE        (1 * 1024 * 1024)  /* 1 MB – for frame data */
 #define STATUS_OK               0
 #define STATUS_ERROR            (-1)
+/* Handle belongs to a dead daemon generation, a reused slot, or the wrong
+ * object kind. Distinct from STATUS_ERROR so the client logs "stale handle"
+ * rather than a confusing argument error. */
+#define VD_STATUS_STALE_EPOCH   (-2)
 
 /* ---- Connection limits -------------------------------------------------- */
 /* Maximum simultaneous clients (control + streaming + snapshot + spare) */
@@ -68,6 +72,15 @@ enum cmd_id {
     /* Utility */
     CMD_GET_ERROR_NO              = 200,
     CMD_GET_ERROR_STR             = 201,
+
+    /* ---- Session ---------------------------------------------------------
+     * CMD_HELLO is the client's attach handshake.  It is the only command a
+     * client may send before the epoch gate is satisfied, so it must never
+     * require an existing session -- it is deliberately absent from
+     * is_lifecycle_cmd(), which is what exempts it from acquire_control().
+     * Response: [u32 epoch][u32 shm_version] = 8 bytes.
+     */
+    CMD_HELLO                     = 300,
     CMD_SHUTDOWN                  = 255
 };
 

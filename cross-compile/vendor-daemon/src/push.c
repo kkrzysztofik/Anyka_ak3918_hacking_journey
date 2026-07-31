@@ -505,7 +505,9 @@ int handle_venc_start_push(int fd, const uint8_t *req, uint32_t req_len)
         return send_response(fd, STATUS_OK, NULL, 0);
     }
 
-    state->stream_handle = req_read_handle(req, 0);
+    if (vd_obj_resolve(req_read_u64(req, 0), VD_OBJ_KIND_STREAM,
+                       &state->stream_handle) != 0)
+        return send_response(fd, VD_STATUS_STALE_EPOCH, NULL, 0);
     state->stream_id = stream_id;
     state->active = 1;
     /* Reset timestamp normalization state on push start */

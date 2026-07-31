@@ -15,6 +15,7 @@
 #include "handlers_audio.h"
 #include "handlers_isp.h"
 #include "push.h"
+#include "vd_ring_buffer.h"
 
 /* ---- Internal helpers (file-static) ------------------------------------- */
 
@@ -76,6 +77,35 @@ static int acquire_control(int fd)
     return 0;
 }
 
+/*
+ * handle_hello - IPC handler for CMD_HELLO.
+ *
+ * Reports this daemon generation's epoch and the shm protocol version so the
+ * client can pin them for the lifetime of its attachment.
+ *
+ * Deliberately requires no control-client status: a second client must be able
+ * to say hello in order to discover that it lost the control race.
+ *
+ * Response: [u32 epoch][u32 shm_version]
+ */
+static int handle_hello(int fd)
+{
+    uint8_t resp[8];
+    uint32_t epoch = 0;
+    uint32_t version = VD_SHM_VERSION;
+
+    if (g_ring_buffer != NULL) {
+        epoch = vd_ring_get_header(g_ring_buffer)->epoch;
+        /* Ring mapped but not yet stamped: refuse until the generation is live. */
+        if (epoch == 0)
+            return send_response(fd, STATUS_ERROR, NULL, 0);
+    }
+
+    memcpy(&resp[0], &epoch, 4);
+    memcpy(&resp[4], &version, 4);
+    return send_response(fd, STATUS_OK, resp, sizeof(resp));
+}
+
 /**
  * handle_get_error_no - IPC handler for CMD_GET_ERROR_NO.
  *
@@ -113,18 +143,26 @@ static int handle_get_error_str(int fd)
 /* ---- Public interface ---------------------------------------------------- */
 
 /**
- * release_control - Clear the control-client slot if fd holds it.
+ * release_control - Clear the control-client slot if fd holds it, and close
+ * everything that client left open.
  *
  * Called on client disconnect to free the control role so the next
  * lifecycle command from any client can claim it.
+ *
+ * The cleanup sweep has to live here rather than in the client's Drop impls:
+ * four of six client-side handle Drops are deliberate no-ops in IPC mode, so
+ * onvif-rust never sends CLOSE, and under SIGKILL no Drop runs at all. Without
+ * this the daemon leaks a VI and two VENC objects on every client restart, and
+ * the next client's VI_OPEN fails against hardware the SDK still thinks is busy.
  *
  * @param fd  File descriptor of the disconnecting client.
  */
 void release_control(int fd)
 {
     if (g_control_fd == fd) {
-        log_info("[daemon] control client fd=%d released", fd);
+        log_info("[daemon] control client fd=%d released; closing leaked objects", fd);
         g_control_fd = -1;
+        vd_obj_close_all();
     }
 }
 
@@ -303,6 +341,11 @@ int process_request(int fd)
         break;
     case CMD_GET_ERROR_STR:
         ret = handle_get_error_str(fd);
+        break;
+
+    /* --- Session --- */
+    case CMD_HELLO:
+        ret = handle_hello(fd);
         break;
 
     case CMD_SHUTDOWN:
