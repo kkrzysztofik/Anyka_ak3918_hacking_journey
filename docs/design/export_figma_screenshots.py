@@ -46,8 +46,8 @@ def export_images():
         print("3. Set it: export FIGMA_ACCESS_TOKEN=your_token_here")
         return False
 
-    # Ensure .ai/img directory exists
-    output_dir = Path('.ai/img')
+    # Ensure docs/design/img directory exists
+    output_dir = Path('docs/design/img')
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # Step 1: Get export URLs from Figma API

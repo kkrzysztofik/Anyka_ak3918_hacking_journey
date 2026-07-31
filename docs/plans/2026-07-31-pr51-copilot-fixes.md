@@ -8,7 +8,7 @@
 
 **Tech Stack:** C99 vendor-daemon (uClibc ARMv5), Rust onvif-rust (vendored toolchain), Python3 cam_exec debug script.
 
-**Spec:** `docs/superpowers/specs/2026-07-31-pr51-copilot-fixes-design.md`
+**Spec:** `docs/plans/2026-07-31-pr51-copilot-fixes-design.md`
 
 ## Global Constraints
 

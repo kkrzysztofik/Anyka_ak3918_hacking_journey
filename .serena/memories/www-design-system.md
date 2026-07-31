@@ -6,9 +6,9 @@
 
 | Requirement | Source |
 |-------------|--------|
-| Design Source | `.ai/design/ONVIF.fig` (Figma) |
-| Design Proposal | `.ai/design_proposal.md` |
-| Theme CSS | `.ai/design/styles/globals.css` |
+| Design Source | `docs/design/ONVIF.fig` (Figma) |
+| Design Proposal | `docs/design/design_proposal.md` |
+| Theme CSS | `docs/design/styles/globals.css` |
 | UI Components | `src/components/ui/` (shadcn/ui) |
 
 **DO NOT** invent new designs or deviate from typography, spacing, or colors unless explicitly authorized.
@@ -267,7 +267,7 @@ Optimized for monitoring applications with dark theme and red accent colors.
 ## Design Assets Location
 
 ```
-.ai/design/
+docs/design/
 ├── ONVIF.fig              # Figma source file
 ├── App.tsx                # Reference component
 ├── design_proposal.md     # Design specifications

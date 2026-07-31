@@ -4,7 +4,7 @@
 
 **Goal:** Publish `kkrzysztofik/anyka-cross-compile:rust-1.97.1` (+ `:latest`) from the local 1.97.1 toolchain and retarget main CI.
 
-**Spec:** `docs/superpowers/specs/2026-07-26-docker-ci-toolchain-design.md`
+**Spec:** `docs/plans/2026-07-26-docker-ci-toolchain-design.md`
 
 ## File map
 

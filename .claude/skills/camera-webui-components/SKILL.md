@@ -12,7 +12,7 @@ Build production-grade React 19 components for the Anyka camera WebUI using shad
 
 ## Design System Compliance
 
-All components MUST adhere to the design system specified in the Camera.UI theme. Reference `.ai/design/ONVIF.fig` (Figma) and `.ai/design/styles/globals.css` for authoritative styles.
+All components MUST adhere to the design system specified in the Camera.UI theme. Reference `docs/design/ONVIF.fig` (Figma) and `docs/design/styles/globals.css` for authoritative styles.
 
 ### Color Palette
 
