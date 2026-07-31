@@ -178,12 +178,14 @@ impl AttachTarget for PlatformAttachTarget {
     }
 }
 
-/// Drive attach → initialize → serve → unwind, retrying until the breaker opens.
+/// Drive attach → initialize → serve → unwind, retrying on failure.
 ///
-/// Returns only when the breaker has latched open, having published
-/// [`Availability::GivenUp`]. A backoff that hides a permanent failure would leave
-/// the camera dark with evidence only in the logs; publishing `GivenUp` is what makes
-/// it visible to the ONVIF services.
+/// Only `initialize()` failures against a live daemon count toward the breaker;
+/// `attach()` failures (absent or late daemon) retry indefinitely with backoff and
+/// never open it. So with a daemon that never appears this function never returns.
+/// When the breaker does latch open it publishes [`Availability::GivenUp`], because a
+/// backoff that hides a permanent failure would leave the camera dark with evidence
+/// only in the logs; publishing `GivenUp` is what makes it visible to the ONVIF services.
 pub async fn run_supervisor(target: Arc<dyn AttachTarget>, tx: &watch::Sender<Availability>) {
     let mut backoff = Backoff::new();
     let mut breaker = CircuitBreaker::new();
@@ -201,9 +203,14 @@ pub async fn run_supervisor(target: Arc<dyn AttachTarget>, tx: &watch::Sender<Av
 
         match target.attach().await {
             Err(e) => {
-                tracing::warn!(error = %e, "attach failed");
+                // Do NOT count this toward the breaker. attach() fails here because
+                // the daemon is absent, not yet listening, or restarting mid-attach
+                // — no SDK call happened, so there is no VI_OPEN/VENC_OPEN churn to
+                // bound. The breaker exists only for a live-but-wedged daemon, which
+                // is the initialize() arm below. Counting absent-daemon failures
+                // here is what made degraded boot give up on a late daemon (S3).
+                tracing::warn!(error = %e, "attach failed; retrying (daemon absent)");
                 let _ = tx.send(Availability::Unavailable);
-                breaker.record_failure();
                 tokio::time::sleep(backoff.next()).await;
             }
             Ok(epoch) => match target.initialize().await {
@@ -469,23 +476,48 @@ mod tests {
     }
 
     #[tokio::test(start_paused = true)]
-    async fn supervisor_gives_up_after_the_breaker_opens_on_attach_failures() {
-        let target = std::sync::Arc::new(MockTarget::new(false, 0));
+    async fn supervisor_gives_up_after_the_breaker_opens_on_initialize_failures() {
+        // The breaker opens only via the real path: a live daemon (attach
+        // succeeds) whose bring-up wedges (initialize always fails). Each failed
+        // initialize is a VI_OPEN/VENC_OPEN cycle against the SDK — that churn is
+        // what the breaker bounds.
+        let target = std::sync::Arc::new(MockTarget::new(true, 0));
         let (tx, _rx) = watch::channel(Availability::Unavailable);
 
         run_supervisor(target.clone(), &tx).await;
 
         assert_eq!(
-            target.attach_calls.load(AtomicOrdering::SeqCst),
+            target.init_calls.load(AtomicOrdering::SeqCst),
             ATTACH_FAILURE_LIMIT as usize,
             "must stop attempting once the breaker opens"
         );
-        assert_eq!(
-            target.rollback_calls.load(AtomicOrdering::SeqCst),
-            0,
-            "attach never succeeded, so there is nothing to unwind"
-        );
         assert_eq!(*tx.borrow(), Availability::GivenUp);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn an_absent_daemon_never_opens_the_breaker() {
+        // attach() failing because the daemon is not there yet must be retried
+        // forever: no SDK call happened, so there is no churn to bound. Only
+        // bring-up (initialize) failures against a live daemon count.
+        let target = std::sync::Arc::new(MockTarget::new(false, 0));
+        let (tx, _rx) = watch::channel(Availability::Unavailable);
+
+        // Run the supervisor with a hard timeout: with the fix it never returns
+        // (retries forever), so a timeout is the pass signal.
+        // 600s must exceed enough capped (15s) backoff cycles to drive attach_calls
+        // past ATTACH_FAILURE_LIMIT; do not trim it or the assertion below weakens.
+        let stop = tokio::time::timeout(
+            std::time::Duration::from_secs(600),
+            run_supervisor(target.clone(), &tx),
+        )
+        .await;
+
+        assert!(stop.is_err(), "supervisor gave up on an absent daemon");
+        assert!(
+            target.attach_calls.load(AtomicOrdering::SeqCst) > ATTACH_FAILURE_LIMIT as usize,
+            "must keep retrying past the failure limit, not give up"
+        );
+        assert_ne!(*tx.borrow(), Availability::GivenUp);
     }
 
     #[tokio::test(start_paused = true)]
