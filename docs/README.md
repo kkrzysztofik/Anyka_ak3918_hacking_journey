@@ -43,11 +43,11 @@ deliberately — renaming for symmetry is churn with no reader benefit.
 
 | Document | Subject |
 |---|---|
-| `reference/architectural-complexity-analysis.md` | onvif-rust RTSP/video pipeline complexity and simplification roadmap |
-| `reference/rtp-send-latency-investigation.md` | Why RTP sends stall on the AK3918 |
-| `reference/video-flow.md` | Video path from sensor to client |
-| `reference/hack-process.md` | Reverse-engineering narrative for the camera |
+| `docs/reference/architectural-complexity-analysis.md` | onvif-rust RTSP/video pipeline complexity and simplification roadmap |
+| `docs/reference/rtp-send-latency-investigation.md` | Why RTP sends stall on the AK3918 |
+| `docs/reference/video-flow.md` | Video path from sensor to client |
+| `docs/reference/hack-process.md` | Reverse-engineering narrative for the camera |
 
 ## Archive
 
-See `archive/README.md`.
+See `docs/archive/README.md`.
