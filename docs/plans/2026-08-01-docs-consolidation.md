@@ -216,12 +216,14 @@ call per file. Do NOT use sed — `AGENTS.md` forbids scripted edits to repo fil
 grep -rn "docs/superpowers" docs/plans/
 ```
 
-Expected: exactly two hits, both historical statements that the design doc says to leave
-alone:
+Expected hits, all of which must be left alone:
 - `2026-07-30-speckit-removal-design.md` — line mentioning `docs/superpowers/specs/**`
 - `2026-07-30-ubs-beads-distill-removal-design.md` — line naming `docs/superpowers/plans/**`
+- `2026-08-01-docs-consolidation-design.md` and `2026-08-01-docs-consolidation.md` — these
+  describe this migration and quote the old paths throughout, so they hit their own grep
 
-Any other hit means Step 3 missed a file.
+Any hit in one of the four files from Step 3 means Step 3 missed a file. That is the only
+failure condition.
 
 **Step 5: Commit**
 
@@ -263,8 +265,10 @@ ls docs/specs 2>&1
 find docs/archive/speckit -type f | wc -l
 ```
 
-Expected: `No such file or directory`, then `35`. A lower count means files were lost —
-stop, `git reset --mixed` is NOT allowed here without asking; report the discrepancy.
+Expected: `No such file or directory`, then `39`. Confirm against ground truth with
+`git ls-tree -r --name-only main docs/specs | wc -l`, which must return the same number.
+A lower count means files were lost — stop and report the discrepancy. Do not attempt
+recovery with a destructive command.
 
 **Step 3: Commit**
 
