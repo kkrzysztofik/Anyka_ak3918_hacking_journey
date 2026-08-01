@@ -61,6 +61,10 @@ pub trait Sys: Send + Sync {
     /// Elapsed since this process started. Used by the storm-guard reset.
     fn uptime(&self) -> Duration;
     fn insmod(&self, path: &str) -> Result<(), SysError>;
+    fn rmmod(&self, name: &str) -> Result<(), SysError>;
+    /// Mockable sleep. Bring-up has several vendor-transcribed settle delays;
+    /// a real `thread::sleep` would make the bring-up tests take 40 seconds.
+    fn sleep(&self, d: Duration);
     fn run_to_completion(&self, prog: &str, args: &[String]) -> Result<ExitStatus, SysError>;
 }
 
@@ -212,6 +216,17 @@ impl Sys for RealSys {
             ExitStatus::Code(0) => Ok(()),
             other => Err(SysError::Other(format!("insmod {path} failed: {other:?}"))),
         }
+    }
+
+    fn rmmod(&self, name: &str) -> Result<(), SysError> {
+        // Unlike insmod, a failure here is routine and not an error: the module
+        // is usually not loaded yet on a cold boot. The caller logs at debug.
+        self.run_to_completion("rmmod", &[name.to_string()])?;
+        Ok(())
+    }
+
+    fn sleep(&self, d: Duration) {
+        std::thread::sleep(d);
     }
 
     fn run_to_completion(&self, prog: &str, args: &[String]) -> Result<ExitStatus, SysError> {
