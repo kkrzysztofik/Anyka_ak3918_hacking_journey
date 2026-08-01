@@ -46,8 +46,12 @@ pub enum SysError {
 #[cfg_attr(test, mockall::automock)]
 pub trait Sys: Send + Sync {
     fn spawn(&self, spec: &SpawnSpec) -> Result<Pid, SysError>;
-    /// Blocks until any child exits. Called only from the reaper thread.
-    fn wait_any(&self) -> Result<(Pid, ExitStatus), SysError>;
+    /// Non-blocking reap of any exited child (`waitpid(-1, WNOHANG)`).
+    ///
+    /// Returns `Ok(None)` when no child has exited yet. The reaper thread polls
+    /// this so it can observe a shutdown flag — a blocking `waitpid` would make
+    /// the reaper unstoppable and steal exits from later host tests.
+    fn wait_any(&self) -> Result<Option<(Pid, ExitStatus)>, SysError>;
     fn kill(&self, pid: Pid, sig: i32) -> Result<(), SysError>;
     fn reboot(&self) -> Result<(), SysError>;
     /// Monotonic. Never `SystemTime` — P2.5 steps the wall clock by decades.
@@ -130,12 +134,19 @@ impl Sys for RealSys {
         Ok(pid)
     }
 
-    fn wait_any(&self) -> Result<(Pid, ExitStatus), SysError> {
+    fn wait_any(&self) -> Result<Option<(Pid, ExitStatus)>, SysError> {
         let mut status: libc::c_int = 0;
-        // SAFETY: waitpid(-1) reaps any child; status is a valid stack int.
-        let pid = unsafe { libc::waitpid(-1, &mut status, 0) };
+        // SAFETY: waitpid(-1, WNOHANG) reaps any exited child; status is stack.
+        let pid = unsafe { libc::waitpid(-1, &mut status, libc::WNOHANG) };
         if pid < 0 {
-            return Err(SysError::Io(std::io::Error::last_os_error()));
+            let err = std::io::Error::last_os_error();
+            if err.raw_os_error() == Some(libc::ECHILD) {
+                return Ok(None);
+            }
+            return Err(SysError::Io(err));
+        }
+        if pid == 0 {
+            return Ok(None);
         }
         // WIF* helpers are safe wrappers around the wait status integer.
         let exit = if libc::WIFSIGNALED(status) {
@@ -143,7 +154,7 @@ impl Sys for RealSys {
         } else {
             ExitStatus::Code(libc::WEXITSTATUS(status))
         };
-        Ok((pid, exit))
+        Ok(Some((pid, exit)))
     }
 
     fn kill(&self, pid: Pid, sig: i32) -> Result<(), SysError> {

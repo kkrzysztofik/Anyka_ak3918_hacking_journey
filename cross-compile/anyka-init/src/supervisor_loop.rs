@@ -7,8 +7,19 @@ use crate::supervise::{Action, Event, Policy, RestartHistory, SvcState, decide};
 use crate::sys::{ExitStatus, Pid, SpawnSpec, Sys};
 use std::collections::BTreeMap;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::time::{Duration, Instant};
+
+/// Background thread stack. 64 KiB on the camera (four threads on a 36 MB
+/// device); full default on host so integration tests can actually run.
+pub fn thread_stack() -> usize {
+    if cfg!(target_arch = "arm") {
+        64 * 1024
+    } else {
+        2 * 1024 * 1024
+    }
+}
 
 pub enum Msg {
     Exited(Pid, ExitStatus),
@@ -36,20 +47,22 @@ pub fn make_channel() -> (Sender<Msg>, Receiver<Msg>) {
     channel()
 }
 
-pub fn spawn_reaper(sys: Arc<dyn Sys>, tx: Sender<Msg>) {
+pub fn spawn_reaper(sys: Arc<dyn Sys>, tx: Sender<Msg>, stop: Arc<AtomicBool>) {
     let _ = std::thread::Builder::new()
         .name("reaper".into())
-        .stack_size(64 * 1024)
+        .stack_size(thread_stack())
         .spawn(move || {
-            loop {
+            while !stop.load(Ordering::Relaxed) {
                 match sys.wait_any() {
-                    Ok((pid, st)) => {
+                    Ok(Some((pid, st))) => {
                         if tx.send(Msg::Exited(pid, st)).is_err() {
                             return;
                         }
                     }
+                    Ok(None) => {
+                        std::thread::sleep(Duration::from_millis(50));
+                    }
                     Err(e) => {
-                        // ECHILD with no children yet is normal at startup.
                         tracing::debug!(error = %e, "wait_any");
                         std::thread::sleep(Duration::from_millis(200));
                     }
@@ -61,7 +74,7 @@ pub fn spawn_reaper(sys: Arc<dyn Sys>, tx: Sender<Msg>) {
 pub fn spawn_signal_thread(tx: Sender<Msg>) {
     let _ = std::thread::Builder::new()
         .name("signals".into())
-        .stack_size(64 * 1024)
+        .stack_size(thread_stack())
         .spawn(move || {
             use signal_hook::consts::{SIGINT, SIGTERM};
             let Ok(mut signals) = signal_hook::iterator::Signals::new([SIGTERM, SIGINT]) else {

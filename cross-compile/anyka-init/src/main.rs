@@ -56,7 +56,7 @@ fn main() {
         let interval = Duration::from_secs(cfg.monitor.interval_sec);
         let _ = std::thread::Builder::new()
             .name("monitor".into())
-            .stack_size(64 * 1024)
+            .stack_size(supervisor_loop::thread_stack())
             .spawn(move || {
                 monitor::run(s.as_ref(), interval, &state_path, reset_after);
             });
@@ -67,7 +67,7 @@ fn main() {
         let tcfg = cfg.time.clone();
         let _ = std::thread::Builder::new()
             .name("timesync".into())
-            .stack_size(64 * 1024)
+            .stack_size(supervisor_loop::thread_stack())
             .spawn(move || {
                 timesync::resync_loop(s.as_ref(), &tcfg);
             });
@@ -81,10 +81,12 @@ fn main() {
         park();
     }
 
-    supervisor_loop::spawn_reaper(Arc::clone(&sysimpl), tx);
+    let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    supervisor_loop::spawn_reaper(Arc::clone(&sysimpl), tx, Arc::clone(&stop));
 
     // P3 + P4
     supervisor_loop::run(sysimpl, &cfg, rx);
+    stop.store(true, std::sync::atomic::Ordering::Relaxed);
 }
 
 /// Block forever without spinning. The recovery telnet started by the P0
