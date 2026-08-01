@@ -204,23 +204,21 @@ pub fn run(sys: Arc<dyn Sys>, cfg: &Config, rx: Receiver<Msg>) {
                     do_reboot(sys.as_ref(), cfg, &why);
                 }
             }
-            Ok(Msg::RestartService(name)) => {
-                match services.iter().find(|s| s.name == name) {
-                    Some(svc) => match svc.state.pid() {
-                        Some(pid) => {
-                            tracing::warn!(service = %name, pid, "restart requested by monitor");
-                            let _ = sys.kill(pid, libc::SIGTERM);
-                        }
-                        None => tracing::info!(
-                            service = %name,
-                            "restart requested but the service is not running"
-                        ),
-                    },
-                    None => {
-                        tracing::warn!(service = %name, "restart requested for unknown service")
+            Ok(Msg::RestartService(name)) => match services.iter().find(|s| s.name == name) {
+                Some(svc) => match svc.state.pid() {
+                    Some(pid) => {
+                        tracing::warn!(service = %name, pid, "restart requested by monitor");
+                        let _ = sys.kill(pid, libc::SIGTERM);
                     }
+                    None => tracing::info!(
+                        service = %name,
+                        "restart requested but the service is not running"
+                    ),
+                },
+                None => {
+                    tracing::warn!(service = %name, "restart requested for unknown service")
                 }
-            }
+            },
             Ok(Msg::Shutdown) => {
                 tracing::info!("shutdown requested");
                 shutdown(sys.as_ref(), &by_pid);

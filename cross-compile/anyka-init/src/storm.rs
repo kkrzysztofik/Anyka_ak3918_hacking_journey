@@ -130,7 +130,12 @@ mod tests {
 
     #[test]
     fn test_storm_state_torn_file_reads_as_zero() {
-        for bad in [r#"{"fast_reboots":"#, "", "garbage", r#"{"fast_reboots":250}"#] {
+        for bad in [
+            r#"{"fast_reboots":"#,
+            "",
+            "garbage",
+            r#"{"fast_reboots":250}"#,
+        ] {
             assert_eq!(StormState::parse(bad), StormState::default());
         }
     }
