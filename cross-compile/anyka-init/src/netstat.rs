@@ -110,6 +110,99 @@ pub enum Action {
     LogOnly,
 }
 
+/// Host IPv4 for `iface`.
+///
+/// `/proc/net/fib_trie` carries the host addresses but no interface, and
+/// `/proc/net/route` carries the interface but only network addresses. Joining
+/// them gives an interface-attributed host address without an ioctl.
+///
+/// Both arguments are file *contents*, never paths, so this is provable on the
+/// host.
+pub fn parse_local_ipv4(fib_trie: &str, route: &str, iface: &str) -> Option<String> {
+    let subnets = iface_subnets(route, iface);
+    if subnets.is_empty() {
+        return None;
+    }
+    for addr in local_host_addresses(fib_trie) {
+        if addr.octets()[0] == 127 {
+            continue;
+        }
+        let raw = u32::from(addr);
+        for &(network, mask) in &subnets {
+            if raw & mask == network {
+                return Some(addr.to_string());
+            }
+        }
+    }
+    None
+}
+
+fn decode_le_hex(hex: &str) -> Option<u32> {
+    let raw = u32::from_str_radix(hex, 16).ok()?;
+    Some(raw.swap_bytes())
+}
+
+/// Non-default routes for `iface`: `(network, mask)` as host-order u32.
+fn iface_subnets(route: &str, iface: &str) -> Vec<(u32, u32)> {
+    let mut out = Vec::new();
+    for line in route.lines().skip(1) {
+        let mut f = line.split_whitespace();
+        let (Some(dev), Some(dest), Some(_gw)) = (f.next(), f.next(), f.next()) else {
+            continue;
+        };
+        // Flags RefCnt Use Metric Mask
+        let (_flags, _refcnt, _use, _metric, Some(mask_hex)) =
+            (f.next(), f.next(), f.next(), f.next(), f.next())
+        else {
+            continue;
+        };
+        if dev != iface || dest == "00000000" {
+            continue;
+        }
+        let (Some(network), Some(mask)) = (decode_le_hex(dest), decode_le_hex(mask_hex)) else {
+            continue;
+        };
+        out.push((network, mask));
+    }
+    out
+}
+
+/// `/32 host LOCAL` addresses from the `Local:` section of fib_trie.
+fn local_host_addresses(fib_trie: &str) -> Vec<Ipv4Addr> {
+    let mut out = Vec::new();
+    let mut in_local = false;
+    let mut pending: Option<Ipv4Addr> = None;
+    for line in fib_trie.lines() {
+        if line.contains("Local:") {
+            in_local = true;
+            pending = None;
+            continue;
+        }
+        if line.starts_with("Main:") {
+            in_local = false;
+            pending = None;
+            continue;
+        }
+        if !in_local {
+            continue;
+        }
+        let trimmed = line.trim();
+        if let Some(rest) = trimmed.strip_prefix("|-- ") {
+            pending = rest
+                .split_whitespace()
+                .next()
+                .and_then(|a| a.parse::<Ipv4Addr>().ok());
+            continue;
+        }
+        if let Some(addr) = pending.take()
+            && trimmed == "/32 host LOCAL"
+        {
+            out.push(addr);
+        }
+    }
+    out
+}
+
 /// The whole recovery ladder. `ticks` counts *consecutive* unhealthy samples
 /// and is reset by the caller after any action, so the next escalation starts
 /// one rung higher.
@@ -201,6 +294,83 @@ IP address       HW type     Flags       HW address            Mask     Device
     fn test_parse_arp_absent_entry_is_not_reachable() {
         assert!(!arp_entry_complete(ARP, "192.168.2.99"));
         assert!(!arp_entry_complete("", "192.168.2.1"));
+    }
+
+    const FIB_TRIE: &str = "\
+Main:
+  +-- 0.0.0.0/0 3 0 5
+     |-- 0.0.0.0
+        /0 universe UNICAST
+Local:
+  +-- 0.0.0.0/0 3 0 4
+     |-- 0.0.0.0
+        /0 universe UNICAST
+     +-- 127.0.0.0/8 2 0 2
+        +-- 127.0.0.0/31 1 0 0
+           |-- 127.0.0.0
+              /8 host LOCAL
+           |-- 127.0.0.1
+              /32 host LOCAL
+        |-- 127.255.255.255
+           /32 link BROADCAST
+     +-- 192.168.2.0/24 2 0 2
+        |-- 192.168.2.0
+           /32 link BROADCAST
+        |-- 192.168.2.198
+           /32 host LOCAL
+        |-- 192.168.2.255
+           /32 link BROADCAST
+";
+
+    #[test]
+    fn test_parse_local_ipv4_returns_the_host_address_for_the_interface() {
+        let addr = parse_local_ipv4(FIB_TRIE, ROUTE, "wlan0").expect("host address");
+        assert_eq!(addr, "192.168.2.198");
+    }
+
+    #[test]
+    fn test_parse_local_ipv4_never_returns_the_default_route_stub() {
+        // F1 regression guard: the old reader returned 0.0.0.0 from Local:.
+        let addr = parse_local_ipv4(FIB_TRIE, ROUTE, "wlan0");
+        assert_ne!(addr, Some("0.0.0.0".into()));
+    }
+
+    #[test]
+    fn test_parse_local_ipv4_skips_loopback_and_broadcast() {
+        let addr = parse_local_ipv4(FIB_TRIE, ROUTE, "wlan0").expect("host address");
+        for bad in ["127.0.0.0", "127.0.0.1", "192.168.2.0", "192.168.2.255"] {
+            assert_ne!(addr, bad);
+        }
+    }
+
+    #[test]
+    fn test_parse_local_ipv4_none_for_other_interface() {
+        assert!(parse_local_ipv4(FIB_TRIE, ROUTE, "eth0").is_none());
+    }
+
+    #[test]
+    fn test_parse_local_ipv4_none_when_no_address_assigned() {
+        let loopback_only = "\
+Local:
+  +-- 0.0.0.0/0 3 0 4
+     |-- 0.0.0.0
+        /0 universe UNICAST
+     +-- 127.0.0.0/8 2 0 2
+           |-- 127.0.0.1
+              /32 host LOCAL
+";
+        assert!(parse_local_ipv4(loopback_only, ROUTE, "wlan0").is_none());
+    }
+
+    #[test]
+    fn test_parse_local_ipv4_handles_empty_and_malformed() {
+        assert!(parse_local_ipv4("", "", "wlan0").is_none());
+        let truncated = "\
+Local:
+  +-- 192.168.2.0/24 2 0 2
+        |-- 192.168.2.198
+";
+        assert!(parse_local_ipv4(truncated, ROUTE, "wlan0").is_none());
     }
 
     const POLICY: Policy = Policy {

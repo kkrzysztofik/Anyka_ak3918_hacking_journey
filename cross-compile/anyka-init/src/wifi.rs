@@ -583,38 +583,15 @@ fn assign_address(sys: &dyn Sys, cfg: &WifiCfg) -> Result<String, String> {
 fn dhcp_once(sys: &dyn Sys, cfg: &WifiCfg) -> Result<String, String> {
     sys.run_to_completion(BUSYBOX, &udhcpc_oneshot_args(&cfg.interface))
         .map_err(|e| format!("udhcpc: {e}"))?;
-    read_address(&cfg.interface).ok_or_else(|| "no address after udhcpc".into())
+    let fib = std::fs::read_to_string("/proc/net/fib_trie").unwrap_or_default();
+    let route = std::fs::read_to_string("/proc/net/route").unwrap_or_default();
+    crate::netstat::parse_local_ipv4(&fib, &route, &cfg.interface)
+        .ok_or_else(|| format!("no address on {} after udhcpc", cfg.interface))
 }
 
 fn read_carrier(iface: &str) -> Option<bool> {
     let src = std::fs::read_to_string(format!("/sys/class/net/{iface}/carrier")).ok()?;
     Some(src.trim() == "1")
-}
-
-/// Host IPv4 for `iface`. `/proc/net/route` only has destinations; the local
-/// address lives in `/proc/net/fib_trie`'s Local section.
-fn read_address(iface: &str) -> Option<String> {
-    let _ = iface;
-    let src = std::fs::read_to_string("/proc/net/fib_trie").ok()?;
-    let mut in_local = false;
-    for line in src.lines() {
-        if line.contains("Local") {
-            in_local = true;
-            continue;
-        }
-        if !in_local {
-            continue;
-        }
-        let trimmed = line.trim();
-        let Some(rest) = trimmed.strip_prefix("|-- ") else {
-            continue;
-        };
-        let addr = rest.split_whitespace().next()?;
-        if addr.contains('.') && addr != "127.0.0.1" {
-            return Some(addr.to_string());
-        }
-    }
-    None
 }
 
 fn gateway_reachable(_sys: &dyn Sys, gw: &str) -> bool {
