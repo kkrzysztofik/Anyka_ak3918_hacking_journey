@@ -148,11 +148,11 @@ log = "{}"
     // Wait until the pidfile appears.
     let mut pid = None;
     for _ in 0..50 {
-        if let Ok(s) = std::fs::read_to_string(&pidfile) {
-            if let Ok(p) = s.trim().parse::<i32>() {
-                pid = Some(p);
-                break;
-            }
+        if let Ok(s) = std::fs::read_to_string(&pidfile)
+            && let Ok(p) = s.trim().parse::<i32>()
+        {
+            pid = Some(p);
+            break;
         }
         std::thread::sleep(Duration::from_millis(100));
     }

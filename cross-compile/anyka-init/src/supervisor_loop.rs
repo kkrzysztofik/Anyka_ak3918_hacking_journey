@@ -21,6 +21,14 @@ pub fn thread_stack() -> usize {
     }
 }
 
+/// How long the reaper sleeps when no child has exited.
+///
+/// ponytail: this is a poll, not a blocking `waitpid`, purely so the thread can
+/// observe the shutdown flag that host integration tests need. Upgrade path if
+/// exit latency ever matters: block in `waitpid(-1, 0)` and wake it on shutdown
+/// by sending the process SIGCHLD.
+const REAP_POLL_INTERVAL: Duration = Duration::from_secs(1);
+
 pub enum Msg {
     Exited(Pid, ExitStatus),
     Shutdown,
@@ -60,7 +68,12 @@ pub fn spawn_reaper(sys: Arc<dyn Sys>, tx: Sender<Msg>, stop: Arc<AtomicBool>) {
                         }
                     }
                     Ok(None) => {
-                        std::thread::sleep(Duration::from_millis(50));
+                        // 1s, not 50ms. This poll exists only so the reaper can
+                        // observe `stop`; nothing needs sub-second exit latency
+                        // because backoff_min is 1s anyway. At 50ms this thread
+                        // woke 20x/sec forever on a single core that also
+                        // encodes and streams video.
+                        std::thread::sleep(REAP_POLL_INTERVAL);
                     }
                     Err(e) => {
                         tracing::debug!(error = %e, "wait_any");
@@ -202,6 +215,43 @@ pub fn run(sys: Arc<dyn Sys>, cfg: &Config, rx: Receiver<Msg>) {
     }
 }
 
+/// Delay before a scheduled reboot: the configured interval plus up to
+/// `jitter_max_sec`.
+///
+/// Jitter exists so that a fleet of cameras flashed from the same SD image does
+/// not reboot in lockstep and brown out the recorder they all stream to. Pure
+/// so the clamp is testable without waiting hours.
+pub fn periodic_reboot_delay(interval_min: u64, jitter_max_sec: u64, entropy: u64) -> Duration {
+    let base = interval_min.saturating_mul(60);
+    let jitter = if jitter_max_sec == 0 {
+        0
+    } else {
+        // saturating: `jitter_max_sec + 1` overflows at u64::MAX, and the
+        // modulus must never be zero.
+        entropy % jitter_max_sec.saturating_add(1)
+    };
+    Duration::from_secs(base.saturating_add(jitter))
+}
+
+/// Replaces `periodic_reboot.sh`. Only started when `[reboot].enabled` is true.
+///
+/// Deliberately does NOT touch the storm-guard counter: this is a scheduled
+/// reboot, not a crash-loop one, and inflating that counter would push a
+/// healthy camera into safe mode after three uneventful cycles.
+pub fn periodic_reboot_loop(sys: &dyn Sys, interval_min: u64, jitter_max_sec: u64) {
+    let delay = periodic_reboot_delay(
+        interval_min,
+        jitter_max_sec,
+        crate::timesync::random_nonce(),
+    );
+    tracing::info!(delay_sec = delay.as_secs(), "periodic reboot scheduled");
+    std::thread::sleep(delay);
+    tracing::warn!("periodic reboot interval elapsed; rebooting");
+    if let Err(e) = sys.reboot() {
+        tracing::error!(error = %e, "periodic reboot failed");
+    }
+}
+
 fn do_reboot(sys: &dyn Sys, cfg: &Config, why: &str) {
     tracing::error!(reason = why, "crash-loop cap exceeded; rebooting");
     let mut st = StormState::load(&cfg.supervisor.storm_guard_state);
@@ -221,5 +271,45 @@ fn shutdown(sys: &dyn Sys, by_pid: &BTreeMap<Pid, usize>) {
     std::thread::sleep(Duration::from_secs(5));
     for &pid in by_pid.keys() {
         let _ = sys.kill(pid, libc::SIGKILL);
+    }
+}
+
+#[cfg(test)]
+mod reboot_delay_tests {
+    use super::*;
+
+    #[test]
+    fn test_periodic_reboot_delay_converts_minutes_to_seconds() {
+        assert_eq!(
+            periodic_reboot_delay(720, 0, 12345),
+            Duration::from_secs(43_200)
+        );
+    }
+
+    #[test]
+    fn test_periodic_reboot_zero_jitter_is_exact() {
+        assert_eq!(
+            periodic_reboot_delay(1, 0, u64::MAX),
+            Duration::from_secs(60)
+        );
+    }
+
+    #[test]
+    fn test_periodic_reboot_jitter_stays_within_bound() {
+        for entropy in [0u64, 1, 59, 60, 61, u64::MAX] {
+            let d = periodic_reboot_delay(10, 60, entropy).as_secs();
+            assert!(
+                (600..=660).contains(&d),
+                "entropy {entropy} produced {d}s, outside 600..=660"
+            );
+        }
+    }
+
+    #[test]
+    fn test_periodic_reboot_delay_saturates_instead_of_overflowing() {
+        // A user typing a nonsense interval must not wrap to a near-zero delay
+        // and reboot-loop the camera.
+        let d = periodic_reboot_delay(u64::MAX, u64::MAX, 7);
+        assert_eq!(d, Duration::from_secs(u64::MAX));
     }
 }

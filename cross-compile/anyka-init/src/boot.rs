@@ -71,10 +71,18 @@ pub fn apply_wifi(cfg: &WifiCfg) -> anyhow::Result<bool> {
 /// P2: system setup. Every step is best-effort — a camera with no sensor
 /// module is still worth reaching over SSH to diagnose.
 pub fn system_setup(sys: &dyn Sys, cfg: &Config) {
+    // Affects this process only. `gergehack.sh:358` exported TZ for children to
+    // inherit; `Sys::spawn` calls `env_clear()`, so a service sees TZ only if
+    // its own `[services.X].env` declares it. Kept because it costs nothing and
+    // makes any libc time formatting inside the supervisor correct — but do not
+    // read this line as "services run in the configured timezone". They do not.
+    // (onvif-rust does not care either way: it hardcodes `tz: "UTC"` at
+    // onvif/device/ops/system.rs:191.)
+    //
     // SAFETY: set_var is not thread-safe, and P2 runs before any thread is
     // started. Do not move this call after P3.
     unsafe { std::env::set_var("TZ", &cfg.time.timezone) };
-    tracing::info!(tz = %cfg.time.timezone, "timezone set");
+    tracing::info!(tz = %cfg.time.timezone, "timezone set (supervisor process only)");
 
     if let Some(module) = &cfg.system.sensor_module {
         match sys.insmod(module) {

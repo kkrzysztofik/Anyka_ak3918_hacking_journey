@@ -188,15 +188,38 @@ pub fn first_sync(sys: &dyn Sys, cfg: &TimeCfg) -> bool {
             );
             return false;
         }
-        std::thread::sleep(Duration::from_secs(2));
+        // Bounded by `deadline` above, so a retry_interval longer than the
+        // timeout simply means one attempt.
+        std::thread::sleep(Duration::from_secs(cfg.retry_interval_sec.min(2)));
     }
 }
 
 /// Background resync loop, started after P3.
 pub fn resync_loop(sys: &dyn Sys, cfg: &TimeCfg) {
+    // Until the clock has been set once, retry at `retry_interval_sec`, not
+    // `resync_interval_sec`. P2.5 gives up after 15s so that boot is not held
+    // hostage to the network, which means a slow wifi association routinely
+    // lands here with the clock still at the epoch. Sleeping the full 6h resync
+    // interval first would leave ws_security.rs:85 (clock_skew_seconds = 300)
+    // rejecting every authenticated ONVIF request for those 6 hours.
+    let mut synced = false;
     loop {
-        std::thread::sleep(Duration::from_secs(cfg.resync_interval_sec));
-        sync_once(sys, cfg);
+        std::thread::sleep(Duration::from_secs(resync_wait_secs(synced, cfg)));
+        if sync_once(sys, cfg).is_some() {
+            synced = true;
+        }
+    }
+}
+
+/// How long `resync_loop` waits before its next attempt.
+///
+/// Split out so the fast-retry-until-first-success rule is testable without
+/// running the loop.
+pub fn resync_wait_secs(synced: bool, cfg: &TimeCfg) -> u64 {
+    if synced {
+        cfg.resync_interval_sec
+    } else {
+        cfg.retry_interval_sec
     }
 }
 
@@ -346,5 +369,18 @@ mod delta_tests {
         let a = UNIX_EPOCH + Duration::from_secs(1090);
         let b = UNIX_EPOCH + Duration::from_secs(1000);
         assert_eq!(delta_secs(a, b), -90);
+    }
+
+    #[test]
+    fn test_resync_waits_retry_interval_until_first_success() {
+        let cfg = crate::config::TimeCfg::default();
+        assert_eq!(
+            resync_wait_secs(false, &cfg),
+            cfg.retry_interval_sec,
+            "before the first sync the clock is wrong and ONVIF auth is down; \
+             retry fast, not once per resync interval"
+        );
+        assert_eq!(resync_wait_secs(true, &cfg), cfg.resync_interval_sec);
+        assert!(cfg.retry_interval_sec < cfg.resync_interval_sec);
     }
 }

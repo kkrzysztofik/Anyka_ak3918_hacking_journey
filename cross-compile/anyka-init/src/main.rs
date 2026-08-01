@@ -22,8 +22,15 @@ fn main() {
     };
 
     if let Err(e) = logging::init(&cfg.log.dir, &cfg.log.level) {
-        logging::console(&format!("logging init failed: {e}"));
-        park();
+        // Do NOT park here. Parking on a bad config is right — a guessed
+        // wifi_ssid or sensor_module does real damage. Losing the log directory
+        // is not in that class: /mnt is vfat and can come back read-only after
+        // an unclean shutdown, and a camera that still streams but keeps no
+        // logs beats one that does nothing at all. Errors still reach the boot
+        // console via `console`.
+        logging::console(&format!(
+            "logging init failed ({e}); continuing without file logs"
+        ));
     }
     tracing::info!(version = env!("CARGO_PKG_VERSION"), "anyka-init starting");
 
@@ -70,6 +77,18 @@ fn main() {
             .stack_size(supervisor_loop::thread_stack())
             .spawn(move || {
                 timesync::resync_loop(s.as_ref(), &tcfg);
+            });
+    }
+
+    if cfg.reboot.enabled {
+        let s = Arc::clone(&sysimpl);
+        let interval_min = cfg.reboot.interval_min;
+        let jitter = cfg.reboot.jitter_max_sec;
+        let _ = std::thread::Builder::new()
+            .name("periodic-reboot".into())
+            .stack_size(supervisor_loop::thread_stack())
+            .spawn(move || {
+                supervisor_loop::periodic_reboot_loop(s.as_ref(), interval_min, jitter);
             });
     }
 
