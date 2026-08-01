@@ -455,7 +455,7 @@ ADDED
 # Addendum: Wifi Bring-Up in Rust
 
 Date: 2026-08-01
-Status: Phase A implemented in anyka-init; hardware smoke test (A10) pending
+Status: Phase A+B implemented in anyka-init; hardware validation (A10, B7) pending
 
 The main design left wifi alone: P2 rewrites `[wireless]` credentials in
 `/etc/jffs2/anyka_cfg.ini` and then shells out to `wifi_manage.sh start`. This

@@ -163,13 +163,25 @@ pub struct SupervisorCfg {
     pub storm_guard_reset_uptime_sec: u64,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct MonitorCfg {
     #[serde(default = "d_true")]
     pub enabled: bool,
     #[serde(default = "d_monitor_interval")]
     pub interval_sec: u64,
+    #[serde(default = "d_true")]
+    pub wifi: bool,
+    #[serde(default = "d_true")]
+    pub wifi_probe: bool,
+    #[serde(default = "d_wifi_dhcp_ticks")]
+    pub wifi_dhcp_after_ticks: u32,
+    #[serde(default = "d_wifi_supplicant_ticks")]
+    pub wifi_supplicant_after_ticks: u32,
+    #[serde(default = "d_wifi_reboot_ticks")]
+    pub wifi_reboot_after_ticks: u32,
+    #[serde(default = "d_wifi_reboot_cap")]
+    pub wifi_reboot_cap: u8,
 }
 
 #[derive(Debug, Deserialize)]
@@ -289,6 +301,19 @@ fn d_storm_reset_uptime() -> u64 {
 fn d_monitor_interval() -> u64 {
     60
 }
+
+fn d_wifi_dhcp_ticks() -> u32 {
+    3
+}
+fn d_wifi_supplicant_ticks() -> u32 {
+    5
+}
+fn d_wifi_reboot_ticks() -> u32 {
+    10
+}
+fn d_wifi_reboot_cap() -> u8 {
+    3
+}
 fn d_reboot_interval() -> u64 {
     720
 }
@@ -345,6 +370,12 @@ impl Default for MonitorCfg {
         Self {
             enabled: true,
             interval_sec: d_monitor_interval(),
+            wifi: true,
+            wifi_probe: true,
+            wifi_dhcp_after_ticks: d_wifi_dhcp_ticks(),
+            wifi_supplicant_after_ticks: d_wifi_supplicant_ticks(),
+            wifi_reboot_after_ticks: d_wifi_reboot_ticks(),
+            wifi_reboot_cap: d_wifi_reboot_cap(),
         }
     }
 }

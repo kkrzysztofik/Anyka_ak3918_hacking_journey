@@ -56,16 +56,23 @@ fn main() {
     // P2.5
     timesync::first_sync(sysimpl.as_ref(), &cfg.time);
 
+    // Channel is created before the monitor so link recovery can request
+    // service restarts without racing the supervisor's own spawn path (R15).
+    let (tx, rx) = supervisor_loop::make_channel();
+    supervisor_loop::spawn_signal_thread(tx.clone());
+
     if cfg.monitor.enabled {
         let s = Arc::clone(&sysimpl);
         let state_path = cfg.supervisor.storm_guard_state.clone();
         let reset_after = Duration::from_secs(cfg.supervisor.storm_guard_reset_uptime_sec);
-        let interval = Duration::from_secs(cfg.monitor.interval_sec);
+        let mon = cfg.monitor.clone();
+        let iface = cfg.wifi.interface.clone();
+        let tx_mon = tx.clone();
         let _ = std::thread::Builder::new()
             .name("monitor".into())
             .stack_size(supervisor_loop::thread_stack())
             .spawn(move || {
-                monitor::run(s.as_ref(), interval, &state_path, reset_after);
+                monitor::run(s.as_ref(), &mon, &iface, &state_path, reset_after, tx_mon);
             });
     }
 
@@ -91,9 +98,6 @@ fn main() {
                 supervisor_loop::periodic_reboot_loop(s.as_ref(), interval_min, jitter);
             });
     }
-
-    let (tx, rx) = supervisor_loop::make_channel();
-    supervisor_loop::spawn_signal_thread(tx.clone());
 
     if safe_mode {
         // Telnet, logging and the monitor stay up; no services start.

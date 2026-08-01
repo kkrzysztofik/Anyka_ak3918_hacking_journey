@@ -54,6 +54,12 @@ storm_guard_reset_uptime_sec = 600
 [monitor]
 enabled = true
 interval_sec = 60
+wifi = true
+wifi_probe = true
+wifi_dhcp_after_ticks = 3
+wifi_supplicant_after_ticks = 5
+wifi_reboot_after_ticks = 10
+wifi_reboot_cap = 3
 
 [reboot]
 enabled = false
