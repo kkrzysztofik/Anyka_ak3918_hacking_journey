@@ -455,7 +455,7 @@ ADDED
 # Addendum: Wifi Bring-Up in Rust
 
 Date: 2026-08-01
-Status: brainstorming — design agreed in principle, not yet planned or built
+Status: design complete, no open questions — not yet planned or built
 
 The main design left wifi alone: P2 rewrites `[wireless]` credentials in
 `/etc/jffs2/anyka_cfg.ini` and then shells out to `wifi_manage.sh start`. This
@@ -594,6 +594,19 @@ the network is wifi. A wifi defect is the only one that removes its own
 recovery path, leaving UART or physical retrieval. This inverts the usual
 risk calculus and is the reason for R7 below.
 
+**W7 — DNS is unwired, and this design depends on it.** `[time].servers` are
+hostnames (`0.ubuntu.pool.ntp.org`), so SNTP needs a resolver. The resolver reads
+`/etc/resolv.conf`; busybox `udhcpc` writes `/etc/jffs2/resolv.conf`
+(`/usr/share/udhcpc/default.script:5`). Nothing in the rootfs links the two —
+`/etc/resolv.conf` is absent from the capture, there is no `ln -s` in any init
+script, and `/etc` is not tmpfs per `/etc/fstab`. The stale
+`/etc/jffs2/resolv.conf` still names `192.168.1.1` plus eight public servers. If
+the link really is missing, hostname resolution never works and D7 fires — a
+wrong clock rejects 100% of authenticated ONVIF requests — on the DHCP path as
+much as the static one. Confirmed by one `ls -l /etc/resolv.conf` on hardware;
+either way the fix is the same, so it does not gate the design: `anyka-init`
+writes `/etc/resolv.conf` itself from `[wifi].dns` after address assignment.
+
 ## Options considered
 
 **A — Harden around the vendor scripts.** Keep the chain; add credential
@@ -639,17 +652,29 @@ P2  wifi::bring_up(sys, cfg) -> Outcome
       7  write wpa_supplicant.conf  properly quoted, one network block
       8  start wpa_supplicant   -> as a supervised service, not a bare fork
       9  wait association       -> carrier/operstate, bounded
-     10  udhcpc -i wlan0        -> or static from [ethernet] in the ini
-     11  verify address
-           ok      -> Outcome::Up { chip, ssid, addr, elapsed }
-           timeout -> Outcome::FellBack, after invoking wifi_manage.sh start
+     10  assign address
+           dhcp   -> busybox udhcpc -i <if> -n -q     (one-shot, blocks)
+           static -> ifconfig <if> <addr> netmask <mask>
+                     route add default gw <gw>
+     11  write /etc/resolv.conf from [wifi].dns            (W7)
+     12  verify address present AND gateway reachable
+           ok            -> Outcome::Up { chip, ssid, addr, elapsed }
+                            resets the persisted wifi_reboots counter
+           static failed -> retry once via DHCP           (R12)
+           still nothing -> Outcome::FellBack, after invoking wifi_manage.sh start
 ```
+
+Step 10 is a *one-shot* lease acquisition so that step 12 can verify before
+declaring `Outcome::Up`. Renewal is a separate concern and belongs to
+`[services.udhcpc]`, spawned in P3 once the interface exists — supervised for
+free, unlike the vendor's `udhcpc -i wlan0 &` (`wifi_station.sh:104`), whose
+death goes unnoticed until the lease lapses.
 
 Pure and therefore host-testable: `parse_hw_conf`, `Chip::from_hw_char`,
 `Chip::from_name`, `Chip::module`, `validate_credentials`,
-`wpa_supplicant_conf`, `ini_get`. That is the bulk of the risk surface — the
-dispatch table, the credential rules and the generated config can all be proven
-on x86_64 against transcribed vendor behaviour.
+`wpa_supplicant_conf`, `ini_get`, `parse_cidr`, `resolv_conf`. That is the bulk
+of the risk surface — the dispatch table, the credential rules and the generated
+config can all be proven on x86_64 against transcribed vendor behaviour.
 
 Thin and untestable off-device: the GPIO write, `insmod`, the tar extraction,
 the interface poll and DHCP.
@@ -661,16 +686,146 @@ the interface poll and DHCP.
 ssid = "..."
 password = "..."
 config_file = "/etc/jffs2/anyka_cfg.ini"   # still rewritten, for the vendor's benefit
-security = "wpa"        # wpa | wep | open
-chip = "auto"           # auto | ssv6355_ble | rtl8188ftv_new | ... (W2 escape hatch)
+security = "wpa"              # wpa | wep | open
+chip = "ssv6355_ble"          # measured: hw.conf[51]='h'. "auto" parses hw.conf (Q2)
+gpio_polarity = "high_low"    # measured: hw.conf[52]='2'
 interface = "wlan0"
-dhcp = true
+dhcp = false
+address = "192.168.2.198/24"  # CIDR; required when dhcp = false
+gateway = "192.168.2.1"       # required when dhcp = false
+dns = ["192.168.2.1", "8.8.8.8"]
 connect_timeout_sec = 45
 fallback_to_vendor = true
+
+[services.udhcpc]             # renewal only; the first lease comes from step 10
+enabled = true
+exec = "/bin/busybox"
+args = ["udhcpc", "-i", "wlan0", "-f"]
+log = "/mnt/logs/udhcpc.log"
+
+[services.wpa_supplicant]     # Q1: supervised, no -B
+enabled = true
+exec = "/usr/sbin/wpa_supplicant"
+args = ["-i", "wlan0", "-D", "nl80211", "-c", "/etc/jffs2/wpa_supplicant.conf"]
+log = "/mnt/logs/wpa_supplicant.log"
 ```
+
+The `-D` value here is a starting point, not a fixed choice: step 8 probes
+`nl80211` then `wext` per R8 and the service is registered with whichever
+worked, so a restart never reverts to a driver flag already known to fail.
 
 `config_file` stays because `anyka_ipc` and the WebUI still read
 `anyka_cfg.ini`, and because the fallback path needs it populated.
+
+`udhcpc` is spawned as a busybox multicall (`exec` the multicall binary,
+`argv[0]` the applet) rather than by bare name. `/sbin/udhcpc` does not exist —
+`/sbin` holds only `ldconfig`, `mmc_test` and `updater` — and the `orig/`
+capture lost its symlinks, so the applet symlink's path is unverifiable from
+here. The multicall form is correct whether or not the symlink exists, and
+`[services.dropbear]` already uses it. Busybox on this device is v1.24.1, which
+has `-n`, `-q` and `-f`.
+
+## Staying up: post-association monitoring
+
+`Outcome::Up` says the camera associated once. Nothing in the vendor chain, and
+nothing in the main design, notices when that stops being true.
+`sys_monitor.sh` — the 261-line script `monitor.rs` replaces — has no network
+checks at all (`grep -i 'wifi\|wlan\|ping\|route'` across its history returns
+nothing), so there is no incumbent behaviour to preserve here.
+
+Two of the five failure modes are already covered and cost nothing:
+
+| Failure | Covered by | Gap |
+|---|---|---|
+| `wpa_supplicant` process dies | Q1: `[services.*]` + backoff | none |
+| AP deauth, roam, brief outage | `wpa_supplicant` reassociates itself | none |
+| Lease lapses, `udhcpc` dies | — | address silently disappears |
+| Driver/firmware wedge, supplicant alive but radio dead | — | looks healthy, is not |
+| L3 blackhole: associated, addressed, no path | — | only an active probe sees it |
+
+The monitor thread already ticks at 60 s and already reads `/proc`, so the check
+lives there rather than in a new thread.
+
+```
+monitor tick:
+  s1 carrier   /sys/class/net/<if>/operstate == "up" && carrier == 1
+  s2 route     /proc/net/route -> default route via <if>?  -> gw
+  s3 reach     udp poke gw:9, then /proc/net/arp entry complete (flags 0x2)
+               (evaluated only when s1 && s2)
+
+  decide(s1, s2, s3, ticks_unhealthy, last_action) -> Action
+      !s2 && ticks >= wifi_dhcp_after_ticks        -> RunDhcp
+      !s1 && ticks >= wifi_supplicant_after_ticks  -> RestartService("wpa_supplicant")
+      !s3 && ticks >= wifi_supplicant_after_ticks  -> RestartService("wpa_supplicant")
+             ticks >= wifi_reboot_after_ticks
+                  && wifi_reboots < wifi_reboot_cap -> Reboot
+                  otherwise                         -> LogOnly
+
+  after any action: ticks = 0, last_action recorded; the next escalation
+  starts one rung higher
+```
+
+The gateway comes from `/proc/net/route`, not from `[wifi].gateway`. That works
+identically for DHCP and static, and the monitor can never probe an address the
+kernel is not actually routing through.
+
+The probe is L2 on purpose. `TcpStream::connect_timeout(gw:80)` would read a
+`ConnectionRefused` as alive, but a router that silently drops on a closed port
+would read as dead. Forcing ARP resolution and checking for a complete entry is
+immune to firewall policy. TCP stays the fallback if some AP turns out not to
+respond to ARP from this interface.
+
+`decide` is pure, mirroring the existing pure-decide seam in `supervise.rs`.
+`parse_operstate`, `parse_default_route` and `parse_arp` are pure. Only three
+file reads and one UDP send are not.
+
+Recovery actions travel as messages, not as direct syscalls:
+
+```rust
+// supervisor_loop.rs:32
+pub enum Msg {
+    Exited(Pid, ExitStatus),
+    Shutdown,
+    RestartService(String),   // NEW: monitor -> supervisor
+}
+```
+
+A monitor thread calling `kill()` itself would race the supervisor's backoff
+timer for the same child. Routing through the channel that already exists keeps
+the supervisor the sole owner of process state and adds no new supervision
+logic — `RestartService` reuses the existing kill-and-restart path.
+
+```toml
+[monitor]
+enabled = true
+interval_sec = 60
+wifi = true
+wifi_probe = true                # active gateway probe
+wifi_dhcp_after_ticks = 3        # 3 min
+wifi_supplicant_after_ticks = 5  # 5 min
+wifi_reboot_after_ticks = 10     # 10 min
+wifi_reboot_cap = 3
+```
+
+### The reboot counter must not reuse the storm guard
+
+`monitor.rs:38` zeroes `fast_reboots` once uptime passes
+`storm_guard_reset_uptime_sec`. That is correct for its own purpose — the storm
+guard bounds *boot-time* crash loops and deliberately forgets once a boot looks
+good — but it is wrong for a runtime trigger, where the longer the camera
+survives the weaker the protection becomes. A wifi-triggered reboot always fires
+after the reset, so the guard would be back at zero every time.
+
+A once-per-boot latch does not fix it either: reboot, come up, find wifi still
+down, wait ten minutes, reboot again — the same unbounded loop with a longer
+period.
+
+The counter has to be reset by evidence the problem is gone, not by time
+passing. `StormState` gains `wifi_reboots: u32`, persisted in the same
+`storm_guard_state` file, incremented on a wifi-triggered reboot and **zeroed
+only when `bring_up` returns `Outcome::Up`**. Past `wifi_reboot_cap` the monitor
+stops escalating and only logs, so a camera whose AP is off overnight keeps
+serving video locally instead of cycling.
 
 ## Risks
 
@@ -681,6 +836,12 @@ fallback_to_vendor = true
 | R9 | The tar extraction and `otg-hs.ko` load have timing the vendor papers over with `sleep 3` / `sleep 2` | Keep the sleeps initially; replace with a poll on the expected artifact only once hardware confirms the timing |
 | R10 | Rewriting `wpa_supplicant.conf` breaks the RTL8188 line-numbered `sed` path if the vendor fallback later runs | Fallback regenerates the vendor-shaped conf before delegating |
 | R11 | Credential validation could lock a user out of a network whose PSK contains a rejected character | Reject only `"`, newline and NUL — characters that cannot survive the config-file grammar. Shell metacharacters (`$`, backtick, `\`, `;`, `&`) must be **accepted**, since they only broke the vendor's `sh -c` and are legal in a PSK |
+| R12 | A typo'd static address is W6-class: association succeeds, the camera is unreachable, and no rung of R7 fires because there is a carrier | CIDR and gateway rejected at TOML parse, not at apply time. Step 12 verifies gateway reachability rather than address presence; a failed static assign retries once via DHCP before the vendor fallback |
+| R13 | Writing `/etc/resolv.conf` overwrites whatever the vendor path would put there | We write it unconditionally after address assignment and are last-writer by construction. The R7 vendor fallback path leaves it alone |
+| R14 | The monitor reboots a camera whose AP is merely switched off overnight | `wifi_reboots` persisted in `storm_guard_state`, capped at `wifi_reboot_cap`, reset only by a successful `bring_up` — never by uptime |
+| R15 | `RestartService` from the monitor races the supervisor's backoff for the same child | The monitor only sends a message; the supervisor remains sole owner of child state. No `kill()` outside the supervisor loop |
+| R16 | A stale ARP entry reads as reachable after the gateway vanishes | The kernel ages entries out well inside the 60 s tick, and no action fires below three consecutive unhealthy ticks, which absorbs a single stale read |
+| R17 | The `/bin/busybox` multicall path or the `-f` flag is wrong on this build | Smoke-checklist item. Non-fatal at boot either way: step 10's one-shot has already obtained the lease, so a failing renewer degrades to "no renewal", which the monitor then catches as a lost route |
 
 ## Resolved questions
 
@@ -742,9 +903,70 @@ needed.
 - The only runtime writer would be `anyka_ipc` (`ak_config.c:20`), which the
   `FACTORY_TEST=1` branch of `service.sh` never starts.
 
+### Q2 — Static IP: ours, not the vendor's. RESOLVED
+
+The vendor's static-IP support does not run. Two separate implementations, both
+dead:
+
+```
+wifi_run.sh:57      using_static_ip() reads [ethernet] ipaddr/netmask/gateway
+                    correctly -- and has ZERO callers in the file
+wifi_station.sh:87  # dhcp=`awk ... [ethernet] ... ^dhcp`     <- COMMENTED OUT
+wifi_station.sh:92  if [ -f /mnt/Factory/lower_half_init.sh ]; then dhcp=0 else dhcp=1
+wifi_station.sh:14  ...and cfgfile then becomes that factory script
+wifi_station.sh:73  awk keys are ^IP / ^GW -- which exist in the factory script,
+                    not in anyka_cfg.ini
+```
+
+So on any non-production boot the vendor is DHCP-only, and static addressing is
+reachable solely by inserting a factory production-line SD card that supplies
+its own addresses. `[ethernet] ipaddr/netmask/gateway` in `anyka_cfg.ini` is
+live only for `eth_manage.sh` on `eth0`.
+
+**Decision: support static IP, but own the schema.** `dhcp`, `address` (CIDR),
+`gateway` and `dns` live under `[wifi]` in `anyka.toml`. Reading the ini's
+`[ethernet]` block was rejected: it would implement a code path the vendor
+abandoned, and it duplicates configuration across two files. Owning the schema
+also sidesteps R10 — we never have to make `anyka_cfg.ini` satisfy both our
+parser and the vendor's `awk` at once.
+
+`parse_cidr` is pure, so a malformed address is a parse-time failure with a
+loud message rather than an unreachable camera.
+
+### Q4 — Chip detection: pinned in config, `auto` as fallback. RESOLVED
+
+Measured on this board:
+
+```
+/etc/jffs2/hw.conf      HW= + 64 chars  ->  [51]='h' (ssv6355_ble)
+                                            [52]='2' (GPIO high-then-low)
+Factory copy            byte-identical, 68 B
+service.sh:124 default  HW= + 32 chars  ->  [51] out of range -> WIFI_NAME=""  (W2)
+```
+
+Offsets are consistent between the two copies present, but "stable across
+revisions" cannot be answered from a single board — any answer is a policy
+choice, not a measurement. So the policy removes the dependency instead of
+betting on it: the shipped `anyka.toml` pins `chip` and `gpio_polarity` to the
+measured values, and our camera never takes the detection path at all. `"auto"`
+remains supported for other boards.
+
+`lsusb`-style USB-ID probing was rejected. It is more robust in principle, but
+it adds a second ten-entry table of constants that are exactly as untestable
+here as the first one — the same transcription risk, doubled.
+
+W2 disappears for free in the rewrite. Bash `${HW_READ:51:1}` on a 32-character
+string silently yields `""`; Rust's `s.chars().nth(51)` is `Option<char>`, so
+the out-of-range case must be handled to compile. An unknown or missing chip
+character becomes a loud error and the R7 vendor fallback, never a silent
+no-driver hang.
+
 ## Open questions
 
-1. Static IP: `wifi_run.sh:57-67` supports `[ethernet] ipaddr/netmask/gateway`
-   from the ini. Carry that forward, or require DHCP and drop the option?
-2. Is `hw.conf` offset 51 stable across the camera revisions in circulation, or
-   should chip detection prefer `lsusb` IDs where the chip is on USB?
+None. Two items need confirming on hardware, but neither changes the design:
+
+1. Does `/etc/resolv.conf` exist on a running camera (W7)? The fix — writing it
+   from `[wifi].dns` — is the same either way.
+2. Is the busybox `udhcpc` applet reachable at `/bin/busybox` with `-f` (R17)?
+   Smoke-checklist item; a failure degrades to "no lease renewal", which the
+   monitor detects.
