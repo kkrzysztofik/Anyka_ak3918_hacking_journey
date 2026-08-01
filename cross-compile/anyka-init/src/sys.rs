@@ -57,7 +57,7 @@ pub trait Sys: Send + Sync {
     /// Elapsed since this process started. Used by the storm-guard reset.
     fn uptime(&self) -> Duration;
     fn insmod(&self, path: &str) -> Result<(), SysError>;
-    fn run_to_completion(&self, prog: &str, args: &[&str]) -> Result<ExitStatus, SysError>;
+    fn run_to_completion(&self, prog: &str, args: &[String]) -> Result<ExitStatus, SysError>;
 }
 
 /// Production syscall backend.
@@ -197,13 +197,13 @@ impl Sys for RealSys {
     }
 
     fn insmod(&self, path: &str) -> Result<(), SysError> {
-        match self.run_to_completion("insmod", &[path])? {
+        match self.run_to_completion("insmod", &[path.to_string()])? {
             ExitStatus::Code(0) => Ok(()),
             other => Err(SysError::Other(format!("insmod {path} failed: {other:?}"))),
         }
     }
 
-    fn run_to_completion(&self, prog: &str, args: &[&str]) -> Result<ExitStatus, SysError> {
+    fn run_to_completion(&self, prog: &str, args: &[String]) -> Result<ExitStatus, SysError> {
         // Uses std's wait, which races the reaper's waitpid(-1). Only call
         // during P2, before the reaper starts.
         let status = Command::new(prog).args(args).status()?;
