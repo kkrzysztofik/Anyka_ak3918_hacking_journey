@@ -51,6 +51,11 @@ cross-compile/rust-hello/target/**/*
 cross-compile/onvif-rust/.cargo/**/*
 !cross-compile/onvif-rust/.cargo/config.toml.template
 cross-compile/onvif-rust/target/**/*
+
+# anyka-init supervisor crate
+cross-compile/anyka-init/.cargo/**/*
+!cross-compile/anyka-init/.cargo/config.toml.template
+cross-compile/anyka-init/target/**/*
 cross-compile/onvif-rust/debug/**/*
 cross-compile/onvif-rust/release/**/*
 cross-compile/onvif-rust/coverage/**/*

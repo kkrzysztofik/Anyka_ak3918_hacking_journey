@@ -1,5 +1,5 @@
 [workspace]
-members = ["onvif-rust", "streaming-lib"]
+members = ["onvif-rust", "streaming-lib", "anyka-init"]
 resolver = "2"
 
 # No [patch.crates-io] entries are needed: nothing in the graph pulls openssl-src
