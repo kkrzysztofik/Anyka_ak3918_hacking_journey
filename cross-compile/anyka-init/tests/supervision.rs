@@ -178,6 +178,82 @@ log = "{}"
 }
 
 #[test]
+fn test_restart_service_message_respawns_the_child() {
+    // A long-running service that would never exit on its own.
+    let dir = tempfile::tempdir().expect("tempdir");
+    let pidfile = dir.path().join("pid");
+    let script = dir.path().join("sleeper.sh");
+    let svc_log = dir.path().join("logs").join("svc.log");
+    write_exec_script(
+        &script,
+        &format!(
+            "#!/bin/sh\necho $$ > '{}'\nexec /bin/sleep 300\n",
+            pidfile.display()
+        ),
+    );
+
+    let cfg_path = write_config(
+        dir.path(),
+        &format!(
+            r#"
+[services.sleeper]
+enabled = true
+exec = "{}"
+log = "{}"
+"#,
+            script.display(),
+            svc_log.display()
+        ),
+    );
+    let cfg = Config::load(cfg_path.to_str().expect("utf8")).expect("load");
+
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    let sys: Arc<dyn Sys> = Arc::new(RealSys::new());
+    let (tx, rx) = supervisor_loop::make_channel();
+    let stop = Arc::new(AtomicBool::new(false));
+    supervisor_loop::spawn_reaper(Arc::clone(&sys), tx.clone(), Arc::clone(&stop));
+    let cfg = Arc::new(cfg);
+    let cfg_thread = Arc::clone(&cfg);
+    let handle = std::thread::spawn(move || {
+        supervisor_loop::run(sys, &cfg_thread, rx);
+    });
+
+    let mut first_pid = None;
+    for _ in 0..50 {
+        if let Ok(s) = std::fs::read_to_string(&pidfile)
+            && let Ok(p) = s.trim().parse::<i32>()
+        {
+            first_pid = Some(p);
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    let first_pid = first_pid.expect("initial pid");
+
+    let _ = tx.send(Msg::RestartService("sleeper".into()));
+
+    let mut new_pid = None;
+    for _ in 0..80 {
+        if let Ok(s) = std::fs::read_to_string(&pidfile)
+            && let Ok(p) = s.trim().parse::<i32>()
+            && p != first_pid
+        {
+            new_pid = Some(p);
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    let new_pid = new_pid.expect("respawned pid after RestartService");
+    assert_ne!(first_pid, new_pid);
+
+    let _ = tx.send(Msg::Shutdown);
+    let _ = handle.join();
+    stop.store(true, Ordering::Relaxed);
+    std::thread::sleep(Duration::from_millis(100));
+}
+
+#[test]
 fn test_env_is_cleared_for_children() {
     let dir = tempfile::tempdir().expect("tempdir");
     let svc_log = dir.path().join("logs").join("svc.log");

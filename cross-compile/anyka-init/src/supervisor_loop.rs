@@ -32,6 +32,9 @@ const REAP_POLL_INTERVAL: Duration = Duration::from_secs(1);
 pub enum Msg {
     Exited(Pid, ExitStatus),
     Shutdown,
+    /// Recovery request from the monitor thread. The supervisor kills the named
+    /// service; the normal exit path then restarts it under the usual backoff.
+    RestartService(String),
 }
 
 struct Service {
@@ -199,6 +202,23 @@ pub fn run(sys: Arc<dyn Sys>, cfg: &Config, rx: Receiver<Msg>) {
                 services[i].state = d.next;
                 if let Action::Reboot(why) = d.action {
                     do_reboot(sys.as_ref(), cfg, &why);
+                }
+            }
+            Ok(Msg::RestartService(name)) => {
+                match services.iter().find(|s| s.name == name) {
+                    Some(svc) => match svc.state.pid() {
+                        Some(pid) => {
+                            tracing::warn!(service = %name, pid, "restart requested by monitor");
+                            let _ = sys.kill(pid, libc::SIGTERM);
+                        }
+                        None => tracing::info!(
+                            service = %name,
+                            "restart requested but the service is not running"
+                        ),
+                    },
+                    None => {
+                        tracing::warn!(service = %name, "restart requested for unknown service")
+                    }
                 }
             }
             Ok(Msg::Shutdown) => {

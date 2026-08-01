@@ -67,6 +67,15 @@ pub enum SvcState {
     Backoff { until: Instant, attempt: u32 },
 }
 
+impl SvcState {
+    pub fn pid(&self) -> Option<Pid> {
+        match self {
+            Self::Running { pid, .. } => Some(*pid),
+            Self::Backoff { .. } => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Event {
     Exited,
