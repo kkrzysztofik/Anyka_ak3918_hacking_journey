@@ -5,6 +5,7 @@
 //! SD card. See `docs/plans/2026-08-01-boot-runtime-rust-design.md`.
 
 pub mod config;
+pub mod storm;
 pub mod supervise;
 pub mod sys;
 pub mod timesync;
