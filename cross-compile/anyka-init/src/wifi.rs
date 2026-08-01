@@ -605,9 +605,8 @@ fn read_address(iface: &str) -> Option<String> {
     None
 }
 
-/// ponytail: Task B3 upgrades this to an L2 ARP probe via `netstat::gateway_reachable`.
-fn gateway_reachable(_sys: &dyn Sys, _gw: &str) -> bool {
-    true
+fn gateway_reachable(_sys: &dyn Sys, gw: &str) -> bool {
+    crate::netstat::gateway_reachable(gw)
 }
 
 #[cfg(test)]

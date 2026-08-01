@@ -8,6 +8,7 @@ pub mod boot;
 pub mod config;
 pub mod logging;
 pub mod monitor;
+pub mod netstat;
 pub mod storm;
 pub mod supervise;
 pub mod supervisor_loop;
