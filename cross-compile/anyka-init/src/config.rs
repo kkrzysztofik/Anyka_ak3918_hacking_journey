@@ -86,7 +86,7 @@ pub struct WifiCfg {
     pub config_file: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TimeCfg {
     #[serde(default = "d_true")]

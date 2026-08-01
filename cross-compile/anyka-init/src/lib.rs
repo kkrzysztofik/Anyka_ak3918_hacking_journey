@@ -7,7 +7,9 @@
 pub mod boot;
 pub mod config;
 pub mod logging;
+pub mod monitor;
 pub mod storm;
 pub mod supervise;
+pub mod supervisor_loop;
 pub mod sys;
 pub mod timesync;
