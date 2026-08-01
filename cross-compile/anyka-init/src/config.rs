@@ -435,6 +435,13 @@ impl Config {
                     "[wifi] gateway is required when dhcp = false".into(),
                 ));
             }
+            if self.services.get("udhcpc").is_some_and(|s| s.enabled) {
+                return Err(ConfigError::Invalid(
+                    "[services.udhcpc] is enabled but [wifi] dhcp = false; \
+                     the renewer would overwrite the static address"
+                        .into(),
+                ));
+            }
         }
         for (name, svc) in &self.services {
             if svc.exec.is_empty() {
@@ -585,5 +592,76 @@ sid = "typo"
         )
         .expect_err("deny_unknown_fields must reject a typo");
         assert!(format!("{err}").contains("sid"));
+    }
+
+    #[test]
+    fn test_config_rejects_dhcp_client_alongside_static_addressing() {
+        let err = load_from_str(
+            r#"
+[wifi]
+ssid = "net"
+password = "secret12"
+dhcp = false
+address = "192.168.2.198/24"
+gateway = "192.168.2.1"
+
+[services.udhcpc]
+enabled = true
+exec = "/bin/busybox"
+log = "/tmp/udhcpc.log"
+"#,
+        )
+        .expect_err("static + enabled udhcpc must be rejected");
+        assert!(
+            format!("{err}").contains("udhcpc"),
+            "error should name udhcpc, got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_config_accepts_dhcp_client_when_dhcp_is_enabled() {
+        load_from_str(
+            r#"
+[wifi]
+ssid = "net"
+password = "secret12"
+dhcp = true
+
+[services.udhcpc]
+enabled = true
+exec = "/bin/busybox"
+log = "/tmp/udhcpc.log"
+"#,
+        )
+        .expect("dhcp + enabled udhcpc must be accepted");
+    }
+
+    #[test]
+    fn test_config_accepts_static_addressing_with_the_client_disabled() {
+        load_from_str(
+            r#"
+[wifi]
+ssid = "net"
+password = "secret12"
+dhcp = false
+address = "192.168.2.198/24"
+gateway = "192.168.2.1"
+
+[services.udhcpc]
+enabled = false
+exec = "/bin/busybox"
+log = "/tmp/udhcpc.log"
+"#,
+        )
+        .expect("static + disabled udhcpc must be accepted");
+    }
+
+    #[test]
+    fn test_shipped_anyka_toml_loads_cleanly() {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../SD_card_contents/anyka_hack/anyka.toml"
+        );
+        Config::load(path).expect("shipped anyka.toml must parse and validate");
     }
 }

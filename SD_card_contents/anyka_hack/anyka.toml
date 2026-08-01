@@ -67,7 +67,10 @@ interval_min = 720
 jitter_max_sec = 0
 
 [services.udhcpc]
-enabled = true
+# Disabled because [wifi] dhcp = false. A renewer would take a lease and
+# replace the static address bring-up assigned. Set enabled = true only
+# together with [wifi] dhcp = true.
+enabled = false
 exec = "/bin/busybox"
 args = ["udhcpc", "-i", "wlan0", "-f"]
 log = "/mnt/logs/udhcpc.log"
