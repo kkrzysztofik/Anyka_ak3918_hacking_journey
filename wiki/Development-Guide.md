@@ -79,8 +79,20 @@ The tools can be integrated into CI/CD pipelines:
 
 For comprehensive code quality and security analysis, see [[Static-Analysis-Tools]].
 
+## SD payload / supervisor
+
+To rebuild the camera SD overlay (including `anyka-init`):
+
+```bash
+source ./setenv.sh
+./scripts/build_sd_contents.sh
+```
+
+Configuration and boot behaviour: [[Boot-Runtime-Supervisor]].
+
 ## See Also
 
+- [[Boot-Runtime-Supervisor]] - `anyka-init` and `anyka.toml`
 - [[Development-Environment]] - Toolchain setup and build instructions
 - [[ONVIF-Rust-Implementation]] - ONVIF server implementation details
 - [[Web-Interface]] - Web interface documentation

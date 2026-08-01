@@ -1,0 +1,102 @@
+# anyka-init configuration — edit wifi credentials before first boot.
+# Parsed (never evaluated). A typo'd key is a loud failure, not a silent default.
+
+[log]
+dir = "/mnt/logs"
+level = "info"
+max_bytes = 2000000
+keep = 2
+
+[system]
+# /data/sensor/ is NOT on any of camera.sh's three search paths
+# (/etc/jffs2, /usr/modules, /data/sensor_ko_and_isp_conf), which is why
+# this insmod is load-bearing and not a duplicate of camera.sh:37-38.
+sensor_module = "/data/sensor/sensor_gc1084.ko"
+telnet = false
+ftp = true
+
+[wifi]
+# EDIT ssid/password before deploying the SD card.
+# First boot uses DHCP so the camera is not forced onto 192.168.2.0/24.
+# For static addressing set dhcp = false and fill address/gateway/dns.
+ssid = "CHANGE_ME"
+password = "CHANGE_ME"
+config_file = "/etc/jffs2/anyka_cfg.ini"
+security = "wpa"
+chip = "ssv6355_ble"
+gpio_polarity = "high_low"
+interface = "wlan0"
+dhcp = true
+# address = "192.168.2.198/24"
+# gateway = "192.168.2.1"
+# dns = ["192.168.2.1", "8.8.8.8"]
+connect_timeout_sec = 45
+fallback_to_vendor = true
+
+[time]
+enabled = true
+servers = ["0.ubuntu.pool.ntp.org", "1.ubuntu.pool.ntp.org"]
+timezone = "GMT+01:00"
+first_sync_timeout_sec = 15
+retry_interval_sec = 30
+resync_interval_sec = 21600
+step_threshold_sec = 2
+min_plausible_unix = 1767225600
+max_plausible_unix = 2147483647
+
+[supervisor]
+backoff_min_sec = 1
+backoff_max_sec = 60
+crashloop_count = 10
+crashloop_window_sec = 600
+storm_guard_max_reboots = 3
+storm_guard_state = "/mnt/anyka_hack/state/boot.json"
+storm_guard_reset_uptime_sec = 600
+
+[monitor]
+enabled = true
+interval_sec = 60
+wifi = true
+wifi_probe = true
+wifi_dhcp_after_ticks = 3
+wifi_supplicant_after_ticks = 5
+wifi_reboot_after_ticks = 10
+wifi_reboot_cap = 3
+
+[reboot]
+enabled = false
+interval_min = 720
+jitter_max_sec = 0
+
+[services.udhcpc]
+# Keep enabled together with [wifi] dhcp = true. Disable when using static
+# addressing so a renewer cannot overwrite the configured address.
+enabled = true
+exec = "/bin/busybox"
+args = ["udhcpc", "-i", "wlan0", "-f"]
+log = "/mnt/logs/udhcpc.log"
+
+[services.wpa_supplicant]
+enabled = true
+exec = "/usr/sbin/wpa_supplicant"
+args = ["-i", "wlan0", "-D", "nl80211", "-c", "/etc/jffs2/wpa_supplicant.conf"]
+log = "/mnt/logs/wpa_supplicant.log"
+
+[services.vendor-daemon]
+enabled = true
+exec = "/mnt/anyka_hack/vendor-daemon/vendor-daemon.bin"
+log = "/mnt/logs/vendor_daemon.log"
+core_dump = true
+env = { LD_LIBRARY_PATH = "/mnt/anyka_hack/vendor-daemon/lib", VENDOR_DAEMON_LOG_LEVEL = "info" }
+
+[services.onvif]
+enabled = true
+exec = "/mnt/anyka_hack/onvif/onvif-rust.bin"
+log = "/mnt/logs/onvif.log"
+core_dump = true
+
+[services.dropbear]
+enabled = false
+exec = "/mnt/anyka_hack/dropbear/dropbearmulti"
+args = ["dropbear", "-F", "-E", "-p", "22"]
+log = "/mnt/logs/dropbear.log"

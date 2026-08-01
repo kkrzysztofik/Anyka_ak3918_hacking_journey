@@ -1,0 +1,28 @@
+[package]
+name = "anyka-init"
+version = "0.1.0"
+edition = "2024"
+description = "Boot and process supervisor for the Anyka AK3918 SD-card hack"
+
+[lib]
+name = "anyka_init"
+path = "src/lib.rs"
+doctest = false
+
+[[bin]]
+name = "anyka-init"
+path = "src/main.rs"
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+toml = "1.1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+libc = "0.2"
+signal-hook = "0.3"
+thiserror = "2.0"
+anyhow = "1.0"
+
+[dev-dependencies]
+mockall = "0.15"
+tempfile = "3"

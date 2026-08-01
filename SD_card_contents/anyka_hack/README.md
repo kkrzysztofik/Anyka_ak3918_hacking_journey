@@ -1,34 +1,39 @@
-# Place in /data/
-These are the files that go in `/data/`
+# Anyka SD-card hack overlay
+
+Files under this directory are copied to the camera's SD card and mounted at
+`/mnt/anyka_hack/`. Boot is driven by `Factory/config.sh` (started by the
+vendor's `service.sh` when `/mnt/Factory` exists), which launches
+`anyka-init.bin`.
 
 # Settings
 
-The `gergesettings.txt` file has new entries to control all parts of the camera. There are comments to explain what each option does.
+Configuration is `/mnt/anyka_hack/anyka.toml` (also present on the SD card as
+`anyka_hack/anyka.toml`). It is **parsed as TOML**, never shell-sourced.
 
-You can simply place an updated copy of `gergesettings.txt` on the SD card in `anyka_hacks` folder and the camera will copy that file. This applies any new settings on the next start of the camera.
+Edit wifi credentials in the `[wifi]` section before first boot. Updating the
+camera means rewriting the SD card (or editing `anyka.toml` in place on a
+mounted card) and rebooting — there is no longer a `/data/gergesettings.txt`
+copy step.
 
 # Wifi
-It will also set the new wifi credentials for you if they are different. There will be a copy of the newly created `anyka_cfg` and a backup of the old one with your old credentials copied to the SD card.
 
-Even if you turn off wifi, or set incorrect credentials you can simply correct the settings with the SD card and the camera will connect to LAN on the next boot.
+`anyka-init` rewrites `/etc/jffs2/anyka_cfg.ini` when `[wifi]` differs from the
+on-disk credentials, keeping a `.old` backup. Incorrect credentials can be
+fixed by editing `anyka.toml` on the SD card and rebooting; recovery telnet on
+port 24 stays up if `[system].telnet = true` (and is always started briefly by
+the P0 wrapper).
 
-**Some special characters don't work in wifi ssid names and passwords** alpha-numerical strings as well as `.` `_` and `-` are tested and working.
-This is not a limitation of the hack, but rather the camera wifi scripts.
+**Some special characters don't work in wifi ssid names and passwords** —
+alphanumeric plus `.` `_` and `-` are tested and working. This is a limitation
+of the camera wifi scripts, not the hack.
 
-# Script version updates
-`gergehack.sh` changes a lot during testing, so it is also updated from the `anyka_hacks` folder of the SD if you place a modified version there.
+# Updating
 
-# SSH Settings
+Swap or rewrite the SD card contents and reboot. The supervisor binary is
+`anyka_hack/anyka-init.bin`, built by `./scripts/build_sd_contents.sh`.
 
-The SD overlay now supports Dropbear SSH management via `gergesettings.txt`:
-
-- `run_ssh=0|1` enables/disables Dropbear startup from `gergehack.sh`
-- `ssh_port=22` sets the SSH listening port
-- `ssh_auth_mode=both|key|password` sets authentication behavior
-- `ssh_host_key_path=/mnt/anyka_hack/dropbear/dropbear_ecdsa_host_key` points to host key file
-- `ssh_authorized_keys_path=/data/.ssh/authorized_keys` controls the key file linked to `/root/.ssh/authorized_keys`
-
-When `run_ssh=1`, `gergehack.sh` will disable telnet automatically for safer defaults.
+Dropbear SSH is controlled by `[services.dropbear]` in `anyka.toml` (`enabled`,
+`args`). There are no separate `ssh_*` keys.
 
 # Third-Party Build Scripts
 

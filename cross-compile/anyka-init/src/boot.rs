@@ -1,0 +1,373 @@
+//! P2 system setup: timezone, sensor module, wifi credentials, service kills.
+
+use crate::config::{Config, WifiCfg};
+use crate::sys::Sys;
+
+/// Rewrite `ssid`/`password` in an `anyka_cfg.ini`, preserving every other
+/// line verbatim. Matches only lines whose key is exactly `ssid` or `password`.
+/// Missing keys are appended so a file without them still verifies on readback.
+pub fn rewrite_wifi_cfg(src: &str, ssid: &str, password: &str) -> String {
+    let mut out = String::with_capacity(src.len() + 32);
+    let mut saw_ssid = false;
+    let mut saw_password = false;
+    for line in src.lines() {
+        let key = line.split('=').next().unwrap_or("").trim();
+        match key {
+            "ssid" => {
+                saw_ssid = true;
+                out.push_str(&format!("ssid = {ssid}\n"));
+            }
+            "password" => {
+                saw_password = true;
+                out.push_str(&format!("password = {password}\n"));
+            }
+            _ => {
+                out.push_str(line);
+                out.push('\n');
+            }
+        }
+    }
+    if !saw_ssid {
+        out.push_str(&format!("ssid = {ssid}\n"));
+    }
+    if !saw_password {
+        out.push_str(&format!("password = {password}\n"));
+    }
+    out
+}
+
+pub fn needs_wifi_update(src: &str, ssid: &str, password: &str) -> bool {
+    let mut have_ssid = false;
+    let mut have_pass = false;
+    for line in src.lines() {
+        let mut parts = line.splitn(2, '=');
+        let key = parts.next().unwrap_or("").trim();
+        let val = parts.next().unwrap_or("").trim();
+        match key {
+            "ssid" => have_ssid = val == ssid,
+            "password" => have_pass = val == password,
+            _ => {}
+        }
+    }
+    !(have_ssid && have_pass)
+}
+
+/// Apply credentials to the on-disk config, backing up first and restoring the
+/// backup if the write or the readback fails. A camera that loses its wifi
+/// config cannot be reached to fix it.
+pub fn apply_wifi(cfg: &WifiCfg) -> anyhow::Result<bool> {
+    let path = &cfg.config_file;
+    let current = std::fs::read_to_string(path)?;
+    if !needs_wifi_update(&current, &cfg.ssid, &cfg.password) {
+        tracing::debug!("wifi credentials already current");
+        return Ok(false);
+    }
+
+    std::fs::write(format!("{path}.old"), &current)?;
+
+    let updated = rewrite_wifi_cfg(&current, &cfg.ssid, &cfg.password);
+    if let Err(e) = std::fs::write(path, &updated) {
+        tracing::error!(error = %e, "wifi config write failed; restoring backup");
+        std::fs::write(path, &current)?;
+        return Err(e.into());
+    }
+
+    let verified = std::fs::read_to_string(path)
+        .map(|readback| !needs_wifi_update(&readback, &cfg.ssid, &cfg.password))
+        .unwrap_or(false);
+    if !verified {
+        tracing::error!("wifi config readback failed or mismatched; restoring backup");
+        std::fs::write(path, &current)?;
+        anyhow::bail!("wifi config verification failed");
+    }
+
+    tracing::info!(ssid = %cfg.ssid, "wifi credentials updated");
+    Ok(true)
+}
+
+/// P2: system setup. Every step is best-effort — a camera with no sensor
+/// module is still worth reaching over SSH to diagnose.
+///
+/// Returns the probed `wpa_supplicant -D` flag on a successful wifi bring-up
+/// so P3 can start the supervised instance with the same driver (F2/F3).
+pub fn system_setup(sys: &dyn Sys, cfg: &Config) -> Option<&'static str> {
+    // Affects this process only. `gergehack.sh:358` exported TZ for children to
+    // inherit; `Sys::spawn` calls `env_clear()`, so a service sees TZ only if
+    // its own `[services.X].env` declares it. Kept because it costs nothing and
+    // makes any libc time formatting inside the supervisor correct — but do not
+    // read this line as "services run in the configured timezone". They do not.
+    // (onvif-rust does not care either way: it hardcodes `tz: "UTC"` at
+    // onvif/device/ops/system.rs:191.)
+    //
+    // SAFETY: set_var is not thread-safe, and P2 runs before any thread is
+    // started. Do not move this call after P3.
+    unsafe { std::env::set_var("TZ", &cfg.time.timezone) };
+    tracing::info!(tz = %cfg.time.timezone, "timezone set (supervisor process only)");
+
+    if let Some(module) = &cfg.system.sensor_module {
+        match sys.insmod(module) {
+            Ok(()) => tracing::info!(module, "sensor module loaded"),
+            Err(e) => tracing::error!(
+                module,
+                error = %e,
+                "sensor module load failed; video will be unavailable"
+            ),
+        }
+    }
+
+    match apply_wifi(&cfg.wifi) {
+        Ok(true) => tracing::info!("wifi config rewritten"),
+        Ok(false) => {}
+        Err(e) => tracing::error!(error = %e, "wifi config update failed"),
+    }
+
+    let probed = match crate::wifi::bring_up(sys, &cfg.wifi, &cfg.supervisor.storm_guard_state) {
+        crate::wifi::Outcome::Up {
+            chip,
+            ref ssid,
+            ref addr,
+            driver,
+        } => {
+            tracing::info!(chip, ssid, addr, driver, "wifi up");
+            Some(driver)
+        }
+        crate::wifi::Outcome::FellBack => {
+            tracing::error!("wifi came up via the vendor fallback; check the chip dispatch");
+            None
+        }
+        crate::wifi::Outcome::Failed => {
+            tracing::error!("wifi is down and the fallback is disabled");
+            None
+        }
+    };
+
+    // The P0 wrapper started telnetd on port 24 before config was readable.
+    // Only now can we honour the setting.
+    if !cfg.system.telnet {
+        let _ = sys.run_to_completion("killall", &["telnetd".to_string()]);
+        tracing::info!("telnetd disabled per config");
+    }
+    if !cfg.system.ftp {
+        // tcpsvd is the vendor's FTP server, started at rc.local:14.
+        let _ = sys.run_to_completion("killall", &["tcpsvd".to_string()]);
+        tracing::info!("ftp disabled per config");
+    }
+
+    probed
+}
+
+#[cfg(test)]
+mod wifi_tests {
+    use super::*;
+    use crate::config::{LogCfg, MonitorCfg, RebootCfg, SupervisorCfg, SystemCfg, TimeCfg};
+    use crate::sys::{ExitStatus, MockSys, SysError};
+    use std::collections::BTreeMap;
+
+    const SAMPLE: &str = "\
+[wlan]
+ssid = oldnet
+password = oldpass
+channel = 6
+";
+
+    fn wifi_cfg(config_file: &str, ssid: &str, password: &str) -> WifiCfg {
+        WifiCfg {
+            ssid: ssid.into(),
+            password: password.into(),
+            config_file: config_file.into(),
+            chip: "auto".into(),
+            gpio_polarity: "low_high".into(),
+            interface: "wlan0".into(),
+            security: "wpa".into(),
+            dhcp: true,
+            address: None,
+            gateway: None,
+            dns: Vec::new(),
+            connect_timeout_sec: 45,
+            fallback_to_vendor: true,
+        }
+    }
+
+    fn test_config(wifi: WifiCfg, system: SystemCfg) -> Config {
+        Config {
+            log: LogCfg::default(),
+            system,
+            wifi,
+            time: TimeCfg::default(),
+            supervisor: SupervisorCfg::default(),
+            monitor: MonitorCfg::default(),
+            reboot: RebootCfg::default(),
+            services: BTreeMap::new(),
+        }
+    }
+
+    #[test]
+    fn test_rewrite_replaces_ssid_and_password() {
+        let out = rewrite_wifi_cfg(SAMPLE, "newnet", "newpass");
+        assert!(out.contains("ssid = newnet"));
+        assert!(out.contains("password = newpass"));
+        assert!(!out.contains("oldnet"));
+        assert!(!out.contains("oldpass"));
+    }
+
+    #[test]
+    fn test_rewrite_preserves_other_lines_and_order() {
+        let out = rewrite_wifi_cfg(SAMPLE, "n", "p");
+        let lines: Vec<&str> = out.lines().collect();
+        assert_eq!(lines[0], "[wlan]");
+        assert_eq!(lines[3], "channel = 6");
+    }
+
+    #[test]
+    fn test_rewrite_is_idempotent() {
+        let once = rewrite_wifi_cfg(SAMPLE, "n", "p");
+        let twice = rewrite_wifi_cfg(&once, "n", "p");
+        assert_eq!(once, twice);
+    }
+
+    #[test]
+    fn test_rewrite_appends_missing_ssid_and_password() {
+        let src = "[wlan]\nchannel = 6\n";
+        let out = rewrite_wifi_cfg(src, "newnet", "newpass");
+        assert!(out.contains("ssid = newnet"));
+        assert!(out.contains("password = newpass"));
+        assert!(!needs_wifi_update(&out, "newnet", "newpass"));
+    }
+
+    #[test]
+    fn test_rewrite_ignores_keys_that_merely_contain_ssid() {
+        // The shell original matched with `case "$line" in ssid*)`, which also
+        // matched ssid_hidden and only missed bssid by luck of ordering.
+        let src = "bssid = aa:bb\nssid = old\n";
+        let out = rewrite_wifi_cfg(src, "new", "p");
+        assert!(out.contains("bssid = aa:bb"), "must not clobber bssid");
+        assert!(out.contains("ssid = new"));
+    }
+
+    #[test]
+    fn test_needs_update_detects_matching_credentials() {
+        let cur = rewrite_wifi_cfg(SAMPLE, "n", "p");
+        assert!(!needs_wifi_update(&cur, "n", "p"));
+        assert!(needs_wifi_update(&cur, "other", "p"));
+        assert!(needs_wifi_update(&cur, "n", "other"));
+    }
+
+    #[test]
+    fn test_apply_wifi_updates_file_and_creates_backup() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("anyka_cfg.ini");
+        std::fs::write(&path, SAMPLE).expect("write original");
+        let cfg = wifi_cfg(path.to_str().expect("utf8 path"), "newnet", "newpass");
+
+        let changed = apply_wifi(&cfg).expect("apply_wifi should succeed");
+        assert!(changed);
+
+        let updated = std::fs::read_to_string(&path).expect("read updated");
+        assert!(updated.contains("ssid = newnet"));
+        assert!(updated.contains("password = newpass"));
+
+        let backup_path = format!("{}.old", path.to_str().unwrap());
+        let backup = std::fs::read_to_string(backup_path).expect("read backup");
+        assert_eq!(backup, SAMPLE, "backup must hold the pre-update content");
+    }
+
+    #[test]
+    fn test_apply_wifi_is_a_noop_when_credentials_are_already_current() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("anyka_cfg.ini");
+        let current = rewrite_wifi_cfg(SAMPLE, "samenet", "samepass");
+        std::fs::write(&path, &current).expect("write original");
+        let cfg = wifi_cfg(path.to_str().expect("utf8 path"), "samenet", "samepass");
+
+        let changed = apply_wifi(&cfg).expect("apply_wifi should succeed");
+        assert!(!changed);
+
+        assert_eq!(
+            std::fs::read_to_string(&path).expect("read back"),
+            current,
+            "file must be untouched"
+        );
+        let backup_path = format!("{}.old", path.to_str().unwrap());
+        assert!(
+            !std::path::Path::new(&backup_path).exists(),
+            "no-op must not create a backup"
+        );
+    }
+
+    #[test]
+    fn test_apply_wifi_restores_backup_when_verification_fails() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("anyka_cfg.ini");
+        std::fs::write(&path, SAMPLE).expect("write original");
+        // A leading/trailing space in the ssid survives the write but is
+        // trimmed away on readback (`needs_wifi_update` trims `val`), so the
+        // post-write verification always disagrees with what was written.
+        // That deterministically exercises the restore-on-verify-failure path
+        // without needing to inject filesystem failures.
+        let cfg = wifi_cfg(path.to_str().expect("utf8 path"), " test ", "newpass");
+
+        let err = apply_wifi(&cfg).expect_err("mismatched readback must fail verification");
+        assert!(format!("{err}").contains("verification"));
+
+        let restored = std::fs::read_to_string(&path).expect("read back");
+        assert_eq!(restored, SAMPLE, "backup must be restored byte-for-byte");
+    }
+
+    #[test]
+    fn test_system_setup_loads_sensor_kills_disabled_services_and_reports_wifi_failure() {
+        let mut sys = MockSys::new();
+        sys.expect_insmod()
+            .withf(|module| module == "sensor.ko")
+            .times(1)
+            .returning(|_| Ok(()));
+        sys.expect_run_to_completion()
+            .withf(|prog, args| prog == "killall" && args == ["telnetd".to_string()])
+            .times(1)
+            .returning(|_, _| Ok(ExitStatus::Code(0)));
+
+        let mut wifi = wifi_cfg("/nonexistent/anyka_cfg.ini", "net", "pass");
+        wifi.chip = "unknown_chip".into();
+        wifi.fallback_to_vendor = false;
+        // telnet=false (default) drives the killall telnetd expectation above.
+        // ftp stays at its default `true`, so killall tcpsvd must not fire.
+        let system = SystemCfg {
+            sensor_module: Some("sensor.ko".into()),
+            ..SystemCfg::default()
+        };
+        let cfg = test_config(wifi, system);
+
+        let probed = system_setup(&sys, &cfg);
+        assert_eq!(
+            probed, None,
+            "unknown chip with fallback disabled must fail"
+        );
+    }
+
+    #[test]
+    fn test_system_setup_logs_sensor_failure_and_kills_ftp_when_disabled() {
+        let mut sys = MockSys::new();
+        sys.expect_insmod()
+            .times(1)
+            .returning(|_| Err(SysError::Other("no such device".into())));
+        sys.expect_run_to_completion()
+            .withf(|prog, args| prog == "killall" && args == ["tcpsvd".to_string()])
+            .times(1)
+            .returning(|_, _| Ok(ExitStatus::Code(0)));
+
+        let mut wifi = wifi_cfg("/nonexistent/anyka_cfg.ini", "net", "pass");
+        wifi.chip = "unknown_chip".into();
+        wifi.fallback_to_vendor = false;
+        let system = SystemCfg {
+            sensor_module: Some("sensor.ko".into()),
+            telnet: true, // suppress the killall telnetd expectation
+            ftp: false,   // drives the killall tcpsvd expectation above
+        };
+        let cfg = test_config(wifi, system);
+
+        let probed = system_setup(&sys, &cfg);
+        assert_eq!(
+            probed, None,
+            "unknown chip with fallback disabled must fail"
+        );
+    }
+}

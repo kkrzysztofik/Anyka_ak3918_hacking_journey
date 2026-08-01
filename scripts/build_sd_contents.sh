@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Assemble SD card payload into SD_card_contents/ (does not copy to media/device).
 #
-# Builds vendor-daemon, onvif-rust, and the WebUI into:
+# Builds vendor-daemon, onvif-rust, anyka-init, and the WebUI into:
 #   SD_card_contents/anyka_hack/
 # Factory scripts are already tracked under SD_card_contents/Factory/.
 #
@@ -28,12 +28,12 @@ usage() {
   cat <<'EOF'
 Usage: build_sd_contents.sh [OPTIONS]
 
-Assemble vendor-daemon, onvif-rust, and WebUI into SD_card_contents/.
+Assemble vendor-daemon, onvif-rust, anyka-init, and WebUI into SD_card_contents/.
 
 Options:
   --skip-www      Skip npm WebUI build
   --skip-vendor   Skip vendor-daemon build/install
-  --debug         Build debug binaries (onvif-rust + vendor-daemon)
+  --debug         Build debug binaries (onvif-rust + vendor-daemon + anyka-init)
   -h, --help      Show this help
 
 Examples:
@@ -140,6 +140,35 @@ else
 fi
 log_success "onvif-rust deployed to ${ANYKA_HACK}/onvif/"
 
+# ── anyka-init ───────────────────────────────────────────────────────────────
+log_step "Building anyka-init (${BUILD_MODE})"
+ANYKA_INIT_DIR="${REPO_ROOT}/cross-compile/anyka-init"
+ANYKA_INIT_TARGET="armv5te-unknown-linux-uclibceabi"
+# Ensure ARM cargo config exists (gitignored; generated from template).
+if [[ ! -f "${ANYKA_INIT_DIR}/.cargo/config.toml" ]]; then
+  if [[ ! -f "${ANYKA_INIT_DIR}/.cargo/config.toml.template" ]]; then
+    log_error "anyka-init cargo config template missing"
+    exit 1
+  fi
+  mkdir -p "${ANYKA_INIT_DIR}/.cargo"
+  ANYKA_TOOLCHAIN_ROOT="$(cd "${ANYKA_TOOLCHAIN_BIN}/.." && pwd)"
+  sed "s|@TOOLCHAIN_BASE@|${ANYKA_TOOLCHAIN_ROOT}|g" \
+    "${ANYKA_INIT_DIR}/.cargo/config.toml.template" \
+    > "${ANYKA_INIT_DIR}/.cargo/config.toml"
+fi
+(
+  cd "${ANYKA_INIT_DIR}"
+  if [[ "${BUILD_MODE}" = "debug" ]]; then
+    "${CARGO}" build --target "${ANYKA_INIT_TARGET}"
+    ANYKA_INIT_BIN="${REPO_ROOT}/cross-compile/target/${ANYKA_INIT_TARGET}/debug/anyka-init"
+  else
+    "${CARGO}" build --release --target "${ANYKA_INIT_TARGET}"
+    ANYKA_INIT_BIN="${REPO_ROOT}/cross-compile/target/${ANYKA_INIT_TARGET}/release/anyka-init"
+  fi
+  install -m 0755 "${ANYKA_INIT_BIN}" "${ANYKA_HACK}/anyka-init.bin"
+)
+log_success "anyka-init installed to ${ANYKA_HACK}/anyka-init.bin"
+
 # ── WebUI ────────────────────────────────────────────────────────────────────
 if [[ "${SKIP_WWW}" = true ]]; then
   log_warn "Skipping WebUI build (--skip-www)"
@@ -176,9 +205,25 @@ fi
 log_step "Verifying SD payload artifacts"
 require_arm_elf "${ANYKA_HACK}/onvif/onvif-rust.bin"
 require_arm_elf "${ANYKA_HACK}/vendor-daemon/vendor-daemon.bin"
+require_arm_elf "${ANYKA_HACK}/anyka-init.bin"
+
+if [[ ! -f "${ANYKA_HACK}/lib/ld-uClibc.so.1" || ! -x "${ANYKA_HACK}/lib/ld-uClibc.so.1" ]]; then
+  log_error "Missing dynamic loader required by anyka-init.bin: ${ANYKA_HACK}/lib/ld-uClibc.so.1"
+  exit 1
+fi
 
 if [[ ! -x "${ANYKA_HACK}/onvif/onvif-rust" ]]; then
   log_error "Missing onvif-rust launcher: ${ANYKA_HACK}/onvif/onvif-rust"
+  exit 1
+fi
+
+if [[ ! -f "${ANYKA_HACK}/anyka.toml" ]]; then
+  log_error "Missing anyka.toml: ${ANYKA_HACK}/anyka.toml"
+  exit 1
+fi
+
+if [[ ! -x "${FACTORY_DIR}/config.sh" ]]; then
+  log_error "Missing or non-executable Factory/config.sh"
   exit 1
 fi
 

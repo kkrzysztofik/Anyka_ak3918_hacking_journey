@@ -1,0 +1,41 @@
+# .cargo/config.toml — DO NOT EDIT DIRECTLY
+#
+# This file is a template. Generate the real config with:
+#
+#   TOOLCHAIN_BASE="$(cd "$(dirname "$0")/../../../toolchain/arm-anykav200-crosstool-ng" && pwd)"
+#   sed "s|@TOOLCHAIN_BASE@|${TOOLCHAIN_BASE}|g" config.toml.template > config.toml
+#
+# Or reuse onvif-rust's setup-cargo-config.sh pattern. Absolute paths differ
+# between developer machines and CI, so config.toml is gitignored.
+
+[build]
+target = "armv5te-unknown-linux-uclibceabi"
+rustc = "@TOOLCHAIN_BASE@/bin/rustc"
+
+[target.armv5te-unknown-linux-uclibceabi]
+linker = "@TOOLCHAIN_BASE@/bin/clang-wrapper.sh"
+rustflags = [
+  "-C",
+  "link-arg=-fno-pie",
+  "-C",
+  "link-arg=-no-pie",
+  "-C",
+  "link-arg=-Wl,--dynamic-linker=/mnt/anyka_hack/lib/ld-uClibc.so.1",
+  "-C",
+  "link-arg=-Wl,--disable-new-dtags,-rpath,/mnt/anyka_hack/lib",
+  "-C",
+  "link-arg=-Wl,--hash-style=both",
+]
+
+[env]
+SYSROOT_armv5te_unknown_linux_uclibceabi = "@TOOLCHAIN_BASE@/arm-unknown-linux-uclibcgnueabi/sysroot"
+CC_armv5te_unknown_linux_uclibceabi = "@TOOLCHAIN_BASE@/bin/arm-unknown-linux-uclibcgnueabi-gcc"
+CXX_armv5te_unknown_linux_uclibceabi = "@TOOLCHAIN_BASE@/bin/arm-unknown-linux-uclibcgnueabi-g++"
+AR_armv5te_unknown_linux_uclibceabi = "@TOOLCHAIN_BASE@/bin/arm-unknown-linux-uclibcgnueabi-ar"
+CFLAGS_armv5te_unknown_linux_uclibceabi = "--sysroot=@TOOLCHAIN_BASE@/arm-unknown-linux-uclibcgnueabi/sysroot"
+CXXFLAGS_armv5te_unknown_linux_uclibceabi = "--sysroot=@TOOLCHAIN_BASE@/arm-unknown-linux-uclibcgnueabi/sysroot"
+CPPFLAGS_armv5te_unknown_linux_uclibceabi = "--sysroot=@TOOLCHAIN_BASE@/arm-unknown-linux-uclibcgnueabi/sysroot"
+LDFLAGS_armv5te_unknown_linux_uclibceabi = "--sysroot=@TOOLCHAIN_BASE@/arm-unknown-linux-uclibcgnueabi/sysroot"
+
+[target.x86_64-unknown-linux-gnu]
+linker = "/usr/bin/gcc"
