@@ -514,7 +514,8 @@ pub fn ifconfig_static_args(iface: &str, cidr: &Cidr) -> Vec<String> {
 
 /// Busybox multicall form: `/sbin/udhcpc` does not exist on this device
 /// (`/sbin` holds only ldconfig, mmc_test, updater) and the `orig/` capture
-/// lost its symlinks, so `argv[0]` selects the applet instead (R17).
+/// lost its symlinks (R17). Spawned as `/bin/busybox` with `udhcpc` as the
+/// first argument so busybox resolves the applet from argv[1].
 pub fn udhcpc_oneshot_args(iface: &str) -> Vec<String> {
     vec![
         "udhcpc".into(),
@@ -588,7 +589,7 @@ fn assign_address(sys: &dyn Sys, cfg: &WifiCfg) -> Result<String, String> {
     // R12: a typo'd static address associates fine and leaves the camera
     // unreachable, which no rung of R7 would catch. Verify, then fall back to
     // DHCP once before giving up.
-    if gateway_reachable(sys, &gw) {
+    if gateway_reachable(&gw) {
         return Ok(cidr.address);
     }
     tracing::error!(
@@ -612,7 +613,7 @@ fn read_carrier(iface: &str) -> Option<bool> {
     Some(src.trim() == "1")
 }
 
-fn gateway_reachable(_sys: &dyn Sys, gw: &str) -> bool {
+fn gateway_reachable(gw: &str) -> bool {
     crate::netstat::gateway_reachable(gw)
 }
 
@@ -899,7 +900,7 @@ mod tests {
         assert!(args.contains(&"-q".to_string()));
         assert_eq!(
             args[0], "udhcpc",
-            "busybox multicall: argv[0] selects the applet"
+            "busybox multicall: first arg selects the applet when exec is /bin/busybox"
         );
     }
 

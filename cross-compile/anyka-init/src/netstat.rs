@@ -69,6 +69,8 @@ pub fn gateway_reachable(gw: &str) -> bool {
         let _ = sock.set_write_timeout(Some(Duration::from_millis(200)));
         let _ = sock.send_to(&[0u8; 1], format!("{gw}:9"));
     }
+    // ponytail: blocks the caller 200 ms per probe. Fine at a 60 s tick; move
+    // to Sys::sleep if the monitor ever needs a faster loop.
     std::thread::sleep(Duration::from_millis(200));
     std::fs::read_to_string("/proc/net/arp")
         .map(|src| arp_entry_complete(&src, gw))
