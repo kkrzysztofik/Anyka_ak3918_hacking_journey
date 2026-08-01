@@ -17,27 +17,40 @@ const MAX_SANE_REBOOTS: u8 = 100;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct StormState {
     pub fast_reboots: u8,
+    pub wifi_reboots: u8,
 }
 
 impl StormState {
-    /// Deliberately hand-rolled rather than pulling in serde_json for one
-    /// integer. Any input that is not exactly what `render` produces reads
-    /// as zero.
+    fn field(src: &str, name: &str) -> Option<u8> {
+        let key = format!("\"{name}\":");
+        let rest = src.split_once(&key)?.1;
+        let end = rest
+            .find(|c: char| !c.is_ascii_digit())
+            .unwrap_or(rest.len());
+        match rest[..end].parse::<u8>() {
+            Ok(n) if n <= MAX_SANE_REBOOTS => Some(n),
+            _ => None,
+        }
+    }
+
+    /// Deliberately hand-rolled rather than pulling in serde_json for two
+    /// integers. Torn or unrecognized input reads as zero.
     pub fn parse(src: &str) -> Self {
-        let Some(rest) = src.trim().strip_prefix(r#"{"fast_reboots":"#) else {
+        let src = src.trim();
+        if !src.starts_with('{') || !src.ends_with('}') {
             return Self::default();
-        };
-        let Some(num) = rest.strip_suffix('}') else {
-            return Self::default();
-        };
-        match num.trim().parse::<u8>() {
-            Ok(n) if n <= MAX_SANE_REBOOTS => Self { fast_reboots: n },
-            _ => Self::default(),
+        }
+        Self {
+            fast_reboots: Self::field(src, "fast_reboots").unwrap_or(0),
+            wifi_reboots: Self::field(src, "wifi_reboots").unwrap_or(0),
         }
     }
 
     pub fn render(&self) -> String {
-        format!(r#"{{"fast_reboots":{}}}"#, self.fast_reboots)
+        format!(
+            r#"{{"fast_reboots":{},"wifi_reboots":{}}}"#,
+            self.fast_reboots, self.wifi_reboots
+        )
     }
 
     /// Write via temp file + rename so a power cut leaves either the old
@@ -89,8 +102,37 @@ mod tests {
 
     #[test]
     fn test_storm_state_render_roundtrips() {
-        let s = StormState { fast_reboots: 3 };
+        let s = StormState {
+            fast_reboots: 3,
+            wifi_reboots: 0,
+        };
         assert_eq!(StormState::parse(&s.render()).fast_reboots, 3);
+    }
+
+    #[test]
+    fn test_storm_state_round_trips_both_counters() {
+        let s = StormState {
+            fast_reboots: 2,
+            wifi_reboots: 1,
+        };
+        assert_eq!(StormState::parse(&s.render()), s);
+    }
+
+    #[test]
+    fn test_storm_state_reads_legacy_single_field_file() {
+        // Files written before this change must not read as a torn file and reset
+        // the crash-loop guard.
+        let legacy = r#"{"fast_reboots":2}"#;
+        let s = StormState::parse(legacy);
+        assert_eq!(s.fast_reboots, 2);
+        assert_eq!(s.wifi_reboots, 0);
+    }
+
+    #[test]
+    fn test_storm_state_torn_file_reads_as_zero() {
+        for bad in [r#"{"fast_reboots":"#, "", "garbage", r#"{"fast_reboots":250}"#] {
+            assert_eq!(StormState::parse(bad), StormState::default());
+        }
     }
 
     #[test]

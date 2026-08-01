@@ -101,7 +101,7 @@ pub fn system_setup(sys: &dyn Sys, cfg: &Config) {
         Err(e) => tracing::error!(error = %e, "wifi config update failed"),
     }
 
-    match crate::wifi::bring_up(sys, &cfg.wifi) {
+    match crate::wifi::bring_up(sys, &cfg.wifi, &cfg.supervisor.storm_guard_state) {
         crate::wifi::Outcome::Up {
             chip,
             ref ssid,

@@ -348,9 +348,21 @@ pub fn resolve_chip(pinned: &str, hw_conf_path: &str) -> Result<(&'static Chip, 
 }
 
 /// Full bring-up. Steps are numbered to match the design addendum.
-pub fn bring_up(sys: &dyn Sys, cfg: &WifiCfg) -> Outcome {
+///
+/// `storm_state_path` is where the wifi reboot counter lives; a successful
+/// bring-up is the only thing that zeroes it (B4).
+pub fn bring_up(sys: &dyn Sys, cfg: &WifiCfg, storm_state_path: &str) -> Outcome {
     match try_bring_up(sys, cfg) {
-        Ok(outcome) => outcome,
+        Ok(outcome) => {
+            if matches!(outcome, Outcome::Up { .. }) {
+                let mut storm = crate::storm::StormState::load(storm_state_path);
+                storm.wifi_reboots = 0;
+                if let Err(e) = storm.save(storm_state_path) {
+                    tracing::warn!(error = %e, "failed to clear wifi reboot counter");
+                }
+            }
+            outcome
+        }
         Err(e) => {
             tracing::error!(error = %e, "wifi bring-up failed");
             if cfg.fallback_to_vendor {

@@ -36,7 +36,12 @@ pub fn run(sys: &dyn Sys, interval: Duration, state_path: &str, reset_after: Dur
     loop {
         sample();
         if !reset_done && sys.uptime() > reset_after {
-            match (StormState { fast_reboots: 0 }).save(state_path) {
+            // Reset only the crash-loop counter. wifi_reboots is cleared solely
+            // by a successful wifi::bring_up (B4) — uptime alone would wipe it
+            // before the link ever recovers.
+            let mut storm = StormState::load(state_path);
+            storm.fast_reboots = 0;
+            match storm.save(state_path) {
                 Ok(()) => tracing::info!("boot considered good; storm-guard counter reset"),
                 Err(e) => tracing::warn!(error = %e, "failed to reset storm-guard state"),
             }
