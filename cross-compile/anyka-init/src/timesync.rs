@@ -111,14 +111,16 @@ pub fn random_nonce() -> u64 {
 /// Non-urandom nonce: wall clock, pid, and a process-local counter so
 /// successive calls differ even when the clock resolution is coarse.
 fn fallback_nonce() -> u64 {
-    use std::sync::atomic::{AtomicU64, Ordering};
-    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    // AtomicU64 is unavailable on ARMv5 (no 64-bit atomics); u32 is enough
+    // to keep successive fallbacks distinct when mixed with wall/pid.
+    use std::sync::atomic::{AtomicU32, Ordering};
+    static COUNTER: AtomicU32 = AtomicU32::new(0);
     let wall = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_nanos() as u64)
         .unwrap_or(0);
     let pid = u64::from(std::process::id());
-    let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+    let n = u64::from(COUNTER.fetch_add(1, Ordering::Relaxed));
     let stack_mix = std::ptr::from_ref(&COUNTER) as u64;
     wall.wrapping_mul(0x9E37_79B9_7F4A_7C15)
         .wrapping_add(pid.wrapping_shl(32))

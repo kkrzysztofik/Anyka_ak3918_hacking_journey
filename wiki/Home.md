@@ -8,6 +8,7 @@ This project was originally developed by **Gerge** (<https://gitea.raspiweb.com/
 
 ## Recent Updates
 
+- **Boot / Runtime Supervisor**: Shell boot scripts replaced by supervised Rust `anyka-init` and typed `anyka.toml`
 - **ONVIF Rust Rewrite**: Complete rewrite of ONVIF services in Rust for memory safety and modern async architecture
 - **ONVIF 24.12 Compliance**: Targeting latest ONVIF specifications with Profile S/T support
 - **Modern Stack**: Built on `tokio` and `axum` for high-performance asynchronous I/O
@@ -19,6 +20,7 @@ This project was originally developed by **Gerge** (<https://gitea.raspiweb.com/
 
 ### Core Documentation
 
+- [[Boot-Runtime-Supervisor]] - SD-card init system, `anyka-init`, and `anyka.toml`
 - [[ONVIF-Rust-Implementation]] - Complete ONVIF 24.12 implementation details
 - [[Development-Environment]] - Toolchain setup and build instructions
 - [[Web-Interface]] - Web UI documentation and navigation
@@ -41,6 +43,7 @@ This project provides a complete, modern ONVIF 24.12 implementation for Anyka AK
 
 ### Working Features
 
+- **Boot / Runtime Supervisor** - `anyka-init` with typed `anyka.toml`, Wi-Fi bring-up, NTP, and service supervision on the SD-card path
 - **ONVIF Rust Implementation** - Modern, memory-safe ONVIF 24.12 server with Device, Media, PTZ, and Imaging services
 - **Memory Safety** - Rust's ownership model prevents buffer overflows and use-after-free errors
 - **Asynchronous Architecture** - High-performance async I/O using `tokio` and `axum`
@@ -66,6 +69,7 @@ The camera can now be connected to professional surveillance software such as Mo
 
 For detailed setup instructions, see:
 
+- [[Boot-Runtime-Supervisor]] - Edit `anyka.toml`, build the SD payload, boot the supervisor
 - [[Development-Environment]] - Toolchain and development setup
 - [[ONVIF-Rust-Implementation]] - ONVIF server build and deployment
 - [[Resources]] - Quick start SD card hack

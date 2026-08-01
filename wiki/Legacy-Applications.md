@@ -35,7 +35,9 @@ More info about the [app](https://github.com/kkrzysztofik/Anyka_ak3918_hacking_j
 
 ## SSH
 
-[Dropbear](https://github.com/kkrzysztofik/Anyka_ak3918_hacking_journey/tree/main/SD_card_contents/anyka_hack/dropbear) can give ssh access if telnet is not your preference.
+[Dropbear](https://github.com/kkrzysztofik/Anyka_ak3918_hacking_journey/tree/main/SD_card_contents/anyka_hack/dropbear)
+can give SSH access if telnet is not your preference. Enable it under
+`[services.dropbear]` in `anyka.toml` (see [[Boot-Runtime-Supervisor]]).
 
 ## Play Sound
 
@@ -55,7 +57,9 @@ After the root and usr partitions are modified with the desired apps, the follow
 
 copy the webpage www folder to `/etc/jffs2/www` for httpd to serve from flash
 
-The latest `gergehack.sh` is already capable of running fully local files, so update if needed and check sensor module settings.
+The current SD-card path uses [[Boot-Runtime-Supervisor|anyka-init]] (Mode A only).
+Running fully from flash without an SD card is a separate, legacy / modified-rootfs
+workflow and is not what `anyka-init` targets today.
 
 This gives the following functions without SD card running on the camera:
 
@@ -66,5 +70,6 @@ This gives the following functions without SD card running on the camera:
 
 ## See Also
 
+- [[Boot-Runtime-Supervisor]] - Current SD-card init and `anyka.toml`
 - [[Web-Interface]] - Current web interface documentation
 - [[Resources]] - Additional resources and links
