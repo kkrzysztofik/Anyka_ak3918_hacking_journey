@@ -142,7 +142,10 @@ pub fn run(
                     let mut storm = storm;
                     storm.wifi_reboots = storm.wifi_reboots.saturating_add(1);
                     let _ = storm.save(state_path);
-                    let _ = sys.reboot();
+                    if let Err(e) = sys.reboot() {
+                        tracing::error!(error = %e, "reboot() returned without rebooting");
+                    }
+                    ticks = 0;
                 }
                 Action::LogOnly => {
                     tracing::error!("wifi down and the reboot budget is exhausted; not rebooting");
