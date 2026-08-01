@@ -77,6 +77,7 @@ fn write_exec_script(path: &Path, body: &str) {
 struct Harness {
     tx: std::sync::mpsc::Sender<Msg>,
     handle: std::thread::JoinHandle<()>,
+    reaper: Option<std::thread::JoinHandle<()>>,
     stop: Arc<AtomicBool>,
     _guard: MutexGuard<'static, ()>,
 }
@@ -87,12 +88,13 @@ impl Harness {
         let sys: Arc<dyn Sys> = Arc::new(RealSys::new());
         let (tx, rx) = supervisor_loop::make_channel();
         let stop = Arc::new(AtomicBool::new(false));
-        supervisor_loop::spawn_reaper(Arc::clone(&sys), tx.clone(), Arc::clone(&stop));
+        let reaper = supervisor_loop::spawn_reaper(Arc::clone(&sys), tx.clone(), Arc::clone(&stop));
         let cfg = Arc::new(cfg);
         let handle = std::thread::spawn(move || supervisor_loop::run(sys, &cfg, rx));
         Self {
             tx,
             handle,
+            reaper,
             stop,
             _guard: guard,
         }
@@ -102,7 +104,10 @@ impl Harness {
         let _ = self.tx.send(Msg::Shutdown);
         let _ = self.handle.join();
         self.stop.store(true, Ordering::Relaxed);
-        std::thread::sleep(Duration::from_millis(100));
+        if let Some(reaper) = self.reaper {
+            let _ = reaper.join();
+        }
+        // _guard drops only after the reaper has exited.
     }
 }
 

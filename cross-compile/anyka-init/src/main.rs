@@ -95,7 +95,7 @@ fn main() {
             });
     }
 
-    if cfg.reboot.enabled {
+    if cfg.reboot.enabled && !safe_mode {
         let s = Arc::clone(&sysimpl);
         let interval_min = cfg.reboot.interval_min;
         let jitter = cfg.reboot.jitter_max_sec;
@@ -113,7 +113,7 @@ fn main() {
     }
 
     let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
-    supervisor_loop::spawn_reaper(Arc::clone(&sysimpl), tx, Arc::clone(&stop));
+    let _reaper = supervisor_loop::spawn_reaper(Arc::clone(&sysimpl), tx, Arc::clone(&stop));
 
     // The supplicant bring-up spawned is unsupervised and holds the ctrl
     // socket. Hand the interface over to the supervised instance here, not

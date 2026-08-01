@@ -58,8 +58,12 @@ pub fn make_channel() -> (Sender<Msg>, Receiver<Msg>) {
     channel()
 }
 
-pub fn spawn_reaper(sys: Arc<dyn Sys>, tx: Sender<Msg>, stop: Arc<AtomicBool>) {
-    let spawned = std::thread::Builder::new()
+pub fn spawn_reaper(
+    sys: Arc<dyn Sys>,
+    tx: Sender<Msg>,
+    stop: Arc<AtomicBool>,
+) -> Option<std::thread::JoinHandle<()>> {
+    match std::thread::Builder::new()
         .name("reaper".into())
         .stack_size(thread_stack())
         .spawn(move || {
@@ -84,12 +88,15 @@ pub fn spawn_reaper(sys: Arc<dyn Sys>, tx: Sender<Msg>, stop: Arc<AtomicBool>) {
                     }
                 }
             }
-        });
-    if let Err(e) = spawned {
-        tracing::error!(
-            error = %e,
-            "failed to start the reaper thread; service exits will not be observed"
-        );
+        }) {
+        Ok(handle) => Some(handle),
+        Err(e) => {
+            tracing::error!(
+                error = %e,
+                "failed to start the reaper thread; service exits will not be observed"
+            );
+            None
+        }
     }
 }
 

@@ -9,7 +9,8 @@ echo
 
 # Test log directory initialization
 echo "Testing log directory initialization..."
-if ! mkdir -p /mnt/logs; then
+probe="/mnt/logs/.verify_write_probe.$$"
+if ! mkdir -p /mnt/logs || ! echo test > "$probe" || ! rm "$probe"; then
   echo "✗ Failed to create or access /mnt/logs"
   exit 1
 fi

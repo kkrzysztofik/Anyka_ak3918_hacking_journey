@@ -7,8 +7,11 @@ on:
     paths:
       - "cross-compile/onvif-rust/**"
       - "cross-compile/streaming-lib/**"
+      - "cross-compile/anyka-init/**"
       - "cross-compile/www/**"
       - "validation/**"
+      - "scripts/**"
+      - "SD_card_contents/**"
   pull_request:
     branches:
       - main
@@ -19,8 +22,11 @@ on:
     paths:
       - "cross-compile/onvif-rust/**"
       - "cross-compile/streaming-lib/**"
+      - "cross-compile/anyka-init/**"
       - "cross-compile/www/**"
       - "validation/**"
+      - "scripts/**"
+      - "SD_card_contents/**"
 
 jobs:
   # =============================================================================

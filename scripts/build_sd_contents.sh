@@ -207,7 +207,7 @@ require_arm_elf "${ANYKA_HACK}/onvif/onvif-rust.bin"
 require_arm_elf "${ANYKA_HACK}/vendor-daemon/vendor-daemon.bin"
 require_arm_elf "${ANYKA_HACK}/anyka-init.bin"
 
-if [[ ! -f "${ANYKA_HACK}/lib/ld-uClibc.so.1" ]]; then
+if [[ ! -f "${ANYKA_HACK}/lib/ld-uClibc.so.1" || ! -x "${ANYKA_HACK}/lib/ld-uClibc.so.1" ]]; then
   log_error "Missing dynamic loader required by anyka-init.bin: ${ANYKA_HACK}/lib/ld-uClibc.so.1"
   exit 1
 fi
