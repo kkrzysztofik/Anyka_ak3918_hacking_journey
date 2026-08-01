@@ -174,6 +174,86 @@ pub fn parse_hw_conf(src: &str) -> Option<HwConf> {
     })
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Security {
+    Wpa,
+    Wep,
+    Open,
+}
+
+impl Security {
+    pub fn from_name(s: &str) -> Option<Self> {
+        match s {
+            "wpa" => Some(Self::Wpa),
+            "wep" => Some(Self::Wep),
+            "open" => Some(Self::Open),
+            _ => None,
+        }
+    }
+}
+
+/// Characters that cannot survive the `wpa_supplicant.conf` grammar, where
+/// values are double-quoted strings on a single line.
+///
+/// Deliberately short. Shell metacharacters (`$`, backtick, `\`, `;`, `&`) are
+/// accepted: they broke `station_connect.sh:89-91` only because it built a
+/// command line for `sh -c`, and they are legal in a PSK (R11).
+const UNGRAMMATICAL: [char; 3] = ['"', '\n', '\0'];
+
+pub fn validate_credentials(ssid: &str, psk: &str, sec: Security) -> Result<(), String> {
+    if ssid.is_empty() {
+        // W4: a blank SSID sends wifi_run.sh:188 into a 1 Hz wait for a file
+        // that only anyka_ipc writes, and anyka_ipc never runs under
+        // FACTORY_TEST=1. It hangs forever, silently.
+        return Err("[wifi] ssid is empty".into());
+    }
+    if ssid.len() > 32 {
+        return Err(format!("[wifi] ssid is {} bytes, max 32", ssid.len()));
+    }
+    if let Some(c) = ssid.chars().find(|c| UNGRAMMATICAL.contains(c)) {
+        return Err(format!("[wifi] ssid contains unsupported character {c:?}"));
+    }
+    if let Some(c) = psk.chars().find(|c| UNGRAMMATICAL.contains(c)) {
+        return Err(format!("[wifi] password contains unsupported character {c:?}"));
+    }
+    if sec == Security::Wpa && !(8..=63).contains(&psk.len()) {
+        return Err(format!(
+            "[wifi] WPA password is {} bytes, must be 8..=63",
+            psk.len()
+        ));
+    }
+    Ok(())
+}
+
+/// Generate a single-network `wpa_supplicant.conf`.
+///
+/// Replaces both vendor mechanisms at once: the line-numbered `sed` into lines
+/// 3 and 4 (`wifi_station.sh:51-54`) and the `wpa_cli set_network` path
+/// (`station_connect.sh:57-95`).
+pub fn wpa_supplicant_conf(ssid: &str, psk: &str, sec: Security) -> String {
+    let mut s = String::with_capacity(256);
+    s.push_str("ctrl_interface=/var/run/wpa_supplicant\n");
+    s.push_str("update_config=1\n\n");
+    s.push_str("network={\n");
+    s.push_str(&format!("\tssid=\"{ssid}\"\n"));
+    match sec {
+        Security::Wpa => {
+            s.push_str("\tkey_mgmt=WPA-PSK\n");
+            s.push_str(&format!("\tpsk=\"{psk}\"\n"));
+        }
+        Security::Wep => {
+            s.push_str("\tkey_mgmt=NONE\n");
+            s.push_str("\twep_tx_keyidx=0\n");
+            s.push_str(&format!("\twep_key0=\"{psk}\"\n"));
+        }
+        Security::Open => {
+            s.push_str("\tkey_mgmt=NONE\n");
+        }
+    }
+    s.push_str("}\n");
+    s
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -259,5 +339,71 @@ mod tests {
         assert_eq!(Polarity::from_char('2'), Polarity::HighLow);
         assert_eq!(Polarity::from_char('1'), Polarity::LowHigh);
         assert_eq!(Polarity::from_char('x'), Polarity::LowHigh);
+    }
+
+    #[test]
+    fn test_validate_credentials_accepts_shell_metacharacters() {
+        // R11: these broke the vendor only because it went through `sh -c`. They
+        // are legal in a PSK and rejecting them would lock a user out of their
+        // own network.
+        for psk in [r#"a$b`c\d;e&f"#, "pass word", "'quoted'", "12345678"] {
+            assert!(
+                validate_credentials("net", psk, Security::Wpa).is_ok(),
+                "must accept {psk:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_validate_credentials_rejects_ungrammatical_characters() {
+        for psk in ["has\"quote", "has\nnewline", "has\0nul"] {
+            assert!(
+                validate_credentials("net", psk, Security::Wpa).is_err(),
+                "must reject {psk:?}"
+            );
+        }
+        assert!(validate_credentials("has\"quote", "goodpass", Security::Wpa).is_err());
+    }
+
+    #[test]
+    fn test_validate_credentials_enforces_wpa_psk_length() {
+        assert!(validate_credentials("net", "short7c", Security::Wpa).is_err());
+        assert!(validate_credentials("net", &"x".repeat(64), Security::Wpa).is_err());
+        assert!(validate_credentials("net", &"x".repeat(63), Security::Wpa).is_ok());
+    }
+
+    #[test]
+    fn test_validate_credentials_enforces_ssid_length() {
+        assert!(validate_credentials("", "goodpass", Security::Wpa).is_err());
+        assert!(validate_credentials(&"s".repeat(33), "goodpass", Security::Wpa).is_err());
+        assert!(validate_credentials(&"s".repeat(32), "goodpass", Security::Wpa).is_ok());
+    }
+
+    #[test]
+    fn test_validate_credentials_open_ignores_psk_length() {
+        assert!(validate_credentials("net", "", Security::Open).is_ok());
+    }
+
+    #[test]
+    fn test_wpa_supplicant_conf_quotes_ssid_and_psk() {
+        let out = wpa_supplicant_conf("my net", "s3cret!!", Security::Wpa);
+        assert!(out.contains("ctrl_interface="), "wpa_cli needs a control socket");
+        assert!(out.contains(r#"ssid="my net""#));
+        assert!(out.contains(r#"psk="s3cret!!""#));
+        assert!(out.contains("key_mgmt=WPA-PSK"));
+    }
+
+    #[test]
+    fn test_wpa_supplicant_conf_open_network_has_no_psk() {
+        let out = wpa_supplicant_conf("guest", "", Security::Open);
+        assert!(out.contains("key_mgmt=NONE"));
+        assert!(!out.contains("psk="));
+    }
+
+    #[test]
+    fn test_wpa_supplicant_conf_is_deterministic() {
+        let a = wpa_supplicant_conf("net", "password", Security::Wpa);
+        let b = wpa_supplicant_conf("net", "password", Security::Wpa);
+        assert_eq!(a, b);
     }
 }
