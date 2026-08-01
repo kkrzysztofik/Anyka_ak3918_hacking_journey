@@ -4,7 +4,9 @@
 //! `/usr/sbin/service.sh` runs when a `Factory/` directory is present on the
 //! SD card. See `docs/plans/2026-08-01-boot-runtime-rust-design.md`.
 
+pub mod boot;
 pub mod config;
+pub mod logging;
 pub mod storm;
 pub mod supervise;
 pub mod sys;
