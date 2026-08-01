@@ -101,9 +101,20 @@ pub fn system_setup(sys: &dyn Sys, cfg: &Config) {
         Err(e) => tracing::error!(error = %e, "wifi config update failed"),
     }
 
-    match sys.run_to_completion("/usr/sbin/wifi_manage.sh", &["start".to_string()]) {
-        Ok(st) => tracing::info!(?st, "wifi_manage.sh start"),
-        Err(e) => tracing::warn!(error = %e, "wifi_manage.sh failed"),
+    match crate::wifi::bring_up(sys, &cfg.wifi) {
+        crate::wifi::Outcome::Up {
+            chip,
+            ref ssid,
+            ref addr,
+        } => {
+            tracing::info!(chip, ssid, addr, "wifi up");
+        }
+        crate::wifi::Outcome::FellBack => {
+            tracing::error!("wifi came up via the vendor fallback; check the chip dispatch");
+        }
+        crate::wifi::Outcome::Failed => {
+            tracing::error!("wifi is down and the fallback is disabled");
+        }
     }
 
     // The P0 wrapper started telnetd on port 24 before config was readable.

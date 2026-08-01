@@ -20,6 +20,16 @@ ftp = true
 ssid = "CHANGE_ME"
 password = "CHANGE_ME"
 config_file = "/etc/jffs2/anyka_cfg.ini"
+security = "wpa"
+chip = "ssv6355_ble"
+gpio_polarity = "high_low"
+interface = "wlan0"
+dhcp = false
+address = "192.168.2.198/24"
+gateway = "192.168.2.1"
+dns = ["192.168.2.1", "8.8.8.8"]
+connect_timeout_sec = 45
+fallback_to_vendor = true
 
 [time]
 enabled = true
@@ -49,6 +59,18 @@ interval_sec = 60
 enabled = false
 interval_min = 720
 jitter_max_sec = 0
+
+[services.udhcpc]
+enabled = true
+exec = "/bin/busybox"
+args = ["udhcpc", "-i", "wlan0", "-f"]
+log = "/mnt/logs/udhcpc.log"
+
+[services.wpa_supplicant]
+enabled = true
+exec = "/usr/sbin/wpa_supplicant"
+args = ["-i", "wlan0", "-D", "nl80211", "-c", "/etc/jffs2/wpa_supplicant.conf"]
+log = "/mnt/logs/wpa_supplicant.log"
 
 [services.vendor-daemon]
 enabled = true

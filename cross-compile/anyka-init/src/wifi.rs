@@ -218,7 +218,9 @@ pub fn validate_credentials(ssid: &str, psk: &str, sec: Security) -> Result<(), 
         return Err(format!("[wifi] ssid contains unsupported character {c:?}"));
     }
     if let Some(c) = psk.chars().find(|c| UNGRAMMATICAL.contains(c)) {
-        return Err(format!("[wifi] password contains unsupported character {c:?}"));
+        return Err(format!(
+            "[wifi] password contains unsupported character {c:?}"
+        ));
     }
     if sec == Security::Wpa && !(8..=63).contains(&psk.len()) {
         return Err(format!(
@@ -324,10 +326,7 @@ pub enum Outcome {
 /// Resolve the chip and GPIO polarity. Pinned config wins; `auto` parses
 /// `hw.conf`, preferring the Factory override when present
 /// (`wifi_driver.sh:41-47`).
-pub fn resolve_chip(
-    pinned: &str,
-    hw_conf_path: &str,
-) -> Result<(&'static Chip, Polarity), String> {
+pub fn resolve_chip(pinned: &str, hw_conf_path: &str) -> Result<(&'static Chip, Polarity), String> {
     if pinned != "auto" {
         let chip = Chip::from_name(pinned)
             .ok_or_else(|| format!("[wifi] chip = {pinned:?} is not a known chip"))?;
@@ -357,9 +356,7 @@ pub fn bring_up(sys: &dyn Sys, cfg: &WifiCfg) -> Outcome {
             if cfg.fallback_to_vendor {
                 fall_back(sys)
             } else {
-                tracing::error!(
-                    "fallback_to_vendor is disabled; the camera may be unreachable"
-                );
+                tracing::error!("fallback_to_vendor is disabled; the camera may be unreachable");
                 Outcome::Failed
             }
         }
@@ -444,11 +441,8 @@ fn try_bring_up(sys: &dyn Sys, cfg: &WifiCfg) -> Result<Outcome, String> {
         .map_err(|e| format!("ifconfig up: {e}"))?;
 
     // 7. Write wpa_supplicant.conf.
-    std::fs::write(
-        WPA_CONF,
-        wpa_supplicant_conf(&cfg.ssid, &cfg.password, sec),
-    )
-    .map_err(|e| format!("write {WPA_CONF}: {e}"))?;
+    std::fs::write(WPA_CONF, wpa_supplicant_conf(&cfg.ssid, &cfg.password, sec))
+        .map_err(|e| format!("write {WPA_CONF}: {e}"))?;
 
     // 8-9. wpa_supplicant is a supervised service started in P3 (design Q1), so
     // bring-up starts it once here in the foreground-detached form and waits for
@@ -663,8 +657,7 @@ mod tests {
 
     // The real record from this camera: orig/etc/jffs2/hw.conf, byte-identical to
     // the /mnt/Factory copy. 64 characters after the HW= prefix.
-    const HW_REAL: &str =
-        "HW=111513155011100180020000000000000000000000020000003h200000000000\n";
+    const HW_REAL: &str = "HW=111513155011100180020000000000000000000000020000003h200000000000\n";
 
     // service.sh:124 writes this when hw.conf is absent: 32 characters, so
     // offset 51 does not exist (W2).
@@ -749,7 +742,10 @@ mod tests {
     #[test]
     fn test_wpa_supplicant_conf_quotes_ssid_and_psk() {
         let out = wpa_supplicant_conf("my net", "s3cret!!", Security::Wpa);
-        assert!(out.contains("ctrl_interface="), "wpa_cli needs a control socket");
+        assert!(
+            out.contains("ctrl_interface="),
+            "wpa_cli needs a control socket"
+        );
         assert!(out.contains(r#"ssid="my net""#));
         assert!(out.contains(r#"psk="s3cret!!""#));
         assert!(out.contains("key_mgmt=WPA-PSK"));
