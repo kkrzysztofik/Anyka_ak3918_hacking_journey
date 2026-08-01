@@ -3,6 +3,7 @@
 //!
 //! See docs/plans/2026-08-01-boot-runtime-rust-design.md, addendum.
 
+use std::net::Ipv4Addr;
 use std::time::Duration;
 
 /// One row of the vendor's chip dispatch, transcribed from
@@ -254,6 +255,46 @@ pub fn wpa_supplicant_conf(ssid: &str, psk: &str, sec: Security) -> String {
     s
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Cidr {
+    pub address: String,
+    pub netmask: String,
+}
+
+/// Parse `a.b.c.d/prefix` into the two strings `ifconfig` wants.
+///
+/// Runs at config-parse time, not at apply time: a malformed static address is
+/// a W6-class failure — the camera associates, is unreachable, and no rung of
+/// the R7 fallback fires because there is a carrier (R12).
+pub fn parse_cidr(src: &str) -> Option<Cidr> {
+    let (addr, prefix) = src.split_once('/')?;
+    let addr: Ipv4Addr = addr.parse().ok()?;
+    let prefix: u32 = prefix.parse().ok()?;
+    if prefix > 32 {
+        return None;
+    }
+    let mask = if prefix == 0 {
+        0u32
+    } else {
+        u32::MAX << (32 - prefix)
+    };
+    Some(Cidr {
+        address: addr.to_string(),
+        netmask: Ipv4Addr::from(mask).to_string(),
+    })
+}
+
+/// W7: the resolver reads `/etc/resolv.conf`, but busybox udhcpc writes
+/// `/etc/jffs2/resolv.conf` (`/usr/share/udhcpc/default.script:5`) and nothing
+/// in the rootfs links the two. Without this, SNTP by hostname never resolves
+/// and D7 fires — a wrong clock rejects every authenticated ONVIF request.
+pub fn resolv_conf(servers: &[String]) -> String {
+    servers
+        .iter()
+        .map(|s| format!("nameserver {s}\n"))
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -405,5 +446,51 @@ mod tests {
         let a = wpa_supplicant_conf("net", "password", Security::Wpa);
         let b = wpa_supplicant_conf("net", "password", Security::Wpa);
         assert_eq!(a, b);
+    }
+
+    #[test]
+    fn test_parse_cidr_splits_address_and_netmask() {
+        let a = parse_cidr("192.168.2.198/24").expect("valid cidr");
+        assert_eq!(a.address, "192.168.2.198");
+        assert_eq!(a.netmask, "255.255.255.0");
+    }
+
+    #[test]
+    fn test_parse_cidr_handles_uncommon_prefixes() {
+        assert_eq!(parse_cidr("10.0.0.1/8").expect("/8").netmask, "255.0.0.0");
+        assert_eq!(
+            parse_cidr("10.0.0.1/30").expect("/30").netmask,
+            "255.255.255.252"
+        );
+        assert_eq!(
+            parse_cidr("10.0.0.1/32").expect("/32").netmask,
+            "255.255.255.255"
+        );
+    }
+
+    #[test]
+    fn test_parse_cidr_rejects_malformed_input() {
+        // R12: every one of these, accepted, produces an unreachable camera.
+        for bad in [
+            "192.168.2.198",    // no prefix
+            "192.168.2.198/33", // prefix out of range
+            "192.168.2/24",     // too few octets
+            "192.168.2.999/24", // octet out of range
+            "not-an-address/24",
+            "",
+        ] {
+            assert!(parse_cidr(bad).is_none(), "must reject {bad:?}");
+        }
+    }
+
+    #[test]
+    fn test_resolv_conf_renders_one_nameserver_per_line() {
+        let out = resolv_conf(&["192.168.2.1".into(), "8.8.8.8".into()]);
+        assert_eq!(out, "nameserver 192.168.2.1\nnameserver 8.8.8.8\n");
+    }
+
+    #[test]
+    fn test_resolv_conf_empty_list_is_empty_string() {
+        assert_eq!(resolv_conf(&[]), "");
     }
 }
