@@ -59,7 +59,7 @@ pub fn make_channel() -> (Sender<Msg>, Receiver<Msg>) {
 }
 
 pub fn spawn_reaper(sys: Arc<dyn Sys>, tx: Sender<Msg>, stop: Arc<AtomicBool>) {
-    let _ = std::thread::Builder::new()
+    let spawned = std::thread::Builder::new()
         .name("reaper".into())
         .stack_size(thread_stack())
         .spawn(move || {
@@ -85,10 +85,16 @@ pub fn spawn_reaper(sys: Arc<dyn Sys>, tx: Sender<Msg>, stop: Arc<AtomicBool>) {
                 }
             }
         });
+    if let Err(e) = spawned {
+        tracing::error!(
+            error = %e,
+            "failed to start the reaper thread; service exits will not be observed"
+        );
+    }
 }
 
 pub fn spawn_signal_thread(tx: Sender<Msg>) {
-    let _ = std::thread::Builder::new()
+    let spawned = std::thread::Builder::new()
         .name("signals".into())
         .stack_size(thread_stack())
         .spawn(move || {
@@ -101,6 +107,12 @@ pub fn spawn_signal_thread(tx: Sender<Msg>) {
                 let _ = tx.send(Msg::Shutdown);
             }
         });
+    if let Err(e) = spawned {
+        tracing::error!(
+            error = %e,
+            "failed to start the signal thread; SIGTERM/SIGINT will not shut down cleanly"
+        );
+    }
 }
 
 pub fn run(sys: Arc<dyn Sys>, cfg: &Config, rx: Receiver<Msg>) {
@@ -170,8 +182,14 @@ pub fn run(sys: Arc<dyn Sys>, cfg: &Config, rx: Receiver<Msg>) {
                             &policy,
                         );
                         services[i].state = d.next;
-                        if let Action::Reboot(why) = d.action {
-                            do_reboot(sys.as_ref(), cfg, &why);
+                        if let Action::Reboot(why) = d.action
+                            && !do_reboot(sys.as_ref(), cfg, &why)
+                        {
+                            apply_failed_reboot_backoff(
+                                &mut services[i],
+                                sys.now(),
+                                policy.backoff_max,
+                            );
                         }
                     }
                 }
@@ -200,8 +218,10 @@ pub fn run(sys: Arc<dyn Sys>, cfg: &Config, rx: Receiver<Msg>) {
                 let state = services[i].state;
                 let d = decide(&state, &mut services[i].hist, Event::Exited, now, &policy);
                 services[i].state = d.next;
-                if let Action::Reboot(why) = d.action {
-                    do_reboot(sys.as_ref(), cfg, &why);
+                if let Action::Reboot(why) = d.action
+                    && !do_reboot(sys.as_ref(), cfg, &why)
+                {
+                    apply_failed_reboot_backoff(&mut services[i], sys.now(), policy.backoff_max);
                 }
             }
             Ok(Msg::RestartService(name)) => match services.iter().find(|s| s.name == name) {
@@ -221,7 +241,7 @@ pub fn run(sys: Arc<dyn Sys>, cfg: &Config, rx: Receiver<Msg>) {
             },
             Ok(Msg::Shutdown) => {
                 tracing::info!("shutdown requested");
-                shutdown(sys.as_ref(), &by_pid);
+                shutdown(sys.as_ref(), &by_pid, &rx);
                 return;
             }
             Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
@@ -263,14 +283,16 @@ pub fn periodic_reboot_loop(sys: &dyn Sys, interval_min: u64, jitter_max_sec: u6
         crate::timesync::random_nonce(),
     );
     tracing::info!(delay_sec = delay.as_secs(), "periodic reboot scheduled");
-    std::thread::sleep(delay);
+    sys.sleep(delay);
     tracing::warn!("periodic reboot interval elapsed; rebooting");
     if let Err(e) = sys.reboot() {
         tracing::error!(error = %e, "periodic reboot failed");
     }
 }
 
-fn do_reboot(sys: &dyn Sys, cfg: &Config, why: &str) {
+/// Returns `false` when `reboot()` fails so the caller can clear history and
+/// apply a bounded backoff instead of spinning and rewriting flash.
+fn do_reboot(sys: &dyn Sys, cfg: &Config, why: &str) -> bool {
     tracing::error!(reason = why, "crash-loop cap exceeded; rebooting");
     let mut st = StormState::load(&cfg.supervisor.storm_guard_state);
     st.fast_reboots = st.fast_reboots.saturating_add(1);
@@ -279,15 +301,40 @@ fn do_reboot(sys: &dyn Sys, cfg: &Config, why: &str) {
     }
     if let Err(e) = sys.reboot() {
         tracing::error!(error = %e, "reboot failed");
+        return false;
     }
+    true
 }
 
-fn shutdown(sys: &dyn Sys, by_pid: &BTreeMap<Pid, usize>) {
-    for &pid in by_pid.keys() {
+fn apply_failed_reboot_backoff(svc: &mut Service, now: Instant, backoff_max: Duration) {
+    svc.hist.clear();
+    svc.state = SvcState::Backoff {
+        until: now + backoff_max,
+        attempt: u32::MAX / 2,
+    };
+}
+
+fn shutdown(sys: &dyn Sys, by_pid: &BTreeMap<Pid, usize>, rx: &Receiver<Msg>) {
+    use std::collections::BTreeSet;
+    let mut pending: BTreeSet<Pid> = by_pid.keys().copied().collect();
+    for &pid in &pending {
         let _ = sys.kill(pid, libc::SIGTERM);
     }
-    std::thread::sleep(Duration::from_secs(5));
-    for &pid in by_pid.keys() {
+    let deadline = sys.now() + Duration::from_secs(5);
+    while !pending.is_empty() {
+        let left = deadline.saturating_duration_since(sys.now());
+        if left.is_zero() {
+            break;
+        }
+        match rx.recv_timeout(left) {
+            Ok(Msg::Exited(pid, _)) => {
+                pending.remove(&pid);
+            }
+            Ok(_) => {}
+            Err(_) => break,
+        }
+    }
+    for pid in pending {
         let _ = sys.kill(pid, libc::SIGKILL);
     }
 }

@@ -206,8 +206,10 @@ fn local_host_addresses(fib_trie: &str) -> Vec<Ipv4Addr> {
 }
 
 /// The whole recovery ladder. `ticks` counts *consecutive* unhealthy samples
-/// and is reset by the caller after any action, so the next escalation starts
-/// one rung higher.
+/// (reset only on health recovery). Escalation is selected by absolute
+/// thresholds (`dhcp_after_ticks`, `supplicant_after_ticks`, then
+/// `reboot_after_ticks`); the caller must not reset `ticks` after taking an
+/// action or the same lowest matching rung fires forever.
 pub fn decide(h: Health, ticks: u32, p: &Policy) -> Action {
     if h.ok() {
         return Action::Nothing;

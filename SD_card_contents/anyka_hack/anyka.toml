@@ -16,7 +16,9 @@ telnet = false
 ftp = true
 
 [wifi]
-# EDIT THESE before deploying the SD card.
+# EDIT ssid/password before deploying the SD card.
+# First boot uses DHCP so the camera is not forced onto 192.168.2.0/24.
+# For static addressing set dhcp = false and fill address/gateway/dns.
 ssid = "CHANGE_ME"
 password = "CHANGE_ME"
 config_file = "/etc/jffs2/anyka_cfg.ini"
@@ -24,10 +26,10 @@ security = "wpa"
 chip = "ssv6355_ble"
 gpio_polarity = "high_low"
 interface = "wlan0"
-dhcp = false
-address = "192.168.2.198/24"
-gateway = "192.168.2.1"
-dns = ["192.168.2.1", "8.8.8.8"]
+dhcp = true
+# address = "192.168.2.198/24"
+# gateway = "192.168.2.1"
+# dns = ["192.168.2.1", "8.8.8.8"]
 connect_timeout_sec = 45
 fallback_to_vendor = true
 
@@ -40,7 +42,7 @@ retry_interval_sec = 30
 resync_interval_sec = 21600
 step_threshold_sec = 2
 min_plausible_unix = 1767225600
-max_plausible_unix = 2524608000
+max_plausible_unix = 2147483647
 
 [supervisor]
 backoff_min_sec = 1
@@ -67,10 +69,9 @@ interval_min = 720
 jitter_max_sec = 0
 
 [services.udhcpc]
-# Disabled because [wifi] dhcp = false. A renewer would take a lease and
-# replace the static address bring-up assigned. Set enabled = true only
-# together with [wifi] dhcp = true.
-enabled = false
+# Keep enabled together with [wifi] dhcp = true. Disable when using static
+# addressing so a renewer cannot overwrite the configured address.
+enabled = true
 exec = "/bin/busybox"
 args = ["udhcpc", "-i", "wlan0", "-f"]
 log = "/mnt/logs/udhcpc.log"

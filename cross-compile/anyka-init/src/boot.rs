@@ -5,18 +5,33 @@ use crate::sys::Sys;
 
 /// Rewrite `ssid`/`password` in an `anyka_cfg.ini`, preserving every other
 /// line verbatim. Matches only lines whose key is exactly `ssid` or `password`.
+/// Missing keys are appended so a file without them still verifies on readback.
 pub fn rewrite_wifi_cfg(src: &str, ssid: &str, password: &str) -> String {
     let mut out = String::with_capacity(src.len() + 32);
+    let mut saw_ssid = false;
+    let mut saw_password = false;
     for line in src.lines() {
         let key = line.split('=').next().unwrap_or("").trim();
         match key {
-            "ssid" => out.push_str(&format!("ssid = {ssid}\n")),
-            "password" => out.push_str(&format!("password = {password}\n")),
+            "ssid" => {
+                saw_ssid = true;
+                out.push_str(&format!("ssid = {ssid}\n"));
+            }
+            "password" => {
+                saw_password = true;
+                out.push_str(&format!("password = {password}\n"));
+            }
             _ => {
                 out.push_str(line);
                 out.push('\n');
             }
         }
+    }
+    if !saw_ssid {
+        out.push_str(&format!("ssid = {ssid}\n"));
+    }
+    if !saw_password {
+        out.push_str(&format!("password = {password}\n"));
     }
     out
 }
@@ -57,9 +72,11 @@ pub fn apply_wifi(cfg: &WifiCfg) -> anyhow::Result<bool> {
         return Err(e.into());
     }
 
-    let readback = std::fs::read_to_string(path)?;
-    if needs_wifi_update(&readback, &cfg.ssid, &cfg.password) {
-        tracing::error!("wifi config readback mismatch; restoring backup");
+    let verified = std::fs::read_to_string(path)
+        .map(|readback| !needs_wifi_update(&readback, &cfg.ssid, &cfg.password))
+        .unwrap_or(false);
+    if !verified {
+        tracing::error!("wifi config readback failed or mismatched; restoring backup");
         std::fs::write(path, &current)?;
         anyhow::bail!("wifi config verification failed");
     }
@@ -172,6 +189,15 @@ channel = 6
         let once = rewrite_wifi_cfg(SAMPLE, "n", "p");
         let twice = rewrite_wifi_cfg(&once, "n", "p");
         assert_eq!(once, twice);
+    }
+
+    #[test]
+    fn test_rewrite_appends_missing_ssid_and_password() {
+        let src = "[wlan]\nchannel = 6\n";
+        let out = rewrite_wifi_cfg(src, "newnet", "newpass");
+        assert!(out.contains("ssid = newnet"));
+        assert!(out.contains("password = newpass"));
+        assert!(!needs_wifi_update(&out, "newnet", "newpass"));
     }
 
     #[test]

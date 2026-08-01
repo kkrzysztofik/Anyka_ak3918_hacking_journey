@@ -275,8 +275,9 @@ fn d_min_plausible() -> u64 {
     1_767_225_600
 } // 2026-01-01
 fn d_max_plausible() -> u64 {
-    2_524_608_000
-} // 2050-01-01
+    // ARMv5 uClibc uses 32-bit time_t; stay below the 2038 overflow.
+    i32::MAX as u64
+}
 fn d_backoff_min() -> u64 {
     1
 }
@@ -424,6 +425,46 @@ impl Config {
                 "time.enabled is true but time.servers is empty".into(),
             ));
         }
+        if self.time.enabled
+            && (self.time.retry_interval_sec == 0 || self.time.resync_interval_sec == 0)
+        {
+            return Err(ConfigError::Invalid(
+                "time.retry_interval_sec and time.resync_interval_sec must be non-zero".into(),
+            ));
+        }
+        if self.monitor.enabled && self.monitor.interval_sec == 0 {
+            return Err(ConfigError::Invalid(
+                "monitor.interval_sec must be non-zero".into(),
+            ));
+        }
+        if self.reboot.enabled && self.reboot.interval_min == 0 {
+            return Err(ConfigError::Invalid(
+                "reboot.interval_min must be non-zero when reboot.enabled is true".into(),
+            ));
+        }
+        if self.supervisor.crashloop_count == 0 {
+            return Err(ConfigError::Invalid(
+                "supervisor.crashloop_count must be non-zero".into(),
+            ));
+        }
+        if self.wifi.chip != "auto" && crate::wifi::Chip::from_name(&self.wifi.chip).is_none() {
+            return Err(ConfigError::Invalid(format!(
+                "[wifi] chip = {:?} is not \"auto\" or a known chip name",
+                self.wifi.chip
+            )));
+        }
+        if crate::wifi::Polarity::from_name(&self.wifi.gpio_polarity).is_none() {
+            return Err(ConfigError::Invalid(format!(
+                "[wifi] gpio_polarity = {:?} is not one of low_high, high_low",
+                self.wifi.gpio_polarity
+            )));
+        }
+        if crate::wifi::Security::from_name(&self.wifi.security).is_none() {
+            return Err(ConfigError::Invalid(format!(
+                "[wifi] security = {:?} is not one of wpa, wep, open",
+                self.wifi.security
+            )));
+        }
         if !self.wifi.dhcp {
             if self.wifi.address.is_none() {
                 return Err(ConfigError::Invalid(
@@ -553,6 +594,61 @@ env = {{ LD_LIBRARY_PATH = "/mnt/anyka_hack/vendor-daemon/lib" }}
         let src = format!("{MINIMAL}\n[time]\nmin_plausible_unix = 99\nmax_plausible_unix = 98\n");
         let cfg = Config::from_str(&src).expect("parses");
         assert!(cfg.validate().is_err());
+    }
+
+    #[test]
+    fn test_config_validate_rejects_zero_intervals() {
+        let src = format!("{MINIMAL}\n[monitor]\ninterval_sec = 0\n");
+        let cfg = Config::from_str(&src).expect("parses");
+        assert!(cfg.validate().is_err());
+
+        let src = format!("{MINIMAL}\n[time]\nretry_interval_sec = 0\n");
+        let cfg = Config::from_str(&src).expect("parses");
+        assert!(cfg.validate().is_err());
+
+        let src = format!("{MINIMAL}\n[reboot]\nenabled = true\ninterval_min = 0\n");
+        let cfg = Config::from_str(&src).expect("parses");
+        assert!(cfg.validate().is_err());
+
+        let src = format!("{MINIMAL}\n[supervisor]\ncrashloop_count = 0\n");
+        let cfg = Config::from_str(&src).expect("parses");
+        assert!(cfg.validate().is_err());
+    }
+
+    #[test]
+    fn test_config_validate_rejects_unknown_wifi_enums() {
+        let err = load_from_str(
+            r#"
+[wifi]
+ssid = "net"
+password = "secret12"
+gpio_polarity = "high-low"
+"#,
+        )
+        .expect_err("typo polarity must be rejected");
+        assert!(format!("{err}").contains("gpio_polarity"));
+
+        let err = load_from_str(
+            r#"
+[wifi]
+ssid = "net"
+password = "secret12"
+security = "wpa3"
+"#,
+        )
+        .expect_err("unknown security must be rejected");
+        assert!(format!("{err}").contains("security"));
+
+        let err = load_from_str(
+            r#"
+[wifi]
+ssid = "net"
+password = "secret12"
+chip = "not_a_chip"
+"#,
+        )
+        .expect_err("unknown chip must be rejected");
+        assert!(format!("{err}").contains("chip"));
     }
 
     fn load_from_str(src: &str) -> Result<Config, ConfigError> {

@@ -198,8 +198,14 @@ impl Sys for RealSys {
         let dur = t
             .duration_since(UNIX_EPOCH)
             .map_err(|e| SysError::Other(format!("time before unix epoch: {e}")))?;
+        let tv_sec = libc::time_t::try_from(dur.as_secs()).map_err(|_| {
+            SysError::Other(format!(
+                "unix time {} overflows this platform's time_t",
+                dur.as_secs()
+            ))
+        })?;
         let ts = libc::timespec {
-            tv_sec: dur.as_secs() as libc::time_t,
+            tv_sec,
             tv_nsec: dur.subsec_nanos() as libc::c_long,
         };
         // SAFETY: timespec is stack-local and valid for CLOCK_REALTIME.

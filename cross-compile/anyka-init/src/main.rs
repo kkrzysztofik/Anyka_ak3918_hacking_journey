@@ -21,7 +21,12 @@ fn main() {
         }
     };
 
-    if let Err(e) = logging::init(&cfg.log.dir, &cfg.log.level) {
+    if let Err(e) = logging::init(
+        &cfg.log.dir,
+        &cfg.log.level,
+        cfg.log.max_bytes,
+        cfg.log.keep,
+    ) {
         // Do NOT park here. Parking on a bad config is right — a guessed
         // wifi_ssid or sensor_module does real damage. Losing the log directory
         // is not in that class: /mnt is vfat and can come back read-only after
@@ -48,6 +53,9 @@ fn main() {
             "SAFE MODE: reboot-storm threshold reached. Log in over telnet :24, \
              fix the failing service, clear /mnt/anyka_hack/state/boot.json, reboot."
         );
+        // system_setup honouring [system].telnet=false would kill the P0
+        // recovery channel before we park — leave no way in. Force it on.
+        cfg.system.telnet = true;
     }
 
     // P2

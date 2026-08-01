@@ -9,7 +9,10 @@ echo
 
 # Test log directory initialization
 echo "Testing log directory initialization..."
-mkdir -p /mnt/logs 2>/dev/null || true
+if ! mkdir -p /mnt/logs; then
+  echo "✗ Failed to create or access /mnt/logs"
+  exit 1
+fi
 
 # Check main log directory
 if [ -d "/mnt/logs" ]; then

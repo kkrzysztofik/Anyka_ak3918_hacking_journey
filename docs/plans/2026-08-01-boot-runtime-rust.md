@@ -140,7 +140,7 @@ Expected: `Finished` with no errors.
 
 ```bash
 $CARGO build --release --target arm-anykav200-crosstool-ng
-file target/arm-anykav200-crosstool-ng/release/anyka-init
+file ../target/arm-anykav200-crosstool-ng/release/anyka-init
 ```
 Expected: `ELF 32-bit LSB executable, ARM, EABI5 ... dynamically linked, interpreter /mnt/anyka_hack/lib/ld-uClibc.so.1`
 
@@ -2504,7 +2504,7 @@ fn park() -> ! {
 ```bash
 $CARGO build --target x86_64-unknown-linux-gnu
 $CARGO build --release --target arm-anykav200-crosstool-ng
-ls -la target/arm-anykav200-crosstool-ng/release/anyka-init
+ls -la ../target/arm-anykav200-crosstool-ng/release/anyka-init
 ```
 
 **Step 3: Lint and commit**
@@ -2612,7 +2612,7 @@ step must run:
   --manifest-path "${ANYKA_REPO_ROOT}/cross-compile/anyka-init/Cargo.toml"
 
 install -m 0755 \
-  "${ANYKA_REPO_ROOT}/cross-compile/anyka-init/target/arm-anykav200-crosstool-ng/release/anyka-init" \
+  "${ANYKA_REPO_ROOT}/cross-compile/target/arm-anykav200-crosstool-ng/release/anyka-init" \
   "${ANYKA_REPO_ROOT}/SD_card_contents/anyka_hack/anyka-init.bin"
 ```
 

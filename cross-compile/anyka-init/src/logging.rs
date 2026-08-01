@@ -24,21 +24,29 @@ pub fn rotate_if_needed(path: &str, max_bytes: u64, keep: u8) -> std::io::Result
         return Ok(());
     }
     let oldest = format!("{path}.{keep}");
-    let _ = std::fs::remove_file(&oldest);
+    ignore_not_found(std::fs::remove_file(&oldest))?;
     for n in (1..keep).rev() {
         let from = format!("{path}.{n}");
         let to = format!("{path}.{}", n + 1);
-        let _ = std::fs::rename(&from, &to);
+        ignore_not_found(std::fs::rename(&from, &to))?;
     }
     std::fs::rename(path, format!("{path}.1"))
+}
+
+fn ignore_not_found(result: std::io::Result<()>) -> std::io::Result<()> {
+    match result {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        other => other,
+    }
 }
 
 /// Install the tracing subscriber writing to `<dir>/anyka-init.log`, with
 /// ERROR-level events additionally reaching stderr (which `service.sh` leaves
 /// attached to the boot console).
-pub fn init(dir: &str, level: &str) -> anyhow::Result<()> {
+pub fn init(dir: &str, level: &str, max_bytes: u64, keep: u8) -> anyhow::Result<()> {
     std::fs::create_dir_all(dir)?;
     let path = format!("{dir}/anyka-init.log");
+    rotate_if_needed(&path, max_bytes, keep)?;
     let file = std::fs::OpenOptions::new()
         .create(true)
         .append(true)

@@ -23,7 +23,7 @@ pub struct StormState {
 impl StormState {
     fn field(src: &str, name: &str) -> Option<u8> {
         let key = format!("\"{name}\":");
-        let rest = src.split_once(&key)?.1;
+        let rest = src.split_once(&key)?.1.trim_start();
         let end = rest
             .find(|c: char| !c.is_ascii_digit())
             .unwrap_or(rest.len());
@@ -56,11 +56,16 @@ impl StormState {
     /// Write via temp file + rename so a power cut leaves either the old
     /// contents or the new ones, never a half-written file.
     pub fn save(&self, path: &str) -> std::io::Result<()> {
+        use std::io::Write;
         if let Some(dir) = std::path::Path::new(path).parent() {
             std::fs::create_dir_all(dir)?;
         }
         let tmp = format!("{path}.tmp");
-        std::fs::write(&tmp, self.render())?;
+        {
+            let mut f = std::fs::File::create(&tmp)?;
+            f.write_all(self.render().as_bytes())?;
+            f.sync_all()?;
+        }
         std::fs::rename(&tmp, path)?;
         // SAFETY: sync(2) takes no arguments and cannot fail.
         unsafe { libc::sync() };
@@ -85,6 +90,11 @@ mod tests {
     #[test]
     fn test_storm_state_parses_valid_json() {
         assert_eq!(StormState::parse(r#"{"fast_reboots":2}"#).fast_reboots, 2);
+    }
+
+    #[test]
+    fn test_storm_state_parses_whitespace_after_colon() {
+        assert_eq!(StormState::parse(r#"{"fast_reboots": 2}"#).fast_reboots, 2);
     }
 
     #[test]

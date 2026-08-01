@@ -95,9 +95,9 @@ pub fn parse_response(
     Ok(UNIX_EPOCH + Duration::new(unix, frac_nanos))
 }
 
-/// Read a 64-bit nonce from `/dev/urandom`. Falls back to a monotonic-derived
-/// value if unavailable — weaker, but the alternative is skipping the
-/// anti-spoofing check entirely.
+/// Read a 64-bit nonce from `/dev/urandom`. Falls back to a mixed
+/// wall-clock / pid / counter value if unavailable — weaker than urandom,
+/// but `Instant::now().elapsed()` is ~0 and must not be used alone.
 pub fn random_nonce() -> u64 {
     let mut buf = [0u8; 8];
     if let Ok(mut f) = std::fs::File::open("/dev/urandom")
@@ -105,7 +105,25 @@ pub fn random_nonce() -> u64 {
     {
         return u64::from_be_bytes(buf);
     }
-    std::time::Instant::now().elapsed().as_nanos() as u64 ^ 0x0005_DEEC_E66D_u64
+    fallback_nonce()
+}
+
+/// Non-urandom nonce: wall clock, pid, and a process-local counter so
+/// successive calls differ even when the clock resolution is coarse.
+fn fallback_nonce() -> u64 {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let wall = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos() as u64)
+        .unwrap_or(0);
+    let pid = u64::from(std::process::id());
+    let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+    let stack_mix = std::ptr::from_ref(&COUNTER) as u64;
+    wall.wrapping_mul(0x9E37_79B9_7F4A_7C15)
+        .wrapping_add(pid.wrapping_shl(32))
+        .wrapping_add(n.wrapping_mul(0xBF58_476D_1CE4_E5B9))
+        .wrapping_add(stack_mix)
 }
 
 pub fn query(server: &str, timeout: Duration, bounds: &Bounds) -> anyhow::Result<SystemTime> {
@@ -134,13 +152,34 @@ pub fn query(server: &str, timeout: Duration, bounds: &Bounds) -> anyhow::Result
 
 /// Query each configured server in turn; step the clock on the first success.
 /// Returns the applied delta in seconds, or `None` if nothing was applied.
-pub fn sync_once(sys: &dyn Sys, cfg: &TimeCfg) -> Option<i64> {
+///
+/// When `budget` is `Some`, stop before starting a server query that cannot
+/// finish within the remaining time (socket timeout is capped to the budget).
+/// DNS via `to_socket_addrs` has no caller-controlled deadline, so a single
+/// hung resolver can still overrun — the budget still bounds retries and
+/// subsequent servers.
+pub fn sync_once(sys: &dyn Sys, cfg: &TimeCfg, budget: Option<Duration>) -> Option<i64> {
     let bounds = Bounds {
         min_unix: cfg.min_plausible_unix,
         max_unix: cfg.max_plausible_unix,
     };
+    let started = sys.now();
     for server in &cfg.servers {
-        match query(server, Duration::from_secs(5), &bounds) {
+        let remaining =
+            budget.map(|b| b.saturating_sub(sys.now().saturating_duration_since(started)));
+        if let Some(left) = remaining
+            && left.is_zero()
+        {
+            tracing::warn!("NTP sync budget exhausted before querying {server}");
+            return None;
+        }
+        let timeout = remaining
+            .map(|left| left.min(Duration::from_secs(5)))
+            .unwrap_or(Duration::from_secs(5));
+        if timeout.is_zero() {
+            return None;
+        }
+        match query(server, timeout, &bounds) {
             Ok(t) => {
                 let before = sys.realtime();
                 let delta = delta_secs(before, t);
@@ -177,10 +216,20 @@ pub fn first_sync(sys: &dyn Sys, cfg: &TimeCfg) -> bool {
     }
     let deadline = sys.now() + Duration::from_secs(cfg.first_sync_timeout_sec);
     loop {
-        if sync_once(sys, cfg).is_some() {
+        let remaining = deadline.saturating_duration_since(sys.now());
+        if remaining.is_zero() {
+            tracing::warn!(
+                timeout_sec = cfg.first_sync_timeout_sec,
+                "no NTP sync before boot deadline; continuing with a wrong clock. \
+                 Authenticated ONVIF requests will fail until the resync thread succeeds."
+            );
+            return false;
+        }
+        if sync_once(sys, cfg, Some(remaining)).is_some() {
             return true;
         }
-        if sys.now() >= deadline {
+        let left = deadline.saturating_duration_since(sys.now());
+        if left.is_zero() {
             tracing::warn!(
                 timeout_sec = cfg.first_sync_timeout_sec,
                 "no NTP sync before boot deadline; continuing with a wrong clock. \
@@ -190,7 +239,7 @@ pub fn first_sync(sys: &dyn Sys, cfg: &TimeCfg) -> bool {
         }
         // Bounded by `deadline` above, so a retry_interval longer than the
         // timeout simply means one attempt.
-        std::thread::sleep(Duration::from_secs(cfg.retry_interval_sec.min(2)));
+        sys.sleep(Duration::from_secs(cfg.retry_interval_sec.min(2)).min(left));
     }
 }
 
@@ -205,7 +254,7 @@ pub fn resync_loop(sys: &dyn Sys, cfg: &TimeCfg) {
     let mut synced = false;
     loop {
         std::thread::sleep(Duration::from_secs(resync_wait_secs(synced, cfg)));
-        if sync_once(sys, cfg).is_some() {
+        if sync_once(sys, cfg, None).is_some() {
             synced = true;
         }
     }
@@ -382,5 +431,36 @@ mod delta_tests {
         );
         assert_eq!(resync_wait_secs(true, &cfg), cfg.resync_interval_sec);
         assert!(cfg.retry_interval_sec < cfg.resync_interval_sec);
+    }
+}
+
+#[cfg(test)]
+mod nonce_tests {
+    use super::*;
+
+    #[test]
+    fn test_fallback_nonce_successive_calls_differ() {
+        let a = fallback_nonce();
+        let b = fallback_nonce();
+        let c = fallback_nonce();
+        assert_ne!(a, b, "counter must advance the fallback nonce");
+        assert_ne!(b, c, "counter must advance the fallback nonce");
+        assert_ne!(a, c);
+    }
+
+    #[test]
+    fn test_random_nonce_returns_nonzero_entropy() {
+        // On the host this usually hits /dev/urandom; either path must not
+        // collapse to the old Instant::elapsed() ~0 constant.
+        let samples: Vec<u64> = (0..8).map(|_| random_nonce()).collect();
+        assert!(
+            samples.iter().any(|&n| n != 0),
+            "nonce samples were all zero: {samples:?}"
+        );
+        let unique: std::collections::BTreeSet<_> = samples.iter().copied().collect();
+        assert!(
+            unique.len() > 1,
+            "nonce samples were identical: {samples:?}"
+        );
     }
 }

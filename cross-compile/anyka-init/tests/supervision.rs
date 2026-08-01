@@ -1,16 +1,44 @@
 //! Host integration tests for the supervision loop.
 //!
-//! These call `waitpid(-1)`, which reaps *any* child of the process, so they
-//! must run single-threaded: `cargo test -- --test-threads=1`.
+//! These call `waitpid(-1)`, which reaps *any* child of the process. A process-
+//! wide mutex serializes the suite so parallel `cargo test` cannot cross-reap.
 
 use anyka_init::config::Config;
 use anyka_init::supervisor_loop::{self, Msg};
 use anyka_init::sys::{RealSys, Sys};
 use std::os::unix::fs::PermissionsExt;
-use std::sync::Arc;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 use std::time::Duration;
 
-fn write_config(dir: &std::path::Path, service_toml: &str) -> std::path::PathBuf {
+/// Hold for the duration of any test that starts a reaper or waits on children.
+fn serialize_waitpid_tests() -> MutexGuard<'static, ()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(()))
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+}
+
+fn require_tool(candidates: &[&str]) -> PathBuf {
+    for c in candidates {
+        let p = Path::new(c);
+        if p.is_file() {
+            return p.to_path_buf();
+        }
+    }
+    panic!("required tool not found; tried {candidates:?}");
+}
+
+fn sleep_bin() -> PathBuf {
+    require_tool(&["/bin/sleep", "/usr/bin/sleep"])
+}
+
+fn env_bin() -> PathBuf {
+    require_tool(&["/usr/bin/env", "/bin/env"])
+}
+
+fn write_config(dir: &Path, service_toml: &str) -> PathBuf {
     let log_dir = dir.join("logs");
     std::fs::create_dir_all(&log_dir).expect("log dir");
     let cfg_path = dir.join("anyka.toml");
@@ -39,36 +67,53 @@ crashloop_window_sec = 600
     cfg_path
 }
 
-fn write_exec_script(path: &std::path::Path, body: &str) {
+fn write_exec_script(path: &Path, body: &str) {
     std::fs::write(path, body).expect("write script");
     let mut perms = std::fs::metadata(path).expect("meta").permissions();
     perms.set_mode(0o755);
     std::fs::set_permissions(path, perms).expect("chmod");
 }
 
+struct Harness {
+    tx: std::sync::mpsc::Sender<Msg>,
+    handle: std::thread::JoinHandle<()>,
+    stop: Arc<AtomicBool>,
+    _guard: MutexGuard<'static, ()>,
+}
+
+impl Harness {
+    fn start(cfg: Config) -> Self {
+        let guard = serialize_waitpid_tests();
+        let sys: Arc<dyn Sys> = Arc::new(RealSys::new());
+        let (tx, rx) = supervisor_loop::make_channel();
+        let stop = Arc::new(AtomicBool::new(false));
+        supervisor_loop::spawn_reaper(Arc::clone(&sys), tx.clone(), Arc::clone(&stop));
+        let cfg = Arc::new(cfg);
+        let handle = std::thread::spawn(move || supervisor_loop::run(sys, &cfg, rx));
+        Self {
+            tx,
+            handle,
+            stop,
+            _guard: guard,
+        }
+    }
+
+    fn stop(self) {
+        let _ = self.tx.send(Msg::Shutdown);
+        let _ = self.handle.join();
+        self.stop.store(true, Ordering::Relaxed);
+        std::thread::sleep(Duration::from_millis(100));
+    }
+}
+
 fn drive(cfg: Config, settle: Duration) {
-    use std::sync::atomic::{AtomicBool, Ordering};
-
-    let sys: Arc<dyn Sys> = Arc::new(RealSys::new());
-    let (tx, rx) = supervisor_loop::make_channel();
-    let stop = Arc::new(AtomicBool::new(false));
-    supervisor_loop::spawn_reaper(Arc::clone(&sys), tx.clone(), Arc::clone(&stop));
-
-    let cfg = Arc::new(cfg);
-    let cfg_thread = Arc::clone(&cfg);
-    let handle = std::thread::spawn(move || {
-        supervisor_loop::run(sys, &cfg_thread, rx);
-    });
-
+    let h = Harness::start(cfg);
     std::thread::sleep(settle);
-    let _ = tx.send(Msg::Shutdown);
-    let _ = handle.join();
-    stop.store(true, Ordering::Relaxed);
-    std::thread::sleep(Duration::from_millis(100));
+    h.stop();
 }
 
 #[test]
-fn test_service_that_exits_immediately_is_restarted() {
+fn test_run_service_exits_immediately_is_restarted() {
     let dir = tempfile::tempdir().expect("tempdir");
     let counter = dir.path().join("starts");
     let script = dir.path().join("flaky.sh");
@@ -105,7 +150,8 @@ log = "{}"
 }
 
 #[test]
-fn test_stable_service_is_not_restarted() {
+fn test_run_stable_service_is_not_restarted() {
+    let sleep = sleep_bin();
     let dir = tempfile::tempdir().expect("tempdir");
     let pidfile = dir.path().join("pid");
     let script = dir.path().join("sleeper.sh");
@@ -113,8 +159,9 @@ fn test_stable_service_is_not_restarted() {
     write_exec_script(
         &script,
         &format!(
-            "#!/bin/sh\necho $$ > '{}'\nexec /bin/sleep 300\n",
-            pidfile.display()
+            "#!/bin/sh\necho $$ > '{}'\nexec '{}' 300\n",
+            pidfile.display(),
+            sleep.display()
         ),
     );
 
@@ -132,20 +179,8 @@ log = "{}"
         ),
     );
     let cfg = Config::load(cfg_path.to_str().expect("utf8")).expect("load");
+    let h = Harness::start(cfg);
 
-    use std::sync::atomic::{AtomicBool, Ordering};
-
-    let sys: Arc<dyn Sys> = Arc::new(RealSys::new());
-    let (tx, rx) = supervisor_loop::make_channel();
-    let stop = Arc::new(AtomicBool::new(false));
-    supervisor_loop::spawn_reaper(Arc::clone(&sys), tx.clone(), Arc::clone(&stop));
-    let cfg = Arc::new(cfg);
-    let cfg_thread = Arc::clone(&cfg);
-    let handle = std::thread::spawn(move || {
-        supervisor_loop::run(sys, &cfg_thread, rx);
-    });
-
-    // Wait until the pidfile appears.
     let mut pid = None;
     for _ in 0..50 {
         if let Ok(s) = std::fs::read_to_string(&pidfile)
@@ -165,21 +200,20 @@ log = "{}"
         .parse()
         .expect("pid");
     assert_eq!(pid, pid_later, "stable service PID must not change");
+    // SAFETY: kill with signal 0 performs a permission and existence check
+    // only; it sends no signal and dereferences no pointer.
     assert_eq!(
         unsafe { libc::kill(pid, 0) },
         0,
         "child must still be alive"
     );
 
-    let _ = tx.send(Msg::Shutdown);
-    let _ = handle.join();
-    stop.store(true, Ordering::Relaxed);
-    std::thread::sleep(Duration::from_millis(100));
+    h.stop();
 }
 
 #[test]
-fn test_restart_service_message_respawns_the_child() {
-    // A long-running service that would never exit on its own.
+fn test_run_restart_service_message_respawns_the_child() {
+    let sleep = sleep_bin();
     let dir = tempfile::tempdir().expect("tempdir");
     let pidfile = dir.path().join("pid");
     let script = dir.path().join("sleeper.sh");
@@ -187,8 +221,9 @@ fn test_restart_service_message_respawns_the_child() {
     write_exec_script(
         &script,
         &format!(
-            "#!/bin/sh\necho $$ > '{}'\nexec /bin/sleep 300\n",
-            pidfile.display()
+            "#!/bin/sh\necho $$ > '{}'\nexec '{}' 300\n",
+            pidfile.display(),
+            sleep.display()
         ),
     );
 
@@ -206,18 +241,7 @@ log = "{}"
         ),
     );
     let cfg = Config::load(cfg_path.to_str().expect("utf8")).expect("load");
-
-    use std::sync::atomic::{AtomicBool, Ordering};
-
-    let sys: Arc<dyn Sys> = Arc::new(RealSys::new());
-    let (tx, rx) = supervisor_loop::make_channel();
-    let stop = Arc::new(AtomicBool::new(false));
-    supervisor_loop::spawn_reaper(Arc::clone(&sys), tx.clone(), Arc::clone(&stop));
-    let cfg = Arc::new(cfg);
-    let cfg_thread = Arc::clone(&cfg);
-    let handle = std::thread::spawn(move || {
-        supervisor_loop::run(sys, &cfg_thread, rx);
-    });
+    let h = Harness::start(cfg);
 
     let mut first_pid = None;
     for _ in 0..50 {
@@ -231,7 +255,7 @@ log = "{}"
     }
     let first_pid = first_pid.expect("initial pid");
 
-    let _ = tx.send(Msg::RestartService("sleeper".into()));
+    let _ = h.tx.send(Msg::RestartService("sleeper".into()));
 
     let mut new_pid = None;
     for _ in 0..80 {
@@ -247,14 +271,12 @@ log = "{}"
     let new_pid = new_pid.expect("respawned pid after RestartService");
     assert_ne!(first_pid, new_pid);
 
-    let _ = tx.send(Msg::Shutdown);
-    let _ = handle.join();
-    stop.store(true, Ordering::Relaxed);
-    std::thread::sleep(Duration::from_millis(100));
+    h.stop();
 }
 
 #[test]
-fn test_env_is_cleared_for_children() {
+fn test_run_env_is_cleared_for_children() {
+    let env = env_bin();
     let dir = tempfile::tempdir().expect("tempdir");
     let svc_log = dir.path().join("logs").join("svc.log");
 
@@ -269,17 +291,23 @@ fn test_env_is_cleared_for_children() {
             r#"
 [services.envcheck]
 enabled = true
-exec = "/usr/bin/env"
+exec = "{}"
 log = "{}"
 env = {{ ANYKA_TEST_INJECTED = "present" }}
 "#,
+            env.display(),
             svc_log.display()
         ),
     );
     let cfg = Config::load(cfg_path.to_str().expect("utf8")).expect("load");
     drive(cfg, Duration::from_secs(2));
 
-    let captured = std::fs::read_to_string(&svc_log).expect("svc log");
+    let captured = std::fs::read_to_string(&svc_log).unwrap_or_else(|e| {
+        panic!(
+            "svc log missing after envcheck run (is {} executable?): {e}",
+            env.display()
+        )
+    });
     assert!(
         captured.contains("ANYKA_TEST_INJECTED=present"),
         "injected env missing; log:\n{captured}"

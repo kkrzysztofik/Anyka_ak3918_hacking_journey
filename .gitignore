@@ -52,6 +52,9 @@ cross-compile/onvif-rust/.cargo/**/*
 !cross-compile/onvif-rust/.cargo/config.toml.template
 cross-compile/onvif-rust/target/**/*
 
+# Workspace Cargo target (onvif-rust, streaming-lib, anyka-init)
+cross-compile/target/**/*
+
 # anyka-init supervisor crate
 cross-compile/anyka-init/.cargo/**/*
 !cross-compile/anyka-init/.cargo/config.toml.template

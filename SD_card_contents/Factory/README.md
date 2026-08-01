@@ -4,7 +4,10 @@ If the `Factory` folder is present on the SD, then the camera thinks that there 
 
 This script can be used to automate the hacking of the camera.
 
-**This method is completely safe as no modifications are made to the camera.** The worst that can happen is that the hack does not work, but your camera will remain functional as original.
+**This method does not modify boot firmware.** The worst that can happen if
+the hack fails is that the camera keeps running the stock software. Note that
+when Wi-Fi settings in `anyka.toml` differ from the camera's stored config, the
+supervisor may rewrite `/etc/jffs2/anyka_cfg.ini` so association can succeed.
 
 This is a tested and validated method on one of my cameras with factory reset firmware. Works out of the box, you never have to use the app as wifi will be set up.
 

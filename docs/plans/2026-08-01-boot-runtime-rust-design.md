@@ -221,7 +221,7 @@ retry_interval_sec     = 30
 resync_interval_sec    = 21600
 step_threshold_sec     = 2
 min_plausible_unix     = 1767225600   # 2026-01-01
-max_plausible_unix     = 2524608000   # 2050-01-01
+max_plausible_unix     = 2147483647   # 2038-01-19 (32-bit time_t)
 
 [supervisor]
 backoff_min_sec = 1;   backoff_max_sec = 60

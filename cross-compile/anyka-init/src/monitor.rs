@@ -128,11 +128,11 @@ pub fn run(
                 Action::RunDhcp => {
                     tracing::warn!("no default route; re-running udhcpc");
                     let _ = sys.run_to_completion(BUSYBOX, &udhcpc_oneshot_args(iface));
-                    ticks = 0;
+                    // Do not reset ticks: decide uses absolute thresholds, so
+                    // clearing here would re-fire the same rung forever.
                 }
                 Action::RestartSupplicant => {
                     let _ = tx.send(Msg::RestartService("wpa_supplicant".into()));
-                    ticks = 0;
                 }
                 Action::Reboot => {
                     tracing::error!(
@@ -145,7 +145,8 @@ pub fn run(
                     if let Err(e) = sys.reboot() {
                         tracing::error!(error = %e, "reboot() returned without rebooting");
                     }
-                    ticks = 0;
+                    // Failed reboot: keep ticks so we stay at LogOnly/Reboot
+                    // rather than dropping back to RunDhcp.
                 }
                 Action::LogOnly => {
                     tracing::error!("wifi down and the reboot budget is exhausted; not rebooting");
