@@ -6,6 +6,9 @@
 use std::net::Ipv4Addr;
 use std::time::Duration;
 
+use crate::config::WifiCfg;
+use crate::sys::Sys;
+
 /// One row of the vendor's chip dispatch, transcribed from
 /// `orig/data/wifi_driver.sh:240-370`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -295,6 +298,324 @@ pub fn resolv_conf(servers: &[String]) -> String {
         .collect()
 }
 
+const HW_CONF: &str = "/etc/jffs2/hw.conf";
+const HW_CONF_FACTORY: &str = "/mnt/Factory/newFactory/hw.conf";
+const GPIO_WIFI_EN: &str = "/sys/user-gpio/wifi_en";
+const OTG_MODULE: &str = "/usr/modules/otg-hs.ko";
+const WPA_CONF: &str = "/etc/jffs2/wpa_supplicant.conf";
+const RESOLV_CONF: &str = "/etc/resolv.conf";
+const KO_DIR: &str = "/tmp/ko";
+pub const DRIVER_PROBE_ORDER: [&str; 2] = ["nl80211", "wext"];
+const BUSYBOX: &str = "/bin/busybox";
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Outcome {
+    Up {
+        chip: &'static str,
+        ssid: String,
+        addr: String,
+    },
+    /// Bring-up failed and the vendor chain was invoked instead (R7).
+    FellBack,
+    /// Bring-up failed and the fallback was disabled by config.
+    Failed,
+}
+
+/// Resolve the chip and GPIO polarity. Pinned config wins; `auto` parses
+/// `hw.conf`, preferring the Factory override when present
+/// (`wifi_driver.sh:41-47`).
+pub fn resolve_chip(
+    pinned: &str,
+    hw_conf_path: &str,
+) -> Result<(&'static Chip, Polarity), String> {
+    if pinned != "auto" {
+        let chip = Chip::from_name(pinned)
+            .ok_or_else(|| format!("[wifi] chip = {pinned:?} is not a known chip"))?;
+        // Polarity comes from config in the pinned case; the caller overrides
+        // this with [wifi].gpio_polarity.
+        return Ok((chip, Polarity::LowHigh));
+    }
+    let src = std::fs::read_to_string(hw_conf_path)
+        .map_err(|e| format!("cannot read {hw_conf_path}: {e}"))?;
+    let hw = parse_hw_conf(&src)
+        .ok_or_else(|| format!("{hw_conf_path} is too short or malformed to dispatch a chip"))?;
+    let chip = Chip::from_hw_char(hw.chip_char).ok_or_else(|| {
+        format!(
+            "hw.conf chip character {:?} has no working driver path",
+            hw.chip_char
+        )
+    })?;
+    Ok((chip, Polarity::from_char(hw.polarity_char)))
+}
+
+/// Full bring-up. Steps are numbered to match the design addendum.
+pub fn bring_up(sys: &dyn Sys, cfg: &WifiCfg) -> Outcome {
+    match try_bring_up(sys, cfg) {
+        Ok(outcome) => outcome,
+        Err(e) => {
+            tracing::error!(error = %e, "wifi bring-up failed");
+            if cfg.fallback_to_vendor {
+                fall_back(sys)
+            } else {
+                tracing::error!(
+                    "fallback_to_vendor is disabled; the camera may be unreachable"
+                );
+                Outcome::Failed
+            }
+        }
+    }
+}
+
+/// R7. Regenerates the vendor-shaped conf before delegating, because the
+/// RTL8188 path `sed`s into line numbers 3 and 4 (R10).
+fn fall_back(sys: &dyn Sys) -> Outcome {
+    tracing::error!("falling back to the vendor wifi chain: /usr/sbin/wifi_manage.sh start");
+    match sys.run_to_completion("/usr/sbin/wifi_manage.sh", &["start".to_string()]) {
+        Ok(st) => tracing::warn!(?st, "vendor wifi_manage.sh start invoked"),
+        Err(e) => tracing::error!(error = %e, "vendor fallback also failed"),
+    }
+    Outcome::FellBack
+}
+
+fn try_bring_up(sys: &dyn Sys, cfg: &WifiCfg) -> Result<Outcome, String> {
+    // 1. Resolve chip.
+    let hw_path = if std::path::Path::new(HW_CONF_FACTORY).exists() {
+        HW_CONF_FACTORY
+    } else {
+        HW_CONF
+    };
+    let (chip, detected_pol) = resolve_chip(&cfg.chip, hw_path)?;
+    let polarity = if cfg.chip == "auto" {
+        detected_pol
+    } else {
+        Polarity::from_name(&cfg.gpio_polarity)
+            .ok_or_else(|| format!("[wifi] gpio_polarity = {:?}", cfg.gpio_polarity))?
+    };
+    tracing::info!(chip = chip.name, ?polarity, "wifi chip resolved");
+
+    // 2. Validate credentials before touching hardware.
+    let sec = Security::from_name(&cfg.security)
+        .ok_or_else(|| format!("[wifi] security = {:?}", cfg.security))?;
+    validate_credentials(&cfg.ssid, &cfg.password, sec)?;
+
+    // 3. Power sequence (wifi_driver.sh:373-382).
+    for level in polarity.sequence() {
+        std::fs::write(GPIO_WIFI_EN, level)
+            .map_err(|e| format!("gpio write {GPIO_WIFI_EN}={level}: {e}"))?;
+        sys.sleep(Duration::from_secs(1));
+    }
+
+    // 4. Prepare (wifi_driver.sh:104-112, 197).
+    std::fs::create_dir_all(KO_DIR).map_err(|e| format!("mkdir {KO_DIR}: {e}"))?;
+    let _ = sys.run_to_completion(
+        "tar",
+        &[
+            "zxf".into(),
+            "/data/wifi_driver.tgz".into(),
+            "-C".into(),
+            KO_DIR.into(),
+        ],
+    );
+    let _ = sys.run_to_completion(
+        "tar",
+        &[
+            "zxf".into(),
+            "/data/wifi_tool.tgz".into(),
+            "-C".into(),
+            "/tmp".into(),
+        ],
+    );
+    let _ = sys.insmod(OTG_MODULE);
+    // R9: the vendor papers over USB enumeration timing with `sleep 3`. Keep it
+    // until hardware confirms what it is actually waiting for.
+    sys.sleep(Duration::from_secs(3));
+
+    // 5. Load driver.
+    let _ = sys.rmmod(chip.rmmod); // routine failure on a cold boot
+    sys.run_to_completion("insmod", &chip.insmod_args())
+        .map_err(|e| format!("insmod {}: {e}", chip.module))?;
+    if !chip.settle.is_zero() {
+        sys.sleep(chip.settle);
+    }
+
+    // 6. Wait for the interface (wifi_run.sh:76-86, 30 s cap).
+    wait_for_interface(sys, &cfg.interface, Duration::from_secs(30))?;
+    sys.run_to_completion("ifconfig", &[cfg.interface.clone(), "up".into()])
+        .map_err(|e| format!("ifconfig up: {e}"))?;
+
+    // 7. Write wpa_supplicant.conf.
+    std::fs::write(
+        WPA_CONF,
+        wpa_supplicant_conf(&cfg.ssid, &cfg.password, sec),
+    )
+    .map_err(|e| format!("write {WPA_CONF}: {e}"))?;
+
+    // 8-9. wpa_supplicant is a supervised service started in P3 (design Q1), so
+    // bring-up starts it once here in the foreground-detached form and waits for
+    // association. See Task A8 for the driver-flag probe (R8).
+    let driver = start_supplicant_probing_driver(sys, cfg)?;
+    tracing::info!(driver, "wpa_supplicant associated");
+
+    // 10-12: address, resolv.conf, verification.
+    let addr = assign_address(sys, cfg)?;
+    if !cfg.dns.is_empty() {
+        std::fs::write(RESOLV_CONF, resolv_conf(&cfg.dns))
+            .map_err(|e| format!("write {RESOLV_CONF}: {e}"))?;
+    }
+
+    Ok(Outcome::Up {
+        chip: chip.name,
+        ssid: cfg.ssid.clone(),
+        addr,
+    })
+}
+
+fn wait_for_interface(sys: &dyn Sys, iface: &str, cap: Duration) -> Result<(), String> {
+    let path = format!("/sys/class/net/{iface}");
+    let deadline = sys.now() + cap;
+    while sys.now() < deadline {
+        if std::path::Path::new(&path).exists() {
+            return Ok(());
+        }
+        sys.sleep(Duration::from_secs(1));
+    }
+    Err(format!("{iface} did not appear within {cap:?}"))
+}
+
+pub fn supplicant_args(iface: &str, driver: &str) -> Vec<String> {
+    vec![
+        "-i".into(),
+        iface.into(),
+        "-D".into(),
+        driver.into(),
+        "-c".into(),
+        WPA_CONF.into(),
+    ]
+}
+
+pub fn ifconfig_static_args(iface: &str, cidr: &Cidr) -> Vec<String> {
+    vec![
+        iface.into(),
+        cidr.address.clone(),
+        "netmask".into(),
+        cidr.netmask.clone(),
+    ]
+}
+
+/// Busybox multicall form: `/sbin/udhcpc` does not exist on this device
+/// (`/sbin` holds only ldconfig, mmc_test, updater) and the `orig/` capture
+/// lost its symlinks, so `argv[0]` selects the applet instead (R17).
+pub fn udhcpc_oneshot_args(iface: &str) -> Vec<String> {
+    vec![
+        "udhcpc".into(),
+        "-i".into(),
+        iface.into(),
+        "-n".into(),
+        "-q".into(),
+    ]
+}
+
+fn start_supplicant_probing_driver(sys: &dyn Sys, cfg: &WifiCfg) -> Result<&'static str, String> {
+    let timeout = Duration::from_secs(cfg.connect_timeout_sec);
+    for driver in DRIVER_PROBE_ORDER {
+        tracing::info!(driver, "starting wpa_supplicant");
+        let _ = sys.run_to_completion("killall", &["wpa_supplicant".into()]);
+        // Spawned detached here only for the duration of bring-up. P3 registers
+        // it as a supervised service with whichever driver flag worked.
+        sys.spawn_detached(
+            "/usr/sbin/wpa_supplicant",
+            &supplicant_args(&cfg.interface, driver),
+        )
+        .map_err(|e| format!("spawn wpa_supplicant: {e}"))?;
+        if wait_associated(sys, &cfg.interface, timeout) {
+            return Ok(driver);
+        }
+        tracing::warn!(driver, "no association; trying the next driver flag");
+    }
+    Err("no driver flag produced an association".into())
+}
+
+fn wait_associated(sys: &dyn Sys, iface: &str, cap: Duration) -> bool {
+    let deadline = sys.now() + cap;
+    while sys.now() < deadline {
+        if read_carrier(iface) == Some(true) {
+            return true;
+        }
+        sys.sleep(Duration::from_secs(1));
+    }
+    false
+}
+
+fn assign_address(sys: &dyn Sys, cfg: &WifiCfg) -> Result<String, String> {
+    if cfg.dhcp {
+        return dhcp_once(sys, cfg);
+    }
+    let cidr = parse_cidr(cfg.address.as_deref().unwrap_or(""))
+        .ok_or_else(|| format!("[wifi] address = {:?} is not valid CIDR", cfg.address))?;
+    let gw = cfg.gateway.clone().unwrap_or_default();
+    sys.run_to_completion("ifconfig", &ifconfig_static_args(&cfg.interface, &cidr))
+        .map_err(|e| format!("ifconfig static: {e}"))?;
+    sys.run_to_completion(
+        "route",
+        &["add".into(), "default".into(), "gw".into(), gw.clone()],
+    )
+    .map_err(|e| format!("route add default: {e}"))?;
+
+    // R12: a typo'd static address associates fine and leaves the camera
+    // unreachable, which no rung of R7 would catch. Verify, then fall back to
+    // DHCP once before giving up.
+    if gateway_reachable(sys, &gw) {
+        return Ok(cidr.address);
+    }
+    tracing::error!(
+        gateway = %gw,
+        "static address assigned but gateway unreachable; retrying via DHCP"
+    );
+    dhcp_once(sys, cfg)
+}
+
+fn dhcp_once(sys: &dyn Sys, cfg: &WifiCfg) -> Result<String, String> {
+    sys.run_to_completion(BUSYBOX, &udhcpc_oneshot_args(&cfg.interface))
+        .map_err(|e| format!("udhcpc: {e}"))?;
+    read_address(&cfg.interface).ok_or_else(|| "no address after udhcpc".into())
+}
+
+fn read_carrier(iface: &str) -> Option<bool> {
+    let src = std::fs::read_to_string(format!("/sys/class/net/{iface}/carrier")).ok()?;
+    Some(src.trim() == "1")
+}
+
+/// Host IPv4 for `iface`. `/proc/net/route` only has destinations; the local
+/// address lives in `/proc/net/fib_trie`'s Local section.
+fn read_address(iface: &str) -> Option<String> {
+    let _ = iface;
+    let src = std::fs::read_to_string("/proc/net/fib_trie").ok()?;
+    let mut in_local = false;
+    for line in src.lines() {
+        if line.contains("Local") {
+            in_local = true;
+            continue;
+        }
+        if !in_local {
+            continue;
+        }
+        let trimmed = line.trim();
+        let Some(rest) = trimmed.strip_prefix("|-- ") else {
+            continue;
+        };
+        let addr = rest.split_whitespace().next()?;
+        if addr.contains('.') && addr != "127.0.0.1" {
+            return Some(addr.to_string());
+        }
+    }
+    None
+}
+
+/// ponytail: Task B3 upgrades this to an L2 ARP probe via `netstat::gateway_reachable`.
+fn gateway_reachable(_sys: &dyn Sys, _gw: &str) -> bool {
+    true
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -492,5 +813,91 @@ mod tests {
     #[test]
     fn test_resolv_conf_empty_list_is_empty_string() {
         assert_eq!(resolv_conf(&[]), "");
+    }
+
+    #[test]
+    fn test_resolve_chip_prefers_pinned_config_over_hw_conf() {
+        // Q4: the shipped config pins the chip, so the detection path is never
+        // taken on this camera and hw.conf offset stability stops mattering.
+        let c = resolve_chip("ssv6355_ble", "/nonexistent/hw.conf").expect("pinned");
+        assert_eq!(c.0.name, "ssv6355_ble");
+    }
+
+    #[test]
+    fn test_resolve_chip_auto_reads_hw_conf() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("hw.conf");
+        std::fs::write(&path, HW_REAL).expect("write");
+        let (chip, pol) = resolve_chip("auto", path.to_str().expect("utf8")).expect("auto");
+        assert_eq!(chip.name, "ssv6355_ble");
+        assert_eq!(pol, Polarity::HighLow);
+    }
+
+    #[test]
+    fn test_resolve_chip_auto_fails_loudly_on_short_record() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("hw.conf");
+        std::fs::write(&path, HW_DEFAULT).expect("write");
+        assert!(resolve_chip("auto", path.to_str().expect("utf8")).is_err());
+    }
+
+    #[test]
+    fn test_resolve_chip_rejects_unknown_pinned_name() {
+        assert!(resolve_chip("rtl8189", "/nonexistent").is_err());
+    }
+
+    #[test]
+    fn test_supplicant_args_uses_probed_driver_and_no_dash_b() {
+        // Q1: -B self-daemonizes, which the supervisor would read as an instant
+        // crash and backoff-loop on forever. wifi_station.sh:60 already proves
+        // foreground operation works on this hardware.
+        let args = supplicant_args("wlan0", "nl80211");
+        assert!(!args.contains(&"-B".to_string()), "must not self-daemonize");
+        assert_eq!(
+            args,
+            vec![
+                "-i".to_string(),
+                "wlan0".to_string(),
+                "-D".to_string(),
+                "nl80211".to_string(),
+                "-c".to_string(),
+                WPA_CONF.to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_driver_probe_order_is_nl80211_then_wext() {
+        // R8: RTL8188 with wpa_supplicant 2.6 needs nl80211; everything else uses
+        // wext (wifi_station.sh:55-68).
+        assert_eq!(DRIVER_PROBE_ORDER, ["nl80211", "wext"]);
+    }
+
+    #[test]
+    fn test_static_address_argv_is_wellformed() {
+        let cidr = parse_cidr("192.168.2.198/24").expect("cidr");
+        let args = ifconfig_static_args("wlan0", &cidr);
+        assert_eq!(
+            args,
+            vec![
+                "wlan0".to_string(),
+                "192.168.2.198".to_string(),
+                "netmask".to_string(),
+                "255.255.255.0".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_udhcpc_oneshot_args_exit_after_lease() {
+        // -n exits if no lease, -q quits once one is obtained. Without both, the
+        // one-shot never returns and P2 blocks forever.
+        let args = udhcpc_oneshot_args("wlan0");
+        assert!(args.contains(&"-n".to_string()));
+        assert!(args.contains(&"-q".to_string()));
+        assert_eq!(
+            args[0], "udhcpc",
+            "busybox multicall: argv[0] selects the applet"
+        );
     }
 }

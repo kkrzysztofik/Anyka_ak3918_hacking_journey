@@ -66,6 +66,9 @@ pub trait Sys: Send + Sync {
     /// a real `thread::sleep` would make the bring-up tests take 40 seconds.
     fn sleep(&self, d: Duration);
     fn run_to_completion(&self, prog: &str, args: &[String]) -> Result<ExitStatus, SysError>;
+    /// Spawn without log-file plumbing. Used by wifi bring-up before the
+    /// supervised service table is registered.
+    fn spawn_detached(&self, prog: &str, args: &[String]) -> Result<Pid, SysError>;
 }
 
 /// Production syscall backend.
@@ -242,5 +245,21 @@ impl Sys for RealSys {
                 "{prog} exited with neither code nor signal"
             )))
         }
+    }
+
+    fn spawn_detached(&self, prog: &str, args: &[String]) -> Result<Pid, SysError> {
+        let mut cmd = Command::new(prog);
+        cmd.args(args)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        let child = cmd.spawn().map_err(|source| SysError::Spawn {
+            exec: prog.to_string(),
+            source,
+        })?;
+        let pid = child.id() as Pid;
+        // Same forget pattern as spawn(): the reaper owns waitpid.
+        std::mem::forget(child);
+        Ok(pid)
     }
 }
