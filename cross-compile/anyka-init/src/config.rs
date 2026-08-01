@@ -435,6 +435,20 @@ impl Config {
                     "[wifi] gateway is required when dhcp = false".into(),
                 ));
             }
+            if let Some(addr) = &self.wifi.address
+                && crate::wifi::parse_cidr(addr).is_none()
+            {
+                return Err(ConfigError::Invalid(format!(
+                    "[wifi] address = {addr:?} is not valid CIDR (expected a.b.c.d/prefix)"
+                )));
+            }
+            if let Some(gw) = &self.wifi.gateway
+                && gw.parse::<std::net::Ipv4Addr>().is_err()
+            {
+                return Err(ConfigError::Invalid(format!(
+                    "[wifi] gateway = {gw:?} is not a valid IPv4 address"
+                )));
+            }
             if self.services.get("udhcpc").is_some_and(|s| s.enabled) {
                 return Err(ConfigError::Invalid(
                     "[services.udhcpc] is enabled but [wifi] dhcp = false; \
@@ -663,5 +677,59 @@ log = "/tmp/udhcpc.log"
             "/../../SD_card_contents/anyka_hack/anyka.toml"
         );
         Config::load(path).expect("shipped anyka.toml must parse and validate");
+    }
+
+    #[test]
+    fn test_wifi_rejects_static_address_without_a_prefix() {
+        let err = load_from_str(
+            r#"
+[wifi]
+ssid = "net"
+password = "secret12"
+dhcp = false
+address = "192.168.2.198"
+gateway = "192.168.2.1"
+"#,
+        )
+        .expect_err("address without prefix must be rejected");
+        assert!(
+            format!("{err}").contains("address"),
+            "error should name address, got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_wifi_rejects_malformed_static_gateway() {
+        let err = load_from_str(
+            r#"
+[wifi]
+ssid = "net"
+password = "secret12"
+dhcp = false
+address = "192.168.2.198/24"
+gateway = "192.168.2"
+"#,
+        )
+        .expect_err("malformed gateway must be rejected");
+        assert!(
+            format!("{err}").contains("gateway"),
+            "error should name gateway, got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_wifi_accepts_a_wellformed_static_configuration() {
+        load_from_str(
+            r#"
+[wifi]
+ssid = "net"
+password = "secret12"
+dhcp = false
+address = "192.168.2.198/24"
+gateway = "192.168.2.1"
+dns = ["192.168.2.1", "8.8.8.8"]
+"#,
+        )
+        .expect("shipped-shaped static config must be accepted");
     }
 }
