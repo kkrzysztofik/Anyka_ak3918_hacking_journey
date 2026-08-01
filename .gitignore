@@ -278,3 +278,7 @@ cross-compile/ONVIF-Device-Manager/**/*
 # The deploy staging copy is generated, not source; the ONVIF binary next to it
 # is tracked deliberately, this directory is not.
 SD_card_contents/anyka_hack/onvif/www/
+
+# Filled-in device configs for real cameras: these carry wifi PSKs.
+# The CHANGE_ME template in SD_card_contents/ is the tracked one.
+.deploy/

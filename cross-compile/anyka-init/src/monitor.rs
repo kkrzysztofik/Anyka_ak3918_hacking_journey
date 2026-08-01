@@ -69,8 +69,106 @@ fn sample_link(iface: &str, probe: bool) -> Health {
     }
 }
 
-/// Sampling loop. Also owns the storm-guard reset: once this process has been
-/// up longer than the configured threshold, the boot is considered good.
+/// Wifi escalation for one tick: updates `ticks`, decides the next `Action`
+/// via `netstat::decide`, and applies it. Split out from `tick` so tests can
+/// drive the decision/escalation ladder by injecting a `Health` directly,
+/// without going through `/sys` or `/proc`.
+pub fn apply_wifi_actions(
+    sys: &dyn Sys,
+    cfg: &MonitorCfg,
+    iface: &str,
+    state_path: &str,
+    tx: &Sender<Msg>,
+    h: Health,
+    ticks: &mut u32,
+) {
+    if h.ok() {
+        *ticks = 0;
+    } else {
+        *ticks = ticks.saturating_add(1);
+        tracing::warn!(
+            carrier = h.carrier,
+            route = h.route,
+            reachable = h.reachable,
+            ticks = *ticks,
+            "wifi link unhealthy"
+        );
+    }
+
+    let storm = StormState::load(state_path);
+    let policy = Policy {
+        dhcp_after_ticks: cfg.wifi_dhcp_after_ticks,
+        supplicant_after_ticks: cfg.wifi_supplicant_after_ticks,
+        reboot_after_ticks: cfg.wifi_reboot_after_ticks,
+        reboot_cap: cfg.wifi_reboot_cap,
+        wifi_reboots_used: storm.wifi_reboots,
+    };
+    match netstat::decide(h, *ticks, &policy) {
+        Action::Nothing => {}
+        Action::RunDhcp => {
+            tracing::warn!("no default route; re-running udhcpc");
+            let _ = sys.run_to_completion(BUSYBOX, &udhcpc_oneshot_args(iface));
+            // Do not reset ticks: decide uses absolute thresholds, so
+            // clearing here would re-fire the same rung forever.
+        }
+        Action::RestartSupplicant => {
+            let _ = tx.send(Msg::RestartService("wpa_supplicant".into()));
+        }
+        Action::Reboot => {
+            tracing::error!(
+                wifi_reboots = storm.wifi_reboots,
+                "wifi down past the reboot threshold; rebooting"
+            );
+            let mut storm = storm;
+            storm.wifi_reboots = storm.wifi_reboots.saturating_add(1);
+            let _ = storm.save(state_path);
+            if let Err(e) = sys.reboot() {
+                tracing::error!(error = %e, "reboot() returned without rebooting");
+            }
+            // Failed reboot: keep ticks so we stay at LogOnly/Reboot
+            // rather than dropping back to RunDhcp.
+        }
+        Action::LogOnly => {
+            tracing::error!("wifi down and the reboot budget is exhausted; not rebooting");
+        }
+    }
+}
+
+/// One iteration of the sampling loop, including the storm-guard reset: once
+/// this process has been up longer than the configured threshold, the boot is
+/// considered good.
+#[allow(clippy::too_many_arguments)]
+pub fn tick(
+    sys: &dyn Sys,
+    cfg: &MonitorCfg,
+    iface: &str,
+    state_path: &str,
+    reset_after: Duration,
+    tx: &Sender<Msg>,
+    reset_done: &mut bool,
+    ticks: &mut u32,
+) {
+    sample();
+    if !*reset_done && sys.uptime() > reset_after {
+        // Reset only the crash-loop counter. wifi_reboots is cleared solely
+        // by a successful wifi::bring_up (B4) — uptime alone would wipe it
+        // before the link ever recovers.
+        let mut storm = StormState::load(state_path);
+        storm.fast_reboots = 0;
+        match storm.save(state_path) {
+            Ok(()) => tracing::info!("boot considered good; storm-guard counter reset"),
+            Err(e) => tracing::warn!(error = %e, "failed to reset storm-guard state"),
+        }
+        *reset_done = true;
+    }
+
+    if cfg.wifi {
+        let h = sample_link(iface, cfg.wifi_probe);
+        apply_wifi_actions(sys, cfg, iface, state_path, tx, h, ticks);
+    }
+}
+
+/// Sampling loop. See `tick` for what happens each iteration.
 pub fn run(
     sys: &dyn Sys,
     cfg: &MonitorCfg,
@@ -80,80 +178,19 @@ pub fn run(
     tx: Sender<Msg>,
 ) {
     let interval = Duration::from_secs(cfg.interval_sec);
-    let base_policy = Policy {
-        dhcp_after_ticks: cfg.wifi_dhcp_after_ticks,
-        supplicant_after_ticks: cfg.wifi_supplicant_after_ticks,
-        reboot_after_ticks: cfg.wifi_reboot_after_ticks,
-        reboot_cap: cfg.wifi_reboot_cap,
-        wifi_reboots_used: 0,
-    };
     let mut reset_done = false;
     let mut ticks: u32 = 0;
     loop {
-        sample();
-        if !reset_done && sys.uptime() > reset_after {
-            // Reset only the crash-loop counter. wifi_reboots is cleared solely
-            // by a successful wifi::bring_up (B4) — uptime alone would wipe it
-            // before the link ever recovers.
-            let mut storm = StormState::load(state_path);
-            storm.fast_reboots = 0;
-            match storm.save(state_path) {
-                Ok(()) => tracing::info!("boot considered good; storm-guard counter reset"),
-                Err(e) => tracing::warn!(error = %e, "failed to reset storm-guard state"),
-            }
-            reset_done = true;
-        }
-
-        if cfg.wifi {
-            let storm = StormState::load(state_path);
-            let h = sample_link(iface, cfg.wifi_probe);
-            if h.ok() {
-                ticks = 0;
-            } else {
-                ticks = ticks.saturating_add(1);
-                tracing::warn!(
-                    carrier = h.carrier,
-                    route = h.route,
-                    reachable = h.reachable,
-                    ticks,
-                    "wifi link unhealthy"
-                );
-            }
-            let policy = Policy {
-                wifi_reboots_used: storm.wifi_reboots,
-                ..base_policy
-            };
-            match netstat::decide(h, ticks, &policy) {
-                Action::Nothing => {}
-                Action::RunDhcp => {
-                    tracing::warn!("no default route; re-running udhcpc");
-                    let _ = sys.run_to_completion(BUSYBOX, &udhcpc_oneshot_args(iface));
-                    // Do not reset ticks: decide uses absolute thresholds, so
-                    // clearing here would re-fire the same rung forever.
-                }
-                Action::RestartSupplicant => {
-                    let _ = tx.send(Msg::RestartService("wpa_supplicant".into()));
-                }
-                Action::Reboot => {
-                    tracing::error!(
-                        wifi_reboots = storm.wifi_reboots,
-                        "wifi down past the reboot threshold; rebooting"
-                    );
-                    let mut storm = storm;
-                    storm.wifi_reboots = storm.wifi_reboots.saturating_add(1);
-                    let _ = storm.save(state_path);
-                    if let Err(e) = sys.reboot() {
-                        tracing::error!(error = %e, "reboot() returned without rebooting");
-                    }
-                    // Failed reboot: keep ticks so we stay at LogOnly/Reboot
-                    // rather than dropping back to RunDhcp.
-                }
-                Action::LogOnly => {
-                    tracing::error!("wifi down and the reboot budget is exhausted; not rebooting");
-                }
-            }
-        }
-
+        tick(
+            sys,
+            cfg,
+            iface,
+            state_path,
+            reset_after,
+            &tx,
+            &mut reset_done,
+            &mut ticks,
+        );
         std::thread::sleep(interval);
     }
 }
@@ -161,6 +198,8 @@ pub fn run(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::sys::MockSys;
+    use std::sync::mpsc;
 
     #[test]
     fn test_parse_mem_kb_prefers_available() {
@@ -177,5 +216,244 @@ mod tests {
     #[test]
     fn test_parse_loadavg_first_field() {
         assert_eq!(parse_loadavg("0.42 0.35 0.30 1/100 1234\n"), Some(0.42));
+    }
+
+    fn healthy() -> Health {
+        Health {
+            carrier: true,
+            route: true,
+            reachable: true,
+        }
+    }
+
+    fn unhealthy() -> Health {
+        Health {
+            carrier: false,
+            route: false,
+            reachable: false,
+        }
+    }
+
+    #[test]
+    fn test_apply_wifi_actions_healthy_link_resets_ticks_and_does_nothing() {
+        let sys = MockSys::new(); // no expectations: must not touch the OS
+        let cfg = MonitorCfg::default();
+        let (tx, rx) = mpsc::channel();
+        let dir = tempfile::tempdir().expect("tempdir");
+        let state_path = dir.path().join("boot.json");
+        let mut ticks = 5;
+
+        apply_wifi_actions(
+            &sys,
+            &cfg,
+            "wlan0",
+            state_path.to_str().expect("utf8"),
+            &tx,
+            healthy(),
+            &mut ticks,
+        );
+
+        assert_eq!(ticks, 0);
+        assert!(rx.try_recv().is_err(), "a healthy link must send nothing");
+    }
+
+    #[test]
+    fn test_apply_wifi_actions_run_dhcp_after_the_dhcp_threshold() {
+        let mut sys = MockSys::new();
+        sys.expect_run_to_completion()
+            .withf(|prog, args| {
+                prog == "/bin/busybox" && args.first().map(String::as_str) == Some("udhcpc")
+            })
+            .times(1)
+            .returning(|_, _| Ok(crate::sys::ExitStatus::Code(0)));
+        let cfg = MonitorCfg::default(); // wifi_dhcp_after_ticks = 3
+        let (tx, rx) = mpsc::channel();
+        let dir = tempfile::tempdir().expect("tempdir");
+        let state_path = dir.path().join("boot.json");
+        let mut ticks = 2;
+
+        let h = Health {
+            carrier: true,
+            route: false,
+            reachable: false,
+        };
+        apply_wifi_actions(
+            &sys,
+            &cfg,
+            "wlan0",
+            state_path.to_str().expect("utf8"),
+            &tx,
+            h,
+            &mut ticks,
+        );
+
+        assert_eq!(ticks, 3);
+        assert!(
+            rx.try_recv().is_err(),
+            "RunDhcp must not message the supervisor"
+        );
+    }
+
+    #[test]
+    fn test_apply_wifi_actions_restarts_supplicant_after_the_supplicant_threshold() {
+        let sys = MockSys::new(); // RestartSupplicant does not touch Sys at all
+        let cfg = MonitorCfg::default(); // wifi_supplicant_after_ticks = 5
+        let (tx, rx) = mpsc::channel();
+        let dir = tempfile::tempdir().expect("tempdir");
+        let state_path = dir.path().join("boot.json");
+        let mut ticks = 4;
+
+        apply_wifi_actions(
+            &sys,
+            &cfg,
+            "wlan0",
+            state_path.to_str().expect("utf8"),
+            &tx,
+            unhealthy(),
+            &mut ticks,
+        );
+
+        assert_eq!(ticks, 5);
+        match rx.try_recv() {
+            Ok(Msg::RestartService(name)) => assert_eq!(name, "wpa_supplicant"),
+            Ok(_) => panic!("expected a RestartService message"),
+            Err(e) => panic!("expected a message, got error: {e:?}"),
+        }
+    }
+
+    #[test]
+    fn test_apply_wifi_actions_reboots_past_the_reboot_threshold() {
+        let mut sys = MockSys::new();
+        sys.expect_reboot().times(1).returning(|| Ok(()));
+        let cfg = MonitorCfg::default(); // wifi_reboot_after_ticks = 10, cap = 3
+        let (tx, rx) = mpsc::channel();
+        let dir = tempfile::tempdir().expect("tempdir");
+        let state_path = dir.path().join("boot.json");
+        crate::storm::StormState {
+            fast_reboots: 0,
+            wifi_reboots: 0,
+        }
+        .save(state_path.to_str().expect("utf8"))
+        .expect("seed storm state");
+        let mut ticks = 9;
+
+        apply_wifi_actions(
+            &sys,
+            &cfg,
+            "wlan0",
+            state_path.to_str().expect("utf8"),
+            &tx,
+            unhealthy(),
+            &mut ticks,
+        );
+
+        assert_eq!(ticks, 10);
+        assert!(rx.try_recv().is_err());
+        let storm = crate::storm::StormState::load(state_path.to_str().expect("utf8"));
+        assert_eq!(storm.wifi_reboots, 1, "each fired reboot must persist");
+    }
+
+    #[test]
+    fn test_apply_wifi_actions_stops_rebooting_past_the_cap() {
+        let sys = MockSys::new(); // no expect_reboot(): calling it would panic
+        let cfg = MonitorCfg::default(); // reboot_cap = 3
+        let (tx, _rx) = mpsc::channel();
+        let dir = tempfile::tempdir().expect("tempdir");
+        let state_path = dir.path().join("boot.json");
+        crate::storm::StormState {
+            fast_reboots: 0,
+            wifi_reboots: 3,
+        }
+        .save(state_path.to_str().expect("utf8"))
+        .expect("seed storm state");
+        let mut ticks = 20;
+
+        apply_wifi_actions(
+            &sys,
+            &cfg,
+            "wlan0",
+            state_path.to_str().expect("utf8"),
+            &tx,
+            unhealthy(),
+            &mut ticks,
+        );
+
+        let storm = crate::storm::StormState::load(state_path.to_str().expect("utf8"));
+        assert_eq!(
+            storm.wifi_reboots, 3,
+            "LogOnly must not bump the counter further"
+        );
+    }
+
+    #[test]
+    fn test_tick_resets_the_crash_loop_counter_once_uptime_passes_the_threshold() {
+        let mut sys = MockSys::new();
+        sys.expect_uptime().returning(|| Duration::from_secs(700));
+        let cfg = MonitorCfg {
+            wifi: false,
+            ..MonitorCfg::default()
+        };
+        let (tx, _rx) = mpsc::channel();
+        let dir = tempfile::tempdir().expect("tempdir");
+        let state_path = dir.path().join("boot.json");
+        crate::storm::StormState {
+            fast_reboots: 2,
+            wifi_reboots: 1,
+        }
+        .save(state_path.to_str().expect("utf8"))
+        .expect("seed storm state");
+
+        let mut reset_done = false;
+        let mut ticks = 0;
+        tick(
+            &sys,
+            &cfg,
+            "wlan0",
+            state_path.to_str().expect("utf8"),
+            Duration::from_secs(600),
+            &tx,
+            &mut reset_done,
+            &mut ticks,
+        );
+
+        assert!(reset_done);
+        let storm = crate::storm::StormState::load(state_path.to_str().expect("utf8"));
+        assert_eq!(storm.fast_reboots, 0, "boot considered good");
+        assert_eq!(
+            storm.wifi_reboots, 1,
+            "only the crash-loop counter resets here"
+        );
+    }
+
+    #[test]
+    fn test_tick_does_not_reset_before_the_uptime_threshold() {
+        let mut sys = MockSys::new();
+        sys.expect_uptime().returning(|| Duration::from_secs(1));
+        let cfg = MonitorCfg {
+            wifi: false,
+            ..MonitorCfg::default()
+        };
+        let (tx, _rx) = mpsc::channel();
+        let dir = tempfile::tempdir().expect("tempdir");
+        let state_path = dir.path().join("boot.json");
+
+        let mut reset_done = false;
+        let mut ticks = 0;
+        tick(
+            &sys,
+            &cfg,
+            "wlan0",
+            state_path.to_str().expect("utf8"),
+            Duration::from_secs(600),
+            &tx,
+            &mut reset_done,
+            &mut ticks,
+        );
+
+        assert!(!reset_done);
+        assert!(
+            !state_path.exists(),
+            "nothing to persist before the threshold"
+        );
     }
 }

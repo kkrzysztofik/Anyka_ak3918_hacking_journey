@@ -385,3 +385,143 @@ mod reboot_delay_tests {
         assert_eq!(d, Duration::from_secs(u64::MAX));
     }
 }
+
+#[cfg(test)]
+mod periodic_reboot_loop_tests {
+    use super::*;
+    use crate::sys::MockSys;
+
+    #[test]
+    fn test_periodic_reboot_loop_sleeps_then_reboots() {
+        let mut sys = MockSys::new();
+        sys.expect_sleep().times(1).returning(|_| {});
+        sys.expect_reboot().times(1).returning(|| Ok(()));
+
+        periodic_reboot_loop(&sys, 1, 0);
+    }
+
+    #[test]
+    fn test_periodic_reboot_loop_logs_and_returns_when_reboot_fails() {
+        let mut sys = MockSys::new();
+        sys.expect_sleep().times(1).returning(|_| {});
+        sys.expect_reboot()
+            .times(1)
+            .returning(|| Err(crate::sys::SysError::Other("reboot() unsupported".into())));
+
+        // Must not panic even though the reboot call failed.
+        periodic_reboot_loop(&sys, 1, 0);
+    }
+}
+
+#[cfg(test)]
+mod run_tests {
+    use super::*;
+    use crate::config::{
+        Config, LogCfg, MonitorCfg, RebootCfg, ServiceCfg, SupervisorCfg, SystemCfg, TimeCfg,
+        WifiCfg,
+    };
+    use crate::sys::{MockSys, SysError};
+
+    fn minimal_wifi_cfg() -> WifiCfg {
+        WifiCfg {
+            ssid: "test".into(),
+            password: "test".into(),
+            config_file: "/nonexistent/anyka_cfg.ini".into(),
+            chip: "auto".into(),
+            gpio_polarity: "low_high".into(),
+            interface: "wlan0".into(),
+            security: "wpa".into(),
+            dhcp: true,
+            address: None,
+            gateway: None,
+            dns: Vec::new(),
+            connect_timeout_sec: 45,
+            fallback_to_vendor: true,
+        }
+    }
+
+    fn test_config(services: BTreeMap<String, ServiceCfg>) -> Config {
+        Config {
+            log: LogCfg::default(),
+            system: SystemCfg::default(),
+            wifi: minimal_wifi_cfg(),
+            time: TimeCfg::default(),
+            supervisor: SupervisorCfg {
+                backoff_min_sec: 30,
+                backoff_max_sec: 60,
+                crashloop_count: 100,
+                crashloop_window_sec: 600,
+                storm_guard_max_reboots: 3,
+                storm_guard_state: "/nonexistent/storm.json".into(),
+                storm_guard_reset_uptime_sec: 600,
+            },
+            monitor: MonitorCfg::default(),
+            reboot: RebootCfg::default(),
+            services,
+        }
+    }
+
+    #[test]
+    fn test_run_restart_message_for_unknown_service_is_ignored() {
+        let mut sys = MockSys::new();
+        sys.expect_now().returning(Instant::now);
+
+        let cfg = Arc::new(test_config(BTreeMap::new()));
+        let (tx, rx) = make_channel();
+        let sys: Arc<dyn Sys> = Arc::new(sys);
+        let handle = std::thread::spawn(move || run(sys, &cfg, rx));
+
+        tx.send(Msg::RestartService("nope".into()))
+            .expect("send restart");
+        tx.send(Msg::Shutdown).expect("send shutdown");
+        handle.join().expect("run() must not panic");
+    }
+
+    #[test]
+    fn test_run_start_failure_backs_off_and_restart_request_reports_not_running() {
+        let mut sys = MockSys::new();
+        sys.expect_now().returning(Instant::now);
+        sys.expect_spawn()
+            .times(1)
+            .returning(|_| Err(SysError::Other("boom".into())));
+
+        let mut services = BTreeMap::new();
+        services.insert(
+            "flaky".to_string(),
+            ServiceCfg {
+                enabled: true,
+                exec: "/bin/false".into(),
+                args: Vec::new(),
+                env: BTreeMap::new(),
+                log: "/nonexistent/flaky.log".into(),
+                core_dump: false,
+            },
+        );
+        let cfg = Arc::new(test_config(services));
+        let (tx, rx) = make_channel();
+        let sys: Arc<dyn Sys> = Arc::new(sys);
+        let handle = std::thread::spawn(move || run(sys, &cfg, rx));
+
+        // Give the loop time to run its first tick (spawn fails, service goes
+        // to a 30s backoff) before the restart request arrives.
+        std::thread::sleep(Duration::from_millis(100));
+        tx.send(Msg::RestartService("flaky".into()))
+            .expect("send restart");
+        tx.send(Msg::Shutdown).expect("send shutdown");
+        handle.join().expect("run() must not panic");
+    }
+
+    #[test]
+    fn test_run_shuts_down_immediately_with_no_services() {
+        let mut sys = MockSys::new();
+        sys.expect_now().returning(Instant::now);
+
+        let cfg = Arc::new(test_config(BTreeMap::new()));
+        let (tx, rx) = make_channel();
+        let sys: Arc<dyn Sys> = Arc::new(sys);
+        let handle = std::thread::spawn(move || run(sys, &cfg, rx));
+
+        tx.send(Msg::Shutdown).expect("send shutdown");
+        handle.join().expect("run() must not panic");
+    }
+}

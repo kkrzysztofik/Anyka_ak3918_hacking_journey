@@ -307,8 +307,64 @@ const OTG_MODULE: &str = "/usr/modules/otg-hs.ko";
 const WPA_CONF: &str = "/etc/jffs2/wpa_supplicant.conf";
 const RESOLV_CONF: &str = "/etc/resolv.conf";
 const KO_DIR: &str = "/tmp/ko";
+/// Same class of bug as the `/sbin/udhcpc` one (R17): `/usr/sbin/wpa_supplicant`
+/// does not exist on this camera. The rootfs ships `/usr/bin/wpa_supplicant` as
+/// a symlink into `/tmp`, and the `orig/` capture lost every symlink, so the
+/// path could not be checked from the capture alone. The extraction target is
+/// the one path that is real on any revision: step 4 unpacks
+/// `/data/wifi_tool.tgz` into `/tmp`, which is where the binary comes from.
+const SUPPLICANT_BIN: &str = "/tmp/wpa_supplicant";
 pub const DRIVER_PROBE_ORDER: [&str; 2] = ["nl80211", "wext"];
 const BUSYBOX: &str = "/bin/busybox";
+const SYS_CLASS_NET: &str = "/sys/class/net";
+const PROC_FIB_TRIE: &str = "/proc/net/fib_trie";
+const PROC_ROUTE: &str = "/proc/net/route";
+const WIFI_MANAGE_SCRIPT: &str = "/usr/sbin/wifi_manage.sh";
+const WIFI_DRIVER_TGZ: &str = "/data/wifi_driver.tgz";
+const WIFI_TOOL_TGZ: &str = "/data/wifi_tool.tgz";
+
+/// Every filesystem path `bring_up` touches, gathered so tests can point the
+/// whole chain at a tempdir instead of the real device tree. `production()`
+/// reproduces the hard-coded paths above exactly; nothing here changes
+/// on-device behaviour.
+#[derive(Debug, Clone)]
+pub struct FsLayout {
+    pub hw_conf: String,
+    pub hw_conf_factory: String,
+    pub gpio_wifi_en: String,
+    pub otg_module: String,
+    pub wpa_conf: String,
+    pub resolv_conf: String,
+    pub ko_dir: String,
+    pub sys_class_net: String,
+    pub proc_fib_trie: String,
+    pub proc_route: String,
+    pub wifi_manage_script: String,
+    pub wifi_driver_tgz: String,
+    pub wifi_tool_tgz: String,
+    pub busybox: String,
+}
+
+impl FsLayout {
+    pub fn production() -> Self {
+        Self {
+            hw_conf: HW_CONF.into(),
+            hw_conf_factory: HW_CONF_FACTORY.into(),
+            gpio_wifi_en: GPIO_WIFI_EN.into(),
+            otg_module: OTG_MODULE.into(),
+            wpa_conf: WPA_CONF.into(),
+            resolv_conf: RESOLV_CONF.into(),
+            ko_dir: KO_DIR.into(),
+            sys_class_net: SYS_CLASS_NET.into(),
+            proc_fib_trie: PROC_FIB_TRIE.into(),
+            proc_route: PROC_ROUTE.into(),
+            wifi_manage_script: WIFI_MANAGE_SCRIPT.into(),
+            wifi_driver_tgz: WIFI_DRIVER_TGZ.into(),
+            wifi_tool_tgz: WIFI_TOOL_TGZ.into(),
+            busybox: BUSYBOX.into(),
+        }
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Outcome {
@@ -355,7 +411,19 @@ pub fn resolve_chip(pinned: &str, hw_conf_path: &str) -> Result<(&'static Chip, 
 /// `storm_state_path` is where the wifi reboot counter lives; a successful
 /// bring-up is the only thing that zeroes it (B4).
 pub fn bring_up(sys: &dyn Sys, cfg: &WifiCfg, storm_state_path: &str) -> Outcome {
-    match try_bring_up(sys, cfg) {
+    bring_up_with(sys, cfg, storm_state_path, &FsLayout::production())
+}
+
+/// Same as [`bring_up`], but with the filesystem paths it touches taken from
+/// `layout` instead of the hard-coded device tree. Exists so tests can run
+/// the whole chain against a tempdir; production always calls [`bring_up`].
+pub fn bring_up_with(
+    sys: &dyn Sys,
+    cfg: &WifiCfg,
+    storm_state_path: &str,
+    layout: &FsLayout,
+) -> Outcome {
+    match try_bring_up_with(sys, cfg, layout) {
         Ok(outcome) => {
             if matches!(outcome, Outcome::Up { .. }) {
                 let mut storm = crate::storm::StormState::load(storm_state_path);
@@ -369,7 +437,7 @@ pub fn bring_up(sys: &dyn Sys, cfg: &WifiCfg, storm_state_path: &str) -> Outcome
         Err(e) => {
             tracing::error!(error = %e, "wifi bring-up failed");
             if cfg.fallback_to_vendor {
-                fall_back(sys)
+                fall_back(sys, layout)
             } else {
                 tracing::error!("fallback_to_vendor is disabled; the camera may be unreachable");
                 Outcome::Failed
@@ -380,21 +448,24 @@ pub fn bring_up(sys: &dyn Sys, cfg: &WifiCfg, storm_state_path: &str) -> Outcome
 
 /// R7. Regenerates the vendor-shaped conf before delegating, because the
 /// RTL8188 path `sed`s into line numbers 3 and 4 (R10).
-fn fall_back(sys: &dyn Sys) -> Outcome {
-    tracing::error!("falling back to the vendor wifi chain: /usr/sbin/wifi_manage.sh start");
-    match sys.run_to_completion("/usr/sbin/wifi_manage.sh", &["start".to_string()]) {
+fn fall_back(sys: &dyn Sys, layout: &FsLayout) -> Outcome {
+    tracing::error!(
+        script = %layout.wifi_manage_script,
+        "falling back to the vendor wifi chain"
+    );
+    match sys.run_to_completion(&layout.wifi_manage_script, &["start".to_string()]) {
         Ok(st) => tracing::warn!(?st, "vendor wifi_manage.sh start invoked"),
         Err(e) => tracing::error!(error = %e, "vendor fallback also failed"),
     }
     Outcome::FellBack
 }
 
-fn try_bring_up(sys: &dyn Sys, cfg: &WifiCfg) -> Result<Outcome, String> {
+fn try_bring_up_with(sys: &dyn Sys, cfg: &WifiCfg, layout: &FsLayout) -> Result<Outcome, String> {
     // 1. Resolve chip.
-    let hw_path = if std::path::Path::new(HW_CONF_FACTORY).exists() {
-        HW_CONF_FACTORY
+    let hw_path = if std::path::Path::new(&layout.hw_conf_factory).exists() {
+        &layout.hw_conf_factory
     } else {
-        HW_CONF
+        &layout.hw_conf
     };
     let (chip, detected_pol) = resolve_chip(&cfg.chip, hw_path)?;
     let polarity = if cfg.chip == "auto" {
@@ -412,32 +483,32 @@ fn try_bring_up(sys: &dyn Sys, cfg: &WifiCfg) -> Result<Outcome, String> {
 
     // 3. Power sequence (wifi_driver.sh:373-382).
     for level in polarity.sequence() {
-        std::fs::write(GPIO_WIFI_EN, level)
-            .map_err(|e| format!("gpio write {GPIO_WIFI_EN}={level}: {e}"))?;
+        std::fs::write(&layout.gpio_wifi_en, level)
+            .map_err(|e| format!("gpio write {}={level}: {e}", layout.gpio_wifi_en))?;
         sys.sleep(Duration::from_secs(1));
     }
 
     // 4. Prepare (wifi_driver.sh:104-112, 197).
-    std::fs::create_dir_all(KO_DIR).map_err(|e| format!("mkdir {KO_DIR}: {e}"))?;
+    std::fs::create_dir_all(&layout.ko_dir).map_err(|e| format!("mkdir {}: {e}", layout.ko_dir))?;
     let _ = sys.run_to_completion(
         "tar",
         &[
             "zxf".into(),
-            "/data/wifi_driver.tgz".into(),
+            layout.wifi_driver_tgz.clone(),
             "-C".into(),
-            KO_DIR.into(),
+            layout.ko_dir.clone(),
         ],
     );
     let _ = sys.run_to_completion(
         "tar",
         &[
             "zxf".into(),
-            "/data/wifi_tool.tgz".into(),
+            layout.wifi_tool_tgz.clone(),
             "-C".into(),
             "/tmp".into(),
         ],
     );
-    let _ = sys.insmod(OTG_MODULE);
+    let _ = sys.insmod(&layout.otg_module);
     // R9: the vendor papers over USB enumeration timing with `sleep 3`. Keep it
     // until hardware confirms what it is actually waiting for.
     sys.sleep(Duration::from_secs(3));
@@ -451,25 +522,28 @@ fn try_bring_up(sys: &dyn Sys, cfg: &WifiCfg) -> Result<Outcome, String> {
     }
 
     // 6. Wait for the interface (wifi_run.sh:76-86, 30 s cap).
-    wait_for_interface(sys, &cfg.interface, Duration::from_secs(30))?;
+    wait_for_interface(sys, &cfg.interface, Duration::from_secs(30), layout)?;
     sys.run_to_completion("ifconfig", &[cfg.interface.clone(), "up".into()])
         .map_err(|e| format!("ifconfig up: {e}"))?;
 
     // 7. Write wpa_supplicant.conf.
-    std::fs::write(WPA_CONF, wpa_supplicant_conf(&cfg.ssid, &cfg.password, sec))
-        .map_err(|e| format!("write {WPA_CONF}: {e}"))?;
+    std::fs::write(
+        &layout.wpa_conf,
+        wpa_supplicant_conf(&cfg.ssid, &cfg.password, sec),
+    )
+    .map_err(|e| format!("write {}: {e}", layout.wpa_conf))?;
 
     // 8-9. wpa_supplicant is a supervised service started in P3 (design Q1), so
     // bring-up starts it once here in the foreground-detached form and waits for
     // association. See Task A8 for the driver-flag probe (R8).
-    let driver = start_supplicant_probing_driver(sys, cfg)?;
+    let driver = start_supplicant_probing_driver(sys, cfg, layout)?;
     tracing::info!(driver, "wpa_supplicant associated");
 
     // 10-12: address, resolv.conf, verification.
-    let addr = assign_address(sys, cfg)?;
+    let addr = assign_address(sys, cfg, layout)?;
     if !cfg.dns.is_empty() {
-        std::fs::write(RESOLV_CONF, resolv_conf(&cfg.dns))
-            .map_err(|e| format!("write {RESOLV_CONF}: {e}"))?;
+        std::fs::write(&layout.resolv_conf, resolv_conf(&cfg.dns))
+            .map_err(|e| format!("write {}: {e}", layout.resolv_conf))?;
     }
 
     Ok(Outcome::Up {
@@ -480,8 +554,13 @@ fn try_bring_up(sys: &dyn Sys, cfg: &WifiCfg) -> Result<Outcome, String> {
     })
 }
 
-fn wait_for_interface(sys: &dyn Sys, iface: &str, cap: Duration) -> Result<(), String> {
-    let path = format!("/sys/class/net/{iface}");
+fn wait_for_interface(
+    sys: &dyn Sys,
+    iface: &str,
+    cap: Duration,
+    layout: &FsLayout,
+) -> Result<(), String> {
+    let path = format!("{}/{iface}", layout.sys_class_net);
     let deadline = sys.now() + cap;
     while sys.now() < deadline {
         if std::path::Path::new(&path).exists() {
@@ -540,19 +619,20 @@ pub fn patch_driver_arg(args: &mut [String], driver: &str) -> bool {
     true
 }
 
-fn start_supplicant_probing_driver(sys: &dyn Sys, cfg: &WifiCfg) -> Result<&'static str, String> {
+fn start_supplicant_probing_driver(
+    sys: &dyn Sys,
+    cfg: &WifiCfg,
+    layout: &FsLayout,
+) -> Result<&'static str, String> {
     let timeout = Duration::from_secs(cfg.connect_timeout_sec);
     for driver in DRIVER_PROBE_ORDER {
         tracing::info!(driver, "starting wpa_supplicant");
         let _ = sys.run_to_completion("killall", &["wpa_supplicant".into()]);
         // Spawned detached here only for the duration of bring-up. P3 registers
         // it as a supervised service with whichever driver flag worked.
-        sys.spawn_detached(
-            "/usr/sbin/wpa_supplicant",
-            &supplicant_args(&cfg.interface, driver),
-        )
-        .map_err(|e| format!("spawn wpa_supplicant: {e}"))?;
-        if wait_associated(sys, &cfg.interface, timeout) {
+        sys.spawn_detached(SUPPLICANT_BIN, &supplicant_args(&cfg.interface, driver))
+            .map_err(|e| format!("spawn wpa_supplicant: {e}"))?;
+        if wait_associated(sys, &cfg.interface, timeout, layout) {
             return Ok(driver);
         }
         tracing::warn!(driver, "no association; trying the next driver flag");
@@ -560,10 +640,10 @@ fn start_supplicant_probing_driver(sys: &dyn Sys, cfg: &WifiCfg) -> Result<&'sta
     Err("no driver flag produced an association".into())
 }
 
-fn wait_associated(sys: &dyn Sys, iface: &str, cap: Duration) -> bool {
+fn wait_associated(sys: &dyn Sys, iface: &str, cap: Duration, layout: &FsLayout) -> bool {
     let deadline = sys.now() + cap;
     while sys.now() < deadline {
-        if read_carrier(iface) == Some(true) {
+        if read_carrier(iface, layout) == Some(true) {
             return true;
         }
         sys.sleep(Duration::from_secs(1));
@@ -571,9 +651,9 @@ fn wait_associated(sys: &dyn Sys, iface: &str, cap: Duration) -> bool {
     false
 }
 
-fn assign_address(sys: &dyn Sys, cfg: &WifiCfg) -> Result<String, String> {
+fn assign_address(sys: &dyn Sys, cfg: &WifiCfg, layout: &FsLayout) -> Result<String, String> {
     if cfg.dhcp {
-        return dhcp_once(sys, cfg);
+        return dhcp_once(sys, cfg, layout);
     }
     let cidr = parse_cidr(cfg.address.as_deref().unwrap_or(""))
         .ok_or_else(|| format!("[wifi] address = {:?} is not valid CIDR", cfg.address))?;
@@ -596,20 +676,20 @@ fn assign_address(sys: &dyn Sys, cfg: &WifiCfg) -> Result<String, String> {
         gateway = %gw,
         "static address assigned but gateway unreachable; retrying via DHCP"
     );
-    dhcp_once(sys, cfg)
+    dhcp_once(sys, cfg, layout)
 }
 
-fn dhcp_once(sys: &dyn Sys, cfg: &WifiCfg) -> Result<String, String> {
-    sys.run_to_completion(BUSYBOX, &udhcpc_oneshot_args(&cfg.interface))
+fn dhcp_once(sys: &dyn Sys, cfg: &WifiCfg, layout: &FsLayout) -> Result<String, String> {
+    sys.run_to_completion(&layout.busybox, &udhcpc_oneshot_args(&cfg.interface))
         .map_err(|e| format!("udhcpc: {e}"))?;
-    let fib = std::fs::read_to_string("/proc/net/fib_trie").unwrap_or_default();
-    let route = std::fs::read_to_string("/proc/net/route").unwrap_or_default();
+    let fib = std::fs::read_to_string(&layout.proc_fib_trie).unwrap_or_default();
+    let route = std::fs::read_to_string(&layout.proc_route).unwrap_or_default();
     crate::netstat::parse_local_ipv4(&fib, &route, &cfg.interface)
         .ok_or_else(|| format!("no address on {} after udhcpc", cfg.interface))
 }
 
-fn read_carrier(iface: &str) -> Option<bool> {
-    let src = std::fs::read_to_string(format!("/sys/class/net/{iface}/carrier")).ok()?;
+fn read_carrier(iface: &str, layout: &FsLayout) -> Option<bool> {
+    let src = std::fs::read_to_string(format!("{}/{iface}/carrier", layout.sys_class_net)).ok()?;
     Some(src.trim() == "1")
 }
 
@@ -620,6 +700,45 @@ fn gateway_reachable(gw: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::sys::{ExitStatus, MockSys};
+
+    fn test_layout(dir: &std::path::Path) -> FsLayout {
+        let p = |name: &str| dir.join(name).to_str().expect("utf8").to_string();
+        FsLayout {
+            hw_conf: p("hw.conf"),
+            hw_conf_factory: p("hw.conf.factory"),
+            gpio_wifi_en: p("wifi_en"),
+            otg_module: p("otg.ko"),
+            wpa_conf: p("wpa_supplicant.conf"),
+            resolv_conf: p("resolv.conf"),
+            ko_dir: p("ko"),
+            sys_class_net: p("net"),
+            proc_fib_trie: p("fib_trie"),
+            proc_route: p("route"),
+            wifi_manage_script: p("wifi_manage.sh"),
+            wifi_driver_tgz: p("wifi_driver.tgz"),
+            wifi_tool_tgz: p("wifi_tool.tgz"),
+            busybox: "busybox".to_string(),
+        }
+    }
+
+    fn happy_cfg() -> WifiCfg {
+        WifiCfg {
+            ssid: "testnet".into(),
+            password: "password1".into(),
+            config_file: "/dev/null".into(),
+            chip: "ssv6355_ble".into(),
+            gpio_polarity: "low_high".into(),
+            interface: "wlan0".into(),
+            security: "wpa".into(),
+            dhcp: true,
+            address: None,
+            gateway: None,
+            dns: vec!["192.168.2.1".into()],
+            connect_timeout_sec: 5,
+            fallback_to_vendor: true,
+        }
+    }
 
     #[test]
     fn test_chip_from_hw_char_h_is_ssv6355() {
@@ -953,5 +1072,132 @@ mod tests {
         let before = args.clone();
         assert!(!patch_driver_arg(&mut args, "wext"));
         assert_eq!(args, before);
+    }
+
+    #[test]
+    fn test_bring_up_returns_failed_when_chip_unknown_and_fallback_disabled() {
+        let mut cfg = happy_cfg();
+        cfg.chip = "nonexistent".into();
+        cfg.fallback_to_vendor = false;
+        // No sys expectations: an unknown pinned chip fails before any syscall.
+        let sys = MockSys::new();
+        assert_eq!(
+            bring_up(&sys, &cfg, "/nonexistent/storm.json"),
+            Outcome::Failed
+        );
+    }
+
+    #[test]
+    fn test_bring_up_returns_fellback_when_chip_unknown_and_fallback_enabled() {
+        let mut cfg = happy_cfg();
+        cfg.chip = "nonexistent".into();
+        cfg.fallback_to_vendor = true;
+
+        let mut sys = MockSys::new();
+        sys.expect_run_to_completion()
+            .withf(|prog, args| prog == "/usr/sbin/wifi_manage.sh" && args == ["start".to_string()])
+            .times(1)
+            .returning(|_, _| Ok(ExitStatus::Code(0)));
+
+        assert_eq!(
+            bring_up(&sys, &cfg, "/nonexistent/storm.json"),
+            Outcome::FellBack
+        );
+    }
+
+    /// Local fixtures mirroring `netstat.rs`'s: a wlan0 default route plus one
+    /// `/32 host LOCAL` address, so `dhcp_once` -> `parse_local_ipv4` resolves.
+    const HAPPY_ROUTE: &str = "\
+Iface\tDestination\tGateway \tFlags\tRefCnt\tUse\tMetric\tMask\t\tMTU\tWindow\tIRTT
+wlan0\t00000000\t0102A8C0\t0003\t0\t0\t0\t00000000\t0\t0\t0
+wlan0\t0002A8C0\t00000000\t0001\t0\t0\t0\t00FFFFFF\t0\t0\t0
+";
+    const HAPPY_FIB_TRIE: &str = "\
+Local:
+  +-- 0.0.0.0/0 3 0 4
+     |-- 0.0.0.0
+        /0 universe UNICAST
+     +-- 192.168.2.0/24 2 0 2
+        |-- 192.168.2.198
+           /32 host LOCAL
+";
+
+    fn happy_mock_sys() -> MockSys {
+        let mut sys = MockSys::new();
+        sys.expect_now().returning(std::time::Instant::now);
+        sys.expect_sleep().returning(|_| ());
+        sys.expect_insmod().returning(|_| Ok(()));
+        sys.expect_rmmod().returning(|_| Ok(()));
+        sys.expect_run_to_completion()
+            .returning(|_, _| Ok(ExitStatus::Code(0)));
+        sys.expect_spawn_detached().returning(|_, _| Ok(4242));
+        sys
+    }
+
+    #[test]
+    fn test_try_bring_up_with_happy_path_over_dhcp() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let layout = test_layout(dir.path());
+        std::fs::create_dir_all(format!("{}/wlan0", layout.sys_class_net)).expect("iface dir");
+        std::fs::write(format!("{}/wlan0/carrier", layout.sys_class_net), "1").expect("carrier");
+        std::fs::write(&layout.proc_route, HAPPY_ROUTE).expect("route");
+        std::fs::write(&layout.proc_fib_trie, HAPPY_FIB_TRIE).expect("fib_trie");
+
+        let cfg = happy_cfg();
+        let sys = happy_mock_sys();
+
+        let outcome = try_bring_up_with(&sys, &cfg, &layout).expect("bring-up must succeed");
+        match outcome {
+            Outcome::Up {
+                chip,
+                ssid,
+                addr,
+                driver,
+            } => {
+                assert_eq!(chip, "ssv6355_ble");
+                assert_eq!(ssid, "testnet");
+                assert_eq!(addr, "192.168.2.198");
+                assert_eq!(driver, "nl80211", "first driver in the probe order");
+            }
+            other => panic!("expected Outcome::Up, got {other:?}"),
+        }
+
+        let wpa = std::fs::read_to_string(&layout.wpa_conf).expect("wpa conf written");
+        assert!(wpa.contains(r#"ssid="testnet""#));
+        let resolv = std::fs::read_to_string(&layout.resolv_conf).expect("resolv conf written");
+        assert_eq!(resolv, "nameserver 192.168.2.1\n");
+    }
+
+    #[test]
+    fn test_bring_up_with_clears_wifi_reboot_counter_on_successful_association() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let layout = test_layout(dir.path());
+        std::fs::create_dir_all(format!("{}/wlan0", layout.sys_class_net)).expect("iface dir");
+        std::fs::write(format!("{}/wlan0/carrier", layout.sys_class_net), "1").expect("carrier");
+        std::fs::write(&layout.proc_route, HAPPY_ROUTE).expect("route");
+        std::fs::write(&layout.proc_fib_trie, HAPPY_FIB_TRIE).expect("fib_trie");
+
+        let storm_path = dir.path().join("storm.json");
+        std::fs::write(&storm_path, r#"{"fast_reboots":1,"wifi_reboots":2}"#)
+            .expect("seed storm state");
+
+        let cfg = happy_cfg();
+        let sys = happy_mock_sys();
+
+        let outcome = bring_up_with(&sys, &cfg, storm_path.to_str().expect("utf8"), &layout);
+        assert!(
+            matches!(outcome, Outcome::Up { .. }),
+            "expected Outcome::Up, got {outcome:?}"
+        );
+
+        let storm = crate::storm::StormState::load(storm_path.to_str().expect("utf8"));
+        assert_eq!(
+            storm.wifi_reboots, 0,
+            "B4: cleared only by a successful bring-up"
+        );
+        assert_eq!(
+            storm.fast_reboots, 1,
+            "bring-up must not touch the unrelated crash-loop counter"
+        );
     }
 }

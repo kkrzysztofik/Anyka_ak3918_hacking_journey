@@ -157,4 +157,44 @@ mod tests {
         assert!(should_enter_safe_mode(3, 3));
         assert!(should_enter_safe_mode(4, 3));
     }
+
+    #[test]
+    fn test_save_and_load_round_trip_via_tempfile() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("storm.json");
+        let path = path.to_str().expect("utf8 path");
+
+        let s = StormState {
+            fast_reboots: 4,
+            wifi_reboots: 2,
+        };
+        s.save(path).expect("save should succeed");
+
+        assert_eq!(StormState::load(path), s);
+    }
+
+    #[test]
+    fn test_save_creates_missing_parent_directories() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("nested").join("deeper").join("storm.json");
+        let path = path.to_str().expect("utf8 path");
+
+        let s = StormState {
+            fast_reboots: 1,
+            wifi_reboots: 0,
+        };
+        s.save(path).expect("save should create parent dirs");
+
+        assert_eq!(StormState::load(path), s);
+    }
+
+    #[test]
+    fn test_load_missing_file_returns_default() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("does_not_exist.json");
+        assert_eq!(
+            StormState::load(path.to_str().unwrap()),
+            StormState::default()
+        );
+    }
 }

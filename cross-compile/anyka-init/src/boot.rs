@@ -159,6 +159,9 @@ pub fn system_setup(sys: &dyn Sys, cfg: &Config) -> Option<&'static str> {
 #[cfg(test)]
 mod wifi_tests {
     use super::*;
+    use crate::config::{LogCfg, MonitorCfg, RebootCfg, SupervisorCfg, SystemCfg, TimeCfg};
+    use crate::sys::{ExitStatus, MockSys, SysError};
+    use std::collections::BTreeMap;
 
     const SAMPLE: &str = "\
 [wlan]
@@ -166,6 +169,37 @@ ssid = oldnet
 password = oldpass
 channel = 6
 ";
+
+    fn wifi_cfg(config_file: &str, ssid: &str, password: &str) -> WifiCfg {
+        WifiCfg {
+            ssid: ssid.into(),
+            password: password.into(),
+            config_file: config_file.into(),
+            chip: "auto".into(),
+            gpio_polarity: "low_high".into(),
+            interface: "wlan0".into(),
+            security: "wpa".into(),
+            dhcp: true,
+            address: None,
+            gateway: None,
+            dns: Vec::new(),
+            connect_timeout_sec: 45,
+            fallback_to_vendor: true,
+        }
+    }
+
+    fn test_config(wifi: WifiCfg, system: SystemCfg) -> Config {
+        Config {
+            log: LogCfg::default(),
+            system,
+            wifi,
+            time: TimeCfg::default(),
+            supervisor: SupervisorCfg::default(),
+            monitor: MonitorCfg::default(),
+            reboot: RebootCfg::default(),
+            services: BTreeMap::new(),
+        }
+    }
 
     #[test]
     fn test_rewrite_replaces_ssid_and_password() {
@@ -216,5 +250,124 @@ channel = 6
         assert!(!needs_wifi_update(&cur, "n", "p"));
         assert!(needs_wifi_update(&cur, "other", "p"));
         assert!(needs_wifi_update(&cur, "n", "other"));
+    }
+
+    #[test]
+    fn test_apply_wifi_updates_file_and_creates_backup() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("anyka_cfg.ini");
+        std::fs::write(&path, SAMPLE).expect("write original");
+        let cfg = wifi_cfg(path.to_str().expect("utf8 path"), "newnet", "newpass");
+
+        let changed = apply_wifi(&cfg).expect("apply_wifi should succeed");
+        assert!(changed);
+
+        let updated = std::fs::read_to_string(&path).expect("read updated");
+        assert!(updated.contains("ssid = newnet"));
+        assert!(updated.contains("password = newpass"));
+
+        let backup_path = format!("{}.old", path.to_str().unwrap());
+        let backup = std::fs::read_to_string(backup_path).expect("read backup");
+        assert_eq!(backup, SAMPLE, "backup must hold the pre-update content");
+    }
+
+    #[test]
+    fn test_apply_wifi_is_a_noop_when_credentials_are_already_current() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("anyka_cfg.ini");
+        let current = rewrite_wifi_cfg(SAMPLE, "samenet", "samepass");
+        std::fs::write(&path, &current).expect("write original");
+        let cfg = wifi_cfg(path.to_str().expect("utf8 path"), "samenet", "samepass");
+
+        let changed = apply_wifi(&cfg).expect("apply_wifi should succeed");
+        assert!(!changed);
+
+        assert_eq!(
+            std::fs::read_to_string(&path).expect("read back"),
+            current,
+            "file must be untouched"
+        );
+        let backup_path = format!("{}.old", path.to_str().unwrap());
+        assert!(
+            !std::path::Path::new(&backup_path).exists(),
+            "no-op must not create a backup"
+        );
+    }
+
+    #[test]
+    fn test_apply_wifi_restores_backup_when_verification_fails() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("anyka_cfg.ini");
+        std::fs::write(&path, SAMPLE).expect("write original");
+        // A leading/trailing space in the ssid survives the write but is
+        // trimmed away on readback (`needs_wifi_update` trims `val`), so the
+        // post-write verification always disagrees with what was written.
+        // That deterministically exercises the restore-on-verify-failure path
+        // without needing to inject filesystem failures.
+        let cfg = wifi_cfg(path.to_str().expect("utf8 path"), " test ", "newpass");
+
+        let err = apply_wifi(&cfg).expect_err("mismatched readback must fail verification");
+        assert!(format!("{err}").contains("verification"));
+
+        let restored = std::fs::read_to_string(&path).expect("read back");
+        assert_eq!(restored, SAMPLE, "backup must be restored byte-for-byte");
+    }
+
+    #[test]
+    fn test_system_setup_loads_sensor_kills_disabled_services_and_reports_wifi_failure() {
+        let mut sys = MockSys::new();
+        sys.expect_insmod()
+            .withf(|module| module == "sensor.ko")
+            .times(1)
+            .returning(|_| Ok(()));
+        sys.expect_run_to_completion()
+            .withf(|prog, args| prog == "killall" && args == ["telnetd".to_string()])
+            .times(1)
+            .returning(|_, _| Ok(ExitStatus::Code(0)));
+
+        let mut wifi = wifi_cfg("/nonexistent/anyka_cfg.ini", "net", "pass");
+        wifi.chip = "unknown_chip".into();
+        wifi.fallback_to_vendor = false;
+        // telnet=false (default) drives the killall telnetd expectation above.
+        // ftp stays at its default `true`, so killall tcpsvd must not fire.
+        let system = SystemCfg {
+            sensor_module: Some("sensor.ko".into()),
+            ..SystemCfg::default()
+        };
+        let cfg = test_config(wifi, system);
+
+        let probed = system_setup(&sys, &cfg);
+        assert_eq!(
+            probed, None,
+            "unknown chip with fallback disabled must fail"
+        );
+    }
+
+    #[test]
+    fn test_system_setup_logs_sensor_failure_and_kills_ftp_when_disabled() {
+        let mut sys = MockSys::new();
+        sys.expect_insmod()
+            .times(1)
+            .returning(|_| Err(SysError::Other("no such device".into())));
+        sys.expect_run_to_completion()
+            .withf(|prog, args| prog == "killall" && args == ["tcpsvd".to_string()])
+            .times(1)
+            .returning(|_, _| Ok(ExitStatus::Code(0)));
+
+        let mut wifi = wifi_cfg("/nonexistent/anyka_cfg.ini", "net", "pass");
+        wifi.chip = "unknown_chip".into();
+        wifi.fallback_to_vendor = false;
+        let system = SystemCfg {
+            sensor_module: Some("sensor.ko".into()),
+            telnet: true, // suppress the killall telnetd expectation
+            ftp: false,   // drives the killall tcpsvd expectation above
+        };
+        let cfg = test_config(wifi, system);
+
+        let probed = system_setup(&sys, &cfg);
+        assert_eq!(
+            probed, None,
+            "unknown chip with fallback disabled must fail"
+        );
     }
 }

@@ -131,4 +131,11 @@ mod tests {
         let p = dir.path().join("nope.log");
         assert!(rotate_if_needed(p.to_str().expect("utf8"), 1024, 2).is_ok());
     }
+
+    #[test]
+    fn test_console_writes_without_panicking() {
+        // stderr is the only sink; there is nothing to assert beyond "did not
+        // panic", which is the whole point of a last-resort logger.
+        console("boot: last-resort message");
+    }
 }
