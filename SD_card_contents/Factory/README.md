@@ -10,7 +10,7 @@ This is a tested and validated method on one of my cameras with factory reset fi
 
 1A) Simply copy the `anyka_hack` and `Factory` folder to the SD card.
 
-1B) Make sure to check all the settings in `anyka_hack/gergesettings.txt` (especially the `rootfs_modified=0` must be set) and add the wifi credentials.
+1B) Edit wifi credentials (and any other settings) in `anyka_hack/anyka.toml` before first boot.
 
 2) Put the SD card into the camera and power it on
 

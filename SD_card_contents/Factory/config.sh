@@ -1,38 +1,23 @@
 #!/bin/sh
+# P0: the only phase that must never fail.
+#
+# Called by the vendor's /usr/sbin/service.sh:91 when /mnt/Factory exists.
+# Deliberately shell, not the ELF: anyka-init.bin needs the bundled uClibc
+# loader at /mnt/anyka_hack/lib/ld-uClibc.so.1, and if that is missing the
+# kernel cannot even start it. Shell has no such dependency, so telnet comes up
+# regardless.
+#
+# service.sh:85 runs `killall telnetd` immediately before calling us, killing
+# the telnetd that rcS:8 started. Restarting it here restores the only remote
+# recovery channel.
 
-LOG_FILE=factory_config.log
-TELNET_PID_FILE="/mnt/tmp/telnetd.pid"
+telnetd -p 24 -l /bin/sh 2>/dev/null &
 
-# Initialize log directories first
-[ -f /mnt/anyka_hack/init_logs.sh ] && . /mnt/anyka_hack/init_logs.sh
+BIN=/mnt/anyka_hack/anyka-init.bin
 
-# Source common utilities (which also ensures log directory)
-[ -f /mnt/anyka_hack/common.sh ] && . /mnt/anyka_hack/common.sh
-
-log INFO "Starting factory config initialization"
-
-# Create temporary directory for PID files
-mkdir -p /mnt/tmp 2>/dev/null || true
-
-# Start telnet (optional) on non-standard port if not already running
-if ! pgrep -f 'telnetd.*-p 24' >/dev/null 2>&1; then
-  telnetd -p 24 -l /bin/sh &
-  echo $! > "$TELNET_PID_FILE" 2>/dev/null
-  log INFO "Started telnetd on port 24 (pid=$!)"
-else
-  log DEBUG "telnetd already running"
+if [ ! -x "$BIN" ]; then
+  echo "anyka-init: missing or non-executable $BIN" >&2
+  exit 1
 fi
 
-if [ ! -f /data/gergehack.sh ]; then
-  cp /mnt/anyka_hack/gergehack.sh /data/gergehack.sh 2>/dev/null && log INFO "Installed gergehack.sh" || log WARN "Failed to copy gergehack.sh"
-fi
-
-if [ ! -f /data/gergesettings.txt ]; then
-  cp /mnt/anyka_hack/gergesettings.txt /data/gergesettings.txt 2>/dev/null && log INFO "Installed gergesettings.txt" || log WARN "Failed to copy gergesettings.txt"
-fi
-
-log INFO "Launching gergehack"
-/data/gergehack.sh >> /mnt/logs/gergehack.log 2>&1 &
-GERGEHACK_PID=$!
-echo $GERGEHACK_PID > /mnt/tmp/gergehack.pid 2>/dev/null
-log INFO "Factory config complete (gergehack pid=$GERGEHACK_PID)"
+exec "$BIN"

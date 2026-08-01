@@ -2,14 +2,13 @@
 
 LOG_FILE=wrap_mp4.log
 
-# Initialize log directories if available
-[ -f /mnt/anyka_hack/init_logs.sh ] && . /mnt/anyka_hack/init_logs.sh
-
-# Source common utilities
-[ -f /mnt/anyka_hack/common.sh ] && . /mnt/anyka_hack/common.sh
+log() {
+  level="$1"
+  shift
+  echo "[$(date '+%Y-%m-%d %H:%M:%S')] [${level}] $*"
+}
 
 restart_app() {
-  [ -f /data/gergesettings.txt ] && . /data/gergesettings.txt
   log INFO 'Restarting libre_anyka_app after wrapping (disabled by default)'
 
   # Create temporary directory for PID files

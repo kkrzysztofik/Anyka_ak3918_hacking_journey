@@ -9,7 +9,7 @@ echo
 
 # Test log directory initialization
 echo "Testing log directory initialization..."
-[ -f /mnt/anyka_hack/init_logs.sh ] && . /mnt/anyka_hack/init_logs.sh
+mkdir -p /mnt/logs 2>/dev/null || true
 
 # Check main log directory
 if [ -d "/mnt/logs" ]; then
@@ -51,24 +51,15 @@ else
   echo "Log directory not accessible"
 fi
 
-# Test common.sh logging function
+# Test inline log helper (replaces the old common.sh dependency)
 echo
-echo "Testing common.sh logging function..."
-if [ -f /mnt/anyka_hack/common.sh ]; then
-  LOG_FILE=verify_test.log
-  . /mnt/anyka_hack/common.sh
-  log INFO "Verification test message"
-  if [ -f "/mnt/logs/verify_test.log" ]; then
-    echo "✓ Common.sh logging function works"
-    echo "Last log entry:"
-    tail -n 1 /mnt/logs/verify_test.log
-    rm /mnt/logs/verify_test.log 2>/dev/null
-  else
-    echo "✗ Common.sh logging function failed"
-  fi
-else
-  echo "✗ common.sh not found"
-fi
+echo "Testing inline log helper..."
+log() {
+  level="$1"
+  shift
+  echo "[$(date '+%Y-%m-%d %H:%M:%S')] [${level}] $*"
+}
+log INFO "Verification test message"
 
 echo
 echo "=== Verification Complete ==="

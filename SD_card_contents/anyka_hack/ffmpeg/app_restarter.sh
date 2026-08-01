@@ -2,13 +2,11 @@
 
 LOG_FILE=ffmpeg_restarter.log
 
-# Initialize log directories if available
-[ -f /mnt/anyka_hack/init_logs.sh ] && . /mnt/anyka_hack/init_logs.sh
-
-# Source common utilities
-[ -f /mnt/anyka_hack/common.sh ] && . /mnt/anyka_hack/common.sh
-
-[ -f /data/gergesettings.txt ] && . /data/gergesettings.txt || log WARN "Missing settings file"
+log() {
+  level="$1"
+  shift
+  echo "[$(date '+%Y-%m-%d %H:%M:%S')] [${level}] $*"
+}
 
 restart_app() {
   log INFO 'Attempting to (re)start libre_anyka_app'
