@@ -13,3 +13,4 @@ pub mod supervise;
 pub mod supervisor_loop;
 pub mod sys;
 pub mod timesync;
+pub mod wifi;
