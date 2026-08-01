@@ -1,0 +1,220 @@
+//! The syscall boundary.
+//!
+//! Everything the supervisor does to the outside world goes through `Sys`, so
+//! that `supervise::decide` and friends can be exercised on the host with
+//! `MockSys`. This is the only module in the crate that contains `unsafe`.
+
+use std::collections::BTreeMap;
+use std::fs::OpenOptions;
+use std::os::unix::process::{CommandExt, ExitStatusExt};
+use std::process::{Command, Stdio};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+
+pub type Pid = i32;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SpawnSpec {
+    pub exec: String,
+    pub args: Vec<String>,
+    /// Applied after the child's environment is cleared. See
+    /// `config::ServiceCfg::env`.
+    pub env: BTreeMap<String, String>,
+    pub log: String,
+    pub core_dump: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExitStatus {
+    Code(i32),
+    Signal(i32),
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum SysError {
+    #[error("start {exec} failed: {source}")]
+    Spawn {
+        exec: String,
+        #[source]
+        source: std::io::Error,
+    },
+    #[error("io error: {0}")]
+    Io(#[from] std::io::Error),
+    #[error("{0}")]
+    Other(String),
+}
+
+#[cfg_attr(test, mockall::automock)]
+pub trait Sys: Send + Sync {
+    fn spawn(&self, spec: &SpawnSpec) -> Result<Pid, SysError>;
+    /// Blocks until any child exits. Called only from the reaper thread.
+    fn wait_any(&self) -> Result<(Pid, ExitStatus), SysError>;
+    fn kill(&self, pid: Pid, sig: i32) -> Result<(), SysError>;
+    fn reboot(&self) -> Result<(), SysError>;
+    /// Monotonic. Never `SystemTime` — P2.5 steps the wall clock by decades.
+    fn now(&self) -> Instant;
+    fn realtime(&self) -> SystemTime;
+    fn set_realtime(&self, t: SystemTime) -> Result<(), SysError>;
+    /// Elapsed since this process started. Used by the storm-guard reset.
+    fn uptime(&self) -> Duration;
+    fn insmod(&self, path: &str) -> Result<(), SysError>;
+    fn run_to_completion(&self, prog: &str, args: &[&str]) -> Result<ExitStatus, SysError>;
+}
+
+/// Production syscall backend.
+pub struct RealSys {
+    started: Instant,
+}
+
+impl RealSys {
+    pub fn new() -> Self {
+        Self {
+            started: Instant::now(),
+        }
+    }
+}
+
+impl Default for RealSys {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Sys for RealSys {
+    fn spawn(&self, spec: &SpawnSpec) -> Result<Pid, SysError> {
+        let log = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&spec.log)
+            .map_err(|source| SysError::Spawn {
+                exec: spec.exec.clone(),
+                source,
+            })?;
+        let log_err = log.try_clone().map_err(|source| SysError::Spawn {
+            exec: spec.exec.clone(),
+            source,
+        })?;
+
+        let mut cmd = Command::new(&spec.exec);
+        cmd.args(&spec.args)
+            .env_clear()
+            .envs(&spec.env)
+            .stdin(Stdio::null())
+            .stdout(Stdio::from(log))
+            .stderr(Stdio::from(log_err));
+
+        if spec.core_dump {
+            // SAFETY: setrlimit is async-signal-safe and only touches this
+            // child's own soft/hard RLIMIT_CORE before exec.
+            unsafe {
+                cmd.pre_exec(|| {
+                    let lim = libc::rlimit {
+                        rlim_cur: libc::RLIM_INFINITY,
+                        rlim_max: libc::RLIM_INFINITY,
+                    };
+                    if libc::setrlimit(libc::RLIMIT_CORE, &lim) != 0 {
+                        return Err(std::io::Error::last_os_error());
+                    }
+                    Ok(())
+                });
+            }
+        }
+
+        let child = cmd.spawn().map_err(|source| SysError::Spawn {
+            exec: spec.exec.clone(),
+            source,
+        })?;
+        let pid = child.id() as Pid;
+        // The reaper thread owns reaping via waitpid(-1). Dropping Child would
+        // race that waitpid.
+        std::mem::forget(child);
+        Ok(pid)
+    }
+
+    fn wait_any(&self) -> Result<(Pid, ExitStatus), SysError> {
+        let mut status: libc::c_int = 0;
+        // SAFETY: waitpid(-1) reaps any child; status is a valid stack int.
+        let pid = unsafe { libc::waitpid(-1, &mut status, 0) };
+        if pid < 0 {
+            return Err(SysError::Io(std::io::Error::last_os_error()));
+        }
+        // WIF* helpers are safe wrappers around the wait status integer.
+        let exit = if libc::WIFSIGNALED(status) {
+            ExitStatus::Signal(libc::WTERMSIG(status))
+        } else {
+            ExitStatus::Code(libc::WEXITSTATUS(status))
+        };
+        Ok((pid, exit))
+    }
+
+    fn kill(&self, pid: Pid, sig: i32) -> Result<(), SysError> {
+        // SAFETY: kill(2) with a pid we previously spawned.
+        let rc = unsafe { libc::kill(pid, sig) };
+        if rc != 0 {
+            return Err(SysError::Io(std::io::Error::last_os_error()));
+        }
+        Ok(())
+    }
+
+    fn reboot(&self) -> Result<(), SysError> {
+        // SAFETY: sync(2) takes no args; reboot(RB_AUTOBOOT) does not return
+        // on success.
+        unsafe {
+            libc::sync();
+            let rc = libc::reboot(libc::RB_AUTOBOOT);
+            if rc != 0 {
+                return Err(SysError::Io(std::io::Error::last_os_error()));
+            }
+        }
+        Err(SysError::Other("reboot returned unexpectedly".into()))
+    }
+
+    fn now(&self) -> Instant {
+        Instant::now()
+    }
+
+    fn realtime(&self) -> SystemTime {
+        SystemTime::now()
+    }
+
+    fn set_realtime(&self, t: SystemTime) -> Result<(), SysError> {
+        let dur = t
+            .duration_since(UNIX_EPOCH)
+            .map_err(|e| SysError::Other(format!("time before unix epoch: {e}")))?;
+        let ts = libc::timespec {
+            tv_sec: dur.as_secs() as libc::time_t,
+            tv_nsec: dur.subsec_nanos() as libc::c_long,
+        };
+        // SAFETY: timespec is stack-local and valid for CLOCK_REALTIME.
+        let rc = unsafe { libc::clock_settime(libc::CLOCK_REALTIME, &ts) };
+        if rc != 0 {
+            return Err(SysError::Io(std::io::Error::last_os_error()));
+        }
+        Ok(())
+    }
+
+    fn uptime(&self) -> Duration {
+        self.started.elapsed()
+    }
+
+    fn insmod(&self, path: &str) -> Result<(), SysError> {
+        match self.run_to_completion("insmod", &[path])? {
+            ExitStatus::Code(0) => Ok(()),
+            other => Err(SysError::Other(format!("insmod {path} failed: {other:?}"))),
+        }
+    }
+
+    fn run_to_completion(&self, prog: &str, args: &[&str]) -> Result<ExitStatus, SysError> {
+        // Uses std's wait, which races the reaper's waitpid(-1). Only call
+        // during P2, before the reaper starts.
+        let status = Command::new(prog).args(args).status()?;
+        if let Some(code) = status.code() {
+            Ok(ExitStatus::Code(code))
+        } else if let Some(sig) = status.signal() {
+            Ok(ExitStatus::Signal(sig))
+        } else {
+            Err(SysError::Other(format!(
+                "{prog} exited with neither code nor signal"
+            )))
+        }
+    }
+}
