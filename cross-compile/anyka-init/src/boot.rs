@@ -70,7 +70,10 @@ pub fn apply_wifi(cfg: &WifiCfg) -> anyhow::Result<bool> {
 
 /// P2: system setup. Every step is best-effort — a camera with no sensor
 /// module is still worth reaching over SSH to diagnose.
-pub fn system_setup(sys: &dyn Sys, cfg: &Config) {
+///
+/// Returns the probed `wpa_supplicant -D` flag on a successful wifi bring-up
+/// so P3 can start the supervised instance with the same driver (F2/F3).
+pub fn system_setup(sys: &dyn Sys, cfg: &Config) -> Option<&'static str> {
     // Affects this process only. `gergehack.sh:358` exported TZ for children to
     // inherit; `Sys::spawn` calls `env_clear()`, so a service sees TZ only if
     // its own `[services.X].env` declares it. Kept because it costs nothing and
@@ -101,21 +104,25 @@ pub fn system_setup(sys: &dyn Sys, cfg: &Config) {
         Err(e) => tracing::error!(error = %e, "wifi config update failed"),
     }
 
-    match crate::wifi::bring_up(sys, &cfg.wifi, &cfg.supervisor.storm_guard_state) {
+    let probed = match crate::wifi::bring_up(sys, &cfg.wifi, &cfg.supervisor.storm_guard_state) {
         crate::wifi::Outcome::Up {
             chip,
             ref ssid,
             ref addr,
+            driver,
         } => {
-            tracing::info!(chip, ssid, addr, "wifi up");
+            tracing::info!(chip, ssid, addr, driver, "wifi up");
+            Some(driver)
         }
         crate::wifi::Outcome::FellBack => {
             tracing::error!("wifi came up via the vendor fallback; check the chip dispatch");
+            None
         }
         crate::wifi::Outcome::Failed => {
             tracing::error!("wifi is down and the fallback is disabled");
+            None
         }
-    }
+    };
 
     // The P0 wrapper started telnetd on port 24 before config was readable.
     // Only now can we honour the setting.
@@ -128,6 +135,8 @@ pub fn system_setup(sys: &dyn Sys, cfg: &Config) {
         let _ = sys.run_to_completion("killall", &["tcpsvd".to_string()]);
         tracing::info!("ftp disabled per config");
     }
+
+    probed
 }
 
 #[cfg(test)]

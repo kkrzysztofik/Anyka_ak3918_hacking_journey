@@ -316,6 +316,9 @@ pub enum Outcome {
         chip: &'static str,
         ssid: String,
         addr: String,
+        /// The `-D` flag that actually associated. The supervised service in P3
+        /// must be started with this one, not with the config's default (R8).
+        driver: &'static str,
     },
     /// Bring-up failed and the vendor chain was invoked instead (R7).
     FellBack,
@@ -473,6 +476,7 @@ fn try_bring_up(sys: &dyn Sys, cfg: &WifiCfg) -> Result<Outcome, String> {
         chip: chip.name,
         ssid: cfg.ssid.clone(),
         addr,
+        driver,
     })
 }
 
@@ -519,6 +523,20 @@ pub fn udhcpc_oneshot_args(iface: &str) -> Vec<String> {
         "-n".into(),
         "-q".into(),
     ]
+}
+
+/// Rewrite the `-D <driver>` pair in a service argv. Returns false when the
+/// service does not take a `-D` flag, which the caller logs.
+pub fn patch_driver_arg(args: &mut [String], driver: &str) -> bool {
+    let Some(i) = args.iter().position(|a| a == "-D") else {
+        return false;
+    };
+    let Some(slot) = args.get_mut(i + 1) else {
+        return false;
+    };
+    slot.clear();
+    slot.push_str(driver);
+    true
 }
 
 fn start_supplicant_probing_driver(sys: &dyn Sys, cfg: &WifiCfg) -> Result<&'static str, String> {
@@ -883,5 +901,56 @@ mod tests {
             args[0], "udhcpc",
             "busybox multicall: argv[0] selects the applet"
         );
+    }
+
+    #[test]
+    fn test_patch_driver_arg_replaces_the_flag_value() {
+        let mut args = vec![
+            "-i".to_string(),
+            "wlan0".to_string(),
+            "-D".to_string(),
+            "nl80211".to_string(),
+            "-c".to_string(),
+            "x".to_string(),
+        ];
+        assert!(patch_driver_arg(&mut args, "wext"));
+        assert_eq!(args[3], "wext");
+    }
+
+    #[test]
+    fn test_patch_driver_arg_leaves_other_args_untouched() {
+        let mut args = vec![
+            "-i".to_string(),
+            "wlan0".to_string(),
+            "-D".to_string(),
+            "nl80211".to_string(),
+            "-c".to_string(),
+            "x".to_string(),
+        ];
+        let before = args.clone();
+        assert!(patch_driver_arg(&mut args, "wext"));
+        assert_eq!(args.len(), before.len());
+        for (i, (a, b)) in args.iter().zip(before.iter()).enumerate() {
+            if i == 3 {
+                continue;
+            }
+            assert_eq!(a, b);
+        }
+    }
+
+    #[test]
+    fn test_patch_driver_arg_returns_false_without_a_d_flag() {
+        let mut args = vec!["-i".to_string(), "wlan0".to_string()];
+        let before = args.clone();
+        assert!(!patch_driver_arg(&mut args, "wext"));
+        assert_eq!(args, before);
+    }
+
+    #[test]
+    fn test_patch_driver_arg_ignores_a_trailing_d_flag() {
+        let mut args = vec!["-D".to_string()];
+        let before = args.clone();
+        assert!(!patch_driver_arg(&mut args, "wext"));
+        assert_eq!(args, before);
     }
 }

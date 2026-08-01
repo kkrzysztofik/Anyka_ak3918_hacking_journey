@@ -13,7 +13,7 @@ fn main() {
 
     // P1: config. Never fall back to defaults — a wrong wifi_ssid or
     // sensor_module is worse than parking with recovery telnet up.
-    let cfg = match config::Config::load("/mnt/anyka_hack/anyka.toml") {
+    let mut cfg = match config::Config::load("/mnt/anyka_hack/anyka.toml") {
         Ok(c) => c,
         Err(e) => {
             logging::console(&format!("config load failed: {e}"));
@@ -51,7 +51,7 @@ fn main() {
     }
 
     // P2
-    boot::system_setup(sysimpl.as_ref(), &cfg);
+    let probed = boot::system_setup(sysimpl.as_ref(), &cfg);
 
     // P2.5
     timesync::first_sync(sysimpl.as_ref(), &cfg.time);
@@ -106,6 +106,22 @@ fn main() {
 
     let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
     supervisor_loop::spawn_reaper(Arc::clone(&sysimpl), tx, Arc::clone(&stop));
+
+    // The supplicant bring-up spawned is unsupervised and holds the ctrl
+    // socket. Hand the interface over to the supervised instance here, not
+    // earlier: P2.5 time sync needs the link up, and the address stays
+    // configured across the swap so the gap is one reassociation.
+    if let Some(driver) = probed {
+        if let Some(svc) = cfg.services.get_mut("wpa_supplicant")
+            && !anyka_init::wifi::patch_driver_arg(&mut svc.args, driver)
+        {
+            tracing::warn!(
+                driver,
+                "wpa_supplicant service has no -D flag to patch; using argv as-is"
+            );
+        }
+        let _ = sysimpl.run_to_completion("killall", &["wpa_supplicant".to_string()]);
+    }
 
     // P3 + P4
     supervisor_loop::run(sysimpl, &cfg, rx);
