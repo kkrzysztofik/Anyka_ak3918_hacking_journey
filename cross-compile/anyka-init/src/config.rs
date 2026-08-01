@@ -84,6 +84,41 @@ pub struct WifiCfg {
     pub password: String,
     #[serde(default = "d_wifi_cfg_file")]
     pub config_file: String,
+
+    /// `auto` parses `/etc/jffs2/hw.conf`; any other value pins the chip and
+    /// skips detection entirely. Pinned is the shipped default because
+    /// `hw.conf` offset stability across camera revisions is unverifiable from
+    /// a single board (design Q4), and because `service.sh:124` writes a
+    /// 32-character default record that cannot be indexed at offset 51 (W2).
+    #[serde(default = "d_wifi_chip")]
+    pub chip: String,
+    /// `high_low` matches vendor `WIFI_ENABLE_VALUE == "2"`
+    /// (`wifi_driver.sh:374-382`); `low_high` is every other value.
+    #[serde(default = "d_wifi_polarity")]
+    pub gpio_polarity: String,
+    #[serde(default = "d_wifi_interface")]
+    pub interface: String,
+    #[serde(default = "d_wifi_security")]
+    pub security: String,
+
+    #[serde(default = "d_true")]
+    pub dhcp: bool,
+    /// CIDR, e.g. `192.168.2.198/24`. Required when `dhcp = false`.
+    #[serde(default)]
+    pub address: Option<String>,
+    /// Required when `dhcp = false`.
+    #[serde(default)]
+    pub gateway: Option<String>,
+    /// Written to `/etc/resolv.conf` after the address is assigned (W7).
+    #[serde(default)]
+    pub dns: Vec<String>,
+
+    #[serde(default = "d_wifi_timeout")]
+    pub connect_timeout_sec: u64,
+    /// R7. Not behind a flag by default: a wrong dispatch entry would
+    /// otherwise cost the camera's only remote access.
+    #[serde(default = "d_true")]
+    pub fallback_to_vendor: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -186,6 +221,22 @@ fn d_log_keep() -> u8 {
 }
 fn d_wifi_cfg_file() -> String {
     "/etc/jffs2/anyka_cfg.ini".into()
+}
+
+fn d_wifi_chip() -> String {
+    "auto".into()
+}
+fn d_wifi_polarity() -> String {
+    "low_high".into()
+}
+fn d_wifi_interface() -> String {
+    "wlan0".into()
+}
+fn d_wifi_security() -> String {
+    "wpa".into()
+}
+fn d_wifi_timeout() -> u64 {
+    45
 }
 fn d_ntp_servers() -> Vec<String> {
     vec![
@@ -342,6 +393,18 @@ impl Config {
                 "time.enabled is true but time.servers is empty".into(),
             ));
         }
+        if !self.wifi.dhcp {
+            if self.wifi.address.is_none() {
+                return Err(ConfigError::Invalid(
+                    "[wifi] address is required when dhcp = false".into(),
+                ));
+            }
+            if self.wifi.gateway.is_none() {
+                return Err(ConfigError::Invalid(
+                    "[wifi] gateway is required when dhcp = false".into(),
+                ));
+            }
+        }
         for (name, svc) in &self.services {
             if svc.exec.is_empty() {
                 return Err(ConfigError::Invalid(format!(
@@ -438,5 +501,58 @@ env = {{ LD_LIBRARY_PATH = "/mnt/anyka_hack/vendor-daemon/lib" }}
         let src = format!("{MINIMAL}\n[time]\nmin_plausible_unix = 99\nmax_plausible_unix = 98\n");
         let cfg = Config::from_str(&src).expect("parses");
         assert!(cfg.validate().is_err());
+    }
+
+    fn load_from_str(src: &str) -> Result<Config, ConfigError> {
+        let cfg: Config = toml::from_str(src)?;
+        cfg.validate()?;
+        Ok(cfg)
+    }
+
+    #[test]
+    fn test_wifi_defaults_are_dhcp_and_auto_chip() {
+        let cfg: Config = toml::from_str(
+            r#"
+[wifi]
+ssid = "net"
+password = "secret12"
+"#,
+        )
+        .expect("parse");
+        assert!(cfg.wifi.dhcp);
+        assert_eq!(cfg.wifi.chip, "auto");
+        assert_eq!(cfg.wifi.interface, "wlan0");
+        assert!(cfg.wifi.fallback_to_vendor);
+    }
+
+    #[test]
+    fn test_wifi_static_requires_address_and_gateway() {
+        let err = load_from_str(
+            r#"
+[wifi]
+ssid = "net"
+password = "secret12"
+dhcp = false
+"#,
+        )
+        .expect_err("static config without an address must be rejected");
+        assert!(
+            format!("{err}").contains("address"),
+            "error should name the missing field, got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_wifi_rejects_unknown_key() {
+        let err = load_from_str(
+            r#"
+[wifi]
+ssid = "net"
+password = "secret12"
+sid = "typo"
+"#,
+        )
+        .expect_err("deny_unknown_fields must reject a typo");
+        assert!(format!("{err}").contains("sid"));
     }
 }
