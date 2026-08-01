@@ -682,16 +682,69 @@ fallback_to_vendor = true
 | R10 | Rewriting `wpa_supplicant.conf` breaks the RTL8188 line-numbered `sed` path if the vendor fallback later runs | Fallback regenerates the vendor-shaped conf before delegating |
 | R11 | Credential validation could lock a user out of a network whose PSK contains a rejected character | Reject only `"`, newline and NUL — characters that cannot survive the config-file grammar. Shell metacharacters (`$`, backtick, `\`, `;`, `&`) must be **accepted**, since they only broke the vendor's `sh -c` and are legal in a PSK |
 
+## Resolved questions
+
+### Q1 — `wpa_supplicant` lifecycle: supervised service. RESOLVED
+
+How the vendor does it today:
+
+```
+START    wifi_station.sh start
+           RTL8188 + wpa_s 2.6:  wpa_supplicant -iwlan0 -Dnl80211 -c <conf> >>/tmp/wpa_log &
+           everything else:      wpa_supplicant -B -iwlan0 -Dwext -f /tmp/wpa_log -c <conf>
+         Either way it detaches and is reparented to init.
+WAIT     wifi_run.sh:106            pgrep; empty -> "init failed, exit start wifi"
+         station_connect.sh:57-63   unbounded `while not in ps: sleep 1`
+MONITOR  wifi_station.sh:141-176, only during the connect attempt:
+           180 iterations at 1 Hz of `ps | grep wpa_supplicant`,
+           `wpa_cli status | grep wpa_state`, and grep of /tmp/wpa_log for
+           "4-Way Handshake failed" / "Invalid WEP key" -> return 3
+AFTER    check_wifi_config_update() loops forever at 1 Hz but never checks
+         whether wpa_supplicant is still alive
+STOP     wifi_station.sh:396-399    killall wpa_supplicant; killall udhcpc
+RESTART  never
+```
+
+So the incumbent design is **detached, unsupervised, watched only until
+association completes, then forgotten** — D1 applied to wifi. When
+`wpa_supplicant` dies after association the interface keeps its address and the
+camera looks healthy until the AP deauths or the lease lapses, then drops off
+the network with no log line and no recovery short of a reboot.
+
+**Decision: `wpa_supplicant` becomes a `[services.*]` entry** under the normal
+backoff and crash-loop policy. Three findings make this straightforward:
+
+- **Drop `-B`.** A self-daemonizing process exits its parent immediately, which
+  the supervisor would read as an instant crash and backoff-loop on forever.
+  Foreground operation is already proven on this hardware: `wifi_station.sh:60`
+  runs it without `-B` on the RTL8188 path.
+- **The driver coupling does not bite.** `wifi_driver.sh uninstall` is only
+  called from `station_install` at the start of bring-up; nothing unloads the
+  module at runtime. Restarting `wpa_supplicant` alone is a valid recovery in
+  steady state.
+- **Bad-password diagnostics come free.** With the process supervised, its
+  stdout already lands in its own log via the existing spawn plumbing, so the
+  `4-Way Handshake failed` signal the vendor greps for becomes a distinct loud
+  error instead of a generic 180 s timeout.
+
+### Q3 — `anyka_cfg.ini` ownership: sole writer. RESOLVED
+
+`anyka-init` is the only component that writes it, so no ordering rule is
+needed.
+
+- `onvif-rust` has zero references to `anyka_cfg`. `set_network_interface` is a
+  default trait method (`platform/common/traits.rs:593`) returning
+  `PlatformError::NotSupported`, and the Anyka platform does not override it —
+  it structurally cannot write network configuration.
+- The WebUI has no references.
+- All other matches are vendor SDK reference source under
+  `cross-compile/anyka_reference/` (never deployed) or vendor rootfs scripts.
+- The only runtime writer would be `anyka_ipc` (`ak_config.c:20`), which the
+  `FACTORY_TEST=1` branch of `service.sh` never starts.
+
 ## Open questions
 
-1. Should `wpa_supplicant` be a `[services.*]` entry — supervised, restarted on
-   crash with the normal backoff — or a one-shot child of the bring-up? Treating
-   it as a service is more consistent, but its lifetime is coupled to the driver
-   module in a way other services are not.
-2. Static IP: `wifi_run.sh:57-67` supports `[ethernet] ipaddr/netmask/gateway`
+1. Static IP: `wifi_run.sh:57-67` supports `[ethernet] ipaddr/netmask/gateway`
    from the ini. Carry that forward, or require DHCP and drop the option?
-3. Does the WebUI or `onvif-rust` write `anyka_cfg.ini` `[wireless]` at runtime?
-   If so, the supervisor and the WebUI both own that file and need an ordering
-   rule.
-4. Is `hw.conf` offset 51 stable across the camera revisions in circulation, or
+2. Is `hw.conf` offset 51 stable across the camera revisions in circulation, or
    should chip detection prefer `lsusb` IDs where the chip is on USB?
