@@ -117,6 +117,63 @@ impl Chip {
     }
 }
 
+/// Vendor offsets, from `wifi_driver.sh:41-47`. Both are zero-based indices
+/// into the record *after* the three-byte `HW=` prefix is dropped, matching
+/// bash `${HW_READ:51:1}`.
+const HW_CHIP_OFFSET: usize = 51;
+const HW_POLARITY_OFFSET: usize = 52;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HwConf {
+    pub chip_char: char,
+    pub polarity_char: char,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Polarity {
+    /// Vendor `WIFI_ENABLE_VALUE == "2"`: 1 then 0 (`wifi_driver.sh:374-377`).
+    HighLow,
+    /// Everything else: 0 then 1 (`wifi_driver.sh:378-381`).
+    LowHigh,
+}
+
+impl Polarity {
+    pub fn from_char(c: char) -> Self {
+        if c == '2' {
+            Self::HighLow
+        } else {
+            Self::LowHigh
+        }
+    }
+
+    pub fn from_name(s: &str) -> Option<Self> {
+        match s {
+            "high_low" => Some(Self::HighLow),
+            "low_high" => Some(Self::LowHigh),
+            _ => None,
+        }
+    }
+
+    /// The two values to write to `/sys/user-gpio/wifi_en`, in order.
+    pub fn sequence(&self) -> [&'static str; 2] {
+        match self {
+            Self::HighLow => ["1", "0"],
+            Self::LowHigh => ["0", "1"],
+        }
+    }
+}
+
+/// Parse `/etc/jffs2/hw.conf`. `None` for anything the vendor would have
+/// silently turned into an empty `WIFI_NAME`.
+pub fn parse_hw_conf(src: &str) -> Option<HwConf> {
+    let record = src.trim_end_matches(['\n', '\r']).strip_prefix("HW=")?;
+    let chars: Vec<char> = record.chars().collect();
+    Some(HwConf {
+        chip_char: *chars.get(HW_CHIP_OFFSET)?,
+        polarity_char: *chars.get(HW_POLARITY_OFFSET)?,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -160,5 +217,47 @@ mod tests {
     fn test_chip_from_name_rejects_unknown() {
         assert!(Chip::from_name("nonexistent").is_none());
         assert!(Chip::from_name("").is_none());
+    }
+
+    // The real record from this camera: orig/etc/jffs2/hw.conf, byte-identical to
+    // the /mnt/Factory copy. 64 characters after the HW= prefix.
+    const HW_REAL: &str =
+        "HW=111513155011100180020000000000000000000000020000003h200000000000\n";
+
+    // service.sh:124 writes this when hw.conf is absent: 32 characters, so
+    // offset 51 does not exist (W2).
+    const HW_DEFAULT: &str = "HW=12151005501110018000000000000000\n";
+
+    #[test]
+    fn test_parse_hw_conf_extracts_chip_and_polarity() {
+        let hw = parse_hw_conf(HW_REAL).expect("real record parses");
+        assert_eq!(hw.chip_char, 'h');
+        assert_eq!(hw.polarity_char, '2');
+    }
+
+    #[test]
+    fn test_parse_hw_conf_rejects_short_default_record() {
+        // Bash `${HW_READ:51:1}` yields "" here and dispatches wifi_config_ with no
+        // diagnostic. Option makes that unignorable.
+        assert!(parse_hw_conf(HW_DEFAULT).is_none());
+    }
+
+    #[test]
+    fn test_parse_hw_conf_rejects_missing_prefix() {
+        assert!(parse_hw_conf("111513155011100180020000000000000000000000020000003h2").is_none());
+        assert!(parse_hw_conf("").is_none());
+    }
+
+    #[test]
+    fn test_parse_hw_conf_tolerates_missing_trailing_newline() {
+        let hw = parse_hw_conf(HW_REAL.trim_end()).expect("no trailing newline");
+        assert_eq!(hw.chip_char, 'h');
+    }
+
+    #[test]
+    fn test_hw_polarity_maps_two_to_high_low() {
+        assert_eq!(Polarity::from_char('2'), Polarity::HighLow);
+        assert_eq!(Polarity::from_char('1'), Polarity::LowHigh);
+        assert_eq!(Polarity::from_char('x'), Polarity::LowHigh);
     }
 }
