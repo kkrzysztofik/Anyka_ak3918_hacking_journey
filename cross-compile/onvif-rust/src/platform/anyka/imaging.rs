@@ -56,8 +56,7 @@ pub(super) struct AnykaImagingControl {
     ffi: Arc<dyn crate::hal::common::imaging::ImagingHalTrait>,
     settings: RwLock<ImagingSettings>,
     video_encoder: Option<Weak<AnykaVideoEncoder>>,
-    paths: super::night_mode::NodePaths,
-    caps: super::night_mode::Capabilities,
+    night: Arc<super::night_mode::NightModeController>,
 }
 
 impl AnykaImagingControl {
@@ -83,15 +82,24 @@ impl AnykaImagingControl {
     ///
     /// Used by tests with `MockImagingHalTrait` for hardware-free testing.
     pub(super) fn with_ffi(ffi: Arc<dyn crate::hal::common::imaging::ImagingHalTrait>) -> Self {
-        Self::with_ffi_and_paths(ffi, super::night_mode::NodePaths::default())
+        Self::with_ffi_and_paths(
+            ffi,
+            super::night_mode::NodePaths::default(),
+            crate::config::types::NightConfig::default(),
+        )
     }
 
     /// Create imaging control with injectable GPIO/sensor paths (tests + production).
     pub(super) fn with_ffi_and_paths(
         ffi: Arc<dyn crate::hal::common::imaging::ImagingHalTrait>,
         paths: super::night_mode::NodePaths,
+        night_cfg: crate::config::types::NightConfig,
     ) -> Self {
-        let caps = super::night_mode::probe(&paths);
+        let night = Arc::new(super::night_mode::NightModeController::new(
+            paths,
+            night_cfg,
+            Arc::clone(&ffi),
+        ));
         Self {
             ffi,
             settings: RwLock::new(ImagingSettings {
@@ -105,9 +113,13 @@ impl AnykaImagingControl {
                 backlight_compensation: false,
             }),
             video_encoder: None,
-            paths,
-            caps,
+            night,
         }
+    }
+
+    /// Night-mode controller shared with auxiliary command handlers.
+    pub(crate) fn night_mode(&self) -> Arc<super::night_mode::NightModeController> {
+        Arc::clone(&self.night)
     }
 
     /// Create a new `AnykaImagingControl` with FFI backend and video encoder reference.
@@ -117,8 +129,10 @@ impl AnykaImagingControl {
     pub(super) fn with_ffi_and_video_encoder(
         ffi: Arc<dyn crate::hal::common::imaging::ImagingHalTrait>,
         video_encoder: Arc<AnykaVideoEncoder>,
+        night_cfg: crate::config::types::NightConfig,
     ) -> Self {
-        let mut control = Self::with_ffi(ffi);
+        let mut control =
+            Self::with_ffi_and_paths(ffi, super::night_mode::NodePaths::default(), night_cfg);
         control.video_encoder = Some(Arc::downgrade(&video_encoder));
         control
     }
@@ -162,6 +176,9 @@ impl ImagingControl for AnykaImagingControl {
     }
 
     async fn set_settings(&self, settings: &ImagingSettings) -> PlatformResult<()> {
+        use super::night_mode::DayNight;
+        use crate::onvif::types::common::IrCutFilterMode;
+
         let start = std::time::Instant::now();
         crate::hal::common::imaging::imaging_set_brightness(settings.brightness, self.ffi.as_ref())
             .await?;
@@ -171,6 +188,21 @@ impl ImagingControl for AnykaImagingControl {
             .await?;
         crate::hal::common::imaging::imaging_set_sharpness(settings.sharpness, self.ffi.as_ref())
             .await?;
+
+        match settings.ir_cut_filter {
+            IrCutFilterMode::ON => {
+                self.night.set_auto_enabled(false);
+                self.night.apply(DayNight::Day).await?;
+            }
+            IrCutFilterMode::OFF => {
+                self.night.set_auto_enabled(false);
+                self.night.apply(DayNight::Night).await?;
+            }
+            IrCutFilterMode::AUTO => {
+                self.night.set_auto_enabled(true);
+            }
+        }
+
         *self.settings.write() = settings.clone();
         self.mark_imaging_update_and_request_idr("set_settings");
         tracing::info!(
@@ -181,9 +213,10 @@ impl ImagingControl for AnykaImagingControl {
     }
 
     async fn get_options(&self) -> PlatformResult<ImagingOptions> {
+        let caps = self.night.capabilities();
         Ok(ImagingOptions {
-            ir_cut_filter_supported: self.caps.line_mode.is_some(),
-            ir_led_supported: self.caps.ir_led,
+            ir_cut_filter_supported: caps.line_mode.is_some(),
+            ir_led_supported: caps.ir_led,
             ..ImagingOptions::default_options()
         })
     }
@@ -255,6 +288,27 @@ impl ImagingControl for AnykaImagingControl {
         );
         Ok(())
     }
+
+    async fn set_ir_lamp(&self, on: bool) -> PlatformResult<()> {
+        use super::night_mode::Node;
+        self.night.set_auto_enabled(false);
+        self.night
+            .write_lamp(Node::IrLed, on)
+            .map_err(|e| crate::platform::common::PlatformError::HardwareFailure(e.to_string()))
+    }
+
+    async fn set_white_light(&self, on: bool) -> PlatformResult<()> {
+        use super::night_mode::Node;
+        self.night
+            .write_lamp(Node::WhiteLed, on)
+            .map_err(|e| crate::platform::common::PlatformError::HardwareFailure(e.to_string()))
+    }
+
+    async fn enable_ir_auto(&self) -> PlatformResult<()> {
+        self.night.set_auto_enabled(true);
+        self.settings.write().ir_cut_filter = crate::onvif::types::common::IrCutFilterMode::AUTO;
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -278,8 +332,11 @@ mod tests {
 
         let dir = tempfile::tempdir().expect("tempdir");
         let paths = crate::platform::anyka::night_mode::NodePaths::rooted(dir.path(), dir.path());
-        let control =
-            AnykaImagingControl::with_ffi_and_paths(Arc::new(MockImagingHalTrait::new()), paths);
+        let control = AnykaImagingControl::with_ffi_and_paths(
+            Arc::new(MockImagingHalTrait::new()),
+            paths,
+            crate::config::types::NightConfig::default(),
+        );
 
         let options = control.get_options().await.unwrap();
 

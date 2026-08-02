@@ -489,6 +489,23 @@ pub trait ImagingControl: Send + Sync {
 
     /// Set sharpness.
     async fn set_sharpness(&self, value: f32) -> PlatformResult<()>;
+
+    /// Force the IR illuminator on or off (ONVIF `tt:IRLamp`).
+    async fn set_ir_lamp(&self, on: bool) -> PlatformResult<()> {
+        let _ = on;
+        Err(PlatformError::NotSupported("set_ir_lamp".to_string()))
+    }
+
+    /// Force the white floodlight on or off (ONVIF `tt:WhiteLight`).
+    async fn set_white_light(&self, on: bool) -> PlatformResult<()> {
+        let _ = on;
+        Err(PlatformError::NotSupported("set_white_light".to_string()))
+    }
+
+    /// Re-enable AUTO day/night for the IR path (ONVIF `tt:IRLamp|Auto`).
+    async fn enable_ir_auto(&self) -> PlatformResult<()> {
+        Err(PlatformError::NotSupported("enable_ir_auto".to_string()))
+    }
 }
 
 // ============================================================================

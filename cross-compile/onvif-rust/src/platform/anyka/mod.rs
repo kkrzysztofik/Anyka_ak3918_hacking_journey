@@ -120,6 +120,7 @@ impl AnykaPlatform {
             true,
             StreamOpenParams::default(),
             StreamOpenParams::default(),
+            crate::config::types::NightConfig::default(),
         )
     }
 
@@ -180,6 +181,7 @@ impl AnykaPlatform {
         ptz_enabled: bool,
         main_encoder: StreamOpenParams,
         sub_encoder: StreamOpenParams,
+        night_cfg: crate::config::types::NightConfig,
     ) -> PlatformResult<Self> {
         let device_info = Self::device_descriptor();
 
@@ -208,10 +210,13 @@ impl AnykaPlatform {
             ));
             let audio_input = Arc::new(AnykaAudioInput::with_ffi(audio_ffi.clone()));
             let audio_encoder = Arc::new(AnykaAudioEncoder::with_ffi(audio_ffi));
-            let imaging_control = Some(Arc::new(AnykaImagingControl::with_ffi_and_video_encoder(
+            let imaging = Arc::new(AnykaImagingControl::with_ffi_and_video_encoder(
                 imaging_ffi,
                 Arc::clone(&video_encoder),
-            )) as Arc<dyn ImagingControl>);
+                night_cfg,
+            ));
+            imaging.night_mode().spawn_auto_loop();
+            let imaging_control = Some(imaging as Arc<dyn ImagingControl>);
 
             (
                 video_input,

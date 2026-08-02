@@ -265,6 +265,156 @@ pub(super) fn read_light_sensor(paths: &NodePaths) -> Option<i32> {
     raw.trim().parse::<i32>().ok()
 }
 
+/// AUTO poll interval. Fixed: lock_time dominates responsiveness.
+pub(crate) const POLL_INTERVAL: Duration = Duration::from_secs(2);
+
+/// Owns the night-mode state and serialises every transition.
+pub(crate) struct NightModeController {
+    paths: NodePaths,
+    caps: Capabilities,
+    cfg: crate::config::types::NightConfig,
+    ffi: std::sync::Arc<dyn crate::hal::common::imaging::ImagingHalTrait>,
+    state: tokio::sync::Mutex<AutoState>,
+    /// When true, [`Self::tick`] may transition; cleared by forced ON/OFF.
+    auto_enabled: std::sync::atomic::AtomicBool,
+}
+
+impl NightModeController {
+    pub(crate) fn new(
+        paths: NodePaths,
+        cfg: crate::config::types::NightConfig,
+        ffi: std::sync::Arc<dyn crate::hal::common::imaging::ImagingHalTrait>,
+    ) -> Self {
+        let caps = probe(&paths);
+        Self {
+            paths,
+            caps,
+            cfg,
+            ffi,
+            state: tokio::sync::Mutex::new(AutoState::new(DayNight::Day)),
+            auto_enabled: std::sync::atomic::AtomicBool::new(true),
+        }
+    }
+
+    pub(crate) fn capabilities(&self) -> Capabilities {
+        self.caps
+    }
+
+    pub(crate) fn set_auto_enabled(&self, enabled: bool) {
+        self.auto_enabled
+            .store(enabled, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    /// Apply a transition. The mutex makes concurrent transitions
+    /// impossible, which matters because the two-line coil must never be
+    /// driven by two callers at once.
+    pub(crate) async fn apply(
+        &self,
+        target: DayNight,
+    ) -> crate::platform::common::PlatformResult<()> {
+        use crate::platform::common::PlatformError;
+
+        let mut state = self.state.lock().await;
+
+        let Some(line_mode) = self.caps.line_mode else {
+            return Ok(()); // no filter hardware; nothing to do
+        };
+        let steps = plan(
+            target,
+            Polarity {
+                ircut_high_is_night: self.cfg.ircut_high_is_night,
+            },
+            line_mode,
+        );
+
+        // GPIO first: it is durable and survives a daemon restart, whereas
+        // the ISP mode does not. A bounce then costs one tick of
+        // wrong-looking image rather than a stuck filter.
+        let paths = self.paths.clone();
+        let gpio_steps = steps.clone();
+        let gpio_result =
+            tokio::task::spawn_blocking(move || execute_gpio(&gpio_steps, &paths)).await;
+
+        // The ISP step is the only part that needs the daemon.
+        let isp = self
+            .ffi
+            .set_ir_filter(matches!(target, DayNight::Night))
+            .await;
+
+        state.record_change(target, std::time::Instant::now());
+
+        if isp != 0 {
+            tracing::warn!(isp, "ISP day/night switch failed; will retry next tick");
+        }
+        match gpio_result {
+            Ok(Ok(())) => Ok(()),
+            Ok(Err(e)) => Err(PlatformError::HardwareFailure(format!("GPIO write: {e}"))),
+            Err(e) => Err(PlatformError::HardwareFailure(format!("join: {e}"))),
+        }
+    }
+
+    /// One AUTO poll: read, classify, decide, maybe apply.
+    pub(crate) async fn tick(&self) {
+        if !self.auto_enabled.load(std::sync::atomic::Ordering::SeqCst) {
+            return;
+        }
+        let Some(raw) = read_light_sensor(&self.paths) else {
+            return; // hold current mode
+        };
+        let reading = classify(
+            raw,
+            Thresholds {
+                day: self.cfg.day_threshold,
+                night: self.cfg.night_threshold,
+                ldr_high_is_day: self.cfg.ldr_high_is_day,
+            },
+        );
+        let target = {
+            let state = self.state.lock().await;
+            decide(
+                &state,
+                reading,
+                std::time::Instant::now(),
+                Duration::from_millis(self.cfg.lock_time_ms),
+            )
+        };
+        if let Some(target) = target
+            && let Err(e) = self.apply(target).await
+        {
+            tracing::warn!(error = %e, "night-mode transition failed");
+        }
+    }
+
+    /// Write a single lamp GPIO. Used by ONVIF auxiliary commands.
+    pub(crate) fn write_lamp(&self, node: Node, on: bool) -> std::io::Result<()> {
+        if matches!(node, Node::IrLed) && !self.caps.ir_led {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "IR_LED node absent",
+            ));
+        }
+        if matches!(node, Node::WhiteLed) && !self.caps.white_led {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "WHITE_LED node absent",
+            ));
+        }
+        std::fs::write(self.paths.node(node), if on { "1" } else { "0" })
+    }
+
+    /// Spawn the AUTO poll loop. Call once after construction.
+    pub(crate) fn spawn_auto_loop(self: &std::sync::Arc<Self>) {
+        let this = std::sync::Arc::clone(self);
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(POLL_INTERVAL);
+            loop {
+                interval.tick().await;
+                this.tick().await;
+            }
+        });
+    }
+}
+
 /// Build the ordered step list for a transition.
 ///
 /// Ordering follows the vendor reference and is not arbitrary: the lamp turns
@@ -336,6 +486,59 @@ mod tests {
         Polarity {
             ircut_high_is_night: true,
         }
+    }
+
+    fn test_config() -> crate::config::types::NightConfig {
+        crate::config::types::NightConfig::default()
+    }
+
+    #[tokio::test]
+    async fn test_apply_night_calls_isp_switch_and_writes_gpios() {
+        use crate::hal::common::imaging::MockImagingHalTrait;
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let paths = NodePaths::rooted(dir.path(), dir.path());
+        for n in [Node::IrCutA, Node::IrCutB, Node::IrLed] {
+            std::fs::write(paths.node(n), "9").unwrap();
+        }
+
+        let mut ffi = MockImagingHalTrait::new();
+        ffi.expect_set_ir_filter()
+            .withf(|enabled| *enabled)
+            .times(1)
+            .returning(|_| 0);
+
+        let ctl = NightModeController::new(paths.clone(), test_config(), std::sync::Arc::new(ffi));
+        ctl.apply(DayNight::Night).await.unwrap();
+
+        assert_eq!(
+            std::fs::read_to_string(paths.node(Node::IrLed)).unwrap(),
+            "1"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_apply_still_writes_gpios_when_the_isp_call_fails() {
+        use crate::hal::common::imaging::MockImagingHalTrait;
+
+        // A daemon restart makes the IPC call fail. GPIO state is durable and
+        // must still be correct, so the next tick only has to redo the ISP.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let paths = NodePaths::rooted(dir.path(), dir.path());
+        for n in [Node::IrCutA, Node::IrCutB, Node::IrLed] {
+            std::fs::write(paths.node(n), "9").unwrap();
+        }
+
+        let mut ffi = MockImagingHalTrait::new();
+        ffi.expect_set_ir_filter().returning(|_| -1);
+
+        let ctl = NightModeController::new(paths.clone(), test_config(), std::sync::Arc::new(ffi));
+        let _ = ctl.apply(DayNight::Night).await;
+
+        assert_eq!(
+            std::fs::read_to_string(paths.node(Node::IrLed)).unwrap(),
+            "1"
+        );
     }
 
     fn thr() -> Thresholds {
