@@ -71,7 +71,8 @@ pub enum LampState {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AuxCommand {
     IrLamp(LampState),
-    WhiteLight(LampState),
+    /// White floodlight is binary only — no AUTO.
+    WhiteLight(bool),
 }
 
 /// Parse an ONVIF auxiliary command string such as `"tt:IRLamp|On"`.
@@ -80,15 +81,12 @@ pub enum AuxCommand {
 /// fault rather than reporting success for hardware that does not exist.
 pub fn parse_auxiliary(data: &str) -> Option<AuxCommand> {
     let (name, state) = data.split_once('|')?;
-    let state = match state {
-        "On" => LampState::On,
-        "Off" => LampState::Off,
-        "Auto" => LampState::Auto,
-        _ => return None,
-    };
-    match name {
-        "tt:IRLamp" => Some(AuxCommand::IrLamp(state)),
-        "tt:WhiteLight" => Some(AuxCommand::WhiteLight(state)),
+    match (name, state) {
+        ("tt:IRLamp", "On") => Some(AuxCommand::IrLamp(LampState::On)),
+        ("tt:IRLamp", "Off") => Some(AuxCommand::IrLamp(LampState::Off)),
+        ("tt:IRLamp", "Auto") => Some(AuxCommand::IrLamp(LampState::Auto)),
+        ("tt:WhiteLight", "On") => Some(AuxCommand::WhiteLight(true)),
+        ("tt:WhiteLight", "Off") => Some(AuxCommand::WhiteLight(false)),
         _ => None,
     }
 }
@@ -154,7 +152,7 @@ mod tests {
     fn test_parse_white_light_off() {
         assert_eq!(
             parse_auxiliary("tt:WhiteLight|Off"),
-            Some(AuxCommand::WhiteLight(LampState::Off))
+            Some(AuxCommand::WhiteLight(false))
         );
     }
 
@@ -164,6 +162,11 @@ mod tests {
             parse_auxiliary("tt:IRLamp|Auto"),
             Some(AuxCommand::IrLamp(LampState::Auto))
         );
+    }
+
+    #[test]
+    fn test_parse_rejects_white_light_auto() {
+        assert_eq!(parse_auxiliary("tt:WhiteLight|Auto"), None);
     }
 
     #[test]

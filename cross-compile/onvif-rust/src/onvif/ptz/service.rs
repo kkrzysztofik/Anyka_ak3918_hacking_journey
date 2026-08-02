@@ -359,14 +359,7 @@ impl PTZService {
             AuxCommand::IrLamp(LampState::On) => imaging.set_ir_lamp(true).await,
             AuxCommand::IrLamp(LampState::Off) => imaging.set_ir_lamp(false).await,
             AuxCommand::IrLamp(LampState::Auto) => imaging.enable_ir_auto().await,
-            AuxCommand::WhiteLight(LampState::On) => imaging.set_white_light(true).await,
-            AuxCommand::WhiteLight(LampState::Off) => imaging.set_white_light(false).await,
-            AuxCommand::WhiteLight(LampState::Auto) => {
-                return Err(OnvifError::InvalidArgVal {
-                    subcode: "InvalidArgVal".to_string(),
-                    reason: "tt:WhiteLight|Auto is not supported".to_string(),
-                });
-            }
+            AuxCommand::WhiteLight(on) => imaging.set_white_light(on).await,
         };
 
         result.map_err(|e| OnvifError::InvalidArgVal {
