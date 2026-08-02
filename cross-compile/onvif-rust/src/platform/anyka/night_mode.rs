@@ -34,7 +34,7 @@ pub(super) enum Node {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum LineMode {
     /// Single node, level written directly.
-    One,
+    One(Node),
     /// H-bridge: opposed pulse, then both lines back to zero.
     Two,
 }
@@ -199,8 +199,6 @@ impl NodePaths {
 pub(super) struct Capabilities {
     /// `None` when no ircut node exists — the filter is unsupported.
     pub line_mode: Option<LineMode>,
-    /// In one-line mode, the node that exists. `None` in two-line mode.
-    pub single_node: Option<Node>,
     pub ir_led: bool,
     pub white_led: bool,
 }
@@ -211,27 +209,20 @@ pub(super) fn probe(paths: &NodePaths) -> Capabilities {
     let a = paths.node(Node::IrCutA).exists();
     let b = paths.node(Node::IrCutB).exists();
 
-    let (line_mode, single_node) = match (a, b) {
-        (true, true) => (Some(LineMode::Two), None),
-        (true, false) => (Some(LineMode::One), Some(Node::IrCutA)),
-        (false, true) => (Some(LineMode::One), Some(Node::IrCutB)),
-        (false, false) => (None, None),
+    let line_mode = match (a, b) {
+        (true, true) => Some(LineMode::Two),
+        (true, false) => Some(LineMode::One(Node::IrCutA)),
+        (false, true) => Some(LineMode::One(Node::IrCutB)),
+        (false, false) => None,
     };
 
     Capabilities {
         line_mode,
-        single_node,
         ir_led: paths.node(Node::IrLed).exists(),
         white_led: paths.node(Node::WhiteLed).exists(),
     }
 }
 
-/// Build the ordered step list for a transition.
-///
-/// Ordering follows the vendor reference and is not arbitrary: the lamp turns
-/// on before the ISP switches to night and off after it switches to day, so no
-/// frame is captured dark. In [`LineMode::Two`] the trailing zero writes
-/// de-energise the solenoid coil and are mandatory.
 /// Execute the GPIO and sleep steps of a plan.
 ///
 /// [`Step::IspMode`] is skipped here; the caller performs it over IPC, because
@@ -258,10 +249,7 @@ pub(super) fn execute_gpio(steps: &[Step], paths: &NodePaths) -> std::io::Result
         }
     }
 
-    match first_err {
-        Some(e) => Err(e),
-        None => Ok(()),
-    }
+    first_err.map_or(Ok(()), Err)
 }
 
 /// Read the raw light-sensor value.
@@ -277,12 +265,13 @@ pub(super) fn read_light_sensor(paths: &NodePaths) -> Option<i32> {
     raw.trim().parse::<i32>().ok()
 }
 
-pub(super) fn plan(
-    target: DayNight,
-    pol: Polarity,
-    line_mode: LineMode,
-    single_node: Option<Node>,
-) -> Vec<Step> {
+/// Build the ordered step list for a transition.
+///
+/// Ordering follows the vendor reference and is not arbitrary: the lamp turns
+/// on before the ISP switches to night and off after it switches to day, so no
+/// frame is captured dark. In [`LineMode::Two`] the trailing zero writes
+/// de-energise the solenoid coil and are mandatory.
+pub(super) fn plan(target: DayNight, pol: Polarity, line_mode: LineMode) -> Vec<Step> {
     let night_level = u8::from(pol.ircut_high_is_night);
     let ircut_level = match target {
         DayNight::Night => night_level,
@@ -291,8 +280,8 @@ pub(super) fn plan(
 
     let mut ircut = Vec::new();
     match line_mode {
-        LineMode::One => ircut.push(Step::Write {
-            node: single_node.unwrap_or(Node::IrCutA),
+        LineMode::One(node) => ircut.push(Step::Write {
+            node,
             value: ircut_level,
         }),
         LineMode::Two => {
@@ -368,7 +357,6 @@ mod tests {
         let caps = probe(&paths);
 
         assert_eq!(caps.line_mode, Some(LineMode::Two));
-        assert_eq!(caps.single_node, None);
         assert!(caps.ir_led);
     }
 
@@ -380,8 +368,7 @@ mod tests {
 
         let caps = probe(&paths);
 
-        assert_eq!(caps.line_mode, Some(LineMode::One));
-        assert_eq!(caps.single_node, Some(Node::IrCutA));
+        assert_eq!(caps.line_mode, Some(LineMode::One(Node::IrCutA)));
         assert!(!caps.ir_led);
     }
 
@@ -393,10 +380,8 @@ mod tests {
         let caps = probe(&paths);
 
         assert_eq!(caps.line_mode, None);
-        assert_eq!(caps.single_node, None);
     }
 
-    #[test]
     #[test]
     fn test_execute_writes_final_values_to_nodes() {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -405,7 +390,7 @@ mod tests {
         std::fs::write(paths.node(Node::IrCutB), "9").unwrap();
         std::fs::write(paths.node(Node::IrLed), "9").unwrap();
 
-        let steps = plan(DayNight::Night, pol(), LineMode::Two, None);
+        let steps = plan(DayNight::Night, pol(), LineMode::Two);
         let outcome = execute_gpio(&steps, &paths);
 
         assert!(outcome.is_ok());
@@ -434,7 +419,7 @@ mod tests {
         std::fs::write(paths.node(Node::IrCutB), "9").unwrap();
         std::fs::create_dir(paths.node(Node::IrLed)).unwrap();
 
-        let steps = plan(DayNight::Night, pol(), LineMode::Two, None);
+        let steps = plan(DayNight::Night, pol(), LineMode::Two);
         let outcome = execute_gpio(&steps, &paths);
 
         assert!(outcome.is_err(), "the failed IrLed write must be reported");
@@ -477,7 +462,7 @@ mod tests {
 
     #[test]
     fn test_one_line_ircut_b_only_board_plans_write_to_ircut_b() {
-        let steps = plan(DayNight::Night, pol(), LineMode::One, Some(Node::IrCutB));
+        let steps = plan(DayNight::Night, pol(), LineMode::One(Node::IrCutB));
 
         assert_eq!(
             steps,
@@ -599,7 +584,7 @@ mod tests {
 
     #[test]
     fn test_night_mode_plan_lights_lamp_before_isp_switch() {
-        let steps = plan(DayNight::Night, pol(), LineMode::Two, None);
+        let steps = plan(DayNight::Night, pol(), LineMode::Two);
 
         assert_eq!(
             steps,
@@ -633,7 +618,7 @@ mod tests {
 
     #[test]
     fn test_day_mode_plan_moves_filter_before_isp_switch() {
-        let steps = plan(DayNight::Day, pol(), LineMode::Two, None);
+        let steps = plan(DayNight::Day, pol(), LineMode::Two);
 
         assert_eq!(
             steps,
@@ -667,7 +652,7 @@ mod tests {
 
     #[test]
     fn test_one_line_mode_writes_single_node_without_pulse() {
-        let steps = plan(DayNight::Night, pol(), LineMode::One, None);
+        let steps = plan(DayNight::Night, pol(), LineMode::One(Node::IrCutA));
 
         assert_eq!(
             steps,
@@ -692,7 +677,7 @@ mod tests {
             ircut_high_is_night: false,
         };
 
-        let steps = plan(DayNight::Night, inverted, LineMode::One, None);
+        let steps = plan(DayNight::Night, inverted, LineMode::One(Node::IrCutA));
 
         assert_eq!(
             steps,
