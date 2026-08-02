@@ -82,6 +82,57 @@ pub(super) enum Reading {
 }
 
 /// Map a raw `ain0` reading to a day/night conclusion.
+/// Current AUTO-mode state: what the camera is set to, and when it last moved.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct AutoState {
+    current: DayNight,
+    last_change: Option<std::time::Instant>,
+}
+
+impl AutoState {
+    pub(super) fn new(current: DayNight) -> Self {
+        Self {
+            current,
+            last_change: None,
+        }
+    }
+
+    pub(super) fn current(&self) -> DayNight {
+        self.current
+    }
+
+    /// Record that a transition has been applied.
+    pub(super) fn record_change(&mut self, to: DayNight, at: std::time::Instant) {
+        self.current = to;
+        self.last_change = Some(at);
+    }
+}
+
+/// Decide whether to transition, given a reading and the lock window.
+///
+/// Returns `None` to hold the current mode. An `Indeterminate` reading always
+/// holds; so does any reading inside `lock` of the last transition, which is
+/// what stops a camera oscillating at dusk.
+pub(super) fn decide(
+    state: &AutoState,
+    reading: Reading,
+    now: std::time::Instant,
+    lock: Duration,
+) -> Option<DayNight> {
+    let Reading::Settled(target) = reading else {
+        return None;
+    };
+    if target == state.current {
+        return None;
+    }
+    if let Some(last) = state.last_change {
+        if now.duration_since(last) < lock {
+            return None;
+        }
+    }
+    Some(target)
+}
+
 pub(super) fn classify(raw: i32, thr: Thresholds) -> Reading {
     let (high, low) = if thr.ldr_high_is_day {
         (DayNight::Day, DayNight::Night)
@@ -199,6 +250,79 @@ mod tests {
 
         assert_eq!(classify(1500, inverted), Reading::Settled(DayNight::Night));
         assert_eq!(classify(120, inverted), Reading::Settled(DayNight::Day));
+    }
+
+    #[test]
+    fn test_decide_switches_when_reading_differs_and_unlocked() {
+        let t0 = std::time::Instant::now();
+        let state = AutoState::new(DayNight::Day);
+
+        let target = decide(
+            &state,
+            Reading::Settled(DayNight::Night),
+            t0,
+            Duration::from_secs(900),
+        );
+
+        assert_eq!(target, Some(DayNight::Night));
+    }
+
+    #[test]
+    fn test_decide_holds_when_reading_matches_current_mode() {
+        let t0 = std::time::Instant::now();
+        let state = AutoState::new(DayNight::Day);
+
+        let target = decide(
+            &state,
+            Reading::Settled(DayNight::Day),
+            t0,
+            Duration::from_secs(900),
+        );
+
+        assert_eq!(target, None);
+    }
+
+    #[test]
+    fn test_decide_holds_current_mode_on_indeterminate_reading() {
+        let t0 = std::time::Instant::now();
+        let state = AutoState::new(DayNight::Day);
+
+        let target = decide(&state, Reading::Indeterminate, t0, Duration::from_secs(900));
+
+        assert_eq!(target, None);
+    }
+
+    #[test]
+    fn test_decide_refuses_to_switch_inside_the_lock_window() {
+        let t0 = std::time::Instant::now();
+        let mut state = AutoState::new(DayNight::Day);
+        state.record_change(DayNight::Night, t0);
+
+        // One second later, the sensor says day again — a dusk flicker.
+        let target = decide(
+            &state,
+            Reading::Settled(DayNight::Day),
+            t0 + Duration::from_secs(1),
+            Duration::from_secs(900),
+        );
+
+        assert_eq!(target, None);
+    }
+
+    #[test]
+    fn test_decide_switches_again_once_the_lock_expires() {
+        let t0 = std::time::Instant::now();
+        let mut state = AutoState::new(DayNight::Day);
+        state.record_change(DayNight::Night, t0);
+
+        let target = decide(
+            &state,
+            Reading::Settled(DayNight::Day),
+            t0 + Duration::from_secs(901),
+            Duration::from_secs(900),
+        );
+
+        assert_eq!(target, Some(DayNight::Day));
     }
 
     #[test]
