@@ -237,11 +237,23 @@ saturation = 50.0
 # Default sharpness (0.0-100.0)
 sharpness = 50.0
 
-# IR cut filter enabled (true/false)
-ir_cut_filter = true
+# IR cut filter: "ON" (day), "OFF" (night), "AUTO" (follow light sensor).
+ir_cut_filter = "AUTO"
 
 # IR LED enabled (true/false)
 ir_led = false
+
+[imaging.night]
+# Board wiring. Verify on hardware before trusting these.
+ldr_high_is_day = true
+ircut_high_is_night = true
+# Raw /sys/kernel/ain/ain0 thresholds. These are the VENDOR defaults and
+# they are WRONG for this board: its resting reading of 306 falls in the
+# unhandled band between them. Calibrate per Task 14 before enabling AUTO.
+day_threshold = 1100
+night_threshold = 300
+# Minimum ms between day/night transitions. Prevents dusk oscillation.
+lock_time_ms = 900000
 
 # ============================================================================
 # WS-Discovery Settings

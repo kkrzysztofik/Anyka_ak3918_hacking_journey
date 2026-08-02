@@ -584,8 +584,11 @@ pub struct ImagingConfig {
     pub contrast: f64,
     pub saturation: f64,
     pub sharpness: f64,
-    pub ir_cut_filter: bool,
+    /// Widened from `bool`: a bool cannot express AUTO, which is why AUTO
+    /// was previously unimplementable at this layer.
+    pub ir_cut_filter: crate::onvif::types::common::IrCutFilterMode,
     pub ir_led: bool,
+    pub night: NightConfig,
 }
 
 impl Default for ImagingConfig {
@@ -595,8 +598,41 @@ impl Default for ImagingConfig {
             contrast: 50.0,
             saturation: 50.0,
             sharpness: 50.0,
-            ir_cut_filter: true,
+            ir_cut_filter: crate::onvif::types::common::IrCutFilterMode::AUTO,
             ir_led: false,
+            night: NightConfig::default(),
+        }
+    }
+}
+
+/// Day/night calibration. Polarity and thresholds vary per board; the
+/// settle delay and poll interval do not and are constants in
+/// `platform::anyka::night_mode`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct NightConfig {
+    /// `true` when a high `ain0` reading means daylight.
+    pub ldr_high_is_day: bool,
+    /// `true` when writing `1` to the ircut node selects night.
+    pub ircut_high_is_night: bool,
+    /// At or above this raw `ain0` reading, the sensor is saturated bright.
+    /// MUST be calibrated on hardware — see design H5, and Task 14.
+    pub day_threshold: i32,
+    /// At or below this raw `ain0` reading, the sensor is saturated dark.
+    /// MUST be calibrated on hardware.
+    pub night_threshold: i32,
+    /// Minimum time between transitions, preventing dusk oscillation.
+    pub lock_time_ms: u64,
+}
+
+impl Default for NightConfig {
+    fn default() -> Self {
+        Self {
+            ldr_high_is_day: true,
+            ircut_high_is_night: true,
+            day_threshold: 1100,
+            night_threshold: 300,
+            lock_time_ms: 900_000,
         }
     }
 }
@@ -940,5 +976,25 @@ file_name = "static"
                 "the error must name the field that is wrong, got {errors:?}"
             );
         }
+    }
+
+    #[test]
+    fn test_imaging_config_defaults_to_auto_ir_cut_filter() {
+        let cfg = ImagingConfig::default();
+        assert_eq!(cfg.ir_cut_filter, crate::onvif::types::common::IrCutFilterMode::AUTO);
+    }
+
+    #[test]
+    fn test_imaging_config_parses_ir_cut_filter_mode_from_toml() {
+        let cfg: ImagingConfig = toml::from_str(r#"ir_cut_filter = "OFF""#).unwrap();
+        assert_eq!(cfg.ir_cut_filter, crate::onvif::types::common::IrCutFilterMode::OFF);
+    }
+
+    #[test]
+    fn test_night_config_defaults_match_vendor_lock_time() {
+        let cfg = NightConfig::default();
+        assert_eq!(cfg.lock_time_ms, 900_000);
+        assert!(cfg.ldr_high_is_day);
+        assert!(cfg.ircut_high_is_night);
     }
 }
