@@ -72,7 +72,7 @@ The Rust-based ONVIF server implements:
 - **Device Service**: System information, network configuration, user management
 - **Media Service**: Video profiles, RTSP stream URI generation, encoder configuration
 - **PTZ Service**: Pan/Tilt/Zoom control with preset management
-- **Imaging Service**: Image parameter adjustment (brightness, contrast, saturation, sharpness)
+- **Imaging Service**: Image parameter adjustment (brightness, contrast, saturation, sharpness), IR cut filter, IR lamp / white light ([[IR-Night-Mode-Calibration]])
 
 ## Troubleshooting
 
@@ -83,4 +83,5 @@ For common issues and solutions, see [[Troubleshooting]].
 - [[Development-Environment]] - Toolchain setup and build instructions
 - [[Development-Guide]] - Development workflow and best practices
 - [[Web-Interface]] - Web UI that communicates with the ONVIF server
+- [[IR-Night-Mode-Calibration]] - Measure `ain0` thresholds; verify day/night AUTO
 - [[Troubleshooting]] - Common issues and solutions
