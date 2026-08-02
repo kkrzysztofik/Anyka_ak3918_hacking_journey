@@ -5,6 +5,7 @@
 //! `platform/libplat/src/drv/ak_drv_ir.c:230-255`) and are load-bearing.
 //! See `docs/plans/2026-08-02-ir-led-support-design.md`.
 
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 /// Delay after a mode switch, letting the solenoid and ISP settle.
@@ -143,13 +144,97 @@ pub(super) fn classify(raw: i32, thr: Thresholds) -> Reading {
     }
 }
 
+/// Filesystem locations of the nodes this module drives.
+///
+/// Held as two base directories rather than six paths so tests can point the
+/// whole set at a `tempdir` with one call.
+#[derive(Debug, Clone)]
+pub(super) struct NodePaths {
+    user_gpio: PathBuf,
+    kernel_ain: PathBuf,
+}
+
+impl Default for NodePaths {
+    fn default() -> Self {
+        Self {
+            user_gpio: PathBuf::from("/sys/user-gpio"),
+            kernel_ain: PathBuf::from("/sys/kernel/ain"),
+        }
+    }
+}
+
+impl NodePaths {
+    /// Point both trees at explicit roots. Tests pass a `tempdir`.
+    pub(super) fn rooted(user_gpio: &Path, kernel_ain: &Path) -> Self {
+        Self {
+            user_gpio: user_gpio.to_path_buf(),
+            kernel_ain: kernel_ain.to_path_buf(),
+        }
+    }
+
+    /// Path of a GPIO node. Names are this board's, not the vendor
+    /// reference's `gpio-` prefixed ones. See design H1.
+    pub(super) fn node(&self, node: Node) -> PathBuf {
+        let name = match node {
+            Node::IrCutA => "ircut_a",
+            Node::IrCutB => "ircut_b",
+            Node::IrLed => "IR_LED",
+            Node::WhiteLed => "WHITE_LED",
+        };
+        self.user_gpio.join(name)
+    }
+
+    /// Path of the light sensor. `gpio-rf_feed` does not exist on this
+    /// board, so the ain fallback is the only source. See design H2.
+    pub(super) fn light_sensor(&self) -> PathBuf {
+        self.kernel_ain.join("ain0")
+    }
+}
+
+/// What the hardware actually supports, discovered at startup.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct Capabilities {
+    /// `None` when no ircut node exists — the filter is unsupported.
+    pub line_mode: Option<LineMode>,
+    /// In one-line mode, the node that exists. `None` in two-line mode.
+    pub single_node: Option<Node>,
+    pub ir_led: bool,
+    pub white_led: bool,
+}
+
+/// Probe for the nodes. One `stat()` per node answers both the wiring
+/// question and the ONVIF capability question.
+pub(super) fn probe(paths: &NodePaths) -> Capabilities {
+    let a = paths.node(Node::IrCutA).exists();
+    let b = paths.node(Node::IrCutB).exists();
+
+    let (line_mode, single_node) = match (a, b) {
+        (true, true) => (Some(LineMode::Two), None),
+        (true, false) => (Some(LineMode::One), Some(Node::IrCutA)),
+        (false, true) => (Some(LineMode::One), Some(Node::IrCutB)),
+        (false, false) => (None, None),
+    };
+
+    Capabilities {
+        line_mode,
+        single_node,
+        ir_led: paths.node(Node::IrLed).exists(),
+        white_led: paths.node(Node::WhiteLed).exists(),
+    }
+}
+
 /// Build the ordered step list for a transition.
 ///
 /// Ordering follows the vendor reference and is not arbitrary: the lamp turns
 /// on before the ISP switches to night and off after it switches to day, so no
 /// frame is captured dark. In [`LineMode::Two`] the trailing zero writes
 /// de-energise the solenoid coil and are mandatory.
-pub(super) fn plan(target: DayNight, pol: Polarity, line_mode: LineMode) -> Vec<Step> {
+pub(super) fn plan(
+    target: DayNight,
+    pol: Polarity,
+    line_mode: LineMode,
+    single_node: Option<Node>,
+) -> Vec<Step> {
     let night_level = u8::from(pol.ircut_high_is_night);
     let ircut_level = match target {
         DayNight::Night => night_level,
@@ -159,7 +244,7 @@ pub(super) fn plan(target: DayNight, pol: Polarity, line_mode: LineMode) -> Vec<
     let mut ircut = Vec::new();
     match line_mode {
         LineMode::One => ircut.push(Step::Write {
-            node: Node::IrCutA,
+            node: single_node.unwrap_or(Node::IrCutA),
             value: ircut_level,
         }),
         LineMode::Two => {
@@ -222,6 +307,71 @@ mod tests {
             night: 300,
             ldr_high_is_day: true,
         }
+    }
+
+    #[test]
+    fn test_probe_reports_two_line_when_both_ircut_nodes_exist() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let paths = NodePaths::rooted(dir.path(), dir.path());
+        std::fs::write(paths.node(Node::IrCutA), "0").unwrap();
+        std::fs::write(paths.node(Node::IrCutB), "0").unwrap();
+        std::fs::write(paths.node(Node::IrLed), "0").unwrap();
+
+        let caps = probe(&paths);
+
+        assert_eq!(caps.line_mode, Some(LineMode::Two));
+        assert_eq!(caps.single_node, None);
+        assert!(caps.ir_led);
+    }
+
+    #[test]
+    fn test_probe_reports_one_line_when_only_ircut_a_exists() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let paths = NodePaths::rooted(dir.path(), dir.path());
+        std::fs::write(paths.node(Node::IrCutA), "0").unwrap();
+
+        let caps = probe(&paths);
+
+        assert_eq!(caps.line_mode, Some(LineMode::One));
+        assert_eq!(caps.single_node, Some(Node::IrCutA));
+        assert!(!caps.ir_led);
+    }
+
+    #[test]
+    fn test_probe_reports_unsupported_when_no_ircut_nodes_exist() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let paths = NodePaths::rooted(dir.path(), dir.path());
+
+        let caps = probe(&paths);
+
+        assert_eq!(caps.line_mode, None);
+        assert_eq!(caps.single_node, None);
+    }
+
+    #[test]
+    fn test_one_line_ircut_b_only_board_plans_write_to_ircut_b() {
+        let steps = plan(
+            DayNight::Night,
+            pol(),
+            LineMode::One,
+            Some(Node::IrCutB),
+        );
+
+        assert_eq!(
+            steps,
+            vec![
+                Step::Write {
+                    node: Node::IrLed,
+                    value: 1
+                },
+                Step::IspMode(DayNight::Night),
+                Step::Write {
+                    node: Node::IrCutB,
+                    value: 1
+                },
+                Step::Sleep(SETTLE),
+            ]
+        );
     }
 
     #[test]
@@ -327,7 +477,7 @@ mod tests {
 
     #[test]
     fn test_night_mode_plan_lights_lamp_before_isp_switch() {
-        let steps = plan(DayNight::Night, pol(), LineMode::Two);
+        let steps = plan(DayNight::Night, pol(), LineMode::Two, None);
 
         assert_eq!(
             steps,
@@ -361,7 +511,7 @@ mod tests {
 
     #[test]
     fn test_day_mode_plan_moves_filter_before_isp_switch() {
-        let steps = plan(DayNight::Day, pol(), LineMode::Two);
+        let steps = plan(DayNight::Day, pol(), LineMode::Two, None);
 
         assert_eq!(
             steps,
@@ -395,7 +545,7 @@ mod tests {
 
     #[test]
     fn test_one_line_mode_writes_single_node_without_pulse() {
-        let steps = plan(DayNight::Night, pol(), LineMode::One);
+        let steps = plan(DayNight::Night, pol(), LineMode::One, None);
 
         assert_eq!(
             steps,
@@ -420,7 +570,7 @@ mod tests {
             ircut_high_is_night: false,
         };
 
-        let steps = plan(DayNight::Night, inverted, LineMode::One);
+        let steps = plan(DayNight::Night, inverted, LineMode::One, None);
 
         assert_eq!(
             steps,
