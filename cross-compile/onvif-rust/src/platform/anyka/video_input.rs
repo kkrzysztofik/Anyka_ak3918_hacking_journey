@@ -177,7 +177,30 @@ impl AnykaVideoInput {
             attr.res[1].max_width,
             attr.res[1].max_height,
         );
-        video_input_set_channel_attr(handle, &attr, self.ffi.as_ref())?;
+        // .198 streams the main channel at sensor-native res. Some boards cap the
+        // main VI channel below the sensor (GC1084 here reports 1280x720 native but
+        // its ISP only validates a 640x360 main -- the vendor app runs it at 640x360).
+        // Try sensor-native first (keeps .198 bit-identical); if the ISP rejects the
+        // attribute set, retry with a uniform sub-sized config, which this class of
+        // board accepts. The encoder main res must be capped to match (device config).
+        // ponytail: fixed 640x360 fallback (= the file's sub default). If a board caps
+        // main at some other size, read it from the ISP conf instead of hardcoding.
+        if let Err(e) = video_input_set_channel_attr(handle, &attr, self.ffi.as_ref()) {
+            tracing::warn!(
+                error = %e,
+                fallback_width = sub_width,
+                fallback_height = sub_height,
+                "sensor-native main rejected by ISP; retrying at sub size"
+            );
+            // Clamp ONLY the main channel to the sub size. Leave the sub channel
+            // untouched -- its max stays at the sensor size (inverted mapping), which
+            // the sub encoder needs as headroom (e.g. a 640x480 sub profile must fit).
+            attr.res[0].width = sub_width;
+            attr.res[0].height = sub_height;
+            attr.res[0].max_width = sub_width;
+            attr.res[0].max_height = sub_height;
+            video_input_set_channel_attr(handle, &attr, self.ffi.as_ref())?;
+        }
         *self.channel_layout.write() = (
             Resolution::new(attr.res[0].width as u32, attr.res[0].height as u32),
             Resolution::new(attr.res[1].width as u32, attr.res[1].height as u32),

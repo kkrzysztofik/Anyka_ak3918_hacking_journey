@@ -295,8 +295,9 @@ async fn test_video_input_set_channel_attr_ffi_error() {
             }
             AK_SUCCESS_I32
         });
+    // Both the inverted attempt and the main.max-bumped retry fail.
     mock.expect_vi_set_channel_attr()
-        .times(1)
+        .times(2)
         .returning(|_, _| AK_FAILED_I32);
 
     let vi = AnykaVideoInput::with_ffi(Arc::new(mock), None);
@@ -310,6 +311,62 @@ async fn test_video_input_set_channel_attr_ffi_error() {
         }
         other => panic!("Expected HardwareFailure, got {:?}", other),
     }
+}
+
+#[tokio::test]
+async fn test_video_input_set_channel_attr_falls_back_to_sub_size_main() {
+    // GC1084-class ISP: rejects sensor-native main (1280x720), accepts the retry
+    // that clamps the main channel to the sub size (640x360, uniform).
+    let mut mock = mock_ffi_with_successful_open();
+    mock.expect_vi_get_sensor_resolution()
+        .times(1)
+        .returning(|_, res| {
+            unsafe {
+                (*res).width = 1280;
+                (*res).height = 720;
+                (*res).max_width = 1280;
+                (*res).max_height = 720;
+            }
+            AK_SUCCESS_I32
+        });
+
+    let seq = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let seq2 = seq.clone();
+    mock.expect_vi_set_channel_attr()
+        .times(2)
+        .returning(move |_, attr| {
+            let n = seq2.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            unsafe {
+                if n == 0 {
+                    // First attempt: sensor-native main -> reject.
+                    assert_eq!((*attr).res[0].width, 1280);
+                    assert_eq!((*attr).res[0].height, 720);
+                    AK_FAILED_I32
+                } else {
+                    // Retry: main clamped to sub size; sub untouched so its max
+                    // stays at the sensor size (encoder headroom).
+                    assert_eq!((*attr).res[0].width, 640);
+                    assert_eq!((*attr).res[0].height, 360);
+                    assert_eq!((*attr).res[0].max_width, 640);
+                    assert_eq!((*attr).res[0].max_height, 360);
+                    assert_eq!((*attr).res[1].width, 640);
+                    assert_eq!((*attr).res[1].height, 360);
+                    // Sub max preserved at sensor size (inverted mapping).
+                    assert_eq!((*attr).res[1].max_width, 1280);
+                    assert_eq!((*attr).res[1].max_height, 720);
+                    AK_SUCCESS_I32
+                }
+            }
+        });
+
+    let vi = AnykaVideoInput::with_ffi(Arc::new(mock), None);
+    vi.open().await.unwrap();
+
+    assert!(vi.set_channel_attr().is_ok());
+    assert_eq!(seq.load(std::sync::atomic::Ordering::SeqCst), 2);
+    // channel_layout reflects the clamped main.
+    let (main, _sub) = vi.channel_layout();
+    assert_eq!((main.width, main.height), (640, 360));
 }
 
 #[tokio::test]
