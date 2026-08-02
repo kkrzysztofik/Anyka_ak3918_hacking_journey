@@ -180,15 +180,10 @@ impl ImagingControl for AnykaImagingControl {
         use crate::onvif::types::common::IrCutFilterMode;
 
         let start = std::time::Instant::now();
-        crate::hal::common::imaging::imaging_set_brightness(settings.brightness, self.ffi.as_ref())
-            .await?;
-        crate::hal::common::imaging::imaging_set_contrast(settings.contrast, self.ffi.as_ref())
-            .await?;
-        crate::hal::common::imaging::imaging_set_saturation(settings.saturation, self.ffi.as_ref())
-            .await?;
-        crate::hal::common::imaging::imaging_set_sharpness(settings.sharpness, self.ffi.as_ref())
-            .await?;
+        let current = self.settings.read().clone();
 
+        // Day/night first: GPIO transitions must not be blocked by ISP color
+        // controls (which can fail independently over IPC).
         match settings.ir_cut_filter {
             IrCutFilterMode::ON => {
                 self.night.set_auto_enabled(false);
@@ -201,6 +196,32 @@ impl ImagingControl for AnykaImagingControl {
             IrCutFilterMode::AUTO => {
                 self.night.set_auto_enabled(true);
             }
+        }
+
+        if !Self::approximately_equal(current.brightness, settings.brightness) {
+            crate::hal::common::imaging::imaging_set_brightness(
+                settings.brightness,
+                self.ffi.as_ref(),
+            )
+            .await?;
+        }
+        if !Self::approximately_equal(current.contrast, settings.contrast) {
+            crate::hal::common::imaging::imaging_set_contrast(settings.contrast, self.ffi.as_ref())
+                .await?;
+        }
+        if !Self::approximately_equal(current.saturation, settings.saturation) {
+            crate::hal::common::imaging::imaging_set_saturation(
+                settings.saturation,
+                self.ffi.as_ref(),
+            )
+            .await?;
+        }
+        if !Self::approximately_equal(current.sharpness, settings.sharpness) {
+            crate::hal::common::imaging::imaging_set_sharpness(
+                settings.sharpness,
+                self.ffi.as_ref(),
+            )
+            .await?;
         }
 
         *self.settings.write() = settings.clone();
