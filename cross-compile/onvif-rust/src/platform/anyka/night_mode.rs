@@ -16,14 +16,14 @@ const PULSE: Duration = Duration::from_millis(10);
 
 /// Day or night target state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum DayNight {
+pub(crate) enum DayNight {
     Day,
     Night,
 }
 
 /// A GPIO node this module drives.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum Node {
+pub(crate) enum Node {
     IrCutA,
     IrCutB,
     IrLed,
@@ -32,7 +32,7 @@ pub(super) enum Node {
 
 /// How many lines the IR cut filter solenoid is wired with.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum LineMode {
+pub(crate) enum LineMode {
     /// Single node, level written directly.
     One(Node),
     /// H-bridge: opposed pulse, then both lines back to zero.
@@ -152,7 +152,7 @@ pub(super) fn classify(raw: i32, thr: Thresholds) -> Reading {
 /// Held as two base directories rather than six paths so tests can point the
 /// whole set at a `tempdir` with one call.
 #[derive(Debug, Clone)]
-pub(super) struct NodePaths {
+pub(crate) struct NodePaths {
     user_gpio: PathBuf,
     kernel_ain: PathBuf,
 }
@@ -168,7 +168,7 @@ impl Default for NodePaths {
 
 impl NodePaths {
     /// Point both trees at explicit roots. Tests pass a `tempdir`.
-    pub(super) fn rooted(user_gpio: &Path, kernel_ain: &Path) -> Self {
+    pub(crate) fn rooted(user_gpio: &Path, kernel_ain: &Path) -> Self {
         Self {
             user_gpio: user_gpio.to_path_buf(),
             kernel_ain: kernel_ain.to_path_buf(),
@@ -196,7 +196,7 @@ impl NodePaths {
 
 /// What the hardware actually supports, discovered at startup.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) struct Capabilities {
+pub(crate) struct Capabilities {
     /// `None` when no ircut node exists — the filter is unsupported.
     pub line_mode: Option<LineMode>,
     pub ir_led: bool,
@@ -205,7 +205,7 @@ pub(super) struct Capabilities {
 
 /// Probe for the nodes. One `stat()` per node answers both the wiring
 /// question and the ONVIF capability question.
-pub(super) fn probe(paths: &NodePaths) -> Capabilities {
+pub(crate) fn probe(paths: &NodePaths) -> Capabilities {
     let a = paths.node(Node::IrCutA).exists();
     let b = paths.node(Node::IrCutB).exists();
 

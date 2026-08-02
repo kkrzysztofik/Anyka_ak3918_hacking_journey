@@ -56,6 +56,8 @@ pub(super) struct AnykaImagingControl {
     ffi: Arc<dyn crate::hal::common::imaging::ImagingHalTrait>,
     settings: RwLock<ImagingSettings>,
     video_encoder: Option<Weak<AnykaVideoEncoder>>,
+    paths: super::night_mode::NodePaths,
+    caps: super::night_mode::Capabilities,
 }
 
 impl AnykaImagingControl {
@@ -81,6 +83,15 @@ impl AnykaImagingControl {
     ///
     /// Used by tests with `MockImagingHalTrait` for hardware-free testing.
     pub(super) fn with_ffi(ffi: Arc<dyn crate::hal::common::imaging::ImagingHalTrait>) -> Self {
+        Self::with_ffi_and_paths(ffi, super::night_mode::NodePaths::default())
+    }
+
+    /// Create imaging control with injectable GPIO/sensor paths (tests + production).
+    pub(super) fn with_ffi_and_paths(
+        ffi: Arc<dyn crate::hal::common::imaging::ImagingHalTrait>,
+        paths: super::night_mode::NodePaths,
+    ) -> Self {
+        let caps = super::night_mode::probe(&paths);
         Self {
             ffi,
             settings: RwLock::new(ImagingSettings {
@@ -94,6 +105,8 @@ impl AnykaImagingControl {
                 backlight_compensation: false,
             }),
             video_encoder: None,
+            paths,
+            caps,
         }
     }
 
@@ -168,7 +181,11 @@ impl ImagingControl for AnykaImagingControl {
     }
 
     async fn get_options(&self) -> PlatformResult<ImagingOptions> {
-        Ok(ImagingOptions::default_options())
+        Ok(ImagingOptions {
+            ir_cut_filter_supported: self.caps.line_mode.is_some(),
+            ir_led_supported: self.caps.ir_led,
+            ..ImagingOptions::default_options()
+        })
     }
 
     async fn set_brightness(&self, value: f32) -> PlatformResult<()> {
@@ -253,6 +270,21 @@ mod tests {
         // Basic compile check - verify the struct is properly defined
         let _ = AnykaImagingControl::with_ffi;
         let _ = AnykaImagingControl::approximately_equal;
+    }
+
+    #[tokio::test]
+    async fn test_get_options_reports_ir_unsupported_when_nodes_are_absent() {
+        use crate::hal::common::imaging::MockImagingHalTrait;
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let paths = crate::platform::anyka::night_mode::NodePaths::rooted(dir.path(), dir.path());
+        let control =
+            AnykaImagingControl::with_ffi_and_paths(Arc::new(MockImagingHalTrait::new()), paths);
+
+        let options = control.get_options().await.unwrap();
+
+        assert!(!options.ir_cut_filter_supported);
+        assert!(!options.ir_led_supported);
     }
 
     #[test]

@@ -13,7 +13,7 @@ pub mod context;
 pub mod imaging;
 pub mod lifecycle;
 pub mod network_info;
-mod night_mode;
+pub(crate) mod night_mode;
 pub mod ptz_actor;
 pub mod ptz_control;
 pub mod supervisor;

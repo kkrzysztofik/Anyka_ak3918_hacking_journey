@@ -1669,7 +1669,10 @@ mod tests {
         let settings = imaging.get_settings().await.unwrap();
         assert_eq!(settings.brightness, 80.0);
         assert_eq!(settings.contrast, 70.0);
-        assert_eq!(settings.ir_cut_filter, crate::onvif::types::common::IrCutFilterMode::OFF);
+        assert_eq!(
+            settings.ir_cut_filter,
+            crate::onvif::types::common::IrCutFilterMode::OFF
+        );
         assert!(settings.ir_led);
         assert!(settings.wdr);
     }

@@ -981,13 +981,19 @@ file_name = "static"
     #[test]
     fn test_imaging_config_defaults_to_auto_ir_cut_filter() {
         let cfg = ImagingConfig::default();
-        assert_eq!(cfg.ir_cut_filter, crate::onvif::types::common::IrCutFilterMode::AUTO);
+        assert_eq!(
+            cfg.ir_cut_filter,
+            crate::onvif::types::common::IrCutFilterMode::AUTO
+        );
     }
 
     #[test]
     fn test_imaging_config_parses_ir_cut_filter_mode_from_toml() {
         let cfg: ImagingConfig = toml::from_str(r#"ir_cut_filter = "OFF""#).unwrap();
-        assert_eq!(cfg.ir_cut_filter, crate::onvif::types::common::IrCutFilterMode::OFF);
+        assert_eq!(
+            cfg.ir_cut_filter,
+            crate::onvif::types::common::IrCutFilterMode::OFF
+        );
     }
 
     #[test]

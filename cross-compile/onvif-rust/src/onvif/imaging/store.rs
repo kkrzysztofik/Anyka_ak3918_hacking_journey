@@ -570,8 +570,7 @@ impl ImagingSettingsStore {
     /// Convert platform settings to ONVIF format.
     fn platform_to_onvif_settings(settings: &ImagingSettings) -> ImagingSettings20 {
         use crate::onvif::types::common::{
-            BacklightCompensation20, BacklightCompensationMode, IrCutFilterMode, WideDynamicMode,
-            WideDynamicRange20,
+            BacklightCompensation20, BacklightCompensationMode, WideDynamicMode, WideDynamicRange20,
         };
 
         ImagingSettings20 {
@@ -611,7 +610,7 @@ impl ImagingSettingsStore {
 
     /// Convert ONVIF settings to platform format.
     fn onvif_to_platform_settings(settings: &ImagingSettings20) -> ImagingSettings {
-        use crate::onvif::types::common::{IrCutFilterMode, WideDynamicMode};
+        use crate::onvif::types::common::WideDynamicMode;
 
         ImagingSettings {
             brightness: settings.brightness.unwrap_or(50.0),

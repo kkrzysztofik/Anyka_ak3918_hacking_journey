@@ -903,7 +903,10 @@ mod tests {
         let settings = ImagingSettings::default();
         assert_eq!(settings.brightness, 0.0);
         assert_eq!(settings.contrast, 0.0);
-        assert_eq!(settings.ir_cut_filter, crate::onvif::types::common::IrCutFilterMode::AUTO);
+        assert_eq!(
+            settings.ir_cut_filter,
+            crate::onvif::types::common::IrCutFilterMode::AUTO
+        );
         assert!(!settings.wdr);
     }
 
@@ -920,7 +923,10 @@ mod tests {
             backlight_compensation: true,
         };
         assert_eq!(settings.brightness, 50.0);
-        assert_eq!(settings.ir_cut_filter, crate::onvif::types::common::IrCutFilterMode::ON);
+        assert_eq!(
+            settings.ir_cut_filter,
+            crate::onvif::types::common::IrCutFilterMode::ON
+        );
         assert!(settings.ir_led);
         assert!(!settings.wdr);
     }
