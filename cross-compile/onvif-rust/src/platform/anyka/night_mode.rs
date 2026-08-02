@@ -60,6 +60,44 @@ pub(super) struct Polarity {
 /// on before the ISP switches to night and off after it switches to day, so no
 /// frame is captured dark. In [`LineMode::Two`] the trailing zero writes
 /// de-energise the solenoid coil and are mandatory.
+/// Light-sensor thresholds. Both values must be calibrated per board:
+/// the vendor defaults leave this camera's resting reading in an
+/// unhandled dead zone.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct Thresholds {
+    /// At or above this raw reading, the sensor is saturated one way.
+    pub day: i32,
+    /// At or below this raw reading, the sensor is saturated the other way.
+    pub night: i32,
+    /// `true` when a high raw reading means daylight.
+    pub ldr_high_is_day: bool,
+}
+
+/// Result of classifying one sensor reading.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Reading {
+    Settled(DayNight),
+    /// Inside the hysteresis band; the caller must hold its current mode.
+    Indeterminate,
+}
+
+/// Map a raw `ain0` reading to a day/night conclusion.
+pub(super) fn classify(raw: i32, thr: Thresholds) -> Reading {
+    let (high, low) = if thr.ldr_high_is_day {
+        (DayNight::Day, DayNight::Night)
+    } else {
+        (DayNight::Night, DayNight::Day)
+    };
+
+    if raw >= thr.day {
+        Reading::Settled(high)
+    } else if raw <= thr.night {
+        Reading::Settled(low)
+    } else {
+        Reading::Indeterminate
+    }
+}
+
 pub(super) fn plan(target: DayNight, pol: Polarity, line_mode: LineMode) -> Vec<Step> {
     let night_level = u8::from(pol.ircut_high_is_night);
     let ircut_level = match target {
@@ -125,6 +163,42 @@ mod tests {
         Polarity {
             ircut_high_is_night: true,
         }
+    }
+
+    fn thr() -> Thresholds {
+        Thresholds {
+            day: 1100,
+            night: 300,
+            ldr_high_is_day: true,
+        }
+    }
+
+    #[test]
+    fn test_classify_bright_reading_is_day() {
+        assert_eq!(classify(1500, thr()), Reading::Settled(DayNight::Day));
+    }
+
+    #[test]
+    fn test_classify_dark_reading_is_night() {
+        assert_eq!(classify(120, thr()), Reading::Settled(DayNight::Night));
+    }
+
+    #[test]
+    fn test_classify_reading_in_hysteresis_band_is_indeterminate() {
+        // 306 is this board's captured ain0 value and sits in the vendor's
+        // unhandled 300..1100 dead zone. See design H5.
+        assert_eq!(classify(306, thr()), Reading::Indeterminate);
+    }
+
+    #[test]
+    fn test_classify_respects_inverted_sensor_polarity() {
+        let inverted = Thresholds {
+            ldr_high_is_day: false,
+            ..thr()
+        };
+
+        assert_eq!(classify(1500, inverted), Reading::Settled(DayNight::Night));
+        assert_eq!(classify(120, inverted), Reading::Settled(DayNight::Day));
     }
 
     #[test]
