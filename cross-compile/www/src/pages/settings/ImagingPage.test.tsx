@@ -10,6 +10,8 @@ import {
   getImagingSettings,
   setImagingSettings,
 } from '@/services/imagingService';
+import { getProfiles } from '@/services/profileService';
+import { sendAuxiliaryCommand } from '@/services/ptzService';
 import { MOCK_DATA, mockToast, renderWithProviders } from '@/test/componentTestHelpers';
 import {
   testMutationWithErrorToast,
@@ -25,12 +27,22 @@ vi.mock('@/services/imagingService', () => ({
   setImagingSettings: vi.fn(),
 }));
 
+vi.mock('@/services/profileService', () => ({
+  getProfiles: vi.fn(),
+}));
+
+vi.mock('@/services/ptzService', () => ({
+  sendAuxiliaryCommand: vi.fn(),
+}));
+
 describe('ImagingPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(getImagingSettings).mockResolvedValue(MOCK_DATA.imaging.settings);
     vi.mocked(getImagingOptions).mockResolvedValue(MOCK_DATA.imaging.options);
     vi.mocked(setImagingSettings).mockResolvedValue(undefined);
+    vi.mocked(getProfiles).mockResolvedValue(MOCK_DATA.profiles);
+    vi.mocked(sendAuxiliaryCommand).mockResolvedValue(undefined);
   });
 
   it('should render page with loading state', async () => {
@@ -622,6 +634,58 @@ describe('ImagingPage', () => {
         expect(callArgs).toHaveProperty('wideDynamicRange');
         expect(callArgs).toHaveProperty('backlightCompensation');
       });
+    });
+  });
+
+  describe('illumination card', () => {
+    it('renders the illumination card with both lamp switches', async () => {
+      renderWithProviders(<ImagingPage />);
+
+      expect(await screen.findByTestId('imaging-ir-lamp-switch')).toBeInTheDocument();
+      expect(screen.getByTestId('imaging-white-light-switch')).toBeInTheDocument();
+    });
+
+    it('sends the IR lamp on command when the switch is enabled', async () => {
+      const user = userEvent.setup();
+      renderWithProviders(<ImagingPage />);
+
+      await user.click(await screen.findByTestId('imaging-ir-lamp-switch'));
+
+      await waitFor(() => {
+        expect(sendAuxiliaryCommand).toHaveBeenCalledWith('ProfileToken1', 'tt:IRLamp|On');
+      });
+    });
+
+    it('sends the white light off command when the switch is toggled twice', async () => {
+      const user = userEvent.setup();
+      renderWithProviders(<ImagingPage />);
+
+      const whiteSwitch = await screen.findByTestId('imaging-white-light-switch');
+      await user.click(whiteSwitch);
+      await waitFor(() => {
+        expect(sendAuxiliaryCommand).toHaveBeenCalledWith('ProfileToken1', 'tt:WhiteLight|On');
+      });
+
+      await user.click(whiteSwitch);
+      await waitFor(() => {
+        expect(sendAuxiliaryCommand).toHaveBeenCalledWith('ProfileToken1', 'tt:WhiteLight|Off');
+      });
+    });
+
+    it('hides the IR cut card when the backend reports no filter modes', async () => {
+      vi.mocked(getImagingOptions).mockResolvedValue({
+        ...MOCK_DATA.imaging.options,
+        irCutFilterModes: [],
+      });
+
+      renderWithProviders(<ImagingPage />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('imaging-title')).toBeInTheDocument();
+      });
+
+      expect(screen.queryByTestId('imaging-infrared-settings-title')).not.toBeInTheDocument();
+      expect(screen.getByTestId('imaging-illumination-card')).toBeInTheDocument();
     });
   });
 });

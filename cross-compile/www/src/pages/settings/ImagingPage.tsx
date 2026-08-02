@@ -3,10 +3,20 @@
  *
  * Configure camera image settings.
  */
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Camera, Contrast, Moon, Palette, RotateCcw, Save, ScanEye, Sun } from 'lucide-react';
+import {
+  Camera,
+  Contrast,
+  Lightbulb,
+  Moon,
+  Palette,
+  RotateCcw,
+  Save,
+  ScanEye,
+  Sun,
+} from 'lucide-react';
 import { toast } from 'sonner';
 
 import { Button } from '@/components/ui/button';
@@ -19,6 +29,7 @@ import {
   SettingsCardTitle,
 } from '@/components/ui/settings-card';
 import { Slider } from '@/components/ui/slider';
+import { Switch } from '@/components/ui/switch';
 import {
   type ImagingOptions,
   type ImagingSettings,
@@ -26,6 +37,14 @@ import {
   getImagingSettings,
   setImagingSettings,
 } from '@/services/imagingService';
+import { getProfiles } from '@/services/profileService';
+import { type AuxiliaryCommand, sendAuxiliaryCommand } from '@/services/ptzService';
+
+const IR_CUT_LABELS: Record<'AUTO' | 'ON' | 'OFF', string> = {
+  AUTO: 'Auto',
+  ON: 'Day Mode',
+  OFF: 'Night Mode',
+};
 
 export default function ImagingPage() {
   const queryClient = useQueryClient();
@@ -41,6 +60,22 @@ export default function ImagingPage() {
     queryKey: ['imagingOptions'],
     queryFn: () => getImagingOptions(),
   });
+
+  // Profile token needed for PTZ SendAuxiliaryCommand (lamp control)
+  const { data: profiles } = useQuery({
+    queryKey: ['profiles'],
+    queryFn: getProfiles,
+  });
+  const profileToken =
+    profiles?.find((p) => p.ptzConfiguration)?.token ?? profiles?.[0]?.token ?? '';
+
+  // undefined -> options not loaded yet, fall back to showing the card
+  // []       -> backend probed and found no filter hardware, hide the card
+  const irCutSupported =
+    options?.irCutFilterModes === undefined || options.irCutFilterModes.length > 0;
+
+  const [irLampOn, setIrLampOn] = useState(false);
+  const [whiteLightOn, setWhiteLightOn] = useState(false);
 
   // Local state for all form values
   const [localSettings, setLocalSettings] = useState<ImagingSettings>({
@@ -108,6 +143,29 @@ export default function ImagingPage() {
       });
     },
   });
+
+  const lampMutation = useMutation({
+    mutationFn: (command: AuxiliaryCommand) => sendAuxiliaryCommand(profileToken, command),
+    onError: (error) => {
+      toast.error('Failed to set lamp', {
+        description: error instanceof Error ? error.message : 'An error occurred',
+      });
+    },
+  });
+
+  const handleIrLampToggle = (checked: boolean) => {
+    setIrLampOn(checked);
+    lampMutation.mutate(checked ? 'tt:IRLamp|On' : 'tt:IRLamp|Off', {
+      onError: () => setIrLampOn(!checked),
+    });
+  };
+
+  const handleWhiteLightToggle = (checked: boolean) => {
+    setWhiteLightOn(checked);
+    lampMutation.mutate(checked ? 'tt:WhiteLight|On' : 'tt:WhiteLight|Off', {
+      onError: () => setWhiteLightOn(!checked),
+    });
+  };
 
   const handleSave = () => {
     mutation.mutate({
@@ -344,56 +402,91 @@ export default function ImagingPage() {
             </SettingsCardContent>
           </SettingsCard>
 
-          {/* Infrared (IR Cut Filter) */}
-          <SettingsCard>
+          {/* Infrared (IR Cut Filter) — hide when backend probed and found no hardware */}
+          {irCutSupported && (
+            <SettingsCard>
+              <SettingsCardHeader>
+                <div className="flex items-center gap-[12px]">
+                  <div className="flex size-[40px] items-center justify-center rounded-[10px] bg-[rgba(191,90,242,0.1)]">
+                    <Moon className="size-5 text-[#bf5af2]" />
+                  </div>
+                  <div>
+                    <SettingsCardTitle data-testid="imaging-infrared-settings-title">
+                      Infrared Settings
+                    </SettingsCardTitle>
+                    <SettingsCardDescription>IR cut filter control</SettingsCardDescription>
+                  </div>
+                </div>
+              </SettingsCardHeader>
+              <SettingsCardContent className="space-y-[24px]">
+                <div className="space-y-[12px]">
+                  <Label className="text-[#e5e5e5]" data-testid="imaging-ir-cut-filter-mode-label">
+                    IR Cut Filter Mode
+                  </Label>
+                  <select
+                    value={localSettings.irCutFilter || 'AUTO'}
+                    onChange={(e) =>
+                      updateSetting('irCutFilter', e.target.value as 'ON' | 'OFF' | 'AUTO')
+                    }
+                    className="h-10 w-full appearance-none rounded-md border border-[#3a3a3c] bg-[#2c2c2e] px-3 py-2 text-sm text-white focus:border-transparent focus:ring-2 focus:ring-[#0a84ff] focus:outline-none"
+                    data-testid="imaging-ir-cut-filter-select"
+                  >
+                    {options?.irCutFilterModes && options.irCutFilterModes.length > 0 ? (
+                      options.irCutFilterModes.map((mode) => (
+                        <option key={mode} value={mode}>
+                          {IR_CUT_LABELS[mode] ?? mode}
+                        </option>
+                      ))
+                    ) : (
+                      <>
+                        <option value="AUTO">Auto</option>
+                        <option value="ON">Day Mode</option>
+                        <option value="OFF">Night Mode</option>
+                      </>
+                    )}
+                  </select>
+                </div>
+              </SettingsCardContent>
+            </SettingsCard>
+          )}
+
+          {/* Illumination (IR lamp + white floodlight) */}
+          <SettingsCard data-testid="imaging-illumination-card">
             <SettingsCardHeader>
               <div className="flex items-center gap-[12px]">
-                <div className="flex size-[40px] items-center justify-center rounded-[10px] bg-[rgba(191,90,242,0.1)]">
-                  <Moon className="size-5 text-[#bf5af2]" />
+                <div className="flex size-[40px] items-center justify-center rounded-[10px] bg-[rgba(255,159,10,0.1)]">
+                  <Lightbulb className="size-5 text-[#ff9f0a]" />
                 </div>
                 <div>
-                  <SettingsCardTitle data-testid="imaging-infrared-settings-title">
-                    Infrared Settings
+                  <SettingsCardTitle data-testid="imaging-illumination-title">
+                    Illumination
                   </SettingsCardTitle>
-                  <SettingsCardDescription>IR cut filter control</SettingsCardDescription>
+                  <SettingsCardDescription>IR lamp and white floodlight</SettingsCardDescription>
                 </div>
               </div>
             </SettingsCardHeader>
             <SettingsCardContent className="space-y-[24px]">
-              <div className="space-y-[12px]">
-                <Label className="text-[#e5e5e5]" data-testid="imaging-ir-cut-filter-mode-label">
-                  IR Cut Filter Mode
+              <div className="flex items-center justify-between">
+                <Label className="text-[#e5e5e5]" data-testid="imaging-ir-lamp-label">
+                  IR Lamp
                 </Label>
-                <select
-                  value={localSettings.irCutFilter || 'AUTO'}
-                  onChange={(e) =>
-                    updateSetting('irCutFilter', e.target.value as 'ON' | 'OFF' | 'AUTO')
-                  }
-                  className="h-10 w-full appearance-none rounded-md border border-[#3a3a3c] bg-[#2c2c2e] px-3 py-2 text-sm text-white focus:border-transparent focus:ring-2 focus:ring-[#0a84ff] focus:outline-none"
-                  data-testid="imaging-ir-cut-filter-select"
-                >
-                  {options?.irCutFilterModes?.map((mode) => {
-                    let label: string;
-                    if (mode === 'AUTO') {
-                      label = 'Auto';
-                    } else if (mode === 'ON') {
-                      label = 'Day Mode';
-                    } else {
-                      label = 'Night Mode';
-                    }
-                    return (
-                      <option key={mode} value={mode}>
-                        {label}
-                      </option>
-                    );
-                  }) || (
-                    <>
-                      <option value="AUTO">Auto</option>
-                      <option value="ON">Day Mode</option>
-                      <option value="OFF">Night Mode</option>
-                    </>
-                  )}
-                </select>
+                <Switch
+                  checked={irLampOn}
+                  onCheckedChange={handleIrLampToggle}
+                  disabled={!profileToken || lampMutation.isPending}
+                  data-testid="imaging-ir-lamp-switch"
+                />
+              </div>
+              <div className="flex items-center justify-between">
+                <Label className="text-[#e5e5e5]" data-testid="imaging-white-light-label">
+                  White Light
+                </Label>
+                <Switch
+                  checked={whiteLightOn}
+                  onCheckedChange={handleWhiteLightToggle}
+                  disabled={!profileToken || lampMutation.isPending}
+                  data-testid="imaging-white-light-switch"
+                />
               </div>
             </SettingsCardContent>
           </SettingsCard>
