@@ -42,7 +42,10 @@ pub(super) enum LineMode {
 /// One step of a transition plan.
 #[derive(Debug, Clone, PartialEq)]
 pub(super) enum Step {
-    Write { node: Node, value: u8 },
+    Write {
+        node: Node,
+        value: u8,
+    },
     /// Cross the IPC boundary to `ak_vi_switch_mode`.
     IspMode(DayNight),
     Sleep(Duration),
@@ -229,6 +232,51 @@ pub(super) fn probe(paths: &NodePaths) -> Capabilities {
 /// on before the ISP switches to night and off after it switches to day, so no
 /// frame is captured dark. In [`LineMode::Two`] the trailing zero writes
 /// de-energise the solenoid coil and are mandatory.
+/// Execute the GPIO and sleep steps of a plan.
+///
+/// [`Step::IspMode`] is skipped here; the caller performs it over IPC, because
+/// it needs the vendor daemon's VI handle.
+///
+/// Every step runs even if an earlier one failed, and the first error is
+/// returned at the end. This is deliberate and must not be "cleaned up" into
+/// `?`: in [`LineMode::Two`] the solenoid coil is energised between the pulse
+/// and the trailing zero writes, and an early return leaves it that way.
+pub(super) fn execute_gpio(steps: &[Step], paths: &NodePaths) -> std::io::Result<()> {
+    let mut first_err: Option<std::io::Error> = None;
+
+    for step in steps {
+        match step {
+            Step::Write { node, value } => {
+                let path = paths.node(*node);
+                if let Err(e) = std::fs::write(&path, value.to_string()) {
+                    tracing::warn!(path = %path.display(), value, error = %e, "GPIO write failed");
+                    first_err.get_or_insert(e);
+                }
+            }
+            Step::Sleep(d) => std::thread::sleep(*d),
+            Step::IspMode(_) => {}
+        }
+    }
+
+    match first_err {
+        Some(e) => Err(e),
+        None => Ok(()),
+    }
+}
+
+/// Read the raw light-sensor value.
+///
+/// Returns `None` on any failure. The caller must treat that as "hold the
+/// current mode" — never as day, which would switch off night vision the
+/// moment the sensor node hiccups.
+pub(super) fn read_light_sensor(paths: &NodePaths) -> Option<i32> {
+    let path = paths.light_sensor();
+    let raw = std::fs::read_to_string(&path)
+        .map_err(|e| tracing::warn!(path = %path.display(), error = %e, "light sensor read failed"))
+        .ok()?;
+    raw.trim().parse::<i32>().ok()
+}
+
 pub(super) fn plan(
     target: DayNight,
     pol: Polarity,
@@ -349,13 +397,87 @@ mod tests {
     }
 
     #[test]
-    fn test_one_line_ircut_b_only_board_plans_write_to_ircut_b() {
-        let steps = plan(
-            DayNight::Night,
-            pol(),
-            LineMode::One,
-            Some(Node::IrCutB),
+    #[test]
+    fn test_execute_writes_final_values_to_nodes() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let paths = NodePaths::rooted(dir.path(), dir.path());
+        std::fs::write(paths.node(Node::IrCutA), "9").unwrap();
+        std::fs::write(paths.node(Node::IrCutB), "9").unwrap();
+        std::fs::write(paths.node(Node::IrLed), "9").unwrap();
+
+        let steps = plan(DayNight::Night, pol(), LineMode::Two, None);
+        let outcome = execute_gpio(&steps, &paths);
+
+        assert!(outcome.is_ok());
+        assert_eq!(
+            std::fs::read_to_string(paths.node(Node::IrLed)).unwrap(),
+            "1"
         );
+        // Both coil lines back to idle.
+        assert_eq!(
+            std::fs::read_to_string(paths.node(Node::IrCutA)).unwrap(),
+            "0"
+        );
+        assert_eq!(
+            std::fs::read_to_string(paths.node(Node::IrCutB)).unwrap(),
+            "0"
+        );
+    }
+
+    #[test]
+    fn test_execute_still_idles_the_coil_when_an_earlier_write_fails() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let paths = NodePaths::rooted(dir.path(), dir.path());
+        // IrLed is a directory so its write fails (sysfs missing nodes also fail;
+        // a plain absent path would be created by fs::write on a tempdir).
+        std::fs::write(paths.node(Node::IrCutA), "9").unwrap();
+        std::fs::write(paths.node(Node::IrCutB), "9").unwrap();
+        std::fs::create_dir(paths.node(Node::IrLed)).unwrap();
+
+        let steps = plan(DayNight::Night, pol(), LineMode::Two, None);
+        let outcome = execute_gpio(&steps, &paths);
+
+        assert!(outcome.is_err(), "the failed IrLed write must be reported");
+        assert_eq!(
+            std::fs::read_to_string(paths.node(Node::IrCutA)).unwrap(),
+            "0",
+            "coil must be de-energised even though an earlier step failed"
+        );
+        assert_eq!(
+            std::fs::read_to_string(paths.node(Node::IrCutB)).unwrap(),
+            "0"
+        );
+    }
+
+    #[test]
+    fn test_read_light_sensor_parses_raw_value() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let paths = NodePaths::rooted(dir.path(), dir.path());
+        std::fs::write(paths.light_sensor(), "306\n").unwrap();
+
+        assert_eq!(read_light_sensor(&paths).unwrap(), 306);
+    }
+
+    #[test]
+    fn test_read_light_sensor_reports_error_when_node_is_absent() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let paths = NodePaths::rooted(dir.path(), dir.path());
+
+        assert!(read_light_sensor(&paths).is_none());
+    }
+
+    #[test]
+    fn test_read_light_sensor_reports_error_on_unparseable_content() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let paths = NodePaths::rooted(dir.path(), dir.path());
+        std::fs::write(paths.light_sensor(), "not a number").unwrap();
+
+        assert!(read_light_sensor(&paths).is_none());
+    }
+
+    #[test]
+    fn test_one_line_ircut_b_only_board_plans_write_to_ircut_b() {
+        let steps = plan(DayNight::Night, pol(), LineMode::One, Some(Node::IrCutB));
 
         assert_eq!(
             steps,
