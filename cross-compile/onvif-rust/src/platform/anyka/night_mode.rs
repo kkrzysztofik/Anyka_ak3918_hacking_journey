@@ -122,10 +122,10 @@ pub(super) fn decide(
     if target == state.current {
         return None;
     }
-    if let Some(last) = state.last_change {
-        if now.duration_since(last) < lock {
-            return None;
-        }
+    if let Some(last) = state.last_change
+        && now.duration_since(last) < lock
+    {
+        return None;
     }
     Some(target)
 }
