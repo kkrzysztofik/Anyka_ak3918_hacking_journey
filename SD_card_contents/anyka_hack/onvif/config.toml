@@ -254,6 +254,7 @@ saturation = 50.0
 sharpness = 50.0
 
 # IR cut filter: "ON" (day), "OFF" (night), "AUTO" (follow light sensor).
+# Applied to the hardware at start-up; ON/OFF also disable the AUTO poll loop.
 ir_cut_filter = "AUTO"
 
 # IR LED enabled (true/false)

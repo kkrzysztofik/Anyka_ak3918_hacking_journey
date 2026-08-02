@@ -308,6 +308,8 @@ pub struct ImagingOptions {
     pub ir_cut_filter_supported: bool,
     /// IR LED supported.
     pub ir_led_supported: bool,
+    /// White floodlight supported.
+    pub white_light_supported: bool,
     /// WDR supported.
     pub wdr_supported: bool,
     /// Backlight compensation supported.
@@ -324,6 +326,7 @@ impl ImagingOptions {
             sharpness_range: (0.0, 100.0),
             ir_cut_filter_supported: true,
             ir_led_supported: true,
+            white_light_supported: false,
             wdr_supported: false,
             backlight_compensation_supported: true,
         }

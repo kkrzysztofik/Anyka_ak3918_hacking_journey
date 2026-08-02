@@ -45,8 +45,33 @@ pub fn validate_node_token(token: &str) -> OnvifResult<()> {
     Ok(())
 }
 
-/// Build default PTZ node.
-pub fn build_ptz_node() -> PTZNode {
+/// Lamp hardware the board actually has, from the GPIO node probe.
+///
+/// Advertising a command for an absent lamp is the same lie the hardcoded
+/// `ir_cut_filter_supported: true` used to tell.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct LampSupport {
+    pub ir_lamp: bool,
+    pub white_light: bool,
+}
+
+/// Build default PTZ node, advertising only the lamps that exist.
+pub fn build_ptz_node(lamps: LampSupport) -> PTZNode {
+    let mut auxiliary_commands = Vec::new();
+    if lamps.ir_lamp {
+        auxiliary_commands.extend([
+            "tt:IRLamp|On".to_string(),
+            "tt:IRLamp|Off".to_string(),
+            "tt:IRLamp|Auto".to_string(),
+        ]);
+    }
+    if lamps.white_light {
+        auxiliary_commands.extend([
+            "tt:WhiteLight|On".to_string(),
+            "tt:WhiteLight|Off".to_string(),
+        ]);
+    }
+
     PTZNode {
         token: DEFAULT_NODE_TOKEN.to_string(),
         fixed_home_position: Some(false),
@@ -55,13 +80,7 @@ pub fn build_ptz_node() -> PTZNode {
         supported_ptz_spaces: build_ptz_spaces(),
         maximum_number_of_presets: MAX_PRESETS,
         home_supported: true,
-        auxiliary_commands: vec![
-            "tt:IRLamp|On".to_string(),
-            "tt:IRLamp|Off".to_string(),
-            "tt:IRLamp|Auto".to_string(),
-            "tt:WhiteLight|On".to_string(),
-            "tt:WhiteLight|Off".to_string(),
-        ],
+        auxiliary_commands,
         extension: None,
     }
 }
@@ -118,22 +137,26 @@ pub fn build_ptz_configuration() -> PTZConfiguration {
 }
 
 /// Handle GetNodes request.
-pub fn get_nodes(_state: &PTZStateManager) -> OnvifResult<GetNodesResponse> {
+pub fn get_nodes(_state: &PTZStateManager, lamps: LampSupport) -> OnvifResult<GetNodesResponse> {
     tracing::debug!("GetNodes request");
 
     Ok(GetNodesResponse {
-        ptz_nodes: vec![build_ptz_node()],
+        ptz_nodes: vec![build_ptz_node(lamps)],
     })
 }
 
 /// Handle GetNode request.
-pub fn get_node(_state: &PTZStateManager, node_token: String) -> OnvifResult<GetNodeResponse> {
+pub fn get_node(
+    _state: &PTZStateManager,
+    node_token: String,
+    lamps: LampSupport,
+) -> OnvifResult<GetNodeResponse> {
     tracing::debug!("GetNode request for {}", node_token);
 
     validate_node_token(&node_token)?;
 
     Ok(GetNodeResponse {
-        ptz_node: build_ptz_node(),
+        ptz_node: build_ptz_node(lamps),
     })
 }
 
@@ -206,10 +229,35 @@ mod tests {
     }
 
     #[test]
+    fn test_node_advertises_only_the_lamps_that_exist() {
+        let node = build_ptz_node(LampSupport {
+            ir_lamp: true,
+            white_light: false,
+        });
+
+        assert!(
+            node.auxiliary_commands
+                .contains(&"tt:IRLamp|On".to_string())
+        );
+        assert!(
+            !node
+                .auxiliary_commands
+                .contains(&"tt:WhiteLight|On".to_string())
+        );
+    }
+
+    #[test]
+    fn test_node_advertises_nothing_without_lamp_hardware() {
+        let node = build_ptz_node(LampSupport::default());
+
+        assert!(node.auxiliary_commands.is_empty());
+    }
+
+    #[test]
     fn test_get_nodes() {
         let state = create_test_state();
 
-        let response = get_nodes(&state).unwrap();
+        let response = get_nodes(&state, LampSupport::default()).unwrap();
 
         assert_eq!(response.ptz_nodes.len(), 1);
         assert_eq!(response.ptz_nodes[0].token, DEFAULT_NODE_TOKEN);
@@ -220,7 +268,12 @@ mod tests {
     fn test_get_node() {
         let state = create_test_state();
 
-        let response = get_node(&state, DEFAULT_NODE_TOKEN.to_string()).unwrap();
+        let response = get_node(
+            &state,
+            DEFAULT_NODE_TOKEN.to_string(),
+            LampSupport::default(),
+        )
+        .unwrap();
 
         assert_eq!(response.ptz_node.token, DEFAULT_NODE_TOKEN);
         assert_eq!(response.ptz_node.maximum_number_of_presets, MAX_PRESETS);
@@ -230,7 +283,7 @@ mod tests {
     fn test_get_node_invalid_token() {
         let state = create_test_state();
 
-        let result = get_node(&state, "InvalidToken".to_string());
+        let result = get_node(&state, "InvalidToken".to_string(), LampSupport::default());
 
         assert!(result.is_err());
     }

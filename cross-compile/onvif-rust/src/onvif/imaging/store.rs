@@ -578,7 +578,7 @@ impl ImagingSettingsStore {
             contrast: Some(settings.contrast),
             color_saturation: Some(settings.saturation),
             sharpness: Some(settings.sharpness),
-            ir_cut_filter: Some(settings.ir_cut_filter.clone()),
+            ir_cut_filter: Some(settings.ir_cut_filter),
             wide_dynamic_range: if settings.wdr {
                 Some(WideDynamicRange20 {
                     mode: WideDynamicMode::ON,
@@ -617,7 +617,7 @@ impl ImagingSettingsStore {
             contrast: settings.contrast.unwrap_or(50.0),
             saturation: settings.color_saturation.unwrap_or(50.0),
             sharpness: settings.sharpness.unwrap_or(50.0),
-            ir_cut_filter: settings.ir_cut_filter.clone().unwrap_or_default(),
+            ir_cut_filter: settings.ir_cut_filter.unwrap_or_default(),
             ir_led: false, // Not exposed in ImagingSettings20
             wdr: settings
                 .wide_dynamic_range

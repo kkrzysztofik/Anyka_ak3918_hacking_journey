@@ -1177,13 +1177,13 @@ impl Application {
                 }
             };
 
-            let night_cfg = config_runtime.read().imaging.night.clone();
+            let imaging_cfg = config_runtime.read().imaging.clone();
             match crate::platform::AnykaPlatform::with_isp_config(
                 isp_path,
                 ptz_enabled,
                 main_encoder,
                 sub_encoder,
-                night_cfg,
+                imaging_cfg,
             ) {
                 Ok(p) => {
                     // Construction no longer touches the daemon, and bring-up is no

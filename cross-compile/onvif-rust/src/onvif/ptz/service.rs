@@ -127,8 +127,26 @@ impl PTZService {
     }
 
     #[allow(dead_code)]
-    pub(crate) fn build_ptz_node(&self) -> PTZNode {
-        config::build_ptz_node()
+    pub(crate) async fn build_ptz_node(&self) -> PTZNode {
+        config::build_ptz_node(self.lamp_support().await)
+    }
+
+    /// Which lamps the platform actually probed. Absent imaging control, or a
+    /// failed query, advertises nothing rather than guessing.
+    async fn lamp_support(&self) -> config::LampSupport {
+        let Some(imaging) = self.imaging_control.as_ref() else {
+            return config::LampSupport::default();
+        };
+        match imaging.get_options().await {
+            Ok(o) => config::LampSupport {
+                ir_lamp: o.ir_led_supported,
+                white_light: o.white_light_supported,
+            },
+            Err(e) => {
+                tracing::warn!(error = %e, "lamp capability query failed; advertising none");
+                config::LampSupport::default()
+            }
+        }
     }
 
     #[allow(dead_code)]
@@ -141,13 +159,13 @@ impl PTZService {
     // ========================================================================
 
     /// Handle GetNodes request - delegates to ops::config
-    pub fn handle_get_nodes(&self, _request: GetNodes) -> OnvifResult<GetNodesResponse> {
-        config::get_nodes(&self.state)
+    pub async fn handle_get_nodes(&self, _request: GetNodes) -> OnvifResult<GetNodesResponse> {
+        config::get_nodes(&self.state, self.lamp_support().await)
     }
 
     /// Handle GetNode request - delegates to ops::config
-    pub fn handle_get_node(&self, request: GetNode) -> OnvifResult<GetNodeResponse> {
-        config::get_node(&self.state, request.node_token)
+    pub async fn handle_get_node(&self, request: GetNode) -> OnvifResult<GetNodeResponse> {
+        config::get_node(&self.state, request.node_token, self.lamp_support().await)
     }
 
     /// Handle GetConfigurations request - delegates to ops::config
@@ -386,7 +404,7 @@ impl ServiceHandler for PTZService {
             // Node Operations
             "GetNodes" => {
                 let request: GetNodes = parse_body(body_xml)?;
-                let response = self.handle_get_nodes(request)?;
+                let response = self.handle_get_nodes(request).await?;
                 quick_xml::se::to_string(&response).map_err(|e| {
                     OnvifError::Internal(format!("Failed to serialize response: {}", e))
                 })
@@ -394,7 +412,7 @@ impl ServiceHandler for PTZService {
 
             "GetNode" => {
                 let request: GetNode = parse_body(body_xml)?;
-                let response = self.handle_get_node(request)?;
+                let response = self.handle_get_node(request).await?;
                 quick_xml::se::to_string(&response).map_err(|e| {
                     OnvifError::Internal(format!("Failed to serialize response: {}", e))
                 })
@@ -586,38 +604,41 @@ mod tests {
     // Node Operations
     // ========================================================================
 
-    #[test]
-    fn test_get_nodes() {
+    #[tokio::test]
+    async fn test_get_nodes() {
         let service = create_test_service();
 
-        let response = service.handle_get_nodes(GetNodes {}).unwrap();
+        let response = service.handle_get_nodes(GetNodes {}).await.unwrap();
 
         assert_eq!(response.ptz_nodes.len(), 1);
         assert_eq!(response.ptz_nodes[0].token, DEFAULT_NODE_TOKEN);
         assert!(response.ptz_nodes[0].home_supported);
     }
 
-    #[test]
-    fn test_get_node() {
+    #[tokio::test]
+    async fn test_get_node() {
         let service = create_test_service();
 
         let response = service
             .handle_get_node(GetNode {
                 node_token: DEFAULT_NODE_TOKEN.to_string(),
             })
+            .await
             .unwrap();
 
         assert_eq!(response.ptz_node.token, DEFAULT_NODE_TOKEN);
         assert_eq!(response.ptz_node.maximum_number_of_presets, MAX_PRESETS);
     }
 
-    #[test]
-    fn test_get_node_invalid_token() {
+    #[tokio::test]
+    async fn test_get_node_invalid_token() {
         let service = create_test_service();
 
-        let result = service.handle_get_node(GetNode {
-            node_token: "InvalidToken".to_string(),
-        });
+        let result = service
+            .handle_get_node(GetNode {
+                node_token: "InvalidToken".to_string(),
+            })
+            .await;
 
         assert!(result.is_err());
     }

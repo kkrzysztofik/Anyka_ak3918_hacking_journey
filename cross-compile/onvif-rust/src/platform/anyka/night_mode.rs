@@ -275,29 +275,48 @@ pub(crate) struct NightModeController {
     cfg: crate::config::types::NightConfig,
     ffi: std::sync::Arc<dyn crate::hal::common::imaging::ImagingHalTrait>,
     state: tokio::sync::Mutex<AutoState>,
+    /// Mode from `[imaging] ir_cut_filter`, applied once at start-up.
+    configured: crate::onvif::types::common::IrCutFilterMode,
     /// When true, [`Self::tick`] may transition; cleared by forced ON/OFF.
     auto_enabled: std::sync::atomic::AtomicBool,
 }
 
 impl NightModeController {
+    /// Build a controller for the configured start-up mode.
+    ///
+    /// A configured `ON`/`OFF` disables the AUTO loop from the first tick, so a
+    /// forced mode survives a restart instead of silently reverting to AUTO.
+    /// [`Self::spawn_auto_loop`] applies it to the hardware.
     pub(crate) fn new(
         paths: NodePaths,
         cfg: crate::config::types::NightConfig,
         ffi: std::sync::Arc<dyn crate::hal::common::imaging::ImagingHalTrait>,
+        mode: crate::onvif::types::common::IrCutFilterMode,
     ) -> Self {
+        use crate::onvif::types::common::IrCutFilterMode;
+
         let caps = probe(&paths);
         Self {
             paths,
             caps,
             cfg,
             ffi,
-            state: tokio::sync::Mutex::new(AutoState::new(DayNight::Day)),
-            auto_enabled: std::sync::atomic::AtomicBool::new(true),
+            state: tokio::sync::Mutex::new(AutoState::new(match mode {
+                IrCutFilterMode::OFF => DayNight::Night,
+                _ => DayNight::Day,
+            })),
+            configured: mode,
+            auto_enabled: std::sync::atomic::AtomicBool::new(matches!(mode, IrCutFilterMode::AUTO)),
         }
     }
 
     pub(crate) fn capabilities(&self) -> Capabilities {
         self.caps
+    }
+
+    /// The day/night state the hardware was last driven to.
+    pub(crate) async fn current_mode(&self) -> DayNight {
+        self.state.lock().await.current()
     }
 
     pub(crate) fn set_auto_enabled(&self, enabled: bool) {
@@ -316,16 +335,25 @@ impl NightModeController {
 
         let mut state = self.state.lock().await;
 
-        let Some(line_mode) = self.caps.line_mode else {
-            return Ok(()); // no filter hardware; nothing to do
-        };
-        let steps = plan(
+        let mut steps = plan(
             target,
             Polarity {
                 ircut_high_is_night: self.cfg.ircut_high_is_night,
             },
-            line_mode,
+            self.caps.line_mode,
         );
+        // A board without the lamp node would only collect a write error.
+        if !self.caps.ir_led {
+            steps.retain(|s| {
+                !matches!(
+                    s,
+                    Step::Write {
+                        node: Node::IrLed,
+                        ..
+                    }
+                )
+            });
+        }
 
         // GPIO first: it is durable and survives a daemon restart, whereas
         // the ISP mode does not. A bounce then costs one tick of
@@ -402,10 +430,27 @@ impl NightModeController {
         std::fs::write(self.paths.node(node), if on { "1" } else { "0" })
     }
 
-    /// Spawn the AUTO poll loop. Call once after construction.
+    /// Apply the configured start-up mode, then run the AUTO poll loop.
+    ///
+    /// Call once after construction. A configured `ON`/`OFF` is driven onto the
+    /// hardware here; `AUTO` leaves the filter where it is until the first tick
+    /// has a settled reading.
     pub(crate) fn spawn_auto_loop(self: &std::sync::Arc<Self>) {
+        use crate::onvif::types::common::IrCutFilterMode;
+
         let this = std::sync::Arc::clone(self);
         tokio::spawn(async move {
+            let forced = match this.configured {
+                IrCutFilterMode::ON => Some(DayNight::Day),
+                IrCutFilterMode::OFF => Some(DayNight::Night),
+                IrCutFilterMode::AUTO => None,
+            };
+            if let Some(target) = forced
+                && let Err(e) = this.apply(target).await
+            {
+                tracing::warn!(error = %e, ?target, "configured start-up night mode failed");
+            }
+
             let mut interval = tokio::time::interval(POLL_INTERVAL);
             loop {
                 interval.tick().await;
@@ -421,7 +466,11 @@ impl NightModeController {
 /// on before the ISP switches to night and off after it switches to day, so no
 /// frame is captured dark. In [`LineMode::Two`] the trailing zero writes
 /// de-energise the solenoid coil and are mandatory.
-pub(super) fn plan(target: DayNight, pol: Polarity, line_mode: LineMode) -> Vec<Step> {
+///
+/// `line_mode` is `None` on a board with no ircut node at all. The filter steps
+/// drop out; the lamp and ISP steps stay, because a board can have an
+/// illuminator without a filter.
+pub(super) fn plan(target: DayNight, pol: Polarity, line_mode: Option<LineMode>) -> Vec<Step> {
     let night_level = u8::from(pol.ircut_high_is_night);
     let ircut_level = match target {
         DayNight::Night => night_level,
@@ -430,11 +479,12 @@ pub(super) fn plan(target: DayNight, pol: Polarity, line_mode: LineMode) -> Vec<
 
     let mut ircut = Vec::new();
     match line_mode {
-        LineMode::One(node) => ircut.push(Step::Write {
+        None => {}
+        Some(LineMode::One(node)) => ircut.push(Step::Write {
             node,
             value: ircut_level,
         }),
-        LineMode::Two => {
+        Some(LineMode::Two) => {
             ircut.push(Step::Write {
                 node: Node::IrCutA,
                 value: ircut_level,
@@ -508,7 +558,12 @@ mod tests {
             .times(1)
             .returning(|_| 0);
 
-        let ctl = NightModeController::new(paths.clone(), test_config(), std::sync::Arc::new(ffi));
+        let ctl = NightModeController::new(
+            paths.clone(),
+            test_config(),
+            std::sync::Arc::new(ffi),
+            crate::onvif::types::common::IrCutFilterMode::AUTO,
+        );
         ctl.apply(DayNight::Night).await.unwrap();
 
         assert_eq!(
@@ -532,13 +587,113 @@ mod tests {
         let mut ffi = MockImagingHalTrait::new();
         ffi.expect_set_ir_filter().returning(|_| -1);
 
-        let ctl = NightModeController::new(paths.clone(), test_config(), std::sync::Arc::new(ffi));
+        let ctl = NightModeController::new(
+            paths.clone(),
+            test_config(),
+            std::sync::Arc::new(ffi),
+            crate::onvif::types::common::IrCutFilterMode::AUTO,
+        );
         let _ = ctl.apply(DayNight::Night).await;
 
         assert_eq!(
             std::fs::read_to_string(paths.node(Node::IrLed)).unwrap(),
             "1"
         );
+    }
+
+    #[tokio::test]
+    async fn test_configured_off_mode_starts_at_night_with_auto_disabled() {
+        use crate::hal::common::imaging::MockImagingHalTrait;
+        use crate::onvif::types::common::IrCutFilterMode;
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let paths = NodePaths::rooted(dir.path(), dir.path());
+        for n in [Node::IrCutA, Node::IrCutB, Node::IrLed] {
+            std::fs::write(paths.node(n), "9").unwrap();
+        }
+        // A sensor reading that would otherwise pull the camera back to day.
+        std::fs::write(paths.light_sensor(), "5000").unwrap();
+
+        let ctl = NightModeController::new(
+            paths.clone(),
+            test_config(),
+            std::sync::Arc::new(MockImagingHalTrait::new()),
+            IrCutFilterMode::OFF,
+        );
+
+        assert_eq!(ctl.current_mode().await, DayNight::Night);
+
+        // The AUTO loop must not undo a configured forced mode.
+        ctl.tick().await;
+        assert_eq!(ctl.current_mode().await, DayNight::Night);
+    }
+
+    #[test]
+    fn test_plan_without_ircut_hardware_still_drives_the_lamp() {
+        let steps = plan(DayNight::Night, pol(), None);
+
+        assert_eq!(
+            steps,
+            vec![
+                Step::Write {
+                    node: Node::IrLed,
+                    value: 1
+                },
+                Step::IspMode(DayNight::Night),
+                Step::Sleep(SETTLE),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn test_apply_lights_the_lamp_on_a_board_without_an_ircut_node() {
+        use crate::hal::common::imaging::MockImagingHalTrait;
+        use crate::onvif::types::common::IrCutFilterMode;
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let paths = NodePaths::rooted(dir.path(), dir.path());
+        std::fs::write(paths.node(Node::IrLed), "9").unwrap();
+
+        let mut ffi = MockImagingHalTrait::new();
+        ffi.expect_set_ir_filter().returning(|_| 0);
+
+        let ctl = NightModeController::new(
+            paths.clone(),
+            test_config(),
+            std::sync::Arc::new(ffi),
+            IrCutFilterMode::AUTO,
+        );
+        ctl.apply(DayNight::Night).await.unwrap();
+
+        assert_eq!(
+            std::fs::read_to_string(paths.node(Node::IrLed)).unwrap(),
+            "1"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_apply_skips_the_lamp_write_when_the_node_is_absent() {
+        use crate::hal::common::imaging::MockImagingHalTrait;
+        use crate::onvif::types::common::IrCutFilterMode;
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let paths = NodePaths::rooted(dir.path(), dir.path());
+        std::fs::write(paths.node(Node::IrCutA), "9").unwrap();
+        std::fs::write(paths.node(Node::IrCutB), "9").unwrap();
+
+        let mut ffi = MockImagingHalTrait::new();
+        ffi.expect_set_ir_filter().returning(|_| 0);
+
+        let ctl = NightModeController::new(
+            paths.clone(),
+            test_config(),
+            std::sync::Arc::new(ffi),
+            IrCutFilterMode::AUTO,
+        );
+
+        // No IR_LED node: the filter still moves and no bogus error is raised.
+        ctl.apply(DayNight::Night).await.unwrap();
+        assert!(!paths.node(Node::IrLed).exists());
     }
 
     fn thr() -> Thresholds {
@@ -593,7 +748,7 @@ mod tests {
         std::fs::write(paths.node(Node::IrCutB), "9").unwrap();
         std::fs::write(paths.node(Node::IrLed), "9").unwrap();
 
-        let steps = plan(DayNight::Night, pol(), LineMode::Two);
+        let steps = plan(DayNight::Night, pol(), Some(LineMode::Two));
         let outcome = execute_gpio(&steps, &paths);
 
         assert!(outcome.is_ok());
@@ -622,7 +777,7 @@ mod tests {
         std::fs::write(paths.node(Node::IrCutB), "9").unwrap();
         std::fs::create_dir(paths.node(Node::IrLed)).unwrap();
 
-        let steps = plan(DayNight::Night, pol(), LineMode::Two);
+        let steps = plan(DayNight::Night, pol(), Some(LineMode::Two));
         let outcome = execute_gpio(&steps, &paths);
 
         assert!(outcome.is_err(), "the failed IrLed write must be reported");
@@ -665,7 +820,7 @@ mod tests {
 
     #[test]
     fn test_one_line_ircut_b_only_board_plans_write_to_ircut_b() {
-        let steps = plan(DayNight::Night, pol(), LineMode::One(Node::IrCutB));
+        let steps = plan(DayNight::Night, pol(), Some(LineMode::One(Node::IrCutB)));
 
         assert_eq!(
             steps,
@@ -787,7 +942,7 @@ mod tests {
 
     #[test]
     fn test_night_mode_plan_lights_lamp_before_isp_switch() {
-        let steps = plan(DayNight::Night, pol(), LineMode::Two);
+        let steps = plan(DayNight::Night, pol(), Some(LineMode::Two));
 
         assert_eq!(
             steps,
@@ -821,7 +976,7 @@ mod tests {
 
     #[test]
     fn test_day_mode_plan_moves_filter_before_isp_switch() {
-        let steps = plan(DayNight::Day, pol(), LineMode::Two);
+        let steps = plan(DayNight::Day, pol(), Some(LineMode::Two));
 
         assert_eq!(
             steps,
@@ -855,7 +1010,7 @@ mod tests {
 
     #[test]
     fn test_one_line_mode_writes_single_node_without_pulse() {
-        let steps = plan(DayNight::Night, pol(), LineMode::One(Node::IrCutA));
+        let steps = plan(DayNight::Night, pol(), Some(LineMode::One(Node::IrCutA)));
 
         assert_eq!(
             steps,
@@ -880,7 +1035,7 @@ mod tests {
             ircut_high_is_night: false,
         };
 
-        let steps = plan(DayNight::Night, inverted, LineMode::One(Node::IrCutA));
+        let steps = plan(DayNight::Night, inverted, Some(LineMode::One(Node::IrCutA)));
 
         assert_eq!(
             steps,

@@ -36,20 +36,20 @@ fn create_service_with_state() -> (PTZService, Arc<PTZStateManager>) {
 // Node Operations Integration Tests
 // ============================================================================
 
-#[test]
-fn test_get_nodes_returns_single_node() {
+#[tokio::test]
+async fn test_get_nodes_returns_single_node() {
     let service = create_test_service();
 
-    let response = service.handle_get_nodes(GetNodes {}).unwrap();
+    let response = service.handle_get_nodes(GetNodes {}).await.unwrap();
 
     assert_eq!(response.ptz_nodes.len(), 1);
 }
 
-#[test]
-fn test_get_nodes_has_supported_spaces() {
+#[tokio::test]
+async fn test_get_nodes_has_supported_spaces() {
     let service = create_test_service();
 
-    let response = service.handle_get_nodes(GetNodes {}).unwrap();
+    let response = service.handle_get_nodes(GetNodes {}).await.unwrap();
 
     let node = &response.ptz_nodes[0];
     // Should have absolute pan/tilt space
@@ -75,12 +75,12 @@ fn test_get_nodes_has_supported_spaces() {
     );
 }
 
-#[test]
-fn test_get_node_by_token() {
+#[tokio::test]
+async fn test_get_node_by_token() {
     let service = create_test_service();
 
     // First get all nodes
-    let nodes_response = service.handle_get_nodes(GetNodes {}).unwrap();
+    let nodes_response = service.handle_get_nodes(GetNodes {}).await.unwrap();
     let node_id = nodes_response.ptz_nodes[0].token.clone();
 
     // Then get specific node
@@ -88,18 +88,21 @@ fn test_get_node_by_token() {
         .handle_get_node(GetNode {
             node_token: node_id.clone(),
         })
+        .await
         .unwrap();
 
     assert_eq!(response.ptz_node.token, node_id);
 }
 
-#[test]
-fn test_get_node_invalid_token_fails() {
+#[tokio::test]
+async fn test_get_node_invalid_token_fails() {
     let service = create_test_service();
 
-    let result = service.handle_get_node(GetNode {
-        node_token: "InvalidNodeToken".to_string(),
-    });
+    let result = service
+        .handle_get_node(GetNode {
+            node_token: "InvalidNodeToken".to_string(),
+        })
+        .await;
 
     assert!(result.is_err());
 }

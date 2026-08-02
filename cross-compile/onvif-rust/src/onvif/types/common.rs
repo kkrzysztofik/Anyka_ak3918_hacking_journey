@@ -1830,7 +1830,7 @@ pub enum AutoFocusMode {
 }
 
 /// IR cut filter mode.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum IrCutFilterMode {
     ON,
     OFF,
