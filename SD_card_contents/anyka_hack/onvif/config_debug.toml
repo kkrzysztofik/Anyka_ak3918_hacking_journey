@@ -244,14 +244,13 @@ ir_cut_filter = "AUTO"
 ir_led = false
 
 [imaging.night]
-# Board wiring. Verify on hardware before trusting these.
+# Board wiring. Verified on 192.168.2.198 (two-line ircut, high=night).
 ldr_high_is_day = true
 ircut_high_is_night = true
-# Raw /sys/kernel/ain/ain0 thresholds. These are the VENDOR defaults and
-# they are WRONG for this board: its resting reading of 306 falls in the
-# unhandled band between them. Calibrate per Task 14 before enabling AUTO.
-day_threshold = 1100
-night_threshold = 300
+# Measured 2026-08-02: dark-box ain0≈648, room-uncovered≈670.
+# day >= 662, night <= 652; 653..661 indeterminate (hold).
+day_threshold = 662
+night_threshold = 652
 # Minimum ms between day/night transitions. Prevents dusk oscillation.
 lock_time_ms = 900000
 

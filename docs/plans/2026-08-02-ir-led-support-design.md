@@ -312,6 +312,23 @@ Step 1 gates the feature. Step 5 is the one that cannot be faked in tests.
 verify against the live camera before any code trusts a path. The vendor's own
 `stat()`-based detection exists precisely because these nodes vary per board.
 
+### Hardware verification results (2026-08-02)
+
+| Check | Result |
+|---|---|
+| GPIO nodes | `ircut_a`, `ircut_b`, `IR_LED`, `WHITE_LED` present (two-line) |
+| Dark-box `ain0` | ≈648 (covering only the camera lens barely moved the reading; LDR is not behind the optics) |
+| Room-uncovered `ain0` | ≈670 (evening lighting; earlier afternoon samples were ≈710) |
+| Thresholds shipped | `day_threshold = 662`, `night_threshold = 652` |
+| Force OFF / ON | IR LED tracks night/day; `ircut_a`/`ircut_b` idle at `0` after each pulse |
+| Aux lamps | `tt:WhiteLight\|On/Off`, `tt:IRLamp\|On/Off` OK; `tt:Wiper\|On` faults |
+| AUTO dark → night | Observed (`IR_LED=1` at `ain0≈648`) |
+| AUTO unlock → day | Observed after `lock_time_ms` (`IR_LED=0` at `ain0≈673`) |
+| ISP `ak_vi_switch_mode` | Returns `-1` over IPC; GPIO path still completes |
+
+The ADC span between dark and room light on this board is narrow (~20 counts).
+Retune if ambient lighting changes substantially.
+
 ## Rejected alternatives
 
 | Alternative | Reason |
