@@ -55,7 +55,13 @@ pub fn build_ptz_node() -> PTZNode {
         supported_ptz_spaces: build_ptz_spaces(),
         maximum_number_of_presets: MAX_PRESETS,
         home_supported: true,
-        auxiliary_commands: vec![],
+        auxiliary_commands: vec![
+            "tt:IRLamp|On".to_string(),
+            "tt:IRLamp|Off".to_string(),
+            "tt:IRLamp|Auto".to_string(),
+            "tt:WhiteLight|On".to_string(),
+            "tt:WhiteLight|Off".to_string(),
+        ],
         extension: None,
     }
 }

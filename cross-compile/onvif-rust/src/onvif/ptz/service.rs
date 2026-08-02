@@ -50,6 +50,8 @@ pub struct PTZService {
     pub(crate) state: Arc<PTZStateManager>,
     /// Platform PTZ control (optional for software-only mode).
     pub(crate) ptz_control: Option<Arc<dyn PTZControl>>,
+    /// Imaging control for IR/white lamp auxiliary commands.
+    pub(crate) imaging_control: Option<Arc<dyn crate::platform::ImagingControl>>,
 }
 
 impl PTZService {
@@ -67,6 +69,7 @@ impl PTZService {
         Self {
             state,
             ptz_control: None,
+            imaging_control: None,
         }
     }
 
@@ -80,6 +83,7 @@ impl PTZService {
         Self {
             state,
             ptz_control: platform.ptz_control(),
+            imaging_control: platform.imaging_control(),
         }
     }
 
@@ -88,6 +92,7 @@ impl PTZService {
         Self {
             state,
             ptz_control: Some(ptz_control),
+            imaging_control: None,
         }
     }
 
@@ -324,18 +329,49 @@ impl PTZService {
     }
 
     /// Handle SendAuxiliaryCommand request - delegates to ops::auxiliary
-    pub fn handle_send_auxiliary_command(
+    pub async fn handle_send_auxiliary_command(
         &self,
         request: SendAuxiliaryCommand,
     ) -> OnvifResult<SendAuxiliaryCommandResponse> {
         self.validate_profile_token(&request.profile_token)?;
-        let response = auxiliary::send_auxiliary_command(
+        let cmd = auxiliary::send_auxiliary_command(
             &self.state,
             &request.profile_token,
             &request.auxiliary_data,
         )?;
+        self.dispatch_auxiliary(cmd).await?;
         Ok(SendAuxiliaryCommandResponse {
-            auxiliary_response: response,
+            auxiliary_response: None,
+        })
+    }
+
+    async fn dispatch_auxiliary(&self, cmd: auxiliary::AuxCommand) -> OnvifResult<()> {
+        use auxiliary::{AuxCommand, LampState};
+
+        let Some(imaging) = self.imaging_control.as_ref() else {
+            return Err(OnvifError::InvalidArgVal {
+                subcode: "InvalidArgVal".to_string(),
+                reason: "Imaging control unavailable for auxiliary command".to_string(),
+            });
+        };
+
+        let result = match cmd {
+            AuxCommand::IrLamp(LampState::On) => imaging.set_ir_lamp(true).await,
+            AuxCommand::IrLamp(LampState::Off) => imaging.set_ir_lamp(false).await,
+            AuxCommand::IrLamp(LampState::Auto) => imaging.enable_ir_auto().await,
+            AuxCommand::WhiteLight(LampState::On) => imaging.set_white_light(true).await,
+            AuxCommand::WhiteLight(LampState::Off) => imaging.set_white_light(false).await,
+            AuxCommand::WhiteLight(LampState::Auto) => {
+                return Err(OnvifError::InvalidArgVal {
+                    subcode: "InvalidArgVal".to_string(),
+                    reason: "tt:WhiteLight|Auto is not supported".to_string(),
+                });
+            }
+        };
+
+        result.map_err(|e| OnvifError::InvalidArgVal {
+            subcode: "InvalidArgVal".to_string(),
+            reason: e.to_string(),
         })
     }
 }
@@ -514,7 +550,7 @@ impl ServiceHandler for PTZService {
 
             "SendAuxiliaryCommand" => {
                 let request: SendAuxiliaryCommand = parse_body(body_xml)?;
-                let response = self.handle_send_auxiliary_command(request)?;
+                let response = self.handle_send_auxiliary_command(request).await?;
                 quick_xml::se::to_string(&response).map_err(|e| {
                     OnvifError::Internal(format!("Failed to serialize response: {}", e))
                 })
@@ -1057,29 +1093,30 @@ mod tests {
     // SendAuxiliaryCommand Tests
     // ========================================================================
 
-    #[test]
-    fn test_send_auxiliary_command() {
+    #[tokio::test]
+    async fn test_send_auxiliary_command_rejects_unknown() {
         let service = create_test_service();
 
-        let response = service
+        let result = service
             .handle_send_auxiliary_command(SendAuxiliaryCommand {
                 profile_token: "Profile1".to_string(),
                 auxiliary_data: "tt:Wiper|On".to_string(),
             })
-            .unwrap();
+            .await;
 
-        // We return success with no response data
-        assert!(response.auxiliary_response.is_none());
+        assert!(result.is_err());
     }
 
-    #[test]
-    fn test_send_auxiliary_command_empty_profile() {
+    #[tokio::test]
+    async fn test_send_auxiliary_command_empty_profile() {
         let service = create_test_service();
 
-        let result = service.handle_send_auxiliary_command(SendAuxiliaryCommand {
-            profile_token: "".to_string(),
-            auxiliary_data: "tt:Wiper|On".to_string(),
-        });
+        let result = service
+            .handle_send_auxiliary_command(SendAuxiliaryCommand {
+                profile_token: "".to_string(),
+                auxiliary_data: "tt:Wiper|On".to_string(),
+            })
+            .await;
 
         assert!(result.is_err());
     }
@@ -1400,14 +1437,16 @@ mod tests {
         assert!(result.is_err());
     }
 
-    #[test]
-    fn test_send_auxiliary_command_empty_profile_token() {
+    #[tokio::test]
+    async fn test_send_auxiliary_command_empty_profile_token() {
         let service = create_test_service();
 
-        let result = service.handle_send_auxiliary_command(SendAuxiliaryCommand {
-            profile_token: "".to_string(),
-            auxiliary_data: "test".to_string(),
-        });
+        let result = service
+            .handle_send_auxiliary_command(SendAuxiliaryCommand {
+                profile_token: "".to_string(),
+                auxiliary_data: "test".to_string(),
+            })
+            .await;
 
         assert!(result.is_err());
     }
