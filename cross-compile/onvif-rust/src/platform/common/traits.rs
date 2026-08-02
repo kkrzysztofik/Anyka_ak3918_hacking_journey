@@ -282,8 +282,9 @@ pub struct ImagingSettings {
     pub saturation: f32,
     /// Sharpness (0.0 to 100.0).
     pub sharpness: f32,
-    /// IR cut filter enabled.
-    pub ir_cut_filter: bool,
+    /// IR cut filter mode. ON = filter in (day), OFF = filter out (night),
+    /// AUTO = follow the light sensor.
+    pub ir_cut_filter: crate::onvif::types::common::IrCutFilterMode,
     /// IR LED enabled.
     pub ir_led: bool,
     /// Wide dynamic range enabled.
@@ -902,7 +903,7 @@ mod tests {
         let settings = ImagingSettings::default();
         assert_eq!(settings.brightness, 0.0);
         assert_eq!(settings.contrast, 0.0);
-        assert!(!settings.ir_cut_filter);
+        assert_eq!(settings.ir_cut_filter, crate::onvif::types::common::IrCutFilterMode::AUTO);
         assert!(!settings.wdr);
     }
 
@@ -913,13 +914,13 @@ mod tests {
             contrast: 60.0,
             saturation: 70.0,
             sharpness: 80.0,
-            ir_cut_filter: true,
+            ir_cut_filter: crate::onvif::types::common::IrCutFilterMode::ON,
             ir_led: true,
             wdr: false,
             backlight_compensation: true,
         };
         assert_eq!(settings.brightness, 50.0);
-        assert!(settings.ir_cut_filter);
+        assert_eq!(settings.ir_cut_filter, crate::onvif::types::common::IrCutFilterMode::ON);
         assert!(settings.ir_led);
         assert!(!settings.wdr);
     }

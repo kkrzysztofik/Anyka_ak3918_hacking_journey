@@ -579,11 +579,7 @@ impl ImagingSettingsStore {
             contrast: Some(settings.contrast),
             color_saturation: Some(settings.saturation),
             sharpness: Some(settings.sharpness),
-            ir_cut_filter: Some(if settings.ir_cut_filter {
-                IrCutFilterMode::ON
-            } else {
-                IrCutFilterMode::OFF
-            }),
+            ir_cut_filter: Some(settings.ir_cut_filter.clone()),
             wide_dynamic_range: if settings.wdr {
                 Some(WideDynamicRange20 {
                     mode: WideDynamicMode::ON,
@@ -622,11 +618,7 @@ impl ImagingSettingsStore {
             contrast: settings.contrast.unwrap_or(50.0),
             saturation: settings.color_saturation.unwrap_or(50.0),
             sharpness: settings.sharpness.unwrap_or(50.0),
-            ir_cut_filter: settings
-                .ir_cut_filter
-                .as_ref()
-                .map(|m| matches!(m, IrCutFilterMode::ON | IrCutFilterMode::AUTO))
-                .unwrap_or(true),
+            ir_cut_filter: settings.ir_cut_filter.clone().unwrap_or_default(),
             ir_led: false, // Not exposed in ImagingSettings20
             wdr: settings
                 .wide_dynamic_range
@@ -984,20 +976,20 @@ mod tests {
         assert_eq!(platform.contrast, 60.0);
         assert_eq!(platform.saturation, 80.0);
         assert_eq!(platform.sharpness, 45.0);
-        assert!(platform.ir_cut_filter);
+        assert_eq!(platform.ir_cut_filter, IrCutFilterMode::ON);
         assert!(platform.wdr);
         assert!(platform.backlight_compensation);
     }
 
     #[test]
     fn test_onvif_to_platform_settings_defaults() {
-        use crate::onvif::types::common::ImagingSettings20;
+        use crate::onvif::types::common::{ImagingSettings20, IrCutFilterMode};
 
         let onvif_settings = ImagingSettings20::default();
         let platform = ImagingSettingsStore::onvif_to_platform_settings(&onvif_settings);
         assert_eq!(platform.brightness, 50.0);
         assert_eq!(platform.contrast, 50.0);
-        assert!(platform.ir_cut_filter); // Default is true
+        assert_eq!(platform.ir_cut_filter, IrCutFilterMode::AUTO);
         assert!(!platform.wdr);
         assert!(!platform.backlight_compensation);
     }
@@ -1023,9 +1015,39 @@ mod tests {
         };
 
         let platform = ImagingSettingsStore::onvif_to_platform_settings(&onvif_settings);
-        assert!(!platform.ir_cut_filter);
+        assert_eq!(platform.ir_cut_filter, IrCutFilterMode::OFF);
         assert!(!platform.wdr);
         assert!(!platform.backlight_compensation);
+    }
+
+    #[test]
+    fn test_auto_ir_cut_filter_survives_conversion_to_platform() {
+        use crate::onvif::types::common::{ImagingSettings20, IrCutFilterMode};
+
+        let onvif = ImagingSettings20 {
+            ir_cut_filter: Some(IrCutFilterMode::AUTO),
+            ..Default::default()
+        };
+
+        let platform = ImagingSettingsStore::onvif_to_platform_settings(&onvif);
+
+        assert_eq!(platform.ir_cut_filter, IrCutFilterMode::AUTO);
+    }
+
+    #[test]
+    fn test_on_and_auto_are_distinguishable_at_the_platform_boundary() {
+        use crate::onvif::types::common::{ImagingSettings20, IrCutFilterMode};
+
+        let on = ImagingSettingsStore::onvif_to_platform_settings(&ImagingSettings20 {
+            ir_cut_filter: Some(IrCutFilterMode::ON),
+            ..Default::default()
+        });
+        let auto = ImagingSettingsStore::onvif_to_platform_settings(&ImagingSettings20 {
+            ir_cut_filter: Some(IrCutFilterMode::AUTO),
+            ..Default::default()
+        });
+
+        assert_ne!(on.ir_cut_filter, auto.ir_cut_filter);
     }
 
     #[test]

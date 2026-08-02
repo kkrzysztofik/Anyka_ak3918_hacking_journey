@@ -361,7 +361,7 @@ impl StubPlatformBuilder {
             contrast: 50.0,
             saturation: 50.0,
             sharpness: 50.0,
-            ir_cut_filter: true,
+            ir_cut_filter: crate::onvif::types::common::IrCutFilterMode::AUTO,
             ir_led: false,
             wdr: false,
             backlight_compensation: false,
@@ -1407,7 +1407,7 @@ mod tests {
             contrast: 60.0,
             saturation: 55.0,
             sharpness: 50.0,
-            ir_cut_filter: true,
+            ir_cut_filter: crate::onvif::types::common::IrCutFilterMode::AUTO,
             ir_led: false,
             wdr: true,
             backlight_compensation: false,
@@ -1659,7 +1659,7 @@ mod tests {
             contrast: 70.0,
             saturation: 60.0,
             sharpness: 50.0,
-            ir_cut_filter: false,
+            ir_cut_filter: crate::onvif::types::common::IrCutFilterMode::OFF,
             ir_led: true,
             wdr: true,
             backlight_compensation: true,
@@ -1669,7 +1669,7 @@ mod tests {
         let settings = imaging.get_settings().await.unwrap();
         assert_eq!(settings.brightness, 80.0);
         assert_eq!(settings.contrast, 70.0);
-        assert!(!settings.ir_cut_filter);
+        assert_eq!(settings.ir_cut_filter, crate::onvif::types::common::IrCutFilterMode::OFF);
         assert!(settings.ir_led);
         assert!(settings.wdr);
     }

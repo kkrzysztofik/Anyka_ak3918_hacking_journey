@@ -88,7 +88,7 @@ impl AnykaImagingControl {
                 contrast: 50.0,
                 saturation: 50.0,
                 sharpness: 50.0,
-                ir_cut_filter: true,
+                ir_cut_filter: crate::onvif::types::common::IrCutFilterMode::AUTO,
                 ir_led: false,
                 wdr: false,
                 backlight_compensation: false,
