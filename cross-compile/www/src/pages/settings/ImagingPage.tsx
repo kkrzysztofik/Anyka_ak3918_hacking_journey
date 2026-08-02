@@ -153,17 +153,15 @@ export default function ImagingPage() {
     },
   });
 
-  const handleIrLampToggle = (checked: boolean) => {
-    setIrLampOn(checked);
-    lampMutation.mutate(checked ? 'tt:IRLamp|On' : 'tt:IRLamp|Off', {
-      onError: () => setIrLampOn(!checked),
-    });
-  };
-
-  const handleWhiteLightToggle = (checked: boolean) => {
-    setWhiteLightOn(checked);
-    lampMutation.mutate(checked ? 'tt:WhiteLight|On' : 'tt:WhiteLight|Off', {
-      onError: () => setWhiteLightOn(!checked),
+  const toggleLamp = (
+    checked: boolean,
+    setOn: (value: boolean) => void,
+    onCmd: AuxiliaryCommand,
+    offCmd: AuxiliaryCommand,
+  ) => {
+    setOn(checked);
+    lampMutation.mutate(checked ? onCmd : offCmd, {
+      onError: () => setOn(!checked),
     });
   };
 
@@ -431,19 +429,14 @@ export default function ImagingPage() {
                     className="h-10 w-full appearance-none rounded-md border border-[#3a3a3c] bg-[#2c2c2e] px-3 py-2 text-sm text-white focus:border-transparent focus:ring-2 focus:ring-[#0a84ff] focus:outline-none"
                     data-testid="imaging-ir-cut-filter-select"
                   >
-                    {options?.irCutFilterModes && options.irCutFilterModes.length > 0 ? (
-                      options.irCutFilterModes.map((mode) => (
-                        <option key={mode} value={mode}>
-                          {IR_CUT_LABELS[mode] ?? mode}
-                        </option>
-                      ))
-                    ) : (
-                      <>
-                        <option value="AUTO">Auto</option>
-                        <option value="ON">Day Mode</option>
-                        <option value="OFF">Night Mode</option>
-                      </>
-                    )}
+                    {(options?.irCutFilterModes && options.irCutFilterModes.length > 0
+                      ? options.irCutFilterModes
+                      : (Object.keys(IR_CUT_LABELS) as Array<keyof typeof IR_CUT_LABELS>)
+                    ).map((mode) => (
+                      <option key={mode} value={mode}>
+                        {IR_CUT_LABELS[mode] ?? mode}
+                      </option>
+                    ))}
                   </select>
                 </div>
               </SettingsCardContent>
@@ -472,7 +465,9 @@ export default function ImagingPage() {
                 </Label>
                 <Switch
                   checked={irLampOn}
-                  onCheckedChange={handleIrLampToggle}
+                  onCheckedChange={(checked) =>
+                    toggleLamp(checked, setIrLampOn, 'tt:IRLamp|On', 'tt:IRLamp|Off')
+                  }
                   disabled={!profileToken || lampMutation.isPending}
                   data-testid="imaging-ir-lamp-switch"
                 />
@@ -483,7 +478,9 @@ export default function ImagingPage() {
                 </Label>
                 <Switch
                   checked={whiteLightOn}
-                  onCheckedChange={handleWhiteLightToggle}
+                  onCheckedChange={(checked) =>
+                    toggleLamp(checked, setWhiteLightOn, 'tt:WhiteLight|On', 'tt:WhiteLight|Off')
+                  }
                   disabled={!profileToken || lampMutation.isPending}
                   data-testid="imaging-white-light-switch"
                 />
