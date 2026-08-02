@@ -11,6 +11,7 @@ pub mod audio_encoder;
 pub mod audio_input;
 pub mod context;
 pub mod imaging;
+mod night_mode;
 pub mod lifecycle;
 pub mod network_info;
 pub mod ptz_actor;
