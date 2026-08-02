@@ -54,12 +54,6 @@ pub(super) struct Polarity {
     pub ircut_high_is_night: bool,
 }
 
-/// Build the ordered step list for a transition.
-///
-/// Ordering follows the vendor reference and is not arbitrary: the lamp turns
-/// on before the ISP switches to night and off after it switches to day, so no
-/// frame is captured dark. In [`LineMode::Two`] the trailing zero writes
-/// de-energise the solenoid coil and are mandatory.
 /// Light-sensor thresholds. Both values must be calibrated per board:
 /// the vendor defaults leave this camera's resting reading in an
 /// unhandled dead zone.
@@ -81,7 +75,6 @@ pub(super) enum Reading {
     Indeterminate,
 }
 
-/// Map a raw `ain0` reading to a day/night conclusion.
 /// Current AUTO-mode state: what the camera is set to, and when it last moved.
 #[derive(Debug, Clone, Copy)]
 pub(super) struct AutoState {
@@ -133,6 +126,7 @@ pub(super) fn decide(
     Some(target)
 }
 
+/// Map a raw `ain0` reading to a day/night conclusion.
 pub(super) fn classify(raw: i32, thr: Thresholds) -> Reading {
     let (high, low) = if thr.ldr_high_is_day {
         (DayNight::Day, DayNight::Night)
@@ -149,6 +143,12 @@ pub(super) fn classify(raw: i32, thr: Thresholds) -> Reading {
     }
 }
 
+/// Build the ordered step list for a transition.
+///
+/// Ordering follows the vendor reference and is not arbitrary: the lamp turns
+/// on before the ISP switches to night and off after it switches to day, so no
+/// frame is captured dark. In [`LineMode::Two`] the trailing zero writes
+/// de-energise the solenoid coil and are mandatory.
 pub(super) fn plan(target: DayNight, pol: Polarity, line_mode: LineMode) -> Vec<Step> {
     let night_level = u8::from(pol.ircut_high_is_night);
     let ircut_level = match target {
