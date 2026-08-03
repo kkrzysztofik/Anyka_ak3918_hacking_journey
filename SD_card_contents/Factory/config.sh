@@ -13,7 +13,10 @@
 
 telnetd -p 24 -l /bin/sh 2>/dev/null &
 
-BIN=/mnt/anyka_hack/anyka-init.bin
+# The two paths below are overridable only so the host test in
+# tests/p0_wrapper.rs can stub them. Production never sets these.
+BIN=${ANYKA_INIT_BIN:-/mnt/anyka_hack/anyka-init.bin}
+WIFI_MANAGE=${ANYKA_WIFI_MANAGE:-/usr/sbin/wifi_manage.sh}
 
 if [ ! -x "$BIN" ]; then
   echo "anyka-init: missing or non-executable $BIN" >&2
