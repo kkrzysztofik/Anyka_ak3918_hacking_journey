@@ -1,7 +1,7 @@
 # AE Luma Day/Night AUTO — Design
 
 Date: 2026-08-04
-Status: approved
+Status: approved; implementation plan at `docs/plans/2026-08-04-ae-luma-day-night.md`
 Branch context: `feat/ir-led-support` (extends IR night-mode; replaces weak `ain0`-only AUTO sensing)
 
 ## Problem
