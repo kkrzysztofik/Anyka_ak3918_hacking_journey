@@ -751,6 +751,16 @@ impl Application {
             } else {
                 tracing::info!("Loaded users from {}", users_path.display());
             }
+        } else {
+            // Said nothing at all before. A missing file leaves UserStorage
+            // empty, which surfaces much later as a streaming-auth failure that
+            // cannot name its own cause — and RTSP then never binds, with no
+            // log line anywhere pointing at this file.
+            tracing::warn!(
+                path = %users_path.display(),
+                "no users file; ONVIF and streaming authentication have no accounts. \
+                 RTSP and HTTP-FLV will not start while server.auth_enabled = true"
+            );
         }
 
         let user_persistence_storage = Arc::clone(&user_storage);
@@ -1323,7 +1333,10 @@ impl Application {
 
         if app_state.user_storage().is_empty() {
             anyhow::bail!(
-                "Streaming authentication is enabled but no users are available in UserStorage"
+                "streaming authentication is enabled but UserStorage is empty, so RTSP and \
+                 HTTP-FLV will not start. Create a users.toml next to config.toml with an \
+                 Administrator entry, or set server.auth_enabled = false to stream without \
+                 authentication."
             );
         }
 
@@ -1853,8 +1866,23 @@ mod tests {
         config.write().server.auth_enabled = true;
         let app_state = make_app_state_for_stream_auth(config, Arc::new(UserStorage::new()));
 
-        let result = Application::build_stream_auth(&app_state);
-        assert!(result.is_err());
+        // `Auth` is not Debug, so expect_err() will not compile here.
+        let msg = match Application::build_stream_auth(&app_state) {
+            Ok(_) => panic!("no users must be an error"),
+            Err(e) => e.to_string(),
+        };
+        // This error is the only thing the operator sees when RTSP silently
+        // fails to bind: build_streaming returns None on it, so the server is
+        // never constructed. It has to name the file to create and the escape
+        // hatch, or it costs a debugging session. It did.
+        assert!(
+            msg.contains("users.toml"),
+            "must name the file to create, got: {msg}"
+        );
+        assert!(
+            msg.contains("auth_enabled"),
+            "must name the setting that disables the requirement, got: {msg}"
+        );
     }
 
     #[test]
