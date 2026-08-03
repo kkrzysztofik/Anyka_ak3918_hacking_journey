@@ -1,7 +1,46 @@
 # anyka-init Cutover on Camera .121 — Design
 
 Date: 2026-08-03
-Status: approved (design), implementation plan pending
+Status: **implemented 2026-08-03**
+
+## Outcome
+
+Cut over on the second attempt. The blocker was not in this design: `W11-CAM`
+does not broadcast its SSID, and `wifi.rs::wpa_supplicant_conf()` emitted no
+`scan_ssid=1`, so wpa_supplicant could only ever associate to a network it had
+heard a beacon from. anyka-init discovered only the one mesh satellite that
+does advertise the SSID, at -85 dBm, and failed to associate there on both
+driver flags; the -49 dBm router BSSID was invisible to it. The vendor chain
+succeeds on the same hardware because `station_connect.sh:62` runs
+`wpa_cli -iwlan0 set_network $1 scan_ssid 1`. `.198` never hit this: its SSID
+is broadcast.
+
+With `scan_ssid=1` (commit `1e3eb071`) association took **2 seconds** on `wext`,
+against a 45 s timeout it previously exhausted:
+
+```
+00:01:03 starting wpa_supplicant driver="wext"
+00:01:05 wpa_supplicant associated driver="wext"
+00:01:06 wifi up chip="ssv6355_ble" ssid="W11-CAM" addr="192.168.30.121"
+```
+
+Observed, all as expected:
+
+- No vendor fallback. `probed = Some("wext")`, so `main.rs:122` patched the
+  service's `-D` flag and killed the P2 instance — the `.198` success path.
+- Five supervised services, no restarts in the first 9 minutes, `boot.json`
+  steady at `{"fast_reboots":0,"wifi_reboots":0}`, no `wifi link unhealthy`.
+- The first attempt failed and **rolled itself back**: the deadman restored
+  `config.sh.gerge.bak` and rebooted, and the camera returned on the vendor
+  stack in ~5 minutes with nobody on-site. That mechanism is now proven.
+- `:554` still does not bind. Pre-existing and explicitly out of scope.
+
+Two corrections to what is written below: `camera.sh` is reached via
+`rc.local:30`, not only through `anyka_ipc.sh` (F2 records this correctly), and
+the earlier claim that a failed dry run was caused by a SIGHUP'd deadman was
+wrong — it was stale `wpa_supplicant`/`udhcpc` processes holding `wlan0`, which
+wedged the radio so that neither anyka-init nor the vendor chain could recover
+without a reboot.
 
 ## Problem
 
