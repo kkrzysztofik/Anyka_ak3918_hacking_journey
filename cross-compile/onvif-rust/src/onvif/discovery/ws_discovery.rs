@@ -494,7 +494,7 @@ impl WsDiscovery {
             return Ok(());
         }
 
-        let socket = create_multicast_socket()?;
+        let socket = create_multicast_socket().await?;
         self.socket = Some(Arc::new(socket));
         debug!(
             multicast = %WS_DISCOVERY_MULTICAST,
@@ -1163,8 +1163,33 @@ impl WsDiscovery {
 // Helper Functions
 // =============================================================================
 
+/// How long to keep retrying the multicast join before giving up.
+///
+/// anyka-init kills wpa_supplicant and respawns it as a supervised service in
+/// the same batch that launches onvif (`main.rs:131`), so at boot the route to
+/// 239.255.255.250 can be absent for the length of one reassociation. A
+/// one-shot join lands in that hole: observed on camera .121, where discovery
+/// was recorded degraded 1.07 s into startup and — since nothing ever retries a
+/// degraded service — stayed down until the process was restarted by hand.
+/// 30 s comfortably covers a reassociation plus DHCP.
+const MULTICAST_JOIN_RETRY_BUDGET: Duration = Duration::from_secs(30);
+const MULTICAST_JOIN_RETRY_INTERVAL: Duration = Duration::from_secs(1);
+
+/// Whether a failed multicast join is worth retrying.
+///
+/// These three all mean "no usable interface or route yet", which is what a
+/// reassociation looks like from userspace. Anything else — EINVAL, EPERM — is
+/// a genuine misconfiguration and must fail immediately rather than stall
+/// startup for the whole budget.
+fn is_transient_join_error(e: &io::Error) -> bool {
+    matches!(
+        e.raw_os_error(),
+        Some(libc::ENODEV) | Some(libc::ENETUNREACH) | Some(libc::EADDRNOTAVAIL)
+    )
+}
+
 /// Create a UDP socket configured for multicast reception
-fn create_multicast_socket() -> Result<UdpSocket, DiscoveryError> {
+async fn create_multicast_socket() -> Result<UdpSocket, DiscoveryError> {
     debug!("Creating multicast socket for WS-Discovery");
 
     let socket = Socket::new(Domain::IPV4, Type::DGRAM, Some(Protocol::UDP))?;
@@ -1184,9 +1209,36 @@ fn create_multicast_socket() -> Result<UdpSocket, DiscoveryError> {
         multicast_group = %WS_DISCOVERY_MULTICAST,
         "Joining multicast group"
     );
-    socket
-        .join_multicast_v4(&WS_DISCOVERY_MULTICAST, &Ipv4Addr::UNSPECIFIED)
-        .map_err(DiscoveryError::MulticastJoin)?;
+    let started = std::time::Instant::now();
+    let mut attempts: u32 = 0;
+    loop {
+        attempts += 1;
+        match socket.join_multicast_v4(&WS_DISCOVERY_MULTICAST, &Ipv4Addr::UNSPECIFIED) {
+            Ok(()) => break,
+            Err(e) => {
+                if !is_transient_join_error(&e) || started.elapsed() >= MULTICAST_JOIN_RETRY_BUDGET
+                {
+                    return Err(DiscoveryError::MulticastJoin(e));
+                }
+                // Only the first one, or a slow boot prints 30 identical lines.
+                if attempts == 1 {
+                    warn!(
+                        error = %e,
+                        budget_secs = MULTICAST_JOIN_RETRY_BUDGET.as_secs(),
+                        "no route to the multicast group yet; retrying"
+                    );
+                }
+                tokio::time::sleep(MULTICAST_JOIN_RETRY_INTERVAL).await;
+            }
+        }
+    }
+    if attempts > 1 {
+        info!(
+            attempts,
+            waited_ms = started.elapsed().as_millis() as u64,
+            "multicast join succeeded after waiting for the network"
+        );
+    }
     info!(
         multicast_group = %WS_DISCOVERY_MULTICAST,
         port = WS_DISCOVERY_PORT,
@@ -1286,6 +1338,36 @@ fn extract_xml_element(xml: &str, element_name: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // =========================================================================
+    // Multicast join retry (boot race against wifi reassociation)
+    // =========================================================================
+
+    #[test]
+    fn test_transient_join_errors_are_retried() {
+        // What a missing route looks like from userspace while the supplicant
+        // is restarting. anyka-init kills and respawns wpa_supplicant in the
+        // same breath as launching onvif, so this window is routine at boot.
+        for code in [libc::ENODEV, libc::ENETUNREACH, libc::EADDRNOTAVAIL] {
+            assert!(
+                is_transient_join_error(&io::Error::from_raw_os_error(code)),
+                "errno {code} means no route yet and must be retried"
+            );
+        }
+    }
+
+    #[test]
+    fn test_permanent_join_errors_fail_fast() {
+        // A real misconfiguration must not stall startup for the whole budget.
+        for code in [libc::EINVAL, libc::EPERM, libc::EACCES] {
+            assert!(
+                !is_transient_join_error(&io::Error::from_raw_os_error(code)),
+                "errno {code} is not transient and must fail immediately"
+            );
+        }
+        // No errno at all: must not spin either.
+        assert!(!is_transient_join_error(&io::Error::other("synthetic")));
+    }
 
     // =========================================================================
     // T186: Unit tests for Hello message generation
