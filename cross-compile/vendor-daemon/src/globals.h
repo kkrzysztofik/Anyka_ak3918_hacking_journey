@@ -17,12 +17,10 @@ struct push_stream_state {
     uint32_t        first_timestamp_ms;   /* First SDK timestamp seen */
     int             timestamp_initialized; /* 0 = not set, 1 = initialized */
     /*
-     * Forward-jump clamp state.  The ISP day/night switch stalls capture for
-     * hundreds of ms, so vs.ts can leap far ahead of the frame cadence and
-     * every consumer of the published timestamp (RTP, VLC) sees a gap.  These
-     * track the last raw/published pair so an outsized step can be replaced by
-     * one typical frame interval, with the difference carried forward in
-     * ts_corr_ms so later frames stay continuous rather than snapping back.
+     * Timestamp continuity state.  Pathological vs.ts leaps (>5s) are clamped;
+     * regressions are held monotonic; ISP stalls where wall time advances but
+     * vs.ts does not get a capped catch-up so live players stay near the edge.
+     * ts_corr_ms carries the offset so later frames stay continuous.
      *
      * All int64_t: the arithmetic mixes a running signed correction with 32-bit
      * timestamps, and a wider signed type makes the over/underflow checks
@@ -32,6 +30,7 @@ struct push_stream_state {
     int64_t         last_out_ts_ms;         /* Last timestamp published to the ring */
     int64_t         last_sane_interval_ms;  /* Init 66; updated when delta in 16..1000 */
     int64_t         ts_corr_ms;             /* Added into normalized out after clamps */
+    uint64_t        last_publish_mono_ms;   /* diag_monotonic_ms at last publish */
     /*
      * Set when stop_push_slot() gave up waiting for this worker.
      *
