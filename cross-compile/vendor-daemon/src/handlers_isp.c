@@ -9,6 +9,19 @@
 #include "ak_vpss.h"
 #include "ak_vi.h"
 
+/* ponytail: sole-VI, pass token only if multi-VI appears. */
+static int isp_first_vi(void **out)
+{
+    int i;
+    for (i = 0; i < VD_OBJ_SLOTS; i++) {
+        if (g_obj_slots[i].live && g_obj_slots[i].kind == VD_OBJ_KIND_VI) {
+            *out = g_obj_slots[i].ptr;
+            return 0;
+        }
+    }
+    return -1;
+}
+
 /**
  * handle_isp_effect - Generic IPC handler for ISP image-effect commands.
  *
@@ -16,7 +29,7 @@
  * ak_vpss_effect_set() with the appropriate effect_type constant.
  * CMD_ISP_SET_IR_FILTER and CMD_ISP_SET_WDR are handled by dedicated functions.
  *
- * Wire format: [u64 vi_handle][i32 value] = 12 bytes.
+ * Wire format: [i32 value] = 4 bytes.
  *
  * @param fd          Client socket file descriptor, used to send the response.
  * @param req         Request payload bytes (little-endian, layout described above).
@@ -28,17 +41,21 @@
 int handle_isp_effect(int fd, const uint8_t *req, uint32_t req_len,
                       int effect_type, const char *name)
 {
-    if (req_len < 8 + 4) {
+    void *vi_handle;
+    int32_t value;
+    int ret;
+
+    if (req_len < 4) {
         log_warn("[isp] %s: req too short (%u)", name, req_len);
         return send_response(fd, STATUS_ERROR, NULL, 0);
     }
-    void *vi_handle;
-    if (vd_obj_resolve(req_read_u64(req, 0), VD_OBJ_KIND_VI, &vi_handle) != 0)
-        return send_response(fd, VD_STATUS_STALE_EPOCH, NULL, 0);
-    int32_t value     = req_read_i32(req, 8);
-
+    if (isp_first_vi(&vi_handle) != 0) {
+        log_warn("[isp] %s: no VI registered", name);
+        return send_response(fd, STATUS_ERROR, NULL, 0);
+    }
+    value = req_read_i32(req, 0);
     log_debug("[isp] %s vi=%p value=%d", name, vi_handle, (int)value);
-    int ret = ak_vpss_effect_set(vi_handle, (enum vpss_effect_type)effect_type, (int)value);
+    ret = ak_vpss_effect_set(vi_handle, (enum vpss_effect_type)effect_type, (int)value);
     return send_response(fd, ret, NULL, 0);
 }
 
@@ -100,21 +117,14 @@ int handle_isp_set_ir_filter(int fd, const uint8_t *req, uint32_t req_len)
  */
 int handle_isp_get_ae_luma(int fd, const uint8_t *req, uint32_t req_len)
 {
-    void *vi = NULL;
-    int i;
+    void *vi;
     struct vpss_isp_ae_run_info info;
     uint8_t luma;
 
     (void)req;
     (void)req_len;
 
-    for (i = 0; i < VD_OBJ_SLOTS; i++) {
-        if (g_obj_slots[i].live && g_obj_slots[i].kind == VD_OBJ_KIND_VI) {
-            vi = g_obj_slots[i].ptr;
-            break;
-        }
-    }
-    if (vi == NULL) {
+    if (isp_first_vi(&vi) != 0) {
         log_warn("[isp] get_ae_luma: no VI registered");
         return send_response(fd, STATUS_ERROR, NULL, 0);
     }
