@@ -1,7 +1,7 @@
 # ISP Sole-VI Wire Format — Design
 
 Date: 2026-08-04
-Status: approved
+Status: approved; implementation plan at `docs/plans/2026-08-04-isp-sole-vi-wire-format.md`
 Branch context: `feat/ir-led-support` (fixes ISP day/night / imaging effects after IR GPIO landed)
 
 ## Problem
