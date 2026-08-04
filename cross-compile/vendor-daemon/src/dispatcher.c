@@ -334,6 +334,9 @@ int process_request(int fd)
     case CMD_ISP_SET_WDR:
         ret = handle_isp_set_wdr(fd, req_buf, req_len);
         break;
+    case CMD_ISP_GET_AE_LUMA:
+        ret = handle_isp_get_ae_luma(fd, req_buf, req_len);
+        break;
 
     /* --- Utility --- */
     case CMD_GET_ERROR_NO:

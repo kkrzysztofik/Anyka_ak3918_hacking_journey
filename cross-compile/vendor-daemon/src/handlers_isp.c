@@ -91,3 +91,41 @@ int handle_isp_set_ir_filter(int fd, const uint8_t *req, uint32_t req_len)
     int ret = ak_vi_switch_mode(vi_handle, dn);
     return send_response(fd, ret, NULL, 0);
 }
+
+/**
+ * handle_isp_get_ae_luma - Return current_calc_avg_lumi for the sole VI.
+ *
+ * Empty request. Uses the first live VD_OBJ_KIND_VI slot (single-camera boards).
+ * Response payload: 1 byte luma on STATUS_OK.
+ */
+int handle_isp_get_ae_luma(int fd, const uint8_t *req, uint32_t req_len)
+{
+    void *vi = NULL;
+    int i;
+    struct vpss_isp_ae_run_info info;
+    uint8_t luma;
+
+    (void)req;
+    (void)req_len;
+
+    for (i = 0; i < VD_OBJ_SLOTS; i++) {
+        if (g_obj_slots[i].live && g_obj_slots[i].kind == VD_OBJ_KIND_VI) {
+            vi = g_obj_slots[i].ptr;
+            break;
+        }
+    }
+    if (vi == NULL) {
+        log_warn("[isp] get_ae_luma: no VI registered");
+        return send_response(fd, STATUS_ERROR, NULL, 0);
+    }
+
+    memset(&info, 0, sizeof(info));
+    if (ak_vpss_isp_get_ae_run_info(vi, &info) != 0) {
+        log_warn("[isp] get_ae_luma: ak_vpss_isp_get_ae_run_info failed");
+        return send_response(fd, STATUS_ERROR, NULL, 0);
+    }
+
+    luma = info.current_calc_avg_lumi;
+    log_debug("[isp] get_ae_luma vi=%p luma=%u", vi, (unsigned)luma);
+    return send_response(fd, STATUS_OK, &luma, 1);
+}
