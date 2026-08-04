@@ -135,6 +135,11 @@ impl AnykaImagingControl {
         let mut control =
             Self::with_ffi_and_paths(ffi, super::night_mode::NodePaths::default(), cfg);
         control.video_encoder = Some(Arc::downgrade(&video_encoder));
+        let enc = Arc::clone(&video_encoder);
+        control.night.set_idr_hook(Arc::new(move || {
+            let _ = enc.request_idr_frame(true);
+            let _ = enc.request_idr_frame(false);
+        }));
         control
     }
 

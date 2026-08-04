@@ -284,6 +284,8 @@ pub(crate) struct NightModeController {
     auto_enabled: std::sync::atomic::AtomicBool,
     /// Consecutive `get_ae_luma` failures; resets on success.
     ae_fail_streak: std::sync::atomic::AtomicU32,
+    /// Best-effort IDR after every day/night apply (forced + AUTO).
+    idr_hook: std::sync::Mutex<Option<std::sync::Arc<dyn Fn() + Send + Sync>>>,
 }
 
 impl NightModeController {
@@ -313,6 +315,14 @@ impl NightModeController {
             configured: mode,
             auto_enabled: std::sync::atomic::AtomicBool::new(matches!(mode, IrCutFilterMode::AUTO)),
             ae_fail_streak: std::sync::atomic::AtomicU32::new(0),
+            idr_hook: std::sync::Mutex::new(None),
+        }
+    }
+
+    /// Wire a best-effort IDR callback (main+sub) invoked after every `apply`.
+    pub(crate) fn set_idr_hook(&self, hook: std::sync::Arc<dyn Fn() + Send + Sync>) {
+        if let Ok(mut guard) = self.idr_hook.lock() {
+            *guard = Some(hook);
         }
     }
 
@@ -380,6 +390,14 @@ impl NightModeController {
         if isp != 0 {
             tracing::warn!(isp, "ISP day/night switch failed; will retry next tick");
         }
+
+        // IDR even when ISP fails: GPIO/filter change still needs a keyframe.
+        if let Ok(guard) = self.idr_hook.lock()
+            && let Some(hook) = guard.as_ref()
+        {
+            hook();
+        }
+
         match gpio_result {
             Ok(Ok(())) => Ok(()),
             Ok(Err(e)) => Err(PlatformError::HardwareFailure(format!("GPIO write: {e}"))),
@@ -617,6 +635,39 @@ mod tests {
             std::fs::read_to_string(paths.node(Node::IrLed)).unwrap(),
             "1"
         );
+    }
+
+    #[tokio::test]
+    async fn test_apply_invokes_idr_hook_after_transition() {
+        use crate::hal::common::imaging::MockImagingHalTrait;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let paths = NodePaths::rooted(dir.path(), dir.path());
+        for n in [Node::IrCutA, Node::IrCutB, Node::IrLed] {
+            std::fs::write(paths.node(n), "9").unwrap();
+        }
+
+        let mut ffi = MockImagingHalTrait::new();
+        ffi.expect_set_ir_filter().returning(|_| 0);
+
+        let ctl = NightModeController::new(
+            paths,
+            test_config(),
+            std::sync::Arc::new(ffi),
+            crate::onvif::types::common::IrCutFilterMode::AUTO,
+        );
+        let calls = std::sync::Arc::new(AtomicUsize::new(0));
+        let calls_hook = std::sync::Arc::clone(&calls);
+        ctl.set_idr_hook(std::sync::Arc::new(move || {
+            calls_hook.fetch_add(1, Ordering::SeqCst);
+        }));
+
+        ctl.apply(DayNight::Night).await.unwrap();
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+
+        ctl.apply(DayNight::Day).await.unwrap();
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
     }
 
     #[tokio::test]
