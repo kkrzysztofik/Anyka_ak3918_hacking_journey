@@ -86,7 +86,7 @@ int handle_isp_set_wdr(int fd, const uint8_t *req, uint32_t req_len)
  * Uses the VI day/night switch (ak_vi_switch_mode) rather than a VPSS effect
  * to control the IR cut filter.
  *
- * Wire format: [u64 vi_handle][i32 mode] = 12 bytes.
+ * Wire format: [i32 mode] = 4 bytes.
  * mode: 0 = day (IR filter in), 1 = night (IR filter out).
  *
  * @param fd      Client socket file descriptor, used to send the response.
@@ -96,16 +96,21 @@ int handle_isp_set_wdr(int fd, const uint8_t *req, uint32_t req_len)
  */
 int handle_isp_set_ir_filter(int fd, const uint8_t *req, uint32_t req_len)
 {
-    if (req_len < 8 + 4)
-        return send_response(fd, STATUS_ERROR, NULL, 0);
     void *vi_handle;
-    if (vd_obj_resolve(req_read_u64(req, 0), VD_OBJ_KIND_VI, &vi_handle) != 0)
-        return send_response(fd, VD_STATUS_STALE_EPOCH, NULL, 0);
-    int32_t mode      = req_read_i32(req, 8);
+    int32_t mode;
+    enum video_daynight_mode dn;
+    int ret;
 
-    enum video_daynight_mode dn = (mode != 0) ? VI_MODE_NIGHT : VI_MODE_DAY;
+    if (req_len < 4)
+        return send_response(fd, STATUS_ERROR, NULL, 0);
+    if (isp_first_vi(&vi_handle) != 0) {
+        log_warn("[isp] set_ir_filter: no VI registered");
+        return send_response(fd, STATUS_ERROR, NULL, 0);
+    }
+    mode = req_read_i32(req, 0);
+    dn = (mode != 0) ? VI_MODE_NIGHT : VI_MODE_DAY;
     log_debug("[isp] set_ir_filter vi=%p mode=%d", vi_handle, (int)dn);
-    int ret = ak_vi_switch_mode(vi_handle, dn);
+    ret = ak_vi_switch_mode(vi_handle, dn);
     return send_response(fd, ret, NULL, 0);
 }
 
