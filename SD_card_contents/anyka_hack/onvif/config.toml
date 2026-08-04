@@ -270,6 +270,9 @@ day_threshold = 662
 night_threshold = 652
 # Minimum ms between day/night transitions. Prevents dusk oscillation.
 lock_time_ms = 900000
+# AE luma (0-255). PLACEHOLDER — calibrate on device (Task 8).
+ae_day_threshold = 80
+ae_night_threshold = 40
 
 # ============================================================================
 # WS-Discovery Settings

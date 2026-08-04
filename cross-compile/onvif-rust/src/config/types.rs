@@ -623,6 +623,10 @@ pub struct NightConfig {
     pub night_threshold: i32,
     /// Minimum time between transitions, preventing dusk oscillation.
     pub lock_time_ms: u64,
+    /// At or above this AE `current_calc_avg_lumi`, treat as day.
+    pub ae_day_threshold: i32,
+    /// At or below this AE luma, treat as night.
+    pub ae_night_threshold: i32,
 }
 
 impl Default for NightConfig {
@@ -633,6 +637,8 @@ impl Default for NightConfig {
             day_threshold: 1100,
             night_threshold: 300,
             lock_time_ms: 900_000,
+            ae_day_threshold: 80,
+            ae_night_threshold: 40,
         }
     }
 }
@@ -1002,5 +1008,12 @@ file_name = "static"
         assert_eq!(cfg.lock_time_ms, 900_000);
         assert!(cfg.ldr_high_is_day);
         assert!(cfg.ircut_high_is_night);
+    }
+
+    #[test]
+    fn test_night_config_ae_thresholds_default() {
+        let cfg = NightConfig::default();
+        assert_eq!(cfg.ae_day_threshold, 80);
+        assert_eq!(cfg.ae_night_threshold, 40);
     }
 }
