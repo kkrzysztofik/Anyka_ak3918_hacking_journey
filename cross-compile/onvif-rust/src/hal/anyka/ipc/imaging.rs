@@ -85,6 +85,11 @@ impl ImagingHalTrait for AnykaIpc {
             }
         }
     }
+
+    // Placeholder until Task 4 wires CMD_ISP_GET_AE_LUMA.
+    async fn get_ae_luma(&self) -> Option<u8> {
+        None
+    }
 }
 
 #[cfg(test)]
