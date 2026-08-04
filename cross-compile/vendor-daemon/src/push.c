@@ -15,6 +15,21 @@
 #include "ak_venc.h"
 #include "vd_ring_buffer.h"
 
+/* ---- Timestamp forward-clamp bounds -------------------------------------
+ *
+ * A step larger than TS_MAX_FORWARD_MS between published timestamps is treated
+ * as a capture stall rather than elapsed media time -- the ISP day/night switch
+ * blocks the encoder for hundreds of ms, and passing that gap through makes
+ * live players resync or drop the session.  Such a step is replaced by the last
+ * plausible frame interval; only intervals inside [TS_SANE_MIN_MS,
+ * TS_SANE_MAX_MS] are learned as plausible.
+ *
+ * # ponytail: 250ms forward cap; lower if VLC still hiccups after confirm log.
+ */
+#define TS_MAX_FORWARD_MS 250
+#define TS_SANE_MIN_MS    16
+#define TS_SANE_MAX_MS    1000
+
 /* ---- Internal helpers (file-static) ------------------------------------- */
 
 /*
@@ -182,7 +197,8 @@ static void *push_frame_thread(void *arg)
         uint32_t seq_no = (uint32_t)vs.seq_no;
         uint32_t ring_frame_type = convert_frame_type(vs.frame_type);
 
-        /* Timestamp normalization: subtract first timestamp to produce 0-based values */
+        /* Timestamp normalization: subtract first timestamp to produce 0-based values,
+         * then forward-clamp oversized jumps (see TS_MAX_FORWARD_MS). */
         if (!state->timestamp_initialized) {
             state->first_timestamp_ms = raw_timestamp_ms;
             state->timestamp_initialized = 1;
@@ -207,8 +223,54 @@ static void *push_frame_thread(void *arg)
                 }
             }
             uint64_t delta = raw64 - first64;
-            timestamp_ms = (delta > UINT32_MAX) ? UINT32_MAX : (uint32_t)delta;
+            int64_t base_ms = (delta > UINT32_MAX) ? (int64_t)UINT32_MAX : (int64_t)delta;
+
+            /*
+             * Apply the running correction before judging the step.  The
+             * correction is signed, so the candidate can land below the
+             * normalized value or below zero; saturate it into the publishable
+             * range rather than let it wrap.
+             */
+            int64_t cand = base_ms + state->ts_corr_ms;
+            if (cand < 0) {
+                cand = 0;
+            } else if (cand > (int64_t)UINT32_MAX) {
+                cand = (int64_t)UINT32_MAX;
+            }
+
+            int64_t last_out = state->last_out_ts_ms;
+            int64_t forward = cand - last_out;
+            if (forward > TS_MAX_FORWARD_MS) {
+                int64_t step = state->last_sane_interval_ms;
+                if (step > TS_MAX_FORWARD_MS) {
+                    step = TS_MAX_FORWARD_MS;
+                } else if (step < TS_SANE_MIN_MS) {
+                    step = TS_SANE_MIN_MS;
+                }
+                int64_t clamped = last_out + step;
+                if (clamped > (int64_t)UINT32_MAX) {
+                    clamped = (int64_t)UINT32_MAX;
+                }
+                /* Carry the swallowed gap so the frames after the stall continue
+                 * from the clamped value instead of snapping back to raw time. */
+                state->ts_corr_ms += clamped - cand;
+                log_warn("event=timestamp_forward_clamp stream=%u raw_ts=%u cand=%lld out=%lld step=%lld corr_ms=%lld diag_monotonic_ms=%llu",
+                         state->stream_id,
+                         raw_timestamp_ms,
+                         (long long)cand,
+                         (long long)clamped,
+                         (long long)step,
+                         (long long)state->ts_corr_ms,
+                         (unsigned long long)diag_monotonic_ms());
+                cand = clamped;
+            } else if (forward >= TS_SANE_MIN_MS && forward <= TS_SANE_MAX_MS) {
+                state->last_sane_interval_ms = forward;
+            }
+            timestamp_ms = (uint32_t)cand;
         }
+
+        state->last_raw_ts_ms = (int64_t)raw_timestamp_ms;
+        state->last_out_ts_ms = (int64_t)timestamp_ms;
 
         log_debug("event=timestamp_normalize stream=%u raw_ts=%u normalized_ts=%u seq_no=%u diag_monotonic_ms=%llu",
                   state->stream_id,
@@ -513,6 +575,10 @@ int handle_venc_start_push(int fd, const uint8_t *req, uint32_t req_len)
     /* Reset timestamp normalization state on push start */
     state->timestamp_initialized = 0;
     state->first_timestamp_ms = 0;
+    state->last_raw_ts_ms = 0;
+    state->last_out_ts_ms = 0;
+    state->last_sane_interval_ms = 66;
+    state->ts_corr_ms = 0;
 
     /* Reset ring buffer if this is the first push activation (both slots
      * were inactive).  Clears stale sequences/flags from a previous session
