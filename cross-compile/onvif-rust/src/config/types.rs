@@ -637,8 +637,9 @@ impl Default for NightConfig {
             day_threshold: 1100,
             night_threshold: 300,
             lock_time_ms: 900_000,
-            ae_day_threshold: 80,
-            ae_night_threshold: 40,
+            // Calibrated on .198 (2026-08-04): room≈34, dark-box≈0..1.
+            ae_day_threshold: 28,
+            ae_night_threshold: 8,
         }
     }
 }
@@ -1013,7 +1014,7 @@ file_name = "static"
     #[test]
     fn test_night_config_ae_thresholds_default() {
         let cfg = NightConfig::default();
-        assert_eq!(cfg.ae_day_threshold, 80);
-        assert_eq!(cfg.ae_night_threshold, 40);
+        assert_eq!(cfg.ae_day_threshold, 28);
+        assert_eq!(cfg.ae_night_threshold, 8);
     }
 }

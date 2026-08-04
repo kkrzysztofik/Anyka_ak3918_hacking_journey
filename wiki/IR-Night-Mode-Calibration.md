@@ -11,16 +11,21 @@ Config lives under `[imaging.night]` in
 
 ## Why calibrate
 
+AUTO prefers ISP AE `current_calc_avg_lumi` (`ae_*_threshold`). After three
+consecutive AE read failures it falls back to `ain0` (`day_threshold` /
+`night_threshold`).
+
 `ain0` is a board-specific ADC reading from the light sensor (LDR). It is **not**
 behind the camera optics — covering only the lens barely moves the value. Put
-the whole front of the camera in a dark box (or cup) for the night sample.
+the whole front of the camera in a dark box (or cup) for the night sample. AE
+luma *does* follow the lens, so a dark box over the optics is enough for AE.
 
-With `ldr_high_is_day = true`:
+With high = day (AE always; `ain0` when `ldr_high_is_day = true`):
 
 | Condition | Meaning |
 |---|---|
-| `ain0 >= day_threshold` | Day |
-| `ain0 <= night_threshold` | Night |
+| value `>= *_day_threshold` | Day |
+| value `<= *_night_threshold` | Night |
 | otherwise | Indeterminate — hold last mode |
 
 Leave a gap between the two thresholds for hysteresis. `lock_time_ms` blocks
@@ -47,6 +52,26 @@ trusting two-line pulse behaviour.
 
 ## Measure thresholds
 
+### AE luma (preferred)
+
+With a temporary `tracing::info!(luma, "AE luma sample")` in `night_mode::tick`
+(or console logging enabled), cover/uncover and read `/mnt/logs/onvif.log`.
+
+Set:
+
+- `ae_day_threshold` slightly **below** the bright reading
+- `ae_night_threshold` slightly **above** the dark reading
+
+Example from the lab board (`192.168.2.198`, 2026-08-04):
+
+| Sample | AE luma |
+|---|---|
+| Dark box (lens covered) | ≈0..1 |
+| Room uncovered | ≈34 |
+| Shipped thresholds | `ae_day_threshold = 28`, `ae_night_threshold = 8` |
+
+### ain0 (fallback)
+
 ```sh
 # Room light (uncovered):
 cat /sys/kernel/ain/ain0
@@ -55,12 +80,9 @@ cat /sys/kernel/ain/ain0
 cat /sys/kernel/ain/ain0
 ```
 
-Set:
+Set `day_threshold` / `night_threshold` the same way (below bright / above dark).
 
-- `day_threshold` slightly **below** the bright reading
-- `night_threshold` slightly **above** the dark reading
-
-Example from the lab board (`192.168.2.198`, 2026-08-02):
+Example (`192.168.2.198`, 2026-08-02):
 
 | Sample | `ain0` |
 |---|---|
@@ -78,6 +100,8 @@ ircut_high_is_night = true
 day_threshold = 662
 night_threshold = 652
 lock_time_ms = 900000
+ae_day_threshold = 28
+ae_night_threshold = 8
 ```
 
 Restart `onvif-rust` after changing config (`killall onvif-rust.bin`;
@@ -109,11 +133,11 @@ night mode.
 2. Dark-box the camera → within a few poll intervals (`~2 s`), expect exactly one
    transition to night (`IR_LED = 1`).
 3. Uncover → no transition until `lock_time_ms` elapses, then day (`IR_LED = 0`)
-   once `ain0 >= day_threshold`.
+   once AE luma `>= ae_day_threshold` (or `ain0 >= day_threshold` on fallback).
 
 If uncover stays in the indeterminate band, ambient light is too close to the
-dark reading — widen the gap or retune. The lab board’s ADC span is only ~20
-counts; evening vs afternoon room light already shifts the bright sample.
+dark reading — widen the gap or retune. The lab board’s `ain0` span is only ~20
+counts; AE luma has a wider dark/room gap (~1 vs ~34) on the same board.
 
 ## Auxiliary lamps
 

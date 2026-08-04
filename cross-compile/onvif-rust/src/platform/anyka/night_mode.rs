@@ -413,6 +413,9 @@ impl NightModeController {
                 if n < AE_FAIL_STREAK_MAX {
                     return;
                 }
+                if n == AE_FAIL_STREAK_MAX {
+                    tracing::warn!(streak = n, "AE luma unavailable; falling back to ain0");
+                }
                 let Some(raw) = read_light_sensor(&self.paths) else {
                     return;
                 };
@@ -684,7 +687,8 @@ mod tests {
         std::fs::write(paths.light_sensor(), "1500").unwrap();
 
         let mut ffi = MockImagingHalTrait::new();
-        ffi.expect_get_ae_luma().times(1).returning(|| Some(10));
+        // Below ae_night_threshold (8); ain0=1500 would otherwise be day.
+        ffi.expect_get_ae_luma().times(1).returning(|| Some(1));
         ffi.expect_set_ir_filter()
             .withf(|enabled| *enabled)
             .times(1)
