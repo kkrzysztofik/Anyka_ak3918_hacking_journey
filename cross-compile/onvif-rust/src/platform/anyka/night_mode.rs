@@ -268,6 +268,9 @@ pub(super) fn read_light_sensor(paths: &NodePaths) -> Option<i32> {
 /// AUTO poll interval. Fixed: lock_time dominates responsiveness.
 pub(crate) const POLL_INTERVAL: Duration = Duration::from_secs(2);
 
+/// Consecutive AE read failures before falling back to `ain0`.
+const AE_FAIL_STREAK_MAX: u32 = 3;
+
 /// Owns the night-mode state and serialises every transition.
 pub(crate) struct NightModeController {
     paths: NodePaths,
@@ -279,6 +282,8 @@ pub(crate) struct NightModeController {
     configured: crate::onvif::types::common::IrCutFilterMode,
     /// When true, [`Self::tick`] may transition; cleared by forced ON/OFF.
     auto_enabled: std::sync::atomic::AtomicBool,
+    /// Consecutive `get_ae_luma` failures; resets on success.
+    ae_fail_streak: std::sync::atomic::AtomicU32,
 }
 
 impl NightModeController {
@@ -307,6 +312,7 @@ impl NightModeController {
             })),
             configured: mode,
             auto_enabled: std::sync::atomic::AtomicBool::new(matches!(mode, IrCutFilterMode::AUTO)),
+            ae_fail_streak: std::sync::atomic::AtomicU32::new(0),
         }
     }
 
@@ -381,22 +387,46 @@ impl NightModeController {
         }
     }
 
-    /// One AUTO poll: read, classify, decide, maybe apply.
+    /// One AUTO poll: prefer AE luma, fall back to `ain0` after streak failures.
     pub(crate) async fn tick(&self) {
-        if !self.auto_enabled.load(std::sync::atomic::Ordering::SeqCst) {
+        use std::sync::atomic::Ordering;
+
+        if !self.auto_enabled.load(Ordering::SeqCst) {
             return;
         }
-        let Some(raw) = read_light_sensor(&self.paths) else {
-            return; // hold current mode
+
+        let reading = match self.ffi.get_ae_luma().await {
+            Some(luma) => {
+                self.ae_fail_streak.store(0, Ordering::SeqCst);
+                classify(
+                    i32::from(luma),
+                    Thresholds {
+                        day: self.cfg.ae_day_threshold,
+                        night: self.cfg.ae_night_threshold,
+                        // AE high = bright = day.
+                        ldr_high_is_day: true,
+                    },
+                )
+            }
+            None => {
+                let n = self.ae_fail_streak.fetch_add(1, Ordering::SeqCst) + 1;
+                if n < AE_FAIL_STREAK_MAX {
+                    return;
+                }
+                let Some(raw) = read_light_sensor(&self.paths) else {
+                    return;
+                };
+                classify(
+                    raw,
+                    Thresholds {
+                        day: self.cfg.day_threshold,
+                        night: self.cfg.night_threshold,
+                        ldr_high_is_day: self.cfg.ldr_high_is_day,
+                    },
+                )
+            }
         };
-        let reading = classify(
-            raw,
-            Thresholds {
-                day: self.cfg.day_threshold,
-                night: self.cfg.night_threshold,
-                ldr_high_is_day: self.cfg.ldr_high_is_day,
-            },
-        );
+
         let target = {
             let state = self.state.lock().await;
             decide(
@@ -542,6 +572,20 @@ mod tests {
         crate::config::types::NightConfig::default()
     }
 
+    /// AUTO tests need zero lock so a settled reading can switch immediately.
+    fn unlocked_config() -> crate::config::types::NightConfig {
+        crate::config::types::NightConfig {
+            lock_time_ms: 0,
+            ..Default::default()
+        }
+    }
+
+    fn seed_gpio_nodes(paths: &NodePaths) {
+        for n in [Node::IrCutA, Node::IrCutB, Node::IrLed] {
+            std::fs::write(paths.node(n), "9").unwrap();
+        }
+    }
+
     #[tokio::test]
     async fn test_apply_night_calls_isp_switch_and_writes_gpios() {
         use crate::hal::common::imaging::MockImagingHalTrait;
@@ -626,6 +670,109 @@ mod tests {
         // The AUTO loop must not undo a configured forced mode.
         ctl.tick().await;
         assert_eq!(ctl.current_mode().await, DayNight::Night);
+    }
+
+    #[tokio::test]
+    async fn test_tick_uses_ae_luma_when_available() {
+        use crate::hal::common::imaging::MockImagingHalTrait;
+        use crate::onvif::types::common::IrCutFilterMode;
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let paths = NodePaths::rooted(dir.path(), dir.path());
+        seed_gpio_nodes(&paths);
+        // ain0 bright enough to be day — AE must win with night luma.
+        std::fs::write(paths.light_sensor(), "1500").unwrap();
+
+        let mut ffi = MockImagingHalTrait::new();
+        ffi.expect_get_ae_luma().times(1).returning(|| Some(10));
+        ffi.expect_set_ir_filter()
+            .withf(|enabled| *enabled)
+            .times(1)
+            .returning(|_| 0);
+
+        let ctl = NightModeController::new(
+            paths,
+            unlocked_config(),
+            std::sync::Arc::new(ffi),
+            IrCutFilterMode::AUTO,
+        );
+        assert_eq!(ctl.current_mode().await, DayNight::Day);
+
+        ctl.tick().await;
+        assert_eq!(ctl.current_mode().await, DayNight::Night);
+    }
+
+    #[tokio::test]
+    async fn test_tick_falls_back_to_ain0_after_three_ae_failures() {
+        use crate::hal::common::imaging::MockImagingHalTrait;
+        use crate::onvif::types::common::IrCutFilterMode;
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let paths = NodePaths::rooted(dir.path(), dir.path());
+        seed_gpio_nodes(&paths);
+        std::fs::write(paths.light_sensor(), "100").unwrap();
+
+        let mut ffi = MockImagingHalTrait::new();
+        ffi.expect_get_ae_luma().times(3).returning(|| None);
+        ffi.expect_set_ir_filter()
+            .withf(|enabled| *enabled)
+            .times(1)
+            .returning(|_| 0);
+
+        let ctl = NightModeController::new(
+            paths,
+            unlocked_config(),
+            std::sync::Arc::new(ffi),
+            IrCutFilterMode::AUTO,
+        );
+
+        ctl.tick().await;
+        assert_eq!(ctl.current_mode().await, DayNight::Day);
+        ctl.tick().await;
+        assert_eq!(ctl.current_mode().await, DayNight::Day);
+        ctl.tick().await;
+        assert_eq!(ctl.current_mode().await, DayNight::Night);
+    }
+
+    #[tokio::test]
+    async fn test_tick_clears_streak_on_ae_success() {
+        use crate::hal::common::imaging::MockImagingHalTrait;
+        use crate::onvif::types::common::IrCutFilterMode;
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let paths = NodePaths::rooted(dir.path(), dir.path());
+        seed_gpio_nodes(&paths);
+        // ain0 dark — would force night if streak reached fallback.
+        std::fs::write(paths.light_sensor(), "100").unwrap();
+
+        let mut ffi = MockImagingHalTrait::new();
+        ffi.expect_get_ae_luma()
+            .times(3)
+            .returning({
+                let mut calls = 0u8;
+                move || {
+                    calls += 1;
+                    if calls < 3 {
+                        None
+                    } else {
+                        Some(100) // bright AE → day
+                    }
+                }
+            });
+        // Must not apply night via ain0 fallback.
+        ffi.expect_set_ir_filter().times(0);
+
+        let ctl = NightModeController::new(
+            paths,
+            unlocked_config(),
+            std::sync::Arc::new(ffi),
+            IrCutFilterMode::AUTO,
+        );
+
+        ctl.tick().await;
+        ctl.tick().await;
+        ctl.tick().await;
+        assert_eq!(ctl.current_mode().await, DayNight::Day);
     }
 
     #[test]
