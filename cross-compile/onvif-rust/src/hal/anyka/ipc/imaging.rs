@@ -12,8 +12,8 @@ use crate::hal::common::AK_FAILED_I32;
 use crate::hal::common::imaging::ImagingHalTrait;
 
 use super::{
-    AnykaIpc, CMD_ISP_SET_BRIGHTNESS, CMD_ISP_SET_CONTRAST, CMD_ISP_SET_IR_FILTER,
-    CMD_ISP_SET_SATURATION, CMD_ISP_SET_SHARPNESS, CMD_ISP_SET_WDR,
+    AnykaIpc, CMD_ISP_GET_AE_LUMA, CMD_ISP_SET_BRIGHTNESS, CMD_ISP_SET_CONTRAST,
+    CMD_ISP_SET_IR_FILTER, CMD_ISP_SET_SATURATION, CMD_ISP_SET_SHARPNESS, CMD_ISP_SET_WDR,
 };
 
 #[async_trait]
@@ -86,9 +86,15 @@ impl ImagingHalTrait for AnykaIpc {
         }
     }
 
-    // Placeholder until Task 4 wires CMD_ISP_GET_AE_LUMA.
     async fn get_ae_luma(&self) -> Option<u8> {
-        None
+        match self.request_async(CMD_ISP_GET_AE_LUMA, &[]).await {
+            Ok((status, data)) if status == 0 && !data.is_empty() => Some(data[0]),
+            Ok(_) => None,
+            Err(e) => {
+                error!(error = %e, "get_ae_luma IPC failed");
+                None
+            }
+        }
     }
 }
 
@@ -99,6 +105,29 @@ mod tests {
     use crate::hal::common::AK_SUCCESS_I32;
     use std::sync::Arc;
     use std::time::{Duration, Instant};
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_get_ae_luma_roundtrip() {
+        let daemon = FakeDaemon::start(|cmd_id, req| {
+            assert_eq!(cmd_id, CMD_ISP_GET_AE_LUMA);
+            assert!(req.is_empty());
+            (AK_SUCCESS_I32, vec![42u8])
+        });
+        let ipc = AnykaIpc::new_with_path(&daemon.socket_path).unwrap();
+        ipc.set_epochs_for_test(1, 1);
+        assert_eq!(
+            <AnykaIpc as ImagingHalTrait>::get_ae_luma(&ipc).await,
+            Some(42)
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_get_ae_luma_error_is_none() {
+        let daemon = FakeDaemon::start(|_c, _r| (crate::hal::common::AK_FAILED_I32, vec![]));
+        let ipc = AnykaIpc::new_with_path(&daemon.socket_path).unwrap();
+        ipc.set_epochs_for_test(1, 1);
+        assert_eq!(<AnykaIpc as ImagingHalTrait>::get_ae_luma(&ipc).await, None);
+    }
 
     /// set_brightness round-trips correctly through the fake daemon.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
