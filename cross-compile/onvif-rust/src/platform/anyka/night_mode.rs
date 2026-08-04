@@ -746,19 +746,17 @@ mod tests {
         std::fs::write(paths.light_sensor(), "100").unwrap();
 
         let mut ffi = MockImagingHalTrait::new();
-        ffi.expect_get_ae_luma()
-            .times(3)
-            .returning({
-                let mut calls = 0u8;
-                move || {
-                    calls += 1;
-                    if calls < 3 {
-                        None
-                    } else {
-                        Some(100) // bright AE → day
-                    }
+        ffi.expect_get_ae_luma().times(3).returning({
+            let mut calls = 0u8;
+            move || {
+                calls += 1;
+                if calls < 3 {
+                    None
+                } else {
+                    Some(100) // bright AE → day
                 }
-            });
+            }
+        });
         // Must not apply night via ain0 fallback.
         ffi.expect_set_ir_filter().times(0);
 
