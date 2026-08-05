@@ -22,7 +22,7 @@ use crate::config::{
     ConfigPersistenceHandle, ConfigPersistenceService, ConfigRuntime, ConfigStorage, PendingWrite,
     PersistenceHandle, PersistenceService, ProfileStorage,
 };
-use crate::config::{PasswordManager, UserStorage};
+use crate::config::{PasswordManager, UserLoadStatus, UserStorage};
 use crate::lifecycle::health::{ComponentHealth, HealthStatus};
 use crate::lifecycle::shutdown::{DEFAULT_SHUTDOWN_TIMEOUT, ShutdownCoordinator};
 use crate::lifecycle::startup::{StartupPhase, StartupProgress};
@@ -746,10 +746,19 @@ impl Application {
             .unwrap_or(std::path::Path::new("/etc/onvif"))
             .join("users.toml");
         if users_path.exists() {
-            if let Err(e) = user_storage.load_from_toml(&users_path) {
-                tracing::warn!("Failed to load users from {}: {}", users_path.display(), e);
-            } else {
-                tracing::info!("Loaded users from {}", users_path.display());
+            match user_storage.load_from_toml(&users_path) {
+                Ok(()) => {
+                    tracing::info!("Loaded users from {}", users_path.display());
+                    user_storage.set_load_status(if user_storage.is_empty() {
+                        UserLoadStatus::Empty
+                    } else {
+                        UserLoadStatus::Loaded
+                    });
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to load users from {}: {}", users_path.display(), e);
+                    user_storage.set_load_status(UserLoadStatus::LoadFailed(e.to_string()));
+                }
             }
         } else {
             // Said nothing at all before. A missing file leaves UserStorage
@@ -761,6 +770,7 @@ impl Application {
                 "no users file; ONVIF and streaming authentication have no accounts. \
                  RTSP and HTTP-FLV will not start while server.auth_enabled = true"
             );
+            user_storage.set_load_status(UserLoadStatus::Missing);
         }
 
         let user_persistence_storage = Arc::clone(&user_storage);
@@ -1332,13 +1342,27 @@ impl Application {
         }
 
         if app_state.user_storage().is_empty() {
-            anyhow::bail!(
-                "streaming authentication is enabled but UserStorage is empty, so RTSP and \
-                 HTTP-FLV will not start. Either no users.toml exists next to config.toml, or \
-                 it exists but is empty or failed to load (see the 'Failed to load users from' \
-                 warning at startup). Add an Administrator entry and restart, or set \
-                 server.auth_enabled = false to stream without authentication."
-            );
+            // Name the actual cause: a missing file, a malformed file, or a
+            // valid-but-empty file all need different operator action.
+            let message = match app_state.user_storage().load_status() {
+                UserLoadStatus::Missing => anyhow::anyhow!(
+                    "streaming authentication is enabled but no users.toml exists next to \
+                     config.toml, so RTSP and HTTP-FLV will not start. Create a users.toml with \
+                     an Administrator entry, or set server.auth_enabled = false to stream \
+                     without authentication."
+                ),
+                UserLoadStatus::LoadFailed(e) => anyhow::anyhow!(
+                    "streaming authentication is enabled but users.toml failed to load: {e}, so \
+                     RTSP and HTTP-FLV will not start. Fix the file, or set \
+                     server.auth_enabled = false to stream without authentication."
+                ),
+                _ => anyhow::anyhow!(
+                    "streaming authentication is enabled but users.toml contains no accounts, so \
+                     RTSP and HTTP-FLV will not start. Add an Administrator entry, or set \
+                     server.auth_enabled = false to stream without authentication."
+                ),
+            };
+            return Err(message);
         }
 
         let validator_storage = Arc::clone(app_state.user_storage());

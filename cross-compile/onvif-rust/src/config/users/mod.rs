@@ -289,9 +289,29 @@ struct UsersFile {
 ///     println!("{}: {}", user.username, user.level);
 /// }
 /// ```
+/// How the users file loaded at startup. Set by the caller that owns the file
+/// path (`wire_user_persistence`); read when streaming auth reports an empty
+/// user set so the operator is told the actual cause, not a guess.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum UserLoadStatus {
+    /// No load attempt yet (fresh storage, e.g. unit tests).
+    #[default]
+    NotLoaded,
+    /// The file exists, parsed, and at least one account is present.
+    Loaded,
+    /// No users.toml was found next to config.toml.
+    Missing,
+    /// The file exists and parsed, but contained no accounts.
+    Empty,
+    /// The file exists but failed to parse or read.
+    LoadFailed(String),
+}
+
 pub struct UserStorage {
     /// In-memory user storage.
     users: RwLock<HashMap<String, UserAccount>>,
+    /// How the users file loaded at startup; see [`UserLoadStatus`].
+    load_status: RwLock<UserLoadStatus>,
     /// Optional debounced, off-executor persistence handle.
     ///
     /// Set once during application startup via [`Self::set_persistence`]. When
@@ -305,6 +325,7 @@ impl UserStorage {
     pub fn new() -> Self {
         Self {
             users: RwLock::new(HashMap::with_capacity(MAX_USERS)),
+            load_status: RwLock::new(UserLoadStatus::NotLoaded),
             persistence: OnceLock::new(),
         }
     }
@@ -313,8 +334,19 @@ impl UserStorage {
     pub fn with_file(_file_path: impl Into<String>) -> Self {
         Self {
             users: RwLock::new(HashMap::with_capacity(MAX_USERS)),
+            load_status: RwLock::new(UserLoadStatus::NotLoaded),
             persistence: OnceLock::new(),
         }
+    }
+
+    /// Record how the users file loaded at startup.
+    pub fn set_load_status(&self, status: UserLoadStatus) {
+        *self.load_status.write() = status;
+    }
+
+    /// How the users file loaded at startup; see [`UserLoadStatus`].
+    pub fn load_status(&self) -> UserLoadStatus {
+        self.load_status.read().clone()
     }
 
     /// Attach a debounced persistence handle.

@@ -136,8 +136,17 @@ night mode.
    once AE luma `>= ae_day_threshold` (or `ain0 >= day_threshold` on fallback).
 
 If uncover stays in the indeterminate band, ambient light is too close to the
-dark reading — widen the gap or retune. The lab board’s `ain0` span is only ~20
-counts; AE luma has a wider dark/room gap (~1 vs ~34) on the same board.
+dark reading. Do **not** widen the threshold gap — that only makes the
+indeterminate band wider and the reading stays stuck. Instead lower the
+relevant `*_day_threshold` to just below the measured uncovered value so the
+reading classifies as Day, keeping `*_night_threshold` above the dark reading
+(or retune both thresholds together).
+
+- `ain0` fallback: lower `day_threshold` below the uncovered `ain0` reading.
+- AE luma: lower `ae_day_threshold` below the uncovered luma reading.
+
+The lab board’s `ain0` span is only ~20 counts; AE luma has a wider dark/room
+gap (~1 vs ~34) on the same board.
 
 ## Auxiliary lamps
 

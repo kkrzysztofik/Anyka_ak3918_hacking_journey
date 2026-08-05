@@ -47,5 +47,6 @@ pub use runtime::*;
 pub use storage::*;
 pub use types::AppConfig;
 pub use users::{
-    MAX_USERS, PasswordError, PasswordManager, UserAccount, UserError, UserLevel, UserStorage,
+    MAX_USERS, PasswordError, PasswordManager, UserAccount, UserError, UserLevel, UserLoadStatus,
+    UserStorage,
 };
