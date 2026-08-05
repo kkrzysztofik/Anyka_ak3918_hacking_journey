@@ -186,7 +186,6 @@ pub fn generate_av_sdp(
     if let Some(fps) = video_framerate {
         sdp.push_str(&format!("a=framerate:{:.1}\r\n", fps));
     }
-    sdp.push_str("a=sendonly\r\n");
 
     if let Some(config) = audio_config {
         let channels = audio_channels_from_config(config);
@@ -202,7 +201,6 @@ pub fn generate_av_sdp(
             config_hex
         ));
         sdp.push_str("a=control:trackID=1\r\n");
-        sdp.push_str("a=sendonly\r\n");
     }
 
     sdp
@@ -322,6 +320,30 @@ mod tests {
         let sdp = generate_av_sdp(&sps, &pps, None, 48000, None);
 
         assert!(!sdp.contains("a=framerate"));
+    }
+
+    /// go2rtc only normalises media direction to `recvonly` when the SDP omits
+    /// the attribute entirely (`pkg/rtsp/helpers.go:94-97`). Any explicit
+    /// direction survives, and go2rtc then treats the track as a backchannel and
+    /// drops it — leaving Frigate with "codecs not matched:  => video:ANY".
+    /// RFC 4566 §6 defaults an absent direction to `sendrecv`, which every RTSP
+    /// client already reads as "the server sends media", so emitting nothing is
+    /// both the compatible and the correct choice.
+    #[test]
+    fn test_generate_av_sdp_omits_direction_attribute() {
+        let sps = vec![0x67, 0x42, 0x00, 0x1e];
+        let pps = vec![0x68, 0xce, 0x06, 0xe2];
+        let audio_config = vec![0x12, 0x10];
+
+        // With audio, so both the video and the audio media section are covered.
+        let sdp = generate_av_sdp(&sps, &pps, Some(&audio_config), 48000, Some(15.0));
+
+        for direction in ["sendonly", "recvonly", "sendrecv", "inactive"] {
+            assert!(
+                !sdp.contains(direction),
+                "SDP must carry no direction attribute, found {direction}:\n{sdp}"
+            );
+        }
     }
 
     #[test]
