@@ -1188,6 +1188,51 @@ fn is_transient_join_error(e: &io::Error) -> bool {
     )
 }
 
+/// Drive a multicast-join retry loop with a hard deadline.
+///
+/// Returns `Ok(attempts)` on success. A permanent failure (per `is_transient`)
+/// or an exhausted `budget` returns `Err` with the offending join error. The
+/// sleep between attempts is capped to the remaining budget so the next attempt
+/// never starts after the deadline.
+async fn retry_multicast_join<F>(
+    mut join: F,
+    is_transient: impl Fn(&io::Error) -> bool,
+    budget: Duration,
+    interval: Duration,
+) -> Result<u32, io::Error>
+where
+    F: FnMut() -> io::Result<()>,
+{
+    let started = std::time::Instant::now();
+    let mut attempts: u32 = 0;
+    loop {
+        attempts += 1;
+        match join() {
+            Ok(()) => return Ok(attempts),
+            Err(e) => {
+                if !is_transient(&e) {
+                    return Err(e);
+                }
+                // Budget exhausted: stop before the next attempt rather than
+                // sleeping past the deadline and trying once more.
+                let remaining = budget.saturating_sub(started.elapsed());
+                if remaining.is_zero() {
+                    return Err(e);
+                }
+                // Only the first one, or a slow boot prints 30 identical lines.
+                if attempts == 1 {
+                    warn!(
+                        error = %e,
+                        budget_secs = budget.as_secs(),
+                        "no route to the multicast group yet; retrying"
+                    );
+                }
+                tokio::time::sleep(interval.min(remaining)).await;
+            }
+        }
+    }
+}
+
 /// Create a UDP socket configured for multicast reception
 async fn create_multicast_socket() -> Result<UdpSocket, DiscoveryError> {
     debug!("Creating multicast socket for WS-Discovery");
@@ -1210,28 +1255,17 @@ async fn create_multicast_socket() -> Result<UdpSocket, DiscoveryError> {
         "Joining multicast group"
     );
     let started = std::time::Instant::now();
-    let mut attempts: u32 = 0;
-    loop {
-        attempts += 1;
-        match socket.join_multicast_v4(&WS_DISCOVERY_MULTICAST, &Ipv4Addr::UNSPECIFIED) {
-            Ok(()) => break,
-            Err(e) => {
-                if !is_transient_join_error(&e) || started.elapsed() >= MULTICAST_JOIN_RETRY_BUDGET
-                {
-                    return Err(DiscoveryError::MulticastJoin(e));
-                }
-                // Only the first one, or a slow boot prints 30 identical lines.
-                if attempts == 1 {
-                    warn!(
-                        error = %e,
-                        budget_secs = MULTICAST_JOIN_RETRY_BUDGET.as_secs(),
-                        "no route to the multicast group yet; retrying"
-                    );
-                }
-                tokio::time::sleep(MULTICAST_JOIN_RETRY_INTERVAL).await;
-            }
-        }
-    }
+    let attempts = match retry_multicast_join(
+        || socket.join_multicast_v4(&WS_DISCOVERY_MULTICAST, &Ipv4Addr::UNSPECIFIED),
+        is_transient_join_error,
+        MULTICAST_JOIN_RETRY_BUDGET,
+        MULTICAST_JOIN_RETRY_INTERVAL,
+    )
+    .await
+    {
+        Ok(attempts) => attempts,
+        Err(e) => return Err(DiscoveryError::MulticastJoin(e)),
+    };
     if attempts > 1 {
         info!(
             attempts,
@@ -1367,6 +1401,62 @@ mod tests {
         }
         // No errno at all: must not spin either.
         assert!(!is_transient_join_error(&io::Error::other("synthetic")));
+    }
+
+    #[tokio::test]
+    async fn test_retry_multicast_join_transient_then_success() {
+        let mut calls = 0;
+        let attempts = retry_multicast_join(
+            || {
+                calls += 1;
+                if calls == 1 {
+                    Err(io::Error::from_raw_os_error(libc::ENETUNREACH))
+                } else {
+                    Ok(())
+                }
+            },
+            is_transient_join_error,
+            Duration::from_secs(5),
+            Duration::from_millis(1),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(attempts, 2, "one transient failure then a success");
+    }
+
+    #[tokio::test]
+    async fn test_retry_multicast_join_permanent_failure_fails_fast() {
+        let result = retry_multicast_join(
+            || Err(io::Error::from_raw_os_error(libc::EINVAL)),
+            is_transient_join_error,
+            Duration::from_secs(5),
+            Duration::from_millis(1),
+        )
+        .await;
+
+        assert!(result.is_err(), "a permanent error must not be retried");
+    }
+
+    #[tokio::test]
+    async fn test_retry_multicast_join_budget_exhausted_stops() {
+        let started = std::time::Instant::now();
+        let result = retry_multicast_join(
+            || Err(io::Error::from_raw_os_error(libc::ENETUNREACH)),
+            is_transient_join_error,
+            Duration::from_millis(5),
+            Duration::from_secs(1),
+        )
+        .await;
+
+        assert!(result.is_err(), "an exhausted budget must give up");
+        // The retry sleep must be capped to the remaining budget: with a 1s
+        // interval but a 5ms budget, the loop gives up in milliseconds, not
+        // after sleeping the full interval.
+        assert!(
+            started.elapsed() < Duration::from_millis(500),
+            "retry loop slept past the deadline"
+        );
     }
 
     // =========================================================================

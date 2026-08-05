@@ -104,12 +104,12 @@ impl AnykaImagingControl {
         Self {
             ffi,
             settings: RwLock::new(ImagingSettings {
-                brightness: 50.0,
-                contrast: 50.0,
-                saturation: 50.0,
-                sharpness: 50.0,
+                brightness: cfg.brightness as f32,
+                contrast: cfg.contrast as f32,
+                saturation: cfg.saturation as f32,
+                sharpness: cfg.sharpness as f32,
                 ir_cut_filter: cfg.ir_cut_filter,
-                ir_led: false,
+                ir_led: cfg.ir_led,
                 wdr: false,
                 backlight_compensation: false,
             }),
@@ -324,6 +324,7 @@ impl ImagingControl for AnykaImagingControl {
         self.night.set_auto_enabled(false);
         self.night
             .write_lamp(Node::IrLed, on)
+            .await
             .map_err(|e| crate::platform::common::PlatformError::HardwareFailure(e.to_string()))?;
 
         // AUTO no longer owns the filter, so reporting AUTO would be a lie.
@@ -343,6 +344,7 @@ impl ImagingControl for AnykaImagingControl {
         use super::night_mode::Node;
         self.night
             .write_lamp(Node::WhiteLed, on)
+            .await
             .map_err(|e| crate::platform::common::PlatformError::HardwareFailure(e.to_string()))
     }
 
@@ -385,6 +387,30 @@ mod tests {
         assert!(!options.ir_cut_filter_supported);
         assert!(!options.ir_led_supported);
         assert!(!options.white_light_supported);
+    }
+
+    #[tokio::test]
+    async fn test_get_options_reports_ir_supported_when_nodes_are_present() {
+        use crate::hal::common::imaging::MockImagingHalTrait;
+        use crate::platform::anyka::night_mode::{Node, NodePaths};
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let paths = NodePaths::rooted(dir.path(), dir.path());
+        for n in [Node::IrCutA, Node::IrCutB, Node::IrLed, Node::WhiteLed] {
+            std::fs::write(paths.node(n), "0").unwrap();
+        }
+
+        let control = AnykaImagingControl::with_ffi_and_paths(
+            Arc::new(MockImagingHalTrait::new()),
+            paths,
+            crate::config::types::ImagingConfig::default(),
+        );
+
+        let options = control.get_options().await.unwrap();
+
+        assert!(options.ir_cut_filter_supported);
+        assert!(options.ir_led_supported);
+        assert!(options.white_light_supported);
     }
 
     #[tokio::test]

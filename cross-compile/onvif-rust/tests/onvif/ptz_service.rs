@@ -76,7 +76,7 @@ async fn test_get_nodes_has_supported_spaces() {
 }
 
 #[tokio::test]
-async fn test_get_node_by_token() {
+async fn test_get_node_valid_token_returns_matching_node() {
     let service = create_test_service();
 
     // First get all nodes

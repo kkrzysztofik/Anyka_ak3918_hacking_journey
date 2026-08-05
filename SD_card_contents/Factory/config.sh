@@ -47,8 +47,14 @@ BAK=${ANYKA_CONFIG_BAK:-/mnt/Factory/config.sh.gerge.bak}
   "$WIFI_MANAGE" start
   sleep 60
   ifconfig wlan0 | grep -q "inet addr" && exit 0
-  [ -f "$BAK" ] && cp "$BAK" "$SELF" && sync
-  reboot ) &
+  # Restore atomically (temp + rename) and reboot only when every step
+  # succeeds: a failed copy must not reboot into the unchanged broken wrapper.
+  RESTORE="${SELF}.restore.$$"
+  if [ -r "$BAK" ] && cp "$BAK" "$RESTORE" && sync && mv "$RESTORE" "$SELF" && sync; then
+    reboot
+  else
+    echo "anyka-init: vendor boot-path restore failed" >&2
+  fi ) &
 
 if [ ! -x "$BIN" ]; then
   echo "anyka-init: missing or non-executable $BIN" >&2

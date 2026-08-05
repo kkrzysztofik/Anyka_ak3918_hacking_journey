@@ -31,7 +31,7 @@ no C daemon test harness; no `set_ir_filter` VI-token fix in this design.
 
 ## Architecture
 
-```
+```text
 tick():
   luma = ffi.get_ae_luma()          # IPC → daemon → AE run info → u8
   if Some(luma):
@@ -63,7 +63,7 @@ VI handle (GPIO path already succeeds; ISP returns `-1`).
 
 ## Error handling
 
-```
+```text
 Some(luma) → streak = 0; AE classify
 None       → streak += 1; if streak < 3 hold; else ain0 path
 decide / lock / apply unchanged
@@ -102,6 +102,8 @@ one luma byte.
 
 ## Calibration note
 
-AE thresholds are board-specific (0–255). Measure on hardware before trusting
-AUTO. Keep ain0 thresholds for fallback; they remain fragile but better than
+AE thresholds are board-specific (0–255). Calibrated on .198 (2026-08-04):
+room≈34, dark-box≈0..1 → `ae_day_threshold = 28`, `ae_night_threshold = 8`;
+AUTO verified (dark-box → `IR_LED=1`, uncover → day after `lock_time_ms`).
+Keep ain0 thresholds for fallback; they remain fragile but better than
 nothing when AE is unavailable.

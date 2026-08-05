@@ -18,7 +18,7 @@ is broadcast.
 With `scan_ssid=1` (commit `1e3eb071`) association took **2 seconds** on `wext`,
 against a 45 s timeout it previously exhausted:
 
-```
+```text
 00:01:03 starting wpa_supplicant driver="wext"
 00:01:05 wpa_supplicant associated driver="wext"
 00:01:06 wifi up chip="ssv6355_ble" ssid="W11-CAM" addr="192.168.30.121"
@@ -144,7 +144,7 @@ of the cutover, and it is a phase-ordering issue, not a bug in `park()`.
 
 ### D1 — config.sh
 
-`.198`'s `config.sh` plus a deadman. Nothing else.
+`.198`'s `config.sh` plus a two-stage deadman. Nothing else.
 
 ```sh
 #!/bin/sh
@@ -153,10 +153,21 @@ telnetd -p 24 -l /bin/sh 2>/dev/null &
 BIN=/mnt/anyka_hack/anyka-init.bin
 [ -x "$BIN" ] || { echo "anyka-init: missing $BIN" >&2; exit 1; }
 
-# Deadman: .121 is jumphost-only and P1 parks before P2 brings wifi up (F4),
-# so a config error would strand it. Hand wifi back to the vendor instead.
+# Deadman, two stages: .121 is jumphost-only and P1 parks before P2 brings
+# wifi up (F4), so a config error would strand it. Stage one hands wifi back
+# to the vendor; if the link is still dead a minute later, stage two restores
+# the vendor boot path (atomically) and reboots into it.
 ( sleep 180
-  ifconfig wlan0 | grep -q "inet addr" || /usr/sbin/wifi_manage.sh start ) &
+  ifconfig wlan0 | grep -q "inet addr" && exit 0
+  /usr/sbin/wifi_manage.sh start
+  sleep 60
+  ifconfig wlan0 | grep -q "inet addr" && exit 0
+  RESTORE="${SELF}.restore.$$"
+  if [ -r "$BAK" ] && cp "$BAK" "$RESTORE" && sync && mv "$RESTORE" "$SELF" && sync; then
+    reboot
+  else
+    echo "anyka-init: vendor boot-path restore failed" >&2
+  fi ) &
 
 exec "$BIN"
 ```
@@ -231,10 +242,14 @@ Three tiers, cheapest first:
 
 1. **Before the swap** — power cycle. `config.sh` is untouched, the vendor stack
    returns. No card pull, no laptop.
-2. **After the swap, wifi lost** — the deadman fires at T+180 s and
+2. **After the swap, wifi lost** — the two-stage deadman fires at T+180 s and
    `wifi_manage.sh start` restores the link; telnet is already listening.
-3. **After the swap, hard failure** — pull the card, restore
-   `config.sh.gerge.bak`. On-site, and the only tier that requires it.
+3. **After the swap, hard failure** — if `wlan0` is still dead T+60 s after the
+   vendor retry, the deadman automatically restores `config.sh.gerge.bak` over
+   `config.sh` (atomic copy + rename) and reboots; the camera returns on the
+   vendor stack in ~5 minutes. If even that did not help, pull the card and
+   restore `config.sh.gerge.bak` by hand — on-site, and the only tier that
+   requires it.
 
 `[monitor] wifi_reboot_cap = 3` and `[supervisor] storm_guard_max_reboots = 3`
 bound any reboot loop. Safe mode forces `telnet = true` (`main.rs:58`) before

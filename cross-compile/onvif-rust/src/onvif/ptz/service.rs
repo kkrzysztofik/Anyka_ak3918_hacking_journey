@@ -364,13 +364,13 @@ impl PTZService {
     }
 
     async fn dispatch_auxiliary(&self, cmd: auxiliary::AuxCommand) -> OnvifResult<()> {
+        use crate::platform::common::PlatformError;
         use auxiliary::{AuxCommand, LampState};
 
         let Some(imaging) = self.imaging_control.as_ref() else {
-            return Err(OnvifError::InvalidArgVal {
-                subcode: "InvalidArgVal".to_string(),
-                reason: "Imaging control unavailable for auxiliary command".to_string(),
-            });
+            return Err(OnvifError::ActionNotSupported(
+                "Imaging control unavailable for auxiliary command".to_string(),
+            ));
         };
 
         let result = match cmd {
@@ -380,9 +380,16 @@ impl PTZService {
             AuxCommand::WhiteLight(on) => imaging.set_white_light(on).await,
         };
 
-        result.map_err(|e| OnvifError::InvalidArgVal {
-            subcode: "InvalidArgVal".to_string(),
-            reason: e.to_string(),
+        // Parsing failures (unrecognised auxiliary data) are the client's
+        // fault and stay InvalidArgVal upstream; execution failures belong to
+        // the backend, so map them to the matching ONVIF fault instead of
+        // blaming the client's arguments.
+        result.map_err(|e| match e {
+            PlatformError::NotSupported(_) | PlatformError::HardwareUnavailable(_) => {
+                OnvifError::ActionNotSupported(e.to_string())
+            }
+            PlatformError::HardwareFailure(_) => OnvifError::HardwareFailure(e.to_string()),
+            other => OnvifError::Internal(other.to_string()),
         })
     }
 }
@@ -594,6 +601,7 @@ mod tests {
         DEFAULT_CONFIG_TOKEN, DEFAULT_NODE_TOKEN, MAX_PRESETS, PTZSpeed, PTZVector, Vector1D,
         Vector2D,
     };
+    use crate::platform::MockImagingControl;
 
     fn create_test_service() -> PTZService {
         let state = Arc::new(PTZStateManager::new());
@@ -605,7 +613,7 @@ mod tests {
     // ========================================================================
 
     #[tokio::test]
-    async fn test_get_nodes() {
+    async fn test_get_nodes_default_capabilities_returns_node() {
         let service = create_test_service();
 
         let response = service.handle_get_nodes(GetNodes {}).await.unwrap();
@@ -616,7 +624,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_get_node() {
+    async fn test_get_node_valid_token_returns_matching_node() {
         let service = create_test_service();
 
         let response = service
@@ -631,7 +639,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_get_node_invalid_token() {
+    async fn test_get_node_invalid_token_returns_error() {
         let service = create_test_service();
 
         let result = service
@@ -1122,7 +1130,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_send_auxiliary_command_empty_profile() {
+    async fn test_send_auxiliary_command_empty_profile_returns_error() {
         let service = create_test_service();
 
         let result = service
@@ -1135,6 +1143,92 @@ mod tests {
         assert!(result.is_err());
     }
 
+    // ========================================================================
+    // Auxiliary dispatch error mapping
+    // ========================================================================
+
+    fn service_with_imaging(imaging: MockImagingControl) -> PTZService {
+        PTZService {
+            state: Arc::new(PTZStateManager::new()),
+            ptz_control: None,
+            imaging_control: Some(Arc::new(imaging)),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_dispatch_auxiliary_without_imaging_control_returns_action_not_supported() {
+        use auxiliary::{AuxCommand, LampState};
+
+        let service = create_test_service();
+        let err = service
+            .dispatch_auxiliary(AuxCommand::IrLamp(LampState::On))
+            .await
+            .unwrap_err();
+
+        assert!(matches!(err, OnvifError::ActionNotSupported(_)));
+    }
+
+    #[tokio::test]
+    async fn test_dispatch_auxiliary_platform_not_supported_returns_action_not_supported() {
+        use crate::platform::common::PlatformError;
+        use auxiliary::{AuxCommand, LampState};
+
+        let mut imaging = MockImagingControl::new();
+        imaging
+            .expect_set_ir_lamp()
+            .returning(|_| Err(PlatformError::NotSupported("ir lamp".to_string())));
+
+        let service = service_with_imaging(imaging);
+        let err = service
+            .dispatch_auxiliary(AuxCommand::IrLamp(LampState::On))
+            .await
+            .unwrap_err();
+
+        assert!(matches!(err, OnvifError::ActionNotSupported(_)));
+    }
+
+    #[tokio::test]
+    async fn test_dispatch_auxiliary_platform_hardware_failure_returns_hardware_failure() {
+        use crate::platform::common::PlatformError;
+        use auxiliary::AuxCommand;
+
+        let mut imaging = MockImagingControl::new();
+        imaging.expect_set_white_light().returning(|_| {
+            Err(PlatformError::HardwareFailure(
+                "gpio write failed".to_string(),
+            ))
+        });
+
+        let service = service_with_imaging(imaging);
+        let err = service
+            .dispatch_auxiliary(AuxCommand::WhiteLight(true))
+            .await
+            .unwrap_err();
+
+        assert!(matches!(err, OnvifError::HardwareFailure(_)));
+    }
+
+    #[tokio::test]
+    async fn test_dispatch_auxiliary_platform_internal_error_returns_internal() {
+        use crate::platform::common::PlatformError;
+        use auxiliary::{AuxCommand, LampState};
+
+        let mut imaging = MockImagingControl::new();
+        imaging
+            .expect_enable_ir_auto()
+            .returning(|| Err(PlatformError::Timeout));
+
+        let service = service_with_imaging(imaging);
+        let err = service
+            .dispatch_auxiliary(AuxCommand::IrLamp(LampState::Auto))
+            .await
+            .unwrap_err();
+
+        assert!(matches!(err, OnvifError::Internal(_)));
+    }
+
+    // ========================================================================
+    // Position Boundary Tests
     // ========================================================================
     // Position Boundary Tests
     // ========================================================================
@@ -1452,7 +1546,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_send_auxiliary_command_empty_profile_token() {
+    async fn test_send_auxiliary_command_empty_profile_token_returns_error() {
         let service = create_test_service();
 
         let result = service

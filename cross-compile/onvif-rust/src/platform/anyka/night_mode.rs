@@ -371,25 +371,53 @@ impl NightModeController {
             });
         }
 
-        // GPIO first: it is durable and survives a daemon restart, whereas
-        // the ISP mode does not. A bounce then costs one tick of
-        // wrong-looking image rather than a stuck filter.
-        let paths = self.paths.clone();
-        let gpio_steps = steps.clone();
-        let gpio_result =
-            tokio::task::spawn_blocking(move || execute_gpio(&gpio_steps, &paths)).await;
+        // Split the plan around the ISP step. `plan()` orders the GPIO writes
+        // around the ISP switch (lamp on before night, off after day) so no
+        // frame is captured dark, and the trailing SETTLE sleep belongs after
+        // the switch — executing every GPIO step before the IPC call broke
+        // both, because the ISP call happened after the lamp was already off
+        // and after the settle had already elapsed.
+        let mut pre_isp = Vec::new();
+        let mut post_isp = Vec::new();
+        let mut seen_isp = false;
+        for s in steps {
+            if matches!(s, Step::IspMode(_)) {
+                seen_isp = true;
+                continue;
+            }
+            if seen_isp {
+                post_isp.push(s);
+            } else {
+                pre_isp.push(s);
+            }
+        }
 
-        // The ISP step is the only part that needs the daemon.
+        let paths = self.paths.clone();
+        let pre = pre_isp.clone();
+        let pre_paths = paths.clone();
+        let pre_result = tokio::task::spawn_blocking(move || execute_gpio(&pre, &pre_paths))
+            .await
+            .map_err(|e| PlatformError::HardwareFailure(format!("join: {e}")))?;
+        if let Err(e) = pre_result {
+            tracing::warn!(error = %e, ?target, "GPIO transition failed; state not advanced");
+            return Err(PlatformError::HardwareFailure(format!("GPIO write: {e}")));
+        }
+
+        // The ISP step is the only part that needs the daemon. GPIO is the
+        // durable state, so an ISP failure alone still records the transition:
+        // the next tick must not re-drive an already-correct GPIO state.
         let isp = self
             .ffi
             .set_ir_filter(matches!(target, DayNight::Night))
             .await;
-
-        state.record_change(target, std::time::Instant::now());
-
         if isp != 0 {
-            tracing::warn!(isp, "ISP day/night switch failed; will retry next tick");
+            tracing::warn!(isp, "ISP day/night switch failed; GPIO state advanced");
         }
+
+        let post = post_isp.clone();
+        let post_result = tokio::task::spawn_blocking(move || execute_gpio(&post, &paths))
+            .await
+            .map_err(|e| PlatformError::HardwareFailure(format!("join: {e}")))?;
 
         // IDR even when ISP fails: GPIO/filter change still needs a keyframe.
         if let Ok(guard) = self.idr_hook.lock()
@@ -398,11 +426,13 @@ impl NightModeController {
             hook();
         }
 
-        match gpio_result {
-            Ok(Ok(())) => Ok(()),
-            Ok(Err(e)) => Err(PlatformError::HardwareFailure(format!("GPIO write: {e}"))),
-            Err(e) => Err(PlatformError::HardwareFailure(format!("join: {e}"))),
+        if let Err(e) = post_result {
+            tracing::warn!(error = %e, ?target, "GPIO transition failed; state not advanced");
+            return Err(PlatformError::HardwareFailure(format!("GPIO write: {e}")));
         }
+
+        state.record_change(target, std::time::Instant::now());
+        Ok(())
     }
 
     /// One AUTO poll: prefer AE luma, fall back to `ain0` after streak failures.
@@ -465,7 +495,10 @@ impl NightModeController {
     }
 
     /// Write a single lamp GPIO. Used by ONVIF auxiliary commands.
-    pub(crate) fn write_lamp(&self, node: Node, on: bool) -> std::io::Result<()> {
+    ///
+    /// Takes the transition mutex so a lamp write cannot interleave with an
+    /// in-flight [`Self::apply`] driving the same node.
+    pub(crate) async fn write_lamp(&self, node: Node, on: bool) -> std::io::Result<()> {
         if matches!(node, Node::IrLed) && !self.caps.ir_led {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::NotFound,
@@ -478,6 +511,7 @@ impl NightModeController {
                 "WHITE_LED node absent",
             ));
         }
+        let _guard = self.state.lock().await;
         std::fs::write(self.paths.node(node), if on { "1" } else { "0" })
     }
 
@@ -486,7 +520,15 @@ impl NightModeController {
     /// Call once after construction. A configured `ON`/`OFF` is driven onto the
     /// hardware here; `AUTO` leaves the filter where it is until the first tick
     /// has a settled reading.
-    pub(crate) fn spawn_auto_loop(self: &std::sync::Arc<Self>) {
+    ///
+    /// `shutdown` is a broadcast subscription: on a notification the loop stops
+    /// before its next tick, so it cannot call `set_ir_filter` on a torn-down
+    /// IPC client during platform teardown. The returned handle is stored by
+    /// the platform and awaited during shutdown.
+    pub(crate) fn spawn_auto_loop(
+        self: &std::sync::Arc<Self>,
+        mut shutdown: tokio::sync::broadcast::Receiver<()>,
+    ) -> tokio::task::JoinHandle<()> {
         use crate::onvif::types::common::IrCutFilterMode;
 
         let this = std::sync::Arc::clone(self);
@@ -504,10 +546,15 @@ impl NightModeController {
 
             let mut interval = tokio::time::interval(POLL_INTERVAL);
             loop {
-                interval.tick().await;
-                this.tick().await;
+                tokio::select! {
+                    _ = interval.tick() => this.tick().await,
+                    _ = shutdown.recv() => {
+                        tracing::debug!("night-mode AUTO loop stopping");
+                        return;
+                    }
+                }
             }
-        });
+        })
     }
 }
 
@@ -801,18 +848,18 @@ mod tests {
         std::fs::write(paths.light_sensor(), "100").unwrap();
 
         let mut ffi = MockImagingHalTrait::new();
-        ffi.expect_get_ae_luma().times(3).returning({
+        ffi.expect_get_ae_luma().times(5).returning({
             let mut calls = 0u8;
             move || {
                 calls += 1;
-                if calls < 3 {
-                    None
-                } else {
-                    Some(100) // bright AE → day
+                match calls {
+                    3 => Some(100), // bright AE → day
+                    _ => None,
                 }
             }
         });
-        // Must not apply night via ain0 fallback.
+        // Must not apply night via ain0 fallback, even after the streak
+        // resumes past the cleared state (calls 4-5).
         ffi.expect_set_ir_filter().times(0);
 
         let ctl = NightModeController::new(
@@ -822,6 +869,8 @@ mod tests {
             IrCutFilterMode::AUTO,
         );
 
+        ctl.tick().await;
+        ctl.tick().await;
         ctl.tick().await;
         ctl.tick().await;
         ctl.tick().await;
@@ -894,6 +943,37 @@ mod tests {
         // No IR_LED node: the filter still moves and no bogus error is raised.
         ctl.apply(DayNight::Night).await.unwrap();
         assert!(!paths.node(Node::IrLed).exists());
+    }
+
+    #[tokio::test]
+    async fn test_apply_does_not_record_mode_when_gpio_fails() {
+        use crate::hal::common::imaging::MockImagingHalTrait;
+        use crate::onvif::types::common::IrCutFilterMode;
+
+        // ircut_a is a directory: `probe` sees a node, but the post-ISP GPIO
+        // write fails, so the transition must not be recorded.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let paths = NodePaths::rooted(dir.path(), dir.path());
+        std::fs::create_dir(paths.node(Node::IrCutA)).unwrap();
+        std::fs::create_dir(paths.node(Node::IrCutB)).unwrap();
+        std::fs::write(paths.node(Node::IrLed), "9").unwrap();
+
+        let mut ffi = MockImagingHalTrait::new();
+        ffi.expect_set_ir_filter().returning(|_| 0);
+
+        let ctl = NightModeController::new(
+            paths,
+            test_config(),
+            std::sync::Arc::new(ffi),
+            IrCutFilterMode::AUTO,
+        );
+        assert_eq!(ctl.current_mode().await, DayNight::Day);
+
+        assert!(ctl.apply(DayNight::Night).await.is_err());
+
+        // A failed transition must not be recorded: AUTO would otherwise
+        // believe the camera is at Night and never retry the transition.
+        assert_eq!(ctl.current_mode().await, DayNight::Day);
     }
 
     fn thr() -> Thresholds {

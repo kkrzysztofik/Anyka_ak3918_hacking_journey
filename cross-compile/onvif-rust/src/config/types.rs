@@ -634,8 +634,12 @@ impl Default for NightConfig {
         Self {
             ldr_high_is_day: true,
             ircut_high_is_night: true,
-            day_threshold: 1100,
-            night_threshold: 300,
+            // Calibrated on .198 (2026-08-02): dark-box ain0≈648,
+            // room-uncovered≈670. These match the shipped templates so an
+            // omitted `[imaging.night]` still lets AUTO transition instead of
+            // leaving documented readings in the indeterminate band.
+            day_threshold: 662,
+            night_threshold: 652,
             lock_time_ms: 900_000,
             // Calibrated on .198 (2026-08-04): room≈34, dark-box≈0..1.
             ae_day_threshold: 28,
@@ -1009,6 +1013,39 @@ file_name = "static"
         assert_eq!(cfg.lock_time_ms, 900_000);
         assert!(cfg.ldr_high_is_day);
         assert!(cfg.ircut_high_is_night);
+    }
+
+    #[test]
+    fn test_night_config_defaults_allow_auto_transition_on_documented_readings() {
+        // An omitted [imaging.night] must not strand AUTO in the indeterminate
+        // band: the documented dark-box≈648 / room≈670 readings must sit
+        // outside the 662/652 defaults on both sides.
+        let cfg = NightConfig::default();
+        assert_eq!(cfg.day_threshold, 662);
+        assert_eq!(cfg.night_threshold, 652);
+        assert!(670 >= cfg.day_threshold, "room reading must read as day");
+        assert!(
+            648 <= cfg.night_threshold,
+            "dark-box reading must read as night"
+        );
+    }
+
+    #[test]
+    fn test_imaging_config_without_night_section_applies_calibrated_defaults() {
+        // Regression: a partial config that omits [imaging.night] must still
+        // get thresholds that operate on the supported hardware.
+        let cfg: ImagingConfig = toml::from_str(
+            r#"
+            brightness = 70.0
+            contrast = 50.0
+            saturation = 50.0
+            sharpness = 50.0
+            ir_cut_filter = "AUTO"
+            "#,
+        )
+        .unwrap();
+        assert_eq!(cfg.night.day_threshold, 662);
+        assert_eq!(cfg.night.night_threshold, 652);
     }
 
     #[test]

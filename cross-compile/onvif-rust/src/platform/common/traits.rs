@@ -967,6 +967,7 @@ mod tests {
         assert_eq!(options.sharpness_range, (0.0, 100.0));
         assert!(options.ir_cut_filter_supported);
         assert!(options.ir_led_supported);
+        assert!(!options.white_light_supported); // default_options() sets this to false
         assert!(!options.wdr_supported); // default_options() sets this to false
         assert!(options.backlight_compensation_supported);
     }

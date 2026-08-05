@@ -649,7 +649,11 @@ describe('ImagingPage', () => {
       const user = userEvent.setup();
       renderWithProviders(<ImagingPage />);
 
-      await user.click(await screen.findByTestId('imaging-ir-lamp-switch'));
+      // The switch is disabled until the profile resolves and no lamp
+      // mutation is pending; wait for it to be clickable, not just rendered.
+      const irSwitch = await screen.findByTestId('imaging-ir-lamp-switch');
+      await waitFor(() => expect(irSwitch).not.toBeDisabled());
+      await user.click(irSwitch);
 
       await waitFor(() => {
         expect(sendAuxiliaryCommand).toHaveBeenCalledWith('ProfileToken1', 'tt:IRLamp|On');
@@ -661,11 +665,15 @@ describe('ImagingPage', () => {
       renderWithProviders(<ImagingPage />);
 
       const whiteSwitch = await screen.findByTestId('imaging-white-light-switch');
+      await waitFor(() => expect(whiteSwitch).not.toBeDisabled());
       await user.click(whiteSwitch);
       await waitFor(() => {
         expect(sendAuxiliaryCommand).toHaveBeenCalledWith('ProfileToken1', 'tt:WhiteLight|On');
       });
 
+      // The switch is disabled while the mutation is pending; wait for it to
+      // become clickable again before toggling off.
+      await waitFor(() => expect(whiteSwitch).not.toBeDisabled());
       await user.click(whiteSwitch);
       await waitFor(() => {
         expect(sendAuxiliaryCommand).toHaveBeenCalledWith('ProfileToken1', 'tt:WhiteLight|Off');

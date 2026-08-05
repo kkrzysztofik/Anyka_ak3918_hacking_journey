@@ -12,7 +12,7 @@
 
 ---
 
-### Task 1: NightConfig AE thresholds
+## Task 1: NightConfig AE thresholds
 
 **Files:**
 - Modify: `cross-compile/onvif-rust/src/config/types.rs` (`NightConfig` / `Default`)
@@ -27,12 +27,12 @@ In `types.rs` tests (or add `#[cfg(test)]` module if missing), assert defaults d
 #[test]
 fn test_night_config_ae_thresholds_default() {
     let cfg = NightConfig::default();
-    assert_eq!(cfg.ae_day_threshold, 80);
-    assert_eq!(cfg.ae_night_threshold, 40);
+    assert_eq!(cfg.ae_day_threshold, 28);
+    assert_eq!(cfg.ae_night_threshold, 8);
 }
 ```
 
-(Placeholder defaults — Task 8 calibrates on hardware.)
+(Calibrated on .198, 2026-08-04 — see Task 8.)
 
 **Step 2: Run test to verify it fails**
 
@@ -55,14 +55,15 @@ pub ae_day_threshold: i32,
 pub ae_night_threshold: i32,
 ```
 
-Defaults: `ae_day_threshold: 80`, `ae_night_threshold: 40`. Keep existing ain0 fields.
+Defaults: `ae_day_threshold: 28`, `ae_night_threshold: 8` (calibrated on .198, 2026-08-04). Keep existing ain0 fields.
 
 In `config.toml` under `[imaging.night]`:
 
 ```toml
-# AE luma (0-255). PLACEHOLDER — calibrate on device (Task 8).
-ae_day_threshold = 80
-ae_night_threshold = 40
+# AE luma (0-255). Calibrated on .198 (2026-08-04): room≈34, dark-box≈0..1.
+# day >= 28, night <= 8; 9..27 indeterminate (hold).
+ae_day_threshold = 28
+ae_night_threshold = 8
 ```
 
 **Step 4: Run test to verify it passes**
@@ -78,7 +79,7 @@ git commit -m "feat(config): add AE day/night luma thresholds"
 
 ---
 
-### Task 2: ImagingHalTrait::get_ae_luma + stub
+## Task 2: ImagingHalTrait::get_ae_luma + stub
 
 **Files:**
 - Modify: `cross-compile/onvif-rust/src/hal/common/imaging.rs`
@@ -98,6 +99,8 @@ async fn test_stub_get_ae_luma_returns_none() {
 **Step 2: Run — expect FAIL** (method missing).
 
 ```bash
+source ./setenv.sh
+cd cross-compile/onvif-rust
 $CARGO test --target x86_64-unknown-linux-gnu test_stub_get_ae_luma_returns_none -- --nocapture
 ```
 
@@ -123,7 +126,7 @@ git commit -am "feat(hal): add ImagingHalTrait::get_ae_luma"
 
 ---
 
-### Task 3: Daemon CMD_ISP_GET_AE_LUMA
+## Task 3: Daemon CMD_ISP_GET_AE_LUMA
 
 **Files:**
 - Modify: `cross-compile/vendor-daemon/src/protocol.h`
@@ -191,7 +194,7 @@ git commit -m "feat(vendor-daemon): CMD_ISP_GET_AE_LUMA from sole VI"
 
 ---
 
-### Task 4: AnykaIpc get_ae_luma + fake-daemon test
+## Task 4: AnykaIpc get_ae_luma + fake-daemon test
 
 **Files:**
 - Modify: `cross-compile/onvif-rust/src/hal/anyka/ipc/mod.rs` (opcode const + name table)
@@ -231,7 +234,9 @@ const CMD_ISP_GET_AE_LUMA: i32 = 106;
 
 async fn get_ae_luma(&self) -> Option<u8> {
     match self.request_async(CMD_ISP_GET_AE_LUMA, &[]).await {
-        Ok((status, data)) if status == 0 && !data.is_empty() => Some(data[0]),
+        // The wire contract is exactly one luma byte; longer or empty
+        // payloads are malformed responses and must map to None.
+        Ok((status, data)) if status == 0 && data.len() == 1 => Some(data[0]),
         Ok(_) | Err(_) => None,
     }
 }
@@ -249,7 +254,7 @@ git commit -am "feat(ipc): get_ae_luma opcode 106"
 
 ---
 
-### Task 5: tick() AE-first + fail streak (TDD)
+## Task 5: tick() AE-first + fail streak (TDD)
 
 **Files:**
 - Modify: `cross-compile/onvif-rust/src/platform/anyka/night_mode.rs`
@@ -338,6 +343,8 @@ Update `NightModeController::new` to init streak to 0. Fix existing mocks: add `
 **Step 4: Run night_mode tests**
 
 ```bash
+source ./setenv.sh
+cd cross-compile/onvif-rust
 $CARGO test --target x86_64-unknown-linux-gnu night_mode -- --nocapture
 ```
 
@@ -351,25 +358,25 @@ git commit -am "feat(night_mode): prefer AE luma with ain0 fallback"
 
 ---
 
-### Task 6: Clippy + fmt quality gate
+## Task 6: Clippy + fmt quality gate
 
 **Step 1:**
 
 ```bash
 source ./setenv.sh
 cd cross-compile/onvif-rust
-$CARGO fmt
+$CARGO fmt -- --check
 $CARGO clippy --target x86_64-unknown-linux-gnu -- -D warnings
 $CARGO test --target x86_64-unknown-linux-gnu --lib
 ```
 
-**Step 2:** Fix any issues.
+**Step 2:** Fix any issues. Formatting changes are applied manually (check-only mode never rewrites files).
 
 **Step 3: Commit** if fmt touched files.
 
 ---
 
-### Task 7: Build + deploy binaries to `.198`
+## Task 7: Build + deploy binaries to `.198`
 
 **Step 1:** Rebuild vendor-daemon + onvif-rust (same flow as prior deploy).
 
@@ -379,7 +386,9 @@ $CARGO test --target x86_64-unknown-linux-gnu --lib
 
 ---
 
-### Task 8: On-device AE calibration + AUTO verify
+## Task 8: On-device AE calibration + AUTO verify
+
+**Status: complete (2026-08-04).** Measured room≈34, dark-box≈0..1; calibrated `ae_day_threshold = 28`, `ae_night_threshold = 8` and committed to `config.toml` and the tracked template.
 
 **Step 1:** Sample AE luma (temporary debug log in tick, or one-shot telnet after adding a tiny debug print — prefer reading via a one-off IPC if easier; else `tracing` at info for a few ticks then remove).
 
@@ -401,7 +410,7 @@ git commit -am "chore(config): calibrate AE luma thresholds on .198"
 
 ---
 
-### Task 9: Ponytail-review the diff
+## Task 9: Ponytail-review the diff
 
 Run ponytail-review on the branch diff vs design baseline. Cut anything that grew past the design. Commit shrinks if any.
 

@@ -8,7 +8,10 @@ The project features a complete, modern ONVIF 24.12 implementation written in **
 - **Target Platform**: Anyka AK3918 (ARM926EJ-S, 32MB RAM)
 - **ONVIF Compliance**: Profile S/T (Targeting v24.12)
 
-> **⚠️ Current Limitation**: The ONVIF Rust implementation currently uses **stub implementations** for the Platform Abstraction Layer. Real Anyka hardware integration is not yet implemented. All ONVIF API calls are handled by stub/mock implementations for testing and development purposes. Hardware integration with the Anyka AK3918 platform is planned for future development.
+> **⚠️ Current Limitation**: Some platform calls still run against stub/mock
+> implementations for development and testing; the Anyka AK3918 hardware path
+> is implemented for imaging (including IR cut filter and lamps), PTZ, and
+> video/audio. Hardware integration for remaining platform features is ongoing.
 
 ## Features
 

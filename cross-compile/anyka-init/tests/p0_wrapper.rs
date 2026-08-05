@@ -33,7 +33,19 @@ struct Outcome {
 /// is what the Nth `ifconfig wlan0` reports. `None` means "no address".
 /// This is what lets one test cover "vendor chain rescued it" and another
 /// cover "still dead, roll back".
-fn run(ifconfig_addrs: &[Option<&str>], binary_present: bool) -> Outcome {
+///
+/// `expected_ifconfig_calls` is the number of `ifconfig` invocations the
+/// deadman must make for the outcome to be final; `run` waits for that count
+/// (with a bounded deadline) instead of a fixed sleep, so a loaded host cannot
+/// observe the background subshell mid-flight.
+///
+/// `cp_fails` stubs `cp` to exit 1, exercising the restore-failure path.
+fn run(
+    ifconfig_addrs: &[Option<&str>],
+    binary_present: bool,
+    expected_ifconfig_calls: usize,
+    cp_fails: bool,
+) -> Outcome {
     let tmp = tempfile::tempdir().expect("tempdir");
     let dir = tmp.path();
 
@@ -41,6 +53,9 @@ fn run(ifconfig_addrs: &[Option<&str>], binary_present: bool) -> Outcome {
     stub(dir, "sleep", "exit 0");
     stub(dir, "telnetd", "exit 0");
     stub(dir, "sync", "exit 0");
+    if cp_fails {
+        stub(dir, "cp", "exit 1");
+    }
 
     // A counter file turns successive `ifconfig` calls into a scripted sequence.
     let counter = dir.join("ifconfig-calls");
@@ -96,8 +111,38 @@ fn run(ifconfig_addrs: &[Option<&str>], binary_present: bool) -> Outcome {
         .status()
         .expect("run config.sh");
 
-    // The deadman is a backgrounded subshell; give it a moment to finish.
-    std::thread::sleep(std::time::Duration::from_millis(400));
+    // The deadman is a backgrounded subshell. Wait for the expected number of
+    // `ifconfig` calls (proving the watchdog actually ran, not just that a
+    // sleep elapsed), then wait until the outcome stops changing — the
+    // restore + reboot run right after the last call, and a loaded host must
+    // not observe the subshell mid-restore.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    let mut last = None;
+    let observed = loop {
+        let state = (
+            fs::read_to_string(&counter)
+                .ok()
+                .and_then(|s| s.trim().parse::<usize>().ok())
+                .unwrap_or(0),
+            fs::read_to_string(&self_path)
+                .ok()
+                .map(|s| s.contains("VENDOR BOOT PATH"))
+                .unwrap_or(false),
+            reboot_marker.exists(),
+        );
+        if state.0 >= expected_ifconfig_calls && Some(state) == last {
+            break state.0;
+        }
+        last = Some(state);
+        if std::time::Instant::now() >= deadline {
+            break state.0;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    };
+    assert!(
+        observed >= expected_ifconfig_calls,
+        "deadman made {observed} ifconfig calls, expected {expected_ifconfig_calls}, within 5s"
+    );
 
     Outcome {
         vendor_wifi_started: wifi_marker.exists(),
@@ -111,7 +156,7 @@ fn run(ifconfig_addrs: &[Option<&str>], binary_present: bool) -> Outcome {
 
 #[test]
 fn healthy_boot_leaves_everything_alone() {
-    let o = run(&[Some("192.168.30.121")], true);
+    let o = run(&[Some("192.168.30.121")], true, 1, false);
     assert!(o.exit_ok, "wrapper must exit 0 when the binary is present");
     assert!(!o.vendor_wifi_started, "an address is held; do not touch wifi");
     assert!(!o.rebooted, "a healthy camera must never be rebooted");
@@ -121,7 +166,7 @@ fn healthy_boot_leaves_everything_alone() {
 #[test]
 fn no_address_hands_wifi_back_to_the_vendor_chain() {
     // First check: no address. Second check, after wifi_manage.sh: recovered.
-    let o = run(&[None, Some("192.168.30.121")], true);
+    let o = run(&[None, Some("192.168.30.121")], true, 2, false);
     assert!(o.vendor_wifi_started, "no IP must invoke the vendor chain");
     assert!(
         !o.rebooted,
@@ -135,7 +180,7 @@ fn no_address_hands_wifi_back_to_the_vendor_chain() {
 /// come back on a boot path that works.
 #[test]
 fn still_dead_after_the_vendor_chain_restores_the_boot_path_and_reboots() {
-    let o = run(&[None, None], true);
+    let o = run(&[None, None], true, 2, false);
     assert!(o.vendor_wifi_started, "the vendor chain must be tried first");
     assert!(
         o.boot_path_restored,
@@ -144,12 +189,25 @@ fn still_dead_after_the_vendor_chain_restores_the_boot_path_and_reboots() {
     assert!(o.rebooted, "and reboot into it");
 }
 
+/// A failed restore must NOT reboot: rebooting after a failed `cp` would come
+/// back on the unchanged broken wrapper.
+#[test]
+fn failed_boot_path_restore_does_not_reboot() {
+    let o = run(&[None, None], true, 2, true);
+    assert!(o.vendor_wifi_started);
+    assert!(!o.rebooted, "a failed restore must never reboot");
+    assert!(
+        !o.boot_path_restored,
+        "a failed copy must not have replaced the boot path"
+    );
+}
+
 /// A missing binary exits non-zero, and service.sh's FACTORY_TEST branch then
 /// returns without ever starting wifi. The deadman must already be armed by
 /// then, or this is exactly the stranding it exists to prevent.
 #[test]
 fn missing_binary_fails_loudly_but_still_arms_the_deadman() {
-    let o = run(&[None, None], false);
+    let o = run(&[None, None], false, 2, false);
     assert!(!o.exit_ok, "a missing supervisor must be a loud failure");
     assert!(o.vendor_wifi_started, "the deadman must run despite the exit");
     assert!(o.boot_path_restored);

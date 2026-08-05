@@ -254,7 +254,7 @@ mod tests {
     }
 
     #[test]
-    fn test_get_nodes() {
+    fn test_get_nodes_default_capabilities_returns_node() {
         let state = create_test_state();
 
         let response = get_nodes(&state, LampSupport::default()).unwrap();

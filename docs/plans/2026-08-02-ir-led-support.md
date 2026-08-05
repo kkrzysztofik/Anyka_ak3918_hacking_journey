@@ -1860,7 +1860,7 @@ From an ONVIF client, send `tt:WhiteLight|On` and `tt:IRLamp|Off`, confirming ea
 Append the measured `ain0` values and the outcome of each step to the design doc, then commit.
 
 ```bash
-git add docs/plans/2026-08-02-ir-led-support-design.md .deploy/anyka.toml SD_card_contents/anyka_hack/anyka.toml
+git add docs/plans/2026-08-02-ir-led-support-design.md SD_card_contents/anyka_hack/anyka.toml
 git commit -m "$(cat <<'EOF'
 docs(design): record measured ain0 thresholds from hardware
 

@@ -75,6 +75,14 @@ pub struct AnykaPlatform {
     /// supervisor completes an attach. That is what lets cold start and recovery
     /// share one path.
     ipc: Arc<AnykaIpc>,
+    /// Shutdown signal + task handle for the night-mode AUTO loop, so
+    /// `shutdown` can stop it before video teardown closes the daemon VI.
+    night_loop: std::sync::Mutex<
+        Option<(
+            tokio::sync::broadcast::Sender<()>,
+            tokio::task::JoinHandle<()>,
+        )>,
+    >,
 }
 
 /// Bring PTZ up, or skip it entirely when `enabled` is false.
@@ -163,6 +171,7 @@ impl AnykaPlatform {
             // Detached: these tests drive the mocked HALs directly and never
             // route through the real IPC client.
             ipc: Arc::new(AnykaIpc::new_detached().expect("detached IPC needs no daemon")),
+            night_loop: std::sync::Mutex::new(None),
         }
     }
 
@@ -185,7 +194,19 @@ impl AnykaPlatform {
     ) -> PlatformResult<Self> {
         let device_info = Self::device_descriptor();
 
-        let (video_input, video_encoder, audio_input, audio_encoder, imaging_control, ipc) = {
+        // Start the AUTO day/night loop with its own shutdown channel; the
+        // handle is stored so `shutdown` can stop it before teardown.
+        let (night_loop_tx, night_loop_rx) = tokio::sync::broadcast::channel(1);
+
+        let (
+            video_input,
+            video_encoder,
+            audio_input,
+            audio_encoder,
+            imaging_control,
+            ipc,
+            night_loop_task,
+        ) = {
             let shared_ipc = Arc::new(AnykaIpc::new_detached().map_err(|e| {
                 PlatformError::InitializationFailed(format!("AnykaIpc construction failed: {}", e))
             })?);
@@ -215,7 +236,7 @@ impl AnykaPlatform {
                 Arc::clone(&video_encoder),
                 imaging_cfg,
             ));
-            imaging.night_mode().spawn_auto_loop();
+            let night_loop_task = imaging.night_mode().spawn_auto_loop(night_loop_rx);
             let imaging_control = Some(imaging as Arc<dyn ImagingControl>);
 
             (
@@ -225,6 +246,7 @@ impl AnykaPlatform {
                 audio_encoder,
                 imaging_control,
                 shared_ipc,
+                night_loop_task,
             )
         };
 
@@ -243,6 +265,7 @@ impl AnykaPlatform {
             imaging_control,
             network_info,
             ipc,
+            night_loop: std::sync::Mutex::new(Some((night_loop_tx, night_loop_task))),
         })
     }
 
@@ -462,6 +485,19 @@ impl Platform for AnykaPlatform {
 
     async fn shutdown(&self) -> PlatformResult<()> {
         tracing::info!("Platform shutdown: starting PTZ stop...");
+
+        // Stop the night-mode AUTO loop before video teardown: it holds an Arc
+        // to the IPC client and must not tick against a closed VI handle.
+        // The guard is dropped here so no std mutex guard spans the await.
+        let night_loop = match self.night_loop.lock() {
+            Ok(mut guard) => guard.take(),
+            Err(poisoned) => poisoned.into_inner().take(),
+        };
+        if let Some((tx, task)) = night_loop {
+            let _ = tx.send(());
+            let _ = tokio::time::timeout(Duration::from_secs(2), task).await;
+        }
+
         // Best-effort PTZ stop — the PTZHandle Drop will call ptz_close.
         // We log errors but do not abort shutdown for a single subsystem failure.
         if let Some(ref ptz) = self.ptz_control

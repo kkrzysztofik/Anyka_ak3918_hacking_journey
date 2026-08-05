@@ -1334,9 +1334,10 @@ impl Application {
         if app_state.user_storage().is_empty() {
             anyhow::bail!(
                 "streaming authentication is enabled but UserStorage is empty, so RTSP and \
-                 HTTP-FLV will not start. Create a users.toml next to config.toml with an \
-                 Administrator entry, or set server.auth_enabled = false to stream without \
-                 authentication."
+                 HTTP-FLV will not start. Either no users.toml exists next to config.toml, or \
+                 it exists but is empty or failed to load (see the 'Failed to load users from' \
+                 warning at startup). Add an Administrator entry and restart, or set \
+                 server.auth_enabled = false to stream without authentication."
             );
         }
 

@@ -9,6 +9,7 @@ use async_trait::async_trait;
 use tracing::error;
 
 use crate::hal::common::AK_FAILED_I32;
+use crate::hal::common::AK_SUCCESS_I32;
 use crate::hal::common::imaging::ImagingHalTrait;
 
 use super::{
@@ -88,7 +89,9 @@ impl ImagingHalTrait for AnykaIpc {
 
     async fn get_ae_luma(&self) -> Option<u8> {
         match self.request_async(CMD_ISP_GET_AE_LUMA, &[]).await {
-            Ok((status, data)) if status == 0 && !data.is_empty() => Some(data[0]),
+            // The wire contract is exactly one luma byte; a longer or empty
+            // payload is a malformed daemon response and must not be accepted.
+            Ok((status, data)) if status == AK_SUCCESS_I32 && data.len() == 1 => Some(data[0]),
             Ok(_) => None,
             Err(e) => {
                 error!(error = %e, "get_ae_luma IPC failed");
@@ -124,6 +127,22 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_get_ae_luma_error_is_none() {
         let daemon = FakeDaemon::start(|_c, _r| (crate::hal::common::AK_FAILED_I32, vec![]));
+        let ipc = AnykaIpc::new_with_path(&daemon.socket_path).unwrap();
+        ipc.set_epochs_for_test(1, 1);
+        assert_eq!(<AnykaIpc as ImagingHalTrait>::get_ae_luma(&ipc).await, None);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_get_ae_luma_empty_payload_is_none() {
+        let daemon = FakeDaemon::start(|_c, _r| (AK_SUCCESS_I32, vec![]));
+        let ipc = AnykaIpc::new_with_path(&daemon.socket_path).unwrap();
+        ipc.set_epochs_for_test(1, 1);
+        assert_eq!(<AnykaIpc as ImagingHalTrait>::get_ae_luma(&ipc).await, None);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_get_ae_luma_multi_byte_payload_is_none() {
+        let daemon = FakeDaemon::start(|_c, _r| (AK_SUCCESS_I32, vec![42u8, 7u8]));
         let ipc = AnykaIpc::new_with_path(&daemon.socket_path).unwrap();
         ipc.set_epochs_for_test(1, 1);
         assert_eq!(<AnykaIpc as ImagingHalTrait>::get_ae_luma(&ipc).await, None);

@@ -1,7 +1,7 @@
 # IR Cut Filter and LED Illumination Support — Design
 
 Date: 2026-08-02
-Status: approved (design), implementation plan pending
+Status: approved (design), implemented (see `2026-08-02-ir-led-support.md`)
 
 ## Problem
 
@@ -24,7 +24,7 @@ job. The abstractions exist and were abandoned before the last mile.
 
 Captured live from the vendor firmware, `orig/sys/`:
 
-```
+```text
 /sys/user-gpio/    ircut_a = 0   ircut_b = 0   IR_LED = 1
                    WHITE_LED = 0  SPK_PA = 0   wifi_en = 0
 
@@ -58,7 +58,7 @@ state, observed on running hardware. Driving one line without returning both to
 `get_ain_threshold` (`ak_drv_ir.c:100-110`) with vendor defaults, given
 `ain0 = 306`:
 
-```
+```text
 306 > day.min (1100)                     ->  no
 306 > night.min (2) && < night.max (300) ->  no, exceeds 300 by 6
 306 == feature (1 or 0)                  ->  no
@@ -99,7 +99,7 @@ Out of scope, with reasons:
 
 One new file. Everything else is an edit to an existing hollow hook.
 
-```
+```text
 onvif-rust ---> night_mode.rs ---> fs::write  /sys/user-gpio/ircut_a, ircut_b
                               ---> fs::write  /sys/user-gpio/IR_LED
                               ---> fs::write  /sys/user-gpio/WHITE_LED
@@ -137,7 +137,7 @@ timer, and a mutex gives identical exclusion in one line.
 
 ### Read path — AUTO tick, 2 s
 
-```
+```text
 /sys/kernel/ain/ain0  ->  raw value  ->  threshold compare  ->  day | night | indeterminate
 ```
 
@@ -155,7 +155,7 @@ at dusk.
 
 Order is the vendor's (`main.c:740-752`) and is load-bearing:
 
-```
+```text
 to DAY:                    to NIGHT:
   1. ircut -> day            1. IR_LED on
   2. ISP   -> DAY            2. ISP -> NIGHT
@@ -174,7 +174,7 @@ of wrong-looking image rather than a stuck filter.
 
 The two-line pulse, confirmed by H4:
 
-```
+```text
 write(ircut_a, level); write(ircut_b, !level);
 sleep(10 ms);
 write(ircut_a, 0); write(ircut_b, 0);
