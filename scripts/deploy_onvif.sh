@@ -21,7 +21,9 @@ USERNAME="${2:-$DEFAULT_USER}"
 PASSWORD="${3:-$DEFAULT_PASS}"
 
 # Source and destination paths
-SOURCE_DIR="$PROJECT_ROOT/cross-compile/onvif-rust/target/arm-anykav200-crosstool-ng/release"
+# Workspace target dir, not per-crate: cross-compile/ is a cargo workspace, and
+# onvif-rust/.cargo/config.toml:16-18 pins armv5te-unknown-linux-uclibceabi.
+SOURCE_DIR="$PROJECT_ROOT/cross-compile/target/armv5te-unknown-linux-uclibceabi/release"
 DEST_DIR="/mnt/anyka_hack/onvif"
 BINARY_NAME="onvif-rust"
 
