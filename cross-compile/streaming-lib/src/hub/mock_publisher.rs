@@ -1728,9 +1728,10 @@ mod tests {
     /// See `onvif-rust`'s `generate_av_sdp`: go2rtc 1.9.10 only defaults media
     /// direction to `recvonly` when the SDP omits it
     /// (`pkg/rtsp/helpers.go:94-97`), and treats an explicit direction on a
-    /// producer as a backchannel. The mock stands in for the camera in host-side
-    /// testing, so it must not reintroduce the attribute the real generator
-    /// dropped.
+    /// producer as a backchannel. This generator ships in the camera binary —
+    /// `onvif-rust/src/main.rs:578` instantiates `MockVideoPublisher` for
+    /// `--validation-mode` H.264-file playback — so it must not reintroduce the
+    /// attribute the real generator dropped.
     #[test]
     fn test_generate_sdp_omits_direction_attribute() {
         let sps = [0x67, 0x42, 0xE0, 0x1E];

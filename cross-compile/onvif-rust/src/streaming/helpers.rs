@@ -322,7 +322,7 @@ mod tests {
         assert!(!sdp.contains("a=framerate"));
     }
 
-    /// go2rtc only normalises media direction to `recvonly` when the SDP omits
+    /// go2rtc 1.9.10 only normalises media direction to `recvonly` when the SDP omits
     /// the attribute entirely (`pkg/rtsp/helpers.go:94-97`). Any explicit
     /// direction survives, and go2rtc then treats the track as a backchannel and
     /// drops it — leaving Frigate with "codecs not matched:  => video:ANY".
