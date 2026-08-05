@@ -266,7 +266,7 @@ git add -u && git commit -m "style: cargo fmt after SDP direction fix"
 ## Task 4: Cross-compile for ARM
 
 **Files:**
-- Produces: `cross-compile/onvif-rust/target/arm-anykav200-crosstool-ng/release/onvif-rust`
+- Produces: `cross-compile/target/armv5te-unknown-linux-uclibceabi/release/onvif-rust`
 
 **Step 1: Build**
 
@@ -275,24 +275,30 @@ cd /home/kmk/dev/anyka-dev/cross-compile/onvif-rust
 $CARGO build --release
 ```
 
-Note the absence of `--target`: the crate's `.cargo/config.toml` already pins
-`arm-anykav200-crosstool-ng` as the default target. This build takes several
-minutes.
+Note the absence of `--target`: `cross-compile/onvif-rust/.cargo/config.toml:16-18`
+pins `armv5te-unknown-linux-uclibceabi` as the default target. Note also that this
+is a **workspace** — artifacts land in the shared `cross-compile/target/`, not in
+a per-crate `onvif-rust/target/`. This build takes about six minutes.
 
 **Step 2: Verify the artifact is ARM and contains the fix**
 
 ```bash
-file cross-compile/onvif-rust/target/arm-anykav200-crosstool-ng/release/onvif-rust
-strings cross-compile/onvif-rust/target/arm-anykav200-crosstool-ng/release/onvif-rust | grep -c 'a=sendonly'
+B=cross-compile/target/armv5te-unknown-linux-uclibceabi/release/onvif-rust
+file $B
+strings $B | grep -c 'a=sendonly'                    # expect 0
+strings $B | grep -c 'a=rtpmap:96 H264/90000'        # expect >0
 ```
 
-Expected: `ELF 32-bit LSB ... ARM, EABI5`, and a count of `0` for `a=sendonly`.
-A non-zero count means a stale artifact — `touch` the two source files and rebuild.
+Expected: `ELF 32-bit LSB executable, ARM, EABI5 ... interpreter
+/mnt/anyka_hack/lib/ld-uClibc.so.1, stripped`, a count of `0` for `a=sendonly`,
+and a non-zero count for the rtpmap marker. That second check matters: a `0` on
+both would mean the SDP code did not make it into the binary at all, which looks
+identical to success if you only grep for the removed string.
 
 **Step 3: Refresh the SD card copy**
 
 ```bash
-cp cross-compile/onvif-rust/target/arm-anykav200-crosstool-ng/release/onvif-rust \
+cp cross-compile/target/armv5te-unknown-linux-uclibceabi/release/onvif-rust \
    SD_card_contents/anyka_hack/onvif/onvif-rust.bin
 ```
 
@@ -335,6 +341,14 @@ and overwriting it blind would lose it.
 
 This FTPs the binary to `/mnt/anyka_hack/onvif/` twice, as `onvif-rust` and as
 `onvif-rust.bin`. The supervisor launches `onvif-rust.bin` per `.deploy/anyka.toml`.
+
+**Known defect:** `scripts/deploy_onvif.sh:24` still points `SOURCE_DIR` at
+`cross-compile/onvif-rust/target/arm-anykav200-crosstool-ng/release`, a path that
+no longer exists after the move to a workspace target dir and the
+`armv5te-unknown-linux-uclibceabi` triple. The script aborts with "Binary not
+found" before contacting the camera — a safe failure, but it must be corrected to
+`$PROJECT_ROOT/cross-compile/target/armv5te-unknown-linux-uclibceabi/release`
+before this step works.
 
 **Step 3: Restart the service**
 
