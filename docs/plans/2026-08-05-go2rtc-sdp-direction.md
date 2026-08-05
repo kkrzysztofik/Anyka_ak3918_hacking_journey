@@ -350,14 +350,26 @@ found" before contacting the camera — a safe failure, but it must be corrected
 `$PROJECT_ROOT/cross-compile/target/armv5te-unknown-linux-uclibceabi/release`
 before this step works.
 
-**Step 3: Restart the service**
+**Step 3: Restart BOTH daemons — not onvif-rust alone**
 
 ```bash
-uv run python3 scripts/debugging/cam_exec.py --timeout 60 'killall onvif-rust.bin; sleep 5; ps | grep -v grep | grep onvif'
+uv run python3 scripts/debugging/cam_exec.py --timeout 260 'killall vendor-daemon.bin onvif-rust.bin; sleep 35; ps | grep -v grep | grep -E "onvif|vendor"'
 ```
 
-Expected: a *new* PID for `/mnt/anyka_hack/onvif/onvif-rust.bin`. The anyka-init
-supervisor respawns it automatically — do not start it by hand.
+Expected: *new* PIDs for both `/mnt/anyka_hack/vendor-daemon/vendor-daemon.bin`
+and `/mnt/anyka_hack/onvif/onvif-rust.bin`. The anyka-init supervisor respawns
+both automatically — do not start either by hand. Allow ~45 s afterwards for the
+sensor/ISP/VENC to come up before probing.
+
+**Restarting `onvif-rust` alone does not work.** Observed on 2026-08-05: after
+`killall onvif-rust.bin`, `/sub` served fine but `/main` returned
+`DESCRIBE failed: 404 Not Found`, and a second lone restart lost `/sub` as well —
+each restart degraded things further. Killing both daemons together restored both
+streams immediately. The vendor-daemon does not release per-channel IPC attach
+state when its onvif-rust peer dies, so the new process cannot re-attach. This
+matches the known vendor-daemon restart-resilience weakness. A 404 on DESCRIBE
+means the stream was never published to the streamhub — it is an IPC/publisher
+problem, not an SDP problem, and no amount of SDP work will fix it.
 
 **Step 4: Confirm the camera serves the new SDP**
 
@@ -411,11 +423,29 @@ Expected: `salon` and `salon-detect` each list a producer with a populated
 **Step 3: Confirm Frigate is quiet**
 
 ```bash
-ssh root@192.168.2.6 "docker logs frigate --since 3m 2>&1 | grep -cE 'codecs not matched|404 Not Found|Unable to read frames'"
+ssh root@192.168.2.6 "docker logs frigate --since 90s 2>&1 | grep -cE 'codecs not matched|404 Not Found'"
 ```
 
 Expected: `0`. If Frigate had been crash-looping, give it a minute to settle after
 the camera restart before running this.
+
+Do **not** include `Unable to read frames` in that grep, as an earlier draft did:
+it also fires for failures downstream of this fix and will mask a clean result.
+Confirmed on 2026-08-05 — once the SDP fix landed, `codecs not matched` and
+`404 Not Found` both went to zero while ffmpeg still failed later, at hardware
+decoder setup:
+
+```
+No VA display found for device /dev/dri/renderD128
+No device available for decoder: device type vaapi needed for codec h264
+```
+
+That is a **separate, pre-existing** problem on the Frigate host, not a camera or
+SDP issue: `/config/config.yaml` sets `hwaccel_args: preset-vaapi`, but `.6` has
+only `/dev/dri/card0` and no `renderD128` render node. It was previously latent
+because ffmpeg died at input-open and never reached decoder init. Fixing it means
+dropping `hwaccel_args` (CPU decode) or exposing a render node — out of scope
+here, and explicitly NOT a reason to consider this task unfinished.
 
 **Step 4: Commit nothing; report the evidence**
 
