@@ -494,8 +494,7 @@ impl Platform for AnykaPlatform {
             Err(poisoned) => poisoned.into_inner().take(),
         };
         if let Some((tx, task)) = night_loop {
-            let _ = tx.send(());
-            let _ = tokio::time::timeout(Duration::from_secs(2), task).await;
+            stop_night_loop(tx, task).await;
         }
 
         // Best-effort PTZ stop — the PTZHandle Drop will call ptz_close.
@@ -552,6 +551,26 @@ impl Platform for AnykaPlatform {
 // =============================================================================
 // PTZ Control Implementation
 // =============================================================================
+
+/// Ask the night-mode AUTO loop to stop and join it, aborting after a timeout.
+///
+/// `tokio::time::timeout` borrowing the handle (not consuming it) means the
+/// task stays joinable if it ignores the shutdown signal; abort and await it
+/// so it cannot keep ticking against a torn-down VI handle.
+async fn stop_night_loop(
+    tx: tokio::sync::broadcast::Sender<()>,
+    mut task: tokio::task::JoinHandle<()>,
+) {
+    let _ = tx.send(());
+    if tokio::time::timeout(Duration::from_secs(2), &mut task)
+        .await
+        .is_err()
+    {
+        tracing::warn!("night-mode AUTO loop did not stop within 2s; aborting");
+        task.abort();
+        let _ = task.await;
+    }
+}
 
 /// Anyka PTZ control — delegates to `AnykaPTZControl` which calls the FFI layer.
 ///

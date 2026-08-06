@@ -57,6 +57,7 @@ pub(super) fn validate_h264_rtp_payload_rfc6184(
         24 => {
             // STAP-A: [STAP-A header][2-byte size][NALU]...
             let mut i = 1usize;
+            let mut units = 0u32;
             while i + 2 <= payload.len() {
                 let size = u16::from_be_bytes([payload[i], payload[i + 1]]) as usize;
                 i += 2;
@@ -70,8 +71,10 @@ pub(super) fn validate_h264_rtp_payload_rfc6184(
                     break;
                 }
                 i += size;
+                units += 1;
             }
-            if i != payload.len() {
+            // RFC 6184 requires at least one aggregation unit in a STAP-A.
+            if i != payload.len() || units == 0 {
                 stap_a_invalid = true;
             }
             (!stap_a_invalid, marker_violation, false, stap_a_invalid)
@@ -174,16 +177,13 @@ where
 }
 
 pub(crate) fn analyze_h264_rfc6184_from_rows(rows: &[RtpTsharkRow]) -> Result<RtpPcapRfc6184Stats> {
-    const MIN_PACKETS: u32 = 10;
-    const MIN_VALID_RATIO: f64 = 0.80;
-
     let Some((pt, valid, total)) = pick_best_payload_type(rows, |row| {
         validate_h264_rtp_payload_rfc6184(&row.payload, row.marker).0
     }) else {
         bail!("no RTP packets found in pcap");
     };
 
-    if total < MIN_PACKETS || valid == 0 {
+    if total < super::MIN_PACKETS || valid == 0 {
         bail!(
             "insufficient H.264-like RTP packets (pt={}, valid={}, total={})",
             pt,
@@ -192,7 +192,7 @@ pub(crate) fn analyze_h264_rfc6184_from_rows(rows: &[RtpTsharkRow]) -> Result<Rt
         );
     }
     let ratio = valid as f64 / total as f64;
-    if ratio < MIN_VALID_RATIO {
+    if ratio < super::MIN_VALID_RATIO {
         bail!(
             "could not classify H.264 RTP payload type (pt={}, valid_ratio={:.2}, valid={}, total={})",
             pt,
@@ -234,16 +234,13 @@ pub(crate) fn analyze_h264_rfc6184_from_rows(rows: &[RtpTsharkRow]) -> Result<Rt
 }
 
 pub(crate) fn analyze_aac_rfc3640_from_rows(rows: &[RtpTsharkRow]) -> Result<RtpPcapRfc3640Stats> {
-    const MIN_PACKETS: u32 = 10;
-    const MIN_VALID_RATIO: f64 = 0.80;
-
     let Some((pt, valid, total)) =
         pick_best_payload_type(rows, |row| validate_aac_rtp_payload_rfc3640(&row.payload).0)
     else {
         bail!("no RTP packets found in pcap");
     };
 
-    if total < MIN_PACKETS || valid == 0 {
+    if total < super::MIN_PACKETS || valid == 0 {
         bail!(
             "insufficient AAC-like RTP packets (pt={}, valid={}, total={})",
             pt,
@@ -252,7 +249,7 @@ pub(crate) fn analyze_aac_rfc3640_from_rows(rows: &[RtpTsharkRow]) -> Result<Rtp
         );
     }
     let ratio = valid as f64 / total as f64;
-    if ratio < MIN_VALID_RATIO {
+    if ratio < super::MIN_VALID_RATIO {
         bail!(
             "could not classify AAC RTP payload type (pt={}, valid_ratio={:.2}, valid={}, total={})",
             pt,

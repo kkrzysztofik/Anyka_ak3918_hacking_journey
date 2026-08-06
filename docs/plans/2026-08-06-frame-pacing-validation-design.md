@@ -125,9 +125,9 @@ $CARGO fmt --check
 
 ## Success criteria
 
-- [ ] `frame_pacing_encoder_delay_percent` / `frame_pacing_arrival_delay_percent` verdict metrics in report
-- [ ] `frame_pacing` stats object with gap diagnostics for both cadences
-- [ ] `[pacing]` config section honored; defaults sane when absent
-- [ ] Baseline comparison covers the four new values
-- [ ] Unit tests above pass; clippy/fmt clean
+- [x] `frame_pacing_encoder_delay_percent` / `frame_pacing_arrival_delay_percent` verdict metrics in report
+- [x] `frame_pacing` stats object with gap diagnostics for both cadences
+- [x] `[pacing]` config section honored; defaults sane when absent
+- [x] Baseline comparison covers the four new values
+- [x] Unit tests above pass; clippy/fmt clean
 - [ ] Manual device run produces plausible numbers

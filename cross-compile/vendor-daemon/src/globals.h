@@ -14,8 +14,18 @@ struct push_stream_state {
     void           *stream_handle;
     uint32_t        stream_id;
     /* Timestamp normalization state */
-    uint32_t        first_timestamp_ms;   /* First SDK timestamp seen */
+    uint32_t        first_timestamp_ms;   /* First SDK timestamp seen (anchor) */
     int             timestamp_initialized; /* 0 = not set, 1 = initialized */
+    /*
+     * Rollover tracking.  The 32-bit SDK clock wraps ~every 49.7 days; the
+     * epoch is incremented by 2^32 each time a consecutive-sample backward
+     * jump of more than half the 32-bit space is observed, so `raw64 =
+     * raw_timestamp_epoch_ms + raw_timestamp_ms` stays monotonic across any
+     * number of wraps (unlike extending against the fixed first timestamp,
+     * which goes stale once the clock laps the anchor).
+     */
+    uint32_t        last_raw_timestamp_ms;  /* Previous SDK timestamp seen */
+    uint64_t        raw_timestamp_epoch_ms; /* 2^32 per detected rollover */
     /*
      * Timestamp continuity state.  Pathological vs.ts leaps (>5s) are clamped;
      * regressions are held monotonic; ISP stalls where wall time advances but

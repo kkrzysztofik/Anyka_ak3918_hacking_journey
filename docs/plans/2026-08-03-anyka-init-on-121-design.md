@@ -150,16 +150,24 @@ of the cutover, and it is a phase-ordering issue, not a bug in `park()`.
 #!/bin/sh
 telnetd -p 24 -l /bin/sh 2>/dev/null &
 
-BIN=/mnt/anyka_hack/anyka-init.bin
-[ -x "$BIN" ] || { echo "anyka-init: missing $BIN" >&2; exit 1; }
+# The paths below are overridable only so the host test can stub them.
+# Production never sets these.
+BIN=${ANYKA_INIT_BIN:-/mnt/anyka_hack/anyka-init.bin}
+WIFI_MANAGE=${ANYKA_WIFI_MANAGE:-/usr/sbin/wifi_manage.sh}
+SELF=${ANYKA_CONFIG_SELF:-/mnt/Factory/config.sh}
+BAK=${ANYKA_CONFIG_BAK:-/mnt/Factory/config.sh.gerge.bak}
 
 # Deadman, two stages: .121 is jumphost-only and P1 parks before P2 brings
 # wifi up (F4), so a config error would strand it. Stage one hands wifi back
 # to the vendor; if the link is still dead a minute later, stage two restores
 # the vendor boot path (atomically) and reboots into it.
+#
+# Armed BEFORE the -x guard on purpose. A missing or corrupt binary exits
+# non-zero, and service.sh's FACTORY_TEST branch then returns without ever
+# starting wifi — the same stranding this exists to prevent.
 ( sleep 180
   ifconfig wlan0 | grep -q "inet addr" && exit 0
-  /usr/sbin/wifi_manage.sh start
+  "$WIFI_MANAGE" start
   sleep 60
   ifconfig wlan0 | grep -q "inet addr" && exit 0
   RESTORE="${SELF}.restore.$$"
@@ -168,6 +176,11 @@ BIN=/mnt/anyka_hack/anyka-init.bin
   else
     echo "anyka-init: vendor boot-path restore failed" >&2
   fi ) &
+
+if [ ! -x "$BIN" ]; then
+  echo "anyka-init: missing or non-executable $BIN" >&2
+  exit 1
+fi
 
 exec "$BIN"
 ```

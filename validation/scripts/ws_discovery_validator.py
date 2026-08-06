@@ -463,7 +463,7 @@ def _receive_responses(
         except socket.timeout:
             continue
         except OSError as e:
-            logger.error("Receive error: %s", e)
+            logger.exception("Receive error: %s", e)
             result.errors.append(str(e))
 
     return devices

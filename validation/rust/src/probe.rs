@@ -153,9 +153,6 @@ fn validate_h264_length_prefixed_nals(data: &[u8]) -> Result<()> {
         if nal_type == 0 {
             bail!("invalid NAL type 0");
         }
-        if nal_type > 31 {
-            bail!("invalid NAL type {}", nal_type);
-        }
         i += len;
         nals_seen = nals_seen.saturating_add(1);
         if nals_seen > 1024 {

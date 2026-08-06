@@ -3,6 +3,7 @@
 use anyhow::{Context, Result, bail};
 use std::path::Path;
 use std::process::{Command, Stdio};
+use tracing::warn;
 
 use crate::util::tail_lossy;
 
@@ -186,8 +187,10 @@ pub(crate) fn tshark_extract_rtp_rows(pcap_path: &Path) -> Result<Vec<RtpTsharkR
     let stdout = String::from_utf8_lossy(&out.stdout);
     let mut rows = Vec::new();
     for (idx, line) in stdout.lines().enumerate() {
-        if let Some(row) = parse_tshark_rtp_row_line(line, idx + 1)? {
-            rows.push(row);
+        match parse_tshark_rtp_row_line(line, idx + 1) {
+            Ok(Some(row)) => rows.push(row),
+            Ok(None) => {}
+            Err(e) => warn!(error = %e, "skipping unparsable tshark rtp row"),
         }
     }
     Ok(rows)

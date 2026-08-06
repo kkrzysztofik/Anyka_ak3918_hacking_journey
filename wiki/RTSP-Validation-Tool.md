@@ -54,6 +54,7 @@ separate modules; the dependency direction is enforced and has no cycles.
 | `src/probe.rs` | Retina in-process probe: DESCRIBE/SETUP/PLAY, SDP, first-frame timing |
 | `src/harness.rs` | External-tool harness: ffmpeg, ffprobe, tshark scenarios |
 | `src/httpflv.rs` | HTTP-FLV container parse and ffmpeg harness |
+| `src/rtp/mod.rs` | RTP layer entry point: curated `pub(crate)` re-exports only |
 | `src/rtp/rows.rs` | `tshark -T fields` output to RTP rows |
 | `src/rtp/payload.rs` | RFC 6184 (H.264) and RFC 3640 (AAC) payload conformance |
 | `src/rtp/streams.rs` | Stream grouping, primary selection, packet loss |
@@ -342,6 +343,8 @@ packet-loss-tolerance-percent = 1
 # Frame pacing (encoder cadence from RTP timestamps + arrival cadence from pcap
 # wall-clock). A frame gap >= max(1000/expected-fps * delay-multiple, delay-floor-ms)
 # counts as a delay; the run fails when delay_percent > delay-tolerance-percent.
+# Built-in defaults when a key is omitted: expected-fps = 25.0,
+# delay-multiple = 2.0, delay-floor-ms = 150.0, delay-tolerance-percent = 5.0.
 expected-fps = 15
 delay-multiple = 2.0
 delay-floor-ms = 150
@@ -391,7 +394,7 @@ Common CLI overrides: `--rtsp-host`, `--rtsp-port`, `--rtsp-stream`, `--username
 
 Local-launch flags: `--h264-file`, `--loop-playback`, `--onvif-binary` (defaults to an auto-detected `cross-compile/target/.../onvif-rust`).
 
-Every option above is unset by default: passing it overrides the config file, omitting it leaves the config value (or the built-in default) in place.
+Every option above except `--transport` is unset by default: passing it overrides the config file, omitting it leaves the config value (or the built-in default) in place. `--transport` always defaults to `tcp` and has no config-file equivalent.
 
 Device flags: `--launch-on-device`, `--no-launch`, `--device-host`, `--device-ssh-port`, `--device-user`, `--device-password`, `--no-telemetry`, `--device-h264-file`, `--device-aac-file`, `--device-loop-playback`, `--device-real-mode`.
 

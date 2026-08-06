@@ -30,13 +30,13 @@ no dual wire format; no protocol.h churn; no C unit harness; no multi-VI.
 
 ## Architecture
 
-```
+```text
 Rust ImagingHalTrait (unchanged payloads)
   set_*effect(value) / set_ir_filter → i32 LE (4 bytes)
        │
        ▼
 vendor-daemon handlers_isp
-  req_len < 4 → STATUS_ERROR
+  req_len != 4 → STATUS_ERROR
   vi = first live VD_OBJ_KIND_VI  // file-local helper shared w/ get_ae_luma
   vi == NULL → STATUS_ERROR
   else → ak_vpss_effect_set / ak_vi_switch_mode → status
@@ -57,7 +57,7 @@ GPIO ordering in `night_mode::apply` unchanged (GPIO first, ISP best-effort).
 
 | Case | Response |
 |---|---|
-| `req_len < 4` | `STATUS_ERROR` |
+| `req_len != 4` (any payload other than the exact 4-byte `[i32]`) | `STATUS_ERROR` |
 | no live VI | `STATUS_ERROR` (+ warn) |
 | SDK non-zero | pass through as status (unchanged) |
 

@@ -212,6 +212,8 @@ static void *push_frame_thread(void *arg)
          * then forward-clamp oversized jumps (see TS_MAX_FORWARD_MS). */
         if (!state->timestamp_initialized) {
             state->first_timestamp_ms = raw_timestamp_ms;
+            state->last_raw_timestamp_ms = raw_timestamp_ms;
+            state->raw_timestamp_epoch_ms = 0;
             state->timestamp_initialized = 1;
             timestamp_ms = 0;
             log_info("event=timestamp_anchor stream=%u first_ts_ms=%u diag_monotonic_ms=%llu",
@@ -219,20 +221,23 @@ static void *push_frame_thread(void *arg)
                      raw_timestamp_ms,
                      (unsigned long long)diag_monotonic_ms());
         } else {
-            /* 32-bit SDK timestamps wrap ~every 49.7 days; extend with u64 before subtract */
-            uint64_t raw64 = (uint64_t)raw_timestamp_ms;
-            uint64_t first64 = (uint64_t)state->first_timestamp_ms;
-            if (raw64 < first64) {
-                log_warn("event=timestamp_wrap stream=%u raw_ts=%u first_ts=%u diag_monotonic_ms=%llu",
+            /* The 32-bit SDK clock wraps ~every 49.7 days.  Extending against the
+             * fixed first timestamp goes stale once the clock laps the anchor, so
+             * track a 64-bit epoch from consecutive-sample rollovers instead:
+             * a backward jump of more than half the 32-bit space means the SDK
+             * clock wrapped, and each wrap adds one 2^32 epoch. */
+            if (raw_timestamp_ms < state->last_raw_timestamp_ms &&
+                state->last_raw_timestamp_ms - raw_timestamp_ms > UINT32_MAX / 2) {
+                state->raw_timestamp_epoch_ms += UINT64_C(1) << 32;
+                log_warn("event=timestamp_wrap stream=%u raw_ts=%u epoch=%llu diag_monotonic_ms=%llu",
                          state->stream_id,
                          raw_timestamp_ms,
-                         state->first_timestamp_ms,
+                         (unsigned long long)state->raw_timestamp_epoch_ms,
                          (unsigned long long)diag_monotonic_ms());
-                /* 32-bit SDK clock may wrap multiple times over very long runs; extend until aligned. */
-                while (raw64 < first64) {
-                    raw64 += (uint64_t)1U << 32;
-                }
             }
+            uint64_t raw64 = state->raw_timestamp_epoch_ms + raw_timestamp_ms;
+            state->last_raw_timestamp_ms = raw_timestamp_ms;
+            uint64_t first64 = (uint64_t)state->first_timestamp_ms;
             uint64_t delta = raw64 - first64;
             int64_t base_ms = (delta > UINT32_MAX) ? (int64_t)UINT32_MAX : (int64_t)delta;
 
@@ -602,6 +607,8 @@ int handle_venc_start_push(int fd, const uint8_t *req, uint32_t req_len)
     /* Reset timestamp normalization state on push start */
     state->timestamp_initialized = 0;
     state->first_timestamp_ms = 0;
+    state->last_raw_timestamp_ms = 0;
+    state->raw_timestamp_epoch_ms = 0;
     state->last_out_ts_ms = 0;
     state->last_sane_interval_ms = 66;
     state->ts_corr_ms = 0;

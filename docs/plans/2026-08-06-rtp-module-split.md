@@ -22,8 +22,9 @@ This is a **refactor, not a feature**. There is no new behaviour to test-drive.
 **Setup — run once before Task 1:**
 
 ```bash
-cd /home/kmk/dev/anyka-dev/validation/rust
-export PATH="/home/kmk/dev/anyka-dev/toolchain/arm-anykav200-crosstool-ng/bin:$PATH"
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+export PATH="$REPO_ROOT/toolchain/arm-anykav200-crosstool-ng/bin:$PATH"
+cd "$REPO_ROOT/validation/rust"
 cargo test 2>&1 | tail -3
 ```
 
@@ -113,7 +114,7 @@ mod tests {
 
 Move these, **unchanged**, out of `rtsp.rs`'s `mod tests`:
 
-```
+```text
 test_parse_tshark_hex_bytes_empty_ok
 test_parse_tshark_hex_bytes_colon_separated
 test_parse_tshark_hex_bytes_contiguous
@@ -196,7 +197,7 @@ Extend the `use crate::rtp::{...}` line with the four newly re-exported names.
 
 **Step 4: Move the 19 `payload` tests verbatim**
 
-```
+```text
 test_validate_h264_rfc6184_single_nal_ok
 test_validate_h264_rfc6184_stap_a_ok
 test_validate_h264_rfc6184_fu_a_ok
@@ -331,7 +332,7 @@ pub(crate) use streams::{
 
 **Step 4: Move the 10 `pacing` tests verbatim**
 
-```
+```text
 test_delay_threshold_ms_fps_scaling
 test_encoder_deltas_ms_basic
 test_encoder_deltas_ms_frames_with_multiple_packets_collapse
@@ -558,11 +559,16 @@ Change `Status: approved, not yet implemented` to `Status: implemented` in `docs
 
 ## Rollback
 
-Each task is one commit on a measured seam. To abandon at any point:
+Each task is one commit on a measured seam. To abandon at any point, revert the
+task commits non-destructively:
 
 ```bash
-git reset --hard aeee6416   # pre-refactor state, clippy-clean, 226 tests green
+git revert --no-commit <first-task-commit>..HEAD
 ```
+
+Do **not** run `git reset --hard`. It discards uncommitted work and requires
+explicit written authorization that repeats the exact command and acknowledges
+its effect (see AGENTS.md "Irreversible Git & Filesystem Actions").
 
 Stopping after Task 4 is a coherent end state (`rtp/` extracted, `rtsp.rs` intact). Stopping after Task 5 without Task 6 is also coherent, just with a misleadingly-named file.
 

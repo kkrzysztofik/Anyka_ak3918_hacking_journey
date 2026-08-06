@@ -78,6 +78,10 @@ fn gap_stats(
 /// order for a live stream, and that keeps 32-bit wrap-around arithmetic
 /// well-defined (the same wrap-around assumption used for sequence-number loss).
 fn encoder_deltas_ms(rows: &[RtpTsharkRow]) -> Vec<f64> {
+    // Half the 32-bit media-clock space: a larger forward delta means the
+    // timestamp went backwards (reordering), not a real gap. Same rule the
+    // arrival and loss calculations use for sequence numbers.
+    const MAX_FORWARD_TICKS: u32 = u32::MAX / 2;
     let mut deltas = Vec::new();
     let mut prev_ts: Option<u32> = None;
     for row in rows {
@@ -85,9 +89,10 @@ fn encoder_deltas_ms(rows: &[RtpTsharkRow]) -> Vec<f64> {
             && row.timestamp != prev
         {
             let delta = row.timestamp.wrapping_sub(prev);
-            if delta > 0 {
+            if delta <= MAX_FORWARD_TICKS {
                 deltas.push(delta as f64 / VIDEO_RTP_CLOCK_HZ * 1000.0);
             }
+            // Out-of-order timestamp; not a gap. Keep the newer reference.
         }
         prev_ts = Some(row.timestamp);
     }
@@ -126,6 +131,12 @@ fn arrival_deltas_ms(rows: &[RtpTsharkRow]) -> Vec<f64> {
 }
 
 /// Compute frame pacing (A + B) for the primary video stream rows.
+///
+/// The encoder-cadence math assumes the primary video stream uses the fixed
+/// 90 kHz RTP media clock ([`VIDEO_RTP_CLOCK_HZ`]), which holds for the current
+/// H.264 validation pipeline. A codec with another clock rate would scale
+/// every gap incorrectly, so that assumption must be revisited if such a
+/// stream is ever validated.
 ///
 /// Returns `None` when there is no usable data (no rows, no expected fps, or
 /// fewer than two frames). Arrival cadence is skipped when the pcap lacks

@@ -47,7 +47,7 @@ fi
 
 if [ ! -f "$SOURCE_DIR/$BINARY_NAME" ]; then
     log_error "Binary not found: $SOURCE_DIR/$BINARY_NAME"
-    log_error "Build first: cd cross-compile/onvif-rust && \$CARGO build --release --target arm-anykav200-crosstool-ng"
+    log_error "Build first: cd cross-compile && \$CARGO build --release --target armv5te-unknown-linux-uclibceabi -p onvif-rust"
     exit 1
 fi
 
@@ -110,15 +110,31 @@ fi
 # The FTP clients report success even when STOR failed, and overwriting a binary
 # that is currently executing fails with ETXTBSY — which is the normal state here,
 # since the supervisor keeps onvif-rust running. Compare sizes to catch it.
+# Query the remote size with the same client that did the upload, so hosts with
+# only lftp (or only ftp) verify without demanding the other binary.
 if [ $UPLOAD_OK -eq 1 ]; then
     LOCAL_SIZE=$(stat -c %s "$SOURCE_DIR/$BINARY_NAME")
-    REMOTE_SIZE=$(printf 'open %s\nuser %s %s\nbinary\ncd %s\nls %s\nquit\n' \
-        "$DEVICE_IP" "$USERNAME" "$PASSWORD" "$DEST_DIR" "$DEST_BINARY" \
-        | ftp -n 2>/dev/null | awk -v f="$DEST_BINARY" '$NF ~ f {print $5}' | tail -1)
+
+    if command -v lftp &>/dev/null; then
+        REMOTE_SIZE=$(lftp -c "
+            open ftp://$USERNAME:$PASSWORD@$DEVICE_IP
+            cd $DEST_DIR
+            du -b -s $DEST_BINARY
+            quit
+        " 2>/dev/null | awk '{print $1}' | tail -1)
+    else
+        REMOTE_SIZE=$(printf 'open %s\nuser %s %s\nbinary\ncd %s\nls %s\nquit\n' \
+            "$DEVICE_IP" "$USERNAME" "$PASSWORD" "$DEST_DIR" "$DEST_BINARY" \
+            | ftp -n 2>/dev/null | awk -v f="$DEST_BINARY" '$NF ~ f {print $5}' | tail -1)
+    fi
+
     if [ -n "$REMOTE_SIZE" ] && [ "$REMOTE_SIZE" != "$LOCAL_SIZE" ]; then
         log_error "Upload did not land: remote is $REMOTE_SIZE bytes, local is $LOCAL_SIZE."
         log_error "The binary is probably running (ETXTBSY). Stop it first:"
         log_error "  killall vendor-daemon.bin onvif-rust.bin   # via telnet :24, then re-run"
+        UPLOAD_OK=0
+    elif [ -z "$REMOTE_SIZE" ]; then
+        log_error "Could not verify remote size (listing unavailable). Treating upload as failed."
         UPLOAD_OK=0
     fi
 fi

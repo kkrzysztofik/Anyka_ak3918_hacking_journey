@@ -39,7 +39,7 @@ struct RtspProtocolSequenceStats {
     setup: u32,
     play: u32,
     teardown: u32,
-    status_200: u32,
+    status_2xx: u32,
     status_4xx: u32,
     status_401: u32,
     status_5xx: u32,
@@ -249,7 +249,7 @@ fn harness_protocol_sequence_pass(stats: &RtspProtocolSequenceStats) -> bool {
     stats.describe > 0
         && stats.setup > 0
         && stats.play > 0
-        && stats.status_200 > 0
+        && stats.status_2xx > 0
         && non_auth_4xx == 0
         && stats.status_5xx == 0
 }
@@ -335,6 +335,7 @@ fn run_ffmpeg(
     cmd.hide_banner();
     configure(&mut cmd);
     let mut child = cmd.spawn().context("spawn ffmpeg")?;
+    let mut early_exit = false;
     for event in child.iter().context("ffmpeg iter")? {
         if let Some(l) = log.as_deref_mut() {
             match &event {
@@ -348,8 +349,15 @@ fn run_ffmpeg(
             }
         }
         if !on_event(&event) {
+            early_exit = true;
             break;
         }
+    }
+    if early_exit {
+        // ffmpeg-sidecar does not reap on drop; terminate and wait so a
+        // harness that stops the event loop early cannot leave a zombie.
+        let _ = child.kill();
+        let _ = child.wait();
     }
     Ok(())
 }
@@ -607,7 +615,7 @@ fn append_harness_protocol_sequence_result(
             "setup": stats.setup,
             "play": stats.play,
             "teardown": stats.teardown,
-            "status_200": stats.status_200,
+            "status_2xx": stats.status_2xx,
             "status_4xx": stats.status_4xx,
             "status_401_auth_challenge": stats.status_401,
             "status_non_auth_4xx": stats.status_4xx.saturating_sub(stats.status_401),
@@ -1334,7 +1342,7 @@ fn rtsp_sequence_stats_from_field_rows(rows: &str) -> RtspProtocolSequenceStats 
         }
         if let Some(status) = parse_status_code(status) {
             if (200..300).contains(&status) {
-                stats.status_200 += 1;
+                stats.status_2xx += 1;
             } else if (400..500).contains(&status) {
                 stats.status_4xx += 1;
                 if status == 401 {
@@ -1777,7 +1785,7 @@ mod tests {
             setup: 2,
             play: 1,
             teardown: 1,
-            status_200: 5,
+            status_2xx: 5,
             status_4xx: 1,
             status_401: 1,
             status_5xx: 0,
@@ -1792,7 +1800,7 @@ mod tests {
             setup: 2,
             play: 1,
             teardown: 1,
-            status_200: 4,
+            status_2xx: 4,
             status_4xx: 1,
             status_401: 0,
             status_5xx: 0,
@@ -1809,7 +1817,7 @@ mod tests {
         assert_eq!(stats.setup, 1);
         assert_eq!(stats.play, 1);
         assert_eq!(stats.teardown, 1);
-        assert_eq!(stats.status_200, 2);
+        assert_eq!(stats.status_2xx, 2);
         assert_eq!(stats.status_4xx, 2);
         assert_eq!(stats.status_401, 1);
         assert_eq!(stats.status_5xx, 1);
@@ -1979,7 +1987,7 @@ mod tests {
                 setup: 1,
                 play: 1,
                 teardown: 1,
-                status_200: 3,
+                status_2xx: 3,
                 status_4xx: 0,
                 status_401: 0,
                 status_5xx: 0,

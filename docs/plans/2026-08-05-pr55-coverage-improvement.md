@@ -235,6 +235,8 @@ async fn test_enable_ir_auto_sets_settings_to_auto() {
 - [ ] **Step 2: Run**
 
 ```bash
+source ./setenv.sh
+cd cross-compile
 $CARGO test --target x86_64-unknown-linux-gnu -p onvif-rust --lib \
   test_set_ir_lamp_writes_node_and_mirrors_filter_mode \
   test_set_white_light_writes_white_led_node \
@@ -336,6 +338,8 @@ async fn test_lamp_support_defaults_when_get_options_fails() {
 - [ ] **Step 3: Run**
 
 ```bash
+source ./setenv.sh
+cd cross-compile
 $CARGO test --target x86_64-unknown-linux-gnu -p onvif-rust --lib \
   test_dispatch_auxiliary_ir_lamp_on_off_auto_succeed \
   test_dispatch_auxiliary_white_light_succeeds \

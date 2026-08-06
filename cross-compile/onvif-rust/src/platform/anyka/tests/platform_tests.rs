@@ -119,6 +119,67 @@ fn test_init_ptz_control_skips_bring_up_when_disabled() {
 }
 
 #[tokio::test]
+async fn test_stop_night_loop_aborts_a_task_that_ignores_shutdown() {
+    use std::sync::atomic::{AtomicU32, Ordering};
+    use std::time::Duration;
+
+    // A loop that keeps spinning regardless of the shutdown signal;
+    // stop_night_loop must abort and join it instead of detaching it
+    // (regression for the timeout path that used to consume the JoinHandle).
+    let (tx, rx) = tokio::sync::broadcast::channel(1);
+    let ticks = Arc::new(AtomicU32::new(0));
+    let ticks_task = Arc::clone(&ticks);
+    let task = tokio::spawn(async move {
+        let mut rx = rx;
+        loop {
+            ticks_task.fetch_add(1, Ordering::SeqCst);
+            let _ = rx.try_recv(); // ignore the shutdown signal
+            tokio::time::sleep(Duration::from_millis(1)).await;
+        }
+    });
+
+    // Let the loop spin a few times so it is provably running before we stop it.
+    tokio::time::sleep(Duration::from_millis(20)).await;
+    assert!(ticks.load(Ordering::SeqCst) > 0, "loop must tick before shutdown");
+
+    super::super::stop_night_loop(tx, task).await;
+
+    // The abort terminates the loop: the tick counter must stop advancing
+    // *after* stop_night_loop returns. (During the 2s shutdown wait the loop
+    // legitimately keeps ticking; the detached-task bug would keep it ticking
+    // after the return too.)
+    let ticks_after_stop = ticks.load(Ordering::SeqCst);
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    assert_eq!(
+        ticks.load(Ordering::SeqCst),
+        ticks_after_stop,
+        "AUTO loop kept running after shutdown (was detached, not aborted)"
+    );
+}
+
+#[tokio::test]
+async fn test_stop_night_loop_joins_a_task_that_stops_promptly() {
+    use std::sync::atomic::{AtomicU32, Ordering};
+    use std::time::Duration;
+
+    let (tx, mut rx) = tokio::sync::broadcast::channel(1);
+    let ticks = Arc::new(AtomicU32::new(0));
+    let ticks_task = Arc::clone(&ticks);
+    let task = tokio::spawn(async move {
+        let _ = rx.recv().await; // stops promptly on shutdown
+        ticks_task.fetch_add(1, Ordering::SeqCst);
+    });
+
+    tokio::time::sleep(Duration::from_millis(10)).await;
+    assert_eq!(ticks.load(Ordering::SeqCst), 0);
+
+    super::super::stop_night_loop(tx, task).await;
+
+    // A well-behaved loop was joined (not aborted) and completed its work.
+    assert_eq!(ticks.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
 async fn test_spawn_supervisor_loss_receiver_taken_returns_initialization_failed() {
     let platform = Arc::new(AnykaPlatform::with_mocked_hal(
         Arc::new(MockVideoHalTrait::new()),

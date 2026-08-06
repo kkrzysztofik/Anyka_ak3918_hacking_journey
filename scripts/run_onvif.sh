@@ -61,11 +61,11 @@ log_info "Connecting to device and starting $BINARY_NAME..."
 TELNET_SCRIPT=$(mktemp /tmp/telnet_run_onvif_rust.XXXXXX)
 cat > "$TELNET_SCRIPT" << EOF
 echo "Stopping any existing onvif-rust process..."
-killall onvif-rust 2>/dev/null || true
+killall onvif-rust onvif-rust.bin 2>/dev/null || true
 sleep 2
 
 if [ ! -f "$FULL_BINARY_PATH" ]; then
-    echo "ERROR: $FULL_BINARY_PATH not found. Deploy first: ./deploy_onvif.sh $DEVICE_IP $USERNAME $PASSWORD"
+    echo "ERROR: $FULL_BINARY_PATH not found. Deploy first: ./deploy_onvif.sh $DEVICE_IP $USERNAME"
     exit 1
 fi
 

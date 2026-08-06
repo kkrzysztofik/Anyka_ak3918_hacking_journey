@@ -48,7 +48,7 @@ int handle_isp_effect(int fd, const uint8_t *req, uint32_t req_len,
     int32_t value;
     int ret;
 
-    if (req_len < 4) {
+    if (req_len != 4) {
         log_warn("[isp] %s: req too short (%u)", name, req_len);
         return send_response(fd, STATUS_ERROR, NULL, 0);
     }
@@ -101,7 +101,7 @@ int handle_isp_set_ir_filter(int fd, const uint8_t *req, uint32_t req_len)
     enum video_daynight_mode dn;
     int ret;
 
-    if (req_len < 4)
+    if (req_len != 4)
         return send_response(fd, STATUS_ERROR, NULL, 0);
     if (isp_first_vi(&vi_handle) != 0) {
         log_warn("[isp] set_ir_filter: no VI registered");

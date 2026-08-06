@@ -43,7 +43,8 @@ ak_vi_switch_mode / ISP stall
        │
        ▼
 push.c  — after first-anchor + wrap:
-          if forward delta > 250ms → publish last_out + min(sane_interval, 250)
+          if forward delta > 5000ms → publish last_out + bounded_step
+          bounded_step = clamp(last_sane_interval, 16..=250)
           keep correction so later frames stay continuous
        │
        ▼
@@ -53,7 +54,7 @@ night_mode::apply
   GPIO → ISP → request_idr main+sub (best-effort)
 ```
 
-`# ponytail: 250ms forward cap; lower if VLC still hiccups after confirm log.`
+`# ponytail: 5s forward cap (TS_MAX_FORWARD_MS); lower if VLC still hiccups after confirm log.`
 
 ## Components
 
@@ -67,7 +68,7 @@ night_mode::apply
 
 | Case | Behavior |
 |---|---|
-| Forward jump > 250ms | Clamp; rate-limited warn |
+| Forward jump > 5000ms (`TS_MAX_FORWARD_MS`) | Publish `last_out + clamp(last_sane_interval, 16..=250)`; rate-limited warn |
 | Encoder missing / IDR fail | Best-effort; do not fail `apply` |
 | u32 wrap | Existing push wrap path unchanged |
 

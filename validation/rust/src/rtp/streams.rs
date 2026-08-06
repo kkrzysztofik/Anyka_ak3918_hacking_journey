@@ -79,17 +79,14 @@ pub(crate) fn compute_stream_loss_metric(stats: &RtpStreamStats) -> RtpLossMetri
 }
 
 fn is_reasonably_h264(stats: &RtpStreamStats) -> bool {
-    const MIN_PACKETS: u32 = 10;
-    const MIN_VALID_RATIO: f64 = 0.80;
     let total = stats.rows.len() as u32;
-    total >= MIN_PACKETS && (stats.valid_h264 as f64 / total as f64) >= MIN_VALID_RATIO
+    total >= super::MIN_PACKETS
+        && (stats.valid_h264 as f64 / total as f64) >= super::MIN_VALID_RATIO
 }
 
 fn is_reasonably_aac(stats: &RtpStreamStats) -> bool {
-    const MIN_PACKETS: u32 = 10;
-    const MIN_VALID_RATIO: f64 = 0.80;
     let total = stats.rows.len() as u32;
-    total >= MIN_PACKETS && (stats.valid_aac as f64 / total as f64) >= MIN_VALID_RATIO
+    total >= super::MIN_PACKETS && (stats.valid_aac as f64 / total as f64) >= super::MIN_VALID_RATIO
 }
 
 pub(crate) fn pick_primary_video_stream(streams: &[RtpStreamStats]) -> Option<&RtpStreamStats> {
@@ -145,6 +142,26 @@ pub(crate) fn group_rtp_rows_by_stream(rows: Vec<RtpTsharkRow>) -> Vec<RtpStream
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_packet_loss_computation_edge_cases() {
+        // Gap: 100, 103 → two packets lost.
+        let (total, loss, pct) = compute_packet_loss_from_seqs(&[100, 103]);
+        assert_eq!((total, loss), (2, 2));
+        assert!((pct - 100.0).abs() < f64::EPSILON);
+
+        // Duplicate: 100, 100 → no loss.
+        let (total, loss, _) = compute_packet_loss_from_seqs(&[100, 100]);
+        assert_eq!((total, loss), (2, 0));
+
+        // Wrap-around: 65535, 0 → contiguous, no loss.
+        let (total, loss, _) = compute_packet_loss_from_seqs(&[65535, 0]);
+        assert_eq!((total, loss), (2, 0));
+
+        // Out-of-order delivery: 100, 99 → treated as reordering, no loss.
+        let (total, loss, _) = compute_packet_loss_from_seqs(&[100, 99]);
+        assert_eq!((total, loss), (2, 0));
+    }
 
     #[test]
     fn test_packet_loss_computation_does_not_mix_streams() {

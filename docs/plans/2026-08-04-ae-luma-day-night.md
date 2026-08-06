@@ -151,7 +151,8 @@ CMD_ISP_GET_AE_LUMA = 106,
 int handle_isp_get_ae_luma(int fd, const uint8_t *req, uint32_t req_len)
 {
     (void)req;
-    (void)req_len;
+    if (req_len != 0)
+        return send_response(fd, STATUS_ERROR, NULL, 0);
     void *vi = NULL;
     int i;
     for (i = 0; i < VD_OBJ_SLOTS; i++) {

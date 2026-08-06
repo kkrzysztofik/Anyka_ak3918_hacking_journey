@@ -23,22 +23,23 @@
 In `struct push_stream_state`, after `timestamp_initialized`, add:
 
 ```c
-uint32_t last_raw_ts_ms;
-uint32_t last_out_ts_ms;
-uint32_t last_sane_interval_ms; /* init 66; updated when delta in 16..1000 */
-int64_t  ts_corr_ms;            /* added into normalized out; keeps continuity after clamps */
+uint32_t last_raw_timestamp_ms;  /* previous SDK timestamp, for rollover detection */
+uint64_t raw_timestamp_epoch_ms; /* 2^32 per detected SDK wrap */
+int64_t  last_out_ts_ms;         /* last timestamp published to the ring */
+int64_t  last_sane_interval_ms;  /* init 66; updated when delta in 16..1000 */
+int64_t  ts_corr_ms;             /* added into normalized out; keeps continuity after clamps */
 ```
 
 **Step 2: Reset on push start**
 
-Where `timestamp_initialized = 0` today (~push.c:513), also zero `last_*`, set `last_sane_interval_ms = 66`, `ts_corr_ms = 0`.
+Where `timestamp_initialized = 0` today (~push.c:513), also zero `last_*`, set `last_sane_interval_ms = 66`, `ts_corr_ms = 0`, `raw_timestamp_epoch_ms = 0`.
 
 **Step 3: Clamp after existing first-anchor / wrap**
 
 After computing `timestamp_ms = raw - first` (with wrap), apply correction and clamp:
 
 ```c
-#define TS_MAX_FORWARD_MS 250u
+#define TS_MAX_FORWARD_MS 5000u /* pathological leap (above VLC's ~9s comfort) */
 #define TS_SANE_MIN_MS 16u
 #define TS_SANE_MAX_MS 1000u
 
@@ -47,35 +48,51 @@ uint64_t out64 = (uint64_t)timestamp_ms + (uint64_t)state->ts_corr_ms;
 /* handle corr negative carefully if using signed corr — prefer unsigned corr_boost only */
 
 if (state->timestamp_initialized /* already past first frame */) {
-    uint32_t last_out = state->last_out_ts_ms;
-    uint32_t cand = /* timestamp_ms + corr, saturating to u32 */;
-    uint32_t delta = cand - last_out; /* only if cand >= last_out; else existing wrap/regress */
+    int64_t last_out = state->last_out_ts_ms;
+    int64_t cand = /* timestamp_ms + corr, saturating to u32 */;
+    int64_t forward = cand - last_out;
 
-    if (cand >= last_out && delta > TS_MAX_FORWARD_MS) {
-        uint32_t step = state->last_sane_interval_ms;
-        if (step < TS_SANE_MIN_MS || step > TS_MAX_FORWARD_MS)
-            step = TS_MAX_FORWARD_MS;
-        uint32_t clamped = last_out + step;
-        state->ts_corr_ms += (int64_t)clamped - (int64_t)cand;
+    if (forward > TS_MAX_FORWARD_MS) {
+        int64_t step = state->last_sane_interval_ms;
+        if (step > 250) {
+            step = 250; /* bounded replacement step */
+        } else if (step < TS_SANE_MIN_MS) {
+            step = TS_SANE_MIN_MS;
+        }
+        int64_t clamped = last_out + step;
+        state->ts_corr_ms += clamped - cand;
         timestamp_ms = clamped;
-        log_warn("event=timestamp_forward_clamp stream=%u raw=%u cand=%u out=%u step=%u",
-                 state->stream_id, raw_timestamp_ms, cand, clamped, step);
+        log_warn("event=timestamp_forward_clamp stream=%u raw=%u cand=%lld out=%lld step=%lld corr_ms=%lld",
+                 state->stream_id, raw_timestamp_ms, (long long)cand,
+                 (long long)clamped, (long long)step, (long long)state->ts_corr_ms);
+    } else if (forward <= 0) {
+        /* never publish a regression; minimal advance keeps media clock moving */
+        int64_t step = 1;
+        int64_t clamped = last_out + step;
+        state->ts_corr_ms += clamped - cand;
+        timestamp_ms = clamped;
+        log_warn("event=timestamp_backward_clamp stream=%u raw=%u cand=%lld out=%lld",
+                 state->stream_id, raw_timestamp_ms, (long long)cand, (long long)clamped);
     } else {
         timestamp_ms = cand;
         if (cand >= last_out) {
-            uint32_t d = cand - last_out;
+            int64_t d = cand - last_out;
             if (d >= TS_SANE_MIN_MS && d <= TS_SANE_MAX_MS)
                 state->last_sane_interval_ms = d;
         }
     }
 }
-state->last_raw_ts_ms = raw_timestamp_ms;
 state->last_out_ts_ms = timestamp_ms;
 ```
 
+Rollover detection is epoch-based (not anchored to the first timestamp): when a
+consecutive-sample backward jump of more than half the 32-bit space is observed,
+`raw_timestamp_epoch_ms += 2^32`, so `raw64 = epoch + raw` stays monotonic across
+any number of SDK wraps.
+
 Refine first-frame path so the first published frame still starts at 0 and initializes `last_out`.
 
-`# ponytail: 250ms forward cap; lower if VLC still hiccups after confirm log.`
+`# ponytail: 5s forward cap (TS_MAX_FORWARD_MS); lower if VLC still hiccups after confirm log.`
 
 **Step 4: Build**
 

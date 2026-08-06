@@ -29,7 +29,7 @@ proposed.
 
 ## Final structure
 
-```
+```text
 src/probe.rs        ~479 code    Retina live probe
 src/harness.rs    ~1,676 code    was rtsp.rs; run_harness, scenarios,
                                  appenders, ffmpeg/tshark plumbing
@@ -43,7 +43,7 @@ src/rtp/pacing.rs     163        encoder + arrival cadence, gap percentiles
 
 ### `rtp/` internal dependencies
 
-```
+```text
 rows  <-- payload <-- streams
   ^
   +-------- pacing
@@ -53,10 +53,10 @@ rows  <-- payload <-- streams
 `RtpTsharkRow`, `validate_h264_rtp_payload_rfc6184`, `validate_aac_rtp_payload_rfc3640`.
 
 `rtp/mod.rs` re-exports as `pub(crate)` only what `harness.rs` calls:
-`tshark_extract_rtp_rows`, `RtpTsharkRow`, `group_rtp_rows_by_stream`,
+`tshark_extract_rtp_rows`, `group_rtp_rows_by_stream`,
 `pick_primary_video_stream`, `pick_primary_audio_stream`, `compute_stream_loss_metric`,
 `analyze_h264_rfc6184_from_rows`, `analyze_aac_rfc3640_from_rows`, `compute_pacing`,
-`HarnessRtpLossMetric`, `RtpPcapRfc6184Stats`, `RtpPcapRfc3640Stats`, `FramePacing`,
+`RtpLossMetric`, `RtpPcapRfc6184Stats`, `RtpPcapRfc3640Stats`, `FramePacing`,
 `GapStats`.
 
 ### Staying in `harness.rs`
@@ -71,15 +71,14 @@ Three items sit inside the moved line range but do not belong to the RTP layer:
 Also staying: `parse_status_code`, `tshark_rtsp_sequence_stats`, `TsharkCapture`,
 `drain_ffmpeg` — RTSP-sequence parsing and capture orchestration, out of scope.
 
-`HarnessRtpLossMetric` keeps its name after moving into `rtp::streams`, to avoid
+`RtpLossMetric` keeps its name after moving into `rtp::streams`, to avoid
 editing test bodies mid-move.
 
 > **Correction (post-implementation).** An earlier revision of this document
 > justified keeping the name by claiming it "is serialised into the report JSON
 > under that shape". That is **wrong**: `serde_json::json!(m)` serialises field
-> names, not the type name, and the struct carries no `#[serde(rename)]`. Renaming
-> it is behaviour-neutral. Deferred to the cleanup pass, not blocked by the report
-> format.
+> names, not the type name, and the struct carries no `#[serde(rename)]`. The
+> rename to `RtpLossMetric` was applied in the cleanup pass.
 
 ## Rejected: splitting `harness/`
 

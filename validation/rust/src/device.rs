@@ -435,7 +435,11 @@ fn device_copy_logs_blocking_with_ssh(
         &device_list_logs_command(dir, glob),
         DEVICE_SSH_LOG_COPY_READ_TIMEOUT_SEC,
     )?;
-    let listing = extract_between_markers(&listing_raw).unwrap_or(listing_raw);
+    // No begin marker means `cd {dir}` failed, so the directory is absent.
+    let Some(listing) = extract_between_markers(&listing_raw) else {
+        debug!(what, dir, "device log directory not present");
+        return Ok(());
+    };
     let files: Vec<&str> = listing
         .lines()
         .map(|l| l.trim_matches(['\r', '\n', ' ']))

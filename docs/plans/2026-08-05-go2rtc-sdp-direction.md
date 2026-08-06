@@ -297,7 +297,18 @@ identical to success if you only grep for the removed string.
 
 **Step 3: Refresh the SD card copy**
 
+Record the checksum of the deployed pre-build artifact *before* overwriting it —
+`git show HEAD~1` is NOT the deployed image when the working tree already carries
+uncommitted work (see the note below), so Task 5 compares against this recorded
+value instead of guessing at HEAD~1.
+
 ```bash
+# What is currently committed on the SD-card copy (this is the prior release):
+git show HEAD:SD_card_contents/anyka_hack/onvif/onvif-rust.bin | md5sum
+# The camera currently runs this (if already deployed): keep this exact value
+# for Task 5 step 1 — save it, e.g.:
+md5sum SD_card_contents/anyka_hack/onvif/onvif-rust.bin > /tmp/deployed_onvif.md5
+
 cp cross-compile/target/armv5te-unknown-linux-uclibceabi/release/onvif-rust \
    SD_card_contents/anyka_hack/onvif/onvif-rust.bin
 ```
@@ -328,10 +339,13 @@ uv run python3 scripts/debugging/cam_exec.py --timeout 60 \
   'md5sum /mnt/anyka_hack/onvif/onvif-rust.bin; cp /mnt/anyka_hack/onvif/onvif-rust.bin /mnt/anyka_hack/onvif/onvif-rust.bin.bak; ls -la /mnt/anyka_hack/onvif/'
 ```
 
-Compare against `git show HEAD~1:SD_card_contents/anyka_hack/onvif/onvif-rust.bin | md5sum`
-(HEAD~1 because Task 4 just committed the new one). They should match. If they do
-not, stop and report — something other than this branch's work is on the camera,
-and overwriting it blind would lose it.
+Compare against the checksum recorded in Task 4 step 3 (the artifact `.198` is
+actually running), e.g. `cat /tmp/deployed_onvif.md5`. Do **not** use `git show
+HEAD~1` — Task 4 just committed the *new* binary, and HEAD~1 is neither the new
+commit nor necessarily the deployed image when the working tree carried
+uncommitted work. They should match. If they do not, stop and report — something
+other than this branch's work is on the camera, and overwriting it blind would
+lose it.
 
 **Step 2: Deploy**
 

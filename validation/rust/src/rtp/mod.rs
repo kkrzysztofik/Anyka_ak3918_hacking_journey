@@ -11,6 +11,18 @@ mod payload;
 mod rows;
 mod streams;
 
+/// Minimum packet count before a stream is classifiable as H.264/AAC.
+///
+/// Shared by stream selection (`streams.rs`) and the RFC payload analyzers
+/// (`payload.rs`) so the four copies cannot drift apart.
+pub(crate) const MIN_PACKETS: u32 = 10;
+
+/// Minimum valid-payload ratio before a stream is classifiable as H.264/AAC.
+///
+/// Shared by stream selection (`streams.rs`) and the RFC payload analyzers
+/// (`payload.rs`) so the four copies cannot drift apart.
+pub(crate) const MIN_VALID_RATIO: f64 = 0.80;
+
 pub(crate) use pacing::{FramePacing, GapStats, compute_pacing};
 pub(crate) use payload::{
     RtpPcapRfc3640Stats, RtpPcapRfc6184Stats, analyze_aac_rfc3640_from_rows,

@@ -95,8 +95,7 @@ impl Default for HttpFlvSection {
         Self {
             port: DEFAULT_HTTPFLV_PORT,
             path: DEFAULT_HTTPFLV_PATH.to_string(),
-            // 0 means "unset"; the effective config substitutes its own default.
-            timeout_sec: 0,
+            timeout_sec: DEFAULT_HTTPFLV_TIMEOUT_SEC,
         }
     }
 }
@@ -512,13 +511,16 @@ impl EffectiveConfig {
         let update_baseline = c.run.update_baseline || args.update_baseline;
         let compare_baseline = c.run.compare_baseline || args.compare_baseline;
 
-        let httpflv = c.httpflv.clone().unwrap_or(HttpFlvSection {
-            timeout_sec: DEFAULT_HTTPFLV_TIMEOUT_SEC,
-            ..Default::default()
-        });
+        let httpflv = c.httpflv.clone().unwrap_or_default();
         let httpflv_port = args.httpflv_port.unwrap_or(httpflv.port);
         let httpflv_path = args.httpflv_stream.clone().unwrap_or(httpflv.path);
-        let httpflv_timeout_sec = httpflv.timeout_sec;
+        // An explicit `timeout-sec = 0` in a config file must not disable the
+        // timeout; treat it as "use the built-in default".
+        let httpflv_timeout_sec = if httpflv.timeout_sec == 0 {
+            DEFAULT_HTTPFLV_TIMEOUT_SEC
+        } else {
+            httpflv.timeout_sec
+        };
 
         // Build streams list.
         let streams = if !c.device.streams.is_empty() {
@@ -975,10 +977,10 @@ where
 #[allow(clippy::field_reassign_with_default)]
 mod tests {
     use super::{
-        DEFAULT_ARTIFACTS_ROOT_DIR, DEFAULT_BASELINE_DIR, DEFAULT_HTTPFLV_PATH, DEFAULT_RTSP_HOST,
-        DEFAULT_RTSP_PORT, DEFAULT_RTSP_STREAM, EffectiveConfig, HttpFlvSection,
-        InitialTimestampPolicyArg, LoggingSection, RtspValidationConfig, load_config,
-        parse_args_from,
+        DEFAULT_ARTIFACTS_ROOT_DIR, DEFAULT_BASELINE_DIR, DEFAULT_HTTPFLV_PATH,
+        DEFAULT_HTTPFLV_TIMEOUT_SEC, DEFAULT_RTSP_HOST, DEFAULT_RTSP_PORT, DEFAULT_RTSP_STREAM,
+        EffectiveConfig, HttpFlvSection, InitialTimestampPolicyArg, LoggingSection,
+        RtspValidationConfig, load_config, parse_args_from,
     };
     use clap::CommandFactory;
     use std::path::PathBuf;
@@ -1062,6 +1064,20 @@ mod tests {
         assert_eq!(cfg.pacing.delay_multiple, 3.0);
         assert_eq!(cfg.pacing.delay_floor_ms, 200.0);
         assert_eq!(cfg.pacing.delay_tolerance_percent, 10.0);
+    }
+
+    #[test]
+    fn test_partial_httpflv_section_uses_default_timeout() {
+        let cfg: RtspValidationConfig = toml::from_str(
+            r#"[httpflv]
+            port = 8080
+            "#,
+        )
+        .unwrap();
+        let parsed = parse_args_from(["rtsp_validation_tool"]).unwrap();
+        let effective = EffectiveConfig::from_config_and_args(Some(&cfg), &parsed);
+        assert_eq!(effective.httpflv_port, 8080);
+        assert_eq!(effective.httpflv_timeout_sec, DEFAULT_HTTPFLV_TIMEOUT_SEC);
     }
 
     #[test]
