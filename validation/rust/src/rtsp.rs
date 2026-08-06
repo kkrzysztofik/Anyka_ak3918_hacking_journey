@@ -23,9 +23,10 @@ use url::Url;
 use crate::config::{Args, EffectiveConfig, InitialTimestampPolicyArg, TransportArg};
 use crate::report::{StreamInfo, TestResult, TestRun, ValidationReport, result_ok};
 use crate::rtp::{
-    RtpPcapRfc3640Stats, RtpPcapRfc6184Stats, RtpTsharkRow, analyze_aac_rfc3640_from_rows,
-    analyze_h264_rfc6184_from_rows, tshark_extract_rtp_rows, validate_aac_rtp_payload_rfc3640,
-    validate_h264_rtp_payload_rfc6184,
+    HarnessRtpLossMetric, RtpPcapRfc3640Stats, RtpPcapRfc6184Stats, RtpTsharkRow,
+    analyze_aac_rfc3640_from_rows, analyze_h264_rfc6184_from_rows, compute_stream_loss_metric,
+    group_rtp_rows_by_stream, pick_primary_audio_stream, pick_primary_video_stream,
+    tshark_extract_rtp_rows,
 };
 use crate::util::{
     MAX_TOOL_LOG_BYTES, parse_ffmpeg_summary_bitrate_kbps, tail_lossy, write_bytes_tail,
@@ -221,142 +222,6 @@ struct HarnessPacketLossResult {
     h264_rfc6184: Option<std::result::Result<RtpPcapRfc6184Stats, String>>,
     aac_rfc3640: Option<std::result::Result<RtpPcapRfc3640Stats, String>>,
     pacing: Option<FramePacing>,
-}
-
-#[derive(Debug, Clone, Default, Serialize)]
-struct HarnessRtpLossMetric {
-    rtp_packets: u32,
-    packet_loss: u32,
-    loss_percent: f64,
-    payload_type: u8,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    ssrc: Option<u32>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-struct RtpStreamKey {
-    payload_type: u8,
-    ssrc: Option<u32>,
-    dst_port: Option<u16>,
-}
-
-#[derive(Debug, Clone)]
-struct RtpStreamStats {
-    key: RtpStreamKey,
-    rows: Vec<RtpTsharkRow>,
-    valid_h264: u32,
-    valid_aac: u32,
-}
-
-fn compute_packet_loss_from_seqs(seqs: &[u16]) -> (u32, u32, f64) {
-    // Compute loss on capture order while ignoring likely reordering.
-    // This is good enough for the short-duration harness capture.
-    let mut total = 0u32;
-    let mut loss = 0u32;
-    let mut prev: Option<u16> = None;
-    for &seq in seqs {
-        total = total.saturating_add(1);
-        let Some(p) = prev else {
-            prev = Some(seq);
-            continue;
-        };
-        let delta = seq.wrapping_sub(p) as u32;
-        if delta == 0 {
-            continue;
-        }
-        if delta < 32768 {
-            if delta > 1 {
-                loss = loss.saturating_add(delta - 1);
-            }
-            prev = Some(seq);
-        } else {
-            // Likely out-of-order delivery. Do not count as loss.
-            continue;
-        }
-    }
-    let loss_percent = if total > 0 {
-        100.0 * (loss as f64) / (total as f64)
-    } else {
-        0.0
-    };
-    (total, loss, loss_percent)
-}
-
-fn compute_stream_loss_metric(stats: &RtpStreamStats) -> HarnessRtpLossMetric {
-    let seqs: Vec<u16> = stats.rows.iter().map(|r| r.seq).collect();
-    let (total, loss, pct) = compute_packet_loss_from_seqs(&seqs);
-    HarnessRtpLossMetric {
-        rtp_packets: total,
-        packet_loss: loss,
-        loss_percent: pct,
-        payload_type: stats.key.payload_type,
-        ssrc: stats.key.ssrc,
-    }
-}
-
-fn is_reasonably_h264(stats: &RtpStreamStats) -> bool {
-    const MIN_PACKETS: u32 = 10;
-    const MIN_VALID_RATIO: f64 = 0.80;
-    let total = stats.rows.len() as u32;
-    total >= MIN_PACKETS && (stats.valid_h264 as f64 / total as f64) >= MIN_VALID_RATIO
-}
-
-fn is_reasonably_aac(stats: &RtpStreamStats) -> bool {
-    const MIN_PACKETS: u32 = 10;
-    const MIN_VALID_RATIO: f64 = 0.80;
-    let total = stats.rows.len() as u32;
-    total >= MIN_PACKETS && (stats.valid_aac as f64 / total as f64) >= MIN_VALID_RATIO
-}
-
-fn pick_primary_video_stream(streams: &[RtpStreamStats]) -> Option<&RtpStreamStats> {
-    streams
-        .iter()
-        .filter(|s| is_reasonably_h264(s))
-        .max_by_key(|s| (s.valid_h264, s.rows.len()))
-        .or_else(|| streams.iter().max_by_key(|s| s.rows.len()))
-}
-
-fn pick_primary_audio_stream(
-    streams: &[RtpStreamStats],
-    video_key: Option<RtpStreamKey>,
-) -> Option<&RtpStreamStats> {
-    let candidates: Vec<&RtpStreamStats> = streams
-        .iter()
-        .filter(|s| Some(s.key) != video_key)
-        .collect();
-
-    candidates
-        .iter()
-        .copied()
-        .filter(|s| is_reasonably_aac(s))
-        .max_by_key(|s| (s.valid_aac, s.rows.len()))
-        .or_else(|| candidates.into_iter().max_by_key(|s| s.rows.len()))
-}
-
-fn group_rtp_rows_by_stream(rows: Vec<RtpTsharkRow>) -> Vec<RtpStreamStats> {
-    use std::collections::HashMap;
-    let mut streams: HashMap<RtpStreamKey, RtpStreamStats> = HashMap::new();
-    for row in rows {
-        let key = RtpStreamKey {
-            payload_type: row.payload_type,
-            ssrc: row.ssrc,
-            dst_port: row.udp_dst_port,
-        };
-        let entry = streams.entry(key).or_insert_with(|| RtpStreamStats {
-            key,
-            rows: Vec::new(),
-            valid_h264: 0,
-            valid_aac: 0,
-        });
-        if validate_h264_rtp_payload_rfc6184(&row.payload, row.marker).0 {
-            entry.valid_h264 = entry.valid_h264.saturating_add(1);
-        }
-        if validate_aac_rtp_payload_rfc3640(&row.payload).0 {
-            entry.valid_aac = entry.valid_aac.saturating_add(1);
-        }
-        entry.rows.push(row);
-    }
-    streams.into_values().collect()
 }
 
 /// Video RTP media clock (Hz). H.264 uses 90 kHz per RFC 6184.
@@ -2467,13 +2332,11 @@ mod tests {
         append_harness_long_duration_result, append_harness_packet_loss_result,
         append_harness_protocol_sequence_result, append_harness_sdp_validation_result,
         append_harness_startup_latency_result, arrival_deltas_ms, bitrate_within_tolerance,
-        build_sdp_test_results, compute_pacing, compute_packet_loss_from_seqs,
-        critical_proto_failed, delay_threshold_ms, empty_report, encoder_deltas_ms,
-        fps_within_tolerance, gap_stats, group_rtp_rows_by_stream, harness_bitrate_pass,
+        build_sdp_test_results, compute_pacing, critical_proto_failed, delay_threshold_ms,
+        empty_report, encoder_deltas_ms, fps_within_tolerance, gap_stats, harness_bitrate_pass,
         harness_fps_pass, harness_protocol_sequence_pass, packet_loss_within_tolerance,
-        pick_primary_audio_stream, pick_primary_video_stream, redact_url_credentials,
-        rtsp_sequence_stats_from_field_rows, rtsp_url, rtsp_url_with_credentials,
-        to_retina_initial_timestamp_policy, to_retina_transport,
+        redact_url_credentials, rtsp_sequence_stats_from_field_rows, rtsp_url,
+        rtsp_url_with_credentials, to_retina_initial_timestamp_policy, to_retina_transport,
         validate_h264_length_prefixed_nals,
     };
     use crate::config::{InitialTimestampPolicyArg, TransportArg};
@@ -2777,53 +2640,6 @@ mod tests {
         assert_eq!(pacing.encoder.delay_count, 3);
         // Arrival gaps ~40-60ms -> no delays.
         assert_eq!(pacing.arrival.as_ref().unwrap().delay_count, 0);
-    }
-
-    #[test]
-    fn test_packet_loss_computation_does_not_mix_streams() {
-        fn mk_row(pt: u8, ssrc: u32, dst_port: u16, seq: u16, payload: &[u8]) -> RtpTsharkRow {
-            RtpTsharkRow {
-                payload_type: pt,
-                marker: true,
-                timestamp: 0,
-                seq,
-                ssrc: Some(ssrc),
-                ip_src: "192.168.2.198".to_string(),
-                ip_dst: "192.168.2.10".to_string(),
-                udp_src_port: Some(5004),
-                udp_dst_port: Some(dst_port),
-                payload: payload.to_vec(),
-                time_epoch_sec: None,
-            }
-        }
-
-        let h264_payload = [0x65, 0x88, 0x99]; // Single NAL, IDR.
-        let aac_payload = [0x00, 0x10, 0x00, 0x10, 0x11, 0x22]; // RFC 3640 AU header + 2 bytes.
-
-        let rows = vec![
-            mk_row(96, 1, 6000, 100, &h264_payload),
-            mk_row(97, 2, 6002, 200, &aac_payload),
-            mk_row(96, 1, 6000, 101, &h264_payload),
-            mk_row(97, 2, 6002, 201, &aac_payload),
-            mk_row(96, 1, 6000, 102, &h264_payload),
-            mk_row(97, 2, 6002, 202, &aac_payload),
-        ];
-
-        let streams = group_rtp_rows_by_stream(rows);
-        assert_eq!(streams.len(), 2);
-
-        let video = pick_primary_video_stream(&streams).expect("video stream");
-        let audio = pick_primary_audio_stream(&streams, Some(video.key)).expect("audio stream");
-
-        let (video_total, video_loss, _) =
-            compute_packet_loss_from_seqs(&video.rows.iter().map(|r| r.seq).collect::<Vec<_>>());
-        let (audio_total, audio_loss, _) =
-            compute_packet_loss_from_seqs(&audio.rows.iter().map(|r| r.seq).collect::<Vec<_>>());
-
-        assert_eq!(video_total, 3);
-        assert_eq!(video_loss, 0);
-        assert_eq!(audio_total, 3);
-        assert_eq!(audio_loss, 0);
     }
 
     #[test]

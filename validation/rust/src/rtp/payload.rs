@@ -30,7 +30,7 @@ fn is_h264_vcl_nal_type(nal_type: u8) -> bool {
     matches!(nal_type, 1..=5)
 }
 
-pub(crate) fn validate_h264_rtp_payload_rfc6184(
+pub(super) fn validate_h264_rtp_payload_rfc6184(
     payload: &[u8],
     marker: bool,
 ) -> (bool, bool, bool, bool) {
@@ -109,7 +109,7 @@ pub(crate) fn validate_h264_rtp_payload_rfc6184(
     }
 }
 
-pub(crate) fn validate_aac_rtp_payload_rfc3640(payload: &[u8]) -> (bool, bool, bool) {
+pub(super) fn validate_aac_rtp_payload_rfc3640(payload: &[u8]) -> (bool, bool, bool) {
     // Returns: (valid, au_header_invalid, au_size_invalid)
     if payload.len() < 4 {
         return (false, true, false);
