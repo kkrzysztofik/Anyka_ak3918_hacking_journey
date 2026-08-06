@@ -26,11 +26,9 @@ struct push_stream_state {
      * timestamps, and a wider signed type makes the over/underflow checks
      * ordinary comparisons instead of unsigned-wrap reasoning.
      */
-    int64_t         last_raw_ts_ms;         /* Last raw SDK timestamp seen */
     int64_t         last_out_ts_ms;         /* Last timestamp published to the ring */
     int64_t         last_sane_interval_ms;  /* Init 66; updated when delta in 16..1000 */
     int64_t         ts_corr_ms;             /* Added into normalized out after clamps */
-    uint64_t        last_publish_mono_ms;   /* diag_monotonic_ms at last publish */
     /*
      * Set when stop_push_slot() gave up waiting for this worker.
      *

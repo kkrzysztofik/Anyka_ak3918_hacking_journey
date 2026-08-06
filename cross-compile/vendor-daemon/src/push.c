@@ -25,18 +25,21 @@
  * TS_SANE_MAX_MS] are learned as plausible.
  *
  * Live VLC rejects deltas beyond ~9s (bound 9000000 µs). A 250ms cap was too
- * tight: ISP day/night stalls ~0.5–2s often leave vs.ts nearly continuous while
- * wall time advances, so published PTS lag the live edge, VLC spams
- * "picture too late", then the next switch trips "Timestamp conversion failed".
- * Cap under the VLC bound so real stalls pass through; still clamp pathological
- * multi-second leaps.
+ * tight: ISP day/night stalls ~0.5–2s carry real wall-clock vs.ts gaps that
+ * must pass through, or the published clock falls behind the live edge for
+ * good. Cap under the VLC bound so real stalls pass through; still clamp
+ * pathological multi-second leaps.
+ *
+ * Do NOT re-add wall-clock "stall catchup" here: vs.ts is already wall-based,
+ * and a publish-side gap only means frames backlogged in the SDK queue. Jumping
+ * PTS toward wall while the backlog drains ratchets ts_corr_ms forward until
+ * VLC's 9s bound trips ("Timestamp conversion failed" / early picture skipped).
  *
  * # ponytail: 5s forward cap (was 250ms); lower only if conversion fails return.
  */
 #define TS_MAX_FORWARD_MS 5000
 #define TS_SANE_MIN_MS    16
 #define TS_SANE_MAX_MS    1000
-#define TS_STALL_WALL_MS  250
 
 /* ---- Internal helpers (file-static) ------------------------------------- */
 
@@ -249,10 +252,6 @@ static void *push_frame_thread(void *arg)
             int64_t last_out = state->last_out_ts_ms;
             int64_t forward = cand - last_out;
             uint64_t now_mono = diag_monotonic_ms();
-            int64_t wall_gap = 0;
-            if (state->last_publish_mono_ms != 0 && now_mono >= state->last_publish_mono_ms) {
-                wall_gap = (int64_t)(now_mono - state->last_publish_mono_ms);
-            }
 
             if (forward > TS_MAX_FORWARD_MS) {
                 /* Pathological leap (above VLC's ~9s comfort with margin). */
@@ -292,37 +291,13 @@ static void *push_frame_thread(void *arg)
                          (long long)step,
                          (long long)state->ts_corr_ms);
                 cand = clamped;
-            } else if (wall_gap > TS_STALL_WALL_MS && forward >= 0 &&
-                       wall_gap > forward + TS_STALL_WALL_MS) {
-                /*
-                 * ISP stall: wall advanced but vs.ts barely moved. Advance the
-                 * published clock toward the live edge (capped) so VLC does not
-                 * accumulate "picture too late" debt across mode switches.
-                 */
-                int64_t catchup = wall_gap;
-                if (catchup > TS_MAX_FORWARD_MS)
-                    catchup = TS_MAX_FORWARD_MS;
-                int64_t clamped = last_out + catchup;
-                if (clamped > (int64_t)UINT32_MAX)
-                    clamped = (int64_t)UINT32_MAX;
-                state->ts_corr_ms += clamped - cand;
-                log_warn("event=timestamp_stall_catchup stream=%u raw_ts=%u wall_gap=%lld media_gap=%lld out=%lld corr_ms=%lld",
-                         state->stream_id,
-                         raw_timestamp_ms,
-                         (long long)wall_gap,
-                         (long long)forward,
-                         (long long)clamped,
-                         (long long)state->ts_corr_ms);
-                cand = clamped;
             } else if (forward >= TS_SANE_MIN_MS && forward <= TS_SANE_MAX_MS) {
                 state->last_sane_interval_ms = forward;
             }
             timestamp_ms = (uint32_t)cand;
         }
 
-        state->last_raw_ts_ms = (int64_t)raw_timestamp_ms;
         state->last_out_ts_ms = (int64_t)timestamp_ms;
-        state->last_publish_mono_ms = diag_monotonic_ms();
 
         log_debug("event=timestamp_normalize stream=%u raw_ts=%u normalized_ts=%u seq_no=%u diag_monotonic_ms=%llu",
                   state->stream_id,
@@ -627,11 +602,9 @@ int handle_venc_start_push(int fd, const uint8_t *req, uint32_t req_len)
     /* Reset timestamp normalization state on push start */
     state->timestamp_initialized = 0;
     state->first_timestamp_ms = 0;
-    state->last_raw_ts_ms = 0;
     state->last_out_ts_ms = 0;
     state->last_sane_interval_ms = 66;
     state->ts_corr_ms = 0;
-    state->last_publish_mono_ms = 0;
 
     /* Reset ring buffer if this is the first push activation (both slots
      * were inactive).  Clears stale sequences/flags from a previous session
