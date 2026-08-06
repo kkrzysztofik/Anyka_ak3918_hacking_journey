@@ -7,6 +7,7 @@ pub mod config;
 pub mod device;
 pub mod httpflv;
 pub mod report;
+pub mod rtp;
 pub mod rtsp;
 pub mod util;
 
