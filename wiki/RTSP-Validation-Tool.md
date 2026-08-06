@@ -1,5 +1,8 @@
 # RTSP Validation Tool
 
+Source: `validation/` — Rust binary in `validation/rust/`, configs in `validation/config/`,
+helper scripts in `validation/scripts/`. All paths below are relative to the repository root.
+
 Host-side tool for testing RTSP performance and protocol conformance without physical camera hardware. A single Rust binary launches `onvif-rust` in validation mode (optional), runs protocol checks (Retina), HTTP-FLV checks, and harness scenarios (ffmpeg, ffprobe, tshark), writing one JSON report in the per-run artifacts directory.
 
 ## Overview
@@ -48,9 +51,11 @@ sudo apt-get install ffmpeg tshark
 # This repo uses a vendored Rust toolchain. Always use its cargo.
 export CARGO=toolchain/arm-anykav200-crosstool-ng/bin/cargo
 
-# Build onvif-rust for host-side validation-mode (only needed for --h264-file local launch)
+# Build onvif-rust for host-side validation runs (only needed for --h264-file local launch).
+# Validation mode is a runtime flag (--validation-mode), not a cargo feature —
+# a normal host build already supports it.
 cd cross-compile/onvif-rust
-$CARGO build --target x86_64-unknown-linux-gnu --features validation-mode
+$CARGO build --target x86_64-unknown-linux-gnu
 
 # Build the RTSP validation tool
 ./validation/build_rtsp_validation_tool.sh
@@ -176,7 +181,7 @@ When `--launch-on-device` is used, the JSON report may include a **telemetry** o
 
 ### File playback on device (validation mode)
 
-To run against a **file** (H.264 and optional AAC) rather than the live camera sensor, the files must be on the device and `onvif-rust` must be built with the `validation-mode` feature.
+To run against a **file** (H.264 and optional AAC) rather than the live camera sensor, the files must be present on the device. `--validation-mode` is a runtime flag on `onvif-rust`; no special build is required.
 
 **Getting files onto the device:**
 
@@ -212,7 +217,7 @@ loop-playback = true
 
 ### Real-mode device validation (camera sensor)
 
-To validate the live camera pipeline without file playback, set `real-mode = true`. The device `onvif-rust` binary does **not** need the `validation-mode` feature. Both `main` and `sub` streams are validated by default, but can be overridden with `[[device.streams]]`.
+To validate the live camera pipeline without file playback, set `real-mode = true`. The device `onvif-rust` is then started without `--validation-mode`. Both `main` and `sub` streams are validated by default, but can be overridden with `[[device.streams]]`.
 
 ```bash
 ./validation/rtsp_validation_tool -c validation/config/rtsp_validation_device_real.toml \
@@ -256,7 +261,7 @@ Or from the CLI:
 3. **Stream startup latency** — FFmpeg harness startup to first frame (`harness-startup-latency-ms`).
 4. **Bitrate / FPS stability** — Steady-state from ffmpeg progress.
 5. **SDP validation** — ffprobe stream/codec checks.
-6. **RTSP protocol sequence** — tshark capture + rtshark analysis (DESCRIBE/SETUP/PLAY/TEARDOWN, status codes).
+6. **RTSP protocol sequence** — tshark capture, parsed with `tshark -T fields` (DESCRIBE/SETUP/PLAY/TEARDOWN, status codes).
 7. **Packet loss + RTP payload conformance** — UDP capture and RTP seq gaps, plus pcap-level RFC checks for H.264 (RFC 6184) and AAC (RFC 3640) payload structure.
 8. **HTTP-FLV** — FLV container format validation (binary parse: header + tags) and ffmpeg bitrate/FPS harness.
 9. **Concurrent clients** — Multiple ffmpeg clients in parallel (config or `--concurrent N`).
@@ -345,7 +350,7 @@ user = "root"
 # Prefer RTSP_VALIDATION_DEVICE_PASSWORD env var for secrets
 password = ""
 telemetry = true
-# File-playback mode (device binary must be built with validation-mode feature)
+# File-playback mode (device is started with --validation-mode)
 h264-file = "/mnt/anyka_hack/onvif/test.h264"
 aac-file = "/mnt/anyka_hack/onvif/test_audio.aac"
 loop-playback = true
@@ -410,7 +415,7 @@ python3 validation/scripts/ws_discovery_validator.py --timeout 10 --verbose
 - **ffmpeg not found** — `sudo apt-get install ffmpeg`
 - **tshark not found** — `sudo apt-get install tshark`
 - **tshark permission denied** — Run with `sudo` or add your user to the `wireshark` group.
-- **Server not starting** — Check that onvif-rust is built with `--features validation-mode` and H.264 file path is valid.
+- **Server not starting** — Check the H.264 file path is valid and readable. `--validation-mode` is a runtime flag; there is no cargo feature to enable.
 - **Validation-mode stream auth failure** — If `server.auth_enabled=true`, onvif-rust validation mode requires a provisioned `users.toml` in the config directory; missing or empty users will abort startup.
 - **Port in use** — Set `--rtsp-port` or stop the process occupying the port.
 - **Stream not found** — For onvif-rust use `--rtsp-stream /stream1` and match the port the server reports (e.g. 8554).

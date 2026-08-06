@@ -29,6 +29,7 @@ This project was originally developed by **Gerge** (<https://gitea.raspiweb.com/
 
 - [[Development-Guide]] - Development workflow and best practices
 - [[Static-Analysis-Tools]] - Code quality and security analysis tools
+- [[RTSP-Validation-Tool]] - Host-side RTSP/HTTP-FLV conformance and performance testing
 - [[Troubleshooting]] - Common issues and solutions
 - [[IR-Night-Mode-Calibration]] - Measure `ain0` thresholds; verify IR cut / lamps / AUTO
 
