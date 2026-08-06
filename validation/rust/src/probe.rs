@@ -59,7 +59,7 @@ pub fn critical_proto_failed(tests: &[TestResult]) -> bool {
 ///
 /// The caller (`main`) always recomputes `summary` with `compute_summary` once every
 /// stream has run, so there is nothing useful to put here.
-pub fn empty_report(test_run: TestRun, tests: Vec<TestResult>) -> ValidationReport {
+fn empty_report(test_run: TestRun, tests: Vec<TestResult>) -> ValidationReport {
     ValidationReport {
         test_run,
         tests,
@@ -71,7 +71,7 @@ pub fn empty_report(test_run: TestRun, tests: Vec<TestResult>) -> ValidationRepo
 }
 
 /// Build SDP/stream structural test results from stream info (unit-testable without a live RTSP server).
-pub fn build_sdp_test_results(stream_infos: &[StreamInfo]) -> Vec<TestResult> {
+fn build_sdp_test_results(stream_infos: &[StreamInfo]) -> Vec<TestResult> {
     let mut tests = Vec::new();
     tests.push(TestResult::metric(
         "stream_count",
@@ -127,7 +127,7 @@ pub fn build_sdp_test_results(stream_infos: &[StreamInfo]) -> Vec<TestResult> {
     tests
 }
 
-pub fn validate_h264_length_prefixed_nals(data: &[u8]) -> Result<()> {
+fn validate_h264_length_prefixed_nals(data: &[u8]) -> Result<()> {
     let mut i: usize = 0;
     let mut nals_seen: u32 = 0;
     while i < data.len() {

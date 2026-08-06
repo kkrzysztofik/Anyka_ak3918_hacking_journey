@@ -6,7 +6,7 @@ use std::collections::HashMap;
 
 use super::rows::RtpTsharkRow;
 
-#[derive(Debug, Clone, Default, Serialize)]
+#[derive(Debug, Default, Serialize)]
 pub(crate) struct RtpPcapRfc6184Stats {
     pub(crate) payload_type: u8,
     pub(crate) packets_analyzed: u32,
@@ -16,7 +16,7 @@ pub(crate) struct RtpPcapRfc6184Stats {
     pub(crate) stap_a_invalid: u32,
 }
 
-#[derive(Debug, Clone, Default, Serialize)]
+#[derive(Debug, Default, Serialize)]
 pub(crate) struct RtpPcapRfc3640Stats {
     pub(crate) payload_type: u8,
     pub(crate) packets_analyzed: u32,

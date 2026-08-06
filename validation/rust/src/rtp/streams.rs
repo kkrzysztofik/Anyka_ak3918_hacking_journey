@@ -24,7 +24,7 @@ pub(crate) struct RtpStreamKey {
     dst_port: Option<u16>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub(crate) struct RtpStreamStats {
     pub(crate) key: RtpStreamKey,
     pub(crate) rows: Vec<RtpTsharkRow>,

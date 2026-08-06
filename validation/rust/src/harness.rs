@@ -201,7 +201,7 @@ struct HarnessPacketLossResult {
 }
 
 /// Returns true if measured bitrate is within tolerance_percent of expected.
-pub fn bitrate_within_tolerance(
+fn bitrate_within_tolerance(
     measured_kbps: f64,
     expected_kbps: f64,
     tolerance_percent: u32,
@@ -214,7 +214,7 @@ pub fn bitrate_within_tolerance(
 }
 
 /// Returns true if measured fps is within tolerance_percent of expected.
-pub fn fps_within_tolerance(measured: f64, expected: f64, tolerance_percent: u32) -> bool {
+fn fps_within_tolerance(measured: f64, expected: f64, tolerance_percent: u32) -> bool {
     if expected <= 0.0 {
         return true;
     }
@@ -255,7 +255,7 @@ fn harness_protocol_sequence_pass(stats: &RtspProtocolSequenceStats) -> bool {
 }
 
 /// Returns true if loss_percent is within max_percent (i.e. loss_percent <= max_percent).
-pub fn packet_loss_within_tolerance(loss_percent: f64, max_percent: f64) -> bool {
+fn packet_loss_within_tolerance(loss_percent: f64, max_percent: f64) -> bool {
     loss_percent <= max_percent
 }
 
@@ -266,7 +266,7 @@ struct BoundedLogWriter {
 }
 
 impl BoundedLogWriter {
-    pub(crate) fn create(path: &Path) -> Result<Self> {
+    fn create(path: &Path) -> Result<Self> {
         let file = File::create(path).with_context(|| format!("create {}", path.display()))?;
         Ok(Self {
             file,
@@ -275,7 +275,7 @@ impl BoundedLogWriter {
         })
     }
 
-    pub(crate) fn write_line(&mut self, line: &str) -> Result<()> {
+    fn write_line(&mut self, line: &str) -> Result<()> {
         if self.truncated {
             return Ok(());
         }

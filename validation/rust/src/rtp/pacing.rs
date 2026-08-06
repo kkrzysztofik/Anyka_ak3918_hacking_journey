@@ -9,7 +9,7 @@ use super::rows::RtpTsharkRow;
 const VIDEO_RTP_CLOCK_HZ: f64 = 90_000.0;
 
 /// Gap statistics for one cadence (encoder RTP timestamps or arrival wall-clock).
-#[derive(Debug, Clone, Default, Serialize)]
+#[derive(Debug, Default, Serialize)]
 pub(crate) struct GapStats {
     count: u32,
     min_ms: f64,
@@ -22,7 +22,7 @@ pub(crate) struct GapStats {
 }
 
 /// Frame pacing measurement for the primary video stream.
-#[derive(Debug, Clone, Default, Serialize)]
+#[derive(Debug, Serialize)]
 pub(crate) struct FramePacing {
     expected_fps: f64,
     nominal_ms: f64,

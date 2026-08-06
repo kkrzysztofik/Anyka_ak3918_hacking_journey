@@ -9,7 +9,7 @@ pub mod harness;
 pub mod httpflv;
 pub mod probe;
 pub mod report;
-pub mod rtp;
+pub(crate) mod rtp;
 pub mod util;
 
 pub use baseline::{
@@ -17,8 +17,6 @@ pub use baseline::{
 };
 pub use config::{Args, EffectiveConfig, RtspValidationConfig, load_config};
 pub use device::DeviceTelemetry;
-pub use harness::run_harness;
-pub use probe::{critical_proto_failed, run_validation};
 pub use report::{
     StreamInfo, Summary, TestResult, TestRun, ValidationReport, compute_summary, result_ok,
 };

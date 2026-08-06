@@ -34,7 +34,7 @@ fn parse_tshark_hex_bytes(raw: &str) -> Result<Vec<u8>> {
     Ok(out)
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub(crate) struct RtpTsharkRow {
     pub(crate) payload_type: u8,
     pub(crate) marker: bool,
