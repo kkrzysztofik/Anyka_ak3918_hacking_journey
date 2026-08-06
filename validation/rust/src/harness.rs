@@ -20,7 +20,7 @@ use url::Url;
 use crate::config::{Args, EffectiveConfig};
 use crate::report::TestResult;
 use crate::rtp::{
-    FramePacing, GapStats, HarnessRtpLossMetric, RtpPcapRfc3640Stats, RtpPcapRfc6184Stats,
+    FramePacing, GapStats, RtpLossMetric, RtpPcapRfc3640Stats, RtpPcapRfc6184Stats,
     analyze_aac_rfc3640_from_rows, analyze_h264_rfc6184_from_rows, compute_pacing,
     compute_stream_loss_metric, group_rtp_rows_by_stream, pick_primary_audio_stream,
     pick_primary_video_stream, tshark_extract_rtp_rows,
@@ -193,8 +193,8 @@ fn parse_status_code(value: &str) -> Option<u32> {
 
 #[derive(Debug)]
 struct HarnessPacketLossResult {
-    video: Option<HarnessRtpLossMetric>,
-    audio: Option<HarnessRtpLossMetric>,
+    video: Option<RtpLossMetric>,
+    audio: Option<RtpLossMetric>,
     h264_rfc6184: Option<std::result::Result<RtpPcapRfc6184Stats, String>>,
     aac_rfc3640: Option<std::result::Result<RtpPcapRfc3640Stats, String>>,
     pacing: Option<FramePacing>,
@@ -630,7 +630,7 @@ fn append_harness_packet_loss_result(
         return;
     };
 
-    let within = |m: &HarnessRtpLossMetric| {
+    let within = |m: &RtpLossMetric| {
         packet_loss_within_tolerance(m.loss_percent, packet_loss_tolerance_percent)
     };
     let video_metric = res.video.clone().unwrap_or_default();
@@ -1675,7 +1675,7 @@ async fn harness_error_handling(
 #[cfg(test)]
 mod tests {
     use super::{
-        BoundedLogWriter, HarnessPacketLossResult, HarnessProcessOutcome, HarnessRtpLossMetric,
+        BoundedLogWriter, HarnessPacketLossResult, HarnessProcessOutcome, RtpLossMetric,
         RtpPcapRfc3640Stats, RtpPcapRfc6184Stats, RtspProtocolSequenceStats,
         append_harness_basic_connectivity_result, append_harness_bitrate_fps_result,
         append_harness_concurrent_clients_result, append_harness_error_handling_result,
@@ -2016,14 +2016,14 @@ mod tests {
         append_harness_packet_loss_result(
             &mut tests,
             HarnessProcessOutcome::Success(HarnessPacketLossResult {
-                video: Some(HarnessRtpLossMetric {
+                video: Some(RtpLossMetric {
                     rtp_packets: 100,
                     packet_loss: 0,
                     loss_percent: 0.0,
                     payload_type: 96,
                     ssrc: Some(1),
                 }),
-                audio: Some(HarnessRtpLossMetric {
+                audio: Some(RtpLossMetric {
                     rtp_packets: 80,
                     packet_loss: 1,
                     loss_percent: 1.25,

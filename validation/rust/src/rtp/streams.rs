@@ -8,7 +8,7 @@ use super::payload::{validate_aac_rtp_payload_rfc3640, validate_h264_rtp_payload
 use super::rows::RtpTsharkRow;
 
 #[derive(Debug, Clone, Default, Serialize)]
-pub(crate) struct HarnessRtpLossMetric {
+pub(crate) struct RtpLossMetric {
     pub(crate) rtp_packets: u32,
     pub(crate) packet_loss: u32,
     pub(crate) loss_percent: f64,
@@ -66,10 +66,10 @@ fn compute_packet_loss_from_seqs(seqs: &[u16]) -> (u32, u32, f64) {
     (total, loss, loss_percent)
 }
 
-pub(crate) fn compute_stream_loss_metric(stats: &RtpStreamStats) -> HarnessRtpLossMetric {
+pub(crate) fn compute_stream_loss_metric(stats: &RtpStreamStats) -> RtpLossMetric {
     let seqs: Vec<u16> = stats.rows.iter().map(|r| r.seq).collect();
     let (total, loss, pct) = compute_packet_loss_from_seqs(&seqs);
-    HarnessRtpLossMetric {
+    RtpLossMetric {
         rtp_packets: total,
         packet_loss: loss,
         loss_percent: pct,

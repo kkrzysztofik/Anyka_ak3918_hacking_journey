@@ -76,7 +76,7 @@ fn gap_stats(
 ///
 /// Rows arrive in pcap (capture) order; media time is monotonic in arrival
 /// order for a live stream, and that keeps 32-bit wrap-around arithmetic
-/// well-defined (same assumption as `compute_packet_loss_from_seqs`).
+/// well-defined (the same wrap-around assumption used for sequence-number loss).
 fn encoder_deltas_ms(rows: &[RtpTsharkRow]) -> Vec<f64> {
     let mut deltas = Vec::new();
     let mut prev_ts: Option<u32> = None;
