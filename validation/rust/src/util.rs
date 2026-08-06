@@ -20,10 +20,20 @@ pub fn tail_lossy(s: &str, max_chars: usize) -> String {
     format!("…{}", tail.into_iter().collect::<String>())
 }
 
-/// Parse an ffmpeg size token (`52kB`, `1MB`, `500B`) into kilobytes.
+/// Parse an ffmpeg size token (`52kB`, `185KiB`, `1MB`, `1MiB`, `500B`) into kilobytes.
+///
+/// ffmpeg 7 and earlier typically print decimal units (`kB`/`MB`); ffmpeg 8+ prints
+/// binary IEC units (`KiB`/`MiB`) on the null-muxer summary line. Longer suffixes are
+/// matched first so `KiB` is not misread as `B`.
 pub fn parse_ffmpeg_kbytes_token(raw: &str) -> Option<f64> {
     let trimmed = raw.trim().trim_end_matches(',');
-    for (suffix, scale) in [("kB", 1.0), ("MB", 1000.0), ("B", 0.001)] {
+    for (suffix, scale) in [
+        ("KiB", 1.0),
+        ("MiB", 1024.0),
+        ("kB", 1.0),
+        ("MB", 1000.0),
+        ("B", 0.001),
+    ] {
         if let Some(value) = trimmed.strip_suffix(suffix) {
             return value.trim().parse::<f64>().ok().map(|v| v * scale);
         }
@@ -31,7 +41,7 @@ pub fn parse_ffmpeg_kbytes_token(raw: &str) -> Option<f64> {
     None
 }
 
-/// Estimate kbps from an ffmpeg summary line (`video:52kB audio:816kB …`) over `duration_sec`.
+/// Estimate kbps from an ffmpeg summary line (`video:52kB` / `video:185KiB` …) over `duration_sec`.
 pub fn parse_ffmpeg_summary_bitrate_kbps(log_line: &str, duration_sec: u64) -> Option<f64> {
     if duration_sec == 0 {
         return None;
@@ -123,10 +133,26 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_ffmpeg_kbytes_token_accepts_kib_mib() {
+        // ffmpeg 8+ prints binary units (KiB/MiB) in the null-muxer summary.
+        assert_eq!(parse_ffmpeg_kbytes_token("185KiB"), Some(185.0));
+        assert_eq!(parse_ffmpeg_kbytes_token("1MiB"), Some(1024.0));
+        assert_eq!(parse_ffmpeg_kbytes_token("0KiB"), Some(0.0));
+    }
+
+    #[test]
     fn test_parse_ffmpeg_summary_bitrate_kbps() {
         let line = "[info] video:52kB audio:816kB subtitle:0kB";
         let bitrate = parse_ffmpeg_summary_bitrate_kbps(line, 4).unwrap();
         assert!((bitrate - 1736.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_parse_ffmpeg_summary_bitrate_kbps_ffmpeg8_kib() {
+        let line = "[out#0/null @ 0x1] [info] video:185KiB audio:0KiB subtitle:0KiB other streams:0KiB global headers:0KiB muxing overhead: unknown";
+        let bitrate = parse_ffmpeg_summary_bitrate_kbps(line, 30).unwrap();
+        // 185 KiB * 8 / 30s ≈ 49.333 kbps
+        assert!((bitrate - (185.0 * 8.0 / 30.0)).abs() < 0.01);
     }
 
     #[test]

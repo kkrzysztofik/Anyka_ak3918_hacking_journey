@@ -11,7 +11,7 @@
 # SSH port, user and telemetry flag already default to this camera.
 
 [run]
-launch-on-device = true
+launch-on-device = false
 
 [rtsp]
 host = "192.168.2.198"
