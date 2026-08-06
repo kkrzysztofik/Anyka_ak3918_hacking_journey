@@ -6,15 +6,17 @@
 
 // Submodules are private: consumers go through the curated re-export list below,
 // not through deep `rtp::rows::…` paths.
+mod pacing;
 mod payload;
 mod rows;
 mod streams;
 
+pub(crate) use pacing::{FramePacing, GapStats, compute_pacing};
 pub(crate) use payload::{
     RtpPcapRfc3640Stats, RtpPcapRfc6184Stats, analyze_aac_rfc3640_from_rows,
     analyze_h264_rfc6184_from_rows,
 };
-pub(crate) use rows::{RtpTsharkRow, tshark_extract_rtp_rows};
+pub(crate) use rows::tshark_extract_rtp_rows;
 pub(crate) use streams::{
     HarnessRtpLossMetric, compute_stream_loss_metric, group_rtp_rows_by_stream,
     pick_primary_audio_stream, pick_primary_video_stream,
