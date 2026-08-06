@@ -1,91 +1,44 @@
-# RTSP validation tool configuration
-# Run with: rtsp_validation_tool   (uses this file via env or search path)
-# Or:      rtsp_validation_tool --config /path/to/rtsp_validation.toml
-# CLI args override config.
+# RTSP validation tool configuration — External Server
+#
+# Validates an RTSP server that is already running elsewhere (e.g. MediaMTX):
+# nothing is launched locally or on the device.
+#
+# Usage:
+#   rtsp_validation_tool -c validation/config/rtsp_validation_external.toml
+#
+# Only overrides are listed here. Anything omitted uses the built-in default —
+# see rtsp_validation.toml for the fully annotated template.
 
-# -----------------------------------------------------------------------------
-# Run mode: how to get an RTSP server (config-only run needs one of these)
-# -----------------------------------------------------------------------------
 [run]
-# Connect to existing server (no local/device launch)
+# Connect to an already-running server.
 no-launch = true
-# Start onvif-rust on the device via SSH (implies no-launch)
-launch-on-device = false
-# For local launch only (no-launch=false, launch-on-device=false): path to H.264 file
-# h264-file = "test_video.h264"
-# Output report path
-output = "rtsp_validation.json"
-# Update baseline files from this run
-update-baseline = false
-# Compare against baselines and fail on regression
-compare-baseline = false
 
-# -----------------------------------------------------------------------------
-# RTSP endpoint (used when no_launch; host/port/stream when launch_on_device come from [device])
-# -----------------------------------------------------------------------------
 [rtsp]
 host = "192.168.2.99"
 port = 8554
 stream = "/mystream"
-timeout-sec = 10
-# Handles servers (e.g. MediaMTX) that omit RTP-Info rtptime on PLAY.
-initial-timestamp-policy = "permissive"
 # Optional stream credentials used for BOTH RTSP and HTTP-FLV checks.
 # username = "admin"
 # password = "www123"
 
-[test]
-short-duration-sec = 30
-long-duration-sec = 600
-concurrent-clients = 4
-
 [thresholds]
-# Harness check (`harness_startup_latency_ms`) includes FFmpeg startup + first decode.
-# For external sources (e.g. FFmpeg->MediaMTX), 2500-4000ms is common.
-harness-startup-latency-ms = 3000
-video-startup-latency-ms = 1500
+# Default is 0, i.e. audio startup latency is recorded but not checked.
 audio-startup-latency-ms = 2000
-bitrate-tolerance-percent = 15
-fps-tolerance-percent = 10
-packet-loss-tolerance-percent = 1
 
-# Optional expected values; if unset, baseline comparison used when available
+# Optional expected values; baseline comparison is used when these are unset.
 # [thresholds.expected]
 # bitrate_kbps = 2000
 # fps = 25
 
-[baseline]
-dir = "rtsp_results/baselines"
-
-[capture]
-# Empty = auto (lo for localhost, any for remote)
-interface = ""
-
 [logging]
 level = "debug"
-# Retina RTSP client library level (e.g. "debug", "trace"). Omit or leave empty to use level above.
+# Retina RTSP client library level. Omit to reuse `level` above.
 retina-level = "debug"
 file = "rtsp_validation.log"
 ffmpeg-level = "debug"
 
-[artifacts]
-# Root directory where the tool writes per-run artifacts:
-# - ffmpeg/ffprobe/tshark stdout/stderr logs (harness tools only)
-# - pcap captures (kept by default)
-# ONVIF server logs are file-based (`onvif.log*`), not separate stdout/stderr artifacts.
-dir = "rtsp_results/runs"
-capture-tool-output = true
-keep-pcaps = true
-
-# Device (camera) validation: SSH and telemetry when using launch-on-device
 [device]
-host = "192.168.2.198"
-ssh-port = 22
-user = "root"
-# Prefer RTSP_VALIDATION_DEVICE_PASSWORD env var for secrets.
-password = ""
-telemetry = true
-# Paths on device for H.264/AAC validation mode (device binary must be built with validation-mode)
+# Only consulted if you flip no-launch off and drive the device instead.
 h264-file = "/mnt/anyka_hack/onvif/test.h264"
 aac-file = "/mnt/anyka_hack/onvif/test_audio.aac"
 loop-playback = true

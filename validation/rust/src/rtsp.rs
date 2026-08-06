@@ -1010,16 +1010,15 @@ pub fn critical_proto_failed(tests: &[TestResult]) -> bool {
     })
 }
 
+/// Build a report whose summary is not filled in yet.
+///
+/// The caller (`main`) always recomputes `summary` with `compute_summary` once every
+/// stream has run, so there is nothing useful to put here.
 pub fn empty_report(test_run: TestRun, tests: Vec<TestResult>) -> ValidationReport {
     ValidationReport {
         test_run,
         tests,
-        summary: crate::report::Summary {
-            total_tests: 0,
-            passed: 0,
-            failed: 0,
-            overall_pass: false,
-        },
+        summary: crate::report::Summary::default(),
         artifacts_dir: None,
         telemetry: None,
         telemetry_before_shutdown: None,
@@ -1235,6 +1234,64 @@ fn run_ffmpeg(
         }
     }
     Ok(())
+}
+
+/// A running `tshark -w` capture writing to `pcap_path`.
+///
+/// Both harness captures follow the same shape: start tshark, let it settle, drive
+/// traffic through ffmpeg, let it drain, then kill it and parse the pcap.
+struct TsharkCapture {
+    child: std::process::Child,
+    pcap_path: std::path::PathBuf,
+}
+
+impl TsharkCapture {
+    /// Spawn tshark on `iface` with capture filter `filter`, then wait for it to settle.
+    async fn start(
+        artifacts_dir: &Path,
+        log_stem: &str,
+        capture_tool_output: bool,
+        iface: &str,
+        filter: &str,
+        pcap_path: std::path::PathBuf,
+    ) -> Result<Self> {
+        let sink = |suffix: &str| -> Result<Stdio> {
+            if !capture_tool_output {
+                return Ok(Stdio::null());
+            }
+            let path = artifacts_dir.join(format!("{}.{}.log", log_stem, suffix));
+            Ok(Stdio::from(
+                File::create(&path).with_context(|| format!("create {}", path.display()))?,
+            ))
+        };
+
+        let child = Command::new("tshark")
+            .args([
+                "-i",
+                iface,
+                "-f",
+                filter,
+                "-w",
+                &pcap_path.to_string_lossy(),
+            ])
+            .stdout(sink("stdout")?)
+            .stderr(sink("stderr")?)
+            .spawn()
+            .context("spawn tshark")?;
+        info!(pcap = %pcap_path.display(), filter, "tshark capture started");
+
+        // Give tshark a moment to bind the interface before traffic starts.
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        Ok(Self { child, pcap_path })
+    }
+
+    /// Let in-flight packets land, stop tshark, and return the pcap path.
+    async fn stop(mut self) -> std::path::PathBuf {
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+        self.pcap_path
+    }
 }
 
 /// Pull a stream for `duration_sec` purely to generate traffic for a tshark capture.
@@ -1637,19 +1694,7 @@ pub async fn run_validation(args: &Args, effective: &EffectiveConfig) -> Result<
         passed, video_frames, audio_frames, "RTSP validation complete"
     );
 
-    Ok(ValidationReport {
-        test_run,
-        tests,
-        summary: crate::report::Summary {
-            total_tests: 0,
-            passed: 0,
-            failed: 0,
-            overall_pass: false,
-        },
-        artifacts_dir: None,
-        telemetry: None,
-        telemetry_before_shutdown: None,
-    })
+    Ok(empty_report(test_run, tests))
 }
 
 #[derive(Debug, Deserialize)]
@@ -2085,7 +2130,7 @@ pub async fn run_harness(
     let sdp_validation = to_harness_process_outcome(
         timeout(
             step_cap_short,
-            harness_sdp_validation(&auth_url, timeout_sec, &artifacts_dir, capture_tool_output),
+            harness_sdp_validation(&auth_url, &artifacts_dir, capture_tool_output),
         )
         .await,
     );
@@ -2099,7 +2144,7 @@ pub async fn run_harness(
     let protocol_sequence = to_harness_process_outcome(
         timeout(
             step_cap_protocol_sequence,
-            harness_rtsp_protocol_sequence(&auth_url, effective, args),
+            harness_rtsp_protocol_sequence(&auth_url, effective),
         )
         .await,
     );
@@ -2112,7 +2157,7 @@ pub async fn run_harness(
     let packet_loss = to_harness_process_outcome(
         timeout(
             step_cap_long,
-            harness_packet_loss(&auth_url, effective, args, expect_h264, expect_aac),
+            harness_packet_loss(&auth_url, effective, expect_h264, expect_aac),
         )
         .await,
     );
@@ -2373,7 +2418,6 @@ async fn harness_bitrate_fps(
 
 async fn harness_sdp_validation(
     url: &str,
-    _timeout_sec: u64,
     artifacts_dir: &Path,
     capture_tool_output: bool,
 ) -> Result<(usize, usize, bool, bool)> {
@@ -2433,7 +2477,6 @@ async fn harness_sdp_validation(
 async fn harness_rtsp_protocol_sequence(
     url: &str,
     effective: &EffectiveConfig,
-    _args: &Args,
 ) -> Result<RtspProtocolSequenceStats> {
     let iface = effective.capture_interface.clone();
     let port = effective.rtsp_port;
@@ -2443,41 +2486,15 @@ async fn harness_rtsp_protocol_sequence(
     let keep_pcaps = effective.keep_pcaps;
     let pcap_path = artifacts_dir.join(format!("rtsp_protocol_sequence_tcp_port{}.pcap", port));
 
-    let pcap_str = pcap_path.to_string_lossy().to_string();
-    let tshark_stdout_path = artifacts_dir.join("tshark_rtsp_protocol_sequence.stdout.log");
-    let tshark_stderr_path = artifacts_dir.join("tshark_rtsp_protocol_sequence.stderr.log");
-    let tshark_stdout = if capture_tool_output {
-        Stdio::from(
-            File::create(&tshark_stdout_path)
-                .with_context(|| format!("create {}", tshark_stdout_path.display()))?,
-        )
-    } else {
-        Stdio::null()
-    };
-    let tshark_stderr = if capture_tool_output {
-        Stdio::from(
-            File::create(&tshark_stderr_path)
-                .with_context(|| format!("create {}", tshark_stderr_path.display()))?,
-        )
-    } else {
-        Stdio::null()
-    };
-    let mut tshark_handle = Command::new("tshark")
-        .args([
-            "-i",
-            &iface,
-            "-f",
-            &format!("tcp port {}", port),
-            "-w",
-            &pcap_str,
-        ])
-        .stdout(tshark_stdout)
-        .stderr(tshark_stderr)
-        .spawn()
-        .context("spawn tshark")?;
-    info!(pcap = %pcap_path.display(), "tshark capture started (rtsp protocol sequence)");
-
-    tokio::time::sleep(Duration::from_secs(1)).await;
+    let capture = TsharkCapture::start(
+        &artifacts_dir,
+        "tshark_rtsp_protocol_sequence",
+        capture_tool_output,
+        &iface,
+        &format!("tcp port {}", port),
+        pcap_path,
+    )
+    .await?;
 
     let url2 = url.clone();
     let short_dur = effective
@@ -2498,9 +2515,7 @@ async fn harness_rtsp_protocol_sequence(
     .await
     .context("ffmpeg join")??;
 
-    tokio::time::sleep(Duration::from_secs(2)).await;
-    let _ = tshark_handle.kill();
-    let _ = tshark_handle.wait();
+    let pcap_path = capture.stop().await;
 
     let stats = tokio::task::spawn_blocking(move || {
         let stats = tshark_rtsp_sequence_stats(&pcap_path)?;
@@ -2588,7 +2603,6 @@ fn rtsp_sequence_stats_from_field_rows(rows: &str) -> RtspProtocolSequenceStats 
 async fn harness_packet_loss(
     url: &str,
     effective: &EffectiveConfig,
-    _args: &Args,
     expect_h264: bool,
     expect_aac: bool,
 ) -> Result<HarnessPacketLossResult> {
@@ -2613,33 +2627,15 @@ async fn harness_packet_loss(
         "udp".to_string()
     };
 
-    let pcap_str_rtp = pcap_path.to_string_lossy().to_string();
-    let tshark_stdout_path = artifacts_dir.join("tshark_packet_loss.stdout.log");
-    let tshark_stderr_path = artifacts_dir.join("tshark_packet_loss.stderr.log");
-    let tshark_stdout = if capture_tool_output {
-        Stdio::from(
-            File::create(&tshark_stdout_path)
-                .with_context(|| format!("create {}", tshark_stdout_path.display()))?,
-        )
-    } else {
-        Stdio::null()
-    };
-    let tshark_stderr = if capture_tool_output {
-        Stdio::from(
-            File::create(&tshark_stderr_path)
-                .with_context(|| format!("create {}", tshark_stderr_path.display()))?,
-        )
-    } else {
-        Stdio::null()
-    };
-    let mut tshark_handle_rtp = Command::new("tshark")
-        .args(["-i", &iface, "-f", &filter, "-w", &pcap_str_rtp])
-        .stdout(tshark_stdout)
-        .stderr(tshark_stderr)
-        .spawn()
-        .context("spawn tshark")?;
-
-    tokio::time::sleep(Duration::from_secs(1)).await;
+    let capture = TsharkCapture::start(
+        &artifacts_dir,
+        "tshark_packet_loss",
+        capture_tool_output,
+        &iface,
+        &filter,
+        pcap_path,
+    )
+    .await?;
 
     let url2 = url.clone();
     let short_dur_rtp = effective.short_duration_sec;
@@ -2658,16 +2654,12 @@ async fn harness_packet_loss(
     .await
     .context("ffmpeg join")??;
 
-    tokio::time::sleep(Duration::from_secs(2)).await;
-    let _ = tshark_handle_rtp.kill();
-    let _ = tshark_handle_rtp.wait();
+    let pcap_path = capture.stop().await;
 
-    let pcap_path_for_parse = pcap_path.clone();
     let (video, audio, h264_rfc6184, aac_rfc3640, pacing) =
         tokio::task::spawn_blocking(move || {
-            let pcap_path_str = pcap_path_for_parse.to_string_lossy().to_string();
-            let mut rows = tshark_extract_rtp_rows(&pcap_path_for_parse)
-                .context("tshark extract rtp rows")?;
+            let mut rows =
+                tshark_extract_rtp_rows(&pcap_path).context("tshark extract rtp rows")?;
 
             if let Some(server) = server_ip.as_ref() {
                 rows.retain(|r| r.ip_src == *server);
@@ -2715,7 +2707,7 @@ async fn harness_packet_loss(
             };
 
             if !keep_pcaps {
-                let _ = std::fs::remove_file(&pcap_path_str);
+                let _ = std::fs::remove_file(&pcap_path);
             }
 
             Ok::<_, anyhow::Error>((

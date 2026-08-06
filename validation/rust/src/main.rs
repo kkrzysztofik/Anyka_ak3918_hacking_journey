@@ -694,39 +694,32 @@ async fn main() -> Result<()> {
                 report.tests.extend(httpflv_tests);
             }
 
-            // Harness Scenarios for this stream
+            // Harness Scenarios for this stream. Collect into a fresh Vec so results can
+            // be prefixed wholesale instead of by tracking slice offsets into report.tests.
+            let mut harness_tests: Vec<TestResult> = Vec::new();
             if critical_proto_failed(&report.tests) {
-                let name = if prefix.is_empty() {
-                    "harness_skipped".to_string()
-                } else {
-                    format!("{}:harness_skipped", prefix)
-                };
-                report.tests.push(TestResult::fail(
-                    name,
+                harness_tests.push(TestResult::fail(
+                    "harness_skipped",
                     "critical protocol validation failed; skipping harness",
                 ));
             } else {
-                let pre_harness_len = report.tests.len();
-                run_harness(&args, &stream_effective, &mut report.tests).await?;
-                prefix_test_names(&mut report.tests[pre_harness_len..], prefix);
+                run_harness(&args, &stream_effective, &mut harness_tests).await?;
 
-                #[allow(clippy::collapsible_if)]
-                if !args.skip_httpflv {
-                    let pre_httpflv_len = report.tests.len();
-                    if let Err(e) = rtsp_validation_tool::httpflv::run_httpflv_harness(
+                if !args.skip_httpflv
+                    && let Err(e) = rtsp_validation_tool::httpflv::run_httpflv_harness(
                         &stream_effective,
-                        &mut report.tests,
+                        &mut harness_tests,
                     )
                     .await
-                    {
-                        report.tests.push(TestResult::fail(
-                            "httpflv_harness_execution",
-                            format!("HTTP-FLV harness failed: {}", e),
-                        ));
-                    }
-                    prefix_test_names(&mut report.tests[pre_httpflv_len..], prefix);
+                {
+                    harness_tests.push(TestResult::fail(
+                        "httpflv_harness_execution",
+                        format!("HTTP-FLV harness failed: {}", e),
+                    ));
                 }
             }
+            prefix_test_names(&mut harness_tests, prefix);
+            report.tests.extend(harness_tests);
 
             all_tests.extend(std::mem::take(&mut report.tests));
             if first_report.is_none() {

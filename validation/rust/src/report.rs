@@ -107,7 +107,7 @@ impl TestResult {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct Summary {
     pub total_tests: usize,
     pub passed: usize,

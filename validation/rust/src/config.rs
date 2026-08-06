@@ -8,7 +8,6 @@ use std::ffi::OsString;
 use std::path::PathBuf;
 use tracing::{info, warn};
 
-pub const DEFAULT_VIDEO_STARTUP_TARGET_MS: u64 = 1500;
 pub const DEFAULT_RTSP_HOST: &str = "127.0.0.1";
 pub const DEFAULT_RTSP_PORT: u16 = 554;
 pub const DEFAULT_RTSP_STREAM: &str = "/stream1";
@@ -971,6 +970,9 @@ where
 }
 
 #[cfg(test)]
+// Tests build a config then poke one or two fields. Struct-update syntax with
+// `..Default::default()` is ~45 lines longer here for no gain in the assertions.
+#[allow(clippy::field_reassign_with_default)]
 mod tests {
     use super::{
         DEFAULT_ARTIFACTS_ROOT_DIR, DEFAULT_BASELINE_DIR, DEFAULT_HTTPFLV_PATH, DEFAULT_RTSP_HOST,

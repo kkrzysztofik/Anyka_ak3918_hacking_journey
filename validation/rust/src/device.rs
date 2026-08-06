@@ -874,14 +874,14 @@ fn device_collect_telemetry_blocking_with_ssh(
 #[cfg(test)]
 mod tests {
     use super::{
-        DEVICE_ONVIF_DIR, DEVICE_ONVIF_LOG_GLOB, DevicePlaybackOptions,
+        DEVICE_ONVIF_DIR, DEVICE_ONVIF_LOG_GLOB, DevicePlaybackOptions, SshExecFn,
         device_assert_file_exists_blocking_with_ssh, device_collect_telemetry_blocking_with_ssh,
         device_copy_onvif_logs_blocking_with_ssh, device_get_onvif_pid_blocking_with_ssh,
         device_list_logs_command, device_start_command, device_start_onvif_blocking_with_ssh,
         extract_between_markers, parse_loadavg, parse_meminfo, parse_pgrep_output,
         parse_status_vmrss_vmsize, sanitize_filename_component, sh_single_quote,
     };
-    use anyhow::{Result, anyhow};
+    use anyhow::anyhow;
     use std::cell::RefCell;
     use std::collections::VecDeque;
     use std::fs;
@@ -913,16 +913,15 @@ Threads:        1"#;
         format!("noise\n__ANYKA_BEGIN__\n{}\n__ANYKA_END__\n", s)
     }
 
-    fn scripted_exec(
-        steps: Vec<ExecStep>,
-    ) -> (
-        Rc<RefCell<Vec<String>>>,
-        impl FnMut(&str, u16, &str, &str, &str, u64) -> Result<String>,
-    ) {
-        let calls = Rc::new(RefCell::new(Vec::new()));
+    /// Commands the scripted runner has seen, in order.
+    type CallLog = Rc<RefCell<Vec<String>>>;
+
+    /// Reuses the production `SshExecFn` shape so the stand-in cannot drift from it.
+    fn scripted_exec(steps: Vec<ExecStep>) -> (CallLog, Box<SshExecFn<'static>>) {
+        let calls: CallLog = Rc::new(RefCell::new(Vec::new()));
         let call_log = Rc::clone(&calls);
         let queue = RefCell::new(VecDeque::from(steps));
-        let exec = move |_h: &str, _p: u16, _u: &str, _pw: &str, cmd: &str, timeout: u64| {
+        let run = move |_h: &str, _p: u16, _u: &str, _pw: &str, cmd: &str, timeout: u64| {
             call_log.borrow_mut().push(cmd.to_string());
             let step = queue
                 .borrow_mut()
@@ -939,12 +938,9 @@ Threads:        1"#;
             if let Some(expected_timeout) = step.expected_timeout {
                 assert_eq!(timeout, expected_timeout, "unexpected timeout");
             }
-            match step.result {
-                Ok(out) => Ok(out),
-                Err(err) => Err(anyhow!(err)),
-            }
+            step.result.map_err(|err| anyhow!(err))
         };
-        (calls, exec)
+        (calls, Box::new(run))
     }
 
     #[test]
