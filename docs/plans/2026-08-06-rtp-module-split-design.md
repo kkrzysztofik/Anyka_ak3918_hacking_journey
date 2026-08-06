@@ -1,7 +1,7 @@
 # RTP Analysis Module Split — Design
 
 Date: 2026-08-06
-Status: approved, not yet implemented
+Status: implemented (commits d9d0d10..2232092)
 Target: `validation/rust` (rtsp-validation-tool)
 
 ## Problem
@@ -71,9 +71,15 @@ Three items sit inside the moved line range but do not belong to the RTP layer:
 Also staying: `parse_status_code`, `tshark_rtsp_sequence_stats`, `TsharkCapture`,
 `drain_ffmpeg` — RTSP-sequence parsing and capture orchestration, out of scope.
 
-`HarnessRtpLossMetric` keeps its name after moving into `rtp::streams`. It is
-serialised into the report JSON under that shape; renaming would be a behaviour
-change for no gain.
+`HarnessRtpLossMetric` keeps its name after moving into `rtp::streams`, to avoid
+editing test bodies mid-move.
+
+> **Correction (post-implementation).** An earlier revision of this document
+> justified keeping the name by claiming it "is serialised into the report JSON
+> under that shape". That is **wrong**: `serde_json::json!(m)` serialises field
+> names, not the type name, and the struct carries no `#[serde(rename)]`. Renaming
+> it is behaviour-neutral. Deferred to the cleanup pass, not blocked by the report
+> format.
 
 ## Rejected: splitting `harness/`
 
