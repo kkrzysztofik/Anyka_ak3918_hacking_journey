@@ -61,6 +61,37 @@ pub fn parse_ffmpeg_summary_bitrate_kbps(log_line: &str, duration_sec: u64) -> O
     Some((total_kbytes * 8.0) / duration_sec as f64)
 }
 
+/// Build a pcap path under the process temp dir.
+///
+/// Ubuntu AppArmor confines `/usr/bin/tshark` so it can read capture files via
+/// `abstractions/user-tmp`, but not arbitrary paths under `$HOME`. Capture and
+/// analyze under this path, then [`finalize_tshark_pcap`] into the run artifacts.
+pub fn tshark_readable_pcap_path(file_name: &str) -> PathBuf {
+    let safe_name = file_name.replace(['/', '\\'], "_");
+    std::env::temp_dir().join(format!(
+        "rtsp_validation_pid{}_{}",
+        std::process::id(),
+        safe_name
+    ))
+}
+
+/// After tshark analysis, optionally keep a copy under `artifacts_dir` and always
+/// remove the temp capture file.
+pub fn finalize_tshark_pcap(
+    tmp_pcap: &Path,
+    artifacts_dir: &Path,
+    file_name: &str,
+    keep_pcaps: bool,
+) -> Result<()> {
+    if keep_pcaps {
+        let dest = artifacts_dir.join(file_name);
+        std::fs::copy(tmp_pcap, &dest)
+            .with_context(|| format!("copy pcap to {}", dest.display()))?;
+    }
+    let _ = std::fs::remove_file(tmp_pcap);
+    Ok(())
+}
+
 pub fn write_bytes_tail(path: &Path, bytes: &[u8]) -> Result<()> {
     let mut f = File::create(path).with_context(|| format!("create {}", path.display()))?;
     if bytes.len() <= MAX_TOOL_LOG_BYTES {
@@ -110,9 +141,9 @@ pub fn copy_log_to_artifacts(log_path: &Path, artifacts_dir: &Path) -> Result<Op
 #[cfg(test)]
 mod tests {
     use super::{
-        MAX_TOOL_LOG_BYTES, copy_log_to_artifacts, parse_ffmpeg_kbytes_token,
+        MAX_TOOL_LOG_BYTES, copy_log_to_artifacts, finalize_tshark_pcap, parse_ffmpeg_kbytes_token,
         parse_ffmpeg_summary_bitrate_kbps, report_output_path_in_run_dir, rtsp_url,
-        run_artifacts_dir_name, tail_lossy, write_bytes_tail,
+        run_artifacts_dir_name, tail_lossy, tshark_readable_pcap_path, write_bytes_tail,
     };
     use std::path::Path;
 
@@ -173,6 +204,47 @@ mod tests {
             run_artifacts_dir_name("20260205T120102Z", 12345),
             "20260205T120102Z_pid12345"
         );
+    }
+
+    #[test]
+    fn test_tshark_readable_pcap_path_is_under_temp_dir() {
+        let path = tshark_readable_pcap_path("rtsp_protocol_sequence_tcp_port554.pcap");
+        assert!(path.starts_with(std::env::temp_dir()));
+        assert!(
+            path.file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| n.ends_with("rtsp_protocol_sequence_tcp_port554.pcap"))
+        );
+        assert!(
+            path.file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| n.contains(&std::process::id().to_string()))
+        );
+    }
+
+    #[test]
+    fn test_finalize_tshark_pcap_copies_when_keep_and_removes_temp() {
+        let artifacts = tempfile::tempdir().unwrap();
+        let tmp = tshark_readable_pcap_path("keep_me.pcap");
+        std::fs::write(&tmp, b"pcap-bytes").unwrap();
+
+        finalize_tshark_pcap(&tmp, artifacts.path(), "keep_me.pcap", true).unwrap();
+
+        assert!(!tmp.exists());
+        let artifact = artifacts.path().join("keep_me.pcap");
+        assert_eq!(std::fs::read(&artifact).unwrap(), b"pcap-bytes");
+    }
+
+    #[test]
+    fn test_finalize_tshark_pcap_discards_artifact_when_not_keeping() {
+        let artifacts = tempfile::tempdir().unwrap();
+        let tmp = tshark_readable_pcap_path("drop_me.pcap");
+        std::fs::write(&tmp, b"pcap-bytes").unwrap();
+
+        finalize_tshark_pcap(&tmp, artifacts.path(), "drop_me.pcap", false).unwrap();
+
+        assert!(!tmp.exists());
+        assert!(!artifacts.path().join("drop_me.pcap").exists());
     }
 
     #[test]

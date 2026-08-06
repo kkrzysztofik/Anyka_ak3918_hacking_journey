@@ -26,7 +26,8 @@ use crate::rtp::{
     pick_primary_video_stream, tshark_extract_rtp_rows,
 };
 use crate::util::{
-    MAX_TOOL_LOG_BYTES, parse_ffmpeg_summary_bitrate_kbps, rtsp_url, tail_lossy, write_bytes_tail,
+    MAX_TOOL_LOG_BYTES, finalize_tshark_pcap, parse_ffmpeg_summary_bitrate_kbps, rtsp_url,
+    tail_lossy, tshark_readable_pcap_path, write_bytes_tail,
 };
 
 const PROTOCOL_SEQUENCE_CAPTURE_MAX_DURATION_SEC: u64 = 12;
@@ -1240,7 +1241,9 @@ async fn harness_rtsp_protocol_sequence(
     let artifacts_dir = effective.artifacts_dir.clone();
     let capture_tool_output = effective.capture_tool_output;
     let keep_pcaps = effective.keep_pcaps;
-    let pcap_path = artifacts_dir.join(format!("rtsp_protocol_sequence_tcp_port{}.pcap", port));
+    let pcap_file_name = format!("rtsp_protocol_sequence_tcp_port{}.pcap", port);
+    // AppArmor: tshark can read under temp dir, not under $HOME artifacts.
+    let pcap_path = tshark_readable_pcap_path(&pcap_file_name);
 
     let capture = TsharkCapture::start(
         &artifacts_dir,
@@ -1274,11 +1277,10 @@ async fn harness_rtsp_protocol_sequence(
     let pcap_path = capture.stop().await;
 
     let stats = tokio::task::spawn_blocking(move || {
-        let stats = tshark_rtsp_sequence_stats(&pcap_path)?;
-        if !keep_pcaps {
-            let _ = std::fs::remove_file(&pcap_path);
-        }
-        Ok::<_, anyhow::Error>(stats)
+        let result = tshark_rtsp_sequence_stats(&pcap_path);
+        // Always clean temp (and optionally persist) even when analysis fails.
+        finalize_tshark_pcap(&pcap_path, &artifacts_dir, &pcap_file_name, keep_pcaps)?;
+        result
     })
     .await
     .context("spawn_blocking")??;
@@ -1370,7 +1372,9 @@ async fn harness_packet_loss(
     let pacing_expected_fps = effective.pacing_expected_fps;
     let pacing_delay_multiple = effective.pacing_delay_multiple;
     let pacing_delay_floor_ms = effective.pacing_delay_floor_ms;
-    let pcap_path = artifacts_dir.join("rtp_packet_loss_capture.pcap");
+    let pcap_file_name = "rtp_packet_loss_capture.pcap".to_string();
+    // AppArmor: tshark can read under temp dir, not under $HOME artifacts.
+    let pcap_path = tshark_readable_pcap_path(&pcap_file_name);
     let server_ip = effective
         .rtsp_host
         .parse::<std::net::IpAddr>()
@@ -1414,66 +1418,76 @@ async fn harness_packet_loss(
 
     let (video, audio, h264_rfc6184, aac_rfc3640, pacing) =
         tokio::task::spawn_blocking(move || {
-            let mut rows =
-                tshark_extract_rtp_rows(&pcap_path).context("tshark extract rtp rows")?;
+            let result = (|| {
+                let mut rows =
+                    tshark_extract_rtp_rows(&pcap_path).context("tshark extract rtp rows")?;
 
-            if let Some(server) = server_ip.as_ref() {
-                rows.retain(|r| r.ip_src == *server);
-            }
-
-            if rows.is_empty() {
-                bail!(
-                    "No decodable RTP payload packets in UDP pcap; tshark RTP heuristic may be disabled or capture filter/interface is wrong."
-                );
-            }
-
-            let stream_list = group_rtp_rows_by_stream(rows);
-
-            let video_stream = pick_primary_video_stream(&stream_list);
-            let video_key = video_stream.map(|s| s.key);
-            let audio_stream = pick_primary_audio_stream(&stream_list, video_key);
-
-            let video_metric = video_stream.map(compute_stream_loss_metric);
-            let audio_metric = audio_stream.map(compute_stream_loss_metric);
-            let pacing = video_stream.and_then(|s| {
-                compute_pacing(
-                    &s.rows,
-                    pacing_expected_fps,
-                    pacing_delay_multiple,
-                    pacing_delay_floor_ms,
-                )
-            });
-
-            let h264_rfc6184 = if expect_h264 {
-                match video_stream {
-                    Some(s) => Some(analyze_h264_rfc6184_from_rows(&s.rows).map_err(|e| e.to_string())),
-                    None => Some(Err("no RTP stream available for H.264 pcap validation".to_string())),
+                if let Some(server) = server_ip.as_ref() {
+                    rows.retain(|r| r.ip_src == *server);
                 }
-            } else {
-                None
-            };
 
-            let aac_rfc3640 = if expect_aac {
-                match audio_stream {
-                    Some(s) => Some(analyze_aac_rfc3640_from_rows(&s.rows).map_err(|e| e.to_string())),
-                    None => Some(Err("no RTP stream available for AAC pcap validation".to_string())),
+                if rows.is_empty() {
+                    bail!(
+                        "No decodable RTP payload packets in UDP pcap; tshark RTP heuristic may be disabled or capture filter/interface is wrong."
+                    );
                 }
-            } else {
-                None
-            };
 
-            if !keep_pcaps {
-                let _ = std::fs::remove_file(&pcap_path);
-            }
+                let stream_list = group_rtp_rows_by_stream(rows);
 
-            Ok::<_, anyhow::Error>((
-                video_metric,
-                audio_metric,
-                h264_rfc6184,
-                aac_rfc3640,
-                pacing,
-            ))
-    })
+                let video_stream = pick_primary_video_stream(&stream_list);
+                let video_key = video_stream.map(|s| s.key);
+                let audio_stream = pick_primary_audio_stream(&stream_list, video_key);
+
+                let video_metric = video_stream.map(compute_stream_loss_metric);
+                let audio_metric = audio_stream.map(compute_stream_loss_metric);
+                let pacing = video_stream.and_then(|s| {
+                    compute_pacing(
+                        &s.rows,
+                        pacing_expected_fps,
+                        pacing_delay_multiple,
+                        pacing_delay_floor_ms,
+                    )
+                });
+
+                let h264_rfc6184 = if expect_h264 {
+                    match video_stream {
+                        Some(s) => {
+                            Some(analyze_h264_rfc6184_from_rows(&s.rows).map_err(|e| e.to_string()))
+                        }
+                        None => Some(Err(
+                            "no RTP stream available for H.264 pcap validation".to_string(),
+                        )),
+                    }
+                } else {
+                    None
+                };
+
+                let aac_rfc3640 = if expect_aac {
+                    match audio_stream {
+                        Some(s) => {
+                            Some(analyze_aac_rfc3640_from_rows(&s.rows).map_err(|e| e.to_string()))
+                        }
+                        None => Some(Err(
+                            "no RTP stream available for AAC pcap validation".to_string(),
+                        )),
+                    }
+                } else {
+                    None
+                };
+
+                Ok::<_, anyhow::Error>((
+                    video_metric,
+                    audio_metric,
+                    h264_rfc6184,
+                    aac_rfc3640,
+                    pacing,
+                ))
+            })();
+
+            // Always clean temp (and optionally persist) even when analysis fails.
+            finalize_tshark_pcap(&pcap_path, &artifacts_dir, &pcap_file_name, keep_pcaps)?;
+            result
+        })
     .await
     .context("spawn_blocking")??;
 
