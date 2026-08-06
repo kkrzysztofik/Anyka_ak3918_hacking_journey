@@ -24,6 +24,11 @@ const DEVICE_MARKER_END: &str = "__ANYKA_END__";
 
 type SshExecFn<'a> = dyn FnMut(&str, u16, &str, &str, &str, u64) -> Result<String> + 'a;
 
+/// The real SSH runner. Tests pass a scripted stand-in with the same shape instead.
+fn ssh_runner() -> impl FnMut(&str, u16, &str, &str, &str, u64) -> Result<String> {
+    run_ssh_command_blocking
+}
+
 fn marker_echo_begin_cmd() -> &'static str {
     // Deliberately split the marker so the shell command echo does NOT contain the exact token.
     // This makes extract_between_markers robust even when the device echoes commands with prompts.
@@ -56,10 +61,7 @@ pub struct DevicePlaybackOptions<'a> {
     pub h264_file: Option<&'a str>,
     pub aac_file: Option<&'a str>,
     pub loop_playback: bool,
-    pub rtsp_stream: String,
-    pub test_duration_seconds: u64,
     pub httpflv_port: Option<u16>,
-    pub httpflv_path: Option<String>,
 }
 
 /// Run a single command on the device via SSH (blocking). Returns accumulated output.
@@ -215,23 +217,11 @@ pub fn extract_between_markers(s: &str) -> Option<String> {
 }
 
 fn first_u64_in_text(s: &str) -> Option<u64> {
-    let start = s
-        .char_indices()
-        .find_map(|(i, ch)| if ch.is_ascii_digit() { Some(i) } else { None })?;
-    let end = s[start..]
-        .char_indices()
-        .find_map(|(i, ch)| {
-            if ch.is_ascii_digit() {
-                None
-            } else {
-                Some(start + i)
-            }
-        })
-        .unwrap_or(s.len());
-    s[start..end].parse::<u64>().ok()
+    s.split(|c: char| !c.is_ascii_digit())
+        .find_map(|run| run.parse::<u64>().ok())
 }
 
-fn device_assert_file_exists_blocking_with_exec(
+fn device_assert_file_exists_blocking_with_ssh(
     host: &str,
     port: u16,
     user: &str,
@@ -277,13 +267,10 @@ pub fn device_get_onvif_pid_blocking(
     user: &str,
     password: &str,
 ) -> Result<Option<u32>> {
-    let mut exec = |h: &str, p: u16, u: &str, pw: &str, c: &str, t: u64| {
-        run_ssh_command_blocking(h, p, u, pw, c, t)
-    };
-    device_get_onvif_pid_blocking_with_exec(host, port, user, password, &mut exec)
+    device_get_onvif_pid_blocking_with_ssh(host, port, user, password, &mut ssh_runner())
 }
 
-fn device_get_onvif_pid_blocking_with_exec(
+fn device_get_onvif_pid_blocking_with_ssh(
     host: &str,
     port: u16,
     user: &str,
@@ -388,7 +375,7 @@ pub fn parse_status_vmrss_vmsize(content: &str) -> (Option<u64>, Option<u64>) {
     (rss, vmsize)
 }
 
-fn device_cleanup_onvif_logs_blocking_with_exec(
+fn device_cleanup_onvif_logs_blocking_with_ssh(
     host: &str,
     port: u16,
     user: &str,
@@ -411,14 +398,81 @@ fn device_cleanup_onvif_logs_blocking_with_exec(
     Ok(())
 }
 
-fn device_list_onvif_logs_command() -> String {
+fn device_list_logs_command(dir: &str, glob: &str) -> String {
     format!(
         "cd {dir} && {b}; for f in {glob}; do [ -f \"$f\" ] && printf '%s\\n' \"$f\"; done; {e}; true",
-        dir = DEVICE_ONVIF_DIR,
-        glob = DEVICE_ONVIF_LOG_GLOB,
+        dir = dir,
+        glob = glob,
         b = marker_echo_begin_cmd(),
         e = marker_echo_end_cmd(),
     )
+}
+
+/// Copy every log matching `glob` under `dir` into `artifacts_dir`, named `{prefix}{file}`.
+///
+/// Shared by the onvif-rust and vendor-daemon copies; they differ only in those three.
+#[allow(clippy::too_many_arguments)]
+fn device_copy_logs_blocking_with_ssh(
+    host: &str,
+    port: u16,
+    user: &str,
+    password: &str,
+    artifacts_dir: &Path,
+    dir: &str,
+    glob: &str,
+    prefix: &str,
+    what: &str,
+    ssh: &mut SshExecFn<'_>,
+) -> Result<()> {
+    std::fs::create_dir_all(artifacts_dir)
+        .with_context(|| format!("create artifacts dir {}", artifacts_dir.display()))?;
+
+    let listing_raw = ssh(
+        host,
+        port,
+        user,
+        password,
+        &device_list_logs_command(dir, glob),
+        DEVICE_SSH_LOG_COPY_READ_TIMEOUT_SEC,
+    )?;
+    let listing = extract_between_markers(&listing_raw).unwrap_or(listing_raw);
+    let files: Vec<&str> = listing
+        .lines()
+        .map(|l| l.trim_matches(['\r', '\n', ' ']))
+        .filter(|l| !l.is_empty())
+        .collect();
+
+    if files.is_empty() {
+        debug!(what, "no device logs found");
+        return Ok(());
+    }
+
+    for f in files {
+        let out_path = artifacts_dir.join(format!("{}{}", prefix, sanitize_filename_component(f)));
+        let q = sh_single_quote(f);
+        let read_cmd = format!(
+            "cd {dir} && {b} && (tail -c {bytes} {q} 2>/dev/null || tail -n 20000 {q} 2>/dev/null || cat {q} 2>/dev/null) && {e}",
+            dir = dir,
+            b = marker_echo_begin_cmd(),
+            e = marker_echo_end_cmd(),
+            bytes = MAX_TOOL_LOG_BYTES,
+            q = q
+        );
+        let raw = ssh(
+            host,
+            port,
+            user,
+            password,
+            &read_cmd,
+            DEVICE_SSH_LOG_COPY_READ_TIMEOUT_SEC,
+        )?;
+        let content = extract_between_markers(&raw).unwrap_or(raw);
+        write_bytes_tail(&out_path, content.as_bytes())
+            .with_context(|| format!("write {}", out_path.display()))?;
+        info!(path = %out_path.display(), device_file = %f, what, "copied device log");
+    }
+
+    Ok(())
 }
 
 fn device_start_command(onvif_cmd: &str) -> String {
@@ -438,82 +492,35 @@ pub fn device_copy_onvif_logs_blocking(
     password: &str,
     artifacts_dir: &Path,
 ) -> Result<()> {
-    let mut exec = |h: &str, p: u16, u: &str, pw: &str, c: &str, t: u64| {
-        run_ssh_command_blocking(h, p, u, pw, c, t)
-    };
-    device_copy_onvif_logs_blocking_with_exec(host, port, user, password, artifacts_dir, &mut exec)
+    device_copy_onvif_logs_blocking_with_ssh(
+        host,
+        port,
+        user,
+        password,
+        artifacts_dir,
+        &mut ssh_runner(),
+    )
 }
 
-fn device_copy_onvif_logs_blocking_with_exec(
+fn device_copy_onvif_logs_blocking_with_ssh(
     host: &str,
     port: u16,
     user: &str,
     password: &str,
     artifacts_dir: &Path,
-    exec: &mut SshExecFn<'_>,
+    ssh: &mut SshExecFn<'_>,
 ) -> Result<()> {
-    std::fs::create_dir_all(artifacts_dir)
-        .with_context(|| format!("create artifacts dir {}", artifacts_dir.display()))?;
-
-    let list_cmd = device_list_onvif_logs_command();
-    let listing_raw = exec(
+    device_copy_logs_blocking_with_ssh(
         host,
         port,
         user,
         password,
-        &list_cmd,
-        DEVICE_SSH_LOG_COPY_READ_TIMEOUT_SEC,
-    )?;
-    let listing = extract_between_markers(&listing_raw).unwrap_or(listing_raw);
-    let files: Vec<String> = listing
-        .lines()
-        .map(|l| l.trim_matches(['\r', '\n', ' ']))
-        .filter(|l| !l.is_empty())
-        .map(|l| l.to_string())
-        .collect();
-
-    if files.is_empty() {
-        debug!("no device onvif logs found");
-        return Ok(());
-    }
-
-    for f in files {
-        let safe = sanitize_filename_component(&f);
-        let out_path = artifacts_dir.join(format!("device_{}", safe));
-
-        let q = sh_single_quote(&f);
-        let read_cmd = format!(
-            "cd {dir} && {b} && (tail -c {bytes} {q} 2>/dev/null || tail -n 20000 {q} 2>/dev/null || cat {q} 2>/dev/null) && {e}",
-            dir = DEVICE_ONVIF_DIR,
-            b = marker_echo_begin_cmd(),
-            e = marker_echo_end_cmd(),
-            bytes = MAX_TOOL_LOG_BYTES,
-            q = q
-        );
-        let raw = exec(
-            host,
-            port,
-            user,
-            password,
-            &read_cmd,
-            DEVICE_SSH_LOG_COPY_READ_TIMEOUT_SEC,
-        )?;
-        let content = extract_between_markers(&raw).unwrap_or(raw);
-        write_bytes_tail(&out_path, content.as_bytes())
-            .with_context(|| format!("write {}", out_path.display()))?;
-        info!(path = %out_path.display(), device_file = %f, "copied device onvif log");
-    }
-
-    Ok(())
-}
-
-fn device_list_vendor_daemon_logs_command() -> String {
-    format!(
-        "cd {dir} && {b}; for f in {glob}; do [ -f \"$f\" ] && printf '%s\\n' \"$f\"; done; {e}; true",
-        dir = DEVICE_VENDOR_DAEMON_LOG_DIR,
-        glob = DEVICE_VENDOR_DAEMON_LOG_GLOB,
-        b = marker_echo_begin_cmd(),
-        e = marker_echo_end_cmd(),
+        artifacts_dir,
+        DEVICE_ONVIF_DIR,
+        DEVICE_ONVIF_LOG_GLOB,
+        "device_",
+        "onvif",
+        ssh,
     )
 }
 
@@ -525,80 +532,18 @@ pub fn device_copy_vendor_daemon_logs_blocking(
     password: &str,
     artifacts_dir: &Path,
 ) -> Result<()> {
-    let mut exec = |h: &str, p: u16, u: &str, pw: &str, c: &str, t: u64| {
-        run_ssh_command_blocking(h, p, u, pw, c, t)
-    };
-    device_copy_vendor_daemon_logs_blocking_with_exec(
+    device_copy_logs_blocking_with_ssh(
         host,
         port,
         user,
         password,
         artifacts_dir,
-        &mut exec,
+        DEVICE_VENDOR_DAEMON_LOG_DIR,
+        DEVICE_VENDOR_DAEMON_LOG_GLOB,
+        "device_vendor_daemon_",
+        "vendor-daemon",
+        &mut ssh_runner(),
     )
-}
-
-fn device_copy_vendor_daemon_logs_blocking_with_exec(
-    host: &str,
-    port: u16,
-    user: &str,
-    password: &str,
-    artifacts_dir: &Path,
-    exec: &mut SshExecFn<'_>,
-) -> Result<()> {
-    std::fs::create_dir_all(artifacts_dir)
-        .with_context(|| format!("create artifacts dir {}", artifacts_dir.display()))?;
-
-    let list_cmd = device_list_vendor_daemon_logs_command();
-    let listing_raw = exec(
-        host,
-        port,
-        user,
-        password,
-        &list_cmd,
-        DEVICE_SSH_LOG_COPY_READ_TIMEOUT_SEC,
-    )?;
-    let listing = extract_between_markers(&listing_raw).unwrap_or(listing_raw);
-    let files: Vec<String> = listing
-        .lines()
-        .map(|l| l.trim_matches(['\r', '\n', ' ']))
-        .filter(|l| !l.is_empty())
-        .map(|l| l.to_string())
-        .collect();
-
-    if files.is_empty() {
-        debug!("no device vendor-daemon logs found");
-        return Ok(());
-    }
-
-    for f in files {
-        let safe = sanitize_filename_component(&f);
-        let out_path = artifacts_dir.join(format!("device_vendor_daemon_{}", safe));
-
-        let q = sh_single_quote(&f);
-        let read_cmd = format!(
-            "cd {dir} && {b} && (tail -c {bytes} {q} 2>/dev/null || tail -n 20000 {q} 2>/dev/null || cat {q} 2>/dev/null) && {e}",
-            dir = DEVICE_VENDOR_DAEMON_LOG_DIR,
-            b = marker_echo_begin_cmd(),
-            e = marker_echo_end_cmd(),
-            bytes = MAX_TOOL_LOG_BYTES,
-            q = q
-        );
-        let raw = exec(
-            host,
-            port,
-            user,
-            password,
-            &read_cmd,
-            DEVICE_SSH_LOG_COPY_READ_TIMEOUT_SEC,
-        )?;
-        let content = extract_between_markers(&raw).unwrap_or(raw);
-        write_bytes_tail(&out_path, content.as_bytes())
-            .with_context(|| format!("write {}", out_path.display()))?;
-        info!(path = %out_path.display(), device_file = %f, "copied device vendor-daemon log");
-    }
-
-    Ok(())
 }
 
 /// Start onvif-rust on the device (blocking). If h264_file is Some, runs in validation mode.
@@ -610,15 +555,18 @@ pub fn device_start_onvif_blocking(
     rtsp_port: u16,
     playback: DevicePlaybackOptions<'_>,
 ) -> Result<()> {
-    let mut exec = |h: &str, p: u16, u: &str, pw: &str, c: &str, t: u64| {
-        run_ssh_command_blocking(h, p, u, pw, c, t)
-    };
-    device_start_onvif_blocking_with_exec(
-        host, port, user, password, rtsp_port, playback, &mut exec,
+    device_start_onvif_blocking_with_ssh(
+        host,
+        port,
+        user,
+        password,
+        rtsp_port,
+        playback,
+        &mut ssh_runner(),
     )
 }
 
-fn device_start_onvif_blocking_with_exec(
+fn device_start_onvif_blocking_with_ssh(
     host: &str,
     port: u16,
     user: &str,
@@ -631,10 +579,7 @@ fn device_start_onvif_blocking_with_exec(
         h264_file,
         aac_file,
         loop_playback,
-        rtsp_stream: _,
-        test_duration_seconds: _,
         httpflv_port,
-        httpflv_path: _,
     } = playback;
     info!(
         %host,
@@ -646,19 +591,19 @@ fn device_start_onvif_blocking_with_exec(
         loop_playback,
         "starting onvif-rust on device"
     );
-    if let Err(e) = device_cleanup_onvif_logs_blocking_with_exec(host, port, user, password, exec) {
+    if let Err(e) = device_cleanup_onvif_logs_blocking_with_ssh(host, port, user, password, exec) {
         warn!(error = %e, "failed to cleanup device onvif logs before start");
     }
 
     // Fail fast on missing inputs. Otherwise the tool will just wait forever for the RTSP port.
     // These checks are cheap and dramatically improve diagnosability.
     if let Some(h264) = h264_file {
-        device_assert_file_exists_blocking_with_exec(
+        device_assert_file_exists_blocking_with_ssh(
             host, port, user, password, h264, "h264", exec,
         )?;
     }
     if let Some(aac) = aac_file {
-        device_assert_file_exists_blocking_with_exec(host, port, user, password, aac, "aac", exec)?;
+        device_assert_file_exists_blocking_with_ssh(host, port, user, password, aac, "aac", exec)?;
     }
 
     let config_q = sh_single_quote(&format!("{}/config.toml", DEVICE_ONVIF_DIR));
@@ -724,13 +669,10 @@ pub fn device_collect_telemetry_blocking(
     user: &str,
     password: &str,
 ) -> DeviceTelemetry {
-    let mut exec = |h: &str, p: u16, u: &str, pw: &str, c: &str, t: u64| {
-        run_ssh_command_blocking(h, p, u, pw, c, t)
-    };
-    device_collect_telemetry_blocking_with_exec(host, port, user, password, &mut exec)
+    device_collect_telemetry_blocking_with_ssh(host, port, user, password, &mut ssh_runner())
 }
 
-fn device_collect_telemetry_blocking_with_exec(
+fn device_collect_telemetry_blocking_with_ssh(
     host: &str,
     port: u16,
     user: &str,
@@ -932,12 +874,12 @@ fn device_collect_telemetry_blocking_with_exec(
 #[cfg(test)]
 mod tests {
     use super::{
-        DevicePlaybackOptions, device_assert_file_exists_blocking_with_exec,
-        device_collect_telemetry_blocking_with_exec, device_copy_onvif_logs_blocking_with_exec,
-        device_get_onvif_pid_blocking_with_exec, device_list_onvif_logs_command,
-        device_start_command, device_start_onvif_blocking_with_exec, extract_between_markers,
-        parse_loadavg, parse_meminfo, parse_pgrep_output, parse_status_vmrss_vmsize,
-        sanitize_filename_component, sh_single_quote,
+        DEVICE_ONVIF_DIR, DEVICE_ONVIF_LOG_GLOB, DevicePlaybackOptions,
+        device_assert_file_exists_blocking_with_ssh, device_collect_telemetry_blocking_with_ssh,
+        device_copy_onvif_logs_blocking_with_ssh, device_get_onvif_pid_blocking_with_ssh,
+        device_list_logs_command, device_start_command, device_start_onvif_blocking_with_ssh,
+        extract_between_markers, parse_loadavg, parse_meminfo, parse_pgrep_output,
+        parse_status_vmrss_vmsize, sanitize_filename_component, sh_single_quote,
     };
     use anyhow::{Result, anyhow};
     use std::cell::RefCell;
@@ -1192,7 +1134,7 @@ Threads:        1"#;
 
     #[test]
     fn test_device_list_onvif_logs_command_excludes_nohup_out() {
-        let cmd = device_list_onvif_logs_command();
+        let cmd = device_list_logs_command(DEVICE_ONVIF_DIR, DEVICE_ONVIF_LOG_GLOB);
         assert!(cmd.contains("for f in onvif.log*;"));
         assert!(!cmd.contains("nohup.out"));
     }
@@ -1217,7 +1159,7 @@ Threads:        1"#;
             result: Ok("__ANYKA_BEGIN__\nOK\n__ANYKA_END__".to_string()),
         }]);
 
-        let result = device_assert_file_exists_blocking_with_exec(
+        let result = device_assert_file_exists_blocking_with_ssh(
             "camera.local",
             22,
             "root",
@@ -1238,7 +1180,7 @@ Threads:        1"#;
             result: Ok("__ANYKA_BEGIN__\nMISSING:aac:/tmp/missing.aac\n__ANYKA_END__".to_string()),
         }]);
 
-        let result = device_assert_file_exists_blocking_with_exec(
+        let result = device_assert_file_exists_blocking_with_ssh(
             "camera.local",
             22,
             "root",
@@ -1261,7 +1203,7 @@ Threads:        1"#;
             result: Ok("__ANYKA_BEGIN__\n2689 2710\n__ANYKA_END__".to_string()),
         }]);
 
-        let pid = device_get_onvif_pid_blocking_with_exec("h", 22, "u", "pw", &mut exec).unwrap();
+        let pid = device_get_onvif_pid_blocking_with_ssh("h", 22, "u", "pw", &mut exec).unwrap();
         assert_eq!(pid, Some(2689));
     }
 
@@ -1273,7 +1215,7 @@ Threads:        1"#;
             result: Ok(marked("not_a_pid")),
         }]);
 
-        let pid = device_get_onvif_pid_blocking_with_exec("h", 22, "u", "pw", &mut exec).unwrap();
+        let pid = device_get_onvif_pid_blocking_with_ssh("h", 22, "u", "pw", &mut exec).unwrap();
         assert_eq!(pid, None);
     }
 
@@ -1287,7 +1229,7 @@ Threads:        1"#;
         }]);
 
         let result =
-            device_copy_onvif_logs_blocking_with_exec("h", 22, "u", "pw", dir.path(), &mut exec);
+            device_copy_onvif_logs_blocking_with_ssh("h", 22, "u", "pw", dir.path(), &mut exec);
         assert!(result.is_ok());
         let entries = fs::read_dir(dir.path()).unwrap().count();
         assert_eq!(entries, 0);
@@ -1314,7 +1256,7 @@ Threads:        1"#;
             },
         ]);
 
-        device_copy_onvif_logs_blocking_with_exec("h", 22, "u", "pw", dir.path(), &mut exec)
+        device_copy_onvif_logs_blocking_with_ssh("h", 22, "u", "pw", dir.path(), &mut exec)
             .unwrap();
 
         let first = fs::read_to_string(dir.path().join("device_onvif.log")).unwrap();
@@ -1344,14 +1286,11 @@ Threads:        1"#;
             h264_file: Some("/tmp/missing.h264"),
             aac_file: None,
             loop_playback: false,
-            rtsp_stream: "stream1".to_string(),
-            test_duration_seconds: 5,
             httpflv_port: None,
-            httpflv_path: None,
         };
 
         let result =
-            device_start_onvif_blocking_with_exec("h", 22, "u", "pw", 8554, playback, &mut exec);
+            device_start_onvif_blocking_with_ssh("h", 22, "u", "pw", 8554, playback, &mut exec);
         assert!(result.is_err());
         assert!(
             !calls
@@ -1390,13 +1329,10 @@ Threads:        1"#;
             h264_file: Some("/tmp/input.h264"),
             aac_file: Some("/tmp/input.aac"),
             loop_playback: true,
-            rtsp_stream: "stream1".to_string(),
-            test_duration_seconds: 5,
             httpflv_port: Some(8080),
-            httpflv_path: Some("stream1".to_string()),
         };
 
-        device_start_onvif_blocking_with_exec("h", 22, "u", "pw", 8554, playback, &mut exec)
+        device_start_onvif_blocking_with_ssh("h", 22, "u", "pw", 8554, playback, &mut exec)
             .unwrap();
 
         let all_cmds = calls.borrow().join("\n");
@@ -1447,7 +1383,7 @@ Threads:        1"#;
             },
         ]);
 
-        let t = device_collect_telemetry_blocking_with_exec("h", 22, "u", "pw", &mut exec);
+        let t = device_collect_telemetry_blocking_with_ssh("h", 22, "u", "pw", &mut exec);
         assert_eq!(t.mem_total_kib, Some(1000));
         assert_eq!(t.mem_available_kib, Some(250));
         assert_eq!(t.load_avg_1m, Some(1.0));
@@ -1479,7 +1415,7 @@ Threads:        1"#;
             },
         ]);
 
-        let t = device_collect_telemetry_blocking_with_exec("h", 22, "u", "pw", &mut exec);
+        let t = device_collect_telemetry_blocking_with_ssh("h", 22, "u", "pw", &mut exec);
         assert_eq!(t.mem_total_kib, Some(1000));
         assert!(
             t.error

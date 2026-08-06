@@ -497,16 +497,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ffprobe"
-version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8ffef835e1f9ac151db5bb2adbb95c9dfe1f315f987f011dd89cd655b4e9a52c"
-dependencies = [
- "serde",
- "serde_json",
-]
-
-[[package]]
 name = "filetime"
 version = "0.2.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1432,15 +1422,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "quick-xml"
-version = "0.38.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b66c2058c55a409d601666cffe35f04333cf1013010882cec174a7467cd4e21c"
-dependencies = [
- "memchr",
-]
-
-[[package]]
 name = "quinn"
 version = "0.11.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1699,17 +1680,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "rtshark"
-version = "4.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3c6dbe3cfb9e8bbce7a6dc271daa946eacacee570bb473e4d81d358495e766ae"
-dependencies = [
- "chrono",
- "quick-xml",
- "semver",
-]
-
-[[package]]
 name = "rtsp-validation-tool"
 version = "0.1.0"
 dependencies = [
@@ -1717,11 +1687,9 @@ dependencies = [
  "chrono",
  "clap",
  "ffmpeg-sidecar",
- "ffprobe",
  "futures-util",
  "reqwest",
  "retina",
- "rtshark",
  "serde",
  "serde_json",
  "ssh2",

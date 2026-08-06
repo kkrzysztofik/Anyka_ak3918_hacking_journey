@@ -8,22 +8,43 @@ use std::path::{Path, PathBuf};
 pub const MAX_TOOL_LOG_BYTES: usize = 2_000_000; // 2MB per log file (tail kept if exceeded)
 
 pub fn tail_lossy(s: &str, max_chars: usize) -> String {
-    let mut truncated = false;
-    let mut seen = 0usize;
-    for _ in s.chars() {
-        seen += 1;
-        if seen > max_chars {
-            truncated = true;
-            break;
-        }
-    }
-    if !truncated {
+    if s.chars().count() <= max_chars {
         return s.to_string();
     }
-    let mut it = s.chars().rev().take(max_chars).collect::<Vec<char>>();
-    it.reverse();
-    let tail: String = it.into_iter().collect();
-    format!("…{}", tail)
+    let mut tail: Vec<char> = s.chars().rev().take(max_chars).collect();
+    tail.reverse();
+    format!("…{}", tail.into_iter().collect::<String>())
+}
+
+/// Parse an ffmpeg size token (`52kB`, `1MB`, `500B`) into kilobytes.
+pub fn parse_ffmpeg_kbytes_token(raw: &str) -> Option<f64> {
+    let trimmed = raw.trim().trim_end_matches(',');
+    for (suffix, scale) in [("kB", 1.0), ("MB", 1000.0), ("B", 0.001)] {
+        if let Some(value) = trimmed.strip_suffix(suffix) {
+            return value.trim().parse::<f64>().ok().map(|v| v * scale);
+        }
+    }
+    None
+}
+
+/// Estimate kbps from an ffmpeg summary line (`video:52kB audio:816kB …`) over `duration_sec`.
+pub fn parse_ffmpeg_summary_bitrate_kbps(log_line: &str, duration_sec: u64) -> Option<f64> {
+    if duration_sec == 0 {
+        return None;
+    }
+    let total_kbytes: f64 = log_line
+        .split_whitespace()
+        .filter_map(|field| {
+            field
+                .strip_prefix("video:")
+                .or_else(|| field.strip_prefix("audio:"))
+        })
+        .filter_map(parse_ffmpeg_kbytes_token)
+        .sum();
+    if total_kbytes <= 0.0 {
+        return None;
+    }
+    Some((total_kbytes * 8.0) / duration_sec as f64)
 }
 
 pub fn write_bytes_tail(path: &Path, bytes: &[u8]) -> Result<()> {
@@ -75,10 +96,38 @@ pub fn copy_log_to_artifacts(log_path: &Path, artifacts_dir: &Path) -> Result<Op
 #[cfg(test)]
 mod tests {
     use super::{
-        MAX_TOOL_LOG_BYTES, copy_log_to_artifacts, report_output_path_in_run_dir,
-        run_artifacts_dir_name, tail_lossy, write_bytes_tail,
+        MAX_TOOL_LOG_BYTES, copy_log_to_artifacts, parse_ffmpeg_kbytes_token,
+        parse_ffmpeg_summary_bitrate_kbps, report_output_path_in_run_dir, run_artifacts_dir_name,
+        tail_lossy, write_bytes_tail,
     };
     use std::path::Path;
+
+    #[test]
+    fn test_parse_ffmpeg_kbytes_token() {
+        assert_eq!(parse_ffmpeg_kbytes_token("52kB"), Some(52.0));
+        assert_eq!(parse_ffmpeg_kbytes_token("1MB"), Some(1000.0));
+        assert_eq!(parse_ffmpeg_kbytes_token("500B"), Some(0.5));
+        assert!(parse_ffmpeg_kbytes_token("n/a").is_none());
+    }
+
+    #[test]
+    fn test_parse_ffmpeg_summary_bitrate_kbps() {
+        let line = "[info] video:52kB audio:816kB subtitle:0kB";
+        let bitrate = parse_ffmpeg_summary_bitrate_kbps(line, 4).unwrap();
+        assert!((bitrate - 1736.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_parse_ffmpeg_summary_bitrate_kbps_missing_fields() {
+        let line = "[info] Output #0, null, to 'pipe:'";
+        assert!(parse_ffmpeg_summary_bitrate_kbps(line, 10).is_none());
+    }
+
+    #[test]
+    fn test_parse_ffmpeg_summary_bitrate_kbps_duration_zero() {
+        let line = "[info] video:52kB audio:816kB subtitle:0kB";
+        assert!(parse_ffmpeg_summary_bitrate_kbps(line, 0).is_none());
+    }
 
     #[test]
     fn test_run_artifacts_dir_name_format() {

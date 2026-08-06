@@ -85,22 +85,13 @@ ONVIF_NVT_TYPE = "tdn:NetworkVideoTransmitter"
 
 
 def setup_logging(verbose: bool = False, debug: bool = False) -> None:
-    """Configure logging based on verbosity level."""
-    if debug:
-        level = logging.DEBUG
-    elif verbose:
-        level = logging.INFO
-    else:
-        level = logging.WARNING
-
-    # Configure root logger for this script
-    handler = logging.StreamHandler(sys.stderr)
-    handler.setFormatter(logging.Formatter(
-        '%(asctime)s [%(levelname)8s] %(name)s: %(message)s',
-        datefmt='%H:%M:%S'
-    ))
-    logger.addHandler(handler)
-    logger.setLevel(level)
+    """Configure logging: --debug is DEBUG, --verbose is INFO, otherwise WARNING."""
+    logging.basicConfig(
+        stream=sys.stderr,
+        level=logging.DEBUG if debug else logging.INFO if verbose else logging.WARNING,
+        format="%(asctime)s [%(levelname)8s] %(name)s: %(message)s",
+        datefmt="%H:%M:%S",
+    )
 
 
 @dataclass
@@ -288,8 +279,8 @@ def _extract_device_data(
     }
 
 
-def parse_response(data: bytes, source_addr: tuple[str, int], start_time: float,
-                   verbose: bool = False) -> Optional[DiscoveredDevice]:
+def parse_response(data: bytes, source_addr: tuple[str, int],
+                   start_time: float) -> Optional[DiscoveredDevice]:
     """
     Parse a WS-Discovery response (ProbeMatch or Hello).
 
@@ -297,7 +288,6 @@ def parse_response(data: bytes, source_addr: tuple[str, int], start_time: float,
         data: Raw XML response bytes
         source_addr: (ip, port) tuple of the sender
         start_time: Time when probe was sent (for response time calculation)
-        verbose: Enable verbose output
 
     Returns:
         DiscoveredDevice if successfully parsed, None otherwise
@@ -319,9 +309,7 @@ def parse_response(data: bytes, source_addr: tuple[str, int], start_time: float,
         active_ns: Dict[str, str]
         action_elem, active_ns = _find_action_element(root)
         if action_elem is None:
-            logger.debug("No Action header found in any namespace")
-            if verbose:
-                print(f"  [WARN] No Action header in response from {source_ip}", file=sys.stderr)
+            logger.warning("No Action header in response from %s", source_ip)
             return None
 
         action: str = action_elem.text.strip() if action_elem.text else ""
@@ -333,18 +321,12 @@ def parse_response(data: bytes, source_addr: tuple[str, int], start_time: float,
         elif "Hello" in action:
             message_type = "Hello"
         else:
-            logger.debug("Unknown action type: %s", action)
-            if verbose:
-                print(f"  [WARN] Unknown action: {action} from {source_ip}", file=sys.stderr)
+            logger.warning("Unknown action %s from %s", action, source_ip)
             return None
 
         match_elem = _find_match_element(root, message_type, active_ns)
         if match_elem is None:
-            if verbose:
-                print(
-                    f"  [WARN] No {message_type} element in response from {source_ip}",
-                    file=sys.stderr,
-                )
+            logger.warning("No %s element in response from %s", message_type, source_ip)
             return None
 
         device_data = _extract_device_data(match_elem, root, message_type, active_ns)
@@ -363,8 +345,7 @@ def parse_response(data: bytes, source_addr: tuple[str, int], start_time: float,
         )
 
     except etree.XMLSyntaxError:  # type: ignore[misc]
-        if verbose:
-            print(f"  [WARN] XML parse error from {source_ip}", file=sys.stderr)
+        logger.warning("XML parse error from %s", source_ip)
         return None
 
 
@@ -405,49 +386,33 @@ def create_multicast_socket(interface: Optional[str] = None) -> socket.socket:
     return sock
 
 
-def _send_probe(sock: socket.socket, interface: Optional[str], verbose: bool) -> tuple[str, str]:
-    """Build and send Probe message, returning message_id and probe_xml."""
+def _send_probe(sock: socket.socket, interface: Optional[str]) -> str:
+    """Build and send the Probe message, returning its MessageID."""
     message_id, probe_xml = build_probe_message()
 
-    if verbose:
-        print("[INFO] Sending WS-Discovery Probe", file=sys.stderr)
-        print(f"  MessageID: {message_id}", file=sys.stderr)
-        print(f"  Multicast: {WS_DISCOVERY_MULTICAST}:{WS_DISCOVERY_PORT}", file=sys.stderr)
-        if interface:
-            print(f"  Interface: {interface}", file=sys.stderr)
-
-    logger.debug("Sending Probe to multicast address: dest=%s:%d, bytes=%d",
-                 WS_DISCOVERY_MULTICAST, WS_DISCOVERY_PORT, len(probe_xml))
+    logger.info(
+        "Sending WS-Discovery Probe: message_id=%s, dest=%s:%d, interface=%s, bytes=%d",
+        message_id, WS_DISCOVERY_MULTICAST, WS_DISCOVERY_PORT, interface or "all", len(probe_xml),
+    )
     sock.sendto(
         probe_xml.encode("utf-8"),
         (WS_DISCOVERY_MULTICAST, WS_DISCOVERY_PORT),
     )
-    logger.debug("Probe sent successfully")
-
-    return message_id, probe_xml
+    return message_id
 
 
 def _should_accept_device(
-    device: DiscoveredDevice, message_id: str, listen_hello: bool, verbose: bool
+    device: DiscoveredDevice, message_id: str, listen_hello: bool
 ) -> bool:
     """Check if device should be accepted based on message type and filters."""
     if device.message_type == "ProbeMatch":
         if device.relates_to != message_id:
-            logger.debug("ProbeMatch RelatesTo mismatch: expected=%s, got=%s",
-                         message_id, device.relates_to)
-            if verbose:
-                print(
-                    f"  [SKIP] ProbeMatch RelatesTo mismatch: "
-                    f"expected {message_id}, got {device.relates_to}",
-                    file=sys.stderr,
-                )
+            logger.info("Skipping ProbeMatch: RelatesTo expected=%s, got=%s",
+                        message_id, device.relates_to)
             return False
-        logger.debug("ProbeMatch RelatesTo validated successfully")
         return True
-    elif device.message_type == "Hello" and not listen_hello:
-        logger.debug("Ignoring Hello message (--listen-hello not enabled)")
-        if verbose:
-            print("  [SKIP] Hello message (--listen-hello not enabled)", file=sys.stderr)
+    if device.message_type == "Hello" and not listen_hello:
+        logger.info("Skipping Hello message (--listen-hello not enabled)")
         return False
     return True
 
@@ -455,81 +420,50 @@ def _should_accept_device(
 def _process_received_device(
     device: DiscoveredDevice,
     devices: Dict[str, DiscoveredDevice],
-    verbose: bool,
 ) -> None:
     """Process a received device, adding it to the devices dict if new."""
     key = device.endpoint_uuid or f"{device.source_ip}:{device.source_port}"
-    if key not in devices:
-        devices[key] = device
-        if verbose:
-            print(
-                f"  [FOUND] {device.message_type}: {device.endpoint_uuid}",
-                file=sys.stderr,
-            )
-            for xaddr in device.xaddrs:
-                print(f"          XAddr: {xaddr}", file=sys.stderr)
-    elif verbose:
-        print(
-            f"  [DUP] Already discovered: {device.endpoint_uuid}",
-            file=sys.stderr,
-        )
+    if key in devices:
+        logger.info("Already discovered: %s", device.endpoint_uuid)
+        return
+    devices[key] = device
+    logger.info("Found %s: %s (XAddrs: %s)",
+                device.message_type, device.endpoint_uuid, " ".join(device.xaddrs) or "none")
 
 
 def _process_packet(
     data: bytes, addr: tuple[str, int], start_time: float, message_id: str,
-    listen_hello: bool, verbose: bool, devices: Dict[str, DiscoveredDevice],
-    recv_count: int,
+    listen_hello: bool, devices: Dict[str, DiscoveredDevice], recv_count: int,
 ) -> None:
     """Process a single received packet."""
-    logger.debug("Received packet #%d from %s:%d, bytes=%d",
-                 recv_count, addr[0], addr[1], len(data))
+    logger.info("Received packet #%d from %s:%d (%d bytes)",
+                recv_count, addr[0], addr[1], len(data))
 
-    if verbose:
-        print(
-            f"  [RECV] Response from {addr[0]}:{addr[1]} ({len(data)} bytes)",
-            file=sys.stderr,
-        )
-
-    device = parse_response(data, addr, start_time, verbose)
-
-    if device:
-        logger.debug("Parsed device response: type=%s, endpoint=%s",
-                     device.message_type,
-                     device.endpoint_uuid[:40] if device.endpoint_uuid else "none")
-
-        if _should_accept_device(device, message_id, listen_hello, verbose):
-            _process_received_device(device, devices, verbose)
+    device = parse_response(data, addr, start_time)
+    if device and _should_accept_device(device, message_id, listen_hello):
+        _process_received_device(device, devices)
 
 
 def _receive_responses(
     sock: socket.socket, start_time: float, timeout: float, message_id: str,
-    listen_hello: bool, verbose: bool, result: DiscoveryResult,
+    listen_hello: bool, result: DiscoveryResult,
 ) -> Dict[str, DiscoveredDevice]:
     """Receive and process responses until timeout."""
     devices: Dict[str, DiscoveredDevice] = {}
     recv_count = 0
 
-    if verbose:
-        print(f"[INFO] Listening for responses (timeout: {timeout}s)...", file=sys.stderr)
-        if listen_hello:
-            print("[INFO] Also listening for Hello announcements", file=sys.stderr)
-
-    logger.debug("Starting response receive loop, timeout=%.1f", timeout)
+    logger.info("Listening for responses (timeout %.1fs, hello=%s)", timeout, listen_hello)
 
     while (time.time() - start_time) < timeout:
         try:
             data, addr = sock.recvfrom(65535)
             recv_count += 1
-            _process_packet(
-                data, addr, start_time, message_id, listen_hello, verbose,
-                devices, recv_count,
-            )
-
+            _process_packet(data, addr, start_time, message_id, listen_hello,
+                            devices, recv_count)
         except socket.timeout:
             continue
         except OSError as e:
-            if verbose:
-                print(f"  [ERROR] Receive error: {e}", file=sys.stderr)
+            logger.error("Receive error: %s", e)
             result.errors.append(str(e))
 
     return devices
@@ -539,7 +473,6 @@ def discover_devices(
     timeout: float = 5.0,
     listen_hello: bool = False,
     interface: Optional[str] = None,
-    verbose: bool = False,
 ) -> DiscoveryResult:
     """
     Perform WS-Discovery to find ONVIF devices.
@@ -548,7 +481,6 @@ def discover_devices(
         timeout: How long to wait for responses (seconds)
         listen_hello: Also listen for Hello announcements
         interface: Optional interface IP to bind to
-        verbose: Enable verbose output
 
     Returns:
         DiscoveryResult with discovered devices
@@ -558,15 +490,7 @@ def discover_devices(
         timeout, listen_hello, interface or "all",
     )
 
-    result = DiscoveryResult(
-        success=False,
-        message="",
-        probe_message_id="",
-        devices=[],
-        total_devices=0,
-        elapsed_time_seconds=0.0,
-        errors=[],
-    )
+    result = DiscoveryResult(success=False, message="", probe_message_id="")
 
     start_time = time.time()
 
@@ -576,11 +500,11 @@ def discover_devices(
         sock.settimeout(0.5)  # Short timeout for non-blocking receive loop
         logger.debug("Socket created and configured, recv_timeout=0.5")
 
-        message_id, _ = _send_probe(sock, interface, verbose)
+        message_id = _send_probe(sock, interface)
         result.probe_message_id = message_id
 
         devices = _receive_responses(
-            sock, start_time, timeout, message_id, listen_hello, verbose, result
+            sock, start_time, timeout, message_id, listen_hello, result
         )
 
         sock.close()
@@ -656,29 +580,15 @@ Examples:
 
     args = parser.parse_args()
 
-    # Setup logging based on verbosity
     setup_logging(verbose=args.verbose, debug=args.debug)
-
-    # Debug implies verbose
-    if args.debug:
-        args.verbose = True
-
-    if args.verbose:
-        logger.info("=" * 60)
-        logger.info("WS-Discovery Validator for ONVIF Devices")
-        logger.info("=" * 60)
-        if args.debug:
-            logger.info("DEBUG MODE ENABLED - Full XML output")
-            logger.info("Using namespace: %s", NAMESPACES['d'])
-            logger.info("Multicast target: %s:%d", WS_DISCOVERY_MULTICAST, WS_DISCOVERY_PORT)
-            logger.info("=" * 60)
+    logger.info("WS-Discovery Validator: namespace=%s, multicast=%s:%d",
+                NAMESPACES["d"], WS_DISCOVERY_MULTICAST, WS_DISCOVERY_PORT)
 
     # Run discovery
     result = discover_devices(
         timeout=args.timeout,
         listen_hello=args.listen_hello,
         interface=args.interface,
-        verbose=args.verbose,
     )
 
     # Output JSON result to stdout

@@ -10,11 +10,12 @@ use ffmpeg_sidecar::command::FfmpegCommand;
 use ffmpeg_sidecar::event::FfmpegEvent;
 use futures_util::StreamExt;
 use tokio::time::timeout;
-use tracing::{debug, info};
+use tracing::info;
 use url::Url;
 
 use crate::config::EffectiveConfig;
 use crate::report::TestResult;
+use crate::util::parse_ffmpeg_summary_bitrate_kbps;
 
 fn httpflv_base_url(effective: &EffectiveConfig) -> String {
     format!(
@@ -76,43 +77,6 @@ fn apply_stream_basic_auth(
     )
 }
 
-fn parse_ffmpeg_kbytes_token(raw: &str) -> Option<f32> {
-    let trimmed = raw.trim().trim_end_matches(',');
-    if let Some(value) = trimmed.strip_suffix("kB") {
-        return value.trim().parse::<f32>().ok();
-    }
-    if let Some(value) = trimmed.strip_suffix("MB") {
-        return value.trim().parse::<f32>().ok().map(|v| v * 1000.0);
-    }
-    if let Some(value) = trimmed.strip_suffix('B') {
-        return value.trim().parse::<f32>().ok().map(|v| v / 1000.0);
-    }
-    None
-}
-
-fn parse_ffmpeg_summary_bitrate_kbps(log_line: &str, duration_sec: u64) -> Option<f32> {
-    if duration_sec == 0 {
-        return None;
-    }
-    let mut total_kbytes = 0.0_f32;
-    let mut found = false;
-    for field in log_line.split_whitespace() {
-        let maybe_value = field
-            .strip_prefix("video:")
-            .or_else(|| field.strip_prefix("audio:"));
-        if let Some(value) = maybe_value
-            && let Some(kbytes) = parse_ffmpeg_kbytes_token(value)
-        {
-            total_kbytes += kbytes;
-            found = true;
-        }
-    }
-    if !found || total_kbytes <= 0.0 {
-        return None;
-    }
-    Some((total_kbytes * 8.0) / duration_sec as f32)
-}
-
 fn validate_video_tag_payload_header(tag_body: &[u8]) -> Result<(), String> {
     if tag_body.len() < 5 {
         return Err(format!(
@@ -165,35 +129,6 @@ fn validate_audio_tag_payload_header(tag_body: &[u8]) -> Result<(), String> {
     }
 
     Ok(())
-}
-
-#[derive(Debug, Default)]
-struct FlvTimestampTracker {
-    audio_last_ts: Option<u32>,
-    video_last_ts: Option<u32>,
-    metadata_last_ts: Option<u32>,
-}
-
-impl FlvTimestampTracker {
-    fn last_timestamp_for_tag_type_mut(&mut self, tag_type: u8) -> Option<&mut Option<u32>> {
-        match tag_type {
-            8 => Some(&mut self.audio_last_ts),
-            9 => Some(&mut self.video_last_ts),
-            18 => Some(&mut self.metadata_last_ts),
-            _ => None,
-        }
-    }
-
-    fn observe(&mut self, tag_type: u8, timestamp: u32) -> Option<u32> {
-        let last_ts = self.last_timestamp_for_tag_type_mut(tag_type)?;
-        let previous = *last_ts;
-        *last_ts = Some(timestamp);
-
-        match previous {
-            Some(prev) if timestamp != 0 && timestamp < prev => Some(prev),
-            _ => None,
-        }
-    }
 }
 
 /// Run HTTP-FLV protocol validation. Returns test results.
@@ -274,9 +209,7 @@ pub async fn run_httpflv_validation(effective: &EffectiveConfig) -> Result<Vec<T
             "httpflv",
         ));
     } else {
-        let flags = header[4];
-        let _has_video = (flags & 0x01) != 0;
-        let _data_offset_unused = u32::from_be_bytes([0, header[5], header[6], header[7]]); // Actually [5..9] is 4 bytes
+        let has_video = (header[4] & 0x01) != 0;
         let data_offset = u32::from_be_bytes([header[5], header[6], header[7], header[8]]);
 
         if data_offset != 9 {
@@ -285,7 +218,7 @@ pub async fn run_httpflv_validation(effective: &EffectiveConfig) -> Result<Vec<T
                 format!("invalid data offset: {}", data_offset),
                 "httpflv",
             ));
-        } else if !_has_video {
+        } else if !has_video {
             tests.push(TestResult::fail_proto(
                 "httpflv_header_valid",
                 "video bit not set in FLV flags",
@@ -324,7 +257,6 @@ pub async fn run_httpflv_validation(effective: &EffectiveConfig) -> Result<Vec<T
     let mut tags_seen = 0;
     let mut video_tags = 0;
     let mut audio_tags = 0;
-    let mut timestamp_tracker = FlvTimestampTracker::default();
     let mut video_payload_header_validated = false;
     let mut audio_payload_header_validated = false;
 
@@ -342,9 +274,6 @@ pub async fn run_httpflv_validation(effective: &EffectiveConfig) -> Result<Vec<T
 
         let tag_type = buffer[pos];
         let data_size = u32::from_be_bytes([0, buffer[pos + 1], buffer[pos + 2], buffer[pos + 3]]);
-        let ts_lower = u32::from_be_bytes([0, buffer[pos + 4], buffer[pos + 5], buffer[pos + 6]]);
-        let ts_upper = buffer[pos + 7] as u32;
-        let timestamp = (ts_upper << 24) | ts_lower;
 
         if !matches!(tag_type, 8 | 9 | 18) {
             tests.push(TestResult::fail_proto(
@@ -431,13 +360,6 @@ pub async fn run_httpflv_validation(effective: &EffectiveConfig) -> Result<Vec<T
             9 => video_tags += 1,
             _ => {}
         }
-        if let Some(last_ts) = timestamp_tracker.observe(tag_type, timestamp) {
-            debug!(
-                tag_type,
-                timestamp, last_ts, "non-monotonic timestamp detected within FLV tag type"
-            );
-        }
-
         pos = next_tag_pos + 4;
         tags_seen += 1;
 
@@ -510,7 +432,6 @@ pub async fn run_httpflv_validation(effective: &EffectiveConfig) -> Result<Vec<T
 ///
 /// Uses ffmpeg to analyze the stream for bitrate, FPS, and consistency over a period of time.
 pub async fn run_httpflv_harness(
-    _args: &crate::config::Args,
     effective: &EffectiveConfig,
     tests: &mut Vec<TestResult>,
 ) -> Result<()> {
@@ -568,10 +489,10 @@ pub async fn run_httpflv_harness(
             } else {
                 0.0
             };
-            let avg_bitrate = if !bitrates.is_empty() {
-                bitrates.iter().sum::<f32>() / bitrates.len() as f32
-            } else {
+            let avg_bitrate = if bitrates.is_empty() {
                 summary_bitrate_kbps.unwrap_or(0.0)
+            } else {
+                bitrates.iter().map(|b| *b as f64).sum::<f64>() / bitrates.len() as f64
             };
 
             tests.push(TestResult::metric_proto(
@@ -616,8 +537,7 @@ pub async fn run_httpflv_harness(
 #[cfg(test)]
 mod tests {
     use super::{
-        FlvTimestampTracker, apply_basic_auth, parse_ffmpeg_kbytes_token,
-        parse_ffmpeg_summary_bitrate_kbps, url_with_credentials, validate_audio_tag_payload_header,
+        apply_basic_auth, url_with_credentials, validate_audio_tag_payload_header,
         validate_video_tag_payload_header,
     };
 
@@ -726,48 +646,6 @@ mod tests {
         let tag_body = [0xAF, 0x05, 0x11, 0x90];
         let result = validate_audio_tag_payload_header(&tag_body);
         assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_flv_timestamp_tracker_tracks_per_tag_type() {
-        let mut tracker = FlvTimestampTracker::default();
-        assert!(tracker.observe(9, 23_040).is_none());
-        assert!(tracker.observe(8, 40).is_none());
-        assert_eq!(tracker.observe(9, 120), Some(23_040));
-    }
-
-    #[test]
-    fn test_flv_timestamp_tracker_allows_zero_timestamp_regression() {
-        let mut tracker = FlvTimestampTracker::default();
-        assert!(tracker.observe(9, 1_000).is_none());
-        assert!(tracker.observe(9, 0).is_none());
-    }
-
-    #[test]
-    fn test_parse_ffmpeg_kbytes_token() {
-        assert_eq!(parse_ffmpeg_kbytes_token("52kB"), Some(52.0));
-        assert_eq!(parse_ffmpeg_kbytes_token("1MB"), Some(1000.0));
-        assert_eq!(parse_ffmpeg_kbytes_token("500B"), Some(0.5));
-        assert!(parse_ffmpeg_kbytes_token("n/a").is_none());
-    }
-
-    #[test]
-    fn test_parse_ffmpeg_summary_bitrate_kbps() {
-        let line = "[info] video:52kB audio:816kB subtitle:0kB";
-        let bitrate = parse_ffmpeg_summary_bitrate_kbps(line, 4).unwrap();
-        assert!((bitrate - 1736.0).abs() < 0.01);
-    }
-
-    #[test]
-    fn test_parse_ffmpeg_summary_bitrate_kbps_missing_fields() {
-        let line = "[info] Output #0, null, to 'pipe:'";
-        assert!(parse_ffmpeg_summary_bitrate_kbps(line, 10).is_none());
-    }
-
-    #[test]
-    fn test_parse_ffmpeg_summary_bitrate_kbps_duration_zero() {
-        let line = "[info] video:52kB audio:816kB subtitle:0kB";
-        assert!(parse_ffmpeg_summary_bitrate_kbps(line, 0).is_none());
     }
 
     #[test]
