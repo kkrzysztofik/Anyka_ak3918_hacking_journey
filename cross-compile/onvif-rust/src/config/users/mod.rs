@@ -294,15 +294,12 @@ struct UsersFile {
 /// user set so the operator is told the actual cause, not a guess.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum UserLoadStatus {
-    /// No load attempt yet (fresh storage, e.g. unit tests).
+    /// No file was read, or one was read and held no accounts — the operator
+    /// action is the same either way, so they are not distinguished.
     #[default]
-    NotLoaded,
-    /// The file exists, parsed, and at least one account is present.
-    Loaded,
+    Empty,
     /// No users.toml was found next to config.toml.
     Missing,
-    /// The file exists and parsed, but contained no accounts.
-    Empty,
     /// The file exists but failed to parse or read.
     LoadFailed(String),
 }
@@ -325,7 +322,7 @@ impl UserStorage {
     pub fn new() -> Self {
         Self {
             users: RwLock::new(HashMap::with_capacity(MAX_USERS)),
-            load_status: RwLock::new(UserLoadStatus::NotLoaded),
+            load_status: RwLock::new(UserLoadStatus::Empty),
             persistence: OnceLock::new(),
         }
     }
@@ -334,7 +331,7 @@ impl UserStorage {
     pub fn with_file(_file_path: impl Into<String>) -> Self {
         Self {
             users: RwLock::new(HashMap::with_capacity(MAX_USERS)),
-            load_status: RwLock::new(UserLoadStatus::NotLoaded),
+            load_status: RwLock::new(UserLoadStatus::Empty),
             persistence: OnceLock::new(),
         }
     }

@@ -86,20 +86,26 @@ impl AnykaImagingControl {
             ffi,
             super::night_mode::NodePaths::default(),
             crate::config::types::ImagingConfig::default(),
+            None,
         )
     }
 
     /// Create imaging control with injectable GPIO/sensor paths (tests + production).
+    ///
+    /// `idr` fires after every day/night transition; `None` when there is no
+    /// video encoder to ask for a keyframe.
     pub(super) fn with_ffi_and_paths(
         ffi: Arc<dyn crate::hal::common::imaging::ImagingHalTrait>,
         paths: super::night_mode::NodePaths,
         cfg: crate::config::types::ImagingConfig,
+        idr: Option<Arc<dyn Fn() + Send + Sync>>,
     ) -> Self {
         let night = Arc::new(super::night_mode::NightModeController::new(
             paths,
             cfg.night,
             Arc::clone(&ffi),
             cfg.ir_cut_filter,
+            idr,
         ));
         Self {
             ffi,
@@ -132,14 +138,17 @@ impl AnykaImagingControl {
         video_encoder: Arc<AnykaVideoEncoder>,
         cfg: crate::config::types::ImagingConfig,
     ) -> Self {
-        let mut control =
-            Self::with_ffi_and_paths(ffi, super::night_mode::NodePaths::default(), cfg);
-        control.video_encoder = Some(Arc::downgrade(&video_encoder));
         let enc = Arc::clone(&video_encoder);
-        control.night.set_idr_hook(Arc::new(move || {
-            let _ = enc.request_idr_frame(true);
-            let _ = enc.request_idr_frame(false);
-        }));
+        let mut control = Self::with_ffi_and_paths(
+            ffi,
+            super::night_mode::NodePaths::default(),
+            cfg,
+            Some(Arc::new(move || {
+                let _ = enc.request_idr_frame(true);
+                let _ = enc.request_idr_frame(false);
+            })),
+        );
+        control.video_encoder = Some(Arc::downgrade(&video_encoder));
         control
     }
 
@@ -242,7 +251,7 @@ impl ImagingControl for AnykaImagingControl {
     async fn get_options(&self) -> PlatformResult<ImagingOptions> {
         let caps = self.night.capabilities();
         Ok(ImagingOptions {
-            ir_cut_filter_supported: caps.line_mode.is_some(),
+            ir_cut_filter_supported: caps.ircut,
             ir_led_supported: caps.ir_led,
             white_light_supported: caps.white_led,
             ..ImagingOptions::default_options()
@@ -380,6 +389,7 @@ mod tests {
             Arc::new(MockImagingHalTrait::new()),
             paths,
             crate::config::types::ImagingConfig::default(),
+            None,
         );
 
         let options = control.get_options().await.unwrap();
@@ -404,6 +414,7 @@ mod tests {
             Arc::new(MockImagingHalTrait::new()),
             paths,
             crate::config::types::ImagingConfig::default(),
+            None,
         );
 
         let options = control.get_options().await.unwrap();
@@ -428,6 +439,7 @@ mod tests {
                 ir_cut_filter: IrCutFilterMode::OFF,
                 ..ImagingConfig::default()
             },
+            None,
         );
 
         let settings = control.get_settings().await.unwrap();

@@ -429,12 +429,14 @@ export default function ImagingPage() {
                     className="h-10 w-full appearance-none rounded-md border border-[#3a3a3c] bg-[#2c2c2e] px-3 py-2 text-sm text-white focus:border-transparent focus:ring-2 focus:ring-[#0a84ff] focus:outline-none"
                     data-testid="imaging-ir-cut-filter-select"
                   >
-                    {(options?.irCutFilterModes && options.irCutFilterModes.length > 0
-                      ? options.irCutFilterModes
-                      : (Object.keys(IR_CUT_LABELS) as Array<keyof typeof IR_CUT_LABELS>)
+                    {/* The card only renders when the list is non-empty or absent, so
+                        the fallback here covers exactly the not-yet-loaded case. */}
+                    {(
+                      options?.irCutFilterModes ??
+                      (Object.keys(IR_CUT_LABELS) as Array<keyof typeof IR_CUT_LABELS>)
                     ).map((mode) => (
                       <option key={mode} value={mode}>
-                        {IR_CUT_LABELS[mode] ?? mode}
+                        {IR_CUT_LABELS[mode]}
                       </option>
                     ))}
                   </select>

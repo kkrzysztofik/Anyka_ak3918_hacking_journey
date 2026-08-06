@@ -747,14 +747,7 @@ impl Application {
             .join("users.toml");
         if users_path.exists() {
             match user_storage.load_from_toml(&users_path) {
-                Ok(()) => {
-                    tracing::info!("Loaded users from {}", users_path.display());
-                    user_storage.set_load_status(if user_storage.is_empty() {
-                        UserLoadStatus::Empty
-                    } else {
-                        UserLoadStatus::Loaded
-                    });
-                }
+                Ok(()) => tracing::info!("Loaded users from {}", users_path.display()),
                 Err(e) => {
                     tracing::warn!("Failed to load users from {}: {}", users_path.display(), e);
                     user_storage.set_load_status(UserLoadStatus::LoadFailed(e.to_string()));

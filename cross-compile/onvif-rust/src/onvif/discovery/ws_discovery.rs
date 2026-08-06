@@ -1190,13 +1190,12 @@ fn is_transient_join_error(e: &io::Error) -> bool {
 
 /// Drive a multicast-join retry loop with a hard deadline.
 ///
-/// Returns `Ok(attempts)` on success. A permanent failure (per `is_transient`)
-/// or an exhausted `budget` returns `Err` with the offending join error. The
-/// sleep between attempts is capped to the remaining budget so the next attempt
-/// never starts after the deadline.
+/// Returns `Ok(attempts)` on success. A permanent failure (per
+/// [`is_transient_join_error`]) or an exhausted `budget` returns `Err` with the
+/// offending join error. The sleep between attempts is capped to the remaining
+/// budget so the next attempt never starts after the deadline.
 async fn retry_multicast_join<F>(
     mut join: F,
-    is_transient: impl Fn(&io::Error) -> bool,
     budget: Duration,
     interval: Duration,
 ) -> Result<u32, io::Error>
@@ -1210,7 +1209,7 @@ where
         match join() {
             Ok(()) => return Ok(attempts),
             Err(e) => {
-                if !is_transient(&e) {
+                if !is_transient_join_error(&e) {
                     return Err(e);
                 }
                 // Budget exhausted: stop before the next attempt rather than
@@ -1254,22 +1253,17 @@ async fn create_multicast_socket() -> Result<UdpSocket, DiscoveryError> {
         multicast_group = %WS_DISCOVERY_MULTICAST,
         "Joining multicast group"
     );
-    let started = std::time::Instant::now();
-    let attempts = match retry_multicast_join(
+    let attempts = retry_multicast_join(
         || socket.join_multicast_v4(&WS_DISCOVERY_MULTICAST, &Ipv4Addr::UNSPECIFIED),
-        is_transient_join_error,
         MULTICAST_JOIN_RETRY_BUDGET,
         MULTICAST_JOIN_RETRY_INTERVAL,
     )
     .await
-    {
-        Ok(attempts) => attempts,
-        Err(e) => return Err(DiscoveryError::MulticastJoin(e)),
-    };
+    .map_err(DiscoveryError::MulticastJoin)?;
     if attempts > 1 {
         info!(
             attempts,
-            waited_ms = started.elapsed().as_millis() as u64,
+            interval_secs = MULTICAST_JOIN_RETRY_INTERVAL.as_secs(),
             "multicast join succeeded after waiting for the network"
         );
     }
@@ -1415,7 +1409,6 @@ mod tests {
                     Ok(())
                 }
             },
-            is_transient_join_error,
             Duration::from_secs(5),
             Duration::from_millis(1),
         )
@@ -1429,7 +1422,6 @@ mod tests {
     async fn test_retry_multicast_join_permanent_failure_fails_fast() {
         let result = retry_multicast_join(
             || Err(io::Error::from_raw_os_error(libc::EINVAL)),
-            is_transient_join_error,
             Duration::from_secs(5),
             Duration::from_millis(1),
         )
@@ -1443,7 +1435,6 @@ mod tests {
         let started = std::time::Instant::now();
         let result = retry_multicast_join(
             || Err(io::Error::from_raw_os_error(libc::ENETUNREACH)),
-            is_transient_join_error,
             Duration::from_millis(5),
             Duration::from_secs(1),
         )
