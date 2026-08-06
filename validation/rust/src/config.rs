@@ -21,6 +21,10 @@ pub const DEFAULT_ARTIFACTS_ROOT_DIR: &str = "rtsp_results/runs";
 pub const DEFAULT_HTTPFLV_PORT: u16 = 8080;
 pub const DEFAULT_HTTPFLV_PATH: &str = "/live/stream1.flv";
 pub const DEFAULT_CONFIG_FILE_NAME: &str = "rtsp_validation.toml";
+pub const DEFAULT_PACING_EXPECTED_FPS: f64 = 25.0;
+pub const DEFAULT_PACING_DELAY_MULTIPLE: f64 = 2.0;
+pub const DEFAULT_PACING_DELAY_FLOOR_MS: f64 = 150.0;
+pub const DEFAULT_PACING_DELAY_TOLERANCE_PERCENT: f64 = 5.0;
 
 /// TOML config file schema (rtsp_validation.toml).
 #[derive(Debug, Default, Clone, Deserialize)]
@@ -47,6 +51,45 @@ pub struct RtspValidationConfig {
     /// Optional HTTP-FLV section for future tests.
     #[serde(default)]
     pub httpflv: Option<HttpFlvSection>,
+    #[serde(default)]
+    pub pacing: PacingSection,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct PacingSection {
+    #[serde(default = "default_pacing_expected_fps")]
+    pub expected_fps: f64,
+    #[serde(default = "default_pacing_delay_multiple")]
+    pub delay_multiple: f64,
+    #[serde(default = "default_pacing_delay_floor_ms")]
+    pub delay_floor_ms: f64,
+    #[serde(default = "default_pacing_delay_tolerance_percent")]
+    pub delay_tolerance_percent: f64,
+}
+
+impl Default for PacingSection {
+    fn default() -> Self {
+        Self {
+            expected_fps: default_pacing_expected_fps(),
+            delay_multiple: default_pacing_delay_multiple(),
+            delay_floor_ms: default_pacing_delay_floor_ms(),
+            delay_tolerance_percent: default_pacing_delay_tolerance_percent(),
+        }
+    }
+}
+
+fn default_pacing_expected_fps() -> f64 {
+    DEFAULT_PACING_EXPECTED_FPS
+}
+fn default_pacing_delay_multiple() -> f64 {
+    DEFAULT_PACING_DELAY_MULTIPLE
+}
+fn default_pacing_delay_floor_ms() -> f64 {
+    DEFAULT_PACING_DELAY_FLOOR_MS
+}
+fn default_pacing_delay_tolerance_percent() -> f64 {
+    DEFAULT_PACING_DELAY_TOLERANCE_PERCENT
 }
 
 #[derive(Debug, Default, Clone, Deserialize)]
@@ -410,6 +453,10 @@ pub struct EffectiveConfig {
     /// HTTP-FLV path (for future tests).
     pub httpflv_path: String,
     pub httpflv_timeout_sec: u64,
+    pub pacing_expected_fps: f64,
+    pub pacing_delay_multiple: f64,
+    pub pacing_delay_floor_ms: f64,
+    pub pacing_delay_tolerance_percent: f64,
 }
 
 impl EffectiveConfig {
@@ -688,6 +735,10 @@ impl EffectiveConfig {
             packet_loss_tolerance_percent: c.thresholds.packet_loss_tolerance_percent,
             expected_bitrate_kbps: expected_bitrate,
             expected_fps,
+            pacing_expected_fps: c.pacing.expected_fps.max(0.1),
+            pacing_delay_multiple: c.pacing.delay_multiple.max(0.0),
+            pacing_delay_floor_ms: c.pacing.delay_floor_ms.max(0.0),
+            pacing_delay_tolerance_percent: c.pacing.delay_tolerance_percent.max(0.0),
             baseline_dir,
             capture_interface,
             artifacts_root_dir: PathBuf::from(artifacts_root_dir),
@@ -1187,6 +1238,34 @@ mod tests {
         assert_eq!(effective.device_password, None);
         assert!(!effective.update_baseline);
         assert!(!effective.compare_baseline);
+    }
+
+    #[test]
+    fn test_from_config_and_args_pacing_defaults() {
+        let parsed = parse_args_from(["rtsp_validation_tool"]).unwrap();
+        let effective = EffectiveConfig::from_config_and_args(None, &parsed.args, &parsed.sources);
+        assert_eq!(effective.pacing_expected_fps, 25.0);
+        assert_eq!(effective.pacing_delay_multiple, 2.0);
+        assert_eq!(effective.pacing_delay_floor_ms, 150.0);
+        assert_eq!(effective.pacing_delay_tolerance_percent, 5.0);
+    }
+
+    #[test]
+    fn test_pacing_section_parses_from_toml() {
+        let cfg: RtspValidationConfig = toml::from_str(
+            r#"
+            [pacing]
+            expected-fps = 15
+            delay-multiple = 3.0
+            delay-floor-ms = 200
+            delay-tolerance-percent = 10
+            "#,
+        )
+        .unwrap();
+        assert_eq!(cfg.pacing.expected_fps, 15.0);
+        assert_eq!(cfg.pacing.delay_multiple, 3.0);
+        assert_eq!(cfg.pacing.delay_floor_ms, 200.0);
+        assert_eq!(cfg.pacing.delay_tolerance_percent, 10.0);
     }
 
     #[test]

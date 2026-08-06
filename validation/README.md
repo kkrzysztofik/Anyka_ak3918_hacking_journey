@@ -305,6 +305,15 @@ packet-loss-tolerance-percent = 1
 # bitrate_kbps = 2000
 # fps = 25
 
+[pacing]
+# Frame pacing (encoder cadence from RTP timestamps + arrival cadence from pcap
+# wall-clock). A frame gap >= max(1000/expected-fps * delay-multiple, delay-floor-ms)
+# counts as a delay; the run fails when delay_percent > delay-tolerance-percent.
+expected-fps = 15
+delay-multiple = 2.0
+delay-floor-ms = 150
+delay-tolerance-percent = 5
+
 [baseline]
 dir = "rtsp_results/baselines"
 
@@ -358,6 +367,9 @@ Device flags: `--launch-on-device`, `--no-launch`, `--device-host`, `--device-ss
 - **harness_protocol_sequence** — RTSP method counts and status codes from pcap. Auth challenge `401` responses are tracked separately and do not fail the metric.
 - **harness_pcap_rfc6184_h264** — RTP payload structural validation for H.264 per RFC 6184 (Single NAL / STAP-A / FU-A).
 - **harness_pcap_rfc3640_aac** — RTP payload structural validation for AAC MPEG4-GENERIC per RFC 3640 (AU headers length + AU sizes).
+- **frame_pacing_encoder_delay_percent** — % of encoder frame gaps (RTP timestamp deltas) that exceed the pacing delay rule; fails if above `delay-tolerance-percent`.
+- **frame_pacing_arrival_delay_percent** — same for arrival cadence (pcap wall-clock deltas); skipped for pcaps without `frame.time_epoch`.
+- **frame_pacing** — full stats object per cadence: count, min/median/p90/p99/max gap ms, delay count/percent (plus the `frame_pacing_*_max_gap_ms` diagnostic metrics).
 - **httpflv_*** — FLV container parse results and ffmpeg bitrate/FPS for HTTP-FLV.
 
 ## Baseline Management

@@ -33,7 +33,11 @@ pub fn baseline_direction_for(test_name: &str) -> &'static str {
         | "telemetry_load_avg_5m"
         | "telemetry_load_avg_15m"
         | "telemetry_onvif_rss_kib"
-        | "telemetry_onvif_vmsize_kib" => "lower",
+        | "telemetry_onvif_vmsize_kib"
+        | "frame_pacing_encoder_delay_percent"
+        | "frame_pacing_arrival_delay_percent"
+        | "frame_pacing_encoder_max_gap_ms"
+        | "frame_pacing_arrival_max_gap_ms" => "lower",
         _ => "lower",
     }
 }
@@ -160,6 +164,12 @@ pub fn apply_baseline_ops(
                 "harness_packet_loss_percent" => value
                     .get("loss_percent")
                     .and_then(serde_json::Value::as_f64),
+                "frame_pacing_encoder_delay_percent" | "frame_pacing_arrival_delay_percent" => {
+                    value.as_f64()
+                }
+                "frame_pacing_encoder_max_gap_ms" | "frame_pacing_arrival_max_gap_ms" => {
+                    value.get("max_ms").and_then(serde_json::Value::as_f64)
+                }
                 _ => None,
             };
             if let Some(f) = v {
@@ -215,6 +225,22 @@ mod tests {
         );
         assert_eq!(baseline_direction_for("telemetry_load_avg_1m"), "lower");
         assert_eq!(baseline_direction_for("telemetry_onvif_rss_kib"), "lower");
+        assert_eq!(
+            baseline_direction_for("frame_pacing_encoder_delay_percent"),
+            "lower"
+        );
+        assert_eq!(
+            baseline_direction_for("frame_pacing_arrival_delay_percent"),
+            "lower"
+        );
+        assert_eq!(
+            baseline_direction_for("frame_pacing_encoder_max_gap_ms"),
+            "lower"
+        );
+        assert_eq!(
+            baseline_direction_for("frame_pacing_arrival_max_gap_ms"),
+            "lower"
+        );
         assert_eq!(baseline_direction_for("unknown_metric"), "lower");
     }
 

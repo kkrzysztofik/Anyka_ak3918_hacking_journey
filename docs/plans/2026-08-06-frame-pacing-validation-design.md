@@ -1,7 +1,7 @@
 # Frame Pacing Validation — Design
 
 Date: 2026-08-06
-Status: approved; implementation plan to follow
+Status: implemented
 Target: `validation/rust` (rtsp-validation-tool)
 
 ## Problem
@@ -56,8 +56,9 @@ tshark_extract_rtp_rows()  +--- frame.time_epoch field added
 pick_primary_video_stream() -> RtpStreamStats (existing)
 
 compute_pacing(rows: &[RtpTsharkRow], expected_fps, multiple, floor_ms)
-  A: rows sorted by (timestamp, seq); consecutive distinct rtp.timestamp
-     -> gap_ms = wrapping_sub(ts2, ts1) / 90_000 * 1000
+  A: rows in pcap order (media time is monotonic in arrival order for a live
+     stream, keeping 32-bit wrap-around well-defined); consecutive distinct
+     rtp.timestamp -> gap_ms = wrapping_sub(ts2, ts1) / 90_000 * 1000
   B: rows in pcap order; when rtp.timestamp changes at row i, the previous
      frame's arrival epoch = row (i-1)'s time_epoch_sec (the packet that closed
      the frame); gap_ms = (epoch_i-1 - prev_frame_epoch) * 1000

@@ -56,6 +56,10 @@ fn test_effective_config(httpflv_port: u16, httpflv_path: &str) -> EffectiveConf
         httpflv_port,
         httpflv_path: httpflv_path.to_string(),
         httpflv_timeout_sec: 2,
+        pacing_expected_fps: 25.0,
+        pacing_delay_multiple: 2.0,
+        pacing_delay_floor_ms: 150.0,
+        pacing_delay_tolerance_percent: 5.0,
     }
 }
 
