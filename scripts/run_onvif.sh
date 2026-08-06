@@ -15,8 +15,10 @@ PROJECT_ROOT="${ANYKA_REPO_ROOT}"
 
 # Default values
 DEFAULT_IP="192.168.1.100"
-DEFAULT_USER="admin"
-DEFAULT_PASS="admin"
+# Only echoed into the suggested deploy_onvif.sh command — telnet on :24 needs
+# no login. Password stays out of the repo; see ANYKA_FTP_PASS.
+DEFAULT_USER="root"
+DEFAULT_PASS="${ANYKA_FTP_PASS:-}"
 DEFAULT_MODE="release"
 
 # Get parameters
@@ -42,7 +44,7 @@ log_info "Mode:       $MODE (config: $CONFIG_FILE)"
 log_info "Log output: $PROJECT_ROOT/debugging/logs/"
 echo ""
 
-if [ -z "$DEVICE_IP" ] || [ -z "$USERNAME" ] || [ -z "$PASSWORD" ]; then
+if [ -z "$DEVICE_IP" ] || [ -z "$USERNAME" ]; then
     log_error "Usage: $0 [device_ip] [username] [password] [release|debug]"
     exit 1
 fi

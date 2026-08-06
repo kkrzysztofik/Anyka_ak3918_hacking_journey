@@ -22,8 +22,10 @@ source "${SCRIPT_DIR}/common.sh"
 MODE=""
 SD_MOUNT=""
 FTP_HOST=""
-FTP_USER="admin"
-FTP_PASS="admin"
+# The camera's FTP account is root, not admin. The password is a secret: pass it
+# with --pass or export ANYKA_FTP_PASS. Never hardcode it here.
+FTP_USER="root"
+FTP_PASS="${ANYKA_FTP_PASS:-}"
 REMOTE_ROOT="/mnt"
 DRY_RUN=false
 DO_DELETE=false
