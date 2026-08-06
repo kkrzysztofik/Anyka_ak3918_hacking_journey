@@ -42,6 +42,31 @@ flowchart TD
   Merge --> Write
 ```
 
+## Code layout
+
+The tool is one Rust crate at `validation/rust/`. `src/rtsp.rs` was split into
+separate modules; the dependency direction is enforced and has no cycles.
+
+| Path | Role |
+| --- | --- |
+| `src/main.rs` | CLI entry point, run orchestration, device SSH lifecycle |
+| `src/config.rs` | TOML schema, CLI parsing, merged `EffectiveConfig` |
+| `src/probe.rs` | Retina in-process probe: DESCRIBE/SETUP/PLAY, SDP, first-frame timing |
+| `src/harness.rs` | External-tool harness: ffmpeg, ffprobe, tshark scenarios |
+| `src/httpflv.rs` | HTTP-FLV container parse and ffmpeg harness |
+| `src/rtp/rows.rs` | `tshark -T fields` output to RTP rows |
+| `src/rtp/payload.rs` | RFC 6184 (H.264) and RFC 3640 (AAC) payload conformance |
+| `src/rtp/streams.rs` | Stream grouping, primary selection, packet loss |
+| `src/rtp/pacing.rs` | Encoder and arrival cadence, gap percentiles |
+| `src/baseline.rs` | Baseline write and regression comparison |
+| `src/device.rs` | Device SSH, telemetry, log collection |
+| `src/report.rs` | `TestResult`, `Summary`, report types |
+| `src/util.rs` | Shared helpers (`rtsp_url`, log tails, artifact paths) |
+
+`rtp/` is pure analysis: it takes rows and numbers and returns statistics, with no
+dependency on config, test-result types, ffmpeg or tokio. `probe` and `harness` do
+not reference each other.
+
 ## Prerequisites
 
 ```bash
@@ -282,6 +307,8 @@ launch-on-device = true
 output = "rtsp_validation.json"
 update-baseline = false
 compare-baseline = false
+# Local launch only: H.264 file passed to onvif-rust (same as --h264-file)
+# h264-file = "test_video.h264"
 
 [rtsp]
 host = "192.168.2.198"
@@ -305,9 +332,10 @@ audio-startup-latency-ms = 2000
 bitrate-tolerance-percent = 15
 fps-tolerance-percent = 10
 packet-loss-tolerance-percent = 1
-# Optional expected values; baseline comparison used when unset and baseline exists
+# Optional expected values; baseline comparison used when unset and baseline exists.
+# Note the kebab-case key: `bitrate_kbps` is rejected (deny_unknown_fields).
 # [thresholds.expected]
-# bitrate_kbps = 2000
+# bitrate-kbps = 2000
 # fps = 25
 
 [pacing]
@@ -359,7 +387,11 @@ loop-playback = true
 # [[device.streams]]  — override which streams to validate in real mode
 ```
 
-Common CLI overrides: `--rtsp-host`, `--rtsp-port`, `--rtsp-stream`, `--username`, `--password`, `--transport` (tcp/udp), `--duration`, `-c`/`--config`, `--output`, `--artifacts-dir`, `--update-baseline`, `--compare-baseline`, `--concurrent`, `--long-duration`, `--skip-error-handling`, `--require-audio`, `--skip-httpflv`, `--httpflv-stream`, `--ffmpeg-log-level`.
+Common CLI overrides: `--rtsp-host`, `--rtsp-port`, `--rtsp-stream`, `--username`, `--password`, `--transport` (tcp/udp), `--initial-timestamp-policy`, `--duration`, `-c`/`--config`, `--output`, `--artifacts-dir`, `--update-baseline`, `--compare-baseline`, `--concurrent`, `--long-duration`, `--skip-error-handling`, `--require-audio`, `--skip-httpflv`, `--httpflv-stream`, `--httpflv-port`, `--max-video-startup-latency-ms`, `--ffmpeg-log-level`.
+
+Local-launch flags: `--h264-file`, `--loop-playback`, `--onvif-binary` (defaults to an auto-detected `cross-compile/target/.../onvif-rust`).
+
+Every option above is unset by default: passing it overrides the config file, omitting it leaves the config value (or the built-in default) in place.
 
 Device flags: `--launch-on-device`, `--no-launch`, `--device-host`, `--device-ssh-port`, `--device-user`, `--device-password`, `--no-telemetry`, `--device-h264-file`, `--device-aac-file`, `--device-loop-playback`, `--device-real-mode`.
 
