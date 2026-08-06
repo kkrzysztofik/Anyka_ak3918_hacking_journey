@@ -10,8 +10,9 @@ use rtsp_validation_tool::device::{
     device_copy_vendor_daemon_logs_blocking, device_get_onvif_pid_blocking,
     device_start_onvif_blocking, device_stop_onvif_blocking,
 };
+use rtsp_validation_tool::probe::{critical_proto_failed, run_validation};
 use rtsp_validation_tool::report::{TestResult, ValidationReport, compute_summary};
-use rtsp_validation_tool::rtsp::{critical_proto_failed, run_harness, run_validation};
+use rtsp_validation_tool::rtsp::run_harness;
 use rtsp_validation_tool::util::{
     copy_log_to_artifacts, report_output_path_in_run_dir, run_artifacts_dir_name, tail_lossy,
 };
@@ -813,8 +814,8 @@ mod tests {
         prefix_test_names, validate_args, wait_for_server_with_retries,
     };
     use rtsp_validation_tool::config::{EffectiveConfig, parse_args_from};
+    use rtsp_validation_tool::probe::critical_proto_failed;
     use rtsp_validation_tool::report::TestResult;
-    use rtsp_validation_tool::rtsp::critical_proto_failed;
     use std::{
         fs,
         process::{Command, Stdio},

@@ -6,6 +6,7 @@ pub mod baseline;
 pub mod config;
 pub mod device;
 pub mod httpflv;
+pub mod probe;
 pub mod report;
 pub mod rtp;
 pub mod rtsp;
@@ -16,7 +17,8 @@ pub use baseline::{
 };
 pub use config::{Args, EffectiveConfig, RtspValidationConfig, load_config};
 pub use device::DeviceTelemetry;
+pub use probe::{critical_proto_failed, run_validation};
 pub use report::{
     StreamInfo, Summary, TestResult, TestRun, ValidationReport, compute_summary, result_ok,
 };
-pub use rtsp::{critical_proto_failed, run_harness, run_validation};
+pub use rtsp::run_harness;
