@@ -1,4 +1,8 @@
-//! RTSP protocol validation and harness (Retina, ffmpeg, tshark).
+//! External-tool RTSP harness: drives ffmpeg, ffprobe and tshark against a
+//! running server and turns their output into test results.
+//!
+//! The in-process Retina probe lives in [`crate::probe`]; pcap/RTP analysis in
+//! [`crate::rtp`].
 
 use anyhow::{Context, Result, anyhow, bail};
 use ffmpeg_sidecar::command::FfmpegCommand;
