@@ -166,7 +166,7 @@ pub fn validate_h264_length_prefixed_nals(data: &[u8]) -> Result<()> {
 }
 
 pub async fn run_validation(args: &Args, effective: &EffectiveConfig) -> Result<ValidationReport> {
-    let url_str = crate::harness::rtsp_url(
+    let url_str = crate::util::rtsp_url(
         &effective.rtsp_host,
         effective.rtsp_port,
         &effective.rtsp_stream,

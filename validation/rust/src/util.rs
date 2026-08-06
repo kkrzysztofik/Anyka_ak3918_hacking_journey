@@ -7,6 +7,10 @@ use std::path::{Path, PathBuf};
 
 pub const MAX_TOOL_LOG_BYTES: usize = 2_000_000; // 2MB per log file (tail kept if exceeded)
 
+pub fn rtsp_url(host: &str, port: u16, stream: &str) -> String {
+    format!("rtsp://{}:{}{}", host, port, stream)
+}
+
 pub fn tail_lossy(s: &str, max_chars: usize) -> String {
     if s.chars().count() <= max_chars {
         return s.to_string();
@@ -97,10 +101,18 @@ pub fn copy_log_to_artifacts(log_path: &Path, artifacts_dir: &Path) -> Result<Op
 mod tests {
     use super::{
         MAX_TOOL_LOG_BYTES, copy_log_to_artifacts, parse_ffmpeg_kbytes_token,
-        parse_ffmpeg_summary_bitrate_kbps, report_output_path_in_run_dir, run_artifacts_dir_name,
-        tail_lossy, write_bytes_tail,
+        parse_ffmpeg_summary_bitrate_kbps, report_output_path_in_run_dir, rtsp_url,
+        run_artifacts_dir_name, tail_lossy, write_bytes_tail,
     };
     use std::path::Path;
+
+    #[test]
+    fn test_rtsp_url() {
+        assert_eq!(
+            rtsp_url("192.168.1.1", 8554, "/live"),
+            "rtsp://192.168.1.1:8554/live"
+        );
+    }
 
     #[test]
     fn test_parse_ffmpeg_kbytes_token() {

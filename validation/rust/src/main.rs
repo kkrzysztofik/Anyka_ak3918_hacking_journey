@@ -14,7 +14,8 @@ use rtsp_validation_tool::harness::run_harness;
 use rtsp_validation_tool::probe::{critical_proto_failed, run_validation};
 use rtsp_validation_tool::report::{TestResult, ValidationReport, compute_summary};
 use rtsp_validation_tool::util::{
-    copy_log_to_artifacts, report_output_path_in_run_dir, run_artifacts_dir_name, tail_lossy,
+    copy_log_to_artifacts, report_output_path_in_run_dir, rtsp_url, run_artifacts_dir_name,
+    tail_lossy,
 };
 use std::env;
 use std::path::{Path, PathBuf};
@@ -521,14 +522,15 @@ async fn main() -> Result<()> {
     } else {
         "local"
     };
-    let rtsp_url = format!(
-        "rtsp://{}:{}{}",
-        effective.rtsp_host, effective.rtsp_port, effective.rtsp_stream
+    let url = rtsp_url(
+        &effective.rtsp_host,
+        effective.rtsp_port,
+        &effective.rtsp_stream,
     );
     let stream_labels: Vec<&str> = effective.streams.iter().map(|s| s.label.as_str()).collect();
     info!(
         run_mode,
-        rtsp = %rtsp_url,
+        rtsp = %url,
         streams = ?stream_labels,
         output = %effective.output,
         "RTSP validation run"

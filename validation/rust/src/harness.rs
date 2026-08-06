@@ -26,7 +26,7 @@ use crate::rtp::{
     pick_primary_video_stream, tshark_extract_rtp_rows,
 };
 use crate::util::{
-    MAX_TOOL_LOG_BYTES, parse_ffmpeg_summary_bitrate_kbps, tail_lossy, write_bytes_tail,
+    MAX_TOOL_LOG_BYTES, parse_ffmpeg_summary_bitrate_kbps, rtsp_url, tail_lossy, write_bytes_tail,
 };
 
 const PROTOCOL_SEQUENCE_CAPTURE_MAX_DURATION_SEC: u64 = 12;
@@ -43,10 +43,6 @@ struct RtspProtocolSequenceStats {
     status_4xx: u32,
     status_401: u32,
     status_5xx: u32,
-}
-
-pub(crate) fn rtsp_url(host: &str, port: u16, stream: &str) -> String {
-    format!("rtsp://{}:{}{}", host, port, stream)
 }
 
 fn redact_url_credentials(raw_url: &str) -> String {
@@ -1688,7 +1684,7 @@ mod tests {
         append_harness_startup_latency_result, bitrate_within_tolerance, fps_within_tolerance,
         harness_bitrate_pass, harness_fps_pass, harness_protocol_sequence_pass,
         packet_loss_within_tolerance, redact_url_credentials, rtsp_sequence_stats_from_field_rows,
-        rtsp_url, rtsp_url_with_credentials,
+        rtsp_url_with_credentials,
     };
     use crate::report::{TestResult, result_ok};
     use crate::util::MAX_TOOL_LOG_BYTES;
@@ -1699,42 +1695,6 @@ mod tests {
             TestResult::Fail { reason, .. } => Some(reason),
             _ => None,
         }
-    }
-
-    #[test]
-    fn test_result_ok_pass() {
-        assert!(result_ok(&TestResult::pass("x")));
-    }
-
-    #[test]
-    fn test_result_ok_fail() {
-        assert!(!result_ok(&TestResult::fail("x", "reason")));
-    }
-
-    #[test]
-    fn test_result_ok_metric_pass() {
-        assert!(result_ok(&TestResult::metric(
-            "m",
-            serde_json::json!(1),
-            true
-        )));
-    }
-
-    #[test]
-    fn test_result_ok_metric_fail() {
-        assert!(!result_ok(&TestResult::metric(
-            "m",
-            serde_json::json!(1),
-            false
-        )));
-    }
-
-    #[test]
-    fn test_rtsp_url() {
-        assert_eq!(
-            rtsp_url("192.168.1.1", 8554, "/live"),
-            "rtsp://192.168.1.1:8554/live"
-        );
     }
 
     #[test]
