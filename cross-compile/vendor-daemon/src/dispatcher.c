@@ -35,6 +35,7 @@ static int is_lifecycle_cmd(int32_t cmd)
     case CMD_VI_OPEN:
     case CMD_VI_CLOSE:
     case CMD_VI_SET_CHANNEL_ATTR:
+    case CMD_VI_SET_FLIP_MIRROR:
     case CMD_VI_CAPTURE_ON:
     case CMD_VI_CAPTURE_OFF:
     case CMD_VPSS_INIT:
@@ -243,6 +244,9 @@ int process_request(int fd)
         break;
     case CMD_VI_CAPTURE_OFF:
         ret = handle_vi_capture_off(fd, req_buf, req_len);
+        break;
+    case CMD_VI_SET_FLIP_MIRROR:
+        ret = handle_vi_set_flip_mirror(fd, req_buf, req_len);
         break;
 
     /* --- VPSS --- */

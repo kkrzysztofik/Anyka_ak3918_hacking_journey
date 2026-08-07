@@ -53,6 +53,10 @@ enum cmd_id {
     /* Push-based frame delivery (Fix 0) */
     CMD_VENC_START_PUSH           = 19,
     CMD_VENC_STOP_PUSH            = 20,
+    /* Video Input (continued — appended here, not in the VI block above,
+     * because this is a wire protocol: renumbering existing commands would
+     * break any client/daemon pair mid-upgrade). */
+    CMD_VI_SET_FLIP_MIRROR        = 21,
     /* Audio Input */
     CMD_AI_OPEN                   = 50,
     CMD_AI_CLOSE                  = 51,
