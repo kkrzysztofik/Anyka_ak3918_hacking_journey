@@ -1182,6 +1182,9 @@ impl Application {
                 ptz_enabled,
                 main_encoder,
                 sub_encoder,
+                // TODO(video-rotate task 11): thread the persisted rotate flag
+                // through from config_runtime instead of hardcoding `false`.
+                false,
             ) {
                 Ok(p) => {
                     // Construction no longer touches the daemon, and bring-up is no

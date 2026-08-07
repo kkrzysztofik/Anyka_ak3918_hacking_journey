@@ -15,8 +15,9 @@ use super::common::{
     AudioEncoder, AudioEncoderConfig, AudioEncoding, AudioInput, AudioSourceConfig, BitrateMode,
     DeviceInfo, DnsInfo, ImagingControl, ImagingOptions, ImagingSettings, NetworkInfo,
     NetworkInterfaceInfo, NetworkProtocolInfo, NtpInfo, PTZControl, Platform, PlatformError,
-    PlatformResult, PtzLimits, PtzPosition, PtzPreset, PtzVelocity, Resolution, VideoEncoder,
-    VideoEncoderConfig, VideoEncoderOptions, VideoEncoding, VideoInput, VideoSourceConfig,
+    PlatformResult, PtzLimits, PtzPosition, PtzPreset, PtzVelocity, Resolution, VideoControl,
+    VideoEncoder, VideoEncoderConfig, VideoEncoderOptions, VideoEncoding, VideoInput,
+    VideoSourceConfig,
 };
 
 /// Builder for configuring stub platform behavior.
@@ -462,6 +463,13 @@ impl Platform for StubPlatform {
 
     crate::impl_platform_accessors!();
 
+    // TODO(video-rotate task 6): back this with a real field for symmetry
+    // with `imaging_control`, same as `AnykaPlatform` does via `video_input`.
+    // Placeholder `None` only unblocks compilation for tasks 3-5.
+    fn video_control(&self) -> Option<Arc<dyn VideoControl>> {
+        None
+    }
+
     async fn initialize(&self) -> PlatformResult<()> {
         if self.fail_init {
             return Err(PlatformError::InitializationFailed(
@@ -576,6 +584,10 @@ impl Platform for ValidationPlatform {
 
     fn imaging_control(&self) -> Option<Arc<dyn ImagingControl>> {
         self.inner.as_ref().imaging_control()
+    }
+
+    fn video_control(&self) -> Option<Arc<dyn VideoControl>> {
+        self.inner.as_ref().video_control()
     }
 
     fn network_info(&self) -> Option<Arc<dyn NetworkInfo>> {
