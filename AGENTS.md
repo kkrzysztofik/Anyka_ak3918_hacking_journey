@@ -208,10 +208,31 @@ Reusable checklists/prompts (manual reference):
 5. **✅ RUN TESTS** → `$CARGO test` (ALL tests must pass)
 6. **🔍 QUALITY CHECK** → `$CARGO clippy -- -D warnings` and `$CARGO fmt --check`
 7. **📝 DOCUMENT** → `$CARGO doc --no-deps`
-8. **👀 SELF-REVIEW** → Follow [Quality Gates](.serena/memories/quality-gates.md)
+8. **👀 SELF-REVIEW** → `ponytail-review` your own diff first (cut bloat), then follow [Quality Gates](.serena/memories/quality-gates.md)
 9. **🚀 DEPLOY** → Test via SD card payload
 
 **NO SHORTCUTS, NO SKIPPING TESTS, NO BYPASSING LINTING, NO SKIPPING DOCUMENTATION.** The task is only complete when every step above is green.
+
+## ⚡ Skill & Complexity Policy
+
+**Defaults — no one asks, you just do it.** Ponytail (full) governs all code and plans: shortest working diff, YAGNI, stdlib-first, no boilerplate. Superpowers process skills auto-trigger on their matching task type below. Never wait to be told to use them.
+
+| Skill                                      | Auto-triggers when                                  |
+| ------------------------------------------ | --------------------------------------------------- |
+| `superpowers:brainstorming`                  | A new feature, component, or behavior change begins |
+| `superpowers:writing-plans`                  | A brainstormed design is approved                   |
+| `ponytail-review`                            | A plan/spec is written, or at step 8 on your own diff |
+| `superpowers:executing-plans`                | Work follows a written plan                         |
+| `superpowers:test-driven-development`        | Implementation code is about to be written          |
+| `superpowers:systematic-debugging`           | Investigating a bug or test failure                 |
+| `superpowers:verification-before-completion` | About to claim work is done                         |
+| `superpowers:requesting-code-review`         | Work is complete, pre-merge / pre-push              |
+| `superpowers:receiving-code-review`          | Review feedback arrives                             |
+| `superpowers:using-git-worktrees`            | Starting isolated feature work                      |
+| `superpowers:dispatching-parallel-agents`    | 2+ independent tasks are available                  |
+| `superpowers:subagent-driven-development`    | Executing a plan with independent subtasks          |
+
+**Conflict rule.** Process is never skipped — tests, lint, docs, and review stay mandatory. Ponytail only cuts bloat *within* a step (code, plan, spec); it is not a license to skip a step.
 
 ## Landing the Plane (Session Completion)
 
