@@ -606,6 +606,29 @@ async fn test_apply_flip_mirror_passes_false_through_when_open() {
 }
 
 #[tokio::test]
+async fn test_apply_flip_mirror_propagates_ffi_error() {
+    let mut mock = mock_ffi_with_successful_open();
+    mock.expect_vi_set_flip_mirror()
+        .times(1)
+        .returning(|_, _, _| AK_FAILED_I32);
+
+    let vi = AnykaVideoInput::with_ffi(Arc::new(mock), None);
+    vi.open().await.unwrap();
+
+    let result = vi.apply_flip_mirror(true);
+    assert!(result.is_err());
+    match result {
+        Err(PlatformError::HardwareFailure(msg)) => {
+            assert!(msg.contains("ak_vi_set_flip_mirror"));
+        }
+        other => panic!("Expected HardwareFailure, got {:?}", other),
+    }
+    // The flag is stored optimistically before the FFI call, regardless of
+    // whether the FFI call itself later fails.
+    assert!(vi.rotated());
+}
+
+#[tokio::test]
 async fn test_video_control_set_flip_mirror_stores_flag_when_closed() {
     // VI never opened — the async trait method must not touch the FFI
     // (MockVideoHalTrait has no expectations set, so any FFI call panics)
@@ -632,6 +655,24 @@ async fn test_video_control_set_flip_mirror_calls_ffi_when_open() {
     let result = VideoControl::set_flip_mirror(&vi, true).await;
     assert!(result.is_ok());
     assert!(vi.rotated());
+}
+
+#[tokio::test]
+async fn test_video_control_set_flip_mirror_passes_false_through_when_open() {
+    // Symmetric with apply_flip_mirror's false-through coverage: the async
+    // path must also send matching flip=mirror=false, not just true.
+    let mut mock = mock_ffi_with_successful_open();
+    mock.expect_vi_set_flip_mirror()
+        .withf(|_, flip, mirror| !*flip && !*mirror)
+        .times(1)
+        .returning(|_, _, _| AK_SUCCESS_I32);
+
+    let vi = AnykaVideoInput::with_ffi(Arc::new(mock), None);
+    vi.open().await.unwrap();
+
+    let result = VideoControl::set_flip_mirror(&vi, false).await;
+    assert!(result.is_ok());
+    assert!(!vi.rotated());
 }
 
 #[tokio::test]
