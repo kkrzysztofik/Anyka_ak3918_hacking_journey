@@ -41,7 +41,7 @@ Key directories to check:
 ```
 cross-compile/onvif-rust/src/         # Rust ONVIF services
 cross-compile/onvif-rust/src/onvif/   # ONVIF handlers
-cross-compile/onvif-rust/src/auth/    # Authentication
+cross-compile/onvif-rust/src/security/ # Authentication & XML security
 cross-compile/onvif-rust/src/platform/ # Hardware abstraction
 cross-compile/streaming-lib/src/      # RTSP streaming
 cross-compile/vendor-daemon/src/      # C IPC bridge
@@ -112,7 +112,8 @@ Each task follows this format:
 
 When planning Rust tasks:
 - All tests use `--target x86_64-unknown-linux-gnu`
-- New traits must be `mockall`-compatible (`#[automock]` or `mock!{}`)
+- All quality gates run with `$CARGO` after `source ./setenv.sh` (vendored toolchain — never bare `cargo`, never `rustup`)
+- New traits must be `mockall`-compatible (`#[cfg_attr(test, automock)]` on the trait definition, or `mockall::mock!{}` for external traits)
 - No `std::sync` in async code (tokio primitives only)
 - Every new public function needs a test
 
@@ -124,7 +125,8 @@ When planning C tasks:
 When planning TypeScript tasks:
 - Every component needs `data-testid` attributes
 - Every new hook needs Vitest tests
-- SOAP XML fixtures go in `src/test/fixtures/soap/`
+- Test helpers live in `src/test/` (e.g. `componentTestHelpers.tsx`)
+- Mock modules with `vi.mock` — no MSW, no real HTTP in tests
 - Check bundle impact for heavy new dependencies
 
 When planning cross-layer IPC changes:

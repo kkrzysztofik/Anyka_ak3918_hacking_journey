@@ -44,7 +44,7 @@ When asked to plan, consider:
 
 ### ONVIF Design
 - Service structure (Device, Media, PTZ, Imaging)
-- SOAP/XML serialization approach (quick-xml 0.38)
+- SOAP/XML serialization approach (quick-xml 0.41)
 - Authentication layers (WS-Security, HTTP Digest/Basic)
 - Profile and capability management
 
@@ -53,17 +53,19 @@ When asked to plan, consider:
 - Binary size considerations
 - Hardware abstraction layer design
 - Cross-compilation requirements (armv5te-unknown-linux-uclibceabi)
+- Vendored toolchain: `source ./setenv.sh` from repo root exports `$CARGO`/`$RUSTC`/`$RUSTDOC` (sets `CARGO_HOME=toolchain/cargo-home`) — never bare `cargo`
 
 ### Repository Structure
 ```
 cross-compile/
 ├── onvif-rust/          # Rust ONVIF implementation
-│   ├── src/onvif/       # ONVIF services
-│   ├── src/auth/        # Authentication
+│   ├── src/onvif/       # ONVIF services (device/, media/, ptz/, imaging/, ...)
+│   ├── src/security/    # Authentication & XML security
 │   ├── src/platform/    # Hardware abstraction
 │   └── tests/           # Integration tests
+├── streaming-lib/       # RTSP/RTP H.264 streaming library
 ├── www/                 # React WebUI (TypeScript, Vite, shadcn/ui)
-├── xiu/                 # Media streaming server
+├── vendor-daemon/       # C IPC bridge
 └── anyka_reference/     # Vendor reference code
 ```
 
@@ -71,8 +73,8 @@ cross-compile/
 - **Rust Edition**: 2024
 - **axum**: 0.8
 - **tokio**: 1.0
-- **quick-xml**: 0.38
-- **mockall**: 0.14
+- **quick-xml**: 0.41
+- **mockall**: 0.15
 - **React**: 19
 - **Vite**: 7
 

@@ -1,17 +1,8 @@
 ---
-description: Security and edge case focused code reviewer
-mode: subagent
-model: anthropic/claude-opus-4-6
-tools:
-  write: false
-  edit: false
-permission:
-  bash:
-    "*": ask
-    "git diff*": allow
-    "git log*": allow
-    "git show*": allow
-    "grep *": allow
+name: reviewer-security
+description: Use when reviewing code for security vulnerabilities, DoS vectors, and edge case handling.
+tools: Read, Grep, Glob, Bash
+model: opus
 ---
 
 # Reviewer: Security & Edge Cases (Claude Opus 4-6)

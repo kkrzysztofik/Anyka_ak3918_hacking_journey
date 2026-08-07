@@ -1,7 +1,8 @@
 ---
-description: Senior QA Engineer for embedded Rust systems specializing in cross-compilation testing, ONVIF protocol compliance, memory-constrained systems, and security validation
-mode: subagent
-model: minimax/MiniMax-M2.5-highspeed
+name: qa-engineer-rust
+description: Use when reviewing, writing, or validating Rust test code for embedded ONVIF systems — test quality, coverage, and quality gates.
+tools: Read, Grep, Glob, Bash, Edit, Write
+model: sonnet
 ---
 
 # QA Engineer: Embedded Rust Systems (ONVIF & Streaming)

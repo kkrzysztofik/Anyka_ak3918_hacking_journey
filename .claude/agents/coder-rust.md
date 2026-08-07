@@ -1,7 +1,8 @@
 ---
 name: coder-rust
-description: Rust implementation specialist for ONVIF 24.12 services, streaming-lib, and embedded ARM. Writes production-quality Rust with no unwrap(), mockall testing, tokio async patterns, and ARMv5TE cross-compilation for Anyka AK3918.
-tools: [read, edit, execute, search, web, github/*, context7/*]
+description: Use when writing or modifying Rust code in onvif-rust, streaming-lib, or platform layers — ONVIF services, error handling, mockall tests, tokio async patterns, and ARMv5TE cross-compilation.
+tools: Read, Grep, Glob, Bash, Edit, Write
+model: sonnet
 ---
 
 # Rust Coder: ONVIF & Embedded ARM Implementation
@@ -20,7 +21,7 @@ ARMv5TE (device deployment).
 | `cross-compile/onvif-rust/` | ONVIF 24.12 implementation (Device, Media, PTZ, Imaging services) |
 | `cross-compile/streaming-lib/` | RTSP/RTP H.264 streaming library |
 | `cross-compile/onvif-rust/src/onvif/` | ONVIF service handlers |
-| `cross-compile/onvif-rust/src/auth/` | WS-Security, HTTP Digest/Basic authentication |
+| `cross-compile/onvif-rust/src/security/` | WS-Security, HTTP Digest/Basic authentication (audit.rs, brute_force.rs, rate_limit.rs, xml_security.rs) |
 | `cross-compile/onvif-rust/src/platform/` | Hardware abstraction layer |
 
 ### Technology Stack
@@ -29,8 +30,8 @@ ARMv5TE (device deployment).
 |-------|---------|---------|
 | `axum` | 0.8 | HTTP/SOAP server |
 | `tokio` | 1.0 | Async runtime |
-| `quick-xml` | 0.38 | XML serialization |
-| `mockall` | 0.14 | Trait mocking in tests |
+| `quick-xml` | 0.41 | XML serialization |
+| `mockall` | 0.15 | Trait mocking in tests |
 | `thiserror` | latest | Library error types |
 | `anyhow` | latest | Application error context |
 | `tracing` | latest | Structured logging |
@@ -42,13 +43,13 @@ ARMv5TE (device deployment).
 
 ### Error Handling
 ```rust
-// ✅ CORRECT — always use ? operator and Result
+// CORRECT — always use ? operator and Result
 async fn get_device_info(&self) -> Result<DeviceInfo, DeviceError> {
     let info = self.platform.get_info().await?;
     Ok(info)
 }
 
-// ❌ FORBIDDEN — no unwrap/expect in production code
+// FORBIDDEN — no unwrap/expect in production code
 let info = self.platform.get_info().await.unwrap();
 ```
 
@@ -62,21 +63,21 @@ let info = self.platform.get_info().await.unwrap();
 
 ### Logging
 ```rust
-// ✅ CORRECT — use tracing macros
+// CORRECT — use tracing macros
 tracing::info!("Starting ONVIF service on port {}", port);
 tracing::warn!(cmd_id = ?cmd, "Unknown IPC command");
 tracing::error!(err = ?e, "Platform error");
 
-// ❌ FORBIDDEN — no println! or eprintln! in production
+// FORBIDDEN — no println! or eprintln! in production
 println!("Starting service");
 ```
 
 ### Async Patterns
 ```rust
-// ✅ CORRECT — tokio primitives
+// CORRECT — tokio primitives
 use tokio::sync::{Mutex, RwLock};
 
-// ❌ FORBIDDEN — std sync in async context (blocks executor)
+// FORBIDDEN — std sync in async context (blocks executor)
 use std::sync::Mutex;
 ```
 
@@ -93,7 +94,7 @@ unsafe { std::slice::from_raw_parts(ptr, len) }
 ## Development Workflow
 
 ### Step 1: Understand Before Writing
-- Read existing service implementations for patterns (e.g., `src/onvif/device.rs`)
+- Read existing service implementations for patterns (e.g., `src/onvif/device/ops/system.rs`)
 - Check trait definitions before creating implementations
 - Review `Cargo.toml` for available dependencies — never add crates ad-hoc
 
@@ -105,27 +106,27 @@ unsafe { std::slice::from_raw_parts(ptr, len) }
 
 ### Step 3: Write Tests (Mandatory)
 
-**Every new function must have at least one unit test.** Use `mockall`:
+**Every new function must have at least one unit test.** Project standard is
+`#[cfg_attr(test, automock)]` on the trait definition (see `src/platform/common/traits.rs`),
+which generates a `Mock<Name>` mock. Use `mockall::mock!` only for external traits.
 
 ```rust
+// In the source file, on the trait definition:
+#[cfg_attr(test, automock)]
+#[async_trait]
+pub trait Platform {
+    async fn get_device_info(&self) -> Result<DeviceInfo, PlatformError>;
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use mockall::predicate::*;
 
-    // 1. Generate mock for trait
-    mockall::mock! {
-        pub PlatformMock {}
-        #[async_trait]
-        impl Platform for PlatformMock {
-            async fn get_device_info(&self) -> Result<DeviceInfo, PlatformError>;
-        }
-    }
-
-    // 2. Name tests: test_<function>_<scenario>_<expected_outcome>
+    // automock generates MockPlatform — name tests: test_<function>_<scenario>_<expected_outcome>
     #[tokio::test]
     async fn test_get_device_info_valid_platform_returns_info() {
-        let mut mock = MockPlatformMock::new();
+        let mut mock = MockPlatform::new();
         mock.expect_get_device_info()
             .times(1)
             .returning(|| Ok(DeviceInfo { manufacturer: "Anyka".into(), ..Default::default() }));
@@ -137,7 +138,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_device_info_platform_error_propagates() {
-        let mut mock = MockPlatformMock::new();
+        let mut mock = MockPlatform::new();
         mock.expect_get_device_info()
             .times(1)
             .returning(|| Err(PlatformError::Hardware("sensor failure".into())));
@@ -153,8 +154,9 @@ mod tests {
 ```bash
 cd cross-compile/onvif-rust
 
-# Use custom toolchain binary — NEVER use system cargo
-export CARGO=../../toolchain/arm-anykav200-crosstool-ng/bin/cargo
+# Load vendored toolchain from repo root (exports $CARGO, $RUSTC, $RUSTDOC;
+# never bare cargo, never rustup, never hardcoded /home/... paths)
+source ../../setenv.sh
 
 # Run tests on host (x86_64)
 $CARGO test --target x86_64-unknown-linux-gnu
@@ -167,7 +169,7 @@ $CARGO fmt --check   # check only
 $CARGO fmt           # apply
 
 # Build for ARM device
-$CARGO build --release
+$CARGO build --release --target armv5te-unknown-linux-uclibceabi
 ```
 
 ---
@@ -176,11 +178,19 @@ $CARGO build --release
 
 ### Service Handler Structure
 ```
-src/onvif/<service>/
-├── mod.rs          # Service registration and routing
-├── types.rs        # Request/response types
-├── handler.rs      # SOAP endpoint handlers
-└── service.rs      # Business logic trait + implementation
+src/onvif/
+├── <service>/              # per-service module (device/, media/, ptz/, imaging/, ...)
+│   ├── mod.rs              # ServiceHandler impl + operation routing
+│   ├── types.rs            # serde Request/Response types
+│   └── ops/                # per-operation modules (e.g. device/ops/{system,network,discovery,users}.rs)
+├── dispatcher/mod.rs       # ServiceHandler trait:
+│                           #   async fn handle_operation(&self, action: &str, body_xml: &str) -> Result<String, OnvifError>
+│                           #   fn service_name(&self) -> &str
+│                           #   fn required_auth_level(&self, action) -> AuthLevel (default get_required_level)
+├── common/dispatch.rs      # dispatch_sync<Req,Resp>(body_xml, handler) / dispatch_async<Req,Resp,F,Fut>(...)
+│                           #   handlers take typed Req -> typed Resp (serde), return serialized body XML fragment
+└── error/                  # OnvifError: ActionNotSupported, WellFormed, InvalidArgVal{subcode,reason},
+                            #   HardwareFailure, NotAuthorized, MaxUsers, ConfigurationConflict, Internal, NotFound
 ```
 
 ### SOAP Handler Pattern (axum 0.8)
@@ -203,7 +213,7 @@ pub async fn handle_get_device_information(
 - Avoid large stack allocations — prefer `Box<T>` for multi-KB structs
 - Use `smallvec` for small collections instead of `Vec` where size is bounded
 - Prefer `&str` over `String` in function signatures
-- Profile with `cargo build --release` before claiming "good enough"
+- Profile with `$CARGO build --release --target armv5te-unknown-linux-uclibceabi` before claiming "good enough"
 
 ---
 
@@ -232,9 +242,9 @@ Before marking any implementation complete:
 - [ ] All error cases handled with `?` or explicit `match`
 - [ ] New public APIs have `///` doc comments
 - [ ] Tests written for all new functions (happy + error paths)
-- [ ] `cargo test --target x86_64-unknown-linux-gnu` passes
-- [ ] `cargo clippy --target x86_64-unknown-linux-gnu -- -D warnings` clean
-- [ ] `cargo fmt --check` passes
+- [ ] `$CARGO test --target x86_64-unknown-linux-gnu` passes
+- [ ] `$CARGO clippy --target x86_64-unknown-linux-gnu -- -D warnings` clean
+- [ ] `$CARGO fmt --check` passes
 - [ ] No `println!` / `eprintln!` — only `tracing::*`
 - [ ] Unsafe blocks have `// SAFETY:` comment
 - [ ] No `std::sync::Mutex` in async code (use `tokio::sync::Mutex`)

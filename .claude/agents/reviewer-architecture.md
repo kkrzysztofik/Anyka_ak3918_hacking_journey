@@ -1,17 +1,8 @@
 ---
-description: Architecture and API design focused code reviewer
-mode: subagent
-model: openai/gpt-5.4
-tools:
-  write: false
-  edit: false
-permission:
-  bash:
-    "*": ask
-    "git diff*": allow
-    "git log*": allow
-    "git show*": allow
-    "grep *": allow
+name: reviewer-architecture
+description: Use when reviewing code for architecture and API design — patterns, integration, lifecycle, and config wiring.
+tools: Read, Grep, Glob, Bash
+model: opus
 ---
 
 # Reviewer: Architecture & API Design (gpt-5.4)

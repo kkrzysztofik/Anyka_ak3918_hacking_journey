@@ -177,7 +177,7 @@ A plan has an end date; reference does not. See `docs/README.md` for the index.
 
 ## Codex Instruction Mapping (from `.github/`)
 
-This repo also contains GitHub Copilot configuration under `.github/` (instructions, prompts, and agent profiles). Codex uses `AGENTS.md` for instruction scoping.
+This repo also contains GitHub Copilot configuration under `.github/` (instructions and prompts; Copilot agent profiles under `.github/agents/` were removed in favor of the `.opencode/agents/` + `.claude/agents/` sets). Codex uses `AGENTS.md` for instruction scoping.
 
 Codex-equivalent scoped instruction files:
 

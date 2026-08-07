@@ -1,17 +1,8 @@
 ---
-description: Memory safety and ownership focused code reviewer (Rust specialist)
-mode: subagent
-model: anthropic/claude-sonnet-4-5
-tools:
-  write: false
-  edit: false
-permission:
-  bash:
-    "*": ask
-    "git diff*": allow
-    "git log*": allow
-    "git show*": allow
-    "grep *": allow
+name: reviewer-memory
+description: Use when reviewing Rust code for memory safety, ownership, lifetimes, and async safety.
+tools: Read, Grep, Glob, Bash
+model: sonnet
 ---
 
 # Reviewer: Memory Safety & Ownership (Claude Sonnet 4.5)

@@ -89,6 +89,22 @@ struct frame_notification {
 
 ## Toolchain and Build
 
+### Rust Toolchain (for onvif-rust tests)
+
+The Rust side of the project uses the **vendored toolchain** — never bare
+`cargo`/`rustup`. From repo root, load it with:
+
+```bash
+source ./setenv.sh   # exports $CARGO/$RUSTC/$RUSTDOC, sets CARGO_HOME=toolchain/cargo-home
+```
+
+Host-side Rust tests run against the `x86_64-unknown-linux-gnu` target (not ARM):
+
+```bash
+source ./setenv.sh
+$CARGO test --target x86_64-unknown-linux-gnu
+```
+
 ### Compiler
 ```bash
 # Compiler binary

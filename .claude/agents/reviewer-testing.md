@@ -1,18 +1,8 @@
 ---
-description: Testing and quality assurance focused code reviewer
-mode: subagent
-model: google/gemini-3.1-pro-preview
-tools:
-  write: false
-  edit: false
-permission:
-  bash:
-    "*": ask
-    "git diff*": allow
-    "git log*": allow
-    "git show*": allow
-    "grep *": allow
-    "cargo test*": allow
+name: reviewer-testing
+description: Use when reviewing code for test coverage, quality assurance, and code correctness.
+tools: Read, Grep, Glob, Bash
+model: sonnet
 ---
 
 # Reviewer: Testing & Quality Assurance (Gemini 3.1 Pro)

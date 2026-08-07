@@ -1,17 +1,8 @@
 ---
-description: Multi-model consensus review orchestrator - dispatches to 4 specialist reviewers
-mode: subagent
-model: anthropic/claude-sonnet-4-5
-tools:
-  write: false
-  edit: false
-permission:
-  bash:
-    "*": ask
-    "git diff*": allow
-    "git log*": allow
-    "git show*": allow
-    "cargo *": allow
+name: reviewer-consensus
+description: Use when orchestrating a multi-model consensus code review across the four specialist reviewers.
+tools: Read, Grep, Glob, Bash, Task
+model: sonnet
 ---
 
 # Multi-Model Consensus Review Orchestrator

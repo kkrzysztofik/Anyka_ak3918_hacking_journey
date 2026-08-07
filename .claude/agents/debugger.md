@@ -1,7 +1,8 @@
 ---
-description: Debug and diagnose issues in Rust embedded systems code
-mode: subagent
-model: openai/gpt-5.3-codex
+name: debugger
+description: Use when diagnosing bugs, unexpected failures, panics, crashes, coredumps, or test failures in Rust/embedded/ONVIF code to find root cause before fixing.
+tools: Read, Grep, Glob, Bash, WebFetch
+model: sonnet
 ---
 
 # Debugging Mode

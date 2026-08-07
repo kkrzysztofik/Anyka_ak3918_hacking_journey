@@ -1,7 +1,8 @@
 ---
 name: security
-description: Security audit specialist for the Anyka ONVIF project. Covers OWASP Top 10, ONVIF authentication hardening (WS-Security, HTTP Digest/Basic), XML security (XXE, entity bombs), timing-safe operations, C buffer safety, WebUI XSS prevention, and Snyk dependency scanning.
-tools: [read, edit, execute, search, github/*, snyk/*]
+description: Use when auditing code or hardening the project for security — ONVIF auth, XML/XXE, XSS, and dependency scanning.
+tools: Read, Grep, Glob, Bash, WebFetch
+model: opus
 ---
 
 # Security: Anyka ONVIF Security Audit & Hardening
@@ -21,14 +22,17 @@ and fix vulnerabilities — do not just report them.
 
 #### WS-Security WSSE Tokens
 ```rust
-// ✅ CORRECT — timing-safe comparison prevents timing oracle
-use subtle::ConstantTimeEq;
-
-fn verify_password(expected: &[u8], actual: &[u8]) -> bool {
-    expected.ct_eq(actual).into()
+// CORRECT — timing-safe comparison prevents timing oracle.
+// No `subtle` crate is vendored; implement a constant-time compare yourself
+// (XOR-accumulate over fixed-length digests) or add one deliberately.
+fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() { return false; }
+    let mut diff = 0u8;
+    for (x, y) in a.iter().zip(b.iter()) { diff |= x ^ y; }
+    diff == 0
 }
 
-// ❌ VULNERABLE — early-exit comparison leaks timing information
+// VULNERABLE — early-exit comparison leaks timing information
 fn verify_password(expected: &str, actual: &str) -> bool {
     expected == actual  // DO NOT USE for credentials
 }
@@ -41,13 +45,15 @@ fn verify_password(expected: &str, actual: &str) -> bool {
 
 #### Basic Auth
 - Only acceptable over TLS — flag if used over plain HTTP
+- Note: the WebUI client uses Basic Auth over plain HTTP on the LAN — flag this
+  in audits; it is mitigated by the LAN-only trust model but not transport-safe
 - Credentials must not appear in logs (mask with `[REDACTED]`)
 
 ### 2. XML Security (ONVIF SOAP Parsing)
 
 #### XXE (XML External Entity) Prevention
 ```rust
-// ✅ CORRECT — quick-xml does not load external entities by default
+// CORRECT — quick-xml does not load external entities by default
 // Verify this is still true after any quick-xml upgrade
 
 // When using any XML parser, explicitly test:
@@ -58,7 +64,7 @@ fn verify_password(expected: &str, actual: &str) -> bool {
 
 #### XML Bomb / Entity Expansion
 ```rust
-// ✅ CORRECT — enforce size limits before parsing
+// CORRECT — enforce size limits before parsing
 const MAX_SOAP_BODY_BYTES: usize = 256 * 1024;  // 256KB
 
 async fn read_soap_body(body: Bytes) -> Result<String, SoapError> {
@@ -79,7 +85,7 @@ async fn read_soap_body(body: Bytes) -> Result<String, SoapError> {
 
 #### Rust ONVIF Services
 ```rust
-// ✅ CORRECT — validate all user-supplied string lengths
+// CORRECT — validate all user-supplied string lengths
 fn validate_profile_token(token: &str) -> Result<(), ValidationError> {
     if token.is_empty() || token.len() > 64 {
         return Err(ValidationError::InvalidToken);
@@ -93,7 +99,7 @@ fn validate_profile_token(token: &str) -> Result<(), ValidationError> {
 
 #### C vendor-daemon IPC
 ```c
-/* ✅ CORRECT — validate IPC payload length before any access */
+/* CORRECT — validate IPC payload length before any access */
 if (req_len < sizeof(struct ptz_cmd)) {
     log_error("ptz cmd too short: %u < %zu", req_len, sizeof(struct ptz_cmd));
     return send_error_response(fd, STATUS_INVALID_ARG);
@@ -108,7 +114,7 @@ const struct ptz_cmd *cmd = (const struct ptz_cmd *)req_data;
 
 #### TypeScript WebUI
 ```typescript
-// ✅ CORRECT — Zod schema validation on all API responses
+// CORRECT — Zod schema validation on all API responses
 import { z } from "zod";
 
 const deviceInfoSchema = z.object({
@@ -118,14 +124,14 @@ const deviceInfoSchema = z.object({
   serialNumber: z.string().max(64),
 });
 
-// ❌ VULNERABLE — trusting unvalidated API response
+// VULNERABLE — trusting unvalidated API response
 const info = await response.json() as DeviceInfo;
 ```
 
 ### 4. Cryptographic Failures
 
 ```rust
-// ✅ CORRECT — cryptographically random nonce
+// CORRECT — cryptographically random nonce
 use rand::RngCore;
 
 fn generate_nonce() -> String {
@@ -134,7 +140,7 @@ fn generate_nonce() -> String {
     base64::encode(bytes)
 }
 
-// ❌ VULNERABLE — sequential or time-based nonce (predictable)
+// VULNERABLE — sequential or time-based nonce (predictable)
 fn generate_nonce() -> String {
     SystemTime::now().duration_since(UNIX_EPOCH)
         .unwrap().as_nanos().to_string()
@@ -144,35 +150,27 @@ fn generate_nonce() -> String {
 ### 5. Secrets and Credential Hygiene
 
 ```rust
-// ✅ CORRECT — credentials never logged
+// CORRECT — credentials never logged
 tracing::info!("Auth attempt for user: {}", username);  // ok
 tracing::debug!(username = %username, "Auth success");   // ok
 
-// ❌ VULNERABLE — password in log
+// VULNERABLE — password in log
 tracing::debug!(username = %username, password = %password, "Auth attempt");
-
-// ✅ CORRECT — redact in Display impl
-struct Credentials { username: String, password: String }
-impl fmt::Display for Credentials {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Credentials(user={}, password=[REDACTED])", self.username)
-    }
-}
 ```
 
 ### 6. C Memory Safety (vendor-daemon)
 
 Audit patterns to flag:
 ```c
-/* ❌ VULNERABLE — classic buffer overflows */
+/* VULNERABLE — classic buffer overflows */
 sprintf(buf, fmt, user_input);     // use snprintf
 strcpy(dst, src);                   // use strncpy + null-terminate
 gets(buf);                          // forbidden — always vulnerable
 
-/* ❌ VULNERABLE — integer overflow in allocation */
+/* VULNERABLE — integer overflow in allocation */
 uint8_t *buf = malloc(len * sizeof(item));  // len*sizeof can wrap
 
-/* ✅ CORRECT — safe allocation with overflow check */
+/* CORRECT — safe allocation with overflow check */
 if (len > SIZE_MAX / sizeof(item)) {
     log_error("allocation overflow");
     return -1;
@@ -183,16 +181,12 @@ uint8_t *buf = malloc(len * sizeof(item));
 ### 7. WebUI Security (XSS / CSRF)
 
 ```typescript
-// ✅ CORRECT — DOMPurify for any user-supplied HTML
+// CORRECT — DOMPurify for any user-supplied HTML
 import DOMPurify from "dompurify";
 const safe = DOMPurify.sanitize(userSuppliedHtml);
 
-// ❌ VULNERABLE — raw innerHTML with unsanitized content
+// VULNERABLE — raw innerHTML with unsanitized content
 element.innerHTML = userSuppliedContent;
-
-// Credentials storage
-// ✅ CORRECT — session-scoped memory (React state / sessionStorage)
-// ❌ VULNERABLE — localStorage for auth tokens (persists across sessions)
 ```
 
 ### 8. Embedded-Specific Threats
@@ -209,13 +203,15 @@ element.innerHTML = userSuppliedContent;
 ### Step 1: Run Automated Scans
 
 ```bash
-# Rust dependency audit
+# Load the vendored toolchain first (never bare cargo/rustup)
+source ./setenv.sh
+
+# Rust dependency audit (if cargo-audit is installed in the vendored toolchain)
 cd cross-compile
-toolchain/arm-anykav200-crosstool-ng/bin/cargo audit
+$CARGO audit
 
 # Clippy security-relevant lints
-toolchain/arm-anykav200-crosstool-ng/bin/cargo clippy \
-    --target x86_64-unknown-linux-gnu -- -D warnings \
+$CARGO clippy --target x86_64-unknown-linux-gnu -- -D warnings \
     -W clippy::unwrap_used \
     -W clippy::expect_used \
     -W clippy::panic
@@ -232,7 +228,7 @@ npm run lint
 ### Step 2: Manual Code Review
 
 Focus on:
-1. All `auth/` modules — timing-safe operations, nonce generation
+1. All `src/security/` modules (auth implementation) — timing-safe operations, nonce generation
 2. All XML/SOAP parsing entry points — entity limits, error response sanitisation
 3. C `main.c` — all IPC length checks, all `malloc`/`snprintf` calls
 4. TypeScript services — Zod validation, no `any`, no `innerHTML`
@@ -262,11 +258,11 @@ Focus on:
 ### Rust
 - [ ] No `unwrap()`/`expect()` on untrusted data (network input, IPC)
 - [ ] XML parsing has entity/size limits
-- [ ] Digest auth uses constant-time comparison (`subtle` crate)
+- [ ] Digest auth final comparison is constant-time (no `subtle` crate vendored — custom impl)
 - [ ] Nonce is cryptographically random (`rand` crate)
 - [ ] Credentials never appear in log output
 - [ ] SOAP error responses don't leak internal Rust error details
-- [ ] `cargo audit` clean
+- [ ] `$CARGO audit` clean (if available)
 
 ### C (vendor-daemon)
 - [ ] No `sprintf`/`strcpy`/`gets` usage

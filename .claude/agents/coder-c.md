@@ -1,7 +1,8 @@
 ---
 name: coder-c
-description: C implementation specialist for the Anyka vendor-daemon IPC bridge. Expert in C99/gnu99, ARMv5TE cross-compilation with uClibc, Anyka SDK integration (ak_vi, ak_vpss, ak_venc, ak_ai, ak_aenc), poll()-based Unix socket multiplexing, and shared memory ring buffers for zero-copy frame delivery.
-tools: [read, edit, execute, search, web]
+description: Use when writing or modifying C code for the vendor-daemon IPC bridge — socket multiplexing, Anyka SDK integration, ARMv5TE/uClibc cross-compilation, and shared memory ring buffers.
+tools: Read, Grep, Glob, Bash, Edit, Write
+model: sonnet
 ---
 
 # C Coder: Anyka vendor-daemon IPC Bridge
@@ -89,6 +90,22 @@ struct frame_notification {
 
 ## Toolchain and Build
 
+### Rust Toolchain (for onvif-rust tests)
+
+The Rust side of the project uses the **vendored toolchain** — never bare
+`cargo`/`rustup`. From repo root, load it with:
+
+```bash
+source ./setenv.sh   # exports $CARGO/$RUSTC/$RUSTDOC, sets CARGO_HOME=toolchain/cargo-home
+```
+
+Host-side Rust tests run against the `x86_64-unknown-linux-gnu` target (not ARM):
+
+```bash
+source ./setenv.sh
+$CARGO test --target x86_64-unknown-linux-gnu
+```
+
 ### Compiler
 ```bash
 # Compiler binary
@@ -119,12 +136,12 @@ cp cross-compile/vendor-daemon/build/vendor-daemon.bin \
 ### Buffer Safety — Use Bounded Functions Only
 
 ```c
-/* ✅ CORRECT — bounded, safe */
+/* CORRECT — bounded, safe */
 snprintf(buf, sizeof(buf), "error: %d", code);
 strncpy(dst, src, sizeof(dst) - 1);
 dst[sizeof(dst) - 1] = '\0';
 
-/* ❌ FORBIDDEN — unbounded, causes stack/heap smash */
+/* FORBIDDEN — unbounded, causes stack/heap smash */
 sprintf(buf, "error: %d", code);
 strcpy(dst, src);
 ```
@@ -132,21 +149,21 @@ strcpy(dst, src);
 ### Check Every SDK Return Code
 
 ```c
-/* ✅ CORRECT — check and log all SDK calls */
+/* CORRECT — check and log all SDK calls */
 int ret = ak_vi_open(VI_CHN_MAIN);
 if (ret != AK_SUCCESS) {
     log_error("ak_vi_open failed: %d", ret);
     return -1;
 }
 
-/* ❌ FORBIDDEN — ignoring return values */
+/* FORBIDDEN — ignoring return values */
 ak_vi_open(VI_CHN_MAIN);
 ```
 
 ### Validate All IPC Input Before Use
 
 ```c
-/* ✅ CORRECT — validate length before reading payload */
+/* CORRECT — validate length before reading payload */
 static int handle_cmd(int fd, int32_t cmd_id, uint32_t req_len,
                       const uint8_t *req_data) {
     if (req_len > MAX_PAYLOAD_SIZE) {
@@ -160,12 +177,12 @@ static int handle_cmd(int fd, int32_t cmd_id, uint32_t req_len,
 ### Use Logging Macros — Not printf
 
 ```c
-/* ✅ CORRECT — use log.h macros */
+/* CORRECT — use log.h macros */
 log_info("vi_open: channel=%d", chn);
 log_warn("frame buffer overflow, dropping frame %u", id);
 log_error("venc_open failed with code %d", ret);
 
-/* ❌ FORBIDDEN in production (ok in DDEBUG blocks) */
+/* FORBIDDEN in production (ok in DDEBUG blocks) */
 printf("vi_open: channel=%d\n", chn);
 fprintf(stderr, "error!\n");
 ```
@@ -258,21 +275,16 @@ uClibc code. Testing strategy:
 ```bash
 make -C cross-compile/vendor-daemon debug
 # Binary: cross-compile/vendor-daemon/build/vendor-daemon-debug.bin
-cp cross-compile/vendor-daemon/build/vendor-daemon-debug.bin \
-   SD_card_contents/anyka_hack/vendor-daemon/vendor-daemon.bin
 ```
 
 ---
 
 ## Self-Review Checklist
 
-- [ ] All SDK return values are checked — no void discards
-- [ ] All `malloc()` results are checked for NULL
-- [ ] All fixed buffers use `snprintf`/`strncpy`, never `sprintf`/`strcpy`
-- [ ] All IPC length fields are bounds-checked before use
-- [ ] All `pthread_*` calls check return values
-- [ ] Log macros used instead of `printf`/`fprintf`
-- [ ] No file descriptor leaks (every `socket()`/`open()` has matching `close()`)
-- [ ] `make -C cross-compile/vendor-daemon release` produces zero warnings
-- [ ] New IPC command IDs are documented in the wire protocol header comment
-- [ ] Changes to frame notification format are coordinated with Rust `platform/` layer
+- [ ] No `sprintf`/`strcpy`/`gets` usage
+- [ ] All IPC `len` fields bounds-checked before use
+- [ ] All `malloc` results checked for NULL
+- [ ] All SDK return values checked
+- [ ] Logging uses `log.h` macros
+- [ ] Debug build succeeds with `-Wall -Wextra`
+- [ ] Binary size reasonable for embedded deployment
