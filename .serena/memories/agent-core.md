@@ -13,14 +13,14 @@ For most implementation or cleanup tasks, also load:
 - `testing-framework`
 - `quality-gates`
 - `review-prompt`
-- `suggested_commands`
+- `suggested_commands` (quick-reference command sheet)
 
 Add `www-development-standards` for WebUI work and `security-guidelines` for auth, validation, or unsafe-code changes.
 
 ## Core Constraints
 
 - Follow the project workflow defined in `AGENTS.md`.
-- Use the vendored cargo binary at `toolchain/arm-anykav200-crosstool-ng/bin/cargo`.
+- Load the vendored Rust toolchain with `source ./setenv.sh` from the repo root (exports `$CARGO`, `$RUSTC`, `$RUSTDOC`). Never use bare `cargo`, `rustup`, or hardcoded absolute paths.
 - Use `--target x86_64-unknown-linux-gnu` for host-side Rust test, lint, and dev-build commands.
 - Keep code aligned with local style: `snake_case` for Rust vars/functions, `CamelCase` for Rust types, and `data-testid` for WebUI tests.
 - Avoid `unwrap()` and `expect()` in production code.

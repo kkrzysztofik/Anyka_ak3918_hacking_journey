@@ -10,14 +10,16 @@ This document captures which RFCs govern our RTSP/RTP/SDP implementation in
 
 | RFC | Subject | Status | Primary Files |
 | --- | --- | --- | --- |
-| **RFC 2326** | RTSP/1.0 | ✅ Implemented | `src/rtsp/session/server_session.rs`, `src/rtsp/rtsp_transport.rs` |
-| **RFC 3550** | RTP/RTCP | ✅ Implemented | `src/rtsp/rtp/rtp_header.rs`, `src/rtsp/rtp/rtcp/rtcp_context.rs` |
-| **RFC 3551** | Static RTP payload types (PCMA/PCMU) | ✅ Defined | `src/rtsp/rtsp_codec.rs` |
-| **RFC 4566** | SDP | ✅ Implemented | `src/rtsp/sdp/mod.rs`, `src/rtsp/sdp/fmtp.rs` |
-| **RFC 6184** | H.264 over RTP | ✅ Implemented | `src/rtsp/rtp/rtp_h264.rs`, `src/rtsp/rtp/define.rs` |
-| **RFC 3640** | MPEG-4 Generic (AAC) over RTP | ✅ Implemented | `src/rtsp/rtp/rtp_aac.rs` |
-| **RFC 5905** | NTP timestamps (64-bit format) | ✅ Implemented | `src/rtsp/rtp/utils.rs` |
-| **RFC 7798** | H.265 over RTP | ⚠️ Partial | `src/rtsp/rtp/rtp_h265.rs` — has u16 overflow bug |
+| **RFC 2326** | RTSP/1.0 | ✅ Implemented | `src/protocol/rtsp/session/server_session.rs`, `src/protocol/rtsp/rtsp_transport.rs` |
+| **RFC 3550** | RTP/RTCP | ✅ Implemented | `src/protocol/rtsp/rtp/rtp_header.rs`, `src/protocol/rtsp/rtp/rtcp/rtcp_context.rs` |
+| **RFC 3551** | Static RTP payload types (PCMA/PCMU) | ✅ Defined | `src/protocol/rtsp/rtsp_codec.rs` |
+| **RFC 4566** | SDP | ✅ Implemented | `src/protocol/rtsp/sdp/mod.rs`, `src/protocol/rtsp/sdp/fmtp.rs` |
+| **RFC 6184** | H.264 over RTP | ✅ Implemented | `src/protocol/rtsp/rtp/rtp_h264.rs`, `src/protocol/rtsp/rtp/define.rs` |
+| **RFC 3640** | MPEG-4 Generic (AAC) over RTP | ✅ Implemented | `src/protocol/rtsp/rtp/rtp_aac.rs` |
+| **RFC 5905** | NTP timestamps (64-bit format) | ✅ Implemented | `src/protocol/rtsp/rtp/utils.rs` |
+
+> **H.265 (RFC 7798) support was removed.** The repo is H.264 + AAC only; no
+> `rtp_h265.rs` exists in `src/protocol/rtsp/rtp/`.
 
 All `src/` paths are relative to `cross-compile/streaming-lib/`.
 
@@ -25,7 +27,7 @@ All `src/` paths are relative to `cross-compile/streaming-lib/`.
 
 ## RFC 6184 — H.264 over RTP
 
-### NAL Type Constants (`src/rtsp/rtp/define.rs`)
+### NAL Type Constants (`src/protocol/rtsp/rtp/define.rs`)
 
 | Constant | Value | RFC 6184 Type |
 | --- | --- | --- |
@@ -75,7 +77,7 @@ a=fmtp:96 packetization-mode=1; sprop-parameter-sets=<SPS_b64>,<PPS_b64>; profil
 
 - Marker bit = 1 always (one complete frame per packet)
 - AU-headers-length field = 16 (big-endian; counts bits of following AU-header data)
-- Written with `BitsWriter` for bit-exact encoding (`src/rtsp/rtp/rtp_aac.rs`)
+- Written with `BitsWriter` for bit-exact encoding (`src/protocol/rtsp/rtp/rtp_aac.rs`)
 
 ### Unpacker Rules
 
@@ -100,7 +102,7 @@ a=fmtp:97 profile-level-id=1;mode=AAC-hbr;sizelength=13;indexlength=3;indexdelta
 ### RTP Header Rules (RFC 3550 §5.1)
 
 - V=2 always (enforced in `Default` impl)
-- Sequence numbers MUST wrap with `wrapping_add(1)` — **H265 has a bug here**
+- Sequence numbers MUST wrap with `wrapping_add(1)`
 - Initial RTP timestamp SHOULD be random (currently may start at 0)
 - Video clock rate = 90000 Hz; audio clock rate = sample rate
 
@@ -190,7 +192,6 @@ Session ID MUST use NTP epoch (1900) per RFC 4566 §5.2.
 | Codec | SDP Name | Dynamic PT | Clock Rate |
 | --- | --- | --- | --- |
 | H264 | `h264` | 96 | 90000 |
-| H265 | `h265` | — | 90000 |
 | AAC | `mpeg4-generic` | 97 | per-stream sample rate |
 | G.711A | `pcma` | 8 (static, RFC 3551) | 8000 |
 
@@ -205,7 +206,6 @@ Session ID MUST use NTP epoch (1900) per RFC 4566 §5.2.
 | FU-B DON discarded on receive | RFC 6184 §5.8.2 | Low |
 | RTCP SDES not sent | RFC 3550 §6.5 | Low |
 | RTP initial timestamp not randomized | RFC 3550 §5.1 | Low |
-| **H265 seq `+= 1` instead of `wrapping_add(1)`** | RFC 3550 §5.1 | **Bug — fix** |
 | AAC packs 1 AU/packet on send (no aggregation) | RFC 3640 §3.3 | Low |
 | Multicast parsed but not implemented | RFC 2326 §12.39 | Non-goal |
 
@@ -215,20 +215,19 @@ Session ID MUST use NTP epoch (1900) per RFC 4566 §5.2.
 
 | Component | Path (relative to `cross-compile/`) |
 | --- | --- |
-| H264 packer/unpacker | `streaming-lib/src/rtsp/rtp/rtp_h264.rs` |
-| AAC packer/unpacker | `streaming-lib/src/rtsp/rtp/rtp_aac.rs` |
-| H265 packer/unpacker | `streaming-lib/src/rtsp/rtp/rtp_h265.rs` |
-| NAL type constants | `streaming-lib/src/rtsp/rtp/define.rs` |
-| RTP header marshal/unmarshal | `streaming-lib/src/rtsp/rtp/rtp_header.rs` |
-| NTP / timestamp utilities | `streaming-lib/src/rtsp/rtp/utils.rs` |
-| RTCP SR/RR/jitter | `streaming-lib/src/rtsp/rtp/rtcp/rtcp_context.rs` |
-| SDP model | `streaming-lib/src/rtsp/sdp/mod.rs` |
-| SDP fmtp parser | `streaming-lib/src/rtsp/sdp/fmtp.rs` |
-| RTSP server session | `streaming-lib/src/rtsp/session/server_session.rs` |
-| RTSP transport parser | `streaming-lib/src/rtsp/rtsp_transport.rs` |
-| RTSP range header | `streaming-lib/src/rtsp/rtsp_range.rs` |
-| Codec ID ↔ SDP name | `streaming-lib/src/rtsp/rtsp_codec.rs` |
+| H264 packer/unpacker | `streaming-lib/src/protocol/rtsp/rtp/rtp_h264.rs` |
+| AAC packer/unpacker | `streaming-lib/src/protocol/rtsp/rtp/rtp_aac.rs` |
+| NAL type constants | `streaming-lib/src/protocol/rtsp/rtp/define.rs` |
+| RTP header marshal/unmarshal | `streaming-lib/src/protocol/rtsp/rtp/rtp_header.rs` |
+| NTP / timestamp utilities | `streaming-lib/src/protocol/rtsp/rtp/utils.rs` |
+| RTCP SR/RR/jitter | `streaming-lib/src/protocol/rtsp/rtp/rtcp/rtcp_context.rs` |
+| SDP model | `streaming-lib/src/protocol/rtsp/sdp/mod.rs` |
+| SDP fmtp parser | `streaming-lib/src/protocol/rtsp/sdp/fmtp.rs` |
+| RTSP server session | `streaming-lib/src/protocol/rtsp/session/server_session.rs` |
+| RTSP transport parser | `streaming-lib/src/protocol/rtsp/rtsp_transport.rs` |
+| RTSP range header | `streaming-lib/src/protocol/rtsp/rtsp_range.rs` |
+| Codec ID ↔ SDP name | `streaming-lib/src/protocol/rtsp/rtsp_codec.rs` |
 | SDP generation (ONVIF side) | `onvif-rust/src/streaming/helpers.rs` |
-| SPS/PPS codec parsing | `streaming-lib/src/codec/sps.rs`, `pps.rs` |
-| RFC compliance audit doc | `../validation/RTSP_RFC_COMPLIANCE.md` |
-| Validation tool | `../validation/rust/src/rtsp.rs` |
+| SPS/PPS codec parsing | `streaming-lib/src/codec/h264/sps.rs`, `pps.rs` |
+| RFC compliance audit doc | `wiki/RTSP-Validation-Tool.md` |
+| Validation tool | `validation/rust/src/probe.rs` |

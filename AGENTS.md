@@ -150,6 +150,14 @@ Before ANY task, load every document below whose topic matches the task (multi-a
 | **[Quality Gates](.serena/memories/quality-gates.md)** | Quality assurance and review process |
 | **[Review Prompt](.serena/memories/review-prompt.md)** | Code review, debugging, crash analysis |
 | **[Coredump Analysis](.serena/memories/coredump-analysis-prompt.md)** | Debugging and crash analysis procedures |
+| **[Suggested Commands](.serena/memories/suggested_commands.md)** | Running commands, quality gates, deployment — quick command reference |
+| **[Platform/HAL Layering](.serena/memories/platform-hal-layering.md)** | Platform, HAL, IPC, unsafe-code boundaries |
+| **[RTSP/RFC Standards](.serena/memories/rtsp-rfc-standards.md)** | RTSP/RTP/SDP, H.264/AAC packetization, streaming-lib changes |
+| **[WWW Project Context](.serena/memories/www-project-context.md)** | Any work in cross-compile/www — structure, stack, commands |
+| **[WWW Development Standards](.serena/memories/www-development-standards.md)** | Any WebUI coding, component, or test work |
+| **[WWW Design System](.serena/memories/www-design-system.md)** | Any WebUI visual/design work — colors, components, layout |
+| **[WWW Review Prompt](.serena/memories/review-prompt-www.md)** | WebUI code review |
+| **[Security Guidelines](.serena/memories/security-guidelines.md)** | Auth, XML/SOAP parsing, unsafe code, IPC, input validation |
 
 ## Documentation Layout
 

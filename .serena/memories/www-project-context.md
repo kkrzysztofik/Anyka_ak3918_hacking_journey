@@ -4,27 +4,26 @@
 
 The `cross-compile/www` directory contains the **Camera WebUI** — a React-based web administration panel for Anyka AK3918 ONVIF cameras. This is the frontend companion to the `onvif-rust` backend, providing a user-friendly interface for camera configuration and live viewing.
 
-**Current Status**: Active development following Spec 003 (Frontend ONVIF Spec).
+**Current Status**: Active development (see `docs/design/prd.md` and `docs/design/design_proposal.md`).
 
 ## Technology Stack
 
 | Category | Technology | Version |
 |----------|------------|---------|
-| **Language** | TypeScript | ~5.8 (strict mode) |
-| **Framework** | React | ^19.2.4 |
-| **Build Tool** | Vite | ^7.3.1 |
-| **Styling** | TailwindCSS | ^4.1.18 |
+| **Language** | TypeScript | TS 7 (native) + TS 6 (eslint peer) |
+| **Framework** | React | ^19.2.8 |
+| **Build Tool** | Vite | ^8.1.5 |
+| **Styling** | TailwindCSS | ^4.3.3 |
 | **UI Components** | shadcn/ui (Radix-based) | Latest |
-| **State Management** | TanStack Query | ^5.90.21 |
-| **Routing** | React Router | ^7.13.0 |
-| **HTTP Client** | Axios | ^1.13.5 |
-| **Form Handling** | React Hook Form + Zod | ^7.71.1 / ^4.3.6 |
-| **XML Parsing** | fast-xml-parser | ^5.3.6 |
-| **Icons** | Lucide React | ^0.564.0 |
-| **XSS Prevention** | DOMPurify | ^3.3.1 |
-| **Charts** | Recharts | ^3.7.0 |
+| **State Management** | TanStack Query | ^5.101.4 |
+| **Routing** | React Router | ^8.3.0 |
+| **HTTP Client** | fetch-based `apiClient` (`src/services/api.ts`) | - |
+| **Form Handling** | React Hook Form + Zod | ^7.83.0 / ^4.4.3 |
+| **XML Parsing** | fast-xml-parser | ^5.10.1 |
+| **Icons** | Lucide React | ^1.27.0 |
+| **XSS Prevention** | DOMPurify | ^3.4.12 |
 | **Toasts** | Sonner | ^2.0.7 |
-| **Testing** | Vitest + Testing Library + MSW | ^4.0.18 / ^16.3.2 / ^2.12.10 |
+| **Testing** | Vitest + Testing Library | ^4.1.10 / ^16.3.2 |
 
 ## Project Structure
 
@@ -34,12 +33,16 @@ cross-compile/www/
 │   ├── main.tsx             # Entry point
 │   ├── App.tsx              # Main application component
 │   ├── Layout.tsx           # Application layout with sidebar
-│   ├── index.css            # Global styles (TailwindCSS)
+│   ├── index.css            # Tailwind entry
+│   │
+│   ├── styles/
+│   │   └── globals.css      # Design tokens + component utilities
 │   │
 │   ├── components/          # Reusable UI components
 │   │   ├── ui/              # shadcn/ui base components
 │   │   ├── common/          # Shared components (LoadingState, etc.)
-│   │   └── users/           # Domain-specific components
+│   │   ├── users/           # Domain-specific components
+│   │   └── layout/          # Layout components
 │   │
 │   ├── pages/               # Route pages
 │   │   ├── LiveViewPage.tsx
@@ -48,21 +51,34 @@ cross-compile/www/
 │   │   └── settings/        # Settings sub-pages (7 categories)
 │   │
 │   ├── services/            # ONVIF SOAP service clients
-│   │   ├── soap/            # SOAP client and message builders
+│   │   ├── soap/            # SOAP client (soapRequest, parseSOAPResponse)
+│   │   ├── api.ts           # fetch-based apiClient (Basic Auth)
+│   │   ├── schemas/         # Zod schemas
 │   │   ├── deviceService.ts
 │   │   ├── networkService.ts
 │   │   ├── timeService.ts
 │   │   ├── imagingService.ts
 │   │   ├── userService.ts
 │   │   ├── profileService.ts
+│   │   ├── ptzService.ts
+│   │   ├── maintenanceService.ts
 │   │   └── authService.ts
 │   │
 │   ├── hooks/               # Custom React hooks
-│   ├── lib/                 # Utility libraries
+│   ├── lib/                 # Utility libraries (queryClient.ts)
 │   ├── types/               # TypeScript type definitions
+│   ├── utils/               # Utility functions
 │   ├── config/              # Application configuration
-│   ├── router/              # Route definitions
-│   └── test/                # Test setup and utilities
+│   ├── router/              # Route definitions (HashRouter)
+│   └── test/                # Test setup + shared helpers
+│       ├── componentTestHelpers.tsx
+│       ├── formTestHelpers.ts
+│       ├── dialogTestHelpers.ts
+│       ├── mutationTestHelpers.ts
+│       ├── serviceTestHelpers.ts
+│       ├── schemaTestHelpers.ts
+│       ├── setup.ts
+│       └── utils.ts
 │
 ├── vite.config.ts           # Vite configuration
 ├── tailwind.config.js       # TailwindCSS configuration
@@ -143,6 +159,17 @@ export function DevicePanel({ deviceId, onSave }: Props) {
 
 ### Testing Pattern
 ```typescript
+// Mock service modules with vi.mock (MSW is NOT used)
+vi.mock('@/services/deviceService', () => ({
+  getInfo: vi.fn(),
+  updateSettings: vi.fn(),
+}));
+
+vi.mocked(deviceService.getInfo).mockResolvedValue({ name: 'Anyka' });
+
+// Always render via renderWithProviders (QueryClientProvider + AuthProvider)
+const { queryClient } = renderWithProviders(<DevicePanel deviceId="test-123" />);
+
 // ALWAYS use data-testid for selectors
 screen.getByTestId('device-panel-save-button');
 
@@ -183,9 +210,11 @@ const schema = z.object({
 
 | Document | Location |
 |----------|----------|
-| Functional Spec | `specs/003-frontend-onvif-spec/spec.md` |
-| Implementation Plan | `specs/003-frontend-onvif-spec/plan.md` |
-| Design Assets | `docs/design/` (Figma + CSS) |
+| Functional Spec (PRD) | `docs/design/prd.md` |
+| Design Proposal | `docs/design/design_proposal.md` |
+| Design Review | `docs/design/DESIGN_REVIEW.md` |
+| Figma Source | `docs/design/ONVIF.fig` |
+| Theme CSS (ground truth) | `src/styles/globals.css` |
 | Design System | See `www-design-system` memory |
 
 ## Performance Requirements

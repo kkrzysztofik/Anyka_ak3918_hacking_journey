@@ -12,38 +12,34 @@
 
 ### Running Tests
 
-**⚠️ Cross-compile note**: Default target is ARM. Use `--target x86_64-unknown-linux-gnu` for host-side testing.
+**⚠️ Cross-compile note**: Default target is ARM. Use `--target x86_64-unknown-linux-gnu` for host-side testing. Load the vendored toolchain first with `source ./setenv.sh` from the repo root (exports `$CARGO`, `$RUSTC`, `$RUSTDOC`). Never use bare `cargo`.
 
-The Rust project is a **workspace** (onvif-rust + streaming-lib). Commands from `cross-compile/` run across both.
+The Rust project is a **workspace** (onvif-rust + streaming-lib + anyka-init). Commands from `cross-compile/` run across all members.
 
 ```bash
 cd cross-compile
 
 # All workspace tests (on host)
-cargo test --target x86_64-unknown-linux-gnu
+$CARGO test --target x86_64-unknown-linux-gnu
 
 # Specific workspace member
-cargo test --target x86_64-unknown-linux-gnu -p onvif-rust
-cargo test --target x86_64-unknown-linux-gnu -p streaming-lib
+$CARGO test --target x86_64-unknown-linux-gnu -p onvif-rust
+$CARGO test --target x86_64-unknown-linux-gnu -p streaming-lib
 
 # Unit tests only
-cargo test --target x86_64-unknown-linux-gnu --lib
+$CARGO test --target x86_64-unknown-linux-gnu --lib
 
 # Specific test
-cargo test --target x86_64-unknown-linux-gnu test_device_get_info
+$CARGO test --target x86_64-unknown-linux-gnu test_device_get_info
 
 # With output
-cargo test --target x86_64-unknown-linux-gnu -- --nocapture
+$CARGO test --target x86_64-unknown-linux-gnu -- --nocapture
 
 # Ignored tests
-cargo test --target x86_64-unknown-linux-gnu -- --ignored
+$CARGO test --target x86_64-unknown-linux-gnu -- --ignored
 
-# Coverage (requires tarpaulin)
-cargo tarpaulin \
-  --workspace \
-  --target x86_64-unknown-linux-gnu \
-  --exclude-files "xiu/**" "patches/**" "anyka_reference/**" "onvif/**" \
-  --out Html
+# Coverage (uses cross-compile/tarpaulin.toml)
+$CARGO tarpaulin --target x86_64-unknown-linux-gnu --config tarpaulin.toml
 ```
 
 ### Mocking with mockall
@@ -52,8 +48,8 @@ cargo tarpaulin \
 use mockall::{automock, predicate::*};
 use async_trait::async_trait;
 
-// Define trait with automock
-#[automock]
+// Define trait with automock (only in test builds)
+#[cfg_attr(test, automock)]
 #[async_trait]
 trait PlatformService {
     async fn get_device_info(&self) -> Result<DeviceInfo, Error>;
@@ -75,6 +71,8 @@ async fn test_brightness_setting() {
 }
 ```
 
+This is the project standard (`#[cfg_attr(test, automock)]` on trait definitions, as in `src/platform/common/traits.rs`). For traits that cannot use `automock`, use `mockall::mock!` instead.
+
 ### Test Naming Convention
 
 ```rust
@@ -91,13 +89,16 @@ fn test_media_create_profile_invalid_name_returns_validation_error() { }
 | Suite | File | Purpose |
 |-------|------|---------|
 | FLV Muxing | `tests/flv_muxing_test.rs` | HTTP-FLV container format |
+| HTTP-FLV Integration | `tests/httpflv_integration_test.rs` | HTTP-FLV serving |
 | RTP Streaming | `tests/rtp_streaming_test.rs` | RTP packetization/depacketization |
 | RTSP Session | `tests/rtsp_session_test.rs` | RTSP session lifecycle |
+| RTSP Integration | `tests/rtsp_integration_test.rs` | RTSP server end-to-end |
 | Stream Routing | `tests/stream_routing_test.rs` | Stream multiplexing |
+| Streaming Service | `tests/streaming_service_test.rs` | Streaming service API |
 
 ```bash
 cd cross-compile
-cargo test --target x86_64-unknown-linux-gnu -p streaming-lib
+$CARGO test --target x86_64-unknown-linux-gnu -p streaming-lib
 ```
 
 ## Validation Suite
@@ -108,7 +109,7 @@ Standalone validation tool for H.264 playback and RTSP RFC compliance testing ag
 
 ```bash
 cd validation/rust
-cargo test --target x86_64-unknown-linux-gnu
+$CARGO test --target x86_64-unknown-linux-gnu
 ```
 
 ## WebUI Testing
@@ -119,7 +120,7 @@ cargo test --target x86_64-unknown-linux-gnu
 |------|------|---------|
 | Unit Tests | Vitest | Component logic, hooks, utils |
 | Component Tests | Testing Library | UI rendering and interaction |
-| API Mocking | MSW | Mock HTTP responses |
+| Service Mocking | `vi.mock` | Mock service modules (`vi.mocked(fn).mockResolvedValue(...)`) |
 
 ### Running Tests
 
@@ -167,33 +168,25 @@ describe('DevicePanel', () => {
 });
 ```
 
-### MSW for API Mocking
+### Service Mocking (vi.mock)
+
+MSW is **not** used. Mock service modules with `vi.mock` + `vi.mocked`:
 
 ```typescript
-import { http, HttpResponse } from 'msw';
-import { setupServer } from 'msw/node';
+import { getDeviceInfo } from '@/services/device';
 
-const handlers = [
-  http.post('/onvif/device_service', () => {
-    return HttpResponse.xml(`
-      <SOAP-ENV:Envelope>
-        <SOAP-ENV:Body>
-          <tds:GetDeviceInformationResponse>
-            <tds:Manufacturer>Anyka</tds:Manufacturer>
-            <tds:Model>AK3918</tds:Model>
-          </tds:GetDeviceInformationResponse>
-        </SOAP-ENV:Body>
-      </SOAP-ENV:Envelope>
-    `);
-  }),
-];
+vi.mock('@/services/device', () => ({
+  getDeviceInfo: vi.fn(),
+}));
 
-const server = setupServer(...handlers);
-
-beforeAll(() => server.listen());
-afterEach(() => server.resetHandlers());
-afterAll(() => server.close());
+// In a test
+vi.mocked(getDeviceInfo).mockResolvedValue({
+  manufacturer: 'Anyka',
+  model: 'AK3918',
+});
 ```
+
+Shared helpers live in `src/test/componentTestHelpers.tsx`: `renderWithProviders`, `createTestQueryClient`, `mockToast`, `MOCK_ENDPOINTS`, `MOCK_DATA`, `waitForPageLoad`, `openDialog`, plus `formTestHelpers`, `dialogTestHelpers`, `mutationTestHelpers`, `serviceTestHelpers`, `schemaTestHelpers`, and `setup.ts`. Always render components with `renderWithProviders` so React Query providers are present.
 
 ### Test Selector Rules
 
@@ -228,7 +221,7 @@ Tests run automatically on:
 All tests must pass before merge:
 ```bash
 # Rust (host target for testing)
-cargo test --target x86_64-unknown-linux-gnu
+$CARGO test --target x86_64-unknown-linux-gnu
 
 # WebUI
 npm run test

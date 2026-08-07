@@ -13,26 +13,30 @@
 
 **DO NOT** invent new designs or deviate from typography, spacing, or colors unless explicitly authorized.
 
-## Theme: "Camera.UI" Dark + Red Accents
+## Theme: "Industrial Dark" (Blue Primary / Red Accent)
 
-Optimized for monitoring applications with dark theme and red accent colors.
+Optimized for monitoring applications with a dark theme, blue primary actions, and red accent colors.
+
+> **⚠️ GROUND TRUTH**: The implemented theme in `src/styles/globals.css` is the authoritative source. The memory's older "Camera.UI red" palette is superseded by the Industrial Dark values below (blue primary, red accent). Tailwind v4 (`@import 'tailwindcss'` + `@config '../../tailwind.config.js'`).
 
 ### Color Palette
 
-| Purpose | Color | Hex | CSS Variable |
-|---------|-------|-----|--------------|
-| Background (main) | Deep black | `#0d0d0d` | `--background` |
-| Background (nav) | Dark gray | `#121212` | `--nav-background` |
-| Background (cards) | Medium dark | `#1c1c1e` | `--card` |
-| Border/Dividers | Subtle gray | `#3a3a3c` | `--border` |
-| Text (primary) | White | `#ffffff` | `--foreground` |
-| Text (secondary) | Gray | `#a1a1a6` | `--muted-foreground` |
-| Text (disabled) | Muted gray | `#6b6b6f` | `--disabled` |
-| Accent (CTA) | Red | `#ff3b30` | `--primary` |
-| Accent (hover) | Dark red | `#dc2626` | `--primary-hover` |
-| Success | Green | `#34c759` | `--success` |
-| Warning | Yellow | `#ff9500` | `--warning` |
-| Error | Red | `#ff3b30` | `--destructive` |
+| Purpose | Color | CSS Variable | Value (HSL) |
+|---------|-------|--------------|-------------|
+| Background (main) | Near-black | `--background` | `220 10% 4%` |
+| Foreground (text) | Near-white | `--foreground` | `210 20% 98%` |
+| Card | Dark slate | `--card` | `220 10% 10%` |
+| Border/Dividers | Gray | `--border` | `220 5% 22%` |
+| Text (muted) | Gray | `--muted-foreground` | `215 16% 65%` |
+| Primary (action) | **Blue** | `--primary` | `217 91% 60%` |
+| Accent | **Red** | `--accent` | `0 84% 60%` |
+| Destructive | Dark red | `--destructive` | `0 62.8% 30.6%` |
+| Focus Ring | Blue | `--ring` | `217 91% 60%` |
+| Radius | 8px | `--radius` | `0.5rem` |
+| Status: Connected | Green | `--status-connected` | `142 71% 45%` |
+| Status: Warning | Amber | `--status-warning` | `38 92% 50%` |
+| Status: Error | Red | `--status-error` | `0 84% 60%` |
+| Status: Disconnected | Gray | `--status-disconnected` | `215 10% 45%` |
 
 ### Typography
 
@@ -65,13 +69,7 @@ Optimized for monitoring applications with dark theme and red accent colors.
 
 ### Border Radius
 
-| Element | Radius |
-|---------|--------|
-| Buttons | 8px |
-| Inputs | 8px |
-| Cards | 12px |
-| Dialogs | 12px |
-| Tooltips | 6px |
+Global `--radius: 0.5rem` (8px), overridable per-component via Tailwind utilities.
 
 ## Layout Architecture
 
@@ -123,7 +121,7 @@ Optimized for monitoring applications with dark theme and red accent colors.
 ### Buttons
 
 ```typescript
-// Primary action (red accent)
+// Primary action (blue accent)
 <Button variant="default">Save Changes</Button>
 
 // Secondary action
@@ -269,14 +267,17 @@ Optimized for monitoring applications with dark theme and red accent colors.
 ```
 docs/design/
 ├── ONVIF.fig              # Figma source file
-├── App.tsx                # Reference component
 ├── design_proposal.md     # Design specifications
-├── components/
-│   ├── ui/                # 48 Radix UI components
-│   └── figma/             # Figma screen exports
+├── DESIGN_REVIEW.md       # Design review notes
+├── prd.md                 # Product requirements
+├── App.tsx                # Reference component
+├── components/            # Design component exports
+├── img/                   # Design images
 └── styles/
     └── globals.css        # CSS custom properties
 ```
+
+**Implemented theme**: `src/styles/globals.css` (ground truth — see note above). Component utilities live in `@layer components` there: `.card`, `.technical-panel`, `.status-badge-connected`, `.empty-state`, `.skeleton*`, `.live-indicator`, `.data-highlight`, `.focus-ring`.
 
 ## Implementation Priority
 

@@ -8,8 +8,8 @@
 - Validate string lengths and bounds using `String::len()` and range checks
 - Sanitize XML/SOAP input to prevent XXE (XML External Entity) and XML bomb attacks
 - Validate numeric ranges and types using `validator::Validate` trait
-- Use `SecurityValidator` from `utils::validation` for XML content validation
-- Validate paths to prevent directory traversal attacks using `PathValidator`
+- Use `utils::validation::SecurityValidator` for XML content validation
+- Validate paths to prevent directory traversal attacks using `utils::validation::PathValidator`
 
 ## Memory Safety
 
@@ -36,25 +36,25 @@
 
 **Secure network communications**:
 
-- Validate all network input before processing using `SecurityValidator`
+- Validate all network input before processing using `utils::validation::SecurityValidator`
 - Use proper error message handling (no information leakage) - return generic ONVIF faults
-- Implement proper authentication and authorization using `auth` module
+- Implement proper authentication and authorization using `src/security/` (rate limit, brute force, audit, XML security) and `src/onvif/ws_security.rs` / `src/onvif/auth_requirements.rs` (WS-Security, auth levels)
 - Validate SOAP/XML input to prevent XXE, XML bombs, and injection attacks
 - Use HTTPS/TLS for all production deployments (especially for HTTP Basic auth)
-- Implement rate limiting using `security::RateLimiter` to prevent abuse
+- Implement rate limiting using `security::rate_limit::RateLimiter` to prevent abuse
 - Use timing-safe comparisons for authentication (e.g., `constant_time_eq` crate)
 
 ## Authentication & Authorization
 
 **Secure authentication implementation**:
 
-- Use `auth::WsSecurityValidator` for WS-Security UsernameToken (SOAP requests)
-- Use `auth::HttpDigestAuth` for HTTP Digest authentication (RFC 2617)
-- Use `auth::HttpBasicAuth` only with HTTPS - credentials are base64 encoded, NOT encrypted
-- Store passwords using Argon2 hashing (see `users::password` module)
+- Use `onvif::ws_security::WsSecurityValidator` for WS-Security UsernameToken (SOAP requests)
+- HTTP Digest verification is handled by `onvif::ws_security::WsSecurityValidator::verify_digest` (SHA1(Nonce + Created + Password)); there is no separate `auth::HttpDigestAuth` module
+- HTTP Basic auth credentials are base64 encoded, NOT encrypted - use only with HTTPS
+- Password storage lives in `config::users::password` - note that passwords are stored in plaintext because WS-Security UsernameToken digest requires the original password (Argon2 one-way hashes are incompatible with this model)
 - Validate session management and nonce/timestamp freshness
-- Ensure proper access controls for all endpoints using `auth::UserLevel`
-- Implement brute force protection using `security::BruteForceProtection`
+- Ensure proper access controls for all endpoints using `config::UserLevel` and `onvif::auth_requirements::AuthLevel`
+- Implement brute force protection using `security::brute_force::BruteForceProtection`
 - Use timing-safe credential comparison to prevent timing attacks
 
 ## Unsafe Code Guidelines
@@ -104,7 +104,7 @@ Proper XML/SOAP request/response handling:
 - Proper SOAP envelope structure using `quick-xml` serialization
 - ONVIF-compliant error codes and messages (map Rust errors to ONVIF faults)
 - Proper content-type headers (`application/soap+xml`)
-- Validate all SOAP requests using `SecurityValidator` before processing
+- Validate all SOAP requests using `utils::validation::SecurityValidator` before processing
 
 ### WS-Discovery
 
@@ -307,15 +307,15 @@ process_frame(&response.data);
 
 **Before deploying any code, verify**:
 
-- [ ] **Input Validation**: All inputs are validated using `validator` or `SecurityValidator`
+- [ ] **Input Validation**: All inputs are validated using `validator` or `utils::validation::SecurityValidator`
 - [ ] **Unsafe Code**: All `unsafe` blocks are justified, documented, and minimal
 - [ ] **Panic Safety**: No `unwrap()` or `expect()` in production code paths
 - [ ] **Error Handling**: All errors use `Result` types and don't leak sensitive information
 - [ ] **Memory Safety**: No data races, proper synchronization in concurrent code
 - [ ] **Network Security**: Secure communication protocols, rate limiting implemented
 - [ ] **Authentication**: Proper credential handling with timing-safe comparison
-- [ ] **Authorization**: Access controls for all endpoints using `UserLevel`
-- [ ] **XML Security**: XXE and XML bomb protection using `SecurityValidator`
+- [ ] **Authorization**: Access controls for all endpoints using `config::UserLevel` / `onvif::auth_requirements::AuthLevel`
+- [ ] **XML Security**: XXE and XML bomb protection using `utils::validation::SecurityValidator`
 - [ ] **ONVIF Compliance**: Proper service implementation and error codes
 - [ ] **IPC Security**: Vendor daemon communication validated, socket permissions checked
 - [ ] **Shared Memory**: Ring buffer access bounds-checked, frame integrity validated

@@ -3,15 +3,15 @@
 ## Code Formatting & Linting
 
 ### ⚠️ Cross-Compilation Note
-Default target is ARM (`armv5te-unknown-linux-uclibceabi`). For host-side operations (test, lint), **you MUST specify x86_64 target**.
+Default target is ARM (`armv5te-unknown-linux-uclibceabi`). For host-side operations (test, lint), **you MUST specify x86_64 target**. Load the vendored toolchain first with `source ./setenv.sh` from the repo root (exports `$CARGO`, `$RUSTC`, `$RUSTDOC`). Never use bare `cargo`.
 
 ### Mandatory Before Commit
 ```bash
 cd cross-compile/onvif-rust
-cargo fmt                          # Format all code (target-independent)
-cargo fmt --check                  # Verify formatting (CI)
-cargo clippy --target x86_64-unknown-linux-gnu -- -D warnings  # Lint on host
-cargo test --target x86_64-unknown-linux-gnu                   # Test on host
+$CARGO fmt                          # Format all code (target-independent)
+$CARGO fmt --check                  # Verify formatting (CI)
+$CARGO clippy --target x86_64-unknown-linux-gnu -- -D warnings  # Lint on host
+$CARGO test --target x86_64-unknown-linux-gnu                   # Test on host
 ```
 
 ## Naming Conventions
@@ -62,14 +62,44 @@ use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum OnvifError {
-    #[error("Authentication failed")]
-    AuthenticationFailed,
-    
-    #[error("Invalid request: {0}")]
-    InvalidRequest(String),
-    
-    #[error("Platform error: {0}")]
-    Platform(#[from] PlatformError),
+    #[error("Action not supported: {0}")]
+    ActionNotSupported(String),
+
+    #[error("Request not well-formed: {0}")]
+    WellFormed(String),
+
+    #[error("Invalid argument: {subcode} - {reason}")]
+    InvalidArgVal { subcode: String, reason: String },
+
+    #[error("Hardware failure: {0}")]
+    HardwareFailure(String),
+
+    #[error("Not authorized: {0}")]
+    NotAuthorized(String),
+
+    #[error("Maximum number of users reached")]
+    MaxUsers,
+
+    #[error("Configuration conflict: {0}")]
+    ConfigurationConflict(String),
+
+    #[error("Internal error: {0}")]
+    Internal(String),
+
+    #[error("Not found: {0}")]
+    NotFound(String),
+}
+
+impl OnvifError {
+    pub fn invalid_arg(reason: impl Into<String>) -> Self {
+        OnvifError::InvalidArgVal { subcode: "ter:InvalidArgVal".into(), reason: reason.into() }
+    }
+    pub fn missing_arg(reason: impl Into<String>) -> Self {
+        OnvifError::InvalidArgVal { subcode: "ter:MissingAttr".into(), reason: reason.into() }
+    }
+    pub fn out_of_range(reason: impl Into<String>) -> Self {
+        OnvifError::InvalidArgVal { subcode: "ter:InvalidArgVal".into(), reason: reason.into() }
+    }
 }
 
 // Application errors - use anyhow with context
@@ -131,62 +161,72 @@ info!(user = %username, action = "login", "User authenticated");
 ```
 src/
 ├── lib.rs                    # Library root, global allocator (cap 24MB)
-├── main.rs                   # Binary entry point
+├── main.rs                   # Binary entry point (onvif-rust)
 ├── app.rs                    # Application lifecycle
 │
 ├── onvif/                    # ONVIF services
-│   ├── device/               # Device service (handlers, types, faults)
+│   ├── device/               # Device service
+│   │   ├── ops/              # {system, network, discovery, users}.rs
+│   │   ├── service.rs        # DeviceService handler
+│   │   ├── state.rs          # Service state
+│   │   ├── store.rs          # Device store
+│   │   ├── types.rs          # Device types
+│   │   ├── faults.rs         # Device faults
+│   │   ├── validation.rs     # Device validation
+│   │   └── user_types.rs     # ONVIF user levels
 │   ├── media/                # Media service
 │   ├── ptz/                  # PTZ service
 │   ├── imaging/              # Imaging service
-│   ├── types/                # Shared ONVIF type definitions
-│   ├── dispatcher.rs         # SOAP action routing
+│   ├── analytics/            # Analytics service
+│   ├── events/               # Events service
+│   ├── discovery/            # Discovery service
+│   ├── common/               # dispatch.rs (dispatch_sync/dispatch_async)
+│   ├── dispatcher/           # mod.rs (ServiceHandler trait), parse_body
+│   ├── error/                # mod.rs (OnvifError)
+│   ├── soap/                 # build.rs, parse.rs, model.rs
+│   ├── types/                # {common, device, media, imaging, ptz}
+│   ├── auth_requirements.rs  # Per-action auth levels
 │   ├── server.rs             # HTTP/SOAP server
-│   ├── soap.rs               # SOAP envelope handling
-│   └── ws_security.rs        # WS-Security processing
+│   ├── ws_security.rs        # WS-Security processing
+│   └── mod.rs
 │
 ├── hal/                      # Hardware Abstraction Layer (IPC-based)
-│   ├── anyka_sdk.rs          # SDK type definitions
-│   ├── vendor_ipc.rs         # Unix socket IPC client
-│   ├── video.rs              # Video HAL
-│   ├── audio.rs              # Audio HAL
-│   ├── imaging.rs            # Imaging HAL
-│   ├── ptz.rs                # PTZ HAL
-│   └── ptz_driver.rs         # PTZ motor driver
+│   ├── common/               # {audio, imaging, ptz, sdk_types, video}.rs traits
+│   ├── anyka/                # ipc/ (shm_ring.rs), ptz/, sdk.rs
+│   └── stub/                 # Test stubs
 │
 ├── streaming/                # Bridge to streaming-lib
 │   ├── bridge.rs             # Frame delivery bridge
 │   ├── config.rs             # Stream configuration
 │   ├── helpers.rs            # Streaming utilities
-│   └── service.rs            # Streaming service
+│   ├── service.rs            # Streaming service
+│   └── telemetry.rs          # Stream telemetry
 │
-├── platform/                 # Platform abstraction
-│   ├── traits.rs             # Platform trait definitions
-│   ├── anyka.rs              # Anyka implementation
-│   ├── frame.rs              # Frame ownership & stream ID
-│   ├── anyka/ptz_control.rs  # Hardware PTZ
-│   ├── stubs.rs              # Test stubs
-│   └── validation.rs         # Platform validation
+├── platform/                 # Platform abstraction (business logic)
+│   ├── anyka/                # audio_encoder, audio_input, context, imaging,
+│   │                         # lifecycle, network_info, night_mode, ptz_actor,
+│   │                         # ptz_control, supervisor, video_encoder,
+│   │                         # video_input, tests/
+│   ├── common/               # traits.rs (Platform traits, #[cfg_attr(test, automock)])
+│   └── stub/                 # Test stubs
 │
-├── auth/                     # Authentication
-│   ├── ws_security.rs        # WS-Security
-│   ├── http_digest.rs        # HTTP Digest
-│   ├── http_basic.rs         # HTTP Basic
-│   └── credentials.rs        # Credential management
-│
-├── security/                 # Security hardening
-│   ├── xml_security.rs       # XXE/XML bomb protection
-│   ├── rate_limit.rs         # Rate limiting
+├── security/                 # Auth + security hardening
+│   ├── audit.rs              # Security audit logging
 │   ├── brute_force.rs        # Brute force protection
-│   └── audit.rs              # Security audit logging
+│   ├── rate_limit.rs         # Rate limiting
+│   └── xml_security.rs       # XXE/XML bomb protection
 │
 ├── discovery/                # WS-Discovery (UDP multicast)
 ├── config/                   # Configuration management, persistence & user management
-│   └── users/                # User accounts, passwords & ONVIF user levels
+│   ├── profiles/             # Media profiles
+│   ├── users/                # User accounts, passwords & ONVIF user levels
+│   ├── persistence.rs        # Persistent storage
+│   ├── runtime.rs            # Runtime settings
+│   ├── storage.rs            # Storage backend
+│   └── types.rs              # Config types
 ├── lifecycle/                # App lifecycle (startup, shutdown, health)
 ├── logging/                  # HTTP & platform logging
-├── net/                      # Network utilities (IP detection)
-├── validation/               # H.264 playback & stream validation
+├── validation/               # Input validation
 │
 └── utils/                    # Shared utilities
     ├── validation.rs         # Input validation
@@ -200,14 +240,14 @@ src/
 |---------|-------|
 | Async runtime | tokio |
 | Web framework | axum 0.8, tower, tower-http |
-| Serialization | serde, quick-xml 0.39 |
+| Serialization | serde, quick-xml 0.41 |
 | Logging | tracing, tracing-subscriber, tracing-appender |
 | Errors (lib) | thiserror 2.0 |
 | Errors (app) | anyhow |
 | Memory tracking | cap 0.1 (24MB hard limit) |
-| Concurrency | parking_lot, dashmap, portable-atomic |
+| Concurrency | parking_lot, portable-atomic |
 | Bytes/buffers | bytes |
-| Testing | mockall 0.14, wiremock 0.6, criterion 0.8 |
+| Testing | mockall 0.15, wiremock 0.6, criterion 0.8 |
 | Validation | validator |
 | Time | chrono |
 | UUID | uuid |
@@ -219,7 +259,7 @@ src/
 - Prefer well-maintained, widely-used crates
 - Avoid heavy dependencies for simple tasks
 - Keep `Cargo.toml` organized and sorted
-- Check for security advisories (`cargo audit`)
+- Check for security advisories (`$CARGO audit`)
 
 ## Unsafe Code
 
@@ -268,7 +308,7 @@ All hardware access should go through HAL traits from `hal/common/`.
 ///
 /// # Errors
 ///
-/// Returns `OnvifError::InvalidRequest` if input is invalid
+/// Returns `OnvifError::InvalidArgVal` if input is invalid
 ///
 /// # Examples
 ///
@@ -284,18 +324,19 @@ pub async fn get_device_info(platform: &impl Platform) -> Result<DeviceInfo, Onv
 
 ```bash
 # Run all checks across workspace (note: x86_64 target for host-side operations)
+# First: source ./setenv.sh to export $CARGO from the vendored toolchain
 cd cross-compile
-cargo fmt && \
-cargo clippy --target x86_64-unknown-linux-gnu -- -D warnings && \
-cargo test --target x86_64-unknown-linux-gnu && \
-cargo doc --no-deps
+$CARGO fmt && \
+$CARGO clippy --target x86_64-unknown-linux-gnu -- -D warnings && \
+$CARGO test --target x86_64-unknown-linux-gnu && \
+$CARGO doc --target x86_64-unknown-linux-gnu --no-deps
 ```
 
-**Note**: Commands run from `cross-compile/` apply to the entire workspace (onvif-rust + streaming-lib).
+**Note**: Commands run from `cross-compile/` apply to the entire workspace (onvif-rust + streaming-lib + anyka-init).
 
-- [ ] Code formatted (`cargo fmt`)
-- [ ] No clippy warnings (`cargo clippy -- -D warnings`)
-- [ ] All tests pass (`cargo test`)
+- [ ] Code formatted (`$CARGO fmt`)
+- [ ] No clippy warnings (`$CARGO clippy -- -D warnings`)
+- [ ] All tests pass (`$CARGO test`)
 - [ ] No `unwrap()`/`expect()` in production code
 - [ ] Public APIs documented
 - [ ] New functionality has tests

@@ -16,60 +16,76 @@ The project aims to create a fully ONVIF 24.12 compliant implementation while ma
 ```
 anyka-dev/
 ├── cross-compile/
-│   ├── Cargo.toml           # Workspace root (members: onvif-rust, streaming-lib)
+│   ├── Cargo.toml           # Workspace root (members: onvif-rust, streaming-lib, anyka-init)
 │   │
 │   ├── onvif-rust/          # 🎯 PRIMARY - Rust ONVIF implementation
 │   │   ├── src/
 │   │   │   ├── onvif/       # ONVIF services (Device, Media, PTZ, Imaging)
-│   │   │   │   ├── device/  # Device service handlers, types, faults
+│   │   │   │   ├── device/  # Device service
+│   │   │   │   │   ├── ops/ # {system, network, discovery, users}.rs operations
+│   │   │   │   │   ├── service.rs   # DeviceService handler
+│   │   │   │   │   ├── state.rs     # Service state
+│   │   │   │   │   ├── store.rs     # Device store
+│   │   │   │   │   ├── types.rs     # Device types
+│   │   │   │   │   ├── faults.rs    # Device faults
+│   │   │   │   │   ├── validation.rs
+│   │   │   │   │   └── user_types.rs
 │   │   │   │   ├── media/   # Media service
 │   │   │   │   ├── ptz/     # PTZ service
 │   │   │   │   ├── imaging/ # Imaging service
-│   │   │   │   ├── types/   # Shared ONVIF type definitions
-│   │   │   │   ├── dispatcher.rs  # SOAP action routing
-│   │   │   │   ├── server.rs      # HTTP/SOAP server
-│   │   │   │   ├── soap.rs        # SOAP envelope handling
-│   │   │   │   └── ws_security.rs # WS-Security processing
+│   │   │   │   ├── analytics/   # Analytics service
+│   │   │   │   ├── events/      # Events service
+│   │   │   │   ├── discovery/   # Discovery service
+│   │   │   │   ├── common/      # dispatch.rs (dispatch_sync/dispatch_async)
+│   │   │   │   ├── dispatcher/  # mod.rs (ServiceHandler trait), parse_body
+│   │   │   │   ├── error/       # mod.rs (OnvifError)
+│   │   │   │   ├── soap/        # build.rs, parse.rs, model.rs
+│   │   │   │   ├── types/       # {common, device, media, imaging, ptz}
+│   │   │   │   ├── auth_requirements.rs
+│   │   │   │   ├── server.rs    # HTTP/SOAP server
+│   │   │   │   ├── ws_security.rs
+│   │   │   │   └── mod.rs
 │   │   │   ├── hal/         # Hardware Abstraction Layer (IPC-based)
-│   │   │   │   ├── anyka_sdk.rs   # SDK type definitions
-│   │   │   │   ├── vendor_ipc.rs  # Unix socket IPC client (2,132 LOC)
-│   │   │   │   ├── video.rs       # Video HAL
-│   │   │   │   ├── audio.rs       # Audio HAL
-│   │   │   │   ├── imaging.rs     # Imaging HAL
-│   │   │   │   ├── ptz.rs         # PTZ HAL
-│   │   │   │   └── ptz_driver.rs  # PTZ motor driver
+│   │   │   │   ├── common/  # {audio, imaging, ptz, sdk_types, video}.rs traits
+│   │   │   │   ├── anyka/   # ipc/, ptz/, sdk.rs
+│   │   │   │   └── stub/    # Test stubs
 │   │   │   ├── streaming/   # Bridge to streaming-lib
 │   │   │   │   ├── bridge.rs      # Frame delivery bridge
 │   │   │   │   ├── config.rs      # Stream configuration
 │   │   │   │   ├── helpers.rs     # Streaming utilities
-│   │   │   │   └── service.rs     # Streaming service
-│   │   │   ├── platform/    # Platform abstraction
-│   │   │   │   ├── traits.rs      # Platform trait definitions
-│   │   │   │   ├── anyka.rs       # Anyka implementation (5,709 LOC)
-│   │   │   │   ├── frame.rs       # Frame ownership & stream ID
-│   │   │   │   ├── anyka/ptz_control.rs  # Hardware PTZ
-│   │   │   │   ├── stubs.rs       # Test stubs
-│   │   │   │   └── validation.rs  # Platform validation
-│   │   │   ├── auth/        # Authentication (WS-Security, HTTP Digest/Basic)
-│   │   │   ├── security/    # Rate limiting, brute force, XML security, audit
-│   │   │   ├── discovery/   # WS-Discovery (UDP multicast)
-│   │   │   ├── config/      # Configuration management, persistence & user management
-│   │   │   ├── lifecycle/   # App lifecycle (startup, shutdown, health)
-│   │   │   ├── logging/     # HTTP & platform logging
-│   │   │   ├── net/         # Network utilities (IP detection)
-│   │   │   ├── validation/  # H.264 playback & stream validation
-│   │   │   ├── utils/       # Shared utilities
-│   │   │   ├── app.rs       # Application lifecycle
-│   │   │   ├── lib.rs       # Library root, global allocator
-│   │   │   └── main.rs      # Binary entry point
-│   │   ├── tests/           # Integration tests (25+ suites)
+│   │   │   │   ├── service.rs     # Streaming service
+│   │   │   │   └── telemetry.rs   # Stream telemetry
+│   │   │   ├── platform/    # Platform abstraction (business logic)
+│   │   │   │   ├── anyka/  # {audio_encoder, audio_input, context, imaging,
+│   │   │   │   │          #  lifecycle, network_info, night_mode, ptz_actor,
+│   │   │   │   │          #  ptz_control, supervisor, video_encoder,
+│   │   │   │   │          #  video_input}.rs, tests/
+│   │   │   │   ├── common/ # traits.rs (Platform traits, #[cfg_attr(test, automock)])
+│   │   │   │   ├── stub/  # Test stubs
+│   │   │   │   └── mod.rs
+│   │   │   ├── security/   # Auth home: audit.rs, brute_force.rs, rate_limit.rs, xml_security.rs
+│   │   │   ├── config/     # {profiles, users} dirs; persistence, runtime, storage, types
+│   │   │   ├── lifecycle/  # App lifecycle (startup, shutdown, health)
+│   │   │   ├── logging/    # HTTP & platform logging
+│   │   │   ├── validation/ # Input validation
+│   │   │   ├── utils/      # {memory, validation}.rs shared utilities
+│   │   │   ├── app.rs      # Application lifecycle
+│   │   │   ├── lib.rs      # Library root, global allocator
+│   │   │   └── main.rs     # Binary entry point (onvif-rust)
+│   │   ├── tests/           # Integration tests
 │   │   └── Cargo.toml
 │   │
 │   ├── streaming-lib/       # 🎯 RTSP/HTTP-FLV streaming library
 │   │   ├── src/
-│   │   │   ├── rtsp/        # RTSP protocol implementation
-│   │   │   ├── httpflv/     # HTTP-FLV muxing
-│   │   │   └── ...
+│   │   │   ├── protocol/    # rtsp/, httpflv/
+│   │   │   ├── codec/       # h264/ (sps, pps), test_fixtures
+│   │   │   ├── container/   # demuxer, muxer
+│   │   │   ├── hub/         # Stream hub
+│   │   │   ├── io/          # bits/bytes readers + writers
+│   │   │   ├── common/      # Shared types
+│   │   │   ├── validation/  # aac_file_reader, h264_file_reader
+│   │   │   ├── service.rs   # Streaming service
+│   │   │   └── config.rs    # Streaming config
 │   │   ├── tests/           # Streaming tests
 │   │   └── Cargo.toml
 │   │
@@ -110,8 +126,8 @@ The project uses a **push-only IPC architecture** where the vendor-daemon (C) ha
 │ vendor-daemon │ ──────────────→ │  onvif-rust   │
 │    (C/SDK)    │   IPC commands  │   (Rust)      │
 │               │                 │               │
-│  Anyka SDK    │  Shared Memory  │  hal/         │
-│  frame capture│ ──────────────→ │  vendor_ipc   │
+│  Anyka SDK    │  Shared Memory  │  hal/anyka    │
+│  frame capture│ ──────────────→ │  /ipc         │
 │  encoding     │  Ring Buffer    │  ipc/shm_ring │
 │               │  (zero-copy)    │               │
 │  Dual sockets │                 │  streaming/   │
@@ -142,13 +158,13 @@ The project enforces strict separation:
 | Language | Rust (Edition 2024) |
 | Web Framework | axum 0.8 |
 | Async Runtime | tokio 1.0 (multi-thread) |
-| Serialization | serde, quick-xml 0.39 |
+| Serialization | serde, quick-xml 0.41 |
 | Logging | tracing, tracing-subscriber, tracing-appender |
 | Error Handling | thiserror 2.0 (libs), anyhow 1.0 (apps) |
 | Memory Tracking | cap 0.1 (24MB hard limit) |
-| Concurrency | parking_lot 0.12, dashmap 6.1, portable-atomic 1.13 |
+| Concurrency | parking_lot 0.12, portable-atomic 1.14 |
 | Streaming | streaming-lib (workspace, RTSP/HTTP-FLV) |
-| Testing | mockall 0.14, wiremock 0.6, criterion 0.8 |
+| Testing | mockall 0.15, wiremock 0.6, criterion 0.8 |
 | Target | armv5te-unknown-linux-uclibceabi |
 
 ### Vendor Daemon (C)
@@ -171,7 +187,7 @@ The project enforces strict separation:
 | Routing | React Router 7.13 |
 | Form Handling | React Hook Form 7.71 + Zod 4.3 |
 | XML Parsing | fast-xml-parser 5.3 |
-| Testing | Vitest 4.0, Testing Library 16.3, MSW 2.12 |
+| Testing | Vitest 4.0, Testing Library 16.3 (vi.mock service mocking) |
 
 ### CI/CD
 - **Platform**: GitHub Actions
@@ -194,7 +210,7 @@ The project enforces strict separation:
 ```toml
 # cross-compile/Cargo.toml
 [workspace]
-members = ["onvif-rust", "streaming-lib"]
+members = ["onvif-rust", "streaming-lib", "anyka-init"]
 resolver = "2"
 
 [profile.release]
@@ -212,14 +228,14 @@ strip = true
 - Use `tokio::sync` primitives for async code
 - Minimal, documented `unsafe` blocks
 - `mockall` for trait mocking in tests
-- IPC via `hal/vendor_ipc.rs` (never direct FFI)
+- IPC via `hal/anyka/ipc/` (never direct FFI)
 - Zero-copy frames via `hal/anyka/ipc/shm_ring.rs`
 
 ### WebUI
 - Strict TypeScript (no `any`)
 - `data-testid` for all test selectors
 - Zod 4 schemas for all form validation
-- MSW for API mocking in tests
+- vi.mock service module mocking in tests
 - shadcn/ui components only (no custom primitives)
 
 ## Essential Commands
@@ -227,14 +243,17 @@ strip = true
 **⚠️ Cross-compile note**: Default Rust target is ARM. Use `--target x86_64-unknown-linux-gnu` for host-side operations (test, lint).
 
 ```bash
+# Load the vendored Rust toolchain (exports $CARGO, $RUSTC, $RUSTDOC)
+source ./setenv.sh
+
 # Rust (host-side testing/linting) — runs across workspace
 cd cross-compile
-cargo fmt && \
-cargo clippy --target x86_64-unknown-linux-gnu -- -D warnings && \
-cargo test --target x86_64-unknown-linux-gnu
+$CARGO fmt && \
+$CARGO clippy --target x86_64-unknown-linux-gnu -- -D warnings && \
+$CARGO test --target x86_64-unknown-linux-gnu
 
 # Rust (build for device - ARM)
-cargo build --release
+$CARGO build --release
 
 # Vendor daemon (ARM cross-compile)
 cd cross-compile/vendor-daemon && make
@@ -244,5 +263,5 @@ cd cross-compile/www
 npm run lint && npm run type-check && npm run test
 
 # Deploy to device
-cd scripts && ./deploy_onvif.sh 192.168.1.100 admin admin
+cd scripts && ./deploy_onvif.sh 192.168.2.198 admin admin
 ```

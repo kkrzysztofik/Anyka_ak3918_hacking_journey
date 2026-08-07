@@ -74,7 +74,7 @@ function isDeviceInfo(data: unknown): data is DeviceInfo {
 
 ### Zod 4 Validation (Mandatory for Forms/API)
 
-**Note**: Project uses Zod ^4.3.6. The core API (`z.object`, `z.string`, `safeParse`, `z.infer`) is compatible with Zod 3 patterns.
+**Note**: Project uses Zod ^4.4.3. The core API (`z.object`, `z.string`, `safeParse`, `z.infer`) is compatible with Zod 3 patterns.
 
 ```typescript
 import { z } from 'zod';
@@ -269,33 +269,42 @@ const form = useForm<DeviceInfo>({
 
 ### Test Structure
 
+Tests use `it('should ...')` inside `describe` (NOT Rust-style `test_<component>` snake naming). Always render through the shared helper `renderWithProviders` from `src/test/componentTestHelpers.tsx` (wraps in QueryClientProvider + AuthProvider, returns the `queryClient`).
+
 ```typescript
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { renderWithProviders } from '@/test/componentTestHelpers';
 
 describe('DevicePanel', () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  it('renders device information correctly', () => {
-    render(<DevicePanel deviceId="test-123" />);
-    
+  it('should render device information correctly', () => {
+    renderWithProviders(<DevicePanel deviceId="test-123" />);
+
     // ALWAYS use data-testid
     expect(screen.getByTestId('device-panel')).toBeInTheDocument();
   });
 
-  it('calls onSave when save button is clicked', async () => {
+  it('should call onSave when save button is clicked', async () => {
     const onSave = vi.fn();
-    render(<DevicePanel deviceId="test-123" onSave={onSave} />);
-    
+    renderWithProviders(<DevicePanel deviceId="test-123" onSave={onSave} />);
+
     await userEvent.click(screen.getByTestId('device-panel-save-button'));
-    
+
     expect(onSave).toHaveBeenCalledTimes(1);
   });
 });
 ```
+
+### Shared Test Helpers (`src/test/`)
+
+- `componentTestHelpers.tsx` — `renderWithProviders`, `createTestQueryClient`, `mockToast`, `MOCK_ENDPOINTS`, `MOCK_DATA`, `waitForPageLoad`, `openDialog`/`closeDialog`/`submitDialog`, `fillFormField`, `toggleSwitch`, `selectOption`
+- `formTestHelpers.ts`, `dialogTestHelpers.ts`, `mutationTestHelpers.ts`, `serviceTestHelpers.ts`, `schemaTestHelpers.ts`
+- `setup.ts` — mocks matchMedia, ResizeObserver, element pointer-capture, sonner toast; filters `act()` noise
 
 ### Selector Rules (MANDATORY)
 
@@ -311,31 +320,29 @@ screen.getByText('Save');                       // NO
 screen.getByClassName('btn-primary');           // NO
 ```
 
-### MSW for API Mocking
+### Service Mocking (vi.mock — MSW is NOT used)
+
+Mock service modules with `vi.mock` at the top of the test file, then control return values with `vi.mocked(...)`. There is no `src/test/mocks/` or `src/test/fixtures/soap/` directory.
 
 ```typescript
-import { http, HttpResponse } from 'msw';
-import { setupServer } from 'msw/node';
+import { deviceService } from '@/services/deviceService';
+import { renderWithProviders } from '@/test/componentTestHelpers';
 
-const handlers = [
-  http.post('/onvif/device_service', () => {
-    return HttpResponse.xml(`
-      <SOAP-ENV:Envelope>
-        <SOAP-ENV:Body>
-          <tds:GetDeviceInformationResponse>
-            <tds:Manufacturer>Anyka</tds:Manufacturer>
-          </tds:GetDeviceInformationResponse>
-        </SOAP-ENV:Body>
-      </SOAP-ENV:Envelope>
-    `);
-  }),
-];
+vi.mock('@/services/deviceService', () => ({
+  getInfo: vi.fn(),
+  updateSettings: vi.fn(),
+}));
 
-const server = setupServer(...handlers);
+describe('DevicePanel', () => {
+  it('should load device info', async () => {
+    vi.mocked(deviceService.getInfo).mockResolvedValue({ name: 'Anyka' });
 
-beforeAll(() => server.listen());
-afterEach(() => server.resetHandlers());
-afterAll(() => server.close());
+    renderWithProviders(<DevicePanel deviceId="test-123" />);
+
+    expect(await screen.findByTestId('device-panel')).toBeInTheDocument();
+    expect(deviceService.getInfo).toHaveBeenCalledWith('test-123');
+  });
+});
 ```
 
 ## Security Requirements

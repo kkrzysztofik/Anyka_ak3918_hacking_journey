@@ -13,6 +13,8 @@ You are working in a **WSL2 Ubuntu development environment** on the Anyka AK3918
 
 Both use ARM cross-compilation toolchain and require specific analysis procedures. This prompt primarily covers the C vendor-daemon coredumps (the Rust binary rarely core dumps due to memory safety).
 
+Coredumps are collected from the device with `scripts/debugging/collect_coredump.sh <ip> <user> <pass>`. On-device coredumps live in `/mnt/coredumps`, `/mnt/logs`, and `/mnt/anyka_hack/onvif`; they are pulled to `debugging/coredump/` on the host.
+
 ## Primary Objective
 
 **Analyze ONVIF daemon coredumps systematically and provide actionable debugging insights within 200-300 words maximum per analysis session.**
@@ -21,10 +23,10 @@ Both use ARM cross-compilation toolchain and require specific analysis procedure
 
 ### 1. Tool Usage Requirements
 
-- **ONLY** use the standardized `run_gdb_multiarch_analysis.sh` script located at `debugging/run_gdb_multiarch_analysis.sh`
+- **ONLY** use the standardized analysis script located at `scripts/debugging/run_gdb_multiarch_analysis.sh`
 - **NEVER** run GDB directly - this is strictly prohibited
 - **ALWAYS** fix script issues before proceeding with analysis
-- **ALWAYS** run from project root directory: `/home/kmk/anyka-dev`
+- **ALWAYS** run from the repo root (`$ANYKA_REPO_ROOT` after `source ./setenv.sh` — never a hardcoded home path)
 
 ### 2. Response Format Requirements
 
@@ -59,20 +61,20 @@ Both use ARM cross-compilation toolchain and require specific analysis procedure
 
 Before any analysis, verify:
 
-- [ ] Script exists: `test -f debugging/run_gdb_multiarch_analysis.sh`
-- [ ] Script is executable: `chmod +x debugging/run_gdb_multiarch_analysis.sh`
-- [ ] Debug binary exists: `test -f cross-compile/onvif/out/onvifd_debug`
-- [ ] Coredump file exists: `ls -la debugging/coredumps/core.*`
-- [ ] Working directory is correct: `pwd` shows `/home/kmk/anyka-dev`
+- [ ] Script exists: `test -f scripts/debugging/run_gdb_multiarch_analysis.sh`
+- [ ] Script is executable: `chmod +x scripts/debugging/run_gdb_multiarch_analysis.sh`
+- [ ] Binary is `onvif-rust` (resolved from `cross-compile/onvif-rust` by the script; on device: `/mnt/anyka_hack/onvif/onvif-rust`)
+- [ ] Coredump file exists: host `ls -la debugging/coredump/core.*` (or pull from device via `collect_coredump.sh`)
+- [ ] Working directory is correct: `pwd` shows the repo root (`$ANYKA_REPO_ROOT`)
 
 ## Analysis Execution
 
 ```bash
-# Navigate to project root
-cd /home/kmk/anyka-dev
+# Navigate to project root (portable - never hardcode a home path)
+cd "$ANYKA_REPO_ROOT"
 
-# Run analysis (replace with actual coredump filename)
-./debugging/run_gdb_multiarch_analysis.sh [coredump_filename] onvifd_debug
+# Run analysis (replace with actual coredump filename; binary is onvif-rust)
+./scripts/debugging/run_gdb_multiarch_analysis.sh [coredump_filename] onvif-rust
 ```
 
 ## Key Analysis Focus Areas
@@ -122,7 +124,7 @@ A successful analysis must:
 
 ### 2. **Context & Environment**
 
-- **Added**: Specific project context (Anyka AK3918, ONVIF 2.5, WSL2)
+- **Added**: Specific project context (Anyka AK3918, ONVIF 24.12, WSL2)
 - **Why**: Provides necessary background to understand the technical constraints and requirements
 
 ### 3. **Primary Objective**
