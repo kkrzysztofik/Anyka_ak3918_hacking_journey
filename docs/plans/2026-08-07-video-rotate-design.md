@@ -50,16 +50,53 @@ Bottom to top:
    in `hal/anyka/ipc/video.rs`. No-op stub in `hal/stub/video.rs` for host
    tests.
 
-3. **Platform layer.** `AnykaVideoInput::set_flip_mirror(&self, rotated:
-   bool)` in `platform/anyka/video_input.rs`, called once during boot right
-   after `capture_on()` succeeds (same order the vendor demo uses), reading
-   the persisted setting. No trait method on `Platform`/`VideoInput` — this
-   is boot-sequence-only, not reachable from the Media service.
+3. **Platform layer — live apply, mirroring `ImagingControl`.** The codebase
+   already has a proven shape for "ONVIF-exposed setting reaches hardware
+   immediately": `Platform::imaging_control() -> Option<Arc<dyn
+   ImagingControl>>`, whose `set_settings()` applies to hardware first, then
+   the caller persists (`app.rs:708-734`, `onvif/imaging/store.rs:302-337`).
+   Reusing that shape is less new code than a bespoke boot-only path, since
+   the boot-only version has no existing plumbing to build on.
+   - New trait `VideoControl` (`platform/common/traits.rs`, next to
+     `ImagingControl`): `async fn set_flip_mirror(&self, rotated: bool) ->
+     PlatformResult<()>`. Added to `Platform` as `fn video_control(&self) ->
+     Option<Arc<dyn VideoControl>>`, with a `None` default in the same macro
+     that already defaults `imaging_control`.
+   - `AnykaVideoInput` (`platform/anyka/video_input.rs`) implements
+     `VideoControl` directly — no separate wrapper struct needed, unlike
+     `AnykaImagingControl`, because the VI handle it already owns is exactly
+     what flip/mirror needs. `set_flip_mirror()`: stores `rotated` in a new
+     `AtomicBool` field, and if the VI is currently open
+     (`self.opened.load()`), also calls the new IPC wrapper immediately.
+     Storing the flag even when closed is what makes reapply-on-reattach
+     (below) work without a second code path.
+   - `AnykaPlatform::video_control()` returns
+     `Some(self.video_input.clone() as Arc<dyn VideoControl>)`.
+   - `init_video_input()` (`platform/anyka/mod.rs:307-357`) — the sequence
+     the supervisor runs on *every* attach, cold boot or post-crash
+     reattach alike — gets a new step right after `capture_on()` succeeds
+     (matching the vendor demo's ordering): call
+     `self.video_input.set_flip_mirror(self.video_input.rotated())` using
+     the stored flag. This is what makes a vendor-daemon crash-and-respawn
+     reapply the setting without any extra wiring — the existing retry path
+     already re-runs this function.
 
-4. **Persistence.** `StoredVideoSourceConfig` in
-   `onvif/media/profile_manager.rs` gets a `rotated: bool` field (default
-   `false`), saved to `profiles.toml` through the existing persistence path
-   — same mechanism bounds/resolution already use.
+4. **Persistence and boot seed — single source of truth.** `profiles.toml`
+   is the *only* place `rotated` is stored; there is no separate
+   `config.toml` seed (see "Rejected alternatives" for why a second layer
+   was rejected).
+   - `StoredVideoSourceConfig` in `config/profiles/mod.rs` gets a `rotated:
+     bool` field (`#[serde(default)]`), wired through
+     `video_source_config_to_stored` / `stored_to_video_source_config` in
+     `profile_manager.rs`.
+   - `Application::run()` (`app.rs`) currently calls `wire_profile_persistence`
+     *after* `init_platform` (line 1011 vs 982); this ordering flips so the
+     profile store is loaded first. The boot value is read straight out of
+     it: `profile_storage.snapshot().video_source_configs.first().map(|c|
+     c.rotated).unwrap_or(false)`, passed as a new parameter through
+     `init_platform` into `AnykaPlatform::with_isp_config(...)`, which seeds
+     `AnykaVideoInput`'s `AtomicBool`. `init_platform` has no dependency on
+     `wire_profile_persistence` or vice versa, so the reorder is safe.
 
 5. **ONVIF Media service.** `VideoSourceConfiguration`'s currently-untyped
    `extension: Option<Extension>` (`onvif/types/common.rs:496`) becomes a
@@ -82,12 +119,12 @@ Bottom to top:
 
 ## Applying a change
 
-Setting the toggle (WebUI or ONVIF client) persists to `profiles.toml`
-immediately but does not touch the running video pipeline. It takes effect
-on the next `onvif-rust` restart, which the `anyka-init` supervisor already
-performs automatically (`killall onvif-rust.bin vendor-daemon.bin` via
-telnet, as used for the last binary deploy — respawn is near-instant, no
-camera reboot required).
+Setting the toggle (WebUI or ONVIF client) applies to the running video
+pipeline immediately (if the VI is open) and persists to `profiles.toml` —
+same order as `ImagingControl::set_settings`: platform first, then cache/
+persist. No restart needed. The same stored flag is also what gets re-applied
+every time the supervisor's attach sequence runs, which covers a
+vendor-daemon crash-and-respawn without extra code (see Architecture, step 3).
 
 ## Error handling
 
@@ -95,7 +132,9 @@ camera reboot required).
   existing convention for every other VI command.
 - onvif-rust: an invalid `Mode` in `SetVideoSourceConfiguration` is a SOAP
   fault (`InvalidArgVal`), consistent with other Set* validation in this
-  service.
+  service. A live-apply failure from `VideoControl::set_flip_mirror` also
+  propagates as a fault, matching `ImagingControl::set_settings`'s `?` —
+  intentionally not soft, for consistency with the pattern being mirrored.
 - WebUI: standard toast-on-error via the existing mutation pattern in
   `ImagingPage.tsx`.
 
@@ -112,14 +151,26 @@ camera reboot required).
 
 ## Rejected alternatives
 
-- **Live apply.** Originally proposed calling into the already-open VI
-  handle from `SetVideoSourceConfiguration` via a new `Platform`/`VideoInput`
-  trait method, so the image would flip without a restart. Cut: it's a new
-  abstraction built for exactly one caller, and `SetVideoSourceConfiguration`
-  already only persists for every other field it handles (bounds,
-  resolution) — restart-to-apply is free here because the supervisor already
-  respawns `onvif-rust.bin` on kill. Revisit if manual restarts prove
-  annoying in practice; it's a one-method addition, not a redesign.
+- **Restart-to-apply instead of live apply.** The original ponytail pass cut
+  live-apply as a new abstraction built for one caller. Reversed after
+  tracing the actual boot sequence: the codebase already has this exact
+  abstraction (`ImagingControl`/`ImagingSettingsStore`), so reusing it is
+  *less* code than the bespoke restart-only path, not more — the restart-only
+  version would have needed its own boot-time config-threading mechanism
+  that doesn't exist anywhere else for this kind of setting.
+- **Seeding the boot value from `config.toml` (mirroring `imaging_cfg`
+  exactly).** `ImagingControl`'s actual pattern has two persistence layers:
+  `config.toml`'s `[imaging]` section seeds the platform at construction,
+  while `imaging.toml` (`ImagingSettingsStore`) holds live ONVIF-set values
+  in a separate file that is never pushed back to hardware on load. Copying
+  that split for Rotate would mean `GetVideoSourceConfiguration` could report
+  a `rotated` value that doesn't match actual hardware state after a plain
+  `onvif-rust` restart (profiles.toml says one thing, config.toml — which
+  boot actually reads — says another). Since Rotate has no hardware readback
+  (see next bullet), nothing would catch that drift. Fixed by making
+  `profiles.toml` the only source of truth: `app.rs` loads the profile store
+  before constructing the platform and reads the boot value straight from
+  it, instead of from `config.toml`. No new config section.
 - **`CMD_VI_GET_FLIP_MIRROR`.** Originally proposed so `GetVideoSourceConfiguration`
   could confirm hardware state. Cut: nothing else in that response reads
   live hardware — it's all persisted profile state — so Rotate doesn't need
