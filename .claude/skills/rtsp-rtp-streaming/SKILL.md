@@ -1,350 +1,117 @@
 ---
 name: rtsp-rtp-streaming
-description: |
-  RTSP/RTP H.264 codec specialist for streaming-lib project. Handles NAL unit packing, fragmentation, SPS/PPS extraction, and RTP packet management.
-  Triggers on: "RTP packet", "H.264", "NAL unit", "SPS/PPS", "RTSP streaming", "fragmentation", "STAP", "FU-A", "H264Packer".
-version: 1.0.0
+description: Use when implementing or debugging H.264 RTP packing/unpacking in streaming-lib (RtpH264Packer/RtpH264UnPacker, NAL units, SPS/PPS, FU-A/STAP, RTSP, frame callbacks, TPacker/TUnPacker traits).
+version: 2.0.0
 ---
 
-# RTSP/RTP H.264 Streaming
+# RTSP/RTP H.264 Streaming (streaming-lib)
 
-Implement H.264 video codec support for RTP streaming in the streaming-lib project. Handle NAL unit packing, fragmentation strategies, and RTP packet construction following RFC 3984.
+Implement/debug H.264 RTP packetization in `cross-compile/streaming-lib` following RFC 3984/6184. The real packer is **callback-driven and async** — verify against `src/protocol/rtsp/rtp/rtp_h264.rs`; older drafts showing `pack_single() -> Vec<RtpPacket>` are wrong.
 
-## H.264 NAL Unit Structure
+## NAL Unit Header
 
-Every H.264 stream consists of NAL (Network Abstraction Layer) units with a 1-byte header:
+Every H.264 NAL unit starts with a 1-byte header:
 
 ```
-+----+-----+
-| F  |NRI | Type (5 bits) |
-+----+-----+
- 1b   2b        5 bits (0-31)
++----+-----+---------+
+| F  | NRI |  Type   |   (1b | 2b | 5b)
++----+-----+---------+
 ```
 
-**Common NAL Types:**
-- Type 1: Coded slice (video data)
-- Type 5: IDR slice (keyframe, always starts stream)
-- Type 6: SEI (supplemental enhancement information)
-- Type 7: SPS (sequence parameter set - dimensions, framerate)
-- Type 8: PPS (picture parameter set - encoding parameters)
+Types (`src/protocol/rtsp/rtp/define.rs`): 1 CodedSlice, 5 IDR, 6 SEI, 7 SPS, 8 PPS, 9 AUD, 28 FU-A, 29 FU-B, 24 STAP-A, 25 STAP-B.
+
+## RtpH264Packer — Real API
+
+Constructor takes 5 args (payload type, ssrc, initial seq, MTU, and an IO handle); output flows through callbacks, it does **not** return packet vecs:
 
 ```rust
-pub enum NalType {
-    Unspecified = 0,
-    CodedSlice = 1,
-    DataPartitionA = 2,
-    DataPartitionB = 3,
-    DataPartitionC = 4,
-    IdrSlice = 5,
-    SEI = 6,
-    SPS = 7,
-    PPS = 8,
-    AccessUnitDelimiter = 9,
-    EndOfSequence = 10,
-    EndOfStream = 11,
-    FillerData = 12,
-    SpsExt = 13,
-    AuxiliaryCodedSlice = 19,
-}
+use crate::protocol::rtsp::rtp::rtp_h264::RtpH264Packer;
+use crate::io::TNetIO;
+use std::sync::Arc;
+use tokio::sync::Mutex;
+
+let packer = RtpH264Packer::new(
+    payload_type: u8,                          // e.g. 96
+    ssrc: u32,                                 // e.g. 12345
+    init_seq: u16,                             // e.g. 0
+    mtu: usize,                                // e.g. 1500
+    io: Arc<Mutex<Box<dyn TNetIO + Send + Sync>>>,  // IO handle
+);
 ```
 
-## Packing Strategy
-
-H.264 over RTP uses three packing modes based on NAL unit size:
-
-### 1. Single NAL Unit Mode (Small NAL)
-
-For NAL units ≤ MTU (maximum transmission unit, typically 1200-1500 bytes):
+Key methods (all return `Result<(), PackerError>`):
 
 ```rust
 impl RtpH264Packer {
-    fn pack_single(&mut self, nalu: &[u8]) -> Vec<RtpPacket> {
-        // NAL unit fits in one RTP packet
-        let mut packet = RtpPacket::new();
-        packet.set_header(self.sequence_number, self.timestamp);
-        packet.payload = nalu.to_vec();
-
-        self.sequence_number += 1;
-        vec![packet]
-    }
+    pub fn new(payload_type: u8, ssrc: u32, init_seq: u16, mtu: usize,
+               io: Arc<Mutex<Box<dyn TNetIO + Send + Sync>>>) -> Self;
+    pub async fn pack_nalu(&mut self, nalu: BytesMut) -> Result<(), PackerError>;
+}
+impl TPacker for RtpH264Packer {
+    async fn pack(&mut self, nalus: &mut BytesMut, timestamp: u32) -> Result<(), PackerError>;
+    fn on_packet_handler(&mut self, f: OnRtpPacketFn);
+}
+impl TVideoPacker for RtpH264Packer {
+    async fn pack_nalu(&mut self, nalu: BytesMut) -> Result<(), PackerError>;
 }
 ```
 
-### 2. STAP (Single-Time Aggregation Packet)
+`pack` splits an Annex-B byte stream into NAL units and sends each; `pack_nalu` packs one NAL unit. Internally it chooses single-NAL (fits in MTU) vs FU-A (larger), with `marker` set on the last fragment of a VCL access unit. Callbacks receive `(io, RtpPacket)`.
 
-Multiple small NAL units with the same timestamp in one RTP packet:
+## RtpH264UnPacker — Real API
 
-```
-+------+
-|STAP Header (1 byte)|
-+------+
-|Size (2 bytes) | NAL Unit 1 |
-+------+
-|Size (2 bytes) | NAL Unit 2 |
-+------+
+Unpacks from a `BytesReader` and emits complete Annex-B frames via a callback:
+
+```rust
+use crate::protocol::rtsp::rtp::rtp_h264::RtpH264UnPacker;
+use crate::io::bytes_reader::BytesReader;
+
+let mut unpacker = RtpH264UnPacker::new();
+unpacker.on_frame_handler(Box::new(|frame: FrameData| {
+    // FrameData::Video { timestamp, data: BytesMut /* Annex-B start code + NAL */ }
+    Ok(())
+}));
+unpacker.unpack(&mut BytesReader::new(payload_bytes)).await?;
 ```
 
 ```rust
-fn pack_stap_a(&mut self, nalus: &[&[u8]]) -> Vec<RtpPacket> {
-    let mut payload = vec![0x60 | 0x08];  // STAP-A header
-
-    for nalu in nalus {
-        let size = (nalu.len() as u16).to_be_bytes();
-        payload.extend_from_slice(&size);
-        payload.extend_from_slice(nalu);
-    }
-
-    let mut packet = RtpPacket::new();
-    packet.set_header(self.sequence_number, self.timestamp);
-    packet.payload = payload;
-
-    self.sequence_number += 1;
-    vec![packet]
+impl TUnPacker for RtpH264UnPacker {
+    async fn unpack(&mut self, reader: &mut BytesReader) -> Result<(), UnPackerError>;
+    fn on_frame_handler(&mut self, f: OnFrameFn);
 }
 ```
 
-### 3. FU-A (Fragmentation Unit Type A)
+Handles single NAL, STAP-A/B, MTAP, FU-A/FU-B (reassembling fragments into Annex-B with `0x00 0x00 0x01` start codes). **Marker bit does not gate frame emission** — FU reassembly is driven by the FU header S/E bits, and emitted frames use the packet timestamp.
 
-Large NAL units fragmented across multiple RTP packets:
+## NAL Type Constants
 
-```
-FU Header:
-+----+-----+-----+
-| F  |NRI  | FUT |  (FUT = 28 for FU-A)
-+----+-----+-----+
-
-FU Indicator:
-+----+-----+
-| S  | E  | R |NAL Type| (S=start, E=end, R=reserved)
-+----+-----+-----+
-
-[Payload ...]
-```
-
-```rust
-fn pack_fu_a(&mut self, nalu: &[u8]) -> Vec<RtpPacket> {
-    const MTU: usize = 1200;
-    const HEADER_SIZE: usize = 2;  // FU header + indicator
-    const MAX_PAYLOAD: usize = MTU - HEADER_SIZE - 12;  // 12 = RTP header
-
-    let mut packets = Vec::new();
-    let original_nal_type = nalu[0] & 0x1F;
-    let payload = &nalu[1..];  // Skip original NAL header
-
-    let mut offset = 0;
-    let mut is_start = true;
-
-    while offset < payload.len() {
-        let chunk_size = std::cmp::min(MAX_PAYLOAD, payload.len() - offset);
-        let is_end = offset + chunk_size >= payload.len();
-
-        // FU Header: 28 (FU-A type)
-        let fu_header = 0x1C;  // 00011100
-
-        // FU Indicator: S|E|R|NAL_Type
-        let fu_indicator = if is_start { 0x80 } else { 0x00 }  // S bit
-                         | if is_end { 0x40 } else { 0x00 }    // E bit
-                         | original_nal_type;
-
-        let mut packet_payload = vec![fu_header, fu_indicator];
-        packet_payload.extend_from_slice(&payload[offset..offset + chunk_size]);
-
-        let mut packet = RtpPacket::new();
-        packet.marker = is_end;  // Mark final fragment
-        packet.set_header(self.sequence_number, self.timestamp);
-        packet.payload = packet_payload;
-
-        packets.push(packet);
-        self.sequence_number += 1;
-        offset += chunk_size;
-        is_start = false;
-    }
-
-    packets
-}
-```
-
-## SPS/PPS Extraction and Handling
-
-SPS and PPS units must be sent before each IDR (keyframe):
-
-```rust
-impl RtpH264Packer {
-    pub async fn pack_nalu(&mut self, nalu: &[u8]) -> Result<(), Error> {
-        let nal_type = nalu[0] & 0x1F;
-
-        match nal_type {
-            7 => {
-                // SPS - store for later inclusion
-                self.sps_buffer = Some(nalu.to_vec());
-            }
-            8 => {
-                // PPS - store for later inclusion
-                self.pps_buffer = Some(nalu.to_vec());
-            }
-            5 => {
-                // IDR Slice - keyframe, prepend SPS/PPS
-                if let (Some(sps), Some(pps)) = (&self.sps_buffer, &self.pps_buffer) {
-                    let packets = self.pack_stap_a(&[sps, pps, nalu])?;
-                    for packet in packets {
-                        self.on_packet_handler(packet).await?;
-                    }
-                } else {
-                    // Send IDR alone if SPS/PPS not available
-                    self.pack_and_send(nalu).await?;
-                }
-            }
-            1 | 2 | 3 | 4 => {
-                // Regular slice - send as-is
-                self.pack_and_send(nalu).await?;
-            }
-            _ => {
-                // Other NAL types - pass through
-                self.pack_and_send(nalu).await?;
-            }
-        }
-
-        Ok(())
-    }
-}
-```
-
-## Unpacking/Reassembly
-
-Receiving side must handle all three packing modes:
-
-```rust
-impl RtpH264UnPacker {
-    pub async fn unpack(&mut self, packet: &RtpPacket) -> Result<Option<Frame>, Error> {
-        let payload = &packet.payload;
-        if payload.is_empty() {
-            return Ok(None);
-        }
-
-        let nal_header = payload[0];
-        let nal_type = nal_header & 0x1F;
-
-        match nal_type {
-            0..=23 => {
-                // Single NAL unit (or in STAP)
-                self.unpack_single(payload).await?
-            }
-            24 => {
-                // STAP-A
-                self.unpack_stap(payload).await?
-            }
-            25 => {
-                // STAP-B
-                self.unpack_stap_b(payload).await?
-            }
-            26 => {
-                // MTAP16
-                self.unpack_mtap16(payload).await?
-            }
-            27 => {
-                // MTAP24
-                self.unpack_mtap24(payload).await?
-            }
-            28 => {
-                // FU-A
-                self.unpack_fu_a(payload, packet.marker).await?
-            }
-            29 => {
-                // FU-B
-                self.unpack_fu_b(payload, packet.marker).await?
-            }
-            _ => {
-                tracing::warn!("Unknown NAL type: {}", nal_type);
-            }
-        }
-
-        // Check if complete frame is available
-        if packet.marker {
-            if let Some(frame) = self.complete_frame()? {
-                return Ok(Some(frame));
-            }
-        }
-
-        Ok(None)
-    }
-}
-```
+`NalType` from `rtp_h264.rs` via `NalType::from_header(byte)`: `Single`, `Stap`, `Mtap`, `Fu`, `Unknown`. FU indicators: `FU_START = 0x80`, `FU_END = 0x40`; `is_fu_start`/`is_fu_end` helpers in `rtp/utils.rs`.
 
 ## Testing Patterns
 
+Use the real constructor with a mock IO and an `on_packet_handler` that records packets:
+
 ```rust
-#[cfg(test)]
-mod tests {
-    use super::*;
+#[tokio::test]
+async fn test_packer_fu_a_marker() {
+    let mock_io = Arc::new(Mutex::new(Box::new(MockIo::new()) as Box<dyn TNetIO + Send + Sync>));
+    let mut packer = RtpH264Packer::new(96, 12345, 0, 1500, mock_io);
 
-    fn create_test_sps() -> Vec<u8> {
-        // Minimal valid SPS NAL unit
-        vec![0x67, 0x42, 0x00, 0x0A, 0xFF, 0xE1, 0x00, 0x16, 0x68, 0xCE, 0x3C, 0x80]
-    }
+    let markers = Arc::new(std::sync::Mutex::new(Vec::<u8>::new()));
+    let markers_clone = markers.clone();
+    packer.on_packet_handler(Box::new(move |_io, packet| {
+        markers_clone.lock().unwrap().push(packet.header.marker);
+        Box::pin(async move { Ok(()) })
+    }));
 
-    fn create_test_pps() -> Vec<u8> {
-        // Minimal valid PPS NAL unit
-        vec![0x68, 0xCE, 0x3C, 0x80]
-    }
-
-    fn create_large_nalu(size: usize) -> Vec<u8> {
-        let mut nalu = vec![0x65];  // IDR slice type
-        nalu.resize(size, 0xFF);
-        nalu
-    }
-
-    #[tokio::test]
-    async fn test_rtp_h264_packer_pack_single_small_nalu() {
-        let mut packer = RtpH264Packer::new(1200);
-        let small_nalu = vec![0x65, 0x01, 0x02, 0x03];  // Small IDR slice
-
-        let packets = packer.pack_single(&small_nalu);
-
-        assert_eq!(packets.len(), 1);
-        assert_eq!(packets[0].payload, small_nalu);
-        assert_eq!(packets[0].marker, true);
-    }
-
-    #[tokio::test]
-    async fn test_rtp_h264_packer_pack_fu_a_large_nalu() {
-        let mut packer = RtpH264Packer::new(1200);
-        let large_nalu = create_large_nalu(4000);
-
-        let packets = packer.pack_fu_a(&large_nalu);
-
-        // Should be fragmented
-        assert!(packets.len() > 1);
-        // First packet should have S=1
-        assert_eq!(packets[0].payload[1] & 0x80, 0x80);
-        // Last packet should have E=1 and marker=1
-        assert_eq!(packets[packets.len()-1].payload[1] & 0x40, 0x40);
-        assert!(packets[packets.len()-1].marker);
-    }
-
-    #[tokio::test]
-    async fn test_rtp_h264_unpacker_unpack_fu_a() {
-        let mut unpacker = RtpH264UnPacker::new();
-        let mut packer = RtpH264Packer::new(1200);
-
-        let large_nalu = create_large_nalu(4000);
-        let packets = packer.pack_fu_a(&large_nalu);
-
-        // Unpack all fragments
-        for (i, packet) in packets.iter().enumerate() {
-            let frame = unpacker.unpack(packet).await.unwrap();
-
-            if i == packets.len() - 1 {
-                // Last packet should complete the frame
-                assert!(frame.is_some());
-            } else {
-                // Intermediate packets shouldn't
-                assert!(frame.is_none());
-            }
-        }
-    }
+    let large_nalu = /* IDR slice > MTU */;
+    packer.pack_nalu(large_nalu).await.unwrap();
+    // first fragment header is FU-A (0x1C | type), FU header S bit set on first, E bit + marker on last
 }
 ```
 
-## Reference
+Real test data: `src/codec/test_fixtures.rs` (SPS_BASELINE_720P, PPS_BASELINE) and `codec::sps::SpsParser` for SPS/PPS parsing. Run with `$CARGO test --target x86_64-unknown-linux-gnu` after `source ./setenv.sh` (see `anyka-embedded-build` skill).
 
-For detailed codec patterns and packetization examples, see `references/codec-patterns.md`.
+## SPS/PPS Handling
+
+SPS/PPS are parameter sets (types 7/8) that must precede IDR frames. `streaming-lib` parses them via `codec::sps::SpsParser` / `codec::pps` (used by the FLV/HTTP-FLV container for avcC). For RTP, parameter sets are transmitted as STAP-A aggregation when combined with the IDR.

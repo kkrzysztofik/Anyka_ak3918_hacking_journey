@@ -1,348 +1,98 @@
 ---
 name: anyka-embedded-build
-description: |
-  Embedded systems build and deployment specialist for Anyka ARM cross-compilation and SD card deployment.
-  Triggers on: "cross-compile", "deploy", "ARM build", "armv5te", "target", "SD card", "build release", "aarch".
-version: 1.0.0
+description: Use when building, cross-compiling, linting, testing, or deploying Anyka ARM binaries for the AK3918 camera (ARM target, x86_64 host checks, SD card deployment, armv5te, uclibc, setenv toolchain).
+version: 2.0.0
 ---
 
 # Anyka Embedded Build and Deployment
 
-Cross-compile Rust binaries for ARM targets and deploy to Anyka cameras via SD card or direct testing. Support both debug builds for testing and optimized release builds for production deployment.
+Cross-compile Rust binaries for ARM and deploy to Anyka cameras via SD card. Uses the project's **vendored toolchain** — never the system `cargo`.
 
-## Cross-Compilation Setup
+## Mandatory Toolchain Setup
 
-The project uses `armv5te-unknown-linux-uclibceabi` as the default ARM target. Host-side operations (testing, linting) require explicit `x86_64` target specification.
-
-### Architecture Overview
-
-```
-Host Machine (x86_64)       ARM Camera (armv5te)
-├─ Rust toolchain           └─ Anyka AK3918 SoC
-├─ Cross compiler           └─ uClibc runtime
-└─ Testing + Linting        └─ SD Card / Flash storage
-```
-
-## Building for Different Targets
-
-### Debug Build (Development/Testing)
+The project vendors a custom Rust toolchain at `toolchain/arm-anykav200-crosstool-ng/`. Always load it first:
 
 ```bash
-# Build for ARM target
+# From repo root — exports $CARGO, $RUSTC, $RUSTDOC, sets CARGO_HOME, prepends toolchain bin/ to PATH
+source ./setenv.sh
+```
+
+- **ALWAYS** use `$CARGO` (not bare `cargo`) for every Rust command.
+- The default build target is `armv5te-unknown-linux-uclibceabi` (ARM camera).
+- Host-side tests/linting/docs require explicit `--target x86_64-unknown-linux-gnu`.
+- Do **not** use `rustup target add` or system rustup — the vendored toolchain is self-contained.
+
+## Build Targets
+
+### ARM Release Build (deployment)
+
+```bash
+source ./setenv.sh
 cd cross-compile/onvif-rust
-cargo build --target armv5te-unknown-linux-uclibceabi
+$CARGO build --release --target armv5te-unknown-linux-uclibceabi
 
-# Output location
-target/armv5te-unknown-linux-uclibceabi/debug/onvif_server
+# Output: target/armv5te-unknown-linux-uclibceabi/release/onvif-rust
 ```
 
-### Release Build (Production)
-
-```bash
-# Optimized binary, smaller size, no debug symbols
-cargo build --release --target armv5te-unknown-linux-uclibceabi
-
-# Output location
-target/armv5te-unknown-linux-uclibceabi/release/onvif_server
-```
-
-### Host-Side Testing and Linting
-
-ALWAYS specify x86_64 target for host-side operations:
+### Host-Side Test / Lint / Doc
 
 ```bash
 cd cross-compile/onvif-rust
-
-# Run tests on host machine
-cargo test --target x86_64-unknown-linux-gnu
-
-# Unit tests only
-cargo test --target x86_64-unknown-linux-gnu --lib
-
-# Specific test
-cargo test --target x86_64-unknown-linux-gnu test_name -- --nocapture
-
-# Linting/style checks
-cargo clippy --target x86_64-unknown-linux-gnu -- -D warnings
-
-# Format check
-cargo fmt --check
-
-# Documentation
-cargo doc --target x86_64-unknown-linux-gnu --no-deps
+$CARGO test --target x86_64-unknown-linux-gnu
+$CARGO test --target x86_64-unknown-linux-gnu --lib        # unit tests only
+$CARGO test --target x86_64-unknown-linux-gnu test_name -- --nocapture
+$CARGO clippy --target x86_64-unknown-linux-gnu -- -D warnings
+$CARGO fmt --check
+$CARGO doc --target x86_64-unknown-linux-gnu --no-deps
 ```
 
-## Pre-Commit Build Verification
+`streaming-lib`, `vendor-daemon`, and `validation/rust` follow the same pattern (build ARM, test on x86_64).
 
-Complete build checklist before committing:
+## Pre-Commit Verification
+
+Run all quality gates before committing:
 
 ```bash
-#!/bin/bash
-set -e
-
+source ./setenv.sh
 cd cross-compile/onvif-rust
-
-echo "🔍 Formatting check..."
-cargo fmt --check
-
-echo "🔍 Linting..."
-cargo clippy --target x86_64-unknown-linux-gnu -- -D warnings
-
-echo "🧪 Running tests..."
-cargo test --target x86_64-unknown-linux-gnu
-
-echo "📚 Building documentation..."
-cargo doc --target x86_64-unknown-linux-gnu --no-deps
-
-echo "🔨 Building ARM release binary..."
-cargo build --release --target armv5te-unknown-linux-uclibceabi
-
-echo "✅ All checks passed!"
+$CARGO fmt --check
+$CARGO clippy --target x86_64-unknown-linux-gnu -- -D warnings
+$CARGO test --target x86_64-unknown-linux-gnu
+$CARGO doc --target x86_64-unknown-linux-gnu --no-deps
+$CARGO build --release --target armv5te-unknown-linux-uclibceabi
 ```
 
-## Build Optimization
+## SD Card Deployment
 
-### Release Build Settings
-
-The `Cargo.toml` should include release optimizations:
-
-```toml
-[profile.release]
-opt-level = 3           # Maximum optimization
-lto = true              # Link-time optimization
-codegen-units = 1       # Better optimization at cost of compile time
-strip = true            # Strip debug symbols
-```
-
-### Binary Size Reduction
+The payload lives in `SD_card_contents/anyka_hack/`. The skill's bundled `scripts/deploy.sh` copies an ARM binary onto the card or over the network:
 
 ```bash
-# Check binary size
-ls -lh target/armv5te-unknown-linux-uclibceabi/release/onvif_server
+# SSH deploy to a camera
+.claude/skills/anyka-embedded-build/scripts/deploy.sh 192.168.2.198 root onvif-rust
 
-# Alternative: use 'bloat' tool to find large functions
-cargo install cargo-bloat
-cargo bloat --release --target armv5te-unknown-linux-uclibceabi -n 20
+# SD card deploy (WARNING: will modify /dev/sdX)
+.claude/skills/anyka-embedded-build/scripts/deploy.sh sdcard /dev/sdb onvif-rust
 ```
 
-## Deployment to SD Card
-
-### SD Card Layout
+Manual SD card layout reference:
 
 ```
-SD Card (16GB typical)
-├─ boot/                      # Boot partition
-│  ├─ ak_fw                   # Bootloader
-│  ├─ uImage                  # Kernel
-│  └─ rootfs.cpio.gz          # Initial root filesystem
-├─ anyka_hack/                # Hack layer
-│  ├─ onvif_server           # ONVIF binary (our build)
-│  ├─ streaming_server       # Streaming binary
-│  ├─ config/
-│  │  └─ config.toml         # Configuration
-│  ├─ scripts/
-│  │  └─ deploy.sh           # Deployment script
-│  └─ rootfs/                # Custom filesystem overlay
-└─ test_data/                # Test captures, logs
+SD_card_contents/
+└── anyka_hack/
+    ├── onvif-rust          # ARM binary
+    ├── lib/                # shared libs (solib search path for gdb)
+    ├── config/             # config.toml
+    └── start.sh            # startup script
 ```
 
-### Preparation Steps
+## Device Runtime Facts
 
-```bash
-# 1. Build ARM release binary
-cd cross-compile/onvif-rust
-cargo build --release --target armv5te-unknown-linux-uclibceabi
+- Camera default IP: `192.168.2.198`. Remote shell: **telnet port 24** (root, no password) — see the `anyka-remote-debugging` skill for `scripts/debugging/cam_exec.py`.
+- Coredumps land in `/mnt/coredumps` (kernel core_pattern), old ones in `/mnt/logs` and `/mnt/anyka_hack/onvif`.
+- ONVIF endpoint: `http://<ip>:8080/onvif/device_service`.
 
-# 2. Mount SD card (on Linux)
-# Find device: lsblk
-SD_DEVICE=/dev/sdb
+## Troubleshooting
 
-# 3. Verify it's correct (IMPORTANT - check before unmounting!)
-lsblk $SD_DEVICE
-mount | grep $SD_DEVICE
-
-# 4. Unmount if currently mounted
-sudo umount ${SD_DEVICE}1 ${SD_DEVICE}2 2>/dev/null || true
-
-# 5. Flash bootloader (if needed)
-sudo dd if=bootloader.bin of=$SD_DEVICE bs=512 seek=0
-
-# 6. Create partitions (first time only)
-sudo parted $SD_DEVICE --script \
-    mklabel msdos \
-    mkpart primary fat32 1MiB 256MiB \
-    mkpart primary ext4 256MiB 100%
-
-# 7. Format partitions
-sudo mkfs.vfat ${SD_DEVICE}1
-sudo mkfs.ext4 ${SD_DEVICE}2
-
-# 8. Mount
-mkdir -p /tmp/sd_boot /tmp/sd_root
-sudo mount ${SD_DEVICE}1 /tmp/sd_boot
-sudo mount ${SD_DEVICE}2 /tmp/sd_root
-
-# 9. Copy boot files
-sudo cp boot/uImage /tmp/sd_boot/
-sudo cp boot/rootfs.cpio.gz /tmp/sd_boot/
-
-# 10. Copy our binary and config
-sudo mkdir -p /tmp/sd_root/anyka_hack
-sudo cp target/armv5te-unknown-linux-uclibceabi/release/onvif_server /tmp/sd_root/anyka_hack/
-sudo cp config/config.toml /tmp/sd_root/anyka_hack/
-
-# 11. Create startup script
-sudo tee /tmp/sd_root/anyka_hack/start.sh > /dev/null << 'EOF'
-#!/bin/sh
-cd /anyka_hack
-./onvif_server --config config.toml &
-EOF
-
-sudo chmod +x /tmp/sd_root/anyka_hack/start.sh
-
-# 12. Unmount
-sudo umount /tmp/sd_boot /tmp/sd_root
-sync
-
-echo "✅ SD card ready for boot"
-```
-
-## Testing on Device
-
-### Direct Connection Testing
-
-```bash
-# 1. Insert SD card and boot camera
-# 2. Wait for boot (typically 30-60 seconds)
-
-# 3. Identify camera IP address
-# Using nmap to find it:
-nmap -p 8080 192.168.1.0/24
-
-# Or check your router's DHCP clients
-
-# 4. SSH into camera (if enabled)
-ssh root@192.168.1.100
-
-# 5. Check if ONVIF server is running
-ps aux | grep onvif
-
-# 6. View logs
-tail -f /var/log/onvif_server.log
-
-# 7. Test SOAP endpoint
-curl -X POST http://192.168.1.100:8080/onvif/device_service \
-    -H "Content-Type: text/xml" \
-    -d '<GetCapabilities>...</GetCapabilities>'
-```
-
-### Debugging and Troubleshooting
-
-```bash
-# Check binary dependencies
-file target/armv5te-unknown-linux-uclibceabi/release/onvif_server
-
-# List required libraries
-ldd target/armv5te-unknown-linux-uclibceabi/release/onvif_server
-
-# Check if ARM binary is correct format
-readelf -h target/armv5te-unknown-linux-uclibceabi/release/onvif_server
-
-# Capture network traffic for debugging
-tcpdump -i eth0 -w capture.pcap
-# Transfer to host for analysis in Wireshark
-scp root@192.168.1.100:/capture.pcap .
-```
-
-## Build Caching and Performance
-
-### Clean Rebuild
-
-```bash
-# Full clean (removes all build artifacts)
-cargo clean
-
-# Rebuild everything
-cargo build --release --target armv5te-unknown-linux-uclibceabi
-```
-
-### Incremental Build
-
-```bash
-# Only rebuild changed files
-cargo build --release --target armv5te-unknown-linux-uclibceabi
-
-# Should be much faster if dependencies haven't changed
-```
-
-## Cross-Compilation Troubleshooting
-
-### "Linker not found" Error
-
-```bash
-# Ensure cross-compilation toolchain is installed
-# Check what triple you're using
-rustc --version --verbose
-
-# Install target if missing
-rustup target add armv5te-unknown-linux-uclibceabi
-
-# Verify installed targets
-rustup target list | grep armv5te
-```
-
-### "Segmentation fault" on Device
-
-Common causes:
-- **Incorrect architecture**: Verify you built for armv5te, not another ARM variant
-- **Missing libraries**: Check with `ldd`, copy missing libs to device
-- **Stack overflow**: Increase stack size or reduce allocations
-- **Memory alignment**: Verify pointer alignment for ARM
-
-```bash
-# Debug with GDB on device
-gdb ./onvif_server
-
-# Common commands
-(gdb) run --config config.toml
-(gdb) backtrace
-(gdb) print variable_name
-(gdb) quit
-```
-
-## Deployment Scripts
-
-Create helper scripts for common tasks:
-
-```bash
-#!/bin/bash
-# scripts/deploy.sh
-
-BINARY_PATH="target/armv5te-unknown-linux-uclibceabi/release/onvif_server"
-CAMERA_IP="${1:-192.168.1.100}"
-CAMERA_USER="${2:-root}"
-CAMERA_PATH="/anyka_hack"
-
-# Check binary exists
-if [ ! -f "$BINARY_PATH" ]; then
-    echo "❌ Binary not found at $BINARY_PATH"
-    exit 1
-fi
-
-# Copy to device
-echo "📦 Deploying $BINARY_PATH to $CAMERA_IP..."
-scp "$BINARY_PATH" "$CAMERA_USER@$CAMERA_IP:$CAMERA_PATH/onvif_server"
-
-# Make executable
-ssh "$CAMERA_USER@$CAMERA_IP" chmod +x "$CAMERA_PATH/onvif_server"
-
-# Restart service
-ssh "$CAMERA_USER@$CAMERA_IP" "pkill -9 onvif_server; sleep 1; $CAMERA_PATH/start.sh"
-
-echo "✅ Deployment complete!"
-echo "📡 Camera endpoint: http://$CAMERA_IP:8080/onvif/device_service"
-```
-
-## Reference
-
-For detailed build scripts and optimization techniques, see `scripts/deploy.sh` in this skill directory.
+- **"Linker not found" / wrong rustc version (E0514):** you used system `rustc` instead of the vendored one. Re-`source ./setenv.sh` and verify `$CARGO --version` points into `toolchain/arm-anykav200-crosstool-ng/bin/`.
+- **`setenv.sh` clears `SYSROOT`** (crosstool exports it; it confuses clippy-driver).
+- **Missing toolchain:** if `setenv.sh` fails, the toolchain dir is incomplete — do not fall back to system Rust.
