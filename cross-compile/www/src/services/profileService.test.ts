@@ -720,7 +720,7 @@ describe('profileService', () => {
 
     it('should return null on SOAP fault', async () => {
       vi.mocked(apiClient.post).mockResolvedValueOnce(
-        createMockSOAPFaultResponse('Configuration not found'),
+        createMockSOAPFaultResponse('soap:Sender', 'Configuration not found'),
       );
 
       const result = await getVideoSourceConfiguration('missing');
