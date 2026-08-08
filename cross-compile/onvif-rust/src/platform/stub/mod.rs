@@ -247,6 +247,7 @@ impl StubPlatformBuilder {
             Self::create_ptz_control(self.ptz_supported, ptz_position, ptz_limits, presets);
         let imaging_control =
             Self::create_imaging_control(self.imaging_supported, imaging_settings);
+        let video_control = Some(Arc::new(StubVideoControl::default()) as Arc<dyn VideoControl>);
         let network_info = Self::create_network_info(
             self.network_info_supported,
             self.mac_address,
@@ -263,6 +264,7 @@ impl StubPlatformBuilder {
             audio_encoder,
             ptz_control,
             imaging_control,
+            video_control,
             network_info,
         }
     }
@@ -436,6 +438,7 @@ pub struct StubPlatform {
     audio_encoder: Arc<StubAudioEncoder>,
     ptz_control: Option<Arc<dyn PTZControl>>,
     imaging_control: Option<Arc<dyn ImagingControl>>,
+    video_control: Option<Arc<dyn VideoControl>>,
     network_info: Option<Arc<dyn NetworkInfo>>,
 }
 
@@ -463,11 +466,8 @@ impl Platform for StubPlatform {
 
     crate::impl_platform_accessors!();
 
-    // TODO(video-rotate task 6): back this with a real field for symmetry
-    // with `imaging_control`, same as `AnykaPlatform` does via `video_input`.
-    // Placeholder `None` only unblocks compilation for tasks 3-5.
     fn video_control(&self) -> Option<Arc<dyn VideoControl>> {
-        None
+        self.video_control.clone()
     }
 
     async fn initialize(&self) -> PlatformResult<()> {
@@ -944,6 +944,22 @@ impl ImagingControl for StubImagingControl {
     }
 }
 
+/// In-memory `VideoControl` for host-side / stub builds. No hardware to
+/// flip, so this just remembers the last value it was given — enough for
+/// ops-layer tests to exercise the live-apply path end to end.
+#[derive(Default)]
+struct StubVideoControl {
+    rotated: AtomicBool,
+}
+
+#[async_trait]
+impl VideoControl for StubVideoControl {
+    async fn set_flip_mirror(&self, rotated: bool) -> PlatformResult<()> {
+        self.rotated.store(rotated, Ordering::SeqCst);
+        Ok(())
+    }
+}
+
 /// Stub network information implementation.
 ///
 /// Returns configurable network data for testing. By default returns
@@ -1235,6 +1251,15 @@ mod tests {
         // Test out of range
         let result = imaging.set_brightness(150.0).await;
         assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_stub_video_control() {
+        let platform = StubPlatform::new();
+        let video = platform.video_control().unwrap();
+
+        video.set_flip_mirror(true).await.unwrap();
+        video.set_flip_mirror(false).await.unwrap();
     }
 
     // Tests for StubPlatformBuilder methods
