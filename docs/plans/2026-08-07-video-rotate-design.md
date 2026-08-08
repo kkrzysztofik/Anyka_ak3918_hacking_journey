@@ -1,7 +1,7 @@
 # Image Flip (180° Rotate) — Design
 
 Date: 2026-08-07
-Status: proposed
+Status: implemented 2026-08-08 (on-device smoke test still pending)
 
 ## Problem
 
@@ -26,8 +26,6 @@ schema) and a WebUI toggle, backed by the same persisted setting.
   mount, not arbitrary mirroring.
 - 90°/270° rotation. The vendor VI API only exposes flip/mirror, not a real
   transpose; this hardware cannot do it.
-- Live apply. See "Rejected alternatives" — the setting takes effect on the
-  next `onvif-rust` restart, not mid-stream.
 - Reading rotate state back from hardware. `GetVideoSourceConfiguration`
   already reads every other field (bounds, name, use_count) from persisted
   profile state, not from a live device query; Rotate follows the same
