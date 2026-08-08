@@ -460,9 +460,11 @@ pub struct ConfigurationEntity {
 }
 
 /// Rotate mode (ONVIF `tt:RotateMode`). `Auto` is deliberately not modeled:
-/// this hardware can never honor or report it (see design doc), so a request
-/// specifying it is rejected at the ops-validation boundary instead of being
-/// represented as a dead enum arm.
+/// this hardware can never honor or report it (see design doc). Today, a
+/// client sending `AUTO` simply fails generic XML deserialization (a raw
+/// serde parse error, not a clean fault); a later task adds an
+/// ops-validation boundary to turn that into a proper `ter:InvalidArgVal`
+/// fault instead of representing `Auto` as a dead enum arm.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum RotateMode {
     #[serde(rename = "OFF")]

@@ -210,19 +210,59 @@ pub struct GetVideoSourceConfigurationOptionsResponse {
     pub options: VideoSourceConfigurationOptions,
 }
 
-/// Supported rotate options (ONVIF `tt:RotateOptions`). `reboot = Some(true)`
-/// signals ONVIF clients this device does not apply rotation changes across
-/// a full restart without re-sending the config — see the design doc's
-/// "profiles.toml is the single source of truth" note. `degree_list` is
+/// Supported rotate options (ONVIF `tt:RotateOptions`). Per the schema,
+/// `Reboot` signals whether the device needs an actual reboot to apply a
+/// rotation change ("If a device can handle rotation changes without
+/// rebooting this value shall be set to false"). `VideoControl::set_flip_mirror`
+/// (Task 3-5) applies live with no reboot, so whatever populates this field
+/// for real (Task 9) must set `reboot: Some(false)`. `degree_list` is
 /// omitted: this device supports exactly one non-zero degree (180), which is
 /// already implied by omitting `Degree` on `Mode: On`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RotateOptions {
-    #[serde(rename = "tt:Mode", alias = "Mode")]
+    #[serde(rename = "tt:Mode", alias = "Mode", default, with = "rotate_mode_vec")]
     pub mode: Vec<crate::onvif::types::common::RotateMode>,
 
     #[serde(rename = "@Reboot", default, skip_serializing_if = "Option::is_none")]
     pub reboot: Option<bool>,
+}
+
+/// Wrapper for deserializing `RotateMode` from repeated XML elements.
+/// Same problem `H264ProfileWrapper`/`h264_profiles_vec` solves below:
+/// quick-xml's serde serializer only emits one element per `Vec<T>` item
+/// when `T` serializes as a struct/map, not a bare scalar — wrapping in a
+/// one-field `$text` struct forces that. Reuses `RotateMode`'s own derived
+/// `Serialize`/`Deserialize` (already `"OFF"`/`"ON"`) instead of
+/// duplicating the string mapping.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+struct RotateModeWrapper {
+    #[serde(rename = "$text")]
+    value: crate::onvif::types::common::RotateMode,
+}
+
+mod rotate_mode_vec {
+    use super::RotateModeWrapper;
+    use crate::onvif::types::common::RotateMode;
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<Vec<RotateMode>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let wrappers: Vec<RotateModeWrapper> = Vec::deserialize(deserializer)?;
+        Ok(wrappers.into_iter().map(|w| w.value).collect())
+    }
+
+    pub fn serialize<S>(modes: &[RotateMode], serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let wrappers: Vec<RotateModeWrapper> = modes
+            .iter()
+            .map(|m| RotateModeWrapper { value: *m })
+            .collect();
+        wrappers.serialize(serializer)
+    }
 }
 
 /// Typed `VideoSourceConfigurationOptions.Extension`
@@ -1561,5 +1601,25 @@ mod tests {
     fn test_get_profiles_response_default() {
         let response = GetProfilesResponse::default();
         assert!(response.profiles.is_empty());
+    }
+
+    #[test]
+    fn test_rotate_options_mode_vec_roundtrips_multiple_elements() {
+        use crate::onvif::types::common::RotateMode;
+
+        let options = RotateOptions {
+            mode: vec![RotateMode::Off, RotateMode::On],
+            reboot: Some(false),
+        };
+
+        let xml = quick_xml::se::to_string(&options).expect("serialize");
+        assert_eq!(
+            xml.matches("tt:Mode").count(),
+            4, // 2 open + 2 close tags
+            "expected one <tt:Mode> element per Vec item, got: {xml}"
+        );
+
+        let deserialized: RotateOptions = quick_xml::de::from_str(&xml).expect("deserialize");
+        assert_eq!(deserialized, options);
     }
 }

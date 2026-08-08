@@ -456,7 +456,7 @@ height = 1080
     }
 
     #[test]
-    fn stored_video_source_config_rotated_defaults_false_when_absent() {
+    fn test_stored_video_source_config_rotated_defaults_false_when_absent() {
         let toml = r#"
             token = "VideoSourceConfig_0"
             source_token = "VideoSource_1"
