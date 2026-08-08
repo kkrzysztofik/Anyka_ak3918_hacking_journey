@@ -139,20 +139,27 @@ impl AnykaPlatform {
     /// Skips the `AnykaIpc` connection that `with_isp_config` requires, so the
     /// bring-up and teardown orchestration can be exercised without hardware.
     /// PTZ/imaging/network are left absent — they are independently tested.
+    ///
+    /// `initial_rotated` mirrors `with_isp_config`'s same-named parameter, so
+    /// the construction-time seed path is exercisable under test too.
     #[cfg(test)]
     pub(super) fn with_mocked_hal(
         video_ffi: Arc<dyn VideoHalTrait>,
         audio_ffi: Arc<dyn crate::hal::common::audio::AudioHalTrait>,
         isp_config_path: Option<PathBuf>,
+        initial_rotated: bool,
     ) -> Self {
+        let video_input = Arc::new(AnykaVideoInput::with_ffi(
+            video_ffi.clone(),
+            isp_config_path,
+        ));
+        video_input.rotated.store(initial_rotated, Ordering::SeqCst);
+
         Self {
             initialized: AtomicBool::new(false),
             device_info: Self::device_descriptor(),
             sensor_resolution: RwLock::new(None),
-            video_input: Arc::new(AnykaVideoInput::with_ffi(
-                video_ffi.clone(),
-                isp_config_path,
-            )),
+            video_input,
             video_encoder: Arc::new(AnykaVideoEncoder::with_ffi(video_ffi)),
             audio_input: Arc::new(AnykaAudioInput::with_ffi(audio_ffi.clone())),
             audio_encoder: Arc::new(AnykaAudioEncoder::with_ffi(audio_ffi)),
@@ -175,6 +182,10 @@ impl AnykaPlatform {
     ///
     /// `main_encoder`/`sub_encoder` carry the parameters that only `ak_venc_open` can apply, so
     /// they must arrive here rather than through `set_configuration`. See [`StreamOpenParams`].
+    ///
+    /// `initial_rotated` seeds the persisted flip/mirror flag before the VI is even open, so it
+    /// is a no-op on the FFI at this point — `AnykaVideoInput::rotated` just remembers it until
+    /// `init_video_input()`'s post-`capture_on()` reapply step actually applies it to hardware.
     pub fn with_isp_config(
         isp_config_path: Option<PathBuf>,
         ptz_enabled: bool,
@@ -202,7 +213,7 @@ impl AnykaPlatform {
                 video_ffi.clone(),
                 isp_config_path.clone(),
             ));
-            let _ = video_input.apply_flip_mirror(initial_rotated);
+            video_input.rotated.store(initial_rotated, Ordering::SeqCst);
             let video_encoder = Arc::new(AnykaVideoEncoder::with_ipc(
                 shared_ipc.clone(),
                 main_encoder,
@@ -329,7 +340,7 @@ impl AnykaPlatform {
         // too, not just cold boot — which is why it lives here rather than
         // only in the constructor. Soft-fail: an upside-down stream is still
         // a working stream, so this must not abort the whole bring-up.
-        if let Err(e) = self.video_input.apply_flip_mirror(self.video_input.rotated()) {
+        if let Err(e) = self.video_input.reapply_flip_mirror() {
             tracing::warn!("Failed to reapply flip/mirror after capture_on: {}", e);
         }
 

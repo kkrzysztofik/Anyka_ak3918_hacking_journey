@@ -4,12 +4,14 @@
 //! against mocked HALs; the per-subsystem behaviour lives in `video_input_tests`
 //! and `video_encoder_tests`.
 
+use std::ffi::c_void;
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use super::super::AnykaPlatform;
 use crate::hal::common::audio::MockAudioHalTrait;
 use crate::hal::common::video::MockVideoHalTrait;
+use crate::hal::common::{AK_FAILED_I32, AK_SUCCESS_I32};
 use crate::platform::common::{Platform, PlatformError};
 
 /// A platform whose ISP config path does not exist, so `match_sensor` fails and
@@ -19,6 +21,7 @@ fn platform_without_isp_config() -> AnykaPlatform {
         Arc::new(MockVideoHalTrait::new()),
         Arc::new(MockAudioHalTrait::new()),
         Some(PathBuf::from("/nonexistent/anyka-test-isp.conf")),
+        false,
     )
 }
 
@@ -75,6 +78,35 @@ fn test_accessors_expose_subsystems_and_absent_optionals() {
     assert!(platform.network_info().is_none());
 }
 
+/// `video_control()` is derived from the `video_input` field rather than a
+/// separate stored field (see `impl_platform_accessors!`'s doc comment), so
+/// unlike the other optionals above it must always be `Some` on a real
+/// `AnykaPlatform` — nothing gates it off.
+#[test]
+fn test_video_control_is_some_for_anyka_platform() {
+    let platform = platform_without_isp_config();
+    assert!(platform.video_control().is_some());
+}
+
+/// `with_isp_config`'s `initial_rotated` seed must land in `AnykaVideoInput`
+/// at construction time, before the VI is ever opened. `with_mocked_hal`
+/// mirrors that seeding so a copy-paste bug at the real `with_isp_config`
+/// call site (passing the wrong bool, or `!initial_rotated`) would be
+/// caught here rather than going unnoticed.
+#[test]
+fn test_with_mocked_hal_seeds_initial_rotated_flag() {
+    let rotated = AnykaPlatform::with_mocked_hal(
+        Arc::new(MockVideoHalTrait::new()),
+        Arc::new(MockAudioHalTrait::new()),
+        Some(PathBuf::from("/nonexistent/anyka-test-isp.conf")),
+        true,
+    );
+    assert!(rotated.video_input.rotated());
+
+    let not_rotated = platform_without_isp_config();
+    assert!(!not_rotated.video_input.rotated());
+}
+
 #[tokio::test]
 async fn test_initialize_propagates_sensor_match_failure_and_stays_uninitialized() {
     let platform = platform_without_isp_config();
@@ -84,6 +116,72 @@ async fn test_initialize_propagates_sensor_match_failure_and_stays_uninitialized
     assert!(matches!(result, Err(PlatformError::HardwareUnavailable(_))));
     // A failed bring-up must not leave the platform flagged as ready.
     assert!(!platform.is_initialized());
+}
+
+/// A mock FFI that gets `init_video_input()` all the way through Step 5
+/// (`capture_on`) successfully, but fails Step 5.5's flip/mirror reapply.
+///
+/// Only covers the VI subsystem — `init_video_input()` is the smallest unit
+/// that actually contains Step 5.5, so this stays deliberately narrower than
+/// a full `initialize()` fixture (which would also need VENC open/streaming
+/// mocks that Step 5.5 itself never touches).
+fn mock_ffi_vi_bring_up_succeeds_flip_mirror_fails() -> MockVideoHalTrait {
+    let mut mock = MockVideoHalTrait::new();
+    let test_ptr = std::ptr::NonNull::<c_void>::dangling().as_ptr() as usize;
+
+    mock.expect_vi_match_sensor()
+        .times(1)
+        .returning(|_| AK_SUCCESS_I32);
+    mock.expect_vi_open()
+        .times(1)
+        .returning(move |_| test_ptr as *mut c_void);
+    mock.expect_vpss_init().times(1).returning(|_, _| ());
+    // Called once directly by init_video_input's Step 3, once more inside
+    // set_channel_attr's own sensor-resolution query (Step 4).
+    mock.expect_vi_get_sensor_resolution()
+        .times(2)
+        .returning(|_, res| {
+            unsafe {
+                (*res).width = 1280;
+                (*res).height = 720;
+                (*res).max_width = 1280;
+                (*res).max_height = 720;
+            }
+            AK_SUCCESS_I32
+        });
+    mock.expect_vi_set_channel_attr()
+        .times(1)
+        .returning(|_, _| AK_SUCCESS_I32);
+    mock.expect_vi_capture_on()
+        .times(1)
+        .returning(|_| AK_SUCCESS_I32);
+    mock.expect_vi_set_flip_mirror()
+        .times(1)
+        .returning(|_, _, _| AK_FAILED_I32);
+
+    mock
+}
+
+#[tokio::test]
+async fn test_init_video_input_step_5_5_flip_mirror_failure_is_soft_fail() {
+    // Proves the `if let Err(e) = ... { warn!(...) }` shape at Step 5.5 —
+    // if a future refactor tightens that to `?`, this test catches the
+    // regression (VI bring-up must not abort over a cosmetic reapply
+    // failure; an upside-down stream is still a working stream).
+    let isp_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml");
+    let platform = AnykaPlatform::with_mocked_hal(
+        Arc::new(mock_ffi_vi_bring_up_succeeds_flip_mirror_fails()),
+        Arc::new(MockAudioHalTrait::new()),
+        Some(isp_path),
+        false,
+    );
+
+    let result = platform.init_video_input().await;
+    assert!(
+        result.is_ok(),
+        "Step 5.5's flip/mirror reapply failure must not abort VI bring-up: {:?}",
+        result
+    );
 }
 
 #[tokio::test]
@@ -124,6 +222,7 @@ async fn test_spawn_supervisor_loss_receiver_taken_returns_initialization_failed
         Arc::new(MockVideoHalTrait::new()),
         Arc::new(MockAudioHalTrait::new()),
         None,
+        false,
     ));
     assert!(
         platform.ipc().take_loss_rx().is_some(),
@@ -150,6 +249,7 @@ async fn test_spawn_supervisor_success_shuts_down_on_signal() {
         Arc::new(MockVideoHalTrait::new()),
         Arc::new(MockAudioHalTrait::new()),
         None,
+        false,
     ));
     let (shutdown_tx, shutdown_rx) = tokio::sync::broadcast::channel(1);
     let (availability, handle) = platform

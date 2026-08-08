@@ -427,6 +427,27 @@ impl AnykaVideoInput {
         self.rotated.load(Ordering::SeqCst)
     }
 
+    /// Reapply the currently-stored flip/mirror flag to hardware, without
+    /// changing it. Used by `init_video_input()`'s post-`capture_on()` reapply
+    /// step. Deliberately does not read-then-pass-through the way
+    /// `apply_flip_mirror(self.rotated())` would — that round-trip re-stores
+    /// whatever was read, which can clobber a newer value set concurrently by a
+    /// live `VideoControl::set_flip_mirror` call between the read and the
+    /// store. This method only ever reads `self.rotated` at the moment it
+    /// applies it and never writes back, so there is no window where it can
+    /// regress the atomic to a stale value.
+    pub(super) fn reapply_flip_mirror(&self) -> PlatformResult<()> {
+        if !self.opened.load(Ordering::SeqCst) {
+            return Ok(());
+        }
+        let guard = self.handle.read();
+        let handle = guard.as_ref().ok_or_else(|| {
+            PlatformError::HardwareUnavailable("Video input not opened".to_string())
+        })?;
+        let rotated = self.rotated.load(Ordering::SeqCst);
+        video_input_set_flip_mirror(handle, rotated, rotated, self.ffi.as_ref())
+    }
+
     pub(super) fn close_blocking(&self) -> PlatformResult<()> {
         // Idempotent: already closed is not an error
         if !self.opened.load(Ordering::SeqCst) {
