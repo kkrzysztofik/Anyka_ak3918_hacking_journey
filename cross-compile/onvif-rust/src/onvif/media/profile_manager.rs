@@ -615,7 +615,6 @@ impl ProfileManager {
                 },
             }),
             video_source_tokens_available: video_source_tokens,
-            rotate: None,
             extension: None,
         }
     }

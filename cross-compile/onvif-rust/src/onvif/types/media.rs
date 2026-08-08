@@ -225,6 +225,22 @@ pub struct RotateOptions {
     pub reboot: Option<bool>,
 }
 
+/// Typed `VideoSourceConfigurationOptions.Extension`
+/// (ONVIF `tt:VideoSourceConfigurationOptionsExtension`). Only `Rotate` is
+/// modeled — the schema also nests a further `SceneOrientationMode`
+/// extension inside this one, which this device has no use for and is out
+/// of scope.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct VideoSourceConfigurationOptionsExtension {
+    #[serde(
+        rename = "tt:Rotate",
+        alias = "Rotate",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub rotate: Option<RotateOptions>,
+}
+
 /// Video source configuration options.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct VideoSourceConfigurationOptions {
@@ -254,15 +270,6 @@ pub struct VideoSourceConfigurationOptions {
     )]
     pub video_source_tokens_available: Vec<ReferenceToken>,
 
-    /// Rotate options.
-    #[serde(
-        rename = "tt:Rotate",
-        alias = "Rotate",
-        default,
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub rotate: Option<RotateOptions>,
-
     /// Extension.
     #[serde(
         rename = "tt:Extension",
@@ -270,7 +277,7 @@ pub struct VideoSourceConfigurationOptions {
         default,
         skip_serializing_if = "Option::is_none"
     )]
-    pub extension: Option<Extension>,
+    pub extension: Option<VideoSourceConfigurationOptionsExtension>,
 }
 
 /// Integer rectangle range.
