@@ -615,6 +615,7 @@ impl ProfileManager {
                 },
             }),
             video_source_tokens_available: video_source_tokens,
+            rotate: None,
             extension: None,
         }
     }
@@ -1171,6 +1172,12 @@ impl ProfileManager {
             y: c.bounds.y,
             width: c.bounds.width as u32,
             height: c.bounds.height as u32,
+            rotated: c
+                .extension
+                .as_ref()
+                .and_then(|ext| ext.rotate.as_ref())
+                .map(|r| r.mode == crate::onvif::types::common::RotateMode::On)
+                .unwrap_or(false),
         }
     }
 
@@ -1264,7 +1271,18 @@ impl ProfileManager {
                 width: s.width as i32,
                 height: s.height as i32,
             },
-            extension: None,
+            extension: Some(
+                crate::onvif::types::common::VideoSourceConfigurationExtension {
+                    rotate: Some(crate::onvif::types::common::Rotate {
+                        mode: if s.rotated {
+                            crate::onvif::types::common::RotateMode::On
+                        } else {
+                            crate::onvif::types::common::RotateMode::Off
+                        },
+                        degree: None,
+                    }),
+                },
+            ),
         }
     }
 

@@ -210,6 +210,21 @@ pub struct GetVideoSourceConfigurationOptionsResponse {
     pub options: VideoSourceConfigurationOptions,
 }
 
+/// Supported rotate options (ONVIF `tt:RotateOptions`). `reboot = Some(true)`
+/// signals ONVIF clients this device does not apply rotation changes across
+/// a full restart without re-sending the config — see the design doc's
+/// "profiles.toml is the single source of truth" note. `degree_list` is
+/// omitted: this device supports exactly one non-zero degree (180), which is
+/// already implied by omitting `Degree` on `Mode: On`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RotateOptions {
+    #[serde(rename = "tt:Mode", alias = "Mode")]
+    pub mode: Vec<crate::onvif::types::common::RotateMode>,
+
+    #[serde(rename = "@Reboot", default, skip_serializing_if = "Option::is_none")]
+    pub reboot: Option<bool>,
+}
+
 /// Video source configuration options.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct VideoSourceConfigurationOptions {
@@ -238,6 +253,15 @@ pub struct VideoSourceConfigurationOptions {
         default
     )]
     pub video_source_tokens_available: Vec<ReferenceToken>,
+
+    /// Rotate options.
+    #[serde(
+        rename = "tt:Rotate",
+        alias = "Rotate",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub rotate: Option<RotateOptions>,
 
     /// Extension.
     #[serde(
