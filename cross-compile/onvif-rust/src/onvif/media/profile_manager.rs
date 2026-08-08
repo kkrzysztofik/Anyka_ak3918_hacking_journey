@@ -615,7 +615,21 @@ impl ProfileManager {
                 },
             }),
             video_source_tokens_available: video_source_tokens,
-            extension: None,
+            extension: Some(
+                crate::onvif::types::media::VideoSourceConfigurationOptionsExtension {
+                    rotate: Some(crate::onvif::types::media::RotateOptions {
+                        mode: vec![
+                            crate::onvif::types::common::RotateMode::Off,
+                            crate::onvif::types::common::RotateMode::On,
+                        ],
+                        // false, not true: per the WSDL, Reboot=true means the device
+                        // needs an actual power-cycle to apply the change. This
+                        // feature applies live via VideoControl::set_flip_mirror
+                        // (Task 3-5) — no reboot required.
+                        reboot: Some(false),
+                    }),
+                },
+            ),
         }
     }
 
@@ -2024,6 +2038,27 @@ mod tests {
         let options = manager.get_video_encoder_configuration_options();
         // Quality range should have valid min/max values
         assert!(options.quality_range.min <= options.quality_range.max);
+    }
+
+    #[test]
+    fn test_video_source_configuration_options_advertise_rotate_off_and_on() {
+        let manager = ProfileManager::new();
+        let options = manager.get_video_source_configuration_options();
+        let rotate = options
+            .extension
+            .as_ref()
+            .expect("extension should be present")
+            .rotate
+            .as_ref()
+            .expect("rotate options should be present");
+        assert_eq!(
+            rotate.mode,
+            vec![
+                crate::onvif::types::common::RotateMode::Off,
+                crate::onvif::types::common::RotateMode::On
+            ]
+        );
+        assert_eq!(rotate.reboot, Some(false));
     }
 
     #[test]
