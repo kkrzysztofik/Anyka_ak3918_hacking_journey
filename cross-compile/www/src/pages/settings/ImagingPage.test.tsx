@@ -10,6 +10,10 @@ import {
   getImagingSettings,
   setImagingSettings,
 } from '@/services/imagingService';
+import {
+  getVideoSourceConfiguration,
+  setVideoSourceConfiguration,
+} from '@/services/profileService';
 import { MOCK_DATA, mockToast, renderWithProviders } from '@/test/componentTestHelpers';
 import {
   testMutationWithErrorToast,
@@ -25,12 +29,28 @@ vi.mock('@/services/imagingService', () => ({
   setImagingSettings: vi.fn(),
 }));
 
+vi.mock('@/services/profileService', () => ({
+  getVideoSourceConfiguration: vi.fn(),
+  setVideoSourceConfiguration: vi.fn(),
+}));
+
+const MOCK_VIDEO_SOURCE_CONFIG = {
+  token: 'VideoSourceConfig_0',
+  name: 'VideoSourceConfig_0',
+  useCount: 2,
+  sourceToken: 'VideoSource_1',
+  bounds: { x: 0, y: 0, width: 1920, height: 1080 },
+  rotate: 'OFF' as const,
+};
+
 describe('ImagingPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(getImagingSettings).mockResolvedValue(MOCK_DATA.imaging.settings);
     vi.mocked(getImagingOptions).mockResolvedValue(MOCK_DATA.imaging.options);
     vi.mocked(setImagingSettings).mockResolvedValue(undefined);
+    vi.mocked(getVideoSourceConfiguration).mockResolvedValue(MOCK_VIDEO_SOURCE_CONFIG);
+    vi.mocked(setVideoSourceConfiguration).mockResolvedValue(undefined);
   });
 
   it('should render page with loading state', async () => {
@@ -622,6 +642,82 @@ describe('ImagingPage', () => {
         expect(callArgs).toHaveProperty('wideDynamicRange');
         expect(callArgs).toHaveProperty('backlightCompensation');
       });
+    });
+  });
+
+  describe('image orientation', () => {
+    it('should render the flip switch unchecked when rotate is OFF', async () => {
+      renderWithProviders(<ImagingPage />);
+
+      const flipSwitch = await screen.findByTestId('imaging-flip-switch');
+      expect(flipSwitch).toBeInTheDocument();
+      expect(flipSwitch).toHaveAttribute('aria-checked', 'false');
+    });
+
+    it('should render the flip switch checked when rotate is ON', async () => {
+      vi.mocked(getVideoSourceConfiguration).mockResolvedValue({
+        ...MOCK_VIDEO_SOURCE_CONFIG,
+        rotate: 'ON',
+      });
+
+      renderWithProviders(<ImagingPage />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('imaging-flip-switch')).toHaveAttribute('aria-checked', 'true');
+      });
+    });
+
+    it('should send the whole configuration with rotate flipped on toggle', async () => {
+      const user = userEvent.setup();
+      renderWithProviders(<ImagingPage />);
+
+      const flipSwitch = await screen.findByTestId('imaging-flip-switch');
+      await user.click(flipSwitch);
+
+      await waitFor(() => {
+        // Bounds and useCount must be round-tripped: the device replaces the
+        // stored configuration wholesale.
+        expect(setVideoSourceConfiguration).toHaveBeenCalledWith({
+          ...MOCK_VIDEO_SOURCE_CONFIG,
+          rotate: 'ON',
+        });
+      });
+    });
+
+    it('should show a success toast after toggling', async () => {
+      const user = userEvent.setup();
+      renderWithProviders(<ImagingPage />);
+
+      const flipSwitch = await screen.findByTestId('imaging-flip-switch');
+      await user.click(flipSwitch);
+
+      await waitFor(() => {
+        expect(mockToast.success).toHaveBeenCalledWith('Image orientation updated');
+      });
+    });
+
+    it('should show an error toast when the toggle fails', async () => {
+      vi.mocked(setVideoSourceConfiguration).mockRejectedValue(new Error('Device unavailable'));
+      const user = userEvent.setup();
+      renderWithProviders(<ImagingPage />);
+
+      const flipSwitch = await screen.findByTestId('imaging-flip-switch');
+      await user.click(flipSwitch);
+
+      await waitFor(() => {
+        expect(mockToast.error).toHaveBeenCalledWith('Failed to update image orientation', {
+          description: 'Device unavailable',
+        });
+      });
+    });
+
+    it('should disable the switch when the configuration could not be fetched', async () => {
+      vi.mocked(getVideoSourceConfiguration).mockResolvedValue(null);
+
+      renderWithProviders(<ImagingPage />);
+
+      const flipSwitch = await screen.findByTestId('imaging-flip-switch');
+      expect(flipSwitch).toBeDisabled();
     });
   });
 });
