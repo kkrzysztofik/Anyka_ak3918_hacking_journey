@@ -87,7 +87,7 @@ fn test_write_panic_sysctls_writes_both_values() {
 }
 
 #[test]
-fn test_write_panic_sysctls_is_silent_when_the_knobs_are_absent() {
+fn test_write_panic_sysctls_does_not_panic_when_the_knobs_are_absent() {
     let dir = tempfile::tempdir().expect("tempdir");
     // No kernel/ subdirectory at all — must not panic.
     write_panic_sysctls(dir.path());
@@ -135,11 +135,15 @@ Expected: PASS, 2 tests.
 
 **Step 5: Call it during boot**
 
-In `boot.rs`, find the early boot sequence (near the timezone setup, around line 30 — the same place that logs `timezone set`). Add:
+Call it from `main.rs`, under the `// P2` marker, immediately before `boot::system_setup(...)`:
 
 ```rust
-write_panic_sysctls(std::path::Path::new("/proc/sys"));
+    // P2
+    boot::write_panic_sysctls(std::path::Path::new("/proc/sys"));
+    let probed = boot::system_setup(sysimpl.as_ref(), &cfg);
 ```
+
+**Not** inside `system_setup`. That function takes an injected `Sys` specifically so it can be tested, and every other side effect in it routes through `sys` or a config-supplied path. A hardcoded `/proc/sys` write inside it means the host test suite mutates the real machine's kernel settings when run as root.
 
 **Step 6: Full test + lint**
 
@@ -217,11 +221,16 @@ Expected: PASS.
 
 **Step 5: Call it at startup**
 
-Call it as the **first** thing in boot, before the sysctls from Task 1 — protection matters most before any allocation happens:
+Call it from `main.rs`, immediately **before** the Task 1 `write_panic_sysctls` line — protection matters most before any allocation happens:
 
 ```rust
-protect_from_oom_killer(std::path::Path::new("/proc/self/oom_score_adj"));
+    // P2
+    boot::protect_from_oom_killer(std::path::Path::new("/proc/self/oom_score_adj"));
+    boot::write_panic_sysctls(std::path::Path::new("/proc/sys"));
+    let probed = boot::system_setup(sysimpl.as_ref(), &cfg);
 ```
+
+**Not** inside `system_setup`, for the same reason as Task 1: it would make the host test suite mutate the real machine when run as root. `/proc/self/oom_score_adj` belongs to the supervisor process even more clearly than the panic knobs belong to "system setup".
 
 **Step 6: Full test + lint, then commit**
 
