@@ -6,12 +6,6 @@ import { defineConfig } from 'vite';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 /**
- * Determines the chunk name for a given module ID.
- * This function encapsulates the chunking strategy to reduce cognitive complexity.
- * @param id - The module ID to determine the chunk for
- * @returns The chunk name or undefined for default chunking
- */
-/**
  * Determines the vendor chunk name for node_modules dependencies.
  * Only vendor code is manually chunked — app source code is left to
  * Vite's default route-based splitting to avoid circular chunk dependencies.
@@ -71,13 +65,9 @@ export default defineConfig(() => ({
       '@': resolve(__dirname, './src'),
     },
   },
-  // Define environment variables
-  define: {
-    __APP_VERSION__: '"1.0.0"',
-  },
   // Optimize dependencies
   optimizeDeps: {
-    include: ['react', 'react-dom', 'react-router-dom', 'lucide-react'],
+    include: ['react', 'react-dom', 'lucide-react'],
   },
   server: {
     // NOSONAR: S5332 - Binding to 0.0.0.0 is required for embedded device access
@@ -121,22 +111,12 @@ export default defineConfig(() => ({
           },
         },
         manualChunks: (id) => getChunkName(id),
-        chunkFileNames: () => {
-          return `js/[name]-[hash].js`;
-        },
+        chunkFileNames: 'js/[name]-[hash].js',
         entryFileNames: 'js/[name]-[hash].js',
-        assetFileNames: (assetInfo) => {
-          // Use names array (preferred) or fall back to name if names is not available
-          // NOSONAR: S1874 - name is still needed as fallback for older Rollup versions
-          const assetName =
-            assetInfo.names?.[0] ?? (assetInfo as { name?: string }).name ?? 'asset'; // NOSONAR
-          const info = assetName.split('.');
-          const ext = info[info.length - 1];
-          if (/\.(css)$/.test(assetName)) {
-            return `css/[name]-[hash].${ext}`;
-          }
-          return `assets/[name]-[hash].${ext}`;
-        },
+        assetFileNames: (info) =>
+          info.names?.[0]?.endsWith('.css')
+            ? 'css/[name]-[hash][extname]'
+            : 'assets/[name]-[hash][extname]',
       },
     },
     // `vendor` (react-dom + react-router) is legitimately ~310 kB raw and is

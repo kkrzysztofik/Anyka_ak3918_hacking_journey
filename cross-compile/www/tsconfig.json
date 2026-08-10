@@ -24,11 +24,7 @@
 
     /* Path mapping (no baseUrl — removed in TS 7; paths must be relative) */
     "paths": {
-      "@/*": ["./src/*"],
-      "@/components/*": ["./src/components/*"],
-      "@/services/*": ["./src/services/*"],
-      "@/hooks/*": ["./src/hooks/*"],
-      "@/types/*": ["./src/types/*"]
+      "@/*": ["./src/*"]
     }
   },
   "include": ["src"],
