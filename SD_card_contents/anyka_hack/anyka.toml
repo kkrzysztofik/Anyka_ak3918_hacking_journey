@@ -63,6 +63,18 @@ wifi_supplicant_after_ticks = 5
 wifi_reboot_after_ticks = 10
 wifi_reboot_cap = 3
 
+# Video-liveness ladder: if /tmp/vd_heartbeat (the vendor-daemon frame count)
+# stops advancing, restart after video_restart_after_ticks, SIGKILL after
+# video_kill_after_ticks, reboot after video_reboot_after_ticks. Ticks count
+# consecutive monitor intervals with an unchanged counter. An absent heartbeat
+# is NOT a stall: push threads only start on CMD_VENC_START_PUSH, so there is a
+# legitimate no-frames window at startup and whenever streaming is off.
+video = true
+video_restart_after_ticks = 2
+video_kill_after_ticks = 3
+video_reboot_after_ticks = 5
+video_heartbeat_path = "/tmp/vd_heartbeat"
+
 [reboot]
 enabled = false
 interval_min = 720

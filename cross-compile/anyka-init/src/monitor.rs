@@ -134,6 +134,65 @@ pub fn apply_wifi_actions(
     }
 }
 
+/// Read the heartbeat counter. `None` means "no signal yet", which is not a
+/// stall — see the test.
+fn read_heartbeat(path: &str) -> Option<u64> {
+    std::fs::read_to_string(path)
+        .ok()
+        .and_then(|s| s.trim().parse().ok())
+}
+
+/// Video escalation for one tick.
+///
+/// Compares consecutive counter values rather than checking mtime: P2.5 steps
+/// the wall clock by decades, so any mtime-based liveness would either fire
+/// instantly or never (see the note in `supervise.rs`).
+pub fn apply_video_actions(
+    sys: &dyn Sys,
+    cfg: &MonitorCfg,
+    tx: &Sender<Msg>,
+    frames: Option<u64>,
+    last: &mut Option<u64>,
+    ticks: &mut u32,
+) {
+    let Some(frames) = frames else {
+        *ticks = 0;
+        *last = None;
+        return;
+    };
+    if *last != Some(frames) {
+        *ticks = 0;
+        *last = Some(frames);
+    } else {
+        *ticks = ticks.saturating_add(1);
+        tracing::warn!(frames, ticks = *ticks, "video frames stalled");
+    }
+
+    let policy = VideoPolicy {
+        restart_after_ticks: cfg.video_restart_after_ticks,
+        kill_after_ticks: cfg.video_kill_after_ticks,
+        reboot_after_ticks: cfg.video_reboot_after_ticks,
+    };
+    match video_decide(*ticks, &policy) {
+        VideoAction::Nothing => {}
+        VideoAction::Restart => {
+            let _ = tx.send(Msg::RestartService("vendor-daemon".into()));
+        }
+        VideoAction::Kill => {
+            let _ = tx.send(Msg::KillService("vendor-daemon".into()));
+        }
+        VideoAction::Reboot => {
+            tracing::error!(
+                ticks = *ticks,
+                "video stalled past the reboot threshold; rebooting"
+            );
+            if let Err(e) = sys.reboot() {
+                tracing::error!(error = %e, "reboot() returned without rebooting");
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct VideoPolicy {
     pub restart_after_ticks: u32,
@@ -181,6 +240,8 @@ pub fn tick(
     tx: &Sender<Msg>,
     reset_done: &mut bool,
     ticks: &mut u32,
+    video_last: &mut Option<u64>,
+    video_ticks: &mut u32,
 ) {
     sample();
     if !*reset_done && sys.uptime() > reset_after {
@@ -200,6 +261,11 @@ pub fn tick(
         let h = sample_link(iface, cfg.wifi_probe);
         apply_wifi_actions(sys, cfg, iface, state_path, tx, h, ticks);
     }
+
+    if cfg.video {
+        let frames = read_heartbeat(&cfg.video_heartbeat_path);
+        apply_video_actions(sys, cfg, tx, frames, video_last, video_ticks);
+    }
 }
 
 /// Sampling loop. See `tick` for what happens each iteration.
@@ -214,6 +280,8 @@ pub fn run(
     let interval = Duration::from_secs(cfg.interval_sec);
     let mut reset_done = false;
     let mut ticks: u32 = 0;
+    let mut video_last: Option<u64> = None;
+    let mut video_ticks: u32 = 0;
     loop {
         tick(
             sys,
@@ -224,6 +292,8 @@ pub fn run(
             &tx,
             &mut reset_done,
             &mut ticks,
+            &mut video_last,
+            &mut video_ticks,
         );
         std::thread::sleep(interval);
     }
@@ -425,6 +495,7 @@ mod tests {
         sys.expect_uptime().returning(|| Duration::from_secs(700));
         let cfg = MonitorCfg {
             wifi: false,
+            video: false,
             ..MonitorCfg::default()
         };
         let (tx, _rx) = mpsc::channel();
@@ -448,6 +519,8 @@ mod tests {
             &tx,
             &mut reset_done,
             &mut ticks,
+            &mut None,
+            &mut 0,
         );
 
         assert!(reset_done);
@@ -465,6 +538,7 @@ mod tests {
         sys.expect_uptime().returning(|| Duration::from_secs(1));
         let cfg = MonitorCfg {
             wifi: false,
+            video: false,
             ..MonitorCfg::default()
         };
         let (tx, _rx) = mpsc::channel();
@@ -482,6 +556,8 @@ mod tests {
             &tx,
             &mut reset_done,
             &mut ticks,
+            &mut None,
+            &mut 0,
         );
 
         assert!(!reset_done);
@@ -497,6 +573,81 @@ mod tests {
             kill_after_ticks: 3,
             reboot_after_ticks: 5,
         }
+    }
+
+    fn cfg_with_video() -> MonitorCfg {
+        MonitorCfg {
+            wifi: false,
+            video: true,
+            video_restart_after_ticks: 2,
+            video_kill_after_ticks: 3,
+            video_reboot_after_ticks: 5,
+            ..MonitorCfg::default()
+        }
+    }
+
+    #[test]
+    fn test_apply_video_actions_absent_heartbeat_is_not_a_stall() {
+        // Push threads only start on CMD_VENC_START_PUSH from onvif-rust, so
+        // there is a legitimate no-frames window at startup and when streaming
+        // is off. An absent counter must never escalate.
+        let mut ticks = 3;
+        let (tx, rx) = mpsc::channel();
+        let sys = MockSys::new(); // no reboot expectation: must not be called
+
+        apply_video_actions(&sys, &cfg_with_video(), &tx, None, &mut None, &mut ticks);
+
+        assert_eq!(ticks, 0, "absent heartbeat resets rather than escalates");
+        assert!(rx.try_recv().is_err(), "no message must be sent");
+    }
+
+    #[test]
+    fn test_apply_video_actions_advancing_counter_resets_ticks() {
+        let mut ticks = 4;
+        let (tx, _rx) = mpsc::channel();
+        let sys = MockSys::new();
+
+        apply_video_actions(
+            &sys,
+            &cfg_with_video(),
+            &tx,
+            Some(1000),
+            &mut None,
+            &mut ticks,
+        );
+
+        assert_eq!(ticks, 0);
+    }
+
+    #[test]
+    fn test_apply_video_actions_stalled_counter_escalates_to_restart() {
+        let (tx, rx) = mpsc::channel();
+        let sys = MockSys::new();
+        let cfg = cfg_with_video();
+        let mut last = None;
+        let mut ticks = 0;
+
+        // Same value three times: first call seeds, next two are stalls.
+        apply_video_actions(&sys, &cfg, &tx, Some(500), &mut last, &mut ticks);
+        apply_video_actions(&sys, &cfg, &tx, Some(500), &mut last, &mut ticks);
+        apply_video_actions(&sys, &cfg, &tx, Some(500), &mut last, &mut ticks);
+
+        assert!(matches!(
+            rx.try_recv(),
+            Ok(Msg::RestartService(ref s)) if s == "vendor-daemon"
+        ));
+    }
+
+    #[test]
+    fn test_apply_video_actions_reboots_when_the_stall_persists() {
+        let (tx, _rx) = mpsc::channel();
+        let mut sys = MockSys::new();
+        sys.expect_reboot().times(1).returning(|| Ok(()));
+        let cfg = cfg_with_video();
+        let mut last = Some(500);
+        let mut ticks = 5;
+
+        apply_video_actions(&sys, &cfg, &tx, Some(500), &mut last, &mut ticks);
     }
 
     #[test]
