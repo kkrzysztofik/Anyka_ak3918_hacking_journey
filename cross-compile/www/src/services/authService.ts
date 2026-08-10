@@ -5,8 +5,8 @@
  * If the call succeeds with provided credentials, user is authenticated.
  */
 import { ENDPOINTS, apiClient } from '@/services/api';
+import type { DeviceInfo } from '@/services/deviceService';
 import { createSOAPEnvelope, parseSOAPResponse, soapBodies } from '@/services/soap/client';
-import type { DeviceInfo } from '@/types';
 import { safeString } from '@/utils/safeString';
 
 export interface LoginResult {
