@@ -6,6 +6,7 @@
 #include <errno.h>
 #include <time.h>
 #include <pthread.h>
+#include <unistd.h>
 
 #include "push.h"
 #include "globals.h"
@@ -191,8 +192,12 @@ static void *push_frame_thread(void *arg)
                           state->stream_handle,
                           (unsigned long long)no_data_count,
                           (unsigned long long)diag_monotonic_ms());
-                state->active = 0;
-                break;
+                /* Crash-only: the pipeline is dead and nothing in this process
+                 * can rebuild it. Exiting hands recovery to anyka-init, whose
+                 * backoff/crash-loop/storm-guard policy already exists. The
+                 * kernel closing /dev/ion, /dev/video0 and /dev/uio0 cleans the
+                 * SDK state better than vd_obj_close_all() does. */
+                _exit(1);
             }
             struct timespec ts = { .tv_sec = 0, .tv_nsec = PUSH_POLL_SLEEP_MS * 1000000L };
             nanosleep(&ts, NULL);

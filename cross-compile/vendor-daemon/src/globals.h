@@ -63,7 +63,10 @@ struct push_stream_state {
  * blocks inside the SDK the counter never advances, so it cannot on its own
  * bound stop_push_slot() -- see PUSH_JOIN_TIMEOUT_SEC.
  */
-#define PUSH_NO_DATA_EXIT_THRESHOLD 1000
+/* 6000 * PUSH_POLL_SLEEP_MS = 30s. Fatal, so the margin over a legitimate
+ * ISP day/night stall (0.5-2s per the note in push.c) has to be large.
+ * Calibration knob: lower it only with dusk evidence. */
+#define PUSH_NO_DATA_EXIT_THRESHOLD 6000
 
 /* Liveness beacon read by anyka-init's monitor. tmpfs, so no SD writes. */
 #define PUSH_HEARTBEAT_PATH "/tmp/vd_heartbeat"
