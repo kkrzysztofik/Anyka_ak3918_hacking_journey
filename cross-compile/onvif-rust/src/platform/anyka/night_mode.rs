@@ -283,6 +283,8 @@ pub(crate) struct NightModeController {
     auto_enabled: std::sync::atomic::AtomicBool,
     /// Consecutive `get_ae_luma` failures; resets on success.
     ae_fail_streak: std::sync::atomic::AtomicU32,
+    /// Whether the "never synced" warning has already fired this process.
+    unsynced_warned: std::sync::atomic::AtomicBool,
     /// When the last sample line was logged, and what it classified to.
     /// `None` = nothing logged yet. Guards [`SAMPLE_LOG_INTERVAL`].
     sample_log: tokio::sync::Mutex<Option<(std::time::Instant, Option<DayNight>)>>,
@@ -329,6 +331,7 @@ impl NightModeController {
             configured: mode,
             auto_enabled: std::sync::atomic::AtomicBool::new(matches!(mode, IrCutFilterMode::AUTO)),
             ae_fail_streak: std::sync::atomic::AtomicU32::new(0),
+            unsynced_warned: std::sync::atomic::AtomicBool::new(false),
             sample_log: tokio::sync::Mutex::new(None),
             idr_hook,
         }
@@ -347,6 +350,24 @@ impl NightModeController {
     pub(crate) fn set_auto_enabled(&self, enabled: bool) {
         self.auto_enabled
             .store(enabled, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    /// Warn once per process when AUTO has driven nothing and the sensor will
+    /// not say which way to go.
+    ///
+    /// This is what miscalibrated thresholds look like from the outside: the
+    /// ISP is still at its power-on day mode, the lamp is wherever it was, and
+    /// no reading will ever break the tie.
+    fn warn_unsynced_once(&self, raw: i32, src: &'static str) {
+        use std::sync::atomic::Ordering;
+        if self.unsynced_warned.swap(true, Ordering::SeqCst) {
+            return;
+        }
+        tracing::warn!(
+            raw,
+            src,
+            "night mode has never driven the hardware and the reading is indeterminate; check thresholds"
+        );
     }
 
     /// Log one AUTO sample, rate-limited by [`sample_due`].
@@ -506,15 +527,21 @@ impl NightModeController {
 
         self.log_sample(raw, src, reading).await;
 
-        let target = {
+        let (target, unsynced) = {
             let state = self.state.lock().await;
-            decide(
+            let target = decide(
                 &state,
                 reading,
                 std::time::Instant::now(),
                 Duration::from_millis(self.cfg.lock_time_ms),
-            )
+            );
+            (target, state.current.is_none())
         };
+
+        if unsynced && reading.is_none() {
+            self.warn_unsynced_once(raw, src);
+        }
+
         if let Some(target) = target
             && let Err(e) = self.apply(target).await
         {
