@@ -1212,6 +1212,13 @@ impl Application {
                                 "failed to start attach supervisor: {e}"
                             ))
                         })?;
+                    crate::platform::supervisor::watch_for_fatal(availability.clone(), || {
+                        tracing::error!(
+                            event = "attach_given_up_fatal",
+                            "vendor-daemon attach gave up; exiting so the supervisor can restart the pair"
+                        );
+                        std::process::exit(1);
+                    });
                     tracing::info!(
                         "AnykaPlatform created; attach supervisor started (degraded until attached)"
                     );

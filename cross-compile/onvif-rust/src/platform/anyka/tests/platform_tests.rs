@@ -140,7 +140,10 @@ async fn test_stop_night_loop_aborts_a_task_that_ignores_shutdown() {
 
     // Let the loop spin a few times so it is provably running before we stop it.
     tokio::time::sleep(Duration::from_millis(20)).await;
-    assert!(ticks.load(Ordering::SeqCst) > 0, "loop must tick before shutdown");
+    assert!(
+        ticks.load(Ordering::SeqCst) > 0,
+        "loop must tick before shutdown"
+    );
 
     super::super::stop_night_loop(tx, task).await;
 
