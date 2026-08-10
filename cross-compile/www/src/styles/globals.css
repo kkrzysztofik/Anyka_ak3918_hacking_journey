@@ -98,14 +98,6 @@
 }
 
 @layer components {
-  .sidebar-icon {
-    @apply h-6 w-6 fill-none stroke-current stroke-2;
-  }
-
-  .ptz-button {
-    @apply flex h-12 w-12 items-center justify-center rounded-lg text-xl font-bold transition-colors;
-  }
-
   /* Technical data styling - for IP addresses, MAC addresses, etc. */
   .technical-data {
     @apply font-mono text-[13px] leading-relaxed tracking-wide;
@@ -116,19 +108,6 @@
   /* Status indicator colors */
   .status-connected {
     color: hsl(var(--status-connected));
-  }
-
-  .status-warning {
-    color: hsl(var(--status-warning));
-  }
-
-  .status-error {
-    color: hsl(var(--status-error));
-  }
-
-  /* Focus ring utility */
-  .focus-ring {
-    @apply ring-ring ring-offset-background ring-2 ring-offset-2;
   }
 
   /* ========================================
@@ -152,29 +131,6 @@
     }
   }
 
-  /* Staggered content reveal */
-  .stagger-1 {
-    animation-delay: 50ms;
-  }
-
-  .stagger-2 {
-    animation-delay: 100ms;
-  }
-
-  .stagger-3 {
-    animation-delay: 150ms;
-  }
-
-  .stagger-4 {
-    animation-delay: 200ms;
-  }
-
-  /* Button press micro-interaction */
-  .btn-press:active {
-    transform: scale(0.98);
-    transition: transform 50ms ease-out;
-  }
-
   /* Status pulse animation */
   .status-pulse {
     animation: statusPulse 2s ease-in-out infinite;
@@ -194,35 +150,6 @@
   /* Skeleton loading animation */
   .skeleton {
     @apply bg-muted animate-pulse rounded;
-  }
-
-  .skeleton-text {
-    @apply bg-muted h-4 w-full animate-pulse rounded;
-  }
-
-  .skeleton-title {
-    @apply bg-muted h-6 w-3/4 animate-pulse rounded;
-  }
-
-  .skeleton-avatar {
-    @apply bg-muted h-10 w-10 animate-pulse rounded-full;
-  }
-
-  /* Card elevation - enhanced depth */
-  .card-elevated {
-    box-shadow:
-      0 1px 3px rgba(0, 0, 0, 0.3),
-      0 4px 12px rgba(0, 0, 0, 0.2);
-    border: 1px solid hsl(var(--border));
-  }
-
-  /* Technical section with grid overlay */
-  .technical-section {
-    background-image:
-      linear-gradient(rgba(255, 255, 255, 0.02) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(255, 255, 255, 0.02) 1px, transparent 1px);
-    background-size: 24px 24px;
-    border: 1.5px solid hsl(var(--border));
   }
 
   /* Technical panel - monospace-friendly container */
@@ -251,18 +178,6 @@
     content: '';
     @apply h-1.5 w-1.5 rounded-full bg-green-500;
     animation: statusPulse 2s ease-in-out infinite;
-  }
-
-  /* Subtle noise texture for backgrounds */
-  .bg-noise {
-    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 400 400' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='4' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)' opacity='0.015'/%3E%3C/svg%3E");
-  }
-
-  /* Gradient mesh overlay for depth */
-  .bg-gradient-mesh {
-    background-image:
-      radial-gradient(at 40% 20%, hsla(220, 70%, 50%, 0.03) 0px, transparent 50%),
-      radial-gradient(at 80% 80%, hsla(0, 70%, 50%, 0.02) 0px, transparent 50%);
   }
 
   /* ========================================
@@ -295,17 +210,6 @@
   .value-transition {
     transition: all 300ms ease-out;
     font-variant-numeric: tabular-nums;
-  }
-
-  /* Section divider */
-  .section-divider {
-    @apply via-border my-6 h-px w-full border-0 bg-gradient-to-r from-transparent to-transparent;
-  }
-
-  /* Interactive list item */
-  .list-item-interactive {
-    @apply flex items-center gap-3 rounded-lg border border-transparent px-3 py-2.5 transition-colors;
-    @apply hover:border-border hover:bg-muted/50;
   }
 
   /* Badge variants for technical info */
