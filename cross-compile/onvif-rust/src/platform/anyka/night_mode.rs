@@ -233,6 +233,21 @@ pub(super) fn read_light_sensor(paths: &NodePaths) -> Option<i32> {
     raw.trim().parse::<i32>().ok()
 }
 
+/// The mode the hardware was last driven to, from the IR_LED GPIO.
+///
+/// In-memory state dies with the process; the GPIO does not. Without this
+/// reconcile, a restart in AUTO leaves the controller thinking it is Day while
+/// the IR illuminator is still on, and it only corrects once a tick reads AE.
+/// Absent or unreadable → `Day`: an unknown node is more plausibly a board
+/// without an IR lamp than a lamp that is on.
+pub(super) fn read_initial_state(paths: &NodePaths) -> DayNight {
+    let path = paths.node(Node::IrLed);
+    match std::fs::read_to_string(&path) {
+        Ok(v) if v.trim() == "1" => DayNight::Night,
+        _ => DayNight::Day,
+    }
+}
+
 /// AUTO poll interval. Fixed: lock_time dominates responsiveness.
 pub(crate) const POLL_INTERVAL: Duration = Duration::from_secs(2);
 
@@ -275,15 +290,20 @@ impl NightModeController {
         use crate::onvif::types::common::IrCutFilterMode;
 
         let caps = probe(&paths);
+        // AUTO seeds from the IR_LED GPIO so a restart in AUTO does not think
+        // it is Day while the illuminator is still on. Forced modes keep their
+        // fixed start so ON/OFF always lands where the user asked.
+        let initial = match mode {
+            IrCutFilterMode::OFF => DayNight::Night,
+            IrCutFilterMode::ON => DayNight::Day,
+            IrCutFilterMode::AUTO => read_initial_state(&paths),
+        };
         Self {
             paths,
             caps,
             cfg,
             ffi,
-            state: tokio::sync::Mutex::new(AutoState::new(match mode {
-                IrCutFilterMode::OFF => DayNight::Night,
-                _ => DayNight::Day,
-            })),
+            state: tokio::sync::Mutex::new(AutoState::new(initial)),
             configured: mode,
             auto_enabled: std::sync::atomic::AtomicBool::new(matches!(mode, IrCutFilterMode::AUTO)),
             ae_fail_streak: std::sync::atomic::AtomicU32::new(0),
@@ -872,6 +892,22 @@ mod tests {
         ctl.tick().await;
         ctl.tick().await;
         assert_eq!(ctl.current_mode().await, DayNight::Day);
+    }
+
+    #[test]
+    fn test_initial_state_follows_the_ir_led_gpio() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let paths = NodePaths::rooted(dir.path(), dir.path());
+
+        std::fs::write(paths.node(Node::IrLed), "1").unwrap();
+        assert_eq!(read_initial_state(&paths), DayNight::Night);
+
+        std::fs::write(paths.node(Node::IrLed), "0").unwrap();
+        assert_eq!(read_initial_state(&paths), DayNight::Day);
+
+        // Absent node: a board with no IR lamp reads as day, never night.
+        let empty = NodePaths::rooted(&dir.path().join("nope"), dir.path());
+        assert_eq!(read_initial_state(&empty), DayNight::Day);
     }
 
     #[test]
