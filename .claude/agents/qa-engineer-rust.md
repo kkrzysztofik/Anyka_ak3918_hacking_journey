@@ -52,7 +52,7 @@ When a user asks you to work on test code, you MUST:
 - Verify all tests pass: `$CARGO test --target x86_64-unknown-linux-gnu`
 - Check code formatting: `$CARGO fmt --check`
 - Run linting: `$CARGO clippy --target x86_64-unknown-linux-gnu -- -D warnings`
-- Generate coverage reports: `$CARGO tarpaulin --target x86_64-unknown-linux-gnu --config tarpaulin.toml`
+- Generate coverage reports: `$CARGO llvm-cov --target x86_64-unknown-linux-gnu --workspace --cobertura --output-path coverage/cobertura.xml`
 
 ---
 
@@ -220,7 +220,7 @@ $CARGO test --target x86_64-unknown-linux-gnu
 $CARGO test --target x86_64-unknown-linux-gnu --lib
 
 # 5. Coverage report (target: 80%+)
-$CARGO tarpaulin --target x86_64-unknown-linux-gnu --config tarpaulin.toml
+$CARGO llvm-cov --target x86_64-unknown-linux-gnu --workspace --cobertura --output-path coverage/cobertura.xml
 
 # 6. Documentation (no warnings)
 $CARGO doc --target x86_64-unknown-linux-gnu --no-deps

@@ -38,8 +38,10 @@ $CARGO test --target x86_64-unknown-linux-gnu -- --nocapture
 # Ignored tests
 $CARGO test --target x86_64-unknown-linux-gnu -- --ignored
 
-# Coverage (uses cross-compile/tarpaulin.toml)
-$CARGO tarpaulin --target x86_64-unknown-linux-gnu --config tarpaulin.toml
+# Coverage (cargo-llvm-cov; install: cargo install cargo-llvm-cov --locked)
+$CARGO llvm-cov --target x86_64-unknown-linux-gnu --workspace \
+  --ignore-filename-regex '(/xiu/|/patches/|/anyka_reference/|/onvif/)' \
+  --cobertura --output-path coverage/cobertura.xml
 ```
 
 ### Mocking with mockall
@@ -213,7 +215,7 @@ Tests run automatically on:
 
 | Project | Tool | Target |
 |---------|------|--------|
-| Rust | tarpaulin | Report to SonarCloud |
+| Rust | cargo-llvm-cov | Report to SonarCloud |
 | WebUI | v8 coverage | Report to SonarCloud |
 
 ### Quality Gates

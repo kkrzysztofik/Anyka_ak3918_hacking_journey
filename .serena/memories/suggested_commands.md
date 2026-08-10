@@ -48,8 +48,10 @@ $CARGO fmt --check                  # Check formatting (CI)
 $CARGO doc --target x86_64-unknown-linux-gnu --no-deps   # Generate docs
 $CARGO doc --target x86_64-unknown-linux-gnu --no-deps --open  # Generate and open
 
-# Coverage (host target, requires tarpaulin; config at cross-compile/tarpaulin.toml)
-$CARGO tarpaulin --target x86_64-unknown-linux-gnu --config tarpaulin.toml
+# Coverage (host target, requires cargo-llvm-cov)
+$CARGO llvm-cov --target x86_64-unknown-linux-gnu --workspace \
+  --ignore-filename-regex '(/xiu/|/patches/|/anyka_reference/|/onvif/)' \
+  --cobertura --output-path coverage/cobertura.xml
 
 # === DEVICE-SIDE COMMANDS (cross-compile for ARM) ===
 
@@ -167,7 +169,8 @@ git push -u origin feature/your-feature-name
 ## CI/CD Notes
 
 - GitHub Actions runs tests/lint with `--target x86_64-unknown-linux-gnu`
-- Container: `kkrzysztofik/anyka-cross-compile:rust-1.97.1`
+- Host CI container: `kkrzysztofik/anyka-cross-compile:rust-1.97.1-ci` (lint/coverage)
+- Cross/release container: `kkrzysztofik/anyka-cross-compile:rust-1.97.1`
 - Coverage reports uploaded to SonarCloud
 - Security scans via Snyk (SAST + SCA)
 - Quality gates must pass before merge

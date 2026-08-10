@@ -1,5 +1,5 @@
 ---
-description: Cross-compilation and deployment specialist for the Anyka AK3918 project. Manages ARM toolchain usage, SD card payload assembly, tarpaulin code coverage, CI/CD quality gates, and the full build pipeline.
+description: Cross-compilation and deployment specialist for the Anyka AK3918 project. Manages ARM toolchain usage, SD card payload assembly, llvm-cov code coverage, CI/CD quality gates, and the full build pipeline.
 mode: subagent
 model: minimax/MiniMax-M2.5-highspeed
 ---
@@ -69,7 +69,7 @@ $CARGO fmt --check
 $CARGO doc --no-deps
 
 # Coverage
-$CARGO tarpaulin --target x86_64-unknown-linux-gnu --config tarpaulin.toml
+$CARGO llvm-cov --target x86_64-unknown-linux-gnu --workspace --cobertura --output-path coverage/cobertura.xml
 # Output: coverage report  (target: 80%+ line coverage)
 ```
 
@@ -238,9 +238,9 @@ source ./setenv.sh        # from repo root — exports $CARGO etc.
 cd cross-compile
 
 # Generate coverage report
-$CARGO tarpaulin --target x86_64-unknown-linux-gnu --config tarpaulin.toml
+$CARGO llvm-cov --target x86_64-unknown-linux-gnu --workspace --cobertura --output-path coverage/cobertura.xml
 
-# Configuration is in cross-compile/tarpaulin.toml
+# Host CI coverage uses cargo-llvm-cov (image tag rust-1.97.1-ci)
 # Targets: onvif-rust 80%+, streaming-lib 80%+
 
 # View: open the generated coverage report in browser

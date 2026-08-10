@@ -30,23 +30,21 @@ on:
 
 jobs:
   # =============================================================================
-  # RUST BACKEND - Lint, Test & Coverage
+  # RUST BACKEND - Lint (parallel with coverage)
   # =============================================================================
-  rust-quality-and-coverage:
-    name: Rust - Lint, Test & Coverage
+  rust-lint:
+    name: Rust - Lint
     runs-on: ubuntu-latest
     permissions:
       contents: read
     container:
-      image: kkrzysztofik/anyka-cross-compile:rust-1.97.1
+      image: kkrzysztofik/anyka-cross-compile:rust-1.97.1-ci
       options: --security-opt seccomp=unconfined
-    outputs:
-      coverage: ${{ steps.coverage-summary.outputs.coverage }}
     steps:
       - name: Checkout Code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.0
         with:
-          fetch-depth: 0
+          fetch-depth: 1
 
       - name: Configure Git
         run: |
@@ -66,16 +64,13 @@ jobs:
 
       - name: Cache Cargo Dependencies
         uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306  # v5.0.3
-        # SHA: cdf6c1fa76f9f475f3d7449005a359c84ca0f306
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            ~/.cargo/bin
-            cross-compile/target
-          key: cargo-${{ runner.os }}-rust-${{ hashFiles('cross-compile/Cargo.lock') }}
+          key: cargo-linux-rust-reg-${{ hashFiles('cross-compile/Cargo.lock') }}
           restore-keys: |
-            cargo-${{ runner.os }}-rust-
+            cargo-linux-rust-reg-
 
       - name: Check Formatting
         working-directory: cross-compile
@@ -92,22 +87,74 @@ jobs:
         run: |
           python3 -m unittest discover -p 'test_*.py' -v
 
+  # =============================================================================
+  # RUST BACKEND - Test & Coverage (parallel with lint)
+  # =============================================================================
+  rust-coverage:
+    name: Rust - Test & Coverage
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    container:
+      image: kkrzysztofik/anyka-cross-compile:rust-1.97.1-ci
+      options: --security-opt seccomp=unconfined
+    outputs:
+      coverage: ${{ steps.coverage-summary.outputs.coverage }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.0
+        with:
+          fetch-depth: 1
+
+      - name: Configure Git
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          git config --global user.name "GitHub Actions"
+          git config --global user.email "actions@github.com"
+
+      - name: Setup ARMv5TEJ Patches
+        working-directory: cross-compile/patches
+        run: |
+          bash setup.sh
+
+      - name: Setup Cargo Config
+        working-directory: cross-compile/onvif-rust
+        run: |
+          ./scripts/setup-cargo-config.sh
+
+      - name: Cache Cargo Dependencies
+        uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306  # v5.0.3
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: cargo-linux-rust-reg-${{ hashFiles('cross-compile/Cargo.lock') }}
+          restore-keys: |
+            cargo-linux-rust-reg-
+
       - name: Run Tests with Coverage
         working-directory: cross-compile
         run: |
-          cargo tarpaulin \
+          IGNORE_REGEX='(/xiu/|/patches/|/anyka_reference/|/onvif/|webrtc-util|webrtc-ice|webrtc-sctp|/rtp-|tokio-metrics|openssl-src)'
+          cargo llvm-cov \
             --workspace \
             --target x86_64-unknown-linux-gnu \
             --all-features \
-            --skip-clean \
-            --follow-exec \
-            --timeout 600 \
-            --implicit-test-threads \
-            --exclude-files "xiu/**" "patches/**" "anyka_reference/**" "onvif/**" \
-            --out Html \
-            --out Lcov \
-            --out Xml \
-            --output-dir coverage
+            --ignore-filename-regex "$IGNORE_REGEX" \
+            --no-report
+          mkdir -p coverage
+          cargo llvm-cov report \
+            --target x86_64-unknown-linux-gnu \
+            --ignore-filename-regex "$IGNORE_REGEX" \
+            --cobertura --output-path coverage/cobertura.xml
+          cargo llvm-cov report \
+            --target x86_64-unknown-linux-gnu \
+            --ignore-filename-regex "$IGNORE_REGEX" \
+            --lcov --output-path coverage/lcov.info
+          cargo llvm-cov report \
+            --target x86_64-unknown-linux-gnu \
+            --ignore-filename-regex "$IGNORE_REGEX" \
+            --html --output-dir coverage/html
           echo ""
           echo "=== Coverage Files Generated ==="
           echo "Files in coverage directory:"
@@ -129,15 +176,20 @@ jobs:
             echo "⚠️ lcov.info NOT FOUND"
           fi
 
+          # Rewrite Cobertura to repo-root-relative paths for Sonar
+          # (sonar.sources=cross-compile; llvm-cov emits workspace-relative paths).
+          if [ -f "coverage/cobertura.xml" ]; then
+            python3 -c "from pathlib import Path; import re; p=Path('coverage/cobertura.xml'); t=p.read_text(); t=re.sub(r'<source>.*?</source>', '<source>.</source>', t, count=1, flags=re.S); t=re.sub(r'filename=\"(?!cross-compile/)([^\"]+)\"', r'filename=\"cross-compile/\\1\"', t); p.write_text(t); print('Rewrote cobertura.xml paths to repo-root-relative')"
+          fi
+
       - name: Upload Coverage Artifacts
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f  # v6.0.0
-        # SHA: b7c566a772e6b6bfb58ed0dc250532a479d7789f
         with:
           name: rust-coverage
           path: |
             cross-compile/coverage/cobertura.xml
             cross-compile/coverage/lcov.info
-            cross-compile/coverage/tarpaulin-report.html
+            cross-compile/coverage/html
           retention-days: 7
 
       - name: Generate Coverage Summary
@@ -145,7 +197,6 @@ jobs:
         run: |
           COVERAGE="0.00"
 
-          # Get workspace coverage
           if [ -f "cross-compile/coverage/cobertura.xml" ]; then
             COVERAGE=$(python3 -c "import xml.etree.ElementTree as ET; tree = ET.parse('cross-compile/coverage/cobertura.xml'); root = tree.getroot(); rate = float(root.get('line-rate', 0)) * 100; print(f'{rate:.2f}')" 2>/dev/null || echo "0.00")
             echo "✅ Rust Workspace Coverage: ${COVERAGE}%"
@@ -321,7 +372,7 @@ jobs:
   security-scans:
     name: Security Scans
     runs-on: ubuntu-latest
-    needs: [rust-quality-and-coverage, webui-quality-and-coverage, validation-rust-quality]
+    needs: [rust-lint, rust-coverage, webui-quality-and-coverage, validation-rust-quality]
     continue-on-error: true
     permissions:
       contents: read
@@ -492,7 +543,7 @@ jobs:
   sonarqube:
     name: SonarQube Analysis & Quality Gate
     runs-on: ubuntu-latest
-    needs: [rust-quality-and-coverage, webui-quality-and-coverage, validation-rust-quality]
+    needs: [rust-lint, rust-coverage, webui-quality-and-coverage, validation-rust-quality]
     continue-on-error: true
     permissions:
       contents: read
@@ -532,7 +583,7 @@ jobs:
             cp coverage-artifacts/validation-rust-coverage/cobertura.xml validation/rust/coverage/
             cp coverage-artifacts/validation-rust-coverage/lcov.info validation/rust/coverage/ 2>/dev/null || true
             echo "✅ Validation Rust coverage copied"
-            # Fix cobertura paths: tarpaulin uses paths relative to crate (e.g. src/lib.rs)
+            # Fix cobertura paths: coverage tools may emit paths relative to crate (e.g. src/lib.rs)
             # SonarQube expects paths relative to project root (validation/rust/src/lib.rs)
             if [ -f "validation/rust/coverage/cobertura.xml" ]; then
               sed -i 's|filename="src/|filename="validation/rust/src/|g' validation/rust/coverage/cobertura.xml
@@ -900,7 +951,8 @@ jobs:
     runs-on: ubuntu-latest
     needs:
       [
-        rust-quality-and-coverage,
+        rust-lint,
+        rust-coverage,
         webui-quality-and-coverage,
         validation-rust-quality,
         security-scans,
@@ -913,7 +965,7 @@ jobs:
     steps:
       - name: Generate Run Summary
         env:
-          RUST_COVERAGE: ${{ needs.rust-quality-and-coverage.outputs.coverage || 'N/A' }}
+          RUST_COVERAGE: ${{ needs.rust-coverage.outputs.coverage || 'N/A' }}
           VALIDATION_RUST_COVERAGE: ${{ needs.validation-rust-quality.outputs.coverage || 'N/A' }}
           WEBUI_COVERAGE: ${{ needs.webui-quality-and-coverage.outputs.coverage || 'N/A' }}
           SNYK_CODE_STATUS: ${{ needs.security-scans.outputs.snyk_code_status }}
@@ -975,7 +1027,7 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            const rustCoverage = '${{ needs.rust-quality-and-coverage.outputs.coverage || 'N/A' }}';
+            const rustCoverage = '${{ needs.rust-coverage.outputs.coverage || 'N/A' }}';
             const validationRustCoverage = '${{ needs.validation-rust-quality.outputs.coverage || 'N/A' }}';
             const webuiCoverage = '${{ needs.webui-quality-and-coverage.outputs.coverage || 'N/A' }}';
             const snykCodeStatus = '${{ needs.security-scans.outputs.snyk_code_status }}';
