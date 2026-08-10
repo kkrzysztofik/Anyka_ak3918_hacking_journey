@@ -134,7 +134,10 @@ static_root = "www"
 # ============================================================================
 [logging]
 # Log level: error, warn, info, debug, trace
-level = "info"
+# error is the shipped default: measured on .121 that warn + an active
+# streaming client emits ~144 MB/day of slow_tcp_write / slow_rtp_pack lines.
+# error logs ~260 KB/day. Raise only while debugging.
+level = "error"
 
 # Enable verbose HTTP request/response logging
 # !! PERFORMANCE: Set to false to reduce CPU and I/O overhead during streaming
@@ -151,7 +154,7 @@ console_enabled = false
 # Log file path (leave empty to disable file logging)
 # !! PERFORMANCE: For profiling idle CPU, use tmpfs (/tmp/onvif.log) or disable ("")
 # !! to eliminate SD card writes. For production, use persistent path.
-file_path = "/tmp/onvif.log"
+file_path = "/mnt/logs/onvif-debug.log"
 
 # Static asset access logging
 [logging.static_assets]

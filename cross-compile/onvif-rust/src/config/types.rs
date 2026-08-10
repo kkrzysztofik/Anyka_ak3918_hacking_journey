@@ -460,12 +460,15 @@ pub struct LoggingConfig {
 impl Default for LoggingConfig {
     fn default() -> Self {
         Self {
-            level: "info".to_string(),
+            // error, not warn: measured on .121 that warn + an active streaming
+            // client emits ~144 MB/day of slow_tcp_write / slow_rtp_pack lines.
+            // error logs ~260 KB/day. See docs/plans/2026-08-10-crash-hardening.md.
+            level: "error".to_string(),
             http_verbose: false,
             stream_frame_debug: false,
             ipc_debug: false,
             console_enabled: true,
-            file_path: String::new(),
+            file_path: "/mnt/logs/onvif-debug.log".to_string(),
             static_assets: StaticAssetsConfig::default(),
         }
     }
