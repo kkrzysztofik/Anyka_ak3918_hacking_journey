@@ -446,6 +446,10 @@ impl NightModeController {
             return Err(PlatformError::HardwareFailure(format!("GPIO write: {e}")));
         }
 
+        // Logged unconditionally: a silent success and a transition that never
+        // happened look identical otherwise, which is what hid the 2026-08-10
+        // failure. `isp` is the daemon's ak_vi_switch_mode return.
+        tracing::info!(from = ?state.current, to = ?target, isp, "night mode applied");
         state.record_change(target, std::time::Instant::now());
         Ok(())
     }
