@@ -81,8 +81,8 @@ fi
 
 # Set panic timeout (seconds before reboot on panic)
 if [ -w /proc/sys/kernel/panic ]; then
-    echo "Setting panic timeout (0 = no reboot)..."
-    echo "0" > /proc/sys/kernel/panic
+    echo "Setting panic timeout (10 = reboot after 10s)..."
+    echo "10" > /proc/sys/kernel/panic
     echo "  /proc/sys/kernel/panic = $(cat /proc/sys/kernel/panic)"
 else
     echo "Warning: Cannot write to /proc/sys/kernel/panic"
