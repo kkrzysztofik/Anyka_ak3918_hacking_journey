@@ -4,7 +4,7 @@
  * SOAP operations for media profiles management.
  */
 import { ENDPOINTS } from '@/services/api';
-import { escapeXml, escapeXmlAttribute, soapRequest } from '@/services/soap/client';
+import { escapeXml, soapRequest } from '@/services/soap/client';
 import { safeString } from '@/utils/safeString';
 
 export interface MediaProfile {
@@ -382,7 +382,7 @@ export async function setVideoEncoderConfiguration(
   const escapedEncoding = escapeXml(config.encoding);
   const escapedSessionTimeout = escapeXml(config.sessionTimeout);
   // NOSONAR - Token from device, but escaping for defense-in-depth
-  const escapedToken = escapeXmlAttribute(config.token);
+  const escapedToken = escapeXml(config.token);
 
   const body = `<trt:SetVideoEncoderConfiguration>
     <trt:Configuration token="${escapedToken}">
@@ -461,7 +461,7 @@ export async function setVideoSourceConfiguration(
   forcePersistence: boolean = true,
 ): Promise<void> {
   // NOSONAR - Token from device, but escaping for defense-in-depth
-  const escapedToken = escapeXmlAttribute(config.token);
+  const escapedToken = escapeXml(config.token);
   const escapedName = escapeXml(config.name);
   const escapedSourceToken = escapeXml(config.sourceToken);
 
