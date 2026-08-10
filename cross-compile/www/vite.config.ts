@@ -32,7 +32,7 @@ function getChunkName(id: string): string | undefined {
     id.includes('sonner')
   )
     return 'ui-vendor';
-  if (id.includes('fast-xml-parser') || id.includes('dompurify')) return 'utils-vendor';
+  if (id.includes('fast-xml-parser')) return 'utils-vendor';
   return 'vendor';
 }
 
