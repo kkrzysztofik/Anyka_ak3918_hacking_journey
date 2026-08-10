@@ -1,8 +1,7 @@
 # Host-only CI image for Rust lint/test/coverage (x86_64).
 # Does NOT include ARM crosstool — use Dockerfile for release/cross builds.
 #
-# Build (from repo root):
-#   ./scripts/docker/prepare-ci-toolchain.sh
+# Build (from repo root; --ci uses scripts/docker as build context):
 #   ./scripts/docker/docker-build.sh --ci -t kkrzysztofik/anyka-cross-compile:rust-1.97.1-ci
 # Push:
 #   docker push kkrzysztofik/anyka-cross-compile:rust-1.97.1-ci
@@ -21,8 +20,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   && rm -rf /var/lib/apt/lists/* \
   && apt-get clean
 
-# Staged by prepare-ci-toolchain.sh (host rustc/cargo/clippy + llvm-cov/profdata only)
-COPY scripts/docker/.ci-toolchain /opt/arm-anykav200-crosstool-ng
+# Build context must be scripts/docker/ (see docker-build.sh --ci).
+# Staged by prepare-ci-toolchain.sh (host rustc/cargo/clippy + llvm-cov/profdata only).
+COPY .ci-toolchain /opt/arm-anykav200-crosstool-ng
 
 # Toolchain bin first; ~/.cargo/bin for cargo-installed tools (llvm-cov wrapper).
 # Never install rustup stable — proxies clash with 1.97.1-dev (E0514).

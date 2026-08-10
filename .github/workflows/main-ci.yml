@@ -179,7 +179,7 @@ jobs:
           # Rewrite Cobertura to repo-root-relative paths for Sonar
           # (sonar.sources=cross-compile; llvm-cov emits workspace-relative paths).
           if [ -f "coverage/cobertura.xml" ]; then
-            python3 -c "from pathlib import Path; import re; p=Path('coverage/cobertura.xml'); t=p.read_text(); t=re.sub(r'<source>.*?</source>', '<source>.</source>', t, count=1, flags=re.S); t=re.sub(r'filename=\"(?!cross-compile/)([^\"]+)\"', r'filename=\"cross-compile/\\1\"', t); p.write_text(t); print('Rewrote cobertura.xml paths to repo-root-relative')"
+            python3 "${GITHUB_WORKSPACE}/scripts/ci/rewrite_cobertura_paths.py" coverage/cobertura.xml
           fi
 
       - name: Upload Coverage Artifacts

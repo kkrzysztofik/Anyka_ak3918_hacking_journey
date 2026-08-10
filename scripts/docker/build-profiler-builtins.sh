@@ -39,6 +39,12 @@ trap cleanup EXIT
 mkdir -p "${WORK}/extract" "${WORK}/target"
 ARCHIVE="${WORK}/llvm.tgz"
 
+if ! command -v gh >/dev/null 2>&1; then
+  log_error "GitHub CLI (gh) is required to fetch compiler-rt sources"
+  log_info "Install: https://cli.github.com/ — then re-run this script"
+  exit 1
+fi
+
 log_info "Fetching ${LLVM_TAG} compiler-rt (profiler sources) via gh..."
 gh api "repos/llvm/llvm-project/tarball/${LLVM_TAG}" \
   -H "Accept: application/vnd.github+json" >"${ARCHIVE}"

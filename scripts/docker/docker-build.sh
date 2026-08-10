@@ -157,7 +157,13 @@ build_docker_image() {
         docker_cmd="${docker_cmd} ${BUILD_ARGS}"
     fi
 
-    docker_cmd="${docker_cmd} -f ${DOCKERFILE} -t ${IMAGE_TAG} ${PROJECT_ROOT}"
+    local build_context="${PROJECT_ROOT}"
+    if [[ "${CI_IMAGE}" = true ]]; then
+        # Narrow context avoids sending the full toolchain tree to the daemon.
+        build_context="${SCRIPT_DIR}"
+    fi
+
+    docker_cmd="${docker_cmd} -f ${DOCKERFILE} -t ${IMAGE_TAG} ${build_context}"
 
     log_info "Executing: ${docker_cmd}"
     echo ""

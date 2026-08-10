@@ -231,7 +231,7 @@ du -sh dist/          # Approximate bundle size (guidance only)
 
 ---
 
-## Tarpaulin Coverage
+## cargo-llvm-cov Coverage
 
 ```bash
 source ./setenv.sh        # from repo root — exports $CARGO etc.
