@@ -432,7 +432,15 @@ impl Default for ServerConfig {
             tls_enabled: false,
             tls_cert_path: String::new(),
             tls_key_path: String::new(),
-            rate_limit_per_minute: 0,
+            // Was 0, which the limiter read as "allow nothing" and closed the
+            // ONVIF API on every deployment that omitted the key. 0 now means
+            // unlimited; this default keeps the DoS bound switched on.
+            //
+            // 300/min, not RateLimiter's library default of 60: the WebUI fires
+            // a burst of SOAP calls on login and on every page, and 60 (1/s) is
+            // tight enough to 429 a legitimate operator. Matches the shipped
+            // config.toml. Calibration knob: lower it with evidence.
+            rate_limit_per_minute: 300,
             static_root: String::new(),
             address: String::new(),
         }

@@ -125,6 +125,11 @@ auth_enabled = true
 # Authentication realm
 realm = "ONVIF Camera"
 
+# Per-IP request cap for /onvif/* (fixed 60s window). 0 = unlimited.
+# Static assets are not counted. The WebUI fires a burst of SOAP calls on
+# login and on each page, so raise this if the UI starts seeing 429s.
+rate_limit_per_minute = 300
+
 # Path to static file root. Must be ABSOLUTE: ServeDir resolves a relative
 # path against the process CWD, and anyka-init starts onvif-rust with CWD=/,
 # so "www" resolved to /www and every UI request 404'd.
