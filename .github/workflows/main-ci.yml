@@ -40,6 +40,10 @@ jobs:
     container:
       image: kkrzysztofik/anyka-cross-compile:rust-1.97.1-ci
       options: --security-opt seccomp=unconfined
+    env:
+      RUSTC_WRAPPER: sccache
+      SCCACHE_DIR: /tmp/sccache
+      SCCACHE_CACHE_SIZE: 5G
     steps:
       - name: Checkout Code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.0
@@ -72,6 +76,14 @@ jobs:
           restore-keys: |
             cargo-linux-rust-reg-
 
+      - name: Cache sccache
+        uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306  # v5.0.3
+        with:
+          path: /tmp/sccache
+          key: sccache-linux-${{ hashFiles('cross-compile/Cargo.lock') }}
+          restore-keys: |
+            sccache-linux-
+
       - name: Check Formatting
         working-directory: cross-compile
         run: |
@@ -87,6 +99,10 @@ jobs:
         run: |
           python3 -m unittest discover -p 'test_*.py' -v
 
+      - name: Show sccache stats
+        if: always()
+        run: sccache -s || true
+
   # =============================================================================
   # RUST BACKEND - Test & Coverage (parallel with lint)
   # =============================================================================
@@ -98,6 +114,11 @@ jobs:
     container:
       image: kkrzysztofik/anyka-cross-compile:rust-1.97.1-ci
       options: --security-opt seccomp=unconfined
+    env:
+      # llvm-cov becomes RUSTC_WRAPPER and chains this via PRE_EXISTING (sccache → rustc).
+      RUSTC_WRAPPER: sccache
+      SCCACHE_DIR: /tmp/sccache
+      SCCACHE_CACHE_SIZE: 5G
     outputs:
       coverage: ${{ steps.coverage-summary.outputs.coverage }}
     steps:
@@ -131,6 +152,14 @@ jobs:
           key: cargo-linux-rust-reg-${{ hashFiles('cross-compile/Cargo.lock') }}
           restore-keys: |
             cargo-linux-rust-reg-
+
+      - name: Cache sccache
+        uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306  # v5.0.3
+        with:
+          path: /tmp/sccache
+          key: sccache-linux-${{ hashFiles('cross-compile/Cargo.lock') }}
+          restore-keys: |
+            sccache-linux-
 
       - name: Run Tests with Coverage
         working-directory: cross-compile
@@ -205,6 +234,10 @@ jobs:
           fi
 
           echo "coverage=$COVERAGE" >> $GITHUB_OUTPUT
+
+      - name: Show sccache stats
+        if: always()
+        run: sccache -s || true
 
   # =============================================================================
   # VALIDATION (RTSP) - Lint, Test & Coverage

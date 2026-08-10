@@ -40,7 +40,9 @@ docker push kkrzysztofik/anyka-cross-compile:rust-1.97.1-ci
 | Fat `target/` cache restore | ~135s | removed (registry-only cache) |
 | Coverage run | tarpaulin ~435s | llvm-cov cold ~176s + report ~5s |
 
-Estimated GitHub `rust-coverage` wall clock (cold instrumented build, warm crates.io cache): ~4–5 minutes. Hitting ≤3 minutes may still need sccache or larger runners after a real Actions run.
+Estimated GitHub `rust-coverage` wall clock (cold instrumented build, warm crates.io cache): ~4–5 minutes.
+
+Follow-up: `sccache` is baked into `:rust-1.97.1-ci` and wired via `RUSTC_WRAPPER` + Actions cache of `/tmp/sccache` on both rust jobs (llvm-cov chains the pre-existing wrapper). Warm-cache runs should improve; cold runs still pay full instrumented compile.
 
 ## Success criteria
 

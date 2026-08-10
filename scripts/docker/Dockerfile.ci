@@ -37,8 +37,10 @@ RUN test "$(command -v cargo)" = "/opt/arm-anykav200-crosstool-ng/bin/cargo" && 
   command -v llvm-profdata && \
   ls /opt/arm-anykav200-crosstool-ng/lib/rustlib/x86_64-unknown-linux-gnu/lib/libprofiler_builtins-*.rlib >/dev/null && \
   cargo install cargo-llvm-cov --locked && \
+  cargo install sccache --locked && \
   rm -rf /root/.cargo/registry/index/* /root/.cargo/git/db/* && \
-  command -v cargo-llvm-cov
+  command -v cargo-llvm-cov && \
+  command -v sccache
 
 WORKDIR /workspace
 CMD ["/bin/bash"]
