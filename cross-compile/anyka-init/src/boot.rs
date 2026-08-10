@@ -89,7 +89,10 @@ pub fn apply_wifi(cfg: &WifiCfg) -> anyhow::Result<bool> {
 ///
 /// This kernel ships `kernel.panic = 0`, so a panic leaves the camera dead
 /// until someone power-cycles it. `proc_root` is a parameter only so the test
-/// can point at a tempdir; production passes `/proc/sys`.
+/// can point at a tempdir; production passes `/proc/sys`. Called from `main`
+/// rather than `system_setup` so the host test suite never touches the real
+/// `/proc/sys` — every other side effect in `system_setup` routes through the
+/// injected `Sys` or a config-supplied path, and this one cannot.
 ///
 /// Best-effort: a missing knob is normal on other kernels and must not abort
 /// boot.
@@ -120,8 +123,6 @@ pub fn system_setup(sys: &dyn Sys, cfg: &Config) -> Option<&'static str> {
     // started. Do not move this call after P3.
     unsafe { std::env::set_var("TZ", &cfg.time.timezone) };
     tracing::info!(tz = %cfg.time.timezone, "timezone set (supervisor process only)");
-
-    write_panic_sysctls(std::path::Path::new("/proc/sys"));
 
     if let Some(module) = &cfg.system.sensor_module {
         match sys.insmod(module) {
@@ -353,7 +354,7 @@ channel = 6
     }
 
     #[test]
-    fn test_write_panic_sysctls_is_silent_when_the_knobs_are_absent() {
+    fn test_write_panic_sysctls_does_not_panic_when_the_knobs_are_absent() {
         let dir = tempfile::tempdir().expect("tempdir");
         // No kernel/ subdirectory at all — must not panic.
         write_panic_sysctls(dir.path());

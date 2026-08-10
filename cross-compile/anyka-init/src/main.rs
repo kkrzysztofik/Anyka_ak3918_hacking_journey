@@ -59,6 +59,7 @@ fn main() {
     }
 
     // P2
+    boot::write_panic_sysctls(std::path::Path::new("/proc/sys"));
     let probed = boot::system_setup(sysimpl.as_ref(), &cfg);
 
     // P2.5
