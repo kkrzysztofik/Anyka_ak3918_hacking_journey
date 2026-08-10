@@ -106,10 +106,6 @@
     @apply flex h-12 w-12 items-center justify-center rounded-lg text-xl font-bold transition-colors;
   }
 
-  .card {
-    @apply bg-card rounded-lg p-6;
-  }
-
   /* Technical data styling - for IP addresses, MAC addresses, etc. */
   .technical-data {
     @apply font-mono text-[13px] leading-relaxed tracking-wide;
