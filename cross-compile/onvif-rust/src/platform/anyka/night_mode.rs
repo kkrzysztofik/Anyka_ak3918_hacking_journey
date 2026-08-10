@@ -250,6 +250,26 @@ pub(crate) const POLL_INTERVAL: Duration = Duration::from_secs(10);
 /// Consecutive AE read failures before falling back to `ain0`.
 const AE_FAIL_STREAK_MAX: u32 = 3;
 
+/// Heartbeat cadence for the AUTO sample line when nothing is changing.
+///
+/// The poll is every 10s; logging each one is ~8,600 lines a day onto an SD
+/// card. A change always logs immediately, so this only bounds the quiet case.
+const SAMPLE_LOG_INTERVAL: Duration = Duration::from_secs(600);
+
+/// Whether a sample line is due: always on a classification change, otherwise
+/// at most once per `interval`.
+fn sample_due(
+    last: Option<(std::time::Instant, Option<DayNight>)>,
+    class: Option<DayNight>,
+    now: std::time::Instant,
+    interval: Duration,
+) -> bool {
+    match last {
+        None => true,
+        Some((at, prev)) => prev != class || now.duration_since(at) >= interval,
+    }
+}
+
 /// Owns the night-mode state and serialises every transition.
 pub(crate) struct NightModeController {
     paths: NodePaths,
@@ -263,6 +283,9 @@ pub(crate) struct NightModeController {
     auto_enabled: std::sync::atomic::AtomicBool,
     /// Consecutive `get_ae_luma` failures; resets on success.
     ae_fail_streak: std::sync::atomic::AtomicU32,
+    /// When the last sample line was logged, and what it classified to.
+    /// `None` = nothing logged yet. Guards [`SAMPLE_LOG_INTERVAL`].
+    sample_log: tokio::sync::Mutex<Option<(std::time::Instant, Option<DayNight>)>>,
     /// Best-effort IDR after every day/night apply (forced + AUTO).
     idr_hook: Option<std::sync::Arc<dyn Fn() + Send + Sync>>,
 }
@@ -306,6 +329,7 @@ impl NightModeController {
             configured: mode,
             auto_enabled: std::sync::atomic::AtomicBool::new(matches!(mode, IrCutFilterMode::AUTO)),
             ae_fail_streak: std::sync::atomic::AtomicU32::new(0),
+            sample_log: tokio::sync::Mutex::new(None),
             idr_hook,
         }
     }
@@ -323,6 +347,24 @@ impl NightModeController {
     pub(crate) fn set_auto_enabled(&self, enabled: bool) {
         self.auto_enabled
             .store(enabled, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    /// Log one AUTO sample, rate-limited by [`sample_due`].
+    ///
+    /// `info!`, not `debug!`: cameras run at `level = "error"` and a day/night
+    /// failure is only diagnosable after the fact. See the filter directive in
+    /// `logging::init_logging_impl`.
+    async fn log_sample(&self, raw: i32, src: &'static str, class: Option<DayNight>) {
+        let now = std::time::Instant::now();
+        let mut last = self.sample_log.lock().await;
+        if !sample_due(*last, class, now, SAMPLE_LOG_INTERVAL) {
+            return;
+        }
+        *last = Some((now, class));
+        match class {
+            Some(mode) => tracing::info!(raw, src, ?mode, "night sample"),
+            None => tracing::info!(raw, src, "night sample: indeterminate, holding"),
+        }
     }
 
     /// Apply a transition. The mutex makes concurrent transitions
@@ -416,18 +458,20 @@ impl NightModeController {
             return;
         }
 
-        let reading = match self.ffi.get_ae_luma().await {
+        let (raw, src, reading) = match self.ffi.get_ae_luma().await {
             Some(luma) => {
                 self.ae_fail_streak.store(0, Ordering::SeqCst);
-                classify(
-                    i32::from(luma),
+                let raw = i32::from(luma);
+                let class = classify(
+                    raw,
                     Thresholds {
                         day: self.cfg.ae_day_threshold,
                         night: self.cfg.ae_night_threshold,
                         // AE high = bright = day.
                         ldr_high_is_day: true,
                     },
-                )
+                );
+                (raw, "ae", class)
             }
             None => {
                 let n = self.ae_fail_streak.fetch_add(1, Ordering::SeqCst) + 1;
@@ -444,16 +488,19 @@ impl NightModeController {
                 let Some(raw) = read_light_sensor(&self.paths) else {
                     return;
                 };
-                classify(
+                let class = classify(
                     raw,
                     Thresholds {
                         day,
                         night,
                         ldr_high_is_day: self.cfg.ldr_high_is_day,
                     },
-                )
+                );
+                (raw, "ain0", class)
             }
         };
+
+        self.log_sample(raw, src, reading).await;
 
         let target = {
             let state = self.state.lock().await;
@@ -1261,6 +1308,57 @@ mod tests {
         let target = decide(&state, Some(DayNight::Night), t0, Duration::from_secs(900));
 
         assert_eq!(target, Some(DayNight::Night));
+    }
+
+    #[test]
+    fn test_sample_due_on_first_call() {
+        let t0 = std::time::Instant::now();
+        assert!(sample_due(
+            None,
+            Some(DayNight::Day),
+            t0,
+            Duration::from_secs(600)
+        ));
+    }
+
+    #[test]
+    fn test_sample_due_when_the_classification_changes() {
+        let t0 = std::time::Instant::now();
+        let last = Some((t0, Some(DayNight::Day)));
+
+        // One second later, but the reading flipped: log it immediately.
+        assert!(sample_due(
+            last,
+            Some(DayNight::Night),
+            t0 + Duration::from_secs(1),
+            Duration::from_secs(600),
+        ));
+    }
+
+    #[test]
+    fn test_sample_suppressed_inside_the_window_when_unchanged() {
+        let t0 = std::time::Instant::now();
+        let last = Some((t0, Some(DayNight::Day)));
+
+        assert!(!sample_due(
+            last,
+            Some(DayNight::Day),
+            t0 + Duration::from_secs(599),
+            Duration::from_secs(600),
+        ));
+    }
+
+    #[test]
+    fn test_sample_due_again_once_the_window_expires() {
+        let t0 = std::time::Instant::now();
+        let last = Some((t0, Some(DayNight::Day)));
+
+        assert!(sample_due(
+            last,
+            Some(DayNight::Day),
+            t0 + Duration::from_secs(600),
+            Duration::from_secs(600),
+        ));
     }
 
     #[test]
