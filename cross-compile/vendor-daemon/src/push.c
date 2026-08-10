@@ -421,6 +421,16 @@ static void *push_frame_thread(void *arg)
                      state->stream_id,
                      (unsigned long long)frames_pushed,
                      (unsigned long long)no_data_count);
+
+            /* Only the main stream drives liveness: if it stalls we are
+             * broken regardless of what the sub stream is doing. */
+            if (state->stream_id == 0) {
+                FILE *hb = fopen(PUSH_HEARTBEAT_PATH, "w");
+                if (hb) {
+                    fprintf(hb, "%llu\n", (unsigned long long)frames_pushed);
+                    fclose(hb);
+                }
+            }
         }
     }
 

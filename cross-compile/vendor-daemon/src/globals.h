@@ -65,6 +65,9 @@ struct push_stream_state {
  */
 #define PUSH_NO_DATA_EXIT_THRESHOLD 1000
 
+/* Liveness beacon read by anyka-init's monitor. tmpfs, so no SD writes. */
+#define PUSH_HEARTBEAT_PATH "/tmp/vd_heartbeat"
+
 /*
  * How many consecutive no-data polls before the run is worth a log line.
  *
