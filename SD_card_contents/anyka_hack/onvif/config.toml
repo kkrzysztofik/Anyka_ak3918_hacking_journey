@@ -264,10 +264,12 @@ ir_led = false
 # Board wiring. Verified on 192.168.2.198 (two-line ircut, high=night).
 ldr_high_is_day = true
 ircut_high_is_night = true
-# Measured 2026-08-02: dark-box ain0≈648, room-uncovered≈670.
-# day >= 662, night <= 652; 653..661 indeterminate (hold).
-day_threshold = 662
-night_threshold = 652
+# Raw ain0 thresholds are board-specific and MUST be calibrated per board:
+# .198 reads dark-box≈648 / room≈670, .121 reads 548..639. Uncomment and set
+# these only after measuring YOUR board's ain0 in both states. While commented,
+# an unavailable AE reading never triggers the fallback (it holds instead).
+# day_threshold = 662
+# night_threshold = 652
 # Minimum ms between day/night transitions. Prevents dusk oscillation.
 lock_time_ms = 900000
 # AE luma (0-255). Measured 2026-08-04 on .198: room≈34, dark-box≈0..1.

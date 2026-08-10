@@ -417,14 +417,18 @@ impl NightModeController {
                 if n == AE_FAIL_STREAK_MAX {
                     tracing::warn!(streak = n, "AE luma unavailable; falling back to ain0");
                 }
+                let (Some(day), Some(night)) = (self.cfg.day_threshold, self.cfg.night_threshold)
+                else {
+                    return;
+                };
                 let Some(raw) = read_light_sensor(&self.paths) else {
                     return;
                 };
                 classify(
                     raw,
                     Thresholds {
-                        day: self.cfg.day_threshold,
-                        night: self.cfg.night_threshold,
+                        day,
+                        night,
                         ldr_high_is_day: self.cfg.ldr_high_is_day,
                     },
                 )
@@ -774,9 +778,15 @@ mod tests {
             .times(1)
             .returning(|_| 0);
 
+        let cfg = crate::config::types::NightConfig {
+            day_threshold: Some(200),
+            night_threshold: Some(150),
+            lock_time_ms: 0,
+            ..Default::default()
+        };
         let ctl = NightModeController::new(
             paths,
-            unlocked_config(),
+            cfg,
             std::sync::Arc::new(ffi),
             IrCutFilterMode::AUTO,
             None,
@@ -788,6 +798,38 @@ mod tests {
         assert_eq!(ctl.current_mode().await, DayNight::Day);
         ctl.tick().await;
         assert_eq!(ctl.current_mode().await, DayNight::Night);
+    }
+
+    #[tokio::test]
+    async fn test_tick_holds_when_ae_fails_and_ain0_is_uncalibrated() {
+        // AE unavailable past the streak limit, thresholds unset: the fallback
+        // must not run. An unavailable AE reading is not evidence about light,
+        // and guessing with another board's numbers put the IR illuminator on
+        // at midday.
+        use crate::hal::common::imaging::MockImagingHalTrait;
+        use crate::onvif::types::common::IrCutFilterMode;
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let paths = NodePaths::rooted(dir.path(), dir.path());
+        seed_gpio_nodes(&paths);
+        std::fs::write(paths.light_sensor(), "100").unwrap();
+
+        let mut ffi = MockImagingHalTrait::new();
+        ffi.expect_get_ae_luma().times(3).returning(|| None);
+        // No set_ir_filter expectation: the fallback must never run.
+
+        let ctl = NightModeController::new(
+            paths,
+            unlocked_config(), // day_threshold/night_threshold are None
+            std::sync::Arc::new(ffi),
+            IrCutFilterMode::AUTO,
+            None,
+        );
+
+        ctl.tick().await;
+        ctl.tick().await;
+        ctl.tick().await;
+        assert_eq!(ctl.current_mode().await, DayNight::Day);
     }
 
     #[tokio::test]

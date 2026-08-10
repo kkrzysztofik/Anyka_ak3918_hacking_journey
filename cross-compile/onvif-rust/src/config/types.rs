@@ -616,11 +616,13 @@ pub struct NightConfig {
     /// `true` when writing `1` to the ircut node selects night.
     pub ircut_high_is_night: bool,
     /// At or above this raw `ain0` reading, the sensor is saturated bright.
-    /// MUST be calibrated on hardware — see design H5, and Task 14.
-    pub day_threshold: i32,
+    /// No default: this is a raw ADC value and is board-specific (.198 reads
+    /// 648-670, .121 reads 548-639). An uncalibrated board holds instead of
+    /// guessing. See wiki/IR-Night-Mode-Calibration.md.
+    pub day_threshold: Option<i32>,
     /// At or below this raw `ain0` reading, the sensor is saturated dark.
     /// MUST be calibrated on hardware.
-    pub night_threshold: i32,
+    pub night_threshold: Option<i32>,
     /// Minimum time between transitions, preventing dusk oscillation.
     pub lock_time_ms: u64,
     /// At or above this AE `current_calc_avg_lumi`, treat as day.
@@ -634,12 +636,11 @@ impl Default for NightConfig {
         Self {
             ldr_high_is_day: true,
             ircut_high_is_night: true,
-            // Calibrated on .198 (2026-08-02): dark-box ain0≈648,
-            // room-uncovered≈670. These match the shipped templates so an
-            // omitted `[imaging.night]` still lets AUTO transition instead of
-            // leaving documented readings in the indeterminate band.
-            day_threshold: 662,
-            night_threshold: 652,
+            // No day_threshold / night_threshold here: they are raw ADC values,
+            // board-specific (.198 reads 648-670, .121 reads 548-639). Leaving
+            // them absent means an uncalibrated board holds instead of guessing.
+            day_threshold: None,
+            night_threshold: None,
             lock_time_ms: 900_000,
             // Calibrated on .198 (2026-08-04): room≈34, dark-box≈0..1.
             ae_day_threshold: 28,
@@ -1016,24 +1017,19 @@ file_name = "static"
     }
 
     #[test]
-    fn test_night_config_defaults_allow_auto_transition_on_documented_readings() {
-        // An omitted [imaging.night] must not strand AUTO in the indeterminate
-        // band: the documented dark-box≈648 / room≈670 readings must sit
-        // outside the 662/652 defaults on both sides.
+    fn test_night_config_defaults_leave_thresholds_uncalibrated() {
+        // A raw ain0 threshold is board-specific (.198 reads 648-670, .121
+        // reads 548-639). Shipping no default means an uncalibrated board holds
+        // instead of guessing with another board's numbers.
         let cfg = NightConfig::default();
-        assert_eq!(cfg.day_threshold, 662);
-        assert_eq!(cfg.night_threshold, 652);
-        assert!(670 >= cfg.day_threshold, "room reading must read as day");
-        assert!(
-            648 <= cfg.night_threshold,
-            "dark-box reading must read as night"
-        );
+        assert_eq!(cfg.day_threshold, None);
+        assert_eq!(cfg.night_threshold, None);
     }
 
     #[test]
-    fn test_imaging_config_without_night_section_applies_calibrated_defaults() {
-        // Regression: a partial config that omits [imaging.night] must still
-        // get thresholds that operate on the supported hardware.
+    fn test_imaging_config_without_night_section_leaves_ain0_uncalibrated() {
+        // Regression: a partial config that omits [imaging.night] must not
+        // guess the raw ain0 thresholds. AE thresholds still have defaults.
         let cfg: ImagingConfig = toml::from_str(
             r#"
             brightness = 70.0
@@ -1044,8 +1040,8 @@ file_name = "static"
             "#,
         )
         .unwrap();
-        assert_eq!(cfg.night.day_threshold, 662);
-        assert_eq!(cfg.night.night_threshold, 652);
+        assert_eq!(cfg.night.day_threshold, None);
+        assert_eq!(cfg.night.night_threshold, None);
     }
 
     #[test]
