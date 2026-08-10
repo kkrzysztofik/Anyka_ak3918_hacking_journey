@@ -59,6 +59,7 @@ fn main() {
     }
 
     // P2
+    boot::protect_from_oom_killer(std::path::Path::new("/proc/self/oom_score_adj"));
     boot::write_panic_sysctls(std::path::Path::new("/proc/sys"));
     let probed = boot::system_setup(sysimpl.as_ref(), &cfg);
 

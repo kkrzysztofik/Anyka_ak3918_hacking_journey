@@ -105,6 +105,21 @@ pub fn write_panic_sysctls(proc_root: &std::path::Path) {
     }
 }
 
+/// Make this process the OOM killer's last choice.
+///
+/// The supervisor is the one process whose death cannot be recovered from in
+/// software: `/usr/sbin/service.sh` has no respawn loop, so if anyka-init dies
+/// every service is orphaned and only a power cycle brings the camera back.
+/// `path` is a parameter for the same reason `write_panic_sysctls` takes
+/// `proc_root`: production passes `/proc/self/oom_score_adj`, the test a
+/// tempdir, so the host suite never rewrites the real machine's score when it
+/// happens to run as root. Best-effort — a write failure must not abort boot.
+pub fn protect_from_oom_killer(path: &std::path::Path) {
+    if let Err(e) = std::fs::write(path, "-1000") {
+        tracing::warn!(error = %e, "could not set oom_score_adj");
+    }
+}
+
 /// P2: system setup. Every step is best-effort — a camera with no sensor
 /// module is still worth reaching over SSH to diagnose.
 ///
@@ -358,6 +373,17 @@ channel = 6
         let dir = tempfile::tempdir().expect("tempdir");
         // No kernel/ subdirectory at all — must not panic.
         write_panic_sysctls(dir.path());
+    }
+
+    #[test]
+    fn test_protect_from_oom_killer_writes_the_minimum_score() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("oom_score_adj");
+        std::fs::write(&path, "0\n").expect("seed");
+
+        protect_from_oom_killer(&path);
+
+        assert_eq!(std::fs::read_to_string(&path).expect("read"), "-1000");
     }
 
     #[test]
