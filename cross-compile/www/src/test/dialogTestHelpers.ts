@@ -22,24 +22,3 @@ export async function testDialogOpen(dialogTestId: string): Promise<void> {
 export function testDialogClosed(dialogTestId: string): void {
   expect(screen.queryByTestId(dialogTestId)).not.toBeInTheDocument();
 }
-
-/**
- * Test dialog title and description rendering
- * @param titleTestId - Test ID of the dialog title
- * @param descriptionTestId - Test ID of the dialog description
- * @param expectedTitle - Expected title text
- * @param expectedDescription - Expected description text
- */
-export async function testDialogTitleAndDescription(
-  titleTestId: string,
-  descriptionTestId: string,
-  expectedTitle: string,
-  expectedDescription: string,
-): Promise<void> {
-  await waitFor(() => {
-    const title = screen.getByTestId(titleTestId);
-    const description = screen.getByTestId(descriptionTestId);
-    expect(title).toHaveTextContent(expectedTitle);
-    expect(description).toHaveTextContent(expectedDescription);
-  });
-}
