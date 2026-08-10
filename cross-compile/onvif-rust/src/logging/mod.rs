@@ -177,9 +177,17 @@ fn init_logging_impl(config: &ConfigRuntime) -> LoggingResult<()> {
     let level = parse_log_level(&level_str)?;
 
     // Create env filter with default level
-    let env_filter = EnvFilter::builder()
+    let mut env_filter = EnvFilter::builder()
         .with_default_directive(level.into())
         .from_env_lossy();
+
+    // Night-mode AUTO diagnostics stay visible whatever `logging.level` says.
+    // Cameras run at "error" in production and a day/night failure is only
+    // diagnosable after the fact, from these lines. `if let` rather than
+    // `expect`: a bad directive must not take the process down over logging.
+    if let Ok(directive) = "onvif_rust::platform::anyka::night_mode=info".parse() {
+        env_filter = env_filter.add_directive(directive);
+    }
 
     // Create reloadable filter layer
     let (filter_layer, reload_handle) = reload::Layer::new(env_filter);
