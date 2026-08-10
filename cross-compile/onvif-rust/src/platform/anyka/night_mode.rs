@@ -248,8 +248,12 @@ pub(super) fn read_initial_state(paths: &NodePaths) -> DayNight {
     }
 }
 
-/// AUTO poll interval. Fixed: lock_time dominates responsiveness.
-pub(crate) const POLL_INTERVAL: Duration = Duration::from_secs(2);
+/// AUTO poll cadence.
+///
+/// Every tick is an IPC round-trip through the daemon's single-threaded poll
+/// loop. 2s meant 30 round-trips a minute, forever, to read a light level that
+/// changes twice a day. Fixed: lock_time dominates responsiveness.
+pub(crate) const POLL_INTERVAL: Duration = Duration::from_secs(10);
 
 /// Consecutive AE read failures before falling back to `ain0`.
 const AE_FAIL_STREAK_MAX: u32 = 3;
