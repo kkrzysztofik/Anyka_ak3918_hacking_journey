@@ -38,7 +38,7 @@ use supervisor::{AttachTarget, Availability, PlatformAttachTarget, run_superviso
 
 use super::common::{
     DeviceInfo, ImagingControl, NetworkInfo, PTZControl, Platform, PlatformError, PlatformResult,
-    Resolution, VideoEncoder, VideoInput,
+    Resolution, VideoControl, VideoEncoder, VideoInput,
 };
 
 // Types used by tests
@@ -129,6 +129,7 @@ impl AnykaPlatform {
             StreamOpenParams::default(),
             StreamOpenParams::default(),
             crate::config::types::ImagingConfig::default(),
+            false,
         )
     }
 
@@ -148,20 +149,27 @@ impl AnykaPlatform {
     /// Skips the `AnykaIpc` connection that `with_isp_config` requires, so the
     /// bring-up and teardown orchestration can be exercised without hardware.
     /// PTZ/imaging/network are left absent — they are independently tested.
+    ///
+    /// `initial_rotated` mirrors `with_isp_config`'s same-named parameter, so
+    /// the construction-time seed path is exercisable under test too.
     #[cfg(test)]
     pub(super) fn with_mocked_hal(
         video_ffi: Arc<dyn VideoHalTrait>,
         audio_ffi: Arc<dyn crate::hal::common::audio::AudioHalTrait>,
         isp_config_path: Option<PathBuf>,
+        initial_rotated: bool,
     ) -> Self {
+        let video_input = Arc::new(AnykaVideoInput::with_ffi(
+            video_ffi.clone(),
+            isp_config_path,
+        ));
+        video_input.rotated.store(initial_rotated, Ordering::SeqCst);
+
         Self {
             initialized: AtomicBool::new(false),
             device_info: Self::device_descriptor(),
             sensor_resolution: RwLock::new(None),
-            video_input: Arc::new(AnykaVideoInput::with_ffi(
-                video_ffi.clone(),
-                isp_config_path,
-            )),
+            video_input,
             video_encoder: Arc::new(AnykaVideoEncoder::with_ffi(video_ffi)),
             audio_input: Arc::new(AnykaAudioInput::with_ffi(audio_ffi.clone())),
             audio_encoder: Arc::new(AnykaAudioEncoder::with_ffi(audio_ffi)),
@@ -185,12 +193,17 @@ impl AnykaPlatform {
     ///
     /// `main_encoder`/`sub_encoder` carry the parameters that only `ak_venc_open` can apply, so
     /// they must arrive here rather than through `set_configuration`. See [`StreamOpenParams`].
+    ///
+    /// `initial_rotated` seeds the persisted flip/mirror flag before the VI is even open, so it
+    /// is a no-op on the FFI at this point — `AnykaVideoInput::rotated` just remembers it until
+    /// `init_video_input()`'s post-`capture_on()` reapply step actually applies it to hardware.
     pub fn with_isp_config(
         isp_config_path: Option<PathBuf>,
         ptz_enabled: bool,
         main_encoder: StreamOpenParams,
         sub_encoder: StreamOpenParams,
         imaging_cfg: crate::config::types::ImagingConfig,
+        initial_rotated: bool,
     ) -> PlatformResult<Self> {
         let device_info = Self::device_descriptor();
 
@@ -224,6 +237,7 @@ impl AnykaPlatform {
                 video_ffi.clone(),
                 isp_config_path.clone(),
             ));
+            video_input.rotated.store(initial_rotated, Ordering::SeqCst);
             let video_encoder = Arc::new(AnykaVideoEncoder::with_ipc(
                 shared_ipc.clone(),
                 main_encoder,
@@ -349,6 +363,16 @@ impl AnykaPlatform {
             let _ = self.video_input.close().await;
             return Err(e);
         }
+
+        // Step 5.5: Reapply flip/mirror. VI state does not survive
+        // close/reopen, so a vendor-daemon crash-and-reattach needs this
+        // too, not just cold boot — which is why it lives here rather than
+        // only in the constructor. Soft-fail: an upside-down stream is still
+        // a working stream, so this must not abort the whole bring-up.
+        if let Err(e) = self.video_input.reapply_flip_mirror() {
+            tracing::warn!("Failed to reapply flip/mirror after capture_on: {}", e);
+        }
+
         // Allow the capture pipeline to stabilize before opening encoders.
         tokio::time::sleep(capture_stabilization_delay()).await;
         tracing::info!("Video input initialized: dual-channel config and capture started");
@@ -468,6 +492,10 @@ impl Platform for AnykaPlatform {
     }
 
     crate::impl_platform_accessors!();
+
+    fn video_control(&self) -> Option<Arc<dyn VideoControl>> {
+        Some(self.video_input.clone() as Arc<dyn VideoControl>)
+    }
 
     fn stream_frame_age_ms(&self) -> Option<u64> {
         self.video_encoder.stream_frame_age_ms()

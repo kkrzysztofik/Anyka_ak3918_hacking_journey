@@ -971,6 +971,23 @@ impl Application {
 
         progress.complete_phase();
 
+        // Profile storage is wired before the platform, not with the other
+        // Phase 3 services: `profiles.toml` is the source of truth for the
+        // persisted rotate flag, and `AnykaPlatform` has to be constructed
+        // already knowing it (same reason the encoder is constructed knowing
+        // `gop_length`). Nothing in the platform feeds back into profiles, so
+        // this is a pure reorder.
+        let (profile_storage, profile_persistence_handle, profile_persistence_task) =
+            Self::wire_profile_persistence(config_path, save_delay, &shutdown_coordinator);
+        let profile_persistence_task = Some(profile_persistence_task);
+
+        let initial_rotated = profile_storage
+            .snapshot()
+            .video_source_configs
+            .first()
+            .map(|c| c.rotated)
+            .unwrap_or(false);
+
         // Phase 2: Platform
         progress.begin_phase(StartupPhase::Platform);
         let PlatformInit {
@@ -983,6 +1000,7 @@ impl Application {
                     &mut progress,
                     &config_runtime,
                     shutdown_coordinator.subscribe(),
+                    initial_rotated,
                 )
                 .await?
             }
@@ -1006,11 +1024,6 @@ impl Application {
         let (user_storage, user_persistence_task) =
             Self::wire_user_persistence(config_path, save_delay, &shutdown_coordinator);
         let user_persistence_task = Some(user_persistence_task);
-
-        // Create profile storage for ONVIF media profiles
-        let (profile_storage, profile_persistence_handle, profile_persistence_task) =
-            Self::wire_profile_persistence(config_path, save_delay, &shutdown_coordinator);
-        let profile_persistence_task = Some(profile_persistence_task);
 
         let (imaging_settings_store, imaging_persistence_task) = Self::wire_imaging_persistence(
             config_path,
@@ -1155,11 +1168,16 @@ impl Application {
         progress: &mut StartupProgress,
         config_runtime: &Arc<ConfigRuntime>,
         shutdown: broadcast::Receiver<()>,
+        initial_rotated: bool,
     ) -> Result<PlatformInit, StartupError> {
         let ptz_enabled = config_runtime.read().ptz.enabled;
 
         #[cfg(use_stubs)]
         let _ = shutdown;
+        // Stub builds have no VI to flip; `StubVideoControl` starts at its own
+        // default and the seed is irrelevant.
+        #[cfg(use_stubs)]
+        let _ = initial_rotated;
 
         #[cfg(not(use_stubs))]
         {
@@ -1197,6 +1215,7 @@ impl Application {
                 main_encoder,
                 sub_encoder,
                 imaging_cfg,
+                initial_rotated,
             ) {
                 Ok(p) => {
                     // Construction no longer touches the daemon, and bring-up is no

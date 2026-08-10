@@ -615,7 +615,21 @@ impl ProfileManager {
                 },
             }),
             video_source_tokens_available: video_source_tokens,
-            extension: None,
+            extension: Some(
+                crate::onvif::types::media::VideoSourceConfigurationOptionsExtension {
+                    rotate: Some(crate::onvif::types::media::RotateOptions {
+                        mode: vec![
+                            crate::onvif::types::common::RotateMode::Off,
+                            crate::onvif::types::common::RotateMode::On,
+                        ],
+                        // false, not true: per the WSDL, Reboot=true means the device
+                        // needs an actual power-cycle to apply the change. This
+                        // feature applies live via VideoControl::set_flip_mirror
+                        // (Task 3-5) — no reboot required.
+                        reboot: Some(false),
+                    }),
+                },
+            ),
         }
     }
 
@@ -1171,6 +1185,12 @@ impl ProfileManager {
             y: c.bounds.y,
             width: c.bounds.width as u32,
             height: c.bounds.height as u32,
+            rotated: c
+                .extension
+                .as_ref()
+                .and_then(|ext| ext.rotate.as_ref())
+                .map(|r| r.mode == crate::onvif::types::common::RotateMode::On)
+                .unwrap_or(false),
         }
     }
 
@@ -1264,7 +1284,14 @@ impl ProfileManager {
                 width: s.width as i32,
                 height: s.height as i32,
             },
-            extension: None,
+            extension: s.rotated.then_some(
+                crate::onvif::types::common::VideoSourceConfigurationExtension {
+                    rotate: Some(crate::onvif::types::common::Rotate {
+                        mode: crate::onvif::types::common::RotateMode::On,
+                        degree: None,
+                    }),
+                },
+            ),
         }
     }
 
@@ -2014,6 +2041,27 @@ mod tests {
     }
 
     #[test]
+    fn test_video_source_configuration_options_advertise_rotate_off_and_on() {
+        let manager = ProfileManager::new();
+        let options = manager.get_video_source_configuration_options();
+        let rotate = options
+            .extension
+            .as_ref()
+            .expect("extension should be present")
+            .rotate
+            .as_ref()
+            .expect("rotate options should be present");
+        assert_eq!(
+            rotate.mode,
+            vec![
+                crate::onvif::types::common::RotateMode::Off,
+                crate::onvif::types::common::RotateMode::On
+            ]
+        );
+        assert_eq!(rotate.reboot, Some(false));
+    }
+
+    #[test]
     fn test_profile_manager_default() {
         let manager = ProfileManager::default();
         let profiles = manager.get_profiles();
@@ -2089,5 +2137,61 @@ mod tests {
         let result =
             manager.add_video_encoder_configuration(&profile.token, &"NonExistent".to_string());
         assert!(result.is_err());
+    }
+
+    // ========================================================================
+    // Rotate bool <-> RotateMode Conversion Tests
+    // ========================================================================
+
+    fn sample_stored_video_source_config(rotated: bool) -> StoredVideoSourceConfig {
+        StoredVideoSourceConfig {
+            token: "VSC_0".to_string(),
+            source_token: "VS_0".to_string(),
+            name: "Main".to_string(),
+            use_count: 1,
+            x: 0,
+            y: 0,
+            width: 1920,
+            height: 1080,
+            rotated,
+        }
+    }
+
+    #[test]
+    fn test_stored_to_video_source_config_rotated_true_becomes_rotate_on() {
+        let stored = sample_stored_video_source_config(true);
+        let config = ProfileManager::stored_to_video_source_config(&stored);
+
+        let rotate = config
+            .extension
+            .expect("rotated: true must produce an extension")
+            .rotate
+            .expect("extension must carry a Rotate");
+        assert_eq!(rotate.mode, crate::onvif::types::common::RotateMode::On);
+        assert_eq!(rotate.degree, None);
+    }
+
+    #[test]
+    fn test_stored_to_video_source_config_rotated_false_omits_extension() {
+        let stored = sample_stored_video_source_config(false);
+        let config = ProfileManager::stored_to_video_source_config(&stored);
+
+        assert!(
+            config.extension.is_none(),
+            "rotated: false must omit the extension entirely, not emit Rotate{{Mode: Off}}"
+        );
+    }
+
+    #[test]
+    fn test_video_source_config_to_stored_roundtrips_rotated_flag() {
+        for rotated in [true, false] {
+            let stored = sample_stored_video_source_config(rotated);
+            let config = ProfileManager::stored_to_video_source_config(&stored);
+            let roundtripped = ProfileManager::video_source_config_to_stored(&config);
+            assert_eq!(
+                roundtripped.rotated, rotated,
+                "rotated={rotated} must survive a stored -> ONVIF -> stored roundtrip"
+            );
+        }
     }
 }

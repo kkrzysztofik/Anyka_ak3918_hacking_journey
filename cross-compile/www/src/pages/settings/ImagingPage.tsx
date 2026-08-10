@@ -9,6 +9,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Camera,
   Contrast,
+  FlipVertical,
   Lightbulb,
   Moon,
   Palette,
@@ -37,7 +38,12 @@ import {
   getImagingSettings,
   setImagingSettings,
 } from '@/services/imagingService';
-import { getProfiles } from '@/services/profileService';
+import {
+  type VideoSourceConfiguration,
+  getProfiles,
+  getVideoSourceConfiguration,
+  setVideoSourceConfiguration,
+} from '@/services/profileService';
 import { type AuxiliaryCommand, sendAuxiliaryCommand } from '@/services/ptzService';
 
 const IR_CUT_LABELS: Record<'AUTO' | 'ON' | 'OFF', string> = {
@@ -45,6 +51,9 @@ const IR_CUT_LABELS: Record<'AUTO' | 'ON' | 'OFF', string> = {
   ON: 'Day Mode',
   OFF: 'Night Mode',
 };
+
+/** This backend exposes exactly one video source configuration. */
+const VIDEO_SOURCE_CONFIG_TOKEN = 'VideoSourceConfig_0';
 
 export default function ImagingPage() {
   const queryClient = useQueryClient();
@@ -148,6 +157,38 @@ export default function ImagingPage() {
     mutationFn: (command: AuxiliaryCommand) => sendAuxiliaryCommand(profileToken, command),
     onError: (error) => {
       toast.error('Failed to set lamp', {
+        description: error instanceof Error ? error.message : 'An error occurred',
+      });
+    },
+  });
+
+  // Orientation lives in the Media service, not Imaging, and applies live —
+  // so it is its own query/mutation pair and is not part of the Save button.
+  const { data: videoSourceConfig } = useQuery<VideoSourceConfiguration | null>({
+    queryKey: ['videoSourceConfig', VIDEO_SOURCE_CONFIG_TOKEN],
+    queryFn: () => getVideoSourceConfiguration(VIDEO_SOURCE_CONFIG_TOKEN),
+  });
+
+  const rotateMutation = useMutation({
+    mutationFn: (rotated: boolean) => {
+      if (!videoSourceConfig) {
+        throw new Error('Video source configuration unavailable');
+      }
+      // Send the whole configuration back: the device replaces the stored
+      // one wholesale, so omitted fields would be lost.
+      return setVideoSourceConfiguration({
+        ...videoSourceConfig,
+        rotate: rotated ? 'ON' : 'OFF',
+      });
+    },
+    onSuccess: () => {
+      toast.success('Image orientation updated');
+      queryClient.invalidateQueries({
+        queryKey: ['videoSourceConfig', VIDEO_SOURCE_CONFIG_TOKEN],
+      });
+    },
+    onError: (error) => {
+      toast.error('Failed to update image orientation', {
         description: error instanceof Error ? error.message : 'An error occurred',
       });
     },
@@ -335,6 +376,44 @@ export default function ImagingPage() {
                   step={1}
                   onValueChange={([val]) => updateSetting('sharpness', val)}
                   className="py-1"
+                />
+              </div>
+            </SettingsCardContent>
+          </SettingsCard>
+
+          {/* Orientation */}
+          <SettingsCard>
+            <SettingsCardHeader>
+              <div className="flex items-center gap-[12px]">
+                <div className="flex size-[40px] items-center justify-center rounded-[10px] bg-[rgba(10,132,255,0.1)]">
+                  <FlipVertical className="size-5 text-[#0a84ff]" />
+                </div>
+                <div>
+                  <SettingsCardTitle data-testid="imaging-orientation-title">
+                    Orientation
+                  </SettingsCardTitle>
+                  <SettingsCardDescription>
+                    Correct an upside-down camera mount
+                  </SettingsCardDescription>
+                </div>
+              </div>
+            </SettingsCardHeader>
+            <SettingsCardContent className="space-y-[24px]">
+              <div className="flex items-center justify-between gap-[16px]">
+                <div className="space-y-[4px]">
+                  <Label className="text-[#e5e5e5]" htmlFor="imaging-flip-switch">
+                    Flip image 180°
+                  </Label>
+                  <p className="text-[13px] text-[#a1a1a6]">
+                    Applies immediately to the live stream
+                  </p>
+                </div>
+                <Switch
+                  id="imaging-flip-switch"
+                  checked={videoSourceConfig?.rotate === 'ON'}
+                  onCheckedChange={(checked) => rotateMutation.mutate(checked)}
+                  disabled={!videoSourceConfig || rotateMutation.isPending}
+                  data-testid="imaging-flip-switch"
                 />
               </div>
             </SettingsCardContent>

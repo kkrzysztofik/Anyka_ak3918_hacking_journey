@@ -511,6 +511,21 @@ pub trait ImagingControl: Send + Sync {
     }
 }
 
+/// Video geometry control — currently just 180° flip/mirror.
+///
+/// Mirrors [`ImagingControl`]'s shape: live-apply on set, with the caller
+/// responsible for persistence. Kept separate from `ImagingControl` because
+/// it operates on the VI device, not the ISP.
+#[cfg_attr(test, automock)]
+#[async_trait]
+pub trait VideoControl: Send + Sync {
+    /// Set 180° flip/mirror. `true` rotates the image 180°, `false` restores
+    /// normal orientation. There is no intermediate state — the vendor VI API
+    /// only exposes independent flip/mirror flags, and this crate always
+    /// drives them together (see the design doc for why).
+    async fn set_flip_mirror(&self, rotated: bool) -> PlatformResult<()>;
+}
+
 // ============================================================================
 // Network Information
 // ============================================================================
@@ -710,6 +725,9 @@ pub trait Platform: Send + Sync {
 
     /// Get imaging control interface (optional).
     fn imaging_control(&self) -> Option<Arc<dyn ImagingControl>>;
+
+    /// Get video geometry control interface (optional).
+    fn video_control(&self) -> Option<Arc<dyn VideoControl>>;
 
     /// Get network information interface (optional).
     fn network_info(&self) -> Option<Arc<dyn NetworkInfo>>;

@@ -13,7 +13,7 @@ use super::{
     AnykaIpc, CMD_GET_ERROR_NO, CMD_GET_ERROR_STR, CMD_VENC_CANCEL_STREAM, CMD_VENC_CLOSE,
     CMD_VENC_OPEN, CMD_VENC_REQUEST_STREAM, CMD_VENC_SET_IFRAME, CMD_VENC_SET_RC,
     CMD_VI_CAPTURE_OFF, CMD_VI_CAPTURE_ON, CMD_VI_CLOSE, CMD_VI_GET_SENSOR_RESOLUTION,
-    CMD_VI_MATCH_SENSOR, CMD_VI_OPEN, CMD_VI_SET_CHANNEL_ATTR,
+    CMD_VI_MATCH_SENSOR, CMD_VI_OPEN, CMD_VI_SET_CHANNEL_ATTR, CMD_VI_SET_FLIP_MIRROR,
 };
 
 impl VideoHalTrait for AnykaIpc {
@@ -127,6 +127,20 @@ impl VideoHalTrait for AnykaIpc {
             Ok((status, _)) => status,
             Err(e) => {
                 error!(error = %e, "vi_capture_off IPC failed");
+                AK_FAILED_I32
+            }
+        }
+    }
+
+    fn vi_set_flip_mirror(&self, handle: *mut c_void, flip: bool, mirror: bool) -> i32 {
+        let handle_val = handle as u64;
+        let mut req_data = handle_val.to_le_bytes().to_vec();
+        req_data.push(flip as u8);
+        req_data.push(mirror as u8);
+        match self.send_request(CMD_VI_SET_FLIP_MIRROR, &req_data) {
+            Ok((status, _)) => status,
+            Err(e) => {
+                error!(error = %e, "vi_set_flip_mirror IPC failed");
                 AK_FAILED_I32
             }
         }

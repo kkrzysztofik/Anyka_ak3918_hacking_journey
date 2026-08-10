@@ -44,6 +44,24 @@ export interface MediaProfile {
 
 export type VideoEncoding = 'H264' | 'H265' | 'JPEG' | 'MPEG4';
 
+/** ONVIF `tt:RotateMode`. The device advertises only these two. */
+export type RotateMode = 'OFF' | 'ON';
+
+export interface VideoSourceConfiguration {
+  token: string;
+  name: string;
+  useCount: number;
+  sourceToken: string;
+  bounds: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  };
+  /** `ON` means the image is rotated 180°. */
+  rotate: RotateMode;
+}
+
 export interface VideoEncoderConfiguration {
   token: string;
   name: string;
@@ -381,6 +399,88 @@ export async function setVideoEncoderConfiguration(
   </trt:SetVideoEncoderConfiguration>`;
 
   await soapRequest(ENDPOINTS.media, body, 'SetVideoEncoderConfigurationResponse');
+}
+
+/**
+ * Get a single video source configuration by token
+ */
+export async function getVideoSourceConfiguration(
+  token: string,
+): Promise<VideoSourceConfiguration | null> {
+  // NOSONAR - Token comes from device response (trusted source), not user input
+  const body = `<trt:GetVideoSourceConfiguration>
+    <trt:ConfigurationToken>${token}</trt:ConfigurationToken>
+  </trt:GetVideoSourceConfiguration>`;
+
+  try {
+    const data = await soapRequest<Record<string, unknown>>(
+      ENDPOINTS.media,
+      body,
+      'GetVideoSourceConfigurationResponse',
+    );
+    const config = data?.Configuration as Record<string, unknown> | undefined;
+
+    if (!config) {
+      return null;
+    }
+
+    const bounds = config.Bounds as Record<string, unknown> | undefined;
+    const extension = config.Extension as Record<string, unknown> | undefined;
+    const rotate = extension?.Rotate as Record<string, unknown> | undefined;
+
+    return {
+      token: safeString(config['@_token'], ''),
+      name: safeString(config.Name, ''),
+      useCount: Number(config.UseCount || 0),
+      sourceToken: safeString(config.SourceToken, ''),
+      bounds: {
+        x: Number(bounds?.['@_x'] || 0),
+        y: Number(bounds?.['@_y'] || 0),
+        width: Number(bounds?.['@_width'] || 0),
+        height: Number(bounds?.['@_height'] || 0),
+      },
+      // A device with no Extension has never had rotation set, which is OFF.
+      rotate: safeString(rotate?.Mode, 'OFF') === 'ON' ? 'ON' : 'OFF',
+    };
+  } catch (error) {
+    console.warn('Failed to get video source configuration:', error);
+    return null;
+  }
+}
+
+/**
+ * Set video source configuration.
+ *
+ * The device replaces the stored configuration wholesale, so every field is
+ * sent back — fetch the current config with `getVideoSourceConfiguration`,
+ * change only what you mean to change, and pass the whole thing here.
+ * Sending placeholder bounds would blank the persisted resolution.
+ */
+export async function setVideoSourceConfiguration(
+  config: VideoSourceConfiguration,
+  forcePersistence: boolean = true,
+): Promise<void> {
+  // NOSONAR - Token from device, but escaping for defense-in-depth
+  const escapedToken = escapeXmlAttribute(config.token);
+  const escapedName = escapeXml(config.name);
+  const escapedSourceToken = escapeXml(config.sourceToken);
+
+  const body = `<trt:SetVideoSourceConfiguration>
+    <trt:Configuration token="${escapedToken}">
+      <tt:Name>${escapedName}</tt:Name>
+      <tt:UseCount>${config.useCount}</tt:UseCount>
+      <tt:SourceToken>${escapedSourceToken}</tt:SourceToken>
+      <tt:Bounds x="${config.bounds.x}" y="${config.bounds.y}" width="${config.bounds.width}" height="${config.bounds.height}" />
+      <tt:Extension>
+        <tt:Rotate>
+          <tt:Mode>${config.rotate}</tt:Mode>
+        </tt:Rotate>
+      </tt:Extension>
+    </trt:Configuration>
+    <trt:ForcePersistence>${forcePersistence}</trt:ForcePersistence>
+  </trt:SetVideoSourceConfiguration>`;
+
+  await soapRequest(ENDPOINTS.media, body, 'SetVideoSourceConfigurationResponse');
 }
 
 /**

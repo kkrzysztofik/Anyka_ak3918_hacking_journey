@@ -746,15 +746,21 @@ git commit -m "feat(onvif-rust): add typed Rotate extension, wire VideoSourceCon
 
 **Step 1: Populate the new options field**
 
-In `get_video_source_configuration_options`, add to the `VideoSourceConfigurationOptions { ... }` literal, replacing `extension: None,`'s neighbor (add a new field, `extension` stays `None`):
+Correction from the original Task 8 draft: `Rotate` is nested inside `VideoSourceConfigurationOptionsExtension` (the type of `.extension`), not a top-level sibling field — verified against `wsdl/onvif.xsd` during Task 7-8's review after the first pass got this wrong and had to be fixed. In `get_video_source_configuration_options`, replace the `extension: None,` field of the `VideoSourceConfigurationOptions { ... }` literal:
 
 ```rust
-            rotate: Some(crate::onvif::types::media::RotateOptions {
-                mode: vec![
-                    crate::onvif::types::common::RotateMode::Off,
-                    crate::onvif::types::common::RotateMode::On,
-                ],
-                reboot: Some(true),
+            extension: Some(crate::onvif::types::media::VideoSourceConfigurationOptionsExtension {
+                rotate: Some(crate::onvif::types::media::RotateOptions {
+                    mode: vec![
+                        crate::onvif::types::common::RotateMode::Off,
+                        crate::onvif::types::common::RotateMode::On,
+                    ],
+                    // false, not true: per the WSDL, Reboot=true means the device
+                    // needs an actual power-cycle to apply the change. This
+                    // feature applies live via VideoControl::set_flip_mirror
+                    // (Task 3-5) — no reboot required.
+                    reboot: Some(false),
+                }),
             }),
 ```
 
