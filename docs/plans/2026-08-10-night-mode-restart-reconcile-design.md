@@ -59,7 +59,7 @@ Three silent paths compounded:
 | D2 | Delete `read_initial_state` and the `IR_LED` seed |
 | D3 | No start-up apply in AUTO; the first determinate reading reconciles GPIO and ISP together |
 | D4 | Rate-limited `info!` sampling: on classification change, or every ~10 min |
-| D5 | `warn!` on `get_ae_luma`'s silent non-success arm |
+| D5 | `error!` on `get_ae_luma`'s silent non-success arm, matching the sibling `Err` arm and surviving `level = "error"` |
 | D6 | One-shot `warn!` if still unsynced after the first few ticks |
 | D7 | `EnvFilter` directive pins the night-mode target to `info` regardless of `logging.level` |
 
