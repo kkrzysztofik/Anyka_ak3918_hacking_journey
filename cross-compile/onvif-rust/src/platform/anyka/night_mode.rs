@@ -63,14 +63,18 @@ pub(super) struct Thresholds {
 }
 
 /// Current AUTO-mode state: what the camera is set to, and when it last moved.
+///
+/// `current` is `None` until this controller has driven the hardware itself.
+/// GPIO survives a restart and the vendor daemon's ISP state does not, so a
+/// mode we merely inferred is not something we may act on. See the design doc.
 #[derive(Debug, Clone, Copy)]
 pub(super) struct AutoState {
-    pub(super) current: DayNight,
+    pub(super) current: Option<DayNight>,
     last_change: Option<std::time::Instant>,
 }
 
 impl AutoState {
-    pub(super) fn new(current: DayNight) -> Self {
+    pub(super) fn new(current: Option<DayNight>) -> Self {
         Self {
             current,
             last_change: None,
@@ -79,7 +83,7 @@ impl AutoState {
 
     /// Record that a transition has been applied.
     pub(super) fn record_change(&mut self, to: DayNight, at: std::time::Instant) {
-        self.current = to;
+        self.current = Some(to);
         self.last_change = Some(at);
     }
 }
@@ -89,6 +93,9 @@ impl AutoState {
 /// Returns `None` to hold the current mode. A `None` reading (inside the
 /// hysteresis band) always holds; so does any reading inside `lock` of the last
 /// transition, which is what stops a camera oscillating at dusk.
+///
+/// A `None` `state.current` never matches, so the first determinate reading
+/// after start-up always transitions — that is the ISP reconcile.
 pub(super) fn decide(
     state: &AutoState,
     reading: Option<DayNight>,
@@ -96,7 +103,7 @@ pub(super) fn decide(
     lock: Duration,
 ) -> Option<DayNight> {
     let target = reading?;
-    if target == state.current {
+    if state.current == Some(target) {
         return None;
     }
     if let Some(last) = state.last_change
@@ -298,9 +305,9 @@ impl NightModeController {
         // it is Day while the illuminator is still on. Forced modes keep their
         // fixed start so ON/OFF always lands where the user asked.
         let initial = match mode {
-            IrCutFilterMode::OFF => DayNight::Night,
-            IrCutFilterMode::ON => DayNight::Day,
-            IrCutFilterMode::AUTO => read_initial_state(&paths),
+            IrCutFilterMode::OFF => Some(DayNight::Night),
+            IrCutFilterMode::ON => Some(DayNight::Day),
+            IrCutFilterMode::AUTO => Some(read_initial_state(&paths)),
         };
         Self {
             paths,
@@ -319,8 +326,9 @@ impl NightModeController {
         self.caps
     }
 
-    /// The day/night state the hardware was last driven to.
-    pub(crate) async fn current_mode(&self) -> DayNight {
+    /// The day/night state the hardware was last driven to, or `None` if this
+    /// controller has not driven it yet.
+    pub(crate) async fn current_mode(&self) -> Option<DayNight> {
         self.state.lock().await.current
     }
 
@@ -746,11 +754,11 @@ mod tests {
             None,
         );
 
-        assert_eq!(ctl.current_mode().await, DayNight::Night);
+        assert_eq!(ctl.current_mode().await, Some(DayNight::Night));
 
         // The AUTO loop must not undo a configured forced mode.
         ctl.tick().await;
-        assert_eq!(ctl.current_mode().await, DayNight::Night);
+        assert_eq!(ctl.current_mode().await, Some(DayNight::Night));
     }
 
     #[tokio::test]
@@ -779,10 +787,10 @@ mod tests {
             IrCutFilterMode::AUTO,
             None,
         );
-        assert_eq!(ctl.current_mode().await, DayNight::Day);
+        assert_eq!(ctl.current_mode().await, Some(DayNight::Day));
 
         ctl.tick().await;
-        assert_eq!(ctl.current_mode().await, DayNight::Night);
+        assert_eq!(ctl.current_mode().await, Some(DayNight::Night));
     }
 
     #[tokio::test]
@@ -817,11 +825,11 @@ mod tests {
         );
 
         ctl.tick().await;
-        assert_eq!(ctl.current_mode().await, DayNight::Day);
+        assert_eq!(ctl.current_mode().await, Some(DayNight::Day));
         ctl.tick().await;
-        assert_eq!(ctl.current_mode().await, DayNight::Day);
+        assert_eq!(ctl.current_mode().await, Some(DayNight::Day));
         ctl.tick().await;
-        assert_eq!(ctl.current_mode().await, DayNight::Night);
+        assert_eq!(ctl.current_mode().await, Some(DayNight::Night));
     }
 
     #[tokio::test]
@@ -853,7 +861,7 @@ mod tests {
         ctl.tick().await;
         ctl.tick().await;
         ctl.tick().await;
-        assert_eq!(ctl.current_mode().await, DayNight::Day);
+        assert_eq!(ctl.current_mode().await, Some(DayNight::Day));
     }
 
     #[tokio::test]
@@ -895,7 +903,7 @@ mod tests {
         ctl.tick().await;
         ctl.tick().await;
         ctl.tick().await;
-        assert_eq!(ctl.current_mode().await, DayNight::Day);
+        assert_eq!(ctl.current_mode().await, Some(DayNight::Day));
     }
 
     #[test]
@@ -1007,13 +1015,13 @@ mod tests {
             IrCutFilterMode::AUTO,
             None,
         );
-        assert_eq!(ctl.current_mode().await, DayNight::Day);
+        assert_eq!(ctl.current_mode().await, Some(DayNight::Day));
 
         assert!(ctl.apply(DayNight::Night).await.is_err());
 
         // A failed transition must not be recorded: AUTO would otherwise
         // believe the camera is at Night and never retry the transition.
-        assert_eq!(ctl.current_mode().await, DayNight::Day);
+        assert_eq!(ctl.current_mode().await, Some(DayNight::Day));
     }
 
     fn thr() -> Thresholds {
@@ -1170,7 +1178,7 @@ mod tests {
     #[test]
     fn test_decide_switches_when_reading_differs_and_unlocked() {
         let t0 = std::time::Instant::now();
-        let state = AutoState::new(DayNight::Day);
+        let state = AutoState::new(Some(DayNight::Day));
 
         let target = decide(&state, Some(DayNight::Night), t0, Duration::from_secs(900));
 
@@ -1180,7 +1188,7 @@ mod tests {
     #[test]
     fn test_decide_holds_when_reading_matches_current_mode() {
         let t0 = std::time::Instant::now();
-        let state = AutoState::new(DayNight::Day);
+        let state = AutoState::new(Some(DayNight::Day));
 
         let target = decide(&state, Some(DayNight::Day), t0, Duration::from_secs(900));
 
@@ -1190,7 +1198,7 @@ mod tests {
     #[test]
     fn test_decide_holds_current_mode_on_indeterminate_reading() {
         let t0 = std::time::Instant::now();
-        let state = AutoState::new(DayNight::Day);
+        let state = AutoState::new(Some(DayNight::Day));
 
         let target = decide(&state, None, t0, Duration::from_secs(900));
 
@@ -1200,7 +1208,7 @@ mod tests {
     #[test]
     fn test_decide_refuses_to_switch_inside_the_lock_window() {
         let t0 = std::time::Instant::now();
-        let mut state = AutoState::new(DayNight::Day);
+        let mut state = AutoState::new(Some(DayNight::Day));
         state.record_change(DayNight::Night, t0);
 
         // One second later, the sensor says day again — a dusk flicker.
@@ -1217,7 +1225,7 @@ mod tests {
     #[test]
     fn test_decide_switches_again_once_the_lock_expires() {
         let t0 = std::time::Instant::now();
-        let mut state = AutoState::new(DayNight::Day);
+        let mut state = AutoState::new(Some(DayNight::Day));
         state.record_change(DayNight::Night, t0);
 
         let target = decide(
@@ -1228,6 +1236,18 @@ mod tests {
         );
 
         assert_eq!(target, Some(DayNight::Day));
+    }
+
+    #[test]
+    fn test_decide_transitions_when_the_current_state_is_unknown() {
+        // At start-up in AUTO the controller has driven nothing, so it must act on
+        // the first determinate reading rather than assume the hardware agrees.
+        let t0 = std::time::Instant::now();
+        let state = AutoState::new(None);
+
+        let target = decide(&state, Some(DayNight::Night), t0, Duration::from_secs(900));
+
+        assert_eq!(target, Some(DayNight::Night));
     }
 
     #[test]
