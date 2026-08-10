@@ -85,6 +85,23 @@ pub fn apply_wifi(cfg: &WifiCfg) -> anyhow::Result<bool> {
     Ok(true)
 }
 
+/// Reboot 10s after a panic instead of halting forever.
+///
+/// This kernel ships `kernel.panic = 0`, so a panic leaves the camera dead
+/// until someone power-cycles it. `proc_root` is a parameter only so the test
+/// can point at a tempdir; production passes `/proc/sys`.
+///
+/// Best-effort: a missing knob is normal on other kernels and must not abort
+/// boot.
+pub fn write_panic_sysctls(proc_root: &std::path::Path) {
+    for (knob, value) in [("kernel/panic", "10"), ("kernel/panic_on_oops", "1")] {
+        let path = proc_root.join(knob);
+        if let Err(e) = std::fs::write(&path, value) {
+            tracing::warn!(knob, error = %e, "could not set panic sysctl");
+        }
+    }
+}
+
 /// P2: system setup. Every step is best-effort — a camera with no sensor
 /// module is still worth reaching over SSH to diagnose.
 ///
@@ -103,6 +120,8 @@ pub fn system_setup(sys: &dyn Sys, cfg: &Config) -> Option<&'static str> {
     // started. Do not move this call after P3.
     unsafe { std::env::set_var("TZ", &cfg.time.timezone) };
     tracing::info!(tz = %cfg.time.timezone, "timezone set (supervisor process only)");
+
+    write_panic_sysctls(std::path::Path::new("/proc/sys"));
 
     if let Some(module) = &cfg.system.sensor_module {
         match sys.insmod(module) {
@@ -311,6 +330,33 @@ channel = 6
 
         let restored = std::fs::read_to_string(&path).expect("read back");
         assert_eq!(restored, SAMPLE, "backup must be restored byte-for-byte");
+    }
+
+    #[test]
+    fn test_write_panic_sysctls_writes_both_values() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let kernel = dir.path().join("kernel");
+        std::fs::create_dir_all(&kernel).expect("mkdir");
+        std::fs::write(kernel.join("panic"), "0\n").expect("seed panic");
+        std::fs::write(kernel.join("panic_on_oops"), "0\n").expect("seed oops");
+
+        write_panic_sysctls(dir.path());
+
+        assert_eq!(
+            std::fs::read_to_string(kernel.join("panic")).expect("read panic"),
+            "10"
+        );
+        assert_eq!(
+            std::fs::read_to_string(kernel.join("panic_on_oops")).expect("read oops"),
+            "1"
+        );
+    }
+
+    #[test]
+    fn test_write_panic_sysctls_is_silent_when_the_knobs_are_absent() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        // No kernel/ subdirectory at all — must not panic.
+        write_panic_sysctls(dir.path());
     }
 
     #[test]
