@@ -92,6 +92,8 @@ pub struct StoredVideoSourceConfig {
     pub y: i32,
     pub width: u32,
     pub height: u32,
+    #[serde(default)]
+    pub rotated: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -363,6 +365,7 @@ mod tests {
                 y: 0,
                 width: 1920,
                 height: 1080,
+                rotated: false,
             }],
             video_encoder_configs: vec![StoredVideoEncoderConfig {
                 token: "VEC_0".to_string(),
@@ -450,5 +453,18 @@ height = 1080
         assert!(!data.profiles[0].fixed);
         assert_eq!(data.video_sources[0].framerate, 30.0); // default
         assert!(data.audio_sources.is_empty()); // missing = empty vec
+    }
+
+    #[test]
+    fn test_stored_video_source_config_rotated_defaults_false_when_absent() {
+        let toml = r#"
+            token = "VideoSourceConfig_0"
+            source_token = "VideoSource_1"
+            name = "Main"
+            width = 1920
+            height = 1080
+        "#;
+        let cfg: StoredVideoSourceConfig = toml::from_str(toml).unwrap();
+        assert!(!cfg.rotated);
     }
 }

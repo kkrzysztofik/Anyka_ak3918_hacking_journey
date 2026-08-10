@@ -140,7 +140,7 @@ static void signal_handler(int sig)
  *   handlers_venc.c - VENC command handlers (non-push)
  *   handlers_audio.c - AI/AENC command handlers
  *   handlers_isp.c  - ISP/imaging command handlers
- *   dispatcher.c    - process_request, release_control
+ *   dispatcher.c    - process_request
  */
 
 /**
@@ -496,17 +496,14 @@ int main(int argc, char *argv[])
                 {
                     int ret = process_request(client_fd);
                     if (ret == -1) {
-                        /* Control client disconnected or I/O error —
-                         * stop push threads before releasing control so
-                         * the SDK state is clean for the next client. */
-                        log_info("[daemon] control client fd=%d disconnected, stopping push threads", client_fd);
-                        stop_push_slot(0);
-                        stop_push_slot(1);
-                        release_control(client_fd);
-                        close(client_fd);
-                        fds[i] = fds[nfds - 1];
-                        nfds--;
-                        i--;
+                        /* Crash-only: this daemon exists to serve one control
+                         * client. The sweep that used to run here could not
+                         * fully clean the SDK -- the next client's
+                         * ak_venc_request_stream returned null. Exiting lets
+                         * the kernel close /dev/ion, /dev/video0 and /dev/uio0,
+                         * and anyka-init restarts the pair. */
+                        log_info("[daemon] control client fd=%d disconnected; exiting", client_fd);
+                        _exit(1);
                     } else if (ret == -2) {
                         /* CMD_SHUTDOWN */
                         g_shutdown = 1;
@@ -522,7 +519,6 @@ int main(int argc, char *argv[])
         int i;
         int first_client_idx = 3;
         for (i = first_client_idx; i < nfds; i++) {
-            release_control(fds[i].fd);
             close(fds[i].fd);
         }
     }

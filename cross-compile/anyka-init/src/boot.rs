@@ -85,6 +85,41 @@ pub fn apply_wifi(cfg: &WifiCfg) -> anyhow::Result<bool> {
     Ok(true)
 }
 
+/// Reboot 10s after a panic instead of halting forever.
+///
+/// This kernel ships `kernel.panic = 0`, so a panic leaves the camera dead
+/// until someone power-cycles it. `proc_root` is a parameter only so the test
+/// can point at a tempdir; production passes `/proc/sys`. Called from `main`
+/// rather than `system_setup` so the host test suite never touches the real
+/// `/proc/sys` — every other side effect in `system_setup` routes through the
+/// injected `Sys` or a config-supplied path, and this one cannot.
+///
+/// Best-effort: a missing knob is normal on other kernels and must not abort
+/// boot.
+pub fn write_panic_sysctls(proc_root: &std::path::Path) {
+    for (knob, value) in [("kernel/panic", "10"), ("kernel/panic_on_oops", "1")] {
+        let path = proc_root.join(knob);
+        if let Err(e) = std::fs::write(&path, value) {
+            tracing::warn!(knob, error = %e, "could not set panic sysctl");
+        }
+    }
+}
+
+/// Make this process the OOM killer's last choice.
+///
+/// The supervisor is the one process whose death cannot be recovered from in
+/// software: `/usr/sbin/service.sh` has no respawn loop, so if anyka-init dies
+/// every service is orphaned and only a power cycle brings the camera back.
+/// `path` is a parameter for the same reason `write_panic_sysctls` takes
+/// `proc_root`: production passes `/proc/self/oom_score_adj`, the test a
+/// tempdir, so the host suite never rewrites the real machine's score when it
+/// happens to run as root. Best-effort — a write failure must not abort boot.
+pub fn protect_from_oom_killer(path: &std::path::Path) {
+    if let Err(e) = std::fs::write(path, "-1000") {
+        tracing::warn!(error = %e, "could not set oom_score_adj");
+    }
+}
+
 /// P2: system setup. Every step is best-effort — a camera with no sensor
 /// module is still worth reaching over SSH to diagnose.
 ///
@@ -311,6 +346,44 @@ channel = 6
 
         let restored = std::fs::read_to_string(&path).expect("read back");
         assert_eq!(restored, SAMPLE, "backup must be restored byte-for-byte");
+    }
+
+    #[test]
+    fn test_write_panic_sysctls_writes_both_values() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let kernel = dir.path().join("kernel");
+        std::fs::create_dir_all(&kernel).expect("mkdir");
+        std::fs::write(kernel.join("panic"), "0\n").expect("seed panic");
+        std::fs::write(kernel.join("panic_on_oops"), "0\n").expect("seed oops");
+
+        write_panic_sysctls(dir.path());
+
+        assert_eq!(
+            std::fs::read_to_string(kernel.join("panic")).expect("read panic"),
+            "10"
+        );
+        assert_eq!(
+            std::fs::read_to_string(kernel.join("panic_on_oops")).expect("read oops"),
+            "1"
+        );
+    }
+
+    #[test]
+    fn test_write_panic_sysctls_does_not_panic_when_the_knobs_are_absent() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        // No kernel/ subdirectory at all — must not panic.
+        write_panic_sysctls(dir.path());
+    }
+
+    #[test]
+    fn test_protect_from_oom_killer_writes_the_minimum_score() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("oom_score_adj");
+        std::fs::write(&path, "0\n").expect("seed");
+
+        protect_from_oom_killer(&path);
+
+        assert_eq!(std::fs::read_to_string(&path).expect("read"), "-1000");
     }
 
     #[test]

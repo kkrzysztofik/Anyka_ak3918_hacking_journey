@@ -50,6 +50,8 @@ pub(crate) trait ImagingHalTrait: Send + Sync {
     async fn set_sharpness(&self, value: i32) -> i32;
     async fn set_ir_filter(&self, enabled: bool) -> i32;
     async fn set_wdr(&self, enabled: bool) -> i32;
+    /// AE average luma (`current_calc_avg_lumi`), or `None` if unavailable.
+    async fn get_ae_luma(&self) -> Option<u8>;
 }
 
 /// Validate ONVIF imaging parameter range (0.0-100.0).

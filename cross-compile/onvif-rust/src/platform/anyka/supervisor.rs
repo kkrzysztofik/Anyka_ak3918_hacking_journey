@@ -58,6 +58,36 @@ pub fn poll_epoch_once(ipc: &AnykaIpc, tx: &watch::Sender<Availability>) {
     }
 }
 
+/// `GivenUp` means the breaker latched open: the daemon is alive but the
+/// pipeline cannot be built. Staying alive in that state leaves the camera
+/// dark with no supervisor visibility, so it is fatal. `Unavailable` is
+/// transient and must not be.
+pub fn availability_is_fatal(a: Availability) -> bool {
+    matches!(a, Availability::GivenUp)
+}
+
+/// Watch the availability channel and call `on_fatal` once if the breaker
+/// latches open.
+///
+/// The exit is injected so the decision is testable without killing the test
+/// runner; production passes a closure that logs and calls `process::exit(1)`.
+pub fn watch_for_fatal(
+    mut rx: watch::Receiver<Availability>,
+    on_fatal: impl Fn() + Send + 'static,
+) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        loop {
+            if availability_is_fatal(*rx.borrow_and_update()) {
+                on_fatal();
+                return;
+            }
+            if rx.changed().await.is_err() {
+                return;
+            }
+        }
+    })
+}
+
 /// Wait for peer loss, from whichever detector notices first.
 ///
 /// Detection is layered, fastest first:
@@ -539,6 +569,47 @@ mod tests {
         async fn wait_for_loss(&self, tx: &watch::Sender<Availability>) {
             self.seen_while_waiting.lock().unwrap().push(*tx.borrow());
         }
+    }
+
+    #[test]
+    fn test_given_up_is_fatal_but_unavailable_is_not() {
+        assert!(availability_is_fatal(Availability::GivenUp));
+        assert!(!availability_is_fatal(Availability::Unavailable));
+        assert!(!availability_is_fatal(Availability::Available));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn test_watch_for_fatal_calls_the_callback_on_given_up() {
+        let (tx, rx) = watch::channel(Availability::Unavailable);
+        let fired = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let fired_clone = std::sync::Arc::clone(&fired);
+        let handle = watch_for_fatal(rx, move || {
+            fired_clone.store(true, std::sync::atomic::Ordering::SeqCst);
+        });
+
+        let _ = tx.send(Availability::Unavailable);
+        tokio::task::yield_now().await;
+        assert!(!fired.load(std::sync::atomic::Ordering::SeqCst));
+
+        let _ = tx.send(Availability::GivenUp);
+        tokio::task::yield_now().await;
+        assert!(fired.load(std::sync::atomic::Ordering::SeqCst));
+        handle.abort();
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn test_watch_for_fatal_does_not_fire_on_available() {
+        let (tx, rx) = watch::channel(Availability::Unavailable);
+        let fired = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let fired_clone = std::sync::Arc::clone(&fired);
+        let handle = watch_for_fatal(rx, move || {
+            fired_clone.store(true, std::sync::atomic::Ordering::SeqCst);
+        });
+
+        let _ = tx.send(Availability::Available);
+        tokio::task::yield_now().await;
+        assert!(!fired.load(std::sync::atomic::Ordering::SeqCst));
+        handle.abort();
     }
 
     #[tokio::test(start_paused = true)]

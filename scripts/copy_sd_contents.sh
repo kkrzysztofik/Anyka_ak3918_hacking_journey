@@ -22,8 +22,10 @@ source "${SCRIPT_DIR}/common.sh"
 MODE=""
 SD_MOUNT=""
 FTP_HOST=""
-FTP_USER="admin"
-FTP_PASS="admin"
+# The camera's FTP account is root, not admin. The password is a secret: pass it
+# with --pass or export ANYKA_FTP_PASS. Never hardcode it here.
+FTP_USER="root"
+FTP_PASS="${ANYKA_FTP_PASS:-}"
 REMOTE_ROOT="/mnt"
 DRY_RUN=false
 DO_DELETE=false
@@ -40,8 +42,8 @@ Modes (exactly one):
   --ftp HOST          Camera IP/hostname (uploads under /mnt)
 
 Options:
-  --user NAME         FTP username (default: admin)
-  --pass PASS         FTP password (default: admin)
+  --user NAME         FTP username (default: root)
+  --pass PASS         FTP password (default: $ANYKA_FTP_PASS env var)
   --remote-root PATH  Remote SD mount root (default: /mnt)
   --delete            Remove destination files not present in source
   --dry-run           Show what would be copied without writing

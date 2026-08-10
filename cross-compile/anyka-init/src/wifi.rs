@@ -242,6 +242,13 @@ pub fn wpa_supplicant_conf(ssid: &str, psk: &str, sec: Security) -> String {
     s.push_str("update_config=1\n\n");
     s.push_str("network={\n");
     s.push_str(&format!("\tssid=\"{ssid}\"\n"));
+    // Probe actively instead of waiting to hear a beacon. Required for an SSID
+    // that does not broadcast, and materially faster to acquire at the edge of
+    // range: a directed probe request draws a probe response, where passive
+    // scanning has to catch a beacon that may not survive the path loss. .121
+    // roams between a router at -49 dBm and a mesh satellite at -85 dBm, and on
+    // the satellite it repeatedly failed to associate inside connect_timeout.
+    s.push_str("\tscan_ssid=1\n");
     match sec {
         Security::Wpa => {
             s.push_str("\tkey_mgmt=WPA-PSK\n");
@@ -882,6 +889,24 @@ mod tests {
         let out = wpa_supplicant_conf("guest", "", Security::Open);
         assert!(out.contains("key_mgmt=NONE"));
         assert!(!out.contains("psk="));
+    }
+
+    /// Without `scan_ssid=1` wpa_supplicant only associates to a network it
+    /// has heard a beacon from. With it, it sends a directed probe request and
+    /// associates on the probe response. On .121 the camera sits between a
+    /// router at -49 dBm and a mesh satellite at -85 dBm and roams between
+    /// them; at the far end, waiting for a beacon inside the 45 s
+    /// connect_timeout is unreliable. Also required outright if an SSID is ever
+    /// configured not to broadcast.
+    #[test]
+    fn test_wpa_supplicant_conf_probes_actively_for_the_ssid() {
+        for sec in [Security::Wpa, Security::Wep, Security::Open] {
+            let out = wpa_supplicant_conf("net", "password", sec);
+            assert!(
+                out.contains("scan_ssid=1"),
+                "every security mode must probe actively, missing for {sec:?}"
+            );
+        }
     }
 
     #[test]

@@ -12,7 +12,7 @@
 
 use bytes::BytesMut;
 use parking_lot::{Mutex, RwLock};
-use portable_atomic::{AtomicU32, AtomicU64, AtomicUsize};
+use portable_atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize};
 use std::collections::VecDeque;
 use std::sync::Arc;
 use std::time::Instant;
@@ -320,6 +320,12 @@ pub struct StreamState {
     pub last_timestamp_ms: Arc<AtomicU32>,
     /// Cached latest IDR frame for late-joining subscribers (updated on every I-frame).
     pub bootstrap_idr: RwLock<Option<Vec<u8>>>,
+    /// Set once the missing-SPS/PPS warning has been logged for this stream.
+    ///
+    /// The warning is per-stream, not per-frame: at 15 fps a per-frame log line
+    /// costs ~184 MB/day of SD writes. A stream restart rebuilds `StreamState`
+    /// (see `new_with_cached_params`), so this flag resets on its own.
+    pub missing_params_warned: AtomicBool,
 }
 
 /// Bridge that receives raw SDK frames and routes them to streaming channels.
@@ -375,6 +381,7 @@ impl StreamingBridge {
                 pps: RwLock::new(main_cached.pps),
                 last_timestamp_ms: Arc::new(AtomicU32::new(0)),
                 bootstrap_idr: RwLock::new(None),
+                missing_params_warned: AtomicBool::new(false),
             },
             sub_stream: StreamState {
                 frame_queue: sub_queue,
@@ -382,6 +389,7 @@ impl StreamingBridge {
                 pps: RwLock::new(sub_cached.pps),
                 last_timestamp_ms: Arc::new(AtomicU32::new(0)),
                 bootstrap_idr: RwLock::new(None),
+                missing_params_warned: AtomicBool::new(false),
             },
             audio_config: RwLock::new(None),
             audio_sample_rate,
@@ -548,17 +556,31 @@ impl StreamingBridge {
             let has_cached_pps = stream.pps.read().is_some();
 
             if !has_cached_sps || !has_cached_pps {
-                tracing::warn!(
-                    stream = ?stream_id,
-                    idr_hint,
-                    found_idr_nal,
-                    found_sps,
-                    found_pps,
-                    has_cached_sps,
-                    has_cached_pps,
-                    idr_size = data.len(),
-                    "IDR frame missing SPS/PPS and cache incomplete"
-                );
+                // Once per stream, not per frame: at frame rate this line cost
+                // ~184 MB/day of SD writes. A stream restart rebuilds
+                // StreamState, so the flag resets then.
+                if stream
+                    .missing_params_warned
+                    .compare_exchange(
+                        false,
+                        true,
+                        portable_atomic::Ordering::Relaxed,
+                        portable_atomic::Ordering::Relaxed,
+                    )
+                    .is_ok()
+                {
+                    tracing::warn!(
+                        stream = ?stream_id,
+                        idr_hint,
+                        found_idr_nal,
+                        found_sps,
+                        found_pps,
+                        has_cached_sps,
+                        has_cached_pps,
+                        idr_size = data.len(),
+                        "IDR frame missing SPS/PPS and cache incomplete"
+                    );
+                }
             } else {
                 tracing::trace!(
                     stream = ?stream_id,
@@ -779,6 +801,43 @@ mod tests {
         let cached = bridge.main_stream.bootstrap_idr.read();
         assert!(cached.is_some());
         assert_eq!(cached.as_ref().unwrap(), &idr_frame);
+    }
+
+    #[test]
+    fn test_bridge_warns_once_per_stream_for_missing_params() {
+        let bridge = make_bridge();
+
+        // IDR NAL (type 5) with no inline SPS/PPS: exercises the warning path.
+        let idr_only = vec![0x00, 0x00, 0x00, 0x01, 0x65, 0x88, 0x84, 0x21, 0xA0];
+        let data = BytesMut::from(idr_only.as_slice());
+
+        bridge.update_video_metadata(StreamId::VideoMain, 2000, &data, true);
+        assert!(
+            bridge
+                .main_stream
+                .missing_params_warned
+                .load(portable_atomic::Ordering::Relaxed),
+            "first missing-params frame must mark the stream as warned"
+        );
+
+        // A second frame must not re-warn; the flag stays latched.
+        bridge.update_video_metadata(StreamId::VideoMain, 2000, &data, true);
+        assert!(
+            bridge
+                .main_stream
+                .missing_params_warned
+                .load(portable_atomic::Ordering::Relaxed),
+            "flag stays set across repeated frames"
+        );
+
+        // The sub stream is independent.
+        assert!(
+            !bridge
+                .sub_stream
+                .missing_params_warned
+                .load(portable_atomic::Ordering::Relaxed),
+            "sub stream must not inherit the main stream's latch"
+        );
     }
 
     #[test]

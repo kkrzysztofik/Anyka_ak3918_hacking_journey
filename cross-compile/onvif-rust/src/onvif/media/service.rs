@@ -225,11 +225,16 @@ impl MediaService {
     }
 
     /// Handle SetVideoSourceConfiguration request.
-    pub fn handle_set_video_source_configuration(
+    pub async fn handle_set_video_source_configuration(
         &self,
         request: SetVideoSourceConfiguration,
     ) -> OnvifResult<SetVideoSourceConfigurationResponse> {
-        video_source_ops::set_video_source_configuration(&self.profile_manager, request)
+        video_source_ops::set_video_source_configuration(
+            &self.profile_manager,
+            self.platform.as_ref(),
+            request,
+        )
+        .await
     }
 
     /// Handle GetVideoSourceConfigurationOptions request.
@@ -743,7 +748,7 @@ impl ServiceHandler for MediaService {
             "SetVideoSourceConfiguration" => {
                 let request: SetVideoSourceConfiguration = quick_xml::de::from_str(body_xml)
                     .map_err(|e| OnvifError::WellFormed(format!("Invalid request XML: {}", e)))?;
-                let response = self.handle_set_video_source_configuration(request)?;
+                let response = self.handle_set_video_source_configuration(request).await?;
                 quick_xml::se::to_string(&response).map_err(|e| {
                     OnvifError::Internal(format!("Failed to serialize response: {}", e))
                 })

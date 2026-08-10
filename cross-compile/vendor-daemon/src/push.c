@@ -6,6 +6,7 @@
 #include <errno.h>
 #include <time.h>
 #include <pthread.h>
+#include <unistd.h>
 
 #include "push.h"
 #include "globals.h"
@@ -14,6 +15,32 @@
 #include "log.h"
 #include "ak_venc.h"
 #include "vd_ring_buffer.h"
+
+/* ---- Timestamp forward-clamp bounds -------------------------------------
+ *
+ * A step larger than TS_MAX_FORWARD_MS between published timestamps is treated
+ * as a capture stall rather than elapsed media time -- the ISP day/night switch
+ * blocks the encoder for hundreds of ms, and passing that gap through makes
+ * live players resync or drop the session.  Such a step is replaced by the last
+ * plausible frame interval; only intervals inside [TS_SANE_MIN_MS,
+ * TS_SANE_MAX_MS] are learned as plausible.
+ *
+ * Live VLC rejects deltas beyond ~9s (bound 9000000 µs). A 250ms cap was too
+ * tight: ISP day/night stalls ~0.5–2s carry real wall-clock vs.ts gaps that
+ * must pass through, or the published clock falls behind the live edge for
+ * good. Cap under the VLC bound so real stalls pass through; still clamp
+ * pathological multi-second leaps.
+ *
+ * Do NOT re-add wall-clock "stall catchup" here: vs.ts is already wall-based,
+ * and a publish-side gap only means frames backlogged in the SDK queue. Jumping
+ * PTS toward wall while the backlog drains ratchets ts_corr_ms forward until
+ * VLC's 9s bound trips ("Timestamp conversion failed" / early picture skipped).
+ *
+ * # ponytail: 5s forward cap (was 250ms); lower only if conversion fails return.
+ */
+#define TS_MAX_FORWARD_MS 5000
+#define TS_SANE_MIN_MS    16
+#define TS_SANE_MAX_MS    1000
 
 /* ---- Internal helpers (file-static) ------------------------------------- */
 
@@ -165,8 +192,12 @@ static void *push_frame_thread(void *arg)
                           state->stream_handle,
                           (unsigned long long)no_data_count,
                           (unsigned long long)diag_monotonic_ms());
-                state->active = 0;
-                break;
+                /* Crash-only: the pipeline is dead and nothing in this process
+                 * can rebuild it. Exiting hands recovery to anyka-init, whose
+                 * backoff/crash-loop/storm-guard policy already exists. The
+                 * kernel closing /dev/ion, /dev/video0 and /dev/uio0 cleans the
+                 * SDK state better than vd_obj_close_all() does. */
+                _exit(1);
             }
             struct timespec ts = { .tv_sec = 0, .tv_nsec = PUSH_POLL_SLEEP_MS * 1000000L };
             nanosleep(&ts, NULL);
@@ -182,9 +213,12 @@ static void *push_frame_thread(void *arg)
         uint32_t seq_no = (uint32_t)vs.seq_no;
         uint32_t ring_frame_type = convert_frame_type(vs.frame_type);
 
-        /* Timestamp normalization: subtract first timestamp to produce 0-based values */
+        /* Timestamp normalization: subtract first timestamp to produce 0-based values,
+         * then forward-clamp oversized jumps (see TS_MAX_FORWARD_MS). */
         if (!state->timestamp_initialized) {
             state->first_timestamp_ms = raw_timestamp_ms;
+            state->last_raw_timestamp_ms = raw_timestamp_ms;
+            state->raw_timestamp_epoch_ms = 0;
             state->timestamp_initialized = 1;
             timestamp_ms = 0;
             log_info("event=timestamp_anchor stream=%u first_ts_ms=%u diag_monotonic_ms=%llu",
@@ -192,23 +226,88 @@ static void *push_frame_thread(void *arg)
                      raw_timestamp_ms,
                      (unsigned long long)diag_monotonic_ms());
         } else {
-            /* 32-bit SDK timestamps wrap ~every 49.7 days; extend with u64 before subtract */
-            uint64_t raw64 = (uint64_t)raw_timestamp_ms;
-            uint64_t first64 = (uint64_t)state->first_timestamp_ms;
-            if (raw64 < first64) {
-                log_warn("event=timestamp_wrap stream=%u raw_ts=%u first_ts=%u diag_monotonic_ms=%llu",
+            /* The 32-bit SDK clock wraps ~every 49.7 days.  Extending against the
+             * fixed first timestamp goes stale once the clock laps the anchor, so
+             * track a 64-bit epoch from consecutive-sample rollovers instead:
+             * a backward jump of more than half the 32-bit space means the SDK
+             * clock wrapped, and each wrap adds one 2^32 epoch. */
+            if (raw_timestamp_ms < state->last_raw_timestamp_ms &&
+                state->last_raw_timestamp_ms - raw_timestamp_ms > UINT32_MAX / 2) {
+                state->raw_timestamp_epoch_ms += UINT64_C(1) << 32;
+                log_warn("event=timestamp_wrap stream=%u raw_ts=%u epoch=%llu diag_monotonic_ms=%llu",
                          state->stream_id,
                          raw_timestamp_ms,
-                         state->first_timestamp_ms,
+                         (unsigned long long)state->raw_timestamp_epoch_ms,
                          (unsigned long long)diag_monotonic_ms());
-                /* 32-bit SDK clock may wrap multiple times over very long runs; extend until aligned. */
-                while (raw64 < first64) {
-                    raw64 += (uint64_t)1U << 32;
-                }
             }
+            uint64_t raw64 = state->raw_timestamp_epoch_ms + raw_timestamp_ms;
+            state->last_raw_timestamp_ms = raw_timestamp_ms;
+            uint64_t first64 = (uint64_t)state->first_timestamp_ms;
             uint64_t delta = raw64 - first64;
-            timestamp_ms = (delta > UINT32_MAX) ? UINT32_MAX : (uint32_t)delta;
+            int64_t base_ms = (delta > UINT32_MAX) ? (int64_t)UINT32_MAX : (int64_t)delta;
+
+            /*
+             * Apply the running correction before judging the step.  The
+             * correction is signed, so the candidate can land below the
+             * normalized value or below zero; saturate it into the publishable
+             * range rather than let it wrap.
+             */
+            int64_t cand = base_ms + state->ts_corr_ms;
+            if (cand < 0) {
+                cand = 0;
+            } else if (cand > (int64_t)UINT32_MAX) {
+                cand = (int64_t)UINT32_MAX;
+            }
+
+            int64_t last_out = state->last_out_ts_ms;
+            int64_t forward = cand - last_out;
+            uint64_t now_mono = diag_monotonic_ms();
+
+            if (forward > TS_MAX_FORWARD_MS) {
+                /* Pathological leap (above VLC's ~9s comfort with margin). */
+                int64_t step = state->last_sane_interval_ms;
+                if (step > 250) {
+                    step = 250;
+                } else if (step < TS_SANE_MIN_MS) {
+                    step = TS_SANE_MIN_MS;
+                }
+                int64_t clamped = last_out + step;
+                if (clamped > (int64_t)UINT32_MAX) {
+                    clamped = (int64_t)UINT32_MAX;
+                }
+                state->ts_corr_ms += clamped - cand;
+                log_warn("event=timestamp_forward_clamp stream=%u raw_ts=%u cand=%lld out=%lld step=%lld corr_ms=%lld diag_monotonic_ms=%llu",
+                         state->stream_id,
+                         raw_timestamp_ms,
+                         (long long)cand,
+                         (long long)clamped,
+                         (long long)step,
+                         (long long)state->ts_corr_ms,
+                         (unsigned long long)now_mono);
+                cand = clamped;
+            } else if (forward <= 0) {
+                /* Never publish a regression or duplicate PTS — VLC/FFmpeg treat
+                 * equal DTS as non-monotonic and eventually trip conversion fail. */
+                int64_t step = 1; /* minimal advance; keep media clock moving */
+                int64_t clamped = last_out + step;
+                if (clamped > (int64_t)UINT32_MAX)
+                    clamped = (int64_t)UINT32_MAX;
+                state->ts_corr_ms += clamped - cand;
+                log_warn("event=timestamp_backward_clamp stream=%u raw_ts=%u cand=%lld out=%lld step=%lld corr_ms=%lld",
+                         state->stream_id,
+                         raw_timestamp_ms,
+                         (long long)cand,
+                         (long long)clamped,
+                         (long long)step,
+                         (long long)state->ts_corr_ms);
+                cand = clamped;
+            } else if (forward >= TS_SANE_MIN_MS && forward <= TS_SANE_MAX_MS) {
+                state->last_sane_interval_ms = forward;
+            }
+            timestamp_ms = (uint32_t)cand;
         }
+
+        state->last_out_ts_ms = (int64_t)timestamp_ms;
 
         log_debug("event=timestamp_normalize stream=%u raw_ts=%u normalized_ts=%u seq_no=%u diag_monotonic_ms=%llu",
                   state->stream_id,
@@ -327,6 +426,16 @@ static void *push_frame_thread(void *arg)
                      state->stream_id,
                      (unsigned long long)frames_pushed,
                      (unsigned long long)no_data_count);
+
+            /* Only the main stream drives liveness: if it stalls we are
+             * broken regardless of what the sub stream is doing. */
+            if (state->stream_id == 0) {
+                FILE *hb = fopen(PUSH_HEARTBEAT_PATH, "w");
+                if (hb) {
+                    fprintf(hb, "%llu\n", (unsigned long long)frames_pushed);
+                    fclose(hb);
+                }
+            }
         }
     }
 
@@ -513,6 +622,11 @@ int handle_venc_start_push(int fd, const uint8_t *req, uint32_t req_len)
     /* Reset timestamp normalization state on push start */
     state->timestamp_initialized = 0;
     state->first_timestamp_ms = 0;
+    state->last_raw_timestamp_ms = 0;
+    state->raw_timestamp_epoch_ms = 0;
+    state->last_out_ts_ms = 0;
+    state->last_sane_interval_ms = 66;
+    state->ts_corr_ms = 0;
 
     /* Reset ring buffer if this is the first push activation (both slots
      * were inactive).  Clears stale sequences/flags from a previous session

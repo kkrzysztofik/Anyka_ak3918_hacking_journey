@@ -11,6 +11,7 @@ import {
   gotoHome,
   gotoPreset,
   removePreset,
+  sendAuxiliaryCommand,
   setPreset,
   stopMove,
 } from '@/services/ptzService';
@@ -267,6 +268,29 @@ describe('ptzService', () => {
       vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
 
       await expect(removePreset('ProfileToken1', 'preset1')).rejects.toThrow();
+    });
+  });
+
+  describe('sendAuxiliaryCommand', () => {
+    it('sends an auxiliary command with the given data', async () => {
+      const mockResponse = createMockSOAPResponse('<SendAuxiliaryCommandResponse />');
+      vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
+
+      await sendAuxiliaryCommand('Profile1', 'tt:IRLamp|On');
+
+      const callArgs = vi.mocked(apiClient.post).mock.calls[0];
+      expect(callArgs[0]).toBe('/onvif/ptz_service');
+      expect(callArgs[1]).toContain('<tptz:AuxiliaryData>tt:IRLamp|On</tptz:AuxiliaryData>');
+    });
+
+    it('escapes XML metacharacters in the profile token', async () => {
+      const mockResponse = createMockSOAPResponse('<SendAuxiliaryCommandResponse />');
+      vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
+
+      await sendAuxiliaryCommand('a&b', 'tt:IRLamp|On');
+
+      const callArgs = vi.mocked(apiClient.post).mock.calls[0];
+      expect(callArgs[1]).toContain('a&amp;b');
     });
   });
 

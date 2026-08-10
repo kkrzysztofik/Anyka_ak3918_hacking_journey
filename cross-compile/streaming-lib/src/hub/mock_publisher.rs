@@ -428,7 +428,6 @@ fn generate_sdp_from_sps_pps(sps: &[u8], pps: &[u8]) -> String {
         profile_level_id, sps_b64, pps_b64
     ));
     sdp.push_str("a=control:trackID=0\r\n");
-    sdp.push_str("a=sendonly\r\n");
     sdp
 }
 
@@ -1726,12 +1725,24 @@ mod tests {
         assert!(sdp.contains("v=0"));
     }
 
+    /// See `onvif-rust`'s `generate_av_sdp`: go2rtc 1.9.10 only defaults media
+    /// direction to `recvonly` when the SDP omits it
+    /// (`pkg/rtsp/helpers.go:94-97`), and treats an explicit direction on a
+    /// producer as a backchannel. This generator ships in the camera binary —
+    /// `onvif-rust/src/main.rs:578` instantiates `MockVideoPublisher` for
+    /// `--validation-mode` H.264-file playback — so it must not reintroduce the
+    /// attribute the real generator dropped.
     #[test]
-    fn test_generate_sdp_contains_sendonly() {
+    fn test_generate_sdp_omits_direction_attribute() {
         let sps = [0x67, 0x42, 0xE0, 0x1E];
         let pps = [0x68, 0xCE];
         let sdp = generate_sdp_from_sps_pps(&sps, &pps);
-        assert!(sdp.contains("a=sendonly"));
+        for direction in ["sendonly", "recvonly", "sendrecv", "inactive"] {
+            assert!(
+                !sdp.contains(direction),
+                "SDP must carry no direction attribute, found {direction}:\n{sdp}"
+            );
+        }
     }
 
     // ========== remove_emulation_prevention_bytes Edge Cases ==========

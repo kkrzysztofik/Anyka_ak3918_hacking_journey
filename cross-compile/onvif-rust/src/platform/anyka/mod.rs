@@ -13,6 +13,7 @@ pub mod context;
 pub mod imaging;
 pub mod lifecycle;
 pub mod network_info;
+pub(crate) mod night_mode;
 pub mod ptz_actor;
 pub mod ptz_control;
 pub mod supervisor;
@@ -37,7 +38,7 @@ use supervisor::{AttachTarget, Availability, PlatformAttachTarget, run_superviso
 
 use super::common::{
     DeviceInfo, ImagingControl, NetworkInfo, PTZControl, Platform, PlatformError, PlatformResult,
-    Resolution, VideoEncoder, VideoInput,
+    Resolution, VideoControl, VideoEncoder, VideoInput,
 };
 
 // Types used by tests
@@ -74,6 +75,14 @@ pub struct AnykaPlatform {
     /// supervisor completes an attach. That is what lets cold start and recovery
     /// share one path.
     ipc: Arc<AnykaIpc>,
+    /// Shutdown signal + task handle for the night-mode AUTO loop, so
+    /// `shutdown` can stop it before video teardown closes the daemon VI.
+    night_loop: std::sync::Mutex<
+        Option<(
+            tokio::sync::broadcast::Sender<()>,
+            tokio::task::JoinHandle<()>,
+        )>,
+    >,
 }
 
 /// Bring PTZ up, or skip it entirely when `enabled` is false.
@@ -119,6 +128,8 @@ impl AnykaPlatform {
             true,
             StreamOpenParams::default(),
             StreamOpenParams::default(),
+            crate::config::types::ImagingConfig::default(),
+            false,
         )
     }
 
@@ -138,20 +149,27 @@ impl AnykaPlatform {
     /// Skips the `AnykaIpc` connection that `with_isp_config` requires, so the
     /// bring-up and teardown orchestration can be exercised without hardware.
     /// PTZ/imaging/network are left absent — they are independently tested.
+    ///
+    /// `initial_rotated` mirrors `with_isp_config`'s same-named parameter, so
+    /// the construction-time seed path is exercisable under test too.
     #[cfg(test)]
     pub(super) fn with_mocked_hal(
         video_ffi: Arc<dyn VideoHalTrait>,
         audio_ffi: Arc<dyn crate::hal::common::audio::AudioHalTrait>,
         isp_config_path: Option<PathBuf>,
+        initial_rotated: bool,
     ) -> Self {
+        let video_input = Arc::new(AnykaVideoInput::with_ffi(
+            video_ffi.clone(),
+            isp_config_path,
+        ));
+        video_input.rotated.store(initial_rotated, Ordering::SeqCst);
+
         Self {
             initialized: AtomicBool::new(false),
             device_info: Self::device_descriptor(),
             sensor_resolution: RwLock::new(None),
-            video_input: Arc::new(AnykaVideoInput::with_ffi(
-                video_ffi.clone(),
-                isp_config_path,
-            )),
+            video_input,
             video_encoder: Arc::new(AnykaVideoEncoder::with_ffi(video_ffi)),
             audio_input: Arc::new(AnykaAudioInput::with_ffi(audio_ffi.clone())),
             audio_encoder: Arc::new(AnykaAudioEncoder::with_ffi(audio_ffi)),
@@ -161,6 +179,7 @@ impl AnykaPlatform {
             // Detached: these tests drive the mocked HALs directly and never
             // route through the real IPC client.
             ipc: Arc::new(AnykaIpc::new_detached().expect("detached IPC needs no daemon")),
+            night_loop: std::sync::Mutex::new(None),
         }
     }
 
@@ -174,15 +193,33 @@ impl AnykaPlatform {
     ///
     /// `main_encoder`/`sub_encoder` carry the parameters that only `ak_venc_open` can apply, so
     /// they must arrive here rather than through `set_configuration`. See [`StreamOpenParams`].
+    ///
+    /// `initial_rotated` seeds the persisted flip/mirror flag before the VI is even open, so it
+    /// is a no-op on the FFI at this point — `AnykaVideoInput::rotated` just remembers it until
+    /// `init_video_input()`'s post-`capture_on()` reapply step actually applies it to hardware.
     pub fn with_isp_config(
         isp_config_path: Option<PathBuf>,
         ptz_enabled: bool,
         main_encoder: StreamOpenParams,
         sub_encoder: StreamOpenParams,
+        imaging_cfg: crate::config::types::ImagingConfig,
+        initial_rotated: bool,
     ) -> PlatformResult<Self> {
         let device_info = Self::device_descriptor();
 
-        let (video_input, video_encoder, audio_input, audio_encoder, imaging_control, ipc) = {
+        // Start the AUTO day/night loop with its own shutdown channel; the
+        // handle is stored so `shutdown` can stop it before teardown.
+        let (night_loop_tx, night_loop_rx) = tokio::sync::broadcast::channel(1);
+
+        let (
+            video_input,
+            video_encoder,
+            audio_input,
+            audio_encoder,
+            imaging_control,
+            ipc,
+            night_loop_task,
+        ) = {
             let shared_ipc = Arc::new(AnykaIpc::new_detached().map_err(|e| {
                 PlatformError::InitializationFailed(format!("AnykaIpc construction failed: {}", e))
             })?);
@@ -200,6 +237,7 @@ impl AnykaPlatform {
                 video_ffi.clone(),
                 isp_config_path.clone(),
             ));
+            video_input.rotated.store(initial_rotated, Ordering::SeqCst);
             let video_encoder = Arc::new(AnykaVideoEncoder::with_ipc(
                 shared_ipc.clone(),
                 main_encoder,
@@ -207,10 +245,13 @@ impl AnykaPlatform {
             ));
             let audio_input = Arc::new(AnykaAudioInput::with_ffi(audio_ffi.clone()));
             let audio_encoder = Arc::new(AnykaAudioEncoder::with_ffi(audio_ffi));
-            let imaging_control = Some(Arc::new(AnykaImagingControl::with_ffi_and_video_encoder(
+            let imaging = Arc::new(AnykaImagingControl::with_ffi_and_video_encoder(
                 imaging_ffi,
                 Arc::clone(&video_encoder),
-            )) as Arc<dyn ImagingControl>);
+                imaging_cfg,
+            ));
+            let night_loop_task = imaging.night_mode().spawn_auto_loop(night_loop_rx);
+            let imaging_control = Some(imaging as Arc<dyn ImagingControl>);
 
             (
                 video_input,
@@ -219,6 +260,7 @@ impl AnykaPlatform {
                 audio_encoder,
                 imaging_control,
                 shared_ipc,
+                night_loop_task,
             )
         };
 
@@ -237,6 +279,7 @@ impl AnykaPlatform {
             imaging_control,
             network_info,
             ipc,
+            night_loop: std::sync::Mutex::new(Some((night_loop_tx, night_loop_task))),
         })
     }
 
@@ -320,6 +363,16 @@ impl AnykaPlatform {
             let _ = self.video_input.close().await;
             return Err(e);
         }
+
+        // Step 5.5: Reapply flip/mirror. VI state does not survive
+        // close/reopen, so a vendor-daemon crash-and-reattach needs this
+        // too, not just cold boot — which is why it lives here rather than
+        // only in the constructor. Soft-fail: an upside-down stream is still
+        // a working stream, so this must not abort the whole bring-up.
+        if let Err(e) = self.video_input.reapply_flip_mirror() {
+            tracing::warn!("Failed to reapply flip/mirror after capture_on: {}", e);
+        }
+
         // Allow the capture pipeline to stabilize before opening encoders.
         tokio::time::sleep(capture_stabilization_delay()).await;
         tracing::info!("Video input initialized: dual-channel config and capture started");
@@ -440,6 +493,10 @@ impl Platform for AnykaPlatform {
 
     crate::impl_platform_accessors!();
 
+    fn video_control(&self) -> Option<Arc<dyn VideoControl>> {
+        Some(self.video_input.clone() as Arc<dyn VideoControl>)
+    }
+
     fn stream_frame_age_ms(&self) -> Option<u64> {
         self.video_encoder.stream_frame_age_ms()
     }
@@ -456,6 +513,18 @@ impl Platform for AnykaPlatform {
 
     async fn shutdown(&self) -> PlatformResult<()> {
         tracing::info!("Platform shutdown: starting PTZ stop...");
+
+        // Stop the night-mode AUTO loop before video teardown: it holds an Arc
+        // to the IPC client and must not tick against a closed VI handle.
+        // The guard is dropped here so no std mutex guard spans the await.
+        let night_loop = match self.night_loop.lock() {
+            Ok(mut guard) => guard.take(),
+            Err(poisoned) => poisoned.into_inner().take(),
+        };
+        if let Some((tx, task)) = night_loop {
+            stop_night_loop(tx, task).await;
+        }
+
         // Best-effort PTZ stop — the PTZHandle Drop will call ptz_close.
         // We log errors but do not abort shutdown for a single subsystem failure.
         if let Some(ref ptz) = self.ptz_control
@@ -510,6 +579,26 @@ impl Platform for AnykaPlatform {
 // =============================================================================
 // PTZ Control Implementation
 // =============================================================================
+
+/// Ask the night-mode AUTO loop to stop and join it, aborting after a timeout.
+///
+/// `tokio::time::timeout` borrowing the handle (not consuming it) means the
+/// task stays joinable if it ignores the shutdown signal; abort and await it
+/// so it cannot keep ticking against a torn-down VI handle.
+async fn stop_night_loop(
+    tx: tokio::sync::broadcast::Sender<()>,
+    mut task: tokio::task::JoinHandle<()>,
+) {
+    let _ = tx.send(());
+    if tokio::time::timeout(Duration::from_secs(2), &mut task)
+        .await
+        .is_err()
+    {
+        tracing::warn!("night-mode AUTO loop did not stop within 2s; aborting");
+        task.abort();
+        let _ = task.await;
+    }
+}
 
 /// Anyka PTZ control — delegates to `AnykaPTZControl` which calls the FFI layer.
 ///

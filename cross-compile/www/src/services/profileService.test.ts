@@ -12,7 +12,9 @@ import {
   getVideoEncoderConfiguration,
   getVideoEncoderConfigurationOptions,
   getVideoEncoderConfigurations,
+  getVideoSourceConfiguration,
   setVideoEncoderConfiguration,
+  setVideoSourceConfiguration,
 } from '@/services/profileService';
 import { createMockSOAPFaultResponse, createMockSOAPResponse } from '@/test/utils';
 
@@ -662,6 +664,106 @@ describe('profileService', () => {
 
       expect(result.h264).toBeUndefined();
       expect(result.jpeg).toBeUndefined();
+    });
+  });
+
+  describe('getVideoSourceConfiguration', () => {
+    it('should parse Rotate ON from the response', async () => {
+      const mockResponse = createMockSOAPResponse(`
+        <GetVideoSourceConfigurationResponse>
+          <Configuration token="VideoSourceConfig_0">
+            <Name>Main</Name>
+            <UseCount>2</UseCount>
+            <SourceToken>VideoSource_1</SourceToken>
+            <Bounds x="0" y="0" width="1920" height="1080" />
+            <Extension>
+              <Rotate>
+                <Mode>ON</Mode>
+              </Rotate>
+            </Extension>
+          </Configuration>
+        </GetVideoSourceConfigurationResponse>
+      `);
+
+      vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
+
+      const result = await getVideoSourceConfiguration('VideoSourceConfig_0');
+
+      expect(result).toEqual({
+        token: 'VideoSourceConfig_0',
+        name: 'Main',
+        useCount: 2,
+        sourceToken: 'VideoSource_1',
+        bounds: { x: 0, y: 0, width: 1920, height: 1080 },
+        rotate: 'ON',
+      });
+    });
+
+    it('should default to OFF when Extension is absent', async () => {
+      const mockResponse = createMockSOAPResponse(`
+        <GetVideoSourceConfigurationResponse>
+          <Configuration token="VideoSourceConfig_0">
+            <Name>Main</Name>
+            <UseCount>1</UseCount>
+            <SourceToken>VideoSource_1</SourceToken>
+            <Bounds x="0" y="0" width="1920" height="1080" />
+          </Configuration>
+        </GetVideoSourceConfigurationResponse>
+      `);
+
+      vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
+
+      const result = await getVideoSourceConfiguration('VideoSourceConfig_0');
+
+      expect(result?.rotate).toBe('OFF');
+    });
+
+    it('should return null on SOAP fault', async () => {
+      vi.mocked(apiClient.post).mockResolvedValueOnce(
+        createMockSOAPFaultResponse('soap:Sender', 'Configuration not found'),
+      );
+
+      const result = await getVideoSourceConfiguration('missing');
+
+      expect(result).toBeNull();
+    });
+  });
+
+  describe('setVideoSourceConfiguration', () => {
+    const config = {
+      token: 'VideoSourceConfig_0',
+      name: 'Main',
+      useCount: 2,
+      sourceToken: 'VideoSource_1',
+      bounds: { x: 0, y: 0, width: 1920, height: 1080 },
+      rotate: 'ON' as const,
+    };
+
+    it('should send Extension/Rotate/Mode in the request body', async () => {
+      vi.mocked(apiClient.post).mockResolvedValueOnce(
+        createMockSOAPResponse('<SetVideoSourceConfigurationResponse />'),
+      );
+
+      await setVideoSourceConfiguration(config);
+
+      const body = vi.mocked(apiClient.post).mock.calls[0][1] as string;
+      expect(body).toContain('<tt:Rotate>');
+      expect(body).toContain('<tt:Mode>ON</tt:Mode>');
+    });
+
+    it('should round-trip the existing bounds rather than zeroing them', async () => {
+      vi.mocked(apiClient.post).mockResolvedValueOnce(
+        createMockSOAPResponse('<SetVideoSourceConfigurationResponse />'),
+      );
+
+      await setVideoSourceConfiguration(config);
+
+      // The device replaces the stored configuration wholesale, so sending
+      // zeroed bounds would blank the persisted resolution in profiles.toml.
+      const body = vi.mocked(apiClient.post).mock.calls[0][1] as string;
+      expect(body).toContain('width="1920"');
+      expect(body).toContain('height="1080"');
+      expect(body).toContain('<tt:UseCount>2</tt:UseCount>');
     });
   });
 });

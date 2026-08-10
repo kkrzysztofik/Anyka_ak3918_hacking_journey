@@ -432,7 +432,15 @@ impl Default for ServerConfig {
             tls_enabled: false,
             tls_cert_path: String::new(),
             tls_key_path: String::new(),
-            rate_limit_per_minute: 0,
+            // Was 0, which the limiter read as "allow nothing" and closed the
+            // ONVIF API on every deployment that omitted the key. 0 now means
+            // unlimited; this default keeps the DoS bound switched on.
+            //
+            // 300/min, not RateLimiter's library default of 60: the WebUI fires
+            // a burst of SOAP calls on login and on every page, and 60 (1/s) is
+            // tight enough to 429 a legitimate operator. Matches the shipped
+            // config.toml. Calibration knob: lower it with evidence.
+            rate_limit_per_minute: 300,
             static_root: String::new(),
             address: String::new(),
         }
@@ -460,12 +468,15 @@ pub struct LoggingConfig {
 impl Default for LoggingConfig {
     fn default() -> Self {
         Self {
-            level: "info".to_string(),
+            // error, not warn: measured on .121 that warn + an active streaming
+            // client emits ~144 MB/day of slow_tcp_write / slow_rtp_pack lines.
+            // error logs ~260 KB/day. See docs/plans/2026-08-10-crash-hardening.md.
+            level: "error".to_string(),
             http_verbose: false,
             stream_frame_debug: false,
             ipc_debug: false,
             console_enabled: true,
-            file_path: String::new(),
+            file_path: "/mnt/logs/onvif-debug.log".to_string(),
             static_assets: StaticAssetsConfig::default(),
         }
     }
@@ -584,8 +595,11 @@ pub struct ImagingConfig {
     pub contrast: f64,
     pub saturation: f64,
     pub sharpness: f64,
-    pub ir_cut_filter: bool,
+    /// Widened from `bool`: a bool cannot express AUTO, which is why AUTO
+    /// was previously unimplementable at this layer.
+    pub ir_cut_filter: crate::onvif::types::common::IrCutFilterMode,
     pub ir_led: bool,
+    pub night: NightConfig,
 }
 
 impl Default for ImagingConfig {
@@ -595,8 +609,53 @@ impl Default for ImagingConfig {
             contrast: 50.0,
             saturation: 50.0,
             sharpness: 50.0,
-            ir_cut_filter: true,
+            ir_cut_filter: crate::onvif::types::common::IrCutFilterMode::AUTO,
             ir_led: false,
+            night: NightConfig::default(),
+        }
+    }
+}
+
+/// Day/night calibration. Polarity and thresholds vary per board; the
+/// settle delay and poll interval do not and are constants in
+/// `platform::anyka::night_mode`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct NightConfig {
+    /// `true` when a high `ain0` reading means daylight.
+    pub ldr_high_is_day: bool,
+    /// `true` when writing `1` to the ircut node selects night.
+    pub ircut_high_is_night: bool,
+    /// At or above this raw `ain0` reading, the sensor is saturated bright.
+    /// No default: this is a raw ADC value and is board-specific (.198 reads
+    /// 648-670, .121 reads 548-639). An uncalibrated board holds instead of
+    /// guessing. See wiki/IR-Night-Mode-Calibration.md.
+    pub day_threshold: Option<i32>,
+    /// At or below this raw `ain0` reading, the sensor is saturated dark.
+    /// MUST be calibrated on hardware.
+    pub night_threshold: Option<i32>,
+    /// Minimum time between transitions, preventing dusk oscillation.
+    pub lock_time_ms: u64,
+    /// At or above this AE `current_calc_avg_lumi`, treat as day.
+    pub ae_day_threshold: i32,
+    /// At or below this AE luma, treat as night.
+    pub ae_night_threshold: i32,
+}
+
+impl Default for NightConfig {
+    fn default() -> Self {
+        Self {
+            ldr_high_is_day: true,
+            ircut_high_is_night: true,
+            // No day_threshold / night_threshold here: they are raw ADC values,
+            // board-specific (.198 reads 648-670, .121 reads 548-639). Leaving
+            // them absent means an uncalibrated board holds instead of guessing.
+            day_threshold: None,
+            night_threshold: None,
+            lock_time_ms: 900_000,
+            // Calibrated on .198 (2026-08-04): room≈34, dark-box≈0..1.
+            ae_day_threshold: 28,
+            ae_night_threshold: 8,
         }
     }
 }
@@ -940,5 +999,66 @@ file_name = "static"
                 "the error must name the field that is wrong, got {errors:?}"
             );
         }
+    }
+
+    #[test]
+    fn test_imaging_config_defaults_to_auto_ir_cut_filter() {
+        let cfg = ImagingConfig::default();
+        assert_eq!(
+            cfg.ir_cut_filter,
+            crate::onvif::types::common::IrCutFilterMode::AUTO
+        );
+    }
+
+    #[test]
+    fn test_imaging_config_parses_ir_cut_filter_mode_from_toml() {
+        let cfg: ImagingConfig = toml::from_str(r#"ir_cut_filter = "OFF""#).unwrap();
+        assert_eq!(
+            cfg.ir_cut_filter,
+            crate::onvif::types::common::IrCutFilterMode::OFF
+        );
+    }
+
+    #[test]
+    fn test_night_config_defaults_match_vendor_lock_time() {
+        let cfg = NightConfig::default();
+        assert_eq!(cfg.lock_time_ms, 900_000);
+        assert!(cfg.ldr_high_is_day);
+        assert!(cfg.ircut_high_is_night);
+    }
+
+    #[test]
+    fn test_night_config_defaults_leave_thresholds_uncalibrated() {
+        // A raw ain0 threshold is board-specific (.198 reads 648-670, .121
+        // reads 548-639). Shipping no default means an uncalibrated board holds
+        // instead of guessing with another board's numbers.
+        let cfg = NightConfig::default();
+        assert_eq!(cfg.day_threshold, None);
+        assert_eq!(cfg.night_threshold, None);
+    }
+
+    #[test]
+    fn test_imaging_config_without_night_section_leaves_ain0_uncalibrated() {
+        // Regression: a partial config that omits [imaging.night] must not
+        // guess the raw ain0 thresholds. AE thresholds still have defaults.
+        let cfg: ImagingConfig = toml::from_str(
+            r#"
+            brightness = 70.0
+            contrast = 50.0
+            saturation = 50.0
+            sharpness = 50.0
+            ir_cut_filter = "AUTO"
+            "#,
+        )
+        .unwrap();
+        assert_eq!(cfg.night.day_threshold, None);
+        assert_eq!(cfg.night.night_threshold, None);
+    }
+
+    #[test]
+    fn test_night_config_ae_thresholds_default() {
+        let cfg = NightConfig::default();
+        assert_eq!(cfg.ae_day_threshold, 28);
+        assert_eq!(cfg.ae_night_threshold, 8);
     }
 }

@@ -33,7 +33,11 @@ pub fn baseline_direction_for(test_name: &str) -> &'static str {
         | "telemetry_load_avg_5m"
         | "telemetry_load_avg_15m"
         | "telemetry_onvif_rss_kib"
-        | "telemetry_onvif_vmsize_kib" => "lower",
+        | "telemetry_onvif_vmsize_kib"
+        | "frame_pacing_encoder_delay_percent"
+        | "frame_pacing_arrival_delay_percent"
+        | "frame_pacing_encoder_max_gap_ms"
+        | "frame_pacing_arrival_max_gap_ms" => "lower",
         _ => "lower",
     }
 }
@@ -107,32 +111,20 @@ pub fn compare_against_baseline(
 
 /// Exposed for unit tests (telemetry baseline metric names and values).
 pub(crate) fn telemetry_baseline_metrics(t: &DeviceTelemetry) -> Vec<(String, f64)> {
-    let mut out = Vec::new();
-    if let Some(v) = t.mem_total_kib {
-        out.push(("telemetry_mem_total_kib".to_string(), v as f64));
-    }
-    if let Some(v) = t.mem_free_kib {
-        out.push(("telemetry_mem_free_kib".to_string(), v as f64));
-    }
-    if let Some(v) = t.mem_available_kib {
-        out.push(("telemetry_mem_available_kib".to_string(), v as f64));
-    }
-    if let Some(v) = t.load_avg_1m {
-        out.push(("telemetry_load_avg_1m".to_string(), v));
-    }
-    if let Some(v) = t.load_avg_5m {
-        out.push(("telemetry_load_avg_5m".to_string(), v));
-    }
-    if let Some(v) = t.load_avg_15m {
-        out.push(("telemetry_load_avg_15m".to_string(), v));
-    }
-    if let Some(v) = t.onvif_rss_kib {
-        out.push(("telemetry_onvif_rss_kib".to_string(), v as f64));
-    }
-    if let Some(v) = t.onvif_vmsize_kib {
-        out.push(("telemetry_onvif_vmsize_kib".to_string(), v as f64));
-    }
-    out
+    let kib = |v: Option<u64>| v.map(|v| v as f64);
+    [
+        ("telemetry_mem_total_kib", kib(t.mem_total_kib)),
+        ("telemetry_mem_free_kib", kib(t.mem_free_kib)),
+        ("telemetry_mem_available_kib", kib(t.mem_available_kib)),
+        ("telemetry_load_avg_1m", t.load_avg_1m),
+        ("telemetry_load_avg_5m", t.load_avg_5m),
+        ("telemetry_load_avg_15m", t.load_avg_15m),
+        ("telemetry_onvif_rss_kib", kib(t.onvif_rss_kib)),
+        ("telemetry_onvif_vmsize_kib", kib(t.onvif_vmsize_kib)),
+    ]
+    .into_iter()
+    .filter_map(|(name, value)| value.map(|v| (name.to_string(), v)))
+    .collect()
 }
 
 pub fn apply_baseline_ops(
@@ -160,6 +152,12 @@ pub fn apply_baseline_ops(
                 "harness_packet_loss_percent" => value
                     .get("loss_percent")
                     .and_then(serde_json::Value::as_f64),
+                "frame_pacing_encoder_delay_percent" | "frame_pacing_arrival_delay_percent" => {
+                    value.as_f64()
+                }
+                "frame_pacing_encoder_max_gap_ms" | "frame_pacing_arrival_max_gap_ms" => {
+                    value.get("max_ms").and_then(serde_json::Value::as_f64)
+                }
                 _ => None,
             };
             if let Some(f) = v {
@@ -215,6 +213,22 @@ mod tests {
         );
         assert_eq!(baseline_direction_for("telemetry_load_avg_1m"), "lower");
         assert_eq!(baseline_direction_for("telemetry_onvif_rss_kib"), "lower");
+        assert_eq!(
+            baseline_direction_for("frame_pacing_encoder_delay_percent"),
+            "lower"
+        );
+        assert_eq!(
+            baseline_direction_for("frame_pacing_arrival_delay_percent"),
+            "lower"
+        );
+        assert_eq!(
+            baseline_direction_for("frame_pacing_encoder_max_gap_ms"),
+            "lower"
+        );
+        assert_eq!(
+            baseline_direction_for("frame_pacing_arrival_max_gap_ms"),
+            "lower"
+        );
         assert_eq!(baseline_direction_for("unknown_metric"), "lower");
     }
 
@@ -302,9 +316,8 @@ mod tests {
 
     #[test]
     fn test_apply_baseline_ops_no_flags_no_op() {
-        let crate::config::ParsedArgs { args, sources } =
-            crate::config::parse_args_from(["rtsp_validation_tool"]).unwrap();
-        let effective = EffectiveConfig::from_config_and_args(None, &args, &sources);
+        let args = crate::config::parse_args_from(["rtsp_validation_tool"]).unwrap();
+        let effective = EffectiveConfig::from_config_and_args(None, &args);
         let mut report = ValidationReport {
             test_run: TestRun {
                 timestamp: String::new(),
@@ -334,15 +347,14 @@ mod tests {
     fn test_apply_baseline_ops_update_and_compare() {
         let dir = tempfile::tempdir().unwrap();
         let baseline_dir = dir.path().to_path_buf();
-        let crate::config::ParsedArgs { mut args, sources } =
-            crate::config::parse_args_from(["rtsp_validation_tool"]).unwrap();
+        let mut args = crate::config::parse_args_from(["rtsp_validation_tool"]).unwrap();
         args.update_baseline = true;
         args.compare_baseline = true;
         let mut cfg = RtspValidationConfig::default();
         cfg.run.update_baseline = true;
         cfg.run.compare_baseline = true;
         cfg.baseline.dir = baseline_dir.to_string_lossy().to_string();
-        let effective = EffectiveConfig::from_config_and_args(Some(&cfg), &args, &sources);
+        let effective = EffectiveConfig::from_config_and_args(Some(&cfg), &args);
         let mut report = ValidationReport {
             test_run: TestRun {
                 timestamp: String::new(),

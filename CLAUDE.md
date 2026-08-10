@@ -34,10 +34,7 @@ Use the appropriate project skill or subagent before doing complex work.
 - WebUI component work: `camera-webui-components`
 - WebUI testing: `anyka-webui-testing`
 - Cross-compilation and deploy: `anyka-embedded-build`
-- Bug investigation: `superpowers:systematic-debugging`
-- Pre-implementation workflow: `superpowers:test-driven-development`
-- Verification before completion: `superpowers:verification-before-completion`
-- Pre-merge review: `superpowers:requesting-code-review`
+- Follow the Skill & Complexity Policy in `AGENTS.md`: superpowers process skills auto-trigger on task type; ponytail (full) is the default for code and plans.
 
 ### Prefer these subagents when delegation helps
 

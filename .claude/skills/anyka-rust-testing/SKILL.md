@@ -1,291 +1,150 @@
 ---
 name: anyka-rust-testing
-description: |
-  Rust testing specialist for Anyka camera projects using mockall, tokio, and the project's testing framework.
-  Triggers on: "write tests", "mock Platform", "mockall", "unit test Rust", "test coverage", "testing patterns".
-version: 1.0.0
+description: Use when writing or debugging Rust tests for onvif-rust and streaming-lib (mockall, tokio, unit/integration tests, host-side test commands, test naming, error-path tests).
+version: 2.0.0
 ---
 
 # Rust Testing for Anyka Camera Projects
 
-Write unit tests for Rust code in the onvif-rust and streaming-lib projects using mockall, tokio, and project testing conventions. Follow these guidelines strictly.
+Write tests for `cross-compile/onvif-rust` and `cross-compile/streaming-lib` using Rust's built-in test framework, `tokio`, and `mockall`. Follow the project conventions below.
 
-## Cross-Compilation Awareness
+## Toolchain & Running Tests
 
-The default target is ARM (`armv5te-unknown-linux-uclibceabi`). Always specify the x86_64 target for host-side testing:
+Use the vendored toolchain. **Never bare `cargo`**:
 
 ```bash
-cargo test --target x86_64-unknown-linux-gnu
-cargo test --target x86_64-unknown-linux-gnu --lib  # Unit tests only
-cargo test --target x86_64-unknown-linux-gnu test_name -- --nocapture  # Specific test with output
+source ./setenv.sh                      # exports $CARGO, $RUSTC, sets CARGO_HOME
+cd cross-compile/onvif-rust
+$CARGO test --target x86_64-unknown-linux-gnu
+$CARGO test --target x86_64-unknown-linux-gnu --lib        # unit tests only
+$CARGO test --target x86_64-unknown-linux-gnu test_name -- --nocapture
+$CARGO clippy --target x86_64-unknown-linux-gnu -- -D warnings
+$CARGO fmt --check
 ```
 
 ## Test Naming Convention
 
-Follow the pattern: `test_<function>_<scenario>_<expected_outcome>`. Examples:
+`test_<component>_<scenario>_<expected_outcome>`:
 
-- `test_device_get_info_success`
-- `test_device_get_info_unauthorized_returns_error`
-- `test_media_create_profile_invalid_name_returns_validation_error`
-- `test_brightness_set_value_out_of_range_returns_error`
+- `test_service_handler_unknown_action_device`
+- `test_service_handler_invalid_xml`
+- `test_apply_set_scopes_keeps_fixed_replaces_configurable`
+- `test_sps_fixtures_have_correct_nal_type`
 
-## Test Module Structure
+## Where Tests Live
 
-Place unit tests in inline `mod tests` blocks within the source file:
-
-```rust
-// src/onvif/device/handlers.rs
-impl DeviceService {
-    pub async fn get_device_info(&self) -> Result<DeviceInfo, OnvifError> {
-        // implementation
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use mockall::predicate::*;
-
-    fn create_test_service() -> DeviceService {
-        // Test helper - reuse across tests
-        DeviceService::new(MockPlatform::new(), test_config())
-    }
-
-    #[tokio::test]
-    async fn test_get_device_info_success() {
-        let service = create_test_service();
-        let result = service.get_device_info().await;
-        assert!(result.is_ok());
-    }
-}
-```
+- **Unit tests**: inline `#[cfg(test)] mod tests` next to the code (use `super::*`).
+- **Integration tests**: `tests/` (e.g. `tests/dispatcher_extended.rs`, `tests/namespace_serialization_tests.rs`, `tests/security_inputs.rs`).
+- **Async tests**: `#[tokio::test]`.
+- Test helper modules/fixtures: `src/codec/test_fixtures.rs` (SPS/PPS), `tests/fixtures/`, `tests/data/`.
 
 ## Mockall Patterns
 
-### Define Traits with #[automock]
+### `#[cfg_attr(test, automock)]` on trait definitions (project standard)
+
+The platform traits in `src/platform/common/traits.rs` use `#[cfg_attr(test, automock)]` so mocks exist only in test builds:
 
 ```rust
-use mockall::{automock, predicate::*};
-use async_trait::async_trait;
-
-#[automock]
+#[cfg_attr(test, automock)]
 #[async_trait]
-pub trait Platform {
-    async fn init(&self) -> Result<(), PlatformError>;
-    async fn get_device_info(&self) -> Result<DeviceInfo, PlatformError>;
-    async fn set_brightness(&self, level: u8) -> Result<(), PlatformError>;
-    async fn ptz_move(&self, pan: f32, tilt: f32, zoom: f32) -> Result<(), PlatformError>;
+pub trait VideoInput: Send + Sync {
+    async fn open(&self) -> PlatformResult<()>;
+    async fn get_resolution(&self) -> PlatformResult<Resolution>;
 }
 ```
 
-### Use mockall::mock! for External Traits
+Mock name is `MockVideoInput`. Traits using `#[automock]` need `Send + Sync` and async methods require `#[async_trait]` (mockall generates the mock via `mock!` internally).
 
-When you cannot use `#[automock]` on the trait definition:
+### Setting expectations
+
+```rust
+let mut mock = MockPlatform::new();
+
+mock.expect_set_brightness()
+    .with(eq(75))
+    .times(1)
+    .returning(|_| Ok(()));
+
+mock.expect_ptz_move()
+    .with(predicate::in_iter(-180.0..=180.0), predicate::in_iter(-90.0..=90.0), predicate::always())
+    .times(1)
+    .returning(|_, _, _| Ok(()));
+```
+
+### Sequential returns (retry logic)
+
+```rust
+mock.expect_get_device_info()
+    .times(3)
+    .returning({
+        let mut count = 0;
+        move || {
+            count += 1;
+            if count < 3 { Err(PlatformError::Temporary) } else { Ok(DeviceInfo::default()) }
+        }
+    });
+```
+
+### Async trait mocks
+
+For traits that can't use `#[automock]` (external/third-party), use `mockall::mock!` with `#[async_trait]`:
 
 ```rust
 mockall::mock! {
     pub Platform {}
-
     #[async_trait]
     impl Platform for Platform {
         async fn init(&self) -> Result<(), PlatformError>;
         async fn get_device_info(&self) -> Result<DeviceInfo, PlatformError>;
-        async fn set_brightness(&self, level: u8) -> Result<(), PlatformError>;
     }
 }
 ```
 
-### Setting Expectations
+## Error-Path Testing
+
+Test success and failure paths, and match on the exact error variant:
 
 ```rust
 #[tokio::test]
-async fn test_brightness_setting() {
-    let mut mock = MockPlatform::new();
-
-    // Expect exactly one call with specific argument
-    mock.expect_set_brightness()
-        .with(eq(75))
-        .times(1)
-        .returning(|_| Ok(()));
-
-    let result = mock.set_brightness(75).await;
-    assert!(result.is_ok());
+async fn test_service_handler_invalid_xml() {
+    let service = create_test_service();
+    let result = service.handle_operation("GetDeviceInformation", "<InvalidXml><Broken").await;
+    assert!(matches!(result, Err(OnvifError::WellFormed(_))));
 }
 
 #[tokio::test]
-async fn test_ptz_move_with_range() {
-    let mut mock = MockPlatform::new();
-
-    // Use predicate functions for ranges
-    mock.expect_ptz_move()
-        .with(
-            predicate::in_iter(-180.0..=180.0),  // pan range
-            predicate::in_iter(-90.0..=90.0),    // tilt range
-            predicate::always()                   // any zoom
-        )
-        .times(1)
-        .returning(|_, _, _| Ok(()));
-
-    let result = mock.ptz_move(90.0, 45.0, 1.0).await;
-    assert!(result.is_ok());
+async fn test_service_handler_unknown_action_device() {
+    let service = create_test_service();
+    let result = service.handle_operation("UnknownAction", "<test/>").await;
+    assert!(matches!(result, Err(OnvifError::ActionNotSupported(_))));
 }
 ```
 
-### Return Different Values on Successive Calls
-
-```rust
-#[tokio::test]
-async fn test_retry_on_failure() {
-    let mut mock = MockPlatform::new();
-
-    mock.expect_get_device_info()
-        .times(3)
-        .returning({
-            let mut count = 0;
-            move || {
-                count += 1;
-                if count < 3 {
-                    Err(PlatformError::Temporary)
-                } else {
-                    Ok(DeviceInfo::default())
-                }
-            }
-        });
-
-    // Test retry logic
-}
-```
-
-## Error Testing
-
-Test both success and error paths:
-
-```rust
-#[tokio::test]
-async fn test_set_brightness_out_of_range() {
-    let mut mock = MockPlatform::new();
-
-    mock.expect_set_brightness()
-        .with(eq(150))  // Invalid: > 100
-        .times(1)
-        .returning(|_| Err(PlatformError::InvalidParameter("brightness out of range".into())));
-
-    let result = mock.set_brightness(150).await;
-
-    assert!(result.is_err());
-    match result {
-        Err(PlatformError::InvalidParameter(msg)) => {
-            assert!(msg.contains("out of range"));
-        }
-        _ => panic!("Expected InvalidParameter error"),
-    }
-}
-```
+See the `onvif-service-impl` skill for the full `OnvifError` variant list (`WellFormed`, `InvalidArgVal{subcode, reason}`, `ActionNotSupported`, `NotFound`, etc.).
 
 ## Test Helpers
 
-Create reusable test fixtures in the test module:
+Create small helper fns in `mod tests` and reuse:
 
 ```rust
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn create_test_config() -> Config {
-        Config {
-            device_name: "Test Camera".to_string(),
-            manufacturer: "Anyka".to_string(),
-            model: "AK3918".to_string(),
-            ..Default::default()
-        }
-    }
-
-    fn create_test_user(level: UserLevel) -> User {
-        User {
-            username: format!("test_{:?}", level).to_lowercase(),
-            password: "test123".to_string(),
-            level,
-        }
-    }
-
-    fn create_mock_platform_with_device_info() -> MockPlatform {
-        let mut mock = MockPlatform::new();
-        mock.expect_get_device_info()
-            .returning(|| Ok(DeviceInfo {
-                serial_number: "TEST123".to_string(),
-                hardware_id: "HW001".to_string(),
-                firmware_version: "1.0.0".to_string(),
-            }));
-        mock
-    }
+fn create_test_service() -> DeviceService {
+    let mut mock = MockPlatform::new();
+    mock.expect_get_device_info()
+        .returning(|| Ok(DeviceInfo { serial_number: "TEST".into(), ..Default::default() }));
+    DeviceService::with_config_and_platform(
+        Arc::new(UserStorage::new()), test_config(), Arc::new(mock))
 }
-```
-
-## Async Test Patterns
-
-Use `#[tokio::test]` for async tests:
-
-```rust
-#[tokio::test]
-async fn test_concurrent_operations() {
-    let service = Arc::new(create_test_service());
-
-    let handles: Vec<_> = (0..10)
-        .map(|i| {
-            let svc = Arc::clone(&service);
-            tokio::spawn(async move {
-                svc.get_device_info().await
-            })
-        })
-        .collect();
-
-    for handle in handles {
-        assert!(handle.await.unwrap().is_ok());
-    }
-}
-```
-
-## Test Coverage
-
-Run coverage reports with tarpaulin:
-
-```bash
-cargo tarpaulin --target x86_64-unknown-linux-gnu --out Html --output-dir coverage
-cargo tarpaulin --target x86_64-unknown-linux-gnu --out Xml  # For CI
-```
-
-## Integration with Existing Tests
-
-Before writing new tests, examine existing test patterns:
-
-```bash
-# Find existing tests in the project
-grep -r "#\[tokio::test\]" cross-compile/onvif-rust/src/
-grep -r "MockPlatform" cross-compile/onvif-rust/src/
 ```
 
 ## Common Assertions
 
 ```rust
-// Value assertions
 assert!(result.is_ok());
-assert!(result.is_err());
-assert_eq!(actual, expected);
-assert_ne!(actual, unexpected);
-
-// String assertions
-assert!(string.contains("expected"));
-assert!(string.starts_with("prefix"));
-
-// Error matching
-assert!(matches!(result, Err(OnvifError::AuthenticationFailed)));
-
-// Collection assertions
-assert!(vec.is_empty());
-assert_eq!(vec.len(), 5);
-assert!(vec.contains(&item));
+assert!(matches!(result, Err(OnvifError::NotAuthorized(_))));
+assert_eq!(packets[0].header.marker, 1);
+assert!(packets[packets.len()-1].payload[1] & 0x40 == 0x40);  // FU_END bit
 ```
 
 ## Reference
 
-For detailed mockall patterns, see `references/mockall-patterns.md` in this skill directory.
+Load `.serena/memories/testing-framework.md` and `.serena/memories/development-standards.md` before writing tests. See the `rtsp-rtp-streaming` skill for packer/unpacker test patterns (mock IO + `on_packet_handler`).

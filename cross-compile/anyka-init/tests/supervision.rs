@@ -280,6 +280,70 @@ log = "{}"
 }
 
 #[test]
+fn test_run_kill_service_message_escalates_to_sigkill() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let pidfile = dir.path().join("pid");
+    let script = dir.path().join("stubborn.sh");
+    let svc_log = dir.path().join("logs").join("svc.log");
+    // Trap SIGTERM: a SIGTERM-only kill would leave this process alive, so the
+    // test fails unless the supervisor escalates to SIGKILL.
+    write_exec_script(
+        &script,
+        &format!(
+            "#!/bin/sh\ntrap '' TERM\necho $$ > '{}'\nwhile :; do sleep 1; done\n",
+            pidfile.display()
+        ),
+    );
+
+    let cfg_path = write_config(
+        dir.path(),
+        &format!(
+            r#"
+[services.stubborn]
+enabled = true
+exec = "{}"
+log = "{}"
+"#,
+            script.display(),
+            svc_log.display()
+        ),
+    );
+    let cfg = Config::load(cfg_path.to_str().expect("utf8")).expect("load");
+    let h = Harness::start(cfg);
+
+    let mut pid = None;
+    for _ in 0..50 {
+        if let Ok(s) = std::fs::read_to_string(&pidfile)
+            && let Ok(p) = s.trim().parse::<i32>()
+        {
+            pid = Some(p);
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    let pid = pid.expect("initial pid");
+
+    let _ = h.tx.send(Msg::KillService("stubborn".into()));
+
+    let mut dead = false;
+    for _ in 0..50 {
+        // SAFETY: kill with signal 0 performs a permission and existence check
+        // only; it sends no signal and dereferences no pointer.
+        if unsafe { libc::kill(pid, 0) } != 0 {
+            dead = true;
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    assert!(
+        dead,
+        "KillService must SIGKILL a SIGTERM-immune child, not leave it alive"
+    );
+
+    h.stop();
+}
+
+#[test]
 fn test_run_env_is_cleared_for_children() {
     let env = env_bin();
     let dir = tempfile::tempdir().expect("tempdir");

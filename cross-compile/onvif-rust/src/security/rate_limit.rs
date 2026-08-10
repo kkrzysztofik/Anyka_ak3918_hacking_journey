@@ -227,6 +227,14 @@ impl RateLimiter {
     }
 
     fn apply_request_window(entry: &mut RequestCount, limiter: &RateLimiter, now: Instant) -> bool {
+        // 0 means "no limit", not "deny everything". Every other 0-valued knob in
+        // this config reads as off/auto (snapshot_port = 0 -> use the main port),
+        // and the deny reading silently closed the whole ONVIF API whenever the
+        // key was absent from config.toml: the UI served its static assets but
+        // every SOAP call 429'd, which looks like a broken login, not a limiter.
+        if limiter.max_requests == 0 {
+            return true;
+        }
         if now.duration_since(entry.window_start) > limiter.window_duration {
             entry.count = 1;
             entry.window_start = now;
@@ -511,6 +519,35 @@ mod tests {
     fn test_default() {
         let limiter = RateLimiter::default();
         assert_eq!(limiter.max_requests(), DEFAULT_RATE_LIMIT);
+    }
+
+    #[test]
+    fn test_zero_limit_means_unlimited_not_denied() {
+        // A limit of 0 used to reject every request, which closed the whole
+        // ONVIF API whenever config.toml omitted rate_limit_per_minute.
+        let limiter = RateLimiter::new(0);
+        let ip: IpAddr = "192.168.30.121".parse().expect("ip");
+
+        for i in 0..200 {
+            assert!(
+                limiter.check_rate_limit(&ip),
+                "request {i} denied by a 0 (unlimited) rate limit"
+            );
+        }
+    }
+
+    #[test]
+    fn test_server_config_default_does_not_deny_every_request() {
+        // Guards the pairing: the shipped config omits the key, so the serde
+        // default is what production actually runs with.
+        let cfg = crate::config::types::ServerConfig::default();
+        let limiter = RateLimiter::new(cfg.rate_limit_per_minute);
+        let ip: IpAddr = "192.168.30.121".parse().expect("ip");
+
+        assert!(
+            limiter.check_rate_limit(&ip),
+            "the default ServerConfig must allow at least one request"
+        );
     }
 
     #[test]

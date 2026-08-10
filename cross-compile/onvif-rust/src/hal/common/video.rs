@@ -50,6 +50,7 @@ pub(crate) trait VideoHalTrait: Send + Sync {
     fn vi_set_channel_attr(&self, handle: *mut c_void, attr: *const video_channel_attr) -> i32;
     fn vi_capture_on(&self, handle: *mut c_void) -> i32;
     fn vi_capture_off(&self, handle: *mut c_void) -> i32;
+    fn vi_set_flip_mirror(&self, handle: *mut c_void, flip: bool, mirror: bool) -> i32;
     fn vpss_init(&self, vi_handle: *mut c_void, dev: i32);
     fn vpss_destroy(&self, dev: i32);
     fn venc_set_cfg_path(&self, path: *const c_char) -> i32;
@@ -274,6 +275,17 @@ pub(crate) fn video_input_capture_off(
 ) -> PlatformResult<()> {
     let ret = ffi.vi_capture_off(handle.as_ptr());
     check_result(ret, "ak_vi_capture_off")
+}
+
+/// Internal helper that takes FFI trait for testability.
+pub(crate) fn video_input_set_flip_mirror(
+    handle: &VideoInputHandle,
+    flip: bool,
+    mirror: bool,
+    ffi: &dyn VideoHalTrait,
+) -> PlatformResult<()> {
+    let ret = ffi.vi_set_flip_mirror(handle.as_ptr(), flip, mirror);
+    check_result(ret, "ak_vi_set_flip_mirror")
 }
 
 /// Internal helper that takes FFI trait for testability.
@@ -1074,6 +1086,56 @@ mod tests {
         match result {
             Err(PlatformError::HardwareFailure(msg)) => {
                 assert!(msg.contains("ak_vi_capture_off"));
+            }
+            _ => panic!("Expected HardwareFailure error"),
+        }
+    }
+
+    #[test]
+    fn test_video_input_set_flip_mirror_calls_ffi_with_correct_flags() {
+        let mut mock_ffi = MockVideoHalTrait::new();
+        let vi_handle = VideoInputHandle::test_handle();
+
+        mock_ffi
+            .expect_vi_set_flip_mirror()
+            .withf(|handle, flip, mirror| handle.is_null() && *flip && *mirror)
+            .times(1)
+            .returning(|_, _, _| AK_SUCCESS_I32);
+
+        let result = video_input_set_flip_mirror(&vi_handle, true, true, &mock_ffi);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_video_input_set_flip_mirror_does_not_swap_flip_and_mirror() {
+        let mut mock_ffi = MockVideoHalTrait::new();
+        let vi_handle = VideoInputHandle::test_handle();
+
+        mock_ffi
+            .expect_vi_set_flip_mirror()
+            .withf(|_, flip, mirror| *flip && !*mirror)
+            .times(1)
+            .returning(|_, _, _| AK_SUCCESS_I32);
+
+        let result = video_input_set_flip_mirror(&vi_handle, true, false, &mock_ffi);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_video_input_set_flip_mirror_propagates_error() {
+        let mut mock_ffi = MockVideoHalTrait::new();
+        let vi_handle = VideoInputHandle::test_handle();
+
+        mock_ffi
+            .expect_vi_set_flip_mirror()
+            .times(1)
+            .returning(|_, _, _| AK_FAILED_I32);
+
+        let result = video_input_set_flip_mirror(&vi_handle, true, true, &mock_ffi);
+        assert!(result.is_err());
+        match result {
+            Err(PlatformError::HardwareFailure(msg)) => {
+                assert!(msg.contains("ak_vi_set_flip_mirror"));
             }
             _ => panic!("Expected HardwareFailure error"),
         }

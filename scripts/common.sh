@@ -47,6 +47,50 @@ ANYKA_RUSTC="${ANYKA_TOOLCHAIN_BIN}/rustc"
 ANYKA_RUSTDOC="${ANYKA_TOOLCHAIN_BIN}/rustdoc"
 export ANYKA_REPO_ROOT ANYKA_TOOLCHAIN_BIN ANYKA_CARGO ANYKA_RUSTC ANYKA_RUSTDOC
 
+# ── Vendored toolchain first on PATH ────────────────────────────────────────
+# Exporting ANYKA_CARGO is not enough on its own: cargo resolves `rustc` from
+# PATH, so a rustup shim in ~/.cargo/bin wins and compiles against artifacts
+# built by the vendored rustc. The result is an opaque
+#   E0514: found crate `x` compiled by an incompatible version of rustc
+# in whatever dependency happens to build first.
+#
+# setenv.sh already does this for interactive shells. Doing it here too makes
+# every script that sources this file self-sufficient, so forgetting to
+# `source setenv.sh` is no longer a way to get a confusing compiler error.
+#
+# No-op when the toolchain is absent (e.g. before it has been built) — the
+# toolchain builder has its own toolchain/toolchain-builder/scripts/common.sh
+# and is unaffected by this file.
+anyka_use_vendored_toolchain() {
+  [[ -d "${ANYKA_TOOLCHAIN_BIN}" ]] || return 0
+
+  # Idempotent: drop any existing occurrence before prepending.
+  local p="${PATH}"
+  p="${p//:${ANYKA_TOOLCHAIN_BIN}/}"
+  p="${p//${ANYKA_TOOLCHAIN_BIN}:/}"
+  p="${p#${ANYKA_TOOLCHAIN_BIN}}"
+  export PATH="${ANYKA_TOOLCHAIN_BIN}:${p}"
+
+  # Cargo resolves subcommands from $CARGO_HOME/bin *before* PATH. rustup
+  # installs cargo-clippy / cargo-fmt proxies there, and those drag in rustup's
+  # rustc — the same E0514 clash by another route. Use a project-local
+  # CARGO_HOME that shares the user's crate cache but has an empty bin/, so the
+  # vendored cargo-* on PATH wins. Set ANYKA_KEEP_CARGO_HOME=1 to opt out.
+  if [[ -z "${ANYKA_KEEP_CARGO_HOME:-}" ]]; then
+    local cargo_home="${ANYKA_REPO_ROOT}/toolchain/cargo-home"
+    mkdir -p "${cargo_home}/bin"
+    local sub
+    for sub in registry git cache; do
+      if [[ -d "${HOME}/.cargo/${sub}" && ! -e "${cargo_home}/${sub}" ]]; then
+        ln -sfn "${HOME}/.cargo/${sub}" "${cargo_home}/${sub}"
+      fi
+    done
+    export CARGO_HOME="${cargo_home}"
+  fi
+}
+
+anyka_use_vendored_toolchain
+
 # ── Colors ───────────────────────────────────────────────────────────────────
 RED='\033[0;31m'
 GREEN='\033[0;32m'

@@ -452,8 +452,10 @@ fn test_get_service_capabilities() {
     let _ = response.capabilities;
 }
 
-#[test]
-fn test_set_video_source_configuration_updates_existing_entry() {
+// Async because the handler now live-applies a Rotate extension to the
+// platform before persisting (see VideoControl::set_flip_mirror).
+#[tokio::test]
+async fn test_set_video_source_configuration_updates_existing_entry() {
     let service = create_test_service();
     let mut configuration = service
         .handle_get_video_source_configurations(GetVideoSourceConfigurations {})
@@ -469,6 +471,7 @@ fn test_set_video_source_configuration_updates_existing_entry() {
             configuration: configuration.clone(),
             force_persistence: false,
         })
+        .await
         .unwrap();
 
     let response = service

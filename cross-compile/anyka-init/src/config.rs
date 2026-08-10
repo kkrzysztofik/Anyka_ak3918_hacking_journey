@@ -182,6 +182,16 @@ pub struct MonitorCfg {
     pub wifi_reboot_after_ticks: u32,
     #[serde(default = "d_wifi_reboot_cap")]
     pub wifi_reboot_cap: u8,
+    #[serde(default = "d_true")]
+    pub video: bool,
+    #[serde(default = "d_video_restart_ticks")]
+    pub video_restart_after_ticks: u32,
+    #[serde(default = "d_video_kill_ticks")]
+    pub video_kill_after_ticks: u32,
+    #[serde(default = "d_video_reboot_ticks")]
+    pub video_reboot_after_ticks: u32,
+    #[serde(default = "d_video_heartbeat")]
+    pub video_heartbeat_path: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -315,6 +325,18 @@ fn d_wifi_reboot_ticks() -> u32 {
 fn d_wifi_reboot_cap() -> u8 {
     3
 }
+fn d_video_restart_ticks() -> u32 {
+    2
+}
+fn d_video_kill_ticks() -> u32 {
+    3
+}
+fn d_video_reboot_ticks() -> u32 {
+    5
+}
+fn d_video_heartbeat() -> String {
+    "/tmp/vd_heartbeat".into()
+}
 fn d_reboot_interval() -> u64 {
     720
 }
@@ -377,6 +399,11 @@ impl Default for MonitorCfg {
             wifi_supplicant_after_ticks: d_wifi_supplicant_ticks(),
             wifi_reboot_after_ticks: d_wifi_reboot_ticks(),
             wifi_reboot_cap: d_wifi_reboot_cap(),
+            video: true,
+            video_restart_after_ticks: d_video_restart_ticks(),
+            video_kill_after_ticks: d_video_kill_ticks(),
+            video_reboot_after_ticks: d_video_reboot_ticks(),
+            video_heartbeat_path: d_video_heartbeat(),
         }
     }
 }

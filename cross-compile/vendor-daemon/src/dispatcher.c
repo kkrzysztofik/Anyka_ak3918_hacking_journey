@@ -35,6 +35,7 @@ static int is_lifecycle_cmd(int32_t cmd)
     case CMD_VI_OPEN:
     case CMD_VI_CLOSE:
     case CMD_VI_SET_CHANNEL_ATTR:
+    case CMD_VI_SET_FLIP_MIRROR:
     case CMD_VI_CAPTURE_ON:
     case CMD_VI_CAPTURE_OFF:
     case CMD_VPSS_INIT:
@@ -143,30 +144,6 @@ static int handle_get_error_str(int fd)
 /* ---- Public interface ---------------------------------------------------- */
 
 /**
- * release_control - Clear the control-client slot if fd holds it, and close
- * everything that client left open.
- *
- * Called on client disconnect to free the control role so the next
- * lifecycle command from any client can claim it.
- *
- * The cleanup sweep has to live here rather than in the client's Drop impls:
- * four of six client-side handle Drops are deliberate no-ops in IPC mode, so
- * onvif-rust never sends CLOSE, and under SIGKILL no Drop runs at all. Without
- * this the daemon leaks a VI and two VENC objects on every client restart, and
- * the next client's VI_OPEN fails against hardware the SDK still thinks is busy.
- *
- * @param fd  File descriptor of the disconnecting client.
- */
-void release_control(int fd)
-{
-    if (g_control_fd == fd) {
-        log_info("[daemon] control client fd=%d released; closing leaked objects", fd);
-        g_control_fd = -1;
-        vd_obj_close_all();
-    }
-}
-
-/**
  * process_request - Read one IPC frame, enforce access control, and dispatch.
  *
  * Reads the 8-byte header (i32 cmd_id + u32 req_len), then the payload,
@@ -243,6 +220,9 @@ int process_request(int fd)
         break;
     case CMD_VI_CAPTURE_OFF:
         ret = handle_vi_capture_off(fd, req_buf, req_len);
+        break;
+    case CMD_VI_SET_FLIP_MIRROR:
+        ret = handle_vi_set_flip_mirror(fd, req_buf, req_len);
         break;
 
     /* --- VPSS --- */
@@ -333,6 +313,9 @@ int process_request(int fd)
         break;
     case CMD_ISP_SET_WDR:
         ret = handle_isp_set_wdr(fd, req_buf, req_len);
+        break;
+    case CMD_ISP_GET_AE_LUMA:
+        ret = handle_isp_get_ae_luma(fd, req_buf, req_len);
         break;
 
     /* --- Utility --- */

@@ -31,7 +31,7 @@ use crate::hal::anyka::sdk::VideoDevice;
 use crate::hal::common::video::{
     VideoHalTrait, VideoInputHandle, video_input_capture_off, video_input_capture_on,
     video_input_get_sensor_resolution, video_input_match_sensor, video_input_open,
-    video_input_set_channel_attr,
+    video_input_set_channel_attr, video_input_set_flip_mirror,
 };
 use crate::hal::common::{video_channel_attr, video_resolution};
 
@@ -50,6 +50,7 @@ pub(super) struct AnykaVideoInput {
     pub(super) isp_config_path: Option<PathBuf>,
     pub(super) vpss_initialized: AtomicBool,
     pub(super) channel_layout: RwLock<(Resolution, Resolution)>,
+    pub(super) rotated: AtomicBool,
 }
 
 impl AnykaVideoInput {
@@ -77,6 +78,7 @@ impl AnykaVideoInput {
             isp_config_path,
             vpss_initialized: AtomicBool::new(false),
             channel_layout: RwLock::new((Resolution::new(1280, 720), Resolution::new(640, 360))),
+            rotated: AtomicBool::new(false),
         }
     }
 
@@ -389,6 +391,63 @@ impl AnykaVideoInput {
         Ok(())
     }
 
+    /// Store the flip/mirror flag and, if the VI is currently open, apply it
+    /// immediately via the sync IPC lane. If the VI is closed
+    /// (construction-time seed, or between attach cycles), the value is
+    /// stored and picked up the next time `init_video_input()` reaches this
+    /// point after `capture_on()`.
+    ///
+    /// **Boot-time / attach-sequence use only.** Called from
+    /// `AnykaPlatform::with_isp_config` (construction-time seed) and
+    /// `AnykaPlatform::init_video_input` (post-`capture_on` reapply on every
+    /// attach) — both contexts where a blocking SDK call is already
+    /// tolerated (see `capture_on`'s own `std::thread::sleep` calls just
+    /// above). Do **not** call this from an ONVIF request handler or any
+    /// other tokio-worker-pool context — use the async `VideoControl::set_flip_mirror`
+    /// trait method for that instead (implemented below), which routes
+    /// through `spawn_blocking` specifically to avoid parking a shared
+    /// worker thread.
+    pub(super) fn apply_flip_mirror(&self, rotated: bool) -> PlatformResult<()> {
+        self.rotated.store(rotated, Ordering::SeqCst);
+
+        if !self.opened.load(Ordering::SeqCst) {
+            return Ok(());
+        }
+
+        let guard = self.handle.read();
+        let handle = guard.as_ref().ok_or_else(|| {
+            PlatformError::HardwareUnavailable("Video input not opened".to_string())
+        })?;
+
+        video_input_set_flip_mirror(handle, rotated, rotated, self.ffi.as_ref())
+    }
+
+    /// Current flip/mirror flag (may not yet be applied if the VI is closed).
+    pub(super) fn rotated(&self) -> bool {
+        self.rotated.load(Ordering::SeqCst)
+    }
+
+    /// Reapply the currently-stored flip/mirror flag to hardware, without
+    /// changing it. Used by `init_video_input()`'s post-`capture_on()` reapply
+    /// step. Deliberately does not read-then-pass-through the way
+    /// `apply_flip_mirror(self.rotated())` would — that round-trip re-stores
+    /// whatever was read, which can clobber a newer value set concurrently by a
+    /// live `VideoControl::set_flip_mirror` call between the read and the
+    /// store. This method only ever reads `self.rotated` at the moment it
+    /// applies it and never writes back, so there is no window where it can
+    /// regress the atomic to a stale value.
+    pub(super) fn reapply_flip_mirror(&self) -> PlatformResult<()> {
+        if !self.opened.load(Ordering::SeqCst) {
+            return Ok(());
+        }
+        let guard = self.handle.read();
+        let handle = guard.as_ref().ok_or_else(|| {
+            PlatformError::HardwareUnavailable("Video input not opened".to_string())
+        })?;
+        let rotated = self.rotated.load(Ordering::SeqCst);
+        video_input_set_flip_mirror(handle, rotated, rotated, self.ffi.as_ref())
+    }
+
     pub(super) fn close_blocking(&self) -> PlatformResult<()> {
         // Idempotent: already closed is not an error
         if !self.opened.load(Ordering::SeqCst) {
@@ -507,5 +566,38 @@ impl VideoInput for AnykaVideoInput {
             resolution,
             max_framerate: 30.0,
         }])
+    }
+}
+
+#[async_trait]
+impl crate::platform::VideoControl for AnykaVideoInput {
+    /// Async-safe live apply, reachable from ONVIF request handlers.
+    ///
+    /// Deliberately does **not** call `apply_flip_mirror` directly — that
+    /// method's `video_input_set_flip_mirror` call goes through the sync
+    /// `send_request` IPC lane, which blocks the calling OS thread. Called
+    /// from `apply_flip_mirror`'s two boot-time call sites that's fine (see
+    /// its doc comment), but this trait method is reachable from
+    /// `SetVideoSourceConfiguration`, an ONVIF SOAP handler running on the
+    /// shared tokio worker pool — blocking that worker for the RPC's full
+    /// timeout would stall other concurrent requests. `spawn_blocking`
+    /// offloads the blocking call to the dedicated blocking-task pool
+    /// instead, freeing this worker immediately. Mirrors why the imaging
+    /// HAL's live-apply path uses `request_async` rather than the sync lane.
+    async fn set_flip_mirror(&self, rotated: bool) -> PlatformResult<()> {
+        self.rotated.store(rotated, Ordering::SeqCst);
+
+        let handle = self.handle.read().clone();
+        let Some(handle) = handle else {
+            // Not open yet — value stored above, applied on next capture_on().
+            return Ok(());
+        };
+        let ffi = self.ffi.clone();
+
+        tokio::task::spawn_blocking(move || {
+            video_input_set_flip_mirror(&handle, rotated, rotated, ffi.as_ref())
+        })
+        .await
+        .map_err(|e| PlatformError::HardwareFailure(format!("flip/mirror task panicked: {e}")))?
     }
 }

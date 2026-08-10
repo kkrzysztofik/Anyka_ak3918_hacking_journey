@@ -47,6 +47,10 @@ impl VideoHalTrait for StubVideoHal {
         AK_SUCCESS_I32
     }
 
+    fn vi_set_flip_mirror(&self, _handle: *mut c_void, _flip: bool, _mirror: bool) -> i32 {
+        AK_SUCCESS_I32
+    }
+
     fn vpss_init(&self, _vi_handle: *mut c_void, _dev: i32) {
         // Stub: no-op for testing
     }

@@ -53,15 +53,53 @@ pub fn get_video_source_configuration(
 
 /// Handle SetVideoSourceConfiguration request.
 ///
-/// Updates a video source configuration.
-pub fn set_video_source_configuration(
+/// Updates a video source configuration and, if a Rotate extension is
+/// present, applies it to the platform live before persisting. `Degree` is
+/// restricted to `None`/`180` when `Mode: On` — this hardware's flip+mirror
+/// trick can only produce a 180° rotation (see the design doc for why
+/// `RotateMode::Auto` isn't modeled at all: it's rejected earlier, at XML
+/// deserialization, since the enum has no `Auto` variant to parse into).
+pub async fn set_video_source_configuration(
     pm: &ProfileManagerRef,
+    platform: Option<&std::sync::Arc<dyn crate::platform::Platform>>,
     request: SetVideoSourceConfiguration,
 ) -> OnvifResult<SetVideoSourceConfigurationResponse> {
     tracing::debug!(
         "SetVideoSourceConfiguration request for token: {}",
         request.configuration.token
     );
+
+    if let Some(rotate) = request
+        .configuration
+        .extension
+        .as_ref()
+        .and_then(|ext| ext.rotate.as_ref())
+    {
+        if let Some(degree) = rotate.degree
+            && degree != 180
+        {
+            return Err(crate::onvif::error::OnvifError::invalid_arg_val(
+                "InvalidDegree",
+                format!(
+                    "Unsupported rotate degree {}: this device only supports 180",
+                    degree
+                ),
+            ));
+        }
+
+        let rotated = rotate.mode == crate::onvif::types::common::RotateMode::On;
+        if let Some(platform) = platform
+            && let Some(control) = platform.video_control()
+        {
+            control.set_flip_mirror(rotated).await.map_err(|e| {
+                crate::onvif::error::OnvifError::HardwareFailure(format!(
+                    "Failed to apply rotation: {}",
+                    e
+                ))
+            })?;
+        }
+    }
+
     pm.set_video_source_configuration(request.configuration)?;
     Ok(SetVideoSourceConfigurationResponse {})
 }
@@ -179,5 +217,158 @@ mod tests {
             },
         );
         assert!(result.is_err());
+    }
+
+    /// Fetch the default test video source configuration and return it ready
+    /// to be mutated (e.g. with a `Rotate` extension) and sent back through
+    /// `set_video_source_configuration`.
+    fn test_configuration(
+        pm: &ProfileManagerRef,
+    ) -> crate::onvif::types::common::VideoSourceConfiguration {
+        get_video_source_configuration(
+            pm,
+            GetVideoSourceConfiguration {
+                configuration_token: "VideoSourceConfig_0".to_string(),
+            },
+        )
+        .unwrap()
+        .configuration
+    }
+
+    #[tokio::test]
+    async fn test_set_video_source_configuration_invalid_degree_rejected() {
+        use crate::onvif::error::OnvifError;
+        use crate::onvif::types::common::{Rotate, RotateMode, VideoSourceConfigurationExtension};
+
+        let pm = create_test_pm();
+        let mut config = test_configuration(&pm);
+        config.extension = Some(VideoSourceConfigurationExtension {
+            rotate: Some(Rotate {
+                mode: RotateMode::On,
+                degree: Some(90),
+            }),
+        });
+
+        let result = set_video_source_configuration(
+            &pm,
+            None,
+            SetVideoSourceConfiguration {
+                configuration: config,
+                force_persistence: true,
+            },
+        )
+        .await;
+
+        assert!(matches!(result, Err(OnvifError::InvalidArgVal { .. })));
+
+        // Not persisted: re-reading the configuration shows no Rotate extension.
+        let after = test_configuration(&pm);
+        assert!(after.extension.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_set_video_source_configuration_rotate_on_no_degree_persists() {
+        use crate::onvif::types::common::{Rotate, RotateMode, VideoSourceConfigurationExtension};
+
+        let pm = create_test_pm();
+        let mut config = test_configuration(&pm);
+        config.extension = Some(VideoSourceConfigurationExtension {
+            rotate: Some(Rotate {
+                mode: RotateMode::On,
+                degree: None,
+            }),
+        });
+
+        let result = set_video_source_configuration(
+            &pm,
+            None,
+            SetVideoSourceConfiguration {
+                configuration: config,
+                force_persistence: true,
+            },
+        )
+        .await;
+        assert!(result.is_ok());
+
+        let after = test_configuration(&pm);
+        let rotate = after.extension.unwrap().rotate.unwrap();
+        assert_eq!(rotate.mode, RotateMode::On);
+    }
+
+    #[tokio::test]
+    async fn test_set_video_source_configuration_rotate_180_accepted() {
+        use crate::onvif::types::common::{Rotate, RotateMode, VideoSourceConfigurationExtension};
+
+        let pm = create_test_pm();
+        let mut config = test_configuration(&pm);
+        config.extension = Some(VideoSourceConfigurationExtension {
+            rotate: Some(Rotate {
+                mode: RotateMode::On,
+                degree: Some(180),
+            }),
+        });
+
+        let result = set_video_source_configuration(
+            &pm,
+            None,
+            SetVideoSourceConfiguration {
+                configuration: config,
+                force_persistence: true,
+            },
+        )
+        .await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_set_video_source_configuration_live_apply_with_platform() {
+        use crate::onvif::types::common::{Rotate, RotateMode, VideoSourceConfigurationExtension};
+        use crate::platform::Platform;
+        use crate::platform::stub::StubPlatform;
+        use std::sync::Arc;
+
+        let pm = create_test_pm();
+        let platform: Arc<dyn Platform> = Arc::new(StubPlatform::new());
+
+        let mut config = test_configuration(&pm);
+        config.extension = Some(VideoSourceConfigurationExtension {
+            rotate: Some(Rotate {
+                mode: RotateMode::On,
+                degree: None,
+            }),
+        });
+
+        let result = set_video_source_configuration(
+            &pm,
+            Some(&platform),
+            SetVideoSourceConfiguration {
+                configuration: config,
+                force_persistence: true,
+            },
+        )
+        .await;
+
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_set_video_source_configuration_no_rotate_extension_unchanged() {
+        let pm = create_test_pm();
+        let config = test_configuration(&pm);
+        assert!(config.extension.is_none());
+
+        let result = set_video_source_configuration(
+            &pm,
+            None,
+            SetVideoSourceConfiguration {
+                configuration: config,
+                force_persistence: true,
+            },
+        )
+        .await;
+        assert!(result.is_ok());
+
+        let after = test_configuration(&pm);
+        assert!(after.extension.is_none());
     }
 }

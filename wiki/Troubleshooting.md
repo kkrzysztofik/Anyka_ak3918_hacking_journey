@@ -27,15 +27,17 @@
 
 ## Imaging Controls Not Working
 
-- **Note**: Currently using stub implementation - hardware integration is not yet implemented
-- Check if imaging service is enabled in the ONVIF server
-- Verify video source token is correct
-- Ensure camera supports imaging adjustments (when hardware integration is available)
-- Check platform abstraction layer for hardware support
+- Confirm `onvif-rust` is running and `/mnt/logs/onvif.log` has no bring-up failures
+- Imaging SOAP token is **`VideoSource_1`** (media may list `VideoSource_0`)
+- AUTO stuck in one mode: vendor `day_threshold` / `night_threshold` are wrong for
+  this board — recalibrate per [[IR-Night-Mode-Calibration]]
+- Covering only the lens does not shade the LDR; use a dark box over the whole front
+- After day/night transitions, `ircut_a` and `ircut_b` must both read `0` (coil idle)
 
 ## See Also
 
 - [[Boot-Runtime-Supervisor]] - Init system, config, and SAFE MODE
 - [[ONVIF-Rust-Implementation]] - ONVIF server implementation details
+- [[IR-Night-Mode-Calibration]] - IR cut / lamp / AUTO threshold calibration
 - [[Development-Environment]] - Toolchain and build setup
 - [[Development-Guide]] - Development workflow and debugging

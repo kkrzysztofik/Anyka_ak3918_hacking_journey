@@ -1,95 +1,81 @@
 #!/usr/bin/env python3
-"""Run a shell command on the Anyka camera over telnet and print its output.
+"""Run shell commands on the Anyka camera over telnet and print their output.
 
 The camera's telnet (port 24) is the only remote shell available. `telnet` is
 interactive and `telnetlib` was removed in Python 3.13, so this speaks the few
 bytes of the protocol we actually need: refuse every IAC negotiation, log in,
-run one command, and read until a sentinel we printed ourselves.
+run commands, and read until a sentinel we printed ourselves.
+
+Reuses the minimal Telnet client from camera_ntp_sync.py (the single telnet
+implementation for this project).
 
 Usage:
     cam_exec.py 'ps | grep vendor'
     cam_exec.py --timeout 30 'pidof onvif-rust'
+    cam_exec.py 'uptime' 'free' 'df -h'        # multiple commands
+    cam_exec.py --host 1.2.3.4 'cmd'
+
+Single command: prints output, prints [exit=N] to stderr, and the process exit
+code mirrors the remote command. Multiple commands: prints each under a
+"===== cmd =====" header; exit code is 1 if any command failed.
 """
 
+from __future__ import annotations
+
 import argparse
-import socket
 import sys
 import time
 import uuid
+from pathlib import Path
 
-IAC, DONT, WONT, WILL, DO, SB, SE = 255, 254, 252, 251, 253, 250, 240
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-
-def negotiate(sock: socket.socket, data: bytes) -> bytes:
-    """Strip telnet IAC sequences, refusing every option, and return the text.
-
-    Incomplete IAC sequences at the end of a recv chunk are discarded; a later
-    chunk may drop a split sequence rather than buffering across reads.
-    """
-    out = bytearray()
-    i = 0
-    while i < len(data):
-        if data[i] != IAC:
-            out.append(data[i])
-            i += 1
-            continue
-        if i + 1 >= len(data):
-            # Incomplete IAC at end of chunk — discard the dangling byte.
-            break
-        cmd = data[i + 1]
-        if cmd == IAC:
-            # IAC IAC is one literal 0xFF.
-            out.append(IAC)
-            i += 2
-            continue
-        if cmd == SB:
-            # Skip subnegotiation through the terminating IAC SE.
-            j = i + 2
-            while j + 1 < len(data):
-                if data[j] == IAC and data[j + 1] == SE:
-                    i = j + 2
-                    break
-                j += 1
-            else:
-                # Incomplete SB payload — discard remainder of chunk.
-                break
-            continue
-        if i + 2 >= len(data):
-            break
-        opt = data[i + 2]
-        # Refuse everything: WILL->DONT, DO->WONT.
-        if cmd == WILL:
-            sock.sendall(bytes([IAC, DONT, opt]))
-        elif cmd == DO:
-            sock.sendall(bytes([IAC, WONT, opt]))
-        i += 3
-    return bytes(out)
+from camera_ntp_sync import Telnet  # noqa: E402
 
 
-def read_until(sock: socket.socket, needle: bytes, deadline: float) -> bytes:
-    """Read until `needle` appears at least once, or the deadline passes.
-
-    Callers that need the final (post-echo) occurrence locate it themselves
-    after this returns; this helper only waits for the first sighting.
-    """
+def read_until(tn: Telnet, needle: bytes, deadline: float) -> bytes:
+    """Read cooked bytes until `needle` appears at least once, or the deadline passes."""
     buf = bytearray()
     while time.time() < deadline:
-        sock.settimeout(max(0.2, deadline - time.time()))
         try:
-            chunk = sock.recv(4096)
-        except TimeoutError:
-            continue
-        if not chunk:
+            chunk = tn.read_eager()
+        except EOFError:
             break
-        buf += negotiate(sock, chunk)
-        if needle in buf:
-            break
+        if chunk:
+            buf += chunk
+            if needle in buf:
+                break
+        else:
+            time.sleep(0.05)
     return bytes(buf)
+
+
+def run_one(tn: Telnet, cmd: str, deadline: float) -> tuple[str, str]:
+    """Run one command, returning (output, exit_status).
+
+    Keeps the sentinel value out of the echoed command line by defining it via a
+    shell variable, then locates the *last* occurrence when parsing so residual
+    echo cannot steal the exit status.
+    """
+    sentinel = f"__END_{uuid.uuid4().hex[:12]}__"
+    tn.write(f"S={sentinel}; {cmd} 2>&1; echo \"$S\"$?\n".encode())
+
+    raw = read_until(tn, sentinel.encode(), deadline)
+    text = raw.decode("utf-8", "replace")
+
+    idx = text.rfind(sentinel)
+    if idx >= 0:
+        body = text[:idx]
+        tail = text[idx + len(sentinel):]
+        status = tail.split()[0].strip() if tail.split() else "?"
+    else:
+        body, status = text, "TIMEOUT"
+    return body.strip(), status
 
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("command")
+    ap.add_argument("commands", nargs="+")
     ap.add_argument("--host", default="192.168.2.198")
     ap.add_argument("--port", type=int, default=24)
     ap.add_argument("--user", default="root")
@@ -97,48 +83,49 @@ def main() -> int:
     ap.add_argument("--timeout", type=float, default=25.0)
     args = ap.parse_args()
 
+    multi = len(args.commands) > 1
     deadline = time.time() + args.timeout
-    with socket.create_connection((args.host, args.port), timeout=args.timeout) as sock:
+
+    try:
+        tn = Telnet(args.host, args.port, timeout=args.timeout)
+    except OSError as e:
+        print(f"Connection failed: {e}", file=sys.stderr)
+        return 1
+
+    try:
         # This device drops straight to a root shell after IAC negotiation; there is
         # no login prompt. Handle both shapes so the script keeps working if the
         # firmware ever grows one.
-        banner = read_until(sock, b"# ", min(deadline, time.time() + 8))
+        banner = read_until(tn, b"# ", min(deadline, time.time() + 8))
         if b"ogin:" in banner:
-            sock.sendall(args.user.encode() + b"\n")
-            prompt = read_until(sock, b"assword:", min(deadline, time.time() + 5))
+            tn.write(args.user.encode() + b"\n")
+            prompt = read_until(tn, b"assword:", min(deadline, time.time() + 5))
             if b"assword:" in prompt:
-                sock.sendall(args.password.encode() + b"\n")
-            read_until(sock, b"# ", min(deadline, time.time() + 8))
+                tn.write(args.password.encode() + b"\n")
+            read_until(tn, b"# ", min(deadline, time.time() + 8))
 
         # Kill terminal echo: the telnet server echoes our command back, and a long
         # command wraps across lines, which makes the echo impossible to strip
         # reliably by line count.
-        sock.sendall(b"stty -echo\n")
-        read_until(sock, b"# ", min(deadline, time.time() + 5))
+        tn.write(b"stty -echo\n")
+        read_until(tn, b"# ", min(deadline, time.time() + 5))
 
-        # Keep the sentinel value out of the echoed command line by defining it
-        # via a shell variable, then locate the *last* occurrence when parsing so
-        # residual echo cannot steal the exit status.
-        sentinel = f"__END_{uuid.uuid4().hex[:12]}__"
-        sock.sendall(
-            f"S={sentinel}; {args.command} 2>&1; echo \"$S\"$?\n".encode()
-        )
+        failed = 0
+        for cmd in args.commands:
+            if multi:
+                print(f"\n===== {cmd} =====", flush=True)
+            body, status = run_one(tn, cmd, deadline)
+            print(body)
+            print(f"[exit={status}]", file=sys.stderr)
+            if status != "0":
+                failed += 1
 
-        raw = read_until(sock, sentinel.encode(), deadline)
-        text = raw.decode("utf-8", "replace")
-
-        idx = text.rfind(sentinel)
-        if idx >= 0:
-            body = text[:idx]
-            tail = text[idx + len(sentinel) :]
-            status = tail.split()[0].strip() if tail.split() else "?"
-        else:
-            body, status = text, "TIMEOUT"
-
-        print(body.strip())
-        print(f"[exit={status}]", file=sys.stderr)
-
-        return 0 if status == "0" else 1
+        return 1 if failed else 0
+    except (OSError, EOFError) as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+    finally:
+        tn.close()
 
 
 if __name__ == "__main__":

@@ -262,3 +262,35 @@ int handle_vi_capture_off(int fd, const uint8_t *req, uint32_t req_len)
     int ret = ak_vi_capture_off(handle);
     return send_response(fd, ret, NULL, 0);
 }
+
+/**
+ * handle_vi_set_flip_mirror - IPC handler for CMD_VI_SET_FLIP_MIRROR.
+ *
+ * Calls ak_vi_set_flip_mirror() on the VI device identified by the handle.
+ *
+ * Wire format: [u64 handle][u8 flip][u8 mirror] = 10 bytes.
+ *
+ * @param fd      Client socket file descriptor, used to send the response.
+ * @param req     Request payload bytes (little-endian, layout described above).
+ * @param req_len Length of @p req in bytes.
+ * @return        0 on success, -1 on I/O error.
+ */
+int handle_vi_set_flip_mirror(int fd, const uint8_t *req, uint32_t req_len)
+{
+    if (req_len < sizeof(uint64_t) + 2) {
+        log_warn("[vi] set_flip_mirror: req too short (%u)", req_len);
+        return send_response(fd, STATUS_ERROR, NULL, 0);
+    }
+    void *handle;
+    if (vd_obj_resolve(req_read_u64(req, 0), VD_OBJ_KIND_VI, &handle) != 0)
+        return send_response(fd, VD_STATUS_STALE_EPOCH, NULL, 0);
+
+    int flip = req[8];
+    int mirror = req[9];
+
+    log_debug("[vi] set_flip_mirror handle=%p flip=%d mirror=%d", handle, flip, mirror);
+    int ret = ak_vi_set_flip_mirror(handle, flip, mirror);
+    if (ret != 0)
+        log_error("[vi] set_flip_mirror failed: %d", ret);
+    return send_response(fd, ret, NULL, 0);
+}

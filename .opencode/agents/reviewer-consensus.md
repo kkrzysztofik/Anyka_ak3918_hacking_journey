@@ -36,11 +36,11 @@ Use this orchestrator for substantive code review.
 
 ## Verification Baseline
 
-Use the vendored toolchain and host target:
+Use the vendored toolchain and host target. From the repo root, load the toolchain, then run gates from the crate:
 
 ```bash
-export CARGO=toolchain/arm-anykav200-crosstool-ng/bin/cargo
-cd cross-compile
+source ./setenv.sh
+cd cross-compile/onvif-rust
 $CARGO fmt --check
 $CARGO clippy --target x86_64-unknown-linux-gnu -- -D warnings
 $CARGO test --target x86_64-unknown-linux-gnu

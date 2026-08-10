@@ -4,57 +4,42 @@
 # Runs validation against both main (1080p) and sub (480p) streams.
 #
 # Usage:
-#   rtsp_validation_tool -c validation/rtsp_validation_device_real.toml --device-password secret
+#   rtsp_validation_tool -c validation/config/rtsp_validation_device_real.toml --device-password secret
+#
+# Only overrides are listed here. Anything omitted uses the built-in default —
+# see rtsp_validation.toml for the fully annotated template. The device host,
+# SSH port, user and telemetry flag already default to this camera.
 
 [run]
-launch-on-device = true
+launch-on-device = false
 
 [rtsp]
 host = "192.168.2.198"
-port = 554
-stream = "/main"  # primary stream (used when [[device.streams]] is empty)
-timeout-sec = 10
-initial-timestamp-policy = "permissive"
+# Primary stream, used when [[device.streams]] is empty.
+stream = "/main"
 username = "admin"
 password = "admin"
 
 [test]
-short-duration-sec = 30
-long-duration-sec = 600
-concurrent-clients = 2  # lower for embedded device
+# Lower than the default 4: this is an embedded device.
+concurrent-clients = 2
 
 [thresholds]
+# All raised from the host-side defaults to suit the camera.
 video-startup-latency-ms = 3000
 harness-startup-latency-ms = 5000
 audio-startup-latency-ms = 3000
 bitrate-tolerance-percent = 20
 fps-tolerance-percent = 15
-packet-loss-tolerance-percent = 1
-
-[baseline]
-dir = "rtsp_results/baselines"
-
-[capture]
-interface = ""
 
 [logging]
 level = "debug"
 retina-level = "debug"
 file = "rtsp_validation.log"
 
-[artifacts]
-dir = "rtsp_results/runs"
-capture-tool-output = true
-keep-pcaps = true
-
 [device]
-host = "192.168.2.198"
-ssh-port = 22
-user = "root"
-password = ""
-telemetry = true
 real-mode = true
-# h264-file and aac-file intentionally omitted (real mode uses camera sensor)
+# h264-file and aac-file intentionally omitted (real mode uses the camera sensor).
 
 # Streams to validate (both main and sub)
 [[device.streams]]
@@ -68,6 +53,7 @@ rtsp-stream = "/sub"
 httpflv-path = "/live/sub.flv"
 
 [httpflv]
-port = 8080
+# Section default for `path` is /live/stream1.flv, so it must be set explicitly.
+# `timeout-sec` defaults to 0 inside a present [httpflv] section, not 10.
 path = "/live/main.flv"
 timeout-sec = 10

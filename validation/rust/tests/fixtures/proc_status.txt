@@ -1,5 +1,0 @@
-Name:   onvif-rust
-State:  S (sleeping)
-VmRSS:  12456 kB
-VmSize: 25680 kB
-Threads:        1

@@ -1,15 +1,13 @@
 //! Configuration (TOML + CLI) and effective merged config.
 
 use anyhow::{Context, Result};
-use clap::parser::ValueSource;
-use clap::{CommandFactory, FromArgMatches, Parser, ValueEnum};
+use clap::{Parser, ValueEnum};
 use serde::Deserialize;
 use std::env;
 use std::ffi::OsString;
 use std::path::PathBuf;
 use tracing::{info, warn};
 
-pub const DEFAULT_VIDEO_STARTUP_TARGET_MS: u64 = 1500;
 pub const DEFAULT_RTSP_HOST: &str = "127.0.0.1";
 pub const DEFAULT_RTSP_PORT: u16 = 554;
 pub const DEFAULT_RTSP_STREAM: &str = "/stream1";
@@ -21,6 +19,15 @@ pub const DEFAULT_ARTIFACTS_ROOT_DIR: &str = "rtsp_results/runs";
 pub const DEFAULT_HTTPFLV_PORT: u16 = 8080;
 pub const DEFAULT_HTTPFLV_PATH: &str = "/live/stream1.flv";
 pub const DEFAULT_CONFIG_FILE_NAME: &str = "rtsp_validation.toml";
+pub const DEFAULT_DEVICE_HOST: &str = "192.168.2.198";
+pub const DEFAULT_DEVICE_USER: &str = "root";
+pub const DEFAULT_DEVICE_SSH_PORT: u16 = 22;
+pub const DEFAULT_OUTPUT_FILE_NAME: &str = "rtsp_validation.json";
+pub const DEFAULT_HTTPFLV_TIMEOUT_SEC: u64 = 10;
+pub const DEFAULT_PACING_EXPECTED_FPS: f64 = 25.0;
+pub const DEFAULT_PACING_DELAY_MULTIPLE: f64 = 2.0;
+pub const DEFAULT_PACING_DELAY_FLOOR_MS: f64 = 150.0;
+pub const DEFAULT_PACING_DELAY_TOLERANCE_PERCENT: f64 = 5.0;
 
 /// TOML config file schema (rtsp_validation.toml).
 #[derive(Debug, Default, Clone, Deserialize)]
@@ -47,244 +54,184 @@ pub struct RtspValidationConfig {
     /// Optional HTTP-FLV section for future tests.
     #[serde(default)]
     pub httpflv: Option<HttpFlvSection>,
+    #[serde(default)]
+    pub pacing: PacingSection,
 }
 
-#[derive(Debug, Default, Clone, Deserialize)]
-#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+// Every section below is `#[serde(default)]` at the container level: any field the
+// TOML omits falls back to that section's `Default`, so the defaults live in exactly
+// one place instead of being repeated in a per-field `default = "…"` helper.
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields, default)]
+pub struct PacingSection {
+    pub expected_fps: f64,
+    pub delay_multiple: f64,
+    pub delay_floor_ms: f64,
+    pub delay_tolerance_percent: f64,
+}
+
+impl Default for PacingSection {
+    fn default() -> Self {
+        Self {
+            expected_fps: DEFAULT_PACING_EXPECTED_FPS,
+            delay_multiple: DEFAULT_PACING_DELAY_MULTIPLE,
+            delay_floor_ms: DEFAULT_PACING_DELAY_FLOOR_MS,
+            delay_tolerance_percent: DEFAULT_PACING_DELAY_TOLERANCE_PERCENT,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields, default)]
 pub struct HttpFlvSection {
-    #[serde(default = "default_httpflv_port")]
     pub port: u16,
-    #[serde(default = "default_httpflv_path")]
     pub path: String,
-    #[serde(default)]
     pub timeout_sec: u64,
 }
 
-fn default_httpflv_port() -> u16 {
-    DEFAULT_HTTPFLV_PORT
-}
-fn default_httpflv_path() -> String {
-    DEFAULT_HTTPFLV_PATH.to_string()
+impl Default for HttpFlvSection {
+    fn default() -> Self {
+        Self {
+            port: DEFAULT_HTTPFLV_PORT,
+            path: DEFAULT_HTTPFLV_PATH.to_string(),
+            timeout_sec: DEFAULT_HTTPFLV_TIMEOUT_SEC,
+        }
+    }
 }
 
 #[derive(Debug, Default, Clone, Deserialize)]
-#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields, default)]
 pub struct RunSection {
-    #[serde(default)]
     pub no_launch: bool,
-    #[serde(default)]
     pub launch_on_device: bool,
-    #[serde(default)]
     pub h264_file: Option<String>,
-    #[serde(default)]
     pub output: Option<String>,
-    #[serde(default)]
     pub update_baseline: bool,
-    #[serde(default)]
     pub compare_baseline: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields, default)]
 pub struct RtspSection {
-    #[serde(default = "default_rtsp_host")]
     pub host: String,
-    #[serde(default = "default_rtsp_port")]
     pub port: u16,
-    #[serde(default = "default_rtsp_stream")]
     pub stream: String,
-    #[serde(default = "default_rtsp_timeout")]
     pub timeout_sec: u64,
-    #[serde(default = "default_initial_timestamp_policy")]
     pub initial_timestamp_policy: InitialTimestampPolicyArg,
-    #[serde(default)]
     pub username: Option<String>,
-    #[serde(default)]
     pub password: Option<String>,
 }
 
 impl Default for RtspSection {
     fn default() -> Self {
         Self {
-            host: default_rtsp_host(),
-            port: default_rtsp_port(),
-            stream: default_rtsp_stream(),
-            timeout_sec: default_rtsp_timeout(),
-            initial_timestamp_policy: default_initial_timestamp_policy(),
+            host: DEFAULT_RTSP_HOST.to_string(),
+            port: DEFAULT_RTSP_PORT,
+            stream: DEFAULT_RTSP_STREAM.to_string(),
+            timeout_sec: 10,
+            initial_timestamp_policy: InitialTimestampPolicyArg::Permissive,
             username: None,
             password: None,
         }
     }
 }
 
-fn default_rtsp_host() -> String {
-    DEFAULT_RTSP_HOST.to_string()
-}
-fn default_rtsp_port() -> u16 {
-    DEFAULT_RTSP_PORT
-}
-fn default_rtsp_stream() -> String {
-    DEFAULT_RTSP_STREAM.to_string()
-}
-fn default_rtsp_timeout() -> u64 {
-    10
-}
-
-fn default_initial_timestamp_policy() -> InitialTimestampPolicyArg {
-    InitialTimestampPolicyArg::Permissive
-}
-
 #[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields, default)]
 pub struct TestSection {
-    #[serde(default = "default_short_duration")]
     pub short_duration_sec: u64,
-    #[serde(default = "default_long_duration")]
     pub long_duration_sec: u64,
-    #[serde(default = "default_concurrent_clients")]
     pub concurrent_clients: u32,
 }
 
 impl Default for TestSection {
     fn default() -> Self {
         Self {
-            short_duration_sec: default_short_duration(),
-            long_duration_sec: default_long_duration(),
-            concurrent_clients: default_concurrent_clients(),
+            short_duration_sec: DEFAULT_DURATION_SEC,
+            long_duration_sec: DEFAULT_LONG_DURATION_SEC,
+            concurrent_clients: DEFAULT_CONCURRENT_CLIENTS,
         }
     }
 }
 
-fn default_short_duration() -> u64 {
-    DEFAULT_DURATION_SEC
-}
-fn default_long_duration() -> u64 {
-    DEFAULT_LONG_DURATION_SEC
-}
-fn default_concurrent_clients() -> u32 {
-    DEFAULT_CONCURRENT_CLIENTS
-}
-
 #[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields, default)]
 pub struct ThresholdsSection {
-    #[serde(default = "default_video_startup_latency_ms")]
     pub video_startup_latency_ms: u64,
-    #[serde(default = "default_harness_startup_latency_ms")]
     pub harness_startup_latency_ms: u64,
-    #[serde(default)]
     pub audio_startup_latency_ms: u64,
-    #[serde(default = "default_bitrate_tolerance")]
     pub bitrate_tolerance_percent: u32,
-    #[serde(default = "default_fps_tolerance")]
     pub fps_tolerance_percent: u32,
-    #[serde(default = "default_packet_loss_tolerance")]
     pub packet_loss_tolerance_percent: f64,
-    #[serde(default)]
     pub expected: Option<ThresholdsExpectedSection>,
 }
 
 impl Default for ThresholdsSection {
     fn default() -> Self {
         Self {
-            video_startup_latency_ms: default_video_startup_latency_ms(),
-            harness_startup_latency_ms: default_harness_startup_latency_ms(),
+            video_startup_latency_ms: 1500,
+            harness_startup_latency_ms: 3000,
             audio_startup_latency_ms: 0,
-            bitrate_tolerance_percent: default_bitrate_tolerance(),
-            fps_tolerance_percent: default_fps_tolerance(),
-            packet_loss_tolerance_percent: default_packet_loss_tolerance(),
+            bitrate_tolerance_percent: 15,
+            fps_tolerance_percent: 10,
+            packet_loss_tolerance_percent: 1.0,
             expected: None,
         }
     }
 }
 
-fn default_video_startup_latency_ms() -> u64 {
-    1500
-}
-fn default_harness_startup_latency_ms() -> u64 {
-    3000
-}
-fn default_bitrate_tolerance() -> u32 {
-    15
-}
-fn default_fps_tolerance() -> u32 {
-    10
-}
-fn default_packet_loss_tolerance() -> f64 {
-    1.0
-}
-
 #[derive(Debug, Default, Clone, Deserialize)]
-#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields, default)]
 pub struct ThresholdsExpectedSection {
     pub bitrate_kbps: Option<f64>,
     pub fps: Option<f64>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields, default)]
 pub struct BaselineSection {
-    #[serde(default = "default_baseline_dir")]
     pub dir: String,
 }
 
 impl Default for BaselineSection {
     fn default() -> Self {
         Self {
-            dir: default_baseline_dir(),
+            dir: DEFAULT_BASELINE_DIR.to_string(),
         }
     }
 }
 
-fn default_baseline_dir() -> String {
-    DEFAULT_BASELINE_DIR.to_string()
-}
-
 #[derive(Debug, Default, Clone, Deserialize)]
-#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields, default)]
 pub struct CaptureSection {
     pub interface: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields, default)]
 pub struct ArtifactsSection {
-    #[serde(default = "default_artifacts_root_dir")]
     pub dir: String,
-    #[serde(default = "default_true")]
     pub capture_tool_output: bool,
-    #[serde(default = "default_true")]
     pub keep_pcaps: bool,
 }
 
 impl Default for ArtifactsSection {
     fn default() -> Self {
         Self {
-            dir: default_artifacts_root_dir(),
+            dir: DEFAULT_ARTIFACTS_ROOT_DIR.to_string(),
             capture_tool_output: true,
             keep_pcaps: true,
         }
     }
 }
 
-fn default_artifacts_root_dir() -> String {
-    DEFAULT_ARTIFACTS_ROOT_DIR.to_string()
-}
-
-fn default_true() -> bool {
-    true
-}
-
 #[derive(Debug, Default, Clone, Deserialize)]
-#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields, default)]
 pub struct LoggingSection {
-    #[serde(default)]
     pub level: String,
-    #[serde(default)]
     pub retina_level: String,
-    #[serde(default)]
     pub file: String,
-    #[serde(default)]
     pub ffmpeg_level: String,
 }
 
@@ -303,40 +250,30 @@ pub struct StreamConfig {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields, default)]
 pub struct DeviceSection {
-    #[serde(default = "default_device_host")]
     pub host: String,
-    #[serde(default = "default_device_ssh_port")]
     pub ssh_port: u16,
-    #[serde(default = "default_device_user")]
     pub user: String,
-    #[serde(default)]
     pub password: Option<String>,
-    #[serde(default = "default_telemetry_enabled")]
     pub telemetry: bool,
-    #[serde(default)]
     pub h264_file: Option<String>,
-    #[serde(default)]
     pub aac_file: Option<String>,
-    #[serde(default)]
     pub loop_playback: bool,
     /// Launch the real camera pipeline (no validation-mode, no H.264/AAC files).
-    #[serde(default)]
     pub real_mode: bool,
     /// Streams to validate in real mode.
-    #[serde(default)]
     pub streams: Vec<StreamConfig>,
 }
 
 impl Default for DeviceSection {
     fn default() -> Self {
         Self {
-            host: default_device_host(),
-            ssh_port: default_device_ssh_port(),
-            user: default_device_user(),
+            host: DEFAULT_DEVICE_HOST.to_string(),
+            ssh_port: DEFAULT_DEVICE_SSH_PORT,
+            user: DEFAULT_DEVICE_USER.to_string(),
             password: None,
-            telemetry: default_telemetry_enabled(),
+            telemetry: true,
             h264_file: None,
             aac_file: None,
             loop_playback: false,
@@ -344,19 +281,6 @@ impl Default for DeviceSection {
             streams: Vec::new(),
         }
     }
-}
-
-fn default_device_host() -> String {
-    "192.168.2.198".to_string()
-}
-fn default_device_ssh_port() -> u16 {
-    22
-}
-fn default_device_user() -> String {
-    "root".to_string()
-}
-fn default_telemetry_enabled() -> bool {
-    true
 }
 
 /// Effective settings after merging config file and CLI (CLI overrides config).
@@ -410,6 +334,10 @@ pub struct EffectiveConfig {
     /// HTTP-FLV path (for future tests).
     pub httpflv_path: String,
     pub httpflv_timeout_sec: u64,
+    pub pacing_expected_fps: f64,
+    pub pacing_delay_multiple: f64,
+    pub pacing_delay_floor_ms: f64,
+    pub pacing_delay_tolerance_percent: f64,
 }
 
 impl EffectiveConfig {
@@ -425,7 +353,7 @@ impl EffectiveConfig {
             .or(env_user)
             .or_else(|| Some(c.device.user.clone()))
             .filter(|u| !u.is_empty())
-            .unwrap_or_else(default_device_user);
+            .unwrap_or_else(|| DEFAULT_DEVICE_USER.to_string());
         let device_password = args
             .device_password
             .clone()
@@ -485,11 +413,7 @@ impl EffectiveConfig {
     /// Precedence is:
     /// - For options: CLI values explicitly provided by the user win over config.
     /// - For flags: `true` on either side wins (cannot be forced to `false` from CLI).
-    pub fn from_config_and_args(
-        config: Option<&RtspValidationConfig>,
-        args: &Args,
-        sources: &ArgSources,
-    ) -> Self {
+    pub fn from_config_and_args(config: Option<&RtspValidationConfig>, args: &Args) -> Self {
         let default_config = RtspValidationConfig::default();
         let c = config.unwrap_or(&default_config);
         let baseline_dir = if c.baseline.dir.is_empty() {
@@ -517,12 +441,12 @@ impl EffectiveConfig {
             .clone()
             .or_else(|| Some(c.device.host.clone()))
             .filter(|h| !h.is_empty())
-            .unwrap_or_else(|| "192.168.2.198".to_string());
+            .unwrap_or_else(|| DEFAULT_DEVICE_HOST.to_string());
         let device_ssh_port = args
             .device_ssh_port
             .or(Some(c.device.ssh_port))
             .filter(|&p| p != 0)
-            .unwrap_or(22);
+            .unwrap_or(DEFAULT_DEVICE_SSH_PORT);
         let (device_user, device_password) = Self::resolve_device_auth(
             args,
             c,
@@ -552,83 +476,57 @@ impl EffectiveConfig {
         };
         let ffmpeg_log_level =
             Self::ffmpeg_log_level_from_config(Some(c), args.ffmpeg_log_level.as_deref());
+        // CLI wins when present, then a non-empty config value, then the built-in default.
         let rtsp_host = if launch_on_device {
             device_host.clone()
-        } else if sources.rtsp_host {
-            args.rtsp_host.clone()
-        } else if !c.rtsp.host.is_empty() {
-            c.rtsp.host.clone()
         } else {
-            args.rtsp_host.clone()
+            args.rtsp_host
+                .clone()
+                .or_else(|| Some(c.rtsp.host.clone()).filter(|h| !h.is_empty()))
+                .unwrap_or_else(|| DEFAULT_RTSP_HOST.to_string())
         };
-        let rtsp_port = if sources.rtsp_port {
-            args.rtsp_port
-        } else if c.rtsp.port != 0 {
-            c.rtsp.port
-        } else {
-            args.rtsp_port
-        };
-        let rtsp_stream = if sources.rtsp_stream {
-            args.rtsp_stream.clone()
-        } else if !c.rtsp.stream.is_empty() {
-            c.rtsp.stream.clone()
-        } else {
-            args.rtsp_stream.clone()
-        };
-        let initial_timestamp_policy = if sources.initial_timestamp_policy {
-            args.initial_timestamp_policy
-        } else {
-            c.rtsp.initial_timestamp_policy
-        };
+        let rtsp_port = args
+            .rtsp_port
+            .or(Some(c.rtsp.port).filter(|&p| p != 0))
+            .unwrap_or(DEFAULT_RTSP_PORT);
+        let rtsp_stream = args
+            .rtsp_stream
+            .clone()
+            .or_else(|| Some(c.rtsp.stream.clone()).filter(|s| !s.is_empty()))
+            .unwrap_or_else(|| DEFAULT_RTSP_STREAM.to_string());
+        let initial_timestamp_policy = args
+            .initial_timestamp_policy
+            .unwrap_or(c.rtsp.initial_timestamp_policy);
         let (stream_username, stream_password) = Self::resolve_stream_auth(args, c);
         let h264_file = args
             .h264_file
             .clone()
             .or_else(|| c.run.h264_file.clone())
             .filter(|s| !s.is_empty());
-        let output = if sources.output {
-            args.output.clone()
-        } else {
-            c.run
-                .output
-                .clone()
-                .filter(|s| !s.is_empty())
-                .unwrap_or_else(|| args.output.clone())
-        };
+        let output = args
+            .output
+            .clone()
+            .or_else(|| c.run.output.clone().filter(|s| !s.is_empty()))
+            .unwrap_or_else(|| DEFAULT_OUTPUT_FILE_NAME.to_string());
         let update_baseline = c.run.update_baseline || args.update_baseline;
         let compare_baseline = c.run.compare_baseline || args.compare_baseline;
 
-        let (httpflv_port, httpflv_path, httpflv_timeout_sec) = if let Some(hf) = &c.httpflv {
-            (
-                if sources.httpflv_port {
-                    args.httpflv_port
-                } else {
-                    hf.port
-                },
-                args.httpflv_stream
-                    .clone()
-                    .unwrap_or_else(|| hf.path.clone()),
-                hf.timeout_sec,
-            )
+        let httpflv = c.httpflv.clone().unwrap_or_default();
+        let httpflv_port = args.httpflv_port.unwrap_or(httpflv.port);
+        let httpflv_path = args.httpflv_stream.clone().unwrap_or(httpflv.path);
+        // An explicit `timeout-sec = 0` in a config file must not disable the
+        // timeout; treat it as "use the built-in default".
+        let httpflv_timeout_sec = if httpflv.timeout_sec == 0 {
+            DEFAULT_HTTPFLV_TIMEOUT_SEC
         } else {
-            (
-                if sources.httpflv_port {
-                    args.httpflv_port
-                } else {
-                    DEFAULT_HTTPFLV_PORT
-                },
-                args.httpflv_stream
-                    .clone()
-                    .unwrap_or_else(|| DEFAULT_HTTPFLV_PATH.to_string()),
-                10, // default timeout
-            )
+            httpflv.timeout_sec
         };
 
         // Build streams list.
         let streams = if !c.device.streams.is_empty() {
             // Explicit [[device.streams]] from TOML config.
             c.device.streams.clone()
-        } else if device_real_mode && !sources.rtsp_stream {
+        } else if device_real_mode && args.rtsp_stream.is_none() {
             // Real mode with no explicit --rtsp-stream: default to main + sub.
             vec![
                 StreamConfig {
@@ -669,18 +567,13 @@ impl EffectiveConfig {
             stream_password,
             rtsp_timeout_sec: c.rtsp.timeout_sec,
             initial_timestamp_policy,
-            short_duration_sec: if sources.duration {
-                args.duration.max(1)
-            } else {
-                c.test.short_duration_sec.max(1)
-            },
+            short_duration_sec: args.duration.unwrap_or(c.test.short_duration_sec).max(1),
             long_duration_sec: c.test.long_duration_sec,
             concurrent_clients: args.concurrent.unwrap_or(c.test.concurrent_clients),
-            video_startup_latency_ms: if sources.max_video_startup_latency_ms {
-                args.max_video_startup_latency_ms.max(1)
-            } else {
-                c.thresholds.video_startup_latency_ms.max(1)
-            },
+            video_startup_latency_ms: args
+                .max_video_startup_latency_ms
+                .unwrap_or(c.thresholds.video_startup_latency_ms)
+                .max(1),
             harness_startup_latency_ms: c.thresholds.harness_startup_latency_ms.max(1),
             audio_startup_latency_ms: c.thresholds.audio_startup_latency_ms,
             bitrate_tolerance_percent: c.thresholds.bitrate_tolerance_percent,
@@ -688,6 +581,10 @@ impl EffectiveConfig {
             packet_loss_tolerance_percent: c.thresholds.packet_loss_tolerance_percent,
             expected_bitrate_kbps: expected_bitrate,
             expected_fps,
+            pacing_expected_fps: c.pacing.expected_fps.max(0.1),
+            pacing_delay_multiple: c.pacing.delay_multiple.max(0.0),
+            pacing_delay_floor_ms: c.pacing.delay_floor_ms.max(0.0),
+            pacing_delay_tolerance_percent: c.pacing.delay_tolerance_percent.max(0.0),
             baseline_dir,
             capture_interface,
             artifacts_root_dir: PathBuf::from(artifacts_root_dir),
@@ -780,32 +677,32 @@ pub struct Args {
     )]
     pub h264_file: Option<String>,
 
+    // The options below are `Option<T>` on purpose: `None` means "user did not pass
+    // this flag", which is what lets config-file values win. Their documented defaults
+    // live in `EffectiveConfig::from_config_and_args`.
     #[arg(
         long,
-        default_value = DEFAULT_RTSP_HOST,
         value_name = "HOST",
         help_heading = "RTSP",
-        help = "RTSP server host/IP to validate (overrides config when explicitly set)."
+        help = "RTSP server host/IP to validate (overrides config; default 127.0.0.1)."
     )]
-    pub rtsp_host: String,
+    pub rtsp_host: Option<String>,
 
     #[arg(
         long,
-        default_value_t = DEFAULT_RTSP_PORT,
         value_name = "PORT",
         help_heading = "RTSP",
-        help = "RTSP server port to validate (overrides config when explicitly set)."
+        help = "RTSP server port to validate (overrides config; default 554)."
     )]
-    pub rtsp_port: u16,
+    pub rtsp_port: Option<u16>,
 
     #[arg(
         long,
-        default_value = DEFAULT_RTSP_STREAM,
         value_name = "PATH",
         help_heading = "RTSP",
-        help = "RTSP stream path (must start with '/'; overrides config when explicitly set)."
+        help = "RTSP stream path (must start with '/'; overrides config; default /stream1)."
     )]
-    pub rtsp_stream: String,
+    pub rtsp_stream: Option<String>,
 
     #[arg(
         long,
@@ -835,47 +732,42 @@ pub struct Args {
     #[arg(
         long,
         value_enum,
-        default_value_t = InitialTimestampPolicyArg::Permissive,
         help_heading = "RTSP",
         help = "Policy for missing RTP-Info rtptime on PLAY (default, require, ignore, permissive)."
     )]
-    pub initial_timestamp_policy: InitialTimestampPolicyArg,
+    pub initial_timestamp_policy: Option<InitialTimestampPolicyArg>,
 
     #[arg(
         long,
-        default_value_t = DEFAULT_HTTPFLV_PORT,
         value_name = "PORT",
         help_heading = "Run / Output",
-        help = "HTTP-FLV port passed to onvif-rust when launching locally (overrides config when explicitly set)."
+        help = "HTTP-FLV port passed to onvif-rust when launching locally (overrides config; default 8080)."
     )]
-    pub httpflv_port: u16,
+    pub httpflv_port: Option<u16>,
 
     #[arg(
         long,
-        default_value_t = DEFAULT_DURATION_SEC,
         value_name = "SEC",
         help_heading = "Run / Output",
-        help = "Short test duration in seconds (overrides config when explicitly set)."
+        help = "Short test duration in seconds (overrides config; default 30)."
     )]
-    pub duration: u64,
+    pub duration: Option<u64>,
 
     #[arg(
         long,
-        default_value_t = DEFAULT_VIDEO_STARTUP_TARGET_MS,
         value_name = "MS",
         help_heading = "Thresholds",
-        help = "Maximum allowed protocol first-frame latency in ms (`first_video_frame_latency_ms`; overrides config when explicitly set)."
+        help = "Maximum allowed protocol first-frame latency in ms (`first_video_frame_latency_ms`; overrides config; default 1500)."
     )]
-    pub max_video_startup_latency_ms: u64,
+    pub max_video_startup_latency_ms: Option<u64>,
 
     #[arg(
         long,
-        default_value = "rtsp_validation.json",
         value_name = "FILE",
         help_heading = "Run / Output",
-        help = "Report filename written inside the run artifacts directory."
+        help = "Report filename written inside the run artifacts directory (default rtsp_validation.json)."
     )]
-    pub output: String,
+    pub output: Option<String>,
 
     #[arg(
         long,
@@ -1067,71 +959,28 @@ pub enum InitialTimestampPolicyArg {
     Permissive,
 }
 
-#[derive(Debug, Clone, Copy)]
-pub struct ArgSources {
-    pub rtsp_host: bool,
-    pub rtsp_port: bool,
-    pub rtsp_stream: bool,
-    pub initial_timestamp_policy: bool,
-    pub duration: bool,
-    pub max_video_startup_latency_ms: bool,
-    pub output: bool,
-    pub httpflv_port: bool,
+pub fn parse_args() -> Args {
+    Args::parse()
 }
 
-impl ArgSources {
-    pub fn from_matches(matches: &clap::ArgMatches) -> Self {
-        fn is_cli(matches: &clap::ArgMatches, id: &str) -> bool {
-            matches.value_source(id) == Some(ValueSource::CommandLine)
-        }
-
-        Self {
-            rtsp_host: is_cli(matches, "rtsp_host"),
-            rtsp_port: is_cli(matches, "rtsp_port"),
-            rtsp_stream: is_cli(matches, "rtsp_stream"),
-            initial_timestamp_policy: is_cli(matches, "initial_timestamp_policy"),
-            duration: is_cli(matches, "duration"),
-            max_video_startup_latency_ms: is_cli(matches, "max_video_startup_latency_ms"),
-            output: is_cli(matches, "output"),
-            httpflv_port: is_cli(matches, "httpflv_port"),
-        }
-    }
-}
-
-#[derive(Debug)]
-pub struct ParsedArgs {
-    pub args: Args,
-    pub sources: ArgSources,
-}
-
-pub fn parse_args() -> Result<ParsedArgs> {
-    let matches = Args::command().get_matches();
-    let sources = ArgSources::from_matches(&matches);
-    let args = Args::from_arg_matches(&matches).context("decode CLI arguments")?;
-    Ok(ParsedArgs { args, sources })
-}
-
-pub fn parse_args_from<I, T>(iter: I) -> Result<ParsedArgs>
+pub fn parse_args_from<I, T>(iter: I) -> Result<Args>
 where
     I: IntoIterator<Item = T>,
     T: Into<OsString> + Clone,
 {
-    let cmd = Args::command();
-    let matches = cmd
-        .try_get_matches_from(iter)
-        .context("parse CLI arguments")?;
-    let sources = ArgSources::from_matches(&matches);
-    let args = Args::from_arg_matches(&matches).context("decode CLI arguments")?;
-    Ok(ParsedArgs { args, sources })
+    Args::try_parse_from(iter).context("parse CLI arguments")
 }
 
 #[cfg(test)]
+// Tests build a config then poke one or two fields. Struct-update syntax with
+// `..Default::default()` is ~45 lines longer here for no gain in the assertions.
+#[allow(clippy::field_reassign_with_default)]
 mod tests {
     use super::{
-        DEFAULT_ARTIFACTS_ROOT_DIR, DEFAULT_BASELINE_DIR, DEFAULT_HTTPFLV_PATH, DEFAULT_RTSP_HOST,
-        DEFAULT_RTSP_PORT, DEFAULT_RTSP_STREAM, EffectiveConfig, HttpFlvSection,
-        InitialTimestampPolicyArg, LoggingSection, RtspValidationConfig, load_config,
-        parse_args_from,
+        DEFAULT_ARTIFACTS_ROOT_DIR, DEFAULT_BASELINE_DIR, DEFAULT_HTTPFLV_PATH,
+        DEFAULT_HTTPFLV_TIMEOUT_SEC, DEFAULT_RTSP_HOST, DEFAULT_RTSP_PORT, DEFAULT_RTSP_STREAM,
+        EffectiveConfig, HttpFlvSection, InitialTimestampPolicyArg, LoggingSection,
+        RtspValidationConfig, load_config, parse_args_from,
     };
     use clap::CommandFactory;
     use std::path::PathBuf;
@@ -1166,7 +1015,7 @@ mod tests {
     #[test]
     fn test_from_config_and_args_defaults() {
         let parsed = parse_args_from(["rtsp_validation_tool"]).unwrap();
-        let effective = EffectiveConfig::from_config_and_args(None, &parsed.args, &parsed.sources);
+        let effective = EffectiveConfig::from_config_and_args(None, &parsed);
         assert_eq!(effective.rtsp_host, DEFAULT_RTSP_HOST);
         assert_eq!(effective.rtsp_port, DEFAULT_RTSP_PORT);
         assert_eq!(effective.rtsp_stream, DEFAULT_RTSP_STREAM);
@@ -1187,6 +1036,48 @@ mod tests {
         assert_eq!(effective.device_password, None);
         assert!(!effective.update_baseline);
         assert!(!effective.compare_baseline);
+    }
+
+    #[test]
+    fn test_from_config_and_args_pacing_defaults() {
+        let parsed = parse_args_from(["rtsp_validation_tool"]).unwrap();
+        let effective = EffectiveConfig::from_config_and_args(None, &parsed);
+        assert_eq!(effective.pacing_expected_fps, 25.0);
+        assert_eq!(effective.pacing_delay_multiple, 2.0);
+        assert_eq!(effective.pacing_delay_floor_ms, 150.0);
+        assert_eq!(effective.pacing_delay_tolerance_percent, 5.0);
+    }
+
+    #[test]
+    fn test_pacing_section_parses_from_toml() {
+        let cfg: RtspValidationConfig = toml::from_str(
+            r#"
+            [pacing]
+            expected-fps = 15
+            delay-multiple = 3.0
+            delay-floor-ms = 200
+            delay-tolerance-percent = 10
+            "#,
+        )
+        .unwrap();
+        assert_eq!(cfg.pacing.expected_fps, 15.0);
+        assert_eq!(cfg.pacing.delay_multiple, 3.0);
+        assert_eq!(cfg.pacing.delay_floor_ms, 200.0);
+        assert_eq!(cfg.pacing.delay_tolerance_percent, 10.0);
+    }
+
+    #[test]
+    fn test_partial_httpflv_section_uses_default_timeout() {
+        let cfg: RtspValidationConfig = toml::from_str(
+            r#"[httpflv]
+            port = 8080
+            "#,
+        )
+        .unwrap();
+        let parsed = parse_args_from(["rtsp_validation_tool"]).unwrap();
+        let effective = EffectiveConfig::from_config_and_args(Some(&cfg), &parsed);
+        assert_eq!(effective.httpflv_port, 8080);
+        assert_eq!(effective.httpflv_timeout_sec, DEFAULT_HTTPFLV_TIMEOUT_SEC);
     }
 
     #[test]
@@ -1216,7 +1107,7 @@ mod tests {
             "pw2",
         ])
         .unwrap();
-        let effective = EffectiveConfig::from_config_and_args(None, &parsed.args, &parsed.sources);
+        let effective = EffectiveConfig::from_config_and_args(None, &parsed);
         assert_eq!(effective.rtsp_host, "10.0.0.1");
         assert_eq!(effective.rtsp_port, 8554);
         assert_eq!(
@@ -1243,7 +1134,7 @@ mod tests {
         cfg.device.user = "cfg_user".to_string();
         cfg.device.password = Some("cfg_pass".to_string());
         let (user, password) = EffectiveConfig::resolve_device_auth(
-            &parsed.args,
+            &parsed,
             &cfg,
             Some("env_user".to_string()),
             Some("env_pass".to_string()),
@@ -1265,7 +1156,7 @@ mod tests {
         .unwrap();
         let cfg = RtspValidationConfig::default();
         let (user, password) = EffectiveConfig::resolve_device_auth(
-            &parsed.args,
+            &parsed,
             &cfg,
             Some("env_user".to_string()),
             Some("env_pass".to_string()),
@@ -1284,7 +1175,7 @@ mod tests {
             "192.168.2.100",
         ])
         .unwrap();
-        let effective = EffectiveConfig::from_config_and_args(None, &parsed.args, &parsed.sources);
+        let effective = EffectiveConfig::from_config_and_args(None, &parsed);
         assert!(effective.launch_on_device);
         assert_eq!(effective.rtsp_host, "192.168.2.100");
         assert_eq!(effective.device_host, "192.168.2.100");
@@ -1293,8 +1184,7 @@ mod tests {
     #[test]
     fn test_resolve_capture_interface_non_empty_unchanged() {
         let parsed = parse_args_from(["rtsp_validation_tool"]).unwrap();
-        let mut effective =
-            EffectiveConfig::from_config_and_args(None, &parsed.args, &parsed.sources);
+        let mut effective = EffectiveConfig::from_config_and_args(None, &parsed);
         effective.capture_interface = "eth0".to_string();
         effective.resolve_capture_interface();
         assert_eq!(effective.capture_interface, "eth0");
@@ -1303,8 +1193,7 @@ mod tests {
     #[test]
     fn test_resolve_capture_interface_empty_localhost_lo() {
         let parsed = parse_args_from(["rtsp_validation_tool", "--rtsp-host", "127.0.0.1"]).unwrap();
-        let mut effective =
-            EffectiveConfig::from_config_and_args(None, &parsed.args, &parsed.sources);
+        let mut effective = EffectiveConfig::from_config_and_args(None, &parsed);
         effective.capture_interface = String::new();
         effective.resolve_capture_interface();
         assert_eq!(effective.capture_interface, "lo");
@@ -1315,8 +1204,7 @@ mod tests {
         let parsed = parse_args_from(["rtsp_validation_tool"]).unwrap();
         let mut cfg = RtspValidationConfig::default();
         cfg.rtsp.host = "localhost".to_string();
-        let mut effective =
-            EffectiveConfig::from_config_and_args(Some(&cfg), &parsed.args, &parsed.sources);
+        let mut effective = EffectiveConfig::from_config_and_args(Some(&cfg), &parsed);
         effective.capture_interface = String::new();
         effective.resolve_capture_interface();
         assert_eq!(effective.capture_interface, "lo");
@@ -1327,8 +1215,7 @@ mod tests {
         let parsed = parse_args_from(["rtsp_validation_tool"]).unwrap();
         let mut cfg = RtspValidationConfig::default();
         cfg.rtsp.host = "::1".to_string();
-        let mut effective =
-            EffectiveConfig::from_config_and_args(Some(&cfg), &parsed.args, &parsed.sources);
+        let mut effective = EffectiveConfig::from_config_and_args(Some(&cfg), &parsed);
         effective.capture_interface = String::new();
         effective.resolve_capture_interface();
         assert_eq!(effective.capture_interface, "lo");
@@ -1339,8 +1226,7 @@ mod tests {
         let parsed = parse_args_from(["rtsp_validation_tool"]).unwrap();
         let mut cfg = RtspValidationConfig::default();
         cfg.rtsp.host = "10.0.0.1".to_string();
-        let mut effective =
-            EffectiveConfig::from_config_and_args(Some(&cfg), &parsed.args, &parsed.sources);
+        let mut effective = EffectiveConfig::from_config_and_args(Some(&cfg), &parsed);
         effective.capture_interface = String::new();
         effective.resolve_capture_interface();
         assert_eq!(effective.capture_interface, "any");
@@ -1359,8 +1245,7 @@ mod tests {
         let mut cfg = RtspValidationConfig::default();
         cfg.rtsp.host = "192.168.2.198".to_string();
         cfg.rtsp.port = 554;
-        let effective =
-            EffectiveConfig::from_config_and_args(Some(&cfg), &parsed.args, &parsed.sources);
+        let effective = EffectiveConfig::from_config_and_args(Some(&cfg), &parsed);
         assert_eq!(effective.rtsp_host, "10.0.0.2");
         assert_eq!(effective.rtsp_port, 8554);
     }
@@ -1379,8 +1264,7 @@ mod tests {
         cfg.rtsp.username = Some("cfg_user".to_string());
         cfg.rtsp.password = Some("cfg_pass".to_string());
 
-        let effective =
-            EffectiveConfig::from_config_and_args(Some(&cfg), &parsed.args, &parsed.sources);
+        let effective = EffectiveConfig::from_config_and_args(Some(&cfg), &parsed);
         assert_eq!(effective.stream_username.as_deref(), Some("cli_user"));
         assert_eq!(effective.stream_password.as_deref(), Some("cli_pass"));
     }
@@ -1392,8 +1276,7 @@ mod tests {
         cfg.rtsp.username = Some("cfg_user".to_string());
         cfg.rtsp.password = Some("cfg_pass".to_string());
 
-        let effective =
-            EffectiveConfig::from_config_and_args(Some(&cfg), &parsed.args, &parsed.sources);
+        let effective = EffectiveConfig::from_config_and_args(Some(&cfg), &parsed);
         assert_eq!(effective.stream_username.as_deref(), Some("cfg_user"));
         assert_eq!(effective.stream_password.as_deref(), Some("cfg_pass"));
     }
@@ -1401,7 +1284,7 @@ mod tests {
     #[test]
     fn test_from_config_and_args_stream_credentials_incomplete_pair_ignored() {
         let parsed = parse_args_from(["rtsp_validation_tool", "--username", "cli_user"]).unwrap();
-        let effective = EffectiveConfig::from_config_and_args(None, &parsed.args, &parsed.sources);
+        let effective = EffectiveConfig::from_config_and_args(None, &parsed);
         assert!(effective.stream_username.is_none());
         assert!(effective.stream_password.is_none());
     }
@@ -1411,8 +1294,7 @@ mod tests {
         let parsed = parse_args_from(["rtsp_validation_tool"]).unwrap();
         let mut cfg = RtspValidationConfig::default();
         cfg.rtsp.initial_timestamp_policy = InitialTimestampPolicyArg::Ignore;
-        let effective =
-            EffectiveConfig::from_config_and_args(Some(&cfg), &parsed.args, &parsed.sources);
+        let effective = EffectiveConfig::from_config_and_args(Some(&cfg), &parsed);
         assert_eq!(
             effective.initial_timestamp_policy,
             InitialTimestampPolicyArg::Ignore
@@ -1422,7 +1304,7 @@ mod tests {
     #[test]
     fn test_config_flag_short_c_parses() {
         let parsed = parse_args_from(["rtsp_validation_tool", "-c", "foo.toml"]).unwrap();
-        assert_eq!(parsed.args.config.as_deref(), Some("foo.toml"));
+        assert_eq!(parsed.config.as_deref(), Some("foo.toml"));
     }
 
     #[test]
@@ -1466,7 +1348,7 @@ harness-startup-latency-ms = 3500
     #[test]
     fn test_from_config_and_args_httpflv_path_uses_default_when_not_overridden() {
         let parsed = parse_args_from(["rtsp_validation_tool"]).expect("parse args");
-        let effective = EffectiveConfig::from_config_and_args(None, &parsed.args, &parsed.sources);
+        let effective = EffectiveConfig::from_config_and_args(None, &parsed);
         assert_eq!(effective.httpflv_path, "/live/stream1.flv");
     }
 
@@ -1485,8 +1367,7 @@ harness-startup-latency-ms = 3500
             timeout_sec: 10,
         });
 
-        let effective =
-            EffectiveConfig::from_config_and_args(Some(&cfg), &parsed.args, &parsed.sources);
+        let effective = EffectiveConfig::from_config_and_args(Some(&cfg), &parsed);
         assert_eq!(effective.httpflv_path, "/live/custom.flv");
     }
 
@@ -1503,8 +1384,7 @@ harness-startup-latency-ms = 3500
         cfg.device.h264_file = Some("/mnt/test.h264".to_string());
         cfg.device.aac_file = Some("/mnt/test.aac".to_string());
 
-        let effective =
-            EffectiveConfig::from_config_and_args(Some(&cfg), &parsed.args, &parsed.sources);
+        let effective = EffectiveConfig::from_config_and_args(Some(&cfg), &parsed);
         assert!(effective.device_real_mode);
         assert!(effective.device_h264_file.is_none());
         assert!(effective.device_aac_file.is_none());
@@ -1513,7 +1393,7 @@ harness-startup-latency-ms = 3500
     #[test]
     fn test_device_real_mode_defaults_two_streams() {
         let parsed = parse_args_from(["rtsp_validation_tool", "--device-real-mode"]).unwrap();
-        let effective = EffectiveConfig::from_config_and_args(None, &parsed.args, &parsed.sources);
+        let effective = EffectiveConfig::from_config_and_args(None, &parsed);
         assert_eq!(effective.streams.len(), 2);
         assert_eq!(effective.streams[0].label, "main");
         assert_eq!(effective.streams[0].rtsp_stream, "/main");
@@ -1532,7 +1412,7 @@ harness-startup-latency-ms = 3500
             "/sub",
         ])
         .unwrap();
-        let effective = EffectiveConfig::from_config_and_args(None, &parsed.args, &parsed.sources);
+        let effective = EffectiveConfig::from_config_and_args(None, &parsed);
         assert_eq!(effective.streams.len(), 1);
         assert_eq!(effective.streams[0].rtsp_stream, "/sub");
     }
@@ -1554,8 +1434,7 @@ real-mode = true
         assert!(config.device.real_mode);
 
         let parsed = parse_args_from(["rtsp_validation_tool"]).unwrap();
-        let effective =
-            EffectiveConfig::from_config_and_args(Some(&config), &parsed.args, &parsed.sources);
+        let effective = EffectiveConfig::from_config_and_args(Some(&config), &parsed);
         assert!(effective.device_real_mode);
         assert_eq!(effective.streams.len(), 2);
     }
@@ -1586,8 +1465,7 @@ httpflv-path = "/live/cam2.flv"
         let config = result.expect("some config");
 
         let parsed = parse_args_from(["rtsp_validation_tool"]).unwrap();
-        let effective =
-            EffectiveConfig::from_config_and_args(Some(&config), &parsed.args, &parsed.sources);
+        let effective = EffectiveConfig::from_config_and_args(Some(&config), &parsed);
         assert_eq!(effective.streams.len(), 2);
         assert_eq!(effective.streams[0].label, "cam1");
         assert_eq!(effective.streams[0].rtsp_stream, "/cam1");
@@ -1601,7 +1479,7 @@ httpflv-path = "/live/cam2.flv"
     #[test]
     fn test_non_real_mode_single_stream() {
         let parsed = parse_args_from(["rtsp_validation_tool"]).unwrap();
-        let effective = EffectiveConfig::from_config_and_args(None, &parsed.args, &parsed.sources);
+        let effective = EffectiveConfig::from_config_and_args(None, &parsed);
         assert!(!effective.device_real_mode);
         assert_eq!(effective.streams.len(), 1);
         assert_eq!(effective.streams[0].label, "");

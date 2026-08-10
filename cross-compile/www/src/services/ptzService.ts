@@ -118,3 +118,20 @@ export async function setPreset(
 export async function removePreset(profileToken: string, presetToken: string): Promise<void> {
   await soapRequest(ENDPOINTS.ptz, soapBodies.removePreset(profileToken, presetToken));
 }
+
+/** Lamp control commands supported by this camera. */
+export type AuxiliaryCommand =
+  'tt:IRLamp|On' | 'tt:IRLamp|Off' | 'tt:IRLamp|Auto' | 'tt:WhiteLight|On' | 'tt:WhiteLight|Off';
+
+/**
+ * Send an ONVIF auxiliary command, used here for the IR lamp and white light.
+ *
+ * @param profileToken - ONVIF media profile token
+ * @param command - One of the AuxiliaryCommand strings
+ */
+export async function sendAuxiliaryCommand(
+  profileToken: string,
+  command: AuxiliaryCommand,
+): Promise<void> {
+  await soapRequest(ENDPOINTS.ptz, soapBodies.sendAuxiliaryCommand(profileToken, command));
+}

@@ -50,6 +50,8 @@ pub struct PTZService {
     pub(crate) state: Arc<PTZStateManager>,
     /// Platform PTZ control (optional for software-only mode).
     pub(crate) ptz_control: Option<Arc<dyn PTZControl>>,
+    /// Imaging control for IR/white lamp auxiliary commands.
+    pub(crate) imaging_control: Option<Arc<dyn crate::platform::ImagingControl>>,
 }
 
 impl PTZService {
@@ -67,6 +69,7 @@ impl PTZService {
         Self {
             state,
             ptz_control: None,
+            imaging_control: None,
         }
     }
 
@@ -80,6 +83,7 @@ impl PTZService {
         Self {
             state,
             ptz_control: platform.ptz_control(),
+            imaging_control: platform.imaging_control(),
         }
     }
 
@@ -88,6 +92,7 @@ impl PTZService {
         Self {
             state,
             ptz_control: Some(ptz_control),
+            imaging_control: None,
         }
     }
 
@@ -122,8 +127,26 @@ impl PTZService {
     }
 
     #[allow(dead_code)]
-    pub(crate) fn build_ptz_node(&self) -> PTZNode {
-        config::build_ptz_node()
+    pub(crate) async fn build_ptz_node(&self) -> PTZNode {
+        config::build_ptz_node(self.lamp_support().await)
+    }
+
+    /// Which lamps the platform actually probed. Absent imaging control, or a
+    /// failed query, advertises nothing rather than guessing.
+    async fn lamp_support(&self) -> config::LampSupport {
+        let Some(imaging) = self.imaging_control.as_ref() else {
+            return config::LampSupport::default();
+        };
+        match imaging.get_options().await {
+            Ok(o) => config::LampSupport {
+                ir_lamp: o.ir_led_supported,
+                white_light: o.white_light_supported,
+            },
+            Err(e) => {
+                tracing::warn!(error = %e, "lamp capability query failed; advertising none");
+                config::LampSupport::default()
+            }
+        }
     }
 
     #[allow(dead_code)]
@@ -136,13 +159,13 @@ impl PTZService {
     // ========================================================================
 
     /// Handle GetNodes request - delegates to ops::config
-    pub fn handle_get_nodes(&self, _request: GetNodes) -> OnvifResult<GetNodesResponse> {
-        config::get_nodes(&self.state)
+    pub async fn handle_get_nodes(&self, _request: GetNodes) -> OnvifResult<GetNodesResponse> {
+        config::get_nodes(&self.state, self.lamp_support().await)
     }
 
     /// Handle GetNode request - delegates to ops::config
-    pub fn handle_get_node(&self, request: GetNode) -> OnvifResult<GetNodeResponse> {
-        config::get_node(&self.state, request.node_token)
+    pub async fn handle_get_node(&self, request: GetNode) -> OnvifResult<GetNodeResponse> {
+        config::get_node(&self.state, request.node_token, self.lamp_support().await)
     }
 
     /// Handle GetConfigurations request - delegates to ops::config
@@ -324,18 +347,49 @@ impl PTZService {
     }
 
     /// Handle SendAuxiliaryCommand request - delegates to ops::auxiliary
-    pub fn handle_send_auxiliary_command(
+    pub async fn handle_send_auxiliary_command(
         &self,
         request: SendAuxiliaryCommand,
     ) -> OnvifResult<SendAuxiliaryCommandResponse> {
         self.validate_profile_token(&request.profile_token)?;
-        let response = auxiliary::send_auxiliary_command(
+        let cmd = auxiliary::send_auxiliary_command(
             &self.state,
             &request.profile_token,
             &request.auxiliary_data,
         )?;
+        self.dispatch_auxiliary(cmd).await?;
         Ok(SendAuxiliaryCommandResponse {
-            auxiliary_response: response,
+            auxiliary_response: None,
+        })
+    }
+
+    async fn dispatch_auxiliary(&self, cmd: auxiliary::AuxCommand) -> OnvifResult<()> {
+        use crate::platform::common::PlatformError;
+        use auxiliary::{AuxCommand, LampState};
+
+        let Some(imaging) = self.imaging_control.as_ref() else {
+            return Err(OnvifError::ActionNotSupported(
+                "Imaging control unavailable for auxiliary command".to_string(),
+            ));
+        };
+
+        let result = match cmd {
+            AuxCommand::IrLamp(LampState::On) => imaging.set_ir_lamp(true).await,
+            AuxCommand::IrLamp(LampState::Off) => imaging.set_ir_lamp(false).await,
+            AuxCommand::IrLamp(LampState::Auto) => imaging.enable_ir_auto().await,
+            AuxCommand::WhiteLight(on) => imaging.set_white_light(on).await,
+        };
+
+        // Parsing failures (unrecognised auxiliary data) are the client's
+        // fault and stay InvalidArgVal upstream; execution failures belong to
+        // the backend, so map them to the matching ONVIF fault instead of
+        // blaming the client's arguments.
+        result.map_err(|e| match e {
+            PlatformError::NotSupported(_) | PlatformError::HardwareUnavailable(_) => {
+                OnvifError::ActionNotSupported(e.to_string())
+            }
+            PlatformError::HardwareFailure(_) => OnvifError::HardwareFailure(e.to_string()),
+            other => OnvifError::Internal(other.to_string()),
         })
     }
 }
@@ -357,7 +411,7 @@ impl ServiceHandler for PTZService {
             // Node Operations
             "GetNodes" => {
                 let request: GetNodes = parse_body(body_xml)?;
-                let response = self.handle_get_nodes(request)?;
+                let response = self.handle_get_nodes(request).await?;
                 quick_xml::se::to_string(&response).map_err(|e| {
                     OnvifError::Internal(format!("Failed to serialize response: {}", e))
                 })
@@ -365,7 +419,7 @@ impl ServiceHandler for PTZService {
 
             "GetNode" => {
                 let request: GetNode = parse_body(body_xml)?;
-                let response = self.handle_get_node(request)?;
+                let response = self.handle_get_node(request).await?;
                 quick_xml::se::to_string(&response).map_err(|e| {
                     OnvifError::Internal(format!("Failed to serialize response: {}", e))
                 })
@@ -514,7 +568,7 @@ impl ServiceHandler for PTZService {
 
             "SendAuxiliaryCommand" => {
                 let request: SendAuxiliaryCommand = parse_body(body_xml)?;
-                let response = self.handle_send_auxiliary_command(request)?;
+                let response = self.handle_send_auxiliary_command(request).await?;
                 quick_xml::se::to_string(&response).map_err(|e| {
                     OnvifError::Internal(format!("Failed to serialize response: {}", e))
                 })
@@ -547,6 +601,7 @@ mod tests {
         DEFAULT_CONFIG_TOKEN, DEFAULT_NODE_TOKEN, MAX_PRESETS, PTZSpeed, PTZVector, Vector1D,
         Vector2D,
     };
+    use crate::platform::MockImagingControl;
 
     fn create_test_service() -> PTZService {
         let state = Arc::new(PTZStateManager::new());
@@ -557,38 +612,41 @@ mod tests {
     // Node Operations
     // ========================================================================
 
-    #[test]
-    fn test_get_nodes() {
+    #[tokio::test]
+    async fn test_get_nodes_default_capabilities_returns_node() {
         let service = create_test_service();
 
-        let response = service.handle_get_nodes(GetNodes {}).unwrap();
+        let response = service.handle_get_nodes(GetNodes {}).await.unwrap();
 
         assert_eq!(response.ptz_nodes.len(), 1);
         assert_eq!(response.ptz_nodes[0].token, DEFAULT_NODE_TOKEN);
         assert!(response.ptz_nodes[0].home_supported);
     }
 
-    #[test]
-    fn test_get_node() {
+    #[tokio::test]
+    async fn test_get_node_valid_token_returns_matching_node() {
         let service = create_test_service();
 
         let response = service
             .handle_get_node(GetNode {
                 node_token: DEFAULT_NODE_TOKEN.to_string(),
             })
+            .await
             .unwrap();
 
         assert_eq!(response.ptz_node.token, DEFAULT_NODE_TOKEN);
         assert_eq!(response.ptz_node.maximum_number_of_presets, MAX_PRESETS);
     }
 
-    #[test]
-    fn test_get_node_invalid_token() {
+    #[tokio::test]
+    async fn test_get_node_invalid_token_returns_error() {
         let service = create_test_service();
 
-        let result = service.handle_get_node(GetNode {
-            node_token: "InvalidToken".to_string(),
-        });
+        let result = service
+            .handle_get_node(GetNode {
+                node_token: "InvalidToken".to_string(),
+            })
+            .await;
 
         assert!(result.is_err());
     }
@@ -1057,33 +1115,120 @@ mod tests {
     // SendAuxiliaryCommand Tests
     // ========================================================================
 
-    #[test]
-    fn test_send_auxiliary_command() {
+    #[tokio::test]
+    async fn test_send_auxiliary_command_rejects_unknown() {
         let service = create_test_service();
 
-        let response = service
+        let result = service
             .handle_send_auxiliary_command(SendAuxiliaryCommand {
                 profile_token: "Profile1".to_string(),
                 auxiliary_data: "tt:Wiper|On".to_string(),
             })
-            .unwrap();
-
-        // We return success with no response data
-        assert!(response.auxiliary_response.is_none());
-    }
-
-    #[test]
-    fn test_send_auxiliary_command_empty_profile() {
-        let service = create_test_service();
-
-        let result = service.handle_send_auxiliary_command(SendAuxiliaryCommand {
-            profile_token: "".to_string(),
-            auxiliary_data: "tt:Wiper|On".to_string(),
-        });
+            .await;
 
         assert!(result.is_err());
     }
 
+    #[tokio::test]
+    async fn test_send_auxiliary_command_empty_profile_returns_error() {
+        let service = create_test_service();
+
+        let result = service
+            .handle_send_auxiliary_command(SendAuxiliaryCommand {
+                profile_token: "".to_string(),
+                auxiliary_data: "tt:Wiper|On".to_string(),
+            })
+            .await;
+
+        assert!(result.is_err());
+    }
+
+    // ========================================================================
+    // Auxiliary dispatch error mapping
+    // ========================================================================
+
+    fn service_with_imaging(imaging: MockImagingControl) -> PTZService {
+        PTZService {
+            state: Arc::new(PTZStateManager::new()),
+            ptz_control: None,
+            imaging_control: Some(Arc::new(imaging)),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_dispatch_auxiliary_without_imaging_control_returns_action_not_supported() {
+        use auxiliary::{AuxCommand, LampState};
+
+        let service = create_test_service();
+        let err = service
+            .dispatch_auxiliary(AuxCommand::IrLamp(LampState::On))
+            .await
+            .unwrap_err();
+
+        assert!(matches!(err, OnvifError::ActionNotSupported(_)));
+    }
+
+    #[tokio::test]
+    async fn test_dispatch_auxiliary_platform_not_supported_returns_action_not_supported() {
+        use crate::platform::common::PlatformError;
+        use auxiliary::{AuxCommand, LampState};
+
+        let mut imaging = MockImagingControl::new();
+        imaging
+            .expect_set_ir_lamp()
+            .returning(|_| Err(PlatformError::NotSupported("ir lamp".to_string())));
+
+        let service = service_with_imaging(imaging);
+        let err = service
+            .dispatch_auxiliary(AuxCommand::IrLamp(LampState::On))
+            .await
+            .unwrap_err();
+
+        assert!(matches!(err, OnvifError::ActionNotSupported(_)));
+    }
+
+    #[tokio::test]
+    async fn test_dispatch_auxiliary_platform_hardware_failure_returns_hardware_failure() {
+        use crate::platform::common::PlatformError;
+        use auxiliary::AuxCommand;
+
+        let mut imaging = MockImagingControl::new();
+        imaging.expect_set_white_light().returning(|_| {
+            Err(PlatformError::HardwareFailure(
+                "gpio write failed".to_string(),
+            ))
+        });
+
+        let service = service_with_imaging(imaging);
+        let err = service
+            .dispatch_auxiliary(AuxCommand::WhiteLight(true))
+            .await
+            .unwrap_err();
+
+        assert!(matches!(err, OnvifError::HardwareFailure(_)));
+    }
+
+    #[tokio::test]
+    async fn test_dispatch_auxiliary_platform_internal_error_returns_internal() {
+        use crate::platform::common::PlatformError;
+        use auxiliary::{AuxCommand, LampState};
+
+        let mut imaging = MockImagingControl::new();
+        imaging
+            .expect_enable_ir_auto()
+            .returning(|| Err(PlatformError::Timeout));
+
+        let service = service_with_imaging(imaging);
+        let err = service
+            .dispatch_auxiliary(AuxCommand::IrLamp(LampState::Auto))
+            .await
+            .unwrap_err();
+
+        assert!(matches!(err, OnvifError::Internal(_)));
+    }
+
+    // ========================================================================
+    // Position Boundary Tests
     // ========================================================================
     // Position Boundary Tests
     // ========================================================================
@@ -1400,14 +1545,16 @@ mod tests {
         assert!(result.is_err());
     }
 
-    #[test]
-    fn test_send_auxiliary_command_empty_profile_token() {
+    #[tokio::test]
+    async fn test_send_auxiliary_command_empty_profile_token_returns_error() {
         let service = create_test_service();
 
-        let result = service.handle_send_auxiliary_command(SendAuxiliaryCommand {
-            profile_token: "".to_string(),
-            auxiliary_data: "test".to_string(),
-        });
+        let result = service
+            .handle_send_auxiliary_command(SendAuxiliaryCommand {
+                profile_token: "".to_string(),
+                auxiliary_data: "test".to_string(),
+            })
+            .await;
 
         assert!(result.is_err());
     }

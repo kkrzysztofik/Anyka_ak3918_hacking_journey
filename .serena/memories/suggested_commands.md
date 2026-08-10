@@ -1,5 +1,11 @@
 # Suggested Commands - Anyka AK3918 Project
 
+> **Toolchain:** this project uses a custom Rust toolchain vendored at
+> `toolchain/arm-anykav200-crosstool-ng/`. Run `source ./setenv.sh` (repo root)
+> before any Rust command — it exports `$CARGO`/`$RUSTC`/`$RUSTDOC` and prepends
+> the toolchain `bin/` to `PATH`. All commands below use `$CARGO`; system Rust
+> tools cause compilation/doctest failures from version/target mismatches.
+
 ## ⚠️ Cross-Compilation Note
 
 This project cross-compiles for ARM (`armv5te-unknown-linux-uclibceabi`) by default.
@@ -19,50 +25,46 @@ cd cross-compile
 # === HOST-SIDE COMMANDS (for development) ===
 
 # Build entire workspace for host (x86_64)
-cargo build --target x86_64-unknown-linux-gnu
-cargo build --target x86_64-unknown-linux-gnu --release
+$CARGO build --target x86_64-unknown-linux-gnu
+$CARGO build --target x86_64-unknown-linux-gnu --release
 
 # Test entire workspace (MUST use host target)
-cargo test --target x86_64-unknown-linux-gnu
-cargo test --target x86_64-unknown-linux-gnu --lib          # Unit tests only
-cargo test --target x86_64-unknown-linux-gnu test_name      # Specific test
+$CARGO test --target x86_64-unknown-linux-gnu
+$CARGO test --target x86_64-unknown-linux-gnu --lib          # Unit tests only
+$CARGO test --target x86_64-unknown-linux-gnu test_name      # Specific test
 
 # Test specific workspace member
-cargo test --target x86_64-unknown-linux-gnu -p onvif-rust
-cargo test --target x86_64-unknown-linux-gnu -p streaming-lib
+$CARGO test --target x86_64-unknown-linux-gnu -p onvif-rust
+$CARGO test --target x86_64-unknown-linux-gnu -p streaming-lib
 
 # Linting (MUST use host target)
-cargo clippy --target x86_64-unknown-linux-gnu -- -D warnings
+$CARGO clippy --target x86_64-unknown-linux-gnu -- -D warnings
 
 # Formatting (target-independent)
-cargo fmt                          # Format all workspace code
-cargo fmt --check                  # Check formatting (CI)
+$CARGO fmt                          # Format all workspace code
+$CARGO fmt --check                  # Check formatting (CI)
 
-# Documentation (target-independent)
-cargo doc --no-deps                # Generate docs
-cargo doc --no-deps --open         # Generate and open in browser
+# Documentation (host target)
+$CARGO doc --target x86_64-unknown-linux-gnu --no-deps   # Generate docs
+$CARGO doc --target x86_64-unknown-linux-gnu --no-deps --open  # Generate and open
 
-# Coverage (host target, requires tarpaulin)
-cargo tarpaulin \
-  --workspace \
-  --target x86_64-unknown-linux-gnu \
-  --exclude-files "xiu/**" "patches/**" "anyka_reference/**" "onvif/**" \
-  --out Html
+# Coverage (host target, requires tarpaulin; config at cross-compile/tarpaulin.toml)
+$CARGO tarpaulin --target x86_64-unknown-linux-gnu --config tarpaulin.toml
 
 # === DEVICE-SIDE COMMANDS (cross-compile for ARM) ===
 
 # Build for device (ARM) - DEFAULT target
-cargo build --release              # Release build for device
-cargo build                        # Debug build for device
+$CARGO build --release              # Release build for device
+$CARGO build                        # Debug build for device
 ```
 
 ### Pre-Commit (Rust - Workspace)
 
 ```bash
 cd cross-compile
-cargo fmt && \
-cargo clippy --target x86_64-unknown-linux-gnu -- -D warnings && \
-cargo test --target x86_64-unknown-linux-gnu
+$CARGO fmt && \
+$CARGO clippy --target x86_64-unknown-linux-gnu -- -D warnings && \
+$CARGO test --target x86_64-unknown-linux-gnu
 ```
 
 ### Vendor Daemon (C)
@@ -115,15 +117,21 @@ npm run lint && npm run type-check && npm run test
 # Navigate to scripts directory
 cd scripts
 
-# Deploy to camera (uploads ARM binaries)
+# Deploy to camera (uploads ARM binaries); default device IP is 192.168.2.198
 ./deploy_onvif.sh [device_ip] [username] [password]
-./deploy_onvif.sh 192.168.1.100 admin admin  # Example
+./deploy_onvif.sh 192.168.2.198 admin admin  # Example
 
 # Run on device
 ./run_onvif.sh [device_ip] [username] [password] [release|debug]
 
+# Copy payload to SD card
+./copy_sd_contents.sh
+
 # Collect crash dumps
-./collect_coredump.sh [device_ip] [username] [password]
+./debugging/collect_coredump.sh [device_ip] [username] [password]
+
+# Device shell over telnet (port 24)
+./debugging/cam_exec.py '<command>'
 ```
 
 ### Git Workflow
@@ -154,7 +162,7 @@ git push -u origin feature/your-feature-name
 | Build for dev | Host (x86_64) | `--target x86_64-unknown-linux-gnu` |
 | Build for device | ARM (default) | (no flag needed) |
 | Format | Any | (target-independent) |
-| Doc | Any | (target-independent) |
+| Doc | Host (x86_64) | `--target x86_64-unknown-linux-gnu` |
 
 ## CI/CD Notes
 

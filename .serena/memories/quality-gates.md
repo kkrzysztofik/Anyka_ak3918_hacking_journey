@@ -2,26 +2,26 @@
 
 ## Pre-Commit Checklist
 
-### Rust Workspace (onvif-rust + streaming-lib)
+### Rust Workspace (onvif-rust + streaming-lib + anyka-init)
 
-**⚠️ Cross-compile note**: Use `--target x86_64-unknown-linux-gnu` for host-side operations.
+**⚠️ Cross-compile note**: Use `--target x86_64-unknown-linux-gnu` for host-side operations. First load the vendored toolchain with `source ./setenv.sh` from the repo root (exports `$CARGO`, `$RUSTC`, `$RUSTDOC`). Never use bare `cargo` or `rustup`.
 
 Commands from `cross-compile/` apply to the entire workspace.
 
 ```bash
 cd cross-compile
-cargo fmt && \
-cargo clippy --target x86_64-unknown-linux-gnu -- -D warnings && \
-cargo test --target x86_64-unknown-linux-gnu
+$CARGO fmt && \
+$CARGO clippy --target x86_64-unknown-linux-gnu -- -D warnings && \
+$CARGO test --target x86_64-unknown-linux-gnu
 ```
 
 | Gate | Command | Requirement |
 |------|---------|-------------|
-| Formatting | `cargo fmt --check` | No changes needed (workspace) |
-| Linting | `cargo clippy --target x86_64-unknown-linux-gnu -- -D warnings` | Zero warnings (workspace) |
-| Unit Tests | `cargo test --target x86_64-unknown-linux-gnu` | All pass (workspace) |
-| Build (device) | `cargo build --release` | No errors (workspace) |
-| Documentation | `cargo doc --no-deps` | No warnings |
+| Formatting | `$CARGO fmt --check` | No changes needed (workspace) |
+| Linting | `$CARGO clippy --target x86_64-unknown-linux-gnu -- -D warnings` | Zero warnings (workspace) |
+| Unit Tests | `$CARGO test --target x86_64-unknown-linux-gnu` | All pass (workspace) |
+| Build (device) | `$CARGO build --release` | No errors (workspace) |
+| Documentation | `$CARGO doc --target x86_64-unknown-linux-gnu --no-deps` | No warnings |
 
 ### WebUI Frontend (www)
 
@@ -92,7 +92,7 @@ npm run lint && npm run type-check && npm run test
 | Check | Tool | Status |
 |-------|------|--------|
 | Rust Lint | clippy | Must pass |
-| Rust Tests | cargo test | Must pass |
+| Rust Tests | `$CARGO test` | Must pass |
 | WebUI Lint | ESLint | Must pass |
 | WebUI Tests | Vitest | Must pass |
 | Type Check | TypeScript | Must pass |
@@ -126,7 +126,7 @@ npm run lint && npm run type-check && npm run test
 1. [ ] All CI checks pass
 2. [ ] Version bumped in Cargo.toml / package.json
 3. [ ] CHANGELOG updated
-4. [ ] Security audit clean (`cargo audit`, `npm audit`)
+4. [ ] Security audit clean (`$CARGO audit`, `npm audit`)
 5. [ ] Manual testing on target device
 6. [ ] Documentation reviewed
 7. [ ] Tag created and pushed

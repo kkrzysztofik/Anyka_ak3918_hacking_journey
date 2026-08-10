@@ -15,8 +15,9 @@ use super::common::{
     AudioEncoder, AudioEncoderConfig, AudioEncoding, AudioInput, AudioSourceConfig, BitrateMode,
     DeviceInfo, DnsInfo, ImagingControl, ImagingOptions, ImagingSettings, NetworkInfo,
     NetworkInterfaceInfo, NetworkProtocolInfo, NtpInfo, PTZControl, Platform, PlatformError,
-    PlatformResult, PtzLimits, PtzPosition, PtzPreset, PtzVelocity, Resolution, VideoEncoder,
-    VideoEncoderConfig, VideoEncoderOptions, VideoEncoding, VideoInput, VideoSourceConfig,
+    PlatformResult, PtzLimits, PtzPosition, PtzPreset, PtzVelocity, Resolution, VideoControl,
+    VideoEncoder, VideoEncoderConfig, VideoEncoderOptions, VideoEncoding, VideoInput,
+    VideoSourceConfig,
 };
 
 /// Builder for configuring stub platform behavior.
@@ -246,6 +247,7 @@ impl StubPlatformBuilder {
             Self::create_ptz_control(self.ptz_supported, ptz_position, ptz_limits, presets);
         let imaging_control =
             Self::create_imaging_control(self.imaging_supported, imaging_settings);
+        let video_control = Some(Arc::new(StubVideoControl::default()) as Arc<dyn VideoControl>);
         let network_info = Self::create_network_info(
             self.network_info_supported,
             self.mac_address,
@@ -262,6 +264,7 @@ impl StubPlatformBuilder {
             audio_encoder,
             ptz_control,
             imaging_control,
+            video_control,
             network_info,
         }
     }
@@ -361,7 +364,7 @@ impl StubPlatformBuilder {
             contrast: 50.0,
             saturation: 50.0,
             sharpness: 50.0,
-            ir_cut_filter: true,
+            ir_cut_filter: crate::onvif::types::common::IrCutFilterMode::AUTO,
             ir_led: false,
             wdr: false,
             backlight_compensation: false,
@@ -435,6 +438,7 @@ pub struct StubPlatform {
     audio_encoder: Arc<StubAudioEncoder>,
     ptz_control: Option<Arc<dyn PTZControl>>,
     imaging_control: Option<Arc<dyn ImagingControl>>,
+    video_control: Option<Arc<dyn VideoControl>>,
     network_info: Option<Arc<dyn NetworkInfo>>,
 }
 
@@ -461,6 +465,10 @@ impl Platform for StubPlatform {
     }
 
     crate::impl_platform_accessors!();
+
+    fn video_control(&self) -> Option<Arc<dyn VideoControl>> {
+        self.video_control.clone()
+    }
 
     async fn initialize(&self) -> PlatformResult<()> {
         if self.fail_init {
@@ -576,6 +584,10 @@ impl Platform for ValidationPlatform {
 
     fn imaging_control(&self) -> Option<Arc<dyn ImagingControl>> {
         self.inner.as_ref().imaging_control()
+    }
+
+    fn video_control(&self) -> Option<Arc<dyn VideoControl>> {
+        self.inner.as_ref().video_control()
     }
 
     fn network_info(&self) -> Option<Arc<dyn NetworkInfo>> {
@@ -932,6 +944,22 @@ impl ImagingControl for StubImagingControl {
     }
 }
 
+/// In-memory `VideoControl` for host-side / stub builds. No hardware to
+/// flip, so this just remembers the last value it was given — enough for
+/// ops-layer tests to exercise the live-apply path end to end.
+#[derive(Default)]
+struct StubVideoControl {
+    rotated: AtomicBool,
+}
+
+#[async_trait]
+impl VideoControl for StubVideoControl {
+    async fn set_flip_mirror(&self, rotated: bool) -> PlatformResult<()> {
+        self.rotated.store(rotated, Ordering::SeqCst);
+        Ok(())
+    }
+}
+
 /// Stub network information implementation.
 ///
 /// Returns configurable network data for testing. By default returns
@@ -1225,6 +1253,15 @@ mod tests {
         assert!(result.is_err());
     }
 
+    #[tokio::test]
+    async fn test_stub_video_control() {
+        let platform = StubPlatform::new();
+        let video = platform.video_control().unwrap();
+
+        video.set_flip_mirror(true).await.unwrap();
+        video.set_flip_mirror(false).await.unwrap();
+    }
+
     // Tests for StubPlatformBuilder methods
     #[tokio::test]
     async fn test_stub_platform_builder_device_info() {
@@ -1407,7 +1444,7 @@ mod tests {
             contrast: 60.0,
             saturation: 55.0,
             sharpness: 50.0,
-            ir_cut_filter: true,
+            ir_cut_filter: crate::onvif::types::common::IrCutFilterMode::AUTO,
             ir_led: false,
             wdr: true,
             backlight_compensation: false,
@@ -1659,7 +1696,7 @@ mod tests {
             contrast: 70.0,
             saturation: 60.0,
             sharpness: 50.0,
-            ir_cut_filter: false,
+            ir_cut_filter: crate::onvif::types::common::IrCutFilterMode::OFF,
             ir_led: true,
             wdr: true,
             backlight_compensation: true,
@@ -1669,7 +1706,10 @@ mod tests {
         let settings = imaging.get_settings().await.unwrap();
         assert_eq!(settings.brightness, 80.0);
         assert_eq!(settings.contrast, 70.0);
-        assert!(!settings.ir_cut_filter);
+        assert_eq!(
+            settings.ir_cut_filter,
+            crate::onvif::types::common::IrCutFilterMode::OFF
+        );
         assert!(settings.ir_led);
         assert!(settings.wdr);
     }

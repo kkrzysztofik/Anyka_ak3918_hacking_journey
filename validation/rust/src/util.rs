@@ -7,23 +7,89 @@ use std::path::{Path, PathBuf};
 
 pub const MAX_TOOL_LOG_BYTES: usize = 2_000_000; // 2MB per log file (tail kept if exceeded)
 
+pub fn rtsp_url(host: &str, port: u16, stream: &str) -> String {
+    format!("rtsp://{}:{}{}", host, port, stream)
+}
+
 pub fn tail_lossy(s: &str, max_chars: usize) -> String {
-    let mut truncated = false;
-    let mut seen = 0usize;
-    for _ in s.chars() {
-        seen += 1;
-        if seen > max_chars {
-            truncated = true;
-            break;
-        }
-    }
-    if !truncated {
+    if s.chars().count() <= max_chars {
         return s.to_string();
     }
-    let mut it = s.chars().rev().take(max_chars).collect::<Vec<char>>();
-    it.reverse();
-    let tail: String = it.into_iter().collect();
-    format!("…{}", tail)
+    let mut tail: Vec<char> = s.chars().rev().take(max_chars).collect();
+    tail.reverse();
+    format!("…{}", tail.into_iter().collect::<String>())
+}
+
+/// Parse an ffmpeg size token (`52kB`, `185KiB`, `1MB`, `1MiB`, `500B`) into kilobytes.
+///
+/// ffmpeg 7 and earlier typically print decimal units (`kB`/`MB`); ffmpeg 8+ prints
+/// binary IEC units (`KiB`/`MiB`) on the null-muxer summary line. Longer suffixes are
+/// matched first so `KiB` is not misread as `B`.
+pub fn parse_ffmpeg_kbytes_token(raw: &str) -> Option<f64> {
+    let trimmed = raw.trim().trim_end_matches(',');
+    for (suffix, scale) in [
+        ("KiB", 1.0),
+        ("MiB", 1024.0),
+        ("kB", 1.0),
+        ("MB", 1000.0),
+        ("B", 0.001),
+    ] {
+        if let Some(value) = trimmed.strip_suffix(suffix) {
+            return value.trim().parse::<f64>().ok().map(|v| v * scale);
+        }
+    }
+    None
+}
+
+/// Estimate kbps from an ffmpeg summary line (`video:52kB` / `video:185KiB` …) over `duration_sec`.
+pub fn parse_ffmpeg_summary_bitrate_kbps(log_line: &str, duration_sec: u64) -> Option<f64> {
+    if duration_sec == 0 {
+        return None;
+    }
+    let total_kbytes: f64 = log_line
+        .split_whitespace()
+        .filter_map(|field| {
+            field
+                .strip_prefix("video:")
+                .or_else(|| field.strip_prefix("audio:"))
+        })
+        .filter_map(parse_ffmpeg_kbytes_token)
+        .sum();
+    if total_kbytes <= 0.0 {
+        return None;
+    }
+    Some((total_kbytes * 8.0) / duration_sec as f64)
+}
+
+/// Build a pcap path under the process temp dir.
+///
+/// Ubuntu AppArmor confines `/usr/bin/tshark` so it can read capture files via
+/// `abstractions/user-tmp`, but not arbitrary paths under `$HOME`. Capture and
+/// analyze under this path, then [`finalize_tshark_pcap`] into the run artifacts.
+pub fn tshark_readable_pcap_path(file_name: &str) -> PathBuf {
+    let safe_name = file_name.replace(['/', '\\'], "_");
+    std::env::temp_dir().join(format!(
+        "rtsp_validation_pid{}_{}",
+        std::process::id(),
+        safe_name
+    ))
+}
+
+/// After tshark analysis, optionally keep a copy under `artifacts_dir` and always
+/// remove the temp capture file.
+pub fn finalize_tshark_pcap(
+    tmp_pcap: &Path,
+    artifacts_dir: &Path,
+    file_name: &str,
+    keep_pcaps: bool,
+) -> Result<()> {
+    if keep_pcaps {
+        let dest = artifacts_dir.join(file_name);
+        std::fs::copy(tmp_pcap, &dest)
+            .with_context(|| format!("copy pcap to {}", dest.display()))?;
+    }
+    let _ = std::fs::remove_file(tmp_pcap);
+    Ok(())
 }
 
 pub fn write_bytes_tail(path: &Path, bytes: &[u8]) -> Result<()> {
@@ -75,10 +141,62 @@ pub fn copy_log_to_artifacts(log_path: &Path, artifacts_dir: &Path) -> Result<Op
 #[cfg(test)]
 mod tests {
     use super::{
-        MAX_TOOL_LOG_BYTES, copy_log_to_artifacts, report_output_path_in_run_dir,
-        run_artifacts_dir_name, tail_lossy, write_bytes_tail,
+        MAX_TOOL_LOG_BYTES, copy_log_to_artifacts, finalize_tshark_pcap, parse_ffmpeg_kbytes_token,
+        parse_ffmpeg_summary_bitrate_kbps, report_output_path_in_run_dir, rtsp_url,
+        run_artifacts_dir_name, tail_lossy, tshark_readable_pcap_path, write_bytes_tail,
     };
     use std::path::Path;
+
+    #[test]
+    fn test_rtsp_url() {
+        assert_eq!(
+            rtsp_url("192.168.1.1", 8554, "/live"),
+            "rtsp://192.168.1.1:8554/live"
+        );
+    }
+
+    #[test]
+    fn test_parse_ffmpeg_kbytes_token() {
+        assert_eq!(parse_ffmpeg_kbytes_token("52kB"), Some(52.0));
+        assert_eq!(parse_ffmpeg_kbytes_token("1MB"), Some(1000.0));
+        assert_eq!(parse_ffmpeg_kbytes_token("500B"), Some(0.5));
+        assert!(parse_ffmpeg_kbytes_token("n/a").is_none());
+    }
+
+    #[test]
+    fn test_parse_ffmpeg_kbytes_token_accepts_kib_mib() {
+        // ffmpeg 8+ prints binary units (KiB/MiB) in the null-muxer summary.
+        assert_eq!(parse_ffmpeg_kbytes_token("185KiB"), Some(185.0));
+        assert_eq!(parse_ffmpeg_kbytes_token("1MiB"), Some(1024.0));
+        assert_eq!(parse_ffmpeg_kbytes_token("0KiB"), Some(0.0));
+    }
+
+    #[test]
+    fn test_parse_ffmpeg_summary_bitrate_kbps() {
+        let line = "[info] video:52kB audio:816kB subtitle:0kB";
+        let bitrate = parse_ffmpeg_summary_bitrate_kbps(line, 4).unwrap();
+        assert!((bitrate - 1736.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_parse_ffmpeg_summary_bitrate_kbps_ffmpeg8_kib() {
+        let line = "[out#0/null @ 0x1] [info] video:185KiB audio:0KiB subtitle:0KiB other streams:0KiB global headers:0KiB muxing overhead: unknown";
+        let bitrate = parse_ffmpeg_summary_bitrate_kbps(line, 30).unwrap();
+        // 185 KiB * 8 / 30s ≈ 49.333 kbps
+        assert!((bitrate - (185.0 * 8.0 / 30.0)).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_parse_ffmpeg_summary_bitrate_kbps_missing_fields() {
+        let line = "[info] Output #0, null, to 'pipe:'";
+        assert!(parse_ffmpeg_summary_bitrate_kbps(line, 10).is_none());
+    }
+
+    #[test]
+    fn test_parse_ffmpeg_summary_bitrate_kbps_duration_zero() {
+        let line = "[info] video:52kB audio:816kB subtitle:0kB";
+        assert!(parse_ffmpeg_summary_bitrate_kbps(line, 0).is_none());
+    }
 
     #[test]
     fn test_run_artifacts_dir_name_format() {
@@ -86,6 +204,47 @@ mod tests {
             run_artifacts_dir_name("20260205T120102Z", 12345),
             "20260205T120102Z_pid12345"
         );
+    }
+
+    #[test]
+    fn test_tshark_readable_pcap_path_is_under_temp_dir() {
+        let path = tshark_readable_pcap_path("rtsp_protocol_sequence_tcp_port554.pcap");
+        assert!(path.starts_with(std::env::temp_dir()));
+        assert!(
+            path.file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| n.ends_with("rtsp_protocol_sequence_tcp_port554.pcap"))
+        );
+        assert!(
+            path.file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| n.contains(&std::process::id().to_string()))
+        );
+    }
+
+    #[test]
+    fn test_finalize_tshark_pcap_copies_when_keep_and_removes_temp() {
+        let artifacts = tempfile::tempdir().unwrap();
+        let tmp = tshark_readable_pcap_path("keep_me.pcap");
+        std::fs::write(&tmp, b"pcap-bytes").unwrap();
+
+        finalize_tshark_pcap(&tmp, artifacts.path(), "keep_me.pcap", true).unwrap();
+
+        assert!(!tmp.exists());
+        let artifact = artifacts.path().join("keep_me.pcap");
+        assert_eq!(std::fs::read(&artifact).unwrap(), b"pcap-bytes");
+    }
+
+    #[test]
+    fn test_finalize_tshark_pcap_discards_artifact_when_not_keeping() {
+        let artifacts = tempfile::tempdir().unwrap();
+        let tmp = tshark_readable_pcap_path("drop_me.pcap");
+        std::fs::write(&tmp, b"pcap-bytes").unwrap();
+
+        finalize_tshark_pcap(&tmp, artifacts.path(), "drop_me.pcap", false).unwrap();
+
+        assert!(!tmp.exists());
+        assert!(!artifacts.path().join("drop_me.pcap").exists());
     }
 
     #[test]

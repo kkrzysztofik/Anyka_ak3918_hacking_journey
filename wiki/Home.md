@@ -29,7 +29,9 @@ This project was originally developed by **Gerge** (<https://gitea.raspiweb.com/
 
 - [[Development-Guide]] - Development workflow and best practices
 - [[Static-Analysis-Tools]] - Code quality and security analysis tools
+- [[RTSP-Validation-Tool]] - Host-side RTSP/HTTP-FLV conformance and performance testing
 - [[Troubleshooting]] - Common issues and solutions
+- [[IR-Night-Mode-Calibration]] - Measure `ain0` thresholds; verify IR cut / lamps / AUTO
 
 ### Additional Resources
 
@@ -48,7 +50,7 @@ This project provides a complete, modern ONVIF 24.12 implementation for Anyka AK
 - **Memory Safety** - Rust's ownership model prevents buffer overflows and use-after-free errors
 - **Asynchronous Architecture** - High-performance async I/O using `tokio` and `axum`
 - **PTZ Control** - Pan-tilt-zoom functionality with preset management (currently using stub implementation)
-- **Imaging Services** - Image parameter adjustment (brightness, contrast, saturation, sharpness) (currently using stub implementation)
+- **Imaging Services** - Brightness / contrast / saturation / sharpness, IR cut filter, IR lamp and white light (see [[IR-Night-Mode-Calibration]])
 - **Platform Abstraction** - Clean hardware abstraction layer for portability and testing (currently using `StubPlatform` for development)
 - **Comprehensive Testing** - Unit tests with `mockall` and integration test framework
 - **Web Interfaces** - Both ONVIF and legacy interfaces with clear separation

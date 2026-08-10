@@ -14,8 +14,31 @@ struct push_stream_state {
     void           *stream_handle;
     uint32_t        stream_id;
     /* Timestamp normalization state */
-    uint32_t        first_timestamp_ms;   /* First SDK timestamp seen */
+    uint32_t        first_timestamp_ms;   /* First SDK timestamp seen (anchor) */
     int             timestamp_initialized; /* 0 = not set, 1 = initialized */
+    /*
+     * Rollover tracking.  The 32-bit SDK clock wraps ~every 49.7 days; the
+     * epoch is incremented by 2^32 each time a consecutive-sample backward
+     * jump of more than half the 32-bit space is observed, so `raw64 =
+     * raw_timestamp_epoch_ms + raw_timestamp_ms` stays monotonic across any
+     * number of wraps (unlike extending against the fixed first timestamp,
+     * which goes stale once the clock laps the anchor).
+     */
+    uint32_t        last_raw_timestamp_ms;  /* Previous SDK timestamp seen */
+    uint64_t        raw_timestamp_epoch_ms; /* 2^32 per detected rollover */
+    /*
+     * Timestamp continuity state.  Pathological vs.ts leaps (>5s) are clamped;
+     * regressions are held monotonic; ISP stalls where wall time advances but
+     * vs.ts does not get a capped catch-up so live players stay near the edge.
+     * ts_corr_ms carries the offset so later frames stay continuous.
+     *
+     * All int64_t: the arithmetic mixes a running signed correction with 32-bit
+     * timestamps, and a wider signed type makes the over/underflow checks
+     * ordinary comparisons instead of unsigned-wrap reasoning.
+     */
+    int64_t         last_out_ts_ms;         /* Last timestamp published to the ring */
+    int64_t         last_sane_interval_ms;  /* Init 66; updated when delta in 16..1000 */
+    int64_t         ts_corr_ms;             /* Added into normalized out after clamps */
     /*
      * Set when stop_push_slot() gave up waiting for this worker.
      *
@@ -40,7 +63,13 @@ struct push_stream_state {
  * blocks inside the SDK the counter never advances, so it cannot on its own
  * bound stop_push_slot() -- see PUSH_JOIN_TIMEOUT_SEC.
  */
-#define PUSH_NO_DATA_EXIT_THRESHOLD 1000
+/* 6000 * PUSH_POLL_SLEEP_MS = 30s. Fatal, so the margin over a legitimate
+ * ISP day/night stall (0.5-2s per the note in push.c) has to be large.
+ * Calibration knob: lower it only with dusk evidence. */
+#define PUSH_NO_DATA_EXIT_THRESHOLD 6000
+
+/* Liveness beacon read by anyka-init's monitor. tmpfs, so no SD writes. */
+#define PUSH_HEARTBEAT_PATH "/tmp/vd_heartbeat"
 
 /*
  * How many consecutive no-data polls before the run is worth a log line.
@@ -155,15 +184,6 @@ int vd_obj_register(uint8_t kind, void *ptr);
 void vd_obj_unregister(uint8_t kind, void *ptr);
 
 /**
- * vd_obj_close_all - Close every live object and empty the table.
- *
- * Closes in reverse dependency order (streams, then encoders, then inputs), the
- * same order a clean shutdown uses. Best-effort: a failing close is logged and
- * the sweep continues, because the alternative is leaking the rest too.
- */
-void vd_obj_close_all(void);
-
-/**
  * vd_cancel_stream_bounded - Cancel an SDK stream, giving up after a timeout.
  *
  * Runs ak_venc_cancel_stream on a detached worker and waits a bounded time.
@@ -180,9 +200,9 @@ int vd_cancel_stream_bounded(void *handle, int *out_result);
 /**
  * vd_stream_orphan_set - Remember a live STREAM that has no object-table slot.
  *
- * Used when register fails or cancel spawn fails after unregister, so
- * vd_obj_close_all can still reclaim the SDK capture_thread. Displacing a
- * previous orphan best-effort cancels it first.
+ * Used when register fails or cancel spawn fails after unregister, so the
+ * capture_thread can still be reclaimed by displacing a newer orphan.
+ * Displacing a previous orphan best-effort cancels it first.
  */
 void vd_stream_orphan_set(void *handle);
 

@@ -1,339 +1,154 @@
 ---
 name: onvif-service-impl
-description: |
-  ONVIF 24.12 service implementation specialist for the onvif-rust project.
-  Triggers on: "implement ONVIF", "add operation", "SOAP handler", "device service", "media service", "PTZ service", "imaging service", "ONVIF endpoint".
-version: 1.0.0
+description: Use when implementing or extending ONVIF 24.12 service operations in onvif-rust (SOAP handlers, device/media/ptz/imaging services, dispatch_sync/dispatch_async, OnvifError faults, ops modules).
+version: 2.0.0
 ---
 
 # ONVIF Service Implementation
 
-Implement ONVIF 24.12 compliant services in the onvif-rust project. Follow the established handler patterns and ensure full specification compliance.
+Implement ONVIF 24.12 compliant operations in `cross-compile/onvif-rust`. Follow the real handler patterns below — verify against the code, not older skill drafts.
 
-## Service Architecture Overview
-
-The onvif-rust project follows a layered architecture:
+## Architecture
 
 ```
 axum Router
-    └── Service Router (e.g., /onvif/device_service)
-        └── ServiceHandler trait
-            └── handle_operation() → dispatches to handle_* methods
-                └── Platform trait → hardware abstraction
+  └── ServiceDispatcher → extracts SOAP action
+        └── ServiceHandler trait (handle_operation)
+              └── dispatch_sync / dispatch_async helpers
+                    └── ops/ functions (typed Req → typed Resp)
+                          └── Platform trait → hardware
 ```
 
-## Handler Pattern
+Auth is enforced **upstream** by the dispatcher's `auth_requirements.rs` (`get_required_level(service, action)`). Handlers do not receive an `AuthContext`.
 
-Each ONVIF service implements the `ServiceHandler` trait:
+## ServiceHandler Trait
+
+`src/onvif/dispatcher/mod.rs`:
 
 ```rust
 #[async_trait]
 pub trait ServiceHandler: Send + Sync {
-    async fn handle_operation(
-        &self,
-        action: &str,
-        body: &str,
-        auth_context: &AuthContext,
-    ) -> Result<String, OnvifError>;
-
-    fn service_name(&self) -> &'static str;
-    fn supported_actions(&self) -> &[&'static str];
-}
-```
-
-## Implementing a New Operation
-
-### Step 1: Define the Handler Method
-
-Follow the naming convention `handle_<operation_name>`:
-
-```rust
-impl DeviceService {
-    /// Handles the GetSystemLog operation.
-    ///
-    /// ONVIF Spec: Device Management - GetSystemLog
-    /// Returns system logs based on the log type requested.
-    async fn handle_get_system_log(
-        &self,
-        body: &str,
-        auth_context: &AuthContext,
-    ) -> Result<String, OnvifError> {
-        // 1. Validate authorization
-        auth_context.require_admin()?;
-
-        // 2. Parse request XML
-        let request = parse_get_system_log_request(body)?;
-
-        // 3. Validate input parameters
-        validate_log_type(&request.log_type)?;
-
-        // 4. Call platform layer
-        let logs = self.platform.get_system_log(request.log_type).await?;
-
-        // 5. Build response XML
-        Ok(build_get_system_log_response(&logs))
+    async fn handle_operation(&self, action: &str, body_xml: &str) -> Result<String, OnvifError>;
+    fn service_name(&self) -> &str;
+    fn required_auth_level(&self, action: &str) -> AuthLevel {
+        get_required_level(self.service_name(), action)
     }
 }
 ```
 
-### Step 2: Add to Operation Dispatcher
+There is **no `supported_actions()`** and **no `auth_context` parameter**. `handle_operation` returns the serialized response body XML fragment (not a full SOAP envelope).
 
-Update `handle_operation()` in the `ServiceHandler` impl:
+## Adding a New Operation
+
+### Step 1: Handler method (typed) in the service
+
+Public typed handlers on the service (e.g. `DeviceService`) delegate to `ops/`:
 
 ```rust
-impl ServiceHandler for DeviceService {
-    async fn handle_operation(
-        &self,
-        action: &str,
-        body: &str,
-        auth_context: &AuthContext,
-    ) -> Result<String, OnvifError> {
-        match action {
-            "GetDeviceInformation" => self.handle_get_device_information(body, auth_context).await,
-            "GetCapabilities" => self.handle_get_capabilities(body, auth_context).await,
-            // Add new operation here:
-            "GetSystemLog" => self.handle_get_system_log(body, auth_context).await,
-            _ => Err(OnvifError::ActionNotSupported(action.to_string())),
-        }
-    }
-
-    fn supported_actions(&self) -> &[&'static str] {
-        &[
-            "GetDeviceInformation",
-            "GetCapabilities",
-            "GetSystemLog",  // Add here too
-        ]
-    }
+// src/onvif/device/service.rs
+pub async fn handle_get_device_information(
+    &self,
+    _request: GetDeviceInformation,
+) -> Result<GetDeviceInformationResponse, OnvifError> {
+    system_ops::handle_get_device_information(&self.platform, &self.store.config).await
 }
 ```
 
-### Step 3: Define Types
+### Step 2: Wire it into `handle_operation` with a dispatch helper
 
-Create request/response types in the service's `types.rs`:
+`src/onvif/common/dispatch.rs` provides two helpers that combine (1) parse XML body → typed `Req`, (2) call handler, (3) serialize `Resp` → body XML:
 
 ```rust
-// src/onvif/device/types.rs
+// Sync handlers
+"GetCapabilities" => dispatch_sync(body_xml, |request: GetCapabilities| {
+    system_ops::handle_get_capabilities(&config, request)
+}),
 
-/// Request for GetSystemLog operation
-#[derive(Debug, Clone)]
-pub struct GetSystemLogRequest {
-    pub log_type: SystemLogType,
-}
+// Async handlers (most real handlers)
+"GetDeviceInformation" => dispatch_async(body_xml, |_req: GetDeviceInformation| {
+    let platform = platform.clone();
+    let config = config.clone();
+    async move { system_ops::handle_get_device_information(&platform, &config).await }
+}).await,
 
-/// System log types per ONVIF spec
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum SystemLogType {
-    System,
-    Access,
-}
+_ => Err(OnvifError::ActionNotSupported(action.to_string())),
+```
 
-/// Response for GetSystemLog operation
-#[derive(Debug, Clone)]
-pub struct SystemLogResponse {
-    pub log_data: String,
+Signatures:
+
+```rust
+pub fn dispatch_sync<Req, Resp>(body_xml: &str, handler: impl FnOnce(Req) -> OnvifResult<Resp>) -> OnvifResult<String>
+pub async fn dispatch_async<Req, Resp, F, Fut>(body_xml: &str, handler: F) -> OnvifResult<String>
+where Req: DeserializeOwned, Resp: Serialize, F: FnOnce(Req) -> Fut, Fut: Future<Output = OnvifResult<Resp>>
+```
+
+Request/response types use `serde` derive (deserialize via `parse_body`, serialize via `quick_xml`).
+
+### Step 3: Implement the operation in the right `ops/` module
+
+Device ops are split by domain under `src/onvif/device/ops/`: `system.rs` (device info, capabilities, date/time), `network.rs`, `discovery.rs` (scopes), `users.rs`. Media/PTZ/Imaging keep handlers in their service or local modules.
+
+## OnvifError Enum
+
+`src/onvif/error/mod.rs`. **These are the only variants** — older names like `InvalidRequest`, `NoProfile`, `InvalidArgs` do NOT exist:
+
+```rust
+pub enum OnvifError {
+    ActionNotSupported(String),      // EC-001
+    WellFormed(String),              // EC-002 malformed/missing XML
+    InvalidArgVal { subcode: String, reason: String },  // EC-003/EC-006
+    HardwareFailure(String),         // EC-005
+    NotAuthorized(String),           // EC-011
+    MaxUsers,                        // EC-013
+    ConfigurationConflict(String),   // EC-015
+    Internal(String),
+    NotFound(String),
 }
 ```
 
-### Step 4: XML Parsing and Building
-
-Create parser and builder functions:
+Constructor helpers:
 
 ```rust
-// src/onvif/device/xml.rs
-
-pub fn parse_get_system_log_request(body: &str) -> Result<GetSystemLogRequest, OnvifError> {
-    let doc = roxmltree::Document::parse(body)
-        .map_err(|e| OnvifError::InvalidRequest(format!("XML parse error: {}", e)))?;
-
-    let log_type_node = doc
-        .descendants()
-        .find(|n| n.has_tag_name("LogType"))
-        .ok_or_else(|| OnvifError::InvalidRequest("Missing LogType element".into()))?;
-
-    let log_type = match log_type_node.text() {
-        Some("System") => SystemLogType::System,
-        Some("Access") => SystemLogType::Access,
-        Some(other) => return Err(OnvifError::InvalidRequest(
-            format!("Invalid log type: {}", other)
-        )),
-        None => return Err(OnvifError::InvalidRequest("Empty LogType".into())),
-    };
-
-    Ok(GetSystemLogRequest { log_type })
-}
-
-pub fn build_get_system_log_response(logs: &str) -> String {
-    format!(r#"<?xml version="1.0" encoding="UTF-8"?>
-<tds:GetSystemLogResponse xmlns:tds="http://www.onvif.org/ver10/device/wsdl"
-    xmlns:tt="http://www.onvif.org/ver10/schema">
-    <tds:SystemLog>
-        <tt:String>{}</tt:String>
-    </tds:SystemLog>
-</tds:GetSystemLogResponse>"#,
-        xml_escape(logs)
-    )
-}
+OnvifError::invalid_arg("OutOfRange", "Value must be between 0 and 100");
+OnvifError::missing_arg("ProfileToken");
+OnvifError::out_of_range("Brightness", 0, 100);
 ```
 
-## Authentication Patterns
+XML parse failures map to `WellFormed`; missing resources to `NotFound`; unknown actions to `ActionNotSupported`.
 
-Use the `AuthContext` for authorization:
-
-```rust
-// No auth required (public operations)
-async fn handle_get_wsdl_url(&self, _body: &str, _auth: &AuthContext) -> Result<String, OnvifError> {
-    // Implementation
-}
-
-// User-level access
-async fn handle_get_profiles(&self, body: &str, auth: &AuthContext) -> Result<String, OnvifError> {
-    auth.require_user()?;  // User or higher
-    // Implementation
-}
-
-// Operator-level access
-async fn handle_create_profile(&self, body: &str, auth: &AuthContext) -> Result<String, OnvifError> {
-    auth.require_operator()?;  // Operator or higher
-    // Implementation
-}
-
-// Admin-only access
-async fn handle_set_user(&self, body: &str, auth: &AuthContext) -> Result<String, OnvifError> {
-    auth.require_admin()?;  // Admin only
-    // Implementation
-}
-```
-
-## Error Handling
-
-Return appropriate ONVIF faults:
-
-```rust
-use crate::onvif::faults::{OnvifError, OnvifFault};
-
-// Input validation errors
-if name.is_empty() {
-    return Err(OnvifError::InvalidArgs("Name cannot be empty".into()));
-}
-
-// Authorization errors (handled by auth.require_*)
-// Returns: ter:NotAuthorized
-
-// Resource not found
-if profile.is_none() {
-    return Err(OnvifError::NoProfile(profile_token.clone()));
-}
-
-// Operation not supported
-if !self.capabilities.supports_ptz {
-    return Err(OnvifError::ActionNotSupported("PTZ".into()));
-}
-
-// Platform/hardware errors
-let result = self.platform.set_brightness(level).await
-    .map_err(|e| OnvifError::Platform(e))?;
-```
-
-## Platform Integration
-
-Call the platform layer for hardware operations:
-
-```rust
-// Platform trait method call
-let device_info = self.platform.get_device_info().await?;
-
-// With fallback to config
-let device_info = match self.platform.get_device_info().await {
-    Ok(info) => info,
-    Err(e) => {
-        tracing::warn!("Platform error, using config fallback: {}", e);
-        self.device_info_from_config()
-    }
-};
-```
-
-## Testing New Operations
-
-Write comprehensive unit tests:
-
-```rust
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn create_test_service() -> DeviceService {
-        let mut mock = MockPlatform::new();
-        mock.expect_get_system_log()
-            .returning(|_| Ok("Test log content".to_string()));
-
-        DeviceService::with_config_and_platform(
-            test_config(),
-            Arc::new(mock),
-        )
-    }
-
-    #[tokio::test]
-    async fn test_get_system_log_success() {
-        let service = create_test_service();
-        let auth = AuthContext::admin();
-
-        let result = service
-            .handle_get_system_log("<GetSystemLog><LogType>System</LogType></GetSystemLog>", &auth)
-            .await;
-
-        assert!(result.is_ok());
-        let response = result.unwrap();
-        assert!(response.contains("GetSystemLogResponse"));
-        assert!(response.contains("Test log content"));
-    }
-
-    #[tokio::test]
-    async fn test_get_system_log_unauthorized() {
-        let service = create_test_service();
-        let auth = AuthContext::user();  // Not admin
-
-        let result = service
-            .handle_get_system_log("<GetSystemLog><LogType>System</LogType></GetSystemLog>", &auth)
-            .await;
-
-        assert!(matches!(result, Err(OnvifError::NotAuthorized)));
-    }
-
-    #[tokio::test]
-    async fn test_get_system_log_invalid_type() {
-        let service = create_test_service();
-        let auth = AuthContext::admin();
-
-        let result = service
-            .handle_get_system_log("<GetSystemLog><LogType>Invalid</LogType></GetSystemLog>", &auth)
-            .await;
-
-        assert!(matches!(result, Err(OnvifError::InvalidRequest(_))));
-    }
-}
-```
-
-## ONVIF Namespaces
-
-Use correct namespaces per service:
+## Namespaces
 
 ```rust
 // Device Management
 const TDS_NS: &str = "http://www.onvif.org/ver10/device/wsdl";
-
 // Media
 const TRT_NS: &str = "http://www.onvif.org/ver10/media/wsdl";
-
 // PTZ
 const TPT_NS: &str = "http://www.onvif.org/ver20/ptz/wsdl";
-
 // Imaging
 const TIM_NS: &str = "http://www.onvif.org/ver20/imaging/wsdl";
-
 // Common schema types
 const TT_NS: &str = "http://www.onvif.org/ver10/schema";
 ```
 
-## Reference
+## Testing
 
-For handler code patterns and XML templates, see `references/handler-patterns.md`.
+Unit tests live inline in `#[cfg(test)] mod tests`. Auth levels are enforced in `auth_requirements.rs`, not via a per-handler `require_*()` API:
+
+```rust
+#[tokio::test]
+async fn test_service_handler_unknown_action_device() {
+    let service = create_test_service();
+    let result = service.handle_operation("UnknownAction", "<test/>").await;
+    assert!(matches!(result, Err(OnvifError::ActionNotSupported(_))));
+}
+
+#[tokio::test]
+async fn test_service_handler_invalid_xml() {
+    let service = create_test_service();
+    let result = service.handle_operation("GetDeviceInformation", "<InvalidXml><Broken").await;
+    assert!(matches!(result, Err(OnvifError::WellFormed(_))));
+}
+```
+
+Test names follow `test_<thing>_<scenario>`. Run host-side with `$CARGO test --target x86_64-unknown-linux-gnu` after `source ./setenv.sh` (see `anyka-embedded-build` skill).

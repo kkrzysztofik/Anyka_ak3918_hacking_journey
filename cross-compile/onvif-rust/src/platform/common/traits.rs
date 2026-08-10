@@ -282,8 +282,9 @@ pub struct ImagingSettings {
     pub saturation: f32,
     /// Sharpness (0.0 to 100.0).
     pub sharpness: f32,
-    /// IR cut filter enabled.
-    pub ir_cut_filter: bool,
+    /// IR cut filter mode. ON = filter in (day), OFF = filter out (night),
+    /// AUTO = follow the light sensor.
+    pub ir_cut_filter: crate::onvif::types::common::IrCutFilterMode,
     /// IR LED enabled.
     pub ir_led: bool,
     /// Wide dynamic range enabled.
@@ -307,6 +308,8 @@ pub struct ImagingOptions {
     pub ir_cut_filter_supported: bool,
     /// IR LED supported.
     pub ir_led_supported: bool,
+    /// White floodlight supported.
+    pub white_light_supported: bool,
     /// WDR supported.
     pub wdr_supported: bool,
     /// Backlight compensation supported.
@@ -323,6 +326,7 @@ impl ImagingOptions {
             sharpness_range: (0.0, 100.0),
             ir_cut_filter_supported: true,
             ir_led_supported: true,
+            white_light_supported: false,
             wdr_supported: false,
             backlight_compensation_supported: true,
         }
@@ -488,6 +492,38 @@ pub trait ImagingControl: Send + Sync {
 
     /// Set sharpness.
     async fn set_sharpness(&self, value: f32) -> PlatformResult<()>;
+
+    /// Force the IR illuminator on or off (ONVIF `tt:IRLamp`).
+    async fn set_ir_lamp(&self, on: bool) -> PlatformResult<()> {
+        let _ = on;
+        Err(PlatformError::NotSupported("set_ir_lamp".to_string()))
+    }
+
+    /// Force the white floodlight on or off (ONVIF `tt:WhiteLight`).
+    async fn set_white_light(&self, on: bool) -> PlatformResult<()> {
+        let _ = on;
+        Err(PlatformError::NotSupported("set_white_light".to_string()))
+    }
+
+    /// Re-enable AUTO day/night for the IR path (ONVIF `tt:IRLamp|Auto`).
+    async fn enable_ir_auto(&self) -> PlatformResult<()> {
+        Err(PlatformError::NotSupported("enable_ir_auto".to_string()))
+    }
+}
+
+/// Video geometry control — currently just 180° flip/mirror.
+///
+/// Mirrors [`ImagingControl`]'s shape: live-apply on set, with the caller
+/// responsible for persistence. Kept separate from `ImagingControl` because
+/// it operates on the VI device, not the ISP.
+#[cfg_attr(test, automock)]
+#[async_trait]
+pub trait VideoControl: Send + Sync {
+    /// Set 180° flip/mirror. `true` rotates the image 180°, `false` restores
+    /// normal orientation. There is no intermediate state — the vendor VI API
+    /// only exposes independent flip/mirror flags, and this crate always
+    /// drives them together (see the design doc for why).
+    async fn set_flip_mirror(&self, rotated: bool) -> PlatformResult<()>;
 }
 
 // ============================================================================
@@ -689,6 +725,9 @@ pub trait Platform: Send + Sync {
 
     /// Get imaging control interface (optional).
     fn imaging_control(&self) -> Option<Arc<dyn ImagingControl>>;
+
+    /// Get video geometry control interface (optional).
+    fn video_control(&self) -> Option<Arc<dyn VideoControl>>;
 
     /// Get network information interface (optional).
     fn network_info(&self) -> Option<Arc<dyn NetworkInfo>>;
@@ -902,7 +941,10 @@ mod tests {
         let settings = ImagingSettings::default();
         assert_eq!(settings.brightness, 0.0);
         assert_eq!(settings.contrast, 0.0);
-        assert!(!settings.ir_cut_filter);
+        assert_eq!(
+            settings.ir_cut_filter,
+            crate::onvif::types::common::IrCutFilterMode::AUTO
+        );
         assert!(!settings.wdr);
     }
 
@@ -913,13 +955,16 @@ mod tests {
             contrast: 60.0,
             saturation: 70.0,
             sharpness: 80.0,
-            ir_cut_filter: true,
+            ir_cut_filter: crate::onvif::types::common::IrCutFilterMode::ON,
             ir_led: true,
             wdr: false,
             backlight_compensation: true,
         };
         assert_eq!(settings.brightness, 50.0);
-        assert!(settings.ir_cut_filter);
+        assert_eq!(
+            settings.ir_cut_filter,
+            crate::onvif::types::common::IrCutFilterMode::ON
+        );
         assert!(settings.ir_led);
         assert!(!settings.wdr);
     }
@@ -940,6 +985,7 @@ mod tests {
         assert_eq!(options.sharpness_range, (0.0, 100.0));
         assert!(options.ir_cut_filter_supported);
         assert!(options.ir_led_supported);
+        assert!(!options.white_light_supported); // default_options() sets this to false
         assert!(!options.wdr_supported); // default_options() sets this to false
         assert!(options.backlight_compensation_supported);
     }

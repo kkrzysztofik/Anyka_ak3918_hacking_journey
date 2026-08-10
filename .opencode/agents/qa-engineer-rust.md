@@ -46,12 +46,12 @@ When a user asks you to work on test code, you MUST:
 - Generate test documentation with clear scenario descriptions
 
 ### 4. Quality Check & Validate
-- Execute test commands with correct cross-compilation targets
+- Execute test commands with correct cross-compilation targets (via `$CARGO` after `source ./setenv.sh`)
 - Run Snyk security scans to detect vulnerabilities
-- Verify all tests pass: `cargo test --target x86_64-unknown-linux-gnu`
-- Check code formatting: `cargo fmt --check`
-- Run linting: `cargo clippy --target x86_64-unknown-linux-gnu -- -D warnings`
-- Generate coverage reports: `cargo tarpaulin --target x86_64-unknown-linux-gnu --out Html`
+- Verify all tests pass: `$CARGO test --target x86_64-unknown-linux-gnu`
+- Check code formatting: `$CARGO fmt --check`
+- Run linting: `$CARGO clippy --target x86_64-unknown-linux-gnu -- -D warnings`
+- Generate coverage reports: `$CARGO tarpaulin --target x86_64-unknown-linux-gnu --config tarpaulin.toml`
 
 ---
 
@@ -59,17 +59,18 @@ When a user asks you to work on test code, you MUST:
 
 ### Cross-Compilation Testing
 
-**CRITICAL**: Always use correct target for testing:
+**CRITICAL**: Always use correct target for testing. Use the vendored toolchain —
+`source ./setenv.sh` from repo root exports `$CARGO`/`$RUSTC`/`$RUSTDOC`; never bare
+`cargo`, never `rustup`, never hardcoded `/home/...` paths.
 
 ```bash
 # Host-side testing (x86_64)
-cargo test --target x86_64-unknown-linux-gnu
-cargo test --target x86_64-unknown-linux-gnu --lib          # Unit tests only
-cargo test --target x86_64-unknown-linux-gnu -- --nocapture # With output
+$CARGO test --target x86_64-unknown-linux-gnu
+$CARGO test --target x86_64-unknown-linux-gnu --lib          # Unit tests only
+$CARGO test --target x86_64-unknown-linux-gnu -- --nocapture # With output
 
 # Device builds (ARM, uses custom toolchain)
-cargo build --release
-# Uses: /home/kmk/anyka-dev/toolchain/arm-anykav200-crosstool-ng/bin/cargo
+$CARGO build --release --target armv5te-unknown-linux-uclibceabi
 ```
 
 ### Test Naming Convention
@@ -142,6 +143,10 @@ mod tests {
 }
 ```
 
+> **Note**: Project standard for traits defined in this repo is `#[cfg_attr(test, automock)]`
+> on the trait definition (see `src/platform/common/traits.rs`), which generates the mock
+> automatically. Use `mockall::mock!` only for external traits.
+
 ---
 
 ## Security-First Testing
@@ -198,23 +203,26 @@ fn test_auth_timing_safe_credential_comparison() {
 ## Quality Gate Commands
 
 ```bash
+# From repo root: load vendored toolchain (exports $CARGO — never bare cargo)
+source ./setenv.sh
+
 # 1. Code formatting
-cargo fmt --check
+$CARGO fmt --check
 
 # 2. Linting (zero warnings)
-cargo clippy --target x86_64-unknown-linux-gnu -- -D warnings
+$CARGO clippy --target x86_64-unknown-linux-gnu -- -D warnings
 
 # 3. All tests pass
-cargo test --target x86_64-unknown-linux-gnu
+$CARGO test --target x86_64-unknown-linux-gnu
 
 # 4. Unit tests only
-cargo test --target x86_64-unknown-linux-gnu --lib
+$CARGO test --target x86_64-unknown-linux-gnu --lib
 
 # 5. Coverage report (target: 80%+)
-cargo tarpaulin --target x86_64-unknown-linux-gnu --out Html
+$CARGO tarpaulin --target x86_64-unknown-linux-gnu --config tarpaulin.toml
 
 # 6. Documentation (no warnings)
-cargo doc --no-deps
+$CARGO doc --target x86_64-unknown-linux-gnu --no-deps
 ```
 
 ---

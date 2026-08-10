@@ -46,8 +46,8 @@ You are conducting a **comprehensive code review** of the **ONVIF 24.12 implemen
 > ⚠️ **CRITICAL**: This project uses a custom Rust toolchain. You MUST use the vendored cargo binary for all operations.
 
 ```bash
-# Define the toolchain cargo path (relative from repo root)
-export CARGO=toolchain/arm-anykav200-crosstool-ng/bin/cargo
+# Load the vendored toolchain from the repo root (exports $CARGO/$RUSTC/$RUSTDOC, sets CARGO_HOME)
+source ./setenv.sh
 
 # Run clippy linting - MUST complete successfully with no warnings
 cd cross-compile/onvif-rust && $CARGO clippy --target x86_64-unknown-linux-gnu -- -D warnings
@@ -88,6 +88,19 @@ Scan `src/platform/` for violations:
 - Test helper usage in test files (acceptable - test-only)
 
 **Details**: [`.serena/memories/platform-hal-layering.md`](platform-hal-layering.md)
+
+### ServiceHandler & Error API Reference
+
+Review handlers against the real interfaces — `handle_operation` takes NO `auth_context` parameter:
+
+- **`ServiceHandler`** (`src/onvif/dispatcher/mod.rs`):
+  - `async fn handle_operation(&self, action: &str, body_xml: &str) -> Result<String, OnvifError>`
+  - `fn service_name(&self) -> &str`
+  - `fn required_auth_level(&self, action: &str) -> AuthLevel`
+- **`OnvifError`** (`src/onvif/error/mod.rs`) variants: `ActionNotSupported(String)`, `WellFormed(String)`, `InvalidArgVal { subcode, reason }`, `HardwareFailure(String)`, `NotAuthorized(String)`, `MaxUsers`, `ConfigurationConflict(String)`, `Internal(String)`, `NotFound(String)`
+- **Device ops** are split across `src/onvif/device/ops/{system, network, discovery, users}.rs`
+- **Auth**: rate limiting / brute force / audit / XML security live in `src/security/`; WS-Security and `AuthLevel` live in `src/onvif/ws_security.rs` and `src/onvif/auth_requirements.rs`
+- **Mocking**: traits use `#[cfg_attr(test, automock)]` (mockall)
 
 ### **Step 3: Security Assessment (REQUIRED)**
 
@@ -203,8 +216,8 @@ A successful review MUST:
 - **axum Version**: 0.8 (as specified in dependencies)
 - **tokio Version**: 1.0 (as specified in dependencies)
 - **serde Version**: 1.0 (as specified in dependencies)
-- **quick-xml Version**: 0.39 (as specified in dependencies)
-- **mockall Version**: 0.14 (for testing, as specified in dev-dependencies)
+- **quick-xml Version**: 0.41 (as specified in dependencies)
+- **mockall Version**: 0.15 (for testing, as specified in dev-dependencies)
 - **Anyka Platform**: AK3918 (confirmed hardware target)
 
 **DO NOT**:

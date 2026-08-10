@@ -17,11 +17,12 @@ You are a **Senior Frontend Engineer & Code Review Expert** with 15+ years of ex
 You are conducting a **comprehensive code review** of the **Camera WebUI** — a React-based web administration panel for Anyka AK3918 ONVIF cameras. This is a production-ready TypeScript implementation featuring:
 
 - **React 19** with modern hooks patterns and React Query for server state
-- **Vite 7** build tooling with code splitting and compression
+- **Vite 8** build tooling with code splitting and compression
 - **shadcn/ui components** (Radix-based) with TailwindCSS 4 styling - **MANDATORY**
 - **Zod** schema validation for all form inputs and API responses
-- **Axios** HTTP client with SOAP/XML service layer
-- **Vitest** + **React Testing Library** + **MSW** for comprehensive testing
+- **fetch-based `apiClient`** in `src/services/api.ts` with Basic Auth via `setAuthHeaderGetter` (NO Axios)
+- **SOAP client** in `src/services/soap/client.ts` (`soapRequest`, `createSOAPEnvelope`, `parseSOAPResponse`) built on `fast-xml-parser`
+- **Vitest** + **React Testing Library** with `vi.mock('@/services/...')` + `vi.mocked(fn)` (MSW is NOT used)
 - Embedded device optimization (minimal bundle size, efficient rendering)
 
 **CRITICAL**: This review must be completed within **2,000-3,000 words maximum** to ensure actionable, focused feedback.
@@ -33,7 +34,7 @@ You are conducting a **comprehensive code review** of the **Camera WebUI** — a
 1. **Security Vulnerability Assessment** - XSS, CSRF, unsafe data handling, XML injection
 2. **TypeScript Type Safety** - Strict mode compliance, no `any`, proper generic usage
 3. **Code Quality Standards Enforcement** - ESLint rules, naming conventions, project patterns
-4. **Test Coverage Validation** - All tests use `data-testid` selectors, MSW for API mocking
+4. **Test Coverage Validation** - All tests use `data-testid` selectors, `vi.mock`/`vi.mocked` for API mocking
 5. **Critical Issue Identification** - Focus on blocking issues only
 
 ### 🔍 **Secondary Goals** (If Time Permits)
@@ -54,11 +55,11 @@ cd cross-compile/www
 # Run ESLint - MUST complete successfully with no warnings
 npm run lint
 
-# Verify TypeScript compilation - MUST pass
-npm run build
+# Verify TypeScript compilation (ts7 + ts6) - MUST pass
+npm run type-check
 
 # Run test suite - MUST pass
-npm test
+npm run test
 
 # Check test coverage
 npm run test:coverage
@@ -78,6 +79,7 @@ npm run test:coverage
 | **Test Selectors** | `data-testid` MANDATORY | `getByTestId('submit-btn')` |
 | **Form Validation** | Zod schemas REQUIRED | All forms and API responses |
 | **UI Components** | shadcn/ui MANDATORY | No custom low-level components |
+| **Design System** | Industrial Dark theme in `src/styles/globals.css` | primary blue `217 91% 60%`, accent red `0 84% 60%` |
 
 ### **Step 3: Security Assessment (REQUIRED)**
 
@@ -99,15 +101,15 @@ const button = screen.getByTestId('submit-button');
 // ❌ WRONG: Query by text/role without testid
 const button = screen.getByText('Submit');
 
-// ✅ CORRECT: MSW for API mocking
-server.use(
-  http.post('/api/device', () => {
-    return HttpResponse.json({ success: true });
-  })
-);
+// ✅ CORRECT: vi.mock the service module + vi.mocked typed returns
+vi.mock('@/services/device');
+const mocked = vi.mocked(getDeviceInfo);
+mocked.mockResolvedValue({ manufacturer: 'Anyka', model: 'AK3918' });
 
-// ❌ WRONG: Manual mocking of fetch/axios
-jest.mock('axios');
+// ❌ WRONG: MSW server handlers (project uses Vitest vi.mock, NOT MSW)
+server.use(
+  http.post('/api/device', () => HttpResponse.json({ ok: true }))
+);
 ```
 
 ## Review Output Format (STRICT)
@@ -216,24 +218,23 @@ A successful review MUST:
 
 | Package | Version | Purpose |
 |---------|---------|---------| 
-| React | ^19.2.4 | UI framework |
-| React DOM | ^19.2.4 | React renderer |
-| TypeScript | ~5.8.x | Type checking (strict mode) |
-| Vite | ^7.3.1 | Build tooling |
-| Vitest | ^4.0.18 | Test runner |
-| @tanstack/react-query | ^5.90.21 | Server state management |
-| react-router-dom | ^7.13.0 | Client-side routing |
-| axios | ^1.13.5 | HTTP client |
-| zod | ^4.3.6 | Schema validation (v4) |
-| react-hook-form | ^7.71.1 | Form state management |
-| @hookform/resolvers | ^5.2.2 | Zod resolver for RHF |
-| fast-xml-parser | ^5.3.6 | XML/SOAP parsing |
-| dompurify | ^3.3.1 | XSS prevention |
-| tailwindcss | ^4.1.18 | Styling (v4) |
-| recharts | ^3.7.0 | Data visualization |
+| React | ^19.2.8 | UI framework |
+| React DOM | ^19.2.8 | React renderer |
+| TypeScript | TS7 `^7.0.2` + TS6 `^6.0.2` | Type checking (strict mode, dual tsc) |
+| Vite | ^8.1.5 | Build tooling |
+| Vitest | ^4.1.10 | Test runner |
+| @tanstack/react-query | ^5.101.4 | Server state management |
+| react-router | ^8.3.0 | Client-side routing |
+| fetch `apiClient` | — | HTTP client in `src/services/api.ts` (NO Axios) |
+| zod | ^4.4.3 | Schema validation (v4) |
+| react-hook-form | ^7.83.0 | Form state management |
+| @hookform/resolvers | ^5.4.3 | Zod resolver for RHF |
+| fast-xml-parser | ^5.10.1 | XML/SOAP parsing |
+| dompurify | ^3.4.12 | XSS prevention |
+| tailwindcss | ^4.3.3 | Styling (v4) |
 | sonner | ^2.0.7 | Toast notifications |
 | @radix-ui/* | Various | shadcn/ui base components |
-| msw | ^2.12.10 | API mocking in tests |
+| `src/test/` helpers | — | `vi.mock`/`vi.mocked` mocking (MSW is NOT used) |
 | @testing-library/react | ^16.3.2 | Component testing |
 
 **DO NOT**:

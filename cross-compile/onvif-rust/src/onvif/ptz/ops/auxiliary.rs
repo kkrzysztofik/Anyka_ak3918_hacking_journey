@@ -59,36 +59,57 @@ pub fn get_compatible_configurations(
     })
 }
 
+/// Requested lamp state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LampState {
+    On,
+    Off,
+    Auto,
+}
+
+/// A recognised ONVIF auxiliary command.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AuxCommand {
+    IrLamp(LampState),
+    /// White floodlight is binary only — no AUTO.
+    WhiteLight(bool),
+}
+
+/// Parse an ONVIF auxiliary command string such as `"tt:IRLamp|On"`.
+///
+/// Returns `None` for anything unrecognised; the caller must raise an ONVIF
+/// fault rather than reporting success for hardware that does not exist.
+pub fn parse_auxiliary(data: &str) -> Option<AuxCommand> {
+    let (name, state) = data.split_once('|')?;
+    match (name, state) {
+        ("tt:IRLamp", "On") => Some(AuxCommand::IrLamp(LampState::On)),
+        ("tt:IRLamp", "Off") => Some(AuxCommand::IrLamp(LampState::Off)),
+        ("tt:IRLamp", "Auto") => Some(AuxCommand::IrLamp(LampState::Auto)),
+        ("tt:WhiteLight", "On") => Some(AuxCommand::WhiteLight(true)),
+        ("tt:WhiteLight", "Off") => Some(AuxCommand::WhiteLight(false)),
+        _ => None,
+    }
+}
+
 /// Handle SendAuxiliaryCommand request.
 ///
-/// # Arguments
-///
-/// * `_state` - PTZ state manager (unused; no auxiliary hardware)
-/// * `profile_token` - The media profile token
-/// * `auxiliary_data` - The auxiliary command string (e.g. `"tt:Wiper|On"`)
-///
-/// # Returns
-///
-/// `Ok(None)` — auxiliary commands are accepted but not acted upon because
-/// the AK3918 has no auxiliary hardware (wiper, heater, etc.).
-///
-/// # Errors
-///
-/// Currently infallible. Will return errors if auxiliary hardware support
-/// is added in the future.
+/// Unknown commands return `InvalidArgVal`. Recognised lamp commands are
+/// returned as [`AuxCommand`] for the service layer to dispatch to hardware.
 pub fn send_auxiliary_command(
     _state: &PTZStateManager,
     profile_token: &str,
     auxiliary_data: &str,
-) -> OnvifResult<Option<String>> {
+) -> OnvifResult<AuxCommand> {
     tracing::debug!(
-        "SendAuxiliaryCommand request for profile {}, command: {}",
-        profile_token,
-        auxiliary_data
+        profile = %profile_token,
+        command = %auxiliary_data,
+        "SendAuxiliaryCommand"
     );
 
-    // We don't support auxiliary commands, return success with empty response
-    Ok(None)
+    parse_auxiliary(auxiliary_data).ok_or_else(|| crate::onvif::error::OnvifError::InvalidArgVal {
+        subcode: "InvalidArgVal".to_string(),
+        reason: format!("Unsupported auxiliary command: {auxiliary_data}"),
+    })
 }
 
 #[cfg(test)]
@@ -120,12 +141,51 @@ mod tests {
     }
 
     #[test]
-    fn test_send_auxiliary_command_returns_none_when_unsupported() {
+    fn test_parse_ir_lamp_on() {
+        assert_eq!(
+            parse_auxiliary("tt:IRLamp|On"),
+            Some(AuxCommand::IrLamp(LampState::On))
+        );
+    }
+
+    #[test]
+    fn test_parse_white_light_off() {
+        assert_eq!(
+            parse_auxiliary("tt:WhiteLight|Off"),
+            Some(AuxCommand::WhiteLight(false))
+        );
+    }
+
+    #[test]
+    fn test_parse_ir_lamp_auto() {
+        assert_eq!(
+            parse_auxiliary("tt:IRLamp|Auto"),
+            Some(AuxCommand::IrLamp(LampState::Auto))
+        );
+    }
+
+    #[test]
+    fn test_parse_rejects_white_light_auto() {
+        assert_eq!(parse_auxiliary("tt:WhiteLight|Auto"), None);
+    }
+
+    #[test]
+    fn test_parse_rejects_unknown_command() {
+        assert_eq!(parse_auxiliary("tt:Wiper|On"), None);
+    }
+
+    #[test]
+    fn test_parse_rejects_malformed_command() {
+        assert_eq!(parse_auxiliary("tt:IRLamp"), None);
+        assert_eq!(parse_auxiliary(""), None);
+    }
+
+    #[test]
+    fn test_send_auxiliary_command_rejects_unknown() {
         let state = create_test_state();
 
-        let response = send_auxiliary_command(&state, "Profile1", "tt:Wiper|On").unwrap();
+        let result = send_auxiliary_command(&state, "Profile1", "tt:Wiper|On");
 
-        // We return success with no response data
-        assert!(response.is_none());
+        assert!(result.is_err());
     }
 }

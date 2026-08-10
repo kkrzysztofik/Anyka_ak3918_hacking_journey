@@ -59,28 +59,17 @@ We do not care about backwards compatibility—we're in early development with n
 
 ## 🎯 AGENT ROLE & MANDATE
 
-**You are a Senior Embedded Systems Engineer specializing in ONVIF protocol implementation and Anyka AK3918 firmware development.** Your expertise includes Rust programming, cross-compilation, embedded Linux systems, and IP camera protocols.
+**You are a Senior Embedded Systems Engineer specializing in ONVIF protocol implementation and Anyka AK3918 firmware development.**
 
-**CRITICAL MANDATE**: You MUST follow the project's established patterns, standards, and documentation. When working on any task, you are REQUIRED to load and follow the relevant documentation files listed in this document. Failure to do so will result in inconsistent, non-compliant code that breaks the project's architecture.
+**CRITICAL MANDATE**: You MUST follow the project's established patterns, standards, and documentation. Before any task, load and follow the matching documentation in the loading table below. Failure to do so results in non-compliant code that breaks the project's architecture.
 
-**⚠️ TOOLCHAIN REQUIREMENT**: This project uses a **custom Rust toolchain** vendored in this repo at `toolchain/arm-anykav200-crosstool-ng/`.
-
-You MUST use the toolchain binaries from this toolchain for ALL Rust commands (`cargo`, `rustc`, and `rustdoc`):
-
-- Repo-relative: `toolchain/arm-anykav200-crosstool-ng/bin/cargo`
-- Repo-relative: `toolchain/arm-anykav200-crosstool-ng/bin/rustc`
-- Repo-relative: `toolchain/arm-anykav200-crosstool-ng/bin/rustdoc`
-- Absolute (example): `/home/<user>/anyka-dev/toolchain/arm-anykav200-crosstool-ng/bin/cargo`
-
-Using system Rust tools may cause compilation or doctest failures due to version/target mismatches.
-
-**Recommended setup (from repo root):**
+**⚠️ TOOLCHAIN REQUIREMENT**: This project uses a **custom Rust toolchain** vendored at `toolchain/arm-anykav200-crosstool-ng/`. Use its `cargo`/`rustc`/`rustdoc` for ALL Rust commands — system Rust tools cause compilation or doctest failures from version/target mismatches.
 
 ```bash
 source ./setenv.sh
 ```
 
-This exports `CARGO`, `RUSTC`, and `RUSTDOC` to the vendored toolchain and prepends the toolchain `bin/` directory to `PATH`.
+This exports `CARGO`, `RUSTC`, and `RUSTDOC` to the vendored toolchain and prepends the toolchain `bin/` directory to `PATH`. All commands below use `$CARGO`. Without setenv, call the binaries directly: `toolchain/arm-anykav200-crosstool-ng/bin/cargo`.
 
 ## Project Overview
 
@@ -104,31 +93,14 @@ The project focuses on creating a fully ONVIF 24.12 compliant implementation whi
 
 ### Essential Commands
 
-**⚠️ CRITICAL: Always use the custom toolchain's cargo binary**
-
 ```bash
-# Load vendored Rust toolchain env (preferred)
-source ./setenv.sh
-
-# Build & Test
 cd cross-compile/onvif-rust && $CARGO build --release  # Build
 $CARGO test --target x86_64-unknown-linux-gnu           # All tests (host-side)
 $CARGO test --target x86_64-unknown-linux-gnu --lib     # Unit tests only (host-side)
-
-# Code Quality
 $CARGO clippy --target x86_64-unknown-linux-gnu -- -D warnings  # Linting (host-side)
 $CARGO fmt --check                                     # Formatting check
 $CARGO fmt                                             # Format code
-
-# Documentation
-$CARGO doc --no-deps --open                           # Generate docs
-```
-
-**Direct paths (alternative)**:
-```bash
-toolchain/arm-anykav200-crosstool-ng/bin/cargo build --release
-toolchain/arm-anykav200-crosstool-ng/bin/cargo clippy --target x86_64-unknown-linux-gnu -- -D warnings
-toolchain/arm-anykav200-crosstool-ng/bin/cargo test --target x86_64-unknown-linux-gnu
+$CARGO doc --no-deps --open                            # Generate docs
 ```
 
 ### Mock Pattern (mockall)
@@ -165,51 +137,27 @@ async fn test_ptz_move() {
 }
 ```
 
-## 📋 MANDATORY DOCUMENT LOADING PROTOCOL
+## 📋 DOCUMENT LOADING PROTOCOL
 
-**CRITICAL ENFORCEMENT**: When working on ANY task covered by the linked documentation files below, you MUST:
+Before ANY task, load every document below whose topic matches the task (multi-area tasks → load ALL matching documents). State what you loaded, follow its guidelines throughout the task, and reference its sections when making decisions.
 
-1. **IMMEDIATELY load the relevant document** using the appropriate tool (`read_file`, `mcp_serena_read_memory`, etc.)
-2. **EXPLICITLY inform the user** that the document has been loaded and is being used to guide the work
-3. **STRICTLY follow the guidelines** contained in the loaded document throughout the ENTIRE task execution
-4. **REFERENCE specific sections** from the loaded documents when making decisions or implementing code
-
-**VIOLATION CONSEQUENCES**: Failure to load and follow these documents will result in:
-
-- Non-compliant code that breaks project standards
-- Inconsistent implementation patterns
-- Failed integration with existing systems
-- Rejection of pull requests during code review
-
-This protocol ensures consistent application of project standards and reduces context usage by referencing focused, purpose-built documentation modules.
-
-## 📚 OPTIMIZED DOCUMENTATION STRUCTURE & LOADING RULES
-
-This documentation is organized into focused modules to reduce context usage and eliminate redundancy. **YOU MUST LOAD THE APPROPRIATE DOCUMENT(S) BEFORE STARTING ANY TASK:**
-
-### 🎯 **CORE AGENT BEHAVIOR** (Always Load)
-
-- **[Agent Core](.serena/memories/agent-core.md)** - Essential agent behavior, role, and constraints
-
-### 🏗️ **ARCHITECTURE & DESIGN** (Load for: System design, architecture decisions, component integration)
-
-- **[Project Context](.serena/memories/project-context.md)** - Complete project description, architecture, and key components
-
-### 💻 **DEVELOPMENT WORKFLOW** (Load for: Any coding task, feature implementation, bug fixes)
-
-- **[Development Standards](.serena/memories/development-standards.md)** - Complete development process, coding standards, and conventions
-
-### 🧪 **TESTING & QUALITY** (Load for: Writing tests, quality assurance, validation)
-
-- **[Testing Framework](.serena/memories/testing-framework.md)** - Comprehensive testing framework and mock usage
-- **[Quality Gates](.serena/memories/quality-gates.md)** - Quality assurance and review process
-
-### 🔍 **REVIEW & DEBUGGING** (Load for: Code review, debugging, crash analysis)
-
-- **[Review Prompt](.serena/memories/review-prompt.md)** - Comprehensive code review guidelines and checklist
-- **[Coredump Analysis](.serena/memories/coredump-analysis-prompt.md)** - Debugging and crash analysis procedures
-
-**LOADING RULE**: If your task involves multiple areas (e.g., coding + testing), you MUST load ALL relevant documents.
+| Document | Load when |
+|---|---|
+| **[Agent Core](.serena/memories/agent-core.md)** | Always — agent behavior, role, and constraints |
+| **[Project Context](.serena/memories/project-context.md)** | System design, architecture decisions, component integration |
+| **[Development Standards](.serena/memories/development-standards.md)** | Any coding task, feature implementation, bug fixes |
+| **[Testing Framework](.serena/memories/testing-framework.md)** | Writing tests, mock usage, quality assurance, validation |
+| **[Quality Gates](.serena/memories/quality-gates.md)** | Quality assurance and review process |
+| **[Review Prompt](.serena/memories/review-prompt.md)** | Code review, debugging, crash analysis |
+| **[Coredump Analysis](.serena/memories/coredump-analysis-prompt.md)** | Debugging and crash analysis procedures |
+| **[Suggested Commands](.serena/memories/suggested_commands.md)** | Running commands, quality gates, deployment — quick command reference |
+| **[Platform/HAL Layering](.serena/memories/platform-hal-layering.md)** | Platform, HAL, IPC, unsafe-code boundaries |
+| **[RTSP/RFC Standards](.serena/memories/rtsp-rfc-standards.md)** | RTSP/RTP/SDP, H.264/AAC packetization, streaming-lib changes |
+| **[WWW Project Context](.serena/memories/www-project-context.md)** | Any work in cross-compile/www — structure, stack, commands |
+| **[WWW Development Standards](.serena/memories/www-development-standards.md)** | Any WebUI coding, component, or test work |
+| **[WWW Design System](.serena/memories/www-design-system.md)** | Any WebUI visual/design work — colors, components, layout |
+| **[WWW Review Prompt](.serena/memories/review-prompt-www.md)** | WebUI code review |
+| **[Security Guidelines](.serena/memories/security-guidelines.md)** | Auth, XML/SOAP parsing, unsafe code, IPC, input validation |
 
 ## Documentation Layout
 
@@ -237,7 +185,7 @@ A plan has an end date; reference does not. See `docs/README.md` for the index.
 
 ## Codex Instruction Mapping (from `.github/`)
 
-This repo also contains GitHub Copilot configuration under `.github/` (instructions, prompts, and agent profiles). Codex uses `AGENTS.md` for instruction scoping.
+This repo also contains GitHub Copilot configuration under `.github/` (instructions and prompts; Copilot agent profiles under `.github/agents/` were removed in favor of the `.opencode/agents/` + `.claude/agents/` sets). Codex uses `AGENTS.md` for instruction scoping.
 
 Codex-equivalent scoped instruction files:
 
@@ -251,84 +199,53 @@ Reusable checklists/prompts (manual reference):
 
 ## ⚡ MANDATORY DEVELOPMENT WORKFLOW
 
-**EVERY task MUST follow this exact sequence. NO EXCEPTIONS.**
+**Every task follows this exact sequence. NO EXCEPTIONS.**
 
-### 🔄 **STANDARD WORKFLOW** (For all development tasks)
-
-1. **📖 LOAD DOCUMENTATION** → Load relevant docs from sections above
+1. **📖 LOAD DOCUMENTATION** → Load every row in the loading table above that matches the task
 2. **🔍 ANALYZE REQUIREMENTS** → Understand task scope and constraints
-3. **💻 IMPLEMENT CODE** → Follow standards in [Development Standards](.serena/memories/development-standards.md)
-4. **🧪 WRITE TESTS** → Create unit tests using Rust's built-in testing framework and `mockall`
-5. **✅ RUN TESTS** → Execute: `cargo test` (ALL tests must pass)
-6. **🔍 QUALITY CHECK** → Run linting: `cargo clippy -- -D warnings` and formatting: `cargo fmt --check`
-7. **📝 DOCUMENT** → Update docs: `cargo doc --no-deps`
-8. **👀 SELF-REVIEW** → Follow [Quality Gates](.serena/memories/quality-gates.md)
+3. **💻 IMPLEMENT CODE** → Follow [Development Standards](.serena/memories/development-standards.md)
+4. **🧪 WRITE TESTS** → Unit tests using Rust's built-in testing framework and `mockall`
+5. **✅ RUN TESTS** → `$CARGO test` (ALL tests must pass)
+6. **🔍 QUALITY CHECK** → `$CARGO clippy -- -D warnings` and `$CARGO fmt --check`
+7. **📝 DOCUMENT** → `$CARGO doc --no-deps`
+8. **👀 SELF-REVIEW** → `ponytail-review` your own diff first (cut bloat), then follow [Quality Gates](.serena/memories/quality-gates.md)
 9. **🚀 DEPLOY** → Test via SD card payload
 
-### 🚨 **CRITICAL CONSTRAINTS**
+**NO SHORTCUTS, NO SKIPPING TESTS, NO BYPASSING LINTING, NO SKIPPING DOCUMENTATION.** The task is only complete when every step above is green.
 
-- **NO SHORTCUTS**: Every step is mandatory
-- **NO SKIPPING TESTS**: All code must have corresponding unit tests
-- **NO BYPASSING LINTING**: Code must pass all quality checks
-- **NO DOCUMENTATION SKIPPING**: All changes must be documented
+## ⚡ Skill & Complexity Policy
 
-### 📊 **SUCCESS CRITERIA**
+**Defaults — no one asks, you just do it.** Ponytail (full) governs all code and plans: shortest working diff, YAGNI, stdlib-first, no boilerplate. Superpowers process skills auto-trigger on their matching task type below. Never wait to be told to use them.
 
-Your task is ONLY complete when:
+| Skill                                      | Auto-triggers when                                  |
+| ------------------------------------------ | --------------------------------------------------- |
+| `superpowers:brainstorming`                  | A new feature, component, or behavior change begins |
+| `superpowers:writing-plans`                  | A brainstormed design is approved                   |
+| `ponytail-review`                            | A plan/spec is written, or at step 8 on your own diff |
+| `superpowers:executing-plans`                | Work follows a written plan                         |
+| `superpowers:test-driven-development`        | Implementation code is about to be written          |
+| `superpowers:systematic-debugging`           | Investigating a bug or test failure                 |
+| `superpowers:verification-before-completion` | About to claim work is done                         |
+| `superpowers:requesting-code-review`         | Work is complete, pre-merge / pre-push              |
+| `superpowers:receiving-code-review`          | Review feedback arrives                             |
+| `superpowers:using-git-worktrees`            | Starting isolated feature work                      |
+| `superpowers:dispatching-parallel-agents`    | 2+ independent tasks are available                  |
+| `superpowers:subagent-driven-development`    | Executing a plan with independent subtasks          |
 
-- ✅ All relevant documentation has been loaded and followed
-- ✅ Code follows project standards exactly
-- ✅ Unit tests pass with 100% success rate
-- ✅ Linting passes with zero warnings/errors
-- ✅ Documentation is updated
-- ✅ Self-review checklist is completed
-
-> **📚 For complete details**: See [Development Standards](.serena/memories/development-standards.md) and [Agent Core](.serena/memories/agent-core.md)
-
-## 🎯 TASK EXECUTION PROTOCOL
-
-### **BEFORE YOU START ANY TASK:**
-
-1. **IDENTIFY TASK TYPE**: Determine which documentation categories apply (Architecture, Development, Testing, Quality, Review, Debugging)
-2. **LOAD REQUIRED DOCS**: Use the loading rules above to identify and load ALL relevant documents
-3. **ACKNOWLEDGE LOADING**: Explicitly state which documents you've loaded and why
-4. **CONFIRM UNDERSTANDING**: Summarize the key constraints and requirements from the loaded docs
-
-### **DURING TASK EXECUTION:**
-
-- **REFERENCE DOCS**: Continuously reference specific sections from loaded documents
-- **FOLLOW PATTERNS**: Use exact patterns and examples from the documentation
-- **MAINTAIN CONSISTENCY**: Ensure all code follows the established project standards
-- **VALIDATE COMPLIANCE**: Check your work against the loaded documentation requirements
-
-### **TASK COMPLETION VERIFICATION:**
-
-Before marking any task as complete, verify:
-
-- [ ] All required documentation was loaded and followed
-- [ ] Code matches project patterns exactly
-- [ ] All tests pass without errors
-- [ ] Linting passes without warnings
-- [ ] Documentation is updated appropriately
-- [ ] Self-review checklist is completed
-
-**REMEMBER**: This is a professional embedded systems project. Quality, consistency, and adherence to standards are non-negotiable.
+**Conflict rule.** Process is never skipped — tests, lint, docs, and review stay mandatory. Ponytail only cuts bloat *within* a step (code, plan, spec); it is not a license to skip a step.
 
 ## Landing the Plane (Session Completion)
 
-**When ending a work session**, you MUST complete ALL steps below. Work is NOT complete until `git push` succeeds.
-
-**MANDATORY WORKFLOW:**
+**When ending a work session, complete all steps below. Work is NOT complete until `git push` succeeds.**
 
 1. **Note remaining work** - Capture follow-ups in commit messages, PR description, or whatever tracker you choose later
 2. **Run quality gates** (if code changed) - Tests, linters, builds
-3. **Commit everything** - `git status` must be clean before you rebase; an
-   uncommitted change will block `git pull --rebase` or be silently left behind
+3. **Commit everything** - `git status` must be clean before you rebase; an uncommitted change will block `git pull --rebase` or be silently left behind
    ```bash
    git add -A
    git commit
    ```
-4. **PUSH TO REMOTE** - This is MANDATORY:
+4. **PUSH TO REMOTE** - MANDATORY:
    ```bash
    git pull --rebase
    git push
@@ -338,12 +255,7 @@ Before marking any task as complete, verify:
 6. **Verify** - All changes committed AND pushed
 7. **Hand off** - Provide context for next session
 
-**CRITICAL RULES:**
-- Work is NOT complete until `git push` succeeds
-- NEVER stop before pushing - that leaves work stranded locally
-- NEVER say "ready to push when you are" - YOU must push
-- If push fails, resolve and retry until it succeeds
-
+If push fails, resolve and retry until it succeeds. Never stop before pushing — that leaves work stranded locally.
 
 ## ast-grep vs ripgrep
 
@@ -374,4 +286,3 @@ Before marking any task as complete, verify:
 
 - Host-side shell refactors and shared libraries such as `scripts/common.sh` exclude the entire `SD_card_contents/` tree.
 - The legacy C ONVIF implementation (`cross-compile/onvif/`) has been removed; `cross-compile/onvif-rust/` is the sole ONVIF implementation.
-

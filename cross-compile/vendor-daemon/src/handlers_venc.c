@@ -198,7 +198,8 @@ int handle_venc_request_stream(int fd, const uint8_t *req, uint32_t req_len)
     if (slot < 0) {
         log_error("[venc] object table full; refusing request_stream");
         /* Transfer ownership before cancel so malloc/pthread/timeout failure
-         * still leaves a reclaim path via vd_obj_close_all. */
+         * still leaves a reclaim path: a newer orphan displaces this one and
+         * cancels it (see vd_stream_orphan_set). */
         vd_stream_orphan_set(stream_handle);
         if (vd_cancel_stream_bounded(stream_handle, NULL) == 0)
             vd_stream_orphan_clear(stream_handle);

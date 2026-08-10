@@ -8,7 +8,10 @@ The project features a complete, modern ONVIF 24.12 implementation written in **
 - **Target Platform**: Anyka AK3918 (ARM926EJ-S, 32MB RAM)
 - **ONVIF Compliance**: Profile S/T (Targeting v24.12)
 
-> **⚠️ Current Limitation**: The ONVIF Rust implementation currently uses **stub implementations** for the Platform Abstraction Layer. Real Anyka hardware integration is not yet implemented. All ONVIF API calls are handled by stub/mock implementations for testing and development purposes. Hardware integration with the Anyka AK3918 platform is planned for future development.
+> **⚠️ Current Limitation**: Some platform calls still run against stub/mock
+> implementations for development and testing; the Anyka AK3918 hardware path
+> is implemented for imaging (including IR cut filter and lamps), PTZ, and
+> video/audio. Hardware integration for remaining platform features is ongoing.
 
 ## Features
 
@@ -72,7 +75,7 @@ The Rust-based ONVIF server implements:
 - **Device Service**: System information, network configuration, user management
 - **Media Service**: Video profiles, RTSP stream URI generation, encoder configuration
 - **PTZ Service**: Pan/Tilt/Zoom control with preset management
-- **Imaging Service**: Image parameter adjustment (brightness, contrast, saturation, sharpness)
+- **Imaging Service**: Image parameter adjustment (brightness, contrast, saturation, sharpness), IR cut filter, IR lamp / white light ([[IR-Night-Mode-Calibration]])
 
 ## Troubleshooting
 
@@ -83,4 +86,5 @@ For common issues and solutions, see [[Troubleshooting]].
 - [[Development-Environment]] - Toolchain setup and build instructions
 - [[Development-Guide]] - Development workflow and best practices
 - [[Web-Interface]] - Web UI that communicates with the ONVIF server
+- [[IR-Night-Mode-Calibration]] - Measure `ain0` thresholds; verify day/night AUTO
 - [[Troubleshooting]] - Common issues and solutions

@@ -1,14 +1,18 @@
 ---
 name: protocol-debugging
-description: |
-  Protocol debugging specialist for ONVIF, RTSP, and network issues. Covers Wireshark analysis, packet inspection, and protocol troubleshooting.
-  Triggers on: "Wireshark", "ONVIF debug", "RTSP issue", "packet analysis", "protocol error", "network capture".
-version: 1.0.0
+description: Use when debugging ONVIF, RTSP, RTP, or camera network issues (Wireshark, tcpdump, pcap analysis, protocol errors, network captures, RTSP handshake failures, RTP packet loss).
+version: 2.0.0
 ---
 
 # Protocol Debugging and Analysis
 
 Diagnose ONVIF, RTSP, and streaming issues using network analysis tools. Capture, filter, and analyze network traffic to identify protocol problems.
+
+## Camera Access Quick Reference
+
+- Camera IP: `192.168.2.198`. ONVIF: `http://192.168.2.198:8080/onvif/device_service`. RTSP: port 554.
+- Remote shell is **telnet port 24** (root). Use `scripts/debugging/cam_exec.py 'cmd'` (one-shot, prints output + exit status) or `scripts/debugging/camera_shell.py 'cmd1' 'cmd2'` (multiple commands). See the `anyka-remote-debugging` skill.
+- Run `source ./setenv.sh` before any `$CARGO`/toolchain commands (see `anyka-embedded-build`).
 
 ## Wireshark Capture Setup
 

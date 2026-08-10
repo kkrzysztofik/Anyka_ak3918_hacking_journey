@@ -459,6 +459,51 @@ pub struct ConfigurationEntity {
     pub use_count: i32,
 }
 
+/// Rotate mode (ONVIF `tt:RotateMode`). `Auto` is deliberately not modeled:
+/// this hardware can never honor or report it (see design doc). Today, a
+/// client sending `AUTO` simply fails generic XML deserialization (a raw
+/// serde parse error, not a clean fault); a later task adds an
+/// ops-validation boundary to turn that into a proper `ter:InvalidArgVal`
+/// fault instead of representing `Auto` as a dead enum arm.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RotateMode {
+    #[serde(rename = "OFF")]
+    Off,
+    #[serde(rename = "ON")]
+    On,
+}
+
+/// Image rotation (ONVIF `tt:Rotate`). `degree` is always `None` on this
+/// device — omitting it for `On` means 180° per spec, the only degree this
+/// hardware's flip+mirror trick can produce.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Rotate {
+    #[serde(rename = "tt:Mode", alias = "Mode")]
+    pub mode: RotateMode,
+
+    #[serde(
+        rename = "tt:Degree",
+        alias = "Degree",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub degree: Option<i32>,
+}
+
+/// Typed `VideoSourceConfiguration.Extension` (ONVIF
+/// `tt:VideoSourceConfigurationExtension`). Only `Rotate` is modeled; this
+/// device has nothing else to put there.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct VideoSourceConfigurationExtension {
+    #[serde(
+        rename = "tt:Rotate",
+        alias = "Rotate",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub rotate: Option<Rotate>,
+}
+
 /// Video source configuration.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct VideoSourceConfiguration {
@@ -493,7 +538,7 @@ pub struct VideoSourceConfiguration {
         default,
         skip_serializing_if = "Option::is_none"
     )]
-    pub extension: Option<Extension>,
+    pub extension: Option<VideoSourceConfigurationExtension>,
 }
 
 /// Audio source configuration.
@@ -1830,7 +1875,7 @@ pub enum AutoFocusMode {
 }
 
 /// IR cut filter mode.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum IrCutFilterMode {
     ON,
     OFF,
@@ -2436,5 +2481,28 @@ mod tests {
     fn test_discovery_mode_default() {
         let mode = DiscoveryMode::default();
         assert_eq!(mode, DiscoveryMode::Discoverable);
+    }
+
+    #[test]
+    fn test_rotate_mode_serializes_to_onvif_tokens() {
+        let off = quick_xml::se::to_string(&RotateMode::Off).expect("serialize");
+        assert!(off.contains("OFF"), "expected OFF token, got {off}");
+
+        let on = quick_xml::se::to_string(&RotateMode::On).expect("serialize");
+        assert!(on.contains("ON"), "expected ON token, got {on}");
+    }
+
+    #[test]
+    fn test_rotate_on_omits_degree_element() {
+        let rotate = Rotate {
+            mode: RotateMode::On,
+            degree: None,
+        };
+
+        let xml = quick_xml::se::to_string(&rotate).expect("serialize");
+        assert!(
+            !xml.contains("Degree"),
+            "degree: None must not serialize a Degree element, got {xml}"
+        );
     }
 }

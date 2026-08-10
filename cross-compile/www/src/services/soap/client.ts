@@ -268,6 +268,9 @@ export const soapBodies = {
 
   removePreset: (profileToken: string, presetToken: string) =>
     `<tptz:RemovePreset><tptz:ProfileToken>${escapeXml(profileToken)}</tptz:ProfileToken><tptz:PresetToken>${escapeXml(presetToken)}</tptz:PresetToken></tptz:RemovePreset>`,
+
+  sendAuxiliaryCommand: (profileToken: string, auxiliaryData: string) =>
+    `<tptz:SendAuxiliaryCommand><tptz:ProfileToken>${escapeXml(profileToken)}</tptz:ProfileToken><tptz:AuxiliaryData>${escapeXml(auxiliaryData)}</tptz:AuxiliaryData></tptz:SendAuxiliaryCommand>`,
 };
 
 export { parser, builder };

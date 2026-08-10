@@ -260,6 +260,7 @@ const CMD_VENC_REQUEST_STREAM: i32 = 15;
 const CMD_VENC_CANCEL_STREAM: i32 = 18;
 const CMD_VENC_START_PUSH: i32 = 19;
 const CMD_VENC_STOP_PUSH: i32 = 20;
+const CMD_VI_SET_FLIP_MIRROR: i32 = 21;
 const CMD_AI_OPEN: i32 = 50;
 const CMD_AI_CLOSE: i32 = 51;
 const CMD_AI_SET_ADC_VOLUME: i32 = 52;
@@ -273,6 +274,7 @@ const CMD_ISP_SET_SATURATION: i32 = 102;
 const CMD_ISP_SET_SHARPNESS: i32 = 103;
 const CMD_ISP_SET_IR_FILTER: i32 = 104;
 const CMD_ISP_SET_WDR: i32 = 105;
+const CMD_ISP_GET_AE_LUMA: i32 = 106;
 const CMD_GET_ERROR_NO: i32 = 200;
 const CMD_GET_ERROR_STR: i32 = 201;
 
@@ -510,6 +512,7 @@ impl AnykaIpc {
             CMD_VI_SET_CHANNEL_ATTR => "VI_SET_CHANNEL_ATTR",
             CMD_VI_CAPTURE_ON => "VI_CAPTURE_ON",
             CMD_VI_CAPTURE_OFF => "VI_CAPTURE_OFF",
+            CMD_VI_SET_FLIP_MIRROR => "VI_SET_FLIP_MIRROR",
             CMD_VPSS_INIT => "VPSS_INIT",
             CMD_VPSS_DESTROY => "VPSS_DESTROY",
             CMD_VENC_SET_CFG_PATH => "VENC_SET_CFG_PATH",
@@ -534,6 +537,7 @@ impl AnykaIpc {
             CMD_ISP_SET_SHARPNESS => "ISP_SET_SHARPNESS",
             CMD_ISP_SET_IR_FILTER => "ISP_SET_IR_FILTER",
             CMD_ISP_SET_WDR => "ISP_SET_WDR",
+            CMD_ISP_GET_AE_LUMA => "ISP_GET_AE_LUMA",
             CMD_GET_ERROR_NO => "GET_ERROR_NO",
             CMD_GET_ERROR_STR => "GET_ERROR_STR",
             CMD_HELLO => "HELLO",

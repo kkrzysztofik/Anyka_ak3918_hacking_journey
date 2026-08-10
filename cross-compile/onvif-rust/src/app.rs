@@ -22,7 +22,7 @@ use crate::config::{
     ConfigPersistenceHandle, ConfigPersistenceService, ConfigRuntime, ConfigStorage, PendingWrite,
     PersistenceHandle, PersistenceService, ProfileStorage,
 };
-use crate::config::{PasswordManager, UserStorage};
+use crate::config::{PasswordManager, UserLoadStatus, UserStorage};
 use crate::lifecycle::health::{ComponentHealth, HealthStatus};
 use crate::lifecycle::shutdown::{DEFAULT_SHUTDOWN_TIMEOUT, ShutdownCoordinator};
 use crate::lifecycle::startup::{StartupPhase, StartupProgress};
@@ -746,11 +746,24 @@ impl Application {
             .unwrap_or(std::path::Path::new("/etc/onvif"))
             .join("users.toml");
         if users_path.exists() {
-            if let Err(e) = user_storage.load_from_toml(&users_path) {
-                tracing::warn!("Failed to load users from {}: {}", users_path.display(), e);
-            } else {
-                tracing::info!("Loaded users from {}", users_path.display());
+            match user_storage.load_from_toml(&users_path) {
+                Ok(()) => tracing::info!("Loaded users from {}", users_path.display()),
+                Err(e) => {
+                    tracing::warn!("Failed to load users from {}: {}", users_path.display(), e);
+                    user_storage.set_load_status(UserLoadStatus::LoadFailed(e.to_string()));
+                }
             }
+        } else {
+            // Said nothing at all before. A missing file leaves UserStorage
+            // empty, which surfaces much later as a streaming-auth failure that
+            // cannot name its own cause — and RTSP then never binds, with no
+            // log line anywhere pointing at this file.
+            tracing::warn!(
+                path = %users_path.display(),
+                "no users file; ONVIF and streaming authentication have no accounts. \
+                 RTSP and HTTP-FLV will not start while server.auth_enabled = true"
+            );
+            user_storage.set_load_status(UserLoadStatus::Missing);
         }
 
         let user_persistence_storage = Arc::clone(&user_storage);
@@ -958,6 +971,23 @@ impl Application {
 
         progress.complete_phase();
 
+        // Profile storage is wired before the platform, not with the other
+        // Phase 3 services: `profiles.toml` is the source of truth for the
+        // persisted rotate flag, and `AnykaPlatform` has to be constructed
+        // already knowing it (same reason the encoder is constructed knowing
+        // `gop_length`). Nothing in the platform feeds back into profiles, so
+        // this is a pure reorder.
+        let (profile_storage, profile_persistence_handle, profile_persistence_task) =
+            Self::wire_profile_persistence(config_path, save_delay, &shutdown_coordinator);
+        let profile_persistence_task = Some(profile_persistence_task);
+
+        let initial_rotated = profile_storage
+            .snapshot()
+            .video_source_configs
+            .first()
+            .map(|c| c.rotated)
+            .unwrap_or(false);
+
         // Phase 2: Platform
         progress.begin_phase(StartupPhase::Platform);
         let PlatformInit {
@@ -970,6 +1000,7 @@ impl Application {
                     &mut progress,
                     &config_runtime,
                     shutdown_coordinator.subscribe(),
+                    initial_rotated,
                 )
                 .await?
             }
@@ -993,11 +1024,6 @@ impl Application {
         let (user_storage, user_persistence_task) =
             Self::wire_user_persistence(config_path, save_delay, &shutdown_coordinator);
         let user_persistence_task = Some(user_persistence_task);
-
-        // Create profile storage for ONVIF media profiles
-        let (profile_storage, profile_persistence_handle, profile_persistence_task) =
-            Self::wire_profile_persistence(config_path, save_delay, &shutdown_coordinator);
-        let profile_persistence_task = Some(profile_persistence_task);
 
         let (imaging_settings_store, imaging_persistence_task) = Self::wire_imaging_persistence(
             config_path,
@@ -1142,11 +1168,16 @@ impl Application {
         progress: &mut StartupProgress,
         config_runtime: &Arc<ConfigRuntime>,
         shutdown: broadcast::Receiver<()>,
+        initial_rotated: bool,
     ) -> Result<PlatformInit, StartupError> {
         let ptz_enabled = config_runtime.read().ptz.enabled;
 
         #[cfg(use_stubs)]
         let _ = shutdown;
+        // Stub builds have no VI to flip; `StubVideoControl` starts at its own
+        // default and the seed is irrelevant.
+        #[cfg(use_stubs)]
+        let _ = initial_rotated;
 
         #[cfg(not(use_stubs))]
         {
@@ -1177,11 +1208,14 @@ impl Application {
                 }
             };
 
+            let imaging_cfg = config_runtime.read().imaging.clone();
             match crate::platform::AnykaPlatform::with_isp_config(
                 isp_path,
                 ptz_enabled,
                 main_encoder,
                 sub_encoder,
+                imaging_cfg,
+                initial_rotated,
             ) {
                 Ok(p) => {
                     // Construction no longer touches the daemon, and bring-up is no
@@ -1197,6 +1231,13 @@ impl Application {
                                 "failed to start attach supervisor: {e}"
                             ))
                         })?;
+                    crate::platform::supervisor::watch_for_fatal(availability.clone(), || {
+                        tracing::error!(
+                            event = "attach_given_up_fatal",
+                            "vendor-daemon attach gave up; exiting so the supervisor can restart the pair"
+                        );
+                        std::process::exit(1);
+                    });
                     tracing::info!(
                         "AnykaPlatform created; attach supervisor started (degraded until attached)"
                     );
@@ -1320,9 +1361,27 @@ impl Application {
         }
 
         if app_state.user_storage().is_empty() {
-            anyhow::bail!(
-                "Streaming authentication is enabled but no users are available in UserStorage"
-            );
+            // Name the actual cause: a missing file, a malformed file, or a
+            // valid-but-empty file all need different operator action.
+            let message = match app_state.user_storage().load_status() {
+                UserLoadStatus::Missing => anyhow::anyhow!(
+                    "streaming authentication is enabled but no users.toml exists next to \
+                     config.toml, so RTSP and HTTP-FLV will not start. Create a users.toml with \
+                     an Administrator entry, or set server.auth_enabled = false to stream \
+                     without authentication."
+                ),
+                UserLoadStatus::LoadFailed(e) => anyhow::anyhow!(
+                    "streaming authentication is enabled but users.toml failed to load: {e}, so \
+                     RTSP and HTTP-FLV will not start. Fix the file, or set \
+                     server.auth_enabled = false to stream without authentication."
+                ),
+                _ => anyhow::anyhow!(
+                    "streaming authentication is enabled but users.toml contains no accounts, so \
+                     RTSP and HTTP-FLV will not start. Add an Administrator entry, or set \
+                     server.auth_enabled = false to stream without authentication."
+                ),
+            };
+            return Err(message);
         }
 
         let validator_storage = Arc::clone(app_state.user_storage());
@@ -1851,8 +1910,23 @@ mod tests {
         config.write().server.auth_enabled = true;
         let app_state = make_app_state_for_stream_auth(config, Arc::new(UserStorage::new()));
 
-        let result = Application::build_stream_auth(&app_state);
-        assert!(result.is_err());
+        // `Auth` is not Debug, so expect_err() will not compile here.
+        let msg = match Application::build_stream_auth(&app_state) {
+            Ok(_) => panic!("no users must be an error"),
+            Err(e) => e.to_string(),
+        };
+        // This error is the only thing the operator sees when RTSP silently
+        // fails to bind: build_streaming returns None on it, so the server is
+        // never constructed. It has to name the file to create and the escape
+        // hatch, or it costs a debugging session. It did.
+        assert!(
+            msg.contains("users.toml"),
+            "must name the file to create, got: {msg}"
+        );
+        assert!(
+            msg.contains("auth_enabled"),
+            "must name the setting that disables the requirement, got: {msg}"
+        );
     }
 
     #[test]

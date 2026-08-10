@@ -86,11 +86,17 @@ Your task is to diagnose and help resolve issues.
 For coredump analysis, use the standardized script:
 
 ```bash
-# Navigate to project root
-cd /home/kmk/anyka-dev
+# From repo root: load vendored toolchain (exports $CARGO — never bare cargo)
+source ./setenv.sh
 
-# Run analysis (NEVER run GDB directly)
-./debugging/run_gdb_multiarch_analysis.sh [coredump_file] onvifd_debug
+# Collect a coredump from the device (coredumps in /mnt/coredumps, /mnt/logs, /mnt/anyka_hack/onvif)
+scripts/debugging/collect_coredump.sh <ip> <user> <pass>
+
+# Run analysis (NEVER run GDB directly). Binary name is onvif-rust.
+scripts/debugging/run_gdb_multiarch_analysis.sh [coredump_file] onvif-rust
+
+# Optional: run a command on the device shell (telnet port 24, camera 192.168.2.198)
+scripts/debugging/cam_exec.py '<command>'
 ```
 
 ### Key Analysis Focus
@@ -113,14 +119,17 @@ cd /home/kmk/anyka-dev
 ## Debugging Commands
 
 ```bash
+# Load vendored toolchain from repo root (exports $CARGO — never bare cargo)
+source ./setenv.sh
+
 # Build with verbose output
-cargo build --target x86_64-unknown-linux-gnu -v
+$CARGO build --target x86_64-unknown-linux-gnu -v
 
 # Test with debug output
-cargo test --target x86_64-unknown-linux-gnu -- --nocapture
+$CARGO test --target x86_64-unknown-linux-gnu -- --nocapture
 
 # Check for issues
-cargo clippy --target x86_64-unknown-linux-gnu -- -D warnings
+$CARGO clippy --target x86_64-unknown-linux-gnu -- -D warnings
 ```
 
 ## Output

@@ -138,6 +138,29 @@ pub fn init_logging(config: &ConfigRuntime) -> LoggingResult<()> {
     result
 }
 
+/// Build a daily-rotating file appender for the given log file path.
+///
+/// Returns `None` when the appender cannot be created (missing/read-only
+/// directory, e.g. `/mnt/logs` not mounted). Callers degrade to console-only
+/// rather than panicking — a log target must never stop the daemon from
+/// starting.
+fn make_file_appender(file_path: &str) -> Option<tracing_appender::rolling::RollingFileAppender> {
+    use tracing_appender::rolling::{RollingFileAppender, Rotation};
+
+    let path = Path::new(file_path);
+    let parent_dir = path.parent().unwrap_or(Path::new("."));
+    let file_name = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("onvif.log");
+
+    RollingFileAppender::builder()
+        .rotation(Rotation::DAILY)
+        .filename_prefix(file_name)
+        .build(parent_dir)
+        .ok()
+}
+
 /// Internal logging initialization implementation.
 fn init_logging_impl(config: &ConfigRuntime) -> LoggingResult<()> {
     // Get log level from configuration
@@ -182,33 +205,47 @@ fn init_logging_impl(config: &ConfigRuntime) -> LoggingResult<()> {
     match (console_enabled, file_enabled) {
         (true, true) => {
             // Both console and file logging
-            let file_path = Path::new(&file_path);
-            let parent_dir = file_path.parent().unwrap_or(Path::new("."));
-            let file_name = file_path
-                .file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or("onvif.log");
+            match make_file_appender(&file_path) {
+                Some(appender) => {
+                    let file_layer = fmt::layer()
+                        .with_target(true)
+                        .with_file(true)
+                        .with_line_number(true)
+                        .with_ansi(false) // No ANSI colors in file
+                        .with_writer(appender);
 
-            let file_appender = tracing_appender::rolling::daily(parent_dir, file_name);
-            let file_layer = fmt::layer()
-                .with_target(true)
-                .with_file(true)
-                .with_line_number(true)
-                .with_ansi(false) // No ANSI colors in file
-                .with_writer(file_appender);
+                    registry
+                        .with(console_layer)
+                        .with(file_layer)
+                        .try_init()
+                        .map_err(|e| LoggingError::TracingInit(e.to_string()))?;
 
-            registry
-                .with(console_layer)
-                .with(file_layer)
-                .try_init()
-                .map_err(|e| LoggingError::TracingInit(e.to_string()))?;
+                    tracing::info!(
+                        level = %level_str,
+                        console_enabled = console_enabled,
+                        file_path = %file_path,
+                        "Logging system initialized with console and file output"
+                    );
+                }
+                None => {
+                    // File appender could not be created (e.g. /mnt/logs missing).
+                    // Degrade to console-only rather than panicking at startup.
+                    tracing::warn!(
+                        file_path = %file_path,
+                        "file logging unavailable; falling back to console"
+                    );
+                    registry
+                        .with(console_layer)
+                        .try_init()
+                        .map_err(|e| LoggingError::TracingInit(e.to_string()))?;
 
-            tracing::info!(
-                level = %level_str,
-                console_enabled = console_enabled,
-                file_path = %file_path.display(),
-                "Logging system initialized with console and file output"
-            );
+                    tracing::info!(
+                        level = %level_str,
+                        console_enabled = console_enabled,
+                        "Logging system initialized with console output (file unavailable)"
+                    );
+                }
+            }
         }
         (true, false) => {
             // Console only
@@ -225,32 +262,35 @@ fn init_logging_impl(config: &ConfigRuntime) -> LoggingResult<()> {
         }
         (false, true) => {
             // File only
-            let file_path = Path::new(&file_path);
-            let parent_dir = file_path.parent().unwrap_or(Path::new("."));
-            let file_name = file_path
-                .file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or("onvif.log");
+            match make_file_appender(&file_path) {
+                Some(appender) => {
+                    let file_layer = fmt::layer()
+                        .with_target(true)
+                        .with_file(true)
+                        .with_line_number(true)
+                        .with_ansi(false)
+                        .with_writer(appender);
 
-            let file_appender = tracing_appender::rolling::daily(parent_dir, file_name);
-            let file_layer = fmt::layer()
-                .with_target(true)
-                .with_file(true)
-                .with_line_number(true)
-                .with_ansi(false)
-                .with_writer(file_appender);
+                    registry
+                        .with(file_layer)
+                        .try_init()
+                        .map_err(|e| LoggingError::TracingInit(e.to_string()))?;
 
-            registry
-                .with(file_layer)
-                .try_init()
-                .map_err(|e| LoggingError::TracingInit(e.to_string()))?;
-
-            // Can't log here since console is disabled, but file will capture it
-            tracing::info!(
-                level = %level_str,
-                file_path = %file_path.display(),
-                "Logging system initialized with file output only"
-            );
+                    // Can't log here since console is disabled, but file will capture it
+                    tracing::info!(
+                        level = %level_str,
+                        file_path = %file_path,
+                        "Logging system initialized with file output only"
+                    );
+                }
+                None => {
+                    // File appender could not be created; init with the filter only
+                    // so the process still runs without logging.
+                    registry
+                        .try_init()
+                        .map_err(|e| LoggingError::TracingInit(e.to_string()))?;
+                }
+            }
         }
         (false, false) => {
             // No logging output configured - just init with filter

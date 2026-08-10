@@ -34,6 +34,21 @@ impl ImagingHalTrait for StubImagingHal {
     async fn set_wdr(&self, _enabled: bool) -> i32 {
         AK_SUCCESS_I32
     }
+
+    async fn get_ae_luma(&self) -> Option<u8> {
+        None
+    }
+}
+
+#[cfg(test)]
+mod get_ae_luma_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_stub_get_ae_luma_returns_none() {
+        let stub = StubImagingHal;
+        assert!(stub.get_ae_luma().await.is_none());
+    }
 }
 
 #[cfg(all(test, use_stubs))]

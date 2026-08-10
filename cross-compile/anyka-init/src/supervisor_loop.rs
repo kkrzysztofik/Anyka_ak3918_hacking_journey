@@ -35,6 +35,10 @@ pub enum Msg {
     /// Recovery request from the monitor thread. The supervisor kills the named
     /// service; the normal exit path then restarts it under the usual backoff.
     RestartService(String),
+    /// Escalation from the monitor when `RestartService` did not take. Sends
+    /// SIGKILL. A task wedged in D state will not die even from this — the
+    /// monitor's next rung is a reboot, which does not need the process to die.
+    KillService(String),
 }
 
 struct Service {
@@ -245,6 +249,19 @@ pub fn run(sys: Arc<dyn Sys>, cfg: &Config, rx: Receiver<Msg>) {
                 None => {
                     tracing::warn!(service = %name, "restart requested for unknown service")
                 }
+            },
+            Ok(Msg::KillService(name)) => match services.iter().find(|s| s.name == name) {
+                Some(svc) => match svc.state.pid() {
+                    Some(pid) => {
+                        tracing::warn!(service = %name, pid, "SIGTERM did not take; sending SIGKILL");
+                        let _ = sys.kill(pid, libc::SIGKILL);
+                    }
+                    None => tracing::info!(
+                        service = %name,
+                        "kill requested but the service is not running"
+                    ),
+                },
+                None => tracing::warn!(service = %name, "kill requested for unknown service"),
             },
             Ok(Msg::Shutdown) => {
                 tracing::info!("shutdown requested");

@@ -24,7 +24,7 @@ embedded camera web server.
 | TanStack Query | 5 | Server state management |
 | Vitest | latest | Unit/integration testing |
 | React Testing Library | latest | Component testing |
-| MSW | latest | API mocking in tests |
+| `vi.mock` | — | Service module mocking (`vi.mock` + `vi.mocked`) |
 | Zod | latest | Schema validation |
 | fast-xml-parser | latest | ONVIF SOAP/XML parsing |
 
@@ -33,16 +33,24 @@ embedded camera web server.
 ```
 cross-compile/www/
 ├── src/
-│   ├── components/      # shadcn/ui components + custom composites
+│   ├── components/      # shadcn/ui components + custom composites (ui/, layout/, settings/, users/)
 │   ├── pages/           # Route-level page components
 │   ├── hooks/           # Custom React hooks (use* prefix)
-│   ├── services/        # ONVIF SOAP service clients
-│   ├── lib/             # Utilities, formatters, typed helpers
-│   └── test/
-│       ├── mocks/
-│       │   └── services/  # Factory mock functions for service injection
-│       └── fixtures/
-│           └── soap/      # Typed SOAP response fixtures (fast-xml-parser output)
+│   ├── services/        # ONVIF SOAP service clients (soap/client.ts, soap/schemas/, per-service wrappers)
+│   ├── lib/             # Utilities, queryClient.ts, formatters, typed helpers
+│   ├── test/            # Shared test helpers
+│   │   ├── componentTestHelpers.tsx  # renderWithProviders, MOCK_ENDPOINTS, MOCK_DATA, waitForPageLoad, dialogs
+│   │   ├── formTestHelpers.ts
+│   │   ├── dialogTestHelpers.ts
+│   │   ├── mutationTestHelpers.ts
+│   │   ├── serviceTestHelpers.ts
+│   │   ├── schemaTestHelpers.ts
+│   │   └── setup.ts     # matchMedia, ResizeObserver, pointer-capture, toast mocks
+│   ├── types/           # Shared TypeScript types
+│   ├── config/          # App configuration
+│   ├── router/          # Route definitions
+│   ├── utils/           # Utility functions
+│   └── styles/          # globals.css (Industrial Dark theme)
 ├── vite.config.ts
 └── package.json
 ```
@@ -93,49 +101,42 @@ console.log("Device info:", info);
 
 ```typescript
 // src/services/deviceService.ts
-const SOAP_ENVELOPE = (body: string) => `<?xml version="1.0" encoding="UTF-8"?>
-<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope"
-            xmlns:tds="http://www.onvif.org/ver10/device/wsdl">
-  <s:Header/>
-  <s:Body>${body}</s:Body>
-</s:Envelope>`;
+import { ENDPOINTS } from "@/services/api";
+import { soapRequest } from "@/services/soap/client";
 
-export async function getDeviceInformation(
-  endpoint: string,
-  credentials: { username: string; password: string }
-): Promise<DeviceInfo> {
-  const body = SOAP_ENVELOPE(`<tds:GetDeviceInformation/>`);
-  const auth = btoa(`${credentials.username}:${credentials.password}`);
-
-  const response = await fetch(`/api${endpoint}`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/soap+xml",
-      "Authorization": `Basic ${auth}`,
-    },
-    body,
-  });
-
-  if (!response.ok) {
-    throw new Error(`SOAP request failed: ${response.status}`);
-  }
-
-  const xml = await response.text();
-  return parseDeviceInformation(xml);  // fast-xml-parser
+export async function getDeviceInformation(): Promise<DeviceInfo> {
+  const data = await soapRequest<Record<string, unknown>>(
+    ENDPOINTS.device,
+    "<tds:GetDeviceInformation />",
+    "GetDeviceInformationResponse",
+  );
+  // map & sanitize with safeString
+  return {
+    manufacturer: safeString(data?.Manufacturer, "Unknown"),
+    model: safeString(data?.Model, "Unknown"),
+    // ...
+  };
 }
 ```
+
+- **Envelopes**: use `createSOAPEnvelope(body)` from `src/services/soap/client.ts` — never hand-roll the envelope.
+- **Bodies**: use the `soapBodies` builders (`soapBodies.getProfiles()`, `soapBodies.continuousMove(...)`, etc.) and `escapeXml`/`escapeXmlAttribute` for any user input.
+- **Request**: `soapRequest<T>(endpoint, body, responseTarget?)` calls `apiClient.post(endpoint, envelope)` and parses via `parseSOAPResponse<T>` (fast-xml-parser).
+- **Auth**: HTTP Basic Auth only — no WS-Security/UsernameToken. `apiClient` in `src/services/api.ts` injects `Authorization` from the getter registered by `setAuthHeaderGetter(getBasicAuthHeader)` (wired in App.tsx via useAuth). Never pass credentials per-call.
+- **Endpoints**: `ENDPOINTS.device/media/imaging/ptz` → `/onvif/device_service`, `/onvif/media_service`, `/onvif/imaging_service`, `/onvif/ptz_service`.
+- **Response target**: pass the ONVIF response key (e.g. `"GetDeviceInformationResponse"`) to extract the payload; omit to get the whole body.
 
 ### TanStack Query Hook Pattern
 
 ```typescript
 // src/hooks/useDeviceInfo.ts
 import { useQuery } from "@tanstack/react-query";
-import { getDeviceInformation } from "../services/deviceService";
+import { getDeviceInformation } from "@/services/deviceService";
 
-export function useDeviceInfo(endpoint: string) {
+export function useDeviceInfo() {
   return useQuery({
-    queryKey: ["device-info", endpoint],
-    queryFn: () => getDeviceInformation(endpoint, getCredentials()),
+    queryKey: ["device-info"],
+    queryFn: () => getDeviceInformation(),
     staleTime: 5 * 60 * 1000,   // 5 minutes
     retry: 2,
   });
@@ -150,12 +151,8 @@ import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useDeviceInfo } from "@/hooks/useDeviceInfo";
 
-interface DevicePanelProps {
-  endpoint: string;
-}
-
-export function DevicePanel({ endpoint }: DevicePanelProps) {
-  const { data, isLoading, error } = useDeviceInfo(endpoint);
+export function DevicePanel() {
+  const { data, isLoading, error } = useDeviceInfo();
 
   if (isLoading) return <DevicePanelSkeleton />;
   if (error) return <DevicePanelError error={error} />;
@@ -182,72 +179,64 @@ export function DevicePanel({ endpoint }: DevicePanelProps) {
 ### Every Component Gets a Test
 
 ```typescript
-// src/components/__tests__/DevicePanel.test.tsx
-import { render, screen } from "@testing-library/react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { vi, describe, it, expect, beforeEach } from "vitest";
-import { DevicePanel } from "../DevicePanel";
-import { createDeviceServiceMock } from "@/test/mocks/services/deviceService";
+// src/pages/settings/DevicePanel.test.tsx
+import { screen, waitFor } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
-// Always wrap with providers
-function renderWithProviders(ui: React.ReactElement) {
-  const queryClient = new QueryClient({
-    defaultOptions: { queries: { retry: false } },
-  });
-  return render(
-    <QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>
-  );
-}
+import { getDeviceInformation } from "@/services/deviceService";
+import { MOCK_DATA, renderWithProviders } from "@/test/componentTestHelpers";
+import DevicePanel from "./DevicePanel";
 
-// Test naming: test_<component>_<action>_<scenario>_<result>
+vi.mock("@/services/deviceService", () => ({
+  getDeviceInformation: vi.fn(),
+}));
+
 describe("DevicePanel", () => {
-  it("displays manufacturer when device info loads successfully", async () => {
-    const mockService = createDeviceServiceMock({
-      manufacturer: "Anyka",
-      model: "AK3918",
-    });
-    vi.mock("@/services/deviceService", () => mockService);
-
-    renderWithProviders(<DevicePanel endpoint="/onvif/device_service" />);
-
-    expect(
-      await screen.findByTestId("device-panel-manufacturer")
-    ).toHaveTextContent("Anyka");
+  beforeEach(() => {
+    vi.mocked(getDeviceInformation).mockResolvedValue(MOCK_DATA.device.deviceInfo);
   });
 
-  it("shows error state when SOAP request fails", async () => {
-    const mockService = createDeviceServiceMock(null, new Error("Connection refused"));
-    vi.mock("@/services/deviceService", () => mockService);
+  it("should display manufacturer when device info loads successfully", async () => {
+    renderWithProviders(<DevicePanel />);
 
-    renderWithProviders(<DevicePanel endpoint="/onvif/device_service" />);
+    await waitFor(() => {
+      expect(screen.getByTestId("device-panel-manufacturer")).toHaveTextContent("Test Manufacturer");
+    });
+  });
+
+  it("should show error state when SOAP request fails", async () => {
+    vi.mocked(getDeviceInformation).mockRejectedValue(new Error("Connection refused"));
+
+    renderWithProviders(<DevicePanel />);
 
     expect(await screen.findByTestId("device-panel-error")).toBeInTheDocument();
   });
 });
 ```
 
-### Factory Mock Pattern
+- **Wrapper**: always use `renderWithProviders(ui)` from `@/test/componentTestHelpers` — it wraps in `QueryClientProvider` + `AuthProvider` and returns `queryClient`.
+- **Service mocks**: `vi.mock("@/services/<service>", () => ({ fn: vi.fn() }))` at module scope, then `vi.mocked(fn).mockResolvedValue(...)` / `mockRejectedValue(...)` per test. Never MSW, never `setupServer`.
+- **Selectors**: `data-testid` ONLY — `getByTestId`/`findByTestId`/`queryByTestId`. Never `getByRole`/`getByText`/`getByDisplayValue`/class selectors.
+- **Test naming**: `it("should ...")` inside `describe`. Not Rust-style `test_*` snake_case.
+- **Shared helpers**: `MOCK_DATA`, `MOCK_ENDPOINTS`, `mockToast`, `openDialog`/`closeDialog`/`submitDialog`, `fillFormField`, `toggleSwitch`, `selectOption`, `waitForPageLoad` — all in `src/test/`.
+- **setup.ts** already mocks `matchMedia`, `ResizeObserver`, Element pointer-capture, and sonner toast; no per-file setup needed.
+- **Async state**: import mocked functions directly from the real module path (e.g. `import { getDeviceInformation } from "@/services/deviceService"`) — `vi.mocked` works because the module was mocked above.
+
+### Form / Mutation Helpers
 
 ```typescript
-// src/test/mocks/services/deviceService.ts
-import { DeviceInfo } from "@/services/deviceService";
+import { fillFormField, selectOption, submitDialog, mockToast } from "@/test/componentTestHelpers";
 
-export function createDeviceServiceMock(
-  data: Partial<DeviceInfo> | null,
-  error?: Error
-) {
-  return {
-    getDeviceInformation: error
-      ? vi.fn().mockRejectedValue(error)
-      : vi.fn().mockResolvedValue({
-          manufacturer: "Anyka",
-          model: "AK3918",
-          firmwareVersion: "1.0.0",
-          serialNumber: "SN001",
-          ...data,
-        }),
-  };
-}
+it("should save network settings", async () => {
+  const user = userEvent.setup();
+  renderWithProviders(<NetworkSettingsPage />);
+
+  await fillFormField(user, "network-config-ip-input", "192.168.1.100");
+  await selectOption(user, "network-config-mode-select", "static");
+  await submitDialog(user, "network-config-save-btn", mockedSave);
+
+  expect(mockToast.success).toHaveBeenCalled();
+});
 ```
 
 ---
@@ -259,11 +248,11 @@ Run all of these — all must pass before any implementation is complete:
 ```bash
 cd cross-compile/www
 
-npm run lint            # ESLint — zero errors
-npm run type-check      # TypeScript — zero errors
+npm run lint            # ESLint — zero errors/warnings
+npm run type-check      # TypeScript 7 (tsc) + TypeScript 6 (tsc6) — zero errors
 npm run test            # Vitest — all tests pass
 npm run test:coverage   # Coverage report (target: 85%+)
-npm run prettier --check  # Formatting check
+npm run prettier        # Prettier formatting (prettier --write .)
 
 # Build and check bundle size
 npm run build
@@ -279,14 +268,15 @@ du -sh dist/
 - **No CDN dependencies**: All assets must be bundled (no external URLs)
 - **Vite config**: Use `build.rollupOptions.output.manualChunks` for code splitting
 - **No heavy libraries**: Avoid moment.js, lodash (use native), large icon packs
-- **Fonts**: System fonts only or woff2 with subsetting
+- **Fonts**: Bundled @fontsource-variable/ibm-plex-sans, @fontsource/ibm-plex-mono, @fontsource/inter (self-hosted, no external URLs)
 
 ---
 
 ## Self-Review Checklist
 
 - [ ] All props typed with explicit TypeScript interfaces (no `any`)
-- [ ] `data-testid` on every interactive / informational element
+- [ ] `data-testid` (kebab-case) on every interactive / informational element
+- [ ] Tests use `renderWithProviders` + `vi.mock("@/services/...")` and `data-testid`-only selectors (no MSW)
 - [ ] Tests cover loading, success, and error states
 - [ ] No `console.log` in production code
 - [ ] TanStack Query used for all server state (no `useState` + `useEffect` for fetching)

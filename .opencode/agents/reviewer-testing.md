@@ -56,8 +56,9 @@ You are **Model 4 of 4** in the multi-model consensus review system. Your findin
 
 ### 1. Load Context
 ```bash
+source ./setenv.sh  # Load vendored toolchain first (sets $CARGO/$RUSTC/$RUSTDOC)
 git diff HEAD~1 HEAD  # View changes
-cargo test --target x86_64-unknown-linux-gnu  # Run tests
+$CARGO test --target x86_64-unknown-linux-gnu  # Run tests
 ```
 
 ### 2. Analyze Test Coverage
@@ -282,6 +283,8 @@ file.close()?;
 ## Project-Specific Checks
 
 ### Mockall Usage
+Trait definitions use `#[cfg_attr(test, automock)]` (mockall 0.15, e.g. `src/platform/common/traits.rs`).
+
 ```rust
 // ✅ GOOD: Proper mockall pattern
 #[cfg(test)]

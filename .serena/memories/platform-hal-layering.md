@@ -214,8 +214,8 @@ pub struct VendorIpc {
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                        ONVIF Services                            │
-│                    (src/onvif/*/handler.rs)                      │
+│                         ONVIF Services                          │
+│        (src/onvif/*/service.rs, src/onvif/device/ops/*)         │
 └─────────────────────────────┬───────────────────────────────────┘
                               │ depends on
                               ▼

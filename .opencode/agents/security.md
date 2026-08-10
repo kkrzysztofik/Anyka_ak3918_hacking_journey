@@ -21,11 +21,14 @@ and fix vulnerabilities — do not just report them.
 
 #### WS-Security WSSE Tokens
 ```rust
-// CORRECT — timing-safe comparison prevents timing oracle
-use subtle::ConstantTimeEq;
-
-fn verify_password(expected: &[u8], actual: &[u8]) -> bool {
-    expected.ct_eq(actual).into()
+// CORRECT — timing-safe comparison prevents timing oracle.
+// No `subtle` crate is vendored; implement a constant-time compare yourself
+// (XOR-accumulate over fixed-length digests) or add one deliberately.
+fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() { return false; }
+    let mut diff = 0u8;
+    for (x, y) in a.iter().zip(b.iter()) { diff |= x ^ y; }
+    diff == 0
 }
 
 // VULNERABLE — early-exit comparison leaks timing information
@@ -41,6 +44,8 @@ fn verify_password(expected: &str, actual: &str) -> bool {
 
 #### Basic Auth
 - Only acceptable over TLS — flag if used over plain HTTP
+- Note: the WebUI client uses Basic Auth over plain HTTP on the LAN — flag this
+  in audits; it is mitigated by the LAN-only trust model but not transport-safe
 - Credentials must not appear in logs (mask with `[REDACTED]`)
 
 ### 2. XML Security (ONVIF SOAP Parsing)
@@ -197,13 +202,15 @@ element.innerHTML = userSuppliedContent;
 ### Step 1: Run Automated Scans
 
 ```bash
-# Rust dependency audit
+# Load the vendored toolchain first (never bare cargo/rustup)
+source ./setenv.sh
+
+# Rust dependency audit (if cargo-audit is installed in the vendored toolchain)
 cd cross-compile
-toolchain/arm-anykav200-crosstool-ng/bin/cargo audit
+$CARGO audit
 
 # Clippy security-relevant lints
-toolchain/arm-anykav200-crosstool-ng/bin/cargo clippy \
-    --target x86_64-unknown-linux-gnu -- -D warnings \
+$CARGO clippy --target x86_64-unknown-linux-gnu -- -D warnings \
     -W clippy::unwrap_used \
     -W clippy::expect_used \
     -W clippy::panic
@@ -220,7 +227,7 @@ npm run lint
 ### Step 2: Manual Code Review
 
 Focus on:
-1. All `auth/` modules — timing-safe operations, nonce generation
+1. All `src/security/` modules (auth implementation) — timing-safe operations, nonce generation
 2. All XML/SOAP parsing entry points — entity limits, error response sanitisation
 3. C `main.c` — all IPC length checks, all `malloc`/`snprintf` calls
 4. TypeScript services — Zod validation, no `any`, no `innerHTML`
@@ -250,11 +257,11 @@ Focus on:
 ### Rust
 - [ ] No `unwrap()`/`expect()` on untrusted data (network input, IPC)
 - [ ] XML parsing has entity/size limits
-- [ ] Digest auth uses constant-time comparison (`subtle` crate)
+- [ ] Digest auth final comparison is constant-time (no `subtle` crate vendored — custom impl)
 - [ ] Nonce is cryptographically random (`rand` crate)
 - [ ] Credentials never appear in log output
 - [ ] SOAP error responses don't leak internal Rust error details
-- [ ] `cargo audit` clean
+- [ ] `$CARGO audit` clean (if available)
 
 ### C (vendor-daemon)
 - [ ] No `sprintf`/`strcpy`/`gets` usage
