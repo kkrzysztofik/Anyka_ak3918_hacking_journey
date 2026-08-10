@@ -134,6 +134,40 @@ pub fn apply_wifi_actions(
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct VideoPolicy {
+    pub restart_after_ticks: u32,
+    pub kill_after_ticks: u32,
+    pub reboot_after_ticks: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VideoAction {
+    Nothing,
+    Restart,
+    Kill,
+    Reboot,
+}
+
+/// Escalation ladder for a stalled video pipeline.
+///
+/// Ordered strongest-first, like `netstat::decide`, so absolute thresholds
+/// cannot skip a rung. Three rungs rather than two because `RestartService`
+/// sends SIGTERM, which a wedged daemon can ignore; the reboot rung does not
+/// need the process to die at all.
+pub fn video_decide(stalled_ticks: u32, p: &VideoPolicy) -> VideoAction {
+    if stalled_ticks >= p.reboot_after_ticks {
+        return VideoAction::Reboot;
+    }
+    if stalled_ticks >= p.kill_after_ticks {
+        return VideoAction::Kill;
+    }
+    if stalled_ticks >= p.restart_after_ticks {
+        return VideoAction::Restart;
+    }
+    VideoAction::Nothing
+}
+
 /// One iteration of the sampling loop, including the storm-guard reset: once
 /// this process has been up longer than the configured threshold, the boot is
 /// considered good.
@@ -455,5 +489,36 @@ mod tests {
             !state_path.exists(),
             "nothing to persist before the threshold"
         );
+    }
+
+    fn video_policy() -> VideoPolicy {
+        VideoPolicy {
+            restart_after_ticks: 2,
+            kill_after_ticks: 3,
+            reboot_after_ticks: 5,
+        }
+    }
+
+    #[test]
+    fn test_video_decide_does_nothing_while_frames_advance() {
+        assert_eq!(video_decide(0, &video_policy()), VideoAction::Nothing);
+    }
+
+    #[test]
+    fn test_video_decide_restarts_at_the_restart_threshold() {
+        assert_eq!(video_decide(2, &video_policy()), VideoAction::Restart);
+    }
+
+    #[test]
+    fn test_video_decide_escalates_to_kill_then_reboot() {
+        assert_eq!(video_decide(3, &video_policy()), VideoAction::Kill);
+        assert_eq!(video_decide(4, &video_policy()), VideoAction::Kill);
+        assert_eq!(video_decide(5, &video_policy()), VideoAction::Reboot);
+        assert_eq!(video_decide(50, &video_policy()), VideoAction::Reboot);
+    }
+
+    #[test]
+    fn test_video_decide_below_the_first_threshold_is_nothing() {
+        assert_eq!(video_decide(1, &video_policy()), VideoAction::Nothing);
     }
 }
