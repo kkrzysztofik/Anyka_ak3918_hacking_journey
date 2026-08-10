@@ -92,9 +92,7 @@ static RELOAD_HANDLE: OnceLock<Handle<EnvFilter, tracing_subscriber::Registry>> 
 /// ```
 pub fn set_log_level(level: &str) -> LoggingResult<()> {
     let level = parse_log_level(level)?;
-    let filter = EnvFilter::builder()
-        .with_default_directive(level.into())
-        .from_env_lossy();
+    let filter = build_env_filter(level);
 
     if let Some(handle) = RELOAD_HANDLE.get() {
         handle
@@ -161,6 +159,25 @@ fn make_file_appender(file_path: &str) -> Option<tracing_appender::rolling::Roll
         .ok()
 }
 
+/// Build the `EnvFilter` for a default level, pinning night-mode diagnostics
+/// to `info` regardless of the configured level.
+///
+/// Night-mode AUTO diagnostics stay visible whatever `logging.level` says.
+/// Cameras run at "error" in production and a day/night failure is only
+/// diagnosable after the fact, from these lines. `if let` rather than
+/// `expect`: a bad directive must not take the process down over logging.
+fn build_env_filter(level: Level) -> EnvFilter {
+    let mut env_filter = EnvFilter::builder()
+        .with_default_directive(level.into())
+        .from_env_lossy();
+
+    if let Ok(directive) = "onvif_rust::platform::anyka::night_mode=info".parse() {
+        env_filter = env_filter.add_directive(directive);
+    }
+
+    env_filter
+}
+
 /// Internal logging initialization implementation.
 fn init_logging_impl(config: &ConfigRuntime) -> LoggingResult<()> {
     // Get log level from configuration
@@ -176,18 +193,8 @@ fn init_logging_impl(config: &ConfigRuntime) -> LoggingResult<()> {
 
     let level = parse_log_level(&level_str)?;
 
-    // Create env filter with default level
-    let mut env_filter = EnvFilter::builder()
-        .with_default_directive(level.into())
-        .from_env_lossy();
-
-    // Night-mode AUTO diagnostics stay visible whatever `logging.level` says.
-    // Cameras run at "error" in production and a day/night failure is only
-    // diagnosable after the fact, from these lines. `if let` rather than
-    // `expect`: a bad directive must not take the process down over logging.
-    if let Ok(directive) = "onvif_rust::platform::anyka::night_mode=info".parse() {
-        env_filter = env_filter.add_directive(directive);
-    }
+    // Create env filter with default level (night-mode pin applied by helper)
+    let env_filter = build_env_filter(level);
 
     // Create reloadable filter layer
     let (filter_layer, reload_handle) = reload::Layer::new(env_filter);
