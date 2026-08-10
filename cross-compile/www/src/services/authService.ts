@@ -81,21 +81,3 @@ function extractDeviceInfo(data: Record<string, unknown> | undefined): DeviceInf
     hardwareId: safeString(response.HardwareId, 'Unknown'),
   };
 }
-
-/**
- * Check if device is reachable (without authentication)
- */
-export async function checkDeviceReachable(): Promise<boolean> {
-  try {
-    // GetSystemDateAndTime doesn't require authentication on most ONVIF devices
-    const envelope = createSOAPEnvelope(soapBodies.getSystemDateAndTime());
-
-    const response = await apiClient.post(ENDPOINTS.device, envelope, {
-      timeout: 5000, // Short timeout for connectivity check
-    });
-
-    return response.status === 200;
-  } catch {
-    return false;
-  }
-}

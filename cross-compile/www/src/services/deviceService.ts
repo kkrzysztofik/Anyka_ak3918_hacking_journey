@@ -25,10 +25,6 @@ export interface DeviceIdentification {
   location: string;
 }
 
-export async function setDeviceInformation(data: DeviceIdentification): Promise<void> {
-  await setScopes(data.name, data.location);
-}
-
 /**
  * Get device information (manufacturer, model, firmware, serial, hardware ID)
  */
@@ -55,7 +51,7 @@ export async function getDeviceInformation(): Promise<DeviceInfo> {
 /**
  * Get device scopes (name, location, etc.)
  */
-export async function getScopes(): Promise<{ name: string; location: string }> {
+async function getScopes(): Promise<{ name: string; location: string }> {
   const data = await soapRequest<Record<string, unknown>>(
     ENDPOINTS.device,
     '<tds:GetScopes />',

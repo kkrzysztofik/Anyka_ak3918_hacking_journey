@@ -7,7 +7,6 @@ import { apiClient } from '@/services/api';
 import {
   getDeviceIdentification,
   getDeviceInformation,
-  getScopes,
   setScopes,
 } from '@/services/deviceService';
 import { createMockSOAPFaultResponse, createMockSOAPResponse } from '@/test/utils';
@@ -66,47 +65,6 @@ describe('deviceService', () => {
       await expect(getDeviceInformation()).rejects.toThrow(
         'SOAP response target "GetDeviceInformationResponse" not found',
       );
-    });
-  });
-
-  describe('getScopes', () => {
-    it('should parse scopes and extract name/location', async () => {
-      const mockResponse = createMockSOAPResponse(`
-        <GetScopesResponse>
-          <Scopes>
-            <ScopeDef>Fixed</ScopeDef>
-            <ScopeItem>onvif://www.onvif.org/name/MyCam</ScopeItem>
-          </Scopes>
-          <Scopes>
-            <ScopeDef>Configurable</ScopeDef>
-            <ScopeItem>onvif://www.onvif.org/location/LivingRoom</ScopeItem>
-          </Scopes>
-        </GetScopesResponse>
-      `);
-
-      vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
-
-      const result = await getScopes();
-
-      expect(result.name).toBe('MyCam');
-      expect(result.location).toBe('LivingRoom');
-    });
-
-    it('should return empty strings when no matching scopes', async () => {
-      const mockResponse = createMockSOAPResponse(`
-        <GetScopesResponse>
-          <Scopes>
-            <ScopeItem>onvif://www.onvif.org/type/video_encoder</ScopeItem>
-          </Scopes>
-        </GetScopesResponse>
-      `);
-
-      vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
-
-      const result = await getScopes();
-
-      expect(result.name).toBe('');
-      expect(result.location).toBe('');
     });
   });
 
