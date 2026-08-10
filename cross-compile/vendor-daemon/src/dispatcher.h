@@ -11,10 +11,4 @@
  */
 int process_request(int fd);
 
-/**
- * release_control - release control-client status when the control client
- * disconnects.
- */
-void release_control(int fd);
-
 #endif /* VENDOR_DAEMON_DISPATCHER_H */

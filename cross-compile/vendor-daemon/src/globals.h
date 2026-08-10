@@ -184,15 +184,6 @@ int vd_obj_register(uint8_t kind, void *ptr);
 void vd_obj_unregister(uint8_t kind, void *ptr);
 
 /**
- * vd_obj_close_all - Close every live object and empty the table.
- *
- * Closes in reverse dependency order (streams, then encoders, then inputs), the
- * same order a clean shutdown uses. Best-effort: a failing close is logged and
- * the sweep continues, because the alternative is leaking the rest too.
- */
-void vd_obj_close_all(void);
-
-/**
  * vd_cancel_stream_bounded - Cancel an SDK stream, giving up after a timeout.
  *
  * Runs ak_venc_cancel_stream on a detached worker and waits a bounded time.
@@ -209,9 +200,9 @@ int vd_cancel_stream_bounded(void *handle, int *out_result);
 /**
  * vd_stream_orphan_set - Remember a live STREAM that has no object-table slot.
  *
- * Used when register fails or cancel spawn fails after unregister, so
- * vd_obj_close_all can still reclaim the SDK capture_thread. Displacing a
- * previous orphan best-effort cancels it first.
+ * Used when register fails or cancel spawn fails after unregister, so the
+ * capture_thread can still be reclaimed by displacing a newer orphan.
+ * Displacing a previous orphan best-effort cancels it first.
  */
 void vd_stream_orphan_set(void *handle);
 

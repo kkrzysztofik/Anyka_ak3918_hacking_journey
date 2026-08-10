@@ -149,16 +149,6 @@ void vd_obj_unregister(uint8_t kind, void *ptr)
     }
 }
 
-/* Close order: streams depend on encoders, encoders on inputs. Tearing down in
- * the other direction hands the SDK a closed input under a running encoder. */
-static const uint8_t g_obj_close_order[] = {
-    VD_OBJ_KIND_STREAM,
-    VD_OBJ_KIND_VENC,
-    VD_OBJ_KIND_AENC,
-    VD_OBJ_KIND_VI,
-    VD_OBJ_KIND_AI,
-};
-
 /* Timeout for the SDK stream cancel, seconds. Shared by session cleanup and
  * the VENC cancel-stream handler. */
 #define VD_CANCEL_STREAM_TIMEOUT_SEC 3
@@ -231,46 +221,9 @@ int vd_cancel_stream_bounded(void *handle, int *out_result)
     return 0;
 }
 
-static void vd_obj_close_one(uint8_t kind, void *ptr)
-{
-    int ret = 0;
-
-    switch (kind) {
-    case VD_OBJ_KIND_STREAM:
-        /* Cancel the SDK stream so libmpi_venc's capture_thread stops before the
-         * VI it reads is closed. stop_push_slot() only stops the daemon's own
-         * push reader, NOT this thread. */
-        (void)vd_cancel_stream_bounded(ptr, NULL);
-        return;
-    case VD_OBJ_KIND_VENC:
-        ret = ak_venc_close(ptr);
-        break;
-    case VD_OBJ_KIND_AENC:
-        ret = ak_aenc_close(ptr);
-        break;
-    case VD_OBJ_KIND_VI:
-        /* capture_off before close: the safe teardown onvif-rust does on clean
-         * shutdown, moved here so a SIGKILLed client gets it too. */
-        (void)ak_vi_capture_off(ptr);
-        ret = ak_vi_close(ptr);
-        break;
-    case VD_OBJ_KIND_AI:
-        ret = ak_ai_close(ptr);
-        break;
-    default:
-        return;
-    }
-
-    if (ret != 0)
-        log_warn("[obj] close kind=%u ptr=%p returned %d (continuing)",
-                 (unsigned)kind, ptr, ret);
-    else
-        log_info("[obj] closed leaked kind=%u ptr=%p", (unsigned)kind, ptr);
-}
-
-/* Live STREAM that never entered (or fell out of) the token table. Reclaimed
- * by vd_obj_close_all so a failed cancel spawn cannot leave an untracked
- * capture_thread. */
+/* Live STREAM that never entered (or fell out of) the token table. Displacing
+ * a newer orphan best-effort cancels it first, so a failed cancel spawn cannot
+ * leave an untracked capture_thread. */
 static void *g_stream_orphan = NULL;
 
 void vd_stream_orphan_set(void *handle)
@@ -288,35 +241,4 @@ void vd_stream_orphan_clear(void *handle)
 {
     if (g_stream_orphan == handle)
         g_stream_orphan = NULL;
-}
-
-void vd_obj_close_all(void)
-{
-    size_t k;
-    int i;
-
-    if (g_stream_orphan != NULL) {
-        void *orphan = g_stream_orphan;
-        g_stream_orphan = NULL;
-        log_warn("[obj] reclaiming orphan stream %p", orphan);
-        (void)vd_cancel_stream_bounded(orphan, NULL);
-    }
-
-    for (k = 0; k < sizeof(g_obj_close_order) / sizeof(g_obj_close_order[0]); k++) {
-        uint8_t kind = g_obj_close_order[k];
-        for (i = 0; i < VD_OBJ_SLOTS; i++) {
-            if (!g_obj_slots[i].live || g_obj_slots[i].kind != kind)
-                continue;
-            vd_obj_close_one(kind, g_obj_slots[i].ptr);
-            g_obj_slots[i].live = 0;
-            g_obj_slots[i].ptr  = NULL;
-        }
-    }
-
-    /* Anything left is a kind with no close path (streams); drop it so the
-     * next session starts from an empty table regardless. */
-    for (i = 0; i < VD_OBJ_SLOTS; i++) {
-        g_obj_slots[i].live = 0;
-        g_obj_slots[i].ptr  = NULL;
-    }
 }
