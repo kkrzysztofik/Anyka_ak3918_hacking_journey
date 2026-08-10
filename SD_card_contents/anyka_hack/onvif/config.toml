@@ -125,8 +125,10 @@ auth_enabled = true
 # Authentication realm
 realm = "ONVIF Camera"
 
-# Path to static file root (relative to binary or absolute)
-static_root = "www"
+# Path to static file root. Must be ABSOLUTE: ServeDir resolves a relative
+# path against the process CWD, and anyka-init starts onvif-rust with CWD=/,
+# so "www" resolved to /www and every UI request 404'd.
+static_root = "/mnt/anyka_hack/onvif/www"
 
 
 # ============================================================================
