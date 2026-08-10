@@ -240,21 +240,6 @@ pub(super) fn read_light_sensor(paths: &NodePaths) -> Option<i32> {
     raw.trim().parse::<i32>().ok()
 }
 
-/// The mode the hardware was last driven to, from the IR_LED GPIO.
-///
-/// In-memory state dies with the process; the GPIO does not. Without this
-/// reconcile, a restart in AUTO leaves the controller thinking it is Day while
-/// the IR illuminator is still on, and it only corrects once a tick reads AE.
-/// Absent or unreadable → `Day`: an unknown node is more plausibly a board
-/// without an IR lamp than a lamp that is on.
-pub(super) fn read_initial_state(paths: &NodePaths) -> DayNight {
-    let path = paths.node(Node::IrLed);
-    match std::fs::read_to_string(&path) {
-        Ok(v) if v.trim() == "1" => DayNight::Night,
-        _ => DayNight::Day,
-    }
-}
-
 /// AUTO poll cadence.
 ///
 /// Every tick is an IPC round-trip through the daemon's single-threaded poll
@@ -301,13 +286,16 @@ impl NightModeController {
         use crate::onvif::types::common::IrCutFilterMode;
 
         let caps = probe(&paths);
-        // AUTO seeds from the IR_LED GPIO so a restart in AUTO does not think
-        // it is Day while the illuminator is still on. Forced modes keep their
-        // fixed start so ON/OFF always lands where the user asked.
+        // AUTO starts unknown: this controller has driven nothing yet. GPIO
+        // survives a restart but the vendor daemon's ISP state does not, so
+        // inferring a mode from the IR_LED node lets AUTO conclude "already
+        // correct" and never issue the ISP switch. The first determinate
+        // reading reconciles both together. Forced modes keep their fixed
+        // start so ON/OFF always lands where the user asked.
         let initial = match mode {
             IrCutFilterMode::OFF => Some(DayNight::Night),
             IrCutFilterMode::ON => Some(DayNight::Day),
-            IrCutFilterMode::AUTO => Some(read_initial_state(&paths)),
+            IrCutFilterMode::AUTO => None,
         };
         Self {
             paths,
@@ -787,7 +775,7 @@ mod tests {
             IrCutFilterMode::AUTO,
             None,
         );
-        assert_eq!(ctl.current_mode().await, Some(DayNight::Day));
+        assert_eq!(ctl.current_mode().await, None, "AUTO starts unknown");
 
         ctl.tick().await;
         assert_eq!(ctl.current_mode().await, Some(DayNight::Night));
@@ -825,9 +813,9 @@ mod tests {
         );
 
         ctl.tick().await;
-        assert_eq!(ctl.current_mode().await, Some(DayNight::Day));
+        assert_eq!(ctl.current_mode().await, None, "AUTO starts unknown");
         ctl.tick().await;
-        assert_eq!(ctl.current_mode().await, Some(DayNight::Day));
+        assert_eq!(ctl.current_mode().await, None, "AUTO starts unknown");
         ctl.tick().await;
         assert_eq!(ctl.current_mode().await, Some(DayNight::Night));
     }
@@ -861,7 +849,7 @@ mod tests {
         ctl.tick().await;
         ctl.tick().await;
         ctl.tick().await;
-        assert_eq!(ctl.current_mode().await, Some(DayNight::Day));
+        assert_eq!(ctl.current_mode().await, None, "AUTO starts unknown");
     }
 
     #[tokio::test]
@@ -886,9 +874,13 @@ mod tests {
                 }
             }
         });
-        // Must not apply night via ain0 fallback, even after the streak
-        // resumes past the cleared state (calls 4-5).
-        ffi.expect_set_ir_filter().times(0);
+        // The first determinate reading (the AE success on call 3) applies
+        // day. The night the ain0 fallback would force must never apply, even
+        // after the streak resumes past the cleared state (calls 4-5).
+        ffi.expect_set_ir_filter()
+            .withf(|enabled| !*enabled)
+            .times(1)
+            .returning(|_| 0);
 
         let ctl = NightModeController::new(
             paths,
@@ -906,20 +898,41 @@ mod tests {
         assert_eq!(ctl.current_mode().await, Some(DayNight::Day));
     }
 
-    #[test]
-    fn test_initial_state_follows_the_ir_led_gpio() {
+    #[tokio::test]
+    async fn test_auto_syncs_the_isp_after_a_restart_with_the_lamp_already_on() {
+        use crate::hal::common::imaging::MockImagingHalTrait;
+        use crate::onvif::types::common::IrCutFilterMode;
+
+        // Reproduces 192.168.30.121 on 2026-08-10: onvif-rust restarted with a
+        // stale IR_LED=1, the vendor daemon restarted alongside it and came up in
+        // day mode, and AUTO concluded "already at night" and never called
+        // set_ir_filter. The daemon must be told, every time, on the first
+        // determinate reading.
         let dir = tempfile::tempdir().expect("tempdir");
         let paths = NodePaths::rooted(dir.path(), dir.path());
-
+        seed_gpio_nodes(&paths);
         std::fs::write(paths.node(Node::IrLed), "1").unwrap();
-        assert_eq!(read_initial_state(&paths), DayNight::Night);
 
-        std::fs::write(paths.node(Node::IrLed), "0").unwrap();
-        assert_eq!(read_initial_state(&paths), DayNight::Day);
+        let mut ffi = MockImagingHalTrait::new();
+        // Below ae_night_threshold (8): a dark scene, agreeing with the stale lamp.
+        ffi.expect_get_ae_luma().times(1).returning(|| Some(1));
+        ffi.expect_set_ir_filter()
+            .withf(|enabled| *enabled)
+            .times(1)
+            .returning(|_| 0);
 
-        // Absent node: a board with no IR lamp reads as day, never night.
-        let empty = NodePaths::rooted(&dir.path().join("nope"), dir.path());
-        assert_eq!(read_initial_state(&empty), DayNight::Day);
+        let ctl = NightModeController::new(
+            paths,
+            unlocked_config(),
+            std::sync::Arc::new(ffi),
+            IrCutFilterMode::AUTO,
+            None,
+        );
+        assert_eq!(ctl.current_mode().await, None, "nothing driven yet");
+
+        ctl.tick().await;
+
+        assert_eq!(ctl.current_mode().await, Some(DayNight::Night));
     }
 
     #[test]
@@ -1015,13 +1028,13 @@ mod tests {
             IrCutFilterMode::AUTO,
             None,
         );
-        assert_eq!(ctl.current_mode().await, Some(DayNight::Day));
+        assert_eq!(ctl.current_mode().await, None, "AUTO starts unknown");
 
         assert!(ctl.apply(DayNight::Night).await.is_err());
 
         // A failed transition must not be recorded: AUTO would otherwise
         // believe the camera is at Night and never retry the transition.
-        assert_eq!(ctl.current_mode().await, Some(DayNight::Day));
+        assert_eq!(ctl.current_mode().await, None);
     }
 
     fn thr() -> Thresholds {
