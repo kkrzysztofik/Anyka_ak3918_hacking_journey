@@ -61,4 +61,11 @@ if [ ! -x "$BIN" ]; then
   exit 1
 fi
 
-exec "$BIN"
+# service.sh has no respawn. If the supervisor dies, every service is
+# orphaned and only a power cycle recovers. anyka-init's own reboot path
+# uses libc::reboot and does not return, so this loop cannot fight it.
+while :; do
+  "$BIN"
+  sleep 5
+done &
+

@@ -5,6 +5,7 @@
 
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
+use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -86,7 +87,11 @@ fn run(
     );
 
     let reboot_marker = dir.join("rebooted");
-    stub(dir, "reboot", &format!("touch '{}'", reboot_marker.display()));
+    stub(
+        dir,
+        "reboot",
+        &format!("touch '{}'", reboot_marker.display()),
+    );
 
     // The vendor boot path the deadman restores, and the file it overwrites.
     let bak = dir.join("config.sh.gerge.bak");
@@ -95,21 +100,27 @@ fn run(
     fs::write(&self_path, "SUPERVISOR BOOT PATH\n").expect("write live");
 
     let init_bin = if binary_present {
-        // The supervisor never returns in production; exiting keeps the test bounded.
+        // The supervisor never returns in production; exiting keeps the test
+        // bounded. config.sh now respawns it in a loop, so the whole wrapper
+        // runs in its own process group and is killed once the assertions
+        // have been observed (see below).
         stub(dir, "anyka-init.bin", "exit 0")
     } else {
         dir.join("does-not-exist")
     };
 
-    let status = Command::new("sh")
-        .arg(script())
+    let mut cmd = Command::new("sh");
+    cmd.arg(script())
         .env("PATH", format!("{}:/usr/bin:/bin", dir.display()))
         .env("ANYKA_INIT_BIN", &init_bin)
         .env("ANYKA_WIFI_MANAGE", &wifi_manage)
         .env("ANYKA_CONFIG_SELF", &self_path)
         .env("ANYKA_CONFIG_BAK", &bak)
-        .status()
-        .expect("run config.sh");
+        // Own process group so the backgrounded respawn loop can be killed
+        // with one signal once the test is done.
+        .process_group(0);
+    let mut child = cmd.spawn().expect("run config.sh");
+    let child_pid = child.id() as i32;
 
     // The deadman is a backgrounded subshell. Wait for the expected number of
     // `ifconfig` calls (proving the watchdog actually ran, not just that a
@@ -144,6 +155,20 @@ fn run(
         "deadman made {observed} ifconfig calls, expected {expected_ifconfig_calls}, within 5s"
     );
 
+    // The wrapper sh exits on its own once the loop is backgrounded; wait for
+    // that natural exit so `exit_ok` reflects the script's real status.
+    let status = child.wait().expect("wait config.sh");
+
+    // Reap the backgrounded respawn loop, which spins forever against the
+    // `exit 0` stub (binary + sleep both exit immediately) and would otherwise
+    // burn a host CPU core. Killing the process group reaches it even though
+    // the group leader already exited.
+    // SAFETY: child_pid is our own spawned sh; a negative pid targets its
+    // process group. No pointers are dereferenced.
+    unsafe {
+        libc::kill(-child_pid, libc::SIGKILL);
+    }
+
     Outcome {
         vendor_wifi_started: wifi_marker.exists(),
         rebooted: reboot_marker.exists(),
@@ -158,9 +183,15 @@ fn run(
 fn healthy_boot_leaves_everything_alone() {
     let o = run(&[Some("192.168.30.121")], true, 1, false);
     assert!(o.exit_ok, "wrapper must exit 0 when the binary is present");
-    assert!(!o.vendor_wifi_started, "an address is held; do not touch wifi");
+    assert!(
+        !o.vendor_wifi_started,
+        "an address is held; do not touch wifi"
+    );
     assert!(!o.rebooted, "a healthy camera must never be rebooted");
-    assert!(!o.boot_path_restored, "the boot path must not be rolled back");
+    assert!(
+        !o.boot_path_restored,
+        "the boot path must not be rolled back"
+    );
 }
 
 #[test]
@@ -181,7 +212,10 @@ fn no_address_hands_wifi_back_to_the_vendor_chain() {
 #[test]
 fn still_dead_after_the_vendor_chain_restores_the_boot_path_and_reboots() {
     let o = run(&[None, None], true, 2, false);
-    assert!(o.vendor_wifi_started, "the vendor chain must be tried first");
+    assert!(
+        o.vendor_wifi_started,
+        "the vendor chain must be tried first"
+    );
     assert!(
         o.boot_path_restored,
         "a still-dead link must restore the vendor boot path"
@@ -209,7 +243,10 @@ fn failed_boot_path_restore_does_not_reboot() {
 fn missing_binary_fails_loudly_but_still_arms_the_deadman() {
     let o = run(&[None, None], false, 2, false);
     assert!(!o.exit_ok, "a missing supervisor must be a loud failure");
-    assert!(o.vendor_wifi_started, "the deadman must run despite the exit");
+    assert!(
+        o.vendor_wifi_started,
+        "the deadman must run despite the exit"
+    );
     assert!(o.boot_path_restored);
     assert!(o.rebooted);
 }
