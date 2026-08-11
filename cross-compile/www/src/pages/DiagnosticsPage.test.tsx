@@ -22,14 +22,14 @@ vi.mock('@/hooks/useDiagnostics');
 vi.mock('@/services/diagnosticsService');
 
 const BASE_DIAG: Diagnostics = {
-  status: 'ok',
+  status: 'healthy',
   uptime: { process_s: 3600, system_s: 3600 }, // no restart gap
   cpu_percent: 45,
   memory: { total_kb: 36864, used_kb: 18432 }, // 18 MB / 36 MB
   storage: { total_kb: 1048576, used_kb: 524288 }, // 512 MB / 1024 MB
   network: { rx_bps: 1_000_000, tx_bps: 500_000 },
   stream_frame_age_ms: 100,
-  components: [{ name: 'onvif', status: 'ok', message: null }],
+  components: [{ name: 'onvif', status: 'healthy', message: null }],
   degraded_services: [],
 };
 
@@ -134,14 +134,14 @@ describe('DiagnosticsPage', () => {
   });
 
   describe('System Status card', () => {
-    it('should show Healthy when status is ok', () => {
+    it('should show Healthy when status is healthy', () => {
       renderWithProviders(<DiagnosticsPage />);
       expect(screen.getByTestId('diagnostics-stat-system-status-value')).toHaveTextContent(
         'Healthy',
       );
     });
 
-    it('should show raw status string when not ok', () => {
+    it('should show raw status string when not healthy', () => {
       vi.mocked(useDiagnostics).mockReturnValue(makeResult({ status: 'degraded' }));
       renderWithProviders(<DiagnosticsPage />);
       expect(screen.getByTestId('diagnostics-stat-system-status-value')).toHaveTextContent(
@@ -158,12 +158,14 @@ describe('DiagnosticsPage', () => {
     });
 
     it('should flag recent restart when system_s - process_s exceeds threshold', () => {
-      // 7200 - 600 = 6600 s gap → > 300 s threshold
+      // 7200 - 600 = 6600 s gap → > 300 s threshold; note uses process uptime
       vi.mocked(useDiagnostics).mockReturnValue(
         makeResult({ uptime: { system_s: 7200, process_s: 600 } }),
       );
       renderWithProviders(<DiagnosticsPage />);
-      expect(screen.getByTestId('diagnostics-restart-note')).toBeInTheDocument();
+      const note = screen.getByTestId('diagnostics-restart-note');
+      expect(note).toBeInTheDocument();
+      expect(note).toHaveTextContent(/Restarted 10m 0s ago/);
     });
 
     it('should NOT show restart note when gap equals threshold exactly', () => {

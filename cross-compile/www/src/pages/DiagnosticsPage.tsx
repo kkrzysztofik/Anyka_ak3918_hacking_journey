@@ -136,9 +136,9 @@ export default function DiagnosticsPage() {
 
   // Stat card values derived from real data
   const statusLabel =
-    data === undefined ? '—' : data.status === 'ok' ? 'Healthy' : data.status;
-  const statusColor = data?.status === 'ok' ? 'text-green-500' : 'text-yellow-500';
-  const statusColorBg = data?.status === 'ok' ? 'bg-green-500/10' : 'bg-yellow-500/10';
+    data === undefined ? '—' : data.status === 'healthy' ? 'Healthy' : data.status;
+  const statusColor = data?.status === 'healthy' ? 'text-green-500' : 'text-yellow-500';
+  const statusColorBg = data?.status === 'healthy' ? 'bg-green-500/10' : 'bg-yellow-500/10';
   const statusSubValue =
     data === undefined
       ? undefined
@@ -453,7 +453,7 @@ export default function DiagnosticsPage() {
                     className="mt-2 text-xs text-yellow-400"
                     data-testid="diagnostics-restart-note"
                   >
-                    Restarted {formatDuration(restartGap)} ago
+                    Restarted {formatDuration(data.uptime.process_s)} ago
                   </p>
                 )}
               </div>
@@ -529,7 +529,7 @@ export default function DiagnosticsPage() {
                       <span
                         className={cn(
                           'font-mono text-xs',
-                          c.status === 'ok' ? 'text-green-400' : 'text-yellow-400',
+                          c.status === 'healthy' ? 'text-green-400' : 'text-yellow-400',
                         )}
                       >
                         {c.status}
