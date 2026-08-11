@@ -19,7 +19,7 @@ jobs:
         working-directory: cross-compile/www
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v6  # v6.0.0
+        uses: actions/checkout@v7  # v6.0.0
         # SHA: de0fac2e4500dabe0009e67214ff5f5447ce83dd
 
       - name: Use Node.js
@@ -52,7 +52,7 @@ jobs:
       image: kkrzysztofik/anyka-cross-compile:latest
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v6  # v6.0.0
+        uses: actions/checkout@v7  # v6.0.0
         # SHA: de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
           fetch-depth: 0
@@ -108,7 +108,7 @@ jobs:
       contents: write
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v6  # v6.0.0
+        uses: actions/checkout@v7  # v6.0.0
         # SHA: de0fac2e4500dabe0009e67214ff5f5447ce83dd
 
       - name: Extract Tag Information

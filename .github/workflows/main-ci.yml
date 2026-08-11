@@ -52,7 +52,7 @@ jobs:
       SCCACHE_CACHE_SIZE: 5G
     steps:
       - name: Checkout Code
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v6.0.0
         with:
           fetch-depth: 1
           persist-credentials: false
@@ -130,7 +130,7 @@ jobs:
       coverage: ${{ steps.coverage-summary.outputs.coverage }}
     steps:
       - name: Checkout Code
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v6.0.0
         with:
           fetch-depth: 1
           persist-credentials: false
@@ -259,7 +259,7 @@ jobs:
       coverage: ${{ steps.coverage-summary.outputs.coverage }}
     steps:
       - name: Checkout Code
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v6.0.0
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9  # v1
@@ -349,7 +349,7 @@ jobs:
     outputs:
       coverage: ${{ steps.test-coverage.outputs.coverage }}
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v6.0.0
         # SHA: de0fac2e4500dabe0009e67214ff5f5447ce83dd
 
       - name: Use Node.js
@@ -424,7 +424,7 @@ jobs:
       audit_status: ${{ steps.audit-status.outputs.audit_status }}
     steps:
       - name: Checkout Code
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v6.0.0
 
       - name: Audit cross-compile workspace
         id: audit-workspace
@@ -476,7 +476,7 @@ jobs:
       quality-gate-status: ${{ steps.sonar-quality-gate.outcome || steps.skip-quality-gate.outputs.status || 'skipped' }}
     steps:
       - name: Checkout Code
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v6.0.0
         with:
           fetch-depth: 0
 

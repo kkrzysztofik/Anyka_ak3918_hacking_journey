@@ -18,13 +18,13 @@ jobs:
 
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@v6  # v6.0.0
+        uses: actions/checkout@v7  # v6.0.0
         # SHA: de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
           fetch-depth: 0
 
       - name: Checkout Wiki Repository
-        uses: actions/checkout@v6  # v6.0.0
+        uses: actions/checkout@v7  # v6.0.0
         # SHA: de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
           repository: ${{ github.repository }}.wiki
