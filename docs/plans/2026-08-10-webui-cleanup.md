@@ -38,6 +38,8 @@ cd cross-compile/www && npm run test:coverage 2>&1 | tail -20
 
 Write the total line-coverage percentage into the PR description. When a PR1 task drops aggregate coverage, compare per-file line coverage to the baseline before assuming something live was deleted — only a drop in an *untouched* file is a real signal.
 
+**Deletion authorization.** Every `rtk git rm` / `rmdir` below deletes files. Per `AGENTS.md` Rule 1, before running any deletion command the executing agent must restate the exact command and affected paths and obtain written confirmation from the user — the search checks alone do not authorize the deletion.
+
 ## Branch
 
 Work continues on `chore/webui-cleanup`, already created and holding the design doc. Open PR1 from it; branch PR2, PR-auth, and PR3 from `main` after their predecessor merges.
