@@ -35,8 +35,10 @@ updates:
       npm-minor-patch:
         update-types: [minor, patch]
 
-  # Every action in these workflows is hand-pinned to a SHA with a trailing
-  # version comment. Dependabot maintains exactly that pattern.
+  # Actions are pinned to SHAs with a trailing version comment; Dependabot
+  # updates the pin and that inline comment together. Note it does NOT update
+  # the standalone "# SHA:" sidecar comments some workflows carry — those go
+  # stale after a bump and are best deleted rather than trusted.
   - package-ecosystem: github-actions
     directory: /
     schedule:
@@ -45,10 +47,3 @@ updates:
     groups:
       actions-minor-patch:
         update-types: [minor, patch]
-
-  # CI toolchain image base
-  - package-ecosystem: docker
-    directory: /scripts/docker
-    schedule:
-      interval: weekly
-    open-pull-requests-limit: 2

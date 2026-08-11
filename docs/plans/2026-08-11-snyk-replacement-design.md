@@ -154,9 +154,13 @@ advisory, and whose failures now fail the job outright.
 
 ## Consequences
 
-CI loses roughly two minutes per run: a `snyk/snyk:node` Docker image pull, four
-network-bound Snyk Code scans, and one Snyk Monitor upload, replaced by two lockfile
-parses. The CI image loses a layer and a download.
+The security-scans job no longer pulls a `snyk/snyk:node` Docker image or makes
+four network-bound Snyk Code scan calls plus a Snyk Monitor upload, but
+`rustsec/audit-check` compiles `cargo-audit` from source on every run (the
+runner has no persistent tool cache), a ~2-3 minute cost in its place. That job
+runs in parallel with the container-based Rust jobs, so it is off the critical
+path and wall-clock impact on total CI time is likely nil. The CI image loses
+a layer and a download.
 
 Security coverage increases: Rust crate advisories go from unscanned to gated, and
 dependency updates go from security-only to all four ecosystems.

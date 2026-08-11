@@ -19,7 +19,8 @@ The project includes comprehensive static analysis tools integrated into the Any
 ### 3. cargo audit (Rust dependency advisories)
 
 Checks both `Cargo.lock` files against the [RustSec advisory database](https://rustsec.org).
-Runs in CI on every push; no account or token required.
+Runs in CI on pushes to `main` and on pull requests targeting `main` that
+match the workflow's path filter; no account or token required.
 
 ```bash
 cargo install cargo-audit --locked
@@ -88,8 +89,10 @@ analysis-results/
 
 ### cargo audit
 
-- Output appears directly in the CI job log and the PR summary comment
-- Failures list the RustSec advisory ID, affected crate/version, and a link to the advisory
+- The PR summary comment shows a single pass/fail status row for the audit
+- The RustSec advisory ID, affected crate/version, and a link to the advisory
+  appear in the CI job log and in the `Security audit` check run, not the
+  comment
 - No local report file — re-run `cargo audit` locally for the same output
 
 ## Integration with Development Workflow
@@ -167,9 +170,10 @@ Focus on:
 ### Adding Custom Rules
 
 Cppcheck rule severity is configured on the command line (e.g.
-`--suppress=missingIncludeSystem`, see above). `cargo audit` has no
-per-project exclusion file in this repo; every RustSec vulnerability fails
-the build by design.
+`--suppress=missingIncludeSystem`, see above). `cargo audit` is waived
+per-advisory via the `ignore:` input on the `rustsec/audit-check` steps in
+`main-ci.yml` — add the advisory ID, a reason, and a removal date as a
+comment above it. Empty is the steady state.
 
 ### Suppressing False Positives
 

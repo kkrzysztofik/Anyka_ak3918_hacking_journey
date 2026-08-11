@@ -12,6 +12,9 @@ on:
       - "validation/**"
       - "scripts/**"
       - "SD_card_contents/**"
+      - "cross-compile/Cargo.lock"
+      - "cross-compile/Cargo.toml"
+      - ".github/workflows/**"
   pull_request:
     branches:
       - main
@@ -27,6 +30,9 @@ on:
       - "validation/**"
       - "scripts/**"
       - "SD_card_contents/**"
+      - "cross-compile/Cargo.lock"
+      - "cross-compile/Cargo.toml"
+      - ".github/workflows/**"
 
 jobs:
   # =============================================================================
@@ -340,6 +346,9 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           working-directory: cross-compile
+          # Temporary waivers. One line per advisory: ID, why, and the date to
+          # remove it by. Empty is the steady state.
+          ignore: ""
 
       - name: Audit validation tool
         id: audit-validation
@@ -348,6 +357,9 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           working-directory: validation/rust
+          # Temporary waivers. One line per advisory: ID, why, and the date to
+          # remove it by. Empty is the steady state.
+          ignore: ""
 
       - name: Record audit status
         id: audit-status
