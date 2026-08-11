@@ -95,7 +95,7 @@ unconditionally — which is exactly the reconcile.
 | `night_mode::AutoState` | `current: Option<DayNight>`; `new()` takes `Option` |
 | `night_mode::decide` | comparison becomes `Some(target) == state.current`; no other logic change |
 | `night_mode::read_initial_state` | **deleted**, with its test |
-| `night_mode::NightModeController` | `current_mode() -> Option<DayNight>`; add `last_sample_log: Mutex<Option<Instant>>`, `last_class`, `unsynced_warned: AtomicBool` |
+| `night_mode::NightModeController` | `current_mode() -> Option<DayNight>`; add `sample_log: Mutex<Option<(Instant, Option<DayNight>)>>`, `unsynced_warned: AtomicBool` |
 | `night_mode::tick` | sample logging, one-shot unsynced warning |
 | `night_mode::apply` | `info!` on transition and on the `isp` return code (currently logged only on failure) |
 | `hal::anyka::ipc::imaging::get_ae_luma` | `warn!` on the `Ok(_)` non-success arm |
@@ -125,7 +125,7 @@ A failed `apply` still does not record the change, so the next tick retries.
   (mock `expect_set_ir_filter().times(1)`) — fails against today's code
 - forced `ON`/`OFF` start-up apply unchanged
 - sample logging fires on class change and suppresses within the window
-- `get_ae_luma` non-success status emits a warning
+- `get_ae_luma` non-success status emits an error
 
 **On `.198`:**
 

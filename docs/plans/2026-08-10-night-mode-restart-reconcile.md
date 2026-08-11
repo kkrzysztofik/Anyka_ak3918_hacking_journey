@@ -19,7 +19,7 @@
 Every task below assumes this environment. Run it once per shell:
 
 ```bash
-cd /home/kmk/dev/anyka-dev
+cd <repo-root>
 source setenv.sh
 ```
 
@@ -30,7 +30,7 @@ first on `PATH`. **Clippy fails with `E0514` if you skip this** — the vendored
 
 All test commands run from `cross-compile/onvif-rust`.
 
-**Files you will touch, all under `cross-compile/onvif-rust/src/`:**
+**Initial source files you will touch:**
 
 | Path | Role |
 |---|---|

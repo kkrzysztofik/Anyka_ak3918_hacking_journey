@@ -54,10 +54,13 @@ trusting two-line pulse behaviour.
 
 ### AE luma (preferred)
 
-The AUTO loop already logs every light sample: `night sample raw=<n> src="ae"
-mode=<Day|Night>` lines in the daily tracing log (`/tmp/onvif.log.YYYY-MM-DD` on
-the `.198` layout, `/mnt/logs/onvif-debug.log.YYYY-MM-DD` on `.121`). Cover /
-uncover and read those lines — no source patch needed.
+The AUTO loop logs a `night sample raw=<n> src="ae" mode=<Day|Night|Indeterminate>`
+line in the daily tracing log (`/tmp/onvif.log.YYYY-MM-DD` on the `.198` layout,
+`/mnt/logs/onvif-debug.log.YYYY-MM-DD` on `.121`). The line is rate-limited:
+emitted on the first sample, on a classification change, or at most once every
+600 s. An indeterminate reading (inside the hysteresis band) logs
+`mode=Indeterminate` and the controller holds its current mode. Cover / uncover
+and read those lines — no source patch needed.
 
 Set:
 
