@@ -34,7 +34,7 @@ jobs:
       quality-gate-status: ${{ steps.sonar-quality-gate.outcome || steps.skip-quality-gate.outputs.status || 'skipped' }}
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v6  # v6.0.0
+        uses: actions/checkout@v7  # v6.0.0
         # SHA: de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
           fetch-depth: 0
