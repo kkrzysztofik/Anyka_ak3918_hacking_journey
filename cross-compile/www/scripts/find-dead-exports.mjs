@@ -1,5 +1,4 @@
-import { readFileSync } from 'node:fs';
-import { globSync } from 'node:fs';
+import { globSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 const EXPORT_RE =
@@ -10,7 +9,7 @@ const EXPORT_RE =
  * anchor otherwise and would make `\b${symbol}\b` never match.
  */
 function escapeForRegex(symbol) {
-  return symbol.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return symbol.replace(/[.*+?^${}()|[\]\\]/g, String.raw`\$&`);
 }
 
 /**
@@ -24,16 +23,11 @@ export function findDeadExports(files) {
       const symbol = match[1];
       // Identifier-character boundaries, not \b: \b treats `$` as a non-word
       // char, so a `$`-prefixed export would always read as dead.
-      const word = new RegExp(`(?<![\\w$])${escapeForRegex(symbol)}(?![\\w$])`);
-      let used = false;
-      for (const [other, otherText] of files) {
-        if (other === file) continue;
-        if (word.test(otherText)) {
-          used = true;
-          break;
-        }
-      }
-      if (!used) dead.push({ file, symbol });
+      const word = new RegExp(String.raw`(?<![\w$])${escapeForRegex(symbol)}(?![\w$])`);
+      const referenced = [...files].some(
+        ([other, otherText]) => other !== file && word.test(otherText),
+      );
+      if (!referenced) dead.push({ file, symbol });
     }
   }
   return dead;
