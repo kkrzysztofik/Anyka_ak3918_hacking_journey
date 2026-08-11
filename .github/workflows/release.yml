@@ -123,14 +123,14 @@ jobs:
         run: mkdir -p release-final/SD_card_contents/anyka_hack/onvif/www
 
       - name: Download Rust Artifact
-        uses: actions/download-artifact@v4  # v4.3.0
+        uses: actions/download-artifact@v8  # v4.3.0
         # SHA: d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           name: rust-build
           path: release-final/SD_card_contents/anyka_hack/onvif/
 
       - name: Download WebUI Artifact
-        uses: actions/download-artifact@v4  # v4.3.0
+        uses: actions/download-artifact@v8  # v4.3.0
         # SHA: d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           name: webui-build
