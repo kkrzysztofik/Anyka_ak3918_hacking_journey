@@ -92,9 +92,7 @@ static RELOAD_HANDLE: OnceLock<Handle<EnvFilter, tracing_subscriber::Registry>> 
 /// ```
 pub fn set_log_level(level: &str) -> LoggingResult<()> {
     let level = parse_log_level(level)?;
-    let filter = EnvFilter::builder()
-        .with_default_directive(level.into())
-        .from_env_lossy();
+    let filter = build_env_filter(level);
 
     if let Some(handle) = RELOAD_HANDLE.get() {
         handle
@@ -161,6 +159,25 @@ fn make_file_appender(file_path: &str) -> Option<tracing_appender::rolling::Roll
         .ok()
 }
 
+/// Build the `EnvFilter` for a default level, pinning night-mode diagnostics
+/// to `info` regardless of the configured level.
+///
+/// Night-mode AUTO diagnostics stay visible whatever `logging.level` says.
+/// Cameras run at "error" in production and a day/night failure is only
+/// diagnosable after the fact, from these lines. `if let` rather than
+/// `expect`: a bad directive must not take the process down over logging.
+fn build_env_filter(level: Level) -> EnvFilter {
+    let mut env_filter = EnvFilter::builder()
+        .with_default_directive(level.into())
+        .from_env_lossy();
+
+    if let Ok(directive) = "onvif_rust::platform::anyka::night_mode=info".parse() {
+        env_filter = env_filter.add_directive(directive);
+    }
+
+    env_filter
+}
+
 /// Internal logging initialization implementation.
 fn init_logging_impl(config: &ConfigRuntime) -> LoggingResult<()> {
     // Get log level from configuration
@@ -176,10 +193,8 @@ fn init_logging_impl(config: &ConfigRuntime) -> LoggingResult<()> {
 
     let level = parse_log_level(&level_str)?;
 
-    // Create env filter with default level
-    let env_filter = EnvFilter::builder()
-        .with_default_directive(level.into())
-        .from_env_lossy();
+    // Create env filter with default level (night-mode pin applied by helper)
+    let env_filter = build_env_filter(level);
 
     // Create reloadable filter layer
     let (filter_layer, reload_handle) = reload::Layer::new(env_filter);
@@ -719,6 +734,89 @@ mod tests {
         assert!(set_log_level("warn").is_ok());
         assert!(set_log_level("error").is_ok());
         assert!(set_log_level("trace").is_ok());
+    }
+
+    /// Collects the targets of every `info!` event that reaches it.
+    #[derive(Default)]
+    struct Capture {
+        targets: std::sync::Arc<std::sync::Mutex<Vec<&'static str>>>,
+    }
+
+    impl<S: tracing::Subscriber> tracing_subscriber::Layer<S> for Capture {
+        fn on_event(
+            &self,
+            event: &tracing::Event<'_>,
+            _ctx: tracing_subscriber::layer::Context<'_, S>,
+        ) {
+            self.targets.lock().unwrap().push(event.metadata().target());
+        }
+    }
+
+    /// Emit one info event in the pinned target and one in a non-pinned target
+    /// through a subscriber gated by `filter`. `PINNED` is a `const` so the
+    /// event macros can build static metadata with the target override.
+    ///
+    /// When `check_other` is set, also asserts a non-pinned target stays
+    /// filtered. The reload checkpoint passes `false`: it reads the shared
+    /// `RELOAD_HANDLE` after a concurrent test may have reloaded it to a
+    /// permissive level, so a non-pinned assertion would race. The pin
+    /// directive is level-independent, so asserting only the pin is race-free.
+    fn assert_pin_holds(filter: EnvFilter, check_other: bool) {
+        use tracing_subscriber::layer::{Layer, SubscriberExt};
+
+        const PINNED: &str = "onvif_rust::platform::anyka::night_mode";
+        const OTHER: &str = "onvif_rust::platform::anyka::imaging";
+
+        let capture = Capture::default();
+        let targets = capture.targets.clone();
+        let subscriber = tracing_subscriber::registry().with(capture.with_filter(filter));
+        tracing::subscriber::with_default(subscriber, || {
+            tracing::info!(target: PINNED, "night-mode diagnostics must stay visible");
+            tracing::info!(target: OTHER, "non-pinned target must be filtered");
+        });
+
+        let seen = targets.lock().unwrap();
+        assert!(
+            seen.contains(&PINNED),
+            "the night_mode pin must lift info above error"
+        );
+        if check_other {
+            assert!(
+                !seen.contains(&OTHER),
+                "a non-pinned target must stay filtered at error"
+            );
+        }
+    }
+
+    #[test]
+    fn test_night_mode_pin_survives_default_error_and_reload() {
+        use crate::config::ConfigRuntime;
+
+        // Production runs at `logging.level = "error"`; the pin must lift the
+        // night_mode target to info while every other target stays filtered.
+        assert_pin_holds(build_env_filter(Level::ERROR), true);
+
+        // The runtime reload path (`set_log_level`) rebuilds the filter via
+        // build_env_filter, so the pin must survive a reload to error too.
+        let config = ConfigRuntime::new(Default::default());
+        {
+            let mut c = config.write();
+            c.logging.level = "error".to_string();
+            c.logging.console_enabled = false;
+        }
+        init_logging(&config).unwrap();
+        set_log_level("error").unwrap();
+        let reloaded = RELOAD_HANDLE
+            .get()
+            .expect("RELOAD_HANDLE set by init_logging")
+            .with_current(|f| f.clone())
+            .expect("reload handle healthy");
+        // Pinned-only checkpoint: the reloaded filter comes from the shared
+        // RELOAD_HANDLE, which a concurrent test (`test_set_log_level_after_init`
+        // and friends) may have reloaded to a permissive level between our
+        // `set_log_level("error")` and the `with_current` clone. The non-pinned
+        // assertion would then flake; the pin is level-independent and cannot.
+        assert_pin_holds(reloaded, false);
     }
 
     #[test]

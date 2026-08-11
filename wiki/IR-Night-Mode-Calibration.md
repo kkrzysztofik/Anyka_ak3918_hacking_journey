@@ -54,8 +54,13 @@ trusting two-line pulse behaviour.
 
 ### AE luma (preferred)
 
-With a temporary `tracing::info!(luma, "AE luma sample")` in `night_mode::tick`
-(or console logging enabled), cover/uncover and read `/mnt/logs/onvif.log`.
+The AUTO loop logs a `night sample raw=<n> src="ae" mode=<Day|Night|Indeterminate>`
+line in the daily tracing log (`/tmp/onvif.log.YYYY-MM-DD` on the `.198` layout,
+`/mnt/logs/onvif-debug.log.YYYY-MM-DD` on `.121`). The line is rate-limited:
+emitted on the first sample, on a classification change, or at most once every
+600 s. An indeterminate reading (inside the hysteresis band) logs
+`mode=Indeterminate` and the controller holds its current mode. Cover / uncover
+and read those lines — no source patch needed.
 
 Set:
 
@@ -163,8 +168,6 @@ WebUI: Imaging → Illumination card.
 
 ## Known caveats (lab board)
 
-- ISP `ak_vi_switch_mode` may log `isp=-1` over vendor IPC; GPIO IR-cut / lamp
-  writes still complete.
 - Imaging SOAP uses token `VideoSource_1` even when media reports
   `VideoSource_0`.
 - Do not overwrite the whole device `config.toml` from the repo copy — it
