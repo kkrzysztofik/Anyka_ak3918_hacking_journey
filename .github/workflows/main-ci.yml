@@ -772,6 +772,7 @@ jobs:
   reporting:
     name: Generate Unified CI Report
     runs-on: ubuntu-latest
+    if: always()
     needs:
       [
         rust-quality-and-coverage,
@@ -790,9 +791,7 @@ jobs:
           RUST_COVERAGE: ${{ needs.rust-quality-and-coverage.outputs.coverage || 'N/A' }}
           VALIDATION_RUST_COVERAGE: ${{ needs.validation-rust-quality.outputs.coverage || 'N/A' }}
           WEBUI_COVERAGE: ${{ needs.webui-quality-and-coverage.outputs.coverage || 'N/A' }}
-          SNYK_CODE_STATUS: ${{ needs.security-scans.outputs.snyk_code_status }}
-          SNYK_OSS_STATUS: ${{ needs.security-scans.outputs.snyk_oss_status }}
-          SNYK_ISSUES: ${{ needs.security-scans.outputs.snyk_issues }}
+          AUDIT_STATUS: ${{ needs.security-scans.outputs.audit_status }}
           SONAR_SCAN_STATUS: ${{ needs.sonarqube.outputs.sonar-scan-status }}
           QUALITY_GATE_STATUS: ${{ needs.sonarqube.outputs.quality-gate-status }}
         run: |
@@ -812,8 +811,7 @@ jobs:
             esac
           }
 
-          SNYK_CODE_STATUS=$(get_status "${SNYK_CODE_STATUS}")
-          SNYK_OSS_STATUS=$(get_status "${SNYK_OSS_STATUS}")
+          AUDIT_STATUS=$(get_status "${AUDIT_STATUS}")
           SONAR_SCAN_STATUS=$(get_status "${SONAR_SCAN_STATUS}")
           QUALITY_GATE_STATUS=$(get_quality_gate_status "${QUALITY_GATE_STATUS}")
 
@@ -827,10 +825,9 @@ jobs:
           | **Validation (Rust)** | ${VALIDATION_RUST_COVERAGE}% |
           | **WebUI** | ${WEBUI_COVERAGE}% |
 
-          ## 🔒 Security Scans (Snyk)
-          - **Code (SAST)**: ${SNYK_CODE_STATUS}
-          - **Open Source (SCA)**: ${SNYK_OSS_STATUS}
-          - **SCA Issues Found**: ${SNYK_ISSUES}
+          ## 🔒 Dependency Advisories (cargo audit)
+          - **Rust crates (RustSec)**: ${AUDIT_STATUS}
+          - **SAST**: see CodeQL and SonarCloud below
 
           ## 🎯 Code Quality (SonarQube)
           - **Status**: ${SONAR_SCAN_STATUS}
@@ -852,9 +849,7 @@ jobs:
             const rustCoverage = '${{ needs.rust-quality-and-coverage.outputs.coverage || 'N/A' }}';
             const validationRustCoverage = '${{ needs.validation-rust-quality.outputs.coverage || 'N/A' }}';
             const webuiCoverage = '${{ needs.webui-quality-and-coverage.outputs.coverage || 'N/A' }}';
-            const snykCodeStatus = '${{ needs.security-scans.outputs.snyk_code_status }}';
-            const snykOssStatus = '${{ needs.security-scans.outputs.snyk_oss_status }}';
-            const snykIssues = '${{ needs.security-scans.outputs.snyk_issues || 0 }}';
+            const auditStatus = '${{ needs.security-scans.outputs.audit_status }}';
             const sonarStatus = '${{ needs.sonarqube.outputs.sonar-scan-status }}';
             const qualityGateStatus = '${{ needs.sonarqube.outputs.quality-gate-status }}';
 
@@ -873,11 +868,11 @@ jobs:
             | **Validation (Rust)** | ${validationRustCoverage}% |
             | **WebUI** | ${webuiCoverage}% |
 
-            ### 🔒 Security Scans (Snyk)
+            ### 🔒 Security
             | Scan Type | Status | Details |
             |-----------|--------|---------|
-            | **Code (SAST)** | ${formatStatus(snykCodeStatus)} | [View in Code Scanning](https://github.com/${context.repo.owner}/${context.repo.repo}/security/code-scanning) |
-            | **Open Source (SCA)** | ${formatStatus(snykOssStatus)} | ${snykIssues !== '0' ? `⚠️ ${snykIssues} vulnerabilities found` : '✅ No issues'} |
+            | **Rust advisories (cargo audit)** | ${formatStatus(auditStatus)} | RustSec advisory database |
+            | **SAST (CodeQL)** | — | [View in Code Scanning](https://github.com/${context.repo.owner}/${context.repo.repo}/security/code-scanning) |
 
             ### 🎯 Code Quality (SonarQube)
             | Metric | Value |
