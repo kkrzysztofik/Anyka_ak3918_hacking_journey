@@ -38,9 +38,12 @@ $CARGO test --target x86_64-unknown-linux-gnu -- --nocapture
 # Ignored tests
 $CARGO test --target x86_64-unknown-linux-gnu -- --ignored
 
-# Coverage (cargo-llvm-cov; install: cargo install cargo-llvm-cov --locked)
+# Coverage (cargo-llvm-cov; install: cargo install cargo-llvm-cov --version 0.8.7 --locked)
+# Match CI rust-coverage job (IGNORE_REGEX + --all-features).
+IGNORE_REGEX='(/xiu/|/patches/|/anyka_reference/|/onvif/|webrtc-util|webrtc-ice|webrtc-sctp|/rtp-|tokio-metrics|openssl-src)'
 $CARGO llvm-cov --target x86_64-unknown-linux-gnu --workspace \
-  --ignore-filename-regex '(/xiu/|/patches/|/anyka_reference/|/onvif/)' \
+  --all-features \
+  --ignore-filename-regex "$IGNORE_REGEX" \
   --cobertura --output-path coverage/cobertura.xml
 ```
 

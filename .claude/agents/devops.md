@@ -69,8 +69,12 @@ $CARGO clippy --target x86_64-unknown-linux-gnu -- -D warnings
 $CARGO fmt --check
 $CARGO doc --no-deps
 
-# Coverage
-$CARGO llvm-cov --target x86_64-unknown-linux-gnu --workspace --cobertura --output-path coverage/cobertura.xml
+# Coverage (match CI rust-coverage job)
+IGNORE_REGEX='(/xiu/|/patches/|/anyka_reference/|/onvif/|webrtc-util|webrtc-ice|webrtc-sctp|/rtp-|tokio-metrics|openssl-src)'
+$CARGO llvm-cov --target x86_64-unknown-linux-gnu --workspace \
+  --all-features \
+  --ignore-filename-regex "$IGNORE_REGEX" \
+  --cobertura --output-path coverage/cobertura.xml
 # Output: coverage report  (target: 80%+ line coverage)
 ```
 
@@ -238,8 +242,12 @@ du -sh dist/          # Approximate bundle size (guidance only)
 source ./setenv.sh        # from repo root — exports $CARGO etc.
 cd cross-compile
 
-# Generate coverage report
-$CARGO llvm-cov --target x86_64-unknown-linux-gnu --workspace --cobertura --output-path coverage/cobertura.xml
+# Generate coverage report (match CI rust-coverage job)
+IGNORE_REGEX='(/xiu/|/patches/|/anyka_reference/|/onvif/|webrtc-util|webrtc-ice|webrtc-sctp|/rtp-|tokio-metrics|openssl-src)'
+$CARGO llvm-cov --target x86_64-unknown-linux-gnu --workspace \
+  --all-features \
+  --ignore-filename-regex "$IGNORE_REGEX" \
+  --cobertura --output-path coverage/cobertura.xml
 
 # Host CI coverage uses cargo-llvm-cov (image tag rust-1.97.1-ci)
 # Targets: onvif-rust 80%+, streaming-lib 80%+

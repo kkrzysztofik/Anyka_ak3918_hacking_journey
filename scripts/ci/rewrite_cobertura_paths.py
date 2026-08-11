@@ -15,6 +15,7 @@ from pathlib import Path
 
 
 def rewrite_cobertura(path: Path, prefix: str = "cross-compile/") -> None:
+    """Normalize Cobertura XML so Sonar can resolve filenames under sonar.sources."""
     tree = ET.parse(path)
     root = tree.getroot()
 

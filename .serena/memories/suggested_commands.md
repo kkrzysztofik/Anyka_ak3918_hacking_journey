@@ -48,9 +48,11 @@ $CARGO fmt --check                  # Check formatting (CI)
 $CARGO doc --target x86_64-unknown-linux-gnu --no-deps   # Generate docs
 $CARGO doc --target x86_64-unknown-linux-gnu --no-deps --open  # Generate and open
 
-# Coverage (host target, requires cargo-llvm-cov)
+# Coverage (host target, requires cargo-llvm-cov; match CI rust-coverage job)
+IGNORE_REGEX='(/xiu/|/patches/|/anyka_reference/|/onvif/|webrtc-util|webrtc-ice|webrtc-sctp|/rtp-|tokio-metrics|openssl-src)'
 $CARGO llvm-cov --target x86_64-unknown-linux-gnu --workspace \
-  --ignore-filename-regex '(/xiu/|/patches/|/anyka_reference/|/onvif/)' \
+  --all-features \
+  --ignore-filename-regex "$IGNORE_REGEX" \
   --cobertura --output-path coverage/cobertura.xml
 
 # === DEVICE-SIDE COMMANDS (cross-compile for ARM) ===

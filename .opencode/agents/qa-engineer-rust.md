@@ -51,7 +51,7 @@ When a user asks you to work on test code, you MUST:
 - Verify all tests pass: `$CARGO test --target x86_64-unknown-linux-gnu`
 - Check code formatting: `$CARGO fmt --check`
 - Run linting: `$CARGO clippy --target x86_64-unknown-linux-gnu -- -D warnings`
-- Generate coverage reports: `$CARGO llvm-cov --target x86_64-unknown-linux-gnu --workspace --cobertura --output-path coverage/cobertura.xml`
+- Generate coverage reports: `$CARGO llvm-cov` with CI `IGNORE_REGEX` and `--all-features` (see devops agent)
 
 ---
 
@@ -218,8 +218,12 @@ $CARGO test --target x86_64-unknown-linux-gnu
 # 4. Unit tests only
 $CARGO test --target x86_64-unknown-linux-gnu --lib
 
-# 5. Coverage report (target: 80%+)
-$CARGO llvm-cov --target x86_64-unknown-linux-gnu --workspace --cobertura --output-path coverage/cobertura.xml
+# 5. Coverage report (target: 80%+; match CI rust-coverage job)
+IGNORE_REGEX='(/xiu/|/patches/|/anyka_reference/|/onvif/|webrtc-util|webrtc-ice|webrtc-sctp|/rtp-|tokio-metrics|openssl-src)'
+$CARGO llvm-cov --target x86_64-unknown-linux-gnu --workspace \
+  --all-features \
+  --ignore-filename-regex "$IGNORE_REGEX" \
+  --cobertura --output-path coverage/cobertura.xml
 
 # 6. Documentation (no warnings)
 $CARGO doc --target x86_64-unknown-linux-gnu --no-deps

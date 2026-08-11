@@ -44,6 +44,14 @@ Estimated GitHub `rust-coverage` wall clock (cold instrumented build, warm crate
 
 Follow-up: `sccache` is baked into `:rust-1.97.1-ci` and wired via `RUSTC_WRAPPER` + Actions cache of `/tmp/sccache` on both rust jobs (llvm-cov chains the pre-existing wrapper). Warm-cache runs should improve; cold runs still pay full instrumented compile.
 
+## Sonar / Cobertura path mapping
+
+`cargo llvm-cov` runs from `cross-compile/` and emits Cobertura `<class filename="onvif-rust/src/...">` with `<source>/workspace/cross-compile</source>`. Sonar is configured with `sonar.sources=cross-compile`, so filenames must be repo-root-relative (`cross-compile/onvif-rust/src/...`).
+
+CI rewrites Cobertura XML via `scripts/ci/rewrite_cobertura_paths.py` (ElementTree): set `<source>.</source>` and prepend `cross-compile/` to each class filename. Lcov/HTML artifacts are for humans only; Sonar consumes the rewritten Cobertura.
+
+Image tag `:rust-1.97.1-ci` is intentionally floating (not digest-pinned) so rebuild/push picks up the next CI run without editing the workflow.
+
 ## Success criteria
 
 Warm-cache `rust-coverage` job ≤ ~3 minutes. If not, re-measure step breakdown before considering larger runners.
