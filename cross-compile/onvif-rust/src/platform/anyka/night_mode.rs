@@ -376,9 +376,10 @@ impl NightModeController {
 
     /// Log one AUTO sample, rate-limited by [`sample_due`].
     ///
-    /// `info!`, not `debug!`: cameras run at `level = "error"` and a day/night
-    /// failure is only diagnosable after the fact. See the filter directive in
-    /// `logging::init_logging_impl`.
+    /// The event name is always `night sample`; the `mode` field is
+    /// `Day|Night|Indeterminate`. `info!`, not `debug!`: cameras run at
+    /// `level = "error"` and a day/night failure is only diagnosable after the
+    /// fact. See the filter directive in `logging::init_logging_impl`.
     async fn log_sample(&self, raw: i32, src: &'static str, class: Option<DayNight>) {
         let now = std::time::Instant::now();
         let mut last = self.sample_log.lock().await;
@@ -388,7 +389,7 @@ impl NightModeController {
         *last = Some((now, class));
         match class {
             Some(mode) => tracing::info!(raw, src, ?mode, "night sample"),
-            None => tracing::info!(raw, src, "night sample: indeterminate, holding"),
+            None => tracing::info!(raw, src, mode = "Indeterminate", "night sample"),
         }
     }
 
