@@ -328,7 +328,6 @@ jobs:
     permissions:
       contents: read
       checks: write
-      issues: write
     outputs:
       audit_status: ${{ steps.audit-status.outputs.audit_status }}
     steps:
