@@ -560,8 +560,9 @@ impl NightModeController {
         }
 
         // A failed set_ir_filter must not be left to rot: GPIO already advanced,
-        // so we do NOT re-run apply (that would re-pulse the coil). Retry only
-        // the ISP call on later ticks until the daemon accepts it.
+        // so we do NOT re-run apply (that would re-pulse the coil). The retry
+        // below runs in the same tick, immediately after the failed apply, and
+        // on later ticks too if it still fails.
         let mut pending = self.isp_pending.lock().await;
         if let Some(target) = *pending {
             let isp = self
@@ -1054,10 +1055,13 @@ mod tests {
         let mut ffi = MockImagingHalTrait::new();
         ffi.expect_get_ae_luma().times(3).returning(|| Some(1)); // dark scene
         let mut calls = 0u8;
-        ffi.expect_set_ir_filter().times(2).returning(move |_| {
-            calls += 1;
-            if calls == 1 { -1 } else { 0 }
-        });
+        ffi.expect_set_ir_filter()
+            .withf(|enabled| *enabled)
+            .times(2)
+            .returning(move |_| {
+                calls += 1;
+                if calls == 1 { -1 } else { 0 }
+            });
 
         let ctl = NightModeController::new(
             paths,
@@ -1067,11 +1071,11 @@ mod tests {
             None,
         );
 
-        ctl.tick().await; // apply fails the ISP; GPIO state still records Night
+        ctl.tick().await; // apply fails the ISP (call 1); the same tick retries it (call 2) to 0
         assert_eq!(ctl.current_mode().await, Some(DayNight::Night));
 
-        ctl.tick().await; // decide holds; the pending ISP sync is retried
-        ctl.tick().await; // nothing further: set_ir_filter called exactly twice
+        ctl.tick().await; // decide holds; the retry already resolved back in tick 1
+        ctl.tick().await; // re-polls only: set_ir_filter still called exactly twice
     }
 
     #[test]

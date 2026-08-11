@@ -114,6 +114,11 @@ keeps holding. It never guesses a mode — that is what put `.198`'s thresholds 
 
 A failed `apply` still does not record the change, so the next tick retries.
 
+Approved deviation from the plan's "on later ticks" wording: the ISP retry runs
+immediately after a failed apply in the same tick, because the retry block
+follows the apply call in `tick`. It cannot over-call — after the tick either
+the pending sync cleared or stays for the next tick.
+
 ## Testing
 
 **Unit (host, `--target x86_64-unknown-linux-gnu`):**
