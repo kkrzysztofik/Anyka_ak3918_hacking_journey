@@ -435,6 +435,126 @@ describe('DiagnosticsPage', () => {
       vi.restoreAllMocks();
     });
   });
+
+  describe('Day / Night Vision card', () => {
+    const FULL_VISION: NonNullable<Diagnostics['vision']> = {
+      mode: 'night',
+      ae_luma: 42,
+      ain0: 123,
+      ir_led: true,
+      ircut_a: false,
+      ircut_b: true,
+      white_led: null,
+      supported: { ir_led: true, ircut: true, white_led: true },
+    };
+
+    it('should render vision card title', () => {
+      renderWithProviders(<DiagnosticsPage />);
+      expect(screen.getByTestId('diagnostics-vision-title')).toBeInTheDocument();
+    });
+
+    it('should show mode when vision is present', () => {
+      vi.mocked(useDiagnostics).mockReturnValue(makeResult({ vision: FULL_VISION }));
+      renderWithProviders(<DiagnosticsPage />);
+      expect(screen.getByTestId('diagnostics-vision-mode')).toHaveTextContent('night');
+    });
+
+    it('should show ae_luma when vision is present', () => {
+      vi.mocked(useDiagnostics).mockReturnValue(makeResult({ vision: FULL_VISION }));
+      renderWithProviders(<DiagnosticsPage />);
+      expect(screen.getByTestId('diagnostics-vision-ae-luma')).toHaveTextContent('42');
+    });
+
+    it('should show ain0 when vision is present', () => {
+      vi.mocked(useDiagnostics).mockReturnValue(makeResult({ vision: FULL_VISION }));
+      renderWithProviders(<DiagnosticsPage />);
+      expect(screen.getByTestId('diagnostics-vision-ain0')).toHaveTextContent('123');
+    });
+
+    it('should show On for ir_led when supported and value is true', () => {
+      vi.mocked(useDiagnostics).mockReturnValue(makeResult({ vision: FULL_VISION }));
+      renderWithProviders(<DiagnosticsPage />);
+      expect(screen.getByTestId('diagnostics-vision-ir-led')).toHaveTextContent('On');
+    });
+
+    it('should show Off for ircut_a when supported and value is false', () => {
+      vi.mocked(useDiagnostics).mockReturnValue(makeResult({ vision: FULL_VISION }));
+      renderWithProviders(<DiagnosticsPage />);
+      expect(screen.getByTestId('diagnostics-vision-ircut-a')).toHaveTextContent('Off');
+    });
+
+    it('should show On for ircut_b when supported and value is true', () => {
+      vi.mocked(useDiagnostics).mockReturnValue(makeResult({ vision: FULL_VISION }));
+      renderWithProviders(<DiagnosticsPage />);
+      expect(screen.getByTestId('diagnostics-vision-ircut-b')).toHaveTextContent('On');
+    });
+
+    it('should show em-dash for white_led when supported but value is null', () => {
+      vi.mocked(useDiagnostics).mockReturnValue(makeResult({ vision: FULL_VISION }));
+      renderWithProviders(<DiagnosticsPage />);
+      expect(screen.getByTestId('diagnostics-vision-white-led')).toHaveTextContent('\u2014');
+    });
+
+    it('should show n/a for ir_led when not supported', () => {
+      const vision: NonNullable<Diagnostics['vision']> = {
+        ...FULL_VISION,
+        ir_led: true,
+        supported: { ...FULL_VISION.supported, ir_led: false },
+      };
+      vi.mocked(useDiagnostics).mockReturnValue(makeResult({ vision }));
+      renderWithProviders(<DiagnosticsPage />);
+      expect(screen.getByTestId('diagnostics-vision-ir-led')).toHaveTextContent('n/a');
+    });
+
+    it('should show n/a for ircut_a and ircut_b when ircut is not supported', () => {
+      const vision: NonNullable<Diagnostics['vision']> = {
+        ...FULL_VISION,
+        supported: { ...FULL_VISION.supported, ircut: false },
+      };
+      vi.mocked(useDiagnostics).mockReturnValue(makeResult({ vision }));
+      renderWithProviders(<DiagnosticsPage />);
+      expect(screen.getByTestId('diagnostics-vision-ircut-a')).toHaveTextContent('n/a');
+      expect(screen.getByTestId('diagnostics-vision-ircut-b')).toHaveTextContent('n/a');
+    });
+
+    it('should show n/a for white_led when not supported', () => {
+      const vision: NonNullable<Diagnostics['vision']> = {
+        ...FULL_VISION,
+        white_led: true,
+        supported: { ...FULL_VISION.supported, white_led: false },
+      };
+      vi.mocked(useDiagnostics).mockReturnValue(makeResult({ vision }));
+      renderWithProviders(<DiagnosticsPage />);
+      expect(screen.getByTestId('diagnostics-vision-white-led')).toHaveTextContent('n/a');
+    });
+
+    it('should show em-dash for mode when vision is null', () => {
+      renderWithProviders(<DiagnosticsPage />); // BASE_DIAG has vision: null
+      expect(screen.getByTestId('diagnostics-vision-mode')).toHaveTextContent('\u2014');
+    });
+
+    it('should show em-dash for ae_luma and ain0 when vision is null', () => {
+      renderWithProviders(<DiagnosticsPage />);
+      expect(screen.getByTestId('diagnostics-vision-ae-luma')).toHaveTextContent('\u2014');
+      expect(screen.getByTestId('diagnostics-vision-ain0')).toHaveTextContent('\u2014');
+    });
+
+    it('should show em-dash for all lamps when vision is null', () => {
+      renderWithProviders(<DiagnosticsPage />);
+      expect(screen.getByTestId('diagnostics-vision-ir-led')).toHaveTextContent('\u2014');
+      expect(screen.getByTestId('diagnostics-vision-ircut-a')).toHaveTextContent('\u2014');
+      expect(screen.getByTestId('diagnostics-vision-ircut-b')).toHaveTextContent('\u2014');
+      expect(screen.getByTestId('diagnostics-vision-white-led')).toHaveTextContent('\u2014');
+    });
+
+    it('should show em-dash for mode when vision.mode is null', () => {
+      vi.mocked(useDiagnostics).mockReturnValue(
+        makeResult({ vision: { ...FULL_VISION, mode: null } }),
+      );
+      renderWithProviders(<DiagnosticsPage />);
+      expect(screen.getByTestId('diagnostics-vision-mode')).toHaveTextContent('\u2014');
+    });
+  });
 });
 
 

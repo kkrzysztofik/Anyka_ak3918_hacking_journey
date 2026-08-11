@@ -5,6 +5,7 @@ import {
   Cpu,
   Database,
   Download,
+  Eye,
   FileText,
   HardDrive,
   Info,
@@ -25,7 +26,12 @@ import {
 } from '@/components/ui/select';
 import { useDiagnostics } from '@/hooks/useDiagnostics';
 import { cn } from '@/lib/utils';
-import { type LogLevel, type LogSource, getLogs } from '@/services/diagnosticsService';
+import {
+  type Diagnostics,
+  type LogLevel,
+  type LogSource,
+  getLogs,
+} from '@/services/diagnosticsService';
 
 const RESTART_THRESHOLD_S = 300; // 5 minutes
 const STALL_THRESHOLD_MS = 5000; // frame age above this → stalled
@@ -112,6 +118,70 @@ function StatCard({
         </div>
       </div>
     </div>
+  );
+}
+
+function formatLamp(supported: boolean, value: boolean | null | undefined): string {
+  if (!supported) return 'n/a';
+  if (value === null || value === undefined) return '\u2014';
+  return value ? 'On' : 'Off';
+}
+
+function VisionCard({ vision }: Readonly<{ vision: Diagnostics['vision'] }>) {
+  const mode = vision?.mode ?? '\u2014';
+  const aeLuma =
+    vision?.ae_luma !== null && vision?.ae_luma !== undefined
+      ? String(vision.ae_luma)
+      : '\u2014';
+  const ain0 =
+    vision?.ain0 !== null && vision?.ain0 !== undefined ? String(vision.ain0) : '\u2014';
+
+  const irLed = vision ? formatLamp(vision.supported.ir_led, vision.ir_led) : '\u2014';
+  const ircutA = vision ? formatLamp(vision.supported.ircut, vision.ircut_a) : '\u2014';
+  const ircutB = vision ? formatLamp(vision.supported.ircut, vision.ircut_b) : '\u2014';
+  const whiteLed = vision
+    ? formatLamp(vision.supported.white_led, vision.white_led)
+    : '\u2014';
+
+  return (
+    <Card className="border-border bg-card overflow-hidden">
+      <CardHeader className="border-border border-b">
+        <div className="flex items-center gap-3">
+          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-purple-500/10">
+            <Eye className="h-5 w-5 text-purple-500" />
+          </div>
+          <div>
+            <CardTitle
+              className="text-foreground text-sm font-semibold"
+              data-testid="diagnostics-vision-title"
+            >
+              Day / Night Vision
+            </CardTitle>
+            <p className="text-muted-foreground text-xs">Ambient sensor and lamp state</p>
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent className="pt-4">
+        <dl className="space-y-2 text-sm">
+          {[
+            { label: 'Mode', value: mode, testId: 'diagnostics-vision-mode' },
+            { label: 'AE luma', value: aeLuma, testId: 'diagnostics-vision-ae-luma' },
+            { label: 'ain0', value: ain0, testId: 'diagnostics-vision-ain0' },
+            { label: 'IR LED', value: irLed, testId: 'diagnostics-vision-ir-led' },
+            { label: 'IR-CUT A', value: ircutA, testId: 'diagnostics-vision-ircut-a' },
+            { label: 'IR-CUT B', value: ircutB, testId: 'diagnostics-vision-ircut-b' },
+            { label: 'White LED', value: whiteLed, testId: 'diagnostics-vision-white-led' },
+          ].map(({ label, value, testId }) => (
+            <div key={testId} className="flex items-center justify-between">
+              <dt className="text-muted-foreground">{label}</dt>
+              <dd className="font-mono text-white" data-testid={testId}>
+                {value}
+              </dd>
+            </div>
+          ))}
+        </dl>
+      </CardContent>
+    </Card>
   );
 }
 
@@ -474,6 +544,9 @@ export default function DiagnosticsPage() {
             </dl>
           </CardContent>
         </Card>
+
+        {/* Vision */}
+        <VisionCard vision={data?.vision ?? null} />
 
         {/* Stream Health */}
         <Card className="border-border bg-card overflow-hidden">
