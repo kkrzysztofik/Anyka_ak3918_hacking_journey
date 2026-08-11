@@ -221,4 +221,82 @@ describe('DiagnosticsPage', () => {
       expect(screen.getByTestId('diagnostics-export-button')).toBeInTheDocument();
     });
   });
+
+  describe('Charts from history', () => {
+    it('should render CPU sparkline when history has two or more cpu samples', () => {
+      const now = Date.now();
+      vi.mocked(useDiagnostics).mockReturnValue(
+        makeResult({}, [
+          { t: now - 5000, cpu: 30, memPct: 50, rx: null, tx: null },
+          { t: now, cpu: 45, memPct: 55, rx: null, tx: null },
+        ]),
+      );
+      renderWithProviders(<DiagnosticsPage />);
+      // Chart should be visible — empty-state placeholder must be absent
+      expect(screen.queryByTestId('diagnostics-cpu-chart-empty')).not.toBeInTheDocument();
+    });
+
+    it('should show empty state when fewer than two CPU samples are available', () => {
+      renderWithProviders(<DiagnosticsPage />); // history = []
+      expect(screen.getByTestId('diagnostics-cpu-chart-empty')).toBeInTheDocument();
+    });
+
+    it('should show memory chart empty state with zero samples', () => {
+      renderWithProviders(<DiagnosticsPage />);
+      expect(screen.getByTestId('diagnostics-memory-chart-empty')).toBeInTheDocument();
+    });
+
+    it('should render memory sparkline when history has two or more memPct samples', () => {
+      const now = Date.now();
+      vi.mocked(useDiagnostics).mockReturnValue(
+        makeResult({}, [
+          { t: now - 5000, cpu: null, memPct: 50, rx: null, tx: null },
+          { t: now, cpu: null, memPct: 55, rx: null, tx: null },
+        ]),
+      );
+      renderWithProviders(<DiagnosticsPage />);
+      expect(screen.queryByTestId('diagnostics-memory-chart-empty')).not.toBeInTheDocument();
+    });
+  });
+
+  describe('Stream Health card', () => {
+    it('should render frame age from data', () => {
+      renderWithProviders(<DiagnosticsPage />); // stream_frame_age_ms = 100
+      expect(screen.getByTestId('diagnostics-frame-age')).toHaveTextContent('100 ms');
+    });
+
+    it('should show em-dash for frame age when null', () => {
+      vi.mocked(useDiagnostics).mockReturnValue(
+        makeResult({ stream_frame_age_ms: null }),
+      );
+      renderWithProviders(<DiagnosticsPage />);
+      expect(screen.getByTestId('diagnostics-frame-age')).toHaveTextContent('\u2014');
+    });
+
+    it('should flag stalled stream when frame_age_ms exceeds 5000 ms', () => {
+      vi.mocked(useDiagnostics).mockReturnValue(
+        makeResult({ stream_frame_age_ms: 6000 }),
+      );
+      renderWithProviders(<DiagnosticsPage />);
+      expect(screen.getByTestId('diagnostics-stream-stalled')).toBeInTheDocument();
+    });
+
+    it('should NOT flag stalled stream when frame_age_ms is within threshold', () => {
+      renderWithProviders(<DiagnosticsPage />); // frame_age_ms = 100
+      expect(screen.queryByTestId('diagnostics-stream-stalled')).not.toBeInTheDocument();
+    });
+
+    it('should render components list when components are present', () => {
+      renderWithProviders(<DiagnosticsPage />); // components = [{ name: 'onvif', status: 'ok' }]
+      expect(screen.getByTestId('diagnostics-components-list')).toBeInTheDocument();
+      expect(screen.getByTestId('diagnostics-component-onvif')).toBeInTheDocument();
+    });
+
+    it('should NOT render components list when components array is empty', () => {
+      vi.mocked(useDiagnostics).mockReturnValue(makeResult({ components: [] }));
+      renderWithProviders(<DiagnosticsPage />);
+      expect(screen.queryByTestId('diagnostics-components-list')).not.toBeInTheDocument();
+    });
+  });
 });
+

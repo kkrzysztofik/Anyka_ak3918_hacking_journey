@@ -18,6 +18,7 @@ import { useDiagnostics } from '@/hooks/useDiagnostics';
 import { cn } from '@/lib/utils';
 
 const RESTART_THRESHOLD_S = 300; // 5 minutes
+const STALL_THRESHOLD_MS = 5000; // frame age above this → stalled
 
 function formatDuration(seconds: number): string {
   const d = Math.floor(seconds / 86400);
@@ -417,7 +418,7 @@ export default function DiagnosticsPage() {
           </CardContent>
         </Card>
 
-        {/* Stream Health — fleshed out in Task 13 */}
+        {/* Stream Health */}
         <Card className="border-border bg-card overflow-hidden">
           <CardHeader className="border-border border-b">
             <div className="flex items-center gap-3">
@@ -447,13 +448,53 @@ export default function DiagnosticsPage() {
                 data-testid="diagnostics-frame-age"
               >
                 <span className="text-muted-foreground">Frame Age</span>
-                <span className="text-foreground font-mono">
+                <span
+                  className={cn(
+                    'font-mono',
+                    data?.stream_frame_age_ms !== null &&
+                      data?.stream_frame_age_ms !== undefined &&
+                      data.stream_frame_age_ms > STALL_THRESHOLD_MS
+                      ? 'text-red-400'
+                      : 'text-foreground',
+                  )}
+                >
                   {data?.stream_frame_age_ms !== null &&
                   data?.stream_frame_age_ms !== undefined
                     ? `${data.stream_frame_age_ms} ms`
                     : '—'}
                 </span>
               </div>
+              {data?.stream_frame_age_ms !== null &&
+                data?.stream_frame_age_ms !== undefined &&
+                data.stream_frame_age_ms > STALL_THRESHOLD_MS && (
+                  <p className="text-xs text-red-400" data-testid="diagnostics-stream-stalled">
+                    Stream stalled — no frame received in {data.stream_frame_age_ms} ms
+                  </p>
+                )}
+              {data?.components && data.components.length > 0 && (
+                <ul
+                  className="mt-2 space-y-1"
+                  data-testid="diagnostics-components-list"
+                >
+                  {data.components.map((c) => (
+                    <li
+                      key={c.name}
+                      className="flex items-center justify-between"
+                      data-testid={`diagnostics-component-${c.name}`}
+                    >
+                      <span className="text-muted-foreground">{c.name}</span>
+                      <span
+                        className={cn(
+                          'font-mono text-xs',
+                          c.status === 'ok' ? 'text-green-400' : 'text-yellow-400',
+                        )}
+                      >
+                        {c.status}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </div>
           </CardContent>
         </Card>
