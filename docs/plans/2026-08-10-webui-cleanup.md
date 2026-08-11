@@ -4,7 +4,7 @@
 
 **Goal:** Remove ~3450 lines of dead code and duplicate abstractions from `cross-compile/www` so the Diagnostics feature is built on one card family, one error path, and one set of types.
 
-**Architecture:** Four independently revertable PRs ordered by blast radius — pure deletions, behavior-preserving dedup, the credential-storage change, then design-system consolidation. Design doc: `docs/plans/2026-08-10-webui-cleanup-design.md`.
+**Architecture:** Four independently revertible PRs ordered by blast radius — pure deletions, behavior-preserving dedup, the credential-storage change, then design-system consolidation. Design doc: `docs/plans/2026-08-10-webui-cleanup-design.md`.
 
 **Tech Stack:** React 19, TypeScript (dual TS 6 / TS 7 type-check), Vite 8, Vitest 4, Tailwind v4, shadcn/ui, TanStack Query.
 
@@ -14,7 +14,7 @@
 
 This is deletion and refactor work, so classic red-green does not apply to most tasks. The discipline is adapted, not skipped:
 
-- **Deletion tasks** — the gate runs before and after. Coverage must not drop; if it does, something live was deleted. No new tests are written.
+- **Deletion tasks** — the gate runs before and after. Aggregate line coverage may drop when *tested-but-dead* code is deleted together with its tests (the removed covered lines concentrate a file's few uncovered ones), so compare per-file line coverage against the baseline instead: every file outside the edit set must be unchanged. A drop confined to the edited files with untouched files byte-identical is a denominator artifact, not a live-code deletion. No new tests are written.
 - **Refactor tasks (PR2)** — the existing suite is the red-green. It must pass **unmodified**. A test that needs editing means the refactor changed behavior, which is a defect in the refactor.
 - **Task 1 only** — `find-dead-exports.mjs` is genuinely new logic and gets real TDD. The repo already tests its build scripts (`scripts/analyze-bundle.test.mjs`, `scripts/precompress.test.mjs`) and `vite.config.ts` includes `scripts/**/*.{test,spec}.mjs` in the Vitest run, so it fits the existing pattern.
 
@@ -32,7 +32,7 @@ Record baseline coverage before starting PR1:
 cd cross-compile/www && npm run test:coverage 2>&1 | tail -20
 ```
 
-Write the total line-coverage percentage into the PR description. Every PR1 task must leave it equal or higher.
+Write the total line-coverage percentage into the PR description. When a PR1 task drops aggregate coverage, compare per-file line coverage to the baseline before assuming something live was deleted — only a drop in an *untouched* file is a real signal.
 
 ## Branch
 
@@ -40,7 +40,7 @@ Work continues on `chore/webui-cleanup`, already created and holding the design 
 
 ---
 
-# PR1 — `chore(webui): remove dead code`
+## PR1 — `chore(webui): remove dead code`
 
 Target: ~-2190 lines, -4 deps. One commit per task so review can go finding-by-finding.
 
@@ -100,6 +100,14 @@ const EXPORT_RE =
   /^export\s+(?:async\s+)?(?:function|const|let|class|interface|type|enum)\s+([A-Za-z_$][\w$]*)/gm;
 
 /**
+ * Escape a symbol for use inside a RegExp, since `$` in identifiers is an
+ * anchor otherwise and would make `\b${symbol}\b` never match.
+ */
+function escapeForRegex(symbol) {
+  return symbol.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
  * @param {Map<string, string>} files path -> source text
  * @returns {Array<{file: string, symbol: string}>}
  */
@@ -108,7 +116,9 @@ export function findDeadExports(files) {
   for (const [file, text] of files) {
     for (const match of text.matchAll(EXPORT_RE)) {
       const symbol = match[1];
-      const word = new RegExp(`\\b${symbol}\\b`);
+      // Identifier-character boundaries, not \b: \b treats `$` as a non-word
+      // char, so a `$`-prefixed export would always read as dead.
+      const word = new RegExp(`(?<![\\w$])${escapeForRegex(symbol)}(?![\\w$])`);
       let used = false;
       for (const [other, otherText] of files) {
         if (other === file) continue;
@@ -127,7 +137,7 @@ export function readSourceFiles(root, { includeTests }) {
   const listed = globSync('**/*.{ts,tsx}', { cwd: root });
   const wanted = includeTests
     ? listed
-    : listed.filter((f) => !/\.test\./.test(f) && !f.startsWith('test/'));
+    : listed.filter((f) => !/\.(test|spec)\./.test(f) && !f.startsWith('test/'));
   return new Map(wanted.map((f) => [f, readFileSync(resolve(root, f), 'utf8')]));
 }
 
@@ -166,7 +176,7 @@ rtk git add scripts/find-dead-exports.mjs scripts/find-dead-exports.test.mjs
 rtk git commit -m "test(webui): add a dead-export scanner for the cleanup"
 ```
 
-> Two deliberate corners. The regex matches identifiers textually, so a symbol sharing a name with an unrelated local reads as "used" — that direction is safe, it under-reports rather than deleting something live. And `fs.globSync` replaces shelling out to `find`: stdlib, no `child_process`, no shell-injection surface. A real resolver is not worth it for a one-off sweep.
+> Two deliberate corners. The regex matches identifiers textually, so a symbol sharing a name with an unrelated local reads as "used" — that direction is safe, it under-reports rather than deleting something live. (The matcher escapes the symbol and uses identifier-character boundaries, so `$`-prefixed exports are matched correctly and cannot over-report.) And `fs.globSync` replaces shelling out to `find`: stdlib, no `child_process`, no shell-injection surface. A real resolver is not worth it for a one-off sweep. `export default`, export lists, and re-exports are not matched by `EXPORT_RE`; they are intentionally out of scope for this sweep, which only inventories named declarations.
 
 ---
 
@@ -181,7 +191,7 @@ Largest single cut. `UserManagementPage` builds its dialogs inline; Layout impor
 **Step 1: Confirm zero production importers**
 
 ```bash
-cd cross-compile/www/src && grep -rn "UserDialogs" --include='*.tsx' . | grep -v '\.test\.'
+cd cross-compile/www/src && grep -rn "UserDialogs" --include='*.ts' --include='*.tsx' . | grep -v 'components/users/UserDialogs'
 ```
 
 Expected: no output. If anything prints, stop and re-scope.
@@ -220,7 +230,7 @@ Six exports, zero callers. The WebUI is served from the camera; `location.host` 
 **Step 1: Confirm no production importer**
 
 ```bash
-cd cross-compile/www/src && grep -rn "cameraConfig" --include='*.ts' --include='*.tsx' . | grep -v 'config/cameraConfig'
+cd cross-compile/www/src && grep -rn "cameraConfig" --include='*.ts' --include='*.tsx' . | grep -v 'config/cameraConfig\.'
 ```
 
 Expected: no output.
@@ -253,7 +263,7 @@ rtk git commit -m "chore(webui): delete cameraConfig, unreferenced since the UI 
 **Step 1: Confirm both are orphaned**
 
 ```bash
-cd cross-compile/www/src && grep -rn "SystemInfo" --include='*.tsx' . | grep -v 'SystemInfo.tsx\|SystemInfo.test\|types/index'
+cd cross-compile/www/src && grep -rn "SystemInfo" --include='*.ts' --include='*.tsx' . | grep -v 'components/SystemInfo'
 grep -rn 'className="card"' --include='*.tsx' .
 ```
 
@@ -374,7 +384,7 @@ rtk git commit -am "chore(webui): cut CSS utilities with no call site, sync the 
 
 ```bash
 cd cross-compile/www/src && for k in getNetworkInterfaces getDNS getUsers getProfiles getImagingSettings systemReboot setSystemFactoryDefault getSystemBackup restoreSystem getPTZStatus; do
-  echo "$(grep -rn "soapBodies\.$k" --include='*.ts' . | grep -v '\.test\.' | wc -l) $k";
+  echo "$(grep -rn "soapBodies\.$k" --include='*.ts' --include='*.tsx' . | grep -v '\.test\.' | wc -l) $k";
 done
 ```
 
@@ -531,13 +541,13 @@ diff /tmp/dead-before.txt /tmp/dead-after.txt
 
 Anything newly appearing is a cascade orphan exposed by these deletions. Delete it and repeat until the list stops growing.
 
-**Step 2: Confirm coverage did not drop**
+**Step 2: Confirm coverage did not drop on any untouched file**
 
 ```bash
 cd cross-compile/www && npm run test:coverage 2>&1 | tail -20
 ```
 
-Expected: total line coverage equal or **higher** than the recorded baseline. A drop means something live was deleted — bisect the task commits.
+Compare per-file line coverage to the baseline. Aggregate coverage may drop when tested-but-dead code was deleted with its tests; that is fine as long as every file *outside* the edit set is unchanged. A drop in an untouched file means something live was deleted — bisect the task commits.
 
 **Step 3: Open the PR**
 
@@ -550,7 +560,7 @@ Include the before/after coverage numbers and the `npm run analyze` delta in the
 
 ---
 
-# PR2 — `refactor(webui): dedup`
+## PR2 — `refactor(webui): dedup`
 
 Target: ~-420 lines, zero visual change. **Success criterion: no test file is modified.** If a test needs editing, the refactor changed behavior — fix the refactor, not the test. The one legitimate exception is noted in Task 14.
 
@@ -789,7 +799,7 @@ Expected: `authService.test.ts` passes unmodified.
 
 ---
 
-# PR-auth — `refactor(webui): drop client-side credential encryption`
+## PR-auth — `refactor(webui): drop client-side credential encryption`
 
 Target: ~-440 lines. Independent of PR2 and PR3 — touches no file they touch. Branch from `main`.
 
@@ -831,7 +841,7 @@ rtk git commit -am "refactor(webui): keep credentials in memory, drop the AES-GC
 
 ---
 
-# PR3 — `refactor(webui): design system`
+## PR3 — `refactor(webui): design system`
 
 Target: ~-415 lines, visible changes. Tests change by design here, so they are **not** the signal — hardware verification is. Branch from `main` after PR2 merges.
 

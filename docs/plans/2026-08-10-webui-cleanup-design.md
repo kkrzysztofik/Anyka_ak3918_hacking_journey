@@ -113,7 +113,7 @@ touches no file the other PRs touch.
 
 ### Sequence
 
-```
+```text
 PR1 ──> PR2 ──> PR3 ──> Diagnostics
    └──> PR-auth (parallel, independent)
 ```
@@ -132,9 +132,13 @@ cd cross-compile/www && npm run lint && npm run type-check && npm run test
 `type-check` runs both compilers. This matters for the `paths` change in PR1,
 which is exactly the kind of edit that diverges between TS 6 and TS 7.
 
-**PR1 — the signal is coverage going up.** Vitest's coverage config includes all
-of `src/**`, so dead-but-tested files were inflating the denominator. A drop means
-something live was deleted. Plus:
+**PR1 — the signal is retained-source coverage, not the aggregate percentage.**
+Aggregate line coverage is *not* monotonic under this PR: deleting tested-but-dead
+code together with its tests can lower the percentage even when nothing live was
+deleted (the removed covered lines concentrate a file's few uncovered ones). Check
+per-file line coverage against the baseline instead — every file outside the edit
+set must be unchanged, and any drop must be confined to the files the task edited.
+Plus:
 
 - Re-run the orphan-export scan after each deletion batch to catch cascades.
   Land it as `scripts/find-dead-exports.mjs` rather than keeping it a throwaway.
