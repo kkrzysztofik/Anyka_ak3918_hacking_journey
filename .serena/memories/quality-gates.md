@@ -96,7 +96,8 @@ npm run lint && npm run type-check && npm run test
 | WebUI Lint | ESLint | Must pass |
 | WebUI Tests | Vitest | Must pass |
 | Type Check | TypeScript | Must pass |
-| Security Scan | Snyk | Review findings |
+| Dependency Audit | `cargo audit` (RustSec) | Must pass — fails build on vulnerabilities |
+| SAST | CodeQL / SonarCloud | Review findings (advisory) |
 | Quality Gate | SonarCloud | Must pass |
 
 ### Branch Protection

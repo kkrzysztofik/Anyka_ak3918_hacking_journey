@@ -194,7 +194,7 @@ The project enforces strict separation:
 - **Container**: `kkrzysztofik/anyka-cross-compile:rust-1.97.1`
 - **Rust**: fmt, clippy, test, tarpaulin (coverage)
 - **WebUI**: lint, type-check, test, coverage
-- **Security**: Snyk (SAST + SCA), SonarQube
+- **Security**: `cargo audit` (RustSec, blocking) + Dependabot (dependency updates), CodeQL + SonarQube (SAST, advisory)
 - **ARM Build**: Cross-compile for armv5te target
 
 ## Target Platform

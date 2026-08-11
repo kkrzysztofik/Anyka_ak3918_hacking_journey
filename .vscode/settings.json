@@ -93,6 +93,5 @@
     }
   },
   "cursorpyright.analysis.typeCheckingMode": "strict",
-  "cursorpyright.analysis.diagnosticMode": "workspace",
-  "snyk.advanced.autoSelectOrganization": true
+  "cursorpyright.analysis.diagnosticMode": "workspace"
 }

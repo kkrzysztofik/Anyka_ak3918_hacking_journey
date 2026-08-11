@@ -169,5 +169,8 @@ git push -u origin feature/your-feature-name
 - GitHub Actions runs tests/lint with `--target x86_64-unknown-linux-gnu`
 - Container: `kkrzysztofik/anyka-cross-compile:rust-1.97.1`
 - Coverage reports uploaded to SonarCloud
-- Security scans via Snyk (SAST + SCA)
+- Dependency audit via `cargo audit` (RustSec DB); fails the build on vulnerabilities
+  - `(cd cross-compile && cargo audit)`
+  - `(cd validation/rust && cargo audit)`
+- SAST via CodeQL (default setup) and SonarCloud; Dependabot manages dependency updates
 - Quality gates must pass before merge

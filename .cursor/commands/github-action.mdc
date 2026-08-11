@@ -11,7 +11,7 @@ alwaysApply: false
 - **Target Platform**: Anyka AK3918 ARM-based IP camera with cross-compilation
 - **Build System**: Make-based with native cross-compilation support
 - **Testing Framework**: CMocka for unit tests (196 tests across 17 suites)
-- **Code Quality**: Clang static analyzer, Cppcheck, Snyk, custom linting scripts
+- **Code Quality**: Clang static analyzer, Cppcheck, CodeQL, custom linting scripts
 - **Documentation**: Doxygen for code documentation generation
 - **Primary Language**: C (embedded systems development)
 
@@ -76,12 +76,12 @@ make -C cross-compile/onvif docs               # Generate Doxygen documentation
 2. **Code Quality**:
 
    - Linting (custom scripts)
-   - Static analysis (Clang, Cppcheck, Snyk)
+   - Static analysis (Clang, Cppcheck, CodeQL)
    - Code formatting verification
 
 3. **Security**:
-   - Snyk security analysis
-   - Dependency vulnerability scanning
+   - CodeQL SAST analysis
+   - Dependency vulnerability scanning (`cargo audit` for Rust, Dependabot for updates)
 
 ### Environment Setup
 
