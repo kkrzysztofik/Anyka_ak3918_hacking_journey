@@ -753,10 +753,15 @@ mod tests {
     }
 
     /// Emit one info event in the pinned target and one in a non-pinned target
-    /// through a subscriber gated by `filter`, asserting only the pinned one is
-    /// enabled. `PINNED` is a `const` so the event macros can build static
-    /// metadata with the target override.
-    fn assert_pin_holds(filter: EnvFilter) {
+    /// through a subscriber gated by `filter`. `PINNED` is a `const` so the
+    /// event macros can build static metadata with the target override.
+    ///
+    /// When `check_other` is set, also asserts a non-pinned target stays
+    /// filtered. The reload checkpoint passes `false`: it reads the shared
+    /// `RELOAD_HANDLE` after a concurrent test may have reloaded it to a
+    /// permissive level, so a non-pinned assertion would race. The pin
+    /// directive is level-independent, so asserting only the pin is race-free.
+    fn assert_pin_holds(filter: EnvFilter, check_other: bool) {
         use tracing_subscriber::layer::{Layer, SubscriberExt};
 
         const PINNED: &str = "onvif_rust::platform::anyka::night_mode";
@@ -775,10 +780,12 @@ mod tests {
             seen.contains(&PINNED),
             "the night_mode pin must lift info above error"
         );
-        assert!(
-            !seen.contains(&OTHER),
-            "a non-pinned target must stay filtered at error"
-        );
+        if check_other {
+            assert!(
+                !seen.contains(&OTHER),
+                "a non-pinned target must stay filtered at error"
+            );
+        }
     }
 
     #[test]
@@ -787,7 +794,7 @@ mod tests {
 
         // Production runs at `logging.level = "error"`; the pin must lift the
         // night_mode target to info while every other target stays filtered.
-        assert_pin_holds(build_env_filter(Level::ERROR));
+        assert_pin_holds(build_env_filter(Level::ERROR), true);
 
         // The runtime reload path (`set_log_level`) rebuilds the filter via
         // build_env_filter, so the pin must survive a reload to error too.
@@ -804,7 +811,12 @@ mod tests {
             .expect("RELOAD_HANDLE set by init_logging")
             .with_current(|f| f.clone())
             .expect("reload handle healthy");
-        assert_pin_holds(reloaded);
+        // Pinned-only checkpoint: the reloaded filter comes from the shared
+        // RELOAD_HANDLE, which a concurrent test (`test_set_log_level_after_init`
+        // and friends) may have reloaded to a permissive level between our
+        // `set_log_level("error")` and the `with_current` clone. The non-pinned
+        // assertion would then flake; the pin is level-independent and cannot.
+        assert_pin_holds(reloaded, false);
     }
 
     #[test]
