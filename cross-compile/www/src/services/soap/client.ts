@@ -4,7 +4,7 @@
  * Provides utilities for building SOAP envelopes and parsing XML responses.
  * Uses fast-xml-parser for XML handling.
  */
-import { XMLBuilder, XMLParser } from 'fast-xml-parser';
+import { XMLParser } from 'fast-xml-parser';
 
 // NOSONAR
 
@@ -82,15 +82,6 @@ const parserOptions = {
 
 const parser = new XMLParser(parserOptions);
 
-const builderOptions = {
-  ignoreAttributes: false,
-  attributeNamePrefix: '@_',
-  format: false,
-  suppressEmptyNode: true,
-};
-
-const builder = new XMLBuilder(builderOptions);
-
 /**
  * Escapes XML special characters to prevent XML injection attacks.
  * Use this for user-provided input that will be inserted into XML content.
@@ -105,17 +96,6 @@ export function escapeXml(input: string): string {
     .replaceAll('>', '&gt;')
     .replaceAll('"', '&quot;')
     .replaceAll("'", '&apos;');
-}
-
-/**
- * Escapes XML attribute values.
- * Use this for user-provided input that will be used in XML attributes.
- *
- * @param input - The string to escape
- * @returns The escaped string safe for XML attribute insertion
- */
-export function escapeXmlAttribute(input: string): string {
-  return escapeXml(input);
 }
 
 /**
@@ -214,25 +194,6 @@ function extractSOAPFault(body: Record<string, unknown>): SOAPFault | null {
 export const soapBodies = {
   getDeviceInformation: () => '<tds:GetDeviceInformation />',
   getSystemDateAndTime: () => '<tds:GetSystemDateAndTime />',
-  getNetworkInterfaces: () => '<tds:GetNetworkInterfaces />',
-  getDNS: () => '<tds:GetDNS />',
-  getUsers: () => '<tds:GetUsers />',
-  getProfiles: () => '<trt:GetProfiles />',
-  getImagingSettings: (videoSourceToken: string) =>
-    `<timg:GetImagingSettings><timg:VideoSourceToken>${escapeXml(videoSourceToken)}</timg:VideoSourceToken></timg:GetImagingSettings>`,
-  systemReboot: () => '<tds:SystemReboot />',
-  setSystemFactoryDefault: (type: 'Hard' | 'Soft') =>
-    `<tds:SetSystemFactoryDefault><tds:FactoryDefault>${escapeXml(type)}</tds:FactoryDefault></tds:SetSystemFactoryDefault>`,
-  getSystemBackup: () => '<tds:GetSystemBackup />',
-  restoreSystem: (backupFiles: Array<{ Name: string; Data: string }>) => {
-    const filesXml = backupFiles
-      .map(
-        (file) =>
-          `<tds:BackupFile><tds:Name>${escapeXml(file.Name)}</tds:Name><tds:Data>${escapeXml(file.Data)}</tds:Data></tds:BackupFile>`,
-      )
-      .join('');
-    return `<tds:RestoreSystem><tds:BackupFiles>${filesXml}</tds:BackupFiles></tds:RestoreSystem>`;
-  },
 
   // PTZ service
   continuousMove: (profileToken: string, panSpeed: number, tiltSpeed: number) => {
@@ -249,9 +210,6 @@ export const soapBodies = {
 
   gotoHomePosition: (profileToken: string) =>
     `<tptz:GotoHomePosition><tptz:ProfileToken>${escapeXml(profileToken)}</tptz:ProfileToken></tptz:GotoHomePosition>`,
-
-  getPTZStatus: (profileToken: string) =>
-    `<tptz:GetStatus><tptz:ProfileToken>${escapeXml(profileToken)}</tptz:ProfileToken></tptz:GetStatus>`,
 
   getPresets: (profileToken: string) =>
     `<tptz:GetPresets><tptz:ProfileToken>${escapeXml(profileToken)}</tptz:ProfileToken></tptz:GetPresets>`,
@@ -273,4 +231,4 @@ export const soapBodies = {
     `<tptz:SendAuxiliaryCommand><tptz:ProfileToken>${escapeXml(profileToken)}</tptz:ProfileToken><tptz:AuxiliaryData>${escapeXml(auxiliaryData)}</tptz:AuxiliaryData></tptz:SendAuxiliaryCommand>`,
 };
 
-export { parser, builder };
+export { parser };

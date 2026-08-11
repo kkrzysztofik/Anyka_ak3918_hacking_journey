@@ -7,11 +7,9 @@ import { apiClient } from '@/services/api';
 import {
   createProfile,
   deleteProfile,
-  getProfile,
   getProfiles,
   getVideoEncoderConfiguration,
   getVideoEncoderConfigurationOptions,
-  getVideoEncoderConfigurations,
   getVideoSourceConfiguration,
   setVideoEncoderConfiguration,
   setVideoSourceConfiguration,
@@ -31,101 +29,6 @@ vi.mock('@/services/api', () => ({
 describe('profileService', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-  });
-
-  describe('getVideoEncoderConfigurations', () => {
-    it('should parse video encoder configurations correctly', async () => {
-      const mockResponse = createMockSOAPResponse(`
-        <GetVideoEncoderConfigurationsResponse>
-          <Configurations token="encoder_1">
-            <Name>MainStream</Name>
-            <Encoding>H264</Encoding>
-            <Resolution>
-              <Width>1920</Width>
-              <Height>1080</Height>
-            </Resolution>
-            <Quality>80</Quality>
-            <RateControl>
-              <FrameRateLimit>30</FrameRateLimit>
-              <EncodingInterval>1</EncodingInterval>
-              <BitrateLimit>4000</BitrateLimit>
-            </RateControl>
-            <H264>
-              <GovLength>30</GovLength>
-              <H264Profile>Main</H264Profile>
-            </H264>
-            <SessionTimeout>PT60S</SessionTimeout>
-          </Configurations>
-        </GetVideoEncoderConfigurationsResponse>
-      `);
-
-      vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
-
-      const result = await getVideoEncoderConfigurations();
-
-      expect(result).toHaveLength(1);
-      expect(result[0].token).toBe('encoder_1');
-      expect(result[0].name).toBe('MainStream');
-      expect(result[0].encoding).toBe('H264');
-      expect(result[0].resolution).toEqual({ width: 1920, height: 1080 });
-      expect(result[0].quality).toBe(80);
-      expect(result[0].rateControl).toEqual({
-        frameRateLimit: 30,
-        encodingInterval: 1,
-        bitrateLimit: 4000,
-      });
-      expect(result[0].h264).toEqual({
-        govLength: 30,
-        h264Profile: 'Main',
-      });
-    });
-
-    it('should handle multiple configurations', async () => {
-      const mockResponse = createMockSOAPResponse(`
-        <GetVideoEncoderConfigurationsResponse>
-          <Configurations token="encoder_1">
-            <Name>MainStream</Name>
-            <Encoding>H264</Encoding>
-            <Resolution><Width>1920</Width><Height>1080</Height></Resolution>
-            <Quality>80</Quality>
-            <SessionTimeout>PT60S</SessionTimeout>
-          </Configurations>
-          <Configurations token="encoder_2">
-            <Name>SubStream</Name>
-            <Encoding>H264</Encoding>
-            <Resolution><Width>640</Width><Height>480</Height></Resolution>
-            <Quality>60</Quality>
-            <SessionTimeout>PT60S</SessionTimeout>
-          </Configurations>
-        </GetVideoEncoderConfigurationsResponse>
-      `);
-
-      vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
-
-      const result = await getVideoEncoderConfigurations();
-
-      expect(result).toHaveLength(2);
-      expect(result[0].name).toBe('MainStream');
-      expect(result[1].name).toBe('SubStream');
-    });
-
-    it('should return empty array when no configurations', async () => {
-      const mockResponse = createMockSOAPResponse('<GetVideoEncoderConfigurationsResponse />');
-
-      vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
-
-      const result = await getVideoEncoderConfigurations();
-
-      expect(result).toEqual([]);
-    });
-
-    it('should throw on SOAP fault', async () => {
-      const mockResponse = createMockSOAPFaultResponse('soap:Sender', 'Operation failed');
-
-      vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
-
-      await expect(getVideoEncoderConfigurations()).rejects.toThrow();
-    });
   });
 
   describe('getVideoEncoderConfiguration', () => {
@@ -484,46 +387,6 @@ describe('profileService', () => {
       vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
 
       await expect(getProfiles()).rejects.toThrow();
-    });
-  });
-
-  describe('getProfile', () => {
-    it('should parse single profile by token', async () => {
-      const mockResponse = createMockSOAPResponse(`
-        <GetProfileResponse>
-          <Profile token="ProfileToken1">
-            <Name>MainStream</Name>
-          </Profile>
-        </GetProfileResponse>
-      `);
-
-      vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
-
-      const result = await getProfile('ProfileToken1');
-
-      expect(result).not.toBeNull();
-      expect(result?.token).toBe('ProfileToken1');
-      expect(result?.name).toBe('MainStream');
-    });
-
-    it('should return null on SOAP fault', async () => {
-      const mockResponse = createMockSOAPFaultResponse('soap:Sender', 'Not found');
-
-      vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
-
-      const result = await getProfile('invalid');
-
-      expect(result).toBeNull();
-    });
-
-    it('should return null on missing profile', async () => {
-      const mockResponse = createMockSOAPResponse('<GetProfileResponse />');
-
-      vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
-
-      const result = await getProfile('invalid');
-
-      expect(result).toBeNull();
     });
   });
 

@@ -1,14 +1,12 @@
 /**
  * Test utilities and mock helpers
  */
-import { vi } from 'vitest';
-
 import type { ApiResponse } from '@/services/api';
 
 /**
  * Create a mock API response
  */
-export function createMockResponse<T>(data: T, status = 200): ApiResponse<T> {
+function createMockResponse<T>(data: T, status = 200): ApiResponse<T> {
   return {
     data,
     status,
@@ -18,7 +16,7 @@ export function createMockResponse<T>(data: T, status = 200): ApiResponse<T> {
 /**
  * Create a SOAP envelope for testing
  */
-export function createTestSOAPResponse(bodyContent: string): string {
+function createTestSOAPResponse(bodyContent: string): string {
   return `<?xml version="1.0" encoding="UTF-8"?>
 <soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope">
   <soap:Body>
@@ -33,22 +31,13 @@ export function createTestSOAPResponse(bodyContent: string): string {
  * @param reason - Fault reason text
  * @returns SOAP envelope XML string with fault
  */
-export function createSOAPFaultResponse(code: string, reason: string): string {
+function createSOAPFaultResponse(code: string, reason: string): string {
   return createTestSOAPResponse(
     `<soap:Fault>
       <soap:Code><soap:Value>${code}</soap:Value></soap:Code>
       <soap:Reason><soap:Text>${reason}</soap:Text></soap:Reason>
     </soap:Fault>`,
   );
-}
-
-/**
- * Create a SOAP success response (alias for createTestSOAPResponse)
- * @param bodyContent - XML body content
- * @returns SOAP envelope XML string
- */
-export function createSOAPSuccessResponse(bodyContent: string): string {
-  return createTestSOAPResponse(bodyContent);
 }
 
 /**
@@ -74,14 +63,4 @@ export function createMockSOAPFaultResponse(
   status = 200,
 ): ApiResponse<string> {
   return createMockResponse(createSOAPFaultResponse(code, reason), status);
-}
-
-/**
- * Mock apiClient for service tests
- */
-export function mockApiClient() {
-  return {
-    post: vi.fn(),
-    get: vi.fn(),
-  };
 }

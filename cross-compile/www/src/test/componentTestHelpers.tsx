@@ -13,7 +13,6 @@ import {
   waitFor,
 } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { toast } from 'sonner';
 import { expect } from 'vitest';
 
 import { AuthProvider } from '@/hooks/useAuth';
@@ -24,7 +23,7 @@ import type { MediaProfile } from '@/services/profileService';
  * Create a QueryClient configured for testing
  * Disables retries for predictable test behavior
  */
-export function createTestQueryClient(): QueryClient {
+function createTestQueryClient(): QueryClient {
   return new QueryClient({
     defaultOptions: {
       queries: { retry: false },
@@ -79,16 +78,6 @@ export function renderWithProviders(
 }
 
 export { toast as mockToast } from 'sonner';
-
-/**
- * API endpoints constants for mock setup
- */
-export const MOCK_ENDPOINTS = {
-  device: '/onvif/device_service',
-  media: '/onvif/media_service',
-  ptz: '/onvif/ptz_service',
-  imaging: '/onvif/imaging_service',
-} as const;
 
 /**
  * Common mock data for tests
@@ -267,22 +256,6 @@ export async function waitForPageLoad(testId: string): Promise<void> {
 }
 
 /**
- * Render a page component and wait for it to load
- * @param component - React component to render
- * @param testId - Test ID to wait for
- * @param options - Optional render options
- */
-export async function renderPageAndWait(
-  component: ReactElement,
-  testId: string,
-  options?: RenderWithProvidersOptions,
-) {
-  const result = renderWithProviders(component, options);
-  await waitForPageLoad(testId);
-  return result;
-}
-
-/**
  * Open a dialog by clicking the trigger and verify it opens
  * @param user - User event instance
  * @param triggerTestId - Test ID of the button/trigger that opens the dialog
@@ -321,27 +294,6 @@ export async function closeDialog(
 }
 
 /**
- * Submit a dialog form and verify the expected function was called
- * @param user - User event instance
- * @param submitTestId - Test ID of the submit button
- * @param expectedCall - Mock function that should be called
- */
-export async function submitDialog(
-  user: ReturnType<typeof userEvent.setup>,
-  submitTestId: string,
-  expectedCall?: ReturnType<typeof import('vitest').vi.fn>,
-): Promise<void> {
-  const submitButton = screen.getByTestId(submitTestId);
-  await user.click(submitButton);
-
-  if (expectedCall) {
-    await waitFor(() => {
-      expect(expectedCall).toHaveBeenCalled();
-    });
-  }
-}
-
-/**
  * Fill a form field with a value
  * @param user - User event instance
  * @param testId - Test ID of the input field
@@ -355,19 +307,6 @@ export async function fillFormField(
   const input = screen.getByTestId(testId);
   await user.clear(input);
   await user.type(input, value);
-}
-
-/**
- * Toggle a switch or checkbox
- * @param user - User event instance
- * @param testId - Test ID of the switch/checkbox
- */
-export async function toggleSwitch(
-  user: ReturnType<typeof userEvent.setup>,
-  testId: string,
-): Promise<void> {
-  const switchElement = screen.getByTestId(testId);
-  await user.click(switchElement);
 }
 
 /**
@@ -463,27 +402,6 @@ export async function makeFormDirty(
 }
 
 /**
- * Helper to interact with user menu (open menu, perform action)
- * @param user - User event instance
- * @param actionTestId - Test ID of the menu action button
- */
-export async function performUserMenuAction(
-  user: ReturnType<typeof userEvent.setup>,
-  actionTestId: string,
-): Promise<void> {
-  const userButtons = screen.getAllByTestId('layout-user-menu-button');
-  const userButton = userButtons[0]; // Use desktop version
-  await user.click(userButton);
-
-  await waitFor(() => {
-    expect(screen.getByTestId(actionTestId)).toBeInTheDocument();
-  });
-
-  const actionButton = screen.getByTestId(actionTestId);
-  await user.click(actionButton);
-}
-
-/**
  * Helper function to create delayed promise for testing loading states
  */
 export async function createDelayedPromise<T>(value: T, delay = 100): Promise<T> {
@@ -507,127 +425,6 @@ export function createControllablePromise<T>() {
 }
 
 /**
- * Common mock for Dialog components to be used in vi.mock
- */
-export const MockDialog = {
-  Dialog: ({
-    children,
-    open,
-    onOpenChange,
-  }: {
-    children: React.ReactNode;
-    open: boolean;
-    onOpenChange: (open: boolean) => void;
-  }) => (
-    <div data-testid="dialog" data-open={open}>
-      {open && (
-        <div data-testid="dialog-container">
-          <button type="button" onClick={() => onOpenChange(false)} data-testid="dialog-overlay">
-            Close
-          </button>
-          {children}
-        </div>
-      )}
-    </div>
-  ),
-  DialogContent: ({
-    children,
-    className,
-    ...props
-  }: {
-    children: React.ReactNode;
-    className?: string;
-    [key: string]: unknown;
-  }) => (
-    <div data-testid="dialog-content" className={className} {...props}>
-      {children}
-    </div>
-  ),
-  DialogDescription: ({
-    children,
-    ...props
-  }: { children: React.ReactNode } & Record<string, unknown>) => (
-    <div data-testid="dialog-description" {...props}>
-      {children}
-    </div>
-  ),
-  DialogFooter: ({
-    children,
-    className,
-    ...props
-  }: {
-    children: React.ReactNode;
-    className?: string;
-    [key: string]: unknown;
-  }) => (
-    <div data-testid="dialog-footer" className={className} {...props}>
-      {children}
-    </div>
-  ),
-  DialogHeader: ({
-    children,
-    className,
-    ...props
-  }: {
-    children: React.ReactNode;
-    className?: string;
-    [key: string]: unknown;
-  }) => (
-    <div data-testid="dialog-header" className={className} {...props}>
-      {children}
-    </div>
-  ),
-  DialogTitle: ({
-    children,
-    ...props
-  }: { children: React.ReactNode } & Record<string, unknown>) => (
-    <h2 data-testid="dialog-title" {...props}>
-      {children}
-    </h2>
-  ),
-};
-
-/**
- * Common mock for Button component to be used in vi.mock
- */
-export const MockButton = {
-  Button: ({
-    children,
-    onClick,
-    disabled,
-    type,
-    variant,
-    size,
-    asChild: _asChild,
-    className,
-    ...props
-  }: {
-    children: React.ReactNode;
-    onClick?: (e: React.MouseEvent) => void;
-    disabled?: boolean;
-    type?: 'submit' | 'reset' | 'button';
-    variant?: string;
-    size?: string;
-    asChild?: boolean;
-    className?: string;
-    [key: string]: unknown;
-  }) => (
-    <button
-      onClick={onClick}
-      disabled={disabled}
-      type={type}
-      data-variant={variant}
-      data-size={size}
-      className={className}
-      {...props}
-    >
-      {children}
-    </button>
-  ),
-  buttonVariants: () => 'mock-button-variant',
-};
-
-/**
  * Create an encrypted data fixture with unique values for testing.
  * Generates unique IV and data strings to prevent cross-test contamination
  * in sessionStorage-based auth tests.
@@ -639,30 +436,4 @@ export function createEncryptedFixture() {
     data: btoa(`data-${unique}`),
     method: 'aes-gcm' as const,
   };
-}
-
-/**
- * Generic error toast verification helper
- * @param message - Expected error message
- * @param description - Optional error description
- */
-export function testErrorToast(message: string, description?: string): void {
-  if (description) {
-    expect(toast.error).toHaveBeenCalledWith(message, { description });
-  } else {
-    expect(toast.error).toHaveBeenCalledWith(message);
-  }
-}
-
-/**
- * Generic success toast verification helper
- * @param message - Expected success message
- * @param description - Optional success description
- */
-export function testSuccessToast(message: string, description?: string): void {
-  if (description) {
-    expect(toast.success).toHaveBeenCalledWith(message, { description });
-  } else {
-    expect(toast.success).toHaveBeenCalledWith(message);
-  }
 }

@@ -5,7 +5,7 @@ import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { getDeviceIdentification, setDeviceInformation } from '@/services/deviceService';
+import { getDeviceIdentification, setScopes } from '@/services/deviceService';
 import { getNetworkInterfaces } from '@/services/networkService';
 import { MOCK_DATA, mockToast, renderWithProviders } from '@/test/componentTestHelpers';
 
@@ -14,7 +14,7 @@ import IdentificationPage from './IdentificationPage';
 // Mock services
 vi.mock('@/services/deviceService', () => ({
   getDeviceIdentification: vi.fn(),
-  setDeviceInformation: vi.fn(),
+  setScopes: vi.fn(),
 }));
 
 vi.mock('@/services/networkService', () => ({
@@ -80,7 +80,7 @@ describe('IdentificationPage', () => {
   });
 
   it('should submit form with valid data', async () => {
-    vi.mocked(setDeviceInformation).mockResolvedValue(undefined);
+    vi.mocked(setScopes).mockResolvedValue(undefined);
 
     const user = userEvent.setup();
     renderWithProviders(<IdentificationPage />);
@@ -97,13 +97,13 @@ describe('IdentificationPage', () => {
     await user.click(submitButton);
 
     await waitFor(() => {
-      expect(setDeviceInformation).toHaveBeenCalled();
+      expect(setScopes).toHaveBeenCalledWith('Updated Device', 'Test Location');
       expect(mockToast.success).toHaveBeenCalledWith('Device information saved');
     });
   });
 
   it('should show error toast when mutation fails', async () => {
-    vi.mocked(setDeviceInformation).mockRejectedValue(new Error('Network error'));
+    vi.mocked(setScopes).mockRejectedValue(new Error('Network error'));
 
     const user = userEvent.setup();
     renderWithProviders(<IdentificationPage />);
@@ -121,7 +121,7 @@ describe('IdentificationPage', () => {
 
     await waitFor(
       () => {
-        expect(setDeviceInformation).toHaveBeenCalled();
+        expect(setScopes).toHaveBeenCalled();
         expect(mockToast.error).toHaveBeenCalledWith('Failed to save device information', {
           description: 'Network error',
         });

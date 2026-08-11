@@ -4,7 +4,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { apiClient } from '@/services/api';
-import { checkDeviceReachable, verifyCredentials } from '@/services/authService';
+import { verifyCredentials } from '@/services/authService';
 import { createMockSOAPFaultResponse, createMockSOAPResponse } from '@/test/utils';
 
 // Mock the api module
@@ -107,27 +107,6 @@ describe('authService', () => {
         expect.stringContaining('GetDeviceInformation'),
         expect.objectContaining({ headers: expect.any(Object) }),
       );
-    });
-  });
-
-  describe('checkDeviceReachable', () => {
-    it('should return true when device responds with 200', async () => {
-      vi.mocked(apiClient.post).mockResolvedValueOnce({
-        status: 200,
-        data: '<response/>',
-      });
-
-      const result = await checkDeviceReachable();
-
-      expect(result).toBe(true);
-    });
-
-    it('should return false on network error', async () => {
-      vi.mocked(apiClient.post).mockRejectedValueOnce(new Error('Connection refused'));
-
-      const result = await checkDeviceReachable();
-
-      expect(result).toBe(false);
     });
   });
 });
