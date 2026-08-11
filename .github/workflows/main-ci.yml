@@ -1002,7 +1002,7 @@ jobs:
             ${sonarStatus === 'success' ? '| **View Report** | [SonarQube Cloud Dashboard](https://sonarcloud.io/dashboard?id=kkrzysztofik_Anyka_ak3918_hacking_journey) |' : ''}
 
             ### 📦 Job Results
-            ${jobResults.map(([name, result]) => `- **${name}**: ${formatStatus(result)}`).join('\n            ')}
+            ${jobResults.map(([name, result]) => `- **${name}**: ${formatStatus(result)}`).join('\n')}
 
             ---
             *This comment is automatically updated on each push to the PR*`;
