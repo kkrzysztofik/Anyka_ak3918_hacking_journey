@@ -47,7 +47,7 @@ fn default_lines() -> usize {
 pub async fn handle_diagnostics(
     Extension(state): Extension<Arc<DiagnosticsState>>,
 ) -> Json<Snapshot> {
-    Json(state.snapshot())
+    Json(state.snapshot().await)
 }
 
 /// Serve a filtered tail of one of the on-device log files as JSON.

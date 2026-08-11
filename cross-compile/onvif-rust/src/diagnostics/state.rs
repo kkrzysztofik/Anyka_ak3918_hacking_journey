@@ -71,6 +71,8 @@ pub struct Snapshot {
     pub components: Vec<Component>,
     /// Service names that failed to initialise at startup.
     pub degraded_services: Vec<String>,
+    /// Live vision/night-mode diagnostics from the imaging pipeline, if available.
+    pub vision: Option<crate::platform::VisionDiagnostics>,
 }
 
 /// Holds platform handles and the last `/proc` sample for computing deltas.
@@ -98,7 +100,10 @@ impl DiagnosticsState {
     ///
     /// Rate fields (`cpu_percent`, `network`) are `None` on the first call;
     /// subsequent calls produce rates from the delta since the previous call.
-    pub fn snapshot(&self) -> Snapshot {
+    ///
+    /// `vision` is populated asynchronously from the imaging pipeline when a
+    /// platform with [`ImagingControl`] support is attached.
+    pub async fn snapshot(&self) -> Snapshot {
         let stat_text = read_file("/proc/stat");
         let meminfo_text = read_file("/proc/meminfo");
         let net_dev_text = read_file("/proc/net/dev");
@@ -170,6 +175,11 @@ impl DiagnosticsState {
             .collect();
         components.sort_by(|a, b| a.name.cmp(&b.name));
 
+        let vision = match self.platform.as_ref().and_then(|p| p.imaging_control()) {
+            Some(imaging) => imaging.vision_diagnostics().await.ok().flatten(),
+            None => None,
+        };
+
         Snapshot {
             status: health.status.to_string(),
             uptime: Uptime {
@@ -183,6 +193,7 @@ impl DiagnosticsState {
             stream_frame_age_ms: frame_age_outer.flatten(),
             degraded_services: health.degraded_services,
             components,
+            vision,
         }
     }
 }
@@ -199,38 +210,45 @@ fn read_file(path: &str) -> Option<String> {
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_first_snapshot_has_no_rates() {
+    #[tokio::test]
+    async fn test_first_snapshot_has_no_rates() {
         let state = DiagnosticsState::new(None, Vec::new());
-        let snap = state.snapshot();
+        let snap = state.snapshot().await;
         assert!(snap.cpu_percent.is_none());
         assert!(snap.network.is_none());
     }
 
-    #[test]
-    fn test_second_snapshot_produces_rates() {
+    #[tokio::test]
+    async fn test_second_snapshot_produces_rates() {
         let state = DiagnosticsState::new(None, Vec::new());
-        let _ = state.snapshot();
+        let _ = state.snapshot().await;
         std::thread::sleep(std::time::Duration::from_millis(50));
-        let snap = state.snapshot();
+        let snap = state.snapshot().await;
         assert!(snap.cpu_percent.is_some(), "a second sample yields a rate");
     }
 
-    #[test]
-    fn test_snapshot_reports_process_uptime() {
+    #[tokio::test]
+    async fn test_snapshot_reports_process_uptime() {
         let state = DiagnosticsState::new(None, Vec::new());
-        let snap = state.snapshot();
+        let snap = state.snapshot().await;
         assert!(snap.uptime.system_s >= snap.uptime.process_s);
     }
 
-    #[test]
-    fn test_snapshot_includes_startup_degraded_services() {
+    #[tokio::test]
+    async fn test_snapshot_includes_startup_degraded_services() {
         let state = DiagnosticsState::new(None, vec!["PTZ".to_string()]);
-        let snap = state.snapshot();
+        let snap = state.snapshot().await;
         assert_eq!(snap.status, "degraded");
         assert!(
             snap.degraded_services.contains(&"PTZ".to_string()),
             "PTZ must appear in degraded_services"
         );
+    }
+
+    #[tokio::test]
+    async fn test_snapshot_vision_none_without_platform() {
+        let state = DiagnosticsState::new(None, Vec::new());
+        let snap = state.snapshot().await;
+        assert!(snap.vision.is_none());
     }
 }
