@@ -10,6 +10,10 @@
 
 ---
 
+## Step 0 — mandatory reads before any task
+
+Before touching `cross-compile/www`, load `.serena/memories/www-development-standards.md`, `.serena/memories/www-design-system.md`, `.serena/memories/quality-gates.md`, and `.serena/memories/security-guidelines.md` (mandatory per `cross-compile/www/AGENTS.md`). Also re-read the design doc: `docs/plans/2026-08-10-webui-cleanup-design.md`.
+
 ## How TDD applies here
 
 This is deletion and refactor work, so classic red-green does not apply to most tasks. The discipline is adapted, not skipped:
