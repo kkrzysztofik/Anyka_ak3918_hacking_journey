@@ -456,12 +456,6 @@ impl NightModeController {
             .await;
         if isp != 0 {
             tracing::warn!(isp, "ISP day/night switch failed; GPIO state advanced");
-            // GPIO already moved, so a later tick must only re-drive the ISP,
-            // never the whole apply (which would re-pulse the coil).
-            *self.isp_pending.lock().await = Some(target);
-        } else {
-            // A successful ISP call clears any prior pending sync.
-            *self.isp_pending.lock().await = None;
         }
 
         let post_result = tokio::task::spawn_blocking(move || execute_gpio(&post_isp, &paths))
@@ -476,6 +470,19 @@ impl NightModeController {
         if let Err(e) = post_result {
             tracing::warn!(error = %e, ?target, "GPIO transition failed; state not advanced");
             return Err(PlatformError::HardwareFailure(format!("GPIO write: {e}")));
+        }
+
+        // Only now that the full GPIO plan has succeeded do we update the
+        // pending ISP sync: a failed post-ISP GPIO write returns above without
+        // leaving a target, so tick never retries the ISP for a transition
+        // whose GPIO did not complete. GPIO already moved, so a pending target
+        // means a later tick must only re-drive the ISP, never the whole apply
+        // (which would re-pulse the coil).
+        if isp != 0 {
+            *self.isp_pending.lock().await = Some(target);
+        } else {
+            // A successful ISP call clears any prior pending sync.
+            *self.isp_pending.lock().await = None;
         }
 
         // Logged unconditionally: a silent success and a transition that never
@@ -1076,6 +1083,43 @@ mod tests {
 
         ctl.tick().await; // decide holds; the retry already resolved back in tick 1
         ctl.tick().await; // re-polls only: set_ir_filter still called exactly twice
+    }
+
+    #[tokio::test]
+    async fn test_no_isp_retry_when_post_isp_gpio_fails() {
+        use crate::hal::common::imaging::MockImagingHalTrait;
+        use crate::onvif::types::common::IrCutFilterMode;
+
+        // A failed post-ISP GPIO write must not leave a pending ISP sync:
+        // apply returns before recording the mode, so tick must not add an
+        // ISP-only retry on top of the normal re-apply. set_ir_filter is called
+        // exactly once per tick (by apply), never twice in the same tick.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let paths = NodePaths::rooted(dir.path(), dir.path());
+        seed_gpio_nodes(&paths);
+        // The post-ISP ircut pulse for Night writes ircut_a; make that fail.
+        std::fs::remove_file(paths.node(Node::IrCutA)).expect("remove ircut_a");
+        std::fs::create_dir(paths.node(Node::IrCutA)).expect("create dir ircut_a");
+
+        let mut ffi = MockImagingHalTrait::new();
+        ffi.expect_get_ae_luma().times(2).returning(|| Some(1)); // dark scene
+        ffi.expect_set_ir_filter()
+            .withf(|enabled| *enabled)
+            .times(2)
+            .returning(|_| -1);
+
+        let ctl = NightModeController::new(
+            paths,
+            unlocked_config(),
+            std::sync::Arc::new(ffi),
+            IrCutFilterMode::AUTO,
+            None,
+        );
+
+        ctl.tick().await; // apply: ISP fails AND post-ISP GPIO fails -> nothing recorded
+        ctl.tick().await; // re-apply only: no ISP-only retry (mockall enforces 2 calls)
+
+        assert_eq!(ctl.current_mode().await, None);
     }
 
     #[test]
