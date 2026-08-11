@@ -288,6 +288,9 @@ pub(crate) struct NightModeController {
     /// When the last sample line was logged, and what it classified to.
     /// `None` = nothing logged yet. Guards [`SAMPLE_LOG_INTERVAL`].
     sample_log: tokio::sync::Mutex<Option<(std::time::Instant, Option<DayNight>)>>,
+    /// A `set_ir_filter` that failed, and what it was trying to reach. GPIO
+    /// already advanced, so only the ISP still needs driving.
+    isp_pending: tokio::sync::Mutex<Option<DayNight>>,
     /// Best-effort IDR after every day/night apply (forced + AUTO).
     idr_hook: Option<std::sync::Arc<dyn Fn() + Send + Sync>>,
 }
@@ -333,6 +336,7 @@ impl NightModeController {
             ae_fail_streak: std::sync::atomic::AtomicU32::new(0),
             unsynced_warned: std::sync::atomic::AtomicBool::new(false),
             sample_log: tokio::sync::Mutex::new(None),
+            isp_pending: tokio::sync::Mutex::new(None),
             idr_hook,
         }
     }
@@ -451,6 +455,12 @@ impl NightModeController {
             .await;
         if isp != 0 {
             tracing::warn!(isp, "ISP day/night switch failed; GPIO state advanced");
+            // GPIO already moved, so a later tick must only re-drive the ISP,
+            // never the whole apply (which would re-pulse the coil).
+            *self.isp_pending.lock().await = Some(target);
+        } else {
+            // A successful ISP call clears any prior pending sync.
+            *self.isp_pending.lock().await = None;
         }
 
         let post_result = tokio::task::spawn_blocking(move || execute_gpio(&post_isp, &paths))
@@ -546,6 +556,21 @@ impl NightModeController {
             && let Err(e) = self.apply(target).await
         {
             tracing::warn!(error = %e, "night-mode transition failed");
+        }
+
+        // A failed set_ir_filter must not be left to rot: GPIO already advanced,
+        // so we do NOT re-run apply (that would re-pulse the coil). Retry only
+        // the ISP call on later ticks until the daemon accepts it.
+        let mut pending = self.isp_pending.lock().await;
+        if let Some(target) = *pending {
+            let isp = self
+                .ffi
+                .set_ir_filter(matches!(target, DayNight::Night))
+                .await;
+            if isp == 0 {
+                *pending = None;
+                tracing::info!(to = ?target, isp, "night mode ISP synced");
+            }
         }
     }
 
@@ -1011,6 +1036,41 @@ mod tests {
         ctl.tick().await;
 
         assert_eq!(ctl.current_mode().await, Some(DayNight::Night));
+    }
+
+    #[tokio::test]
+    async fn test_retries_the_isp_after_a_failed_switch() {
+        use crate::hal::common::imaging::MockImagingHalTrait;
+        use crate::onvif::types::common::IrCutFilterMode;
+
+        // GPIO advances even when the ISP switch fails, but the ISP itself must
+        // be retried until the daemon accepts it — otherwise it stays at its
+        // restart-default mode while the lamp says night.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let paths = NodePaths::rooted(dir.path(), dir.path());
+        seed_gpio_nodes(&paths);
+
+        let mut ffi = MockImagingHalTrait::new();
+        ffi.expect_get_ae_luma().times(3).returning(|| Some(1)); // dark scene
+        let mut calls = 0u8;
+        ffi.expect_set_ir_filter().times(2).returning(move |_| {
+            calls += 1;
+            if calls == 1 { -1 } else { 0 }
+        });
+
+        let ctl = NightModeController::new(
+            paths,
+            unlocked_config(),
+            std::sync::Arc::new(ffi),
+            IrCutFilterMode::AUTO,
+            None,
+        );
+
+        ctl.tick().await; // apply fails the ISP; GPIO state still records Night
+        assert_eq!(ctl.current_mode().await, Some(DayNight::Night));
+
+        ctl.tick().await; // decide holds; the pending ISP sync is retried
+        ctl.tick().await; // nothing further: set_ir_filter called exactly twice
     }
 
     #[test]
