@@ -19,7 +19,7 @@ toml = "1.1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 libc = "0.2"
-signal-hook = "0.3"
+signal-hook = "0.4"
 thiserror = "2.0"
 anyhow = "1.0"
 
