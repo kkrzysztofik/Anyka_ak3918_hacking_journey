@@ -492,7 +492,7 @@ pub struct VisionDiagnostics {
     pub mode: Option<String>,
     /// Last AE luminance reading used as the switching trigger (`0–255`), or
     /// `None` if no luma sample has been captured yet.
-    pub ae_luma: Option<i32>,
+    pub ae_luma: Option<u8>,
     /// Raw ADC reading on AIN0 (light-sensor channel), or `None` if not read.
     pub ain0: Option<i32>,
     /// Current IR LED state (`true` = on), or `None` if undriven.
