@@ -1,223 +1,224 @@
 /**
- * DiagnosticsPage Component Tests
+ * DiagnosticsPage Tests
+ *
+ * All tests mock useDiagnostics so the page renders without network calls.
+ * The service mock keeps TypeScript happy since getLogs is imported in later tasks.
  */
 import { screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import type { UseDiagnosticsResult } from '@/hooks/useDiagnostics';
+import { useDiagnostics } from '@/hooks/useDiagnostics';
+import type { Diagnostics } from '@/services/diagnosticsService';
 import { renderWithProviders } from '@/test/componentTestHelpers';
 
 import DiagnosticsPage from './DiagnosticsPage';
 
+vi.mock('@/hooks/useDiagnostics');
+vi.mock('@/services/diagnosticsService');
+
+const BASE_DIAG: Diagnostics = {
+  status: 'ok',
+  uptime: { process_s: 3600, system_s: 3600 }, // no restart gap
+  cpu_percent: 45,
+  memory: { total_kb: 36864, used_kb: 18432 }, // 18 MB / 36 MB
+  storage: { total_kb: 1048576, used_kb: 524288 }, // 512 MB / 1024 MB
+  network: { rx_bps: 1_000_000, tx_bps: 500_000 },
+  stream_frame_age_ms: 100,
+  components: [{ name: 'onvif', status: 'ok', message: null }],
+  degraded_services: [],
+};
+
+function makeResult(
+  overrides: Partial<Diagnostics> = {},
+  history: UseDiagnosticsResult['history'] = [],
+): UseDiagnosticsResult {
+  return {
+    data: { ...BASE_DIAG, ...overrides },
+    history,
+    isLoading: false,
+    isError: false,
+    error: null,
+    isFetching: false,
+    isSuccess: true,
+    isPending: false,
+    isRefetching: false,
+    dataUpdatedAt: Date.now(),
+    errorUpdatedAt: 0,
+    failureCount: 0,
+    failureReason: null,
+    fetchStatus: 'idle',
+    isLoadingError: false,
+    isRefetchError: false,
+    isStale: false,
+    isPlaceholderData: false,
+    status: 'success',
+    refetch: vi.fn(),
+  } as unknown as UseDiagnosticsResult;
+}
+
 describe('DiagnosticsPage', () => {
-  const renderDiagnosticsPage = () => renderWithProviders(<DiagnosticsPage />);
+  beforeEach(() => {
+    vi.mocked(useDiagnostics).mockReturnValue(makeResult());
+  });
 
   it('should render page title and description', () => {
-    renderDiagnosticsPage();
+    renderWithProviders(<DiagnosticsPage />);
     expect(screen.getByTestId('diagnostics-title')).toBeInTheDocument();
     expect(screen.getByTestId('diagnostics-description')).toBeInTheDocument();
   });
 
-  it('should render all system health stat cards', () => {
-    renderDiagnosticsPage();
-    expect(screen.getByTestId('diagnostics-stat-system-status')).toBeInTheDocument();
-    expect(screen.getByTestId('diagnostics-stat-system-status-value')).toHaveTextContent('Healthy');
-    expect(screen.getByTestId('diagnostics-stat-cpu-usage')).toBeInTheDocument();
-    expect(screen.getByTestId('diagnostics-stat-cpu-usage-value')).toHaveTextContent('51%');
-    expect(screen.getByTestId('diagnostics-stat-memory')).toBeInTheDocument();
-    expect(screen.getByTestId('diagnostics-stat-memory-value')).toHaveTextContent('69%');
-    expect(screen.getByTestId('diagnostics-stat-temperature')).toBeInTheDocument();
-    expect(screen.getByTestId('diagnostics-stat-temperature-value')).toHaveTextContent('64°C');
-  });
+  describe('CPU stat card', () => {
+    it('should render real cpu percent', () => {
+      renderWithProviders(<DiagnosticsPage />);
+      expect(screen.getByTestId('diagnostics-stat-cpu-usage-value')).toHaveTextContent('45%');
+    });
 
-  it('should render StatCard with subValue', () => {
-    renderDiagnosticsPage();
-    const subValueTests = [
-      { testId: 'diagnostics-stat-system-status-subvalue', expectedText: '● Online' },
-      { testId: 'diagnostics-stat-cpu-usage-subvalue', expectedText: 'Avg: 48%' },
-      { testId: 'diagnostics-stat-memory-subvalue', expectedText: '1.4 GB / 2.0 GB' },
-      { testId: 'diagnostics-stat-temperature-subvalue', expectedText: 'Normal range' },
-    ];
-
-    subValueTests.forEach(({ testId, expectedText }) => {
-      const element = screen.getByTestId(testId);
-      expect(element).toBeInTheDocument();
-      expect(element).toHaveTextContent(expectedText);
+    it('should show em-dash when cpu_percent is null', () => {
+      vi.mocked(useDiagnostics).mockReturnValue(makeResult({ cpu_percent: null }));
+      renderWithProviders(<DiagnosticsPage />);
+      expect(screen.getByTestId('diagnostics-stat-cpu-usage-value')).toHaveTextContent('\u2014');
     });
   });
 
-  it('should render StatCard labels', () => {
-    renderDiagnosticsPage();
-    const labelTests = [
-      { testId: 'diagnostics-stat-system-status-label', expectedText: 'System Status' },
-      { testId: 'diagnostics-stat-cpu-usage-label', expectedText: 'CPU Usage' },
-    ];
+  describe('Memory stat card', () => {
+    it('should render memory in megabytes', () => {
+      renderWithProviders(<DiagnosticsPage />);
+      // 18432 KB → 18 MB
+      expect(screen.getByTestId('diagnostics-stat-memory-value')).toHaveTextContent('18 MB');
+    });
 
-    labelTests.forEach(({ testId, expectedText }) => {
-      const element = screen.getByTestId(testId);
-      expect(element).toBeInTheDocument();
-      expect(element).toHaveTextContent(expectedText);
+    it('should show MB / MB subvalue', () => {
+      renderWithProviders(<DiagnosticsPage />);
+      expect(screen.getByTestId('diagnostics-stat-memory-subvalue')).toHaveTextContent(
+        '18 MB / 36 MB',
+      );
+    });
+
+    it('should show em-dash when memory is null', () => {
+      vi.mocked(useDiagnostics).mockReturnValue(makeResult({ memory: null }));
+      renderWithProviders(<DiagnosticsPage />);
+      expect(screen.getByTestId('diagnostics-stat-memory-value')).toHaveTextContent('\u2014');
     });
   });
 
-  it.each([
-    {
-      chartName: 'CPU usage',
-      titleTestId: 'diagnostics-cpu-usage-title',
-      descriptionTestId: 'diagnostics-cpu-usage-description',
-      hasCharts: true,
-    },
-    {
-      chartName: 'memory usage',
-      titleTestId: 'diagnostics-memory-usage-title',
-      descriptionTestId: 'diagnostics-memory-usage-description',
-      hasCharts: false,
-    },
-    {
-      chartName: 'network throughput',
-      titleTestId: 'diagnostics-network-throughput-title',
-      descriptionTestId: 'diagnostics-network-throughput-description',
-      hasCharts: false,
-      additionalTestIds: ['diagnostics-network-download-label', 'diagnostics-network-upload-label'],
-    },
-  ])(
-    'should render $chartName chart',
-    ({ titleTestId, descriptionTestId, hasCharts, additionalTestIds }) => {
-      renderDiagnosticsPage();
-      expect(screen.getByTestId(titleTestId)).toBeInTheDocument();
-      expect(screen.getByTestId(descriptionTestId)).toBeInTheDocument();
-      if (hasCharts) {
-        expect(screen.getAllByTestId('sparkline-area').length).toBeGreaterThan(0);
-      }
-      if (additionalTestIds) {
-        additionalTestIds.forEach((testId) => {
-          expect(screen.getByTestId(testId)).toBeInTheDocument();
-        });
-      }
-    },
-  );
+  describe('Storage stat card', () => {
+    it('should render storage card', () => {
+      renderWithProviders(<DiagnosticsPage />);
+      expect(screen.getByTestId('diagnostics-stat-storage')).toBeInTheDocument();
+    });
 
-  it('should render device information card', () => {
-    renderDiagnosticsPage();
-    expect(screen.getByTestId('diagnostics-device-information-title')).toBeInTheDocument();
-    expect(screen.getByTestId('diagnostics-device-information-description')).toBeInTheDocument();
-    const modelElement = screen.getByTestId('diagnostics-device-model');
-    expect(modelElement).toBeInTheDocument();
-    expect(modelElement).toHaveTextContent('Anyka-3918-Pro');
-    const firmwareElement = screen.getByTestId('diagnostics-device-firmware');
-    expect(firmwareElement).toBeInTheDocument();
-    expect(firmwareElement).toHaveTextContent('v2.4.1');
-  });
+    it('should display storage in MB', () => {
+      renderWithProviders(<DiagnosticsPage />);
+      // 524288 KB → 512 MB
+      expect(screen.getByTestId('diagnostics-stat-storage-value')).toHaveTextContent('512 MB');
+    });
 
-  it('should render system metrics card', () => {
-    renderDiagnosticsPage();
-    expect(screen.getByTestId('diagnostics-system-metrics-title')).toBeInTheDocument();
-    expect(screen.getByTestId('diagnostics-system-metrics-description')).toBeInTheDocument();
-    expect(screen.getByTestId('diagnostics-storage-used')).toBeInTheDocument();
-    expect(screen.getByTestId('diagnostics-active-streams')).toBeInTheDocument();
-  });
-
-  it('should render system logs section', () => {
-    renderDiagnosticsPage();
-    expect(screen.getByTestId('diagnostics-system-logs-title')).toBeInTheDocument();
-    expect(screen.getByTestId('diagnostics-system-logs-description')).toBeInTheDocument();
-  });
-
-  it('should render log filter buttons', () => {
-    renderDiagnosticsPage();
-    const filterButtons = [
-      'diagnostics-log-filter-all',
-      'diagnostics-log-filter-info',
-      'diagnostics-log-filter-warning',
-      'diagnostics-log-filter-error',
-    ];
-    filterButtons.forEach((testId) => {
-      expect(screen.getByTestId(testId)).toBeInTheDocument();
+    it('should show em-dash when storage is null', () => {
+      vi.mocked(useDiagnostics).mockReturnValue(makeResult({ storage: null }));
+      renderWithProviders(<DiagnosticsPage />);
+      expect(screen.getByTestId('diagnostics-stat-storage-value')).toHaveTextContent('\u2014');
     });
   });
 
-  it('should render export button', () => {
-    renderDiagnosticsPage();
-    expect(screen.getByTestId('diagnostics-export-button')).toBeInTheDocument();
-  });
-
-  it('should render log entries', () => {
-    renderDiagnosticsPage();
-    expect(screen.getByTestId('diagnostics-system-logs-title')).toBeInTheDocument();
-  });
-
-  describe('StatCard component', () => {
-    it('should render StatCard without subValue', () => {
-      renderDiagnosticsPage();
-      const statCardTestIds = [
-        'diagnostics-stat-system-status',
-        'diagnostics-stat-cpu-usage',
-        'diagnostics-stat-memory',
-        'diagnostics-stat-temperature',
-      ];
-      statCardTestIds.forEach((testId) => {
-        expect(screen.getByTestId(testId)).toBeInTheDocument();
-      });
-    });
-
-    it('should render StatCard with custom testId', () => {
-      renderDiagnosticsPage();
-      expect(screen.getByTestId('diagnostics-stat-system-status')).toBeInTheDocument();
-      expect(screen.getByTestId('diagnostics-stat-cpu-usage')).toBeInTheDocument();
-    });
-
-    it('should render StatCard with custom color and colorBg', () => {
-      renderDiagnosticsPage();
-      const statCardTestIds = [
-        'diagnostics-stat-system-status',
-        'diagnostics-stat-cpu-usage',
-        'diagnostics-stat-memory',
-        'diagnostics-stat-temperature',
-      ];
-      statCardTestIds.forEach((testId) => {
-        expect(screen.getByTestId(testId)).toBeInTheDocument();
-      });
+  describe('Temperature card', () => {
+    it('should NOT render a temperature stat card', () => {
+      renderWithProviders(<DiagnosticsPage />);
+      expect(screen.queryByTestId('diagnostics-stat-temperature')).not.toBeInTheDocument();
     });
   });
 
-  describe('Button interactions', () => {
+  describe('System Status card', () => {
+    it('should show Healthy when status is ok', () => {
+      renderWithProviders(<DiagnosticsPage />);
+      expect(screen.getByTestId('diagnostics-stat-system-status-value')).toHaveTextContent(
+        'Healthy',
+      );
+    });
+
+    it('should show raw status string when not ok', () => {
+      vi.mocked(useDiagnostics).mockReturnValue(makeResult({ status: 'degraded' }));
+      renderWithProviders(<DiagnosticsPage />);
+      expect(screen.getByTestId('diagnostics-stat-system-status-value')).toHaveTextContent(
+        'degraded',
+      );
+    });
+  });
+
+  describe('Restart detection', () => {
+    it('should NOT show restart note when gap is within threshold', () => {
+      // process_s === system_s → no restart
+      renderWithProviders(<DiagnosticsPage />);
+      expect(screen.queryByTestId('diagnostics-restart-note')).not.toBeInTheDocument();
+    });
+
+    it('should flag recent restart when system_s - process_s exceeds threshold', () => {
+      // 7200 - 600 = 6600 s gap → > 300 s threshold
+      vi.mocked(useDiagnostics).mockReturnValue(
+        makeResult({ uptime: { system_s: 7200, process_s: 600 } }),
+      );
+      renderWithProviders(<DiagnosticsPage />);
+      expect(screen.getByTestId('diagnostics-restart-note')).toBeInTheDocument();
+    });
+
+    it('should NOT show restart note when gap equals threshold exactly', () => {
+      vi.mocked(useDiagnostics).mockReturnValue(
+        makeResult({ uptime: { system_s: 3600, process_s: 3300 } }), // gap = 300, not > 300
+      );
+      renderWithProviders(<DiagnosticsPage />);
+      expect(screen.queryByTestId('diagnostics-restart-note')).not.toBeInTheDocument();
+    });
+  });
+
+  describe('Uptime rows', () => {
+    it('should render process and system uptime', () => {
+      renderWithProviders(<DiagnosticsPage />);
+      expect(screen.getByTestId('diagnostics-uptime-process')).toBeInTheDocument();
+      expect(screen.getByTestId('diagnostics-uptime-system')).toBeInTheDocument();
+    });
+
+    it('should format process uptime in human-readable form', () => {
+      // process_s = 3600 → 1h 0m
+      renderWithProviders(<DiagnosticsPage />);
+      expect(screen.getByTestId('diagnostics-uptime-process')).toHaveTextContent('1h 0m');
+    });
+  });
+
+  describe('Log filter buttons', () => {
+    it('should render all log filter buttons', () => {
+      renderWithProviders(<DiagnosticsPage />);
+      expect(screen.getByTestId('diagnostics-log-filter-all')).toBeInTheDocument();
+      expect(screen.getByTestId('diagnostics-log-filter-info')).toBeInTheDocument();
+      expect(screen.getByTestId('diagnostics-log-filter-warning')).toBeInTheDocument();
+      expect(screen.getByTestId('diagnostics-log-filter-error')).toBeInTheDocument();
+    });
+
     it('should handle log filter button clicks', async () => {
       const user = userEvent.setup();
-      renderDiagnosticsPage();
+      renderWithProviders(<DiagnosticsPage />);
 
-      const filterButtons = [
-        'diagnostics-log-filter-info',
-        'diagnostics-log-filter-warning',
-        'diagnostics-log-filter-error',
-      ];
+      await user.click(screen.getByTestId('diagnostics-log-filter-info'));
+      expect(screen.getByTestId('diagnostics-log-filter-info')).toBeInTheDocument();
 
-      for (const testId of filterButtons) {
-        const button = screen.getByTestId(testId);
-        await user.click(button);
-        expect(button).toBeInTheDocument();
-      }
+      await user.click(screen.getByTestId('diagnostics-log-filter-all'));
+      expect(screen.getByTestId('diagnostics-log-filter-all')).toBeInTheDocument();
     });
+  });
 
-    it('should handle export button click', async () => {
-      const user = userEvent.setup();
-      renderDiagnosticsPage();
-
-      const exportButton = screen.getByTestId('diagnostics-export-button');
-      expect(exportButton).toBeInTheDocument();
-      await user.click(exportButton);
-      expect(exportButton).toBeInTheDocument();
+  describe('Chart empty state', () => {
+    it('should show empty state when history has fewer than two samples', () => {
+      renderWithProviders(<DiagnosticsPage />); // history = []
+      expect(screen.getByTestId('diagnostics-cpu-chart-empty')).toBeInTheDocument();
+      expect(screen.getByTestId('diagnostics-memory-chart-empty')).toBeInTheDocument();
+      expect(screen.getByTestId('diagnostics-network-chart-empty')).toBeInTheDocument();
     });
+  });
 
-    it('should handle chart button clicks', async () => {
-      const user = userEvent.setup();
-      renderDiagnosticsPage();
-
-      const clockButtons = screen.getAllByTestId('diagnostics-chart-time-button');
-      expect(clockButtons.length).toBeGreaterThan(0);
-      if (clockButtons.length > 0) {
-        await user.click(clockButtons[0]);
-        expect(clockButtons[0]).toBeInTheDocument();
-      }
+  describe('Export button', () => {
+    it('should render export button', () => {
+      renderWithProviders(<DiagnosticsPage />);
+      expect(screen.getByTestId('diagnostics-export-button')).toBeInTheDocument();
     });
   });
 });

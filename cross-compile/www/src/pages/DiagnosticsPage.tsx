@@ -1,38 +1,33 @@
-import React from 'react';
+import React, { useState } from 'react';
 
 import {
   Activity,
-  Clock,
   Cpu,
+  Database,
   Download,
   FileText,
   HardDrive,
   Info,
-  Thermometer,
   Wifi,
 } from 'lucide-react';
+
 import { Sparkline } from '@/components/common/Sparkline';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { useDiagnostics } from '@/hooks/useDiagnostics';
 import { cn } from '@/lib/utils';
 
-// Mock data generator for charts
-// Using Math.random() for mock visualization data - not security-sensitive
-function generateData(points: number, base: number, variance: number) {
-  // NOSONAR: Math.random() is acceptable for mock visualization data
-  return Array.from({ length: points }, (_, i) => ({
-    time: i,
-    value: Math.max(0, Math.min(100, base + (Math.random() - 0.5) * variance)), // NOSONAR
-  }));
-}
+const RESTART_THRESHOLD_S = 300; // 5 minutes
 
-function generateNetworkData(points: number) {
-  return Array.from({ length: points }, (_, i) => ({
-    time: i,
-    // NOSONAR: Math.random() is acceptable for mock visualization data
-    upload: Math.max(0, 2 + (Math.random() - 0.5) * 1), // NOSONAR
-    download: Math.max(0, 4 + (Math.random() - 0.5) * 2), // NOSONAR
-  }));
+function formatDuration(seconds: number): string {
+  const d = Math.floor(seconds / 86400);
+  const h = Math.floor((seconds % 86400) / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = Math.floor(seconds % 60);
+  if (d > 0) return `${d}d ${h}h ${m}m`;
+  if (h > 0) return `${h}h ${m}m`;
+  if (m > 0) return `${m}m ${s}s`;
+  return `${s}s`;
 }
 
 function StatCard({
@@ -52,7 +47,7 @@ function StatCard({
   colorBg?: string;
   testId?: string;
 }>) {
-  const baseTestId = testId || `diagnostics-stat-${label.toLowerCase().replaceAll(/\s+/g, '-')}`;
+  const baseTestId = testId ?? `diagnostics-stat-${label.toLowerCase().replaceAll(/\s+/g, '-')}`;
   return (
     <div
       className="border-border bg-card overflow-hidden rounded-xl border"
@@ -60,7 +55,10 @@ function StatCard({
     >
       <div className="flex items-center gap-4 p-5">
         <div
-          className={cn('flex h-10 w-10 shrink-0 items-center justify-center rounded-lg', colorBg)}
+          className={cn(
+            'flex h-10 w-10 shrink-0 items-center justify-center rounded-lg',
+            colorBg,
+          )}
         >
           <Icon className={cn('h-5 w-5', color)} />
         </div>
@@ -89,9 +87,72 @@ function StatCard({
 }
 
 export default function DiagnosticsPage() {
-  const cpuData = React.useMemo(() => generateData(30, 45, 15), []);
-  const memoryData = React.useMemo(() => generateData(30, 60, 5), []);
-  const networkData = React.useMemo(() => generateNetworkData(30), []);
+  const { data, isLoading, history } = useDiagnostics();
+  const [logFilter, setLogFilter] = useState<'all' | 'info' | 'warning' | 'error'>('all');
+
+  // Stat card values derived from real data
+  const statusLabel =
+    data === undefined ? '—' : data.status === 'ok' ? 'Healthy' : data.status;
+  const statusColor = data?.status === 'ok' ? 'text-green-500' : 'text-yellow-500';
+  const statusColorBg = data?.status === 'ok' ? 'bg-green-500/10' : 'bg-yellow-500/10';
+  const statusSubValue =
+    data === undefined
+      ? undefined
+      : data.degraded_services.length > 0
+        ? `${data.degraded_services.length} service(s) degraded`
+        : '● Online';
+
+  const cpuValue =
+    data?.cpu_percent !== null && data?.cpu_percent !== undefined
+      ? `${Math.round(data.cpu_percent)}%`
+      : '—';
+
+  const memUsedMb = data?.memory ? Math.round(data.memory.used_kb / 1024) : null;
+  const memTotalMb = data?.memory ? Math.round(data.memory.total_kb / 1024) : null;
+  const memValue = memUsedMb !== null ? `${memUsedMb} MB` : '—';
+  const memSubValue =
+    memUsedMb !== null && memTotalMb !== null
+      ? `${memUsedMb} MB / ${memTotalMb} MB`
+      : undefined;
+
+  const storageUsedMb = data?.storage ? Math.round(data.storage.used_kb / 1024) : null;
+  const storageTotalMb = data?.storage ? Math.round(data.storage.total_kb / 1024) : null;
+  const storageValue = storageUsedMb !== null ? `${storageUsedMb} MB` : '—';
+  const storageSubValue =
+    storageUsedMb !== null && storageTotalMb !== null
+      ? `${storageUsedMb} MB / ${storageTotalMb} MB`
+      : undefined;
+
+  // Chart data from rolling history — nulls filtered before passing to Sparkline
+  const cpuChartData = history
+    .filter((p) => p.cpu !== null)
+    .map((p) => ({ t: p.t, cpu: p.cpu as number }));
+
+  const memChartData = history
+    .filter((p) => p.memPct !== null)
+    .map((p) => ({ t: p.t, memPct: p.memPct as number }));
+
+  const netChartData = history
+    .filter((p) => p.rx !== null && p.tx !== null)
+    .map((p) => ({
+      t: p.t,
+      rxKbps: (p.rx as number) / 1000,
+      txKbps: (p.tx as number) / 1000,
+    }));
+
+  // Uptime and restart detection
+  const processUptime = data ? formatDuration(data.uptime.process_s) : '—';
+  const systemUptime = data ? formatDuration(data.uptime.system_s) : '—';
+  const restartGap = data ? data.uptime.system_s - data.uptime.process_s : 0;
+  const hasRecentRestart = data !== undefined && restartGap > RESTART_THRESHOLD_S;
+
+  if (isLoading) {
+    return (
+      <div className="flex h-64 items-center justify-center" data-testid="diagnostics-loading">
+        <p className="text-muted-foreground text-sm">Loading diagnostics…</p>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6 pb-8">
@@ -104,22 +165,21 @@ export default function DiagnosticsPage() {
         </p>
       </div>
 
-      {/* Top Row: System Health Cards */}
+      {/* Stat cards */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         <StatCard
           icon={Activity}
           label="System Status"
-          value="Healthy"
-          subValue="● Online"
-          color="text-green-500"
-          colorBg="bg-green-500/10"
+          value={statusLabel}
+          subValue={statusSubValue}
+          color={statusColor}
+          colorBg={statusColorBg}
           testId="diagnostics-stat-system-status"
         />
         <StatCard
           icon={Cpu}
           label="CPU Usage"
-          value="51%"
-          subValue="Avg: 48%"
+          value={cpuValue}
           color="text-red-500"
           colorBg="bg-red-500/10"
           testId="diagnostics-stat-cpu-usage"
@@ -127,20 +187,20 @@ export default function DiagnosticsPage() {
         <StatCard
           icon={HardDrive}
           label="Memory"
-          value="69%"
-          subValue="1.4 GB / 2.0 GB"
+          value={memValue}
+          subValue={memSubValue}
           color="text-yellow-500"
           colorBg="bg-yellow-500/10"
           testId="diagnostics-stat-memory"
         />
         <StatCard
-          icon={Thermometer}
-          label="Temperature"
-          value="64°C"
-          subValue="Normal range"
+          icon={Database}
+          label="Storage"
+          value={storageValue}
+          subValue={storageSubValue}
           color="text-blue-500"
           colorBg="bg-blue-500/10"
-          testId="diagnostics-stat-temperature"
+          testId="diagnostics-stat-storage"
         />
       </div>
 
@@ -148,96 +208,84 @@ export default function DiagnosticsPage() {
       <div className="grid gap-6 lg:grid-cols-2">
         <Card className="border-border bg-card overflow-hidden">
           <CardHeader className="border-border border-b">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-red-500/10">
-                  <Activity className="h-5 w-5 text-red-500" />
-                </div>
-                <div>
-                  <CardTitle
-                    className="text-foreground text-sm font-semibold"
-                    data-testid="diagnostics-cpu-usage-title"
-                  >
-                    CPU Usage
-                  </CardTitle>
-                  <p
-                    className="text-muted-foreground text-xs"
-                    data-testid="diagnostics-cpu-usage-description"
-                  >
-                    Processor load over time
-                  </p>
-                </div>
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-red-500/10">
+                <Activity className="h-5 w-5 text-red-500" />
               </div>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8"
-                data-testid="diagnostics-chart-time-button"
-              >
-                <Clock className="text-muted-foreground h-4 w-4" />
-              </Button>
+              <div>
+                <CardTitle
+                  className="text-foreground text-sm font-semibold"
+                  data-testid="diagnostics-cpu-usage-title"
+                >
+                  CPU Usage
+                </CardTitle>
+                <p
+                  className="text-muted-foreground text-xs"
+                  data-testid="diagnostics-cpu-usage-description"
+                >
+                  Processor load over time
+                </p>
+              </div>
             </div>
           </CardHeader>
           <CardContent className="pt-4">
             <div className="h-[180px] w-full">
-              <Sparkline
-                data={cpuData}
-                series={[{ key: 'value', label: 'CPU', color: '#ef4444', unit: '%' }]}
-                domain={[0, 100]}
-              />
-            </div>
-            <div className="text-muted-foreground mt-2 flex justify-between font-mono text-xs">
-              <span>00:00</span>
-              <span>00:15</span>
-              <span>00:30</span>
+              {cpuChartData.length >= 2 ? (
+                <Sparkline
+                  data={cpuChartData}
+                  series={[{ key: 'cpu', label: 'CPU', color: '#ef4444', unit: '%' }]}
+                  domain={[0, 100]}
+                />
+              ) : (
+                <div
+                  className="flex h-full items-center justify-center"
+                  data-testid="diagnostics-cpu-chart-empty"
+                >
+                  <p className="text-muted-foreground text-sm">Collecting data…</p>
+                </div>
+              )}
             </div>
           </CardContent>
         </Card>
 
         <Card className="border-border bg-card overflow-hidden">
           <CardHeader className="border-border border-b">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-yellow-500/10">
-                  <HardDrive className="h-5 w-5 text-yellow-500" />
-                </div>
-                <div>
-                  <CardTitle
-                    className="text-foreground text-sm font-semibold"
-                    data-testid="diagnostics-memory-usage-title"
-                  >
-                    Memory Usage
-                  </CardTitle>
-                  <p
-                    className="text-muted-foreground text-xs"
-                    data-testid="diagnostics-memory-usage-description"
-                  >
-                    RAM utilization over time
-                  </p>
-                </div>
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-yellow-500/10">
+                <HardDrive className="h-5 w-5 text-yellow-500" />
               </div>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8"
-                data-testid="diagnostics-chart-time-button"
-              >
-                <Clock className="text-muted-foreground h-4 w-4" />
-              </Button>
+              <div>
+                <CardTitle
+                  className="text-foreground text-sm font-semibold"
+                  data-testid="diagnostics-memory-usage-title"
+                >
+                  Memory Usage
+                </CardTitle>
+                <p
+                  className="text-muted-foreground text-xs"
+                  data-testid="diagnostics-memory-usage-description"
+                >
+                  RAM utilization over time
+                </p>
+              </div>
             </div>
           </CardHeader>
           <CardContent className="pt-4">
             <div className="h-[180px] w-full">
-              <Sparkline
-                data={memoryData}
-                series={[{ key: 'value', label: 'Memory', color: '#eab308', unit: '%' }]}
-                domain={[0, 100]}
-              />
-            </div>
-            <div className="text-muted-foreground mt-2 flex justify-between font-mono text-xs">
-              <span>00:00</span>
-              <span>00:15</span>
-              <span>00:30</span>
+              {memChartData.length >= 2 ? (
+                <Sparkline
+                  data={memChartData}
+                  series={[{ key: 'memPct', label: 'Memory', color: '#eab308', unit: '%' }]}
+                  domain={[0, 100]}
+                />
+              ) : (
+                <div
+                  className="flex h-full items-center justify-center"
+                  data-testid="diagnostics-memory-chart-empty"
+                >
+                  <p className="text-muted-foreground text-sm">Collecting data…</p>
+                </div>
+              )}
             </div>
           </CardContent>
         </Card>
@@ -284,18 +332,22 @@ export default function DiagnosticsPage() {
         </CardHeader>
         <CardContent className="pt-4">
           <div className="relative h-[120px] w-full">
-            <Sparkline
-              data={networkData}
-              series={[
-                { key: 'download', label: 'Download', color: '#3b82f6', unit: ' Mbps' },
-                { key: 'upload', label: 'Upload', color: '#22c55e', unit: ' Mbps' },
-              ]}
-            />
-          </div>
-          <div className="text-muted-foreground mt-2 flex justify-between font-mono text-xs">
-            <span>00:00</span>
-            <span>00:15</span>
-            <span>00:30</span>
+            {netChartData.length >= 2 ? (
+              <Sparkline
+                data={netChartData}
+                series={[
+                  { key: 'rxKbps', label: 'Download', color: '#3b82f6', unit: ' kbps' },
+                  { key: 'txKbps', label: 'Upload', color: '#22c55e', unit: ' kbps' },
+                ]}
+              />
+            ) : (
+              <div
+                className="flex h-full items-center justify-center"
+                data-testid="diagnostics-network-chart-empty"
+              >
+                <p className="text-muted-foreground text-sm">Collecting data…</p>
+              </div>
+            )}
           </div>
         </CardContent>
       </Card>
@@ -326,34 +378,46 @@ export default function DiagnosticsPage() {
             </div>
           </CardHeader>
           <CardContent className="pt-4">
-            <dl className="grid grid-cols-2 gap-4 text-sm">
-              <div className="space-y-1" data-testid="diagnostics-device-model">
-                <dt className="text-muted-foreground">Model</dt>
-                <dd className="text-foreground font-mono">Anyka-3918-Pro</dd>
-              </div>
-              <div className="space-y-1 text-right" data-testid="diagnostics-device-firmware">
-                <dt className="text-muted-foreground">Firmware</dt>
-                <dd className="text-foreground font-mono">v2.4.1</dd>
-              </div>
-              <div className="space-y-1">
-                <dt className="text-muted-foreground">Serial Number</dt>
-                <dd className="text-foreground font-mono">AK-2025-X892</dd>
-              </div>
-              <div className="space-y-1 text-right">
-                <dt className="text-muted-foreground">IP Address</dt>
-                <dd className="text-foreground font-mono">192.168.1.100</dd>
-              </div>
-              <div className="border-border col-span-2 mt-2 border-t pt-2">
-                <div className="flex items-center justify-between">
-                  <span className="text-muted-foreground">Uptime</span>
-                  <span className="font-mono text-white">12d 5h 32m</span>
+            <dl className="space-y-3 text-sm">
+              <div className="border-border border-t pt-3">
+                <div
+                  className="flex items-center justify-between"
+                  data-testid="diagnostics-uptime-process-row"
+                >
+                  <span className="text-muted-foreground">Process Uptime</span>
+                  <span
+                    className="font-mono text-white"
+                    data-testid="diagnostics-uptime-process"
+                  >
+                    {processUptime}
+                  </span>
                 </div>
+                <div
+                  className="mt-1 flex items-center justify-between"
+                  data-testid="diagnostics-uptime-system-row"
+                >
+                  <span className="text-muted-foreground">System Uptime</span>
+                  <span
+                    className="font-mono text-white"
+                    data-testid="diagnostics-uptime-system"
+                  >
+                    {systemUptime}
+                  </span>
+                </div>
+                {hasRecentRestart && (
+                  <p
+                    className="mt-2 text-xs text-yellow-400"
+                    data-testid="diagnostics-restart-note"
+                  >
+                    Restarted {formatDuration(restartGap)} ago
+                  </p>
+                )}
               </div>
             </dl>
           </CardContent>
         </Card>
 
-        {/* System Metrics */}
+        {/* Stream Health — fleshed out in Task 13 */}
         <Card className="border-border bg-card overflow-hidden">
           <CardHeader className="border-border border-b">
             <div className="flex items-center gap-3">
@@ -363,42 +427,32 @@ export default function DiagnosticsPage() {
               <div>
                 <CardTitle
                   className="text-foreground text-sm font-semibold"
-                  data-testid="diagnostics-system-metrics-title"
+                  data-testid="diagnostics-stream-health-title"
                 >
-                  System Metrics
+                  Stream Health
                 </CardTitle>
                 <p
                   className="text-muted-foreground text-xs"
-                  data-testid="diagnostics-system-metrics-description"
+                  data-testid="diagnostics-stream-health-description"
                 >
-                  Performance and storage statistics
+                  Video pipeline status
                 </p>
               </div>
             </div>
           </CardHeader>
           <CardContent className="pt-4">
-            <div className="space-y-4 text-sm">
+            <div className="space-y-3 text-sm">
               <div
                 className="flex items-center justify-between"
-                data-testid="diagnostics-storage-used"
+                data-testid="diagnostics-frame-age"
               >
-                <span className="text-muted-foreground">Storage Used</span>
-                <span className="text-foreground font-mono">85% (42.5 GB / 50 GB)</span>
-              </div>
-              <div
-                className="flex items-center justify-between"
-                data-testid="diagnostics-active-streams"
-              >
-                <span className="text-muted-foreground">Active Streams</span>
-                <span className="text-foreground font-mono">2</span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-muted-foreground">Dropped Frames (24h)</span>
-                <span className="text-foreground font-mono">12</span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-muted-foreground">Avg Bitrate</span>
-                <span className="text-foreground font-mono">4.2 Mbps</span>
+                <span className="text-muted-foreground">Frame Age</span>
+                <span className="text-foreground font-mono">
+                  {data?.stream_frame_age_ms !== null &&
+                  data?.stream_frame_age_ms !== undefined
+                    ? `${data.stream_frame_age_ms} ms`
+                    : '—'}
+                </span>
               </div>
             </div>
           </CardContent>
@@ -431,34 +485,38 @@ export default function DiagnosticsPage() {
             <div className="flex items-center gap-2">
               <div className="border-border bg-muted/50 flex items-center rounded-md border p-0.5">
                 <Button
-                  variant="default"
+                  variant={logFilter === 'all' ? 'default' : 'ghost'}
                   size="sm"
                   className="h-6 px-2.5 text-xs"
                   data-testid="diagnostics-log-filter-all"
+                  onClick={() => setLogFilter('all')}
                 >
                   All
                 </Button>
                 <Button
-                  variant="ghost"
+                  variant={logFilter === 'info' ? 'default' : 'ghost'}
                   size="sm"
                   className="text-muted-foreground hover:text-foreground h-6 px-2.5 text-xs"
                   data-testid="diagnostics-log-filter-info"
+                  onClick={() => setLogFilter('info')}
                 >
                   Info
                 </Button>
                 <Button
-                  variant="ghost"
+                  variant={logFilter === 'warning' ? 'default' : 'ghost'}
                   size="sm"
                   className="text-muted-foreground hover:text-foreground h-6 px-2.5 text-xs"
                   data-testid="diagnostics-log-filter-warning"
+                  onClick={() => setLogFilter('warning')}
                 >
                   Warning
                 </Button>
                 <Button
-                  variant="ghost"
+                  variant={logFilter === 'error' ? 'default' : 'ghost'}
                   size="sm"
                   className="text-muted-foreground hover:text-foreground h-6 px-2.5 text-xs"
                   data-testid="diagnostics-log-filter-error"
+                  onClick={() => setLogFilter('error')}
                 >
                   Error
                 </Button>
@@ -474,156 +532,13 @@ export default function DiagnosticsPage() {
             </div>
           </div>
         </CardHeader>
-        <div className="max-h-[400px] overflow-x-auto overflow-y-auto">
-          <table className="w-full text-left text-sm">
-            <thead className="border-border bg-muted/40 text-muted-foreground border-b text-xs">
-              <tr>
-                <th className="px-5 py-3 font-medium">Timestamp</th>
-                <th className="px-5 py-3 font-medium">Level</th>
-                <th className="px-5 py-3 font-medium">Category</th>
-                <th className="px-5 py-3 font-medium">Message</th>
-              </tr>
-            </thead>
-            <tbody className="divide-border divide-y">
-              <tr className="hover:bg-muted/30">
-                <td className="px-5 py-4">
-                  <div className="text-muted-foreground flex items-center gap-2">
-                    <Clock className="h-3.5 w-3.5" />
-                    <span className="font-mono text-xs">
-                      2025-12-11
-                      <br />
-                      14:32:15
-                    </span>
-                  </div>
-                </td>
-                <td className="px-5 py-4">
-                  <span className="inline-flex items-center gap-1 rounded-full border border-blue-500/30 bg-blue-500/10 px-2 py-0.5 text-xs font-medium text-blue-400">
-                    <span
-                      className="h-1.5 w-1.5 rounded-full bg-blue-400"
-                      aria-hidden="true"
-                    ></span>
-                    <span>Info</span>
-                  </span>
-                </td>
-                <td className="text-foreground px-5 py-4 font-medium">Stream</td>
-                <td className="text-muted-foreground px-5 py-4">
-                  Main stream started successfully
-                </td>
-              </tr>
-              <tr className="hover:bg-muted/30">
-                <td className="px-5 py-4">
-                  <div className="text-muted-foreground flex items-center gap-2">
-                    <Clock className="h-3.5 w-3.5" />
-                    <span className="font-mono text-xs">
-                      2025-12-11
-                      <br />
-                      14:30:42
-                    </span>
-                  </div>
-                </td>
-                <td className="px-5 py-4">
-                  <span className="inline-flex items-center gap-1 rounded-full border border-yellow-500/30 bg-yellow-500/10 px-2 py-0.5 text-xs font-medium text-yellow-400">
-                    <span
-                      className="h-1.5 w-1.5 rounded-full bg-yellow-400"
-                      aria-hidden="true"
-                    ></span>
-                    <span>Warning</span>
-                  </span>
-                </td>
-                <td className="text-foreground px-5 py-4 font-medium">Network</td>
-                <td className="text-muted-foreground px-5 py-4">High latency detected: 125ms</td>
-              </tr>
-              <tr className="hover:bg-muted/30">
-                <td className="px-5 py-4">
-                  <div className="text-muted-foreground flex items-center gap-2">
-                    <Clock className="h-3.5 w-3.5" />
-                    <span className="font-mono text-xs">
-                      2025-12-11
-                      <br />
-                      14:28:03
-                    </span>
-                  </div>
-                </td>
-                <td className="px-5 py-4">
-                  <span className="inline-flex items-center gap-1 rounded-full border border-blue-500/30 bg-blue-500/10 px-2 py-0.5 text-xs font-medium text-blue-400">
-                    <span
-                      className="h-1.5 w-1.5 rounded-full bg-blue-400"
-                      aria-hidden="true"
-                    ></span>
-                    <span>Info</span>
-                  </span>
-                </td>
-                <td className="text-foreground px-5 py-4 font-medium">PTZ</td>
-                <td className="text-muted-foreground px-5 py-4">Preset position 1 updated</td>
-              </tr>
-              <tr className="hover:bg-muted/30">
-                <td className="px-5 py-4">
-                  <div className="text-muted-foreground flex items-center gap-2">
-                    <Clock className="h-3.5 w-3.5" />
-                    <span className="font-mono text-xs">
-                      2025-12-11
-                      <br />
-                      14:25:17
-                    </span>
-                  </div>
-                </td>
-                <td className="px-5 py-4">
-                  <span className="inline-flex items-center gap-1 rounded-full border border-red-500/30 bg-red-500/10 px-2 py-0.5 text-xs font-medium text-red-400">
-                    <span className="h-1.5 w-1.5 rounded-full bg-red-400" aria-hidden="true"></span>
-                    <span>Error</span>
-                  </span>
-                </td>
-                <td className="text-foreground px-5 py-4 font-medium">Storage</td>
-                <td className="text-muted-foreground px-5 py-4">Storage capacity at 85%</td>
-              </tr>
-              <tr className="hover:bg-muted/30">
-                <td className="px-5 py-4">
-                  <div className="text-muted-foreground flex items-center gap-2">
-                    <Clock className="h-3.5 w-3.5" />
-                    <span className="font-mono text-xs">
-                      2025-12-11
-                      <br />
-                      14:20:55
-                    </span>
-                  </div>
-                </td>
-                <td className="px-5 py-4">
-                  <span className="inline-flex items-center gap-1 rounded-full border border-blue-500/30 bg-blue-500/10 px-2 py-0.5 text-xs font-medium text-blue-400">
-                    <span
-                      className="h-1.5 w-1.5 rounded-full bg-blue-400"
-                      aria-hidden="true"
-                    ></span>
-                    <span>Info</span>
-                  </span>
-                </td>
-                <td className="text-foreground px-5 py-4 font-medium">System</td>
-                <td className="text-muted-foreground px-5 py-4">Firmware version 2.4.1 running</td>
-              </tr>
-              <tr className="hover:bg-muted/30">
-                <td className="px-5 py-4">
-                  <div className="text-muted-foreground flex items-center gap-2">
-                    <Clock className="h-3.5 w-3.5" />
-                    <span className="font-mono text-xs">
-                      2025-12-11
-                      <br />
-                      14:18:33
-                    </span>
-                  </div>
-                </td>
-                <td className="px-5 py-4">
-                  <span className="inline-flex items-center gap-1 rounded-full border border-blue-500/30 bg-blue-500/10 px-2 py-0.5 text-xs font-medium text-blue-400">
-                    <span
-                      className="h-1.5 w-1.5 rounded-full bg-blue-400"
-                      aria-hidden="true"
-                    ></span>
-                    <span>Info</span>
-                  </span>
-                </td>
-                <td className="text-foreground px-5 py-4 font-medium">Auth</td>
-                <td className="text-muted-foreground px-5 py-4">User admin logged in</td>
-              </tr>
-            </tbody>
-          </table>
+        <div className="max-h-[400px] overflow-y-auto" data-testid="diagnostics-log-panel">
+          <p
+            className="text-muted-foreground p-5 text-sm"
+            data-testid="diagnostics-log-placeholder"
+          >
+            Select a log source to view entries.
+          </p>
         </div>
       </Card>
     </div>
