@@ -51,6 +51,8 @@ pub mod routing;
 
 // Re-export parse_body for convenience
 pub use request_parse::parse_body;
+// Re-export for diagnostics HTTP auth middleware (single credential-check path)
+pub(crate) use auth::verify_basic_auth_self;
 
 /// Authentication context for dispatch operations.
 ///
