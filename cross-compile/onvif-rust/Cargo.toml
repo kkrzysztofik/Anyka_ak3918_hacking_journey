@@ -45,7 +45,7 @@ clap = { version = "4", features = ["derive"] }
 cap = "0.1"  # Memory allocation tracking and hard-limit enforcement for embedded targets
 async-trait = "0.1"
 portable-atomic = { version = "1.14", features = ["std", "serde", "float"] }
-validator = { version = "0.20", features = ["derive"] }
+validator = { version = "0.21", features = ["derive"] }
 zeroize = { version = "1.9", features = ["derive"] }
 unicode-normalization = "0.1"
 # Grapheme cluster counting for ONVIF username validation (`onvif/device/user_types.rs`); required for spec-aligned length limits on embedded targets.
