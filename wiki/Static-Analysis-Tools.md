@@ -16,12 +16,20 @@ The project includes comprehensive static analysis tools integrated into the Any
 - **Detects**: Undefined behavior, memory leaks, buffer overflows, style issues
 - **Output**: XML and HTML reports
 
-### 3. Snyk Code
+### 3. cargo audit (Rust dependency advisories)
 
-- **Purpose**: Advanced security vulnerability scanning and code analysis
-- **Detects**: Security vulnerabilities, code quality issues, dependency vulnerabilities
-- **Output**: JSON and SARIF reports
-- **Authentication**: Requires SNYK_TOKEN for full functionality
+Checks both `Cargo.lock` files against the [RustSec advisory database](https://rustsec.org).
+Runs in CI on pushes to `main` and on pull requests targeting `main` that
+match the workflow's path filter; no account or token required.
+
+```bash
+cargo install cargo-audit --locked
+(cd cross-compile && cargo audit)
+(cd validation/rust && cargo audit)
+```
+
+Vulnerabilities fail the build. Informational advisories — `unmaintained`,
+`unsound`, `yanked` — are reported as warnings and do not.
 
 ## Usage Methods
 
@@ -36,10 +44,6 @@ Use the provided PowerShell script for easy analysis:
 # Run specific tool
 .\static-analysis.ps1 -Tool clang
 .\static-analysis.ps1 -Tool cppcheck
-.\static-analysis.ps1 -Tool snyk
-
-# Run with Snyk authentication token
-.\static-analysis.ps1 -Tool snyk -SnykToken "your-api-token-here"
 
 # Verbose output
 .\static-analysis.ps1 -Verbose
@@ -63,11 +67,11 @@ analysis-results/
 ├── clang/                    # Clang Static Analyzer results
 │   └── index.html           # Main HTML report
 ├── cppcheck-results.xml     # Cppcheck XML output
-├── cppcheck-html/           # Cppcheck HTML report
-│   └── index.html
-├── snyk-results.json        # Snyk JSON output
-└── snyk-results.sarif       # Snyk SARIF output
+└── cppcheck-html/           # Cppcheck HTML report
+    └── index.html
 ```
+
+`cargo audit` output goes to the CI job log and PR summary, not this directory.
 
 ## Viewing Results
 
@@ -83,48 +87,13 @@ analysis-results/
 - Shows categorized issues with severity levels
 - Includes suggestions for fixes
 
-### Snyk Code
+### cargo audit
 
-- Open `analysis-results/snyk-results.json` for programmatic analysis
-- Open `analysis-results/snyk-results.sarif` for SARIF-compatible tools
-- Shows security vulnerabilities with detailed remediation guidance
-- Includes severity levels and CVE information when available
-
-## Snyk Authentication Setup
-
-### Getting Your Snyk API Token
-
-1. **Create a free Snyk account**: Visit <https://app.snyk.io/>
-2. **Navigate to Account Settings**:
-   - Click on your profile → Account Settings
-   - Go to General Settings → API Token
-3. **Copy your token**: Click "click to show" to reveal your API token
-4. **Store securely**: Never commit this token to source control
-
-### Authentication Methods
-
-#### Method 1: Environment Variable (Recommended)
-
-```powershell
-# Set environment variable for current session
-$env:SNYK_TOKEN = "your-api-token-here"
-
-# Or set permanently (Windows)
-[Environment]::SetEnvironmentVariable("SNYK_TOKEN", "your-api-token-here", "User")
-```
-
-#### Method 2: Script Parameter
-
-```powershell
-# Pass token directly to script
-.\static-analysis.ps1 -Tool snyk -SnykToken "your-api-token-here"
-```
-
-### Authentication Behavior
-
-- **With Token**: Full Snyk functionality, cloud-based analysis, latest vulnerability database
-- **Without Token**: Limited offline mode, basic analysis only
-- **Script Warnings**: The script will warn you if no token is provided
+- The PR summary comment shows a single pass/fail status row for the audit
+- The RustSec advisory ID, affected crate/version, and a link to the advisory
+  appear in the CI job log and in the `Security audit` check run, not the
+  comment
+- No local report file — re-run `cargo audit` locally for the same output
 
 ## Integration with Development Workflow
 
@@ -200,15 +169,12 @@ Focus on:
 
 ### Adding Custom Rules
 
-Snyk uses built-in security rules, but you can configure severity thresholds and exclusions:
-
-```bash
-# Set severity threshold
-snyk code test --severity-threshold=medium
-
-# Exclude specific files or directories
-snyk code test --exclude=test/,vendor/
-```
+Cppcheck rule severity is configured on the command line (e.g.
+`--suppress=missingIncludeSystem`, see above). `cargo audit` is waived via the `ignore:`
+input on the `rustsec/audit-check` steps in `main-ci.yml`. It takes a single
+comma-separated list of advisory IDs, e.g.
+`ignore: "RUSTSEC-2020-0071,RUSTSEC-2021-0124"`; record the reason and removal
+date in a YAML comment beside it. Empty is the steady state.
 
 ### Suppressing False Positives
 
@@ -217,9 +183,6 @@ Add comments to suppress specific warnings:
 ```c
 // cppcheck-suppress nullPointer
 if (ptr == NULL) return;
-
-// snyk: disable-next-line
-strcpy(dest, src);  // Known safe in this context
 ```
 
 ## Best Practices
@@ -250,7 +213,7 @@ Get-ChildItem -Path "analysis-results" -Recurse | ForEach-Object { $_.Attributes
 
 - [Clang Static Analyzer Documentation](https://clang.llvm.org/docs/analyzer/)
 - [Cppcheck Manual](http://cppcheck.sourceforge.net/manual.pdf)
-- [Snyk Documentation](https://docs.snyk.io/)
+- [RustSec Advisory Database](https://rustsec.org)
 - ONVIF Project Coding Standards (see project documentation)
 
 ## See Also

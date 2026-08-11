@@ -12,6 +12,9 @@ on:
       - "validation/**"
       - "scripts/**"
       - "SD_card_contents/**"
+      - "cross-compile/Cargo.lock"
+      - "cross-compile/Cargo.toml"
+      - ".github/workflows/**"
   pull_request:
     branches:
       - main
@@ -27,6 +30,9 @@ on:
       - "validation/**"
       - "scripts/**"
       - "SD_card_contents/**"
+      - "cross-compile/Cargo.lock"
+      - "cross-compile/Cargo.toml"
+      - ".github/workflows/**"
 
 jobs:
   # =============================================================================
@@ -402,175 +408,57 @@ jobs:
           retention-days: 7
 
   # =============================================================================
-  # SECURITY SCANS - Unified Snyk Scans
+  # SECURITY SCANS - Rust dependency advisories (RustSec)
   # =============================================================================
+  # cargo-audit parses Cargo.lock only; no build, no vendored toolchain.
+  # Vulnerabilities fail the job. Informational advisories (unmaintained,
+  # unsound, yanked) are reported as warnings and do not fail it.
+  # SAST is covered by CodeQL default setup and SonarCloud, not here.
   security-scans:
     name: Security Scans
     runs-on: ubuntu-latest
-    needs: [rust-lint, rust-coverage, webui-quality-and-coverage, validation-rust-quality]
-    continue-on-error: true
     permissions:
       contents: read
-      security-events: write
+      checks: write
     outputs:
-      snyk_code_status: ${{ steps.scan-results.outputs.snyk_code_status }}
-      snyk_oss_status: ${{ steps.scan-results.outputs.snyk_oss_status }}
-      snyk_issues: ${{ steps.scan-results.outputs.snyk_issues }}
+      audit_status: ${{ steps.audit-status.outputs.audit_status }}
     steps:
       - name: Checkout Code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.0
 
-      - name: Setup Snyk CLI
-        uses: snyk/actions/setup@9adf32b1121593767fc3c057af55b55db032dc04  # v1.0.0
-
-      # Rust Snyk Code Scan
-      - name: Run Snyk Code for Rust
-        id: snyk-code-rust
-        if: hashFiles('cross-compile/onvif-rust/**/*.rs') != ''
-        working-directory: cross-compile/onvif-rust
-        run: snyk code test --sarif-file-output=snyk-code-rust.sarif
-        continue-on-error: true
-        env:
-          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
-
-      - name: Upload Rust Snyk Code SARIF
-        if: hashFiles('cross-compile/onvif-rust/**/*.rs') != '' && hashFiles('cross-compile/onvif-rust/snyk-code-rust.sarif') != ''
-        uses: github/codeql-action/upload-sarif@0d579ffd059c29b07949a3cce3983f0780820c98  # v4.0.0
-        # SHA: 0d579ffd059c29b07949a3cce3983f0780820c98
-        continue-on-error: true
+      - name: Audit cross-compile workspace
+        id: audit-workspace
+        uses: rustsec/audit-check@69366f33c96575abad1ee0dba8212993eecbe998  # v2.0.0
         with:
-          sarif_file: cross-compile/onvif-rust/snyk-code-rust.sarif
+          token: ${{ secrets.GITHUB_TOKEN }}
+          working-directory: cross-compile
+          # Temporary waivers: a single comma-separated list of advisory IDs,
+          # e.g. "RUSTSEC-2020-0071,RUSTSEC-2021-0124". Record the reason and
+          # removal date in a comment here. Empty is the steady state.
+          ignore: ""
 
-      # Streaming-lib Snyk Code Scan
-      - name: Run Snyk Code for streaming-lib
-        id: snyk-code-streaming
-        if: hashFiles('cross-compile/streaming-lib/**/*.rs') != ''
-        working-directory: cross-compile/streaming-lib
-        run: snyk code test --sarif-file-output=snyk-code-streaming.sarif
-        continue-on-error: true
-        env:
-          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
-
-      - name: Upload streaming-lib Snyk Code SARIF
-        if: hashFiles('cross-compile/streaming-lib/**/*.rs') != '' && hashFiles('cross-compile/streaming-lib/snyk-code-streaming.sarif') != ''
-        uses: github/codeql-action/upload-sarif@0d579ffd059c29b07949a3cce3983f0780820c98  # v4.0.0
-        # SHA: 0d579ffd059c29b07949a3cce3983f0780820c98
-        continue-on-error: true
+      - name: Audit validation tool
+        id: audit-validation
+        if: always()
+        uses: rustsec/audit-check@69366f33c96575abad1ee0dba8212993eecbe998  # v2.0.0
         with:
-          sarif_file: cross-compile/streaming-lib/snyk-code-streaming.sarif
+          token: ${{ secrets.GITHUB_TOKEN }}
+          working-directory: validation/rust
+          # Temporary waivers: a single comma-separated list of advisory IDs,
+          # e.g. "RUSTSEC-2020-0071,RUSTSEC-2021-0124". Record the reason and
+          # removal date in a comment here. Empty is the steady state.
+          ignore: ""
 
-      # Validation (RTSP) Snyk Code Scan
-      - name: Run Snyk Code for validation (Rust)
-        id: snyk-code-validation
-        if: hashFiles('validation/**/*.rs') != ''
-        working-directory: validation/rust
-        run: snyk code test --sarif-file-output=snyk-code-validation.sarif
-        continue-on-error: true
-        env:
-          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
-
-      - name: Upload validation Snyk Code SARIF
-        if: hashFiles('validation/**/*.rs') != '' && hashFiles('validation/rust/snyk-code-validation.sarif') != ''
-        uses: github/codeql-action/upload-sarif@0d579ffd059c29b07949a3cce3983f0780820c98  # v4.0.0
-        # SHA: 0d579ffd059c29b07949a3cce3983f0780820c98
-        continue-on-error: true
-        with:
-          sarif_file: validation/rust/snyk-code-validation.sarif
-
-      # WebUI Snyk Code + OSS Scan
-      - name: Setup Node.js for WebUI Scans
-        uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f  # v6.0.0
-        # SHA: 53b83947a5a98c8d113130e565377fae1a50d02f
-        with:
-          node-version: "24"
-          cache: "npm"
-          cache-dependency-path: cross-compile/www/package-lock.json
-
-      - name: Install WebUI dependencies
-        working-directory: cross-compile/www
-        run: npm ci
-
-      - name: Run Snyk Code for WebUI
-        id: snyk-code-webui
-        working-directory: cross-compile/www
-        run: snyk code test --sarif-file-output=snyk-code-webui.sarif
-        continue-on-error: true
-        env:
-          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
-
-      - name: Upload WebUI Snyk Code SARIF
-        if: hashFiles('cross-compile/www/snyk-code-webui.sarif') != ''
-        uses: github/codeql-action/upload-sarif@0d579ffd059c29b07949a3cce3983f0780820c98  # v4.0.0
-        # SHA: 0d579ffd059c29b07949a3cce3983f0780820c98
-        continue-on-error: true
-        with:
-          sarif_file: cross-compile/www/snyk-code-webui.sarif
-
-      - name: Run Snyk OSS for WebUI
-        id: snyk-oss-webui
-        uses: snyk/actions/node@9adf32b1121593767fc3c057af55b55db032dc04  # v1.0.0
-        continue-on-error: true
-        env:
-          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
-        with:
-          args: --file=cross-compile/www/package.json --sarif-file-output=cross-compile/www/snyk-oss-webui.sarif
-          command: test
-
-      - name: Upload WebUI Snyk OSS SARIF
-        if: hashFiles('cross-compile/www/snyk-oss-webui.sarif') != ''
-        uses: github/codeql-action/upload-sarif@0d579ffd059c29b07949a3cce3983f0780820c98  # v4.0.0
-        # SHA: 0d579ffd059c29b07949a3cce3983f0780820c98
-        continue-on-error: true
-        with:
-          sarif_file: cross-compile/www/snyk-oss-webui.sarif
-
-      - name: Count Total Snyk Issues
-        id: count-issues
+      - name: Record audit status
+        id: audit-status
+        if: always()
         run: |
-          TOTAL_ISSUES=0
-
-          # Count from WebUI OSS SARIF
-          if [ -f "cross-compile/www/snyk-oss-webui.sarif" ]; then
-            ISSUES=$(jq '.runs[0].results | length' cross-compile/www/snyk-oss-webui.sarif 2>/dev/null || echo "0")
-            TOTAL_ISSUES=$((TOTAL_ISSUES + ISSUES))
+          if [ "${{ steps.audit-workspace.outcome }}" = "success" ] && \
+             [ "${{ steps.audit-validation.outcome }}" = "success" ]; then
+            echo "audit_status=success" >> "$GITHUB_OUTPUT"
+          else
+            echo "audit_status=failure" >> "$GITHUB_OUTPUT"
           fi
-
-          echo "snyk_issues=$TOTAL_ISSUES" >> $GITHUB_OUTPUT
-          echo "Total Snyk issues: $TOTAL_ISSUES"
-
-      - name: Aggregate Scan Results
-        id: scan-results
-        run: |
-          # Determine overall status
-          CODE_STATUS="success"
-          OSS_STATUS="success"
-
-          # Check if any code scan ran
-          if [ "${{ steps.snyk-code-rust.outcome }}" == "failure" ] || [ "${{ steps.snyk-code-webui.outcome }}" == "failure" ] || [ "${{ steps.snyk-code-validation.outcome }}" == "failure" ]; then
-            CODE_STATUS="failure"
-          elif [ "${{ steps.snyk-code-rust.outcome }}" == "skipped" ] && [ "${{ steps.snyk-code-webui.outcome }}" == "skipped" ] && [ "${{ steps.snyk-code-validation.outcome }}" == "skipped" ]; then
-            CODE_STATUS="skipped"
-          fi
-
-          # Check OSS scan status
-          if [ "${{ steps.snyk-oss-webui.outcome }}" == "failure" ]; then
-            OSS_STATUS="failure"
-          elif [ "${{ steps.snyk-oss-webui.outcome }}" == "skipped" ]; then
-            OSS_STATUS="skipped"
-          fi
-
-          echo "snyk_code_status=$CODE_STATUS" >> $GITHUB_OUTPUT
-          echo "snyk_oss_status=$OSS_STATUS" >> $GITHUB_OUTPUT
-
-      - name: Run Snyk Monitor
-        if: hashFiles('cross-compile/www/package.json') != ''
-        uses: snyk/actions/node@9adf32b1121593767fc3c057af55b55db032dc04  # v1.0.0
-        continue-on-error: true
-        env:
-          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
-        with:
-          args: --file=cross-compile/www/package.json
-          command: monitor
 
   # =============================================================================
   # SONARQUBE - Unified Quality Analysis
@@ -984,6 +872,7 @@ jobs:
   reporting:
     name: Generate Unified CI Report
     runs-on: ubuntu-latest
+    if: ${{ !cancelled() }}
     needs:
       [
         rust-lint,
@@ -1003,11 +892,15 @@ jobs:
           RUST_COVERAGE: ${{ needs.rust-coverage.outputs.coverage || 'N/A' }}
           VALIDATION_RUST_COVERAGE: ${{ needs.validation-rust-quality.outputs.coverage || 'N/A' }}
           WEBUI_COVERAGE: ${{ needs.webui-quality-and-coverage.outputs.coverage || 'N/A' }}
-          SNYK_CODE_STATUS: ${{ needs.security-scans.outputs.snyk_code_status }}
-          SNYK_OSS_STATUS: ${{ needs.security-scans.outputs.snyk_oss_status }}
-          SNYK_ISSUES: ${{ needs.security-scans.outputs.snyk_issues }}
+          AUDIT_STATUS: ${{ needs.security-scans.outputs.audit_status }}
           SONAR_SCAN_STATUS: ${{ needs.sonarqube.outputs.sonar-scan-status }}
           QUALITY_GATE_STATUS: ${{ needs.sonarqube.outputs.quality-gate-status }}
+          # Real job results. This job runs under !cancelled(), so it reports
+          # after failures too -- never hardcode success text here.
+          RUST_LINT_RESULT: ${{ needs.rust-lint.result }}
+          RUST_TEST_RESULT: ${{ needs.rust-coverage.result }}
+          WEBUI_RESULT: ${{ needs.webui-quality-and-coverage.result }}
+          VALIDATION_RESULT: ${{ needs.validation-rust-quality.result }}
         run: |
           get_status() {
             case "$1" in
@@ -1025,10 +918,13 @@ jobs:
             esac
           }
 
-          SNYK_CODE_STATUS=$(get_status "${SNYK_CODE_STATUS}")
-          SNYK_OSS_STATUS=$(get_status "${SNYK_OSS_STATUS}")
+          AUDIT_STATUS=$(get_status "${AUDIT_STATUS}")
           SONAR_SCAN_STATUS=$(get_status "${SONAR_SCAN_STATUS}")
           QUALITY_GATE_STATUS=$(get_quality_gate_status "${QUALITY_GATE_STATUS}")
+          RUST_LINT_RESULT=$(get_quality_gate_status "${RUST_LINT_RESULT}")
+          RUST_TEST_RESULT=$(get_quality_gate_status "${RUST_TEST_RESULT}")
+          WEBUI_RESULT=$(get_quality_gate_status "${WEBUI_RESULT}")
+          VALIDATION_RESULT=$(get_quality_gate_status "${VALIDATION_RESULT}")
 
           cat >> $GITHUB_STEP_SUMMARY << EOF
           # 🔍 Unified CI Analysis Summary
@@ -1040,19 +936,19 @@ jobs:
           | **Validation (Rust)** | ${VALIDATION_RUST_COVERAGE}% |
           | **WebUI** | ${WEBUI_COVERAGE}% |
 
-          ## 🔒 Security Scans (Snyk)
-          - **Code (SAST)**: ${SNYK_CODE_STATUS}
-          - **Open Source (SCA)**: ${SNYK_OSS_STATUS}
-          - **SCA Issues Found**: ${SNYK_ISSUES}
+          ## 🔒 Dependency Advisories (cargo audit)
+          - **Rust crates (RustSec)**: ${AUDIT_STATUS}
+          - **SAST**: see CodeQL and SonarCloud below
 
           ## 🎯 Code Quality (SonarQube)
           - **Status**: ${SONAR_SCAN_STATUS}
           - **Quality Gate**: ${QUALITY_GATE_STATUS}
 
-          ## 📦 Build Status
-          - **Build**: ✅ Successful
-          - **Lint**: ✅ Passed
-          - **Tests**: ✅ Passed
+          ## 📦 Job Results
+          - **Rust — Lint**: ${RUST_LINT_RESULT}
+          - **Rust — Test & Coverage**: ${RUST_TEST_RESULT}
+          - **Validation (Rust)**: ${VALIDATION_RESULT}
+          - **WebUI**: ${WEBUI_RESULT}
           EOF
 
       - name: Comment PR with Analysis Results
@@ -1065,11 +961,17 @@ jobs:
             const rustCoverage = '${{ needs.rust-coverage.outputs.coverage || 'N/A' }}';
             const validationRustCoverage = '${{ needs.validation-rust-quality.outputs.coverage || 'N/A' }}';
             const webuiCoverage = '${{ needs.webui-quality-and-coverage.outputs.coverage || 'N/A' }}';
-            const snykCodeStatus = '${{ needs.security-scans.outputs.snyk_code_status }}';
-            const snykOssStatus = '${{ needs.security-scans.outputs.snyk_oss_status }}';
-            const snykIssues = '${{ needs.security-scans.outputs.snyk_issues || 0 }}';
+            const auditStatus = '${{ needs.security-scans.outputs.audit_status }}';
             const sonarStatus = '${{ needs.sonarqube.outputs.sonar-scan-status }}';
             const qualityGateStatus = '${{ needs.sonarqube.outputs.quality-gate-status }}';
+            // Real job results. This job runs under !cancelled(), so it reports
+            // after failures too -- never hardcode success text here.
+            const jobResults = [
+              ['Rust — Lint', '${{ needs.rust-lint.result }}'],
+              ['Rust — Test & Coverage', '${{ needs.rust-coverage.result }}'],
+              ['Validation (Rust)', '${{ needs.validation-rust-quality.result }}'],
+              ['WebUI', '${{ needs.webui-quality-and-coverage.result }}'],
+            ];
 
             const formatStatus = (status) => {
               if (status === 'success') return '✅ Completed';
@@ -1086,11 +988,11 @@ jobs:
             | **Validation (Rust)** | ${validationRustCoverage}% |
             | **WebUI** | ${webuiCoverage}% |
 
-            ### 🔒 Security Scans (Snyk)
+            ### 🔒 Security
             | Scan Type | Status | Details |
             |-----------|--------|---------|
-            | **Code (SAST)** | ${formatStatus(snykCodeStatus)} | [View in Code Scanning](https://github.com/${context.repo.owner}/${context.repo.repo}/security/code-scanning) |
-            | **Open Source (SCA)** | ${formatStatus(snykOssStatus)} | ${snykIssues !== '0' ? `⚠️ ${snykIssues} vulnerabilities found` : '✅ No issues'} |
+            | **Rust advisories (cargo audit)** | ${formatStatus(auditStatus)} | RustSec advisory database |
+            | **SAST (CodeQL)** | ℹ️ Reported separately | [View in Code Scanning](https://github.com/${context.repo.owner}/${context.repo.repo}/security/code-scanning) |
 
             ### 🎯 Code Quality (SonarQube)
             | Metric | Value |
@@ -1099,14 +1001,8 @@ jobs:
             | **Quality Gate** | ${formatStatus(qualityGateStatus)} |
             ${sonarStatus === 'success' ? '| **View Report** | [SonarQube Cloud Dashboard](https://sonarcloud.io/dashboard?id=kkrzysztofik_Anyka_ak3918_hacking_journey) |' : ''}
 
-            ### ✅ Build Status
-            - **Rust Lint**: ✅ Passed
-            - **WebUI Lint**: ✅ Passed
-            - **Validation (Rust) Lint**: ✅ Passed
-            - **Rust Tests**: ✅ Passed
-            - **Validation (Rust) Tests**: ✅ Passed
-            - **WebUI Tests**: ✅ Passed
-            - **Build**: ✅ Successful
+            ### 📦 Job Results
+            ${jobResults.map(([name, result]) => `- **${name}**: ${formatStatus(result)}`).join('\n')}
 
             ---
             *This comment is automatically updated on each push to the PR*`;

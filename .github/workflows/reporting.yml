@@ -9,18 +9,6 @@ on:
       test_coverage:
         required: false
         type: string
-      snyk_code_status:
-        required: false
-        type: string
-        default: "skipped"
-      snyk_oss_status:
-        required: false
-        type: string
-        default: "skipped"
-      snyk_issues:
-        required: false
-        type: string
-        default: "0"
       sonar_scan_status:
         required: false
         type: string
@@ -39,13 +27,10 @@ jobs:
     steps:
       - name: Generate Run Summary
         env:
-          SNYK_CODE_STATUS_INPUT: ${{ inputs.snyk_code_status }}
-          SNYK_OSS_STATUS_INPUT: ${{ inputs.snyk_oss_status }}
           SONAR_SCAN_STATUS_INPUT: ${{ inputs.sonar_scan_status }}
           QUALITY_GATE_STATUS_INPUT: ${{ inputs.quality_gate_status }}
           PROJECT_TYPE: ${{ inputs.project_type }}
           TEST_COVERAGE: ${{ inputs.test_coverage || 'N/A' }}
-          SNYK_ISSUES: ${{ inputs.snyk_issues || '0' }}
         run: |
           # Helper function to get status emoji
           get_status() {
@@ -64,8 +49,6 @@ jobs:
             esac
           }
 
-          SNYK_CODE_STATUS=$(get_status "${SNYK_CODE_STATUS_INPUT}")
-          SNYK_OSS_STATUS=$(get_status "${SNYK_OSS_STATUS_INPUT}")
           SONAR_SCAN_STATUS=$(get_status "${SONAR_SCAN_STATUS_INPUT}")
           QUALITY_GATE_STATUS=$(get_quality_gate_status "${QUALITY_GATE_STATUS_INPUT}")
 
@@ -76,10 +59,8 @@ jobs:
           - **Coverage**: ${TEST_COVERAGE}%
           - **Report**: [View Coverage Report](https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID})
 
-          ## 🔒 Security Scans (Snyk)
-          - **Code (SAST)**: ${SNYK_CODE_STATUS}
-          - **Open Source (SCA)**: ${SNYK_OSS_STATUS}
-          - **SCA Issues Found**: ${SNYK_ISSUES}
+          ## 🔒 Dependency Advisories (cargo audit)
+          - **Rust crates (RustSec)**: see the security-scans job
 
           ## 🎯 Code Quality (SonarQube)
           - **Status**: ${SONAR_SCAN_STATUS}
@@ -105,9 +86,6 @@ jobs:
         env:
           PROJECT_TYPE: ${{ inputs.project_type }}
           TEST_COVERAGE: ${{ inputs.test_coverage || '0' }}
-          SNYK_CODE_STATUS: ${{ inputs.snyk_code_status }}
-          SNYK_OSS_STATUS: ${{ inputs.snyk_oss_status }}
-          SNYK_ISSUES: ${{ inputs.snyk_issues || 0 }}
           SONAR_SCAN_STATUS: ${{ inputs.sonar_scan_status }}
           QUALITY_GATE_STATUS: ${{ inputs.quality_gate_status }}
         with:
@@ -115,9 +93,6 @@ jobs:
           script: |
             const projectType = process.env.PROJECT_TYPE;
             const coverage = process.env.TEST_COVERAGE;
-            const snykCodeStatus = process.env.SNYK_CODE_STATUS;
-            const snykOssStatus = process.env.SNYK_OSS_STATUS;
-            const snykIssues = process.env.SNYK_ISSUES;
             const sonarStatus = process.env.SONAR_SCAN_STATUS;
             const qualityGateStatus = process.env.QUALITY_GATE_STATUS;
 
@@ -129,12 +104,8 @@ jobs:
             | **Line Coverage** | ${coverage}% |
             | **Coverage Report** | [View Artifacts](https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}) |
 
-            ### 🔒 Security Scans (Snyk)
-            | Scan Type | Status | Details |
-            |-----------|--------|---------|
-            | **Code (SAST)** | ${snykCodeStatus === 'success' ? '✅ Completed' : (snykCodeStatus === 'failure' ? '⚠️ Failed' : '⚠️ Skipped')} | [View in Code Scanning](https://github.com/${context.repo.owner}/${context.repo.repo}/security/code-scanning) |
-            | **Open Source (SCA)** | ${snykOssStatus === 'success' ? '✅ Completed' : (snykOssStatus === 'failure' ? '⚠️ Failed' : '⚠️ Skipped')} | ${snykIssues !== '0' ? `⚠️ ${snykIssues} vulnerabilities found` : '✅ No issues'} |
-            ${snykOssStatus === 'success' && snykIssues !== '0' ? '| **Action Required** | ⚠️ Review vulnerabilities in [Snyk Dashboard](https://app.snyk.io/) |' : ''}
+            ### 🔒 Dependency Advisories (cargo audit)
+            See the security-scans job for RustSec results.
 
             ### 🎯 Code Quality (SonarQube)
             | Metric | Value |

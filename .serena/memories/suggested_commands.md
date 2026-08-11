@@ -174,5 +174,10 @@ git push -u origin feature/your-feature-name
 - Host CI container: `kkrzysztofik/anyka-cross-compile:rust-1.97.1-ci` (lint/coverage)
 - Cross/release container: `kkrzysztofik/anyka-cross-compile:rust-1.97.1`
 - Coverage reports uploaded to SonarCloud
-- Security scans via Snyk (SAST + SCA)
+- Dependency audit via `cargo audit` (RustSec DB): vulnerabilities fail the build,
+  informational advisories (unmaintained/unsound/yanked) only warn. Covers both
+  lockfiles; it parses `Cargo.lock` only, so no target flag is needed.
+  - `(cd cross-compile && $CARGO audit)`
+  - `(cd validation/rust && $CARGO audit)`
+- SAST via CodeQL (default setup) and SonarCloud; Dependabot manages dependency updates
 - Quality gates must pass before merge

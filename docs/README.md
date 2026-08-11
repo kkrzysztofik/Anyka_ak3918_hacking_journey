@@ -62,7 +62,7 @@ deliberately — renaming for symmetry is churn with no reader benefit.
 | `docs/design/prd.md`, `design_proposal.md`, `DESIGN_REVIEW.md` | Product requirements, design proposal, and design review for the web interface |
 | `docs/design/export_figma_screenshots.py` | Regenerates `img/` |
 
-Excluded from Snyk and DeepCode analysis by `.snyk` and `.dcignore` — most of it is generated.
+Not exempted from CodeQL scanning — `.github/codeql/codeql-config.yml` excludes `cross-compile/anyka_reference/**` and a few other vendor paths, but not `docs/design/`. Most of this directory is Figma-exported reference code, not the shipping WebUI.
 
 ## Archive
 

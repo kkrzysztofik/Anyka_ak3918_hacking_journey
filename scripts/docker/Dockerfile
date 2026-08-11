@@ -42,19 +42,13 @@ ENV PATH="/opt/arm-anykav200-crosstool-ng/bin:/root/.cargo/bin:${PATH}"
 
 # Host gcc for x86_64 proc-macros/build scripts. Use vendored cargo/rustc/clippy
 # from /opt (real binaries — do NOT install rustup stable; rustup cargo-clippy
-# proxies clash with 1.97.1-dev → E0514). Preinstall tarpaulin + Snyk for CI.
+# proxies clash with 1.97.1-dev → E0514). Preinstall tarpaulin for CI.
 RUN apt-get update && apt-get install -y --no-install-recommends build-essential && \
   rm -rf /var/lib/apt/lists/* && apt-get clean && \
   test "$(command -v cargo)" = "/opt/arm-anykav200-crosstool-ng/bin/cargo" && \
   test "$(command -v rustc)" = "/opt/arm-anykav200-crosstool-ng/bin/rustc" && \
   cargo install cargo-tarpaulin --locked --features vendored-openssl && \
   rm -rf /root/.cargo/registry/index/* /root/.cargo/git/db/* && \
-  curl --proto '=https' --tlsv1.2 --location --fail --show-error -Lo snyk-linux https://downloads.snyk.io/cli/stable/snyk-linux \
-  && curl --proto '=https' --tlsv1.2 --location --fail --show-error -Lo snyk-linux.sha256 https://downloads.snyk.io/cli/stable/snyk-linux.sha256 \
-  && sha256sum -c snyk-linux.sha256 \
-  && chmod +x snyk-linux \
-  && mv snyk-linux /usr/local/bin/snyk \
-  && rm snyk-linux.sha256 && \
   (arm-unknown-linux-uclibcgnueabi-gcc --version || arm-anykav200-linux-uclibcgnueabi-gcc --version) && \
   EXPECTED_RUSTC="/opt/arm-anykav200-crosstool-ng/bin/rustc" && \
   ACTUAL_RUSTC=$(command -v rustc) && \
@@ -66,7 +60,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends build-essential
   rustc --version | grep -q '1\.97' && \
   cargo --version && \
   clang --version 2>&1 | tee /tmp/clang-version.txt | grep -q '22\.1\.8' && \
-  snyk --version && \
   ccache --version && \
   command -v cargo-tarpaulin && \
   command -v clippy-driver
