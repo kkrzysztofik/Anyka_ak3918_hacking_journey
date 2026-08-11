@@ -13,7 +13,7 @@ use crate::platform::Platform;
 const NET_IFACE: &str = "wlan0";
 const STORAGE_MOUNT: &str = "/mnt";
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 struct RawSample {
     taken_at: Instant,
     cpu: Option<CpuTimes>,
@@ -56,7 +56,6 @@ pub struct Component {
     pub message: Option<String>,
 }
 
-/// Full on-demand diagnostics snapshot.
 #[derive(Debug, Clone, Serialize)]
 pub struct Snapshot {
     pub status: String,
@@ -68,8 +67,10 @@ pub struct Snapshot {
     /// Network throughput since the previous sample; `None` on the first call.
     pub network: Option<Network>,
     /// Age of the newest video frame from the hardware encoder, if known.
-    pub frame_age_ms: Option<u64>,
+    pub stream_frame_age_ms: Option<u64>,
     pub components: Vec<Component>,
+    /// Service names that failed to initialise at startup.
+    pub degraded_services: Vec<String>,
 }
 
 /// Holds platform handles and the last `/proc` sample for computing deltas.
@@ -121,7 +122,7 @@ impl DiagnosticsState {
 
         let prev_sample = {
             let mut guard = self.previous.lock().unwrap_or_else(|e| e.into_inner());
-            guard.replace(now_sample.clone())
+            guard.replace(now_sample)
         };
 
         let cpu_percent = prev_sample
@@ -153,7 +154,7 @@ impl DiagnosticsState {
 
         let process_s = self.started_at.elapsed().as_secs();
         let health = compute_health(
-            std::time::Duration::from_secs(system_s),
+            self.started_at.elapsed(),
             frame_age_outer,
             &self.degraded_services,
         );
@@ -179,7 +180,8 @@ impl DiagnosticsState {
             memory,
             storage,
             network,
-            frame_age_ms: frame_age_outer.flatten(),
+            stream_frame_age_ms: frame_age_outer.flatten(),
+            degraded_services: health.degraded_services,
             components,
         }
     }
@@ -226,5 +228,9 @@ mod tests {
         let state = DiagnosticsState::new(None, vec!["PTZ".to_string()]);
         let snap = state.snapshot();
         assert_eq!(snap.status, "degraded");
+        assert!(
+            snap.degraded_services.contains(&"PTZ".to_string()),
+            "PTZ must appear in degraded_services"
+        );
     }
 }
