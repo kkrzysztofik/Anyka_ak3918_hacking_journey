@@ -8,7 +8,7 @@ use serde::Serialize;
 use super::proc::{self, CpuTimes, NetBytes};
 use super::storage;
 use crate::lifecycle::health::compute_health;
-use crate::platform::Platform;
+use crate::platform::{Platform, VisionDiagnostics};
 
 const NET_IFACE: &str = "wlan0";
 const STORAGE_MOUNT: &str = "/mnt";
@@ -72,7 +72,7 @@ pub struct Snapshot {
     /// Service names that failed to initialise at startup.
     pub degraded_services: Vec<String>,
     /// Live vision/night-mode diagnostics from the imaging pipeline, if available.
-    pub vision: Option<crate::platform::VisionDiagnostics>,
+    pub vision: Option<VisionDiagnostics>,
 }
 
 /// Holds platform handles and the last `/proc` sample for computing deltas.
@@ -102,7 +102,7 @@ impl DiagnosticsState {
     /// subsequent calls produce rates from the delta since the previous call.
     ///
     /// `vision` is populated asynchronously from the imaging pipeline when a
-    /// platform with [`ImagingControl`] support is attached.
+    /// platform with imaging control support is attached.
     pub async fn snapshot(&self) -> Snapshot {
         let stat_text = read_file("/proc/stat");
         let meminfo_text = read_file("/proc/meminfo");
@@ -176,7 +176,13 @@ impl DiagnosticsState {
         components.sort_by(|a, b| a.name.cmp(&b.name));
 
         let vision = match self.platform.as_ref().and_then(|p| p.imaging_control()) {
-            Some(imaging) => imaging.vision_diagnostics().await.ok().flatten(),
+            Some(imaging) => match imaging.vision_diagnostics().await {
+                Ok(v) => v,
+                Err(e) => {
+                    tracing::warn!(error = %e, "vision diagnostics unavailable");
+                    None
+                }
+            },
             None => None,
         };
 

@@ -490,8 +490,7 @@ pub struct VisionDiagnostics {
     /// Current day/night mode string (`"day"` or `"night"`), or `None` if
     /// the mode has never been applied by the `NightModeController`.
     pub mode: Option<String>,
-    /// Last AE luminance reading used as the switching trigger (`0–255`), or
-    /// `None` if no luma sample has been captured yet.
+    /// Live AE luminance reading (`0–255`), or `None` if the read failed.
     pub ae_luma: Option<u8>,
     /// Raw ADC reading on AIN0 (light-sensor channel), or `None` if not read.
     pub ain0: Option<i32>,
