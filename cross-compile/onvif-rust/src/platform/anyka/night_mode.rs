@@ -247,7 +247,9 @@ pub(super) fn read_light_sensor(paths: &NodePaths) -> Option<i32> {
 fn read_gpio_on(paths: &NodePaths, node: Node) -> Option<bool> {
     let path = paths.node(node);
     let raw = std::fs::read_to_string(path).ok()?;
-    raw.trim().parse::<i32>().ok().map(|v| v != 0)
+    // AK3918 user-gpio sysfs nodes are often NUL-padded (e.g. "1\0").
+    let cleaned = raw.split('\0').next().unwrap_or("").trim();
+    cleaned.parse::<i32>().ok().map(|v| v != 0)
 }
 
 /// AUTO poll cadence.
@@ -1657,6 +1659,16 @@ mod tests {
                 Step::Sleep(SETTLE),
             ]
         );
+    }
+
+    #[test]
+    fn test_read_gpio_on_accepts_nul_padded_sysfs() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = NodePaths::rooted(dir.path(), dir.path());
+        std::fs::write(paths.node(Node::IrLed), "1\0").unwrap();
+        std::fs::write(paths.node(Node::WhiteLed), "0\0").unwrap();
+        assert_eq!(read_gpio_on(&paths, Node::IrLed), Some(true));
+        assert_eq!(read_gpio_on(&paths, Node::WhiteLed), Some(false));
     }
 
     #[tokio::test]
