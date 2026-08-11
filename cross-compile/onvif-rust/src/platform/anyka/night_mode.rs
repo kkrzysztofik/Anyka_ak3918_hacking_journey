@@ -240,6 +240,16 @@ pub(super) fn read_light_sensor(paths: &NodePaths) -> Option<i32> {
     raw.trim().parse::<i32>().ok()
 }
 
+/// Read a GPIO sysfs node as a boolean (nonzero = on).
+///
+/// Returns `None` when the node is absent or unparseable — the caller must
+/// treat that as "unknown", not as off.
+fn read_gpio_on(paths: &NodePaths, node: Node) -> Option<bool> {
+    let path = paths.node(node);
+    let raw = std::fs::read_to_string(path).ok()?;
+    raw.trim().parse::<i32>().ok().map(|v| v != 0)
+}
+
 /// AUTO poll cadence.
 ///
 /// Every tick is an IPC round-trip through the daemon's single-threaded poll
@@ -644,6 +654,48 @@ impl NightModeController {
                 }
             }
         })
+    }
+
+    /// Return a point-in-time snapshot of the vision-switching pipeline state.
+    pub(crate) async fn live_diagnostics(&self) -> crate::platform::common::VisionDiagnostics {
+        use crate::platform::common::{VisionDiagnostics, VisionSupported};
+
+        let ae_luma = self.ffi.get_ae_luma().await;
+        let ain0 = read_light_sensor(&self.paths);
+        let mode = self.current_mode().await.map(|m| match m {
+            DayNight::Day => "day".to_string(),
+            DayNight::Night => "night".to_string(),
+        });
+        VisionDiagnostics {
+            mode,
+            ae_luma,
+            ain0,
+            ir_led: self
+                .caps
+                .ir_led
+                .then(|| read_gpio_on(&self.paths, Node::IrLed))
+                .flatten(),
+            ircut_a: self
+                .caps
+                .ircut
+                .then(|| read_gpio_on(&self.paths, Node::IrCutA))
+                .flatten(),
+            ircut_b: self
+                .caps
+                .ircut
+                .then(|| read_gpio_on(&self.paths, Node::IrCutB))
+                .flatten(),
+            white_led: self
+                .caps
+                .white_led
+                .then(|| read_gpio_on(&self.paths, Node::WhiteLed))
+                .flatten(),
+            supported: VisionSupported {
+                ir_led: self.caps.ir_led,
+                ircut: self.caps.ircut,
+                white_led: self.caps.white_led,
+            },
+        }
     }
 }
 
@@ -1605,5 +1657,36 @@ mod tests {
                 Step::Sleep(SETTLE),
             ]
         );
+    }
+
+    #[tokio::test]
+    async fn test_live_diagnostics_reads_ae_ain0_and_lamps() {
+        use crate::hal::common::imaging::MockImagingHalTrait;
+        use crate::onvif::types::common::IrCutFilterMode;
+
+        let dir = tempfile::tempdir().unwrap();
+        let paths = NodePaths::rooted(dir.path(), dir.path());
+        for n in [Node::IrCutA, Node::IrCutB, Node::IrLed, Node::WhiteLed] {
+            std::fs::write(paths.node(n), "0").unwrap();
+        }
+        std::fs::write(paths.node(Node::IrLed), "1").unwrap();
+        std::fs::write(paths.light_sensor(), "306").unwrap();
+
+        let mut ffi = MockImagingHalTrait::new();
+        ffi.expect_get_ae_luma().times(1).returning(|| Some(42));
+
+        let ctl = NightModeController::new(
+            paths,
+            test_config(),
+            std::sync::Arc::new(ffi),
+            IrCutFilterMode::AUTO,
+            None,
+        );
+        let v = ctl.live_diagnostics().await;
+        assert_eq!(v.ae_luma, Some(42));
+        assert_eq!(v.ain0, Some(306));
+        assert_eq!(v.ir_led, Some(true));
+        assert_eq!(v.ircut_a, Some(false));
+        assert!(v.supported.ir_led);
     }
 }
