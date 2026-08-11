@@ -4,6 +4,8 @@
 //! testable on the host. The camera runs a kernel old enough to lack
 //! `MemAvailable`, so these formats cannot be assumed to match a modern box.
 
+use std::time::Duration;
+
 /// Jiffy counters from the aggregate `cpu` line of `/proc/stat`.
 ///
 /// These are cumulative since boot, so a single reading yields the since-boot
@@ -121,9 +123,33 @@ pub fn parse_uptime_secs(contents: &str) -> Option<u64> {
         .map(|secs| secs as u64)
 }
 
+/// Busy percentage between two `/proc/stat` readings.
+///
+/// Returns `None` when the counters did not move forward — that means a reset,
+/// and a negative delta would render as a nonsense percentage.
+pub fn cpu_percent(prev: CpuTimes, now: CpuTimes) -> Option<f32> {
+    let total = now.total.checked_sub(prev.total)?;
+    let busy = now.busy.checked_sub(prev.busy)?;
+    if total == 0 {
+        return None;
+    }
+    Some((busy as f32 / total as f32) * 100.0)
+}
+
+/// Throughput between two cumulative byte counters.
+pub fn bytes_per_sec(prev: u64, now: u64, elapsed: Duration) -> Option<u64> {
+    let delta = now.checked_sub(prev)?;
+    let secs = elapsed.as_secs_f64();
+    if secs <= 0.0 {
+        return None;
+    }
+    Some((delta as f64 / secs) as u64)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Duration;
 
     /// Captured from the AK3918 on .198, 2026-08-11.
     const STAT: &str = "cpu  4169306 0 2746808 33139786 9423 0 91014 0 0 0\ncpu0 1 2 3\n";
@@ -180,5 +206,37 @@ mod tests {
     #[test]
     fn test_parse_uptime_secs_truncates() {
         assert_eq!(parse_uptime_secs("421240.95 351066.01\n"), Some(421_240));
+    }
+
+    #[test]
+    fn test_cpu_percent_from_delta() {
+        let prev = CpuTimes { busy: 100, total: 1000 };
+        let now = CpuTimes { busy: 150, total: 1200 };
+        let pct = cpu_percent(prev, now).expect("forward delta");
+        assert!((pct - 25.0).abs() < 0.01, "got {pct}");
+    }
+
+    #[test]
+    fn test_cpu_percent_rejects_backwards_counter() {
+        let prev = CpuTimes { busy: 150, total: 1200 };
+        let now = CpuTimes { busy: 100, total: 1000 };
+        assert!(cpu_percent(prev, now).is_none());
+    }
+
+    #[test]
+    fn test_cpu_percent_zero_elapsed_is_none() {
+        let same = CpuTimes { busy: 100, total: 1000 };
+        assert!(cpu_percent(same, same).is_none());
+    }
+
+    #[test]
+    fn test_bytes_per_sec_divides_by_elapsed() {
+        let rate = bytes_per_sec(1000, 6000, Duration::from_secs(5)).expect("forward delta");
+        assert_eq!(rate, 1000);
+    }
+
+    #[test]
+    fn test_bytes_per_sec_rejects_counter_reset() {
+        assert!(bytes_per_sec(6000, 1000, Duration::from_secs(5)).is_none());
     }
 }
