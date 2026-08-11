@@ -90,7 +90,7 @@ describe('useDiagnostics', () => {
   });
 
   it('should not duplicate history on rerender without dataUpdatedAt change', async () => {
-    const { queryClient, wrapper } = makeWrapper();
+    const { wrapper } = makeWrapper();
     const { result, rerender } = renderHook(() => useDiagnostics(), { wrapper });
 
     await waitFor(() => expect(result.current.history.length).toBe(1));

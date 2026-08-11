@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 
 import { useQuery } from '@tanstack/react-query';
 
@@ -48,14 +48,15 @@ export function useDiagnostics(): UseDiagnosticsResult {
   });
 
   const [history, setHistory] = useState<DiagnosticsPoint[]>([]);
+  const [seenAt, setSeenAt] = useState(0);
 
-  useEffect(() => {
-    if (!query.data) return;
-    const point = toPoint(query.data, query.dataUpdatedAt);
-    setHistory((prev) => [...prev, point].slice(-MAX_SAMPLES));
-    // dataUpdatedAt changes only when TanStack Query receives fresh data —
-    // this guards against spurious re-renders corrupting the history array.
-  }, [query.dataUpdatedAt]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Append on fresh query data during render (React “adjust state when props
+  // change” pattern). Keyed on dataUpdatedAt so unrelated re-renders cannot
+  // duplicate points — same guarantee the plan required of the effect.
+  if (query.data && query.dataUpdatedAt !== seenAt) {
+    setSeenAt(query.dataUpdatedAt);
+    setHistory((prev) => [...prev, toPoint(query.data, query.dataUpdatedAt)].slice(-MAX_SAMPLES));
+  }
 
   return { ...query, history };
 }
