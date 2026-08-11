@@ -128,9 +128,107 @@ impl HealthStatus {
     }
 }
 
+/// Maximum silence from venc-read before `stream_health` is marked degraded.
+pub const STREAM_HEALTH_SILENCE_SECS: u64 = 5;
+
+/// Build a [`HealthStatus`] from already-gathered inputs.
+///
+/// Free-standing rather than a method on `App` so the HTTP diagnostics handler
+/// and `App::health()` share one implementation instead of drifting apart.
+///
+/// `frame_age_ms` is `None` when streaming is disabled entirely, and
+/// `Some(None)` when streaming is on but no frame has arrived yet.
+pub fn compute_health(
+    uptime: Duration,
+    frame_age_ms: Option<Option<u64>>,
+    degraded_services: &[String],
+) -> HealthStatus {
+    let mut status = HealthStatus::new(uptime);
+
+    status.add_component("config", ComponentHealth::healthy("Configuration"));
+    status.add_component("platform", ComponentHealth::healthy("Platform"));
+    status.add_component("device", ComponentHealth::healthy("Device Service"));
+    status.add_component("media", ComponentHealth::healthy("Media Service"));
+
+    if let Some(age) = frame_age_ms {
+        match age {
+            Some(age_ms) if age_ms > STREAM_HEALTH_SILENCE_SECS * 1000 => {
+                status.add_component(
+                    "stream_health",
+                    ComponentHealth::degraded(
+                        "Stream Health",
+                        format!("No frames for {}ms (venc-read likely stalled)", age_ms),
+                    ),
+                );
+                status.mark_degraded("stream_health");
+            }
+            Some(_) => {
+                status.add_component("stream_health", ComponentHealth::healthy("Stream Health"));
+            }
+            None => {
+                status.add_component(
+                    "stream_health",
+                    ComponentHealth::degraded(
+                        "Stream Health",
+                        "Streaming enabled but no frames observed yet",
+                    ),
+                );
+                status.mark_degraded("stream_health");
+            }
+        }
+    }
+
+    for service in degraded_services {
+        status.mark_degraded(service);
+        status.add_component(
+            service.to_lowercase(),
+            ComponentHealth::degraded(service, "Initialization failed"),
+        );
+    }
+
+    status
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Duration;
+
+    #[test]
+    fn test_compute_health_flags_stalled_stream() {
+        let status = compute_health(Duration::from_secs(60), Some(Some(6_000)), &[]);
+        assert_eq!(status.status, HealthState::Degraded);
+        assert!(
+            status
+                .degraded_services
+                .contains(&"stream_health".to_string())
+        );
+    }
+
+    #[test]
+    fn test_compute_health_accepts_recent_frame() {
+        let status = compute_health(Duration::from_secs(60), Some(Some(40)), &[]);
+        assert_eq!(status.status, HealthState::Healthy);
+    }
+
+    #[test]
+    fn test_compute_health_flags_stream_with_no_frames_yet() {
+        let status = compute_health(Duration::from_secs(60), Some(None), &[]);
+        assert_eq!(status.status, HealthState::Degraded);
+    }
+
+    #[test]
+    fn test_compute_health_without_streaming_is_healthy() {
+        let status = compute_health(Duration::from_secs(60), None, &[]);
+        assert_eq!(status.status, HealthState::Healthy);
+    }
+
+    #[test]
+    fn test_compute_health_includes_startup_degraded_services() {
+        let status = compute_health(Duration::from_secs(60), None, &["PTZ".to_string()]);
+        assert_eq!(status.status, HealthState::Degraded);
+        assert!(status.degraded_services.contains(&"PTZ".to_string()));
+    }
 
     #[test]
     fn test_health_state_display() {
