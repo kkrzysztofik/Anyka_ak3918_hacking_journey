@@ -17,6 +17,7 @@ pub struct StorageUsage {
 /// Returns `None` if the path cannot be stat-ed, e.g. the SD card is absent.
 pub fn storage_usage(mount: &str) -> Option<StorageUsage> {
     let path = CString::new(mount).ok()?;
+    // SAFETY: `statvfs` is POD; all-zeroes is a valid inhabitant.
     let mut stats: libc::statvfs = unsafe { std::mem::zeroed() };
 
     // SAFETY: `path` is a valid NUL-terminated C string that outlives the call,
@@ -26,10 +27,15 @@ pub fn storage_usage(mount: &str) -> Option<StorageUsage> {
         return None;
     }
 
-    // f_frsize is the fragment size, which is what the block counts are in.
-    let block_kb = u64::from(stats.f_frsize as u32) / 1024;
-    let total_kb = (stats.f_blocks as u64).checked_mul(block_kb)?;
-    let free_kb = (stats.f_bfree as u64).checked_mul(block_kb)?;
+    // f_frsize is the fragment size the block counts are in; some filesystems
+    // report 0 and expect f_bsize to be used instead.
+    let frsize = match stats.f_frsize as u64 {
+        0 => stats.f_bsize as u64,
+        n => n,
+    };
+    let to_kb = |blocks: u64| blocks.checked_mul(frsize).map(|bytes| bytes / 1024);
+    let total_kb = to_kb(stats.f_blocks as u64)?;
+    let free_kb = to_kb(stats.f_bfree as u64)?;
     Some(StorageUsage {
         total_kb,
         used_kb: total_kb.saturating_sub(free_kb),
