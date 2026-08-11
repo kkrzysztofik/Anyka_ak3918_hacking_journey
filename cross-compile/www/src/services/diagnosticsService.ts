@@ -16,6 +16,16 @@ export interface Diagnostics {
   stream_frame_age_ms: number | null;
   components: Array<{ name: string; status: string; message: string | null }>;
   degraded_services: string[];
+  vision: {
+    mode: string | null;
+    ae_luma: number | null;
+    ain0: number | null;
+    ir_led: boolean | null;
+    ircut_a: boolean | null;
+    ircut_b: boolean | null;
+    white_led: boolean | null;
+    supported: { ir_led: boolean; ircut: boolean; white_led: boolean };
+  } | null;
 }
 
 export type LogSource = 'onvif_rust' | 'vendor_daemon' | 'anyka_init' | 'wpa_supplicant';

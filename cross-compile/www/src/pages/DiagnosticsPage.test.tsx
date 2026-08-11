@@ -31,6 +31,7 @@ const BASE_DIAG: Diagnostics = {
   stream_frame_age_ms: 100,
   components: [{ name: 'onvif', status: 'healthy', message: null }],
   degraded_services: [],
+  vision: null,
 };
 
 function makeResult(
@@ -240,6 +241,8 @@ describe('DiagnosticsPage', () => {
       renderWithProviders(<DiagnosticsPage />);
       // Chart should be visible — empty-state placeholder must be absent
       expect(screen.queryByTestId('diagnostics-cpu-chart-empty')).not.toBeInTheDocument();
+      expect(screen.getByTestId('sparkline-legend-cpu')).toHaveTextContent('CPU');
+      expect(screen.getByTestId('sparkline-legend-cpu-value')).toHaveTextContent('45%');
     });
 
     it('should show empty state when fewer than two CPU samples are available', () => {
@@ -262,6 +265,8 @@ describe('DiagnosticsPage', () => {
       );
       renderWithProviders(<DiagnosticsPage />);
       expect(screen.queryByTestId('diagnostics-memory-chart-empty')).not.toBeInTheDocument();
+      expect(screen.getByTestId('sparkline-legend-memPct')).toHaveTextContent('Memory');
+      expect(screen.getByTestId('sparkline-legend-memPct-value')).toHaveTextContent('55%');
     });
   });
 
@@ -302,6 +307,27 @@ describe('DiagnosticsPage', () => {
       vi.mocked(useDiagnostics).mockReturnValue(makeResult({ components: [] }));
       renderWithProviders(<DiagnosticsPage />);
       expect(screen.queryByTestId('diagnostics-components-list')).not.toBeInTheDocument();
+    });
+  });
+
+  describe('Network rates in Device Information', () => {
+    it('should render Download and Upload rows when network is present', () => {
+      renderWithProviders(<DiagnosticsPage />); // network: { rx_bps: 1_000_000, tx_bps: 500_000 }
+      expect(screen.getByTestId('diagnostics-network-download')).toHaveTextContent('1000 kbps');
+      expect(screen.getByTestId('diagnostics-network-upload')).toHaveTextContent('500 kbps');
+    });
+
+    it('should show em-dash for Download and Upload when network is null', () => {
+      vi.mocked(useDiagnostics).mockReturnValue(makeResult({ network: null }));
+      renderWithProviders(<DiagnosticsPage />);
+      expect(screen.getByTestId('diagnostics-network-download')).toHaveTextContent('\u2014');
+      expect(screen.getByTestId('diagnostics-network-upload')).toHaveTextContent('\u2014');
+    });
+
+    it('should always render download and upload row containers', () => {
+      renderWithProviders(<DiagnosticsPage />);
+      expect(screen.getByTestId('diagnostics-network-download-row')).toBeInTheDocument();
+      expect(screen.getByTestId('diagnostics-network-upload-row')).toBeInTheDocument();
     });
   });
 

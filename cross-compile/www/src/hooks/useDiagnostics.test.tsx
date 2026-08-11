@@ -29,6 +29,7 @@ const MOCK_DIAGNOSTICS: Diagnostics = {
   stream_frame_age_ms: null,
   components: [],
   degraded_services: [],
+  vision: null,
 };
 
 function makeWrapper() {

@@ -21,6 +21,7 @@ const MOCK_DIAGNOSTICS = {
   stream_frame_age_ms: 33,
   components: [{ name: 'onvif_server', status: 'ok', message: null }],
   degraded_services: [],
+  vision: null,
 };
 
 function makeResponse(body: unknown, status = 200): Response {

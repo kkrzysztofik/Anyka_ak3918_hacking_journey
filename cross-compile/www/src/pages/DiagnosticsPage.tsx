@@ -44,6 +44,10 @@ const LOG_LEVEL_OPTIONS: Array<{ value: LogLevel | 'all'; label: string }> = [
   { value: 'error', label: 'Error' },
 ];
 
+function formatKbps(bps: number): string {
+  return `${Math.round(bps / 1000)} kbps`;
+}
+
 function formatDuration(seconds: number): string {
   const d = Math.floor(seconds / 86400);
   const h = Math.floor((seconds % 86400) / 3600);
@@ -273,7 +277,7 @@ export default function DiagnosticsPage() {
             </div>
           </CardHeader>
           <CardContent className="pt-4">
-            <div className="h-[180px] w-full">
+            <div className="h-[200px] w-full">
               {cpuChartData.length >= 2 ? (
                 <Sparkline
                   data={cpuChartData}
@@ -315,7 +319,7 @@ export default function DiagnosticsPage() {
             </div>
           </CardHeader>
           <CardContent className="pt-4">
-            <div className="h-[180px] w-full">
+            <div className="h-[200px] w-full">
               {memChartData.length >= 2 ? (
                 <Sparkline
                   data={memChartData}
@@ -338,44 +342,28 @@ export default function DiagnosticsPage() {
       {/* Charts Row 2: Network */}
       <Card className="border-border bg-card overflow-hidden">
         <CardHeader className="border-border border-b">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-500/10">
-                <Wifi className="h-5 w-5 text-blue-500" />
-              </div>
-              <div>
-                <CardTitle
-                  className="text-foreground text-sm font-semibold"
-                  data-testid="diagnostics-network-throughput-title"
-                >
-                  Network Throughput
-                </CardTitle>
-                <p
-                  className="text-muted-foreground text-xs"
-                  data-testid="diagnostics-network-throughput-description"
-                >
-                  Upload and download bandwidth
-                </p>
-              </div>
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-500/10">
+              <Wifi className="h-5 w-5 text-blue-500" />
             </div>
-            <div className="text-muted-foreground flex items-center gap-4 text-xs">
-              <span
-                className="flex items-center gap-1.5"
-                data-testid="diagnostics-network-download-label"
+            <div>
+              <CardTitle
+                className="text-foreground text-sm font-semibold"
+                data-testid="diagnostics-network-throughput-title"
               >
-                <div className="h-2 w-2 rounded-full bg-blue-500"></div> Download
-              </span>
-              <span
-                className="flex items-center gap-1.5"
-                data-testid="diagnostics-network-upload-label"
+                Network Throughput
+              </CardTitle>
+              <p
+                className="text-muted-foreground text-xs"
+                data-testid="diagnostics-network-throughput-description"
               >
-                <div className="h-2 w-2 rounded-full bg-green-500"></div> Upload
-              </span>
+                Upload and download bandwidth
+              </p>
             </div>
           </div>
         </CardHeader>
         <CardContent className="pt-4">
-          <div className="relative h-[120px] w-full">
+          <div className="relative h-[160px] w-full">
             {netChartData.length >= 2 ? (
               <Sparkline
                 data={netChartData}
@@ -456,6 +444,32 @@ export default function DiagnosticsPage() {
                     Restarted {formatDuration(data.uptime.process_s)} ago
                   </p>
                 )}
+              </div>
+              <div className="border-border border-t pt-3">
+                <div
+                  className="flex items-center justify-between"
+                  data-testid="diagnostics-network-download-row"
+                >
+                  <span className="text-muted-foreground">Download</span>
+                  <span
+                    className="font-mono text-white"
+                    data-testid="diagnostics-network-download"
+                  >
+                    {data?.network != null ? formatKbps(data.network.rx_bps) : '\u2014'}
+                  </span>
+                </div>
+                <div
+                  className="mt-1 flex items-center justify-between"
+                  data-testid="diagnostics-network-upload-row"
+                >
+                  <span className="text-muted-foreground">Upload</span>
+                  <span
+                    className="font-mono text-white"
+                    data-testid="diagnostics-network-upload"
+                  >
+                    {data?.network != null ? formatKbps(data.network.tx_bps) : '\u2014'}
+                  </span>
+                </div>
               </div>
             </dl>
           </CardContent>
