@@ -8,6 +8,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 #[cfg(test)]
 use mockall::automock;
+use serde::Serialize;
 use thiserror::Error;
 
 /// Errors that can occur in platform operations.
@@ -468,6 +469,44 @@ pub trait PTZControl: Send + Sync {
     async fn get_limits(&self) -> PlatformResult<PtzLimits>;
 }
 
+/// Which vision-switching hardware components this camera actually has.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct VisionSupported {
+    /// Camera has a controllable IR LED array.
+    pub ir_led: bool,
+    /// Camera has a controllable IR-cut filter motor.
+    pub ircut: bool,
+    /// Camera has a controllable white floodlight.
+    pub white_led: bool,
+}
+
+/// A point-in-time snapshot of the vision-switching pipeline state.
+///
+/// All fields that require an active hardware read carry `Option<T>` — they
+/// are `None` when the corresponding hardware has never been driven or when
+/// it is unavailable for reading (e.g. IR-cut motor has no feedback pin).
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct VisionDiagnostics {
+    /// Current day/night mode string (`"day"` or `"night"`), or `None` if
+    /// the mode has never been applied by the `NightModeController`.
+    pub mode: Option<String>,
+    /// Last AE luminance reading used as the switching trigger (`0–255`), or
+    /// `None` if no luma sample has been captured yet.
+    pub ae_luma: Option<i32>,
+    /// Raw ADC reading on AIN0 (light-sensor channel), or `None` if not read.
+    pub ain0: Option<i32>,
+    /// Current IR LED state (`true` = on), or `None` if undriven.
+    pub ir_led: Option<bool>,
+    /// IR-cut filter coil A state (`true` = energised), or `None` if undriven.
+    pub ircut_a: Option<bool>,
+    /// IR-cut filter coil B state (`true` = energised), or `None` if undriven.
+    pub ircut_b: Option<bool>,
+    /// White LED state (`true` = on), or `None` if undriven.
+    pub white_led: Option<bool>,
+    /// Which vision-switching components are present on this camera model.
+    pub supported: VisionSupported,
+}
+
 /// Imaging control trait for image settings.
 #[cfg_attr(test, automock)]
 #[async_trait]
@@ -508,6 +547,15 @@ pub trait ImagingControl: Send + Sync {
     /// Re-enable AUTO day/night for the IR path (ONVIF `tt:IRLamp|Auto`).
     async fn enable_ir_auto(&self) -> PlatformResult<()> {
         Err(PlatformError::NotSupported("enable_ir_auto".to_string()))
+    }
+
+    /// Return a point-in-time diagnostics snapshot of the vision-switching
+    /// pipeline, or `None` if this implementation does not support it.
+    ///
+    /// The default returns `Ok(None)` — stubs and minimal implementations do
+    /// not need to override this method.
+    async fn vision_diagnostics(&self) -> PlatformResult<Option<VisionDiagnostics>> {
+        Ok(None)
     }
 }
 

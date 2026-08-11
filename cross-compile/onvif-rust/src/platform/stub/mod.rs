@@ -2107,4 +2107,11 @@ mod tests {
         assert_eq!(configs.len(), 1);
         assert_eq!(configs[0].token, "audio_encoder");
     }
+
+    #[tokio::test]
+    async fn test_imaging_control_vision_diagnostics_defaults_to_none() {
+        let platform = StubPlatform::new();
+        let imaging = platform.imaging_control().unwrap();
+        assert!(imaging.vision_diagnostics().await.unwrap().is_none());
+    }
 }
