@@ -90,4 +90,29 @@ describe('Sparkline', () => {
     render(<Sparkline data={points} series={[{ key: 'value', label: 'CPU', color: '#ef4444' }]} />);
     expect(screen.getByRole('img')).toHaveAttribute('aria-label', 'CPU 30');
   });
+
+  it('renders a legend entry with color label and latest value for each series', () => {
+    render(
+      <Sparkline
+        data={[
+          { time: 0, upload: 2, download: 4 },
+          { time: 1, upload: 3, download: 5 },
+        ]}
+        series={[
+          { key: 'download', label: 'Download', color: '#3b82f6', unit: ' Mbps' },
+          { key: 'upload', label: 'Upload', color: '#22c55e', unit: ' Mbps' },
+        ]}
+      />,
+    );
+    expect(screen.getByTestId('sparkline-legend')).toBeInTheDocument();
+    expect(screen.getByTestId('sparkline-legend-download')).toHaveTextContent('Download');
+    expect(screen.getByTestId('sparkline-legend-download-value')).toHaveTextContent('5 Mbps');
+    expect(screen.getByTestId('sparkline-legend-upload')).toHaveTextContent('Upload');
+    expect(screen.getByTestId('sparkline-legend-upload-value')).toHaveTextContent('3 Mbps');
+  });
+
+  it('omits the legend when there is no data', () => {
+    render(<Sparkline data={[]} series={[{ key: 'value', label: 'CPU', color: '#ef4444' }]} />);
+    expect(screen.queryByTestId('sparkline-legend')).not.toBeInTheDocument();
+  });
 });
