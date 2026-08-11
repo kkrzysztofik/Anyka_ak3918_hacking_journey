@@ -56,7 +56,7 @@ use axum::{
     http::{Method, StatusCode, header},
     middleware::{self, Next},
     response::{IntoResponse, Response},
-    routing::post,
+    routing::{get, post},
 };
 use tokio::net::TcpListener;
 use tokio::sync::broadcast;
@@ -199,6 +199,8 @@ pub struct OnvifServer {
     memory_monitor: Arc<MemoryMonitor>,
     /// Rate limiter for per-IP request limiting.
     rate_limiter: Arc<RateLimiter>,
+    /// Optional diagnostics state. `None` disables the /api routes entirely.
+    diagnostics: Option<Arc<crate::diagnostics::state::DiagnosticsState>>,
 }
 
 /// Validate security configuration for TLS and authentication.
@@ -305,6 +307,7 @@ impl OnvifServer {
             auth_enabled: false, // Authentication disabled in minimal mode
             memory_monitor,
             rate_limiter,
+            diagnostics: None,
         })
     }
 
@@ -380,7 +383,21 @@ impl OnvifServer {
             auth_enabled,
             memory_monitor: Arc::clone(app_state.memory_monitor()),
             rate_limiter: Arc::clone(app_state.rate_limiter()),
+            diagnostics: None,
         })
+    }
+
+    /// Attach a diagnostics state, enabling the `GET /api/diagnostics` and
+    /// `GET /api/logs` routes on the router.
+    ///
+    /// When not called the `/api` sub-router is not mounted at all.
+    #[must_use]
+    pub fn with_diagnostics(
+        mut self,
+        diagnostics: Arc<crate::diagnostics::state::DiagnosticsState>,
+    ) -> Self {
+        self.diagnostics = Some(diagnostics);
+        self
     }
 
     /// Register minimal ONVIF services (Media and Imaging only).
@@ -564,10 +581,29 @@ impl OnvifServer {
         // Clone memory monitor for the memory check middleware
         let memory_monitor = Arc::clone(&state.memory_monitor);
 
-        // Build the main router with middleware
-        // Layers are applied in reverse order: last added = first executed
-        let app = Router::new()
-            .nest("/onvif", service_routes)
+        // Build the main router with middleware.
+        // IMPORTANT: /api must be nested BEFORE the rate-limit and memory-check
+        // layers so those protections also cover the diagnostics endpoints.
+        // Layers are applied in reverse order: last added = first executed.
+        let mut app = Router::new().nest("/onvif", service_routes);
+
+        // Mount /api routes when diagnostics state is available.
+        if let Some(diagnostics) = &self.diagnostics {
+            let api = Router::new()
+                .route(
+                    "/diagnostics",
+                    get(crate::diagnostics::http::handle_diagnostics),
+                )
+                .route("/logs", get(crate::diagnostics::http::handle_logs))
+                .layer(middleware::from_fn_with_state(
+                    state.clone(),
+                    crate::diagnostics::http::diagnostics_auth_middleware,
+                ))
+                .layer(axum::Extension(Arc::clone(diagnostics)));
+            app = app.nest("/api", api);
+        }
+
+        let app = app
             .layer(
                 ServiceBuilder::new()
                     // Add request timeout (returns 408 Request Timeout on timeout)
@@ -1279,5 +1315,114 @@ mod tests {
 
         // Verify state can be cloned
         let _cloned = state.clone();
+    }
+
+    // Helper: build a server+state+router with diagnostics attached.
+    //
+    // `auth_on` sets `auth_enabled` on the `OnvifServerState` used in
+    // `build_router`; the `OnvifServer` is always constructed with auth off
+    // (its constructor sets `auth_enabled: false` in minimal mode).
+    fn make_diagnostics_app(auth_on: bool) -> Router {
+        use axum::extract::ConnectInfo;
+        use std::net::SocketAddr;
+
+        let config = OnvifServerConfig {
+            static_root: None,
+            ..Default::default()
+        };
+        let server = OnvifServer::new(config).unwrap().with_diagnostics(Arc::new(
+            crate::diagnostics::state::DiagnosticsState::new(None, vec![]),
+        ));
+
+        let state = OnvifServerState {
+            dispatcher: Arc::clone(&server.dispatcher),
+            shutdown_tx: server.shutdown_tx.clone(),
+            ws_security: Arc::clone(&server.ws_security),
+            user_storage: Arc::clone(&server.user_storage),
+            password_manager: Arc::clone(&server.password_manager),
+            auth_enabled: auth_on,
+            memory_monitor: Arc::clone(&server.memory_monitor),
+            rate_limiter: Arc::clone(&server.rate_limiter),
+        };
+
+        let addr: SocketAddr = "127.0.0.1:8080".parse().unwrap();
+        server
+            .build_router(state)
+            // ConnectInfo is required by rate_limit_middleware
+            .layer(axum::Extension(ConnectInfo(addr)))
+    }
+
+    #[tokio::test]
+    async fn test_diagnostics_route_requires_auth() {
+        use axum::body::Body;
+        use axum::http::{Request, StatusCode};
+        use tower::ServiceExt;
+
+        let app = make_diagnostics_app(true);
+
+        // No Authorization header → must get 401, not 200, not 404.
+        let request = Request::builder()
+            .method("GET")
+            .uri("/api/diagnostics")
+            .body(Body::empty())
+            .unwrap();
+
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(
+            response.status(),
+            StatusCode::UNAUTHORIZED,
+            "unauthenticated request should be rejected"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_diagnostics_route_returns_json_when_authorized() {
+        use axum::body::Body;
+        use axum::http::{Request, StatusCode};
+        use tower::ServiceExt;
+
+        // auth_enabled=false → middleware passes through without credential check.
+        let app = make_diagnostics_app(false);
+
+        let request = Request::builder()
+            .method("GET")
+            .uri("/api/diagnostics")
+            .body(Body::empty())
+            .unwrap();
+
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body = axum::body::to_bytes(response.into_body(), 64 * 1024)
+            .await
+            .unwrap();
+        let text = std::str::from_utf8(&body).unwrap();
+        assert!(
+            text.contains("uptime"),
+            "response body should contain 'uptime'; got: {text}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_unknown_api_route_is_not_swallowed_by_static_fallback() {
+        use axum::body::Body;
+        use axum::http::{Request, StatusCode};
+        use tower::ServiceExt;
+
+        // No static_root configured, so fallback service is not present.
+        let app = make_diagnostics_app(false);
+
+        let request = Request::builder()
+            .method("GET")
+            .uri("/api/nonexistent")
+            .body(Body::empty())
+            .unwrap();
+
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(
+            response.status(),
+            StatusCode::NOT_FOUND,
+            "/api/nonexistent must return 404, not be swallowed by a fallback"
+        );
     }
 }

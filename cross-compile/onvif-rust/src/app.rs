@@ -1100,9 +1100,15 @@ impl Application {
         let server_config = Self::build_server_config(&config_runtime);
         let port = server_config.port;
 
+        let diagnostics = Arc::new(crate::diagnostics::state::DiagnosticsState::new(
+            app_state.platform().cloned(),
+            progress.degraded_services().to_vec(),
+        ));
+
         let server = Arc::new(
             OnvifServer::with_app_state(server_config, app_state.clone())
-                .map_err(|e| StartupError::Network(e.to_string()))?,
+                .map_err(|e| StartupError::Network(e.to_string()))?
+                .with_diagnostics(Arc::clone(&diagnostics)),
         );
 
         // Start the server in a background task
