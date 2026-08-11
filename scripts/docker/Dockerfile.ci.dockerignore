@@ -1,0 +1,34 @@
+# Dockerignore for Dockerfile.ci — keep context small (staged host toolchain only).
+.git/
+.gitignore
+.dockerignore
+Dockerfile*
+node_modules/
+dist/
+build/
+coverage/
+target/
+debug/
+release/
+*.log
+*.tmp
+*.swp
+.env
+.env.*
+.vscode/
+.idea/
+toolchain/
+cross-compile/
+validation/
+SD_card_contents/
+docs/
+wiki/
+orig/
+sample_xml/
+# Allow only the staged host-CI toolchain + this directory's scripts
+!scripts/
+scripts/**
+!scripts/docker/
+scripts/docker/**
+!scripts/docker/.ci-toolchain/
+!scripts/docker/.ci-toolchain/**

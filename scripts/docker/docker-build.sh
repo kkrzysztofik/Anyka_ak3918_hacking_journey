@@ -18,6 +18,7 @@ DOCKERFILE="${SCRIPT_DIR}/Dockerfile"
 IMAGE_TAG="anyka-cross-compile"
 BUILD_ARGS=""
 NO_CACHE=false
+CI_IMAGE=false
 
 # =============================================================================
 # Utility Functions
@@ -33,15 +34,16 @@ Build the Anyka cross-compilation Docker image with ARM toolchain.
 OPTIONS:
   -h, --help              Show this help message
   -t, --tag TAG           Docker image tag (default: anyka-cross-compile)
-  -f, --file FILE         Dockerfile path (default: cross-compile/Dockerfile)
+  -f, --file FILE         Dockerfile path (default: scripts/docker/Dockerfile)
+  --ci                    Build slim host-CI image (Dockerfile.ci; runs prepare-ci-toolchain.sh)
   --no-cache              Build without using cache
   --build-arg KEY=VALUE   Pass build argument to docker build
 
 EXAMPLES:
-  $0                                    # Build with default settings
+  $0                                    # Build full cross-compile image
+  $0 --ci -t kkrzysztofik/anyka-cross-compile:rust-1.97.1-ci
   $0 --tag my-toolchain                  # Build with custom tag
   $0 --no-cache                          # Build without cache
-  $0 --build-arg BUILDKIT_INLINE_CACHE=1 # Pass build argument
 
 After building, use the image:
   docker run -it --rm -v \${PWD}:/workspace ${IMAGE_TAG}
@@ -100,6 +102,14 @@ parse_arguments() {
                 DOCKERFILE="${file}"
                 shift 2
                 ;;
+            --ci)
+                CI_IMAGE=true
+                DOCKERFILE="${SCRIPT_DIR}/Dockerfile.ci"
+                if [[ "${IMAGE_TAG}" = "anyka-cross-compile" ]]; then
+                    IMAGE_TAG="kkrzysztofik/anyka-cross-compile:rust-1.97.1-ci"
+                fi
+                shift
+                ;;
             --no-cache)
                 NO_CACHE=true
                 shift
@@ -124,7 +134,13 @@ parse_arguments() {
 # =============================================================================
 
 build_docker_image() {
-    log_info "Building Anyka cross-compilation Docker image..."
+    if [[ "${CI_IMAGE}" = true ]]; then
+        log_info "Preparing staged host-CI toolchain..."
+        bash "${SCRIPT_DIR}/prepare-ci-toolchain.sh"
+        log_info "Building Anyka host-CI Docker image..."
+    else
+        log_info "Building Anyka cross-compilation Docker image..."
+    fi
     log_info "Dockerfile: ${DOCKERFILE}"
     log_info "Image tag: ${IMAGE_TAG}"
     log_info "Project root: ${PROJECT_ROOT}"
@@ -141,7 +157,13 @@ build_docker_image() {
         docker_cmd="${docker_cmd} ${BUILD_ARGS}"
     fi
 
-    docker_cmd="${docker_cmd} -f ${DOCKERFILE} -t ${IMAGE_TAG} ${PROJECT_ROOT}"
+    local build_context="${PROJECT_ROOT}"
+    if [[ "${CI_IMAGE}" = true ]]; then
+        # Narrow context avoids sending the full toolchain tree to the daemon.
+        build_context="${SCRIPT_DIR}"
+    fi
+
+    docker_cmd="${docker_cmd} -f ${DOCKERFILE} -t ${IMAGE_TAG} ${build_context}"
 
     log_info "Executing: ${docker_cmd}"
     echo ""
@@ -151,17 +173,31 @@ build_docker_image() {
         log_success "Docker image built successfully!"
         echo ""
         log_info "Usage examples:"
-        echo "  Interactive shell:"
-        echo "    docker run -it --rm -v \${PWD}:/workspace ${IMAGE_TAG}"
-        echo ""
-        echo "  Build C ONVIF project:"
-        echo "    docker run --rm -v \${PWD}:/workspace ${IMAGE_TAG} make -C /workspace/cross-compile/onvif"
-        echo ""
-        echo "  Build Rust ONVIF project:"
-        echo "    docker run --rm -v \${PWD}:/workspace ${IMAGE_TAG} bash -c 'cd /workspace/cross-compile/onvif-rust && ./scripts/build.sh'"
-        echo ""
-        echo "  Run any command:"
-        echo "    docker run --rm -v \${PWD}:/workspace ${IMAGE_TAG} <command>"
+        if [[ "${CI_IMAGE}" = true ]]; then
+            echo "  Interactive shell (host Rust fmt/clippy/llvm-cov):"
+            echo "    docker run -it --rm -v \${PWD}:/workspace ${IMAGE_TAG}"
+            echo ""
+            echo "  Clippy (matches CI rust-lint job):"
+            echo "    docker run --rm -v \${PWD}:/workspace ${IMAGE_TAG} bash -c 'cd /workspace/cross-compile && cargo clippy --target x86_64-unknown-linux-gnu -- -D warnings'"
+            echo ""
+            echo "  Coverage (matches CI rust-coverage job):"
+            echo "    docker run --rm -v \${PWD}:/workspace ${IMAGE_TAG} bash -c 'cd /workspace/cross-compile && cargo llvm-cov --workspace --target x86_64-unknown-linux-gnu --all-features --cobertura --output-path coverage/cobertura.xml'"
+            echo ""
+            echo "  Push to registry after rebuild:"
+            echo "    docker push ${IMAGE_TAG}"
+        else
+            echo "  Interactive shell:"
+            echo "    docker run -it --rm -v \${PWD}:/workspace ${IMAGE_TAG}"
+            echo ""
+            echo "  Build C ONVIF project:"
+            echo "    docker run --rm -v \${PWD}:/workspace ${IMAGE_TAG} make -C /workspace/cross-compile/onvif"
+            echo ""
+            echo "  Build Rust ONVIF project:"
+            echo "    docker run --rm -v \${PWD}:/workspace ${IMAGE_TAG} bash -c 'cd /workspace/cross-compile/onvif-rust && ./scripts/build.sh'"
+            echo ""
+            echo "  Run any command:"
+            echo "    docker run --rm -v \${PWD}:/workspace ${IMAGE_TAG} <command>"
+        fi
         return 0
     else
         log_error "Docker build failed"

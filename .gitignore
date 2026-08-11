@@ -7,6 +7,7 @@
 # -----------------------------------------------------------------------------
 toolchain/arm-anykav200-crosstool/**/*
 toolchain/arm-anykav200-crosstool-ng/**/*
+scripts/docker/.ci-toolchain/
 toolchain/cargo-home/
 .cargo-targets/
 toolchain/aarch64-unknown-linux-gnu-toolchain/**/*
