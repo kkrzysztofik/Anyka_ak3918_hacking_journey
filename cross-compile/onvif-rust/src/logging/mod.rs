@@ -736,6 +736,77 @@ mod tests {
         assert!(set_log_level("trace").is_ok());
     }
 
+    /// Collects the targets of every `info!` event that reaches it.
+    #[derive(Default)]
+    struct Capture {
+        targets: std::sync::Arc<std::sync::Mutex<Vec<&'static str>>>,
+    }
+
+    impl<S: tracing::Subscriber> tracing_subscriber::Layer<S> for Capture {
+        fn on_event(
+            &self,
+            event: &tracing::Event<'_>,
+            _ctx: tracing_subscriber::layer::Context<'_, S>,
+        ) {
+            self.targets.lock().unwrap().push(event.metadata().target());
+        }
+    }
+
+    /// Emit one info event in the pinned target and one in a non-pinned target
+    /// through a subscriber gated by `filter`, asserting only the pinned one is
+    /// enabled. `PINNED` is a `const` so the event macros can build static
+    /// metadata with the target override.
+    fn assert_pin_holds(filter: EnvFilter) {
+        use tracing_subscriber::layer::{Layer, SubscriberExt};
+
+        const PINNED: &str = "onvif_rust::platform::anyka::night_mode";
+        const OTHER: &str = "onvif_rust::platform::anyka::imaging";
+
+        let capture = Capture::default();
+        let targets = capture.targets.clone();
+        let subscriber = tracing_subscriber::registry().with(capture.with_filter(filter));
+        tracing::subscriber::with_default(subscriber, || {
+            tracing::info!(target: PINNED, "night-mode diagnostics must stay visible");
+            tracing::info!(target: OTHER, "non-pinned target must be filtered");
+        });
+
+        let seen = targets.lock().unwrap();
+        assert!(
+            seen.contains(&PINNED),
+            "the night_mode pin must lift info above error"
+        );
+        assert!(
+            !seen.contains(&OTHER),
+            "a non-pinned target must stay filtered at error"
+        );
+    }
+
+    #[test]
+    fn test_night_mode_pin_survives_default_error_and_reload() {
+        use crate::config::ConfigRuntime;
+
+        // Production runs at `logging.level = "error"`; the pin must lift the
+        // night_mode target to info while every other target stays filtered.
+        assert_pin_holds(build_env_filter(Level::ERROR));
+
+        // The runtime reload path (`set_log_level`) rebuilds the filter via
+        // build_env_filter, so the pin must survive a reload to error too.
+        let config = ConfigRuntime::new(Default::default());
+        {
+            let mut c = config.write();
+            c.logging.level = "error".to_string();
+            c.logging.console_enabled = false;
+        }
+        init_logging(&config).unwrap();
+        set_log_level("error").unwrap();
+        let reloaded = RELOAD_HANDLE
+            .get()
+            .expect("RELOAD_HANDLE set by init_logging")
+            .with_current(|f| f.clone())
+            .expect("reload handle healthy");
+        assert_pin_holds(reloaded);
+    }
+
     #[test]
     fn test_set_log_level_invalid() {
         use crate::config::ConfigRuntime;
