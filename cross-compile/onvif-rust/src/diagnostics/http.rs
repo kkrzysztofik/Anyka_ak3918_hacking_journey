@@ -30,10 +30,10 @@ use crate::onvif::server::OnvifServerState;
 /// Query parameters for `GET /api/logs`.
 #[derive(Debug, Deserialize)]
 pub struct LogQuery {
-    pub source: LogSource,
-    pub level: Option<LogLevel>,
+    source: LogSource,
+    level: Option<LogLevel>,
     #[serde(default = "default_lines")]
-    pub lines: usize,
+    lines: usize,
 }
 
 fn default_lines() -> usize {
@@ -67,13 +67,17 @@ pub async fn handle_logs(Query(query): Query<LogQuery>) -> Response {
 
 /// Determine the required auth level for a given request path.
 ///
-/// - `/api/logs` (and anything containing `/logs`) → [`AuthLevel::Administrator`]
-/// - all other `/api` paths → [`AuthLevel::User`]
+/// The middleware is nested under `/api`, so axum strips that prefix and
+/// this function sees the remainder (e.g. `/logs`, `/diagnostics`).
+///
+/// The default arm **fails closed** (Administrator) so any future route that
+/// hasn't been explicitly opened is denied rather than silently permitted.
 fn required_level_for_path(path: &str) -> AuthLevel {
-    if path.contains("/logs") {
-        AuthLevel::Administrator
-    } else {
-        AuthLevel::User
+    match path {
+        "/logs" | "/logs/" => AuthLevel::Administrator,
+        "/diagnostics" | "/diagnostics/" => AuthLevel::User,
+        // Fail closed: unknown routes require Administrator until explicitly opened.
+        _ => AuthLevel::Administrator,
     }
 }
 
@@ -83,7 +87,7 @@ fn required_level_for_path(path: &str) -> AuthLevel {
 ///
 /// Keeping this as a thin pure function makes the auth gate independently
 /// testable without HTTP infrastructure.
-pub(crate) fn check_required_level(
+fn check_required_level(
     result: Result<Option<UserAccount>, OnvifError>,
     required: AuthLevel,
 ) -> Option<StatusCode> {
@@ -228,33 +232,38 @@ mod tests {
     }
 
     // ── required_level_for_path ──────────────────────────────────────────
+    // The middleware is nested under /api, so axum strips that prefix.
+    // Paths seen here are /logs, /diagnostics, etc.
 
     #[test]
     fn test_required_level_for_path_diagnostics_requires_user() {
-        assert_eq!(required_level_for_path("/api/diagnostics"), AuthLevel::User);
+        assert_eq!(required_level_for_path("/diagnostics"), AuthLevel::User);
+    }
+
+    #[test]
+    fn test_required_level_for_path_diagnostics_trailing_slash_requires_user() {
+        assert_eq!(required_level_for_path("/diagnostics/"), AuthLevel::User);
     }
 
     #[test]
     fn test_required_level_for_path_logs_requires_admin() {
-        assert_eq!(
-            required_level_for_path("/api/logs"),
-            AuthLevel::Administrator
-        );
+        assert_eq!(required_level_for_path("/logs"), AuthLevel::Administrator);
     }
 
     #[test]
-    fn test_required_level_for_path_logs_with_query_requires_admin() {
-        // Path component only (query string is separate in URI), but
-        // verify the function doesn't choke on a query-like suffix.
-        assert_eq!(
-            required_level_for_path("/api/logs/stream"),
-            AuthLevel::Administrator
-        );
+    fn test_required_level_for_path_logs_trailing_slash_requires_admin() {
+        assert_eq!(required_level_for_path("/logs/"), AuthLevel::Administrator);
     }
 
     #[test]
-    fn test_required_level_for_path_unknown_defaults_to_user() {
-        assert_eq!(required_level_for_path("/api/status"), AuthLevel::User);
+    fn test_required_level_for_path_unknown_fails_closed_to_admin() {
+        // Fail-closed: unrecognised routes must not be default-open.
+        assert_eq!(required_level_for_path("/status"), AuthLevel::Administrator);
+    }
+
+    #[test]
+    fn test_required_level_for_path_root_fails_closed_to_admin() {
+        assert_eq!(required_level_for_path("/"), AuthLevel::Administrator);
     }
 
     // ── reuse proof: verify_basic_auth_self integration ──────────────────
@@ -362,12 +371,12 @@ mod tests {
             .unwrap();
 
         let result = verify_basic_auth_self(&dispatcher, &request, &auth_ctx);
-        let required = required_level_for_path("/api/logs");
+        let required = required_level_for_path("/logs");
         let status = check_required_level(result, required);
         assert_eq!(
             status,
             Some(StatusCode::FORBIDDEN),
-            "User level must not access /api/logs"
+            "User level must not access /logs"
         );
     }
 
@@ -403,8 +412,8 @@ mod tests {
             .unwrap();
 
         let result = verify_basic_auth_self(&dispatcher, &request, &auth_ctx);
-        let required = required_level_for_path("/api/logs");
+        let required = required_level_for_path("/logs");
         let status = check_required_level(result, required);
-        assert_eq!(status, None, "Administrator must be allowed on /api/logs");
+        assert_eq!(status, None, "Administrator must be allowed on /logs");
     }
 }
