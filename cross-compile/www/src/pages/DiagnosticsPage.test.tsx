@@ -8,9 +8,12 @@ import { screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { waitFor } from '@testing-library/react';
+
 import type { UseDiagnosticsResult } from '@/hooks/useDiagnostics';
 import { useDiagnostics } from '@/hooks/useDiagnostics';
 import type { Diagnostics } from '@/services/diagnosticsService';
+import { getLogs } from '@/services/diagnosticsService';
 import { renderWithProviders } from '@/test/componentTestHelpers';
 
 import DiagnosticsPage from './DiagnosticsPage';
@@ -61,6 +64,7 @@ function makeResult(
 describe('DiagnosticsPage', () => {
   beforeEach(() => {
     vi.mocked(useDiagnostics).mockReturnValue(makeResult());
+    vi.mocked(getLogs).mockResolvedValue([]);
   });
 
   it('should render page title and description', () => {
@@ -190,7 +194,7 @@ describe('DiagnosticsPage', () => {
       renderWithProviders(<DiagnosticsPage />);
       expect(screen.getByTestId('diagnostics-log-filter-all')).toBeInTheDocument();
       expect(screen.getByTestId('diagnostics-log-filter-info')).toBeInTheDocument();
-      expect(screen.getByTestId('diagnostics-log-filter-warning')).toBeInTheDocument();
+      expect(screen.getByTestId('diagnostics-log-filter-warn')).toBeInTheDocument();
       expect(screen.getByTestId('diagnostics-log-filter-error')).toBeInTheDocument();
     });
 
@@ -298,5 +302,111 @@ describe('DiagnosticsPage', () => {
       expect(screen.queryByTestId('diagnostics-components-list')).not.toBeInTheDocument();
     });
   });
+
+  describe('Log panel — Task 14', () => {
+    it('should render log panel with source selector and level buttons', () => {
+      renderWithProviders(<DiagnosticsPage />);
+      expect(screen.getByTestId('diagnostics-system-logs-title')).toBeInTheDocument();
+      expect(screen.getByTestId('diagnostics-log-source-select')).toBeInTheDocument();
+      expect(screen.getByTestId('diagnostics-log-filter-all')).toBeInTheDocument();
+      expect(screen.getByTestId('diagnostics-log-filter-info')).toBeInTheDocument();
+      expect(screen.getByTestId('diagnostics-log-filter-warn')).toBeInTheDocument();
+      expect(screen.getByTestId('diagnostics-log-filter-error')).toBeInTheDocument();
+    });
+
+    it('should render fetched log lines', async () => {
+      vi.mocked(getLogs).mockResolvedValue([
+        '2026-08-11 INFO Service started',
+        '2026-08-11 WARN High latency',
+      ]);
+      renderWithProviders(<DiagnosticsPage />);
+      await waitFor(() => {
+        expect(screen.getByTestId('diagnostics-log-lines')).toBeInTheDocument();
+      });
+      expect(screen.getByTestId('diagnostics-log-lines')).toHaveTextContent(
+        'Service started',
+      );
+    });
+
+    it('should show unavailable message when source returns empty array', async () => {
+      vi.mocked(getLogs).mockResolvedValue([]);
+      renderWithProviders(<DiagnosticsPage />);
+      await waitFor(() => {
+        expect(screen.getByTestId('diagnostics-log-unavailable')).toBeInTheDocument();
+      });
+    });
+
+    it('should call getLogs with level when level filter is changed', async () => {
+      const user = userEvent.setup();
+      renderWithProviders(<DiagnosticsPage />);
+
+      const errorBtn = screen.getByTestId('diagnostics-log-filter-error');
+      await user.click(errorBtn);
+
+      await waitFor(() => {
+        expect(vi.mocked(getLogs)).toHaveBeenCalledWith(
+          'onvif_rust',
+          'error',
+          200,
+          expect.anything(),
+        );
+      });
+    });
+
+    it('should refetch logs when source is changed via Select', async () => {
+      const user = userEvent.setup();
+      renderWithProviders(<DiagnosticsPage />);
+
+      const trigger = screen.getByTestId('diagnostics-log-source-select');
+      await user.click(trigger);
+
+      const vendorOption = screen.getByTestId(
+        'diagnostics-log-source-option-vendor_daemon',
+      );
+      await user.click(vendorOption);
+
+      await waitFor(() => {
+        expect(vi.mocked(getLogs)).toHaveBeenCalledWith(
+          'vendor_daemon',
+          undefined,
+          200,
+          expect.anything(),
+        );
+      });
+    });
+
+    it('should download loaded log lines on export click', async () => {
+      const createObjectURL = vi.fn(() => 'blob:test');
+      const revokeObjectURL = vi.fn();
+      const clickMock = vi.fn();
+      URL.createObjectURL = createObjectURL;
+      URL.revokeObjectURL = revokeObjectURL;
+
+      const createElementOrig = document.createElement.bind(document);
+      vi.spyOn(document, 'createElement').mockImplementation((tag: string) => {
+        if (tag === 'a') {
+          const el = createElementOrig('a') as HTMLAnchorElement;
+          el.click = clickMock;
+          return el;
+        }
+        return createElementOrig(tag);
+      });
+
+      vi.mocked(getLogs).mockResolvedValue(['line one', 'line two']);
+      const user = userEvent.setup();
+      renderWithProviders(<DiagnosticsPage />);
+
+      const exportBtn = await screen.findByTestId('diagnostics-export-button');
+      await waitFor(() => expect(exportBtn).not.toBeDisabled());
+      await user.click(exportBtn);
+
+      expect(createObjectURL).toHaveBeenCalledWith(expect.any(Blob));
+      expect(clickMock).toHaveBeenCalled();
+      expect(revokeObjectURL).toHaveBeenCalledWith('blob:test');
+
+      vi.restoreAllMocks();
+    });
+  });
 });
+
 

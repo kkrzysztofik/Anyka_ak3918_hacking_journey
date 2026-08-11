@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useCallback, useState } from 'react';
 
 import {
   Activity,
@@ -11,14 +11,38 @@ import {
   Wifi,
 } from 'lucide-react';
 
+import { useQuery } from '@tanstack/react-query';
+
 import { Sparkline } from '@/components/common/Sparkline';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { useDiagnostics } from '@/hooks/useDiagnostics';
 import { cn } from '@/lib/utils';
+import { type LogLevel, type LogSource, getLogs } from '@/services/diagnosticsService';
 
 const RESTART_THRESHOLD_S = 300; // 5 minutes
 const STALL_THRESHOLD_MS = 5000; // frame age above this → stalled
+
+const LOG_SOURCES: Array<{ value: LogSource; label: string }> = [
+  { value: 'onvif_rust', label: 'ONVIF Service' },
+  { value: 'vendor_daemon', label: 'Vendor Daemon' },
+  { value: 'anyka_init', label: 'Anyka Init' },
+  { value: 'wpa_supplicant', label: 'WPA Supplicant' },
+];
+
+const LOG_LEVEL_OPTIONS: Array<{ value: LogLevel | 'all'; label: string }> = [
+  { value: 'all', label: 'All' },
+  { value: 'info', label: 'Info' },
+  { value: 'warn', label: 'Warning' },
+  { value: 'error', label: 'Error' },
+];
 
 function formatDuration(seconds: number): string {
   const d = Math.floor(seconds / 86400);
@@ -89,7 +113,26 @@ function StatCard({
 
 export default function DiagnosticsPage() {
   const { data, isLoading, history } = useDiagnostics();
-  const [logFilter, setLogFilter] = useState<'all' | 'info' | 'warning' | 'error'>('all');
+  const [logSource, setLogSource] = useState<LogSource>('onvif_rust');
+  const [logLevel, setLogLevel] = useState<LogLevel | 'all'>('all');
+
+  const resolvedLevel = logLevel === 'all' ? undefined : logLevel;
+
+  const { data: logLines = [], isFetching: logsFetching } = useQuery({
+    queryKey: ['logs', logSource, resolvedLevel],
+    queryFn: ({ signal }) => getLogs(logSource, resolvedLevel, 200, signal),
+    staleTime: 10_000,
+  });
+
+  const handleExport = useCallback(() => {
+    const blob = new Blob([logLines.join('\n')], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${logSource}.log`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [logLines, logSource]);
 
   // Stat card values derived from real data
   const statusLabel =
@@ -524,62 +567,85 @@ export default function DiagnosticsPage() {
               </div>
             </div>
             <div className="flex items-center gap-2">
+              {/* Source selector */}
+              <Select
+                value={logSource}
+                onValueChange={(v) => setLogSource(v as LogSource)}
+              >
+                <SelectTrigger
+                  className="h-7 w-40 text-xs"
+                  data-testid="diagnostics-log-source-select"
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {LOG_SOURCES.map((s) => (
+                    <SelectItem
+                      key={s.value}
+                      value={s.value}
+                      data-testid={`diagnostics-log-source-option-${s.value}`}
+                    >
+                      {s.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+
+              {/* Level filter buttons */}
               <div className="border-border bg-muted/50 flex items-center rounded-md border p-0.5">
-                <Button
-                  variant={logFilter === 'all' ? 'default' : 'ghost'}
-                  size="sm"
-                  className="h-6 px-2.5 text-xs"
-                  data-testid="diagnostics-log-filter-all"
-                  onClick={() => setLogFilter('all')}
-                >
-                  All
-                </Button>
-                <Button
-                  variant={logFilter === 'info' ? 'default' : 'ghost'}
-                  size="sm"
-                  className="text-muted-foreground hover:text-foreground h-6 px-2.5 text-xs"
-                  data-testid="diagnostics-log-filter-info"
-                  onClick={() => setLogFilter('info')}
-                >
-                  Info
-                </Button>
-                <Button
-                  variant={logFilter === 'warning' ? 'default' : 'ghost'}
-                  size="sm"
-                  className="text-muted-foreground hover:text-foreground h-6 px-2.5 text-xs"
-                  data-testid="diagnostics-log-filter-warning"
-                  onClick={() => setLogFilter('warning')}
-                >
-                  Warning
-                </Button>
-                <Button
-                  variant={logFilter === 'error' ? 'default' : 'ghost'}
-                  size="sm"
-                  className="text-muted-foreground hover:text-foreground h-6 px-2.5 text-xs"
-                  data-testid="diagnostics-log-filter-error"
-                  onClick={() => setLogFilter('error')}
-                >
-                  Error
-                </Button>
+                {LOG_LEVEL_OPTIONS.map((opt) => (
+                  <Button
+                    key={opt.value}
+                    variant={logLevel === opt.value ? 'default' : 'ghost'}
+                    size="sm"
+                    className="h-6 px-2.5 text-xs"
+                    data-testid={`diagnostics-log-filter-${opt.value}`}
+                    onClick={() => setLogLevel(opt.value)}
+                  >
+                    {opt.label}
+                  </Button>
+                ))}
               </div>
+
               <Button
                 variant="outline"
                 size="sm"
                 className="border-border h-7 gap-1 text-xs"
                 data-testid="diagnostics-export-button"
+                onClick={handleExport}
+                disabled={logLines.length === 0}
               >
                 <Download className="h-3 w-3" /> Export
               </Button>
             </div>
           </div>
         </CardHeader>
-        <div className="max-h-[400px] overflow-y-auto" data-testid="diagnostics-log-panel">
-          <p
-            className="text-muted-foreground p-5 text-sm"
-            data-testid="diagnostics-log-placeholder"
-          >
-            Select a log source to view entries.
-          </p>
+        <div
+          className="max-h-[400px] overflow-y-auto"
+          data-testid="diagnostics-log-panel"
+        >
+          {logsFetching && logLines.length === 0 ? (
+            <p
+              className="text-muted-foreground p-5 text-sm"
+              data-testid="diagnostics-log-loading"
+            >
+              Loading…
+            </p>
+          ) : logLines.length === 0 ? (
+            <p
+              className="text-muted-foreground p-5 text-sm"
+              data-testid="diagnostics-log-unavailable"
+            >
+              Source unavailable or no log entries found.
+            </p>
+          ) : (
+            <pre
+              className="text-foreground divide-border divide-y p-4 font-mono text-xs leading-relaxed"
+              data-testid="diagnostics-log-lines"
+            >
+              {logLines.join('\n')}
+            </pre>
+          )}
         </div>
       </Card>
     </div>
