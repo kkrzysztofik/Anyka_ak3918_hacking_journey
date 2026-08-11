@@ -170,10 +170,11 @@ Focus on:
 ### Adding Custom Rules
 
 Cppcheck rule severity is configured on the command line (e.g.
-`--suppress=missingIncludeSystem`, see above). `cargo audit` is waived
-per-advisory via the `ignore:` input on the `rustsec/audit-check` steps in
-`main-ci.yml` — add the advisory ID, a reason, and a removal date as a
-comment above it. Empty is the steady state.
+`--suppress=missingIncludeSystem`, see above). `cargo audit` is waived via the `ignore:`
+input on the `rustsec/audit-check` steps in `main-ci.yml`. It takes a single
+comma-separated list of advisory IDs, e.g.
+`ignore: "RUSTSEC-2020-0071,RUSTSEC-2021-0124"`; record the reason and removal
+date in a YAML comment beside it. Empty is the steady state.
 
 ### Suppressing False Positives
 

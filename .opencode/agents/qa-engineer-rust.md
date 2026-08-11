@@ -47,7 +47,9 @@ When a user asks you to work on test code, you MUST:
 
 ### 4. Quality Check & Validate
 - Execute test commands with correct cross-compilation targets (via `$CARGO` after `source ./setenv.sh`)
-- Run `$CARGO audit` to check for RustSec dependency vulnerabilities (blocks CI on findings)
+- Run `$CARGO audit` for RustSec advisories in both lockfiles:
+  `(cd cross-compile && $CARGO audit)` and `(cd validation/rust && $CARGO audit)`.
+  Vulnerabilities block CI; informational advisories (unmaintained/unsound/yanked) only warn
 - Verify all tests pass: `$CARGO test --target x86_64-unknown-linux-gnu`
 - Check code formatting: `$CARGO fmt --check`
 - Run linting: `$CARGO clippy --target x86_64-unknown-linux-gnu -- -D warnings`

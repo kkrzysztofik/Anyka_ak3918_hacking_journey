@@ -16,7 +16,7 @@ code-scanning API, not from the workflow YAML's description of itself.
 **Snyk Code (SAST)** — four scans: `onvif-rust`, `streaming-lib`, `validation/rust`,
 `www`. Every one of them currently ends:
 
-```
+```text
  ERROR   Forbidden (SNYK-CLI-0000)
 ##[error]Process completed with exit code 1.
 ```

@@ -432,8 +432,9 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           working-directory: cross-compile
-          # Temporary waivers. One line per advisory: ID, why, and the date to
-          # remove it by. Empty is the steady state.
+          # Temporary waivers: a single comma-separated list of advisory IDs,
+          # e.g. "RUSTSEC-2020-0071,RUSTSEC-2021-0124". Record the reason and
+          # removal date in a comment here. Empty is the steady state.
           ignore: ""
 
       - name: Audit validation tool
@@ -443,8 +444,9 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           working-directory: validation/rust
-          # Temporary waivers. One line per advisory: ID, why, and the date to
-          # remove it by. Empty is the steady state.
+          # Temporary waivers: a single comma-separated list of advisory IDs,
+          # e.g. "RUSTSEC-2020-0071,RUSTSEC-2021-0124". Record the reason and
+          # removal date in a comment here. Empty is the steady state.
           ignore: ""
 
       - name: Record audit status
@@ -893,6 +895,12 @@ jobs:
           AUDIT_STATUS: ${{ needs.security-scans.outputs.audit_status }}
           SONAR_SCAN_STATUS: ${{ needs.sonarqube.outputs.sonar-scan-status }}
           QUALITY_GATE_STATUS: ${{ needs.sonarqube.outputs.quality-gate-status }}
+          # Real job results. This job runs under !cancelled(), so it reports
+          # after failures too -- never hardcode success text here.
+          RUST_LINT_RESULT: ${{ needs.rust-lint.result }}
+          RUST_TEST_RESULT: ${{ needs.rust-coverage.result }}
+          WEBUI_RESULT: ${{ needs.webui-quality-and-coverage.result }}
+          VALIDATION_RESULT: ${{ needs.validation-rust-quality.result }}
         run: |
           get_status() {
             case "$1" in
@@ -913,6 +921,10 @@ jobs:
           AUDIT_STATUS=$(get_status "${AUDIT_STATUS}")
           SONAR_SCAN_STATUS=$(get_status "${SONAR_SCAN_STATUS}")
           QUALITY_GATE_STATUS=$(get_quality_gate_status "${QUALITY_GATE_STATUS}")
+          RUST_LINT_RESULT=$(get_quality_gate_status "${RUST_LINT_RESULT}")
+          RUST_TEST_RESULT=$(get_quality_gate_status "${RUST_TEST_RESULT}")
+          WEBUI_RESULT=$(get_quality_gate_status "${WEBUI_RESULT}")
+          VALIDATION_RESULT=$(get_quality_gate_status "${VALIDATION_RESULT}")
 
           cat >> $GITHUB_STEP_SUMMARY << EOF
           # 🔍 Unified CI Analysis Summary
@@ -932,10 +944,11 @@ jobs:
           - **Status**: ${SONAR_SCAN_STATUS}
           - **Quality Gate**: ${QUALITY_GATE_STATUS}
 
-          ## 📦 Build Status
-          - **Build**: ✅ Successful
-          - **Lint**: ✅ Passed
-          - **Tests**: ✅ Passed
+          ## 📦 Job Results
+          - **Rust — Lint**: ${RUST_LINT_RESULT}
+          - **Rust — Test & Coverage**: ${RUST_TEST_RESULT}
+          - **Validation (Rust)**: ${VALIDATION_RESULT}
+          - **WebUI**: ${WEBUI_RESULT}
           EOF
 
       - name: Comment PR with Analysis Results
@@ -951,6 +964,14 @@ jobs:
             const auditStatus = '${{ needs.security-scans.outputs.audit_status }}';
             const sonarStatus = '${{ needs.sonarqube.outputs.sonar-scan-status }}';
             const qualityGateStatus = '${{ needs.sonarqube.outputs.quality-gate-status }}';
+            // Real job results. This job runs under !cancelled(), so it reports
+            // after failures too -- never hardcode success text here.
+            const jobResults = [
+              ['Rust — Lint', '${{ needs.rust-lint.result }}'],
+              ['Rust — Test & Coverage', '${{ needs.rust-coverage.result }}'],
+              ['Validation (Rust)', '${{ needs.validation-rust-quality.result }}'],
+              ['WebUI', '${{ needs.webui-quality-and-coverage.result }}'],
+            ];
 
             const formatStatus = (status) => {
               if (status === 'success') return '✅ Completed';
@@ -980,14 +1001,8 @@ jobs:
             | **Quality Gate** | ${formatStatus(qualityGateStatus)} |
             ${sonarStatus === 'success' ? '| **View Report** | [SonarQube Cloud Dashboard](https://sonarcloud.io/dashboard?id=kkrzysztofik_Anyka_ak3918_hacking_journey) |' : ''}
 
-            ### ✅ Build Status
-            - **Rust Lint**: ✅ Passed
-            - **WebUI Lint**: ✅ Passed
-            - **Validation (Rust) Lint**: ✅ Passed
-            - **Rust Tests**: ✅ Passed
-            - **Validation (Rust) Tests**: ✅ Passed
-            - **WebUI Tests**: ✅ Passed
-            - **Build**: ✅ Successful
+            ### 📦 Job Results
+            ${jobResults.map(([name, result]) => `- **${name}**: ${formatStatus(result)}`).join('\n            ')}
 
             ---
             *This comment is automatically updated on each push to the PR*`;

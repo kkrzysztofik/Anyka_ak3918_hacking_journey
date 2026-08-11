@@ -389,7 +389,7 @@ The repo has never had one — PR #57 arrived via GitHub's security-updates defa
 # Dependabot version updates. Security alerts are enabled separately in
 # repo settings and need no configuration here.
 #
-# Grouping is deliberate: ungrouped, five ecosystems produce a PR per crate
+# Grouping is deliberate: ungrouped, four ecosystems produce a PR per crate
 # per week. Grouped minor+patch means roughly one PR per ecosystem.
 version: 2
 updates:
@@ -434,12 +434,6 @@ updates:
       actions-minor-patch:
         update-types: [minor, patch]
 
-  # CI toolchain image base
-  - package-ecosystem: docker
-    directory: /scripts/docker
-    schedule:
-      interval: weekly
-    open-pull-requests-limit: 2
 ```
 
 **Step 2: Sanity-check the paths**
@@ -510,7 +504,7 @@ Excluded from CodeQL analysis by `.github/codeql/codeql-config.yml` — most of 
 
 The file documents Snyk as tool #3 with a token-setup walkthrough (lines ~19-24, 39-42, 68-69, 86-89, 93-125, 203-207). Replace all of it with a short `cargo audit` section:
 
-```markdown
+````markdown
 ### 3. cargo audit (Rust dependency advisories)
 
 Checks both `Cargo.lock` files against the [RustSec advisory database](https://rustsec.org).
@@ -524,7 +518,7 @@ cargo install cargo-audit --locked
 
 Vulnerabilities fail the build. Informational advisories — `unmaintained`,
 `unsound`, `yanked` — are reported as warnings and do not.
-```
+````
 
 Delete the "Snyk Authentication Setup" section entirely; there is no token any more.
 
@@ -594,7 +588,7 @@ Do not skip this. Under the old `continue-on-error: true` the job could never fa
 
 **Step 5: Confirm Dependabot parsed the config**
 
-Visit **Insights → Dependency graph → Dependabot** and confirm five ecosystems are listed with no parse error. Expect a small burst of update PRs within a day.
+Visit **Insights → Dependency graph → Dependabot** and confirm four ecosystems are listed with no parse error. Expect a small burst of update PRs within a day.
 
 **Step 6: Manual follow-up for the user**
 
