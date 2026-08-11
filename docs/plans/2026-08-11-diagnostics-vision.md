@@ -57,7 +57,7 @@ pub struct VisionSupported {
 pub struct VisionDiagnostics {
     /// `"day"` | `"night"` when hardware has been driven; else `None`.
     pub mode: Option<String>,
-    pub ae_luma: Option<i32>,
+    pub ae_luma: Option<u8>,
     pub ain0: Option<i32>,
     pub ir_led: Option<bool>,
     pub ircut_a: Option<bool>,
