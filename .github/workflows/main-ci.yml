@@ -772,7 +772,7 @@ jobs:
   reporting:
     name: Generate Unified CI Report
     runs-on: ubuntu-latest
-    if: always()
+    if: ${{ !cancelled() }}
     needs:
       [
         rust-quality-and-coverage,
@@ -872,7 +872,7 @@ jobs:
             | Scan Type | Status | Details |
             |-----------|--------|---------|
             | **Rust advisories (cargo audit)** | ${formatStatus(auditStatus)} | RustSec advisory database |
-            | **SAST (CodeQL)** | — | [View in Code Scanning](https://github.com/${context.repo.owner}/${context.repo.repo}/security/code-scanning) |
+            | **SAST (CodeQL)** | ℹ️ Reported separately | [View in Code Scanning](https://github.com/${context.repo.owner}/${context.repo.repo}/security/code-scanning) |
 
             ### 🎯 Code Quality (SonarQube)
             | Metric | Value |
