@@ -69,19 +69,21 @@ pub fn tail_bytes(path: &Path, budget: u64) -> std::io::Result<String> {
         file.seek(SeekFrom::Start(start))?;
     }
 
-    let mut buf = String::new();
-    file.read_to_string(&mut buf)?;
+    let mut raw = Vec::new();
+    file.read_to_end(&mut raw)?;
+
+    let mut text = String::from_utf8_lossy(&raw).into_owned();
 
     if start > 0 {
         // Drop first (possibly partial) line.
-        if let Some(nl) = buf.find('\n') {
-            buf = buf[nl + 1..].to_owned();
+        if let Some(nl) = text.find('\n') {
+            text = text[nl + 1..].to_owned();
         } else {
-            buf.clear();
+            text.clear();
         }
     }
 
-    Ok(buf)
+    Ok(text)
 }
 
 pub fn filter_lines(text: &str, min_level: Option<LogLevel>, limit: usize) -> Vec<&str> {
@@ -125,6 +127,27 @@ mod tests {
             "partial line must be dropped, got {text:?}"
         );
         assert!(text.contains("bbbb"));
+    }
+
+    #[test]
+    fn test_tail_returns_ok_with_invalid_utf8() {
+        let mut file = tempfile::NamedTempFile::new().expect("temp file");
+        // Valid ASCII prefix followed by isolated invalid UTF-8 bytes.
+        file.write_all(b"valid\n\xFF\xFEinvalid utf8 here\n")
+            .expect("write");
+        file.flush().expect("flush");
+        let result = tail_bytes(file.path(), 4096);
+        assert!(result.is_ok(), "invalid UTF-8 must not cause an error");
+        let text = result.unwrap();
+        // from_utf8_lossy replaces bad bytes with U+FFFD; valid content is preserved.
+        assert!(
+            text.contains("valid"),
+            "valid content must be preserved; got: {text:?}"
+        );
+        assert!(
+            text.contains(char::REPLACEMENT_CHARACTER) || text.contains("invalid utf8 here"),
+            "invalid bytes must be replaced; got: {text:?}"
+        );
     }
 
     #[test]

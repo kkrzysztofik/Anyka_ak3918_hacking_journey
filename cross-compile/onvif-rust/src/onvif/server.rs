@@ -595,6 +595,7 @@ impl OnvifServer {
                     get(crate::diagnostics::http::handle_diagnostics),
                 )
                 .route("/logs", get(crate::diagnostics::http::handle_logs))
+                .fallback(|| async { StatusCode::NOT_FOUND })
                 .layer(middleware::from_fn_with_state(
                     state.clone(),
                     crate::diagnostics::http::diagnostics_auth_middleware,
@@ -1406,11 +1407,42 @@ mod tests {
     #[tokio::test]
     async fn test_unknown_api_route_is_not_swallowed_by_static_fallback() {
         use axum::body::Body;
+        use axum::extract::ConnectInfo;
         use axum::http::{Request, StatusCode};
+        use std::io::Write;
+        use std::net::SocketAddr;
         use tower::ServiceExt;
 
-        // No static_root configured, so fallback service is not present.
-        let app = make_diagnostics_app(false);
+        // Create a real static root so ServeDir is active; index.html holds a
+        // unique sentinel we can check is NOT returned for /api paths.
+        let temp_dir = tempfile::tempdir().unwrap();
+        let mut index = std::fs::File::create(temp_dir.path().join("index.html")).unwrap();
+        index.write_all(b"STATIC_INDEX").unwrap();
+
+        let config = OnvifServerConfig {
+            static_root: Some(temp_dir.path().to_str().unwrap().to_string()),
+            ..Default::default()
+        };
+        let server = OnvifServer::new(config).unwrap().with_diagnostics(Arc::new(
+            crate::diagnostics::state::DiagnosticsState::new(None, vec![]),
+        ));
+
+        // auth_enabled=true: unauthenticated unknown /api path hits auth middleware → 401.
+        let state = OnvifServerState {
+            dispatcher: Arc::clone(&server.dispatcher),
+            shutdown_tx: server.shutdown_tx.clone(),
+            ws_security: Arc::clone(&server.ws_security),
+            user_storage: Arc::clone(&server.user_storage),
+            password_manager: Arc::clone(&server.password_manager),
+            auth_enabled: true,
+            memory_monitor: Arc::clone(&server.memory_monitor),
+            rate_limiter: Arc::clone(&server.rate_limiter),
+        };
+
+        let addr: SocketAddr = "127.0.0.1:8080".parse().unwrap();
+        let app = server
+            .build_router(state)
+            .layer(axum::Extension(ConnectInfo(addr)));
 
         let request = Request::builder()
             .method("GET")
@@ -1419,10 +1451,24 @@ mod tests {
             .unwrap();
 
         let response = app.oneshot(request).await.unwrap();
-        assert_eq!(
-            response.status(),
-            StatusCode::NOT_FOUND,
-            "/api/nonexistent must return 404, not be swallowed by a fallback"
+
+        // With the inner /api fallback placed before the auth layer (Option A),
+        // an unauthenticated unknown path returns 401. Either way it must not
+        // be 200, and the body must never contain the static index sentinel.
+        let status = response.status();
+        assert_ne!(
+            status,
+            StatusCode::OK,
+            "/api/nonexistent must not return 200; got: {status}"
+        );
+
+        let body = axum::body::to_bytes(response.into_body(), 4096)
+            .await
+            .unwrap();
+        let body_text = String::from_utf8_lossy(&body);
+        assert!(
+            !body_text.contains("STATIC_INDEX"),
+            "/api/nonexistent must not serve static content; body: {body_text:?}"
         );
     }
 }
