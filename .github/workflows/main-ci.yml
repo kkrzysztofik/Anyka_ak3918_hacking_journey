@@ -316,175 +316,50 @@ jobs:
           retention-days: 7
 
   # =============================================================================
-  # SECURITY SCANS - Unified Snyk Scans
+  # SECURITY SCANS - Rust dependency advisories (RustSec)
   # =============================================================================
+  # cargo-audit parses Cargo.lock only; no build, no vendored toolchain.
+  # Vulnerabilities fail the job. Informational advisories (unmaintained,
+  # unsound, yanked) are reported as warnings and do not fail it.
+  # SAST is covered by CodeQL default setup and SonarCloud, not here.
   security-scans:
     name: Security Scans
     runs-on: ubuntu-latest
-    needs: [rust-quality-and-coverage, webui-quality-and-coverage, validation-rust-quality]
-    continue-on-error: true
     permissions:
       contents: read
-      security-events: write
+      checks: write
+      issues: write
     outputs:
-      snyk_code_status: ${{ steps.scan-results.outputs.snyk_code_status }}
-      snyk_oss_status: ${{ steps.scan-results.outputs.snyk_oss_status }}
-      snyk_issues: ${{ steps.scan-results.outputs.snyk_issues }}
+      audit_status: ${{ steps.audit-status.outputs.audit_status }}
     steps:
       - name: Checkout Code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.0
 
-      - name: Setup Snyk CLI
-        uses: snyk/actions/setup@9adf32b1121593767fc3c057af55b55db032dc04  # v1.0.0
-
-      # Rust Snyk Code Scan
-      - name: Run Snyk Code for Rust
-        id: snyk-code-rust
-        if: hashFiles('cross-compile/onvif-rust/**/*.rs') != ''
-        working-directory: cross-compile/onvif-rust
-        run: snyk code test --sarif-file-output=snyk-code-rust.sarif
-        continue-on-error: true
-        env:
-          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
-
-      - name: Upload Rust Snyk Code SARIF
-        if: hashFiles('cross-compile/onvif-rust/**/*.rs') != '' && hashFiles('cross-compile/onvif-rust/snyk-code-rust.sarif') != ''
-        uses: github/codeql-action/upload-sarif@0d579ffd059c29b07949a3cce3983f0780820c98  # v4.0.0
-        # SHA: 0d579ffd059c29b07949a3cce3983f0780820c98
-        continue-on-error: true
+      - name: Audit cross-compile workspace
+        id: audit-workspace
+        uses: rustsec/audit-check@69366f33c96575abad1ee0dba8212993eecbe998  # v2.0.0
         with:
-          sarif_file: cross-compile/onvif-rust/snyk-code-rust.sarif
+          token: ${{ secrets.GITHUB_TOKEN }}
+          working-directory: cross-compile
 
-      # Streaming-lib Snyk Code Scan
-      - name: Run Snyk Code for streaming-lib
-        id: snyk-code-streaming
-        if: hashFiles('cross-compile/streaming-lib/**/*.rs') != ''
-        working-directory: cross-compile/streaming-lib
-        run: snyk code test --sarif-file-output=snyk-code-streaming.sarif
-        continue-on-error: true
-        env:
-          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
-
-      - name: Upload streaming-lib Snyk Code SARIF
-        if: hashFiles('cross-compile/streaming-lib/**/*.rs') != '' && hashFiles('cross-compile/streaming-lib/snyk-code-streaming.sarif') != ''
-        uses: github/codeql-action/upload-sarif@0d579ffd059c29b07949a3cce3983f0780820c98  # v4.0.0
-        # SHA: 0d579ffd059c29b07949a3cce3983f0780820c98
-        continue-on-error: true
+      - name: Audit validation tool
+        id: audit-validation
+        if: always()
+        uses: rustsec/audit-check@69366f33c96575abad1ee0dba8212993eecbe998  # v2.0.0
         with:
-          sarif_file: cross-compile/streaming-lib/snyk-code-streaming.sarif
+          token: ${{ secrets.GITHUB_TOKEN }}
+          working-directory: validation/rust
 
-      # Validation (RTSP) Snyk Code Scan
-      - name: Run Snyk Code for validation (Rust)
-        id: snyk-code-validation
-        if: hashFiles('validation/**/*.rs') != ''
-        working-directory: validation/rust
-        run: snyk code test --sarif-file-output=snyk-code-validation.sarif
-        continue-on-error: true
-        env:
-          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
-
-      - name: Upload validation Snyk Code SARIF
-        if: hashFiles('validation/**/*.rs') != '' && hashFiles('validation/rust/snyk-code-validation.sarif') != ''
-        uses: github/codeql-action/upload-sarif@0d579ffd059c29b07949a3cce3983f0780820c98  # v4.0.0
-        # SHA: 0d579ffd059c29b07949a3cce3983f0780820c98
-        continue-on-error: true
-        with:
-          sarif_file: validation/rust/snyk-code-validation.sarif
-
-      # WebUI Snyk Code + OSS Scan
-      - name: Setup Node.js for WebUI Scans
-        uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f  # v6.0.0
-        # SHA: 53b83947a5a98c8d113130e565377fae1a50d02f
-        with:
-          node-version: "24"
-          cache: "npm"
-          cache-dependency-path: cross-compile/www/package-lock.json
-
-      - name: Install WebUI dependencies
-        working-directory: cross-compile/www
-        run: npm ci
-
-      - name: Run Snyk Code for WebUI
-        id: snyk-code-webui
-        working-directory: cross-compile/www
-        run: snyk code test --sarif-file-output=snyk-code-webui.sarif
-        continue-on-error: true
-        env:
-          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
-
-      - name: Upload WebUI Snyk Code SARIF
-        if: hashFiles('cross-compile/www/snyk-code-webui.sarif') != ''
-        uses: github/codeql-action/upload-sarif@0d579ffd059c29b07949a3cce3983f0780820c98  # v4.0.0
-        # SHA: 0d579ffd059c29b07949a3cce3983f0780820c98
-        continue-on-error: true
-        with:
-          sarif_file: cross-compile/www/snyk-code-webui.sarif
-
-      - name: Run Snyk OSS for WebUI
-        id: snyk-oss-webui
-        uses: snyk/actions/node@9adf32b1121593767fc3c057af55b55db032dc04  # v1.0.0
-        continue-on-error: true
-        env:
-          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
-        with:
-          args: --file=cross-compile/www/package.json --sarif-file-output=cross-compile/www/snyk-oss-webui.sarif
-          command: test
-
-      - name: Upload WebUI Snyk OSS SARIF
-        if: hashFiles('cross-compile/www/snyk-oss-webui.sarif') != ''
-        uses: github/codeql-action/upload-sarif@0d579ffd059c29b07949a3cce3983f0780820c98  # v4.0.0
-        # SHA: 0d579ffd059c29b07949a3cce3983f0780820c98
-        continue-on-error: true
-        with:
-          sarif_file: cross-compile/www/snyk-oss-webui.sarif
-
-      - name: Count Total Snyk Issues
-        id: count-issues
+      - name: Record audit status
+        id: audit-status
+        if: always()
         run: |
-          TOTAL_ISSUES=0
-
-          # Count from WebUI OSS SARIF
-          if [ -f "cross-compile/www/snyk-oss-webui.sarif" ]; then
-            ISSUES=$(jq '.runs[0].results | length' cross-compile/www/snyk-oss-webui.sarif 2>/dev/null || echo "0")
-            TOTAL_ISSUES=$((TOTAL_ISSUES + ISSUES))
+          if [ "${{ steps.audit-workspace.outcome }}" = "success" ] && \
+             [ "${{ steps.audit-validation.outcome }}" = "success" ]; then
+            echo "audit_status=success" >> "$GITHUB_OUTPUT"
+          else
+            echo "audit_status=failure" >> "$GITHUB_OUTPUT"
           fi
-
-          echo "snyk_issues=$TOTAL_ISSUES" >> $GITHUB_OUTPUT
-          echo "Total Snyk issues: $TOTAL_ISSUES"
-
-      - name: Aggregate Scan Results
-        id: scan-results
-        run: |
-          # Determine overall status
-          CODE_STATUS="success"
-          OSS_STATUS="success"
-
-          # Check if any code scan ran
-          if [ "${{ steps.snyk-code-rust.outcome }}" == "failure" ] || [ "${{ steps.snyk-code-webui.outcome }}" == "failure" ] || [ "${{ steps.snyk-code-validation.outcome }}" == "failure" ]; then
-            CODE_STATUS="failure"
-          elif [ "${{ steps.snyk-code-rust.outcome }}" == "skipped" ] && [ "${{ steps.snyk-code-webui.outcome }}" == "skipped" ] && [ "${{ steps.snyk-code-validation.outcome }}" == "skipped" ]; then
-            CODE_STATUS="skipped"
-          fi
-
-          # Check OSS scan status
-          if [ "${{ steps.snyk-oss-webui.outcome }}" == "failure" ]; then
-            OSS_STATUS="failure"
-          elif [ "${{ steps.snyk-oss-webui.outcome }}" == "skipped" ]; then
-            OSS_STATUS="skipped"
-          fi
-
-          echo "snyk_code_status=$CODE_STATUS" >> $GITHUB_OUTPUT
-          echo "snyk_oss_status=$OSS_STATUS" >> $GITHUB_OUTPUT
-
-      - name: Run Snyk Monitor
-        if: hashFiles('cross-compile/www/package.json') != ''
-        uses: snyk/actions/node@9adf32b1121593767fc3c057af55b55db032dc04  # v1.0.0
-        continue-on-error: true
-        env:
-          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
-        with:
-          args: --file=cross-compile/www/package.json
-          command: monitor
 
   # =============================================================================
   # SONARQUBE - Unified Quality Analysis
