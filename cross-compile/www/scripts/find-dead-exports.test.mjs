@@ -1,5 +1,8 @@
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { findDeadExports } from './find-dead-exports.mjs';
+import { findDeadExports, readSourceFiles } from './find-dead-exports.mjs';
 
 describe('findDeadExports', () => {
   it('reports an export no other file references', () => {
@@ -21,5 +24,28 @@ describe('findDeadExports', () => {
       ['./u.ts', "import type { Shape } from './t';"],
     ]);
     expect(findDeadExports(files)).toEqual([]);
+  });
+
+  it('does not report a $ identifier that another file references', () => {
+    const files = new Map([
+      ['./a.ts', 'export const $shape = 1;'],
+      ['./b.ts', "import { $shape } from './a';\nconsole.log($shape);"],
+    ]);
+    expect(findDeadExports(files)).toEqual([]);
+  });
+});
+
+describe('readSourceFiles', () => {
+  it('excludes both .test and .spec files in prod-only mode', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'fde-'));
+    try {
+      writeFileSync(join(dir, 'a.ts'), 'export function a() {}');
+      writeFileSync(join(dir, 'a.test.ts'), 'import { a } from "./a";');
+      writeFileSync(join(dir, 'a.spec.ts'), 'import { a } from "./a";');
+      const files = readSourceFiles(dir, { includeTests: false });
+      expect([...files.keys()]).toEqual(['a.ts']);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

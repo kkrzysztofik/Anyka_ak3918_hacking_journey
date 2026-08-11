@@ -6,6 +6,14 @@ const EXPORT_RE =
   /^export\s+(?:async\s+)?(?:function|const|let|class|interface|type|enum)\s+([A-Za-z_$][\w$]*)/gm;
 
 /**
+ * Escape a symbol for use inside a RegExp, since `$` in identifiers is an
+ * anchor otherwise and would make `\b${symbol}\b` never match.
+ */
+function escapeForRegex(symbol) {
+  return symbol.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
  * @param {Map<string, string>} files path -> source text
  * @returns {Array<{file: string, symbol: string}>}
  */
@@ -14,7 +22,9 @@ export function findDeadExports(files) {
   for (const [file, text] of files) {
     for (const match of text.matchAll(EXPORT_RE)) {
       const symbol = match[1];
-      const word = new RegExp(`\\b${symbol}\\b`);
+      // Identifier-character boundaries, not \b: \b treats `$` as a non-word
+      // char, so a `$`-prefixed export would always read as dead.
+      const word = new RegExp(`(?<![\\w$])${escapeForRegex(symbol)}(?![\\w$])`);
       let used = false;
       for (const [other, otherText] of files) {
         if (other === file) continue;
@@ -33,7 +43,7 @@ export function readSourceFiles(root, { includeTests }) {
   const listed = globSync('**/*.{ts,tsx}', { cwd: root });
   const wanted = includeTests
     ? listed
-    : listed.filter((f) => !/\.test\./.test(f) && !f.startsWith('test/'));
+    : listed.filter((f) => !/\.(test|spec)\./.test(f) && !f.startsWith('test/'));
   return new Map(wanted.map((f) => [f, readFileSync(resolve(root, f), 'utf8')]));
 }
 
