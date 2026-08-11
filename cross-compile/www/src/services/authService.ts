@@ -5,8 +5,8 @@
  * If the call succeeds with provided credentials, user is authenticated.
  */
 import { ENDPOINTS, apiClient } from '@/services/api';
+import type { DeviceInfo } from '@/services/deviceService';
 import { createSOAPEnvelope, parseSOAPResponse, soapBodies } from '@/services/soap/client';
-import type { DeviceInfo } from '@/types';
 import { safeString } from '@/utils/safeString';
 
 export interface LoginResult {
@@ -80,22 +80,4 @@ function extractDeviceInfo(data: Record<string, unknown> | undefined): DeviceInf
     serialNumber: safeString(response.SerialNumber, 'Unknown'),
     hardwareId: safeString(response.HardwareId, 'Unknown'),
   };
-}
-
-/**
- * Check if device is reachable (without authentication)
- */
-export async function checkDeviceReachable(): Promise<boolean> {
-  try {
-    // GetSystemDateAndTime doesn't require authentication on most ONVIF devices
-    const envelope = createSOAPEnvelope(soapBodies.getSystemDateAndTime());
-
-    const response = await apiClient.post(ENDPOINTS.device, envelope, {
-      timeout: 5000, // Short timeout for connectivity check
-    });
-
-    return response.status === 200;
-  } catch {
-    return false;
-  }
 }

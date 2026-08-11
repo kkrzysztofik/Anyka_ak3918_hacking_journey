@@ -1,0 +1,46 @@
+# Host-only CI image for Rust lint/test/coverage (x86_64).
+# Does NOT include ARM crosstool — use Dockerfile for release/cross builds.
+#
+# Build (from repo root; --ci uses scripts/docker as build context):
+#   ./scripts/docker/docker-build.sh --ci -t kkrzysztofik/anyka-cross-compile:rust-1.97.1-ci
+# Push:
+#   docker push kkrzysztofik/anyka-cross-compile:rust-1.97.1-ci
+
+FROM ubuntu:24.04
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+  build-essential \
+  ca-certificates \
+  curl \
+  git \
+  libssl-dev \
+  pkg-config \
+  python3 \
+  zlib1g \
+  && rm -rf /var/lib/apt/lists/* \
+  && apt-get clean
+
+# Build context must be scripts/docker/ (see docker-build.sh --ci).
+# Staged by prepare-ci-toolchain.sh (host rustc/cargo/clippy + llvm-cov/profdata only).
+COPY .ci-toolchain /opt/arm-anykav200-crosstool-ng
+
+# Toolchain bin first; ~/.cargo/bin for cargo-installed tools (llvm-cov wrapper).
+# Never install rustup stable — proxies clash with 1.97.1-dev (E0514).
+ENV PATH="/opt/arm-anykav200-crosstool-ng/bin:/root/.cargo/bin:${PATH}"
+
+RUN test "$(command -v cargo)" = "/opt/arm-anykav200-crosstool-ng/bin/cargo" && \
+  test "$(command -v rustc)" = "/opt/arm-anykav200-crosstool-ng/bin/rustc" && \
+  rustc --version | grep -q '1\.97' && \
+  cargo --version && \
+  command -v clippy-driver && \
+  command -v llvm-cov && \
+  command -v llvm-profdata && \
+  ls /opt/arm-anykav200-crosstool-ng/lib/rustlib/x86_64-unknown-linux-gnu/lib/libprofiler_builtins-*.rlib >/dev/null && \
+  cargo install cargo-llvm-cov --version 0.8.7 --locked && \
+  cargo install sccache --version 0.17.0 --locked && \
+  rm -rf /root/.cargo/registry/index/* /root/.cargo/git/db/* && \
+  command -v cargo-llvm-cov && \
+  command -v sccache
+
+WORKDIR /workspace
+CMD ["/bin/bash"]

@@ -8,6 +8,8 @@ import { createRoot } from 'react-dom/client';
 
 import App from './App';
 
+import './index.css';
+
 // Initialize the application
 const container = document.getElementById('root');
 if (container) {

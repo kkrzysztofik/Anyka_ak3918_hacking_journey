@@ -63,14 +63,18 @@ pub(super) struct Thresholds {
 }
 
 /// Current AUTO-mode state: what the camera is set to, and when it last moved.
+///
+/// `current` is `None` until this controller has driven the hardware itself.
+/// GPIO survives a restart and the vendor daemon's ISP state does not, so a
+/// mode we merely inferred is not something we may act on. See the design doc.
 #[derive(Debug, Clone, Copy)]
 pub(super) struct AutoState {
-    pub(super) current: DayNight,
+    pub(super) current: Option<DayNight>,
     last_change: Option<std::time::Instant>,
 }
 
 impl AutoState {
-    pub(super) fn new(current: DayNight) -> Self {
+    pub(super) fn new(current: Option<DayNight>) -> Self {
         Self {
             current,
             last_change: None,
@@ -79,7 +83,7 @@ impl AutoState {
 
     /// Record that a transition has been applied.
     pub(super) fn record_change(&mut self, to: DayNight, at: std::time::Instant) {
-        self.current = to;
+        self.current = Some(to);
         self.last_change = Some(at);
     }
 }
@@ -89,6 +93,9 @@ impl AutoState {
 /// Returns `None` to hold the current mode. A `None` reading (inside the
 /// hysteresis band) always holds; so does any reading inside `lock` of the last
 /// transition, which is what stops a camera oscillating at dusk.
+///
+/// A `None` `state.current` never matches, so the first determinate reading
+/// after start-up always transitions — that is the ISP reconcile.
 pub(super) fn decide(
     state: &AutoState,
     reading: Option<DayNight>,
@@ -96,7 +103,7 @@ pub(super) fn decide(
     lock: Duration,
 ) -> Option<DayNight> {
     let target = reading?;
-    if target == state.current {
+    if state.current == Some(target) {
         return None;
     }
     if let Some(last) = state.last_change
@@ -233,21 +240,6 @@ pub(super) fn read_light_sensor(paths: &NodePaths) -> Option<i32> {
     raw.trim().parse::<i32>().ok()
 }
 
-/// The mode the hardware was last driven to, from the IR_LED GPIO.
-///
-/// In-memory state dies with the process; the GPIO does not. Without this
-/// reconcile, a restart in AUTO leaves the controller thinking it is Day while
-/// the IR illuminator is still on, and it only corrects once a tick reads AE.
-/// Absent or unreadable → `Day`: an unknown node is more plausibly a board
-/// without an IR lamp than a lamp that is on.
-pub(super) fn read_initial_state(paths: &NodePaths) -> DayNight {
-    let path = paths.node(Node::IrLed);
-    match std::fs::read_to_string(&path) {
-        Ok(v) if v.trim() == "1" => DayNight::Night,
-        _ => DayNight::Day,
-    }
-}
-
 /// AUTO poll cadence.
 ///
 /// Every tick is an IPC round-trip through the daemon's single-threaded poll
@@ -257,6 +249,26 @@ pub(crate) const POLL_INTERVAL: Duration = Duration::from_secs(10);
 
 /// Consecutive AE read failures before falling back to `ain0`.
 const AE_FAIL_STREAK_MAX: u32 = 3;
+
+/// Heartbeat cadence for the AUTO sample line when nothing is changing.
+///
+/// The poll is every 10s; logging each one is ~8,600 lines a day onto an SD
+/// card. A change always logs immediately, so this only bounds the quiet case.
+const SAMPLE_LOG_INTERVAL: Duration = Duration::from_secs(600);
+
+/// Whether a sample line is due: always on a classification change, otherwise
+/// at most once per `interval`.
+fn sample_due(
+    last: Option<(std::time::Instant, Option<DayNight>)>,
+    class: Option<DayNight>,
+    now: std::time::Instant,
+    interval: Duration,
+) -> bool {
+    match last {
+        None => true,
+        Some((at, prev)) => prev != class || now.duration_since(at) >= interval,
+    }
+}
 
 /// Owns the night-mode state and serialises every transition.
 pub(crate) struct NightModeController {
@@ -271,6 +283,14 @@ pub(crate) struct NightModeController {
     auto_enabled: std::sync::atomic::AtomicBool,
     /// Consecutive `get_ae_luma` failures; resets on success.
     ae_fail_streak: std::sync::atomic::AtomicU32,
+    /// Whether the "never synced" warning has already fired this process.
+    unsynced_warned: std::sync::atomic::AtomicBool,
+    /// When the last sample line was logged, and what it classified to.
+    /// `None` = nothing logged yet. Guards [`SAMPLE_LOG_INTERVAL`].
+    sample_log: tokio::sync::Mutex<Option<(std::time::Instant, Option<DayNight>)>>,
+    /// A `set_ir_filter` that failed, and what it was trying to reach. GPIO
+    /// already advanced, so only the ISP still needs driving.
+    isp_pending: tokio::sync::Mutex<Option<DayNight>>,
     /// Best-effort IDR after every day/night apply (forced + AUTO).
     idr_hook: Option<std::sync::Arc<dyn Fn() + Send + Sync>>,
 }
@@ -294,13 +314,16 @@ impl NightModeController {
         use crate::onvif::types::common::IrCutFilterMode;
 
         let caps = probe(&paths);
-        // AUTO seeds from the IR_LED GPIO so a restart in AUTO does not think
-        // it is Day while the illuminator is still on. Forced modes keep their
-        // fixed start so ON/OFF always lands where the user asked.
+        // AUTO starts unknown: this controller has driven nothing yet. GPIO
+        // survives a restart but the vendor daemon's ISP state does not, so
+        // inferring a mode from the IR_LED node lets AUTO conclude "already
+        // correct" and never issue the ISP switch. The first determinate
+        // reading reconciles both together. Forced modes keep their fixed
+        // start so ON/OFF always lands where the user asked.
         let initial = match mode {
-            IrCutFilterMode::OFF => DayNight::Night,
-            IrCutFilterMode::ON => DayNight::Day,
-            IrCutFilterMode::AUTO => read_initial_state(&paths),
+            IrCutFilterMode::OFF => Some(DayNight::Night),
+            IrCutFilterMode::ON => Some(DayNight::Day),
+            IrCutFilterMode::AUTO => None,
         };
         Self {
             paths,
@@ -311,6 +334,9 @@ impl NightModeController {
             configured: mode,
             auto_enabled: std::sync::atomic::AtomicBool::new(matches!(mode, IrCutFilterMode::AUTO)),
             ae_fail_streak: std::sync::atomic::AtomicU32::new(0),
+            unsynced_warned: std::sync::atomic::AtomicBool::new(false),
+            sample_log: tokio::sync::Mutex::new(None),
+            isp_pending: tokio::sync::Mutex::new(None),
             idr_hook,
         }
     }
@@ -319,14 +345,52 @@ impl NightModeController {
         self.caps
     }
 
-    /// The day/night state the hardware was last driven to.
-    pub(crate) async fn current_mode(&self) -> DayNight {
+    /// The day/night state the hardware was last driven to, or `None` if this
+    /// controller has not driven it yet.
+    pub(crate) async fn current_mode(&self) -> Option<DayNight> {
         self.state.lock().await.current
     }
 
     pub(crate) fn set_auto_enabled(&self, enabled: bool) {
         self.auto_enabled
             .store(enabled, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    /// Warn once per process when AUTO has driven nothing and the sensor will
+    /// not say which way to go.
+    ///
+    /// This is what miscalibrated thresholds look like from the outside: the
+    /// ISP is still at its power-on day mode, the lamp is wherever it was, and
+    /// no reading will ever break the tie.
+    fn warn_unsynced_once(&self, raw: i32, src: &'static str) {
+        use std::sync::atomic::Ordering;
+        if self.unsynced_warned.swap(true, Ordering::SeqCst) {
+            return;
+        }
+        tracing::warn!(
+            raw,
+            src,
+            "night mode has never driven the hardware and the reading is indeterminate; check thresholds"
+        );
+    }
+
+    /// Log one AUTO sample, rate-limited by [`sample_due`].
+    ///
+    /// The event name is always `night sample`; the `mode` field is
+    /// `Day|Night|Indeterminate`. `info!`, not `debug!`: cameras run at
+    /// `level = "error"` and a day/night failure is only diagnosable after the
+    /// fact. See the filter directive in `logging::init_logging_impl`.
+    async fn log_sample(&self, raw: i32, src: &'static str, class: Option<DayNight>) {
+        let now = std::time::Instant::now();
+        let mut last = self.sample_log.lock().await;
+        if !sample_due(*last, class, now, SAMPLE_LOG_INTERVAL) {
+            return;
+        }
+        *last = Some((now, class));
+        match class {
+            Some(mode) => tracing::info!(raw, src, ?mode, "night sample"),
+            None => tracing::info!(raw, src, mode = "Indeterminate", "night sample"),
+        }
     }
 
     /// Apply a transition. The mutex makes concurrent transitions
@@ -408,6 +472,23 @@ impl NightModeController {
             return Err(PlatformError::HardwareFailure(format!("GPIO write: {e}")));
         }
 
+        // Only now that the full GPIO plan has succeeded do we update the
+        // pending ISP sync: a failed post-ISP GPIO write returns above without
+        // leaving a target, so tick never retries the ISP for a transition
+        // whose GPIO did not complete. GPIO already moved, so a pending target
+        // means a later tick must only re-drive the ISP, never the whole apply
+        // (which would re-pulse the coil).
+        if isp != 0 {
+            *self.isp_pending.lock().await = Some(target);
+        } else {
+            // A successful ISP call clears any prior pending sync.
+            *self.isp_pending.lock().await = None;
+        }
+
+        // Logged unconditionally: a silent success and a transition that never
+        // happened look identical otherwise, which is what hid the 2026-08-10
+        // failure. `isp` is the daemon's ak_vi_switch_mode return.
+        tracing::info!(from = ?state.current, to = ?target, isp, "night mode applied");
         state.record_change(target, std::time::Instant::now());
         Ok(())
     }
@@ -420,18 +501,20 @@ impl NightModeController {
             return;
         }
 
-        let reading = match self.ffi.get_ae_luma().await {
+        let (raw, src, reading) = match self.ffi.get_ae_luma().await {
             Some(luma) => {
                 self.ae_fail_streak.store(0, Ordering::SeqCst);
-                classify(
-                    i32::from(luma),
+                let raw = i32::from(luma);
+                let class = classify(
+                    raw,
                     Thresholds {
                         day: self.cfg.ae_day_threshold,
                         night: self.cfg.ae_night_threshold,
                         // AE high = bright = day.
                         ldr_high_is_day: true,
                     },
-                )
+                );
+                (raw, "ae", class)
             }
             None => {
                 let n = self.ae_fail_streak.fetch_add(1, Ordering::SeqCst) + 1;
@@ -448,30 +531,55 @@ impl NightModeController {
                 let Some(raw) = read_light_sensor(&self.paths) else {
                     return;
                 };
-                classify(
+                let class = classify(
                     raw,
                     Thresholds {
                         day,
                         night,
                         ldr_high_is_day: self.cfg.ldr_high_is_day,
                     },
-                )
+                );
+                (raw, "ain0", class)
             }
         };
 
-        let target = {
+        self.log_sample(raw, src, reading).await;
+
+        let (target, unsynced) = {
             let state = self.state.lock().await;
-            decide(
+            let target = decide(
                 &state,
                 reading,
                 std::time::Instant::now(),
                 Duration::from_millis(self.cfg.lock_time_ms),
-            )
+            );
+            (target, state.current.is_none())
         };
+
+        if unsynced && reading.is_none() {
+            self.warn_unsynced_once(raw, src);
+        }
+
         if let Some(target) = target
             && let Err(e) = self.apply(target).await
         {
             tracing::warn!(error = %e, "night-mode transition failed");
+        }
+
+        // A failed set_ir_filter must not be left to rot: GPIO already advanced,
+        // so we do NOT re-run apply (that would re-pulse the coil). The retry
+        // below runs in the same tick, immediately after the failed apply, and
+        // on later ticks too if it still fails.
+        let mut pending = self.isp_pending.lock().await;
+        if let Some(target) = *pending {
+            let isp = self
+                .ffi
+                .set_ir_filter(matches!(target, DayNight::Night))
+                .await;
+            if isp == 0 {
+                *pending = None;
+                tracing::info!(to = ?target, isp, "night mode ISP synced");
+            }
         }
     }
 
@@ -746,11 +854,11 @@ mod tests {
             None,
         );
 
-        assert_eq!(ctl.current_mode().await, DayNight::Night);
+        assert_eq!(ctl.current_mode().await, Some(DayNight::Night));
 
         // The AUTO loop must not undo a configured forced mode.
         ctl.tick().await;
-        assert_eq!(ctl.current_mode().await, DayNight::Night);
+        assert_eq!(ctl.current_mode().await, Some(DayNight::Night));
     }
 
     #[tokio::test]
@@ -779,10 +887,10 @@ mod tests {
             IrCutFilterMode::AUTO,
             None,
         );
-        assert_eq!(ctl.current_mode().await, DayNight::Day);
+        assert_eq!(ctl.current_mode().await, None, "AUTO starts unknown");
 
         ctl.tick().await;
-        assert_eq!(ctl.current_mode().await, DayNight::Night);
+        assert_eq!(ctl.current_mode().await, Some(DayNight::Night));
     }
 
     #[tokio::test]
@@ -817,11 +925,11 @@ mod tests {
         );
 
         ctl.tick().await;
-        assert_eq!(ctl.current_mode().await, DayNight::Day);
+        assert_eq!(ctl.current_mode().await, None, "AUTO starts unknown");
         ctl.tick().await;
-        assert_eq!(ctl.current_mode().await, DayNight::Day);
+        assert_eq!(ctl.current_mode().await, None, "AUTO starts unknown");
         ctl.tick().await;
-        assert_eq!(ctl.current_mode().await, DayNight::Night);
+        assert_eq!(ctl.current_mode().await, Some(DayNight::Night));
     }
 
     #[tokio::test]
@@ -853,7 +961,7 @@ mod tests {
         ctl.tick().await;
         ctl.tick().await;
         ctl.tick().await;
-        assert_eq!(ctl.current_mode().await, DayNight::Day);
+        assert_eq!(ctl.current_mode().await, None, "AUTO starts unknown");
     }
 
     #[tokio::test]
@@ -878,9 +986,13 @@ mod tests {
                 }
             }
         });
-        // Must not apply night via ain0 fallback, even after the streak
-        // resumes past the cleared state (calls 4-5).
-        ffi.expect_set_ir_filter().times(0);
+        // The first determinate reading (the AE success on call 3) applies
+        // day. The night the ain0 fallback would force must never apply, even
+        // after the streak resumes past the cleared state (calls 4-5).
+        ffi.expect_set_ir_filter()
+            .withf(|enabled| !*enabled)
+            .times(1)
+            .returning(|_| 0);
 
         let ctl = NightModeController::new(
             paths,
@@ -895,23 +1007,119 @@ mod tests {
         ctl.tick().await;
         ctl.tick().await;
         ctl.tick().await;
-        assert_eq!(ctl.current_mode().await, DayNight::Day);
+        assert_eq!(ctl.current_mode().await, Some(DayNight::Day));
     }
 
-    #[test]
-    fn test_initial_state_follows_the_ir_led_gpio() {
+    #[tokio::test]
+    async fn test_auto_syncs_the_isp_after_a_restart_with_the_lamp_already_on() {
+        use crate::hal::common::imaging::MockImagingHalTrait;
+        use crate::onvif::types::common::IrCutFilterMode;
+
+        // Reproduces 192.168.30.121 on 2026-08-10: onvif-rust restarted with a
+        // stale IR_LED=1, the vendor daemon restarted alongside it and came up in
+        // day mode, and AUTO concluded "already at night" and never called
+        // set_ir_filter. The daemon must be told, every time, on the first
+        // determinate reading.
         let dir = tempfile::tempdir().expect("tempdir");
         let paths = NodePaths::rooted(dir.path(), dir.path());
-
+        seed_gpio_nodes(&paths);
         std::fs::write(paths.node(Node::IrLed), "1").unwrap();
-        assert_eq!(read_initial_state(&paths), DayNight::Night);
 
-        std::fs::write(paths.node(Node::IrLed), "0").unwrap();
-        assert_eq!(read_initial_state(&paths), DayNight::Day);
+        let mut ffi = MockImagingHalTrait::new();
+        // Below ae_night_threshold (8): a dark scene, agreeing with the stale lamp.
+        ffi.expect_get_ae_luma().times(1).returning(|| Some(1));
+        ffi.expect_set_ir_filter()
+            .withf(|enabled| *enabled)
+            .times(1)
+            .returning(|_| 0);
 
-        // Absent node: a board with no IR lamp reads as day, never night.
-        let empty = NodePaths::rooted(&dir.path().join("nope"), dir.path());
-        assert_eq!(read_initial_state(&empty), DayNight::Day);
+        let ctl = NightModeController::new(
+            paths,
+            unlocked_config(),
+            std::sync::Arc::new(ffi),
+            IrCutFilterMode::AUTO,
+            None,
+        );
+        assert_eq!(ctl.current_mode().await, None, "nothing driven yet");
+
+        ctl.tick().await;
+
+        assert_eq!(ctl.current_mode().await, Some(DayNight::Night));
+    }
+
+    #[tokio::test]
+    async fn test_retries_the_isp_after_a_failed_switch() {
+        use crate::hal::common::imaging::MockImagingHalTrait;
+        use crate::onvif::types::common::IrCutFilterMode;
+
+        // GPIO advances even when the ISP switch fails, but the ISP itself must
+        // be retried until the daemon accepts it — otherwise it stays at its
+        // restart-default mode while the lamp says night.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let paths = NodePaths::rooted(dir.path(), dir.path());
+        seed_gpio_nodes(&paths);
+
+        let mut ffi = MockImagingHalTrait::new();
+        ffi.expect_get_ae_luma().times(3).returning(|| Some(1)); // dark scene
+        let mut calls = 0u8;
+        ffi.expect_set_ir_filter()
+            .withf(|enabled| *enabled)
+            .times(2)
+            .returning(move |_| {
+                calls += 1;
+                if calls == 1 { -1 } else { 0 }
+            });
+
+        let ctl = NightModeController::new(
+            paths,
+            unlocked_config(),
+            std::sync::Arc::new(ffi),
+            IrCutFilterMode::AUTO,
+            None,
+        );
+
+        ctl.tick().await; // apply fails the ISP (call 1); the same tick retries it (call 2) to 0
+        assert_eq!(ctl.current_mode().await, Some(DayNight::Night));
+
+        ctl.tick().await; // decide holds; the retry already resolved back in tick 1
+        ctl.tick().await; // re-polls only: set_ir_filter still called exactly twice
+    }
+
+    #[tokio::test]
+    async fn test_no_isp_retry_when_post_isp_gpio_fails() {
+        use crate::hal::common::imaging::MockImagingHalTrait;
+        use crate::onvif::types::common::IrCutFilterMode;
+
+        // A failed post-ISP GPIO write must not leave a pending ISP sync:
+        // apply returns before recording the mode, so tick must not add an
+        // ISP-only retry on top of the normal re-apply. set_ir_filter is called
+        // exactly once per tick (by apply), never twice in the same tick.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let paths = NodePaths::rooted(dir.path(), dir.path());
+        seed_gpio_nodes(&paths);
+        // The post-ISP ircut pulse for Night writes ircut_a; make that fail.
+        std::fs::remove_file(paths.node(Node::IrCutA)).expect("remove ircut_a");
+        std::fs::create_dir(paths.node(Node::IrCutA)).expect("create dir ircut_a");
+
+        let mut ffi = MockImagingHalTrait::new();
+        ffi.expect_get_ae_luma().times(2).returning(|| Some(1)); // dark scene
+        ffi.expect_set_ir_filter()
+            .withf(|enabled| *enabled)
+            .times(2)
+            .returning(|_| -1);
+
+        let ctl = NightModeController::new(
+            paths,
+            unlocked_config(),
+            std::sync::Arc::new(ffi),
+            IrCutFilterMode::AUTO,
+            None,
+        );
+
+        ctl.tick().await; // apply: ISP fails AND post-ISP GPIO fails -> nothing recorded
+        ctl.tick().await; // re-apply only: no ISP-only retry (mockall enforces 2 calls)
+
+        assert_eq!(ctl.current_mode().await, None);
     }
 
     #[test]
@@ -1007,13 +1215,13 @@ mod tests {
             IrCutFilterMode::AUTO,
             None,
         );
-        assert_eq!(ctl.current_mode().await, DayNight::Day);
+        assert_eq!(ctl.current_mode().await, None, "AUTO starts unknown");
 
         assert!(ctl.apply(DayNight::Night).await.is_err());
 
         // A failed transition must not be recorded: AUTO would otherwise
         // believe the camera is at Night and never retry the transition.
-        assert_eq!(ctl.current_mode().await, DayNight::Day);
+        assert_eq!(ctl.current_mode().await, None);
     }
 
     fn thr() -> Thresholds {
@@ -1170,7 +1378,7 @@ mod tests {
     #[test]
     fn test_decide_switches_when_reading_differs_and_unlocked() {
         let t0 = std::time::Instant::now();
-        let state = AutoState::new(DayNight::Day);
+        let state = AutoState::new(Some(DayNight::Day));
 
         let target = decide(&state, Some(DayNight::Night), t0, Duration::from_secs(900));
 
@@ -1180,7 +1388,7 @@ mod tests {
     #[test]
     fn test_decide_holds_when_reading_matches_current_mode() {
         let t0 = std::time::Instant::now();
-        let state = AutoState::new(DayNight::Day);
+        let state = AutoState::new(Some(DayNight::Day));
 
         let target = decide(&state, Some(DayNight::Day), t0, Duration::from_secs(900));
 
@@ -1190,7 +1398,7 @@ mod tests {
     #[test]
     fn test_decide_holds_current_mode_on_indeterminate_reading() {
         let t0 = std::time::Instant::now();
-        let state = AutoState::new(DayNight::Day);
+        let state = AutoState::new(Some(DayNight::Day));
 
         let target = decide(&state, None, t0, Duration::from_secs(900));
 
@@ -1200,7 +1408,7 @@ mod tests {
     #[test]
     fn test_decide_refuses_to_switch_inside_the_lock_window() {
         let t0 = std::time::Instant::now();
-        let mut state = AutoState::new(DayNight::Day);
+        let mut state = AutoState::new(Some(DayNight::Day));
         state.record_change(DayNight::Night, t0);
 
         // One second later, the sensor says day again — a dusk flicker.
@@ -1217,7 +1425,7 @@ mod tests {
     #[test]
     fn test_decide_switches_again_once_the_lock_expires() {
         let t0 = std::time::Instant::now();
-        let mut state = AutoState::new(DayNight::Day);
+        let mut state = AutoState::new(Some(DayNight::Day));
         state.record_change(DayNight::Night, t0);
 
         let target = decide(
@@ -1228,6 +1436,69 @@ mod tests {
         );
 
         assert_eq!(target, Some(DayNight::Day));
+    }
+
+    #[test]
+    fn test_decide_transitions_when_the_current_state_is_unknown() {
+        // At start-up in AUTO the controller has driven nothing, so it must act on
+        // the first determinate reading rather than assume the hardware agrees.
+        let t0 = std::time::Instant::now();
+        let state = AutoState::new(None);
+
+        let target = decide(&state, Some(DayNight::Night), t0, Duration::from_secs(900));
+
+        assert_eq!(target, Some(DayNight::Night));
+    }
+
+    #[test]
+    fn test_sample_due_on_first_call() {
+        let t0 = std::time::Instant::now();
+        assert!(sample_due(
+            None,
+            Some(DayNight::Day),
+            t0,
+            Duration::from_secs(600)
+        ));
+    }
+
+    #[test]
+    fn test_sample_due_when_the_classification_changes() {
+        let t0 = std::time::Instant::now();
+        let last = Some((t0, Some(DayNight::Day)));
+
+        // One second later, but the reading flipped: log it immediately.
+        assert!(sample_due(
+            last,
+            Some(DayNight::Night),
+            t0 + Duration::from_secs(1),
+            Duration::from_secs(600),
+        ));
+    }
+
+    #[test]
+    fn test_sample_suppressed_inside_the_window_when_unchanged() {
+        let t0 = std::time::Instant::now();
+        let last = Some((t0, Some(DayNight::Day)));
+
+        assert!(!sample_due(
+            last,
+            Some(DayNight::Day),
+            t0 + Duration::from_secs(599),
+            Duration::from_secs(600),
+        ));
+    }
+
+    #[test]
+    fn test_sample_due_again_once_the_window_expires() {
+        let t0 = std::time::Instant::now();
+        let last = Some((t0, Some(DayNight::Day)));
+
+        assert!(sample_due(
+            last,
+            Some(DayNight::Day),
+            t0 + Duration::from_secs(600),
+            Duration::from_secs(600),
+        ));
     }
 
     #[test]

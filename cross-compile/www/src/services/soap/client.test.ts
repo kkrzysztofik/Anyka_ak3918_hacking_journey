@@ -7,7 +7,6 @@ import { apiClient } from '@/services/api';
 import {
   createSOAPEnvelope,
   escapeXml,
-  escapeXmlAttribute,
   parseSOAPResponse,
   soapBodies,
   soapRequest,
@@ -218,14 +217,6 @@ describe('SOAP Client', () => {
     });
   });
 
-  describe('escapeXmlAttribute', () => {
-    it('should escape XML attribute values', () => {
-      expect(escapeXmlAttribute('test & value < > " \'')).toBe(
-        'test &amp; value &lt; &gt; &quot; &apos;',
-      );
-    });
-  });
-
   describe('soapBodies', () => {
     it('should create GetDeviceInformation body', () => {
       const body = soapBodies.getDeviceInformation();
@@ -235,82 +226,6 @@ describe('SOAP Client', () => {
     it('should create GetSystemDateAndTime body', () => {
       const body = soapBodies.getSystemDateAndTime();
       expect(body).toContain('tds:GetSystemDateAndTime');
-    });
-
-    it('should create GetNetworkInterfaces body', () => {
-      const body = soapBodies.getNetworkInterfaces();
-      expect(body).toContain('tds:GetNetworkInterfaces');
-    });
-
-    it('should create GetDNS body', () => {
-      const body = soapBodies.getDNS();
-      expect(body).toContain('tds:GetDNS');
-    });
-
-    it('should create GetUsers body', () => {
-      const body = soapBodies.getUsers();
-      expect(body).toContain('tds:GetUsers');
-    });
-
-    it('should create GetProfiles body', () => {
-      const body = soapBodies.getProfiles();
-      expect(body).toContain('trt:GetProfiles');
-    });
-
-    it('should create GetImagingSettings body with token', () => {
-      const body = soapBodies.getImagingSettings('VideoSourceToken1');
-      expect(body).toContain('timg:GetImagingSettings');
-      expect(body).toContain('VideoSourceToken1');
-    });
-
-    it('should create systemReboot body', () => {
-      const body = soapBodies.systemReboot();
-      expect(body).toContain('tds:SystemReboot');
-    });
-
-    it('should create setSystemFactoryDefault body with Hard type', () => {
-      const body = soapBodies.setSystemFactoryDefault('Hard');
-      expect(body).toContain('tds:SetSystemFactoryDefault');
-      expect(body).toContain('Hard');
-    });
-
-    it('should create setSystemFactoryDefault body with Soft type', () => {
-      const body = soapBodies.setSystemFactoryDefault('Soft');
-      expect(body).toContain('tds:SetSystemFactoryDefault');
-      expect(body).toContain('Soft');
-    });
-
-    it('should create getSystemBackup body', () => {
-      const body = soapBodies.getSystemBackup();
-      expect(body).toContain('tds:GetSystemBackup');
-    });
-
-    it('should create restoreSystem body with single backup file', () => {
-      const backupFiles = [{ Name: 'config.toml', Data: 'base64data' }];
-      const body = soapBodies.restoreSystem(backupFiles);
-      expect(body).toContain('tds:RestoreSystem');
-      expect(body).toContain('config.toml');
-      expect(body).toContain('base64data');
-    });
-
-    it('should create restoreSystem body with multiple backup files', () => {
-      const backupFiles = [
-        { Name: 'config.toml', Data: 'data1' },
-        { Name: 'settings.json', Data: 'data2' },
-      ];
-      const body = soapBodies.restoreSystem(backupFiles);
-      expect(body).toContain('tds:RestoreSystem');
-      expect(body).toContain('config.toml');
-      expect(body).toContain('settings.json');
-      expect(body).toContain('data1');
-      expect(body).toContain('data2');
-    });
-
-    it('should create restoreSystem body with empty backup files array', () => {
-      const backupFiles: Array<{ Name: string; Data: string }> = [];
-      const body = soapBodies.restoreSystem(backupFiles);
-      expect(body).toContain('tds:RestoreSystem');
-      expect(body).toContain('tds:BackupFiles');
     });
 
     // PTZ SOAP bodies
@@ -348,12 +263,6 @@ describe('SOAP Client', () => {
     it('should create gotoHomePosition body', () => {
       const body = soapBodies.gotoHomePosition('ProfileToken1');
       expect(body).toContain('tptz:GotoHomePosition');
-      expect(body).toContain('ProfileToken1');
-    });
-
-    it('should create getPTZStatus body', () => {
-      const body = soapBodies.getPTZStatus('ProfileToken1');
-      expect(body).toContain('tptz:GetStatus');
       expect(body).toContain('ProfileToken1');
     });
 

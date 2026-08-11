@@ -92,7 +92,14 @@ impl ImagingHalTrait for AnykaIpc {
             // The wire contract is exactly one luma byte; a longer or empty
             // payload is a malformed daemon response and must not be accepted.
             Ok((status, data)) if status == AK_SUCCESS_I32 && data.len() == 1 => Some(data[0]),
-            Ok(_) => None,
+            // Not silent: a bad status or a short payload is a real daemon
+            // fault, and the caller only sees `None`, which it treats as
+            // "hold". Without this line an ISP that never answers looks
+            // exactly like a camera that is correctly holding its mode.
+            Ok((status, data)) => {
+                error!(status, len = data.len(), "get_ae_luma bad daemon response");
+                None
+            }
             Err(e) => {
                 error!(error = %e, "get_ae_luma IPC failed");
                 None
@@ -143,6 +150,16 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_get_ae_luma_multi_byte_payload_is_none() {
         let daemon = FakeDaemon::start(|_c, _r| (AK_SUCCESS_I32, vec![42u8, 7u8]));
+        let ipc = AnykaIpc::new_with_path(&daemon.socket_path).unwrap();
+        ipc.set_epochs_for_test(1, 1);
+        assert_eq!(<AnykaIpc as ImagingHalTrait>::get_ae_luma(&ipc).await, None);
+    }
+
+    /// A daemon STATUS_ERROR used to return None with no log at all, which
+    /// is what made the 2026-08-10 .121 night-mode failure undiagnosable.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_get_ae_luma_non_success_status_is_none() {
+        let daemon = FakeDaemon::start(|_c, _r| (AK_FAILED_I32, vec![0u8]));
         let ipc = AnykaIpc::new_with_path(&daemon.socket_path).unwrap();
         ipc.set_epochs_for_test(1, 1);
         assert_eq!(<AnykaIpc as ImagingHalTrait>::get_ae_luma(&ipc).await, None);

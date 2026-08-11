@@ -277,7 +277,7 @@ docs/design/
     └── globals.css        # CSS custom properties
 ```
 
-**Implemented theme**: `src/styles/globals.css` (ground truth — see note above). Component utilities live in `@layer components` there: `.card`, `.technical-panel`, `.status-badge-connected`, `.empty-state`, `.skeleton*`, `.live-indicator`, `.data-highlight`, `.focus-ring`.
+**Implemented theme**: `src/styles/globals.css` (ground truth — see note above). Component utilities live in `@layer components` there: `.technical-panel`, `.technical-data`, `.mono-value`, `.badge-technical`, `.data-highlight`, `.value-transition`, `.empty-state*`, `.skeleton`, `.page-enter`, `.status-connected`, `.status-pulse`, `.live-indicator`, `.status-badge-connected`.
 
 ## Implementation Priority
 

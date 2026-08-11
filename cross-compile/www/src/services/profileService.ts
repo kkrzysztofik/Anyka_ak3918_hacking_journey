@@ -4,7 +4,7 @@
  * SOAP operations for media profiles management.
  */
 import { ENDPOINTS } from '@/services/api';
-import { escapeXml, escapeXmlAttribute, soapRequest } from '@/services/soap/client';
+import { escapeXml, soapRequest } from '@/services/soap/client';
 import { safeString } from '@/utils/safeString';
 
 export interface MediaProfile {
@@ -179,37 +179,6 @@ export async function getProfiles(): Promise<MediaProfile[]> {
 }
 
 /**
- * Get a single profile by token
- */
-export async function getProfile(token: string): Promise<MediaProfile | null> {
-  // NOSONAR - Token comes from device response (trusted source), not user input
-  const body = `<trt:GetProfile>
-    <trt:ProfileToken>${token}</trt:ProfileToken>
-  </trt:GetProfile>`;
-
-  try {
-    const data = await soapRequest<Record<string, unknown>>(
-      ENDPOINTS.media,
-      body,
-      'GetProfileResponse',
-    );
-    const profile = data?.Profile as Record<string, unknown> | undefined;
-
-    if (!profile) {
-      return null;
-    }
-
-    return {
-      token: safeString(profile['@_token'], ''),
-      name: safeString(profile.Name, ''),
-    };
-  } catch (error) {
-    console.warn('Failed to get profile:', error);
-    return null;
-  }
-}
-
-/**
  * Create a new profile
  */
 export async function createProfile(name: string): Promise<string> {
@@ -240,56 +209,6 @@ export async function deleteProfile(token: string): Promise<void> {
   </trt:DeleteProfile>`;
 
   await soapRequest(ENDPOINTS.media, body, 'DeleteProfileResponse');
-}
-
-/**
- * Get video encoder configurations
- */
-export async function getVideoEncoderConfigurations(): Promise<VideoEncoderConfiguration[]> {
-  const data = await soapRequest<Record<string, unknown>>(
-    ENDPOINTS.media,
-    '<trt:GetVideoEncoderConfigurations />',
-    'GetVideoEncoderConfigurationsResponse',
-  );
-
-  const configs = data?.Configurations;
-
-  if (!configs) {
-    return [];
-  }
-
-  const configsList = Array.isArray(configs) ? configs : [configs];
-
-  return configsList.map((config: Record<string, unknown>) => {
-    const resolution = config.Resolution as Record<string, unknown> | undefined;
-    const rateControl = config.RateControl as Record<string, unknown> | undefined;
-    const h264 = config.H264 as Record<string, unknown> | undefined;
-
-    return {
-      token: safeString(config['@_token'], ''),
-      name: safeString(config.Name, ''),
-      encoding: safeString(config.Encoding, 'H264') as VideoEncoding,
-      resolution: {
-        width: Number(resolution?.Width || 1920),
-        height: Number(resolution?.Height || 1080),
-      },
-      quality: Number(config.Quality || 80),
-      rateControl: rateControl
-        ? {
-            frameRateLimit: Number(rateControl.FrameRateLimit || 30),
-            encodingInterval: Number(rateControl.EncodingInterval || 1),
-            bitrateLimit: Number(rateControl.BitrateLimit || 4000),
-          }
-        : undefined,
-      h264: h264
-        ? {
-            govLength: Number(h264.GovLength || 30),
-            h264Profile: safeString(h264.H264Profile, 'Main'),
-          }
-        : undefined,
-      sessionTimeout: safeString(config.SessionTimeout, 'PT60S'),
-    };
-  });
 }
 
 /**
@@ -382,7 +301,7 @@ export async function setVideoEncoderConfiguration(
   const escapedEncoding = escapeXml(config.encoding);
   const escapedSessionTimeout = escapeXml(config.sessionTimeout);
   // NOSONAR - Token from device, but escaping for defense-in-depth
-  const escapedToken = escapeXmlAttribute(config.token);
+  const escapedToken = escapeXml(config.token);
 
   const body = `<trt:SetVideoEncoderConfiguration>
     <trt:Configuration token="${escapedToken}">
@@ -461,7 +380,7 @@ export async function setVideoSourceConfiguration(
   forcePersistence: boolean = true,
 ): Promise<void> {
   // NOSONAR - Token from device, but escaping for defense-in-depth
-  const escapedToken = escapeXmlAttribute(config.token);
+  const escapedToken = escapeXml(config.token);
   const escapedName = escapeXml(config.name);
   const escapedSourceToken = escapeXml(config.sourceToken);
 

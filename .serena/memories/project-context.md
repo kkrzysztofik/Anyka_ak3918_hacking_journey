@@ -191,8 +191,9 @@ The project enforces strict separation:
 
 ### CI/CD
 - **Platform**: GitHub Actions
-- **Container**: `kkrzysztofik/anyka-cross-compile:rust-1.97.1`
-- **Rust**: fmt, clippy, test, tarpaulin (coverage)
+- **Host CI container**: `kkrzysztofik/anyka-cross-compile:rust-1.97.1-ci`
+- **Cross/release container**: `kkrzysztofik/anyka-cross-compile:rust-1.97.1`
+- **Rust**: fmt, clippy, test, cargo-llvm-cov (coverage)
 - **WebUI**: lint, type-check, test, coverage
 - **Security**: `cargo audit` (RustSec, blocking) + Dependabot (dependency updates), CodeQL + SonarQube (SAST, advisory)
 - **ARM Build**: Cross-compile for armv5te target

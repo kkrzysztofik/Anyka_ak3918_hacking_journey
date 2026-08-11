@@ -340,8 +340,11 @@ impl ImagingControl for AnykaImagingControl {
         // The filter itself did not move: report where it actually is.
         // Resolved before taking the lock — the guard must not cross an await.
         let mode = match self.night.current_mode().await {
-            DayNight::Day => IrCutFilterMode::ON,
-            DayNight::Night => IrCutFilterMode::OFF,
+            // Unknown means we have never driven the filter, so it sits where a
+            // fresh VI leaves it: day. `VI_MODE_DAY` is the zero value of
+            // `enum video_daynight_mode` and `handle_vi_open` never switches it.
+            Some(DayNight::Day) | None => IrCutFilterMode::ON,
+            Some(DayNight::Night) => IrCutFilterMode::OFF,
         };
         let mut settings = self.settings.write();
         settings.ir_led = on;
