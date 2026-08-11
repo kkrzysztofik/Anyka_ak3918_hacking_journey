@@ -1,0 +1,54 @@
+# Dependabot version updates. Security alerts are enabled separately in
+# repo settings and need no configuration here.
+#
+# Grouping is deliberate: ungrouped, five ecosystems produce a PR per crate
+# per week. Grouped minor+patch means roughly one PR per ecosystem.
+version: 2
+updates:
+  # Rust workspace: onvif-rust, streaming-lib, anyka-init
+  - package-ecosystem: cargo
+    directory: /cross-compile
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 3
+    groups:
+      cargo-minor-patch:
+        update-types: [minor, patch]
+
+  # Host-side RTSP validation tool
+  - package-ecosystem: cargo
+    directory: /validation/rust
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 3
+    groups:
+      cargo-minor-patch:
+        update-types: [minor, patch]
+
+  # Camera WebUI
+  - package-ecosystem: npm
+    directory: /cross-compile/www
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 3
+    groups:
+      npm-minor-patch:
+        update-types: [minor, patch]
+
+  # Every action in these workflows is hand-pinned to a SHA with a trailing
+  # version comment. Dependabot maintains exactly that pattern.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      actions-minor-patch:
+        update-types: [minor, patch]
+
+  # CI toolchain image base
+  - package-ecosystem: docker
+    directory: /scripts/docker
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 2
