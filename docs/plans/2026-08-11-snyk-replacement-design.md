@@ -111,10 +111,14 @@ is net-new coverage: Snyk OSS scanned npm only.
 
 **New `.github/dependabot.yml`** — the repo has never had one, so PR #57 arrived via
 GitHub's security-updates default rather than config. Four ecosystems: `cargo` (both
-lockfile directories), `npm`, `github-actions`, `docker`. The `github-actions` entry
-earns its place independently: every action in these workflows is hand-pinned to a
-SHA with a hand-written `# v6.0.0` comment, which is exactly the pattern Dependabot
-maintains automatically.
+lockfile directories), `npm`, and `github-actions`. A `docker` entry was considered
+and dropped: no CI job builds the toolchain image, so a base-image bump PR would go
+green having tested nothing about the change.
+
+The `github-actions` entry earns its place independently: most actions here are
+pinned to a SHA with a trailing version comment, which Dependabot updates as a pair.
+Note it does not maintain the standalone `# SHA:` sidecar comments some workflows
+carry — those go stale after a bump and are best deleted rather than trusted.
 
 ### 3. Gate behaviour
 
