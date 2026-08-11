@@ -210,22 +210,37 @@ mod tests {
 
     #[test]
     fn test_cpu_percent_from_delta() {
-        let prev = CpuTimes { busy: 100, total: 1000 };
-        let now = CpuTimes { busy: 150, total: 1200 };
+        let prev = CpuTimes {
+            busy: 100,
+            total: 1000,
+        };
+        let now = CpuTimes {
+            busy: 150,
+            total: 1200,
+        };
         let pct = cpu_percent(prev, now).expect("forward delta");
         assert!((pct - 25.0).abs() < 0.01, "got {pct}");
     }
 
     #[test]
     fn test_cpu_percent_rejects_backwards_counter() {
-        let prev = CpuTimes { busy: 150, total: 1200 };
-        let now = CpuTimes { busy: 100, total: 1000 };
+        let prev = CpuTimes {
+            busy: 150,
+            total: 1200,
+        };
+        let now = CpuTimes {
+            busy: 100,
+            total: 1000,
+        };
         assert!(cpu_percent(prev, now).is_none());
     }
 
     #[test]
     fn test_cpu_percent_zero_elapsed_is_none() {
-        let same = CpuTimes { busy: 100, total: 1000 };
+        let same = CpuTimes {
+            busy: 100,
+            total: 1000,
+        };
         assert!(cpu_percent(same, same).is_none());
     }
 

@@ -4,3 +4,4 @@
 //! arrives, so an unwatched page costs this single-core device nothing.
 
 pub mod proc;
+pub mod storage;
