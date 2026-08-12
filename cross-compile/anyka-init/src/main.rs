@@ -110,6 +110,12 @@ fn main() {
     }
 
     if safe_mode {
+        // Reaching safe mode means repeated fast reboots. If an update is
+        // still unconfirmed it is the prime suspect, and parking with the
+        // marker intact would leave the camera on the broken slot forever —
+        // the trial thread below is never reached from here. Revert first;
+        // this reboots and does not return when there is something to revert.
+        anyka_init::update::revert_now(sysimpl.as_ref(), std::path::Path::new(&cfg.update.root));
         // Telnet, logging and the monitor stay up; no services start.
         park();
     }
@@ -134,12 +140,19 @@ fn main() {
     }
 
     // P3 + P4
-    // An unconfirmed update resolves on its own thread: `supervisor_loop::run`
-    // blocks forever. It runs after the monitor's services are already up, so
-    // the trial has real sockets to probe.
+    // An unconfirmed update resolves on its own thread, because
+    // `supervisor_loop::run` below blocks forever.
+    //
+    // The thread is spawned just before services start rather than after, so
+    // the deadline budget has to cover service startup as well as the hold:
+    // 120 s deadline against a 30 s hold leaves ~90 s for onvif-rust to walk
+    // its five startup phases and bind. Judging a slow-but-healthy boot a
+    // failure costs a revert to a known-good slot, so the safe direction is
+    // the one it already errs in.
     {
         let s = Arc::clone(&sysimpl);
         let root = cfg.update.root.clone();
+        let running = anyka_init::update::Slots::new(&root).running_slot();
         let policy = anyka_init::update::Policy {
             hold_secs: cfg.update.trial_hold_sec,
             deadline_secs: cfg.update.trial_deadline_sec,
@@ -151,6 +164,7 @@ fn main() {
                 anyka_init::update::reconcile(
                     s.as_ref(),
                     std::path::Path::new(&root),
+                    running,
                     policy,
                     anyka_init::netstat::listening,
                     std::thread::sleep,

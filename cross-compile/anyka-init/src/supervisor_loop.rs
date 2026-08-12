@@ -52,7 +52,11 @@ struct Service {
 /// Rewrite a `SpawnSpec` so exec and slot-owned env paths resolve inside the
 /// active slot. `root` is `[update] root`; paths outside it pass through.
 fn spec_of_slot(svc: &ServiceCfg, root: &Path, slots: &crate::update::Slots) -> SpawnSpec {
-    let active = slots.active();
+    // Where this supervisor was actually loaded from, not where `active`
+    // claims. When `config.sh` falls back to the other slot it does not
+    // rewrite the pointer, and resolving services against a stale pointer
+    // would spawn them out of the slot that just failed to exec.
+    let active = slots.running_slot();
     let rewrite = |p: &str| {
         crate::update::slot_path(root, active, Path::new(p))
             .to_string_lossy()

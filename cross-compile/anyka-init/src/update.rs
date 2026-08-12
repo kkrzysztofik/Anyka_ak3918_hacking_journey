@@ -79,22 +79,69 @@ impl Slots {
         unsafe { libc::sync() };
         Ok(())
     }
-}
 
-/// Rewrite a configured exec path into the active slot.
-///
-/// Config keeps writing `/mnt/anyka_hack/onvif/onvif-rust.bin`; this maps it to
-/// `/mnt/anyka_hack/slots/<active>/onvif/onvif-rust.bin`. Paths outside the
-/// update root (`/bin/busybox`, `/tmp/wpa_supplicant`) pass through untouched,
-/// which is what keeps udhcpc and wpa_supplicant working.
-pub fn slot_path(root: &Path, active: Slot, exec: &Path) -> PathBuf {
-    match exec.strip_prefix(root) {
-        Ok(rest) => root.join("slots").join(active.name()).join(rest),
-        Err(_) => exec.to_path_buf(),
+    /// Which slot an executable path sits in, if any.
+    pub fn slot_of_exe(&self, exe: &Path) -> Option<Slot> {
+        let rest = exe.strip_prefix(self.root.join("slots")).ok()?;
+        match rest.components().next()?.as_os_str().to_str()? {
+            "a" => Some(Slot::A),
+            "b" => Some(Slot::B),
+            _ => None,
+        }
+    }
+
+    /// The slot this supervisor is actually running from.
+    ///
+    /// Ground truth, deliberately not the `active` pointer. `config.sh` falls
+    /// back to the other slot when the selected one will not exec, and it does
+    /// not rewrite `active` on the way — writing to vfat that early in boot is
+    /// its own failure mode. Trusting the pointer in that state would resolve
+    /// every service path into the slot that was just rejected.
+    ///
+    /// Falls back to the pointer when the executable is not inside the slot
+    /// tree, which is every host test and any pre-migration camera still
+    /// running `/mnt/anyka_hack/anyka-init.bin` directly.
+    pub fn running(&self, exe: Option<&Path>) -> Slot {
+        exe.and_then(|e| self.slot_of_exe(e))
+            .unwrap_or_else(|| self.active())
+    }
+
+    /// `running` against this process. Reads `/proc/self/exe`.
+    pub fn running_slot(&self) -> Slot {
+        self.running(std::env::current_exe().ok().as_deref())
     }
 }
 
-/// An unconfirmed update, recorded as the *existence* of `state/trial-<slot>`.///
+/// Top-level entries the bundle actually ships, and therefore the only ones
+/// that exist inside a slot.
+///
+/// Everything else under the update root — `dropbear/`, `lib/`, `curl/`,
+/// `ffmpeg/`, `gdb/` — lives outside the slots and is not versioned. Rewriting
+/// those would point them at a directory `scripts/build_bundle.sh` never
+/// populates; for dropbear that would silently break an emergency access path.
+const BUNDLED: [&str; 3] = ["anyka-init.bin", "vendor-daemon", "onvif"];
+
+/// Rewrite a configured path into `slot`, if it names something a bundle ships.
+///
+/// Config keeps writing `/mnt/anyka_hack/onvif/onvif-rust.bin`; this maps it to
+/// `/mnt/anyka_hack/slots/<slot>/onvif/onvif-rust.bin`. Paths outside the
+/// update root (`/bin/busybox`, `/tmp/wpa_supplicant`) and paths under it that
+/// the bundle does not carry both pass through untouched.
+pub fn slot_path(root: &Path, slot: Slot, exec: &Path) -> PathBuf {
+    let Ok(rest) = exec.strip_prefix(root) else {
+        return exec.to_path_buf();
+    };
+    let Some(first) = rest.components().next() else {
+        return exec.to_path_buf();
+    };
+    if !BUNDLED.contains(&first.as_os_str().to_string_lossy().as_ref()) {
+        return exec.to_path_buf();
+    }
+    root.join("slots").join(slot.name()).join(rest)
+}
+
+/// An unconfirmed update, recorded as the *existence* of `state/trial-<slot>`.
+///
 /// Deliberately not a parsed file. There is no `serde_json` here, and the
 /// storm guard already learned that reading structured state off exFAT after a
 /// power cut is a hazard (`boot-runtime-rust-design.md:449`). A filename
@@ -121,9 +168,14 @@ impl Trial {
     }
 
     /// Record that `prev` was active before the flip we are about to make.
+    ///
+    /// Clears first: two markers at once would make `find` depend on
+    /// `read_dir` order, and the rollback target is not something to leave to
+    /// the filesystem.
     pub fn arm(root: &Path, prev: Slot) -> std::io::Result<()> {
         let dir = Self::dir(root);
         std::fs::create_dir_all(&dir)?;
+        Self::clear(root)?;
         std::fs::File::create(dir.join(format!("trial-{}", prev.name())))?.sync_all()?;
         // SAFETY: sync(2) takes no arguments and cannot fail.
         unsafe { libc::sync() };
@@ -183,6 +235,13 @@ pub enum UpdateError {
     Schema { needs: u32, has: u32 },
     #[error("checksum verification failed")]
     Checksum,
+    /// Distinct from `Checksum` on purpose: a truncated archive, a full card
+    /// and a hash mismatch all fail here, and the log line is the only
+    /// diagnostic available on a camera reachable via jumphost.
+    #[error("bundle could not be extracted")]
+    Untar,
+    #[error("update already awaiting confirmation; not applying")]
+    TrialInFlight,
     #[error("io: {0}")]
     Io(#[from] std::io::Error),
 }
@@ -292,6 +351,7 @@ pub fn evaluate_trial(
 pub fn reconcile(
     sys: &dyn crate::sys::Sys,
     root: &Path,
+    running: Slot,
     policy: Policy,
     probe: impl FnMut(u16) -> bool,
     sleep: impl FnMut(std::time::Duration),
@@ -302,16 +362,29 @@ pub fn reconcile(
     let slots = Slots::new(root);
     tracing::info!(
         active = slots.active().name(),
+        running = running.name(),
         prev = prev.name(),
         "unconfirmed update: starting trial"
     );
 
     match evaluate_trial(&TRIAL_PORTS, policy, probe, sleep) {
         Outcome::Confirm => {
+            // Heal the pointer against reality before clearing the marker.
+            // If `config.sh` fell back to this slot because the pointed-at one
+            // would not exec, `active` still names the broken slot; clearing
+            // the marker without correcting it would leave the camera booting
+            // into the fallback on every single boot, with nothing left to
+            // signal that anything is wrong.
+            if slots.active() != running
+                && let Err(e) = slots.set_active(running)
+            {
+                tracing::error!(error = %e, "could not heal the active pointer");
+                return;
+            }
             if let Err(e) = Trial::clear(root) {
                 tracing::error!(error = %e, "could not clear the trial marker");
             } else {
-                tracing::info!(slot = slots.active().name(), "update confirmed");
+                tracing::info!(slot = running.name(), "update confirmed");
             }
         }
         Outcome::Revert => {
@@ -336,6 +409,37 @@ pub fn reconcile(
     }
 }
 
+/// Revert an unconfirmed update immediately, without running a trial.
+///
+/// For safe mode. The storm guard only gets there after repeated fast reboots,
+/// and if an update is still unconfirmed it is the prime suspect. Safe mode
+/// deliberately starts no services, so the normal trial could only ever time
+/// out — waiting two minutes to learn that would be theatre, and parking with
+/// the marker intact strands the camera on the broken slot with no way back
+/// short of pulling the card.
+///
+/// Returns true when a revert was performed (and a reboot requested).
+pub fn revert_now(sys: &dyn crate::sys::Sys, root: &Path) -> bool {
+    let Some(prev) = Trial::find(root) else {
+        return false;
+    };
+    let slots = Slots::new(root);
+    tracing::error!(
+        active = slots.active().name(),
+        prev = prev.name(),
+        "safe mode with an unconfirmed update: reverting without a trial"
+    );
+    if let Err(e) = slots.set_active(prev) {
+        tracing::error!(error = %e, "could not restore the previous slot");
+        return false;
+    }
+    if let Err(e) = Trial::clear(root) {
+        tracing::error!(error = %e, "could not clear the trial marker");
+    }
+    let _ = sys.reboot();
+    true
+}
+
 /// Is a complete bundle waiting?
 ///
 /// The trigger file is written after the tar, so its presence means the
@@ -351,7 +455,14 @@ pub fn apply(sys: &dyn crate::sys::Sys, root: &Path, device_schema: u32) {
     let target = slots.inactive();
     let dir = slots.dir(target);
 
-    let result = stage_and_flip(sys, root, &slots, target, &dir, device_schema);
+    let result = if Trial::find(root).is_some() {
+        // An unconfirmed update is mid-trial. Applying now would arm a second
+        // marker and race the trial thread for the `active` pointer, leaving
+        // the rollback target up to whichever wrote last.
+        Err(UpdateError::TrialInFlight)
+    } else {
+        stage_and_flip(sys, root, &slots, target, &dir, device_schema)
+    };
 
     // Clear the spool either way. A bundle that failed verification will fail
     // it again on the next tick, and retrying forever would keep the supervisor
@@ -370,9 +481,18 @@ pub fn apply(sys: &dyn crate::sys::Sys, root: &Path, device_schema: u32) {
         }
         Err(e) => {
             tracing::error!(error = %e, slot = target.name(), "update rejected; both slots untouched");
-            let _ = std::fs::remove_dir_all(&dir);
+            // Only the staging tree is removed. `dir` is the rollback slot and
+            // is never touched on a failed apply.
+            let _ = std::fs::remove_dir_all(staging_dir(&dir));
         }
     }
+}
+
+/// Where a bundle is unpacked before it has earned the slot.
+fn staging_dir(slot_dir: &Path) -> PathBuf {
+    let mut s = slot_dir.as_os_str().to_os_string();
+    s.push(".staging");
+    PathBuf::from(s)
 }
 
 fn stage_and_flip(
@@ -383,10 +503,17 @@ fn stage_and_flip(
     dir: &Path,
     device_schema: u32,
 ) -> Result<Meta, UpdateError> {
-    // Wipe first: a slot half-written by a previous interrupted apply would
-    // otherwise contribute stale files that the manifest never mentions.
-    let _ = std::fs::remove_dir_all(dir);
-    std::fs::create_dir_all(dir)?;
+    // Unpack beside the slot, never into it. The slot currently holds the last
+    // known-good build and is the rollback target: wiping it before the new
+    // bundle has proven itself would mean a single corrupt upload destroys the
+    // ability to roll back, without ever flipping anything.
+    //
+    // Wiping staging first is safe — nothing depends on it, and a tree left by
+    // a previous interrupted apply would otherwise contribute files the
+    // manifest never mentions.
+    let staging = staging_dir(dir);
+    let _ = std::fs::remove_dir_all(&staging);
+    std::fs::create_dir_all(&staging)?;
 
     let untar = [
         "sh".to_string(),
@@ -394,17 +521,27 @@ fn stage_and_flip(
         format!(
             "busybox tar -xf {} -C {}",
             shell_quote(&root.join("spool/bundle.tar")),
-            shell_quote(dir)
+            shell_quote(&staging)
         ),
     ];
     match sys.run_to_completion("busybox", &untar) {
         Ok(st) if st.success() => {}
-        _ => return Err(UpdateError::Checksum),
+        _ => return Err(UpdateError::Untar),
     }
     // SAFETY: sync(2) takes no arguments and cannot fail.
     unsafe { libc::sync() };
 
-    let meta = verify_slot(sys, dir, device_schema)?;
+    let meta = verify_slot(sys, &staging, device_schema)?;
+
+    // Verified. Now take the slot: remove the old tree and rename staging over
+    // it. FAT cannot rename onto an existing directory, so the two steps
+    // cannot be collapsed; the window between them is two syscalls wide and,
+    // unlike the previous ordering, is only ever entered by a bundle that has
+    // already passed its checksums.
+    let _ = std::fs::remove_dir_all(dir);
+    std::fs::rename(&staging, dir)?;
+    // SAFETY: sync(2) takes no arguments and cannot fail.
+    unsafe { libc::sync() };
 
     // Arm before flipping. A power cut between the two leaves the old slot
     // active with a stale marker, which the next boot resolves by confirming a
@@ -660,7 +797,7 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         let mut sys = MockSys::new();
         sys.expect_reboot().never();
-        reconcile(&sys, d.path(), Policy::default(), |_| true, |_| {});
+        reconcile(&sys, d.path(), Slot::A, Policy::default(), |_| true, |_| {});
     }
 
     #[test]
@@ -676,6 +813,7 @@ mod tests {
         reconcile(
             &sys,
             d.path(),
+            Slot::B,
             Policy {
                 hold_secs: 1,
                 deadline_secs: 3,
@@ -686,6 +824,38 @@ mod tests {
 
         assert_eq!(Trial::find(d.path()), None);
         assert_eq!(s.active(), Slot::B);
+    }
+
+    #[test]
+    fn confirming_heals_a_pointer_that_disagrees_with_the_running_slot() {
+        use crate::sys::MockSys;
+        let d = tempfile::tempdir().unwrap();
+        // active=b, but config.sh fell back and we are actually running a.
+        Trial::arm(d.path(), Slot::A).unwrap();
+        let s = Slots::new(d.path());
+        s.set_active(Slot::B).unwrap();
+
+        let mut sys = MockSys::new();
+        sys.expect_reboot().never();
+        reconcile(
+            &sys,
+            d.path(),
+            Slot::A,
+            Policy {
+                hold_secs: 1,
+                deadline_secs: 3,
+            },
+            |_| true,
+            |_| {},
+        );
+
+        assert_eq!(
+            s.active(),
+            Slot::A,
+            "pointer must be healed to the slot that actually booted, or every \
+             later boot repeats the fallback"
+        );
+        assert_eq!(Trial::find(d.path()), None);
     }
 
     #[test]
@@ -701,6 +871,7 @@ mod tests {
         reconcile(
             &sys,
             d.path(),
+            Slot::B,
             Policy {
                 hold_secs: 1,
                 deadline_secs: 2,
@@ -714,6 +885,122 @@ mod tests {
             Trial::find(d.path()),
             None,
             "marker must not survive the revert"
+        );
+    }
+
+    #[test]
+    fn safe_mode_revert_restores_the_previous_slot_and_reboots() {
+        use crate::sys::MockSys;
+        let d = tempfile::tempdir().unwrap();
+        Trial::arm(d.path(), Slot::A).unwrap();
+        let s = Slots::new(d.path());
+        s.set_active(Slot::B).unwrap();
+
+        let mut sys = MockSys::new();
+        sys.expect_reboot().times(1).returning(|| Ok(()));
+
+        assert!(revert_now(&sys, d.path()));
+        assert_eq!(s.active(), Slot::A);
+        assert_eq!(Trial::find(d.path()), None);
+    }
+
+    #[test]
+    fn safe_mode_revert_does_nothing_without_a_marker() {
+        use crate::sys::MockSys;
+        let d = tempfile::tempdir().unwrap();
+        let mut sys = MockSys::new();
+        sys.expect_reboot().never();
+        assert!(!revert_now(&sys, d.path()));
+    }
+
+    #[test]
+    fn arming_twice_leaves_exactly_one_marker() {
+        let d = tempfile::tempdir().unwrap();
+        Trial::arm(d.path(), Slot::A).unwrap();
+        Trial::arm(d.path(), Slot::B).unwrap();
+
+        let names: Vec<_> = std::fs::read_dir(d.path().join("state"))
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .filter(|n| n.starts_with("trial-"))
+            .collect();
+        assert_eq!(names, ["trial-b"], "a second arm must replace, not stack");
+    }
+
+    #[test]
+    fn running_slot_comes_from_the_executable_not_the_pointer() {
+        let d = tempfile::tempdir().unwrap();
+        let s = Slots::new(d.path());
+        s.set_active(Slot::B).unwrap();
+
+        let exe = d.path().join("slots/a/anyka-init.bin");
+        assert_eq!(
+            s.running(Some(&exe)),
+            Slot::A,
+            "config.sh's fallback boots a while the pointer still says b"
+        );
+    }
+
+    #[test]
+    fn running_slot_falls_back_to_the_pointer_outside_the_slot_tree() {
+        let d = tempfile::tempdir().unwrap();
+        let s = Slots::new(d.path());
+        s.set_active(Slot::B).unwrap();
+        // Pre-migration camera, or a host test binary.
+        assert_eq!(s.running(Some(Path::new("/usr/bin/whatever"))), Slot::B);
+        assert_eq!(s.running(None), Slot::B);
+    }
+
+    #[test]
+    fn unbundled_paths_under_the_root_are_not_rewritten() {
+        let root = Path::new("/mnt/anyka_hack");
+        // dropbear is an emergency access path and is not in any bundle.
+        assert_eq!(
+            slot_path(
+                root,
+                Slot::B,
+                Path::new("/mnt/anyka_hack/dropbear/dropbearmulti")
+            ),
+            Path::new("/mnt/anyka_hack/dropbear/dropbearmulti")
+        );
+        assert_eq!(
+            slot_path(root, Slot::B, Path::new("/mnt/anyka_hack/lib/libc.so.0")),
+            Path::new("/mnt/anyka_hack/lib/libc.so.0")
+        );
+    }
+
+    #[test]
+    fn bundled_paths_are_rewritten_into_the_slot() {
+        let root = Path::new("/mnt/anyka_hack");
+        for (input, want) in [
+            (
+                "/mnt/anyka_hack/onvif/onvif-rust.bin",
+                "/mnt/anyka_hack/slots/b/onvif/onvif-rust.bin",
+            ),
+            (
+                "/mnt/anyka_hack/vendor-daemon/lib",
+                "/mnt/anyka_hack/slots/b/vendor-daemon/lib",
+            ),
+            (
+                "/mnt/anyka_hack/anyka-init.bin",
+                "/mnt/anyka_hack/slots/b/anyka-init.bin",
+            ),
+        ] {
+            assert_eq!(slot_path(root, Slot::B, Path::new(input)), Path::new(want));
+        }
+    }
+
+    #[test]
+    fn paths_outside_the_root_are_untouched() {
+        let root = Path::new("/mnt/anyka_hack");
+        assert_eq!(
+            slot_path(root, Slot::B, Path::new("/bin/busybox")),
+            Path::new("/bin/busybox")
+        );
+        assert_eq!(
+            slot_path(root, Slot::B, Path::new("/tmp/wpa_supplicant")),
+            Path::new("/tmp/wpa_supplicant")
         );
     }
 
@@ -824,26 +1111,84 @@ mod tests {
     }
 
     #[test]
-    fn paths_under_the_root_move_into_the_active_slot() {
-        assert_eq!(
-            slot_path(
-                Path::new("/mnt/anyka_hack"),
-                Slot::B,
-                Path::new("/mnt/anyka_hack/onvif/onvif-rust.bin")
-            ),
-            Path::new("/mnt/anyka_hack/slots/b/onvif/onvif-rust.bin")
+    fn a_corrupt_bundle_does_not_destroy_the_rollback_slot() {
+        use crate::sys::MockSys;
+        let d = tempfile::tempdir().unwrap();
+        let root = d.path();
+        std::fs::create_dir_all(root.join("spool")).unwrap();
+        std::fs::write(root.join("spool/bundle.tar"), b"corrupt").unwrap();
+        std::fs::write(root.join("spool/bundle.trigger"), b"").unwrap();
+
+        // slots/b holds the last known-good build; active is a.
+        let good = root.join("slots/b");
+        std::fs::create_dir_all(&good).unwrap();
+        std::fs::write(good.join("onvif-rust.bin"), b"known good").unwrap();
+
+        let mut sys = MockSys::new();
+        sys.expect_run_to_completion().returning(|_, args| {
+            if let Some(cmd) = args.iter().find(|a| a.contains("tar -xf")) {
+                let dir = cmd
+                    .split("-C ")
+                    .nth(1)
+                    .map(|s| s.trim().trim_matches('\'').to_string())
+                    .expect("untar -C dir");
+                std::fs::create_dir_all(&dir).unwrap();
+                std::fs::write(
+                    std::path::Path::new(&dir).join("manifest.sha256"),
+                    "abc  anyka-init.bin\n",
+                )
+                .unwrap();
+                std::fs::write(
+                    std::path::Path::new(&dir).join("manifest.meta"),
+                    "requires_config_schema=1\n",
+                )
+                .unwrap();
+                return Ok(exit_ok());
+            }
+            Ok(exit_fail()) // sha256sum -c rejects it
+        });
+        sys.expect_reboot().never();
+
+        apply(&sys, root, 1);
+
+        assert!(
+            good.join("onvif-rust.bin").exists(),
+            "a bundle that fails verification must not consume the rollback slot"
+        );
+        assert_eq!(Slots::new(root).active(), Slot::A, "no flip");
+        assert!(
+            !root.join("slots/b.staging").exists(),
+            "staging tree must be cleaned up"
         );
     }
 
     #[test]
-    fn paths_outside_the_root_are_untouched() {
+    fn apply_refuses_while_a_trial_is_unconfirmed() {
+        use crate::sys::MockSys;
+        let d = tempfile::tempdir().unwrap();
+        let root = d.path();
+        std::fs::create_dir_all(root.join("spool")).unwrap();
+        std::fs::write(root.join("spool/bundle.tar"), b"tar").unwrap();
+        std::fs::write(root.join("spool/bundle.trigger"), b"").unwrap();
+        Trial::arm(root, Slot::A).unwrap();
+        Slots::new(root).set_active(Slot::B).unwrap();
+
+        let mut sys = MockSys::new();
+        // Nothing unpacked, hashed, or rebooted into.
+        sys.expect_run_to_completion().never();
+        sys.expect_reboot().never();
+
+        apply(&sys, root, 1);
+
         assert_eq!(
-            slot_path(
-                Path::new("/mnt/anyka_hack"),
-                Slot::B,
-                Path::new("/bin/busybox")
-            ),
-            Path::new("/bin/busybox")
+            Trial::find(root),
+            Some(Slot::A),
+            "the in-flight trial's marker must be left exactly as it was"
+        );
+        assert_eq!(Slots::new(root).active(), Slot::B, "pointer must not move");
+        assert!(
+            !root.join("spool/bundle.trigger").exists(),
+            "spool is still cleared so the bundle is not rehashed every tick"
         );
     }
 }
