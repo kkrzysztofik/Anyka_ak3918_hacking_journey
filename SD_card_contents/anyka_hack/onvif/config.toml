@@ -130,10 +130,11 @@ realm = "ONVIF Camera"
 # login and on each page, so raise this if the UI starts seeing 429s.
 rate_limit_per_minute = 300
 
-# Path to static file root. Must be ABSOLUTE: ServeDir resolves a relative
-# path against the process CWD, and anyka-init starts onvif-rust with CWD=/,
-# so "www" resolved to /www and every UI request 404'd.
-static_root = "/mnt/anyka_hack/onvif/www"
+# Path to static file root. Relative: anyka-init starts onvif-rust with CWD set
+# to the executable's own directory (its A/B slot), so "www" resolves to
+# slots/<active>/onvif/www. An absolute path here would point at the old flat
+# layout and serve a stale copy after an update.
+static_root = "www"
 
 
 # ============================================================================
