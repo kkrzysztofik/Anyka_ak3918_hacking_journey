@@ -274,6 +274,55 @@ pub fn evaluate_trial(
     Outcome::Revert
 }
 
+/// Resolve an unconfirmed update, if there is one. Called once per boot, after
+/// services have been started.
+pub fn reconcile(
+    sys: &dyn crate::sys::Sys,
+    root: &Path,
+    policy: Policy,
+    probe: impl FnMut(u16) -> bool,
+    sleep: impl FnMut(std::time::Duration),
+) {
+    let Some(prev) = Trial::find(root) else {
+        return;
+    };
+    let slots = Slots::new(root);
+    tracing::info!(
+        active = slots.active().name(),
+        prev = prev.name(),
+        "unconfirmed update: starting trial"
+    );
+
+    match evaluate_trial(&TRIAL_PORTS, policy, probe, sleep) {
+        Outcome::Confirm => {
+            if let Err(e) = Trial::clear(root) {
+                tracing::error!(error = %e, "could not clear the trial marker");
+            } else {
+                tracing::info!(slot = slots.active().name(), "update confirmed");
+            }
+        }
+        Outcome::Revert => {
+            tracing::error!(
+                ports = ?TRIAL_PORTS,
+                "trial failed: reverting to slot {}",
+                prev.name()
+            );
+            // Order matters. Restore the pointer, then clear the marker, then
+            // reboot: if power is lost between the first two the next boot
+            // repeats a revert that is already correct, whereas clearing first
+            // would boot the broken slot with no marker and no way back.
+            if let Err(e) = slots.set_active(prev) {
+                tracing::error!(error = %e, "could not restore the previous slot");
+                return;
+            }
+            if let Err(e) = Trial::clear(root) {
+                tracing::error!(error = %e, "could not clear the trial marker");
+            }
+            let _ = sys.reboot();
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -511,5 +560,68 @@ mod tests {
             |_| {},
         );
         assert_eq!(outcome, Outcome::Revert);
+    }
+
+    #[test]
+    fn reconcile_is_a_no_op_without_a_marker() {
+        use crate::sys::MockSys;
+        let d = tempfile::tempdir().unwrap();
+        let mut sys = MockSys::new();
+        sys.expect_reboot().never();
+        reconcile(&sys, d.path(), Policy::default(), |_| true, |_| {});
+    }
+
+    #[test]
+    fn a_healthy_trial_clears_the_marker_and_does_not_reboot() {
+        use crate::sys::MockSys;
+        let d = tempfile::tempdir().unwrap();
+        Trial::arm(d.path(), Slot::A).unwrap();
+        let s = Slots::new(d.path());
+        s.set_active(Slot::B).unwrap();
+
+        let mut sys = MockSys::new();
+        sys.expect_reboot().never();
+        reconcile(
+            &sys,
+            d.path(),
+            Policy {
+                hold_secs: 1,
+                deadline_secs: 3,
+            },
+            |_| true,
+            |_| {},
+        );
+
+        assert_eq!(Trial::find(d.path()), None);
+        assert_eq!(s.active(), Slot::B);
+    }
+
+    #[test]
+    fn a_failed_trial_restores_the_previous_slot_and_reboots() {
+        use crate::sys::MockSys;
+        let d = tempfile::tempdir().unwrap();
+        Trial::arm(d.path(), Slot::A).unwrap();
+        let s = Slots::new(d.path());
+        s.set_active(Slot::B).unwrap();
+
+        let mut sys = MockSys::new();
+        sys.expect_reboot().times(1).returning(|| Ok(()));
+        reconcile(
+            &sys,
+            d.path(),
+            Policy {
+                hold_secs: 1,
+                deadline_secs: 2,
+            },
+            |_| false,
+            |_| {},
+        );
+
+        assert_eq!(s.active(), Slot::A, "must fall back before rebooting");
+        assert_eq!(
+            Trial::find(d.path()),
+            None,
+            "marker must not survive the revert"
+        );
     }
 }

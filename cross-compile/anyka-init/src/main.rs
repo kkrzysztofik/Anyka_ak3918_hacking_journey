@@ -134,6 +134,30 @@ fn main() {
     }
 
     // P3 + P4
+    // An unconfirmed update resolves on its own thread: `supervisor_loop::run`
+    // blocks forever. It runs after the monitor's services are already up, so
+    // the trial has real sockets to probe.
+    {
+        let s = Arc::clone(&sysimpl);
+        let root = cfg.update.root.clone();
+        let policy = anyka_init::update::Policy {
+            hold_secs: cfg.update.trial_hold_sec,
+            deadline_secs: cfg.update.trial_deadline_sec,
+        };
+        let _ = std::thread::Builder::new()
+            .name("update-trial".into())
+            .stack_size(supervisor_loop::thread_stack())
+            .spawn(move || {
+                anyka_init::update::reconcile(
+                    s.as_ref(),
+                    std::path::Path::new(&root),
+                    policy,
+                    anyka_init::netstat::listening,
+                    std::thread::sleep,
+                );
+            });
+    }
+
     supervisor_loop::run(sysimpl, &cfg, rx);
     stop.store(true, std::sync::atomic::Ordering::Relaxed);
 }
