@@ -272,7 +272,7 @@ fn run_slot(slot_b_present: bool, pointer: Option<&str>) -> SlotOutcome {
     let marker_a = dir.join("slot-a-ran");
     let marker_b = dir.join("slot-b-ran");
     fs::create_dir_all(dir.join("slots/a")).expect("slots/a");
-    let bin_a = stub(
+    let _bin_a = stub(
         &dir.join("slots/a"),
         "anyka-init.bin",
         &format!("touch '{}'", marker_a.display()),
