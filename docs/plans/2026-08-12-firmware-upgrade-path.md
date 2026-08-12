@@ -30,31 +30,42 @@ Zero `onvif-rust` changes. Transport is an FTP drop into `spool/`, which works o
 
 ---
 
-### Task 1: Confirm busybox `sha256sum` and `tar` on the device
+### Task 1: Confirm busybox `sha256sum` and `tar` on the device — **DONE, PASSED**
 
-**Files:** none — this is a hardware pre-check that gates Tasks 4 and 5.
+Verified on `192.168.2.198` on 2026-08-12. No work remains; this record exists so
+the executor does not re-litigate the assumptions the later tasks rest on.
 
-**Step 1: Check the applets**
+**busybox v1.24.1**, both applets present:
 
-Over telnet to `192.168.2.198:24` (no login; pace the input — see the `anyka-remote-debugging` skill):
-
-```sh
-busybox sha256sum --help 2>&1 | head -2
-busybox tar --help 2>&1 | head -2
-echo test > /tmp/t && busybox sha256sum /tmp/t
+```
+Usage: sha256sum [-c[sw]] [FILE]...
+Usage: tar -[cxtzhmvO] [-X FILE] [-T FILE] [-f TARFILE] [-C DIR] [FILE]...
 ```
 
-Expected: a usage line for each, and a 64-hex-digit hash for `/tmp/t`.
+The verify mechanism was exercised end to end, not just probed for existence:
 
-**Step 2: Record the outcome**
+| Case | Result |
+|---|---|
+| Manifest matches every file | all `OK`, `rc=0` |
+| One file corrupted | `FAILED`, `1 of 2 computed checksums did NOT match`, `rc=1` |
+| One file deleted | `can't open ...`, `FAILED`, `rc=1` |
+| `tar -cf` → `tar -xf -C` → `sha256sum -c` round trip | all `OK`, `rc=0` |
 
-If both applets exist, continue to Task 2 unchanged.
+Both failure modes the applier depends on — corruption and absence — produce a
+nonzero exit, which is the whole contract `verify_slot` is built on.
 
-If `sha256sum` is missing, **stop and report**. The fallback is adding the `sha2` crate to `anyka-init` and hashing in Rust, which changes Task 4's implementation but nothing else in this plan. Do not guess — ask before switching.
+**Two findings that shape later tasks:**
 
-**Step 3: Commit**
-
-Nothing to commit. Note the result in the task log.
+1. **busybox `find` has no `-printf`** (GNU-only; it silently produced an empty
+   manifest). Irrelevant on-device, since the camera only ever *verifies*. But
+   `scripts/build_bundle.sh` in Task 12 must stay host-side, where GNU `find`
+   provides it. Do not port manifest generation to the camera.
+2. **Disk:** `/dev/mmcblk0p1`, vfat, 29.7 G with **28.8 G available**. `mount`
+   shows a leftover `tmpfs on /mnt` that the vfat is mounted over; both report
+   identical usage and `/mnt/anyka_hack` holds 721 MB of real content, so the
+   card is what is live. Two ~19 MB slots are free in practice.
+3. **RAM:** 36 MB total, 2.5 MB free (26 MB counting buffers/cache). This is why
+   Task 14 streams the upload body straight to disk. Nothing may be buffered.
 
 ---
 
@@ -65,14 +76,21 @@ Nothing to commit. Note the result in the task log.
 
 **Step 1: Write the failing test**
 
-Append to the `mod tests` block at the bottom of `netstat.rs`:
+Append to the `mod tests` block at the bottom of `netstat.rs`. The fixture is
+real output captured from `192.168.2.198` on 2026-08-12 — 022A is RTSP, 1F90 is
+HTTP-FLV, 0050 is ONVIF, 0015/0018 are FTP and telnet. Only the last line is
+synthetic, added to cover a non-LISTEN state:
 
 ```rust
 const TCP_FIXTURE: &str = "\
   sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode
-   0: 00000000:0050 00000000:0000 0A 00000000:00000000 00:00000000 00000000     0        0 1234 1 00000000 100 0 0 10 0
-   1: 00000000:022A 00000000:0000 0A 00000000:00000000 00:00000000 00000000     0        0 1235 1 00000000 100 0 0 10 0
-   2: 0100007F:1F90 0100007F:C350 01 00000000:00000000 00:00000000 00000000     0        0 1236 1 00000000 100 0 0 10 0
+   0: 00000000:022A 00000000:0000 0A 00000000:00000000 00:00000000 00000000     0        0 653 1 c2225680 100 0 0 10 -1
+   1: 0100007F:224E 00000000:0000 0A 00000000:00000000 00:00000000 00000000     0        0 132 1 c2224900 100 0 0 10 -1
+   2: 00000000:1F90 00000000:0000 0A 00000000:00000000 00:00000000 00000000     0        0 654 1 c2224d80 100 0 0 10 -1
+   3: 00000000:0050 00000000:0000 0A 00000000:00000000 00:00000000 00000000     0        0 598 1 c2225200 100 0 0 10 -1
+   4: 00000000:0015 00000000:0000 0A 00000000:00000000 00:00000000 00000000     0        0 112 1 c2224480 100 0 0 10 -1
+   5: 00000000:0018 00000000:0000 0A 00000000:00000000 00:00000000 00000000     0        0 325 1 c2224000 100 0 0 10 -1
+   6: 0100007F:1F91 0100007F:C350 01 00000000:00000000 00:00000000 00000000     0        0 999 1 c2224111 100 0 0 10 -1
 ";
 
 #[test]
@@ -87,9 +105,16 @@ fn listening_finds_a_high_port_in_hex() {
 }
 
 #[test]
+fn listening_finds_every_trial_port() {
+    for p in crate::update::TRIAL_PORTS {
+        assert!(parse_listening(TCP_FIXTURE, p), "port {p} should be listening");
+    }
+}
+
+#[test]
 fn listening_rejects_an_established_socket() {
-    // 0x1F90 == 8080, present but state 01 (ESTABLISHED), not 0A (LISTEN)
-    assert!(!parse_listening(TCP_FIXTURE, 8080));
+    // 0x1F91 == 8081, present but state 01 (ESTABLISHED), not 0A (LISTEN)
+    assert!(!parse_listening(TCP_FIXTURE, 8081));
 }
 
 #[test]
@@ -131,27 +156,33 @@ pub fn listening(port: u16) -> bool {
 }
 
 /// Split out so the parse is testable without a real `/proc`.
+///
+/// Columns are `sl local_address rem_address st ...`, first line a header.
+/// Destructuring all four up front is duller than chaining iterator adaptors
+/// and does not invite a fencepost error on the one field that matters.
 fn parse_listening(src: &str, port: u16) -> bool {
     src.lines().skip(1).any(|line| {
-        let mut f = line.split_whitespace().skip(1);
-        let local = match f.next() {
-            Some(v) => v,
-            None => return false,
+        let mut f = line.split_whitespace();
+        let (Some(_sl), Some(local), Some(_rem), Some(state)) =
+            (f.next(), f.next(), f.next(), f.next())
+        else {
+            return false;
         };
-        let state = match f.next().and_then(|_rem| f.next()) {
-            Some(v) => v,
-            None => return false,
-        };
-        let hex = match local.rsplit(':').next() {
-            Some(v) => v,
-            None => return false,
-        };
-        u16::from_str_radix(hex, 16) == Ok(port) && state == TCP_LISTEN
+        state == TCP_LISTEN
+            && local
+                .rsplit(':')
+                .next()
+                .and_then(|hex| u16::from_str_radix(hex, 16).ok())
+                == Some(port)
     })
 }
 ```
 
-Note the field walk: after `skip(1)` the next three items are `local_address`, `rem_address`, `st`. The `and_then` above steps over `rem_address` before reading `st`.
+Known limitation, deliberately not guarded: this matches on port only, so a
+service bound to `127.0.0.1` alone would pass the trial while being externally
+unreachable. The live `/proc/net/tcp` confirms every supervised service binds
+`0.0.0.0` (only one unrelated listener sits on loopback), and checking the
+address costs more than the failure is worth.
 
 **Step 4: Run the tests to verify they pass**
 
@@ -1316,15 +1347,19 @@ git commit -m "feat(anyka-init): config schema generation and [update] section"
 - Modify: `cross-compile/anyka-init/src/sys.rs:108-113`
 - Modify: `cross-compile/anyka-init/src/supervisor_loop.rs` (exec path resolution)
 
-**Step 1: Confirm the coredump consequence first**
+**Step 1: Coredump consequence — CHECKED 2026-08-12, CLEAR**
 
-`spec.core_dump` services write cores to CWD, which is `/` today. Setting a working directory moves them onto the SD card. Before implementing, check `/proc/sys/kernel/core_pattern` on `192.168.2.198` over telnet:
+`spec.core_dump` services write cores to CWD, so giving each service a working
+directory could have moved 30 MB cores onto vfat on every crash. Checked on
+`192.168.2.198`:
 
-```sh
-cat /proc/sys/kernel/core_pattern
+```
+/proc/sys/kernel/core_pattern = /mnt/core_%e_%p_%t
 ```
 
-An absolute pattern means CWD is irrelevant and this is a non-issue. A bare relative pattern means cores land in the new CWD — a 30 MB write onto vfat per crash. If it is relative, **stop and report** rather than shipping a change that could fill the card during a crash loop.
+**Absolute**, so the kernel ignores CWD entirely for core placement and
+`current_dir` has no effect on where cores land. Proceed with the implementation
+as written. Re-check if a camera turns up with a relative pattern.
 
 **Step 2: Write the failing test**
 
@@ -1747,5 +1782,13 @@ git commit -m "feat(www): upload an upgrade bundle from the diagnostics page"
 
 - **Toolchain.** Always `source setenv.sh` first and use `$CARGO`. Host-side work needs `--target x86_64-unknown-linux-gnu`; clippy additionally needs `PATH="${ANYKA_TOOLCHAIN_BIN}:$PATH"` or it fails with E0514.
 - **Never `killall busybox` on the camera.** `udhcpc` and your own telnet shell are busybox.
-- **Task 1 and Task 10 Step 1 are gates.** Both check a hardware fact that changes the implementation. If either comes back the wrong way, stop and report instead of working around it.
+- **Both hardware gates are resolved** (2026-08-12, on `192.168.2.198`): busybox
+  ships `sha256sum -c` and `tar -C`, verified end to end including the corrupt
+  and missing-file cases; `core_pattern` is absolute, so per-service `current_dir`
+  cannot relocate coredumps. Neither needs re-checking.
+- **`.198`'s `/mnt/anyka_hack` is 721 MB and does not match `SD_card_contents/`** —
+  it still carries `gergehack.sh`, `web_interface`, `xiu`, `rtsp`, `ptz` and the
+  vendor demos. The Task 13 migration copies only the three components into
+  `slots/a`, so this is harmless, but it is why that step leaves the originals
+  in place rather than moving them.
 - **Task 13 Step 6 is the acceptance test.** An upgrade system that has never been observed to roll back has not been tested.
