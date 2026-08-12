@@ -17,6 +17,7 @@ import { ApiError, authorizedFetch } from '@/services/api';
 
 const MOCK_DIAGNOSTICS = {
   status: 'healthy',
+  firmware_version: 'v1.2.3',
   uptime: { process_s: 3600, system_s: 7200 },
   cpu_percent: 12.5,
   memory: { total_kb: 131072, used_kb: 45000 },

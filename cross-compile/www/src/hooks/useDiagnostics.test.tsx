@@ -21,6 +21,7 @@ vi.mock('@/services/diagnosticsService', () => ({
 
 const MOCK_DIAGNOSTICS: Diagnostics = {
   status: 'healthy',
+  firmware_version: 'v1.2.3',
   uptime: { process_s: 100, system_s: 200 },
   cpu_percent: 42,
   memory: { total_kb: 2048, used_kb: 1024 },

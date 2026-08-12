@@ -23,6 +23,7 @@ vi.mock('@/services/diagnosticsService');
 
 const BASE_DIAG: Diagnostics = {
   status: 'healthy',
+  firmware_version: 'v1.2.3',
   uptime: { process_s: 3600, system_s: 3600 }, // no restart gap
   cpu_percent: 45,
   memory: { total_kb: 36864, used_kb: 18432 }, // 18 MB / 36 MB
@@ -521,6 +522,62 @@ describe('DiagnosticsPage', () => {
       );
       renderWithProviders(<DiagnosticsPage />);
       expect(screen.getByTestId('diagnostics-vision-mode')).toHaveTextContent('\u2014');
+    });
+  });
+
+  describe('Device information', () => {
+    it('test_DiagnosticsPage_shows_firmware_version', () => {
+      renderWithProviders(<DiagnosticsPage />);
+      expect(screen.getByTestId('diagnostics-firmware-version')).toHaveTextContent('v1.2.3');
+    });
+  });
+
+  describe('Firmware update', () => {
+    it('test_DiagnosticsPage_upload_button_disabled_until_file_chosen', () => {
+      renderWithProviders(<DiagnosticsPage />);
+      expect(screen.getByTestId('diagnostics-firmware-upload-button')).toBeDisabled();
+    });
+
+    it('test_DiagnosticsPage_browse_reveals_file_name_and_enables_upload', async () => {
+      renderWithProviders(<DiagnosticsPage />);
+      const input = screen.getByTestId('diagnostics-firmware-input') as HTMLInputElement;
+      const file = new File(['tar'], 'bundle.tar', { type: 'application/x-tar' });
+      await userEvent.upload(input, file);
+      expect(screen.getByTestId('diagnostics-firmware-browse-button')).toHaveTextContent(
+        'bundle.tar',
+      );
+      expect(screen.getByTestId('diagnostics-firmware-upload-button')).toBeEnabled();
+    });
+
+    it('test_DiagnosticsPage_upload_calls_uploadFirmware_and_shows_queued', async () => {
+      const { uploadFirmware } = await import('@/services/diagnosticsService');
+      vi.mocked(uploadFirmware).mockResolvedValue(undefined);
+
+      renderWithProviders(<DiagnosticsPage />);
+      const input = screen.getByTestId('diagnostics-firmware-input') as HTMLInputElement;
+      await userEvent.upload(input, new File(['tar'], 'bundle.tar'));
+      await userEvent.click(screen.getByTestId('diagnostics-firmware-upload-button'));
+
+      await waitFor(() =>
+        expect(screen.getByTestId('diagnostics-firmware-queued')).toBeInTheDocument(),
+      );
+      expect(vi.mocked(uploadFirmware)).toHaveBeenCalledTimes(1);
+    });
+
+    it('test_DiagnosticsPage_upload_failure_shows_error', async () => {
+      const { uploadFirmware } = await import('@/services/diagnosticsService');
+      vi.mocked(uploadFirmware).mockRejectedValue(new Error('Upload rejected by camera'));
+
+      renderWithProviders(<DiagnosticsPage />);
+      const input = screen.getByTestId('diagnostics-firmware-input') as HTMLInputElement;
+      await userEvent.upload(input, new File(['tar'], 'bundle.tar'));
+      await userEvent.click(screen.getByTestId('diagnostics-firmware-upload-button'));
+
+      await waitFor(() =>
+        expect(screen.getByTestId('diagnostics-firmware-error')).toHaveTextContent(
+          'Upload rejected by camera',
+        ),
+      );
     });
   });
 });

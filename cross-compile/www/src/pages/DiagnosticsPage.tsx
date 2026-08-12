@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 
 import {
   Activity,
@@ -9,6 +9,7 @@ import {
   FileText,
   HardDrive,
   Info,
+  Upload,
   Wifi,
 } from 'lucide-react';
 
@@ -31,6 +32,7 @@ import {
   type LogLevel,
   type LogSource,
   getLogs,
+  uploadFirmware,
 } from '@/services/diagnosticsService';
 
 const RESTART_THRESHOLD_S = 300; // 5 minutes
@@ -471,6 +473,15 @@ function DeviceInfoCard({ data }: Readonly<{ data: Diagnostics | undefined }>) {
           <div className="border-border border-t pt-3">
             <div
               className="flex items-center justify-between"
+              data-testid="diagnostics-firmware-version-row"
+            >
+              <dt className="text-muted-foreground">Firmware</dt>
+              <dd className="font-mono text-white" data-testid="diagnostics-firmware-version">
+                {data?.firmware_version ?? '\u2014'}
+              </dd>
+            </div>
+            <div
+              className="mt-1 flex items-center justify-between"
               data-testid="diagnostics-network-download-row"
             >
               <dt className="text-muted-foreground">Download</dt>
@@ -699,6 +710,106 @@ function SystemLogsCard({
   );
 }
 
+function FirmwareUpdateCard() {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [fileName, setFileName] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [queued, setQueued] = useState(false);
+
+  const handleFileChange = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    setFileName(file?.name ?? null);
+    setQueued(false);
+  }, []);
+
+  const handleUpload = useCallback(async () => {
+    const input = fileInputRef.current;
+    const file = input?.files?.[0];
+    if (!file) return;
+
+    setUploading(true);
+    setError(null);
+    try {
+      await uploadFirmware(file);
+      setQueued(true);
+      setFileName(null);
+      if (input) input.value = '';
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Upload failed');
+    } finally {
+      setUploading(false);
+    }
+  }, []);
+
+  return (
+    <Card className="border-border bg-card overflow-hidden">
+      <CardHeader className="border-border border-b">
+        <div className="flex items-center gap-3">
+          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-green-500/10">
+            <Upload className="h-5 w-5 text-green-500" />
+          </div>
+          <div>
+            <CardTitle
+              className="text-foreground text-sm font-semibold"
+              data-testid="diagnostics-firmware-title"
+            >
+              Firmware Update
+            </CardTitle>
+            <p
+              className="text-muted-foreground text-xs"
+              data-testid="diagnostics-firmware-description"
+            >
+              Install an upgrade bundle
+            </p>
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent className="pt-4">
+        <div className="flex flex-wrap items-center gap-3">
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".tar"
+            className="hidden"
+            data-testid="diagnostics-firmware-input"
+            onChange={handleFileChange}
+            disabled={uploading}
+          />
+          <Button
+            variant="outline"
+            size="sm"
+            data-testid="diagnostics-firmware-browse-button"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={uploading}
+          >
+            {fileName ?? 'Choose bundle…'}
+          </Button>
+          <Button
+            size="sm"
+            data-testid="diagnostics-firmware-upload-button"
+            onClick={handleUpload}
+            disabled={uploading || fileName === null}
+          >
+            {uploading ? 'Uploading…' : 'Upload'}
+          </Button>
+        </div>
+        {queued && (
+          <p className="mt-3 text-sm text-green-400" data-testid="diagnostics-firmware-queued">
+            Bundle accepted. The camera will reboot into it and return in about
+            two minutes.
+          </p>
+        )}
+        {error && (
+          <p className="mt-3 text-sm text-red-400" data-testid="diagnostics-firmware-error">
+            {error}
+          </p>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function DiagnosticsPage() {
   const { data, isLoading, history } = useDiagnostics();
   const [logSource, setLogSource] = useState<LogSource>('onvif_rust');
@@ -751,6 +862,8 @@ export default function DiagnosticsPage() {
         <VisionCard vision={data?.vision ?? null} />
         <StreamHealthCard data={data} />
       </div>
+
+      <FirmwareUpdateCard />
 
       <SystemLogsCard
         logSource={logSource}

@@ -8,6 +8,8 @@ import { ApiError, authorizedFetch } from '@/services/api';
 
 export interface Diagnostics {
   status: string;
+  /** `git describe` at build time on the running bundle. */
+  firmware_version: string;
   uptime: { process_s: number; system_s: number };
   cpu_percent: number | null;
   memory: { total_kb: number; used_kb: number } | null;
@@ -77,6 +79,7 @@ function isUptime(value: unknown): value is Diagnostics['uptime'] {
 function isDiagnostics(value: unknown): value is Diagnostics {
   if (!isRecord(value)) return false;
   if (typeof value.status !== 'string') return false;
+  if (typeof value.firmware_version !== 'string') return false;
   if (!isUptime(value.uptime)) return false;
   if (!isNullOrNumber(value.cpu_percent)) return false;
   if (!isNullOrRecord(value.memory)) return false;
@@ -164,4 +167,29 @@ export async function getLogs(
     throw new ApiError('Logs response has an unexpected shape', response.status, '');
   }
   return payload;
+}
+
+/**
+ * Upload an upgrade bundle to the camera.
+ *
+ * Streams the file raw as the PUT body — the backend never buffers it, and
+ * neither should we. 202 means the update is queued: the applier will stage it,
+ * flip slots and reboot within the next poll interval.
+ */
+export async function uploadFirmware(file: File, signal?: AbortSignal): Promise<void> {
+  const response = await authorizedFetch('/api/update', {
+    method: 'PUT',
+    body: file,
+    signal,
+  });
+
+  if (response.status === 202) {
+    return;
+  }
+  const text = await response.text();
+  throw new ApiError(
+    `Firmware upload failed with status ${response.status}`,
+    response.status,
+    text,
+  );
 }
