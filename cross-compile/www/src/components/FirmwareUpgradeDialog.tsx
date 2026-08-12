@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { Upload } from 'lucide-react';
 
@@ -48,12 +48,15 @@ function sleep(ms: number, signal: AbortSignal): Promise<void> {
       reject(new DOMException('Aborted', 'AbortError'));
       return;
     }
-    const id = window.setTimeout(resolve, ms);
     const onAbort = () => {
       window.clearTimeout(id);
       reject(new DOMException('Aborted', 'AbortError'));
     };
-    signal.addEventListener('abort', onAbort, { once: true });
+    const id = window.setTimeout(() => {
+      signal.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    signal.addEventListener('abort', onAbort);
   });
 }
 
@@ -92,6 +95,12 @@ export function FirmwareUpgradeDialog({
     if (inputRef.current) inputRef.current.value = '';
   }, []);
 
+  useEffect(() => {
+    return () => {
+      abortRef.current?.abort();
+    };
+  }, []);
+
   const assignFile = useCallback((next: File | null) => {
     setFile(next);
     setError(null);
@@ -106,21 +115,28 @@ export function FirmwareUpgradeDialog({
   const pollUntilBack = useCallback(
     async (signal: AbortSignal) => {
       const deadline = Date.now() + POLL_TIMEOUT_MS;
+      // ponytail: down→up edge approximates reconnect; trial-status API if false reverted reports appear.
+      let sawDown = false;
       while (Date.now() < deadline) {
         if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
         try {
           const diagnostics = await getDiagnostics(signal);
-          const next = diagnostics.firmware_version;
-          if (next !== previousVersion) {
-            setResultMessage(`Upgrade committed. Firmware version is now ${next}.`);
-          } else {
-            setResultMessage(`Upgrade probably reverted. Firmware version is still ${next}.`);
+          if (sawDown) {
+            const next = diagnostics.firmware_version;
+            if (next !== previousVersion) {
+              setResultMessage(`Upgrade committed. Firmware version is now ${next}.`);
+            } else {
+              setResultMessage(
+                `Upgrade probably reverted. Firmware version is still ${next}.`,
+              );
+            }
+            setStep('result');
+            return;
           }
-          setStep('result');
-          return;
+          // Still reachable with a pre-reboot snapshot — keep polling.
         } catch (err) {
           if (isAbortError(err)) throw err;
-          // Ignore network errors while the camera reboots.
+          sawDown = true;
         }
         await sleep(POLL_INTERVAL_MS, signal);
       }

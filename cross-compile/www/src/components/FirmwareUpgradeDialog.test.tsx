@@ -144,22 +144,63 @@ describe('FirmwareUpgradeDialog', () => {
     });
   });
 
-  it('should show committed copy when firmware_version changes', async () => {
+  it('should ignore pre-reboot diagnostics until a down→up reconnect', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
 
     vi.mocked(uploadFirmware).mockResolvedValue(undefined);
-    vi.mocked(getDiagnostics).mockResolvedValue(makeDiagnostics('v2.0.0'));
+    let poll = 0;
+    vi.mocked(getDiagnostics).mockImplementation(async () => {
+      poll += 1;
+      if (poll === 1) return makeDiagnostics(PREVIOUS);
+      if (poll === 2) throw new Error('camera down');
+      return makeDiagnostics('v2.0.0');
+    });
 
     renderDialog();
     await selectTarAndContinue(user);
     await user.click(screen.getByTestId('firmware-upgrade-confirm-button'));
 
+    expect(await screen.findByTestId('firmware-upgrade-waiting')).toBeInTheDocument();
+
     await waitFor(() => {
-      expect(screen.getByTestId('firmware-upgrade-result-message').textContent).toMatch(
-        /committed/i,
-      );
+      expect(poll).toBeGreaterThanOrEqual(1);
     });
+    // First success is still the old version before reboot — must not exit early
+    expect(screen.queryByTestId('firmware-upgrade-result-message')).not.toBeInTheDocument();
+    expect(screen.getByTestId('firmware-upgrade-waiting')).toBeInTheDocument();
+
+    await waitFor(
+      () => {
+        expect(screen.getByTestId('firmware-upgrade-result-message').textContent).toMatch(
+          /committed/i,
+        );
+      },
+      { timeout: 10_000 },
+    );
+  });
+
+  it('should show committed copy when firmware_version changes', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+
+    vi.mocked(uploadFirmware).mockResolvedValue(undefined);
+    vi.mocked(getDiagnostics)
+      .mockRejectedValueOnce(new Error('camera down'))
+      .mockResolvedValue(makeDiagnostics('v2.0.0'));
+
+    renderDialog();
+    await selectTarAndContinue(user);
+    await user.click(screen.getByTestId('firmware-upgrade-confirm-button'));
+
+    await waitFor(
+      () => {
+        expect(screen.getByTestId('firmware-upgrade-result-message').textContent).toMatch(
+          /committed/i,
+        );
+      },
+      { timeout: 5000 },
+    );
   });
 
   it('should show reverted copy when firmware_version is unchanged', async () => {
@@ -167,17 +208,22 @@ describe('FirmwareUpgradeDialog', () => {
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
 
     vi.mocked(uploadFirmware).mockResolvedValue(undefined);
-    vi.mocked(getDiagnostics).mockResolvedValue(makeDiagnostics(PREVIOUS));
+    vi.mocked(getDiagnostics)
+      .mockRejectedValueOnce(new Error('camera down'))
+      .mockResolvedValue(makeDiagnostics(PREVIOUS));
 
     renderDialog();
     await selectTarAndContinue(user);
     await user.click(screen.getByTestId('firmware-upgrade-confirm-button'));
 
-    await waitFor(() => {
-      expect(screen.getByTestId('firmware-upgrade-result-message').textContent).toMatch(
-        /probably reverted/i,
-      );
-    });
+    await waitFor(
+      () => {
+        expect(screen.getByTestId('firmware-upgrade-result-message').textContent).toMatch(
+          /probably reverted/i,
+        );
+      },
+      { timeout: 5000 },
+    );
   });
 
   it('should show upload error on uploading step and allow retry', async () => {
