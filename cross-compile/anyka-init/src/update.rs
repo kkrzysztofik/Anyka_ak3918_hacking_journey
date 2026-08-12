@@ -81,8 +81,7 @@ impl Slots {
     }
 }
 
-/// An unconfirmed update, recorded as the *existence* of `state/trial-<slot>`.
-///
+/// An unconfirmed update, recorded as the *existence* of `state/trial-<slot>`.///
 /// Deliberately not a parsed file. There is no `serde_json` here, and the
 /// storm guard already learned that reading structured state off exFAT after a
 /// power cut is a hazard (`boot-runtime-rust-design.md:449`). A filename
@@ -132,6 +131,89 @@ impl Trial {
         unsafe { libc::sync() };
         Ok(())
     }
+}
+
+/// `manifest.meta`: `key=value` lines. Unparseable anything reads as zero,
+/// which fails the compatibility check closed for a nonzero device schema and
+/// open for schema 0 — matching the pre-schema bundles that predate this.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct Meta {
+    pub version: Option<String>,
+    pub requires_config_schema: u32,
+}
+
+impl Meta {
+    pub fn parse(src: &str) -> Self {
+        let mut m = Self::default();
+        for line in src.lines() {
+            match line.split_once('=') {
+                Some(("version", v)) => m.version = Some(v.trim().to_string()),
+                Some(("requires_config_schema", v)) => {
+                    m.requires_config_schema = v.trim().parse().unwrap_or(0);
+                }
+                _ => {}
+            }
+        }
+        m
+    }
+
+    pub fn compatible_with(&self, device_schema: u32) -> bool {
+        self.requires_config_schema <= device_schema
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum UpdateError {
+    #[error("manifest unreadable in {0}")]
+    NoManifest(PathBuf),
+    #[error("bundle needs config schema {needs}, device has {has}")]
+    Schema { needs: u32, has: u32 },
+    #[error("checksum verification failed")]
+    Checksum,
+    #[error("io: {0}")]
+    Io(#[from] std::io::Error),
+}
+
+/// Verify a staged slot. Schema first: it is free, and a bundle that can never
+/// run should not cost a full pass over 19 MB of hashing.
+pub fn verify_slot(
+    sys: &dyn crate::sys::Sys,
+    slot_dir: &Path,
+    device_schema: u32,
+) -> Result<Meta, UpdateError> {
+    let meta_src = std::fs::read_to_string(slot_dir.join("manifest.meta"))
+        .map_err(|_| UpdateError::NoManifest(slot_dir.to_path_buf()))?;
+    let meta = Meta::parse(&meta_src);
+    if !meta.compatible_with(device_schema) {
+        return Err(UpdateError::Schema {
+            needs: meta.requires_config_schema,
+            has: device_schema,
+        });
+    }
+    if !slot_dir.join("manifest.sha256").is_file() {
+        return Err(UpdateError::NoManifest(slot_dir.to_path_buf()));
+    }
+    // busybox resolves the manifest's relative paths against CWD, so run it
+    // from the slot root. This also catches the exFAT NUL-byte write artifact,
+    // which is a write failure and therefore invisible to any transfer check.
+    let args = [
+        "sh".to_string(),
+        "-c".to_string(),
+        format!(
+            "cd {} && busybox sha256sum -c manifest.sha256",
+            shell_quote(slot_dir)
+        ),
+    ];
+    match sys.run_to_completion("busybox", &args) {
+        Ok(st) if st.success() => Ok(meta),
+        _ => Err(UpdateError::Checksum),
+    }
+}
+
+/// Single-quote a path for `sh -c`. Slot paths are ours, not user input, but
+/// quoting costs one line and removes the question.
+fn shell_quote(p: &Path) -> String {
+    format!("'{}'", p.to_string_lossy().replace('\'', r"'\''"))
 }
 
 #[cfg(test)]
@@ -198,5 +280,109 @@ mod tests {
     fn clearing_an_absent_marker_is_not_an_error() {
         let d = tempfile::tempdir().unwrap();
         Trial::clear(d.path()).unwrap();
+    }
+
+    #[test]
+    fn meta_parses_the_schema_requirement() {
+        let m = Meta::parse("version=v1.2.3\nrequires_config_schema=2\n");
+        assert_eq!(m.version.as_deref(), Some("v1.2.3"));
+        assert_eq!(m.requires_config_schema, 2);
+    }
+
+    #[test]
+    fn missing_schema_requirement_reads_as_zero() {
+        assert_eq!(Meta::parse("version=v1\n").requires_config_schema, 0);
+    }
+
+    #[test]
+    fn torn_meta_reads_as_zero() {
+        let m = Meta::parse("\0\0\0garbage");
+        assert_eq!(m.requires_config_schema, 0);
+        assert_eq!(m.version, None);
+    }
+
+    #[test]
+    fn schema_newer_than_the_device_is_rejected() {
+        assert!(
+            !Meta {
+                version: None,
+                requires_config_schema: 3
+            }
+            .compatible_with(2)
+        );
+    }
+
+    #[test]
+    fn schema_at_or_below_the_device_is_accepted() {
+        assert!(
+            Meta {
+                version: None,
+                requires_config_schema: 2
+            }
+            .compatible_with(2)
+        );
+        assert!(
+            Meta {
+                version: None,
+                requires_config_schema: 1
+            }
+            .compatible_with(2)
+        );
+    }
+
+    fn exit_ok() -> crate::sys::ExitStatus {
+        crate::sys::ExitStatus::Code(0)
+    }
+
+    fn exit_fail() -> crate::sys::ExitStatus {
+        crate::sys::ExitStatus::Code(1)
+    }
+
+    #[test]
+    fn verify_runs_sha256sum_in_the_slot_directory() {
+        use crate::sys::MockSys;
+        let d = tempfile::tempdir().unwrap();
+        let slot = d.path().join("slots/b");
+        std::fs::create_dir_all(&slot).unwrap();
+        std::fs::write(slot.join("manifest.sha256"), "abc  anyka-init.bin\n").unwrap();
+        std::fs::write(slot.join("manifest.meta"), "requires_config_schema=1\n").unwrap();
+
+        let mut sys = MockSys::new();
+        sys.expect_run_to_completion()
+            .withf(|prog, args| prog == "busybox" && args[0] == "sh" && args[1] == "-c")
+            .returning(|_, _| Ok(exit_ok()));
+
+        assert!(verify_slot(&sys, &slot, 1).is_ok());
+    }
+
+    #[test]
+    fn verify_fails_when_a_checksum_does_not_match() {
+        use crate::sys::MockSys;
+        let d = tempfile::tempdir().unwrap();
+        let slot = d.path().join("slots/b");
+        std::fs::create_dir_all(&slot).unwrap();
+        std::fs::write(slot.join("manifest.sha256"), "abc  anyka-init.bin\n").unwrap();
+        std::fs::write(slot.join("manifest.meta"), "requires_config_schema=1\n").unwrap();
+
+        let mut sys = MockSys::new();
+        sys.expect_run_to_completion()
+            .returning(|_, _| Ok(exit_fail()));
+
+        assert!(verify_slot(&sys, &slot, 1).is_err());
+    }
+
+    #[test]
+    fn verify_fails_on_an_incompatible_schema_without_hashing() {
+        use crate::sys::MockSys;
+        let d = tempfile::tempdir().unwrap();
+        let slot = d.path().join("slots/b");
+        std::fs::create_dir_all(&slot).unwrap();
+        std::fs::write(slot.join("manifest.sha256"), "abc  anyka-init.bin\n").unwrap();
+        std::fs::write(slot.join("manifest.meta"), "requires_config_schema=9\n").unwrap();
+
+        let mut sys = MockSys::new();
+        sys.expect_run_to_completion().never();
+
+        assert!(verify_slot(&sys, &slot, 1).is_err());
     }
 }

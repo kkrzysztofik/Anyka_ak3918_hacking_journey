@@ -29,6 +29,14 @@ pub enum ExitStatus {
     Signal(i32),
 }
 
+impl ExitStatus {
+    /// Zero exit code and no signal. The `sha256sum -c` contract: `success()`
+    /// means every file in the manifest matched.
+    pub fn success(&self) -> bool {
+        matches!(self, ExitStatus::Code(0))
+    }
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum SysError {
     #[error("start {exec} failed: {source}")]
