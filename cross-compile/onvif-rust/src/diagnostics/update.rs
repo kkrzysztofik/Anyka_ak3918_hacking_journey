@@ -217,6 +217,11 @@ mod tests {
     }
 
     /// A body that yields one chunk and then fails mid-stream.
+    ///
+    /// Deliberately a hand-written double, not mockall: `http_body::Body` is a
+    /// foreign trait whose `poll_frame` takes an elided-HRTB `Context<'_>`,
+    /// which mockall's `mock!` cannot express (and `#[automock]` only applies
+    /// to local traits). This is the same pattern as `SlowBody`/`RepeatBody`.
     struct ErrorAfterData {
         sent: bool,
     }
