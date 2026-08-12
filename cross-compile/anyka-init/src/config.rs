@@ -536,6 +536,13 @@ impl Config {
                     .into(),
             ));
         }
+        if self.update.trial_ports.is_empty() {
+            // An empty list would make evaluate_trial treat every port as bound
+            // and confirm an update without ever checking a listener.
+            return Err(ConfigError::Invalid(
+                "update.trial_ports must contain at least one port".into(),
+            ));
+        }
         if self.wifi.chip != "auto" && crate::wifi::Chip::from_name(&self.wifi.chip).is_none() {
             return Err(ConfigError::Invalid(format!(
                 "[wifi] chip = {:?} is not \"auto\" or a known chip name",
@@ -905,6 +912,13 @@ log = "/tmp/udhcpc.log"
         let src = format!("{MINIMAL}\n[update]\ntrial_ports = [80, 8554]\n");
         let c: Config = toml::from_str(&src).unwrap();
         assert_eq!(c.update.trial_ports, vec![80, 8554]);
+    }
+
+    #[test]
+    fn test_config_validate_rejects_empty_trial_ports() {
+        let src = format!("{MINIMAL}\n[update]\ntrial_ports = []\n");
+        let c: Config = toml::from_str(&src).unwrap();
+        assert!(c.validate().is_err());
     }
 
     #[test]

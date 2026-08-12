@@ -25,12 +25,14 @@ Do **not** use legacy `scripts/deploy_onvif.sh` (per-binary FTP) for this path.
 ./scripts/build_upgrade_bundle.sh
 # optional: --skip-www | --skip-vendor | --debug | OUT path
 
-# 2) Upload (Administrator Basic auth) — expect HTTP 202
-./scripts/upload_upgrade_bundle.sh --host 192.168.2.198 --user admin --pass SECRET bundle.tar
+# 2) Upload (Administrator Basic auth) — expect HTTP 202.
+# Password from env or --pass-file, never argv (keeps it out of history/`ps`).
+CAMERA_PASS="$CAMERA_PASS" ./scripts/upload_upgrade_bundle.sh --host 192.168.2.198 \
+  --user admin bundle.tar
 
 # Behind jumphost
-./scripts/upload_upgrade_bundle.sh --host 192.168.30.10 --jumphost root@192.168.3.137 \
-  --user admin --pass SECRET bundle.tar
+CAMERA_PASS="$CAMERA_PASS" ./scripts/upload_upgrade_bundle.sh --host 192.168.30.10 \
+  --jumphost root@192.168.3.137 --user admin bundle.tar
 ```
 
 Env fallbacks: `CAMERA_HOST`, `CAMERA_USER`, `CAMERA_PASS`, `CAMERA_JUMPHOST`.
@@ -69,12 +71,14 @@ Need Admin credentials for `PUT /api/update`.
 ./scripts/build_upgrade_bundle.sh
 ```
 
-Note the printed `git describe` version. Bundle excludes `lib/` and device-local config (`anyka.toml`, `onvif/config.toml`).
+Note the printed bundle version (from `onvif/.build-version`, matching the
+binary's `FirmwareVersion`). Bundle excludes `lib/` and device-local config
+(`anyka.toml`, `onvif/config.toml`).
 
 ### 3. Upload
 
 ```bash
-./scripts/upload_upgrade_bundle.sh --host <ip> --user admin --pass "$CAMERA_PASS" bundle.tar
+CAMERA_PASS="$CAMERA_PASS" ./scripts/upload_upgrade_bundle.sh --host <ip> --user admin bundle.tar
 ```
 
 Require **HTTP 202**. Common failures: 401 (auth), 409 (upload/spool busy), 413 (too large).

@@ -106,9 +106,15 @@ export async function authorizedFetch(
 
 export type UploadProgress = { loaded: number; total: number };
 
+/// A stalled upload must not leave the promise pending forever (the upgrade
+/// dialog locks dismissal while uploading). 10 minutes is far past a real
+/// 19 MB bundle over camera wifi but still bounds a dead connection.
+const UPLOAD_TIMEOUT_MS = 10 * 60 * 1000;
+
 /**
  * PUT via XHR for upload progress. Same auth injection and 401 session-expiry
- * path as {@link authorizedFetch}; no default timeout (firmware bundles are large).
+ * path as {@link authorizedFetch}; the timeout is large to keep bundles working
+ * while still bounding a stalled connection.
  *
  * Always resolves with status + body — callers (e.g. uploadFirmware) decide
  * which statuses are success vs ApiError.
@@ -160,6 +166,14 @@ export function authorizedXhrPut(
           onProgress({ loaded: ev.loaded, total: ev.total });
         }
       });
+
+      xhr.addEventListener('timeout', () => {
+        signal?.removeEventListener('abort', onAbort);
+        reject(new TypeError('Upload timed out'));
+      });
+      // xhr.timeout bounds a stalled connection; without it no load/error/abort
+      // event would ever fire and the promise would stay pending forever.
+      xhr.timeout = UPLOAD_TIMEOUT_MS;
 
       xhr.addEventListener('load', () => {
         signal?.removeEventListener('abort', onAbort);

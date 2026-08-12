@@ -369,7 +369,7 @@ describe('api', () => {
       vi.stubGlobal('XMLHttpRequest', MockXHR);
     });
 
-    it('should resolve status and bodyText on 202', async () => {
+    it('test_authorizedXhrPut_202_resolves_status_and_body', async () => {
       const pending = authorizedXhrPut('/api/update', new Blob(['fw']));
       const xhr = MockXHR.instances[0];
       expect(xhr.method).toBe('PUT');
@@ -380,14 +380,14 @@ describe('api', () => {
       await expect(pending).resolves.toEqual({ status: 202, bodyText: 'accepted' });
     });
 
-    it('should resolve non-202 status without throwing (caller decides)', async () => {
+    it('test_authorizedXhrPut_non_202_resolves_without_throwing', async () => {
       const pending = authorizedXhrPut('/api/update', new Blob(['fw']));
       MockXHR.instances[0].complete(500, 'boom');
 
       await expect(pending).resolves.toEqual({ status: 500, bodyText: 'boom' });
     });
 
-    it('should fire onProgress from upload progress events', async () => {
+    it('test_authorizedXhrPut_progress_fires_onProgress', async () => {
       const onProgress = vi.fn();
       const pending = authorizedXhrPut('/api/update', new Blob(['fw']), { onProgress });
       const xhr = MockXHR.instances[0];
@@ -403,7 +403,7 @@ describe('api', () => {
       expect(onProgress).toHaveBeenCalledWith({ loaded: 50, total: 100 });
     });
 
-    it('should reject when the abort signal fires', async () => {
+    it('test_authorizedXhrPut_abort_signal_rejects', async () => {
       const controller = new AbortController();
       const pending = authorizedXhrPut('/api/update', new Blob(['fw']), {
         signal: controller.signal,
@@ -415,7 +415,7 @@ describe('api', () => {
       expect(MockXHR.instances[0].aborted).toBe(true);
     });
 
-    it('should reject immediately when the signal is already aborted', async () => {
+    it('test_authorizedXhrPut_pre_aborted_signal_rejects_immediately', async () => {
       const controller = new AbortController();
       controller.abort();
 
@@ -424,7 +424,7 @@ describe('api', () => {
       ).rejects.toThrow(/abort/i);
     });
 
-    it('should inject Authorization from the auth getter', async () => {
+    it('test_authorizedXhrPut_auth_getter_injects_authorization', async () => {
       const mockGetter = vi.fn().mockResolvedValue('Basic dGVzdDp0ZXN0');
       setAuthHeaderGetter(mockGetter);
 

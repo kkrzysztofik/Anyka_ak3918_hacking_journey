@@ -4,10 +4,14 @@
 # Expects HTTP 202 (queued). The applier stages the inactive slot, flips
 # `active`, and reboots on its next poll — this script does not wait.
 #
-# Usage:
-#   ./scripts/upload_upgrade_bundle.sh --host 192.168.2.198 --user admin --pass SECRET bundle.tar
+# The password is NEVER a command-line argument (it would land in shell
+# history and `ps`). Pass it via CAMERA_PASS env or --pass-file FILE:
+#   ./scripts/upload_upgrade_bundle.sh --host 192.168.2.198 --user admin \
+#       --pass-file <(echo "$CAMERA_PASS") bundle.tar
+#   CAMERA_PASS=SECRET ./scripts/upload_upgrade_bundle.sh --host 192.168.2.198 \
+#       --user admin bundle.tar
 #   ./scripts/upload_upgrade_bundle.sh --host 192.168.30.10 --jumphost root@192.168.3.137 \
-#       --user admin --pass SECRET bundle.tar
+#       --user admin --pass-file /path/to/netrc-credential bundle.tar
 #
 # Env fallbacks: CAMERA_HOST, CAMERA_USER, CAMERA_PASS, CAMERA_JUMPHOST
 
@@ -24,6 +28,7 @@ JUMPHOST="${CAMERA_JUMPHOST:-}"
 BUNDLE=""
 # Bundles are ~19 MB; device ceiling is 64 MB. Allow slow links / jumphost hops.
 TIMEOUT_SEC="${CAMERA_UPLOAD_TIMEOUT:-600}"
+PASS_FILE=""
 
 usage() {
   cat <<'EOF'
@@ -35,16 +40,22 @@ Success is HTTP 202 only — the camera queues the apply and will reboot later.
 Options:
   --host HOST         Camera IP/hostname (or CAMERA_HOST)
   --user USER         ONVIF/WebUI admin user (or CAMERA_USER)
-  --pass PASS         Password (or CAMERA_PASS)
+  --pass-file FILE    File containing the password (no leading/trailing spaces
+                      trimmed). Use process substitution to avoid a temp file.
   --jumphost SPEC     ssh target, e.g. root@192.168.3.137 (or CAMERA_JUMPHOST)
   --timeout SEC       curl max-time seconds (default 600, or CAMERA_UPLOAD_TIMEOUT)
   -h, --help          Show this help
 
+Password is taken from CAMERA_PASS or --pass-file only — never from argv, so
+it stays out of shell history and `ps`.
+
 Examples:
-  ./scripts/upload_upgrade_bundle.sh --host 192.168.2.198 --user admin --pass SECRET bundle.tar
-  CAMERA_PASS=SECRET ./scripts/upload_upgrade_bundle.sh --host 192.168.2.198 --user admin bundle.tar
+  CAMERA_PASS=SECRET ./scripts/upload_upgrade_bundle.sh --host 192.168.2.198 \
+      --user admin bundle.tar
+  ./scripts/upload_upgrade_bundle.sh --host 192.168.2.198 --user admin \
+      --pass-file <(echo -n "$CAMERA_PASS") bundle.tar
   ./scripts/upload_upgrade_bundle.sh --host 192.168.30.10 --jumphost root@192.168.3.137 \
-      --user admin --pass SECRET bundle.tar
+      --user admin --pass-file <(echo -n "$CAMERA_PASS") bundle.tar
 
 After 202: wait for reboot (~90s), then verify ports 80/554/8080 and
 GET /api/diagnostics firmware_version. See skill anyka-firmware-upgrade.
@@ -61,8 +72,8 @@ while [[ $# -gt 0 ]]; do
       USER_NAME="${2:-}"
       shift 2
       ;;
-    --pass)
-      PASS="${2:-}"
+    --pass-file)
+      PASS_FILE="${2:-}"
       shift 2
       ;;
     --jumphost)
@@ -94,8 +105,26 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if [[ -z "${HOST}" || -z "${USER_NAME}" || -z "${PASS}" || -z "${BUNDLE}" ]]; then
-  log_error "--host, --user, --pass, and BUNDLE are required (or CAMERA_* env + BUNDLE)"
+if [[ -z "${HOST}" || -z "${USER_NAME}" || -z "${BUNDLE}" ]]; then
+  log_error "--host, --user, and BUNDLE are required (or CAMERA_* env + BUNDLE)"
+  usage >&2
+  exit 1
+fi
+
+# Password from argv is forbidden; require CAMERA_PASS or --pass-file.
+if [[ -n "${PASS_FILE}" ]]; then
+  PASS="$(cat "${PASS_FILE}")"
+fi
+if [[ -z "${PASS}" ]]; then
+  log_error "Password required: set CAMERA_PASS or pass --pass-file FILE"
+  usage >&2
+  exit 1
+fi
+
+# TIMEOUT_SEC is interpolated into a remote shell command below; validate it as
+# a positive integer so a hostile value cannot inject extra commands.
+if ! [[ "${TIMEOUT_SEC}" =~ ^[0-9]+$ ]] || (( TIMEOUT_SEC < 1 )); then
+  log_error "--timeout must be a positive integer (got '${TIMEOUT_SEC}')"
   usage >&2
   exit 1
 fi
@@ -112,7 +141,12 @@ fi
 
 URL="http://${HOST}/api/update"
 RESP_BODY="$(mktemp)"
-trap 'rm -f "${RESP_BODY}"' EXIT
+NETRC="$(mktemp)"
+chmod 600 "${NETRC}"
+# netrc: curl reads credentials from here, so the password never appears in
+# argv (local or, after scp, on the jumphost).
+printf 'machine %s login %s password %s\n' "${HOST}" "${USER_NAME}" "${PASS}" > "${NETRC}"
+trap 'rm -f "${RESP_BODY}" "${NETRC}"' EXIT
 
 log_info "Uploading $(du -h "${BUNDLE}" | cut -f1) → ${URL}"
 if [[ -n "${JUMPHOST}" ]]; then
@@ -122,21 +156,23 @@ fi
 upload_lan() {
   curl -sS -o "${RESP_BODY}" -w '%{http_code}' \
     --max-time "${TIMEOUT_SEC}" \
-    -u "${USER_NAME}:${PASS}" \
+    --netrc-file "${NETRC}" \
     -T "${BUNDLE}" \
     "${URL}"
 }
 
 upload_jumphost() {
-  # printf %q for remote shell; curl -u still visible in jumphost `ps` during transfer.
-  local remote_user remote_pass remote_url
-  remote_user="$(printf '%q' "${USER_NAME}")"
-  remote_pass="$(printf '%q' "${PASS}")"
+  # Copy the credential file to the remote so curl -u never appears in the
+  # jumphost's `ps`, then clean it up. The bundle body goes over stdin.
+  local remote_netrc="/tmp/upgrade_netrc.$$"
+  scp -o BatchMode=yes -q "${NETRC}" "${JUMPHOST}:${remote_netrc}"
+  local remote_url
   remote_url="$(printf '%q' "${URL}")"
   # HTTP body → local RESP_BODY (remote stderr); status code alone on stdout.
   ssh -o BatchMode=yes "${JUMPHOST}" \
-    "curl -sS -o /dev/stderr -w '%{http_code}' --max-time ${TIMEOUT_SEC} \
-      -u ${remote_user}:${remote_pass} -T - ${remote_url}" \
+    "trap 'rm -f ${remote_netrc}' EXIT; chmod 600 ${remote_netrc}; \
+     curl -sS -o /dev/stderr -w '%{http_code}' --max-time ${TIMEOUT_SEC} \
+       --netrc-file ${remote_netrc} -T - ${remote_url}" \
     <"${BUNDLE}" 2>"${RESP_BODY}"
 }
 

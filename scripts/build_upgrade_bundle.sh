@@ -40,7 +40,7 @@ Examples:
   ./scripts/build_upgrade_bundle.sh --debug
 
 Next step:
-  ./scripts/upload_upgrade_bundle.sh --host <camera> --user admin --pass SECRET bundle.tar
+  CAMERA_PASS=\$CAMERA_PASS ./scripts/upload_upgrade_bundle.sh --host <camera> --user admin bundle.tar
 EOF
 }
 
@@ -87,4 +87,4 @@ log_step "2/2 package bundle.tar"
 
 echo ""
 log_success "Upgrade bundle ready: ${OUT}"
-log_info "Upload: ./scripts/upload_upgrade_bundle.sh --host <camera> --user admin --pass SECRET ${OUT}"
+log_info "Upload: CAMERA_PASS=\$CAMERA_PASS ./scripts/upload_upgrade_bundle.sh --host <camera> --user admin ${OUT}"

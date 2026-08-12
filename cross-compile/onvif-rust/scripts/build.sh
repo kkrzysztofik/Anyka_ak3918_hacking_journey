@@ -121,6 +121,14 @@ fi
 
 [[ -n "${ALL_FEATURES}" ]] && log_info "Features: ${ALL_FEATURES}"
 
+# Capture the version once, before Cargo runs, and export it so build.rs embeds
+# the same value this script writes to `.build-version` afterwards. Without the
+# export, build.rs would run its own git describe and the two could diverge if
+# the working tree moved between builds.
+ANYKA_BUILD_VERSION="${ANYKA_BUILD_VERSION:-$(git -C "${ANYKA_REPO_ROOT}" describe --tags --always --dirty)}"
+export ANYKA_BUILD_VERSION
+log_info "build version: ${ANYKA_BUILD_VERSION}"
+
 if [[ "${BUILD_MODE}" = "release" ]]; then
   "${CARGO}" build --release --target "${TARGET}" "${FEATURES_ARGS[@]}"
   WORKSPACE_BINARY_PATH="${WORKSPACE_DIR}/target/${TARGET}/release/onvif-rust"
@@ -183,9 +191,10 @@ cp "${BINARY_PATH}" "${DEPLOY_DIR}/onvif-rust.bin"
 chmod 755 "${DEPLOY_DIR}/onvif-rust.bin"
 
 # Record the version this binary reports as FirmwareVersion so the bundle
-# script can reuse it for manifest.meta. build.rs honors ANYKA_BUILD_VERSION
-# (falling back to git describe); capture whichever value landed.
-VERSION="${ANYKA_BUILD_VERSION:-$(git -C "${ANYKA_REPO_ROOT}" describe --tags --always --dirty)}"
+# script can reuse it for manifest.meta. Uses the same ANYKA_BUILD_VERSION
+# captured before the build, so the sidecar always matches what build.rs
+# embedded.
+VERSION="${ANYKA_BUILD_VERSION}"
 printf '%s\n' "${VERSION}" > "${DEPLOY_DIR}/.build-version"
 log_info "build version: ${VERSION}"
 

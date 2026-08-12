@@ -26,6 +26,7 @@ task-by-task implementation plan. Some entries have only one of the two.
 |---|---|---|---|
 | 2026-08-13 | Camera firmware upgrade skill | ✅ | ✅ |
 | 2026-08-12 | Firmware upgrade path (A/B) | ✅ | ✅ |
+| 2026-08-12 | Firmware upload dialog | ✅ | ✅ |
 | 2026-08-01 | Docs consolidation | ✅ | ✅ |
 | 2026-07-31 | Restart-resilience hardware fixes | ✅ | ✅ |
 | 2026-07-31 | PR51 Copilot fixes | ✅ | ✅ |

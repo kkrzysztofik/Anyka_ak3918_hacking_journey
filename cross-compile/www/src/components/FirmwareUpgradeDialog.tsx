@@ -105,6 +105,15 @@ export function FirmwareUpgradeDialog({
   const assignFile = useCallback((next: File | null) => {
     setFile(next);
     setError(null);
+    if (next) {
+      if (!next.name.toLowerCase().endsWith('.tar')) {
+        setError('Bundle must be a .tar file.');
+      } else if (next.size === 0) {
+        setError('Bundle is empty.');
+      } else if (next.size > MAX_BYTES) {
+        setError(`Bundle is too large (max 64 MB).`);
+      }
+    }
   }, []);
 
   const handleBrowse = useCallback(() => {
@@ -280,12 +289,16 @@ export function FirmwareUpgradeDialog({
 
           {step === 'uploading' && progress && (
             <div className="space-y-3 py-4">
-              <p className="text-muted-foreground text-sm">
+              <p
+                className="text-muted-foreground text-sm"
+                id="firmware-upgrade-progress-label"
+              >
                 {error ? 'Upload failed' : 'Uploading…'}
               </p>
               <progress
                 className="h-2 w-full"
                 data-testid="firmware-upgrade-progress"
+                aria-labelledby="firmware-upgrade-progress-label"
                 value={progress.loaded}
                 max={progress.total || 1}
               />

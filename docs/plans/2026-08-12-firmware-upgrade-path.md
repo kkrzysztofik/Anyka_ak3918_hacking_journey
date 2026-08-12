@@ -1659,7 +1659,7 @@ EOF
 tar -cf "${OUT}" -C "${STAGE}" .
 
 log_success "bundle ${VERSION} -> ${OUT} ($(du -h "${OUT}" | cut -f1))"
-log_info "deploy: curl -u admin:PASSWORD -T ${OUT} http://<camera>/api/update"
+log_info "deploy: CAMERA_PASS=\$CAMERA_PASS ./scripts/upload_upgrade_bundle.sh --host <camera> --user admin ${OUT}"
 log_info "or drop it in /mnt/anyka_hack/spool/ over FTP, then touch bundle.trigger"
 ```
 

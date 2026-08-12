@@ -73,7 +73,7 @@ describe('FirmwareUpgradeDialog', () => {
     vi.useRealTimers();
   });
 
-  it('should disable continue without a valid .tar file', async () => {
+  it('test_FirmwareUpgradeDialog_invalid_file_disables_continue', async () => {
     const user = userEvent.setup();
     renderDialog();
 
@@ -95,7 +95,7 @@ describe('FirmwareUpgradeDialog', () => {
     expect(continueButton).toBeEnabled();
   });
 
-  it('should show AlertDialog confirm before calling uploadFirmware', async () => {
+  it('test_FirmwareUpgradeDialog_confirm_dialog_precedes_upload', async () => {
     const user = userEvent.setup();
     const upload = createControllablePromise<void>();
     vi.mocked(uploadFirmware).mockReturnValue(upload.promise);
@@ -113,7 +113,7 @@ describe('FirmwareUpgradeDialog', () => {
     });
   });
 
-  it('should update progress UI from onProgress callback', async () => {
+  it('test_FirmwareUpgradeDialog_onProgress_updates_progress_ui', async () => {
     const user = userEvent.setup();
     const upload = createControllablePromise<void>();
     vi.mocked(uploadFirmware).mockImplementation(async (_file, options) => {
@@ -130,7 +130,7 @@ describe('FirmwareUpgradeDialog', () => {
     expect(progress).toHaveAttribute('max', '10');
   });
 
-  it('should enter waiting after a 202 upload', async () => {
+  it('test_FirmwareUpgradeDialog_upload_202_enters_waiting', async () => {
     const user = userEvent.setup();
     vi.mocked(uploadFirmware).mockResolvedValue(undefined);
 
@@ -144,7 +144,7 @@ describe('FirmwareUpgradeDialog', () => {
     });
   });
 
-  it('should ignore pre-reboot diagnostics until a down→up reconnect', async () => {
+  it('test_FirmwareUpgradeDialog_pre_reboot_diagnostics_ignored_until_reconnect', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
 
@@ -180,7 +180,7 @@ describe('FirmwareUpgradeDialog', () => {
     );
   });
 
-  it('should show committed copy when firmware_version changes', async () => {
+  it('test_FirmwareUpgradeDialog_version_changed_shows_committed', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
 
@@ -203,7 +203,7 @@ describe('FirmwareUpgradeDialog', () => {
     );
   });
 
-  it('should show reverted copy when firmware_version is unchanged', async () => {
+  it('test_FirmwareUpgradeDialog_version_unchanged_shows_reverted', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
 
@@ -226,7 +226,7 @@ describe('FirmwareUpgradeDialog', () => {
     );
   });
 
-  it('should show upload error on uploading step and allow retry', async () => {
+  it('test_FirmwareUpgradeDialog_upload_error_shows_retry', async () => {
     const user = userEvent.setup();
     vi.mocked(uploadFirmware).mockRejectedValueOnce(
       new ApiError('Firmware upload failed with status 500', 500, ''),
@@ -252,7 +252,7 @@ describe('FirmwareUpgradeDialog', () => {
     });
   });
 
-  it('should surface the backend rejection detail instead of the generic message', async () => {
+  it('test_FirmwareUpgradeDialog_backend_rejection_shows_detail', async () => {
     const user = userEvent.setup();
     vi.mocked(uploadFirmware).mockRejectedValueOnce(
       new ApiError('bundle too large', 413, 'bundle exceeds 67108864 bytes'),
@@ -266,7 +266,7 @@ describe('FirmwareUpgradeDialog', () => {
     expect(error.textContent).toContain('bundle exceeds 67108864 bytes');
   });
 
-  it('should show stayed-reachable copy when poll times out without a down', async () => {
+  it('test_FirmwareUpgradeDialog_no_down_timeout_shows_stayed_reachable', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
 
@@ -291,7 +291,7 @@ describe('FirmwareUpgradeDialog', () => {
     );
   });
 
-  it('should keep unreachable copy when poll times out after a down', async () => {
+  it('test_FirmwareUpgradeDialog_down_timeout_shows_unreachable', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
 
@@ -313,7 +313,7 @@ describe('FirmwareUpgradeDialog', () => {
     });
   });
 
-  it('should ignore dismiss while waiting after upload', async () => {
+  it('test_FirmwareUpgradeDialog_waiting_ignores_dismiss', async () => {
     const user = userEvent.setup();
     const upload = createControllablePromise<void>();
     vi.mocked(uploadFirmware).mockReturnValue(upload.promise);
@@ -332,7 +332,7 @@ describe('FirmwareUpgradeDialog', () => {
     expect(screen.getByTestId('firmware-upgrade-dialog')).toBeInTheDocument();
   });
 
-  it('should ignore dismiss while uploading without an error', async () => {
+  it('test_FirmwareUpgradeDialog_uploading_ignores_dismiss', async () => {
     const user = userEvent.setup();
     const upload = createControllablePromise<void>();
     vi.mocked(uploadFirmware).mockReturnValue(upload.promise);

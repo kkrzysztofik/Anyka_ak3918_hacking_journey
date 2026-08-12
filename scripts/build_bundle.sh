@@ -54,7 +54,8 @@ EOF
 tar -cf "${OUT}" -C "${STAGE}" .
 
 log_success "bundle ${VERSION} -> ${OUT} ($(du -h "${OUT}" | cut -f1))"
-# /api/update requires Administrator Basic Auth; the camera's admin credentials
-# are configured in onvif config.toml, so `-u admin:<password>` is the form.
-log_info "deploy: curl -u admin:PASSWORD -T ${OUT} http://<camera>/api/update"
+# /api/update requires Administrator Basic Auth. Use the upload wrapper (it
+# reads the password from CAMERA_PASS/--pass-file, never from argv) so the
+# credential stays out of shell history and `ps`.
+log_info "deploy: CAMERA_PASS=\$CAMERA_PASS ./scripts/upload_upgrade_bundle.sh --host <camera> --user admin ${OUT}"
 log_info "or drop it in /mnt/anyka_hack/spool/ over FTP, then touch bundle.trigger"

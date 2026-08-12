@@ -38,9 +38,10 @@ fn main() {
             .unwrap_or_else(|| "unknown".into()),
     };
     println!("cargo:rustc-env=ANYKA_BUILD_VERSION={v}");
-    if env::var_os("ANYKA_BUILD_VERSION").is_some() {
-        println!("cargo:rerun-if-env-changed=ANYKA_BUILD_VERSION");
-    }
+    // Emitted unconditionally: Cargo must also rerun when the variable goes
+    // from unset to set (the bundle pipeline exports it), not just when an
+    // already-set value changes.
+    println!("cargo:rerun-if-env-changed=ANYKA_BUILD_VERSION");
 
     // `.git/HEAD` alone is not enough to rerun on a commit advance: on a branch
     // it holds the constant line `ref: refs/heads/<branch>`, so its mtime only

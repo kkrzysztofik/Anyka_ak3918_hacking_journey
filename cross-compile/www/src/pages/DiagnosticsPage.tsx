@@ -703,6 +703,8 @@ function FirmwareUpdateCard({
 }: Readonly<{ previousVersion: string | null; onFinished: () => void }>) {
   const [open, setOpen] = useState(false);
 
+  const handleUpgrade = useCallback(() => setOpen(true), []);
+
   return (
     <>
       <Card className="border-border bg-card overflow-hidden">
@@ -730,7 +732,7 @@ function FirmwareUpdateCard({
             <Button
               size="sm"
               data-testid="diagnostics-firmware-upgrade-button"
-              onClick={() => setOpen(true)}
+              onClick={handleUpgrade}
             >
               Upgrade…
             </Button>
@@ -772,6 +774,10 @@ export default function DiagnosticsPage() {
     globalThis.setTimeout(() => URL.revokeObjectURL(url), 0);
   }, [logLines, logSource]);
 
+  const handleUpgradeFinished = useCallback(() => {
+    void refetch();
+  }, [refetch]);
+
   if (isLoading) {
     return (
       <div className="flex h-64 items-center justify-center" data-testid="diagnostics-loading">
@@ -803,9 +809,7 @@ export default function DiagnosticsPage() {
 
       <FirmwareUpdateCard
         previousVersion={data?.firmware_version ?? null}
-        onFinished={() => {
-          void refetch();
-        }}
+        onFinished={handleUpgradeFinished}
       />
 
       <SystemLogsCard

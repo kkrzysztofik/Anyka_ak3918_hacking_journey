@@ -202,11 +202,13 @@ The applier works with any transport that can drop a file into `spool/`.
 
 ```bash
 # increment 2, LAN. /api/update sits behind AuthLevel::Administrator, so the
-# admin credentials from onvif config.toml are required:
-curl -u admin:PASSWORD -T bundle.tar http://192.168.2.198/api/update
+# admin credentials from onvif config.toml are required. The password comes
+# from a netrc file / process substitution, never from argv:
+curl --netrc-file <(printf 'machine 192.168.2.198 login admin password %s\n' "$CAMERA_PASS") \
+  -T bundle.tar http://192.168.2.198/api/update
 
-# increment 2, behind the jumphost
-ssh root@192.168.3.137 'curl -u admin:PASSWORD -T - http://192.168.30.x/api/update' < bundle.tar
+# increment 2, behind the jumphost (password still not on any command line)
+ssh root@192.168.3.137 "curl --netrc-file <(printf 'machine 192.168.30.x login admin password %s\n' \"\$CAMERA_PASS\") -T - http://192.168.30.x/api/update" < bundle.tar
 ```
 
 `PUT /api/update` streams the body straight to `spool/bundle.tar` — a raw body,
@@ -217,7 +219,8 @@ existing `AuthLevel::Administrator` gate (`diagnostics/http.rs:89`).
 FTP and telnet remain the recovery path for a camera whose `onvif-rust` is dead.
 
 Bundle building belongs beside `scripts/build_sd_contents.sh`. There is no deploy
-wrapper script; the deploy command is `curl -u admin:PASSWORD -T`.
+wrapper script; the deploy command is `curl --netrc-file ... -T` (password from
+env, never argv).
 
 ## Increments
 
