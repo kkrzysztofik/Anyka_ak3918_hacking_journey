@@ -250,3 +250,104 @@ fn missing_binary_fails_loudly_but_still_arms_the_deadman() {
     assert!(o.boot_path_restored);
     assert!(o.rebooted);
 }
+
+/// Run config.sh against an A/B slot layout. Which slot runs is observed by
+/// which marker stub the selected `anyka-init.bin` touches.
+struct SlotOutcome {
+    slot_a_ran: bool,
+    slot_b_ran: bool,
+}
+
+/// `slot_b_present` controls whether `slots/b/anyka-init.bin` exists at all;
+/// `pointer` is the content of `active` (`None` = no pointer file).
+fn run_slot(slot_b_present: bool, pointer: Option<&str>) -> SlotOutcome {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let dir = tmp.path();
+
+    stub(dir, "sleep", "exit 0");
+    stub(dir, "telnetd", "exit 0");
+    stub(dir, "sync", "exit 0");
+    stub(dir, "ifconfig", "echo 'inet addr:192.168.30.121'");
+
+    let marker_a = dir.join("slot-a-ran");
+    let marker_b = dir.join("slot-b-ran");
+    fs::create_dir_all(dir.join("slots/a")).expect("slots/a");
+    let bin_a = stub(
+        &dir.join("slots/a"),
+        "anyka-init.bin",
+        &format!("touch '{}'", marker_a.display()),
+    );
+    if slot_b_present {
+        fs::create_dir_all(dir.join("slots/b")).expect("slots/b");
+        let _ = stub(
+            &dir.join("slots/b"),
+            "anyka-init.bin",
+            &format!("touch '{}'", marker_b.display()),
+        );
+    }
+    if let Some(p) = pointer {
+        fs::write(dir.join("active"), p).expect("write active pointer");
+    }
+
+    let mut cmd = Command::new("sh");
+    cmd.arg(script())
+        .env("PATH", format!("{}:/usr/bin:/bin", dir.display()))
+        // Deliberately unset ANYKA_INIT_BIN: the default resolves from the slot
+        // pointer, which is what these tests exercise.
+        .env_remove("ANYKA_INIT_BIN")
+        .env("ANYKA_SLOT_ROOT", dir)
+        .env("ANYKA_WIFI_MANAGE", dir.join("wifi_manage.sh"))
+        .env("ANYKA_CONFIG_SELF", dir.join("config.sh.live"))
+        .env("ANYKA_CONFIG_BAK", dir.join("config.sh.gerge.bak"))
+        .process_group(0);
+    let mut child = cmd.spawn().expect("run config.sh");
+    let child_pid = child.id() as i32;
+
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    let outcome = loop {
+        let o = SlotOutcome {
+            slot_a_ran: marker_a.exists(),
+            slot_b_ran: marker_b.exists(),
+        };
+        if o.slot_a_ran || o.slot_b_ran {
+            break o;
+        }
+        if std::time::Instant::now() >= deadline {
+            break SlotOutcome {
+                slot_a_ran: false,
+                slot_b_ran: false,
+            };
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    };
+
+    let _ = child.wait().expect("wait config.sh");
+    // SAFETY: child_pid is our own spawned sh; a negative pid targets its
+    // process group (the backgrounded respawn loop).
+    unsafe {
+        libc::kill(-child_pid, libc::SIGKILL);
+    }
+    outcome
+}
+
+#[test]
+fn boots_the_slot_named_by_the_pointer() {
+    let o = run_slot(true, Some("b\n"));
+    assert!(o.slot_b_ran, "active=b must run slots/b/anyka-init.bin");
+    assert!(!o.slot_a_ran);
+}
+
+#[test]
+fn falls_back_to_the_other_slot_when_the_named_one_is_missing() {
+    // active points at b, but only slots/a exists.
+    let o = run_slot(false, Some("b\n"));
+    assert!(o.slot_a_ran, "missing named slot must fall back to slots/a");
+    assert!(!o.slot_b_ran);
+}
+
+#[test]
+fn defaults_to_slot_a_when_the_pointer_is_absent() {
+    let o = run_slot(true, None);
+    assert!(o.slot_a_ran, "no active file must default to slots/a");
+    assert!(!o.slot_b_ran);
+}
