@@ -28,6 +28,15 @@ pub enum ConfigError {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
+    /// Config schema generation. A bundle declares the minimum it needs in
+    /// `manifest.meta`; the *running* supervisor compares that against this
+    /// number before flipping, so a build that needs keys this file lacks is
+    /// rejected with both slots intact instead of crashlooping into a revert.
+    ///
+    /// Zero means "predates the schema key", which accepts every bundle that
+    /// does not ask for one.
+    #[serde(default)]
+    pub schema: u32,
     #[serde(default)]
     pub log: LogCfg,
     #[serde(default)]
@@ -42,7 +51,23 @@ pub struct Config {
     #[serde(default)]
     pub reboot: RebootCfg,
     #[serde(default)]
+    pub update: Update,
+    #[serde(default)]
     pub services: BTreeMap<String, ServiceCfg>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Update {
+    /// Root holding `active`, `slots/`, `state/` and `spool/`.
+    #[serde(default = "default_update_root")]
+    pub root: String,
+    /// Consecutive seconds all trial ports must stay bound.
+    #[serde(default = "default_trial_hold")]
+    pub trial_hold_sec: u32,
+    /// Give up and revert after this long.
+    #[serde(default = "default_trial_deadline")]
+    pub trial_deadline_sec: u32,
 }
 
 #[derive(Debug, Deserialize)]
@@ -340,6 +365,25 @@ fn d_video_heartbeat() -> String {
 fn d_reboot_interval() -> u64 {
     720
 }
+fn default_update_root() -> String {
+    "/mnt/anyka_hack".to_string()
+}
+fn default_trial_hold() -> u32 {
+    30
+}
+fn default_trial_deadline() -> u32 {
+    120
+}
+
+impl Default for Update {
+    fn default() -> Self {
+        Self {
+            root: default_update_root(),
+            trial_hold_sec: default_trial_hold(),
+            trial_deadline_sec: default_trial_deadline(),
+        }
+    }
+}
 
 impl Default for LogCfg {
     fn default() -> Self {
@@ -472,6 +516,11 @@ impl Config {
         if self.supervisor.crashloop_count == 0 {
             return Err(ConfigError::Invalid(
                 "supervisor.crashloop_count must be non-zero".into(),
+            ));
+        }
+        if self.update.trial_hold_sec >= self.update.trial_deadline_sec {
+            return Err(ConfigError::Invalid(
+                "update.trial_hold_sec must be less than update.trial_deadline_sec".into(),
             ));
         }
         if self.wifi.chip != "auto" && crate::wifi::Chip::from_name(&self.wifi.chip).is_none() {
@@ -800,6 +849,34 @@ log = "/tmp/udhcpc.log"
             "/../../SD_card_contents/anyka_hack/anyka.toml"
         );
         Config::load(path).expect("shipped anyka.toml must parse and validate");
+    }
+
+    #[test]
+    fn schema_defaults_to_zero_for_configs_that_predate_it() {
+        let c: Config = toml::from_str(MINIMAL).unwrap();
+        assert_eq!(c.schema, 0);
+    }
+
+    #[test]
+    fn schema_is_read_from_the_top_level() {
+        let src = format!("schema = 2\n{MINIMAL}");
+        let c: Config = toml::from_str(&src).unwrap();
+        assert_eq!(c.schema, 2);
+    }
+
+    #[test]
+    fn update_section_has_working_defaults() {
+        let c: Config = toml::from_str(MINIMAL).unwrap();
+        assert_eq!(c.update.root, "/mnt/anyka_hack");
+        assert_eq!(c.update.trial_hold_sec, 30);
+        assert_eq!(c.update.trial_deadline_sec, 120);
+    }
+
+    #[test]
+    fn a_hold_longer_than_the_deadline_is_rejected() {
+        let src = format!("{MINIMAL}\n[update]\ntrial_hold_sec = 200\ntrial_deadline_sec = 120\n");
+        let c: Config = toml::from_str(&src).unwrap();
+        assert!(c.validate().is_err());
     }
 
     #[test]

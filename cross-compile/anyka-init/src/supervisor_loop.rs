@@ -459,6 +459,7 @@ mod run_tests {
 
     fn test_config(services: BTreeMap<String, ServiceCfg>) -> Config {
         Config {
+            schema: 0,
             log: LogCfg::default(),
             system: SystemCfg::default(),
             wifi: minimal_wifi_cfg(),
@@ -474,6 +475,7 @@ mod run_tests {
             },
             monitor: MonitorCfg::default(),
             reboot: RebootCfg::default(),
+            update: crate::config::Update::default(),
             services,
         }
     }
