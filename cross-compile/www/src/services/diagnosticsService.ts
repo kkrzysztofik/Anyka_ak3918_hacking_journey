@@ -58,23 +58,31 @@ function isVision(value: unknown): value is NonNullable<Diagnostics['vision']> {
   );
 }
 
+function isNullOrNumber(value: unknown): boolean {
+  return value === null || typeof value === 'number';
+}
+
+function isNullOrRecord(value: unknown): value is Record<string, unknown> | null {
+  return value === null || isRecord(value);
+}
+
+function isUptime(value: unknown): value is Diagnostics['uptime'] {
+  return (
+    isRecord(value) &&
+    typeof value.process_s === 'number' &&
+    typeof value.system_s === 'number'
+  );
+}
+
 function isDiagnostics(value: unknown): value is Diagnostics {
   if (!isRecord(value)) return false;
   if (typeof value.status !== 'string') return false;
-  if (
-    !isRecord(value.uptime) ||
-    typeof value.uptime.process_s !== 'number' ||
-    typeof value.uptime.system_s !== 'number'
-  ) {
-    return false;
-  }
-  if (value.cpu_percent !== null && typeof value.cpu_percent !== 'number') return false;
-  if (value.memory !== null && !isRecord(value.memory)) return false;
-  if (value.storage !== null && !isRecord(value.storage)) return false;
-  if (value.network !== null && !isRecord(value.network)) return false;
-  if (value.stream_frame_age_ms !== null && typeof value.stream_frame_age_ms !== 'number') {
-    return false;
-  }
+  if (!isUptime(value.uptime)) return false;
+  if (!isNullOrNumber(value.cpu_percent)) return false;
+  if (!isNullOrRecord(value.memory)) return false;
+  if (!isNullOrRecord(value.storage)) return false;
+  if (!isNullOrRecord(value.network)) return false;
+  if (!isNullOrNumber(value.stream_frame_age_ms)) return false;
   if (!Array.isArray(value.components) || !Array.isArray(value.degraded_services)) return false;
   if (value.vision !== null && !isVision(value.vision)) return false;
   return true;
