@@ -68,10 +68,22 @@ fn spec_of_slot(svc: &ServiceCfg, root: &Path, slots: &crate::update::Slots) -> 
         env: svc
             .env
             .iter()
-            .map(|(k, v)| (k.clone(), rewrite(v)))
+            .map(|(k, v)| (k.clone(), rewrite_env(k, v, &rewrite)))
             .collect(),
         log: svc.log.clone(),
         core_dump: svc.core_dump,
+    }
+}
+
+/// Rewrite one env value. `LD_LIBRARY_PATH` is a `:`-separated path list, so
+/// each entry must be rewritten individually — rewriting the whole string as a
+/// single path would leave the first entry pointing at the old slot's libs.
+fn rewrite_env(key: &str, value: &str, rewrite: &impl Fn(&str) -> String) -> String {
+    if key == "LD_LIBRARY_PATH" {
+        let entries: Vec<String> = value.split(':').map(rewrite).collect();
+        entries.join(":")
+    } else {
+        rewrite(value)
     }
 }
 
@@ -386,6 +398,81 @@ fn shutdown(sys: &dyn Sys, by_pid: &BTreeMap<Pid, usize>, rx: &Receiver<Msg>) {
 #[cfg(test)]
 mod reboot_delay_tests {
     use super::*;
+
+    #[test]
+    fn test_rewrite_env_rewrites_a_path_list_entry_by_entry() {
+        // Two entries on the update root: rewriting the whole value as one
+        // path would leave the second entry pointing at the old slot.
+        let d = tempfile::tempdir().unwrap();
+        let root = d.path();
+        let slots = crate::update::Slots::new(root);
+        // Force active=a so slot_path resolves into slots/a regardless of the
+        // host this test runs on.
+        std::fs::create_dir_all(root.join("slots")).unwrap();
+        std::fs::write(root.join("active"), "a").unwrap();
+        let rewrite = |p: &str| {
+            crate::update::slot_path(root, slots.active(), Path::new(p))
+                .to_string_lossy()
+                .into_owned()
+        };
+        let root_str = root.display().to_string();
+        assert_eq!(
+            rewrite_env(
+                "LD_LIBRARY_PATH",
+                &format!("{root_str}/vendor-daemon/lib:{root_str}/onvif/lib"),
+                &rewrite,
+            ),
+            format!("{root_str}/slots/a/vendor-daemon/lib:{root_str}/slots/a/onvif/lib")
+        );
+    }
+
+    #[test]
+    fn test_rewrite_env_leaves_unbundled_path_list_entries_alone() {
+        let d = tempfile::tempdir().unwrap();
+        let root = d.path();
+        let slots = crate::update::Slots::new(root);
+        std::fs::create_dir_all(root.join("slots")).unwrap();
+        std::fs::write(root.join("active"), "a").unwrap();
+        let rewrite = |p: &str| {
+            crate::update::slot_path(root, slots.active(), Path::new(p))
+                .to_string_lossy()
+                .into_owned()
+        };
+        let root_str = root.display().to_string();
+        // /lib is outside the slots and must pass through.
+        assert_eq!(
+            rewrite_env(
+                "LD_LIBRARY_PATH",
+                &format!("/lib:{root_str}/vendor-daemon/lib"),
+                &rewrite,
+            ),
+            format!("/lib:{root_str}/slots/a/vendor-daemon/lib")
+        );
+    }
+
+    #[test]
+    fn test_rewrite_env_rewrites_non_path_list_values_verbatim() {
+        let d = tempfile::tempdir().unwrap();
+        let root = d.path();
+        let slots = crate::update::Slots::new(root);
+        std::fs::create_dir_all(root.join("slots")).unwrap();
+        std::fs::write(root.join("active"), "a").unwrap();
+        let rewrite = |p: &str| {
+            crate::update::slot_path(root, slots.active(), Path::new(p))
+                .to_string_lossy()
+                .into_owned()
+        };
+        let root_str = root.display().to_string();
+        // A single bundled path is rewritten wholesale, not split on ':'.
+        assert_eq!(
+            rewrite_env(
+                "OTHER",
+                &format!("{root_str}/onvif/onvif-rust.bin"),
+                &rewrite
+            ),
+            format!("{root_str}/slots/a/onvif/onvif-rust.bin")
+        );
+    }
 
     #[test]
     fn test_periodic_reboot_delay_converts_minutes_to_seconds() {

@@ -201,11 +201,12 @@ same source. Surfaced in ONVIF `GetDeviceInformation`'s `FirmwareVersion` and in
 The applier works with any transport that can drop a file into `spool/`.
 
 ```bash
-# increment 2, LAN
-curl -T bundle.tar http://192.168.2.198/api/update
+# increment 2, LAN. /api/update sits behind AuthLevel::Administrator, so the
+# admin credentials from onvif config.toml are required:
+curl -u admin:PASSWORD -T bundle.tar http://192.168.2.198/api/update
 
 # increment 2, behind the jumphost
-ssh root@192.168.3.137 'curl -T - http://192.168.30.x/api/update' < bundle.tar
+ssh root@192.168.3.137 'curl -u admin:PASSWORD -T - http://192.168.30.x/api/update' < bundle.tar
 ```
 
 `PUT /api/update` streams the body straight to `spool/bundle.tar` — a raw body,
@@ -216,7 +217,7 @@ existing `AuthLevel::Administrator` gate (`diagnostics/http.rs:89`).
 FTP and telnet remain the recovery path for a camera whose `onvif-rust` is dead.
 
 Bundle building belongs beside `scripts/build_sd_contents.sh`. There is no deploy
-wrapper script; the deploy command is `curl -T`.
+wrapper script; the deploy command is `curl -u admin:PASSWORD -T`.
 
 ## Increments
 

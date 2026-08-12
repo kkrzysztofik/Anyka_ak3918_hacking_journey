@@ -13,7 +13,23 @@ source "${SCRIPT_DIR}/common.sh"
 SRC="${ANYKA_REPO_ROOT}/SD_card_contents/anyka_hack"
 OUT="${1:-${ANYKA_REPO_ROOT}/bundle.tar}"
 SCHEMA="${ANYKA_CONFIG_SCHEMA:-1}"
-VERSION="$(git -C "${ANYKA_REPO_ROOT}" describe --tags --always --dirty)"
+# The manifest's requires_config_schema must be a decimal u32: anyka-init
+# rejects a present-but-unparseable value, and silently writing garbage would
+# ship a bundle that can never apply.
+if ! [[ "${SCHEMA}" =~ ^[0-9]+$ ]] || (( SCHEMA > 4294967295 )); then
+  log_error "ANYKA_CONFIG_SCHEMA='${SCHEMA}' is not a decimal u32"
+  exit 1
+fi
+# One captured version for both manifest.meta and the binary's FirmwareVersion:
+# the onvif-rust build writes `.build-version` next to the deployed binary.
+# Falling back to a fresh `git describe` would risk a bundle that claims a
+# version the binary does not report.
+if [[ -f "${SRC}/onvif/.build-version" ]]; then
+  VERSION="$(cat "${SRC}/onvif/.build-version")"
+else
+  VERSION="$(git -C "${ANYKA_REPO_ROOT}" describe --tags --always --dirty)"
+  log_warn "no ${SRC}/onvif/.build-version (build onvif-rust first); falling back to git describe"
+fi
 
 STAGE="$(mktemp -d)"
 trap 'rm -rf "$STAGE"' EXIT
@@ -38,5 +54,7 @@ EOF
 tar -cf "${OUT}" -C "${STAGE}" .
 
 log_success "bundle ${VERSION} -> ${OUT} ($(du -h "${OUT}" | cut -f1))"
-log_info "deploy: curl -T ${OUT} http://<camera>/api/update   # increment 2"
+# /api/update requires Administrator Basic Auth; the camera's admin credentials
+# are configured in onvif config.toml, so `-u admin:<password>` is the form.
+log_info "deploy: curl -u admin:PASSWORD -T ${OUT} http://<camera>/api/update"
 log_info "or drop it in /mnt/anyka_hack/spool/ over FTP, then touch bundle.trigger"

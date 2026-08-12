@@ -94,6 +94,10 @@ pub fn listening(port: u16) -> bool {
 /// Columns are `sl local_address rem_address st ...`, first line a header.
 /// Destructuring all four up front is duller than chaining iterator adaptors
 /// and does not invite a fencepost error on the one field that matters.
+///
+/// The local address must be the wildcard bind `00000000`: a service that
+/// regressed to binding loopback is not reachable from the network, and a
+/// trial must not confirm an update that left the camera unreachable.
 fn parse_listening(src: &str, port: u16) -> bool {
     src.lines().skip(1).any(|line| {
         let mut f = line.split_whitespace();
@@ -102,12 +106,15 @@ fn parse_listening(src: &str, port: u16) -> bool {
         else {
             return false;
         };
-        state == TCP_LISTEN
-            && local
-                .rsplit(':')
-                .next()
-                .and_then(|hex| u16::from_str_radix(hex, 16).ok())
-                == Some(port)
+        if state != TCP_LISTEN {
+            return false;
+        }
+        let Some((addr, hex)) = local.split_once(':') else {
+            return false;
+        };
+        // A loopback-only bind is not reachable from the network and must not
+        // satisfy a trial port.
+        addr == "00000000" && u16::from_str_radix(hex, 16).ok() == Some(port)
     })
 }
 
@@ -309,6 +316,27 @@ mod tests {
     fn listening_rejects_an_established_socket() {
         // 0x1F91 == 8081, present but state 01 (ESTABLISHED), not 0A (LISTEN)
         assert!(!parse_listening(TCP_FIXTURE, 8081));
+    }
+
+    #[test]
+    fn listening_rejects_a_loopback_only_bind() {
+        // 0100007F:0050 is 127.0.0.1:80 in LISTEN state. A service that
+        // regressed to binding loopback is not reachable from the network and
+        // must not satisfy a trial port.
+        let loopback = "\
+  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode
+   0: 0100007F:0050 00000000:0000 0A 00000000:00000000 00:00000000 00000000     0        0 653 1 c2225680 100 0 0 10 -1
+";
+        assert!(!parse_listening(loopback, 80));
+    }
+
+    #[test]
+    fn listening_still_accepts_a_wildcard_bind() {
+        let wildcard = "\
+  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode
+   0: 00000000:0050 00000000:0000 0A 00000000:00000000 00:00000000 00000000     0        0 653 1 c2225680 100 0 0 10 -1
+";
+        assert!(parse_listening(wildcard, 80));
     }
 
     #[test]

@@ -62,8 +62,12 @@ pub async fn handle_update(Extension(state): Extension<Arc<UpdateState>>, body: 
     match receive_bundle(&state.spool_root, body).await {
         Ok(()) => (StatusCode::ACCEPTED, "update queued").into_response(),
         Err(UpdateError::InFlight) => {
-            tracing::warn!("bundle upload rejected: another upload is in progress");
-            (StatusCode::CONFLICT, "upload already in progress").into_response()
+            tracing::warn!("bundle upload rejected: another upload in progress or a bundle queued");
+            (
+                StatusCode::CONFLICT,
+                "upload in progress or bundle already queued",
+            )
+                .into_response()
         }
         Err(UpdateError::TooLarge) => {
             tracing::warn!(
@@ -89,8 +93,16 @@ pub async fn handle_update(Extension(state): Extension<Arc<UpdateState>>, body: 
 /// `AlreadyExists` instead of interleaving with the first. On any failure the
 /// partial file is removed, so nothing stale survives to confuse the next
 /// attempt.
+///
+/// A completed `bundle.tar`/`bundle.trigger` pair is also rejected: the
+/// applier has not claimed the previous upload yet, and overwriting it while
+/// the applier is mid-extract would corrupt the apply or lose the earlier
+/// bundle.
 async fn receive_bundle(spool_root: &Path, body: Body) -> Result<(), UpdateError> {
     tokio::fs::create_dir_all(spool_root).await?;
+    if spool_root.join("bundle.trigger").is_file() {
+        return Err(UpdateError::InFlight);
+    }
     let part = spool_root.join("bundle.tar.part");
     let mut file = match tokio::fs::File::create_new(&part).await {
         Ok(f) => f,
@@ -163,7 +175,7 @@ enum UpdateError {
     Io(#[from] std::io::Error),
     #[error("body stream: {0}")]
     Body(String),
-    #[error("another upload is already in progress")]
+    #[error("an upload is in progress or a bundle is already queued")]
     InFlight,
     #[error("bundle exceeds {MAX_BUNDLE_BYTES} bytes")]
     TooLarge,
@@ -181,7 +193,7 @@ mod tests {
     // ── receive_bundle ─────────────────────────────────────────────────────
 
     #[tokio::test]
-    async fn test_receive_writes_tar_then_trigger() {
+    async fn test_receive_bundle_valid_body_writes_tar_and_trigger() {
         let d = tempfile::tempdir().unwrap();
         let spool = d.path().join("spool");
         let body = Body::new(http_body_util::Full::new(Bytes::from_static(
@@ -286,7 +298,32 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_receive_rejects_a_second_concurrent_upload() {
+    async fn test_receive_bundle_rejects_when_a_bundle_is_already_queued() {
+        let d = tempfile::tempdir().unwrap();
+        let spool = d.path().join("spool");
+        std::fs::create_dir_all(&spool).unwrap();
+        // A completed upload the applier has not claimed yet: tar + trigger.
+        std::fs::write(spool.join("bundle.tar"), b"queued").unwrap();
+        std::fs::write(spool.join("bundle.trigger"), b"").unwrap();
+
+        let body = Body::new(http_body_util::Full::new(Bytes::from_static(
+            b"second upload",
+        )));
+        let err = receive_bundle(&spool, body).await.unwrap_err();
+
+        assert!(
+            matches!(err, UpdateError::InFlight),
+            "an already-queued bundle must be left alone, got {err:?}"
+        );
+        assert_eq!(
+            std::fs::read(spool.join("bundle.tar")).unwrap(),
+            b"queued",
+            "the queued bundle must not be overwritten"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_receive_bundle_rejects_a_second_concurrent_upload() {
         let d = tempfile::tempdir().unwrap();
         let spool = d.path().join("spool");
         std::fs::create_dir_all(&spool).unwrap();

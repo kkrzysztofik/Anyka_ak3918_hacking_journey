@@ -327,6 +327,18 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_snapshot_reports_firmware_version() {
+        let state = DiagnosticsState::new(Instant::now(), None, Vec::new());
+        let snap = state.snapshot().await;
+        assert_eq!(
+            snap.firmware_version,
+            crate::build_version(),
+            "the diagnostics snapshot must carry the same build identity as \
+             GetDeviceInformation's FirmwareVersion"
+        );
+    }
+
+    #[tokio::test]
     async fn test_snapshot_second_call_produces_rates() {
         if !std::path::Path::new("/proc/stat").exists() {
             return;

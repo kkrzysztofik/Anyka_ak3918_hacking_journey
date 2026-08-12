@@ -604,7 +604,15 @@ impl OnvifServer {
 
         // Mount /api routes when diagnostics state is available.
         if let Some(diagnostics) = &self.diagnostics {
-            let api = Router::new()
+            // PUT /api/update streams an untrusted bundle onto the card, so it
+            // must never be reachable without authentication. When
+            // `auth_enabled` is false the diagnostics middleware passes every
+            // request through — mount the route only when auth is actually on.
+            //
+            // The route must be registered before the middleware layer: axum
+            // layers apply only to routes added before them, and /update must
+            // sit behind diagnostics_auth_middleware like the GET routes.
+            let mut api = Router::new()
                 .route(
                     "/diagnostics",
                     get(crate::diagnostics::http::handle_diagnostics).layer(timeout()),
@@ -612,9 +620,12 @@ impl OnvifServer {
                 .route(
                     "/logs",
                     get(crate::diagnostics::http::handle_logs).layer(timeout()),
-                )
+                );
+            if state.auth_enabled {
                 // No timeout: see the comment on `timeout` above.
-                .route("/update", put(crate::diagnostics::update::handle_update))
+                api = api.route("/update", put(crate::diagnostics::update::handle_update));
+            }
+            let api = api
                 .fallback(|| async { StatusCode::NOT_FOUND })
                 .layer(middleware::from_fn_with_state(
                     state.clone(),
@@ -798,6 +809,7 @@ async fn handle_imaging_service(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::future::Future;
 
     #[test]
     fn test_server_config_default() {
@@ -1383,6 +1395,52 @@ mod tests {
             .layer(axum::Extension(ConnectInfo(addr)))
     }
 
+    /// Like `make_diagnostics_app_with_timeout`, but registers a user before
+    /// building the router so an authenticated request can get past the auth
+    /// middleware.
+    fn make_diagnostics_app_with_user(
+        auth_on: bool,
+        username: &str,
+        level: crate::config::UserLevel,
+        request_timeout_secs: u64,
+    ) -> Router {
+        use axum::extract::ConnectInfo;
+        use std::net::SocketAddr;
+
+        let config = OnvifServerConfig {
+            static_root: None,
+            request_timeout_secs,
+            ..Default::default()
+        };
+        let server = OnvifServer::new(config).unwrap().with_diagnostics(Arc::new(
+            crate::diagnostics::state::DiagnosticsState::new(
+                std::time::Instant::now(),
+                None,
+                vec![],
+            ),
+        ));
+        server
+            .user_storage
+            .create_user(username, "pass", level)
+            .unwrap();
+
+        let state = OnvifServerState {
+            dispatcher: Arc::clone(&server.dispatcher),
+            shutdown_tx: server.shutdown_tx.clone(),
+            ws_security: Arc::clone(&server.ws_security),
+            user_storage: Arc::clone(&server.user_storage),
+            password_manager: Arc::clone(&server.password_manager),
+            auth_enabled: auth_on,
+            memory_monitor: Arc::clone(&server.memory_monitor),
+            rate_limiter: Arc::clone(&server.rate_limiter),
+        };
+
+        let addr: SocketAddr = "127.0.0.1:8080".parse().unwrap();
+        server
+            .build_router(state)
+            .layer(axum::Extension(ConnectInfo(addr)))
+    }
+
     /// A body whose second chunk arrives only after `delay`.
     ///
     /// Stands in for a real bundle upload, which takes far longer than the
@@ -1431,13 +1489,21 @@ mod tests {
     async fn test_update_route_is_exempt_from_the_request_timeout() {
         use axum::body::Body;
         use axum::http::{Request, StatusCode};
+        use base64::Engine;
         use tower::ServiceExt;
 
-        let app = make_diagnostics_app_with_timeout(false, 1);
+        let app = make_diagnostics_app_with_user(
+            true,
+            "admin",
+            crate::config::UserLevel::Administrator,
+            1,
+        );
+        let credentials = base64::engine::general_purpose::STANDARD.encode("admin:pass");
 
         let request = Request::builder()
             .method("PUT")
             .uri("/api/update")
+            .header("Authorization", format!("Basic {credentials}"))
             .body(Body::new(SlowBody {
                 delay: Duration::from_secs(2),
                 timer: None,
@@ -1448,13 +1514,84 @@ mod tests {
         // Asserts only that the timeout did not fire. Whether the write itself
         // succeeds depends on the spool path, which `build_router` fixes at
         // /mnt/anyka_hack/spool and does not exist on a host — `receive_bundle`
-        // has its own eight tests for that. A 408 here means the timeout layer
+        // has its own tests for that. A 408 here means the timeout layer
         // has been moved back onto the whole app and every real update is dead.
         let response = app.oneshot(request).await.unwrap();
         assert_ne!(
             response.status(),
             StatusCode::REQUEST_TIMEOUT,
             "an upload slower than request_timeout_secs must not be aborted"
+        );
+    }
+
+    /// An authenticated PUT /api/update must reach the handler (not be bounced
+    /// by the auth or content-type middleware), and the middleware must forward
+    /// PUT requests untouched.
+    #[tokio::test]
+    async fn test_update_route_accepts_authenticated_octet_stream_upload() {
+        use axum::body::Body;
+        use axum::http::{Request, StatusCode};
+        use base64::Engine;
+        use tower::ServiceExt;
+
+        let app = make_diagnostics_app_with_user(
+            true,
+            "admin",
+            crate::config::UserLevel::Administrator,
+            0,
+        );
+        let credentials = base64::engine::general_purpose::STANDARD.encode("admin:pass");
+
+        let request = Request::builder()
+            .method("PUT")
+            .uri("/api/update")
+            .header("content-type", "application/octet-stream")
+            .header("Authorization", format!("Basic {credentials}"))
+            .body(Body::new(SlowBody {
+                delay: Duration::from_millis(1),
+                timer: None,
+                finished: false,
+            }))
+            .unwrap();
+
+        // The handler writes to /mnt/anyka_hack/spool, which does not exist on
+        // a host, so the response will be a 500 — but the point is the request
+        // got *through* the middleware stack to the handler, not bounced by it.
+        let response = app.oneshot(request).await.unwrap();
+        assert_ne!(
+            response.status(),
+            StatusCode::UNAUTHORIZED,
+            "valid admin credentials must clear the auth middleware"
+        );
+        assert_ne!(
+            response.status(),
+            StatusCode::UNSUPPORTED_MEDIA_TYPE,
+            "application/octet-stream must be accepted"
+        );
+    }
+
+    /// With authentication disabled, the firmware upload route must not be
+    /// mounted at all — an unauthenticated client must get 404, never a chance
+    /// to stream a bundle onto the card.
+    #[tokio::test]
+    async fn test_update_route_is_not_mounted_when_auth_disabled() {
+        use axum::body::Body;
+        use axum::http::{Request, StatusCode};
+        use tower::ServiceExt;
+
+        let app = make_diagnostics_app(false);
+
+        let request = Request::builder()
+            .method("PUT")
+            .uri("/api/update")
+            .body(Body::empty())
+            .unwrap();
+
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(
+            response.status(),
+            StatusCode::NOT_FOUND,
+            "PUT /api/update must not exist when auth is off"
         );
     }
 

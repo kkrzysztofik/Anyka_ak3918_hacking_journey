@@ -149,6 +149,13 @@ fn main() {
     // its five startup phases and bind. Judging a slow-but-healthy boot a
     // failure costs a revert to a known-good slot, so the safe direction is
     // the one it already errs in.
+    //
+    // The trial thread and the poll thread below both mutate the active
+    // pointer and the trial marker. One lock serializes them: only one of
+    // reconcile/apply may be mutating durable slot state at a time, so a
+    // revert cannot interleave with a flip and leave `active` agreeing with
+    // neither the marker nor the other writer.
+    let slot_lock = Arc::new(std::sync::Mutex::new(()));
     {
         let s = Arc::clone(&sysimpl);
         let root = cfg.update.root.clone();
@@ -156,7 +163,9 @@ fn main() {
         let policy = anyka_init::update::Policy {
             hold_secs: cfg.update.trial_hold_sec,
             deadline_secs: cfg.update.trial_deadline_sec,
+            ports: cfg.update.trial_ports.clone(),
         };
+        let lock = Arc::clone(&slot_lock);
         let _ = std::thread::Builder::new()
             .name("update-trial".into())
             .stack_size(supervisor_loop::thread_stack())
@@ -168,17 +177,23 @@ fn main() {
                     policy,
                     anyka_init::netstat::listening,
                     std::thread::sleep,
+                    &lock,
                 );
             });
     }
 
     // Poll `spool/` for a dropped bundle. Reuses the monitor cadence — a
     // `stat` per minute costs nothing and adds no new tunable.
+    //
+    // The interval is floored at 60 s: `monitor.interval_sec` is only
+    // validated as non-zero when the monitor is enabled, so a disabled monitor
+    // with a zero interval would otherwise busy-spin this thread.
     {
         let s = Arc::clone(&sysimpl);
         let root = cfg.update.root.clone();
         let schema = cfg.schema;
-        let interval = Duration::from_secs(cfg.monitor.interval_sec);
+        let interval = Duration::from_secs(cfg.monitor.interval_sec.max(60));
+        let lock = Arc::clone(&slot_lock);
         let _ = std::thread::Builder::new()
             .name("update-poll".into())
             .stack_size(supervisor_loop::thread_stack())
@@ -187,7 +202,7 @@ fn main() {
                 loop {
                     std::thread::sleep(interval);
                     if anyka_init::update::pending(root) {
-                        anyka_init::update::apply(s.as_ref(), root, schema);
+                        anyka_init::update::apply(s.as_ref(), root, schema, &lock);
                     }
                 }
             });

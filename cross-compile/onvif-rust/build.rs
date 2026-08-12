@@ -23,13 +23,53 @@ fn main() {
         println!("cargo:rustc-cfg=use_stubs");
     }
 
-    let v = std::process::Command::new("git")
-        .args(["describe", "--tags", "--always", "--dirty"])
+    // The version the binary reports as FirmwareVersion. Honor an explicit
+    // `ANYKA_BUILD_VERSION` (set by the bundle pipeline so manifest.meta and
+    // the binary agree on one captured `git describe`), falling back to a
+    // fresh `git describe` for ad-hoc builds.
+    let v = match env::var("ANYKA_BUILD_VERSION") {
+        Ok(v) if !v.trim().is_empty() => v.trim().to_string(),
+        _ => std::process::Command::new("git")
+            .args(["describe", "--tags", "--always", "--dirty"])
+            .output()
+            .ok()
+            .filter(|o| o.status.success())
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+            .unwrap_or_else(|| "unknown".into()),
+    };
+    println!("cargo:rustc-env=ANYKA_BUILD_VERSION={v}");
+    if env::var_os("ANYKA_BUILD_VERSION").is_some() {
+        println!("cargo:rerun-if-env-changed=ANYKA_BUILD_VERSION");
+    }
+
+    // `.git/HEAD` alone is not enough to rerun on a commit advance: on a branch
+    // it holds the constant line `ref: refs/heads/<branch>`, so its mtime only
+    // changes on a branch switch. Watch the resolved ref file, packed-refs,
+    // and the tag refs a `git describe` would walk, or `ANYKA_BUILD_VERSION`
+    // goes stale across incremental builds.
+    let git_dir = std::process::Command::new("git")
+        .args(["rev-parse", "--git-dir"])
         .output()
         .ok()
         .filter(|o| o.status.success())
-        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-        .unwrap_or_else(|| "unknown".into());
-    println!("cargo:rustc-env=ANYKA_BUILD_VERSION={v}");
-    println!("cargo:rerun-if-changed=.git/HEAD");
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .map(|s| s.trim().to_string());
+    if let Some(dir) = &git_dir {
+        println!("cargo:rerun-if-changed={dir}/HEAD");
+        println!("cargo:rerun-if-changed={dir}/packed-refs");
+        // `symbolic-ref` output is relative to the git dir.
+        if let Ok(o) = std::process::Command::new("git")
+            .args(["symbolic-ref", "-q", "HEAD"])
+            .output()
+            && o.status.success()
+            && let Ok(ref_name) = String::from_utf8(o.stdout)
+        {
+            println!(
+                "cargo:rerun-if-changed={dir}/{name}",
+                name = ref_name.trim()
+            );
+        }
+    }
+    // Dereferenced tag objects (`git describe` uses them) are loose files under
+    // refs/tags or live in packed-refs, both covered above.
 }

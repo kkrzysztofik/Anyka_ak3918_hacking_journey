@@ -22,6 +22,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { getDiagnostics, uploadFirmware } from '@/services/diagnosticsService';
+import { ApiError } from '@/services/api';
 
 const MAX_BYTES = 64 * 1024 * 1024;
 const POLL_INTERVAL_MS = 2000;
@@ -106,6 +107,10 @@ export function FirmwareUpgradeDialog({
     setError(null);
   }, []);
 
+  const handleBrowse = useCallback(() => {
+    inputRef.current?.click();
+  }, []);
+
   const handleClose = useCallback(() => {
     if (step === 'result') onFinished();
     reset();
@@ -177,7 +182,15 @@ export function FirmwareUpgradeDialog({
         return;
       }
       // Stay on uploading so the error is visible next to progress; retry allowed.
-      setError(err instanceof Error ? err.message : 'Upload failed');
+      // Prefer the backend's own detail (checksum, schema, authorization) over
+      // the generic HTTP-status message when the response body carries one.
+      setError(
+        err instanceof ApiError && err.data.trim().length > 0
+          ? err.data
+          : err instanceof Error
+            ? err.message
+            : 'Upload failed',
+      );
     }
   }, [file, pollUntilBack]);
 
@@ -256,7 +269,7 @@ export function FirmwareUpgradeDialog({
                   type="button"
                   variant="outline"
                   size="sm"
-                  onClick={() => inputRef.current?.click()}
+                  onClick={handleBrowse}
                 >
                   {file?.name ?? 'Choose bundle…'}
                 </Button>
@@ -277,7 +290,11 @@ export function FirmwareUpgradeDialog({
                 max={progress.total || 1}
               />
               {error && (
-                <p className="text-destructive text-sm" data-testid="firmware-upgrade-error">
+                <p
+                  className="text-destructive text-sm"
+                  data-testid="firmware-upgrade-error"
+                  aria-live="assertive"
+                >
                   {error}
                 </p>
               )}
@@ -288,13 +305,18 @@ export function FirmwareUpgradeDialog({
             <p
               className="text-muted-foreground py-4 text-sm"
               data-testid="firmware-upgrade-waiting"
+              aria-live="polite"
             >
               Camera is rebooting. Waiting for it to come back…
             </p>
           )}
 
           {step === 'result' && resultMessage && (
-            <p className="py-4 text-sm" data-testid="firmware-upgrade-result-message">
+            <p
+              className="py-4 text-sm"
+              data-testid="firmware-upgrade-result-message"
+              aria-live="polite"
+            >
               {resultMessage}
             </p>
           )}

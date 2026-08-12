@@ -252,6 +252,20 @@ describe('FirmwareUpgradeDialog', () => {
     });
   });
 
+  it('should surface the backend rejection detail instead of the generic message', async () => {
+    const user = userEvent.setup();
+    vi.mocked(uploadFirmware).mockRejectedValueOnce(
+      new ApiError('bundle too large', 413, 'bundle exceeds 67108864 bytes'),
+    );
+
+    renderDialog();
+    await selectTarAndContinue(user);
+    await user.click(screen.getByTestId('firmware-upgrade-confirm-button'));
+
+    const error = await screen.findByTestId('firmware-upgrade-error');
+    expect(error.textContent).toContain('bundle exceeds 67108864 bytes');
+  });
+
   it('should show stayed-reachable copy when poll times out without a down', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });

@@ -190,7 +190,7 @@ address costs more than the failure is worth.
 cd cross-compile && $CARGO test -p anyka-init --target x86_64-unknown-linux-gnu listening
 ```
 
-Expected: PASS, 5 tests.
+Expected: PASS, 6 tests.
 
 **Step 5: Commit**
 
@@ -542,10 +542,17 @@ Expected: FAIL, `cannot find type 'Meta'`.
 /// `manifest.meta`: `key=value` lines. Unparseable anything reads as zero,
 /// which fails the compatibility check closed for a nonzero device schema and
 /// open for schema 0 — matching the pre-schema bundles that predate this.
+///
+/// A *present* but unparseable `requires_config_schema` is different: it means
+/// the producer shipped garbage, not that the bundle predates the schema. That
+/// must reject the bundle rather than silently reading as zero and passing a
+/// compatibility check meant to catch exactly that.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct Meta {
     pub version: Option<String>,
     pub requires_config_schema: u32,
+    /// `requires_config_schema` was present but not a decimal u32.
+    pub schema_malformed: bool,
 }
 
 impl Meta {
@@ -553,9 +560,20 @@ impl Meta {
         let mut m = Self::default();
         for line in src.lines() {
             match line.split_once('=') {
-                Some(("version", v)) => m.version = Some(v.trim().to_string()),
+                Some(("version", v)) => {
+                    let v = v.trim().to_string();
+                    if !v.is_empty() {
+                        m.version = Some(v);
+                    }
+                }
                 Some(("requires_config_schema", v)) => {
-                    m.requires_config_schema = v.trim().parse().unwrap_or(0);
+                    m.requires_config_schema = match v.trim().parse() {
+                        Ok(n) => n,
+                        Err(_) => {
+                            m.schema_malformed = true;
+                            0
+                        }
+                    };
                 }
                 _ => {}
             }
@@ -589,7 +607,7 @@ fn verify_runs_sha256sum_in_the_slot_directory() {
 
     let mut sys = MockSys::new();
     sys.expect_run_to_completion()
-        .withf(|prog, args| prog == "busybox" && args[0] == "sha256sum" && args[1] == "-c")
+        .withf(|prog, args| prog == "busybox" && args[0] == "sh" && args[1] == "-c")
         .returning(|_, _| Ok(exit_ok()));
 
     assert!(verify_slot(&sys, &slot, 1).is_ok());
@@ -1083,7 +1101,14 @@ pub fn apply(sys: &dyn crate::sys::Sys, root: &Path, device_schema: u32) {
     let target = slots.inactive();
     let dir = slots.dir(target);
 
-    let result = stage_and_flip(sys, root, &slots, target, &dir, device_schema);
+    let result = if Trial::find(root).is_some() {
+        // An unconfirmed update is mid-trial. Applying now would arm a second
+        // marker and race the trial thread for the `active` pointer, leaving
+        // the rollback target up to whichever wrote last.
+        Err(UpdateError::TrialInFlight)
+    } else {
+        stage_and_flip(sys, root, &slots, target, &dir, device_schema)
+    };
 
     // Clear the spool either way. A bundle that failed verification will fail
     // it again on the next tick, and retrying forever would keep the supervisor
@@ -1102,9 +1127,18 @@ pub fn apply(sys: &dyn crate::sys::Sys, root: &Path, device_schema: u32) {
         }
         Err(e) => {
             tracing::error!(error = %e, slot = target.name(), "update rejected; both slots untouched");
-            let _ = std::fs::remove_dir_all(&dir);
+            // Only the staging tree is removed. `dir` is the rollback slot and
+            // is never touched on a failed apply.
+            let _ = std::fs::remove_dir_all(staging_dir(&dir));
         }
     }
+}
+
+/// Where a bundle is unpacked before it has earned the slot.
+fn staging_dir(slot_dir: &Path) -> PathBuf {
+    let mut s = slot_dir.as_os_str().to_os_string();
+    s.push(".staging");
+    PathBuf::from(s)
 }
 
 fn stage_and_flip(
@@ -1115,10 +1149,17 @@ fn stage_and_flip(
     dir: &Path,
     device_schema: u32,
 ) -> Result<Meta, UpdateError> {
-    // Wipe first: a slot half-written by a previous interrupted apply would
-    // otherwise contribute stale files that the manifest never mentions.
-    let _ = std::fs::remove_dir_all(dir);
-    std::fs::create_dir_all(dir)?;
+    // Unpack beside the slot, never into it. The slot currently holds the last
+    // known-good build and is the rollback target: wiping it before the new
+    // bundle has proven itself would mean a single corrupt upload destroys the
+    // ability to roll back, without ever flipping anything.
+    //
+    // Wiping staging first is safe — nothing depends on it, and a tree left by
+    // a previous interrupted apply would otherwise contribute files the
+    // manifest never mentions.
+    let staging = staging_dir(dir);
+    let _ = std::fs::remove_dir_all(&staging);
+    std::fs::create_dir_all(&staging)?;
 
     let untar = [
         "sh".to_string(),
@@ -1126,17 +1167,27 @@ fn stage_and_flip(
         format!(
             "busybox tar -xf {} -C {}",
             shell_quote(&root.join("spool/bundle.tar")),
-            shell_quote(dir)
+            shell_quote(&staging)
         ),
     ];
     match sys.run_to_completion("busybox", &untar) {
         Ok(st) if st.success() => {}
-        _ => return Err(UpdateError::Checksum),
+        _ => return Err(UpdateError::Untar),
     }
     // SAFETY: sync(2) takes no arguments and cannot fail.
     unsafe { libc::sync() };
 
-    let meta = verify_slot(sys, dir, device_schema)?;
+    let meta = verify_slot(sys, &staging, device_schema)?;
+
+    // Verified. Now take the slot: remove the old tree and rename staging over
+    // it. FAT cannot rename onto an existing directory, so the two steps
+    // cannot be collapsed; the window between them is two syscalls wide and,
+    // unlike the previous ordering, is only ever entered by a bundle that has
+    // already passed its checksums.
+    let _ = std::fs::remove_dir_all(dir);
+    std::fs::rename(&staging, dir)?;
+    // SAFETY: sync(2) takes no arguments and cannot fail.
+    unsafe { libc::sync() };
 
     // Arm before flipping. A power cut between the two leaves the old slot
     // active with a stale marker, which the next boot resolves by confirming a
@@ -1157,24 +1208,33 @@ Expected: PASS, 26 tests in `update::`.
 Alongside the trial thread from Task 7, add a poller. Reuse `cfg.monitor.interval_sec` for the cadence — a `stat` per minute costs nothing and adds no new tunable:
 
 ```rust
-{
-    let s = Arc::clone(&sysimpl);
-    let root = cfg.update.root.clone();
-    let schema = cfg.schema;
-    let interval = Duration::from_secs(cfg.monitor.interval_sec);
-    let _ = std::thread::Builder::new()
-        .name("update-poll".into())
-        .stack_size(supervisor_loop::thread_stack())
-        .spawn(move || {
-            let root = std::path::Path::new(&root);
-            loop {
-                std::thread::sleep(interval);
-                if anyka_init::update::pending(root) {
-                    anyka_init::update::apply(s.as_ref(), root, schema);
+    // The trial thread and the poller both mutate the active pointer and the
+    // trial marker. One lock serializes them, so a revert cannot interleave
+    // with a flip and leave `active` agreeing with neither the marker nor the
+    // other writer.
+    let slot_lock = Arc::new(std::sync::Mutex::new(()));
+    {
+        let s = Arc::clone(&sysimpl);
+        let root = cfg.update.root.clone();
+        let schema = cfg.schema;
+        // The interval is floored at 60 s: `monitor.interval_sec` is only
+        // validated as non-zero when the monitor is enabled, so a disabled
+        // monitor with a zero interval would otherwise busy-spin this thread.
+        let interval = Duration::from_secs(cfg.monitor.interval_sec.max(60));
+        let lock = Arc::clone(&slot_lock);
+        let _ = std::thread::Builder::new()
+            .name("update-poll".into())
+            .stack_size(supervisor_loop::thread_stack())
+            .spawn(move || {
+                let root = std::path::Path::new(&root);
+                loop {
+                    std::thread::sleep(interval);
+                    if anyka_init::update::pending(root) {
+                        anyka_init::update::apply(s.as_ref(), root, schema, &lock);
+                    }
                 }
-            }
-        });
-}
+            });
+    }
 ```
 
 **Step 6: Commit**
@@ -1264,11 +1324,17 @@ pub struct Update {
     /// Give up and revert after this long.
     #[serde(default = "default_trial_deadline")]
     pub trial_deadline_sec: u32,
+    /// Ports an unconfirmed update must bind to be confirmed. Defaults to the
+    /// shipped ONVIF/RTSP/HTTP-FLV contract so the trial follows an operator
+    /// who changes those ports.
+    #[serde(default = "default_trial_ports")]
+    pub trial_ports: Vec<u16>,
 }
 
 fn default_update_root() -> String { "/mnt/anyka_hack".to_string() }
 fn default_trial_hold() -> u32 { 30 }
 fn default_trial_deadline() -> u32 { 120 }
+fn default_trial_ports() -> Vec<u16> { crate::update::TRIAL_PORTS.to_vec() }
 
 impl Default for Update {
     fn default() -> Self {
@@ -1276,6 +1342,7 @@ impl Default for Update {
             root: default_update_root(),
             trial_hold_sec: default_trial_hold(),
             trial_deadline_sec: default_trial_deadline(),
+            trial_ports: default_trial_ports(),
         }
     }
 }
@@ -1286,9 +1353,13 @@ Match the surrounding style — check whether existing sections use `deny_unknow
 Add to `Config::validate` (`config.rs:439`), so a misconfiguration parks at boot rather than surfacing mid-update:
 
 ```rust
-if self.update.trial_hold_sec >= self.update.trial_deadline_sec {
+if self.update.trial_hold_sec == 0
+    || self.update.trial_hold_sec >= self.update.trial_deadline_sec
+{
     return Err(ConfigError::Invalid(
-        "update.trial_hold_sec must be less than update.trial_deadline_sec".into(),
+        "update.trial_hold_sec must be greater than zero and less than \
+         update.trial_deadline_sec"
+            .into(),
     ));
 }
 ```
@@ -1588,7 +1659,7 @@ EOF
 tar -cf "${OUT}" -C "${STAGE}" .
 
 log_success "bundle ${VERSION} -> ${OUT} ($(du -h "${OUT}" | cut -f1))"
-log_info "deploy: curl -T ${OUT} http://<camera>/api/update   # increment 2"
+log_info "deploy: curl -u admin:PASSWORD -T ${OUT} http://<camera>/api/update"
 log_info "or drop it in /mnt/anyka_hack/spool/ over FTP, then touch bundle.trigger"
 ```
 
@@ -1677,7 +1748,9 @@ Build a bundle, FTP it into `/mnt/anyka_hack/spool/bundle.tar`, then `touch /mnt
 
 **Step 6: Validate a bad update end to end**
 
-This is the test that matters — everything else is theatre if this does not work. Build a bundle whose `onvif-rust.bin` is deliberately broken (truncate it), push it, and confirm the camera reverts to `slots/b`... that is, to whichever slot was active, reboots, and comes back serving on all three ports. Confirm the log shows `trial failed`.
+This is the test that matters — everything else is theatre if this does not work. Build a bundle whose `onvif-rust.bin` is deliberately broken (truncate it), push it, and confirm the camera reverts to the slot that was active *before* the upload, reboots, and comes back serving on all three ports. Confirm the log shows `trial failed`.
+
+**Record the active slot before uploading** (e.g. `cat /mnt/anyka_hack/active`), and assert that `active` reads that same value after recovery and reboot — rollback must return to the pre-update slot, not to a hard-coded `slots/b`.
 
 **Do this on `192.168.2.198` only.** It is the camera with direct telnet access. Do not touch `.121`, `.127` or `.146` until a bad update has demonstrably self-recovered on `.198`.
 
@@ -1733,15 +1806,32 @@ git commit -m "feat(onvif): accept upgrade bundles at PUT /api/update"
 ```rust
 // build.rs
 fn main() {
-    let v = std::process::Command::new("git")
-        .args(["describe", "--tags", "--always", "--dirty"])
-        .output()
-        .ok()
-        .filter(|o| o.status.success())
-        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-        .unwrap_or_else(|| "unknown".into());
+    // Honor an explicit ANYKA_BUILD_VERSION (set by the bundle pipeline so
+    // manifest.meta and the binary agree on one captured git describe),
+    // falling back to a fresh git describe for ad-hoc builds.
+    let v = match env::var("ANYKA_BUILD_VERSION") {
+        Ok(v) if !v.trim().is_empty() => v.trim().to_string(),
+        _ => std::process::Command::new("git")
+            .args(["describe", "--tags", "--always", "--dirty"])
+            .output()
+            .ok()
+            .filter(|o| o.status.success())
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+            .unwrap_or_else(|| "unknown".into()),
+    };
     println!("cargo:rustc-env=ANYKA_BUILD_VERSION={v}");
-    println!("cargo:rerun-if-changed=.git/HEAD");
+    if env::var_os("ANYKA_BUILD_VERSION").is_some() {
+        println!("cargo:rerun-if-env-changed=ANYKA_BUILD_VERSION");
+    }
+
+    // `.git/HEAD` alone does not rerun on a commit advance: on a branch it
+    // holds a constant `ref: ...` line, so its mtime only changes on a branch
+    // switch. Watch the resolved ref file, packed-refs, and HEAD instead, or
+    // ANYKA_BUILD_VERSION goes stale across incremental builds.
+    let git_dir = /* `git rev-parse --git-dir` */;
+    println!("cargo:rerun-if-changed={git_dir}/HEAD");
+    println!("cargo:rerun-if-changed={git_dir}/packed-refs");
+    println!("cargo:rerun-if-changed={git_dir}/<resolved symbolic-ref>");
 }
 ```
 

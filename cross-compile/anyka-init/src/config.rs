@@ -68,6 +68,11 @@ pub struct Update {
     /// Give up and revert after this long.
     #[serde(default = "default_trial_deadline")]
     pub trial_deadline_sec: u32,
+    /// Ports an unconfirmed update must bind to be confirmed. The default
+    /// mirrors the shipped ONVIF/RTSP/HTTP-FLV contract; if an operator
+    /// changes those ports, the trial follows.
+    #[serde(default = "default_trial_ports")]
+    pub trial_ports: Vec<u16>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -374,6 +379,9 @@ fn default_trial_hold() -> u32 {
 fn default_trial_deadline() -> u32 {
     120
 }
+fn default_trial_ports() -> Vec<u16> {
+    crate::update::TRIAL_PORTS.to_vec()
+}
 
 impl Default for Update {
     fn default() -> Self {
@@ -381,6 +389,7 @@ impl Default for Update {
             root: default_update_root(),
             trial_hold_sec: default_trial_hold(),
             trial_deadline_sec: default_trial_deadline(),
+            trial_ports: default_trial_ports(),
         }
     }
 }
@@ -518,9 +527,13 @@ impl Config {
                 "supervisor.crashloop_count must be non-zero".into(),
             ));
         }
-        if self.update.trial_hold_sec >= self.update.trial_deadline_sec {
+        if self.update.trial_hold_sec == 0
+            || self.update.trial_hold_sec >= self.update.trial_deadline_sec
+        {
             return Err(ConfigError::Invalid(
-                "update.trial_hold_sec must be less than update.trial_deadline_sec".into(),
+                "update.trial_hold_sec must be greater than zero and less than \
+                 update.trial_deadline_sec"
+                    .into(),
             ));
         }
         if self.wifi.chip != "auto" && crate::wifi::Chip::from_name(&self.wifi.chip).is_none() {
@@ -852,31 +865,46 @@ log = "/tmp/udhcpc.log"
     }
 
     #[test]
-    fn schema_defaults_to_zero_for_configs_that_predate_it() {
+    fn test_config_schema_defaults_to_zero_when_absent() {
         let c: Config = toml::from_str(MINIMAL).unwrap();
         assert_eq!(c.schema, 0);
     }
 
     #[test]
-    fn schema_is_read_from_the_top_level() {
+    fn test_config_schema_is_read_from_the_top_level() {
         let src = format!("schema = 2\n{MINIMAL}");
         let c: Config = toml::from_str(&src).unwrap();
         assert_eq!(c.schema, 2);
     }
 
     #[test]
-    fn update_section_has_working_defaults() {
+    fn test_config_update_section_applies_defaults() {
         let c: Config = toml::from_str(MINIMAL).unwrap();
         assert_eq!(c.update.root, "/mnt/anyka_hack");
         assert_eq!(c.update.trial_hold_sec, 30);
         assert_eq!(c.update.trial_deadline_sec, 120);
+        assert_eq!(c.update.trial_ports, crate::update::TRIAL_PORTS);
     }
 
     #[test]
-    fn a_hold_longer_than_the_deadline_is_rejected() {
+    fn test_config_validate_rejects_hold_above_deadline() {
         let src = format!("{MINIMAL}\n[update]\ntrial_hold_sec = 200\ntrial_deadline_sec = 120\n");
         let c: Config = toml::from_str(&src).unwrap();
         assert!(c.validate().is_err());
+    }
+
+    #[test]
+    fn test_config_validate_rejects_zero_trial_hold() {
+        let src = format!("{MINIMAL}\n[update]\ntrial_hold_sec = 0\ntrial_deadline_sec = 120\n");
+        let c: Config = toml::from_str(&src).unwrap();
+        assert!(c.validate().is_err());
+    }
+
+    #[test]
+    fn test_config_update_section_reads_trial_ports() {
+        let src = format!("{MINIMAL}\n[update]\ntrial_ports = [80, 8554]\n");
+        let c: Config = toml::from_str(&src).unwrap();
+        assert_eq!(c.update.trial_ports, vec![80, 8554]);
     }
 
     #[test]

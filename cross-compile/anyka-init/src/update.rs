@@ -201,10 +201,17 @@ impl Trial {
 /// `manifest.meta`: `key=value` lines. Unparseable anything reads as zero,
 /// which fails the compatibility check closed for a nonzero device schema and
 /// open for schema 0 — matching the pre-schema bundles that predate this.
+///
+/// A *present* but unparseable `requires_config_schema` is different: it means
+/// the producer shipped garbage, not that the bundle predates the schema. That
+/// must reject the bundle rather than silently reading as zero and passing a
+/// compatibility check meant to catch exactly that.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct Meta {
     pub version: Option<String>,
     pub requires_config_schema: u32,
+    /// `requires_config_schema` was present but not a decimal u32.
+    pub schema_malformed: bool,
 }
 
 impl Meta {
@@ -212,9 +219,20 @@ impl Meta {
         let mut m = Self::default();
         for line in src.lines() {
             match line.split_once('=') {
-                Some(("version", v)) => m.version = Some(v.trim().to_string()),
+                Some(("version", v)) => {
+                    let v = v.trim().to_string();
+                    if !v.is_empty() {
+                        m.version = Some(v);
+                    }
+                }
                 Some(("requires_config_schema", v)) => {
-                    m.requires_config_schema = v.trim().parse().unwrap_or(0);
+                    m.requires_config_schema = match v.trim().parse() {
+                        Ok(n) => n,
+                        Err(_) => {
+                            m.schema_malformed = true;
+                            0
+                        }
+                    };
                 }
                 _ => {}
             }
@@ -233,6 +251,8 @@ pub enum UpdateError {
     NoManifest(PathBuf),
     #[error("bundle needs config schema {needs}, device has {has}")]
     Schema { needs: u32, has: u32 },
+    #[error("manifest requires_config_schema is present but not a number")]
+    MalformedMeta,
     #[error("checksum verification failed")]
     Checksum,
     /// Distinct from `Checksum` on purpose: a truncated archive, a full card
@@ -256,6 +276,9 @@ pub fn verify_slot(
     let meta_src = std::fs::read_to_string(slot_dir.join("manifest.meta"))
         .map_err(|_| UpdateError::NoManifest(slot_dir.to_path_buf()))?;
     let meta = Meta::parse(&meta_src);
+    if meta.schema_malformed {
+        return Err(UpdateError::MalformedMeta);
+    }
     if !meta.compatible_with(device_schema) {
         return Err(UpdateError::Schema {
             needs: meta.requires_config_schema,
@@ -294,12 +317,15 @@ pub enum Outcome {
     Revert,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct Policy {
     /// Consecutive seconds every port must stay bound.
     pub hold_secs: u32,
     /// Give up after this long.
     pub deadline_secs: u32,
+    /// Ports an unconfirmed update must bind to be confirmed. Mirrors
+    /// `[update] trial_ports` in anyka.toml.
+    pub ports: Vec<u16>,
 }
 
 impl Default for Policy {
@@ -307,12 +333,14 @@ impl Default for Policy {
         Self {
             hold_secs: 30,
             deadline_secs: 120,
+            ports: TRIAL_PORTS.to_vec(),
         }
     }
 }
 
 /// Ports the trial requires. From
-/// `SD_card_contents/anyka_hack/onvif/config.toml:105,183,186`.
+/// `SD_card_contents/anyka_hack/onvif/config.toml:105,183,186`. The default
+/// value of `[update] trial_ports`.
 pub const TRIAL_PORTS: [u16; 3] = [80, 554, 8080];
 
 /// Watch `ports` once a second until all of them have been bound continuously
@@ -327,7 +355,7 @@ pub const TRIAL_PORTS: [u16; 3] = [80, 554, 8080];
 /// silent-no-video regression ever ships.
 pub fn evaluate_trial(
     ports: &[u16],
-    policy: Policy,
+    policy: &Policy,
     mut probe: impl FnMut(u16) -> bool,
     mut sleep: impl FnMut(std::time::Duration),
 ) -> Outcome {
@@ -348,6 +376,10 @@ pub fn evaluate_trial(
 
 /// Resolve an unconfirmed update, if there is one. Called once per boot, after
 /// services have been started.
+///
+/// `lock` serializes the state-changing tail against `apply`: both mutate the
+/// `active` pointer and the trial marker, and `set_active` writes a shared
+/// `<root>/active.tmp` file that must not see two concurrent writers.
 pub fn reconcile(
     sys: &dyn crate::sys::Sys,
     root: &Path,
@@ -355,6 +387,7 @@ pub fn reconcile(
     policy: Policy,
     probe: impl FnMut(u16) -> bool,
     sleep: impl FnMut(std::time::Duration),
+    lock: &std::sync::Mutex<()>,
 ) {
     let Some(prev) = Trial::find(root) else {
         return;
@@ -367,8 +400,12 @@ pub fn reconcile(
         "unconfirmed update: starting trial"
     );
 
-    match evaluate_trial(&TRIAL_PORTS, policy, probe, sleep) {
+    // The trial evaluation sleeps through the whole window but touches no
+    // shared state; only the confirm/revert tail below writes the pointer and
+    // the marker, so the lock is taken there and held across the reboot.
+    match evaluate_trial(&policy.ports, &policy, probe, sleep) {
         Outcome::Confirm => {
+            let _guard = lock.lock().unwrap_or_else(|e| e.into_inner());
             // Heal the pointer against reality before clearing the marker.
             // If `config.sh` fell back to this slot because the pointed-at one
             // would not exec, `active` still names the broken slot; clearing
@@ -389,7 +426,7 @@ pub fn reconcile(
         }
         Outcome::Revert => {
             tracing::error!(
-                ports = ?TRIAL_PORTS,
+                ports = ?policy.ports,
                 "trial failed: reverting to slot {}",
                 prev.name()
             );
@@ -397,6 +434,7 @@ pub fn reconcile(
             // reboot: if power is lost between the first two the next boot
             // repeats a revert that is already correct, whereas clearing first
             // would boot the broken slot with no marker and no way back.
+            let _guard = lock.lock().unwrap_or_else(|e| e.into_inner());
             if let Err(e) = slots.set_active(prev) {
                 tracing::error!(error = %e, "could not restore the previous slot");
                 return;
@@ -450,7 +488,17 @@ pub fn pending(root: &Path) -> bool {
 
 /// Apply the bundle in `spool/`. Returns having either rebooted or done
 /// nothing durable.
-pub fn apply(sys: &dyn crate::sys::Sys, root: &Path, device_schema: u32) {
+///
+/// `lock` serializes against `reconcile`: both mutate the `active` pointer and
+/// the trial marker, and `set_active` writes a shared `<root>/active.tmp` file.
+/// Held for the whole call so a flip cannot interleave with a revert.
+pub fn apply(
+    sys: &dyn crate::sys::Sys,
+    root: &Path,
+    device_schema: u32,
+    lock: &std::sync::Mutex<()>,
+) {
+    let _guard = lock.lock().unwrap_or_else(|e| e.into_inner());
     let slots = Slots::new(root);
     let target = slots.inactive();
     let dir = slots.dir(target);
@@ -623,11 +671,33 @@ mod tests {
         let m = Meta::parse("version=v1.2.3\nrequires_config_schema=2\n");
         assert_eq!(m.version.as_deref(), Some("v1.2.3"));
         assert_eq!(m.requires_config_schema, 2);
+        assert!(!m.schema_malformed);
     }
 
     #[test]
     fn missing_schema_requirement_reads_as_zero() {
         assert_eq!(Meta::parse("version=v1\n").requires_config_schema, 0);
+        assert!(!Meta::parse("version=v1\n").schema_malformed);
+    }
+
+    #[test]
+    fn a_malformed_present_schema_value_is_flagged() {
+        let m = Meta::parse("requires_config_schema=garbage\n");
+        assert!(
+            m.schema_malformed,
+            "garbage in a present key must not read as a valid zero"
+        );
+        let m = Meta::parse("requires_config_schema=\n");
+        assert!(
+            m.schema_malformed,
+            "empty value for a present key must be flagged"
+        );
+    }
+
+    #[test]
+    fn an_empty_version_reads_as_absent() {
+        let m = Meta::parse("version=\n");
+        assert_eq!(m.version, None);
     }
 
     #[test]
@@ -635,6 +705,10 @@ mod tests {
         let m = Meta::parse("\0\0\0garbage");
         assert_eq!(m.requires_config_schema, 0);
         assert_eq!(m.version, None);
+        assert!(
+            !m.schema_malformed,
+            "a torn read has no key at all, which is the legacy path"
+        );
     }
 
     #[test]
@@ -642,7 +716,8 @@ mod tests {
         assert!(
             !Meta {
                 version: None,
-                requires_config_schema: 3
+                requires_config_schema: 3,
+                schema_malformed: false
             }
             .compatible_with(2)
         );
@@ -653,14 +728,16 @@ mod tests {
         assert!(
             Meta {
                 version: None,
-                requires_config_schema: 2
+                requires_config_schema: 2,
+                schema_malformed: false
             }
             .compatible_with(2)
         );
         assert!(
             Meta {
                 version: None,
-                requires_config_schema: 1
+                requires_config_schema: 1,
+                schema_malformed: false
             }
             .compatible_with(2)
         );
@@ -723,13 +800,30 @@ mod tests {
     }
 
     #[test]
+    fn verify_rejects_a_malformed_present_schema_without_hashing() {
+        use crate::sys::MockSys;
+        let d = tempfile::tempdir().unwrap();
+        let slot = d.path().join("slots/b");
+        std::fs::create_dir_all(&slot).unwrap();
+        std::fs::write(slot.join("manifest.sha256"), "abc  anyka-init.bin\n").unwrap();
+        std::fs::write(slot.join("manifest.meta"), "requires_config_schema=oops\n").unwrap();
+
+        let mut sys = MockSys::new();
+        sys.expect_run_to_completion().never();
+
+        let err = verify_slot(&sys, &slot, 1).expect_err("malformed schema must be rejected");
+        assert!(matches!(err, UpdateError::MalformedMeta));
+    }
+
+    #[test]
     fn trial_passes_when_every_port_is_bound_for_the_hold() {
         let mut calls = 0;
         let outcome = evaluate_trial(
             &[80, 554, 8080],
-            Policy {
+            &Policy {
                 hold_secs: 3,
                 deadline_secs: 10,
+                ports: TRIAL_PORTS.to_vec(),
             },
             |_port| {
                 calls += 1;
@@ -745,9 +839,10 @@ mod tests {
     fn trial_fails_when_one_port_never_binds() {
         let outcome = evaluate_trial(
             &[80, 554, 8080],
-            Policy {
+            &Policy {
                 hold_secs: 3,
                 deadline_secs: 6,
+                ports: TRIAL_PORTS.to_vec(),
             },
             |port| port != 554,
             |_| {},
@@ -760,9 +855,10 @@ mod tests {
         let mut tick = 0;
         let outcome = evaluate_trial(
             &[554],
-            Policy {
+            &Policy {
                 hold_secs: 2,
                 deadline_secs: 20,
+                ports: TRIAL_PORTS.to_vec(),
             },
             |_| {
                 tick += 1;
@@ -778,9 +874,10 @@ mod tests {
         let mut tick = 0;
         let outcome = evaluate_trial(
             &[80],
-            Policy {
+            &Policy {
                 hold_secs: 3,
                 deadline_secs: 8,
+                ports: TRIAL_PORTS.to_vec(),
             },
             |_| {
                 tick += 1;
@@ -797,7 +894,15 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         let mut sys = MockSys::new();
         sys.expect_reboot().never();
-        reconcile(&sys, d.path(), Slot::A, Policy::default(), |_| true, |_| {});
+        reconcile(
+            &sys,
+            d.path(),
+            Slot::A,
+            Policy::default(),
+            |_| true,
+            |_| {},
+            &std::sync::Mutex::new(()),
+        );
     }
 
     #[test]
@@ -817,9 +922,11 @@ mod tests {
             Policy {
                 hold_secs: 1,
                 deadline_secs: 3,
+                ports: TRIAL_PORTS.to_vec(),
             },
             |_| true,
             |_| {},
+            &std::sync::Mutex::new(()),
         );
 
         assert_eq!(Trial::find(d.path()), None);
@@ -844,9 +951,11 @@ mod tests {
             Policy {
                 hold_secs: 1,
                 deadline_secs: 3,
+                ports: TRIAL_PORTS.to_vec(),
             },
             |_| true,
             |_| {},
+            &std::sync::Mutex::new(()),
         );
 
         assert_eq!(
@@ -875,9 +984,11 @@ mod tests {
             Policy {
                 hold_secs: 1,
                 deadline_secs: 2,
+                ports: TRIAL_PORTS.to_vec(),
             },
             |_| false,
             |_| {},
+            &std::sync::Mutex::new(()),
         );
 
         assert_eq!(s.active(), Slot::A, "must fall back before rebooting");
@@ -1042,7 +1153,7 @@ mod tests {
             });
         sys.expect_reboot().times(1).returning(|| Ok(()));
 
-        apply(&sys, root, 1);
+        apply(&sys, root, 1, &std::sync::Mutex::new(()));
 
         assert_eq!(
             Slots::new(root).active(),
@@ -1096,7 +1207,7 @@ mod tests {
         });
         sys.expect_reboot().never();
 
-        apply(&sys, root, 1);
+        apply(&sys, root, 1, &std::sync::Mutex::new(()));
 
         assert_eq!(
             Slots::new(root).active(),
@@ -1149,7 +1260,7 @@ mod tests {
         });
         sys.expect_reboot().never();
 
-        apply(&sys, root, 1);
+        apply(&sys, root, 1, &std::sync::Mutex::new(()));
 
         assert!(
             good.join("onvif-rust.bin").exists(),
@@ -1178,7 +1289,7 @@ mod tests {
         sys.expect_run_to_completion().never();
         sys.expect_reboot().never();
 
-        apply(&sys, root, 1);
+        apply(&sys, root, 1, &std::sync::Mutex::new(()));
 
         assert_eq!(
             Trial::find(root),

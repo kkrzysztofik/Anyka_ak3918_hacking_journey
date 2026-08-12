@@ -321,12 +321,14 @@ fn run_slot(slot_b_present: bool, pointer: Option<&str>) -> SlotOutcome {
         std::thread::sleep(std::time::Duration::from_millis(20));
     };
 
-    let _ = child.wait().expect("wait config.sh");
-    // SAFETY: child_pid is our own spawned sh; a negative pid targets its
-    // process group (the backgrounded respawn loop).
+    // Signal before reaping. After `wait` the pid is free for reuse, and a
+    // negative pid would then target an unrelated process group.
+    // SAFETY: child_pid is the still-unreaped sh this test spawned; the
+    // negative pid targets its process group (the backgrounded respawn loop).
     unsafe {
         libc::kill(-child_pid, libc::SIGKILL);
     }
+    let _ = child.wait().expect("wait config.sh");
     outcome
 }
 
