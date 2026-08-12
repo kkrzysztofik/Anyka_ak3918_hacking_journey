@@ -57,7 +57,11 @@ pub async fn handle_get_device_information(
     Ok(GetDeviceInformationResponse {
         manufacturer: info.manufacturer,
         model: info.model,
-        firmware_version: info.firmware_version,
+        // The running build's git describe, not a config string that drifts.
+        // What the config carries is the device-family firmware the vendor
+        // flashed; what operators and the diagnostics page need is the version
+        // of *this* bundle.
+        firmware_version: crate::build_version().to_string(),
         serial_number: info.serial_number,
         hardware_id: info.hardware_id,
     })
@@ -403,6 +407,11 @@ mod tests {
         // Default values from config - these should always be present
         assert_eq!(response.manufacturer, "Anyka");
         assert_eq!(response.model, "AK3918 Camera");
+        assert_eq!(
+            response.firmware_version,
+            crate::build_version(),
+            "FirmwareVersion must report the build's git describe"
+        );
         assert!(!response.firmware_version.is_empty());
     }
 

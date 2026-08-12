@@ -52,6 +52,13 @@ pub fn allocated() -> usize {
     ALLOCATOR.allocated()
 }
 
+/// `git describe` at build time — the version reported as `FirmwareVersion`
+/// and in `/api/diagnostics`. Emitted by `build.rs`; never missing, so this
+/// can be `env!` rather than `option_env!`.
+pub fn build_version() -> &'static str {
+    env!("ANYKA_BUILD_VERSION")
+}
+
 pub mod app;
 pub mod lifecycle;
 
