@@ -40,7 +40,7 @@ pnpm lint
 
 These were captured from `.198` on 2026-08-11 and are used verbatim as test fixtures. Do not invent different ones — the point is that they came off the actual kernel.
 
-```
+```text
 /proc/stat    → cpu  4169306 0 2746808 33139786 9423 0 91014 0 0 0
 /proc/uptime  → 421240.95 351066.01
 /proc/meminfo → MemTotal: 36540 kB / MemFree: 2756 kB / Buffers: 4104 kB / Cached: 18356 kB

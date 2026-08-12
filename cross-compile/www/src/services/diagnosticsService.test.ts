@@ -45,7 +45,7 @@ describe('diagnosticsService', () => {
   });
 
   describe('getDiagnostics', () => {
-    it('should return a parsed diagnostics snapshot', async () => {
+    it('test_getDiagnostics_ok_response_returns_parsed_snapshot', async () => {
       vi.mocked(authorizedFetch).mockResolvedValue(makeResponse(MOCK_DIAGNOSTICS));
 
       const result = await getDiagnostics();
@@ -60,7 +60,7 @@ describe('diagnosticsService', () => {
       expect(result.degraded_services).toHaveLength(0);
     });
 
-    it('should send the Authorization header via authorizedFetch', async () => {
+    it('test_getDiagnostics_request_sends_authorization_via_authorizedFetch', async () => {
       vi.mocked(authorizedFetch).mockResolvedValue(makeResponse(MOCK_DIAGNOSTICS));
 
       await getDiagnostics();
@@ -71,7 +71,7 @@ describe('diagnosticsService', () => {
       );
     });
 
-    it('should forward the AbortSignal to authorizedFetch', async () => {
+    it('test_getDiagnostics_abort_signal_forwards_to_authorizedFetch', async () => {
       vi.mocked(authorizedFetch).mockResolvedValue(makeResponse(MOCK_DIAGNOSTICS));
       const controller = new AbortController();
 
@@ -81,7 +81,7 @@ describe('diagnosticsService', () => {
       expect(init.signal).toBe(controller.signal);
     });
 
-    it('should throw when the response is not ok', async () => {
+    it('test_getDiagnostics_non_ok_response_throws_api_error', async () => {
       vi.mocked(authorizedFetch).mockResolvedValue(
         makeResponse({ error: 'internal error' }, 500),
       );
@@ -89,15 +89,23 @@ describe('diagnosticsService', () => {
       await expect(getDiagnostics()).rejects.toThrow(ApiError);
     });
 
-    it('should throw when the response shape is invalid', async () => {
+    it('test_getDiagnostics_invalid_shape_throws_api_error', async () => {
       vi.mocked(authorizedFetch).mockResolvedValue(makeResponse({ status: 'healthy' }));
+
+      await expect(getDiagnostics()).rejects.toThrow(ApiError);
+    });
+
+    it('test_getDiagnostics_invalid_json_throws_api_error', async () => {
+      vi.mocked(authorizedFetch).mockResolvedValue(
+        new Response('not json', { status: 200, headers: { 'Content-Type': 'application/json' } }),
+      );
 
       await expect(getDiagnostics()).rejects.toThrow(ApiError);
     });
   });
 
   describe('getLogs', () => {
-    it('should encode source and level as query parameters', async () => {
+    it('test_getLogs_with_level_encodes_source_and_level_query_params', async () => {
       vi.mocked(authorizedFetch).mockResolvedValue(
         makeResponse(['line1', 'line2']),
       );
@@ -109,7 +117,7 @@ describe('diagnosticsService', () => {
       expect(url).toContain('level=info');
     });
 
-    it('should include the lines parameter', async () => {
+    it('test_getLogs_with_lines_includes_lines_query_param', async () => {
       vi.mocked(authorizedFetch).mockResolvedValue(makeResponse(['a']));
 
       await getLogs('vendor_daemon', undefined, 50);
@@ -118,7 +126,7 @@ describe('diagnosticsService', () => {
       expect(url).toContain('lines=50');
     });
 
-    it('should return empty array on 404 (missing source is normal)', async () => {
+    it('test_getLogs_404_response_returns_empty_array', async () => {
       vi.mocked(authorizedFetch).mockResolvedValue(
         new Response('Not Found', { status: 404 }),
       );
@@ -128,7 +136,7 @@ describe('diagnosticsService', () => {
       expect(result).toEqual([]);
     });
 
-    it('should return parsed log lines array', async () => {
+    it('test_getLogs_ok_response_returns_parsed_log_lines', async () => {
       const lines = ['[INFO] started', '[WARN] low memory'];
       vi.mocked(authorizedFetch).mockResolvedValue(makeResponse(lines));
 
@@ -137,9 +145,17 @@ describe('diagnosticsService', () => {
       expect(result).toEqual(lines);
     });
 
-    it('should throw on non-404 errors', async () => {
+    it('test_getLogs_non_404_error_throws_api_error', async () => {
       vi.mocked(authorizedFetch).mockResolvedValue(
         new Response('Server Error', { status: 500 }),
+      );
+
+      await expect(getLogs('onvif_rust')).rejects.toThrow(ApiError);
+    });
+
+    it('test_getLogs_invalid_json_throws_api_error', async () => {
+      vi.mocked(authorizedFetch).mockResolvedValue(
+        new Response('not json', { status: 200, headers: { 'Content-Type': 'application/json' } }),
       );
 
       await expect(getLogs('onvif_rust')).rejects.toThrow(ApiError);

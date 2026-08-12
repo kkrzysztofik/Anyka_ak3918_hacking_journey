@@ -417,4 +417,165 @@ mod tests {
         assert_eq!(snap.status, "healthy");
         assert!(snap.stream_frame_age_ms.is_none());
     }
+
+    #[tokio::test]
+    async fn test_snapshot_within_min_delta_reuses_baseline() {
+        if !std::path::Path::new("/proc/stat").exists() {
+            return;
+        }
+        let state = DiagnosticsState::new(Instant::now(), None, Vec::new());
+        let _ = state.snapshot().await;
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        let baseline = state.snapshot().await;
+        let too_soon = state.snapshot().await;
+        assert!(
+            too_soon.network.is_none(),
+            "polls closer than MIN_DELTA must not emit inflated network rates"
+        );
+        let _ = baseline;
+    }
+
+    fn sample_vision() -> crate::platform::VisionDiagnostics {
+        crate::platform::VisionDiagnostics {
+            mode: Some("night".to_string()),
+            ae_luma: Some(42),
+            ain0: Some(100),
+            ir_led: Some(true),
+            ircut_a: Some(false),
+            ircut_b: Some(true),
+            white_led: None,
+            supported: crate::platform::VisionSupported {
+                ir_led: true,
+                ircut: true,
+                white_led: false,
+            },
+        }
+    }
+
+    struct PlatformWithImaging {
+        inner: std::sync::Arc<crate::platform::stub::StubPlatform>,
+        imaging: std::sync::Arc<dyn crate::platform::ImagingControl>,
+    }
+
+    #[async_trait::async_trait]
+    impl crate::platform::Platform for PlatformWithImaging {
+        async fn get_device_info(
+            &self,
+        ) -> crate::platform::PlatformResult<crate::platform::DeviceInfo> {
+            self.inner.get_device_info().await
+        }
+
+        fn video_input(&self) -> std::sync::Arc<dyn crate::platform::VideoInput> {
+            self.inner.video_input()
+        }
+
+        fn video_encoder(&self) -> std::sync::Arc<dyn crate::platform::VideoEncoder> {
+            self.inner.video_encoder()
+        }
+
+        fn audio_input(&self) -> std::sync::Arc<dyn crate::platform::AudioInput> {
+            self.inner.audio_input()
+        }
+
+        fn audio_encoder(&self) -> std::sync::Arc<dyn crate::platform::AudioEncoder> {
+            self.inner.audio_encoder()
+        }
+
+        fn ptz_control(&self) -> Option<std::sync::Arc<dyn crate::platform::PTZControl>> {
+            self.inner.ptz_control()
+        }
+
+        fn imaging_control(&self) -> Option<std::sync::Arc<dyn crate::platform::ImagingControl>> {
+            Some(std::sync::Arc::clone(&self.imaging))
+        }
+
+        fn video_control(&self) -> Option<std::sync::Arc<dyn crate::platform::VideoControl>> {
+            self.inner.video_control()
+        }
+
+        fn network_info(&self) -> Option<std::sync::Arc<dyn crate::platform::NetworkInfo>> {
+            self.inner.network_info()
+        }
+
+        fn is_initialized(&self) -> bool {
+            self.inner.is_initialized()
+        }
+
+        async fn initialize(&self) -> crate::platform::PlatformResult<()> {
+            self.inner.initialize().await
+        }
+
+        async fn shutdown(&self) -> crate::platform::PlatformResult<()> {
+            self.inner.shutdown().await
+        }
+
+        fn max_sensor_resolution(
+            &self,
+        ) -> crate::platform::PlatformResult<crate::platform::Resolution> {
+            self.inner.max_sensor_resolution()
+        }
+    }
+
+    fn platform_with_imaging(
+        imaging: std::sync::Arc<dyn crate::platform::ImagingControl>,
+    ) -> std::sync::Arc<dyn crate::platform::Platform> {
+        std::sync::Arc::new(PlatformWithImaging {
+            inner: std::sync::Arc::new(crate::platform::stub::StubPlatform::new()),
+            imaging,
+        })
+    }
+
+    #[tokio::test]
+    async fn test_snapshot_vision_ok_some_reaches_snapshot() {
+        use crate::platform::MockImagingControl;
+
+        let expected = sample_vision();
+        let mut imaging = MockImagingControl::new();
+        imaging
+            .expect_vision_diagnostics()
+            .returning(move || Ok(Some(expected.clone())));
+
+        let state = DiagnosticsState::new(
+            Instant::now(),
+            Some(platform_with_imaging(std::sync::Arc::new(imaging))),
+            Vec::new(),
+        );
+        let snap = state.snapshot().await;
+        assert_eq!(snap.vision.as_ref(), Some(&sample_vision()));
+    }
+
+    #[tokio::test]
+    async fn test_snapshot_vision_ok_none_returns_none() {
+        use crate::platform::MockImagingControl;
+
+        let mut imaging = MockImagingControl::new();
+        imaging.expect_vision_diagnostics().returning(|| Ok(None));
+
+        let state = DiagnosticsState::new(
+            Instant::now(),
+            Some(platform_with_imaging(std::sync::Arc::new(imaging))),
+            Vec::new(),
+        );
+        let snap = state.snapshot().await;
+        assert!(snap.vision.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_snapshot_vision_err_returns_none_without_failing() {
+        use crate::platform::{MockImagingControl, PlatformError};
+
+        let mut imaging = MockImagingControl::new();
+        imaging
+            .expect_vision_diagnostics()
+            .returning(|| Err(PlatformError::HardwareFailure("vision read failed".into())));
+
+        let state = DiagnosticsState::new(
+            Instant::now(),
+            Some(platform_with_imaging(std::sync::Arc::new(imaging))),
+            Vec::new(),
+        );
+        let snap = state.snapshot().await;
+        assert!(snap.vision.is_none());
+        assert_eq!(snap.status, "healthy");
+    }
 }

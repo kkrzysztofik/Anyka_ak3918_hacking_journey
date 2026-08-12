@@ -72,7 +72,7 @@ tab costs the camera exactly zero. No server-side background sampler.
 
 Two routes on the existing axum router, ahead of the static fallback:
 
-```
+```text
 GET /api/diagnostics
 GET /api/logs?source=<enum>&level=<lvl>&lines=<n>
 ```

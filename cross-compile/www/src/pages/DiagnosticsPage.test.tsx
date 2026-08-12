@@ -68,19 +68,19 @@ describe('DiagnosticsPage', () => {
     vi.mocked(getLogs).mockResolvedValue([]);
   });
 
-  it('should render page title and description', () => {
+  it('test_DiagnosticsPage_render_shows_title_and_description', () => {
     renderWithProviders(<DiagnosticsPage />);
     expect(screen.getByTestId('diagnostics-title')).toBeInTheDocument();
     expect(screen.getByTestId('diagnostics-description')).toBeInTheDocument();
   });
 
   describe('CPU stat card', () => {
-    it('should render real cpu percent', () => {
+    it('test_DiagnosticsPage_cpu_percent_present_renders_value', () => {
       renderWithProviders(<DiagnosticsPage />);
       expect(screen.getByTestId('diagnostics-stat-cpu-usage-value')).toHaveTextContent('45%');
     });
 
-    it('should show em-dash when cpu_percent is null', () => {
+    it('test_DiagnosticsPage_null_cpu_percent_renders_em_dash', () => {
       vi.mocked(useDiagnostics).mockReturnValue(makeResult({ cpu_percent: null }));
       renderWithProviders(<DiagnosticsPage />);
       expect(screen.getByTestId('diagnostics-stat-cpu-usage-value')).toHaveTextContent('\u2014');
@@ -88,20 +88,20 @@ describe('DiagnosticsPage', () => {
   });
 
   describe('Memory stat card', () => {
-    it('should render memory in megabytes', () => {
+    it('test_DiagnosticsPage_memory_present_renders_megabytes', () => {
       renderWithProviders(<DiagnosticsPage />);
       // 18432 KB → 18 MB
       expect(screen.getByTestId('diagnostics-stat-memory-value')).toHaveTextContent('18 MB');
     });
 
-    it('should show MB / MB subvalue', () => {
+    it('test_DiagnosticsPage_memory_present_renders_used_total_subvalue', () => {
       renderWithProviders(<DiagnosticsPage />);
       expect(screen.getByTestId('diagnostics-stat-memory-subvalue')).toHaveTextContent(
         '18 MB / 36 MB',
       );
     });
 
-    it('should show em-dash when memory is null', () => {
+    it('test_DiagnosticsPage_null_memory_renders_em_dash', () => {
       vi.mocked(useDiagnostics).mockReturnValue(makeResult({ memory: null }));
       renderWithProviders(<DiagnosticsPage />);
       expect(screen.getByTestId('diagnostics-stat-memory-value')).toHaveTextContent('\u2014');
@@ -109,18 +109,18 @@ describe('DiagnosticsPage', () => {
   });
 
   describe('Storage stat card', () => {
-    it('should render storage card', () => {
+    it('test_DiagnosticsPage_storage_card_renders', () => {
       renderWithProviders(<DiagnosticsPage />);
       expect(screen.getByTestId('diagnostics-stat-storage')).toBeInTheDocument();
     });
 
-    it('should display storage in MB', () => {
+    it('test_DiagnosticsPage_storage_present_renders_megabytes', () => {
       renderWithProviders(<DiagnosticsPage />);
       // 524288 KB → 512 MB
       expect(screen.getByTestId('diagnostics-stat-storage-value')).toHaveTextContent('512 MB');
     });
 
-    it('should show em-dash when storage is null', () => {
+    it('test_DiagnosticsPage_null_storage_renders_em_dash', () => {
       vi.mocked(useDiagnostics).mockReturnValue(makeResult({ storage: null }));
       renderWithProviders(<DiagnosticsPage />);
       expect(screen.getByTestId('diagnostics-stat-storage-value')).toHaveTextContent('\u2014');
@@ -128,21 +128,21 @@ describe('DiagnosticsPage', () => {
   });
 
   describe('Temperature card', () => {
-    it('should NOT render a temperature stat card', () => {
+    it('test_DiagnosticsPage_temperature_card_not_rendered', () => {
       renderWithProviders(<DiagnosticsPage />);
       expect(screen.queryByTestId('diagnostics-stat-temperature')).not.toBeInTheDocument();
     });
   });
 
   describe('System Status card', () => {
-    it('should show Healthy when status is healthy', () => {
+    it('test_DiagnosticsPage_healthy_status_renders_healthy_label', () => {
       renderWithProviders(<DiagnosticsPage />);
       expect(screen.getByTestId('diagnostics-stat-system-status-value')).toHaveTextContent(
         'Healthy',
       );
     });
 
-    it('should show raw status string when not healthy', () => {
+    it('test_DiagnosticsPage_degraded_status_renders_raw_status_string', () => {
       vi.mocked(useDiagnostics).mockReturnValue(makeResult({ status: 'degraded' }));
       renderWithProviders(<DiagnosticsPage />);
       expect(screen.getByTestId('diagnostics-stat-system-status-value')).toHaveTextContent(
@@ -152,13 +152,13 @@ describe('DiagnosticsPage', () => {
   });
 
   describe('Restart detection', () => {
-    it('should NOT show restart note when gap is within threshold', () => {
+    it('test_DiagnosticsPage_equal_uptime_gap_hides_restart_note', () => {
       // process_s === system_s → no restart
       renderWithProviders(<DiagnosticsPage />);
       expect(screen.queryByTestId('diagnostics-restart-note')).not.toBeInTheDocument();
     });
 
-    it('should flag recent restart when system_s - process_s exceeds threshold', () => {
+    it('test_DiagnosticsPage_large_uptime_gap_shows_restart_note', () => {
       // 7200 - 600 = 6600 s gap → > 300 s threshold; note uses process uptime
       vi.mocked(useDiagnostics).mockReturnValue(
         makeResult({ uptime: { system_s: 7200, process_s: 600 } }),
@@ -169,7 +169,7 @@ describe('DiagnosticsPage', () => {
       expect(note).toHaveTextContent(/Restarted 10m 0s ago/);
     });
 
-    it('should NOT show restart note when gap equals threshold exactly', () => {
+    it('test_DiagnosticsPage_threshold_uptime_gap_hides_restart_note', () => {
       vi.mocked(useDiagnostics).mockReturnValue(
         makeResult({ uptime: { system_s: 3600, process_s: 3300 } }), // gap = 300, not > 300
       );
@@ -179,13 +179,13 @@ describe('DiagnosticsPage', () => {
   });
 
   describe('Uptime rows', () => {
-    it('should render process and system uptime', () => {
+    it('test_DiagnosticsPage_uptime_rows_render', () => {
       renderWithProviders(<DiagnosticsPage />);
       expect(screen.getByTestId('diagnostics-uptime-process')).toBeInTheDocument();
       expect(screen.getByTestId('diagnostics-uptime-system')).toBeInTheDocument();
     });
 
-    it('should format process uptime in human-readable form', () => {
+    it('test_DiagnosticsPage_process_uptime_renders_human_readable', () => {
       // process_s = 3600 → 1h 0m
       renderWithProviders(<DiagnosticsPage />);
       expect(screen.getByTestId('diagnostics-uptime-process')).toHaveTextContent('1h 0m');
@@ -193,7 +193,7 @@ describe('DiagnosticsPage', () => {
   });
 
   describe('Log filter buttons', () => {
-    it('should render all log filter buttons', () => {
+    it('test_DiagnosticsPage_log_filter_buttons_render', () => {
       renderWithProviders(<DiagnosticsPage />);
       expect(screen.getByTestId('diagnostics-log-filter-all')).toBeInTheDocument();
       expect(screen.getByTestId('diagnostics-log-filter-info')).toBeInTheDocument();
@@ -201,7 +201,7 @@ describe('DiagnosticsPage', () => {
       expect(screen.getByTestId('diagnostics-log-filter-error')).toBeInTheDocument();
     });
 
-    it('should handle log filter button clicks', async () => {
+    it('test_DiagnosticsPage_log_filter_buttons_respond_to_clicks', async () => {
       const user = userEvent.setup();
       renderWithProviders(<DiagnosticsPage />);
 
@@ -214,7 +214,7 @@ describe('DiagnosticsPage', () => {
   });
 
   describe('Chart empty state', () => {
-    it('should show empty state when history has fewer than two samples', () => {
+    it('test_DiagnosticsPage_empty_history_shows_chart_empty_states', () => {
       renderWithProviders(<DiagnosticsPage />); // history = []
       expect(screen.getByTestId('diagnostics-cpu-chart-empty')).toBeInTheDocument();
       expect(screen.getByTestId('diagnostics-memory-chart-empty')).toBeInTheDocument();
@@ -223,14 +223,14 @@ describe('DiagnosticsPage', () => {
   });
 
   describe('Export button', () => {
-    it('should render export button', () => {
+    it('test_DiagnosticsPage_export_button_renders', () => {
       renderWithProviders(<DiagnosticsPage />);
       expect(screen.getByTestId('diagnostics-export-button')).toBeInTheDocument();
     });
   });
 
   describe('Charts from history', () => {
-    it('should render CPU sparkline when history has two or more cpu samples', () => {
+    it('test_DiagnosticsPage_cpu_history_renders_sparkline', () => {
       const now = Date.now();
       vi.mocked(useDiagnostics).mockReturnValue(
         makeResult({}, [
@@ -245,17 +245,17 @@ describe('DiagnosticsPage', () => {
       expect(screen.getByTestId('sparkline-legend-cpu-value')).toHaveTextContent('45%');
     });
 
-    it('should show empty state when fewer than two CPU samples are available', () => {
+    it('test_DiagnosticsPage_insufficient_cpu_history_shows_empty_state', () => {
       renderWithProviders(<DiagnosticsPage />); // history = []
       expect(screen.getByTestId('diagnostics-cpu-chart-empty')).toBeInTheDocument();
     });
 
-    it('should show memory chart empty state with zero samples', () => {
+    it('test_DiagnosticsPage_zero_memory_history_shows_empty_state', () => {
       renderWithProviders(<DiagnosticsPage />);
       expect(screen.getByTestId('diagnostics-memory-chart-empty')).toBeInTheDocument();
     });
 
-    it('should render memory sparkline when history has two or more memPct samples', () => {
+    it('test_DiagnosticsPage_memory_history_renders_sparkline', () => {
       const now = Date.now();
       vi.mocked(useDiagnostics).mockReturnValue(
         makeResult({}, [
@@ -271,12 +271,12 @@ describe('DiagnosticsPage', () => {
   });
 
   describe('Stream Health card', () => {
-    it('should render frame age from data', () => {
+    it('test_DiagnosticsPage_frame_age_present_renders_value', () => {
       renderWithProviders(<DiagnosticsPage />); // stream_frame_age_ms = 100
       expect(screen.getByTestId('diagnostics-frame-age')).toHaveTextContent('100 ms');
     });
 
-    it('should show em-dash for frame age when null', () => {
+    it('test_DiagnosticsPage_null_frame_age_renders_em_dash', () => {
       vi.mocked(useDiagnostics).mockReturnValue(
         makeResult({ stream_frame_age_ms: null }),
       );
@@ -284,7 +284,7 @@ describe('DiagnosticsPage', () => {
       expect(screen.getByTestId('diagnostics-frame-age')).toHaveTextContent('\u2014');
     });
 
-    it('should flag stalled stream when frame_age_ms exceeds 5000 ms', () => {
+    it('test_DiagnosticsPage_stale_frame_age_shows_stalled_indicator', () => {
       vi.mocked(useDiagnostics).mockReturnValue(
         makeResult({ stream_frame_age_ms: 6000 }),
       );
@@ -292,18 +292,18 @@ describe('DiagnosticsPage', () => {
       expect(screen.getByTestId('diagnostics-stream-stalled')).toBeInTheDocument();
     });
 
-    it('should NOT flag stalled stream when frame_age_ms is within threshold', () => {
+    it('test_DiagnosticsPage_fresh_frame_age_hides_stalled_indicator', () => {
       renderWithProviders(<DiagnosticsPage />); // frame_age_ms = 100
       expect(screen.queryByTestId('diagnostics-stream-stalled')).not.toBeInTheDocument();
     });
 
-    it('should render components list when components are present', () => {
+    it('test_DiagnosticsPage_components_present_renders_list', () => {
       renderWithProviders(<DiagnosticsPage />); // components = [{ name: 'onvif', status: 'healthy' }]
       expect(screen.getByTestId('diagnostics-components-list')).toBeInTheDocument();
       expect(screen.getByTestId('diagnostics-component-onvif')).toBeInTheDocument();
     });
 
-    it('should NOT render components list when components array is empty', () => {
+    it('test_DiagnosticsPage_empty_components_hides_list', () => {
       vi.mocked(useDiagnostics).mockReturnValue(makeResult({ components: [] }));
       renderWithProviders(<DiagnosticsPage />);
       expect(screen.queryByTestId('diagnostics-components-list')).not.toBeInTheDocument();
@@ -311,20 +311,20 @@ describe('DiagnosticsPage', () => {
   });
 
   describe('Network rates in Device Information', () => {
-    it('should render Download and Upload rows when network is present', () => {
+    it('test_DiagnosticsPage_network_present_renders_download_upload', () => {
       renderWithProviders(<DiagnosticsPage />); // network: { rx_bps: 1_000_000, tx_bps: 500_000 }
       expect(screen.getByTestId('diagnostics-network-download')).toHaveTextContent('1000 kbps');
       expect(screen.getByTestId('diagnostics-network-upload')).toHaveTextContent('500 kbps');
     });
 
-    it('should show em-dash for Download and Upload when network is null', () => {
+    it('test_DiagnosticsPage_null_network_renders_em_dash', () => {
       vi.mocked(useDiagnostics).mockReturnValue(makeResult({ network: null }));
       renderWithProviders(<DiagnosticsPage />);
       expect(screen.getByTestId('diagnostics-network-download')).toHaveTextContent('\u2014');
       expect(screen.getByTestId('diagnostics-network-upload')).toHaveTextContent('\u2014');
     });
 
-    it('should always render download and upload row containers', () => {
+    it('test_DiagnosticsPage_network_rows_always_render', () => {
       renderWithProviders(<DiagnosticsPage />);
       expect(screen.getByTestId('diagnostics-network-download-row')).toBeInTheDocument();
       expect(screen.getByTestId('diagnostics-network-upload-row')).toBeInTheDocument();
@@ -332,7 +332,7 @@ describe('DiagnosticsPage', () => {
   });
 
   describe('Log panel', () => {
-    it('should render log panel with source selector and level buttons', () => {
+    it('test_DiagnosticsPage_log_panel_renders_controls', () => {
       renderWithProviders(<DiagnosticsPage />);
       expect(screen.getByTestId('diagnostics-system-logs-title')).toBeInTheDocument();
       expect(screen.getByTestId('diagnostics-log-source-select')).toBeInTheDocument();
@@ -342,7 +342,7 @@ describe('DiagnosticsPage', () => {
       expect(screen.getByTestId('diagnostics-log-filter-error')).toBeInTheDocument();
     });
 
-    it('should render fetched log lines', async () => {
+    it('test_DiagnosticsPage_log_lines_render_after_fetch', async () => {
       vi.mocked(getLogs).mockResolvedValue([
         '2026-08-11 INFO Service started',
         '2026-08-11 WARN High latency',
@@ -356,7 +356,7 @@ describe('DiagnosticsPage', () => {
       );
     });
 
-    it('should show unavailable message when source returns empty array', async () => {
+    it('test_DiagnosticsPage_empty_log_source_shows_unavailable_message', async () => {
       vi.mocked(getLogs).mockResolvedValue([]);
       renderWithProviders(<DiagnosticsPage />);
       await waitFor(() => {
@@ -364,7 +364,7 @@ describe('DiagnosticsPage', () => {
       });
     });
 
-    it('should call getLogs with level when level filter is changed', async () => {
+    it('test_DiagnosticsPage_level_filter_calls_getLogs_with_level', async () => {
       const user = userEvent.setup();
       renderWithProviders(<DiagnosticsPage />);
 
@@ -381,7 +381,7 @@ describe('DiagnosticsPage', () => {
       });
     });
 
-    it('should refetch logs when source is changed via Select', async () => {
+    it('test_DiagnosticsPage_source_change_refetches_logs', async () => {
       const user = userEvent.setup();
       renderWithProviders(<DiagnosticsPage />);
 
@@ -403,7 +403,7 @@ describe('DiagnosticsPage', () => {
       });
     });
 
-    it('should download loaded log lines on export click', async () => {
+    it('test_DiagnosticsPage_export_click_downloads_log_lines', async () => {
       const createObjectURL = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:test');
       const revokeObjectURL = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
       const clickMock = vi.fn();
@@ -444,7 +444,7 @@ describe('DiagnosticsPage', () => {
       supported: { ir_led: true, ircut: true, white_led: true },
     };
 
-    it('should render vision card title', () => {
+    it('test_DiagnosticsPage_vision_card_title_renders', () => {
       renderWithProviders(<DiagnosticsPage />);
       expect(screen.getByTestId('diagnostics-vision-title')).toBeInTheDocument();
     });
@@ -457,13 +457,13 @@ describe('DiagnosticsPage', () => {
       ['diagnostics-vision-ircut-a', 'Off'],
       ['diagnostics-vision-ircut-b', 'On'],
       ['diagnostics-vision-white-led', '\u2014'],
-    ])('should show %s when vision is present', (testId, expected) => {
+    ])('test_DiagnosticsPage_vision_present_renders_%s', (testId, expected) => {
       vi.mocked(useDiagnostics).mockReturnValue(makeResult({ vision: FULL_VISION }));
       renderWithProviders(<DiagnosticsPage />);
       expect(screen.getByTestId(testId)).toHaveTextContent(expected);
     });
 
-    it('should show n/a for ir_led when not supported', () => {
+    it('test_DiagnosticsPage_unsupported_ir_led_shows_na', () => {
       const vision: NonNullable<Diagnostics['vision']> = {
         ...FULL_VISION,
         ir_led: true,
@@ -474,7 +474,7 @@ describe('DiagnosticsPage', () => {
       expect(screen.getByTestId('diagnostics-vision-ir-led')).toHaveTextContent('n/a');
     });
 
-    it('should show n/a for ircut_a and ircut_b when ircut is not supported', () => {
+    it('test_DiagnosticsPage_unsupported_ircut_shows_na', () => {
       const vision: NonNullable<Diagnostics['vision']> = {
         ...FULL_VISION,
         supported: { ...FULL_VISION.supported, ircut: false },
@@ -485,7 +485,7 @@ describe('DiagnosticsPage', () => {
       expect(screen.getByTestId('diagnostics-vision-ircut-b')).toHaveTextContent('n/a');
     });
 
-    it('should show n/a for white_led when not supported', () => {
+    it('test_DiagnosticsPage_unsupported_white_led_shows_na', () => {
       const vision: NonNullable<Diagnostics['vision']> = {
         ...FULL_VISION,
         white_led: true,
@@ -496,18 +496,18 @@ describe('DiagnosticsPage', () => {
       expect(screen.getByTestId('diagnostics-vision-white-led')).toHaveTextContent('n/a');
     });
 
-    it('should show em-dash for mode when vision is null', () => {
+    it('test_DiagnosticsPage_null_vision_mode_renders_em_dash', () => {
       renderWithProviders(<DiagnosticsPage />); // BASE_DIAG has vision: null
       expect(screen.getByTestId('diagnostics-vision-mode')).toHaveTextContent('\u2014');
     });
 
-    it('should show em-dash for ae_luma and ain0 when vision is null', () => {
+    it('test_DiagnosticsPage_null_vision_sensors_renders_em_dash', () => {
       renderWithProviders(<DiagnosticsPage />);
       expect(screen.getByTestId('diagnostics-vision-ae-luma')).toHaveTextContent('\u2014');
       expect(screen.getByTestId('diagnostics-vision-ain0')).toHaveTextContent('\u2014');
     });
 
-    it('should show em-dash for all lamps when vision is null', () => {
+    it('test_DiagnosticsPage_null_vision_lamps_renders_em_dash', () => {
       renderWithProviders(<DiagnosticsPage />);
       expect(screen.getByTestId('diagnostics-vision-ir-led')).toHaveTextContent('\u2014');
       expect(screen.getByTestId('diagnostics-vision-ircut-a')).toHaveTextContent('\u2014');
@@ -515,7 +515,7 @@ describe('DiagnosticsPage', () => {
       expect(screen.getByTestId('diagnostics-vision-white-led')).toHaveTextContent('\u2014');
     });
 
-    it('should show em-dash for mode when vision.mode is null', () => {
+    it('test_DiagnosticsPage_null_vision_mode_field_renders_em_dash', () => {
       vi.mocked(useDiagnostics).mockReturnValue(
         makeResult({ vision: { ...FULL_VISION, mode: null } }),
       );

@@ -99,7 +99,12 @@ export async function getDiagnostics(signal?: AbortSignal): Promise<Diagnostics>
     );
   }
 
-  const payload: unknown = await response.json();
+  let payload: unknown;
+  try {
+    payload = await response.json();
+  } catch {
+    throw new ApiError('Invalid JSON in diagnostics response', response.status, '');
+  }
   if (!isDiagnostics(payload)) {
     throw new ApiError('Diagnostics response has an unexpected shape', response.status, '');
   }
@@ -141,7 +146,12 @@ export async function getLogs(
     );
   }
 
-  const payload: unknown = await response.json();
+  let payload: unknown;
+  try {
+    payload = await response.json();
+  } catch {
+    throw new ApiError('Invalid JSON in logs response', response.status, '');
+  }
   if (!isLogLines(payload)) {
     throw new ApiError('Logs response has an unexpected shape', response.status, '');
   }

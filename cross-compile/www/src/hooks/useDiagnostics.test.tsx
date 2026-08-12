@@ -50,7 +50,7 @@ describe('useDiagnostics', () => {
     vi.mocked(getDiagnostics).mockResolvedValue(MOCK_DIAGNOSTICS);
   });
 
-  it('should return snapshot from query', async () => {
+  it('test_useDiagnostics_query_success_returns_snapshot', async () => {
     const { wrapper } = makeWrapper();
     const { result } = renderHook(() => useDiagnostics(), { wrapper });
 
@@ -59,7 +59,7 @@ describe('useDiagnostics', () => {
     expect(result.current.data).toEqual(MOCK_DIAGNOSTICS);
   });
 
-  it('should append one history point per update', async () => {
+  it('test_useDiagnostics_new_data_appends_single_history_point', async () => {
     const { wrapper } = makeWrapper();
     const { result } = renderHook(() => useDiagnostics(), { wrapper });
 
@@ -74,7 +74,7 @@ describe('useDiagnostics', () => {
   });
 
   it(
-    'should cap history at max samples (60)',
+    'test_useDiagnostics_many_updates_caps_history_at_sixty_samples',
     async () => {
       const { queryClient, wrapper } = makeWrapper();
       const { result } = renderHook(() => useDiagnostics(), { wrapper });
@@ -93,7 +93,7 @@ describe('useDiagnostics', () => {
     20_000,
   );
 
-  it('should not duplicate history on rerender without dataUpdatedAt change', async () => {
+  it('test_useDiagnostics_rerender_without_data_update_does_not_duplicate_history', async () => {
     const { wrapper } = makeWrapper();
     const { result, rerender } = renderHook(() => useDiagnostics(), { wrapper });
 

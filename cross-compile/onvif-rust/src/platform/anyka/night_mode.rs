@@ -402,7 +402,14 @@ impl NightModeController {
 
     /// The day/night state the hardware was last driven to, or `None` if this
     /// controller has not driven it yet.
+    ///
+    /// While an ISP resync is pending after a failed `set_ir_filter`, returns
+    /// `None` so diagnostics do not report a pipeline mode the ISP has not
+    /// actually reached yet.
     pub(crate) async fn current_mode(&self) -> Option<DayNight> {
+        if self.isp_pending.lock().await.is_some() {
+            return None;
+        }
         self.state.lock().await.current
     }
 
@@ -928,6 +935,36 @@ mod tests {
         assert_eq!(
             std::fs::read_to_string(paths.node(Node::IrLed)).unwrap(),
             "1"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_live_diagnostics_mode_none_while_isp_sync_pending() {
+        use crate::hal::common::imaging::MockImagingHalTrait;
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let paths = NodePaths::rooted(dir.path(), dir.path());
+        for n in [Node::IrCutA, Node::IrCutB, Node::IrLed] {
+            std::fs::write(paths.node(n), "9").unwrap();
+        }
+
+        let mut ffi = MockImagingHalTrait::new();
+        ffi.expect_set_ir_filter().times(1).returning(|_| -1);
+        ffi.expect_get_ae_luma().times(1..).returning(|| None);
+
+        let ctl = NightModeController::new(
+            paths,
+            test_config(),
+            std::sync::Arc::new(ffi),
+            crate::onvif::types::common::IrCutFilterMode::AUTO,
+            None,
+        );
+        let _ = ctl.apply(DayNight::Night).await;
+
+        let vision = ctl.live_diagnostics().await;
+        assert!(
+            vision.mode.is_none(),
+            "pending ISP sync must not report night while the filter is still in day mode"
         );
     }
 

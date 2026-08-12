@@ -10,7 +10,7 @@
 
 ---
 
-### Task 1: Vision types + ImagingControl hook
+## Task 1: Vision types + ImagingControl hook
 
 **Files:**
 - Modify: `cross-compile/onvif-rust/src/platform/common/traits.rs`
@@ -92,7 +92,7 @@ EOF
 
 ---
 
-### Task 2: NightModeController::live_diagnostics
+## Task 2: NightModeController::live_diagnostics
 
 **Files:**
 - Modify: `cross-compile/onvif-rust/src/platform/anyka/night_mode.rs`
@@ -197,7 +197,7 @@ EOF
 
 ---
 
-### Task 3: Wire vision into DiagnosticsState snapshot
+## Task 3: Wire vision into DiagnosticsState snapshot
 
 **Files:**
 - Modify: `cross-compile/onvif-rust/src/diagnostics/state.rs`
@@ -264,7 +264,7 @@ EOF
 
 ---
 
-### Task 4: Frontend types + Device Information net text
+## Task 4: Frontend types + Device Information net text
 
 **Files:**
 - Modify: `cross-compile/www/src/services/diagnosticsService.ts`
@@ -307,7 +307,7 @@ EOF
 
 ---
 
-### Task 5: Day / Night Vision card
+## Task 5: Day / Night Vision card
 
 **Files:**
 - Modify: `cross-compile/www/src/pages/DiagnosticsPage.tsx`
@@ -342,7 +342,7 @@ EOF
 
 ---
 
-### Task 6: Quality gates + deploy to `.198`
+## Task 6: Quality gates + deploy to `.198`
 
 **Step 1: Rust gates**
 

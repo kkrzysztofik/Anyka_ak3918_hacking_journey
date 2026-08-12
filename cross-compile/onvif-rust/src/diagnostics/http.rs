@@ -73,7 +73,7 @@ pub async fn handle_logs(Query(query): Query<LogQuery>) -> Response {
         }
         Err(e) => {
             tracing::warn!(error = %e, "log tail task failed");
-            (StatusCode::NOT_FOUND, "log source unavailable").into_response()
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
         }
     }
 }

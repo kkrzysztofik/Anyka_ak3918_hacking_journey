@@ -448,19 +448,19 @@ function DeviceInfoCard({ data }: Readonly<{ data: Diagnostics | undefined }>) {
               className="flex items-center justify-between"
               data-testid="diagnostics-uptime-process-row"
             >
-              <span className="text-muted-foreground">Process Uptime</span>
-              <span className="font-mono text-white" data-testid="diagnostics-uptime-process">
+              <dt className="text-muted-foreground">Process Uptime</dt>
+              <dd className="font-mono text-white" data-testid="diagnostics-uptime-process">
                 {processUptime}
-              </span>
+              </dd>
             </div>
             <div
               className="mt-1 flex items-center justify-between"
               data-testid="diagnostics-uptime-system-row"
             >
-              <span className="text-muted-foreground">System Uptime</span>
-              <span className="font-mono text-white" data-testid="diagnostics-uptime-system">
+              <dt className="text-muted-foreground">System Uptime</dt>
+              <dd className="font-mono text-white" data-testid="diagnostics-uptime-system">
                 {systemUptime}
-              </span>
+              </dd>
             </div>
             {hasRecentRestart && data && (
               <p className="mt-2 text-xs text-yellow-400" data-testid="diagnostics-restart-note">
@@ -473,19 +473,19 @@ function DeviceInfoCard({ data }: Readonly<{ data: Diagnostics | undefined }>) {
               className="flex items-center justify-between"
               data-testid="diagnostics-network-download-row"
             >
-              <span className="text-muted-foreground">Download</span>
-              <span className="font-mono text-white" data-testid="diagnostics-network-download">
+              <dt className="text-muted-foreground">Download</dt>
+              <dd className="font-mono text-white" data-testid="diagnostics-network-download">
                 {data?.network != null ? formatKbps(data.network.rx_bps) : '\u2014'}
-              </span>
+              </dd>
             </div>
             <div
               className="mt-1 flex items-center justify-between"
               data-testid="diagnostics-network-upload-row"
             >
-              <span className="text-muted-foreground">Upload</span>
-              <span className="font-mono text-white" data-testid="diagnostics-network-upload">
+              <dt className="text-muted-foreground">Upload</dt>
+              <dd className="font-mono text-white" data-testid="diagnostics-network-upload">
                 {data?.network != null ? formatKbps(data.network.tx_bps) : '\u2014'}
-              </span>
+              </dd>
             </div>
           </div>
         </dl>
