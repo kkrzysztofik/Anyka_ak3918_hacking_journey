@@ -8,6 +8,7 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Duration;
 
 use axum::body::Body;
 use axum::extract::Extension;
@@ -19,6 +20,25 @@ use tokio::io::AsyncWriteExt;
 /// Spool directory under `[update] root` (`/mnt/anyka_hack`), matching the
 /// anyka-init applier's default.
 pub const DEFAULT_SPOOL_ROOT: &str = "/mnt/anyka_hack/spool";
+
+/// Ceiling on an accepted bundle.
+///
+/// The route is deliberately exempt from the server's `DefaultBodyLimit`,
+/// because axum's `Body` extractor streams without consulting it — so without
+/// an explicit counter here the write is unbounded and a stuck or hostile
+/// client fills the card. A full `/mnt` takes logging, the storm-guard state
+/// file and the spool itself down with it. Bundles are ~19 MB; 64 MB leaves
+/// generous headroom for a bigger payload without leaving the door open.
+pub const MAX_BUNDLE_BYTES: u64 = 64 * 1024 * 1024;
+
+/// How long a `bundle.tar.part` may sit before it is treated as abandoned.
+///
+/// The `.part` file doubles as an in-flight lock, but nothing cleans it up if
+/// the process dies mid-upload — which happens here, since the supervisor
+/// restarts onvif-rust and killing it also takes down vendor-daemon. Without
+/// this, one interrupted upload wedges the endpoint at 409 forever and the
+/// only fix is telnet, on the camera the WebUI upload exists to avoid.
+const STALE_PART_AFTER: Duration = Duration::from_secs(600);
 
 /// Shared state for the update endpoint.
 #[derive(Clone)]
@@ -45,6 +65,13 @@ pub async fn handle_update(Extension(state): Extension<Arc<UpdateState>>, body: 
             tracing::warn!("bundle upload rejected: another upload is in progress");
             (StatusCode::CONFLICT, "upload already in progress").into_response()
         }
+        Err(UpdateError::TooLarge) => {
+            tracing::warn!(
+                limit = MAX_BUNDLE_BYTES,
+                "bundle upload rejected: too large"
+            );
+            (StatusCode::PAYLOAD_TOO_LARGE, "bundle too large").into_response()
+        }
         Err(e) => {
             tracing::error!(
                 error = %e,
@@ -68,16 +95,24 @@ async fn receive_bundle(spool_root: &Path, body: Body) -> Result<(), UpdateError
     let mut file = match tokio::fs::File::create_new(&part).await {
         Ok(f) => f,
         Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
-            return Err(UpdateError::InFlight);
+            if !reclaim_stale_part(&part).await {
+                return Err(UpdateError::InFlight);
+            }
+            tokio::fs::File::create(&part).await?
         }
         Err(e) => return Err(e.into()),
     };
 
     let written = async {
         let mut body = body;
+        let mut total: u64 = 0;
         while let Some(frame) = body.frame().await {
             let frame = frame.map_err(|e| UpdateError::Body(format!("{e}")))?;
             if let Ok(data) = frame.into_data() {
+                total += data.len() as u64;
+                if total > MAX_BUNDLE_BYTES {
+                    return Err(UpdateError::TooLarge);
+                }
                 file.write_all(&data).await?;
             }
         }
@@ -96,6 +131,32 @@ async fn receive_bundle(spool_root: &Path, body: Body) -> Result<(), UpdateError
     Ok(())
 }
 
+/// Is an existing `.part` old enough to be treated as abandoned?
+///
+/// Removing it is safe even in the unlikely case a real upload is still
+/// running: that writer holds its own file handle, so it keeps writing to a
+/// now-unlinked inode and its final rename fails harmlessly. Refusing forever
+/// is the worse failure.
+async fn reclaim_stale_part(part: &Path) -> bool {
+    let Ok(meta) = tokio::fs::metadata(part).await else {
+        // It vanished between the create and the stat — treat as reclaimable.
+        return true;
+    };
+    let stale = meta
+        .modified()
+        .ok()
+        .and_then(|m| m.elapsed().ok())
+        .is_some_and(|age| age > STALE_PART_AFTER);
+    if stale {
+        tracing::warn!(
+            path = %part.display(),
+            "removing an abandoned partial upload left by an interrupted transfer"
+        );
+        let _ = tokio::fs::remove_file(part).await;
+    }
+    stale
+}
+
 #[derive(Debug, thiserror::Error)]
 enum UpdateError {
     #[error("io: {0}")]
@@ -104,6 +165,8 @@ enum UpdateError {
     Body(String),
     #[error("another upload is already in progress")]
     InFlight,
+    #[error("bundle exceeds {MAX_BUNDLE_BYTES} bytes")]
+    TooLarge,
 }
 
 #[cfg(test)]
@@ -168,6 +231,33 @@ mod tests {
         }
     }
 
+    /// A body that yields the same chunk `remaining` times.
+    ///
+    /// Streams rather than materializing the whole payload: the point is to
+    /// push past the size ceiling, and allocating it contiguously aborts the
+    /// test process on a machine with a modest heap.
+    struct RepeatBody {
+        chunk: Bytes,
+        remaining: usize,
+    }
+
+    impl http_body::Body for RepeatBody {
+        type Data = Bytes;
+        type Error = std::io::Error;
+
+        fn poll_frame(
+            mut self: Pin<&mut Self>,
+            _cx: &mut Context<'_>,
+        ) -> Poll<Option<Result<http_body::Frame<Bytes>, Self::Error>>> {
+            if self.remaining == 0 {
+                return Poll::Ready(None);
+            }
+            self.remaining -= 1;
+            let chunk = self.chunk.clone();
+            Poll::Ready(Some(Ok(http_body::Frame::data(chunk))))
+        }
+    }
+
     #[tokio::test]
     async fn test_receive_on_stream_error_leaves_no_trigger() {
         let d = tempfile::tempdir().unwrap();
@@ -211,6 +301,82 @@ mod tests {
         assert!(
             matches!(err, UpdateError::InFlight),
             "a second upload must be rejected, got {err:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_receive_reclaims_an_abandoned_part_file() {
+        let d = tempfile::tempdir().unwrap();
+        let spool = d.path().join("spool");
+        std::fs::create_dir_all(&spool).unwrap();
+
+        // A .part left behind by a process that died mid-upload. Backdate it
+        // past the staleness window; without reclaim this wedges the endpoint
+        // at 409 forever and only telnet can clear it.
+        let part = spool.join("bundle.tar.part");
+        std::fs::write(&part, b"orphaned").unwrap();
+        let old = std::time::SystemTime::now() - STALE_PART_AFTER - Duration::from_secs(60);
+        std::fs::File::options()
+            .write(true)
+            .open(&part)
+            .unwrap()
+            .set_modified(old)
+            .unwrap();
+
+        let body = Body::new(http_body_util::Full::new(Bytes::from_static(b"new bundle")));
+        receive_bundle(&spool, body)
+            .await
+            .expect("a stale .part must not block a fresh upload");
+
+        assert!(spool.join("bundle.trigger").is_file());
+        assert_eq!(
+            std::fs::read(spool.join("bundle.tar")).unwrap(),
+            b"new bundle"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_receive_still_rejects_a_fresh_part_file() {
+        let d = tempfile::tempdir().unwrap();
+        let spool = d.path().join("spool");
+        std::fs::create_dir_all(&spool).unwrap();
+        // Just-created .part: a genuine concurrent upload, not an orphan.
+        std::fs::write(spool.join("bundle.tar.part"), b"in progress").unwrap();
+
+        let body = Body::new(http_body_util::Full::new(Bytes::from_static(b"second")));
+        let err = receive_bundle(&spool, body).await.unwrap_err();
+
+        assert!(
+            matches!(err, UpdateError::InFlight),
+            "a recent .part is a live upload, got {err:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_receive_rejects_a_body_past_the_size_ceiling() {
+        let d = tempfile::tempdir().unwrap();
+        let spool = d.path().join("spool");
+
+        // axum's Body extractor ignores DefaultBodyLimit, so this counter is
+        // the only thing standing between a stuck client and a full SD card.
+        const CHUNK: usize = 1024 * 1024;
+        let body = Body::new(RepeatBody {
+            chunk: Bytes::from(vec![0u8; CHUNK]),
+            remaining: (MAX_BUNDLE_BYTES as usize / CHUNK) + 1,
+        });
+        let err = receive_bundle(&spool, body).await.unwrap_err();
+
+        assert!(
+            matches!(err, UpdateError::TooLarge),
+            "an oversized bundle must be refused, got {err:?}"
+        );
+        assert!(
+            !spool.join("bundle.trigger").exists(),
+            "nothing may be queued"
+        );
+        assert!(
+            !spool.join("bundle.tar.part").exists(),
+            "the partial write must be cleaned up, not left as a lock"
         );
     }
 

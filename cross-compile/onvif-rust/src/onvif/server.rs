@@ -563,12 +563,27 @@ impl OnvifServer {
 
     /// Build the axum router with all service endpoints and middleware.
     fn build_router(&self, state: OnvifServerState) -> Router {
+        // Request timeout, applied per route rather than over the whole app.
+        //
+        // PUT /api/update must be exempt: a bundle is ~19 MB and the upload is
+        // one request, so a 30 s ceiling would abort every real update over
+        // camera wifi while the SD card is also taking video writes. Every
+        // other route keeps the timeout, which is what bounds a slow-loris on
+        // the SOAP endpoints.
+        let timeout = || {
+            TimeoutLayer::with_status_code(
+                StatusCode::REQUEST_TIMEOUT,
+                Duration::from_secs(self.config.request_timeout_secs),
+            )
+        };
+
         // Build service routes
         let service_routes = Router::new()
             .route("/device_service", post(handle_device_service))
             .route("/media_service", post(handle_media_service))
             .route("/ptz_service", post(handle_ptz_service))
-            .route("/imaging_service", post(handle_imaging_service));
+            .route("/imaging_service", post(handle_imaging_service))
+            .layer(timeout());
 
         // Configure HTTP logging middleware
         let http_log_config = HttpLogConfig {
@@ -592,9 +607,13 @@ impl OnvifServer {
             let api = Router::new()
                 .route(
                     "/diagnostics",
-                    get(crate::diagnostics::http::handle_diagnostics),
+                    get(crate::diagnostics::http::handle_diagnostics).layer(timeout()),
                 )
-                .route("/logs", get(crate::diagnostics::http::handle_logs))
+                .route(
+                    "/logs",
+                    get(crate::diagnostics::http::handle_logs).layer(timeout()),
+                )
+                // No timeout: see the comment on `timeout` above.
                 .route("/update", put(crate::diagnostics::update::handle_update))
                 .fallback(|| async { StatusCode::NOT_FOUND })
                 .layer(middleware::from_fn_with_state(
@@ -611,11 +630,6 @@ impl OnvifServer {
         let app = app
             .layer(
                 ServiceBuilder::new()
-                    // Add request timeout (returns 408 Request Timeout on timeout)
-                    .layer(TimeoutLayer::with_status_code(
-                        StatusCode::REQUEST_TIMEOUT,
-                        Duration::from_secs(self.config.request_timeout_secs),
-                    ))
                     // Add middleware for logging and validation
                     .layer(middleware::from_fn(validate_content_type))
                     // Add HTTP logging middleware (replaces basic log_request)
@@ -1328,11 +1342,19 @@ mod tests {
     // `build_router`; the `OnvifServer` is always constructed with auth off
     // (its constructor sets `auth_enabled: false` in minimal mode).
     fn make_diagnostics_app(auth_on: bool) -> Router {
+        make_diagnostics_app_with_timeout(
+            auth_on,
+            OnvifServerConfig::default().request_timeout_secs,
+        )
+    }
+
+    fn make_diagnostics_app_with_timeout(auth_on: bool, request_timeout_secs: u64) -> Router {
         use axum::extract::ConnectInfo;
         use std::net::SocketAddr;
 
         let config = OnvifServerConfig {
             static_root: None,
+            request_timeout_secs,
             ..Default::default()
         };
         let server = OnvifServer::new(config).unwrap().with_diagnostics(Arc::new(
@@ -1359,6 +1381,81 @@ mod tests {
             .build_router(state)
             // ConnectInfo is required by rate_limit_middleware
             .layer(axum::Extension(ConnectInfo(addr)))
+    }
+
+    /// A body whose second chunk arrives only after `delay`.
+    ///
+    /// Stands in for a real bundle upload, which takes far longer than the
+    /// SOAP request timeout: ~19 MB over camera wifi while the SD card is also
+    /// taking video writes.
+    struct SlowBody {
+        delay: Duration,
+        timer: Option<std::pin::Pin<Box<tokio::time::Sleep>>>,
+        finished: bool,
+    }
+
+    impl http_body::Body for SlowBody {
+        type Data = bytes::Bytes;
+        type Error = std::io::Error;
+
+        fn poll_frame(
+            mut self: std::pin::Pin<&mut Self>,
+            cx: &mut std::task::Context<'_>,
+        ) -> std::task::Poll<Option<Result<http_body::Frame<bytes::Bytes>, Self::Error>>> {
+            use std::task::Poll;
+            if self.finished {
+                return Poll::Ready(None);
+            }
+            let delay = self.delay;
+            let timer = self
+                .timer
+                .get_or_insert_with(|| Box::pin(tokio::time::sleep(delay)));
+            match timer.as_mut().poll(cx) {
+                Poll::Pending => Poll::Pending,
+                Poll::Ready(()) => {
+                    self.finished = true;
+                    Poll::Ready(Some(Ok(http_body::Frame::data(bytes::Bytes::from_static(
+                        b"slow bundle",
+                    )))))
+                }
+            }
+        }
+    }
+
+    /// The request timeout must not apply to bundle uploads.
+    ///
+    /// A 30 s ceiling — the deployed value — would abort every real update,
+    /// since a bundle is one ~19 MB request. Guards against the timeout layer
+    /// being moved back onto the whole app.
+    #[tokio::test]
+    async fn test_update_route_is_exempt_from_the_request_timeout() {
+        use axum::body::Body;
+        use axum::http::{Request, StatusCode};
+        use tower::ServiceExt;
+
+        let app = make_diagnostics_app_with_timeout(false, 1);
+
+        let request = Request::builder()
+            .method("PUT")
+            .uri("/api/update")
+            .body(Body::new(SlowBody {
+                delay: Duration::from_secs(2),
+                timer: None,
+                finished: false,
+            }))
+            .unwrap();
+
+        // Asserts only that the timeout did not fire. Whether the write itself
+        // succeeds depends on the spool path, which `build_router` fixes at
+        // /mnt/anyka_hack/spool and does not exist on a host — `receive_bundle`
+        // has its own eight tests for that. A 408 here means the timeout layer
+        // has been moved back onto the whole app and every real update is dead.
+        let response = app.oneshot(request).await.unwrap();
+        assert_ne!(
+            response.status(),
+            StatusCode::REQUEST_TIMEOUT,
+            "an upload slower than request_timeout_secs must not be aborted"
+        );
     }
 
     #[tokio::test]
