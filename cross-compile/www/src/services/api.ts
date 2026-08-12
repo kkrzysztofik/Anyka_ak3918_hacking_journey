@@ -104,6 +104,91 @@ export async function authorizedFetch(
   return response;
 }
 
+export type UploadProgress = { loaded: number; total: number };
+
+/**
+ * PUT via XHR for upload progress. Same auth injection and 401 session-expiry
+ * path as {@link authorizedFetch}; no default timeout (firmware bundles are large).
+ *
+ * Always resolves with status + body — callers (e.g. uploadFirmware) decide
+ * which statuses are success vs ApiError.
+ */
+export function authorizedXhrPut(
+  url: string,
+  body: Blob,
+  options: {
+    onProgress?: (p: UploadProgress) => void;
+    signal?: AbortSignal;
+  } = {},
+): Promise<{ status: number; bodyText: string }> {
+  const { onProgress, signal } = options;
+
+  return (async () => {
+    const abortError = () =>
+      signal?.reason instanceof Error
+        ? signal.reason
+        : new DOMException('The operation was aborted.', 'AbortError');
+
+    if (signal?.aborted) {
+      throw abortError();
+    }
+
+    let authHeader: string | null = null;
+    if (getAuthHeader) {
+      authHeader = await getAuthHeader();
+    }
+
+    // Auth await can race with abort; re-check before open/send.
+    if (signal?.aborted) {
+      throw abortError();
+    }
+
+    const xhr = new XMLHttpRequest();
+
+    return await new Promise<{ status: number; bodyText: string }>((resolve, reject) => {
+      const onAbort = () => {
+        xhr.abort();
+        reject(abortError());
+      };
+
+      if (signal) {
+        signal.addEventListener('abort', onAbort, { once: true });
+      }
+
+      xhr.upload.addEventListener('progress', (ev) => {
+        if (onProgress && ev.lengthComputable) {
+          onProgress({ loaded: ev.loaded, total: ev.total });
+        }
+      });
+
+      xhr.addEventListener('load', () => {
+        signal?.removeEventListener('abort', onAbort);
+        if (xhr.status === 401) {
+          sessionStorage.removeItem('onvif_camera_auth');
+          globalThis.dispatchEvent(new CustomEvent('auth:unauthorized'));
+        }
+        resolve({ status: xhr.status, bodyText: xhr.responseText });
+      });
+
+      xhr.addEventListener('error', () => {
+        signal?.removeEventListener('abort', onAbort);
+        reject(new TypeError('Network request failed'));
+      });
+
+      xhr.addEventListener('abort', () => {
+        signal?.removeEventListener('abort', onAbort);
+        reject(abortError());
+      });
+
+      xhr.open('PUT', url);
+      if (authHeader) {
+        xhr.setRequestHeader('Authorization', authHeader);
+      }
+      xhr.send(body);
+    });
+  })();
+}
+
 /**
  * Configured fetch client for ONVIF SOAP requests
  *
