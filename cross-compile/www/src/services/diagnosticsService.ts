@@ -4,7 +4,12 @@
  * JSON GET operations for the /api/diagnostics and /api/logs endpoints.
  * Uses authorizedFetch so 401 responses trigger the shared session-expiry path.
  */
-import { ApiError, authorizedFetch } from '@/services/api';
+import {
+  ApiError,
+  authorizedFetch,
+  authorizedXhrPut,
+  type UploadProgress,
+} from '@/services/api';
 
 export interface Diagnostics {
   status: string;
@@ -37,7 +42,9 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
 
-function isVisionSupported(value: unknown): value is NonNullable<Diagnostics['vision']>['supported'] {
+function isVisionSupported(
+  value: unknown,
+): value is NonNullable<Diagnostics['vision']>['supported'] {
   return (
     isRecord(value) &&
     typeof value.ir_led === 'boolean' &&
@@ -70,9 +77,7 @@ function isNullOrRecord(value: unknown): value is Record<string, unknown> | null
 
 function isUptime(value: unknown): value is Diagnostics['uptime'] {
   return (
-    isRecord(value) &&
-    typeof value.process_s === 'number' &&
-    typeof value.system_s === 'number'
+    isRecord(value) && typeof value.process_s === 'number' && typeof value.system_s === 'number'
   );
 }
 
@@ -150,11 +155,7 @@ export async function getLogs(
 
   if (!response.ok) {
     const text = await response.text();
-    throw new ApiError(
-      `Logs request failed with status ${response.status}`,
-      response.status,
-      text,
-    );
+    throw new ApiError(`Logs request failed with status ${response.status}`, response.status, text);
   }
 
   let payload: unknown;
@@ -176,20 +177,17 @@ export async function getLogs(
  * neither should we. 202 means the update is queued: the applier will stage it,
  * flip slots and reboot within the next poll interval.
  */
-export async function uploadFirmware(file: File, signal?: AbortSignal): Promise<void> {
-  const response = await authorizedFetch('/api/update', {
-    method: 'PUT',
-    body: file,
-    signal,
-  });
+export async function uploadFirmware(
+  file: File,
+  options?: {
+    onProgress?: (p: UploadProgress) => void;
+    signal?: AbortSignal;
+  },
+): Promise<void> {
+  const { status, bodyText } = await authorizedXhrPut('/api/update', file, options);
 
-  if (response.status === 202) {
+  if (status === 202) {
     return;
   }
-  const text = await response.text();
-  throw new ApiError(
-    `Firmware upload failed with status ${response.status}`,
-    response.status,
-    text,
-  );
+  throw new ApiError(`Firmware upload failed with status ${status}`, status, bodyText);
 }
