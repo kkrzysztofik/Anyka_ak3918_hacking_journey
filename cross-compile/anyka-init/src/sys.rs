@@ -7,6 +7,7 @@
 use std::collections::BTreeMap;
 use std::fs::OpenOptions;
 use std::os::unix::process::{CommandExt, ExitStatusExt};
+use std::path::Path;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -120,6 +121,14 @@ impl Sys for RealSys {
             .stdin(Stdio::null())
             .stdout(Stdio::from(log))
             .stderr(Stdio::from(log_err));
+
+        // Run each service from its own directory. This makes relative paths in
+        // a service's own config resolve inside its slot: onvif-rust's
+        // `static_root = "www"` (config_debug.toml:129) resolved against CWD=/
+        // before, which is how the WebUI came up serving nothing.
+        if let Some(parent) = Path::new(&spec.exec).parent() {
+            cmd.current_dir(parent);
+        }
 
         if spec.core_dump {
             // SAFETY: setrlimit is async-signal-safe and only touches this
@@ -275,5 +284,50 @@ impl Sys for RealSys {
         // Same forget pattern as spawn(): the reaper owns waitpid.
         std::mem::forget(child);
         Ok(pid)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+
+    #[test]
+    fn a_spawned_child_runs_in_its_executable_directory() {
+        let d = tempfile::tempdir().unwrap();
+        let script = d.path().join("probe.sh");
+        std::fs::write(&script, "#!/bin/sh\npwd\n").unwrap();
+        // set the exec bit the same way tests/supervision.rs does
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let log = d.path().join("out.log");
+        let spec = SpawnSpec {
+            exec: script.to_string_lossy().into_owned(),
+            args: Vec::new(),
+            env: BTreeMap::new(),
+            log: log.to_string_lossy().into_owned(),
+            core_dump: false,
+        };
+        RealSys::new().spawn(&spec).unwrap();
+
+        // Poll the log briefly: the child prints its working directory.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let contents = loop {
+            if let Ok(s) = std::fs::read_to_string(&log)
+                && !s.is_empty()
+            {
+                break s;
+            }
+            if std::time::Instant::now() >= deadline {
+                panic!("child never wrote to {}", log.display());
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        };
+        assert!(
+            contents.trim().starts_with(&*d.path().to_string_lossy()),
+            "child CWD was {:?}, expected the executable's directory {}",
+            contents.trim(),
+            d.path().display()
+        );
     }
 }

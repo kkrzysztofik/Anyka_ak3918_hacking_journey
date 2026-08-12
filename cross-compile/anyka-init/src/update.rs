@@ -81,6 +81,19 @@ impl Slots {
     }
 }
 
+/// Rewrite a configured exec path into the active slot.
+///
+/// Config keeps writing `/mnt/anyka_hack/onvif/onvif-rust.bin`; this maps it to
+/// `/mnt/anyka_hack/slots/<active>/onvif/onvif-rust.bin`. Paths outside the
+/// update root (`/bin/busybox`, `/tmp/wpa_supplicant`) pass through untouched,
+/// which is what keeps udhcpc and wpa_supplicant working.
+pub fn slot_path(root: &Path, active: Slot, exec: &Path) -> PathBuf {
+    match exec.strip_prefix(root) {
+        Ok(rest) => root.join("slots").join(active.name()).join(rest),
+        Err(_) => exec.to_path_buf(),
+    }
+}
+
 /// An unconfirmed update, recorded as the *existence* of `state/trial-<slot>`.///
 /// Deliberately not a parsed file. There is no `serde_json` here, and the
 /// storm guard already learned that reading structured state off exFAT after a
@@ -807,6 +820,30 @@ mod tests {
         assert!(
             !root.join("spool/bundle.trigger").exists(),
             "spool must still be cleared"
+        );
+    }
+
+    #[test]
+    fn paths_under_the_root_move_into_the_active_slot() {
+        assert_eq!(
+            slot_path(
+                Path::new("/mnt/anyka_hack"),
+                Slot::B,
+                Path::new("/mnt/anyka_hack/onvif/onvif-rust.bin")
+            ),
+            Path::new("/mnt/anyka_hack/slots/b/onvif/onvif-rust.bin")
+        );
+    }
+
+    #[test]
+    fn paths_outside_the_root_are_untouched() {
+        assert_eq!(
+            slot_path(
+                Path::new("/mnt/anyka_hack"),
+                Slot::B,
+                Path::new("/bin/busybox")
+            ),
+            Path::new("/bin/busybox")
         );
     }
 }

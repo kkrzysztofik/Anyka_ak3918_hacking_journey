@@ -6,6 +6,7 @@ use crate::storm::StormState;
 use crate::supervise::{Action, Event, Policy, RestartHistory, SvcState, decide};
 use crate::sys::{ExitStatus, Pid, SpawnSpec, Sys};
 use std::collections::BTreeMap;
+use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
@@ -48,11 +49,23 @@ struct Service {
     hist: RestartHistory,
 }
 
-fn spec_of(svc: &ServiceCfg) -> SpawnSpec {
+/// Rewrite a `SpawnSpec` so exec and slot-owned env paths resolve inside the
+/// active slot. `root` is `[update] root`; paths outside it pass through.
+fn spec_of_slot(svc: &ServiceCfg, root: &Path, slots: &crate::update::Slots) -> SpawnSpec {
+    let active = slots.active();
+    let rewrite = |p: &str| {
+        crate::update::slot_path(root, active, Path::new(p))
+            .to_string_lossy()
+            .into_owned()
+    };
     SpawnSpec {
-        exec: svc.exec.clone(),
+        exec: rewrite(&svc.exec),
         args: svc.args.clone(),
-        env: svc.env.clone(),
+        env: svc
+            .env
+            .iter()
+            .map(|(k, v)| (k.clone(), rewrite(v)))
+            .collect(),
         log: svc.log.clone(),
         core_dump: svc.core_dump,
     }
@@ -134,13 +147,16 @@ pub fn run(sys: Arc<dyn Sys>, cfg: &Config, rx: Receiver<Msg>) {
         crashloop_window: Duration::from_secs(cfg.supervisor.crashloop_window_sec),
     };
 
+    let slots = crate::update::Slots::new(&cfg.update.root);
+    let update_root = Path::new(&cfg.update.root);
+
     let mut services: Vec<Service> = cfg
         .services
         .iter()
         .filter(|(_, s)| s.enabled)
         .map(|(name, s)| Service {
             name: name.clone(),
-            spec: spec_of(s),
+            spec: spec_of_slot(s, update_root, &slots),
             state: SvcState::Backoff {
                 until: sys.now(),
                 attempt: 0,
