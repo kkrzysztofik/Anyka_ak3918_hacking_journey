@@ -55,13 +55,25 @@ pub async fn handle_diagnostics(
 /// Auth is enforced by the surrounding [`diagnostics_auth_middleware`];
 /// this handler assumes the request has already been authenticated.
 pub async fn handle_logs(Query(query): Query<LogQuery>) -> Response {
-    let path = std::path::Path::new(query.source.path());
-    match logs::tail_bytes(path, DEFAULT_TAIL_BYTES) {
-        Ok(text) => {
-            let lines = logs::filter_lines(&text, query.level, query.lines.min(MAX_LINES));
-            Json(lines).into_response()
+    let source = query.source;
+    let level = query.level;
+    let lines_limit = query.lines.min(MAX_LINES);
+
+    match tokio::task::spawn_blocking(move || {
+        let path = std::path::Path::new(source.path());
+        logs::tail_bytes(path, DEFAULT_TAIL_BYTES).map(|text| logs::filter_lines(&text, level, lines_limit))
+    })
+    .await
+    {
+        Ok(Ok(lines)) => Json(lines).into_response(),
+        Ok(Err(e)) => {
+            tracing::debug!(source = ?source, error = %e, "log tail failed");
+            (StatusCode::NOT_FOUND, "log source unavailable").into_response()
         }
-        Err(_) => (StatusCode::NOT_FOUND, "log source unavailable").into_response(),
+        Err(e) => {
+            tracing::warn!(error = %e, "log tail task failed");
+            (StatusCode::NOT_FOUND, "log source unavailable").into_response()
+        }
     }
 }
 

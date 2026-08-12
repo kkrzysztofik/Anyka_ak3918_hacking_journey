@@ -252,6 +252,49 @@ fn read_gpio_on(paths: &NodePaths, node: Node) -> Option<bool> {
     cleaned.parse::<i32>().ok().map(|v| v != 0)
 }
 
+#[derive(Debug)]
+struct BlockingVisionReadings {
+    ain0: Option<i32>,
+    ir_led: Option<bool>,
+    ircut_a: Option<bool>,
+    ircut_b: Option<bool>,
+    white_led: Option<bool>,
+}
+
+impl BlockingVisionReadings {
+    fn empty() -> Self {
+        Self {
+            ain0: None,
+            ir_led: None,
+            ircut_a: None,
+            ircut_b: None,
+            white_led: None,
+        }
+    }
+}
+
+fn read_blocking_vision(paths: &NodePaths, caps: Capabilities) -> BlockingVisionReadings {
+    BlockingVisionReadings {
+        ain0: read_light_sensor(paths),
+        ir_led: caps
+            .ir_led
+            .then(|| read_gpio_on(paths, Node::IrLed))
+            .flatten(),
+        ircut_a: caps
+            .ircut
+            .then(|| read_gpio_on(paths, Node::IrCutA))
+            .flatten(),
+        ircut_b: caps
+            .ircut
+            .then(|| read_gpio_on(paths, Node::IrCutB))
+            .flatten(),
+        white_led: caps
+            .white_led
+            .then(|| read_gpio_on(paths, Node::WhiteLed))
+            .flatten(),
+    }
+}
+
 /// AUTO poll cadence.
 ///
 /// Every tick is an IPC round-trip through the daemon's single-threaded poll
@@ -662,36 +705,37 @@ impl NightModeController {
     pub(crate) async fn live_diagnostics(&self) -> crate::platform::common::VisionDiagnostics {
         use crate::platform::common::{VisionDiagnostics, VisionSupported};
 
-        let ae_luma = self.ffi.get_ae_luma().await;
-        let ain0 = read_light_sensor(&self.paths);
-        let mode = self.current_mode().await.map(|m| match m {
-            DayNight::Day => "day".to_string(),
-            DayNight::Night => "night".to_string(),
-        });
+        let paths = self.paths.clone();
+        let caps = self.caps;
+        let blocking = tokio::task::spawn_blocking(move || read_blocking_vision(&paths, caps));
+
+        let (ae_luma, mode, gpio) = tokio::join!(
+            self.ffi.get_ae_luma(),
+            async {
+                self.current_mode().await.map(|m| match m {
+                    DayNight::Day => "day".to_string(),
+                    DayNight::Night => "night".to_string(),
+                })
+            },
+            async {
+                match blocking.await {
+                    Ok(readings) => readings,
+                    Err(e) => {
+                        tracing::warn!(error = %e, "vision GPIO sampling task failed");
+                        BlockingVisionReadings::empty()
+                    }
+                }
+            }
+        );
+
         VisionDiagnostics {
             mode,
             ae_luma,
-            ain0,
-            ir_led: self
-                .caps
-                .ir_led
-                .then(|| read_gpio_on(&self.paths, Node::IrLed))
-                .flatten(),
-            ircut_a: self
-                .caps
-                .ircut
-                .then(|| read_gpio_on(&self.paths, Node::IrCutA))
-                .flatten(),
-            ircut_b: self
-                .caps
-                .ircut
-                .then(|| read_gpio_on(&self.paths, Node::IrCutB))
-                .flatten(),
-            white_led: self
-                .caps
-                .white_led
-                .then(|| read_gpio_on(&self.paths, Node::WhiteLed))
-                .flatten(),
+            ain0: gpio.ain0,
+            ir_led: gpio.ir_led,
+            ircut_a: gpio.ircut_a,
+            ircut_b: gpio.ircut_b,
+            white_led: gpio.white_led,
             supported: VisionSupported {
                 ir_led: self.caps.ir_led,
                 ircut: self.caps.ircut,

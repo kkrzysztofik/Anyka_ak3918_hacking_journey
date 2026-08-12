@@ -13,6 +13,8 @@ use crate::platform::{Platform, VisionDiagnostics};
 
 const NET_IFACE: &str = "wlan0";
 const STORAGE_MOUNT: &str = "/mnt";
+/// Ignore rate deltas shorter than this — near-simultaneous polls inflate throughput.
+const MIN_DELTA: std::time::Duration = std::time::Duration::from_millis(200);
 
 #[derive(Debug, Clone, Copy)]
 struct RawSample {
@@ -140,17 +142,22 @@ impl DiagnosticsState {
     /// `vision` is populated asynchronously from the imaging pipeline when a
     /// platform with imaging control support is attached.
     pub async fn snapshot(&self) -> Snapshot {
-        let stat_text = read_file("/proc/stat");
-        let meminfo_text = read_file("/proc/meminfo");
-        let net_dev_text = read_file("/proc/net/dev");
-        let uptime_text = read_file("/proc/uptime");
+        let readings = match tokio::task::spawn_blocking(collect_proc_readings).await {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::warn!(error = %e, "diagnostics proc sampling task failed");
+                ProcReadings::empty()
+            }
+        };
 
-        let cpu_now = stat_text.as_deref().and_then(proc::parse_stat);
-        let net_now = net_dev_text
+        let cpu_now = readings.stat_text.as_deref().and_then(proc::parse_stat);
+        let net_now = readings
+            .net_dev_text
             .as_deref()
             .and_then(|s| proc::parse_net_dev(s, NET_IFACE));
-        let mem = meminfo_text.as_deref().and_then(proc::parse_meminfo);
-        let system_s = uptime_text
+        let mem = readings.meminfo_text.as_deref().and_then(proc::parse_meminfo);
+        let system_s = readings
+            .uptime_text
             .as_deref()
             .and_then(proc::parse_uptime_secs)
             .unwrap_or(0);
@@ -163,7 +170,13 @@ impl DiagnosticsState {
 
         let prev_sample = {
             let mut guard = self.previous.lock().unwrap_or_else(|e| e.into_inner());
-            guard.replace(now_sample)
+            let prev = guard.as_ref().copied();
+            let too_soon = prev
+                .is_some_and(|p| now_sample.taken_at.duration_since(p.taken_at) < MIN_DELTA);
+            if !too_soon {
+                guard.replace(now_sample);
+            }
+            prev
         };
 
         let cpu_percent = prev_sample
@@ -172,6 +185,9 @@ impl DiagnosticsState {
 
         let network = prev_sample.as_ref().and_then(|prev| {
             let elapsed = now_sample.taken_at.duration_since(prev.taken_at);
+            if elapsed < MIN_DELTA {
+                return None;
+            }
             let prev_net = prev.net?;
             let now_net = now_sample.net?;
             let rx_bps = proc::bytes_per_sec(prev_net.rx, now_net.rx, elapsed)?;
@@ -184,7 +200,7 @@ impl DiagnosticsState {
             used_kb: m.used_kb,
         });
 
-        let storage = storage::storage_usage(STORAGE_MOUNT).map(|s| Storage {
+        let storage = readings.storage.map(|s| Storage {
             total_kb: s.total_kb,
             used_kb: s.used_kb,
         });
@@ -249,6 +265,37 @@ impl DiagnosticsState {
             components,
             vision,
         }
+    }
+}
+
+/// Blocking `/proc` and mount reads collected off the async executor.
+struct ProcReadings {
+    stat_text: Option<String>,
+    meminfo_text: Option<String>,
+    net_dev_text: Option<String>,
+    uptime_text: Option<String>,
+    storage: Option<storage::StorageUsage>,
+}
+
+impl ProcReadings {
+    fn empty() -> Self {
+        Self {
+            stat_text: None,
+            meminfo_text: None,
+            net_dev_text: None,
+            uptime_text: None,
+            storage: None,
+        }
+    }
+}
+
+fn collect_proc_readings() -> ProcReadings {
+    ProcReadings {
+        stat_text: read_file("/proc/stat"),
+        meminfo_text: read_file("/proc/meminfo"),
+        net_dev_text: read_file("/proc/net/dev"),
+        uptime_text: read_file("/proc/uptime"),
+        storage: storage::storage_usage(STORAGE_MOUNT),
     }
 }
 
