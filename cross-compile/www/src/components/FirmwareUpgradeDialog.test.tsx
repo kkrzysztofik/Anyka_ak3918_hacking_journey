@@ -180,7 +180,7 @@ describe('FirmwareUpgradeDialog', () => {
     });
   });
 
-  it('should show upload error and allow retry', async () => {
+  it('should show upload error on uploading step and allow retry', async () => {
     const user = userEvent.setup();
     vi.mocked(uploadFirmware).mockRejectedValueOnce(
       new ApiError('Firmware upload failed with status 500', 500, ''),
@@ -192,6 +192,9 @@ describe('FirmwareUpgradeDialog', () => {
 
     const error = await screen.findByTestId('firmware-upgrade-error');
     expect(error.textContent).toMatch(/500|failed/i);
+    // Stay put on uploading — do not collapse back to select
+    expect(screen.getByTestId('firmware-upgrade-progress')).toBeInTheDocument();
+    expect(screen.queryByTestId('firmware-upgrade-input')).not.toBeInTheDocument();
     expect(screen.queryByTestId('firmware-upgrade-waiting')).not.toBeInTheDocument();
 
     vi.mocked(uploadFirmware).mockResolvedValueOnce(undefined);

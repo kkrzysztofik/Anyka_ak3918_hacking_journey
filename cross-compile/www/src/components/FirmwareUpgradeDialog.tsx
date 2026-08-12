@@ -156,9 +156,8 @@ export function FirmwareUpgradeDialog({
         setError(null);
         return;
       }
+      // Stay on uploading so the error is visible next to progress; retry allowed.
       setError(err instanceof Error ? err.message : 'Upload failed');
-      setStep('select');
-      setProgress(null);
     }
   }, [file, pollUntilBack]);
 
@@ -235,23 +234,25 @@ export function FirmwareUpgradeDialog({
                 </Button>
               </div>
 
-              {error && (
-                <p className="text-destructive text-sm" data-testid="firmware-upgrade-error">
-                  {error}
-                </p>
-              )}
             </div>
           )}
 
           {step === 'uploading' && progress && (
             <div className="space-y-3 py-4">
-              <p className="text-muted-foreground text-sm">Uploading…</p>
+              <p className="text-muted-foreground text-sm">
+                {error ? 'Upload failed' : 'Uploading…'}
+              </p>
               <progress
                 className="h-2 w-full"
                 data-testid="firmware-upgrade-progress"
                 value={progress.loaded}
                 max={progress.total || 1}
               />
+              {error && (
+                <p className="text-destructive text-sm" data-testid="firmware-upgrade-error">
+                  {error}
+                </p>
+              )}
             </div>
           )}
 
@@ -300,7 +301,17 @@ export function FirmwareUpgradeDialog({
                 Close
               </Button>
             )}
-            {(step === 'uploading' || step === 'waiting') && (
+            {step === 'uploading' && error && (
+              <Button
+                type="button"
+                disabled={!valid}
+                onClick={() => setConfirmOpen(true)}
+                data-testid="firmware-upgrade-continue-button"
+              >
+                Retry
+              </Button>
+            )}
+            {((step === 'uploading' && !error) || step === 'waiting') && (
               <Button type="button" variant="ghost" disabled>
                 Please wait…
               </Button>
