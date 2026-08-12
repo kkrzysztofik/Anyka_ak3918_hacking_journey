@@ -140,7 +140,11 @@ export function FirmwareUpgradeDialog({
         }
         await sleep(POLL_INTERVAL_MS, signal);
       }
-      setResultMessage('Camera still unreachable. Refresh later.');
+      setResultMessage(
+        sawDown
+          ? 'Camera still unreachable. Refresh later.'
+          : 'Timed out waiting for reboot. The camera stayed reachable — check whether the update applied.',
+      );
       setStep('result');
     },
     [previousVersion],
@@ -188,19 +192,27 @@ export function FirmwareUpgradeDialog({
   );
 
   const valid = isValidTar(file);
+  const dismissLocked = step === 'waiting' || (step === 'uploading' && !error);
 
   return (
     <>
       <Dialog
         open={open}
         onOpenChange={(next) => {
+          if (!next && dismissLocked) return;
           if (!next) handleClose();
           else onOpenChange(next);
         }}
       >
         <DialogContent
-          className="bg-card border-border text-foreground sm:max-w-[480px]"
+          className={`bg-card border-border text-foreground sm:max-w-[480px]${dismissLocked ? ' [&_[data-testid=dialog-close]]:hidden' : ''}`}
           data-testid="firmware-upgrade-dialog"
+          onInteractOutside={(event) => {
+            if (dismissLocked) event.preventDefault();
+          }}
+          onEscapeKeyDown={(event) => {
+            if (dismissLocked) event.preventDefault();
+          }}
         >
           <DialogHeader>
             <div className="mb-2 flex items-center gap-3">
@@ -318,14 +330,24 @@ export function FirmwareUpgradeDialog({
               </Button>
             )}
             {step === 'uploading' && error && (
-              <Button
-                type="button"
-                disabled={!valid}
-                onClick={() => setConfirmOpen(true)}
-                data-testid="firmware-upgrade-continue-button"
-              >
-                Retry
-              </Button>
+              <>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  onClick={handleClose}
+                  data-testid="firmware-upgrade-close-button"
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="button"
+                  disabled={!valid}
+                  onClick={() => setConfirmOpen(true)}
+                  data-testid="firmware-upgrade-continue-button"
+                >
+                  Retry
+                </Button>
+              </>
             )}
             {((step === 'uploading' && !error) || step === 'waiting') && (
               <Button type="button" variant="ghost" disabled>
