@@ -843,8 +843,36 @@ impl RtspServerSession {
         }
 
         // Request the stream from the hub and wait for its SDP (populates
-        // self.sdp and self.tracks); shared with `ensure_tracks_from_streamhub`.
-        self.ensure_tracks_from_streamhub(rtsp_request).await?;
+        // self.sdp and self.tracks).
+        //
+        // Poll rather than ask once: a client can DESCRIBE before the encoder
+        // has emitted SPS/PPS, and the publisher then answers the hub's Request
+        // with nothing at all, leaving the SDP empty and this DESCRIBE a 404.
+        // Reuses the PLAY readiness budget — same "is the stream describable
+        // yet" question, so it does not deserve a second knob.
+        let describe_gate_timeout_ms = if self.config.play_ready_timeout_ms > 0 {
+            self.config.play_ready_timeout_ms
+        } else {
+            DEFAULT_PLAY_READY_TIMEOUT_MS
+        };
+        let deadline = Instant::now() + Duration::from_millis(describe_gate_timeout_ms.max(50));
+        loop {
+            // An answer ends the wait even when it carries no media: that is the
+            // publisher's verdict, and retrying it would just stall the client.
+            if self.ensure_tracks_from_streamhub(rtsp_request).await? {
+                break;
+            }
+            if Instant::now() >= deadline {
+                error!(
+                    remote_addr = %self.remote_addr,
+                    stream_path = %rtsp_request.uri.path,
+                    timeout_ms = describe_gate_timeout_ms,
+                    "describe_no_sdp"
+                );
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
 
         // M-02: RFC 2326 §12.1: honour Accept header in DESCRIBE
         if let Some(accept) = rtsp_request.get_header("Accept") {
@@ -1183,17 +1211,20 @@ impl RtspServerSession {
         Ok(())
     }
 
+    /// Returns `true` when the publisher answered, whether or not that answer
+    /// contained media. Callers use this to tell "not ready yet, worth asking
+    /// again" apart from "answered, and the stream genuinely has no media".
     async fn ensure_tracks_from_streamhub(
         &mut self,
         rtsp_request: &RtspRequest,
-    ) -> Result<(), SessionError> {
+    ) -> Result<bool, SessionError> {
         if !self.tracks.is_empty() {
-            return Ok(());
+            return Ok(true);
         }
 
         let stream_path = self.normalize_rtsp_stream_path(&rtsp_request.uri.path);
         if stream_path.is_empty() {
-            return Ok(());
+            return Ok(false);
         }
 
         let (sender, mut receiver) = mpsc::unbounded_channel();
@@ -1208,14 +1239,15 @@ impl RtspServerSession {
             });
         }
 
-        if let Some(Information::Sdp { data }) = receiver.recv().await
-            && let Ok(sdp) = Sdp::unmarshal(&data)
-        {
-            self.sdp = sdp;
-            self.new_tracks()?;
+        if let Some(Information::Sdp { data }) = receiver.recv().await {
+            if let Ok(sdp) = Sdp::unmarshal(&data) {
+                self.sdp = sdp;
+                self.new_tracks()?;
+            }
+            return Ok(true);
         }
 
-        Ok(())
+        Ok(false)
     }
 
     async fn wait_for_tracks(
