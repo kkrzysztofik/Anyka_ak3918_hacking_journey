@@ -23,7 +23,7 @@ use crate::config::{
     PersistenceHandle, PersistenceService, ProfileStorage,
 };
 use crate::config::{PasswordManager, UserLoadStatus, UserStorage};
-use crate::lifecycle::health::{ComponentHealth, HealthStatus};
+use crate::lifecycle::health::HealthStatus;
 use crate::lifecycle::shutdown::{DEFAULT_SHUTDOWN_TIMEOUT, ShutdownCoordinator};
 use crate::lifecycle::startup::{StartupPhase, StartupProgress};
 use crate::lifecycle::{RuntimeError, ShutdownReport, StartupError};
@@ -1100,9 +1100,16 @@ impl Application {
         let server_config = Self::build_server_config(&config_runtime);
         let port = server_config.port;
 
+        let diagnostics = Arc::new(crate::diagnostics::state::DiagnosticsState::new(
+            started_at,
+            app_state.platform().cloned(),
+            progress.degraded_services().to_vec(),
+        ));
+
         let server = Arc::new(
             OnvifServer::with_app_state(server_config, app_state.clone())
-                .map_err(|e| StartupError::Network(e.to_string()))?,
+                .map_err(|e| StartupError::Network(e.to_string()))?
+                .with_diagnostics(Arc::clone(&diagnostics)),
         );
 
         // Start the server in a background task
@@ -1124,6 +1131,15 @@ impl Application {
         // Phase 6: Streaming (optional, gracefully degrades)
         let streaming_service =
             Self::start_streaming(&config_runtime, &app_state, &mut progress).await;
+
+        // `diagnostics` was constructed back in the Network phase, before
+        // Discovery and Streaming could still fail and record degradation.
+        // Bring it up to date now so /api/diagnostics matches App::health()
+        // instead of a snapshot frozen mid-startup.
+        diagnostics.finalize_startup(
+            progress.degraded_services().to_vec(),
+            streaming_service.is_some(),
+        );
 
         let startup_duration = started_at.elapsed();
         if progress.has_degraded_services() {
@@ -1653,67 +1669,21 @@ impl Application {
         }
     }
 
-    /// Maximum silence from venc-read before `stream_health` is marked degraded.
-    const STREAM_HEALTH_SILENCE_SECS: u64 = 5;
-
     /// Get the current health status of the application.
     ///
     /// This can be used for health check endpoints (e.g., `/health`, `/ready`).
     pub fn health(&self) -> HealthStatus {
-        let mut status = HealthStatus::new(self.started_at.elapsed());
-
-        // Add component health
-        status.add_component("config", ComponentHealth::healthy("Configuration"));
-        status.add_component("platform", ComponentHealth::healthy("Platform"));
-        status.add_component("device", ComponentHealth::healthy("Device Service"));
-        status.add_component("media", ComponentHealth::healthy("Media Service"));
-
-        // Runtime stream liveness (not just startup readiness).
-        if self.streaming_service.is_some() {
-            match self
-                .app_state
+        let frame_age = self.streaming_service.as_ref().map(|_| {
+            self.app_state
                 .as_ref()
                 .and_then(|s| s.platform())
                 .and_then(|p| p.stream_frame_age_ms())
-            {
-                Some(age_ms) if age_ms > Self::STREAM_HEALTH_SILENCE_SECS * 1000 => {
-                    status.add_component(
-                        "stream_health",
-                        ComponentHealth::degraded(
-                            "Stream Health",
-                            format!("No frames for {}ms (venc-read likely stalled)", age_ms),
-                        ),
-                    );
-                    status.mark_degraded("stream_health");
-                }
-                Some(_) => {
-                    status
-                        .add_component("stream_health", ComponentHealth::healthy("Stream Health"));
-                }
-                None => {
-                    status.add_component(
-                        "stream_health",
-                        ComponentHealth::degraded(
-                            "Stream Health",
-                            "Streaming enabled but no frames observed yet",
-                        ),
-                    );
-                    status.mark_degraded("stream_health");
-                }
-            }
-        }
-
-        // Mark degraded services
-        for service in &self.degraded_services {
-            status.mark_degraded(service);
-            let component_key = service.to_lowercase();
-            status.add_component(
-                &component_key,
-                ComponentHealth::degraded(service, "Initialization failed"),
-            );
-        }
-
-        status
+        });
+        crate::lifecycle::health::compute_health(
+            self.started_at.elapsed(),
+            frame_age,
+            &self.degraded_services,
+        )
     }
 
     /// Get the application uptime.

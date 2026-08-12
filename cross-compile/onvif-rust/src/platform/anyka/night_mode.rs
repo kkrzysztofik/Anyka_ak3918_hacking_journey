@@ -240,6 +240,61 @@ pub(super) fn read_light_sensor(paths: &NodePaths) -> Option<i32> {
     raw.trim().parse::<i32>().ok()
 }
 
+/// Read a GPIO sysfs node as a boolean (nonzero = on).
+///
+/// Returns `None` when the node is absent or unparseable — the caller must
+/// treat that as "unknown", not as off.
+fn read_gpio_on(paths: &NodePaths, node: Node) -> Option<bool> {
+    let path = paths.node(node);
+    let raw = std::fs::read_to_string(path).ok()?;
+    // AK3918 user-gpio sysfs nodes are often NUL-padded (e.g. "1\0").
+    let cleaned = raw.split('\0').next().unwrap_or("").trim();
+    cleaned.parse::<i32>().ok().map(|v| v != 0)
+}
+
+#[derive(Debug)]
+struct BlockingVisionReadings {
+    ain0: Option<i32>,
+    ir_led: Option<bool>,
+    ircut_a: Option<bool>,
+    ircut_b: Option<bool>,
+    white_led: Option<bool>,
+}
+
+impl BlockingVisionReadings {
+    fn empty() -> Self {
+        Self {
+            ain0: None,
+            ir_led: None,
+            ircut_a: None,
+            ircut_b: None,
+            white_led: None,
+        }
+    }
+}
+
+fn read_blocking_vision(paths: &NodePaths, caps: Capabilities) -> BlockingVisionReadings {
+    BlockingVisionReadings {
+        ain0: read_light_sensor(paths),
+        ir_led: caps
+            .ir_led
+            .then(|| read_gpio_on(paths, Node::IrLed))
+            .flatten(),
+        ircut_a: caps
+            .ircut
+            .then(|| read_gpio_on(paths, Node::IrCutA))
+            .flatten(),
+        ircut_b: caps
+            .ircut
+            .then(|| read_gpio_on(paths, Node::IrCutB))
+            .flatten(),
+        white_led: caps
+            .white_led
+            .then(|| read_gpio_on(paths, Node::WhiteLed))
+            .flatten(),
+    }
+}
+
 /// AUTO poll cadence.
 ///
 /// Every tick is an IPC round-trip through the daemon's single-threaded poll
@@ -347,8 +402,17 @@ impl NightModeController {
 
     /// The day/night state the hardware was last driven to, or `None` if this
     /// controller has not driven it yet.
+    ///
+    /// While an ISP resync is pending after a failed `set_ir_filter`, returns
+    /// `None` so diagnostics do not report a pipeline mode the ISP has not
+    /// actually reached yet.
     pub(crate) async fn current_mode(&self) -> Option<DayNight> {
-        self.state.lock().await.current
+        let state = self.state.lock().await;
+        let pending = self.isp_pending.lock().await;
+        if pending.is_some() {
+            return None;
+        }
+        state.current
     }
 
     pub(crate) fn set_auto_enabled(&self, enabled: bool) {
@@ -645,6 +709,49 @@ impl NightModeController {
             }
         })
     }
+
+    /// Return a point-in-time snapshot of the vision-switching pipeline state.
+    pub(crate) async fn live_diagnostics(&self) -> crate::platform::common::VisionDiagnostics {
+        use crate::platform::common::{VisionDiagnostics, VisionSupported};
+
+        let paths = self.paths.clone();
+        let caps = self.caps;
+        let blocking = tokio::task::spawn_blocking(move || read_blocking_vision(&paths, caps));
+
+        let (ae_luma, mode, gpio) = tokio::join!(
+            self.ffi.get_ae_luma(),
+            async {
+                self.current_mode().await.map(|m| match m {
+                    DayNight::Day => "day".to_string(),
+                    DayNight::Night => "night".to_string(),
+                })
+            },
+            async {
+                match blocking.await {
+                    Ok(readings) => readings,
+                    Err(e) => {
+                        tracing::warn!(error = %e, "vision GPIO sampling task failed");
+                        BlockingVisionReadings::empty()
+                    }
+                }
+            }
+        );
+
+        VisionDiagnostics {
+            mode,
+            ae_luma,
+            ain0: gpio.ain0,
+            ir_led: gpio.ir_led,
+            ircut_a: gpio.ircut_a,
+            ircut_b: gpio.ircut_b,
+            white_led: gpio.white_led,
+            supported: VisionSupported {
+                ir_led: self.caps.ir_led,
+                ircut: self.caps.ircut,
+                white_led: self.caps.white_led,
+            },
+        }
+    }
 }
 
 /// Build the ordered step list for a transition.
@@ -830,6 +937,53 @@ mod tests {
         assert_eq!(
             std::fs::read_to_string(paths.node(Node::IrLed)).unwrap(),
             "1"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_live_diagnostics_mode_none_while_apply_holds_state_lock() {
+        use std::sync::{Arc, Barrier};
+
+        use crate::hal::common::imaging::MockImagingHalTrait;
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let paths = NodePaths::rooted(dir.path(), dir.path());
+        for n in [Node::IrCutA, Node::IrCutB, Node::IrLed] {
+            std::fs::write(paths.node(n), "9").unwrap();
+        }
+
+        let barrier = Arc::new(Barrier::new(2));
+        let barrier_isp = Arc::clone(&barrier);
+
+        let mut ffi = MockImagingHalTrait::new();
+        ffi.expect_set_ir_filter().times(1).returning(move |_| {
+            barrier_isp.wait();
+            -1
+        });
+        ffi.expect_get_ae_luma().times(1..).returning(|| None);
+
+        let ctl = Arc::new(NightModeController::new(
+            paths,
+            test_config(),
+            Arc::new(ffi),
+            crate::onvif::types::common::IrCutFilterMode::AUTO,
+            None,
+        ));
+
+        let ctl_apply = Arc::clone(&ctl);
+        let diag_barrier = Arc::clone(&barrier);
+        let diag = tokio::spawn(async move {
+            diag_barrier.wait();
+            ctl.live_diagnostics().await.mode
+        });
+        let apply = tokio::spawn(async move { ctl_apply.apply(DayNight::Night).await });
+
+        let mode = diag.await.expect("diagnostics task");
+        let _ = apply.await.expect("apply task");
+
+        assert!(
+            mode.is_none(),
+            "live diagnostics must not report a mode while apply owns state or ISP sync is pending"
         );
     }
 
@@ -1605,5 +1759,51 @@ mod tests {
                 Step::Sleep(SETTLE),
             ]
         );
+    }
+
+    #[test]
+    fn test_read_gpio_on_accepts_nul_padded_sysfs() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = NodePaths::rooted(dir.path(), dir.path());
+        std::fs::write(paths.node(Node::IrLed), "1\0").unwrap();
+        std::fs::write(paths.node(Node::WhiteLed), "0\0").unwrap();
+        assert_eq!(read_gpio_on(&paths, Node::IrLed), Some(true));
+        assert_eq!(read_gpio_on(&paths, Node::WhiteLed), Some(false));
+    }
+
+    #[tokio::test]
+    async fn test_live_diagnostics_reads_ae_ain0_and_lamps() {
+        use crate::hal::common::imaging::MockImagingHalTrait;
+        use crate::onvif::types::common::IrCutFilterMode;
+
+        let dir = tempfile::tempdir().unwrap();
+        let paths = NodePaths::rooted(dir.path(), dir.path());
+        for n in [Node::IrCutA, Node::IrCutB, Node::IrLed, Node::WhiteLed] {
+            std::fs::write(paths.node(n), "0").unwrap();
+        }
+        std::fs::write(paths.node(Node::IrLed), "1").unwrap();
+        std::fs::write(paths.light_sensor(), "306").unwrap();
+
+        let mut ffi = MockImagingHalTrait::new();
+        ffi.expect_get_ae_luma().times(1).returning(|| Some(42));
+
+        let ctl = NightModeController::new(
+            paths,
+            test_config(),
+            std::sync::Arc::new(ffi),
+            IrCutFilterMode::AUTO,
+            None,
+        );
+        let v = ctl.live_diagnostics().await;
+        assert_eq!(v.ae_luma, Some(42));
+        assert_eq!(v.ain0, Some(306));
+        assert_eq!(v.ir_led, Some(true));
+        assert_eq!(v.ircut_a, Some(false));
+        assert_eq!(v.ircut_b, Some(false));
+        assert_eq!(v.white_led, Some(false));
+        assert!(v.supported.ir_led);
+        assert!(v.supported.ircut);
+        assert!(v.supported.white_led);
+        assert_eq!(v.mode, None);
     }
 }

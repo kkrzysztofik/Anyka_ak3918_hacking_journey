@@ -20,7 +20,7 @@ use crate::onvif::ws_security::WsSecurityError;
 use std::sync::Arc;
 
 /// Verify HTTP Basic Authentication credentials.
-pub(super) fn verify_basic_auth_self(
+pub(crate) fn verify_basic_auth_self(
     _dispatcher: &ServiceDispatcher,
     request: &Request<Body>,
     auth_ctx: &AuthContext,

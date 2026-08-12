@@ -365,6 +365,12 @@ impl ImagingControl for AnykaImagingControl {
         self.settings.write().ir_cut_filter = crate::onvif::types::common::IrCutFilterMode::AUTO;
         Ok(())
     }
+
+    async fn vision_diagnostics(
+        &self,
+    ) -> PlatformResult<Option<crate::platform::common::VisionDiagnostics>> {
+        Ok(Some(self.night.live_diagnostics().await))
+    }
 }
 
 #[cfg(test)]

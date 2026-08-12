@@ -67,6 +67,44 @@ function raceSignals(a: AbortSignal, b: AbortSignal): AbortSignal {
 }
 
 /**
+ * Fetch with the same auth injection and 401 handling as SOAP posts.
+ *
+ * The diagnostics endpoints are plain JSON GETs, but they must share the
+ * session-expiry path: a poll that quietly 401s every 5 s would leave a dead
+ * page with no sign-in prompt.
+ */
+export async function authorizedFetch(
+  url: string,
+  init: RequestInit = {},
+  config: ApiRequestConfig = {},
+): Promise<Response> {
+  const headers = new Headers(init.headers);
+  for (const [name, value] of Object.entries(config.headers ?? {})) {
+    headers.set(name, value);
+  }
+
+  if (!headers.has('Authorization') && getAuthHeader) {
+    const authHeader = await getAuthHeader();
+    if (authHeader) {
+      headers.set('Authorization', authHeader);
+    }
+  }
+
+  const timeoutMs = config.timeout ?? DEFAULT_TIMEOUT_MS;
+  const timeout = AbortSignal.timeout(timeoutMs);
+  const signal = init.signal ? raceSignals(init.signal as AbortSignal, timeout) : timeout;
+
+  const response = await fetch(url, { ...init, headers, signal });
+
+  if (response.status === 401) {
+    sessionStorage.removeItem('onvif_camera_auth');
+    globalThis.dispatchEvent(new CustomEvent('auth:unauthorized'));
+  }
+
+  return response;
+}
+
+/**
  * Configured fetch client for ONVIF SOAP requests
  *
  * Headers:
@@ -87,34 +125,24 @@ async function request(
   // passing `authorization` must suppress the injected `Authorization` rather
   // than end up with both merged into one comma-joined value.
   const headers = new Headers(DEFAULT_HEADERS);
-  for (const [name, value] of Object.entries(config.headers ?? {})) {
-    headers.set(name, value);
-  }
-
-  if (!headers.has('Authorization') && getAuthHeader) {
-    const authHeader = await getAuthHeader();
-    if (authHeader) {
-      headers.set('Authorization', authHeader);
+  if (config.headers) {
+    for (const [name, value] of Object.entries(config.headers)) {
+      headers.set(name, value);
     }
   }
-
-  const timeoutMs = config.timeout ?? DEFAULT_TIMEOUT_MS;
-  const timeout = AbortSignal.timeout(timeoutMs);
-  const signal = config.signal ? raceSignals(config.signal, timeout) : timeout;
-
-  const response = await fetch(url, {
-    method: 'POST',
-    headers,
-    body,
-    signal,
-  });
+  const response = await authorizedFetch(
+    url,
+    {
+      method: 'POST',
+      headers,
+      body,
+      signal: config.signal,
+    },
+    { timeout: config.timeout },
+  );
 
   const text = await response.text();
 
-  if (response.status === 401) {
-    sessionStorage.removeItem('onvif_camera_auth');
-    globalThis.dispatchEvent(new CustomEvent('auth:unauthorized'));
-  }
   if (!response.ok) {
     throw new ApiError(`Request failed with status ${response.status}`, response.status, text);
   }
