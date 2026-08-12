@@ -312,7 +312,7 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn test_first_snapshot_has_no_rates() {
+    async fn test_snapshot_first_call_has_no_rates() {
         let state = DiagnosticsState::new(Instant::now(), None, Vec::new());
         let snap = state.snapshot().await;
         assert!(snap.cpu_percent.is_none());
@@ -320,7 +320,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_second_snapshot_produces_rates() {
+    async fn test_snapshot_second_call_produces_rates() {
+        if !std::path::Path::new("/proc/stat").exists() {
+            return;
+        }
         let state = DiagnosticsState::new(Instant::now(), None, Vec::new());
         let _ = state.snapshot().await;
         std::thread::sleep(std::time::Duration::from_millis(50));

@@ -195,7 +195,7 @@ mod tests {
     use std::time::Duration;
 
     #[test]
-    fn test_compute_health_flags_stalled_stream() {
+    fn test_compute_health_stalled_stream_marks_degraded() {
         let status = compute_health(Duration::from_secs(60), Some(Some(6_000)), &[]);
         assert_eq!(status.status, HealthState::Degraded);
         assert!(
@@ -206,25 +206,25 @@ mod tests {
     }
 
     #[test]
-    fn test_compute_health_accepts_recent_frame() {
+    fn test_compute_health_recent_frame_stays_healthy() {
         let status = compute_health(Duration::from_secs(60), Some(Some(40)), &[]);
         assert_eq!(status.status, HealthState::Healthy);
     }
 
     #[test]
-    fn test_compute_health_flags_stream_with_no_frames_yet() {
+    fn test_compute_health_no_frames_yet_marks_degraded() {
         let status = compute_health(Duration::from_secs(60), Some(None), &[]);
         assert_eq!(status.status, HealthState::Degraded);
     }
 
     #[test]
-    fn test_compute_health_without_streaming_is_healthy() {
+    fn test_compute_health_without_streaming_stays_healthy() {
         let status = compute_health(Duration::from_secs(60), None, &[]);
         assert_eq!(status.status, HealthState::Healthy);
     }
 
     #[test]
-    fn test_compute_health_includes_startup_degraded_services() {
+    fn test_compute_health_startup_degraded_services_marks_degraded() {
         let status = compute_health(Duration::from_secs(60), None, &["PTZ".to_string()]);
         assert_eq!(status.status, HealthState::Degraded);
         assert!(status.degraded_services.contains(&"PTZ".to_string()));

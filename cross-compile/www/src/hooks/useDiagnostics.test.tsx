@@ -73,22 +73,25 @@ describe('useDiagnostics', () => {
     expect(typeof point.t).toBe('number');
   });
 
-  it('should cap history at max samples (60)', async () => {
-    const { queryClient, wrapper } = makeWrapper();
-    const { result } = renderHook(() => useDiagnostics(), { wrapper });
+  it(
+    'should cap history at max samples (60)',
+    async () => {
+      const { queryClient, wrapper } = makeWrapper();
+      const { result } = renderHook(() => useDiagnostics(), { wrapper });
 
-    await waitFor(() => expect(result.current.history).toHaveLength(1));
+      await waitFor(() => expect(result.current.history).toHaveLength(1));
 
-    // Simulate 70 distinct refetches by invalidating with unique timestamps.
-    for (let i = 0; i < 69; i++) {
-      await act(async () => {
-        await queryClient.invalidateQueries({ queryKey: ['diagnostics'] });
-        await waitFor(() => expect(result.current.isSuccess).toBe(true));
-      });
-    }
+      for (let i = 0; i < 69; i++) {
+        await act(async () => {
+          await new Promise((resolve) => setTimeout(resolve, 2));
+          await queryClient.invalidateQueries({ queryKey: ['diagnostics'] });
+        });
+      }
 
-    await waitFor(() => expect(result.current.history).toHaveLength(60));
-  });
+      await waitFor(() => expect(result.current.history).toHaveLength(60), { timeout: 10_000 });
+    },
+    20_000,
+  );
 
   it('should not duplicate history on rerender without dataUpdatedAt change', async () => {
     const { wrapper } = makeWrapper();

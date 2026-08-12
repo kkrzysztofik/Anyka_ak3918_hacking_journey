@@ -88,6 +88,12 @@ describe('diagnosticsService', () => {
 
       await expect(getDiagnostics()).rejects.toThrow(ApiError);
     });
+
+    it('should throw when the response shape is invalid', async () => {
+      vi.mocked(authorizedFetch).mockResolvedValue(makeResponse({ status: 'healthy' }));
+
+      await expect(getDiagnostics()).rejects.toThrow(ApiError);
+    });
   });
 
   describe('getLogs', () => {

@@ -568,14 +568,22 @@ function LogPanelBody({
 }: Readonly<{ logsFetching: boolean; logLines: string[] }>) {
   if (logsFetching && logLines.length === 0) {
     return (
-      <p className="text-muted-foreground p-5 text-sm" data-testid="diagnostics-log-loading">
+      <p
+        className="text-muted-foreground p-5 text-sm"
+        data-testid="diagnostics-log-loading"
+        aria-live="polite"
+      >
         Loading…
       </p>
     );
   }
   if (logLines.length === 0) {
     return (
-      <p className="text-muted-foreground p-5 text-sm" data-testid="diagnostics-log-unavailable">
+      <p
+        className="text-muted-foreground p-5 text-sm"
+        data-testid="diagnostics-log-unavailable"
+        aria-live="polite"
+      >
         Source unavailable or no log entries found.
       </p>
     );
@@ -584,6 +592,7 @@ function LogPanelBody({
     <pre
       className="text-foreground divide-border divide-y p-4 font-mono text-xs leading-relaxed"
       data-testid="diagnostics-log-lines"
+      aria-live="polite"
     >
       {logLines.join('\n')}
     </pre>
@@ -651,7 +660,11 @@ function SystemLogsCard({
               </SelectContent>
             </Select>
 
-            <div className="border-border bg-muted/50 flex items-center rounded-md border p-0.5">
+            <div
+              className="border-border bg-muted/50 flex items-center rounded-md border p-0.5"
+              role="group"
+              aria-label="Log level filter"
+            >
               {LOG_LEVEL_OPTIONS.map((opt) => (
                 <Button
                   key={opt.value}
@@ -659,6 +672,7 @@ function SystemLogsCard({
                   size="sm"
                   className="h-6 px-2.5 text-xs"
                   data-testid={`diagnostics-log-filter-${opt.value}`}
+                  aria-pressed={logLevel === opt.value}
                   onClick={() => setLogLevel(opt.value)}
                 >
                   {opt.label}
@@ -706,7 +720,8 @@ export default function DiagnosticsPage() {
     a.href = url;
     a.download = `${logSource}.log`;
     a.click();
-    URL.revokeObjectURL(url);
+    // Defer revoke so Firefox can start the download before the blob URL is invalidated.
+    globalThis.setTimeout(() => URL.revokeObjectURL(url), 0);
   }, [logLines, logSource]);
 
   if (isLoading) {

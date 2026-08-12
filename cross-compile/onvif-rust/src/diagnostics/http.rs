@@ -80,11 +80,10 @@ pub async fn handle_logs(Query(query): Query<LogQuery>) -> Response {
 /// Determine the required auth level for a given request path.
 ///
 /// The middleware is nested under `/api`, so axum strips that prefix and
-/// this function sees the remainder (e.g. `/logs`, `/diagnostics`).
-///
-/// The default arm **fails closed** (Administrator) so any future route that
-/// hasn't been explicitly opened is denied rather than silently permitted.
+/// this function sees the remainder (e.g. `/logs`, `/diagnostics`). Some
+/// callers still pass the full `/api/...` path; strip the prefix defensively.
 fn required_level_for_path(path: &str) -> AuthLevel {
+    let path = path.strip_prefix("/api").unwrap_or(path);
     match path {
         "/logs" | "/logs/" => AuthLevel::Administrator,
         "/diagnostics" | "/diagnostics/" => AuthLevel::User,
@@ -134,7 +133,8 @@ pub async fn diagnostics_auth_middleware(
         return next.run(request).await;
     }
 
-    let required = required_level_for_path(request.uri().path());
+    let path = request.uri().path().to_owned();
+    let required = required_level_for_path(&path);
     let auth_ctx = state.auth_context();
 
     match check_required_level(
@@ -143,6 +143,12 @@ pub async fn diagnostics_auth_middleware(
     ) {
         None => next.run(request).await,
         Some(StatusCode::UNAUTHORIZED) => {
+            tracing::warn!(
+                target: "security",
+                path = %path,
+                ?required,
+                "diagnostics access denied: unauthorized"
+            );
             let mut resp = StatusCode::UNAUTHORIZED.into_response();
             resp.headers_mut().insert(
                 header::WWW_AUTHENTICATE,
@@ -150,7 +156,16 @@ pub async fn diagnostics_auth_middleware(
             );
             resp
         }
-        Some(status) => status.into_response(),
+        Some(status) => {
+            tracing::warn!(
+                target: "security",
+                path = %path,
+                ?required,
+                status = %status,
+                "diagnostics access denied: insufficient privilege"
+            );
+            status.into_response()
+        }
     }
 }
 
@@ -278,42 +293,25 @@ mod tests {
         assert_eq!(required_level_for_path("/"), AuthLevel::Administrator);
     }
 
+    #[test]
+    fn test_required_level_for_path_diagnostics_with_api_prefix_requires_user() {
+        assert_eq!(
+            required_level_for_path("/api/diagnostics"),
+            AuthLevel::User
+        );
+    }
+
     // ── reuse proof: verify_basic_auth_self integration ──────────────────
     //
     // These tests exercise the same verify_basic_auth_self → check_required_level
     // pipeline that diagnostics_auth_middleware uses, confirming no duplicate
     // credential-check path was introduced.
 
-    #[test]
-    fn test_reuse_verify_basic_auth_self_no_header_gives_unauthorized() {
-        use crate::config::{PasswordManager, UserStorage};
-        use crate::onvif::dispatcher::{AuthContext, ServiceDispatcher};
-        use crate::onvif::ws_security::WsSecurityValidator;
-        use axum::body::Body;
-        use axum::http::Request as HttpRequest;
-        use std::sync::Arc;
-
-        let dispatcher = ServiceDispatcher::new();
-        let auth_ctx = AuthContext::new(
-            Arc::new(WsSecurityValidator::with_defaults()),
-            Arc::new(UserStorage::new()),
-            Arc::new(PasswordManager::new()),
-            true,
-        );
-
-        let request = HttpRequest::builder()
-            .method("GET")
-            .uri("/api/diagnostics")
-            .body(Body::empty())
-            .unwrap();
-
-        let result = verify_basic_auth_self(&dispatcher, &request, &auth_ctx);
-        let status = check_required_level(result, AuthLevel::User);
-        assert_eq!(status, Some(StatusCode::UNAUTHORIZED));
-    }
-
-    #[test]
-    fn test_reuse_verify_basic_auth_self_valid_user_on_metrics_route_passes() {
+    fn auth_pipeline_status(
+        account: Option<(&str, &str, UserLevel)>,
+        uri: &str,
+        required: AuthLevel,
+    ) -> Option<StatusCode> {
         use crate::config::{PasswordManager, UserStorage};
         use crate::onvif::dispatcher::{AuthContext, ServiceDispatcher};
         use crate::onvif::ws_security::WsSecurityValidator;
@@ -323,9 +321,11 @@ mod tests {
         use std::sync::Arc;
 
         let user_storage = Arc::new(UserStorage::new());
-        user_storage
-            .create_user("viewer", "pass", crate::config::UserLevel::User)
-            .unwrap();
+        if let Some((username, password, level)) = account {
+            user_storage
+                .create_user(username, password, level)
+                .unwrap();
+        }
 
         let dispatcher = ServiceDispatcher::new();
         let auth_ctx = AuthContext::new(
@@ -335,58 +335,47 @@ mod tests {
             true,
         );
 
-        let credentials = base64::engine::general_purpose::STANDARD.encode("viewer:pass");
-        let request = HttpRequest::builder()
-            .method("GET")
-            .uri("/api/diagnostics")
-            .header("Authorization", format!("Basic {}", credentials))
-            .body(Body::empty())
-            .unwrap();
+        let mut builder = HttpRequest::builder().method("GET").uri(uri);
+        if let Some((username, password, _)) = account {
+            let credentials =
+                base64::engine::general_purpose::STANDARD.encode(format!("{username}:{password}"));
+            builder = builder.header("Authorization", format!("Basic {credentials}"));
+        }
 
+        let request = builder.body(Body::empty()).unwrap();
         let result = verify_basic_auth_self(&dispatcher, &request, &auth_ctx);
-        let status = check_required_level(result, AuthLevel::User);
+        check_required_level(result, required)
+    }
+
+    #[test]
+    fn test_reuse_verify_basic_auth_self_no_header_gives_unauthorized() {
         assert_eq!(
-            status, None,
+            auth_pipeline_status(None, "/api/diagnostics", AuthLevel::User),
+            Some(StatusCode::UNAUTHORIZED)
+        );
+    }
+
+    #[test]
+    fn test_reuse_verify_basic_auth_self_valid_user_on_metrics_route_passes() {
+        assert_eq!(
+            auth_pipeline_status(
+                Some(("viewer", "pass", UserLevel::User)),
+                "/api/diagnostics",
+                AuthLevel::User,
+            ),
+            None,
             "valid User-level credentials must pass /api/diagnostics"
         );
     }
 
     #[test]
     fn test_reuse_verify_basic_auth_self_user_blocked_from_logs_route() {
-        use crate::config::{PasswordManager, UserStorage};
-        use crate::onvif::dispatcher::{AuthContext, ServiceDispatcher};
-        use crate::onvif::ws_security::WsSecurityValidator;
-        use axum::body::Body;
-        use axum::http::Request as HttpRequest;
-        use base64::Engine;
-        use std::sync::Arc;
-
-        let user_storage = Arc::new(UserStorage::new());
-        user_storage
-            .create_user("viewer", "pass", crate::config::UserLevel::User)
-            .unwrap();
-
-        let dispatcher = ServiceDispatcher::new();
-        let auth_ctx = AuthContext::new(
-            Arc::new(WsSecurityValidator::with_defaults()),
-            user_storage,
-            Arc::new(PasswordManager::new()),
-            true,
-        );
-
-        let credentials = base64::engine::general_purpose::STANDARD.encode("viewer:pass");
-        let request = HttpRequest::builder()
-            .method("GET")
-            .uri("/api/logs")
-            .header("Authorization", format!("Basic {}", credentials))
-            .body(Body::empty())
-            .unwrap();
-
-        let result = verify_basic_auth_self(&dispatcher, &request, &auth_ctx);
-        let required = required_level_for_path("/logs");
-        let status = check_required_level(result, required);
         assert_eq!(
-            status,
+            auth_pipeline_status(
+                Some(("viewer", "pass", UserLevel::User)),
+                "/api/logs",
+                required_level_for_path("/logs"),
+            ),
             Some(StatusCode::FORBIDDEN),
             "User level must not access /logs"
         );
@@ -394,38 +383,14 @@ mod tests {
 
     #[test]
     fn test_reuse_verify_basic_auth_self_admin_allowed_on_logs_route() {
-        use crate::config::{PasswordManager, UserStorage};
-        use crate::onvif::dispatcher::{AuthContext, ServiceDispatcher};
-        use crate::onvif::ws_security::WsSecurityValidator;
-        use axum::body::Body;
-        use axum::http::Request as HttpRequest;
-        use base64::Engine;
-        use std::sync::Arc;
-
-        let user_storage = Arc::new(UserStorage::new());
-        user_storage
-            .create_user("admin", "secret", crate::config::UserLevel::Administrator)
-            .unwrap();
-
-        let dispatcher = ServiceDispatcher::new();
-        let auth_ctx = AuthContext::new(
-            Arc::new(WsSecurityValidator::with_defaults()),
-            user_storage,
-            Arc::new(PasswordManager::new()),
-            true,
+        assert_eq!(
+            auth_pipeline_status(
+                Some(("admin", "secret", UserLevel::Administrator)),
+                "/api/logs",
+                required_level_for_path("/logs"),
+            ),
+            None,
+            "Administrator must be allowed on /logs"
         );
-
-        let credentials = base64::engine::general_purpose::STANDARD.encode("admin:secret");
-        let request = HttpRequest::builder()
-            .method("GET")
-            .uri("/api/logs")
-            .header("Authorization", format!("Basic {}", credentials))
-            .body(Body::empty())
-            .unwrap();
-
-        let result = verify_basic_auth_self(&dispatcher, &request, &auth_ctx);
-        let required = required_level_for_path("/logs");
-        let status = check_required_level(result, required);
-        assert_eq!(status, None, "Administrator must be allowed on /logs");
     }
 }

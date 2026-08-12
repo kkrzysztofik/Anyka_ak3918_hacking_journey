@@ -1405,6 +1405,58 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_diagnostics_route_allows_user_with_valid_credentials() {
+        use axum::body::Body;
+        use axum::http::{Request, StatusCode};
+        use base64::Engine;
+        use tower::ServiceExt;
+
+        let config = OnvifServerConfig {
+            static_root: None,
+            ..Default::default()
+        };
+        let server = OnvifServer::new(config).unwrap().with_diagnostics(Arc::new(
+            crate::diagnostics::state::DiagnosticsState::new(std::time::Instant::now(), None, vec![]),
+        ));
+        server
+            .user_storage
+            .create_user("viewer", "pass", crate::config::UserLevel::User)
+            .unwrap();
+
+        let state = OnvifServerState {
+            dispatcher: Arc::clone(&server.dispatcher),
+            shutdown_tx: server.shutdown_tx.clone(),
+            ws_security: Arc::clone(&server.ws_security),
+            user_storage: Arc::clone(&server.user_storage),
+            password_manager: Arc::clone(&server.password_manager),
+            auth_enabled: true,
+            memory_monitor: Arc::clone(&server.memory_monitor),
+            rate_limiter: Arc::clone(&server.rate_limiter),
+        };
+
+        let addr: SocketAddr = "127.0.0.1:8080".parse().unwrap();
+        let app = server
+            .build_router(state)
+            .layer(axum::Extension(ConnectInfo(addr)));
+
+        let credentials =
+            base64::engine::general_purpose::STANDARD.encode("viewer:pass");
+        let request = Request::builder()
+            .method("GET")
+            .uri("/api/diagnostics")
+            .header("Authorization", format!("Basic {credentials}"))
+            .body(Body::empty())
+            .unwrap();
+
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(
+            response.status(),
+            StatusCode::OK,
+            "User-level credentials must reach /api/diagnostics through the nested router"
+        );
+    }
+
+    #[tokio::test]
     async fn test_unknown_api_route_is_not_swallowed_by_static_fallback() {
         use axum::body::Body;
         use axum::extract::ConnectInfo;
@@ -1456,10 +1508,10 @@ mod tests {
         // an unauthenticated unknown path returns 401. Either way it must not
         // be 200, and the body must never contain the static index sentinel.
         let status = response.status();
-        assert_ne!(
+        assert_eq!(
             status,
-            StatusCode::OK,
-            "/api/nonexistent must not return 200; got: {status}"
+            StatusCode::UNAUTHORIZED,
+            "/api/nonexistent must be rejected by the auth layer; got: {status}"
         );
 
         let body = axum::body::to_bytes(response.into_body(), 4096)

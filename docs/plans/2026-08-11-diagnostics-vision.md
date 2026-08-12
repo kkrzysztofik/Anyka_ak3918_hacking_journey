@@ -366,17 +366,17 @@ npm run lint && npm run type-check && npm run test && npm run build
 
 ```bash
 # ARM binary (vision is server-side)
-./scripts/deploy_onvif.sh 192.168.2.198 root 'www123'
+./scripts/deploy_onvif.sh 192.168.2.198 root "${DEPLOY_PASSWORD:?set DEPLOY_PASSWORD}"
 # Restart via telnet :24 (stop anyka-init briefly if needed — same as prior deploys)
 
 # WWW assets
-python3 # FTP mirror SD_card_contents/anyka_hack/onvif/www → /mnt/anyka_hack/onvif/www
+# Mirror SD_card_contents/anyka_hack/onvif/www → /mnt/anyka_hack/onvif/www (FTP or scp)
 ```
 
 **Step 4: Hardware smoke**
 
 ```bash
-curl -su admin:admin http://192.168.2.198/api/diagnostics | jq '.network, .vision'
+curl -su "admin:${DIAGNOSTICS_PASSWORD:?set DIAGNOSTICS_PASSWORD}" http://192.168.2.198/api/diagnostics | jq '.network, .vision'
 ```
 
 Expected: vision fields populated on camera; lamps match sysfs.

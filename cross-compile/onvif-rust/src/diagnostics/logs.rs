@@ -45,16 +45,16 @@ pub enum LogLevel {
 
 impl LogLevel {
     fn of_line(line: &str) -> Option<Self> {
-        for (token, level) in [
-            ("ERROR", LogLevel::Error),
-            ("WARN", LogLevel::Warn),
-            ("INFO", LogLevel::Info),
-            ("DEBUG", LogLevel::Debug),
-            ("TRACE", LogLevel::Trace),
-        ] {
-            if line.contains(token) {
-                return Some(level);
-            }
+        for word in line.split_whitespace() {
+            let level = match word {
+                "ERROR" => LogLevel::Error,
+                "WARN" => LogLevel::Warn,
+                "INFO" => LogLevel::Info,
+                "DEBUG" => LogLevel::Debug,
+                "TRACE" => LogLevel::Trace,
+                _ => continue,
+            };
+            return Some(level);
         }
         None
     }
@@ -118,11 +118,11 @@ fn strip_ansi(line: &str) -> String {
 pub fn filter_lines(text: &str, min_level: Option<LogLevel>, limit: usize) -> Vec<String> {
     let lines: Vec<String> = text
         .lines()
+        .map(strip_ansi)
         .filter(|line| {
             let level = LogLevel::of_line(line);
             min_level.is_none_or(|min| level.is_none_or(|l| l >= min))
         })
-        .map(strip_ansi)
         .collect();
 
     let start = lines.len().saturating_sub(limit);
@@ -230,10 +230,15 @@ mod tests {
 
     #[test]
     fn test_filter_lines_level_detection_unaffected_by_surrounding_ansi() {
-        // The level token must still match while wrapped in escape codes,
-        // since filtering happens on the raw line before stripping.
         let text = "\u{1b}[33m WARN\u{1b}[0m slow\n\u{1b}[32m INFO\u{1b}[0m ok\n";
         let kept = filter_lines(text, Some(LogLevel::Warn), 100);
-        assert_eq!(kept, vec![" WARN slow"]);
+        assert_eq!(kept, vec!["WARN slow"]);
+    }
+
+    #[test]
+    fn test_log_level_prefers_first_token_not_message_substring() {
+        let text = "INFO recovered after ERROR path\n";
+        let kept = filter_lines(text, Some(LogLevel::Info), 100);
+        assert_eq!(kept, vec!["INFO recovered after ERROR path"]);
     }
 }

@@ -1743,6 +1743,11 @@ mod tests {
         assert_eq!(v.ain0, Some(306));
         assert_eq!(v.ir_led, Some(true));
         assert_eq!(v.ircut_a, Some(false));
+        assert_eq!(v.ircut_b, Some(false));
+        assert_eq!(v.white_led, Some(false));
         assert!(v.supported.ir_led);
+        assert!(v.supported.ircut);
+        assert!(v.supported.white_led);
+        assert_eq!(v.mode, None);
     }
 }

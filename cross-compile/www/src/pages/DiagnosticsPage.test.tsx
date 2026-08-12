@@ -2,7 +2,7 @@
  * DiagnosticsPage Tests
  *
  * All tests mock useDiagnostics so the page renders without network calls.
- * The service mock keeps TypeScript happy since getLogs is imported in later tasks.
+ * getLogs is mocked via @/services/diagnosticsService.
  */
 import { screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -298,7 +298,7 @@ describe('DiagnosticsPage', () => {
     });
 
     it('should render components list when components are present', () => {
-      renderWithProviders(<DiagnosticsPage />); // components = [{ name: 'onvif', status: 'ok' }]
+      renderWithProviders(<DiagnosticsPage />); // components = [{ name: 'onvif', status: 'healthy' }]
       expect(screen.getByTestId('diagnostics-components-list')).toBeInTheDocument();
       expect(screen.getByTestId('diagnostics-component-onvif')).toBeInTheDocument();
     });
@@ -331,7 +331,7 @@ describe('DiagnosticsPage', () => {
     });
   });
 
-  describe('Log panel — Task 14', () => {
+  describe('Log panel', () => {
     it('should render log panel with source selector and level buttons', () => {
       renderWithProviders(<DiagnosticsPage />);
       expect(screen.getByTestId('diagnostics-system-logs-title')).toBeInTheDocument();
@@ -428,7 +428,7 @@ describe('DiagnosticsPage', () => {
 
       expect(createObjectURL).toHaveBeenCalledWith(expect.any(Blob));
       expect(clickMock).toHaveBeenCalled();
-      expect(revokeObjectURL).toHaveBeenCalledWith('blob:test');
+      await waitFor(() => expect(revokeObjectURL).toHaveBeenCalledWith('blob:test'));
     });
   });
 
