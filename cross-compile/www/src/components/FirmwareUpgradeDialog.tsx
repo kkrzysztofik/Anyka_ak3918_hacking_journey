@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useRef, useState } from 'react';
 
 import { Upload } from 'lucide-react';
 
@@ -74,6 +74,7 @@ export function FirmwareUpgradeDialog({
   onFinished,
 }: Readonly<FirmwareUpgradeDialogProps>) {
   const inputRef = useRef<HTMLInputElement>(null);
+  const progressLabelId = useId();
   const [file, setFile] = useState<File | null>(null);
   const [step, setStep] = useState<Step>('select');
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -283,22 +284,27 @@ export function FirmwareUpgradeDialog({
                   {file?.name ?? 'Choose bundle…'}
                 </Button>
               </div>
-
+              {error && (
+                <p
+                  className="text-destructive text-sm"
+                  data-testid="firmware-upgrade-error"
+                  aria-live="polite"
+                >
+                  {error}
+                </p>
+              )}
             </div>
           )}
 
           {step === 'uploading' && progress && (
             <div className="space-y-3 py-4">
-              <p
-                className="text-muted-foreground text-sm"
-                id="firmware-upgrade-progress-label"
-              >
+              <p className="text-muted-foreground text-sm" id={progressLabelId}>
                 {error ? 'Upload failed' : 'Uploading…'}
               </p>
               <progress
                 className="h-2 w-full"
                 data-testid="firmware-upgrade-progress"
-                aria-labelledby="firmware-upgrade-progress-label"
+                aria-labelledby={progressLabelId}
                 value={progress.loaded}
                 max={progress.total || 1}
               />

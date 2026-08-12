@@ -99,6 +99,8 @@ pub struct OnvifServerConfig {
     pub tls_key_path: Option<std::path::PathBuf>,
     /// Rate limit: maximum requests per minute per IP address.
     pub rate_limit_per_minute: u32,
+    /// Root shared with anyka-init `[update] root`; uploads go to `{update_root}/spool`.
+    pub update_root: std::path::PathBuf,
 }
 
 impl Default for OnvifServerConfig {
@@ -115,6 +117,7 @@ impl Default for OnvifServerConfig {
             tls_cert_path: None,
             tls_key_path: None,
             rate_limit_per_minute: 60,
+            update_root: std::path::PathBuf::from(crate::diagnostics::update::DEFAULT_UPDATE_ROOT),
         }
     }
 }
@@ -633,7 +636,9 @@ impl OnvifServer {
                 ))
                 .layer(axum::Extension(Arc::clone(diagnostics)))
                 .layer(axum::Extension(Arc::new(
-                    crate::diagnostics::update::UpdateState::default(),
+                    crate::diagnostics::update::UpdateState::from_update_root(
+                        self.config.update_root.clone(),
+                    ),
                 )));
             app = app.nest("/api", api);
         }
@@ -888,6 +893,7 @@ mod tests {
             tls_cert_path: None,
             tls_key_path: None,
             rate_limit_per_minute: 60,
+            update_root: std::path::PathBuf::from(crate::diagnostics::update::DEFAULT_UPDATE_ROOT),
         };
 
         assert_eq!(config.bind_address, "127.0.0.1");
@@ -1570,6 +1576,77 @@ mod tests {
         );
     }
 
+    /// A non-default `update_root` must send uploads to `{root}/spool`, not the
+    /// hardcoded default path.
+    #[tokio::test]
+    async fn test_update_route_uses_configured_update_root_spool() {
+        use axum::body::Body;
+        use axum::extract::ConnectInfo;
+        use axum::http::{Request, StatusCode};
+        use base64::Engine;
+        use std::net::SocketAddr;
+        use tower::ServiceExt;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let update_root = tmp.path().to_path_buf();
+
+        let config = OnvifServerConfig {
+            static_root: None,
+            update_root: update_root.clone(),
+            ..Default::default()
+        };
+        let server = OnvifServer::new(config).unwrap().with_diagnostics(Arc::new(
+            crate::diagnostics::state::DiagnosticsState::new(
+                std::time::Instant::now(),
+                None,
+                vec![],
+            ),
+        ));
+        server
+            .user_storage
+            .create_user("admin", "pass", crate::config::UserLevel::Administrator)
+            .unwrap();
+
+        let state = OnvifServerState {
+            dispatcher: Arc::clone(&server.dispatcher),
+            shutdown_tx: server.shutdown_tx.clone(),
+            ws_security: Arc::clone(&server.ws_security),
+            user_storage: Arc::clone(&server.user_storage),
+            password_manager: Arc::clone(&server.password_manager),
+            auth_enabled: true,
+            memory_monitor: Arc::clone(&server.memory_monitor),
+            rate_limiter: Arc::clone(&server.rate_limiter),
+        };
+
+        let app = server
+            .build_router(state)
+            .layer(axum::Extension(ConnectInfo(
+                "127.0.0.1:8080".parse::<SocketAddr>().unwrap(),
+            )));
+
+        let credentials = base64::engine::general_purpose::STANDARD.encode("admin:pass");
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri("/api/update")
+                    .header("content-type", "application/octet-stream")
+                    .header("Authorization", format!("Basic {credentials}"))
+                    .body(Body::from("configured-root-bundle"))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::ACCEPTED);
+        let spool = update_root.join("spool");
+        assert_eq!(
+            std::fs::read(spool.join("bundle.tar")).unwrap(),
+            b"configured-root-bundle"
+        );
+        assert!(spool.join("bundle.trigger").is_file());
+    }
+
     /// With authentication disabled, the firmware upload route must not be
     /// mounted at all — an unauthenticated client must get 404, never a chance
     /// to stream a bundle onto the card.
@@ -1638,6 +1715,32 @@ mod tests {
             response.status(),
             StatusCode::UNAUTHORIZED,
             "unauthenticated upload must be rejected"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_update_route_rejects_non_admin_credentials_with_403() {
+        use axum::body::Body;
+        use axum::http::{Request, StatusCode};
+        use base64::Engine;
+        use tower::ServiceExt;
+
+        let app = make_diagnostics_app_with_user(true, "viewer", crate::config::UserLevel::User, 0);
+        let credentials = base64::engine::general_purpose::STANDARD.encode("viewer:pass");
+
+        let request = Request::builder()
+            .method("PUT")
+            .uri("/api/update")
+            .header("content-type", "application/octet-stream")
+            .header("Authorization", format!("Basic {credentials}"))
+            .body(Body::empty())
+            .unwrap();
+
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(
+            response.status(),
+            StatusCode::FORBIDDEN,
+            "valid non-admin credentials must not be allowed to upload firmware"
         );
     }
 

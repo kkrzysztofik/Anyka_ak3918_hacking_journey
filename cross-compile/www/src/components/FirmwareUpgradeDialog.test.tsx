@@ -87,6 +87,7 @@ describe('FirmwareUpgradeDialog', () => {
     Object.defineProperty(oversized, 'size', { value: 64 * 1024 * 1024 + 1 });
     await user.upload(screen.getByTestId('firmware-upgrade-input'), oversized);
     expect(continueButton).toBeDisabled();
+    expect(screen.getByTestId('firmware-upgrade-error')).toBeInTheDocument();
 
     await user.upload(
       screen.getByTestId('firmware-upgrade-input'),
@@ -128,6 +129,9 @@ describe('FirmwareUpgradeDialog', () => {
     const progress = await screen.findByTestId('firmware-upgrade-progress');
     expect(progress).toHaveAttribute('value', '5');
     expect(progress).toHaveAttribute('max', '10');
+    // aria-labelledby points at a useId() value, so a broken pairing would be
+    // invisible in the DOM but leave the bar unnamed for screen readers.
+    expect(screen.getByRole('progressbar', { name: 'Uploading…' })).toBe(progress);
   });
 
   it('test_FirmwareUpgradeDialog_upload_202_enters_waiting', async () => {

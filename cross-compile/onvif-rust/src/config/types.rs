@@ -31,6 +31,8 @@ pub struct AppConfig {
     pub imaging: ImagingConfig,
     pub discovery: DiscoverySettings,
     pub memory: MemoryConfig,
+    /// Shared with anyka-init `[update]`; spool is `{update.root}/spool`.
+    pub update: UpdateConfig,
     pub stream_profile_1: StreamProfileConfig,
     #[serde(default = "StreamProfileConfig::default_sub")]
     pub stream_profile_2: StreamProfileConfig,
@@ -64,6 +66,7 @@ impl Default for AppConfig {
             imaging: ImagingConfig::default(),
             discovery: DiscoverySettings::default(),
             memory: MemoryConfig::default(),
+            update: UpdateConfig::default(),
             stream_profile_1: StreamProfileConfig::default(),
             stream_profile_2: p2,
             stream_profile_3: p3,
@@ -276,6 +279,28 @@ impl AppConfig {
             Ok(())
         } else {
             Err(errors)
+        }
+    }
+}
+
+// ============================================================================
+// Section: [update]
+// ============================================================================
+
+/// Firmware-upgrade paths shared with anyka-init's `[update]` section.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct UpdateConfig {
+    /// Root holding `active`, `slots/`, `state/`, and `spool/`.
+    pub root: String,
+}
+
+impl Default for UpdateConfig {
+    fn default() -> Self {
+        Self {
+            // Keep in sync with anyka-init `[update] root` and
+            // `diagnostics::update::DEFAULT_UPDATE_ROOT`.
+            root: "/mnt/anyka_hack".to_string(),
         }
     }
 }

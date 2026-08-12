@@ -867,6 +867,7 @@ impl Application {
                 Some(std::path::PathBuf::from(&c.server.tls_key_path))
             },
             rate_limit_per_minute: c.server.rate_limit_per_minute,
+            update_root: std::path::PathBuf::from(&c.update.root),
         }
     }
 

@@ -16,6 +16,10 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use http_body_util::BodyExt;
 use tokio::io::AsyncWriteExt;
+use tokio::sync::Mutex;
+
+/// Default `[update] root`, matching anyka-init.
+pub const DEFAULT_UPDATE_ROOT: &str = "/mnt/anyka_hack";
 
 /// Spool directory under `[update] root` (`/mnt/anyka_hack`), matching the
 /// anyka-init applier's default.
@@ -44,13 +48,31 @@ const STALE_PART_AFTER: Duration = Duration::from_secs(600);
 #[derive(Clone)]
 pub struct UpdateState {
     pub spool_root: PathBuf,
+    /// One upload at a time: held from the queue check through trigger create.
+    upload_guard: Arc<Mutex<()>>,
+}
+
+impl UpdateState {
+    /// Spool at `{update_root}/spool`, matching anyka-init's layout.
+    pub fn from_update_root(update_root: impl Into<PathBuf>) -> Self {
+        Self {
+            spool_root: update_root.into().join("spool"),
+            upload_guard: Arc::new(Mutex::new(())),
+        }
+    }
+
+    /// Direct spool path (tests).
+    pub fn with_spool_root(spool_root: PathBuf) -> Self {
+        Self {
+            spool_root,
+            upload_guard: Arc::new(Mutex::new(())),
+        }
+    }
 }
 
 impl Default for UpdateState {
     fn default() -> Self {
-        Self {
-            spool_root: PathBuf::from(DEFAULT_SPOOL_ROOT),
-        }
+        Self::from_update_root(DEFAULT_UPDATE_ROOT)
     }
 }
 
@@ -59,7 +81,7 @@ impl Default for UpdateState {
 /// Returns 202: the update is queued, not yet applied. The reboot happens on
 /// the applier's next poll.
 pub async fn handle_update(Extension(state): Extension<Arc<UpdateState>>, body: Body) -> Response {
-    match receive_bundle(&state.spool_root, body).await {
+    match receive_bundle(&state, body).await {
         Ok(()) => (StatusCode::ACCEPTED, "update queued").into_response(),
         Err(UpdateError::InFlight) => {
             tracing::warn!("bundle upload rejected: another upload in progress or a bundle queued");
@@ -98,7 +120,14 @@ pub async fn handle_update(Extension(state): Extension<Arc<UpdateState>>, body: 
 /// applier has not claimed the previous upload yet, and overwriting it while
 /// the applier is mid-extract would corrupt the apply or lose the earlier
 /// bundle.
-async fn receive_bundle(spool_root: &Path, body: Body) -> Result<(), UpdateError> {
+async fn receive_bundle(state: &UpdateState, body: Body) -> Result<(), UpdateError> {
+    // Acquire before the queue check so two handlers cannot both pass the
+    // trigger/.part tests and then race on create_new.
+    let Ok(_guard) = state.upload_guard.try_lock() else {
+        return Err(UpdateError::InFlight);
+    };
+
+    let spool_root = &state.spool_root;
     tokio::fs::create_dir_all(spool_root).await?;
     if spool_root.join("bundle.trigger").is_file() {
         return Err(UpdateError::InFlight);
@@ -110,7 +139,14 @@ async fn receive_bundle(spool_root: &Path, body: Body) -> Result<(), UpdateError
             if !reclaim_stale_part(&part).await {
                 return Err(UpdateError::InFlight);
             }
-            tokio::fs::File::create(&part).await?
+            // Never File::create: keep the exclusive-create invariant.
+            match tokio::fs::File::create_new(&part).await {
+                Ok(f) => f,
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                    return Err(UpdateError::InFlight);
+                }
+                Err(e) => return Err(e.into()),
+            }
         }
         Err(e) => return Err(e.into()),
     };
@@ -138,8 +174,15 @@ async fn receive_bundle(spool_root: &Path, body: Body) -> Result<(), UpdateError
         return Err(e);
     }
 
-    tokio::fs::rename(&part, spool_root.join("bundle.tar")).await?;
-    tokio::fs::File::create(spool_root.join("bundle.trigger")).await?;
+    let tar = spool_root.join("bundle.tar");
+    if let Err(e) = tokio::fs::rename(&part, &tar).await {
+        let _ = tokio::fs::remove_file(&part).await;
+        return Err(e.into());
+    }
+    if let Err(e) = tokio::fs::File::create(spool_root.join("bundle.trigger")).await {
+        let _ = tokio::fs::remove_file(&tar).await;
+        return Err(e.into());
+    }
     Ok(())
 }
 
@@ -200,7 +243,9 @@ mod tests {
             b"pretend tar",
         )));
 
-        receive_bundle(&spool, body).await.unwrap();
+        receive_bundle(&UpdateState::with_spool_root(spool.clone()), body)
+            .await
+            .unwrap();
 
         assert_eq!(
             std::fs::read(spool.join("bundle.tar")).unwrap(),
@@ -280,9 +325,12 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         let spool = d.path().join("spool");
 
-        let err = receive_bundle(&spool, Body::new(ErrorAfterData { sent: false }))
-            .await
-            .unwrap_err();
+        let err = receive_bundle(
+            &UpdateState::with_spool_root(spool.clone()),
+            Body::new(ErrorAfterData { sent: false }),
+        )
+        .await
+        .unwrap_err();
 
         assert!(
             matches!(err, UpdateError::Body(_)),
@@ -314,7 +362,9 @@ mod tests {
         let body = Body::new(http_body_util::Full::new(Bytes::from_static(
             b"second upload",
         )));
-        let err = receive_bundle(&spool, body).await.unwrap_err();
+        let err = receive_bundle(&UpdateState::with_spool_root(spool.clone()), body)
+            .await
+            .unwrap_err();
 
         assert!(
             matches!(err, UpdateError::InFlight),
@@ -324,6 +374,14 @@ mod tests {
             std::fs::read(spool.join("bundle.tar")).unwrap(),
             b"queued",
             "the queued bundle must not be overwritten"
+        );
+        assert!(
+            spool.join("bundle.trigger").is_file(),
+            "the queued trigger must still exist"
+        );
+        assert!(
+            !spool.join("bundle.tar.part").exists(),
+            "no partial file should be created when a bundle is already queued"
         );
     }
 
@@ -338,7 +396,9 @@ mod tests {
         let body = Body::new(http_body_util::Full::new(Bytes::from_static(
             b"second upload",
         )));
-        let err = receive_bundle(&spool, body).await.unwrap_err();
+        let err = receive_bundle(&UpdateState::with_spool_root(spool.clone()), body)
+            .await
+            .unwrap_err();
 
         assert!(
             matches!(err, UpdateError::InFlight),
@@ -366,7 +426,7 @@ mod tests {
             .unwrap();
 
         let body = Body::new(http_body_util::Full::new(Bytes::from_static(b"new bundle")));
-        receive_bundle(&spool, body)
+        receive_bundle(&UpdateState::with_spool_root(spool.clone()), body)
             .await
             .expect("a stale .part must not block a fresh upload");
 
@@ -386,12 +446,88 @@ mod tests {
         std::fs::write(spool.join("bundle.tar.part"), b"in progress").unwrap();
 
         let body = Body::new(http_body_util::Full::new(Bytes::from_static(b"second")));
-        let err = receive_bundle(&spool, body).await.unwrap_err();
+        let err = receive_bundle(&UpdateState::with_spool_root(spool.clone()), body)
+            .await
+            .unwrap_err();
 
         assert!(
             matches!(err, UpdateError::InFlight),
             "a recent .part is a live upload, got {err:?}"
         );
+    }
+
+    #[tokio::test]
+    async fn test_receive_bundle_cleans_up_part_on_rename_failure() {
+        let d = tempfile::tempdir().unwrap();
+        let spool = d.path().join("spool");
+        std::fs::create_dir_all(&spool).unwrap();
+        // A directory at the destination makes rename fail with EISDIR.
+        std::fs::create_dir(spool.join("bundle.tar")).unwrap();
+
+        let body = Body::new(http_body_util::Full::new(Bytes::from_static(b"bundle")));
+        let err = receive_bundle(&UpdateState::with_spool_root(spool.clone()), body)
+            .await
+            .unwrap_err();
+
+        assert!(
+            matches!(err, UpdateError::Io(_)),
+            "rename failure must surface as an io error, got {err:?}"
+        );
+        assert!(
+            !spool.join("bundle.tar.part").exists(),
+            "the partial file must be removed when rename fails"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_receive_bundle_cleans_up_tar_on_trigger_failure() {
+        let d = tempfile::tempdir().unwrap();
+        let spool = d.path().join("spool");
+        std::fs::create_dir_all(&spool).unwrap();
+        // A directory at the trigger path makes File::create fail with EISDIR.
+        std::fs::create_dir(spool.join("bundle.trigger")).unwrap();
+
+        let body = Body::new(http_body_util::Full::new(Bytes::from_static(b"bundle")));
+        let err = receive_bundle(&UpdateState::with_spool_root(spool.clone()), body)
+            .await
+            .unwrap_err();
+
+        assert!(
+            matches!(err, UpdateError::Io(_)),
+            "trigger creation failure must surface as an io error, got {err:?}"
+        );
+        assert!(
+            !spool.join("bundle.tar").exists(),
+            "the published tar must be removed when trigger creation fails"
+        );
+        assert!(
+            !spool.join("bundle.tar.part").exists(),
+            "the partial file must be gone after a failed publication"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_receive_bundle_rejects_upload_while_publication_guard_held() {
+        let d = tempfile::tempdir().unwrap();
+        let spool = d.path().join("spool");
+        let state = UpdateState::with_spool_root(spool);
+        // The guard is held continuously from before .part creation through
+        // trigger creation; holding it here reproduces the rejection any
+        // concurrent upload would see in the rename-trigger window.
+        let guard = state.upload_guard.try_lock().expect("lock is free");
+
+        let err = receive_bundle(
+            &state,
+            Body::new(http_body_util::Full::new(Bytes::from_static(b"bundle"))),
+        )
+        .await
+        .unwrap_err();
+
+        assert!(
+            matches!(err, UpdateError::InFlight),
+            "an upload must be rejected while the publication guard is held"
+        );
+        drop(guard);
     }
 
     #[tokio::test]
@@ -406,7 +542,9 @@ mod tests {
             chunk: Bytes::from(vec![0u8; CHUNK]),
             remaining: (MAX_BUNDLE_BYTES as usize / CHUNK) + 1,
         });
-        let err = receive_bundle(&spool, body).await.unwrap_err();
+        let err = receive_bundle(&UpdateState::with_spool_root(spool.clone()), body)
+            .await
+            .unwrap_err();
 
         assert!(
             matches!(err, UpdateError::TooLarge),
@@ -428,13 +566,18 @@ mod tests {
         let spool = d.path().join("spool");
 
         // First attempt fails mid-stream.
-        receive_bundle(&spool, Body::new(ErrorAfterData { sent: false }))
-            .await
-            .unwrap_err();
+        receive_bundle(
+            &UpdateState::with_spool_root(spool.clone()),
+            Body::new(ErrorAfterData { sent: false }),
+        )
+        .await
+        .unwrap_err();
 
         // Second attempt must be able to start fresh.
         let body = Body::new(http_body_util::Full::new(Bytes::from_static(b"retry")));
-        receive_bundle(&spool, body).await.unwrap();
+        receive_bundle(&UpdateState::with_spool_root(spool.clone()), body)
+            .await
+            .unwrap();
         assert_eq!(std::fs::read(spool.join("bundle.tar")).unwrap(), b"retry");
     }
 
@@ -443,7 +586,9 @@ mod tests {
     fn update_app(spool_root: PathBuf) -> axum::Router {
         axum::Router::new()
             .route("/update", axum::routing::put(handle_update))
-            .layer(axum::Extension(Arc::new(UpdateState { spool_root })))
+            .layer(axum::Extension(Arc::new(UpdateState::with_spool_root(
+                spool_root,
+            ))))
     }
 
     #[tokio::test]
