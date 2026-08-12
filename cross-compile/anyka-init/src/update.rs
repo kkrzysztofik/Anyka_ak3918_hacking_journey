@@ -216,6 +216,64 @@ fn shell_quote(p: &Path) -> String {
     format!("'{}'", p.to_string_lossy().replace('\'', r"'\''"))
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Outcome {
+    Confirm,
+    Revert,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct Policy {
+    /// Consecutive seconds every port must stay bound.
+    pub hold_secs: u32,
+    /// Give up after this long.
+    pub deadline_secs: u32,
+}
+
+impl Default for Policy {
+    fn default() -> Self {
+        Self {
+            hold_secs: 30,
+            deadline_secs: 120,
+        }
+    }
+}
+
+/// Ports the trial requires. From
+/// `SD_card_contents/anyka_hack/onvif/config.toml:105,183,186`.
+pub const TRIAL_PORTS: [u16; 3] = [80, 554, 8080];
+
+/// Watch `ports` once a second until all of them have been bound continuously
+/// for `hold_secs`, or `deadline_secs` elapses.
+///
+/// `probe` and `sleep` are injected so this is testable without sockets or
+/// wall-clock waits. Production passes `netstat::listening` and
+/// `std::thread::sleep`.
+///
+/// ponytail: socket-liveness smoke test. Bound sockets do not prove frames
+/// flow, so a broken vendor-daemon can pass. Add a frame-counter probe if a
+/// silent-no-video regression ever ships.
+pub fn evaluate_trial(
+    ports: &[u16],
+    policy: Policy,
+    mut probe: impl FnMut(u16) -> bool,
+    mut sleep: impl FnMut(std::time::Duration),
+) -> Outcome {
+    let mut held = 0u32;
+    for _ in 0..policy.deadline_secs {
+        if ports.iter().all(|p| probe(*p)) {
+            held += 1;
+            if held >= policy.hold_secs {
+                return Outcome::Confirm;
+            }
+        } else {
+            held = 0;
+        }
+        sleep(std::time::Duration::from_secs(1));
+    }
+    Outcome::Revert
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -384,5 +442,74 @@ mod tests {
         sys.expect_run_to_completion().never();
 
         assert!(verify_slot(&sys, &slot, 1).is_err());
+    }
+
+    #[test]
+    fn trial_passes_when_every_port_is_bound_for_the_hold() {
+        let mut calls = 0;
+        let outcome = evaluate_trial(
+            &[80, 554, 8080],
+            Policy {
+                hold_secs: 3,
+                deadline_secs: 10,
+            },
+            |_port| {
+                calls += 1;
+                true
+            },
+            |_| {},
+        );
+        assert_eq!(outcome, Outcome::Confirm);
+        assert!(calls >= 3);
+    }
+
+    #[test]
+    fn trial_fails_when_one_port_never_binds() {
+        let outcome = evaluate_trial(
+            &[80, 554, 8080],
+            Policy {
+                hold_secs: 3,
+                deadline_secs: 6,
+            },
+            |port| port != 554,
+            |_| {},
+        );
+        assert_eq!(outcome, Outcome::Revert);
+    }
+
+    #[test]
+    fn a_late_bind_still_confirms_inside_the_deadline() {
+        let mut tick = 0;
+        let outcome = evaluate_trial(
+            &[554],
+            Policy {
+                hold_secs: 2,
+                deadline_secs: 20,
+            },
+            |_| {
+                tick += 1;
+                tick > 5
+            },
+            |_| {},
+        );
+        assert_eq!(outcome, Outcome::Confirm);
+    }
+
+    #[test]
+    fn a_flapping_port_resets_the_hold_and_eventually_reverts() {
+        let mut tick = 0;
+        let outcome = evaluate_trial(
+            &[80],
+            Policy {
+                hold_secs: 3,
+                deadline_secs: 8,
+            },
+            |_| {
+                tick += 1;
+                tick % 2 == 0
+            },
+            |_| {},
+        );
+        assert_eq!(outcome, Outcome::Revert);
     }
 }

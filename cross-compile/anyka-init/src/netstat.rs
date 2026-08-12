@@ -296,6 +296,16 @@ mod tests {
     }
 
     #[test]
+    fn listening_finds_every_trial_port() {
+        for p in crate::update::TRIAL_PORTS {
+            assert!(
+                parse_listening(TCP_FIXTURE, p),
+                "port {p} should be listening"
+            );
+        }
+    }
+
+    #[test]
     fn listening_rejects_an_established_socket() {
         // 0x1F91 == 8081, present but state 01 (ESTABLISHED), not 0A (LISTEN)
         assert!(!parse_listening(TCP_FIXTURE, 8081));
