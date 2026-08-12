@@ -62,6 +62,8 @@ tempfile = "3.27"
 regex = "1.13"
 serde_json = "1.0"
 clap = { version = "4", features = ["derive"] }
+# Tests build custom http_body::Body impls to inject mid-stream errors.
+http-body = "1.1"
 
 [features]
 default = []

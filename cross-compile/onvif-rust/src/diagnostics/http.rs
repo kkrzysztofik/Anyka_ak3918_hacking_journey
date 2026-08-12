@@ -87,6 +87,7 @@ fn required_level_for_path(path: &str) -> AuthLevel {
     let path = path.strip_prefix("/api").unwrap_or(path);
     match path {
         "/logs" | "/logs/" => AuthLevel::Administrator,
+        "/update" | "/update/" => AuthLevel::Administrator,
         "/diagnostics" | "/diagnostics/" => AuthLevel::User,
         // Fail closed: unknown routes require Administrator until explicitly opened.
         _ => AuthLevel::Administrator,
@@ -281,6 +282,27 @@ mod tests {
     #[test]
     fn test_required_level_for_path_logs_trailing_slash_requires_admin() {
         assert_eq!(required_level_for_path("/logs/"), AuthLevel::Administrator);
+    }
+
+    #[test]
+    fn test_required_level_for_path_update_requires_admin() {
+        assert_eq!(required_level_for_path("/update"), AuthLevel::Administrator);
+    }
+
+    #[test]
+    fn test_required_level_for_path_update_trailing_slash_requires_admin() {
+        assert_eq!(
+            required_level_for_path("/update/"),
+            AuthLevel::Administrator
+        );
+    }
+
+    #[test]
+    fn test_required_level_for_path_update_with_api_prefix_requires_admin() {
+        assert_eq!(
+            required_level_for_path("/api/update"),
+            AuthLevel::Administrator
+        );
     }
 
     #[test]

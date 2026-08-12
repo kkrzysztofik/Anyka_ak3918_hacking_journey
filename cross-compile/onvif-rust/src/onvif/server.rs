@@ -56,7 +56,7 @@ use axum::{
     http::{Method, StatusCode, header},
     middleware::{self, Next},
     response::{IntoResponse, Response},
-    routing::{get, post},
+    routing::{get, post, put},
 };
 use tokio::net::TcpListener;
 use tokio::sync::broadcast;
@@ -595,12 +595,16 @@ impl OnvifServer {
                     get(crate::diagnostics::http::handle_diagnostics),
                 )
                 .route("/logs", get(crate::diagnostics::http::handle_logs))
+                .route("/update", put(crate::diagnostics::update::handle_update))
                 .fallback(|| async { StatusCode::NOT_FOUND })
                 .layer(middleware::from_fn_with_state(
                     state.clone(),
                     crate::diagnostics::http::diagnostics_auth_middleware,
                 ))
-                .layer(axum::Extension(Arc::clone(diagnostics)));
+                .layer(axum::Extension(Arc::clone(diagnostics)))
+                .layer(axum::Extension(Arc::new(
+                    crate::diagnostics::update::UpdateState::default(),
+                )));
             app = app.nest("/api", api);
         }
 
@@ -1377,6 +1381,29 @@ mod tests {
             response.status(),
             StatusCode::UNAUTHORIZED,
             "unauthenticated request should be rejected"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_update_route_requires_auth() {
+        use axum::body::Body;
+        use axum::http::{Request, StatusCode};
+        use tower::ServiceExt;
+
+        let app = make_diagnostics_app(true);
+
+        // PUT /api/update without credentials → 401, exactly like /logs.
+        let request = Request::builder()
+            .method("PUT")
+            .uri("/api/update")
+            .body(Body::empty())
+            .unwrap();
+
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(
+            response.status(),
+            StatusCode::UNAUTHORIZED,
+            "unauthenticated upload must be rejected"
         );
     }
 
