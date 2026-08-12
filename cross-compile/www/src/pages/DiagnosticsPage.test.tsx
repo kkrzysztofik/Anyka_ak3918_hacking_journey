@@ -5,10 +5,9 @@
  * getLogs is mocked via @/services/diagnosticsService.
  */
 import { screen } from '@testing-library/react';
+import { waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-
-import { waitFor } from '@testing-library/react';
 
 import type { UseDiagnosticsResult } from '@/hooks/useDiagnostics';
 import { useDiagnostics } from '@/hooks/useDiagnostics';
@@ -278,17 +277,13 @@ describe('DiagnosticsPage', () => {
     });
 
     it('test_DiagnosticsPage_null_frame_age_renders_em_dash', () => {
-      vi.mocked(useDiagnostics).mockReturnValue(
-        makeResult({ stream_frame_age_ms: null }),
-      );
+      vi.mocked(useDiagnostics).mockReturnValue(makeResult({ stream_frame_age_ms: null }));
       renderWithProviders(<DiagnosticsPage />);
       expect(screen.getByTestId('diagnostics-frame-age')).toHaveTextContent('\u2014');
     });
 
     it('test_DiagnosticsPage_stale_frame_age_shows_stalled_indicator', () => {
-      vi.mocked(useDiagnostics).mockReturnValue(
-        makeResult({ stream_frame_age_ms: 6000 }),
-      );
+      vi.mocked(useDiagnostics).mockReturnValue(makeResult({ stream_frame_age_ms: 6000 }));
       renderWithProviders(<DiagnosticsPage />);
       expect(screen.getByTestId('diagnostics-stream-stalled')).toBeInTheDocument();
     });
@@ -352,9 +347,7 @@ describe('DiagnosticsPage', () => {
       await waitFor(() => {
         expect(screen.getByTestId('diagnostics-log-lines')).toBeInTheDocument();
       });
-      expect(screen.getByTestId('diagnostics-log-lines')).toHaveTextContent(
-        'Service started',
-      );
+      expect(screen.getByTestId('diagnostics-log-lines')).toHaveTextContent('Service started');
     });
 
     it('test_DiagnosticsPage_empty_log_source_shows_unavailable_message', async () => {
@@ -389,9 +382,7 @@ describe('DiagnosticsPage', () => {
       const trigger = screen.getByTestId('diagnostics-log-source-select');
       await user.click(trigger);
 
-      const vendorOption = screen.getByTestId(
-        'diagnostics-log-source-option-vendor_daemon',
-      );
+      const vendorOption = screen.getByTestId('diagnostics-log-source-option-vendor_daemon');
       await user.click(vendorOption);
 
       await waitFor(() => {
@@ -533,53 +524,18 @@ describe('DiagnosticsPage', () => {
   });
 
   describe('Firmware update', () => {
-    it('test_DiagnosticsPage_upload_button_disabled_until_file_chosen', () => {
+    it('test_DiagnosticsPage_firmware_upgrade_button_renders', () => {
       renderWithProviders(<DiagnosticsPage />);
-      expect(screen.getByTestId('diagnostics-firmware-upload-button')).toBeDisabled();
+      expect(screen.getByTestId('diagnostics-firmware-upgrade-button')).toBeInTheDocument();
     });
 
-    it('test_DiagnosticsPage_browse_reveals_file_name_and_enables_upload', async () => {
+    it('test_DiagnosticsPage_upgrade_click_opens_firmware_upgrade_dialog', async () => {
+      const user = userEvent.setup();
       renderWithProviders(<DiagnosticsPage />);
-      const input = screen.getByTestId('diagnostics-firmware-input') as HTMLInputElement;
-      const file = new File(['tar'], 'bundle.tar', { type: 'application/x-tar' });
-      await userEvent.upload(input, file);
-      expect(screen.getByTestId('diagnostics-firmware-browse-button')).toHaveTextContent(
-        'bundle.tar',
-      );
-      expect(screen.getByTestId('diagnostics-firmware-upload-button')).toBeEnabled();
-    });
 
-    it('test_DiagnosticsPage_upload_calls_uploadFirmware_and_shows_queued', async () => {
-      const { uploadFirmware } = await import('@/services/diagnosticsService');
-      vi.mocked(uploadFirmware).mockResolvedValue(undefined);
+      await user.click(screen.getByTestId('diagnostics-firmware-upgrade-button'));
 
-      renderWithProviders(<DiagnosticsPage />);
-      const input = screen.getByTestId('diagnostics-firmware-input') as HTMLInputElement;
-      await userEvent.upload(input, new File(['tar'], 'bundle.tar'));
-      await userEvent.click(screen.getByTestId('diagnostics-firmware-upload-button'));
-
-      await waitFor(() =>
-        expect(screen.getByTestId('diagnostics-firmware-queued')).toBeInTheDocument(),
-      );
-      expect(vi.mocked(uploadFirmware)).toHaveBeenCalledTimes(1);
-    });
-
-    it('test_DiagnosticsPage_upload_failure_shows_error', async () => {
-      const { uploadFirmware } = await import('@/services/diagnosticsService');
-      vi.mocked(uploadFirmware).mockRejectedValue(new Error('Upload rejected by camera'));
-
-      renderWithProviders(<DiagnosticsPage />);
-      const input = screen.getByTestId('diagnostics-firmware-input') as HTMLInputElement;
-      await userEvent.upload(input, new File(['tar'], 'bundle.tar'));
-      await userEvent.click(screen.getByTestId('diagnostics-firmware-upload-button'));
-
-      await waitFor(() =>
-        expect(screen.getByTestId('diagnostics-firmware-error')).toHaveTextContent(
-          'Upload rejected by camera',
-        ),
-      );
+      expect(screen.getByTestId('firmware-upgrade-dialog')).toBeInTheDocument();
     });
   });
 });
-
-

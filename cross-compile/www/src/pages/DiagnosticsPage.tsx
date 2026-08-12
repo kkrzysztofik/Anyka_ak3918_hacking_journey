@@ -1,5 +1,6 @@
-import React, { useCallback, useRef, useState } from 'react';
+import React, { useCallback, useState } from 'react';
 
+import { useQuery } from '@tanstack/react-query';
 import {
   Activity,
   Cpu,
@@ -13,9 +14,8 @@ import {
   Wifi,
 } from 'lucide-react';
 
-import { useQuery } from '@tanstack/react-query';
-
 import { Sparkline } from '@/components/common/Sparkline';
+import { FirmwareUpgradeDialog } from '@/components/FirmwareUpgradeDialog';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
@@ -25,14 +25,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { useDiagnostics, type DiagnosticsPoint } from '@/hooks/useDiagnostics';
+import { type DiagnosticsPoint, useDiagnostics } from '@/hooks/useDiagnostics';
 import { cn } from '@/lib/utils';
 import {
   type Diagnostics,
   type LogLevel,
   type LogSource,
   getLogs,
-  uploadFirmware,
 } from '@/services/diagnosticsService';
 
 const RESTART_THRESHOLD_S = 300; // 5 minutes
@@ -92,10 +91,7 @@ function StatCard({
     >
       <div className="flex items-center gap-4 p-5">
         <div
-          className={cn(
-            'flex h-10 w-10 shrink-0 items-center justify-center rounded-lg',
-            colorBg,
-          )}
+          className={cn('flex h-10 w-10 shrink-0 items-center justify-center rounded-lg', colorBg)}
         >
           <Icon className={cn('h-5 w-5', color)} />
         </div>
@@ -132,18 +128,13 @@ function formatLamp(supported: boolean, value: boolean | null | undefined): stri
 function VisionCard({ vision }: Readonly<{ vision: Diagnostics['vision'] }>) {
   const mode = vision?.mode ?? '\u2014';
   const aeLuma =
-    vision?.ae_luma !== null && vision?.ae_luma !== undefined
-      ? String(vision.ae_luma)
-      : '\u2014';
-  const ain0 =
-    vision?.ain0 !== null && vision?.ain0 !== undefined ? String(vision.ain0) : '\u2014';
+    vision?.ae_luma !== null && vision?.ae_luma !== undefined ? String(vision.ae_luma) : '\u2014';
+  const ain0 = vision?.ain0 !== null && vision?.ain0 !== undefined ? String(vision.ain0) : '\u2014';
 
   const irLed = vision ? formatLamp(vision.supported.ir_led, vision.ir_led) : '\u2014';
   const ircutA = vision ? formatLamp(vision.supported.ircut, vision.ircut_a) : '\u2014';
   const ircutB = vision ? formatLamp(vision.supported.ircut, vision.ircut_b) : '\u2014';
-  const whiteLed = vision
-    ? formatLamp(vision.supported.white_led, vision.white_led)
-    : '\u2014';
+  const whiteLed = vision ? formatLamp(vision.supported.white_led, vision.white_led) : '\u2014';
 
   return (
     <Card className="border-border bg-card overflow-hidden">
@@ -224,9 +215,7 @@ function DiagnosticsStatCards({ data }: Readonly<{ data: Diagnostics | undefined
   const memTotalMb = data?.memory ? Math.round(data.memory.total_kb / 1024) : null;
   const memValue = memUsedMb !== null ? `${memUsedMb} MB` : '—';
   const memSubValue =
-    memUsedMb !== null && memTotalMb !== null
-      ? `${memUsedMb} MB / ${memTotalMb} MB`
-      : undefined;
+    memUsedMb !== null && memTotalMb !== null ? `${memUsedMb} MB / ${memTotalMb} MB` : undefined;
 
   const storageUsedMb = data?.storage ? Math.round(data.storage.used_kb / 1024) : null;
   const storageTotalMb = data?.storage ? Math.round(data.storage.total_kb / 1024) : null;
@@ -671,9 +660,7 @@ function SystemLogsCard({
               </SelectContent>
             </Select>
 
-            <fieldset
-              className="border-border bg-muted/50 m-0 flex min-w-0 items-center rounded-md border p-0.5"
-            >
+            <fieldset className="border-border bg-muted/50 m-0 flex min-w-0 items-center rounded-md border p-0.5">
               <legend className="sr-only">Log level filter</legend>
               {LOG_LEVEL_OPTIONS.map((opt) => (
                 <Button
@@ -710,108 +697,59 @@ function SystemLogsCard({
   );
 }
 
-function FirmwareUpdateCard() {
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const [fileName, setFileName] = useState<string | null>(null);
-  const [uploading, setUploading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [queued, setQueued] = useState(false);
-
-  const handleFileChange = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    setFileName(file?.name ?? null);
-    setQueued(false);
-  }, []);
-
-  const handleUpload = useCallback(async () => {
-    const input = fileInputRef.current;
-    const file = input?.files?.[0];
-    if (!file) return;
-
-    setUploading(true);
-    setError(null);
-    try {
-      await uploadFirmware(file);
-      setQueued(true);
-      setFileName(null);
-      if (input) input.value = '';
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Upload failed');
-    } finally {
-      setUploading(false);
-    }
-  }, []);
+function FirmwareUpdateCard({
+  previousVersion,
+  onFinished,
+}: Readonly<{ previousVersion: string | null; onFinished: () => void }>) {
+  const [open, setOpen] = useState(false);
 
   return (
-    <Card className="border-border bg-card overflow-hidden">
-      <CardHeader className="border-border border-b">
-        <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-green-500/10">
-            <Upload className="h-5 w-5 text-green-500" />
-          </div>
-          <div>
-            <CardTitle
-              className="text-foreground text-sm font-semibold"
-              data-testid="diagnostics-firmware-title"
+    <>
+      <Card className="border-border bg-card overflow-hidden">
+        <CardHeader className="border-border border-b">
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-green-500/10">
+                <Upload className="h-5 w-5 text-green-500" />
+              </div>
+              <div>
+                <CardTitle
+                  className="text-foreground text-sm font-semibold"
+                  data-testid="diagnostics-firmware-title"
+                >
+                  Firmware Update
+                </CardTitle>
+                <p
+                  className="text-muted-foreground text-xs"
+                  data-testid="diagnostics-firmware-description"
+                >
+                  Install an upgrade bundle
+                </p>
+              </div>
+            </div>
+            <Button
+              size="sm"
+              data-testid="diagnostics-firmware-upgrade-button"
+              onClick={() => setOpen(true)}
             >
-              Firmware Update
-            </CardTitle>
-            <p
-              className="text-muted-foreground text-xs"
-              data-testid="diagnostics-firmware-description"
-            >
-              Install an upgrade bundle
-            </p>
+              Upgrade…
+            </Button>
           </div>
-        </div>
-      </CardHeader>
-      <CardContent className="pt-4">
-        <div className="flex flex-wrap items-center gap-3">
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".tar"
-            className="hidden"
-            data-testid="diagnostics-firmware-input"
-            onChange={handleFileChange}
-            disabled={uploading}
-          />
-          <Button
-            variant="outline"
-            size="sm"
-            data-testid="diagnostics-firmware-browse-button"
-            onClick={() => fileInputRef.current?.click()}
-            disabled={uploading}
-          >
-            {fileName ?? 'Choose bundle…'}
-          </Button>
-          <Button
-            size="sm"
-            data-testid="diagnostics-firmware-upload-button"
-            onClick={handleUpload}
-            disabled={uploading || fileName === null}
-          >
-            {uploading ? 'Uploading…' : 'Upload'}
-          </Button>
-        </div>
-        {queued && (
-          <p className="mt-3 text-sm text-green-400" data-testid="diagnostics-firmware-queued">
-            Bundle accepted. The camera will reboot into it and return in about
-            two minutes.
-          </p>
-        )}
-        {error && (
-          <p className="mt-3 text-sm text-red-400" data-testid="diagnostics-firmware-error">
-            {error}
-          </p>
-        )}
-      </CardContent>
-    </Card>
+        </CardHeader>
+      </Card>
+
+      <FirmwareUpgradeDialog
+        open={open}
+        onOpenChange={setOpen}
+        previousVersion={previousVersion}
+        onFinished={onFinished}
+      />
+    </>
   );
 }
 
 export default function DiagnosticsPage() {
-  const { data, isLoading, history } = useDiagnostics();
+  const { data, isLoading, history, refetch } = useDiagnostics();
   const [logSource, setLogSource] = useState<LogSource>('onvif_rust');
   const [logLevel, setLogLevel] = useState<LogLevel | 'all'>('all');
 
@@ -863,7 +801,12 @@ export default function DiagnosticsPage() {
         <StreamHealthCard data={data} />
       </div>
 
-      <FirmwareUpdateCard />
+      <FirmwareUpdateCard
+        previousVersion={data?.firmware_version ?? null}
+        onFinished={() => {
+          void refetch();
+        }}
+      />
 
       <SystemLogsCard
         logSource={logSource}
