@@ -155,7 +155,10 @@ impl DiagnosticsState {
             .net_dev_text
             .as_deref()
             .and_then(|s| proc::parse_net_dev(s, NET_IFACE));
-        let mem = readings.meminfo_text.as_deref().and_then(proc::parse_meminfo);
+        let mem = readings
+            .meminfo_text
+            .as_deref()
+            .and_then(proc::parse_meminfo);
         let system_s = readings
             .uptime_text
             .as_deref()
@@ -171,8 +174,8 @@ impl DiagnosticsState {
         let prev_sample = {
             let mut guard = self.previous.lock().unwrap_or_else(|e| e.into_inner());
             let prev = guard.as_ref().copied();
-            let too_soon = prev
-                .is_some_and(|p| now_sample.taken_at.duration_since(p.taken_at) < MIN_DELTA);
+            let too_soon =
+                prev.is_some_and(|p| now_sample.taken_at.duration_since(p.taken_at) < MIN_DELTA);
             if !too_soon {
                 guard.replace(now_sample);
             }

@@ -118,7 +118,7 @@ fn strip_ansi(line: &str) -> String {
 pub fn filter_lines(text: &str, min_level: Option<LogLevel>, limit: usize) -> Vec<String> {
     let lines: Vec<String> = text
         .lines()
-        .map(strip_ansi)
+        .map(|line| strip_ansi(line).trim().to_string())
         .filter(|line| {
             let level = LogLevel::of_line(line);
             min_level.is_none_or(|min| level.is_none_or(|l| l >= min))

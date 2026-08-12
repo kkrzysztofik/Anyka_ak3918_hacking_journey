@@ -1332,7 +1332,11 @@ mod tests {
             ..Default::default()
         };
         let server = OnvifServer::new(config).unwrap().with_diagnostics(Arc::new(
-            crate::diagnostics::state::DiagnosticsState::new(std::time::Instant::now(), None, vec![]),
+            crate::diagnostics::state::DiagnosticsState::new(
+                std::time::Instant::now(),
+                None,
+                vec![],
+            ),
         ));
 
         let state = OnvifServerState {
@@ -1416,7 +1420,11 @@ mod tests {
             ..Default::default()
         };
         let server = OnvifServer::new(config).unwrap().with_diagnostics(Arc::new(
-            crate::diagnostics::state::DiagnosticsState::new(std::time::Instant::now(), None, vec![]),
+            crate::diagnostics::state::DiagnosticsState::new(
+                std::time::Instant::now(),
+                None,
+                vec![],
+            ),
         ));
         server
             .user_storage
@@ -1439,8 +1447,7 @@ mod tests {
             .build_router(state)
             .layer(axum::Extension(ConnectInfo(addr)));
 
-        let credentials =
-            base64::engine::general_purpose::STANDARD.encode("viewer:pass");
+        let credentials = base64::engine::general_purpose::STANDARD.encode("viewer:pass");
         let request = Request::builder()
             .method("GET")
             .uri("/api/diagnostics")
@@ -1476,7 +1483,11 @@ mod tests {
             ..Default::default()
         };
         let server = OnvifServer::new(config).unwrap().with_diagnostics(Arc::new(
-            crate::diagnostics::state::DiagnosticsState::new(std::time::Instant::now(), None, vec![]),
+            crate::diagnostics::state::DiagnosticsState::new(
+                std::time::Instant::now(),
+                None,
+                vec![],
+            ),
         ));
 
         // auth_enabled=true: unauthenticated unknown /api path hits auth middleware → 401.

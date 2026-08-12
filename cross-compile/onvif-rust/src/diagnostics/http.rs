@@ -61,7 +61,8 @@ pub async fn handle_logs(Query(query): Query<LogQuery>) -> Response {
 
     match tokio::task::spawn_blocking(move || {
         let path = std::path::Path::new(source.path());
-        logs::tail_bytes(path, DEFAULT_TAIL_BYTES).map(|text| logs::filter_lines(&text, level, lines_limit))
+        logs::tail_bytes(path, DEFAULT_TAIL_BYTES)
+            .map(|text| logs::filter_lines(&text, level, lines_limit))
     })
     .await
     {
@@ -295,10 +296,7 @@ mod tests {
 
     #[test]
     fn test_required_level_for_path_diagnostics_with_api_prefix_requires_user() {
-        assert_eq!(
-            required_level_for_path("/api/diagnostics"),
-            AuthLevel::User
-        );
+        assert_eq!(required_level_for_path("/api/diagnostics"), AuthLevel::User);
     }
 
     // ── reuse proof: verify_basic_auth_self integration ──────────────────
@@ -322,9 +320,7 @@ mod tests {
 
         let user_storage = Arc::new(UserStorage::new());
         if let Some((username, password, level)) = account {
-            user_storage
-                .create_user(username, password, level)
-                .unwrap();
+            user_storage.create_user(username, password, level).unwrap();
         }
 
         let dispatcher = ServiceDispatcher::new();
