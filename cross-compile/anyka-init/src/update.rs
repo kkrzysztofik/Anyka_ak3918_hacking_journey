@@ -323,6 +323,85 @@ pub fn reconcile(
     }
 }
 
+/// Is a complete bundle waiting?
+///
+/// The trigger file is written after the tar, so its presence means the
+/// transfer finished. A tar without a trigger is an upload still in flight.
+pub fn pending(root: &Path) -> bool {
+    root.join("spool/bundle.trigger").is_file() && root.join("spool/bundle.tar").is_file()
+}
+
+/// Apply the bundle in `spool/`. Returns having either rebooted or done
+/// nothing durable.
+pub fn apply(sys: &dyn crate::sys::Sys, root: &Path, device_schema: u32) {
+    let slots = Slots::new(root);
+    let target = slots.inactive();
+    let dir = slots.dir(target);
+
+    let result = stage_and_flip(sys, root, &slots, target, &dir, device_schema);
+
+    // Clear the spool either way. A bundle that failed verification will fail
+    // it again on the next tick, and retrying forever would keep the supervisor
+    // busy hashing 19 MB every minute.
+    let _ = std::fs::remove_file(root.join("spool/bundle.trigger"));
+    let _ = std::fs::remove_file(root.join("spool/bundle.tar"));
+
+    match result {
+        Ok(meta) => {
+            tracing::info!(
+                slot = target.name(),
+                version = meta.version.as_deref().unwrap_or("unknown"),
+                "update staged; rebooting into it"
+            );
+            let _ = sys.reboot();
+        }
+        Err(e) => {
+            tracing::error!(error = %e, slot = target.name(), "update rejected; both slots untouched");
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+    }
+}
+
+fn stage_and_flip(
+    sys: &dyn crate::sys::Sys,
+    root: &Path,
+    slots: &Slots,
+    target: Slot,
+    dir: &Path,
+    device_schema: u32,
+) -> Result<Meta, UpdateError> {
+    // Wipe first: a slot half-written by a previous interrupted apply would
+    // otherwise contribute stale files that the manifest never mentions.
+    let _ = std::fs::remove_dir_all(dir);
+    std::fs::create_dir_all(dir)?;
+
+    let untar = [
+        "sh".to_string(),
+        "-c".to_string(),
+        format!(
+            "busybox tar -xf {} -C {}",
+            shell_quote(&root.join("spool/bundle.tar")),
+            shell_quote(dir)
+        ),
+    ];
+    match sys.run_to_completion("busybox", &untar) {
+        Ok(st) if st.success() => {}
+        _ => return Err(UpdateError::Checksum),
+    }
+    // SAFETY: sync(2) takes no arguments and cannot fail.
+    unsafe { libc::sync() };
+
+    let meta = verify_slot(sys, dir, device_schema)?;
+
+    // Arm before flipping. A power cut between the two leaves the old slot
+    // active with a stale marker, which the next boot resolves by confirming a
+    // slot that is already good — harmless. The reverse order could flip
+    // without a marker and lose the way back.
+    Trial::arm(root, slots.active())?;
+    slots.set_active(target)?;
+    Ok(meta)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -622,6 +701,112 @@ mod tests {
             Trial::find(d.path()),
             None,
             "marker must not survive the revert"
+        );
+    }
+
+    #[test]
+    fn apply_stages_flips_and_reboots() {
+        use crate::sys::MockSys;
+        let d = tempfile::tempdir().unwrap();
+        let root = d.path();
+        std::fs::create_dir_all(root.join("spool")).unwrap();
+        std::fs::write(root.join("spool/bundle.tar"), b"pretend tar").unwrap();
+        std::fs::write(root.join("spool/bundle.trigger"), b"").unwrap();
+
+        let mut sys = MockSys::new();
+        // one untar, one sha256sum -c. The mocked untar cannot run for real, so
+        // it materializes the slot content the verify step will look for by
+        // extracting the target dir from the shell command line.
+        sys.expect_run_to_completion()
+            .times(2)
+            .returning(|_, args| {
+                if let Some(cmd) = args.iter().find(|a| a.contains("tar -xf")) {
+                    let dir = cmd
+                        .split("-C ")
+                        .nth(1)
+                        .map(|s| s.trim().trim_matches('\'').to_string())
+                        .expect("untar -C dir");
+                    std::fs::create_dir_all(&dir).unwrap();
+                    std::fs::write(
+                        std::path::Path::new(&dir).join("manifest.sha256"),
+                        "abc  anyka-init.bin\n",
+                    )
+                    .unwrap();
+                    std::fs::write(
+                        std::path::Path::new(&dir).join("manifest.meta"),
+                        "requires_config_schema=1\n",
+                    )
+                    .unwrap();
+                }
+                Ok(exit_ok())
+            });
+        sys.expect_reboot().times(1).returning(|| Ok(()));
+
+        apply(&sys, root, 1);
+
+        assert_eq!(
+            Slots::new(root).active(),
+            Slot::B,
+            "must flip to the staged slot"
+        );
+        assert_eq!(
+            Trial::find(root),
+            Some(Slot::A),
+            "must arm the trial with the old slot"
+        );
+        assert!(
+            !root.join("spool/bundle.trigger").exists(),
+            "spool must be cleared"
+        );
+    }
+
+    #[test]
+    fn a_failed_verify_leaves_both_slots_alone() {
+        use crate::sys::MockSys;
+        let d = tempfile::tempdir().unwrap();
+        let root = d.path();
+        std::fs::create_dir_all(root.join("spool")).unwrap();
+        std::fs::write(root.join("spool/bundle.tar"), b"corrupt").unwrap();
+        std::fs::write(root.join("spool/bundle.trigger"), b"").unwrap();
+
+        let mut sys = MockSys::new();
+        sys.expect_run_to_completion().returning(|_, args| {
+            if args.iter().any(|a| a.contains("sha256sum")) {
+                return Ok(exit_fail());
+            }
+            // Materialize the staged slot the sha256sum step will reject.
+            let cmd = args.iter().find(|a| a.contains("tar -xf")).unwrap();
+            let dir = cmd
+                .split("-C ")
+                .nth(1)
+                .map(|s| s.trim().trim_matches('\'').to_string())
+                .expect("untar -C dir");
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(
+                std::path::Path::new(&dir).join("manifest.sha256"),
+                "abc  anyka-init.bin\n",
+            )
+            .unwrap();
+            std::fs::write(
+                std::path::Path::new(&dir).join("manifest.meta"),
+                "requires_config_schema=1\n",
+            )
+            .unwrap();
+            Ok(exit_ok())
+        });
+        sys.expect_reboot().never();
+
+        apply(&sys, root, 1);
+
+        assert_eq!(
+            Slots::new(root).active(),
+            Slot::A,
+            "no flip on a bad bundle"
+        );
+        assert_eq!(Trial::find(root), None, "no trial armed");
+        assert!(
+            !root.join("spool/bundle.trigger").exists(),
+            "spool must still be cleared"
         );
     }
 }

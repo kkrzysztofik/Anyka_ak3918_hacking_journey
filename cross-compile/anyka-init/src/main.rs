@@ -158,6 +158,27 @@ fn main() {
             });
     }
 
+    // Poll `spool/` for a dropped bundle. Reuses the monitor cadence — a
+    // `stat` per minute costs nothing and adds no new tunable.
+    {
+        let s = Arc::clone(&sysimpl);
+        let root = cfg.update.root.clone();
+        let schema = cfg.schema;
+        let interval = Duration::from_secs(cfg.monitor.interval_sec);
+        let _ = std::thread::Builder::new()
+            .name("update-poll".into())
+            .stack_size(supervisor_loop::thread_stack())
+            .spawn(move || {
+                let root = std::path::Path::new(&root);
+                loop {
+                    std::thread::sleep(interval);
+                    if anyka_init::update::pending(root) {
+                        anyka_init::update::apply(s.as_ref(), root, schema);
+                    }
+                }
+            });
+    }
+
     supervisor_loop::run(sysimpl, &cfg, rx);
     stop.store(true, std::sync::atomic::Ordering::Relaxed);
 }
