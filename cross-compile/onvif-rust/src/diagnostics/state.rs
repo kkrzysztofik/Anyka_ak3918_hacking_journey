@@ -452,77 +452,14 @@ mod tests {
         }
     }
 
-    struct PlatformWithImaging {
-        inner: std::sync::Arc<crate::platform::stub::StubPlatform>,
-        imaging: std::sync::Arc<dyn crate::platform::ImagingControl>,
-    }
-
-    #[async_trait::async_trait]
-    impl crate::platform::Platform for PlatformWithImaging {
-        async fn get_device_info(
-            &self,
-        ) -> crate::platform::PlatformResult<crate::platform::DeviceInfo> {
-            self.inner.get_device_info().await
-        }
-
-        fn video_input(&self) -> std::sync::Arc<dyn crate::platform::VideoInput> {
-            self.inner.video_input()
-        }
-
-        fn video_encoder(&self) -> std::sync::Arc<dyn crate::platform::VideoEncoder> {
-            self.inner.video_encoder()
-        }
-
-        fn audio_input(&self) -> std::sync::Arc<dyn crate::platform::AudioInput> {
-            self.inner.audio_input()
-        }
-
-        fn audio_encoder(&self) -> std::sync::Arc<dyn crate::platform::AudioEncoder> {
-            self.inner.audio_encoder()
-        }
-
-        fn ptz_control(&self) -> Option<std::sync::Arc<dyn crate::platform::PTZControl>> {
-            self.inner.ptz_control()
-        }
-
-        fn imaging_control(&self) -> Option<std::sync::Arc<dyn crate::platform::ImagingControl>> {
-            Some(std::sync::Arc::clone(&self.imaging))
-        }
-
-        fn video_control(&self) -> Option<std::sync::Arc<dyn crate::platform::VideoControl>> {
-            self.inner.video_control()
-        }
-
-        fn network_info(&self) -> Option<std::sync::Arc<dyn crate::platform::NetworkInfo>> {
-            self.inner.network_info()
-        }
-
-        fn is_initialized(&self) -> bool {
-            self.inner.is_initialized()
-        }
-
-        async fn initialize(&self) -> crate::platform::PlatformResult<()> {
-            self.inner.initialize().await
-        }
-
-        async fn shutdown(&self) -> crate::platform::PlatformResult<()> {
-            self.inner.shutdown().await
-        }
-
-        fn max_sensor_resolution(
-            &self,
-        ) -> crate::platform::PlatformResult<crate::platform::Resolution> {
-            self.inner.max_sensor_resolution()
-        }
-    }
-
     fn platform_with_imaging(
         imaging: std::sync::Arc<dyn crate::platform::ImagingControl>,
     ) -> std::sync::Arc<dyn crate::platform::Platform> {
-        std::sync::Arc::new(PlatformWithImaging {
-            inner: std::sync::Arc::new(crate::platform::stub::StubPlatform::new()),
-            imaging,
-        })
+        let mut platform = crate::platform::MockPlatform::new();
+        platform
+            .expect_imaging_control()
+            .returning(move || Some(std::sync::Arc::clone(&imaging)));
+        std::sync::Arc::new(platform)
     }
 
     #[tokio::test]

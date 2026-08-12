@@ -407,10 +407,12 @@ impl NightModeController {
     /// `None` so diagnostics do not report a pipeline mode the ISP has not
     /// actually reached yet.
     pub(crate) async fn current_mode(&self) -> Option<DayNight> {
-        if self.isp_pending.lock().await.is_some() {
+        let state = self.state.lock().await;
+        let pending = self.isp_pending.lock().await;
+        if pending.is_some() {
             return None;
         }
-        self.state.lock().await.current
+        state.current
     }
 
     pub(crate) fn set_auto_enabled(&self, enabled: bool) {
@@ -938,8 +940,10 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn test_live_diagnostics_mode_none_while_isp_sync_pending() {
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_live_diagnostics_mode_none_while_apply_holds_state_lock() {
+        use std::sync::{Arc, Barrier};
+
         use crate::hal::common::imaging::MockImagingHalTrait;
 
         let dir = tempfile::tempdir().expect("tempdir");
@@ -948,23 +952,38 @@ mod tests {
             std::fs::write(paths.node(n), "9").unwrap();
         }
 
+        let barrier = Arc::new(Barrier::new(2));
+        let barrier_isp = Arc::clone(&barrier);
+
         let mut ffi = MockImagingHalTrait::new();
-        ffi.expect_set_ir_filter().times(1).returning(|_| -1);
+        ffi.expect_set_ir_filter().times(1).returning(move |_| {
+            barrier_isp.wait();
+            -1
+        });
         ffi.expect_get_ae_luma().times(1..).returning(|| None);
 
-        let ctl = NightModeController::new(
+        let ctl = Arc::new(NightModeController::new(
             paths,
             test_config(),
-            std::sync::Arc::new(ffi),
+            Arc::new(ffi),
             crate::onvif::types::common::IrCutFilterMode::AUTO,
             None,
-        );
-        let _ = ctl.apply(DayNight::Night).await;
+        ));
 
-        let vision = ctl.live_diagnostics().await;
+        let ctl_apply = Arc::clone(&ctl);
+        let diag_barrier = Arc::clone(&barrier);
+        let diag = tokio::spawn(async move {
+            diag_barrier.wait();
+            ctl.live_diagnostics().await.mode
+        });
+        let apply = tokio::spawn(async move { ctl_apply.apply(DayNight::Night).await });
+
+        let mode = diag.await.expect("diagnostics task");
+        let _ = apply.await.expect("apply task");
+
         assert!(
-            vision.mode.is_none(),
-            "pending ISP sync must not report night while the filter is still in day mode"
+            mode.is_none(),
+            "live diagnostics must not report a mode while apply owns state or ISP sync is pending"
         );
     }
 

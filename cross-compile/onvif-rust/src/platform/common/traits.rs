@@ -742,6 +742,7 @@ macro_rules! impl_platform_accessors {
 }
 
 /// Main platform trait combining all hardware abstractions.
+#[cfg_attr(test, automock)]
 #[async_trait]
 pub trait Platform: Send + Sync {
     /// Get device information.

@@ -352,7 +352,8 @@ cd cross-compile/onvif-rust
 $CARGO fmt --check
 $CARGO clippy --target x86_64-unknown-linux-gnu -- -D warnings
 $CARGO test --target x86_64-unknown-linux-gnu --lib
-$CARGO build --release
+$CARGO doc --no-deps
+$CARGO build --release --target armv5te-unknown-linux-uclibceabi
 ```
 
 **Step 2: WWW gates**
