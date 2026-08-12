@@ -1332,7 +1332,7 @@ mod tests {
             ..Default::default()
         };
         let server = OnvifServer::new(config).unwrap().with_diagnostics(Arc::new(
-            crate::diagnostics::state::DiagnosticsState::new(None, vec![]),
+            crate::diagnostics::state::DiagnosticsState::new(std::time::Instant::now(), None, vec![]),
         ));
 
         let state = OnvifServerState {
@@ -1424,7 +1424,7 @@ mod tests {
             ..Default::default()
         };
         let server = OnvifServer::new(config).unwrap().with_diagnostics(Arc::new(
-            crate::diagnostics::state::DiagnosticsState::new(None, vec![]),
+            crate::diagnostics::state::DiagnosticsState::new(std::time::Instant::now(), None, vec![]),
         ));
 
         // auth_enabled=true: unauthenticated unknown /api path hits auth middleware → 401.

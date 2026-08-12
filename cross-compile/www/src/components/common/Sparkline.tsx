@@ -36,7 +36,7 @@ function buildPaths(
 
 /** "CPU 42%, Memory 61%" — the label alone conveys nothing to a screen reader. */
 function describe(data: Array<Record<string, number>>, series: SparklineSeries[]) {
-  const latest = data[data.length - 1];
+  const latest = data.at(-1);
   return series
     .map((s) => {
       const value = latest?.[s.key];
@@ -62,7 +62,7 @@ export function Sparkline({ data, series, domain, className }: Readonly<Sparklin
 
   if (data.length === 0) return null;
 
-  const latest = data[data.length - 1];
+  const latest = data.at(-1);
 
   return (
     <div className={className ?? 'flex h-full w-full flex-col'} data-testid="sparkline">

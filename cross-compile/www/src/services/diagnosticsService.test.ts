@@ -5,11 +5,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { getDiagnostics, getLogs } from './diagnosticsService';
 
-vi.mock('@/services/api', () => ({
-  authorizedFetch: vi.fn(),
-}));
+vi.mock('@/services/api', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/services/api')>();
+  return {
+    ...actual,
+    authorizedFetch: vi.fn(),
+  };
+});
 
-import { authorizedFetch } from '@/services/api';
+import { ApiError, authorizedFetch } from '@/services/api';
 
 const MOCK_DIAGNOSTICS = {
   status: 'healthy',
@@ -82,7 +86,7 @@ describe('diagnosticsService', () => {
         makeResponse({ error: 'internal error' }, 500),
       );
 
-      await expect(getDiagnostics()).rejects.toThrow();
+      await expect(getDiagnostics()).rejects.toThrow(ApiError);
     });
   });
 
@@ -132,7 +136,7 @@ describe('diagnosticsService', () => {
         new Response('Server Error', { status: 500 }),
       );
 
-      await expect(getLogs('onvif_rust')).rejects.toThrow();
+      await expect(getLogs('onvif_rust')).rejects.toThrow(ApiError);
     });
   });
 });

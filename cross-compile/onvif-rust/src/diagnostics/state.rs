@@ -1,5 +1,6 @@
 //! Snapshot assembly and the previous-sample state used for rate deltas.
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
@@ -76,24 +77,59 @@ pub struct Snapshot {
 }
 
 /// Holds platform handles and the last `/proc` sample for computing deltas.
+///
+/// Constructed during the Network startup phase, before the Discovery and
+/// Streaming phases run — the HTTP server (and this state, attached to it)
+/// must already be listening by then. That means the `degraded_services` and
+/// `streaming_active` this struct starts with are provisional: Discovery and
+/// Streaming can still fail after construction. [`finalize_startup`] is
+/// called once, after `App::new()` completes every phase, so
+/// `/api/diagnostics` ends up reflecting the same final state as
+/// `App::health()` rather than a snapshot frozen mid-startup.
+///
+/// [`finalize_startup`]: DiagnosticsState::finalize_startup
 pub struct DiagnosticsState {
     started_at: Instant,
     platform: Option<Arc<dyn Platform>>,
-    degraded_services: Vec<String>,
+    degraded_services: Mutex<Vec<String>>,
+    /// Mirrors `App::streaming_service.is_some()`. Gates `stream_frame_age_ms`
+    /// the same way `App::health()` does: a platform can exist (e.g. for
+    /// imaging control) while streaming itself is disabled in config, in
+    /// which case there is no stream to be stalled and reporting one as
+    /// degraded would be a false alarm.
+    streaming_active: AtomicBool,
     previous: Mutex<Option<RawSample>>,
 }
 
 impl DiagnosticsState {
     /// Create a new state.  `platform` is `None` on the first boot before the
-    /// hardware pipeline attaches.  `degraded_services` lists service names that
-    /// failed to initialise at startup.
-    pub fn new(platform: Option<Arc<dyn Platform>>, degraded_services: Vec<String>) -> Self {
+    /// hardware pipeline attaches.  `degraded_services` lists service names
+    /// known to have failed to initialise so far — provisional until
+    /// [`finalize_startup`](Self::finalize_startup) is called.
+    pub fn new(
+        started_at: Instant,
+        platform: Option<Arc<dyn Platform>>,
+        degraded_services: Vec<String>,
+    ) -> Self {
         Self {
-            started_at: Instant::now(),
+            started_at,
             platform,
-            degraded_services,
+            degraded_services: Mutex::new(degraded_services),
+            streaming_active: AtomicBool::new(false),
             previous: Mutex::new(None),
         }
+    }
+
+    /// Record the outcome of the startup phases (Discovery, Streaming) that
+    /// run after this state is constructed. Called exactly once, from
+    /// `App::new()`, right after those phases complete.
+    pub fn finalize_startup(&self, degraded_services: Vec<String>, streaming_active: bool) {
+        *self
+            .degraded_services
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = degraded_services;
+        self.streaming_active
+            .store(streaming_active, Ordering::Relaxed);
     }
 
     /// Assemble a [`Snapshot`] from current `/proc` readings.
@@ -153,15 +189,27 @@ impl DiagnosticsState {
             used_kb: s.used_kb,
         });
 
-        // `stream_frame_age_ms` → Option<u64>; wrap in outer Option for compute_health.
-        let frame_age_outer: Option<Option<u64>> =
-            self.platform.as_ref().map(|p| p.stream_frame_age_ms());
+        // Outer Option is Some iff streaming is actually active, matching
+        // App::health()'s `self.streaming_service.as_ref().map(...)` gate.
+        // A platform can exist for imaging control with streaming disabled in
+        // config; in that case there is no stream to report on at all.
+        let frame_age_outer: Option<Option<u64>> = if self.streaming_active.load(Ordering::Relaxed)
+        {
+            Some(self.platform.as_ref().and_then(|p| p.stream_frame_age_ms()))
+        } else {
+            None
+        };
 
         let process_s = self.started_at.elapsed().as_secs();
+        let degraded_services = self
+            .degraded_services
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
         let health = compute_health(
             self.started_at.elapsed(),
             frame_age_outer,
-            &self.degraded_services,
+            &degraded_services,
         );
 
         let mut components: Vec<Component> = health
@@ -218,7 +266,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_first_snapshot_has_no_rates() {
-        let state = DiagnosticsState::new(None, Vec::new());
+        let state = DiagnosticsState::new(Instant::now(), None, Vec::new());
         let snap = state.snapshot().await;
         assert!(snap.cpu_percent.is_none());
         assert!(snap.network.is_none());
@@ -226,7 +274,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_second_snapshot_produces_rates() {
-        let state = DiagnosticsState::new(None, Vec::new());
+        let state = DiagnosticsState::new(Instant::now(), None, Vec::new());
         let _ = state.snapshot().await;
         std::thread::sleep(std::time::Duration::from_millis(50));
         let snap = state.snapshot().await;
@@ -235,14 +283,14 @@ mod tests {
 
     #[tokio::test]
     async fn test_snapshot_reports_process_uptime() {
-        let state = DiagnosticsState::new(None, Vec::new());
+        let state = DiagnosticsState::new(Instant::now(), None, Vec::new());
         let snap = state.snapshot().await;
         assert!(snap.uptime.system_s >= snap.uptime.process_s);
     }
 
     #[tokio::test]
     async fn test_snapshot_includes_startup_degraded_services() {
-        let state = DiagnosticsState::new(None, vec!["PTZ".to_string()]);
+        let state = DiagnosticsState::new(Instant::now(), None, vec!["PTZ".to_string()]);
         let snap = state.snapshot().await;
         assert_eq!(snap.status, "degraded");
         assert!(
@@ -253,8 +301,67 @@ mod tests {
 
     #[tokio::test]
     async fn test_snapshot_vision_none_without_platform() {
-        let state = DiagnosticsState::new(None, Vec::new());
+        let state = DiagnosticsState::new(Instant::now(), None, Vec::new());
         let snap = state.snapshot().await;
         assert!(snap.vision.is_none());
+    }
+
+    // ── finalize_startup ─────────────────────────────────────────────────
+    //
+    // These cover the fix for two bugs found validating the diagnostics
+    // rollout: (1) degraded_services was captured before the Discovery and
+    // Streaming startup phases ran, so a stream that failed to start was
+    // reported healthy; (2) the stream-health gate used platform-presence
+    // instead of streaming_service-presence, so streaming_enabled=false
+    // configs could report a falsely degraded stream.
+
+    #[tokio::test]
+    async fn test_finalize_startup_replaces_initial_degraded_services() {
+        let state = DiagnosticsState::new(Instant::now(), None, vec!["A".to_string()]);
+        state.finalize_startup(vec!["B".to_string()], false);
+        let snap = state.snapshot().await;
+        assert_eq!(snap.degraded_services, vec!["B".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn test_before_finalize_streaming_inactive_frame_age_is_none() {
+        // Mirrors the constructor-only state a request could observe in the
+        // brief window between the HTTP server binding (Network phase) and
+        // Discovery/Streaming completing.
+        let state = DiagnosticsState::new(Instant::now(), None, Vec::new());
+        let snap = state.snapshot().await;
+        assert!(snap.stream_frame_age_ms.is_none());
+        assert_eq!(snap.status, "healthy");
+    }
+
+    #[tokio::test]
+    async fn test_finalize_startup_streaming_active_without_platform_reports_degraded() {
+        // App::health() gates on `streaming_service.is_some()`, not on
+        // platform presence. A streaming service marked active with no
+        // frame-age data available must show up as degraded ("enabled but
+        // no frames observed yet"), matching compute_health's Some(None)
+        // branch, not silently stay healthy because platform is None.
+        let state = DiagnosticsState::new(Instant::now(), None, Vec::new());
+        state.finalize_startup(Vec::new(), true);
+        let snap = state.snapshot().await;
+        assert_eq!(snap.status, "degraded");
+        assert!(
+            snap.degraded_services
+                .contains(&"stream_health".to_string()),
+            "got {:?}",
+            snap.degraded_services
+        );
+    }
+
+    #[tokio::test]
+    async fn test_finalize_startup_streaming_inactive_stays_healthy() {
+        // A platform can exist for imaging control with streaming disabled
+        // in config (media.streaming_enabled = false). That must not be
+        // reported as a stalled stream, since there is no stream at all.
+        let state = DiagnosticsState::new(Instant::now(), None, Vec::new());
+        state.finalize_startup(Vec::new(), false);
+        let snap = state.snapshot().await;
+        assert_eq!(snap.status, "healthy");
+        assert!(snap.stream_frame_age_ms.is_none());
     }
 }

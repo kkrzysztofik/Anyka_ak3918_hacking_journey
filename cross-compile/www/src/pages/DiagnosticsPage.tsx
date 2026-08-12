@@ -24,7 +24,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { useDiagnostics } from '@/hooks/useDiagnostics';
+import { useDiagnostics, type DiagnosticsPoint } from '@/hooks/useDiagnostics';
 import { cn } from '@/lib/utils';
 import {
   type Diagnostics,
@@ -185,40 +185,33 @@ function VisionCard({ vision }: Readonly<{ vision: Diagnostics['vision'] }>) {
   );
 }
 
-export default function DiagnosticsPage() {
-  const { data, isLoading, history } = useDiagnostics();
-  const [logSource, setLogSource] = useState<LogSource>('onvif_rust');
-  const [logLevel, setLogLevel] = useState<LogLevel | 'all'>('all');
+function formatStatusLabel(data: Diagnostics | undefined): string {
+  if (data === undefined) return '—';
+  if (data.status === 'healthy') return 'Healthy';
+  return data.status;
+}
 
-  const resolvedLevel = logLevel === 'all' ? undefined : logLevel;
+function formatStatusSubValue(data: Diagnostics | undefined): string | undefined {
+  if (data === undefined) return undefined;
+  if (data.degraded_services.length > 0) {
+    return `${data.degraded_services.length} service(s) degraded`;
+  }
+  return '● Online';
+}
 
-  const { data: logLines = [], isFetching: logsFetching } = useQuery({
-    queryKey: ['logs', logSource, resolvedLevel],
-    queryFn: ({ signal }) => getLogs(logSource, resolvedLevel, 200, signal),
-    staleTime: 10_000,
-  });
+function ChartEmptyState({ testId }: Readonly<{ testId: string }>) {
+  return (
+    <div className="flex h-full items-center justify-center" data-testid={testId}>
+      <p className="text-muted-foreground text-sm">Collecting data…</p>
+    </div>
+  );
+}
 
-  const handleExport = useCallback(() => {
-    const blob = new Blob([logLines.join('\n')], { type: 'text/plain' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${logSource}.log`;
-    a.click();
-    URL.revokeObjectURL(url);
-  }, [logLines, logSource]);
-
-  // Stat card values derived from real data
-  const statusLabel =
-    data === undefined ? '—' : data.status === 'healthy' ? 'Healthy' : data.status;
+function DiagnosticsStatCards({ data }: Readonly<{ data: Diagnostics | undefined }>) {
+  const statusLabel = formatStatusLabel(data);
   const statusColor = data?.status === 'healthy' ? 'text-green-500' : 'text-yellow-500';
   const statusColorBg = data?.status === 'healthy' ? 'bg-green-500/10' : 'bg-yellow-500/10';
-  const statusSubValue =
-    data === undefined
-      ? undefined
-      : data.degraded_services.length > 0
-        ? `${data.degraded_services.length} service(s) degraded`
-        : '● Online';
+  const statusSubValue = formatStatusSubValue(data);
 
   const cpuValue =
     data?.cpu_percent !== null && data?.cpu_percent !== undefined
@@ -241,7 +234,48 @@ export default function DiagnosticsPage() {
       ? `${storageUsedMb} MB / ${storageTotalMb} MB`
       : undefined;
 
-  // Chart data from rolling history — nulls filtered before passing to Sparkline
+  return (
+    <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+      <StatCard
+        icon={Activity}
+        label="System Status"
+        value={statusLabel}
+        subValue={statusSubValue}
+        color={statusColor}
+        colorBg={statusColorBg}
+        testId="diagnostics-stat-system-status"
+      />
+      <StatCard
+        icon={Cpu}
+        label="CPU Usage"
+        value={cpuValue}
+        color="text-red-500"
+        colorBg="bg-red-500/10"
+        testId="diagnostics-stat-cpu-usage"
+      />
+      <StatCard
+        icon={HardDrive}
+        label="Memory"
+        value={memValue}
+        subValue={memSubValue}
+        color="text-yellow-500"
+        colorBg="bg-yellow-500/10"
+        testId="diagnostics-stat-memory"
+      />
+      <StatCard
+        icon={Database}
+        label="Storage"
+        value={storageValue}
+        subValue={storageSubValue}
+        color="text-blue-500"
+        colorBg="bg-blue-500/10"
+        testId="diagnostics-stat-storage"
+      />
+    </div>
+  );
+}
+
+function DiagnosticsChartsSection({ history }: Readonly<{ history: DiagnosticsPoint[] }>) {
   const cpuChartData = history
     .filter((p) => p.cpu !== null)
     .map((p) => ({ t: p.t, cpu: p.cpu as number }));
@@ -258,71 +292,8 @@ export default function DiagnosticsPage() {
       txKbps: (p.tx as number) / 1000,
     }));
 
-  // Uptime and restart detection
-  const processUptime = data ? formatDuration(data.uptime.process_s) : '—';
-  const systemUptime = data ? formatDuration(data.uptime.system_s) : '—';
-  const restartGap = data ? data.uptime.system_s - data.uptime.process_s : 0;
-  const hasRecentRestart = data !== undefined && restartGap > RESTART_THRESHOLD_S;
-
-  if (isLoading) {
-    return (
-      <div className="flex h-64 items-center justify-center" data-testid="diagnostics-loading">
-        <p className="text-muted-foreground text-sm">Loading diagnostics…</p>
-      </div>
-    );
-  }
-
   return (
-    <div className="space-y-6 pb-8">
-      <div className="flex flex-col gap-2">
-        <h1 className="text-2xl font-bold text-white" data-testid="diagnostics-title">
-          Diagnostics & Statistics
-        </h1>
-        <p className="text-muted-foreground text-sm" data-testid="diagnostics-description">
-          Real-time system monitoring and performance metrics
-        </p>
-      </div>
-
-      {/* Stat cards */}
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        <StatCard
-          icon={Activity}
-          label="System Status"
-          value={statusLabel}
-          subValue={statusSubValue}
-          color={statusColor}
-          colorBg={statusColorBg}
-          testId="diagnostics-stat-system-status"
-        />
-        <StatCard
-          icon={Cpu}
-          label="CPU Usage"
-          value={cpuValue}
-          color="text-red-500"
-          colorBg="bg-red-500/10"
-          testId="diagnostics-stat-cpu-usage"
-        />
-        <StatCard
-          icon={HardDrive}
-          label="Memory"
-          value={memValue}
-          subValue={memSubValue}
-          color="text-yellow-500"
-          colorBg="bg-yellow-500/10"
-          testId="diagnostics-stat-memory"
-        />
-        <StatCard
-          icon={Database}
-          label="Storage"
-          value={storageValue}
-          subValue={storageSubValue}
-          color="text-blue-500"
-          colorBg="bg-blue-500/10"
-          testId="diagnostics-stat-storage"
-        />
-      </div>
-
-      {/* Charts Row 1: CPU & Memory */}
+    <>
       <div className="grid gap-6 lg:grid-cols-2">
         <Card className="border-border bg-card overflow-hidden">
           <CardHeader className="border-border border-b">
@@ -355,12 +326,7 @@ export default function DiagnosticsPage() {
                   domain={[0, 100]}
                 />
               ) : (
-                <div
-                  className="flex h-full items-center justify-center"
-                  data-testid="diagnostics-cpu-chart-empty"
-                >
-                  <p className="text-muted-foreground text-sm">Collecting data…</p>
-                </div>
+                <ChartEmptyState testId="diagnostics-cpu-chart-empty" />
               )}
             </div>
           </CardContent>
@@ -397,19 +363,13 @@ export default function DiagnosticsPage() {
                   domain={[0, 100]}
                 />
               ) : (
-                <div
-                  className="flex h-full items-center justify-center"
-                  data-testid="diagnostics-memory-chart-empty"
-                >
-                  <p className="text-muted-foreground text-sm">Collecting data…</p>
-                </div>
+                <ChartEmptyState testId="diagnostics-memory-chart-empty" />
               )}
             </div>
           </CardContent>
         </Card>
       </div>
 
-      {/* Charts Row 2: Network */}
       <Card className="border-border bg-card overflow-hidden">
         <CardHeader className="border-border border-b">
           <div className="flex items-center gap-3">
@@ -443,298 +403,350 @@ export default function DiagnosticsPage() {
                 ]}
               />
             ) : (
-              <div
-                className="flex h-full items-center justify-center"
-                data-testid="diagnostics-network-chart-empty"
-              >
-                <p className="text-muted-foreground text-sm">Collecting data…</p>
-              </div>
+              <ChartEmptyState testId="diagnostics-network-chart-empty" />
             )}
           </div>
         </CardContent>
       </Card>
+    </>
+  );
+}
 
-      {/* Info Grid */}
-      <div className="grid gap-6 lg:grid-cols-2">
-        {/* Device Info */}
-        <Card className="border-border bg-card overflow-hidden">
-          <CardHeader className="border-border border-b">
-            <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-500/10">
-                <Info className="h-5 w-5 text-blue-500" />
-              </div>
-              <div>
-                <CardTitle
-                  className="text-foreground text-sm font-semibold"
-                  data-testid="diagnostics-device-information-title"
-                >
-                  Device Information
-                </CardTitle>
-                <p
-                  className="text-muted-foreground text-xs"
-                  data-testid="diagnostics-device-information-description"
-                >
-                  Hardware and firmware details
-                </p>
-              </div>
+function DeviceInfoCard({ data }: Readonly<{ data: Diagnostics | undefined }>) {
+  const processUptime = data ? formatDuration(data.uptime.process_s) : '—';
+  const systemUptime = data ? formatDuration(data.uptime.system_s) : '—';
+  const restartGap = data ? data.uptime.system_s - data.uptime.process_s : 0;
+  const hasRecentRestart = data !== undefined && restartGap > RESTART_THRESHOLD_S;
+
+  return (
+    <Card className="border-border bg-card overflow-hidden">
+      <CardHeader className="border-border border-b">
+        <div className="flex items-center gap-3">
+          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-500/10">
+            <Info className="h-5 w-5 text-blue-500" />
+          </div>
+          <div>
+            <CardTitle
+              className="text-foreground text-sm font-semibold"
+              data-testid="diagnostics-device-information-title"
+            >
+              Device Information
+            </CardTitle>
+            <p
+              className="text-muted-foreground text-xs"
+              data-testid="diagnostics-device-information-description"
+            >
+              Hardware and firmware details
+            </p>
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent className="pt-4">
+        <dl className="space-y-3 text-sm">
+          <div className="border-border border-t pt-3">
+            <div
+              className="flex items-center justify-between"
+              data-testid="diagnostics-uptime-process-row"
+            >
+              <span className="text-muted-foreground">Process Uptime</span>
+              <span className="font-mono text-white" data-testid="diagnostics-uptime-process">
+                {processUptime}
+              </span>
             </div>
-          </CardHeader>
-          <CardContent className="pt-4">
-            <dl className="space-y-3 text-sm">
-              <div className="border-border border-t pt-3">
-                <div
-                  className="flex items-center justify-between"
-                  data-testid="diagnostics-uptime-process-row"
-                >
-                  <span className="text-muted-foreground">Process Uptime</span>
-                  <span
-                    className="font-mono text-white"
-                    data-testid="diagnostics-uptime-process"
-                  >
-                    {processUptime}
-                  </span>
-                </div>
-                <div
-                  className="mt-1 flex items-center justify-between"
-                  data-testid="diagnostics-uptime-system-row"
-                >
-                  <span className="text-muted-foreground">System Uptime</span>
-                  <span
-                    className="font-mono text-white"
-                    data-testid="diagnostics-uptime-system"
-                  >
-                    {systemUptime}
-                  </span>
-                </div>
-                {hasRecentRestart && (
-                  <p
-                    className="mt-2 text-xs text-yellow-400"
-                    data-testid="diagnostics-restart-note"
-                  >
-                    Restarted {formatDuration(data.uptime.process_s)} ago
-                  </p>
-                )}
-              </div>
-              <div className="border-border border-t pt-3">
-                <div
-                  className="flex items-center justify-between"
-                  data-testid="diagnostics-network-download-row"
-                >
-                  <span className="text-muted-foreground">Download</span>
-                  <span
-                    className="font-mono text-white"
-                    data-testid="diagnostics-network-download"
-                  >
-                    {data?.network != null ? formatKbps(data.network.rx_bps) : '\u2014'}
-                  </span>
-                </div>
-                <div
-                  className="mt-1 flex items-center justify-between"
-                  data-testid="diagnostics-network-upload-row"
-                >
-                  <span className="text-muted-foreground">Upload</span>
-                  <span
-                    className="font-mono text-white"
-                    data-testid="diagnostics-network-upload"
-                  >
-                    {data?.network != null ? formatKbps(data.network.tx_bps) : '\u2014'}
-                  </span>
-                </div>
-              </div>
-            </dl>
-          </CardContent>
-        </Card>
-
-        {/* Vision */}
-        <VisionCard vision={data?.vision ?? null} />
-
-        {/* Stream Health */}
-        <Card className="border-border bg-card overflow-hidden">
-          <CardHeader className="border-border border-b">
-            <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-red-500/10">
-                <Activity className="h-5 w-5 text-red-500" />
-              </div>
-              <div>
-                <CardTitle
-                  className="text-foreground text-sm font-semibold"
-                  data-testid="diagnostics-stream-health-title"
-                >
-                  Stream Health
-                </CardTitle>
-                <p
-                  className="text-muted-foreground text-xs"
-                  data-testid="diagnostics-stream-health-description"
-                >
-                  Video pipeline status
-                </p>
-              </div>
+            <div
+              className="mt-1 flex items-center justify-between"
+              data-testid="diagnostics-uptime-system-row"
+            >
+              <span className="text-muted-foreground">System Uptime</span>
+              <span className="font-mono text-white" data-testid="diagnostics-uptime-system">
+                {systemUptime}
+              </span>
             </div>
-          </CardHeader>
-          <CardContent className="pt-4">
-            <div className="space-y-3 text-sm">
-              <div
-                className="flex items-center justify-between"
-                data-testid="diagnostics-frame-age"
-              >
-                <span className="text-muted-foreground">Frame Age</span>
-                <span
-                  className={cn(
-                    'font-mono',
-                    data?.stream_frame_age_ms !== null &&
-                      data?.stream_frame_age_ms !== undefined &&
-                      data.stream_frame_age_ms > STALL_THRESHOLD_MS
-                      ? 'text-red-400'
-                      : 'text-foreground',
-                  )}
-                >
-                  {data?.stream_frame_age_ms !== null &&
-                  data?.stream_frame_age_ms !== undefined
-                    ? `${data.stream_frame_age_ms} ms`
-                    : '—'}
-                </span>
-              </div>
-              {data?.stream_frame_age_ms !== null &&
-                data?.stream_frame_age_ms !== undefined &&
-                data.stream_frame_age_ms > STALL_THRESHOLD_MS && (
-                  <p className="text-xs text-red-400" data-testid="diagnostics-stream-stalled">
-                    Stream stalled — no frame received in {data.stream_frame_age_ms} ms
-                  </p>
-                )}
-              {data?.components && data.components.length > 0 && (
-                <ul
-                  className="mt-2 space-y-1"
-                  data-testid="diagnostics-components-list"
-                >
-                  {data.components.map((c) => (
-                    <li
-                      key={c.name}
-                      className="flex items-center justify-between"
-                      data-testid={`diagnostics-component-${c.name}`}
-                    >
-                      <span className="text-muted-foreground">{c.name}</span>
-                      <span
-                        className={cn(
-                          'font-mono text-xs',
-                          c.status === 'healthy' ? 'text-green-400' : 'text-yellow-400',
-                        )}
-                      >
-                        {c.status}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              )}
+            {hasRecentRestart && data && (
+              <p className="mt-2 text-xs text-yellow-400" data-testid="diagnostics-restart-note">
+                Restarted {formatDuration(data.uptime.process_s)} ago
+              </p>
+            )}
+          </div>
+          <div className="border-border border-t pt-3">
+            <div
+              className="flex items-center justify-between"
+              data-testid="diagnostics-network-download-row"
+            >
+              <span className="text-muted-foreground">Download</span>
+              <span className="font-mono text-white" data-testid="diagnostics-network-download">
+                {data?.network != null ? formatKbps(data.network.rx_bps) : '\u2014'}
+              </span>
             </div>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* System Logs */}
-      <Card className="border-border bg-card overflow-hidden">
-        <CardHeader className="border-border border-b">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-orange-500/10">
-                <FileText className="h-5 w-5 text-orange-500" />
-              </div>
-              <div>
-                <CardTitle
-                  className="text-foreground text-sm font-semibold"
-                  data-testid="diagnostics-system-logs-title"
-                >
-                  System Logs
-                </CardTitle>
-                <p
-                  className="text-muted-foreground text-xs"
-                  data-testid="diagnostics-system-logs-description"
-                >
-                  Recent activity and events
-                </p>
-              </div>
-            </div>
-            <div className="flex items-center gap-2">
-              {/* Source selector */}
-              <Select
-                value={logSource}
-                onValueChange={(v) => setLogSource(v as LogSource)}
-              >
-                <SelectTrigger
-                  className="h-7 w-40 text-xs"
-                  data-testid="diagnostics-log-source-select"
-                >
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {LOG_SOURCES.map((s) => (
-                    <SelectItem
-                      key={s.value}
-                      value={s.value}
-                      data-testid={`diagnostics-log-source-option-${s.value}`}
-                    >
-                      {s.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-
-              {/* Level filter buttons */}
-              <div className="border-border bg-muted/50 flex items-center rounded-md border p-0.5">
-                {LOG_LEVEL_OPTIONS.map((opt) => (
-                  <Button
-                    key={opt.value}
-                    variant={logLevel === opt.value ? 'default' : 'ghost'}
-                    size="sm"
-                    className="h-6 px-2.5 text-xs"
-                    data-testid={`diagnostics-log-filter-${opt.value}`}
-                    onClick={() => setLogLevel(opt.value)}
-                  >
-                    {opt.label}
-                  </Button>
-                ))}
-              </div>
-
-              <Button
-                variant="outline"
-                size="sm"
-                className="border-border h-7 gap-1 text-xs"
-                data-testid="diagnostics-export-button"
-                onClick={handleExport}
-                disabled={logLines.length === 0}
-              >
-                <Download className="h-3 w-3" /> Export
-              </Button>
+            <div
+              className="mt-1 flex items-center justify-between"
+              data-testid="diagnostics-network-upload-row"
+            >
+              <span className="text-muted-foreground">Upload</span>
+              <span className="font-mono text-white" data-testid="diagnostics-network-upload">
+                {data?.network != null ? formatKbps(data.network.tx_bps) : '\u2014'}
+              </span>
             </div>
           </div>
-        </CardHeader>
-        <div
-          className="max-h-[400px] overflow-y-auto"
-          data-testid="diagnostics-log-panel"
-        >
-          {logsFetching && logLines.length === 0 ? (
+        </dl>
+      </CardContent>
+    </Card>
+  );
+}
+
+function StreamHealthCard({ data }: Readonly<{ data: Diagnostics | undefined }>) {
+  const frameAge = data?.stream_frame_age_ms;
+  const hasFrameAge = frameAge !== null && frameAge !== undefined;
+  const isStalled = hasFrameAge && frameAge > STALL_THRESHOLD_MS;
+
+  return (
+    <Card className="border-border bg-card overflow-hidden">
+      <CardHeader className="border-border border-b">
+        <div className="flex items-center gap-3">
+          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-red-500/10">
+            <Activity className="h-5 w-5 text-red-500" />
+          </div>
+          <div>
+            <CardTitle
+              className="text-foreground text-sm font-semibold"
+              data-testid="diagnostics-stream-health-title"
+            >
+              Stream Health
+            </CardTitle>
             <p
-              className="text-muted-foreground p-5 text-sm"
-              data-testid="diagnostics-log-loading"
+              className="text-muted-foreground text-xs"
+              data-testid="diagnostics-stream-health-description"
             >
-              Loading…
+              Video pipeline status
             </p>
-          ) : logLines.length === 0 ? (
-            <p
-              className="text-muted-foreground p-5 text-sm"
-              data-testid="diagnostics-log-unavailable"
-            >
-              Source unavailable or no log entries found.
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent className="pt-4">
+        <div className="space-y-3 text-sm">
+          <div className="flex items-center justify-between" data-testid="diagnostics-frame-age">
+            <span className="text-muted-foreground">Frame Age</span>
+            <span className={cn('font-mono', isStalled ? 'text-red-400' : 'text-foreground')}>
+              {hasFrameAge ? `${frameAge} ms` : '—'}
+            </span>
+          </div>
+          {isStalled && (
+            <p className="text-xs text-red-400" data-testid="diagnostics-stream-stalled">
+              Stream stalled — no frame received in {frameAge} ms
             </p>
-          ) : (
-            <pre
-              className="text-foreground divide-border divide-y p-4 font-mono text-xs leading-relaxed"
-              data-testid="diagnostics-log-lines"
-            >
-              {logLines.join('\n')}
-            </pre>
+          )}
+          {data?.components && data.components.length > 0 && (
+            <ul className="mt-2 space-y-1" data-testid="diagnostics-components-list">
+              {data.components.map((c) => (
+                <li
+                  key={c.name}
+                  className="flex items-center justify-between"
+                  data-testid={`diagnostics-component-${c.name}`}
+                >
+                  <span className="text-muted-foreground">{c.name}</span>
+                  <span
+                    className={cn(
+                      'font-mono text-xs',
+                      c.status === 'healthy' ? 'text-green-400' : 'text-yellow-400',
+                    )}
+                  >
+                    {c.status}
+                  </span>
+                </li>
+              ))}
+            </ul>
           )}
         </div>
-      </Card>
+      </CardContent>
+    </Card>
+  );
+}
+
+function LogPanelBody({
+  logsFetching,
+  logLines,
+}: Readonly<{ logsFetching: boolean; logLines: string[] }>) {
+  if (logsFetching && logLines.length === 0) {
+    return (
+      <p className="text-muted-foreground p-5 text-sm" data-testid="diagnostics-log-loading">
+        Loading…
+      </p>
+    );
+  }
+  if (logLines.length === 0) {
+    return (
+      <p className="text-muted-foreground p-5 text-sm" data-testid="diagnostics-log-unavailable">
+        Source unavailable or no log entries found.
+      </p>
+    );
+  }
+  return (
+    <pre
+      className="text-foreground divide-border divide-y p-4 font-mono text-xs leading-relaxed"
+      data-testid="diagnostics-log-lines"
+    >
+      {logLines.join('\n')}
+    </pre>
+  );
+}
+
+function SystemLogsCard({
+  logSource,
+  setLogSource,
+  logLevel,
+  setLogLevel,
+  logLines,
+  logsFetching,
+  onExport,
+}: Readonly<{
+  logSource: LogSource;
+  setLogSource: (source: LogSource) => void;
+  logLevel: LogLevel | 'all';
+  setLogLevel: (level: LogLevel | 'all') => void;
+  logLines: string[];
+  logsFetching: boolean;
+  onExport: () => void;
+}>) {
+  return (
+    <Card className="border-border bg-card overflow-hidden">
+      <CardHeader className="border-border border-b">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-orange-500/10">
+              <FileText className="h-5 w-5 text-orange-500" />
+            </div>
+            <div>
+              <CardTitle
+                className="text-foreground text-sm font-semibold"
+                data-testid="diagnostics-system-logs-title"
+              >
+                System Logs
+              </CardTitle>
+              <p
+                className="text-muted-foreground text-xs"
+                data-testid="diagnostics-system-logs-description"
+              >
+                Recent activity and events
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <Select value={logSource} onValueChange={(v) => setLogSource(v as LogSource)}>
+              <SelectTrigger
+                className="h-7 w-40 text-xs"
+                data-testid="diagnostics-log-source-select"
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {LOG_SOURCES.map((s) => (
+                  <SelectItem
+                    key={s.value}
+                    value={s.value}
+                    data-testid={`diagnostics-log-source-option-${s.value}`}
+                  >
+                    {s.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            <div className="border-border bg-muted/50 flex items-center rounded-md border p-0.5">
+              {LOG_LEVEL_OPTIONS.map((opt) => (
+                <Button
+                  key={opt.value}
+                  variant={logLevel === opt.value ? 'default' : 'ghost'}
+                  size="sm"
+                  className="h-6 px-2.5 text-xs"
+                  data-testid={`diagnostics-log-filter-${opt.value}`}
+                  onClick={() => setLogLevel(opt.value)}
+                >
+                  {opt.label}
+                </Button>
+              ))}
+            </div>
+
+            <Button
+              variant="outline"
+              size="sm"
+              className="border-border h-7 gap-1 text-xs"
+              data-testid="diagnostics-export-button"
+              onClick={onExport}
+              disabled={logLines.length === 0}
+            >
+              <Download className="h-3 w-3" /> Export
+            </Button>
+          </div>
+        </div>
+      </CardHeader>
+      <div className="max-h-[400px] overflow-y-auto" data-testid="diagnostics-log-panel">
+        <LogPanelBody logsFetching={logsFetching} logLines={logLines} />
+      </div>
+    </Card>
+  );
+}
+
+export default function DiagnosticsPage() {
+  const { data, isLoading, history } = useDiagnostics();
+  const [logSource, setLogSource] = useState<LogSource>('onvif_rust');
+  const [logLevel, setLogLevel] = useState<LogLevel | 'all'>('all');
+
+  const resolvedLevel = logLevel === 'all' ? undefined : logLevel;
+
+  const { data: logLines = [], isFetching: logsFetching } = useQuery({
+    queryKey: ['logs', logSource, resolvedLevel],
+    queryFn: ({ signal }) => getLogs(logSource, resolvedLevel, 200, signal),
+    staleTime: 10_000,
+  });
+
+  const handleExport = useCallback(() => {
+    const blob = new Blob([logLines.join('\n')], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${logSource}.log`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [logLines, logSource]);
+
+  if (isLoading) {
+    return (
+      <div className="flex h-64 items-center justify-center" data-testid="diagnostics-loading">
+        <p className="text-muted-foreground text-sm">Loading diagnostics…</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6 pb-8">
+      <div className="flex flex-col gap-2">
+        <h1 className="text-2xl font-bold text-white" data-testid="diagnostics-title">
+          Diagnostics & Statistics
+        </h1>
+        <p className="text-muted-foreground text-sm" data-testid="diagnostics-description">
+          Real-time system monitoring and performance metrics
+        </p>
+      </div>
+
+      <DiagnosticsStatCards data={data} />
+
+      <DiagnosticsChartsSection history={history} />
+
+      <div className="grid gap-6 lg:grid-cols-2">
+        <DeviceInfoCard data={data} />
+        <VisionCard vision={data?.vision ?? null} />
+        <StreamHealthCard data={data} />
+      </div>
+
+      <SystemLogsCard
+        logSource={logSource}
+        setLogSource={setLogSource}
+        logLevel={logLevel}
+        setLogLevel={setLogLevel}
+        logLines={logLines}
+        logsFetching={logsFetching}
+        onExport={handleExport}
+      />
     </div>
   );
 }

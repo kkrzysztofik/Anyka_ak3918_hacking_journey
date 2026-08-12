@@ -21,7 +21,11 @@ pub enum LogSource {
 impl LogSource {
     pub fn path(self) -> &'static str {
         match self {
-            LogSource::OnvifRust => "/mnt/logs/onvif_rust.log",
+            // anyka-init's supervisor config (.deploy/anyka.toml) writes the
+            // running onvif-rust process to onvif.log. onvif_rust.log is a
+            // pre-cutover artifact that stopped updating 2026-08-01 and would
+            // otherwise silently become the panel's default dead source.
+            LogSource::OnvifRust => "/mnt/logs/onvif.log",
             LogSource::VendorDaemon => "/mnt/logs/vendor_daemon.log",
             LogSource::AnykaInit => "/mnt/logs/anyka-init.log",
             LogSource::WpaSupplicant => "/mnt/logs/wpa_supplicant.log",
@@ -86,13 +90,39 @@ pub fn tail_bytes(path: &Path, budget: u64) -> std::io::Result<String> {
     Ok(text)
 }
 
-pub fn filter_lines(text: &str, min_level: Option<LogLevel>, limit: usize) -> Vec<&str> {
-    let lines: Vec<&str> = text
+/// Strip ANSI/VT100 escape sequences (`\x1b[...m` SGR codes and similar).
+///
+/// `tracing`'s fmt subscriber and the vendor daemon's C logging both colourise
+/// their output for a terminal. Serving that raw turns every line in the log
+/// panel into `[2m2026-...[0m` noise around the actual message.
+fn strip_ansi(line: &str) -> String {
+    let mut out = String::with_capacity(line.len());
+    let mut chars = line.chars();
+    while let Some(c) = chars.next() {
+        if c == '\u{1b}' {
+            // Consume through the final byte of the escape sequence (the
+            // first char outside 0x30..=0x3f, 0x20..=0x2f). CSI sequences
+            // ("\x1b[...m") end in an alphabetic byte; skip until we see one.
+            for next in chars.by_ref() {
+                if next.is_ascii_alphabetic() {
+                    break;
+                }
+            }
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
+pub fn filter_lines(text: &str, min_level: Option<LogLevel>, limit: usize) -> Vec<String> {
+    let lines: Vec<String> = text
         .lines()
         .filter(|line| {
             let level = LogLevel::of_line(line);
             min_level.is_none_or(|min| level.is_none_or(|l| l >= min))
         })
+        .map(strip_ansi)
         .collect();
 
     let start = lines.len().saturating_sub(limit);
@@ -157,7 +187,10 @@ mod tests {
 
     #[test]
     fn test_log_source_paths_are_fixed() {
-        assert_eq!(LogSource::OnvifRust.path(), "/mnt/logs/onvif_rust.log");
+        // onvif.log, not onvif_rust.log: the latter is a pre-cutover artifact
+        // that stopped being written on 2026-08-01 (see .deploy/anyka.toml,
+        // which points the running onvif-rust process at onvif.log).
+        assert_eq!(LogSource::OnvifRust.path(), "/mnt/logs/onvif.log");
         assert_eq!(
             LogSource::VendorDaemon.path(),
             "/mnt/logs/vendor_daemon.log"
@@ -176,5 +209,31 @@ mod tests {
         let text = "INFO a\nINFO b\nINFO c\n";
         let kept = filter_lines(text, None, 2);
         assert_eq!(kept, vec!["INFO b", "INFO c"]);
+    }
+
+    #[test]
+    fn test_filter_lines_strips_ansi_escapes() {
+        // Real captured shape from onvif.log: tracing's colourised fmt output.
+        let text = "\u{1b}[2m2026-08-01T22:33:01Z\u{1b}[0m \u{1b}[33m WARN\u{1b}[0m \u{1b}[2msrc\u{1b}[0m\u{1b}[2m:\u{1b}[0m Bye failed\n";
+        let kept = filter_lines(text, None, 100);
+        assert_eq!(kept, vec!["2026-08-01T22:33:01Z  WARN src: Bye failed"]);
+    }
+
+    #[test]
+    fn test_filter_lines_strips_ansi_from_vendor_daemon_style_output() {
+        // Real captured shape from vendor_daemon.log: raw VT100 SGR codes,
+        // no tracing structure, no level token.
+        let text = "\u{1b}[m\u{1b}[0;32;34m[ak_venc]: rate=160(kbps)\u{1b}[m\n";
+        let kept = filter_lines(text, None, 100);
+        assert_eq!(kept, vec!["[ak_venc]: rate=160(kbps)"]);
+    }
+
+    #[test]
+    fn test_filter_lines_level_detection_unaffected_by_surrounding_ansi() {
+        // The level token must still match while wrapped in escape codes,
+        // since filtering happens on the raw line before stripping.
+        let text = "\u{1b}[33m WARN\u{1b}[0m slow\n\u{1b}[32m INFO\u{1b}[0m ok\n";
+        let kept = filter_lines(text, Some(LogLevel::Warn), 100);
+        assert_eq!(kept, vec![" WARN slow"]);
     }
 }

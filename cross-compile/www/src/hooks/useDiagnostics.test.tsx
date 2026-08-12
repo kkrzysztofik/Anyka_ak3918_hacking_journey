@@ -63,7 +63,7 @@ describe('useDiagnostics', () => {
     const { wrapper } = makeWrapper();
     const { result } = renderHook(() => useDiagnostics(), { wrapper });
 
-    await waitFor(() => expect(result.current.history.length).toBe(1));
+    await waitFor(() => expect(result.current.history).toHaveLength(1));
 
     const point = result.current.history[0];
     expect(point.cpu).toBe(42);
@@ -77,7 +77,7 @@ describe('useDiagnostics', () => {
     const { queryClient, wrapper } = makeWrapper();
     const { result } = renderHook(() => useDiagnostics(), { wrapper });
 
-    await waitFor(() => expect(result.current.history.length).toBe(1));
+    await waitFor(() => expect(result.current.history).toHaveLength(1));
 
     // Simulate 70 distinct refetches by invalidating with unique timestamps.
     for (let i = 0; i < 69; i++) {
@@ -87,14 +87,14 @@ describe('useDiagnostics', () => {
       });
     }
 
-    await waitFor(() => expect(result.current.history.length).toBe(60));
+    await waitFor(() => expect(result.current.history).toHaveLength(60));
   });
 
   it('should not duplicate history on rerender without dataUpdatedAt change', async () => {
     const { wrapper } = makeWrapper();
     const { result, rerender } = renderHook(() => useDiagnostics(), { wrapper });
 
-    await waitFor(() => expect(result.current.history.length).toBe(1));
+    await waitFor(() => expect(result.current.history).toHaveLength(1));
     const firstTimestamp = result.current.history[0].t;
 
     // Force a re-render that does NOT change the cached data.
@@ -103,7 +103,7 @@ describe('useDiagnostics', () => {
     });
 
     // History must stay at exactly 1 entry with the same timestamp.
-    expect(result.current.history.length).toBe(1);
+    expect(result.current.history).toHaveLength(1);
     expect(result.current.history[0].t).toBe(firstTimestamp);
   });
 });

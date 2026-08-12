@@ -124,11 +124,17 @@ async function request(
   // Headers, not a plain object: header names are case-insensitive, so a caller
   // passing `authorization` must suppress the injected `Authorization` rather
   // than end up with both merged into one comma-joined value.
+  const headers = new Headers(DEFAULT_HEADERS);
+  if (config.headers) {
+    for (const [name, value] of Object.entries(config.headers)) {
+      headers.set(name, value);
+    }
+  }
   const response = await authorizedFetch(
     url,
     {
       method: 'POST',
-      headers: new Headers({ ...DEFAULT_HEADERS, ...(config.headers ?? {}) }),
+      headers,
       body,
       signal: config.signal,
     },

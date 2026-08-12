@@ -1101,6 +1101,7 @@ impl Application {
         let port = server_config.port;
 
         let diagnostics = Arc::new(crate::diagnostics::state::DiagnosticsState::new(
+            started_at,
             app_state.platform().cloned(),
             progress.degraded_services().to_vec(),
         ));
@@ -1130,6 +1131,15 @@ impl Application {
         // Phase 6: Streaming (optional, gracefully degrades)
         let streaming_service =
             Self::start_streaming(&config_runtime, &app_state, &mut progress).await;
+
+        // `diagnostics` was constructed back in the Network phase, before
+        // Discovery and Streaming could still fail and record degradation.
+        // Bring it up to date now so /api/diagnostics matches App::health()
+        // instead of a snapshot frozen mid-startup.
+        diagnostics.finalize_startup(
+            progress.degraded_services().to_vec(),
+            streaming_service.is_some(),
+        );
 
         let startup_duration = started_at.elapsed();
         if progress.has_degraded_services() {
