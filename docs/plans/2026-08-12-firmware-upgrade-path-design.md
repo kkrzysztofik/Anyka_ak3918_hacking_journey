@@ -31,6 +31,12 @@ Four goals, all in scope:
 | Device config | Lives outside the slots, never overwritten |
 | Transport | Any drop into `spool/`; `PUT /api/update` in increment 2 |
 
+The manifest is `manifest.sha256` in `sha256sum -c` format plus a
+`manifest.meta` of `key=value` lines, not JSON: `anyka-init` has no
+`serde_json`, and `sha256sum -c` does the whole verify in one exit status using
+a busybox applet already on the device. See the implementation plan's
+"Deviation from the design doc" for the full reasoning.
+
 `lib/` (31 MB of uClibc runtime) stays outside the slots and outside the bundle.
 A toolchain bump becomes a deliberate separate step; a mismatch surfaces as a
 failed trial rather than a silent bad flip.
@@ -42,7 +48,8 @@ failed trial rather than a silent bad flip.
   active                     # text: "a" or "b" — read by config.sh and anyka-init
   slots/
     a/
-      manifest.json          # version + per-file sha256 + requires_config_schema
+      manifest.sha256        # sha256sum -c format, one line per file
+      manifest.meta          # version=, requires_config_schema=
       anyka-init.bin
       vendor-daemon/{vendor-daemon.bin, lib/}
       onvif/{onvif-rust.bin, www/, config.template.toml}
@@ -96,8 +103,8 @@ Polled from the existing supervisor tick (`[monitor] interval_sec = 60`); a
 ```
 tick:  spool/bundle.trigger present?
          → untar spool/bundle.tar into slots/<inactive>
-         → sha256 every file against manifest.json
-         → compare manifest.requires_config_schema against anyka.toml schema
+         → sha256sum -c manifest.sha256, run with CWD = the slot
+         → compare manifest.meta requires_config_schema against anyka.toml schema
          → any failure: log, clear spool, wipe staging, done (nothing flipped)
          → touch state/trial-<current>, sync
          → write active = <inactive>, sync
@@ -161,7 +168,7 @@ commit. No torn-write failure mode.
 
 ### Config schema check
 
-`manifest.json` declares `requires_config_schema = N`; `anyka.toml` gains
+`manifest.meta` declares `requires_config_schema=N`; `anyka.toml` gains
 `schema = N`. The *old* applier compares two integers before flipping, so a build
 needing new config keys fails at verify time with both slots intact rather than
 crashlooping into a revert.
@@ -185,7 +192,7 @@ Requires adding `schema` to the template
 ## Version identity
 
 `git describe` at build time, compiled into `onvif-rust` via
-`option_env!("ANYKA_BUILD_VERSION")` and written into `manifest.json` from the
+`option_env!("ANYKA_BUILD_VERSION")` and written into `manifest.meta` from the
 same source. Surfaced in ONVIF `GetDeviceInformation`'s `FirmwareVersion` and in
 `/api/diagnostics`. Not baked into `anyka-init` — nothing asks it.
 
