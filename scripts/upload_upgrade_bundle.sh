@@ -144,9 +144,19 @@ RESP_BODY="$(mktemp)"
 NETRC="$(mktemp)"
 chmod 600 "${NETRC}"
 # netrc: curl reads credentials from here, so the password never appears in
-# argv (local or, after scp, on the jumphost).
+# argv (local or, after the jumphost hop, on the jumphost).
 printf 'machine %s login %s password %s\n' "${HOST}" "${USER_NAME}" "${PASS}" > "${NETRC}"
-trap 'rm -f "${RESP_BODY}" "${NETRC}"' EXIT
+REMOTE_NETRC=""
+
+cleanup() {
+  rm -f "${RESP_BODY}" "${NETRC}"
+  # Set as soon as the remote file exists, so a failure anywhere after that
+  # still wipes the credential off the jumphost.
+  if [[ -n "${REMOTE_NETRC}" ]]; then
+    ssh -o BatchMode=yes "${JUMPHOST}" "rm -f $(printf '%q' "${REMOTE_NETRC}")" || true
+  fi
+}
+trap cleanup EXIT
 
 log_info "Uploading $(du -h "${BUNDLE}" | cut -f1) → ${URL}"
 if [[ -n "${JUMPHOST}" ]]; then
@@ -161,23 +171,39 @@ upload_lan() {
     "${URL}"
 }
 
+# Stage the credential file on the jumphost so curl -u never appears in its
+# `ps`. mktemp under umask 077 means the name is unpredictable and the file is
+# never group/world-readable, not even momentarily; the contents arrive over
+# stdin, so the password stays out of the remote argv too.
+#
+# Must run OUTSIDE the "$(upload_jumphost)" command substitution: that is a
+# subshell, and REMOTE_NETRC set there would never reach the EXIT trap.
+stage_remote_netrc() {
+  REMOTE_NETRC="$(ssh -o BatchMode=yes "${JUMPHOST}" \
+    'umask 077; f="$(mktemp "${TMPDIR:-/tmp}/upgrade_netrc.XXXXXX")" \
+       && cat >"$f" && printf %s "$f"' \
+    <"${NETRC}")" || true
+  if [[ -z "${REMOTE_NETRC}" ]]; then
+    log_error "Failed to stage credentials on ${JUMPHOST}"
+    exit 1
+  fi
+  # From here the EXIT trap owns removal of REMOTE_NETRC.
+}
+
 upload_jumphost() {
-  # Copy the credential file to the remote so curl -u never appears in the
-  # jumphost's `ps`, then clean it up. The bundle body goes over stdin.
-  local remote_netrc="/tmp/upgrade_netrc.$$"
-  scp -o BatchMode=yes -q "${NETRC}" "${JUMPHOST}:${remote_netrc}"
-  local remote_url
+  local remote_url remote_netrc
   remote_url="$(printf '%q' "${URL}")"
+  remote_netrc="$(printf '%q' "${REMOTE_NETRC}")"
   # HTTP body → local RESP_BODY (remote stderr); status code alone on stdout.
   ssh -o BatchMode=yes "${JUMPHOST}" \
-    "trap 'rm -f ${remote_netrc}' EXIT; chmod 600 ${remote_netrc}; \
-     curl -sS -o /dev/stderr -w '%{http_code}' --max-time ${TIMEOUT_SEC} \
+    "curl -sS -o /dev/stderr -w '%{http_code}' --max-time ${TIMEOUT_SEC} \
        --netrc-file ${remote_netrc} -T - ${remote_url}" \
     <"${BUNDLE}" 2>"${RESP_BODY}"
 }
 
 http_code=""
 if [[ -n "${JUMPHOST}" ]]; then
+  stage_remote_netrc
   http_code="$(upload_jumphost)" || true
 else
   http_code="$(upload_lan)" || true
