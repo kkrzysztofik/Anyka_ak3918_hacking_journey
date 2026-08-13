@@ -35,7 +35,6 @@ import {
   SettingsCardTitle,
 } from '@/components/ui/settings-card';
 import { cn } from '@/lib/utils';
-import { buildFlvUrl } from '@/utils/streamUrl';
 import { getProfiles } from '@/services/profileService';
 import {
   continuousMove,
@@ -47,6 +46,7 @@ import {
   stopMove,
 } from '@/services/ptzService';
 import type { PTZDirection, PTZPreset } from '@/services/ptzService';
+import { buildFlvUrl } from '@/utils/streamUrl';
 
 /** States that cover the video with a message. Absent = show the picture. */
 const WAITING_TEXT: Partial<Record<PlayerState, string>> = {
@@ -285,9 +285,7 @@ export default function LiveViewPage() {
                   </button>
                 </fieldset>
                 <div
-                  className={
-                    playerState === 'playing' ? 'status-badge-connected' : 'text-zinc-400'
-                  }
+                  className={playerState === 'playing' ? 'status-badge-connected' : 'text-zinc-400'}
                 >
                   {playerState}
                 </div>

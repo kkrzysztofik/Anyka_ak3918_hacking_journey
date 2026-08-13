@@ -44,7 +44,9 @@ export function LiveVideoPlayer({
   // effect depended on any of them, each parent render would tear down and
   // rebuild a live connection to the camera.
   const latest = useRef({ onStateChange, onStats, getBasicAuthHeader });
-  latest.current = { onStateChange, onStats, getBasicAuthHeader };
+  useEffect(() => {
+    latest.current = { onStateChange, onStats, getBasicAuthHeader };
+  });
 
   useEffect(() => {
     const video = videoRef.current;

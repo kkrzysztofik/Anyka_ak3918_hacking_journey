@@ -15,12 +15,12 @@ const mockPlayer = {
   load: vi.fn(),
   destroy: vi.fn(),
 };
-const createPlayer = vi.fn(() => mockPlayer);
+const createPlayer = vi.fn((_media?: unknown, _config?: unknown) => mockPlayer);
 
 vi.mock('mpegts.js', () => ({
   default: {
     isSupported: () => true,
-    createPlayer: (...args: unknown[]) => createPlayer(...args),
+    createPlayer: (media: unknown, config?: unknown) => createPlayer(media, config),
     Events: {
       MEDIA_INFO: 'media_info',
       STATISTICS_INFO: 'statistics_info',
