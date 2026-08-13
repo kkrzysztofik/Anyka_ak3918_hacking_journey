@@ -225,6 +225,7 @@ channel = 6
 
     fn test_config(wifi: WifiCfg, system: SystemCfg) -> Config {
         Config {
+            schema: 0,
             log: LogCfg::default(),
             system,
             wifi,
@@ -232,6 +233,7 @@ channel = 6
             supervisor: SupervisorCfg::default(),
             monitor: MonitorCfg::default(),
             reboot: RebootCfg::default(),
+            update: crate::config::Update::default(),
             services: BTreeMap::new(),
         }
     }

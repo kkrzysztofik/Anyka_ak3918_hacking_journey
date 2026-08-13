@@ -1693,6 +1693,7 @@ dependencies = [
  "criterion",
  "headers",
  "hmac",
+ "http-body",
  "http-body-util",
  "libc",
  "md-5",

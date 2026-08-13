@@ -3,20 +3,22 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { getDiagnostics, getLogs } from './diagnosticsService';
+import { ApiError, authorizedFetch, authorizedXhrPut } from '@/services/api';
+
+import { getDiagnostics, getLogs, uploadFirmware } from './diagnosticsService';
 
 vi.mock('@/services/api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/services/api')>();
   return {
     ...actual,
     authorizedFetch: vi.fn(),
+    authorizedXhrPut: vi.fn(),
   };
 });
 
-import { ApiError, authorizedFetch } from '@/services/api';
-
 const MOCK_DIAGNOSTICS = {
   status: 'healthy',
+  firmware_version: 'v1.2.3',
   uptime: { process_s: 3600, system_s: 7200 },
   cpu_percent: 12.5,
   memory: { total_kb: 131072, used_kb: 45000 },
@@ -82,9 +84,7 @@ describe('diagnosticsService', () => {
     });
 
     it('test_getDiagnostics_non_ok_response_throws_api_error', async () => {
-      vi.mocked(authorizedFetch).mockResolvedValue(
-        makeResponse({ error: 'internal error' }, 500),
-      );
+      vi.mocked(authorizedFetch).mockResolvedValue(makeResponse({ error: 'internal error' }, 500));
 
       await expect(getDiagnostics()).rejects.toThrow(ApiError);
     });
@@ -106,9 +106,7 @@ describe('diagnosticsService', () => {
 
   describe('getLogs', () => {
     it('test_getLogs_with_level_encodes_source_and_level_query_params', async () => {
-      vi.mocked(authorizedFetch).mockResolvedValue(
-        makeResponse(['line1', 'line2']),
-      );
+      vi.mocked(authorizedFetch).mockResolvedValue(makeResponse(['line1', 'line2']));
 
       await getLogs('onvif_rust', 'info');
 
@@ -127,9 +125,7 @@ describe('diagnosticsService', () => {
     });
 
     it('test_getLogs_404_response_returns_empty_array', async () => {
-      vi.mocked(authorizedFetch).mockResolvedValue(
-        new Response('Not Found', { status: 404 }),
-      );
+      vi.mocked(authorizedFetch).mockResolvedValue(new Response('Not Found', { status: 404 }));
 
       const result = await getLogs('anyka_init');
 
@@ -146,9 +142,7 @@ describe('diagnosticsService', () => {
     });
 
     it('test_getLogs_non_404_error_throws_api_error', async () => {
-      vi.mocked(authorizedFetch).mockResolvedValue(
-        new Response('Server Error', { status: 500 }),
-      );
+      vi.mocked(authorizedFetch).mockResolvedValue(new Response('Server Error', { status: 500 }));
 
       await expect(getLogs('onvif_rust')).rejects.toThrow(ApiError);
     });
@@ -159,6 +153,45 @@ describe('diagnosticsService', () => {
       );
 
       await expect(getLogs('onvif_rust')).rejects.toThrow(ApiError);
+    });
+  });
+
+  describe('uploadFirmware', () => {
+    const file = new File(['firmware-bytes'], 'upgrade.bin', { type: 'application/octet-stream' });
+
+    it('test_uploadFirmware_202_resolves_via_authorizedXhrPut', async () => {
+      vi.mocked(authorizedXhrPut).mockResolvedValue({ status: 202, bodyText: '' });
+
+      await expect(uploadFirmware(file)).resolves.toBeUndefined();
+
+      expect(vi.mocked(authorizedXhrPut)).toHaveBeenCalledWith('/api/update', file, undefined);
+    });
+
+    it('test_uploadFirmware_forwards_progress_and_signal_options', async () => {
+      vi.mocked(authorizedXhrPut).mockResolvedValue({ status: 202, bodyText: '' });
+      const onProgress = vi.fn();
+      const controller = new AbortController();
+
+      await uploadFirmware(file, { onProgress, signal: controller.signal });
+
+      expect(vi.mocked(authorizedXhrPut)).toHaveBeenCalledWith('/api/update', file, {
+        onProgress,
+        signal: controller.signal,
+      });
+    });
+
+    it('test_uploadFirmware_non_202_throws_api_error', async () => {
+      vi.mocked(authorizedXhrPut).mockResolvedValue({
+        status: 400,
+        bodyText: 'bad bundle',
+      });
+
+      await expect(uploadFirmware(file)).rejects.toMatchObject({
+        name: 'ApiError',
+        status: 400,
+        data: 'bad bundle',
+        message: 'Firmware upload failed with status 400',
+      });
     });
   });
 });

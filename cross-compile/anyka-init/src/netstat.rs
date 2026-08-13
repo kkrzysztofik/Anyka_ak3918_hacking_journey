@@ -77,6 +77,47 @@ pub fn gateway_reachable(gw: &str) -> bool {
         .unwrap_or(false)
 }
 
+/// TCP_LISTEN as `/proc/net/tcp` spells it.
+const TCP_LISTEN: &str = "0A";
+
+/// Is anything listening on `port`?
+///
+/// Reads `/proc/net/tcp` rather than connecting, so it costs no socket and
+/// cannot be fooled by a half-open accept queue. IPv4 only — every service
+/// this supervises binds v4.
+pub fn listening(port: u16) -> bool {
+    std::fs::read_to_string("/proc/net/tcp").is_ok_and(|s| parse_listening(&s, port))
+}
+
+/// Split out so the parse is testable without a real `/proc`.
+///
+/// Columns are `sl local_address rem_address st ...`, first line a header.
+/// Destructuring all four up front is duller than chaining iterator adaptors
+/// and does not invite a fencepost error on the one field that matters.
+///
+/// The local address must be the wildcard bind `00000000`: a service that
+/// regressed to binding loopback is not reachable from the network, and a
+/// trial must not confirm an update that left the camera unreachable.
+fn parse_listening(src: &str, port: u16) -> bool {
+    src.lines().skip(1).any(|line| {
+        let mut f = line.split_whitespace();
+        let (Some(_sl), Some(local), Some(_rem), Some(state)) =
+            (f.next(), f.next(), f.next(), f.next())
+        else {
+            return false;
+        };
+        if state != TCP_LISTEN {
+            return false;
+        }
+        let Some((addr, hex)) = local.split_once(':') else {
+            return false;
+        };
+        // A loopback-only bind is not reachable from the network and must not
+        // satisfy a trial port.
+        addr == "00000000" && u16::from_str_radix(hex, 16).ok() == Some(port)
+    })
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Health {
     pub carrier: bool,
@@ -235,6 +276,79 @@ pub fn decide(h: Health, ticks: u32, p: &Policy) -> Action {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Real output captured from 192.168.2.198 on 2026-08-12. 022A is RTSP,
+    // 1F90 is HTTP-FLV, 0050 is ONVIF, 0015/0018 are FTP and telnet. Only the
+    // last line is synthetic, added to cover a non-LISTEN state.
+    const TCP_FIXTURE: &str = "\
+  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode
+   0: 00000000:022A 00000000:0000 0A 00000000:00000000 00:00000000 00000000     0        0 653 1 c2225680 100 0 0 10 -1
+   1: 0100007F:224E 00000000:0000 0A 00000000:00000000 00:00000000 00000000     0        0 132 1 c2224900 100 0 0 10 -1
+   2: 00000000:1F90 00000000:0000 0A 00000000:00000000 00:00000000 00000000     0        0 654 1 c2224d80 100 0 0 10 -1
+   3: 00000000:0050 00000000:0000 0A 00000000:00000000 00:00000000 00000000     0        0 598 1 c2225200 100 0 0 10 -1
+   4: 00000000:0015 00000000:0000 0A 00000000:00000000 00:00000000 00000000     0        0 112 1 c2224480 100 0 0 10 -1
+   5: 00000000:0018 00000000:0000 0A 00000000:00000000 00:00000000 00000000     0        0 325 1 c2224000 100 0 0 10 -1
+   6: 0100007F:1F91 0100007F:C350 01 00000000:00000000 00:00000000 00000000     0        0 999 1 c2224111 100 0 0 10 -1
+";
+
+    #[test]
+    fn listening_finds_a_listening_port() {
+        assert!(parse_listening(TCP_FIXTURE, 80));
+    }
+
+    #[test]
+    fn listening_finds_a_high_port_in_hex() {
+        // 0x022A == 554
+        assert!(parse_listening(TCP_FIXTURE, 554));
+    }
+
+    #[test]
+    fn listening_finds_every_trial_port() {
+        for p in crate::update::TRIAL_PORTS {
+            assert!(
+                parse_listening(TCP_FIXTURE, p),
+                "port {p} should be listening"
+            );
+        }
+    }
+
+    #[test]
+    fn listening_rejects_an_established_socket() {
+        // 0x1F91 == 8081, present but state 01 (ESTABLISHED), not 0A (LISTEN)
+        assert!(!parse_listening(TCP_FIXTURE, 8081));
+    }
+
+    #[test]
+    fn listening_rejects_a_loopback_only_bind() {
+        // 0100007F:0050 is 127.0.0.1:80 in LISTEN state. A service that
+        // regressed to binding loopback is not reachable from the network and
+        // must not satisfy a trial port.
+        let loopback = "\
+  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode
+   0: 0100007F:0050 00000000:0000 0A 00000000:00000000 00:00000000 00000000     0        0 653 1 c2225680 100 0 0 10 -1
+";
+        assert!(!parse_listening(loopback, 80));
+    }
+
+    #[test]
+    fn listening_still_accepts_a_wildcard_bind() {
+        let wildcard = "\
+  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode
+   0: 00000000:0050 00000000:0000 0A 00000000:00000000 00:00000000 00000000     0        0 653 1 c2225680 100 0 0 10 -1
+";
+        assert!(parse_listening(wildcard, 80));
+    }
+
+    #[test]
+    fn listening_rejects_an_absent_port() {
+        assert!(!parse_listening(TCP_FIXTURE, 12345));
+    }
+
+    #[test]
+    fn listening_tolerates_garbage() {
+        assert!(!parse_listening("", 80));
+        assert!(!parse_listening("not a proc file at all", 80));
+    }
 
     // Real format: `cat /proc/net/route` on a busybox system. Tabs, not spaces.
     const ROUTE: &str = "\

@@ -1,5 +1,6 @@
 import React, { useCallback, useState } from 'react';
 
+import { useQuery } from '@tanstack/react-query';
 import {
   Activity,
   Cpu,
@@ -9,12 +10,12 @@ import {
   FileText,
   HardDrive,
   Info,
+  Upload,
   Wifi,
 } from 'lucide-react';
 
-import { useQuery } from '@tanstack/react-query';
-
 import { Sparkline } from '@/components/common/Sparkline';
+import { FirmwareUpgradeDialog } from '@/components/FirmwareUpgradeDialog';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
@@ -24,7 +25,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { useDiagnostics, type DiagnosticsPoint } from '@/hooks/useDiagnostics';
+import { type DiagnosticsPoint, useDiagnostics } from '@/hooks/useDiagnostics';
 import { cn } from '@/lib/utils';
 import {
   type Diagnostics,
@@ -90,10 +91,7 @@ function StatCard({
     >
       <div className="flex items-center gap-4 p-5">
         <div
-          className={cn(
-            'flex h-10 w-10 shrink-0 items-center justify-center rounded-lg',
-            colorBg,
-          )}
+          className={cn('flex h-10 w-10 shrink-0 items-center justify-center rounded-lg', colorBg)}
         >
           <Icon className={cn('h-5 w-5', color)} />
         </div>
@@ -130,18 +128,13 @@ function formatLamp(supported: boolean, value: boolean | null | undefined): stri
 function VisionCard({ vision }: Readonly<{ vision: Diagnostics['vision'] }>) {
   const mode = vision?.mode ?? '\u2014';
   const aeLuma =
-    vision?.ae_luma !== null && vision?.ae_luma !== undefined
-      ? String(vision.ae_luma)
-      : '\u2014';
-  const ain0 =
-    vision?.ain0 !== null && vision?.ain0 !== undefined ? String(vision.ain0) : '\u2014';
+    vision?.ae_luma !== null && vision?.ae_luma !== undefined ? String(vision.ae_luma) : '\u2014';
+  const ain0 = vision?.ain0 !== null && vision?.ain0 !== undefined ? String(vision.ain0) : '\u2014';
 
   const irLed = vision ? formatLamp(vision.supported.ir_led, vision.ir_led) : '\u2014';
   const ircutA = vision ? formatLamp(vision.supported.ircut, vision.ircut_a) : '\u2014';
   const ircutB = vision ? formatLamp(vision.supported.ircut, vision.ircut_b) : '\u2014';
-  const whiteLed = vision
-    ? formatLamp(vision.supported.white_led, vision.white_led)
-    : '\u2014';
+  const whiteLed = vision ? formatLamp(vision.supported.white_led, vision.white_led) : '\u2014';
 
   return (
     <Card className="border-border bg-card overflow-hidden">
@@ -222,9 +215,7 @@ function DiagnosticsStatCards({ data }: Readonly<{ data: Diagnostics | undefined
   const memTotalMb = data?.memory ? Math.round(data.memory.total_kb / 1024) : null;
   const memValue = memUsedMb !== null ? `${memUsedMb} MB` : '—';
   const memSubValue =
-    memUsedMb !== null && memTotalMb !== null
-      ? `${memUsedMb} MB / ${memTotalMb} MB`
-      : undefined;
+    memUsedMb !== null && memTotalMb !== null ? `${memUsedMb} MB / ${memTotalMb} MB` : undefined;
 
   const storageUsedMb = data?.storage ? Math.round(data.storage.used_kb / 1024) : null;
   const storageTotalMb = data?.storage ? Math.round(data.storage.total_kb / 1024) : null;
@@ -471,6 +462,15 @@ function DeviceInfoCard({ data }: Readonly<{ data: Diagnostics | undefined }>) {
           <div className="border-border border-t pt-3">
             <div
               className="flex items-center justify-between"
+              data-testid="diagnostics-firmware-version-row"
+            >
+              <dt className="text-muted-foreground">Firmware</dt>
+              <dd className="font-mono text-white" data-testid="diagnostics-firmware-version">
+                {data?.firmware_version ?? '\u2014'}
+              </dd>
+            </div>
+            <div
+              className="mt-1 flex items-center justify-between"
               data-testid="diagnostics-network-download-row"
             >
               <dt className="text-muted-foreground">Download</dt>
@@ -660,9 +660,7 @@ function SystemLogsCard({
               </SelectContent>
             </Select>
 
-            <fieldset
-              className="border-border bg-muted/50 m-0 flex min-w-0 items-center rounded-md border p-0.5"
-            >
+            <fieldset className="border-border bg-muted/50 m-0 flex min-w-0 items-center rounded-md border p-0.5">
               <legend className="sr-only">Log level filter</legend>
               {LOG_LEVEL_OPTIONS.map((opt) => (
                 <Button
@@ -699,8 +697,61 @@ function SystemLogsCard({
   );
 }
 
+function FirmwareUpdateCard({
+  previousVersion,
+  onFinished,
+}: Readonly<{ previousVersion: string | null; onFinished: () => void }>) {
+  const [open, setOpen] = useState(false);
+
+  const handleUpgrade = useCallback(() => setOpen(true), []);
+
+  return (
+    <>
+      <Card className="border-border bg-card overflow-hidden">
+        <CardHeader className="border-border border-b">
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-green-500/10">
+                <Upload className="h-5 w-5 text-green-500" />
+              </div>
+              <div>
+                <CardTitle
+                  className="text-foreground text-sm font-semibold"
+                  data-testid="diagnostics-firmware-title"
+                >
+                  Firmware Update
+                </CardTitle>
+                <p
+                  className="text-muted-foreground text-xs"
+                  data-testid="diagnostics-firmware-description"
+                >
+                  Install an upgrade bundle
+                </p>
+              </div>
+            </div>
+            <Button
+              size="sm"
+              data-testid="diagnostics-firmware-upgrade-button"
+              onClick={handleUpgrade}
+            >
+              Upgrade…
+            </Button>
+          </div>
+        </CardHeader>
+      </Card>
+
+      <FirmwareUpgradeDialog
+        open={open}
+        onOpenChange={setOpen}
+        previousVersion={previousVersion}
+        onFinished={onFinished}
+      />
+    </>
+  );
+}
+
 export default function DiagnosticsPage() {
-  const { data, isLoading, history } = useDiagnostics();
+  const { data, isLoading, history, refetch } = useDiagnostics();
   const [logSource, setLogSource] = useState<LogSource>('onvif_rust');
   const [logLevel, setLogLevel] = useState<LogLevel | 'all'>('all');
 
@@ -722,6 +773,10 @@ export default function DiagnosticsPage() {
     // Defer revoke so Firefox can start the download before the blob URL is invalidated.
     globalThis.setTimeout(() => URL.revokeObjectURL(url), 0);
   }, [logLines, logSource]);
+
+  const handleUpgradeFinished = useCallback(() => {
+    void refetch();
+  }, [refetch]);
 
   if (isLoading) {
     return (
@@ -751,6 +806,11 @@ export default function DiagnosticsPage() {
         <VisionCard vision={data?.vision ?? null} />
         <StreamHealthCard data={data} />
       </div>
+
+      <FirmwareUpdateCard
+        previousVersion={data?.firmware_version ?? null}
+        onFinished={handleUpgradeFinished}
+      />
 
       <SystemLogsCard
         logSource={logSource}

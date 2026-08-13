@@ -28,6 +28,15 @@ pub enum ConfigError {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
+    /// Config schema generation. A bundle declares the minimum it needs in
+    /// `manifest.meta`; the *running* supervisor compares that against this
+    /// number before flipping, so a build that needs keys this file lacks is
+    /// rejected with both slots intact instead of crashlooping into a revert.
+    ///
+    /// Zero means "predates the schema key", which accepts every bundle that
+    /// does not ask for one.
+    #[serde(default)]
+    pub schema: u32,
     #[serde(default)]
     pub log: LogCfg,
     #[serde(default)]
@@ -42,7 +51,28 @@ pub struct Config {
     #[serde(default)]
     pub reboot: RebootCfg,
     #[serde(default)]
+    pub update: Update,
+    #[serde(default)]
     pub services: BTreeMap<String, ServiceCfg>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Update {
+    /// Root holding `active`, `slots/`, `state/` and `spool/`.
+    #[serde(default = "default_update_root")]
+    pub root: String,
+    /// Consecutive seconds all trial ports must stay bound.
+    #[serde(default = "default_trial_hold")]
+    pub trial_hold_sec: u32,
+    /// Give up and revert after this long.
+    #[serde(default = "default_trial_deadline")]
+    pub trial_deadline_sec: u32,
+    /// Ports an unconfirmed update must bind to be confirmed. The default
+    /// mirrors the shipped ONVIF/RTSP/HTTP-FLV contract; if an operator
+    /// changes those ports, the trial follows.
+    #[serde(default = "default_trial_ports")]
+    pub trial_ports: Vec<u16>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -340,6 +370,29 @@ fn d_video_heartbeat() -> String {
 fn d_reboot_interval() -> u64 {
     720
 }
+fn default_update_root() -> String {
+    "/mnt/anyka_hack".to_string()
+}
+fn default_trial_hold() -> u32 {
+    30
+}
+fn default_trial_deadline() -> u32 {
+    120
+}
+fn default_trial_ports() -> Vec<u16> {
+    crate::update::TRIAL_PORTS.to_vec()
+}
+
+impl Default for Update {
+    fn default() -> Self {
+        Self {
+            root: default_update_root(),
+            trial_hold_sec: default_trial_hold(),
+            trial_deadline_sec: default_trial_deadline(),
+            trial_ports: default_trial_ports(),
+        }
+    }
+}
 
 impl Default for LogCfg {
     fn default() -> Self {
@@ -472,6 +525,22 @@ impl Config {
         if self.supervisor.crashloop_count == 0 {
             return Err(ConfigError::Invalid(
                 "supervisor.crashloop_count must be non-zero".into(),
+            ));
+        }
+        if self.update.trial_hold_sec == 0
+            || self.update.trial_hold_sec >= self.update.trial_deadline_sec
+        {
+            return Err(ConfigError::Invalid(
+                "update.trial_hold_sec must be greater than zero and less than \
+                 update.trial_deadline_sec"
+                    .into(),
+            ));
+        }
+        if self.update.trial_ports.is_empty() {
+            // An empty list would make evaluate_trial treat every port as bound
+            // and confirm an update without ever checking a listener.
+            return Err(ConfigError::Invalid(
+                "update.trial_ports must contain at least one port".into(),
             ));
         }
         if self.wifi.chip != "auto" && crate::wifi::Chip::from_name(&self.wifi.chip).is_none() {
@@ -800,6 +869,56 @@ log = "/tmp/udhcpc.log"
             "/../../SD_card_contents/anyka_hack/anyka.toml"
         );
         Config::load(path).expect("shipped anyka.toml must parse and validate");
+    }
+
+    #[test]
+    fn test_config_schema_defaults_to_zero_when_absent() {
+        let c: Config = toml::from_str(MINIMAL).unwrap();
+        assert_eq!(c.schema, 0);
+    }
+
+    #[test]
+    fn test_config_schema_is_read_from_the_top_level() {
+        let src = format!("schema = 2\n{MINIMAL}");
+        let c: Config = toml::from_str(&src).unwrap();
+        assert_eq!(c.schema, 2);
+    }
+
+    #[test]
+    fn test_config_update_section_applies_defaults() {
+        let c: Config = toml::from_str(MINIMAL).unwrap();
+        assert_eq!(c.update.root, "/mnt/anyka_hack");
+        assert_eq!(c.update.trial_hold_sec, 30);
+        assert_eq!(c.update.trial_deadline_sec, 120);
+        assert_eq!(c.update.trial_ports, crate::update::TRIAL_PORTS);
+    }
+
+    #[test]
+    fn test_config_validate_rejects_hold_above_deadline() {
+        let src = format!("{MINIMAL}\n[update]\ntrial_hold_sec = 200\ntrial_deadline_sec = 120\n");
+        let c: Config = toml::from_str(&src).unwrap();
+        assert!(c.validate().is_err());
+    }
+
+    #[test]
+    fn test_config_validate_rejects_zero_trial_hold() {
+        let src = format!("{MINIMAL}\n[update]\ntrial_hold_sec = 0\ntrial_deadline_sec = 120\n");
+        let c: Config = toml::from_str(&src).unwrap();
+        assert!(c.validate().is_err());
+    }
+
+    #[test]
+    fn test_config_update_section_reads_trial_ports() {
+        let src = format!("{MINIMAL}\n[update]\ntrial_ports = [80, 8554]\n");
+        let c: Config = toml::from_str(&src).unwrap();
+        assert_eq!(c.update.trial_ports, vec![80, 8554]);
+    }
+
+    #[test]
+    fn test_config_validate_rejects_empty_trial_ports() {
+        let src = format!("{MINIMAL}\n[update]\ntrial_ports = []\n");
+        let c: Config = toml::from_str(&src).unwrap();
+        assert!(c.validate().is_err());
     }
 
     #[test]

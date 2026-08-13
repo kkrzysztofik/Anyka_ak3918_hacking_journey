@@ -62,6 +62,9 @@ pub struct Component {
 #[derive(Debug, Clone, Serialize)]
 pub struct Snapshot {
     pub status: String,
+    /// `git describe` at build time, matching `GetDeviceInformation`'s
+    /// `FirmwareVersion`.
+    pub firmware_version: String,
     pub uptime: Uptime,
     /// CPU busy percentage since the previous sample; `None` on the first call.
     pub cpu_percent: Option<f32>,
@@ -255,6 +258,7 @@ impl DiagnosticsState {
 
         Snapshot {
             status: health.status.to_string(),
+            firmware_version: crate::build_version().to_string(),
             uptime: Uptime {
                 system_s,
                 process_s,
@@ -320,6 +324,18 @@ mod tests {
         let snap = state.snapshot().await;
         assert!(snap.cpu_percent.is_none());
         assert!(snap.network.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_snapshot_reports_firmware_version() {
+        let state = DiagnosticsState::new(Instant::now(), None, Vec::new());
+        let snap = state.snapshot().await;
+        assert_eq!(
+            snap.firmware_version,
+            crate::build_version(),
+            "the diagnostics snapshot must carry the same build identity as \
+             GetDeviceInformation's FirmwareVersion"
+        );
     }
 
     #[tokio::test]

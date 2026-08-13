@@ -4,10 +4,17 @@
  * JSON GET operations for the /api/diagnostics and /api/logs endpoints.
  * Uses authorizedFetch so 401 responses trigger the shared session-expiry path.
  */
-import { ApiError, authorizedFetch } from '@/services/api';
+import {
+  ApiError,
+  authorizedFetch,
+  authorizedXhrPut,
+  type UploadProgress,
+} from '@/services/api';
 
 export interface Diagnostics {
   status: string;
+  /** `git describe` at build time on the running bundle. */
+  firmware_version: string;
   uptime: { process_s: number; system_s: number };
   cpu_percent: number | null;
   memory: { total_kb: number; used_kb: number } | null;
@@ -35,7 +42,9 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
 
-function isVisionSupported(value: unknown): value is NonNullable<Diagnostics['vision']>['supported'] {
+function isVisionSupported(
+  value: unknown,
+): value is NonNullable<Diagnostics['vision']>['supported'] {
   return (
     isRecord(value) &&
     typeof value.ir_led === 'boolean' &&
@@ -68,15 +77,14 @@ function isNullOrRecord(value: unknown): value is Record<string, unknown> | null
 
 function isUptime(value: unknown): value is Diagnostics['uptime'] {
   return (
-    isRecord(value) &&
-    typeof value.process_s === 'number' &&
-    typeof value.system_s === 'number'
+    isRecord(value) && typeof value.process_s === 'number' && typeof value.system_s === 'number'
   );
 }
 
 function isDiagnostics(value: unknown): value is Diagnostics {
   if (!isRecord(value)) return false;
   if (typeof value.status !== 'string') return false;
+  if (typeof value.firmware_version !== 'string') return false;
   if (!isUptime(value.uptime)) return false;
   if (!isNullOrNumber(value.cpu_percent)) return false;
   if (!isNullOrRecord(value.memory)) return false;
@@ -147,11 +155,7 @@ export async function getLogs(
 
   if (!response.ok) {
     const text = await response.text();
-    throw new ApiError(
-      `Logs request failed with status ${response.status}`,
-      response.status,
-      text,
-    );
+    throw new ApiError(`Logs request failed with status ${response.status}`, response.status, text);
   }
 
   let payload: unknown;
@@ -164,4 +168,26 @@ export async function getLogs(
     throw new ApiError('Logs response has an unexpected shape', response.status, '');
   }
   return payload;
+}
+
+/**
+ * Upload an upgrade bundle to the camera.
+ *
+ * Streams the file raw as the PUT body — the backend never buffers it, and
+ * neither should we. 202 means the update is queued: the applier will stage it,
+ * flip slots and reboot within the next poll interval.
+ */
+export async function uploadFirmware(
+  file: File,
+  options?: {
+    onProgress?: (p: UploadProgress) => void;
+    signal?: AbortSignal;
+  },
+): Promise<void> {
+  const { status, bodyText } = await authorizedXhrPut('/api/update', file, options);
+
+  if (status === 202) {
+    return;
+  }
+  throw new ApiError(`Firmware upload failed with status ${status}`, status, bodyText);
 }

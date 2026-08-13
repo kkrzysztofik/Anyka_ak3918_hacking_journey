@@ -9,6 +9,7 @@ import {
   DEFAULT_TIMEOUT_MS,
   ENDPOINTS,
   apiClient,
+  authorizedXhrPut,
   setAuthHeaderGetter,
 } from './api';
 
@@ -282,6 +283,200 @@ describe('api', () => {
       );
 
       await expect(apiClient.post('/test', '<body />')).rejects.toThrow('Network Error');
+    });
+  });
+
+  describe('authorizedXhrPut', () => {
+    type XhrListener = (ev?: ProgressEvent) => void;
+
+    class MockXHR {
+      static instances: MockXHR[] = [];
+
+      readyState = 0;
+      status = 0;
+      responseText = '';
+      upload = {
+        listeners: new Map<string, XhrListener[]>(),
+        addEventListener(type: string, listener: XhrListener) {
+          const list = this.listeners.get(type) ?? [];
+          list.push(listener);
+          this.listeners.set(type, list);
+        },
+        dispatch(type: string, ev: ProgressEvent) {
+          for (const listener of this.listeners.get(type) ?? []) {
+            listener(ev);
+          }
+        },
+      };
+
+      private listeners = new Map<string, XhrListener[]>();
+      method = '';
+      url = '';
+      headers: Record<string, string> = {};
+      body: Blob | null = null;
+      aborted = false;
+
+      constructor() {
+        MockXHR.instances.push(this);
+      }
+
+      open(method: string, url: string) {
+        this.method = method;
+        this.url = url;
+        this.readyState = 1;
+      }
+
+      setRequestHeader(name: string, value: string) {
+        this.headers[name] = value;
+      }
+
+      addEventListener(type: string, listener: XhrListener) {
+        const list = this.listeners.get(type) ?? [];
+        list.push(listener);
+        this.listeners.set(type, list);
+      }
+
+      send(body?: Document | XMLHttpRequestBodyInit | null) {
+        this.body = body instanceof Blob ? body : null;
+        this.readyState = 2;
+      }
+
+      abort() {
+        this.aborted = true;
+        this.dispatch('abort');
+      }
+
+      dispatch(type: string, ev?: ProgressEvent) {
+        for (const listener of this.listeners.get(type) ?? []) {
+          listener(ev);
+        }
+      }
+
+      complete(status: number, responseText: string) {
+        this.status = status;
+        this.responseText = responseText;
+        this.readyState = 4;
+        this.dispatch('load');
+      }
+
+      failNetwork() {
+        this.dispatch('error');
+      }
+    }
+
+    beforeEach(() => {
+      MockXHR.instances = [];
+      vi.stubGlobal('XMLHttpRequest', MockXHR);
+    });
+
+    it('test_authorizedXhrPut_202_resolves_status_and_body', async () => {
+      const pending = authorizedXhrPut('/api/update', new Blob(['fw']));
+      const xhr = MockXHR.instances[0];
+      expect(xhr.method).toBe('PUT');
+      expect(xhr.url).toBe('/api/update');
+
+      xhr.complete(202, 'accepted');
+
+      await expect(pending).resolves.toEqual({ status: 202, bodyText: 'accepted' });
+    });
+
+    it('test_authorizedXhrPut_non_202_resolves_without_throwing', async () => {
+      const pending = authorizedXhrPut('/api/update', new Blob(['fw']));
+      MockXHR.instances[0].complete(500, 'boom');
+
+      await expect(pending).resolves.toEqual({ status: 500, bodyText: 'boom' });
+    });
+
+    it('test_authorizedXhrPut_progress_fires_onProgress', async () => {
+      const onProgress = vi.fn();
+      const pending = authorizedXhrPut('/api/update', new Blob(['fw']), { onProgress });
+      const xhr = MockXHR.instances[0];
+
+      xhr.upload.dispatch('progress', {
+        lengthComputable: true,
+        loaded: 50,
+        total: 100,
+      } as ProgressEvent);
+      xhr.complete(202, '');
+
+      await pending;
+      expect(onProgress).toHaveBeenCalledWith({ loaded: 50, total: 100 });
+    });
+
+    it('test_authorizedXhrPut_abort_signal_rejects', async () => {
+      const controller = new AbortController();
+      const pending = authorizedXhrPut('/api/update', new Blob(['fw']), {
+        signal: controller.signal,
+      });
+
+      controller.abort();
+
+      await expect(pending).rejects.toThrow(/abort/i);
+      expect(MockXHR.instances[0].aborted).toBe(true);
+    });
+
+    it('test_authorizedXhrPut_pre_aborted_signal_rejects_immediately', async () => {
+      const controller = new AbortController();
+      controller.abort();
+
+      await expect(
+        authorizedXhrPut('/api/update', new Blob(['fw']), { signal: controller.signal }),
+      ).rejects.toThrow(/abort/i);
+    });
+
+    it('test_authorizedXhrPut_auth_getter_injects_authorization', async () => {
+      const mockGetter = vi.fn().mockResolvedValue('Basic dGVzdDp0ZXN0');
+      setAuthHeaderGetter(mockGetter);
+
+      const pending = authorizedXhrPut('/api/update', new Blob(['fw']));
+      // auth is awaited before open/send — flush microtasks
+      await Promise.resolve();
+      await Promise.resolve();
+
+      const xhr = MockXHR.instances[0];
+      expect(xhr.headers.Authorization).toBe('Basic dGVzdDp0ZXN0');
+      expect(mockGetter).toHaveBeenCalled();
+
+      xhr.complete(202, '');
+      await pending;
+    });
+
+    it('should reject if aborted while awaiting auth', async () => {
+      let resolveAuth!: (value: string) => void;
+      setAuthHeaderGetter(
+        () =>
+          new Promise<string>((resolve) => {
+            resolveAuth = resolve;
+          }),
+      );
+
+      const controller = new AbortController();
+      const pending = authorizedXhrPut('/api/update', new Blob(['fw']), {
+        signal: controller.signal,
+      });
+
+      controller.abort();
+      resolveAuth('Basic late');
+
+      await expect(pending).rejects.toThrow(/abort/i);
+      expect(MockXHR.instances).toHaveLength(0);
+    });
+
+    it('should clear auth and dispatch on 401', async () => {
+      sessionStorage.setItem('onvif_camera_auth', 'test');
+      const unauthorized = vi.fn();
+      globalThis.addEventListener('auth:unauthorized', unauthorized);
+
+      try {
+        const pending = authorizedXhrPut('/api/update', new Blob(['fw']));
+        MockXHR.instances[0].complete(401, 'Unauthorized');
+
+        await expect(pending).resolves.toEqual({ status: 401, bodyText: 'Unauthorized' });
+        expect(sessionStorage.getItem('onvif_camera_auth')).toBeNull();
+        expect(unauthorized).toHaveBeenCalled();
+      } finally {
+        globalThis.removeEventListener('auth:unauthorized', unauthorized);
+      }
     });
   });
 });

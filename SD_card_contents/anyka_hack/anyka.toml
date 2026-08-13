@@ -1,6 +1,12 @@
 # anyka-init configuration — edit wifi credentials before first boot.
 # Parsed (never evaluated). A typo'd key is a loud failure, not a silent default.
 
+# Config schema generation. Bump this when a key is added that a new build
+# requires, and set `requires_config_schema` to the same number in that
+# build's manifest.meta. The running supervisor refuses to flip to a bundle
+# asking for more than this.
+schema = 1
+
 [log]
 dir = "/mnt/logs"
 level = "info"

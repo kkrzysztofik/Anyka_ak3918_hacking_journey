@@ -6,6 +6,7 @@ use crate::storm::StormState;
 use crate::supervise::{Action, Event, Policy, RestartHistory, SvcState, decide};
 use crate::sys::{ExitStatus, Pid, SpawnSpec, Sys};
 use std::collections::BTreeMap;
+use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
@@ -48,13 +49,41 @@ struct Service {
     hist: RestartHistory,
 }
 
-fn spec_of(svc: &ServiceCfg) -> SpawnSpec {
+/// Rewrite a `SpawnSpec` so exec and slot-owned env paths resolve inside the
+/// active slot. `root` is `[update] root`; paths outside it pass through.
+fn spec_of_slot(svc: &ServiceCfg, root: &Path, slots: &crate::update::Slots) -> SpawnSpec {
+    // Where this supervisor was actually loaded from, not where `active`
+    // claims. When `config.sh` falls back to the other slot it does not
+    // rewrite the pointer, and resolving services against a stale pointer
+    // would spawn them out of the slot that just failed to exec.
+    let active = slots.running_slot();
+    let rewrite = |p: &str| {
+        crate::update::slot_path(root, active, Path::new(p))
+            .to_string_lossy()
+            .into_owned()
+    };
     SpawnSpec {
-        exec: svc.exec.clone(),
+        exec: rewrite(&svc.exec),
         args: svc.args.clone(),
-        env: svc.env.clone(),
+        env: svc
+            .env
+            .iter()
+            .map(|(k, v)| (k.clone(), rewrite_env(k, v, &rewrite)))
+            .collect(),
         log: svc.log.clone(),
         core_dump: svc.core_dump,
+    }
+}
+
+/// Rewrite one env value. `LD_LIBRARY_PATH` is a `:`-separated path list, so
+/// each entry must be rewritten individually — rewriting the whole string as a
+/// single path would leave the first entry pointing at the old slot's libs.
+fn rewrite_env(key: &str, value: &str, rewrite: &impl Fn(&str) -> String) -> String {
+    if key == "LD_LIBRARY_PATH" {
+        let entries: Vec<String> = value.split(':').map(rewrite).collect();
+        entries.join(":")
+    } else {
+        rewrite(value)
     }
 }
 
@@ -134,13 +163,16 @@ pub fn run(sys: Arc<dyn Sys>, cfg: &Config, rx: Receiver<Msg>) {
         crashloop_window: Duration::from_secs(cfg.supervisor.crashloop_window_sec),
     };
 
+    let slots = crate::update::Slots::new(&cfg.update.root);
+    let update_root = Path::new(&cfg.update.root);
+
     let mut services: Vec<Service> = cfg
         .services
         .iter()
         .filter(|(_, s)| s.enabled)
         .map(|(name, s)| Service {
             name: name.clone(),
-            spec: spec_of(s),
+            spec: spec_of_slot(s, update_root, &slots),
             state: SvcState::Backoff {
                 until: sys.now(),
                 attempt: 0,
@@ -368,6 +400,81 @@ mod reboot_delay_tests {
     use super::*;
 
     #[test]
+    fn test_rewrite_env_rewrites_a_path_list_entry_by_entry() {
+        // Two entries on the update root: rewriting the whole value as one
+        // path would leave the second entry pointing at the old slot.
+        let d = tempfile::tempdir().unwrap();
+        let root = d.path();
+        let slots = crate::update::Slots::new(root);
+        // Force active=a so slot_path resolves into slots/a regardless of the
+        // host this test runs on.
+        std::fs::create_dir_all(root.join("slots")).unwrap();
+        std::fs::write(root.join("active"), "a").unwrap();
+        let rewrite = |p: &str| {
+            crate::update::slot_path(root, slots.active(), Path::new(p))
+                .to_string_lossy()
+                .into_owned()
+        };
+        let root_str = root.display().to_string();
+        assert_eq!(
+            rewrite_env(
+                "LD_LIBRARY_PATH",
+                &format!("{root_str}/vendor-daemon/lib:{root_str}/onvif/lib"),
+                &rewrite,
+            ),
+            format!("{root_str}/slots/a/vendor-daemon/lib:{root_str}/slots/a/onvif/lib")
+        );
+    }
+
+    #[test]
+    fn test_rewrite_env_leaves_unbundled_path_list_entries_alone() {
+        let d = tempfile::tempdir().unwrap();
+        let root = d.path();
+        let slots = crate::update::Slots::new(root);
+        std::fs::create_dir_all(root.join("slots")).unwrap();
+        std::fs::write(root.join("active"), "a").unwrap();
+        let rewrite = |p: &str| {
+            crate::update::slot_path(root, slots.active(), Path::new(p))
+                .to_string_lossy()
+                .into_owned()
+        };
+        let root_str = root.display().to_string();
+        // /lib is outside the slots and must pass through.
+        assert_eq!(
+            rewrite_env(
+                "LD_LIBRARY_PATH",
+                &format!("/lib:{root_str}/vendor-daemon/lib"),
+                &rewrite,
+            ),
+            format!("/lib:{root_str}/slots/a/vendor-daemon/lib")
+        );
+    }
+
+    #[test]
+    fn test_rewrite_env_rewrites_non_path_list_values_verbatim() {
+        let d = tempfile::tempdir().unwrap();
+        let root = d.path();
+        let slots = crate::update::Slots::new(root);
+        std::fs::create_dir_all(root.join("slots")).unwrap();
+        std::fs::write(root.join("active"), "a").unwrap();
+        let rewrite = |p: &str| {
+            crate::update::slot_path(root, slots.active(), Path::new(p))
+                .to_string_lossy()
+                .into_owned()
+        };
+        let root_str = root.display().to_string();
+        // A single bundled path is rewritten wholesale, not split on ':'.
+        assert_eq!(
+            rewrite_env(
+                "OTHER",
+                &format!("{root_str}/onvif/onvif-rust.bin"),
+                &rewrite
+            ),
+            format!("{root_str}/slots/a/onvif/onvif-rust.bin")
+        );
+    }
+
+    #[test]
     fn test_periodic_reboot_delay_converts_minutes_to_seconds() {
         assert_eq!(
             periodic_reboot_delay(720, 0, 12345),
@@ -459,6 +566,7 @@ mod run_tests {
 
     fn test_config(services: BTreeMap<String, ServiceCfg>) -> Config {
         Config {
+            schema: 0,
             log: LogCfg::default(),
             system: SystemCfg::default(),
             wifi: minimal_wifi_cfg(),
@@ -474,6 +582,7 @@ mod run_tests {
             },
             monitor: MonitorCfg::default(),
             reboot: RebootCfg::default(),
+            update: crate::config::Update::default(),
             services,
         }
     }

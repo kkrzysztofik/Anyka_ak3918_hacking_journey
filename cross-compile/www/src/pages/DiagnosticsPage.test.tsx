@@ -5,10 +5,9 @@
  * getLogs is mocked via @/services/diagnosticsService.
  */
 import { screen } from '@testing-library/react';
+import { waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-
-import { waitFor } from '@testing-library/react';
 
 import type { UseDiagnosticsResult } from '@/hooks/useDiagnostics';
 import { useDiagnostics } from '@/hooks/useDiagnostics';
@@ -23,6 +22,7 @@ vi.mock('@/services/diagnosticsService');
 
 const BASE_DIAG: Diagnostics = {
   status: 'healthy',
+  firmware_version: 'v1.2.3',
   uptime: { process_s: 3600, system_s: 3600 }, // no restart gap
   cpu_percent: 45,
   memory: { total_kb: 36864, used_kb: 18432 }, // 18 MB / 36 MB
@@ -277,17 +277,13 @@ describe('DiagnosticsPage', () => {
     });
 
     it('test_DiagnosticsPage_null_frame_age_renders_em_dash', () => {
-      vi.mocked(useDiagnostics).mockReturnValue(
-        makeResult({ stream_frame_age_ms: null }),
-      );
+      vi.mocked(useDiagnostics).mockReturnValue(makeResult({ stream_frame_age_ms: null }));
       renderWithProviders(<DiagnosticsPage />);
       expect(screen.getByTestId('diagnostics-frame-age')).toHaveTextContent('\u2014');
     });
 
     it('test_DiagnosticsPage_stale_frame_age_shows_stalled_indicator', () => {
-      vi.mocked(useDiagnostics).mockReturnValue(
-        makeResult({ stream_frame_age_ms: 6000 }),
-      );
+      vi.mocked(useDiagnostics).mockReturnValue(makeResult({ stream_frame_age_ms: 6000 }));
       renderWithProviders(<DiagnosticsPage />);
       expect(screen.getByTestId('diagnostics-stream-stalled')).toBeInTheDocument();
     });
@@ -351,9 +347,7 @@ describe('DiagnosticsPage', () => {
       await waitFor(() => {
         expect(screen.getByTestId('diagnostics-log-lines')).toBeInTheDocument();
       });
-      expect(screen.getByTestId('diagnostics-log-lines')).toHaveTextContent(
-        'Service started',
-      );
+      expect(screen.getByTestId('diagnostics-log-lines')).toHaveTextContent('Service started');
     });
 
     it('test_DiagnosticsPage_empty_log_source_shows_unavailable_message', async () => {
@@ -388,9 +382,7 @@ describe('DiagnosticsPage', () => {
       const trigger = screen.getByTestId('diagnostics-log-source-select');
       await user.click(trigger);
 
-      const vendorOption = screen.getByTestId(
-        'diagnostics-log-source-option-vendor_daemon',
-      );
+      const vendorOption = screen.getByTestId('diagnostics-log-source-option-vendor_daemon');
       await user.click(vendorOption);
 
       await waitFor(() => {
@@ -523,6 +515,27 @@ describe('DiagnosticsPage', () => {
       expect(screen.getByTestId('diagnostics-vision-mode')).toHaveTextContent('\u2014');
     });
   });
+
+  describe('Device information', () => {
+    it('test_DiagnosticsPage_shows_firmware_version', () => {
+      renderWithProviders(<DiagnosticsPage />);
+      expect(screen.getByTestId('diagnostics-firmware-version')).toHaveTextContent('v1.2.3');
+    });
+  });
+
+  describe('Firmware update', () => {
+    it('test_DiagnosticsPage_firmware_upgrade_button_renders', () => {
+      renderWithProviders(<DiagnosticsPage />);
+      expect(screen.getByTestId('diagnostics-firmware-upgrade-button')).toBeInTheDocument();
+    });
+
+    it('test_DiagnosticsPage_upgrade_click_opens_firmware_upgrade_dialog', async () => {
+      const user = userEvent.setup();
+      renderWithProviders(<DiagnosticsPage />);
+
+      await user.click(screen.getByTestId('diagnostics-firmware-upgrade-button'));
+
+      expect(screen.getByTestId('firmware-upgrade-dialog')).toBeInTheDocument();
+    });
+  });
 });
-
-

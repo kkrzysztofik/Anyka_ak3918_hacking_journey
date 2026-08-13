@@ -1,0 +1,354 @@
+/**
+ * FirmwareUpgradeDialog — design tests 2–8
+ */
+import { screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { ApiError } from '@/services/api';
+import type { Diagnostics } from '@/services/diagnosticsService';
+import { getDiagnostics, uploadFirmware } from '@/services/diagnosticsService';
+import { createControllablePromise, renderWithProviders } from '@/test/componentTestHelpers';
+
+import { FirmwareUpgradeDialog } from './FirmwareUpgradeDialog';
+
+vi.mock('@/services/diagnosticsService', () => ({
+  getDiagnostics: vi.fn(),
+  uploadFirmware: vi.fn(),
+}));
+
+const PREVIOUS = 'v1.0.0';
+
+function makeDiagnostics(firmware_version: string): Diagnostics {
+  return {
+    status: 'ok',
+    firmware_version,
+    uptime: { process_s: 1, system_s: 1 },
+    cpu_percent: null,
+    memory: null,
+    storage: null,
+    network: null,
+    stream_frame_age_ms: null,
+    components: [],
+    degraded_services: [],
+    vision: null,
+  };
+}
+
+function renderDialog(
+  overrides: Partial<{
+    open: boolean;
+    onOpenChange: (open: boolean) => void;
+    previousVersion: string | null;
+    onFinished: () => void;
+  }> = {},
+) {
+  const props = {
+    open: true,
+    onOpenChange: vi.fn(),
+    previousVersion: PREVIOUS,
+    onFinished: vi.fn(),
+    ...overrides,
+  };
+  renderWithProviders(<FirmwareUpgradeDialog {...props} />);
+  return props;
+}
+
+async function selectTarAndContinue(
+  user: ReturnType<typeof userEvent.setup>,
+  file = new File(['tar'], 'bundle.tar', { type: 'application/x-tar' }),
+) {
+  await user.upload(screen.getByTestId('firmware-upgrade-input'), file);
+  await user.click(screen.getByTestId('firmware-upgrade-continue-button'));
+}
+
+describe('FirmwareUpgradeDialog', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(uploadFirmware).mockResolvedValue(undefined);
+    vi.mocked(getDiagnostics).mockRejectedValue(new Error('camera down'));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('test_FirmwareUpgradeDialog_invalid_file_disables_continue', async () => {
+    const user = userEvent.setup();
+    renderDialog();
+
+    const continueButton = screen.getByTestId('firmware-upgrade-continue-button');
+    expect(continueButton).toBeDisabled();
+
+    await user.upload(screen.getByTestId('firmware-upgrade-input'), new File(['x'], 'bundle.bin'));
+    expect(continueButton).toBeDisabled();
+
+    const oversized = new File(['x'], 'big.tar');
+    Object.defineProperty(oversized, 'size', { value: 64 * 1024 * 1024 + 1 });
+    await user.upload(screen.getByTestId('firmware-upgrade-input'), oversized);
+    expect(continueButton).toBeDisabled();
+    expect(screen.getByTestId('firmware-upgrade-error')).toBeInTheDocument();
+
+    await user.upload(
+      screen.getByTestId('firmware-upgrade-input'),
+      new File(['tar'], 'bundle.tar'),
+    );
+    expect(continueButton).toBeEnabled();
+  });
+
+  it('test_FirmwareUpgradeDialog_confirm_dialog_precedes_upload', async () => {
+    const user = userEvent.setup();
+    const upload = createControllablePromise<void>();
+    vi.mocked(uploadFirmware).mockReturnValue(upload.promise);
+
+    renderDialog();
+    await selectTarAndContinue(user);
+
+    expect(screen.getByTestId('firmware-upgrade-confirm-button')).toBeInTheDocument();
+    expect(uploadFirmware).not.toHaveBeenCalled();
+
+    await user.click(screen.getByTestId('firmware-upgrade-confirm-button'));
+
+    await waitFor(() => {
+      expect(uploadFirmware).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it('test_FirmwareUpgradeDialog_onProgress_updates_progress_ui', async () => {
+    const user = userEvent.setup();
+    const upload = createControllablePromise<void>();
+    vi.mocked(uploadFirmware).mockImplementation(async (_file, options) => {
+      options?.onProgress?.({ loaded: 5, total: 10 });
+      return upload.promise;
+    });
+
+    renderDialog();
+    await selectTarAndContinue(user);
+    await user.click(screen.getByTestId('firmware-upgrade-confirm-button'));
+
+    const progress = await screen.findByTestId('firmware-upgrade-progress');
+    expect(progress).toHaveAttribute('value', '5');
+    expect(progress).toHaveAttribute('max', '10');
+    // aria-labelledby points at a useId() value, so a broken pairing would be
+    // invisible in the DOM but leave the bar unnamed for screen readers.
+    expect(screen.getByRole('progressbar', { name: 'Uploading…' })).toBe(progress);
+  });
+
+  it('test_FirmwareUpgradeDialog_upload_202_enters_waiting', async () => {
+    const user = userEvent.setup();
+    vi.mocked(uploadFirmware).mockResolvedValue(undefined);
+
+    renderDialog();
+    await selectTarAndContinue(user);
+    await user.click(screen.getByTestId('firmware-upgrade-confirm-button'));
+
+    expect(await screen.findByTestId('firmware-upgrade-waiting')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(getDiagnostics).toHaveBeenCalled();
+    });
+  });
+
+  it('test_FirmwareUpgradeDialog_pre_reboot_diagnostics_ignored_until_reconnect', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+
+    vi.mocked(uploadFirmware).mockResolvedValue(undefined);
+    let poll = 0;
+    vi.mocked(getDiagnostics).mockImplementation(async () => {
+      poll += 1;
+      if (poll === 1) return makeDiagnostics(PREVIOUS);
+      if (poll === 2) throw new Error('camera down');
+      return makeDiagnostics('v2.0.0');
+    });
+
+    renderDialog();
+    await selectTarAndContinue(user);
+    await user.click(screen.getByTestId('firmware-upgrade-confirm-button'));
+
+    expect(await screen.findByTestId('firmware-upgrade-waiting')).toBeInTheDocument();
+
+    await waitFor(() => {
+      expect(poll).toBeGreaterThanOrEqual(1);
+    });
+    // First success is still the old version before reboot — must not exit early
+    expect(screen.queryByTestId('firmware-upgrade-result-message')).not.toBeInTheDocument();
+    expect(screen.getByTestId('firmware-upgrade-waiting')).toBeInTheDocument();
+
+    await waitFor(
+      () => {
+        expect(screen.getByTestId('firmware-upgrade-result-message').textContent).toMatch(
+          /committed/i,
+        );
+      },
+      { timeout: 10_000 },
+    );
+  });
+
+  it('test_FirmwareUpgradeDialog_version_changed_shows_committed', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+
+    vi.mocked(uploadFirmware).mockResolvedValue(undefined);
+    vi.mocked(getDiagnostics)
+      .mockRejectedValueOnce(new Error('camera down'))
+      .mockResolvedValue(makeDiagnostics('v2.0.0'));
+
+    renderDialog();
+    await selectTarAndContinue(user);
+    await user.click(screen.getByTestId('firmware-upgrade-confirm-button'));
+
+    await waitFor(
+      () => {
+        expect(screen.getByTestId('firmware-upgrade-result-message').textContent).toMatch(
+          /committed/i,
+        );
+      },
+      { timeout: 5000 },
+    );
+  });
+
+  it('test_FirmwareUpgradeDialog_version_unchanged_shows_reverted', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+
+    vi.mocked(uploadFirmware).mockResolvedValue(undefined);
+    vi.mocked(getDiagnostics)
+      .mockRejectedValueOnce(new Error('camera down'))
+      .mockResolvedValue(makeDiagnostics(PREVIOUS));
+
+    renderDialog();
+    await selectTarAndContinue(user);
+    await user.click(screen.getByTestId('firmware-upgrade-confirm-button'));
+
+    await waitFor(
+      () => {
+        expect(screen.getByTestId('firmware-upgrade-result-message').textContent).toMatch(
+          /probably reverted/i,
+        );
+      },
+      { timeout: 5000 },
+    );
+  });
+
+  it('test_FirmwareUpgradeDialog_upload_error_shows_retry', async () => {
+    const user = userEvent.setup();
+    vi.mocked(uploadFirmware).mockRejectedValueOnce(
+      new ApiError('Firmware upload failed with status 500', 500, ''),
+    );
+
+    renderDialog();
+    await selectTarAndContinue(user);
+    await user.click(screen.getByTestId('firmware-upgrade-confirm-button'));
+
+    const error = await screen.findByTestId('firmware-upgrade-error');
+    expect(error.textContent).toMatch(/500|failed/i);
+    // Stay put on uploading — do not collapse back to select
+    expect(screen.getByTestId('firmware-upgrade-progress')).toBeInTheDocument();
+    expect(screen.queryByTestId('firmware-upgrade-input')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('firmware-upgrade-waiting')).not.toBeInTheDocument();
+
+    vi.mocked(uploadFirmware).mockResolvedValueOnce(undefined);
+    await user.click(screen.getByTestId('firmware-upgrade-continue-button'));
+    await user.click(screen.getByTestId('firmware-upgrade-confirm-button'));
+
+    await waitFor(() => {
+      expect(uploadFirmware).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  it('test_FirmwareUpgradeDialog_backend_rejection_shows_detail', async () => {
+    const user = userEvent.setup();
+    vi.mocked(uploadFirmware).mockRejectedValueOnce(
+      new ApiError('bundle too large', 413, 'bundle exceeds 67108864 bytes'),
+    );
+
+    renderDialog();
+    await selectTarAndContinue(user);
+    await user.click(screen.getByTestId('firmware-upgrade-confirm-button'));
+
+    const error = await screen.findByTestId('firmware-upgrade-error');
+    expect(error.textContent).toContain('bundle exceeds 67108864 bytes');
+  });
+
+  it('test_FirmwareUpgradeDialog_no_down_timeout_shows_stayed_reachable', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+
+    vi.mocked(uploadFirmware).mockResolvedValue(undefined);
+    vi.mocked(getDiagnostics).mockResolvedValue(makeDiagnostics(PREVIOUS));
+
+    renderDialog();
+    await selectTarAndContinue(user);
+    await user.click(screen.getByTestId('firmware-upgrade-confirm-button'));
+
+    expect(await screen.findByTestId('firmware-upgrade-waiting')).toBeInTheDocument();
+
+    await vi.advanceTimersByTimeAsync(5 * 60 * 1000 + 3_000);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('firmware-upgrade-result-message').textContent).toMatch(
+        /stayed reachable/i,
+      );
+    });
+    expect(screen.getByTestId('firmware-upgrade-result-message').textContent).not.toMatch(
+      /still unreachable/i,
+    );
+  });
+
+  it('test_FirmwareUpgradeDialog_down_timeout_shows_unreachable', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+
+    vi.mocked(uploadFirmware).mockResolvedValue(undefined);
+    vi.mocked(getDiagnostics).mockRejectedValue(new Error('camera down'));
+
+    renderDialog();
+    await selectTarAndContinue(user);
+    await user.click(screen.getByTestId('firmware-upgrade-confirm-button'));
+
+    expect(await screen.findByTestId('firmware-upgrade-waiting')).toBeInTheDocument();
+
+    await vi.advanceTimersByTimeAsync(5 * 60 * 1000 + 3_000);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('firmware-upgrade-result-message').textContent).toMatch(
+        /still unreachable/i,
+      );
+    });
+  });
+
+  it('test_FirmwareUpgradeDialog_waiting_ignores_dismiss', async () => {
+    const user = userEvent.setup();
+    const upload = createControllablePromise<void>();
+    vi.mocked(uploadFirmware).mockReturnValue(upload.promise);
+    vi.mocked(getDiagnostics).mockRejectedValue(new Error('camera down'));
+
+    const props = renderDialog();
+    await selectTarAndContinue(user);
+    await user.click(screen.getByTestId('firmware-upgrade-confirm-button'));
+
+    upload.resolve(undefined);
+    expect(await screen.findByTestId('firmware-upgrade-waiting')).toBeInTheDocument();
+
+    await user.click(screen.getByTestId('dialog-close'));
+    expect(props.onOpenChange).not.toHaveBeenCalledWith(false);
+    expect(screen.getByTestId('firmware-upgrade-waiting')).toBeInTheDocument();
+    expect(screen.getByTestId('firmware-upgrade-dialog')).toBeInTheDocument();
+  });
+
+  it('test_FirmwareUpgradeDialog_uploading_ignores_dismiss', async () => {
+    const user = userEvent.setup();
+    const upload = createControllablePromise<void>();
+    vi.mocked(uploadFirmware).mockReturnValue(upload.promise);
+
+    const props = renderDialog();
+    await selectTarAndContinue(user);
+    await user.click(screen.getByTestId('firmware-upgrade-confirm-button'));
+
+    expect(await screen.findByTestId('firmware-upgrade-progress')).toBeInTheDocument();
+
+    await user.click(screen.getByTestId('dialog-close'));
+    expect(props.onOpenChange).not.toHaveBeenCalledWith(false);
+    expect(screen.getByTestId('firmware-upgrade-progress')).toBeInTheDocument();
+  });
+});

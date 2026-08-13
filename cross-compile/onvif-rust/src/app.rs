@@ -867,6 +867,7 @@ impl Application {
                 Some(std::path::PathBuf::from(&c.server.tls_key_path))
             },
             rate_limit_per_minute: c.server.rate_limit_per_minute,
+            update_root: std::path::PathBuf::from(&c.update.root),
         }
     }
 
@@ -1143,7 +1144,7 @@ impl Application {
 
         let startup_duration = started_at.elapsed();
         if progress.has_degraded_services() {
-            tracing::warn!(
+            tracing::error!(
                 "Application started in DEGRADED mode in {:?}. Unavailable services: {:?}",
                 startup_duration,
                 progress.degraded_services()
@@ -1323,7 +1324,9 @@ impl Application {
                 streaming_config.auth = stream_auth;
             }
             Err(e) => {
-                tracing::warn!(
+                // error!, not warn!: this leaves RTSP and HTTP-FLV unbound, and the
+                // shipped log level is "error", so a warn here is invisible on-device.
+                tracing::error!(
                     "Streaming authentication setup failed, continuing in degraded mode: {}",
                     e
                 );
@@ -1355,7 +1358,7 @@ impl Application {
                 Some(service)
             }
             Err(e) => {
-                tracing::warn!(
+                tracing::error!(
                     "Streaming service failed to start, continuing in degraded mode: {}",
                     e
                 );

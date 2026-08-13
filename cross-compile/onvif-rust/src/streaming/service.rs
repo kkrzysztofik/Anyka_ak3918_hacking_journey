@@ -167,7 +167,9 @@ impl TStreamHandler for LiveStreamHandler {
             let has_idr = bootstrap_idr.is_some();
 
             if !has_sps || !has_pps {
-                tracing::warn!(
+                // error!: the subscriber gets a black screen, and at the shipped
+                // "error" log level a warn! here is invisible.
+                tracing::error!(
                     stream = stream_name,
                     has_sps,
                     has_pps,
@@ -232,7 +234,10 @@ impl TStreamHandler for LiveStreamHandler {
             );
             let _ = sender.send(Information::Sdp { data: sdp });
         } else {
-            tracing::warn!(
+            // error!, not warn!: no SDP is sent at all here, so RTSP DESCRIBE
+            // answers 404 for the life of the process. The shipped log level is
+            // "error", which made this failure completely silent on-device.
+            tracing::error!(
                 stream = stream_name,
                 has_sps,
                 has_pps,

@@ -15,7 +15,21 @@ telnetd -p 24 -l /bin/sh 2>/dev/null &
 
 # The paths below are overridable only so the host test in
 # tests/p0_wrapper.rs can stub them. Production never sets these.
-BIN=${ANYKA_INIT_BIN:-/mnt/anyka_hack/anyka-init.bin}
+#
+# A/B slot selection. /mnt is vfat and has no symlinks, so the pointer is a
+# one-byte file. Unreadable or unrecognized reads as slot a.
+#
+# Second line is the fallback: a slot whose supervisor will not exec is the
+# exact failure an update must survive, and it costs one test to handle here
+# rather than waiting 240s for the deadman below to restore the vendor path.
+SLOT_ROOT=${ANYKA_SLOT_ROOT:-/mnt/anyka_hack}
+SLOT=$(cat "$SLOT_ROOT/active" 2>/dev/null) || SLOT=a
+[ "$SLOT" = b ] || SLOT=a
+BIN=${ANYKA_INIT_BIN:-$SLOT_ROOT/slots/$SLOT/anyka-init.bin}
+if [ ! -x "$BIN" ]; then
+  OTHER=$([ "$SLOT" = a ] && echo b || echo a)
+  BIN=$SLOT_ROOT/slots/$OTHER/anyka-init.bin
+fi
 WIFI_MANAGE=${ANYKA_WIFI_MANAGE:-/usr/sbin/wifi_manage.sh}
 SELF=${ANYKA_CONFIG_SELF:-/mnt/Factory/config.sh}
 BAK=${ANYKA_CONFIG_BAK:-/mnt/Factory/config.sh.gerge.bak}
