@@ -180,6 +180,23 @@ with a fake player exposing the event emitter, `data-testid` on new elements,
 3. **Fleet health.** This demos only on .198 until `main-stream-dies-on-60d460dd`
    is resolved.
 
+### Hardware check on 192.168.2.198 (2026-08-13)
+
+Rebuilt WebUI deployed to the active slot (`/mnt/anyka_hack/slots/b/onvif/www`).
+Port 80 serves the new `index-O9x_J6Y9.js`; Live View dynamically imports
+`mpegts-DT5H0-tC.js` (not in the eager modulepreload list). The production URL
+in that chunk is `http://${hostname}:8080/live/{main,sub}.flv`.
+
+| Stream | Resolution | Codec | Header on the wire |
+| --- | --- | --- | --- |
+| `/live/main.flv` | 1280x720 | H.264 Main ~15 fps | 0.51–0.58 s |
+| `/live/sub.flv` | 640x360 | H.264 Main ~15 fps | 0.54 s |
+
+CORS is `Access-Control-Allow-Origin: *`. Header delay is well under the 3 s
+`process_header_phase` threshold, so no Rust change is warranted from this check.
+A full browser sit (moving picture, 5-minute dropped-frame watch) still needs a
+human at `http://192.168.2.198/`.
+
 ## Out of scope
 
 Fullscreen, snapshot-to-PNG, and audio playback. Also out of scope, but noted as
