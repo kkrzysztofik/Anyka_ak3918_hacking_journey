@@ -98,6 +98,7 @@ impl LiveStreamHandler {
                 pps,
                 audio_config,
                 self.bridge.audio_sample_rate,
+                self.video_framerate,
             );
             send_httpflv_prior_frames(frame_sender, &mut remuxer, timestamp, bootstrap_idr)?;
         } else {
@@ -302,6 +303,7 @@ struct FanoutTask {
     stream_name: String,
     rtsp_tx: tokio::sync::mpsc::Sender<FrameData>,
     httpflv_tx: tokio::sync::mpsc::Sender<FrameData>,
+    video_framerate: u32,
 
     // Mutable state
     httpflv_remuxer: Option<ValidationHttpFlvRemuxer>,
@@ -318,6 +320,7 @@ impl FanoutTask {
         stream_name: String,
         rtsp_tx: tokio::sync::mpsc::Sender<FrameData>,
         httpflv_tx: tokio::sync::mpsc::Sender<FrameData>,
+        video_framerate: u32,
     ) -> Self {
         let telemetry = StreamTelemetry::new(stream_name.clone(), Arc::clone(&bridge_queue));
         Self {
@@ -327,6 +330,7 @@ impl FanoutTask {
             stream_name,
             rtsp_tx,
             httpflv_tx,
+            video_framerate,
             httpflv_remuxer: None,
             cached_sps: None,
             cached_pps: None,
@@ -426,6 +430,7 @@ impl FanoutTask {
                 pps.clone(),
                 audio_config,
                 self.bridge.audio_sample_rate,
+                self.video_framerate,
             ));
             self.cached_sps = Some(sps);
             self.cached_pps = Some(pps);
@@ -723,6 +728,7 @@ impl StreamingService {
             stream_name.to_string(),
             rtsp_tx,
             httpflv_tx,
+            self.config.video_framerate,
         );
         let fanout_handle = tokio::spawn(async move { task.run().await });
 

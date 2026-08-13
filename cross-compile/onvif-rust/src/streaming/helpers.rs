@@ -457,6 +457,7 @@ mod tests {
             vec![0x68, 0xce, 0x06, 0xe2],
             None,
             48_000,
+            15,
         );
         let frame = FrameData::Video {
             timestamp: 20,
@@ -491,6 +492,7 @@ mod tests {
             vec![0x68, 0xce, 0x06, 0xe2],
             None,
             48_000,
+            15,
         );
 
         send_httpflv_prior_frames(&tx, &mut remuxer, 4321, None)
@@ -516,6 +518,7 @@ mod tests {
             vec![0x68, 0xce, 0x06, 0xe2],
             None,
             48_000,
+            15,
         );
 
         send_httpflv_prior_frames(&tx, &mut remuxer, 4322, Some(&[0x00, 0x00, 0x00]))
