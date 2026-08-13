@@ -145,9 +145,7 @@ describe('LiveViewPage', () => {
   it('should render stream URL and copy button', () => {
     renderWithProviders(<LiveViewPage />);
     expect(screen.getByTestId('liveview-stream-url-label')).toHaveTextContent('Stream URL');
-    expect(screen.getByTestId('liveview-stream-url-value')).toHaveTextContent(
-      'rtsp://192.168.1.100:554/main',
-    );
+    expect(screen.getByTestId('liveview-stream-url-value')).toHaveTextContent('/live/main.flv');
     expect(screen.getByTestId('liveview-copy-url-button')).toBeInTheDocument();
   });
 
@@ -222,6 +220,32 @@ describe('LiveViewPage', () => {
     await screen.findByTestId('liveview-video');
 
     expect(screen.getByTestId('liveview-resolution-value')).toHaveTextContent('—');
+  });
+
+  it('shows the stream URL actually in use and copies it', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', {
+      value: { writeText },
+      configurable: true,
+    });
+
+    renderWithProviders(<LiveViewPage />);
+    await screen.findByTestId('liveview-video');
+
+    expect(screen.getByTestId('liveview-stream-url-value')).toHaveTextContent('/live/main.flv');
+
+    fireEvent.click(screen.getByTestId('liveview-copy-url-button'));
+    expect(writeText).toHaveBeenCalledWith(expect.stringContaining('/live/main.flv'));
+  });
+
+  it('updates the stream URL when switching to the sub stream', async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<LiveViewPage />);
+    await screen.findByTestId('liveview-video');
+
+    await user.click(screen.getByTestId('liveview-sub-stream-button'));
+
+    expect(screen.getByTestId('liveview-stream-url-value')).toHaveTextContent('/live/sub.flv');
   });
 
   it('no longer displays unmeasurable packet loss and latency rows', async () => {

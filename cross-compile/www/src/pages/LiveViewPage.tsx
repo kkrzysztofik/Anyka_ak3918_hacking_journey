@@ -35,6 +35,7 @@ import {
   SettingsCardTitle,
 } from '@/components/ui/settings-card';
 import { cn } from '@/lib/utils';
+import { buildFlvUrl } from '@/utils/streamUrl';
 import { getProfiles } from '@/services/profileService';
 import {
   continuousMove,
@@ -81,6 +82,15 @@ export default function LiveViewPage() {
     setStats({});
     setPlayerKey((k) => k + 1);
   }, []);
+
+  const streamUrl = buildFlvUrl(streamType);
+
+  const handleCopyUrl = useCallback(() => {
+    void navigator.clipboard.writeText(streamUrl).then(
+      () => toast.success('Stream URL copied'),
+      () => toast.error('Could not copy the stream URL'),
+    );
+  }, [streamUrl]);
   const queryClient = useQueryClient();
 
   // Fetch profiles to get the PTZ-capable profile token
@@ -342,12 +352,13 @@ export default function LiveViewPage() {
               className="border-border bg-background text-foreground flex-1 truncate rounded border px-3 py-2 font-mono text-sm"
               data-testid="liveview-stream-url-value"
             >
-              rtsp://192.168.1.100:554/main
+              {streamUrl}
             </div>
             <Button
               variant="outline"
               size="sm"
               className="border-border bg-muted text-foreground hover:bg-muted/80"
+              onClick={handleCopyUrl}
               data-testid="liveview-copy-url-button"
             >
               <Copy className="mr-2 h-3.5 w-3.5" />
