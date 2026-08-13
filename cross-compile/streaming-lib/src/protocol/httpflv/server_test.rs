@@ -210,6 +210,81 @@ async fn test_handle_connection_requires_auth_without_credentials_returns_401_wi
         response.headers().get("WWW-Authenticate").unwrap(),
         "Basic realm=\"ONVIF Camera\""
     );
+    assert_eq!(
+        response
+            .headers()
+            .get("Access-Control-Allow-Origin")
+            .unwrap(),
+        "*"
+    );
+}
+
+#[tokio::test]
+async fn test_handle_connection_options_preflight_skips_auth_and_returns_cors() {
+    use crate::common::auth::{AuthAlgorithm, AuthType};
+    use axum::http::Method;
+
+    let (event_sender, _event_receiver) = tokio_mpsc::unbounded_channel();
+    let auth = Auth::new(
+        "test_key".to_string(),
+        "test_secret".to_string(),
+        None,
+        AuthAlgorithm::Simple,
+        AuthType::Pull,
+    )
+    .with_credential_validator(std::sync::Arc::new(|username, password| {
+        username == "admin" && password == "secret"
+    }))
+    .with_basic_realm("ONVIF Camera");
+
+    let uri = Uri::from_static("http://localhost/live/stream1.flv");
+    let req = Request::builder()
+        .method(Method::OPTIONS)
+        .uri(uri)
+        .header("Origin", "http://192.168.2.198")
+        .header("Access-Control-Request-Method", "GET")
+        .header("Access-Control-Request-Headers", "authorization")
+        .body(Body::empty())
+        .unwrap();
+    let remote_addr = SocketAddr::from(([127, 0, 0, 1], 1234));
+
+    let response = handle_connection(
+        State((event_sender, Some(auth))),
+        ConnectInfo(remote_addr),
+        req,
+    )
+    .await;
+
+    assert_eq!(response.status(), axum::http::StatusCode::NO_CONTENT);
+    assert_eq!(
+        response
+            .headers()
+            .get("Access-Control-Allow-Origin")
+            .unwrap(),
+        "*"
+    );
+    let allow_headers = response
+        .headers()
+        .get("Access-Control-Allow-Headers")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .to_ascii_lowercase();
+    assert!(
+        allow_headers.contains("authorization"),
+        "preflight must allow Authorization, got {allow_headers}"
+    );
+    let allow_methods = response
+        .headers()
+        .get("Access-Control-Allow-Methods")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .to_ascii_uppercase();
+    assert!(
+        allow_methods.contains("GET"),
+        "preflight must allow GET, got {allow_methods}"
+    );
 }
 
 #[tokio::test]

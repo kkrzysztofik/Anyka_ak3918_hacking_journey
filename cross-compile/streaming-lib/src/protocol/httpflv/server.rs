@@ -6,7 +6,7 @@ use {
         body::Body,
         extract::{ConnectInfo, Request, State},
         handler::Handler,
-        http::{HeaderValue, StatusCode},
+        http::{HeaderValue, Method, StatusCode},
         response::Response,
     },
     futures::channel::mpsc::unbounded,
@@ -48,6 +48,17 @@ pub(crate) async fn handle_connection(
             let app_name = String::from(rv[1]);
             let stream_name = String::from(rv[2]);
 
+            // CORS preflight has no Authorization header. Authenticate GET only.
+            if req.method() == Method::OPTIONS {
+                return Response::builder()
+                    .status(StatusCode::NO_CONTENT)
+                    .header("Access-Control-Allow-Origin", "*")
+                    .header("Access-Control-Allow-Methods", "GET, OPTIONS")
+                    .header("Access-Control-Allow-Headers", "Authorization")
+                    .body(Body::empty())
+                    .unwrap_or_else(|_| Response::new(Body::empty()));
+            }
+
             if let Some(auth_val) = auth
                 && auth_val
                     .authenticate_request(
@@ -61,6 +72,7 @@ pub(crate) async fn handle_connection(
                 return Response::builder()
                     .status(StatusCode::UNAUTHORIZED)
                     .header("WWW-Authenticate", auth_val.basic_challenge())
+                    .header("Access-Control-Allow-Origin", "*")
                     .body(UNAUTHORIZED.into())
                     .unwrap_or_else(|_| Response::new(Body::from(UNAUTHORIZED)));
             }
