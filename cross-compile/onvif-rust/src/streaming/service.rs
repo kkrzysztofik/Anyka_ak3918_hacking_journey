@@ -913,9 +913,12 @@ mod tests {
             .await;
         assert!(result.is_ok());
 
-        // MediaInfo + FLV video sequence header = 2 frames.
+        // MediaInfo + onMetaData + FLV video sequence header = 3 frames.
         let media_info = frame_rx.try_recv().unwrap();
         assert!(matches!(media_info, FrameData::MediaInfo { .. }));
+
+        let metadata = frame_rx.try_recv().unwrap();
+        assert!(matches!(metadata, FrameData::MetaData { .. }));
 
         let sequence_header = frame_rx.try_recv().unwrap();
         assert!(matches!(
