@@ -27,6 +27,9 @@ function getChunkName(id: string): string | undefined {
   )
     return 'ui-vendor';
   if (id.includes('fast-xml-parser')) return 'utils-vendor';
+  // Keep the FLV demuxer out of the eager vendor chunk. LiveVideoPlayer loads
+  // it with import(), so it must stay a separate async chunk.
+  if (id.includes('mpegts.js')) return 'mpegts';
   return 'vendor';
 }
 
