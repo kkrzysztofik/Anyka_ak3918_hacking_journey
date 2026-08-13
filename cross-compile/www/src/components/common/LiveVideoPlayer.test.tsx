@@ -144,7 +144,63 @@ describe('LiveVideoPlayer', () => {
     mediaHandler({ width: 1280, height: 720, fps: 25, videoCodec: 'avc1.4d001f' });
 
     expect(onStats).toHaveBeenCalledWith(
-      expect.objectContaining({ width: 1280, height: 720, fps: 25 }),
+      expect.objectContaining({ width: 1280, height: 720 }),
+    );
+  });
+
+  it('formats the raw AVC codec tag into a human label', async () => {
+    const onStats = vi.fn();
+    renderWithProviders(<LiveVideoPlayer streamType="main" onStats={onStats} />);
+    await waitFor(() => expect(mockPlayer.on).toHaveBeenCalled());
+
+    const mediaHandler = mockPlayer.on.mock.calls.find((c) => c[0] === 'media_info')?.[1];
+    mediaHandler({ width: 1280, height: 720, fps: 25, videoCodec: 'avc1.4de028' });
+
+    expect(onStats).toHaveBeenCalledWith(
+      expect.objectContaining({ videoCodec: 'H.264 Main@L4.0' }),
+    );
+  });
+
+  it('does not trust the SPS-derived fps from MEDIA_INFO', async () => {
+    const onStats = vi.fn();
+    renderWithProviders(<LiveVideoPlayer streamType="main" onStats={onStats} />);
+    await waitFor(() => expect(mockPlayer.on).toHaveBeenCalled());
+
+    const mediaHandler = mockPlayer.on.mock.calls.find((c) => c[0] === 'media_info')?.[1];
+    mediaHandler({ width: 1280, height: 720, fps: 23.976, videoCodec: 'avc1.4de028' });
+
+    expect(onStats).toHaveBeenCalledWith(
+      expect.not.objectContaining({ fps: expect.anything() }),
+    );
+  });
+
+  it('measures real fps from decoded frame deltas', async () => {
+    const onStats = vi.fn();
+    renderWithProviders(<LiveVideoPlayer streamType="main" onStats={onStats} />);
+    await waitFor(() => expect(mockPlayer.on).toHaveBeenCalled());
+
+    const now = vi.spyOn(performance, 'now');
+    const statsHandler = mockPlayer.on.mock.calls.find((c) => c[0] === 'statistics_info')?.[1];
+
+    now.mockReturnValue(0);
+    statsHandler({ speed: 128, decodedFrames: 0, droppedFrames: 0 });
+    now.mockReturnValue(1000);
+    statsHandler({ speed: 128, decodedFrames: 15, droppedFrames: 0 });
+
+    expect(onStats).toHaveBeenLastCalledWith(expect.objectContaining({ fps: 15 }));
+    now.mockRestore();
+  });
+
+  it('keeps fps undefined until two decoded frame samples exist', async () => {
+    const onStats = vi.fn();
+    renderWithProviders(<LiveVideoPlayer streamType="main" onStats={onStats} />);
+    await waitFor(() => expect(mockPlayer.on).toHaveBeenCalled());
+
+    const statsHandler = mockPlayer.on.mock.calls.find((c) => c[0] === 'statistics_info')?.[1];
+    statsHandler({ speed: 128, decodedFrames: 0, droppedFrames: 0 });
+
+    expect(onStats).toHaveBeenLastCalledWith(
+      expect.not.objectContaining({ fps: expect.anything() }),
     );
   });
 

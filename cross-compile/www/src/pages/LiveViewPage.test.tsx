@@ -219,7 +219,25 @@ describe('LiveViewPage', () => {
     mediaHandler({ width: 1280, height: 720, fps: 25, videoCodec: 'avc1.4d001f' });
 
     expect(await screen.findByTestId('liveview-resolution-value')).toHaveTextContent('1280x720');
-    expect(screen.getByTestId('liveview-framerate-value')).toHaveTextContent('25 fps');
+    expect(screen.getByTestId('liveview-codec-value')).toHaveTextContent('H.264 Main@L3.1');
+  });
+
+  it('shows the measured frame rate from decoded frame deltas', async () => {
+    renderWithProviders(<LiveViewPage />);
+    await screen.findByTestId('liveview-video');
+
+    const now = vi.spyOn(performance, 'now');
+    const statsHandler = mockPlayer.on.mock.calls.find((c) => c[0] === 'statistics_info')?.[1];
+
+    now.mockReturnValue(0);
+    statsHandler({ speed: 128, decodedFrames: 0, droppedFrames: 0 });
+    now.mockReturnValue(1000);
+    statsHandler({ speed: 128, decodedFrames: 15, droppedFrames: 0 });
+
+    await waitFor(() =>
+      expect(screen.getByTestId('liveview-framerate-value')).toHaveTextContent('15 fps'),
+    );
+    now.mockRestore();
   });
 
   it('shows a placeholder rather than a fake number before stats arrive', async () => {

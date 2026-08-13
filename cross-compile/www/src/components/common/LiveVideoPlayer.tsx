@@ -11,6 +11,7 @@ import React, { useEffect, useRef } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { cn } from '@/lib/utils';
 import { type StreamType, buildFlvUrl } from '@/utils/streamUrl';
+import { formatVideoCodec } from '@/utils/videoCodec';
 
 export type PlayerState = 'connecting' | 'playing' | 'stalled' | 'error';
 
@@ -48,12 +49,16 @@ export function LiveVideoPlayer({
     latest.current = { onStateChange, onStats, getBasicAuthHeader };
   });
 
+  // Last decoded-frame sample for measuring real fps (per-stream, reset below).
+  const fpsSample = useRef<{ frames: number; at: number } | undefined>(undefined);
+
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
 
     let cancelled = false;
     let player: { destroy: () => void } | null = null;
+    fpsSample.current = undefined;
 
     latest.current.onStateChange?.('connecting');
 
@@ -88,14 +93,34 @@ export function LiveVideoPlayer({
         player = instance;
 
         // mpegts.js ships its own types (d.ts/mpegts.d.ts), so these payloads
-        // arrive typed — no casts needed.
-        instance.on(mpegts.Events.MEDIA_INFO, ({ width, height, fps, videoCodec }) => {
-          latest.current.onStats?.({ width, height, fps, videoCodec });
+        // arrive typed — no casts needed. MEDIA_INFO.fps is a guess from the
+        // SPS VUI/default (23.976 when absent), so we ignore it and derive the
+        // real frame rate from decodedFrames deltas in STATISTICS_INFO.
+        instance.on(mpegts.Events.MEDIA_INFO, ({ width, height, videoCodec }) => {
+          latest.current.onStats?.({
+            width,
+            height,
+            videoCodec: formatVideoCodec(videoCodec),
+          });
         });
 
-        instance.on(mpegts.Events.STATISTICS_INFO, ({ speed, droppedFrames }) => {
+        instance.on(mpegts.Events.STATISTICS_INFO, ({ speed, droppedFrames, decodedFrames }) => {
           // speed is KB/s; the UI shows Kbps.
-          latest.current.onStats?.({ bitrateKbps: Math.round((speed ?? 0) * 8), droppedFrames });
+          let fps: number | undefined;
+          if (decodedFrames !== undefined) {
+            const now = performance.now();
+            const prev = fpsSample.current;
+            if (prev && now > prev.at) {
+              const measured = ((decodedFrames - prev.frames) / ((now - prev.at) / 1000)) | 0;
+              if (measured > 0) fps = measured;
+            }
+            fpsSample.current = { frames: decodedFrames, at: now };
+          }
+          latest.current.onStats?.({
+            bitrateKbps: Math.round((speed ?? 0) * 8),
+            droppedFrames,
+            ...(fps !== undefined ? { fps } : {}),
+          });
         });
 
         instance.on(mpegts.Events.ERROR, (type, detail, info) => {
