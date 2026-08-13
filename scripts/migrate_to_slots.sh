@@ -58,6 +58,13 @@ while [[ $# -gt 0 ]]; do
 done
 
 [[ -n "${HOST}" ]] || { log_error "--host is required"; exit 1; }
+# NC_PORT is spliced into a shell command that runs on the camera (push_file);
+# reject anything that is not a plain decimal port so a crafted value cannot
+# terminate the `nc` command and run further commands on the device.
+if ! [[ "${NC_PORT}" =~ ^[1-9][0-9]{0,4}$ ]] || (( 10#"${NC_PORT}" > 65535 )); then
+  log_error "--nc-port must be an integer from 1 through 65535"
+  exit 1
+fi
 
 CAM_ARGS=(--host "${HOST}")
 [[ -n "${PORT}" ]] || PORT=""
@@ -146,10 +153,13 @@ log_success "flat anyka-init camera, not yet migrated"
 # ── 2. Config schema ─────────────────────────────────────────────────────────
 # The applier compares the bundle's requires_config_schema against the device's
 # top-level `schema` key, which defaults to 0 when absent — so without this the
-# bundle is rejected as "needs 1, has 0". Edited in place with sed rather than
-# by pushing a whole file: anyka.toml holds the live wifi PSK, and a bad push
-# means Config::load fails, which parks the supervisor with no wifi and no
-# deadman.
+# bundle is rejected as "needs 1, has 0". Comparing the numeric value, not just
+# key presence, also catches the case where the key exists but is lower than the
+# bundle requires (e.g. schema = 0 with a schema-1 bundle), which previously
+# skipped the update and let the trial self-revert. Edited in place with sed
+# rather than by pushing a whole file: anyka.toml holds the live wifi PSK, and a
+# bad push means Config::load fails, which parks the supervisor with no wifi and
+# no deadman.
 log_step "2/8 device config (schema + static_root)"
 
 CFG_LOCAL="$(mktemp)"; trap 'rm -f "${CFG_LOCAL}" "${CFG_LOCAL}.after"' EXIT
@@ -165,24 +175,34 @@ if [[ ! -x "${CHECKER}" ]]; then
            --target x86_64-unknown-linux-gnu >/dev/null 2>&1 )
 fi
 
-if grep -q '^schema[[:space:]]*=' "${CFG_LOCAL}"; then
-  log_info "schema key already present: $(grep -m1 '^schema' "${CFG_LOCAL}")"
+TARGET_SCHEMA="${BUNDLE_SCHEMA:-1}"
+current_schema="$(sed -n 's/^schema[[:space:]]*=[[:space:]]*\([0-9][0-9]*\).*/\1/p' "${CFG_LOCAL}" | head -1)"
+if [[ -n "${current_schema}" ]] && (( 10#"${current_schema}" >= 10#"${TARGET_SCHEMA}" )); then
+  log_info "schema already at or above required: schema = ${current_schema} (need ${TARGET_SCHEMA})"
 else
+  if [[ -n "${current_schema}" ]]; then
+    log_info "schema ${current_schema} below required ${TARGET_SCHEMA}; rewriting the value"
+    sed "s/^schema[[:space:]]*=.*/schema = ${TARGET_SCHEMA}/" "${CFG_LOCAL}" > "${CFG_LOCAL}.after"
+    edit_expr="s/^schema[[:space:]]*=.*/schema = ${TARGET_SCHEMA}/"
+  else
+    log_info "no schema key; prepending schema = ${TARGET_SCHEMA}"
+    { echo "schema = ${TARGET_SCHEMA}"; cat "${CFG_LOCAL}"; } > "${CFG_LOCAL}.after"
+    edit_expr="1i schema = ${TARGET_SCHEMA}"
+  fi
   # Validate the intended result before writing anything to the device.
-  { echo "schema = ${BUNDLE_SCHEMA:-1}"; cat "${CFG_LOCAL}"; } > "${CFG_LOCAL}.after"
   "${CHECKER}" "${CFG_LOCAL}.after" \
-    || { log_error "device anyka.toml + schema key does not parse; refusing"; exit 1; }
+    || { log_error "device anyka.toml + schema change does not parse; refusing"; exit 1; }
   log_success "post-edit config parses with the new supervisor's parser"
 
-  run "sed -i '1i schema = ${BUNDLE_SCHEMA:-1}' '${ROOT}/anyka.toml'" >/dev/null
+  run "sed -i '${edit_expr}' '${ROOT}/anyka.toml'" >/dev/null
   if [[ "${DRY_RUN}" = false ]]; then
     cam "cat '${ROOT}/anyka.toml'" > "${CFG_LOCAL}.after"
     "${CHECKER}" "${CFG_LOCAL}.after" \
       || { log_error "anyka.toml no longer parses after the edit! restore it by hand"; exit 1; }
-    added="$(diff <(cat "${CFG_LOCAL}") "${CFG_LOCAL}.after" | grep -c '^>' || true)"
-    [[ "${added}" = "1" ]] \
-      || { log_error "expected exactly 1 added line, saw ${added}"; exit 1; }
-    log_success "schema = ${BUNDLE_SCHEMA:-1} added, config still parses, 1 line changed"
+    got_schema="$(sed -n 's/^schema[[:space:]]*=[[:space:]]*\([0-9][0-9]*\).*/\1/p' "${CFG_LOCAL}.after" | head -1)"
+    [[ -n "${got_schema}" ]] \
+      || { log_error "schema key missing after the edit! restore it by hand"; exit 1; }
+    log_success "schema = ${got_schema} in place, config still parses"
   fi
 fi
 
@@ -208,9 +228,12 @@ else
 fi
 
 # ── 3. Layout ────────────────────────────────────────────────────────────────
+# slots/b is not created here: it arrives only via the verified staging dir
+# promotion below, so a partial run never leaves a half-populated slot b that a
+# re-run would have to delete.
 log_step "3/8 create the slot layout"
-run "mkdir -p '${ROOT}/slots/a' '${ROOT}/slots/b' '${ROOT}/state' '${ROOT}/spool'" >/dev/null
-log_success "slots/{a,b}, state/, spool/ present"
+run "mkdir -p '${ROOT}/slots/a' '${ROOT}/state' '${ROOT}/spool'" >/dev/null
+log_success "slots/a, state/, spool/ present"
 
 # ── 4. Rollback slot ─────────────────────────────────────────────────────────
 # ponytail: slot a gets only anyka-init.bin, not the whole payload. The current
@@ -233,7 +256,10 @@ log_success "slots/a holds the current supervisor as the rollback target"
 # ── 5. Stage the new bundle ──────────────────────────────────────────────────
 log_step "5/8 stage the bundle into slots/b"
 push_file "${BUNDLE}" "${ROOT}/spool/bundle.tar"
-run "rm -rf '${ROOT}/slots/b.staging' && mkdir -p '${ROOT}/slots/b.staging' && busybox tar -xf '${ROOT}/spool/bundle.tar' -C '${ROOT}/slots/b.staging' && sync && echo untarred" >/dev/null
+# mkdir without -p fails on an existing staging dir: a stale b.staging from a
+# crashed earlier run must block rather than be deleted, so the operator
+# decides what to do with it.
+run "mkdir '${ROOT}/slots/b.staging' && busybox tar -xf '${ROOT}/spool/bundle.tar' -C '${ROOT}/slots/b.staging' && sync && echo untarred" >/dev/null
 
 if [[ "${DRY_RUN}" = false ]]; then
   # The bundle's own manifest is the transfer check: it covers every file and
@@ -248,7 +274,7 @@ if [[ "${DRY_RUN}" = false ]]; then
   log_success "all $(cam "grep -c ': OK$' /tmp/sha.log" | tr -d '[:space:]') files match the manifest"
 fi
 
-run "rm -rf '${ROOT}/slots/b' && mv '${ROOT}/slots/b.staging' '${ROOT}/slots/b' && sync && echo promoted" >/dev/null
+run "mv '${ROOT}/slots/b.staging' '${ROOT}/slots/b' && sync && echo promoted" >/dev/null
 run "rm -f '${ROOT}/spool/bundle.tar' '${ROOT}/spool/bundle.trigger'" >/dev/null
 log_success "slots/b holds bundle ${BUNDLE_VERSION}"
 

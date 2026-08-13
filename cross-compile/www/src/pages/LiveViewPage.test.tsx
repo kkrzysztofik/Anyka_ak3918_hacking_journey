@@ -81,6 +81,13 @@ Object.defineProperty(navigator, 'clipboard', {
 describe('LiveViewPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // jsdom resets navigator.clipboard between tests, so (re)install the
+    // module-level mock so the copy test and any later one share the same mock.
+    Object.defineProperty(navigator, 'clipboard', {
+      value: { writeText: mockWriteText },
+      writable: true,
+      configurable: true,
+    });
   });
 
   it('should render page title and description', () => {
@@ -223,19 +230,36 @@ describe('LiveViewPage', () => {
   });
 
   it('shows the stream URL actually in use and copies it', async () => {
-    const writeText = vi.fn().mockResolvedValue(undefined);
-    Object.defineProperty(navigator, 'clipboard', {
-      value: { writeText },
-      configurable: true,
-    });
-
     renderWithProviders(<LiveViewPage />);
     await screen.findByTestId('liveview-video');
 
     expect(screen.getByTestId('liveview-stream-url-value')).toHaveTextContent('/live/main.flv');
 
     fireEvent.click(screen.getByTestId('liveview-copy-url-button'));
-    expect(writeText).toHaveBeenCalledWith(expect.stringContaining('/live/main.flv'));
+    expect(mockWriteText).toHaveBeenCalledWith(expect.stringContaining('/live/main.flv'));
+  });
+
+  it('copies the stream URL over plain HTTP when clipboard is unavailable', async () => {
+    const { toast } = await import('sonner');
+    Object.defineProperty(navigator, 'clipboard', {
+      value: undefined,
+      writable: true,
+      configurable: true,
+    });
+    Object.defineProperty(document, 'execCommand', {
+      value: vi.fn().mockReturnValue(true),
+      writable: true,
+      configurable: true,
+    });
+
+    renderWithProviders(<LiveViewPage />);
+    await screen.findByTestId('liveview-video');
+
+    fireEvent.click(screen.getByTestId('liveview-copy-url-button'));
+
+    await waitFor(() => {
+      expect(toast.success).toHaveBeenCalledWith('Stream URL copied');
+    });
   });
 
   it('updates the stream URL when switching to the sub stream', async () => {
@@ -248,12 +272,13 @@ describe('LiveViewPage', () => {
     expect(screen.getByTestId('liveview-stream-url-value')).toHaveTextContent('/live/sub.flv');
   });
 
-  it('no longer displays unmeasurable packet loss and latency rows', async () => {
+  it('replaces unmeasurable packet loss and latency with dropped frames', async () => {
     renderWithProviders(<LiveViewPage />);
     await screen.findByTestId('liveview-video');
 
-    expect(screen.queryByText('Packet Loss')).not.toBeInTheDocument();
-    expect(screen.queryByText('Latency')).not.toBeInTheDocument();
+    expect(screen.getByTestId('liveview-dropped-frames-value')).toBeInTheDocument();
+    expect(screen.queryByTestId('liveview-packet-loss-value')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('liveview-latency-value')).not.toBeInTheDocument();
   });
 
   it('hides the LIVE indicator until playback actually starts', async () => {

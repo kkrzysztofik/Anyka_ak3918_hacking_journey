@@ -35,6 +35,7 @@ import {
   SettingsCardTitle,
 } from '@/components/ui/settings-card';
 import { cn } from '@/lib/utils';
+import { copyTextToClipboard } from '@/utils/clipboard';
 import { getProfiles } from '@/services/profileService';
 import {
   continuousMove,
@@ -46,7 +47,15 @@ import {
   stopMove,
 } from '@/services/ptzService';
 import type { PTZDirection, PTZPreset } from '@/services/ptzService';
-import { buildFlvUrl } from '@/utils/streamUrl';
+import { type StreamType, buildFlvUrl } from '@/utils/streamUrl';
+
+/** User-facing label for each player state. */
+const STATE_LABEL: Record<PlayerState, string> = {
+  connecting: 'Connecting',
+  playing: 'Connected',
+  stalled: 'Buffering',
+  error: 'Error',
+};
 
 /** States that cover the video with a message. Absent = show the picture. */
 const WAITING_TEXT: Partial<Record<PlayerState, string>> = {
@@ -60,7 +69,7 @@ function stat(value: number | string | undefined, suffix = ''): string {
 }
 
 export default function LiveViewPage() {
-  const [streamType, setStreamType] = useState<'main' | 'sub'>('main');
+  const [streamType, setStreamType] = useState<StreamType>('main');
   const [ptzSpeed, setPtzSpeed] = useState(50);
   const [playerState, setPlayerState] = useState<PlayerState>('connecting');
   const [playerMessage, setPlayerMessage] = useState<string>();
@@ -86,10 +95,13 @@ export default function LiveViewPage() {
   const streamUrl = buildFlvUrl(streamType);
 
   const handleCopyUrl = useCallback(() => {
-    void navigator.clipboard.writeText(streamUrl).then(
-      () => toast.success('Stream URL copied'),
-      () => toast.error('Could not copy the stream URL'),
-    );
+    void copyTextToClipboard(streamUrl).then((ok) => {
+      if (ok) {
+        toast.success('Stream URL copied');
+      } else {
+        toast.error('Could not copy the stream URL');
+      }
+    });
   }, [streamUrl]);
   const queryClient = useQueryClient();
 
@@ -285,9 +297,11 @@ export default function LiveViewPage() {
                   </button>
                 </fieldset>
                 <div
+                  role="status"
+                  aria-live="polite"
                   className={playerState === 'playing' ? 'status-badge-connected' : 'text-zinc-400'}
                 >
-                  {playerState}
+                  {STATE_LABEL[playerState]}
                 </div>
               </div>
             </div>
@@ -436,6 +450,8 @@ export default function LiveViewPage() {
                 <div className="grid grid-cols-2 gap-y-3 text-sm">
                   <span className="text-muted-foreground">Status</span>
                   <span
+                    role="status"
+                    aria-live="polite"
                     className={cn(
                       'flex items-center justify-end gap-1.5 text-right font-medium',
                       playerState === 'playing' ? 'text-green-500' : 'text-zinc-400',
@@ -447,7 +463,7 @@ export default function LiveViewPage() {
                         playerState === 'playing' ? 'status-pulse bg-green-500' : 'bg-zinc-500',
                       )}
                     />
-                    {playerState}
+                    {STATE_LABEL[playerState]}
                   </span>
                   <span className="text-muted-foreground">Bandwidth</span>
                   <span className="text-foreground text-right font-mono">

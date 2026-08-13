@@ -100,8 +100,13 @@ export default defineConfig(() => ({
       // WebUI is served from 80, so this entry rewrites the port for dev only.
       // NOSONAR: S5332, S4830 - HTTP and secure:false are required for embedded camera devices
       '/live': {
-        target: (process.env.VITE_API_TARGET || 'http://192.168.2.198:80') // NOSONAR
-          .replace(/:\d+$/, ':8080'),
+        // URL parsing beats string replacement: it also normalizes targets
+        // with no explicit port or a trailing slash.
+        target: (() => {
+          const url = new URL(process.env.VITE_API_TARGET || 'http://192.168.2.198:80'); // NOSONAR
+          url.port = '8080';
+          return url.toString();
+        })(),
         changeOrigin: true,
         secure: false, // NOSONAR
       },

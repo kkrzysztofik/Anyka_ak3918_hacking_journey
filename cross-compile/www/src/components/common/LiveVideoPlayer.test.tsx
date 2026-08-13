@@ -112,11 +112,26 @@ describe('LiveVideoPlayer', () => {
     await waitFor(() => expect(mockPlayer.on).toHaveBeenCalled());
 
     const errorHandler = mockPlayer.on.mock.calls.find((c) => c[0] === 'error')?.[1];
-    errorHandler('NetworkError', 'Unexpected status 401');
+    errorHandler('NetworkError', 'HttpStatusCodeInvalid', { code: 401 });
 
     expect(onStateChange).toHaveBeenCalledWith(
       'error',
       'The camera rejected these credentials for the video stream.',
+    );
+  });
+
+  it('surfaces a setup failure as an error state instead of an unhandled rejection', async () => {
+    const onStateChange = vi.fn();
+    createPlayer.mockImplementationOnce(() => {
+      throw new Error('player construction failed');
+    });
+    renderWithProviders(<LiveVideoPlayer streamType="main" onStateChange={onStateChange} />);
+
+    await waitFor(() =>
+      expect(onStateChange).toHaveBeenCalledWith(
+        'error',
+        expect.stringContaining('player construction failed'),
+      ),
     );
   });
 

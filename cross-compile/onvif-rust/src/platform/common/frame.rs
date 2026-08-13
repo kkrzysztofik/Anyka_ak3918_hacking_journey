@@ -12,6 +12,8 @@
 //! ```
 
 use bytes::BytesMut;
+#[cfg(test)]
+use mockall::automock;
 
 /// Unique identifier for a registered callback.
 pub type CallbackId = u64;
@@ -106,6 +108,7 @@ pub trait OwnedFrameCallback: Send + Sync {
 /// A named trait rather than `Arc<dyn Fn(bool)>` because `Platform` is
 /// `#[automock]`ed and mockall cannot mock `Fn` objects (mockall#139). Same
 /// shape as `OwnedFrameCallback` above, for the same reason.
+#[cfg_attr(test, automock)]
 pub trait IdrRequester: Send + Sync {
     /// Request an IDR on the main stream when `is_main`, else the sub stream.
     ///

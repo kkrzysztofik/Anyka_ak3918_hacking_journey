@@ -51,6 +51,10 @@ pub struct LiveStreamHandler {
     bridge: Arc<StreamingBridge>,
     /// Video frame rate for SDP `a=framerate` attribute.
     video_framerate: u32,
+    /// Coalesces IDR requests: set while an IDR is outstanding and cleared when
+    /// both parameter sets are cached, so DESCRIBE polling cannot force an IDR
+    /// on every retry while the encoder is recovering.
+    idr_requested: portable_atomic::AtomicBool,
 }
 
 impl LiveStreamHandler {
@@ -60,6 +64,7 @@ impl LiveStreamHandler {
             is_main,
             bridge,
             video_framerate,
+            idr_requested: portable_atomic::AtomicBool::new(false),
         }
     }
 
@@ -219,6 +224,9 @@ impl TStreamHandler for LiveStreamHandler {
         let audio_config = self.bridge.audio_config.read().deref().clone();
 
         if let (Some(sps), Some(pps)) = (sps, pps) {
+            // Parameter sets are cached again: allow a future IDR request if
+            // this stream regresses to missing SPS/PPS later.
+            self.idr_requested.store(false, Ordering::Relaxed);
             let sdp = generate_av_sdp(
                 &sps,
                 &pps,
@@ -249,8 +257,12 @@ impl TStreamHandler for LiveStreamHandler {
             // kick, and if the bridge attached too late to see them no
             // subsequent frame contains NAL 7/8 for the whole process lifetime.
             // DESCRIBE polls (`server_session.rs:859`), so the retry that picks
-            // the new SDP up already exists and needs no second knob.
-            if let Some(requester) = self.bridge.idr_requester.read().deref() {
+            // the new SDP up already exists and needs no second knob. Coalesced
+            // via `idr_requested`: only one IDR is asked for until SPS/PPS
+            // actually appear, otherwise every poll re-kicks the encoder.
+            if !self.idr_requested.swap(true, Ordering::Relaxed)
+                && let Some(requester) = self.bridge.idr_requester.read().deref()
+            {
                 requester.request_idr(self.is_main);
             }
         }
@@ -699,6 +711,7 @@ impl StreamingService {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::platform::MockIdrRequester;
 
     /// Helper: create a bridge and handler targeting the main stream.
     fn make_main_handler() -> (Arc<StreamingBridge>, LiveStreamHandler) {
@@ -718,40 +731,51 @@ mod tests {
         (bridge, handler)
     }
 
-    /// Records every `is_main` an IDR was requested for.
-    struct RecordingIdrRequester {
-        calls: Arc<std::sync::Mutex<Vec<bool>>>,
-    }
-
-    impl crate::platform::frame::IdrRequester for RecordingIdrRequester {
-        fn request_idr(&self, is_main: bool) {
-            self.calls.lock().unwrap().push(is_main);
-        }
-    }
-
-    /// Install a recorder on `bridge` and hand back what it records.
-    fn recording_idr_requester(bridge: &StreamingBridge) -> Arc<std::sync::Mutex<Vec<bool>>> {
-        let calls = Arc::new(std::sync::Mutex::new(Vec::new()));
-        *bridge.idr_requester.write() = Some(Arc::new(RecordingIdrRequester {
-            calls: Arc::clone(&calls),
-        }));
-        calls
+    /// Install a mock `IdrRequester` on `bridge` expecting the given `is_main`
+    /// values, in order, one request each.
+    fn expect_idr_requests(bridge: &StreamingBridge, is_main: bool, count: usize) {
+        let mut requester = MockIdrRequester::new();
+        requester
+            .expect_request_idr()
+            .with(mockall::predicate::eq(is_main))
+            .times(count)
+            .returning(|_| ());
+        *bridge.idr_requester.write() = Some(Arc::new(requester));
     }
 
     #[tokio::test]
     async fn test_send_information_requests_idr_when_parameter_sets_are_missing() {
         let (bridge, handler) = make_main_handler();
-        let calls = recording_idr_requester(&bridge);
+        expect_idr_requests(&bridge, true, 1);
         let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
 
         handler.send_information(tx).await;
+    }
 
-        assert_eq!(
-            *calls.lock().unwrap(),
-            vec![true],
-            "no SDP means the encoder never emitted SPS/PPS; without asking for a \
-             fresh IDR this stream 404s for the life of the process"
-        );
+    #[tokio::test]
+    async fn test_send_information_requests_sub_stream_idr_when_parameter_sets_are_missing() {
+        let bridge = Arc::new(StreamingBridge::new(
+            LowLatencyFrameQueue::new("test-main", 8),
+            LowLatencyFrameQueue::new("test-sub", 8),
+            48_000,
+        ));
+        *bridge.sub_stream.sps.write() = None;
+        *bridge.sub_stream.pps.write() = None;
+        let handler = LiveStreamHandler::new(false, Arc::clone(&bridge), 15);
+        expect_idr_requests(&bridge, false, 1);
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+
+        handler.send_information(tx).await;
+    }
+
+    #[tokio::test]
+    async fn test_send_information_requests_idr_only_once_while_parameter_sets_missing() {
+        let (bridge, handler) = make_main_handler();
+        expect_idr_requests(&bridge, true, 1);
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+
+        handler.send_information(tx.clone()).await;
+        handler.send_information(tx).await;
     }
 
     #[tokio::test]
@@ -759,15 +783,11 @@ mod tests {
         let (bridge, handler) = make_main_handler();
         *bridge.main_stream.sps.write() = Some(vec![0x67, 0x42, 0x00, 0x1e]);
         *bridge.main_stream.pps.write() = Some(vec![0x68, 0xce, 0x06, 0xe2]);
-        let calls = recording_idr_requester(&bridge);
+        expect_idr_requests(&bridge, true, 0);
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
 
         handler.send_information(tx).await;
 
-        assert!(
-            calls.lock().unwrap().is_empty(),
-            "a describable stream must not cost the encoder an extra IDR"
-        );
         assert!(
             matches!(rx.try_recv(), Ok(Information::Sdp { .. })),
             "an SDP must still be sent when SPS/PPS are cached"

@@ -81,8 +81,13 @@ other three which target port 80:
       // WebUI is served from 80, so this entry rewrites the port for dev only.
       // NOSONAR: S5332, S4830 - HTTP and secure:false are required for embedded camera devices
       '/live': {
-        target: (process.env.VITE_API_TARGET || 'http://192.168.2.198:80') // NOSONAR
-          .replace(/:\d+$/, ':8080'),
+        // URL parsing beats string replacement: it also normalizes targets
+        // with no explicit port or a trailing slash.
+        target: (() => {
+          const url = new URL(process.env.VITE_API_TARGET || 'http://192.168.2.198:80'); // NOSONAR
+          url.port = '8080';
+          return url.toString();
+        })(),
         changeOrigin: true,
         secure: false, // NOSONAR
       },
@@ -416,51 +421,62 @@ export function LiveVideoPlayer({
     latest.current.onStateChange?.('connecting');
 
     void (async () => {
-      const [{ default: mpegts }, authHeader] = await Promise.all([
-        import('mpegts.js'),
-        latest.current.getBasicAuthHeader(),
-      ]);
-      if (cancelled) return;
+      try {
+        const [{ default: mpegts }, authHeader] = await Promise.all([
+          import('mpegts.js'),
+          latest.current.getBasicAuthHeader(),
+        ]);
+        if (cancelled) return;
 
-      if (!mpegts.isSupported()) {
+        if (!mpegts.isSupported()) {
+          latest.current.onStateChange?.(
+            'error',
+            'This browser cannot play the stream (Media Source Extensions unavailable).',
+          );
+          return;
+        }
+
+        const instance = mpegts.createPlayer(
+          { type: 'flv', isLive: true, url: buildFlvUrl(streamType) },
+          {
+            // Hand frames to MSE immediately rather than accumulating them first.
+            enableStashBuffer: false,
+            // Deliberately off: this accelerates playback to burn off buffer, the
+            // same class of catch-up mechanism as the push.c stall ratchet that
+            // caused the VLC late-pictures bug and was removed 2026-08-06.
+            liveBufferLatencyChasing: false,
+            ...(authHeader ? { headers: { Authorization: authHeader } } : {}),
+          },
+        );
+        player = instance;
+
+        // mpegts.js ships its own types (d.ts/mpegts.d.ts), so these payloads
+        // arrive typed — no casts needed.
+        instance.on(mpegts.Events.MEDIA_INFO, ({ width, height, fps, videoCodec }) => {
+          latest.current.onStats?.({ width, height, fps, videoCodec });
+        });
+
+        instance.on(mpegts.Events.STATISTICS_INFO, ({ speed, droppedFrames }) => {
+          // speed is KB/s; the UI shows Kbps.
+          latest.current.onStats?.({ bitrateKbps: Math.round((speed ?? 0) * 8), droppedFrames });
+        });
+
+        instance.on(mpegts.Events.ERROR, (type, detail, info) => {
+          latest.current.onStateChange?.('error', describeError(type, detail, info));
+        });
+
+        instance.attachMediaElement(video);
+        instance.load();
+      } catch (err) {
+        // The dynamic import, auth lookup, or player construction can reject;
+        // surface those as an error state instead of an unhandled rejection
+        // that leaves the page stuck on "connecting" with no retry affordance.
+        if (cancelled) return;
         latest.current.onStateChange?.(
           'error',
-          'This browser cannot play the stream (Media Source Extensions unavailable).',
+          err instanceof Error ? err.message : 'Could not start the video stream.',
         );
-        return;
       }
-
-      const instance = mpegts.createPlayer(
-        { type: 'flv', isLive: true, url: buildFlvUrl(streamType) },
-        {
-          // Hand frames to MSE immediately rather than accumulating them first.
-          enableStashBuffer: false,
-          // Deliberately off: this accelerates playback to burn off buffer, the
-          // same class of catch-up mechanism as the push.c stall ratchet that
-          // caused the VLC late-pictures bug and was removed 2026-08-06.
-          liveBufferLatencyChasing: false,
-          ...(authHeader ? { headers: { Authorization: authHeader } } : {}),
-        },
-      );
-      player = instance;
-
-      // mpegts.js ships its own types (d.ts/mpegts.d.ts), so these payloads
-      // arrive typed — no casts needed.
-      instance.on(mpegts.Events.MEDIA_INFO, ({ width, height, fps, videoCodec }) => {
-        latest.current.onStats?.({ width, height, fps, videoCodec });
-      });
-
-      instance.on(mpegts.Events.STATISTICS_INFO, ({ speed, droppedFrames }) => {
-        // speed is KB/s; the UI shows Kbps.
-        latest.current.onStats?.({ bitrateKbps: Math.round((speed ?? 0) * 8), droppedFrames });
-      });
-
-      instance.on(mpegts.Events.ERROR, (type, detail) => {
-        latest.current.onStateChange?.('error', describeError(type, detail));
-      });
-
-      instance.attachMediaElement(video);
-      instance.load();
     })();
 
     return () => {
@@ -688,12 +704,13 @@ shipping nothing.
     expect(screen.getByTestId('liveview-resolution-value')).toHaveTextContent('—');
   });
 
-  it('no longer displays unmeasurable packet loss and latency rows', async () => {
+  it('replaces unmeasurable packet loss and latency with dropped frames', async () => {
     renderWithProviders(<LiveViewPage />);
     await screen.findByTestId('liveview-video');
 
-    expect(screen.queryByText('Packet Loss')).not.toBeInTheDocument();
-    expect(screen.queryByText('Latency')).not.toBeInTheDocument();
+    expect(screen.getByTestId('liveview-dropped-frames-value')).toBeInTheDocument();
+    expect(screen.queryByTestId('liveview-packet-loss-value')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('liveview-latency-value')).not.toBeInTheDocument();
   });
 ```
 
@@ -793,6 +810,11 @@ Expected: FAIL — the URL still reads `rtsp://192.168.1.100:554/main`.
   const streamUrl = buildFlvUrl(streamType);
 
   const handleCopyUrl = useCallback(() => {
+    // Over plain HTTP the Clipboard API may be unavailable entirely.
+    if (!navigator.clipboard?.writeText) {
+      toast.error('Could not copy the stream URL');
+      return;
+    }
     void navigator.clipboard.writeText(streamUrl).then(
       () => toast.success('Stream URL copied'),
       () => toast.error('Could not copy the stream URL'),

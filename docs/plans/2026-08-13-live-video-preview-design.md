@@ -108,9 +108,9 @@ credential storage.
 One new file, `components/common/LiveVideoPlayer.tsx`, plus edits to
 `LiveViewPage.tsx`. The player owns the `<video>` ref and the mpegts.js
 lifecycle (`createPlayer` → `attachMediaElement` → `load`, and `destroy()` on
-unmount and on stream switch), reporting upward through a single `onStatus`
-callback. `mpegts.js` is pulled in with a dynamic `import()` so it stays in the
-lazy chunk.
+unmount and on stream switch), reporting upward through separate `onStateChange`
+and `onStats` callbacks. `mpegts.js` is pulled in with a dynamic `import()` so it
+stays in the lazy chunk.
 
 ### Player configuration
 
@@ -148,11 +148,12 @@ that actually diagnose stalls.
 
 ## Error handling
 
-State machine: `idle → connecting → playing → (stalled | error)`, driven by
-mpegts.js `ERROR` events plus the `<video>` element's `waiting` and `playing`
-events. The error state renders a human-readable reason and a Retry button. A
-401 is surfaced distinctly as rejected credentials, since that is the
-`users.toml` failure mode recorded in `missing-users-toml-kills-streaming`.
+State machine: `connecting → playing → (stalled | error)`, driven by mpegts.js
+`ERROR` events plus the `<video>` element's `waiting` and `playing` events. The
+error state renders a human-readable reason and a Retry button. A 401 is
+surfaced distinctly as rejected credentials, since that is the `users.toml`
+failure mode recorded in `missing-users-toml-kills-streaming`. (There is no
+`idle` state; the page initializes straight to `connecting`.)
 
 ## Testing
 
