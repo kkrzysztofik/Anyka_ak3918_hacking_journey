@@ -133,6 +133,9 @@ impl HttpFlv {
                 self.has_video = true;
                 header_state.cached_frames.push(data);
             }
+            FrameData::MetaData { .. } => {
+                header_state.cached_frames.push(data);
+            }
             _ => {}
         }
 
@@ -191,6 +194,7 @@ impl HttpFlv {
                 self.send_video_statistics(&data);
                 (data, timestamp, tag_type::VIDEO)
             }
+            FrameData::MetaData { timestamp, data } => (data, timestamp, tag_type::SCRIPT_DATA_AMF),
             other => {
                 return Err(HttpFLvError {
                     value: HttpFLvErrorValue::UnexpectedFrameData(format!("{other:?}")),
@@ -1159,8 +1163,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_write_flv_tag_metadata_rejected() {
-        let (event_sender, _event_receiver, response_sender, _response_receiver) =
+    async fn test_write_flv_tag_metadata_writes_script_tag() {
+        let (event_sender, _event_receiver, response_sender, mut response_receiver) =
             create_test_channels();
         let remote_addr = create_test_socket_addr();
 
@@ -1174,18 +1178,26 @@ mod tests {
         );
 
         let mut meta = BytesMut::new();
-        meta.extend_from_slice(b"@setDataFrame");
+        meta.extend_from_slice(&[0x02, 0x00, 0x0a]);
         meta.extend_from_slice(b"onMetaData");
         let frame = FrameData::MetaData {
             timestamp: 0,
             data: meta,
         };
         let result = httpflv.write_flv_tag(frame);
-        assert!(result.is_err(), "MetaData frames should be rejected");
-        match result.unwrap_err().value {
-            HttpFLvErrorValue::UnexpectedFrameData(_) => {}
-            other => panic!("Expected UnexpectedFrameData, got: {other:?}"),
-        }
+        assert!(
+            result.is_ok(),
+            "MetaData frame should be writable as an FLV script tag"
+        );
+
+        let chunk = response_receiver.next().await.expect("response chunk");
+        let bytes = chunk.expect("chunk is Ok");
+        assert_eq!(
+            bytes[0],
+            tag_type::SCRIPT_DATA_AMF,
+            "tag type byte must be 18"
+        );
+        assert_eq!(bytes[11], 0x02, "body must start with AMF string type");
     }
 
     #[tokio::test]
