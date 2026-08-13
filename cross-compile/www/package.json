@@ -36,6 +36,7 @@
     "clsx": "^2.1.1",
     "fast-xml-parser": "^5.10.1",
     "lucide-react": "^1.30.0",
+    "mpegts.js": "^1.8.1",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "react-hook-form": "^7.85.0",

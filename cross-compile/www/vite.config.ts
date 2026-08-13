@@ -93,6 +93,15 @@ export default defineConfig(() => ({
         changeOrigin: true,
         secure: false, // NOSONAR
       },
+      // Proxy HTTP-FLV live streams. The FLV server listens on 8080 while the
+      // WebUI is served from 80, so this entry rewrites the port for dev only.
+      // NOSONAR: S5332, S4830 - HTTP and secure:false are required for embedded camera devices
+      '/live': {
+        target: (process.env.VITE_API_TARGET || 'http://192.168.2.198:80') // NOSONAR
+          .replace(/:\d+$/, ':8080'),
+        changeOrigin: true,
+        secure: false, // NOSONAR
+      },
     },
   },
   build: {
