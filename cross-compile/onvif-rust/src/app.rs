@@ -1340,6 +1340,18 @@ impl Application {
             Ok(bridge) => {
                 // Register the bridge as an owned frame callback with the platform (zero-copy path).
                 if let Some(platform) = app_state.platform() {
+                    // Give the bridge a way to ask for an IDR before handing it
+                    // over: the callback registration below is what starts
+                    // caching SPS/PPS, and it may already have missed the only
+                    // parameter sets the encoder emits on its own.
+                    if let Some(request_idr) = platform.idr_requester() {
+                        *bridge.idr_requester.write() = Some(request_idr);
+                    } else {
+                        tracing::warn!(
+                            "platform exposes no IDR request; a stream that misses SPS/PPS \
+                             cannot be recovered without a restart"
+                        );
+                    }
                     match platform.register_owned_frame_callback(bridge) {
                         Ok(()) => {
                             tracing::info!(

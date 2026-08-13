@@ -101,6 +101,20 @@ pub trait OwnedFrameCallback: Send + Sync {
     fn on_owned_frame(&self, frame: OwnedFrame);
 }
 
+/// Asks the encoder to emit an IDR frame on demand.
+///
+/// A named trait rather than `Arc<dyn Fn(bool)>` because `Platform` is
+/// `#[automock]`ed and mockall cannot mock `Fn` objects (mockall#139). Same
+/// shape as `OwnedFrameCallback` above, for the same reason.
+pub trait IdrRequester: Send + Sync {
+    /// Request an IDR on the main stream when `is_main`, else the sub stream.
+    ///
+    /// Infallible by design: the caller is a stream that is already
+    /// undescribable, and there is nothing further it could do with an error.
+    /// Implementations log their own failures.
+    fn request_idr(&self, is_main: bool);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

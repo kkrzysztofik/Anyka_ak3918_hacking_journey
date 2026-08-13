@@ -243,6 +243,16 @@ impl TStreamHandler for LiveStreamHandler {
                 has_pps,
                 "Cannot generate SDP: SPS/PPS missing"
             );
+            // Ask the encoder to emit a fresh IDR, which carries SPS/PPS with
+            // it. Without this the cache can never fill: the only parameter
+            // sets the vendor encoder emits are the ones around the startup IDR
+            // kick, and if the bridge attached too late to see them no
+            // subsequent frame contains NAL 7/8 for the whole process lifetime.
+            // DESCRIBE polls (`server_session.rs:859`), so the retry that picks
+            // the new SDP up already exists and needs no second knob.
+            if let Some(requester) = self.bridge.idr_requester.read().deref() {
+                requester.request_idr(self.is_main);
+            }
         }
     }
 }
@@ -706,6 +716,62 @@ mod tests {
         *bridge.sub_stream.bootstrap_idr.write() = None;
         let handler = LiveStreamHandler::new(true, Arc::clone(&bridge), 15);
         (bridge, handler)
+    }
+
+    /// Records every `is_main` an IDR was requested for.
+    struct RecordingIdrRequester {
+        calls: Arc<std::sync::Mutex<Vec<bool>>>,
+    }
+
+    impl crate::platform::frame::IdrRequester for RecordingIdrRequester {
+        fn request_idr(&self, is_main: bool) {
+            self.calls.lock().unwrap().push(is_main);
+        }
+    }
+
+    /// Install a recorder on `bridge` and hand back what it records.
+    fn recording_idr_requester(bridge: &StreamingBridge) -> Arc<std::sync::Mutex<Vec<bool>>> {
+        let calls = Arc::new(std::sync::Mutex::new(Vec::new()));
+        *bridge.idr_requester.write() = Some(Arc::new(RecordingIdrRequester {
+            calls: Arc::clone(&calls),
+        }));
+        calls
+    }
+
+    #[tokio::test]
+    async fn test_send_information_requests_idr_when_parameter_sets_are_missing() {
+        let (bridge, handler) = make_main_handler();
+        let calls = recording_idr_requester(&bridge);
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+
+        handler.send_information(tx).await;
+
+        assert_eq!(
+            *calls.lock().unwrap(),
+            vec![true],
+            "no SDP means the encoder never emitted SPS/PPS; without asking for a \
+             fresh IDR this stream 404s for the life of the process"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_send_information_does_not_request_idr_when_parameter_sets_are_cached() {
+        let (bridge, handler) = make_main_handler();
+        *bridge.main_stream.sps.write() = Some(vec![0x67, 0x42, 0x00, 0x1e]);
+        *bridge.main_stream.pps.write() = Some(vec![0x68, 0xce, 0x06, 0xe2]);
+        let calls = recording_idr_requester(&bridge);
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+
+        handler.send_information(tx).await;
+
+        assert!(
+            calls.lock().unwrap().is_empty(),
+            "a describable stream must not cost the encoder an extra IDR"
+        );
+        assert!(
+            matches!(rx.try_recv(), Ok(Information::Sdp { .. })),
+            "an SDP must still be sent when SPS/PPS are cached"
+        );
     }
 
     #[test]

@@ -826,6 +826,16 @@ pub trait Platform: Send + Sync {
             "register_owned_frame_callback".to_string(),
         ))
     }
+
+    /// A handle that asks the encoder for an IDR frame on demand.
+    ///
+    /// Handed to the streaming bridge so it can recover a stream whose SPS/PPS
+    /// were never cached: a fresh IDR carries the parameter sets with it.
+    ///
+    /// Default implementation returns `None` for platforms with no encoder.
+    fn idr_requester(&self) -> Option<Arc<dyn crate::platform::frame::IdrRequester>> {
+        None
+    }
 }
 
 #[cfg(test)]
