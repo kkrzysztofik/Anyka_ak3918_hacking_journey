@@ -119,27 +119,20 @@ prod/dev port split is the single easiest thing to get wrong in this feature.
  */
 import { describe, expect, it } from 'vitest';
 
-import { HTTPFLV_PORT, buildFlvUrl } from './streamUrl';
+import { buildFlvUrl } from './streamUrl';
 
 describe('buildFlvUrl', () => {
-  it('builds an absolute URL on the FLV port in production', () => {
-    expect(buildFlvUrl('main', { isDev: false, hostname: '192.168.2.198' })).toBe(
-      'http://192.168.2.198:8080/live/main.flv',
-    );
-  });
-
-  it('uses the sub stream path when asked', () => {
+  // The point of these two: production must cross to port 8080, development
+  // must not (the Vite proxy does it). Getting that backwards is the whole
+  // reason this function exists.
+  it('crosses to the FLV port in production', () => {
     expect(buildFlvUrl('sub', { isDev: false, hostname: '192.168.2.198' })).toBe(
       'http://192.168.2.198:8080/live/sub.flv',
     );
   });
 
-  it('returns a relative path in development so the Vite proxy handles it', () => {
+  it('stays relative in development so the Vite proxy handles it', () => {
     expect(buildFlvUrl('main', { isDev: true, hostname: 'localhost' })).toBe('/live/main.flv');
-  });
-
-  it('exposes the FLV port so callers need not hardcode it', () => {
-    expect(HTTPFLV_PORT).toBe(8080);
   });
 });
 ```
@@ -163,28 +156,22 @@ Expected: FAIL — cannot resolve `./streamUrl`.
  */
 export type StreamType = 'main' | 'sub';
 
-/** Port the camera's HTTP-FLV server listens on (config.toml: media.httpflv_port). */
-export const HTTPFLV_PORT = 8080;
-
-interface BuildFlvUrlOptions {
-  readonly isDev?: boolean;
-  readonly hostname?: string;
-}
-
-export function buildFlvUrl(streamType: StreamType, options: BuildFlvUrlOptions = {}): string {
-  const { isDev = import.meta.env.DEV, hostname = window.location.hostname } = options;
-
-  if (isDev) {
-    return `/live/${streamType}.flv`;
-  }
-  return `http://${hostname}:${HTTPFLV_PORT}/live/${streamType}.flv`;
+export function buildFlvUrl(
+  streamType: StreamType,
+  { isDev = import.meta.env.DEV, hostname = window.location.hostname } = {},
+): string {
+  // 8080 is config.toml's media.httpflv_port.
+  return isDev ? `/live/${streamType}.flv` : `http://${hostname}:8080/live/${streamType}.flv`;
 }
 ```
+
+The two options exist only so the tests can pin production behaviour without
+stubbing `window.location` and `import.meta.env`. Callers pass neither.
 
 **Step 4: Run test to verify it passes**
 
 Run: `npx vitest run src/utils/streamUrl.test.ts`
-Expected: PASS, 4 tests.
+Expected: PASS, 2 tests.
 
 **Step 5: Commit**
 
@@ -195,7 +182,7 @@ git commit -m "feat(www): add HTTP-FLV stream URL builder"
 
 ---
 
-## Task 3: LiveVideoPlayer — lifecycle
+## Task 3: LiveVideoPlayer — lifecycle, state, and stats
 
 The riskiest part of the feature is leaking a player on unmount or stream
 switch, because each leaked player holds an open HTTP connection to a camera
@@ -308,6 +295,53 @@ describe('LiveVideoPlayer', () => {
     expect(createPlayer).toHaveBeenCalledTimes(1);
     expect(mockPlayer.destroy).not.toHaveBeenCalled();
   });
+
+  it('reports connecting before the player is ready', () => {
+    const onStateChange = vi.fn();
+    renderWithProviders(<LiveVideoPlayer streamType="main" onStateChange={onStateChange} />);
+
+    expect(onStateChange).toHaveBeenCalledWith('connecting');
+  });
+
+  it('surfaces a credentials-specific message on a 401', async () => {
+    const onStateChange = vi.fn();
+    renderWithProviders(<LiveVideoPlayer streamType="main" onStateChange={onStateChange} />);
+    await waitFor(() => expect(mockPlayer.on).toHaveBeenCalled());
+
+    const errorHandler = mockPlayer.on.mock.calls.find((c) => c[0] === 'error')?.[1];
+    errorHandler('NetworkError', 'Unexpected status 401');
+
+    expect(onStateChange).toHaveBeenCalledWith(
+      'error',
+      'The camera rejected these credentials for the video stream.',
+    );
+  });
+
+  it('forwards decoded media info to onStats', async () => {
+    const onStats = vi.fn();
+    renderWithProviders(<LiveVideoPlayer streamType="main" onStats={onStats} />);
+    await waitFor(() => expect(mockPlayer.on).toHaveBeenCalled());
+
+    const mediaHandler = mockPlayer.on.mock.calls.find((c) => c[0] === 'media_info')?.[1];
+    mediaHandler({ width: 1280, height: 720, fps: 25, videoCodec: 'avc1.4d001f' });
+
+    expect(onStats).toHaveBeenCalledWith(
+      expect.objectContaining({ width: 1280, height: 720, fps: 25 }),
+    );
+  });
+
+  it('converts the reported speed from KB/s to Kbps', async () => {
+    const onStats = vi.fn();
+    renderWithProviders(<LiveVideoPlayer streamType="main" onStats={onStats} />);
+    await waitFor(() => expect(mockPlayer.on).toHaveBeenCalled());
+
+    const statsHandler = mockPlayer.on.mock.calls.find((c) => c[0] === 'statistics_info')?.[1];
+    statsHandler({ speed: 128, droppedFrames: 3 });
+
+    expect(onStats).toHaveBeenCalledWith(
+      expect.objectContaining({ bitrateKbps: 1024, droppedFrames: 3 }),
+    );
+  });
 });
 ```
 
@@ -365,15 +399,12 @@ export function LiveVideoPlayer({
   const videoRef = useRef<HTMLVideoElement>(null);
   const { getBasicAuthHeader } = useAuth();
 
-  // Callbacks live in a ref so that a parent re-render with fresh inline
-  // arrow functions does not tear down and rebuild the stream connection.
-  const callbacks = useRef({ onStateChange, onStats });
-  callbacks.current = { onStateChange, onStats };
-
-  // getBasicAuthHeader is a useCallback in AuthProvider, but its identity
-  // changes when credentials change; hold it in a ref for the same reason.
-  const authRef = useRef(getBasicAuthHeader);
-  authRef.current = getBasicAuthHeader;
+  // Everything the effect needs but must not re-run for. Parents pass inline
+  // arrows, and getBasicAuthHeader's identity changes with credentials; if the
+  // effect depended on any of them, each parent render would tear down and
+  // rebuild a live connection to the camera.
+  const latest = useRef({ onStateChange, onStats, getBasicAuthHeader });
+  latest.current = { onStateChange, onStats, getBasicAuthHeader };
 
   useEffect(() => {
     const video = videoRef.current;
@@ -382,17 +413,17 @@ export function LiveVideoPlayer({
     let cancelled = false;
     let player: { destroy: () => void } | null = null;
 
-    callbacks.current.onStateChange?.('connecting');
+    latest.current.onStateChange?.('connecting');
 
     void (async () => {
       const [{ default: mpegts }, authHeader] = await Promise.all([
         import('mpegts.js'),
-        authRef.current(),
+        latest.current.getBasicAuthHeader(),
       ]);
       if (cancelled) return;
 
       if (!mpegts.isSupported()) {
-        callbacks.current.onStateChange?.(
+        latest.current.onStateChange?.(
           'error',
           'This browser cannot play the stream (Media Source Extensions unavailable).',
         );
@@ -413,25 +444,19 @@ export function LiveVideoPlayer({
       );
       player = instance;
 
-      instance.on(mpegts.Events.MEDIA_INFO, (info: Record<string, unknown>) => {
-        callbacks.current.onStats?.({
-          width: info.width as number | undefined,
-          height: info.height as number | undefined,
-          fps: info.fps as number | undefined,
-          videoCodec: info.videoCodec as string | undefined,
-        });
+      // mpegts.js ships its own types (d.ts/mpegts.d.ts), so these payloads
+      // arrive typed — no casts needed.
+      instance.on(mpegts.Events.MEDIA_INFO, ({ width, height, fps, videoCodec }) => {
+        latest.current.onStats?.({ width, height, fps, videoCodec });
       });
 
-      instance.on(mpegts.Events.STATISTICS_INFO, (stats: Record<string, unknown>) => {
-        const speedKBps = (stats.speed as number | undefined) ?? 0;
-        callbacks.current.onStats?.({
-          bitrateKbps: Math.round(speedKBps * 8),
-          droppedFrames: stats.droppedFrames as number | undefined,
-        });
+      instance.on(mpegts.Events.STATISTICS_INFO, ({ speed, droppedFrames }) => {
+        // speed is KB/s; the UI shows Kbps.
+        latest.current.onStats?.({ bitrateKbps: Math.round((speed ?? 0) * 8), droppedFrames });
       });
 
-      instance.on(mpegts.Events.ERROR, (type: string, detail: string) => {
-        callbacks.current.onStateChange?.('error', describeError(type, detail));
+      instance.on(mpegts.Events.ERROR, (type, detail) => {
+        latest.current.onStateChange?.('error', describeError(type, detail));
       });
 
       instance.attachMediaElement(video);
@@ -452,11 +477,9 @@ export function LiveVideoPlayer({
       autoPlay
       muted
       playsInline
-      onPlaying={() => callbacks.current.onStateChange?.('playing')}
-      onWaiting={() => callbacks.current.onStateChange?.('stalled')}
-    >
-      <track kind="captions" />
-    </video>
+      onPlaying={() => latest.current.onStateChange?.('playing')}
+      onWaiting={() => latest.current.onStateChange?.('stalled')}
+    />
   );
 }
 
@@ -472,18 +495,14 @@ function describeError(type: string, detail: string): string {
 }
 ```
 
-Notes for the implementer:
-
-- `autoPlay muted playsInline` uses the browser's own autoplay path rather than
-  calling `.play()` by hand. Muted autoplay is always permitted; unmuted is not.
-  There is likely no audio on this camera anyway.
-- The `<track kind="captions" />` child is there to satisfy the
-  `jsx-a11y/media-has-caption` lint rule. Do not delete it.
+Note: `autoPlay muted playsInline` uses the browser's own autoplay path rather
+than calling `.play()` by hand. Muted autoplay is always permitted; unmuted is
+not. There is likely no audio on this camera anyway.
 
 **Step 4: Run test to verify it passes**
 
 Run: `npx vitest run src/components/common/LiveVideoPlayer.test.tsx`
-Expected: PASS, 6 tests.
+Expected: PASS, 10 tests.
 
 **Step 5: Commit**
 
@@ -494,81 +513,7 @@ git commit -m "feat(www): add LiveVideoPlayer backed by mpegts.js and MSE"
 
 ---
 
-## Task 4: Connection state and retry UI
-
-**Files:**
-- Modify: `cross-compile/www/src/components/common/LiveVideoPlayer.tsx`
-- Modify: `cross-compile/www/src/components/common/LiveVideoPlayer.test.tsx`
-
-**Step 1: Write the failing tests**
-
-Append to the existing `describe` block:
-
-```tsx
-  it('surfaces a credentials-specific message on a 401', async () => {
-    const onStateChange = vi.fn();
-    renderWithProviders(<LiveVideoPlayer streamType="main" onStateChange={onStateChange} />);
-    await waitFor(() => expect(mockPlayer.on).toHaveBeenCalled());
-
-    const errorHandler = mockPlayer.on.mock.calls.find((c) => c[0] === 'error')?.[1];
-    errorHandler('NetworkError', 'Unexpected status 401');
-
-    expect(onStateChange).toHaveBeenCalledWith(
-      'error',
-      'The camera rejected these credentials for the video stream.',
-    );
-  });
-
-  it('reports connecting before the player is ready', async () => {
-    const onStateChange = vi.fn();
-    renderWithProviders(<LiveVideoPlayer streamType="main" onStateChange={onStateChange} />);
-
-    expect(onStateChange).toHaveBeenCalledWith('connecting');
-  });
-
-  it('forwards decoded media info to onStats', async () => {
-    const onStats = vi.fn();
-    renderWithProviders(<LiveVideoPlayer streamType="main" onStats={onStats} />);
-    await waitFor(() => expect(mockPlayer.on).toHaveBeenCalled());
-
-    const mediaHandler = mockPlayer.on.mock.calls.find((c) => c[0] === 'media_info')?.[1];
-    mediaHandler({ width: 1280, height: 720, fps: 25, videoCodec: 'avc1.4d001f' });
-
-    expect(onStats).toHaveBeenCalledWith(
-      expect.objectContaining({ width: 1280, height: 720, fps: 25 }),
-    );
-  });
-
-  it('converts the reported speed from KB/s to Kbps', async () => {
-    const onStats = vi.fn();
-    renderWithProviders(<LiveVideoPlayer streamType="main" onStats={onStats} />);
-    await waitFor(() => expect(mockPlayer.on).toHaveBeenCalled());
-
-    const statsHandler = mockPlayer.on.mock.calls.find((c) => c[0] === 'statistics_info')?.[1];
-    statsHandler({ speed: 128, droppedFrames: 3 });
-
-    expect(onStats).toHaveBeenCalledWith(
-      expect.objectContaining({ bitrateKbps: 1024, droppedFrames: 3 }),
-    );
-  });
-```
-
-**Step 2: Run to verify**
-
-Run: `npx vitest run src/components/common/LiveVideoPlayer.test.tsx`
-Expected: PASS — the Task 3 implementation already satisfies these. If any
-fail, fix `LiveVideoPlayer.tsx`; do not weaken the tests.
-
-**Step 3: Commit**
-
-```bash
-git add cross-compile/www/src/components/common/LiveVideoPlayer.test.tsx
-git commit -m "test(www): cover LiveVideoPlayer state and stats reporting"
-```
-
----
-
-## Task 5: Replace the placeholder in LiveViewPage
+## Task 4: Replace the placeholder in LiveViewPage
 
 **Files:**
 - Modify: `cross-compile/www/src/pages/LiveViewPage.tsx:245-276`
@@ -649,21 +594,12 @@ Replace the placeholder block at lines 245–268 with:
                 onStats={handleStats}
               />
 
-              {playerState === 'connecting' && (
+              {WAITING_TEXT[playerState] && (
                 <div
                   className="absolute inset-0 flex items-center justify-center bg-black/60 text-zinc-400"
-                  data-testid="liveview-connecting"
+                  data-testid={`liveview-${playerState}`}
                 >
-                  Connecting to stream…
-                </div>
-              )}
-
-              {playerState === 'stalled' && (
-                <div
-                  className="absolute inset-0 flex items-center justify-center bg-black/60 text-zinc-400"
-                  data-testid="liveview-stalled"
-                >
-                  Buffering…
+                  {WAITING_TEXT[playerState]}
                 </div>
               )}
 
@@ -694,10 +630,16 @@ Change the LIVE indicator at line 271 so it is conditional:
             )}
 ```
 
-Add the import:
+Add the import and the overlay text lookup (module scope, above the component):
 
 ```tsx
 import { LiveVideoPlayer, type PlayerState, type StreamStats } from '@/components/common/LiveVideoPlayer';
+
+/** States that cover the video with a message. Absent = show the picture. */
+const WAITING_TEXT: Partial<Record<PlayerState, string>> = {
+  connecting: 'Connecting to stream…',
+  stalled: 'Buffering…',
+};
 ```
 
 **Step 4: Run test to verify it passes**
@@ -714,7 +656,7 @@ git commit -m "feat(www): show live video in place of the LiveView placeholder"
 
 ---
 
-## Task 6: Feed the stats cards real data
+## Task 5: Feed the stats cards real data
 
 The cards already exist and look right. Only their data source changes. Two
 rows are deleted rather than reconnected, because MSE exposes neither packet
@@ -806,7 +748,7 @@ git commit -m "feat(www): drive LiveView stats cards from the real stream"
 
 ---
 
-## Task 7: Real stream URL bar and working Copy button
+## Task 6: Real stream URL bar and working Copy button
 
 **Files:**
 - Modify: `cross-compile/www/src/pages/LiveViewPage.tsx:279-302`
@@ -877,7 +819,7 @@ git commit -m "feat(www): show and copy the real stream URL"
 
 ---
 
-## Task 8: Quality gates
+## Task 7: Quality gates
 
 **Step 1: Full test suite**
 
@@ -919,7 +861,7 @@ git commit -m "build(www): rebuild WebUI assets with live video preview"
 
 ---
 
-## Task 9: Hardware verification on 192.168.2.198
+## Task 8: Hardware verification on 192.168.2.198
 
 Nothing above proves a single frame decoded. Mocked tests cannot.
 
