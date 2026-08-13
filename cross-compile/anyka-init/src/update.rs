@@ -262,6 +262,8 @@ pub enum UpdateError {
     Untar,
     #[error("update already awaiting confirmation; not applying")]
     TrialInFlight,
+    #[error("could not remove {0}")]
+    Remove(PathBuf),
     #[error("io: {0}")]
     Io(#[from] std::io::Error),
 }
@@ -302,6 +304,28 @@ pub fn verify_slot(
     match sys.run_to_completion("busybox", &args) {
         Ok(st) if st.success() => Ok(meta),
         _ => Err(UpdateError::Checksum),
+    }
+}
+
+/// Remove a tree with busybox, not `std::fs::remove_dir_all`.
+///
+/// std's version does not reliably empty a directory on the exFAT cards
+/// (.121/.146/.127): observed on .127, the slot was left populated and the
+/// `rename` that follows failed with `EEXIST`, so every upgrade after the
+/// first was rejected. busybox `rm -rf` clears the same path. vfat (.198) was
+/// never affected, which is why this survived several upgrades unnoticed.
+///
+/// No `sh -c`: busybox dispatches on its first argument, so the path never
+/// passes through a shell.
+fn remove_tree(sys: &dyn crate::sys::Sys, path: &Path) -> Result<(), UpdateError> {
+    let args = [
+        "rm".to_string(),
+        "-rf".to_string(),
+        path.to_string_lossy().into_owned(),
+    ];
+    match sys.run_to_completion("busybox", &args) {
+        Ok(st) if st.success() => Ok(()),
+        _ => Err(UpdateError::Remove(path.to_path_buf())),
     }
 }
 
@@ -531,7 +555,15 @@ pub fn apply(
             tracing::error!(error = %e, slot = target.name(), "update rejected; both slots untouched");
             // Only the staging tree is removed. `dir` is the rollback slot and
             // is never touched on a failed apply.
-            let _ = std::fs::remove_dir_all(staging_dir(&dir));
+            //
+            // Except under `TrialInFlight`: that path unpacked nothing, and
+            // `dir` is the live rollback target of a trial that has not been
+            // decided yet, so it gets no writes at all.
+            if !matches!(e, UpdateError::TrialInFlight)
+                && let Err(err) = remove_tree(sys, &staging_dir(&dir))
+            {
+                tracing::warn!(error = %err, "could not clean up the staging tree");
+            }
         }
     }
 }
@@ -558,9 +590,10 @@ fn stage_and_flip(
     //
     // Wiping staging first is safe — nothing depends on it, and a tree left by
     // a previous interrupted apply would otherwise contribute files the
-    // manifest never mentions.
+    // manifest never mentions. That makes the removal load-bearing, so its
+    // failure is an error rather than something to shrug at.
     let staging = staging_dir(dir);
-    let _ = std::fs::remove_dir_all(&staging);
+    remove_tree(sys, &staging)?;
     std::fs::create_dir_all(&staging)?;
 
     let untar = [
@@ -583,10 +616,12 @@ fn stage_and_flip(
 
     // Verified. Now take the slot: remove the old tree and rename staging over
     // it. FAT cannot rename onto an existing directory, so the two steps
-    // cannot be collapsed; the window between them is two syscalls wide and,
+    // cannot be collapsed. The window between them is one `rm -rf` wide and,
     // unlike the previous ordering, is only ever entered by a bundle that has
-    // already passed its checksums.
-    let _ = std::fs::remove_dir_all(dir);
+    // already passed its checksums; a power cut inside it leaves the rollback
+    // slot half-deleted but `active` still pointing at the running slot, and
+    // the next apply rebuilds it from scratch.
+    remove_tree(sys, dir)?;
     std::fs::rename(&staging, dir)?;
     // SAFETY: sync(2) takes no arguments and cannot fail.
     unsafe { libc::sync() };
@@ -749,6 +784,17 @@ mod tests {
 
     fn exit_fail() -> crate::sys::ExitStatus {
         crate::sys::ExitStatus::Code(1)
+    }
+
+    /// Stand in for busybox `rm -rf` in a mocked `Sys`, really removing the
+    /// tree. Returns true when it handled the call so each test's closure can
+    /// fall through to its own tar/sha256sum behaviour.
+    fn fake_rm(args: &[String]) -> bool {
+        if args.first().map(String::as_str) != Some("rm") {
+            return false;
+        }
+        let _ = std::fs::remove_dir_all(&args[2]);
+        true
     }
 
     #[test]
@@ -1125,12 +1171,16 @@ mod tests {
         std::fs::write(root.join("spool/bundle.trigger"), b"").unwrap();
 
         let mut sys = MockSys::new();
-        // one untar, one sha256sum -c. The mocked untar cannot run for real, so
-        // it materializes the slot content the verify step will look for by
+        // Two `rm -rf` (staging, then the slot being taken), one untar, one
+        // sha256sum -c. The mocked untar cannot run for real, so it
+        // materializes the slot content the verify step will look for by
         // extracting the target dir from the shell command line.
         sys.expect_run_to_completion()
-            .times(2)
+            .times(4)
             .returning(|_, args| {
+                if fake_rm(args) {
+                    return Ok(exit_ok());
+                }
                 if let Some(cmd) = args.iter().find(|a| a.contains("tar -xf")) {
                     let dir = cmd
                         .split("-C ")
@@ -1182,6 +1232,9 @@ mod tests {
 
         let mut sys = MockSys::new();
         sys.expect_run_to_completion().returning(|_, args| {
+            if fake_rm(args) {
+                return Ok(exit_ok());
+            }
             if args.iter().any(|a| a.contains("sha256sum")) {
                 return Ok(exit_fail());
             }
@@ -1237,6 +1290,9 @@ mod tests {
 
         let mut sys = MockSys::new();
         sys.expect_run_to_completion().returning(|_, args| {
+            if fake_rm(args) {
+                return Ok(exit_ok());
+            }
             if let Some(cmd) = args.iter().find(|a| a.contains("tar -xf")) {
                 let dir = cmd
                     .split("-C ")
@@ -1300,6 +1356,124 @@ mod tests {
         assert!(
             !root.join("spool/bundle.trigger").exists(),
             "spool is still cleared so the bundle is not rehashed every tick"
+        );
+    }
+
+    /// The second upgrade of a camera is the first one that has to overwrite a
+    /// populated slot. On exFAT `std::fs::remove_dir_all` left it populated and
+    /// the rename then failed with EEXIST, so `.121`/`.146`/`.127` could only
+    /// ever be upgraded once.
+    #[test]
+    fn a_populated_slot_is_replaced_rather_than_rejected() {
+        use crate::sys::MockSys;
+        let d = tempfile::tempdir().unwrap();
+        let root = d.path();
+        std::fs::create_dir_all(root.join("spool")).unwrap();
+        std::fs::write(root.join("spool/bundle.tar"), b"pretend tar").unwrap();
+        std::fs::write(root.join("spool/bundle.trigger"), b"").unwrap();
+
+        // The inactive slot already holds a previous build, nested so a
+        // single-level unlink would not be enough.
+        let old = root.join("slots/b");
+        std::fs::create_dir_all(old.join("onvif")).unwrap();
+        std::fs::write(old.join("onvif/onvif-rust.bin"), b"previous build").unwrap();
+
+        let mut sys = MockSys::new();
+        sys.expect_run_to_completion().returning(|_, args| {
+            if fake_rm(args) {
+                return Ok(exit_ok());
+            }
+            if let Some(cmd) = args.iter().find(|a| a.contains("tar -xf")) {
+                let dir = cmd
+                    .split("-C ")
+                    .nth(1)
+                    .map(|s| s.trim().trim_matches('\'').to_string())
+                    .expect("untar -C dir");
+                std::fs::create_dir_all(&dir).unwrap();
+                std::fs::write(
+                    std::path::Path::new(&dir).join("manifest.sha256"),
+                    "abc  anyka-init.bin\n",
+                )
+                .unwrap();
+                std::fs::write(
+                    std::path::Path::new(&dir).join("manifest.meta"),
+                    "requires_config_schema=1\n",
+                )
+                .unwrap();
+                std::fs::write(std::path::Path::new(&dir).join("new.bin"), b"new build").unwrap();
+            }
+            Ok(exit_ok())
+        });
+        sys.expect_reboot().times(1).returning(|| Ok(()));
+
+        apply(&sys, root, 1, &std::sync::Mutex::new(()));
+
+        assert_eq!(Slots::new(root).active(), Slot::B, "must flip");
+        assert!(
+            old.join("new.bin").exists(),
+            "new build must be in the slot"
+        );
+        assert!(
+            !old.join("onvif/onvif-rust.bin").exists(),
+            "the previous build must be gone, not merged with the new one"
+        );
+    }
+
+    /// The removal is load-bearing, so a failure has to stop the update. The
+    /// original bug was a swallowed error here, which turned into a bare
+    /// `rename` EEXIST with nothing in the log pointing at the cause.
+    #[test]
+    fn a_slot_that_cannot_be_cleared_aborts_the_update() {
+        use crate::sys::MockSys;
+        let d = tempfile::tempdir().unwrap();
+        let root = d.path();
+        std::fs::create_dir_all(root.join("spool")).unwrap();
+        std::fs::write(root.join("spool/bundle.tar"), b"pretend tar").unwrap();
+        std::fs::write(root.join("spool/bundle.trigger"), b"").unwrap();
+
+        let old = root.join("slots/b");
+        std::fs::create_dir_all(&old).unwrap();
+        std::fs::write(old.join("onvif-rust.bin"), b"previous build").unwrap();
+
+        let mut sys = MockSys::new();
+        sys.expect_run_to_completion().returning(|_, args| {
+            // Staging clears; the slot itself refuses.
+            if args.first().map(String::as_str) == Some("rm") {
+                if args[2].ends_with(".staging") {
+                    let _ = std::fs::remove_dir_all(&args[2]);
+                    return Ok(exit_ok());
+                }
+                return Ok(exit_fail());
+            }
+            if let Some(cmd) = args.iter().find(|a| a.contains("tar -xf")) {
+                let dir = cmd
+                    .split("-C ")
+                    .nth(1)
+                    .map(|s| s.trim().trim_matches('\'').to_string())
+                    .expect("untar -C dir");
+                std::fs::create_dir_all(&dir).unwrap();
+                std::fs::write(
+                    std::path::Path::new(&dir).join("manifest.sha256"),
+                    "abc  anyka-init.bin\n",
+                )
+                .unwrap();
+                std::fs::write(
+                    std::path::Path::new(&dir).join("manifest.meta"),
+                    "requires_config_schema=1\n",
+                )
+                .unwrap();
+            }
+            Ok(exit_ok())
+        });
+        sys.expect_reboot().never();
+
+        apply(&sys, root, 1, &std::sync::Mutex::new(()));
+
+        assert_eq!(Slots::new(root).active(), Slot::A, "no flip");
+        assert_eq!(Trial::find(root), None, "no trial armed");
+        assert!(
+            old.join("onvif-rust.bin").exists(),
+            "the rollback slot must survive a failed removal intact"
         );
     }
 }
