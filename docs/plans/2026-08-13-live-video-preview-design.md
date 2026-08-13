@@ -92,9 +92,16 @@ not do in production:
 
 ### Authentication
 
-`services/api.ts:100` shows the app keeps its Basic header in
-`sessionStorage['onvif_camera_auth']`. Pass that same value through mpegts.js's
-`headers` config. No second login, no new credential storage.
+The app stores credentials under `sessionStorage['onvif_camera_auth']`, but the
+password is **AES-GCM encrypted** (`hooks/useAuth.tsx:97`), so that key must
+never be read directly. The correct accessor is `useAuth().getBasicAuthHeader()`
+(`hooks/useAuth.tsx:132`), which decrypts on demand and returns
+`"Basic <base64>"` or `null`.
+
+It is `async`, which means the player's setup effect is asynchronous: await the
+header and the dynamic `import('mpegts.js')` together, then create the player.
+Pass the result through mpegts.js's `headers` config. No second login, no new
+credential storage.
 
 ### Components
 
