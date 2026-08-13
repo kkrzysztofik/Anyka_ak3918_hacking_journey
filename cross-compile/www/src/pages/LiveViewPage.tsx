@@ -21,6 +21,11 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 
+import {
+  LiveVideoPlayer,
+  type PlayerState,
+  type StreamStats,
+} from '@/components/common/LiveVideoPlayer';
 import { Button } from '@/components/ui/button';
 import {
   SettingsCard,
@@ -42,9 +47,35 @@ import {
 } from '@/services/ptzService';
 import type { PTZDirection, PTZPreset } from '@/services/ptzService';
 
+/** States that cover the video with a message. Absent = show the picture. */
+const WAITING_TEXT: Partial<Record<PlayerState, string>> = {
+  connecting: 'Connecting to stream…',
+  stalled: 'Buffering…',
+};
+
 export default function LiveViewPage() {
   const [streamType, setStreamType] = useState<'main' | 'sub'>('main');
   const [ptzSpeed, setPtzSpeed] = useState(50);
+  const [playerState, setPlayerState] = useState<PlayerState>('connecting');
+  const [playerMessage, setPlayerMessage] = useState<string>();
+  const [stats, setStats] = useState<StreamStats>({});
+  const [playerKey, setPlayerKey] = useState(0);
+
+  const handleStateChange = useCallback((state: PlayerState, message?: string) => {
+    setPlayerState(state);
+    setPlayerMessage(message);
+  }, []);
+
+  const handleStats = useCallback((next: StreamStats) => {
+    setStats((prev) => ({ ...prev, ...next }));
+  }, []);
+
+  // Remounting the player is the retry: the effect cleanup destroys the old
+  // instance and a fresh one reconnects.
+  const handleRetry = useCallback(() => {
+    setStats({});
+    setPlayerKey((k) => k + 1);
+  }, []);
   const queryClient = useQueryClient();
 
   // Fetch profiles to get the PTZ-capable profile token
@@ -242,38 +273,50 @@ export default function LiveViewPage() {
               </div>
             </div>
 
-            {/* Video Placeholder */}
-            <div
-              className="flex h-full w-full flex-col items-center justify-center text-zinc-500"
-              style={{
-                backgroundImage: `
-                  linear-gradient(to right, rgba(63, 63, 70, 0.1) 1px, transparent 1px),
-                  linear-gradient(to bottom, rgba(63, 63, 70, 0.1) 1px, transparent 1px)
-                `,
-                backgroundSize: '20px 20px',
-              }}
-            >
-              <div className="mb-4 rounded-full bg-zinc-900/50 p-8">
-                <Camera className="h-12 w-12 text-zinc-600" />
-              </div>
-              <h3
-                className="text-xl font-medium text-zinc-400"
-                data-testid="liveview-stream-preview-title"
-              >
-                ONVIF Stream Preview
-              </h3>
-              <p className="text-sm text-zinc-600" data-testid="liveview-stream-preview-info">
-                1920×1080 @ 30fps
-              </p>
+            {/* Live Video */}
+            <div className="relative h-full w-full">
+              <LiveVideoPlayer
+                key={`${streamType}-${playerKey}`}
+                streamType={streamType}
+                onStateChange={handleStateChange}
+                onStats={handleStats}
+              />
+
+              {WAITING_TEXT[playerState] && (
+                <div
+                  className="absolute inset-0 flex items-center justify-center bg-black/60 text-zinc-400"
+                  data-testid={`liveview-${playerState}`}
+                >
+                  {WAITING_TEXT[playerState]}
+                </div>
+              )}
+
+              {playerState === 'error' && (
+                <div
+                  className="absolute inset-0 flex flex-col items-center justify-center gap-4 bg-black/80 p-6 text-center"
+                  data-testid="liveview-error"
+                >
+                  <p className="text-sm text-zinc-300">{playerMessage ?? 'Playback failed.'}</p>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleRetry}
+                    data-testid="liveview-retry-button"
+                  >
+                    Retry
+                  </Button>
+                </div>
+              )}
             </div>
 
-            {/* LIVE Indicator */}
-            <div
-              className="live-indicator absolute top-20 left-6 backdrop-blur-sm"
-              data-testid="liveview-live-indicator"
-            >
-              LIVE
-            </div>
+            {playerState === 'playing' && (
+              <div
+                className="live-indicator absolute top-20 left-6 backdrop-blur-sm"
+                data-testid="liveview-live-indicator"
+              >
+                LIVE
+              </div>
+            )}
           </div>
 
           {/* Stream URL Bar */}

@@ -9,6 +9,26 @@ import { renderWithProviders } from '@/test/componentTestHelpers';
 
 import LiveViewPage from './LiveViewPage';
 
+const mockPlayer = {
+  on: vi.fn(),
+  attachMediaElement: vi.fn(),
+  load: vi.fn(),
+  destroy: vi.fn(),
+};
+const createPlayer = vi.fn(() => mockPlayer);
+
+vi.mock('mpegts.js', () => ({
+  default: {
+    isSupported: () => true,
+    createPlayer: (...args: unknown[]) => createPlayer(...args),
+    Events: {
+      MEDIA_INFO: 'media_info',
+      STATISTICS_INFO: 'statistics_info',
+      ERROR: 'error',
+    },
+  },
+}));
+
 // Mock ptzService
 vi.mock('@/services/ptzService', () => ({
   continuousMove: vi.fn().mockResolvedValue(undefined),
@@ -71,14 +91,9 @@ describe('LiveViewPage', () => {
     );
   });
 
-  it('should render video stream placeholder', () => {
+  it('should render the live video element', async () => {
     renderWithProviders(<LiveViewPage />);
-    expect(screen.getByTestId('liveview-stream-preview-title')).toHaveTextContent(
-      'ONVIF Stream Preview',
-    );
-    expect(screen.getByTestId('liveview-stream-preview-info')).toHaveTextContent(
-      '1920×1080 @ 30fps',
-    );
+    expect(await screen.findByTestId('liveview-video')).toBeInTheDocument();
   });
 
   it('should toggle between main and sub stream', async () => {
@@ -168,9 +183,34 @@ describe('LiveViewPage', () => {
     expect(screen.getByTestId('liveview-ptz-home-button')).toBeInTheDocument();
   });
 
-  it('should render LIVE indicator', () => {
+  it('should not show the LIVE indicator before playback starts', async () => {
     renderWithProviders(<LiveViewPage />);
-    expect(screen.getByTestId('liveview-live-indicator')).toHaveTextContent('LIVE');
+    await screen.findByTestId('liveview-video');
+    expect(screen.queryByTestId('liveview-live-indicator')).not.toBeInTheDocument();
+  });
+
+  it('renders the video element instead of the old placeholder', async () => {
+    renderWithProviders(<LiveViewPage />);
+
+    expect(await screen.findByTestId('liveview-video')).toBeInTheDocument();
+    expect(screen.queryByTestId('liveview-stream-preview-title')).not.toBeInTheDocument();
+  });
+
+  it('shows a retry affordance when playback fails', async () => {
+    renderWithProviders(<LiveViewPage />);
+    await screen.findByTestId('liveview-video');
+
+    const errorHandler = mockPlayer.on.mock.calls.find((c) => c[0] === 'error')?.[1];
+    errorHandler('NetworkError', 'connection refused');
+
+    expect(await screen.findByTestId('liveview-retry-button')).toBeInTheDocument();
+  });
+
+  it('hides the LIVE indicator until playback actually starts', async () => {
+    renderWithProviders(<LiveViewPage />);
+    await screen.findByTestId('liveview-video');
+
+    expect(screen.queryByTestId('liveview-live-indicator')).not.toBeInTheDocument();
   });
 
   it('should update speed slider value', async () => {
