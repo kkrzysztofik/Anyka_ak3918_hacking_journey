@@ -220,3 +220,38 @@ int handle_isp_get_lum_factor(int fd, const uint8_t *req, uint32_t req_len)
               vi, raw_factor, avg_lumi, (int)resp[0]);
     return send_response(fd, STATUS_OK, resp, sizeof(resp));
 }
+
+/**
+ * handle_isp_get_ae_attr - Return the ISP's live AE attributes verbatim.
+ *
+ * The profile loaded by a day/night switch sets the exposure and gain ceilings
+ * (`a_gain_max` is 24 by day and 10 at night on the gc1084), and this is the
+ * only way to see what the ISP actually holds rather than what we asked for.
+ * Deliberately uninterpreted: the caller decodes. See
+ * docs/reference/vendor-day-night-implementation.md.
+ *
+ * Empty request. Response payload: struct vpss_isp_ae_attr = 204 bytes.
+ */
+int handle_isp_get_ae_attr(int fd, const uint8_t *req, uint32_t req_len)
+{
+    void *vi;
+    struct vpss_isp_ae_attr attr;
+
+    (void)req;
+    (void)req_len;
+
+    if (isp_first_vi(&vi) != 0) {
+        log_warn("[isp] get_ae_attr: no VI registered");
+        return send_response(fd, STATUS_ERROR, NULL, 0);
+    }
+
+    memset(&attr, 0, sizeof(attr));
+    if (ak_vpss_isp_get_ae_attr(vi, &attr) != 0) {
+        log_warn("[isp] get_ae_attr: ak_vpss_isp_get_ae_attr failed");
+        return send_response(fd, STATUS_ERROR, NULL, 0);
+    }
+
+    log_debug("[isp] get_ae_attr vi=%p a_gain_max=%lu exp_time_max=%lu target_lum=%lu",
+              vi, attr.a_gain_max, attr.exp_time_max, attr.target_lumiance);
+    return send_response(fd, STATUS_OK, &attr, sizeof(attr));
+}
