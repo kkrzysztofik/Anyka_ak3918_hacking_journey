@@ -34,7 +34,7 @@ use super::bridge::StreamingBridge;
 use super::config::StreamingConfig;
 use super::helpers::{
     fanout_frame, generate_av_sdp, send_frame, send_httpflv_prior_frames, spawn_httpflv_server,
-    spawn_rtsp_server, spawn_streamhub_event_loop,
+    spawn_rtsp_server, spawn_streamhub_event_loop, stream_hub_error,
 };
 use crate::validation::httpflv_remux::ValidationHttpFlvRemuxer;
 
@@ -167,21 +167,21 @@ impl TStreamHandler for LiveStreamHandler {
 
             let sps = stream.sps.read().deref().clone();
             let pps = stream.pps.read().deref().clone();
+            let has_sps = sps.is_some();
+            let has_pps = pps.is_some();
 
-            // HTTP-FLV remux needs SPS/PPS for the sequence header. Refuse
-            // before MediaInfo so the client does not get a half-open FLV
-            // session; kick IDR once so the cache can fill for a retry.
-            if matches!(sub_type, SubscribeType::HttpFlvPull)
-                && (sps.is_none() || pps.is_none())
-            {
+            // HTTP-FLV remux needs SPS/PPS for the sequence header. Client may
+            // already have HTTP 200; refuse prior-data so the body stays empty/EOF
+            // instead of a half-open FLV session. Kick IDR once for a retry.
+            if matches!(sub_type, SubscribeType::HttpFlvPull) && (!has_sps || !has_pps) {
                 tracing::error!(
                     stream = stream_name,
-                    has_sps = sps.is_some(),
-                    has_pps = pps.is_some(),
-                    "HTTP-FLV subscribe refused: SPS/PPS missing"
+                    has_sps,
+                    has_pps,
+                    "HTTP-FLV prior-data refused: SPS/PPS missing (body empty/EOF)"
                 );
                 self.request_idr_once();
-                return Err("http-flv: SPS/PPS not ready".to_string().into());
+                return Err(stream_hub_error("http-flv: SPS/PPS not ready"));
             }
 
             let media_info = MediaInfo {
@@ -194,8 +194,6 @@ impl TStreamHandler for LiveStreamHandler {
             let bootstrap_idr = stream.bootstrap_idr.read().deref().clone();
             let has_idr = bootstrap_idr.is_some();
 
-            let has_sps = sps.is_some();
-            let has_pps = pps.is_some();
             if !has_sps || !has_pps {
                 // RTSP path: still Ok + MediaInfo; client may retry DESCRIBE.
                 // error!: the subscriber gets a black screen, and at the shipped
