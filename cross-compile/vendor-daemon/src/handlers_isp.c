@@ -232,6 +232,8 @@ int handle_isp_get_lum_factor(int fd, const uint8_t *req, uint32_t req_len)
  *
  * Empty request. Response payload: struct vpss_isp_ae_attr = 204 bytes.
  */
+_Static_assert(sizeof(struct vpss_isp_ae_attr) == 204, "AE attr wire size changed");
+
 int handle_isp_get_ae_attr(int fd, const uint8_t *req, uint32_t req_len)
 {
     void *vi;
@@ -248,6 +250,17 @@ int handle_isp_get_ae_attr(int fd, const uint8_t *req, uint32_t req_len)
     memset(&attr, 0, sizeof(attr));
     if (ak_vpss_isp_get_ae_attr(vi, &attr) != 0) {
         log_warn("[isp] get_ae_attr: ak_vpss_isp_get_ae_attr failed");
+        return send_response(fd, STATUS_ERROR, NULL, 0);
+    }
+
+    /* A 0 return means the ioctl succeeded, not that a profile is loaded. An
+     * all-zero read is indistinguishable from a real one to the caller, and
+     * the planned AE override read-modify-writes this struct -- writing a
+     * zeroed one back would wipe hist_weight, envi_gain_range and
+     * target_lumiance. a_gain_max is never legitimately 0 on a loaded
+     * profile (24 by day, 10 at night on the gc1084). */
+    if (attr.a_gain_max == 0) {
+        log_warn("[isp] get_ae_attr: AE attrs unpopulated (a_gain_max=0)");
         return send_response(fd, STATUS_ERROR, NULL, 0);
     }
 
