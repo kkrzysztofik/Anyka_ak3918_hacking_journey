@@ -462,13 +462,18 @@ Expected: `OK: 3 blocks x 34746 bytes, 25 modules`, then the day and night `EXP`
 If `/tmp/isp_gc1084.conf` is absent, pull it first:
 
 ```bash
-uv run python3 scripts/debugging/cam_exec.py --host 127.0.0.1 --port 12324 \
+uv run python3 scripts/debugging/cam_exec.py --host 127.0.0.1 --port 12321 \
   'nc -l -p 9932 < /data/sensor/isp_gc1084.conf &'
-ssh root@192.168.3.137 'nc 192.168.30.146 9932 > /tmp/isp_gc1084.conf'
+ssh root@192.168.3.137 'nc 192.168.30.121 9932 > /tmp/isp_gc1084.conf'
 scp root@192.168.3.137:/tmp/isp_gc1084.conf /tmp/isp_gc1084.conf
 ```
 
-(`.146` is jumphost-only; see the fleet notes. Tunnel `12324 -> 192.168.30.146:24` first.)
+`.121` is jumphost-only. Open both tunnels before any hardware step:
+
+```bash
+ssh -N -L 12321:192.168.30.121:24   root@192.168.3.137 &   # telnet, for cam_exec.py
+ssh -N -L 12180:192.168.30.121:8080 root@192.168.3.137 &   # HTTP-FLV, for frame capture
+```
 
 **Step 3: Commit the script**
 
@@ -477,7 +482,7 @@ git add scripts/debugging/isp_conf_diff.py
 git commit -m "test(debugging): add ISP conf module parser with self-check"
 ```
 
-**Step 4: Deploy the new daemon and onvif-rust to `.146`**
+**Step 4: Deploy the new daemon and onvif-rust to `.121`**
 
 Use the project's normal deploy path (`scripts/deploy_onvif.sh` / the slot bundle flow). Confirm the supervisor restarted — the memory note applies: config knobs only take effect on a *restarted* supervisor, so a redeploy alone proves nothing.
 
@@ -592,13 +597,25 @@ git commit -m "feat(night): allow overriding the night AE ceiling from config"
 Deploy, set `night_a_gain_max = 24`, restart the supervisor, wait for night, capture a frame and measure:
 
 ```bash
-ffmpeg -y -loglevel error -i "http://admin:admin@127.0.0.1:12380/live/main.flv" \
+ffmpeg -y -loglevel error -i "http://admin:admin@127.0.0.1:12180/live/main.flv" \
   -frames:v 1 -q:v 2 /tmp/after.jpg
 ffmpeg -loglevel info -i /tmp/after.jpg \
   -vf "signalstats,metadata=print:key=lavfi.signalstats.YAVG" -f null - 2>&1 | grep YAVG
 ```
 
-**Allow 30 s of settle after any mode or lamp change before capturing.** AE re-ramps, and an early grab reads low enough to invert the comparison — this has already caused one wrong conclusion. Compare against the pre-change baseline recorded in Task 4.
+**Allow 30 s of settle after any mode or lamp change before capturing.** AE re-ramps, and an early grab reads low enough to invert the comparison — this has already caused one wrong conclusion. Compare against the baseline below.
+
+**`.121` night baseline, captured 2026-08-14 01:20 local:**
+
+| metric | value |
+|---|---|
+| `YAVG` | 6.51 |
+| `SATAVG` | 0 (true monochrome) |
+| `IR_LED` | 1 |
+| `WHITE_LED` | **1** |
+| AE luma | 3–4, occasional 16 |
+
+Note the white lamp is already on and the frame is still black — on `.146` the same lamp produced `YAVG 110`. Do not assume `.121`'s illumination is comparable; the scene is the variable, so only compare `.121` against `.121`.
 
 ---
 
