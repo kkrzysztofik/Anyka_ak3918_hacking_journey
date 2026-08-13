@@ -173,6 +173,63 @@ async fn test_streams_hub_subscribe_success() {
 }
 
 #[tokio::test]
+async fn test_subscribe_prior_data_error_does_not_kill_stream_for_later_subscriber() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    let mut hub = StreamsHub::new(None);
+    let identifier = create_test_stream_identifier();
+    let (_frame_sender, frame_receiver) = crate::hub::define::frame_data_channel();
+    let receiver = DataReceiver {
+        frame_receiver: Some(frame_receiver),
+        packet_receiver: None,
+    };
+
+    let call_count = Arc::new(AtomicUsize::new(0));
+    let mut mock_handler = MockStreamHandler::new();
+    mock_handler
+        .expect_send_prior_data()
+        .times(2)
+        .returning(move |_, _| {
+            let n = call_count.fetch_add(1, Ordering::SeqCst);
+            if n == 0 {
+                Err(StreamHubError {
+                    value: StreamHubErrorValue::Other("prior data missing".to_string()),
+                })
+            } else {
+                Ok(())
+            }
+        });
+    let mock_handler = Arc::new(mock_handler);
+
+    hub.publish(identifier.clone(), receiver, mock_handler)
+        .await
+        .expect("publish");
+
+    let (sender1, _) = crate::hub::define::frame_data_channel();
+    let first = hub
+        .subscribe(
+            &identifier,
+            create_test_subscriber_info(),
+            DataSender::Frame { sender: sender1 },
+        )
+        .await;
+    assert!(first.is_err(), "first subscribe should fail when prior-data errs");
+
+    let (sender2, _) = crate::hub::define::frame_data_channel();
+    let second = hub
+        .subscribe(
+            &identifier,
+            create_test_subscriber_info(),
+            DataSender::Frame { sender: sender2 },
+        )
+        .await;
+    assert!(
+        second.is_ok(),
+        "second subscribe must succeed — stream event loop must stay alive: {second:?}"
+    );
+}
+
+#[tokio::test]
 async fn test_streams_hub_subscribe_no_stream() {
     let mut hub = StreamsHub::new(None);
     let identifier = create_test_stream_identifier();

@@ -571,7 +571,8 @@ impl StreamDataTransceiver {
             .await
         {
             error!(error = %err, "receive_event_loop_send_prior_data_error");
-            return true;
+            // Dropping result_sender still fails this subscribe; keep the loop alive.
+            return false;
         }
         match sender {
             DataSender::Frame {
