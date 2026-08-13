@@ -53,6 +53,11 @@ const WAITING_TEXT: Partial<Record<PlayerState, string>> = {
   stalled: 'Buffering…',
 };
 
+/** Render a stat, or an em dash when the stream has not reported it yet. */
+function stat(value: number | string | undefined, suffix = ''): string {
+  return value === undefined ? '—' : `${value}${suffix}`;
+}
+
 export default function LiveViewPage() {
   const [streamType, setStreamType] = useState<'main' | 'sub'>('main');
   const [ptzSpeed, setPtzSpeed] = useState(50);
@@ -269,7 +274,13 @@ export default function LiveViewPage() {
                     Sub Stream
                   </button>
                 </fieldset>
-                <div className="status-badge-connected">Connected</div>
+                <div
+                  className={
+                    playerState === 'playing' ? 'status-badge-connected' : 'text-zinc-400'
+                  }
+                >
+                  {playerState}
+                </div>
               </div>
             </div>
 
@@ -370,14 +381,29 @@ export default function LiveViewPage() {
                     className="text-foreground text-right font-mono"
                     data-testid="liveview-resolution-value"
                   >
-                    1920x1080
+                    {stats.width ? `${stats.width}x${stats.height}` : '—'}
                   </span>
                   <span className="text-muted-foreground">Bitrate</span>
-                  <span className="text-foreground text-right font-mono">4096 Kbps</span>
+                  <span
+                    className="text-foreground text-right font-mono"
+                    data-testid="liveview-bitrate-value"
+                  >
+                    {stat(stats.bitrateKbps, ' Kbps')}
+                  </span>
                   <span className="text-muted-foreground">Frame Rate</span>
-                  <span className="text-foreground text-right font-mono">30 fps</span>
+                  <span
+                    className="text-foreground text-right font-mono"
+                    data-testid="liveview-framerate-value"
+                  >
+                    {stat(stats.fps, ' fps')}
+                  </span>
                   <span className="text-muted-foreground">Codec</span>
-                  <span className="text-foreground text-right font-mono">H.264</span>
+                  <span
+                    className="text-foreground text-right font-mono"
+                    data-testid="liveview-codec-value"
+                  >
+                    {stats.videoCodec ?? '—'}
+                  </span>
                 </div>
               </SettingsCardContent>
             </SettingsCard>
@@ -400,16 +426,31 @@ export default function LiveViewPage() {
               <SettingsCardContent>
                 <div className="grid grid-cols-2 gap-y-3 text-sm">
                   <span className="text-muted-foreground">Status</span>
-                  <span className="flex items-center justify-end gap-1.5 text-right font-medium text-green-500">
-                    <div className="status-pulse h-1.5 w-1.5 rounded-full bg-green-500" />
-                    Connected
+                  <span
+                    className={cn(
+                      'flex items-center justify-end gap-1.5 text-right font-medium',
+                      playerState === 'playing' ? 'text-green-500' : 'text-zinc-400',
+                    )}
+                  >
+                    <div
+                      className={cn(
+                        'h-1.5 w-1.5 rounded-full',
+                        playerState === 'playing' ? 'status-pulse bg-green-500' : 'bg-zinc-500',
+                      )}
+                    />
+                    {playerState}
                   </span>
-                  <span className="text-muted-foreground">Packet Loss</span>
-                  <span className="text-foreground text-right font-mono">0.0%</span>
-                  <span className="text-muted-foreground">Latency</span>
-                  <span className="text-foreground text-right font-mono">45 ms</span>
                   <span className="text-muted-foreground">Bandwidth</span>
-                  <span className="text-foreground text-right font-mono">4.2 Mbps</span>
+                  <span className="text-foreground text-right font-mono">
+                    {stat(stats.bitrateKbps, ' Kbps')}
+                  </span>
+                  <span className="text-muted-foreground">Dropped frames</span>
+                  <span
+                    className="text-foreground text-right font-mono"
+                    data-testid="liveview-dropped-frames-value"
+                  >
+                    {stat(stats.droppedFrames)}
+                  </span>
                 </div>
               </SettingsCardContent>
             </SettingsCard>

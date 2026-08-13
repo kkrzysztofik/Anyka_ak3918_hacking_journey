@@ -139,7 +139,7 @@ describe('LiveViewPage', () => {
     expect(screen.getByTestId('liveview-stream-info-title')).toHaveTextContent('Stream Info');
     expect(screen.getByTestId('liveview-network-stats-title')).toHaveTextContent('Network Stats');
     expect(screen.getByTestId('liveview-resolution-label')).toHaveTextContent('Resolution');
-    expect(screen.getByTestId('liveview-resolution-value')).toHaveTextContent('1920x1080');
+    expect(screen.getByTestId('liveview-resolution-value')).toHaveTextContent('—');
   });
 
   it('should render stream URL and copy button', () => {
@@ -204,6 +204,32 @@ describe('LiveViewPage', () => {
     errorHandler('NetworkError', 'connection refused');
 
     expect(await screen.findByTestId('liveview-retry-button')).toBeInTheDocument();
+  });
+
+  it('fills the stream info card from decoded media info', async () => {
+    renderWithProviders(<LiveViewPage />);
+    await screen.findByTestId('liveview-video');
+
+    const mediaHandler = mockPlayer.on.mock.calls.find((c) => c[0] === 'media_info')?.[1];
+    mediaHandler({ width: 1280, height: 720, fps: 25, videoCodec: 'avc1.4d001f' });
+
+    expect(await screen.findByTestId('liveview-resolution-value')).toHaveTextContent('1280x720');
+    expect(screen.getByTestId('liveview-framerate-value')).toHaveTextContent('25 fps');
+  });
+
+  it('shows a placeholder rather than a fake number before stats arrive', async () => {
+    renderWithProviders(<LiveViewPage />);
+    await screen.findByTestId('liveview-video');
+
+    expect(screen.getByTestId('liveview-resolution-value')).toHaveTextContent('—');
+  });
+
+  it('no longer displays unmeasurable packet loss and latency rows', async () => {
+    renderWithProviders(<LiveViewPage />);
+    await screen.findByTestId('liveview-video');
+
+    expect(screen.queryByText('Packet Loss')).not.toBeInTheDocument();
+    expect(screen.queryByText('Latency')).not.toBeInTheDocument();
   });
 
   it('hides the LIVE indicator until playback actually starts', async () => {
