@@ -13,8 +13,9 @@ use crate::hal::common::AK_SUCCESS_I32;
 use crate::hal::common::imaging::ImagingHalTrait;
 
 use super::{
-    AnykaIpc, CMD_ISP_GET_AE_LUMA, CMD_ISP_SET_BRIGHTNESS, CMD_ISP_SET_CONTRAST,
-    CMD_ISP_SET_IR_FILTER, CMD_ISP_SET_SATURATION, CMD_ISP_SET_SHARPNESS, CMD_ISP_SET_WDR,
+    AnykaIpc, CMD_ISP_GET_AE_LUMA, CMD_ISP_GET_LUM_FACTOR, CMD_ISP_SET_BRIGHTNESS,
+    CMD_ISP_SET_CONTRAST, CMD_ISP_SET_IR_FILTER, CMD_ISP_SET_SATURATION, CMD_ISP_SET_SHARPNESS,
+    CMD_ISP_SET_WDR,
 };
 
 #[async_trait]
@@ -106,6 +107,44 @@ impl ImagingHalTrait for AnykaIpc {
             }
         }
     }
+
+    async fn get_lum_factor(&self) -> Option<i32> {
+        match self.request_async(CMD_ISP_GET_LUM_FACTOR, &[]).await {
+            // The wire contract is exactly one little-endian i32, and it is
+            // strictly positive: the underlying isp_get_cur_lum_factor()
+            // signals failure with -1, and a non-positive factor sits below
+            // every day threshold, so letting one through would read as
+            // "bright" and switch night vision off. The daemon already filters
+            // this; the check is repeated here so an older daemon on a
+            // half-upgraded camera cannot reintroduce it.
+            Ok((status, data)) if status == AK_SUCCESS_I32 && data.len() == 4 => {
+                let factor = i32::from_le_bytes([data[0], data[1], data[2], data[3]]);
+                if factor > 0 {
+                    Some(factor)
+                } else {
+                    error!(
+                        factor,
+                        "get_lum_factor non-positive; treating as unavailable"
+                    );
+                    None
+                }
+            }
+            // Same reasoning as get_ae_luma: a silent `None` is indistinguishable
+            // from a camera correctly holding its mode, so say so.
+            Ok((status, data)) => {
+                error!(
+                    status,
+                    len = data.len(),
+                    "get_lum_factor bad daemon response"
+                );
+                None
+            }
+            Err(e) => {
+                error!(error = %e, "get_lum_factor IPC failed");
+                None
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -128,6 +167,48 @@ mod tests {
         assert_eq!(
             <AnykaIpc as ImagingHalTrait>::get_ae_luma(&ipc).await,
             Some(42)
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_get_lum_factor_roundtrip() {
+        // Little-endian i32, and wide enough to catch a byte-order slip: the
+        // vendor's thresholds are 2048 and 6400, so a swapped value would still
+        // classify, just wrongly.
+        let daemon = FakeDaemon::start(|cmd_id, req| {
+            assert_eq!(cmd_id, CMD_ISP_GET_LUM_FACTOR);
+            assert!(req.is_empty());
+            (AK_SUCCESS_I32, 6400i32.to_le_bytes().to_vec())
+        });
+        let ipc = AnykaIpc::new_with_path(&daemon.socket_path).unwrap();
+        ipc.set_epochs_for_test(1, 1);
+        assert_eq!(
+            <AnykaIpc as ImagingHalTrait>::get_lum_factor(&ipc).await,
+            Some(6400)
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_get_lum_factor_negative_is_none_not_daylight() {
+        // isp_get_cur_lum_factor() reports failure as -1. Forwarded, it would
+        // land below every day threshold and turn night vision off at night.
+        let daemon = FakeDaemon::start(|_c, _r| (AK_SUCCESS_I32, (-1i32).to_le_bytes().to_vec()));
+        let ipc = AnykaIpc::new_with_path(&daemon.socket_path).unwrap();
+        ipc.set_epochs_for_test(1, 1);
+        assert_eq!(
+            <AnykaIpc as ImagingHalTrait>::get_lum_factor(&ipc).await,
+            None
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_get_lum_factor_short_payload_is_none() {
+        let daemon = FakeDaemon::start(|_c, _r| (AK_SUCCESS_I32, vec![0u8, 25]));
+        let ipc = AnykaIpc::new_with_path(&daemon.socket_path).unwrap();
+        ipc.set_epochs_for_test(1, 1);
+        assert_eq!(
+            <AnykaIpc as ImagingHalTrait>::get_lum_factor(&ipc).await,
+            None
         );
     }
 

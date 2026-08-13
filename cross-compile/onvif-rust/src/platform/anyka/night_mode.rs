@@ -557,11 +557,35 @@ impl NightModeController {
         Ok(())
     }
 
-    /// One AUTO poll: prefer AE luma, fall back to `ain0` after streak failures.
+    /// One AUTO poll.
+    ///
+    /// Signal preference, best first: the ISP luminance factor (what the stock
+    /// firmware switches on), then AE luma, then `ain0` after streak failures.
+    ///
+    /// The factor is `isp_get_cur_lum_factor() * 40 / avg_lumi` — exposure
+    /// effort per unit of achieved brightness. Because AE luma is a *regulated*
+    /// output pinned near its setpoint until the AE runs out of gain, it cannot
+    /// see dusk on its own; dividing by it is what makes the factor track real
+    /// light. See `docs/reference/vendor-day-night-implementation.md`.
     pub(crate) async fn tick(&self) {
         use std::sync::atomic::Ordering;
 
         if !self.auto_enabled.load(Ordering::SeqCst) {
+            return;
+        }
+
+        if let Some(factor) = self.ffi.get_lum_factor().await {
+            let reading = classify(
+                factor,
+                Thresholds {
+                    // Inverted against every other source here: a high factor
+                    // means the ISP is working hard, i.e. the scene is dark.
+                    day: self.cfg.lum_night_threshold,
+                    night: self.cfg.lum_day_threshold,
+                    ldr_high_is_day: false,
+                },
+            );
+            self.resolve(factor, "lum", reading).await;
             return;
         }
 
@@ -607,6 +631,12 @@ impl NightModeController {
             }
         };
 
+        self.resolve(raw, src, reading).await;
+    }
+
+    /// Act on one classified sample: log it, decide, apply, and retry a pending
+    /// ISP sync. Shared by every signal source so they cannot drift apart.
+    async fn resolve(&self, raw: i32, src: &'static str, reading: Option<DayNight>) {
         self.log_sample(raw, src, reading).await;
 
         let (target, unsynced) = {
@@ -960,6 +990,8 @@ mod tests {
             barrier_isp.wait();
             -1
         });
+        // No ISP luminance factor: these exercise the AE and ain0 fallbacks.
+        ffi.expect_get_lum_factor().returning(|| None);
         ffi.expect_get_ae_luma().times(1..).returning(|| None);
 
         let ctl = Arc::new(NightModeController::new(
@@ -1028,6 +1060,8 @@ mod tests {
 
         let mut ffi = MockImagingHalTrait::new();
         // Below ae_night_threshold (8); ain0=1500 would otherwise be day.
+        // No ISP luminance factor: these exercise the AE and ain0 fallbacks.
+        ffi.expect_get_lum_factor().returning(|| None);
         ffi.expect_get_ae_luma().times(1).returning(|| Some(1));
         ffi.expect_set_ir_filter()
             .withf(|enabled| *enabled)
@@ -1048,6 +1082,101 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_tick_prefers_the_lum_factor_and_reads_it_dark_when_high() {
+        use crate::hal::common::imaging::MockImagingHalTrait;
+        use crate::onvif::types::common::IrCutFilterMode;
+
+        // The factor runs opposite to every other source: high = dark. A value
+        // above lum_night_threshold must mean night even though the same number
+        // read as AE luma would be broad daylight, and AE must not be consulted
+        // at all while the factor is available.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let paths = NodePaths::rooted(dir.path(), dir.path());
+        seed_gpio_nodes(&paths);
+
+        let mut ffi = MockImagingHalTrait::new();
+        ffi.expect_get_lum_factor()
+            .times(1)
+            .returning(|| Some(9000));
+        ffi.expect_get_ae_luma().never();
+        ffi.expect_set_ir_filter()
+            .withf(|enabled| *enabled)
+            .times(1)
+            .returning(|_| 0);
+
+        let ctl = NightModeController::new(
+            paths,
+            unlocked_config(),
+            std::sync::Arc::new(ffi),
+            IrCutFilterMode::AUTO,
+            None,
+        );
+
+        ctl.tick().await;
+        assert_eq!(ctl.current_mode().await, Some(DayNight::Night));
+    }
+
+    #[tokio::test]
+    async fn test_tick_reads_a_low_lum_factor_as_day() {
+        use crate::hal::common::imaging::MockImagingHalTrait;
+        use crate::onvif::types::common::IrCutFilterMode;
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let paths = NodePaths::rooted(dir.path(), dir.path());
+        seed_gpio_nodes(&paths);
+
+        let mut ffi = MockImagingHalTrait::new();
+        // Below lum_day_threshold (2048): the ISP is barely working, so it is bright.
+        ffi.expect_get_lum_factor().times(1).returning(|| Some(500));
+        ffi.expect_set_ir_filter()
+            .withf(|enabled| !*enabled)
+            .times(1)
+            .returning(|_| 0);
+
+        let ctl = NightModeController::new(
+            paths,
+            unlocked_config(),
+            std::sync::Arc::new(ffi),
+            IrCutFilterMode::AUTO,
+            None,
+        );
+
+        ctl.tick().await;
+        assert_eq!(ctl.current_mode().await, Some(DayNight::Day));
+    }
+
+    #[tokio::test]
+    async fn test_tick_holds_inside_the_lum_hysteresis_band() {
+        use crate::hal::common::imaging::MockImagingHalTrait;
+        use crate::onvif::types::common::IrCutFilterMode;
+
+        // 2048..6400 is the vendor's hysteresis band; nothing may move there,
+        // and the AE fallback must not be reached just because the factor was
+        // indeterminate — that would reintroduce dusk oscillation.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let paths = NodePaths::rooted(dir.path(), dir.path());
+        seed_gpio_nodes(&paths);
+
+        let mut ffi = MockImagingHalTrait::new();
+        ffi.expect_get_lum_factor()
+            .times(1)
+            .returning(|| Some(4000));
+        ffi.expect_get_ae_luma().never();
+        // No set_ir_filter expectation: any transition fails the test.
+
+        let ctl = NightModeController::new(
+            paths,
+            unlocked_config(),
+            std::sync::Arc::new(ffi),
+            IrCutFilterMode::AUTO,
+            None,
+        );
+
+        ctl.tick().await;
+        assert_eq!(ctl.current_mode().await, None);
+    }
+
+    #[tokio::test]
     async fn test_tick_falls_back_to_ain0_after_three_ae_failures() {
         use crate::hal::common::imaging::MockImagingHalTrait;
         use crate::onvif::types::common::IrCutFilterMode;
@@ -1058,6 +1187,8 @@ mod tests {
         std::fs::write(paths.light_sensor(), "100").unwrap();
 
         let mut ffi = MockImagingHalTrait::new();
+        // No ISP luminance factor: these exercise the AE and ain0 fallbacks.
+        ffi.expect_get_lum_factor().returning(|| None);
         ffi.expect_get_ae_luma().times(3).returning(|| None);
         ffi.expect_set_ir_filter()
             .withf(|enabled| *enabled)
@@ -1101,6 +1232,8 @@ mod tests {
         std::fs::write(paths.light_sensor(), "100").unwrap();
 
         let mut ffi = MockImagingHalTrait::new();
+        // No ISP luminance factor: these exercise the AE and ain0 fallbacks.
+        ffi.expect_get_lum_factor().returning(|| None);
         ffi.expect_get_ae_luma().times(3).returning(|| None);
         // No set_ir_filter expectation: the fallback must never run.
 
@@ -1130,6 +1263,8 @@ mod tests {
         std::fs::write(paths.light_sensor(), "100").unwrap();
 
         let mut ffi = MockImagingHalTrait::new();
+        // No ISP luminance factor: these exercise the AE and ain0 fallbacks.
+        ffi.expect_get_lum_factor().returning(|| None);
         ffi.expect_get_ae_luma().times(5).returning({
             let mut calls = 0u8;
             move || {
@@ -1181,6 +1316,8 @@ mod tests {
 
         let mut ffi = MockImagingHalTrait::new();
         // Below ae_night_threshold (8): a dark scene, agreeing with the stale lamp.
+        // No ISP luminance factor: these exercise the AE and ain0 fallbacks.
+        ffi.expect_get_lum_factor().returning(|| None);
         ffi.expect_get_ae_luma().times(1).returning(|| Some(1));
         ffi.expect_set_ir_filter()
             .withf(|enabled| *enabled)
@@ -1214,6 +1351,8 @@ mod tests {
         seed_gpio_nodes(&paths);
 
         let mut ffi = MockImagingHalTrait::new();
+        // No ISP luminance factor: these exercise the AE and ain0 fallbacks.
+        ffi.expect_get_lum_factor().returning(|| None);
         ffi.expect_get_ae_luma().times(3).returning(|| Some(1)); // dark scene
         let mut calls = 0u8;
         ffi.expect_set_ir_filter()
@@ -1256,6 +1395,8 @@ mod tests {
         std::fs::create_dir(paths.node(Node::IrCutA)).expect("create dir ircut_a");
 
         let mut ffi = MockImagingHalTrait::new();
+        // No ISP luminance factor: these exercise the AE and ain0 fallbacks.
+        ffi.expect_get_lum_factor().returning(|| None);
         ffi.expect_get_ae_luma().times(2).returning(|| Some(1)); // dark scene
         ffi.expect_set_ir_filter()
             .withf(|enabled| *enabled)
@@ -1785,6 +1926,8 @@ mod tests {
         std::fs::write(paths.light_sensor(), "306").unwrap();
 
         let mut ffi = MockImagingHalTrait::new();
+        // No ISP luminance factor: these exercise the AE and ain0 fallbacks.
+        ffi.expect_get_lum_factor().returning(|| None);
         ffi.expect_get_ae_luma().times(1).returning(|| Some(42));
 
         let ctl = NightModeController::new(

@@ -52,6 +52,13 @@ pub(crate) trait ImagingHalTrait: Send + Sync {
     async fn set_wdr(&self, enabled: bool) -> i32;
     /// AE average luma (`current_calc_avg_lumi`), or `None` if unavailable.
     async fn get_ae_luma(&self) -> Option<u8>;
+    /// The vendor's day/night luminance ratio, or `None` if unavailable.
+    ///
+    /// `isp_get_cur_lum_factor() * 40 / avg_lumi` — exposure effort per unit of
+    /// achieved brightness, so **higher means darker**. This is the signal the
+    /// stock firmware switches on; `get_ae_luma` alone is AE-regulated and
+    /// cannot see dusk. See `docs/reference/vendor-day-night-implementation.md`.
+    async fn get_lum_factor(&self) -> Option<i32>;
 }
 
 /// Validate ONVIF imaging parameter range (0.0-100.0).

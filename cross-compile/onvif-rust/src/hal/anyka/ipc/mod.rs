@@ -275,6 +275,7 @@ const CMD_ISP_SET_SHARPNESS: i32 = 103;
 const CMD_ISP_SET_IR_FILTER: i32 = 104;
 const CMD_ISP_SET_WDR: i32 = 105;
 const CMD_ISP_GET_AE_LUMA: i32 = 106;
+const CMD_ISP_GET_LUM_FACTOR: i32 = 107;
 const CMD_GET_ERROR_NO: i32 = 200;
 const CMD_GET_ERROR_STR: i32 = 201;
 
@@ -538,6 +539,7 @@ impl AnykaIpc {
             CMD_ISP_SET_IR_FILTER => "ISP_SET_IR_FILTER",
             CMD_ISP_SET_WDR => "ISP_SET_WDR",
             CMD_ISP_GET_AE_LUMA => "ISP_GET_AE_LUMA",
+            CMD_ISP_GET_LUM_FACTOR => "ISP_GET_LUM_FACTOR",
             CMD_GET_ERROR_NO => "GET_ERROR_NO",
             CMD_GET_ERROR_STR => "GET_ERROR_STR",
             CMD_HELLO => "HELLO",

@@ -38,6 +38,10 @@ impl ImagingHalTrait for StubImagingHal {
     async fn get_ae_luma(&self) -> Option<u8> {
         None
     }
+
+    async fn get_lum_factor(&self) -> Option<i32> {
+        None
+    }
 }
 
 #[cfg(test)]

@@ -187,6 +187,33 @@ impl AppConfig {
             100.0,
         );
 
+        // Night thresholds. Ordering, not range, is what matters: each pair
+        // must leave a hysteresis band between them, and an inverted pair
+        // classifies every reading as both day and night, which `classify`
+        // resolves to whichever branch it tests first. That is a camera
+        // oscillating at every poll, so refuse the config instead.
+        let night = &self.imaging.night;
+        if night.ae_night_threshold >= night.ae_day_threshold {
+            errors.push(format!(
+                "imaging.night.ae_night_threshold ({}) must be below ae_day_threshold ({})",
+                night.ae_night_threshold, night.ae_day_threshold
+            ));
+        }
+        // The luminance factor runs the other way: high means dark.
+        if night.lum_day_threshold >= night.lum_night_threshold {
+            errors.push(format!(
+                "imaging.night.lum_day_threshold ({}) must be below lum_night_threshold ({})",
+                night.lum_day_threshold, night.lum_night_threshold
+            ));
+        }
+        if let (Some(day), Some(n)) = (night.day_threshold, night.night_threshold)
+            && n >= day
+        {
+            errors.push(format!(
+                "imaging.night.night_threshold ({n}) must be below day_threshold ({day})"
+            ));
+        }
+
         // Discovery
         range(
             &mut errors,
@@ -665,6 +692,14 @@ pub struct NightConfig {
     pub ae_day_threshold: i32,
     /// At or below this AE luma, treat as night.
     pub ae_night_threshold: i32,
+    /// At or above this ISP luminance factor, treat as night.
+    ///
+    /// The factor is exposure effort per unit brightness, so it runs the
+    /// opposite way to AE luma: high means dark. Defaults are the vendor's own
+    /// `[autoir]` values, present in `/etc/jffs2/anyka_cfg.ini` on every camera.
+    pub lum_night_threshold: i32,
+    /// At or below this ISP luminance factor, treat as day.
+    pub lum_day_threshold: i32,
 }
 
 impl Default for NightConfig {
@@ -681,6 +716,10 @@ impl Default for NightConfig {
             // Calibrated on .198 (2026-08-04): room≈34, dark-box≈0..1.
             ae_day_threshold: 28,
             ae_night_threshold: 8,
+            // The vendor's own thresholds, read out of every camera's
+            // `[autoir]` block: day_to_night_lum / night_to_day_lum.
+            lum_night_threshold: 6400,
+            lum_day_threshold: 2048,
         }
     }
 }

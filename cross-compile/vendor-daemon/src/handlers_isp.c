@@ -144,3 +144,79 @@ int handle_isp_get_ae_luma(int fd, const uint8_t *req, uint32_t req_len)
     log_debug("[isp] get_ae_luma vi=%p luma=%u", vi, (unsigned)luma);
     return send_response(fd, STATUS_OK, &luma, 1);
 }
+
+/*
+ * isp_get_cur_lum_factor - the ISP's current luminance factor.
+ *
+ * Declared here rather than included: no vendor header we ship declares it, but
+ * libplat_vi.so exports it (`T isp_get_cur_lum_factor`), and the copy on the
+ * cameras is byte-identical to cross-compile/vendor-daemon/lib/libplat_vi.so.
+ * Prototype from anyka_reference/platform/libplat/src/include/isp_basic.h:300.
+ */
+extern int isp_get_cur_lum_factor(void);
+
+/**
+ * handle_isp_get_lum_factor - Return the vendor's day/night luminance ratio.
+ *
+ * Reproduces calc_cur_lumi() from the stock firmware
+ * (anyka_reference/platform/libplat/src/vpss/ak_vpss_isp.c:205):
+ *
+ *     lum_factor = isp_get_cur_lum_factor() * 40 / avg_lumi
+ *
+ * avg_lumi is the AE loop's *regulated* output, pinned near its setpoint until
+ * the AE runs out of gain, which is why it is useless alone as a light meter.
+ * Dividing the ISP's luminance factor by it yields exposure effort per unit of
+ * achieved brightness, so HIGHER MEANS DARKER. The stock thresholds are already
+ * on every camera in /etc/jffs2/anyka_cfg.ini [autoir]: day_to_night_lum = 6400,
+ * night_to_day_lum = 2048, and the gap between them is the hysteresis band.
+ *
+ * See docs/reference/vendor-day-night-implementation.md.
+ *
+ * Empty request. Response payload: [i32 lum_factor] = 4 bytes.
+ */
+int handle_isp_get_lum_factor(int fd, const uint8_t *req, uint32_t req_len)
+{
+    void *vi;
+    struct vpss_isp_ae_run_info info;
+    int avg_lumi;
+    int raw_factor;
+    int32_t resp[1];
+
+    (void)req;
+    (void)req_len;
+
+    if (isp_first_vi(&vi) != 0) {
+        log_warn("[isp] get_lum_factor: no VI registered");
+        return send_response(fd, STATUS_ERROR, NULL, 0);
+    }
+
+    /* isp_get_cur_lum_factor() returns -1 on three separate failure paths
+     * (uninitialised fps config, bad high_fps_exp_time, AE stat read failure --
+     * isp_basic.c:2403). It MUST NOT be forwarded: a negative factor is below
+     * every day threshold, so the caller would read "bright" and switch night
+     * vision off the moment the ISP hiccups. Report unavailable and let the
+     * caller hold its current mode. The vendor tolerates -1 here only because
+     * its AWB gate is a second opinion; we have no such gate. */
+    raw_factor = isp_get_cur_lum_factor();
+    if (raw_factor <= 0) {
+        log_warn("[isp] get_lum_factor: isp_get_cur_lum_factor failed (%d)", raw_factor);
+        return send_response(fd, STATUS_ERROR, NULL, 0);
+    }
+
+    memset(&info, 0, sizeof(info));
+    if (ak_vpss_isp_get_ae_run_info(vi, &info) != 0) {
+        log_warn("[isp] get_lum_factor: ak_vpss_isp_get_ae_run_info failed");
+        return send_response(fd, STATUS_ERROR, NULL, 0);
+    }
+
+    /* The vendor's own guard (ak_vpss_isp.c:216): a zero reading would divide by
+     * zero, and 40 is the AE setpoint it substitutes. */
+    avg_lumi = (int)info.current_calc_avg_lumi;
+    if (avg_lumi == 0)
+        avg_lumi = 40;
+
+    resp[0] = (int32_t)(raw_factor * 40 / avg_lumi);
+    log_debug("[isp] get_lum_factor vi=%p raw=%d avg_lumi=%d factor=%d",
+              vi, raw_factor, avg_lumi, (int)resp[0]);
+    return send_response(fd, STATUS_OK, resp, sizeof(resp));
+}
