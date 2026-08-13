@@ -487,7 +487,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_send_httpflv_prior_frames_no_audio_no_bootstrap_emits_video_header_only() {
+    async fn test_send_httpflv_prior_frames_no_audio_no_bootstrap_emits_metadata_and_video_header()
+    {
         let (tx, mut rx) = streaming_lib::frame_data_channel();
         let mut remuxer = ValidationHttpFlvRemuxer::new(
             vec![0x67, 0x42, 0x00, 0x1e],
