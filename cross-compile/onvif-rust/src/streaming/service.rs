@@ -900,6 +900,33 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_send_prior_data_httpflv_missing_sps_requests_idr_and_errs() {
+        let (bridge, handler) = make_main_handler();
+        expect_idr_requests(&bridge, true, 1);
+        let (frame_tx, mut frame_rx) = streaming_lib::frame_data_channel();
+        let sender = DataSender::Frame { sender: frame_tx };
+
+        let result = handler
+            .send_prior_data(sender, SubscribeType::HttpFlvPull)
+            .await;
+        assert!(result.is_err());
+        assert!(frame_rx.try_recv().is_err()); // no MediaInfo on refuse path
+    }
+
+    #[tokio::test]
+    async fn test_send_prior_data_httpflv_missing_sps_requests_idr_only_once() {
+        let (bridge, handler) = make_main_handler();
+        expect_idr_requests(&bridge, true, 1);
+        for _ in 0..2 {
+            let (frame_tx, _frame_rx) = streaming_lib::frame_data_channel();
+            let sender = DataSender::Frame { sender: frame_tx };
+            let _ = handler
+                .send_prior_data(sender, SubscribeType::HttpFlvPull)
+                .await;
+        }
+    }
+
+    #[tokio::test]
     async fn test_live_stream_handler_send_information_sdp() {
         let (bridge, handler) = make_main_handler();
 
