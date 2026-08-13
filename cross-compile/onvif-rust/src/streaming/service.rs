@@ -127,6 +127,15 @@ impl LiveStreamHandler {
 
         Ok(())
     }
+
+    /// Coalesced IDR kick: at most one request until SPS/PPS are cached again.
+    fn request_idr_once(&self) {
+        if !self.idr_requested.swap(true, Ordering::Relaxed)
+            && let Some(requester) = self.bridge.idr_requester.read().deref()
+        {
+            requester.request_idr(self.is_main);
+        }
+    }
 }
 
 #[async_trait]
@@ -156,6 +165,25 @@ impl TStreamHandler for LiveStreamHandler {
                 0
             };
 
+            let sps = stream.sps.read().deref().clone();
+            let pps = stream.pps.read().deref().clone();
+
+            // HTTP-FLV remux needs SPS/PPS for the sequence header. Refuse
+            // before MediaInfo so the client does not get a half-open FLV
+            // session; kick IDR once so the cache can fill for a retry.
+            if matches!(sub_type, SubscribeType::HttpFlvPull)
+                && (sps.is_none() || pps.is_none())
+            {
+                tracing::error!(
+                    stream = stream_name,
+                    has_sps = sps.is_some(),
+                    has_pps = pps.is_some(),
+                    "HTTP-FLV subscribe refused: SPS/PPS missing"
+                );
+                self.request_idr_once();
+                return Err("http-flv: SPS/PPS not ready".to_string().into());
+            }
+
             let media_info = MediaInfo {
                 audio_clock_rate,
                 video_clock_rate: 90000,
@@ -163,15 +191,13 @@ impl TStreamHandler for LiveStreamHandler {
             };
             send_frame(&frame_sender, FrameData::MediaInfo { media_info })?;
 
-            let sps = stream.sps.read().deref().clone();
-            let pps = stream.pps.read().deref().clone();
             let bootstrap_idr = stream.bootstrap_idr.read().deref().clone();
+            let has_idr = bootstrap_idr.is_some();
 
             let has_sps = sps.is_some();
             let has_pps = pps.is_some();
-            let has_idr = bootstrap_idr.is_some();
-
             if !has_sps || !has_pps {
+                // RTSP path: still Ok + MediaInfo; client may retry DESCRIBE.
                 // error!: the subscriber gets a black screen, and at the shipped
                 // "error" log level a warn! here is invisible.
                 tracing::error!(
@@ -183,6 +209,8 @@ impl TStreamHandler for LiveStreamHandler {
             }
 
             if let (Some(sps), Some(pps)) = (sps, pps) {
+                // Parameter sets present: allow a future IDR kick if they vanish.
+                self.idr_requested.store(false, Ordering::Relaxed);
                 tracing::debug!(
                     stream = stream_name,
                     sps_size = sps.len(),
@@ -260,11 +288,7 @@ impl TStreamHandler for LiveStreamHandler {
             // the new SDP up already exists and needs no second knob. Coalesced
             // via `idr_requested`: only one IDR is asked for until SPS/PPS
             // actually appear, otherwise every poll re-kicks the encoder.
-            if !self.idr_requested.swap(true, Ordering::Relaxed)
-                && let Some(requester) = self.bridge.idr_requester.read().deref()
-            {
-                requester.request_idr(self.is_main);
-            }
+            self.request_idr_once();
         }
     }
 }
