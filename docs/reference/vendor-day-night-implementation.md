@@ -323,6 +323,39 @@ it only as a status indicator via `led_status.sh` (off / blink 200 / blink 2000)
 > **Measurement caveat:** AE re-ramps for tens of seconds after any mode or lamp change.
 > Frames grabbed ~5 s after a change read low and can invert the comparison. Allow 30 s.
 
+## 9. Live ISP AE state, measured on `.121` 2026-08-14 01:5x
+
+First capture through the new `CMD_ISP_GET_AE_ATTR`, both modes, 30 s settle:
+
+| field | night | day | night conf | day conf |
+|---|---|---|---|---|
+| `exp_time_max` | **2250** | **1500** | 2250 | 1500 |
+| `a_gain_max` | 16384 | 16384 | — | — |
+| `target_lumiance` | 55 | 35 | — | — |
+| `ae_luma` (achieved) | 3 | 2 | | |
+
+**The day/night switch is complete and correct.** `exp_time_max` tracks the sensor conf
+exactly in both directions. This is outcome 1 of the gate: the profile really is applied.
+
+Three findings that change the picture:
+
+1. **`a_gain_max` does not change between profiles**, and at 16384 it is not a restrictive
+   ceiling. The conf's `low_light_gain` (24 day / 10 night) is therefore **a different
+   parameter** — an AE algorithm envelope, not the hard gain limit. The working hypothesis
+   that the night profile starves the image of gain is **disproved.**
+2. **`target_lumiance` rises 35 → 55 at night.** The night profile asks the AE for a
+   *brighter* image than the day profile does, the opposite of a deliberate darkening.
+3. **AE is railed in both modes** — achieved luma 3 against a target of 55 at night, 2
+   against 35 by day. With that much gain headroom unused, the constraint is not the ISP
+   configuration at all: not enough light is reaching the sensor.
+
+Consequence: overriding `a_gain_max` (the planned Task 5) is **not justified** — it is not
+the binding constraint. The next question is why AE cannot converge with 16384 of gain
+available, which points at exposure time or the sensor's own limits rather than the profile.
+
+Note the vendor's `calc_cur_lumi` divides by a hardcoded `40`, while this camera's actual
+`target_lumiance` is 55 at night and 35 by day. The constant is not the AE target.
+
 ## 9. What to change
 
 1. **Expose the vendor's signal.** `handle_isp_get_ae_luma` already calls
