@@ -15,9 +15,26 @@ was what we set out to find.
    AWB gate, multi-sample voting, a stability check, and an early lock release. It also has
    no ISP mode read-back, and discards most of the AE run-info struct.
 
+3. **Amended 2026-08-14 (evening): gap (2) is a live defect, not a theoretical shortfall.**
+   `.127` oscillates day↔night on a 30-minute cycle all night, spending half of it in Day
+   mode at night, i.e. showing black frames. Cause: the AE luma we switch on is a regulated
+   servo output, and in Night mode our own IR lamp drives it back to its setpoint (~50, well
+   above `ae_day_threshold`), so the camera reads "day", switches, goes dark, reads "night",
+   and switches back. Full evidence in
+   `docs/reference/vendor-day-night-implementation.md` §10.
+
 These are independent. **None of the (2) gaps would make the night image brighter** — they
 govern *when* we switch, not what the image looks like afterwards. That distinction drives
 the whole design: two tracks, sharing one new capability.
+
+Finding (3) does not change the design; it changes the priority and the justification.
+Track B stops being "catch up with the vendor" and becomes the fix for a reproducible
+defect on every board whose IR lamp works. It also settles two questions the design left
+open: **B1 is the mechanism that matters** (chroma collapses under IR, so the colour bins
+refuse consent however bright the frame looks), and **B2 voting is irrelevant to this bug**
+(all N samples agree on the same lie). Threshold tuning cannot help either — no threshold
+separates a servo output pinned at its setpoint in daylight from the same output pinned at
+its setpoint under IR.
 
 ## Constraints established before designing
 
@@ -122,6 +139,29 @@ currently works. They are enabled one at a time on hardware.
 
 A classification commits only if the colour statistics agree. This is the vendor's second
 opinion, and the reason it tolerates a `-1` luminance factor where we cannot.
+
+**Amended 2026-08-14: measure the bins before gating on them.** The vendor's `night_cnt`
+(1200) and `day_cnt` (600000) are calibration for the vendor's AWB tuning, and nothing in
+the plan ever logged a bin. Shipping the gate straight onto those numbers risks the
+opposite defect from the one it fixes: if the night ISP profile leaves AWB idle, the bins
+never rise, the gate never permits night→day, and the camera sticks in night. Stuck-in-night
+and flapping look nothing alike, but both come from the same unmeasured number, and each
+wrong guess costs a full night to observe.
+
+So Task 6 lands the IPC command *and* a log line — the ten bins on the existing rate-limited
+`night sample` line, plus the same bins in `VisionDiagnostics` — with no gate and no
+behaviour change. One night on `.127` then answers both questions at once: whether AWB is
+alive under IR, and what the thresholds should be. Task 7 sets them from that data.
+
+**Contingency if the bins do not separate — the lamp-off peek.** If AWB proves idle or
+indeterminate under IR, the fallback is to remove the contamination rather than gate around
+it: before honouring a night→day decision, switch the illuminators off, poll the source
+every 200 ms until two consecutive reads differ by less than 2 (or a `peek_max_ms` ceiling
+elapses), restore the lamps, and decide on the peeked value. Rate-limited to once per
+`peek_interval_ms` (default `lock_time_ms`), it costs one short dark blink per lock window
+and needs no vendor symbols at all. It is deliberately *not* being built now: it duplicates
+what B1 is designed to do, and it is only justified if B1's measurement says the colour
+statistics cannot carry the decision.
 
 ### B2/B3: voting, with the lock release folded in
 

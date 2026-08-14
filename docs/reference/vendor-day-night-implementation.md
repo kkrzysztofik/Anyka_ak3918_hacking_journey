@@ -362,12 +362,81 @@ Note the vendor's `calc_cur_lumi` divides by a hardcoded `40`, while this camera
    `ak_vpss_isp_get_ae_run_info()` and fills a struct containing `current_darked_flag`,
    `current_a_gain`, `current_exp_time`, then returns **one byte**. Widening that response
    is nearly free and gives both the diagnostic and the ISP-profile read-back.
-2. **Better: wrap `ak_vpss_isp_get_auto_day_night_level(pre_ir_level)`** in one new IPC
-   command. It returns 0 night / 1 day / -1 unknown and contains the ratio, the AWB gate,
-   the voting and the lock. Adopting it *deletes* our `classify`/`decide`/threshold config
-   rather than adding to it, and comes pre-calibrated by the vendor for this sensor.
-   It requires `ak_vpss_isp_set_auto_day_night_param()` to be called first, from the
-   `[autoir]` block that is already on every camera.
+2. ~~**Better: wrap `ak_vpss_isp_get_auto_day_night_level(pre_ir_level)`**~~ **Not
+   actionable — see §11.** The function is declared in the headers we ship but is not
+   exported by any library we have, and the camera rootfs has no `libplat_vpss.so` at all.
+   The vendor's soft-IR algorithm is linked statically inside `anyka_ipc` and cannot be
+   called from our processes. Reimplementing it on `isp_get_statinfo` is the only route.
 3. **Consider `WHITE_LED` as an opt-in night illuminator.** `Node::WhiteLed`, the caps
    probe and `set_white_light` already exist; only `plan()` never writes it. Opt-in, since
    on an outdoor camera a floodlight is not a sane default.
+
+## 10. The missing AWB gate is a live defect, not a gap — `.127`, 2026-08-14
+
+Observed on `.127` as a black picture that repaired itself minutes later. It is not an
+intermittent failure to switch: it is a **30-minute oscillation**, half of it spent in Day
+mode at night, i.e. filter in, lamp off, black frames.
+
+Four consecutive cycles out of `/mnt/logs/onvif-debug.log.2026-08-14`:
+
+```text
+12:08:49  sample raw=2  ae → Night     applied Day→Night
+12:08:59  sample raw=60 ae → Day       (10 s later, same scene)
+12:23:59                               applied Night→Day
+12:24:09  sample raw=1  ae → Night
+12:39:09                               applied Day→Night
+12:39:19  sample raw=52 ae → Day
+12:54:19                               applied Night→Day
+13:09:29                               applied Day→Night
+13:19:39  sample raw=49 ae → Day
+```
+
+Every apply is exactly `lock_time_ms` (900 s) after the decision that caused it. The lock is
+not hysteresis here — it is the oscillation period. Confirmed live at 13:20 UTC:
+`IR_LED=1`, `ircut_a=0` (in Night), AE reading 49, i.e. already committed to the next flip.
+
+**Mechanism — the camera meters its own illuminator.** `current_calc_avg_lumi` is a
+regulated servo output. In Night the filter is out and `IR_LED` is on, so the AE reaches its
+setpoint and reads ~50, which is `>= ae_day_threshold` (28) → "day" → switch to Day → filter
+in, lamp off → reads 1–2, `<= ae_night_threshold` (8) → "night" → switch back. The actuator
+feeds the sensor.
+
+Three consequences worth keeping:
+
+1. **Threshold tuning cannot fix this class of bug.** AE sits near its setpoint in daylight
+   *and* in IR-lit night. No pair of thresholds separates them, because the signal is
+   regulated. The same argument kills `lum_factor`: the lamp lowers exposure effort and
+   raises achieved luma, so the ratio is contaminated from both ends.
+2. **Multi-sample voting (Task 8) does not touch it.** All N samples agree on the same lie.
+3. **The AWB gate (Task 7) is the defence**, and now has a hardware defect to justify it
+   rather than a symmetry argument: chroma collapses under IR, so the colour bins withhold
+   consent no matter how bright the frame looks. That is precisely why the stock firmware
+   never flips on luminance alone.
+
+`.121` hides this bug: its IR illuminator emits nothing, so night AE rails at 2–3, no day
+classification is ever produced, and the loop never closes. Any board whose lamp works is
+exposed.
+
+**Open risk, unmeasured:** if the night ISP profile leaves AWB idle, the bins never rise and
+the gate can never permit night→day — stuck in night instead of flapping. The bins must be
+logged across one night before the gate is enabled.
+
+## 11. What is actually callable — symbol availability, 2026-08-14
+
+Checked with the vendored ARM `nm` against the libraries we ship and the camera's own
+rootfs. The headers in `anyka_reference` describe a superset of what exists here.
+
+| symbol | where | usable |
+|---|---|---|
+| `isp_get_statinfo` | `libplat_vi.so` (shipped) | **yes** — the planned AWB route |
+| `isp_get_cur_lum_factor` | `libplat_vi.so` (shipped) | yes, already used by `CMD_ISP_GET_LUM_FACTOR` |
+| `Ak_ISP_get_awb_stat_info` | `libakispsdk.so` (shipped, byte-identical to the camera's `/usr/lib` copy) | yes — alternative route, one library further down |
+| `ak_vpss_isp_get_ae_attr` / `_run_info` | `libplat_vpss.so` (shipped) | yes, already used |
+| `ak_vpss_isp_get_awb_stat_info` | declared in `ak_vpss.h`, **not exported** by our `libplat_vpss.so` (29 exported functions, none of them soft-IR) | no |
+| `ak_vpss_isp_get_auto_day_night_level` | same — declared, not exported | no |
+| `ak_vpss_isp_set_auto_day_night_param` | same — declared, not exported | no |
+
+`/usr/lib/libplat_vpss.so` **does not exist on `.127`**: the stock `anyka_ipc` links libplat
+statically, so the vendor's soft-IR algorithm is inside that binary and is not reachable as
+a library from any process of ours. Adopting the vendor's loop wholesale (§9 item 2) is
+therefore off the table; reimplementing it on `isp_get_statinfo` is the route that exists.

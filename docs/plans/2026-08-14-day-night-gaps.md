@@ -30,6 +30,30 @@ Run `cargo` from `cross-compile/` (the workspace root), not the repo root.
 
 **Task ordering:** Tasks 1–4 are Track A and must run in order; **Task 4 is a hardware gate that decides whether Task 5 happens at all**. Tasks 6–8 are Track B and are independent of Track A — they may be done in parallel or first.
 
+**Amended 2026-08-14 (evening):** Track B is now the priority. `.127` was found oscillating
+day↔night on a 30-minute cycle all night, black for half of it, because our AE signal is
+contaminated by our own IR lamp (reference doc §10). Track B's AWB gate is the fix.
+Consequences for the ordering above:
+
+- **Do Task 0 first** (below): stop the strobing on `.127` while the fix is built.
+- **Task 6b is new and is a second hardware gate.** Task 7 does not start until the colour
+  bins have been measured across one night and shown to separate. If they do not, the design
+  doc's peek contingency replaces Task 7.
+- **Task 8 (voting) is not a fix for this defect** — all N samples agree on the same lie.
+  Keep it last and judge it on its own merits.
+
+### Task 0: stop the strobe on `.127`
+
+Set `ir_cut_filter = "OFF"` in the active slot's `config.toml` on `.127` and restart the
+supervisor. The camera then stays in night mode: a usable grey picture instead of alternating
+15-minute blocks of grey and black.
+
+This is a stopgap on one camera, not a fix and not a fleet default — an `OFF` camera never
+attempts a transition, which is also why Task 9 must revert it before validating. Note the
+reversal in the deploy log so it does not become permanent by forgetting.
+
+---
+
 ---
 
 ## Track A — night image quality
@@ -656,6 +680,50 @@ git commit -m "feat(vendor-daemon): expose AWB colour-bin statistics over IPC"
 
 ---
 
+### Task 6b: log the bins before gating on them (added 2026-08-14)
+
+No gate, no behaviour change. This exists because Task 7's thresholds are the vendor's
+calibration for the vendor's AWB tuning, and no bin has ever been measured on our hardware.
+A gate on unmeasured numbers can stick the camera in night just as easily as it can fix the
+flap, and each wrong guess costs a full night to observe.
+
+**Files:**
+- Modify: `cross-compile/onvif-rust/src/hal/{common,anyka/ipc,stub}/imaging.rs`
+- Modify: `cross-compile/onvif-rust/src/platform/anyka/night_mode.rs`
+- Modify: `cross-compile/onvif-rust/src/platform/common/mod.rs` (`VisionDiagnostics`)
+
+**Step 1:** Add `get_awb_stat() -> Option<[i32; 10]>` to `ImagingHalTrait`, the IPC impl and
+the stub, following `get_ae_attr` exactly (`a55baf97` for the unpopulated-response guard).
+
+**Step 2:** Add the bins as a field on the existing `night sample` line in `log_sample`.
+That line is already rate-limited to `SAMPLE_LOG_INTERVAL` (10 min), so this is ~144 extra
+lines a day, not 8,600. Do **not** add a second log line or a second cadence.
+
+**Step 3:** Add `awb_cnt: Option<[i32; 10]>` to `VisionDiagnostics`, filled in
+`live_diagnostics` alongside `ae_attr` — same pattern, same `tokio::join!`.
+
+**Step 4:** Unit test: the bins reach the log/diagnostics unchanged, and a `None` from the
+HAL is not turned into zeros. Zeros and "no reading" must stay distinguishable — that
+distinction is the whole point of the measurement.
+
+**Step 5:** Deploy to `.127` and leave it for one full night with the flap still running
+(or with `ir_cut_filter = "OFF"` if the strobing is not tolerable — the bins are still
+informative, they just stop covering the day side).
+
+**Step 6:** Read the night out and record it in
+`docs/reference/vendor-day-night-implementation.md` §10:
+
+| question | how the log answers it |
+|---|---|
+| is AWB alive under IR? | do the bins change at all between lamp-on night and day? |
+| do night and day separate? | is there a threshold between the two clusters, per bin? |
+| does the vendor's 1200 / 600000 fit? | where do our clusters sit against those numbers? |
+
+**Gate: if the bins do not separate, stop and switch to the peek contingency** in the design
+doc's B1 section. Do not proceed to Task 7 on unseparated data.
+
+---
+
 ### Task 7: AWB gate in the night controller
 
 **Files:**
@@ -700,6 +768,12 @@ async fn test_awb_gate_disabled_by_default_does_not_block() {
 ```
 
 Defaults: `false`, `[1200; 5]`, `[600_000; 10]`.
+
+**Amended 2026-08-14:** those two arrays are the vendor's calibration, and they are only the
+starting point. Set them from the clusters Task 6b measured on `.127`, and record in the
+config comment which night the numbers came from — the same convention the `ain0` and AE
+thresholds already follow. If the measured clusters happen to straddle the vendor's values,
+keep the vendor's; do not re-derive numbers that already fit.
 
 **Step 4: Implement the gate**
 
@@ -785,6 +859,24 @@ git commit -m "feat(night): require unanimous multi-sample votes to switch"
 **Step 4:** Record both dusk timings in `docs/reference/vendor-day-night-implementation.md` §8 and commit.
 
 One flag at a time — a combined enable that misbehaves gives no information about which mechanism caused it.
+
+**Amended 2026-08-14 — validate on `.127`, across a whole night, against a defect:**
+
+`.127` is the camera where the flap is reproducible (§10 of the reference doc), so it is the
+one that can prove the gate works. `.121` cannot: its IR lamp emits nothing, so it never
+produced the bad transition in the first place and a clean night there proves only that we
+did no harm.
+
+- Watching one dusk is not enough. The oscillation runs all night on a 30-minute cycle, so
+  the run must cover dusk → dawn.
+- Success: **zero `to=Day` applies while the scene is dark**, and exactly one at dawn. The
+  `night sample` lines may still classify Day — that is the AE lying as before; what must
+  change is that the gate refuses to act on it.
+- Failure mode to watch for in the *other* direction: no `to=Day` apply at dawn either. That
+  is the stuck-in-night case, and it means the day-side thresholds are wrong, not that the
+  gate is broken.
+- Revert the `ir_cut_filter = "OFF"` stopgap on `.127` before this run, or the camera never
+  attempts a transition and the run measures nothing.
 
 ---
 
