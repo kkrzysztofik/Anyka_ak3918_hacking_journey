@@ -35,6 +35,23 @@ const ONVIF_MIN: f32 = 0.0;
 /// Maximum ONVIF imaging parameter value.
 const ONVIF_MAX: f32 = 100.0;
 
+/// Live ISP auto-exposure limits, as reported by the sensor profile in force.
+///
+/// Mirrors `struct vpss_isp_ae_attr` (204 bytes, ARMv5TE). Only the fields we
+/// have a use for are decoded; the rest of the struct is carried by the daemon
+/// but not modelled here.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct AeAttr {
+    pub exp_time_max: u32,
+    pub exp_time_min: u32,
+    pub d_gain_max: u32,
+    pub a_gain_max: u32,
+    pub target_lumiance: u32,
+}
+
+/// Wire size of `struct vpss_isp_ae_attr` on the camera.
+pub(crate) const AE_ATTR_WIRE_LEN: usize = 204;
+
 /// Internal trait for abstracting imaging FFI calls to enable mocking in tests.
 ///
 /// Methods are `async` so that IPC-backed implementations (e.g. `AnykaIpc`) can
@@ -59,6 +76,8 @@ pub(crate) trait ImagingHalTrait: Send + Sync {
     /// stock firmware switches on; `get_ae_luma` alone is AE-regulated and
     /// cannot see dusk. See `docs/reference/vendor-day-night-implementation.md`.
     async fn get_lum_factor(&self) -> Option<i32>;
+    /// Live ISP AE limits, or `None` if unavailable.
+    async fn get_ae_attr(&self) -> Option<AeAttr>;
 }
 
 /// Validate ONVIF imaging parameter range (0.0-100.0).

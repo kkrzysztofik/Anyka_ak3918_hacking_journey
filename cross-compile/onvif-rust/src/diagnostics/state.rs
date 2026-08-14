@@ -455,6 +455,9 @@ mod tests {
         crate::platform::VisionDiagnostics {
             mode: Some("night".to_string()),
             ae_luma: Some(42),
+            ae_a_gain_max: Some(10),
+            ae_exp_time_max: Some(2250),
+            ae_target_lumiance: Some(40),
             ain0: Some(100),
             ir_led: Some(true),
             ircut_a: Some(false),

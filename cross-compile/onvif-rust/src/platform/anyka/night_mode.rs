@@ -748,8 +748,9 @@ impl NightModeController {
         let caps = self.caps;
         let blocking = tokio::task::spawn_blocking(move || read_blocking_vision(&paths, caps));
 
-        let (ae_luma, mode, gpio) = tokio::join!(
+        let (ae_luma, ae_attr, mode, gpio) = tokio::join!(
             self.ffi.get_ae_luma(),
+            self.ffi.get_ae_attr(),
             async {
                 self.current_mode().await.map(|m| match m {
                     DayNight::Day => "day".to_string(),
@@ -770,6 +771,9 @@ impl NightModeController {
         VisionDiagnostics {
             mode,
             ae_luma,
+            ae_a_gain_max: ae_attr.map(|a| a.a_gain_max),
+            ae_exp_time_max: ae_attr.map(|a| a.exp_time_max),
+            ae_target_lumiance: ae_attr.map(|a| a.target_lumiance),
             ain0: gpio.ain0,
             ir_led: gpio.ir_led,
             ircut_a: gpio.ircut_a,
@@ -993,6 +997,8 @@ mod tests {
         // No ISP luminance factor: these exercise the AE and ain0 fallbacks.
         ffi.expect_get_lum_factor().returning(|| None);
         ffi.expect_get_ae_luma().times(1..).returning(|| None);
+        // live_diagnostics now also reads AE ceilings; not under test here.
+        ffi.expect_get_ae_attr().returning(|| None);
 
         let ctl = Arc::new(NightModeController::new(
             paths,
@@ -1929,6 +1935,8 @@ mod tests {
         // No ISP luminance factor: these exercise the AE and ain0 fallbacks.
         ffi.expect_get_lum_factor().returning(|| None);
         ffi.expect_get_ae_luma().times(1).returning(|| Some(42));
+        // live_diagnostics now also reads AE ceilings; not under test here.
+        ffi.expect_get_ae_attr().returning(|| None);
 
         let ctl = NightModeController::new(
             paths,

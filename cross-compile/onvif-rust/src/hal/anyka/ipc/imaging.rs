@@ -10,12 +10,12 @@ use tracing::error;
 
 use crate::hal::common::AK_FAILED_I32;
 use crate::hal::common::AK_SUCCESS_I32;
-use crate::hal::common::imaging::ImagingHalTrait;
+use crate::hal::common::imaging::{AE_ATTR_WIRE_LEN, AeAttr, ImagingHalTrait};
 
 use super::{
-    AnykaIpc, CMD_ISP_GET_AE_LUMA, CMD_ISP_GET_LUM_FACTOR, CMD_ISP_SET_BRIGHTNESS,
-    CMD_ISP_SET_CONTRAST, CMD_ISP_SET_IR_FILTER, CMD_ISP_SET_SATURATION, CMD_ISP_SET_SHARPNESS,
-    CMD_ISP_SET_WDR,
+    AnykaIpc, CMD_ISP_GET_AE_ATTR, CMD_ISP_GET_AE_LUMA, CMD_ISP_GET_LUM_FACTOR,
+    CMD_ISP_SET_BRIGHTNESS, CMD_ISP_SET_CONTRAST, CMD_ISP_SET_IR_FILTER, CMD_ISP_SET_SATURATION,
+    CMD_ISP_SET_SHARPNESS, CMD_ISP_SET_WDR,
 };
 
 #[async_trait]
@@ -145,6 +145,41 @@ impl ImagingHalTrait for AnykaIpc {
             }
         }
     }
+
+    async fn get_ae_attr(&self) -> Option<AeAttr> {
+        match self.request_async(CMD_ISP_GET_AE_ATTR, &[]).await {
+            // The wire contract is exactly the 204-byte struct vpss_isp_ae_attr.
+            // A short payload means a daemon/struct mismatch; decoding it would
+            // silently return offset-shifted, plausible-looking numbers.
+            Ok((status, data)) if status == AK_SUCCESS_I32 && data.len() == AE_ATTR_WIRE_LEN => {
+                let read_u32 = |offset: usize| {
+                    u32::from_le_bytes([
+                        data[offset],
+                        data[offset + 1],
+                        data[offset + 2],
+                        data[offset + 3],
+                    ])
+                };
+                Some(AeAttr {
+                    exp_time_max: read_u32(0),
+                    exp_time_min: read_u32(4),
+                    d_gain_max: read_u32(8),
+                    a_gain_max: read_u32(24),
+                    target_lumiance: read_u32(40),
+                })
+            }
+            // Same reasoning as get_ae_luma / get_lum_factor: a silent `None`
+            // is indistinguishable from a camera correctly holding its mode.
+            Ok((status, data)) => {
+                error!(status, len = data.len(), "get_ae_attr bad daemon response");
+                None
+            }
+            Err(e) => {
+                error!(error = %e, "get_ae_attr IPC failed");
+                None
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -244,6 +279,42 @@ mod tests {
         let ipc = AnykaIpc::new_with_path(&daemon.socket_path).unwrap();
         ipc.set_epochs_for_test(1, 1);
         assert_eq!(<AnykaIpc as ImagingHalTrait>::get_ae_luma(&ipc).await, None);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_get_ae_attr_decodes_gain_and_exposure_ceilings() {
+        // Field offsets are load-bearing: reading a_gain_max at the wrong offset
+        // silently returns d_gain_min, a plausible-looking number that would send
+        // the whole night-image investigation in the wrong direction.
+        let mut payload = vec![0u8; 204];
+        payload[0..4].copy_from_slice(&2250u32.to_le_bytes()); // exp_time_max
+        payload[24..28].copy_from_slice(&10u32.to_le_bytes()); // a_gain_max
+        payload[40..44].copy_from_slice(&40u32.to_le_bytes()); // target_lumiance
+
+        let daemon = FakeDaemon::start(move |cmd_id, req| {
+            assert_eq!(cmd_id, CMD_ISP_GET_AE_ATTR);
+            assert!(req.is_empty());
+            (AK_SUCCESS_I32, payload.clone())
+        });
+        let ipc = AnykaIpc::new_with_path(&daemon.socket_path).unwrap();
+        ipc.set_epochs_for_test(1, 1);
+
+        let attr = <AnykaIpc as ImagingHalTrait>::get_ae_attr(&ipc)
+            .await
+            .expect("attr");
+        assert_eq!(attr.exp_time_max, 2250);
+        assert_eq!(attr.a_gain_max, 10);
+        assert_eq!(attr.target_lumiance, 40);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_get_ae_attr_wrong_length_is_none() {
+        // A short payload means a daemon/struct mismatch. Decoding it would yield
+        // silently wrong ceilings, so reject rather than pad.
+        let daemon = FakeDaemon::start(|_c, _r| (AK_SUCCESS_I32, vec![0u8; 200]));
+        let ipc = AnykaIpc::new_with_path(&daemon.socket_path).unwrap();
+        ipc.set_epochs_for_test(1, 1);
+        assert_eq!(<AnykaIpc as ImagingHalTrait>::get_ae_attr(&ipc).await, None);
     }
 
     /// set_brightness round-trips correctly through the fake daemon.
