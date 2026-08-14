@@ -580,6 +580,13 @@ impl NightModeController {
     pub(crate) async fn tick(&self) {
         use std::sync::atomic::Ordering;
 
+        // Runs regardless of auto_enabled: a forced ON/OFF mode is only ever
+        // reached from spawn_auto_loop's start-up apply, which is not gated
+        // on auto_enabled either, so a failed ISP switch there would
+        // otherwise never be retried. Cheap when nothing is pending — see
+        // retry_pending_isp.
+        self.retry_pending_isp().await;
+
         if !self.auto_enabled.load(Ordering::SeqCst) {
             return;
         }
@@ -672,8 +679,20 @@ impl NightModeController {
 
         // A failed set_ir_filter must not be left to rot: GPIO already advanced,
         // so we do NOT re-run apply (that would re-pulse the coil). The retry
-        // below runs in the same tick, immediately after the failed apply, and
-        // on later ticks too if it still fails.
+        // runs in the same tick, immediately after the failed apply, and on
+        // later ticks too if it still fails.
+        self.retry_pending_isp().await;
+    }
+
+    /// Retry a previously failed `set_ir_filter`, if one is pending.
+    ///
+    /// GPIO already advanced when the failure was recorded, so this only
+    /// ever re-issues the ISP call — never [`Self::apply`], which would
+    /// re-pulse the ircut solenoid coil. A no-op (zero HAL calls) when
+    /// nothing is pending: [`Self::tick`] calls this every poll regardless
+    /// of `auto_enabled`, and a forced camera with nothing pending must not
+    /// add IPC traffic to the daemon's single-threaded poll loop.
+    async fn retry_pending_isp(&self) {
         let mut pending = self.isp_pending.lock().await;
         if let Some(target) = *pending {
             let isp = self
@@ -1412,6 +1431,124 @@ mod tests {
 
         ctl.tick().await; // decide holds; the retry already resolved back in tick 1
         ctl.tick().await; // re-polls only: set_ir_filter still called exactly twice
+    }
+
+    #[tokio::test]
+    async fn test_forced_mode_tick_retries_a_pending_isp_switch() {
+        use crate::hal::common::imaging::MockImagingHalTrait;
+        use crate::onvif::types::common::IrCutFilterMode;
+
+        // Regression test for the 2026-08-14 .127 bug: a forced OFF whose
+        // start-up ISP switch fails (racing a cold vendor daemon) must still
+        // be retried by tick(), even though auto_enabled is false in a
+        // forced mode. Before the fix this never drains and the camera sits
+        // with night GPIO and a day ISP profile indefinitely.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let paths = NodePaths::rooted(dir.path(), dir.path());
+        seed_gpio_nodes(&paths);
+
+        let mut ffi = MockImagingHalTrait::new();
+        let mut calls = 0u8;
+        ffi.expect_set_ir_filter()
+            .withf(|enabled| *enabled) // OFF -> Night
+            .times(2)
+            .returning(move |_| {
+                calls += 1;
+                if calls == 1 { -1 } else { 0 }
+            });
+
+        let ctl = NightModeController::new(
+            paths,
+            test_config(),
+            std::sync::Arc::new(ffi),
+            IrCutFilterMode::OFF,
+            None,
+        );
+
+        // Mirrors what spawn_auto_loop does at start-up: apply the forced
+        // mode; the ISP call fails, GPIO still advances.
+        let _ = ctl.apply(DayNight::Night).await;
+        assert_eq!(ctl.current_mode().await, None, "ISP sync still pending");
+
+        ctl.tick().await; // must retry despite auto_enabled == false
+
+        assert_eq!(ctl.current_mode().await, Some(DayNight::Night));
+    }
+
+    #[tokio::test]
+    async fn test_forced_mode_retry_does_not_re_run_apply() {
+        use crate::hal::common::imaging::MockImagingHalTrait;
+        use crate::onvif::types::common::IrCutFilterMode;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        // The retry exists because GPIO already advanced; re-running apply()
+        // would re-pulse the ircut solenoid coil. Count idr_hook invocations
+        // as a proxy for apply() calls, since apply() invokes it exactly
+        // once per successful GPIO plan.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let paths = NodePaths::rooted(dir.path(), dir.path());
+        seed_gpio_nodes(&paths);
+
+        let mut ffi = MockImagingHalTrait::new();
+        let mut calls = 0u8;
+        ffi.expect_set_ir_filter()
+            .withf(|enabled| *enabled)
+            .times(2)
+            .returning(move |_| {
+                calls += 1;
+                if calls == 1 { -1 } else { 0 }
+            });
+
+        let idr_calls = std::sync::Arc::new(AtomicUsize::new(0));
+        let idr_calls_hook = std::sync::Arc::clone(&idr_calls);
+        let ctl = NightModeController::new(
+            paths,
+            test_config(),
+            std::sync::Arc::new(ffi),
+            IrCutFilterMode::OFF,
+            Some(std::sync::Arc::new(move || {
+                idr_calls_hook.fetch_add(1, Ordering::SeqCst);
+            })),
+        );
+
+        let _ = ctl.apply(DayNight::Night).await;
+        assert_eq!(idr_calls.load(Ordering::SeqCst), 1, "apply ran once");
+
+        ctl.tick().await; // retries the ISP only; must not re-run apply()
+
+        assert_eq!(
+            idr_calls.load(Ordering::SeqCst),
+            1,
+            "retry must not call apply() again"
+        );
+        assert_eq!(ctl.current_mode().await, Some(DayNight::Night));
+    }
+
+    #[tokio::test]
+    async fn test_forced_mode_tick_makes_no_hal_calls_when_nothing_pending() {
+        use crate::hal::common::imaging::MockImagingHalTrait;
+        use crate::onvif::types::common::IrCutFilterMode;
+
+        // No expectations at all: mockall panics on any unexpected call, so
+        // this proves a forced-mode tick with nothing pending is zero HAL
+        // traffic, exactly as before this change.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let paths = NodePaths::rooted(dir.path(), dir.path());
+        seed_gpio_nodes(&paths);
+
+        let ffi = MockImagingHalTrait::new();
+
+        let ctl = NightModeController::new(
+            paths,
+            test_config(),
+            std::sync::Arc::new(ffi),
+            IrCutFilterMode::OFF,
+            None,
+        );
+
+        // Nothing has driven the hardware (spawn_auto_loop was never called),
+        // so isp_pending is None.
+        ctl.tick().await;
     }
 
     #[tokio::test]
