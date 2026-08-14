@@ -317,24 +317,23 @@ int handle_isp_get_awb_stat(int fd, const uint8_t *req, uint32_t req_len)
         return send_response(fd, STATUS_ERROR, NULL, 0);
     }
 
+    /* Unlike ak_vpss_isp_get_ae_attr (a55baf97), the vendor's ISP_AWBSTAT path
+     * (isp_basic.c ISP_AWBSTAT case -> Ak_ISP_get_awb_stat_info) never inspects
+     * total_cnt to decide success, so this return-code check is a weak signal:
+     * it can report success without a fresh AWB pass having run. We do NOT
+     * compensate with a total_cnt==0 guard -- zero counts are a legitimate
+     * per-frame reading (e.g. AWB going quiet under IR illumination is exactly
+     * what the next task measures), so mapping them to STATUS_ERROR would make
+     * "AWB is idle" indistinguishable from "the read failed". */
     memset(&info, 0, sizeof(info));
     if (isp_get_statinfo(ISP_AWBSTAT, &info, &size) != 0) {
         log_warn("[isp] get_awb_stat: isp_get_statinfo failed");
         return send_response(fd, STATUS_ERROR, NULL, 0);
     }
 
-    /* Same failure shape as the AE attr guard (commit a55baf97): the SDK call
-     * can report success without having populated the struct. A real AWB
-     * reading always has at least one non-zero colour-temperature bin, so an
-     * all-zero total_cnt is indistinguishable-from-real only if we skip this
-     * check. */
     total = 0;
     for (i = 0; i < 10; i++)
         total += info.total_cnt[i];
-    if (total == 0) {
-        log_warn("[isp] get_awb_stat: AWB stats unpopulated (all total_cnt zero)");
-        return send_response(fd, STATUS_ERROR, NULL, 0);
-    }
 
     for (i = 0; i < 10; i++)
         resp[i] = (int32_t)info.total_cnt[i];
