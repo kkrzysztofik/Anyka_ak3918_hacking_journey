@@ -453,16 +453,14 @@ impl NightModeController {
     /// read renders distinguishably from a legitimate all-zero reading.
     async fn log_sample(&self, raw: i32, src: &'static str, class: Option<DayNight>) {
         let now = std::time::Instant::now();
-        let due = {
-            let last = self.sample_log.lock().await;
-            sample_due(*last, class, now, SAMPLE_LOG_INTERVAL)
-        };
-        if !due {
-            return;
+        {
+            let mut last = self.sample_log.lock().await;
+            if !sample_due(*last, class, now, SAMPLE_LOG_INTERVAL) {
+                return;
+            }
+            *last = Some((now, class));
         }
         let awb_cnt = self.ffi.get_awb_stat().await;
-        let mut last = self.sample_log.lock().await;
-        *last = Some((now, class));
         match class {
             Some(mode) => tracing::info!(raw, src, ?mode, ?awb_cnt, "night sample"),
             None => tracing::info!(raw, src, mode = "Indeterminate", ?awb_cnt, "night sample"),

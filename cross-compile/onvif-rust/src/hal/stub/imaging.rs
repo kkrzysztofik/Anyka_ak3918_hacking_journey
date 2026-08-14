@@ -53,7 +53,7 @@ impl ImagingHalTrait for StubImagingHal {
 }
 
 #[cfg(test)]
-mod get_ae_luma_tests {
+mod stub_getter_tests {
     use super::*;
 
     #[tokio::test]
