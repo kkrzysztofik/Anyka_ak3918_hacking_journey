@@ -268,3 +268,77 @@ int handle_isp_get_ae_attr(int fd, const uint8_t *req, uint32_t req_len)
               vi, attr.a_gain_max, attr.exp_time_max, attr.target_lumiance);
     return send_response(fd, STATUS_OK, &attr, sizeof(attr));
 }
+
+/*
+ * isp_get_statinfo - read ISP statistic module data (AWB, AE, AF, 3D-NR...).
+ *
+ * Declared here rather than included: no vendor header we ship declares it, but
+ * libplat_vi.so exports it (`T isp_get_statinfo`), and the copy on the cameras
+ * is byte-identical to cross-compile/vendor-daemon/lib/libplat_vi.so.
+ * Prototype from anyka_reference/platform/libplat/src/include/isp_basic.h:100.
+ */
+extern int isp_get_statinfo(int module_id, void *buf, unsigned int *size);
+
+/*
+ * ISP_AWBSTAT = 27: counted from ISP_BB = 0 in the isp_module_id enum at
+ * anyka_reference/platform/libplat/src/include/isp_basic.h:11-45 (28 entries,
+ * ISP_AWBSTAT is the 28th, i.e. index 27). Defined locally rather than
+ * vendoring the whole enum.
+ */
+#define ISP_AWBSTAT 27
+
+_Static_assert(sizeof(struct vpss_isp_awb_stat_info) == 196, "AWB stat wire size changed");
+
+/**
+ * handle_isp_get_awb_stat - Return the ISP's live AWB colour-bin statistics.
+ *
+ * The vendor's own day/night switch never trusts luminance alone: it gates on
+ * these AWB colour-temperature bin counts (total_cnt[10]) because chroma
+ * collapses under IR illumination even when the AE loop reads "bright". This
+ * handler copies that subset out uninterpreted; the caller decodes. See
+ * docs/reference/vendor-day-night-implementation.md.
+ *
+ * Empty request. Response payload: [i32 total_cnt[10]] = 40 bytes.
+ */
+int handle_isp_get_awb_stat(int fd, const uint8_t *req, uint32_t req_len)
+{
+    void *vi;
+    struct vpss_isp_awb_stat_info info;
+    unsigned int size = 0;
+    int32_t resp[10];
+    unsigned long total;
+    int i;
+
+    (void)req;
+    (void)req_len;
+
+    if (isp_first_vi(&vi) != 0) {
+        log_warn("[isp] get_awb_stat: no VI registered");
+        return send_response(fd, STATUS_ERROR, NULL, 0);
+    }
+
+    memset(&info, 0, sizeof(info));
+    if (isp_get_statinfo(ISP_AWBSTAT, &info, &size) != 0) {
+        log_warn("[isp] get_awb_stat: isp_get_statinfo failed");
+        return send_response(fd, STATUS_ERROR, NULL, 0);
+    }
+
+    /* Same failure shape as the AE attr guard (commit a55baf97): the SDK call
+     * can report success without having populated the struct. A real AWB
+     * reading always has at least one non-zero colour-temperature bin, so an
+     * all-zero total_cnt is indistinguishable-from-real only if we skip this
+     * check. */
+    total = 0;
+    for (i = 0; i < 10; i++)
+        total += info.total_cnt[i];
+    if (total == 0) {
+        log_warn("[isp] get_awb_stat: AWB stats unpopulated (all total_cnt zero)");
+        return send_response(fd, STATUS_ERROR, NULL, 0);
+    }
+
+    for (i = 0; i < 10; i++)
+        resp[i] = (int32_t)info.total_cnt[i];
+
+    log_debug("[isp] get_awb_stat vi=%p total=%lu", vi, total);
+    return send_response(fd, STATUS_OK, resp, sizeof(resp));
+}

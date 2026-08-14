@@ -251,6 +251,31 @@ struct vpss_isp_sensor_reg_info {
     unsigned short value;
 };
 
+/*
+ * struct vpss_isp_awb_stat_info - AWB colour-bin statistics.
+ *
+ * Copied verbatim from
+ * cross-compile/anyka_reference/platform/libplat/include/ak_vpss.h:292.
+ * Must stay complete (not just total_cnt) because isp_get_statinfo() writes
+ * the whole struct into whatever buffer it is given.
+ */
+struct vpss_isp_awb_stat_info {
+    // White balance statistics results
+    unsigned long  total_R[10];    // Total R for 10 color temperatures
+    unsigned long  total_G[10];    // Total G for 10 color temperatures
+    unsigned long  total_B[10];    // Total B for 10 color temperatures
+    unsigned long  total_cnt[10];  // Total count for 10 color temperatures
+
+    // AWB gain results from auto white balance algorithm
+    unsigned short  r_gain;    // Red gain
+    unsigned short  g_gain;    // Green gain
+    unsigned short  b_gain;    // Blue gain
+    unsigned short  r_offset;  // Red offset
+    unsigned short  g_offset;  // Green offset
+    unsigned short  b_offset;  // Blue offset
+    unsigned short  current_colortemp_index;   // Current color temperature index
+    unsigned short  colortemp_stable_cnt[10];  // Stable frame count for 10 color temperatures
+};
 
 /* NOTE: Functions below are verified against libplat_vpss.so exports (libre_anyka_app SDK) */
 
