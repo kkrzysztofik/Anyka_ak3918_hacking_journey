@@ -26,7 +26,20 @@ Read the design doc. Two things in it are load-bearing and easy to violate:
 export PATH="/home/kmk/dev/anyka-dev/toolchain/arm-anykav200-crosstool-ng/bin:$PATH"
 ```
 
-Run `cargo` from `cross-compile/` (the workspace root), not the repo root.
+Run `cargo` from `cross-compile/` (the workspace root), not the repo root — **for host commands
+only** (tests, clippy, `--target x86_64-unknown-linux-gnu`).
+
+**The ARM release build must run from `cross-compile/onvif-rust/` instead.** The ARM
+linker and sysroot live in `cross-compile/onvif-rust/.cargo/config.toml` and there is no
+`cross-compile/.cargo/`; cargo searches for config upward from the CWD and never down into a
+member crate, so from the workspace root the target's `linker` is unset and it silently falls
+back to the host toolchain. The failure looks like a broken sysroot
+(`error adding symbols: file in wrong format`) but is only a working-directory problem:
+
+```bash
+source setenv.sh && cd cross-compile/onvif-rust
+$CARGO build --release --target armv5te-unknown-linux-uclibceabi
+```
 
 **Task ordering:** Tasks 1–4 are Track A and must run in order; **Task 4 is a hardware gate that decides whether Task 5 happens at all**. Tasks 6–8 are Track B and are independent of Track A — they may be done in parallel or first.
 
@@ -722,6 +735,20 @@ informative, they just stop covering the day side).
 **Gate: if the bins do not separate, stop and switch to the peek contingency** in the design
 doc's B1 section. Do not proceed to Task 7 on unseparated data.
 
+**GATE PASSED 2026-08-14 on `.198`** — full readings in
+`docs/reference/vendor-day-night-implementation.md` §12. Lit room reads 192,414 in bin 0;
+IR-lit night reads a maximum of 159 across all ten bins. Three to four orders of magnitude of
+separation, and the vendor's `1200` / `600000` thresholds sit inside it with 7.5x and 160x
+margins. AWB is **not** idle under the night profile, so the stuck-in-night failure this gate
+was guarding against does not apply. Task 7 may proceed; the peek contingency is not needed.
+
+Two caveats Task 7 must honour, both from §12: gate on the **max across bins** (bins 5–9
+return suspiciously uniform values under IR), and note that a dark **unilluminated** scene
+reads 3,000–11,000 — i.e. "day" to this gate. That state only occurs in day-mode-at-night
+where the night→day question is never asked, but do not reuse these bins elsewhere without
+handling it. Still unmeasured: bin behaviour under an illuminator strong enough to fool the
+luminance meter — `.198`'s IR is too weak to reproduce the `.127` flap.
+
 ---
 
 ### Task 7: AWB gate in the night controller
@@ -774,6 +801,12 @@ starting point. Set them from the clusters Task 6b measured on `.127`, and recor
 config comment which night the numbers came from — the same convention the `ain0` and AE
 thresholds already follow. If the measured clusters happen to straddle the vendor's values,
 keep the vendor's; do not re-derive numbers that already fit.
+
+**Measured 2026-08-14 on `.198` — keep the vendor's values.** IR-lit night peaks at 159
+across all ten bins and a lit room reads 192,414, so `1200` sits inside the gap with a 7.5x
+margin below and 160x above (reference doc §12). The vendor's numbers already fit; per the
+rule above, do not re-derive them. Cite §12 in the config comment rather than a night on
+`.127`, which never produced data.
 
 **Step 4: Implement the gate**
 

@@ -440,3 +440,48 @@ rootfs. The headers in `anyka_reference` describe a superset of what exists here
 statically, so the vendor's soft-IR algorithm is inside that binary and is not reachable as
 a library from any process of ours. Adopting the vendor's loop wholesale (§9 item 2) is
 therefore off the table; reimplementing it on `isp_get_statinfo` is the route that exists.
+
+## 12. The AWB gate is viable — measured on `.198`, 2026-08-14
+
+First hardware readings of the colour bins, from `CMD_ISP_GET_AWB_STAT` (Task 6) logged on
+the `night sample` line (Task 6b). This is the gate Task 7 was blocked on.
+
+```text
+19:26  raw=1071    Day    awb=[192414, 1152, 151, 0, 0, 1650, 269, 0, 0, 0]   lit room, lamp off
+19:27  raw=327680  Night  awb=[10620, 10695, 11449, 3645, 4302, 10666, 2056, 2562, 0, 0]
+19:31  night mode applied Day->Night isp=0                                    IR lamp on
+19:37  raw=218453  Night  awb=[7, 2, 1, 3, 1, 115, 115, 115, 111, 115]
+19:47  raw=218453  Night  awb=[5, 0, 0, 0, 0, 93, 93, 93, 93, 93]
+19:57  raw=163840  Night  awb=[2, 0, 0, 0, 0, 113, 113, 113, 113, 113]
+20:07  raw=218453  Night  awb=[12, 22, 16, 21, 4, 159, 159, 159, 117, 159]
+```
+
+**AWB is not idle under the night profile, and chroma collapses under IR by three to four
+orders of magnitude.** The vendor's own `[autoir]` thresholds work unmodified:
+
+| test | threshold | measured | outcome |
+|---|---|---|---|
+| night->day, IR-lit (`night_cnt`) | any bin > 1200 | max **159** | refuses to leave night — 7.5x margin |
+| night->day, real light | any bin > 1200 | **192414** | permits day — 160x margin |
+| day->night (`day_cnt`) | any bin > 600000 | 192414 → "not day" | permits the night switch |
+
+Three findings to carry into Task 7:
+
+1. **Near-zero bins mean *IR-lit*, not merely *dark*.** The 19:27 sample is dark with the
+   lamp not yet on (the transition applied at 19:31) and reads 3,000–11,000 — above the
+   1200 threshold. Darkness alone produces noise-driven chroma; it was the lamp that pushed
+   the bins to ~100. So a dark **unilluminated** scene classifies as "day" to this gate.
+   That combination only arises in day-mode-at-night, where the night→day question is never
+   asked, so it does not break the design — but any future use of these bins outside that
+   context must account for it.
+2. **Bins 5–9 return suspiciously uniform values** under IR (`115,115,115,111,115`, then
+   `93x5`, `113x5`). Identical counts across five colour-temperature buckets look like a
+   fixed pattern rather than a measurement. Gate on the max across bins, as the vendor does;
+   do not attribute meaning to an individual bin.
+3. **`.198` cannot reproduce the `.127` flap**, so this measurement does not exercise the
+   failure the gate exists to prevent. Its IR illuminator is the weak one (110 vs 3 YAVG
+   against `WHITE_LED` indoors), so the lum factor stays at ~218453 — correctly "dark" —
+   with the lamp on, and the camera never oscillates. The strong-lamp case is `.127`, which
+   went off-network the same evening. The chroma-collapse result stands on its own; what is
+   still unmeasured is the bin behaviour under an illuminator strong enough to fool the
+   luminance meter.
