@@ -39,6 +39,15 @@ Mean frame luma out of 255, `ffmpeg signalstats YAVG`, via RTSP:
 essentially nothing, and because an IR-cut filter passes visible light, a stuck filter cannot
 explain a *white* lamp adding only 1.9. The fault there is upstream of the optics.
 
+## Don't compare `ae_luma` with `YAVG`
+
+They disagree by design and neither is broken. `/api/diagnostics` reported `ae_luma: 4` on
+`.198` while ffmpeg measured `YAVG` ≈ 26 on the same scene at the same moment: `ae_luma` is the
+ISP's internal pre-processing average, `YAVG` is measured on the encoded output *after* gamma,
+which lifts dark values hard. Use `ae_luma` to tell whether the AE is railed (it is, at 4
+against a target of 55) and `YAVG` for relative before/after comparisons — never one as a check
+on the other.
+
 ## Before you open anything
 
 Force the lamp on from software so you are probing a live circuit. The GPIO holds its value
