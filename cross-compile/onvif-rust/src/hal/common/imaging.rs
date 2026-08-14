@@ -52,6 +52,9 @@ pub(crate) struct AeAttr {
 /// Wire size of `struct vpss_isp_ae_attr` on the camera.
 pub(crate) const AE_ATTR_WIRE_LEN: usize = 204;
 
+/// Wire size of the AWB colour-bin response: `i32 total_cnt[10]`.
+pub(crate) const AWB_STAT_WIRE_LEN: usize = 40;
+
 /// Internal trait for abstracting imaging FFI calls to enable mocking in tests.
 ///
 /// Methods are `async` so that IPC-backed implementations (e.g. `AnykaIpc`) can
@@ -78,6 +81,10 @@ pub(crate) trait ImagingHalTrait: Send + Sync {
     async fn get_lum_factor(&self) -> Option<i32>;
     /// Live ISP AE limits, or `None` if unavailable.
     async fn get_ae_attr(&self) -> Option<AeAttr>;
+    /// Live ISP AWB colour-temperature bin counts (`total_cnt[10]`), or `None`
+    /// if unavailable. A zero bin is a legitimate reading (e.g. AWB going
+    /// quiet under IR illumination) and must not be conflated with `None`.
+    async fn get_awb_stat(&self) -> Option<[i32; 10]>;
 }
 
 /// Validate ONVIF imaging parameter range (0.0-100.0).

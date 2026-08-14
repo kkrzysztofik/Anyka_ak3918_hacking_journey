@@ -497,6 +497,11 @@ pub struct VisionDiagnostics {
     pub ae_a_gain_max: Option<u32>,
     pub ae_exp_time_max: Option<u32>,
     pub ae_target_lumiance: Option<u32>,
+    /// Live ISP AWB colour-temperature bin counts (`total_cnt[10]`), or
+    /// `None` if unavailable. A zero bin is a legitimate reading and must
+    /// stay distinguishable from `None` — that distinction is the whole point
+    /// of the day/night AWB-gate measurement.
+    pub awb_cnt: Option<[i32; 10]>,
     /// Raw ADC reading on AIN0 (light-sensor channel), or `None` if not read.
     pub ain0: Option<i32>,
     /// Current IR LED state (`true` = on), or `None` if undriven.

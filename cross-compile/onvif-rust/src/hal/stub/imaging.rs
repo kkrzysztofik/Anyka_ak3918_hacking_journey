@@ -46,6 +46,10 @@ impl ImagingHalTrait for StubImagingHal {
     async fn get_ae_attr(&self) -> Option<AeAttr> {
         None
     }
+
+    async fn get_awb_stat(&self) -> Option<[i32; 10]> {
+        None
+    }
 }
 
 #[cfg(test)]
@@ -56,6 +60,12 @@ mod get_ae_luma_tests {
     async fn test_stub_get_ae_luma_returns_none() {
         let stub = StubImagingHal;
         assert!(stub.get_ae_luma().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_stub_get_awb_stat_returns_none() {
+        let stub = StubImagingHal;
+        assert!(stub.get_awb_stat().await.is_none());
     }
 }
 

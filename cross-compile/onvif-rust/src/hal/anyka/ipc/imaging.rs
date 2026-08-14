@@ -10,12 +10,12 @@ use tracing::error;
 
 use crate::hal::common::AK_FAILED_I32;
 use crate::hal::common::AK_SUCCESS_I32;
-use crate::hal::common::imaging::{AE_ATTR_WIRE_LEN, AeAttr, ImagingHalTrait};
+use crate::hal::common::imaging::{AE_ATTR_WIRE_LEN, AWB_STAT_WIRE_LEN, AeAttr, ImagingHalTrait};
 
 use super::{
-    AnykaIpc, CMD_ISP_GET_AE_ATTR, CMD_ISP_GET_AE_LUMA, CMD_ISP_GET_LUM_FACTOR,
-    CMD_ISP_SET_BRIGHTNESS, CMD_ISP_SET_CONTRAST, CMD_ISP_SET_IR_FILTER, CMD_ISP_SET_SATURATION,
-    CMD_ISP_SET_SHARPNESS, CMD_ISP_SET_WDR,
+    AnykaIpc, CMD_ISP_GET_AE_ATTR, CMD_ISP_GET_AE_LUMA, CMD_ISP_GET_AWB_STAT,
+    CMD_ISP_GET_LUM_FACTOR, CMD_ISP_SET_BRIGHTNESS, CMD_ISP_SET_CONTRAST, CMD_ISP_SET_IR_FILTER,
+    CMD_ISP_SET_SATURATION, CMD_ISP_SET_SHARPNESS, CMD_ISP_SET_WDR,
 };
 
 #[async_trait]
@@ -180,6 +180,39 @@ impl ImagingHalTrait for AnykaIpc {
             }
         }
     }
+
+    async fn get_awb_stat(&self) -> Option<[i32; 10]> {
+        match self.request_async(CMD_ISP_GET_AWB_STAT, &[]).await {
+            // The wire contract is exactly ten little-endian i32 bins. A short
+            // payload means a daemon/struct mismatch; decoding it would
+            // silently return offset-shifted, plausible-looking bin counts.
+            Ok((status, data)) if status == AK_SUCCESS_I32 && data.len() == AWB_STAT_WIRE_LEN => {
+                let mut bins = [0i32; 10];
+                for (i, bin) in bins.iter_mut().enumerate() {
+                    let off = i * 4;
+                    *bin = i32::from_le_bytes([
+                        data[off],
+                        data[off + 1],
+                        data[off + 2],
+                        data[off + 3],
+                    ]);
+                }
+                Some(bins)
+            }
+            // Same reasoning as get_ae_luma / get_lum_factor / get_ae_attr: a
+            // silent `None` is indistinguishable from a camera correctly
+            // holding its mode, and here specifically from a legitimate
+            // all-zero AWB reading, so say so.
+            Ok((status, data)) => {
+                error!(status, len = data.len(), "get_awb_stat bad daemon response");
+                None
+            }
+            Err(e) => {
+                error!(error = %e, "get_awb_stat IPC failed");
+                None
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -315,6 +348,61 @@ mod tests {
         let ipc = AnykaIpc::new_with_path(&daemon.socket_path).unwrap();
         ipc.set_epochs_for_test(1, 1);
         assert_eq!(<AnykaIpc as ImagingHalTrait>::get_ae_attr(&ipc).await, None);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_get_awb_stat_roundtrip() {
+        let mut payload = Vec::with_capacity(40);
+        let bins: [i32; 10] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
+        for b in bins {
+            payload.extend_from_slice(&b.to_le_bytes());
+        }
+        let daemon = FakeDaemon::start(move |cmd_id, req| {
+            assert_eq!(cmd_id, CMD_ISP_GET_AWB_STAT);
+            assert!(req.is_empty());
+            (AK_SUCCESS_I32, payload.clone())
+        });
+        let ipc = AnykaIpc::new_with_path(&daemon.socket_path).unwrap();
+        ipc.set_epochs_for_test(1, 1);
+        assert_eq!(
+            <AnykaIpc as ImagingHalTrait>::get_awb_stat(&ipc).await,
+            Some(bins)
+        );
+    }
+
+    /// All-zero bins are a legitimate AWB reading (AWB going quiet under IR)
+    /// and must round-trip as `Some([0; 10])`, never collapse to `None`.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_get_awb_stat_all_zero_bins_is_some_not_none() {
+        let daemon = FakeDaemon::start(|_c, _r| (AK_SUCCESS_I32, vec![0u8; 40]));
+        let ipc = AnykaIpc::new_with_path(&daemon.socket_path).unwrap();
+        ipc.set_epochs_for_test(1, 1);
+        assert_eq!(
+            <AnykaIpc as ImagingHalTrait>::get_awb_stat(&ipc).await,
+            Some([0i32; 10])
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_get_awb_stat_wrong_length_is_none() {
+        let daemon = FakeDaemon::start(|_c, _r| (AK_SUCCESS_I32, vec![0u8; 36]));
+        let ipc = AnykaIpc::new_with_path(&daemon.socket_path).unwrap();
+        ipc.set_epochs_for_test(1, 1);
+        assert_eq!(
+            <AnykaIpc as ImagingHalTrait>::get_awb_stat(&ipc).await,
+            None
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_get_awb_stat_error_status_is_none() {
+        let daemon = FakeDaemon::start(|_c, _r| (AK_FAILED_I32, vec![]));
+        let ipc = AnykaIpc::new_with_path(&daemon.socket_path).unwrap();
+        ipc.set_epochs_for_test(1, 1);
+        assert_eq!(
+            <AnykaIpc as ImagingHalTrait>::get_awb_stat(&ipc).await,
+            None
+        );
     }
 
     /// set_brightness round-trips correctly through the fake daemon.

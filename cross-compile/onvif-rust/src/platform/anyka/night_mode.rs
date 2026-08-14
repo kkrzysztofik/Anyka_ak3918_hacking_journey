@@ -444,16 +444,28 @@ impl NightModeController {
     /// `Day|Night|Indeterminate`. `info!`, not `debug!`: cameras run at
     /// `level = "error"` and a day/night failure is only diagnosable after the
     /// fact. See the filter directive in `logging::init_logging_impl`.
+    ///
+    /// The AWB colour bins are fetched here, not in every [`Self::tick`],
+    /// specifically because this call is already gated by `sample_due`: an
+    /// unconditional per-tick fetch would double ISP IPC traffic forever to
+    /// feed a line that is logged at most once every [`SAMPLE_LOG_INTERVAL`].
+    /// `awb_cnt` is logged as `None`/`Some([...])` via `?awb_cnt` so a failed
+    /// read renders distinguishably from a legitimate all-zero reading.
     async fn log_sample(&self, raw: i32, src: &'static str, class: Option<DayNight>) {
         let now = std::time::Instant::now();
-        let mut last = self.sample_log.lock().await;
-        if !sample_due(*last, class, now, SAMPLE_LOG_INTERVAL) {
+        let due = {
+            let last = self.sample_log.lock().await;
+            sample_due(*last, class, now, SAMPLE_LOG_INTERVAL)
+        };
+        if !due {
             return;
         }
+        let awb_cnt = self.ffi.get_awb_stat().await;
+        let mut last = self.sample_log.lock().await;
         *last = Some((now, class));
         match class {
-            Some(mode) => tracing::info!(raw, src, ?mode, "night sample"),
-            None => tracing::info!(raw, src, mode = "Indeterminate", "night sample"),
+            Some(mode) => tracing::info!(raw, src, ?mode, ?awb_cnt, "night sample"),
+            None => tracing::info!(raw, src, mode = "Indeterminate", ?awb_cnt, "night sample"),
         }
     }
 
@@ -748,9 +760,10 @@ impl NightModeController {
         let caps = self.caps;
         let blocking = tokio::task::spawn_blocking(move || read_blocking_vision(&paths, caps));
 
-        let (ae_luma, ae_attr, mode, gpio) = tokio::join!(
+        let (ae_luma, ae_attr, awb_cnt, mode, gpio) = tokio::join!(
             self.ffi.get_ae_luma(),
             self.ffi.get_ae_attr(),
+            self.ffi.get_awb_stat(),
             async {
                 self.current_mode().await.map(|m| match m {
                     DayNight::Day => "day".to_string(),
@@ -774,6 +787,7 @@ impl NightModeController {
             ae_a_gain_max: ae_attr.map(|a| a.a_gain_max),
             ae_exp_time_max: ae_attr.map(|a| a.exp_time_max),
             ae_target_lumiance: ae_attr.map(|a| a.target_lumiance),
+            awb_cnt,
             ain0: gpio.ain0,
             ir_led: gpio.ir_led,
             ircut_a: gpio.ircut_a,
@@ -997,8 +1011,10 @@ mod tests {
         // No ISP luminance factor: these exercise the AE and ain0 fallbacks.
         ffi.expect_get_lum_factor().returning(|| None);
         ffi.expect_get_ae_luma().times(1..).returning(|| None);
-        // live_diagnostics now also reads AE ceilings; not under test here.
+        // live_diagnostics now also reads AE ceilings and AWB bins; not under
+        // test here.
         ffi.expect_get_ae_attr().returning(|| None);
+        ffi.expect_get_awb_stat().returning(|| None);
 
         let ctl = Arc::new(NightModeController::new(
             paths,
@@ -1073,6 +1089,8 @@ mod tests {
             .withf(|enabled| *enabled)
             .times(1)
             .returning(|_| 0);
+        // The sample line is due on the first tick, so it fetches the bins.
+        ffi.expect_get_awb_stat().returning(|| None);
 
         let ctl = NightModeController::new(
             paths,
@@ -1109,6 +1127,8 @@ mod tests {
             .withf(|enabled| *enabled)
             .times(1)
             .returning(|_| 0);
+        // The sample line is due on the first tick, so it fetches the bins.
+        ffi.expect_get_awb_stat().returning(|| None);
 
         let ctl = NightModeController::new(
             paths,
@@ -1138,6 +1158,8 @@ mod tests {
             .withf(|enabled| !*enabled)
             .times(1)
             .returning(|_| 0);
+        // The sample line is due on the first tick, so it fetches the bins.
+        ffi.expect_get_awb_stat().returning(|| None);
 
         let ctl = NightModeController::new(
             paths,
@@ -1169,6 +1191,8 @@ mod tests {
             .returning(|| Some(4000));
         ffi.expect_get_ae_luma().never();
         // No set_ir_filter expectation: any transition fails the test.
+        // The sample line is due on the first tick, so it fetches the bins.
+        ffi.expect_get_awb_stat().returning(|| None);
 
         let ctl = NightModeController::new(
             paths,
@@ -1200,6 +1224,8 @@ mod tests {
             .withf(|enabled| *enabled)
             .times(1)
             .returning(|_| 0);
+        // The sample line is due once resolve() is finally reached (3rd tick).
+        ffi.expect_get_awb_stat().returning(|| None);
 
         let cfg = crate::config::types::NightConfig {
             day_threshold: Some(200),
@@ -1288,6 +1314,8 @@ mod tests {
             .withf(|enabled| !*enabled)
             .times(1)
             .returning(|_| 0);
+        // The sample line is due once resolve() is finally reached (call 3).
+        ffi.expect_get_awb_stat().returning(|| None);
 
         let ctl = NightModeController::new(
             paths,
@@ -1329,6 +1357,8 @@ mod tests {
             .withf(|enabled| *enabled)
             .times(1)
             .returning(|_| 0);
+        // The sample line is due on the first tick, so it fetches the bins.
+        ffi.expect_get_awb_stat().returning(|| None);
 
         let ctl = NightModeController::new(
             paths,
@@ -1368,6 +1398,8 @@ mod tests {
                 calls += 1;
                 if calls == 1 { -1 } else { 0 }
             });
+        // Due on the first tick only: class does not change across ticks.
+        ffi.expect_get_awb_stat().returning(|| None);
 
         let ctl = NightModeController::new(
             paths,
@@ -1408,6 +1440,10 @@ mod tests {
             .withf(|enabled| *enabled)
             .times(2)
             .returning(|_| -1);
+        // Mode never resolves to Night here (apply keeps failing), so the
+        // sample class stays Indeterminate->Night pending; either way it is
+        // due each tick until a class sticks.
+        ffi.expect_get_awb_stat().returning(|| None);
 
         let ctl = NightModeController::new(
             paths,
@@ -1937,6 +1973,9 @@ mod tests {
         ffi.expect_get_ae_luma().times(1).returning(|| Some(42));
         // live_diagnostics now also reads AE ceilings; not under test here.
         ffi.expect_get_ae_attr().returning(|| None);
+        ffi.expect_get_awb_stat()
+            .times(1)
+            .returning(|| Some([9, 0, 0, 0, 0, 0, 0, 0, 0, 1]));
 
         let ctl = NightModeController::new(
             paths,
@@ -1952,9 +1991,91 @@ mod tests {
         assert_eq!(v.ircut_a, Some(false));
         assert_eq!(v.ircut_b, Some(false));
         assert_eq!(v.white_led, Some(false));
+        assert_eq!(v.awb_cnt, Some([9, 0, 0, 0, 0, 0, 0, 0, 0, 1]));
         assert!(v.supported.ir_led);
         assert!(v.supported.ircut);
         assert!(v.supported.white_led);
         assert_eq!(v.mode, None);
+    }
+
+    /// `live_diagnostics` must surface a failed AWB read as `None`, not as
+    /// all-zero bins — the two mean opposite things (unavailable vs. a
+    /// legitimate quiet reading).
+    #[tokio::test]
+    async fn test_live_diagnostics_awb_none_stays_none_not_zeros() {
+        use crate::hal::common::imaging::MockImagingHalTrait;
+        use crate::onvif::types::common::IrCutFilterMode;
+
+        let dir = tempfile::tempdir().unwrap();
+        let paths = NodePaths::rooted(dir.path(), dir.path());
+
+        let mut ffi = MockImagingHalTrait::new();
+        ffi.expect_get_lum_factor().returning(|| None);
+        ffi.expect_get_ae_luma().returning(|| None);
+        ffi.expect_get_ae_attr().returning(|| None);
+        ffi.expect_get_awb_stat().times(1).returning(|| None);
+
+        let ctl = NightModeController::new(
+            paths,
+            test_config(),
+            std::sync::Arc::new(ffi),
+            IrCutFilterMode::AUTO,
+            None,
+        );
+        assert_eq!(ctl.live_diagnostics().await.awb_cnt, None);
+    }
+
+    /// The sample line is rate-limited by `sample_due`; the AWB fetch that
+    /// backs it must be gated the same way, or a 10 s poll would double ISP
+    /// IPC traffic to feed a line logged at most every `SAMPLE_LOG_INTERVAL`.
+    #[tokio::test]
+    async fn test_log_sample_only_fetches_awb_bins_when_the_line_is_due() {
+        use crate::hal::common::imaging::MockImagingHalTrait;
+        use crate::onvif::types::common::IrCutFilterMode;
+
+        let dir = tempfile::tempdir().unwrap();
+        let paths = NodePaths::rooted(dir.path(), dir.path());
+
+        let mut ffi = MockImagingHalTrait::new();
+        // Exactly one call: the first log_sample is due (nothing logged yet),
+        // the second has the same class within the interval and must not
+        // fetch the bins at all.
+        ffi.expect_get_awb_stat().times(1).returning(|| None);
+
+        let ctl = NightModeController::new(
+            paths,
+            test_config(),
+            std::sync::Arc::new(ffi),
+            IrCutFilterMode::AUTO,
+            None,
+        );
+
+        ctl.log_sample(100, "ae", Some(DayNight::Day)).await;
+        ctl.log_sample(100, "ae", Some(DayNight::Day)).await;
+    }
+
+    /// A determinate-to-determinate class change always re-fetches the bins
+    /// immediately, mirroring `sample_due`'s "always log a change" rule.
+    #[tokio::test]
+    async fn test_log_sample_refetches_awb_bins_on_a_class_change() {
+        use crate::hal::common::imaging::MockImagingHalTrait;
+        use crate::onvif::types::common::IrCutFilterMode;
+
+        let dir = tempfile::tempdir().unwrap();
+        let paths = NodePaths::rooted(dir.path(), dir.path());
+
+        let mut ffi = MockImagingHalTrait::new();
+        ffi.expect_get_awb_stat().times(2).returning(|| None);
+
+        let ctl = NightModeController::new(
+            paths,
+            test_config(),
+            std::sync::Arc::new(ffi),
+            IrCutFilterMode::AUTO,
+            None,
+        );
+
+        ctl.log_sample(100, "ae", Some(DayNight::Day)).await;
+        ctl.log_sample(50, "ae", Some(DayNight::Night)).await;
     }
 }
