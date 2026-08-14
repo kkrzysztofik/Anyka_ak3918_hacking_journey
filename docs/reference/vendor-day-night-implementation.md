@@ -474,6 +474,15 @@ Three findings to carry into Task 7:
    That combination only arises in day-mode-at-night, where the night→day question is never
    asked, so it does not break the design — but any future use of these bins outside that
    context must account for it.
+
+   **Corroborated on `.146` the same evening**, which sits in exactly that state all night:
+   its IR does not effectively illuminate (the AE rails at luma 2–3 against a ~40 setpoint),
+   so a settled night frame reads
+   `awb=[5754, 7804, 12105, 4589, 6285, 7317, 1439, 3214, 0, 0]` — the same 3,000–12,000
+   noise-chroma band, an order of magnitude above `night_cnt`. The gate is still safe there
+   because luminance is primary and AWB only vetoes: at `lum=327160` the night→day test never
+   reaches the colour check. The veto only bites on a camera whose lamp is strong enough to
+   fool the luminance meter, i.e. `.127`.
 2. **Bins 5–9 return suspiciously uniform values** under IR (`115,115,115,111,115`, then
    `93x5`, `113x5`). Identical counts across five colour-temperature buckets look like a
    fixed pattern rather than a measurement. Gate on the max across bins, as the vendor does;
