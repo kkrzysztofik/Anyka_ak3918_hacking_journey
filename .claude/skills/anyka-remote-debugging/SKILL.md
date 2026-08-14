@@ -21,7 +21,7 @@ Debug the Anyka AK3918 camera at runtime: shell access, process inspection, log 
 
 ```bash
 scripts/debugging/cam_exec.py 'ps | grep onvif'
-scripts/debugging/cam_exec.py 'pidof onvif-rust'
+scripts/debugging/cam_exec.py 'pidof onvif-rust.bin'
 scripts/debugging/cam_exec.py --timeout 30 'cat /mnt/anyka_hack/onvif/log/onvif.log | tail -50'
 scripts/debugging/cam_exec.py 'uptime' 'free' 'df -h'          # multi-command (===== cmd ===== headers)
 scripts/debugging/cam_exec.py --host 192.168.2.198 --port 24 'cmd'
@@ -35,7 +35,9 @@ scripts/debugging/cam_exec.py --host 192.168.2.198 --port 24 'cmd'
 
 ```bash
 # Is onvif-rust running?
-cam_exec.py 'pidof onvif-rust'          # empty = not running
+cam_exec.py 'pidof onvif-rust.bin'      # empty = not running (note the .bin — the
+                                        # slot layout execs onvif-rust.bin, so a bare
+                                        # `pidof onvif-rust` silently returns nothing)
 
 # Process list
 cam_exec.py 'ps | grep -E "onvif|vendor"'

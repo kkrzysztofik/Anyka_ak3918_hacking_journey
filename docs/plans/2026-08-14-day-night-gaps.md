@@ -751,6 +751,35 @@ luminance meter — `.198`'s IR is too weak to reproduce the `.127` flap.
 
 ---
 
+### Task 6c: retry a failed ISP switch in forced ON/OFF modes (added and DONE 2026-08-14)
+
+Not planned — found on hardware while applying the Task 0 stopgap to `.127`, fixed the same
+evening in `ee6529a7`.
+
+**The bug:** the `isp_pending` retry lived at the end of `resolve()`, and `resolve()` is only
+reachable from `tick()`, which returns immediately at its `auto_enabled` guard in a forced
+`ON`/`OFF` mode. So a failed `set_ir_filter` was never retried there: GPIO advanced, the ISP
+stayed on the old profile, and nothing ever drained the pending target.
+
+**Why it matters more than it looks:** killing onvif-rust also kills the vendor daemon (they
+are supervised as a pair), so *every* onvif-rust start races a cold daemon with no VI
+registered, and the start-up forced apply reliably loses that race. Observed twice on `.127`
+(`isp=-1` at 13:56:34 and 13:59:11) with GPIO in night and the encoder still reporting the day
+profile's 15 fps. AUTO always hid this by retrying on the next 10 s tick.
+
+**The fix:** extract the retry into `retry_pending_isp()`, call it from `resolve()` where it
+was, and also from `tick()` *before* the `auto_enabled` guard. It only ever re-issues
+`set_ir_filter`, never `apply()` — re-running `apply()` would re-pulse the ircut solenoid coil
+— and it is a no-op costing one in-process mutex acquisition when nothing is pending, so a
+forced camera adds zero IPC traffic. Both call sites are load-bearing: the tick one drains a
+stale target from an earlier tick, the resolve one drains a target this tick's own `apply()`
+just recorded.
+
+Four tests, two of which fail without the fix; the reviewer additionally mutation-tested them
+in scratch worktrees to confirm they fail for the right reasons.
+
+---
+
 ### Task 7: AWB gate in the night controller
 
 **Files:**
