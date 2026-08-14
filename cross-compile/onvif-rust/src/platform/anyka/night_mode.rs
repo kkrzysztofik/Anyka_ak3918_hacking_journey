@@ -585,6 +585,13 @@ impl NightModeController {
         // on auto_enabled either, so a failed ISP switch there would
         // otherwise never be retried. Cheap when nothing is pending — see
         // retry_pending_isp.
+        //
+        // Both call sites are load-bearing and must not be deduplicated:
+        // this one drains a *stale* target left by an earlier tick, before
+        // this tick decides anything; the one at the tail of resolve drains
+        // a target this tick's own apply may have just recorded, which is
+        // the same-tick retry `test_retries_the_isp_after_a_failed_switch`
+        // pins.
         self.retry_pending_isp().await;
 
         if !self.auto_enabled.load(Ordering::SeqCst) {
