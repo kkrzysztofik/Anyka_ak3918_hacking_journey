@@ -109,21 +109,9 @@ pub struct MotorMessage {
     pub attach_timer: c_int,
 }
 
-/// Outcome of waiting for a motor turn to finish.
-///
-/// `step_pos` is reconciled from `MOTOR_GET_STATUS` after the wait so callers can use
-/// the hardware's own position accounting instead of dead-reckoning from the commanded
-/// step count.
-#[derive(Debug, Clone, Copy, Default)]
-pub struct TurnOutcome {
-    /// `true` if the wait ended because the stop flag was set (preempted), not because
-    /// the motor signalled completion.
-    pub interrupted: bool,
-    /// Motor step position read back from `MOTOR_GET_STATUS` after the turn.
-    pub step_pos: i32,
-    /// Raw event bitmask from the kernel `notify_data` (0 when interrupted).
-    pub event: c_int,
-}
+// `TurnOutcome` lives in `hal::common::ptz` alongside the trait that returns it, so the
+// signature (and its mock) are available on host builds where this driver is not compiled.
+pub use crate::hal::common::ptz::TurnOutcome;
 
 // --- PTZ types matching SDK (for PtzHalTrait) - no C header dependency ---
 
@@ -543,15 +531,6 @@ impl NativePtzDriver {
         })
     }
 
-    /// Turn one motor by degree and block until completion/interrupt.
-    /// Convenience wrapper over `start_turn` + `wait_turn`.
-    pub fn turn(&self, direction: ptz_turn_direction, degree: i32) -> PlatformResult<TurnOutcome> {
-        if !self.start_turn(direction, degree)? {
-            return Ok(TurnOutcome::default());
-        }
-        self.wait_turn(direction)
-    }
-
     pub fn get_step_pos(&self, motor_no: ptz_device) -> PlatformResult<i32> {
         let motor = {
             let guard = self
@@ -606,6 +585,45 @@ impl Default for NativePtzDriver {
     }
 }
 
+/// The driver *is* the HAL backend — no adapter struct in between.
+///
+/// Gated to ARM because on host builds `hal::common::ptz` binds its types to the
+/// mirrors in `common::sdk_types` rather than the ones declared above.
+#[cfg(not(use_stubs))]
+impl crate::hal::common::ptz::PtzHalTrait for NativePtzDriver {
+    fn ptz_open(&self) -> PlatformResult<()> {
+        self.open()
+    }
+
+    fn ptz_close(&self) -> PlatformResult<()> {
+        self.close()
+    }
+
+    fn ptz_check_self(&self, pin_type: ptz_feedback_pin) -> PlatformResult<()> {
+        self.check_self(pin_type)
+    }
+
+    fn ptz_start_turn(&self, direction: ptz_turn_direction, degree: i32) -> PlatformResult<bool> {
+        self.start_turn(direction, degree)
+    }
+
+    fn ptz_wait_turn(&self, direction: ptz_turn_direction) -> PlatformResult<TurnOutcome> {
+        self.wait_turn(direction)
+    }
+
+    fn ptz_get_step_pos(&self, motor_no: ptz_device) -> PlatformResult<i32> {
+        self.get_step_pos(motor_no)
+    }
+
+    fn ptz_stop(&self, direction: ptz_turn_direction) -> PlatformResult<()> {
+        self.stop(direction)
+    }
+
+    fn ptz_interrupt(&self) {
+        self.interrupt();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -642,7 +660,7 @@ mod tests {
         // Reserved is rejected at motor selection even before the open check ordering,
         // but with a closed device the unavailable check fires first; open-less drivers
         // still must not panic.
-        let result = driver.turn(ptz_turn_direction::PTZ_TURN_RESERVED, 10);
+        let result = driver.start_turn(ptz_turn_direction::PTZ_TURN_RESERVED, 10);
         assert!(result.is_err());
     }
 

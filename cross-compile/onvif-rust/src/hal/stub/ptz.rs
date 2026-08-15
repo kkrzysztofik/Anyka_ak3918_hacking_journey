@@ -5,42 +5,40 @@
 pub(crate) struct StubPtzHal;
 
 #[cfg(use_stubs)]
-use crate::hal::common::ptz::{PtzHalTrait, PtzWaitOutcome};
+use crate::hal::common::ptz::{PtzHalTrait, TurnOutcome};
 #[cfg(use_stubs)]
-use crate::hal::common::{AK_SUCCESS_I32, ptz_device, ptz_feedback_pin, ptz_turn_direction};
+use crate::hal::common::{ptz_device, ptz_feedback_pin, ptz_turn_direction};
+#[cfg(use_stubs)]
+use crate::platform::PlatformResult;
 
 #[cfg(use_stubs)]
 impl PtzHalTrait for StubPtzHal {
-    fn ptz_open(&self) -> i32 {
-        AK_SUCCESS_I32
+    fn ptz_open(&self) -> PlatformResult<()> {
+        Ok(())
     }
 
-    fn ptz_close(&self) -> i32 {
-        AK_SUCCESS_I32
+    fn ptz_close(&self) -> PlatformResult<()> {
+        Ok(())
     }
 
-    fn ptz_check_self(&self, _pin_type: ptz_feedback_pin) -> i32 {
-        AK_SUCCESS_I32
+    fn ptz_check_self(&self, _pin_type: ptz_feedback_pin) -> PlatformResult<()> {
+        Ok(())
     }
 
-    fn ptz_turn(&self, _direction: ptz_turn_direction, _degree: i32) -> i32 {
-        AK_SUCCESS_I32
+    fn ptz_start_turn(&self, _direction: ptz_turn_direction, _degree: i32) -> PlatformResult<bool> {
+        Ok(true)
     }
 
-    fn ptz_start_turn(&self, _direction: ptz_turn_direction, _degree: i32) -> i32 {
-        AK_SUCCESS_I32
+    fn ptz_wait_turn(&self, _direction: ptz_turn_direction) -> PlatformResult<TurnOutcome> {
+        Ok(TurnOutcome::default())
     }
 
-    fn ptz_wait_turn(&self, _direction: ptz_turn_direction) -> PtzWaitOutcome {
-        PtzWaitOutcome::default()
+    fn ptz_get_step_pos(&self, _motor_no: ptz_device) -> PlatformResult<i32> {
+        Ok(0) // Return 0 steps for stub
     }
 
-    fn ptz_get_step_pos(&self, _motor_no: ptz_device) -> i32 {
-        0 // Return 0 steps for stub
-    }
-
-    fn ptz_stop(&self, _direction: ptz_turn_direction) -> i32 {
-        AK_SUCCESS_I32
+    fn ptz_stop(&self, _direction: ptz_turn_direction) -> PlatformResult<()> {
+        Ok(())
     }
 
     fn ptz_interrupt(&self) {}

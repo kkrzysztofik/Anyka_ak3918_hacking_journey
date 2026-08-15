@@ -30,8 +30,7 @@ use crate::hal::anyka::ptz::ptz_turn_direction;
 #[cfg(use_stubs)]
 use crate::hal::common::ptz_turn_direction;
 
-use crate::hal::common::AK_SUCCESS_I32;
-use crate::hal::common::ptz::{PtzHalTrait, PtzWaitOutcome};
+use crate::hal::common::ptz::{PtzHalTrait, TurnOutcome};
 
 use crate::platform::traits::{PlatformError, PlatformResult, PtzPosition, PtzVelocity};
 
@@ -187,12 +186,8 @@ fn do_move(
     let mut result = Ok(());
     for (direction, degrees, axis) in plan {
         let sdk_dir = direction_to_ffi(direction);
-        let ret = ffi.ptz_start_turn(sdk_dir, degrees.round() as i32);
-        if ret != AK_SUCCESS_I32 {
-            result = Err(PlatformError::HardwareFailure(format!(
-                "ptz_start_turn({:?}) failed: error code {}",
-                direction, ret
-            )));
+        if let Err(e) = ffi.ptz_start_turn(sdk_dir, degrees.round() as i32) {
+            result = Err(e);
             break;
         }
         started.push((sdk_dir, axis));
@@ -249,7 +244,20 @@ fn drain_started_turns(
     started: Vec<(ptz_turn_direction, Axis)>,
 ) {
     for (sdk_dir, axis) in started {
-        let outcome: PtzWaitOutcome = ffi.ptz_wait_turn(sdk_dir);
+        let outcome: TurnOutcome = match ffi.ptz_wait_turn(sdk_dir) {
+            Ok(outcome) => outcome,
+            Err(e) => {
+                // The wait itself failed, so we do not know where the motor stopped.
+                // Committing the commanded target here would record a position the
+                // hardware may never have reached.
+                tracing::warn!(
+                    "PTZ wait failed on {:?}, leaving tracked position: {}",
+                    axis,
+                    e
+                );
+                break;
+            }
+        };
         if outcome.interrupted {
             tracing::debug!(
                 "absolute move preempted on {:?} (step_pos={}); leaving tracked position",
@@ -312,12 +320,8 @@ fn do_continuous(
             dir_neg
         };
         let sdk_dir = direction_to_ffi(direction);
-        let ret = ffi.ptz_start_turn(sdk_dir, sweep.round() as i32);
-        if ret != AK_SUCCESS_I32 {
-            result = Err(PlatformError::HardwareFailure(format!(
-                "ptz_start_turn({:?}) failed: error code {}",
-                direction, ret
-            )));
+        if let Err(e) = ffi.ptz_start_turn(sdk_dir, sweep.round() as i32) {
+            result = Err(e);
             break;
         }
         started.push(sdk_dir);
@@ -337,12 +341,14 @@ fn do_continuous(
     // ~100ms poll tick in the driver's wait loop. The `PtzWaitOutcome` is consumed (not
     // discarded) for the reconciled step position / interrupt signal.
     for sdk_dir in started {
-        let outcome: PtzWaitOutcome = ffi.ptz_wait_turn(sdk_dir);
-        tracing::debug!(
-            "continuous axis wait finished: interrupted={}, step_pos={}",
-            outcome.interrupted,
-            outcome.step_pos
-        );
+        match ffi.ptz_wait_turn(sdk_dir) {
+            Ok(outcome) => tracing::debug!(
+                "continuous axis wait finished: interrupted={}, step_pos={}",
+                outcome.interrupted,
+                outcome.step_pos
+            ),
+            Err(e) => tracing::warn!("continuous axis wait failed: {}", e),
+        }
     }
 }
 
@@ -351,12 +357,9 @@ fn do_continuous(
 fn do_stop(ffi: &dyn PtzHalTrait, state: &PtzActorState) -> PlatformResult<()> {
     let mut first_error: Option<PlatformError> = None;
     for (dir, sdk_dir) in iter_ffi_directions(&PTZ_STOP_DIRECTIONS) {
-        let ret = ffi.ptz_stop(sdk_dir);
-        if ret != AK_SUCCESS_I32 && first_error.is_none() {
-            first_error = Some(PlatformError::HardwareFailure(format!(
-                "ptz_turn_stop({:?}) failed: error code {}",
-                dir, ret
-            )));
+        if let Err(e) = ffi.ptz_stop(sdk_dir) {
+            tracing::warn!("PTZ stop failed on {:?}: {}", dir, e);
+            first_error.get_or_insert(e);
         }
     }
     *state.velocity.write() = PtzVelocity::STOP;
