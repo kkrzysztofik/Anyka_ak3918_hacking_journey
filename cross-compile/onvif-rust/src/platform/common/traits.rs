@@ -516,6 +516,68 @@ pub struct VisionDiagnostics {
     pub supported: VisionSupported,
 }
 
+/// Last motor step position observed by the PTZ actor, with its age.
+///
+/// Sampled from the `TurnOutcome` the actor already reads at the end of every turn —
+/// never by a fresh `ptz_get_step_pos`, which takes the driver's main lock a continuous
+/// sweep can hold for ten seconds.
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+pub struct StepPos {
+    pub pan: Option<i32>,
+    pub tilt: Option<i32>,
+    /// Milliseconds since this sample was taken.
+    pub age_ms: u64,
+}
+
+/// A point-in-time snapshot of the PTZ subsystem, including why it failed to come up.
+///
+/// Lives on [`Platform`] rather than on [`PTZControl`] deliberately: `ptz_control()` is
+/// `None` exactly when the interesting failure has happened, so a `PTZControl` method
+/// would go blank precisely when PTZ breaks.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct PtzDiagnostics {
+    /// `[ptz] enabled` from config.
+    pub enabled: bool,
+    /// Motor devices opened successfully.
+    pub opened: bool,
+    /// Why bring-up failed, carrying the device path and errno. `None` when it did not.
+    pub init_error: Option<String>,
+    /// Calibration sweep outcome: `None` = never run, `Some("ok")`, or the failure text.
+    pub self_check: Option<String>,
+    /// Tracked pan/tilt/zoom in degrees — dead-reckoned from commanded moves, not
+    /// measured. See `last_step_pos` for what the motor actually reported.
+    pub position: Option<[f32; 3]>,
+    pub moving: bool,
+    pub last_step_pos: Option<StepPos>,
+    /// Commands the actor has fully finished. Answers "did my command reach the motor?"
+    pub commands_completed: u32,
+}
+
+impl PtzDiagnostics {
+    /// PTZ turned off in configuration: no bring-up was attempted.
+    pub fn disabled() -> Self {
+        Self {
+            enabled: false,
+            opened: false,
+            init_error: None,
+            self_check: None,
+            position: None,
+            moving: false,
+            last_step_pos: None,
+            commands_completed: 0,
+        }
+    }
+
+    /// PTZ was enabled but the motor devices could not be opened.
+    pub fn failed(error: String) -> Self {
+        Self {
+            enabled: true,
+            init_error: Some(error),
+            ..Self::disabled()
+        }
+    }
+}
+
 /// Imaging control trait for image settings.
 #[cfg_attr(test, automock)]
 #[async_trait]
@@ -772,6 +834,14 @@ pub trait Platform: Send + Sync {
         None
     }
 
+    /// Point-in-time PTZ diagnostics, including bring-up failures.
+    ///
+    /// Sync and I/O-free by contract: it is called from the `/api/diagnostics` poll and
+    /// must never take the motor driver's lock. Default: `None` (no PTZ reporting).
+    fn ptz_diagnostics(&self) -> Option<PtzDiagnostics> {
+        None
+    }
+
     /// Get audio input interface.
     fn audio_input(&self) -> Arc<dyn AudioInput>;
 
@@ -851,6 +921,27 @@ pub trait Platform: Send + Sync {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_ptz_diagnostics_disabled_reports_not_enabled() {
+        let d = PtzDiagnostics::disabled();
+        assert!(!d.enabled);
+        assert!(!d.opened);
+        assert!(d.init_error.is_none());
+        assert!(d.position.is_none());
+    }
+
+    #[test]
+    fn test_ptz_diagnostics_failed_retains_the_error() {
+        let d = PtzDiagnostics::failed("open /dev/ak-motor0: errno 19".to_string());
+        assert!(d.enabled, "the flag was on; the hardware is what failed");
+        assert!(!d.opened);
+        assert_eq!(
+            d.init_error.as_deref(),
+            Some("open /dev/ak-motor0: errno 19"),
+            "the device path and errno are the whole point of this field"
+        );
+    }
 
     #[test]
     fn test_resolution_new() {
