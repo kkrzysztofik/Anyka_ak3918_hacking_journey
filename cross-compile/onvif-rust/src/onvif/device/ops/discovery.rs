@@ -16,8 +16,12 @@ use crate::onvif::types::device::{
 };
 
 /// Get the default scopes.
-pub fn default_scopes() -> Vec<Scope> {
-    vec![
+///
+/// The `ptz_enabled` flag controls whether the `type/ptz` fixed scope is
+/// advertised; a device with `[ptz] enabled = false` has no pan/tilt motor and
+/// must not claim PTZ support during discovery.
+pub fn default_scopes(ptz_enabled: bool) -> Vec<Scope> {
+    let mut scopes = vec![
         Scope {
             scope_def: ScopeDefinition::Fixed,
             scope_item: "onvif://www.onvif.org/type/video_encoder".to_string(),
@@ -26,10 +30,14 @@ pub fn default_scopes() -> Vec<Scope> {
             scope_def: ScopeDefinition::Fixed,
             scope_item: "onvif://www.onvif.org/type/audio_encoder".to_string(),
         },
-        Scope {
+    ];
+    if ptz_enabled {
+        scopes.push(Scope {
             scope_def: ScopeDefinition::Fixed,
             scope_item: "onvif://www.onvif.org/type/ptz".to_string(),
-        },
+        });
+    }
+    scopes.extend([
         Scope {
             scope_def: ScopeDefinition::Configurable,
             scope_item: "onvif://www.onvif.org/location/country/unknown".to_string(),
@@ -38,7 +46,8 @@ pub fn default_scopes() -> Vec<Scope> {
             scope_def: ScopeDefinition::Configurable,
             scope_item: "onvif://www.onvif.org/name/OnvifCamera".to_string(),
         },
-    ]
+    ]);
+    scopes
 }
 
 /// Handle GetScopes request.
@@ -215,11 +224,27 @@ mod tests {
     use super::*;
 
     fn create_test_scopes() -> parking_lot::RwLock<Vec<Scope>> {
-        parking_lot::RwLock::new(default_scopes())
+        parking_lot::RwLock::new(default_scopes(true))
     }
 
     fn create_test_discovery_mode() -> parking_lot::RwLock<DiscoveryMode> {
         parking_lot::RwLock::new(DiscoveryMode::Discoverable)
+    }
+
+    #[test]
+    fn test_default_scopes_omits_ptz_when_disabled() {
+        let scopes = default_scopes(false);
+        assert!(!scopes
+            .iter()
+            .any(|s| s.scope_item == "onvif://www.onvif.org/type/ptz"));
+    }
+
+    #[test]
+    fn test_default_scopes_includes_ptz_when_enabled() {
+        let scopes = default_scopes(true);
+        assert!(scopes
+            .iter()
+            .any(|s| s.scope_item == "onvif://www.onvif.org/type/ptz"));
     }
 
     // ========================================================================
