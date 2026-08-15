@@ -492,6 +492,16 @@ pub struct VisionDiagnostics {
     pub mode: Option<String>,
     /// Live AE luminance reading (`0–255`), or `None` if the read failed.
     pub ae_luma: Option<u8>,
+    /// Live ISP AE ceilings, or `None` if unavailable. Present so a night image
+    /// complaint can be diagnosed without a redeploy.
+    pub ae_a_gain_max: Option<u32>,
+    pub ae_exp_time_max: Option<u32>,
+    pub ae_target_luminance: Option<u32>,
+    /// Live ISP AWB colour-temperature bin counts (`total_cnt[10]`), or
+    /// `None` if unavailable. A zero bin is a legitimate reading and must
+    /// stay distinguishable from `None` — that distinction is the whole point
+    /// of the day/night AWB-gate measurement.
+    pub awb_cnt: Option<[i32; 10]>,
     /// Raw ADC reading on AIN0 (light-sensor channel), or `None` if not read.
     pub ain0: Option<i32>,
     /// Current IR LED state (`true` = on), or `None` if undriven.
@@ -825,6 +835,16 @@ pub trait Platform: Send + Sync {
         Err(PlatformError::NotSupported(
             "register_owned_frame_callback".to_string(),
         ))
+    }
+
+    /// A handle that asks the encoder for an IDR frame on demand.
+    ///
+    /// Handed to the streaming bridge so it can recover a stream whose SPS/PPS
+    /// were never cached: a fresh IDR carries the parameter sets with it.
+    ///
+    /// Default implementation returns `None` for platforms with no encoder.
+    fn idr_requester(&self) -> Option<Arc<dyn crate::platform::frame::IdrRequester>> {
+        None
     }
 }
 

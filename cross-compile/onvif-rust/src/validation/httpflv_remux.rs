@@ -18,6 +18,7 @@ pub struct ValidationHttpFlvRemuxer {
     pps: Option<Vec<u8>>,
     audio_config: Option<Vec<u8>>,
     audio_sample_rate: u32,
+    video_framerate: u32,
 }
 
 impl ValidationHttpFlvRemuxer {
@@ -26,13 +27,31 @@ impl ValidationHttpFlvRemuxer {
         pps: Vec<u8>,
         audio_config: Option<Vec<u8>>,
         audio_sample_rate: u32,
+        video_framerate: u32,
     ) -> Self {
         Self {
             sps: (!sps.is_empty()).then_some(sps),
             pps: (!pps.is_empty()).then_some(pps),
             audio_config,
             audio_sample_rate,
+            video_framerate,
         }
+    }
+
+    /// Build the FLV onMetaData script-tag payload (AMF0 ECMA array).
+    pub fn on_metadata_tag(&self, timestamp: u32) -> FrameData {
+        let mut data = BytesMut::new();
+        amf0_string(&mut data, "onMetaData");
+        amf0_ecma_array(
+            &mut data,
+            &[
+                ("videocodecid", amf0_number(7.0)),
+                ("hasVideo", amf0_bool(true)),
+                ("hasAudio", amf0_bool(self.audio_config.is_some())),
+                ("framerate", amf0_number(self.video_framerate as f64)),
+            ],
+        );
+        FrameData::MetaData { timestamp, data }
     }
 
     pub fn remux_frame(
@@ -183,6 +202,35 @@ impl ValidationHttpFlvRemuxer {
     }
 }
 
+fn amf0_string(out: &mut BytesMut, s: &str) {
+    out.put_u8(0x02);
+    out.put_u16(s.len() as u16);
+    out.extend_from_slice(s.as_bytes());
+}
+
+fn amf0_number(value: f64) -> BytesMut {
+    let mut v = BytesMut::with_capacity(9);
+    v.put_u8(0x00);
+    v.put_f64(value);
+    v
+}
+
+fn amf0_bool(value: bool) -> BytesMut {
+    BytesMut::from(&[0x01, value as u8][..])
+}
+
+/// AMF0 ECMA array: `08 <u32be count> (u16be keylen + key + value)* 00 00 09`.
+fn amf0_ecma_array(out: &mut BytesMut, entries: &[(&str, BytesMut)]) {
+    out.put_u8(0x08);
+    out.put_u32(entries.len() as u32);
+    for (key, value) in entries {
+        out.put_u16(key.len() as u16);
+        out.extend_from_slice(key.as_bytes());
+        out.extend_from_slice(value);
+    }
+    out.extend_from_slice(&[0x00, 0x00, 0x09]);
+}
+
 fn is_probable_h264_nal(data: &[u8]) -> bool {
     let Some(&header) = data.first() else {
         return false;
@@ -275,6 +323,7 @@ mod tests {
             vec![0x68, 0xCE, 0x06, 0xE2],
             None,
             0,
+            15,
         );
         let frame = remuxer.video_sequence_header(123).expect("seq header");
         match frame {
@@ -290,7 +339,7 @@ mod tests {
 
     #[test]
     fn test_remux_annexb_video_to_avcc_nalu_payload() {
-        let mut remuxer = ValidationHttpFlvRemuxer::new(Vec::new(), Vec::new(), None, 0);
+        let mut remuxer = ValidationHttpFlvRemuxer::new(Vec::new(), Vec::new(), None, 0, 15);
         let mut frame = BytesMut::new();
         frame.extend_from_slice(&annexb_nal(&[0x67, 0x42, 0xE0, 0x1E]));
         frame.extend_from_slice(&annexb_nal(&[0x68, 0xCE, 0x06, 0xE2]));
@@ -314,7 +363,7 @@ mod tests {
 
     #[test]
     fn test_remux_single_raw_nal_without_annexb_start_code() {
-        let mut remuxer = ValidationHttpFlvRemuxer::new(Vec::new(), Vec::new(), None, 0);
+        let mut remuxer = ValidationHttpFlvRemuxer::new(Vec::new(), Vec::new(), None, 0, 15);
         let frame = BytesMut::from(&[0x65, 0x88, 0x84, 0x21, 0xA0][..]);
 
         let out = remuxer
@@ -341,6 +390,7 @@ mod tests {
             vec![0x68, 0xCE, 0x06, 0xE2],
             Some(vec![0x11, 0x90]),
             48_000,
+            15,
         );
         let out = remuxer
             .remux_audio_frame(48_000, BytesMut::from(&[0x01, 0x02, 0x03][..]))
@@ -357,7 +407,7 @@ mod tests {
 
     #[test]
     fn test_remux_runtime_sps_pps_filtering_skips_headers_only_frame() {
-        let mut remuxer = ValidationHttpFlvRemuxer::new(Vec::new(), Vec::new(), None, 0);
+        let mut remuxer = ValidationHttpFlvRemuxer::new(Vec::new(), Vec::new(), None, 0, 15);
         let mut frame = BytesMut::new();
         frame.extend_from_slice(&annexb_nal(&[0x67, 0x42, 0xE0, 0x1E]));
         frame.extend_from_slice(&annexb_nal(&[0x68, 0xCE, 0x06, 0xE2]));
@@ -365,5 +415,60 @@ mod tests {
         let out = remuxer.remux_video_frame(0, frame).expect("remux");
         assert!(out.is_none());
         assert!(remuxer.video_sequence_header(0).is_ok());
+    }
+
+    #[test]
+    fn test_on_metadata_tag_builds_framerate_ecma_array() {
+        let remuxer = ValidationHttpFlvRemuxer::new(
+            vec![0x67, 0x42, 0xE0, 0x1E],
+            vec![0x68, 0xCE, 0x06, 0xE2],
+            None,
+            0,
+            15,
+        );
+        let FrameData::MetaData { timestamp, data } = remuxer.on_metadata_tag(0) else {
+            panic!("expected MetaData frame");
+        };
+        assert_eq!(timestamp, 0);
+
+        // AMF string: 0x02, u16be len=10, "onMetaData"
+        assert_eq!(&data[..3], &[0x02, 0x00, 0x0a]);
+        assert_eq!(&data[3..13], b"onMetaData");
+
+        // ECMA array marker + framerate key/value (15.0 = 0x402E000000000000)
+        let body = &data[13..];
+        assert_eq!(body[0], 0x08, "ECMA array marker");
+        let framerate = body
+            .windows(9)
+            .position(|w| w == b"framerate".as_slice())
+            .expect("framerate key present");
+        assert_eq!(&body[framerate + 9..framerate + 10], &[0x00], "number type");
+        assert_eq!(
+            &body[framerate + 10..framerate + 18],
+            &[0x40, 0x2E, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00],
+            "15.0 as f64"
+        );
+        assert!(body.ends_with(&[0x00, 0x00, 0x09]), "ECMA array terminator");
+    }
+
+    #[test]
+    fn test_on_metadata_tag_reflects_audio_presence() {
+        let remuxer = ValidationHttpFlvRemuxer::new(
+            vec![0x67, 0x42, 0xE0, 0x1E],
+            vec![0x68, 0xCE, 0x06, 0xE2],
+            Some(vec![0x11, 0x90]),
+            48_000,
+            15,
+        );
+        let FrameData::MetaData { data, .. } = remuxer.on_metadata_tag(0) else {
+            panic!("expected MetaData frame");
+        };
+        // hasAudio bool (0x01) true (0x01) follows the "hasAudio" key
+        let body = &data[13..];
+        let idx = body
+            .windows(8)
+            .position(|w| w == b"hasAudio".as_slice())
+            .expect("hasAudio key present");
+        assert_eq!(&body[idx + 8..idx + 10], &[0x01, 0x01], "hasAudio = true");
     }
 }

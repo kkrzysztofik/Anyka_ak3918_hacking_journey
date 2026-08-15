@@ -45,6 +45,26 @@ use super::common::{
 #[cfg(test)]
 use super::common::{VideoEncoderConfig, VideoEncoding};
 use video_encoder::AnykaVideoEncoder;
+
+/// Bridges the streaming layer's "I need parameter sets" to the vendor encoder.
+struct EncoderIdrRequester {
+    encoder: Arc<AnykaVideoEncoder>,
+}
+
+impl crate::platform::frame::IdrRequester for EncoderIdrRequester {
+    fn request_idr(&self, is_main: bool) {
+        if let Err(e) = self.encoder.request_idr_frame(is_main) {
+            // error!: the caller only asks when a stream has no cached SPS/PPS,
+            // so a failure here means RTSP DESCRIBE keeps 404ing. The shipped
+            // log level is "error".
+            tracing::error!(
+                is_main,
+                error = %e,
+                "IDR request failed; a stream with no cached SPS/PPS stays undescribable"
+            );
+        }
+    }
+}
 use video_input::AnykaVideoInput;
 
 // Re-export helpers from submodules for internal use
@@ -573,6 +593,12 @@ impl Platform for AnykaPlatform {
         let _id = self.video_encoder.register_owned_frame_callback(callback);
         tracing::info!("Owned frame callback registered (id={})", _id);
         Ok(())
+    }
+
+    fn idr_requester(&self) -> Option<Arc<dyn crate::platform::frame::IdrRequester>> {
+        Some(Arc::new(EncoderIdrRequester {
+            encoder: Arc::clone(&self.video_encoder),
+        }))
     }
 }
 

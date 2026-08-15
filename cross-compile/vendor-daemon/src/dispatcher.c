@@ -317,6 +317,15 @@ int process_request(int fd)
     case CMD_ISP_GET_AE_LUMA:
         ret = handle_isp_get_ae_luma(fd, req_buf, req_len);
         break;
+    case CMD_ISP_GET_LUM_FACTOR:
+        ret = handle_isp_get_lum_factor(fd, req_buf, req_len);
+        break;
+    case CMD_ISP_GET_AE_ATTR:
+        ret = handle_isp_get_ae_attr(fd, req_buf, req_len);
+        break;
+    case CMD_ISP_GET_AWB_STAT:
+        ret = handle_isp_get_awb_stat(fd, req_buf, req_len);
+        break;
 
     /* --- Utility --- */
     case CMD_GET_ERROR_NO:

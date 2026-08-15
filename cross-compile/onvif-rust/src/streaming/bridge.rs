@@ -344,6 +344,18 @@ pub struct StreamingBridge {
     pub audio_config: RwLock<Option<Vec<u8>>>,
     /// Audio sample rate in Hz.
     pub audio_sample_rate: u32,
+    /// Hook to ask the encoder for an IDR frame, argument `is_main`.
+    ///
+    /// The vendor encoder emits SPS/PPS only around the startup IDR kick
+    /// (`platform/anyka/video_encoder.rs:1439-1447`), which is issued during
+    /// platform init — before `app.rs:1343` attaches this bridge as the frame
+    /// consumer. Lose that race and no later frame ever carries NAL 7/8, so
+    /// `sps`/`pps` stay `None` for the whole process and every RTSP DESCRIBE
+    /// 404s while HTTP-FLV still serves video. Asking for a fresh IDR is the
+    /// only way to make the encoder re-emit them.
+    ///
+    /// `None` on platforms with no encoder and in tests.
+    pub idr_requester: RwLock<Option<Arc<dyn crate::platform::frame::IdrRequester>>>,
 }
 
 impl StreamingBridge {
@@ -393,6 +405,7 @@ impl StreamingBridge {
             },
             audio_config: RwLock::new(None),
             audio_sample_rate,
+            idr_requester: RwLock::new(None),
         }
     }
 

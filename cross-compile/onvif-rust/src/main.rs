@@ -445,6 +445,7 @@ struct ValidationAvStreamHandler {
     last_video_timestamp_ms: Arc<AtomicU32>,
     audio_config: Option<Vec<u8>>,
     audio_sample_rate: u32,
+    video_framerate: u32,
 }
 
 impl ValidationAvStreamHandler {
@@ -455,6 +456,7 @@ impl ValidationAvStreamHandler {
         last_video_timestamp_ms: Arc<AtomicU32>,
         audio_config: Option<Vec<u8>>,
         audio_sample_rate: u32,
+        video_framerate: u32,
     ) -> Self {
         Self {
             sps,
@@ -463,6 +465,7 @@ impl ValidationAvStreamHandler {
             last_video_timestamp_ms,
             audio_config,
             audio_sample_rate,
+            video_framerate,
         }
     }
 }
@@ -498,6 +501,7 @@ impl TStreamHandler for ValidationAvStreamHandler {
                     self.pps.clone(),
                     self.audio_config.clone(),
                     self.audio_sample_rate,
+                    self.video_framerate,
                 );
                 send_httpflv_prior_frames(
                     &frame_sender,
@@ -685,6 +689,7 @@ async fn run_validation_mode(config: H264PlaybackConfig, config_path: &str) -> R
         video_last_timestamp_handle,
         audio_config.clone(),
         audio_sample_rate,
+        config.frame_rate,
     ));
 
     let mut streamhub = StreamsHub::new(None);
@@ -701,6 +706,7 @@ async fn run_validation_mode(config: H264PlaybackConfig, config_path: &str) -> R
         video_pps.clone(),
         audio_config.clone(),
         audio_sample_rate,
+        config.frame_rate,
     );
 
     let (rtsp_subscriber_handle, httpflv_subscriber_handle) = publish_to_streamhub(
@@ -974,10 +980,17 @@ fn spawn_fanout_task(
     video_pps: Vec<u8>,
     audio_config: Option<Vec<u8>>,
     audio_sample_rate: u32,
+    video_framerate: u32,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         let mut httpflv_remuxer = frame_tx_httpflv.as_ref().map(|_| {
-            ValidationHttpFlvRemuxer::new(video_sps, video_pps, audio_config, audio_sample_rate)
+            ValidationHttpFlvRemuxer::new(
+                video_sps,
+                video_pps,
+                audio_config,
+                audio_sample_rate,
+                video_framerate,
+            )
         });
         while let Some(frame) = frame_rx.recv().await {
             fanout_frame(
@@ -1367,6 +1380,7 @@ mod tests {
             Arc::new(AtomicU32::new(1234)),
             Some(vec![0x12, 0x10]),
             48_000,
+            15,
         );
 
         let (tx, mut rx) = streaming_lib::frame_data_channel();
@@ -1408,6 +1422,7 @@ mod tests {
             Arc::new(AtomicU32::new(777)),
             Some(vec![0x12, 0x10]),
             48_000,
+            15,
         );
 
         let (tx, mut rx) = streaming_lib::frame_data_channel();
@@ -1446,6 +1461,7 @@ mod tests {
             Arc::new(AtomicU32::new(778)),
             Some(vec![0x12, 0x10]),
             48_000,
+            15,
         );
 
         let (tx, mut rx) = streaming_lib::frame_data_channel();

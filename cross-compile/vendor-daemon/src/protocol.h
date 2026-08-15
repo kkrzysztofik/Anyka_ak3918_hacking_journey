@@ -74,6 +74,10 @@ enum cmd_id {
     CMD_ISP_SET_IR_FILTER         = 104,
     CMD_ISP_SET_WDR               = 105,
     CMD_ISP_GET_AE_LUMA            = 106,
+    CMD_ISP_GET_LUM_FACTOR         = 107,
+    CMD_ISP_GET_AE_ATTR            = 108,
+    /* 109 reserved: was CMD_ISP_SET_AE_ATTR, since cancelled */
+    CMD_ISP_GET_AWB_STAT           = 110,
     /* Utility */
     CMD_GET_ERROR_NO              = 200,
     CMD_GET_ERROR_STR             = 201,

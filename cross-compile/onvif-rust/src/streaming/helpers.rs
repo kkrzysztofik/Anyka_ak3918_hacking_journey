@@ -113,6 +113,8 @@ pub fn send_httpflv_prior_frames(
         "Sending HTTP-FLV prior frames to late-joining subscriber"
     );
 
+    send_frame(frame_sender, remuxer.on_metadata_tag(timestamp))?;
+
     let video_sequence_header = remuxer.video_sequence_header(timestamp).map_err(|err| {
         stream_hub_error(format!(
             "failed to build HTTP-FLV video sequence header: {}",
@@ -457,6 +459,7 @@ mod tests {
             vec![0x68, 0xce, 0x06, 0xe2],
             None,
             48_000,
+            15,
         );
         let frame = FrameData::Video {
             timestamp: 20,
@@ -484,20 +487,28 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_send_httpflv_prior_frames_no_audio_no_bootstrap_emits_video_header_only() {
+    async fn test_send_httpflv_prior_frames_no_audio_no_bootstrap_emits_metadata_and_video_header()
+    {
         let (tx, mut rx) = streaming_lib::frame_data_channel();
         let mut remuxer = ValidationHttpFlvRemuxer::new(
             vec![0x67, 0x42, 0x00, 0x1e],
             vec![0x68, 0xce, 0x06, 0xe2],
             None,
             48_000,
+            15,
         );
 
         send_httpflv_prior_frames(&tx, &mut remuxer, 4321, None)
             .expect("prior frame bootstrap should succeed");
 
         let first = rx.recv().await.expect("first frame should be present");
-        match first {
+        assert!(
+            matches!(first, FrameData::MetaData { .. }),
+            "expected onMetaData first, got {first:?}"
+        );
+
+        let second = rx.recv().await.expect("second frame should be present");
+        match second {
             FrameData::Video { timestamp, data } => {
                 assert_eq!(timestamp, 4321);
                 assert!(data.len() >= 2);
@@ -516,13 +527,20 @@ mod tests {
             vec![0x68, 0xce, 0x06, 0xe2],
             None,
             48_000,
+            15,
         );
 
         send_httpflv_prior_frames(&tx, &mut remuxer, 4322, Some(&[0x00, 0x00, 0x00]))
             .expect("malformed bootstrap should be ignored");
 
         let first = rx.recv().await.expect("first frame should be present");
-        match first {
+        assert!(
+            matches!(first, FrameData::MetaData { .. }),
+            "expected onMetaData first, got {first:?}"
+        );
+
+        let second = rx.recv().await.expect("second frame should be present");
+        match second {
             FrameData::Video { data, .. } => {
                 assert!(data.len() >= 2);
                 assert_eq!(data[1], 0);
@@ -532,6 +550,26 @@ mod tests {
         assert!(
             rx.try_recv().is_err(),
             "malformed bootstrap should not emit IDR"
+        );
+    }
+
+    #[test]
+    fn test_send_httpflv_prior_frames_sends_metadata_first() {
+        use tokio::sync::mpsc;
+        let (tx, mut rx) = mpsc::channel(16);
+        let mut remuxer = ValidationHttpFlvRemuxer::new(
+            vec![0x67, 0x42, 0xE0, 0x1E],
+            vec![0x68, 0xCE, 0x06, 0xE2],
+            None,
+            0,
+            15,
+        );
+        send_httpflv_prior_frames(&tx, &mut remuxer, 123, None).expect("prior frames sent");
+
+        let first = rx.try_recv().expect("first frame");
+        assert!(
+            matches!(first, FrameData::MetaData { .. }),
+            "first FLV frame must be onMetaData, got {first:?}"
         );
     }
 }

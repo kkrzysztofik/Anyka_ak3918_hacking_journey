@@ -35,6 +35,26 @@ const ONVIF_MIN: f32 = 0.0;
 /// Maximum ONVIF imaging parameter value.
 const ONVIF_MAX: f32 = 100.0;
 
+/// Live ISP auto-exposure limits, as reported by the sensor profile in force.
+///
+/// Mirrors `struct vpss_isp_ae_attr` (204 bytes, ARMv5TE). Only the fields we
+/// have a use for are decoded; the rest of the struct is carried by the daemon
+/// but not modelled here.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct AeAttr {
+    pub exp_time_max: u32,
+    pub exp_time_min: u32,
+    pub d_gain_max: u32,
+    pub a_gain_max: u32,
+    pub target_lumiance: u32,
+}
+
+/// Wire size of `struct vpss_isp_ae_attr` on the camera.
+pub(crate) const AE_ATTR_WIRE_LEN: usize = 204;
+
+/// Wire size of the AWB colour-bin response: `i32 total_cnt[10]`.
+pub(crate) const AWB_STAT_WIRE_LEN: usize = 40;
+
 /// Internal trait for abstracting imaging FFI calls to enable mocking in tests.
 ///
 /// Methods are `async` so that IPC-backed implementations (e.g. `AnykaIpc`) can
@@ -52,6 +72,19 @@ pub(crate) trait ImagingHalTrait: Send + Sync {
     async fn set_wdr(&self, enabled: bool) -> i32;
     /// AE average luma (`current_calc_avg_lumi`), or `None` if unavailable.
     async fn get_ae_luma(&self) -> Option<u8>;
+    /// The vendor's day/night luminance ratio, or `None` if unavailable.
+    ///
+    /// `isp_get_cur_lum_factor() * 40 / avg_lumi` — exposure effort per unit of
+    /// achieved brightness, so **higher means darker**. This is the signal the
+    /// stock firmware switches on; `get_ae_luma` alone is AE-regulated and
+    /// cannot see dusk. See `docs/reference/vendor-day-night-implementation.md`.
+    async fn get_lum_factor(&self) -> Option<i32>;
+    /// Live ISP AE limits, or `None` if unavailable.
+    async fn get_ae_attr(&self) -> Option<AeAttr>;
+    /// Live ISP AWB colour-temperature bin counts (`total_cnt[10]`), or `None`
+    /// if unavailable. A zero bin is a legitimate reading (e.g. AWB going
+    /// quiet under IR illumination) and must not be conflated with `None`.
+    async fn get_awb_stat(&self) -> Option<[i32; 10]>;
 }
 
 /// Validate ONVIF imaging parameter range (0.0-100.0).

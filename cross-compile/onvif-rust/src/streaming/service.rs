@@ -34,9 +34,13 @@ use super::bridge::StreamingBridge;
 use super::config::StreamingConfig;
 use super::helpers::{
     fanout_frame, generate_av_sdp, send_frame, send_httpflv_prior_frames, spawn_httpflv_server,
-    spawn_rtsp_server, spawn_streamhub_event_loop,
+    spawn_rtsp_server, spawn_streamhub_event_loop, stream_hub_error,
 };
 use crate::validation::httpflv_remux::ValidationHttpFlvRemuxer;
+
+/// Minimum interval between initiated IDR requests: coalesces the DESCRIBE
+/// poll storm without latching a missing or ignored kick forever.
+const IDR_RETRY_COOLDOWN_MS: u64 = 1_000;
 
 /// Per-stream handler that reads cached SPS/PPS/IDR from the bridge.
 ///
@@ -51,6 +55,18 @@ pub struct LiveStreamHandler {
     bridge: Arc<StreamingBridge>,
     /// Video frame rate for SDP `a=framerate` attribute.
     video_framerate: u32,
+    /// Epoch millis of the last initiated IDR request; 0 = none yet.
+    ///
+    /// A plain latch (set on kick, cleared when SPS/PPS are cached) would
+    /// suppress retries for the process lifetime if the kick was never made
+    /// (requester not attached yet) or the encoder never honoured it. The
+    /// cooldown instead bounds how often polling can re-kick while still
+    /// coalescing the storm; the SPS/PPS-cached paths below reset it the
+    /// moment the encoder recovers.
+    idr_requested_at: portable_atomic::AtomicU64,
+    /// Milliseconds between initiated IDR requests. Small in tests so cooldown
+    /// expiry does not require real sleeping.
+    idr_cooldown_ms: u64,
 }
 
 impl LiveStreamHandler {
@@ -60,6 +76,8 @@ impl LiveStreamHandler {
             is_main,
             bridge,
             video_framerate,
+            idr_requested_at: portable_atomic::AtomicU64::new(0),
+            idr_cooldown_ms: IDR_RETRY_COOLDOWN_MS,
         }
     }
 
@@ -93,6 +111,7 @@ impl LiveStreamHandler {
                 pps,
                 audio_config,
                 self.bridge.audio_sample_rate,
+                self.video_framerate,
             );
             send_httpflv_prior_frames(frame_sender, &mut remuxer, timestamp, bootstrap_idr)?;
         } else {
@@ -122,6 +141,46 @@ impl LiveStreamHandler {
 
         Ok(())
     }
+
+    /// Coalesced IDR kick: at most one initiated request per
+    /// [`IDR_RETRY_COOLDOWN_MS`], and never when no requester is attached.
+    ///
+    /// Checking the requester first is what lets a late-attached bridge still
+    /// kick its first IDR; a latch keyed on "we asked once" would suppress it
+    /// forever if the first ask had no one to hear it.
+    fn request_idr_once(&self) {
+        let guard = self.bridge.idr_requester.read();
+        let Some(requester) = guard.deref() else {
+            return;
+        };
+        let now = now_ms();
+        loop {
+            let last = self.idr_requested_at.load(Ordering::Relaxed);
+            if last != 0 && now.saturating_sub(last) < self.idr_cooldown_ms {
+                return;
+            }
+            match self.idr_requested_at.compare_exchange_weak(
+                last,
+                now,
+                Ordering::Relaxed,
+                Ordering::Relaxed,
+            ) {
+                Ok(_) => break,
+                Err(_) => continue,
+            }
+        }
+        requester.request_idr(self.is_main);
+    }
+}
+
+/// Milliseconds since the Unix epoch, saturating at `u64::MAX` when the clock
+/// is unusable. A broken clock degrades to "coalesce everything after the
+/// first kick" — the safe direction.
+fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX))
+        .unwrap_or(u64::MAX)
 }
 
 #[async_trait]
@@ -151,6 +210,25 @@ impl TStreamHandler for LiveStreamHandler {
                 0
             };
 
+            let sps = stream.sps.read().deref().clone();
+            let pps = stream.pps.read().deref().clone();
+            let has_sps = sps.is_some();
+            let has_pps = pps.is_some();
+
+            // HTTP-FLV remux needs SPS/PPS for the sequence header. Client may
+            // already have HTTP 200; refuse prior-data so the body stays empty/EOF
+            // instead of a half-open FLV session. Kick IDR once for a retry.
+            if matches!(sub_type, SubscribeType::HttpFlvPull) && (!has_sps || !has_pps) {
+                tracing::error!(
+                    stream = stream_name,
+                    has_sps,
+                    has_pps,
+                    "HTTP-FLV prior-data refused: SPS/PPS missing (body empty/EOF)"
+                );
+                self.request_idr_once();
+                return Err(stream_hub_error("http-flv: SPS/PPS not ready"));
+            }
+
             let media_info = MediaInfo {
                 audio_clock_rate,
                 video_clock_rate: 90000,
@@ -158,15 +236,11 @@ impl TStreamHandler for LiveStreamHandler {
             };
             send_frame(&frame_sender, FrameData::MediaInfo { media_info })?;
 
-            let sps = stream.sps.read().deref().clone();
-            let pps = stream.pps.read().deref().clone();
             let bootstrap_idr = stream.bootstrap_idr.read().deref().clone();
-
-            let has_sps = sps.is_some();
-            let has_pps = pps.is_some();
             let has_idr = bootstrap_idr.is_some();
 
             if !has_sps || !has_pps {
+                // RTSP path: still Ok + MediaInfo; client may retry DESCRIBE.
                 // error!: the subscriber gets a black screen, and at the shipped
                 // "error" log level a warn! here is invisible.
                 tracing::error!(
@@ -178,6 +252,8 @@ impl TStreamHandler for LiveStreamHandler {
             }
 
             if let (Some(sps), Some(pps)) = (sps, pps) {
+                // Parameter sets present: allow a future IDR kick if they vanish.
+                self.idr_requested_at.store(0, Ordering::Relaxed);
                 tracing::debug!(
                     stream = stream_name,
                     sps_size = sps.len(),
@@ -219,6 +295,9 @@ impl TStreamHandler for LiveStreamHandler {
         let audio_config = self.bridge.audio_config.read().deref().clone();
 
         if let (Some(sps), Some(pps)) = (sps, pps) {
+            // Parameter sets are cached again: allow a future IDR request if
+            // this stream regresses to missing SPS/PPS later.
+            self.idr_requested_at.store(0, Ordering::Relaxed);
             let sdp = generate_av_sdp(
                 &sps,
                 &pps,
@@ -243,6 +322,17 @@ impl TStreamHandler for LiveStreamHandler {
                 has_pps,
                 "Cannot generate SDP: SPS/PPS missing"
             );
+            // Ask the encoder to emit a fresh IDR, which carries SPS/PPS with
+            // it. Without this the cache can never fill: the only parameter
+            // sets the vendor encoder emits are the ones around the startup IDR
+            // kick, and if the bridge attached too late to see them no
+            // subsequent frame contains NAL 7/8 for the whole process lifetime.
+            // DESCRIBE polls (`server_session.rs:859`), so the retry that picks
+            // the new SDP up already exists and needs no second knob. Coalesced
+            // via `idr_requested_at`: at most one IDR kick per cooldown until
+            // SPS/PPS actually appear, otherwise every poll re-kicks the
+            // encoder.
+            self.request_idr_once();
         }
     }
 }
@@ -258,6 +348,7 @@ struct FanoutTask {
     stream_name: String,
     rtsp_tx: tokio::sync::mpsc::Sender<FrameData>,
     httpflv_tx: tokio::sync::mpsc::Sender<FrameData>,
+    video_framerate: u32,
 
     // Mutable state
     httpflv_remuxer: Option<ValidationHttpFlvRemuxer>,
@@ -274,6 +365,7 @@ impl FanoutTask {
         stream_name: String,
         rtsp_tx: tokio::sync::mpsc::Sender<FrameData>,
         httpflv_tx: tokio::sync::mpsc::Sender<FrameData>,
+        video_framerate: u32,
     ) -> Self {
         let telemetry = StreamTelemetry::new(stream_name.clone(), Arc::clone(&bridge_queue));
         Self {
@@ -283,6 +375,7 @@ impl FanoutTask {
             stream_name,
             rtsp_tx,
             httpflv_tx,
+            video_framerate,
             httpflv_remuxer: None,
             cached_sps: None,
             cached_pps: None,
@@ -382,6 +475,7 @@ impl FanoutTask {
                 pps.clone(),
                 audio_config,
                 self.bridge.audio_sample_rate,
+                self.video_framerate,
             ));
             self.cached_sps = Some(sps);
             self.cached_pps = Some(pps);
@@ -679,6 +773,7 @@ impl StreamingService {
             stream_name.to_string(),
             rtsp_tx,
             httpflv_tx,
+            self.config.video_framerate,
         );
         let fanout_handle = tokio::spawn(async move { task.run().await });
 
@@ -689,6 +784,7 @@ impl StreamingService {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::platform::MockIdrRequester;
 
     /// Helper: create a bridge and handler targeting the main stream.
     fn make_main_handler() -> (Arc<StreamingBridge>, LiveStreamHandler) {
@@ -706,6 +802,97 @@ mod tests {
         *bridge.sub_stream.bootstrap_idr.write() = None;
         let handler = LiveStreamHandler::new(true, Arc::clone(&bridge), 15);
         (bridge, handler)
+    }
+
+    /// Install a mock `IdrRequester` on `bridge` expecting the given `is_main`
+    /// values, in order, one request each.
+    fn expect_idr_requests(bridge: &StreamingBridge, is_main: bool, count: usize) {
+        let mut requester = MockIdrRequester::new();
+        requester
+            .expect_request_idr()
+            .with(mockall::predicate::eq(is_main))
+            .times(count)
+            .returning(|_| ());
+        *bridge.idr_requester.write() = Some(Arc::new(requester));
+    }
+
+    #[tokio::test]
+    async fn test_send_information_requests_idr_when_parameter_sets_are_missing() {
+        let (bridge, handler) = make_main_handler();
+        expect_idr_requests(&bridge, true, 1);
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+
+        handler.send_information(tx).await;
+    }
+
+    #[tokio::test]
+    async fn test_send_information_requests_sub_stream_idr_when_parameter_sets_are_missing() {
+        let bridge = Arc::new(StreamingBridge::new(
+            LowLatencyFrameQueue::new("test-main", 8),
+            LowLatencyFrameQueue::new("test-sub", 8),
+            48_000,
+        ));
+        *bridge.sub_stream.sps.write() = None;
+        *bridge.sub_stream.pps.write() = None;
+        let handler = LiveStreamHandler::new(false, Arc::clone(&bridge), 15);
+        expect_idr_requests(&bridge, false, 1);
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+
+        handler.send_information(tx).await;
+    }
+
+    #[tokio::test]
+    async fn test_send_information_requests_idr_only_once_while_parameter_sets_missing() {
+        let (bridge, handler) = make_main_handler();
+        expect_idr_requests(&bridge, true, 1);
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+
+        handler.send_information(tx.clone()).await;
+        handler.send_information(tx).await;
+    }
+
+    #[tokio::test]
+    async fn test_send_information_kicks_idr_once_a_requester_attaches_later() {
+        // No requester at the first poll: the kick must not latch, so the
+        // late-attached bridge can still get its first IDR on the next poll.
+        let (bridge, handler) = make_main_handler();
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+        handler.send_information(tx.clone()).await;
+        assert!(bridge.idr_requester.read().is_none());
+
+        expect_idr_requests(&bridge, true, 1);
+        handler.send_information(tx).await;
+    }
+
+    #[tokio::test]
+    async fn test_send_information_retries_idr_after_cooldown_when_ineffective() {
+        // The encoder never honoured the kick (SPS/PPS still missing): the
+        // next poll after the cooldown must be allowed to ask again instead
+        // of being suppressed for the process lifetime.
+        let (bridge, mut handler) = make_main_handler();
+        expect_idr_requests(&bridge, true, 2);
+        handler.idr_cooldown_ms = 1;
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+
+        handler.send_information(tx.clone()).await;
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        handler.send_information(tx).await;
+    }
+
+    #[tokio::test]
+    async fn test_send_information_does_not_request_idr_when_parameter_sets_are_cached() {
+        let (bridge, handler) = make_main_handler();
+        *bridge.main_stream.sps.write() = Some(vec![0x67, 0x42, 0x00, 0x1e]);
+        *bridge.main_stream.pps.write() = Some(vec![0x68, 0xce, 0x06, 0xe2]);
+        expect_idr_requests(&bridge, true, 0);
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+
+        handler.send_information(tx).await;
+
+        assert!(
+            matches!(rx.try_recv(), Ok(Information::Sdp { .. })),
+            "an SDP must still be sent when SPS/PPS are cached"
+        );
     }
 
     #[test]
@@ -799,9 +986,12 @@ mod tests {
             .await;
         assert!(result.is_ok());
 
-        // MediaInfo + FLV video sequence header = 2 frames.
+        // MediaInfo + onMetaData + FLV video sequence header = 3 frames.
         let media_info = frame_rx.try_recv().unwrap();
         assert!(matches!(media_info, FrameData::MediaInfo { .. }));
+
+        let metadata = frame_rx.try_recv().unwrap();
+        assert!(matches!(metadata, FrameData::MetaData { .. }));
 
         let sequence_header = frame_rx.try_recv().unwrap();
         assert!(matches!(
@@ -811,6 +1001,33 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    #[tokio::test]
+    async fn test_send_prior_data_httpflv_missing_sps_requests_idr_and_errs() {
+        let (bridge, handler) = make_main_handler();
+        expect_idr_requests(&bridge, true, 1);
+        let (frame_tx, mut frame_rx) = streaming_lib::frame_data_channel();
+        let sender = DataSender::Frame { sender: frame_tx };
+
+        let result = handler
+            .send_prior_data(sender, SubscribeType::HttpFlvPull)
+            .await;
+        assert!(result.is_err());
+        assert!(frame_rx.try_recv().is_err()); // no MediaInfo on refuse path
+    }
+
+    #[tokio::test]
+    async fn test_send_prior_data_httpflv_missing_sps_requests_idr_only_once() {
+        let (bridge, handler) = make_main_handler();
+        expect_idr_requests(&bridge, true, 1);
+        for _ in 0..2 {
+            let (frame_tx, _frame_rx) = streaming_lib::frame_data_channel();
+            let sender = DataSender::Frame { sender: frame_tx };
+            let _ = handler
+                .send_prior_data(sender, SubscribeType::HttpFlvPull)
+                .await;
+        }
     }
 
     #[tokio::test]

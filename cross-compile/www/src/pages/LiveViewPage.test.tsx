@@ -9,6 +9,26 @@ import { renderWithProviders } from '@/test/componentTestHelpers';
 
 import LiveViewPage from './LiveViewPage';
 
+const mockPlayer = {
+  on: vi.fn(),
+  attachMediaElement: vi.fn(),
+  load: vi.fn(),
+  destroy: vi.fn(),
+};
+const createPlayer = vi.fn((_media?: unknown, _config?: unknown) => mockPlayer);
+
+vi.mock('mpegts.js', () => ({
+  default: {
+    isSupported: () => true,
+    createPlayer: (media: unknown, config?: unknown) => createPlayer(media, config),
+    Events: {
+      MEDIA_INFO: 'media_info',
+      STATISTICS_INFO: 'statistics_info',
+      ERROR: 'error',
+    },
+  },
+}));
+
 // Mock ptzService
 vi.mock('@/services/ptzService', () => ({
   continuousMove: vi.fn().mockResolvedValue(undefined),
@@ -61,7 +81,28 @@ Object.defineProperty(navigator, 'clipboard', {
 describe('LiveViewPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // jsdom resets navigator.clipboard between tests, so (re)install the
+    // module-level mock so the copy test and any later one share the same mock.
+    Object.defineProperty(navigator, 'clipboard', {
+      value: { writeText: mockWriteText },
+      writable: true,
+      configurable: true,
+    });
   });
+
+  /**
+   * The player's event handlers are registered asynchronously (after the
+   * mocked dynamic import resolves), so wait until the specific `event`
+   * registration exists before retrieving the handler to invoke.
+   */
+  async function waitForPlayerHandler(event: string): Promise<(...args: unknown[]) => void> {
+    let handler: ((...args: unknown[]) => void) | undefined;
+    await waitFor(() => {
+      handler = mockPlayer.on.mock.calls.find((c) => c[0] === event)?.[1];
+      expect(handler).toBeDefined();
+    });
+    return handler as (...args: unknown[]) => void;
+  }
 
   it('should render page title and description', () => {
     renderWithProviders(<LiveViewPage />);
@@ -71,14 +112,9 @@ describe('LiveViewPage', () => {
     );
   });
 
-  it('should render video stream placeholder', () => {
+  it('should render the live video element', async () => {
     renderWithProviders(<LiveViewPage />);
-    expect(screen.getByTestId('liveview-stream-preview-title')).toHaveTextContent(
-      'ONVIF Stream Preview',
-    );
-    expect(screen.getByTestId('liveview-stream-preview-info')).toHaveTextContent(
-      '1920×1080 @ 30fps',
-    );
+    expect(await screen.findByTestId('liveview-video')).toBeInTheDocument();
   });
 
   it('should toggle between main and sub stream', async () => {
@@ -124,15 +160,13 @@ describe('LiveViewPage', () => {
     expect(screen.getByTestId('liveview-stream-info-title')).toHaveTextContent('Stream Info');
     expect(screen.getByTestId('liveview-network-stats-title')).toHaveTextContent('Network Stats');
     expect(screen.getByTestId('liveview-resolution-label')).toHaveTextContent('Resolution');
-    expect(screen.getByTestId('liveview-resolution-value')).toHaveTextContent('1920x1080');
+    expect(screen.getByTestId('liveview-resolution-value')).toHaveTextContent('—');
   });
 
   it('should render stream URL and copy button', () => {
     renderWithProviders(<LiveViewPage />);
     expect(screen.getByTestId('liveview-stream-url-label')).toHaveTextContent('Stream URL');
-    expect(screen.getByTestId('liveview-stream-url-value')).toHaveTextContent(
-      'rtsp://192.168.1.100:554/main',
-    );
+    expect(screen.getByTestId('liveview-stream-url-value')).toHaveTextContent('/live/main.flv');
     expect(screen.getByTestId('liveview-copy-url-button')).toBeInTheDocument();
   });
 
@@ -168,9 +202,122 @@ describe('LiveViewPage', () => {
     expect(screen.getByTestId('liveview-ptz-home-button')).toBeInTheDocument();
   });
 
-  it('should render LIVE indicator', () => {
+  it('should not show the LIVE indicator before playback starts', async () => {
     renderWithProviders(<LiveViewPage />);
-    expect(screen.getByTestId('liveview-live-indicator')).toHaveTextContent('LIVE');
+    await screen.findByTestId('liveview-video');
+    expect(screen.queryByTestId('liveview-live-indicator')).not.toBeInTheDocument();
+  });
+
+  it('renders the video element instead of the old placeholder', async () => {
+    renderWithProviders(<LiveViewPage />);
+
+    expect(await screen.findByTestId('liveview-video')).toBeInTheDocument();
+    expect(screen.queryByTestId('liveview-stream-preview-title')).not.toBeInTheDocument();
+  });
+
+  it('shows a retry affordance when playback fails', async () => {
+    renderWithProviders(<LiveViewPage />);
+    await screen.findByTestId('liveview-video');
+
+    const errorHandler = await waitForPlayerHandler('error');
+    errorHandler('NetworkError', 'connection refused');
+
+    expect(await screen.findByTestId('liveview-retry-button')).toBeInTheDocument();
+  });
+
+  it('fills the stream info card from decoded media info', async () => {
+    renderWithProviders(<LiveViewPage />);
+    await screen.findByTestId('liveview-video');
+
+    const mediaHandler = await waitForPlayerHandler('media_info');
+    mediaHandler({ width: 1280, height: 720, fps: 25, videoCodec: 'avc1.4d001f' });
+
+    expect(await screen.findByTestId('liveview-resolution-value')).toHaveTextContent('1280x720');
+    expect(screen.getByTestId('liveview-codec-value')).toHaveTextContent('H.264 Main@L3.1');
+  });
+
+  it('shows the measured frame rate from decoded frame deltas', async () => {
+    renderWithProviders(<LiveViewPage />);
+    await screen.findByTestId('liveview-video');
+
+    const statsHandler = await waitForPlayerHandler('statistics_info');
+    const now = vi.spyOn(performance, 'now');
+
+    now.mockReturnValue(0);
+    statsHandler({ speed: 128, decodedFrames: 0, droppedFrames: 0 });
+    now.mockReturnValue(1000);
+    statsHandler({ speed: 128, decodedFrames: 15, droppedFrames: 0 });
+
+    await waitFor(() =>
+      expect(screen.getByTestId('liveview-framerate-value')).toHaveTextContent('15 fps'),
+    );
+    now.mockRestore();
+  });
+
+  it('shows a placeholder rather than a fake number before stats arrive', async () => {
+    renderWithProviders(<LiveViewPage />);
+    await screen.findByTestId('liveview-video');
+
+    expect(screen.getByTestId('liveview-resolution-value')).toHaveTextContent('—');
+  });
+
+  it('shows the stream URL actually in use and copies it', async () => {
+    renderWithProviders(<LiveViewPage />);
+    await screen.findByTestId('liveview-video');
+
+    expect(screen.getByTestId('liveview-stream-url-value')).toHaveTextContent('/live/main.flv');
+
+    fireEvent.click(screen.getByTestId('liveview-copy-url-button'));
+    expect(mockWriteText).toHaveBeenCalledWith(expect.stringContaining('/live/main.flv'));
+  });
+
+  it('copies the stream URL over plain HTTP when clipboard is unavailable', async () => {
+    const { toast } = await import('sonner');
+    Object.defineProperty(navigator, 'clipboard', {
+      value: undefined,
+      writable: true,
+      configurable: true,
+    });
+    Object.defineProperty(document, 'execCommand', {
+      value: vi.fn().mockReturnValue(true),
+      writable: true,
+      configurable: true,
+    });
+
+    renderWithProviders(<LiveViewPage />);
+    await screen.findByTestId('liveview-video');
+
+    fireEvent.click(screen.getByTestId('liveview-copy-url-button'));
+
+    await waitFor(() => {
+      expect(toast.success).toHaveBeenCalledWith('Stream URL copied');
+    });
+  });
+
+  it('updates the stream URL when switching to the sub stream', async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<LiveViewPage />);
+    await screen.findByTestId('liveview-video');
+
+    await user.click(screen.getByTestId('liveview-sub-stream-button'));
+
+    expect(screen.getByTestId('liveview-stream-url-value')).toHaveTextContent('/live/sub.flv');
+  });
+
+  it('replaces unmeasurable packet loss and latency with dropped frames', async () => {
+    renderWithProviders(<LiveViewPage />);
+    await screen.findByTestId('liveview-video');
+
+    expect(screen.getByTestId('liveview-dropped-frames-value')).toBeInTheDocument();
+    expect(screen.queryByTestId('liveview-packet-loss-value')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('liveview-latency-value')).not.toBeInTheDocument();
+  });
+
+  it('hides the LIVE indicator until playback actually starts', async () => {
+    renderWithProviders(<LiveViewPage />);
+    await screen.findByTestId('liveview-video');
+
+    expect(screen.queryByTestId('liveview-live-indicator')).not.toBeInTheDocument();
   });
 
   it('should update speed slider value', async () => {

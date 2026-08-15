@@ -21,7 +21,7 @@ Debug the Anyka AK3918 camera at runtime: shell access, process inspection, log 
 
 ```bash
 scripts/debugging/cam_exec.py 'ps | grep onvif'
-scripts/debugging/cam_exec.py 'pidof onvif-rust'
+scripts/debugging/cam_exec.py 'pidof onvif-rust.bin'
 scripts/debugging/cam_exec.py --timeout 30 'cat /mnt/anyka_hack/onvif/log/onvif.log | tail -50'
 scripts/debugging/cam_exec.py 'uptime' 'free' 'df -h'          # multi-command (===== cmd ===== headers)
 scripts/debugging/cam_exec.py --host 192.168.2.198 --port 24 'cmd'
@@ -35,7 +35,9 @@ scripts/debugging/cam_exec.py --host 192.168.2.198 --port 24 'cmd'
 
 ```bash
 # Is onvif-rust running?
-cam_exec.py 'pidof onvif-rust'          # empty = not running
+cam_exec.py 'pidof onvif-rust.bin'      # empty = not running (note the .bin — the
+                                        # slot layout execs onvif-rust.bin, so a bare
+                                        # `pidof onvif-rust` silently returns nothing)
 
 # Process list
 cam_exec.py 'ps | grep -E "onvif|vendor"'
@@ -81,7 +83,7 @@ scripts/debugging/run_gdb_multiarch_analysis.sh core.onvif-rust.12345 onvif-rust
 scripts/debugging/cam_exec.py 'ls /usr/bin/gdbserver || echo missing'
 
 # On device (via telnet): start gdbserver attached to running process
-cam_exec.py 'gdbserver :2345 --attach $(pidof onvif-rust)'
+cam_exec.py 'gdbserver :2345 --attach $(pidof onvif-rust.bin)'
 
 # On host: connect gdb-multiarch
 gdb-multiarch cross-compile/onvif-rust/target/armv5te-unknown-linux-uclibceabi/release/onvif-rust
@@ -96,7 +98,7 @@ Note: on this uClibc target `gdbserver` may be incompatible with the Rust static
 
 | Symptom | Action |
 |---------|--------|
-| onvif-rust not responding | `pidof onvif-rust`; check `/mnt/anyka_hack/onvif/log/`; restart via start script |
+| onvif-rust.bin not responding | `pidof onvif-rust.bin`; check `/mnt/anyka_hack/onvif/log/`; restart via start script |
 | Process crashed | `collect_coredump.sh` then `run_gdb_multiarch_analysis.sh` |
 | Telemetry/perf issues | Use the `anyka-validation` skill (RTSP validation tool) |
 | Protocol/network issues | Use the `protocol-debugging` skill (Wireshark/tcpdump) |

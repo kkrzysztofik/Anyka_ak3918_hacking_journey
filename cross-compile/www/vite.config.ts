@@ -27,6 +27,9 @@ function getChunkName(id: string): string | undefined {
   )
     return 'ui-vendor';
   if (id.includes('fast-xml-parser')) return 'utils-vendor';
+  // Keep the FLV demuxer out of the eager vendor chunk. LiveVideoPlayer loads
+  // it with import(), so it must stay a separate async chunk.
+  if (id.includes('mpegts.js')) return 'mpegts';
   return 'vendor';
 }
 
@@ -90,6 +93,20 @@ export default defineConfig(() => ({
       // Proxy snapshot requests
       '/snapshot': {
         target: process.env.VITE_API_TARGET || 'http://192.168.2.198:80', // NOSONAR
+        changeOrigin: true,
+        secure: false, // NOSONAR
+      },
+      // Proxy HTTP-FLV live streams. The FLV server listens on 8080 while the
+      // WebUI is served from 80, so this entry rewrites the port for dev only.
+      // NOSONAR: S5332, S4830 - HTTP and secure:false are required for embedded camera devices
+      '/live': {
+        // URL parsing beats string replacement: it also normalizes targets
+        // with no explicit port or a trailing slash.
+        target: (() => {
+          const url = new URL(process.env.VITE_API_TARGET || 'http://192.168.2.198:80'); // NOSONAR
+          url.port = '8080';
+          return url.toString();
+        })(),
         changeOrigin: true,
         secure: false, // NOSONAR
       },

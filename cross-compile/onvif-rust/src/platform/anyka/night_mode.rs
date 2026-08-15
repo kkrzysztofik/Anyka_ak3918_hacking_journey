@@ -444,16 +444,26 @@ impl NightModeController {
     /// `Day|Night|Indeterminate`. `info!`, not `debug!`: cameras run at
     /// `level = "error"` and a day/night failure is only diagnosable after the
     /// fact. See the filter directive in `logging::init_logging_impl`.
+    ///
+    /// The AWB colour bins are fetched here, not in every [`Self::tick`],
+    /// specifically because this call is already gated by `sample_due`: an
+    /// unconditional per-tick fetch would double ISP IPC traffic forever to
+    /// feed a line that is logged at most once every [`SAMPLE_LOG_INTERVAL`].
+    /// `awb_cnt` is logged as `None`/`Some([...])` via `?awb_cnt` so a failed
+    /// read renders distinguishably from a legitimate all-zero reading.
     async fn log_sample(&self, raw: i32, src: &'static str, class: Option<DayNight>) {
         let now = std::time::Instant::now();
-        let mut last = self.sample_log.lock().await;
-        if !sample_due(*last, class, now, SAMPLE_LOG_INTERVAL) {
-            return;
+        {
+            let mut last = self.sample_log.lock().await;
+            if !sample_due(*last, class, now, SAMPLE_LOG_INTERVAL) {
+                return;
+            }
+            *last = Some((now, class));
         }
-        *last = Some((now, class));
+        let awb_cnt = self.ffi.get_awb_stat().await;
         match class {
-            Some(mode) => tracing::info!(raw, src, ?mode, "night sample"),
-            None => tracing::info!(raw, src, mode = "Indeterminate", "night sample"),
+            Some(mode) => tracing::info!(raw, src, ?mode, ?awb_cnt, "night sample"),
+            None => tracing::info!(raw, src, mode = "Indeterminate", ?awb_cnt, "night sample"),
         }
     }
 
@@ -557,11 +567,49 @@ impl NightModeController {
         Ok(())
     }
 
-    /// One AUTO poll: prefer AE luma, fall back to `ain0` after streak failures.
+    /// One AUTO poll.
+    ///
+    /// Signal preference, best first: the ISP luminance factor (what the stock
+    /// firmware switches on), then AE luma, then `ain0` after streak failures.
+    ///
+    /// The factor is `isp_get_cur_lum_factor() * 40 / avg_lumi` — exposure
+    /// effort per unit of achieved brightness. Because AE luma is a *regulated*
+    /// output pinned near its setpoint until the AE runs out of gain, it cannot
+    /// see dusk on its own; dividing by it is what makes the factor track real
+    /// light. See `docs/reference/vendor-day-night-implementation.md`.
     pub(crate) async fn tick(&self) {
         use std::sync::atomic::Ordering;
 
+        // Runs regardless of auto_enabled: a forced ON/OFF mode is only ever
+        // reached from spawn_auto_loop's start-up apply, which is not gated
+        // on auto_enabled either, so a failed ISP switch there would
+        // otherwise never be retried. Cheap when nothing is pending — see
+        // retry_pending_isp.
+        //
+        // Both call sites are load-bearing and must not be deduplicated:
+        // this one drains a *stale* target left by an earlier tick, before
+        // this tick decides anything; the one at the tail of resolve drains
+        // a target this tick's own apply may have just recorded, which is
+        // the same-tick retry `test_retries_the_isp_after_a_failed_switch`
+        // pins.
+        self.retry_pending_isp().await;
+
         if !self.auto_enabled.load(Ordering::SeqCst) {
+            return;
+        }
+
+        if let Some(factor) = self.ffi.get_lum_factor().await {
+            let reading = classify(
+                factor,
+                Thresholds {
+                    // Inverted against every other source here: a high factor
+                    // means the ISP is working hard, i.e. the scene is dark.
+                    day: self.cfg.lum_night_threshold,
+                    night: self.cfg.lum_day_threshold,
+                    ldr_high_is_day: false,
+                },
+            );
+            self.resolve(factor, "lum", reading).await;
             return;
         }
 
@@ -607,6 +655,12 @@ impl NightModeController {
             }
         };
 
+        self.resolve(raw, src, reading).await;
+    }
+
+    /// Act on one classified sample: log it, decide, apply, and retry a pending
+    /// ISP sync. Shared by every signal source so they cannot drift apart.
+    async fn resolve(&self, raw: i32, src: &'static str, reading: Option<DayNight>) {
         self.log_sample(raw, src, reading).await;
 
         let (target, unsynced) = {
@@ -632,15 +686,37 @@ impl NightModeController {
 
         // A failed set_ir_filter must not be left to rot: GPIO already advanced,
         // so we do NOT re-run apply (that would re-pulse the coil). The retry
-        // below runs in the same tick, immediately after the failed apply, and
-        // on later ticks too if it still fails.
-        let mut pending = self.isp_pending.lock().await;
-        if let Some(target) = *pending {
-            let isp = self
-                .ffi
-                .set_ir_filter(matches!(target, DayNight::Night))
-                .await;
-            if isp == 0 {
+        // runs in the same tick, immediately after the failed apply, and on
+        // later ticks too if it still fails.
+        self.retry_pending_isp().await;
+    }
+
+    /// Retry a previously failed `set_ir_filter`, if one is pending.
+    ///
+    /// GPIO already advanced when the failure was recorded, so this only
+    /// ever re-issues the ISP call — never [`Self::apply`], which would
+    /// re-pulse the ircut solenoid coil. A no-op (zero HAL calls) when
+    /// nothing is pending: [`Self::tick`] calls this every poll regardless
+    /// of `auto_enabled`, and a forced camera with nothing pending must not
+    /// add IPC traffic to the daemon's single-threaded poll loop.
+    ///
+    /// The pending target is copied out and the lock is released *before*
+    /// the IPC call: `set_ir_filter` can take long enough to stall
+    /// diagnostics, which read `isp_pending` via [`Self::current_mode`].
+    /// The clear after a successful call is conditional on the target still
+    /// being the one this retry drove, so a newer failed transition recorded
+    /// while the call was in flight survives for the next tick.
+    async fn retry_pending_isp(&self) {
+        let Some(target) = *self.isp_pending.lock().await else {
+            return;
+        };
+        let isp = self
+            .ffi
+            .set_ir_filter(matches!(target, DayNight::Night))
+            .await;
+        if isp == 0 {
+            let mut pending = self.isp_pending.lock().await;
+            if *pending == Some(target) {
                 *pending = None;
                 tracing::info!(to = ?target, isp, "night mode ISP synced");
             }
@@ -718,8 +794,10 @@ impl NightModeController {
         let caps = self.caps;
         let blocking = tokio::task::spawn_blocking(move || read_blocking_vision(&paths, caps));
 
-        let (ae_luma, mode, gpio) = tokio::join!(
+        let (ae_luma, ae_attr, awb_cnt, mode, gpio) = tokio::join!(
             self.ffi.get_ae_luma(),
+            self.ffi.get_ae_attr(),
+            self.ffi.get_awb_stat(),
             async {
                 self.current_mode().await.map(|m| match m {
                     DayNight::Day => "day".to_string(),
@@ -740,6 +818,10 @@ impl NightModeController {
         VisionDiagnostics {
             mode,
             ae_luma,
+            ae_a_gain_max: ae_attr.map(|a| a.a_gain_max),
+            ae_exp_time_max: ae_attr.map(|a| a.exp_time_max),
+            ae_target_luminance: ae_attr.map(|a| a.target_lumiance),
+            awb_cnt,
             ain0: gpio.ain0,
             ir_led: gpio.ir_led,
             ircut_a: gpio.ircut_a,
@@ -960,7 +1042,13 @@ mod tests {
             barrier_isp.wait();
             -1
         });
+        // No ISP luminance factor: these exercise the AE and ain0 fallbacks.
+        ffi.expect_get_lum_factor().returning(|| None);
         ffi.expect_get_ae_luma().times(1..).returning(|| None);
+        // live_diagnostics now also reads AE ceilings and AWB bins; not under
+        // test here.
+        ffi.expect_get_ae_attr().returning(|| None);
+        ffi.expect_get_awb_stat().returning(|| None);
 
         let ctl = Arc::new(NightModeController::new(
             paths,
@@ -1028,11 +1116,15 @@ mod tests {
 
         let mut ffi = MockImagingHalTrait::new();
         // Below ae_night_threshold (8); ain0=1500 would otherwise be day.
+        // No ISP luminance factor: these exercise the AE and ain0 fallbacks.
+        ffi.expect_get_lum_factor().returning(|| None);
         ffi.expect_get_ae_luma().times(1).returning(|| Some(1));
         ffi.expect_set_ir_filter()
             .withf(|enabled| *enabled)
             .times(1)
             .returning(|_| 0);
+        // The sample line is due on the first tick, so it fetches the bins.
+        ffi.expect_get_awb_stat().returning(|| None);
 
         let ctl = NightModeController::new(
             paths,
@@ -1048,6 +1140,107 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_tick_prefers_the_lum_factor_and_reads_it_dark_when_high() {
+        use crate::hal::common::imaging::MockImagingHalTrait;
+        use crate::onvif::types::common::IrCutFilterMode;
+
+        // The factor runs opposite to every other source: high = dark. A value
+        // above lum_night_threshold must mean night even though the same number
+        // read as AE luma would be broad daylight, and AE must not be consulted
+        // at all while the factor is available.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let paths = NodePaths::rooted(dir.path(), dir.path());
+        seed_gpio_nodes(&paths);
+
+        let mut ffi = MockImagingHalTrait::new();
+        ffi.expect_get_lum_factor()
+            .times(1)
+            .returning(|| Some(9000));
+        ffi.expect_get_ae_luma().never();
+        ffi.expect_set_ir_filter()
+            .withf(|enabled| *enabled)
+            .times(1)
+            .returning(|_| 0);
+        // The sample line is due on the first tick, so it fetches the bins.
+        ffi.expect_get_awb_stat().returning(|| None);
+
+        let ctl = NightModeController::new(
+            paths,
+            unlocked_config(),
+            std::sync::Arc::new(ffi),
+            IrCutFilterMode::AUTO,
+            None,
+        );
+
+        ctl.tick().await;
+        assert_eq!(ctl.current_mode().await, Some(DayNight::Night));
+    }
+
+    #[tokio::test]
+    async fn test_tick_reads_a_low_lum_factor_as_day() {
+        use crate::hal::common::imaging::MockImagingHalTrait;
+        use crate::onvif::types::common::IrCutFilterMode;
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let paths = NodePaths::rooted(dir.path(), dir.path());
+        seed_gpio_nodes(&paths);
+
+        let mut ffi = MockImagingHalTrait::new();
+        // Below lum_day_threshold (2048): the ISP is barely working, so it is bright.
+        ffi.expect_get_lum_factor().times(1).returning(|| Some(500));
+        ffi.expect_set_ir_filter()
+            .withf(|enabled| !*enabled)
+            .times(1)
+            .returning(|_| 0);
+        // The sample line is due on the first tick, so it fetches the bins.
+        ffi.expect_get_awb_stat().returning(|| None);
+
+        let ctl = NightModeController::new(
+            paths,
+            unlocked_config(),
+            std::sync::Arc::new(ffi),
+            IrCutFilterMode::AUTO,
+            None,
+        );
+
+        ctl.tick().await;
+        assert_eq!(ctl.current_mode().await, Some(DayNight::Day));
+    }
+
+    #[tokio::test]
+    async fn test_tick_holds_inside_the_lum_hysteresis_band() {
+        use crate::hal::common::imaging::MockImagingHalTrait;
+        use crate::onvif::types::common::IrCutFilterMode;
+
+        // 2048..6400 is the vendor's hysteresis band; nothing may move there,
+        // and the AE fallback must not be reached just because the factor was
+        // indeterminate — that would reintroduce dusk oscillation.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let paths = NodePaths::rooted(dir.path(), dir.path());
+        seed_gpio_nodes(&paths);
+
+        let mut ffi = MockImagingHalTrait::new();
+        ffi.expect_get_lum_factor()
+            .times(1)
+            .returning(|| Some(4000));
+        ffi.expect_get_ae_luma().never();
+        // No set_ir_filter expectation: any transition fails the test.
+        // The sample line is due on the first tick, so it fetches the bins.
+        ffi.expect_get_awb_stat().returning(|| None);
+
+        let ctl = NightModeController::new(
+            paths,
+            unlocked_config(),
+            std::sync::Arc::new(ffi),
+            IrCutFilterMode::AUTO,
+            None,
+        );
+
+        ctl.tick().await;
+        assert_eq!(ctl.current_mode().await, None);
+    }
+
+    #[tokio::test]
     async fn test_tick_falls_back_to_ain0_after_three_ae_failures() {
         use crate::hal::common::imaging::MockImagingHalTrait;
         use crate::onvif::types::common::IrCutFilterMode;
@@ -1058,11 +1251,15 @@ mod tests {
         std::fs::write(paths.light_sensor(), "100").unwrap();
 
         let mut ffi = MockImagingHalTrait::new();
+        // No ISP luminance factor: these exercise the AE and ain0 fallbacks.
+        ffi.expect_get_lum_factor().returning(|| None);
         ffi.expect_get_ae_luma().times(3).returning(|| None);
         ffi.expect_set_ir_filter()
             .withf(|enabled| *enabled)
             .times(1)
             .returning(|_| 0);
+        // The sample line is due once resolve() is finally reached (3rd tick).
+        ffi.expect_get_awb_stat().returning(|| None);
 
         let cfg = crate::config::types::NightConfig {
             day_threshold: Some(200),
@@ -1101,6 +1298,8 @@ mod tests {
         std::fs::write(paths.light_sensor(), "100").unwrap();
 
         let mut ffi = MockImagingHalTrait::new();
+        // No ISP luminance factor: these exercise the AE and ain0 fallbacks.
+        ffi.expect_get_lum_factor().returning(|| None);
         ffi.expect_get_ae_luma().times(3).returning(|| None);
         // No set_ir_filter expectation: the fallback must never run.
 
@@ -1130,6 +1329,8 @@ mod tests {
         std::fs::write(paths.light_sensor(), "100").unwrap();
 
         let mut ffi = MockImagingHalTrait::new();
+        // No ISP luminance factor: these exercise the AE and ain0 fallbacks.
+        ffi.expect_get_lum_factor().returning(|| None);
         ffi.expect_get_ae_luma().times(5).returning({
             let mut calls = 0u8;
             move || {
@@ -1147,6 +1348,8 @@ mod tests {
             .withf(|enabled| !*enabled)
             .times(1)
             .returning(|_| 0);
+        // The sample line is due once resolve() is finally reached (call 3).
+        ffi.expect_get_awb_stat().returning(|| None);
 
         let ctl = NightModeController::new(
             paths,
@@ -1181,11 +1384,15 @@ mod tests {
 
         let mut ffi = MockImagingHalTrait::new();
         // Below ae_night_threshold (8): a dark scene, agreeing with the stale lamp.
+        // No ISP luminance factor: these exercise the AE and ain0 fallbacks.
+        ffi.expect_get_lum_factor().returning(|| None);
         ffi.expect_get_ae_luma().times(1).returning(|| Some(1));
         ffi.expect_set_ir_filter()
             .withf(|enabled| *enabled)
             .times(1)
             .returning(|_| 0);
+        // The sample line is due on the first tick, so it fetches the bins.
+        ffi.expect_get_awb_stat().returning(|| None);
 
         let ctl = NightModeController::new(
             paths,
@@ -1214,6 +1421,8 @@ mod tests {
         seed_gpio_nodes(&paths);
 
         let mut ffi = MockImagingHalTrait::new();
+        // No ISP luminance factor: these exercise the AE and ain0 fallbacks.
+        ffi.expect_get_lum_factor().returning(|| None);
         ffi.expect_get_ae_luma().times(3).returning(|| Some(1)); // dark scene
         let mut calls = 0u8;
         ffi.expect_set_ir_filter()
@@ -1223,6 +1432,8 @@ mod tests {
                 calls += 1;
                 if calls == 1 { -1 } else { 0 }
             });
+        // Due on the first tick only: class does not change across ticks.
+        ffi.expect_get_awb_stat().returning(|| None);
 
         let ctl = NightModeController::new(
             paths,
@@ -1237,6 +1448,124 @@ mod tests {
 
         ctl.tick().await; // decide holds; the retry already resolved back in tick 1
         ctl.tick().await; // re-polls only: set_ir_filter still called exactly twice
+    }
+
+    #[tokio::test]
+    async fn test_forced_mode_tick_retries_a_pending_isp_switch() {
+        use crate::hal::common::imaging::MockImagingHalTrait;
+        use crate::onvif::types::common::IrCutFilterMode;
+
+        // Regression test for the 2026-08-14 .127 bug: a forced OFF whose
+        // start-up ISP switch fails (racing a cold vendor daemon) must still
+        // be retried by tick(), even though auto_enabled is false in a
+        // forced mode. Before the fix this never drains and the camera sits
+        // with night GPIO and a day ISP profile indefinitely.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let paths = NodePaths::rooted(dir.path(), dir.path());
+        seed_gpio_nodes(&paths);
+
+        let mut ffi = MockImagingHalTrait::new();
+        let mut calls = 0u8;
+        ffi.expect_set_ir_filter()
+            .withf(|enabled| *enabled) // OFF -> Night
+            .times(2)
+            .returning(move |_| {
+                calls += 1;
+                if calls == 1 { -1 } else { 0 }
+            });
+
+        let ctl = NightModeController::new(
+            paths,
+            test_config(),
+            std::sync::Arc::new(ffi),
+            IrCutFilterMode::OFF,
+            None,
+        );
+
+        // Mirrors what spawn_auto_loop does at start-up: apply the forced
+        // mode; the ISP call fails, GPIO still advances.
+        let _ = ctl.apply(DayNight::Night).await;
+        assert_eq!(ctl.current_mode().await, None, "ISP sync still pending");
+
+        ctl.tick().await; // must retry despite auto_enabled == false
+
+        assert_eq!(ctl.current_mode().await, Some(DayNight::Night));
+    }
+
+    #[tokio::test]
+    async fn test_forced_mode_retry_does_not_re_run_apply() {
+        use crate::hal::common::imaging::MockImagingHalTrait;
+        use crate::onvif::types::common::IrCutFilterMode;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        // The retry exists because GPIO already advanced; re-running apply()
+        // would re-pulse the ircut solenoid coil. Count idr_hook invocations
+        // as a proxy for apply() calls, since apply() invokes it exactly
+        // once per successful GPIO plan.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let paths = NodePaths::rooted(dir.path(), dir.path());
+        seed_gpio_nodes(&paths);
+
+        let mut ffi = MockImagingHalTrait::new();
+        let mut calls = 0u8;
+        ffi.expect_set_ir_filter()
+            .withf(|enabled| *enabled)
+            .times(2)
+            .returning(move |_| {
+                calls += 1;
+                if calls == 1 { -1 } else { 0 }
+            });
+
+        let idr_calls = std::sync::Arc::new(AtomicUsize::new(0));
+        let idr_calls_hook = std::sync::Arc::clone(&idr_calls);
+        let ctl = NightModeController::new(
+            paths,
+            test_config(),
+            std::sync::Arc::new(ffi),
+            IrCutFilterMode::OFF,
+            Some(std::sync::Arc::new(move || {
+                idr_calls_hook.fetch_add(1, Ordering::SeqCst);
+            })),
+        );
+
+        let _ = ctl.apply(DayNight::Night).await;
+        assert_eq!(idr_calls.load(Ordering::SeqCst), 1, "apply ran once");
+
+        ctl.tick().await; // retries the ISP only; must not re-run apply()
+
+        assert_eq!(
+            idr_calls.load(Ordering::SeqCst),
+            1,
+            "retry must not call apply() again"
+        );
+        assert_eq!(ctl.current_mode().await, Some(DayNight::Night));
+    }
+
+    #[tokio::test]
+    async fn test_forced_mode_tick_makes_no_hal_calls_when_nothing_pending() {
+        use crate::hal::common::imaging::MockImagingHalTrait;
+        use crate::onvif::types::common::IrCutFilterMode;
+
+        // No expectations at all: mockall panics on any unexpected call, so
+        // this proves a forced-mode tick with nothing pending is zero HAL
+        // traffic, exactly as before this change.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let paths = NodePaths::rooted(dir.path(), dir.path());
+        seed_gpio_nodes(&paths);
+
+        let ffi = MockImagingHalTrait::new();
+
+        let ctl = NightModeController::new(
+            paths,
+            test_config(),
+            std::sync::Arc::new(ffi),
+            IrCutFilterMode::OFF,
+            None,
+        );
+
+        // Nothing has driven the hardware (spawn_auto_loop was never called),
+        // so isp_pending is None.
+        ctl.tick().await;
     }
 
     #[tokio::test]
@@ -1256,11 +1585,17 @@ mod tests {
         std::fs::create_dir(paths.node(Node::IrCutA)).expect("create dir ircut_a");
 
         let mut ffi = MockImagingHalTrait::new();
+        // No ISP luminance factor: these exercise the AE and ain0 fallbacks.
+        ffi.expect_get_lum_factor().returning(|| None);
         ffi.expect_get_ae_luma().times(2).returning(|| Some(1)); // dark scene
         ffi.expect_set_ir_filter()
             .withf(|enabled| *enabled)
             .times(2)
             .returning(|_| -1);
+        // Mode never resolves to Night here (apply keeps failing), so the
+        // sample class stays Indeterminate->Night pending; either way it is
+        // due each tick until a class sticks.
+        ffi.expect_get_awb_stat().returning(|| None);
 
         let ctl = NightModeController::new(
             paths,
@@ -1785,7 +2120,14 @@ mod tests {
         std::fs::write(paths.light_sensor(), "306").unwrap();
 
         let mut ffi = MockImagingHalTrait::new();
+        // No ISP luminance factor: these exercise the AE and ain0 fallbacks.
+        ffi.expect_get_lum_factor().returning(|| None);
         ffi.expect_get_ae_luma().times(1).returning(|| Some(42));
+        // live_diagnostics now also reads AE ceilings; not under test here.
+        ffi.expect_get_ae_attr().returning(|| None);
+        ffi.expect_get_awb_stat()
+            .times(1)
+            .returning(|| Some([9, 0, 0, 0, 0, 0, 0, 0, 0, 1]));
 
         let ctl = NightModeController::new(
             paths,
@@ -1801,9 +2143,164 @@ mod tests {
         assert_eq!(v.ircut_a, Some(false));
         assert_eq!(v.ircut_b, Some(false));
         assert_eq!(v.white_led, Some(false));
+        assert_eq!(v.awb_cnt, Some([9, 0, 0, 0, 0, 0, 0, 0, 0, 1]));
         assert!(v.supported.ir_led);
         assert!(v.supported.ircut);
         assert!(v.supported.white_led);
         assert_eq!(v.mode, None);
+    }
+
+    /// `live_diagnostics` must surface a failed AWB read as `None`, not as
+    /// all-zero bins — the two mean opposite things (unavailable vs. a
+    /// legitimate quiet reading).
+    #[tokio::test]
+    async fn test_live_diagnostics_awb_none_stays_none_not_zeros() {
+        use crate::hal::common::imaging::MockImagingHalTrait;
+        use crate::onvif::types::common::IrCutFilterMode;
+
+        let dir = tempfile::tempdir().unwrap();
+        let paths = NodePaths::rooted(dir.path(), dir.path());
+
+        let mut ffi = MockImagingHalTrait::new();
+        ffi.expect_get_lum_factor().returning(|| None);
+        ffi.expect_get_ae_luma().returning(|| None);
+        ffi.expect_get_ae_attr().returning(|| None);
+        ffi.expect_get_awb_stat().times(1).returning(|| None);
+
+        let ctl = NightModeController::new(
+            paths,
+            test_config(),
+            std::sync::Arc::new(ffi),
+            IrCutFilterMode::AUTO,
+            None,
+        );
+        assert_eq!(ctl.live_diagnostics().await.awb_cnt, None);
+    }
+
+    /// The sample line is rate-limited by `sample_due`; the AWB fetch that
+    /// backs it must be gated the same way, or a 10 s poll would double ISP
+    /// IPC traffic to feed a line logged at most every `SAMPLE_LOG_INTERVAL`.
+    #[tokio::test]
+    async fn test_log_sample_only_fetches_awb_bins_when_the_line_is_due() {
+        use crate::hal::common::imaging::MockImagingHalTrait;
+        use crate::onvif::types::common::IrCutFilterMode;
+
+        let dir = tempfile::tempdir().unwrap();
+        let paths = NodePaths::rooted(dir.path(), dir.path());
+
+        let mut ffi = MockImagingHalTrait::new();
+        // Exactly one call: the first log_sample is due (nothing logged yet),
+        // the second has the same class within the interval and must not
+        // fetch the bins at all.
+        ffi.expect_get_awb_stat().times(1).returning(|| None);
+
+        let ctl = NightModeController::new(
+            paths,
+            test_config(),
+            std::sync::Arc::new(ffi),
+            IrCutFilterMode::AUTO,
+            None,
+        );
+
+        ctl.log_sample(100, "ae", Some(DayNight::Day)).await;
+        ctl.log_sample(100, "ae", Some(DayNight::Day)).await;
+    }
+
+    /// A determinate-to-determinate class change always re-fetches the bins
+    /// immediately, mirroring `sample_due`'s "always log a change" rule.
+    #[tokio::test]
+    async fn test_log_sample_refetches_awb_bins_on_a_class_change() {
+        use crate::hal::common::imaging::MockImagingHalTrait;
+        use crate::onvif::types::common::IrCutFilterMode;
+
+        let dir = tempfile::tempdir().unwrap();
+        let paths = NodePaths::rooted(dir.path(), dir.path());
+
+        let mut ffi = MockImagingHalTrait::new();
+        ffi.expect_get_awb_stat().times(2).returning(|| None);
+
+        let ctl = NightModeController::new(
+            paths,
+            test_config(),
+            std::sync::Arc::new(ffi),
+            IrCutFilterMode::AUTO,
+            None,
+        );
+
+        ctl.log_sample(100, "ae", Some(DayNight::Day)).await;
+        ctl.log_sample(50, "ae", Some(DayNight::Night)).await;
+    }
+
+    /// While the retry's `set_ir_filter` is in flight, `isp_pending` must be
+    /// free (diagnostics read it via `current_mode` and must not stall on the
+    /// daemon's poll loop), and a newer failed transition recorded in that
+    /// window must not be erased by the successful retry.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_retry_pending_isp_releases_lock_and_keeps_newer_target() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::{Arc, Barrier};
+
+        use crate::hal::common::imaging::MockImagingHalTrait;
+        use crate::onvif::types::common::IrCutFilterMode;
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let paths = NodePaths::rooted(dir.path(), dir.path());
+        seed_gpio_nodes(&paths);
+
+        let barrier = Arc::new(Barrier::new(2));
+        let barrier_isp = Arc::clone(&barrier);
+        let call = Arc::new(AtomicUsize::new(0));
+        let call_isp = Arc::clone(&call);
+
+        let mut ffi = MockImagingHalTrait::new();
+        // First call (the failed apply that seeds the pending target) fails
+        // at once; the second (the retry) blocks until the test has recorded
+        // a newer target, then succeeds.
+        ffi.expect_set_ir_filter().times(2).returning(move |_| {
+            if call_isp.fetch_add(1, Ordering::SeqCst) == 0 {
+                -1
+            } else {
+                barrier_isp.wait();
+                0
+            }
+        });
+        // The tick's signal reads after the retry.
+        ffi.expect_get_lum_factor().returning(|| None);
+        ffi.expect_get_ae_luma().returning(|| None);
+
+        let ctl = Arc::new(NightModeController::new(
+            paths,
+            test_config(),
+            Arc::new(ffi),
+            IrCutFilterMode::AUTO,
+            None,
+        ));
+
+        // Seed a pending target: an apply whose ISP call failed.
+        let _ = ctl.apply(DayNight::Night).await;
+        assert_eq!(*ctl.isp_pending.lock().await, Some(DayNight::Night));
+
+        let tick_ctl = Arc::clone(&ctl);
+        let tick = tokio::spawn(async move { tick_ctl.tick().await });
+
+        // The retry's ISP call is now in flight.
+        barrier.wait();
+
+        // A newer failed transition must be able to record its target while
+        // the call is in flight — impossible if the retry still holds the
+        // lock, in which case this times out.
+        let write_ctl = Arc::clone(&ctl);
+        let writer = tokio::spawn(async move {
+            *write_ctl.isp_pending.lock().await = Some(DayNight::Day);
+        });
+        match tokio::time::timeout(Duration::from_secs(2), writer).await {
+            Ok(Ok(())) => {}
+            _ => panic!("isp_pending was not released while the ISP retry was in flight"),
+        }
+
+        tick.await.expect("tick task");
+
+        // The successful retry must not clear the newer target.
+        assert_eq!(*ctl.isp_pending.lock().await, Some(DayNight::Day));
     }
 }
