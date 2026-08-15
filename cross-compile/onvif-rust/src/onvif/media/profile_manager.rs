@@ -226,6 +226,7 @@ impl ProfileManager {
         default_ptz_config: PTZConfiguration,
     ) {
         let mut profile_count = 0;
+        let ptz_enabled = config.read().ptz.enabled;
 
         for profile_num in 1..=4 {
             if !Self::is_profile_enabled(config, profile_num) {
@@ -285,7 +286,7 @@ impl ProfileManager {
                 None
             };
 
-            let profile = Self::create_profile_from_config(
+            let mut profile = Self::create_profile_from_config(
                 &profile_config.name,
                 profile_config.width,
                 profile_config.height,
@@ -295,6 +296,9 @@ impl ProfileManager {
                 audio_encoder_config,
                 &default_ptz_config,
             );
+            if !ptz_enabled {
+                profile.ptz_configuration = None;
+            }
             self.profiles.write().insert(profile.token.clone(), profile);
             profile_count += 1;
         }
@@ -1527,6 +1531,29 @@ mod tests {
         let manager = ProfileManager::new();
         let profiles = manager.get_profiles();
         assert_eq!(profiles.len(), 2);
+    }
+
+    #[test]
+    fn test_profiles_omit_ptz_configuration_when_disabled() {
+        let config = Arc::new(ConfigRuntime::new(Default::default()));
+        config.write().ptz.enabled = false;
+        let manager = ProfileManager::with_config(config);
+        let profiles = manager.get_profiles();
+        assert!(!profiles.is_empty());
+        for profile in profiles {
+            assert!(profile.ptz_configuration.is_none());
+        }
+    }
+
+    #[test]
+    fn test_profiles_include_ptz_configuration_when_enabled() {
+        let config = Arc::new(ConfigRuntime::new(Default::default()));
+        let manager = ProfileManager::with_config(config);
+        let profiles = manager.get_profiles();
+        assert!(!profiles.is_empty());
+        for profile in profiles {
+            assert!(profile.ptz_configuration.is_some());
+        }
     }
 
     #[test]
