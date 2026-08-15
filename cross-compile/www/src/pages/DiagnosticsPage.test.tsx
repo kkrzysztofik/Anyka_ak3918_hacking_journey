@@ -32,6 +32,7 @@ const BASE_DIAG: Diagnostics = {
   components: [{ name: 'onvif', status: 'healthy', message: null }],
   degraded_services: [],
   vision: null,
+  ptz: null,
 };
 
 function makeResult(
@@ -536,6 +537,74 @@ describe('DiagnosticsPage', () => {
       await user.click(screen.getByTestId('diagnostics-firmware-upgrade-button'));
 
       expect(screen.getByTestId('firmware-upgrade-dialog')).toBeInTheDocument();
+    });
+  });
+
+  describe('PTZ card', () => {
+    const PTZ_OK: NonNullable<Diagnostics['ptz']> = {
+      enabled: true,
+      opened: true,
+      init_error: null,
+      self_check: 'ok',
+      position: [-12, 4.5, 1],
+      moving: false,
+      last_step_pos: { pan: 0, tilt: 0, age_ms: 14_000 },
+      commands_completed: 47,
+    };
+
+    it('should render the PTZ bring-up and motion rows', () => {
+      vi.mocked(useDiagnostics).mockReturnValue(makeResult({ ptz: PTZ_OK }));
+      renderWithProviders(<DiagnosticsPage />);
+      expect(screen.getByTestId('diagnostics-ptz-motors')).toHaveTextContent('open');
+      expect(screen.getByTestId('diagnostics-ptz-position')).toHaveTextContent('-12.0° / 4.5°');
+      expect(screen.getByTestId('diagnostics-ptz-commands')).toHaveTextContent('47');
+    });
+
+    it('should surface the motor open errno when bring-up failed', () => {
+      vi.mocked(useDiagnostics).mockReturnValue(
+        makeResult({
+          ptz: {
+            ...PTZ_OK,
+            opened: false,
+            self_check: null,
+            position: null,
+            init_error: 'open /dev/ak-motor0: errno 19',
+          },
+        }),
+      );
+      renderWithProviders(<DiagnosticsPage />);
+      expect(screen.getByTestId('diagnostics-ptz-init-error')).toHaveTextContent('errno 19');
+    });
+
+    it('should warn when the motor reports no step movement after completed commands', () => {
+      vi.mocked(useDiagnostics).mockReturnValue(makeResult({ ptz: PTZ_OK }));
+      renderWithProviders(<DiagnosticsPage />);
+      expect(screen.getByTestId('diagnostics-ptz-no-readback')).toBeInTheDocument();
+    });
+
+    it('should collapse the card when PTZ is disabled in configuration', () => {
+      vi.mocked(useDiagnostics).mockReturnValue(
+        makeResult({
+          ptz: {
+            ...PTZ_OK,
+            enabled: false,
+            opened: false,
+            self_check: null,
+            position: null,
+            last_step_pos: null,
+            commands_completed: 0,
+          },
+        }),
+      );
+      renderWithProviders(<DiagnosticsPage />);
+      expect(screen.getByTestId('diagnostics-ptz-disabled-note')).toBeInTheDocument();
+      expect(screen.queryByTestId('diagnostics-ptz-position')).not.toBeInTheDocument();
+    });
+
+    it('should not render the PTZ card when the backend reports no PTZ', () => {
+      vi.mocked(useDiagnostics).mockReturnValue(makeResult({ ptz: null }));
+      renderWithProviders(<DiagnosticsPage />);
+      expect(screen.queryByTestId('diagnostics-ptz-title')).not.toBeInTheDocument();
     });
   });
 });

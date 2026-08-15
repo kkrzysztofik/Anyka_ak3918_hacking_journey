@@ -8,6 +8,7 @@ import {
   Download,
   Eye,
   FileText,
+  Move,
   HardDrive,
   Info,
   Upload,
@@ -172,6 +173,110 @@ function VisionCard({ vision }: Readonly<{ vision: Diagnostics['vision'] }>) {
               </dd>
             </div>
           ))}
+        </dl>
+      </CardContent>
+    </Card>
+  );
+}
+
+function PtzCard({ ptz }: Readonly<{ ptz: NonNullable<Diagnostics['ptz']> }>) {
+  const config = ptz.enabled ? 'enabled' : 'disabled';
+  const motors = ptz.opened ? 'open' : 'not opened';
+  const selfCheck = ptz.self_check ?? '\u2014';
+
+  const position =
+    ptz.position !== null && ptz.position !== undefined
+      ? `${ptz.position[0].toFixed(1)}\u00B0 / ${ptz.position[1].toFixed(1)}\u00B0 (tracked)`
+      : '\u2014';
+
+  const stepPos =
+    ptz.last_step_pos !== null && ptz.last_step_pos !== undefined
+      ? `${ptz.last_step_pos.pan ?? '\u2014'} / ${ptz.last_step_pos.tilt ?? '\u2014'} (${formatDuration(ptz.last_step_pos.age_ms / 1000)} ago)`
+      : '\u2014';
+
+  // A step position pinned at 0 after completed commands is the signature of a motor
+  // driver whose MOTOR_GET_STATUS returns success and writes nothing.
+  const showNoReadback =
+    ptz.enabled &&
+    ptz.opened &&
+    ptz.commands_completed > 0 &&
+    ptz.last_step_pos !== null &&
+    ptz.last_step_pos !== undefined &&
+    ptz.last_step_pos.pan === 0 &&
+    ptz.last_step_pos.tilt === 0;
+
+  const bringUpRows = [
+    { label: 'Config', value: config, testId: 'diagnostics-ptz-config' },
+    { label: 'Motors', value: motors, testId: 'diagnostics-ptz-motors' },
+    { label: 'Self-check', value: selfCheck, testId: 'diagnostics-ptz-self-check' },
+  ];
+
+  const motionRows = [
+    { label: 'Position', value: position, testId: 'diagnostics-ptz-position' },
+    { label: 'Step pos', value: stepPos, testId: 'diagnostics-ptz-step-pos' },
+    { label: 'Moving', value: ptz.moving ? 'yes' : 'no', testId: 'diagnostics-ptz-moving' },
+    {
+      label: 'Commands',
+      value: String(ptz.commands_completed),
+      testId: 'diagnostics-ptz-commands',
+    },
+  ];
+
+  return (
+    <Card className="border-border bg-card overflow-hidden">
+      <CardHeader className="border-border border-b">
+        <div className="flex items-center gap-3">
+          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-cyan-500/10">
+            <Move className="h-5 w-5 text-cyan-500" />
+          </div>
+          <div>
+            <CardTitle
+              className="text-foreground text-sm font-semibold"
+              data-testid="diagnostics-ptz-title"
+            >
+              PTZ
+            </CardTitle>
+            <p className="text-muted-foreground text-xs">Motor bring-up and tracked motion</p>
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent className="pt-4">
+        <dl className="space-y-2 text-sm">
+          {bringUpRows.map(({ label, value, testId }) => (
+            <div key={testId} className="flex items-center justify-between">
+              <dt className="text-muted-foreground">{label}</dt>
+              <dd className="font-mono text-white" data-testid={testId}>
+                {value}
+              </dd>
+            </div>
+          ))}
+          {ptz.init_error ? (
+            <div className="flex items-center justify-between">
+              <dt className="text-muted-foreground">Init error</dt>
+              <dd className="font-mono text-red-500" data-testid="diagnostics-ptz-init-error">
+                {ptz.init_error}
+              </dd>
+            </div>
+          ) : null}
+          {!ptz.enabled ? (
+            <p className="text-muted-foreground text-xs" data-testid="diagnostics-ptz-disabled-note">
+              PTZ disabled in configuration
+            </p>
+          ) : (
+            motionRows.map(({ label, value, testId }) => (
+              <div key={testId} className="flex items-center justify-between">
+                <dt className="text-muted-foreground">{label}</dt>
+                <dd className="font-mono text-white" data-testid={testId}>
+                  {value}
+                </dd>
+              </div>
+            ))
+          )}
+          {showNoReadback ? (
+            <p className="text-yellow-500 text-xs" data-testid="diagnostics-ptz-no-readback">
+              Motor reports step 0 after completed commands — likely no MOTOR_GET_STATUS readback
+            </p>
+          ) : null}
         </dl>
       </CardContent>
     </Card>
@@ -804,6 +909,7 @@ export default function DiagnosticsPage() {
       <div className="grid gap-6 lg:grid-cols-2">
         <DeviceInfoCard data={data} />
         <VisionCard vision={data?.vision ?? null} />
+        {data?.ptz ? <PtzCard ptz={data.ptz} /> : null}
         <StreamHealthCard data={data} />
       </div>
 
