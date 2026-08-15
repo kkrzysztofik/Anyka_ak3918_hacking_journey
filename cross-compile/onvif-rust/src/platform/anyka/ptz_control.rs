@@ -39,7 +39,8 @@ use crate::hal::anyka::ptz::ptz_turn_direction;
 use crate::hal::common::ptz_turn_direction;
 
 use crate::platform::traits::{
-    PTZControl, PlatformError, PlatformResult, PtzLimits, PtzPosition, PtzPreset, PtzVelocity,
+    PTZControl, PlatformError, PlatformResult, PtzDiagnostics, PtzLimits, PtzPosition, PtzPreset,
+    PtzVelocity, StepPos,
 };
 
 use super::ptz_actor::{self, PtzActorState, PtzCommand};
@@ -160,6 +161,39 @@ impl AnykaPTZControl {
             continuous_move_active: Arc::new(AtomicBool::new(false)),
             continuous_move_cancel: Arc::new(Notify::new()),
             continuous_move_task: Mutex::new(None),
+        }
+    }
+
+    /// Point-in-time diagnostics for a PTZ that came up.
+    ///
+    /// Reads only `parking_lot` guards and atomics — no ioctl, no driver lock — because
+    /// this runs on the `/api/diagnostics` poll path, which must not be blockable by an
+    /// in-flight ten-second sweep.
+    pub(crate) fn diagnostics(&self) -> PtzDiagnostics {
+        let handle = self.handle.read();
+        let opened = handle.is_some();
+        let self_check = handle
+            .as_ref()
+            .map(|h| h.self_check_error().unwrap_or("ok").to_string());
+        drop(handle);
+
+        let position = *self.shared.position.read();
+        let velocity = *self.shared.velocity.read();
+        let last_step_pos = self.shared.last_step.read().as_ref().map(|s| StepPos {
+            pan: s.pan,
+            tilt: s.tilt,
+            age_ms: s.at.elapsed().as_millis().min(u128::from(u64::MAX)) as u64,
+        });
+
+        PtzDiagnostics {
+            enabled: true,
+            opened,
+            init_error: None,
+            self_check,
+            position: Some([position.pan, position.tilt, position.zoom]),
+            moving: velocity.pan != 0.0 || velocity.tilt != 0.0,
+            last_step_pos,
+            commands_completed: self.shared.commands_completed.load(Ordering::SeqCst),
         }
     }
 
@@ -434,6 +468,28 @@ mod tests {
     // =========================================================================
     // Initialization tests
     // =========================================================================
+
+    #[tokio::test]
+    async fn test_diagnostics_reports_open_state_and_tracked_position() {
+        let ptz = AnykaPTZControl::with_ffi(Arc::new(mock_with_open()));
+        ptz.open().unwrap();
+
+        let d = ptz.diagnostics();
+        assert!(d.enabled && d.opened);
+        assert!(d.init_error.is_none());
+        assert_eq!(d.self_check.as_deref(), Some("ok"));
+        assert_eq!(d.position, Some([0.0, 0.0, 1.0]), "HOME until a move lands");
+        assert!(!d.moving);
+        assert!(d.last_step_pos.is_none(), "no turn has completed yet");
+    }
+
+    #[tokio::test]
+    async fn test_diagnostics_before_open_reports_not_opened() {
+        let ptz = AnykaPTZControl::with_ffi(Arc::new(mock_with_open()));
+        let d = ptz.diagnostics();
+        assert!(!d.opened);
+        assert!(d.self_check.is_none(), "the sweep only runs on open");
+    }
 
     #[test]
     fn test_open_success() {
