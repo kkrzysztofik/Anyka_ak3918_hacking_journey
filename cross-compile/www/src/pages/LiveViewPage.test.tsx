@@ -140,6 +140,19 @@ describe('LiveViewPage', () => {
     expect(screen.getByTestId('liveview-ptz-description')).toHaveTextContent('PTZ camera controls');
   });
 
+  it('should disable PTZ controls when no profile has a PTZ configuration', async () => {
+    const { getProfiles } = await import('@/services/profileService');
+    vi.mocked(getProfiles).mockResolvedValueOnce([
+      { token: 'ProfileToken1', name: 'MainStream' },
+      { token: 'ProfileToken2', name: 'SubStream' },
+    ]);
+    renderWithProviders(<LiveViewPage />);
+    await waitFor(() => {
+      expect(screen.getByTestId('liveview-ptz-fieldset')).toBeDisabled();
+    });
+    expect(screen.getByTestId('liveview-ptz-disabled-note')).toHaveTextContent('PTZ is disabled');
+  });
+
   it('should render PTZ speed slider', () => {
     renderWithProviders(<LiveViewPage />);
     const speedSlider = screen.getByTestId('liveview-ptz-speed-slider');

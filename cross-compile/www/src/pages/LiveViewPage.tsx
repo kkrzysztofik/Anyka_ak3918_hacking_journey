@@ -106,13 +106,16 @@ export default function LiveViewPage() {
   const queryClient = useQueryClient();
 
   // Fetch profiles to get the PTZ-capable profile token
-  const { data: profiles } = useQuery({
+  const { data: profiles, isSuccess } = useQuery({
     queryKey: ['profiles'],
     queryFn: getProfiles,
   });
 
-  const profileToken =
-    profiles?.find((p) => p.ptzConfiguration)?.token ?? profiles?.[0]?.token ?? '';
+  const hasPtz = !!profiles?.some((p) => p.ptzConfiguration);
+  const ptzDisabled = isSuccess && !hasPtz;
+  const profileToken = hasPtz
+    ? (profiles?.find((p) => p.ptzConfiguration)?.token ?? '')
+    : '';
 
   // Fetch presets for the active profile
   const { data: presets } = useQuery({
@@ -483,7 +486,11 @@ export default function LiveViewPage() {
         </div>
 
         {/* Right Column: Controls */}
-        <div className="flex flex-col gap-4">
+        <fieldset
+          disabled={ptzDisabled}
+          className={cn('m-0 flex flex-col gap-4 border-0 p-0', ptzDisabled && 'opacity-50')}
+          data-testid="liveview-ptz-fieldset"
+        >
           {/* PTZ Controls */}
           <SettingsCard>
             <SettingsCardHeader>
@@ -496,6 +503,11 @@ export default function LiveViewPage() {
                   <SettingsCardDescription data-testid="liveview-ptz-description">
                     PTZ camera controls
                   </SettingsCardDescription>
+                  {ptzDisabled && (
+                    <p className="text-xs text-zinc-500" data-testid="liveview-ptz-disabled-note">
+                      PTZ is disabled on this device
+                    </p>
+                  )}
                 </div>
               </div>
             </SettingsCardHeader>
@@ -767,7 +779,7 @@ export default function LiveViewPage() {
               </div>
             </SettingsCardContent>
           </SettingsCard>
-        </div>
+        </fieldset>
       </div>
     </div>
   );
