@@ -38,8 +38,9 @@ use supervisor::{AttachTarget, Availability, PlatformAttachTarget, run_superviso
 
 use super::common::{
     DeviceInfo, ImagingControl, NetworkInfo, PTZControl, Platform, PlatformError, PlatformResult,
-    Resolution, VideoControl, VideoEncoder, VideoInput,
+    PtzDiagnostics, Resolution, VideoControl, VideoEncoder, VideoInput,
 };
+use crate::lifecycle::startup::OptionalInitResult;
 
 // Types used by tests
 #[cfg(test)]
@@ -87,6 +88,8 @@ pub struct AnykaPlatform {
     audio_input: Arc<AnykaAudioInput>,
     audio_encoder: Arc<AnykaAudioEncoder>,
     ptz_control: Option<Arc<dyn PTZControl>>,
+    /// Full PTZ bring-up outcome, including the open failure reason when present.
+    ptz_init: OptionalInitResult<Arc<AnykaPTZControl>>,
     imaging_control: Option<Arc<dyn ImagingControl>>,
     network_info: Option<Arc<dyn NetworkInfo>>,
     /// The shared IPC client, kept so the supervisor can attach and detach it.
@@ -112,12 +115,12 @@ pub struct AnykaPlatform {
 /// startup and then fails with -1 before the vertical motor is attempted, so `enabled = false` is
 /// a real saving and not just a service toggle.
 ///
-/// Returning `None` is already a supported state throughout the platform — the open-failure path
-/// below has always produced it — so callers need no new handling.
-fn init_ptz_control(enabled: bool) -> Option<Arc<dyn PTZControl>> {
+/// Returning [`OptionalInitResult`] keeps the open failure reason (device path + errno)
+/// reachable from diagnostics instead of discarding it into a bare `None`.
+fn init_ptz_control(enabled: bool) -> OptionalInitResult<Arc<AnykaPTZControl>> {
     if !enabled {
         tracing::info!("PTZ disabled by config (ptz.enabled = false); skipping motor bring-up");
-        return None;
+        return OptionalInitResult::Disabled;
     }
 
     tracing::info!("Initializing PTZ (native Rust driver, /dev/ak-motor0, /dev/ak-motor1)");
@@ -125,14 +128,19 @@ fn init_ptz_control(enabled: bool) -> Option<Arc<dyn PTZControl>> {
     match ptz.open() {
         Ok(()) => {
             tracing::info!("PTZ device opened successfully");
-            Some(Arc::new(ptz) as Arc<dyn PTZControl>)
+            OptionalInitResult::Success(Arc::new(ptz))
         }
         Err(e) => {
             tracing::error!(
                 "PTZ device failed to open, PTZ features will be unavailable: {}",
                 e
             );
-            None
+            OptionalInitResult::Failed {
+                component: "PTZ".to_string(),
+                // The device path and errno live in this string. Losing it is what made
+                // PTZ bring-up undiagnosable from anywhere but a telnet session.
+                error: e.to_string(),
+            }
         }
     }
 }
@@ -194,6 +202,7 @@ impl AnykaPlatform {
             audio_input: Arc::new(AnykaAudioInput::with_ffi(audio_ffi.clone())),
             audio_encoder: Arc::new(AnykaAudioEncoder::with_ffi(audio_ffi)),
             ptz_control: None,
+            ptz_init: OptionalInitResult::Disabled,
             imaging_control: None,
             network_info: None,
             // Detached: these tests drive the mocked HALs directly and never
@@ -284,7 +293,11 @@ impl AnykaPlatform {
             )
         };
 
-        let ptz_control = init_ptz_control(ptz_enabled);
+        let ptz_init = init_ptz_control(ptz_enabled);
+        let ptz_control = match &ptz_init {
+            OptionalInitResult::Success(ptz) => Some(Arc::clone(ptz) as Arc<dyn PTZControl>),
+            _ => None,
+        };
         let network_info = Some(Arc::new(AnykaNetworkInfo::new()) as Arc<dyn NetworkInfo>);
 
         Ok(Self {
@@ -296,6 +309,7 @@ impl AnykaPlatform {
             audio_input,
             audio_encoder,
             ptz_control,
+            ptz_init,
             imaging_control,
             network_info,
             ipc,
@@ -519,6 +533,14 @@ impl Platform for AnykaPlatform {
 
     fn stream_frame_age_ms(&self) -> Option<u64> {
         self.video_encoder.stream_frame_age_ms()
+    }
+
+    fn ptz_diagnostics(&self) -> Option<PtzDiagnostics> {
+        Some(match &self.ptz_init {
+            OptionalInitResult::Disabled => PtzDiagnostics::disabled(),
+            OptionalInitResult::Failed { error, .. } => PtzDiagnostics::failed(error.clone()),
+            OptionalInitResult::Success(ptz) => ptz.diagnostics(),
+        })
     }
 
     async fn initialize(&self) -> PlatformResult<()> {
