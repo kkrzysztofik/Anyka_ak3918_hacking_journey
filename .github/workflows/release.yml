@@ -37,7 +37,7 @@ jobs:
         run: npm run build
 
       - name: Archive WebUI Build
-        uses: actions/upload-artifact@v6  # v6.0.0
+        uses: actions/upload-artifact@v7  # v6.0.0
         # SHA: b7c566a772e6b6bfb58ed0dc250532a479d7789f
         with:
           name: webui-build
@@ -94,7 +94,7 @@ jobs:
           chmod +x release-artifacts/SD_card_contents/anyka_hack/onvif/onvif-rust
 
       - name: Archive Rust Build
-        uses: actions/upload-artifact@v6  # v6.0.0
+        uses: actions/upload-artifact@v7  # v6.0.0
         # SHA: b7c566a772e6b6bfb58ed0dc250532a479d7789f
         with:
           name: rust-build
