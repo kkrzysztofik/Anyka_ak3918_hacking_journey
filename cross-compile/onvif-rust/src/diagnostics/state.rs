@@ -9,7 +9,7 @@ use serde::Serialize;
 use super::proc::{self, CpuTimes, NetBytes};
 use super::storage;
 use crate::lifecycle::health::compute_health;
-use crate::platform::{Platform, VisionDiagnostics};
+use crate::platform::{Platform, PtzDiagnostics, VisionDiagnostics};
 
 const NET_IFACE: &str = "wlan0";
 const STORAGE_MOUNT: &str = "/mnt";
@@ -79,6 +79,9 @@ pub struct Snapshot {
     pub degraded_services: Vec<String>,
     /// Live vision/night-mode diagnostics from the imaging pipeline, if available.
     pub vision: Option<VisionDiagnostics>,
+    /// PTZ subsystem state, including bring-up failures. `None` when the platform does
+    /// not report PTZ at all.
+    pub ptz: Option<PtzDiagnostics>,
 }
 
 /// Holds platform handles and the last `/proc` sample for computing deltas.
@@ -256,6 +259,8 @@ impl DiagnosticsState {
             None => None,
         };
 
+        let ptz = self.platform.as_ref().and_then(|p| p.ptz_diagnostics());
+
         Snapshot {
             status: health.status.to_string(),
             firmware_version: crate::build_version().to_string(),
@@ -271,6 +276,7 @@ impl DiagnosticsState {
             degraded_services: health.degraded_services,
             components,
             vision,
+            ptz,
         }
     }
 }
@@ -373,6 +379,36 @@ mod tests {
         let state = DiagnosticsState::new(Instant::now(), None, Vec::new());
         let snap = state.snapshot().await;
         assert!(snap.vision.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_snapshot_ptz_none_without_platform() {
+        let state = DiagnosticsState::new(Instant::now(), None, Vec::new());
+        assert!(state.snapshot().await.ptz.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_snapshot_carries_ptz_init_error() {
+        use crate::platform::MockPlatform;
+
+        let mut platform = MockPlatform::new();
+        platform.expect_ptz_diagnostics().returning(|| {
+            Some(crate::platform::PtzDiagnostics::failed(
+                "open /dev/ak-motor0: errno 19".to_string(),
+            ))
+        });
+        platform.expect_imaging_control().returning(|| None);
+
+        let state =
+            DiagnosticsState::new(Instant::now(), Some(std::sync::Arc::new(platform)), Vec::new());
+        let snap = state.snapshot().await;
+        let ptz = snap
+            .ptz
+            .expect("a platform reporting PTZ must reach the snapshot");
+        assert_eq!(
+            ptz.init_error.as_deref(),
+            Some("open /dev/ak-motor0: errno 19")
+        );
     }
 
     // ── finalize_startup ─────────────────────────────────────────────────
@@ -479,6 +515,7 @@ mod tests {
         platform
             .expect_imaging_control()
             .returning(move || Some(std::sync::Arc::clone(&imaging)));
+        platform.expect_ptz_diagnostics().returning(|| None);
         std::sync::Arc::new(platform)
     }
 
