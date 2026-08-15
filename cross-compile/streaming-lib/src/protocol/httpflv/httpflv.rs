@@ -1631,9 +1631,17 @@ mod tests {
 
         // First chunk: FLV header (9 bytes) + zero previous-tag-size.
         let header = &chunks[0];
-        assert_eq!(&header[0..3], b"FLV", "chunk must start with the FLV signature");
+        assert_eq!(
+            &header[0..3],
+            b"FLV",
+            "chunk must start with the FLV signature"
+        );
         assert_eq!(header[3], 0x01, "FLV version must be 1");
-        assert_eq!(&header[9..13], &[0, 0, 0, 0], "first previous-tag-size must be zero");
+        assert_eq!(
+            &header[9..13],
+            &[0, 0, 0, 0],
+            "first previous-tag-size must be zero"
+        );
 
         // Second chunk: the first tag after the FLV header. The header phase
         // cached the metadata frame first, so it must be a script tag carrying
@@ -1649,7 +1657,11 @@ mod tests {
             &[0x02, 0x00, 0x0a],
             "tag body must start with an AMF string of length 10"
         );
-        assert_eq!(&first_tag[14..24], b"onMetaData", "AMF string must be onMetaData");
+        assert_eq!(
+            &first_tag[14..24],
+            b"onMetaData",
+            "AMF string must be onMetaData"
+        );
     }
 
     #[tokio::test]
