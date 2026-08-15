@@ -457,7 +457,7 @@ mod tests {
             ae_luma: Some(42),
             ae_a_gain_max: Some(10),
             ae_exp_time_max: Some(2250),
-            ae_target_lumiance: Some(40),
+            ae_target_luminance: Some(40),
             awb_cnt: Some([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]),
             ain0: Some(100),
             ir_led: Some(true),

@@ -90,6 +90,20 @@ describe('LiveViewPage', () => {
     });
   });
 
+  /**
+   * The player's event handlers are registered asynchronously (after the
+   * mocked dynamic import resolves), so wait until the specific `event`
+   * registration exists before retrieving the handler to invoke.
+   */
+  async function waitForPlayerHandler(event: string): Promise<(...args: unknown[]) => void> {
+    let handler: ((...args: unknown[]) => void) | undefined;
+    await waitFor(() => {
+      handler = mockPlayer.on.mock.calls.find((c) => c[0] === event)?.[1];
+      expect(handler).toBeDefined();
+    });
+    return handler as (...args: unknown[]) => void;
+  }
+
   it('should render page title and description', () => {
     renderWithProviders(<LiveViewPage />);
     expect(screen.getByTestId('liveview-title')).toHaveTextContent('Live Video Preview');
@@ -205,7 +219,7 @@ describe('LiveViewPage', () => {
     renderWithProviders(<LiveViewPage />);
     await screen.findByTestId('liveview-video');
 
-    const errorHandler = mockPlayer.on.mock.calls.find((c) => c[0] === 'error')?.[1];
+    const errorHandler = await waitForPlayerHandler('error');
     errorHandler('NetworkError', 'connection refused');
 
     expect(await screen.findByTestId('liveview-retry-button')).toBeInTheDocument();
@@ -215,7 +229,7 @@ describe('LiveViewPage', () => {
     renderWithProviders(<LiveViewPage />);
     await screen.findByTestId('liveview-video');
 
-    const mediaHandler = mockPlayer.on.mock.calls.find((c) => c[0] === 'media_info')?.[1];
+    const mediaHandler = await waitForPlayerHandler('media_info');
     mediaHandler({ width: 1280, height: 720, fps: 25, videoCodec: 'avc1.4d001f' });
 
     expect(await screen.findByTestId('liveview-resolution-value')).toHaveTextContent('1280x720');
@@ -226,8 +240,8 @@ describe('LiveViewPage', () => {
     renderWithProviders(<LiveViewPage />);
     await screen.findByTestId('liveview-video');
 
+    const statsHandler = await waitForPlayerHandler('statistics_info');
     const now = vi.spyOn(performance, 'now');
-    const statsHandler = mockPlayer.on.mock.calls.find((c) => c[0] === 'statistics_info')?.[1];
 
     now.mockReturnValue(0);
     statsHandler({ speed: 128, decodedFrames: 0, droppedFrames: 0 });

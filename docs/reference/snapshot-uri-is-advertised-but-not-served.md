@@ -6,10 +6,13 @@ brightness. Not a regression from that build — the handler has never existed.
 ## Symptom
 
 ```console
-$ curl -s -u admin:admin -D- -o /dev/null 'http://192.168.2.198/snapshot.jpg'
+$ curl -s -u <user>:<password> -D- -o /dev/null 'http://<cam>/snapshot.jpg'
 HTTP/1.1 200 OK
 content-type: text/html
 ```
+
+`<user>:<password>` is the camera's HTTP credential — the same one the WebUI sends — stored
+in the camera's credential mechanism, never hardcoded in docs or scripts.
 
 The request falls through to the WebUI's SPA fallback and returns `index.html`.
 
@@ -54,9 +57,12 @@ a client in use requires snapshots.
 Because there is no snapshot endpoint, the working method is RTSP plus ffmpeg:
 
 ```bash
-ffmpeg -rtsp_transport tcp -i "rtsp://admin:admin@<cam>:554/main" \
+ffmpeg -rtsp_transport tcp -i "rtsp://<user>:<password>@<cam>:554/main" \
   -vf "signalstats,metadata=print:key=lavfi.signalstats.YAVG" -frames:v 12 -f null -
 ```
+
+Same credential rule as above: `<user>:<password>` is a placeholder for the camera's
+credential, not a literal.
 
 Also available live, and unregulated by the AE, are the AWB colour bins in
 `/api/diagnostics` (`vision.awb_cnt`) — see `ir-illuminator-bench-measurement.md`.

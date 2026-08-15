@@ -126,7 +126,7 @@ git commit -m "feat(streaming-lib): write FrameData::MetaData as FLV script tags
 - Consumes: existing `ValidationHttpFlvRemuxer::new(sps, pps, audio_config, audio_sample_rate)` — gains a 5th param `video_framerate: u32`.
 - Produces:
   - `ValidationHttpFlvRemuxer::new(sps: Vec<u8>, pps: Vec<u8>, audio_config: Option<Vec<u8>>, audio_sample_rate: u32, video_framerate: u32) -> Self`
-  - `ValidationHttpFlvRemuxer::on_metadata_tag(&self, timestamp: u32) -> FrameData::MetaData`
+   - `ValidationHttpFlvRemuxer::on_metadata_tag(&self, timestamp: u32) -> FrameData`
 
 - [ ] **Step 1: Write the failing test for the AMF0 payload**
 
@@ -224,7 +224,7 @@ impl ValidationHttpFlvRemuxer {
     }
 
     /// Build the FLV onMetaData script-tag payload (AMF0 ECMA array).
-    pub fn on_metadata_tag(&self, timestamp: u32) -> FrameData::MetaData {
+    pub fn on_metadata_tag(&self, timestamp: u32) -> FrameData {
         let mut data = BytesMut::new();
         amf0_string(&mut data, "onMetaData");
         amf0_ecma_array(
@@ -296,7 +296,7 @@ git commit -m "feat(onvif-rust): build FLV onMetaData tag with configured framer
 - Modify: `cross-compile/onvif-rust/src/main.rs` (`ValidationAvStreamHandler`)
 
 **Interfaces:**
-- Consumes: `ValidationHttpFlvRemuxer::on_metadata_tag(timestamp) -> FrameData::MetaData` (Task 2).
+- Consumes: `ValidationHttpFlvRemuxer::on_metadata_tag(timestamp) -> FrameData` (Task 2).
 - Produces: every HTTP-FLV subscriber receives an `onMetaData` tag as the first FLV tag.
 
 - [ ] **Step 1: Add a failing helper test in `helpers.rs`**
@@ -412,4 +412,4 @@ git status  # clean; nothing to commit if gates passed without edits
 
 - **Spec coverage:** Task 1 (streaming-lib script-tag support) ✓; Task 2 (AMF0 onMetaData builder, no width/height) ✓; Task 3 (wiring + framerate threading) ✓; Task 4 (gates + on-device) ✓. Non-goals (width/height, measured rate, SPS VUI rewrite) are not implemented.
 - **Placeholder scan:** all steps contain concrete code; no TBD/TODO.
-- **Type consistency:** `ValidationHttpFlvRemuxer::new` gains 5th param in Task 2 and every call site is updated in Task 3; `on_metadata_tag` returns `FrameData::MetaData`; `send_httpflv_prior_frames` signature unchanged (remuxer already carries framerate). `FanoutTask::new` gains `video_framerate: u32` — updated at its single call site in `publish_stream`.
+- **Type consistency:** `ValidationHttpFlvRemuxer::new` gains 5th param in Task 2 and every call site is updated in Task 3; `on_metadata_tag` returns `FrameData` (constructing the `FrameData::MetaData` variant); `send_httpflv_prior_frames` signature unchanged (remuxer already carries framerate). `FanoutTask::new` gains `video_framerate: u32` — updated at its single call site in `publish_stream`.

@@ -1564,6 +1564,95 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_send_media_stream_header_phase_first_tag_after_header_is_on_metadata_script() {
+        let (event_sender, mut event_receiver, response_sender, mut response_receiver) =
+            create_test_channels();
+        let remote_addr = create_test_socket_addr();
+
+        let mut httpflv = HttpFlv::new(
+            "live".to_string(),
+            "stream1".to_string(),
+            event_sender,
+            response_sender,
+            "http://localhost/live/stream1.flv".to_string(),
+            remote_addr,
+        );
+
+        let hub_task = tokio::spawn(async move {
+            if let Some(StreamHubEvent::Subscribe { result_sender, .. }) =
+                event_receiver.recv().await
+            {
+                let (frame_tx, frame_rx) = crate::hub::define::frame_data_channel();
+                let data_receiver = DataReceiver {
+                    frame_receiver: Some(frame_rx),
+                    packet_receiver: None,
+                };
+                let _ = result_sender.send(Ok((data_receiver, None)));
+
+                // AMF string "onMetaData": type 0x02, length 10.
+                let mut meta = BytesMut::new();
+                meta.extend_from_slice(&[0x02, 0x00, 0x0a]);
+                meta.extend_from_slice(b"onMetaData");
+                let _ = frame_tx.try_send(FrameData::MetaData {
+                    timestamp: 0,
+                    data: meta,
+                });
+                let _ = frame_tx.try_send(FrameData::Audio {
+                    timestamp: 100,
+                    data: BytesMut::from(&[0x01][..]),
+                });
+                let _ = frame_tx.try_send(FrameData::Video {
+                    timestamp: 200,
+                    data: BytesMut::from(&[0x00, 0x01][..]),
+                });
+                drop(frame_tx);
+            }
+        });
+
+        let result = httpflv.subscribe_from_stream_hub().await;
+        assert!(result.is_ok());
+
+        let send_task = tokio::spawn(async move { httpflv.send_media_stream().await });
+
+        let result = send_task.await.expect("send_media_stream task panicked");
+        assert!(result.is_ok());
+
+        let mut chunks: Vec<BytesMut> = Vec::new();
+        while let Some(chunk) = response_receiver.next().await {
+            chunks.push(chunk.expect("response chunk must be Ok"));
+        }
+        let _ = hub_task.await;
+
+        assert!(
+            chunks.len() >= 2,
+            "expected the FLV header chunk plus at least one tag chunk, got {}",
+            chunks.len()
+        );
+
+        // First chunk: FLV header (9 bytes) + zero previous-tag-size.
+        let header = &chunks[0];
+        assert_eq!(&header[0..3], b"FLV", "chunk must start with the FLV signature");
+        assert_eq!(header[3], 0x01, "FLV version must be 1");
+        assert_eq!(&header[9..13], &[0, 0, 0, 0], "first previous-tag-size must be zero");
+
+        // Second chunk: the first tag after the FLV header. The header phase
+        // cached the metadata frame first, so it must be a script tag carrying
+        // the AMF onMetaData prefix.
+        let first_tag = &chunks[1];
+        assert_eq!(
+            first_tag[0],
+            tag_type::SCRIPT_DATA_AMF,
+            "first tag after the FLV header must be a script (onMetaData) tag"
+        );
+        assert_eq!(
+            &first_tag[11..14],
+            &[0x02, 0x00, 0x0a],
+            "tag body must start with an AMF string of length 10"
+        );
+        assert_eq!(&first_tag[14..24], b"onMetaData", "AMF string must be onMetaData");
+    }
+
+    #[tokio::test]
     async fn test_send_media_stream_header_phase_max_frames_without_av_guesses() {
         let (event_sender, mut event_receiver, response_sender, mut response_receiver) =
             create_test_channels();

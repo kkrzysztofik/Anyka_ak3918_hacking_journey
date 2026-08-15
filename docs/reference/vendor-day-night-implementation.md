@@ -42,7 +42,7 @@ nc 192.168.30.146 9931 > /tmp/aipc_146
 
 Disassembly needs the vendored ARM objdump; the host one has no ARM support:
 
-```
+```text
 toolchain/arm-anykav200-crosstool-ng/bin/arm-unknown-linux-uclibcgnueabi-objdump
 ```
 
@@ -81,7 +81,7 @@ ldrb r3, [sp, #19+i] ; sub r3, #48 ; strb r3, [r4, #i]
 
 so the decode rule is:
 
-```
+```text
 yi_hwconfig[i] = hw.conf_line[3 + i] - '0'
 ```
 
@@ -165,6 +165,9 @@ quick_switch_mode     = 0
 night_cnt0..4         = 1200
 day_cnt0..9           = 600000
 ```
+
+The range notation abbreviates the file: it carries `night_cnt0` through `night_cnt4` and
+`day_cnt0` through `day_cnt9`, each set to the value shown.
 
 Our `NightConfig::lock_time_ms` default of `900_000` came from this file. We inherited the
 vendor's tuning for a *different signal*: 15 minutes is reasonable for a ratio that has an

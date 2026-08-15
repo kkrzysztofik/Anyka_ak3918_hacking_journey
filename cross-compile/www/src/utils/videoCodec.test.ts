@@ -22,6 +22,16 @@ describe('formatVideoCodec', () => {
     expect(formatVideoCodec('avc1.9e0028')).toBe('H.264 Profile 158@L4.0');
   });
 
+  it('labels a level-11 Baseline tag with constraint_set3 as L1b, not L1.1', () => {
+    // avc1.42100b: profile 66 (Baseline), constraint byte 0x10
+    // (constraint_set3_flag), level_idc 11.
+    expect(formatVideoCodec('avc1.42100b')).toBe('H.264 Baseline@L1b');
+  });
+
+  it('keeps L1.1 for level 11 without constraint_set3_flag', () => {
+    expect(formatVideoCodec('avc1.42000b')).toBe('H.264 Baseline@L1.1');
+  });
+
   it('passes through non-AVC or malformed codec strings', () => {
     expect(formatVideoCodec('hvc1.1.6.L93.B0')).toBe('hvc1.1.6.L93.B0');
     expect(formatVideoCodec('avc1')).toBe('avc1');

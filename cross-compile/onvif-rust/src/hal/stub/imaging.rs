@@ -63,6 +63,18 @@ mod stub_getter_tests {
     }
 
     #[tokio::test]
+    async fn test_stub_get_lum_factor_returns_none() {
+        let stub = StubImagingHal;
+        assert!(stub.get_lum_factor().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_stub_get_ae_attr_returns_none() {
+        let stub = StubImagingHal;
+        assert!(stub.get_ae_attr().await.is_none());
+    }
+
+    #[tokio::test]
     async fn test_stub_get_awb_stat_returns_none() {
         let stub = StubImagingHal;
         assert!(stub.get_awb_stat().await.is_none());

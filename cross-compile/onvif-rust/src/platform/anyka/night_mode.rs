@@ -699,14 +699,24 @@ impl NightModeController {
     /// nothing is pending: [`Self::tick`] calls this every poll regardless
     /// of `auto_enabled`, and a forced camera with nothing pending must not
     /// add IPC traffic to the daemon's single-threaded poll loop.
+    ///
+    /// The pending target is copied out and the lock is released *before*
+    /// the IPC call: `set_ir_filter` can take long enough to stall
+    /// diagnostics, which read `isp_pending` via [`Self::current_mode`].
+    /// The clear after a successful call is conditional on the target still
+    /// being the one this retry drove, so a newer failed transition recorded
+    /// while the call was in flight survives for the next tick.
     async fn retry_pending_isp(&self) {
-        let mut pending = self.isp_pending.lock().await;
-        if let Some(target) = *pending {
-            let isp = self
-                .ffi
-                .set_ir_filter(matches!(target, DayNight::Night))
-                .await;
-            if isp == 0 {
+        let Some(target) = *self.isp_pending.lock().await else {
+            return;
+        };
+        let isp = self
+            .ffi
+            .set_ir_filter(matches!(target, DayNight::Night))
+            .await;
+        if isp == 0 {
+            let mut pending = self.isp_pending.lock().await;
+            if *pending == Some(target) {
                 *pending = None;
                 tracing::info!(to = ?target, isp, "night mode ISP synced");
             }
@@ -810,7 +820,7 @@ impl NightModeController {
             ae_luma,
             ae_a_gain_max: ae_attr.map(|a| a.a_gain_max),
             ae_exp_time_max: ae_attr.map(|a| a.exp_time_max),
-            ae_target_lumiance: ae_attr.map(|a| a.target_lumiance),
+            ae_target_luminance: ae_attr.map(|a| a.target_lumiance),
             awb_cnt,
             ain0: gpio.ain0,
             ir_led: gpio.ir_led,
@@ -2219,5 +2229,78 @@ mod tests {
 
         ctl.log_sample(100, "ae", Some(DayNight::Day)).await;
         ctl.log_sample(50, "ae", Some(DayNight::Night)).await;
+    }
+
+    /// While the retry's `set_ir_filter` is in flight, `isp_pending` must be
+    /// free (diagnostics read it via `current_mode` and must not stall on the
+    /// daemon's poll loop), and a newer failed transition recorded in that
+    /// window must not be erased by the successful retry.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_retry_pending_isp_releases_lock_and_keeps_newer_target() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::{Arc, Barrier};
+
+        use crate::hal::common::imaging::MockImagingHalTrait;
+        use crate::onvif::types::common::IrCutFilterMode;
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let paths = NodePaths::rooted(dir.path(), dir.path());
+        seed_gpio_nodes(&paths);
+
+        let barrier = Arc::new(Barrier::new(2));
+        let barrier_isp = Arc::clone(&barrier);
+        let call = Arc::new(AtomicUsize::new(0));
+        let call_isp = Arc::clone(&call);
+
+        let mut ffi = MockImagingHalTrait::new();
+        // First call (the failed apply that seeds the pending target) fails
+        // at once; the second (the retry) blocks until the test has recorded
+        // a newer target, then succeeds.
+        ffi.expect_set_ir_filter().times(2).returning(move |_| {
+            if call_isp.fetch_add(1, Ordering::SeqCst) == 0 {
+                -1
+            } else {
+                barrier_isp.wait();
+                0
+            }
+        });
+        // The tick's signal reads after the retry.
+        ffi.expect_get_lum_factor().returning(|| None);
+        ffi.expect_get_ae_luma().returning(|| None);
+
+        let ctl = Arc::new(NightModeController::new(
+            paths,
+            test_config(),
+            Arc::new(ffi),
+            IrCutFilterMode::AUTO,
+            None,
+        ));
+
+        // Seed a pending target: an apply whose ISP call failed.
+        let _ = ctl.apply(DayNight::Night).await;
+        assert_eq!(*ctl.isp_pending.lock().await, Some(DayNight::Night));
+
+        let tick_ctl = Arc::clone(&ctl);
+        let tick = tokio::spawn(async move { tick_ctl.tick().await });
+
+        // The retry's ISP call is now in flight.
+        barrier.wait();
+
+        // A newer failed transition must be able to record its target while
+        // the call is in flight — impossible if the retry still holds the
+        // lock, in which case this times out.
+        let write_ctl = Arc::clone(&ctl);
+        let writer = tokio::spawn(async move {
+            *write_ctl.isp_pending.lock().await = Some(DayNight::Day);
+        });
+        match tokio::time::timeout(Duration::from_secs(2), writer).await {
+            Ok(Ok(())) => {}
+            _ => panic!("isp_pending was not released while the ISP retry was in flight"),
+        }
+
+        tick.await.expect("tick task");
+
+        // The successful retry must not clear the newer target.
+        assert_eq!(*ctl.isp_pending.lock().await, Some(DayNight::Day));
     }
 }

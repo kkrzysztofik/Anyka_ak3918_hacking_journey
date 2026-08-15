@@ -83,7 +83,7 @@ scripts/debugging/run_gdb_multiarch_analysis.sh core.onvif-rust.12345 onvif-rust
 scripts/debugging/cam_exec.py 'ls /usr/bin/gdbserver || echo missing'
 
 # On device (via telnet): start gdbserver attached to running process
-cam_exec.py 'gdbserver :2345 --attach $(pidof onvif-rust)'
+cam_exec.py 'gdbserver :2345 --attach $(pidof onvif-rust.bin)'
 
 # On host: connect gdb-multiarch
 gdb-multiarch cross-compile/onvif-rust/target/armv5te-unknown-linux-uclibceabi/release/onvif-rust
@@ -98,7 +98,7 @@ Note: on this uClibc target `gdbserver` may be incompatible with the Rust static
 
 | Symptom | Action |
 |---------|--------|
-| onvif-rust not responding | `pidof onvif-rust`; check `/mnt/anyka_hack/onvif/log/`; restart via start script |
+| onvif-rust.bin not responding | `pidof onvif-rust.bin`; check `/mnt/anyka_hack/onvif/log/`; restart via start script |
 | Process crashed | `collect_coredump.sh` then `run_gdb_multiarch_analysis.sh` |
 | Telemetry/perf issues | Use the `anyka-validation` skill (RTSP validation tool) |
 | Protocol/network issues | Use the `protocol-debugging` skill (Wireshark/tcpdump) |

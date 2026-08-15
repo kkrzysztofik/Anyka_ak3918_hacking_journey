@@ -133,6 +133,17 @@ export function LiveVideoPlayer({
         // The dynamic import, auth lookup, or player construction can reject;
         // surface those as an error state instead of an unhandled rejection
         // that leaves the page stuck on "connecting" with no retry affordance.
+        if (player) {
+          // attachMediaElement/load can reject after the instance exists; tear
+          // it down here and clear the reference so unmount cleanup cannot
+          // double-destroy it.
+          try {
+            player.destroy();
+          } catch {
+            // Swallow: the setup error below is what the operator needs.
+          }
+          player = null;
+        }
         if (cancelled) return;
         latest.current.onStateChange?.(
           'error',
@@ -143,7 +154,10 @@ export function LiveVideoPlayer({
 
     return () => {
       cancelled = true;
-      player?.destroy();
+      if (player) {
+        player.destroy();
+        player = null;
+      }
     };
   }, [streamType]);
 
@@ -152,6 +166,7 @@ export function LiveVideoPlayer({
       ref={videoRef}
       className={cn('h-full w-full bg-black object-contain', className)}
       data-testid="liveview-video"
+      aria-label={`${streamType === 'main' ? 'Main Stream' : 'Sub Stream'} live video`}
       autoPlay
       muted
       playsInline

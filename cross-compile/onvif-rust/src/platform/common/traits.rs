@@ -496,7 +496,7 @@ pub struct VisionDiagnostics {
     /// complaint can be diagnosed without a redeploy.
     pub ae_a_gain_max: Option<u32>,
     pub ae_exp_time_max: Option<u32>,
-    pub ae_target_lumiance: Option<u32>,
+    pub ae_target_luminance: Option<u32>,
     /// Live ISP AWB colour-temperature bin counts (`total_cnt[10]`), or
     /// `None` if unavailable. A zero bin is a legitimate reading and must
     /// stay distinguishable from `None` — that distinction is the whole point

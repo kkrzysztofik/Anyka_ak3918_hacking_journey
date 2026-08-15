@@ -19,7 +19,16 @@ export function formatVideoCodec(codec?: string): string | undefined {
   const match = /^avc1\.([0-9a-f]{6})$/i.exec(codec);
   if (!match) return codec;
   const profileIdc = parseInt(match[1].slice(0, 2), 16);
+  const constraintFlags = parseInt(match[1].slice(2, 4), 16);
   const levelIdc = parseInt(match[1].slice(4, 6), 16);
   const profile = H264_PROFILE_NAMES[profileIdc] ?? `Profile ${profileIdc}`;
-  return `H.264 ${profile}@L${(levelIdc / 10).toFixed(1)}`;
+  // H.264: level_idc 11 is "Level 1b" for Baseline/Main/Extended with
+  // constraint_set3_flag set (0x10) — label it L1b, not L1.1.
+  const level =
+    levelIdc === 11 &&
+    (constraintFlags & 0x10) !== 0 &&
+    (profileIdc === 66 || profileIdc === 77 || profileIdc === 88)
+      ? 'L1b'
+      : `L${(levelIdc / 10).toFixed(1)}`;
+  return `H.264 ${profile}@${level}`;
 }

@@ -38,6 +38,10 @@ use super::helpers::{
 };
 use crate::validation::httpflv_remux::ValidationHttpFlvRemuxer;
 
+/// Minimum interval between initiated IDR requests: coalesces the DESCRIBE
+/// poll storm without latching a missing or ignored kick forever.
+const IDR_RETRY_COOLDOWN_MS: u64 = 1_000;
+
 /// Per-stream handler that reads cached SPS/PPS/IDR from the bridge.
 ///
 /// Unlike `ValidationAvStreamHandler` which holds static copies of SPS/PPS,
@@ -51,10 +55,18 @@ pub struct LiveStreamHandler {
     bridge: Arc<StreamingBridge>,
     /// Video frame rate for SDP `a=framerate` attribute.
     video_framerate: u32,
-    /// Coalesces IDR requests: set while an IDR is outstanding and cleared when
-    /// both parameter sets are cached, so DESCRIBE polling cannot force an IDR
-    /// on every retry while the encoder is recovering.
-    idr_requested: portable_atomic::AtomicBool,
+    /// Epoch millis of the last initiated IDR request; 0 = none yet.
+    ///
+    /// A plain latch (set on kick, cleared when SPS/PPS are cached) would
+    /// suppress retries for the process lifetime if the kick was never made
+    /// (requester not attached yet) or the encoder never honoured it. The
+    /// cooldown instead bounds how often polling can re-kick while still
+    /// coalescing the storm; the SPS/PPS-cached paths below reset it the
+    /// moment the encoder recovers.
+    idr_requested_at: portable_atomic::AtomicU64,
+    /// Milliseconds between initiated IDR requests. Small in tests so cooldown
+    /// expiry does not require real sleeping.
+    idr_cooldown_ms: u64,
 }
 
 impl LiveStreamHandler {
@@ -64,7 +76,8 @@ impl LiveStreamHandler {
             is_main,
             bridge,
             video_framerate,
-            idr_requested: portable_atomic::AtomicBool::new(false),
+            idr_requested_at: portable_atomic::AtomicU64::new(0),
+            idr_cooldown_ms: IDR_RETRY_COOLDOWN_MS,
         }
     }
 
@@ -129,14 +142,45 @@ impl LiveStreamHandler {
         Ok(())
     }
 
-    /// Coalesced IDR kick: at most one request until SPS/PPS are cached again.
+    /// Coalesced IDR kick: at most one initiated request per
+    /// [`IDR_RETRY_COOLDOWN_MS`], and never when no requester is attached.
+    ///
+    /// Checking the requester first is what lets a late-attached bridge still
+    /// kick its first IDR; a latch keyed on "we asked once" would suppress it
+    /// forever if the first ask had no one to hear it.
     fn request_idr_once(&self) {
-        if !self.idr_requested.swap(true, Ordering::Relaxed)
-            && let Some(requester) = self.bridge.idr_requester.read().deref()
-        {
-            requester.request_idr(self.is_main);
+        let guard = self.bridge.idr_requester.read();
+        let Some(requester) = guard.deref() else {
+            return;
+        };
+        let now = now_ms();
+        loop {
+            let last = self.idr_requested_at.load(Ordering::Relaxed);
+            if last != 0 && now.saturating_sub(last) < self.idr_cooldown_ms {
+                return;
+            }
+            match self.idr_requested_at.compare_exchange_weak(
+                last,
+                now,
+                Ordering::Relaxed,
+                Ordering::Relaxed,
+            ) {
+                Ok(_) => break,
+                Err(_) => continue,
+            }
         }
+        requester.request_idr(self.is_main);
     }
+}
+
+/// Milliseconds since the Unix epoch, saturating at `u64::MAX` when the clock
+/// is unusable. A broken clock degrades to "coalesce everything after the
+/// first kick" — the safe direction.
+fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX))
+        .unwrap_or(u64::MAX)
 }
 
 #[async_trait]
@@ -209,7 +253,7 @@ impl TStreamHandler for LiveStreamHandler {
 
             if let (Some(sps), Some(pps)) = (sps, pps) {
                 // Parameter sets present: allow a future IDR kick if they vanish.
-                self.idr_requested.store(false, Ordering::Relaxed);
+                self.idr_requested_at.store(0, Ordering::Relaxed);
                 tracing::debug!(
                     stream = stream_name,
                     sps_size = sps.len(),
@@ -253,7 +297,7 @@ impl TStreamHandler for LiveStreamHandler {
         if let (Some(sps), Some(pps)) = (sps, pps) {
             // Parameter sets are cached again: allow a future IDR request if
             // this stream regresses to missing SPS/PPS later.
-            self.idr_requested.store(false, Ordering::Relaxed);
+            self.idr_requested_at.store(0, Ordering::Relaxed);
             let sdp = generate_av_sdp(
                 &sps,
                 &pps,
@@ -285,8 +329,9 @@ impl TStreamHandler for LiveStreamHandler {
             // subsequent frame contains NAL 7/8 for the whole process lifetime.
             // DESCRIBE polls (`server_session.rs:859`), so the retry that picks
             // the new SDP up already exists and needs no second knob. Coalesced
-            // via `idr_requested`: only one IDR is asked for until SPS/PPS
-            // actually appear, otherwise every poll re-kicks the encoder.
+            // via `idr_requested_at`: at most one IDR kick per cooldown until
+            // SPS/PPS actually appear, otherwise every poll re-kicks the
+            // encoder.
             self.request_idr_once();
         }
     }
@@ -803,6 +848,34 @@ mod tests {
         let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
 
         handler.send_information(tx.clone()).await;
+        handler.send_information(tx).await;
+    }
+
+    #[tokio::test]
+    async fn test_send_information_kicks_idr_once_a_requester_attaches_later() {
+        // No requester at the first poll: the kick must not latch, so the
+        // late-attached bridge can still get its first IDR on the next poll.
+        let (bridge, handler) = make_main_handler();
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+        handler.send_information(tx.clone()).await;
+        assert!(bridge.idr_requester.read().is_none());
+
+        expect_idr_requests(&bridge, true, 1);
+        handler.send_information(tx).await;
+    }
+
+    #[tokio::test]
+    async fn test_send_information_retries_idr_after_cooldown_when_ineffective() {
+        // The encoder never honoured the kick (SPS/PPS still missing): the
+        // next poll after the cooldown must be allowed to ask again instead
+        // of being suppressed for the process lifetime.
+        let (bridge, mut handler) = make_main_handler();
+        expect_idr_requests(&bridge, true, 2);
+        handler.idr_cooldown_ms = 1;
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+
+        handler.send_information(tx.clone()).await;
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
         handler.send_information(tx).await;
     }
 

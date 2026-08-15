@@ -1,8 +1,9 @@
 # Measuring the IR / white illuminator on the bench
 
-Written 2026-08-15, after an evening of remote measurement established that the dark night
-image on this fleet is **not** a firmware fault. Everything software-side checks out; what
-remains can only be settled with a meter on the ring PCB.
+Written 2026-08-15, after an evening of remote measurement of cameras `.121` and `.198` found
+no firmware fault in the dark night image on those two units under the measured conditions.
+The software-side checks on those units pass; whether the ring is the cause can only be
+settled with a meter on the ring PCB.
 
 Aimed at the LED ring in these dome cameras: **4 IR + 4 white emitters interleaved** around
 the lens, on two independent circuits. The single most valuable number is **current through
@@ -130,11 +131,11 @@ Repeat with `WHITE_LED=1`, `IR_LED=0`.
 
 | finding | conclusion |
 |---|---|
-| Expected current, LEDs warm, phone sees the glow | Array healthy — the problem is optical (undersized array, or scene too far). Matches `.198`. |
-| Rail present, ~0 current | Open string or dead driver — locate the open LED by diode test |
-| Current present but well below expectation | Wrong resistor, degraded LEDs, or a driver not fully switching |
+| Expected current, LEDs warm, phone sees the glow | The array is delivering power and light. The current reading alone does not establish optical delivery, IR-cut state, emitter alignment, or sensor response — the glow observation is what settles the optical side. Matches `.198`. |
+| Rail present, ~0 current | No current is flowing — an investigation scope, not a diagnosis: broken trace, failed transistor, driver fault, or an open LED string (locate the open LED by diode test) |
+| Current present but well below expectation | An investigation scope: wrong resistor, degraded LEDs, or a driver not fully switching |
 | No rail at the ring PCB | Fault is on the main board or the connector, not the lamp |
-| GPIO reads 1 but the transistor gate never moves | The sysfs node is not wired to this driver on this board revision — a real possibility that could not be ruled out remotely |
+| GPIO reads 1 but the transistor gate never moves | An investigation scope, not a diagnosis: incorrect node mapping, broken trace, failed transistor, or driver fault — none of it could be ruled out remotely |
 
 ## Do this first
 

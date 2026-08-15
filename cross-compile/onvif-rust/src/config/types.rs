@@ -880,6 +880,109 @@ mod tests {
         assert!(config.validate().is_ok());
     }
 
+    /// `validate` must refuse a night config whose threshold pairs leave no
+    /// hysteresis band: an equal or inverted pair classifies every reading as
+    /// both day and night, which makes the camera oscillate at every poll.
+    #[test]
+    fn test_validate_ae_thresholds_equal_reports_ordering_error() {
+        let mut config = AppConfig::default();
+        config.imaging.night.ae_night_threshold = config.imaging.night.ae_day_threshold;
+
+        let errors = config
+            .validate()
+            .expect_err("equal AE thresholds must be refused");
+        assert_eq!(
+            errors,
+            vec!["imaging.night.ae_night_threshold (28) must be below ae_day_threshold (28)"]
+        );
+    }
+
+    #[test]
+    fn test_validate_ae_thresholds_inverted_reports_ordering_error() {
+        let mut config = AppConfig::default();
+        config.imaging.night.ae_night_threshold = 40; // default ae_day_threshold is 28
+
+        let errors = config
+            .validate()
+            .expect_err("inverted AE thresholds must be refused");
+        assert_eq!(
+            errors,
+            vec!["imaging.night.ae_night_threshold (40) must be below ae_day_threshold (28)"]
+        );
+    }
+
+    /// The luminance factor runs the other way (high means dark), so the
+    /// ordering check is `lum_day < lum_night`.
+    #[test]
+    fn test_validate_lum_thresholds_equal_reports_ordering_error() {
+        let mut config = AppConfig::default();
+        config.imaging.night.lum_day_threshold = config.imaging.night.lum_night_threshold;
+
+        let errors = config
+            .validate()
+            .expect_err("equal luminance thresholds must be refused");
+        assert_eq!(
+            errors,
+            vec!["imaging.night.lum_day_threshold (6400) must be below lum_night_threshold (6400)"]
+        );
+    }
+
+    #[test]
+    fn test_validate_lum_thresholds_inverted_reports_ordering_error() {
+        let mut config = AppConfig::default();
+        config.imaging.night.lum_day_threshold = 8000; // default lum_night_threshold is 6400
+
+        let errors = config
+            .validate()
+            .expect_err("inverted luminance thresholds must be refused");
+        assert_eq!(
+            errors,
+            vec!["imaging.night.lum_day_threshold (8000) must be below lum_night_threshold (6400)"]
+        );
+    }
+
+    /// The raw ADC pair is optional (board-specific calibration), but when
+    /// both halves are present the same ordering rule applies.
+    #[test]
+    fn test_validate_raw_thresholds_equal_reports_ordering_error() {
+        let mut config = AppConfig::default();
+        config.imaging.night.day_threshold = Some(640);
+        config.imaging.night.night_threshold = Some(640);
+
+        let errors = config
+            .validate()
+            .expect_err("equal raw thresholds must be refused");
+        assert_eq!(
+            errors,
+            vec!["imaging.night.night_threshold (640) must be below day_threshold (640)"]
+        );
+    }
+
+    #[test]
+    fn test_validate_raw_thresholds_inverted_reports_ordering_error() {
+        let mut config = AppConfig::default();
+        config.imaging.night.day_threshold = Some(640);
+        config.imaging.night.night_threshold = Some(800);
+
+        let errors = config
+            .validate()
+            .expect_err("inverted raw thresholds must be refused");
+        assert_eq!(
+            errors,
+            vec!["imaging.night.night_threshold (800) must be below day_threshold (640)"]
+        );
+    }
+
+    /// A single present raw threshold (or none at all) is an uncalibrated
+    /// board and must not trip the ordering check.
+    #[test]
+    fn test_validate_raw_thresholds_single_set_is_valid() {
+        let mut config = AppConfig::default();
+        config.imaging.night.day_threshold = Some(640);
+
+        assert!(config.validate().is_ok());
+    }
+
     #[test]
     fn test_default_server_values() {
         let config = AppConfig::default();

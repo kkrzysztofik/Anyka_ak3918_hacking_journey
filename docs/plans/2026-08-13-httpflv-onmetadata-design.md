@@ -42,7 +42,7 @@ add a header-phase caching test.
 ### onvif-rust `ValidationHttpFlvRemuxer` (`validation/httpflv_remux.rs`)
 
 1. Add `video_framerate: u32` to the struct + `new()`.
-2. Add `on_metadata_tag(timestamp) -> FrameData::MetaData` building the AMF0
+2. Add `on_metadata_tag(timestamp) -> FrameData` building the AMF0
    body: `"onMetaData"` string + ECMA array `{videocodecid: 7, hasVideo: true,
    hasAudio: <from audio_config>, framerate: <configured>}` — matching the
    byte format ffmpeg/mpegts.js parse (`08` ECMA marker, `00` number type,

@@ -66,7 +66,7 @@ its setpoint under IR.
 
 ## Architecture
 
-```
+```text
                     ┌──────────────────────────────────────┐
                     │ vendor-daemon (C) — SDK access only  │
   CMD_ISP_GET_AE_   ├─ ak_vpss_isp_get_ae_attr             │
@@ -175,7 +175,7 @@ consecutive agreeing samples, and that is one mechanism to test instead of three
 
 ## Data flow
 
-```
+```text
 tick()
  ├─ auto_enabled? ──no──> return
  ├─ vote: N × { get_lum_factor → classify }              (B2)
