@@ -19,6 +19,7 @@
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
+use std::time::Instant;
 
 use parking_lot::RwLock;
 use tokio::sync::{mpsc, oneshot};
@@ -39,6 +40,14 @@ use super::ptz_control::{
     PTZ_MIN_TILT_DEGREES, PTZ_STOP_DIRECTIONS, direction_to_ffi, iter_ffi_directions,
 };
 
+/// The most recent motor step readback, per axis, with when it was taken.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct StepSample {
+    pub pan: Option<i32>,
+    pub tilt: Option<i32>,
+    pub at: Instant,
+}
+
 /// Shared, lock-guarded PTZ state written by the actor and read by the platform layer.
 ///
 /// Kept behind `Arc` so `get_position`/preset logic on the async side observe the truth
@@ -51,6 +60,8 @@ pub(crate) struct PtzActorState {
     /// reply). Lets observers know when an accepted-but-async move has actually landed.
     /// `u32` (not `u64`) so it is lock-free on the 32-bit ARM target.
     pub commands_completed: AtomicU32,
+    /// Last `TurnOutcome.step_pos` observed per axis — never from a fresh ioctl.
+    pub last_step: RwLock<Option<StepSample>>,
 }
 
 impl PtzActorState {
@@ -59,7 +70,28 @@ impl PtzActorState {
             position: RwLock::new(PtzPosition::HOME),
             velocity: RwLock::new(PtzVelocity::STOP),
             commands_completed: AtomicU32::new(0),
+            last_step: RwLock::new(None),
         }
+    }
+
+    /// Record a step readback observed at the end of a turn.
+    ///
+    /// Called only from the actor thread with a `TurnOutcome` already in hand — this
+    /// never issues an ioctl of its own.
+    pub(crate) fn record_step(&self, is_pan: bool, step: i32) {
+        let mut guard = self.last_step.write();
+        let mut sample = (*guard).unwrap_or(StepSample {
+            pan: None,
+            tilt: None,
+            at: Instant::now(),
+        });
+        if is_pan {
+            sample.pan = Some(step);
+        } else {
+            sample.tilt = Some(step);
+        }
+        sample.at = Instant::now();
+        *guard = Some(sample);
     }
 }
 
@@ -258,6 +290,9 @@ fn drain_started_turns(
                 break;
             }
         };
+        let is_pan = matches!(axis, Axis::Pan(_));
+        state.record_step(is_pan, outcome.step_pos);
+
         if outcome.interrupted {
             tracing::debug!(
                 "absolute move preempted on {:?} (step_pos={}); leaving tracked position",
@@ -292,25 +327,27 @@ fn do_continuous(
     velocity: PtzVelocity,
     reply: oneshot::Sender<PlatformResult<()>>,
 ) {
-    // (axis velocity, positive dir, negative dir, sweep magnitude)
+    // (axis velocity, positive dir, negative dir, sweep magnitude, is_pan)
     let axes = [
         (
             velocity.pan,
             PtzDirection::Right,
             PtzDirection::Left,
             PTZ_MAX_PAN_DEGREES,
+            true,
         ),
         (
             velocity.tilt,
             PtzDirection::Down,
             PtzDirection::Up,
             PTZ_MAX_TILT_DEGREES,
+            false,
         ),
     ];
 
     let mut started = Vec::new();
     let mut result = Ok(());
-    for (axis_velocity, dir_pos, dir_neg, sweep) in axes {
+    for (axis_velocity, dir_pos, dir_neg, sweep, is_pan) in axes {
         if axis_velocity.abs() <= f32::EPSILON {
             continue;
         }
@@ -324,7 +361,7 @@ fn do_continuous(
             result = Err(e);
             break;
         }
-        started.push(sdk_dir);
+        started.push((sdk_dir, is_pan));
     }
 
     if result.is_ok() {
@@ -340,13 +377,16 @@ fn do_continuous(
     // set by the platform layer before each submit), bounding preemption latency to one
     // ~100ms poll tick in the driver's wait loop. The `PtzWaitOutcome` is consumed (not
     // discarded) for the reconciled step position / interrupt signal.
-    for sdk_dir in started {
+    for (sdk_dir, is_pan) in started {
         match ffi.ptz_wait_turn(sdk_dir) {
-            Ok(outcome) => tracing::debug!(
-                "continuous axis wait finished: interrupted={}, step_pos={}",
-                outcome.interrupted,
-                outcome.step_pos
-            ),
+            Ok(outcome) => {
+                state.record_step(is_pan, outcome.step_pos);
+                tracing::debug!(
+                    "continuous axis wait finished: interrupted={}, step_pos={}",
+                    outcome.interrupted,
+                    outcome.step_pos
+                );
+            }
             Err(e) => tracing::warn!("continuous axis wait failed: {}", e),
         }
     }
@@ -366,5 +406,26 @@ fn do_stop(ffi: &dyn PtzHalTrait, state: &PtzActorState) -> PlatformResult<()> {
     match first_error {
         Some(e) => Err(e),
         None => Ok(()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_actor_state_record_step_keeps_both_axes() {
+        let state = PtzActorState::new();
+        assert!(state.last_step.read().is_none(), "nothing observed yet");
+
+        state.record_step(true, 0);
+        state.record_step(false, 137);
+
+        let sample = state
+            .last_step
+            .read()
+            .expect("a sample was recorded");
+        assert_eq!(sample.pan, Some(0), "a zero step is a real reading, not absence");
+        assert_eq!(sample.tilt, Some(137));
     }
 }
