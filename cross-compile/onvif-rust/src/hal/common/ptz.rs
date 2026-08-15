@@ -77,6 +77,8 @@ pub(crate) fn default_ptz_hal() -> std::sync::Arc<dyn PtzHalTrait> {
 pub struct PTZHandle {
     opened: bool,
     ffi: std::sync::Arc<dyn PtzHalTrait>,
+    /// Calibration sweep failure, kept for diagnostics. `None` = the sweep succeeded.
+    self_check_error: Option<String>,
 }
 
 impl Drop for PTZHandle {
@@ -95,6 +97,11 @@ impl PTZHandle {
     pub(crate) fn is_opened(&self) -> bool {
         self.opened
     }
+
+    /// Why the calibration sweep failed, or `None` if it succeeded.
+    pub(crate) fn self_check_error(&self) -> Option<&str> {
+        self.self_check_error.as_deref()
+    }
 }
 
 /// Open the motor devices and run the calibration self-check.
@@ -106,11 +113,19 @@ pub(crate) fn ptz_open(ffi: std::sync::Arc<dyn PtzHalTrait>) -> PlatformResult<P
     ffi.ptz_open()?;
 
     // PTZ_FEEDBACK_PIN_NONE = 0 (no feedback pin on this hardware).
-    if let Err(e) = ffi.ptz_check_self(ptz_feedback_pin::PTZ_FEEDBACK_PIN_NONE) {
-        tracing::warn!("PTZ self-check failed, continuing anyway: {}", e);
-    }
+    let self_check_error = match ffi.ptz_check_self(ptz_feedback_pin::PTZ_FEEDBACK_PIN_NONE) {
+        Ok(()) => None,
+        Err(e) => {
+            tracing::warn!("PTZ self-check failed, continuing anyway: {}", e);
+            Some(e.to_string())
+        }
+    };
 
-    Ok(PTZHandle { opened: true, ffi })
+    Ok(PTZHandle {
+        opened: true,
+        ffi,
+        self_check_error,
+    })
 }
 
 /// Convert degrees to motor steps.
@@ -232,5 +247,32 @@ mod tests {
         mock_ffi.expect_ptz_close().returning(|| Ok(()));
 
         assert!(ptz_open(std::sync::Arc::new(mock_ffi)).is_ok());
+    }
+
+    #[test]
+    fn test_ptz_open_records_check_self_failure_on_the_handle() {
+        let mut mock_ffi = MockPtzHalTrait::new();
+        mock_ffi.expect_ptz_open().times(1).returning(|| Ok(()));
+        mock_ffi.expect_ptz_check_self().times(1).returning(|_| {
+            Err(PlatformError::HardwareFailure("motor wait timed out".to_string()))
+        });
+        mock_ffi.expect_ptz_close().returning(|| Ok(()));
+
+        let handle = ptz_open(std::sync::Arc::new(mock_ffi)).unwrap();
+        assert!(
+            handle.self_check_error().is_some_and(|e| e.contains("motor wait timed out")),
+            "a warn! log is not reachable from the WebUI; the handle must carry it"
+        );
+    }
+
+    #[test]
+    fn test_ptz_open_clean_self_check_records_no_error() {
+        let mut mock_ffi = MockPtzHalTrait::new();
+        mock_ffi.expect_ptz_open().times(1).returning(|| Ok(()));
+        mock_ffi.expect_ptz_check_self().times(1).returning(|_| Ok(()));
+        mock_ffi.expect_ptz_close().returning(|| Ok(()));
+
+        let handle = ptz_open(std::sync::Arc::new(mock_ffi)).unwrap();
+        assert!(handle.self_check_error().is_none());
     }
 }
