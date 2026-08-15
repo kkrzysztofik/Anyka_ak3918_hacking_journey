@@ -153,6 +153,14 @@ describe('LiveViewPage', () => {
     expect(screen.getByTestId('liveview-ptz-disabled-note')).toHaveTextContent('PTZ is disabled');
   });
 
+  it('should not show the PTZ disabled note while profiles are still loading', async () => {
+    const { getProfiles } = await import('@/services/profileService');
+    vi.mocked(getProfiles).mockReturnValueOnce(new Promise(() => {})); // never resolves
+    renderWithProviders(<LiveViewPage />);
+    await screen.findByTestId('liveview-ptz-title');
+    expect(screen.queryByTestId('liveview-ptz-disabled-note')).not.toBeInTheDocument();
+  });
+
   it('should render PTZ speed slider', () => {
     renderWithProviders(<LiveViewPage />);
     const speedSlider = screen.getByTestId('liveview-ptz-speed-slider');
