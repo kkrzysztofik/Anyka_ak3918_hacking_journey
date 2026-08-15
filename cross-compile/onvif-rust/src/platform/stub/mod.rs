@@ -794,6 +794,19 @@ pub struct StubPTZControl {
     next_preset_id: RwLock<u32>,
 }
 
+impl StubPTZControl {
+    /// In-memory PTZ for host-side / ONVIF unit tests.
+    pub fn new() -> Self {
+        Self {
+            position: RwLock::new(PtzPosition::HOME),
+            velocity: RwLock::new(PtzVelocity::STOP),
+            presets: RwLock::new(HashMap::new()),
+            limits: PtzLimits::DEFAULT,
+            next_preset_id: RwLock::new(1),
+        }
+    }
+}
+
 #[async_trait]
 impl PTZControl for StubPTZControl {
     async fn move_to_position(&self, position: PtzPosition) -> PlatformResult<()> {

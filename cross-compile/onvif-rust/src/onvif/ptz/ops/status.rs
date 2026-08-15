@@ -86,6 +86,9 @@ pub async fn goto_home_position(
         crate::onvif::ptz::ops::movement::sync_position_from_platform(state, ptz).await;
     } else {
         state.stop();
+        return Err(crate::onvif::error::OnvifError::ActionNotSupported(
+            "PTZ is not available on this device".to_string(),
+        ));
     }
 
     Ok(())
@@ -141,10 +144,15 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_status_goto_home_no_platform_returns_ok() {
+    async fn test_status_goto_home_without_hardware_faults() {
         let state = create_test_state();
 
-        goto_home_position(&state, &None, "Profile1").await.unwrap();
+        let result = goto_home_position(&state, &None, "Profile1").await;
+        assert!(matches!(
+            result,
+            Err(crate::onvif::error::OnvifError::ActionNotSupported(_))
+        ));
+        assert!(!state.is_moving());
     }
 
     #[test]

@@ -95,9 +95,10 @@ pub async fn absolute_move(
         sync_position_from_platform(state, ptz).await;
         // Leave moving=true; Stop / completion path clears it. GetStatus reads live.
     } else {
-        // No hardware: apply requested position immediately (stub / unit tests).
-        state.set_position(&position);
         state.stop();
+        return Err(crate::onvif::error::OnvifError::ActionNotSupported(
+            "PTZ is not available on this device".to_string(),
+        ));
     }
 
     Ok(())
@@ -147,8 +148,10 @@ pub async fn relative_move(
         })?;
         sync_position_from_platform(state, ptz).await;
     } else {
-        state.set_position(&new_pos);
         state.stop();
+        return Err(crate::onvif::error::OnvifError::ActionNotSupported(
+            "PTZ is not available on this device".to_string(),
+        ));
     }
 
     Ok(())
@@ -189,6 +192,11 @@ pub async fn continuous_move(
                 e
             ))
         })?;
+    } else {
+        state.stop();
+        return Err(crate::onvif::error::OnvifError::ActionNotSupported(
+            "PTZ is not available on this device".to_string(),
+        ));
     }
 
     Ok(())
@@ -235,6 +243,17 @@ pub async fn stop(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn test_continuous_move_without_hardware_faults_instead_of_faking_success() {
+        let state = PTZStateManager::new();
+        let result = continuous_move(&state, &None, "Profile1", PTZSpeed::default()).await;
+        assert!(
+            matches!(result, Err(crate::onvif::error::OnvifError::ActionNotSupported(_))),
+            "a disabled PTZ must refuse the move, not report a move that never happened"
+        );
+        assert!(!state.is_moving(), "a refused command must not leave state moving");
+    }
 
     #[test]
     fn test_vector_to_position() {
