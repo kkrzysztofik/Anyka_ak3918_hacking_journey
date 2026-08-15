@@ -333,10 +333,12 @@ impl MotorHandle {
                 )
             })
             .map_err(|e| PlatformError::HardwareFailure(e.to_string()))?;
+        // Deliberately NOT checking `n` against the struct size. This driver does not
+        // return a byte count from `read()`, and the vendor ignores the return value
+        // outright (ak_drv_ptz.c:411) — it reads into the struct and uses it regardless.
+        // Treating a "short" read as fatal aborted every calibration sweep at ~2s.
         if n != std::mem::size_of::<NotifyData>() {
-            return Err(PlatformError::HardwareFailure(
-                "short read on motor notify".to_string(),
-            ));
+            tracing::debug!("{}: motor notify read returned {} bytes", self.name, n);
         }
         Ok(buf)
     }
@@ -375,6 +377,13 @@ impl MotorHandle {
                 PollOutcome::Readable => {
                     // fd readable → consume the notify_data.
                     let notify = self.read_notify()?;
+                    tracing::debug!(
+                        "{}: notify event=0x{:x} hit_num={} remain_steps={}",
+                        self.name,
+                        notify.event,
+                        notify.hit_num,
+                        notify.remain_steps
+                    );
                     return Ok((notify, false));
                 }
             }
@@ -461,6 +470,20 @@ impl MotorHandle {
         // Turn clockwise to middle position (same as C driver reset_step).
         self.turn_steps(self.reset_step(), true)?;
         self.wait_event_interruptible(TURN_TIMEOUT_SECS, stop_flag)?;
+
+        // Does the kernel's own position accounting actually move? This distinguishes a
+        // working MOTOR_GET_STATUS from one that returns success while writing nothing.
+        match self.get_status() {
+            Ok(msg) => tracing::info!(
+                "{}: post-calibration status={} pos={} steps_one_circle={} total_steps={}",
+                self.name,
+                msg.status,
+                msg.pos,
+                msg.steps_one_circle,
+                msg.total_steps
+            ),
+            Err(e) => tracing::warn!("{}: post-calibration status read failed: {}", self.name, e),
+        }
         Ok(())
     }
 }
