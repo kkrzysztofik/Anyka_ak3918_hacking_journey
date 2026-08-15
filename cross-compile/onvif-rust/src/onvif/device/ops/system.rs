@@ -90,6 +90,7 @@ pub fn handle_get_capabilities(
 ) -> OnvifResult<GetCapabilitiesResponse> {
     tracing::debug!("GetCapabilities request");
 
+    let ptz_enabled = config.read().ptz.enabled;
     let base_url = base_url(config);
 
     Ok(GetCapabilitiesResponse {
@@ -99,7 +100,7 @@ pub fn handle_get_capabilities(
             events: None,
             imaging: Some(build_imaging_capabilities(&base_url)),
             media: Some(build_media_capabilities(&base_url)),
-            ptz: Some(build_ptz_capabilities(&base_url)),
+            ptz: ptz_enabled.then(|| build_ptz_capabilities(&base_url)),
             extension: None,
         },
     })
@@ -438,6 +439,23 @@ mod tests {
 
         // Should have imaging capabilities
         assert!(response.capabilities.imaging.is_some());
+    }
+
+    #[test]
+    fn test_get_capabilities_ptz_disabled_omits_ptz() {
+        let config = create_test_config();
+        config.write().ptz.enabled = false;
+        let response =
+            handle_get_capabilities(&config, GetCapabilities { category: vec![] }).unwrap();
+        assert!(response.capabilities.ptz.is_none());
+    }
+
+    #[test]
+    fn test_get_capabilities_ptz_enabled_includes_ptz() {
+        let config = create_test_config();
+        let response =
+            handle_get_capabilities(&config, GetCapabilities { category: vec![] }).unwrap();
+        assert!(response.capabilities.ptz.is_some());
     }
 
     // ========================================================================
