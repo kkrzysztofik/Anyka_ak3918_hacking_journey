@@ -33,6 +33,17 @@ export interface Diagnostics {
     white_led: boolean | null;
     supported: { ir_led: boolean; ircut: boolean; white_led: boolean };
   } | null;
+  ptz?: {
+    enabled: boolean;
+    opened: boolean;
+    init_error: string | null;
+    self_check: string | null;
+    /** Tracked pan/tilt/zoom in degrees — dead-reckoned, not measured. */
+    position: [number, number, number] | null;
+    moving: boolean;
+    last_step_pos: { pan: number | null; tilt: number | null; age_ms: number } | null;
+    commands_completed: number;
+  } | null;
 }
 
 export type LogSource = 'onvif_rust' | 'vendor_daemon' | 'anyka_init' | 'wpa_supplicant';
@@ -67,6 +78,16 @@ function isVision(value: unknown): value is NonNullable<Diagnostics['vision']> {
   );
 }
 
+function isPtz(value: unknown): value is NonNullable<Diagnostics['ptz']> {
+  return (
+    isRecord(value) &&
+    typeof value.enabled === 'boolean' &&
+    typeof value.opened === 'boolean' &&
+    typeof value.moving === 'boolean' &&
+    typeof value.commands_completed === 'number'
+  );
+}
+
 function isNullOrNumber(value: unknown): boolean {
   return value === null || typeof value === 'number';
 }
@@ -93,6 +114,8 @@ function isDiagnostics(value: unknown): value is Diagnostics {
   if (!isNullOrNumber(value.stream_frame_age_ms)) return false;
   if (!Array.isArray(value.components) || !Array.isArray(value.degraded_services)) return false;
   if (value.vision !== null && !isVision(value.vision)) return false;
+  // Absent is fine — a snapshot from a build without PTZ reporting still validates.
+  if (value.ptz !== null && value.ptz !== undefined && !isPtz(value.ptz)) return false;
   return true;
 }
 
