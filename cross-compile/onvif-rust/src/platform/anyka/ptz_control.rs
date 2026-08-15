@@ -881,6 +881,23 @@ mod tests {
     // Limits tests
     // =========================================================================
 
+    /// The driver seeds the kernel's travel range via `MOTOR_PARM` from its own
+    /// constants; if they drift from the limits reported over ONVIF, the motor is
+    /// configured for a different range than the one clients are told about.
+    #[test]
+    fn test_driver_travel_matches_reported_limits() {
+        use crate::hal::anyka::ptz::driver::{PAN_TRAVEL_DEGREES, TILT_TRAVEL_DEGREES};
+
+        assert_eq!(
+            PAN_TRAVEL_DEGREES,
+            (PTZ_MAX_PAN_DEGREES - PTZ_MIN_PAN_DEGREES) as i32
+        );
+        assert_eq!(
+            TILT_TRAVEL_DEGREES,
+            (PTZ_MAX_TILT_DEGREES - PTZ_MIN_TILT_DEGREES) as i32
+        );
+    }
+
     #[tokio::test]
     async fn test_get_limits_returns_hardware_constants() {
         let mock = mock_with_open();

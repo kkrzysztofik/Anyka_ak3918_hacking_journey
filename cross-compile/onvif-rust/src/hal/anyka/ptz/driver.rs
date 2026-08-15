@@ -73,11 +73,12 @@ const AK_MOTOR_TURN_ANTICLKWISE: c_uint = _iow(AK_MOTOR_IOC_MAGIC, 14, SIZE_INT)
 const AK_MOTOR_GET_HIT_STATUS: c_uint = _iow(AK_MOTOR_IOC_MAGIC, 15, SIZE_INT);
 const AK_MOTOR_TURN_STOP: c_uint = _iow(AK_MOTOR_IOC_MAGIC, 16, SIZE_INT);
 
-const MOTOR_GET_STATUS: c_uint = _ior(
-    AK_MOTOR_IOC_MAGIC,
-    0x43,
-    std::mem::size_of::<MotorMessage>() as c_uint,
-);
+// The "Anycloud V500" command family. Both of these pass a *struct* pointer but are
+// declared `_IOW(..., int)` in the vendor driver (ak_drv_ptz.c:39,62) — the size field
+// is part of the command word, so encoding them from the struct size produces a
+// different ioctl number and the kernel rejects it.
+const MOTOR_PARM: c_uint = _iow(AK_MOTOR_IOC_MAGIC, 0x00, SIZE_INT);
+const MOTOR_GET_STATUS: c_uint = _iow(AK_MOTOR_IOC_MAGIC, 0x43, SIZE_INT);
 
 pub const AK_MOTOR_EVENT_HIT: c_int = 1;
 pub const AK_MOTOR_EVENT_UNHIT: c_int = 1 << 1;
@@ -93,6 +94,17 @@ pub struct NotifyData {
     pub hit_num: c_int,
     pub event: c_int,
     pub remain_steps: c_int,
+}
+
+/// motor_parm for the MOTOR_PARM ioctl - Qiwen ABI (field order matters).
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Default)]
+pub struct MotorParm {
+    pub pos: c_int,
+    pub speed_step: c_int,
+    pub steps_one_circle: c_int,
+    pub total_steps: c_int,
+    pub boundary_steps: c_int,
 }
 
 /// motor_message for MOTOR_GET_STATUS ioctl - Qiwen ABI.
@@ -154,6 +166,14 @@ const CYCLE_STEP: i32 = 2048;
 /// Steps from limit to "middle" (matches C driver init_pos = fulldst_step/2).
 const RESET_STEP: i32 = 2048 / 2;
 const DEFAULT_SPEED: c_int = 100;
+/// `motor_parm.speed_step` seed, matching the vendor's `ak_drv_ptz_setup_step_param()`.
+const DEFAULT_SPEED_STEP: c_int = 400;
+/// Total travel of each axis in degrees. `MOTOR_PARM` wants this as a step count
+/// (`2048 * degrees / 360`), exactly as the vendor's `AK_DRV_PTZ_SETUP` macro computes it
+/// (`libplat/include/ak_drv_ptz.h:113`). Kept in sync with the platform layer's
+/// `PTZ_{MAX,MIN}_{PAN,TILT}_DEGREES` by a unit test below.
+pub(crate) const PAN_TRAVEL_DEGREES: i32 = 700;
+pub(crate) const TILT_TRAVEL_DEGREES: i32 = 260;
 /// Timeout for calibration move to limit (full rotation can be slow).
 const CALIBRATION_TIMEOUT_SECS: u64 = 120;
 /// Upper bound for a single motor turn to complete before we give up.
@@ -178,15 +198,26 @@ enum PollOutcome {
 /// be shared between the turning path and the stop path without a per-handle mutex.
 struct MotorHandle {
     file: File,
+    /// Device path, carried so every ioctl failure says *which* motor.
+    name: &'static str,
+    /// Steps per full revolution. Seeded from [`CYCLE_STEP`], then replaced by whatever
+    /// the kernel reports after `MOTOR_PARM` — the hardware's own gearing wins.
     cycle_step: i32,
+    /// Usable travel in steps, likewise adopted from the kernel.
+    total_steps: i32,
 }
 
 impl MotorHandle {
-    fn open(path: &Path) -> IoResult<Self> {
-        let file = File::options().read(true).write(true).open(path)?;
+    fn open(path: &'static str) -> IoResult<Self> {
+        let file = File::options()
+            .read(true)
+            .write(true)
+            .open(Path::new(path))?;
         Ok(Self {
             file,
+            name: path,
             cycle_step: CYCLE_STEP,
+            total_steps: 0,
         })
     }
 
@@ -194,72 +225,100 @@ impl MotorHandle {
         self.file.as_raw_fd()
     }
 
-    fn set_speed(&self, speed: c_int) -> PlatformResult<()> {
-        let fd = self.raw_fd();
-        let mut val = speed;
-        let ret = unsafe { libc::ioctl(fd, AK_MOTOR_SET_ANG_SPEED as libc::c_ulong, &mut val) };
+    /// Issue an ioctl carrying a pointer argument.
+    ///
+    /// Failures name the command and the motor, so the caller never has to guess which
+    /// of the two devices rejected what.
+    fn ioctl_ptr<T>(&self, cmd: c_uint, arg: *mut T, what: &str) -> PlatformResult<()> {
+        // SAFETY: `arg` points at a live, correctly-typed value owned by the caller for
+        // the duration of the call (or is null, which the STOP command accepts), and
+        // `cmd` is one of the kernel ABI constants declared above.
+        let ret = unsafe {
+            libc::ioctl(
+                self.raw_fd(),
+                cmd as libc::c_ulong,
+                arg as *mut libc::c_void,
+            )
+        };
         if ret != 0 {
             return Err(PlatformError::HardwareFailure(format!(
-                "AK_MOTOR_SET_ANG_SPEED failed: errno {}",
+                "{} failed on {}: errno {}",
+                what,
+                self.name,
                 std::io::Error::last_os_error().raw_os_error().unwrap_or(-1)
             )));
         }
         Ok(())
+    }
+
+    /// Seed the kernel's motor geometry, then adopt what it reports back.
+    ///
+    /// Mirrors the vendor's `ak_drv_ptz_setup_step_param()` (ak_drv_ptz.c:760). Without
+    /// `MOTOR_PARM` the kernel motor has no travel limits or step scale configured, so
+    /// the movement ioctls have nothing to work against.
+    fn configure(&mut self, travel_degrees: i32) -> PlatformResult<()> {
+        let total_steps = CYCLE_STEP * travel_degrees / 360;
+        let mut parm = MotorParm {
+            // Vendor passes init_pos = -1, which its helper resolves to fulldst_step / 2.
+            pos: total_steps / 2,
+            speed_step: DEFAULT_SPEED_STEP,
+            steps_one_circle: CYCLE_STEP,
+            total_steps,
+            boundary_steps: 0,
+        };
+        self.ioctl_ptr(MOTOR_PARM, &mut parm, "MOTOR_PARM")?;
+
+        // Trust the kernel's accounting over our seed values: a differently geared body
+        // reports its own numbers here, and this is the only place we can learn them.
+        let msg = self.get_status()?;
+        if msg.steps_one_circle > 0 {
+            self.cycle_step = msg.steps_one_circle;
+        }
+        if msg.total_steps > 0 {
+            self.total_steps = msg.total_steps;
+        }
+        tracing::info!(
+            "{}: cycle_step={}, total_steps={}, pos={}",
+            self.name,
+            self.cycle_step,
+            self.total_steps,
+            msg.pos
+        );
+        Ok(())
+    }
+
+    fn set_speed(&self, speed: c_int) -> PlatformResult<()> {
+        let mut val = speed;
+        self.ioctl_ptr(AK_MOTOR_SET_ANG_SPEED, &mut val, "AK_MOTOR_SET_ANG_SPEED")
     }
 
     fn turn_steps(&self, steps: i32, clockwise: bool) -> PlatformResult<()> {
-        let fd = self.raw_fd();
         let mut val = steps;
-        let cmd = if clockwise {
-            AK_MOTOR_TURN_CLKWISE
+        let (cmd, what) = if clockwise {
+            (AK_MOTOR_TURN_CLKWISE, "AK_MOTOR_TURN_CLKWISE")
         } else {
-            AK_MOTOR_TURN_ANTICLKWISE
+            (AK_MOTOR_TURN_ANTICLKWISE, "AK_MOTOR_TURN_ANTICLKWISE")
         };
-        let ret = unsafe { libc::ioctl(fd, cmd as libc::c_ulong, &mut val) };
-        if ret != 0 {
-            return Err(PlatformError::HardwareFailure(format!(
-                "motor turn failed: errno {}",
-                std::io::Error::last_os_error().raw_os_error().unwrap_or(-1)
-            )));
-        }
-        Ok(())
+        self.ioctl_ptr(cmd, &mut val, what)
     }
 
     fn turn_stop(&self) -> PlatformResult<()> {
-        let fd = self.raw_fd();
-        let ret = unsafe {
-            libc::ioctl(
-                fd,
-                AK_MOTOR_TURN_STOP as libc::c_ulong,
-                std::ptr::null_mut::<c_int>(),
-            )
-        };
-        if ret != 0 {
-            return Err(PlatformError::HardwareFailure(format!(
-                "AK_MOTOR_TURN_STOP failed: errno {}",
-                std::io::Error::last_os_error().raw_os_error().unwrap_or(-1)
-            )));
-        }
-        Ok(())
+        self.ioctl_ptr(
+            AK_MOTOR_TURN_STOP,
+            std::ptr::null_mut::<c_int>(),
+            "AK_MOTOR_TURN_STOP",
+        )
+    }
+
+    /// Read the kernel's full motor status (position, run state, geometry).
+    fn get_status(&self) -> PlatformResult<MotorMessage> {
+        let mut msg = MotorMessage::default();
+        self.ioctl_ptr(MOTOR_GET_STATUS, &mut msg, "MOTOR_GET_STATUS")?;
+        Ok(msg)
     }
 
     fn get_step_pos(&self) -> PlatformResult<i32> {
-        let fd = self.raw_fd();
-        let mut msg = MotorMessage::default();
-        let ret = unsafe {
-            libc::ioctl(
-                fd,
-                MOTOR_GET_STATUS as libc::c_ulong,
-                &mut msg as *mut MotorMessage as *mut libc::c_void,
-            )
-        };
-        if ret != 0 {
-            return Err(PlatformError::HardwareFailure(format!(
-                "MOTOR_GET_STATUS failed: errno {}",
-                std::io::Error::last_os_error().raw_os_error().unwrap_or(-1)
-            )));
-        }
-        Ok(msg.pos)
+        Ok(self.get_status()?.pos)
     }
 
     /// Read the pending `notify_data` from the motor fd (fd already known readable).
@@ -369,12 +428,24 @@ impl MotorHandle {
         (self.cycle_step as i64 * degree as i64 / 360) as i32
     }
 
+    /// Steps from the physical limit back to the middle of travel.
+    ///
+    /// The vendor uses `fulldst_step / 2`; fall back to half a revolution when the
+    /// kernel reported no travel range.
+    fn reset_step(&self) -> i32 {
+        if self.total_steps > 0 {
+            self.total_steps / 2
+        } else {
+            RESET_STEP
+        }
+    }
+
     /// Run calibration sequence matching C driver get_motor_param():
-    /// turn anticlockwise to limit (HIT or STOP), then clockwise to middle (RESET_STEP).
+    /// turn anticlockwise to limit (HIT or STOP), then clockwise to the middle of travel.
     fn calibrate(&self, stop_flag: &AtomicBool) -> PlatformResult<()> {
         self.set_speed(DEFAULT_SPEED)?;
         // Turn anticlockwise to physical limit; wait for HIT or STOP event.
-        self.turn_steps(CYCLE_STEP, false)?;
+        self.turn_steps(self.cycle_step, false)?;
         let (notify, _) = self.wait_event_interruptible(CALIBRATION_TIMEOUT_SECS, stop_flag)?;
         if (notify.event & AK_MOTOR_EVENT_HIT) != 0 {
             tracing::debug!(
@@ -388,7 +459,7 @@ impl MotorHandle {
             );
         }
         // Turn clockwise to middle position (same as C driver reset_step).
-        self.turn_steps(RESET_STEP, true)?;
+        self.turn_steps(self.reset_step(), true)?;
         self.wait_event_interruptible(TURN_TIMEOUT_SECS, stop_flag)?;
         Ok(())
     }
@@ -463,12 +534,16 @@ impl NativePtzDriver {
         if guard.is_some() {
             return Ok(());
         }
-        let motor_h = MotorHandle::open(Path::new(AK_MOTOR_DEV0)).map_err(|e| {
+        let mut motor_h = MotorHandle::open(AK_MOTOR_DEV0).map_err(|e| {
             PlatformError::HardwareFailure(format!("open {}: {}", AK_MOTOR_DEV0, e))
         })?;
-        let motor_v = MotorHandle::open(Path::new(AK_MOTOR_DEV1)).map_err(|e| {
+        let mut motor_v = MotorHandle::open(AK_MOTOR_DEV1).map_err(|e| {
             PlatformError::HardwareFailure(format!("open {}: {}", AK_MOTOR_DEV1, e))
         })?;
+        // Geometry must be seeded before speed or movement: MOTOR_PARM is what gives the
+        // kernel motor its step scale and travel limits.
+        motor_h.configure(PAN_TRAVEL_DEGREES)?;
+        motor_v.configure(TILT_TRAVEL_DEGREES)?;
         motor_h.set_speed(DEFAULT_SPEED)?;
         motor_v.set_speed(DEFAULT_SPEED)?;
         *guard = Some(NativePtzDriverInner {
@@ -631,6 +706,46 @@ mod tests {
     #[test]
     fn test_notify_data_size() {
         assert_eq!(std::mem::size_of::<NotifyData>(), 12);
+    }
+
+    #[test]
+    fn test_motor_parm_size() {
+        assert_eq!(std::mem::size_of::<MotorParm>(), 20);
+    }
+
+    /// Pin the exact command words against the vendor driver's macros
+    /// (`anyka_reference/platform/libplat/src/drv/ak_drv_ptz.c:39,62`).
+    ///
+    /// Both are declared `_IOW(magic, nr, int)` even though they carry a struct pointer.
+    /// Encoding them from the struct size instead yields a different command word and the
+    /// kernel rejects the call — which is exactly how PTZ bring-up failed with `-1`.
+    #[test]
+    fn test_v500_ioctl_encoding_matches_vendor() {
+        assert_eq!(
+            MOTOR_PARM, 0x4004_6D00,
+            "MOTOR_PARM must be _IOW('m', 0x00, int)"
+        );
+        assert_eq!(
+            MOTOR_GET_STATUS, 0x4004_6D43,
+            "MOTOR_GET_STATUS must be _IOW('m', 0x43, int)"
+        );
+    }
+
+    /// The legacy `nr 11-16` family, unchanged — guards against a careless edit to `_iow`.
+    #[test]
+    fn test_legacy_ioctl_encoding() {
+        assert_eq!(AK_MOTOR_SET_ANG_SPEED, 0x4004_6D0B);
+        assert_eq!(AK_MOTOR_TURN_CLKWISE, 0x4004_6D0D);
+        assert_eq!(AK_MOTOR_TURN_ANTICLKWISE, 0x4004_6D0E);
+        assert_eq!(AK_MOTOR_TURN_STOP, 0x4004_6D10);
+    }
+
+    /// `MOTOR_PARM.total_steps` is `2048 * travel / 360`, as the vendor's
+    /// `AK_DRV_PTZ_SETUP` macro computes it (`libplat/include/ak_drv_ptz.h:113`).
+    #[test]
+    fn test_travel_degrees_convert_to_vendor_step_counts() {
+        assert_eq!(CYCLE_STEP * PAN_TRAVEL_DEGREES / 360, 3982);
+        assert_eq!(CYCLE_STEP * TILT_TRAVEL_DEGREES / 360, 1479);
     }
 
     #[test]
