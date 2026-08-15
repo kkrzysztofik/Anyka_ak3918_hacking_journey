@@ -234,17 +234,21 @@ mod tests {
     #[test]
     fn test_default_scopes_omits_ptz_when_disabled() {
         let scopes = default_scopes(false);
-        assert!(!scopes
-            .iter()
-            .any(|s| s.scope_item == "onvif://www.onvif.org/type/ptz"));
+        assert!(
+            !scopes
+                .iter()
+                .any(|s| s.scope_item == "onvif://www.onvif.org/type/ptz")
+        );
     }
 
     #[test]
     fn test_default_scopes_includes_ptz_when_enabled() {
         let scopes = default_scopes(true);
-        assert!(scopes
-            .iter()
-            .any(|s| s.scope_item == "onvif://www.onvif.org/type/ptz"));
+        assert!(
+            scopes
+                .iter()
+                .any(|s| s.scope_item == "onvif://www.onvif.org/type/ptz")
+        );
     }
 
     // ========================================================================

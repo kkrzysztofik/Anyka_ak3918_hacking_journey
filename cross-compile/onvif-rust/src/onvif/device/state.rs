@@ -35,7 +35,9 @@ impl DeviceState {
     /// Create a new DeviceState whose fixed scopes reflect the given PTZ support.
     pub fn with_ptz(ptz_enabled: bool) -> Self {
         Self {
-            scopes: RwLock::new(crate::onvif::device::ops::discovery::default_scopes(ptz_enabled)),
+            scopes: RwLock::new(crate::onvif::device::ops::discovery::default_scopes(
+                ptz_enabled,
+            )),
             discovery_mode: RwLock::new(DiscoveryMode::Discoverable),
         }
     }
