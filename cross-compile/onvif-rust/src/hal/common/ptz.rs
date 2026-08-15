@@ -254,13 +254,17 @@ mod tests {
         let mut mock_ffi = MockPtzHalTrait::new();
         mock_ffi.expect_ptz_open().times(1).returning(|| Ok(()));
         mock_ffi.expect_ptz_check_self().times(1).returning(|_| {
-            Err(PlatformError::HardwareFailure("motor wait timed out".to_string()))
+            Err(PlatformError::HardwareFailure(
+                "motor wait timed out".to_string(),
+            ))
         });
         mock_ffi.expect_ptz_close().returning(|| Ok(()));
 
         let handle = ptz_open(std::sync::Arc::new(mock_ffi)).unwrap();
         assert!(
-            handle.self_check_error().is_some_and(|e| e.contains("motor wait timed out")),
+            handle
+                .self_check_error()
+                .is_some_and(|e| e.contains("motor wait timed out")),
             "a warn! log is not reachable from the WebUI; the handle must carry it"
         );
     }
@@ -269,7 +273,10 @@ mod tests {
     fn test_ptz_open_clean_self_check_records_no_error() {
         let mut mock_ffi = MockPtzHalTrait::new();
         mock_ffi.expect_ptz_open().times(1).returning(|| Ok(()));
-        mock_ffi.expect_ptz_check_self().times(1).returning(|_| Ok(()));
+        mock_ffi
+            .expect_ptz_check_self()
+            .times(1)
+            .returning(|_| Ok(()));
         mock_ffi.expect_ptz_close().returning(|| Ok(()));
 
         let handle = ptz_open(std::sync::Arc::new(mock_ffi)).unwrap();

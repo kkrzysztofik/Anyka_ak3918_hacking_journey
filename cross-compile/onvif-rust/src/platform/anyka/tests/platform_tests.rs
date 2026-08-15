@@ -207,7 +207,10 @@ async fn test_rollback_video_pipeline_is_best_effort_when_hal_is_unopened() {
 #[test]
 fn test_init_ptz_control_disabled_reports_disabled_not_failed() {
     let result = super::super::init_ptz_control(false);
-    assert!(matches!(result, crate::lifecycle::startup::OptionalInitResult::Disabled));
+    assert!(matches!(
+        result,
+        crate::lifecycle::startup::OptionalInitResult::Disabled
+    ));
     assert!(
         result.error_message().is_none(),
         "disabled is a choice, not a failure"

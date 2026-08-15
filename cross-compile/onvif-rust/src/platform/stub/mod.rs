@@ -797,6 +797,12 @@ pub struct StubPTZControl {
 impl StubPTZControl {
     /// In-memory PTZ for host-side / ONVIF unit tests.
     pub fn new() -> Self {
+        Self::default()
+    }
+}
+
+impl Default for StubPTZControl {
+    fn default() -> Self {
         Self {
             position: RwLock::new(PtzPosition::HOME),
             velocity: RwLock::new(PtzVelocity::STOP),

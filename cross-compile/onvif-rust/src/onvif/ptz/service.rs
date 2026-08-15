@@ -605,10 +605,7 @@ mod tests {
 
     fn create_test_service() -> PTZService {
         let state = Arc::new(PTZStateManager::new());
-        PTZService::with_ptz_control(
-            state,
-            Arc::new(crate::platform::StubPTZControl::new()),
-        )
+        PTZService::with_ptz_control(state, Arc::new(crate::platform::StubPTZControl::new()))
     }
 
     // ========================================================================
@@ -962,8 +959,7 @@ mod tests {
             })
             .await;
         assert!(
-            goto_result.is_ok()
-                || matches!(goto_result, Err(OnvifError::HardwareFailure(_))),
+            goto_result.is_ok() || matches!(goto_result, Err(OnvifError::HardwareFailure(_))),
             "goto_preset must succeed in state even when stub lacks the token"
         );
 

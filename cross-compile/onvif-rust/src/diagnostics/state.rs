@@ -399,8 +399,11 @@ mod tests {
         });
         platform.expect_imaging_control().returning(|| None);
 
-        let state =
-            DiagnosticsState::new(Instant::now(), Some(std::sync::Arc::new(platform)), Vec::new());
+        let state = DiagnosticsState::new(
+            Instant::now(),
+            Some(std::sync::Arc::new(platform)),
+            Vec::new(),
+        );
         let snap = state.snapshot().await;
         let ptz = snap
             .ptz

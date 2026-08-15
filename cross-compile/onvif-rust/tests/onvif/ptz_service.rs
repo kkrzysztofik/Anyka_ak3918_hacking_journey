@@ -23,10 +23,7 @@ use std::sync::Arc;
 
 fn create_test_service() -> PTZService {
     let state = Arc::new(PTZStateManager::new());
-    PTZService::with_ptz_control(
-        state,
-        Arc::new(onvif_rust::platform::StubPTZControl::new()),
-    )
+    PTZService::with_ptz_control(state, Arc::new(onvif_rust::platform::StubPTZControl::new()))
 }
 
 fn create_service_with_state() -> (PTZService, Arc<PTZStateManager>) {

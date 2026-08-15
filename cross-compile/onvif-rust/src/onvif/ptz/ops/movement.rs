@@ -249,10 +249,16 @@ mod tests {
         let state = PTZStateManager::new();
         let result = continuous_move(&state, &None, "Profile1", PTZSpeed::default()).await;
         assert!(
-            matches!(result, Err(crate::onvif::error::OnvifError::ActionNotSupported(_))),
+            matches!(
+                result,
+                Err(crate::onvif::error::OnvifError::ActionNotSupported(_))
+            ),
             "a disabled PTZ must refuse the move, not report a move that never happened"
         );
-        assert!(!state.is_moving(), "a refused command must not leave state moving");
+        assert!(
+            !state.is_moving(),
+            "a refused command must not leave state moving"
+        );
     }
 
     #[test]

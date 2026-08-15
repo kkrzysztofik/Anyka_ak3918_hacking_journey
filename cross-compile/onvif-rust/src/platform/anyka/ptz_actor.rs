@@ -421,11 +421,12 @@ mod tests {
         state.record_step(true, 0);
         state.record_step(false, 137);
 
-        let sample = state
-            .last_step
-            .read()
-            .expect("a sample was recorded");
-        assert_eq!(sample.pan, Some(0), "a zero step is a real reading, not absence");
+        let sample = state.last_step.read().expect("a sample was recorded");
+        assert_eq!(
+            sample.pan,
+            Some(0),
+            "a zero step is a real reading, not absence"
+        );
         assert_eq!(sample.tilt, Some(137));
     }
 }
