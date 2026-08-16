@@ -1045,6 +1045,7 @@ impl Application {
                 Self::init_platform(
                     &mut progress,
                     &config_runtime,
+                    config_path,
                     shutdown_coordinator.subscribe(),
                     initial_rotated,
                 )
@@ -1090,7 +1091,9 @@ impl Application {
         let mut app_state_builder = AppState::builder()
             .user_storage(Arc::clone(&user_storage))
             .password_manager(Arc::new(PasswordManager::new()))
-            .ptz_state(Arc::new(PTZStateManager::with_preset_store(Arc::clone(&preset_store))))
+            .ptz_state(Arc::new(PTZStateManager::with_preset_store(Arc::clone(
+                &preset_store,
+            ))))
             .config(Arc::clone(&config_runtime))
             .memory_monitor(Arc::new(
                 crate::utils::MemoryMonitor::from_config(&config_runtime).map_err(|e| {
@@ -1230,13 +1233,14 @@ impl Application {
     async fn init_platform(
         progress: &mut StartupProgress,
         config_runtime: &Arc<ConfigRuntime>,
-        shutdown: broadcast::Receiver<()>,
+        config_path: &str,
+        _shutdown_rx: broadcast::Receiver<()>,
         initial_rotated: bool,
     ) -> Result<PlatformInit, StartupError> {
         let ptz_config = config_runtime.read().ptz.clone();
 
         #[cfg(use_stubs)]
-        let _ = shutdown;
+        let _ = _shutdown_rx;
         // Stub builds have no VI to flip; `StubVideoControl` starts at its own
         // default and the seed is irrelevant.
         #[cfg(use_stubs)]
@@ -1294,7 +1298,7 @@ impl Application {
                     // the video pipeline is still down.
                     let platform = Arc::new(p);
                     let (availability, supervisor_task) =
-                        platform.spawn_supervisor(shutdown).map_err(|e| {
+                        platform.spawn_supervisor(shutdown_rx).map_err(|e| {
                             StartupError::Platform(format!(
                                 "failed to start attach supervisor: {e}"
                             ))
