@@ -680,12 +680,12 @@ async fn stop_night_loop(
     }
 }
 
+use ptz_actor::PtzRates;
 /// Anyka PTZ control — delegates to `AnykaPTZControl` which calls the FFI layer.
 ///
 /// The PTZ stub has been replaced with a real hardware implementation
 /// (see `ptz_control.rs`) that controls the physical stepper motors via FFI.
 use ptz_control::AnykaPTZControl;
-use ptz_actor::PtzRates;
 
 // Re-export from submodules for internal use
 use audio_encoder::AnykaAudioEncoder;

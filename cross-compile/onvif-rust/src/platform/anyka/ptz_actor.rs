@@ -388,12 +388,20 @@ fn integrate_axis(state: &PtzActorState, direction: PtzDirection, elapsed: Durat
     let mut position = state.position.write();
     match direction {
         PtzDirection::Right | PtzDirection::Left => {
-            let sign = if matches!(direction, PtzDirection::Right) { 1.0 } else { -1.0 };
+            let sign = if matches!(direction, PtzDirection::Right) {
+                1.0
+            } else {
+                -1.0
+            };
             position.pan = (position.pan + sign * state.rates.pan_deg_per_sec * seconds)
                 .clamp(PTZ_MIN_PAN_DEGREES, PTZ_MAX_PAN_DEGREES);
         }
         PtzDirection::Down | PtzDirection::Up => {
-            let sign = if matches!(direction, PtzDirection::Down) { 1.0 } else { -1.0 };
+            let sign = if matches!(direction, PtzDirection::Down) {
+                1.0
+            } else {
+                -1.0
+            };
             position.tilt = (position.tilt + sign * state.rates.tilt_deg_per_sec * seconds)
                 .clamp(PTZ_MIN_TILT_DEGREES, PTZ_MAX_TILT_DEGREES);
         }
@@ -662,7 +670,10 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("ptz_position.toml");
         std::fs::write(&path, b"this is not toml {{{").unwrap();
-        assert!(load_position(&path).is_none(), "a corrupt file must never fail boot");
+        assert!(
+            load_position(&path).is_none(),
+            "a corrupt file must never fail boot"
+        );
     }
 
     #[test]

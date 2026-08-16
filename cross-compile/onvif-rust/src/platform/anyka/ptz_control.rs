@@ -395,8 +395,7 @@ impl AnykaPTZControl {
         };
         // Below the move threshold, the integrator would no-op anyway — skip the
         // round-trip and keep PTZ_CMD_TIMEOUT free for real callers.
-        if saved.pan.abs() < PTZ_MIN_MOVE_THRESHOLD && saved.tilt.abs() < PTZ_MIN_MOVE_THRESHOLD
-        {
+        if saved.pan.abs() < PTZ_MIN_MOVE_THRESHOLD && saved.tilt.abs() < PTZ_MIN_MOVE_THRESHOLD {
             // Still seed the in-memory position so platform reads report truth
             // even if the user never moves the lens after boot.
             *self.shared.position.write() = saved;
@@ -939,7 +938,9 @@ mod tests {
             },
         );
         let before = ptz.shared.commands_completed.load(Ordering::SeqCst);
-        ptz.continuous_move(PtzVelocity::new(1.0, 0.0, 0.0)).await.unwrap();
+        ptz.continuous_move(PtzVelocity::new(1.0, 0.0, 0.0))
+            .await
+            .unwrap();
         await_actor_completed(&ptz, before).await;
 
         // 200ms at 100 deg/s ≈ 20 degrees. Wide tolerance: this measures real
@@ -970,7 +971,9 @@ mod tests {
             },
         );
         let before = ptz.shared.commands_completed.load(Ordering::SeqCst);
-        ptz.continuous_move(PtzVelocity::new(-1.0, 0.0, 0.0)).await.unwrap();
+        ptz.continuous_move(PtzVelocity::new(-1.0, 0.0, 0.0))
+            .await
+            .unwrap();
         await_actor_completed(&ptz, before).await;
 
         let pan = ptz.get_position().await.unwrap().pan;
@@ -1001,7 +1004,9 @@ mod tests {
                 tilt_deg_per_sec: 100.0,
             },
         );
-        move_and_settle(&ptz, PtzPosition::new(350.0, 0.0, 1.0)).await.unwrap();
+        move_and_settle(&ptz, PtzPosition::new(350.0, 0.0, 1.0))
+            .await
+            .unwrap();
 
         // Interrupted before reaching 350, but ~20 degrees of travel happened.
         let pan = ptz.get_position().await.unwrap().pan;
@@ -1030,7 +1035,9 @@ mod tests {
         mock.expect_ptz_check_self().times(2).returning(|_| Ok(()));
 
         let ptz = create_opened(mock);
-        move_and_settle(&ptz, PtzPosition::new(90.0, 45.0, 1.0)).await.unwrap();
+        move_and_settle(&ptz, PtzPosition::new(90.0, 45.0, 1.0))
+            .await
+            .unwrap();
 
         let before = ptz.shared.commands_completed.load(Ordering::SeqCst);
         ptz.home().await.unwrap();
@@ -1060,7 +1067,11 @@ mod tests {
         // The move lands via the dead-reckoning integrator, so the initial pan
         // delta comes from `(90 - 0) deg` traveling at the default rate. Verify
         // the direction is correct (positive) rather than the exact value.
-        assert!(pos.pan > 0.0, "expected pan to grow positive, got {}", pos.pan);
+        assert!(
+            pos.pan > 0.0,
+            "expected pan to grow positive, got {}",
+            pos.pan
+        );
     }
 
     #[tokio::test]

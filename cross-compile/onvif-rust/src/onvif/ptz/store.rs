@@ -271,10 +271,7 @@ impl PresetStore {
             }
         };
         let content = toml::to_string_pretty(&file).map_err(|e| {
-            crate::onvif::error::OnvifError::Internal(format!(
-                "Failed to serialize presets: {}",
-                e
-            ))
+            crate::onvif::error::OnvifError::Internal(format!("Failed to serialize presets: {}", e))
         })?;
         Ok(content.into_bytes())
     }
@@ -451,7 +448,10 @@ mod tests {
 
         let reloaded = PresetStore::with_persistence(&path);
         reloaded.load_from_file().unwrap();
-        assert_eq!(reloaded.get(&token).unwrap().name, Some("Front Door".into()));
+        assert_eq!(
+            reloaded.get(&token).unwrap().name,
+            Some("Front Door".into())
+        );
     }
 
     #[test]
