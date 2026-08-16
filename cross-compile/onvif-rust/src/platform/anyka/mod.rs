@@ -40,6 +40,7 @@ use super::common::{
     DeviceInfo, ImagingControl, NetworkInfo, PTZControl, Platform, PlatformError, PlatformResult,
     PtzDiagnostics, Resolution, VideoControl, VideoEncoder, VideoInput,
 };
+use crate::config::types::PtzConfig;
 use crate::lifecycle::startup::OptionalInitResult;
 
 // Types used by tests
@@ -117,14 +118,14 @@ pub struct AnykaPlatform {
 ///
 /// Returning [`OptionalInitResult`] keeps the open failure reason (device path + errno)
 /// reachable from diagnostics instead of discarding it into a bare `None`.
-fn init_ptz_control(enabled: bool) -> OptionalInitResult<Arc<AnykaPTZControl>> {
+fn init_ptz_control(enabled: bool, ptz_config: &PtzConfig) -> OptionalInitResult<Arc<AnykaPTZControl>> {
     if !enabled {
         tracing::info!("PTZ disabled by config (ptz.enabled = false); skipping motor bring-up");
         return OptionalInitResult::Disabled;
     }
 
     tracing::info!("Initializing PTZ (native Rust driver, /dev/ak-motor0, /dev/ak-motor1)");
-    let ptz = AnykaPTZControl::new();
+    let ptz = AnykaPTZControl::new(PtzRates::from_config(ptz_config));
     match ptz.open() {
         Ok(()) => {
             tracing::info!("PTZ device opened successfully");
@@ -153,7 +154,7 @@ impl AnykaPlatform {
     pub fn new() -> PlatformResult<Self> {
         Self::with_isp_config(
             None,
-            true,
+            crate::config::types::PtzConfig::default(),
             StreamOpenParams::default(),
             StreamOpenParams::default(),
             crate::config::types::ImagingConfig::default(),
@@ -217,8 +218,9 @@ impl AnykaPlatform {
     /// If `isp_config_path` is `Some`, that path is used directly for
     /// `ak_vi_match_sensor()`. If `None`, the default search paths are used.
     ///
-    /// `ptz_enabled` carries `[ptz] enabled` from the config; see [`init_ptz_control`] for what
-    /// skipping it avoids.
+    /// `ptz_config` carries the full `[ptz]` section; the `enabled` flag and the
+    /// dead-reckoning rates are read from it. See [`init_ptz_control`] for what skipping
+    /// the bring-up avoids.
     ///
     /// `main_encoder`/`sub_encoder` carry the parameters that only `ak_venc_open` can apply, so
     /// they must arrive here rather than through `set_configuration`. See [`StreamOpenParams`].
@@ -228,7 +230,7 @@ impl AnykaPlatform {
     /// `init_video_input()`'s post-`capture_on()` reapply step actually applies it to hardware.
     pub fn with_isp_config(
         isp_config_path: Option<PathBuf>,
-        ptz_enabled: bool,
+        ptz_config: PtzConfig,
         main_encoder: StreamOpenParams,
         sub_encoder: StreamOpenParams,
         imaging_cfg: crate::config::types::ImagingConfig,
@@ -293,7 +295,7 @@ impl AnykaPlatform {
             )
         };
 
-        let ptz_init = init_ptz_control(ptz_enabled);
+        let ptz_init = init_ptz_control(ptz_config.enabled, &ptz_config);
         let ptz_control = match &ptz_init {
             OptionalInitResult::Success(ptz) => Some(Arc::clone(ptz) as Arc<dyn PTZControl>),
             _ => None,
@@ -653,6 +655,7 @@ async fn stop_night_loop(
 /// The PTZ stub has been replaced with a real hardware implementation
 /// (see `ptz_control.rs`) that controls the physical stepper motors via FFI.
 use ptz_control::AnykaPTZControl;
+use ptz_actor::PtzRates;
 
 // Re-export from submodules for internal use
 use audio_encoder::AnykaAudioEncoder;

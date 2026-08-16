@@ -111,15 +111,15 @@ pub(crate) struct AnykaPTZControl {
 #[allow(dead_code)]
 impl AnykaPTZControl {
     /// Create a new `AnykaPTZControl` with the default FFI backend.
-    pub(crate) fn new() -> Self {
-        Self::with_ffi(default_ptz_hal())
+    pub(crate) fn new(rates: PtzRates) -> Self {
+        Self::with_ffi(default_ptz_hal(), rates)
     }
 
     /// Create a new `AnykaPTZControl` with a custom FFI backend.
     ///
     /// Spawns the PTZ actor thread immediately; it idles until commands arrive.
-    pub(crate) fn with_ffi(ffi: Arc<dyn PtzHalTrait>) -> Self {
-        Self::build(ffi, Duration::from_secs(PTZ_CONTINUOUS_TIMEOUT_SECS))
+    pub(crate) fn with_ffi(ffi: Arc<dyn PtzHalTrait>, rates: PtzRates) -> Self {
+        Self::build(ffi, Duration::from_secs(PTZ_CONTINUOUS_TIMEOUT_SECS), rates)
     }
 
     /// Test-only constructor with a custom continuous-move auto-stop timeout so the
@@ -129,7 +129,11 @@ impl AnykaPTZControl {
         ffi: Arc<dyn PtzHalTrait>,
         continuous_timeout: Duration,
     ) -> Self {
-        Self::build(ffi, continuous_timeout)
+        Self::build(
+            ffi,
+            continuous_timeout,
+            PtzRates::from_config(&crate::config::types::PtzConfig::default()),
+        )
     }
 
     /// Test-only constructor with custom timeout and rates — the rates knob is the
@@ -171,9 +175,7 @@ impl AnykaPTZControl {
         }
     }
 
-    fn build(ffi: Arc<dyn PtzHalTrait>, continuous_timeout: Duration) -> Self {
-        // Default rates until Task 6 wires the real config through.
-        let rates = PtzRates::from_config(&crate::config::types::PtzConfig::default());
+    fn build(ffi: Arc<dyn PtzHalTrait>, continuous_timeout: Duration, rates: PtzRates) -> Self {
         let shared = Arc::new(PtzActorState::new(rates));
         let (tx, rx) = mpsc::channel::<PtzCommand>(PTZ_CMD_QUEUE_CAP);
 
@@ -501,7 +503,10 @@ mod tests {
 
     /// Helper: create a AnykaPTZControl with mock and open it.
     fn create_opened(mock: MockPtzHalTrait) -> AnykaPTZControl {
-        let ptz = AnykaPTZControl::with_ffi(Arc::new(mock));
+        let ptz = AnykaPTZControl::with_ffi(
+            Arc::new(mock),
+            PtzRates::from_config(&crate::config::types::PtzConfig::default()),
+        );
         ptz.open().expect("open should succeed");
         ptz
     }
@@ -526,7 +531,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_diagnostics_reports_open_state_and_tracked_position() {
-        let ptz = AnykaPTZControl::with_ffi(Arc::new(mock_with_open()));
+        let ptz = AnykaPTZControl::with_ffi(
+            Arc::new(mock_with_open()),
+            PtzRates::from_config(&crate::config::types::PtzConfig::default()),
+        );
         ptz.open().unwrap();
 
         let d = ptz.diagnostics();
@@ -540,7 +548,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_diagnostics_before_open_reports_not_opened() {
-        let ptz = AnykaPTZControl::with_ffi(Arc::new(mock_with_open()));
+        let ptz = AnykaPTZControl::with_ffi(
+            Arc::new(mock_with_open()),
+            PtzRates::from_config(&crate::config::types::PtzConfig::default()),
+        );
         let d = ptz.diagnostics();
         assert!(!d.opened);
         assert!(d.self_check.is_none(), "the sweep only runs on open");
@@ -549,7 +560,10 @@ mod tests {
     #[test]
     fn test_open_success() {
         let mock = mock_with_open();
-        let ptz = AnykaPTZControl::with_ffi(Arc::new(mock));
+        let ptz = AnykaPTZControl::with_ffi(
+            Arc::new(mock),
+            PtzRates::from_config(&crate::config::types::PtzConfig::default()),
+        );
         assert!(ptz.open().is_ok());
     }
 
@@ -561,7 +575,10 @@ mod tests {
                 "open /dev/ak-motor0: errno 19".to_string(),
             ))
         });
-        let ptz = AnykaPTZControl::with_ffi(Arc::new(mock));
+        let ptz = AnykaPTZControl::with_ffi(
+            Arc::new(mock),
+            PtzRates::from_config(&crate::config::types::PtzConfig::default()),
+        );
         let result = ptz.open();
         match result {
             Err(PlatformError::HardwareFailure(msg)) => {
@@ -581,7 +598,10 @@ mod tests {
         mock.expect_ptz_check_self().times(1).returning(|_| Ok(()));
         mock.expect_ptz_close().returning(|| Ok(()));
         mock.expect_ptz_interrupt().returning(|| ());
-        let ptz = AnykaPTZControl::with_ffi(Arc::new(mock));
+        let ptz = AnykaPTZControl::with_ffi(
+            Arc::new(mock),
+            PtzRates::from_config(&crate::config::types::PtzConfig::default()),
+        );
         assert!(ptz.open().is_ok());
         assert!(ptz.open().is_ok());
     }
@@ -589,7 +609,10 @@ mod tests {
     #[tokio::test]
     async fn test_operation_without_open_fails() {
         let mock = MockPtzHalTrait::new();
-        let ptz = AnykaPTZControl::with_ffi(Arc::new(mock));
+        let ptz = AnykaPTZControl::with_ffi(
+            Arc::new(mock),
+            PtzRates::from_config(&crate::config::types::PtzConfig::default()),
+        );
         let result = ptz.move_to_position(PtzPosition::HOME).await;
         assert!(result.is_err());
         match result {
@@ -922,6 +945,100 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn test_interrupted_absolute_move_commits_partial_motion() {
+        let mut mock = mock_with_open();
+        mock.expect_ptz_start_turn().returning(|_, _| Ok(true));
+        mock.expect_ptz_wait_turn().returning(|_| {
+            std::thread::sleep(Duration::from_millis(200));
+            Ok(TurnOutcome {
+                interrupted: true,
+                ..TurnOutcome::default()
+            })
+        });
+        mock.expect_ptz_stop().returning(|_| Ok(()));
+
+        let ptz = create_opened_with_rates(
+            mock,
+            PtzRates {
+                pan_deg_per_sec: 100.0,
+                tilt_deg_per_sec: 100.0,
+            },
+        );
+        move_and_settle(&ptz, PtzPosition::new(350.0, 0.0, 1.0)).await.unwrap();
+
+        // Interrupted before reaching 350, but ~20 degrees of travel happened.
+        let pan = ptz.get_position().await.unwrap().pan;
+        assert!(
+            pan > 10.0 && pan < 40.0,
+            "partial motion lost: pan = {}",
+            pan
+        );
+    }
+
+    #[tokio::test]
+    async fn test_configured_rate_scales_tracked_motion() {
+        // Two controls, same 200ms mock wait, rates differing 4x.
+        // The faster one must accumulate roughly 4x the degrees.
+        // Asserting the ratio, not absolutes, is what keeps this from flaking
+        // on a shared CI machine — elapsed wall-clock is the same in both runs.
+
+        let mut slow_mock = mock_with_open();
+        slow_mock.expect_ptz_start_turn().returning(|_, _| Ok(true));
+        slow_mock.expect_ptz_wait_turn().returning(|_| {
+            std::thread::sleep(Duration::from_millis(200));
+            Ok(TurnOutcome::default())
+        });
+        slow_mock.expect_ptz_stop().returning(|_| Ok(()));
+        let slow_ptz = create_opened_with_rates(
+            slow_mock,
+            PtzRates {
+                pan_deg_per_sec: 50.0,
+                tilt_deg_per_sec: 50.0,
+            },
+        );
+
+        let mut fast_mock = mock_with_open();
+        fast_mock.expect_ptz_start_turn().returning(|_, _| Ok(true));
+        fast_mock.expect_ptz_wait_turn().returning(|_| {
+            std::thread::sleep(Duration::from_millis(200));
+            Ok(TurnOutcome::default())
+        });
+        fast_mock.expect_ptz_stop().returning(|_| Ok(()));
+        let fast_ptz = create_opened_with_rates(
+            fast_mock,
+            PtzRates {
+                pan_deg_per_sec: 200.0,
+                tilt_deg_per_sec: 200.0,
+            },
+        );
+
+        let before_slow = slow_ptz.shared.commands_completed.load(Ordering::SeqCst);
+        slow_ptz
+            .continuous_move(PtzVelocity::new(1.0, 0.0, 0.0))
+            .await
+            .unwrap();
+        await_actor_completed(&slow_ptz, before_slow).await;
+
+        let before_fast = fast_ptz.shared.commands_completed.load(Ordering::SeqCst);
+        fast_ptz
+            .continuous_move(PtzVelocity::new(1.0, 0.0, 0.0))
+            .await
+            .unwrap();
+        await_actor_completed(&fast_ptz, before_fast).await;
+
+        let slow = slow_ptz.get_position().await.unwrap().pan;
+        let fast = fast_ptz.get_position().await.unwrap().pan;
+        let ratio = fast / slow;
+        assert!(
+            ratio > 3.0 && ratio < 5.0,
+            "expected ~4x scaling, got slow={} fast={} ratio={}",
+            slow,
+            fast,
+            ratio
+        );
+    }
+
     // =========================================================================
     // Stop tests
     // =========================================================================
@@ -1096,7 +1213,10 @@ mod tests {
         mock.expect_ptz_stop().returning(|_| Ok(()));
         mock.expect_ptz_interrupt().returning(|| ());
 
-        let ptz = AnykaPTZControl::with_ffi(Arc::new(mock));
+        let ptz = AnykaPTZControl::with_ffi(
+            Arc::new(mock),
+            PtzRates::from_config(&crate::config::types::PtzConfig::default()),
+        );
         ptz.open().unwrap();
         ptz.close().await;
 

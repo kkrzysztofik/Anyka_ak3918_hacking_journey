@@ -1187,7 +1187,7 @@ impl Application {
         shutdown: broadcast::Receiver<()>,
         initial_rotated: bool,
     ) -> Result<PlatformInit, StartupError> {
-        let ptz_enabled = config_runtime.read().ptz.enabled;
+        let ptz_config = config_runtime.read().ptz.clone();
 
         #[cfg(use_stubs)]
         let _ = shutdown;
@@ -1228,7 +1228,7 @@ impl Application {
             let imaging_cfg = config_runtime.read().imaging.clone();
             match crate::platform::AnykaPlatform::with_isp_config(
                 isp_path,
-                ptz_enabled,
+                ptz_config,
                 main_encoder,
                 sub_encoder,
                 imaging_cfg,
@@ -1277,7 +1277,7 @@ impl Application {
         #[cfg(use_stubs)]
         {
             let stub_platform = StubPlatformBuilder::new()
-                .ptz_supported(ptz_enabled)
+                .ptz_supported(ptz_config.enabled)
                 .imaging_supported(true)
                 .build();
             match stub_platform.initialize().await {
