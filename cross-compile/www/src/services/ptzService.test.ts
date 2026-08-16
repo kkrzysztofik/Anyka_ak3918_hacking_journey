@@ -8,6 +8,7 @@ import type { PTZDirection } from '@/services/ptzService';
 import {
   continuousMove,
   getPresets,
+  getPtzStatus,
   gotoHome,
   gotoPreset,
   removePreset,
@@ -187,6 +188,49 @@ describe('ptzService', () => {
       vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
 
       await expect(getPresets('ProfileToken1')).rejects.toThrow();
+    });
+  });
+
+  describe('getPtzStatus', () => {
+    it('should parse pan, tilt and zoom from the status response', async () => {
+      const mockResponse = createMockSOAPResponse(`
+        <GetStatusResponse>
+          <PTZStatus>
+            <Position>
+              <PanTilt x="0.42" y="-0.085" />
+              <Zoom x="0.25" />
+            </Position>
+          </PTZStatus>
+        </GetStatusResponse>
+      `);
+      vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
+
+      const status = await getPtzStatus('ProfileToken1');
+
+      const callArgs = vi.mocked(apiClient.post).mock.calls[0];
+      expect(callArgs[1]).toContain('tptz:GetStatus');
+      expect(callArgs[1]).toContain('ProfileToken1');
+      expect(status).toEqual({ pan: 0.42, tilt: -0.085, zoom: 0.25 });
+    });
+
+    it('should default missing axes to zero rather than NaN', async () => {
+      const mockResponse = createMockSOAPResponse(`
+        <GetStatusResponse>
+          <PTZStatus />
+        </GetStatusResponse>
+      `);
+      vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
+
+      const status = await getPtzStatus('ProfileToken1');
+
+      expect(status).toEqual({ pan: 0, tilt: 0, zoom: 0 });
+    });
+
+    it('should throw on SOAP fault', async () => {
+      const mockResponse = createMockSOAPFaultResponse('soap:Sender', 'Get status failed');
+      vi.mocked(apiClient.post).mockResolvedValueOnce(mockResponse);
+
+      await expect(getPtzStatus('ProfileToken1')).rejects.toThrow();
     });
   });
 
