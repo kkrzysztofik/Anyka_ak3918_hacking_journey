@@ -113,19 +113,32 @@ of `speed_step`.
 
 ## 5. Position persistence
 
-**File.** `ptz_position.toml` holding `pan`/`tilt` in degrees, in the directory the app
-already resolved its config file to. No new config knob, no deploy change; it inherits
-whatever the A/B slot convention already does for config. Consequence, accepted: if
-config is per-slot, a firmware upgrade loses the saved position — an upgrade reboots and
-re-homes anyway, so the cost is one re-jog on a rare event.
+**No file-writing code is written.** `config::file_ops::atomic_write(path, bytes, mode)`
+is `pub(crate)` and already implements temp-file → `fsync` → `rename`, creating parent
+directories on the way. It is what config, user and profile storage all use.
 
-**Writes happen on the actor thread, after each completed movement command.** No
-debounce, no dirty flag, no background task. The actor is a dedicated OS thread that
+**File.** `ptz_position.toml` holding `pan`/`tilt` in degrees, beside the other
+per-concern state files, path derived from the config file's parent exactly as
+`wire_profile_persistence` derives `profiles.toml` (`app.rs:799-802`).
+
+**Trigger: one `atomic_write` call on the actor thread, after each completed movement
+command.** No debounce, no service, no handle. The actor is a dedicated OS thread that
 already blocks on motor waits, so blocking file I/O there is free, and `dispatch_batch`'s
 supersede semantics already collapse a burst of jog clicks into one completed command —
-writes track user actions, not clicks. Temp-file-plus-rename for atomicity, since power
-loss mid-write is the realistic corruption path on this hardware.
-`ponytail:` comment naming debounce as the upgrade path.
+writes track user actions, not clicks.
+
+This deliberately does *not* use the debounced `PersistenceService` that §6b uses for
+presets. That service is wired in `app.rs`, which reaches the ONVIF layer but not
+`AnykaPTZControl`; adopting it here would mean a `set_persistence`/`persistence_service`
+surface on the platform layer (which has no persistence wiring at all today) plus either
+a trait addition or a downcast — more new code than the single call it would replace,
+to save two `f32`s. `ponytail:` comment naming debounce as the upgrade path if write
+volume ever bites.
+
+Note the deliberate *non*-use of `PtzConfig.presets_json` / `next_preset_num` /
+`home_pan` / `home_tilt`: those fields exist in `[ptz]` and are read by nothing. They are
+a half-built earlier attempt at this feature. Per-concern state files are the pattern the
+codebase actually converged on, so the dead fields get deleted (§6d) rather than revived.
 
 **Restore** goes in the async platform init, after `init_ptz_control` reports success:
 read the file, and if the target exceeds `PTZ_MIN_MOVE_THRESHOLD`, issue an ordinary
@@ -173,14 +186,21 @@ committed.
 and then admits "in-memory only… for potential persistence to non-volatile storage in the
 future" (`store.rs:1-7`). Presets die on every restart. Folded into this design rather
 than deferred: a camera that resumes its exact view after a reboot but has forgotten its
-three presets is a worse half-state than either extreme. Same shape as §5 — serde to
-`ptz_presets.toml` beside the config, atomic temp-and-rename, write on mutation, load at
-startup, all failures non-fatal.
+three presets is a worse half-state than either extreme. Same mechanism as §5 —
+`PresetStore` copies the `ImagingSettingsStore` shape and persists to
+`ptz_presets.toml`, with `request_save()` on every mutation and `load_from_file()` at
+startup. All failures non-fatal.
 
-**c) Dead code.** `AnykaPTZControl` carries its own `presets: HashMap` + `next_preset_id`
-that nothing on the ONVIF path reaches; `ops/presets.rs:35` notes `ptz_control` is
-"accepted but not yet used". Two preset stores, one unreachable. Deleted, so a later fix
-cannot land on the wrong one.
+**c) Dead code — platform presets.** `AnykaPTZControl` carries its own `presets: HashMap`
++ `next_preset_id` that nothing on the ONVIF path reaches; `ops/presets.rs:35` notes
+`ptz_control` is "accepted but not yet used". Two preset stores, one unreachable. Deleted,
+so a later fix cannot land on the wrong one.
+
+**d) Dead code — config fields.** `PtzConfig.presets_json`, `next_preset_num`,
+`home_pan`, `home_tilt`, `home_zoom` are defined, defaulted and (for the home fields)
+range-validated, and read by nothing. Deleted. `#[serde(default)]` on `PtzConfig` means
+existing deployed config files carrying those keys still load — serde ignores unknown
+fields — so removal is backward compatible.
 
 ## Non-goals
 
