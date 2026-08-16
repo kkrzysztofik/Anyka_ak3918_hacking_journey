@@ -239,21 +239,24 @@ fn do_move(
     let plan = build_move_plan(pan_delta, tilt_delta, clamped_pan, clamped_tilt);
 
     // Issue each axis turn (non-blocking). Acceptance = all planned turns issued.
-    let mut started = Vec::new();
+    let mut started: Vec<(ptz_turn_direction, PtzDirection, Axis)> = Vec::new();
     let mut result = Ok(());
+    // Capture the tick *before* the first `ptz_start_turn` so the dead-reckoned
+    // partial commit on interrupt measures exactly the motor-on window.
+    let started_at = Instant::now();
     for (direction, degrees, axis) in plan {
         let sdk_dir = direction_to_ffi(direction);
         if let Err(e) = ffi.ptz_start_turn(sdk_dir, degrees.round() as i32) {
             result = Err(e);
             break;
         }
-        started.push((sdk_dir, axis));
+        started.push((sdk_dir, direction, axis));
     }
 
     // Reply on acceptance (before waiting for the motor to finish).
     let _ = reply.send(result);
 
-    drain_started_turns(ffi, state, started);
+    drain_started_turns(ffi, state, started, started_at);
 
     // No hardware zoom on AK3918.
     state.position.write().zoom = position.zoom.clamp(1.0, 1.0);
@@ -314,14 +317,16 @@ fn integrate_axis(state: &PtzActorState, direction: PtzDirection, elapsed: Durat
 /// Drain each started axis off the tokio workers; commit its target once it lands.
 ///
 /// A `TurnOutcome`/`PtzWaitOutcome` is used (never discarded): on interruption we
-/// stop reconciling further axes and leave the last known position untouched rather
-/// than committing a target the motor never reached.
+/// dead-reckon the partial motion that already happened and commit that, rather than
+/// leaving the tracked position untouched (which would lose every degree the motor
+/// actually travelled).
 fn drain_started_turns(
     ffi: &dyn PtzHalTrait,
     state: &PtzActorState,
-    started: Vec<(ptz_turn_direction, Axis)>,
+    started: Vec<(ptz_turn_direction, PtzDirection, Axis)>,
+    started_at: Instant,
 ) {
-    for (sdk_dir, axis) in started {
+    for (sdk_dir, direction, axis) in started {
         let outcome: TurnOutcome = match ffi.ptz_wait_turn(sdk_dir) {
             Ok(outcome) => outcome,
             Err(e) => {
@@ -340,8 +345,12 @@ fn drain_started_turns(
         state.record_step(is_pan, outcome.step_pos);
 
         if outcome.interrupted {
+            // Commit the partial motion the motor actually travelled, then stop
+            // draining later axes — their `started_at`‑measured integration would
+            // smear attempted-future motion into the position.
+            integrate_axis(state, direction, started_at.elapsed());
             tracing::debug!(
-                "absolute move preempted on {:?} (step_pos={}); leaving tracked position",
+                "absolute move preempted on {:?} (step_pos={}); committed dead-reckoned partial motion",
                 axis,
                 outcome.step_pos
             );
