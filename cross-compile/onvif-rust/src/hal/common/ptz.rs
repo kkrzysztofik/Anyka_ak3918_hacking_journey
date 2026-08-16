@@ -116,6 +116,8 @@ pub struct PTZHandle {
     ffi: std::sync::Arc<dyn PtzHalTrait>,
     /// Calibration sweep failure, kept for diagnostics. `None` = the sweep succeeded.
     self_check_error: Option<String>,
+    /// Whether the motor driver's position accounting proved live during the sweep.
+    step_readback: StepReadback,
 }
 
 impl Drop for PTZHandle {
@@ -139,6 +141,12 @@ impl PTZHandle {
     pub(crate) fn self_check_error(&self) -> Option<&str> {
         self.self_check_error.as_deref()
     }
+
+    /// Whether motor step positions from this device are measurements or always zero.
+    #[allow(dead_code)] // Read by the diagnostics path, which is not wired up yet.
+    pub(crate) fn step_readback(&self) -> StepReadback {
+        self.step_readback
+    }
 }
 
 /// Open the motor devices and run the calibration self-check.
@@ -150,18 +158,21 @@ pub(crate) fn ptz_open(ffi: std::sync::Arc<dyn PtzHalTrait>) -> PlatformResult<P
     ffi.ptz_open()?;
 
     // PTZ_FEEDBACK_PIN_NONE = 0 (no feedback pin on this hardware).
-    let self_check_error = match ffi.ptz_check_self(ptz_feedback_pin::PTZ_FEEDBACK_PIN_NONE) {
-        Ok(_) => None,
-        Err(e) => {
-            tracing::warn!("PTZ self-check failed, continuing anyway: {}", e);
-            Some(e.to_string())
-        }
-    };
+    let (self_check_error, step_readback) =
+        match ffi.ptz_check_self(ptz_feedback_pin::PTZ_FEEDBACK_PIN_NONE) {
+            Ok(readback) => (None, readback),
+            Err(e) => {
+                tracing::warn!("PTZ self-check failed, continuing anyway: {}", e);
+                // The sweep never reached its probe, so the readback question is open.
+                (Some(e.to_string()), StepReadback::Unknown)
+            }
+        };
 
     Ok(PTZHandle {
         opened: true,
         ffi,
         self_check_error,
+        step_readback,
     })
 }
 
@@ -204,6 +215,49 @@ mod tests {
         assert_eq!(StepReadback::worst_of(Working, Unknown), Unknown);
         assert_eq!(StepReadback::worst_of(Unknown, Unsupported), Unsupported);
         assert_eq!(StepReadback::worst_of(Unsupported, Working), Unsupported);
+    }
+
+    #[test]
+    fn test_ptz_open_records_working_step_readback() {
+        let mut ffi = MockPtzHalTrait::new();
+        ffi.expect_ptz_open().returning(|| Ok(()));
+        ffi.expect_ptz_close().returning(|| Ok(()));
+        ffi.expect_ptz_check_self()
+            .returning(|_| Ok(StepReadback::Working));
+
+        let handle = ptz_open(std::sync::Arc::new(ffi)).expect("open should succeed");
+        assert_eq!(handle.step_readback(), StepReadback::Working);
+        assert!(handle.self_check_error().is_none());
+    }
+
+    #[test]
+    fn test_ptz_open_records_unsupported_step_readback() {
+        let mut ffi = MockPtzHalTrait::new();
+        ffi.expect_ptz_open().returning(|| Ok(()));
+        ffi.expect_ptz_close().returning(|| Ok(()));
+        ffi.expect_ptz_check_self()
+            .returning(|_| Ok(StepReadback::Unsupported));
+
+        let handle = ptz_open(std::sync::Arc::new(ffi)).expect("open should succeed");
+        assert_eq!(handle.step_readback(), StepReadback::Unsupported);
+    }
+
+    #[test]
+    fn test_ptz_open_self_check_failure_leaves_readback_unknown() {
+        let mut ffi = MockPtzHalTrait::new();
+        ffi.expect_ptz_open().returning(|| Ok(()));
+        ffi.expect_ptz_close().returning(|| Ok(()));
+        ffi.expect_ptz_check_self()
+            .returning(|_| Err(PlatformError::HardwareFailure("sweep timed out".into())));
+
+        let handle = ptz_open(std::sync::Arc::new(ffi)).expect("open still succeeds");
+        // A failed sweep says nothing about whether the status ioctl works.
+        assert_eq!(handle.step_readback(), StepReadback::Unknown);
+        assert!(handle.self_check_error().is_some());
+        assert!(
+            handle.is_opened(),
+            "a failed sweep must not close the device"
+        );
     }
 
     #[test]
