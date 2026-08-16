@@ -122,9 +122,24 @@ pub struct MotorMessage {
 }
 
 // `TurnOutcome` and `StepReadback` live in `hal::common::ptz` alongside the trait that
-// returns them, so the signatures (and their mocks) are available on host builds where
-// this driver is not compiled.
+// returns them, so the signatures — and the mock generated from the trait — are available
+// on host builds, where the `PtzHalTrait for NativePtzDriver` impl below is cfg'd out.
 pub use crate::hal::common::ptz::{StepReadback, TurnOutcome};
+
+/// Decide whether a post-calibration `MOTOR_GET_STATUS` reply is a real measurement.
+///
+/// The buffer goes into the ioctl zeroed, so an all-zero reply is indistinguishable from
+/// a driver that wrote nothing — which is exactly what V500 boards do. `steps_one_circle`
+/// is the discriminator: zero is physically impossible for a motor that reported anything
+/// at all, whereas `pos == 0` is the *correct* reading for a freshly homed motor. Hence
+/// the conjunction; testing `pos` alone would call working hardware broken.
+fn classify_readback(msg: &MotorMessage) -> StepReadback {
+    if msg.pos == 0 && msg.steps_one_circle == 0 && msg.total_steps == 0 {
+        StepReadback::Unsupported
+    } else {
+        StepReadback::Working
+    }
+}
 
 // --- PTZ types matching SDK (for PtzHalTrait) - no C header dependency ---
 
@@ -474,8 +489,6 @@ impl MotorHandle {
 
         // Does the kernel's own position accounting actually move? This distinguishes a
         // working MOTOR_GET_STATUS from one that returns success while writing nothing.
-        // The buffer goes in zeroed; steps_one_circle == 0 coming back is physically
-        // impossible for a driver that wrote anything at all.
         let readback = match self.get_status() {
             Ok(msg) => {
                 tracing::info!(
@@ -486,11 +499,7 @@ impl MotorHandle {
                     msg.steps_one_circle,
                     msg.total_steps
                 );
-                if msg.pos == 0 && msg.steps_one_circle == 0 && msg.total_steps == 0 {
-                    StepReadback::Unsupported
-                } else {
-                    StepReadback::Working
-                }
+                classify_readback(&msg)
             }
             Err(e) => {
                 tracing::warn!("{}: post-calibration status read failed: {}", self.name, e);
@@ -743,6 +752,41 @@ mod tests {
     #[test]
     fn test_notify_data_size() {
         assert_eq!(std::mem::size_of::<NotifyData>(), 12);
+    }
+
+    /// A V500 board: the ioctl returns success without touching the zeroed buffer.
+    #[test]
+    fn test_classify_readback_all_zero_is_unsupported() {
+        assert_eq!(
+            classify_readback(&MotorMessage::default()),
+            StepReadback::Unsupported
+        );
+    }
+
+    /// Regression guard for weakening the predicate to `pos == 0` alone.
+    ///
+    /// A motor parked at its origin on *working* hardware reports `pos == 0` with real
+    /// geometry beside it. Classifying that as `Unsupported` is the bug this whole change
+    /// exists to remove, and the planned hardware check on .198 cannot catch it — that
+    /// camera only ever exercises the `Unsupported` branch.
+    #[test]
+    fn test_classify_readback_homed_motor_with_geometry_is_working() {
+        let msg = MotorMessage {
+            pos: 0,
+            steps_one_circle: CYCLE_STEP,
+            total_steps: CYCLE_STEP * PAN_TRAVEL_DEGREES / 360,
+            ..Default::default()
+        };
+        assert_eq!(classify_readback(&msg), StepReadback::Working);
+    }
+
+    #[test]
+    fn test_classify_readback_nonzero_pos_is_working() {
+        let msg = MotorMessage {
+            pos: 137,
+            ..Default::default()
+        };
+        assert_eq!(classify_readback(&msg), StepReadback::Working);
     }
 
     #[test]

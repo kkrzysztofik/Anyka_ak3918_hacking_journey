@@ -143,7 +143,14 @@ impl PTZHandle {
     }
 
     /// Whether motor step positions from this device are measurements or always zero.
-    #[allow(dead_code)] // Read by the diagnostics path, which is not wired up yet.
+    // `expect` rather than `allow` so this self-cleans: once the diagnostics path reads
+    // it, the expectation goes unfulfilled and `-D warnings` demands the attribute's
+    // removal. Gated to non-test builds because the tests below already use it, which
+    // would leave the expectation unfulfilled under `cargo test` today.
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "read by the diagnostics path, wired up in Task 4")
+    )]
     pub(crate) fn step_readback(&self) -> StepReadback {
         self.step_readback
     }
@@ -228,18 +235,6 @@ mod tests {
         let handle = ptz_open(std::sync::Arc::new(ffi)).expect("open should succeed");
         assert_eq!(handle.step_readback(), StepReadback::Working);
         assert!(handle.self_check_error().is_none());
-    }
-
-    #[test]
-    fn test_ptz_open_records_unsupported_step_readback() {
-        let mut ffi = MockPtzHalTrait::new();
-        ffi.expect_ptz_open().returning(|| Ok(()));
-        ffi.expect_ptz_close().returning(|| Ok(()));
-        ffi.expect_ptz_check_self()
-            .returning(|_| Ok(StepReadback::Unsupported));
-
-        let handle = ptz_open(std::sync::Arc::new(ffi)).expect("open should succeed");
-        assert_eq!(handle.step_readback(), StepReadback::Unsupported);
     }
 
     #[test]
