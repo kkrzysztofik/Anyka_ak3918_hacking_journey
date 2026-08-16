@@ -78,13 +78,38 @@ function isVision(value: unknown): value is NonNullable<Diagnostics['vision']> {
   );
 }
 
+function isPositionTuple(value: unknown): value is [number, number, number] {
+  return (
+    Array.isArray(value) &&
+    value.length === 3 &&
+    typeof value[0] === 'number' &&
+    typeof value[1] === 'number' &&
+    typeof value[2] === 'number'
+  );
+}
+
+function isLastStepPos(
+  value: unknown,
+): value is NonNullable<NonNullable<Diagnostics['ptz']>['last_step_pos']> {
+  return (
+    isRecord(value) &&
+    isNullOrNumber(value.pan) &&
+    isNullOrNumber(value.tilt) &&
+    typeof value.age_ms === 'number'
+  );
+}
+
 function isPtz(value: unknown): value is NonNullable<Diagnostics['ptz']> {
   return (
     isRecord(value) &&
     typeof value.enabled === 'boolean' &&
     typeof value.opened === 'boolean' &&
     typeof value.moving === 'boolean' &&
-    typeof value.commands_completed === 'number'
+    typeof value.commands_completed === 'number' &&
+    (value.init_error === null || typeof value.init_error === 'string') &&
+    (value.self_check === null || typeof value.self_check === 'string') &&
+    (value.position === null || isPositionTuple(value.position)) &&
+    (value.last_step_pos === null || isLastStepPos(value.last_step_pos))
   );
 }
 

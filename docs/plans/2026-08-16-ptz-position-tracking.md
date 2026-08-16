@@ -17,9 +17,9 @@
 **Toolchain.** All cargo commands use the vendored toolchain, never the system one:
 
 ```bash
-export CARGO=/home/kmk/dev/anyka-dev/toolchain/arm-anykav200-crosstool-ng/bin/cargo
-export PATH=/home/kmk/dev/anyka-dev/toolchain/arm-anykav200-crosstool-ng/bin:$PATH
-cd /home/kmk/dev/anyka-dev/cross-compile/onvif-rust
+export CARGO=toolchain/arm-anykav200-crosstool-ng/bin/cargo
+export PATH=toolchain/arm-anykav200-crosstool-ng/bin:$PATH
+cd cross-compile/onvif-rust
 ```
 
 The `PATH` prefix is not optional for clippy — the vendored clippy fails with `E0514` without it.
@@ -883,7 +883,7 @@ Everything above runs on placeholder rates. This is where the numbers become rea
 **Step 1: Cross-compile and deploy**
 
 ```bash
-cd /home/kmk/dev/anyka-dev/cross-compile/onvif-rust   # NOT the workspace root, or cargo
+cd cross-compile/onvif-rust   # NOT the workspace root, or cargo
 $CARGO build --release                                # silently links the host toolchain
 ```
 

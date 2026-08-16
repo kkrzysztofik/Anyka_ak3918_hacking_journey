@@ -93,13 +93,13 @@ pub async fn goto_preset(
         })?;
         super::movement::sync_position_from_platform(state, ptz).await;
         // Leave moving=true; Stop / completion path clears it. GetStatus reads live.
+        Ok(())
     } else {
-        // No platform: update the cached position only (unit-test / stub path).
-        state.set_position(&position);
         state.stop();
+        Err(crate::onvif::error::OnvifError::ActionNotSupported(
+            "PTZ is not available on this device".to_string(),
+        ))
     }
-
-    Ok(())
 }
 
 /// Handle RemovePreset request.
@@ -160,10 +160,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_goto_preset() {
+    async fn test_goto_preset_without_hardware_faults() {
         let state = create_test_state();
 
-        // Move to a position and create preset
         state.set_position(&PTZVector {
             pan_tilt: Some(Vector2D {
                 x: 0.6,
@@ -185,33 +184,16 @@ mod tests {
         )
         .unwrap();
 
-        // Move somewhere else
-        state.set_position(&PTZVector {
-            pan_tilt: Some(Vector2D {
-                x: 0.0,
-                y: 0.0,
-                space: None,
-            }),
-            zoom: Some(Vector1D {
-                x: 0.0,
-                space: None,
-            }),
-        });
-
-        // Go to preset
-        goto_preset(&state, &None, "Profile1", set_response.preset_token)
-            .await
-            .unwrap();
-
-        // Verify position
-        let pos = state.get_position();
-        let pt = pos.pan_tilt.unwrap();
-        assert_eq!(pt.x, 0.6);
-        assert_eq!(pt.y, 0.7);
+        let result = goto_preset(&state, &None, "Profile1", set_response.preset_token).await;
+        assert!(matches!(
+            result,
+            Err(crate::onvif::error::OnvifError::ActionNotSupported(_))
+        ));
+        assert!(!state.is_moving());
     }
 
     #[tokio::test]
-    async fn test_goto_preset_drives_platform_absolute_move() {
+    async fn test_goto_preset_platform_drives_absolute_move() {
         use crate::platform::common::traits::{MockPTZControl, PtzPosition};
         use mockall::predicate::eq;
 

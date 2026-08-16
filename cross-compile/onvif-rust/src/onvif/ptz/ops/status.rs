@@ -75,29 +75,29 @@ pub async fn goto_home_position(
     tracing::debug!("GotoHomePosition request for profile {}", profile_token);
 
     state.set_moving(true, true);
-    state.goto_home();
 
     if let Some(ptz) = ptz_control {
+        let home = vector_to_position(&state.get_home_position());
         // Re-establish the physical origin first: this is the drift reset, and it makes
         // the dead-reckoned leg below the most accurate move the system can make.
+        // Do not commit the cached home until both hardware steps succeed.
         ptz.home().await.map_err(|e| {
             state.stop();
             crate::onvif::error::OnvifError::HardwareFailure(format!("PTZ re-home failed: {}", e))
         })?;
-        let pos = vector_to_position(&state.get_position());
-        ptz.move_to_position(pos).await.map_err(|e| {
+        ptz.move_to_position(home).await.map_err(|e| {
             state.stop();
             crate::onvif::error::OnvifError::HardwareFailure(format!("PTZ goto home failed: {}", e))
         })?;
+        state.goto_home();
         crate::onvif::ptz::ops::movement::sync_position_from_platform(state, ptz).await;
+        Ok(())
     } else {
         state.stop();
-        return Err(crate::onvif::error::OnvifError::ActionNotSupported(
+        Err(crate::onvif::error::OnvifError::ActionNotSupported(
             "PTZ is not available on this device".to_string(),
-        ));
+        ))
     }
-
-    Ok(())
 }
 
 /// Handle the ONVIF PTZ SetHomePosition request.
@@ -138,7 +138,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_goto_home_position_rehomes_before_moving() {
+    async fn test_goto_home_position_hardware_rehomes_before_moving() {
         let state = create_test_state();
         let mut mock = MockPTZControl::new();
         let mut seq = mockall::Sequence::new();
@@ -155,6 +155,46 @@ mod tests {
 
         let ptz: Option<Arc<dyn crate::platform::PTZControl>> = Some(Arc::new(mock));
         goto_home_position(&state, &ptz, "Profile1").await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_goto_home_position_home_failure_preserves_cached_position() {
+        let state = create_test_state();
+        state.set_position(&PTZVector {
+            pan_tilt: Some(Vector2D {
+                x: 0.5,
+                y: -0.25,
+                space: None,
+            }),
+            zoom: Some(Vector1D {
+                x: 0.0,
+                space: None,
+            }),
+        });
+        let before = state.get_position();
+
+        let mut mock = MockPTZControl::new();
+        mock.expect_home().returning(|| {
+            Err(crate::platform::PlatformError::HardwareFailure(
+                "home failed".to_string(),
+            ))
+        });
+        mock.expect_move_to_position().times(0);
+
+        let ptz: Option<Arc<dyn crate::platform::PTZControl>> = Some(Arc::new(mock));
+        let result = goto_home_position(&state, &ptz, "Profile1").await;
+        assert!(result.is_err());
+        assert!(!state.is_moving());
+
+        let after = state.get_position();
+        assert_eq!(
+            after.pan_tilt.as_ref().map(|p| p.x),
+            before.pan_tilt.as_ref().map(|p| p.x)
+        );
+        assert_eq!(
+            after.pan_tilt.as_ref().map(|p| p.y),
+            before.pan_tilt.as_ref().map(|p| p.y)
+        );
     }
 
     #[tokio::test]

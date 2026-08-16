@@ -1,10 +1,10 @@
 //! PTZ preset store for persistent preset management.
 //!
-//! This module provides the persistent storage layer for PTZ presets.
-//! It handles preset CRUD operations and maintains the preset numbering.
+//! Persistent storage for PTZ presets (`ptz_presets.toml`).
 //!
-//! The preset store is separate from runtime state (position/movement) to allow
-//! for potential persistence to non-volatile storage in the future.
+//! Handles preset CRUD and token numbering. Kept separate from runtime
+//! position/movement state so presets can be loaded/saved independently of
+//! the live PTZ actor.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -69,12 +69,16 @@ impl PersistedPosition {
     }
 
     fn into_vector(self) -> PTZVector {
-        PTZVector {
-            pan_tilt: Some(Vector2D {
-                x: self.pan_tilt_x.unwrap_or(0.0),
-                y: self.pan_tilt_y.unwrap_or(0.0),
+        let pan_tilt = match (self.pan_tilt_x, self.pan_tilt_y) {
+            (None, None) => None,
+            (x, y) => Some(Vector2D {
+                x: x.unwrap_or(0.0),
+                y: y.unwrap_or(0.0),
                 space: None,
             }),
+        };
+        PTZVector {
+            pan_tilt,
             zoom: self.zoom.map(|x| Vector1D { x, space: None }),
         }
     }
@@ -224,10 +228,17 @@ impl PresetStore {
             }
         };
 
+        let mut max_loaded_num = 0u32;
         {
             let mut presets = self.presets.write();
             presets.clear();
             for (token, entry) in file.presets {
+                if let Some(n) = token
+                    .strip_prefix("Preset")
+                    .and_then(|s| s.parse::<u32>().ok())
+                {
+                    max_loaded_num = max_loaded_num.max(n);
+                }
                 presets.insert(
                     token,
                     PresetData {
@@ -239,7 +250,9 @@ impl PresetStore {
         }
         {
             let mut next = self.next_preset_num.write();
-            *next = file.next_preset_num;
+            // Advance past any PresetN already on disk so a subsequent
+            // set_preset(existing_token=None) cannot collide with a restored token.
+            *next = file.next_preset_num.max(max_loaded_num.saturating_add(1));
         }
 
         tracing::info!(
@@ -491,6 +504,36 @@ mod tests {
         // Two presets occupied "Preset1" and "Preset2" before reload; the third
         // must be "Preset3", not "Preset1" — otherwise we'd overwrite.
         assert_eq!(token, "Preset3");
+    }
+
+    #[test]
+    fn test_load_from_file_advances_counter_past_highest_preset_token() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("ptz_presets.toml");
+        // Stale/low next_preset_num with a high PresetN token must not collide.
+        std::fs::write(
+            &path,
+            r#"
+next_preset_num = 1
+
+[presets.Preset7]
+name = "High"
+
+[presets.Preset7.position]
+pan_tilt_x = 0.1
+pan_tilt_y = 0.2
+zoom = 0.0
+"#,
+        )
+        .unwrap();
+
+        let store = PresetStore::with_persistence(&path);
+        store.load_from_file().unwrap();
+        let token = store
+            .set_preset("Next".into(), create_test_position(), None)
+            .unwrap();
+        assert_eq!(token, "Preset8");
+        assert!(store.get("Preset7").is_ok());
     }
 
     // ========================================================================

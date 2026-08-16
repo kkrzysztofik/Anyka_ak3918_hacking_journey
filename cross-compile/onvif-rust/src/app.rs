@@ -663,7 +663,6 @@ pub struct Application {
     profile_persistence_task: Option<JoinHandle<()>>,
 
     /// Handle to the PTZ preset persistence task.
-    #[allow(dead_code)]
     preset_persistence_task: Option<JoinHandle<()>>,
 
     /// Handle to the imaging persistence task.
@@ -1286,13 +1285,15 @@ impl Application {
                 .unwrap_or(std::path::Path::new("/etc/onvif"))
                 .join("ptz_position.toml");
             match crate::platform::AnykaPlatform::with_isp_config(
-                isp_path,
-                ptz_config,
-                main_encoder,
-                sub_encoder,
-                imaging_cfg,
-                initial_rotated,
-                Some(position_path),
+                crate::platform::AnykaPlatformIspConfig {
+                    isp_config_path: isp_path,
+                    ptz_config,
+                    main_encoder,
+                    sub_encoder,
+                    imaging_cfg,
+                    initial_rotated,
+                    position_path: Some(position_path),
+                },
             ) {
                 Ok(p) => {
                     // Construction no longer touches the daemon, and bring-up is no
@@ -1656,6 +1657,10 @@ impl Application {
         }
 
         if let Some(task) = self.profile_persistence_task.take() {
+            let _ = tokio::time::timeout(Duration::from_secs(2), task).await;
+        }
+
+        if let Some(task) = self.preset_persistence_task.take() {
             let _ = tokio::time::timeout(Duration::from_secs(2), task).await;
         }
 

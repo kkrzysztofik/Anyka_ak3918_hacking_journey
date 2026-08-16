@@ -128,7 +128,7 @@ rendered side by side, *is* the diagnosis.
 
 ## Data flow
 
-```
+```text
 [ptz] enabled ─┬─ false → PtzDiagnostics { enabled: false, opened: false, .. }
                └─ true  → init_ptz_control
                             ├─ open fails → { opened: false, init_error: "…errno 19" }

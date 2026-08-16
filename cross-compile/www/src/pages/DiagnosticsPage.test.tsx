@@ -582,6 +582,21 @@ describe('DiagnosticsPage', () => {
       expect(screen.getByTestId('diagnostics-ptz-no-readback')).toBeInTheDocument();
     });
 
+    it('should hide the no-readback warning at Home with zero tracked axes and steps', () => {
+      vi.mocked(useDiagnostics).mockReturnValue(
+        makeResult({
+          ptz: {
+            ...PTZ_OK,
+            position: [0, 0, 1],
+            last_step_pos: { pan: 0, tilt: 0, age_ms: 14_000 },
+            commands_completed: 47,
+          },
+        }),
+      );
+      renderWithProviders(<DiagnosticsPage />);
+      expect(screen.queryByTestId('diagnostics-ptz-no-readback')).not.toBeInTheDocument();
+    });
+
     it('should collapse the card when PTZ is disabled in configuration', () => {
       vi.mocked(useDiagnostics).mockReturnValue(
         makeResult({

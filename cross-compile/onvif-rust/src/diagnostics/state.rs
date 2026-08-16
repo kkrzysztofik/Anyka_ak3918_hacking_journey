@@ -382,13 +382,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_snapshot_ptz_none_without_platform() {
+    async fn test_snapshot_without_platform_ptz_is_none() {
         let state = DiagnosticsState::new(Instant::now(), None, Vec::new());
         assert!(state.snapshot().await.ptz.is_none());
     }
 
     #[tokio::test]
-    async fn test_snapshot_carries_ptz_init_error() {
+    async fn test_snapshot_ptz_init_error_is_carried() {
         use crate::platform::MockPlatform;
 
         let mut platform = MockPlatform::new();

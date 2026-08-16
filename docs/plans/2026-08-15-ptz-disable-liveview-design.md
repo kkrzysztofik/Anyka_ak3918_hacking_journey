@@ -90,7 +90,7 @@ live path reaches GetProfiles.
 
 ## Data flow
 
-```
+```text
 config [ptz] enabled = false
   → GetCapabilities:  ptz absent
   → GetProfiles:      profiles have no ptzConfiguration

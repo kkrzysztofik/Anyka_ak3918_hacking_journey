@@ -195,11 +195,17 @@ function PtzCard({ ptz }: Readonly<{ ptz: NonNullable<Diagnostics['ptz']> }>) {
       : '\u2014';
 
   // A step position pinned at 0 after completed commands is the signature of a motor
-  // driver whose MOTOR_GET_STATUS returns success and writes nothing.
+  // driver whose MOTOR_GET_STATUS returns success and writes nothing — but only when
+  // dead-reckoning has already left Home (all-zero tracked axes are expected after re-home).
+  const trackedAwayFromHome =
+    ptz.position !== null &&
+    ptz.position !== undefined &&
+    (ptz.position[0] !== 0 || ptz.position[1] !== 0);
   const showNoReadback =
     ptz.enabled &&
     ptz.opened &&
     ptz.commands_completed > 0 &&
+    trackedAwayFromHome &&
     ptz.last_step_pos !== null &&
     ptz.last_step_pos !== undefined &&
     ptz.last_step_pos.pan === 0 &&

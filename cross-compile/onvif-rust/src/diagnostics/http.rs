@@ -42,12 +42,22 @@ fn default_lines() -> usize {
 
 /// Serve a snapshot of system metrics as JSON.
 ///
-/// Auth is enforced by the surrounding [`diagnostics_auth_middleware`];
-/// this handler assumes the request has already been authenticated.
+/// Auth is enforced by the surrounding [`diagnostics_auth_middleware`].
+/// When authentication is disabled the route still answers, but PTZ
+/// `init_error` / `self_check` are redacted so unauthenticated clients
+/// do not learn motor bring-up failure details.
 pub async fn handle_diagnostics(
+    State(server): State<OnvifServerState>,
     Extension(state): Extension<Arc<DiagnosticsState>>,
 ) -> Json<Snapshot> {
-    Json(state.snapshot().await)
+    let mut snapshot = state.snapshot().await;
+    if !server.auth_enabled
+        && let Some(ptz) = snapshot.ptz.as_mut()
+    {
+        ptz.init_error = None;
+        ptz.self_check = None;
+    }
+    Json(snapshot)
 }
 
 /// Serve a filtered tail of one of the on-device log files as JSON.

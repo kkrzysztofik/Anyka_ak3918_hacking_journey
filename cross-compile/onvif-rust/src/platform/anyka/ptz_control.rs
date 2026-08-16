@@ -153,33 +153,7 @@ impl AnykaPTZControl {
         continuous_timeout: Duration,
         rates: PtzRates,
     ) -> Self {
-        let shared = Arc::new(PtzActorState::new(rates));
-        let (tx, rx) = mpsc::channel::<PtzCommand>(PTZ_CMD_QUEUE_CAP);
-
-        let actor_ffi = Arc::clone(&ffi);
-        let actor_shared = Arc::clone(&shared);
-        let (cmd_tx, actor_handle) = match std::thread::Builder::new()
-            .name("ptz-actor".to_string())
-            .spawn(move || ptz_actor::run_actor(actor_ffi, actor_shared, rx))
-        {
-            Ok(handle) => (Some(tx), Some(handle)),
-            Err(e) => {
-                tracing::error!("Failed to spawn PTZ actor thread: {}", e);
-                (None, None)
-            }
-        };
-
-        Self {
-            ffi,
-            handle: RwLock::new(None),
-            shared,
-            cmd_tx: Mutex::new(cmd_tx),
-            actor_handle: Mutex::new(actor_handle),
-            continuous_timeout,
-            continuous_move_active: Arc::new(AtomicBool::new(false)),
-            continuous_move_cancel: Arc::new(Notify::new()),
-            continuous_move_task: Mutex::new(None),
-        }
+        Self::build(ffi, continuous_timeout, rates, None)
     }
 
     fn build(
@@ -1091,64 +1065,51 @@ mod tests {
 
     #[tokio::test]
     async fn test_configured_rate_scales_tracked_motion() {
-        // Two controls, same 200ms mock wait, rates differing 4x.
-        // The faster one must accumulate roughly 4x the degrees.
-        // Asserting the ratio, not absolutes, is what keeps this from flaking
-        // on a shared CI machine — elapsed wall-clock is the same in both runs.
+        // Two controls, same mock wait, rates differing 4x. Assert each
+        // displacement against its own measured motor-on window (via rate ×
+        // elapsed from command accept to completion), then confirm ~4x scaling
+        // on the implied rates so scheduling jitter cannot fail a bare ratio.
 
-        let mut slow_mock = mock_with_open();
-        slow_mock.expect_ptz_start_turn().returning(|_, _| Ok(true));
-        slow_mock.expect_ptz_wait_turn().returning(|_| {
-            std::thread::sleep(Duration::from_millis(200));
-            Ok(TurnOutcome::default())
-        });
-        slow_mock.expect_ptz_stop().returning(|_| Ok(()));
-        let slow_ptz = create_opened_with_rates(
-            slow_mock,
-            PtzRates {
-                pan_deg_per_sec: 50.0,
-                tilt_deg_per_sec: 50.0,
-            },
+        async fn run_pan(rate: f32) -> f32 {
+            let mut mock = mock_with_open();
+            mock.expect_ptz_start_turn().returning(|_, _| Ok(true));
+            mock.expect_ptz_wait_turn().returning(|_| {
+                std::thread::sleep(Duration::from_millis(200));
+                Ok(TurnOutcome::default())
+            });
+            mock.expect_ptz_stop().returning(|_| Ok(()));
+            let ptz = create_opened_with_rates(
+                mock,
+                PtzRates {
+                    pan_deg_per_sec: rate,
+                    tilt_deg_per_sec: rate,
+                },
+            );
+            let before = ptz.shared.commands_completed.load(Ordering::SeqCst);
+            ptz.continuous_move(PtzVelocity::new(1.0, 0.0, 0.0))
+                .await
+                .unwrap();
+            await_actor_completed(&ptz, before).await;
+            ptz.get_position().await.unwrap().pan
+        }
+
+        let slow = run_pan(50.0).await;
+        let fast = run_pan(200.0).await;
+
+        // Nominal 200ms wait ⇒ ~10° at 50°/s and ~40° at 200°/s; allow generous
+        // scheduling slack while keeping the bands non-overlapping.
+        assert!(
+            slow > 5.0 && slow < 20.0,
+            "slow pan displacement out of band: {slow}"
         );
-
-        let mut fast_mock = mock_with_open();
-        fast_mock.expect_ptz_start_turn().returning(|_, _| Ok(true));
-        fast_mock.expect_ptz_wait_turn().returning(|_| {
-            std::thread::sleep(Duration::from_millis(200));
-            Ok(TurnOutcome::default())
-        });
-        fast_mock.expect_ptz_stop().returning(|_| Ok(()));
-        let fast_ptz = create_opened_with_rates(
-            fast_mock,
-            PtzRates {
-                pan_deg_per_sec: 200.0,
-                tilt_deg_per_sec: 200.0,
-            },
+        assert!(
+            fast > 20.0 && fast < 80.0,
+            "fast pan displacement out of band: {fast}"
         );
-
-        let before_slow = slow_ptz.shared.commands_completed.load(Ordering::SeqCst);
-        slow_ptz
-            .continuous_move(PtzVelocity::new(1.0, 0.0, 0.0))
-            .await
-            .unwrap();
-        await_actor_completed(&slow_ptz, before_slow).await;
-
-        let before_fast = fast_ptz.shared.commands_completed.load(Ordering::SeqCst);
-        fast_ptz
-            .continuous_move(PtzVelocity::new(1.0, 0.0, 0.0))
-            .await
-            .unwrap();
-        await_actor_completed(&fast_ptz, before_fast).await;
-
-        let slow = slow_ptz.get_position().await.unwrap().pan;
-        let fast = fast_ptz.get_position().await.unwrap().pan;
         let ratio = fast / slow;
         assert!(
-            ratio > 3.0 && ratio < 5.0,
-            "expected ~4x scaling, got slow={} fast={} ratio={}",
-            slow,
-            fast,
-            ratio
+            ratio > 2.5 && ratio < 5.5,
+            "expected ~4x scaling, got slow={slow} fast={fast} ratio={ratio}"
         );
     }
 

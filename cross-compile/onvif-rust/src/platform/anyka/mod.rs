@@ -112,7 +112,7 @@ pub struct AnykaPlatform {
     ptz_position_path: Option<std::path::PathBuf>,
 }
 
-/// Bring PTZ up, or skip it entirely when `enabled` is false.
+/// Bring PTZ up, or skip it entirely when `ptz_config.enabled` is false.
 ///
 /// Bring-up is not free: it spawns the `ptz-actor` thread, opens `/dev/ak-motor{0,1}` and runs
 /// `ptz_check_self`, a physical calibration sweep. On the AK3918 that sweep costs ~2.1 s of every
@@ -125,11 +125,10 @@ pub struct AnykaPlatform {
 /// `position_path` is the on-disk location the actor will write the tracked position to
 /// after each completed command. `None` disables persistence.
 fn init_ptz_control(
-    enabled: bool,
     ptz_config: &PtzConfig,
     position_path: Option<std::path::PathBuf>,
 ) -> OptionalInitResult<Arc<AnykaPTZControl>> {
-    if !enabled {
+    if !ptz_config.enabled {
         tracing::info!("PTZ disabled by config (ptz.enabled = false); skipping motor bring-up");
         return OptionalInitResult::Disabled;
     }
@@ -156,21 +155,35 @@ fn init_ptz_control(
     }
 }
 
+/// Named construction inputs for [`AnykaPlatform::with_isp_config`].
+///
+/// Field names keep the two `Option<PathBuf>` paths and the boolean seed from being
+/// swapped at call sites.
+pub struct AnykaPlatformIspConfig {
+    pub isp_config_path: Option<PathBuf>,
+    pub ptz_config: PtzConfig,
+    pub main_encoder: StreamOpenParams,
+    pub sub_encoder: StreamOpenParams,
+    pub imaging_cfg: crate::config::types::ImagingConfig,
+    pub initial_rotated: bool,
+    pub position_path: Option<PathBuf>,
+}
+
 impl AnykaPlatform {
     /// Create a new Anyka platform instance.
     ///
     /// Uses auto-detection for the ISP config path and brings PTZ up. See
     /// [`with_isp_config`](Self::with_isp_config) to specify an explicit path or to disable PTZ.
     pub fn new() -> PlatformResult<Self> {
-        Self::with_isp_config(
-            None,
-            crate::config::types::PtzConfig::default(),
-            StreamOpenParams::default(),
-            StreamOpenParams::default(),
-            crate::config::types::ImagingConfig::default(),
-            false,
-            None,
-        )
+        Self::with_isp_config(AnykaPlatformIspConfig {
+            isp_config_path: None,
+            ptz_config: crate::config::types::PtzConfig::default(),
+            main_encoder: StreamOpenParams::default(),
+            sub_encoder: StreamOpenParams::default(),
+            imaging_cfg: crate::config::types::ImagingConfig::default(),
+            initial_rotated: false,
+            position_path: None,
+        })
     }
 
     /// Static hardware descriptor reported by `get_device_info`.
@@ -243,15 +256,16 @@ impl AnykaPlatform {
     ///
     /// `position_path` is the on-disk file the actor writes to after every completed
     /// command. `None` disables persistence.
-    pub fn with_isp_config(
-        isp_config_path: Option<PathBuf>,
-        ptz_config: PtzConfig,
-        main_encoder: StreamOpenParams,
-        sub_encoder: StreamOpenParams,
-        imaging_cfg: crate::config::types::ImagingConfig,
-        initial_rotated: bool,
-        position_path: Option<std::path::PathBuf>,
-    ) -> PlatformResult<Self> {
+    pub fn with_isp_config(cfg: AnykaPlatformIspConfig) -> PlatformResult<Self> {
+        let AnykaPlatformIspConfig {
+            isp_config_path,
+            ptz_config,
+            main_encoder,
+            sub_encoder,
+            imaging_cfg,
+            initial_rotated,
+            position_path,
+        } = cfg;
         let device_info = Self::device_descriptor();
 
         // Start the AUTO day/night loop with its own shutdown channel; the
@@ -311,7 +325,7 @@ impl AnykaPlatform {
             )
         };
 
-        let ptz_init = init_ptz_control(ptz_config.enabled, &ptz_config, position_path.clone());
+        let ptz_init = init_ptz_control(&ptz_config, position_path.clone());
         let ptz_control = match &ptz_init {
             OptionalInitResult::Success(ptz) => Some(Arc::clone(ptz) as Arc<dyn PTZControl>),
             _ => None,

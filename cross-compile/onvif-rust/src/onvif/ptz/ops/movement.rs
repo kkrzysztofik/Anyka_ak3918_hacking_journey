@@ -239,9 +239,13 @@ pub async fn stop(
         // (the Stop batch is only dequeued after do_continuous returns), so this cannot
         // read a half-updated value.
         sync_position_from_platform(state, ptz).await;
+        Ok(())
+    } else {
+        // Cached motion flags were cleared above; without hardware Stop is not supported.
+        Err(crate::onvif::error::OnvifError::ActionNotSupported(
+            "PTZ is not available on this device".to_string(),
+        ))
     }
-
-    Ok(())
 }
 
 #[cfg(test)]
@@ -256,7 +260,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_stop_refreshes_cached_position_from_platform() {
+    async fn test_stop_platform_position_refreshes_cached_position() {
         let state = create_test_state();
         let mut mock = MockPTZControl::new();
         mock.expect_stop().returning(|| Ok(()));
@@ -271,6 +275,18 @@ mod tests {
             pan.abs() > f32::EPSILON,
             "cached position still at origin after stop"
         );
+    }
+
+    #[tokio::test]
+    async fn test_stop_without_hardware_clears_cache_and_faults() {
+        let state = create_test_state();
+        state.set_moving(true, true);
+        let result = stop(&state, &None, "Profile1", true, true).await;
+        assert!(matches!(
+            result,
+            Err(crate::onvif::error::OnvifError::ActionNotSupported(_))
+        ));
+        assert!(!state.is_moving());
     }
 
     #[tokio::test]

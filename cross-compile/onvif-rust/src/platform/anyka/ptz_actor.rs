@@ -332,11 +332,14 @@ fn do_move(
     let started_at = Instant::now();
     for (direction, degrees, axis) in plan {
         let sdk_dir = direction_to_ffi(direction);
-        if let Err(e) = ffi.ptz_start_turn(sdk_dir, degrees.round() as i32) {
-            result = Err(e);
-            break;
+        match ffi.ptz_start_turn(sdk_dir, degrees.round() as i32) {
+            Ok(true) => started.push((sdk_dir, direction, axis)),
+            Ok(false) => {}
+            Err(e) => {
+                result = Err(e);
+                break;
+            }
         }
-        started.push((sdk_dir, direction, axis));
     }
 
     // Reply on acceptance (before waiting for the motor to finish).
@@ -518,11 +521,14 @@ fn do_continuous(
             dir_neg
         };
         let sdk_dir = direction_to_ffi(direction);
-        if let Err(e) = ffi.ptz_start_turn(sdk_dir, sweep.round() as i32) {
-            result = Err(e);
-            break;
+        match ffi.ptz_start_turn(sdk_dir, sweep.round() as i32) {
+            Ok(true) => started.push((sdk_dir, direction, is_pan)),
+            Ok(false) => {}
+            Err(e) => {
+                result = Err(e);
+                break;
+            }
         }
-        started.push((sdk_dir, direction, is_pan));
     }
 
     if result.is_ok() {

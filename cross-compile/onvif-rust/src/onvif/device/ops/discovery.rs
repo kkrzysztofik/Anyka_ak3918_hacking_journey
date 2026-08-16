@@ -232,7 +232,7 @@ mod tests {
     }
 
     #[test]
-    fn test_default_scopes_omits_ptz_when_disabled() {
+    fn test_default_scopes_ptz_disabled_omits_ptz() {
         let scopes = default_scopes(false);
         assert!(
             !scopes
@@ -242,7 +242,7 @@ mod tests {
     }
 
     #[test]
-    fn test_default_scopes_includes_ptz_when_enabled() {
+    fn test_default_scopes_ptz_enabled_includes_ptz() {
         let scopes = default_scopes(true);
         assert!(
             scopes

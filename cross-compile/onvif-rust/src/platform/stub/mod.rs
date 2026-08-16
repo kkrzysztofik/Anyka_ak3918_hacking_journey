@@ -1231,6 +1231,20 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_stub_ptz_home_resets_to_home_position() {
+        let platform = StubPlatform::new();
+        let ptz = platform.ptz_control().unwrap();
+
+        ptz.move_to_position(PtzPosition::new(45.0, -30.0, 2.0))
+            .await
+            .unwrap();
+        ptz.home().await.unwrap();
+
+        let pos = ptz.get_position().await.unwrap();
+        assert_eq!(pos, PtzPosition::HOME);
+    }
+
+    #[tokio::test]
     async fn test_stub_ptz_presets() {
         let platform = StubPlatform::new();
         let ptz = platform.ptz_control().unwrap();

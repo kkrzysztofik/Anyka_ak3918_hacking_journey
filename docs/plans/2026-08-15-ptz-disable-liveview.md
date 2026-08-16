@@ -355,7 +355,7 @@ const { data: profiles, isSuccess } = useQuery({
 });
 ```
 
-2. Replace the current `profileToken` derivation with a `hasPtz` flag plus an empty-token-when-disabled `profileToken`:
+1. Replace the current `profileToken` derivation with a `hasPtz` flag plus an empty-token-when-disabled `profileToken`:
 
 ```tsx
 const hasPtz = !!profiles?.some((p) => p.ptzConfiguration);
@@ -365,7 +365,7 @@ const profileToken = hasPtz
   : '';
 ```
 
-3. Wrap the right-column controls so the two PTZ cards (Pan & Tilt, Presets) sit inside a native `<fieldset disabled>`. Replace the wrapper `<div className="flex flex-col gap-4">` that opens the "Right Column: Controls" section with:
+1. Wrap the right-column controls so the two PTZ cards (Pan & Tilt, Presets) sit inside a native `<fieldset disabled>`. Replace the wrapper `<div className="flex flex-col gap-4">` that opens the "Right Column: Controls" section with:
 
 ```tsx
 <fieldset
@@ -377,7 +377,7 @@ const profileToken = hasPtz
 
 and change its matching closing `</div>` to `</fieldset>`.
 
-4. Add the note inside the Pan & Tilt card header, after the existing `SettingsCardDescription` (the block that already holds `liveview-ptz-title` / `liveview-ptz-description`):
+1. Add the note inside the Pan & Tilt card header, after the existing `SettingsCardDescription` (the block that already holds `liveview-ptz-title` / `liveview-ptz-description`):
 
 ```tsx
 {ptzDisabled && (

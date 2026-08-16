@@ -153,20 +153,35 @@ impl AppConfig {
         range(&mut errors, "ptz.tilt_speed", self.ptz.tilt_speed, 0.0, 1.0);
         range(&mut errors, "ptz.zoom_speed", self.ptz.zoom_speed, 0.0, 1.0);
         range(&mut errors, "ptz.max_presets", self.ptz.max_presets, 1, 64);
-        range(
-            &mut errors,
-            "ptz.pan_degrees_per_sec",
-            self.ptz.pan_degrees_per_sec,
-            0.1,
-            360.0,
-        );
-        range(
-            &mut errors,
-            "ptz.tilt_degrees_per_sec",
-            self.ptz.tilt_degrees_per_sec,
-            0.1,
-            360.0,
-        );
+        // NaN fails every PartialOrd compare, so `range` alone would accept it.
+        if !self.ptz.pan_degrees_per_sec.is_finite() {
+            errors.push(format!(
+                "ptz.pan_degrees_per_sec: {} is not a finite number",
+                self.ptz.pan_degrees_per_sec
+            ));
+        } else {
+            range(
+                &mut errors,
+                "ptz.pan_degrees_per_sec",
+                self.ptz.pan_degrees_per_sec,
+                0.1,
+                360.0,
+            );
+        }
+        if !self.ptz.tilt_degrees_per_sec.is_finite() {
+            errors.push(format!(
+                "ptz.tilt_degrees_per_sec: {} is not a finite number",
+                self.ptz.tilt_degrees_per_sec
+            ));
+        } else {
+            range(
+                &mut errors,
+                "ptz.tilt_degrees_per_sec",
+                self.ptz.tilt_degrees_per_sec,
+                0.1,
+                360.0,
+            );
+        }
 
         // Imaging
         range(
@@ -1253,6 +1268,18 @@ file_name = "static"
             .validate()
             .expect_err("a zero rate divides motion by nothing");
         assert!(errors.iter().any(|e| e.contains("pan_degrees_per_sec")));
+    }
+
+    #[test]
+    fn test_ptz_config_rejects_nan_rates() {
+        let mut config = AppConfig::default();
+        config.ptz.pan_degrees_per_sec = f64::NAN;
+        config.ptz.tilt_degrees_per_sec = f64::INFINITY;
+        let errors = config
+            .validate()
+            .expect_err("non-finite rates must not pass validation");
+        assert!(errors.iter().any(|e| e.contains("pan_degrees_per_sec")));
+        assert!(errors.iter().any(|e| e.contains("tilt_degrees_per_sec")));
     }
 
     #[test]
