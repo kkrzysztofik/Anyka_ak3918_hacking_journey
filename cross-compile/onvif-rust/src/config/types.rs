@@ -156,6 +156,8 @@ impl AppConfig {
         range(&mut errors, "ptz.home_pan", self.ptz.home_pan, -1.0, 1.0);
         range(&mut errors, "ptz.home_tilt", self.ptz.home_tilt, -1.0, 1.0);
         range(&mut errors, "ptz.home_zoom", self.ptz.home_zoom, 0.0, 1.0);
+        range(&mut errors, "ptz.pan_degrees_per_sec", self.ptz.pan_degrees_per_sec, 0.1, 360.0);
+        range(&mut errors, "ptz.tilt_degrees_per_sec", self.ptz.tilt_degrees_per_sec, 0.1, 360.0);
 
         // Imaging
         range(
@@ -615,6 +617,11 @@ pub struct PtzConfig {
     pub home_tilt: f64,
     pub home_zoom: f64,
     pub next_preset_num: u32,
+    /// Degrees per second the pan axis travels at the driver's fixed speed.
+    /// Measured on hardware — see the design doc §4 for the procedure.
+    pub pan_degrees_per_sec: f64,
+    /// Degrees per second the tilt axis travels at the driver's fixed speed.
+    pub tilt_degrees_per_sec: f64,
 }
 
 impl Default for PtzConfig {
@@ -631,6 +638,9 @@ impl Default for PtzConfig {
             home_tilt: 0.0,
             home_zoom: 0.0,
             next_preset_num: 1,
+            // ponytail: placeholders replaced by measurement in Task 14.
+            pan_degrees_per_sec: 60.0,
+            tilt_degrees_per_sec: 60.0,
         }
     }
 }
@@ -1227,5 +1237,20 @@ file_name = "static"
         let cfg = NightConfig::default();
         assert_eq!(cfg.ae_day_threshold, 28);
         assert_eq!(cfg.ae_night_threshold, 8);
+    }
+
+    #[test]
+    fn test_ptz_config_default_rates_are_positive() {
+        let c = PtzConfig::default();
+        assert!(c.pan_degrees_per_sec > 0.0);
+        assert!(c.tilt_degrees_per_sec > 0.0);
+    }
+
+    #[test]
+    fn test_ptz_config_rejects_zero_pan_rate() {
+        let mut config = AppConfig::default();
+        config.ptz.pan_degrees_per_sec = 0.0;
+        let errors = config.validate().expect_err("a zero rate divides motion by nothing");
+        assert!(errors.iter().any(|e| e.contains("pan_degrees_per_sec")));
     }
 }
