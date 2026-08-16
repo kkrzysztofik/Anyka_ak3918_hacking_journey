@@ -391,8 +391,11 @@ fn do_continuous(
         ),
     ];
 
-    let mut started = Vec::new();
+    let mut started: Vec<(ptz_turn_direction, PtzDirection, bool)> = Vec::new();
     let mut result = Ok(());
+    // Capture the tick *before* the first `ptz_start_turn` so the integrated motion
+    // measures exactly the motor-on window, not the validation that preceded it.
+    let started_at = Instant::now();
     for (axis_velocity, dir_pos, dir_neg, sweep, is_pan) in axes {
         if axis_velocity.abs() <= f32::EPSILON {
             continue;
@@ -407,7 +410,7 @@ fn do_continuous(
             result = Err(e);
             break;
         }
-        started.push((sdk_dir, is_pan));
+        started.push((sdk_dir, direction, is_pan));
     }
 
     if result.is_ok() {
@@ -423,10 +426,10 @@ fn do_continuous(
     // set by the platform layer before each submit), bounding preemption latency to one
     // ~100ms poll tick in the driver's wait loop. The `PtzWaitOutcome` is consumed (not
     // discarded) for the reconciled step position / interrupt signal.
-    for (sdk_dir, is_pan) in started {
-        match ffi.ptz_wait_turn(sdk_dir) {
+    for (sdk_dir, _direction, is_pan) in &started {
+        match ffi.ptz_wait_turn(*sdk_dir) {
             Ok(outcome) => {
-                state.record_step(is_pan, outcome.step_pos);
+                state.record_step(*is_pan, outcome.step_pos);
                 tracing::debug!(
                     "continuous axis wait finished: interrupted={}, step_pos={}",
                     outcome.interrupted,
@@ -435,6 +438,15 @@ fn do_continuous(
             }
             Err(e) => tracing::warn!("continuous axis wait failed: {}", e),
         }
+    }
+
+    // Dead-reckon the tracked position from the motor-on window. One Instant for the
+    // whole command — both axes ran during the same wall-clock interval, and timing
+    // each axis separately would credit the second axis with ~0° (its wait returns
+    // almost immediately after the first wait releases).
+    let elapsed = started_at.elapsed();
+    for (_, direction, _) in &started {
+        integrate_axis(state, *direction, elapsed);
     }
 }
 
