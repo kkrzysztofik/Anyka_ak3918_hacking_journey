@@ -235,6 +235,10 @@ pub async fn stop(
         ptz.stop().await.map_err(|e| {
             crate::onvif::error::OnvifError::HardwareFailure(format!("PTZ stop failed: {}", e))
         })?;
+        // Motion has ended and the actor has already committed the integrated position
+        // (the Stop batch is only dequeued after do_continuous returns), so this cannot
+        // read a half-updated value.
+        sync_position_from_platform(state, ptz).await;
     }
 
     Ok(())
@@ -243,6 +247,31 @@ pub async fn stop(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::platform::PtzPosition;
+    use crate::platform::common::traits::MockPTZControl;
+    use std::sync::Arc;
+
+    fn create_test_state() -> PTZStateManager {
+        PTZStateManager::new()
+    }
+
+    #[tokio::test]
+    async fn test_stop_refreshes_cached_position_from_platform() {
+        let state = create_test_state();
+        let mut mock = MockPTZControl::new();
+        mock.expect_stop().returning(|| Ok(()));
+        mock.expect_get_position()
+            .returning(|| Ok(PtzPosition::new(90.0, 45.0, 1.0)));
+
+        let ptz: Option<Arc<dyn crate::platform::PTZControl>> = Some(Arc::new(mock));
+        stop(&state, &ptz, "Profile1", true, true).await.unwrap();
+
+        let pan = state.get_position().pan_tilt.expect("pan_tilt present").x;
+        assert!(
+            pan.abs() > f32::EPSILON,
+            "cached position still at origin after stop"
+        );
+    }
 
     #[tokio::test]
     async fn test_continuous_move_without_hardware_faults_instead_of_faking_success() {
