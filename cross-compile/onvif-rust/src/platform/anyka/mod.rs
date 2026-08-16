@@ -107,6 +107,9 @@ pub struct AnykaPlatform {
             tokio::task::JoinHandle<()>,
         )>,
     >,
+    /// Path the async init path reads to restore the saved PTZ position.
+    /// `None` means persistence is disabled.
+    ptz_position_path: Option<std::path::PathBuf>,
 }
 
 /// Bring PTZ up, or skip it entirely when `enabled` is false.
@@ -218,6 +221,7 @@ impl AnykaPlatform {
             // route through the real IPC client.
             ipc: Arc::new(AnykaIpc::new_detached().expect("detached IPC needs no daemon")),
             night_loop: std::sync::Mutex::new(None),
+            ptz_position_path: None,
         }
     }
 
@@ -307,7 +311,7 @@ impl AnykaPlatform {
             )
         };
 
-        let ptz_init = init_ptz_control(ptz_config.enabled, &ptz_config, position_path);
+        let ptz_init = init_ptz_control(ptz_config.enabled, &ptz_config, position_path.clone());
         let ptz_control = match &ptz_init {
             OptionalInitResult::Success(ptz) => Some(Arc::clone(ptz) as Arc<dyn PTZControl>),
             _ => None,
@@ -328,6 +332,7 @@ impl AnykaPlatform {
             network_info,
             ipc,
             night_loop: std::sync::Mutex::new(Some((night_loop_tx, night_loop_task))),
+            ptz_position_path: position_path,
         })
     }
 
@@ -562,6 +567,19 @@ impl Platform for AnykaPlatform {
         self.init_video_encoders().await?;
         self.start_frame_production().await?;
         self.validate_pipeline_readiness()?;
+
+        // Restore the saved PTZ position *after* `check_self` has driven the
+        // motors to true center, so the dead-reckoned move starts from the
+        // most accurate origin available. Every failure is non-fatal: a state
+        // file must never fail boot.
+        if let (Some(path), OptionalInitResult::Success(ptz)) =
+            (&self.ptz_position_path, &self.ptz_init)
+        {
+            // Discard the `Result`: an unwrap here would convert a corrupt
+            // state file into a boot failure, which is exactly what the design
+            // says must not happen.
+            let _ = ptz.restore_position_from_disk(path).await;
+        }
 
         self.initialized.store(true, Ordering::SeqCst);
         Ok(())

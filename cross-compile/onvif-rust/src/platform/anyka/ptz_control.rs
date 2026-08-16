@@ -378,6 +378,37 @@ impl Drop for AnykaPTZControl {
     }
 }
 
+impl AnykaPTZControl {
+    /// Read the saved position from disk and, if non-trivial, dead-reckon the
+    /// motors from their just-calibrated origin to it.
+    ///
+    /// Called from the async init path *after* `check_self` has just driven the
+    /// motors to true center, so the resulting move starts from the most accurate
+    /// origin available. Errors are logged and swallowed — a state file must
+    /// never fail boot.
+    pub(crate) async fn restore_position_from_disk(
+        &self,
+        path: &std::path::Path,
+    ) -> PlatformResult<()> {
+        let Some(saved) = ptz_actor::load_position(path) else {
+            return Ok(());
+        };
+        // Below the move threshold, the integrator would no-op anyway — skip the
+        // round-trip and keep PTZ_CMD_TIMEOUT free for real callers.
+        if saved.pan.abs() < PTZ_MIN_MOVE_THRESHOLD && saved.tilt.abs() < PTZ_MIN_MOVE_THRESHOLD
+        {
+            // Still seed the in-memory position so platform reads report truth
+            // even if the user never moves the lens after boot.
+            *self.shared.position.write() = saved;
+            return Ok(());
+        }
+        if let Err(e) = self.move_to_position(saved).await {
+            tracing::warn!("PTZ position restore failed, staying centered: {}", e);
+        }
+        Ok(())
+    }
+}
+
 #[async_trait]
 impl PTZControl for AnykaPTZControl {
     async fn move_to_position(&self, position: PtzPosition) -> PlatformResult<()> {
@@ -1008,6 +1039,43 @@ mod tests {
         let pos = ptz.get_position().await.unwrap();
         assert!(pos.pan.abs() < f32::EPSILON);
         assert!(pos.tilt.abs() < f32::EPSILON);
+    }
+
+    #[tokio::test]
+    async fn test_startup_restores_saved_position() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("ptz_position.toml");
+        ptz_actor::save_position(&path, PtzPosition::new(90.0, -45.0, 1.0));
+
+        let mut mock = mock_with_open();
+        mock.expect_ptz_start_turn().returning(|_, _| Ok(true));
+        mock.expect_ptz_wait_turn()
+            .returning(|_| Ok(TurnOutcome::default()));
+        mock.expect_ptz_stop().returning(|_| Ok(()));
+
+        let ptz = create_opened(mock);
+        ptz.restore_position_from_disk(&path).await.unwrap();
+
+        let pos = ptz.get_position().await.unwrap();
+        // The move lands via the dead-reckoning integrator, so the initial pan
+        // delta comes from `(90 - 0) deg` traveling at the default rate. Verify
+        // the direction is correct (positive) rather than the exact value.
+        assert!(pos.pan > 0.0, "expected pan to grow positive, got {}", pos.pan);
+    }
+
+    #[tokio::test]
+    async fn test_startup_does_not_move_when_saved_position_is_home() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("ptz_position.toml");
+        ptz_actor::save_position(&path, PtzPosition::HOME);
+
+        let mut mock = mock_with_open();
+        // 0,0 falls below PTZ_MIN_MOVE_THRESHOLD — no motor turn should be issued.
+        mock.expect_ptz_start_turn().never();
+        mock.expect_ptz_stop().returning(|_| Ok(()));
+
+        let ptz = create_opened(mock);
+        ptz.restore_position_from_disk(&path).await.unwrap();
     }
 
     #[tokio::test]
