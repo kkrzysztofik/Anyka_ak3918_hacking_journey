@@ -42,6 +42,8 @@ export interface Diagnostics {
     position: [number, number, number] | null;
     moving: boolean;
     last_step_pos: { pan: number | null; tilt: number | null; age_ms: number } | null;
+    /** Whether last_step_pos is a measurement. Absent on pre-2026-08-16 bundles. */
+    step_readback?: 'working' | 'unsupported' | 'unknown';
     commands_completed: number;
   } | null;
 }
@@ -109,7 +111,11 @@ function isPtz(value: unknown): value is NonNullable<Diagnostics['ptz']> {
     (value.init_error === null || typeof value.init_error === 'string') &&
     (value.self_check === null || typeof value.self_check === 'string') &&
     (value.position === null || isPositionTuple(value.position)) &&
-    (value.last_step_pos === null || isLastStepPos(value.last_step_pos))
+    (value.last_step_pos === null || isLastStepPos(value.last_step_pos)) &&
+    (value.step_readback === undefined ||
+      value.step_readback === 'working' ||
+      value.step_readback === 'unsupported' ||
+      value.step_readback === 'unknown')
   );
 }
 
