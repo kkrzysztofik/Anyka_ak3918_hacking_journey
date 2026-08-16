@@ -556,8 +556,102 @@ describe('DiagnosticsPage', () => {
       vi.mocked(useDiagnostics).mockReturnValue(makeResult({ ptz: PTZ_OK }));
       renderWithProviders(<DiagnosticsPage />);
       expect(screen.getByTestId('diagnostics-ptz-motors')).toHaveTextContent('open');
-      expect(screen.getByTestId('diagnostics-ptz-position')).toHaveTextContent('-12.0° / 4.5°');
+      expect(screen.getByTestId('diagnostics-ptz-pan')).toHaveTextContent('-12.0°');
+      expect(screen.getByTestId('diagnostics-ptz-tilt')).toHaveTextContent('4.5°');
       expect(screen.getByTestId('diagnostics-ptz-commands')).toHaveTextContent('47');
+    });
+
+    it('should render zoom from the third position axis', () => {
+      vi.mocked(useDiagnostics).mockReturnValue(
+        makeResult({ ptz: { ...PTZ_OK, position: [-12, 4.5, 2.5] } }),
+      );
+      renderWithProviders(<DiagnosticsPage />);
+      expect(screen.getByTestId('diagnostics-ptz-zoom')).toHaveTextContent('2.5');
+    });
+
+    it('should label the estimated group as dead-reckoned', () => {
+      vi.mocked(useDiagnostics).mockReturnValue(makeResult({ ptz: PTZ_OK }));
+      renderWithProviders(<DiagnosticsPage />);
+      expect(screen.getByTestId('diagnostics-ptz-estimated-header')).toHaveTextContent(
+        /dead-reckoned/i,
+      );
+    });
+
+    it('should report unsupported readback and hide the step position row', () => {
+      vi.mocked(useDiagnostics).mockReturnValue(
+        makeResult({ ptz: { ...PTZ_OK, step_readback: 'unsupported' } }),
+      );
+      renderWithProviders(<DiagnosticsPage />);
+      expect(screen.getByTestId('diagnostics-ptz-step-readback')).toHaveTextContent('unsupported');
+      expect(screen.queryByTestId('diagnostics-ptz-step-pos')).not.toBeInTheDocument();
+      expect(screen.getByTestId('diagnostics-ptz-no-readback')).toBeInTheDocument();
+    });
+
+    // Regression: the old heuristic inferred "no readback" from a zero step position
+    // after completed commands, so a freshly homed camera — every tracked axis at 0 and
+    // no commands yet — went silent because it could not tell "at origin" from
+    // "cannot measure". The backend now says so outright, at home or not.
+    it('should report unsupported readback on a freshly homed camera', () => {
+      vi.mocked(useDiagnostics).mockReturnValue(
+        makeResult({
+          ptz: {
+            ...PTZ_OK,
+            position: [0, 0, 0],
+            commands_completed: 0,
+            step_readback: 'unsupported',
+          },
+        }),
+      );
+      renderWithProviders(<DiagnosticsPage />);
+      expect(screen.getByTestId('diagnostics-ptz-step-readback')).toHaveTextContent('unsupported');
+      expect(screen.getByTestId('diagnostics-ptz-no-readback')).toBeInTheDocument();
+    });
+
+    it('should render the measured step position when readback works', () => {
+      vi.mocked(useDiagnostics).mockReturnValue(
+        makeResult({
+          ptz: {
+            ...PTZ_OK,
+            step_readback: 'working',
+            last_step_pos: { pan: 120, tilt: -40, age_ms: 3000 },
+          },
+        }),
+      );
+      renderWithProviders(<DiagnosticsPage />);
+      expect(screen.getByTestId('diagnostics-ptz-step-pos')).toHaveTextContent('120 / -40');
+      expect(screen.queryByTestId('diagnostics-ptz-no-readback')).not.toBeInTheDocument();
+    });
+
+    it('should keep the step position row when an older bundle omits step_readback', () => {
+      vi.mocked(useDiagnostics).mockReturnValue(makeResult({ ptz: PTZ_OK }));
+      renderWithProviders(<DiagnosticsPage />);
+      expect(screen.getByTestId('diagnostics-ptz-step-readback')).toHaveTextContent('unknown');
+      expect(screen.getByTestId('diagnostics-ptz-step-pos')).toBeInTheDocument();
+    });
+
+    it('should report the last motion age even when readback is unsupported', () => {
+      vi.mocked(useDiagnostics).mockReturnValue(
+        makeResult({
+          ptz: {
+            ...PTZ_OK,
+            step_readback: 'unsupported',
+            last_step_pos: { pan: 0, tilt: 0, age_ms: 14_000 },
+          },
+        }),
+      );
+      renderWithProviders(<DiagnosticsPage />);
+      expect(screen.getByTestId('diagnostics-ptz-last-motion')).toHaveTextContent('14s ago');
+    });
+
+    it('should render em dashes when position and step data are absent', () => {
+      vi.mocked(useDiagnostics).mockReturnValue(
+        makeResult({ ptz: { ...PTZ_OK, position: null, last_step_pos: null } }),
+      );
+      renderWithProviders(<DiagnosticsPage />);
+      expect(screen.getByTestId('diagnostics-ptz-pan')).toHaveTextContent('—');
+      expect(screen.getByTestId('diagnostics-ptz-zoom')).toHaveTextContent('—');
+      expect(screen.getByTestId('diagnostics-ptz-last-motion')).toHaveTextContent('—');
+      expect(screen.getByTestId('diagnostics-ptz-step-pos')).toHaveTextContent('—');
     });
 
     it('should surface the motor open errno when bring-up failed', () => {
@@ -576,27 +670,6 @@ describe('DiagnosticsPage', () => {
       expect(screen.getByTestId('diagnostics-ptz-init-error')).toHaveTextContent('errno 19');
     });
 
-    it('should warn when the motor reports no step movement after completed commands', () => {
-      vi.mocked(useDiagnostics).mockReturnValue(makeResult({ ptz: PTZ_OK }));
-      renderWithProviders(<DiagnosticsPage />);
-      expect(screen.getByTestId('diagnostics-ptz-no-readback')).toBeInTheDocument();
-    });
-
-    it('should hide the no-readback warning at Home with zero tracked axes and steps', () => {
-      vi.mocked(useDiagnostics).mockReturnValue(
-        makeResult({
-          ptz: {
-            ...PTZ_OK,
-            position: [0, 0, 1],
-            last_step_pos: { pan: 0, tilt: 0, age_ms: 14_000 },
-            commands_completed: 47,
-          },
-        }),
-      );
-      renderWithProviders(<DiagnosticsPage />);
-      expect(screen.queryByTestId('diagnostics-ptz-no-readback')).not.toBeInTheDocument();
-    });
-
     it('should collapse the card when PTZ is disabled in configuration', () => {
       vi.mocked(useDiagnostics).mockReturnValue(
         makeResult({
@@ -613,7 +686,8 @@ describe('DiagnosticsPage', () => {
       );
       renderWithProviders(<DiagnosticsPage />);
       expect(screen.getByTestId('diagnostics-ptz-disabled-note')).toBeInTheDocument();
-      expect(screen.queryByTestId('diagnostics-ptz-position')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('diagnostics-ptz-pan')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('diagnostics-ptz-estimated-header')).not.toBeInTheDocument();
     });
 
     it('should not render the PTZ card when the backend reports no PTZ', () => {
