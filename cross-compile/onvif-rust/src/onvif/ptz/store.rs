@@ -7,12 +7,15 @@
 //! for potential persistence to non-volatile storage in the future.
 
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, OnceLock};
 
 use parking_lot::RwLock;
+use serde::{Deserialize, Serialize};
 
+use crate::config::{PendingWrite, PersistenceHandle, PersistenceService};
 use crate::onvif::error::OnvifResult;
-use crate::onvif::types::common::{PTZPreset, PTZVector};
+use crate::onvif::types::common::{PTZPreset, PTZVector, Vector1D, Vector2D};
 
 use super::faults::{no_preset, too_many_presets};
 use super::types::MAX_PRESETS;
@@ -24,6 +27,61 @@ struct PresetData {
     name: String,
     /// Preset position.
     position: PTZVector,
+}
+
+/// Disk file shape for the persisted presets.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct PresetStoreFile {
+    /// Presets (token -> preset data).
+    #[serde(default)]
+    presets: HashMap<String, PresetStoreEntry>,
+    /// Next token number, so a fresh-process reload can keep issuing
+    /// `Preset{N}` without colliding with already-stored tokens.
+    #[serde(default = "default_next_preset_num")]
+    next_preset_num: u32,
+}
+
+/// Per-preset entry on disk. Positions are kept in their TOML shape so the
+/// file stays human-readable for diagnosis.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct PresetStoreEntry {
+    name: String,
+    position: PersistedPosition,
+}
+
+/// TOML-friendly PTZ position. `PTZVector` uses the ONVIF namespace prefix
+/// (`tt:PanTilt`) which is not a valid TOML key, so we serialise a flat shape
+/// here and convert at the boundary.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct PersistedPosition {
+    pan_tilt_x: Option<f32>,
+    pan_tilt_y: Option<f32>,
+    zoom: Option<f32>,
+}
+
+impl PersistedPosition {
+    fn from_vector(v: &PTZVector) -> Self {
+        Self {
+            pan_tilt_x: v.pan_tilt.as_ref().map(|pt| pt.x),
+            pan_tilt_y: v.pan_tilt.as_ref().map(|pt| pt.y),
+            zoom: v.zoom.as_ref().map(|z| z.x),
+        }
+    }
+
+    fn into_vector(self) -> PTZVector {
+        PTZVector {
+            pan_tilt: Some(Vector2D {
+                x: self.pan_tilt_x.unwrap_or(0.0),
+                y: self.pan_tilt_y.unwrap_or(0.0),
+                space: None,
+            }),
+            zoom: self.zoom.map(|x| Vector1D { x, space: None }),
+        }
+    }
+}
+
+fn default_next_preset_num() -> u32 {
+    1
 }
 
 /// Persistent preset store for PTZ presets.
@@ -55,6 +113,10 @@ pub struct PresetStore {
     presets: RwLock<HashMap<String, PresetData>>,
     /// Next preset number for auto-generated tokens.
     next_preset_num: RwLock<u32>,
+    /// Path the preset store serialises to. `None` disables persistence.
+    persistence_path: Option<PathBuf>,
+    /// Optional debounced, off-executor persistence handle.
+    persistence: OnceLock<PersistenceHandle>,
 }
 
 impl PresetStore {
@@ -63,12 +125,158 @@ impl PresetStore {
         Self {
             presets: RwLock::new(HashMap::new()),
             next_preset_num: RwLock::new(1),
+            persistence_path: None,
+            persistence: OnceLock::new(),
+        }
+    }
+
+    /// Create a new preset store with a persistence path.
+    pub fn with_persistence(path: impl AsRef<Path>) -> Self {
+        Self {
+            presets: RwLock::new(HashMap::new()),
+            next_preset_num: RwLock::new(1),
+            persistence_path: Some(path.as_ref().to_path_buf()),
+            persistence: OnceLock::new(),
         }
     }
 
     /// Create a new preset store wrapped in Arc.
     pub fn new_arc() -> Arc<Self> {
         Arc::new(Self::new())
+    }
+
+    /// Attach a debounced persistence handle.
+    pub fn set_persistence(&self, handle: PersistenceHandle) {
+        if self.persistence.set(handle).is_err() {
+            tracing::warn!("Preset store persistence handle already set; ignoring");
+        }
+    }
+
+    /// Request a non-blocking, debounced save of the preset store.
+    pub fn request_save(&self) {
+        match self.persistence.get() {
+            Some(handle) => handle.request_save(),
+            None => {
+                tracing::debug!("No preset persistence handle configured; skipping save request")
+            }
+        }
+    }
+
+    /// Build a persistence service that snapshots this store on debounce flush.
+    pub fn persistence_service(
+        self: &Arc<Self>,
+        save_delay_ms: u64,
+    ) -> (PersistenceService, PersistenceHandle) {
+        let store = Arc::clone(self);
+        let snapshot = Box::new(move || {
+            let Some(path) = store.persistence_path.clone() else {
+                tracing::debug!("No persistence path configured, skipping preset snapshot");
+                return None;
+            };
+            match store.snapshot_toml() {
+                Ok(bytes) => Some(PendingWrite {
+                    path,
+                    bytes,
+                    mode: None,
+                }),
+                Err(e) => {
+                    tracing::error!("Failed to serialize presets: {}", e);
+                    None
+                }
+            }
+        });
+
+        PersistenceService::new("ptz_presets", save_delay_ms, snapshot)
+    }
+
+    /// Load presets from the persistence file. Missing/unreadable files are
+    /// not fatal — the store boots empty and the next save overwrites the path.
+    pub fn load_from_file(&self) -> OnvifResult<()> {
+        let Some(path) = &self.persistence_path else {
+            tracing::debug!("No persistence path configured, skipping load");
+            return Ok(());
+        };
+        if !path.exists() {
+            tracing::info!("Preset store file does not exist: {:?}", path);
+            return Ok(());
+        }
+
+        let raw = match std::fs::read_to_string(path) {
+            Ok(s) => s,
+            Err(e) => {
+                tracing::warn!(
+                    "Failed to read preset file {}: {}; booting with empty store",
+                    path.display(),
+                    e
+                );
+                return Ok(());
+            }
+        };
+        let file: PresetStoreFile = match toml::from_str(&raw) {
+            Ok(f) => f,
+            Err(e) => {
+                tracing::warn!(
+                    "Failed to parse preset file {}: {}; booting with empty store",
+                    path.display(),
+                    e
+                );
+                return Ok(());
+            }
+        };
+
+        {
+            let mut presets = self.presets.write();
+            presets.clear();
+            for (token, entry) in file.presets {
+                presets.insert(
+                    token,
+                    PresetData {
+                        name: entry.name,
+                        position: entry.position.into_vector(),
+                    },
+                );
+            }
+        }
+        {
+            let mut next = self.next_preset_num.write();
+            *next = file.next_preset_num;
+        }
+
+        tracing::info!(
+            "Loaded {} presets from {:?}",
+            self.presets.read().len(),
+            path
+        );
+        Ok(())
+    }
+
+    /// Serialize the in-memory store to TOML bytes.
+    pub fn snapshot_toml(&self) -> OnvifResult<Vec<u8>> {
+        let file = {
+            let presets = self.presets.read();
+            let next = *self.next_preset_num.read();
+            let mut entries = HashMap::with_capacity(presets.len());
+            for (token, data) in presets.iter() {
+                entries.insert(
+                    token.clone(),
+                    PresetStoreEntry {
+                        name: data.name.clone(),
+                        position: PersistedPosition::from_vector(&data.position),
+                    },
+                );
+            }
+            PresetStoreFile {
+                presets: entries,
+                next_preset_num: next,
+            }
+        };
+        let content = toml::to_string_pretty(&file).map_err(|e| {
+            crate::onvif::error::OnvifError::Internal(format!(
+                "Failed to serialize presets: {}",
+                e
+            ))
+        })?;
+        Ok(content.into_bytes())
     }
 
     /// Get all presets.
@@ -215,6 +423,7 @@ impl Default for PresetStore {
 mod tests {
     use super::*;
     use crate::onvif::types::common::{Vector1D, Vector2D};
+    use tempfile::tempdir;
 
     fn create_test_position() -> PTZVector {
         PTZVector {
@@ -228,6 +437,56 @@ mod tests {
                 space: None,
             }),
         }
+    }
+
+    #[test]
+    fn test_preset_store_roundtrips_through_file() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("ptz_presets.toml");
+        let store = PresetStore::with_persistence(&path);
+        let token = store
+            .set_preset("Front Door".into(), create_test_position(), None)
+            .unwrap();
+        std::fs::write(&path, store.snapshot_toml().unwrap()).unwrap();
+
+        let reloaded = PresetStore::with_persistence(&path);
+        reloaded.load_from_file().unwrap();
+        assert_eq!(reloaded.get(&token).unwrap().name, Some("Front Door".into()));
+    }
+
+    #[test]
+    fn test_preset_store_survives_corrupt_file() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("ptz_presets.toml");
+        std::fs::write(&path, b"this is not toml {{{").unwrap();
+
+        // Garbage in the file must leave an empty, usable store — never a boot failure.
+        let store = PresetStore::with_persistence(&path);
+        store.load_from_file().unwrap();
+        assert!(store.is_empty());
+    }
+
+    #[test]
+    fn test_preset_store_preserves_next_token_number_across_reload() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("ptz_presets.toml");
+        let store = PresetStore::with_persistence(&path);
+        let _ = store
+            .set_preset("First".into(), create_test_position(), None)
+            .unwrap();
+        let _ = store
+            .set_preset("Second".into(), create_test_position(), None)
+            .unwrap();
+        std::fs::write(&path, store.snapshot_toml().unwrap()).unwrap();
+
+        let reloaded = PresetStore::with_persistence(&path);
+        reloaded.load_from_file().unwrap();
+        let token = reloaded
+            .set_preset("Third".into(), create_test_position(), None)
+            .unwrap();
+        // Two presets occupied "Preset1" and "Preset2" before reload; the third
+        // must be "Preset3", not "Preset1" — otherwise we'd overwrite.
+        assert_eq!(token, "Preset3");
     }
 
     // ========================================================================

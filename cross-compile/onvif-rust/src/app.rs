@@ -29,7 +29,7 @@ use crate::lifecycle::startup::{StartupPhase, StartupProgress};
 use crate::lifecycle::{RuntimeError, ShutdownReport, StartupError};
 use crate::onvif::discovery::{DiscoveryConfig, WsDiscovery, WsDiscoveryHandle};
 use crate::onvif::imaging::ImagingSettingsStore;
-use crate::onvif::ptz::PTZStateManager;
+use crate::onvif::ptz::{PTZStateManager, PresetStore};
 use crate::onvif::server::{OnvifServer, OnvifServerConfig};
 #[cfg(use_stubs)]
 use crate::platform::StubPlatformBuilder;
@@ -662,6 +662,10 @@ pub struct Application {
     /// Handle to the profile persistence task.
     profile_persistence_task: Option<JoinHandle<()>>,
 
+    /// Handle to the PTZ preset persistence task.
+    #[allow(dead_code)]
+    preset_persistence_task: Option<JoinHandle<()>>,
+
     /// Handle to the imaging persistence task.
     imaging_persistence_task: Option<JoinHandle<()>>,
 
@@ -840,6 +844,43 @@ impl Application {
         )
     }
 
+    /// Create the PTZ preset store and wire its debounced off-executor persistence.
+    ///
+    /// Mirrors `wire_profile_persistence`: loads from disk at startup, runs a
+    /// debounced persistence service against the shutdown coordinator, and
+    /// returns a `JoinHandle` callers can join on shutdown.
+    fn wire_ptz_preset_persistence(
+        config_path: &str,
+        save_delay: u64,
+        shutdown_coordinator: &ShutdownCoordinator,
+    ) -> (Arc<PresetStore>, PersistenceHandle, JoinHandle<()>) {
+        let presets_path = std::path::Path::new(config_path)
+            .parent()
+            .unwrap_or(std::path::Path::new("/etc/onvif"))
+            .join("ptz_presets.toml");
+        let preset_store = Arc::new(PresetStore::with_persistence(&presets_path));
+        if let Err(e) = preset_store.load_from_file() {
+            tracing::warn!(
+                "Failed to load PTZ presets from {}: {}",
+                presets_path.display(),
+                e
+            );
+        } else if !preset_store.is_empty() {
+            tracing::info!("Loaded PTZ presets from {}", presets_path.display());
+        }
+
+        let (preset_persistence_service, preset_persistence_handle) =
+            preset_store.persistence_service(save_delay);
+        let preset_persistence_task =
+            tokio::spawn(preset_persistence_service.run(shutdown_coordinator.subscribe()));
+
+        (
+            preset_store,
+            preset_persistence_handle,
+            preset_persistence_task,
+        )
+    }
+
     /// Build the HTTP server configuration from the runtime configuration.
     fn build_server_config(config_runtime: &Arc<ConfigRuntime>) -> OnvifServerConfig {
         let c = config_runtime.read();
@@ -982,6 +1023,10 @@ impl Application {
             Self::wire_profile_persistence(config_path, save_delay, &shutdown_coordinator);
         let profile_persistence_task = Some(profile_persistence_task);
 
+        let (preset_store, _preset_persistence_handle, preset_persistence_task) =
+            Self::wire_ptz_preset_persistence(config_path, save_delay, &shutdown_coordinator);
+        let preset_persistence_task = Some(preset_persistence_task);
+
         let initial_rotated = profile_storage
             .snapshot()
             .video_source_configs
@@ -1045,7 +1090,7 @@ impl Application {
         let mut app_state_builder = AppState::builder()
             .user_storage(Arc::clone(&user_storage))
             .password_manager(Arc::new(PasswordManager::new()))
-            .ptz_state(Arc::new(PTZStateManager::new()))
+            .ptz_state(Arc::new(PTZStateManager::with_preset_store(Arc::clone(&preset_store))))
             .config(Arc::clone(&config_runtime))
             .memory_monitor(Arc::new(
                 crate::utils::MemoryMonitor::from_config(&config_runtime).map_err(|e| {
@@ -1167,6 +1212,7 @@ impl Application {
             config_persistence_task,
             user_persistence_task,
             profile_persistence_task,
+            preset_persistence_task,
             imaging_persistence_task,
             memory_logging_task,
             rate_limiter_cleanup_task,
@@ -1856,6 +1902,7 @@ mod tests {
             discovery_task: None,
             memory_logging_task: None,
             rate_limiter_cleanup_task: None,
+            preset_persistence_task: None,
             supervisor_task: None,
             streaming_service: None,
         }
@@ -2308,6 +2355,7 @@ mod tests {
             discovery_task: None,
             memory_logging_task: None,
             rate_limiter_cleanup_task: None,
+            preset_persistence_task: None,
             supervisor_task: None,
             streaming_service: None,
         };
@@ -2368,6 +2416,7 @@ mod tests {
             discovery_task: None,
             memory_logging_task: None,
             rate_limiter_cleanup_task: None,
+            preset_persistence_task: None,
             supervisor_task: None,
             streaming_service: None,
         };
