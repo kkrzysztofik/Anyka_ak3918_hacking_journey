@@ -110,15 +110,24 @@ pub(crate) struct AnykaPTZControl {
 #[allow(dead_code)]
 impl AnykaPTZControl {
     /// Create a new `AnykaPTZControl` with the default FFI backend.
-    pub(crate) fn new(rates: PtzRates) -> Self {
-        Self::with_ffi(default_ptz_hal(), rates)
+    pub(crate) fn new(rates: PtzRates, position_path: Option<std::path::PathBuf>) -> Self {
+        Self::with_ffi(default_ptz_hal(), rates, position_path)
     }
 
     /// Create a new `AnykaPTZControl` with a custom FFI backend.
     ///
     /// Spawns the PTZ actor thread immediately; it idles until commands arrive.
-    pub(crate) fn with_ffi(ffi: Arc<dyn PtzHalTrait>, rates: PtzRates) -> Self {
-        Self::build(ffi, Duration::from_secs(PTZ_CONTINUOUS_TIMEOUT_SECS), rates)
+    pub(crate) fn with_ffi(
+        ffi: Arc<dyn PtzHalTrait>,
+        rates: PtzRates,
+        position_path: Option<std::path::PathBuf>,
+    ) -> Self {
+        Self::build(
+            ffi,
+            Duration::from_secs(PTZ_CONTINUOUS_TIMEOUT_SECS),
+            rates,
+            position_path,
+        )
     }
 
     /// Test-only constructor with a custom continuous-move auto-stop timeout so the
@@ -132,6 +141,7 @@ impl AnykaPTZControl {
             ffi,
             continuous_timeout,
             PtzRates::from_config(&crate::config::types::PtzConfig::default()),
+            None,
         )
     }
 
@@ -172,8 +182,16 @@ impl AnykaPTZControl {
         }
     }
 
-    fn build(ffi: Arc<dyn PtzHalTrait>, continuous_timeout: Duration, rates: PtzRates) -> Self {
-        let shared = Arc::new(PtzActorState::new(rates));
+    fn build(
+        ffi: Arc<dyn PtzHalTrait>,
+        continuous_timeout: Duration,
+        rates: PtzRates,
+        position_path: Option<std::path::PathBuf>,
+    ) -> Self {
+        let shared = Arc::new(PtzActorState {
+            position_path,
+            ..PtzActorState::new(rates)
+        });
         let (tx, rx) = mpsc::channel::<PtzCommand>(PTZ_CMD_QUEUE_CAP);
 
         let actor_ffi = Arc::clone(&ffi);
@@ -486,6 +504,7 @@ mod tests {
         let ptz = AnykaPTZControl::with_ffi(
             Arc::new(mock),
             PtzRates::from_config(&crate::config::types::PtzConfig::default()),
+            None,
         );
         ptz.open().expect("open should succeed");
         ptz
@@ -514,6 +533,7 @@ mod tests {
         let ptz = AnykaPTZControl::with_ffi(
             Arc::new(mock_with_open()),
             PtzRates::from_config(&crate::config::types::PtzConfig::default()),
+            None,
         );
         ptz.open().unwrap();
 
@@ -531,6 +551,7 @@ mod tests {
         let ptz = AnykaPTZControl::with_ffi(
             Arc::new(mock_with_open()),
             PtzRates::from_config(&crate::config::types::PtzConfig::default()),
+            None,
         );
         let d = ptz.diagnostics();
         assert!(!d.opened);
@@ -543,6 +564,7 @@ mod tests {
         let ptz = AnykaPTZControl::with_ffi(
             Arc::new(mock),
             PtzRates::from_config(&crate::config::types::PtzConfig::default()),
+            None,
         );
         assert!(ptz.open().is_ok());
     }
@@ -558,6 +580,7 @@ mod tests {
         let ptz = AnykaPTZControl::with_ffi(
             Arc::new(mock),
             PtzRates::from_config(&crate::config::types::PtzConfig::default()),
+            None,
         );
         let result = ptz.open();
         match result {
@@ -581,6 +604,7 @@ mod tests {
         let ptz = AnykaPTZControl::with_ffi(
             Arc::new(mock),
             PtzRates::from_config(&crate::config::types::PtzConfig::default()),
+            None,
         );
         assert!(ptz.open().is_ok());
         assert!(ptz.open().is_ok());
@@ -592,6 +616,7 @@ mod tests {
         let ptz = AnykaPTZControl::with_ffi(
             Arc::new(mock),
             PtzRates::from_config(&crate::config::types::PtzConfig::default()),
+            None,
         );
         let result = ptz.move_to_position(PtzPosition::HOME).await;
         assert!(result.is_err());
@@ -1155,6 +1180,7 @@ mod tests {
         let ptz = AnykaPTZControl::with_ffi(
             Arc::new(mock),
             PtzRates::from_config(&crate::config::types::PtzConfig::default()),
+            None,
         );
         ptz.open().unwrap();
         ptz.close().await;

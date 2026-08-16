@@ -17,11 +17,13 @@
 //! (`PtzHalTrait::ptz_interrupt`), set by the platform layer before each new command so
 //! the actor's blocking wait unwinds quickly.
 
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{Duration, Instant};
 
 use parking_lot::RwLock;
+use serde::{Deserialize, Serialize};
 use tokio::sync::{mpsc, oneshot};
 
 use crate::hal::anyka::sdk::PtzDirection;
@@ -39,6 +41,47 @@ use super::ptz_control::{
     PTZ_MAX_PAN_DEGREES, PTZ_MAX_TILT_DEGREES, PTZ_MIN_MOVE_THRESHOLD, PTZ_MIN_PAN_DEGREES,
     PTZ_MIN_TILT_DEGREES, PTZ_STOP_DIRECTIONS, direction_to_ffi, iter_ffi_directions,
 };
+
+/// On-disk form of the tracked position. Degrees, matching `PtzPosition`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct PersistedPosition {
+    pan: f32,
+    tilt: f32,
+}
+
+/// Load a previously saved position, clamped to the travel limits.
+///
+/// Returns `None` for every failure — missing, unreadable, malformed. A state file
+/// must never be able to fail boot.
+pub(crate) fn load_position(path: &Path) -> Option<PtzPosition> {
+    let raw = std::fs::read_to_string(path).ok()?;
+    let parsed: PersistedPosition = toml::from_str(&raw).ok()?;
+    Some(PtzPosition::new(
+        parsed.pan.clamp(PTZ_MIN_PAN_DEGREES, PTZ_MAX_PAN_DEGREES),
+        parsed
+            .tilt
+            .clamp(PTZ_MIN_TILT_DEGREES, PTZ_MAX_TILT_DEGREES),
+        1.0,
+    ))
+}
+
+/// Write the tracked position. Failures are logged, never propagated: losing the
+/// saved view is not worth failing a move the motor already made.
+pub(crate) fn save_position(path: &Path, position: PtzPosition) {
+    let bytes = match toml::to_string(&PersistedPosition {
+        pan: position.pan,
+        tilt: position.tilt,
+    }) {
+        Ok(s) => s.into_bytes(),
+        Err(e) => {
+            tracing::error!("PTZ position serialise failed: {}", e);
+            return;
+        }
+    };
+    if let Err(e) = crate::config::file_ops::atomic_write(path, &bytes, None) {
+        tracing::error!("PTZ position write to {} failed: {}", path.display(), e);
+    }
+}
 
 /// Degrees per second each axis travels at the driver's fixed speed setting.
 ///
@@ -86,6 +129,9 @@ pub(crate) struct PtzActorState {
     pub last_step: RwLock<Option<StepSample>>,
     /// Per-axis degrees-per-second used by dead-reckoning integration.
     pub rates: PtzRates,
+    /// Path the actor writes the tracked position to after every completed command.
+    /// `None` disables persistence (host tests / disabled PTZ).
+    pub position_path: Option<PathBuf>,
 }
 
 impl PtzActorState {
@@ -96,6 +142,7 @@ impl PtzActorState {
             commands_completed: AtomicU32::new(0),
             last_step: RwLock::new(None),
             rates,
+            position_path: None,
         }
     }
 
@@ -200,6 +247,14 @@ fn dispatch_batch(ffi: &dyn PtzHalTrait, state: &PtzActorState, batch: Vec<PtzCo
 
     // The winner has fully finished (including any post-acceptance wait/reconcile tail).
     state.commands_completed.fetch_add(1, Ordering::SeqCst);
+
+    // ponytail: one write per completed command, no debounce — dispatch_batch's
+    // supersede semantics already collapse a jog burst into a single command, and this
+    // runs on the actor's own OS thread where blocking I/O is free. Add debouncing via
+    // config::persistence if write volume ever becomes a problem.
+    if let Some(path) = &state.position_path {
+        save_position(path, *state.position.read());
+    }
 }
 
 fn execute(ffi: &dyn PtzHalTrait, state: &PtzActorState, cmd: PtzCommand) {
@@ -585,5 +640,37 @@ mod tests {
             "a zero step is a real reading, not absence"
         );
         assert_eq!(sample.tilt, Some(137));
+    }
+
+    #[test]
+    fn test_position_file_roundtrips_through_toml() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("ptz_position.toml");
+        save_position(&path, PtzPosition::new(90.0, -45.0, 1.0));
+        let loaded = load_position(&path).expect("just-written file must load");
+        assert!((loaded.pan - 90.0).abs() < 0.01);
+        assert!((loaded.tilt + 45.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_load_position_returns_none_for_missing_file() {
+        assert!(load_position(std::path::Path::new("/nonexistent/ptz_position.toml")).is_none());
+    }
+
+    #[test]
+    fn test_load_position_returns_none_for_corrupt_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("ptz_position.toml");
+        std::fs::write(&path, b"this is not toml {{{").unwrap();
+        assert!(load_position(&path).is_none(), "a corrupt file must never fail boot");
+    }
+
+    #[test]
+    fn test_load_position_clamps_out_of_range_values() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("ptz_position.toml");
+        std::fs::write(&path, b"pan = 9999.0\ntilt = -9999.0\n").unwrap();
+        let loaded = load_position(&path).expect("out-of-range is clamped, not rejected");
+        assert!((loaded.pan - PTZ_MAX_PAN_DEGREES).abs() < f32::EPSILON);
     }
 }

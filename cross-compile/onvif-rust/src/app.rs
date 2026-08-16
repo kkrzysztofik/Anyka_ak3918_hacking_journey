@@ -1226,6 +1226,10 @@ impl Application {
             };
 
             let imaging_cfg = config_runtime.read().imaging.clone();
+            let position_path = std::path::Path::new(config_path)
+                .parent()
+                .unwrap_or(std::path::Path::new("/etc/onvif"))
+                .join("ptz_position.toml");
             match crate::platform::AnykaPlatform::with_isp_config(
                 isp_path,
                 ptz_config,
@@ -1233,6 +1237,7 @@ impl Application {
                 sub_encoder,
                 imaging_cfg,
                 initial_rotated,
+                Some(position_path),
             ) {
                 Ok(p) => {
                     // Construction no longer touches the daemon, and bring-up is no

@@ -209,6 +209,7 @@ fn test_init_ptz_control_disabled_reports_disabled_not_failed() {
     let result = super::super::init_ptz_control(
         false,
         &crate::config::types::PtzConfig::default(),
+        None,
     );
     assert!(matches!(
         result,
@@ -225,6 +226,7 @@ fn test_init_ptz_control_enabled_succeeds_with_the_stub_hal() {
     assert!(super::super::init_ptz_control(
         true,
         &crate::config::types::PtzConfig::default(),
+        None,
     )
     .is_success());
 }

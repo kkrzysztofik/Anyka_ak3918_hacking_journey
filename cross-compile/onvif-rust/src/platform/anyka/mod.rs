@@ -118,14 +118,21 @@ pub struct AnykaPlatform {
 ///
 /// Returning [`OptionalInitResult`] keeps the open failure reason (device path + errno)
 /// reachable from diagnostics instead of discarding it into a bare `None`.
-fn init_ptz_control(enabled: bool, ptz_config: &PtzConfig) -> OptionalInitResult<Arc<AnykaPTZControl>> {
+///
+/// `position_path` is the on-disk location the actor will write the tracked position to
+/// after each completed command. `None` disables persistence.
+fn init_ptz_control(
+    enabled: bool,
+    ptz_config: &PtzConfig,
+    position_path: Option<std::path::PathBuf>,
+) -> OptionalInitResult<Arc<AnykaPTZControl>> {
     if !enabled {
         tracing::info!("PTZ disabled by config (ptz.enabled = false); skipping motor bring-up");
         return OptionalInitResult::Disabled;
     }
 
     tracing::info!("Initializing PTZ (native Rust driver, /dev/ak-motor0, /dev/ak-motor1)");
-    let ptz = AnykaPTZControl::new(PtzRates::from_config(ptz_config));
+    let ptz = AnykaPTZControl::new(PtzRates::from_config(ptz_config), position_path);
     match ptz.open() {
         Ok(()) => {
             tracing::info!("PTZ device opened successfully");
@@ -159,6 +166,7 @@ impl AnykaPlatform {
             StreamOpenParams::default(),
             crate::config::types::ImagingConfig::default(),
             false,
+            None,
         )
     }
 
@@ -228,6 +236,9 @@ impl AnykaPlatform {
     /// `initial_rotated` seeds the persisted flip/mirror flag before the VI is even open, so it
     /// is a no-op on the FFI at this point — `AnykaVideoInput::rotated` just remembers it until
     /// `init_video_input()`'s post-`capture_on()` reapply step actually applies it to hardware.
+    ///
+    /// `position_path` is the on-disk file the actor writes to after every completed
+    /// command. `None` disables persistence.
     pub fn with_isp_config(
         isp_config_path: Option<PathBuf>,
         ptz_config: PtzConfig,
@@ -235,6 +246,7 @@ impl AnykaPlatform {
         sub_encoder: StreamOpenParams,
         imaging_cfg: crate::config::types::ImagingConfig,
         initial_rotated: bool,
+        position_path: Option<std::path::PathBuf>,
     ) -> PlatformResult<Self> {
         let device_info = Self::device_descriptor();
 
@@ -295,7 +307,7 @@ impl AnykaPlatform {
             )
         };
 
-        let ptz_init = init_ptz_control(ptz_config.enabled, &ptz_config);
+        let ptz_init = init_ptz_control(ptz_config.enabled, &ptz_config, position_path);
         let ptz_control = match &ptz_init {
             OptionalInitResult::Success(ptz) => Some(Arc::clone(ptz) as Arc<dyn PTZControl>),
             _ => None,
