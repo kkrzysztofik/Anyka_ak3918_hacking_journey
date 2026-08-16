@@ -11,6 +11,8 @@ use mockall::automock;
 use serde::Serialize;
 use thiserror::Error;
 
+use crate::hal::common::ptz::StepReadback;
+
 /// Errors that can occur in platform operations.
 #[derive(Debug, Error, Clone)]
 pub enum PlatformError {
@@ -556,6 +558,14 @@ pub struct PtzDiagnostics {
     pub position: Option<[f32; 3]>,
     pub moving: bool,
     pub last_step_pos: Option<StepPos>,
+    /// Whether `last_step_pos` is a measurement or a driver artefact.
+    ///
+    /// `Unsupported` means the motor driver accepts `MOTOR_GET_STATUS` and writes
+    /// nothing, so every step position it reports is zero regardless of where the
+    /// camera is actually pointing. Determined once during bring-up calibration: a
+    /// later re-home sweep does not revise it, so an `Unknown` here can outlive the
+    /// condition that caused it.
+    pub step_readback: StepReadback,
     /// Commands the actor has fully finished. Answers "did my command reach the motor?"
     pub commands_completed: u32,
 }
@@ -571,6 +581,7 @@ impl PtzDiagnostics {
             position: None,
             moving: false,
             last_step_pos: None,
+            step_readback: StepReadback::Unknown,
             commands_completed: 0,
         }
     }

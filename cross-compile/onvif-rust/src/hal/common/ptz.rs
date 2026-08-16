@@ -143,14 +143,6 @@ impl PTZHandle {
     }
 
     /// Whether motor step positions from this device are measurements or always zero.
-    // `expect` rather than `allow` so this self-cleans: once the diagnostics path reads
-    // it, the expectation goes unfulfilled and `-D warnings` demands the attribute's
-    // removal. Gated to non-test builds because the tests below already use it, which
-    // would leave the expectation unfulfilled under `cargo test` today.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "read by the diagnostics path, wired up in Task 4")
-    )]
     pub(crate) fn step_readback(&self) -> StepReadback {
         self.step_readback
     }

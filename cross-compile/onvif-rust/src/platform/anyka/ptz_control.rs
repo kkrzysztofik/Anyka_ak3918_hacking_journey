@@ -30,7 +30,7 @@ use tokio::sync::{Notify, mpsc, oneshot};
 use tokio::task::JoinHandle;
 
 use crate::hal::anyka::sdk::PtzDirection;
-use crate::hal::common::ptz::{PTZHandle, PtzHalTrait, default_ptz_hal, ptz_open};
+use crate::hal::common::ptz::{PTZHandle, PtzHalTrait, StepReadback, default_ptz_hal, ptz_open};
 
 #[cfg(not(use_stubs))]
 use crate::hal::anyka::ptz::ptz_turn_direction;
@@ -205,6 +205,9 @@ impl AnykaPTZControl {
         let self_check = handle
             .as_ref()
             .map(|h| h.self_check_error().unwrap_or("ok").to_string());
+        let step_readback = handle
+            .as_ref()
+            .map_or(StepReadback::Unknown, |h| h.step_readback());
         drop(handle);
 
         let position = *self.shared.position.read();
@@ -223,6 +226,7 @@ impl AnykaPTZControl {
             position: Some([position.pan, position.tilt, position.zoom]),
             moving: velocity.pan != 0.0 || velocity.tilt != 0.0,
             last_step_pos,
+            step_readback,
             commands_completed: self.shared.commands_completed.load(Ordering::SeqCst),
         }
     }
@@ -455,7 +459,7 @@ impl PTZControl for AnykaPTZControl {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::hal::common::ptz::{MockPtzHalTrait, StepReadback, TurnOutcome};
+    use crate::hal::common::ptz::{MockPtzHalTrait, TurnOutcome};
 
     /// A driver-shaped failure: carries the device path and errno the way the real
     /// `NativePtzDriver` does, so tests can assert that detail survives the HAL boundary
@@ -561,6 +565,42 @@ mod tests {
         let d = ptz.diagnostics();
         assert!(!d.opened);
         assert!(d.self_check.is_none(), "the sweep only runs on open");
+    }
+
+    #[tokio::test]
+    async fn test_diagnostics_reports_unsupported_step_readback() {
+        // Not `mock_with_open()`: its self-check verdict is baked in, and a second
+        // `expect_ptz_check_self` would never be reached.
+        let mut mock = MockPtzHalTrait::new();
+        mock.expect_ptz_open().returning(|| Ok(()));
+        mock.expect_ptz_check_self()
+            .returning(|_| Ok(StepReadback::Unsupported));
+        mock.expect_ptz_close().returning(|| Ok(()));
+        let ptz = create_opened(mock);
+
+        let d = ptz.diagnostics();
+        assert_eq!(
+            d.step_readback,
+            StepReadback::Unsupported,
+            "the sweep's verdict must reach the diagnostics snapshot"
+        );
+        // The WebUI keys off the serialised form, so pin it here.
+        assert!(
+            serde_json::to_string(&d)
+                .unwrap()
+                .contains(r#""step_readback":"unsupported""#),
+            "unexpected serialisation: {}",
+            serde_json::to_string(&d).unwrap()
+        );
+    }
+
+    #[test]
+    fn test_diagnostics_disabled_reports_unknown_step_readback() {
+        assert_eq!(
+            PtzDiagnostics::disabled().step_readback,
+            StepReadback::Unknown,
+            "PTZ switched off never probed the motor, so it cannot claim readback works"
+        );
     }
 
     #[test]
