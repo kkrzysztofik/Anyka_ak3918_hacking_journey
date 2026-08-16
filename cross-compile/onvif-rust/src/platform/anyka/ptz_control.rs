@@ -20,7 +20,6 @@
 //!   └── continuous timeout task     (tokio, routes auto-stop through the actor)
 //! ```
 
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
@@ -42,6 +41,8 @@ use crate::platform::traits::{
     PTZControl, PlatformError, PlatformResult, PtzDiagnostics, PtzLimits, PtzPosition, PtzPreset,
     PtzVelocity, StepPos,
 };
+// `PtzPreset` is still referenced in the trait signatures; preserved in the import
+// list to keep the trait contract clear at the use site.
 
 use super::ptz_actor::{self, PtzActorState, PtzCommand, PtzRates};
 
@@ -98,8 +99,6 @@ pub(crate) struct AnykaPTZControl {
     ffi: Arc<dyn PtzHalTrait>,
     handle: RwLock<Option<PTZHandle>>,
     shared: Arc<PtzActorState>,
-    presets: RwLock<HashMap<String, PtzPreset>>,
-    next_preset_id: RwLock<u32>,
     cmd_tx: Mutex<Option<mpsc::Sender<PtzCommand>>>,
     actor_handle: Mutex<Option<std::thread::JoinHandle<()>>>,
     continuous_timeout: Duration,
@@ -164,8 +163,6 @@ impl AnykaPTZControl {
             ffi,
             handle: RwLock::new(None),
             shared,
-            presets: RwLock::new(HashMap::new()),
-            next_preset_id: RwLock::new(1),
             cmd_tx: Mutex::new(cmd_tx),
             actor_handle: Mutex::new(actor_handle),
             continuous_timeout,
@@ -196,8 +193,6 @@ impl AnykaPTZControl {
             ffi,
             handle: RwLock::new(None),
             shared,
-            presets: RwLock::new(HashMap::new()),
-            next_preset_id: RwLock::new(1),
             cmd_tx: Mutex::new(cmd_tx),
             actor_handle: Mutex::new(actor_handle),
             continuous_timeout,
@@ -397,50 +392,30 @@ impl PTZControl for AnykaPTZControl {
     }
 
     async fn get_presets(&self) -> PlatformResult<Vec<PtzPreset>> {
-        Ok(self.presets.read().values().cloned().collect())
+        // Presets are stored in the ONVIF layer (`PresetStore`), not in the platform.
+        // The trait method stays so the ONVIF path can ask for them, but the platform
+        // declares it unsupported.
+        Err(PlatformError::NotSupported(
+            "presets are stored in the ONVIF layer".into(),
+        ))
     }
 
-    async fn set_preset(&self, name: &str) -> PlatformResult<String> {
-        let position = *self.shared.position.read();
-        let mut presets = self.presets.write();
-        let mut next_id = self.next_preset_id.write();
-        let token = format!("preset_{}", *next_id);
-        *next_id += 1;
-
-        presets.insert(
-            token.clone(),
-            PtzPreset {
-                token: token.clone(),
-                name: name.to_string(),
-                position,
-            },
-        );
-
-        Ok(token)
+    async fn set_preset(&self, _name: &str) -> PlatformResult<String> {
+        Err(PlatformError::NotSupported(
+            "presets are stored in the ONVIF layer".into(),
+        ))
     }
 
-    async fn goto_preset(&self, token: &str) -> PlatformResult<()> {
-        let position = {
-            let presets = self.presets.read();
-            let preset = presets.get(token).ok_or_else(|| {
-                PlatformError::InvalidParameter(format!("Unknown preset: {}", token))
-            })?;
-            preset.position
-        };
-
-        self.move_to_position(position).await
+    async fn goto_preset(&self, _token: &str) -> PlatformResult<()> {
+        Err(PlatformError::NotSupported(
+            "presets are stored in the ONVIF layer".into(),
+        ))
     }
 
-    async fn remove_preset(&self, token: &str) -> PlatformResult<()> {
-        let mut presets = self.presets.write();
-        if presets.remove(token).is_some() {
-            Ok(())
-        } else {
-            Err(PlatformError::InvalidParameter(format!(
-                "Unknown preset: {}",
-                token
-            )))
-        }
+    async fn remove_preset(&self, _token: &str) -> PlatformResult<()> {
+        Err(PlatformError::NotSupported(
+            "presets are stored in the ONVIF layer".into(),
+        ))
     }
 
     async fn get_limits(&self) -> PlatformResult<PtzLimits> {
@@ -1122,82 +1097,12 @@ mod tests {
     // =========================================================================
 
     #[tokio::test]
-    async fn test_set_and_get_preset() {
-        let mock = mock_with_open();
-        let ptz = create_opened(mock);
-
-        let token = ptz.set_preset("Front Door").await.unwrap();
-        assert!(token.starts_with("preset_"));
-
-        let presets = ptz.get_presets().await.unwrap();
-        assert_eq!(presets.len(), 1);
-        assert_eq!(presets[0].name, "Front Door");
-        assert_eq!(presets[0].token, token);
-    }
-
-    #[tokio::test]
-    async fn test_goto_preset_triggers_move() {
-        let mut mock = mock_with_open();
-        // First move to set up position
-        mock.expect_ptz_start_turn().returning(|_, _| Ok(true));
-        mock.expect_ptz_wait_turn()
-            .returning(|_| Ok(TurnOutcome::default()));
-        mock.expect_ptz_stop().returning(|_| Ok(()));
-
-        let ptz = create_opened(mock);
-
-        // Move to (90, 45), then set a preset there
-        move_and_settle(&ptz, PtzPosition::new(90.0, 45.0, 1.0))
-            .await
-            .unwrap();
-        let token = ptz.set_preset("Corner").await.unwrap();
-
-        // Move back to home
-        move_and_settle(&ptz, PtzPosition::new(0.0, 0.0, 1.0))
-            .await
-            .unwrap();
-
-        // Goto preset should move back to (90, 45)
-        let before = ptz.shared.commands_completed.load(Ordering::SeqCst);
-        ptz.goto_preset(&token).await.unwrap();
-        await_actor_completed(&ptz, before).await;
-        let pos = ptz.get_position().await.unwrap();
-        assert!((pos.pan - 90.0).abs() < f32::EPSILON);
-        assert!((pos.tilt - 45.0).abs() < f32::EPSILON);
-    }
-
-    #[tokio::test]
-    async fn test_goto_nonexistent_preset() {
-        let mock = mock_with_open();
-        let ptz = create_opened(mock);
-
-        let result = ptz.goto_preset("nonexistent").await;
-        assert!(result.is_err());
-        match result {
-            Err(PlatformError::InvalidParameter(msg)) => {
-                assert!(msg.contains("nonexistent"));
-            }
-            _ => panic!("Expected InvalidParameter"),
-        }
-    }
-
-    #[tokio::test]
-    async fn test_remove_preset() {
-        let mock = mock_with_open();
-        let ptz = create_opened(mock);
-
-        let token = ptz.set_preset("Temp").await.unwrap();
-        assert!(ptz.remove_preset(&token).await.is_ok());
-        assert!(ptz.get_presets().await.unwrap().is_empty());
-    }
-
-    #[tokio::test]
-    async fn test_remove_nonexistent_preset() {
-        let mock = mock_with_open();
-        let ptz = create_opened(mock);
-
-        let result = ptz.remove_preset("nonexistent").await;
-        assert!(result.is_err());
+    async fn test_platform_presets_are_not_supported() {
+        let ptz = create_opened(mock_with_open());
+        assert!(matches!(
+            ptz.set_preset("x").await,
+            Err(PlatformError::NotSupported(_))
+        ));
     }
 
     // =========================================================================
