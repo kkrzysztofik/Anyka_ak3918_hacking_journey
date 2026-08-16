@@ -27,6 +27,7 @@ import {
   type PlayerState,
   type StreamStats,
 } from '@/components/common/LiveVideoPlayer';
+import { PresetDialog } from '@/components/common/PresetDialog';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -85,9 +86,8 @@ export default function LiveViewPage() {
   const [playerMessage, setPlayerMessage] = useState<string>();
   const [stats, setStats] = useState<StreamStats>({});
   const [playerKey, setPlayerKey] = useState(0);
-  // The preset being created ('new') or edited. The dialog that reads this is
-  // not built yet, so only the setter is bound.
-  const [, setEditingPreset] = useState<PTZPreset | 'new' | null>(null);
+  // The preset being created ('new') or edited, or null when the dialog is closed.
+  const [editingPreset, setEditingPreset] = useState<PTZPreset | 'new' | null>(null);
   const [presetToDelete, setPresetToDelete] = useState<PTZPreset | null>(null);
   // Which preset has a mutation in flight. A single page-wide boolean would freeze
   // every row while one of them is being deleted.
@@ -805,6 +805,15 @@ export default function LiveViewPage() {
           </SettingsCard>
         </fieldset>
       </div>
+
+      {editingPreset && (
+        <PresetDialog
+          profileToken={profileToken}
+          preset={editingPreset}
+          existing={presets ?? []}
+          onClose={() => setEditingPreset(null)}
+        />
+      )}
 
       {/* Delete Confirmation */}
       <AlertDialog open={!!presetToDelete} onOpenChange={() => setPresetToDelete(null)}>

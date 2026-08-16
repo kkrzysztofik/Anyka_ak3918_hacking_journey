@@ -43,6 +43,7 @@ vi.mock('@/services/ptzService', () => ({
   gotoPreset: vi.fn().mockResolvedValue(undefined),
   setPreset: vi.fn().mockResolvedValue('preset_new'),
   removePreset: vi.fn().mockResolvedValue(undefined),
+  getPtzStatus: vi.fn().mockResolvedValue({ pan: 0.42, tilt: -0.085, zoom: 0 }),
 }));
 
 // Mock profileService
@@ -512,6 +513,34 @@ describe('LiveViewPage', () => {
 
       // Naming was "Preset ${presets.length + 1}", which collides after a delete.
       expect(mockSetPreset).not.toHaveBeenCalled();
+    });
+
+    it('should open the save dialog from the add button', async () => {
+      const user = userEvent.setup();
+      renderWithProviders(<LiveViewPage />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('liveview-preset-preset1-label')).toHaveTextContent('Front Door');
+      });
+
+      await user.click(screen.getByTestId('liveview-add-preset-button'));
+
+      expect(await screen.findByTestId('preset-dialog')).toBeInTheDocument();
+    });
+
+    it('should open the update dialog from a preset edit button', async () => {
+      // The pencil sets editingPreset; this is the test that the reader is actually
+      // bound to it. Discarding the reader made both buttons silently inert.
+      const user = userEvent.setup();
+      renderWithProviders(<LiveViewPage />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('liveview-preset-preset1-label')).toHaveTextContent('Front Door');
+      });
+
+      await user.click(screen.getByTestId('liveview-preset-preset1-edit-button'));
+
+      expect(await screen.findByTestId('preset-dialog-name-input')).toHaveValue('Front Door');
     });
 
     it('should not remove a preset on a bare trash click', async () => {
