@@ -344,6 +344,15 @@ fn do_move(
 
     drain_started_turns(ffi, state, started, started_at);
 
+    // Recalibration aid: enable debug logging and issue single-axis AbsoluteMoves;
+    // deg/s = |delta| / (elapsed_ms/1000). Median of three trials per axis.
+    tracing::debug!(
+        elapsed_ms = started_at.elapsed().as_millis(),
+        pan_delta,
+        tilt_delta,
+        "PTZ absolute move motor-on window"
+    );
+
     // No hardware zoom on AK3918.
     state.position.write().zoom = position.zoom.clamp(1.0, 1.0);
     *state.velocity.write() = PtzVelocity::STOP;

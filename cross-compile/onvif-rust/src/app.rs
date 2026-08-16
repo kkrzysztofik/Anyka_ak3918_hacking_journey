@@ -871,6 +871,9 @@ impl Application {
 
         let (preset_persistence_service, preset_persistence_handle) =
             preset_store.persistence_service(save_delay);
+        // Keep the handle alive inside the store — dropping it closes the save
+        // channel and the persistence task exits immediately (see imaging).
+        preset_store.set_persistence(preset_persistence_handle.clone());
         let preset_persistence_task =
             tokio::spawn(preset_persistence_service.run(shutdown_coordinator.subscribe()));
 
@@ -1234,13 +1237,15 @@ impl Application {
         progress: &mut StartupProgress,
         config_runtime: &Arc<ConfigRuntime>,
         config_path: &str,
-        _shutdown_rx: broadcast::Receiver<()>,
+        shutdown_rx: broadcast::Receiver<()>,
         initial_rotated: bool,
     ) -> Result<PlatformInit, StartupError> {
         let ptz_config = config_runtime.read().ptz.clone();
 
         #[cfg(use_stubs)]
-        let _ = _shutdown_rx;
+        let _ = shutdown_rx;
+        #[cfg(use_stubs)]
+        let _ = config_path;
         // Stub builds have no VI to flip; `StubVideoControl` starts at its own
         // default and the seed is irrelevant.
         #[cfg(use_stubs)]

@@ -636,9 +636,10 @@ impl Default for PtzConfig {
             zoom_speed: 0.5,
             max_presets: 16,
             home_on_start: true,
-            // ponytail: placeholders replaced by measurement in Task 14.
-            pan_degrees_per_sec: 60.0,
-            tilt_degrees_per_sec: 60.0,
+            // Measured on AK3918 hardware (AbsoluteMove timing of start_turn→wait_turn;
+            // median of three 180° pan / 90° tilt trials). See design doc §4.
+            pan_degrees_per_sec: 175.6,
+            tilt_degrees_per_sec: 175.4,
         }
     }
 }

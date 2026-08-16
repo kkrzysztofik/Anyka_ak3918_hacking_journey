@@ -359,6 +359,8 @@ impl PresetStore {
         };
 
         presets.insert(preset_token.clone(), PresetData { name, position });
+        drop(presets);
+        self.request_save();
 
         Ok(preset_token)
     }
@@ -375,6 +377,8 @@ impl PresetStore {
     pub fn remove(&self, token: &str) -> OnvifResult<()> {
         let mut presets = self.presets.write();
         presets.remove(token).ok_or_else(|| no_preset(token))?;
+        drop(presets);
+        self.request_save();
         Ok(())
     }
 

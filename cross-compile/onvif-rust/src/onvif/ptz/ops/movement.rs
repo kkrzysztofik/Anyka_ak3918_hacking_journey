@@ -16,7 +16,7 @@ use crate::onvif::ptz::state::PTZStateManager;
 use crate::onvif::ptz::validation;
 
 /// Convert PTZVector to platform PtzPosition.
-pub(super) fn vector_to_position(vector: &PTZVector) -> PtzPosition {
+pub(crate) fn vector_to_position(vector: &PTZVector) -> PtzPosition {
     let mut pos = PtzPosition::default();
     if let Some(pt) = &vector.pan_tilt {
         // ONVIF uses -1 to 1, platform uses degrees
