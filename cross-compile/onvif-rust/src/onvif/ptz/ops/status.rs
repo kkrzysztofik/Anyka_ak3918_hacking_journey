@@ -78,6 +78,12 @@ pub async fn goto_home_position(
     state.goto_home();
 
     if let Some(ptz) = ptz_control {
+        // Re-establish the physical origin first: this is the drift reset, and it makes
+        // the dead-reckoned leg below the most accurate move the system can make.
+        ptz.home().await.map_err(|e| {
+            state.stop();
+            crate::onvif::error::OnvifError::HardwareFailure(format!("PTZ re-home failed: {}", e))
+        })?;
         let pos = vector_to_position(&state.get_position());
         ptz.move_to_position(pos).await.map_err(|e| {
             state.stop();
@@ -123,10 +129,32 @@ pub fn set_home_position(state: &PTZStateManager, profile_token: &str) -> OnvifR
 mod tests {
     use super::*;
     use crate::onvif::types::common::{PTZVector, Vector1D, Vector2D};
+    use crate::platform::PtzPosition;
+    use crate::platform::common::traits::MockPTZControl;
     use std::sync::Arc;
 
     fn create_test_state() -> Arc<PTZStateManager> {
         Arc::new(PTZStateManager::new())
+    }
+
+    #[tokio::test]
+    async fn test_goto_home_position_rehomes_before_moving() {
+        let state = create_test_state();
+        let mut mock = MockPTZControl::new();
+        let mut seq = mockall::Sequence::new();
+        mock.expect_home()
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(|| Ok(()));
+        mock.expect_move_to_position()
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(|_| Ok(()));
+        mock.expect_get_position()
+            .returning(|| Ok(PtzPosition::HOME));
+
+        let ptz: Option<Arc<dyn crate::platform::PTZControl>> = Some(Arc::new(mock));
+        goto_home_position(&state, &ptz, "Profile1").await.unwrap();
     }
 
     #[tokio::test]
