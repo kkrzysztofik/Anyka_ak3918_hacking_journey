@@ -455,7 +455,7 @@ impl PTZControl for AnykaPTZControl {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::hal::common::ptz::{MockPtzHalTrait, TurnOutcome};
+    use crate::hal::common::ptz::{MockPtzHalTrait, StepReadback, TurnOutcome};
 
     /// A driver-shaped failure: carries the device path and errno the way the real
     /// `NativePtzDriver` does, so tests can assert that detail survives the HAL boundary
@@ -495,7 +495,8 @@ mod tests {
     fn mock_with_open() -> MockPtzHalTrait {
         let mut mock = MockPtzHalTrait::new();
         mock.expect_ptz_open().returning(|| Ok(()));
-        mock.expect_ptz_check_self().returning(|_| Ok(()));
+        mock.expect_ptz_check_self()
+            .returning(|_| Ok(StepReadback::Unknown));
         // Allow close to be called during Drop
         mock.expect_ptz_close().returning(|| Ok(()));
         // Every submitted command interrupts any in-flight turn first.
@@ -602,7 +603,9 @@ mod tests {
         let mut mock = MockPtzHalTrait::new();
         // open called only once despite two open() calls
         mock.expect_ptz_open().times(1).returning(|| Ok(()));
-        mock.expect_ptz_check_self().times(1).returning(|_| Ok(()));
+        mock.expect_ptz_check_self()
+            .times(1)
+            .returning(|_| Ok(StepReadback::Unknown));
         mock.expect_ptz_close().returning(|| Ok(()));
         mock.expect_ptz_interrupt().returning(|| ());
         let ptz = AnykaPTZControl::with_ffi(
@@ -1006,7 +1009,9 @@ mod tests {
             .returning(|_| Ok(TurnOutcome::default()));
         mock.expect_ptz_stop().returning(|_| Ok(()));
         // check_self runs once at open() and once more for the re-home.
-        mock.expect_ptz_check_self().times(2).returning(|_| Ok(()));
+        mock.expect_ptz_check_self()
+            .times(2)
+            .returning(|_| Ok(StepReadback::Unknown));
 
         let ptz = create_opened(mock);
         move_and_settle(&ptz, PtzPosition::new(90.0, 45.0, 1.0))
@@ -1212,7 +1217,8 @@ mod tests {
     async fn test_close_allows_reopen() {
         let mut mock = MockPtzHalTrait::new();
         mock.expect_ptz_open().times(2).returning(|| Ok(()));
-        mock.expect_ptz_check_self().returning(|_| Ok(()));
+        mock.expect_ptz_check_self()
+            .returning(|_| Ok(StepReadback::Unknown));
         mock.expect_ptz_close().returning(|| Ok(()));
         mock.expect_ptz_stop().returning(|_| Ok(()));
         mock.expect_ptz_interrupt().returning(|| ());

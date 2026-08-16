@@ -121,9 +121,10 @@ pub struct MotorMessage {
     pub attach_timer: c_int,
 }
 
-// `TurnOutcome` lives in `hal::common::ptz` alongside the trait that returns it, so the
-// signature (and its mock) are available on host builds where this driver is not compiled.
-pub use crate::hal::common::ptz::TurnOutcome;
+// `TurnOutcome` and `StepReadback` live in `hal::common::ptz` alongside the trait that
+// returns them, so the signatures (and their mocks) are available on host builds where
+// this driver is not compiled.
+pub use crate::hal::common::ptz::{StepReadback, TurnOutcome};
 
 // --- PTZ types matching SDK (for PtzHalTrait) - no C header dependency ---
 
@@ -451,7 +452,7 @@ impl MotorHandle {
 
     /// Run calibration sequence matching C driver get_motor_param():
     /// turn anticlockwise to limit (HIT or STOP), then clockwise to the middle of travel.
-    fn calibrate(&self, stop_flag: &AtomicBool) -> PlatformResult<()> {
+    fn calibrate(&self, stop_flag: &AtomicBool) -> PlatformResult<StepReadback> {
         self.set_speed(DEFAULT_SPEED)?;
         // Turn anticlockwise to physical limit; wait for HIT or STOP event.
         self.turn_steps(self.cycle_step, false)?;
@@ -473,18 +474,30 @@ impl MotorHandle {
 
         // Does the kernel's own position accounting actually move? This distinguishes a
         // working MOTOR_GET_STATUS from one that returns success while writing nothing.
-        match self.get_status() {
-            Ok(msg) => tracing::info!(
-                "{}: post-calibration status={} pos={} steps_one_circle={} total_steps={}",
-                self.name,
-                msg.status,
-                msg.pos,
-                msg.steps_one_circle,
-                msg.total_steps
-            ),
-            Err(e) => tracing::warn!("{}: post-calibration status read failed: {}", self.name, e),
-        }
-        Ok(())
+        // The buffer goes in zeroed; steps_one_circle == 0 coming back is physically
+        // impossible for a driver that wrote anything at all.
+        let readback = match self.get_status() {
+            Ok(msg) => {
+                tracing::info!(
+                    "{}: post-calibration status={} pos={} steps_one_circle={} total_steps={}",
+                    self.name,
+                    msg.status,
+                    msg.pos,
+                    msg.steps_one_circle,
+                    msg.total_steps
+                );
+                if msg.pos == 0 && msg.steps_one_circle == 0 && msg.total_steps == 0 {
+                    StepReadback::Unsupported
+                } else {
+                    StepReadback::Working
+                }
+            }
+            Err(e) => {
+                tracing::warn!("{}: post-calibration status read failed: {}", self.name, e);
+                StepReadback::Unknown
+            }
+        };
+        Ok(readback)
     }
 }
 
@@ -587,17 +600,18 @@ impl NativePtzDriver {
 
     /// check_self: run calibration (turn to limit, then to middle) for both motors.
     /// Matches C driver get_motor_param() so the physical calibration movement is heard.
-    pub fn check_self(&self, _pin_type: ptz_feedback_pin) -> PlatformResult<()> {
+    pub fn check_self(&self, _pin_type: ptz_feedback_pin) -> PlatformResult<StepReadback> {
         self.stop_flag.store(false, Ordering::SeqCst);
         let (motor_h, motor_v) = self
             .both_motors()?
             .ok_or_else(|| PlatformError::HardwareUnavailable("PTZ device not opened".into()))?;
         tracing::info!("PTZ calibration: horizontal motor (limit then middle)");
-        motor_h.calibrate(&self.stop_flag)?;
+        let readback_h = motor_h.calibrate(&self.stop_flag)?;
         tracing::info!("PTZ calibration: vertical motor (limit then middle)");
-        motor_v.calibrate(&self.stop_flag)?;
-        tracing::info!("PTZ calibration complete");
-        Ok(())
+        let readback_v = motor_v.calibrate(&self.stop_flag)?;
+        let readback = StepReadback::worst_of(readback_h, readback_v);
+        tracing::info!("PTZ calibration complete, step readback: {:?}", readback);
+        Ok(readback)
     }
 
     /// Issue a turn command without waiting for completion. Clears the stop flag so a
@@ -697,7 +711,7 @@ impl crate::hal::common::ptz::PtzHalTrait for NativePtzDriver {
         self.close()
     }
 
-    fn ptz_check_self(&self, pin_type: ptz_feedback_pin) -> PlatformResult<()> {
+    fn ptz_check_self(&self, pin_type: ptz_feedback_pin) -> PlatformResult<StepReadback> {
         self.check_self(pin_type)
     }
 

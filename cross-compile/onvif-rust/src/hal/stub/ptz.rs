@@ -5,7 +5,7 @@
 pub(crate) struct StubPtzHal;
 
 #[cfg(use_stubs)]
-use crate::hal::common::ptz::{PtzHalTrait, TurnOutcome};
+use crate::hal::common::ptz::{PtzHalTrait, StepReadback, TurnOutcome};
 #[cfg(use_stubs)]
 use crate::hal::common::{ptz_device, ptz_feedback_pin, ptz_turn_direction};
 #[cfg(use_stubs)]
@@ -21,8 +21,9 @@ impl PtzHalTrait for StubPtzHal {
         Ok(())
     }
 
-    fn ptz_check_self(&self, _pin_type: ptz_feedback_pin) -> PlatformResult<()> {
-        Ok(())
+    fn ptz_check_self(&self, _pin_type: ptz_feedback_pin) -> PlatformResult<StepReadback> {
+        // The host stub has no kernel to read back from.
+        Ok(StepReadback::Unknown)
     }
 
     fn ptz_start_turn(&self, _direction: ptz_turn_direction, _degree: i32) -> PlatformResult<bool> {

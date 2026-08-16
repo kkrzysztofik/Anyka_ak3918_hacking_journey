@@ -76,7 +76,11 @@ pub(crate) trait PtzHalTrait: Send + Sync {
     fn ptz_open(&self) -> PlatformResult<()>;
     fn ptz_close(&self) -> PlatformResult<()>;
     /// Run the calibration sweep (turn to physical limit, then to middle).
-    fn ptz_check_self(&self, pin_type: ptz_feedback_pin) -> PlatformResult<()>;
+    ///
+    /// Returns whether the kernel's position accounting proved live during the sweep —
+    /// the driver probes `MOTOR_GET_STATUS` once the motors have demonstrably moved,
+    /// which is the only moment the answer is knowable.
+    fn ptz_check_self(&self, pin_type: ptz_feedback_pin) -> PlatformResult<StepReadback>;
     /// Issue a turn without waiting for completion (non-blocking).
     ///
     /// Used by the PTZ actor so it can acknowledge the command immediately and wait for
@@ -147,7 +151,7 @@ pub(crate) fn ptz_open(ffi: std::sync::Arc<dyn PtzHalTrait>) -> PlatformResult<P
 
     // PTZ_FEEDBACK_PIN_NONE = 0 (no feedback pin on this hardware).
     let self_check_error = match ffi.ptz_check_self(ptz_feedback_pin::PTZ_FEEDBACK_PIN_NONE) {
-        Ok(()) => None,
+        Ok(_) => None,
         Err(e) => {
             tracing::warn!("PTZ self-check failed, continuing anyway: {}", e);
             Some(e.to_string())
@@ -244,7 +248,7 @@ mod tests {
         mock_ffi
             .expect_ptz_check_self()
             .times(1)
-            .returning(|_| Ok(()));
+            .returning(|_| Ok(StepReadback::Unknown));
         mock_ffi.expect_ptz_close().returning(|| Ok(()));
 
         let result = ptz_open(std::sync::Arc::new(mock_ffi));
@@ -318,7 +322,7 @@ mod tests {
         mock_ffi
             .expect_ptz_check_self()
             .times(1)
-            .returning(|_| Ok(()));
+            .returning(|_| Ok(StepReadback::Unknown));
         mock_ffi.expect_ptz_close().returning(|| Ok(()));
 
         let handle = ptz_open(std::sync::Arc::new(mock_ffi)).unwrap();

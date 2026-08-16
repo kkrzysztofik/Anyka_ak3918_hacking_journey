@@ -285,7 +285,7 @@ fn execute(ffi: &dyn PtzHalTrait, state: &PtzActorState, cmd: PtzCommand) {
 /// integrators against.
 fn do_home(ffi: &dyn PtzHalTrait, state: &PtzActorState) {
     match ffi.ptz_check_self(ptz_feedback_pin::PTZ_FEEDBACK_PIN_EXIST) {
-        Ok(()) => {
+        Ok(_) => {
             *state.position.write() = PtzPosition::HOME;
             *state.velocity.write() = PtzVelocity::STOP;
         }
