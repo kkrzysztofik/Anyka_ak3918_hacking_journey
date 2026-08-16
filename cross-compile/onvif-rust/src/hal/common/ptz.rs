@@ -12,6 +12,7 @@
 
 use crate::platform::PlatformError;
 use crate::platform::PlatformResult;
+use serde::Serialize;
 
 // On ARM we use the Rust native driver; types from ptz/driver.rs (ak_drv_ptz.h omitted
 // from bindgen). On host builds the mirrored types in `common::sdk_types` stand in.
@@ -20,6 +21,38 @@ use crate::hal::anyka::ptz::{ptz_device, ptz_feedback_pin, ptz_turn_direction};
 
 #[cfg(use_stubs)]
 use super::{ptz_device, ptz_feedback_pin, ptz_turn_direction};
+
+/// Whether the kernel's own position accounting is live on this motor driver.
+///
+/// V500 boards accept `MOTOR_GET_STATUS`, return success, and write nothing into the
+/// caller's buffer. A step position read back from such a board is a zero, not a
+/// measurement, and rendering it as data misleads whoever is diagnosing the camera.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum StepReadback {
+    /// The kernel wrote plausible geometry back — step positions mean something.
+    Working,
+    /// The ioctl succeeded but wrote nothing. Step positions are always zero.
+    Unsupported,
+    /// Never probed, or the probe itself failed.
+    #[default]
+    Unknown,
+}
+
+impl StepReadback {
+    /// Combine two per-motor verdicts into one for the device.
+    ///
+    /// Pessimistic on purpose: if either motor cannot report its position, the pair
+    /// cannot, and a consumer has nothing useful to do with "pan works, tilt does not".
+    pub fn worst_of(a: Self, b: Self) -> Self {
+        use StepReadback::{Unknown, Unsupported, Working};
+        match (a, b) {
+            (Unsupported, _) | (_, Unsupported) => Unsupported,
+            (Unknown, _) | (_, Unknown) => Unknown,
+            (Working, Working) => Working,
+        }
+    }
+}
 
 /// Outcome of waiting for an in-flight motor turn to finish or be interrupted.
 ///
@@ -159,6 +192,15 @@ pub fn steps_to_degrees(steps: i32, cycle_steps: i32) -> PlatformResult<f32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_step_readback_worst_of_prefers_unsupported() {
+        use StepReadback::{Unknown, Unsupported, Working};
+        assert_eq!(StepReadback::worst_of(Working, Working), Working);
+        assert_eq!(StepReadback::worst_of(Working, Unknown), Unknown);
+        assert_eq!(StepReadback::worst_of(Unknown, Unsupported), Unsupported);
+        assert_eq!(StepReadback::worst_of(Unsupported, Working), Unsupported);
+    }
 
     #[test]
     fn test_degrees_to_steps() {
