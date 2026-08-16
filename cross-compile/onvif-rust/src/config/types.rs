@@ -153,9 +153,6 @@ impl AppConfig {
         range(&mut errors, "ptz.tilt_speed", self.ptz.tilt_speed, 0.0, 1.0);
         range(&mut errors, "ptz.zoom_speed", self.ptz.zoom_speed, 0.0, 1.0);
         range(&mut errors, "ptz.max_presets", self.ptz.max_presets, 1, 64);
-        range(&mut errors, "ptz.home_pan", self.ptz.home_pan, -1.0, 1.0);
-        range(&mut errors, "ptz.home_tilt", self.ptz.home_tilt, -1.0, 1.0);
-        range(&mut errors, "ptz.home_zoom", self.ptz.home_zoom, 0.0, 1.0);
         range(&mut errors, "ptz.pan_degrees_per_sec", self.ptz.pan_degrees_per_sec, 0.1, 360.0);
         range(&mut errors, "ptz.tilt_degrees_per_sec", self.ptz.tilt_degrees_per_sec, 0.1, 360.0);
 
@@ -611,12 +608,6 @@ pub struct PtzConfig {
     pub zoom_speed: f64,
     pub max_presets: u32,
     pub home_on_start: bool,
-    /// Serialized PTZ presets JSON string.
-    pub presets_json: String,
-    pub home_pan: f64,
-    pub home_tilt: f64,
-    pub home_zoom: f64,
-    pub next_preset_num: u32,
     /// Degrees per second the pan axis travels at the driver's fixed speed.
     /// Measured on hardware — see the design doc §4 for the procedure.
     pub pan_degrees_per_sec: f64,
@@ -633,11 +624,6 @@ impl Default for PtzConfig {
             zoom_speed: 0.5,
             max_presets: 16,
             home_on_start: true,
-            presets_json: String::new(),
-            home_pan: 0.0,
-            home_tilt: 0.0,
-            home_zoom: 0.0,
-            next_preset_num: 1,
             // ponytail: placeholders replaced by measurement in Task 14.
             pan_degrees_per_sec: 60.0,
             tilt_degrees_per_sec: 60.0,
@@ -1252,5 +1238,18 @@ file_name = "static"
         config.ptz.pan_degrees_per_sec = 0.0;
         let errors = config.validate().expect_err("a zero rate divides motion by nothing");
         assert!(errors.iter().any(|e| e.contains("pan_degrees_per_sec")));
+    }
+
+    #[test]
+    fn test_ptz_config_ignores_removed_legacy_keys() {
+        // A config file written by an older build still carries these keys.
+        let toml = r#"
+enabled = true
+presets_json = "{}"
+next_preset_num = 4
+home_pan = 0.5
+"#;
+        let parsed: PtzConfig = toml::from_str(toml).expect("legacy keys must not break loading");
+        assert!(parsed.enabled);
     }
 }
