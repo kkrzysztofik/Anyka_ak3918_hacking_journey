@@ -19,7 +19,7 @@
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use parking_lot::RwLock;
 use tokio::sync::{mpsc, oneshot};
@@ -39,6 +39,28 @@ use super::ptz_control::{
     PTZ_MAX_PAN_DEGREES, PTZ_MAX_TILT_DEGREES, PTZ_MIN_MOVE_THRESHOLD, PTZ_MIN_PAN_DEGREES,
     PTZ_MIN_TILT_DEGREES, PTZ_STOP_DIRECTIONS, direction_to_ffi, iter_ffi_directions,
 };
+
+/// Degrees per second each axis travels at the driver's fixed speed setting.
+///
+/// ponytail: plain constants, because the driver sets speed exactly once
+/// (`DEFAULT_SPEED`) and nothing varies it — a constant is as expressive as the
+/// hardware currently is. If variable speed ever lands these become a function of
+/// `motor_parm.speed_step`.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct PtzRates {
+    pub pan_deg_per_sec: f32,
+    pub tilt_deg_per_sec: f32,
+}
+
+impl PtzRates {
+    /// Convert from the configuration's `f64` degrees-per-second fields.
+    pub(crate) fn from_config(cfg: &crate::config::types::PtzConfig) -> Self {
+        Self {
+            pan_deg_per_sec: cfg.pan_degrees_per_sec as f32,
+            tilt_deg_per_sec: cfg.tilt_degrees_per_sec as f32,
+        }
+    }
+}
 
 /// The most recent motor step readback, per axis, with when it was taken.
 #[derive(Debug, Clone, Copy)]
@@ -62,15 +84,18 @@ pub(crate) struct PtzActorState {
     pub commands_completed: AtomicU32,
     /// Last `TurnOutcome.step_pos` observed per axis — never from a fresh ioctl.
     pub last_step: RwLock<Option<StepSample>>,
+    /// Per-axis degrees-per-second used by dead-reckoning integration.
+    pub rates: PtzRates,
 }
 
 impl PtzActorState {
-    pub(crate) fn new() -> Self {
+    pub(crate) fn new(rates: PtzRates) -> Self {
         Self {
             position: RwLock::new(PtzPosition::HOME),
             velocity: RwLock::new(PtzVelocity::STOP),
             commands_completed: AtomicU32::new(0),
             last_step: RwLock::new(None),
+            rates,
         }
     }
 
@@ -265,6 +290,27 @@ fn build_move_plan(
     plan
 }
 
+/// Accumulate dead-reckoned motion for one axis into the tracked position.
+///
+/// Sign convention matches `build_move_plan`: Right and Down are positive.
+/// There is no hardware readback to correct against — see the design doc.
+fn integrate_axis(state: &PtzActorState, direction: PtzDirection, elapsed: Duration) {
+    let seconds = elapsed.as_secs_f32();
+    let mut position = state.position.write();
+    match direction {
+        PtzDirection::Right | PtzDirection::Left => {
+            let sign = if matches!(direction, PtzDirection::Right) { 1.0 } else { -1.0 };
+            position.pan = (position.pan + sign * state.rates.pan_deg_per_sec * seconds)
+                .clamp(PTZ_MIN_PAN_DEGREES, PTZ_MAX_PAN_DEGREES);
+        }
+        PtzDirection::Down | PtzDirection::Up => {
+            let sign = if matches!(direction, PtzDirection::Down) { 1.0 } else { -1.0 };
+            position.tilt = (position.tilt + sign * state.rates.tilt_deg_per_sec * seconds)
+                .clamp(PTZ_MIN_TILT_DEGREES, PTZ_MAX_TILT_DEGREES);
+        }
+    }
+}
+
 /// Drain each started axis off the tokio workers; commit its target once it lands.
 ///
 /// A `TurnOutcome`/`PtzWaitOutcome` is used (never discarded): on interruption we
@@ -412,10 +458,69 @@ fn do_stop(ffi: &dyn PtzHalTrait, state: &PtzActorState) -> PlatformResult<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Duration;
+
+    /// Rates chosen so one second of motion equals exactly ten degrees, making
+    /// every expectation below readable by inspection.
+    fn test_state() -> PtzActorState {
+        PtzActorState::new(PtzRates {
+            pan_deg_per_sec: 10.0,
+            tilt_deg_per_sec: 10.0,
+        })
+    }
+
+    #[test]
+    fn test_integrate_pan_right_accumulates_positive_degrees() {
+        let state = test_state();
+        integrate_axis(&state, PtzDirection::Right, Duration::from_secs(2));
+        assert!((state.position.read().pan - 20.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_integrate_pan_left_accumulates_negative_degrees() {
+        let state = test_state();
+        integrate_axis(&state, PtzDirection::Left, Duration::from_secs(2));
+        assert!((state.position.read().pan + 20.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_integrate_tilt_down_is_positive_up_is_negative() {
+        let state = test_state();
+        integrate_axis(&state, PtzDirection::Down, Duration::from_secs(1));
+        assert!((state.position.read().tilt - 10.0).abs() < 0.01);
+        integrate_axis(&state, PtzDirection::Up, Duration::from_secs(3));
+        assert!((state.position.read().tilt + 20.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_integrate_accumulates_across_calls() {
+        let state = test_state();
+        integrate_axis(&state, PtzDirection::Right, Duration::from_secs(1));
+        integrate_axis(&state, PtzDirection::Right, Duration::from_secs(1));
+        assert!((state.position.read().pan - 20.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_integrate_clamps_to_pan_limit() {
+        let state = test_state();
+        // 100 seconds at 10 deg/s = 1000 degrees, far past the 350 limit.
+        integrate_axis(&state, PtzDirection::Right, Duration::from_secs(100));
+        assert!((state.position.read().pan - PTZ_MAX_PAN_DEGREES).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn test_integrate_clamps_to_negative_tilt_limit() {
+        let state = test_state();
+        integrate_axis(&state, PtzDirection::Up, Duration::from_secs(100));
+        assert!((state.position.read().tilt - PTZ_MIN_TILT_DEGREES).abs() < f32::EPSILON);
+    }
 
     #[test]
     fn test_actor_state_record_step_keeps_both_axes() {
-        let state = PtzActorState::new();
+        let state = PtzActorState::new(PtzRates {
+            pan_deg_per_sec: 60.0,
+            tilt_deg_per_sec: 60.0,
+        });
         assert!(state.last_step.read().is_none(), "nothing observed yet");
 
         state.record_step(true, 0);

@@ -43,7 +43,7 @@ use crate::platform::traits::{
     PtzVelocity, StepPos,
 };
 
-use super::ptz_actor::{self, PtzActorState, PtzCommand};
+use super::ptz_actor::{self, PtzActorState, PtzCommand, PtzRates};
 
 // Hardware constants matching the C adapter (ptz_adapter.c:31-34).
 pub(crate) const PTZ_MAX_PAN_DEGREES: f32 = 350.0;
@@ -133,7 +133,9 @@ impl AnykaPTZControl {
     }
 
     fn build(ffi: Arc<dyn PtzHalTrait>, continuous_timeout: Duration) -> Self {
-        let shared = Arc::new(PtzActorState::new());
+        // Default rates until Task 6 wires the real config through.
+        let rates = PtzRates::from_config(&crate::config::types::PtzConfig::default());
+        let shared = Arc::new(PtzActorState::new(rates));
         let (tx, rx) = mpsc::channel::<PtzCommand>(PTZ_CMD_QUEUE_CAP);
 
         let actor_ffi = Arc::clone(&ffi);
