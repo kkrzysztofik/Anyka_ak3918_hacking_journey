@@ -391,6 +391,11 @@ impl PTZControl for AnykaPTZControl {
         self.submit(|reply| PtzCommand::Stop { reply }).await
     }
 
+    async fn home(&self) -> PlatformResult<()> {
+        self.cancel_continuous_timeout().await;
+        self.submit(|reply| PtzCommand::Home { reply }).await
+    }
+
     async fn get_presets(&self) -> PlatformResult<Vec<PtzPreset>> {
         Ok(self.presets.read().values().cloned().collect())
     }
@@ -974,6 +979,35 @@ mod tests {
             "partial motion lost: pan = {}",
             pan
         );
+    }
+
+    #[tokio::test]
+    async fn test_home_runs_self_check_and_resets_position() {
+        // Build the mock from scratch so the strict `times(2)` for `ptz_check_self`
+        // is the only expectation on the method — mockall's multiple-expectation
+        // dispatch never gets crossed with the permissive default from
+        // `mock_with_open()`.
+        let mut mock = MockPtzHalTrait::new();
+        mock.expect_ptz_open().returning(|| Ok(()));
+        mock.expect_ptz_close().returning(|| Ok(()));
+        mock.expect_ptz_interrupt().returning(|| ());
+        mock.expect_ptz_start_turn().returning(|_, _| Ok(true));
+        mock.expect_ptz_wait_turn()
+            .returning(|_| Ok(TurnOutcome::default()));
+        mock.expect_ptz_stop().returning(|_| Ok(()));
+        // check_self runs once at open() and once more for the re-home.
+        mock.expect_ptz_check_self().times(2).returning(|_| Ok(()));
+
+        let ptz = create_opened(mock);
+        move_and_settle(&ptz, PtzPosition::new(90.0, 45.0, 1.0)).await.unwrap();
+
+        let before = ptz.shared.commands_completed.load(Ordering::SeqCst);
+        ptz.home().await.unwrap();
+        await_actor_completed(&ptz, before).await;
+
+        let pos = ptz.get_position().await.unwrap();
+        assert!(pos.pan.abs() < f32::EPSILON);
+        assert!(pos.tilt.abs() < f32::EPSILON);
     }
 
     #[tokio::test]

@@ -844,6 +844,11 @@ impl PTZControl for StubPTZControl {
         Ok(())
     }
 
+    async fn home(&self) -> PlatformResult<()> {
+        *self.position.write() = PtzPosition::HOME;
+        Ok(())
+    }
+
     async fn get_presets(&self) -> PlatformResult<Vec<PtzPreset>> {
         Ok(self.presets.read().values().cloned().collect())
     }

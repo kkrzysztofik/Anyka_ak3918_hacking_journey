@@ -453,6 +453,13 @@ pub trait PTZControl: Send + Sync {
     /// Stop all PTZ movement.
     async fn stop(&self) -> PlatformResult<()>;
 
+    /// Run the limit-switch sweep and reset tracked position to `HOME`.
+    ///
+    /// This is the drift-reset primitive: the platform-layer sweep is the only
+    /// absolute reference the hardware offers, so `GotoHomePosition` callers
+    /// must run it before any dead-reckoned leg to it.
+    async fn home(&self) -> PlatformResult<()>;
+
     /// Get all presets.
     async fn get_presets(&self) -> PlatformResult<Vec<PtzPreset>>;
 

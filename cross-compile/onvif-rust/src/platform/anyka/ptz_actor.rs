@@ -27,9 +27,9 @@ use tokio::sync::{mpsc, oneshot};
 use crate::hal::anyka::sdk::PtzDirection;
 
 #[cfg(not(use_stubs))]
-use crate::hal::anyka::ptz::ptz_turn_direction;
+use crate::hal::anyka::ptz::{ptz_feedback_pin, ptz_turn_direction};
 #[cfg(use_stubs)]
-use crate::hal::common::ptz_turn_direction;
+use crate::hal::common::{ptz_feedback_pin, ptz_turn_direction};
 
 use crate::hal::common::ptz::{PtzHalTrait, TurnOutcome};
 
@@ -139,6 +139,13 @@ pub(crate) enum PtzCommand {
     Stop {
         reply: oneshot::Sender<PlatformResult<()>>,
     },
+    /// Run the limit-switch sweep and reset tracked position to `HOME`.
+    ///
+    /// Replied on acceptance: the sweep can outrun `PTZ_CMD_TIMEOUT` and ONVIF treats
+    /// these moves as asynchronous (same as `MoveTo`).
+    Home {
+        reply: oneshot::Sender<PlatformResult<()>>,
+    },
 }
 
 impl PtzCommand {
@@ -152,7 +159,8 @@ impl PtzCommand {
         match self {
             PtzCommand::MoveTo { reply, .. }
             | PtzCommand::Continuous { reply, .. }
-            | PtzCommand::Stop { reply } => reply,
+            | PtzCommand::Stop { reply }
+            | PtzCommand::Home { reply } => reply,
         }
     }
 }
@@ -205,6 +213,29 @@ fn execute(ffi: &dyn PtzHalTrait, state: &PtzActorState, cmd: PtzCommand) {
         PtzCommand::Stop { reply } => {
             let result = do_stop(ffi, state);
             let _ = reply.send(result);
+        }
+        PtzCommand::Home { reply } => {
+            // Reply on acceptance: the limit-switch sweep can outrun PTZ_CMD_TIMEOUT,
+            // and ONVIF treats these moves as asynchronous (same as MoveTo).
+            let _ = reply.send(Ok(()));
+            do_home(ffi, state);
+        }
+    }
+}
+
+/// Run the limit-switch sweep and reset tracked position to `HOME`.
+///
+/// The sweep is the only absolute reference the hardware offers (`MOTOR_GET_STATUS`
+/// is a silent no-op on V500), so this is the drift reset that every other move
+/// integrators against.
+fn do_home(ffi: &dyn PtzHalTrait, state: &PtzActorState) {
+    match ffi.ptz_check_self(ptz_feedback_pin::PTZ_FEEDBACK_PIN_EXIST) {
+        Ok(()) => {
+            *state.position.write() = PtzPosition::HOME;
+            *state.velocity.write() = PtzVelocity::STOP;
+        }
+        Err(e) => {
+            tracing::error!("PTZ re-home sweep failed, position unchanged: {}", e);
         }
     }
 }
