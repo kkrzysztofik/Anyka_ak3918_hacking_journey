@@ -27,6 +27,16 @@ import {
   type PlayerState,
   type StreamStats,
 } from '@/components/common/LiveVideoPlayer';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { Button } from '@/components/ui/button';
 import {
   SettingsCard,
@@ -184,6 +194,12 @@ export default function LiveViewPage() {
         description: error instanceof Error ? error.message : 'An error occurred',
       });
     },
+    // Clear on settle, not on success: a failed delete must not leave the row
+    // disabled forever.
+    onSettled: () => {
+      setPendingToken(null);
+      setPresetToDelete(null);
+    },
   });
 
   const isMovingRef = useRef(false);
@@ -215,6 +231,12 @@ export default function LiveViewPage() {
     },
     [profileToken, gotoPresetMutation],
   );
+
+  const handleConfirmDelete = useCallback(() => {
+    if (!profileToken || !presetToDelete) return;
+    setPendingToken(presetToDelete.token);
+    removePresetMutation.mutate(presetToDelete.token);
+  }, [profileToken, presetToDelete, removePresetMutation]);
 
   return (
     <div className="flex h-full flex-col gap-6">
@@ -783,6 +805,37 @@ export default function LiveViewPage() {
           </SettingsCard>
         </fieldset>
       </div>
+
+      {/* Delete Confirmation */}
+      <AlertDialog open={!!presetToDelete} onOpenChange={() => setPresetToDelete(null)}>
+        <AlertDialogContent
+          className="border-border bg-card text-foreground"
+          data-testid="liveview-delete-preset-dialog"
+        >
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-foreground">Delete Preset?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Delete the saved position "{presetToDelete?.name || presetToDelete?.token}"? This
+              cannot be undone; the camera will not move.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel
+              className="border-border bg-transparent"
+              data-testid="liveview-delete-preset-cancel"
+            >
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleConfirmDelete}
+              className="bg-accent-red text-white hover:bg-red-700"
+              data-testid="liveview-delete-preset-confirm"
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

@@ -6,6 +6,7 @@ import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { renderWithProviders } from '@/test/componentTestHelpers';
+import { testDialogClosed, testDialogOpen } from '@/test/dialogTestHelpers';
 
 import LiveViewPage from './LiveViewPage';
 
@@ -524,7 +525,75 @@ describe('LiveViewPage', () => {
 
       await user.click(screen.getByTestId('liveview-preset-preset1-delete-button'));
 
+      await testDialogOpen('liveview-delete-preset-dialog');
       expect(mockRemovePreset).not.toHaveBeenCalled();
+    });
+
+    it('should remove the preset only after the delete is confirmed', async () => {
+      const user = userEvent.setup();
+      const { removePreset: mockRemovePreset } = await import('@/services/ptzService');
+      renderWithProviders(<LiveViewPage />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('liveview-preset-preset2-delete-button')).toBeInTheDocument();
+      });
+
+      await user.click(screen.getByTestId('liveview-preset-preset2-delete-button'));
+      await testDialogOpen('liveview-delete-preset-dialog');
+      await user.click(screen.getByTestId('liveview-delete-preset-confirm'));
+
+      await waitFor(() => {
+        expect(mockRemovePreset).toHaveBeenCalledWith('ProfileToken1', 'preset2');
+      });
+    });
+
+    it('should never remove a preset when the delete is cancelled', async () => {
+      const user = userEvent.setup();
+      const { removePreset: mockRemovePreset } = await import('@/services/ptzService');
+      renderWithProviders(<LiveViewPage />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('liveview-preset-preset1-delete-button')).toBeInTheDocument();
+      });
+
+      await user.click(screen.getByTestId('liveview-preset-preset1-delete-button'));
+      await testDialogOpen('liveview-delete-preset-dialog');
+      await user.click(screen.getByTestId('liveview-delete-preset-cancel'));
+
+      await waitFor(() => {
+        testDialogClosed('liveview-delete-preset-dialog');
+      });
+      expect(mockRemovePreset).not.toHaveBeenCalled();
+    });
+
+    it('should re-enable the row after a failed delete', async () => {
+      const user = userEvent.setup();
+      const { removePreset: mockRemovePreset } = await import('@/services/ptzService');
+      vi.mocked(mockRemovePreset).mockRejectedValueOnce(new Error('Device busy'));
+      renderWithProviders(<LiveViewPage />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('liveview-preset-preset1-delete-button')).toBeInTheDocument();
+      });
+
+      await user.click(screen.getByTestId('liveview-preset-preset1-delete-button'));
+      await testDialogOpen('liveview-delete-preset-dialog');
+      await user.click(screen.getByTestId('liveview-delete-preset-confirm'));
+
+      await waitFor(() => {
+        expect(screen.getByTestId('liveview-preset-preset1-button')).toBeEnabled();
+      });
+    });
+
+    it('falls back to the token for a preset the device never named', async () => {
+      const { getPresets } = await import('@/services/ptzService');
+      vi.mocked(getPresets).mockResolvedValueOnce([{ token: 'preset7', name: '' }]);
+      renderWithProviders(<LiveViewPage />);
+
+      expect(await screen.findByTestId('liveview-preset-preset7-label')).toHaveTextContent(
+        'preset7',
+      );
+      expect(screen.getByLabelText('Delete preset preset7')).toBeInTheDocument();
     });
 
     it('labels the per-preset icon buttons for screen readers', async () => {
