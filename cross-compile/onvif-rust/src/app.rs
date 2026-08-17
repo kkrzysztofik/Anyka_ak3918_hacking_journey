@@ -13,7 +13,7 @@
 //! - **Dependency injection**: Components receive dependencies via constructors
 //! - **Graceful degradation**: Optional components can fail without stopping the app
 
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 use tokio::sync::broadcast;
 use tokio::task::JoinHandle;
@@ -104,6 +104,12 @@ pub struct AppState {
     profile_persistence: Option<PersistenceHandle>,
     /// Imaging settings store (optional; production wires persistence at startup).
     imaging_settings_store: Option<Arc<ImagingSettingsStore>>,
+    /// WS-Discovery handle, populated after the discovery phase starts.
+    ///
+    /// The server (and therefore DeviceService) is constructed before discovery,
+    /// so this is late-bound. Empty is legitimate: discovery may be disabled or
+    /// may have failed into degraded mode.
+    discovery_handle: Arc<OnceLock<WsDiscoveryHandle>>,
 }
 
 impl AppState {
@@ -174,6 +180,11 @@ impl AppState {
     pub fn imaging_settings_store(&self) -> Option<&Arc<ImagingSettingsStore>> {
         self.imaging_settings_store.as_ref()
     }
+
+    /// Late-bound WS-Discovery handle slot.
+    pub fn discovery_handle(&self) -> &Arc<OnceLock<WsDiscoveryHandle>> {
+        &self.discovery_handle
+    }
 }
 
 impl std::fmt::Debug for AppState {
@@ -237,6 +248,7 @@ pub struct AppStateBuilder {
     profile_storage: Option<Arc<ProfileStorage>>,
     profile_persistence: Option<PersistenceHandle>,
     imaging_settings_store: Option<Arc<ImagingSettingsStore>>,
+    discovery_handle: Option<Arc<OnceLock<WsDiscoveryHandle>>>,
 }
 
 /// Error type for AppState construction failures.
@@ -331,6 +343,12 @@ impl AppStateBuilder {
         self
     }
 
+    /// Set the late-bound WS-Discovery handle slot.
+    pub fn discovery_handle(mut self, handle: Arc<OnceLock<WsDiscoveryHandle>>) -> Self {
+        self.discovery_handle = Some(handle);
+        self
+    }
+
     /// Build the `AppState`, returning an error if required components are missing.
     pub fn build(self) -> Result<AppState, AppStateError> {
         Ok(AppState {
@@ -360,6 +378,9 @@ impl AppStateBuilder {
                 .ok_or_else(|| AppStateError::MissingComponent("profile_storage".to_string()))?,
             profile_persistence: self.profile_persistence,
             imaging_settings_store: self.imaging_settings_store,
+            discovery_handle: self
+                .discovery_handle
+                .unwrap_or_else(|| Arc::new(OnceLock::new())),
         })
     }
 }
@@ -1177,6 +1198,9 @@ impl Application {
         progress.begin_phase(StartupPhase::Discovery);
         let (discovery, discovery_task) =
             Self::start_discovery_phase(&config_runtime, port, &mut progress).await;
+        if let Some(ref disc) = discovery {
+            let _ = app_state.discovery_handle().set(disc.clone());
+        }
         progress.complete_phase();
 
         // Phase 6: Streaming (optional, gracefully degrades)

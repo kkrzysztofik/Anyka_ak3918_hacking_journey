@@ -3,10 +3,11 @@
 //! This module contains the DeviceService struct and the ServiceHandler trait implementation.
 //! Uses common::dispatch helpers to reduce boilerplate in the handle_operation match block.
 
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use crate::config::{ConfigRuntime, UserStorage};
 use crate::onvif::common::{dispatch_async, dispatch_sync};
+use crate::onvif::discovery::WsDiscoveryHandle;
 use crate::onvif::dispatcher::ServiceHandler;
 use crate::onvif::error::{OnvifError, OnvifResult};
 use crate::onvif::types::device::{
@@ -47,6 +48,8 @@ pub struct DeviceService {
     pub(crate) store: DeviceStoreRef,
     /// Platform abstraction (optional for backward compatibility).
     pub(crate) platform: Option<Arc<dyn Platform>>,
+    /// WS-Discovery handle, late-bound after the discovery phase starts.
+    discovery_handle: Arc<OnceLock<WsDiscoveryHandle>>,
 }
 
 impl DeviceService {
@@ -57,7 +60,17 @@ impl DeviceService {
         Self {
             store,
             platform: None,
+            discovery_handle: Arc::new(OnceLock::new()),
         }
+    }
+
+    /// Bind a late-populated WS-Discovery handle slot.
+    pub fn with_discovery_handle(
+        mut self,
+        discovery_handle: Arc<OnceLock<WsDiscoveryHandle>>,
+    ) -> Self {
+        self.discovery_handle = discovery_handle;
+        self
     }
 
     /// Create a new Device Service with configuration and platform.
@@ -71,6 +84,7 @@ impl DeviceService {
         Self {
             store,
             platform: Some(platform),
+            discovery_handle: Arc::new(OnceLock::new()),
         }
     }
 
@@ -190,7 +204,14 @@ impl DeviceService {
         &self,
         request: SetDiscoveryMode,
     ) -> Result<SetDiscoveryModeResponse, OnvifError> {
-        self.store.config.write().discovery.mode = request.discovery_mode;
+        self.store.config.write().discovery.mode = request.discovery_mode.clone();
+        if let Some(handle) = self.discovery_handle.get() {
+            handle
+                .set_discovery_mode(request.discovery_mode.into())
+                .await;
+        } else {
+            tracing::debug!("No WS-Discovery handle; discovery mode persisted for next boot");
+        }
         Ok(SetDiscoveryModeResponse {})
     }
 
@@ -231,6 +252,23 @@ impl DeviceService {
 // Scope mutation helpers (shared by the public handlers and the dispatcher)
 // ========================================================================
 
+/// Push merged scopes to WS-Discovery if the handle has been bound.
+async fn push_scopes_to_discovery(service: &DeviceService) {
+    if let Some(handle) = service.discovery_handle.get() {
+        let (ptz_enabled, configured) = {
+            let c = service.store.config.read();
+            (c.ptz.enabled, c.device.scopes.clone())
+        };
+        let announced: Vec<String> = discovery_ops::merge_scopes(ptz_enabled, &configured)
+            .into_iter()
+            .map(|s| s.scope_item)
+            .collect();
+        handle.set_scopes(announced).await;
+    } else {
+        tracing::debug!("No WS-Discovery handle; scope change persisted for next boot");
+    }
+}
+
 /// Replace the configurable scopes. Fixed scopes are derived, never stored.
 async fn apply_set_scopes(
     service: &DeviceService,
@@ -243,6 +281,7 @@ async fn apply_set_scopes(
     let count = request.scopes.len();
     service.store.config.write().device.scopes = request.scopes;
     tracing::info!("SetScopes: updated to {count} configurable scopes");
+    push_scopes_to_discovery(service).await;
     Ok(SetScopesResponse {})
 }
 
@@ -261,6 +300,7 @@ async fn apply_add_scopes(
     };
     configurable.extend(request.scope_item);
     service.store.config.write().device.scopes = configurable;
+    push_scopes_to_discovery(service).await;
     Ok(AddScopesResponse {})
 }
 
@@ -283,6 +323,7 @@ async fn apply_remove_scopes(
 
     service.store.config.write().device.scopes = configurable;
     tracing::info!("RemoveScopes: removed {} scopes", removed.len());
+    push_scopes_to_discovery(service).await;
 
     Ok(RemoveScopesResponse {
         scope_item: removed,
@@ -603,6 +644,67 @@ mod tests {
             Arc::new(ConfigRuntime::new(app)),
             Arc::new(crate::platform::StubPlatform::new()),
         )
+    }
+
+    fn test_service_with_discovery(
+        slot: Arc<std::sync::OnceLock<crate::onvif::discovery::WsDiscoveryHandle>>,
+    ) -> DeviceService {
+        DeviceService::new(Arc::new(UserStorage::new())).with_discovery_handle(slot)
+    }
+
+    #[tokio::test]
+    async fn test_set_scopes_reaches_discovery_and_bumps_metadata_version() {
+        let discovery = crate::onvif::discovery::WsDiscovery::new(
+            crate::onvif::discovery::DiscoveryConfig::default(),
+        );
+        let (handle, task) = discovery.run_service().await.unwrap();
+
+        let slot = Arc::new(std::sync::OnceLock::new());
+        assert!(slot.set(handle.clone()).is_ok());
+        let service = test_service_with_discovery(slot);
+
+        let before_version = handle.metadata_version();
+
+        apply_set_scopes(
+            &service,
+            SetScopes {
+                scopes: vec!["onvif://www.onvif.org/name/Renamed".to_string()],
+            },
+        )
+        .await
+        .unwrap();
+
+        let announced = handle.scopes().await;
+        assert!(
+            announced.iter().any(|s| s.contains("name/Renamed")),
+            "SetScopes must change what WS-Discovery announces"
+        );
+        assert!(
+            handle.metadata_version() > before_version,
+            "ONVIF Sec. 4.1 requires metadata_version to increment on config change"
+        );
+
+        let _ = handle.stop().await;
+        task.abort();
+    }
+
+    #[tokio::test]
+    async fn test_set_scopes_succeeds_when_discovery_is_disabled() {
+        let service = test_service_with_discovery(Arc::new(std::sync::OnceLock::new()));
+
+        apply_set_scopes(
+            &service,
+            SetScopes {
+                scopes: vec!["onvif://www.onvif.org/name/Cam".to_string()],
+            },
+        )
+        .await
+        .expect("missing discovery handle is not a fault");
+
+        assert_eq!(
+            service.store.config.read().device.scopes,
+            vec!["onvif://www.onvif.org/name/Cam"]
+        );
     }
 
     #[tokio::test]
