@@ -442,12 +442,17 @@ impl OnvifServer {
         tracing::debug!("Registering Device Service");
         let discovery_handle = Arc::clone(app_state.discovery_handle());
         let device_service = if let Some(platform) = app_state.platform() {
-            DeviceService::with_config_and_platform(
+            let service = DeviceService::with_config_and_platform(
                 Arc::clone(app_state.user_storage()),
                 Arc::clone(app_state.config()),
                 Arc::clone(platform),
             )
-            .with_discovery_handle(discovery_handle)
+            .with_discovery_handle(discovery_handle);
+            if let Some(handle) = app_state.config_persistence() {
+                service.with_config_persistence(handle.clone())
+            } else {
+                service
+            }
         } else {
             DeviceService::new(Arc::clone(app_state.user_storage()))
                 .with_discovery_handle(discovery_handle)

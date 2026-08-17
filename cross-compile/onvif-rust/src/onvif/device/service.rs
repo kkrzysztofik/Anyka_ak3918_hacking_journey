@@ -5,7 +5,7 @@
 
 use std::sync::{Arc, OnceLock};
 
-use crate::config::{ConfigRuntime, UserStorage};
+use crate::config::{ConfigRuntime, PersistenceHandle, UserStorage};
 use crate::onvif::common::{dispatch_async, dispatch_sync};
 use crate::onvif::discovery::WsDiscoveryHandle;
 use crate::onvif::dispatcher::ServiceHandler;
@@ -70,6 +70,12 @@ impl DeviceService {
         discovery_handle: Arc<OnceLock<WsDiscoveryHandle>>,
     ) -> Self {
         self.discovery_handle = discovery_handle;
+        self
+    }
+
+    /// Attach debounced config.toml persistence for identification mutations.
+    pub fn with_config_persistence(self, handle: PersistenceHandle) -> Self {
+        self.store.set_persistence(handle);
         self
     }
 
@@ -156,7 +162,9 @@ impl DeviceService {
         &self,
         request: SetHostname,
     ) -> Result<SetHostnameResponse, OnvifError> {
-        network_ops::handle_set_hostname(&self.store.config, request)
+        let response = network_ops::handle_set_hostname(&self.store.config, request)?;
+        self.store.request_save();
+        Ok(response)
     }
 
     /// Handle GetScopes request.
@@ -212,6 +220,7 @@ impl DeviceService {
         } else {
             tracing::debug!("No WS-Discovery handle; discovery mode persisted for next boot");
         }
+        self.store.request_save();
         Ok(SetDiscoveryModeResponse {})
     }
 
@@ -282,6 +291,7 @@ async fn apply_set_scopes(
     service.store.config.write().device.scopes = request.scopes;
     tracing::info!("SetScopes: updated to {count} configurable scopes");
     push_scopes_to_discovery(service).await;
+    service.store.request_save();
     Ok(SetScopesResponse {})
 }
 
@@ -305,6 +315,7 @@ async fn apply_add_scopes(
     }
     service.store.config.write().device.scopes = configurable;
     push_scopes_to_discovery(service).await;
+    service.store.request_save();
     Ok(AddScopesResponse {})
 }
 
@@ -334,6 +345,7 @@ async fn apply_remove_scopes(
     service.store.config.write().device.scopes = configurable;
     tracing::info!("RemoveScopes: removed {} scopes", removed.len());
     push_scopes_to_discovery(service).await;
+    service.store.request_save();
 
     Ok(RemoveScopesResponse {
         scope_item: removed,
@@ -444,7 +456,7 @@ impl ServiceHandler for DeviceService {
             }),
 
             "SetHostname" => dispatch_sync(body_xml, |request: SetHostname| {
-                network_ops::handle_set_hostname(&config, request)
+                self.handle_set_hostname(request)
             }),
 
             // Network Operations
@@ -625,8 +637,13 @@ impl ServiceHandler for DeviceService {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{PasswordManager, UserLevel, UserStorage};
+    use crate::config::{
+        ConfigPersistenceService, ConfigStorage, PasswordManager, UserLevel, UserStorage,
+    };
     use std::sync::Arc;
+    use std::time::Duration;
+    use tempfile::NamedTempFile;
+    use tokio::sync::broadcast;
 
     const TEST_PASSWORD: &str = "test_fixture_pwd_not_real";
 
@@ -660,6 +677,34 @@ mod tests {
         slot: Arc<std::sync::OnceLock<crate::onvif::discovery::WsDiscoveryHandle>>,
     ) -> DeviceService {
         DeviceService::new(Arc::new(UserStorage::new())).with_discovery_handle(slot)
+    }
+
+    async fn spawn_config_persistence(
+        config: Arc<ConfigRuntime>,
+    ) -> (
+        crate::config::PersistenceHandle,
+        NamedTempFile,
+        tokio::task::JoinHandle<()>,
+        broadcast::Sender<()>,
+    ) {
+        let temp_file = NamedTempFile::new().unwrap();
+        let storage = ConfigStorage::new(temp_file.path().to_str().unwrap());
+        let (service, handle) = ConfigPersistenceService::new(config, storage, 50);
+        let (shutdown_tx, shutdown_rx) = broadcast::channel(1);
+        let task = tokio::spawn(service.run(shutdown_rx));
+        (handle, temp_file, task, shutdown_tx)
+    }
+
+    fn test_service_with_persistence(
+        config: Arc<ConfigRuntime>,
+        persistence: crate::config::PersistenceHandle,
+    ) -> DeviceService {
+        DeviceService::with_config_and_platform(
+            Arc::new(UserStorage::new()),
+            config,
+            Arc::new(crate::platform::StubPlatform::new()),
+        )
+        .with_config_persistence(persistence)
     }
 
     #[tokio::test]
@@ -718,9 +763,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_set_scopes_persists_to_config_and_bumps_generation() {
-        let service = test_service();
-        let before = service.store.config.generation();
+    async fn test_set_scopes_requests_config_disk_persistence() {
+        let config = Arc::new(ConfigRuntime::new(crate::config::AppConfig::default()));
+        let (handle, temp_file, task, shutdown_tx) =
+            spawn_config_persistence(Arc::clone(&config)).await;
+        let service = test_service_with_persistence(config, handle);
 
         apply_set_scopes(
             &service,
@@ -731,14 +778,55 @@ mod tests {
         .await
         .unwrap();
 
-        assert_eq!(
-            service.store.config.read().device.scopes,
-            vec!["onvif://www.onvif.org/name/Cam"]
-        );
-        assert!(
-            service.store.config.generation() > before,
-            "generation must bump so ConfigPersistenceService flushes"
-        );
+        tokio::time::sleep(Duration::from_millis(150)).await;
+        let _ = shutdown_tx.send(());
+        task.await.unwrap();
+
+        let content = std::fs::read_to_string(temp_file.path()).unwrap();
+        assert!(content.contains("onvif://www.onvif.org/name/Cam"));
+    }
+
+    #[tokio::test]
+    async fn test_set_discovery_mode_requests_config_disk_persistence() {
+        let config = Arc::new(ConfigRuntime::new(crate::config::AppConfig::default()));
+        let (handle, temp_file, task, shutdown_tx) =
+            spawn_config_persistence(Arc::clone(&config)).await;
+        let service = test_service_with_persistence(config, handle);
+
+        service
+            .handle_set_discovery_mode(SetDiscoveryMode {
+                discovery_mode: crate::onvif::types::common::DiscoveryMode::NonDiscoverable,
+            })
+            .await
+            .unwrap();
+
+        tokio::time::sleep(Duration::from_millis(150)).await;
+        let _ = shutdown_tx.send(());
+        task.await.unwrap();
+
+        let content = std::fs::read_to_string(temp_file.path()).unwrap();
+        assert!(content.contains("NonDiscoverable"));
+    }
+
+    #[tokio::test]
+    async fn test_set_hostname_requests_config_disk_persistence() {
+        let config = Arc::new(ConfigRuntime::new(crate::config::AppConfig::default()));
+        let (handle, temp_file, task, shutdown_tx) =
+            spawn_config_persistence(Arc::clone(&config)).await;
+        let service = test_service_with_persistence(config, handle);
+
+        service
+            .handle_set_hostname(SetHostname {
+                name: "deploy-host".to_string(),
+            })
+            .unwrap();
+
+        tokio::time::sleep(Duration::from_millis(150)).await;
+        let _ = shutdown_tx.send(());
+        task.await.unwrap();
+
+        let content = std::fs::read_to_string(temp_file.path()).unwrap();
+        assert!(content.contains("deploy-host"));
     }
 
     #[tokio::test]
