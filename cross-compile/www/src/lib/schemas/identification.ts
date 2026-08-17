@@ -16,10 +16,14 @@ const scopeItemSchema = z
   .min(1, 'Scope cannot be empty')
   .max(256, 'Scope is too long')
   .startsWith('onvif://www.onvif.org/', 'Scope must start with onvif://www.onvif.org/')
-  .refine(
-    (scope) => !/[\s\u0000-\u001f]/.test(scope),
-    'Scope cannot contain spaces or control characters',
-  );
+  .refine((scope) => {
+    for (const character of scope) {
+      if (character.charCodeAt(0) <= 32) {
+        return false;
+      }
+    }
+    return true;
+  }, 'Scope cannot contain spaces or control characters');
 
 const scopeSchema = z.object({
   scopeDef: z.enum(['Fixed', 'Configurable']),
@@ -42,4 +46,5 @@ export const identificationSchema = z.object({
   scopes: z.array(scopeSchema).default([]),
 });
 
-export type IdentificationFormData = z.infer<typeof identificationSchema>;
+export type IdentificationFormInput = z.input<typeof identificationSchema>;
+export type IdentificationFormData = z.output<typeof identificationSchema>;

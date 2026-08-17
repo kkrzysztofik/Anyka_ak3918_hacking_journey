@@ -48,7 +48,11 @@ import {
   StatusCardItem,
 } from '@/components/ui/status-card';
 import { Switch } from '@/components/ui/switch';
-import { type IdentificationFormData, identificationSchema } from '@/lib/schemas/identification';
+import {
+  type IdentificationFormData,
+  type IdentificationFormInput,
+  identificationSchema,
+} from '@/lib/schemas/identification';
 import {
   type DeviceIdentification,
   type DiscoveryMode,
@@ -95,7 +99,7 @@ export default function IdentificationPage() {
     queryFn: getNetworkInterfaces,
   });
 
-  const form = useForm<IdentificationFormData>({
+  const form = useForm<IdentificationFormInput, unknown, IdentificationFormData>({
     resolver: zodResolver(identificationSchema),
     defaultValues: {
       deviceInfo: {
