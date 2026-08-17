@@ -57,6 +57,25 @@ pub fn handle_get_scopes_from_vec(
     })
 }
 
+/// Merge derived fixed scopes with the configured configurable ones.
+///
+/// Fixed scopes are never stored: they follow device capabilities, so a PTZ
+/// config change is reflected with no migration and a client cannot persist a
+/// bogus fixed scope.
+pub fn merge_scopes(ptz_enabled: bool, configured: &[String]) -> Vec<Scope> {
+    let mut scopes: Vec<Scope> = default_scopes(ptz_enabled)
+        .into_iter()
+        .filter(|s| matches!(s.scope_def, ScopeDefinition::Fixed))
+        .collect();
+
+    scopes.extend(configured.iter().map(|item| Scope {
+        scope_def: ScopeDefinition::Configurable,
+        scope_item: item.clone(),
+    }));
+
+    scopes
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -79,5 +98,31 @@ mod tests {
                 .iter()
                 .any(|s| s.scope_item == "onvif://www.onvif.org/type/ptz")
         );
+    }
+
+    #[test]
+    fn test_merged_scopes_combine_fixed_and_configured() {
+        let configured = vec!["onvif://www.onvif.org/name/Cam".to_string()];
+        let merged = merge_scopes(true, &configured);
+
+        // Fixed scopes are derived, never stored.
+        assert!(
+            merged
+                .iter()
+                .any(|s| s.scope_item == "onvif://www.onvif.org/type/ptz"
+                    && matches!(s.scope_def, ScopeDefinition::Fixed))
+        );
+        assert!(
+            merged
+                .iter()
+                .any(|s| s.scope_item == "onvif://www.onvif.org/name/Cam"
+                    && matches!(s.scope_def, ScopeDefinition::Configurable))
+        );
+    }
+
+    #[test]
+    fn test_merged_scopes_omit_ptz_when_disabled() {
+        let merged = merge_scopes(false, &[]);
+        assert!(!merged.iter().any(|s| s.scope_item.ends_with("/type/ptz")));
     }
 }

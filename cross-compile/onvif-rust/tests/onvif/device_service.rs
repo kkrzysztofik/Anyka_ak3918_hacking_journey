@@ -208,6 +208,12 @@ fn test_set_hostname_invalid_empty() {
 #[tokio::test]
 async fn test_get_scopes_includes_fixed_and_configurable() {
     let service = create_test_service();
+    service
+        .handle_set_scopes(SetScopes {
+            scopes: vec!["onvif://www.onvif.org/name/Cam".to_string()],
+        })
+        .await
+        .unwrap();
 
     let response = service.handle_get_scopes(GetScopes {}).await.unwrap();
 
