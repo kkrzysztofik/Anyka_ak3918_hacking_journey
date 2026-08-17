@@ -1179,10 +1179,9 @@ mod tests {
     #[tokio::test]
     async fn test_add_scopes_is_idempotent() {
         let service = test_service();
-        let request =
-            || AddScopes {
-                scope_item: vec!["onvif://www.onvif.org/name/Cam".to_string()],
-            };
+        let request = || AddScopes {
+            scope_item: vec!["onvif://www.onvif.org/name/Cam".to_string()],
+        };
 
         apply_add_scopes(&service, request()).await.unwrap();
         apply_add_scopes(&service, request()).await.unwrap();
