@@ -90,8 +90,8 @@ hostname = "ipcam"
 # Device UUID (leave empty to auto-generate)
 uuid = ""
 
-# Configurable ONVIF scopes (comma-separated, leave empty for defaults)
-scopes = ""
+# Configurable ONVIF scopes. Fixed scopes are derived at boot, never stored.
+scopes = []
 
 # ISP sensor config file path (leave empty for auto-detection)
 # Auto-detection searches: /mnt/anyka_hack/onvif/, /etc/jffs2/, /usr/local/

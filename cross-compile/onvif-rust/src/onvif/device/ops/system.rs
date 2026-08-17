@@ -405,9 +405,9 @@ mod tests {
         let config = create_test_config();
         let response = handle_get_device_information(&None, &config).await.unwrap();
 
-        // Default values from config - these should always be present
-        assert_eq!(response.manufacturer, "Anyka");
-        assert_eq!(response.model, "AK3918 Camera");
+        // Empty config identity means not overridden (platform descriptor wins in Task 8).
+        assert_eq!(response.manufacturer, "");
+        assert_eq!(response.model, "");
         assert_eq!(
             response.firmware_version,
             crate::build_version(),

@@ -132,7 +132,7 @@ model = "TestModel"
     fn test_config_storage_defaults() {
         let config = AppConfig::default();
         assert_eq!(config.server.port, 80);
-        assert_eq!(config.device.manufacturer, "Anyka");
+        assert_eq!(config.device.manufacturer, "");
     }
 
     #[tokio::test]
@@ -164,7 +164,7 @@ manufacturer = "LoadTest"
     fn test_config_storage_load_or_default() {
         let config = ConfigStorage::load_or_default("/nonexistent/path/config.toml").unwrap();
         assert_eq!(config.server.port, 80);
-        assert_eq!(config.device.manufacturer, "Anyka");
+        assert_eq!(config.device.manufacturer, "");
     }
 
     #[test]

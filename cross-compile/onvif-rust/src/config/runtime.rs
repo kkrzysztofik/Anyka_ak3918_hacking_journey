@@ -177,7 +177,7 @@ mod tests {
         let runtime = ConfigRuntime::new(AppConfig::default());
         let c = runtime.read();
         assert_eq!(c.server.port, 80);
-        assert_eq!(c.device.manufacturer, "Anyka");
+        assert_eq!(c.device.manufacturer, "");
         assert!(c.server.auth_enabled);
         assert!((c.ptz.pan_speed - 0.5).abs() < f64::EPSILON);
     }
