@@ -55,7 +55,9 @@ pub fn parse_wpa_status(text: &str, interface: &str) -> WifiDiagnostics {
     let channel = frequency_mhz.and_then(frequency_to_channel);
     let security = fields.get("key_mgmt").map(|value| map_key_mgmt(value));
     let ssid = fields.get("ssid").map(|value| value.to_string());
-    let signal_dbm = fields.get("signal").and_then(|value| value.parse().ok());
+    let signal_dbm = fields
+        .get("signal")
+        .and_then(|value| value.parse().ok());
 
     WifiDiagnostics {
         interface: interface.to_string(),
@@ -65,6 +67,33 @@ pub fn parse_wpa_status(text: &str, interface: &str) -> WifiDiagnostics {
         channel,
         security,
         signal_dbm,
+    }
+}
+
+/// Parse `Frequency:2.437 GHz` from `iwconfig` output (Anyka wpa_cli often omits `freq`).
+pub fn parse_iwconfig_frequency_mhz(text: &str) -> Option<u32> {
+    let marker = "Frequency:";
+    let after = text.split(marker).nth(1)?;
+    let ghz_token = after.split_whitespace().next()?;
+    let ghz: f64 = ghz_token.parse().ok()?;
+    Some((ghz * 1000.0).round() as u32)
+}
+
+fn read_iwconfig_frequency_mhz(interface: &str) -> Option<u32> {
+    let output = Command::new("iwconfig").arg(interface).output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    parse_iwconfig_frequency_mhz(&String::from_utf8_lossy(&output.stdout))
+}
+
+fn enrich_missing_radio_fields(wifi: &mut WifiDiagnostics) {
+    if !wifi.connected || wifi.frequency_mhz.is_some() {
+        return;
+    }
+    if let Some(freq) = read_iwconfig_frequency_mhz(&wifi.interface) {
+        wifi.frequency_mhz = Some(freq);
+        wifi.channel = frequency_to_channel(freq);
     }
 }
 
@@ -78,7 +107,9 @@ pub fn read_wifi_diagnostics(interface: &str) -> Option<WifiDiagnostics> {
         return None;
     }
     let text = String::from_utf8_lossy(&output.stdout);
-    Some(parse_wpa_status(&text, interface))
+    let mut wifi = parse_wpa_status(&text, interface);
+    enrich_missing_radio_fields(&mut wifi);
+    Some(wifi)
 }
 
 #[cfg(test)]
@@ -121,5 +152,12 @@ signal=-52
     fn map_key_mgmt_covers_open_and_enterprise() {
         assert_eq!(map_key_mgmt("NONE"), "Open");
         assert_eq!(map_key_mgmt("WPA2-EAP"), "Enterprise");
+    }
+
+    #[test]
+    fn parse_iwconfig_frequency_from_anyka_output() {
+        let text = "wlan0     IEEE 802.11bgn  ESSID:\"kmk\"  \n          Mode:Managed  Frequency:2.437 GHz  Access Point: 3C:64:CF:7D:A1:9F";
+        assert_eq!(parse_iwconfig_frequency_mhz(text), Some(2437));
+        assert_eq!(frequency_to_channel(2437), Some(6));
     }
 }
