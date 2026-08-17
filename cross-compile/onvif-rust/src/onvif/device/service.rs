@@ -309,12 +309,18 @@ async fn apply_remove_scopes(
     service: &DeviceService,
     request: RemoveScopes,
 ) -> Result<RemoveScopesResponse, OnvifError> {
-    let mut configurable = {
+    let (ptz_enabled, mut configurable) = {
         let c = service.store.config.read();
-        c.device.scopes.clone()
+        (c.ptz.enabled, c.device.scopes.clone())
     };
-    let mut removed = Vec::new();
+    let fixed = discovery_ops::merge_scopes(ptz_enabled, &[]);
+    for scope_item in &request.scope_item {
+        if fixed.iter().any(|s| s.scope_item == *scope_item) {
+            return Err(super::faults::fixed_scope(scope_item));
+        }
+    }
 
+    let mut removed = Vec::new();
     for scope_item in &request.scope_item {
         if let Some(pos) = configurable.iter().position(|s| s == scope_item) {
             removed.push(configurable.remove(pos));
@@ -1105,7 +1111,6 @@ mod tests {
             RemoveScopes {
                 scope_item: vec![
                     configurable_item.clone(),
-                    fixed_item.clone(),
                     "onvif://www.onvif.org/does/not/exist".to_string(),
                 ],
             },
@@ -1122,5 +1127,48 @@ mod tests {
             .scopes;
         assert!(!remaining.iter().any(|s| s.scope_item == configurable_item));
         assert!(remaining.iter().any(|s| s.scope_item == fixed_item));
+    }
+
+    #[tokio::test]
+    async fn test_remove_scopes_rejects_fixed_scope_with_fault() {
+        let service = test_service();
+        let error = apply_remove_scopes(
+            &service,
+            RemoveScopes {
+                scope_item: vec!["onvif://www.onvif.org/type/video_encoder".to_string()],
+            },
+        )
+        .await
+        .expect_err("removing a fixed scope must fault, not silently no-op");
+
+        assert!(matches!(
+            error,
+            OnvifError::InvalidArgVal { ref subcode, .. } if subcode == "FixedScope"
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_remove_scopes_reports_removed_configurable_items() {
+        let service = test_service();
+        apply_set_scopes(
+            &service,
+            SetScopes {
+                scopes: vec!["onvif://www.onvif.org/name/Cam".to_string()],
+            },
+        )
+        .await
+        .unwrap();
+
+        let response = apply_remove_scopes(
+            &service,
+            RemoveScopes {
+                scope_item: vec!["onvif://www.onvif.org/name/Cam".to_string()],
+            },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(response.scope_item, vec!["onvif://www.onvif.org/name/Cam"]);
+        assert!(service.store.config.read().device.scopes.is_empty());
     }
 }
