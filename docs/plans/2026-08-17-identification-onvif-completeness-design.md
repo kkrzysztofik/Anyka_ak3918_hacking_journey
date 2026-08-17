@@ -11,9 +11,16 @@ actively broken:
 
 1. **`SetScopes` from the WebUI destroys other scopes.** `deviceService.setScopes()`
    sends exactly two items (name, location). The backend
-   (`onvif-rust/src/onvif/device/ops/discovery.rs:96-115`) keeps *fixed* scopes and
-   replaces **all** configurable ones with what was sent. One save wipes
+   (`apply_set_scopes`, `onvif-rust/src/onvif/device/service.rs:240-281`) keeps *fixed*
+   scopes and replaces **all** configurable ones with what was sent. One save wipes
    `location/country/unknown` and any scope an ONVIF client added.
+
+   Note: `ops/discovery.rs` contains a second, near-identical implementation that is
+   **dead code** (the file carries `#![cfg_attr(not(test), allow(dead_code))]`).
+   `handle_set_scopes`, `handle_add_scopes`, `handle_remove_scopes`,
+   `handle_get_discovery_mode`, and `handle_set_discovery_mode` have zero non-test
+   callers; only `default_scopes()` and `handle_get_scopes_from_vec()` are live. The
+   duplication is why the two copies have already drifted (see item 6).
 
 2. **Scope and discovery-mode changes never reach the wire.** `DeviceState` (what
    `SetScopes` writes) and `WsDiscovery` (what announces Hello/ProbeMatch) are separate
@@ -32,6 +39,10 @@ actively broken:
 5. **Backend capability the UI never surfaces:** `AddScopes`, `RemoveScopes`,
    `GetDiscoveryMode`, `SetDiscoveryMode`, `GetHostname`, `SetHostname` are all
    implemented and dispatched, and no WebUI page calls any of them.
+
+6. **`AddScopes` creates duplicates.** The live `apply_add_scopes`
+   (`service.rs:283-305`) pushes unconditionally. The dead copy in `ops/discovery.rs:140`
+   checks for an existing item first — the two implementations have drifted.
 
 ## Decision
 
@@ -167,7 +178,38 @@ reset to defaults. Relabel to "Discard Changes". Wiring it to the real
 `Channel: Auto`, hardcoded `ONVIF 24.12`). Noted for a later pass;
 `diagnosticsService.uptime.system_s` already exists if uptime is wanted.
 
-### 4. Testing
+### 4. Device identity override
+
+`GetDeviceInformation` reports Manufacturer / Model / Serial Number / Hardware ID from
+`AnykaPlatform::device_descriptor()` (`src/platform/anyka/mod.rs:189-198`) — hardcoded
+constants. `device_info_from_config()` exists and reads `config.device.*`, but on real
+hardware it is only the error fallback, since `platform.get_device_info()` succeeds. So
+editing `[device]` in `anyka.toml` currently does nothing, and all four cameras report
+`SerialNumber = AK3918-001`.
+
+ONVIF has no `SetDeviceInformation`, so this is not a UI field. The fix is a config
+override:
+
+- Change the `manufacturer`, `model`, `serial_number`, and `hardware_id` defaults in
+  `DeviceConfig::default()` to **empty strings**, so "unset" is representable. Today they
+  default to values that *differ* from the platform constants (`"AK3918 Camera"` vs
+  `"AK3918"`, `"ak3918"` vs `"ak3918-hw"`), so a naive "config wins" rule would silently
+  change what every camera reports.
+- `handle_get_device_information` starts from the platform descriptor (or built-in
+  constants when no platform is present) and overrides each field with the config value
+  **only when non-empty**.
+- `firmware_version` is deliberately excluded: `build_version()` stays authoritative, per
+  the existing comment at `ops/system.rs:60-63`. Config must not override the running
+  build's identity.
+
+Deployed configs have no `[device]` section, so behavior is unchanged until an operator
+opts in by setting a field.
+
+Deriving a unique serial from the interface MAC was considered and deferred — the config
+override unblocks per-camera identity without adding a boot-time dependency on network
+enumeration.
+
+### 5. Testing
 
 The bug is an integration-seam bug: both sides had passing unit tests over their own
 `RwLock`, and no test asserted that a `SetScopes` request changes what goes out on
@@ -183,6 +225,10 @@ multicast. The tests that matter cross the seam.
 - Fixed scopes recomputed from `ptz.enabled` at boot.
 - Handle absent (`OnceLock` empty) -> mutation still succeeds and persists.
 - `RemoveScopes` on a fixed scope -> `ter:FixedScope` fault; existing test flips.
+- `AddScopes` with an already-present item does not duplicate it.
+- Device identity: empty config field -> platform value reported; non-empty config field
+  -> config value reported; `firmware_version` always `build_version()` regardless of
+  config.
 
 **WebUI:**
 - `setScopes` regression: seed a scope list containing something that is neither name nor
