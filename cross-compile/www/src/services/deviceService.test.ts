@@ -8,9 +8,13 @@ import {
   type Scope,
   getDeviceIdentification,
   getDeviceInformation,
+  getDiscoveryMode,
+  getHostname,
   getScopes,
   nameFromScopes,
   scopesForSave,
+  setDiscoveryMode,
+  setHostname,
   setScopes,
 } from '@/services/deviceService';
 import { createMockSOAPFaultResponse, createMockSOAPResponse } from '@/test/utils';
@@ -188,6 +192,62 @@ describe('deviceService', () => {
       expect(result.deviceInfo.manufacturer).toBe('Anyka');
       expect(result.name).toBe('TestCam');
       expect(result.location).toBe('Office');
+    });
+  });
+
+  describe('getDiscoveryMode', () => {
+    it('should parse the discovery mode', async () => {
+      vi.mocked(apiClient.post).mockResolvedValueOnce(
+        createMockSOAPResponse(`
+          <GetDiscoveryModeResponse>
+            <DiscoveryMode>NonDiscoverable</DiscoveryMode>
+          </GetDiscoveryModeResponse>
+        `),
+      );
+
+      await expect(getDiscoveryMode()).resolves.toBe('NonDiscoverable');
+    });
+  });
+
+  describe('setDiscoveryMode', () => {
+    it('should send the discovery mode', async () => {
+      vi.mocked(apiClient.post).mockResolvedValueOnce(
+        createMockSOAPResponse('<SetDiscoveryModeResponse />'),
+      );
+
+      await setDiscoveryMode('NonDiscoverable');
+
+      const sentBody = String(vi.mocked(apiClient.post).mock.calls[0]?.[1]);
+      expect(sentBody).toContain('NonDiscoverable');
+    });
+  });
+
+  describe('getHostname', () => {
+    it('should parse the hostname', async () => {
+      vi.mocked(apiClient.post).mockResolvedValueOnce(
+        createMockSOAPResponse(`
+          <GetHostnameResponse>
+            <HostnameInformation>
+              <Name>ipcam</Name>
+            </HostnameInformation>
+          </GetHostnameResponse>
+        `),
+      );
+
+      await expect(getHostname()).resolves.toBe('ipcam');
+    });
+  });
+
+  describe('setHostname', () => {
+    it('should send the hostname', async () => {
+      vi.mocked(apiClient.post).mockResolvedValueOnce(
+        createMockSOAPResponse('<SetHostnameResponse />'),
+      );
+
+      await setHostname('ipcam');
+
+      const sentBody = String(vi.mocked(apiClient.post).mock.calls[0]?.[1]);
+      expect(sentBody).toContain('ipcam');
     });
   });
 });

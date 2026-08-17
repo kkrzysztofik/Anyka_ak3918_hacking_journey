@@ -4,7 +4,7 @@
  * SOAP operations for device management (GetDeviceInformation, GetScopes, SetScopes).
  */
 import { ENDPOINTS } from '@/services/api';
-import { soapRequest } from '@/services/soap/client';
+import { escapeXml, soapRequest } from '@/services/soap/client';
 import { safeString } from '@/utils/safeString';
 
 export interface DeviceInfo {
@@ -25,6 +25,8 @@ export interface DeviceIdentification {
   name: string;
   location: string;
 }
+
+export type DiscoveryMode = 'Discoverable' | 'NonDiscoverable';
 
 const NAME_PREFIX = 'onvif://www.onvif.org/name/';
 const LOCATION_PREFIX = 'onvif://www.onvif.org/location/';
@@ -159,4 +161,38 @@ export async function getDeviceIdentification(): Promise<DeviceIdentification> {
     name: nameFromScopes(scopes),
     location: locationFromScopes(scopes),
   };
+}
+
+export async function getDiscoveryMode(): Promise<DiscoveryMode> {
+  const data = await soapRequest<Record<string, unknown>>(
+    ENDPOINTS.device,
+    '<tds:GetDiscoveryMode />',
+    'GetDiscoveryModeResponse',
+  );
+  const mode = safeString(data?.DiscoveryMode, 'Discoverable');
+  return mode === 'NonDiscoverable' ? 'NonDiscoverable' : 'Discoverable';
+}
+
+export async function setDiscoveryMode(mode: DiscoveryMode): Promise<void> {
+  await soapRequest(
+    ENDPOINTS.device,
+    `<tds:SetDiscoveryMode><tds:DiscoveryMode>${mode}</tds:DiscoveryMode></tds:SetDiscoveryMode>`,
+  );
+}
+
+export async function getHostname(): Promise<string> {
+  const data = await soapRequest<Record<string, unknown>>(
+    ENDPOINTS.device,
+    '<tds:GetHostname />',
+    'GetHostnameResponse',
+  );
+  const info = data?.HostnameInformation as { Name?: unknown } | undefined;
+  return safeString(info?.Name, '');
+}
+
+export async function setHostname(name: string): Promise<void> {
+  await soapRequest(
+    ENDPOINTS.device,
+    `<tds:SetHostname><tds:Name>${escapeXml(name)}</tds:Name></tds:SetHostname>`,
+  );
 }
