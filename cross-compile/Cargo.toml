@@ -2,12 +2,12 @@
 members = ["onvif-rust", "streaming-lib", "anyka-init"]
 resolver = "2"
 
-# No [patch.crates-io] entries are needed: nothing in the graph pulls openssl-src
-# any more (streaming-lib's unused `reqwest` dependency was the only path to it).
-# If a native-tls-backed dependency returns, restore:
-#   [patch.crates-io]
+# tower-http 0.7.0's ServeDir rate_limited! macro uses std AtomicU64, which
+# does not exist on ARMv5TEJ. setup.sh materialises patches/tower-http-0.7.0-full.
+[patch.crates-io]
+tower-http = { path = "patches/tower-http-0.7.0-full" }
+# If a native-tls-backed dependency returns, also restore:
 #   openssl-src = { path = "patches/openssl-src-300.2.3+3.2.1-full" }
-# The patch and its setup.sh entry are still tracked under patches/.
 
 # Release profile for all workspace members
 # Phase 4 optimization: Changed from opt-level="z" to "3" for performance gains

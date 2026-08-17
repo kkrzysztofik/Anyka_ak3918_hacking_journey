@@ -74,6 +74,10 @@ cd "${PROJECT_DIR}"
 log_info "Setting up cargo configuration..."
 "${SCRIPT_DIR}/setup-cargo-config.sh"
 
+# Materialise gitignored *-full/ crate patches (tower-http AtomicU64, etc.)
+log_info "Applying ARMv5TEJ crate patches..."
+"${WORKSPACE_DIR}/patches/setup.sh"
+
 log_info "Building ONVIF Rust application"
 log_info "Project directory: ${PROJECT_DIR}"
 log_info "Target: ${TARGET}"

@@ -15,6 +15,7 @@ cd "$SCRIPT_DIR"
 # Crate versions to download
 declare -A CRATES=(
     ["openssl-src"]="300.2.3+3.2.1"
+    ["tower-http"]="0.7.0"
 )
 
 clean_patched() {

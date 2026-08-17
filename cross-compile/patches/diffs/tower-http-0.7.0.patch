@@ -1,0 +1,35 @@
+--- originals/tower-http-0.7.0/src/macros.rs
++++ tower-http-0.7.0-full/src/macros.rs
+@@ -113,19 +113,28 @@
+ #[allow(unused_macros)]
+ macro_rules! rate_limited {
+     ($interval:expr, $call:expr) => {{
+-        use std::sync::atomic::{AtomicU64, Ordering};
++        use std::sync::atomic::{AtomicU32, Ordering};
+         use std::time::{Duration, SystemTime, UNIX_EPOCH};
+ 
+-        static NEXT_CALL: AtomicU64 = AtomicU64::new(0);
++        // ARMv5TEJ (Anyka AK3918) has no 64-bit atomics, so this counter is a
++        // u32. It stores whole seconds since the Unix epoch, which stays in
++        // range until 2106; both narrowing conversions saturate, so a clock far
++        // in the future degrades to "never log again" rather than wrapping to
++        // "log every call".
++        static NEXT_CALL: AtomicU32 = AtomicU32::new(0);
+ 
+         let interval: Duration = $interval;
++        // `.min(..) as u32` rather than u32::try_from: this crate is edition
++        // 2018, where TryFrom is not in the prelude, and the macro expands in
++        // call sites that do not import it.
+         let now = SystemTime::now()
+             .duration_since(UNIX_EPOCH)
+             .unwrap_or(Duration::ZERO)
+-            .as_secs();
++            .as_secs()
++            .min(u32::MAX as u64) as u32;
+         let next = NEXT_CALL.load(Ordering::Relaxed);
+         if now >= next {
+-            let new_next = now.saturating_add(interval.as_secs());
++            let new_next = now.saturating_add(interval.as_secs().min(u32::MAX as u64) as u32);
+             if NEXT_CALL
+                 .compare_exchange(next, new_next, Ordering::Relaxed, Ordering::Relaxed)
+                 .is_ok()

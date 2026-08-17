@@ -28,6 +28,7 @@ patches/
 |Crate|Version|Change|
 |-----|-------|-----|
 |openssl-src|300.2.3+3.2.1|Add uClibc target support|
+|tower-http|0.7.0|`rate_limited!` uses `AtomicU32` (ARMv5 has no 64-bit atomics)|
 
 ## Why Patches?
 
