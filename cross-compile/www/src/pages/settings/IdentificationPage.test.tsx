@@ -171,4 +171,99 @@ describe('IdentificationPage', () => {
       expect(screen.getByTestId('identification-loading')).toBeInTheDocument();
     });
   });
+
+  describe('scopes card', () => {
+    const fixedScope = {
+      scopeDef: 'Fixed' as const,
+      scopeItem: 'onvif://www.onvif.org/type/video_encoder',
+    };
+    const customScope = {
+      scopeDef: 'Configurable' as const,
+      scopeItem: 'onvif://www.onvif.org/location/country/unknown',
+    };
+
+    beforeEach(() => {
+      vi.mocked(getScopes).mockResolvedValue([fixedScope, customScope]);
+    });
+
+    it('should render fixed scopes as non-removable', async () => {
+      renderWithProviders(<IdentificationPage />);
+
+      await waitFor(() => {
+        expect(
+          screen.getByTestId(`identification-scope-row-${fixedScope.scopeItem}`),
+        ).toBeInTheDocument();
+      });
+
+      expect(
+        screen.getByTestId(`identification-scope-remove-${fixedScope.scopeItem}`),
+      ).toBeDisabled();
+      expect(
+        screen.getByTestId(`identification-scope-remove-${customScope.scopeItem}`),
+      ).not.toBeDisabled();
+    });
+
+    it('should add a scope row', async () => {
+      const user = userEvent.setup();
+      renderWithProviders(<IdentificationPage />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('identification-scope-add-input')).toBeInTheDocument();
+      });
+
+      const added = 'onvif://www.onvif.org/name/Extra';
+      await user.type(screen.getByTestId('identification-scope-add-input'), added);
+      await user.click(screen.getByTestId('identification-scope-add-button'));
+
+      expect(screen.getByTestId(`identification-scope-row-${added}`)).toBeInTheDocument();
+    });
+
+    it('should remove a configurable scope row', async () => {
+      const user = userEvent.setup();
+      renderWithProviders(<IdentificationPage />);
+
+      await waitFor(() => {
+        expect(
+          screen.getByTestId(`identification-scope-row-${customScope.scopeItem}`),
+        ).toBeInTheDocument();
+      });
+
+      await user.click(screen.getByTestId(`identification-scope-remove-${customScope.scopeItem}`));
+
+      expect(
+        screen.queryByTestId(`identification-scope-row-${customScope.scopeItem}`),
+      ).not.toBeInTheDocument();
+    });
+
+    it('should send the full configurable list on save', async () => {
+      vi.mocked(setScopes).mockResolvedValue(undefined);
+
+      const user = userEvent.setup();
+      renderWithProviders(<IdentificationPage />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('identification-device-name-input')).toHaveValue('Test Device');
+        expect(
+          screen.getByTestId(`identification-scope-row-${customScope.scopeItem}`),
+        ).toBeInTheDocument();
+      });
+
+      const nameInput = screen.getByTestId('identification-device-name-input');
+      await user.clear(nameInput);
+      await user.type(nameInput, 'Updated Device');
+
+      await user.click(screen.getByTestId('identification-save-button'));
+
+      await waitFor(() => {
+        expect(setScopes).toHaveBeenCalledWith(
+          expect.arrayContaining([
+            customScope.scopeItem,
+            'onvif://www.onvif.org/name/Updated%20Device',
+            'onvif://www.onvif.org/location/Test%20Location',
+          ]),
+        );
+        expect(setScopes).toHaveBeenCalledWith(expect.not.arrayContaining([fixedScope.scopeItem]));
+      });
+    });
+  });
 });
