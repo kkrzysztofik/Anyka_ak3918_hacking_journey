@@ -38,6 +38,8 @@ import { identificationSchema } from '@/lib/schemas/identification';
 import {
   type DeviceIdentification,
   getDeviceIdentification,
+  getScopes,
+  scopesForSave,
   setScopes,
 } from '@/services/deviceService';
 import { type NetworkInterface, getNetworkInterfaces } from '@/services/networkService';
@@ -82,7 +84,10 @@ export default function IdentificationPage() {
 
   // Mutation for saving device info
   const mutation = useMutation({
-    mutationFn: (values: DeviceIdentification) => setScopes(values.name, values.location),
+    mutationFn: async (values: DeviceIdentification) => {
+      const scopes = await getScopes();
+      await setScopes(scopesForSave(scopes, { name: values.name, location: values.location }));
+    },
     onSuccess: () => {
       toast.success('Device information saved');
       queryClient.invalidateQueries({ queryKey: ['deviceInformation'] });

@@ -5,17 +5,22 @@ import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { getDeviceIdentification, setScopes } from '@/services/deviceService';
+import { getDeviceIdentification, getScopes, setScopes } from '@/services/deviceService';
 import { getNetworkInterfaces } from '@/services/networkService';
 import { MOCK_DATA, mockToast, renderWithProviders } from '@/test/componentTestHelpers';
 
 import IdentificationPage from './IdentificationPage';
 
 // Mock services
-vi.mock('@/services/deviceService', () => ({
-  getDeviceIdentification: vi.fn(),
-  setScopes: vi.fn(),
-}));
+vi.mock('@/services/deviceService', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/services/deviceService')>();
+  return {
+    ...actual,
+    getDeviceIdentification: vi.fn(),
+    getScopes: vi.fn(),
+    setScopes: vi.fn(),
+  };
+});
 
 vi.mock('@/services/networkService', () => ({
   getNetworkInterfaces: vi.fn(),
@@ -26,6 +31,7 @@ describe('IdentificationPage', () => {
     vi.clearAllMocks();
     vi.mocked(getDeviceIdentification).mockResolvedValue(MOCK_DATA.device);
     vi.mocked(getNetworkInterfaces).mockResolvedValue([]);
+    vi.mocked(getScopes).mockResolvedValue([]);
   });
 
   it('should render identification form', async () => {
@@ -97,7 +103,10 @@ describe('IdentificationPage', () => {
     await user.click(submitButton);
 
     await waitFor(() => {
-      expect(setScopes).toHaveBeenCalledWith('Updated Device', 'Test Location');
+      expect(setScopes).toHaveBeenCalledWith([
+        'onvif://www.onvif.org/name/Updated%20Device',
+        'onvif://www.onvif.org/location/Test%20Location',
+      ]);
       expect(mockToast.success).toHaveBeenCalledWith('Device information saved');
     });
   });
