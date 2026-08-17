@@ -5,7 +5,9 @@
 
 #![cfg_attr(not(test), allow(dead_code))]
 
-pub use super::validation::{validate_hostname, validate_scope};
+pub use super::validation::validate_hostname;
+#[cfg(test)]
+use super::validation::validate_scope;
 use crate::onvif::error::OnvifError;
 
 // ============================================================================
