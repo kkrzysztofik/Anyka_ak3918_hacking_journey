@@ -20,6 +20,8 @@ export interface NetworkInterface {
   enabled: boolean;
   name: string;
   hwAddress: string;
+  /** Link speed in Mbps from ONVIF OperSettings, when reported (> 0). */
+  linkSpeedMbps: number | null;
   ipv4Enabled: boolean;
   dhcp: boolean;
   address: string;
@@ -62,12 +64,24 @@ export async function getNetworkInterfaces(): Promise<NetworkInterface[]> {
     const ipv4 = iface.IPv4 as Record<string, unknown> | undefined;
     const config = ipv4?.Config as Record<string, unknown> | undefined;
     const manual = config?.Manual as Record<string, unknown> | undefined;
+    const link = iface.Link as Record<string, unknown> | undefined;
+    const operSettings = link?.OperSettings as Record<string, unknown> | undefined;
+    const rawSpeed = operSettings?.Speed;
+    const parsedSpeed =
+      typeof rawSpeed === 'number'
+        ? rawSpeed
+        : typeof rawSpeed === 'string'
+          ? Number(rawSpeed)
+          : Number.NaN;
+    const linkSpeedMbps =
+      Number.isFinite(parsedSpeed) && parsedSpeed > 0 ? Math.trunc(parsedSpeed) : null;
 
     return {
       token: safeString(iface['@_token'], ''),
       enabled: parseBoolean(iface.Enabled),
       name: safeString(info?.Name, 'eth0'),
       hwAddress: safeString(info?.HwAddress, ''),
+      linkSpeedMbps,
       ipv4Enabled: parseBoolean(ipv4?.Enabled),
       dhcp: parseBoolean(config?.DHCP),
       address: safeString(manual?.Address, ''),

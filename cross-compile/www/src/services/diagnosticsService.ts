@@ -46,6 +46,15 @@ export interface Diagnostics {
     step_readback?: 'working' | 'unsupported' | 'unknown';
     commands_completed: number;
   } | null;
+  wifi?: {
+    interface: string;
+    connected: boolean;
+    ssid: string | null;
+    frequency_mhz: number | null;
+    channel: number | null;
+    security: string | null;
+    signal_dbm: number | null;
+  } | null;
 }
 
 export type LogSource = 'onvif_rust' | 'vendor_daemon' | 'anyka_init' | 'wpa_supplicant';
@@ -123,6 +132,23 @@ function isNullOrNumber(value: unknown): boolean {
   return value === null || typeof value === 'number';
 }
 
+function isNullOrString(value: unknown): boolean {
+  return value === null || typeof value === 'string';
+}
+
+function isWifi(value: unknown): value is NonNullable<Diagnostics['wifi']> {
+  return (
+    isRecord(value) &&
+    typeof value.interface === 'string' &&
+    typeof value.connected === 'boolean' &&
+    isNullOrString(value.ssid) &&
+    isNullOrNumber(value.frequency_mhz) &&
+    isNullOrNumber(value.channel) &&
+    isNullOrString(value.security) &&
+    (value.signal_dbm === null || typeof value.signal_dbm === 'number')
+  );
+}
+
 function isNullOrRecord(value: unknown): value is Record<string, unknown> | null {
   return value === null || isRecord(value);
 }
@@ -147,6 +173,7 @@ function isDiagnostics(value: unknown): value is Diagnostics {
   if (value.vision !== null && !isVision(value.vision)) return false;
   // Absent is fine — a snapshot from a build without PTZ reporting still validates.
   if (value.ptz !== null && value.ptz !== undefined && !isPtz(value.ptz)) return false;
+  if (value.wifi !== null && value.wifi !== undefined && !isWifi(value.wifi)) return false;
   return true;
 }
 

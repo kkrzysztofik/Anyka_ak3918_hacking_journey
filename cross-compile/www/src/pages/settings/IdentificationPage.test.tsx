@@ -14,6 +14,7 @@ import {
   setHostname,
   setScopes,
 } from '@/services/deviceService';
+import { getDiagnostics } from '@/services/diagnosticsService';
 import { getNetworkInterfaces } from '@/services/networkService';
 import { MOCK_DATA, mockToast, renderWithProviders } from '@/test/componentTestHelpers';
 
@@ -38,11 +39,39 @@ vi.mock('@/services/networkService', () => ({
   getNetworkInterfaces: vi.fn(),
 }));
 
+vi.mock('@/services/diagnosticsService', () => ({
+  getDiagnostics: vi.fn(),
+}));
+
+const MOCK_DIAGNOSTICS = {
+  status: 'healthy',
+  firmware_version: 'test',
+  uptime: { process_s: 100, system_s: 7200 },
+  cpu_percent: null,
+  memory: null,
+  storage: null,
+  network: null,
+  stream_frame_age_ms: null,
+  components: [],
+  degraded_services: [],
+  vision: null,
+  wifi: {
+    interface: 'wlan0',
+    connected: true,
+    ssid: 'kmk',
+    frequency_mhz: 2437,
+    channel: 6,
+    security: 'WPA2',
+    signal_dbm: -52,
+  },
+};
+
 describe('IdentificationPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(getDeviceIdentification).mockResolvedValue(MOCK_DATA.device);
     vi.mocked(getNetworkInterfaces).mockResolvedValue([]);
+    vi.mocked(getDiagnostics).mockResolvedValue(MOCK_DIAGNOSTICS);
     vi.mocked(getScopes).mockResolvedValue([]);
     vi.mocked(getHostname).mockResolvedValue('ipcam');
     vi.mocked(getDiscoveryMode).mockResolvedValue('Discoverable');
@@ -54,6 +83,34 @@ describe('IdentificationPage', () => {
     await waitFor(() => {
       expect(screen.getByTestId('identification-title')).toBeInTheDocument();
     });
+  });
+
+  it('should show diagnostics-backed status card values', async () => {
+    vi.mocked(getNetworkInterfaces).mockResolvedValue([
+      {
+        token: 'wlan0',
+        enabled: true,
+        name: 'wlan0',
+        hwAddress: 'C0:4B:24:DA:4D:EB',
+        linkSpeedMbps: 72,
+        ipv4Enabled: true,
+        dhcp: true,
+        address: '192.168.2.198',
+        prefixLength: 24,
+        gateway: '',
+      },
+    ]);
+
+    renderWithProviders(<IdentificationPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('identification-status-health')).toHaveTextContent('Healthy');
+    });
+    expect(screen.getByTestId('identification-status-uptime')).toHaveTextContent('2h 0m');
+    expect(screen.getByTestId('identification-status-mac')).toHaveTextContent('C0:4B:24:DA:4D:EB');
+    expect(screen.getByTestId('identification-status-speed')).toHaveTextContent('72 Mbps');
+    expect(screen.getByTestId('identification-status-channel')).toHaveTextContent('6');
+    expect(screen.getByTestId('identification-status-security')).toHaveTextContent('WPA2');
   });
 
   it('should display device information when loaded', async () => {

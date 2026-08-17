@@ -66,7 +66,8 @@ import {
   setHostname,
   setScopes,
 } from '@/services/deviceService';
-import { type NetworkInterface, getNetworkInterfaces } from '@/services/networkService';
+import { HealthStatusValue } from '@/components/settings/HealthStatusValue';
+import { useDeviceStatus } from '@/hooks/useDeviceStatus';
 import { handleMutationError } from '@/utils/errorHandling';
 
 export default function IdentificationPage() {
@@ -93,11 +94,14 @@ export default function IdentificationPage() {
     queryFn: getDiscoveryMode,
   });
 
-  // Fetch network info for status card
-  const { data: networkInterfaces } = useQuery<NetworkInterface[]>({
-    queryKey: ['networkInterfaces'],
-    queryFn: getNetworkInterfaces,
-  });
+  const {
+    healthStatus,
+    linkSpeed,
+    primaryInterface,
+    systemUptime,
+    wifiChannel,
+    wifiSecurity,
+  } = useDeviceStatus();
 
   const form = useForm<IdentificationFormInput, unknown, IdentificationFormData>({
     resolver: zodResolver(identificationSchema),
@@ -202,8 +206,6 @@ export default function IdentificationPage() {
     );
   }
 
-  const primaryInterface = networkInterfaces?.[0];
-
   return (
     <div
       className="absolute inset-0 overflow-auto bg-[#0d0d0d] lg:inset-[0_0_0_356.84px]"
@@ -234,17 +236,39 @@ export default function IdentificationPage() {
             <StatusCardItem
               label="Status"
               value={
-                <div className="flex items-center gap-2">
-                  <div className="size-2 rounded-full bg-green-500" />
-                  <span>Online</span>
-                </div>
+                <HealthStatusValue
+                  label={healthStatus.label}
+                  tone={healthStatus.tone}
+                  detail={healthStatus.detail}
+                  testId="identification-status-health"
+                />
               }
             />
-            <StatusCardItem label="Uptime" value="--" />
-            <StatusCardItem label="MAC Address" value={primaryInterface?.hwAddress || '--'} />
-            <StatusCardItem label="Speed" value="100 Mbps" />
-            <StatusCardItem label="Channel" value="Auto" />
-            <StatusCardItem label="Security" value="--" />
+            <StatusCardItem
+              label="Uptime"
+              value={systemUptime}
+              data-testid="identification-status-uptime"
+            />
+            <StatusCardItem
+              label="MAC Address"
+              value={primaryInterface?.hwAddress || '—'}
+              data-testid="identification-status-mac"
+            />
+            <StatusCardItem
+              label="Speed"
+              value={linkSpeed}
+              data-testid="identification-status-speed"
+            />
+            <StatusCardItem
+              label="Channel"
+              value={wifiChannel}
+              data-testid="identification-status-channel"
+            />
+            <StatusCardItem
+              label="Security"
+              value={wifiSecurity}
+              data-testid="identification-status-security"
+            />
           </StatusCardContent>
         </StatusCard>
 

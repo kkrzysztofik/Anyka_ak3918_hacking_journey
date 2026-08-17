@@ -23,7 +23,12 @@ use crate::onvif::types::device::{
     NetworkProtocolType, PrefixedIPv4Address, SetDNS, SetDNSResponse, SetHostname,
     SetHostnameResponse, SetNTP, SetNTPResponse, SetNetworkProtocols, SetNetworkProtocolsResponse,
 };
-use crate::platform::{Platform, external_ip};
+use crate::platform::{
+    Platform, common::NetworkInterfaceInfo as PlatformInterfaceInfo, external_ip,
+};
+
+const IFT_ETHERNET: i32 = 6;
+const IFT_IEEE80211: i32 = 71;
 
 /// Handle GetHostname request.
 ///
@@ -82,10 +87,121 @@ pub async fn handle_get_network_interfaces(
 ) -> OnvifResult<GetNetworkInterfacesResponse> {
     tracing::debug!("GetNetworkInterfaces request");
 
-    let (ip_address, mac_address, dhcp_enabled) = get_network_info(platform, config).await;
+    if let Some(platform_ref) = platform.as_ref()
+        && let Some(network_info) = platform_ref.network_info()
+        && let Ok(platform_ifaces) = network_info.get_network_interfaces().await
+        && !platform_ifaces.is_empty()
+    {
+        let default_ip = network_info
+            .detect_local_ip()
+            .unwrap_or_else(|| external_ip(config));
+        let network_interfaces = platform_ifaces
+            .iter()
+            .map(|iface| build_onvif_network_interface(iface, &default_ip))
+            .collect();
+        return Ok(GetNetworkInterfacesResponse { network_interfaces });
+    }
 
-    // Create network interface
-    let network_interface = NetworkInterface {
+    let (ip_address, mac_address, dhcp_enabled) = get_network_info(platform, config).await;
+    Ok(GetNetworkInterfacesResponse {
+        network_interfaces: vec![build_fallback_network_interface(
+            ip_address,
+            mac_address,
+            dhcp_enabled,
+        )],
+    })
+}
+
+fn onvif_interface_type(name: &str) -> i32 {
+    if name.starts_with("wlan") {
+        IFT_IEEE80211
+    } else {
+        IFT_ETHERNET
+    }
+}
+
+fn link_settings(speed_mbps: Option<u32>) -> NetworkInterfaceConnectionSetting {
+    let speed = speed_mbps.unwrap_or(0) as i32;
+    NetworkInterfaceConnectionSetting {
+        auto_negotiation: speed == 0,
+        speed,
+        duplex: Duplex::Full,
+    }
+}
+
+fn ipv4_configuration(
+    ip_address: &str,
+    prefix_length: u8,
+    dhcp_enabled: bool,
+) -> IPv4Configuration {
+    if dhcp_enabled {
+        IPv4Configuration {
+            manual: vec![],
+            link_local: None,
+            from_dhcp: Some(PrefixedIPv4Address {
+                address: ip_address.to_string(),
+                prefix_length: i32::from(prefix_length),
+            }),
+            dhcp: true,
+        }
+    } else {
+        IPv4Configuration {
+            manual: vec![PrefixedIPv4Address {
+                address: ip_address.to_string(),
+                prefix_length: i32::from(prefix_length),
+            }],
+            link_local: None,
+            from_dhcp: None,
+            dhcp: false,
+        }
+    }
+}
+
+fn build_onvif_network_interface(
+    iface: &PlatformInterfaceInfo,
+    default_ip: &str,
+) -> NetworkInterface {
+    let ip_address = iface
+        .ipv4_address
+        .clone()
+        .filter(|ip| !ip.is_empty())
+        .unwrap_or_else(|| default_ip.to_string());
+    let prefix_length = iface.ipv4_prefix_length.unwrap_or(24);
+    let link = link_settings(iface.link_speed);
+    let hw_address = iface
+        .mac_address
+        .clone()
+        .unwrap_or_else(|| "00:00:00:00:00:00".to_string());
+
+    NetworkInterface {
+        token: iface.token.clone(),
+        enabled: iface.enabled,
+        info: Some(NetworkInterfaceInfo {
+            name: Some(iface.name.clone()),
+            hw_address,
+            mtu: Some(1500),
+        }),
+        link: Some(NetworkInterfaceLink {
+            admin_settings: link.clone(),
+            oper_settings: link,
+            interface_type: onvif_interface_type(&iface.name),
+        }),
+        ipv4: Some(IPv4NetworkInterface {
+            enabled: true,
+            config: ipv4_configuration(&ip_address, prefix_length, iface.ipv4_dhcp),
+        }),
+        ipv6: None,
+        extension: None,
+    }
+}
+
+fn build_fallback_network_interface(
+    ip_address: String,
+    mac_address: String,
+    dhcp_enabled: bool,
+) -> NetworkInterface {
+    let link = link_settings(Some(100));
+    NetworkInterface {
         token: "eth0".to_string(),
         enabled: true,
         info: Some(NetworkInterfaceInfo {
@@ -94,50 +210,17 @@ pub async fn handle_get_network_interfaces(
             mtu: Some(1500),
         }),
         link: Some(NetworkInterfaceLink {
-            admin_settings: NetworkInterfaceConnectionSetting {
-                auto_negotiation: true,
-                speed: 100,
-                duplex: Duplex::Full,
-            },
-            oper_settings: NetworkInterfaceConnectionSetting {
-                auto_negotiation: true,
-                speed: 100,
-                duplex: Duplex::Full,
-            },
-            interface_type: 6, // ethernetCsmacd
+            admin_settings: link.clone(),
+            oper_settings: link,
+            interface_type: IFT_ETHERNET,
         }),
-        // TODO: Read actual prefix length from network interface or config.
-        // /24 is a reasonable default for the embedded camera's typical LAN deployment.
         ipv4: Some(IPv4NetworkInterface {
             enabled: true,
-            config: IPv4Configuration {
-                manual: if !dhcp_enabled {
-                    vec![PrefixedIPv4Address {
-                        address: ip_address.clone(),
-                        prefix_length: 24,
-                    }]
-                } else {
-                    vec![]
-                },
-                link_local: None,
-                from_dhcp: if dhcp_enabled {
-                    Some(PrefixedIPv4Address {
-                        address: ip_address,
-                        prefix_length: 24,
-                    })
-                } else {
-                    None
-                },
-                dhcp: dhcp_enabled,
-            },
+            config: ipv4_configuration(&ip_address, 24, dhcp_enabled),
         }),
         ipv6: None,
         extension: None,
-    };
-
-    Ok(GetNetworkInterfacesResponse {
-        network_interfaces: vec![network_interface],
-    })
+    }
 }
 
 /// Get network info from platform or fallback to config.
@@ -498,6 +581,28 @@ mod tests {
     // ========================================================================
     // GetNetworkInterfaces Tests (T211)
     // ========================================================================
+
+    #[tokio::test]
+    async fn test_get_network_interfaces_reads_platform_link_speed() {
+        use crate::platform::StubPlatformBuilder;
+
+        let config = create_test_config();
+        let platform = Arc::new(
+            StubPlatformBuilder::new()
+                .network_info_supported(true)
+                .build(),
+        );
+        let response =
+            handle_get_network_interfaces(&Some(platform), &config, GetNetworkInterfaces {})
+                .await
+                .unwrap();
+
+        let link = response.network_interfaces[0]
+            .link
+            .as_ref()
+            .expect("link settings");
+        assert_eq!(link.oper_settings.speed, 100);
+    }
 
     #[tokio::test]
     async fn test_get_network_interfaces() {
