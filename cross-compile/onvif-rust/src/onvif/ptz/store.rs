@@ -472,6 +472,35 @@ mod tests {
     }
 
     #[test]
+    fn test_preset_store_roundtrips_a_position_without_pan_tilt() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("ptz_presets.toml");
+        let store = PresetStore::with_persistence(&path);
+        // A zoom-only preset must not come back aimed at (0, 0) — that would
+        // silently re-point the camera on the next GotoPreset.
+        let token = store
+            .set_preset(
+                "Zoom Only".into(),
+                PTZVector {
+                    pan_tilt: None,
+                    zoom: Some(Vector1D {
+                        x: 0.25,
+                        space: None,
+                    }),
+                },
+                None,
+            )
+            .unwrap();
+        std::fs::write(&path, store.snapshot_toml().unwrap()).unwrap();
+
+        let reloaded = PresetStore::with_persistence(&path);
+        reloaded.load_from_file().unwrap();
+        let position = reloaded.get(&token).unwrap().ptz_position.unwrap();
+        assert!(position.pan_tilt.is_none());
+        assert_eq!(position.zoom.unwrap().x, 0.25);
+    }
+
+    #[test]
     fn test_preset_store_survives_corrupt_file() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("ptz_presets.toml");

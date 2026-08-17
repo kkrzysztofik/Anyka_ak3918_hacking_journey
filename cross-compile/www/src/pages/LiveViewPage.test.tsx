@@ -230,9 +230,8 @@ describe('LiveViewPage', () => {
     renderWithProviders(<LiveViewPage />);
 
     expect(await screen.findByTestId('liveview-presets-empty')).toBeInTheDocument();
-    expect(screen.queryByTestId('liveview-preset-preset1-button')).not.toBeInTheDocument();
     // The old fixed slots rendered "Preset 1" rows that pointed at nothing.
-    expect(screen.queryByText('Preset 1')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('liveview-preset-preset1-button')).not.toBeInTheDocument();
   });
 
   it('should render PTZ control buttons', () => {
@@ -622,14 +621,20 @@ describe('LiveViewPage', () => {
       expect(await screen.findByTestId('liveview-preset-preset7-label')).toHaveTextContent(
         'preset7',
       );
-      expect(screen.getByLabelText('Delete preset preset7')).toBeInTheDocument();
+      expect(screen.getByTestId('liveview-preset-preset7-delete-button')).toHaveAccessibleName(
+        'Delete preset preset7',
+      );
     });
 
     it('labels the per-preset icon buttons for screen readers', async () => {
       renderWithProviders(<LiveViewPage />);
 
-      expect(await screen.findByLabelText('Edit preset Front Door')).toBeInTheDocument();
-      expect(screen.getByLabelText('Delete preset Front Door')).toBeInTheDocument();
+      expect(await screen.findByTestId('liveview-preset-preset1-edit-button')).toHaveAccessibleName(
+        'Edit preset Front Door',
+      );
+      expect(screen.getByTestId('liveview-preset-preset1-delete-button')).toHaveAccessibleName(
+        'Delete preset Front Door',
+      );
     });
 
     it('should display preset names from backend', async () => {

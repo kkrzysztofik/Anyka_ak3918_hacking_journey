@@ -9,6 +9,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { renderWithProviders } from '@/test/componentTestHelpers';
 import { getPtzStatus, setPreset } from '@/services/ptzService';
+import type { PTZStatus } from '@/services/ptzService';
 
 import { PresetDialog } from './PresetDialog';
 
@@ -39,6 +40,39 @@ describe('PresetDialog', () => {
       expect(screen.getByTestId('preset-dialog-position-warning')).toHaveTextContent(
         /also re-saves the position as 0\.42 \/ -0\.09/i,
       );
+    });
+  });
+
+  it('hides the cached position while a reopened dialog refetches', async () => {
+    // Reopening serves the previous read straight from cache. Showing it would name a
+    // stale aim point for the position SetPreset is about to overwrite.
+    const { unmount, queryClient } = renderWithProviders(
+      <PresetDialog profileToken="ProfileToken1" preset={PRESET} onClose={vi.fn()} />,
+    );
+    await waitFor(() => {
+      expect(screen.getByTestId('preset-dialog-position')).toHaveTextContent('0.42 / -0.09');
+    });
+    unmount();
+
+    let releaseSecondRead: (status: PTZStatus) => void = () => {};
+    vi.mocked(getPtzStatus).mockReturnValue(
+      new Promise<PTZStatus>((resolve) => {
+        releaseSecondRead = resolve;
+      }),
+    );
+    renderWithProviders(
+      <PresetDialog profileToken="ProfileToken1" preset={PRESET} onClose={vi.fn()} />,
+      { queryClient },
+    );
+
+    expect(screen.getByTestId('preset-dialog-position')).toHaveTextContent('Position: —');
+    expect(screen.getByTestId('preset-dialog-position-warning')).toHaveTextContent(
+      /re-saves the current position/i,
+    );
+
+    releaseSecondRead({ pan: -1.5, tilt: 0.25, zoom: 0 });
+    await waitFor(() => {
+      expect(screen.getByTestId('preset-dialog-position')).toHaveTextContent('-1.50 / 0.25');
     });
   });
 

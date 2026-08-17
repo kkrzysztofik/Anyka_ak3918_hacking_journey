@@ -206,8 +206,10 @@ async fn test_rollback_video_pipeline_is_best_effort_when_hal_is_unopened() {
 /// what makes this test able to tell the gate apart from a plain hardware-open failure.
 #[test]
 fn test_init_ptz_control_disabled_reports_disabled_not_failed() {
-    let mut cfg = crate::config::types::PtzConfig::default();
-    cfg.enabled = false;
+    let cfg = crate::config::types::PtzConfig {
+        enabled: false,
+        ..Default::default()
+    };
     let result = super::super::init_ptz_control(&cfg, None);
     assert!(matches!(
         result,

@@ -187,7 +187,9 @@ const DEFAULT_SPEED_STEP: c_int = 400;
 /// Total travel of each axis in degrees. `MOTOR_PARM` wants this as a step count
 /// (`2048 * degrees / 360`), exactly as the vendor's `AK_DRV_PTZ_SETUP` macro computes it
 /// (`libplat/include/ak_drv_ptz.h:113`). Kept in sync with the platform layer's
-/// `PTZ_{MAX,MIN}_{PAN,TILT}_DEGREES` by a unit test below.
+/// `PTZ_{MAX,MIN}_{PAN,TILT}_DEGREES` by `test_driver_travel_matches_reported_limits`
+/// in `platform/anyka/ptz_control.rs` — the assertion lives there because
+/// `platform::anyka` is private, so those limits are unnameable from this module.
 pub(crate) const PAN_TRAVEL_DEGREES: i32 = 700;
 pub(crate) const TILT_TRAVEL_DEGREES: i32 = 260;
 /// Timeout for calibration move to limit (full rotation can be slow).

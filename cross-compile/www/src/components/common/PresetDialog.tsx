@@ -68,7 +68,11 @@ export function PresetDialog({
 
   // Read once per open, not polled: this number is only visible in this modal, and a
   // refetchInterval would cost a SOAP round trip per tick for it.
-  const { data: position } = useQuery({
+  const {
+    data: position,
+    isFetching,
+    isFetchedAfterMount,
+  } = useQuery({
     queryKey: ['ptzStatus', profileToken],
     queryFn: () => getPtzStatus(profileToken),
     enabled: !!profileToken,
@@ -93,9 +97,12 @@ export function PresetDialog({
   });
 
   const trimmed = name.trim();
-  const positionText = position
-    ? `${position.pan.toFixed(2)} / ${position.tilt.toFixed(2)}`
-    : '—';
+  // Reopening the dialog serves the previous position straight from cache while the
+  // refetch is still in flight. Showing that number would disclose where the camera
+  // *was*, then save where it *is* — the exact silent re-aim this dialog exists to
+  // prevent. Only trust coordinates fetched during this mount and settled.
+  const fresh = isFetchedAfterMount && !isFetching ? position : undefined;
+  const positionText = fresh ? `${fresh.pan.toFixed(2)} / ${fresh.tilt.toFixed(2)}` : '—';
 
   return (
     <Dialog open onOpenChange={(next) => !next && onClose()}>
@@ -138,7 +145,7 @@ export function PresetDialog({
 
           {isEditing && (
             <p className="text-xs text-yellow-500" data-testid="preset-dialog-position-warning">
-              {position
+              {fresh
                 ? `This also re-saves the position as ${positionText} (estimated).`
                 : 'This also re-saves the current position.'}
             </p>
