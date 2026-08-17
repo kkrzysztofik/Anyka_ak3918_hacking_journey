@@ -298,7 +298,11 @@ async fn apply_add_scopes(
         let c = service.store.config.read();
         c.device.scopes.clone()
     };
-    configurable.extend(request.scope_item);
+    for item in request.scope_item {
+        if !configurable.contains(&item) {
+            configurable.push(item);
+        }
+    }
     service.store.config.write().device.scopes = configurable;
     push_scopes_to_discovery(service).await;
     Ok(AddScopesResponse {})
@@ -1170,5 +1174,23 @@ mod tests {
 
         assert_eq!(response.scope_item, vec!["onvif://www.onvif.org/name/Cam"]);
         assert!(service.store.config.read().device.scopes.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_add_scopes_is_idempotent() {
+        let service = test_service();
+        let request =
+            || AddScopes {
+                scope_item: vec!["onvif://www.onvif.org/name/Cam".to_string()],
+            };
+
+        apply_add_scopes(&service, request()).await.unwrap();
+        apply_add_scopes(&service, request()).await.unwrap();
+
+        assert_eq!(
+            service.store.config.read().device.scopes.len(),
+            1,
+            "adding an existing scope must not duplicate it"
+        );
     }
 }
