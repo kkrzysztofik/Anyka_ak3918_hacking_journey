@@ -6,6 +6,7 @@ import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { renderWithProviders } from '@/test/componentTestHelpers';
+import { testDialogClosed, testDialogOpen } from '@/test/dialogTestHelpers';
 
 import LiveViewPage from './LiveViewPage';
 
@@ -42,6 +43,7 @@ vi.mock('@/services/ptzService', () => ({
   gotoPreset: vi.fn().mockResolvedValue(undefined),
   setPreset: vi.fn().mockResolvedValue('preset_new'),
   removePreset: vi.fn().mockResolvedValue(undefined),
+  getPtzStatus: vi.fn().mockResolvedValue({ pan: 0.42, tilt: -0.085, zoom: 0 }),
 }));
 
 // Mock profileService
@@ -140,6 +142,27 @@ describe('LiveViewPage', () => {
     expect(screen.getByTestId('liveview-ptz-description')).toHaveTextContent('PTZ camera controls');
   });
 
+  it('should disable PTZ controls when no profile has a PTZ configuration', async () => {
+    const { getProfiles } = await import('@/services/profileService');
+    vi.mocked(getProfiles).mockResolvedValueOnce([
+      { token: 'ProfileToken1', name: 'MainStream' },
+      { token: 'ProfileToken2', name: 'SubStream' },
+    ]);
+    renderWithProviders(<LiveViewPage />);
+    await waitFor(() => {
+      expect(screen.getByTestId('liveview-ptz-fieldset')).toBeDisabled();
+    });
+    expect(screen.getByTestId('liveview-ptz-disabled-note')).toHaveTextContent('PTZ is disabled');
+  });
+
+  it('should not show the PTZ disabled note while profiles are still loading', async () => {
+    const { getProfiles } = await import('@/services/profileService');
+    vi.mocked(getProfiles).mockReturnValueOnce(new Promise(() => {})); // never resolves
+    renderWithProviders(<LiveViewPage />);
+    await screen.findByTestId('liveview-ptz-title');
+    expect(screen.queryByTestId('liveview-ptz-disabled-note')).not.toBeInTheDocument();
+  });
+
   it('should render PTZ speed slider', () => {
     renderWithProviders(<LiveViewPage />);
     const speedSlider = screen.getByTestId('liveview-ptz-speed-slider');
@@ -176,11 +199,39 @@ describe('LiveViewPage', () => {
 
     // Preset data is loaded asynchronously from the mocked getPresets service
     await waitFor(() => {
-      expect(screen.getByTestId('liveview-preset-1-button')).toBeInTheDocument();
+      expect(screen.getByTestId('liveview-preset-preset1-button')).toBeInTheDocument();
     });
-    expect(screen.getByTestId('liveview-preset-2-button')).toBeInTheDocument();
-    expect(screen.getByTestId('liveview-preset-3-button')).toBeInTheDocument();
-    expect(screen.getByTestId('liveview-add-preset-label')).toHaveTextContent('+ Add Preset');
+    expect(screen.getByTestId('liveview-preset-preset2-button')).toBeInTheDocument();
+    expect(screen.getByTestId('liveview-preset-preset3-button')).toBeInTheDocument();
+    expect(screen.getByTestId('liveview-add-preset-label')).toHaveTextContent(
+      '+ Save current position',
+    );
+  });
+
+  it('renders a row for every preset the device reports, not just three', async () => {
+    const { getPresets } = await import('@/services/ptzService');
+    vi.mocked(getPresets).mockResolvedValueOnce([
+      { token: 'preset1', name: 'Front Door' },
+      { token: 'preset2', name: 'Back Yard' },
+      { token: 'preset3', name: 'Garage' },
+      { token: 'preset4', name: 'Driveway' },
+    ]);
+    renderWithProviders(<LiveViewPage />);
+
+    expect(await screen.findByTestId('liveview-preset-preset4-button')).toBeInTheDocument();
+    for (const token of ['preset1', 'preset2', 'preset3']) {
+      expect(screen.getByTestId(`liveview-preset-${token}-button`)).toBeInTheDocument();
+    }
+  });
+
+  it('shows an empty state and no placeholder rows when there are no presets', async () => {
+    const { getPresets } = await import('@/services/ptzService');
+    vi.mocked(getPresets).mockResolvedValueOnce([]);
+    renderWithProviders(<LiveViewPage />);
+
+    expect(await screen.findByTestId('liveview-presets-empty')).toBeInTheDocument();
+    // The old fixed slots rendered "Preset 1" rows that pointed at nothing.
+    expect(screen.queryByTestId('liveview-preset-preset1-button')).not.toBeInTheDocument();
   });
 
   it('should render PTZ control buttons', () => {
@@ -338,7 +389,7 @@ describe('LiveViewPage', () => {
 
       // Wait for profiles + presets queries to resolve (preset names prove profileToken is set)
       await waitFor(() => {
-        expect(screen.getByTestId('liveview-preset-1-label')).toHaveTextContent('Front Door');
+        expect(screen.getByTestId('liveview-preset-preset1-label')).toHaveTextContent('Front Door');
       });
 
       const upButton = screen.getByTestId('liveview-ptz-up-button');
@@ -354,7 +405,7 @@ describe('LiveViewPage', () => {
       renderWithProviders(<LiveViewPage />);
 
       await waitFor(() => {
-        expect(screen.getByTestId('liveview-preset-1-label')).toHaveTextContent('Front Door');
+        expect(screen.getByTestId('liveview-preset-preset1-label')).toHaveTextContent('Front Door');
       });
 
       const upButton = screen.getByTestId('liveview-ptz-up-button');
@@ -371,7 +422,7 @@ describe('LiveViewPage', () => {
       renderWithProviders(<LiveViewPage />);
 
       await waitFor(() => {
-        expect(screen.getByTestId('liveview-preset-1-label')).toHaveTextContent('Front Door');
+        expect(screen.getByTestId('liveview-preset-preset1-label')).toHaveTextContent('Front Door');
       });
 
       const leftButton = screen.getByTestId('liveview-ptz-left-button');
@@ -405,7 +456,7 @@ describe('LiveViewPage', () => {
       renderWithProviders(<LiveViewPage />);
 
       await waitFor(() => {
-        expect(screen.getByTestId('liveview-preset-1-label')).toHaveTextContent('Front Door');
+        expect(screen.getByTestId('liveview-preset-preset1-label')).toHaveTextContent('Front Door');
       });
 
       const directions = [
@@ -437,10 +488,10 @@ describe('LiveViewPage', () => {
 
       // Wait for presets to load
       await waitFor(() => {
-        expect(screen.getByTestId('liveview-preset-1-button')).toBeInTheDocument();
+        expect(screen.getByTestId('liveview-preset-preset1-button')).toBeInTheDocument();
       });
 
-      const presetButton = screen.getByTestId('liveview-preset-1-button');
+      const presetButton = screen.getByTestId('liveview-preset-preset1-button');
       await user.click(presetButton);
 
       await waitFor(() => {
@@ -448,48 +499,152 @@ describe('LiveViewPage', () => {
       });
     });
 
-    it('should call setPreset when add preset button is clicked', async () => {
+    it('should not save a machine-named preset straight from the add button', async () => {
       const user = userEvent.setup();
       const { setPreset: mockSetPreset } = await import('@/services/ptzService');
       renderWithProviders(<LiveViewPage />);
 
       await waitFor(() => {
-        expect(screen.getByTestId('liveview-preset-1-label')).toHaveTextContent('Front Door');
+        expect(screen.getByTestId('liveview-preset-preset1-label')).toHaveTextContent('Front Door');
       });
 
-      const addButton = screen.getByTestId('liveview-add-preset-button');
-      await user.click(addButton);
+      await user.click(screen.getByTestId('liveview-add-preset-button'));
 
-      await waitFor(() => {
-        expect(mockSetPreset).toHaveBeenCalledWith('ProfileToken1', expect.any(String), undefined);
-      });
+      // Naming was "Preset ${presets.length + 1}", which collides after a delete.
+      expect(mockSetPreset).not.toHaveBeenCalled();
     });
 
-    it('should call removePreset when preset settings button is clicked', async () => {
+    it('should open the save dialog from the add button', async () => {
+      const user = userEvent.setup();
+      renderWithProviders(<LiveViewPage />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('liveview-preset-preset1-label')).toHaveTextContent('Front Door');
+      });
+
+      await user.click(screen.getByTestId('liveview-add-preset-button'));
+
+      expect(await screen.findByTestId('preset-dialog')).toBeInTheDocument();
+    });
+
+    it('should open the update dialog from a preset edit button', async () => {
+      // The pencil sets editingPreset; this is the test that the reader is actually
+      // bound to it. Discarding the reader made both buttons silently inert.
+      const user = userEvent.setup();
+      renderWithProviders(<LiveViewPage />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('liveview-preset-preset1-label')).toHaveTextContent('Front Door');
+      });
+
+      await user.click(screen.getByTestId('liveview-preset-preset1-edit-button'));
+
+      expect(await screen.findByTestId('preset-dialog-name-input')).toHaveValue('Front Door');
+    });
+
+    it('should not remove a preset on a bare trash click', async () => {
       const user = userEvent.setup();
       const { removePreset: mockRemovePreset } = await import('@/services/ptzService');
       renderWithProviders(<LiveViewPage />);
 
       await waitFor(() => {
-        expect(screen.getByTestId('liveview-preset-1-settings-button')).toBeInTheDocument();
+        expect(screen.getByTestId('liveview-preset-preset1-delete-button')).toBeInTheDocument();
       });
 
-      const settingsButton = screen.getByTestId('liveview-preset-1-settings-button');
-      await user.click(settingsButton);
+      await user.click(screen.getByTestId('liveview-preset-preset1-delete-button'));
+
+      await testDialogOpen('liveview-delete-preset-dialog');
+      expect(mockRemovePreset).not.toHaveBeenCalled();
+    });
+
+    it('should remove the preset only after the delete is confirmed', async () => {
+      const user = userEvent.setup();
+      const { removePreset: mockRemovePreset } = await import('@/services/ptzService');
+      renderWithProviders(<LiveViewPage />);
 
       await waitFor(() => {
-        expect(mockRemovePreset).toHaveBeenCalledWith('ProfileToken1', 'preset1');
+        expect(screen.getByTestId('liveview-preset-preset2-delete-button')).toBeInTheDocument();
       });
+
+      await user.click(screen.getByTestId('liveview-preset-preset2-delete-button'));
+      await testDialogOpen('liveview-delete-preset-dialog');
+      await user.click(screen.getByTestId('liveview-delete-preset-confirm'));
+
+      await waitFor(() => {
+        expect(mockRemovePreset).toHaveBeenCalledWith('ProfileToken1', 'preset2');
+      });
+    });
+
+    it('should never remove a preset when the delete is cancelled', async () => {
+      const user = userEvent.setup();
+      const { removePreset: mockRemovePreset } = await import('@/services/ptzService');
+      renderWithProviders(<LiveViewPage />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('liveview-preset-preset1-delete-button')).toBeInTheDocument();
+      });
+
+      await user.click(screen.getByTestId('liveview-preset-preset1-delete-button'));
+      await testDialogOpen('liveview-delete-preset-dialog');
+      await user.click(screen.getByTestId('liveview-delete-preset-cancel'));
+
+      await waitFor(() => {
+        testDialogClosed('liveview-delete-preset-dialog');
+      });
+      expect(mockRemovePreset).not.toHaveBeenCalled();
+    });
+
+    it('should re-enable the row after a failed delete', async () => {
+      const user = userEvent.setup();
+      const { removePreset: mockRemovePreset } = await import('@/services/ptzService');
+      vi.mocked(mockRemovePreset).mockRejectedValueOnce(new Error('Device busy'));
+      renderWithProviders(<LiveViewPage />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('liveview-preset-preset1-delete-button')).toBeInTheDocument();
+      });
+
+      await user.click(screen.getByTestId('liveview-preset-preset1-delete-button'));
+      await testDialogOpen('liveview-delete-preset-dialog');
+      await user.click(screen.getByTestId('liveview-delete-preset-confirm'));
+
+      await waitFor(() => {
+        expect(screen.getByTestId('liveview-preset-preset1-button')).toBeEnabled();
+      });
+    });
+
+    it('falls back to the token for a preset the device never named', async () => {
+      const { getPresets } = await import('@/services/ptzService');
+      vi.mocked(getPresets).mockResolvedValueOnce([{ token: 'preset7', name: '' }]);
+      renderWithProviders(<LiveViewPage />);
+
+      expect(await screen.findByTestId('liveview-preset-preset7-label')).toHaveTextContent(
+        'preset7',
+      );
+      expect(screen.getByTestId('liveview-preset-preset7-delete-button')).toHaveAccessibleName(
+        'Delete preset preset7',
+      );
+    });
+
+    it('labels the per-preset icon buttons for screen readers', async () => {
+      renderWithProviders(<LiveViewPage />);
+
+      expect(await screen.findByTestId('liveview-preset-preset1-edit-button')).toHaveAccessibleName(
+        'Edit preset Front Door',
+      );
+      expect(screen.getByTestId('liveview-preset-preset1-delete-button')).toHaveAccessibleName(
+        'Delete preset Front Door',
+      );
     });
 
     it('should display preset names from backend', async () => {
       renderWithProviders(<LiveViewPage />);
 
       await waitFor(() => {
-        expect(screen.getByTestId('liveview-preset-1-label')).toHaveTextContent('Front Door');
+        expect(screen.getByTestId('liveview-preset-preset1-label')).toHaveTextContent('Front Door');
       });
-      expect(screen.getByTestId('liveview-preset-2-label')).toHaveTextContent('Back Yard');
-      expect(screen.getByTestId('liveview-preset-3-label')).toHaveTextContent('Garage');
+      expect(screen.getByTestId('liveview-preset-preset2-label')).toHaveTextContent('Back Yard');
+      expect(screen.getByTestId('liveview-preset-preset3-label')).toHaveTextContent('Garage');
     });
 
     it('should show error toast when PTZ move fails', async () => {
@@ -500,7 +655,7 @@ describe('LiveViewPage', () => {
       renderWithProviders(<LiveViewPage />);
 
       await waitFor(() => {
-        expect(screen.getByTestId('liveview-preset-1-label')).toHaveTextContent('Front Door');
+        expect(screen.getByTestId('liveview-preset-preset1-label')).toHaveTextContent('Front Door');
       });
 
       const upButton = screen.getByTestId('liveview-ptz-up-button');
@@ -512,17 +667,5 @@ describe('LiveViewPage', () => {
         });
       });
     });
-  });
-
-  it('should handle preset settings button clicks', async () => {
-    renderWithProviders(<LiveViewPage />);
-
-    const settingsButton1 = screen.getByTestId('liveview-preset-1-settings-button');
-    const settingsButton2 = screen.getByTestId('liveview-preset-2-settings-button');
-    const settingsButton3 = screen.getByTestId('liveview-preset-3-settings-button');
-
-    expect(settingsButton1).toBeInTheDocument();
-    expect(settingsButton2).toBeInTheDocument();
-    expect(settingsButton3).toBeInTheDocument();
   });
 });

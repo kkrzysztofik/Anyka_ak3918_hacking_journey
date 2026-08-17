@@ -72,8 +72,9 @@ impl DeviceService {
         config: Arc<ConfigRuntime>,
         platform: Arc<dyn Platform>,
     ) -> Self {
+        let ptz_enabled = config.read().ptz.enabled;
         let store = Arc::new(DeviceStore::with_config(users, config));
-        let state = Arc::new(DeviceState::new());
+        let state = Arc::new(DeviceState::with_ptz(ptz_enabled));
 
         Self {
             store,

@@ -30,6 +30,17 @@ const MOCK_DIAGNOSTICS = {
   vision: null,
 };
 
+const PTZ_BLOCK = {
+  enabled: true,
+  opened: false,
+  init_error: 'open /dev/ak-motor0: errno 19',
+  self_check: null,
+  position: null,
+  moving: false,
+  last_step_pos: null,
+  commands_completed: 0,
+};
+
 function makeResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
@@ -60,6 +71,44 @@ describe('diagnosticsService', () => {
       expect(result.stream_frame_age_ms).toBe(33);
       expect(result.components[0].name).toBe('onvif_server');
       expect(result.degraded_services).toHaveLength(0);
+    });
+
+    it('should accept a diagnostics payload carrying a ptz block', async () => {
+      vi.mocked(authorizedFetch).mockResolvedValue(
+        makeResponse({ ...MOCK_DIAGNOSTICS, ptz: PTZ_BLOCK }),
+      );
+      const result = await getDiagnostics();
+      expect(result.ptz?.init_error).toBe('open /dev/ak-motor0: errno 19');
+    });
+
+    it('should keep the step_readback value from the ptz block', async () => {
+      const payload = {
+        ...MOCK_DIAGNOSTICS,
+        ptz: { ...PTZ_BLOCK, step_readback: 'unsupported' },
+      };
+      vi.mocked(authorizedFetch).mockResolvedValue(makeResponse(payload));
+      const result = await getDiagnostics();
+      expect(result.ptz?.step_readback).toBe('unsupported');
+    });
+
+    it('should accept a ptz block without step_readback from an older bundle', async () => {
+      vi.mocked(authorizedFetch).mockResolvedValue(
+        makeResponse({ ...MOCK_DIAGNOSTICS, ptz: PTZ_BLOCK }),
+      );
+      const result = await getDiagnostics();
+      expect(result.ptz?.step_readback).toBeUndefined();
+    });
+
+    it('should reject a ptz block with an unknown step_readback value', async () => {
+      vi.mocked(authorizedFetch).mockResolvedValue(
+        makeResponse({ ...MOCK_DIAGNOSTICS, ptz: { ...PTZ_BLOCK, step_readback: 'maybe' } }),
+      );
+      await expect(getDiagnostics()).rejects.toThrow(/unexpected shape/);
+    });
+
+    it('should accept a diagnostics payload with no ptz key', async () => {
+      vi.mocked(authorizedFetch).mockResolvedValue(makeResponse(MOCK_DIAGNOSTICS));
+      await expect(getDiagnostics()).resolves.toBeDefined();
     });
 
     it('test_getDiagnostics_request_sends_authorization_via_authorizedFetch', async () => {

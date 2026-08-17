@@ -25,9 +25,19 @@ pub struct DeviceState {
 
 impl DeviceState {
     /// Create a new DeviceState with default values.
+    ///
+    /// PTZ scope advertising defaults to enabled; call [`DeviceState::with_ptz`]
+    /// to honor the `[ptz] enabled` config flag.
     pub fn new() -> Self {
+        Self::with_ptz(true)
+    }
+
+    /// Create a new DeviceState whose fixed scopes reflect the given PTZ support.
+    pub fn with_ptz(ptz_enabled: bool) -> Self {
         Self {
-            scopes: RwLock::new(crate::onvif::device::ops::discovery::default_scopes()),
+            scopes: RwLock::new(crate::onvif::device::ops::discovery::default_scopes(
+                ptz_enabled,
+            )),
             discovery_mode: RwLock::new(DiscoveryMode::Discoverable),
         }
     }

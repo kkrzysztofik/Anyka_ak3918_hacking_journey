@@ -33,6 +33,19 @@ export interface Diagnostics {
     white_led: boolean | null;
     supported: { ir_led: boolean; ircut: boolean; white_led: boolean };
   } | null;
+  ptz?: {
+    enabled: boolean;
+    opened: boolean;
+    init_error: string | null;
+    self_check: string | null;
+    /** Tracked pan/tilt/zoom in degrees — dead-reckoned, not measured. */
+    position: [number, number, number] | null;
+    moving: boolean;
+    last_step_pos: { pan: number | null; tilt: number | null; age_ms: number } | null;
+    /** Whether last_step_pos is a measurement. Absent on pre-2026-08-16 bundles. */
+    step_readback?: 'working' | 'unsupported' | 'unknown';
+    commands_completed: number;
+  } | null;
 }
 
 export type LogSource = 'onvif_rust' | 'vendor_daemon' | 'anyka_init' | 'wpa_supplicant';
@@ -67,6 +80,45 @@ function isVision(value: unknown): value is NonNullable<Diagnostics['vision']> {
   );
 }
 
+function isPositionTuple(value: unknown): value is [number, number, number] {
+  return (
+    Array.isArray(value) &&
+    value.length === 3 &&
+    typeof value[0] === 'number' &&
+    typeof value[1] === 'number' &&
+    typeof value[2] === 'number'
+  );
+}
+
+function isLastStepPos(
+  value: unknown,
+): value is NonNullable<NonNullable<Diagnostics['ptz']>['last_step_pos']> {
+  return (
+    isRecord(value) &&
+    isNullOrNumber(value.pan) &&
+    isNullOrNumber(value.tilt) &&
+    typeof value.age_ms === 'number'
+  );
+}
+
+function isPtz(value: unknown): value is NonNullable<Diagnostics['ptz']> {
+  return (
+    isRecord(value) &&
+    typeof value.enabled === 'boolean' &&
+    typeof value.opened === 'boolean' &&
+    typeof value.moving === 'boolean' &&
+    typeof value.commands_completed === 'number' &&
+    (value.init_error === null || typeof value.init_error === 'string') &&
+    (value.self_check === null || typeof value.self_check === 'string') &&
+    (value.position === null || isPositionTuple(value.position)) &&
+    (value.last_step_pos === null || isLastStepPos(value.last_step_pos)) &&
+    (value.step_readback === undefined ||
+      value.step_readback === 'working' ||
+      value.step_readback === 'unsupported' ||
+      value.step_readback === 'unknown')
+  );
+}
+
 function isNullOrNumber(value: unknown): boolean {
   return value === null || typeof value === 'number';
 }
@@ -93,6 +145,8 @@ function isDiagnostics(value: unknown): value is Diagnostics {
   if (!isNullOrNumber(value.stream_frame_age_ms)) return false;
   if (!Array.isArray(value.components) || !Array.isArray(value.degraded_services)) return false;
   if (value.vision !== null && !isVision(value.vision)) return false;
+  // Absent is fine — a snapshot from a build without PTZ reporting still validates.
+  if (value.ptz !== null && value.ptz !== undefined && !isPtz(value.ptz)) return false;
   return true;
 }
 

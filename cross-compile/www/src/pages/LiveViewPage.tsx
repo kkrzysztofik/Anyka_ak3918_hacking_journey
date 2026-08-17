@@ -16,7 +16,8 @@ import {
   Camera,
   Copy,
   Home,
-  Settings2,
+  Pencil,
+  Trash2,
   Wifi,
 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -26,6 +27,17 @@ import {
   type PlayerState,
   type StreamStats,
 } from '@/components/common/LiveVideoPlayer';
+import { PresetDialog } from '@/components/common/PresetDialog';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { Button } from '@/components/ui/button';
 import {
   SettingsCard,
@@ -43,7 +55,6 @@ import {
   gotoHome,
   gotoPreset,
   removePreset,
-  setPreset,
   stopMove,
 } from '@/services/ptzService';
 import type { PTZDirection, PTZPreset } from '@/services/ptzService';
@@ -75,6 +86,12 @@ export default function LiveViewPage() {
   const [playerMessage, setPlayerMessage] = useState<string>();
   const [stats, setStats] = useState<StreamStats>({});
   const [playerKey, setPlayerKey] = useState(0);
+  // The preset being created ('new') or edited, or null when the dialog is closed.
+  const [editingPreset, setEditingPreset] = useState<PTZPreset | 'new' | null>(null);
+  const [presetToDelete, setPresetToDelete] = useState<PTZPreset | null>(null);
+  // Which preset has a mutation in flight. A single page-wide boolean would freeze
+  // every row while one of them is being deleted.
+  const [pendingToken, setPendingToken] = useState<string | null>(null);
 
   const handleStateChange = useCallback((state: PlayerState, message?: string) => {
     setPlayerState(state);
@@ -106,13 +123,16 @@ export default function LiveViewPage() {
   const queryClient = useQueryClient();
 
   // Fetch profiles to get the PTZ-capable profile token
-  const { data: profiles } = useQuery({
+  const { data: profiles, isSuccess } = useQuery({
     queryKey: ['profiles'],
     queryFn: getProfiles,
   });
 
-  const profileToken =
-    profiles?.find((p) => p.ptzConfiguration)?.token ?? profiles?.[0]?.token ?? '';
+  const hasPtz = !!profiles?.some((p) => p.ptzConfiguration);
+  const ptzDisabled = isSuccess && !hasPtz;
+  const profileToken = hasPtz
+    ? (profiles?.find((p) => p.ptzConfiguration)?.token ?? '')
+    : '';
 
   // Fetch presets for the active profile
   const { data: presets } = useQuery({
@@ -162,21 +182,6 @@ export default function LiveViewPage() {
     },
   });
 
-  // Set preset mutation
-  const setPresetMutation = useMutation({
-    mutationFn: ({ name, presetToken }: { name: string; presetToken?: string }) =>
-      setPreset(profileToken, name, presetToken),
-    onSuccess: () => {
-      toast.success('Preset saved');
-      queryClient.invalidateQueries({ queryKey: ['ptzPresets', profileToken] });
-    },
-    onError: (error) => {
-      toast.error('Save preset failed', {
-        description: error instanceof Error ? error.message : 'An error occurred',
-      });
-    },
-  });
-
   // Remove preset mutation
   const removePresetMutation = useMutation({
     mutationFn: (presetToken: string) => removePreset(profileToken, presetToken),
@@ -188,6 +193,12 @@ export default function LiveViewPage() {
       toast.error('Remove preset failed', {
         description: error instanceof Error ? error.message : 'An error occurred',
       });
+    },
+    // Clear on settle, not on success: a failed delete must not leave the row
+    // disabled forever.
+    onSettled: () => {
+      setPendingToken(null);
+      setPresetToDelete(null);
     },
   });
 
@@ -221,25 +232,11 @@ export default function LiveViewPage() {
     [profileToken, gotoPresetMutation],
   );
 
-  const handleAddPreset = useCallback(() => {
-    if (!profileToken) return;
-    const nextIndex = (presets?.length ?? 0) + 1;
-    setPresetMutation.mutate({ name: `Preset ${nextIndex}` });
-  }, [profileToken, presets, setPresetMutation]);
-
-  const handleRemovePreset = useCallback(
-    (presetToken: string) => {
-      if (!profileToken) return;
-      removePresetMutation.mutate(presetToken);
-    },
-    [profileToken, removePresetMutation],
-  );
-
-  // Build display presets: use real presets if available, fallback to placeholder slots
-  const displayPresets: Array<{ index: number; preset?: PTZPreset }> = [1, 2, 3].map((i) => ({
-    index: i,
-    preset: presets?.[i - 1],
-  }));
+  const handleConfirmDelete = useCallback(() => {
+    if (!profileToken || !presetToDelete) return;
+    setPendingToken(presetToDelete.token);
+    removePresetMutation.mutate(presetToDelete.token);
+  }, [profileToken, presetToDelete, removePresetMutation]);
 
   return (
     <div className="flex h-full flex-col gap-6">
@@ -483,7 +480,11 @@ export default function LiveViewPage() {
         </div>
 
         {/* Right Column: Controls */}
-        <div className="flex flex-col gap-4">
+        <fieldset
+          disabled={ptzDisabled}
+          className={cn('m-0 flex flex-col gap-4 border-0 p-0', ptzDisabled && 'opacity-50')}
+          data-testid="liveview-ptz-fieldset"
+        >
           {/* PTZ Controls */}
           <SettingsCard>
             <SettingsCardHeader>
@@ -496,6 +497,11 @@ export default function LiveViewPage() {
                   <SettingsCardDescription data-testid="liveview-ptz-description">
                     PTZ camera controls
                   </SettingsCardDescription>
+                  {ptzDisabled && (
+                    <p className="text-xs text-zinc-500" data-testid="liveview-ptz-disabled-note">
+                      PTZ is disabled on this device
+                    </p>
+                  )}
                 </div>
               </div>
             </SettingsCardHeader>
@@ -730,45 +736,115 @@ export default function LiveViewPage() {
             </SettingsCardHeader>
             <SettingsCardContent>
               <div className="space-y-2">
-                {displayPresets.map(({ index, preset }) => (
-                  <div key={index} className="group flex items-center gap-2">
-                    <Button
-                      variant="outline"
-                      className="border-border bg-muted text-foreground hover:border-ring hover:bg-muted/80 flex-1 justify-between"
-                      data-testid={`liveview-preset-${index}-button`}
-                      onClick={() => preset && handleGotoPreset(preset.token)}
-                    >
-                      <span className="text-xs" data-testid={`liveview-preset-${index}-label`}>
-                        {preset?.name || `Preset ${index}`}
-                      </span>
-                      <span className="bg-background text-muted-foreground rounded px-1.5 py-0.5 font-mono text-[10px]">
-                        #{index}
-                      </span>
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="text-muted-foreground hover:bg-muted hover:text-accent-red h-8 w-8"
-                      data-testid={`liveview-preset-${index}-settings-button`}
-                      onClick={() => preset && handleRemovePreset(preset.token)}
-                    >
-                      <Settings2 className="h-3.5 w-3.5" />
-                    </Button>
-                  </div>
-                ))}
+                {presets?.length === 0 && (
+                  <p
+                    className="text-muted-foreground py-2 text-xs"
+                    data-testid="liveview-presets-empty"
+                  >
+                    No saved positions yet.
+                  </p>
+                )}
+                {(presets ?? []).map((preset) => {
+                  // A preset the device never named still has to be clickable.
+                  const label = preset.name || preset.token;
+                  const busy = pendingToken === preset.token;
+                  return (
+                    <div key={preset.token} className="group flex items-center gap-2">
+                      <Button
+                        variant="outline"
+                        className="border-border bg-muted text-foreground hover:border-ring hover:bg-muted/80 flex-1 justify-between"
+                        data-testid={`liveview-preset-${preset.token}-button`}
+                        disabled={busy}
+                        onClick={() => handleGotoPreset(preset.token)}
+                      >
+                        <span
+                          className="text-xs"
+                          data-testid={`liveview-preset-${preset.token}-label`}
+                        >
+                          {label}
+                        </span>
+                        <span className="bg-background text-muted-foreground rounded px-1.5 py-0.5 font-mono text-[10px]">
+                          #{preset.token}
+                        </span>
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="text-muted-foreground hover:bg-muted hover:text-foreground h-8 w-8"
+                        aria-label={`Edit preset ${label}`}
+                        data-testid={`liveview-preset-${preset.token}-edit-button`}
+                        disabled={busy}
+                        onClick={() => setEditingPreset(preset)}
+                      >
+                        <Pencil className="h-3.5 w-3.5" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="text-muted-foreground hover:bg-muted hover:text-accent-red h-8 w-8"
+                        aria-label={`Delete preset ${label}`}
+                        data-testid={`liveview-preset-${preset.token}-delete-button`}
+                        disabled={busy}
+                        onClick={() => setPresetToDelete(preset)}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                  );
+                })}
                 <Button
                   variant="outline"
                   className="border-border text-muted-foreground hover:bg-muted/50 hover:text-foreground mt-2 w-full border-dashed"
                   data-testid="liveview-add-preset-button"
-                  onClick={handleAddPreset}
+                  onClick={() => setEditingPreset('new')}
                 >
-                  <span data-testid="liveview-add-preset-label">+ Add Preset</span>
+                  <span data-testid="liveview-add-preset-label">+ Save current position</span>
                 </Button>
               </div>
             </SettingsCardContent>
           </SettingsCard>
-        </div>
+        </fieldset>
       </div>
+
+      {editingPreset && (
+        <PresetDialog
+          profileToken={profileToken}
+          preset={editingPreset}
+          existing={presets ?? []}
+          onClose={() => setEditingPreset(null)}
+        />
+      )}
+
+      {/* Delete Confirmation */}
+      <AlertDialog open={!!presetToDelete} onOpenChange={() => setPresetToDelete(null)}>
+        <AlertDialogContent
+          className="border-border bg-card text-foreground"
+          data-testid="liveview-delete-preset-dialog"
+        >
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-foreground">Delete Preset?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Delete the saved position "{presetToDelete?.name || presetToDelete?.token}"? This
+              cannot be undone; the camera will not move.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel
+              className="border-border bg-transparent"
+              data-testid="liveview-delete-preset-cancel"
+            >
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleConfirmDelete}
+              className="bg-accent-red text-white hover:bg-red-700"
+              data-testid="liveview-delete-preset-confirm"
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

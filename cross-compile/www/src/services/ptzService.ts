@@ -12,6 +12,13 @@ export interface PTZPreset {
   name: string;
 }
 
+/** Normalised ONVIF PTZ position (-1..1 for pan/tilt, 0..1 for zoom). */
+export interface PTZStatus {
+  pan: number;
+  tilt: number;
+  zoom: number;
+}
+
 /** Valid PTZ movement directions */
 export type PTZDirection =
   'up' | 'down' | 'left' | 'right' | 'up-left' | 'up-right' | 'down-left' | 'down-right';
@@ -62,6 +69,40 @@ export async function stopMove(profileToken: string): Promise<void> {
  */
 export async function gotoHome(profileToken: string): Promise<void> {
   await soapRequest(ENDPOINTS.ptz, soapBodies.gotoHomePosition(profileToken));
+}
+
+/** Read one XML axis attribute, treating anything unparseable as 0. */
+function axis(value: unknown): number {
+  const parsed = Number(safeString(value, ''));
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+/**
+ * Get the current PTZ position.
+ *
+ * This is the *tracked* position, not a hardware reading: the V500 motor
+ * ioctls accept a position write but never report one back, so the device
+ * dead-reckons it from the moves it has been commanded to make. It drifts on
+ * stalls and is wrong after a manual nudge. Anything that shows this to a
+ * user must say where the number comes from.
+ */
+export async function getPtzStatus(profileToken: string): Promise<PTZStatus> {
+  const data = await soapRequest<Record<string, unknown>>(
+    ENDPOINTS.ptz,
+    soapBodies.getStatus(profileToken),
+    'GetStatusResponse',
+  );
+
+  const status = data?.PTZStatus as Record<string, unknown> | undefined;
+  const position = status?.Position as Record<string, unknown> | undefined;
+  const panTilt = position?.PanTilt as Record<string, unknown> | undefined;
+  const zoom = position?.Zoom as Record<string, unknown> | undefined;
+
+  return {
+    pan: axis(panTilt?.['@_x']),
+    tilt: axis(panTilt?.['@_y']),
+    zoom: axis(zoom?.['@_x']),
+  };
 }
 
 /**

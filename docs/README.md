@@ -24,6 +24,8 @@ task-by-task implementation plan. Some entries have only one of the two.
 
 | Date | Topic | Design | Plan |
 |---|---|---|---|
+| 2026-08-16 | PTZ diagnostics pane | ✅ | ✅ |
+| 2026-08-15 | PTZ disable reflects in live view | ✅ | ✅ |
 | 2026-08-13 | Camera firmware upgrade skill | ✅ | ✅ |
 | 2026-08-12 | Firmware upgrade path (A/B) | ✅ | ✅ |
 | 2026-08-12 | Firmware upload dialog | ✅ | ✅ |

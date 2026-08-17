@@ -38,8 +38,10 @@ use supervisor::{AttachTarget, Availability, PlatformAttachTarget, run_superviso
 
 use super::common::{
     DeviceInfo, ImagingControl, NetworkInfo, PTZControl, Platform, PlatformError, PlatformResult,
-    Resolution, VideoControl, VideoEncoder, VideoInput,
+    PtzDiagnostics, Resolution, VideoControl, VideoEncoder, VideoInput,
 };
+use crate::config::types::PtzConfig;
+use crate::lifecycle::startup::OptionalInitResult;
 
 // Types used by tests
 #[cfg(test)]
@@ -87,6 +89,8 @@ pub struct AnykaPlatform {
     audio_input: Arc<AnykaAudioInput>,
     audio_encoder: Arc<AnykaAudioEncoder>,
     ptz_control: Option<Arc<dyn PTZControl>>,
+    /// Full PTZ bring-up outcome, including the open failure reason when present.
+    ptz_init: OptionalInitResult<Arc<AnykaPTZControl>>,
     imaging_control: Option<Arc<dyn ImagingControl>>,
     network_info: Option<Arc<dyn NetworkInfo>>,
     /// The shared IPC client, kept so the supervisor can attach and detach it.
@@ -103,38 +107,66 @@ pub struct AnykaPlatform {
             tokio::task::JoinHandle<()>,
         )>,
     >,
+    /// Path the async init path reads to restore the saved PTZ position.
+    /// `None` means persistence is disabled.
+    ptz_position_path: Option<std::path::PathBuf>,
 }
 
-/// Bring PTZ up, or skip it entirely when `enabled` is false.
+/// Bring PTZ up, or skip it entirely when `ptz_config.enabled` is false.
 ///
 /// Bring-up is not free: it spawns the `ptz-actor` thread, opens `/dev/ak-motor{0,1}` and runs
 /// `ptz_check_self`, a physical calibration sweep. On the AK3918 that sweep costs ~2.1 s of every
 /// startup and then fails with -1 before the vertical motor is attempted, so `enabled = false` is
 /// a real saving and not just a service toggle.
 ///
-/// Returning `None` is already a supported state throughout the platform — the open-failure path
-/// below has always produced it — so callers need no new handling.
-fn init_ptz_control(enabled: bool) -> Option<Arc<dyn PTZControl>> {
-    if !enabled {
+/// Returning [`OptionalInitResult`] keeps the open failure reason (device path + errno)
+/// reachable from diagnostics instead of discarding it into a bare `None`.
+///
+/// `position_path` is the on-disk location the actor will write the tracked position to
+/// after each completed command. `None` disables persistence.
+fn init_ptz_control(
+    ptz_config: &PtzConfig,
+    position_path: Option<std::path::PathBuf>,
+) -> OptionalInitResult<Arc<AnykaPTZControl>> {
+    if !ptz_config.enabled {
         tracing::info!("PTZ disabled by config (ptz.enabled = false); skipping motor bring-up");
-        return None;
+        return OptionalInitResult::Disabled;
     }
 
     tracing::info!("Initializing PTZ (native Rust driver, /dev/ak-motor0, /dev/ak-motor1)");
-    let ptz = AnykaPTZControl::new();
+    let ptz = AnykaPTZControl::new(PtzRates::from_config(ptz_config), position_path);
     match ptz.open() {
         Ok(()) => {
             tracing::info!("PTZ device opened successfully");
-            Some(Arc::new(ptz) as Arc<dyn PTZControl>)
+            OptionalInitResult::Success(Arc::new(ptz))
         }
         Err(e) => {
             tracing::error!(
                 "PTZ device failed to open, PTZ features will be unavailable: {}",
                 e
             );
-            None
+            OptionalInitResult::Failed {
+                component: "PTZ".to_string(),
+                // The device path and errno live in this string. Losing it is what made
+                // PTZ bring-up undiagnosable from anywhere but a telnet session.
+                error: e.to_string(),
+            }
         }
     }
+}
+
+/// Named construction inputs for [`AnykaPlatform::with_isp_config`].
+///
+/// Field names keep the two `Option<PathBuf>` paths and the boolean seed from being
+/// swapped at call sites.
+pub struct AnykaPlatformIspConfig {
+    pub isp_config_path: Option<PathBuf>,
+    pub ptz_config: PtzConfig,
+    pub main_encoder: StreamOpenParams,
+    pub sub_encoder: StreamOpenParams,
+    pub imaging_cfg: crate::config::types::ImagingConfig,
+    pub initial_rotated: bool,
+    pub position_path: Option<PathBuf>,
 }
 
 impl AnykaPlatform {
@@ -143,14 +175,15 @@ impl AnykaPlatform {
     /// Uses auto-detection for the ISP config path and brings PTZ up. See
     /// [`with_isp_config`](Self::with_isp_config) to specify an explicit path or to disable PTZ.
     pub fn new() -> PlatformResult<Self> {
-        Self::with_isp_config(
-            None,
-            true,
-            StreamOpenParams::default(),
-            StreamOpenParams::default(),
-            crate::config::types::ImagingConfig::default(),
-            false,
-        )
+        Self::with_isp_config(AnykaPlatformIspConfig {
+            isp_config_path: None,
+            ptz_config: crate::config::types::PtzConfig::default(),
+            main_encoder: StreamOpenParams::default(),
+            sub_encoder: StreamOpenParams::default(),
+            imaging_cfg: crate::config::types::ImagingConfig::default(),
+            initial_rotated: false,
+            position_path: None,
+        })
     }
 
     /// Static hardware descriptor reported by `get_device_info`.
@@ -194,12 +227,14 @@ impl AnykaPlatform {
             audio_input: Arc::new(AnykaAudioInput::with_ffi(audio_ffi.clone())),
             audio_encoder: Arc::new(AnykaAudioEncoder::with_ffi(audio_ffi)),
             ptz_control: None,
+            ptz_init: OptionalInitResult::Disabled,
             imaging_control: None,
             network_info: None,
             // Detached: these tests drive the mocked HALs directly and never
             // route through the real IPC client.
             ipc: Arc::new(AnykaIpc::new_detached().expect("detached IPC needs no daemon")),
             night_loop: std::sync::Mutex::new(None),
+            ptz_position_path: None,
         }
     }
 
@@ -208,8 +243,9 @@ impl AnykaPlatform {
     /// If `isp_config_path` is `Some`, that path is used directly for
     /// `ak_vi_match_sensor()`. If `None`, the default search paths are used.
     ///
-    /// `ptz_enabled` carries `[ptz] enabled` from the config; see [`init_ptz_control`] for what
-    /// skipping it avoids.
+    /// `ptz_config` carries the full `[ptz]` section; the `enabled` flag and the
+    /// dead-reckoning rates are read from it. See [`init_ptz_control`] for what skipping
+    /// the bring-up avoids.
     ///
     /// `main_encoder`/`sub_encoder` carry the parameters that only `ak_venc_open` can apply, so
     /// they must arrive here rather than through `set_configuration`. See [`StreamOpenParams`].
@@ -217,14 +253,19 @@ impl AnykaPlatform {
     /// `initial_rotated` seeds the persisted flip/mirror flag before the VI is even open, so it
     /// is a no-op on the FFI at this point — `AnykaVideoInput::rotated` just remembers it until
     /// `init_video_input()`'s post-`capture_on()` reapply step actually applies it to hardware.
-    pub fn with_isp_config(
-        isp_config_path: Option<PathBuf>,
-        ptz_enabled: bool,
-        main_encoder: StreamOpenParams,
-        sub_encoder: StreamOpenParams,
-        imaging_cfg: crate::config::types::ImagingConfig,
-        initial_rotated: bool,
-    ) -> PlatformResult<Self> {
+    ///
+    /// `position_path` is the on-disk file the actor writes to after every completed
+    /// command. `None` disables persistence.
+    pub fn with_isp_config(cfg: AnykaPlatformIspConfig) -> PlatformResult<Self> {
+        let AnykaPlatformIspConfig {
+            isp_config_path,
+            ptz_config,
+            main_encoder,
+            sub_encoder,
+            imaging_cfg,
+            initial_rotated,
+            position_path,
+        } = cfg;
         let device_info = Self::device_descriptor();
 
         // Start the AUTO day/night loop with its own shutdown channel; the
@@ -284,7 +325,11 @@ impl AnykaPlatform {
             )
         };
 
-        let ptz_control = init_ptz_control(ptz_enabled);
+        let ptz_init = init_ptz_control(&ptz_config, position_path.clone());
+        let ptz_control = match &ptz_init {
+            OptionalInitResult::Success(ptz) => Some(Arc::clone(ptz) as Arc<dyn PTZControl>),
+            _ => None,
+        };
         let network_info = Some(Arc::new(AnykaNetworkInfo::new()) as Arc<dyn NetworkInfo>);
 
         Ok(Self {
@@ -296,10 +341,12 @@ impl AnykaPlatform {
             audio_input,
             audio_encoder,
             ptz_control,
+            ptz_init,
             imaging_control,
             network_info,
             ipc,
             night_loop: std::sync::Mutex::new(Some((night_loop_tx, night_loop_task))),
+            ptz_position_path: position_path,
         })
     }
 
@@ -521,11 +568,32 @@ impl Platform for AnykaPlatform {
         self.video_encoder.stream_frame_age_ms()
     }
 
+    fn ptz_diagnostics(&self) -> Option<PtzDiagnostics> {
+        Some(match &self.ptz_init {
+            OptionalInitResult::Disabled => PtzDiagnostics::disabled(),
+            OptionalInitResult::Failed { error, .. } => PtzDiagnostics::failed(error.clone()),
+            OptionalInitResult::Success(ptz) => ptz.diagnostics(),
+        })
+    }
+
     async fn initialize(&self) -> PlatformResult<()> {
         self.init_video_input().await?;
         self.init_video_encoders().await?;
         self.start_frame_production().await?;
         self.validate_pipeline_readiness()?;
+
+        // Restore the saved PTZ position *after* `check_self` has driven the
+        // motors to true center, so the dead-reckoned move starts from the
+        // most accurate origin available. Every failure is non-fatal: a state
+        // file must never fail boot.
+        if let (Some(path), OptionalInitResult::Success(ptz)) =
+            (&self.ptz_position_path, &self.ptz_init)
+        {
+            // Discard the `Result`: an unwrap here would convert a corrupt
+            // state file into a boot failure, which is exactly what the design
+            // says must not happen.
+            let _ = ptz.restore_position_from_disk(path).await;
+        }
 
         self.initialized.store(true, Ordering::SeqCst);
         Ok(())
@@ -626,6 +694,7 @@ async fn stop_night_loop(
     }
 }
 
+use ptz_actor::PtzRates;
 /// Anyka PTZ control — delegates to `AnykaPTZControl` which calls the FFI layer.
 ///
 /// The PTZ stub has been replaced with a real hardware implementation

@@ -794,6 +794,25 @@ pub struct StubPTZControl {
     next_preset_id: RwLock<u32>,
 }
 
+impl StubPTZControl {
+    /// In-memory PTZ for host-side / ONVIF unit tests.
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
+impl Default for StubPTZControl {
+    fn default() -> Self {
+        Self {
+            position: RwLock::new(PtzPosition::HOME),
+            velocity: RwLock::new(PtzVelocity::STOP),
+            presets: RwLock::new(HashMap::new()),
+            limits: PtzLimits::DEFAULT,
+            next_preset_id: RwLock::new(1),
+        }
+    }
+}
+
 #[async_trait]
 impl PTZControl for StubPTZControl {
     async fn move_to_position(&self, position: PtzPosition) -> PlatformResult<()> {
@@ -822,6 +841,11 @@ impl PTZControl for StubPTZControl {
 
     async fn stop(&self) -> PlatformResult<()> {
         *self.velocity.write() = PtzVelocity::STOP;
+        Ok(())
+    }
+
+    async fn home(&self) -> PlatformResult<()> {
+        *self.position.write() = PtzPosition::HOME;
         Ok(())
     }
 
@@ -1204,6 +1228,20 @@ mod tests {
         assert_eq!(pos.pan, 45.0);
         assert_eq!(pos.tilt, -30.0);
         assert_eq!(pos.zoom, 2.0);
+    }
+
+    #[tokio::test]
+    async fn test_stub_ptz_home_resets_to_home_position() {
+        let platform = StubPlatform::new();
+        let ptz = platform.ptz_control().unwrap();
+
+        ptz.move_to_position(PtzPosition::new(45.0, -30.0, 2.0))
+            .await
+            .unwrap();
+        ptz.home().await.unwrap();
+
+        let pos = ptz.get_position().await.unwrap();
+        assert_eq!(pos, PtzPosition::HOME);
     }
 
     #[tokio::test]

@@ -226,6 +226,7 @@ impl ProfileManager {
         default_ptz_config: PTZConfiguration,
     ) {
         let mut profile_count = 0;
+        let ptz_enabled = config.read().ptz.enabled;
 
         for profile_num in 1..=4 {
             if !Self::is_profile_enabled(config, profile_num) {
@@ -285,7 +286,7 @@ impl ProfileManager {
                 None
             };
 
-            let profile = Self::create_profile_from_config(
+            let mut profile = Self::create_profile_from_config(
                 &profile_config.name,
                 profile_config.width,
                 profile_config.height,
@@ -295,6 +296,9 @@ impl ProfileManager {
                 audio_encoder_config,
                 &default_ptz_config,
             );
+            if !ptz_enabled {
+                profile.ptz_configuration = None;
+            }
             self.profiles.write().insert(profile.token.clone(), profile);
             profile_count += 1;
         }
@@ -1427,10 +1431,19 @@ impl ProfileManager {
                 .and_then(Self::stored_to_audio_encoder_config)
         });
 
-        let ptz_configuration = stored
-            .ptz_config
+        let ptz_enabled = self
+            .config
             .as_ref()
-            .map(|_| Self::create_default_ptz_configuration());
+            .map(|c| c.read().ptz.enabled)
+            .unwrap_or(true);
+        let ptz_configuration = if ptz_enabled {
+            stored
+                .ptz_config
+                .as_ref()
+                .map(|_| Self::create_default_ptz_configuration())
+        } else {
+            None
+        };
 
         Some(Profile {
             token: stored.token.clone(),
@@ -1527,6 +1540,29 @@ mod tests {
         let manager = ProfileManager::new();
         let profiles = manager.get_profiles();
         assert_eq!(profiles.len(), 2);
+    }
+
+    #[test]
+    fn test_profiles_ptz_disabled_omit_configuration() {
+        let config = Arc::new(ConfigRuntime::new(Default::default()));
+        config.write().ptz.enabled = false;
+        let manager = ProfileManager::with_config(config);
+        let profiles = manager.get_profiles();
+        assert!(!profiles.is_empty());
+        for profile in profiles {
+            assert!(profile.ptz_configuration.is_none());
+        }
+    }
+
+    #[test]
+    fn test_profiles_ptz_enabled_include_configuration() {
+        let config = Arc::new(ConfigRuntime::new(Default::default()));
+        let manager = ProfileManager::with_config(config);
+        let profiles = manager.get_profiles();
+        assert!(!profiles.is_empty());
+        for profile in profiles {
+            assert!(profile.ptz_configuration.is_some());
+        }
     }
 
     #[test]
@@ -1713,6 +1749,42 @@ mod tests {
         );
         let loaded = manager_reloaded.get_profile(&profile.token).unwrap();
         assert_eq!(loaded.name, "PersistedProfile");
+    }
+
+    #[test]
+    fn test_storage_restore_ptz_disabled_clears_configuration() {
+        let dir = tempfile::tempdir().unwrap();
+        let enabled = Arc::new(ConfigRuntime::new(Default::default()));
+        let storage = Arc::new(ProfileStorage::new(dir.path().join("profiles.toml")));
+        let _seeded = ProfileManager::with_storage(
+            Arc::clone(&enabled),
+            Arc::clone(&storage),
+            Resolution::new(1920, 1080),
+        );
+        assert!(
+            storage
+                .snapshot()
+                .profiles
+                .iter()
+                .any(|p| p.ptz_config.is_some()),
+            "seed storage must retain PTZ tokens so restore can clear them"
+        );
+
+        let disabled = Arc::new(ConfigRuntime::new(Default::default()));
+        disabled.write().ptz.enabled = false;
+        let restored = ProfileManager::with_storage(
+            disabled,
+            Arc::clone(&storage),
+            Resolution::new(1920, 1080),
+        );
+        let profiles = restored.get_profiles();
+        assert!(!profiles.is_empty());
+        for profile in profiles {
+            assert!(
+                profile.ptz_configuration.is_none(),
+                "restored profile must drop PTZConfiguration when ptz.enabled is false"
+            );
+        }
     }
 
     // ========================================================================

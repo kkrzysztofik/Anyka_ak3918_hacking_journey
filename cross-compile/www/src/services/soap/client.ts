@@ -211,6 +211,9 @@ export const soapBodies = {
   gotoHomePosition: (profileToken: string) =>
     `<tptz:GotoHomePosition><tptz:ProfileToken>${escapeXml(profileToken)}</tptz:ProfileToken></tptz:GotoHomePosition>`,
 
+  getStatus: (profileToken: string) =>
+    `<tptz:GetStatus><tptz:ProfileToken>${escapeXml(profileToken)}</tptz:ProfileToken></tptz:GetStatus>`,
+
   getPresets: (profileToken: string) =>
     `<tptz:GetPresets><tptz:ProfileToken>${escapeXml(profileToken)}</tptz:ProfileToken></tptz:GetPresets>`,
 

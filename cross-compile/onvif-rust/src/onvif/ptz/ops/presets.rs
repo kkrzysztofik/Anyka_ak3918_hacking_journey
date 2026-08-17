@@ -55,6 +55,10 @@ pub fn set_preset(
 }
 
 /// Handle GotoPreset request.
+///
+/// Presets live in the ONVIF `PresetStore`. Drive the motors with a normal
+/// absolute move to the stored position — the platform layer no longer keeps
+/// its own preset map (see the position-tracking design §6c).
 pub async fn goto_preset(
     state: &PTZStateManager,
     ptz_control: &Option<Arc<dyn PTZControl>>,
@@ -67,26 +71,35 @@ pub async fn goto_preset(
         preset_token
     );
 
-    // Set moving state
+    let preset = state.get_preset(&preset_token)?;
+    let position = preset.ptz_position.ok_or_else(|| {
+        crate::onvif::error::OnvifError::Internal(
+            "Preset exists but has no stored position".to_string(),
+        )
+    })?;
+
+    // Mark moving before hardware accepts the command — do NOT write the target
+    // yet (truth comes from the platform after accept / completion).
     state.set_moving(true, true);
 
-    // Go to preset position
-    state.goto_preset(&preset_token)?;
-
-    // Call platform if available
     if let Some(ptz) = ptz_control {
-        ptz.goto_preset(&preset_token).await.map_err(|e| {
+        let pos = super::movement::vector_to_position(&position);
+        ptz.move_to_position(pos).await.map_err(|e| {
             state.stop();
             crate::onvif::error::OnvifError::HardwareFailure(format!(
                 "PTZ goto preset failed: {}",
                 e
             ))
         })?;
+        super::movement::sync_position_from_platform(state, ptz).await;
+        // Leave moving=true; Stop / completion path clears it. GetStatus reads live.
+        Ok(())
+    } else {
+        state.stop();
+        Err(crate::onvif::error::OnvifError::ActionNotSupported(
+            "PTZ is not available on this device".to_string(),
+        ))
     }
-
-    state.stop();
-
-    Ok(())
 }
 
 /// Handle RemovePreset request.
@@ -147,10 +160,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_goto_preset() {
+    async fn test_goto_preset_without_hardware_faults() {
         let state = create_test_state();
 
-        // Move to a position and create preset
         state.set_position(&PTZVector {
             pan_tilt: Some(Vector2D {
                 x: 0.6,
@@ -172,10 +184,23 @@ mod tests {
         )
         .unwrap();
 
-        // Move somewhere else
+        let result = goto_preset(&state, &None, "Profile1", set_response.preset_token).await;
+        assert!(matches!(
+            result,
+            Err(crate::onvif::error::OnvifError::ActionNotSupported(_))
+        ));
+        assert!(!state.is_moving());
+    }
+
+    #[tokio::test]
+    async fn test_goto_preset_platform_drives_absolute_move() {
+        use crate::platform::common::traits::{MockPTZControl, PtzPosition};
+        use mockall::predicate::eq;
+
+        let state = create_test_state();
         state.set_position(&PTZVector {
             pan_tilt: Some(Vector2D {
-                x: 0.0,
+                x: 0.5,
                 y: 0.0,
                 space: None,
             }),
@@ -184,17 +209,27 @@ mod tests {
                 space: None,
             }),
         });
+        let token = set_preset(
+            &state,
+            &None,
+            "Profile1",
+            Some("HardwareGoto".to_string()),
+            None,
+        )
+        .unwrap()
+        .preset_token;
 
-        // Go to preset
-        goto_preset(&state, &None, "Profile1", set_response.preset_token)
-            .await
-            .unwrap();
+        let mut mock = MockPTZControl::new();
+        mock.expect_goto_preset().times(0);
+        mock.expect_move_to_position()
+            .times(1)
+            .with(eq(PtzPosition::new(90.0, 0.0, 1.0)))
+            .returning(|_| Ok(()));
+        mock.expect_get_position()
+            .returning(|| Ok(PtzPosition::new(90.0, 0.0, 1.0)));
 
-        // Verify position
-        let pos = state.get_position();
-        let pt = pos.pan_tilt.unwrap();
-        assert_eq!(pt.x, 0.6);
-        assert_eq!(pt.y, 0.7);
+        let ptz: Option<Arc<dyn PTZControl>> = Some(Arc::new(mock));
+        goto_preset(&state, &ptz, "Profile1", token).await.unwrap();
     }
 
     #[test]

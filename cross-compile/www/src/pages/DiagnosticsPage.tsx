@@ -8,6 +8,7 @@ import {
   Download,
   Eye,
   FileText,
+  Move,
   HardDrive,
   Info,
   Upload,
@@ -173,6 +174,147 @@ function VisionCard({ vision }: Readonly<{ vision: Diagnostics['vision'] }>) {
             </div>
           ))}
         </dl>
+      </CardContent>
+    </Card>
+  );
+}
+
+type PtzRow = { label: string; value: string; testId: string };
+
+function PtzRows({ rows }: Readonly<{ rows: PtzRow[] }>) {
+  return (
+    <>
+      {rows.map(({ label, value, testId }) => (
+        <div key={testId} className="flex items-center justify-between">
+          <dt className="text-muted-foreground">{label}</dt>
+          <dd className="font-mono text-white" data-testid={testId}>
+            {value}
+          </dd>
+        </div>
+      ))}
+    </>
+  );
+}
+
+function PtzCard({ ptz }: Readonly<{ ptz: NonNullable<Diagnostics['ptz']> }>) {
+  const config = ptz.enabled ? 'enabled' : 'disabled';
+  const motors = ptz.opened ? 'open' : 'not opened';
+  const selfCheck = ptz.self_check ?? '\u2014';
+
+  // Older bundles omit the field; that is "not established either way", not "broken".
+  const stepReadback = ptz.step_readback ?? 'unknown';
+  const noReadback = stepReadback === 'unsupported';
+
+  const axis = (index: number) =>
+    ptz.position ? `${ptz.position[index].toFixed(1)}\u00B0` : '\u2014';
+
+  const bringUpRows: PtzRow[] = [
+    { label: 'Config', value: config, testId: 'diagnostics-ptz-config' },
+    { label: 'Motors', value: motors, testId: 'diagnostics-ptz-motors' },
+    { label: 'Self-check', value: selfCheck, testId: 'diagnostics-ptz-self-check' },
+  ];
+
+  const measuredRows: PtzRow[] = [
+    { label: 'Step readback', value: stepReadback, testId: 'diagnostics-ptz-step-readback' },
+    // A permanently-zero step position is noise impersonating data, so drop the row entirely.
+    ...(noReadback
+      ? []
+      : [
+          {
+            label: 'Step pos',
+            value: ptz.last_step_pos
+              ? `${ptz.last_step_pos.pan ?? '\u2014'} / ${ptz.last_step_pos.tilt ?? '\u2014'}`
+              : '\u2014',
+            testId: 'diagnostics-ptz-step-pos',
+          },
+        ]),
+    { label: 'Moving', value: ptz.moving ? 'yes' : 'no', testId: 'diagnostics-ptz-moving' },
+    {
+      label: 'Commands',
+      value: String(ptz.commands_completed),
+      testId: 'diagnostics-ptz-commands',
+    },
+  ];
+
+  const estimatedRows: PtzRow[] = [
+    { label: 'Pan', value: axis(0), testId: 'diagnostics-ptz-pan' },
+    { label: 'Tilt', value: axis(1), testId: 'diagnostics-ptz-tilt' },
+    {
+      label: 'Zoom',
+      value: ptz.position ? ptz.position[2].toFixed(1) : '\u2014',
+      testId: 'diagnostics-ptz-zoom',
+    },
+    {
+      // The age is measured even when the position beside it is not: it is when the last
+      // turn finished, so it belongs here whether or not step readback works.
+      label: 'Last motion',
+      value: ptz.last_step_pos ? `${formatDuration(ptz.last_step_pos.age_ms / 1000)} ago` : '\u2014',
+      testId: 'diagnostics-ptz-last-motion',
+    },
+  ];
+
+  return (
+    <Card className="border-border bg-card overflow-hidden">
+      <CardHeader className="border-border border-b">
+        <div className="flex items-center gap-3">
+          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-cyan-500/10">
+            <Move className="h-5 w-5 text-cyan-500" />
+          </div>
+          <div>
+            <CardTitle
+              className="text-foreground text-sm font-semibold"
+              data-testid="diagnostics-ptz-title"
+            >
+              PTZ
+            </CardTitle>
+            <p className="text-muted-foreground text-xs">Motor bring-up and tracked motion</p>
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-4 pt-4">
+        <div>
+          <p
+            className="text-muted-foreground mb-2 text-xs font-semibold uppercase"
+            data-testid="diagnostics-ptz-measured-header"
+          >
+            Measured
+          </p>
+          <dl className="space-y-2 text-sm">
+            <PtzRows rows={bringUpRows} />
+            {ptz.init_error ? (
+              <div className="flex items-center justify-between">
+                <dt className="text-muted-foreground">Init error</dt>
+                <dd className="font-mono text-red-500" data-testid="diagnostics-ptz-init-error">
+                  {ptz.init_error}
+                </dd>
+              </div>
+            ) : null}
+            {ptz.enabled ? <PtzRows rows={measuredRows} /> : null}
+          </dl>
+          {ptz.enabled && noReadback ? (
+            <p className="mt-2 text-xs text-yellow-500" data-testid="diagnostics-ptz-no-readback">
+              This motor driver accepts the status ioctl and writes nothing back, so step
+              positions are unavailable on this hardware.
+            </p>
+          ) : null}
+        </div>
+        {ptz.enabled ? (
+          <div>
+            <p
+              className="text-muted-foreground mb-2 text-xs font-semibold uppercase"
+              data-testid="diagnostics-ptz-estimated-header"
+            >
+              Estimated — dead-reckoned, not measured
+            </p>
+            <dl className="space-y-2 text-sm">
+              <PtzRows rows={estimatedRows} />
+            </dl>
+          </div>
+        ) : (
+          <p className="text-muted-foreground text-xs" data-testid="diagnostics-ptz-disabled-note">
+            PTZ disabled in configuration
+          </p>
+        )}
       </CardContent>
     </Card>
   );
@@ -804,6 +946,7 @@ export default function DiagnosticsPage() {
       <div className="grid gap-6 lg:grid-cols-2">
         <DeviceInfoCard data={data} />
         <VisionCard vision={data?.vision ?? null} />
+        {data?.ptz ? <PtzCard ptz={data.ptz} /> : null}
         <StreamHealthCard data={data} />
       </div>
 

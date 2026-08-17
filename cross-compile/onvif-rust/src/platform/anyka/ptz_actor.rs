@@ -17,21 +17,23 @@
 //! (`PtzHalTrait::ptz_interrupt`), set by the platform layer before each new command so
 //! the actor's blocking wait unwinds quickly.
 
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
+use std::time::{Duration, Instant};
 
 use parking_lot::RwLock;
+use serde::{Deserialize, Serialize};
 use tokio::sync::{mpsc, oneshot};
 
 use crate::hal::anyka::sdk::PtzDirection;
 
 #[cfg(not(use_stubs))]
-use crate::hal::anyka::ptz::ptz_turn_direction;
+use crate::hal::anyka::ptz::{ptz_feedback_pin, ptz_turn_direction};
 #[cfg(use_stubs)]
-use crate::hal::common::ptz_turn_direction;
+use crate::hal::common::{ptz_feedback_pin, ptz_turn_direction};
 
-use crate::hal::common::AK_SUCCESS_I32;
-use crate::hal::common::ptz::{PtzHalTrait, PtzWaitOutcome};
+use crate::hal::common::ptz::{PtzHalTrait, TurnOutcome};
 
 use crate::platform::traits::{PlatformError, PlatformResult, PtzPosition, PtzVelocity};
 
@@ -39,6 +41,77 @@ use super::ptz_control::{
     PTZ_MAX_PAN_DEGREES, PTZ_MAX_TILT_DEGREES, PTZ_MIN_MOVE_THRESHOLD, PTZ_MIN_PAN_DEGREES,
     PTZ_MIN_TILT_DEGREES, PTZ_STOP_DIRECTIONS, direction_to_ffi, iter_ffi_directions,
 };
+
+/// On-disk form of the tracked position. Degrees, matching `PtzPosition`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct PersistedPosition {
+    pan: f32,
+    tilt: f32,
+}
+
+/// Load a previously saved position, clamped to the travel limits.
+///
+/// Returns `None` for every failure — missing, unreadable, malformed. A state file
+/// must never be able to fail boot.
+pub(crate) fn load_position(path: &Path) -> Option<PtzPosition> {
+    let raw = std::fs::read_to_string(path).ok()?;
+    let parsed: PersistedPosition = toml::from_str(&raw).ok()?;
+    Some(PtzPosition::new(
+        parsed.pan.clamp(PTZ_MIN_PAN_DEGREES, PTZ_MAX_PAN_DEGREES),
+        parsed
+            .tilt
+            .clamp(PTZ_MIN_TILT_DEGREES, PTZ_MAX_TILT_DEGREES),
+        1.0,
+    ))
+}
+
+/// Write the tracked position. Failures are logged, never propagated: losing the
+/// saved view is not worth failing a move the motor already made.
+pub(crate) fn save_position(path: &Path, position: PtzPosition) {
+    let bytes = match toml::to_string(&PersistedPosition {
+        pan: position.pan,
+        tilt: position.tilt,
+    }) {
+        Ok(s) => s.into_bytes(),
+        Err(e) => {
+            tracing::error!("PTZ position serialise failed: {}", e);
+            return;
+        }
+    };
+    if let Err(e) = crate::config::file_ops::atomic_write(path, &bytes, None) {
+        tracing::error!("PTZ position write to {} failed: {}", path.display(), e);
+    }
+}
+
+/// Degrees per second each axis travels at the driver's fixed speed setting.
+///
+/// ponytail: plain constants, because the driver sets speed exactly once
+/// (`DEFAULT_SPEED`) and nothing varies it — a constant is as expressive as the
+/// hardware currently is. If variable speed ever lands these become a function of
+/// `motor_parm.speed_step`.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct PtzRates {
+    pub pan_deg_per_sec: f32,
+    pub tilt_deg_per_sec: f32,
+}
+
+impl PtzRates {
+    /// Convert from the configuration's `f64` degrees-per-second fields.
+    pub(crate) fn from_config(cfg: &crate::config::types::PtzConfig) -> Self {
+        Self {
+            pan_deg_per_sec: cfg.pan_degrees_per_sec as f32,
+            tilt_deg_per_sec: cfg.tilt_degrees_per_sec as f32,
+        }
+    }
+}
+
+/// The most recent motor step readback, per axis, with when it was taken.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct StepSample {
+    pub pan: Option<i32>,
+    pub tilt: Option<i32>,
+    pub at: Instant,
+}
 
 /// Shared, lock-guarded PTZ state written by the actor and read by the platform layer.
 ///
@@ -52,15 +125,45 @@ pub(crate) struct PtzActorState {
     /// reply). Lets observers know when an accepted-but-async move has actually landed.
     /// `u32` (not `u64`) so it is lock-free on the 32-bit ARM target.
     pub commands_completed: AtomicU32,
+    /// Last `TurnOutcome.step_pos` observed per axis — never from a fresh ioctl.
+    pub last_step: RwLock<Option<StepSample>>,
+    /// Per-axis degrees-per-second used by dead-reckoning integration.
+    pub rates: PtzRates,
+    /// Path the actor writes the tracked position to after every completed command.
+    /// `None` disables persistence (host tests / disabled PTZ).
+    pub position_path: Option<PathBuf>,
 }
 
 impl PtzActorState {
-    pub(crate) fn new() -> Self {
+    pub(crate) fn new(rates: PtzRates) -> Self {
         Self {
             position: RwLock::new(PtzPosition::HOME),
             velocity: RwLock::new(PtzVelocity::STOP),
             commands_completed: AtomicU32::new(0),
+            last_step: RwLock::new(None),
+            rates,
+            position_path: None,
         }
+    }
+
+    /// Record a step readback observed at the end of a turn.
+    ///
+    /// Called only from the actor thread with a `TurnOutcome` already in hand — this
+    /// never issues an ioctl of its own.
+    pub(crate) fn record_step(&self, is_pan: bool, step: i32) {
+        let mut guard = self.last_step.write();
+        let mut sample = (*guard).unwrap_or(StepSample {
+            pan: None,
+            tilt: None,
+            at: Instant::now(),
+        });
+        if is_pan {
+            sample.pan = Some(step);
+        } else {
+            sample.tilt = Some(step);
+        }
+        sample.at = Instant::now();
+        *guard = Some(sample);
     }
 }
 
@@ -83,6 +186,13 @@ pub(crate) enum PtzCommand {
     Stop {
         reply: oneshot::Sender<PlatformResult<()>>,
     },
+    /// Run the limit-switch sweep and reset tracked position to `HOME`.
+    ///
+    /// Replied on acceptance: the sweep can outrun `PTZ_CMD_TIMEOUT` and ONVIF treats
+    /// these moves as asynchronous (same as `MoveTo`).
+    Home {
+        reply: oneshot::Sender<PlatformResult<()>>,
+    },
 }
 
 impl PtzCommand {
@@ -96,7 +206,8 @@ impl PtzCommand {
         match self {
             PtzCommand::MoveTo { reply, .. }
             | PtzCommand::Continuous { reply, .. }
-            | PtzCommand::Stop { reply } => reply,
+            | PtzCommand::Stop { reply }
+            | PtzCommand::Home { reply } => reply,
         }
     }
 }
@@ -136,6 +247,14 @@ fn dispatch_batch(ffi: &dyn PtzHalTrait, state: &PtzActorState, batch: Vec<PtzCo
 
     // The winner has fully finished (including any post-acceptance wait/reconcile tail).
     state.commands_completed.fetch_add(1, Ordering::SeqCst);
+
+    // ponytail: one write per completed command, no debounce — dispatch_batch's
+    // supersede semantics already collapse a jog burst into a single command, and this
+    // runs on the actor's own OS thread where blocking I/O is free. Add debouncing via
+    // config::persistence if write volume ever becomes a problem.
+    if let Some(path) = &state.position_path {
+        save_position(path, *state.position.read());
+    }
 }
 
 fn execute(ffi: &dyn PtzHalTrait, state: &PtzActorState, cmd: PtzCommand) {
@@ -149,6 +268,29 @@ fn execute(ffi: &dyn PtzHalTrait, state: &PtzActorState, cmd: PtzCommand) {
         PtzCommand::Stop { reply } => {
             let result = do_stop(ffi, state);
             let _ = reply.send(result);
+        }
+        PtzCommand::Home { reply } => {
+            // Reply on acceptance: the limit-switch sweep can outrun PTZ_CMD_TIMEOUT,
+            // and ONVIF treats these moves as asynchronous (same as MoveTo).
+            let _ = reply.send(Ok(()));
+            do_home(ffi, state);
+        }
+    }
+}
+
+/// Run the limit-switch sweep and reset tracked position to `HOME`.
+///
+/// The sweep is the only absolute reference the hardware offers (`MOTOR_GET_STATUS`
+/// is a silent no-op on V500), so this is the drift reset that every other move
+/// integrators against.
+fn do_home(ffi: &dyn PtzHalTrait, state: &PtzActorState) {
+    match ffi.ptz_check_self(ptz_feedback_pin::PTZ_FEEDBACK_PIN_EXIST) {
+        Ok(_) => {
+            *state.position.write() = PtzPosition::HOME;
+            *state.velocity.write() = PtzVelocity::STOP;
+        }
+        Err(e) => {
+            tracing::error!("PTZ re-home sweep failed, position unchanged: {}", e);
         }
     }
 }
@@ -183,25 +325,36 @@ fn do_move(
     let plan = build_move_plan(pan_delta, tilt_delta, clamped_pan, clamped_tilt);
 
     // Issue each axis turn (non-blocking). Acceptance = all planned turns issued.
-    let mut started = Vec::new();
+    let mut started: Vec<(ptz_turn_direction, PtzDirection, Axis)> = Vec::new();
     let mut result = Ok(());
+    // Capture the tick *before* the first `ptz_start_turn` so the dead-reckoned
+    // partial commit on interrupt measures exactly the motor-on window.
+    let started_at = Instant::now();
     for (direction, degrees, axis) in plan {
         let sdk_dir = direction_to_ffi(direction);
-        let ret = ffi.ptz_start_turn(sdk_dir, degrees.round() as i32);
-        if ret != AK_SUCCESS_I32 {
-            result = Err(PlatformError::HardwareFailure(format!(
-                "ptz_start_turn({:?}) failed: error code {}",
-                direction, ret
-            )));
-            break;
+        match ffi.ptz_start_turn(sdk_dir, degrees.round() as i32) {
+            Ok(true) => started.push((sdk_dir, direction, axis)),
+            Ok(false) => {}
+            Err(e) => {
+                result = Err(e);
+                break;
+            }
         }
-        started.push((sdk_dir, axis));
     }
 
     // Reply on acceptance (before waiting for the motor to finish).
     let _ = reply.send(result);
 
-    drain_started_turns(ffi, state, started);
+    drain_started_turns(ffi, state, started, started_at);
+
+    // Recalibration aid: enable debug logging and issue single-axis AbsoluteMoves;
+    // deg/s = |delta| / (elapsed_ms/1000). Median of three trials per axis.
+    tracing::debug!(
+        elapsed_ms = started_at.elapsed().as_millis(),
+        pan_delta,
+        tilt_delta,
+        "PTZ absolute move motor-on window"
+    );
 
     // No hardware zoom on AK3918.
     state.position.write().zoom = position.zoom.clamp(1.0, 1.0);
@@ -238,21 +391,72 @@ fn build_move_plan(
     plan
 }
 
+/// Accumulate dead-reckoned motion for one axis into the tracked position.
+///
+/// Sign convention matches `build_move_plan`: Right and Down are positive.
+/// There is no hardware readback to correct against — see the design doc.
+fn integrate_axis(state: &PtzActorState, direction: PtzDirection, elapsed: Duration) {
+    let seconds = elapsed.as_secs_f32();
+    let mut position = state.position.write();
+    match direction {
+        PtzDirection::Right | PtzDirection::Left => {
+            let sign = if matches!(direction, PtzDirection::Right) {
+                1.0
+            } else {
+                -1.0
+            };
+            position.pan = (position.pan + sign * state.rates.pan_deg_per_sec * seconds)
+                .clamp(PTZ_MIN_PAN_DEGREES, PTZ_MAX_PAN_DEGREES);
+        }
+        PtzDirection::Down | PtzDirection::Up => {
+            let sign = if matches!(direction, PtzDirection::Down) {
+                1.0
+            } else {
+                -1.0
+            };
+            position.tilt = (position.tilt + sign * state.rates.tilt_deg_per_sec * seconds)
+                .clamp(PTZ_MIN_TILT_DEGREES, PTZ_MAX_TILT_DEGREES);
+        }
+    }
+}
+
 /// Drain each started axis off the tokio workers; commit its target once it lands.
 ///
 /// A `TurnOutcome`/`PtzWaitOutcome` is used (never discarded): on interruption we
-/// stop reconciling further axes and leave the last known position untouched rather
-/// than committing a target the motor never reached.
+/// dead-reckon the partial motion that already happened and commit that, rather than
+/// leaving the tracked position untouched (which would lose every degree the motor
+/// actually travelled).
 fn drain_started_turns(
     ffi: &dyn PtzHalTrait,
     state: &PtzActorState,
-    started: Vec<(ptz_turn_direction, Axis)>,
+    started: Vec<(ptz_turn_direction, PtzDirection, Axis)>,
+    started_at: Instant,
 ) {
-    for (sdk_dir, axis) in started {
-        let outcome: PtzWaitOutcome = ffi.ptz_wait_turn(sdk_dir);
+    for (sdk_dir, direction, axis) in started {
+        let outcome: TurnOutcome = match ffi.ptz_wait_turn(sdk_dir) {
+            Ok(outcome) => outcome,
+            Err(e) => {
+                // The wait itself failed, so we do not know where the motor stopped.
+                // Committing the commanded target here would record a position the
+                // hardware may never have reached.
+                tracing::warn!(
+                    "PTZ wait failed on {:?}, leaving tracked position: {}",
+                    axis,
+                    e
+                );
+                break;
+            }
+        };
+        let is_pan = matches!(axis, Axis::Pan(_));
+        state.record_step(is_pan, outcome.step_pos);
+
         if outcome.interrupted {
+            // Commit the partial motion the motor actually travelled, then stop
+            // draining later axes — their `started_at`‑measured integration would
+            // smear attempted-future motion into the position.
+            integrate_axis(state, direction, started_at.elapsed());
             tracing::debug!(
-                "absolute move preempted on {:?} (step_pos={}); leaving tracked position",
+                "absolute move preempted on {:?} (step_pos={}); committed dead-reckoned partial motion",
                 axis,
                 outcome.step_pos
             );
@@ -284,25 +488,30 @@ fn do_continuous(
     velocity: PtzVelocity,
     reply: oneshot::Sender<PlatformResult<()>>,
 ) {
-    // (axis velocity, positive dir, negative dir, sweep magnitude)
+    // (axis velocity, positive dir, negative dir, sweep magnitude, is_pan)
     let axes = [
         (
             velocity.pan,
             PtzDirection::Right,
             PtzDirection::Left,
             PTZ_MAX_PAN_DEGREES,
+            true,
         ),
         (
             velocity.tilt,
             PtzDirection::Down,
             PtzDirection::Up,
             PTZ_MAX_TILT_DEGREES,
+            false,
         ),
     ];
 
-    let mut started = Vec::new();
+    let mut started: Vec<(ptz_turn_direction, PtzDirection, bool)> = Vec::new();
     let mut result = Ok(());
-    for (axis_velocity, dir_pos, dir_neg, sweep) in axes {
+    // Capture the tick *before* the first `ptz_start_turn` so the integrated motion
+    // measures exactly the motor-on window, not the validation that preceded it.
+    let started_at = Instant::now();
+    for (axis_velocity, dir_pos, dir_neg, sweep, is_pan) in axes {
         if axis_velocity.abs() <= f32::EPSILON {
             continue;
         }
@@ -312,15 +521,14 @@ fn do_continuous(
             dir_neg
         };
         let sdk_dir = direction_to_ffi(direction);
-        let ret = ffi.ptz_start_turn(sdk_dir, sweep.round() as i32);
-        if ret != AK_SUCCESS_I32 {
-            result = Err(PlatformError::HardwareFailure(format!(
-                "ptz_start_turn({:?}) failed: error code {}",
-                direction, ret
-            )));
-            break;
+        match ffi.ptz_start_turn(sdk_dir, sweep.round() as i32) {
+            Ok(true) => started.push((sdk_dir, direction, is_pan)),
+            Ok(false) => {}
+            Err(e) => {
+                result = Err(e);
+                break;
+            }
         }
-        started.push(sdk_dir);
     }
 
     if result.is_ok() {
@@ -336,13 +544,27 @@ fn do_continuous(
     // set by the platform layer before each submit), bounding preemption latency to one
     // ~100ms poll tick in the driver's wait loop. The `PtzWaitOutcome` is consumed (not
     // discarded) for the reconciled step position / interrupt signal.
-    for sdk_dir in started {
-        let outcome: PtzWaitOutcome = ffi.ptz_wait_turn(sdk_dir);
-        tracing::debug!(
-            "continuous axis wait finished: interrupted={}, step_pos={}",
-            outcome.interrupted,
-            outcome.step_pos
-        );
+    for (sdk_dir, _direction, is_pan) in &started {
+        match ffi.ptz_wait_turn(*sdk_dir) {
+            Ok(outcome) => {
+                state.record_step(*is_pan, outcome.step_pos);
+                tracing::debug!(
+                    "continuous axis wait finished: interrupted={}, step_pos={}",
+                    outcome.interrupted,
+                    outcome.step_pos
+                );
+            }
+            Err(e) => tracing::warn!("continuous axis wait failed: {}", e),
+        }
+    }
+
+    // Dead-reckon the tracked position from the motor-on window. One Instant for the
+    // whole command — both axes ran during the same wall-clock interval, and timing
+    // each axis separately would credit the second axis with ~0° (its wait returns
+    // almost immediately after the first wait releases).
+    let elapsed = started_at.elapsed();
+    for (_, direction, _) in &started {
+        integrate_axis(state, *direction, elapsed);
     }
 }
 
@@ -351,17 +573,130 @@ fn do_continuous(
 fn do_stop(ffi: &dyn PtzHalTrait, state: &PtzActorState) -> PlatformResult<()> {
     let mut first_error: Option<PlatformError> = None;
     for (dir, sdk_dir) in iter_ffi_directions(&PTZ_STOP_DIRECTIONS) {
-        let ret = ffi.ptz_stop(sdk_dir);
-        if ret != AK_SUCCESS_I32 && first_error.is_none() {
-            first_error = Some(PlatformError::HardwareFailure(format!(
-                "ptz_turn_stop({:?}) failed: error code {}",
-                dir, ret
-            )));
+        if let Err(e) = ffi.ptz_stop(sdk_dir) {
+            tracing::warn!("PTZ stop failed on {:?}: {}", dir, e);
+            first_error.get_or_insert(e);
         }
     }
     *state.velocity.write() = PtzVelocity::STOP;
     match first_error {
         Some(e) => Err(e),
         None => Ok(()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    /// Rates chosen so one second of motion equals exactly ten degrees, making
+    /// every expectation below readable by inspection.
+    fn test_state() -> PtzActorState {
+        PtzActorState::new(PtzRates {
+            pan_deg_per_sec: 10.0,
+            tilt_deg_per_sec: 10.0,
+        })
+    }
+
+    #[test]
+    fn test_integrate_pan_right_accumulates_positive_degrees() {
+        let state = test_state();
+        integrate_axis(&state, PtzDirection::Right, Duration::from_secs(2));
+        assert!((state.position.read().pan - 20.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_integrate_pan_left_accumulates_negative_degrees() {
+        let state = test_state();
+        integrate_axis(&state, PtzDirection::Left, Duration::from_secs(2));
+        assert!((state.position.read().pan + 20.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_integrate_tilt_down_is_positive_up_is_negative() {
+        let state = test_state();
+        integrate_axis(&state, PtzDirection::Down, Duration::from_secs(1));
+        assert!((state.position.read().tilt - 10.0).abs() < 0.01);
+        integrate_axis(&state, PtzDirection::Up, Duration::from_secs(3));
+        assert!((state.position.read().tilt + 20.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_integrate_accumulates_across_calls() {
+        let state = test_state();
+        integrate_axis(&state, PtzDirection::Right, Duration::from_secs(1));
+        integrate_axis(&state, PtzDirection::Right, Duration::from_secs(1));
+        assert!((state.position.read().pan - 20.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_integrate_clamps_to_pan_limit() {
+        let state = test_state();
+        // 100 seconds at 10 deg/s = 1000 degrees, far past the 350 limit.
+        integrate_axis(&state, PtzDirection::Right, Duration::from_secs(100));
+        assert!((state.position.read().pan - PTZ_MAX_PAN_DEGREES).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn test_integrate_clamps_to_negative_tilt_limit() {
+        let state = test_state();
+        integrate_axis(&state, PtzDirection::Up, Duration::from_secs(100));
+        assert!((state.position.read().tilt - PTZ_MIN_TILT_DEGREES).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn test_actor_state_record_step_keeps_both_axes() {
+        let state = PtzActorState::new(PtzRates {
+            pan_deg_per_sec: 60.0,
+            tilt_deg_per_sec: 60.0,
+        });
+        assert!(state.last_step.read().is_none(), "nothing observed yet");
+
+        state.record_step(true, 0);
+        state.record_step(false, 137);
+
+        let sample = state.last_step.read().expect("a sample was recorded");
+        assert_eq!(
+            sample.pan,
+            Some(0),
+            "a zero step is a real reading, not absence"
+        );
+        assert_eq!(sample.tilt, Some(137));
+    }
+
+    #[test]
+    fn test_position_file_roundtrips_through_toml() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("ptz_position.toml");
+        save_position(&path, PtzPosition::new(90.0, -45.0, 1.0));
+        let loaded = load_position(&path).expect("just-written file must load");
+        assert!((loaded.pan - 90.0).abs() < 0.01);
+        assert!((loaded.tilt + 45.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_load_position_returns_none_for_missing_file() {
+        assert!(load_position(std::path::Path::new("/nonexistent/ptz_position.toml")).is_none());
+    }
+
+    #[test]
+    fn test_load_position_returns_none_for_corrupt_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("ptz_position.toml");
+        std::fs::write(&path, b"this is not toml {{{").unwrap();
+        assert!(
+            load_position(&path).is_none(),
+            "a corrupt file must never fail boot"
+        );
+    }
+
+    #[test]
+    fn test_load_position_clamps_out_of_range_values() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("ptz_position.toml");
+        std::fs::write(&path, b"pan = 9999.0\ntilt = -9999.0\n").unwrap();
+        let loaded = load_position(&path).expect("out-of-range is clamped, not rejected");
+        assert!((loaded.pan - PTZ_MAX_PAN_DEGREES).abs() < f32::EPSILON);
     }
 }
