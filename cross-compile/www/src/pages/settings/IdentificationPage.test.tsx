@@ -5,7 +5,15 @@ import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { getDeviceIdentification, getScopes, setScopes } from '@/services/deviceService';
+import {
+  getDeviceIdentification,
+  getDiscoveryMode,
+  getHostname,
+  getScopes,
+  setDiscoveryMode,
+  setHostname,
+  setScopes,
+} from '@/services/deviceService';
 import { getNetworkInterfaces } from '@/services/networkService';
 import { MOCK_DATA, mockToast, renderWithProviders } from '@/test/componentTestHelpers';
 
@@ -18,7 +26,11 @@ vi.mock('@/services/deviceService', async (importOriginal) => {
     ...actual,
     getDeviceIdentification: vi.fn(),
     getScopes: vi.fn(),
+    getHostname: vi.fn(),
+    getDiscoveryMode: vi.fn(),
     setScopes: vi.fn(),
+    setHostname: vi.fn(),
+    setDiscoveryMode: vi.fn(),
   };
 });
 
@@ -32,6 +44,8 @@ describe('IdentificationPage', () => {
     vi.mocked(getDeviceIdentification).mockResolvedValue(MOCK_DATA.device);
     vi.mocked(getNetworkInterfaces).mockResolvedValue([]);
     vi.mocked(getScopes).mockResolvedValue([]);
+    vi.mocked(getHostname).mockResolvedValue('ipcam');
+    vi.mocked(getDiscoveryMode).mockResolvedValue('Discoverable');
   });
 
   it('should render identification form', async () => {
@@ -264,6 +278,69 @@ describe('IdentificationPage', () => {
         );
         expect(setScopes).toHaveBeenCalledWith(expect.not.arrayContaining([fixedScope.scopeItem]));
       });
+    });
+  });
+
+  describe('discovery and hostname', () => {
+    it('should apply discovery mode immediately without saving', async () => {
+      vi.mocked(setDiscoveryMode).mockResolvedValue(undefined);
+
+      const user = userEvent.setup();
+      renderWithProviders(<IdentificationPage />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('identification-discovery-switch')).toBeInTheDocument();
+      });
+
+      await user.click(screen.getByTestId('identification-discovery-switch'));
+
+      await waitFor(() => {
+        expect(setDiscoveryMode).toHaveBeenCalledWith('NonDiscoverable');
+      });
+      expect(setScopes).not.toHaveBeenCalled();
+    });
+
+    it('should omit hostname from save when it is unchanged', async () => {
+      vi.mocked(setScopes).mockResolvedValue(undefined);
+      vi.mocked(setHostname).mockResolvedValue(undefined);
+
+      const user = userEvent.setup();
+      renderWithProviders(<IdentificationPage />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('identification-hostname-input')).toHaveValue('ipcam');
+      });
+
+      const nameInput = screen.getByTestId('identification-device-name-input');
+      await user.clear(nameInput);
+      await user.type(nameInput, 'Updated Device');
+      await user.click(screen.getByTestId('identification-save-button'));
+
+      await waitFor(() => {
+        expect(setScopes).toHaveBeenCalled();
+      });
+      expect(setHostname).not.toHaveBeenCalled();
+    });
+
+    it('should discard hostname edits back to the loaded value', async () => {
+      const user = userEvent.setup();
+      renderWithProviders(<IdentificationPage />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('identification-hostname-input')).toHaveValue('ipcam');
+      });
+
+      const hostnameInput = screen.getByTestId('identification-hostname-input');
+      await user.clear(hostnameInput);
+      await user.type(hostnameInput, 'front-door');
+      await user.click(screen.getByTestId('identification-reset-button'));
+
+      await waitFor(() => {
+        expect(hostnameInput).toHaveValue('ipcam');
+      });
+      expect(screen.getByTestId('identification-reset-button')).toHaveTextContent(
+        'Discard Changes',
+      );
     });
   });
 });

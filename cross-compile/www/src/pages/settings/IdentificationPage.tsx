@@ -14,6 +14,7 @@ import {
   Image as ImageIcon,
   Info,
   Plus,
+  Radar,
   RotateCcw,
   Save,
   Trash2,
@@ -46,13 +47,19 @@ import {
   StatusCardImage,
   StatusCardItem,
 } from '@/components/ui/status-card';
+import { Switch } from '@/components/ui/switch';
 import { type IdentificationFormData, identificationSchema } from '@/lib/schemas/identification';
 import {
   type DeviceIdentification,
+  type DiscoveryMode,
   type Scope,
   getDeviceIdentification,
+  getDiscoveryMode,
+  getHostname,
   getScopes,
   scopesForSave,
+  setDiscoveryMode,
+  setHostname,
   setScopes,
 } from '@/services/deviceService';
 import { type NetworkInterface, getNetworkInterfaces } from '@/services/networkService';
@@ -70,6 +77,16 @@ export default function IdentificationPage() {
   const { data: scopes } = useQuery<Scope[]>({
     queryKey: ['deviceScopes'],
     queryFn: getScopes,
+  });
+
+  const { data: hostname } = useQuery<string>({
+    queryKey: ['hostname'],
+    queryFn: getHostname,
+  });
+
+  const { data: discoveryMode } = useQuery<DiscoveryMode>({
+    queryKey: ['discoveryMode'],
+    queryFn: getDiscoveryMode,
   });
 
   // Fetch network info for status card
@@ -103,29 +120,44 @@ export default function IdentificationPage() {
   const [newScope, setNewScope] = useState('');
 
   useEffect(() => {
-    if (deviceInfo && scopes) {
+    if (deviceInfo && scopes && hostname !== undefined && discoveryMode) {
       form.reset({
         ...deviceInfo,
-        hostname: '',
-        discoveryMode: 'Discoverable',
+        hostname,
+        discoveryMode,
         scopes,
       });
     }
-  }, [deviceInfo, scopes, form]);
+  }, [deviceInfo, scopes, hostname, discoveryMode, form]);
 
   const mutation = useMutation({
     mutationFn: async (values: IdentificationFormData) => {
       await setScopes(
         scopesForSave(values.scopes, { name: values.name, location: values.location }),
       );
+      if (form.formState.dirtyFields.hostname) {
+        await setHostname(values.hostname);
+      }
     },
     onSuccess: () => {
       toast.success('Device information saved');
       queryClient.invalidateQueries({ queryKey: ['deviceInformation'] });
       queryClient.invalidateQueries({ queryKey: ['deviceScopes'] });
+      queryClient.invalidateQueries({ queryKey: ['hostname'] });
     },
     onError: (error) => {
       handleMutationError(error, 'Failed to save device information');
+    },
+  });
+
+  const discoveryMutation = useMutation({
+    mutationFn: (mode: DiscoveryMode) => setDiscoveryMode(mode),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['discoveryMode'] });
+      toast.success('Discovery mode updated');
+    },
+    onError: (error) => {
+      handleMutationError(error, 'Failed to update discovery mode');
     },
   });
 
@@ -134,11 +166,11 @@ export default function IdentificationPage() {
   };
 
   const handleReset = () => {
-    if (deviceInfo && scopes) {
+    if (deviceInfo && scopes && hostname !== undefined && discoveryMode) {
       form.reset({
         ...deviceInfo,
-        hostname: '',
-        discoveryMode: 'Discoverable',
+        hostname,
+        discoveryMode,
         scopes,
       });
       toast.info('Form reset to current device values');
@@ -264,6 +296,58 @@ export default function IdentificationPage() {
                     </FormItem>
                   )}
                 />
+                <FormField
+                  control={form.control}
+                  name="hostname"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel className="text-[#a1a1a6]">Hostname</FormLabel>
+                      <FormControl>
+                        <Input
+                          {...field}
+                          className="border-[#3a3a3c] bg-transparent text-white focus:border-[#dc2626]"
+                          data-testid="identification-hostname-input"
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </SettingsCardContent>
+            </SettingsCard>
+
+            <SettingsCard>
+              <SettingsCardHeader>
+                <div className="flex items-center gap-[12px]">
+                  <div className="flex size-[40px] items-center justify-center rounded-[10px] bg-[rgba(10,132,255,0.1)]">
+                    <Radar className="size-5 text-[#0a84ff]" />
+                  </div>
+                  <div>
+                    <SettingsCardTitle>Discovery</SettingsCardTitle>
+                    <SettingsCardDescription>
+                      Control whether this camera answers WS-Discovery
+                    </SettingsCardDescription>
+                  </div>
+                </div>
+              </SettingsCardHeader>
+              <SettingsCardContent className="space-y-[16px]">
+                <div className="flex items-center justify-between gap-[16px]">
+                  <div>
+                    <p className="text-[14px] text-white">Discoverable</p>
+                    <p className="text-[13px] text-[#a1a1a6]">
+                      NonDiscoverable stops Probe replies and Hello announcements, so ONVIF clients
+                      will not find this camera on the network.
+                    </p>
+                  </div>
+                  <Switch
+                    checked={discoveryMode === 'Discoverable'}
+                    disabled={discoveryMutation.isPending || discoveryMode === undefined}
+                    onCheckedChange={(enabled) => {
+                      discoveryMutation.mutate(enabled ? 'Discoverable' : 'NonDiscoverable');
+                    }}
+                    data-testid="identification-discovery-switch"
+                  />
+                </div>
               </SettingsCardContent>
             </SettingsCard>
 
@@ -457,7 +541,7 @@ export default function IdentificationPage() {
                 data-testid="identification-reset-button"
               >
                 <RotateCcw className="mr-2 size-4" />
-                Reset to Default
+                Discard Changes
               </Button>
             </div>
 
