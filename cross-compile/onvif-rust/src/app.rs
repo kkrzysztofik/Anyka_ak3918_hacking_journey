@@ -1846,6 +1846,9 @@ impl Application {
         } else {
             c.discovery.hello_interval as u64
         };
+        let ptz_enabled = c.ptz.enabled;
+        let configured_scopes = c.device.scopes.clone();
+        let discovery_mode = c.discovery.mode.clone();
         drop(c);
 
         // Get local IP - "auto" means we should try to detect, otherwise use external_ip helper
@@ -1868,7 +1871,14 @@ impl Application {
             http_port,
             device_ip,
             hello_interval: Duration::from_secs(hello_interval_secs),
-            ..Default::default()
+            scopes: crate::onvif::device::ops::discovery::merge_scopes(
+                ptz_enabled,
+                &configured_scopes,
+            )
+            .into_iter()
+            .map(|s| s.scope_item)
+            .collect(),
+            discovery_mode: discovery_mode.into(),
         }
     }
 
@@ -2211,6 +2221,42 @@ mod tests {
         assert_eq!(discovery.device_ip, "198.51.100.42");
         assert_eq!(discovery.http_port, 8080);
         assert_eq!(discovery.hello_interval, Duration::from_secs(300));
+    }
+
+    #[test]
+    fn test_make_discovery_config_seeds_scopes_from_config() {
+        let mut app_config = crate::config::AppConfig::default();
+        app_config.device.scopes = vec!["onvif://www.onvif.org/name/Persisted".to_string()];
+        app_config.ptz.enabled = false;
+        let runtime = Arc::new(ConfigRuntime::new(app_config));
+
+        let discovery_config = Application::make_discovery_config(&runtime, 80);
+
+        assert!(
+            discovery_config
+                .scopes
+                .iter()
+                .any(|s| s.contains("name/Persisted")),
+            "..Default::default() must not swallow configured scopes"
+        );
+        assert!(
+            !discovery_config
+                .scopes
+                .iter()
+                .any(|s| s.ends_with("/type/ptz"))
+        );
+    }
+
+    #[test]
+    fn test_make_discovery_config_seeds_mode_from_config() {
+        let mut app_config = crate::config::AppConfig::default();
+        app_config.discovery.mode = crate::onvif::types::common::DiscoveryMode::NonDiscoverable;
+        let runtime = Arc::new(ConfigRuntime::new(app_config));
+
+        assert_eq!(
+            Application::make_discovery_config(&runtime, 80).discovery_mode,
+            crate::onvif::discovery::DiscoveryMode::NonDiscoverable
+        );
     }
 
     #[test]
