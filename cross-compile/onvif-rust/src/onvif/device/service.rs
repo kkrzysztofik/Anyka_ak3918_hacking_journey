@@ -64,6 +64,17 @@ impl DeviceService {
         }
     }
 
+    /// Create a Device Service with loaded runtime configuration and no platform.
+    pub fn with_config(users: Arc<UserStorage>, config: Arc<ConfigRuntime>) -> Self {
+        let store = Arc::new(DeviceStore::with_config(users, config));
+
+        Self {
+            store,
+            platform: None,
+            discovery_handle: Arc::new(OnceLock::new()),
+        }
+    }
+
     /// Bind a late-populated WS-Discovery handle slot.
     pub fn with_discovery_handle(
         mut self,
@@ -261,21 +272,26 @@ impl DeviceService {
 // Scope mutation helpers (shared by the public handlers and the dispatcher)
 // ========================================================================
 
-/// Push merged scopes to WS-Discovery if the handle has been bound.
-async fn push_scopes_to_discovery(service: &DeviceService) {
+/// Push a precomputed announcement-scope snapshot to WS-Discovery.
+async fn push_announced_scopes_to_discovery(service: &DeviceService, announced: Vec<String>) {
     if let Some(handle) = service.discovery_handle.get() {
-        let (ptz_enabled, configured) = {
-            let c = service.store.config.read();
-            (c.ptz.enabled, c.device.scopes.clone())
-        };
-        let announced: Vec<String> = discovery_ops::merge_scopes(ptz_enabled, &configured)
-            .into_iter()
-            .map(|s| s.scope_item)
-            .collect();
         handle.set_scopes(announced).await;
     } else {
         tracing::debug!("No WS-Discovery handle; scope change persisted for next boot");
     }
+}
+
+/// Push merged scopes to WS-Discovery if the handle has been bound.
+async fn push_scopes_to_discovery(service: &DeviceService) {
+    let (ptz_enabled, configured) = {
+        let c = service.store.config.read();
+        (c.ptz.enabled, c.device.scopes.clone())
+    };
+    let announced: Vec<String> = discovery_ops::merge_scopes(ptz_enabled, &configured)
+        .into_iter()
+        .map(|s| s.scope_item)
+        .collect();
+    push_announced_scopes_to_discovery(service, announced).await;
 }
 
 /// Replace the configurable scopes. Fixed scopes are derived, never stored.
@@ -304,17 +320,19 @@ async fn apply_add_scopes(
         super::validation::validate_scope(scope)?;
     }
 
-    let mut configurable = {
-        let c = service.store.config.read();
-        c.device.scopes.clone()
-    };
-    for item in request.scope_item {
-        if !configurable.contains(&item) {
-            configurable.push(item);
+    let announced = {
+        let mut c = service.store.config.write();
+        for item in request.scope_item {
+            if !c.device.scopes.contains(&item) {
+                c.device.scopes.push(item);
+            }
         }
-    }
-    service.store.config.write().device.scopes = configurable;
-    push_scopes_to_discovery(service).await;
+        discovery_ops::merge_scopes(c.ptz.enabled, &c.device.scopes)
+            .into_iter()
+            .map(|s| s.scope_item)
+            .collect::<Vec<_>>()
+    };
+    push_announced_scopes_to_discovery(service, announced).await;
     service.store.request_save();
     Ok(AddScopesResponse {})
 }
@@ -324,27 +342,29 @@ async fn apply_remove_scopes(
     service: &DeviceService,
     request: RemoveScopes,
 ) -> Result<RemoveScopesResponse, OnvifError> {
-    let (ptz_enabled, mut configurable) = {
-        let c = service.store.config.read();
-        (c.ptz.enabled, c.device.scopes.clone())
+    let (removed, announced) = {
+        let mut c = service.store.config.write();
+        let fixed = discovery_ops::merge_scopes(c.ptz.enabled, &[]);
+        for scope_item in &request.scope_item {
+            if fixed.iter().any(|s| s.scope_item == *scope_item) {
+                return Err(super::faults::fixed_scope(scope_item));
+            }
+        }
+
+        let mut removed = Vec::new();
+        for scope_item in &request.scope_item {
+            if let Some(pos) = c.device.scopes.iter().position(|s| s == scope_item) {
+                removed.push(c.device.scopes.remove(pos));
+            }
+        }
+        let announced = discovery_ops::merge_scopes(c.ptz.enabled, &c.device.scopes)
+            .into_iter()
+            .map(|s| s.scope_item)
+            .collect::<Vec<_>>();
+        (removed, announced)
     };
-    let fixed = discovery_ops::merge_scopes(ptz_enabled, &[]);
-    for scope_item in &request.scope_item {
-        if fixed.iter().any(|s| s.scope_item == *scope_item) {
-            return Err(super::faults::fixed_scope(scope_item));
-        }
-    }
-
-    let mut removed = Vec::new();
-    for scope_item in &request.scope_item {
-        if let Some(pos) = configurable.iter().position(|s| s == scope_item) {
-            removed.push(configurable.remove(pos));
-        }
-    }
-
-    service.store.config.write().device.scopes = configurable;
     tracing::info!("RemoveScopes: removed {} scopes", removed.len());
-    push_scopes_to_discovery(service).await;
+    push_announced_scopes_to_discovery(service, announced).await;
     service.store.request_save();
 
     Ok(RemoveScopesResponse {

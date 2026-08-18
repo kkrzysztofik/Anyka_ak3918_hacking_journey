@@ -144,7 +144,7 @@ export async function getScopes(): Promise<Scope[]> {
  */
 export async function setScopes(scopeItems: string[]): Promise<void> {
   const body = `<tds:SetScopes>
-    ${scopeItems.map((item) => `<tds:Scopes>${item}</tds:Scopes>`).join('\n    ')}
+    ${scopeItems.map((item) => `<tds:Scopes>${escapeXml(item)}</tds:Scopes>`).join('\n    ')}
   </tds:SetScopes>`;
 
   await soapRequest(ENDPOINTS.device, body);

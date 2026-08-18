@@ -3,7 +3,9 @@ members = ["onvif-rust", "streaming-lib", "anyka-init"]
 resolver = "2"
 
 # tower-http 0.7.0's ServeDir rate_limited! macro uses std AtomicU64, which
-# does not exist on ARMv5TEJ. setup.sh materialises patches/tower-http-0.7.0-full.
+# does not exist on ARMv5TEJ. patches/tower-http-0.7.0-full is gitignored;
+# run patches/setup.sh before invoking cargo so the path exists after checkout:
+#   ./patches/setup.sh && cargo build --release
 [patch.crates-io]
 tower-http = { path = "patches/tower-http-0.7.0-full" }
 # If a native-tls-backed dependency returns, also restore:

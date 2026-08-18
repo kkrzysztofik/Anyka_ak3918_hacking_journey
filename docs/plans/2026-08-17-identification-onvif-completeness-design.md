@@ -84,7 +84,7 @@ and stops a client from persisting a bogus fixed scope.
 
 **Write path.** Every scope / mode mutation does two things:
 
-```
+```text
 SetScopes / AddScopes / RemoveScopes / SetDiscoveryMode
   |- config.write().device.scopes = ...  -> generation++ -> ConfigPersistenceService flushes (free)
   '- discovery.get().set_scopes(...)     -> metadata_version++ (ONVIF Sec. 4.1)

@@ -434,7 +434,11 @@ Pass it into `DeviceService::with_config_and_platform` and store it on the struc
 
 ```rust
 if let Some(handle) = self.discovery_handle.get() {
-    handle.set_scopes(configurable.clone()).await;   // bumps metadata_version
+    let announced: Vec<String> = merge_scopes(ptz_enabled, &configurable)
+        .into_iter()
+        .map(|s| s.scope_item)
+        .collect();
+    handle.set_scopes(announced).await;   // bumps metadata_version
 } else {
     tracing::debug!("No WS-Discovery handle; scope change persisted for next boot");
 }

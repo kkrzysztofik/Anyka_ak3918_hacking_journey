@@ -18,7 +18,8 @@ This directory contains patches to enable Rust crates to compile for the ARMv5TE
 patches/
 ├── setup.sh              # Download and patch script
 ├── diffs/                # Patch files (tracked in git)
-│   └── openssl-src-300.2.3+3.2.1.patch
+│   ├── openssl-src-300.2.3+3.2.1.patch
+│   └── tower-http-0.7.0.patch
 ├── originals/            # Downloaded crates (git-ignored)
 └── *-full/               # Patched crates (git-ignored)
 ```

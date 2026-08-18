@@ -23,6 +23,10 @@ pub fn default_scopes(ptz_enabled: bool) -> Vec<Scope> {
             scope_def: ScopeDefinition::Fixed,
             scope_item: "onvif://www.onvif.org/type/audio_encoder".to_string(),
         },
+        Scope {
+            scope_def: ScopeDefinition::Fixed,
+            scope_item: "onvif://www.onvif.org/Profile/Streaming".to_string(),
+        },
     ];
     if ptz_enabled {
         scopes.push(Scope {
@@ -124,5 +128,19 @@ mod tests {
     fn test_merged_scopes_omit_ptz_when_disabled() {
         let merged = merge_scopes(false, &[]);
         assert!(!merged.iter().any(|s| s.scope_item.ends_with("/type/ptz")));
+    }
+
+    #[test]
+    fn test_merged_scopes_always_include_profile_streaming() {
+        for ptz_enabled in [true, false] {
+            let merged = merge_scopes(ptz_enabled, &[]);
+            assert!(
+                merged.iter().any(|s| {
+                    s.scope_item == "onvif://www.onvif.org/Profile/Streaming"
+                        && matches!(s.scope_def, ScopeDefinition::Fixed)
+                }),
+                "boot-derived scopes must retain Profile/Streaming (ptz={ptz_enabled})"
+            );
+        }
     }
 }

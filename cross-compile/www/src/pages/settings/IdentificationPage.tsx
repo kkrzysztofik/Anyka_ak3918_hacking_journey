@@ -3,7 +3,7 @@
  *
  * Manage device identification and location.
  */
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -23,6 +23,7 @@ import {
 import { useFieldArray, useForm } from 'react-hook-form';
 import { toast } from 'sonner';
 
+import { HealthStatusValue } from '@/components/settings/HealthStatusValue';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -48,6 +49,7 @@ import {
   StatusCardItem,
 } from '@/components/ui/status-card';
 import { Switch } from '@/components/ui/switch';
+import { useDeviceStatus } from '@/hooks/useDeviceStatus';
 import {
   type IdentificationFormData,
   type IdentificationFormInput,
@@ -66,8 +68,6 @@ import {
   setHostname,
   setScopes,
 } from '@/services/deviceService';
-import { HealthStatusValue } from '@/components/settings/HealthStatusValue';
-import { useDeviceStatus } from '@/hooks/useDeviceStatus';
 import { handleMutationError } from '@/utils/errorHandling';
 
 export default function IdentificationPage() {
@@ -94,14 +94,8 @@ export default function IdentificationPage() {
     queryFn: getDiscoveryMode,
   });
 
-  const {
-    healthStatus,
-    primaryInterface,
-    systemUptime,
-    wifiChannel,
-    wifiQuality,
-    wifiSecurity,
-  } = useDeviceStatus();
+  const { healthStatus, primaryInterface, systemUptime, wifiChannel, wifiQuality, wifiSecurity } =
+    useDeviceStatus();
 
   const form = useForm<IdentificationFormInput, unknown, IdentificationFormData>({
     resolver: zodResolver(identificationSchema),
@@ -128,7 +122,13 @@ export default function IdentificationPage() {
   const [newScope, setNewScope] = useState('');
 
   useEffect(() => {
-    if (deviceInfo && scopes && hostname !== undefined && discoveryMode) {
+    if (
+      deviceInfo &&
+      scopes &&
+      hostname !== undefined &&
+      discoveryMode &&
+      !form.formState.isDirty
+    ) {
       form.reset({
         ...deviceInfo,
         hostname,
@@ -147,8 +147,9 @@ export default function IdentificationPage() {
         await setHostname(values.hostname);
       }
     },
-    onSuccess: () => {
+    onSuccess: (_result, values) => {
       toast.success('Device information saved');
+      form.reset(values);
       queryClient.invalidateQueries({ queryKey: ['deviceInformation'] });
       queryClient.invalidateQueries({ queryKey: ['deviceScopes'] });
       queryClient.invalidateQueries({ queryKey: ['hostname'] });
@@ -185,7 +186,7 @@ export default function IdentificationPage() {
     }
   };
 
-  const handleAddScope = () => {
+  const handleAddScope = useCallback(() => {
     const scopeItem = newScope.trim();
     if (!scopeItem) {
       return;
@@ -196,7 +197,21 @@ export default function IdentificationPage() {
     }
     append({ scopeDef: 'Configurable', scopeItem });
     setNewScope('');
-  };
+  }, [append, fields, newScope]);
+
+  const handleDiscoveryToggle = useCallback(
+    (enabled: boolean) => {
+      discoveryMutation.mutate(enabled ? 'Discoverable' : 'NonDiscoverable');
+    },
+    [discoveryMutation],
+  );
+
+  const handleRemoveScope = useCallback(
+    (index: number) => {
+      remove(index);
+    },
+    [remove],
+  );
 
   if (isDeviceLoading) {
     return (
@@ -370,9 +385,7 @@ export default function IdentificationPage() {
                   <Switch
                     checked={discoveryMode === 'Discoverable'}
                     disabled={discoveryMutation.isPending || discoveryMode === undefined}
-                    onCheckedChange={(enabled) => {
-                      discoveryMutation.mutate(enabled ? 'Discoverable' : 'NonDiscoverable');
-                    }}
+                    onCheckedChange={handleDiscoveryToggle}
                     data-testid="identification-discovery-switch"
                   />
                 </div>
@@ -430,7 +443,8 @@ export default function IdentificationPage() {
                               variant="ghost"
                               size="icon"
                               disabled={field.scopeDef === 'Fixed'}
-                              onClick={() => remove(index)}
+                              onClick={() => handleRemoveScope(index)}
+                              aria-label={`Remove scope ${field.scopeItem}`}
                               className="h-8 w-8 text-[#a1a1a6] hover:bg-[rgba(220,38,38,0.1)] hover:text-[#dc2626]"
                               data-testid={`identification-scope-remove-${field.scopeItem}`}
                             >
@@ -447,6 +461,7 @@ export default function IdentificationPage() {
                     value={newScope}
                     onChange={(event) => setNewScope(event.target.value)}
                     placeholder="onvif://www.onvif.org/…"
+                    aria-label="New ONVIF scope"
                     className="border-[#3a3a3c] bg-transparent text-white focus:border-[#dc2626]"
                     data-testid="identification-scope-add-input"
                   />

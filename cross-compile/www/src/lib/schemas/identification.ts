@@ -16,14 +16,10 @@ const scopeItemSchema = z
   .min(1, 'Scope cannot be empty')
   .max(256, 'Scope is too long')
   .startsWith('onvif://www.onvif.org/', 'Scope must start with onvif://www.onvif.org/')
-  .refine((scope) => {
-    for (const character of scope) {
-      if (character.charCodeAt(0) <= 32) {
-        return false;
-      }
-    }
-    return true;
-  }, 'Scope cannot contain spaces or control characters');
+  .refine(
+    (scope) => !/[\p{White_Space}\p{Cc}]/u.test(scope),
+    'Scope cannot contain spaces or control characters',
+  );
 
 const scopeSchema = z.object({
   scopeDef: z.enum(['Fixed', 'Configurable']),

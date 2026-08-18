@@ -1547,6 +1547,38 @@ mod tests {
     }
 
     #[test]
+    fn test_default_discovery_config_includes_profile_streaming_in_hello_and_probe_match() {
+        let config = DiscoveryConfig::default();
+        assert!(
+            config
+                .scopes
+                .iter()
+                .any(|s| s == "onvif://www.onvif.org/Profile/Streaming"),
+            "DiscoveryConfig::default must include Profile/Streaming"
+        );
+
+        let discovery = WsDiscovery::new(config.clone());
+        match discovery.build_hello_message(&config) {
+            WsDiscoveryMessage::Hello { scopes, .. } => {
+                assert!(
+                    scopes.contains("onvif://www.onvif.org/Profile/Streaming"),
+                    "Hello scopes must include Profile/Streaming"
+                );
+            }
+            other => panic!("Expected Hello message, got {other:?}"),
+        }
+        match discovery.build_probe_match(&config, "urn:uuid:test-probe") {
+            WsDiscoveryMessage::ProbeMatch { scopes, .. } => {
+                assert!(
+                    scopes.contains("onvif://www.onvif.org/Profile/Streaming"),
+                    "ProbeMatch scopes must include Profile/Streaming"
+                );
+            }
+            other => panic!("Expected ProbeMatch message, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn test_hello_contains_required_elements() {
         let config = DiscoveryConfig {
             device_ip: "10.0.0.50".to_string(),

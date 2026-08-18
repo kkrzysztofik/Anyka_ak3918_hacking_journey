@@ -56,6 +56,26 @@ download_crate() {
     return 0
 }
 
+patch_stamp() {
+    local patched_dir="$1"
+    printf '%s/.patch-sha256' "$patched_dir"
+}
+
+patch_sha256() {
+    local patch_file="$1"
+    sha256sum "$patch_file" | awk '{print $1}'
+}
+
+# True when *-full/ was produced from the current diffs/*.patch contents.
+is_patch_fresh() {
+    local patched_dir="$1"
+    local patch_file="$2"
+    local stamp_file
+    stamp_file="$(patch_stamp "$patched_dir")"
+    [[ -d "$patched_dir" && -f "$patch_file" && -f "$stamp_file" ]] || return 1
+    [[ "$(cat "$stamp_file")" == "$(patch_sha256 "$patch_file")" ]]
+}
+
 apply_patch() {
     local crate="$1"
     local version="$2"
@@ -76,13 +96,16 @@ apply_patch() {
 
     # Apply the patch (a/ -> patched_dir, b/ -> patched_dir)
     cd "$patched_dir"
-    if patch -p1 --no-backup-if-mismatch < "../$patch_file" >/dev/null 2>&1; then
+    if patch -p1 --no-backup-if-mismatch < "../$patch_file"; then
         log_info "  Patch applied successfully"
-    else
-        log_warn "  Patch had warnings (may be OK)"
+        patch_sha256 "../$patch_file" > .patch-sha256
+        cd "$SCRIPT_DIR"
+        return 0
     fi
+    log_error "  Patch failed for ${crate} v${version}"
     cd "$SCRIPT_DIR"
-    return 0
+    rm -rf "$patched_dir"
+    return 1
 }
 
 main() {
@@ -99,9 +122,13 @@ main() {
         version="${CRATES[$crate]}"
         patched_dir="${crate}-${version}-full"
 
-        if [[ -d "$patched_dir" ]]; then
+        patch_file="diffs/${crate}-${version}.patch"
+        if is_patch_fresh "$patched_dir" "$patch_file"; then
             log_info "Skipping ${crate} (already patched)"
             continue
+        fi
+        if [[ -d "$patched_dir" ]]; then
+            log_info "Refreshing ${crate} (patch file changed)"
         fi
 
         download_crate "$crate" "$version"

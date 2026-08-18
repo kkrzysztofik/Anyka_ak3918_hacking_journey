@@ -1164,9 +1164,9 @@ impl Application {
 
         progress.complete_phase();
 
-        // Phase 4: Network - Start HTTP Server
+        // Phase 4: Network - construct the HTTP server (listen after Discovery).
         progress.begin_phase(StartupPhase::Network);
-        tracing::debug!("Starting HTTP server...");
+        tracing::debug!("Constructing HTTP server...");
 
         // Get HTTP settings from config
         let server_config = Self::build_server_config(&config_runtime);
@@ -1184,17 +1184,10 @@ impl Application {
                 .with_diagnostics(Arc::clone(&diagnostics)),
         );
 
-        // Start the server in a background task
-        let server_clone: Arc<OnvifServer> = Arc::clone(&server);
-        let server_task = tokio::spawn(async move {
-            if let Err(e) = server_clone.start().await {
-                tracing::error!("HTTP server error: {}", e);
-            }
-        });
-
         progress.complete_phase();
 
-        // Phase 5: Discovery
+        // Phase 5: Discovery — publish the handle before the HTTP listener
+        // accepts SetScopes, so mutations cannot race handle publication.
         progress.begin_phase(StartupPhase::Discovery);
         let (discovery, discovery_task) =
             Self::start_discovery_phase(&config_runtime, port, &mut progress).await;
@@ -1202,6 +1195,16 @@ impl Application {
             let _ = app_state.discovery_handle().set(disc.clone());
         }
         progress.complete_phase();
+
+        // Listen only after the discovery handle is published (or discovery
+        // has degraded), so SOAP scope mutations always see a bound handle.
+        tracing::debug!("Starting HTTP server...");
+        let server_clone: Arc<OnvifServer> = Arc::clone(&server);
+        let server_task = tokio::spawn(async move {
+            if let Err(e) = server_clone.start().await {
+                tracing::error!("HTTP server error: {}", e);
+            }
+        });
 
         // Phase 6: Streaming (optional, gracefully degrades)
         let streaming_service =
@@ -2244,6 +2247,13 @@ mod tests {
                 .scopes
                 .iter()
                 .any(|s| s.ends_with("/type/ptz"))
+        );
+        assert!(
+            discovery_config
+                .scopes
+                .iter()
+                .any(|s| s == "onvif://www.onvif.org/Profile/Streaming"),
+            "boot-derived discovery scopes must include Profile/Streaming"
         );
     }
 

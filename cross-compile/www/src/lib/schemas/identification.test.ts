@@ -147,6 +147,18 @@ describe('identificationSchema', () => {
       });
       expect(result.success).toBe(false);
     });
+
+    it.each([
+      ['U+00A0', 'onvif://www.onvif.org/name/Cam\u00A0era'],
+      ['U+007F', 'onvif://www.onvif.org/name/Cam\u007Fera'],
+      ['U+0085', 'onvif://www.onvif.org/name/Cam\u0085era'],
+    ])('should reject a scope containing %s', (_label, scopeItem) => {
+      const result = validate({
+        ...base,
+        scopes: [{ scopeDef: 'Configurable', scopeItem }],
+      });
+      expect(result.success).toBe(false);
+    });
   });
 
   describe('invalid identification data', () => {

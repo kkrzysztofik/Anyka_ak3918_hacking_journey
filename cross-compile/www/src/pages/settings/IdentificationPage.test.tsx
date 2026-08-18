@@ -211,6 +211,25 @@ describe('IdentificationPage', () => {
     );
   });
 
+  it('should preserve unsaved edits when query data refetches', async () => {
+    const user = userEvent.setup();
+    const { queryClient } = renderWithProviders(<IdentificationPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('identification-device-name-input')).toHaveValue('Test Device');
+    });
+
+    const nameInput = screen.getByTestId('identification-device-name-input');
+    await user.clear(nameInput);
+    await user.type(nameInput, 'Unsaved Name');
+
+    await queryClient.invalidateQueries({ queryKey: ['deviceInformation'] });
+
+    await waitFor(() => {
+      expect(nameInput).toHaveValue('Unsaved Name');
+    });
+  });
+
   it('should reset form when handleReset is called', async () => {
     const user = userEvent.setup();
     renderWithProviders(<IdentificationPage />);
@@ -273,6 +292,13 @@ describe('IdentificationPage', () => {
       expect(
         screen.getByTestId(`identification-scope-remove-${customScope.scopeItem}`),
       ).not.toBeDisabled();
+      expect(
+        screen.getByTestId(`identification-scope-remove-${customScope.scopeItem}`),
+      ).toHaveAttribute('aria-label', `Remove scope ${customScope.scopeItem}`);
+      expect(screen.getByTestId('identification-scope-add-input')).toHaveAttribute(
+        'aria-label',
+        'New ONVIF scope',
+      );
     });
 
     it('should add a scope row', async () => {

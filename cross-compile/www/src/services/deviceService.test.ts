@@ -153,6 +153,18 @@ describe('deviceService', () => {
       );
     });
 
+    it('should XML-escape each scope item before interpolating', async () => {
+      vi.mocked(apiClient.post).mockResolvedValueOnce(
+        createMockSOAPResponse('<SetScopesResponse />'),
+      );
+
+      await setScopes(['onvif://www.onvif.org/name/A&B']);
+
+      const sentBody = String(vi.mocked(apiClient.post).mock.calls[0]?.[1]);
+      expect(sentBody).toContain('<tds:Scopes>onvif://www.onvif.org/name/A&amp;B</tds:Scopes>');
+      expect(sentBody).not.toContain('<tds:Scopes>onvif://www.onvif.org/name/A&B</tds:Scopes>');
+    });
+
     it('should throw on failure', async () => {
       const mockResponse = createMockSOAPFaultResponse('soap:Sender', 'Set failed');
 
