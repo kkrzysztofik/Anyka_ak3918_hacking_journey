@@ -139,19 +139,67 @@ export default function IdentificationPage() {
 
   const mutation = useMutation({
     mutationFn: async (values: IdentificationFormData) => {
-      await setScopes(
-        scopesForSave(values.scopes, { name: values.name, location: values.location }),
-      );
-      if (form.formState.dirtyFields.hostname) {
-        await setHostname(values.hostname);
+      const dirty = form.formState.dirtyFields;
+      const shouldSaveScopes = Boolean(dirty.name || dirty.location || dirty.scopes);
+      const shouldSaveHostname = Boolean(dirty.hostname);
+      const result: {
+        scopes: 'saved' | 'skipped' | 'failed';
+        hostname: 'saved' | 'skipped' | 'failed';
+        scopesError?: unknown;
+        hostnameError?: unknown;
+      } = {
+        scopes: shouldSaveScopes ? 'failed' : 'skipped',
+        hostname: shouldSaveHostname ? 'failed' : 'skipped',
+      };
+
+      if (shouldSaveScopes) {
+        try {
+          await setScopes(
+            scopesForSave(values.scopes, { name: values.name, location: values.location }),
+          );
+          result.scopes = 'saved';
+        } catch (error) {
+          result.scopesError = error;
+        }
       }
+
+      if (shouldSaveHostname) {
+        try {
+          await setHostname(values.hostname);
+          result.hostname = 'saved';
+        } catch (error) {
+          result.hostnameError = error;
+        }
+      }
+
+      if (result.scopes !== 'saved' && result.hostname !== 'saved') {
+        throw result.scopesError ?? result.hostnameError ?? new Error('Nothing to save');
+      }
+
+      return result;
     },
-    onSuccess: (_result, values) => {
+    onSuccess: (result, values) => {
+      if (result.scopes === 'saved') {
+        queryClient.invalidateQueries({ queryKey: ['deviceInformation'] });
+        queryClient.invalidateQueries({ queryKey: ['deviceScopes'] });
+      }
+      if (result.hostname === 'saved') {
+        queryClient.invalidateQueries({ queryKey: ['hostname'] });
+      }
+
+      if (result.scopes === 'failed') {
+        toast.warning('Hostname saved, but scopes update failed');
+        handleMutationError(result.scopesError, 'Failed to save scopes');
+        return;
+      }
+      if (result.hostname === 'failed') {
+        toast.warning('Scopes saved, but hostname update failed');
+        handleMutationError(result.hostnameError, 'Failed to update hostname');
+        return;
+      }
+
       toast.success('Device information saved');
       form.reset(values);
-      queryClient.invalidateQueries({ queryKey: ['deviceInformation'] });
-      queryClient.invalidateQueries({ queryKey: ['deviceScopes'] });
-      queryClient.invalidateQueries({ queryKey: ['hostname'] });
     },
     onError: (error) => {
       handleMutationError(error, 'Failed to save device information');

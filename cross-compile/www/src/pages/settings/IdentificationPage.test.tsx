@@ -407,6 +407,76 @@ describe('IdentificationPage', () => {
       expect(setScopes).not.toHaveBeenCalled();
     });
 
+    it('should report partial success when scopes save and hostname fails', async () => {
+      vi.mocked(setScopes).mockResolvedValue(undefined);
+      vi.mocked(setHostname).mockRejectedValue(new Error('hostname rejected'));
+
+      const user = userEvent.setup();
+      const { queryClient } = renderWithProviders(<IdentificationPage />);
+      const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
+
+      await waitFor(() => {
+        expect(screen.getByTestId('identification-hostname-input')).toHaveValue('ipcam');
+      });
+
+      const nameInput = screen.getByTestId('identification-device-name-input');
+      await user.clear(nameInput);
+      await user.type(nameInput, 'Updated Device');
+      const hostnameInput = screen.getByTestId('identification-hostname-input');
+      await user.clear(hostnameInput);
+      await user.type(hostnameInput, 'front-door');
+      await user.click(screen.getByTestId('identification-save-button'));
+
+      await waitFor(() => {
+        expect(setScopes).toHaveBeenCalled();
+        expect(setHostname).toHaveBeenCalledWith('front-door');
+        expect(mockToast.warning).toHaveBeenCalledWith('Scopes saved, but hostname update failed');
+        expect(mockToast.error).toHaveBeenCalledWith('Failed to update hostname', {
+          description: 'hostname rejected',
+        });
+      });
+      expect(mockToast.success).not.toHaveBeenCalledWith('Device information saved');
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['deviceScopes'] });
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['deviceInformation'] });
+      expect(invalidateSpy).not.toHaveBeenCalledWith({ queryKey: ['hostname'] });
+      expect(hostnameInput).toHaveValue('front-door');
+      expect(screen.getByTestId('identification-save-button')).toBeEnabled();
+    });
+
+    it('should still save hostname when scopes fail', async () => {
+      vi.mocked(setScopes).mockRejectedValue(new Error('scopes rejected'));
+      vi.mocked(setHostname).mockResolvedValue(undefined);
+
+      const user = userEvent.setup();
+      const { queryClient } = renderWithProviders(<IdentificationPage />);
+      const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
+
+      await waitFor(() => {
+        expect(screen.getByTestId('identification-hostname-input')).toHaveValue('ipcam');
+      });
+
+      const nameInput = screen.getByTestId('identification-device-name-input');
+      await user.clear(nameInput);
+      await user.type(nameInput, 'Updated Device');
+      const hostnameInput = screen.getByTestId('identification-hostname-input');
+      await user.clear(hostnameInput);
+      await user.type(hostnameInput, 'front-door');
+      await user.click(screen.getByTestId('identification-save-button'));
+
+      await waitFor(() => {
+        expect(setHostname).toHaveBeenCalledWith('front-door');
+        expect(mockToast.warning).toHaveBeenCalledWith('Hostname saved, but scopes update failed');
+        expect(mockToast.error).toHaveBeenCalledWith('Failed to save scopes', {
+          description: 'scopes rejected',
+        });
+      });
+      expect(mockToast.success).not.toHaveBeenCalledWith('Device information saved');
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['hostname'] });
+      expect(invalidateSpy).not.toHaveBeenCalledWith({ queryKey: ['deviceScopes'] });
+      expect(nameInput).toHaveValue('Updated Device');
+      expect(screen.getByTestId('identification-save-button')).toBeEnabled();
+    });
+
     it('should save hostname when it changes', async () => {
       vi.mocked(setScopes).mockResolvedValue(undefined);
       vi.mocked(setHostname).mockResolvedValue(undefined);
