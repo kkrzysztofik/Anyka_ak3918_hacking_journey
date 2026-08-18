@@ -54,6 +54,7 @@ export interface Diagnostics {
     channel: number | null;
     security: string | null;
     signal_dbm: number | null;
+    link_quality: string | null;
   } | null;
 }
 
@@ -145,7 +146,8 @@ function isWifi(value: unknown): value is NonNullable<Diagnostics['wifi']> {
     isNullOrNumber(value.frequency_mhz) &&
     isNullOrNumber(value.channel) &&
     isNullOrString(value.security) &&
-    (value.signal_dbm === null || typeof value.signal_dbm === 'number')
+    (value.signal_dbm === null || typeof value.signal_dbm === 'number') &&
+    isNullOrString(value.link_quality)
   );
 }
 

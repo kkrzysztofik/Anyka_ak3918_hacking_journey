@@ -96,10 +96,10 @@ export default function IdentificationPage() {
 
   const {
     healthStatus,
-    linkSpeed,
     primaryInterface,
     systemUptime,
     wifiChannel,
+    wifiQuality,
     wifiSecurity,
   } = useDeviceStatus();
 
@@ -255,9 +255,9 @@ export default function IdentificationPage() {
               data-testid="identification-status-mac"
             />
             <StatusCardItem
-              label="Speed"
-              value={linkSpeed}
-              data-testid="identification-status-speed"
+              label="Link Quality"
+              value={wifiQuality}
+              data-testid="identification-status-quality"
             />
             <StatusCardItem
               label="Channel"

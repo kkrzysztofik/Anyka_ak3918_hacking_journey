@@ -113,7 +113,7 @@ export default function NetworkPage() {
   // Watch for conditional rendering
   const dhcpEnabled = useWatch({ control: form.control, name: 'dhcp' });
   const dnsFromDHCP = useWatch({ control: form.control, name: 'dnsFromDHCP' });
-  const { healthStatus, linkSpeed, primaryInterface, systemUptime } = useDeviceStatus();
+  const { healthStatus, primaryInterface, systemUptime, wifiQuality } = useDeviceStatus();
 
   // Load data into form
   useEffect(() => {
@@ -235,7 +235,11 @@ export default function NetworkPage() {
               value={primaryInterface?.hwAddress || '—'}
               data-testid="network-mac-address"
             />
-            <StatusCardItem label="Speed" value={linkSpeed} data-testid="network-speed" />
+            <StatusCardItem
+              label="Link Quality"
+              value={wifiQuality}
+              data-testid="network-quality"
+            />
             <StatusCardItem
               label="Status"
               value={

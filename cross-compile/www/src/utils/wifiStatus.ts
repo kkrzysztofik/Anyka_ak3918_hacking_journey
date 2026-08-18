@@ -21,3 +21,10 @@ export function formatWifiSecurity(wifi: WifiDiagnostics | null | undefined): st
   }
   return wifi.security ?? '—';
 }
+
+export function formatWifiQuality(wifi: WifiDiagnostics | null | undefined): string {
+  if (wifi?.connected !== true) {
+    return '—';
+  }
+  return wifi.link_quality ?? '—';
+}

@@ -63,6 +63,7 @@ const MOCK_DIAGNOSTICS = {
     channel: 6,
     security: 'WPA2',
     signal_dbm: -52,
+    link_quality: '66/70',
   },
 };
 
@@ -92,7 +93,7 @@ describe('IdentificationPage', () => {
         enabled: true,
         name: 'wlan0',
         hwAddress: 'C0:4B:24:DA:4D:EB',
-        linkSpeedMbps: 72,
+        linkSpeedMbps: null,
         ipv4Enabled: true,
         dhcp: true,
         address: '192.168.2.198',
@@ -108,7 +109,7 @@ describe('IdentificationPage', () => {
     });
     expect(screen.getByTestId('identification-status-uptime')).toHaveTextContent('2h 0m');
     expect(screen.getByTestId('identification-status-mac')).toHaveTextContent('C0:4B:24:DA:4D:EB');
-    expect(screen.getByTestId('identification-status-speed')).toHaveTextContent('72 Mbps');
+    expect(screen.getByTestId('identification-status-quality')).toHaveTextContent('66/70');
     expect(screen.getByTestId('identification-status-channel')).toHaveTextContent('6');
     expect(screen.getByTestId('identification-status-security')).toHaveTextContent('WPA2');
   });

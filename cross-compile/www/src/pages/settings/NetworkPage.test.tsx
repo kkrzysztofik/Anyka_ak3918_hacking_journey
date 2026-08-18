@@ -42,7 +42,16 @@ const MOCK_DIAGNOSTICS = {
   components: [],
   degraded_services: [],
   vision: null,
-  wifi: null,
+  wifi: {
+    interface: 'wlan0',
+    connected: true,
+    ssid: 'kmk',
+    frequency_mhz: 2437,
+    channel: 6,
+    security: 'WPA2',
+    signal_dbm: -44,
+    link_quality: '66/70',
+  },
 };
 
 describe('NetworkPage', () => {
@@ -61,7 +70,7 @@ describe('NetworkPage', () => {
         enabled: true,
         name: 'wlan0',
         hwAddress: 'C0:4B:24:DA:4D:EB',
-        linkSpeedMbps: 100,
+        linkSpeedMbps: null,
         ipv4Enabled: true,
         dhcp: true,
         address: '192.168.2.198',
@@ -91,7 +100,7 @@ describe('NetworkPage', () => {
     await renderNetworkPage();
 
     expect(screen.getByTestId('network-mac-address')).toHaveTextContent('C0:4B:24:DA:4D:EB');
-    expect(screen.getByTestId('network-speed')).toHaveTextContent('100 Mbps');
+    expect(screen.getByTestId('network-quality')).toHaveTextContent('66/70');
     expect(screen.getByTestId('network-status')).toHaveTextContent('Healthy');
     expect(screen.getByTestId('network-uptime')).toHaveTextContent('1h 0m');
   });
