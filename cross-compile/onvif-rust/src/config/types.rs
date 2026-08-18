@@ -465,7 +465,10 @@ impl Default for DeviceConfig {
             serial_number: String::new(),
             hardware_id: String::new(),
             hostname: "ipcam".to_string(),
-            scopes: Vec::new(),
+            scopes: vec![
+                "onvif://www.onvif.org/location/country/unknown".to_string(),
+                "onvif://www.onvif.org/name/OnvifCamera".to_string(),
+            ],
             uuid: String::new(),
             isp_config_path: String::new(),
         }
@@ -910,9 +913,22 @@ mod tests {
     }
 
     #[test]
-    fn test_device_scopes_default_is_empty_list() {
+    fn test_device_scopes_default_includes_factory_name_and_location() {
         let config = AppConfig::default();
-        assert!(config.device.scopes.is_empty());
+        assert!(
+            config
+                .device
+                .scopes
+                .iter()
+                .any(|s| s.ends_with("/name/OnvifCamera"))
+        );
+        assert!(
+            config
+                .device
+                .scopes
+                .iter()
+                .any(|s| s.ends_with("/location/country/unknown"))
+        );
     }
 
     #[test]
@@ -948,7 +964,13 @@ scopes = ["onvif://www.onvif.org/name/Front%20Door"]
     fn test_deployed_config_without_device_section_still_parses() {
         // No .deploy/*.toml carries [device] or [discovery]; serde(default) must cover it.
         let config: AppConfig = toml::from_str("[server]\nport = 80\n").unwrap();
-        assert!(config.device.scopes.is_empty());
+        assert!(
+            config
+                .device
+                .scopes
+                .iter()
+                .any(|s| s.ends_with("/name/OnvifCamera"))
+        );
         assert_eq!(config.discovery.mode, DiscoveryMode::Discoverable);
     }
 

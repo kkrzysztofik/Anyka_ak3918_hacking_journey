@@ -34,16 +34,6 @@ pub fn default_scopes(ptz_enabled: bool) -> Vec<Scope> {
             scope_item: "onvif://www.onvif.org/type/ptz".to_string(),
         });
     }
-    scopes.extend([
-        Scope {
-            scope_def: ScopeDefinition::Configurable,
-            scope_item: "onvif://www.onvif.org/location/country/unknown".to_string(),
-        },
-        Scope {
-            scope_def: ScopeDefinition::Configurable,
-            scope_item: "onvif://www.onvif.org/name/OnvifCamera".to_string(),
-        },
-    ]);
     scopes
 }
 

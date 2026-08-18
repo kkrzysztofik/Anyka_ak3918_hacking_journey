@@ -281,19 +281,6 @@ async fn push_announced_scopes_to_discovery(service: &DeviceService, announced: 
     }
 }
 
-/// Push merged scopes to WS-Discovery if the handle has been bound.
-async fn push_scopes_to_discovery(service: &DeviceService) {
-    let (ptz_enabled, configured) = {
-        let c = service.store.config.read();
-        (c.ptz.enabled, c.device.scopes.clone())
-    };
-    let announced: Vec<String> = discovery_ops::merge_scopes(ptz_enabled, &configured)
-        .into_iter()
-        .map(|s| s.scope_item)
-        .collect();
-    push_announced_scopes_to_discovery(service, announced).await;
-}
-
 /// Replace the configurable scopes. Fixed scopes are derived, never stored.
 async fn apply_set_scopes(
     service: &DeviceService,
@@ -303,10 +290,22 @@ async fn apply_set_scopes(
         super::validation::validate_scope(scope)?;
     }
 
-    let count = request.scopes.len();
-    service.store.config.write().device.scopes = request.scopes;
-    tracing::info!("SetScopes: updated to {count} configurable scopes");
-    push_scopes_to_discovery(service).await;
+    let announced = {
+        let mut c = service.store.config.write();
+        let fixed = discovery_ops::merge_scopes(c.ptz.enabled, &[]);
+        c.device.scopes = request
+            .scopes
+            .into_iter()
+            .filter(|item| !fixed.iter().any(|s| s.scope_item == *item))
+            .collect();
+        let count = c.device.scopes.len();
+        tracing::info!("SetScopes: updated to {count} configurable scopes");
+        discovery_ops::merge_scopes(c.ptz.enabled, &c.device.scopes)
+            .into_iter()
+            .map(|s| s.scope_item)
+            .collect::<Vec<_>>()
+    };
+    push_announced_scopes_to_discovery(service, announced).await;
     service.store.request_save();
     Ok(SetScopesResponse {})
 }
@@ -870,8 +869,28 @@ mod tests {
                 .device
                 .scopes
                 .iter()
-                .any(|s| s.contains("/type/"))
+                .any(|s| s.contains("/type/") || s.contains("/Profile/"))
         );
+    }
+
+    #[tokio::test]
+    async fn test_apply_set_scopes_strips_client_supplied_fixed_scopes() {
+        let service = test_service();
+        apply_set_scopes(
+            &service,
+            SetScopes {
+                scopes: vec![
+                    "onvif://www.onvif.org/type/video_encoder".to_string(),
+                    "onvif://www.onvif.org/Profile/Streaming".to_string(),
+                    "onvif://www.onvif.org/name/Cam".to_string(),
+                ],
+            },
+        )
+        .await
+        .unwrap();
+
+        let stored = service.store.config.read().device.scopes.clone();
+        assert_eq!(stored, vec!["onvif://www.onvif.org/name/Cam".to_string()]);
 
         // ...but GetScopes still reports them.
         let response = service.handle_get_scopes(GetScopes {}).await.unwrap();
@@ -1287,6 +1306,14 @@ mod tests {
     #[tokio::test]
     async fn test_add_scopes_is_idempotent() {
         let service = test_service();
+        apply_set_scopes(
+            &service,
+            SetScopes {
+                scopes: vec!["onvif://www.onvif.org/name/Cam".to_string()],
+            },
+        )
+        .await
+        .unwrap();
         let request = || AddScopes {
             scope_item: vec!["onvif://www.onvif.org/name/Cam".to_string()],
         };

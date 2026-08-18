@@ -92,12 +92,9 @@ pub async fn handle_get_network_interfaces(
         && let Ok(platform_ifaces) = network_info.get_network_interfaces().await
         && !platform_ifaces.is_empty()
     {
-        let default_ip = network_info
-            .detect_local_ip()
-            .unwrap_or_else(|| external_ip(config));
         let network_interfaces = platform_ifaces
             .iter()
-            .map(|iface| build_onvif_network_interface(iface, &default_ip))
+            .map(build_onvif_network_interface)
             .collect();
         return Ok(GetNetworkInterfacesResponse { network_interfaces });
     }
@@ -120,12 +117,22 @@ fn onvif_interface_type(name: &str) -> i32 {
     }
 }
 
-fn link_settings(speed_mbps: Option<u32>) -> NetworkInterfaceConnectionSetting {
-    let speed = speed_mbps.unwrap_or(0) as i32;
+fn admin_link_settings() -> NetworkInterfaceConnectionSetting {
     NetworkInterfaceConnectionSetting {
-        auto_negotiation: speed == 0,
-        speed,
+        auto_negotiation: true,
+        speed: 0,
         duplex: Duplex::Full,
+    }
+}
+
+fn oper_link_settings(speed_mbps: Option<u32>) -> NetworkInterfaceConnectionSetting {
+    match speed_mbps {
+        Some(speed) => NetworkInterfaceConnectionSetting {
+            auto_negotiation: false,
+            speed: speed as i32,
+            duplex: Duplex::Full,
+        },
+        None => admin_link_settings(),
     }
 }
 
@@ -157,17 +164,15 @@ fn ipv4_configuration(
     }
 }
 
-fn build_onvif_network_interface(
-    iface: &PlatformInterfaceInfo,
-    default_ip: &str,
-) -> NetworkInterface {
+fn build_onvif_network_interface(iface: &PlatformInterfaceInfo) -> NetworkInterface {
     let ip_address = iface
         .ipv4_address
         .clone()
         .filter(|ip| !ip.is_empty())
-        .unwrap_or_else(|| default_ip.to_string());
+        .unwrap_or_default();
     let prefix_length = iface.ipv4_prefix_length.unwrap_or(24);
-    let link = link_settings(iface.link_speed);
+    let admin_settings = admin_link_settings();
+    let oper_settings = oper_link_settings(iface.link_speed);
     let hw_address = iface
         .mac_address
         .clone()
@@ -182,8 +187,8 @@ fn build_onvif_network_interface(
             mtu: Some(1500),
         }),
         link: Some(NetworkInterfaceLink {
-            admin_settings: link.clone(),
-            oper_settings: link,
+            admin_settings,
+            oper_settings,
             interface_type: onvif_interface_type(&iface.name),
         }),
         ipv4: Some(IPv4NetworkInterface {
@@ -200,7 +205,6 @@ fn build_fallback_network_interface(
     mac_address: String,
     dhcp_enabled: bool,
 ) -> NetworkInterface {
-    let link = link_settings(Some(100));
     NetworkInterface {
         token: "eth0".to_string(),
         enabled: true,
@@ -210,8 +214,8 @@ fn build_fallback_network_interface(
             mtu: Some(1500),
         }),
         link: Some(NetworkInterfaceLink {
-            admin_settings: link.clone(),
-            oper_settings: link,
+            admin_settings: admin_link_settings(),
+            oper_settings: oper_link_settings(Some(100)),
             interface_type: IFT_ETHERNET,
         }),
         ipv4: Some(IPv4NetworkInterface {
@@ -602,6 +606,34 @@ mod tests {
             .as_ref()
             .expect("link settings");
         assert_eq!(link.oper_settings.speed, 100);
+        assert!(link.admin_settings.auto_negotiation);
+        assert_eq!(link.admin_settings.speed, 0);
+    }
+
+    #[test]
+    fn test_build_onvif_network_interface_leaves_missing_ipv4_empty() {
+        let iface = crate::platform::common::NetworkInterfaceInfo {
+            token: "eth1".to_string(),
+            name: "eth1".to_string(),
+            enabled: true,
+            ipv4_address: None,
+            ipv4_prefix_length: None,
+            ipv4_dhcp: true,
+            mac_address: Some("AA:BB:CC:DD:EE:FF".to_string()),
+            link_speed: Some(1000),
+        };
+        let built = build_onvif_network_interface(&iface);
+        let v4 = built.ipv4.expect("ipv4");
+        let addr = v4
+            .config
+            .from_dhcp
+            .as_ref()
+            .map(|a| a.address.as_str())
+            .unwrap_or("");
+        assert_eq!(addr, "");
+        let link = built.link.expect("link");
+        assert!(link.admin_settings.auto_negotiation);
+        assert_eq!(link.oper_settings.speed, 1000);
     }
 
     #[tokio::test]

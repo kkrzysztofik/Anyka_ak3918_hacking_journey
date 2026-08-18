@@ -32,12 +32,13 @@ export const identificationSchema = z.object({
   location: z.string().max(128, 'Location is too long'),
   hostname: z
     .string()
+    .min(1, 'Hostname is required')
     .max(63, 'Hostname is too long')
     .regex(
-      /^(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)?$/,
+      /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$/,
       'Hostname must be a DNS label (letters, digits, hyphens)',
     )
-    .default(''),
+    .default('ipcam'),
   discoveryMode: z.enum(['Discoverable', 'NonDiscoverable']).default('Discoverable'),
   scopes: z.array(scopeSchema).default([]),
 });

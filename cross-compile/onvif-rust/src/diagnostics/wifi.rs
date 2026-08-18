@@ -1,7 +1,9 @@
 //! Wi-Fi association snapshot for `/api/diagnostics`.
 
 use std::collections::HashMap;
-use std::process::Command;
+use std::io::Read;
+use std::process::{Command, Stdio};
+use std::time::{Duration, Instant};
 
 use serde::Serialize;
 
@@ -32,6 +34,9 @@ pub fn map_key_mgmt(raw: &str) -> String {
 
 /// Convert centre frequency (MHz) to IEEE channel when unambiguous.
 pub fn frequency_to_channel(freq_mhz: u32) -> Option<u32> {
+    if freq_mhz == 2484 {
+        return Some(14);
+    }
     if (2412..=2484).contains(&freq_mhz) && freq_mhz % 5 == 2 {
         return Some((freq_mhz - 2407) / 5);
     }
@@ -86,14 +91,6 @@ pub fn parse_iwconfig_link_quality(text: &str) -> Option<String> {
     Some(raw.to_string())
 }
 
-fn read_iwconfig(interface: &str) -> Option<String> {
-    let output = Command::new("iwconfig").arg(interface).output().ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    Some(String::from_utf8_lossy(&output.stdout).into_owned())
-}
-
 fn enrich_missing_radio_fields(wifi: &mut WifiDiagnostics) {
     if !wifi.connected {
         return;
@@ -101,27 +98,65 @@ fn enrich_missing_radio_fields(wifi: &mut WifiDiagnostics) {
     let Some(iwconfig_text) = read_iwconfig(&wifi.interface) else {
         return;
     };
+    apply_iwconfig_enrichment(wifi, &iwconfig_text);
+}
+
+/// Merge `iwconfig` radio fields into a `wpa_cli` snapshot that omitted them.
+pub fn apply_iwconfig_enrichment(wifi: &mut WifiDiagnostics, iwconfig_text: &str) {
     if wifi.frequency_mhz.is_none()
-        && let Some(freq) = parse_iwconfig_frequency_mhz(&iwconfig_text)
+        && let Some(freq) = parse_iwconfig_frequency_mhz(iwconfig_text)
     {
         wifi.frequency_mhz = Some(freq);
         wifi.channel = frequency_to_channel(freq);
     }
     if wifi.link_quality.is_none() {
-        wifi.link_quality = parse_iwconfig_link_quality(&iwconfig_text);
+        wifi.link_quality = parse_iwconfig_link_quality(iwconfig_text);
     }
+}
+
+const COMMAND_TIMEOUT: Duration = Duration::from_secs(2);
+
+fn run_command_with_timeout(mut command: Command) -> Option<String> {
+    command.stdout(Stdio::piped());
+    command.stderr(Stdio::null());
+    let mut child = command.spawn().ok()?;
+    let deadline = Instant::now() + COMMAND_TIMEOUT;
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                if !status.success() {
+                    return None;
+                }
+                let mut stdout = String::new();
+                child.stdout.as_mut()?.read_to_string(&mut stdout).ok()?;
+                return Some(stdout);
+            }
+            Ok(None) if Instant::now() >= deadline => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return None;
+            }
+            Ok(None) => std::thread::sleep(Duration::from_millis(25)),
+            Err(_) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return None;
+            }
+        }
+    }
+}
+
+fn read_iwconfig(interface: &str) -> Option<String> {
+    let mut command = Command::new("iwconfig");
+    command.arg(interface);
+    run_command_with_timeout(command)
 }
 
 /// Read live Wi-Fi status via `wpa_cli`. Returns `None` when the tool or iface is absent.
 pub fn read_wifi_diagnostics(interface: &str) -> Option<WifiDiagnostics> {
-    let output = Command::new("wpa_cli")
-        .args(["-i", interface, "status"])
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    let text = String::from_utf8_lossy(&output.stdout);
+    let mut command = Command::new("wpa_cli");
+    command.args(["-i", interface, "status"]);
+    let text = run_command_with_timeout(command)?;
     let mut wifi = parse_wpa_status(&text, interface);
     enrich_missing_radio_fields(&mut wifi);
     Some(wifi)
@@ -146,10 +181,21 @@ ip_address=192.168.2.198
 signal=-52
 ";
 
+    const SAMPLE_WITHOUT_FREQ: &str = "\
+bssid=3c:64:cf:7d:a1:9f
+ssid=kmk
+id=0
+mode=station
+key_mgmt=WPA2-PSK
+wpa_state=COMPLETED
+ip_address=192.168.2.198
+signal=-52
+";
+
     const IWCONFIG_SAMPLE: &str = "wlan0     IEEE 802.11bgn  ESSID:\"kmk\"  \n          Mode:Managed  Frequency:2.437 GHz  Access Point: 3C:64:CF:7D:A1:9F   \n          Retry  long limit:7   RTS thr:off   Fragment thr:off\n          Encryption key:off\n          Power Management:on\n          Link Quality=66/70  Signal level=-44 dBm  \n";
 
     #[test]
-    fn parse_wpa_status_maps_connected_wifi() {
+    fn test_parse_wpa_status_connected_maps_ssid_channel_and_security() {
         let wifi = parse_wpa_status(SAMPLE, "wlan0");
         assert!(wifi.connected);
         assert_eq!(wifi.ssid.as_deref(), Some("kmk"));
@@ -161,28 +207,41 @@ signal=-52
     }
 
     #[test]
-    fn frequency_to_channel_handles_common_2g4_values() {
+    fn test_frequency_to_channel_common_2g4_values_match_ieee() {
         assert_eq!(frequency_to_channel(2412), Some(1));
         assert_eq!(frequency_to_channel(2437), Some(6));
+        assert_eq!(frequency_to_channel(2484), Some(14));
     }
 
     #[test]
-    fn map_key_mgmt_covers_open_and_enterprise() {
+    fn test_map_key_mgmt_open_and_enterprise_labels() {
         assert_eq!(map_key_mgmt("NONE"), "Open");
         assert_eq!(map_key_mgmt("WPA2-EAP"), "Enterprise");
     }
 
     #[test]
-    fn parse_iwconfig_frequency_from_anyka_output() {
+    fn test_parse_iwconfig_frequency_from_anyka_output_is_2437() {
         assert_eq!(parse_iwconfig_frequency_mhz(IWCONFIG_SAMPLE), Some(2437));
         assert_eq!(frequency_to_channel(2437), Some(6));
     }
 
     #[test]
-    fn parse_iwconfig_link_quality_from_anyka_output() {
+    fn test_parse_iwconfig_link_quality_from_anyka_output_is_66_70() {
         assert_eq!(
             parse_iwconfig_link_quality(IWCONFIG_SAMPLE).as_deref(),
             Some("66/70")
         );
+    }
+
+    #[test]
+    fn test_wifi_enrichment_fills_freq_from_iwconfig_when_wpa_omits_it() {
+        let mut wifi = parse_wpa_status(SAMPLE_WITHOUT_FREQ, "wlan0");
+        assert!(wifi.connected);
+        assert_eq!(wifi.frequency_mhz, None);
+        apply_iwconfig_enrichment(&mut wifi, IWCONFIG_SAMPLE);
+        assert_eq!(wifi.frequency_mhz, Some(2437));
+        assert_eq!(wifi.channel, Some(6));
+        assert_eq!(wifi.link_quality.as_deref(), Some("66/70"));
+        assert_eq!(wifi.ssid.as_deref(), Some("kmk"));
     }
 }

@@ -9,7 +9,7 @@ import {
 } from '@/utils/identificationStatusCard';
 import { formatWifiChannel, formatWifiQuality, formatWifiSecurity } from '@/utils/wifiStatus';
 
-const STATUS_POLL_MS = 30_000;
+export const STATUS_POLL_MS = 30_000;
 
 /** Live device status for settings status cards (diagnostics + ONVIF network). */
 export function useDeviceStatus() {
@@ -22,6 +22,7 @@ export function useDeviceStatus() {
   const networkQuery = useQuery({
     queryKey: ['networkInterfaces'],
     queryFn: getNetworkInterfaces,
+    refetchInterval: STATUS_POLL_MS,
   });
 
   const primaryInterface = pickPrimaryNetworkInterface(networkQuery.data);

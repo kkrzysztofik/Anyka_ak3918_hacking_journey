@@ -106,12 +106,14 @@ describe('IdentificationPage', () => {
 
     await waitFor(() => {
       expect(screen.getByTestId('identification-status-health')).toHaveTextContent('Healthy');
+      expect(screen.getByTestId('identification-status-mac')).toHaveTextContent(
+        'C0:4B:24:DA:4D:EB',
+      );
+      expect(screen.getByTestId('identification-status-quality')).toHaveTextContent('66/70');
+      expect(screen.getByTestId('identification-status-channel')).toHaveTextContent('6');
+      expect(screen.getByTestId('identification-status-security')).toHaveTextContent('WPA2');
     });
     expect(screen.getByTestId('identification-status-uptime')).toHaveTextContent('2h 0m');
-    expect(screen.getByTestId('identification-status-mac')).toHaveTextContent('C0:4B:24:DA:4D:EB');
-    expect(screen.getByTestId('identification-status-quality')).toHaveTextContent('66/70');
-    expect(screen.getByTestId('identification-status-channel')).toHaveTextContent('6');
-    expect(screen.getByTestId('identification-status-security')).toHaveTextContent('WPA2');
   });
 
   it('should display device information when loaded', async () => {
@@ -263,6 +265,27 @@ describe('IdentificationPage', () => {
     });
   });
 
+  it('should keep the form loading until scopes resolve', async () => {
+    vi.mocked(getScopes).mockImplementation(() => new Promise(() => {}));
+
+    renderWithProviders(<IdentificationPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('identification-loading')).toBeInTheDocument();
+    });
+    expect(screen.queryByTestId('identification-title')).not.toBeInTheDocument();
+  });
+
+  it('should show an error when an identification query fails', async () => {
+    vi.mocked(getHostname).mockRejectedValue(new Error('hostname unavailable'));
+
+    renderWithProviders(<IdentificationPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('identification-error')).toBeInTheDocument();
+    });
+  });
+
   describe('scopes card', () => {
     const fixedScope = {
       scopeDef: 'Fixed' as const,
@@ -382,6 +405,27 @@ describe('IdentificationPage', () => {
         expect(setDiscoveryMode).toHaveBeenCalledWith('NonDiscoverable');
       });
       expect(setScopes).not.toHaveBeenCalled();
+    });
+
+    it('should save hostname when it changes', async () => {
+      vi.mocked(setScopes).mockResolvedValue(undefined);
+      vi.mocked(setHostname).mockResolvedValue(undefined);
+
+      const user = userEvent.setup();
+      renderWithProviders(<IdentificationPage />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('identification-hostname-input')).toHaveValue('ipcam');
+      });
+
+      const hostnameInput = screen.getByTestId('identification-hostname-input');
+      await user.clear(hostnameInput);
+      await user.type(hostnameInput, 'front-door');
+      await user.click(screen.getByTestId('identification-save-button'));
+
+      await waitFor(() => {
+        expect(setHostname).toHaveBeenCalledWith('front-door');
+      });
     });
 
     it('should omit hostname from save when it is unchanged', async () => {

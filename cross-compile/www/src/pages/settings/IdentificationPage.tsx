@@ -73,23 +73,22 @@ import { handleMutationError } from '@/utils/errorHandling';
 export default function IdentificationPage() {
   const queryClient = useQueryClient();
 
-  // Fetch device info
-  const { data: deviceInfo, isLoading: isDeviceLoading } = useQuery<DeviceIdentification>({
+  const { data: deviceInfo, isError: isDeviceError } = useQuery<DeviceIdentification>({
     queryKey: ['deviceInformation'],
     queryFn: getDeviceIdentification,
   });
 
-  const { data: scopes } = useQuery<Scope[]>({
+  const { data: scopes, isError: isScopesError } = useQuery<Scope[]>({
     queryKey: ['deviceScopes'],
     queryFn: getScopes,
   });
 
-  const { data: hostname } = useQuery<string>({
+  const { data: hostname, isError: isHostnameError } = useQuery<string>({
     queryKey: ['hostname'],
     queryFn: getHostname,
   });
 
-  const { data: discoveryMode } = useQuery<DiscoveryMode>({
+  const { data: discoveryMode, isError: isDiscoveryError } = useQuery<DiscoveryMode>({
     queryKey: ['discoveryMode'],
     queryFn: getDiscoveryMode,
   });
@@ -182,6 +181,7 @@ export default function IdentificationPage() {
         discoveryMode,
         scopes,
       });
+      setNewScope('');
       toast.info('Form reset to current device values');
     }
   };
@@ -213,7 +213,21 @@ export default function IdentificationPage() {
     [remove],
   );
 
-  if (isDeviceLoading) {
+  const identificationError = isDeviceError || isScopesError || isHostnameError || isDiscoveryError;
+  if (identificationError) {
+    return (
+      <div className="text-white" data-testid="identification-error">
+        Failed to load identification
+      </div>
+    );
+  }
+
+  if (
+    deviceInfo === undefined ||
+    scopes === undefined ||
+    hostname === undefined ||
+    discoveryMode === undefined
+  ) {
     return (
       <div className="text-white" data-testid="identification-loading">
         Loading...
@@ -384,8 +398,9 @@ export default function IdentificationPage() {
                   </div>
                   <Switch
                     checked={discoveryMode === 'Discoverable'}
-                    disabled={discoveryMutation.isPending || discoveryMode === undefined}
+                    disabled={discoveryMutation.isPending}
                     onCheckedChange={handleDiscoveryToggle}
+                    aria-label="Discoverable"
                     data-testid="identification-discovery-switch"
                   />
                 </div>

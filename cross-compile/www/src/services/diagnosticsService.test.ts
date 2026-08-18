@@ -106,6 +106,22 @@ describe('diagnosticsService', () => {
       await expect(getDiagnostics()).rejects.toThrow(/unexpected shape/);
     });
 
+    it('should accept a wifi block that omits link_quality from an older bundle', async () => {
+      const wifi = {
+        interface: 'wlan0',
+        connected: true,
+        ssid: 'kmk',
+        frequency_mhz: 2437,
+        channel: 6,
+        security: 'WPA2',
+        signal_dbm: -52,
+      };
+      vi.mocked(authorizedFetch).mockResolvedValue(makeResponse({ ...MOCK_DIAGNOSTICS, wifi }));
+      const result = await getDiagnostics();
+      expect(result.wifi?.ssid).toBe('kmk');
+      expect(result.wifi?.link_quality).toBeUndefined();
+    });
+
     it('should accept a diagnostics payload with no ptz key', async () => {
       vi.mocked(authorizedFetch).mockResolvedValue(makeResponse(MOCK_DIAGNOSTICS));
       await expect(getDiagnostics()).resolves.toBeDefined();

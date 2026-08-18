@@ -183,6 +183,11 @@ describe('identificationSchema', () => {
         error: 'too long',
         description: 'location too long',
       },
+      {
+        data: { deviceInfo: defaultDeviceInfo, name: 'Camera', location: 'Hall', hostname: '' },
+        error: 'required',
+        description: 'empty hostname',
+      },
     ];
 
     it.each(invalidCases)('should reject $description', ({ data, error }) => {

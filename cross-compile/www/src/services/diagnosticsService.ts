@@ -4,12 +4,7 @@
  * JSON GET operations for the /api/diagnostics and /api/logs endpoints.
  * Uses authorizedFetch so 401 responses trigger the shared session-expiry path.
  */
-import {
-  ApiError,
-  authorizedFetch,
-  authorizedXhrPut,
-  type UploadProgress,
-} from '@/services/api';
+import { ApiError, type UploadProgress, authorizedFetch, authorizedXhrPut } from '@/services/api';
 
 export interface Diagnostics {
   status: string;
@@ -54,7 +49,8 @@ export interface Diagnostics {
     channel: number | null;
     security: string | null;
     signal_dbm: number | null;
-    link_quality: string | null;
+    /** Absent on firmware older than the 2026-08-18 quality field. */
+    link_quality?: string | null;
   } | null;
 }
 
@@ -147,7 +143,7 @@ function isWifi(value: unknown): value is NonNullable<Diagnostics['wifi']> {
     isNullOrNumber(value.channel) &&
     isNullOrString(value.security) &&
     (value.signal_dbm === null || typeof value.signal_dbm === 'number') &&
-    isNullOrString(value.link_quality)
+    (value.link_quality === undefined || isNullOrString(value.link_quality))
   );
 }
 

@@ -5,8 +5,13 @@ import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { getNetworkConfig, getNetworkInterfaces, setDNS, setNetworkInterface } from '@/services/networkService';
 import { getDiagnostics } from '@/services/diagnosticsService';
+import {
+  getNetworkConfig,
+  getNetworkInterfaces,
+  setDNS,
+  setNetworkInterface,
+} from '@/services/networkService';
 import {
   MOCK_DATA,
   fillFormField,
@@ -99,10 +104,12 @@ describe('NetworkPage', () => {
   it('should show diagnostics-backed status card values', async () => {
     await renderNetworkPage();
 
-    expect(screen.getByTestId('network-mac-address')).toHaveTextContent('C0:4B:24:DA:4D:EB');
-    expect(screen.getByTestId('network-quality')).toHaveTextContent('66/70');
-    expect(screen.getByTestId('network-status')).toHaveTextContent('Healthy');
-    expect(screen.getByTestId('network-uptime')).toHaveTextContent('1h 0m');
+    await waitFor(() => {
+      expect(screen.getByTestId('network-mac-address')).toHaveTextContent('C0:4B:24:DA:4D:EB');
+      expect(screen.getByTestId('network-quality')).toHaveTextContent('66/70');
+      expect(screen.getByTestId('network-status')).toHaveTextContent('Healthy');
+      expect(screen.getByTestId('network-uptime')).toHaveTextContent('1h 0m');
+    });
   });
 
   it('should toggle DHCP and show/hide static IP fields', async () => {
