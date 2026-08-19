@@ -128,6 +128,7 @@ export const MOCK_DATA = {
       dnsServers: ['8.8.8.8', '8.8.4.4'], // NOSONAR - Test data: Google DNS IPs for testing DNS configuration
       searchDomain: [],
     },
+    protocols: { http: 80, rtsp: 554 },
   },
   device: {
     deviceInfo: {

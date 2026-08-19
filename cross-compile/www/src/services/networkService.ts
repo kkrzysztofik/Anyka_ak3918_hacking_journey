@@ -1,9 +1,9 @@
 /**
  * Network Service
  *
- * SOAP operations for network configuration.
+ * SOAP operations for network configuration and REST overlay access.
  */
-import { ENDPOINTS } from '@/services/api';
+import { ENDPOINTS, authorizedFetch } from '@/services/api';
 import { escapeXml, soapRequest } from '@/services/soap/client';
 import { safeString } from '@/utils/safeString';
 
@@ -35,10 +35,42 @@ export interface DNSConfig {
   dnsServers: string[];
 }
 
+export interface NetworkProtocols {
+  http: number;
+  rtsp: number;
+}
+
 export interface NetworkConfig {
   interfaces: NetworkInterface[];
   dns: DNSConfig;
+  protocols: NetworkProtocols;
 }
+
+export interface NetworkOverlayView {
+  ssid?: string;
+  has_password: boolean;
+  security?: string;
+  dhcp?: boolean;
+  address?: string;
+  gateway?: string;
+  dns?: string[];
+}
+
+export interface NetworkOverlayState {
+  pending: NetworkOverlayView;
+  has_pending: boolean;
+  last_failure: NetworkOverlayView | null;
+}
+
+export type NetworkOverlayPatch = Partial<{
+  ssid: string;
+  password: string;
+  security: string;
+  dhcp: boolean;
+  address: string;
+  gateway: string;
+  dns: string[];
+}>;
 
 /**
  * Get network interfaces
@@ -56,7 +88,6 @@ export async function getNetworkInterfaces(): Promise<NetworkInterface[]> {
     return [];
   }
 
-  // Handle single or array of interfaces
   const interfacesList = Array.isArray(interfaces) ? interfaces : [interfaces];
 
   return interfacesList.map((iface: Record<string, unknown>) => {
@@ -89,6 +120,56 @@ export async function getNetworkInterfaces(): Promise<NetworkInterface[]> {
       gateway: '',
     };
   });
+}
+
+/**
+ * Get default gateway from the device.
+ */
+export async function getNetworkDefaultGateway(): Promise<string> {
+  const data = await soapRequest<Record<string, unknown>>(
+    ENDPOINTS.device,
+    '<tds:GetNetworkDefaultGateway />',
+    'GetNetworkDefaultGatewayResponse',
+  );
+
+  const gateways = data?.NetworkGateway;
+  const gateway = Array.isArray(gateways) ? gateways[0] : gateways;
+  const gatewayRecord = gateway as Record<string, unknown> | undefined;
+  const ipv4 = gatewayRecord?.IPv4Address;
+  if (Array.isArray(ipv4)) {
+    return safeString(ipv4[0], '');
+  }
+  return safeString(ipv4, '');
+}
+
+/**
+ * Get HTTP and RTSP listener ports.
+ */
+export async function getNetworkProtocols(): Promise<NetworkProtocols> {
+  const data = await soapRequest<Record<string, unknown>>(
+    ENDPOINTS.device,
+    '<tds:GetNetworkProtocols />',
+    'GetNetworkProtocolsResponse',
+  );
+
+  const protocols = data?.NetworkProtocols;
+  const list = Array.isArray(protocols) ? protocols : protocols ? [protocols] : [];
+
+  let http = 80;
+  let rtsp = 554;
+
+  for (const proto of list) {
+    const entry = proto as Record<string, unknown>;
+    const name = safeString(entry.Name, '').toUpperCase();
+    const ports = entry.Port;
+    const portValue = Array.isArray(ports) ? ports[0] : ports;
+    const port = Number(portValue);
+    if (!Number.isFinite(port)) continue;
+    if (name === 'HTTP') http = port;
+    if (name === 'RTSP') rtsp = port;
+  }
+
+  return { http, rtsp };
 }
 
 /**
@@ -131,9 +212,52 @@ export async function getDNS(): Promise<DNSConfig> {
  * Get full network configuration
  */
 export async function getNetworkConfig(): Promise<NetworkConfig> {
-  const [interfaces, dns] = await Promise.all([getNetworkInterfaces(), getDNS()]);
+  const [interfaces, dns, gateway, protocols] = await Promise.all([
+    getNetworkInterfaces(),
+    getDNS(),
+    getNetworkDefaultGateway(),
+    getNetworkProtocols(),
+  ]);
 
-  return { interfaces, dns };
+  if (interfaces[0]) {
+    interfaces[0] = { ...interfaces[0], gateway };
+  }
+
+  return { interfaces, dns, protocols };
+}
+
+/**
+ * Read pending overlay state from /api/network.
+ */
+export async function getNetworkOverlay(): Promise<NetworkOverlayState> {
+  const response = await authorizedFetch('/api/network');
+  if (!response.ok) {
+    throw new Error(`Failed to load network overlay (${response.status})`);
+  }
+  return (await response.json()) as NetworkOverlayState;
+}
+
+/**
+ * Write overlay keys via PUT /api/network.
+ */
+export async function putNetworkOverlay(patch: NetworkOverlayPatch): Promise<void> {
+  const body: NetworkOverlayPatch = {};
+  for (const [key, value] of Object.entries(patch)) {
+    if (value !== undefined) {
+      (body as Record<string, unknown>)[key] = value;
+    }
+  }
+
+  const response = await authorizedFetch('/api/network', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(text || `Overlay save failed (${response.status})`);
+  }
 }
 
 /**
@@ -168,11 +292,24 @@ export async function setNetworkInterface(
 }
 
 /**
+ * Set default gateway
+ */
+export async function setNetworkDefaultGateway(gateway: string): Promise<void> {
+  const body = `<tds:SetNetworkDefaultGateway>
+    <tds:NetworkGateway>
+      <tt:IPv4Address>${escapeXml(gateway)}</tt:IPv4Address>
+    </tds:NetworkGateway>
+  </tds:SetNetworkDefaultGateway>`;
+
+  await soapRequest(ENDPOINTS.device, body);
+}
+
+/**
  * Set DNS configuration
  */
-export async function setDNS(_fromDHCP: boolean, dnsServers?: string[]): Promise<void> {
+export async function setDNS(fromDHCP: boolean, dnsServers?: string[]): Promise<void> {
   const manualDNS =
-    !_fromDHCP && dnsServers?.length
+    !fromDHCP && dnsServers?.length
       ? dnsServers
           .map(
             (ip) =>
@@ -182,9 +319,29 @@ export async function setDNS(_fromDHCP: boolean, dnsServers?: string[]): Promise
       : '';
 
   const body = `<tds:SetDNS>
-    <tds:FromDHCP>${escapeXml(String(_fromDHCP))}</tds:FromDHCP>
+    <tds:FromDHCP>${escapeXml(String(fromDHCP))}</tds:FromDHCP>
     ${manualDNS}
   </tds:SetDNS>`;
+
+  await soapRequest(ENDPOINTS.device, body);
+}
+
+/**
+ * Set HTTP and RTSP listener ports.
+ */
+export async function setNetworkProtocols(httpPort: number, rtspPort: number): Promise<void> {
+  const body = `<tds:SetNetworkProtocols>
+    <tds:NetworkProtocols>
+      <tt:Name>HTTP</tt:Name>
+      <tt:Enabled>true</tt:Enabled>
+      <tt:Port>${httpPort}</tt:Port>
+    </tds:NetworkProtocols>
+    <tds:NetworkProtocols>
+      <tt:Name>RTSP</tt:Name>
+      <tt:Enabled>true</tt:Enabled>
+      <tt:Port>${rtspPort}</tt:Port>
+    </tds:NetworkProtocols>
+  </tds:SetNetworkProtocols>`;
 
   await soapRequest(ENDPOINTS.device, body);
 }

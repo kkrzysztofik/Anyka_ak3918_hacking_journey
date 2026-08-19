@@ -637,6 +637,11 @@ impl OnvifServer {
             if state.auth_enabled {
                 // No timeout: see the comment on `timeout` above.
                 api = api.route("/update", put(crate::diagnostics::update::handle_update));
+                api = api.route(
+                    "/network",
+                    get(crate::diagnostics::network::handle_get_network)
+                        .put(crate::diagnostics::network::handle_put_network),
+                );
             }
             let api = api
                 .fallback(|| async { StatusCode::NOT_FOUND })
@@ -647,6 +652,11 @@ impl OnvifServer {
                 .layer(axum::Extension(Arc::clone(diagnostics)))
                 .layer(axum::Extension(Arc::new(
                     crate::diagnostics::update::UpdateState::from_update_root(
+                        self.config.update_root.clone(),
+                    ),
+                )))
+                .layer(axum::Extension(Arc::new(
+                    crate::diagnostics::network::NetworkState::from_update_root(
                         self.config.update_root.clone(),
                     ),
                 )));
@@ -1726,6 +1736,43 @@ mod tests {
             StatusCode::UNAUTHORIZED,
             "unauthenticated upload must be rejected"
         );
+    }
+
+    #[tokio::test]
+    async fn test_get_network_requires_auth() {
+        use axum::body::Body;
+        use axum::http::{Request, StatusCode};
+        use tower::ServiceExt;
+
+        let app = make_diagnostics_app(true);
+
+        let request = Request::builder()
+            .method("GET")
+            .uri("/api/network")
+            .body(Body::empty())
+            .unwrap();
+
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn test_put_network_requires_auth() {
+        use axum::body::Body;
+        use axum::http::{Request, StatusCode};
+        use tower::ServiceExt;
+
+        let app = make_diagnostics_app(true);
+
+        let request = Request::builder()
+            .method("PUT")
+            .uri("/api/network")
+            .header("content-type", "application/json")
+            .body(Body::from(r#"{"ssid":"TestNet"}"#))
+            .unwrap();
+
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
     }
 
     #[tokio::test]

@@ -2,8 +2,10 @@
 // Network Info Implementation
 // =============================================================================
 
+use crate::config::netoverlay::NetworkOverlay;
 use crate::platform::common::{
-    DnsInfo, NetworkInfo, NetworkInterfaceInfo, NetworkProtocolInfo, NtpInfo, PlatformResult,
+    DnsInfo, NetworkInfo, NetworkInterfaceInfo, NetworkProtocolInfo, NtpInfo, PlatformError,
+    PlatformResult,
 };
 use async_trait::async_trait;
 
@@ -11,11 +13,33 @@ use async_trait::async_trait;
 ///
 /// Reads network configuration from the Linux system. Falls back to empty
 /// values if system files cannot be read.
-pub(super) struct AnykaNetworkInfo;
+pub(super) struct AnykaNetworkInfo {
+    overlay_path: std::path::PathBuf,
+}
 
 impl AnykaNetworkInfo {
     pub(super) fn new() -> Self {
-        Self
+        Self {
+            overlay_path: std::path::PathBuf::from(crate::config::netoverlay::DEFAULT_OVERLAY_PATH),
+        }
+    }
+
+    #[cfg(test)]
+    pub(super) fn with_overlay_path(overlay_path: std::path::PathBuf) -> Self {
+        Self { overlay_path }
+    }
+
+    /// Read the overlay, hand it to `edit`, write it back.
+    ///
+    /// Read-modify-write because each ONVIF setter owns a different slice of
+    /// the same file; a blind write would drop the other setters' work.
+    fn update_overlay(&self, edit: impl FnOnce(&mut NetworkOverlay)) -> PlatformResult<()> {
+        let mut overlay = NetworkOverlay::read(&self.overlay_path)
+            .map_err(|e| PlatformError::HardwareFailure(e.to_string()))?;
+        edit(&mut overlay);
+        overlay
+            .write(&self.overlay_path)
+            .map_err(|e| PlatformError::HardwareFailure(e.to_string()))
     }
 
     /// Read network interfaces from /sys/class/net and /proc/net/route.
@@ -235,5 +259,104 @@ impl NetworkInfo for AnykaNetworkInfo {
                 ports: vec![554],
             },
         ])
+    }
+
+    async fn set_network_interface(
+        &self,
+        _token: &str,
+        ipv4_address: Option<String>,
+        ipv4_prefix_length: Option<u8>,
+        ipv4_dhcp: bool,
+    ) -> PlatformResult<()> {
+        // `[wifi]` describes one interface; the token is ignored.
+        self.update_overlay(|o| {
+            o.dhcp = Some(ipv4_dhcp);
+            o.address = if ipv4_dhcp {
+                None
+            } else {
+                ipv4_address.map(|a| format!("{a}/{}", ipv4_prefix_length.unwrap_or(24)))
+            };
+        })
+    }
+
+    async fn set_dns(
+        &self,
+        dns_servers: &[String],
+        _search_domains: &[String],
+    ) -> PlatformResult<()> {
+        let servers = dns_servers.to_vec();
+        self.update_overlay(|o| o.dns = Some(servers))
+    }
+
+    async fn set_gateway(&self, gateway: &str) -> PlatformResult<()> {
+        let gateway = gateway.to_string();
+        self.update_overlay(|o| o.gateway = Some(gateway))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_set_network_interface_writes_static_config() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("network.toml");
+        let info = AnykaNetworkInfo::with_overlay_path(path.clone());
+
+        info.set_network_interface("eth0", Some("192.168.2.50".into()), Some(24), false)
+            .await
+            .expect("set must succeed");
+
+        let overlay = NetworkOverlay::read(&path).expect("read");
+        assert_eq!(overlay.dhcp, Some(false));
+        assert_eq!(
+            overlay.address.as_deref(),
+            Some("192.168.2.50/24"),
+            "ONVIF sends address and prefix separately; the overlay stores CIDR"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_set_dns_preserves_an_existing_address() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("network.toml");
+        let info = AnykaNetworkInfo::with_overlay_path(path.clone());
+
+        info.set_network_interface("eth0", Some("192.168.2.50".into()), Some(24), false)
+            .await
+            .expect("set interface");
+        info.set_dns(&["1.1.1.1".to_string()], &[])
+            .await
+            .expect("set dns");
+
+        let overlay = NetworkOverlay::read(&path).expect("read");
+        assert_eq!(overlay.dns, Some(vec!["1.1.1.1".to_string()]));
+        assert_eq!(
+            overlay.address.as_deref(),
+            Some("192.168.2.50/24"),
+            "SetDNS must not drop what SetNetworkInterfaces wrote"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_set_dhcp_clears_the_static_address() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("network.toml");
+        let info = AnykaNetworkInfo::with_overlay_path(path.clone());
+
+        info.set_network_interface("eth0", Some("192.168.2.50".into()), Some(24), false)
+            .await
+            .expect("set static");
+        info.set_network_interface("eth0", None, None, true)
+            .await
+            .expect("set dhcp");
+
+        let overlay = NetworkOverlay::read(&path).expect("read");
+        assert_eq!(overlay.dhcp, Some(true));
+        assert!(
+            overlay.address.is_none(),
+            "a stale address left behind DHCP would be applied on the next switch back to static"
+        );
     }
 }

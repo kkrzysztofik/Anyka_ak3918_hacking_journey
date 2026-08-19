@@ -480,11 +480,24 @@ impl std::str::FromStr for Config {
 
 impl Config {
     pub fn load(path: &str) -> Result<Self, ConfigError> {
+        Self::load_with_overlay(
+            path,
+            std::path::Path::new(crate::netoverlay::NetworkOverlay::DEFAULT_PATH),
+        )
+    }
+
+    /// `Config::load`, with the overlay path taken as an argument so tests can
+    /// point it at a tempdir.
+    pub fn load_with_overlay(
+        path: &str,
+        overlay_path: &std::path::Path,
+    ) -> Result<Self, ConfigError> {
         let src = std::fs::read_to_string(path).map_err(|source| ConfigError::Read {
             path: path.to_string(),
             source,
         })?;
-        let cfg: Self = src.parse()?;
+        let mut cfg: Self = src.parse()?;
+        crate::netoverlay::NetworkOverlay::load(overlay_path)?.apply_to(&mut cfg.wifi);
         cfg.validate()?;
         Ok(cfg)
     }

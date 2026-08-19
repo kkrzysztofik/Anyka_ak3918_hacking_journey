@@ -11,7 +11,7 @@
 use std::sync::Arc;
 
 use crate::config::ConfigRuntime;
-use crate::onvif::device::faults::validate_hostname;
+use crate::onvif::device::faults::{validate_hostname, validate_ipv4};
 use crate::onvif::error::{OnvifError, OnvifResult};
 use crate::onvif::types::device::{
     DNSInformation, Duplex, GetDNS, GetDNSResponse, GetHostname, GetHostnameResponse, GetNTP,
@@ -21,7 +21,9 @@ use crate::onvif::types::device::{
     IPv4NetworkInterface, NTPInformation, NetworkGateway, NetworkHost, NetworkInterface,
     NetworkInterfaceConnectionSetting, NetworkInterfaceInfo, NetworkInterfaceLink, NetworkProtocol,
     NetworkProtocolType, PrefixedIPv4Address, SetDNS, SetDNSResponse, SetHostname,
-    SetHostnameResponse, SetNTP, SetNTPResponse, SetNetworkProtocols, SetNetworkProtocolsResponse,
+    SetHostnameResponse, SetNTP, SetNTPResponse, SetNetworkDefaultGateway,
+    SetNetworkDefaultGatewayResponse, SetNetworkInterfaces, SetNetworkInterfacesResponse,
+    SetNetworkProtocols, SetNetworkProtocolsResponse,
 };
 use crate::platform::{
     Platform, common::NetworkInterfaceInfo as PlatformInterfaceInfo, external_ip,
@@ -320,17 +322,115 @@ pub async fn handle_get_dns(
     })
 }
 
-/// Handle SetDNS request.
+/// Handle SetNetworkInterfaces request.
 ///
-/// Not supported - returns ActionNotSupported error.
-pub async fn handle_set_dns(request: SetDNS) -> OnvifResult<SetDNSResponse> {
-    tracing::debug!(
-        "SetDNS request: from_dhcp={}, {} manual servers (not supported)",
-        request.from_dhcp,
-        request.dns_manual.len()
+/// Persists to the machine-owned overlay; anyka-init applies it at the next
+/// boot. onvif-rust deliberately does not run `ifconfig` — the supervisor owns
+/// the interface, and racing it is how a camera loses its only remote access.
+pub async fn handle_set_network_interfaces(
+    platform: &Option<Arc<dyn Platform>>,
+    request: SetNetworkInterfaces,
+) -> OnvifResult<SetNetworkInterfacesResponse> {
+    let ipv4 = request.network_interface.ipv4.as_ref();
+    let dhcp = ipv4.map(|v| v.config.dhcp).unwrap_or(true);
+
+    let (address, prefix) = if dhcp {
+        (None, None)
+    } else {
+        let manual = ipv4.and_then(|v| v.config.manual.first()).ok_or_else(|| {
+            OnvifError::invalid_arg_val("NoConfig", "static addressing requires a Manual block")
+        })?;
+        validate_ipv4(&manual.address)?;
+        if !(1..=32).contains(&manual.prefix_length) {
+            return Err(OnvifError::invalid_arg_val(
+                "NoConfig",
+                "PrefixLength must be between 1 and 32",
+            ));
+        }
+        (
+            Some(manual.address.clone()),
+            Some(manual.prefix_length as u8),
+        )
+    };
+
+    let network_info = platform
+        .as_ref()
+        .and_then(|p| p.network_info())
+        .ok_or_else(|| OnvifError::ActionNotSupported("SetNetworkInterfaces".to_string()))?;
+
+    network_info
+        .set_network_interface(&request.interface_token, address, prefix, dhcp)
+        .await
+        .map_err(|e| OnvifError::HardwareFailure(e.to_string()))?;
+
+    tracing::info!(
+        dhcp,
+        "SetNetworkInterfaces: persisted; applies at next boot"
     );
 
-    Err(OnvifError::ActionNotSupported("SetDNS".to_string()))
+    Ok(SetNetworkInterfacesResponse {
+        reboot_needed: true,
+    })
+}
+
+/// Handle SetDNS request.
+///
+/// Persists to the overlay; applied by anyka-init at next boot.
+pub async fn handle_set_dns(
+    platform: &Option<Arc<dyn Platform>>,
+    request: SetDNS,
+) -> OnvifResult<SetDNSResponse> {
+    let servers: Vec<String> = if request.from_dhcp {
+        Vec::new()
+    } else {
+        request
+            .dns_manual
+            .iter()
+            .filter_map(|a| a.ipv4_address.clone())
+            .collect()
+    };
+    for s in &servers {
+        validate_ipv4(s)?;
+    }
+
+    let network_info = platform
+        .as_ref()
+        .and_then(|p| p.network_info())
+        .ok_or_else(|| OnvifError::ActionNotSupported("SetDNS".to_string()))?;
+
+    network_info
+        .set_dns(&servers, &request.search_domain)
+        .await
+        .map_err(|e| OnvifError::HardwareFailure(e.to_string()))?;
+
+    Ok(SetDNSResponse {})
+}
+
+/// Handle SetNetworkDefaultGateway request.
+///
+/// Persists to the overlay; applied by anyka-init at next boot.
+pub async fn handle_set_network_default_gateway(
+    platform: &Option<Arc<dyn Platform>>,
+    request: SetNetworkDefaultGateway,
+) -> OnvifResult<SetNetworkDefaultGatewayResponse> {
+    let gateway = request
+        .network_gateway
+        .first()
+        .and_then(|g| g.ipv4_address.first())
+        .ok_or_else(|| OnvifError::invalid_arg_val("NoConfig", "IPv4 gateway address required"))?;
+    validate_ipv4(gateway)?;
+
+    let network_info = platform
+        .as_ref()
+        .and_then(|p| p.network_info())
+        .ok_or_else(|| OnvifError::ActionNotSupported("SetNetworkDefaultGateway".to_string()))?;
+
+    network_info
+        .set_gateway(gateway)
+        .await
+        .map_err(|e| OnvifError::HardwareFailure(e.to_string()))?;
+
+    Ok(SetNetworkDefaultGatewayResponse {})
 }
 
 /// Handle GetNTP request.
@@ -482,24 +582,45 @@ pub async fn handle_get_network_protocols(
 
 /// Handle SetNetworkProtocols request.
 ///
-/// Not supported - returns ActionNotSupported error.
+/// Ports belong to this process's own listeners, so they go to `config.toml`,
+/// not to the anyka-init overlay. Both listeners bind at startup, so the change
+/// takes effect at the next restart.
 pub async fn handle_set_network_protocols(
+    config: &Arc<ConfigRuntime>,
     request: SetNetworkProtocols,
 ) -> OnvifResult<SetNetworkProtocolsResponse> {
-    tracing::debug!(
-        "SetNetworkProtocols request: {} protocols (not supported)",
-        request.network_protocols.len()
-    );
-
-    Err(OnvifError::ActionNotSupported(
-        "SetNetworkProtocols".to_string(),
-    ))
+    for proto in &request.network_protocols {
+        let port = *proto.port.first().ok_or_else(|| {
+            OnvifError::invalid_arg_val("NoConfig", "protocol entry carries no port")
+        })?;
+        if !(1..=65535).contains(&port) {
+            return Err(OnvifError::invalid_arg_val(
+                "NoConfig",
+                "port must be between 1 and 65535",
+            ));
+        }
+        match proto.name {
+            NetworkProtocolType::HTTP => {
+                config.write().server.port = port as u16;
+            }
+            NetworkProtocolType::RTSP => {
+                config.write().media.rtsp_port = port as u16;
+            }
+            NetworkProtocolType::HTTPS => {
+                return Err(OnvifError::ActionNotSupported(
+                    "HTTPS: no TLS listener exists".to_string(),
+                ));
+            }
+        }
+    }
+    Ok(SetNetworkProtocolsResponse {})
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::config::ConfigRuntime;
+    use crate::onvif::types::device::{IPv4NetworkInterfaceSet, NetworkInterfaceSetConfiguration};
     use std::sync::Arc;
 
     fn create_test_config() -> Arc<ConfigRuntime> {
@@ -677,20 +798,163 @@ mod tests {
     }
 
     // ========================================================================
+    // SetNetworkInterfaces Tests
+    // ========================================================================
+
+    fn static_set_network_interfaces_request() -> SetNetworkInterfaces {
+        SetNetworkInterfaces {
+            interface_token: "eth0".to_string(),
+            network_interface: NetworkInterfaceSetConfiguration {
+                ipv4: Some(IPv4NetworkInterfaceSet {
+                    enabled: true,
+                    config: IPv4Configuration {
+                        manual: vec![PrefixedIPv4Address {
+                            address: "192.168.2.50".to_string(),
+                            prefix_length: 24,
+                        }],
+                        link_local: None,
+                        from_dhcp: None,
+                        dhcp: false,
+                    },
+                }),
+            },
+        }
+    }
+
+    #[tokio::test]
+    async fn test_set_network_interfaces_rejects_a_malformed_address() {
+        let platform = None;
+        let mut request = static_set_network_interfaces_request();
+        request
+            .network_interface
+            .ipv4
+            .as_mut()
+            .unwrap()
+            .config
+            .manual[0]
+            .address = "not-an-ip".to_string();
+
+        let result = handle_set_network_interfaces(&platform, request).await;
+
+        assert!(
+            matches!(result, Err(OnvifError::InvalidArgVal { .. })),
+            "a malformed address must fault before reaching the overlay"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_set_network_interfaces_rejects_static_without_an_address() {
+        let platform = None;
+        let request = SetNetworkInterfaces {
+            interface_token: "eth0".to_string(),
+            network_interface: NetworkInterfaceSetConfiguration {
+                ipv4: Some(IPv4NetworkInterfaceSet {
+                    enabled: true,
+                    config: IPv4Configuration {
+                        manual: vec![],
+                        link_local: None,
+                        from_dhcp: None,
+                        dhcp: false,
+                    },
+                }),
+            },
+        };
+
+        assert!(
+            handle_set_network_interfaces(&platform, request)
+                .await
+                .is_err()
+        );
+    }
+
+    #[tokio::test]
+    async fn test_set_network_interfaces_without_a_platform_is_not_supported() {
+        let platform = None;
+        let request = SetNetworkInterfaces {
+            interface_token: "eth0".to_string(),
+            network_interface: NetworkInterfaceSetConfiguration {
+                ipv4: Some(IPv4NetworkInterfaceSet {
+                    enabled: true,
+                    config: IPv4Configuration {
+                        manual: vec![],
+                        link_local: None,
+                        from_dhcp: None,
+                        dhcp: true,
+                    },
+                }),
+            },
+        };
+
+        assert!(matches!(
+            handle_set_network_interfaces(&platform, request).await,
+            Err(OnvifError::ActionNotSupported(_))
+        ));
+    }
+
+    // ========================================================================
     // SetDNS Tests
     // ========================================================================
 
     #[tokio::test]
-    async fn test_set_dns_not_supported() {
-        let result = handle_set_dns(SetDNS {
-            from_dhcp: false,
-            search_domain: vec!["example.com".to_string()],
-            dns_manual: vec![IPAddress::ipv4("8.8.8.8")],
-        })
-        .await;
+    async fn test_set_dns_is_no_longer_action_not_supported() {
+        use crate::platform::StubPlatformBuilder;
 
-        assert!(result.is_err());
-        assert!(matches!(result, Err(OnvifError::ActionNotSupported(_))));
+        let platform = Arc::new(
+            StubPlatformBuilder::new()
+                .network_info_supported(true)
+                .build(),
+        );
+        let request = SetDNS {
+            from_dhcp: false,
+            search_domain: vec![],
+            dns_manual: vec![IPAddress::ipv4("8.8.8.8")],
+        };
+
+        let result = handle_set_dns(&Some(platform), request).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_set_dns_rejects_a_malformed_server() {
+        let platform = None;
+        let request = SetDNS {
+            from_dhcp: false,
+            search_domain: vec![],
+            dns_manual: vec![IPAddress::ipv4("999.1.1.1")],
+        };
+
+        assert!(matches!(
+            handle_set_dns(&platform, request).await,
+            Err(OnvifError::InvalidArgVal { .. })
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_set_dns_from_dhcp_clears_manual_servers() {
+        use crate::platform::StubPlatformBuilder;
+
+        let platform = Arc::new(
+            StubPlatformBuilder::new()
+                .network_info_supported(true)
+                .build(),
+        );
+        let request = SetDNS {
+            from_dhcp: true,
+            search_domain: vec![],
+            dns_manual: vec![IPAddress::ipv4("8.8.8.8")],
+        };
+
+        handle_set_dns(&Some(platform.clone()), request)
+            .await
+            .expect("must succeed");
+
+        let dns = platform
+            .network_info()
+            .expect("network info")
+            .get_dns_info()
+            .await
+            .expect("dns");
+        assert!(dns.dns_manual.is_empty());
     }
 
     // ========================================================================
@@ -752,17 +1016,64 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_set_network_protocols_not_supported() {
-        let result = handle_set_network_protocols(SetNetworkProtocols {
+    async fn test_set_network_protocols_updates_http_and_rtsp_ports() {
+        let config = create_test_config();
+        let request = SetNetworkProtocols {
+            network_protocols: vec![
+                NetworkProtocol {
+                    name: NetworkProtocolType::HTTP,
+                    enabled: true,
+                    port: vec![8080],
+                },
+                NetworkProtocol {
+                    name: NetworkProtocolType::RTSP,
+                    enabled: true,
+                    port: vec![8554],
+                },
+            ],
+        };
+
+        handle_set_network_protocols(&config, request)
+            .await
+            .expect("must succeed");
+
+        assert_eq!(config.read().server.port, 8080);
+        assert_eq!(config.read().media.rtsp_port, 8554);
+    }
+
+    #[tokio::test]
+    async fn test_set_network_protocols_rejects_https() {
+        let config = create_test_config();
+        let request = SetNetworkProtocols {
+            network_protocols: vec![NetworkProtocol {
+                name: NetworkProtocolType::HTTPS,
+                enabled: true,
+                port: vec![443],
+            }],
+        };
+
+        assert!(
+            handle_set_network_protocols(&config, request)
+                .await
+                .is_err(),
+            "there is no TLS listener"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_set_network_protocols_rejects_port_zero() {
+        let config = create_test_config();
+        let request = SetNetworkProtocols {
             network_protocols: vec![NetworkProtocol {
                 name: NetworkProtocolType::HTTP,
                 enabled: true,
-                port: vec![8080],
+                port: vec![0],
             }],
-        })
-        .await;
-
-        assert!(result.is_err());
-        assert!(matches!(result, Err(OnvifError::ActionNotSupported(_))));
+        };
+        assert!(
+            handle_set_network_protocols(&config, request)
+                .await
+                .is_err()
+        );
     }
 }

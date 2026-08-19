@@ -34,6 +34,7 @@
 //! ```
 
 pub(crate) mod file_ops;
+pub mod netoverlay;
 mod persistence;
 pub mod profiles;
 mod runtime;

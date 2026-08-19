@@ -1,13 +1,13 @@
 /**
  * Network Page
  *
- * Configure network interfaces, DNS, and ports.
+ * Configure network interfaces, DNS, Wi-Fi, and ports.
  */
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Globe, Info, Network, RotateCcw, Save, Server, Wifi } from 'lucide-react';
+import { Globe, Info, Network, RotateCcw, Save, Server, Wifi, X } from 'lucide-react';
 import { Resolver, useForm, useWatch } from 'react-hook-form';
 import { toast } from 'sonner';
 import { z } from 'zod';
@@ -22,6 +22,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
   Form,
@@ -33,6 +34,13 @@ import {
   FormMessage,
 } from '@/components/ui/form';
 import { Input } from '@/components/ui/input';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import {
   SettingsCard,
   SettingsCardContent,
@@ -52,17 +60,21 @@ import { useDeviceStatus } from '@/hooks/useDeviceStatus';
 import {
   type NetworkConfig,
   getNetworkConfig,
+  getNetworkOverlay,
+  putNetworkOverlay,
   setDNS,
+  setNetworkDefaultGateway,
   setNetworkInterface,
+  setNetworkProtocols,
 } from '@/services/networkService';
 
-// Validation Schema
-// Simplified IPv4 regex to reduce complexity
-// Octet pattern: 0-255 (25[0-5] | 2[0-4][0-9] | 1[0-9][0-9] | [1-9][0-9] | [0-9])
 const octet = String.raw`(?:25[0-5]|2[0-4]\d|1\d{2}|[1-9]\d|\d)`;
 const ipRegex = new RegExp(String.raw`^${octet}\.${octet}\.${octet}\.${octet}$`);
 
 const networkSchema = z.object({
+  ssid: z.string().min(1, 'SSID is required').max(32, 'SSID must be 32 characters or fewer'),
+  password: z.string().max(63, 'WPA passphrases are at most 63 characters'),
+  security: z.enum(['wpa', 'wep', 'none']),
   dhcp: z.boolean(),
   address: z.string().regex(ipRegex, 'Invalid IP address').optional().or(z.literal('')),
   prefixLength: z.number().min(0).max(32).optional(),
@@ -70,31 +82,61 @@ const networkSchema = z.object({
   dnsFromDHCP: z.boolean(),
   primaryDNS: z.string().regex(ipRegex, 'Invalid IP address').optional().or(z.literal('')),
   secondaryDNS: z.string().regex(ipRegex, 'Invalid IP address').optional().or(z.literal('')),
-  // Stubs
-  onvifDiscovery: z.boolean().default(true),
-  hostname: z.string().optional(),
-  httpPort: z.number().default(80),
-  httpsPort: z.number().default(443),
-  rtspPort: z.number().default(554),
+  httpPort: z.number().int().min(1, 'Port must be 1-65535').max(65535, 'Port must be 1-65535'),
+  rtspPort: z.number().int().min(1, 'Port must be 1-65535').max(65535, 'Port must be 1-65535'),
 });
 
 type NetworkFormData = z.infer<typeof networkSchema>;
+
+function parseOverlayAddress(address?: string): { ip: string; prefix: number } | null {
+  if (!address) return null;
+  const [ip, prefix] = address.split('/');
+  if (!ip || !prefix) return null;
+  return { ip, prefix: Number(prefix) };
+}
+
+function overlayDiffersFromLive(
+  config: NetworkConfig | undefined,
+  overlay: Awaited<ReturnType<typeof getNetworkOverlay>> | undefined,
+): boolean {
+  if (!config || !overlay?.has_pending) return false;
+  const pending = overlay.pending;
+  const iface = config.interfaces[0];
+  if (!iface) return false;
+
+  if (pending.dhcp !== undefined && pending.dhcp !== iface.dhcp) return true;
+  const parsed = parseOverlayAddress(pending.address);
+  if (parsed && (parsed.ip !== iface.address || parsed.prefix !== iface.prefixLength)) {
+    return true;
+  }
+  if (pending.gateway && pending.gateway !== iface.gateway) return true;
+  if (pending.dns && pending.dns.join(',') !== config.dns.dnsServers.join(',')) return true;
+  if (pending.ssid) return true;
+  return false;
+}
 
 export default function NetworkPage() {
   const queryClient = useQueryClient();
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [pendingValues, setPendingValues] = useState<NetworkFormData | null>(null);
+  const [failureDismissed, setFailureDismissed] = useState(false);
 
-  // Fetch data
   const { data: config, isLoading } = useQuery<NetworkConfig>({
     queryKey: ['networkConfig'],
     queryFn: getNetworkConfig,
   });
 
-  // Form setup
+  const { data: overlay } = useQuery({
+    queryKey: ['networkOverlay'],
+    queryFn: getNetworkOverlay,
+  });
+
   const form = useForm<NetworkFormData>({
     resolver: zodResolver(networkSchema) as Resolver<NetworkFormData>,
     defaultValues: {
+      ssid: '',
+      password: '',
+      security: 'wpa',
       dhcp: true,
       address: '',
       prefixLength: 24,
@@ -102,56 +144,93 @@ export default function NetworkPage() {
       dnsFromDHCP: true,
       primaryDNS: '',
       secondaryDNS: '',
-      onvifDiscovery: true,
-      hostname: 'camera-device',
       httpPort: 80,
-      httpsPort: 443,
       rtspPort: 554,
     },
   });
 
-  // Watch for conditional rendering
   const dhcpEnabled = useWatch({ control: form.control, name: 'dhcp' });
   const dnsFromDHCP = useWatch({ control: form.control, name: 'dnsFromDHCP' });
-  const { healthStatus, primaryInterface, systemUptime, wifiQuality } = useDeviceStatus();
+  const httpPort = useWatch({ control: form.control, name: 'httpPort' });
+  const { healthStatus, primaryInterface, systemUptime, wifiQuality, diagnostics } =
+    useDeviceStatus();
 
-  // Load data into form
+  const ipPending = useMemo(() => overlayDiffersFromLive(config, overlay), [config, overlay]);
+
   useEffect(() => {
     if (config) {
-      const iface = config.interfaces[0]; // Assume single interface
+      const iface = config.interfaces[0];
+      const pending = overlay?.pending;
+      const parsed = parseOverlayAddress(pending?.address);
       form.reset({
-        dhcp: iface?.dhcp ?? true,
-        address: iface?.address || '',
-        prefixLength: iface?.prefixLength || 24,
-        gateway: iface?.gateway || '',
+        ssid: pending?.ssid ?? diagnostics?.wifi?.ssid ?? 'camera',
+        password: '',
+        security: (pending?.security as NetworkFormData['security']) ?? 'wpa',
+        dhcp: pending?.dhcp ?? iface?.dhcp ?? true,
+        address: parsed?.ip ?? iface?.address ?? '',
+        prefixLength: parsed?.prefix ?? iface?.prefixLength ?? 24,
+        gateway: pending?.gateway ?? iface?.gateway ?? '',
         dnsFromDHCP: config.dns.fromDHCP,
-        primaryDNS: config.dns.dnsServers[0] || '',
-        secondaryDNS: config.dns.dnsServers[1] || '',
-        // Keep stubs
-        onvifDiscovery: true,
-        hostname: iface?.name || 'camera-device',
-        httpPort: 80,
-        httpsPort: 443,
-        rtspPort: 554,
+        primaryDNS: pending?.dns?.[0] ?? config.dns.dnsServers[0] ?? '',
+        secondaryDNS: pending?.dns?.[1] ?? config.dns.dnsServers[1] ?? '',
+        httpPort: config.protocols.http,
+        rtspPort: config.protocols.rtsp,
       });
     }
-  }, [config, form]);
+  }, [config, overlay, diagnostics?.wifi?.ssid, form]);
 
   const mutation = useMutation({
     mutationFn: async (values: NetworkFormData) => {
       const iface = config?.interfaces[0];
       if (!iface) throw new Error('No interface found');
 
-      await setNetworkInterface(iface.token, values.dhcp, values.address, values.prefixLength);
+      const wifiPatch: Parameters<typeof putNetworkOverlay>[0] = {
+        ssid: values.ssid,
+        security: values.security,
+      };
+      if (values.password) {
+        wifiPatch.password = values.password;
+      }
+      await putNetworkOverlay(wifiPatch);
 
-      const dnsServers = [values.primaryDNS, values.secondaryDNS].filter(Boolean) as string[];
-      await setDNS(values.dnsFromDHCP, dnsServers);
+      try {
+        await setNetworkInterface(iface.token, values.dhcp, values.address, values.prefixLength);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'unknown error';
+        throw new Error(`IP configuration failed: ${message}`, { cause: error });
+      }
+
+      if (!values.dhcp && values.gateway) {
+        try {
+          await setNetworkDefaultGateway(values.gateway);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : 'unknown error';
+          throw new Error(`Gateway failed: ${message}`, { cause: error });
+        }
+      }
+
+      try {
+        const dnsServers = [values.primaryDNS, values.secondaryDNS].filter(Boolean) as string[];
+        await setDNS(values.dnsFromDHCP, dnsServers);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'unknown error';
+        throw new Error(`DNS failed: ${message}`, { cause: error });
+      }
+
+      try {
+        await setNetworkProtocols(values.httpPort, values.rtspPort);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'unknown error';
+        throw new Error(`Port configuration failed: ${message}`, { cause: error });
+      }
     },
     onSuccess: () => {
       toast.success('Network settings saved', {
-        description: 'The device may lose connectivity if IP settings changed.',
+        description:
+          'Changes are saved and will apply after the next reboot. The device may be unreachable until then if IP or ports changed.',
       });
       queryClient.invalidateQueries({ queryKey: ['networkConfig'] });
+      queryClient.invalidateQueries({ queryKey: ['networkOverlay'] });
       setConfirmOpen(false);
     },
     onError: (error) => {
@@ -175,28 +254,35 @@ export default function NetworkPage() {
 
   const handleReset = () => {
     if (config) {
-      // Re-trigger the useEffect to reset
-      // A quick hack is to just re-fetch or clone the data,
-      // but form.reset inside useEffect handles it if we depend on config.
-      // Actually, we can just call form.reset with current config derived values
       const iface = config.interfaces[0];
+      const pending = overlay?.pending;
+      const parsed = parseOverlayAddress(pending?.address);
       form.reset({
-        dhcp: iface?.dhcp ?? true,
-        address: iface?.address || '',
-        prefixLength: iface?.prefixLength || 24,
-        gateway: iface?.gateway || '',
+        ssid: pending?.ssid ?? diagnostics?.wifi?.ssid ?? 'camera',
+        password: '',
+        security: (pending?.security as NetworkFormData['security']) ?? 'wpa',
+        dhcp: pending?.dhcp ?? iface?.dhcp ?? true,
+        address: parsed?.ip ?? iface?.address ?? '',
+        prefixLength: parsed?.prefix ?? iface?.prefixLength ?? 24,
+        gateway: pending?.gateway ?? iface?.gateway ?? '',
         dnsFromDHCP: config.dns.fromDHCP,
-        primaryDNS: config.dns.dnsServers[0] || '',
-        secondaryDNS: config.dns.dnsServers[1] || '',
-        onvifDiscovery: true,
-        hostname: iface?.name || 'camera-device',
-        httpPort: 80,
-        httpsPort: 443,
-        rtspPort: 554,
+        primaryDNS: pending?.dns?.[0] ?? config.dns.dnsServers[0] ?? '',
+        secondaryDNS: pending?.dns?.[1] ?? config.dns.dnsServers[1] ?? '',
+        httpPort: config.protocols.http,
+        rtspPort: config.protocols.rtsp,
       });
       toast.info('Form reset to current values');
     }
   };
+
+  const confirmDescription = useMemo(() => {
+    const base =
+      'Applying these changes might disconnect the device from the network. Settings take effect after reboot.';
+    if (pendingValues && pendingValues.httpPort !== config?.protocols.http) {
+      return `${base} After reboot, open the WebUI at http://${globalThis.location.hostname}:${pendingValues.httpPort}/`;
+    }
+    return base;
+  }, [pendingValues, config?.protocols.http]);
 
   if (isLoading)
     return (
@@ -211,7 +297,6 @@ export default function NetworkPage() {
       data-name="Container"
     >
       <div className="max-w-[1200px] p-[16px] pb-[80px] md:p-[32px] md:pb-[48px] lg:p-[48px]">
-        {/* Header */}
         <div className="mb-[32px] md:mb-[40px]">
           <h1
             className="mb-[8px] text-[22px] text-white md:text-[28px]"
@@ -220,11 +305,44 @@ export default function NetworkPage() {
             Network
           </h1>
           <p className="text-[13px] text-[#a1a1a6] md:text-[14px]">
-            Configure IP address, DNS, and service ports
+            Configure IP address, DNS, Wi-Fi, and service ports
+          </p>
+          <p className="mt-[8px] text-[13px] text-[#a1a1a6]">
+            Hostname and ONVIF discovery are configured under{' '}
+            <a
+              href="#/settings/identification"
+              className="text-[#0a84ff] underline"
+              data-testid="network-identification-link"
+            >
+              Settings › Identification
+            </a>
+            .
           </p>
         </div>
 
-        {/* Connection Status Card */}
+        {overlay?.last_failure && !failureDismissed && (
+          <div
+            className="mb-[24px] flex items-start justify-between gap-[12px] rounded-[8px] border border-[rgba(255,69,58,0.3)] bg-[rgba(255,69,58,0.08)] p-[16px]"
+            data-testid="network-failure-banner"
+          >
+            <p className="text-[13px] text-[#ff453a]">
+              Previous network settings failed and were reverted
+              {overlay.last_failure.ssid ? ` (SSID: ${overlay.last_failure.ssid})` : ''}. Review
+              the values below before saving again.
+            </p>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="shrink-0 text-[#ff453a]"
+              onClick={() => setFailureDismissed(true)}
+              data-testid="network-failure-dismiss"
+            >
+              <X className="size-4" />
+            </Button>
+          </div>
+        )}
+
         <StatusCard>
           <StatusCardImage>
             <Network className="size-8 opacity-50" />
@@ -235,11 +353,7 @@ export default function NetworkPage() {
               value={primaryInterface?.hwAddress || '—'}
               data-testid="network-mac-address"
             />
-            <StatusCardItem
-              label="Link Quality"
-              value={wifiQuality}
-              data-testid="network-quality"
-            />
+            <StatusCardItem label="Link Quality" value={wifiQuality} data-testid="network-quality" />
             <StatusCardItem
               label="Status"
               value={
@@ -257,42 +371,109 @@ export default function NetworkPage() {
 
         <Form {...form}>
           <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-[24px]">
-            {/* Network Configuration */}
             <SettingsCard>
               <SettingsCardHeader>
                 <div className="flex items-center gap-[12px]">
-                  <div className="flex size-[40px] items-center justify-center rounded-[10px] bg-[rgba(10,132,255,0.1)]">
-                    <Globe className="size-5 text-[#0a84ff]" />
+                  <div className="flex size-[40px] items-center justify-center rounded-[10px] bg-[rgba(255,159,10,0.1)]">
+                    <Wifi className="size-5 text-[#ff9f0a]" />
                   </div>
                   <div>
-                    <SettingsCardTitle>Network Configuration</SettingsCardTitle>
+                    <SettingsCardTitle>Wi-Fi Network</SettingsCardTitle>
                     <SettingsCardDescription>
-                      IP address and hostname settings
+                      Credentials applied at the next reboot
                     </SettingsCardDescription>
                   </div>
                 </div>
               </SettingsCardHeader>
               <SettingsCardContent className="space-y-[24px]">
-                {/* Hostname (Stub) */}
                 <FormField
                   control={form.control}
-                  name="hostname"
+                  name="ssid"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel className="text-[#a1a1a6]">Hostname</FormLabel>
+                      <FormLabel className="text-[#a1a1a6]">SSID</FormLabel>
                       <FormControl>
                         <Input
                           {...field}
                           className="border-[#3a3a3c] bg-transparent text-white focus:border-[#0a84ff]"
-                          data-testid="network-hostname-input"
+                          data-testid="network-ssid-input"
                         />
                       </FormControl>
                       <FormMessage />
                     </FormItem>
                   )}
                 />
+                <FormField
+                  control={form.control}
+                  name="password"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel className="text-[#a1a1a6]">Password</FormLabel>
+                      <FormControl>
+                        <Input
+                          {...field}
+                          type="password"
+                          placeholder={overlay?.pending.has_password ? 'Saved (leave blank to keep)' : ''}
+                          className="border-[#3a3a3c] bg-transparent text-white focus:border-[#0a84ff]"
+                          data-testid="network-password-input"
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="security"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel className="text-[#a1a1a6]">Security</FormLabel>
+                      <Select onValueChange={field.onChange} value={field.value}>
+                        <FormControl>
+                          <SelectTrigger
+                            className="border-[#3a3a3c] bg-transparent text-white"
+                            data-testid="network-security-select"
+                          >
+                            <SelectValue placeholder="Select security" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          <SelectItem value="wpa">WPA/WPA2</SelectItem>
+                          <SelectItem value="wep">WEP</SelectItem>
+                          <SelectItem value="none">Open</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </SettingsCardContent>
+            </SettingsCard>
 
-                {/* DHCP Toggle */}
+            <SettingsCard>
+              <SettingsCardHeader>
+                <div className="flex items-center gap-[12px]">
+                  <div className="flex size-[40px] items-center justify-center rounded-[10px] bg-[rgba(10,132,255,0.1)]">
+                    <Globe className="size-5 text-[#0a84ff]" />
+                  </div>
+                  <div className="flex flex-1 items-center justify-between gap-[12px]">
+                    <div>
+                      <SettingsCardTitle>IP Configuration</SettingsCardTitle>
+                      <SettingsCardDescription>Addressing applied at next reboot</SettingsCardDescription>
+                    </div>
+                    {ipPending && (
+                      <Badge
+                        variant="outline"
+                        className="border-[#ff9f0a] text-[#ff9f0a]"
+                        data-testid="network-ip-pending-badge"
+                      >
+                        Pending reboot
+                      </Badge>
+                    )}
+                  </div>
+                </div>
+              </SettingsCardHeader>
+              <SettingsCardContent className="space-y-[24px]">
                 <FormField
                   control={form.control}
                   name="dhcp"
@@ -309,31 +490,6 @@ export default function NetworkPage() {
                           checked={field.value}
                           onCheckedChange={field.onChange}
                           data-testid="network-dhcp-switch"
-                        />
-                      </FormControl>
-                    </FormItem>
-                  )}
-                />
-
-                {/* ONVIF Discovery (Stub) */}
-                <FormField
-                  control={form.control}
-                  name="onvifDiscovery"
-                  render={({ field }) => (
-                    <FormItem className="flex flex-row items-center justify-between rounded-lg border border-[#3a3a3c] bg-[#2c2c2e] p-4">
-                      <div>
-                        <FormLabel className="text-base leading-none text-white">
-                          ONVIF Discovery
-                        </FormLabel>
-                        <FormDescription className="text-[#a1a1a6]">
-                          Make this device visible to ONVIF clients
-                        </FormDescription>
-                      </div>
-                      <FormControl>
-                        <Switch
-                          checked={field.value}
-                          onCheckedChange={field.onChange}
-                          data-testid="network-onvif-discovery-switch"
                         />
                       </FormControl>
                     </FormItem>
@@ -400,7 +556,6 @@ export default function NetworkPage() {
               </SettingsCardContent>
             </SettingsCard>
 
-            {/* DNS Configuration */}
             <SettingsCard>
               <SettingsCardHeader>
                 <div className="flex items-center gap-[12px]">
@@ -473,7 +628,6 @@ export default function NetworkPage() {
               </SettingsCardContent>
             </SettingsCard>
 
-            {/* Port Configuration (Stub) */}
             <SettingsCard>
               <SettingsCardHeader>
                 <div className="flex items-center gap-[12px]">
@@ -482,12 +636,12 @@ export default function NetworkPage() {
                   </div>
                   <div>
                     <SettingsCardTitle>Port Configuration</SettingsCardTitle>
-                    <SettingsCardDescription>Service ports (HTTP/RTSP)</SettingsCardDescription>
+                    <SettingsCardDescription>HTTP and RTSP ports (reboot required)</SettingsCardDescription>
                   </div>
                 </div>
               </SettingsCardHeader>
               <SettingsCardContent className="space-y-[24px]">
-                <div className="grid grid-cols-1 gap-[24px] md:grid-cols-3">
+                <div className="grid grid-cols-1 gap-[24px] md:grid-cols-2">
                   <FormField
                     control={form.control}
                     name="httpPort"
@@ -501,25 +655,6 @@ export default function NetworkPage() {
                             onChange={(e) => field.onChange(Number.parseInt(e.target.value))}
                             className="border-[#3a3a3c] bg-transparent text-white"
                             data-testid="network-http-port-input"
-                          />
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-                  <FormField
-                    control={form.control}
-                    name="httpsPort"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel className="text-[#a1a1a6]">HTTPS Port</FormLabel>
-                        <FormControl>
-                          <Input
-                            type="number"
-                            {...field}
-                            onChange={(e) => field.onChange(Number.parseInt(e.target.value))}
-                            className="border-[#3a3a3c] bg-transparent text-white"
-                            data-testid="network-https-port-input"
                           />
                         </FormControl>
                         <FormMessage />
@@ -549,7 +684,6 @@ export default function NetworkPage() {
               </SettingsCardContent>
             </SettingsCard>
 
-            {/* Action Buttons */}
             <div className="flex items-center gap-[16px]">
               <Button
                 type="submit"
@@ -572,24 +706,22 @@ export default function NetworkPage() {
               </Button>
             </div>
 
-            {/* Help Text */}
             <div className="mt-[24px] flex gap-[12px] rounded-[8px] border border-[rgba(0,122,255,0.2)] bg-[rgba(0,122,255,0.05)] p-[16px]">
               <Info className="mt-[2px] size-5 flex-shrink-0 text-[#007AFF]" />
               <div>
-                <p className="mb-[4px] text-[14px] font-medium text-[#007AFF]">
-                  Network Information
-                </p>
+                <p className="mb-[4px] text-[14px] font-medium text-[#007AFF]">Network Information</p>
                 <p className="text-[13px] text-[#a1a1a6]">
-                  Changing IP settings may cause the device to become unreachable. Ensure you are on
-                  the same subnet if you set a static IP address. Port changes will require a device
-                  reboot.
+                  IP, DNS, gateway, and Wi-Fi changes are written to a pending overlay and apply
+                  after reboot. Port changes also require a restart of the ONVIF service.
+                  {httpPort !== config?.protocols.http
+                    ? ` After reboot use port ${httpPort} for the WebUI.`
+                    : ''}
                 </p>
               </div>
             </div>
           </form>
         </Form>
 
-        {/* Confirmation Modal */}
         <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
           <AlertDialogContent
             className="border-[#3a3a3c] bg-[#1c1c1e] text-white"
@@ -600,8 +732,7 @@ export default function NetworkPage() {
                 Save Network Settings?
               </AlertDialogTitle>
               <AlertDialogDescription className="text-[#a1a1a6]">
-                Applying these changes might disconnect the device from the network. You may need to
-                reconnect using the new IP address.
+                {confirmDescription}
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>

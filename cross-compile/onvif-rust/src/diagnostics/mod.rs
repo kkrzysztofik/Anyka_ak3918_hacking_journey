@@ -5,6 +5,7 @@
 
 pub mod http;
 pub mod logs;
+pub mod network;
 pub mod proc;
 pub mod state;
 pub mod storage;

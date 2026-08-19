@@ -1,6 +1,6 @@
 //! anyka-init entry point: phase sequencing for the boot/runtime supervisor.
 
-use anyka_init::{boot, config, logging, monitor, storm, supervisor_loop, sys, timesync};
+use anyka_init::{boot, config, logging, monitor, netoverlay, storm, supervisor_loop, sys, timesync};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -61,7 +61,24 @@ fn main() {
     // P2
     boot::protect_from_oom_killer(std::path::Path::new("/proc/self/oom_score_adj"));
     boot::write_panic_sysctls(std::path::Path::new("/proc/sys"));
-    let probed = boot::system_setup(sysimpl.as_ref(), &cfg);
+    let baseline_cfg = match config::Config::load_with_overlay(
+        "/mnt/anyka_hack/anyka.toml",
+        std::path::Path::new("/mnt/anyka_hack/network.toml.__no_overlay__"),
+    ) {
+        Ok(c) => c,
+        Err(e) => {
+            logging::console(&format!("baseline config load failed: {e}"));
+            park();
+        }
+    };
+
+    let overlay_path = std::path::Path::new(netoverlay::NetworkOverlay::DEFAULT_PATH);
+    let probed = boot::system_setup(
+        sysimpl.as_ref(),
+        &cfg,
+        &baseline_cfg.wifi,
+        overlay_path,
+    );
 
     // P2.5
     timesync::first_sync(sysimpl.as_ref(), &cfg.time);

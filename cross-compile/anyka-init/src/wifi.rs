@@ -453,6 +453,57 @@ pub fn bring_up_with(
     }
 }
 
+/// [`bring_up_with`], plus rung 2 of the rescue ladder.
+///
+/// `gateway_reachable` already rescues a bad static address. It cannot rescue
+/// bad credentials: with no association there is no gateway to probe. So when
+/// bring-up fails outright *and* an overlay is what produced `cfg`, quarantine
+/// the overlay and retry once with the operator's baseline before falling
+/// through to the vendor chain.
+pub fn bring_up_with_overlay(
+    sys: &dyn Sys,
+    cfg: &WifiCfg,
+    baseline: &WifiCfg,
+    storm_state_path: &str,
+    layout: &FsLayout,
+    overlay_path: &std::path::Path,
+) -> Outcome {
+    match try_bring_up_with(sys, cfg, layout) {
+        Ok(outcome) => {
+            if matches!(outcome, Outcome::Up { .. }) {
+                let mut storm = crate::storm::StormState::load(storm_state_path);
+                storm.wifi_reboots = 0;
+                if let Err(e) = storm.save(storm_state_path) {
+                    tracing::warn!(error = %e, "failed to clear wifi reboot counter");
+                }
+            }
+            outcome
+        }
+        Err(e) => {
+            tracing::error!(error = %e, "wifi bring-up failed");
+
+            if overlay_path.exists() {
+                crate::netoverlay::NetworkOverlay::quarantine(overlay_path);
+
+                match try_bring_up_with(sys, baseline, layout) {
+                    Ok(outcome) => {
+                        tracing::warn!("recovered on the baseline config");
+                        return outcome;
+                    }
+                    Err(e) => tracing::error!(error = %e, "baseline retry also failed"),
+                }
+            }
+
+            if cfg.fallback_to_vendor {
+                fall_back(sys, layout)
+            } else {
+                tracing::error!("fallback_to_vendor is disabled; the camera may be unreachable");
+                Outcome::Failed
+            }
+        }
+    }
+}
+
 /// R7. Regenerates the vendor-shaped conf before delegating, because the
 /// RTL8188 path `sed`s into line numbers 3 and 4 (R10).
 fn fall_back(sys: &dyn Sys, layout: &FsLayout) -> Outcome {
@@ -1223,6 +1274,64 @@ Local:
         assert_eq!(
             storm.fast_reboots, 1,
             "bring-up must not touch the unrelated crash-loop counter"
+        );
+    }
+
+    #[test]
+    fn test_a_failing_overlay_is_quarantined_and_the_baseline_is_retried() {
+        // Arrange: same tempdir layout as the happy-path test, but no carrier,
+        // so association fails and bring-up returns Err.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let layout = test_layout(dir.path());
+        std::fs::create_dir_all(format!("{}/wlan0", layout.sys_class_net))
+            .expect("iface dir");
+        std::fs::write(&layout.proc_route, HAPPY_ROUTE).expect("route");
+        std::fs::write(&layout.proc_fib_trie, HAPPY_FIB_TRIE).expect("fib_trie");
+
+        let mut overlay_cfg = happy_cfg();
+        overlay_cfg.ssid = "TypoNet".into();
+        overlay_cfg.password = "password1".into();
+        overlay_cfg.connect_timeout_sec = 0;
+        overlay_cfg.fallback_to_vendor = false;
+
+        let mut baseline_cfg = happy_cfg();
+        baseline_cfg.ssid = "OperatorNet".into();
+        baseline_cfg.password = "password1".into();
+        baseline_cfg.connect_timeout_sec = 0;
+
+        let storm_path = dir.path().join("storm.json");
+
+        let overlay_path = dir.path().join("network.toml");
+        std::fs::write(&overlay_path, "ssid = \"TypoNet\"\n").expect("write");
+
+        let sys = happy_mock_sys();
+
+        // Act
+        let outcome = bring_up_with_overlay(
+            &sys,
+            &overlay_cfg,
+            &baseline_cfg,
+            storm_path.to_str().expect("utf8"),
+            &layout,
+            &overlay_path,
+        );
+
+        // Assert: quarantine + a visible baseline retry
+        assert_eq!(outcome, Outcome::Failed);
+        assert!(!overlay_path.exists(), "the failing overlay must be quarantined");
+
+        let bad = dir.path().join("network.toml.bad");
+        assert!(bad.exists(), "the quarantined overlay must be readable by the UI");
+        assert_eq!(
+            std::fs::read_to_string(&bad).expect("read"),
+            "ssid = \"TypoNet\"\n",
+            "quarantine must preserve the content so the UI can show what failed"
+        );
+
+        let wpa = std::fs::read_to_string(&layout.wpa_conf).expect("wpa conf written");
+        assert!(
+            wpa.contains("ssid=\"OperatorNet\""),
+            "baseline retry must rewrite wpa_supplicant.conf"
         );
     }
 }

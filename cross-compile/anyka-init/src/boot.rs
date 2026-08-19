@@ -125,7 +125,12 @@ pub fn protect_from_oom_killer(path: &std::path::Path) {
 ///
 /// Returns the probed `wpa_supplicant -D` flag on a successful wifi bring-up
 /// so P3 can start the supervised instance with the same driver (F2/F3).
-pub fn system_setup(sys: &dyn Sys, cfg: &Config) -> Option<&'static str> {
+pub fn system_setup(
+    sys: &dyn Sys,
+    cfg: &Config,
+    baseline_wifi: &WifiCfg,
+    overlay_path: &std::path::Path,
+) -> Option<&'static str> {
     // Affects this process only. `gergehack.sh:358` exported TZ for children to
     // inherit; `Sys::spawn` calls `env_clear()`, so a service sees TZ only if
     // its own `[services.X].env` declares it. Kept because it costs nothing and
@@ -156,7 +161,14 @@ pub fn system_setup(sys: &dyn Sys, cfg: &Config) -> Option<&'static str> {
         Err(e) => tracing::error!(error = %e, "wifi config update failed"),
     }
 
-    let probed = match crate::wifi::bring_up(sys, &cfg.wifi, &cfg.supervisor.storm_guard_state) {
+    let probed = match crate::wifi::bring_up_with_overlay(
+        sys,
+        &cfg.wifi,
+        baseline_wifi,
+        &cfg.supervisor.storm_guard_state,
+        &crate::wifi::FsLayout::production(),
+        overlay_path,
+    ) {
         crate::wifi::Outcome::Up {
             chip,
             ref ssid,
@@ -411,7 +423,9 @@ channel = 6
         };
         let cfg = test_config(wifi, system);
 
-        let probed = system_setup(&sys, &cfg);
+        let dir = tempfile::tempdir().expect("tempdir");
+        let overlay_path = dir.path().join("network.toml");
+        let probed = system_setup(&sys, &cfg, &cfg.wifi, &overlay_path);
         assert_eq!(
             probed, None,
             "unknown chip with fallback disabled must fail"
@@ -439,7 +453,9 @@ channel = 6
         };
         let cfg = test_config(wifi, system);
 
-        let probed = system_setup(&sys, &cfg);
+        let dir = tempfile::tempdir().expect("tempdir");
+        let overlay_path = dir.path().join("network.toml");
+        let probed = system_setup(&sys, &cfg, &cfg.wifi, &overlay_path);
         assert_eq!(
             probed, None,
             "unknown chip with fallback disabled must fail"
