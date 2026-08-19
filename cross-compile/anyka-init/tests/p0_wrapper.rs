@@ -127,8 +127,9 @@ fn run(
     // sleep elapsed), then wait until the outcome stops changing — the
     // restore + reboot run right after the last call, and a loaded host must
     // not observe the subshell mid-restore.
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
     let mut last = None;
+    let mut stable_count = 0usize;
     let observed = loop {
         let state = (
             fs::read_to_string(&counter)
@@ -141,8 +142,18 @@ fn run(
                 .unwrap_or(false),
             reboot_marker.exists(),
         );
-        if state.0 >= expected_ifconfig_calls && Some(state) == last {
-            break state.0;
+        if state.0 >= expected_ifconfig_calls {
+            if Some(state) == last {
+                stable_count += 1;
+                // Two consecutive identical readings (≥40 ms apart) mean the
+                // restore + reboot stubs have had time to complete on even the
+                // most loaded CI runner.
+                if stable_count >= 2 {
+                    break state.0;
+                }
+            } else {
+                stable_count = 0;
+            }
         }
         last = Some(state);
         if std::time::Instant::now() >= deadline {
