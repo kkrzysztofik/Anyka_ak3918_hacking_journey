@@ -86,6 +86,81 @@ describe('identificationSchema', () => {
     });
   });
 
+  describe('scopes', () => {
+    const base = {
+      deviceInfo: defaultDeviceInfo,
+      name: 'Camera',
+      location: 'Hall',
+    };
+
+    it('should accept a valid ONVIF scope', () => {
+      const result = validate({
+        ...base,
+        scopes: [
+          {
+            scopeDef: 'Configurable',
+            scopeItem: 'onvif://www.onvif.org/name/Cam',
+          },
+        ],
+      });
+      expect(result.success).toBe(true);
+    });
+
+    it('should reject an empty scope', () => {
+      const result = validate({
+        ...base,
+        scopes: [{ scopeDef: 'Configurable', scopeItem: '' }],
+      });
+      expect(result.success).toBe(false);
+    });
+
+    it('should reject a scope that is too long', () => {
+      const result = validate({
+        ...base,
+        scopes: [
+          {
+            scopeDef: 'Configurable',
+            scopeItem: `onvif://www.onvif.org/${'x'.repeat(256)}`,
+          },
+        ],
+      });
+      expect(result.success).toBe(false);
+    });
+
+    it('should reject a scope with the wrong prefix', () => {
+      const result = validate({
+        ...base,
+        scopes: [{ scopeDef: 'Configurable', scopeItem: 'http://example.com/scope' }],
+      });
+      expect(result.success).toBe(false);
+    });
+
+    it('should reject a scope that contains spaces', () => {
+      const result = validate({
+        ...base,
+        scopes: [
+          {
+            scopeDef: 'Configurable',
+            scopeItem: 'onvif://www.onvif.org/name/Front Door',
+          },
+        ],
+      });
+      expect(result.success).toBe(false);
+    });
+
+    it.each([
+      ['U+00A0', 'onvif://www.onvif.org/name/Cam\u00A0era'],
+      ['U+007F', 'onvif://www.onvif.org/name/Cam\u007Fera'],
+      ['U+0085', 'onvif://www.onvif.org/name/Cam\u0085era'],
+    ])('should reject a scope containing %s', (_label, scopeItem) => {
+      const result = validate({
+        ...base,
+        scopes: [{ scopeDef: 'Configurable', scopeItem }],
+      });
+      expect(result.success).toBe(false);
+    });
+  });
+
   describe('invalid identification data', () => {
     const invalidCases = [
       {
@@ -107,6 +182,11 @@ describe('identificationSchema', () => {
         data: { deviceInfo: defaultDeviceInfo, name: 'Camera', location: 'A'.repeat(129) },
         error: 'too long',
         description: 'location too long',
+      },
+      {
+        data: { deviceInfo: defaultDeviceInfo, name: 'Camera', location: 'Hall', hostname: '' },
+        error: 'required',
+        description: 'empty hostname',
       },
     ];
 

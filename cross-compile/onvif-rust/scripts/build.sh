@@ -74,6 +74,15 @@ cd "${PROJECT_DIR}"
 log_info "Setting up cargo configuration..."
 "${SCRIPT_DIR}/setup-cargo-config.sh"
 
+# Materialise gitignored *-full/ crate patches (tower-http AtomicU64, etc.).
+# setup.sh refreshes a crate when its patch stamp is stale; --clean forces that.
+log_info "Applying ARMv5TEJ crate patches..."
+if [[ "${CLEAN}" = true ]]; then
+  "${WORKSPACE_DIR}/patches/setup.sh" --clean
+else
+  "${WORKSPACE_DIR}/patches/setup.sh"
+fi
+
 log_info "Building ONVIF Rust application"
 log_info "Project directory: ${PROJECT_DIR}"
 log_info "Target: ${TARGET}"

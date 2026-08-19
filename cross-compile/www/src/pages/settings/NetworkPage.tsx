@@ -47,6 +47,8 @@ import {
   StatusCardItem,
 } from '@/components/ui/status-card';
 import { Switch } from '@/components/ui/switch';
+import { HealthStatusValue } from '@/components/settings/HealthStatusValue';
+import { useDeviceStatus } from '@/hooks/useDeviceStatus';
 import {
   type NetworkConfig,
   getNetworkConfig,
@@ -111,6 +113,7 @@ export default function NetworkPage() {
   // Watch for conditional rendering
   const dhcpEnabled = useWatch({ control: form.control, name: 'dhcp' });
   const dnsFromDHCP = useWatch({ control: form.control, name: 'dnsFromDHCP' });
+  const { healthStatus, primaryInterface, systemUptime, wifiQuality } = useDeviceStatus();
 
   // Load data into form
   useEffect(() => {
@@ -202,8 +205,6 @@ export default function NetworkPage() {
       </div>
     );
 
-  const primaryInterface = config?.interfaces[0];
-
   return (
     <div
       className="absolute inset-0 overflow-auto bg-[#0d0d0d] lg:inset-[0_0_0_356.84px]"
@@ -231,21 +232,26 @@ export default function NetworkPage() {
           <StatusCardContent>
             <StatusCardItem
               label="MAC Address"
-              value={primaryInterface?.hwAddress || '--'}
+              value={primaryInterface?.hwAddress || '—'}
               data-testid="network-mac-address"
             />
-            <StatusCardItem label="Speed" value="100 Mbps" data-testid="network-speed" />
+            <StatusCardItem
+              label="Link Quality"
+              value={wifiQuality}
+              data-testid="network-quality"
+            />
             <StatusCardItem
               label="Status"
               value={
-                <div className="flex items-center gap-2">
-                  <div className="size-2 rounded-full bg-green-500" />
-                  <span>Connected</span>
-                </div>
+                <HealthStatusValue
+                  label={healthStatus.label}
+                  tone={healthStatus.tone}
+                  detail={healthStatus.detail}
+                  testId="network-status"
+                />
               }
-              data-testid="network-status"
             />
-            <StatusCardItem label="Uptime" value="--" data-testid="network-uptime" />
+            <StatusCardItem label="Uptime" value={systemUptime} data-testid="network-uptime" />
           </StatusCardContent>
         </StatusCard>
 

@@ -9,3 +9,4 @@ pub mod proc;
 pub mod state;
 pub mod storage;
 pub mod update;
+pub mod wifi;

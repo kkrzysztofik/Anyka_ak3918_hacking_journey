@@ -120,6 +120,7 @@ export const MOCK_DATA = {
         prefixLength: 24,
         gateway: '192.168.1.1', // NOSONAR - Test data: Hardcoded gateway IP for testing
         hwAddress: '00:11:22:33:44:55',
+        linkSpeedMbps: 100,
       },
     ],
     dns: {

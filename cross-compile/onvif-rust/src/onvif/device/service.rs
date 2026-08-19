@@ -3,10 +3,11 @@
 //! This module contains the DeviceService struct and the ServiceHandler trait implementation.
 //! Uses common::dispatch helpers to reduce boilerplate in the handle_operation match block.
 
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
-use crate::config::{ConfigRuntime, UserStorage};
+use crate::config::{ConfigRuntime, PersistenceHandle, UserStorage};
 use crate::onvif::common::{dispatch_async, dispatch_sync};
+use crate::onvif::discovery::WsDiscoveryHandle;
 use crate::onvif::dispatcher::ServiceHandler;
 use crate::onvif::error::{OnvifError, OnvifResult};
 use crate::onvif::types::device::{
@@ -32,8 +33,6 @@ pub(crate) use super::ops::{
     discovery as discovery_ops, network as network_ops, system as system_ops, users as users_ops,
 };
 
-// Re-export new modules
-pub(crate) use super::state::{DeviceState, DeviceStateRef};
 pub(crate) use super::store::{DeviceStore, DeviceStoreRef};
 
 /// ONVIF Device Service.
@@ -47,23 +46,48 @@ pub(crate) use super::store::{DeviceStore, DeviceStoreRef};
 pub struct DeviceService {
     /// Persistent state (config, users).
     pub(crate) store: DeviceStoreRef,
-    /// Runtime state (scopes, discovery mode).
-    pub(crate) state: DeviceStateRef,
     /// Platform abstraction (optional for backward compatibility).
     pub(crate) platform: Option<Arc<dyn Platform>>,
+    /// WS-Discovery handle, late-bound after the discovery phase starts.
+    discovery_handle: Arc<OnceLock<WsDiscoveryHandle>>,
 }
 
 impl DeviceService {
     /// Create a new Device Service.
     pub fn new(users: Arc<UserStorage>) -> Self {
         let store = Arc::new(DeviceStore::new(users));
-        let state = Arc::new(DeviceState::new());
 
         Self {
             store,
-            state,
             platform: None,
+            discovery_handle: Arc::new(OnceLock::new()),
         }
+    }
+
+    /// Create a Device Service with loaded runtime configuration and no platform.
+    pub fn with_config(users: Arc<UserStorage>, config: Arc<ConfigRuntime>) -> Self {
+        let store = Arc::new(DeviceStore::with_config(users, config));
+
+        Self {
+            store,
+            platform: None,
+            discovery_handle: Arc::new(OnceLock::new()),
+        }
+    }
+
+    /// Bind a late-populated WS-Discovery handle slot.
+    pub fn with_discovery_handle(
+        mut self,
+        discovery_handle: Arc<OnceLock<WsDiscoveryHandle>>,
+    ) -> Self {
+        self.discovery_handle = discovery_handle;
+        self
+    }
+
+    /// Attach debounced config.toml persistence for identification mutations.
+    pub fn with_config_persistence(self, handle: PersistenceHandle) -> Self {
+        self.store.set_persistence(handle);
+        self
     }
 
     /// Create a new Device Service with configuration and platform.
@@ -72,14 +96,12 @@ impl DeviceService {
         config: Arc<ConfigRuntime>,
         platform: Arc<dyn Platform>,
     ) -> Self {
-        let ptz_enabled = config.read().ptz.enabled;
         let store = Arc::new(DeviceStore::with_config(users, config));
-        let state = Arc::new(DeviceState::with_ptz(ptz_enabled));
 
         Self {
             store,
-            state,
             platform: Some(platform),
+            discovery_handle: Arc::new(OnceLock::new()),
         }
     }
 
@@ -151,7 +173,9 @@ impl DeviceService {
         &self,
         request: SetHostname,
     ) -> Result<SetHostnameResponse, OnvifError> {
-        network_ops::handle_set_hostname(&self.store.config, request)
+        let response = network_ops::handle_set_hostname(&self.store.config, request)?;
+        self.store.request_save();
+        Ok(response)
     }
 
     /// Handle GetScopes request.
@@ -159,7 +183,11 @@ impl DeviceService {
         &self,
         request: GetScopes,
     ) -> Result<GetScopesResponse, OnvifError> {
-        let scopes = self.state.get_scopes().await;
+        let (ptz_enabled, configured) = {
+            let c = self.store.config.read();
+            (c.ptz.enabled, c.device.scopes.clone())
+        };
+        let scopes = discovery_ops::merge_scopes(ptz_enabled, &configured);
         discovery_ops::handle_get_scopes_from_vec(&scopes, request)
     }
 
@@ -168,7 +196,7 @@ impl DeviceService {
         &self,
         request: SetScopes,
     ) -> Result<SetScopesResponse, OnvifError> {
-        apply_set_scopes(&self.state, request).await
+        apply_set_scopes(self, request).await
     }
 
     /// Handle AddScopes request.
@@ -176,7 +204,7 @@ impl DeviceService {
         &self,
         request: AddScopes,
     ) -> Result<AddScopesResponse, OnvifError> {
-        apply_add_scopes(&self.state, request).await
+        apply_add_scopes(self, request).await
     }
 
     /// Handle GetDiscoveryMode request.
@@ -184,7 +212,7 @@ impl DeviceService {
         &self,
         _request: GetDiscoveryMode,
     ) -> Result<GetDiscoveryModeResponse, OnvifError> {
-        let mode = self.state.get_discovery_mode().await;
+        let mode = self.store.config.read().discovery.mode.clone();
         Ok(GetDiscoveryModeResponse {
             discovery_mode: mode,
         })
@@ -195,7 +223,15 @@ impl DeviceService {
         &self,
         request: SetDiscoveryMode,
     ) -> Result<SetDiscoveryModeResponse, OnvifError> {
-        self.state.set_discovery_mode(request.discovery_mode).await;
+        self.store.config.write().discovery.mode = request.discovery_mode.clone();
+        if let Some(handle) = self.discovery_handle.get() {
+            handle
+                .set_discovery_mode(request.discovery_mode.into())
+                .await;
+        } else {
+            tracing::debug!("No WS-Discovery handle; discovery mode persisted for next boot");
+        }
+        self.store.request_save();
         Ok(SetDiscoveryModeResponse {})
     }
 
@@ -236,99 +272,99 @@ impl DeviceService {
 // Scope mutation helpers (shared by the public handlers and the dispatcher)
 // ========================================================================
 
-/// Replace the configurable scopes, keeping the fixed ones.
+/// Push a precomputed announcement-scope snapshot to WS-Discovery.
+async fn push_announced_scopes_to_discovery(service: &DeviceService, announced: Vec<String>) {
+    if let Some(handle) = service.discovery_handle.get() {
+        handle.set_scopes(announced).await;
+    } else {
+        tracing::debug!("No WS-Discovery handle; scope change persisted for next boot");
+    }
+}
+
+/// Replace the configurable scopes. Fixed scopes are derived, never stored.
 async fn apply_set_scopes(
-    state: &DeviceStateRef,
+    service: &DeviceService,
     request: SetScopes,
 ) -> Result<SetScopesResponse, OnvifError> {
-    // Validate all scopes
     for scope in &request.scopes {
         super::validation::validate_scope(scope)?;
     }
 
-    // Read-copy-write: get_scopes() clones under read lock, then set_scopes()
-    // takes write lock. The tokio RwLock cannot be held across await points for
-    // both read and write in the same critical section. A concurrent mutation
-    // between the two calls is possible but acceptable for this embedded device.
-    let scopes = state.get_scopes().await;
-
-    // Keep fixed scopes, replace configurable ones
-    let fixed_scopes: Vec<_> = scopes
-        .into_iter()
-        .filter(|s| {
-            matches!(
-                s.scope_def,
-                crate::onvif::types::common::ScopeDefinition::Fixed
-            )
-        })
-        .collect();
-
-    let new_configurable: Vec<_> = request
-        .scopes
-        .into_iter()
-        .map(|s| crate::onvif::types::common::Scope {
-            scope_def: crate::onvif::types::common::ScopeDefinition::Configurable,
-            scope_item: s,
-        })
-        .collect();
-
-    let mut new_scopes = fixed_scopes;
-    new_scopes.extend(new_configurable);
-
-    state.set_scopes(new_scopes.clone()).await;
-
-    tracing::info!("SetScopes: updated to {} scopes", new_scopes.len());
+    let announced = {
+        let mut c = service.store.config.write();
+        let fixed = discovery_ops::merge_scopes(c.ptz.enabled, &[]);
+        c.device.scopes = request
+            .scopes
+            .into_iter()
+            .filter(|item| !fixed.iter().any(|s| s.scope_item == *item))
+            .collect();
+        let count = c.device.scopes.len();
+        tracing::info!("SetScopes: updated to {count} configurable scopes");
+        discovery_ops::merge_scopes(c.ptz.enabled, &c.device.scopes)
+            .into_iter()
+            .map(|s| s.scope_item)
+            .collect::<Vec<_>>()
+    };
+    push_announced_scopes_to_discovery(service, announced).await;
+    service.store.request_save();
     Ok(SetScopesResponse {})
 }
 
 /// Append configurable scopes to the current scope list.
 async fn apply_add_scopes(
-    state: &DeviceStateRef,
+    service: &DeviceService,
     request: AddScopes,
 ) -> Result<AddScopesResponse, OnvifError> {
-    // Validate all scopes
     for scope in &request.scope_item {
         super::validation::validate_scope(scope)?;
     }
 
-    // Read-copy-write pattern (see apply_set_scopes comment for rationale)
-    let mut scopes = state.get_scopes().await;
-
-    for scope in request.scope_item {
-        scopes.push(crate::onvif::types::common::Scope {
-            scope_def: crate::onvif::types::common::ScopeDefinition::Configurable,
-            scope_item: scope,
-        });
-    }
-
-    state.set_scopes(scopes).await;
+    let announced = {
+        let mut c = service.store.config.write();
+        for item in request.scope_item {
+            if !c.device.scopes.contains(&item) {
+                c.device.scopes.push(item);
+            }
+        }
+        discovery_ops::merge_scopes(c.ptz.enabled, &c.device.scopes)
+            .into_iter()
+            .map(|s| s.scope_item)
+            .collect::<Vec<_>>()
+    };
+    push_announced_scopes_to_discovery(service, announced).await;
+    service.store.request_save();
     Ok(AddScopesResponse {})
 }
 
 /// Remove the requested configurable scopes, reporting the ones actually removed.
 async fn apply_remove_scopes(
-    state: &DeviceStateRef,
+    service: &DeviceService,
     request: RemoveScopes,
 ) -> Result<RemoveScopesResponse, OnvifError> {
-    // Read-copy-write pattern (see apply_set_scopes comment for rationale)
-    let mut scopes = state.get_scopes().await;
-    let mut removed = Vec::new();
-
-    for scope_item in &request.scope_item {
-        if let Some(pos) = scopes.iter().position(|s| {
-            s.scope_item == *scope_item
-                && matches!(
-                    s.scope_def,
-                    crate::onvif::types::common::ScopeDefinition::Configurable
-                )
-        }) {
-            removed.push(scopes[pos].scope_item.clone());
-            scopes.remove(pos);
+    let (removed, announced) = {
+        let mut c = service.store.config.write();
+        let fixed = discovery_ops::merge_scopes(c.ptz.enabled, &[]);
+        for scope_item in &request.scope_item {
+            if fixed.iter().any(|s| s.scope_item == *scope_item) {
+                return Err(super::faults::fixed_scope(scope_item));
+            }
         }
-    }
 
-    state.set_scopes(scopes).await;
+        let mut removed = Vec::new();
+        for scope_item in &request.scope_item {
+            if let Some(pos) = c.device.scopes.iter().position(|s| s == scope_item) {
+                removed.push(c.device.scopes.remove(pos));
+            }
+        }
+        let announced = discovery_ops::merge_scopes(c.ptz.enabled, &c.device.scopes)
+            .into_iter()
+            .map(|s| s.scope_item)
+            .collect::<Vec<_>>();
+        (removed, announced)
+    };
     tracing::info!("RemoveScopes: removed {} scopes", removed.len());
+    push_announced_scopes_to_discovery(service, announced).await;
+    service.store.request_save();
 
     Ok(RemoveScopesResponse {
         scope_item: removed,
@@ -353,7 +389,6 @@ impl ServiceHandler for DeviceService {
         let platform = self.platform.clone();
         let config = Arc::clone(&self.store.config);
         let users = Arc::clone(&self.store.users);
-        let state = Arc::clone(&self.state);
 
         match action {
             // Device Information Operations
@@ -440,7 +475,7 @@ impl ServiceHandler for DeviceService {
             }),
 
             "SetHostname" => dispatch_sync(body_xml, |request: SetHostname| {
-                network_ops::handle_set_hostname(&config, request)
+                self.handle_set_hostname(request)
             }),
 
             // Network Operations
@@ -519,61 +554,44 @@ impl ServiceHandler for DeviceService {
 
             // Scope Operations
             "GetScopes" => {
-                dispatch_async(body_xml, |request: GetScopes| {
-                    let state = state.clone();
-                    async move {
-                        let scopes = state.get_scopes().await;
-                        discovery_ops::handle_get_scopes_from_vec(&scopes, request)
-                    }
+                dispatch_async(body_xml, |request: GetScopes| async {
+                    self.handle_get_scopes(request).await
                 })
                 .await
             }
 
             "SetScopes" => {
-                dispatch_async(body_xml, |request: SetScopes| {
-                    let state = state.clone();
-                    async move { apply_set_scopes(&state, request).await }
+                dispatch_async(body_xml, |request: SetScopes| async {
+                    apply_set_scopes(self, request).await
                 })
                 .await
             }
 
             "AddScopes" => {
-                dispatch_async(body_xml, |request: AddScopes| {
-                    let state = state.clone();
-                    async move { apply_add_scopes(&state, request).await }
+                dispatch_async(body_xml, |request: AddScopes| async {
+                    apply_add_scopes(self, request).await
                 })
                 .await
             }
 
             "RemoveScopes" => {
-                dispatch_async(body_xml, |request: RemoveScopes| {
-                    let state = state.clone();
-                    async move { apply_remove_scopes(&state, request).await }
+                dispatch_async(body_xml, |request: RemoveScopes| async {
+                    apply_remove_scopes(self, request).await
                 })
                 .await
             }
 
             // Discovery Operations
             "GetDiscoveryMode" => {
-                dispatch_async(body_xml, |_request: GetDiscoveryMode| {
-                    let state = state.clone();
-                    async move {
-                        let mode = state.get_discovery_mode().await;
-                        Ok(GetDiscoveryModeResponse {
-                            discovery_mode: mode,
-                        })
-                    }
+                dispatch_async(body_xml, |request: GetDiscoveryMode| async {
+                    self.handle_get_discovery_mode(request).await
                 })
                 .await
             }
 
             "SetDiscoveryMode" => {
-                dispatch_async(body_xml, |request: SetDiscoveryMode| {
-                    let state = state.clone();
-                    async move {
-                        state.set_discovery_mode(request.discovery_mode).await;
-                        Ok(SetDiscoveryModeResponse {})
-                    }
+                dispatch_async(body_xml, |request: SetDiscoveryMode| async {
+                    self.handle_set_discovery_mode(request).await
                 })
                 .await
             }
@@ -638,8 +656,13 @@ impl ServiceHandler for DeviceService {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{PasswordManager, UserLevel, UserStorage};
+    use crate::config::{
+        ConfigPersistenceService, ConfigStorage, PasswordManager, UserLevel, UserStorage,
+    };
     use std::sync::Arc;
+    use std::time::Duration;
+    use tempfile::NamedTempFile;
+    use tokio::sync::broadcast;
 
     const TEST_PASSWORD: &str = "test_fixture_pwd_not_real";
 
@@ -653,6 +676,256 @@ mod tests {
             .unwrap();
 
         DeviceService::new(users)
+    }
+
+    fn test_service() -> DeviceService {
+        DeviceService::new(Arc::new(UserStorage::new()))
+    }
+
+    fn test_service_with_ptz(ptz_enabled: bool) -> DeviceService {
+        let mut app = crate::config::AppConfig::default();
+        app.ptz.enabled = ptz_enabled;
+        DeviceService::with_config_and_platform(
+            Arc::new(UserStorage::new()),
+            Arc::new(ConfigRuntime::new(app)),
+            Arc::new(crate::platform::StubPlatform::new()),
+        )
+    }
+
+    fn test_service_with_discovery(
+        slot: Arc<std::sync::OnceLock<crate::onvif::discovery::WsDiscoveryHandle>>,
+    ) -> DeviceService {
+        DeviceService::new(Arc::new(UserStorage::new())).with_discovery_handle(slot)
+    }
+
+    async fn spawn_config_persistence(
+        config: Arc<ConfigRuntime>,
+    ) -> (
+        crate::config::PersistenceHandle,
+        NamedTempFile,
+        tokio::task::JoinHandle<()>,
+        broadcast::Sender<()>,
+    ) {
+        let temp_file = NamedTempFile::new().unwrap();
+        let storage = ConfigStorage::new(temp_file.path().to_str().unwrap());
+        let (service, handle) = ConfigPersistenceService::new(config, storage, 50);
+        let (shutdown_tx, shutdown_rx) = broadcast::channel(1);
+        let task = tokio::spawn(service.run(shutdown_rx));
+        (handle, temp_file, task, shutdown_tx)
+    }
+
+    fn test_service_with_persistence(
+        config: Arc<ConfigRuntime>,
+        persistence: crate::config::PersistenceHandle,
+    ) -> DeviceService {
+        DeviceService::with_config_and_platform(
+            Arc::new(UserStorage::new()),
+            config,
+            Arc::new(crate::platform::StubPlatform::new()),
+        )
+        .with_config_persistence(persistence)
+    }
+
+    #[tokio::test]
+    async fn test_set_scopes_reaches_discovery_and_bumps_metadata_version() {
+        let discovery = crate::onvif::discovery::WsDiscovery::new(
+            crate::onvif::discovery::DiscoveryConfig::default(),
+        );
+        let (handle, task) = discovery.run_service().await.unwrap();
+
+        let slot = Arc::new(std::sync::OnceLock::new());
+        assert!(slot.set(handle.clone()).is_ok());
+        let service = test_service_with_discovery(slot);
+
+        let before_version = handle.metadata_version();
+
+        apply_set_scopes(
+            &service,
+            SetScopes {
+                scopes: vec!["onvif://www.onvif.org/name/Renamed".to_string()],
+            },
+        )
+        .await
+        .unwrap();
+
+        let announced = handle.scopes().await;
+        assert!(
+            announced.iter().any(|s| s.contains("name/Renamed")),
+            "SetScopes must change what WS-Discovery announces"
+        );
+        assert!(
+            handle.metadata_version() > before_version,
+            "ONVIF Sec. 4.1 requires metadata_version to increment on config change"
+        );
+
+        let _ = handle.stop().await;
+        task.abort();
+    }
+
+    #[tokio::test]
+    async fn test_set_scopes_succeeds_when_discovery_is_disabled() {
+        let service = test_service_with_discovery(Arc::new(std::sync::OnceLock::new()));
+
+        apply_set_scopes(
+            &service,
+            SetScopes {
+                scopes: vec!["onvif://www.onvif.org/name/Cam".to_string()],
+            },
+        )
+        .await
+        .expect("missing discovery handle is not a fault");
+
+        assert_eq!(
+            service.store.config.read().device.scopes,
+            vec!["onvif://www.onvif.org/name/Cam"]
+        );
+    }
+
+    #[tokio::test]
+    async fn test_set_scopes_requests_config_disk_persistence() {
+        let config = Arc::new(ConfigRuntime::new(crate::config::AppConfig::default()));
+        let (handle, temp_file, task, shutdown_tx) =
+            spawn_config_persistence(Arc::clone(&config)).await;
+        let service = test_service_with_persistence(config, handle);
+
+        apply_set_scopes(
+            &service,
+            SetScopes {
+                scopes: vec!["onvif://www.onvif.org/name/Cam".to_string()],
+            },
+        )
+        .await
+        .unwrap();
+
+        tokio::time::sleep(Duration::from_millis(150)).await;
+        let _ = shutdown_tx.send(());
+        task.await.unwrap();
+
+        let content = std::fs::read_to_string(temp_file.path()).unwrap();
+        assert!(content.contains("onvif://www.onvif.org/name/Cam"));
+    }
+
+    #[tokio::test]
+    async fn test_set_discovery_mode_requests_config_disk_persistence() {
+        let config = Arc::new(ConfigRuntime::new(crate::config::AppConfig::default()));
+        let (handle, temp_file, task, shutdown_tx) =
+            spawn_config_persistence(Arc::clone(&config)).await;
+        let service = test_service_with_persistence(config, handle);
+
+        service
+            .handle_set_discovery_mode(SetDiscoveryMode {
+                discovery_mode: crate::onvif::types::common::DiscoveryMode::NonDiscoverable,
+            })
+            .await
+            .unwrap();
+
+        tokio::time::sleep(Duration::from_millis(150)).await;
+        let _ = shutdown_tx.send(());
+        task.await.unwrap();
+
+        let content = std::fs::read_to_string(temp_file.path()).unwrap();
+        assert!(content.contains("NonDiscoverable"));
+    }
+
+    #[tokio::test]
+    async fn test_set_hostname_requests_config_disk_persistence() {
+        let config = Arc::new(ConfigRuntime::new(crate::config::AppConfig::default()));
+        let (handle, temp_file, task, shutdown_tx) =
+            spawn_config_persistence(Arc::clone(&config)).await;
+        let service = test_service_with_persistence(config, handle);
+
+        service
+            .handle_set_hostname(SetHostname {
+                name: "deploy-host".to_string(),
+            })
+            .unwrap();
+
+        tokio::time::sleep(Duration::from_millis(150)).await;
+        let _ = shutdown_tx.send(());
+        task.await.unwrap();
+
+        let content = std::fs::read_to_string(temp_file.path()).unwrap();
+        assert!(content.contains("deploy-host"));
+    }
+
+    #[tokio::test]
+    async fn test_set_scopes_does_not_store_fixed_scopes() {
+        let service = test_service();
+        apply_set_scopes(
+            &service,
+            SetScopes {
+                scopes: vec!["onvif://www.onvif.org/name/Cam".to_string()],
+            },
+        )
+        .await
+        .unwrap();
+
+        // Config holds configurable scopes only; fixed ones are derived.
+        assert!(
+            !service
+                .store
+                .config
+                .read()
+                .device
+                .scopes
+                .iter()
+                .any(|s| s.contains("/type/") || s.contains("/Profile/"))
+        );
+    }
+
+    #[tokio::test]
+    async fn test_apply_set_scopes_strips_client_supplied_fixed_scopes() {
+        let service = test_service();
+        apply_set_scopes(
+            &service,
+            SetScopes {
+                scopes: vec![
+                    "onvif://www.onvif.org/type/video_encoder".to_string(),
+                    "onvif://www.onvif.org/Profile/Streaming".to_string(),
+                    "onvif://www.onvif.org/name/Cam".to_string(),
+                ],
+            },
+        )
+        .await
+        .unwrap();
+
+        let stored = service.store.config.read().device.scopes.clone();
+        assert_eq!(stored, vec!["onvif://www.onvif.org/name/Cam".to_string()]);
+
+        // ...but GetScopes still reports them.
+        let response = service.handle_get_scopes(GetScopes {}).await.unwrap();
+        assert!(response.scopes.iter().any(|s| matches!(
+            s.scope_def,
+            crate::onvif::types::common::ScopeDefinition::Fixed
+        )));
+    }
+
+    #[tokio::test]
+    async fn test_set_discovery_mode_persists_to_config() {
+        let service = test_service();
+        service
+            .handle_set_discovery_mode(SetDiscoveryMode {
+                discovery_mode: crate::onvif::types::common::DiscoveryMode::NonDiscoverable,
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(
+            service.store.config.read().discovery.mode,
+            crate::onvif::types::common::DiscoveryMode::NonDiscoverable
+        );
+    }
+
+    #[tokio::test]
+    async fn test_fixed_scopes_follow_ptz_config_without_stored_state() {
+        let service = test_service_with_ptz(false);
+        let response = service.handle_get_scopes(GetScopes {}).await.unwrap();
+        assert!(
+            !response
+                .scopes
+                .iter()
+                .any(|s| s.scope_item.ends_with("/type/ptz"))
+        );
     }
 
     // ========================================================================
@@ -827,10 +1100,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_apply_set_scopes_keeps_fixed_replaces_configurable() {
-        let state: DeviceStateRef = Arc::new(DeviceState::new());
-        let fixed_before: Vec<_> = state
-            .get_scopes()
+        let service = test_service();
+        let fixed_before: Vec<_> = service
+            .handle_get_scopes(GetScopes {})
             .await
+            .unwrap()
+            .scopes
             .into_iter()
             .filter(|s| {
                 matches!(
@@ -845,7 +1120,7 @@ mod tests {
         );
 
         let response = apply_set_scopes(
-            &state,
+            &service,
             SetScopes {
                 scopes: vec!["onvif://www.onvif.org/name/NewCamera".to_string()],
             },
@@ -854,7 +1129,11 @@ mod tests {
         .unwrap();
         assert_eq!(response, SetScopesResponse {});
 
-        let scopes = state.get_scopes().await;
+        let scopes = service
+            .handle_get_scopes(GetScopes {})
+            .await
+            .unwrap()
+            .scopes;
         let fixed_after: Vec<_> = scopes
             .iter()
             .filter(|s| {
@@ -884,9 +1163,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_apply_set_scopes_rejects_invalid_scope() {
-        let state: DeviceStateRef = Arc::new(DeviceState::new());
+        let service = test_service();
         let result = apply_set_scopes(
-            &state,
+            &service,
             SetScopes {
                 scopes: vec!["not-a-valid-scope".to_string()],
             },
@@ -897,11 +1176,16 @@ mod tests {
 
     #[tokio::test]
     async fn test_apply_add_scopes_appends_configurable() {
-        let state: DeviceStateRef = Arc::new(DeviceState::new());
-        let before_len = state.get_scopes().await.len();
+        let service = test_service();
+        let before_len = service
+            .handle_get_scopes(GetScopes {})
+            .await
+            .unwrap()
+            .scopes
+            .len();
 
         let response = apply_add_scopes(
-            &state,
+            &service,
             AddScopes {
                 scope_item: vec!["onvif://www.onvif.org/location/Lobby".to_string()],
             },
@@ -910,7 +1194,11 @@ mod tests {
         .unwrap();
         assert_eq!(response, AddScopesResponse {});
 
-        let scopes = state.get_scopes().await;
+        let scopes = service
+            .handle_get_scopes(GetScopes {})
+            .await
+            .unwrap()
+            .scopes;
         assert_eq!(scopes.len(), before_len + 1);
         assert!(scopes.iter().any(|s| {
             s.scope_item == "onvif://www.onvif.org/location/Lobby"
@@ -923,37 +1211,37 @@ mod tests {
 
     #[tokio::test]
     async fn test_apply_remove_scopes_removes_matching_configurable_only() {
-        let state: DeviceStateRef = Arc::new(DeviceState::new());
-        let initial_scopes = state.get_scopes().await;
-        let configurable_item = initial_scopes
-            .iter()
-            .find(|s| {
-                matches!(
-                    s.scope_def,
-                    crate::onvif::types::common::ScopeDefinition::Configurable
-                )
-            })
-            .map(|s| s.scope_item.clone())
-            .expect("default scopes must include a configurable entry");
-        let fixed_item = initial_scopes
-            .iter()
+        let service = test_service();
+        apply_set_scopes(
+            &service,
+            SetScopes {
+                scopes: vec!["onvif://www.onvif.org/name/Cam".to_string()],
+            },
+        )
+        .await
+        .unwrap();
+
+        let configurable_item = "onvif://www.onvif.org/name/Cam".to_string();
+        let fixed_item = service
+            .handle_get_scopes(GetScopes {})
+            .await
+            .unwrap()
+            .scopes
+            .into_iter()
             .find(|s| {
                 matches!(
                     s.scope_def,
                     crate::onvif::types::common::ScopeDefinition::Fixed
                 )
             })
-            .map(|s| s.scope_item.clone())
+            .map(|s| s.scope_item)
             .expect("default scopes must include a fixed entry");
 
-        // Request removal of both a real configurable scope and a fixed scope's
-        // string (fixed scopes are not removable) plus a nonexistent one.
         let response = apply_remove_scopes(
-            &state,
+            &service,
             RemoveScopes {
                 scope_item: vec![
                     configurable_item.clone(),
-                    fixed_item.clone(),
                     "onvif://www.onvif.org/does/not/exist".to_string(),
                 ],
             },
@@ -963,8 +1251,80 @@ mod tests {
 
         assert_eq!(response.scope_item, vec![configurable_item.clone()]);
 
-        let remaining = state.get_scopes().await;
+        let remaining = service
+            .handle_get_scopes(GetScopes {})
+            .await
+            .unwrap()
+            .scopes;
         assert!(!remaining.iter().any(|s| s.scope_item == configurable_item));
         assert!(remaining.iter().any(|s| s.scope_item == fixed_item));
+    }
+
+    #[tokio::test]
+    async fn test_remove_scopes_rejects_fixed_scope_with_fault() {
+        let service = test_service();
+        let error = apply_remove_scopes(
+            &service,
+            RemoveScopes {
+                scope_item: vec!["onvif://www.onvif.org/type/video_encoder".to_string()],
+            },
+        )
+        .await
+        .expect_err("removing a fixed scope must fault, not silently no-op");
+
+        assert!(matches!(
+            error,
+            OnvifError::InvalidArgVal { ref subcode, .. } if subcode == "FixedScope"
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_remove_scopes_reports_removed_configurable_items() {
+        let service = test_service();
+        apply_set_scopes(
+            &service,
+            SetScopes {
+                scopes: vec!["onvif://www.onvif.org/name/Cam".to_string()],
+            },
+        )
+        .await
+        .unwrap();
+
+        let response = apply_remove_scopes(
+            &service,
+            RemoveScopes {
+                scope_item: vec!["onvif://www.onvif.org/name/Cam".to_string()],
+            },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(response.scope_item, vec!["onvif://www.onvif.org/name/Cam"]);
+        assert!(service.store.config.read().device.scopes.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_add_scopes_is_idempotent() {
+        let service = test_service();
+        apply_set_scopes(
+            &service,
+            SetScopes {
+                scopes: vec!["onvif://www.onvif.org/name/Cam".to_string()],
+            },
+        )
+        .await
+        .unwrap();
+        let request = || AddScopes {
+            scope_item: vec!["onvif://www.onvif.org/name/Cam".to_string()],
+        };
+
+        apply_add_scopes(&service, request()).await.unwrap();
+        apply_add_scopes(&service, request()).await.unwrap();
+
+        assert_eq!(
+            service.store.config.read().device.scopes.len(),
+            1,
+            "adding an existing scope must not duplicate it"
+        );
     }
 }

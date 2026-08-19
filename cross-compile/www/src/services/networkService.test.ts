@@ -47,6 +47,11 @@ describe('networkService', () => {
                 </Manual>
               </Config>
             </IPv4>
+            <Link>
+              <OperSettings>
+                <Speed>100</Speed>
+              </OperSettings>
+            </Link>
           </NetworkInterfaces>
         </GetNetworkInterfacesResponse>
       `);
@@ -62,6 +67,7 @@ describe('networkService', () => {
       expect(result[0].dhcp).toBe(false);
       expect(result[0].address).toBe('192.168.1.100');
       expect(result[0].prefixLength).toBe(24);
+      expect(result[0].linkSpeedMbps).toBe(100);
     });
 
     it('should return empty array when no interfaces', async () => {

@@ -5,7 +5,13 @@ import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { getNetworkConfig, setDNS, setNetworkInterface } from '@/services/networkService';
+import { getDiagnostics } from '@/services/diagnosticsService';
+import {
+  getNetworkConfig,
+  getNetworkInterfaces,
+  setDNS,
+  setNetworkInterface,
+} from '@/services/networkService';
 import {
   MOCK_DATA,
   fillFormField,
@@ -20,9 +26,38 @@ import NetworkPage from './NetworkPage';
 // Mock services
 vi.mock('@/services/networkService', () => ({
   getNetworkConfig: vi.fn(),
+  getNetworkInterfaces: vi.fn(),
   setNetworkInterface: vi.fn(),
   setDNS: vi.fn(),
 }));
+
+vi.mock('@/services/diagnosticsService', () => ({
+  getDiagnostics: vi.fn(),
+}));
+
+const MOCK_DIAGNOSTICS = {
+  status: 'healthy',
+  firmware_version: 'test',
+  uptime: { process_s: 100, system_s: 3600 },
+  cpu_percent: null,
+  memory: null,
+  storage: null,
+  network: null,
+  stream_frame_age_ms: null,
+  components: [],
+  degraded_services: [],
+  vision: null,
+  wifi: {
+    interface: 'wlan0',
+    connected: true,
+    ssid: 'kmk',
+    frequency_mhz: 2437,
+    channel: 6,
+    security: 'WPA2',
+    signal_dbm: -44,
+    link_quality: '66/70',
+  },
+};
 
 describe('NetworkPage', () => {
   const renderNetworkPage = async () => {
@@ -34,6 +69,21 @@ describe('NetworkPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(getNetworkConfig).mockResolvedValue(MOCK_DATA.network);
+    vi.mocked(getNetworkInterfaces).mockResolvedValue([
+      {
+        token: 'wlan0',
+        enabled: true,
+        name: 'wlan0',
+        hwAddress: 'C0:4B:24:DA:4D:EB',
+        linkSpeedMbps: null,
+        ipv4Enabled: true,
+        dhcp: true,
+        address: '192.168.2.198',
+        prefixLength: 24,
+        gateway: '',
+      },
+    ]);
+    vi.mocked(getDiagnostics).mockResolvedValue(MOCK_DIAGNOSTICS);
   });
 
   it('should render page with loading state', async () => {
@@ -49,6 +99,17 @@ describe('NetworkPage', () => {
     // NOSONAR: Hardcoded IP addresses are safe in test files
     expect(screen.getByTestId('network-ip-address-input')).toHaveValue('192.168.1.100'); // NOSONAR
     expect(screen.getByTestId('network-gateway-input')).toHaveValue('192.168.1.1'); // NOSONAR
+  });
+
+  it('should show diagnostics-backed status card values', async () => {
+    await renderNetworkPage();
+
+    await waitFor(() => {
+      expect(screen.getByTestId('network-mac-address')).toHaveTextContent('C0:4B:24:DA:4D:EB');
+      expect(screen.getByTestId('network-quality')).toHaveTextContent('66/70');
+      expect(screen.getByTestId('network-status')).toHaveTextContent('Healthy');
+      expect(screen.getByTestId('network-uptime')).toHaveTextContent('1h 0m');
+    });
   });
 
   it('should toggle DHCP and show/hide static IP fields', async () => {
@@ -220,8 +281,7 @@ describe('NetworkPage', () => {
 
     await waitFor(() => {
       expect(screen.getByTestId('network-mac-address')).toBeInTheDocument();
-      // MAC address value is inside the StatusCardItem
-      expect(screen.getByTestId('network-mac-address')).toHaveTextContent('00:11:22:33:44:55');
+      expect(screen.getByTestId('network-mac-address')).toHaveTextContent('C0:4B:24:DA:4D:EB');
     });
   });
 });

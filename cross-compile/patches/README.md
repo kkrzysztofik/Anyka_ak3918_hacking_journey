@@ -18,7 +18,8 @@ This directory contains patches to enable Rust crates to compile for the ARMv5TE
 patches/
 ├── setup.sh              # Download and patch script
 ├── diffs/                # Patch files (tracked in git)
-│   └── openssl-src-300.2.3+3.2.1.patch
+│   ├── openssl-src-300.2.3+3.2.1.patch
+│   └── tower-http-0.7.0.patch
 ├── originals/            # Downloaded crates (git-ignored)
 └── *-full/               # Patched crates (git-ignored)
 ```
@@ -28,6 +29,7 @@ patches/
 |Crate|Version|Change|
 |-----|-------|-----|
 |openssl-src|300.2.3+3.2.1|Add uClibc target support|
+|tower-http|0.7.0|`rate_limited!` uses `AtomicU32` (ARMv5 has no 64-bit atomics)|
 
 ## Why Patches?
 

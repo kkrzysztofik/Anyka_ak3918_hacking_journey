@@ -94,8 +94,11 @@ isp_config_path = "/data/sensor/isp_gc1084.conf"
 # Device UUID (leave empty to auto-generate)
 uuid = ""
 
-# Configurable ONVIF scopes (comma-separated, leave empty for defaults)
-scopes = ""
+# Configurable ONVIF scopes. Fixed scopes are derived at boot, never stored.
+scopes = [
+    "onvif://www.onvif.org/location/country/unknown",
+    "onvif://www.onvif.org/name/OnvifCamera",
+]
 
 # ============================================================================
 # HTTP Server Settings

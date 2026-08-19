@@ -46,15 +46,11 @@ async fn test_get_device_information_returns_correct_values() {
         .await
         .unwrap();
 
-    // Default values from config
     assert_eq!(response.manufacturer, "Anyka");
     assert_eq!(response.model, "AK3918 Camera");
     assert!(!response.firmware_version.is_empty());
-    // serial_number and hardware_id may be empty in default config
-    // They are populated from platform or config in production
-    // Just verify the fields exist (they have default values)
-    let _ = response.serial_number;
-    let _ = response.hardware_id;
+    assert_eq!(response.serial_number, "AK3918-001");
+    assert_eq!(response.hardware_id, "ak3918");
 }
 
 // ============================================================================
@@ -208,6 +204,12 @@ fn test_set_hostname_invalid_empty() {
 #[tokio::test]
 async fn test_get_scopes_includes_fixed_and_configurable() {
     let service = create_test_service();
+    service
+        .handle_set_scopes(SetScopes {
+            scopes: vec!["onvif://www.onvif.org/name/Cam".to_string()],
+        })
+        .await
+        .unwrap();
 
     let response = service.handle_get_scopes(GetScopes {}).await.unwrap();
 

@@ -13,7 +13,7 @@
 //! - **Dependency injection**: Components receive dependencies via constructors
 //! - **Graceful degradation**: Optional components can fail without stopping the app
 
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 use tokio::sync::broadcast;
 use tokio::task::JoinHandle;
@@ -104,6 +104,12 @@ pub struct AppState {
     profile_persistence: Option<PersistenceHandle>,
     /// Imaging settings store (optional; production wires persistence at startup).
     imaging_settings_store: Option<Arc<ImagingSettingsStore>>,
+    /// WS-Discovery handle, populated after the discovery phase starts.
+    ///
+    /// The server (and therefore DeviceService) is constructed before discovery,
+    /// so this is late-bound. Empty is legitimate: discovery may be disabled or
+    /// may have failed into degraded mode.
+    discovery_handle: Arc<OnceLock<WsDiscoveryHandle>>,
 }
 
 impl AppState {
@@ -174,6 +180,11 @@ impl AppState {
     pub fn imaging_settings_store(&self) -> Option<&Arc<ImagingSettingsStore>> {
         self.imaging_settings_store.as_ref()
     }
+
+    /// Late-bound WS-Discovery handle slot.
+    pub fn discovery_handle(&self) -> &Arc<OnceLock<WsDiscoveryHandle>> {
+        &self.discovery_handle
+    }
 }
 
 impl std::fmt::Debug for AppState {
@@ -237,6 +248,7 @@ pub struct AppStateBuilder {
     profile_storage: Option<Arc<ProfileStorage>>,
     profile_persistence: Option<PersistenceHandle>,
     imaging_settings_store: Option<Arc<ImagingSettingsStore>>,
+    discovery_handle: Option<Arc<OnceLock<WsDiscoveryHandle>>>,
 }
 
 /// Error type for AppState construction failures.
@@ -331,6 +343,12 @@ impl AppStateBuilder {
         self
     }
 
+    /// Set the late-bound WS-Discovery handle slot.
+    pub fn discovery_handle(mut self, handle: Arc<OnceLock<WsDiscoveryHandle>>) -> Self {
+        self.discovery_handle = Some(handle);
+        self
+    }
+
     /// Build the `AppState`, returning an error if required components are missing.
     pub fn build(self) -> Result<AppState, AppStateError> {
         Ok(AppState {
@@ -360,6 +378,9 @@ impl AppStateBuilder {
                 .ok_or_else(|| AppStateError::MissingComponent("profile_storage".to_string()))?,
             profile_persistence: self.profile_persistence,
             imaging_settings_store: self.imaging_settings_store,
+            discovery_handle: self
+                .discovery_handle
+                .unwrap_or_else(|| Arc::new(OnceLock::new())),
         })
     }
 }
@@ -1143,9 +1164,9 @@ impl Application {
 
         progress.complete_phase();
 
-        // Phase 4: Network - Start HTTP Server
+        // Phase 4: Network - construct the HTTP server (listen after Discovery).
         progress.begin_phase(StartupPhase::Network);
-        tracing::debug!("Starting HTTP server...");
+        tracing::debug!("Constructing HTTP server...");
 
         // Get HTTP settings from config
         let server_config = Self::build_server_config(&config_runtime);
@@ -1163,21 +1184,27 @@ impl Application {
                 .with_diagnostics(Arc::clone(&diagnostics)),
         );
 
-        // Start the server in a background task
+        progress.complete_phase();
+
+        // Phase 5: Discovery — publish the handle before the HTTP listener
+        // accepts SetScopes, so mutations cannot race handle publication.
+        progress.begin_phase(StartupPhase::Discovery);
+        let (discovery, discovery_task) =
+            Self::start_discovery_phase(&config_runtime, port, &mut progress).await;
+        if let Some(ref disc) = discovery {
+            let _ = app_state.discovery_handle().set(disc.clone());
+        }
+        progress.complete_phase();
+
+        // Listen only after the discovery handle is published (or discovery
+        // has degraded), so SOAP scope mutations always see a bound handle.
+        tracing::debug!("Starting HTTP server...");
         let server_clone: Arc<OnvifServer> = Arc::clone(&server);
         let server_task = tokio::spawn(async move {
             if let Err(e) = server_clone.start().await {
                 tracing::error!("HTTP server error: {}", e);
             }
         });
-
-        progress.complete_phase();
-
-        // Phase 5: Discovery
-        progress.begin_phase(StartupPhase::Discovery);
-        let (discovery, discovery_task) =
-            Self::start_discovery_phase(&config_runtime, port, &mut progress).await;
-        progress.complete_phase();
 
         // Phase 6: Streaming (optional, gracefully degrades)
         let streaming_service =
@@ -1822,6 +1849,9 @@ impl Application {
         } else {
             c.discovery.hello_interval as u64
         };
+        let ptz_enabled = c.ptz.enabled;
+        let configured_scopes = c.device.scopes.clone();
+        let discovery_mode = c.discovery.mode.clone();
         drop(c);
 
         // Get local IP - "auto" means we should try to detect, otherwise use external_ip helper
@@ -1844,7 +1874,14 @@ impl Application {
             http_port,
             device_ip,
             hello_interval: Duration::from_secs(hello_interval_secs),
-            ..Default::default()
+            scopes: crate::onvif::device::ops::discovery::merge_scopes(
+                ptz_enabled,
+                &configured_scopes,
+            )
+            .into_iter()
+            .map(|s| s.scope_item)
+            .collect(),
+            discovery_mode: discovery_mode.into(),
         }
     }
 
@@ -2187,6 +2224,49 @@ mod tests {
         assert_eq!(discovery.device_ip, "198.51.100.42");
         assert_eq!(discovery.http_port, 8080);
         assert_eq!(discovery.hello_interval, Duration::from_secs(300));
+    }
+
+    #[test]
+    fn test_make_discovery_config_seeds_scopes_from_config() {
+        let mut app_config = crate::config::AppConfig::default();
+        app_config.device.scopes = vec!["onvif://www.onvif.org/name/Persisted".to_string()];
+        app_config.ptz.enabled = false;
+        let runtime = Arc::new(ConfigRuntime::new(app_config));
+
+        let discovery_config = Application::make_discovery_config(&runtime, 80);
+
+        assert!(
+            discovery_config
+                .scopes
+                .iter()
+                .any(|s| s.contains("name/Persisted")),
+            "..Default::default() must not swallow configured scopes"
+        );
+        assert!(
+            !discovery_config
+                .scopes
+                .iter()
+                .any(|s| s.ends_with("/type/ptz"))
+        );
+        assert!(
+            discovery_config
+                .scopes
+                .iter()
+                .any(|s| s == "onvif://www.onvif.org/Profile/Streaming"),
+            "boot-derived discovery scopes must include Profile/Streaming"
+        );
+    }
+
+    #[test]
+    fn test_make_discovery_config_seeds_mode_from_config() {
+        let mut app_config = crate::config::AppConfig::default();
+        app_config.discovery.mode = crate::onvif::types::common::DiscoveryMode::NonDiscoverable;
+        let runtime = Arc::new(ConfigRuntime::new(app_config));
+
+        assert_eq!(
+            Application::make_discovery_config(&runtime, 80).discovery_mode,
+            crate::onvif::discovery::DiscoveryMode::NonDiscoverable
+        );
     }
 
     #[test]

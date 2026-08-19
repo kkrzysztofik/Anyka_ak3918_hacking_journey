@@ -4,7 +4,7 @@
  * SOAP operations for device management (GetDeviceInformation, GetScopes, SetScopes).
  */
 import { ENDPOINTS } from '@/services/api';
-import { soapRequest } from '@/services/soap/client';
+import { escapeXml, soapRequest } from '@/services/soap/client';
 import { safeString } from '@/utils/safeString';
 
 export interface DeviceInfo {
@@ -15,7 +15,8 @@ export interface DeviceInfo {
   hardwareId: string;
 }
 
-export interface DeviceScope {
+export interface Scope {
+  scopeDef: 'Fixed' | 'Configurable';
   scopeItem: string;
 }
 
@@ -23,6 +24,75 @@ export interface DeviceIdentification {
   deviceInfo: DeviceInfo;
   name: string;
   location: string;
+}
+
+export type DiscoveryMode = 'Discoverable' | 'NonDiscoverable';
+
+const NAME_PREFIX = 'onvif://www.onvif.org/name/';
+const LOCATION_PREFIX = 'onvif://www.onvif.org/location/';
+
+function remainderAfter(scopeItem: string, prefix: string): string | undefined {
+  if (!scopeItem.startsWith(prefix)) {
+    return undefined;
+  }
+  return scopeItem.slice(prefix.length);
+}
+
+/** Form-managed name/location scopes are a single path segment after the prefix. */
+function isManagedScope(scopeItem: string, prefix: string): boolean {
+  const rest = remainderAfter(scopeItem, prefix);
+  return rest !== undefined && !rest.includes('/');
+}
+
+function asScopeElements(scopes: unknown): Array<{ ScopeDef?: string; ScopeItem?: string }> {
+  if (scopes === undefined || scopes === null) {
+    return [];
+  }
+  return Array.isArray(scopes) ? scopes : [scopes];
+}
+
+function decodeScopeValue(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
+export function nameFromScopes(scopes: Scope[]): string {
+  for (const scope of scopes) {
+    const rest = remainderAfter(scope.scopeItem, NAME_PREFIX);
+    if (rest !== undefined) {
+      return decodeScopeValue(rest);
+    }
+  }
+  return '';
+}
+
+export function locationFromScopes(scopes: Scope[]): string {
+  for (const scope of scopes) {
+    const rest = remainderAfter(scope.scopeItem, LOCATION_PREFIX);
+    if (rest !== undefined && !rest.includes('/')) {
+      return decodeScopeValue(rest);
+    }
+  }
+  return '';
+}
+
+export function scopesForSave(
+  scopes: Scope[],
+  values: { name: string; location: string },
+): string[] {
+  const kept = scopes
+    .filter((scope) => scope.scopeDef === 'Configurable')
+    .map((scope) => scope.scopeItem)
+    .filter((item) => !isManagedScope(item, NAME_PREFIX) && !isManagedScope(item, LOCATION_PREFIX));
+
+  return [
+    ...kept,
+    `${NAME_PREFIX}${encodeURIComponent(values.name)}`,
+    `${LOCATION_PREFIX}${encodeURIComponent(values.location)}`,
+  ];
 }
 
 /**
@@ -49,48 +119,32 @@ export async function getDeviceInformation(): Promise<DeviceInfo> {
 }
 
 /**
- * Get device scopes (name, location, etc.)
+ * Get the device's ONVIF scopes, including Fixed entries.
  */
-async function getScopes(): Promise<{ name: string; location: string }> {
+export async function getScopes(): Promise<Scope[]> {
   const data = await soapRequest<Record<string, unknown>>(
     ENDPOINTS.device,
     '<tds:GetScopes />',
     'GetScopesResponse',
   );
 
-  const scopes = data?.Scopes as Array<{ ScopeDef?: string; ScopeItem?: string }> | undefined;
-
-  let name = '';
-  let location = '';
-
-  if (scopes && Array.isArray(scopes)) {
-    for (const scope of scopes) {
-      const item = scope.ScopeItem || '';
-      if (item.includes('name/')) {
-        name = item.split('name/')[1] || '';
-      }
-      if (item.includes('location/')) {
-        location = item.split('location/')[1] || '';
-      }
-    }
-  }
-
-  return {
-    name: decodeURIComponent(name),
-    location: decodeURIComponent(location),
-  };
+  return asScopeElements(data?.Scopes)
+    .map((scope) => {
+      const scopeDef = scope.ScopeDef === 'Fixed' ? 'Fixed' : 'Configurable';
+      return {
+        scopeDef,
+        scopeItem: safeString(scope.ScopeItem, ''),
+      } satisfies Scope;
+    })
+    .filter((scope) => scope.scopeItem.length > 0);
 }
 
 /**
- * Set device scopes (name, location)
+ * Replace the configurable scope list. Fixed scopes are never sent.
  */
-export async function setScopes(name: string, location: string): Promise<void> {
-  const encodedName = encodeURIComponent(name);
-  const encodedLocation = encodeURIComponent(location);
-
+export async function setScopes(scopeItems: string[]): Promise<void> {
   const body = `<tds:SetScopes>
-    <tds:Scopes>onvif://www.onvif.org/name/${encodedName}</tds:Scopes>
-    <tds:Scopes>onvif://www.onvif.org/location/${encodedLocation}</tds:Scopes>
+    ${scopeItems.map((item) => `<tds:Scopes>${escapeXml(item)}</tds:Scopes>`).join('\n    ')}
   </tds:SetScopes>`;
 
   await soapRequest(ENDPOINTS.device, body);
@@ -104,7 +158,41 @@ export async function getDeviceIdentification(): Promise<DeviceIdentification> {
 
   return {
     deviceInfo,
-    name: scopes.name,
-    location: scopes.location,
+    name: nameFromScopes(scopes),
+    location: locationFromScopes(scopes),
   };
+}
+
+export async function getDiscoveryMode(): Promise<DiscoveryMode> {
+  const data = await soapRequest<Record<string, unknown>>(
+    ENDPOINTS.device,
+    '<tds:GetDiscoveryMode />',
+    'GetDiscoveryModeResponse',
+  );
+  const mode = safeString(data?.DiscoveryMode, 'Discoverable');
+  return mode === 'NonDiscoverable' ? 'NonDiscoverable' : 'Discoverable';
+}
+
+export async function setDiscoveryMode(mode: DiscoveryMode): Promise<void> {
+  await soapRequest(
+    ENDPOINTS.device,
+    `<tds:SetDiscoveryMode><tds:DiscoveryMode>${mode}</tds:DiscoveryMode></tds:SetDiscoveryMode>`,
+  );
+}
+
+export async function getHostname(): Promise<string> {
+  const data = await soapRequest<Record<string, unknown>>(
+    ENDPOINTS.device,
+    '<tds:GetHostname />',
+    'GetHostnameResponse',
+  );
+  const info = data?.HostnameInformation as { Name?: unknown } | undefined;
+  return safeString(info?.Name, '');
+}
+
+export async function setHostname(name: string): Promise<void> {
+  await soapRequest(
+    ENDPOINTS.device,
+    `<tds:SetHostname><tds:Name>${escapeXml(name)}</tds:Name></tds:SetHostname>`,
+  );
 }

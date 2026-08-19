@@ -9,6 +9,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::onvif::types::common::DiscoveryMode;
+
 // ============================================================================
 // Root configuration
 // ============================================================================
@@ -446,8 +448,8 @@ pub struct DeviceConfig {
     pub serial_number: String,
     pub hardware_id: String,
     pub hostname: String,
-    /// Comma-separated ONVIF scopes.
-    pub scopes: String,
+    /// ONVIF configurable scopes. Fixed scopes are derived at boot, never stored.
+    pub scopes: Vec<String>,
     /// Device UUID (empty to auto-generate).
     pub uuid: String,
     /// Path to ISP configuration file.
@@ -457,13 +459,16 @@ pub struct DeviceConfig {
 impl Default for DeviceConfig {
     fn default() -> Self {
         Self {
-            manufacturer: "Anyka".to_string(),
-            model: "AK3918 Camera".to_string(),
+            manufacturer: String::new(),
+            model: String::new(),
             firmware_version: "1.0.0".to_string(),
             serial_number: String::new(),
-            hardware_id: "ak3918".to_string(),
+            hardware_id: String::new(),
             hostname: "ipcam".to_string(),
-            scopes: String::new(),
+            scopes: vec![
+                "onvif://www.onvif.org/location/country/unknown".to_string(),
+                "onvif://www.onvif.org/name/OnvifCamera".to_string(),
+            ],
             uuid: String::new(),
             isp_config_path: String::new(),
         }
@@ -766,6 +771,8 @@ pub struct DiscoverySettings {
     pub enabled: bool,
     /// Hello announcement interval in seconds.
     pub hello_interval: u32,
+    /// Discovery mode. `NonDiscoverable` keeps the service running but silent.
+    pub mode: DiscoveryMode,
 }
 
 impl Default for DiscoverySettings {
@@ -775,6 +782,7 @@ impl Default for DiscoverySettings {
             local_ip: "auto".to_string(),
             enabled: true,
             hello_interval: 300,
+            mode: DiscoveryMode::Discoverable,
         }
     }
 }
@@ -902,6 +910,68 @@ mod tests {
     fn test_default_config_validates() {
         let config = AppConfig::default();
         assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn test_device_scopes_default_includes_factory_name_and_location() {
+        let config = AppConfig::default();
+        assert!(
+            config
+                .device
+                .scopes
+                .iter()
+                .any(|s| s.ends_with("/name/OnvifCamera"))
+        );
+        assert!(
+            config
+                .device
+                .scopes
+                .iter()
+                .any(|s| s.ends_with("/location/country/unknown"))
+        );
+    }
+
+    #[test]
+    fn test_device_identity_defaults_are_empty_for_override_detection() {
+        // Empty means "not overridden" so the platform descriptor wins.
+        let config = AppConfig::default();
+        assert_eq!(config.device.manufacturer, "");
+        assert_eq!(config.device.model, "");
+        assert_eq!(config.device.serial_number, "");
+        assert_eq!(config.device.hardware_id, "");
+    }
+
+    #[test]
+    fn test_discovery_mode_defaults_to_discoverable() {
+        let config = AppConfig::default();
+        assert_eq!(config.discovery.mode, DiscoveryMode::Discoverable);
+    }
+
+    #[test]
+    fn test_device_scopes_round_trip_through_toml() {
+        let toml_str = r#"
+[device]
+scopes = ["onvif://www.onvif.org/name/Front%20Door"]
+"#;
+        let config: AppConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(
+            config.device.scopes,
+            vec!["onvif://www.onvif.org/name/Front%20Door"]
+        );
+    }
+
+    #[test]
+    fn test_deployed_config_without_device_section_still_parses() {
+        // No .deploy/*.toml carries [device] or [discovery]; serde(default) must cover it.
+        let config: AppConfig = toml::from_str("[server]\nport = 80\n").unwrap();
+        assert!(
+            config
+                .device
+                .scopes
+                .iter()
+                .any(|s| s.ends_with("/name/OnvifCamera"))
+        );
+        assert_eq!(config.discovery.mode, DiscoveryMode::Discoverable);
     }
 
     /// `validate` must refuse a night config whose threshold pairs leave no
@@ -1079,7 +1149,7 @@ manufacturer = "Custom"
 
         // Defaults for unspecified
         assert!(config.server.auth_enabled);
-        assert_eq!(config.device.model, "AK3918 Camera");
+        assert_eq!(config.device.model, "");
         assert_eq!(config.ptz.pan_speed, 0.5);
         assert_eq!(config.stream_profile_1.width, 1920);
     }
@@ -1165,7 +1235,7 @@ file_name = "static"
         assert!(sample.contains("[server]"));
         assert!(sample.contains("[device]"));
         assert!(sample.contains("port = 80"));
-        assert!(sample.contains("manufacturer = \"Anyka\""));
+        assert!(sample.contains("manufacturer = \"\""));
     }
 
     /// `min_qp` is documented as an inclusive `[20, 25]` range, so the boundaries themselves must

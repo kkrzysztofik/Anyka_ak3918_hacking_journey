@@ -109,6 +109,14 @@ pub enum DiscoveryMode {
     /// Device ignores Probe messages and does not announce itself (silent mode)
     NonDiscoverable,
 }
+impl From<crate::onvif::types::common::DiscoveryMode> for DiscoveryMode {
+    fn from(mode: crate::onvif::types::common::DiscoveryMode) -> Self {
+        match mode {
+            crate::onvif::types::common::DiscoveryMode::Discoverable => Self::Discoverable,
+            crate::onvif::types::common::DiscoveryMode::NonDiscoverable => Self::NonDiscoverable,
+        }
+    }
+}
 
 impl std::fmt::Display for DiscoveryMode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -379,6 +387,16 @@ impl WsDiscoveryHandle {
         // Increment metadata version when configuration changes (Section 4.1)
         let new_version = self.metadata_version.fetch_add(1, Ordering::Relaxed) + 1;
         info!(metadata_version = new_version, "Discovery scopes updated");
+    }
+
+    /// Current metadata version advertised in Hello/ProbeMatch.
+    pub fn metadata_version(&self) -> u32 {
+        self.metadata_version.load(Ordering::Relaxed)
+    }
+
+    /// Scopes currently announced by WS-Discovery.
+    pub async fn scopes(&self) -> Vec<String> {
+        self.config.read().await.scopes.clone()
     }
 
     /// Send a Bye message to the multicast group.
@@ -1526,6 +1544,38 @@ mod tests {
         assert!(xml.contains("d:AppSequence"));
         assert!(xml.contains("InstanceId="));
         assert!(xml.contains("MessageNumber="));
+    }
+
+    #[test]
+    fn test_default_discovery_config_includes_profile_streaming_in_hello_and_probe_match() {
+        let config = DiscoveryConfig::default();
+        assert!(
+            config
+                .scopes
+                .iter()
+                .any(|s| s == "onvif://www.onvif.org/Profile/Streaming"),
+            "DiscoveryConfig::default must include Profile/Streaming"
+        );
+
+        let discovery = WsDiscovery::new(config.clone());
+        match discovery.build_hello_message(&config) {
+            WsDiscoveryMessage::Hello { scopes, .. } => {
+                assert!(
+                    scopes.contains("onvif://www.onvif.org/Profile/Streaming"),
+                    "Hello scopes must include Profile/Streaming"
+                );
+            }
+            other => panic!("Expected Hello message, got {other:?}"),
+        }
+        match discovery.build_probe_match(&config, "urn:uuid:test-probe") {
+            WsDiscoveryMessage::ProbeMatch { scopes, .. } => {
+                assert!(
+                    scopes.contains("onvif://www.onvif.org/Profile/Streaming"),
+                    "ProbeMatch scopes must include Profile/Streaming"
+                );
+            }
+            other => panic!("Expected ProbeMatch message, got {other:?}"),
+        }
     }
 
     #[test]

@@ -5,8 +5,8 @@
 
 #![cfg_attr(not(test), allow(dead_code))]
 
-use crate::config::{ConfigRuntime, UserStorage};
-use std::sync::Arc;
+use crate::config::{ConfigRuntime, PersistenceHandle, UserStorage};
+use std::sync::{Arc, OnceLock};
 
 /// Persistent state for the Device Service.
 ///
@@ -18,6 +18,8 @@ pub struct DeviceStore {
     pub(crate) config: Arc<ConfigRuntime>,
     /// User storage.
     pub(crate) users: Arc<UserStorage>,
+    /// Debounced config.toml persistence handle.
+    persistence: OnceLock<PersistenceHandle>,
 }
 
 impl DeviceStore {
@@ -26,12 +28,32 @@ impl DeviceStore {
         Self {
             config: Arc::new(ConfigRuntime::new(Default::default())),
             users,
+            persistence: OnceLock::new(),
         }
     }
 
     /// Create a new DeviceStore with custom configuration.
     pub fn with_config(users: Arc<UserStorage>, config: Arc<ConfigRuntime>) -> Self {
-        Self { config, users }
+        Self {
+            config,
+            users,
+            persistence: OnceLock::new(),
+        }
+    }
+
+    /// Attach the debounced config.toml persistence handle.
+    pub fn set_persistence(&self, handle: PersistenceHandle) {
+        if self.persistence.set(handle).is_err() {
+            tracing::warn!("DeviceStore persistence handle already set; ignoring");
+        }
+    }
+
+    /// Request a non-blocking, debounced save of config.toml.
+    pub fn request_save(&self) {
+        match self.persistence.get() {
+            Some(handle) => handle.request_save(),
+            None => tracing::debug!("No config persistence handle configured; skipping save"),
+        }
     }
 
     /// Get a clone of the config reference.

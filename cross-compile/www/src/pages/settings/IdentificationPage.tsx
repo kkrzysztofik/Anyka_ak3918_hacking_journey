@@ -3,14 +3,28 @@
  *
  * Manage device identification and location.
  */
-import React, { useEffect } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Activity, HardDrive, Image as ImageIcon, Info, RotateCcw, Save, Wifi } from 'lucide-react';
-import { useForm } from 'react-hook-form';
+import {
+  Activity,
+  Globe,
+  HardDrive,
+  Image as ImageIcon,
+  Info,
+  Plus,
+  Radar,
+  RotateCcw,
+  Save,
+  Trash2,
+  Wifi,
+} from 'lucide-react';
+import { useFieldArray, useForm } from 'react-hook-form';
 import { toast } from 'sonner';
 
+import { HealthStatusValue } from '@/components/settings/HealthStatusValue';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
   Form,
@@ -34,31 +48,55 @@ import {
   StatusCardImage,
   StatusCardItem,
 } from '@/components/ui/status-card';
-import { identificationSchema } from '@/lib/schemas/identification';
+import { Switch } from '@/components/ui/switch';
+import { useDeviceStatus } from '@/hooks/useDeviceStatus';
+import {
+  type IdentificationFormData,
+  type IdentificationFormInput,
+  identificationSchema,
+} from '@/lib/schemas/identification';
 import {
   type DeviceIdentification,
+  type DiscoveryMode,
+  type Scope,
   getDeviceIdentification,
+  getDiscoveryMode,
+  getHostname,
+  getScopes,
+  scopesForSave,
+  setDiscoveryMode,
+  setHostname,
   setScopes,
 } from '@/services/deviceService';
-import { type NetworkInterface, getNetworkInterfaces } from '@/services/networkService';
 import { handleMutationError } from '@/utils/errorHandling';
 
 export default function IdentificationPage() {
   const queryClient = useQueryClient();
 
-  // Fetch device info
-  const { data: deviceInfo, isLoading: isDeviceLoading } = useQuery<DeviceIdentification>({
+  const { data: deviceInfo, isError: isDeviceError } = useQuery<DeviceIdentification>({
     queryKey: ['deviceInformation'],
     queryFn: getDeviceIdentification,
   });
 
-  // Fetch network info for status card
-  const { data: networkInterfaces } = useQuery<NetworkInterface[]>({
-    queryKey: ['networkInterfaces'],
-    queryFn: getNetworkInterfaces,
+  const { data: scopes, isError: isScopesError } = useQuery<Scope[]>({
+    queryKey: ['deviceScopes'],
+    queryFn: getScopes,
   });
 
-  const form = useForm<DeviceIdentification>({
+  const { data: hostname, isError: isHostnameError } = useQuery<string>({
+    queryKey: ['hostname'],
+    queryFn: getHostname,
+  });
+
+  const { data: discoveryMode, isError: isDiscoveryError } = useQuery<DiscoveryMode>({
+    queryKey: ['discoveryMode'],
+    queryFn: getDiscoveryMode,
+  });
+
+  const { healthStatus, primaryInterface, systemUptime, wifiChannel, wifiQuality, wifiSecurity } =
+    useDeviceStatus();
+
+  const form = useForm<IdentificationFormInput, unknown, IdentificationFormData>({
     resolver: zodResolver(identificationSchema),
     defaultValues: {
       deviceInfo: {
@@ -70,48 +108,180 @@ export default function IdentificationPage() {
       },
       name: '',
       location: '',
+      hostname: '',
+      discoveryMode: 'Discoverable',
+      scopes: [],
     },
   });
 
-  // Update form when data is loaded
-  useEffect(() => {
-    if (deviceInfo) {
-      form.reset(deviceInfo);
-    }
-  }, [deviceInfo, form]);
+  const { fields, append, remove } = useFieldArray({
+    control: form.control,
+    name: 'scopes',
+  });
+  const [newScope, setNewScope] = useState('');
 
-  // Mutation for saving device info
+  useEffect(() => {
+    if (
+      deviceInfo &&
+      scopes &&
+      hostname !== undefined &&
+      discoveryMode &&
+      !form.formState.isDirty
+    ) {
+      form.reset({
+        ...deviceInfo,
+        hostname,
+        discoveryMode,
+        scopes,
+      });
+    }
+  }, [deviceInfo, scopes, hostname, discoveryMode, form]);
+
   const mutation = useMutation({
-    mutationFn: (values: DeviceIdentification) => setScopes(values.name, values.location),
-    onSuccess: () => {
+    mutationFn: async (values: IdentificationFormData) => {
+      const dirty = form.formState.dirtyFields;
+      const shouldSaveScopes = Boolean(dirty.name || dirty.location || dirty.scopes);
+      const shouldSaveHostname = Boolean(dirty.hostname);
+      const result: {
+        scopes: 'saved' | 'skipped' | 'failed';
+        hostname: 'saved' | 'skipped' | 'failed';
+        scopesError?: unknown;
+        hostnameError?: unknown;
+      } = {
+        scopes: shouldSaveScopes ? 'failed' : 'skipped',
+        hostname: shouldSaveHostname ? 'failed' : 'skipped',
+      };
+
+      if (shouldSaveScopes) {
+        try {
+          await setScopes(
+            scopesForSave(values.scopes, { name: values.name, location: values.location }),
+          );
+          result.scopes = 'saved';
+        } catch (error) {
+          result.scopesError = error;
+        }
+      }
+
+      if (shouldSaveHostname) {
+        try {
+          await setHostname(values.hostname);
+          result.hostname = 'saved';
+        } catch (error) {
+          result.hostnameError = error;
+        }
+      }
+
+      if (result.scopes !== 'saved' && result.hostname !== 'saved') {
+        throw result.scopesError ?? result.hostnameError ?? new Error('Nothing to save');
+      }
+
+      return result;
+    },
+    onSuccess: (result, values) => {
+      if (result.scopes === 'saved') {
+        queryClient.invalidateQueries({ queryKey: ['deviceInformation'] });
+        queryClient.invalidateQueries({ queryKey: ['deviceScopes'] });
+      }
+      if (result.hostname === 'saved') {
+        queryClient.invalidateQueries({ queryKey: ['hostname'] });
+      }
+
+      if (result.scopes === 'failed') {
+        toast.warning('Hostname saved, but scopes update failed');
+        handleMutationError(result.scopesError, 'Failed to save scopes');
+        return;
+      }
+      if (result.hostname === 'failed') {
+        toast.warning('Scopes saved, but hostname update failed');
+        handleMutationError(result.hostnameError, 'Failed to update hostname');
+        return;
+      }
+
       toast.success('Device information saved');
-      queryClient.invalidateQueries({ queryKey: ['deviceInformation'] });
+      form.reset(values);
     },
     onError: (error) => {
       handleMutationError(error, 'Failed to save device information');
     },
   });
 
-  const onSubmit = (values: DeviceIdentification) => {
+  const discoveryMutation = useMutation({
+    mutationFn: (mode: DiscoveryMode) => setDiscoveryMode(mode),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['discoveryMode'] });
+      toast.success('Discovery mode updated');
+    },
+    onError: (error) => {
+      handleMutationError(error, 'Failed to update discovery mode');
+    },
+  });
+
+  const onSubmit = (values: IdentificationFormData) => {
     mutation.mutate(values);
   };
 
   const handleReset = () => {
-    if (deviceInfo) {
-      form.reset(deviceInfo);
+    if (deviceInfo && scopes && hostname !== undefined && discoveryMode) {
+      form.reset({
+        ...deviceInfo,
+        hostname,
+        discoveryMode,
+        scopes,
+      });
+      setNewScope('');
       toast.info('Form reset to current device values');
     }
   };
 
-  if (isDeviceLoading) {
+  const handleAddScope = useCallback(() => {
+    const scopeItem = newScope.trim();
+    if (!scopeItem) {
+      return;
+    }
+    if (fields.some((field) => field.scopeItem === scopeItem)) {
+      setNewScope('');
+      return;
+    }
+    append({ scopeDef: 'Configurable', scopeItem });
+    setNewScope('');
+  }, [append, fields, newScope]);
+
+  const handleDiscoveryToggle = useCallback(
+    (enabled: boolean) => {
+      discoveryMutation.mutate(enabled ? 'Discoverable' : 'NonDiscoverable');
+    },
+    [discoveryMutation],
+  );
+
+  const handleRemoveScope = useCallback(
+    (index: number) => {
+      remove(index);
+    },
+    [remove],
+  );
+
+  const identificationError = isDeviceError || isScopesError || isHostnameError || isDiscoveryError;
+  if (identificationError) {
+    return (
+      <div className="text-white" data-testid="identification-error">
+        Failed to load identification
+      </div>
+    );
+  }
+
+  if (
+    deviceInfo === undefined ||
+    scopes === undefined ||
+    hostname === undefined ||
+    discoveryMode === undefined
+  ) {
     return (
       <div className="text-white" data-testid="identification-loading">
         Loading...
       </div>
     );
   }
-
-  const primaryInterface = networkInterfaces?.[0];
 
   return (
     <div
@@ -143,17 +313,39 @@ export default function IdentificationPage() {
             <StatusCardItem
               label="Status"
               value={
-                <div className="flex items-center gap-2">
-                  <div className="size-2 rounded-full bg-green-500" />
-                  <span>Online</span>
-                </div>
+                <HealthStatusValue
+                  label={healthStatus.label}
+                  tone={healthStatus.tone}
+                  detail={healthStatus.detail}
+                  testId="identification-status-health"
+                />
               }
             />
-            <StatusCardItem label="Uptime" value="--" />
-            <StatusCardItem label="MAC Address" value={primaryInterface?.hwAddress || '--'} />
-            <StatusCardItem label="Speed" value="100 Mbps" />
-            <StatusCardItem label="Channel" value="Auto" />
-            <StatusCardItem label="Security" value="--" />
+            <StatusCardItem
+              label="Uptime"
+              value={systemUptime}
+              data-testid="identification-status-uptime"
+            />
+            <StatusCardItem
+              label="MAC Address"
+              value={primaryInterface?.hwAddress || '—'}
+              data-testid="identification-status-mac"
+            />
+            <StatusCardItem
+              label="Link Quality"
+              value={wifiQuality}
+              data-testid="identification-status-quality"
+            />
+            <StatusCardItem
+              label="Channel"
+              value={wifiChannel}
+              data-testid="identification-status-channel"
+            />
+            <StatusCardItem
+              label="Security"
+              value={wifiSecurity}
+              data-testid="identification-status-security"
+            />
           </StatusCardContent>
         </StatusCard>
 
@@ -209,6 +401,144 @@ export default function IdentificationPage() {
                     </FormItem>
                   )}
                 />
+                <FormField
+                  control={form.control}
+                  name="hostname"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel className="text-[#a1a1a6]">Hostname</FormLabel>
+                      <FormControl>
+                        <Input
+                          {...field}
+                          className="border-[#3a3a3c] bg-transparent text-white focus:border-[#dc2626]"
+                          data-testid="identification-hostname-input"
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </SettingsCardContent>
+            </SettingsCard>
+
+            <SettingsCard>
+              <SettingsCardHeader>
+                <div className="flex items-center gap-[12px]">
+                  <div className="flex size-[40px] items-center justify-center rounded-[10px] bg-[rgba(10,132,255,0.1)]">
+                    <Radar className="size-5 text-[#0a84ff]" />
+                  </div>
+                  <div>
+                    <SettingsCardTitle>Discovery</SettingsCardTitle>
+                    <SettingsCardDescription>
+                      Control whether this camera answers WS-Discovery
+                    </SettingsCardDescription>
+                  </div>
+                </div>
+              </SettingsCardHeader>
+              <SettingsCardContent className="space-y-[16px]">
+                <div className="flex items-center justify-between gap-[16px]">
+                  <div>
+                    <p className="text-[14px] text-white">Discoverable</p>
+                    <p className="text-[13px] text-[#a1a1a6]">
+                      NonDiscoverable stops Probe replies and Hello announcements, so ONVIF clients
+                      will not find this camera on the network.
+                    </p>
+                  </div>
+                  <Switch
+                    checked={discoveryMode === 'Discoverable'}
+                    disabled={discoveryMutation.isPending}
+                    onCheckedChange={handleDiscoveryToggle}
+                    aria-label="Discoverable"
+                    data-testid="identification-discovery-switch"
+                  />
+                </div>
+              </SettingsCardContent>
+            </SettingsCard>
+
+            <SettingsCard>
+              <SettingsCardHeader>
+                <div className="flex items-center gap-[12px]">
+                  <div className="flex size-[40px] items-center justify-center rounded-[10px] bg-[rgba(48,209,88,0.1)]">
+                    <Globe className="size-5 text-[#30d158]" />
+                  </div>
+                  <div>
+                    <SettingsCardTitle>Scopes</SettingsCardTitle>
+                    <SettingsCardDescription>
+                      ONVIF scopes announced during discovery
+                    </SettingsCardDescription>
+                  </div>
+                </div>
+              </SettingsCardHeader>
+              <SettingsCardContent className="p-0">
+                <div className="overflow-hidden">
+                  <table className="w-full text-left text-sm text-[#a1a1a6]">
+                    <thead className="border-b border-[#3a3a3c] bg-[#1c1c1e] text-xs font-medium uppercase">
+                      <tr>
+                        <th className="px-6 py-4">Scope</th>
+                        <th className="px-6 py-4">Type</th>
+                        <th className="px-6 py-4 text-right">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-[#3a3a3c]">
+                      {fields.map((field, index) => (
+                        <tr
+                          key={field.id}
+                          className="transition-colors hover:bg-[#2c2c2e]/50"
+                          data-testid={`identification-scope-row-${field.scopeItem}`}
+                        >
+                          <td className="px-6 py-4 font-mono text-[13px] break-all text-white">
+                            {field.scopeItem}
+                          </td>
+                          <td className="px-6 py-4">
+                            <Badge
+                              className={`pointer-events-none rounded-md border px-2 py-1 text-xs font-medium ${
+                                field.scopeDef === 'Fixed'
+                                  ? 'border-[rgba(142,142,147,0.2)] bg-[rgba(142,142,147,0.1)] text-[#8e8e93]'
+                                  : 'border-[rgba(48,209,88,0.2)] bg-[rgba(48,209,88,0.1)] text-[#30d158]'
+                              }`}
+                            >
+                              {field.scopeDef}
+                            </Badge>
+                          </td>
+                          <td className="px-6 py-4 text-right">
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              disabled={field.scopeDef === 'Fixed'}
+                              onClick={() => handleRemoveScope(index)}
+                              aria-label={`Remove scope ${field.scopeItem}`}
+                              className="h-8 w-8 text-[#a1a1a6] hover:bg-[rgba(220,38,38,0.1)] hover:text-[#dc2626]"
+                              data-testid={`identification-scope-remove-${field.scopeItem}`}
+                            >
+                              <Trash2 className="size-4" />
+                            </Button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="flex gap-[8px] border-t border-[#3a3a3c] p-[16px]">
+                  <Input
+                    value={newScope}
+                    onChange={(event) => setNewScope(event.target.value)}
+                    placeholder="onvif://www.onvif.org/…"
+                    aria-label="New ONVIF scope"
+                    className="border-[#3a3a3c] bg-transparent text-white focus:border-[#dc2626]"
+                    data-testid="identification-scope-add-input"
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={handleAddScope}
+                    className="h-[40px] border-[#3a3a3c] bg-transparent text-[#a1a1a6] hover:bg-[#1c1c1e] hover:text-white"
+                    data-testid="identification-scope-add-button"
+                  >
+                    <Plus className="mr-2 size-4" />
+                    Add
+                  </Button>
+                </div>
               </SettingsCardContent>
             </SettingsCard>
 
@@ -317,7 +647,7 @@ export default function IdentificationPage() {
                 data-testid="identification-reset-button"
               >
                 <RotateCcw className="mr-2 size-4" />
-                Reset to Default
+                Discard Changes
               </Button>
             </div>
 

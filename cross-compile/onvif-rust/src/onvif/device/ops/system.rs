@@ -46,10 +46,11 @@ pub async fn handle_get_device_information(
     tracing::debug!("GetDeviceInformation request");
 
     let info = if let Some(platform) = platform {
-        platform.get_device_info().await.unwrap_or_else(|e| {
+        let from_platform = platform.get_device_info().await.unwrap_or_else(|e| {
             tracing::warn!("Failed to get device info from platform: {}", e);
             device_info_from_config(config)
-        })
+        });
+        apply_identity_overrides(from_platform, config)
     } else {
         device_info_from_config(config)
     };
@@ -67,16 +68,40 @@ pub async fn handle_get_device_information(
     })
 }
 
+/// Fallback identity when no platform is present (host tests, degraded start).
+fn default_device_info() -> DeviceInfo {
+    DeviceInfo {
+        manufacturer: "Anyka".to_string(),
+        model: "AK3918 Camera".to_string(),
+        firmware_version: "1.0.0".to_string(),
+        serial_number: "AK3918-001".to_string(),
+        hardware_id: "ak3918".to_string(),
+    }
+}
+
+/// Overlay non-empty config values over the platform descriptor.
+///
+/// Empty means "not overridden", so a camera with no `[device]` section keeps
+/// reporting exactly what the platform says. `firmware_version` is deliberately
+/// excluded: `build_version()` stays authoritative.
+fn apply_identity_overrides(mut info: DeviceInfo, config: &Arc<ConfigRuntime>) -> DeviceInfo {
+    let c = config.read();
+    for (field, override_value) in [
+        (&mut info.manufacturer, &c.device.manufacturer),
+        (&mut info.model, &c.device.model),
+        (&mut info.serial_number, &c.device.serial_number),
+        (&mut info.hardware_id, &c.device.hardware_id),
+    ] {
+        if !override_value.is_empty() {
+            *field = override_value.clone();
+        }
+    }
+    info
+}
+
 /// Get device info from configuration.
 pub fn device_info_from_config(config: &Arc<ConfigRuntime>) -> DeviceInfo {
-    let c = config.read();
-    DeviceInfo {
-        manufacturer: c.device.manufacturer.clone(),
-        model: c.device.model.clone(),
-        firmware_version: c.device.firmware_version.clone(),
-        serial_number: c.device.serial_number.clone(),
-        hardware_id: c.device.hardware_id.clone(),
-    }
+    apply_identity_overrides(default_device_info(), config)
 }
 
 /// Handle GetCapabilities request (legacy).
@@ -396,6 +421,65 @@ mod tests {
         Arc::new(ConfigRuntime::new(Default::default()))
     }
 
+    fn mock_platform_with_serial(serial: &str) -> Arc<dyn crate::platform::Platform> {
+        Arc::new(
+            crate::platform::StubPlatformBuilder::new()
+                .device_info(crate::platform::DeviceInfo {
+                    manufacturer: "Anyka".to_string(),
+                    model: "AK3918".to_string(),
+                    firmware_version: "1.0.0".to_string(),
+                    serial_number: serial.to_string(),
+                    hardware_id: "ak3918-hw".to_string(),
+                })
+                .build(),
+        )
+    }
+
+    #[tokio::test]
+    async fn test_device_information_uses_platform_when_config_is_empty() {
+        let config = create_test_config();
+        let platform = mock_platform_with_serial("AK3918-001");
+
+        let response = handle_get_device_information(&Some(platform), &config)
+            .await
+            .unwrap();
+
+        assert_eq!(response.serial_number, "AK3918-001");
+    }
+
+    #[tokio::test]
+    async fn test_device_information_config_overrides_platform() {
+        let config = create_test_config();
+        config.write().device.serial_number = "CAM-198".to_string();
+        let platform = mock_platform_with_serial("AK3918-001");
+
+        let response = handle_get_device_information(&Some(platform), &config)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            response.serial_number, "CAM-198",
+            "operators must be able to give each camera a unique serial"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_device_information_firmware_always_reports_build_version() {
+        let config = create_test_config();
+        config.write().device.firmware_version = "9.9.9".to_string();
+        let platform = mock_platform_with_serial("AK3918-001");
+
+        let response = handle_get_device_information(&Some(platform), &config)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            response.firmware_version,
+            crate::build_version(),
+            "config must not be able to misreport the running build"
+        );
+    }
+
     // ========================================================================
     // GetDeviceInformation Tests (T204)
     // ========================================================================
@@ -405,7 +489,6 @@ mod tests {
         let config = create_test_config();
         let response = handle_get_device_information(&None, &config).await.unwrap();
 
-        // Default values from config - these should always be present
         assert_eq!(response.manufacturer, "Anyka");
         assert_eq!(response.model, "AK3918 Camera");
         assert_eq!(

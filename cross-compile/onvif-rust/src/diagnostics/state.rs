@@ -82,6 +82,8 @@ pub struct Snapshot {
     /// PTZ subsystem state, including bring-up failures. `None` when the platform does
     /// not report PTZ at all.
     pub ptz: Option<PtzDiagnostics>,
+    /// Wi-Fi association snapshot from `wpa_cli`, when available.
+    pub wifi: Option<super::wifi::WifiDiagnostics>,
 }
 
 /// Holds platform handles and the last `/proc` sample for computing deltas.
@@ -261,6 +263,18 @@ impl DiagnosticsState {
 
         let ptz = self.platform.as_ref().and_then(|p| p.ptz_diagnostics());
 
+        let wifi = match tokio::task::spawn_blocking(|| {
+            super::wifi::read_wifi_diagnostics(super::wifi::DEFAULT_WIFI_IFACE)
+        })
+        .await
+        {
+            Ok(snapshot) => snapshot,
+            Err(error) => {
+                tracing::debug!(%error, "wifi diagnostics task failed");
+                None
+            }
+        };
+
         Snapshot {
             status: health.status.to_string(),
             firmware_version: crate::build_version().to_string(),
@@ -277,6 +291,7 @@ impl DiagnosticsState {
             components,
             vision,
             ptz,
+            wifi,
         }
     }
 }

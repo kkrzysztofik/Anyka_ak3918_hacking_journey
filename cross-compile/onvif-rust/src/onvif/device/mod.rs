@@ -40,7 +40,6 @@
 pub(crate) mod faults;
 pub(crate) mod ops;
 pub mod service;
-pub(crate) mod state;
 pub(crate) mod store;
 pub mod types;
 pub mod user_types;
