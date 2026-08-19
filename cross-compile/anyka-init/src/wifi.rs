@@ -413,6 +413,18 @@ pub fn resolve_chip(pinned: &str, hw_conf_path: &str) -> Result<(&'static Chip, 
     Ok((chip, Polarity::from_char(hw.polarity_char)))
 }
 
+/// Clear the Wi-Fi reboot counter after a successful association (B4).
+fn on_association_success(storm_state_path: &str, outcome: Outcome) -> Outcome {
+    if matches!(outcome, Outcome::Up { .. }) {
+        let mut storm = crate::storm::StormState::load(storm_state_path);
+        storm.wifi_reboots = 0;
+        if let Err(e) = storm.save(storm_state_path) {
+            tracing::warn!(error = %e, "failed to clear wifi reboot counter");
+        }
+    }
+    outcome
+}
+
 /// Full bring-up. Steps are numbered to match the design addendum.
 ///
 /// `storm_state_path` is where the wifi reboot counter lives; a successful
@@ -431,16 +443,7 @@ pub fn bring_up_with(
     layout: &FsLayout,
 ) -> Outcome {
     match try_bring_up_with(sys, cfg, layout) {
-        Ok(outcome) => {
-            if matches!(outcome, Outcome::Up { .. }) {
-                let mut storm = crate::storm::StormState::load(storm_state_path);
-                storm.wifi_reboots = 0;
-                if let Err(e) = storm.save(storm_state_path) {
-                    tracing::warn!(error = %e, "failed to clear wifi reboot counter");
-                }
-            }
-            outcome
-        }
+        Ok(outcome) => on_association_success(storm_state_path, outcome),
         Err(e) => {
             tracing::error!(error = %e, "wifi bring-up failed");
             if cfg.fallback_to_vendor {
@@ -469,26 +472,21 @@ pub fn bring_up_with_overlay(
     overlay_path: &std::path::Path,
 ) -> Outcome {
     match try_bring_up_with(sys, cfg, layout) {
-        Ok(outcome) => {
-            if matches!(outcome, Outcome::Up { .. }) {
-                let mut storm = crate::storm::StormState::load(storm_state_path);
-                storm.wifi_reboots = 0;
-                if let Err(e) = storm.save(storm_state_path) {
-                    tracing::warn!(error = %e, "failed to clear wifi reboot counter");
-                }
-            }
-            outcome
-        }
+        Ok(outcome) => on_association_success(storm_state_path, outcome),
         Err(e) => {
             tracing::error!(error = %e, "wifi bring-up failed");
 
             if overlay_path.exists() {
-                crate::netoverlay::NetworkOverlay::quarantine(overlay_path);
+                if crate::netoverlay::NetworkOverlay::load(overlay_path)
+                    .is_ok_and(|overlay| overlay.overrides_association())
+                {
+                    crate::netoverlay::NetworkOverlay::quarantine(overlay_path);
+                }
 
                 match try_bring_up_with(sys, baseline, layout) {
                     Ok(outcome) => {
                         tracing::warn!("recovered on the baseline config");
-                        return outcome;
+                        return on_association_success(storm_state_path, outcome);
                     }
                     Err(e) => tracing::error!(error = %e, "baseline retry also failed"),
                 }

@@ -71,31 +71,52 @@ import {
 const octet = String.raw`(?:25[0-5]|2[0-4]\d|1\d{2}|[1-9]\d|\d)`;
 const ipRegex = new RegExp(String.raw`^${octet}\.${octet}\.${octet}\.${octet}$`);
 
-const networkSchema = z.object({
-  ssid: z.string().min(1, 'SSID is required').max(32, 'SSID must be 32 characters or fewer'),
-  password: z.string().max(63, 'WPA passphrases are at most 63 characters'),
-  security: z.enum(['wpa', 'wep', 'none']),
-  dhcp: z.boolean(),
-  address: z.string().regex(ipRegex, 'Invalid IP address').optional().or(z.literal('')),
-  prefixLength: z.number().min(0).max(32).optional(),
-  gateway: z.string().regex(ipRegex, 'Invalid IP address').optional().or(z.literal('')),
-  dnsFromDHCP: z.boolean(),
-  primaryDNS: z.string().regex(ipRegex, 'Invalid IP address').optional().or(z.literal('')),
-  secondaryDNS: z.string().regex(ipRegex, 'Invalid IP address').optional().or(z.literal('')),
-  httpPort: z.number().int().min(1, 'Port must be 1-65535').max(65535, 'Port must be 1-65535'),
-  rtspPort: z.number().int().min(1, 'Port must be 1-65535').max(65535, 'Port must be 1-65535'),
-});
+const networkSchema = z
+  .object({
+    ssid: z.string().min(1, 'SSID is required').max(32, 'SSID must be 32 characters or fewer'),
+    password: z.string().max(63, 'WPA passphrases are at most 63 characters'),
+    security: z.enum(['wpa', 'wep', 'open']),
+    dhcp: z.boolean(),
+    address: z.string().regex(ipRegex, 'Invalid IP address').optional().or(z.literal('')),
+    prefixLength: z.number().min(0).max(32).optional(),
+    gateway: z.string().regex(ipRegex, 'Invalid IP address').optional().or(z.literal('')),
+    dnsFromDHCP: z.boolean(),
+    primaryDNS: z.string().regex(ipRegex, 'Invalid IP address').optional().or(z.literal('')),
+    secondaryDNS: z.string().regex(ipRegex, 'Invalid IP address').optional().or(z.literal('')),
+    httpPort: z.number().int().min(1, 'Port must be 1-65535').max(65535, 'Port must be 1-65535'),
+    rtspPort: z.number().int().min(1, 'Port must be 1-65535').max(65535, 'Port must be 1-65535'),
+  })
+  .superRefine((data, ctx) => {
+    if (!data.dhcp) {
+      if (!data.address?.trim()) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['address'],
+          message: 'IP address is required when DHCP is disabled',
+        });
+      }
+      if (!data.gateway?.trim()) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['gateway'],
+          message: 'Gateway is required when DHCP is disabled',
+        });
+      }
+    }
+  });
 
 type NetworkFormData = z.infer<typeof networkSchema>;
 
 function parseOverlayAddress(address?: string): { ip: string; prefix: number } | null {
   if (!address) return null;
-  const [ip, prefix] = address.split('/');
-  if (!ip || !prefix) return null;
-  return { ip, prefix: Number(prefix) };
+  const [ip, prefixStr] = address.split('/');
+  if (!ip || !prefixStr) return null;
+  const prefix = Number(prefixStr);
+  if (!Number.isFinite(prefix) || prefix < 0 || prefix > 32) return null;
+  return { ip, prefix };
 }
 
-function overlayDiffersFromLive(
+function ipOverlayDiffersFromLive(
   config: NetworkConfig | undefined,
   overlay: Awaited<ReturnType<typeof getNetworkOverlay>> | undefined,
 ): boolean {
@@ -111,8 +132,25 @@ function overlayDiffersFromLive(
   }
   if (pending.gateway && pending.gateway !== iface.gateway) return true;
   if (pending.dns && pending.dns.join(',') !== config.dns.dnsServers.join(',')) return true;
-  if (pending.ssid) return true;
   return false;
+}
+
+function buildWifiOverlayPatch(
+  values: NetworkFormData,
+  liveSsid: string | undefined,
+  liveSecurity: NetworkFormData['security'],
+): Parameters<typeof putNetworkOverlay>[0] | null {
+  const patch: Parameters<typeof putNetworkOverlay>[0] = {};
+  if (values.ssid && values.ssid !== liveSsid) {
+    patch.ssid = values.ssid;
+  }
+  if (values.security !== liveSecurity) {
+    patch.security = values.security;
+  }
+  if (values.password) {
+    patch.password = values.password;
+  }
+  return Object.keys(patch).length > 0 ? patch : null;
 }
 
 export default function NetworkPage() {
@@ -155,7 +193,7 @@ export default function NetworkPage() {
   const { healthStatus, primaryInterface, systemUptime, wifiQuality, diagnostics } =
     useDeviceStatus();
 
-  const ipPending = useMemo(() => overlayDiffersFromLive(config, overlay), [config, overlay]);
+  const ipPending = useMemo(() => ipOverlayDiffersFromLive(config, overlay), [config, overlay]);
 
   useEffect(() => {
     if (config) {
@@ -163,7 +201,7 @@ export default function NetworkPage() {
       const pending = overlay?.pending;
       const parsed = parseOverlayAddress(pending?.address);
       form.reset({
-        ssid: pending?.ssid ?? diagnostics?.wifi?.ssid ?? 'camera',
+        ssid: pending?.ssid ?? diagnostics?.wifi?.ssid ?? '',
         password: '',
         security: (pending?.security as NetworkFormData['security']) ?? 'wpa',
         dhcp: pending?.dhcp ?? iface?.dhcp ?? true,
@@ -184,14 +222,13 @@ export default function NetworkPage() {
       const iface = config?.interfaces[0];
       if (!iface) throw new Error('No interface found');
 
-      const wifiPatch: Parameters<typeof putNetworkOverlay>[0] = {
-        ssid: values.ssid,
-        security: values.security,
-      };
-      if (values.password) {
-        wifiPatch.password = values.password;
+      const liveSsid = overlay?.pending?.ssid ?? diagnostics?.wifi?.ssid;
+      const liveSecurity =
+        (overlay?.pending?.security as NetworkFormData['security'] | undefined) ?? 'wpa';
+      const wifiPatch = buildWifiOverlayPatch(values, liveSsid, liveSecurity);
+      if (wifiPatch) {
+        await putNetworkOverlay(wifiPatch);
       }
-      await putNetworkOverlay(wifiPatch);
 
       try {
         await setNetworkInterface(iface.token, values.dhcp, values.address, values.prefixLength);
@@ -258,7 +295,7 @@ export default function NetworkPage() {
       const pending = overlay?.pending;
       const parsed = parseOverlayAddress(pending?.address);
       form.reset({
-        ssid: pending?.ssid ?? diagnostics?.wifi?.ssid ?? 'camera',
+        ssid: pending?.ssid ?? diagnostics?.wifi?.ssid ?? '',
         password: '',
         security: (pending?.security as NetworkFormData['security']) ?? 'wpa',
         dhcp: pending?.dhcp ?? iface?.dhcp ?? true,
@@ -335,6 +372,7 @@ export default function NetworkPage() {
               variant="ghost"
               size="icon"
               className="shrink-0 text-[#ff453a]"
+              aria-label="Dismiss network failure"
               onClick={() => setFailureDismissed(true)}
               data-testid="network-failure-dismiss"
             >
@@ -440,7 +478,7 @@ export default function NetworkPage() {
                         <SelectContent>
                           <SelectItem value="wpa">WPA/WPA2</SelectItem>
                           <SelectItem value="wep">WEP</SelectItem>
-                          <SelectItem value="none">Open</SelectItem>
+                          <SelectItem value="open">Open</SelectItem>
                         </SelectContent>
                       </Select>
                       <FormMessage />

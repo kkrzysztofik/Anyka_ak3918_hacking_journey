@@ -11,28 +11,35 @@ use std::sync::Arc;
 use axum::Json;
 use axum::extract::Extension;
 use axum::http::StatusCode;
+use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 
-use crate::config::netoverlay::NetworkOverlay;
-use crate::diagnostics::update::DEFAULT_UPDATE_ROOT;
+use crate::config::netoverlay::{DEFAULT_OVERLAY_PATH, NetworkOverlay};
 
 /// Shared state for the network overlay endpoint.
 #[derive(Clone)]
 pub struct NetworkState {
     pub overlay_path: PathBuf,
+    pub overlay_lock: Arc<Mutex<()>>,
 }
 
 impl NetworkState {
-    pub fn from_update_root(update_root: impl Into<PathBuf>) -> Self {
+    pub fn new(overlay_path: impl Into<PathBuf>) -> Self {
         Self {
-            overlay_path: update_root.into().join("network.toml"),
+            overlay_path: overlay_path.into(),
+            overlay_lock: NetworkOverlay::overlay_lock(),
         }
+    }
+
+    /// Test-only helper: overlay path under an update root.
+    pub fn from_update_root(update_root: impl Into<PathBuf>) -> Self {
+        Self::new(update_root.into().join("network.toml"))
     }
 }
 
 impl Default for NetworkState {
     fn default() -> Self {
-        Self::from_update_root(DEFAULT_UPDATE_ROOT)
+        Self::new(DEFAULT_OVERLAY_PATH)
     }
 }
 
@@ -95,10 +102,27 @@ fn validate_patch(patch: &NetworkOverlayPatch) -> Result<(), String> {
     if patch.ssid.as_deref() == Some("") {
         return Err("SSID cannot be empty".to_string());
     }
-    if let Some(ref addr) = patch.address {
+    if let Some(sec) = patch.security.as_deref()
+        && !matches!(sec, "wpa" | "wep" | "open")
+    {
+        return Err(format!("security must be wpa, wep, or open (got {sec})"));
+    }
+    if patch.dhcp == Some(false) {
+        if patch.address.as_deref().is_none_or(|a| a.trim().is_empty()) {
+            return Err("address is required when DHCP is disabled".to_string());
+        }
+        if patch.gateway.as_deref().is_none_or(|g| g.trim().is_empty()) {
+            return Err("gateway is required when DHCP is disabled".to_string());
+        }
+    }
+    if let Some(ref addr) = patch.address
+        && !addr.is_empty()
+    {
         validate_cidr(addr)?;
     }
-    if let Some(ref gw) = patch.gateway {
+    if let Some(ref gw) = patch.gateway
+        && !gw.is_empty()
+    {
         validate_ipv4(gw)?;
     }
     if let Some(ref servers) = patch.dns {
@@ -158,16 +182,17 @@ fn merge_overlay(existing: &mut NetworkOverlay, patch: NetworkOverlayPatch) {
 /// GET /api/network
 pub async fn handle_get_network(
     Extension(state): Extension<Arc<NetworkState>>,
-) -> Json<NetworkStateResponse> {
-    let pending = NetworkOverlay::read(&state.overlay_path).unwrap_or_default();
+) -> Result<Json<NetworkStateResponse>, (StatusCode, String)> {
+    let pending = NetworkOverlay::read(&state.overlay_path)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     let last_failure = NetworkOverlay::last_failure(&state.overlay_path)
         .map(|o| NetworkOverlayView::from_overlay(&o));
 
-    Json(NetworkStateResponse {
+    Ok(Json(NetworkStateResponse {
         has_pending: overlay_exists(&state.overlay_path),
         pending: NetworkOverlayView::from_overlay(&pending),
         last_failure,
-    })
+    }))
 }
 
 /// PUT /api/network
@@ -177,6 +202,7 @@ pub async fn handle_put_network(
 ) -> Result<StatusCode, (StatusCode, String)> {
     validate_patch(&patch).map_err(|reason| (StatusCode::BAD_REQUEST, reason))?;
 
+    let _guard = state.overlay_lock.lock();
     let mut overlay = NetworkOverlay::read(&state.overlay_path)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     merge_overlay(&mut overlay, patch);
@@ -212,5 +238,102 @@ mod tests {
             ..Default::default()
         };
         assert!(validate_patch(&patch).is_err());
+    }
+
+    #[test]
+    fn test_validate_patch_rejects_static_without_address_or_gateway() {
+        let patch = NetworkOverlayPatch {
+            dhcp: Some(false),
+            address: Some(String::new()),
+            gateway: Some("192.168.1.1".into()),
+            ..Default::default()
+        };
+        assert!(validate_patch(&patch).is_err());
+
+        let patch = NetworkOverlayPatch {
+            dhcp: Some(false),
+            address: Some("192.168.1.10/24".into()),
+            gateway: Some(String::new()),
+            ..Default::default()
+        };
+        assert!(validate_patch(&patch).is_err());
+    }
+
+    #[test]
+    fn test_validate_patch_rejects_invalid_security() {
+        let patch = NetworkOverlayPatch {
+            security: Some("wpa3".into()),
+            ..Default::default()
+        };
+        assert!(validate_patch(&patch).is_err());
+    }
+
+    #[test]
+    fn test_merge_overlay_preserves_absent_keys() {
+        let mut existing = NetworkOverlay {
+            ssid: Some("Net".into()),
+            dhcp: Some(false),
+            address: Some("10.0.0.1/24".into()),
+            ..Default::default()
+        };
+        merge_overlay(
+            &mut existing,
+            NetworkOverlayPatch {
+                gateway: Some("10.0.0.254".into()),
+                ..Default::default()
+            },
+        );
+        assert_eq!(existing.ssid.as_deref(), Some("Net"));
+        assert_eq!(existing.dhcp, Some(false));
+        assert_eq!(existing.address.as_deref(), Some("10.0.0.1/24"));
+        assert_eq!(existing.gateway.as_deref(), Some("10.0.0.254"));
+    }
+
+    #[test]
+    fn test_merge_overlay_stores_explicit_empty_dns_list() {
+        let mut existing = NetworkOverlay {
+            dns: Some(vec!["8.8.8.8".into()]),
+            ..Default::default()
+        };
+        merge_overlay(
+            &mut existing,
+            NetworkOverlayPatch {
+                dns: Some(vec![]),
+                ..Default::default()
+            },
+        );
+        assert_eq!(existing.dns, Some(vec![]));
+    }
+
+    #[test]
+    fn test_validate_cidr_rejects_missing_prefix_and_out_of_range() {
+        assert!(validate_cidr("192.168.1.1").is_err());
+        assert!(validate_cidr("192.168.1.1/0").is_err());
+        assert!(validate_cidr("192.168.1.1/33").is_err());
+        assert!(validate_cidr("192.168.1.1/24").is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_handle_put_network_round_trips_via_tempfile() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("network.toml");
+        let state = Arc::new(NetworkState::new(&path));
+
+        let result = handle_put_network(
+            Extension(Arc::clone(&state)),
+            Json(NetworkOverlayPatch {
+                ssid: Some("TestNet".into()),
+                dhcp: Some(true),
+                ..Default::default()
+            }),
+        )
+        .await;
+        assert_eq!(result, Ok(StatusCode::NO_CONTENT));
+
+        let response = handle_get_network(Extension(state))
+            .await
+            .expect("get must succeed");
+        assert_eq!(response.pending.ssid.as_deref(), Some("TestNet"));
+        assert_eq!(response.has_pending, true);
     }
 }

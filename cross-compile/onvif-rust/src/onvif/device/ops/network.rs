@@ -11,7 +11,7 @@
 use std::sync::Arc;
 
 use crate::config::ConfigRuntime;
-use crate::onvif::device::faults::{validate_hostname, validate_ipv4};
+use crate::onvif::device::faults::{unsupported_network_config, validate_hostname, validate_ipv4};
 use crate::onvif::error::{OnvifError, OnvifResult};
 use crate::onvif::types::device::{
     DNSInformation, Duplex, GetDNS, GetDNSResponse, GetHostname, GetHostnameResponse, GetNTP,
@@ -331,13 +331,24 @@ pub async fn handle_set_network_interfaces(
     platform: &Option<Arc<dyn Platform>>,
     request: SetNetworkInterfaces,
 ) -> OnvifResult<SetNetworkInterfacesResponse> {
-    let ipv4 = request.network_interface.ipv4.as_ref();
-    let dhcp = ipv4.map(|v| v.config.dhcp).unwrap_or(true);
+    let ipv4 = request
+        .network_interface
+        .ipv4
+        .as_ref()
+        .ok_or_else(|| {
+            OnvifError::invalid_arg_val("NoConfig", "IPv4 configuration block is required")
+        })?;
+
+    if !ipv4.enabled {
+        return Err(unsupported_network_config("IPv4 is disabled"));
+    }
+
+    let dhcp = ipv4.dhcp;
 
     let (address, prefix) = if dhcp {
         (None, None)
     } else {
-        let manual = ipv4.and_then(|v| v.config.manual.first()).ok_or_else(|| {
+        let manual = ipv4.manual.first().ok_or_else(|| {
             OnvifError::invalid_arg_val("NoConfig", "static addressing requires a Manual block")
         })?;
         validate_ipv4(&manual.address)?;
@@ -589,6 +600,9 @@ pub async fn handle_set_network_protocols(
     config: &Arc<ConfigRuntime>,
     request: SetNetworkProtocols,
 ) -> OnvifResult<SetNetworkProtocolsResponse> {
+    let mut http_port: Option<i32> = None;
+    let mut rtsp_port: Option<i32> = None;
+
     for proto in &request.network_protocols {
         let port = *proto.port.first().ok_or_else(|| {
             OnvifError::invalid_arg_val("NoConfig", "protocol entry carries no port")
@@ -600,12 +614,8 @@ pub async fn handle_set_network_protocols(
             ));
         }
         match proto.name {
-            NetworkProtocolType::HTTP => {
-                config.write().server.port = port as u16;
-            }
-            NetworkProtocolType::RTSP => {
-                config.write().media.rtsp_port = port as u16;
-            }
+            NetworkProtocolType::HTTP => http_port = Some(port),
+            NetworkProtocolType::RTSP => rtsp_port = Some(port),
             NetworkProtocolType::HTTPS => {
                 return Err(OnvifError::ActionNotSupported(
                     "HTTPS: no TLS listener exists".to_string(),
@@ -613,6 +623,15 @@ pub async fn handle_set_network_protocols(
             }
         }
     }
+
+    let mut cfg = config.write();
+    if let Some(port) = http_port {
+        cfg.server.port = port as u16;
+    }
+    if let Some(port) = rtsp_port {
+        cfg.media.rtsp_port = port as u16;
+    }
+
     Ok(SetNetworkProtocolsResponse {})
 }
 
@@ -807,15 +826,13 @@ mod tests {
             network_interface: NetworkInterfaceSetConfiguration {
                 ipv4: Some(IPv4NetworkInterfaceSet {
                     enabled: true,
-                    config: IPv4Configuration {
-                        manual: vec![PrefixedIPv4Address {
-                            address: "192.168.2.50".to_string(),
-                            prefix_length: 24,
-                        }],
-                        link_local: None,
-                        from_dhcp: None,
-                        dhcp: false,
-                    },
+                    manual: vec![PrefixedIPv4Address {
+                        address: "192.168.2.50".to_string(),
+                        prefix_length: 24,
+                    }],
+                    link_local: None,
+                    from_dhcp: None,
+                    dhcp: false,
                 }),
             },
         }
@@ -830,7 +847,6 @@ mod tests {
             .ipv4
             .as_mut()
             .unwrap()
-            .config
             .manual[0]
             .address = "not-an-ip".to_string();
 
@@ -850,12 +866,10 @@ mod tests {
             network_interface: NetworkInterfaceSetConfiguration {
                 ipv4: Some(IPv4NetworkInterfaceSet {
                     enabled: true,
-                    config: IPv4Configuration {
-                        manual: vec![],
-                        link_local: None,
-                        from_dhcp: None,
-                        dhcp: false,
-                    },
+                    manual: vec![],
+                    link_local: None,
+                    from_dhcp: None,
+                    dhcp: false,
                 }),
             },
         };
@@ -875,12 +889,10 @@ mod tests {
             network_interface: NetworkInterfaceSetConfiguration {
                 ipv4: Some(IPv4NetworkInterfaceSet {
                     enabled: true,
-                    config: IPv4Configuration {
-                        manual: vec![],
-                        link_local: None,
-                        from_dhcp: None,
-                        dhcp: true,
-                    },
+                    manual: vec![],
+                    link_local: None,
+                    from_dhcp: None,
+                    dhcp: true,
                 }),
             },
         };
@@ -896,7 +908,7 @@ mod tests {
     // ========================================================================
 
     #[tokio::test]
-    async fn test_set_dns_is_no_longer_action_not_supported() {
+    async fn test_set_dns_with_manual_servers_succeeds() {
         use crate::platform::StubPlatformBuilder;
 
         let platform = Arc::new(
@@ -1074,6 +1086,95 @@ mod tests {
             handle_set_network_protocols(&config, request)
                 .await
                 .is_err()
+        );
+    }
+
+    #[tokio::test]
+    async fn test_set_network_protocols_leaves_config_unchanged_on_rejected_request() {
+        let config = create_test_config();
+        let before_http = config.read().server.port;
+        let before_rtsp = config.read().media.rtsp_port;
+        let request = SetNetworkProtocols {
+            network_protocols: vec![
+                NetworkProtocol {
+                    name: NetworkProtocolType::HTTP,
+                    enabled: true,
+                    port: vec![8080],
+                },
+                NetworkProtocol {
+                    name: NetworkProtocolType::HTTPS,
+                    enabled: true,
+                    port: vec![443],
+                },
+            ],
+        };
+        assert!(handle_set_network_protocols(&config, request).await.is_err());
+        assert_eq!(config.read().server.port, before_http);
+        assert_eq!(config.read().media.rtsp_port, before_rtsp);
+    }
+
+    #[tokio::test]
+    async fn test_set_network_interfaces_rejects_missing_ipv4_block() {
+        let platform = None;
+        let request = SetNetworkInterfaces {
+            interface_token: "eth0".to_string(),
+            network_interface: NetworkInterfaceSetConfiguration { ipv4: None },
+        };
+        assert!(
+            handle_set_network_interfaces(&platform, request)
+                .await
+                .is_err()
+        );
+    }
+
+    #[tokio::test]
+    async fn test_set_network_interfaces_rejects_disabled_ipv4() {
+        let platform = None;
+        let request = SetNetworkInterfaces {
+            interface_token: "eth0".to_string(),
+            network_interface: NetworkInterfaceSetConfiguration {
+                ipv4: Some(IPv4NetworkInterfaceSet {
+                    enabled: false,
+                    manual: vec![],
+                    link_local: None,
+                    from_dhcp: None,
+                    dhcp: true,
+                }),
+            },
+        };
+        assert!(
+            handle_set_network_interfaces(&platform, request)
+                .await
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn test_set_network_interfaces_wire_shape_for_dhcp_and_manual() {
+        let dhcp_ipv4 = IPv4NetworkInterfaceSet {
+            enabled: true,
+            dhcp: true,
+            ..Default::default()
+        };
+        let dhcp_xml = quick_xml::se::to_string(&dhcp_ipv4).expect("serialize dhcp ipv4");
+        assert!(
+            dhcp_xml.contains("tt:DHCP") || dhcp_xml.contains("<tt:DHCP>"),
+            "expected flat tt:DHCP under tt:IPv4, got: {dhcp_xml}"
+        );
+
+        let manual_ipv4 = IPv4NetworkInterfaceSet {
+            enabled: true,
+            manual: vec![PrefixedIPv4Address {
+                address: "192.168.2.50".to_string(),
+                prefix_length: 24,
+            }],
+            dhcp: false,
+            ..Default::default()
+        };
+        let manual_xml = quick_xml::se::to_string(&manual_ipv4).expect("serialize manual ipv4");
+        assert!(
+            manual_xml.contains("tt:Manual") || manual_xml.contains("<tt:Manual>"),
+            "expected tt:Manual under tt:IPv4, got: {manual_xml}"
         );
     }
 }

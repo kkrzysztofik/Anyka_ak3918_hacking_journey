@@ -5,7 +5,7 @@
 //! from fault construction.
 
 use crate::onvif::common::MAX_SCOPE_URI_CHARS;
-use crate::onvif::error::{OnvifError, OnvifResult};
+use crate::onvif::error::OnvifResult;
 
 /// Validate a hostname according to RFC 1123.
 ///
@@ -52,10 +52,7 @@ pub fn validate_ipv4(addr: &str) -> OnvifResult<()> {
     if addr.parse::<std::net::Ipv4Addr>().is_ok() {
         Ok(())
     } else {
-        Err(OnvifError::invalid_arg_val(
-            "NoConfig",
-            format!("invalid IPv4 address: {addr}"),
-        ))
+        Err(super::faults::invalid_ipv4_address(&format!("invalid IPv4 address: {addr}")))
     }
 }
 

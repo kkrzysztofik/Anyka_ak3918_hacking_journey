@@ -119,17 +119,17 @@ describe('NetworkPage', () => {
     expect(screen.getByTestId('network-gateway-input')).toHaveValue('192.168.1.1');
   });
 
-  it('does not render a hostname input; Identification owns it', async () => {
+  it('should not render a hostname input; Identification owns it', async () => {
     await renderNetworkPage();
     expect(screen.queryByTestId('network-hostname-input')).toBeNull();
   });
 
-  it('does not render an ONVIF discovery switch; Identification owns it', async () => {
+  it('should not render an ONVIF discovery switch; Identification owns it', async () => {
     await renderNetworkPage();
     expect(screen.queryByTestId('network-onvif-discovery-switch')).toBeNull();
   });
 
-  it('links to the Identification pane instead', async () => {
+  it('should link to the Identification pane instead', async () => {
     await renderNetworkPage();
     expect(screen.getByTestId('network-identification-link')).toHaveAttribute(
       'href',
@@ -137,12 +137,12 @@ describe('NetworkPage', () => {
     );
   });
 
-  it('does not render an HTTPS port input; no TLS listener exists', async () => {
+  it('should not render an HTTPS port input; no TLS listener exists', async () => {
     await renderNetworkPage();
     expect(screen.queryByTestId('network-https-port-input')).toBeNull();
   });
 
-  it('badges IP Configuration as pending when the overlay differs from live', async () => {
+  it('should badge IP Configuration as pending when the overlay differs from live', async () => {
     vi.mocked(getNetworkOverlay).mockResolvedValue({
       pending: { has_password: false, dhcp: false, address: '192.168.2.50/24' },
       has_pending: true,
@@ -153,12 +153,23 @@ describe('NetworkPage', () => {
     expect(await screen.findByTestId('network-ip-pending-badge')).toBeInTheDocument();
   });
 
-  it('shows no badge when the overlay matches the live config', async () => {
+  it('should not badge IP Configuration when only Wi-Fi credentials are pending', async () => {
+    vi.mocked(getNetworkOverlay).mockResolvedValue({
+      pending: { has_password: false, ssid: 'OtherNet' },
+      has_pending: true,
+      last_failure: null,
+    });
+
     await renderNetworkPage();
     await waitFor(() => expect(screen.queryByTestId('network-ip-pending-badge')).toBeNull());
   });
 
-  it('warns when the previous Wi-Fi settings failed and were reverted', async () => {
+  it('should show no badge when the overlay matches the live config', async () => {
+    await renderNetworkPage();
+    await waitFor(() => expect(screen.queryByTestId('network-ip-pending-badge')).toBeNull());
+  });
+
+  it('should warn when the previous Wi-Fi settings failed and were reverted', async () => {
     vi.mocked(getNetworkOverlay).mockResolvedValue({
       pending: { has_password: false },
       has_pending: false,
@@ -179,7 +190,7 @@ describe('NetworkPage', () => {
     expect(await screen.findByTestId('network-confirm-dialog')).toBeInTheDocument();
   });
 
-  it('spells out the new URL when the HTTP port changes', async () => {
+  it('should spell out the new URL when the HTTP port changes', async () => {
     const user = userEvent.setup();
     await renderNetworkPage();
 
@@ -209,7 +220,36 @@ describe('NetworkPage', () => {
     });
   });
 
-  it('reports failure when a save faults', async () => {
+  it('should skip the Wi-Fi overlay patch when only IP settings change', async () => {
+    const user = userEvent.setup();
+    await renderNetworkPage();
+
+    await makeFormDirty(user, 'network-ip-address-input', '192.168.1.200');
+    await user.click(screen.getByTestId('network-save-button'));
+    await user.click(await screen.findByTestId('network-confirm-save-button'));
+
+    await waitFor(() => {
+      expect(setNetworkInterface).toHaveBeenCalled();
+      expect(putNetworkOverlay).not.toHaveBeenCalled();
+    });
+  });
+
+  it('should reject static IP save when address is empty with DHCP disabled', async () => {
+    const user = userEvent.setup();
+    await renderNetworkPage();
+
+    expect(await screen.findByTestId('network-ip-address-input')).toBeInTheDocument();
+    await user.clear(screen.getByTestId('network-ip-address-input'));
+    await user.clear(screen.getByTestId('network-gateway-input'));
+    await user.click(screen.getByTestId('network-save-button'));
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('network-confirm-dialog')).toBeNull();
+    });
+    expect(putNetworkOverlay).not.toHaveBeenCalled();
+  });
+
+  it('should report failure when a save faults', async () => {
     vi.mocked(setDNS).mockRejectedValue(new Error('ActionNotSupported'));
 
     const user = userEvent.setup();
@@ -224,7 +264,7 @@ describe('NetworkPage', () => {
     expect(mockToast.success).not.toHaveBeenCalled();
   });
 
-  it('reports which part failed when the interface saves but DNS does not', async () => {
+  it('should report which part failed when the interface saves but DNS does not', async () => {
     vi.mocked(setNetworkInterface).mockResolvedValue(undefined);
     vi.mocked(setDNS).mockRejectedValue(new Error('boom'));
 

@@ -61,10 +61,7 @@ fn main() {
     // P2
     boot::protect_from_oom_killer(std::path::Path::new("/proc/self/oom_score_adj"));
     boot::write_panic_sysctls(std::path::Path::new("/proc/sys"));
-    let baseline_cfg = match config::Config::load_with_overlay(
-        "/mnt/anyka_hack/anyka.toml",
-        std::path::Path::new("/mnt/anyka_hack/network.toml.__no_overlay__"),
-    ) {
+    let baseline_cfg = match config::Config::load_without_overlay("/mnt/anyka_hack/anyka.toml") {
         Ok(c) => c,
         Err(e) => {
             logging::console(&format!("baseline config load failed: {e}"));

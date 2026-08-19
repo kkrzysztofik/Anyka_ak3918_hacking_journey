@@ -640,7 +640,8 @@ impl OnvifServer {
                 api = api.route(
                     "/network",
                     get(crate::diagnostics::network::handle_get_network)
-                        .put(crate::diagnostics::network::handle_put_network),
+                        .put(crate::diagnostics::network::handle_put_network)
+                        .layer(timeout()),
                 );
             }
             let api = api

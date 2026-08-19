@@ -5,13 +5,24 @@
 //! surfacing as a boot failure.
 
 use std::path::Path;
+use std::sync::{Arc, LazyLock};
 
+use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 
 use super::file_ops::atomic_write;
 
 /// Production location, alongside `anyka.toml` under the update root.
 pub const DEFAULT_OVERLAY_PATH: &str = "/mnt/anyka_hack/network.toml";
+
+/// Field names in `NetworkOverlay` — keep in sync with `anyka-init/src/netoverlay.rs`.
+pub const OVERLAY_SCHEMA_FIELDS: &[&str] =
+    &["address", "dhcp", "dns", "gateway", "password", "security", "ssid"];
+
+fn shared_overlay_lock() -> Arc<Mutex<()>> {
+    static LOCK: LazyLock<Arc<Mutex<()>>> = LazyLock::new(|| Arc::new(Mutex::new(())));
+    Arc::clone(&LOCK)
+}
 
 #[derive(Debug, Default, Clone, Deserialize, Serialize, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -40,6 +51,20 @@ impl NetworkOverlay {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Self::default()),
             Err(e) => Err(e),
         }
+    }
+
+    /// Atomically read-modify-write under a process-wide overlay lock.
+    pub fn update_at(path: &Path, edit: impl FnOnce(&mut Self)) -> Result<(), std::io::Error> {
+        let lock = shared_overlay_lock();
+        let _guard = lock.lock();
+        let mut overlay = Self::read(path)?;
+        edit(&mut overlay);
+        overlay.write(path)
+    }
+
+    /// Shared lock used by REST and ONVIF overlay writers.
+    pub fn overlay_lock() -> Arc<Mutex<()>> {
+        shared_overlay_lock()
     }
 
     /// Write the overlay atomically.
@@ -142,10 +167,23 @@ mod tests {
         keys.sort_unstable();
         assert_eq!(
             keys,
-            [
-                "address", "dhcp", "dns", "gateway", "password", "security", "ssid"
-            ],
+            OVERLAY_SCHEMA_FIELDS,
             "overlay keys changed: update anyka-init/src/netoverlay.rs to match"
+        );
+    }
+
+    #[test]
+    fn test_overlay_struct_fields_match_anyka_init_schema() {
+        let onvif_fields: std::collections::BTreeSet<&str> = OVERLAY_SCHEMA_FIELDS.iter().copied().collect();
+        // Keep identical to anyka-init `NetworkOverlay` — see anyka-init/src/netoverlay.rs.
+        let anyka_init_fields: std::collections::BTreeSet<&str> = [
+            "ssid", "password", "security", "dhcp", "address", "gateway", "dns",
+        ]
+        .into_iter()
+        .collect();
+        assert_eq!(
+            onvif_fields, anyka_init_fields,
+            "onvif-rust and anyka-init NetworkOverlay field sets diverged"
         );
     }
 }

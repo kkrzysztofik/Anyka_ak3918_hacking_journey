@@ -34,11 +34,7 @@ impl AnykaNetworkInfo {
     /// Read-modify-write because each ONVIF setter owns a different slice of
     /// the same file; a blind write would drop the other setters' work.
     fn update_overlay(&self, edit: impl FnOnce(&mut NetworkOverlay)) -> PlatformResult<()> {
-        let mut overlay = NetworkOverlay::read(&self.overlay_path)
-            .map_err(|e| PlatformError::HardwareFailure(e.to_string()))?;
-        edit(&mut overlay);
-        overlay
-            .write(&self.overlay_path)
+        NetworkOverlay::update_at(&self.overlay_path, edit)
             .map_err(|e| PlatformError::HardwareFailure(e.to_string()))
     }
 
@@ -269,6 +265,11 @@ impl NetworkInfo for AnykaNetworkInfo {
         ipv4_dhcp: bool,
     ) -> PlatformResult<()> {
         // `[wifi]` describes one interface; the token is ignored.
+        if !ipv4_dhcp && ipv4_address.is_none() {
+            return Err(PlatformError::InvalidParameter(
+                "static addressing requires an IPv4 address".into(),
+            ));
+        }
         self.update_overlay(|o| {
             o.dhcp = Some(ipv4_dhcp);
             o.address = if ipv4_dhcp {

@@ -1596,9 +1596,31 @@ pub struct IPv4NetworkInterfaceSet {
     #[serde(rename = "tt:Enabled", alias = "Enabled", default = "default_true")]
     pub enabled: bool,
 
-    /// IPv4 configuration (flattened under `tt:IPv4` for inbound SOAP).
-    #[serde(flatten)]
-    pub config: IPv4Configuration,
+    /// Manual addresses.
+    #[serde(rename = "tt:Manual", alias = "Manual", default)]
+    pub manual: Vec<PrefixedIPv4Address>,
+
+    /// Link-local address.
+    #[serde(
+        rename = "tt:LinkLocal",
+        alias = "LinkLocal",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub link_local: Option<PrefixedIPv4Address>,
+
+    /// Address from DHCP.
+    #[serde(
+        rename = "tt:FromDHCP",
+        alias = "FromDHCP",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub from_dhcp: Option<PrefixedIPv4Address>,
+
+    /// DHCP enabled.
+    #[serde(rename = "tt:DHCP", alias = "DHCP")]
+    pub dhcp: bool,
 }
 
 fn default_true() -> bool {
@@ -1610,7 +1632,7 @@ fn default_true() -> bool {
 #[serde(rename = "tds:SetNetworkInterfacesResponse")]
 pub struct SetNetworkInterfacesResponse {
     /// Whether a reboot is required before the settings take effect.
-    #[serde(rename = "RebootNeeded")]
+    #[serde(rename = "tds:RebootNeeded", alias = "RebootNeeded")]
     pub reboot_needed: bool,
 }
 

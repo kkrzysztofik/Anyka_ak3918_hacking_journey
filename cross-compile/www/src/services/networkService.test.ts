@@ -13,7 +13,9 @@ import {
   getNetworkProtocols,
   putNetworkOverlay,
   setDNS,
+  setNetworkDefaultGateway,
   setNetworkInterface,
+  setNetworkProtocols,
 } from '@/services/networkService';
 import { createMockSOAPResponse } from '@/test/utils';
 
@@ -73,7 +75,7 @@ describe('networkService', () => {
   });
 
   describe('getNetworkDefaultGateway', () => {
-    it('returns the first IPv4 gateway', async () => {
+    it('should return the first IPv4 gateway', async () => {
       vi.mocked(apiClient.post).mockResolvedValueOnce(
         createMockSOAPResponse(`
         <GetNetworkDefaultGatewayResponse>
@@ -89,7 +91,7 @@ describe('networkService', () => {
   });
 
   describe('getNetworkProtocols', () => {
-    it('reads HTTP and RTSP ports', async () => {
+    it('should read HTTP and RTSP ports', async () => {
       vi.mocked(apiClient.post).mockResolvedValueOnce(
         createMockSOAPResponse(`
         <GetNetworkProtocolsResponse>
@@ -110,7 +112,7 @@ describe('networkService', () => {
   });
 
   describe('getNetworkConfig', () => {
-    it('populates the gateway from GetNetworkDefaultGateway', async () => {
+    it('should populate the gateway from GetNetworkDefaultGateway', async () => {
       vi.mocked(apiClient.post)
         .mockResolvedValueOnce(
           createMockSOAPResponse(`
@@ -154,9 +156,22 @@ describe('networkService', () => {
       expect(config.protocols).toEqual({ http: 80, rtsp: 554 });
     });
 
-    it('leaves the gateway empty when the device reports none', async () => {
+    it('should leave the gateway empty when the device reports none', async () => {
       vi.mocked(apiClient.post)
-        .mockResolvedValueOnce(createMockSOAPResponse('<GetNetworkInterfacesResponse />'))
+        .mockResolvedValueOnce(
+          createMockSOAPResponse(`
+          <GetNetworkInterfacesResponse>
+            <NetworkInterfaces token="eth0">
+              <Enabled>true</Enabled>
+              <Info><Name>eth0</Name><HwAddress>00:11:22:33:44:55</HwAddress></Info>
+              <IPv4>
+                <Enabled>true</Enabled>
+                <Config><DHCP>true</DHCP></Config>
+              </IPv4>
+            </NetworkInterfaces>
+          </GetNetworkInterfacesResponse>
+        `),
+        )
         .mockResolvedValueOnce(
           createMockSOAPResponse('<GetDNSResponse><DNSInformation/></GetDNSResponse>'),
         )
@@ -164,12 +179,12 @@ describe('networkService', () => {
         .mockResolvedValueOnce(createMockSOAPResponse('<GetNetworkProtocolsResponse />'));
 
       const config = await getNetworkConfig();
-      expect(config.interfaces[0]).toBeUndefined();
+      expect(config.interfaces[0].gateway).toBe('');
     });
   });
 
   describe('overlay client', () => {
-    it('returns overlay state from GET /api/network', async () => {
+    it('should return overlay state from GET /api/network', async () => {
       vi.mocked(authorizedFetch).mockResolvedValueOnce(
         new Response(
           JSON.stringify({
@@ -186,7 +201,7 @@ describe('networkService', () => {
       expect(state.has_pending).toBe(true);
     });
 
-    it('rejects when PUT /api/network fails', async () => {
+    it('should reject when PUT /api/network fails', async () => {
       vi.mocked(authorizedFetch).mockResolvedValueOnce(
         new Response('bad request', { status: 400 }),
       );
@@ -213,6 +228,42 @@ describe('networkService', () => {
       const result = await getDNS();
       expect(result.fromDHCP).toBe(false);
       expect(result.dnsServers).toContain('8.8.8.8');
+    });
+  });
+
+  describe('setNetworkDefaultGateway', () => {
+    it('should send the gateway in SetNetworkDefaultGateway SOAP', async () => {
+      vi.mocked(apiClient.post).mockResolvedValueOnce(
+        createMockSOAPResponse('<SetNetworkDefaultGatewayResponse />'),
+      );
+
+      await setNetworkDefaultGateway('192.168.2.1');
+
+      expect(apiClient.post).toHaveBeenCalledWith(
+        '/onvif/device_service',
+        expect.stringContaining('<tt:IPv4Address>192.168.2.1</tt:IPv4Address>'),
+      );
+      expect(apiClient.post).toHaveBeenCalledWith(
+        '/onvif/device_service',
+        expect.stringContaining('<tds:SetNetworkDefaultGateway>'),
+      );
+    });
+  });
+
+  describe('setNetworkProtocols', () => {
+    it('should send HTTP and RTSP protocol entries with ports', async () => {
+      vi.mocked(apiClient.post).mockResolvedValueOnce(
+        createMockSOAPResponse('<SetNetworkProtocolsResponse />'),
+      );
+
+      await setNetworkProtocols(8080, 8554);
+
+      const body = vi.mocked(apiClient.post).mock.calls[0]?.[1] as string;
+      expect(body).toContain('<tds:SetNetworkProtocols>');
+      expect(body).toContain('<tt:Name>HTTP</tt:Name>');
+      expect(body).toContain('<tt:Port>8080</tt:Port>');
+      expect(body).toContain('<tt:Name>RTSP</tt:Name>');
+      expect(body).toContain('<tt:Port>8554</tt:Port>');
     });
   });
 

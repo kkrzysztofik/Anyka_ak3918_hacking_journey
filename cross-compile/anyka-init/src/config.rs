@@ -107,7 +107,7 @@ pub struct SystemCfg {
     pub ftp: bool,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct WifiCfg {
     pub ssid: String,
@@ -486,20 +486,48 @@ impl Config {
         )
     }
 
+    /// Read, parse, and validate the base file only — no network overlay merge.
+    pub fn load_without_overlay(path: &str) -> Result<Self, ConfigError> {
+        let cfg = Self::parse_file(path)?;
+        cfg.validate()?;
+        Ok(cfg)
+    }
+
     /// `Config::load`, with the overlay path taken as an argument so tests can
     /// point it at a tempdir.
     pub fn load_with_overlay(
         path: &str,
         overlay_path: &std::path::Path,
     ) -> Result<Self, ConfigError> {
+        let mut cfg = Self::parse_file(path)?;
+        let baseline_wifi = cfg.wifi.clone();
+        match crate::netoverlay::NetworkOverlay::load(overlay_path) {
+            Ok(overlay) if overlay.has_content() => {
+                if let Err(e) = overlay.validate() {
+                    tracing::warn!(error = %e, "invalid network overlay; quarantining");
+                    crate::netoverlay::NetworkOverlay::quarantine(overlay_path);
+                } else {
+                    overlay.apply_to(&mut cfg.wifi);
+                    if cfg.validate().is_err() {
+                        tracing::warn!("merged network overlay failed validation; quarantining");
+                        crate::netoverlay::NetworkOverlay::quarantine(overlay_path);
+                        cfg.wifi = baseline_wifi;
+                    }
+                }
+            }
+            Ok(_) => {}
+            Err(e) => return Err(e),
+        }
+        cfg.validate()?;
+        Ok(cfg)
+    }
+
+    fn parse_file(path: &str) -> Result<Self, ConfigError> {
         let src = std::fs::read_to_string(path).map_err(|source| ConfigError::Read {
             path: path.to_string(),
             source,
         })?;
-        let mut cfg: Self = src.parse()?;
-        crate::netoverlay::NetworkOverlay::load(overlay_path)?.apply_to(&mut cfg.wifi);
-        cfg.validate()?;
-        Ok(cfg)
+        src.parse()
     }
 
     pub fn validate(&self) -> Result<(), ConfigError> {

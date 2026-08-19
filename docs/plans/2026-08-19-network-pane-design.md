@@ -1,7 +1,7 @@
 # Network Pane — Write Support
 
 **Date:** 2026-08-19
-**Status:** Design approved, pending implementation plan
+**Status:** Design approved — implemented in `docs/plans/2026-08-19-network-pane.md` and the corresponding anyka-init / onvif-rust / WebUI changes.
 
 ## Problem
 
