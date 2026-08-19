@@ -15,7 +15,7 @@ import {
   setDNS,
   setNetworkInterface,
 } from '@/services/networkService';
-import { createMockSOAPFaultResponse, createMockSOAPResponse } from '@/test/utils';
+import { createMockSOAPResponse } from '@/test/utils';
 
 vi.mock('@/services/api', () => ({
   apiClient: {
