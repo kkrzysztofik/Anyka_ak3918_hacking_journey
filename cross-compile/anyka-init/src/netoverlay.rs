@@ -199,15 +199,14 @@ mod tests {
     #[test]
     fn test_overlay_replaces_credentials_only_when_present() {
         let mut cfg = baseline();
-        let overlay: NetworkOverlay = toml::from_str(r#"ssid = "NewNet""#)
-            .expect("overlay must parse");
+        let overlay: NetworkOverlay =
+            toml::from_str(r#"ssid = "NewNet""#).expect("overlay must parse");
 
         overlay.apply_to(&mut cfg);
 
         assert_eq!(cfg.ssid, "NewNet");
         assert_eq!(
-            cfg.password,
-            "operatorpass",
+            cfg.password, "operatorpass",
             "an overlay that sets only ssid must not blank the baseline password"
         );
     }
@@ -228,8 +227,7 @@ mod tests {
 
     #[test]
     fn test_unknown_key_is_rejected() {
-        let result: Result<NetworkOverlay, _> =
-            toml::from_str(r#"chip = "ssv6355_ble""#);
+        let result: Result<NetworkOverlay, _> = toml::from_str(r#"chip = "ssv6355_ble""#);
         assert!(
             result.is_err(),
             "the overlay must not silently accept keys it does not apply"
@@ -250,8 +248,7 @@ mod tests {
     fn test_load_reads_a_present_overlay() {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("network.toml");
-        std::fs::write(&path, "dhcp = false\naddress = \"10.0.0.5/24\"\n")
-            .expect("write");
+        std::fs::write(&path, "dhcp = false\naddress = \"10.0.0.5/24\"\n").expect("write");
 
         let overlay = NetworkOverlay::load(&path).expect("overlay must load");
 
@@ -279,10 +276,7 @@ mod tests {
 
         NetworkOverlay::quarantine(&path);
 
-        assert!(
-            !path.exists(),
-            "the failing overlay must not be used again"
-        );
+        assert!(!path.exists(), "the failing overlay must not be used again");
         let bad = dir.path().join("network.toml.bad");
         assert!(
             bad.exists(),

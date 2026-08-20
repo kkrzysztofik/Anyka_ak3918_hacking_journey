@@ -1,6 +1,8 @@
 //! anyka-init entry point: phase sequencing for the boot/runtime supervisor.
 
-use anyka_init::{boot, config, logging, monitor, netoverlay, storm, supervisor_loop, sys, timesync};
+use anyka_init::{
+    boot, config, logging, monitor, netoverlay, storm, supervisor_loop, sys, timesync,
+};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -70,12 +72,7 @@ fn main() {
     };
 
     let overlay_path = std::path::Path::new(netoverlay::NetworkOverlay::DEFAULT_PATH);
-    let probed = boot::system_setup(
-        sysimpl.as_ref(),
-        &cfg,
-        &baseline_cfg.wifi,
-        overlay_path,
-    );
+    let probed = boot::system_setup(sysimpl.as_ref(), &cfg, &baseline_cfg.wifi, overlay_path);
 
     // P2.5
     timesync::first_sync(sysimpl.as_ref(), &cfg.time);

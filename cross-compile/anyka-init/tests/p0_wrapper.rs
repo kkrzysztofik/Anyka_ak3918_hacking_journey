@@ -127,9 +127,17 @@ fn run(
     // sleep elapsed), then wait until the outcome stops changing — the
     // restore + reboot run right after the last call, and a loaded host must
     // not observe the subshell mid-restore.
+    //
+    // After the final ifconfig the deadman may still be about to `cp`/`mv`/
+    // `reboot`. A stable `(count, false, false)` reading can therefore be
+    // mid-flight; require either a restore/reboot side effect *or* a short
+    // grace window after the count is met before treating the outcome as
+    // final. That covers both "vendor chain rescued the link" and "still
+    // dead, restore" on a loaded CI runner.
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
     let mut last = None;
     let mut stable_count = 0usize;
+    let mut count_met_at = None;
     let observed = loop {
         let state = (
             fs::read_to_string(&counter)
@@ -142,28 +150,33 @@ fn run(
                 .unwrap_or(false),
             reboot_marker.exists(),
         );
+        let now = std::time::Instant::now();
         if state.0 >= expected_ifconfig_calls {
-            if Some(state) == last {
-                stable_count += 1;
-                // Two consecutive identical readings (≥40 ms apart) mean the
-                // restore + reboot stubs have had time to complete on even the
-                // most loaded CI runner.
-                if stable_count >= 2 {
-                    break state.0;
+            let met_at = *count_met_at.get_or_insert(now);
+            let grace_done = now.duration_since(met_at) >= std::time::Duration::from_millis(250);
+            let outcome_known = state.1 || state.2 || grace_done;
+            if outcome_known {
+                if Some(state) == last {
+                    stable_count += 1;
+                    // Two consecutive identical readings (≥40 ms apart) mean
+                    // the restore + reboot stubs have settled.
+                    if stable_count >= 2 {
+                        break state.0;
+                    }
+                } else {
+                    stable_count = 0;
                 }
-            } else {
-                stable_count = 0;
             }
         }
         last = Some(state);
-        if std::time::Instant::now() >= deadline {
+        if now >= deadline {
             break state.0;
         }
         std::thread::sleep(std::time::Duration::from_millis(20));
     };
     assert!(
         observed >= expected_ifconfig_calls,
-        "deadman made {observed} ifconfig calls, expected {expected_ifconfig_calls}, within 5s"
+        "deadman made {observed} ifconfig calls, expected {expected_ifconfig_calls}, within 10s"
     );
 
     // The wrapper sh exits on its own once the loop is backgrounded; wait for

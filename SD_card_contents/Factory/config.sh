@@ -25,10 +25,17 @@ telnetd -p 24 -l /bin/sh 2>/dev/null &
 SLOT_ROOT=${ANYKA_SLOT_ROOT:-/mnt/anyka_hack}
 SLOT=$(cat "$SLOT_ROOT/active" 2>/dev/null) || SLOT=a
 [ "$SLOT" = b ] || SLOT=a
-BIN=${ANYKA_INIT_BIN:-$SLOT_ROOT/slots/$SLOT/anyka-init.bin}
-if [ ! -x "$BIN" ]; then
-  OTHER=$([ "$SLOT" = a ] && echo b || echo a)
-  BIN=$SLOT_ROOT/slots/$OTHER/anyka-init.bin
+# An explicit ANYKA_INIT_BIN (host tests) must not fall through to the other
+# slot — that would rewrite a deliberate missing-path probe into the
+# production /mnt/anyka_hack layout.
+if [ -n "${ANYKA_INIT_BIN:-}" ]; then
+  BIN=$ANYKA_INIT_BIN
+else
+  BIN=$SLOT_ROOT/slots/$SLOT/anyka-init.bin
+  if [ ! -x "$BIN" ]; then
+    OTHER=$([ "$SLOT" = a ] && echo b || echo a)
+    BIN=$SLOT_ROOT/slots/$OTHER/anyka-init.bin
+  fi
 fi
 WIFI_MANAGE=${ANYKA_WIFI_MANAGE:-/usr/sbin/wifi_manage.sh}
 SELF=${ANYKA_CONFIG_SELF:-/mnt/Factory/config.sh}

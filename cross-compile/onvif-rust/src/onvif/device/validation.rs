@@ -52,7 +52,9 @@ pub fn validate_ipv4(addr: &str) -> OnvifResult<()> {
     if addr.parse::<std::net::Ipv4Addr>().is_ok() {
         Ok(())
     } else {
-        Err(super::faults::invalid_ipv4_address(&format!("invalid IPv4 address: {addr}")))
+        Err(super::faults::invalid_ipv4_address(&format!(
+            "invalid IPv4 address: {addr}"
+        )))
     }
 }
 

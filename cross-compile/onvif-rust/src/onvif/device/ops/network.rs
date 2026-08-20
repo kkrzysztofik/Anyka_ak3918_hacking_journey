@@ -331,13 +331,9 @@ pub async fn handle_set_network_interfaces(
     platform: &Option<Arc<dyn Platform>>,
     request: SetNetworkInterfaces,
 ) -> OnvifResult<SetNetworkInterfacesResponse> {
-    let ipv4 = request
-        .network_interface
-        .ipv4
-        .as_ref()
-        .ok_or_else(|| {
-            OnvifError::invalid_arg_val("NoConfig", "IPv4 configuration block is required")
-        })?;
+    let ipv4 = request.network_interface.ipv4.as_ref().ok_or_else(|| {
+        OnvifError::invalid_arg_val("NoConfig", "IPv4 configuration block is required")
+    })?;
 
     if !ipv4.enabled {
         return Err(unsupported_network_config("IPv4 is disabled"));
@@ -842,13 +838,8 @@ mod tests {
     async fn test_set_network_interfaces_rejects_a_malformed_address() {
         let platform = None;
         let mut request = static_set_network_interfaces_request();
-        request
-            .network_interface
-            .ipv4
-            .as_mut()
-            .unwrap()
-            .manual[0]
-            .address = "not-an-ip".to_string();
+        request.network_interface.ipv4.as_mut().unwrap().manual[0].address =
+            "not-an-ip".to_string();
 
         let result = handle_set_network_interfaces(&platform, request).await;
 
@@ -1108,7 +1099,11 @@ mod tests {
                 },
             ],
         };
-        assert!(handle_set_network_protocols(&config, request).await.is_err());
+        assert!(
+            handle_set_network_protocols(&config, request)
+                .await
+                .is_err()
+        );
         assert_eq!(config.read().server.port, before_http);
         assert_eq!(config.read().media.rtsp_port, before_rtsp);
     }

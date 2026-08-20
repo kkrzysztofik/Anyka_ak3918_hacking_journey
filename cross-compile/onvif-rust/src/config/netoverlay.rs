@@ -16,8 +16,9 @@ use super::file_ops::atomic_write;
 pub const DEFAULT_OVERLAY_PATH: &str = "/mnt/anyka_hack/network.toml";
 
 /// Field names in `NetworkOverlay` — keep in sync with `anyka-init/src/netoverlay.rs`.
-pub const OVERLAY_SCHEMA_FIELDS: &[&str] =
-    &["address", "dhcp", "dns", "gateway", "password", "security", "ssid"];
+pub const OVERLAY_SCHEMA_FIELDS: &[&str] = &[
+    "address", "dhcp", "dns", "gateway", "password", "security", "ssid",
+];
 
 fn shared_overlay_lock() -> Arc<Mutex<()>> {
     static LOCK: LazyLock<Arc<Mutex<()>>> = LazyLock::new(|| Arc::new(Mutex::new(())));
@@ -166,15 +167,15 @@ mod tests {
             .collect();
         keys.sort_unstable();
         assert_eq!(
-            keys,
-            OVERLAY_SCHEMA_FIELDS,
+            keys, OVERLAY_SCHEMA_FIELDS,
             "overlay keys changed: update anyka-init/src/netoverlay.rs to match"
         );
     }
 
     #[test]
     fn test_overlay_struct_fields_match_anyka_init_schema() {
-        let onvif_fields: std::collections::BTreeSet<&str> = OVERLAY_SCHEMA_FIELDS.iter().copied().collect();
+        let onvif_fields: std::collections::BTreeSet<&str> =
+            OVERLAY_SCHEMA_FIELDS.iter().copied().collect();
         // Keep identical to anyka-init `NetworkOverlay` — see anyka-init/src/netoverlay.rs.
         let anyka_init_fields: std::collections::BTreeSet<&str> = [
             "ssid", "password", "security", "dhcp", "address", "gateway", "dns",

@@ -1281,8 +1281,7 @@ Local:
         // so association fails and bring-up returns Err.
         let dir = tempfile::tempdir().expect("tempdir");
         let layout = test_layout(dir.path());
-        std::fs::create_dir_all(format!("{}/wlan0", layout.sys_class_net))
-            .expect("iface dir");
+        std::fs::create_dir_all(format!("{}/wlan0", layout.sys_class_net)).expect("iface dir");
         std::fs::write(&layout.proc_route, HAPPY_ROUTE).expect("route");
         std::fs::write(&layout.proc_fib_trie, HAPPY_FIB_TRIE).expect("fib_trie");
 
@@ -1316,10 +1315,16 @@ Local:
 
         // Assert: quarantine + a visible baseline retry
         assert_eq!(outcome, Outcome::Failed);
-        assert!(!overlay_path.exists(), "the failing overlay must be quarantined");
+        assert!(
+            !overlay_path.exists(),
+            "the failing overlay must be quarantined"
+        );
 
         let bad = dir.path().join("network.toml.bad");
-        assert!(bad.exists(), "the quarantined overlay must be readable by the UI");
+        assert!(
+            bad.exists(),
+            "the quarantined overlay must be readable by the UI"
+        );
         assert_eq!(
             std::fs::read_to_string(&bad).expect("read"),
             "ssid = \"TypoNet\"\n",

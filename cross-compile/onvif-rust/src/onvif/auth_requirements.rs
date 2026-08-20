@@ -104,7 +104,10 @@ fn build_auth_requirements() -> AuthMap {
     map.insert(("device", "GetNetworkProtocols"), AuthLevel::User);
     map.insert(("device", "SetNetworkInterfaces"), AuthLevel::Administrator);
     map.insert(("device", "SetDNS"), AuthLevel::Administrator);
-    map.insert(("device", "SetNetworkDefaultGateway"), AuthLevel::Administrator);
+    map.insert(
+        ("device", "SetNetworkDefaultGateway"),
+        AuthLevel::Administrator,
+    );
     map.insert(("device", "SetNetworkProtocols"), AuthLevel::Administrator);
     map.insert(("device", "GetScopes"), AuthLevel::User);
     map.insert(("device", "GetDiscoveryMode"), AuthLevel::User);
