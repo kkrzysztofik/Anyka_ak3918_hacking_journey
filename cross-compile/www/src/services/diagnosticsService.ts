@@ -157,22 +157,32 @@ function isUptime(value: unknown): value is Diagnostics['uptime'] {
   );
 }
 
-function isDiagnostics(value: unknown): value is Diagnostics {
-  if (!isRecord(value)) return false;
-  if (typeof value.status !== 'string') return false;
-  if (typeof value.firmware_version !== 'string') return false;
-  if (!isUptime(value.uptime)) return false;
-  if (!isNullOrNumber(value.cpu_percent)) return false;
-  if (!isNullOrRecord(value.memory)) return false;
-  if (!isNullOrRecord(value.storage)) return false;
-  if (!isNullOrRecord(value.network)) return false;
-  if (!isNullOrNumber(value.stream_frame_age_ms)) return false;
-  if (!Array.isArray(value.components) || !Array.isArray(value.degraded_services)) return false;
+function hasCoreDiagnosticsFields(value: Record<string, unknown>): boolean {
+  return (
+    typeof value.status === 'string' &&
+    typeof value.firmware_version === 'string' &&
+    isUptime(value.uptime) &&
+    isNullOrNumber(value.cpu_percent) &&
+    isNullOrRecord(value.memory) &&
+    isNullOrRecord(value.storage) &&
+    isNullOrRecord(value.network) &&
+    isNullOrNumber(value.stream_frame_age_ms) &&
+    Array.isArray(value.components) &&
+    Array.isArray(value.degraded_services)
+  );
+}
+
+function hasOptionalDiagnosticsFields(value: Record<string, unknown>): boolean {
   if (value.vision !== null && !isVision(value.vision)) return false;
   // Absent is fine — a snapshot from a build without PTZ reporting still validates.
   if (value.ptz !== null && value.ptz !== undefined && !isPtz(value.ptz)) return false;
   if (value.wifi !== null && value.wifi !== undefined && !isWifi(value.wifi)) return false;
   return true;
+}
+
+function isDiagnostics(value: unknown): value is Diagnostics {
+  if (!isRecord(value)) return false;
+  return hasCoreDiagnosticsFields(value) && hasOptionalDiagnosticsFields(value);
 }
 
 function isLogLines(value: unknown): value is string[] {
